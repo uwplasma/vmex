@@ -838,6 +838,23 @@ class _ScanCarry(NamedTuple):
     edge_Zsin: Any
 
 
+def _mask_scan_restart_force_payload(
+    *, force_blocks: tuple[Any, ...], cache_valid: Any, do_restart: Any
+) -> tuple[tuple[Any, ...], Any]:
+    """Zero current-state scan forces on restart when checkpoint forces are skipped.
+
+    The no-restart-payload scan path reuses current-state residual channels on
+    accelerator backends to avoid evaluating both lax.cond branches. If a
+    restart occurred, those residual channels must not advance the velocity
+    update; the next iteration recomputes forces from the checkpoint state.
+    """
+
+    no_restart = jnp.logical_not(do_restart)
+    masked_blocks = tuple(jnp.where(no_restart, block, jnp.zeros_like(block)) for block in force_blocks)
+    cache_valid_masked = jnp.where(no_restart, cache_valid, jnp.asarray(False))
+    return masked_blocks, cache_valid_masked
+
+
 def _free_boundary_iter_controls(iter2: int, iter1: int, nvacskip: int) -> tuple[int, int]:
     """Simple free-boundary cadence helper (legacy/diagnostics path).
 
@@ -8386,20 +8403,40 @@ def solve_fixed_boundary_residual_iter(
                     ) = _current_payload(None)
                     # Zero out force arrays on restart so the velocity update
                     # is a no-op (velocities are also zeroed in _restart_updates).
-                    _no_restart = ~do_restart
-                    frcc_u_use = jnp.where(_no_restart, frcc_u_use, jnp.zeros_like(frcc_u_use))
-                    frss_u_use = jnp.where(_no_restart, frss_u_use, jnp.zeros_like(frss_u_use))
-                    fzsc_u_use = jnp.where(_no_restart, fzsc_u_use, jnp.zeros_like(fzsc_u_use))
-                    fzcs_u_use = jnp.where(_no_restart, fzcs_u_use, jnp.zeros_like(fzcs_u_use))
-                    flsc_u_use = jnp.where(_no_restart, flsc_u_use, jnp.zeros_like(flsc_u_use))
-                    flcs_u_use = jnp.where(_no_restart, flcs_u_use, jnp.zeros_like(flcs_u_use))
-                    frsc_u_use = jnp.where(_no_restart, frsc_u_use, jnp.zeros_like(frsc_u_use))
-                    frcs_u_use = jnp.where(_no_restart, frcs_u_use, jnp.zeros_like(frcs_u_use))
-                    fzcc_u_use = jnp.where(_no_restart, fzcc_u_use, jnp.zeros_like(fzcc_u_use))
-                    fzss_u_use = jnp.where(_no_restart, fzss_u_use, jnp.zeros_like(fzss_u_use))
-                    flcc_u_use = jnp.where(_no_restart, flcc_u_use, jnp.zeros_like(flcc_u_use))
-                    flss_u_use = jnp.where(_no_restart, flss_u_use, jnp.zeros_like(flss_u_use))
-                    cache_valid_use = jnp.where(_no_restart, cache_valid_use, jnp.asarray(False))
+                    (
+                        (
+                            frcc_u_use,
+                            frss_u_use,
+                            fzsc_u_use,
+                            fzcs_u_use,
+                            flsc_u_use,
+                            flcs_u_use,
+                            frsc_u_use,
+                            frcs_u_use,
+                            fzcc_u_use,
+                            fzss_u_use,
+                            flcc_u_use,
+                            flss_u_use,
+                        ),
+                        cache_valid_use,
+                    ) = _mask_scan_restart_force_payload(
+                        force_blocks=(
+                            frcc_u_use,
+                            frss_u_use,
+                            fzsc_u_use,
+                            fzcs_u_use,
+                            flsc_u_use,
+                            flcs_u_use,
+                            frsc_u_use,
+                            frcs_u_use,
+                            fzcc_u_use,
+                            fzss_u_use,
+                            flcc_u_use,
+                            flss_u_use,
+                        ),
+                        cache_valid=cache_valid_use,
+                        do_restart=do_restart,
+                    )
 
                 frcc_u = frcc_u_use
                 frss_u = frss_u_use

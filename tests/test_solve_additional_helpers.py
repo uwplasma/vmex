@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from vmec_jax._compat import jnp
 import vmec_jax.solve as solve_module
 from vmec_jax.solve import (
     _can_reassemble_precond_mats,
@@ -33,6 +34,7 @@ from vmec_jax.solve import (
     _metric_surface_precond_scales_jax,
     _metric_surface_precond_scales_np,
     _mode_weight_force_blocks_np,
+    _mask_scan_restart_force_payload,
     _normalize_adjoint_trace_mode,
     _normalize_resume_state_mode,
     _pack_resume_state_record,
@@ -190,6 +192,46 @@ def test_vmec2000_scan_options_restart_payload_explicit_env_wins():
 
     assert not disabled.scan_use_restart_payload
     assert enabled.scan_use_restart_payload
+
+
+def test_scan_restart_force_payload_zeros_residual_impulse_and_invalidates_cache():
+    force_blocks = (
+        jnp.asarray([[1.0, -2.0], [3.0, -4.0]]),
+        jnp.asarray([[0.5, 1.5], [-2.5, 4.5]]),
+        jnp.asarray([[7.0, -8.0], [9.0, -10.0]]),
+    )
+
+    masked_blocks, cache_valid = _mask_scan_restart_force_payload(
+        force_blocks=force_blocks,
+        cache_valid=jnp.asarray(True),
+        do_restart=jnp.asarray(True),
+    )
+
+    for block in masked_blocks:
+        np.testing.assert_allclose(np.asarray(block), 0.0)
+    assert not bool(np.asarray(cache_valid))
+    assert sum(float(np.asarray(jnp.sum(block * block))) for block in masked_blocks) == 0.0
+
+
+def test_scan_restart_force_payload_preserves_current_residuals_without_restart():
+    force_blocks = (
+        jnp.asarray([[1.0, 2.0], [3.0, 4.0]]),
+        jnp.asarray([[5.0, 6.0], [7.0, 8.0]]),
+    )
+
+    masked_blocks, cache_valid = _mask_scan_restart_force_payload(
+        force_blocks=force_blocks,
+        cache_valid=jnp.asarray(True),
+        do_restart=jnp.asarray(False),
+    )
+
+    for actual, expected in zip(masked_blocks, force_blocks):
+        np.testing.assert_allclose(np.asarray(actual), np.asarray(expected))
+    assert bool(np.asarray(cache_valid))
+    np.testing.assert_allclose(
+        sum(float(np.asarray(jnp.sum(block * block))) for block in masked_blocks),
+        sum(float(np.asarray(jnp.sum(block * block))) for block in force_blocks),
+    )
 
 
 @pytest.mark.parametrize(
