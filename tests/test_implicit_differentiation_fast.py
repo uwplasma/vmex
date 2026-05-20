@@ -578,3 +578,168 @@ def test_zero_m1_zforce_flag_tracks_short_and_converged_histories():
             float,
         )
     ) == pytest.approx(0.0)
+
+
+def test_profile_logs_include_elapsed_payloads(monkeypatch, capsys):
+    import vmec_jax.implicit as implicit
+
+    monkeypatch.setenv("VMEC_JAX_PROFILE_BACKWARD", "1")
+    monkeypatch.setenv("VMEC_JAX_PROFILE_RESIDUAL", "yes")
+    monkeypatch.setattr(implicit.time, "perf_counter", lambda: 12.5)
+
+    implicit._vmec_backward_profile_log("bwd", start=10.0, columns=3)
+    implicit._vmec_residual_profile_log("resid", start=11.0, rows=4)
+
+    out = capsys.readouterr().out
+    assert "[vmec_jax backward]" in out
+    assert "'stage': 'bwd'" in out
+    assert "'elapsed_s': 2.5" in out
+    assert "'columns': 3" in out
+    assert "[vmec_jax residual]" in out
+    assert "'stage': 'resid'" in out
+    assert "'elapsed_s': 1.5" in out
+    assert "'rows': 4" in out
+
+
+def test_lineax_bicgstab_marks_device_get_failures_unsuccessful(monkeypatch):
+    pytest.importorskip("jax")
+
+    import vmec_jax.implicit as implicit
+    from vmec_jax._compat import jnp
+
+    class FakeLineax:
+        class FunctionLinearOperator:
+            def __init__(self, matvec, input_structure):
+                self.matvec = matvec
+                self.input_structure = input_structure
+
+        class BiCGStab:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+        @staticmethod
+        def linear_solve(*_args, **_kwargs):
+            return SimpleNamespace(value=jnp.asarray([1.0, -2.0]), stats={"num_steps": 2})
+
+    monkeypatch.setattr(implicit, "lx", FakeLineax)
+    monkeypatch.setattr(implicit.jax, "device_get", lambda _x: (_ for _ in ()).throw(RuntimeError("device")))
+
+    value, success, stats = implicit._lineax_bicgstab_solve(
+        lambda x: x,
+        jnp.asarray([1.0, -2.0]),
+        x0=jnp.asarray([0.5, 0.5]),
+        tol=1.0e-6,
+        max_iter=3,
+    )
+
+    np.testing.assert_allclose(np.asarray(value), [1.0, -2.0])
+    assert success is False
+    assert stats == {"num_steps": 2}
+
+
+def test_lambda_implicit_primal_uses_radial_spacing_branch(monkeypatch):
+    pytest.importorskip("jax")
+
+    import vmec_jax.implicit as implicit
+    from vmec_jax._compat import jnp
+
+    state = _state(2, 1, xp=jnp)
+    static = _static(2, [0], [0])
+
+    monkeypatch.setattr(
+        implicit,
+        "eval_geom",
+        lambda st, _static: SimpleNamespace(
+            g_tt=jnp.ones_like(jnp.asarray(st.Rcos)),
+            g_tp=jnp.zeros_like(jnp.asarray(st.Rcos)),
+            g_pp=jnp.ones_like(jnp.asarray(st.Rcos)),
+            sqrtg=jnp.ones_like(jnp.asarray(st.Rcos)),
+        ),
+    )
+    monkeypatch.setattr(
+        implicit,
+        "solve_lambda_gd",
+        lambda state0, *_args, **_kwargs: SimpleNamespace(
+            state=VMECState(
+                layout=state0.layout,
+                Rcos=state0.Rcos,
+                Rsin=state0.Rsin,
+                Zcos=state0.Zcos,
+                Zsin=state0.Zsin,
+                Lcos=jnp.asarray(state0.Lcos) + 1.0,
+                Lsin=state0.Lsin,
+            )
+        ),
+    )
+
+    out = implicit.solve_lambda_state_implicit(
+        state,
+        static,
+        phipf=jnp.ones(2),
+        chipf=jnp.ones(2),
+        signgs=1,
+        lamscale=jnp.ones(2),
+    )
+
+    np.testing.assert_allclose(np.asarray(out.Lcos), np.asarray(state.Lcos) + 1.0)
+
+
+def test_fixed_boundary_backward_zeros_inactive_edge_cotangents(monkeypatch):
+    pytest.importorskip("jax")
+
+    import vmec_jax.implicit as implicit
+    from vmec_jax._compat import enable_x64, jax, jnp
+
+    enable_x64(True)
+    state = _state(1, 1, xp=jnp)
+    static = _static(1, [0], [0])
+    lbfgs_calls = []
+
+    def fake_gd(state0, *_args, **kwargs):
+        return SimpleNamespace(state=state0, grad_rms_history=[0.0], diagnostics={"grad_tol": 1.0})
+
+    def fake_lbfgs(state0, *_args, **kwargs):
+        lbfgs_calls.append(kwargs)
+        return SimpleNamespace(state=state0, grad_rms_history=[0.0], diagnostics={"grad_tol": 1.0})
+
+    def fake_eval_geom(st, _static):
+        shape = jnp.asarray(st.Rcos)[:, :, None].shape
+        return SimpleNamespace(
+            g_tt=jnp.ones(shape),
+            g_tp=jnp.zeros(shape),
+            g_pp=jnp.ones(shape),
+            sqrtg=jnp.ones(shape),
+        )
+
+    monkeypatch.setattr(implicit, "solve_fixed_boundary_gd", fake_gd)
+    monkeypatch.setattr(implicit, "solve_fixed_boundary_lbfgs", fake_lbfgs)
+    monkeypatch.setattr(implicit, "eval_geom", fake_eval_geom)
+    monkeypatch.setattr(
+        implicit,
+        "bsup_from_geom",
+        lambda _g, *, phipf, chipf, lamscale, **_kwargs: (
+            jnp.asarray(phipf)[:, None, None],
+            jnp.asarray(chipf)[:, None, None] + jnp.asarray(lamscale)[:, None, None],
+        ),
+    )
+    monkeypatch.setattr(implicit, "b2_from_bsup", lambda _g, u, v: u * u + v * v)
+    monkeypatch.setattr(implicit, "_cg_solve", lambda _matvec, b, **_kwargs: jnp.zeros_like(b))
+
+    def objective(alpha):
+        st = implicit.solve_fixed_boundary_state_implicit(
+            state,
+            static,
+            phipf=alpha * jnp.ones(1),
+            chipf=jnp.ones(1),
+            signgs=1,
+            lamscale=jnp.ones(1),
+            pressure=jnp.zeros(1),
+            solver="lbfgs",
+            implicit=implicit.ImplicitFixedBoundaryOptions(cg_max_iter=2, cg_tol=1.0e-12, damping=0.1),
+        )
+        return jnp.sum(st.Rcos)
+
+    grad = float(jax.grad(objective)(2.0))
+
+    assert grad == pytest.approx(0.0)
+    assert len(lbfgs_calls) == 1

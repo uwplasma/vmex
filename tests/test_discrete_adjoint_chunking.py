@@ -138,6 +138,15 @@ def test_dynamic_replay_bucket_default_is_modest(monkeypatch):
     assert da._dynamic_replay_bucket_len(33) == 64
 
 
+def test_dynamic_replay_bucket_backend_failure_and_empty_lengths(monkeypatch):
+    monkeypatch.delenv("VMEC_JAX_DYNAMIC_REPLAY_BUCKET", raising=False)
+    monkeypatch.setattr(da.jax, "default_backend", lambda: (_ for _ in ()).throw(RuntimeError("backend")))
+
+    assert da._dynamic_replay_bucket_size() == 32
+    assert da._dynamic_replay_bucket_len(0) == 0
+    assert da._dynamic_replay_bucket_len(-3) == 0
+
+
 def test_dynamic_replay_bucket_default_is_larger_on_gpu(monkeypatch):
     monkeypatch.delenv("VMEC_JAX_DYNAMIC_REPLAY_BUCKET", raising=False)
     monkeypatch.setattr(da.jax, "default_backend", lambda: "gpu")
@@ -484,6 +493,21 @@ def test_dynamic_replay_payload_promotes_varying_constants(monkeypatch):
     np.testing.assert_allclose(np.asarray(stacked["w_mode_mn"])[:, 0], [1.0, 2.0])
 
 
+def test_dynamic_replay_payload_stacks_on_device_for_gpu_backend(monkeypatch):
+    monkeypatch.setenv("VMEC_JAX_DYNAMIC_REPLAY_BUCKET", "1")
+    monkeypatch.setattr(da.jax, "default_backend", lambda: "gpu")
+    traces = (_fake_dynamic_trace(lambda_update_scale=0.5),)
+    static_flags = da._static_flags_from_replay_step_traces(traces)
+
+    stacked, _dynamic_flags, _initial_carry, _base_carries = da._build_dynamic_replay_payload(
+        traces,
+        static_flags,
+    )
+
+    assert hasattr(stacked["lambda_update_scale"], "dtype")
+    np.testing.assert_allclose(np.asarray(stacked["lambda_update_scale"]), [0.5])
+
+
 def test_dynamic_replay_support_and_restart_classifiers():
     supported = _fake_supported_dynamic_trace()
     restart = _fake_restart_trace()
@@ -504,6 +528,30 @@ def test_dynamic_replay_support_and_restart_classifiers():
         tape=SimpleNamespace(step_traces=(supported,), step_trace_static_flags={"precond_jmax": None}),
         rebuild_preconditioner=True,
     )
+
+
+def test_replay_values_equal_handles_objects_and_fallback_equality():
+    assert da._replay_values_equal(SimpleNamespace(a=np.asarray([1.0])), SimpleNamespace(a=np.asarray([1.0])))
+    assert not da._replay_values_equal(SimpleNamespace(a=1, b=2), SimpleNamespace(a=1))
+
+    class Unarrayable:
+        def __array__(self, *_args, **_kwargs):
+            raise TypeError("no array view")
+
+        def __eq__(self, other):
+            return isinstance(other, Unarrayable)
+
+    assert da._replay_values_equal(Unarrayable(), Unarrayable())
+
+
+def test_stacked_trace_signature_uses_asarray_dtype_for_proxy_leaf():
+    class ArrayProxy:
+        shape = (2,)
+
+        def __array__(self, dtype=None):
+            return np.asarray([1, 2], dtype=dtype)
+
+    assert da._stacked_trace_signature((ArrayProxy(),)) == (((2,), np.dtype(int).str),)
 
 
 def test_dynamic_initial_carry_zero_fills_missing_asymmetric_velocities():
@@ -802,3 +850,126 @@ def test_packed_dynamic_replay_step_requires_layout_before_force_rebuild():
             static_flags={},
             preconditioner_jmax_override=1,
         )
+
+
+def test_replay_column_chunk_default_ignores_uninspectable_trees(monkeypatch):
+    monkeypatch.setenv("VMEC_JAX_REPLAY_COLUMN_TARGET_MB", "1")
+    monkeypatch.setattr(
+        da.jax.tree_util,
+        "tree_leaves",
+        lambda _tree: (_ for _ in ()).throw(TypeError("opaque tree")),
+    )
+
+    chunk = da._replay_column_chunk_default(
+        tape=SimpleNamespace(dynamic_initial_carry=object(), dynamic_base_carries_stacked=object()),
+        tangents=np.zeros((4, 2)),
+    )
+
+    assert chunk is None
+
+
+def test_compact_tape_diagnostics_skips_scalar_conversion_errors():
+    class BadFloat(float):
+        def __float__(self):
+            raise TypeError("bad scalar")
+
+    out = da._compact_tape_diagnostics({"final_fsq": BadFloat(1.0), "converged_iter": np.int64(2)})
+
+    assert out == {"converged_iter": 2}
+
+
+def test_fallback_state_jvp_and_vjp_apply_linearized_step(monkeypatch):
+    trace = _fake_dynamic_trace()
+
+    def fake_step(state, *_args, **_kwargs):
+        packed = da.pack_state(state)
+        return {"step": {"state_post": da.unpack_state(2.0 * packed + 1.0, state.layout)}}
+
+    monkeypatch.setattr(da, "strict_update_one_step_from_state", fake_step)
+    tape = SimpleNamespace(
+        step_traces=(trace,),
+        dynamic_initial_carry=None,
+        dynamic_base_carries_stacked=None,
+        stacked_step_traces=None,
+        step_trace_static_flags=None,
+    )
+    tangent = np.arange(trace["state_pre"].layout.size, dtype=float)
+    cotangent = np.arange(trace["state_pre"].layout.size, dtype=float) + 1.0
+
+    jvp_out = da.checkpoint_tape_state_jvp(
+        tape=tape,
+        static="static",
+        initial_tangent=tangent,
+        rebuild_preconditioner=False,
+    )
+    vjp_out = da.checkpoint_tape_state_vjp(
+        tape=tape,
+        static="static",
+        final_cotangent=cotangent,
+        rebuild_preconditioner=False,
+    )
+
+    np.testing.assert_allclose(np.asarray(jvp_out), 2.0 * tangent)
+    np.testing.assert_allclose(np.asarray(vjp_out), 2.0 * cotangent)
+
+
+def test_checkpoint_tape_param_jvp_and_vjp_bridge_boundary_params(monkeypatch):
+    pytest.importorskip("jax")
+
+    from vmec_jax._compat import jnp
+
+    layout = StateLayout(ns=1, K=1, lasym=False)
+
+    def fake_apply_boundary_params(boundary, specs, params):
+        return SimpleNamespace(boundary=boundary, specs=specs, params=params)
+
+    def fake_initial_guess_from_boundary(_static, boundary_p, *_args, **_kwargs):
+        params = jnp.asarray(boundary_p.params)
+        z = jnp.zeros((1, 1), dtype=params.dtype)
+        return VMECState(
+            layout=layout,
+            Rcos=params[0:1, None],
+            Rsin=z,
+            Zcos=z,
+            Zsin=params[1:2, None],
+            Lcos=z,
+            Lsin=z,
+        )
+
+    monkeypatch.setattr("vmec_jax.optimization.apply_boundary_params", fake_apply_boundary_params)
+    monkeypatch.setattr("vmec_jax.init_guess.initial_guess_from_boundary", fake_initial_guess_from_boundary)
+    tape = SimpleNamespace(
+        step_traces=(),
+        dynamic_initial_carry=None,
+        dynamic_base_carries_stacked=None,
+        stacked_step_traces=None,
+        step_trace_static_flags=None,
+    )
+
+    params = jnp.asarray([2.0, 3.0])
+    tangent = jnp.asarray([0.25, -0.5])
+    final_cotangent = jnp.asarray([10.0, 20.0, 30.0, 40.0, 50.0, 60.0])
+
+    jvp_out = da.checkpoint_tape_param_jvp(
+        tape=tape,
+        static="static",
+        boundary="boundary",
+        indata="indata",
+        specs="specs",
+        params=params,
+        axis_override=None,
+        params_tangent=tangent,
+    )
+    vjp_out = da.checkpoint_tape_param_vjp(
+        tape=tape,
+        static="static",
+        boundary="boundary",
+        indata="indata",
+        specs="specs",
+        params=params,
+        axis_override=None,
+        final_cotangent=final_cotangent,
+    )
+
+    np.testing.assert_allclose(np.asarray(jvp_out), [0.25, 0.0, 0.0, -0.5, 0.0, 0.0])
+    np.testing.assert_allclose(np.asarray(vjp_out), [10.0, 40.0])
