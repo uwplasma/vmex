@@ -3,6 +3,8 @@ from __future__ import annotations
 import builtins
 import pathlib
 import platform
+import sys
+import types
 
 import numpy as np
 import pytest
@@ -152,6 +154,24 @@ def test_cache_machine_fingerprint_uses_cpuinfo_and_fallbacks(monkeypatch) -> No
     assert compat._cache_machine_fingerprint().startswith("unknown-unknown-")
 
 
+def test_cache_machine_fingerprint_ignores_malformed_cpuinfo_and_open_errors(monkeypatch) -> None:
+    monkeypatch.setattr(compat.importlib_metadata, "version", lambda _name: "1.0")
+    monkeypatch.setattr(compat.os.path, "exists", lambda path: path == "/proc/cpuinfo")
+
+    def fake_open(path, *args, **kwargs):
+        assert path == "/proc/cpuinfo"
+        return _StringContext("no delimiter here\nFeatures : neon\n")
+
+    monkeypatch.setattr(builtins, "open", fake_open)
+    assert len(compat._cache_machine_fingerprint().rsplit("-", 1)[-1]) == 16
+
+    def raising_open(*_args, **_kwargs):
+        raise OSError("cpuinfo unavailable")
+
+    monkeypatch.setattr(builtins, "open", raising_open)
+    assert len(compat._cache_machine_fingerprint().rsplit("-", 1)[-1]) == 16
+
+
 class _StringContext:
     def __init__(self, text: str):
         self._lines = text.splitlines(True)
@@ -233,6 +253,30 @@ def test_configure_compilation_cache_cpu_default_disables_extra_xla_caches(monke
     assert not any(key == "jax_persistent_cache_enable_xla_caches" for key, _value in calls)
 
 
+def test_configure_compilation_cache_ignores_optional_update_failures(monkeypatch) -> None:
+    calls = []
+
+    class _Config:
+        def update(self, key, value):
+            calls.append((key, value))
+            if key in {
+                "jax_persistent_cache_enable_xla_caches",
+                "jax_explain_cache_misses",
+            }:
+                raise RuntimeError("unsupported")
+
+    class _Jax:
+        config = _Config()
+
+    monkeypatch.setenv("VMEC_JAX_PERSISTENT_CACHE_XLA_CACHES", "xla_gpu_kernel_cache_file")
+    monkeypatch.setenv("VMEC_JAX_EXPLAIN_CACHE_MISSES", "1")
+
+    compat._configure_compilation_cache(_Jax(), "/tmp/cache")
+
+    assert ("jax_persistent_cache_enable_xla_caches", "xla_gpu_kernel_cache_file") in calls
+    assert ("jax_explain_cache_misses", True) in calls
+
+
 def test_try_import_jax_falls_back_when_import_is_mocked(monkeypatch) -> None:
     real_import = builtins.__import__
 
@@ -254,6 +298,35 @@ def test_try_import_jax_falls_back_when_import_is_mocked(monkeypatch) -> None:
     assert jit(fn)(3) == 5
 
 
+def test_try_import_jax_sets_cache_env_and_ignores_config_update_failures(monkeypatch) -> None:
+    fake_jax = types.ModuleType("jax")
+    fake_jnp = types.ModuleType("jax.numpy")
+    updates = []
+
+    class _Config:
+        def update(self, key, value):
+            updates.append((key, value))
+            if key in {"jax_enable_x64", "jax_cpu_enable_async_dispatch"}:
+                raise RuntimeError("read-only")
+
+    fake_jax.config = _Config()
+    fake_jax.jit = lambda fn=None, **_kwargs: (lambda inner: inner) if fn is None else fn
+    fake_jax.numpy = fake_jnp
+    monkeypatch.setitem(sys.modules, "jax", fake_jax)
+    monkeypatch.setitem(sys.modules, "jax.numpy", fake_jnp)
+    monkeypatch.setattr(compat, "_default_compilation_cache_dir", lambda: "/tmp/synthetic-cache")
+    monkeypatch.delenv("JAX_COMPILATION_CACHE_DIR", raising=False)
+
+    jax_mod, jnp_mod, jit = compat._try_import_jax()
+
+    assert jax_mod is fake_jax
+    assert jnp_mod is fake_jnp
+    assert jit(lambda x: x)(4) == 4
+    assert ("jax_enable_x64", True) in updates
+    assert ("jax_cpu_enable_async_dispatch", False) in updates
+    assert compat.os.environ["JAX_COMPILATION_CACHE_DIR"] == "/tmp/synthetic-cache"
+
+
 def test_x64_enabled_falls_back_to_environment(monkeypatch) -> None:
     if compat.jax is None:
         pytest.skip("JAX not available")
@@ -267,3 +340,60 @@ def test_x64_enabled_falls_back_to_environment(monkeypatch) -> None:
     assert compat.x64_enabled() is True
     monkeypatch.setenv("JAX_ENABLE_X64", "0")
     assert compat.x64_enabled() is False
+
+
+def test_x64_and_array_helpers_when_jax_missing_or_limited(monkeypatch) -> None:
+    monkeypatch.setattr(compat, "jax", None)
+    assert compat.x64_enabled() is True
+    compat.enable_x64(False)
+    np.testing.assert_allclose(compat.asarray([1, 2], dtype=float), np.asarray([1.0, 2.0]))
+
+    class _BadConfig:
+        def update(self, *_args, **_kwargs):
+            raise RuntimeError("cannot update")
+
+    monkeypatch.setattr(compat, "jax", types.SimpleNamespace(config=_BadConfig()))
+    compat.enable_x64(True)
+
+
+def test_einsum_jax_precision_fallbacks(monkeypatch) -> None:
+    class _FakeJnp:
+        def __init__(self):
+            self.calls = []
+
+        def einsum(self, expr, *operands, precision=None):
+            self.calls.append(precision)
+            if precision is not None:
+                raise TypeError("precision unsupported")
+            return np.einsum(expr, *operands)
+
+    fake_jnp = _FakeJnp()
+    monkeypatch.setattr(compat, "jax", object())
+    monkeypatch.setattr(compat, "jnp", fake_jnp)
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "jax" and args and args[2] == ("lax",):
+            raise ImportError("no lax")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    np.testing.assert_allclose(compat.einsum("i,i->", np.asarray([2.0]), np.asarray([3.0])), 6.0)
+    assert fake_jnp.calls[-1] is None
+
+    np.testing.assert_allclose(
+        compat.einsum("i,i->", np.asarray([2.0]), np.asarray([3.0]), precision="highest"),
+        6.0,
+    )
+    assert fake_jnp.calls[-2:] == ["highest", None]
+
+
+def test_einsum_uses_real_jax_highest_precision_when_available() -> None:
+    if compat.jax is None:
+        pytest.skip("JAX not available")
+
+    np.testing.assert_allclose(
+        np.asarray(compat.einsum("i,i->", np.asarray([2.0]), np.asarray([4.0]))),
+        8.0,
+    )

@@ -63,6 +63,21 @@ def test_scan_chunk_settings_explicit_env_wins_and_cpu_quiet_uses_full_budget(mo
     assert cap_to_remaining is True
 
 
+def test_scan_chunk_settings_accelerator_quiet_uses_full_budget(monkeypatch):
+    monkeypatch.delenv("VMEC_JAX_SCAN_CHUNK_SIZE", raising=False)
+
+    chunk_size, cap_to_remaining = runtime._scan_chunk_settings(
+        max_iter_scan=12,
+        nstep_screen=4,
+        need_print=False,
+        lthreed=True,
+        backend_name="tpu",
+    )
+
+    assert chunk_size == 12
+    assert cap_to_remaining is True
+
+
 @pytest.mark.parametrize(
     ("scan_core_env", "scan_minimal", "fsq_total_target", "expected"),
     [
@@ -155,6 +170,46 @@ def test_hash_array_bytes_reports_opaque_unarrayable_values():
     assert runtime._hash_array_bytes(Unarrayable()) == "opaque:Unarrayable"
 
 
+def test_array_keys_use_traced_aval_for_unarrayable_values(monkeypatch):
+    class Unarrayable:
+        def __array__(self, dtype=None):
+            raise TypeError("cannot materialize")
+
+    class Aval:
+        shape = (2, 3)
+        dtype = np.dtype("float32")
+        weak_type = True
+
+    class FakeJax:
+        typeof = staticmethod(lambda _x: Aval())
+
+    monkeypatch.setattr(runtime, "jax", FakeJax())
+
+    value = Unarrayable()
+
+    assert runtime._hash_array_bytes(value) == "traced:(2, 3):float32:True"
+    assert runtime._array_signature_key(value) == ((2, 3), "float32")
+
+
+def test_array_signature_key_falls_back_to_type_when_no_aval(monkeypatch):
+    class Unarrayable:
+        def __array__(self, dtype=None):
+            raise TypeError("cannot materialize")
+
+    class FakeCore:
+        @staticmethod
+        def get_aval(_x):
+            raise TypeError("not a tracer")
+
+    class FakeJax:
+        typeof = None
+        core = FakeCore()
+
+    monkeypatch.setattr(runtime, "jax", FakeJax())
+
+    assert runtime._array_signature_key(Unarrayable()) == ((), "Unarrayable")
+
+
 def test_edge_signature_ignores_values_but_value_key_tracks_bytes():
     a = np.asarray([1.0, 2.0], dtype=np.float64)
     b = np.asarray([9.0, 8.0], dtype=np.float64)
@@ -169,7 +224,7 @@ def test_edge_signature_ignores_values_but_value_key_tracks_bytes():
 
 def test_dump_iter_selection_parses_ranges_and_invalid_chunks():
     assert runtime._parse_iter_list("") is None
-    assert runtime._parse_iter_list("bad, 5-3, 8") == {3, 4, 5, 8}
+    assert runtime._parse_iter_list("bad, 5-3, 8, 9-bad, ,") == {3, 4, 5, 8}
     assert runtime._dump_env_enabled("false") is True
     assert runtime._dump_env_enabled("0") is False
     assert runtime._dump_iter_selected(iter_idx=4, iter_env="1,3-5") is True
@@ -188,3 +243,53 @@ def test_scan_backend_tree_and_scalar_history_helpers(monkeypatch):
 
     np.testing.assert_allclose(runtime._scalar_history_array([]), np.zeros((0,)))
     np.testing.assert_allclose(runtime._scalar_history_array([1, 2.5]), [1.0, 2.5])
+
+
+def test_scan_backend_tree_and_history_exception_fallbacks(monkeypatch):
+    monkeypatch.setattr(runtime, "jax", None)
+    assert runtime._tree_has_tracer({"x": object()}) is False
+
+    class _TreeUtil:
+        @staticmethod
+        def tree_leaves(_tree):
+            raise RuntimeError("tree failure")
+
+    class _Core:
+        class Tracer:
+            pass
+
+    class _FakeJax:
+        tree_util = _TreeUtil()
+        core = _Core()
+
+        @staticmethod
+        def default_backend():
+            raise RuntimeError("backend unavailable")
+
+        @staticmethod
+        def device_get(_vals):
+            raise RuntimeError("device_get unavailable")
+
+    monkeypatch.setattr(runtime, "jax", _FakeJax())
+    monkeypatch.setattr(runtime, "has_jax", lambda: True)
+
+    assert runtime._scan_backend_name() == "cpu"
+    assert runtime._tree_has_tracer(object()) is False
+    np.testing.assert_allclose(runtime._scalar_history_array([1, 2]), [1.0, 2.0])
+
+
+def test_scan_fallback_policy_accept_frac_default_on_parse_error():
+    policy = runtime._scan_fallback_policy(
+        backend_name="cpu",
+        enabled_env=None,
+        iters_env="bad",
+        badjac_limit_env="bad",
+        fsq_abs_env="bad",
+        accept_frac_env="bad",
+        fsq_factor_env="bad",
+        improve_env="bad",
+    )
+
+    assert policy.enabled is True
+    assert policy.iters == 20
+    assert policy.accept_frac == 0.5
