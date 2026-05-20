@@ -82,28 +82,28 @@ CASES = (
     QICase(
         label="NFP=3 seed 3127",
         input_file=REPO_ROOT / "examples" / "data" / "input.QI_stel_seed_3127",
-        output_dir=REPO_ROOT / "results" / "qi_opt" / "ess" / "qi_stel_seed_3127_current_public_final",
+        output_dir=REPO_ROOT / "results" / "qi_opt" / "ess" / "qi_stel_seed_3127_mirror_calibrated_20260516",
         initial_wout=REPO_ROOT / "examples" / "data" / "wout_QI_stel_seed_3127.nc",
-        note="curated reference-family baseline",
+        note="passing reference-family QI lane",
         history_paths=(
             REPO_ROOT
             / "results"
             / "qi_opt"
             / "ess"
-            / "qi_stel_seed_3127_current_public_final"
+            / "qi_stel_seed_3127_mirror_calibrated_20260516"
             / "history.json",
             REPO_ROOT
             / "results"
             / "qi_opt"
             / "ess"
-            / "qi_stel_seed_3127_current_public_final"
+            / "qi_stel_seed_3127_mirror_calibrated_20260516"
             / "boundary_reference_baseline"
             / "history.json",
             REPO_ROOT
             / "results"
             / "qi_opt"
             / "ess"
-            / "qi_stel_seed_3127_current_public_final"
+            / "qi_stel_seed_3127_mirror_calibrated_20260516"
             / "mirror_ramp_01_prefiltered_mirror_qi_iota_cleanup"
             / "history.json",
         ),
@@ -111,45 +111,31 @@ CASES = (
         / "results"
         / "qi_opt"
         / "ess"
-        / "qi_stel_seed_3127_current_public_final"
+        / "qi_stel_seed_3127_mirror_calibrated_20260516"
         / "boundary_reference_preconditioner"
         / "summary.json",
     ),
     QICase(
-        label="NFP=4 minimal seed",
-        input_file=REPO_ROOT / "examples" / "data" / "input.minimal_seed_nfp4",
-        output_dir=REPO_ROOT / "results" / "qi_opt" / "ess" / "minimal_nfp4_to_qi_finite_beta_reference",
+        label="NFP=4 finite-beta QI",
+        input_file=REPO_ROOT / "examples" / "data" / "input.nfp4_QI_finite_beta",
+        output_dir=REPO_ROOT / "results" / "qi_opt" / "ess" / "nfp4_qi_finite_beta",
         initial_wout=REPO_ROOT
         / "results"
         / "qi_opt"
         / "ess"
-        / "minimal_nfp4_to_qi_finite_beta_reference"
+        / "nfp4_qi_finite_beta"
         / "wout_initial.nc",
-        note="NFP=4 deferred finite-beta/reference stress lane; not promoted with NFP=1/2/3",
+        note="finite-beta verification/stress lane; not production NFP=4 robustness",
         validation_status="deferred",
         history_paths=(
             REPO_ROOT
             / "results"
             / "qi_opt"
             / "ess"
-            / "minimal_nfp4_to_qi_finite_beta_reference"
-            / "boundary_reference_baseline"
-            / "history.json",
-            REPO_ROOT
-            / "results"
-            / "qi_opt"
-            / "ess"
-            / "minimal_nfp4_to_qi_finite_beta_reference"
+            / "nfp4_qi_finite_beta"
             / "mirror_ramp_01_finite_beta_qi_audit_refine"
             / "history.json",
         ),
-        preconditioner_summary=REPO_ROOT
-        / "results"
-        / "qi_opt"
-        / "ess"
-        / "minimal_nfp4_to_qi_finite_beta_reference"
-        / "boundary_reference_preconditioner"
-        / "summary.json",
     ),
 )
 
@@ -496,6 +482,8 @@ def _plot_boozer_bmag(ax, wout_path: Path, nfp: int, title: str) -> None:
 
 
 def _row_title(record: dict[str, str | float]) -> str:
+    status = str(record["validation_status"])
+    suffix = "" if status == "promoted" else f", status={status}"
     return (
         f"{record['case']} | J={record['objective_final']:.2e}, "
         f"QI={record['qi_legacy_total']:.2e}, smooth={record['qi_smooth_total']:.2e}, "
@@ -504,6 +492,7 @@ def _row_title(record: dict[str, str | float]) -> str:
         f"A={record['aspect']:.3f}, "
         f"iota={record['mean_iota']:.4f}, "
         f"{record['cpu_time_min']:.1f} CPU min"
+        f"{suffix}"
     )
 
 
@@ -529,7 +518,7 @@ def _render(records: list[dict[str, str | float]]) -> None:
     )
 
     row_count = len(CASES)
-    fig = plt.figure(figsize=(21.5, 4.15 * row_count + 0.8))
+    fig = plt.figure(figsize=(21.5, 4.45 * row_count + 0.8))
     gs = fig.add_gridspec(
         row_count,
         5,
@@ -538,10 +527,16 @@ def _render(records: list[dict[str, str | float]]) -> None:
         bottom=0.035,
         top=0.92,
         wspace=0.35,
-        hspace=0.75,
+        hspace=1.05,
         width_ratios=(1.05, 1.05, 1.0, 1.08, 1.08),
     )
-    fig.suptitle("QI_optimization coverage for NFP=1, 2, 3, and 4", fontsize=13, x=0.02, y=0.992, ha="left")
+    fig.suptitle(
+        "QI_optimization coverage for NFP=1, 2, 3, plus NFP=4 finite-beta verification",
+        fontsize=13,
+        x=0.02,
+        y=0.992,
+        ha="left",
+    )
     for row, (case, record) in enumerate(zip(CASES, records, strict=True)):
         ax0 = fig.add_subplot(gs[row, 0], projection="3d")
         ax1 = fig.add_subplot(gs[row, 1], projection="3d")
@@ -553,10 +548,8 @@ def _render(records: list[dict[str, str | float]]) -> None:
         _plot_history(ax2, case)
         _plot_boozer_bmag(ax3, case.initial_wout, int(record["qi_nfp"]), r"Initial Boozer $|B|$")
         _plot_boozer_bmag(ax4, case.output_dir / "wout_final.nc", int(record["qi_nfp"]), r"Final Boozer $|B|$")
-        top = 0.92
-        bottom = 0.035
-        row_height = (top - bottom) / row_count
-        title_y = top - row * row_height + 0.008
+        row_top = max(ax.get_position().y1 for ax in (ax0, ax1, ax2, ax3, ax4))
+        title_y = row_top + 0.034
         fig.text(0.045, title_y, _row_title(record), fontsize=10, ha="left", va="bottom")
         fig.text(
             0.045,

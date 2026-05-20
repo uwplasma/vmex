@@ -171,22 +171,17 @@ then run the bounded robustness probe or select a ``RUN_CASE`` in
    PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py --quick --smooth-qi-max 5e-3 --legacy-qi-max 2e-3 --csv results/qi_seed3127_audit.csv
    PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py --quick --prefine-probes plan --prefine-manifest results/qi_seed_audit/prefine_manifest.json --prefine-output-dir results/qi_seed_audit/prefine_probes
    PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_seed_robustness.py
-   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127 \
-     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/qi_stel_seed_3127_current_public_final \
+   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp1_qi \
+     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp1_qi_direct_office_20260519 \
      python examples/optimization/QI_optimization.py
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp2_qi \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp2_qi \
      python examples/optimization/QI_optimization.py
+   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp3_qi \
+     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516 \
+     python examples/optimization/QI_optimization.py
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi_finite_beta \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp4_qi_finite_beta \
-     python examples/optimization/QI_optimization.py
-   PYTHONPATH=. JAX_PLATFORMS=cpu \
-     VMEC_JAX_QI_INPUT=examples/data/input.minimal_seed_nfp4 \
-     VMEC_JAX_QI_LABEL=minimal_nfp4_to_qi_finite_beta_reference \
-     VMEC_JAX_QI_POLICY_CASE=nfp4_qi_finite_beta \
-     VMEC_JAX_QI_REFERENCE_INPUT=examples/data/input.nfp4_QI_finite_beta \
-     VMEC_JAX_QI_REFERENCE_LAMBDAS=1.0 \
-     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/minimal_nfp4_to_qi_finite_beta_reference \
      python examples/optimization/QI_optimization.py
 
 The second audit command uses the far-seed QI gate convention from
@@ -195,12 +190,12 @@ below ``5e-3``.
 
 The README/docs QI coverage figure is rendered from existing reviewed
 ``QI_optimization.py`` outputs.  The NFP=1, NFP=2, and seed-3127 rows are
-reviewed QI lanes; the NFP=4 row is retained as a deferred stress/validation
-case and must not be described as completed NFP=4 robustness:
+passing QI lanes; the NFP=4 row is a finite-beta verification/stress artifact
+and must not be described as completed NFP=4 robustness:
 
 .. list-table::
    :header-rows: 1
-   :widths: 22 27 11 11 11 10 9 9 9 9
+   :widths: 20 25 10 10 10 9 8 8 8 8 10
 
    * - Input
      - Output/provenance
@@ -212,6 +207,7 @@ case and must not be described as completed NFP=4 robustness:
      - Aspect
      - Iota
      - CPU min
+     - Status
    * - ``examples/data/input.nfp1_QI``
      - ``results/qi_opt/ess/nfp1_qi_direct_office_20260519``
      - ``1.56e-2``
@@ -222,6 +218,7 @@ case and must not be described as completed NFP=4 robustness:
      - ``9.999/10.0``
      - ``0.5369``
      - ``15.8``
+     - ``promoted``
    * - ``examples/data/input.nfp2_QI``
      - ``results/qi_opt/ess/nfp2_qi``
      - ``1.17e-2``
@@ -232,26 +229,29 @@ case and must not be described as completed NFP=4 robustness:
      - ``9.999/10.0``
      - ``-0.5043``
      - ``14.7``
+     - ``promoted``
    * - ``examples/data/input.QI_stel_seed_3127``
-     - ``results/qi_opt/ess/qi_stel_seed_3127_current_public_final``
-     - ``1.12e-1``
-     - ``4.32e-3``
-     - ``1.16e-3``
-     - ``0.316/0.35``
-     - ``3.91/8.0``
-     - ``3.465/4.0``
-     - ``-1.0366``
-     - ``4.8``
-   * - ``examples/data/input.minimal_seed_nfp4``
-     - ``results/qi_opt/ess/minimal_nfp4_to_qi_finite_beta_reference``
-     - ``2.52e-2``
-     - ``2.56e-3``
-     - ``2.54e-4``
-     - ``0.287/0.35``
+     - ``results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516``
+     - ``9.33e-2``
+     - ``4.11e-3``
+     - ``1.01e-3``
+     - ``0.304/0.35``
+     - ``4.00/8.0``
+     - ``3.541/4.0``
+     - ``-1.0401``
+     - ``4.6``
+     - ``promoted``
+   * - ``examples/data/input.nfp4_QI_finite_beta``
+     - ``results/qi_opt/ess/nfp4_qi_finite_beta``
+     - ``2.39e-2``
+     - ``2.37e-3``
+     - ``1.75e-4``
+     - ``0.282/0.35``
      - ``4.14/8.2``
      - ``6.011/6.0``
-     - ``-1.2930``
-     - ``1.2``
+     - ``-1.2913``
+     - ``1.0``
+     - ``deferred``
 
 .. image:: _static/figures/readme_qi_optimization_cases.png
    :width: 100%
@@ -289,11 +289,8 @@ Current NFP=4 QI status: deferred.  ``VMEC_JAX_QI_RUN_CASE=nfp4_qi_finite_beta``
 is a finite-beta NFP=4 verification/stress lane, not a completed robustness
 claim.  It preserves the input deck's ``MPOL=5``, ``NTOR=5``, and VMEC
 convergence settings because low-budget local cleanup can damage the
-smooth-QI gate.  The README NFP=4 minimal-seed row uses the same case as a
-policy, starts from ``examples/data/input.minimal_seed_nfp4``, and enables
-``VMEC_JAX_QI_REFERENCE_INPUT=examples/data/input.nfp4_QI_finite_beta`` with
-``VMEC_JAX_QI_REFERENCE_LAMBDAS=1.0``.  Treat this as evidence that the driver
-can exercise the NFP=4 path, not as proof of seed-robust NFP=4 QI.
+smooth-QI gate.  Treat the saved NFP=4 artifact as evidence that the driver can
+exercise and audit the NFP=4 path, not as proof of seed-robust NFP=4 QI.
 ``VMEC_JAX_QI_RUN_CASE=nfp4_qh_warm_to_qi`` remains an explicit non-passing
 stress fixture for QH-to-QI conversion and should not be used as a promoted QI
 result.
@@ -1178,22 +1175,17 @@ script:
 
 .. code-block:: bash
 
+   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp1_qi \
+     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp1_qi_direct_office_20260519 \
+     python examples/optimization/QI_optimization.py
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp2_qi \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp2_qi \
      python examples/optimization/QI_optimization.py
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp3_qi \
-     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/qi_stel_seed_3127_current_public_final \
+     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516 \
      python examples/optimization/QI_optimization.py
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi_finite_beta \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp4_qi_finite_beta \
-     python examples/optimization/QI_optimization.py
-   PYTHONPATH=. JAX_PLATFORMS=cpu \
-     VMEC_JAX_QI_INPUT=examples/data/input.minimal_seed_nfp4 \
-     VMEC_JAX_QI_LABEL=minimal_nfp4_to_qi_finite_beta_reference \
-     VMEC_JAX_QI_POLICY_CASE=nfp4_qi_finite_beta \
-     VMEC_JAX_QI_REFERENCE_INPUT=examples/data/input.nfp4_QI_finite_beta \
-     VMEC_JAX_QI_REFERENCE_LAMBDAS=1.0 \
-     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/minimal_nfp4_to_qi_finite_beta_reference \
      python examples/optimization/QI_optimization.py
 
 The script takes ``nfp`` from the VMEC input file, so NFP=1/2/3/4 do not need
