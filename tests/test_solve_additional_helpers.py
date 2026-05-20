@@ -55,6 +55,7 @@ from vmec_jax.solve import (
     _sm_sp_from_s_np,
     _update_state_gd,
     _should_print_vmec2000_row,
+    _vmec2000_time_control_decision,
     _vmec2000_scan_options_from_env,
     _vmec_force_flux_profiles,
     _vmec_scale_m1_factors_from_mats,
@@ -1014,6 +1015,112 @@ def test_host_restart_decision_covers_stage_growth_progress_and_vmec_paths():
     )
     assert vmecpp_progress.vmecpp_bad_progress
     assert vmecpp_progress.pre_restart_reason == "bad_progress_vmecpp"
+
+
+def test_vmec2000_time_control_decision_initializes_and_checkpoints_minima():
+    initialized = _vmec2000_time_control_decision(
+        iter2=3,
+        iter1=3,
+        fsq_prev=1.5,
+        fsq0_curr=2.5,
+        fsq0_prev=9.0,
+        res0=-1.0,
+        res1=4.0,
+        bad_jacobian=True,
+        vmec2000_fact=1.0e4,
+    )
+
+    assert initialized.fsq == pytest.approx(1.5)
+    assert initialized.fsq0 == pytest.approx(2.5)
+    assert initialized.res0 == pytest.approx(1.5)
+    assert initialized.res1 == pytest.approx(2.5)
+    assert initialized.trace_irst == 1
+    assert initialized.irst == 1
+    assert initialized.initialized
+    assert initialized.store_checkpoint
+    assert not initialized.restart
+    assert initialized.pre_restart_reason == "none"
+
+    improved = _vmec2000_time_control_decision(
+        iter2=8,
+        iter1=3,
+        fsq_prev=0.5,
+        fsq0_curr=0.25,
+        fsq0_prev=9.0,
+        res0=1.0,
+        res1=0.3,
+        bad_jacobian=False,
+        vmec2000_fact=1.0e4,
+    )
+
+    assert not improved.initialized
+    assert improved.res0 == pytest.approx(0.5)
+    assert improved.res1 == pytest.approx(0.25)
+    assert improved.store_checkpoint
+    assert not improved.restart
+
+
+def test_vmec2000_time_control_decision_bad_jacobian_uses_previous_physical_residual():
+    decision = _vmec2000_time_control_decision(
+        iter2=9,
+        iter1=3,
+        fsq_prev=0.5,
+        fsq0_curr=999.0,
+        fsq0_prev=0.75,
+        res0=1.0,
+        res1=2.0,
+        bad_jacobian=True,
+        vmec2000_fact=1.0e4,
+    )
+
+    assert decision.fsq == pytest.approx(0.5)
+    assert decision.fsq0 == pytest.approx(0.75)
+    assert decision.res0 == pytest.approx(0.5)
+    assert decision.res1 == pytest.approx(0.75)
+    assert decision.trace_irst == 2
+    assert decision.irst == 2
+    assert not decision.initialized
+    assert not decision.store_checkpoint
+    assert decision.restart
+    assert decision.pre_restart_reason == "bad_jacobian"
+
+
+def test_vmec2000_time_control_decision_bad_progress_respects_restart_window():
+    in_window = _vmec2000_time_control_decision(
+        iter2=18,
+        iter1=8,
+        fsq_prev=2.0,
+        fsq0_curr=3.0,
+        fsq0_prev=9.0,
+        res0=1.0e-4,
+        res1=1.0e-4,
+        bad_jacobian=False,
+        vmec2000_fact=100.0,
+    )
+    assert in_window.trace_irst == 1
+    assert in_window.irst == 1
+    assert not in_window.store_checkpoint
+    assert not in_window.restart
+
+    past_window = _vmec2000_time_control_decision(
+        iter2=19,
+        iter1=8,
+        fsq_prev=2.0,
+        fsq0_curr=3.0,
+        fsq0_prev=9.0,
+        res0=1.0e-4,
+        res1=1.0e-4,
+        bad_jacobian=False,
+        vmec2000_fact=100.0,
+    )
+
+    assert past_window.res0 == pytest.approx(1.0e-4)
+    assert past_window.res1 == pytest.approx(1.0e-4)
+    assert past_window.trace_irst == 1
+    assert past_window.irst == 3
+    assert not past_window.store_checkpoint
+    assert past_window.restart
+    assert past_window.pre_restart_reason == "time_control"
 
 
 def test_residual_iter_history_record_packs_restart_row_with_free_boundary_cadence():

@@ -66,6 +66,19 @@ class _HostRestartDecision(NamedTuple):
     vmecpp_bad_progress: bool
 
 
+class _Vmec2000TimeControlDecision(NamedTuple):
+    fsq: float
+    fsq0: float
+    res0: float
+    res1: float
+    trace_irst: int
+    irst: int
+    initialized: bool
+    store_checkpoint: bool
+    restart: bool
+    pre_restart_reason: str
+
+
 class _ResidualIterHistoryRecord(NamedTuple):
     step: float
     dt_eff: float
@@ -1711,6 +1724,67 @@ def _host_restart_decision(
         huge_initial_forces=bool(huge_initial_forces),
         store_checkpoint=bool(store_checkpoint),
         vmecpp_bad_progress=bool(vmecpp_bad_progress),
+    )
+
+
+def _vmec2000_time_control_decision(
+    *,
+    iter2: int,
+    iter1: int,
+    fsq_prev: float,
+    fsq0_curr: float,
+    fsq0_prev: float,
+    res0: float,
+    res1: float,
+    bad_jacobian: bool,
+    vmec2000_fact: float,
+) -> _Vmec2000TimeControlDecision:
+    """Return host-side VMEC2000 TimeStepControl scalar decisions."""
+
+    i2 = int(iter2)
+    i1 = int(iter1)
+    fsq = float(fsq_prev)
+    fsq0 = float(fsq0_curr)
+    res0_f = float(res0)
+    res1_f = float(res1)
+
+    irst = 1
+    if bool(bad_jacobian) and (i2 > i1):
+        # VMEC's irst=2 path uses the previous physical residual.
+        irst = 2
+        fsq0 = float(fsq0_prev)
+
+    initialized = (i2 == i1) or (res0_f < 0.0) or (res1_f < 0.0)
+    if initialized:
+        res0_f = fsq
+        res1_f = fsq0
+
+    res0_f = min(res0_f, fsq)
+    res1_f = min(res1_f, fsq0)
+    store_checkpoint = (fsq <= res0_f) and (fsq0 <= res1_f) and (irst == 1)
+    trace_irst = irst
+
+    fact = float(vmec2000_fact)
+    bad_progress = (fsq > fact * max(res0_f, 1e-30)) or (fsq0 > fact * max(res1_f, 1e-30))
+    if (irst == 1) and ((i2 - i1) > 10) and bad_progress:
+        irst = 3
+
+    restart = irst != 1
+    pre_restart_reason = "none"
+    if restart:
+        pre_restart_reason = "bad_jacobian" if irst == 2 else "time_control"
+
+    return _Vmec2000TimeControlDecision(
+        fsq=float(fsq),
+        fsq0=float(fsq0),
+        res0=float(res0_f),
+        res1=float(res1_f),
+        trace_irst=int(trace_irst),
+        irst=int(irst),
+        initialized=bool(initialized),
+        store_checkpoint=bool(store_checkpoint),
+        restart=bool(restart),
+        pre_restart_reason=pre_restart_reason,
     )
 
 
@@ -13302,22 +13376,26 @@ def solve_fixed_boundary_residual_iter(
 
             # VMEC-style time-step control: VMEC2000's `TimeStepControl` + `restart_iter`.
             if bool(vmec2000_control) and (not skip_time_control):
-                fsq0 = fsq0_curr  # physical residual on current state
                 # VMEC's TimeStepControl uses the *previous* preconditioned
                 # residual (fsq) which is updated at the end of evolve.f.
-                # VMEC's TimeStepControl uses `fsq` from the *previous* evolve
-                # step (initialized to 1.0). It does not switch to fsq1 when
-                # iter2 == iter1 (restart window).
-                fsq = fsq_prev
-                irst_tc = 1
-                if bool(bad_jacobian) and (iter2 > iter1):
-                    # VMEC's irst=2 path: use previous physical residual when
-                    # the Jacobian changes sign.
-                    irst_tc = 2
-                    fsq0 = fsq0_prev
-                if (iter2 == iter1) or (res0 < 0.0) or (res1 < 0.0):
-                    res0 = fsq
-                    res1 = fsq0
+                tc = _vmec2000_time_control_decision(
+                    iter2=int(iter2),
+                    iter1=int(iter1),
+                    fsq_prev=float(fsq_prev),
+                    fsq0_curr=float(fsq0_curr),
+                    fsq0_prev=float(fsq0_prev),
+                    res0=float(res0),
+                    res1=float(res1),
+                    bad_jacobian=bool(bad_jacobian),
+                    vmec2000_fact=float(vmec2000_fact),
+                )
+                fsq = tc.fsq
+                fsq0 = tc.fsq0
+                res0 = tc.res0
+                res1 = tc.res1
+                irst_tc = tc.irst
+                irst_trace = tc.trace_irst
+                if tc.initialized:
                     state_checkpoint = state
                     _dump_time_control_trace(
                         stage="init",
@@ -13328,13 +13406,11 @@ def solve_fixed_boundary_residual_iter(
                         res0=float(res0),
                         res1=float(res1),
                         time_step=float(time_step),
-                        irst=int(irst_tc),
+                        irst=int(irst_trace),
                     )
                     _maybe_dump_checkpoint(
                         iter_idx=int(iter2), fsq=float(fsq), fsq0=float(fsq0), res0=float(res0), res1=float(res1)
                     )
-                res0 = min(res0, fsq)
-                res1 = min(res1, fsq0)
                 _dump_time_control_trace(
                     stage="pre",
                     iter2=int(iter2),
@@ -13344,9 +13420,9 @@ def solve_fixed_boundary_residual_iter(
                     res0=float(res0),
                     res1=float(res1),
                     time_step=float(time_step),
-                    irst=int(irst_tc),
+                    irst=int(irst_trace),
                 )
-                if (fsq <= res0) and (fsq0 <= res1) and (irst_tc == 1):
+                if tc.store_checkpoint:
                     _dump_time_control_trace(
                         stage="checkpoint",
                         iter2=int(iter2),
@@ -13356,19 +13432,13 @@ def solve_fixed_boundary_residual_iter(
                         res0=float(res0),
                         res1=float(res1),
                         time_step=float(time_step),
-                        irst=int(irst_tc),
+                        irst=int(irst_trace),
                     )
                     state_checkpoint = state
                     _maybe_dump_checkpoint(
                         iter_idx=int(iter2), fsq=float(fsq), fsq0=float(fsq0), res0=float(res0), res1=float(res1)
                     )
-                if (
-                    (irst_tc == 1)
-                    and ((iter2 - iter1) > 10)
-                    and ((fsq > vmec2000_fact * max(res0, 1e-30)) or (fsq0 > vmec2000_fact * max(res1, 1e-30)))
-                ):
-                    irst_tc = 3
-                if irst_tc != 1:
+                if tc.restart:
                     _maybe_dump_time_control(
                         iter_idx=int(iter2),
                         fsq=float(fsq),
@@ -13377,7 +13447,7 @@ def solve_fixed_boundary_residual_iter(
                         res1=float(res1),
                         time_step=float(time_step),
                     )
-                    pre_restart_reason = "bad_jacobian" if irst_tc == 2 else "time_control"
+                    pre_restart_reason = tc.pre_restart_reason
                     state = state_checkpoint
                     vRcc = jnp.zeros_like(vRcc)
                     vRss = jnp.zeros_like(vRss)
