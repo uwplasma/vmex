@@ -200,22 +200,34 @@ The source table is also available as
 QI_optimization Input Coverage
 ------------------------------
 
-The dedicated QI README/docs renderer covers both bundled QI inputs without
+The dedicated QI README/docs renderer covers the reviewed NFP=1, 2, 3, and 4
+QI lanes without
 rerunning optimization jobs.  It reads the existing ``QI_optimization.py``
 outputs, records the final smooth QI metric, legacy QI metric, mirror ratio,
 elongation, iota, aspect, and CPU wall time, and draws initial and final
 Boozer ``|B|`` with line contours only.
 
-To refresh the inputs used by this panel, run both source optimizations before
-rendering:
+To refresh the inputs used by this panel, run the source optimizations before
+rendering.  The NFP=3 case can be selected as ``nfp3_qi``; that is a
+convenience alias for the ``input.QI_stel_seed_3127`` robustness lane.
 
 .. code-block:: bash
 
+   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp1_qi \
+     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp1_qi \
+     python examples/optimization/QI_optimization.py
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp2_qi \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp2_qi \
      python examples/optimization/QI_optimization.py
-   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127 \
+   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp3_qi \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/qi_stel_seed_3127_current_public_final \
+     python examples/optimization/QI_optimization.py
+   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_INPUT=examples/data/input.minimal_seed_nfp4 \
+     VMEC_JAX_QI_LABEL=minimal_nfp4_to_qi_finite_beta_reference \
+     VMEC_JAX_QI_POLICY_CASE=nfp4_qi_finite_beta \
+     VMEC_JAX_QI_REFERENCE_INPUT=examples/data/input.nfp4_QI_finite_beta \
+     VMEC_JAX_QI_REFERENCE_LAMBDAS=1.0 \
+     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/minimal_nfp4_to_qi_finite_beta_reference \
      python examples/optimization/QI_optimization.py
    PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 
@@ -233,6 +245,16 @@ rendering:
      - Aspect
      - Iota
      - CPU min
+   * - ``examples/data/input.nfp1_QI``
+     - ``results/qi_opt/ess/nfp1_qi_direct_office_20260519``
+     - ``1.56e-2``
+     - ``1.48e-3``
+     - ``7.75e-4``
+     - ``0.242/0.30``
+     - ``6.24/8.2``
+     - ``9.999/10.0``
+     - ``0.5369``
+     - ``15.8``
    * - ``examples/data/input.nfp2_QI``
      - ``results/qi_opt/ess/nfp2_qi``
      - ``1.17e-2``
@@ -252,12 +274,22 @@ rendering:
      - ``3.91/8.0``
      - ``3.465/4.0``
      - ``-1.0366``
-     - ``6.2``
+     - ``4.8``
+   * - ``examples/data/input.minimal_seed_nfp4``
+     - ``results/qi_opt/ess/minimal_nfp4_to_qi_finite_beta_reference``
+     - ``2.52e-2``
+     - ``2.56e-3``
+     - ``2.54e-4``
+     - ``0.287/0.35``
+     - ``4.14/8.2``
+     - ``6.011/6.0``
+     - ``-1.2930``
+     - ``1.2``
 
 .. image:: _static/figures/readme_qi_optimization_cases.png
    :width: 100%
    :align: center
-   :alt: QI optimization coverage for NFP=2 QI and seed-3127 inputs
+   :alt: QI optimization coverage for reviewed NFP=1, 2, 3, and 4 inputs
 
 Source table:
 :download:`readme_qi_optimization_cases.csv <_static/figures/readme_qi_optimization_cases.csv>`.

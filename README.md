@@ -138,8 +138,9 @@ Run one of those cases with:
 PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp2_qi python examples/optimization/QI_optimization.py
 ```
 
-Use `VMEC_JAX_QI_RUN_CASE=nfp1_qi`, `nfp2_qi`, `qi_stel_seed_3127`, or
-`nfp4_qi_finite_beta`. For a new same-NFP seed, set `VMEC_JAX_QI_INPUT` and,
+Use `VMEC_JAX_QI_RUN_CASE=nfp1_qi`, `nfp2_qi`, `nfp3_qi` (alias for the
+`qi_stel_seed_3127` NFP=3 robustness lane), or `nfp4_qi_finite_beta`.
+For a new same-NFP seed, set `VMEC_JAX_QI_INPUT` and,
 when available, `VMEC_JAX_QI_REFERENCE_INPUT`; for example the NFP=4 minimal
 seed row uses `VMEC_JAX_QI_INPUT=examples/data/input.minimal_seed_nfp4` and
 `VMEC_JAX_QI_REFERENCE_INPUT=examples/data/input.nfp4_QI_finite_beta`. Full
