@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -313,6 +314,80 @@ def test_final_flux_profiles_from_state_fast_exit_branches(monkeypatch):
         )
         == (flux, prof)
     )
+
+
+def test_final_flux_profiles_from_state_handles_no_jax_and_empty_axis(monkeypatch):
+    import vmec_jax.vmec_bcovar as bcovar
+    import vmec_jax.vmec_residue as residue
+    import vmec_jax.wout as wout_module
+
+    class _BadArray:
+        def __array__(self, dtype=None):
+            del dtype
+            raise TypeError("synthetic conversion failure")
+
+    original_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "jax":
+            raise RuntimeError("jax unavailable")
+        return original_import(name, *args, **kwargs)
+
+    ns = 0
+    static = SimpleNamespace(
+        s=np.asarray([], dtype=float),
+        modes=SimpleNamespace(m=np.asarray([0]), n=np.asarray([0])),
+        cfg=SimpleNamespace(nfp=1, mpol=1, ntor=0, lasym=False),
+        grid=SimpleNamespace(theta=np.asarray([0.0]), zeta=np.asarray([0.0])),
+        trig_vmec=object(),
+    )
+    state = SimpleNamespace(
+        Rcos=_BadArray(),
+        Rsin=np.zeros((ns, 1)),
+        Zcos=np.zeros((ns, 1)),
+        Zsin=np.zeros((ns, 1)),
+        Lcos=np.zeros((ns, 1)),
+        Lsin=np.zeros((ns, 1)),
+    )
+    flux = FluxProfiles(
+        phipf=np.asarray([], dtype=float),
+        chipf=np.asarray([], dtype=float),
+        phips=np.asarray([], dtype=float),
+        signgs=1,
+        lamscale=np.asarray(1.0),
+    )
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    monkeypatch.setattr(driver, "boundary_from_indata", lambda *_args, **_kwargs: SimpleNamespace(R_cos=np.asarray([1.0])))
+    monkeypatch.setattr(wout_module, "_icurv_full_mesh_from_indata", lambda **_kwargs: np.asarray([], dtype=float))
+    monkeypatch.setattr(wout_module, "_chipf_from_chips", lambda chips: np.asarray(chips, dtype=float))
+    monkeypatch.setattr(driver, "_iotaf_from_iotas", lambda iotas, *, lrfp: np.asarray(iotas, dtype=float))
+    monkeypatch.setattr(residue, "vmec_pwint_from_trig", lambda *_args, **_kwargs: np.zeros((ns, 1, 1)))
+    monkeypatch.setattr(
+        bcovar,
+        "vmec_bcovar_half_mesh_from_wout",
+        lambda **_kwargs: SimpleNamespace(
+            jac=SimpleNamespace(sqrtg=np.zeros((ns, 1, 1))),
+            guu=np.zeros((ns, 1, 1)),
+            guv=np.zeros((ns, 1, 1)),
+            bsupu=np.zeros((ns, 1, 1)),
+            bsupv=np.zeros((ns, 1, 1)),
+        ),
+    )
+
+    flux_out, prof_out = driver._final_flux_profiles_from_state(
+        indata=_Input(NCURR=1),
+        static_in=static,
+        state=state,
+        signgs=1,
+        flux_local=flux,
+        prof_local={"pressure": np.asarray([], dtype=float)},
+        pressure_local=np.asarray([], dtype=float),
+    )
+
+    assert flux_out.chipf.size == 0
+    assert prof_out["iota"].size == 0
+    assert prof_out["iotaf"].size == 0
 
 
 def test_write_wout_from_fixed_boundary_run_creates_parent_and_delegates(monkeypatch, tmp_path):

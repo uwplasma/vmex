@@ -150,6 +150,12 @@ def test_allocate_integer_budget_clamps_inputs_and_distributes_remainder():
     assert driver._allocate_integer_budget(total=5, weights=[0, 0, 0]) == [0, 0, 5]
 
 
+def test_as_list_like_tolerates_broken_numpy_type_check(monkeypatch):
+    monkeypatch.setattr(driver.np, "ndarray", object())
+
+    assert driver._as_list_like(object()) is None
+
+
 def test_accelerated_cli_budget_helpers_scale_total_and_weight_stages():
     assert driver._accelerated_cli_budgeted_total_iters(total_budget=100, ns_stages=[9, 36]) == 50
     assert driver._accelerated_cli_budgeted_total_iters(total_budget=0, ns_stages=[4]) == 1
@@ -276,6 +282,26 @@ def test_stage_switch_reason_from_progress_reports_only_actionable_misses():
             remaining_budget=10,
         )
         == "nondecreasing_total_fsq"
+    )
+    assert (
+        driver._stage_switch_reason_from_progress(
+            start_total_fsq=10.0,
+            best_total_fsq=0.5,
+            target_total_fsq=1.0,
+            chunk_iters=2,
+            remaining_budget=10,
+        )
+        is None
+    )
+    assert (
+        driver._stage_switch_reason_from_progress(
+            start_total_fsq=0.0,
+            best_total_fsq=-1.0,
+            target_total_fsq=0.0,
+            chunk_iters=2,
+            remaining_budget=10,
+        )
+        is None
     )
     assert (
         driver._stage_switch_reason_from_progress(

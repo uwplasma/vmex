@@ -587,6 +587,181 @@ def test_compilation_cache_falls_back_to_tmp_when_default_cache_is_unwritable(mo
     assert cache_calls == ["/tmp/vmec_jax/jax_compilation_cache"]
 
 
+@pytest.mark.parametrize(
+    ("cache_env", "disable_env", "cache_dir"),
+    [
+        ("0", "", None),
+        ("", "1", None),
+        ("", "", "disabled"),
+    ],
+)
+def test_compilation_cache_short_circuits_without_jax_cache_setup(
+    monkeypatch,
+    cache_env,
+    disable_env,
+    cache_dir,
+) -> None:
+    import vmec_jax._compat as compat
+    from jax.experimental.compilation_cache import compilation_cache
+
+    cache_calls = []
+
+    monkeypatch.setenv("VMEC_JAX_COMPILATION_CACHE", cache_env)
+    monkeypatch.setenv("VMEC_JAX_DISABLE_COMPILATION_CACHE", disable_env)
+    if cache_dir is None:
+        monkeypatch.setattr(
+            compat,
+            "_default_compilation_cache_dir",
+            lambda: pytest.fail("cache dir should not be resolved"),
+        )
+    else:
+        monkeypatch.setattr(compat, "_default_compilation_cache_dir", lambda: cache_dir)
+    monkeypatch.setattr(compilation_cache, "set_cache_dir", lambda value: cache_calls.append(value))
+    _patch_lightweight_driver_core(monkeypatch)
+
+    run = run_fixed_boundary(
+        _example_input(),
+        use_initial_guess=True,
+        verbose=False,
+        vmec_project=False,
+        grid=_small_grid(),
+    )
+
+    assert run.state is not None
+    assert cache_calls == []
+
+
+def test_run_fixed_boundary_continues_when_enable_x64_fails(monkeypatch) -> None:
+    import vmec_jax._compat as compat
+
+    monkeypatch.setenv("VMEC_JAX_COMPILATION_CACHE", "0")
+    monkeypatch.setattr(compat, "enable_x64", lambda _value: (_ for _ in ()).throw(RuntimeError("x64 unavailable")))
+    _patch_lightweight_driver_core(monkeypatch)
+
+    run = run_fixed_boundary(
+        _example_input(),
+        use_initial_guess=True,
+        verbose=False,
+        vmec_project=False,
+        grid=_small_grid(),
+    )
+
+    assert run.state is not None
+
+
+@pytest.mark.parametrize(
+    ("env_name", "expected"),
+    [
+        ("VMEC_JAX_ENABLE_AXIS_INFER", True),
+        ("VMEC_JAX_DISABLE_AXIS_INFER", False),
+    ],
+)
+def test_vmec2000_axis_inference_env_toggles_initial_guess(monkeypatch, env_name, expected) -> None:
+    captured = {}
+
+    monkeypatch.setenv("VMEC_JAX_COMPILATION_CACHE", "0")
+    monkeypatch.setenv(env_name, "1")
+    _patch_lightweight_driver_core(monkeypatch)
+
+    def fake_initial_guess(static, _boundary, _indata, **kwargs):
+        captured["infer_axis_if_missing"] = kwargs["infer_axis_if_missing"]
+        return _fake_state(static.cfg.ns)
+
+    monkeypatch.setattr(driver, "initial_guess_from_boundary", fake_initial_guess)
+
+    run = run_fixed_boundary(
+        _example_input(),
+        solver="vmec2000_iter",
+        use_initial_guess=True,
+        verbose=False,
+        performance_mode=False,
+        vmec_project=False,
+        grid=_small_grid(),
+    )
+
+    assert run.state is not None
+    assert captured["infer_axis_if_missing"] is expected
+
+
+def test_solver_device_lookup_failure_falls_back_to_regular_run(monkeypatch) -> None:
+    import jax
+
+    calls = []
+
+    def fake_solver(state, static, **kwargs):
+        calls.append({"ns": int(static.cfg.ns), "max_iter": int(kwargs["max_iter"])})
+        return _result(state, max_iter=int(kwargs["max_iter"]), fsq=1.0e-16, converged=True)
+
+    monkeypatch.setenv("VMEC_JAX_COMPILATION_CACHE", "0")
+    monkeypatch.setenv("VMEC_JAX_DISABLE_JIT_INIT", "1")
+    monkeypatch.setattr(jax, "devices", lambda _name: (_ for _ in ()).throw(RuntimeError("device lookup failed")))
+    _patch_lightweight_driver_core(monkeypatch)
+    monkeypatch.setattr(driver, "solve_fixed_boundary_residual_iter", fake_solver)
+    monkeypatch.setattr(solve_module, "solve_fixed_boundary_residual_iter", fake_solver)
+
+    run = run_fixed_boundary(
+        _example_input(),
+        solver="vmec2000_iter",
+        solver_mode="parity",
+        solver_device="gpu",
+        max_iter=1,
+        verbose=False,
+        multigrid=False,
+        grid=_small_grid(),
+    )
+
+    assert calls == [{"ns": run.static.cfg.ns, "max_iter": 1}]
+    assert "solver_device" not in run.result.diagnostics
+
+
+def test_run_fixed_boundary_accepts_tuple_array_and_scalar_stage_inputs(monkeypatch) -> None:
+    class _SyntheticInput:
+        def get(self, key, default=None):
+            values = {
+                "NS_ARRAY": (5,),
+                "NITER_ARRAY": np.asarray([2]),
+                "FTOL_ARRAY": 1.0e-8,
+            }
+            return values.get(key, default)
+
+        def get_bool(self, key, default=False):
+            del key
+            return bool(default)
+
+        def get_float(self, key, default=0.0):
+            return 1.0e-8 if key == "FTOL" else float(default)
+
+        def get_int(self, key, default=0):
+            return 2 if key == "NITER" else int(default)
+
+    cfg = SimpleNamespace(
+        ns=5,
+        mpol=2,
+        ntor=0,
+        nfp=1,
+        ntheta=4,
+        nzeta=1,
+        lfreeb=False,
+        lasym=False,
+        lthreed=False,
+    )
+
+    monkeypatch.setenv("VMEC_JAX_COMPILATION_CACHE", "0")
+    _patch_lightweight_driver_core(monkeypatch)
+    monkeypatch.setattr(driver, "load_config", lambda _path: (cfg, _SyntheticInput()))
+
+    run = run_fixed_boundary(
+        _example_input(),
+        use_initial_guess=True,
+        verbose=False,
+        vmec_project=False,
+        grid=_small_grid(),
+    )
+
+    assert run.state is not None
+    assert run.cfg is cfg
+
+
 def test_driver_history_and_flux_profile_helper_branches(monkeypatch) -> None:
     import vmec_jax.vmec_bcovar as bcovar_module
     import vmec_jax.vmec_residue as residue_module
@@ -715,6 +890,64 @@ def test_cli_finisher_accepts_strict_residuals_even_when_converged_flag_is_false
     assert diag["converged"] is True
     assert diag["converged_strict"] is True
     assert np.asarray(diag["cli_fixed_boundary_finish_budgets"]).tolist() == []
+    assert diag["cli_fixed_boundary_full_parity_fallback"] is False
+
+
+def test_cli_finisher_records_noop_finish_for_already_converged_run(monkeypatch, tmp_path) -> None:
+    input_path = _write_input(
+        tmp_path,
+        "input.already_converged_finish",
+        """
+  LFREEB = F
+  NFP = 1
+  MPOL = 5
+  NTOR = 0
+  NS = 7
+  NITER = 3
+  FTOL = 1e-10
+  PHIEDGE = 1.0
+  RBC(0,0) = 1.0
+  ZBS(1,0) = 0.1
+""",
+    )
+    calls = []
+
+    def fake_solver(state, static, **kwargs):
+        del static
+        calls.append(int(kwargs["max_iter"]))
+        return _result(
+            state,
+            max_iter=int(kwargs["max_iter"]),
+            fsq=1.0e-12,
+            converged=True,
+            diagnostics={
+                "ftol": float(kwargs["ftol"]),
+                "final_fsqr": 1.0e-12,
+                "final_fsqz": 2.0e-12,
+                "final_fsql": 3.0e-12,
+            },
+        )
+
+    monkeypatch.setenv("VMEC_JAX_COMPILATION_CACHE", "0")
+    monkeypatch.setenv("VMEC_JAX_DISABLE_JIT_INIT", "1")
+    _patch_lightweight_driver_core(monkeypatch)
+    monkeypatch.setattr(driver, "solve_fixed_boundary_residual_iter", fake_solver)
+    monkeypatch.setattr(solve_module, "solve_fixed_boundary_residual_iter", fake_solver)
+
+    run = run_fixed_boundary(
+        input_path,
+        solver="vmec2000_iter",
+        solver_mode="parity",
+        verbose=False,
+        cli_fixed_boundary_mode=True,
+    )
+
+    assert calls == [3]
+    diag = run.result.diagnostics
+    assert diag["converged"] is True
+    assert diag["converged_strict"] is True
+    assert diag["converged_by_total_fsq"] is True
+    assert np.asarray(diag["cli_fixed_boundary_finish_modes"]).tolist() == []
     assert diag["cli_fixed_boundary_full_parity_fallback"] is False
 
 
@@ -994,6 +1227,74 @@ def test_accelerated_single_grid_runs_explicit_staged_followup(monkeypatch, tmp_
     assert np.asarray(diag["cli_fixed_boundary_staged_followup_ns"]).tolist() == [5, 9]
     assert np.asarray(diag["cli_fixed_boundary_staged_followup_niter"]).tolist() == [2, 3]
     assert np.asarray(diag["cli_fixed_boundary_staged_followup_modes"]).tolist() == ["parity", "accelerated"]
+    assert diag["converged"] is True
+
+
+def test_accelerated_staged_followup_skips_zero_budget_stage(monkeypatch, tmp_path) -> None:
+    input_path = _write_input(
+        tmp_path,
+        "input.zero_stage_followup",
+        """
+  LFREEB = F
+  LASYM = F
+  NFP = 2
+  MPOL = 5
+  NTOR = 1
+  NS = 9
+  NITER = 3
+  FTOL = 1e-14
+  NS_ARRAY = 5 9
+  NITER_ARRAY = 0 3
+  FTOL_ARRAY = 1e-14 1e-14
+  PHIEDGE = 1.0
+  RBC(0,0) = 1.0
+  ZBS(1,0) = 0.1
+""",
+    )
+    calls = []
+
+    def fake_solver(state, static, **kwargs):
+        idx = len(calls)
+        calls.append({"ns": int(static.cfg.ns), "max_iter": int(kwargs["max_iter"]), "use_scan": bool(kwargs["use_scan"])})
+        fsq = 1.0e-16 if idx == 1 else 1.0e-3
+        return _result(
+            state,
+            max_iter=int(kwargs["max_iter"]),
+            fsq=fsq,
+            converged=idx == 1,
+            diagnostics={
+                "ftol": float(kwargs["ftol"]),
+                "use_scan": bool(kwargs["use_scan"]),
+                "final_fsqr": fsq,
+                "final_fsqz": 0.0,
+                "final_fsql": 0.0,
+            },
+        )
+
+    monkeypatch.setenv("VMEC_JAX_COMPILATION_CACHE", "0")
+    monkeypatch.setenv("VMEC_JAX_DISABLE_JIT_INIT", "1")
+    _patch_lightweight_driver_core(monkeypatch)
+    monkeypatch.setattr(driver, "solve_fixed_boundary_residual_iter", fake_solver)
+    monkeypatch.setattr(solve_module, "solve_fixed_boundary_residual_iter", fake_solver)
+
+    run = run_fixed_boundary(
+        input_path,
+        solver="vmec2000_iter",
+        solver_mode="accelerated",
+        verbose=False,
+        multigrid=False,
+        cli_fixed_boundary_mode=True,
+    )
+
+    assert calls == [
+        {"ns": 9, "max_iter": 3, "use_scan": True},
+        {"ns": 9, "max_iter": 3, "use_scan": True},
+    ]
+    diag = run.result.diagnostics
+    assert diag["cli_fixed_boundary_staged_followup_used"] is True
+    assert np.asarray(diag["cli_fixed_boundary_staged_followup_ns"]).tolist() == [5, 9]
+    assert np.asarray(diag["cli_fixed_boundary_staged_followup_niter"]).tolist() == [0, 3]
+    assert np.asarray(diag["cli_fixed_boundary_staged_followup_modes"]).tolist() == ["accelerated"]
     assert diag["converged"] is True
 
 
