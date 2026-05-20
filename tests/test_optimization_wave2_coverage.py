@@ -393,6 +393,7 @@ def test_residual_linear_operator_products_use_tape_and_residual_transposes(monk
     assert opt._profile["linear_operator_matvec"]["count"] == 1
     assert opt._profile["linear_operator_matmat"]["count"] == 1
     assert opt._profile["linear_operator_rmatvec"]["count"] == 1
+    assert opt._profile["linear_operator_initial_transpose"]["count"] == 1
 
     def residual_cotangent_from_packed(_packed_state, _layout, cotangent):
         return jnp.asarray([10.0 * cotangent[0], 20.0 * cotangent[1], 0.0, 0.0, 0.0, 0.0], dtype=jnp.float64)
@@ -400,6 +401,7 @@ def test_residual_linear_operator_products_use_tape_and_residual_transposes(monk
     residuals_fn._state_cotangent_from_packed = residual_cotangent_from_packed
     op_with_helper = opt.residual_linear_operator(np.asarray([1.0, 2.0]))
     np.testing.assert_allclose(op_with_helper.rmatvec(np.asarray([2.0, 3.0])), [20.0, 60.0])
+    assert opt._profile["linear_operator_initial_transpose"]["count"] == 2
 
 
 def test_qh_and_qs_residual_cotangent_operator_factories(monkeypatch) -> None:

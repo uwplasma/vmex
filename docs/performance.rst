@@ -1098,6 +1098,16 @@ batched ``J @ X`` products and cached split residual-block ``J.Tv`` products,
 so the next optimization target is the reverse VMEC tape replay and the number
 of LSMR iterations, not replacing the production optimizer policy prematurely.
 
+A 2026-05-20 matrix-free cleanup removed one redundant initialization AD pass:
+``residual_linear_operator`` now obtains the frozen-axis initial-state
+transpose from the already-created ``jax.linearize`` object instead of tracing a
+second ``jax.vjp`` through the same initial-state graph.  A cold QA
+``max_mode=1`` CPU smoke with ``inner_max_iter=trial_max_iter=4`` reported
+``linear_operator_initial_transpose = 0.78 s`` and selected
+``exact_tape_build_solve_call`` as the next patch target, confirming that
+remaining first-call cost is in the accepted VMEC tape solve/replay path rather
+than duplicated initial-state autodiff.
+
 April 2026 local CPU diagnostics with ``inner_max_iter=trial_max_iter=300`` and
 ``max_nfev=2``:
 

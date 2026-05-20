@@ -1,6 +1,6 @@
 # VMEC-JAX Research-Grade Roadmap
 
-Last updated: 2026-05-19
+Last updated: 2026-05-20
 Primary branch: `main`
 Baseline release: `v0.0.11`
 
@@ -397,7 +397,7 @@ release, and the QI optimization driver split:
   soft-wall guard for mirror/elongation cleanup that preserves an accepted QI
   basin. The remaining open cleanup is running and tuning the guarded mirror
   schedule across unrelated seeds.
-- CPU/GPU performance: 94%. Backend-adaptive replay bucketing, scalar-gradient
+- CPU/GPU performance: 95%. Backend-adaptive replay bucketing, scalar-gradient
   tangent reuse, detailed timing, and GPU-only preconditioner-output fusion are
   in place. Hot-path algebra and CPU/GPU fusion gating are now covered by
   focused CPU-only regressions. The exact-Jacobian residual tangent helper now
@@ -413,7 +413,11 @@ release, and the QI optimization driver split:
   GPU because May 2026 `office` profiles showed converged GPU non-scan solves
   faster than scan across QH, QA, QI, and LASYM examples. A fused
   residual-projected replay experiment was profiled and rejected because it was
-  neutral on non-LASYM QH and slower on chunked LASYM CPU callbacks. The next
+  neutral on non-LASYM QH and slower on chunked LASYM CPU callbacks. The
+  matrix-free linear-operator path now reuses the transpose of the setup
+  `jax.linearize` object instead of tracing a second initial-state VJP, and the
+  profile comparator exposes the new `linear_operator_initial_transpose`
+  bucket. The next
   performance blockers remain larger-mode accepted-point replay cost and dense
   residual-tangent projection.
 - VMEC parity and physics gates: 99%. Required-tier bundled gates now cover
@@ -1236,3 +1240,9 @@ Defer beyond the current cycle:
   diagnostics, exposed scan-trial timing subphases, and changed the VMEC2000
   scan-runner cache to reuse compiled scan loops across perturbed fixed-boundary
   trial points by carrying boundary edge rows dynamically.
+- 2026-05-20: Reduced matrix-free exact-optimizer setup cost by deriving the
+  initial-state transpose from the existing `jax.linearize` object instead of
+  tracing a second initial-state VJP. A cold QA `max_mode=1` CPU linear-operator
+  smoke with `inner_max_iter=trial_max_iter=4` completed in `24.0 s`, reported
+  `linear_operator_initial_transpose = 0.78 s`, and selected
+  `exact_tape_build_solve_call` as the next patch target.
