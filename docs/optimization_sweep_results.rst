@@ -210,22 +210,30 @@ the seed-3127 NFP=3 lane uses target aspect 4, and the NFP=4 row uses the
 minimal seed plus a same-NFP finite-beta QI reference-family proposal.
 Finite-beta NFP=4 remains a separate stress fixture.
 
-To refresh the inputs used by this panel, run the source optimizations before
-rendering.  The NFP=3 case can be selected as ``nfp3_qi``; that is a
-convenience alias for the ``input.QI_stel_seed_3127`` robustness lane.
+To refresh the exact rows used by this panel, run the source optimizations with
+the target-aspect and output-dir overrides below before rendering.  Bare
+``VMEC_JAX_QI_RUN_CASE=...`` commands use the current aspect-6 public defaults;
+the explicit overrides reproduce the reviewed figure rows.  The NFP=3 case can
+be selected as ``nfp3_qi``; that is a convenience alias for the
+``input.QI_stel_seed_3127`` robustness lane.
 
 .. code-block:: bash
 
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp1_qi \
-     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp1_qi \
+     VMEC_JAX_QI_TARGET_ASPECT=10 \
+     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp1_qi_direct_office_20260519 \
      python examples/optimization/QI_optimization.py
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp2_qi \
+     VMEC_JAX_QI_TARGET_ASPECT=10 \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp2_qi \
      python examples/optimization/QI_optimization.py
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp3_qi \
+     VMEC_JAX_QI_TARGET_ASPECT=4 \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516 \
      python examples/optimization/QI_optimization.py
-   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi python examples/optimization/QI_optimization.py
+   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi \
+     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/minimal_nfp4_to_qi_finite_beta_reference \
+     python examples/optimization/QI_optimization.py
    PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 
 .. list-table::

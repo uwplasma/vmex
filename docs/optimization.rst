@@ -100,7 +100,7 @@ decks: QA blends the active low-order RBC/ZBS space 25% toward
 This gives the transform residual a usable derivative before local exact
 optimization and is recorded in ``showcase_case.json``.
 
-The bounded common-seed showcase runner maps those inputs to QI NFP=1/2/3,
+The bounded common-seed showcase runner maps those inputs to QI NFP=1/2/3/4,
 QA NFP=2, QH NFP=4, and QP NFP=2.  The QI rows use
 ``examples/optimization/qi_staged_runner.py`` to call the standalone
 ``QI_optimization.py`` staged/reference-family policy, so they exercise the
@@ -122,8 +122,9 @@ existing successful ``showcase_case.json`` rows are reused, which can leave old
 rows on disk; the renderer skips known-stale rows by default and
 ``--include-stale`` should be reserved for debugging.  The current QI dispatch
 writes staged-run outputs under ``.../qi_nfp1/continuation/nfp1_qi``,
-``.../qi_nfp2/continuation/nfp2_qi``, and
-``.../qi_nfp3/continuation/qi_stel_seed_3127``.  Any QI showcase rows under
+``.../qi_nfp2/continuation/nfp2_qi``,
+``.../qi_nfp3/continuation/qi_stel_seed_3127``, and
+``.../qi_nfp4/continuation/nfp4_qi``.  Any QI showcase rows under
 ``.../qi_nfp*/continuation/qp_preseed/...`` predate this dispatch and should
 not be treated as current staged-QI evidence.  Any QA/QP showcase rows without
 ``reference_preseed`` provenance also predate the current common-seed policy.
@@ -172,19 +173,28 @@ then run the bounded robustness probe or select a ``RUN_CASE`` in
    PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py --quick --prefine-probes plan --prefine-manifest results/qi_seed_audit/prefine_manifest.json --prefine-output-dir results/qi_seed_audit/prefine_probes
    PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_seed_robustness.py
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp1_qi \
+     VMEC_JAX_QI_TARGET_ASPECT=10 \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp1_qi_direct_office_20260519 \
      python examples/optimization/QI_optimization.py
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp2_qi \
+     VMEC_JAX_QI_TARGET_ASPECT=10 \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp2_qi \
      python examples/optimization/QI_optimization.py
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp3_qi \
+     VMEC_JAX_QI_TARGET_ASPECT=4 \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516 \
      python examples/optimization/QI_optimization.py
-   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi python examples/optimization/QI_optimization.py
+   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi \
+     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/minimal_nfp4_to_qi_finite_beta_reference \
+     python examples/optimization/QI_optimization.py
 
 The second audit command uses the far-seed QI gate convention from
 ``QI_optimization.py``: legacy QI below ``2e-3`` and smooth differentiable QI
 below ``5e-3``.
+
+The bare ``VMEC_JAX_QI_RUN_CASE=...`` commands use the current aspect-6 public
+defaults.  The explicit target-aspect and output-dir overrides above reproduce
+the reviewed rows currently embedded in the README/docs figure.
 
 The README/docs QI coverage figure is rendered from existing reviewed
 ``QI_optimization.py`` outputs.  These rows are case-specific gate checks, not

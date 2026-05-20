@@ -133,7 +133,7 @@ QI proposal. Finite-beta NFP=4 remains documented as a separate stress fixture.
   <img src="docs/_static/figures/readme_qi_optimization_cases.png" width="980" />
 </p>
 
-Reproduce the four QI lanes with:
+Run the current four public QI case selectors with:
 
 ```bash
 PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp1_qi python examples/optimization/QI_optimization.py

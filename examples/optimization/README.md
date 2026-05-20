@@ -79,7 +79,7 @@ recorded in `showcase_case.json`; rows that lack that provenance predate the
 current seed-robustness policy.
 
 The bounded common-seed showcase is a stress test, not a best-result table.  It
-maps the minimal seeds to QI NFP=1/2/3, QA NFP=2, QH NFP=4, and QP NFP=2, then
+maps the minimal seeds to QI NFP=1/2/3/4, QA NFP=2, QH NFP=4, and QP NFP=2, then
 renders the failure-revealing objective panel used by the docs.  The QI rows
 dispatch through `QI_optimization.py` via `qi_staged_runner.py`, so the common
 minimal seeds use the same staged/reference-family QI policy as the standalone
@@ -186,7 +186,7 @@ remain available for custom inspection.
 - `QA_optimization.py`: recommended quasi-axisymmetric fixed-boundary optimization.
 - `QH_optimization.py`: recommended quasi-helical fixed-boundary optimization.
 - `QP_optimization.py`: quasi-poloidal fixed-boundary optimization from the NFP=2 QI seed.
-- `QI_optimization.py`: recommended quasi-isodynamic optimization with Boozer-space QI metrics, mirror-ratio and elongation penalties, repeated same-mode continuation, and ESS. It is a staged driver: each phase can change optimizer, mode sequence, weights, and promotion gates, and only exact independent diagnostics decide whether a stage is promoted. Set `VMEC_JAX_QI_RUN_CASE` or change the top-level `RUN_CASE` to run the bundled `nfp1_qi`, `nfp2_qi`, `qi_stel_seed_3127`, or diagnostic `nfp4_qh_warm_to_qi` stress case.
+- `QI_optimization.py`: recommended quasi-isodynamic optimization with Boozer-space QI metrics, mirror-ratio and elongation penalties, repeated same-mode continuation, and ESS. It is a staged driver: each phase can change optimizer, mode sequence, weights, and promotion gates, and only exact independent diagnostics decide whether a stage is promoted. Set `VMEC_JAX_QI_RUN_CASE` or change the top-level `RUN_CASE` to run the bundled `nfp1_qi`, `nfp2_qi`, `nfp3_qi`/`qi_stel_seed_3127`, `nfp4_qi`, or diagnostic `nfp4_qh_warm_to_qi` stress case.
 - `qa_optimization_finite_beta.py`, `qh_optimization_finite_beta.py`, and `qi_optimization_finite_beta.py`:
   finite-beta stage-1 examples with pressure/current-profile terms. These intentionally use
   `FixedBoundaryExactOptimizer` directly because each continuation stage builds custom
@@ -335,7 +335,7 @@ promotion evidence.
 - `generate_qs_ess_sweep.py`: CPU/GPU QA/QH/QP/QI policy sweep over mode continuation, ESS, and maximum boundary mode.
 - `render_qs_ess_publication_panel.py`: render the large optimization atlas and summary tables from sweep outputs.
 - `render_readme_best_optimizations.py`: render the compact README figures and CSV table.
-- `render_qi_readme_cases.py`: render the two-input QI README/docs coverage figure and CSV from existing `QI_optimization.py` outputs, using Boozer `|B|` line contours only.
+- `render_qi_readme_cases.py`: render the NFP=1-4 QI README/docs coverage figure and CSV from existing `QI_optimization.py` outputs, using Boozer `|B|` line contours only.
 - `render_qi_constrained_sweep.py`: render QI-focused constrained-sweep diagnostics.
 
 Example:

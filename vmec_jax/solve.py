@@ -9014,6 +9014,7 @@ def solve_fixed_boundary_residual_iter(
             float(stage_transition_factor),
             float(stage_transition_scale),
             bool(jit_forces_scan),
+            bool(state_only_scan),
             bool(scan_light),
             bool(scan_minimal),
             int(scan_fallback_iters),
@@ -9148,10 +9149,11 @@ def solve_fixed_boundary_residual_iter(
                         carry, hist_pre = _scan_step(carry, jnp.asarray(0, dtype=jnp.int32))
                 except Exception:
                     carry, hist_pre = _scan_step(carry, jnp.asarray(0, dtype=jnp.int32))
-                fsq_min_global_j = jnp.minimum(
-                    fsq_min_global_j,
-                    jnp.min(hist_pre[0] + hist_pre[1] + hist_pre[2]),
-                )
+                if not state_only_scan:
+                    fsq_min_global_j = jnp.minimum(
+                        fsq_min_global_j,
+                        jnp.min(hist_pre[0] + hist_pre[1] + hist_pre[2]),
+                    )
                 if need_print:
                     hist_pre_np = jax.tree_util.tree_map(lambda a: np.asarray(a)[None], hist_pre)
                     hist_parts.append(hist_pre_np)
@@ -9177,10 +9179,11 @@ def solve_fixed_boundary_residual_iter(
                 carry, hist_chunk = runner(carry, it_seq)
                 if scan_timing_enabled and t_device is not None:
                     carry, hist_chunk = _scan_device_run_ready(t_device, (carry, hist_chunk))
-                fsq_min_global_j = jnp.minimum(
-                    fsq_min_global_j,
-                    jnp.min(hist_chunk[0] + hist_chunk[1] + hist_chunk[2]),
-                )
+                if not state_only_scan:
+                    fsq_min_global_j = jnp.minimum(
+                        fsq_min_global_j,
+                        jnp.min(hist_chunk[0] + hist_chunk[1] + hist_chunk[2]),
+                    )
                 if need_print:
                     hist_chunk_np = jax.tree_util.tree_map(lambda a: np.asarray(a), hist_chunk)
                     hist_parts.append(hist_chunk_np)
@@ -9261,20 +9264,25 @@ def solve_fixed_boundary_residual_iter(
                     carry_final, hist_tail = runner(carry_pre, it_seq)
                     if scan_timing_enabled and t_device is not None:
                         carry_final, hist_tail = _scan_device_run_ready(t_device, (carry_final, hist_tail))
-                    hist = jax.tree_util.tree_map(
-                        lambda a, b: jnp.concatenate([a[None], b], axis=0),
-                        hist_pre,
-                        hist_tail,
-                    )
+                    if state_only_scan:
+                        hist = None
+                    else:
+                        hist = jax.tree_util.tree_map(
+                            lambda a, b: jnp.concatenate([a[None], b], axis=0),
+                            hist_pre,
+                            hist_tail,
+                        )
                 else:
                     carry_final = carry_pre
-                    hist = jax.tree_util.tree_map(lambda a: a[None], hist_pre)
+                    hist = None if state_only_scan else jax.tree_util.tree_map(lambda a: a[None], hist_pre)
             else:
                 it_seq = jnp.arange(int(max_iter_scan), dtype=jnp.int32)
                 t_device = time.perf_counter() if scan_timing_enabled else None
                 carry_final, hist = runner(carry_init, it_seq)
                 if scan_timing_enabled and t_device is not None:
                     carry_final, hist = _scan_device_run_ready(t_device, (carry_final, hist))
+                if state_only_scan:
+                    hist = None
         scan_postprocess_start = time.perf_counter() if scan_timing_enabled else None
         if state_only_scan:
             traced = _tree_has_tracer(carry_final.state)
