@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 import vmec_jax.optimization as opt_module
-from vmec_jax.optimization import FixedBoundaryExactOptimizer
+from vmec_jax.optimization import FixedBoundaryExactOptimizer, gauss_newton_least_squares
 from tools.diagnostics import profile_exact_optimizer as exact_profile_tool
 
 
@@ -121,6 +121,115 @@ def test_run_does_not_force_dynamic_replay_bucket(monkeypatch) -> None:
 
     assert result["_history_dump"]["success"] is True
     assert "VMEC_JAX_DYNAMIC_REPLAY_BUCKET" not in os.environ
+
+
+def test_gauss_newton_skips_jacobian_for_exact_zero_residual() -> None:
+    jacobian_calls = []
+
+    def residual(_x):
+        return np.asarray([0.0, 0.0], dtype=float)
+
+    def jacobian(_x):
+        jacobian_calls.append(True)
+        return np.eye(2)
+
+    result = gauss_newton_least_squares(
+        residual,
+        jacobian,
+        np.asarray([1.0, 2.0], dtype=float),
+        max_nfev=3,
+        verbose=0,
+    )
+
+    assert result["success"] is True
+    assert result["nfev"] == 1
+    assert result["njev"] == 0
+    assert jacobian_calls == []
+
+
+def test_gauss_newton_can_skip_exhausted_budget_jacobian(monkeypatch) -> None:
+    monkeypatch.setenv("VMEC_JAX_OPT_SKIP_EXHAUSTED_GN_JACOBIAN", "1")
+
+    def residual(_x):
+        return np.asarray([1.0], dtype=float)
+
+    def jacobian(_x):
+        raise AssertionError("Jacobian replay should not run after residual budget is exhausted")
+
+    result = gauss_newton_least_squares(
+        residual,
+        jacobian,
+        np.asarray([0.0], dtype=float),
+        max_nfev=1,
+        verbose=0,
+    )
+
+    assert result["success"] is False
+    assert result["message"] == "maximum function evaluations exceeded"
+    assert result["nfev"] == 1
+    assert result["njev"] == 0
+    assert result["cost"] == pytest.approx(0.5)
+
+
+def test_run_final_output_reuses_best_exact_residual_when_jacobian_is_skipped(monkeypatch) -> None:
+    monkeypatch.setenv("VMEC_JAX_OPT_SKIP_EXHAUSTED_GN_JACOBIAN", "1")
+    residual = np.asarray([0.5, 3.0, 4.0], dtype=float)
+    state = object()
+
+    opt = FixedBoundaryExactOptimizer.__new__(FixedBoundaryExactOptimizer)
+    opt._history = []
+    opt._profile = {}
+    opt._trial_residual_cache = OrderedDict()
+    opt._exact_cache = {b"accepted": (state, {})}
+    opt._exact_state_cache = {b"accepted": state}
+    opt._exact_state_key_by_id = {id(state): b"accepted"}
+    opt._exact_residual_cache = {}
+    opt._exact_jacobian_cache = {}
+    opt._initial_tangent_cache = {}
+    opt._last_jacobian_key = [None]
+    opt._last_jacobian_residual = None
+    opt._last_jacobian_source = "exact_tape_replay"
+    opt._static = object()
+    opt._inner_max_iter = 0
+    opt._inner_ftol = 0.0
+    opt._trial_max_iter = 0
+    opt._trial_ftol = 0.0
+    opt._solver_device_name = None
+    opt._scan_exact_path = "tape"
+    opt._exact_cache_key = lambda _params: b"accepted"
+    opt._aspect_target = 7.0
+    opt._aspect_weight = 2.0
+    opt._n_non_qs = 1
+    opt._n_qs = None
+    opt._has_residual_block_metadata = True
+    opt._callback_trace_enabled = False
+    opt._callback_trace = []
+    opt._callback_point_ids = {}
+    opt._callback_previous_key = None
+    opt._post_jacobian_clear = lambda *args, **kwargs: None
+    opt._solve_exact_with_tape = lambda _params, return_payload=False: (state, {}) if return_payload else state
+    opt._cached_exact_state = lambda _params: state
+    opt.residual_fun = lambda _params: residual.copy()
+    opt.forward_residual_fun = lambda _params: (_ for _ in ()).throw(
+        AssertionError("line-search trial residual should not run")
+    )
+    opt.jacobian_fun = lambda _params: (_ for _ in ()).throw(
+        AssertionError("accepted-point Jacobian replay should be skipped")
+    )
+    opt._evaluate_residuals_from_state = lambda _state: (_ for _ in ()).throw(
+        AssertionError("final residual should come from best exact residual")
+    )
+    opt._qs_total_from_state_fn = lambda _state: (_ for _ in ()).throw(
+        AssertionError("QS state callback should not run with residual metadata")
+    )
+
+    result = opt.run(np.asarray([0.0]), method="gauss_newton", max_nfev=1, verbose=0)
+
+    assert result["success"] is False
+    assert result["njev"] == 0
+    assert result["_history_dump"]["objective_final"] == pytest.approx(float(np.dot(residual, residual)))
+    assert result["_history_dump"]["qs_final"] == pytest.approx(25.0)
+    assert result["_history_dump"]["aspect_final"] == pytest.approx(7.25)
 
 
 def test_exact_optimizer_profile_parser_accepts_cache_budget_args() -> None:

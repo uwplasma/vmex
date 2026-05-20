@@ -82,6 +82,11 @@ def _linear_operator_matrix_arg(value, *, rows: int, name: str) -> np.ndarray:
     return arr
 
 
+def _skip_exhausted_gauss_newton_jacobian() -> bool:
+    flag = os.getenv("VMEC_JAX_OPT_SKIP_EXHAUSTED_GN_JACOBIAN", "").strip().lower()
+    return flag in ("1", "true", "yes", "on")
+
+
 def _coeff_label(prefix: str, m: int, n: int) -> str:
     n_str = f"{n:+d}".replace("+", "")
     return f"{prefix}{m}{n_str}"
@@ -579,6 +584,20 @@ def gauss_newton_least_squares(
             residual = accepted_residual
             accepted_residual = None
         cost = 0.5 * float(np.dot(residual, residual))
+        if cost == 0.0:
+            success = True
+            message = "`gtol` termination condition is satisfied."
+            accepted_cost = cost
+            accepted_step_norm = 0.0
+            if verbose:
+                print(f"{iteration:12d}{nfev:16d}{cost:13.4e}{0.0:18.2e}{0.0:16.2e}{0.0:16.2e}")
+            break
+        if nfev >= int(max_nfev) and _skip_exhausted_gauss_newton_jacobian():
+            accepted_cost = cost
+            accepted_step_norm = 0.0
+            if verbose:
+                print(f"{iteration:12d}{nfev:16d}{cost:13.4e}{0.0:18.2e}{0.0:16.2e}{float('nan'):16.2e}")
+            break
 
         jacobian = np.asarray(jacobian_fun(x), dtype=float)
         njev += 1
@@ -3926,6 +3945,14 @@ class FixedBoundaryExactOptimizer:
 
         final_key = self._exact_cache_key(result["x"])
         res_final = self._cached_exact_residual(cache_key=final_key)
+        if (
+            res_final is None
+            and best_exact_params is not None
+            and best_exact_residual is not None
+            and final_key == self._exact_cache_key(best_exact_params)
+        ):
+            res_final = np.asarray(best_exact_residual, dtype=float).reshape(-1)
+            self._remember_exact_residual(final_key, res_final)
         state_final = self._cached_exact_state(result["x"])
         if state_final is None:
             try:
