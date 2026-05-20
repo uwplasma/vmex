@@ -865,13 +865,18 @@ Jacobian path, which still linearizes the raw residual function where
 derivatives are required.
 
 The accepted-point exact tape path now enables precomputed Thomas coefficients
-for accelerator backends only.  This is intentionally not applied to trial
-scan solves: the same switch made cold GPU trial scans slower.  On ``office``
-with JAX 0.6.2 and one RTX A4000, two perturbed QA ``max_mode=1`` dense
-Jacobian callbacks dropped from ``88.9 s`` total to ``72.6 s`` total, while the
-Jacobian Frobenius norms matched to about ``7.5e-11`` relative difference.
-Set ``VMEC_JAX_OPT_EXACT_TRIDI_PRECOMPUTE=0`` to disable this accepted-point
-optimization for diagnostics, or ``=1`` to force it on a specific backend.
+for small-DOF accelerator tapes only.  This is intentionally not applied to
+trial scan solves: the same switch made cold GPU trial scans slower.  On
+``office`` with JAX 0.6.2 and one RTX A4000, two perturbed QA ``max_mode=1``
+dense Jacobian callbacks dropped from ``88.9 s`` total to ``72.6 s`` total,
+while the Jacobian Frobenius norms matched to about ``7.5e-11`` relative
+difference.  A later QH ``max_mode=2`` profile with 24 boundary DOFs showed the
+opposite tradeoff: replaying the larger tape outweighed the preconditioner
+savings.  The default therefore enables this optimization only up to 12
+optimization DOFs.  Set ``VMEC_JAX_OPT_EXACT_TRIDI_PRECOMPUTE=0`` to disable
+this accepted-point optimization for diagnostics, ``=1`` to force it on a
+specific backend, or ``VMEC_JAX_OPT_EXACT_TRIDI_PRECOMPUTE_MAX_DOFS`` to adjust
+the automatic small-DOF threshold.
 
 Fixed-boundary GPU diagnostics
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

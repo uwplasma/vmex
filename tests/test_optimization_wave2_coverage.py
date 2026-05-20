@@ -223,8 +223,17 @@ def test_exact_tape_precomputed_tridi_policy_backend_and_env(monkeypatch) -> Non
     opt = object.__new__(FixedBoundaryExactOptimizer)
 
     opt._solver_device_name = "gpu"
+    opt._specs = [object()] * 8
     monkeypatch.delenv("VMEC_JAX_OPT_EXACT_TRIDI_PRECOMPUTE", raising=False)
+    monkeypatch.delenv("VMEC_JAX_OPT_EXACT_TRIDI_PRECOMPUTE_MAX_DOFS", raising=False)
     assert opt._use_precomputed_tridi_for_exact_tape() is True
+    opt._specs = [object()] * 24
+    assert opt._use_precomputed_tridi_for_exact_tape() is None
+    monkeypatch.setenv("VMEC_JAX_OPT_EXACT_TRIDI_PRECOMPUTE_MAX_DOFS", "24")
+    assert opt._use_precomputed_tridi_for_exact_tape() is True
+    monkeypatch.setenv("VMEC_JAX_OPT_EXACT_TRIDI_PRECOMPUTE_MAX_DOFS", "-1")
+    assert opt._use_precomputed_tridi_for_exact_tape() is False
+    monkeypatch.delenv("VMEC_JAX_OPT_EXACT_TRIDI_PRECOMPUTE_MAX_DOFS")
 
     opt._solver_device_name = "cpu"
     assert opt._use_precomputed_tridi_for_exact_tape() is None
@@ -236,8 +245,11 @@ def test_exact_tape_precomputed_tridi_policy_backend_and_env(monkeypatch) -> Non
 
     monkeypatch.delenv("VMEC_JAX_OPT_EXACT_TRIDI_PRECOMPUTE")
     opt._solver_device_name = None
+    opt._specs = [object()] * 8
     monkeypatch.setattr(compat, "jax", SimpleNamespace(default_backend=lambda: "cuda"))
     assert opt._use_precomputed_tridi_for_exact_tape() is True
+    opt._specs = [object()] * 24
+    assert opt._use_precomputed_tridi_for_exact_tape() is None
     monkeypatch.setattr(compat, "jax", SimpleNamespace(default_backend=lambda: "cpu"))
     assert opt._use_precomputed_tridi_for_exact_tape() is None
 
