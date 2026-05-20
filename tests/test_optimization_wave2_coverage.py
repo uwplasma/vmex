@@ -217,6 +217,31 @@ def test_solver_device_context_and_trial_scan_env_branches(monkeypatch) -> None:
     assert opt._use_scan_for_trial_solves() is True
 
 
+def test_exact_tape_precomputed_tridi_policy_backend_and_env(monkeypatch) -> None:
+    import vmec_jax._compat as compat
+
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+
+    opt._solver_device_name = "gpu"
+    monkeypatch.delenv("VMEC_JAX_OPT_EXACT_TRIDI_PRECOMPUTE", raising=False)
+    assert opt._use_precomputed_tridi_for_exact_tape() is True
+
+    opt._solver_device_name = "cpu"
+    assert opt._use_precomputed_tridi_for_exact_tape() is None
+
+    monkeypatch.setenv("VMEC_JAX_OPT_EXACT_TRIDI_PRECOMPUTE", "0")
+    assert opt._use_precomputed_tridi_for_exact_tape() is False
+    monkeypatch.setenv("VMEC_JAX_OPT_EXACT_TRIDI_PRECOMPUTE", "yes")
+    assert opt._use_precomputed_tridi_for_exact_tape() is True
+
+    monkeypatch.delenv("VMEC_JAX_OPT_EXACT_TRIDI_PRECOMPUTE")
+    opt._solver_device_name = None
+    monkeypatch.setattr(compat, "jax", SimpleNamespace(default_backend=lambda: "cuda"))
+    assert opt._use_precomputed_tridi_for_exact_tape() is True
+    monkeypatch.setattr(compat, "jax", SimpleNamespace(default_backend=lambda: "cpu"))
+    assert opt._use_precomputed_tridi_for_exact_tape() is None
+
+
 def test_optimizer_init_moves_static_boundary_and_boundary_input(monkeypatch) -> None:
     state0 = SimpleNamespace(layout=SimpleNamespace(size=6))
     static = SimpleNamespace(s=np.asarray([0.0, 1.0]), cfg=SimpleNamespace(lasym=False))

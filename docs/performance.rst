@@ -795,9 +795,10 @@ so repeated Jacobian callbacks do not need to re-linearize that graph unless
 the discrete flip branch changes.  On the same QH ``max_mode=2`` GPU profile,
 three perturbed dense-Jacobian callbacks moved from about ``20.7 s`` total to
 about ``19.9 s`` total, with matching Jacobian norms.  Two attempted GPU replay
-shortcuts were rejected as defaults: precomputed tridiagonal coefficients are
-now correctness-tested but slower on this replay graph, and stopping gradients
-through solver time-control scalars nearly doubled replay time.
+shortcuts were rejected as broad defaults at that point: precomputed
+tridiagonal coefficients were correctness-tested but workload-dependent, and
+stopping gradients through solver time-control scalars nearly doubled replay
+time.
 
 May 2026 follow-up profiling used Python 3.11.15, JAX 0.10.0, and
 ``jax[cuda13]`` on the same ``office`` RTX A4000 host.  The GPU backend is
@@ -862,6 +863,15 @@ when the residual vector is already available.  On the same ``office`` GPU QH
 about ``15.3 s`` to ``11.2 s``.  This does not change the discrete-adjoint
 Jacobian path, which still linearizes the raw residual function where
 derivatives are required.
+
+The accepted-point exact tape path now enables precomputed Thomas coefficients
+for accelerator backends only.  This is intentionally not applied to trial
+scan solves: the same switch made cold GPU trial scans slower.  On ``office``
+with JAX 0.6.2 and one RTX A4000, two perturbed QA ``max_mode=1`` dense
+Jacobian callbacks dropped from ``88.9 s`` total to ``72.6 s`` total, while the
+Jacobian Frobenius norms matched to about ``7.5e-11`` relative difference.
+Set ``VMEC_JAX_OPT_EXACT_TRIDI_PRECOMPUTE=0`` to disable this accepted-point
+optimization for diagnostics, or ``=1`` to force it on a specific backend.
 
 Fixed-boundary GPU diagnostics
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
