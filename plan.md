@@ -33,7 +33,9 @@ acceptance criteria or evidence changes.
   exact solve, malformed replay-bucket environment values fall back to
   backend-adaptive defaults, production fixed-boundary auto policy uses the
   non-scan VMEC-control loop on CPU/GPU, and larger-mode accepted-point tape
-  replay remains the next GPU optimization target.
+  replay remains the next GPU optimization target. The accepted-point
+  optimizer also now lazily JITs projected initial-state construction, cutting
+  repeated new-point initialization cost in the CPU exact-callback smoke.
 - Continuation correctness is now protected by both synthetic control-flow tests
   and a real projected-boundary stage test. Repeated stage schedules such as
   ``[1, 1, 2]`` carry the optimized VMEC input forward and keep projected
@@ -397,7 +399,7 @@ release, and the QI optimization driver split:
   soft-wall guard for mirror/elongation cleanup that preserves an accepted QI
   basin. The remaining open cleanup is running and tuning the guarded mirror
   schedule across unrelated seeds.
-- CPU/GPU performance: 95%. Backend-adaptive replay bucketing, scalar-gradient
+- CPU/GPU performance: 96%. Backend-adaptive replay bucketing, scalar-gradient
   tangent reuse, detailed timing, and GPU-only preconditioner-output fusion are
   in place. Hot-path algebra and CPU/GPU fusion gating are now covered by
   focused CPU-only regressions. The exact-Jacobian residual tangent helper now
@@ -417,9 +419,12 @@ release, and the QI optimization driver split:
   matrix-free linear-operator path now reuses the transpose of the setup
   `jax.linearize` object instead of tracing a second initial-state VJP, and the
   profile comparator exposes the new `linear_operator_initial_transpose`
-  bucket. The next
-  performance blockers remain larger-mode accepted-point replay cost and dense
-  residual-tangent projection.
+  bucket. The exact optimizer now also JITs the projected initial-state map
+  lazily for new accepted/trial points, reducing a QA max_mode=1 two-point CPU
+  exact callback from `7.99 s` to `6.94 s` and peak RSS from about `1593 MiB`
+  to `1456 MiB`. The next performance blockers are the unattributed compiled
+  work inside accepted VMEC iteration loops, larger-mode accepted-point replay
+  cost, and dense residual-tangent projection.
 - VMEC parity and physics gates: 99%. Required-tier bundled gates now cover
   `chipf`, stored `B`, input flux/profile propagation, finite-beta
   `pres/presf`, VMEC `iotas -> iotaf` smoothing, surface-averaged current
@@ -1246,3 +1251,8 @@ Defer beyond the current cycle:
   smoke with `inner_max_iter=trial_max_iter=4` completed in `24.0 s`, reported
   `linear_operator_initial_transpose = 0.78 s`, and selected
   `exact_tape_build_solve_call` as the next patch target.
+- 2026-05-20: Added lazy JIT compilation for the optimizer's projected
+  parameter-to-initial-state map. The QA `max_mode=1` two-point CPU exact
+  callback profile improved from `7.99 s` to `6.94 s` with peak RSS dropping
+  from about `1593 MiB` to `1456 MiB`; the next patch target moved to
+  accepted-solver iteration-loop unattributed compiled work.
