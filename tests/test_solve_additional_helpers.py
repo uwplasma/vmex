@@ -624,6 +624,48 @@ def test_trace_formatting_and_scalar_guard_helpers():
     ).startswith("       2        1        3 pre")
 
 
+def test_legacy_dump_guard_helpers_and_time_control_append(monkeypatch, tmp_path):
+    monkeypatch.delenv("VMEC_JAX_DUMP_TIMECONTROL", raising=False)
+    monkeypatch.delenv("VMEC_JAX_DUMP_DIR", raising=False)
+    assert solve_module._legacy_dump_record_path(
+        enable_env="VMEC_JAX_DUMP_TIMECONTROL",
+        filename="time_control.log",
+    ) is None
+
+    monkeypatch.setenv("VMEC_JAX_DUMP_TIMECONTROL", "0")
+    monkeypatch.setenv("VMEC_JAX_DUMP_DIR", str(tmp_path))
+    assert solve_module._legacy_dump_record_path(
+        enable_env="VMEC_JAX_DUMP_TIMECONTROL",
+        filename="time_control.log",
+    ) is None
+
+    monkeypatch.setenv("VMEC_JAX_DUMP_TIMECONTROL", "false")
+    assert solve_module._legacy_dump_record_path(
+        enable_env="VMEC_JAX_DUMP_TIMECONTROL",
+        filename="time_control.log",
+    ) == tmp_path / "time_control.log"
+
+    solve_module._maybe_dump_time_control_record(
+        iter_idx=4,
+        fsq=1.0,
+        fsq0=2.0,
+        res0=3.0,
+        res1=4.0,
+        time_step=0.5,
+    )
+    assert (tmp_path / "time_control.log").read_text(encoding="utf-8") == (
+        "iter=4 fsq=1.000000e+00 fsq0=2.000000e+00 "
+        "res0=3.000000e+00 res1=4.000000e+00 time_step=5.000000e-01\n"
+    )
+
+
+def test_legacy_single_dump_iter_filter_matches_invalid_as_all():
+    assert solve_module._legacy_single_dump_iter_selected(dump_iter="", iter_idx=3)
+    assert solve_module._legacy_single_dump_iter_selected(dump_iter="3", iter_idx=3)
+    assert not solve_module._legacy_single_dump_iter_selected(dump_iter="2", iter_idx=3)
+    assert solve_module._legacy_single_dump_iter_selected(dump_iter="not-an-int", iter_idx=3)
+
+
 def test_radial_tridi_smoothing_matches_dense_dirichlet_reference():
     pytest.importorskip("jax")
 

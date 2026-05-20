@@ -850,6 +850,16 @@ def _format_evolve_trace_row(
     )
 
 
+def _legacy_dump_record_path(*, enable_env: str, filename: str) -> Path | None:
+    """Return a dump path for legacy flags that only treat empty/0 as disabled."""
+    if not _dump_env_enabled(os.getenv(enable_env, "")):
+        return None
+    dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
+    if not dump_dir:
+        return None
+    return Path(dump_dir) / filename
+
+
 def _maybe_dump_time_control_record(
     *,
     iter_idx: int,
@@ -859,13 +869,10 @@ def _maybe_dump_time_control_record(
     res1: float,
     time_step: float,
 ) -> None:
-    if os.getenv("VMEC_JAX_DUMP_TIMECONTROL", "") in ("", "0"):
-        return
-    dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
-    if not dump_dir:
+    path = _legacy_dump_record_path(enable_env="VMEC_JAX_DUMP_TIMECONTROL", filename="time_control.log")
+    if path is None:
         return
     try:
-        path = Path(dump_dir) / "time_control.log"
         with path.open("a", encoding="utf-8") as f:
             f.write(
                 _format_time_control_log_row(
@@ -893,13 +900,10 @@ def _dump_time_control_trace_record(
     time_step: float,
     irst: int,
 ) -> None:
-    if os.getenv("VMEC_JAX_DUMP_TIMECONTROL", "") in ("", "0"):
-        return
-    dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
-    if not dump_dir:
+    path = _legacy_dump_record_path(enable_env="VMEC_JAX_DUMP_TIMECONTROL", filename="time_control_trace.log")
+    if path is None:
         return
     try:
-        path = Path(dump_dir) / "time_control_trace.log"
         with path.open("a", encoding="utf-8") as f:
             f.write(
                 _format_time_control_trace_row(
@@ -919,13 +923,10 @@ def _dump_time_control_trace_record(
 
 
 def _maybe_dump_checkpoint_record(*, iter_idx: int, fsq: float, fsq0: float, res0: float, res1: float) -> None:
-    if os.getenv("VMEC_JAX_DUMP_CHECKPOINT", "") in ("", "0"):
-        return
-    dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
-    if not dump_dir:
+    path = _legacy_dump_record_path(enable_env="VMEC_JAX_DUMP_CHECKPOINT", filename="checkpoint.log")
+    if path is None:
         return
     try:
-        path = Path(dump_dir) / "checkpoint.log"
         with path.open("a", encoding="utf-8") as f:
             f.write(_format_checkpoint_log_row(iter_idx=iter_idx, fsq=fsq, fsq0=fsq0, res0=res0, res1=res1))
     except Exception:
@@ -942,13 +943,10 @@ def _dump_freeb_control_trace_record(
     fsq_rz_prev: float,
     cached: bool,
 ) -> None:
-    if os.getenv("VMEC_JAX_DUMP_FREEB_CONTROL", "") in ("", "0"):
-        return
-    dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
-    if not dump_dir:
+    path = _legacy_dump_record_path(enable_env="VMEC_JAX_DUMP_FREEB_CONTROL", filename="freeb_control_trace.log")
+    if path is None:
         return
     try:
-        path = Path(dump_dir) / "freeb_control_trace.log"
         with path.open("a", encoding="utf-8") as f:
             f.write(
                 _format_freeb_control_trace_row(
@@ -966,13 +964,10 @@ def _dump_freeb_control_trace_record(
 
 
 def _dump_freeb_axis_trace_record(*, iter2: int, axis_r: np.ndarray, axis_z: np.ndarray) -> None:
-    if os.getenv("VMEC_JAX_DUMP_FREEB_AXIS", "") in ("", "0"):
-        return
-    dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
-    if not dump_dir:
+    path = _legacy_dump_record_path(enable_env="VMEC_JAX_DUMP_FREEB_AXIS", filename=f"freeb_axis_iter{int(iter2)}.npz")
+    if path is None:
         return
     try:
-        path = Path(dump_dir) / f"freeb_axis_iter{int(iter2)}.npz"
         np.savez_compressed(
             path,
             iter2=int(iter2),
@@ -1021,10 +1016,8 @@ def _maybe_dump_evolve_trace_record(
     flcc_val=None,
     flss_val=None,
 ) -> None:
-    if os.getenv("VMEC_JAX_DUMP_EVOLVE", "") in ("", "0"):
-        return
-    dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
-    if not dump_dir:
+    path = _legacy_dump_record_path(enable_env="VMEC_JAX_DUMP_EVOLVE", filename="evolve_trace.log")
+    if path is None:
         return
     try:
         from .diagnostics import vmec_internal_mn_from_state, vmec_xc_from_mn_blocks
@@ -1100,7 +1093,6 @@ def _maybe_dump_evolve_trace_record(
                 g_kwargs["lss"] = np.asarray(flss_val, dtype=float)
             g_vec = np.asarray(vmec_xc_from_mn_blocks(cfg=static.cfg, **g_kwargs), dtype=float)
             gnorm = float(np.linalg.norm(g_vec))
-        path = Path(dump_dir) / "evolve_trace.log"
         with path.open("a", encoding="utf-8") as f:
             f.write(
                 _format_evolve_trace_row(
@@ -1280,17 +1272,23 @@ def _sm_sp_from_s_np(s_arr) -> tuple[np.ndarray, np.ndarray]:
     return sm, sp
 
 
+def _legacy_single_dump_iter_selected(*, dump_iter: str, iter_idx: int) -> bool:
+    """Match legacy single-iteration dump filtering, including invalid-as-all."""
+    if not dump_iter:
+        return True
+    try:
+        return int(dump_iter) == int(iter_idx)
+    except Exception:
+        return True
+
+
 def _maybe_dump_jacobian_terms_record(*, k, s, iter_idx: int) -> None:
     env = os.getenv("VMEC_JAX_DUMP_JACOBIAN_TERMS", "").strip()
     if not env or env in ("0", "false", "no", "False"):
         return
     dump_iter = os.getenv("VMEC_JAX_DUMP_ITER", "").strip()
-    if dump_iter:
-        try:
-            if int(dump_iter) != int(iter_idx):
-                return
-        except Exception:
-            pass
+    if not _legacy_single_dump_iter_selected(dump_iter=dump_iter, iter_idx=iter_idx):
+        return
     outdir = os.getenv("VMEC_JAX_DUMP_DIR", "").strip() or "."
     outpath = Path(outdir).expanduser().resolve()
     outpath.mkdir(parents=True, exist_ok=True)
