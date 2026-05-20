@@ -52,9 +52,10 @@ acceptance criteria or evidence changes.
   with 86.04% coverage; appending the final same-turn solver/plotting helper
   tests raised the local coverage database to 86.31%. The optional converged
   VMEC2000 parity gate passed locally with `VMEC2000_INTEGRATION=1`, and
-  GitHub CI passed on the validation commit. The next coverage blocker is not
-  peripheral helpers: reaching 95% still requires about 2.9k additional covered
-  lines, dominated by `solve.py` orchestration/refactor seams.
+  GitHub CI passed on the validation commit. Treat this as about 86% current
+  required coverage. The 90% and 95% gates are staged future ratchets; reaching
+  95% still requires about 2.9k additional covered lines, dominated by
+  `solve.py` orchestration/refactor seams.
 - VMEC2000 converged-wout parity now has a fast bundled matrix gate across
   fixed/free, axisymmetric/non-axisymmetric, LASYM, and single/multigrid
   representatives. The executable-backed end-state gate remains opt-in:
@@ -97,10 +98,11 @@ acceptance criteria or evidence changes.
       visually bad QI fields cannot pass unnoticed.
 - [ ] Prove seed robustness with a curated multi-seed matrix: start QI from QI,
       QP, QH, QA, and a simple non-omnigenous seed; document which policies
-      reliably converge. NFP=1/2/3 are passing under the current gates. NFP=4 is
-      intentionally deferred: bounded May 2026 audits found no passing NFP=4 QI
-      path among the available QH warm start, local QH-to-QI cleanup, and
-      archived same-NFP references.
+      reliably converge. Some NFP=1/2/3 probes pass the current narrow gates,
+      but full seed robustness remains open. NFP=4 is intentionally deferred:
+      bounded May 2026 audits found no passing NFP=4 QI path among the
+      available QH warm start, local QH-to-QI cleanup, and archived same-NFP
+      references.
 - [x] Diagnose remaining QI noisiness by one-DOF scans of Boozer/QI metrics and
       choose default resolutions/weights that preserve ranking while remaining
       differentiable.
@@ -380,7 +382,8 @@ release, and the QI optimization driver split:
   validation, and QI aligned-profile/mirror smooth branches have direct AD
   checks. Full QA/QH/QP/QI max_mode=1 objective derivative gates and
   matrix-free/scalar-adjoint production paths remain open.
-- Seed-robust QI: 97%. The tier-2 and tier-3 probes are bounded and monotone,
+- QI validation and seed-robustness: staged, not complete. The tier-2 and
+  tier-3 probes are bounded and monotone,
   constrained terms run end-to-end, and manifests now expose QI/engineering
   diagnostic deltas from final artifacts, including scalar-improved but
   QI-worsened cases. A new bundled near-axis seed, `input.QI_stel_seed_3127`,
@@ -485,12 +488,12 @@ release, and the QI optimization driver split:
   `input.QI_stel_seed_3127`; final seed-robust QI and GPU-production artifacts
   remain open.
 
-Release-critical average across the lanes requested in this push
-(continuation, exact accepted-point output, VMEC parity/physics gates, and
-docs/release hygiene): about 99.5%. Broader roadmap average across all open
-lanes: about 97.7%, because the 85% coverage gate is now locked locally and the
-remaining open work is seed-robust QI mirror cleanup, 90-95% coverage, and
-larger-mode GPU replay.
+Release-critical lanes requested in this push (continuation, exact
+accepted-point output, VMEC parity/physics gates, and docs/release hygiene) are
+near closure, but the broader roadmap remains open. The 85% coverage gate is
+locked locally at about 86% current coverage; seed-robust QI mirror cleanup,
+staged 90% and 95% coverage ratchets, and larger-mode GPU replay remain future
+work.
 
 Acceptance:
 
@@ -585,10 +588,11 @@ Acceptance:
 
 Realistic next targets for this development cycle:
 
-1. Keep the required CI coverage gate at 80% and preserve sub-ten-minute py3.11
+1. Keep the required CI coverage gate at 85% and preserve sub-ten-minute py3.11
    coverage runtime by pruning duplicate helper tests, splitting slow
    validation into optional tiers, or refactoring the largest modules so fewer
-   synthetic branch tests are required.
+   synthetic branch tests are required. Current required coverage is about 86%;
+   the 90% and 95% gates are staged ratchets, not completed targets.
 2. Raise the solved-state QI diagnostic from the new low-resolution bundled
    gate to reviewed higher-resolution evidence: smooth QI, legacy QI, mirror
    ratio, elongation, iota, aspect ratio, and Boozer `|B|` contour quality.

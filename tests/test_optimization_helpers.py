@@ -1708,6 +1708,78 @@ def test_residual_linear_operator_matvec_and_matmat_are_shape_checked(monkeypatc
         op._matmat(np.ones((3, 1)))
 
 
+def test_residual_linear_operator_reuses_cached_initial_tangents(monkeypatch):
+    pytest.importorskip("scipy.sparse.linalg")
+    import vmec_jax.discrete_adjoint as discrete_adjoint
+    import vmec_jax.init_guess as init_guess
+    import vmec_jax.state as state_module
+
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._solver_device_name = None
+    opt._inside_solver_device_context = False
+    opt._layout = SimpleNamespace(size=3)
+    opt._static = object()
+    opt._indata = object()
+    opt._profile = {}
+    opt._discrete_jacobian_helper_cache = {}
+    opt._exact_residual_cache = {}
+    opt._exact_cache_key = lambda _params: b"operator"
+    opt._initial_tangent_cache_key = lambda _params: "axis-branch"
+    opt._initial_tangent_cache = {
+        "axis-branch": jnp.asarray(
+            [
+                [1.0, 0.0, 2.0],
+                [0.0, 3.0, 4.0],
+            ],
+            dtype=jnp.float64,
+        )
+    }
+    opt._boundary_from_params = lambda _params: (_ for _ in ()).throw(
+        AssertionError("cached initial tangents should skip boundary reconstruction")
+    )
+    opt._lasym_replay_column_chunk = lambda _n_params: None
+    opt._solve_exact_with_tape = lambda _params, return_payload=False: (
+        jnp.asarray([10.0, 20.0, 30.0], dtype=jnp.float64),
+        {"tape": "tape", "axis_override": {}},
+    )
+    opt._residuals_fn = lambda state: jnp.asarray(
+        [state[0] + 2.0 * state[2], state[1] - state[2]],
+        dtype=jnp.float64,
+    )
+
+    monkeypatch.setattr(
+        init_guess,
+        "initial_guess_from_boundary",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("cached initial tangents should skip initial_guess")
+        ),
+    )
+    monkeypatch.setattr(state_module, "pack_state", lambda state: jnp.asarray(state, dtype=jnp.float64))
+    monkeypatch.setattr(state_module, "unpack_state", lambda packed, _layout: packed)
+    monkeypatch.setattr(
+        discrete_adjoint,
+        "checkpoint_tape_state_jvp",
+        lambda *, tape, static, initial_tangent, rebuild_preconditioner: initial_tangent,
+    )
+    monkeypatch.setattr(
+        discrete_adjoint,
+        "checkpoint_tape_state_jvp_columns",
+        lambda *, tape, static, initial_tangents, rebuild_preconditioner, column_chunk: initial_tangents,
+    )
+    monkeypatch.setattr(
+        discrete_adjoint,
+        "checkpoint_tape_state_vjp",
+        lambda *, tape, static, final_cotangent, rebuild_preconditioner: final_cotangent,
+    )
+
+    op = opt.residual_linear_operator(np.asarray([0.0, 0.0]))
+
+    np.testing.assert_allclose(op.matvec(np.asarray([5.0, 7.0])), [81.0, -17.0])
+    np.testing.assert_allclose(op.rmatvec(np.asarray([2.0, -3.0])), [16.0, 19.0])
+    assert opt._profile["linear_operator_initial_tangents_cache_hit"]["count"] == 1
+    assert "linear_operator_initial_tangents_cache_miss" not in opt._profile
+
+
 def test_scan_exact_history_can_be_reconstructed_from_residuals():
     opt = object.__new__(FixedBoundaryExactOptimizer)
     opt._scan_exact_path = "scan"
