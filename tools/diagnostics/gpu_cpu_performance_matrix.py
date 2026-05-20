@@ -93,6 +93,14 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--sync-replay-timing",
+        action="store_true",
+        help=(
+            "Forward exact-callback replay/tangent synchronization timing to child profilers. "
+            "This splits dispatch and device-ready buckets and is for diagnostics only."
+        ),
+    )
+    parser.add_argument(
         "--extra-arg",
         action="append",
         default=[],
@@ -237,6 +245,8 @@ def child_env(
         env["VMEC_JAX_DYNAMIC_REPLAY_BUCKET"] = str(args.dynamic_replay_bucket)
     if args.dynamic_replay_mode is not None:
         env["VMEC_JAX_DYNAMIC_REPLAY_MODE"] = str(args.dynamic_replay_mode)
+    if getattr(args, "sync_replay_timing", False):
+        env["VMEC_JAX_OPT_SYNC_REPLAY_TIMING"] = "1"
     return env
 
 
@@ -248,6 +258,7 @@ def env_summary(env: dict[str, str]) -> dict[str, str | None]:
         "VMEC_JAX_REPLAY_COLUMN_CHUNK",
         "VMEC_JAX_DYNAMIC_REPLAY_BUCKET",
         "VMEC_JAX_DYNAMIC_REPLAY_MODE",
+        "VMEC_JAX_OPT_SYNC_REPLAY_TIMING",
     )
     return {key: env.get(key) for key in keys if env.get(key) is not None}
 
@@ -381,6 +392,8 @@ def build_child_command(
         command.append("--vmec-timing")
     if args.vmec_timing_detail:
         command.append("--vmec-timing-detail")
+    if args.sync_replay_timing:
+        command.append("--sync-replay-timing")
     if args.trace:
         command.extend(["--trace-outdir", str(trace_dir)])
     if memory_profile_path is not None:
@@ -479,6 +492,11 @@ def print_report(payload: dict[str, Any]) -> None:
                 _metric(summary, "qi_first_call_s"),
                 _metric(summary, "qi_warm_min_s"),
                 _metric(summary, "replay_time_s"),
+                _metric(summary, "accepted_replay_dispatch_s"),
+                _metric(summary, "accepted_replay_ready_s"),
+                _metric(summary, "initial_tangents_s"),
+                _metric(summary, "residual_tangents_s"),
+                _metric(summary, "trial_solver_scan_device_run_s"),
                 _metric(summary, "contamination_warning_count"),
                 run["report_path"],
             )
@@ -495,6 +513,11 @@ def print_report(payload: dict[str, Any]) -> None:
         "qi_first_s",
         "qi_warm_s",
         "replay_s",
+        "replay_dispatch_s",
+        "replay_ready_s",
+        "init_tangent_s",
+        "resid_tangent_s",
+        "trial_scan_device_s",
         "warnings",
         "report",
     )
