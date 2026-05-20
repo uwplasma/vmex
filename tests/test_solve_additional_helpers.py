@@ -42,6 +42,7 @@ from vmec_jax.solve import (
     _radial_tridi_smooth_dirichlet,
     _replace_mode_slice,
     _replace_mode_slice_np,
+    _append_residual_iter_history_record,
     _residual_iter_history_record,
     _safe_dt_from_force_blocks,
     _scale_m1_precond_rhs_from_mats,
@@ -1206,6 +1207,140 @@ def test_residual_iter_history_record_clamps_negative_total_and_omits_free_bound
     assert rec.freeb_ivac is None
     assert rec.freeb_ivacskip is None
     assert rec.freeb_full_update is None
+
+
+def test_append_residual_iter_history_record_keeps_all_channels_aligned():
+    rec = _residual_iter_history_record(
+        step=0.5,
+        dt_eff=0.25,
+        update_rms=0.125,
+        w_curr=1.0,
+        w_try=2.0,
+        w_try_ratio=3.0,
+        restart_path="vmec2000_time_control",
+        step_status="restart_time_control",
+        restart_reason="time_control",
+        pre_restart_reason="time_control",
+        time_step=4.0,
+        res0=5.0,
+        res1=6.0,
+        fsq_prev=7.0,
+        bad_growth_streak=8,
+        iter1=9,
+        iter2=10,
+        fsqr=9.0,
+        fsqz=16.0,
+        fsql=0.0,
+        free_boundary_enabled=True,
+        freeb_ivac=3,
+        freeb_ivacskip=0,
+    )
+    histories = {
+        "step_history": [],
+        "dt_eff_history": [],
+        "update_rms_history": [],
+        "w_curr_history": [],
+        "w_try_history": [],
+        "w_try_ratio_history": [],
+        "restart_path_history": [],
+        "step_status_history": [],
+        "restart_reason_history": [],
+        "pre_restart_reason_history": [],
+        "time_step_history": [],
+        "res0_history": [],
+        "res1_history": [],
+        "fsq_prev_history": [],
+        "bad_growth_streak_history": [],
+        "iter1_history": [],
+        "iter2_history": [],
+        "grad_rms_history": [],
+        "freeb_ivac_history": [],
+        "freeb_ivacskip_history": [],
+        "freeb_full_update_history": [],
+    }
+
+    _append_residual_iter_history_record(rec, free_boundary_enabled=True, **histories)
+
+    assert histories["step_history"] == [pytest.approx(0.5)]
+    assert histories["dt_eff_history"] == [pytest.approx(0.25)]
+    assert histories["update_rms_history"] == [pytest.approx(0.125)]
+    assert histories["w_curr_history"] == [pytest.approx(1.0)]
+    assert histories["w_try_history"] == [pytest.approx(2.0)]
+    assert histories["w_try_ratio_history"] == [pytest.approx(3.0)]
+    assert histories["restart_path_history"] == ["vmec2000_time_control"]
+    assert histories["step_status_history"] == ["restart_time_control"]
+    assert histories["restart_reason_history"] == ["time_control"]
+    assert histories["pre_restart_reason_history"] == ["time_control"]
+    assert histories["time_step_history"] == [pytest.approx(4.0)]
+    assert histories["res0_history"] == [pytest.approx(5.0)]
+    assert histories["res1_history"] == [pytest.approx(6.0)]
+    assert histories["fsq_prev_history"] == [pytest.approx(7.0)]
+    assert histories["bad_growth_streak_history"] == [8]
+    assert histories["iter1_history"] == [9]
+    assert histories["iter2_history"] == [10]
+    assert histories["grad_rms_history"] == [pytest.approx(5.0)]
+    assert histories["freeb_ivac_history"] == [3]
+    assert histories["freeb_ivacskip_history"] == [0]
+    assert histories["freeb_full_update_history"] == [1]
+    lengths = {key: len(value) for key, value in histories.items()}
+    assert set(lengths.values()) == {1}
+
+
+def test_append_residual_iter_history_record_skips_free_boundary_channels_when_disabled():
+    rec = _residual_iter_history_record(
+        step=0.0,
+        dt_eff=0.0,
+        update_rms=0.0,
+        w_curr=0.0,
+        w_try=np.nan,
+        w_try_ratio=np.nan,
+        restart_path="converged",
+        step_status="converged",
+        restart_reason="none",
+        pre_restart_reason="none",
+        time_step=1.0,
+        res0=0.0,
+        res1=0.0,
+        fsq_prev=0.0,
+        bad_growth_streak=0,
+        iter1=1,
+        iter2=1,
+        fsqr=0.0,
+        fsqz=0.0,
+        fsql=0.0,
+        free_boundary_enabled=False,
+    )
+    histories = {
+        "step_history": [],
+        "dt_eff_history": [],
+        "update_rms_history": [],
+        "w_curr_history": [],
+        "w_try_history": [],
+        "w_try_ratio_history": [],
+        "restart_path_history": [],
+        "step_status_history": [],
+        "restart_reason_history": [],
+        "pre_restart_reason_history": [],
+        "time_step_history": [],
+        "res0_history": [],
+        "res1_history": [],
+        "fsq_prev_history": [],
+        "bad_growth_streak_history": [],
+        "iter1_history": [],
+        "iter2_history": [],
+        "grad_rms_history": [],
+        "freeb_ivac_history": [],
+        "freeb_ivacskip_history": [],
+        "freeb_full_update_history": [],
+    }
+
+    _append_residual_iter_history_record(rec, free_boundary_enabled=False, **histories)
+
+    assert histories["step_history"] == [0.0]
+    assert histories["grad_rms_history"] == [0.0]
+    assert histories["freeb_ivac_history"] == []
+    assert histories["freeb_ivacskip_history"] == []
+    assert histories["freeb_full_update_history"] == []
 
 
 def test_first_step_diagnostics_synthetic_default_and_axisymmetric_paths(monkeypatch):
