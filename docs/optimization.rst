@@ -180,9 +180,7 @@ then run the bounded robustness probe or select a ``RUN_CASE`` in
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp3_qi \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516 \
      python examples/optimization/QI_optimization.py
-   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi_finite_beta \
-     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp4_qi_finite_beta \
-     python examples/optimization/QI_optimization.py
+   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi python examples/optimization/QI_optimization.py
 
 The second audit command uses the far-seed QI gate convention from
 ``QI_optimization.py``: legacy QI below ``2e-3`` and smooth differentiable QI
@@ -192,8 +190,10 @@ The README/docs QI coverage figure is rendered from existing reviewed
 ``QI_optimization.py`` outputs.  These rows are case-specific gate checks, not
 additional aspect-6 README best-row promotions: the NFP=1 and NFP=2 lanes use
 target aspect 10, the seed-3127 lane uses target aspect 4, and the NFP=4 row is
-a finite-beta verification/stress artifact that must not be described as
-completed NFP=4 robustness:
+the common-minimal-seed path with a same-NFP finite-beta QI reference-family
+preconditioner.  The source input remains the three-coefficient minimal seed;
+the finite-beta NFP=4 input is kept as a separate stress fixture, not as the
+README initial state:
 
 .. list-table::
    :header-rows: 1
@@ -243,22 +243,22 @@ completed NFP=4 robustness:
      - ``-1.0401``
      - ``4.6``
      - ``case-gated``
-   * - ``examples/data/input.nfp4_QI_finite_beta``
-     - ``results/qi_opt/ess/nfp4_qi_finite_beta``
-     - ``2.39e-2``
-     - ``2.37e-3``
-     - ``1.75e-4``
-     - ``0.282/0.35``
+   * - ``examples/data/input.minimal_seed_nfp4``
+     - ``results/qi_opt/ess/minimal_nfp4_to_qi_finite_beta_reference``
+     - ``2.52e-2``
+     - ``2.56e-3``
+     - ``2.54e-4``
+     - ``0.287/0.35``
      - ``4.14/8.2``
      - ``6.011/6.0``
-     - ``-1.2913``
-     - ``1.0``
-     - ``deferred``
+     - ``-1.2930``
+     - ``0.4``
+     - ``case-gated``
 
 .. image:: _static/figures/readme_qi_optimization_cases.png
    :width: 100%
    :align: center
-   :alt: QI optimization coverage for reviewed NFP=1, NFP=2, NFP=3, and deferred NFP=4 inputs
+   :alt: QI optimization coverage for reviewed NFP=1, NFP=2, NFP=3, and NFP=4 inputs
 
 The initial and final Boozer ``|B|`` panels in that figure use line contours
 only.  The staged objective panel concatenates every recorded history file and
@@ -287,12 +287,14 @@ basin-survey diagnostics use fast trial solves unless ``--exact-solve`` is
 passed; use exact solves before treating their scalar values as promotion
 evidence.
 
-Current NFP=4 QI status: deferred.  ``VMEC_JAX_QI_RUN_CASE=nfp4_qi_finite_beta``
-is a finite-beta NFP=4 verification/stress lane, not a completed robustness
-claim.  It preserves the input deck's ``MPOL=5``, ``NTOR=5``, and VMEC
-convergence settings because low-budget local cleanup can damage the
-smooth-QI gate.  Treat the saved NFP=4 artifact as evidence that the driver can
-exercise and audit the NFP=4 path, not as proof of seed-robust NFP=4 QI.
+``VMEC_JAX_QI_RUN_CASE=nfp4_qi`` starts from
+``examples/data/input.minimal_seed_nfp4``, whose boundary contains only
+``RBC(0,0)``, ``RBC(0,1)``, and ``ZBS(0,1)``.  The current passing path uses a
+same-NFP finite-beta QI reference-family proposal as a deterministic basin
+capture step, then runs a bounded local QI audit/refine stage.  This is a
+case-gated NFP=4 result, not yet proof that arbitrary NFP=4 seeds converge.
+``VMEC_JAX_QI_RUN_CASE=nfp4_qi_finite_beta`` is a finite-beta NFP=4 stress
+fixture, not the README initial-state row.
 ``VMEC_JAX_QI_RUN_CASE=nfp4_qh_warm_to_qi`` remains an explicit non-passing
 stress fixture for QH-to-QI conversion and should not be used as a promoted QI
 result.
@@ -1164,12 +1166,15 @@ of the file, to one of the bundled cases:
    RUN_CASE = "nfp2_qi"             # default NFP=2 mirror-aware QI lane
    RUN_CASE = "nfp3_qi"             # NFP=3 alias for qi_stel_seed_3127
    RUN_CASE = "qi_stel_seed_3127"   # descriptive name for the NFP=3 far seed
-   RUN_CASE = "nfp4_qi_finite_beta" # NFP=4 finite-beta stress/verification lane
+   RUN_CASE = "nfp4_qi"             # NFP=4 common-minimal-seed QI candidate
+   RUN_CASE = "nfp4_qi_finite_beta" # NFP=4 finite-beta stress fixture
    RUN_CASE = "nfp4_qh_warm_to_qi"  # NFP=4 diagnostic stress test, using the input NFP
 
-Both NFP=4 cases are deferred validation lanes.  They confirm that the current
-QI driver can run NFP=4 input paths, but available NFP=4 starts do not yet
-establish independent QI, mirror, and multi-seed robustness gates.
+The README NFP=4 case is a case-gated common-minimal-seed result with a
+same-NFP reference-family preconditioner.  The finite-beta and QH-warm-start
+NFP=4 cases are stress fixtures; keep them out of promoted QI robustness tables
+unless their independent diagnostics are reviewed and the README renderer is
+intentionally retargeted.
 
 For example, to run the bundled near-axis stellarator seed without editing the
 script:
@@ -1185,9 +1190,7 @@ script:
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp3_qi \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516 \
      python examples/optimization/QI_optimization.py
-   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi_finite_beta \
-     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp4_qi_finite_beta \
-     python examples/optimization/QI_optimization.py
+   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi python examples/optimization/QI_optimization.py
 
 The script takes ``nfp`` from the VMEC input file, so NFP=1/2/3/4 do not need
 separate drivers.  To try a different VMEC input deck, add one dictionary entry

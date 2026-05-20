@@ -10,10 +10,21 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "examples" / "optimization" / "render_qi_readme_cases.py"
+CASES_SCRIPT = ROOT / "examples" / "optimization" / "qi_optimization_cases.py"
 
 
 def _load_module():
     spec = importlib.util.spec_from_file_location("render_qi_readme_cases_test", SCRIPT)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_cases_module():
+    spec = importlib.util.spec_from_file_location("qi_optimization_cases_test", CASES_SCRIPT)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -113,7 +124,9 @@ def test_readme_renderer_records_case_gated_nfp123_gate_status(monkeypatch, tmp_
     assert all(record["qi_gate_failures"] == "" for record in records)
 
 
-def test_readme_renderer_keeps_nfp4_deferred_with_gate_failures(monkeypatch, tmp_path: Path) -> None:
+def test_readme_renderer_keeps_deferred_case_from_promotion(
+    monkeypatch, tmp_path: Path
+) -> None:
     mod = _load_module()
     monkeypatch.setattr(mod, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(mod, "_history_summary", lambda _case: (180.0, 1, 3))
@@ -134,8 +147,7 @@ def test_readme_renderer_keeps_nfp4_deferred_with_gate_failures(monkeypatch, tmp
             "target_aspect": 6.0,
             "mean_iota": 0.52,
             "qi_nfp": 4,
-            "qi_case_expected_gate_status": "non_passing_stress_fixture",
-            "qi_case_stress_fixture": True,
+            "qi_case_expected_gate_status": "candidate",
             "qi_seed_gate_passed": False,
             "qi_engineering_gate_passed": False,
             "qi_gate_failures": ["smooth_qi", "legacy_qi", "mirror"],
@@ -149,10 +161,37 @@ def test_readme_renderer_keeps_nfp4_deferred_with_gate_failures(monkeypatch, tmp
 
     assert record["qi_nfp"] == 4
     assert record["validation_status"] == "deferred"
-    assert record["expected_gate_status"] == "non_passing_stress_fixture"
+    assert record["expected_gate_status"] == "candidate"
     assert record["qi_seed_gate_passed"] is False
     assert record["qi_engineering_gate_passed"] is False
     assert record["qi_gate_failures"] == "smooth_qi;legacy_qi;mirror"
+
+
+def test_readme_renderer_points_nfp4_row_at_minimal_seed() -> None:
+    mod = _load_module()
+
+    nfp4 = mod.CASES[-1]
+
+    assert nfp4.label == "NFP=4 minimal seed"
+    assert nfp4.input_file.name == "input.minimal_seed_nfp4"
+    assert "minimal_nfp4_to_qi_finite_beta_reference" in str(nfp4.output_dir)
+    assert "nfp4_qi_finite_beta" not in str(nfp4.output_dir)
+    assert nfp4.validation_status == "case-gated"
+
+
+def test_qi_case_catalog_defines_nfp4_minimal_seed_candidate() -> None:
+    cases_mod = _load_cases_module()
+
+    case = cases_mod.QI_CASES["nfp4_qi"]
+
+    assert case["input_file"].name == "input.minimal_seed_nfp4"
+    assert case["target_aspect"] == cases_mod.DEFAULT_QI_TARGET_ASPECT
+    assert case["mirror_threshold"] == pytest.approx(0.35)
+    assert case["qi_gate_legacy_max"] == pytest.approx(2.0e-3)
+    assert "minimal_nfp4_to_qi_finite_beta_reference" in str(case["output_dir"])
+    assert case["boundary_reference_preconditioner"]["reference_input"].name == "input.nfp4_QI_finite_beta"
+    assert case["boundary_reference_preconditioner"]["accept_as_baseline"] is True
+    assert {family for family, _index, _value in case["target_helicity_seed_terms"]} == {"RBC", "ZBS"}
 
 
 def test_readme_renderer_rejects_case_gated_case_with_failed_engineering_gate(

@@ -125,8 +125,9 @@ Reproduction commands for these panels live in
 QI multi-NFP coverage is rendered from existing reviewed `QI_optimization.py`
 artifacts. These are case-specific gate checks, not additional aspect-6 README
 best-row promotions: NFP=1/2 use target aspect 10, the seed-3127 NFP=3 lane
-uses target aspect 4, and NFP=4 is a finite-beta verification/stress lane
-rather than a production robustness claim.
+uses target aspect 4, and NFP=4 starts from the common minimal seed
+(`RBC(0,0)`, `RBC(0,1)`, `ZBS(0,1)` only) before a same-NFP reference-family
+QI proposal. Finite-beta NFP=4 remains documented as a separate stress fixture.
 
 <p align="center">
   <img src="docs/_static/figures/readme_qi_optimization_cases.png" width="980" />
@@ -138,7 +139,7 @@ Reproduce the four QI lanes with:
 PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp1_qi python examples/optimization/QI_optimization.py
 PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp2_qi python examples/optimization/QI_optimization.py
 PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp3_qi python examples/optimization/QI_optimization.py
-PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi_finite_beta python examples/optimization/QI_optimization.py
+PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi python examples/optimization/QI_optimization.py
 ```
 
 Full QI metrics, regeneration commands, and caveats are in
