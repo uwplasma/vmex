@@ -59,7 +59,7 @@ driver for reproducible comparison tables:
      - NFP=4 warm start, aspect near 6, ``abs(mean_iota) >= 0.41``, QH residual.
    * - QP
      - ``examples/optimization/QP_optimization.py``
-     - NFP=2 QI seed, aspect near 6, ``abs(mean_iota) >= 0.41``, QP residual.
+     - NFP=2 QI seed, aspect near 6, ``abs(mean_iota) >= 0.41``, QP residual.  The final optimized QP row is also the seed for the separate :doc:`piecewise_omnigenous_plan`.
    * - QI
      - ``examples/optimization/QI_optimization.py``
      - NFP=2 QI default lane with Boozer-space QI, mirror, elongation, QI ceiling, ESS, and repeated same-mode continuation; the README best-row sweep uses aspect target 6, while seed-robustness cases may choose case-specific aspect targets.
