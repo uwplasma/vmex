@@ -52,7 +52,7 @@ def _patch_matching_wout(monkeypatch, mod, *, nfp: int = 2) -> None:
     monkeypatch.setattr(mod, "read_wout", lambda _path: _synthetic_wout(nfp=nfp))
 
 
-def _synthetic_case(mod, tmp_path: Path, label: str, *, nfp: int, validation_status: str = "promoted"):
+def _synthetic_case(mod, tmp_path: Path, label: str, *, nfp: int, validation_status: str = "case-gated"):
     case_dir = tmp_path / f"case_nfp{nfp}"
     case_dir.mkdir(parents=True)
     input_file = tmp_path / "examples" / "data" / f"input.nfp{nfp}_QI"
@@ -72,7 +72,7 @@ def _synthetic_case(mod, tmp_path: Path, label: str, *, nfp: int, validation_sta
     )
 
 
-def test_readme_renderer_records_promoted_nfp123_gate_status(monkeypatch, tmp_path: Path) -> None:
+def test_readme_renderer_records_case_gated_nfp123_gate_status(monkeypatch, tmp_path: Path) -> None:
     mod = _load_module()
     monkeypatch.setattr(mod, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(mod, "_history_summary", lambda _case: (120.0, 2, 5))
@@ -107,7 +107,7 @@ def test_readme_renderer_records_promoted_nfp123_gate_status(monkeypatch, tmp_pa
     ]
 
     assert {record["qi_nfp"] for record in records} == {1, 2, 3}
-    assert {record["validation_status"] for record in records} == {"promoted"}
+    assert {record["validation_status"] for record in records} == {"case-gated"}
     assert all(record["qi_seed_gate_passed"] is True for record in records)
     assert all(record["qi_engineering_gate_passed"] is True for record in records)
     assert all(record["qi_gate_failures"] == "" for record in records)
@@ -155,7 +155,9 @@ def test_readme_renderer_keeps_nfp4_deferred_with_gate_failures(monkeypatch, tmp
     assert record["qi_gate_failures"] == "smooth_qi;legacy_qi;mirror"
 
 
-def test_readme_renderer_rejects_promoted_case_with_failed_engineering_gate(monkeypatch, tmp_path: Path) -> None:
+def test_readme_renderer_rejects_case_gated_case_with_failed_engineering_gate(
+    monkeypatch, tmp_path: Path
+) -> None:
     mod = _load_module()
     monkeypatch.setattr(mod, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(mod, "_history_summary", lambda _case: (10.0, 1, 1))
@@ -181,7 +183,7 @@ def test_readme_renderer_rejects_promoted_case_with_failed_engineering_gate(monk
 
     monkeypatch.setattr(mod, "_load_json", fake_load_json)
 
-    with pytest.raises(RuntimeError, match="promoted but failed"):
+    with pytest.raises(RuntimeError, match="case-gated but failed"):
         mod._case_record(_synthetic_case(mod, tmp_path, "NFP=2 bundled QI", nfp=2))
 
 

@@ -297,9 +297,10 @@ convenience alias for the ``input.QI_stel_seed_3127`` robustness lane.
 
 Source table:
 :download:`readme_qi_optimization_cases.csv <_static/figures/readme_qi_optimization_cases.csv>`.
-In that generated CSV, ``validation_status=promoted`` records the
+In that generated CSV, ``validation_status=case-gated`` records
 case-specific QI gate status from the renderer and should not be read as
-aspect-6 README best-row promotion evidence.
+aspect-6 README best-row promotion evidence; ``deferred`` marks stress or
+verification rows.
 
 Regenerate these lightweight artifacts with:
 
