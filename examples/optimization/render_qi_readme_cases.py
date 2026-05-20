@@ -33,6 +33,7 @@ class QICase:
     output_dir: Path
     initial_wout: Path
     note: str
+    validation_status: str = "promoted"
     history_paths: tuple[Path, ...] = ()
     preconditioner_summary: Path | None = None
 
@@ -124,7 +125,8 @@ CASES = (
         / "ess"
         / "minimal_nfp4_to_qi_finite_beta_reference"
         / "wout_initial.nc",
-        note="minimal seed with same-NFP finite-beta QI reference",
+        note="NFP=4 deferred finite-beta/reference stress lane; not promoted with NFP=1/2/3",
+        validation_status="deferred",
         history_paths=(
             REPO_ROOT
             / "results"
@@ -254,6 +256,18 @@ def _preconditioner_summary(case: QICase) -> tuple[int, float | None, float | No
     )
 
 
+def _optional_bool(diagnostics: dict, key: str) -> str | bool:
+    if key not in diagnostics:
+        return ""
+    return bool(diagnostics[key])
+
+
+def _qi_smooth_total(diagnostics: dict) -> float:
+    if "qi_smooth_total" in diagnostics:
+        return float(diagnostics["qi_smooth_total"])
+    return float(diagnostics["qi_raw_total"])
+
+
 def _case_record(case: QICase) -> dict[str, str | float]:
     diagnostics = _load_json(case.output_dir / "diagnostics.json")
     history = _load_json(case.output_dir / "history.json")
@@ -263,13 +277,23 @@ def _case_record(case: QICase) -> dict[str, str | float]:
     for path in (case.input_file, case.initial_wout, final_wout):
         if not path.exists():
             raise FileNotFoundError(path)
+    stress_fixture = bool(diagnostics.get("qi_case_stress_fixture", False))
+    expected_gate_status = str(diagnostics.get("qi_case_expected_gate_status", "candidate"))
+    validation_status = "deferred" if case.validation_status == "deferred" or stress_fixture else "promoted"
+    if validation_status == "promoted" and diagnostics.get("qi_engineering_gate_passed") is False:
+        raise RuntimeError(f"{case.label} is promoted but failed the QI engineering gate")
     return {
         "case": case.label,
         "input_file": str(case.input_file.relative_to(REPO_ROOT)),
         "output_dir": str(case.output_dir.relative_to(REPO_ROOT)),
         "note": case.note,
+        "validation_status": validation_status,
+        "expected_gate_status": expected_gate_status,
+        "qi_seed_gate_passed": _optional_bool(diagnostics, "qi_seed_gate_passed"),
+        "qi_engineering_gate_passed": _optional_bool(diagnostics, "qi_engineering_gate_passed"),
+        "qi_gate_failures": ";".join(str(item) for item in diagnostics.get("qi_gate_failures", [])),
         "objective_final": float(history["objective_final"]),
-        "qi_smooth_total": float(diagnostics.get("qi_smooth_total", diagnostics["qi_raw_total"])),
+        "qi_smooth_total": _qi_smooth_total(diagnostics),
         "qi_legacy_total": float(diagnostics["qi_legacy_total"]),
         "qi_mirror_ratio_max": float(diagnostics["qi_mirror_ratio_max"]),
         "qi_mirror_ratio_target": float(diagnostics["qi_mirror_ratio_target"]),
@@ -298,6 +322,11 @@ def _write_csv(records: list[dict[str, str | float]]) -> None:
         "input_file",
         "output_dir",
         "note",
+        "validation_status",
+        "expected_gate_status",
+        "qi_seed_gate_passed",
+        "qi_engineering_gate_passed",
+        "qi_gate_failures",
         "objective_final",
         "qi_smooth_total",
         "qi_legacy_total",

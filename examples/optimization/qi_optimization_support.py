@@ -398,6 +398,13 @@ def write_qi_stage_checkpoint(
     history = dict(stage_result.history)
     diagnostics = dict(diagnostics)
     promotion = {} if promotion is None else dict(promotion)
+    provenance = {
+        "stage_output_dir": str(stage_output_dir),
+        "initial_input_path": str(stage_output_dir / "input.initial"),
+        "final_input_path": str(stage_output_dir / "input.final"),
+        "initial_wout_path": str(stage_output_dir / "wout_initial.nc"),
+        "final_wout_path": str(stage_output_dir / "wout_final.nc"),
+    }
     checkpoint = {
         "schema_version": 1,
         "partial": True,
@@ -418,10 +425,15 @@ def write_qi_stage_checkpoint(
         "history": _jsonable(history),
         "diagnostics": _jsonable(diagnostics),
         "promotion": _jsonable(promotion),
+        "provenance": _jsonable(provenance),
         "history_path": str(stage_output_dir / "history.json"),
         "diagnostics_path": str(stage_output_dir / "diagnostics.json"),
         "input_path": str(stage_output_dir / "input.final"),
         "wout_path": str(stage_output_dir / "wout_final.nc"),
+        "initial_input_path": provenance["initial_input_path"],
+        "final_input_path": provenance["final_input_path"],
+        "initial_wout_path": provenance["initial_wout_path"],
+        "final_wout_path": provenance["final_wout_path"],
     }
     diagnostics_path = stage_output_dir / "diagnostics.json"
     checkpoint_path = stage_output_dir / "qi_stage_checkpoint.json"
