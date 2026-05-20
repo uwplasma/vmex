@@ -20,7 +20,7 @@ Target State
 - Near-term coverage target: keep the required ``85%`` actual line coverage gate
   green with meaningful fast and bounded-physics tests while preserving
   sub-ten-minute coverage runtime.  The current required fast-suite coverage is
-  ``87.767%`` from the validated May 20 local CI-equivalent run.  Treat this as
+  ``88.335%`` from the validated May 20 local CI-equivalent run.  Treat this as
   about ``88%`` current required coverage; the enforced gate remains ``85%``.
 - Next staged coverage target: raise the required Python 3.11 gate to ``90%``
   only after a clean local CI-equivalent run demonstrates at least 90% package
@@ -207,7 +207,7 @@ the recommended local escalation path.
    * - Coverage gate
      - ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000 and not simsopt" --cov=vmec_jax --cov-report=xml --cov-report=term:skip-covered --cov-fail-under=85``
      - Python 3.11 required CI coverage job.  The latest local equivalent
-       measured ``87.767%`` coverage and enforces the 85% coverage gate while
+       measured ``88.335%`` coverage and enforces the 85% coverage gate while
        keeping optional executable validation in separate opt-in lanes.
    * - Optimization workflow smoke
      - ``pytest -q tests/test_optimization_examples.py tests/test_qs_ess_render_smoke.py``
