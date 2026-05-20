@@ -73,6 +73,10 @@ The required release baseline is:
 - The bounded physics smoke job succeeds.
 - Manual/nightly physics jobs may be skipped, but must not fail.
 
+As of 2026-05-20, the latest known green ``main`` CI baseline is commit
+``7030eaf``.  Re-check GitHub Actions before cutting any later release
+candidate rather than assuming that baseline still applies.
+
 The current CI workflow also includes a dedicated full-docs job.  Treat both
 ``Build (wheel/sdist + docs)`` and ``Docs (full guide)`` as release blockers.
 
@@ -128,6 +132,10 @@ with a no-dependencies wheel download after publication.
 
 The release notes should list user-visible changes, validation coverage, known
 limitations, and any optional external validation that was not run.
+The next release candidate should cite the ``7030eaf``-or-newer green CI run,
+the validated ``86.871%`` local required coverage result, the unchanged
+``85%`` enforced coverage gate, and the fact that ``90%``/``95%`` coverage and
+NFP=4 QI robustness are not yet achieved.
 
 Optional research-grade gates
 -----------------------------
