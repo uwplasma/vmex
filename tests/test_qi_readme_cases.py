@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 import sys
+import csv
 
 import numpy as np
 import pytest
@@ -83,6 +84,27 @@ def _synthetic_case(mod, tmp_path: Path, label: str, *, nfp: int, validation_sta
     )
 
 
+def _passing_diagnostics(*, nfp: int = 2) -> dict:
+    return {
+        "qi_smooth_total": 1.0e-3,
+        "qi_smooth_gate": 2.0e-3,
+        "qi_legacy_total": 1.5e-3,
+        "qi_legacy_gate": 2.0e-3,
+        "qi_mirror_ratio_max": 0.24,
+        "qi_mirror_ratio_target": 0.30,
+        "qi_max_elongation": 6.5,
+        "qi_elongation_target": 8.2,
+        "aspect": 9.8,
+        "target_aspect": 10.0,
+        "mean_iota": 0.47,
+        "abs_iota_min": 0.41,
+        "qi_nfp": nfp,
+        "qi_seed_gate_passed": True,
+        "qi_engineering_gate_passed": True,
+        "qi_gate_failures": [],
+    }
+
+
 def test_readme_renderer_records_case_gated_nfp123_gate_status(monkeypatch, tmp_path: Path) -> None:
     mod = _load_module()
     monkeypatch.setattr(mod, "REPO_ROOT", tmp_path)
@@ -93,21 +115,7 @@ def test_readme_renderer_records_case_gated_nfp123_gate_status(monkeypatch, tmp_
     def fake_load_json(path: Path):
         if path.name == "history.json":
             return {"objective_final": 1.5, "total_wall_time_s": 60.0}
-        return {
-            "qi_smooth_total": 1.0e-3,
-            "qi_legacy_total": 1.5e-3,
-            "qi_mirror_ratio_max": 0.24,
-            "qi_mirror_ratio_target": 0.30,
-            "qi_max_elongation": 6.5,
-            "qi_elongation_target": 8.2,
-            "aspect": 9.8,
-            "target_aspect": 10.0,
-            "mean_iota": 0.47,
-            "qi_nfp": int(path.parent.name.removeprefix("case_nfp")),
-            "qi_seed_gate_passed": True,
-            "qi_engineering_gate_passed": True,
-            "qi_gate_failures": [],
-        }
+        return _passing_diagnostics(nfp=int(path.parent.name.removeprefix("case_nfp")))
 
     monkeypatch.setattr(mod, "_load_json", fake_load_json)
 
@@ -224,6 +232,77 @@ def test_readme_renderer_rejects_case_gated_case_with_failed_engineering_gate(
 
     with pytest.raises(RuntimeError, match="case-gated but failed"):
         mod._case_record(_synthetic_case(mod, tmp_path, "NFP=2 bundled QI", nfp=2))
+
+
+def test_readme_renderer_rejects_case_gated_case_with_failed_seed_gate(monkeypatch, tmp_path: Path) -> None:
+    mod = _load_module()
+    monkeypatch.setattr(mod, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(mod, "_history_summary", lambda _case: (10.0, 1, 1))
+    monkeypatch.setattr(mod, "_preconditioner_summary", lambda _case: (0, None, None, None))
+    _patch_matching_wout(monkeypatch, mod)
+
+    def fake_load_json(path: Path):
+        if path.name == "history.json":
+            return {"objective_final": 1.0, "total_wall_time_s": 10.0}
+        diagnostics = _passing_diagnostics()
+        diagnostics["qi_seed_gate_passed"] = False
+        return diagnostics
+
+    monkeypatch.setattr(mod, "_load_json", fake_load_json)
+
+    with pytest.raises(RuntimeError, match="failed the QI seed gate"):
+        mod._case_record(_synthetic_case(mod, tmp_path, "NFP=2 bundled QI", nfp=2))
+
+
+def test_readme_renderer_rejects_case_gated_case_with_gate_failures(monkeypatch, tmp_path: Path) -> None:
+    mod = _load_module()
+    monkeypatch.setattr(mod, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(mod, "_history_summary", lambda _case: (10.0, 1, 1))
+    monkeypatch.setattr(mod, "_preconditioner_summary", lambda _case: (0, None, None, None))
+    _patch_matching_wout(monkeypatch, mod)
+
+    def fake_load_json(path: Path):
+        if path.name == "history.json":
+            return {"objective_final": 1.0, "total_wall_time_s": 10.0}
+        diagnostics = _passing_diagnostics()
+        diagnostics["qi_gate_failures"] = ["smooth_qi"]
+        return diagnostics
+
+    monkeypatch.setattr(mod, "_load_json", fake_load_json)
+
+    with pytest.raises(RuntimeError, match="has QI gate failures"):
+        mod._case_record(_synthetic_case(mod, tmp_path, "NFP=2 bundled QI", nfp=2))
+
+
+def test_readme_renderer_rejects_case_gated_case_with_nonfinite_metric(monkeypatch, tmp_path: Path) -> None:
+    mod = _load_module()
+    monkeypatch.setattr(mod, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(mod, "_history_summary", lambda _case: (10.0, 1, 1))
+    monkeypatch.setattr(mod, "_preconditioner_summary", lambda _case: (0, None, None, None))
+    _patch_matching_wout(monkeypatch, mod)
+
+    def fake_load_json(path: Path):
+        if path.name == "history.json":
+            return {"objective_final": 1.0, "total_wall_time_s": 10.0}
+        diagnostics = _passing_diagnostics()
+        diagnostics["qi_smooth_total"] = float("nan")
+        return diagnostics
+
+    monkeypatch.setattr(mod, "_load_json", fake_load_json)
+
+    with pytest.raises(RuntimeError, match="non-finite qi_smooth_total"):
+        mod._case_record(_synthetic_case(mod, tmp_path, "NFP=2 bundled QI", nfp=2))
+
+
+def test_real_qi_readme_csv_contains_only_clean_case_gated_rows() -> None:
+    csv_path = ROOT / "docs" / "_static" / "figures" / "readme_qi_optimization_cases.csv"
+    rows = list(csv.DictReader(csv_path.open()))
+
+    assert {int(row["qi_nfp"]) for row in rows} == {1, 2, 3, 4}
+    assert {row["validation_status"] for row in rows} == {"case-gated"}
+    assert {row["qi_gate_failures"] for row in rows} == {""}
+    assert {row["qi_seed_gate_passed"] for row in rows} == {"True"}
+    assert {row["qi_engineering_gate_passed"] for row in rows} == {"True"}
 
 
 def test_readme_renderer_rejects_initial_wout_that_does_not_match_input(monkeypatch, tmp_path: Path) -> None:
