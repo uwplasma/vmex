@@ -1401,6 +1401,7 @@ class FixedBoundaryExactOptimizer:
             jit_forces="auto",
             use_scan=False,
             light_history=True,
+            preconditioner_use_precomputed_tridi=self._use_precomputed_tridi_for_exact_tape(),
             # The optimizer only ever consumes `result.state` from these inner
             # solves. Keeping the full resume_state payload alive in diagnostics
             # needlessly retains large cached arrays/checkpoints across SciPy
@@ -1526,6 +1527,30 @@ class FixedBoundaryExactOptimizer:
         if backend in ("gpu", "cuda", "tpu", "rocm"):
             return "tape"
         return "tape"
+
+    def _use_precomputed_tridi_for_exact_tape(self) -> bool | None:
+        """Use precomputed Thomas coefficients for accepted GPU tape solves.
+
+        This is deliberately scoped to accepted-point exact solves. May 2026
+        office RTX A4000 profiles show it reduces dense-Jacobian tape cost, while
+        the same switch slows cold trial scan solves. ``None`` preserves the
+        solver's legacy environment-controlled default for CPU/default backends.
+        """
+
+        forced = os.getenv("VMEC_JAX_OPT_EXACT_TRIDI_PRECOMPUTE", "").strip().lower()
+        if forced in ("1", "true", "yes", "on"):
+            return True
+        if forced in ("0", "false", "no", "off"):
+            return False
+        backend = str(self._solver_device_name or "").strip().lower()
+        if not backend:
+            try:
+                from ._compat import jax as _jax
+
+                backend = str(_jax.default_backend()).strip().lower() if _jax is not None else "cpu"
+            except Exception:
+                backend = "cpu"
+        return True if backend in ("gpu", "cuda", "tpu", "rocm") else None
 
     def _use_scan_for_trial_solves(self) -> bool:
         """Return whether trial residual solves should use the scan loop.

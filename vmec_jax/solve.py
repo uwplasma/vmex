@@ -4729,6 +4729,7 @@ def solve_fixed_boundary_residual_iter(
     resume_state_mode: str | None = None,
     fsq_total_target: float | None = None,
     host_update_assembly: bool | None = None,
+    preconditioner_use_precomputed_tridi: bool | None = None,
     adjoint_trace: bool = False,
     adjoint_trace_mode: str = "full",
     state_only: bool = False,
@@ -6750,6 +6751,9 @@ def solve_fixed_boundary_residual_iter(
             indata_nstep=int(indata.get_int("NSTEP", 1)) if indata is not None else 1,
             override_env="",
         )
+        tridi_precompute_env = os.getenv("VMEC_JAX_TRIDI_PRECOMPUTE", "0")
+        if preconditioner_use_precomputed_tridi is not None:
+            tridi_precompute_env = "1" if bool(preconditioner_use_precomputed_tridi) else "0"
         scan_options = _vmec2000_scan_options_from_env(
             verbose=bool(verbose),
             vmec2000_control=bool(vmec2000_control),
@@ -6770,7 +6774,7 @@ def solve_fixed_boundary_residual_iter(
             scan_trace_env=os.getenv("VMEC_JAX_SCAN_TRACE", "0"),
             abort_scan_env=os.getenv("VMEC_JAX_SCAN_ABORT_ON_BADJAC", "0"),
             scan_precompute_env=os.getenv("VMEC_JAX_SCAN_PRECOND_PRECOMPUTE", ""),
-            tridi_precompute_env=os.getenv("VMEC_JAX_TRIDI_PRECOMPUTE", "0"),
+            tridi_precompute_env=tridi_precompute_env,
             scan_lax_env=os.getenv("VMEC_JAX_SCAN_PRECOND_LAXTRIDI", ""),
             tridi_solve_env=os.getenv("VMEC_JAX_TRIDI_SOLVE", ""),
             scan_restart_payload_env=os.getenv("VMEC_JAX_SCAN_RESTART_PAYLOAD", ""),
@@ -11314,6 +11318,7 @@ def solve_fixed_boundary_residual_iter(
                     mats=mats,
                     jmax=jmax,
                     cfg=cfg,
+                    use_precomputed=preconditioner_use_precomputed_tridi,
                 )
                 frzl_lam_pre = frzl_rz
                 if host_update_assembly:
@@ -11478,6 +11483,7 @@ def solve_fixed_boundary_residual_iter(
                     mats=mats,
                     jmax=jmax,
                     cfg=cfg,
+                    use_precomputed=preconditioner_use_precomputed_tridi,
                 )
                 frzl_lam_pre = frzl_rz
                 if host_update_assembly:
