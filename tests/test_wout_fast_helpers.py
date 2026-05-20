@@ -10,7 +10,10 @@ from vmec_jax.namelist import InData
 import vmec_jax.wout as wout_module
 from vmec_jax.wout import (
     MU0,
+    _apply_bsubv_equif_correction,
     _bool_from_nc,
+    _bsubuv_parity_from_bcovar,
+    _bsubuv_parity_from_realspace_jxbforce,
     _bss_scalxc_undo_factor,
     _bss_should_undo_scalxc,
     _chipf_from_chips,
@@ -24,6 +27,7 @@ from vmec_jax.wout import (
     _pshalf_from_s,
     _read_wout_scalar_metadata,
     _safe_divide,
+    _filter_bsubuv_jxbforce_parity,
     _undo_bss_scalxc_if_enabled,
     _vmec_wint_from_trig,
     _wout_phi_profile_from_variables,
@@ -104,6 +108,36 @@ def test_current_profile_full_mesh_uses_vmec_half_mesh_normalization() -> None:
     np.testing.assert_allclose(np.asarray(_icurv_full_mesh_from_indata(indata=zero_edge, s_full=s_full, signgs=1)), 0.0)
 
 
+def test_current_profile_guard_branches_keep_output_finite(monkeypatch) -> None:
+    s_full = np.asarray([0.0, 0.5, 1.0])
+
+    zero_curtor = InData(scalars={"NCURR": 1, "CURTOR": 0.0, "AC": [1.0]}, indexed={})
+    np.testing.assert_allclose(
+        np.asarray(_icurv_full_mesh_from_indata(indata=zero_curtor, s_full=s_full, signgs=1)),
+        np.zeros_like(s_full),
+    )
+
+    def fake_eval_profiles(indata, s):
+        del indata
+        s = np.asarray(s)
+        if int(s.shape[0]) == 1:
+            return {"current": np.asarray([2.0])}
+        return {"current": np.asarray([1.0, 2.0])}
+
+    monkeypatch.setattr("vmec_jax.profiles.eval_profiles", fake_eval_profiles)
+    mismatched_profile = InData(scalars={"NCURR": 1, "CURTOR": 3.0}, indexed={})
+    np.testing.assert_allclose(
+        np.asarray(_icurv_full_mesh_from_indata(indata=mismatched_profile, s_full=s_full, signgs=-1)),
+        np.zeros_like(s_full),
+    )
+    np.testing.assert_allclose(
+        np.asarray(_icurv_full_mesh_from_indata(indata=mismatched_profile, s_full=np.asarray([0.0]), signgs=1)),
+        np.asarray([0.0]),
+    )
+    empty_icurv = _icurv_full_mesh_from_indata(indata=mismatched_profile, s_full=np.asarray([]), signgs=1)
+    assert np.asarray(empty_icurv).shape == (0,)
+
+
 def test_eqfor_beta_aspect_and_ctor_match_vmec_normalizations() -> None:
     pres = np.asarray([0.0, 2.0, 4.0])
     vp = np.asarray([0.0, 5.0, 6.0])
@@ -134,6 +168,9 @@ def test_eqfor_beta_aspect_and_ctor_match_vmec_normalizations() -> None:
     assert betator == pytest.approx(2.0 * sump / sumbtor)
     assert betatot == pytest.approx(2.0 * sump / sumbtot)
     assert betaxis == pytest.approx(1.5 * (2.0 / (20.0 / 5.0 - 2.0)) - 0.5 * (4.0 / (20.0 / 6.0 - 4.0)))
+    assert _compute_eqfor_betaxis(pres=pres, vp=vp, bsq=bsq, sqrtg=sqrtg, wint=wint, signgs=1) == pytest.approx(
+        betaxis
+    )
     assert _compute_eqfor_betaxis(pres=pres[:2], vp=vp[:2], bsq=bsq[:2], sqrtg=sqrtg[:2], wint=wint, signgs=1) == 0.0
 
     R = np.asarray([[[1.0, 1.0], [1.0, 1.0]], [[3.0, 3.0], [5.0, 5.0]]])
@@ -147,6 +184,8 @@ def test_eqfor_beta_aspect_and_ctor_match_vmec_normalizations() -> None:
 
     with pytest.raises(ValueError, match="shape"):
         _compute_aspectratio(R=R[0], Zu=Zu[0], wint=wint)
+    with pytest.raises(ValueError, match="wint shape mismatch"):
+        _compute_aspectratio(R=R, Zu=Zu, wint=np.ones((1, 1)))
     assert _compute_aspectratio(R=np.zeros_like(R), Zu=Zu, wint=wint)[:3] == (0.0, 0.0, 0.0)
 
     fixed_bdy = InData(scalars={}, indexed={})
@@ -156,6 +195,211 @@ def test_eqfor_beta_aspect_and_ctor_match_vmec_normalizations() -> None:
     assert _compute_ctor_from_buco(buco=buco, signgs=-1, indata=fixed_bdy) == pytest.approx(-2.0 * np.pi * 5.0 / MU0)
     assert _compute_ctor_from_buco(buco=buco, signgs=1, indata=free_legacy) == pytest.approx(2.0 * np.pi * 4.0 / MU0)
     assert _compute_ctor_from_buco(buco=buco, signgs=1, indata=free_exact) == pytest.approx(2.0 * np.pi * 4.0 / MU0)
+    assert _compute_ctor_from_buco(buco=np.asarray([1.0]), signgs=1, indata=fixed_bdy) == 0.0
+
+
+def test_eqfor_beta_zero_denominators_and_short_meshes_stay_finite() -> None:
+    short = _compute_eqfor_beta(
+        pres=np.asarray([0.0, 1.0]),
+        vp=np.asarray([0.0, 1.0]),
+        bsq=np.ones((2, 1, 1)),
+        r12=np.ones((2, 1, 1)),
+        bsupv=np.ones((2, 1, 1)),
+        sqrtg=np.ones((2, 1, 1)),
+        wint=np.ones((1, 1)),
+        signgs=1,
+    )
+    assert short == (0.0, 0.0, 0.0, 0.0)
+
+    pres = np.asarray([0.0, 4.0, 5.0])
+    vp = np.asarray([0.0, 2.0, 3.0])
+    bsq = np.asarray([[[0.0]], [[8.0]], [[15.0]]])
+    betapol, betator, betatot, betaxis = _compute_eqfor_beta(
+        pres=pres,
+        vp=vp,
+        bsq=bsq,
+        r12=np.zeros_like(bsq),
+        bsupv=np.ones_like(bsq),
+        sqrtg=np.ones_like(bsq),
+        wint=np.ones((1, 1)),
+        signgs=1,
+    )
+
+    vnorm = (2.0 * np.pi) ** 2 * 0.5
+    expected_safe_beta = 2.0 * vnorm * (vp[1] * pres[1] + vp[2] * pres[2])
+    assert betapol == pytest.approx(expected_safe_beta)
+    assert betator == pytest.approx(expected_safe_beta)
+    assert betatot == pytest.approx(expected_safe_beta)
+    assert betaxis == pytest.approx(1.5 * pres[1] - 0.5 * pres[2])
+    assert _compute_eqfor_betaxis(pres=pres, vp=vp, bsq=bsq, sqrtg=np.ones_like(bsq), wint=np.ones((1, 1)), signgs=1) == 0.0
+
+
+def test_bsubv_equif_correction_preserves_preblend_surface_averages() -> None:
+    trig = SimpleNamespace(ntheta3=2, cosmui3=np.ones((2, 1)), mscale=np.asarray([2.0]))
+    ns = 4
+    bsubv_levels = np.asarray([100.0, 2.0, 4.0, 8.0])
+    bsubv = np.broadcast_to(bsubv_levels[:, None, None], (ns, 2, 1)).copy()
+    bsubv_e = np.broadcast_to(np.asarray([0.0, 5.0, 6.0, 0.0])[:, None, None], (ns, 2, 1)).copy()
+
+    corrected = _apply_bsubv_equif_correction(bsubv=bsubv, bsubv_e=bsubv_e, trig=trig)
+
+    np.testing.assert_allclose(corrected[0], bsubv[0])
+    for js in range(1, ns):
+        assert np.sum(corrected[js] * 0.5) == pytest.approx(bsubv_levels[js])
+
+    short = bsubv[:2]
+    assert _apply_bsubv_equif_correction(bsubv=short, bsubv_e=bsubv_e[:2], trig=trig) is short
+
+    bad_trig = SimpleNamespace(ntheta3=1, cosmui3=np.ones((1, 1)), mscale=np.asarray([1.0]))
+    with pytest.raises(ValueError, match="pwint shape mismatch"):
+        _apply_bsubv_equif_correction(bsubv=bsubv, bsubv_e=bsubv_e, trig=bad_trig)
+
+
+def test_parity_helpers_use_expected_radial_scaling_and_shape_guards() -> None:
+    s = np.asarray([0.0, 0.25, 1.0])
+    even_u = np.asarray([1.0, 2.0, 3.0])[:, None, None]
+    even_v = np.asarray([4.0, 5.0, 6.0])[:, None, None]
+
+    bsubu_even, bsubu_odd, bsubv_even, bsubv_odd = _bsubuv_parity_from_bcovar(
+        bsubu_even=even_u,
+        bsubv_even=even_v,
+        s=s,
+        iequi=0,
+    )
+    np.testing.assert_allclose(bsubu_even, even_u)
+    np.testing.assert_allclose(bsubv_even, even_v)
+    np.testing.assert_allclose(bsubu_odd, np.sqrt(s)[:, None, None] * even_u)
+    np.testing.assert_allclose(bsubv_odd, np.sqrt(s)[:, None, None] * even_v)
+
+    _, bsubu_odd_iequi, _, bsubv_odd_iequi = _bsubuv_parity_from_bcovar(
+        bsubu_even=even_u,
+        bsubv_even=even_v,
+        s=s,
+        iequi=1,
+    )
+    pshalf = _pshalf_from_s(s)[:, None, None]
+    np.testing.assert_allclose(bsubu_odd_iequi, pshalf * even_u)
+    np.testing.assert_allclose(bsubv_odd_iequi, pshalf * even_v)
+
+    trig = SimpleNamespace(
+        ntheta2=1,
+        cosmui=np.ones((1, 1)),
+        sinmui=np.zeros((1, 1)),
+        cosmu=np.ones((1, 1)),
+        sinmu=np.zeros((1, 1)),
+        cosnv=np.ones((1, 1)),
+        sinnv=np.zeros((1, 1)),
+        r0scale=1.0,
+    )
+    bsubu_even, bsubu_odd, bsubv_even, bsubv_odd = _bsubuv_parity_from_realspace_jxbforce(
+        bsubu=even_u,
+        bsubv=even_v,
+        trig=trig,
+    )
+    np.testing.assert_allclose(bsubu_even, even_u)
+    np.testing.assert_allclose(bsubv_even, even_v)
+    np.testing.assert_allclose(bsubu_odd, np.zeros_like(even_u))
+    np.testing.assert_allclose(bsubv_odd, np.zeros_like(even_v))
+
+    with pytest.raises(ValueError, match="shape mismatch"):
+        _bsubuv_parity_from_realspace_jxbforce(bsubu=even_u, bsubv=even_v[:2], trig=trig)
+    with pytest.raises(ValueError, match="shape"):
+        _bsubuv_parity_from_realspace_jxbforce(
+            bsubu=np.zeros((3, 1)),
+            bsubv=np.zeros((3, 1)),
+            trig=trig,
+        )
+    with pytest.raises(ValueError, match="smaller than ntheta2"):
+        _bsubuv_parity_from_realspace_jxbforce(
+            bsubu=np.zeros((3, 0, 1)),
+            bsubv=np.zeros((3, 0, 1)),
+            trig=trig,
+        )
+
+    rich_trig = SimpleNamespace(
+        ntheta2=2,
+        cosmui=np.asarray([[1.0, 1.0], [1.0, -1.0]]),
+        sinmui=np.zeros((2, 2)),
+        cosmu=np.asarray([[1.0, 1.0], [1.0, -1.0]]),
+        sinmu=np.zeros((2, 2)),
+        cosnv=np.asarray([[1.0, 1.0], [1.0, -1.0]]),
+        sinnv=np.zeros((2, 2)),
+        r0scale=1.0,
+    )
+    _, odd_u_rich, _, odd_v_rich = _bsubuv_parity_from_realspace_jxbforce(
+        bsubu=np.asarray([[[1.0, 1.0], [3.0, 3.0]]]),
+        bsubv=np.asarray([[[2.0, 2.0], [4.0, 4.0]]]),
+        trig=rich_trig,
+    )
+    assert np.any(np.abs(odd_u_rich) > 0.0)
+    assert np.any(np.abs(odd_v_rich) > 0.0)
+
+
+def test_parity_filter_negative_limits_return_even_channels_and_validate_shapes() -> None:
+    trig = SimpleNamespace(ntheta2=1)
+    even_u = np.asarray([1.0, 2.0, 3.0])[:, None, None]
+    odd_u = -even_u
+    even_v = even_u + 10.0
+    odd_v = -even_v
+
+    filtered_u, filtered_v = _filter_bsubuv_jxbforce_parity(
+        bsubu_even=even_u,
+        bsubu_odd=odd_u,
+        bsubv_even=even_v,
+        bsubv_odd=odd_v,
+        trig=trig,
+        mmax_force=-1,
+        nmax_force=0,
+    )
+
+    np.testing.assert_allclose(filtered_u, even_u)
+    np.testing.assert_allclose(filtered_v, even_v)
+    assert filtered_u is not even_u
+    assert filtered_v is not even_v
+
+    with pytest.raises(ValueError, match="shape mismatch"):
+        _filter_bsubuv_jxbforce_parity(
+            bsubu_even=even_u,
+            bsubu_odd=odd_u[:2],
+            bsubv_even=even_v,
+            bsubv_odd=odd_v,
+            trig=trig,
+            mmax_force=0,
+            nmax_force=0,
+        )
+
+    with pytest.raises(ValueError, match="smaller than ntheta2"):
+        _filter_bsubuv_jxbforce_parity(
+            bsubu_even=np.zeros((3, 0, 1)),
+            bsubu_odd=np.zeros((3, 0, 1)),
+            bsubv_even=np.zeros((3, 0, 1)),
+            bsubv_odd=np.zeros((3, 0, 1)),
+            trig=trig,
+            mmax_force=0,
+            nmax_force=0,
+        )
+
+    filter_trig = SimpleNamespace(
+        ntheta2=1,
+        cosmui=np.ones((1, 1)),
+        sinmui=np.zeros((1, 1)),
+        cosmu=np.ones((1, 1)),
+        sinmu=np.zeros((1, 1)),
+        cosnv=np.ones((1, 1)),
+        sinnv=np.zeros((1, 1)),
+        r0scale=1.0,
+    )
+    filtered_u, filtered_v = _filter_bsubuv_jxbforce_parity(
+        bsubu_even=even_u,
+        bsubu_odd=odd_u,
+        bsubv_even=even_v,
+        bsubv_odd=odd_v,
+        trig=filter_trig,
+        mmax_force=0,
+        nmax_force=0,
+    )
+    np.testing.assert_allclose(filtered_u, even_u)
+    np.testing.assert_allclose(filtered_v, even_v)
 
 
 def test_netcdf_scalar_helpers_handle_masked_and_fallback_values() -> None:
