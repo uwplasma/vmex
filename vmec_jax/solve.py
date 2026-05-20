@@ -1849,6 +1849,58 @@ def _residual_iter_history_record(
     )
 
 
+def _append_residual_iter_history_record(
+    rec: _ResidualIterHistoryRecord,
+    *,
+    step_history: list,
+    dt_eff_history: list,
+    update_rms_history: list,
+    w_curr_history: list,
+    w_try_history: list,
+    w_try_ratio_history: list,
+    restart_path_history: list,
+    step_status_history: list,
+    restart_reason_history: list,
+    pre_restart_reason_history: list,
+    time_step_history: list,
+    res0_history: list,
+    res1_history: list,
+    fsq_prev_history: list,
+    bad_growth_streak_history: list,
+    iter1_history: list,
+    iter2_history: list,
+    grad_rms_history: list,
+    free_boundary_enabled: bool,
+    freeb_ivac_history: list,
+    freeb_ivacskip_history: list,
+    freeb_full_update_history: list,
+) -> None:
+    """Append one residual-iteration history record to aligned host lists."""
+
+    step_history.append(rec.step)
+    dt_eff_history.append(rec.dt_eff)
+    update_rms_history.append(rec.update_rms)
+    w_curr_history.append(rec.w_curr)
+    w_try_history.append(rec.w_try)
+    w_try_ratio_history.append(rec.w_try_ratio)
+    restart_path_history.append(rec.restart_path)
+    step_status_history.append(rec.step_status)
+    restart_reason_history.append(rec.restart_reason)
+    pre_restart_reason_history.append(rec.pre_restart_reason)
+    time_step_history.append(rec.time_step)
+    res0_history.append(rec.res0)
+    res1_history.append(rec.res1)
+    fsq_prev_history.append(rec.fsq_prev)
+    bad_growth_streak_history.append(rec.bad_growth_streak)
+    iter1_history.append(rec.iter1)
+    iter2_history.append(rec.iter2)
+    grad_rms_history.append(rec.grad_rms)
+    if bool(free_boundary_enabled):
+        freeb_ivac_history.append(rec.freeb_ivac)
+        freeb_ivacskip_history.append(rec.freeb_ivacskip)
+        freeb_full_update_history.append(rec.freeb_full_update)
+
+
 def _sample_free_boundary_external_field(*, state: VMECState, static) -> dict[str, Any]:
     """WP2 diagnostic scaffold for external-field boundary channels."""
     from .free_boundary import sample_external_vacuum_diagnostics
@@ -13164,28 +13216,31 @@ def solve_fixed_boundary_residual_iter(
                         freeb_ivac=freeb_ivac,
                         freeb_ivacskip=freeb_ivacskip,
                     )
-                    step_history.append(rec.step)
-                    dt_eff_history.append(rec.dt_eff)
-                    update_rms_history.append(rec.update_rms)
-                    w_curr_history.append(rec.w_curr)
-                    w_try_history.append(rec.w_try)
-                    w_try_ratio_history.append(rec.w_try_ratio)
-                    restart_path_history.append(rec.restart_path)
-                    step_status_history.append(rec.step_status)
-                    restart_reason_history.append(rec.restart_reason)
-                    pre_restart_reason_history.append(rec.pre_restart_reason)
-                    time_step_history.append(rec.time_step)
-                    res0_history.append(rec.res0)
-                    res1_history.append(rec.res1)
-                    fsq_prev_history.append(rec.fsq_prev)
-                    bad_growth_streak_history.append(rec.bad_growth_streak)
-                    iter1_history.append(rec.iter1)
-                    iter2_history.append(rec.iter2)
-                    if free_boundary_enabled:
-                        freeb_ivac_history.append(rec.freeb_ivac)
-                        freeb_ivacskip_history.append(rec.freeb_ivacskip)
-                        freeb_full_update_history.append(rec.freeb_full_update)
-                    grad_rms_history.append(rec.grad_rms)
+                    _append_residual_iter_history_record(
+                        rec,
+                        step_history=step_history,
+                        dt_eff_history=dt_eff_history,
+                        update_rms_history=update_rms_history,
+                        w_curr_history=w_curr_history,
+                        w_try_history=w_try_history,
+                        w_try_ratio_history=w_try_ratio_history,
+                        restart_path_history=restart_path_history,
+                        step_status_history=step_status_history,
+                        restart_reason_history=restart_reason_history,
+                        pre_restart_reason_history=pre_restart_reason_history,
+                        time_step_history=time_step_history,
+                        res0_history=res0_history,
+                        res1_history=res1_history,
+                        fsq_prev_history=fsq_prev_history,
+                        bad_growth_streak_history=bad_growth_streak_history,
+                        iter1_history=iter1_history,
+                        iter2_history=iter2_history,
+                        grad_rms_history=grad_rms_history,
+                        free_boundary_enabled=free_boundary_enabled,
+                        freeb_ivac_history=freeb_ivac_history,
+                        freeb_ivacskip_history=freeb_ivacskip_history,
+                        freeb_full_update_history=freeb_full_update_history,
+                    )
                 if verbose and not (bool(vmec2000_control) and bool(verbose_vmec2000_table)):
                     print(
                         f"[solve_fixed_boundary_residual_iter] converged: "
@@ -13532,28 +13587,31 @@ def solve_fixed_boundary_residual_iter(
                             freeb_ivac=freeb_ivac,
                             freeb_ivacskip=freeb_ivacskip,
                         )
-                        step_history.append(rec.step)
-                        dt_eff_history.append(rec.dt_eff)
-                        update_rms_history.append(rec.update_rms)
-                        w_curr_history.append(rec.w_curr)
-                        w_try_history.append(rec.w_try)
-                        w_try_ratio_history.append(rec.w_try_ratio)
-                        restart_path_history.append(rec.restart_path)
-                        step_status_history.append(rec.step_status)
-                        restart_reason_history.append(rec.restart_reason)
-                        pre_restart_reason_history.append(rec.pre_restart_reason)
-                        time_step_history.append(rec.time_step)
-                        res0_history.append(rec.res0)
-                        res1_history.append(rec.res1)
-                        fsq_prev_history.append(rec.fsq_prev)
-                        bad_growth_streak_history.append(rec.bad_growth_streak)
-                        iter1_history.append(rec.iter1)
-                        iter2_history.append(rec.iter2)
-                        if free_boundary_enabled:
-                            freeb_ivac_history.append(rec.freeb_ivac)
-                            freeb_ivacskip_history.append(rec.freeb_ivacskip)
-                            freeb_full_update_history.append(rec.freeb_full_update)
-                        grad_rms_history.append(rec.grad_rms)
+                        _append_residual_iter_history_record(
+                            rec,
+                            step_history=step_history,
+                            dt_eff_history=dt_eff_history,
+                            update_rms_history=update_rms_history,
+                            w_curr_history=w_curr_history,
+                            w_try_history=w_try_history,
+                            w_try_ratio_history=w_try_ratio_history,
+                            restart_path_history=restart_path_history,
+                            step_status_history=step_status_history,
+                            restart_reason_history=restart_reason_history,
+                            pre_restart_reason_history=pre_restart_reason_history,
+                            time_step_history=time_step_history,
+                            res0_history=res0_history,
+                            res1_history=res1_history,
+                            fsq_prev_history=fsq_prev_history,
+                            bad_growth_streak_history=bad_growth_streak_history,
+                            iter1_history=iter1_history,
+                            iter2_history=iter2_history,
+                            grad_rms_history=grad_rms_history,
+                            free_boundary_enabled=free_boundary_enabled,
+                            freeb_ivac_history=freeb_ivac_history,
+                            freeb_ivacskip_history=freeb_ivacskip_history,
+                            freeb_full_update_history=freeb_full_update_history,
+                        )
                     _pop_iteration_histories()
                     prev_rz_fsq = prev_rz_fsq_before
                     skip_time_control = True
@@ -13698,28 +13756,31 @@ def solve_fixed_boundary_residual_iter(
                         freeb_ivac=freeb_ivac,
                         freeb_ivacskip=freeb_ivacskip,
                     )
-                    step_history.append(rec.step)
-                    dt_eff_history.append(rec.dt_eff)
-                    update_rms_history.append(rec.update_rms)
-                    w_curr_history.append(rec.w_curr)
-                    w_try_history.append(rec.w_try)
-                    w_try_ratio_history.append(rec.w_try_ratio)
-                    restart_path_history.append(rec.restart_path)
-                    step_status_history.append(rec.step_status)
-                    restart_reason_history.append(rec.restart_reason)
-                    pre_restart_reason_history.append(rec.pre_restart_reason)
-                    time_step_history.append(rec.time_step)
-                    res0_history.append(rec.res0)
-                    res1_history.append(rec.res1)
-                    fsq_prev_history.append(rec.fsq_prev)
-                    bad_growth_streak_history.append(rec.bad_growth_streak)
-                    iter1_history.append(rec.iter1)
-                    iter2_history.append(rec.iter2)
-                    if free_boundary_enabled:
-                        freeb_ivac_history.append(rec.freeb_ivac)
-                        freeb_ivacskip_history.append(rec.freeb_ivacskip)
-                        freeb_full_update_history.append(rec.freeb_full_update)
-                    grad_rms_history.append(rec.grad_rms)
+                    _append_residual_iter_history_record(
+                        rec,
+                        step_history=step_history,
+                        dt_eff_history=dt_eff_history,
+                        update_rms_history=update_rms_history,
+                        w_curr_history=w_curr_history,
+                        w_try_history=w_try_history,
+                        w_try_ratio_history=w_try_ratio_history,
+                        restart_path_history=restart_path_history,
+                        step_status_history=step_status_history,
+                        restart_reason_history=restart_reason_history,
+                        pre_restart_reason_history=pre_restart_reason_history,
+                        time_step_history=time_step_history,
+                        res0_history=res0_history,
+                        res1_history=res1_history,
+                        fsq_prev_history=fsq_prev_history,
+                        bad_growth_streak_history=bad_growth_streak_history,
+                        iter1_history=iter1_history,
+                        iter2_history=iter2_history,
+                        grad_rms_history=grad_rms_history,
+                        free_boundary_enabled=free_boundary_enabled,
+                        freeb_ivac_history=freeb_ivac_history,
+                        freeb_ivacskip_history=freeb_ivacskip_history,
+                        freeb_full_update_history=freeb_full_update_history,
+                    )
                 if verbose:
                     if bool(vmec2000_control) and bool(verbose_vmec2000_table):
                         # VMEC does not print rejected restart steps.
