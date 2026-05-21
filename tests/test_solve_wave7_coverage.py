@@ -270,3 +270,72 @@ def test_residual_iter_precompile_setup_branches(load_case_circular_tokamak, mon
     )
 
     assert freeb_result.diagnostics == {"precompile_only": True}
+
+
+def test_residual_iter_vmec2000_scan_minimal_one_step(load_case_circular_tokamak, monkeypatch):
+    pytest.importorskip("jax")
+
+    _cfg, indata, static, _boundary, state0 = load_case_circular_tokamak
+    monkeypatch.setenv("VMEC_JAX_SCAN_PRINT", "0")
+    monkeypatch.setenv("VMEC_JAX_SCAN_LIGHT", "0")
+    monkeypatch.setenv("VMEC_JAX_SCAN_MINIMAL", "1")
+    monkeypatch.setenv("VMEC_JAX_SCAN_PRECOND_PRECOMPUTE", "0")
+    monkeypatch.setenv("VMEC_JAX_TIMING", "1")
+
+    result = solve.solve_fixed_boundary_residual_iter(
+        state0,
+        static,
+        indata=indata,
+        signgs=1,
+        max_iter=1,
+        step_size=float(indata.get_float("DELT", 1.0)),
+        vmec2000_control=True,
+        strict_update=True,
+        backtracking=False,
+        jit_forces=False,
+        use_scan=True,
+        scan_minimal_default=True,
+        verbose=False,
+        verbose_vmec2000_table=False,
+    )
+
+    assert result.n_iter == 1
+    assert result.w_history.shape == (1,)
+    assert result.diagnostics["use_scan"] is True
+    assert result.diagnostics["vmec2000_scan"] is True
+    assert result.diagnostics["scan_minimal"] is True
+    assert result.diagnostics["probe_count"] == 1
+    assert np.isfinite(result.diagnostics["final_fsqr"])
+    assert result.diagnostics["timing"]["scan_total_s"] >= 0.0
+
+
+def test_residual_iter_vmec2000_scan_state_only(load_case_circular_tokamak, monkeypatch):
+    pytest.importorskip("jax")
+
+    _cfg, indata, static, _boundary, state0 = load_case_circular_tokamak
+    monkeypatch.setenv("VMEC_JAX_SCAN_PRINT", "0")
+    monkeypatch.setenv("VMEC_JAX_SCAN_MINIMAL", "1")
+
+    result = solve.solve_fixed_boundary_residual_iter(
+        state0,
+        static,
+        indata=indata,
+        signgs=1,
+        max_iter=1,
+        step_size=float(indata.get_float("DELT", 1.0)),
+        vmec2000_control=True,
+        strict_update=True,
+        backtracking=False,
+        jit_forces=False,
+        use_scan=True,
+        state_only=True,
+        scan_minimal_default=True,
+        verbose=False,
+        verbose_vmec2000_table=False,
+    )
+
+    assert result.n_iter == 1
+    assert result.w_history.shape == (0,)
+    assert result.diagnostics["state_only"] is True
+    assert result.diagnostics["history_none"] is True
+    assert result.diagnostics["vmec2000_scan"] is True

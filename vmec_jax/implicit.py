@@ -26,6 +26,19 @@ from typing import Any, Callable, Tuple
 import numpy as np
 
 from ._compat import has_jax, jax, jnp
+from .implicit_adjoint_helpers import (
+    active_normal_rhs,
+    default_jac_chunk_size,
+    dense_adjoint_from_jacobian,
+    full_active_keep_indices,
+    make_active_normal_map,
+    make_damped_transpose_map,
+    make_full_normal_map,
+    select_active_adjoint_mode,
+    select_active_packing_strategy,
+    validate_active_adjoint_shapes,
+    validate_full_adjoint_shapes,
+)
 
 try:
     import lineax as lx
@@ -1717,9 +1730,12 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
             )
             rz_idx = jnp.asarray(rz_idx_np, dtype=jnp.int32)
             lam_idx = jnp.asarray(lam_idx_np, dtype=jnp.int32)
-            if _vmec_keep_all_active_enabled():
+            active_packing_strategy = select_active_packing_strategy(
+                keep_all_active=_vmec_keep_all_active_enabled()
+            )
+            if active_packing_strategy == "full":
                 b_active_full = _pack_stellsym_feasible_state(ct_state, rz_idx=rz_idx, lam_idx=lam_idx)
-                active_keep_idx = jnp.arange(int(b_active_full.shape[0]), dtype=jnp.int32)
+                active_keep_idx = full_active_keep_indices(b_active_full, dtype=jnp.int32)
                 st_active_ref = _stop_gradient_tree(st_star)
                 x_active_star_full = _pack_stellsym_feasible_state(st_star, rz_idx=rz_idx, lam_idx=lam_idx)
                 x_active_star = jnp.take(x_active_star_full, active_keep_idx)
@@ -1885,22 +1901,20 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
                 active_linearize_start,
                 residual_size=int(np.prod(np.shape(residual_star_active))),
             )
-            active_is_square = tuple(residual_star_active.shape) == tuple(b_active.shape)
-            use_chunked_active = residual_adjoint_mode in ("chunked", "dense")
-            use_lineax_active = (
-                residual_adjoint_mode == "lineax"
-                and active_is_square
+            active_is_square = validate_active_adjoint_shapes(residual_star_active, b_active, x_active_star)
+            active_mode = select_active_adjoint_mode(
+                residual_adjoint_mode,
+                active_is_square=active_is_square,
             )
-            use_direct_stellsym = (
-                residual_adjoint_mode in ("direct", "bicgstab")
-                and active_is_square
-            )
+            use_chunked_active = active_mode.use_chunked_active
+            use_lineax_active = active_mode.use_lineax_active
+            use_direct_stellsym = active_mode.use_direct_stellsym
 
             if use_chunked_active:
-                chunk_size = getattr(implicit, "jac_chunk_size", None)
-                if chunk_size is None:
-                    chunk_size = min(int(x_active_star.shape[0]), 64)
-                chunk_size = int(chunk_size)
+                chunk_size = default_jac_chunk_size(
+                    x_active_star,
+                    getattr(implicit, "jac_chunk_size", None),
+                )
                 dense_start = time.perf_counter()
                 J_active = _linear_map_jacobian_columns(
                     residual_jvp_active,
@@ -1917,26 +1931,14 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
                 )
                 solve_start = time.perf_counter()
                 damping = jnp.asarray(float(implicit.damping), dtype=J_active.dtype)
-                if residual_adjoint_mode == "dense":
-                    if _is_traced(J_active, b_active, damping):
-                        out_shape = jax.ShapeDtypeStruct((int(J_active.shape[0]),), J_active.dtype)
-                        lam = jax.pure_callback(
-                            _dense_transpose_lstsq_host,
-                            out_shape,
-                            J_active,
-                            b_active,
-                            damping,
-                        )
-                    else:
-                        lam = jnp.asarray(
-                            _dense_transpose_lstsq_host(J_active, b_active, damping),
-                            dtype=J_active.dtype,
-                        )
-                else:
-                    H_active = J_active @ J_active.T
-                    H_active = H_active + damping * jnp.eye(int(H_active.shape[0]), dtype=H_active.dtype)
-                    rhs_active = J_active @ b_active
-                    lam = jnp.linalg.solve(H_active, rhs_active)
+                lam = dense_adjoint_from_jacobian(
+                    J_active,
+                    b_active,
+                    damping=damping,
+                    mode=residual_adjoint_mode,
+                    dense_transpose_lstsq_host=_dense_transpose_lstsq_host,
+                    is_traced=_is_traced,
+                )
                 _vmec_backward_profile_log("active_dense_solve_done", solve_start)
                 result = _boundary_param_vjp_active(lam)
                 _vmec_backward_profile_log("bwd_done_chunked", bwd_start)
@@ -1945,9 +1947,10 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
             if use_direct_stellsym:
                 from jax.scipy.sparse.linalg import bicgstab
 
-                def JT_active(v):
-                    return residual_vjp_active(v)[0] + jnp.asarray(float(implicit.damping), dtype=jnp.asarray(v).dtype) * v
-
+                JT_active = make_damped_transpose_map(
+                    residual_vjp_active,
+                    damping=float(implicit.damping),
+                )
                 direct_solve_start = time.perf_counter()
                 lam, info = bicgstab(
                     JT_active,
@@ -1964,9 +1967,10 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
 
             if use_lineax_active:
                 direct_solve_start = time.perf_counter()
-
-                def JT_active_lineax(v):
-                    return residual_vjp_active(v)[0] + jnp.asarray(float(implicit.damping), dtype=jnp.asarray(v).dtype) * v
+                JT_active_lineax = make_damped_transpose_map(
+                    residual_vjp_active,
+                    damping=float(implicit.damping),
+                )
 
                 lam, success, stats = _lineax_bicgstab_solve(
                     JT_active_lineax,
@@ -1996,12 +2000,12 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
             #   argmin_lam ||J^T lam - b||^2 + damping ||lam||^2
             # whose normal equations are
             #   (J J^T + damping I) lam = J b.
-            def Hvp_active(lam):
-                jt_lam = residual_vjp_active(lam)[0]
-                j_jt_lam = residual_jvp_active(jt_lam)
-                return j_jt_lam + jnp.asarray(float(implicit.damping), dtype=jnp.asarray(lam).dtype) * lam
-
-            rhs_active = residual_jvp_active(b_active)
+            Hvp_active = make_active_normal_map(
+                residual_jvp_active,
+                residual_vjp_active,
+                damping=float(implicit.damping),
+            )
+            rhs_active = active_normal_rhs(residual_jvp_active, b_active)
             cg_start = time.perf_counter()
             lam = _cg_solve(Hvp_active, rhs_active, tol=float(implicit.cg_tol), max_iter=int(implicit.cg_max_iter))
             _vmec_backward_profile_log("active_cg_done", cg_start)
@@ -2032,13 +2036,16 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
         residual_star, residual_jvp = jax.linearize(stationarity_fun, st_star)
         residual_vjp = jax.linear_transpose(residual_jvp, st_star)
         _vmec_backward_profile_log("full_linearize_done", linearize_start, residual_size=int(np.prod(np.shape(residual_star))))
-
-        def Hvp(u_flat):
-            u_state = _project_state(unpack_state(u_flat, st_star.layout))
-            jv = residual_jvp(u_state)
-            jt_jv = residual_vjp(jv)[0]
-            jt_jv = _project_state(jt_jv)
-            return pack_state(jt_jv) + jnp.asarray(float(implicit.damping), dtype=jnp.asarray(jv).dtype) * u_flat
+        validate_full_adjoint_shapes(residual_star, b)
+        Hvp = make_full_normal_map(
+            residual_jvp,
+            residual_vjp,
+            unpack_state=unpack_state,
+            pack_state=pack_state,
+            project_state=_project_state,
+            layout=st_star.layout,
+            damping=float(implicit.damping),
+        )
 
         cg_start = time.perf_counter()
         u = _cg_solve(Hvp, b, tol=float(implicit.cg_tol), max_iter=int(implicit.cg_max_iter))

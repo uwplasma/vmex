@@ -31,7 +31,7 @@ from .solve_residual_iter_config import (
     HEAVY_DUMP_ENVS as _HEAVY_DUMP_ENVS,
     LIGHT_DUMP_ENVS as _LIGHT_DUMP_ENVS,
     bad_jacobian_tau_tolerance as _bad_jacobian_tau_tolerance,
-    normalize_debug_print_mode as _normalize_debug_print_mode,
+    normalize_debug_print_mode as _normalize_debug_print_mode,  # noqa: F401 - re-exported for internal helpers/tests.
     parse_bad_jacobian_config as _parse_bad_jacobian_config,
     resolve_chunked_scan_config as _resolve_chunked_scan_config,
     resolve_debug_print_config as _resolve_debug_print_config,
@@ -98,7 +98,7 @@ from .solve_profile_helpers import (
     _icurv_full_mesh_from_indata,
     _mass_half_mesh_from_indata,
     _pressure_half_mesh_from_indata,
-    _s_half_from_full_mesh_s,
+    _s_half_from_full_mesh_s,  # noqa: F401 - re-exported for existing internal tests/importers.
     _vmec_force_flux_profiles,
 )
 from .solve_residual_iter_geometry_helpers import (
@@ -106,7 +106,25 @@ from .solve_residual_iter_geometry_helpers import (
     _mn_sin_to_signed_physical_batch as _geometry_mn_sin_to_signed_physical_batch,
     _rz_norm_np as _geometry_rz_norm_np,
 )
+from .solve_residual_objective_helpers import (
+    assemble_residual_objective_terms as _assemble_residual_objective_terms,
+    residual_objective_vector as _residual_objective_vector,
+)
 from .solve_scan_output import postprocess_vmec2000_scan_result, unpack_vmec2000_scan_histories
+from .solve_scan_planning_helpers import (
+    apply_state_only_scan_options as _apply_state_only_scan_options,
+    build_scan_timing_report as _build_scan_timing_report,
+    build_vmec2000_scan_cache_key as _build_vmec2000_scan_cache_key,
+    new_scan_timing_stats as _new_scan_timing_stats,
+    normalize_scan_print_mode as _normalize_scan_print_mode,
+    resolve_scan_iteration_plan as _resolve_scan_iteration_plan,
+    resolve_scan_preflight_iters as _resolve_scan_preflight_iters,
+    resolve_scan_run_flags as _resolve_scan_run_flags,
+    scan_chunk_settings as _resolve_scan_chunk_settings,
+    scan_jit_forces_enabled as _scan_jit_forces_enabled,
+    scan_timing_enabled as _scan_timing_enabled,
+    validate_vmec2000_scan_guards as _validate_vmec2000_scan_guards,
+)
 from .solve_scan_time_control import (
     scan_restart_decision,
     scan_restart_transition,
@@ -583,12 +601,13 @@ def _scan_chunk_settings(
     need_print: bool,
     lthreed: bool,
 ) -> tuple[int, bool]:
-    return _solve_runtime._scan_chunk_settings(
+    return _resolve_scan_chunk_settings(
         max_iter_scan=max_iter_scan,
         nstep_screen=nstep_screen,
         need_print=need_print,
         lthreed=lthreed,
         backend_name=_scan_backend_name(),
+        chunk_size_env=os.getenv("VMEC_JAX_SCAN_CHUNK_SIZE", ""),
     )
 
 
@@ -3645,8 +3664,6 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
     from .vmec_forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
     from .vmec_residue import (
         vmec_force_norms_from_bcovar_dynamic,
-        vmec_gcx2_from_tomnsps,
-        vmec_zero_m1_zforce,
     )
     from .vmec_tomnsp import vmec_trig_tables
 
@@ -3748,27 +3765,26 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
             include_edge=False,
             masks=mask_pack,
         )
-        rzl = vmec_zero_m1_zforce(frzl=rzl, enabled=zero_m1_zforce)
-        gcr2, gcz2, gcl2 = vmec_gcx2_from_tomnsps(
+        norms = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs)
+        terms = _assemble_residual_objective_terms(
             frzl=rzl,
+            norms=norms,
+            s=s,
+            w_rz=w_rz,
+            w_l=w_l,
+            zero_m1_zforce=zero_m1_zforce,
             lconm1=bool(getattr(static.cfg, "lconm1", True)),
             apply_m1_constraints=bool(apply_m1_constraints),
+            zero_m1_after_m1_constraints=False,
             include_edge=False,
             apply_scalxc=True,
-            s=s,
+            zero_edge_rz_blocks=False,
+            objective_scale=objective_scale_f,
         )
-        norms = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs)
-        fsqr2 = norms.r1 * norms.fnorm * gcr2
-        fsqz2 = norms.r1 * norms.fnorm * gcz2
-        fsql2 = norms.fnormL * gcl2
-
-        w = (w_rz * (fsqr2 + fsqz2)) + (w_l * fsql2)
-        if objective_scale_f is not None:
-            w = jnp.asarray(objective_scale_f, dtype=jnp.asarray(w).dtype) * w
 
         jac = signgs * jnp.asarray(k.bc.jac.sqrtg)
         jac_min = jnp.min(jac) if jac.shape[0] <= 1 else jnp.min(jac[1:, :, :])
-        return fsqr2, fsqz2, fsql2, w, jac_min
+        return terms.fsqr2, terms.fsqz2, terms.fsql2, terms.w, jac_min
 
     def _w_only(state: VMECState, zero_m1_zforce: Any):
         return _fsq2_terms_and_jacmin(state, zero_m1_zforce)[3]
@@ -3828,26 +3844,26 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
                 include_edge=False,
                 masks=mask_pack,
             )
-            rzl = vmec_zero_m1_zforce(frzl=rzl, enabled=zero_m1_zforce)
-            gcr2, gcz2, gcl2 = vmec_gcx2_from_tomnsps(
+            norms = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs)
+            terms = _assemble_residual_objective_terms(
                 frzl=rzl,
+                norms=norms,
+                s=s,
+                w_rz=w_rz,
+                w_l=w_l,
+                zero_m1_zforce=zero_m1_zforce,
                 lconm1=bool(getattr(static.cfg, "lconm1", True)),
                 apply_m1_constraints=bool(apply_m1_constraints),
+                zero_m1_after_m1_constraints=False,
                 include_edge=False,
                 apply_scalxc=True,
-                s=s,
+                zero_edge_rz_blocks=False,
+                objective_scale=objective_scale_f,
             )
-            norms = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs)
-            fsqr2 = norms.r1 * norms.fnorm * gcr2
-            fsqz2 = norms.r1 * norms.fnorm * gcz2
-            fsql2 = norms.fnormL * gcl2
-
-            w = (w_rz * (fsqr2 + fsqz2)) + (w_l * fsql2)
-            w = jnp.asarray(objective_scale_f, dtype=jnp.asarray(w).dtype) * w
 
             jac = signgs * jnp.asarray(k.bc.jac.sqrtg)
             jac_min = jnp.min(jac) if jac.shape[0] <= 1 else jnp.min(jac[1:, :, :])
-            return fsqr2, fsqz2, fsql2, w, jac_min
+            return terms.fsqr2, terms.fsqz2, terms.fsql2, terms.w, jac_min
 
         def _w_only(state: VMECState, zero_m1_zforce: Any):  # type: ignore[no-redef]
             return _fsq2_terms_and_jacmin(state, zero_m1_zforce)[3]
@@ -4134,11 +4150,7 @@ def solve_fixed_boundary_gn_vmec_residual(
     from .energy import flux_profiles_from_indata
     from .vmec_forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
     from .vmec_residue import (
-        vmec_apply_m1_constraints,
-        vmec_apply_scalxc_to_tomnsps,
         vmec_force_norms_from_bcovar_dynamic,
-        vmec_scalxc_from_s,
-        vmec_zero_m1_zforce,
     )
     from .vmec_tomnsp import vmec_trig_tables
 
@@ -4213,12 +4225,6 @@ def solve_fixed_boundary_gn_vmec_residual(
             dtype=jnp.asarray(state0.Rcos).dtype,
         )
 
-    # VMEC updates the *unscaled* coefficients using scalxc-weighted residuals.
-    # By default we keep that behavior (no division by scalxc). The optional
-    # `divide_by_scalxc_for_update` hook exists for experiments only.
-    scalxc = vmec_scalxc_from_s(s=s, mpol=int(static.cfg.mpol))  # (ns, mpol)
-    scalxc_mn = scalxc[:, :, None]  # (ns, mpol, ntor+1)
-
     edge_Rcos = jnp.asarray(state0.Rcos)[-1, :]
     edge_Rsin = jnp.asarray(state0.Rsin)[-1, :]
     edge_Zcos = jnp.asarray(state0.Zcos)[-1, :]
@@ -4261,72 +4267,28 @@ def solve_fixed_boundary_gn_vmec_residual(
             include_edge=False,
             masks=mask_pack,
         )
-        frzl = rzl
-        if bool(apply_m1_constraints):
-            frzl = vmec_apply_m1_constraints(frzl=frzl, lconm1=bool(getattr(static.cfg, "lconm1", True)))
-        frzl = vmec_zero_m1_zforce(frzl=frzl, enabled=zero_m1_zforce)
-
-        # VMEC convention: after tomnsps, scale Fourier-space forces by `scalxc`
-        # before forming sums-of-squares/scalars (funct3d.f).
-        frzl = vmec_apply_scalxc_to_tomnsps(frzl=frzl, s=s)
-
-        # VMEC convention: R/Z sums exclude the edge surface; enforce that by
-        # zeroing R/Z blocks at js=ns (lambda blocks are left untouched).
-        frzl = _zero_edge_rz_force_blocks(frzl)
-
-        gcr2 = jnp.sum(jnp.asarray(frzl.frcc) ** 2)
-        gcz2 = jnp.sum(jnp.asarray(frzl.fzsc) ** 2)
-        gcl2 = jnp.sum(jnp.asarray(frzl.flsc) ** 2)
-        if frzl.frss is not None:
-            gcr2 = gcr2 + jnp.sum(jnp.asarray(frzl.frss) ** 2)
-        if frzl.fzcs is not None:
-            gcz2 = gcz2 + jnp.sum(jnp.asarray(frzl.fzcs) ** 2)
-        if frzl.flcs is not None:
-            gcl2 = gcl2 + jnp.sum(jnp.asarray(frzl.flcs) ** 2)
-
-        if getattr(frzl, "frsc", None) is not None:
-            gcr2 = gcr2 + jnp.sum(jnp.asarray(frzl.frsc) ** 2)
-        if getattr(frzl, "fzcc", None) is not None:
-            gcz2 = gcz2 + jnp.sum(jnp.asarray(frzl.fzcc) ** 2)
-        if getattr(frzl, "flcc", None) is not None:
-            gcl2 = gcl2 + jnp.sum(jnp.asarray(frzl.flcc) ** 2)
-
-        if getattr(frzl, "frcs", None) is not None:
-            gcr2 = gcr2 + jnp.sum(jnp.asarray(frzl.frcs) ** 2)
-        if getattr(frzl, "fzss", None) is not None:
-            gcz2 = gcz2 + jnp.sum(jnp.asarray(frzl.fzss) ** 2)
-        if getattr(frzl, "flss", None) is not None:
-            gcl2 = gcl2 + jnp.sum(jnp.asarray(frzl.flss) ** 2)
-
         norms = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs)
-        fsqr2 = norms.r1 * norms.fnorm * gcr2
-        fsqz2 = norms.r1 * norms.fnorm * gcz2
-        fsql2 = norms.fnormL * gcl2
-        return frzl, fsqr2, fsqz2, fsql2, norms
+        terms = _assemble_residual_objective_terms(
+            frzl=rzl,
+            norms=norms,
+            s=s,
+            w_rz=w_rz,
+            w_l=w_l,
+            zero_m1_zforce=zero_m1_zforce,
+            lconm1=bool(getattr(static.cfg, "lconm1", True)),
+            apply_m1_constraints=bool(apply_m1_constraints),
+            zero_m1_after_m1_constraints=True,
+            include_edge=True,
+            apply_scalxc=True,
+            zero_edge_rz_blocks=True,
+            objective_scale=None,
+        )
+        return terms.frzl, terms.fsqr2, terms.fsqz2, terms.fsql2, terms.norms
 
     def _residual_vec(state: VMECState, zero_m1_zforce: Any) -> Any:
         frzl, *_vals = _residual_blocks(state, zero_m1_zforce)
         norms = _vals[-1]
-        scale_rz = jnp.sqrt(jnp.asarray(w_rz)) * jnp.sqrt(norms.r1 * norms.fnorm)
-        scale_l = jnp.sqrt(jnp.asarray(w_l)) * jnp.sqrt(norms.fnormL)
-        scale_rz = jnp.asarray(scale_rz, dtype=jnp.asarray(frzl.frcc).dtype)
-        scale_l = jnp.asarray(scale_l, dtype=jnp.asarray(frzl.frcc).dtype)
-
-        parts = [scale_rz * frzl.frcc, scale_rz * frzl.fzsc, scale_l * frzl.flsc]
-        if frzl.frss is not None:
-            parts.append(scale_rz * frzl.frss)
-        if frzl.fzcs is not None:
-            parts.append(scale_rz * frzl.fzcs)
-        if frzl.flcs is not None:
-            parts.append(scale_l * frzl.flcs)
-        for name in ["frsc", "fzcc", "flcc", "frcs", "fzss", "flss"]:
-            a = getattr(frzl, name, None)
-            if a is not None:
-                if name.startswith("fl"):
-                    parts.append(scale_l * a)
-                else:
-                    parts.append(scale_rz * a)
-        return jnp.concatenate([jnp.ravel(jnp.asarray(p)) for p in parts], axis=0)
+        return _residual_objective_vector(frzl=frzl, norms=norms, w_rz=w_rz, w_l=w_l)
 
     def _obj_terms(state: VMECState, zero_m1_zforce: Any):
         _frzl, fsqr2, fsqz2, fsql2, _norms = _residual_blocks(state, zero_m1_zforce)
@@ -6495,20 +6457,8 @@ def solve_fixed_boundary_residual_iter(
             stage_prev_fsq_j = None
 
     def _run_vmec2000_scan(state_init: VMECState) -> SolveVmecResidualResult:
-        scan_timing_env = os.getenv("VMEC_JAX_TIMING", "").strip().lower()
-        scan_timing_enabled = scan_timing_env not in ("", "0", "false", "no")
-        scan_timing_stats = {
-            "scan_setup_s": 0.0,
-            "scan_initial_compute_forces_s": 0.0,
-            "scan_axis_reset_compute_forces_s": 0.0,
-            "scan_run_setup_s": 0.0,
-            "scan_preflight_s": 0.0,
-            "scan_device_run_s": 0.0,
-            "scan_device_dispatch_s": 0.0,
-            "scan_device_ready_s": 0.0,
-            "scan_host_materialize_s": 0.0,
-            "scan_postprocess_s": 0.0,
-        }
+        scan_timing_enabled = _scan_timing_enabled(os.getenv("VMEC_JAX_TIMING", ""))
+        scan_timing_stats = _new_scan_timing_stats()
         scan_total_start = time.perf_counter() if scan_timing_enabled else None
 
         def _scan_block_until_ready(value):
@@ -6531,22 +6481,26 @@ def solve_fixed_boundary_residual_iter(
             scan_timing_stats["scan_device_run_s"] += ready_done - float(start)
             return value
 
-        if backtracking or limit_dt_from_force or limit_update_rms or use_direct_fallback or reference_mode:
-            raise ValueError(
-                "vmec2000 scan requires backtracking=False, limit_dt_from_force=False, "
-                "limit_update_rms=False, use_direct_fallback=False, reference_mode=False."
-            )
-        if not bool(strict_update):
-            raise ValueError("vmec2000 scan requires strict_update=True.")
-        if bool(auto_flip_force):
-            raise ValueError("vmec2000 scan does not yet support auto_flip_force=True.")
-
-        state_only_scan = bool(state_only)
-        scan_differentiated = _tree_has_tracer(state_init)
-        scan_fallback_enabled_run = (
-            bool(scan_fallback_enabled) and (not bool(scan_differentiated)) and (not state_only_scan)
+        _validate_vmec2000_scan_guards(
+            backtracking=bool(backtracking),
+            limit_dt_from_force=bool(limit_dt_from_force),
+            limit_update_rms=bool(limit_update_rms),
+            use_direct_fallback=bool(use_direct_fallback),
+            reference_mode=bool(reference_mode),
+            strict_update=bool(strict_update),
+            auto_flip_force=bool(auto_flip_force),
         )
-        force_chunked_scan_run = bool(force_chunked_scan) and (not bool(scan_differentiated))
+
+        scan_differentiated = _tree_has_tracer(state_init)
+        scan_run_flags = _resolve_scan_run_flags(
+            state_only=bool(state_only),
+            scan_differentiated=bool(scan_differentiated),
+            scan_fallback_enabled=bool(scan_fallback_enabled),
+            force_chunked_scan=bool(force_chunked_scan),
+        )
+        state_only_scan = scan_run_flags.state_only_scan
+        scan_fallback_enabled_run = scan_run_flags.scan_fallback_enabled_run
+        force_chunked_scan_run = scan_run_flags.force_chunked_scan_run
         k_preconditioner_update_interval = 25
         restart_badjac_factor = 0.9
         restart_badprog_factor = 1.03
@@ -6584,6 +6538,7 @@ def solve_fixed_boundary_residual_iter(
             tridi_solve_env=os.getenv("VMEC_JAX_TRIDI_SOLVE", ""),
             scan_restart_payload_env=os.getenv("VMEC_JAX_SCAN_RESTART_PAYLOAD", ""),
         )
+        scan_options = _apply_state_only_scan_options(scan_options, state_only_scan=bool(state_only_scan))
         scan_print_env = scan_options.scan_print_env
         scan_print_mode = scan_options.scan_print_mode
         scan_print_ordered = scan_options.scan_print_ordered
@@ -6615,13 +6570,6 @@ def solve_fixed_boundary_residual_iter(
                 scan_timecontrol_callback = None
         print_in_scan = scan_options.print_in_scan
         chunked_print = scan_options.chunked_print
-        if state_only_scan:
-            scan_light = False
-            scan_minimal = True
-            scan_collect_scalars = False
-            scan_collect_print = False
-            print_in_scan = False
-            chunked_print = False
         _jax_debug = None
         _jax_debug_print = None
         if print_in_scan:
@@ -6634,8 +6582,15 @@ def solve_fixed_boundary_residual_iter(
         if scan_print_mode == "io_callback":
             try:
                 from jax.experimental import io_callback as _io_callback
+                scan_print_mode = _normalize_scan_print_mode(
+                    scan_print_mode=scan_print_mode,
+                    io_callback_available=True,
+                )
             except Exception:
-                scan_print_mode = _normalize_debug_print_mode("debug_print")
+                scan_print_mode = _normalize_scan_print_mode(
+                    scan_print_mode=scan_print_mode,
+                    io_callback_available=False,
+                )
                 _io_callback = None  # type: ignore[assignment]
         scan_trace_ctx = None
         if scan_trace:
@@ -6929,10 +6884,7 @@ def solve_fixed_boundary_residual_iter(
         # Avoid nested JIT inside the scan by default; allow opt-in for testing.
         # Some cases benefit from a separately-jitted force kernel.
         scan_jit_env = os.getenv("VMEC_JAX_SCAN_JIT_FORCES")
-        if scan_jit_env is None:
-            jit_forces_scan = bool(jit_forces)
-        else:
-            jit_forces_scan = scan_jit_env.strip().lower() not in ("", "0", "false", "no")
+        jit_forces_scan = _scan_jit_forces_enabled(env_value=scan_jit_env, jit_forces=bool(jit_forces))
         _compute_forces_scan = _compute_forces if jit_forces_scan else _compute_forces_impl
         if scan_timing_enabled and scan_total_start is not None:
             scan_timing_stats["scan_setup_s"] += time.perf_counter() - float(scan_total_start)
@@ -8771,31 +8723,22 @@ def solve_fixed_boundary_residual_iter(
             edge_Zsin=jnp.asarray(edge_Zsin, dtype=dtype),
         )
 
-        preflight_default = "0" if bool(jit_forces_scan) else "1"
-        preflight_env = os.getenv("VMEC_JAX_SCAN_PREFLIGHT", preflight_default).strip()
-        preflight_env_l = preflight_env.lower()
-        preflight_enabled = preflight_env_l not in ("", "0", "false", "no")
-        if preflight_enabled and bool(vmec2000_control) and int(max_iter) > 0:
-            try:
-                preflight_iters = max(1, int(preflight_env))
-            except Exception:
-                preflight_iters = 1
-        else:
-            preflight_iters = 0
-        if axis_reset_repeat and int(max_iter) > 0:
-            preflight_iters = max(1, int(preflight_iters))
-        extra_iters_default = "0" if bool(vmec2000_control) else "10"
-        extra_iters_env = os.getenv("VMEC_JAX_SCAN_EXTRA_ITERS", extra_iters_default).strip()
-        try:
-            extra_iters = max(0, int(extra_iters_env))
-        except Exception:
-            extra_iters = 0
-        max_iter_scan = int(max_iter) + int(extra_iters)
-        if max_iter_scan <= 0:
-            preflight_iters = 0
-        elif preflight_iters > max_iter_scan:
-            preflight_iters = int(max_iter_scan)
-        max_iter_tail = int(max_iter_scan) - int(preflight_iters)
+        preflight_plan = _resolve_scan_preflight_iters(
+            jit_forces_scan=bool(jit_forces_scan),
+            vmec2000_control=bool(vmec2000_control),
+            max_iter=int(max_iter),
+            axis_reset_repeat=bool(axis_reset_repeat),
+            preflight_env=os.getenv("VMEC_JAX_SCAN_PREFLIGHT"),
+        )
+        iteration_plan = _resolve_scan_iteration_plan(
+            max_iter=int(max_iter),
+            preflight_iters=int(preflight_plan.preflight_iters),
+            vmec2000_control=bool(vmec2000_control),
+            extra_iters_env=os.getenv("VMEC_JAX_SCAN_EXTRA_ITERS"),
+        )
+        preflight_iters = iteration_plan.preflight_iters
+        max_iter_scan = iteration_plan.max_iter_scan
+        max_iter_tail = iteration_plan.max_iter_tail
 
         iter_offset_preflight = iter_offset0
         if axis_reset_repeat:
@@ -8803,34 +8746,33 @@ def solve_fixed_boundary_residual_iter(
             iter_offset0 = -1
             carry0 = carry0._replace(iter_offset=jnp.asarray(iter_offset0, dtype=jnp.int32))
 
-        scan_cache_key = (
-            "vmec2000_scan_v5",
-            static_key,
-            wout_key,
-            edge_signature_key,
-            int(max_iter_tail),
-            int(preflight_iters),
-            int(iter_offset0),
-            float(step_size),
-            float(initial_flip_sign),
-            float(lambda_update_scale),
-            float(ftol),
-            int(nstep_screen),
-            bool(use_restart_triggers),
-            bool(vmecpp_restart),
-            bool(scan_use_restart_payload),
-            None if stage_prev_fsq is None else float(stage_prev_fsq),
-            float(stage_transition_factor),
-            float(stage_transition_scale),
-            bool(jit_forces_scan),
-            bool(state_only_scan),
-            bool(scan_light),
-            bool(scan_minimal),
-            int(scan_fallback_iters),
-            float(scan_fallback_accept_frac),
-            float(scan_fallback_fsq_factor),
-            int(scan_fallback_badjac_limit),
-            float(scan_fallback_fsq_abs),
+        scan_cache_key = _build_vmec2000_scan_cache_key(
+            static_key=static_key,
+            wout_key=wout_key,
+            edge_signature_key=edge_signature_key,
+            max_iter_tail=int(max_iter_tail),
+            preflight_iters=int(preflight_iters),
+            iter_offset0=int(iter_offset0),
+            step_size=float(step_size),
+            initial_flip_sign=float(initial_flip_sign),
+            lambda_update_scale=float(lambda_update_scale),
+            ftol=float(ftol),
+            nstep_screen=int(nstep_screen),
+            use_restart_triggers=bool(use_restart_triggers),
+            vmecpp_restart=bool(vmecpp_restart),
+            scan_use_restart_payload=bool(scan_use_restart_payload),
+            stage_prev_fsq=stage_prev_fsq,
+            stage_transition_factor=float(stage_transition_factor),
+            stage_transition_scale=float(stage_transition_scale),
+            jit_forces_scan=bool(jit_forces_scan),
+            state_only_scan=bool(state_only_scan),
+            scan_light=bool(scan_light),
+            scan_minimal=bool(scan_minimal),
+            scan_fallback_iters=int(scan_fallback_iters),
+            scan_fallback_accept_frac=float(scan_fallback_accept_frac),
+            scan_fallback_fsq_factor=float(scan_fallback_fsq_factor),
+            scan_fallback_badjac_limit=int(scan_fallback_badjac_limit),
+            scan_fallback_fsq_abs=float(scan_fallback_fsq_abs),
         )
 
         def _run_scan(carry_init, it_seq):
@@ -9106,17 +9048,11 @@ def solve_fixed_boundary_residual_iter(
                     if scan_total_start is not None
                     else sum(scan_timing_stats.values())
                 )
-                scan_leaf_total_s = sum(
-                    float(value)
-                    for key, value in scan_timing_stats.items()
-                    if key not in ("scan_device_dispatch_s", "scan_device_ready_s")
+                scan_timing_report = _build_scan_timing_report(
+                    iterations=int(max_iter),
+                    stats=scan_timing_stats,
+                    scan_total_s=float(scan_total_s),
                 )
-                scan_timing_report = {
-                    "iterations": int(max_iter),
-                    "scan_total_s": float(scan_total_s),
-                    **{key: float(value) for key, value in scan_timing_stats.items()},
-                    "scan_unattributed_s": max(0.0, float(scan_total_s) - float(scan_leaf_total_s)),
-                }
             diagnostics = {
                 "use_scan": True,
                 "vmec2000_scan": True,
@@ -9291,17 +9227,11 @@ def solve_fixed_boundary_residual_iter(
                 if scan_total_start is not None
                 else sum(scan_timing_stats.values())
             )
-            scan_leaf_total_s = sum(
-                float(value)
-                for key, value in scan_timing_stats.items()
-                if key not in ("scan_device_dispatch_s", "scan_device_ready_s")
+            scan_timing_report = _build_scan_timing_report(
+                iterations=int(n_iter_hist),
+                stats=scan_timing_stats,
+                scan_total_s=float(scan_total_s),
             )
-            scan_timing_report = {
-                "iterations": int(n_iter_hist),
-                "scan_total_s": float(scan_total_s),
-                **{key: float(value) for key, value in scan_timing_stats.items()},
-                "scan_unattributed_s": max(0.0, float(scan_total_s) - float(scan_leaf_total_s)),
-            }
         res_scan = SolveVmecResidualResult(
             state=carry_final.state,
             n_iter=int(scan_output.w_history.shape[0]),
