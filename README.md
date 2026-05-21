@@ -136,6 +136,9 @@ PYTHONPATH=. python examples/optimization/render_readme_best_optimizations.py
 
 Full sweep reproduction, generated result tables, QI multi-NFP coverage, and
 publication asset requirements are in `docs/optimization_sweep_results.rst`.
+The full sweep lane spans QA/QH/QP/QI, CPU/GPU, `max_mode=1..4`, ESS/no ESS,
+continuation/direct, and `LASYM = F/T`; the compact README panels remain the
+reviewed `LASYM = F` best rows only.
 
 ## Performance, Validation, Release
 

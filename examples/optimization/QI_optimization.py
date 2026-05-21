@@ -67,10 +67,15 @@ STAGE_MODES = vj.repeated_stage_modes(
 )
 MIRROR_RAMP_STAGES = tuple(CASE.get("mirror_ramp_stages", ()))
 if _MAX_NFEV_ENV is not None:
-    MIRROR_RAMP_STAGES = tuple(
-        {**stage, "max_nfev": min(int(stage.get("max_nfev", MAX_NFEV)), MAX_NFEV)}
-        for stage in MIRROR_RAMP_STAGES
-    )
+    budgeted_stages = []
+    for stage in MIRROR_RAMP_STAGES:
+        stage_max_nfev = int(stage.get("max_nfev", MAX_NFEV))
+        if bool(stage.get("use_showcase_max_nfev", False)):
+            stage_max_nfev = MAX_NFEV
+        else:
+            stage_max_nfev = min(stage_max_nfev, MAX_NFEV)
+        budgeted_stages.append({**stage, "max_nfev": stage_max_nfev})
+    MIRROR_RAMP_STAGES = tuple(budgeted_stages)
 _TARGET_HELICITY_SEED_AMP_ENV = os.environ.get("VMEC_JAX_QI_TARGET_HELICITY_SEED_AMPLITUDE")
 _TARGET_HELICITY_SEED_ENABLED_ENV = os.environ.get("VMEC_JAX_QI_USE_TARGET_HELICITY_SEED")
 TARGET_HELICITY_SEED_ENABLED = (

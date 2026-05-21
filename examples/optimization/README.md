@@ -294,10 +294,10 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi_boundary_interpolatio
   --max-mirror-ratio 0.35 --max-elongation 8.0
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py \
   --backend-label cpu --solver-device cpu --policy continuation \
-  --problems qi --modes 1,2,3 --ess both --qi-qp-preseed both --rerun
+  --problems qi --modes 1,2,3,4 --ess both --qi-qp-preseed both --rerun
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py \
   --backend-label cpu --solver-device cpu --policy direct \
-  --problems qi --modes 1,2,3 --ess both --qi-qp-preseed both --rerun
+  --problems qi --modes 1,2,3,4 --ess both --qi-qp-preseed both --rerun
 PYTHONPATH=. python examples/optimization/render_qi_constrained_sweep.py
 PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 ```
@@ -340,7 +340,7 @@ promotion evidence.
 ## Sweep And Rendering Tools
 
 - `generate_qs_ess_sweep.py`: CPU/GPU QA/QH/QP/QI policy sweep over mode continuation, ESS, and maximum boundary mode.
-- `render_qs_ess_publication_panel.py`: render full-sweep docs assets from sweep outputs: objective histories over all stages, final-state 3D atlases, LCFS Boozer `|B|` line-contour atlases, and wall-time/status summary tables.
+- `render_qs_ess_publication_panel.py`: render full-sweep docs assets from sweep outputs: objective histories over all stages, initial/final 3D atlases, initial/final LCFS Boozer `|B|` line-contour atlases, and wall-time/status summary tables.
 - `render_readme_best_optimizations.py`: render only the compact README best-row figures and CSV table.
 - `render_qi_readme_cases.py`: render the NFP=1-4 QI docs coverage figure and CSV from existing `QI_optimization.py` outputs, using Boozer `|B|` line contours only.
 - `render_qi_constrained_sweep.py`: render QI-focused constrained-sweep diagnostics.
@@ -350,7 +350,7 @@ Example:
 ```bash
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py \
   --backend-label cpu --solver-device cpu --policy continuation \
-  --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --rerun
+  --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --qi-qp-preseed off --rerun
 PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 ```
 

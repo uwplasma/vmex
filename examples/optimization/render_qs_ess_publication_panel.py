@@ -45,8 +45,8 @@ ROW_SPECS = (
     ("qi", "direct"),
 )
 MODES_BY_POLICY = {
-    "continuation": (1, 2, 3),
-    "direct": (1, 2, 3),
+    "continuation": (1, 2, 3, 4),
+    "direct": (1, 2, 3, 4),
 }
 QI_INPUT_NFP = 2
 TARGET_ASPECT = 6.0
@@ -131,8 +131,7 @@ class CaseResult:
 
 
 @dataclass
-class PlotPayload:
-    result: CaseResult
+class StatePayload:
     X: np.ndarray
     Y: np.ndarray
     Z: np.ndarray
@@ -141,6 +140,13 @@ class PlotPayload:
     zeta: np.ndarray
     B_contour: np.ndarray
     nfp: int
+
+
+@dataclass
+class PlotPayload:
+    result: CaseResult
+    initial: StatePayload
+    final: StatePayload
 
 
 def _style_publication():
@@ -710,41 +716,52 @@ def _problems_with_payloads(
     )
 
 
+def _load_state_payload(wout_path: Path) -> StatePayload | None:
+    if not wout_path.exists():
+        return None
+    wout = read_wout(str(wout_path))
+    ns = int(np.asarray(wout.ns))
+    _theta3d, phi3d, R3d, Z3d, B3d = vmecplot2_lcfs_3d_grid(
+        wout,
+        s_index=ns - 1,
+        ntheta=48,
+        nzeta=96,
+    )
+    X3d, Y3d, Z3d = _lcfs_xyz(R3d, Z3d, phi3d)
+    zeta_max = 2.0 * np.pi / int(np.asarray(wout.nfp))
+    theta2d, zeta2d, B2d = vmecplot2_bmag_grid(
+        wout,
+        s_index=ns - 1,
+        ntheta=128,
+        nzeta=192,
+        zeta_max=zeta_max,
+    )
+    return StatePayload(
+        X=X3d,
+        Y=Y3d,
+        Z=Z3d,
+        B_surface=B3d,
+        theta=theta2d,
+        zeta=zeta2d,
+        B_contour=B2d,
+        nfp=int(np.asarray(wout.nfp)),
+    )
+
+
 def _load_payloads(results: list[CaseResult]) -> dict[tuple[str, bool, str, str, int, bool], PlotPayload]:
     payloads: dict[tuple[str, bool, str, str, int, bool], PlotPayload] = {}
     for result in results:
         if result.crashed or result.output_dir is None:
             continue
-        wout_path = Path(result.output_dir) / "wout_final.nc"
-        if not wout_path.exists():
+        output_dir = Path(result.output_dir)
+        initial = _load_state_payload(output_dir / "wout_initial.nc")
+        final = _load_state_payload(output_dir / "wout_final.nc")
+        if initial is None or final is None:
             continue
-        wout = read_wout(str(wout_path))
-        ns = int(np.asarray(wout.ns))
-        theta3d, phi3d, R3d, Z3d, B3d = vmecplot2_lcfs_3d_grid(
-            wout,
-            s_index=ns - 1,
-            ntheta=48,
-            nzeta=96,
-        )
-        X3d, Y3d, Z3d = _lcfs_xyz(R3d, Z3d, phi3d)
-        zeta_max = 2.0 * np.pi / int(np.asarray(wout.nfp))
-        theta2d, zeta2d, B2d = vmecplot2_bmag_grid(
-            wout,
-            s_index=ns - 1,
-            ntheta=128,
-            nzeta=192,
-            zeta_max=zeta_max,
-        )
         payloads[_result_key(result)] = PlotPayload(
             result=result,
-            X=X3d,
-            Y=Y3d,
-            Z=Z3d,
-            B_surface=B3d,
-            theta=theta2d,
-            zeta=zeta2d,
-            B_contour=B2d,
-            nfp=int(np.asarray(wout.nfp)),
+            initial=initial,
+            final=final,
         )
     return payloads
 
@@ -989,8 +1006,8 @@ def _plot_state_atlas(
         return False
     columns = [(mode, use_ess) for mode in modes for use_ess in ESS_OPTIONS]
     ncols = len(columns)
-    nrows = 2 * len(problems)
-    fig = plt.figure(figsize=(3.95 * ncols, 3.15 * nrows))
+    nrows = 4 * len(problems)
+    fig = plt.figure(figsize=(3.95 * ncols, 2.75 * nrows))
     grid = fig.add_gridspec(nrows, ncols, wspace=0.14, hspace=0.22)
 
     def _finite_range(values: np.ndarray) -> tuple[float, float]:
@@ -1012,8 +1029,10 @@ def _plot_state_atlas(
 
     for col_index, (max_mode, use_ess) in enumerate(columns):
         for problem_index, problem in enumerate(problems):
-            row_surface = problem_index * 2
-            row_contour = row_surface + 1
+            row_initial_surface = problem_index * 4
+            row_final_surface = row_initial_surface + 1
+            row_initial_contour = row_initial_surface + 2
+            row_final_contour = row_initial_surface + 3
             result = _lookup_result(
                 lookup,
                 backend=backend,
@@ -1029,13 +1048,74 @@ def _plot_state_atlas(
             if problem_index == 0:
                 title = f"mode {max_mode} | {_ess_label(use_ess)}"
             if result is None or payload is None:
+                for row, label, is_surface in (
+                    (row_initial_surface, "initial LCFS", True),
+                    (row_final_surface, "final LCFS", True),
+                    (row_initial_contour, "initial |B|", False),
+                    (row_final_contour, "final |B|", False),
+                ):
+                    ax = fig.add_subplot(grid[row, col_index], projection="3d") if is_surface else fig.add_subplot(grid[row, col_index])
+                    _draw_placeholder(ax, "", title=title if row == row_initial_surface else None)
+                    if col_index == 0:
+                        if not is_surface:
+                            ax.set_ylabel("theta")
+                        text_fn = ax.text2D if is_surface else ax.text
+                        text_fn(
+                            -0.17 if is_surface else -0.19,
+                            0.5,
+                            f"{problem.upper()} {label}",
+                            transform=ax.transAxes,
+                            rotation=90,
+                            va="center",
+                            ha="center",
+                            fontsize=12,
+                            fontweight="bold",
+                        )
+                    if not is_surface:
+                        ax.set_xlabel("zeta")
+                continue
+
+            for state_label, state, row_surface, row_contour in (
+                ("initial", payload.initial, row_initial_surface, row_initial_contour),
+                ("final", payload.final, row_final_surface, row_final_contour),
+            ):
                 ax3d = fig.add_subplot(grid[row_surface, col_index], projection="3d")
-                _draw_placeholder(ax3d, "", title=title)
+                b3_min, b3_max = _finite_range(state.B_surface)
+                surface_norm = Normalize(vmin=b3_min, vmax=b3_max)
+                facecolors = cm.viridis(surface_norm(state.B_surface))
+                ax3d.plot_surface(
+                    state.X,
+                    state.Y,
+                    state.Z,
+                    facecolors=facecolors,
+                    rstride=1,
+                    cstride=1,
+                    linewidth=0,
+                    antialiased=False,
+                    shade=False,
+                )
+                ax3d.view_init(elev=24, azim=42)
+                fix_matplotlib_3d(ax3d)
+                ax3d.set_xticks([])
+                ax3d.set_yticks([])
+                ax3d.set_zticks([])
+                sm = ScalarMappable(norm=surface_norm, cmap=cm.viridis)
+                sm.set_array([])
+                _inset_colorbar(sm, ax3d, label="|B| (T)", height="46%")
+                if problem_index == 0 and state_label == "initial":
+                    wall_min = float(result.total_wall_time_s) / 60.0
+                    objective_text = (
+                        f"{float(result.objective_final):.2e}" if result.objective_final is not None else "n/a"
+                    )
+                    ax3d.set_title(
+                        f"mode {max_mode} | {_ess_label(use_ess)}\nJ={objective_text}, {wall_min:.1f} min",
+                        pad=10,
+                    )
                 if col_index == 0:
                     ax3d.text2D(
                         -0.16,
                         0.5,
-                        f"{problem.upper()} LCFS",
+                        f"{problem.upper()} {state_label} LCFS",
                         transform=ax3d.transAxes,
                         rotation=90,
                         va="center",
@@ -1043,14 +1123,30 @@ def _plot_state_atlas(
                         fontsize=12,
                         fontweight="bold",
                     )
+
                 ax2d = fig.add_subplot(grid[row_contour, col_index])
-                _draw_placeholder(ax2d, "")
+                zeta_mesh, theta_mesh = np.meshgrid(state.zeta, state.theta)
+                b2_min, b2_max = _finite_range(state.B_contour)
+                contour_levels = np.linspace(b2_min, b2_max, 22)
+                contours = ax2d.contour(
+                    zeta_mesh,
+                    theta_mesh,
+                    state.B_contour,
+                    levels=contour_levels,
+                    cmap="viridis",
+                    linewidths=1.0,
+                )
+                _inset_colorbar(contours, ax2d, label="|B| (T)", height="78%")
+                ax2d.set_ylim(0.0, 2.0 * np.pi)
+                ax2d.set_xlim(0.0, float(np.max(state.zeta)))
+                ax2d.set_yticks([0.0, np.pi, 2.0 * np.pi])
                 if col_index == 0:
+                    ax2d.set_yticklabels(["0", "pi", "2pi"])
                     ax2d.set_ylabel("theta")
                     ax2d.text(
                         -0.19,
                         0.5,
-                        f"{problem.upper()} |B|",
+                        f"{problem.upper()} {state_label} |B|",
                         transform=ax2d.transAxes,
                         rotation=90,
                         va="center",
@@ -1058,111 +1154,39 @@ def _plot_state_atlas(
                         fontsize=12,
                         fontweight="bold",
                     )
+                else:
+                    ax2d.set_yticklabels([])
+                xticks = [0.0, float(np.max(state.zeta)) / 2.0, float(np.max(state.zeta))]
+                ax2d.set_xticks(xticks)
+                ax2d.set_xticklabels([_pi_label(v) for v in xticks])
                 ax2d.set_xlabel("zeta")
-                continue
-
-            ax3d = fig.add_subplot(grid[row_surface, col_index], projection="3d")
-            b3_min, b3_max = _finite_range(payload.B_surface)
-            surface_norm = Normalize(vmin=b3_min, vmax=b3_max)
-            facecolors = cm.viridis(surface_norm(payload.B_surface))
-            ax3d.plot_surface(
-                payload.X,
-                payload.Y,
-                payload.Z,
-                facecolors=facecolors,
-                rstride=1,
-                cstride=1,
-                linewidth=0,
-                antialiased=False,
-                shade=False,
-            )
-            ax3d.view_init(elev=24, azim=42)
-            fix_matplotlib_3d(ax3d)
-            ax3d.set_xticks([])
-            ax3d.set_yticks([])
-            ax3d.set_zticks([])
-            sm = ScalarMappable(norm=surface_norm, cmap=cm.viridis)
-            sm.set_array([])
-            _inset_colorbar(sm, ax3d, label="|B| (T)", height="46%")
-            if problem_index == 0:
-                wall_min = float(result.total_wall_time_s) / 60.0
-                objective_text = (
-                    f"{float(result.objective_final):.2e}" if result.objective_final is not None else "n/a"
-                )
-                ax3d.set_title(
-                    f"mode {max_mode} | {_ess_label(use_ess)}\nJ={objective_text}, {wall_min:.1f} min",
-                    pad=10,
-                )
-            if col_index == 0:
-                ax3d.text2D(
-                    -0.16,
-                    0.5,
-                    f"{problem.upper()} LCFS",
-                    transform=ax3d.transAxes,
-                    rotation=90,
-                    va="center",
-                    ha="center",
-                    fontsize=12,
-                    fontweight="bold",
-                )
-
-            ax2d = fig.add_subplot(grid[row_contour, col_index])
-            zeta_mesh, theta_mesh = np.meshgrid(payload.zeta, payload.theta)
-            b2_min, b2_max = _finite_range(payload.B_contour)
-            contour_levels = np.linspace(b2_min, b2_max, 22)
-            contours = ax2d.contour(
-                zeta_mesh,
-                theta_mesh,
-                payload.B_contour,
-                levels=contour_levels,
-                cmap="viridis",
-                linewidths=1.0,
-            )
-            _inset_colorbar(contours, ax2d, label="|B| (T)", height="78%")
-            ax2d.set_ylim(0.0, 2.0 * np.pi)
-            ax2d.set_xlim(0.0, float(np.max(payload.zeta)))
-            ax2d.set_yticks([0.0, np.pi, 2.0 * np.pi])
-            if col_index == 0:
-                ax2d.set_yticklabels(["0", "pi", "2pi"])
-                ax2d.set_ylabel("theta")
-                ax2d.text(
-                    -0.19,
-                    0.5,
-                    f"{problem.upper()} |B|",
-                    transform=ax2d.transAxes,
-                    rotation=90,
-                    va="center",
-                    ha="center",
-                    fontsize=12,
-                    fontweight="bold",
-                )
-            else:
-                ax2d.set_yticklabels([])
-            xticks = [0.0, float(np.max(payload.zeta)) / 2.0, float(np.max(payload.zeta))]
-            ax2d.set_xticks(xticks)
-            ax2d.set_xticklabels([_pi_label(v) for v in xticks])
-            ax2d.set_xlabel("zeta")
-            ax2d.grid(False)
-            wall_min = float(result.total_wall_time_s) / 60.0
-            meta = f"A={float(result.aspect_final):.3f}\nwall={wall_min:.1f} min"
-            if result.iota_final is not None:
-                meta = f"A={float(result.aspect_final):.3f}\niota={float(result.iota_final):.4f}\nwall={wall_min:.1f} min"
-            if _is_zero_iota_direct_limit(result):
-                meta += "\nzero-iota branch"
-            ax2d.text(
-                0.02,
-                0.02,
-                meta,
-                transform=ax2d.transAxes,
-                ha="left",
-                va="bottom",
-                fontsize=8.1,
-                bbox={"boxstyle": "round,pad=0.22", "facecolor": "white", "edgecolor": "0.86", "alpha": 0.92},
-            )
+                ax2d.grid(False)
+                if state_label == "final":
+                    wall_min = float(result.total_wall_time_s) / 60.0
+                    meta = f"A={float(result.aspect_final):.3f}\nwall={wall_min:.1f} min"
+                    if result.iota_final is not None:
+                        meta = f"A={float(result.aspect_final):.3f}\niota={float(result.iota_final):.4f}\nwall={wall_min:.1f} min"
+                    if _is_zero_iota_direct_limit(result):
+                        meta += "\nzero-iota branch"
+                    ax2d.text(
+                        0.02,
+                        0.02,
+                        meta,
+                        transform=ax2d.transAxes,
+                        ha="left",
+                        va="bottom",
+                        fontsize=8.1,
+                        bbox={
+                            "boxstyle": "round,pad=0.22",
+                            "facecolor": "white",
+                            "edgecolor": "0.86",
+                            "alpha": 0.92,
+                        },
+                    )
 
     fig.suptitle(
         (
-            f"Final-state atlas: {backend.upper()} {_symmetry_label(stellarator_asymmetric)} "
+            f"Initial/final state atlas: {backend.upper()} {_symmetry_label(stellarator_asymmetric)} "
             f"{_policy_label(policy)} policy"
         ),
         y=0.995,
@@ -1363,12 +1387,12 @@ def _render_publication_set(
                 ):
                     continue
                 atlas_stem = (
-                    f"final_state_atlas_{backend}_{policy}"
+                    f"initial_final_state_atlas_{backend}_{policy}"
                     if not stellarator_asymmetric
-                    else f"final_state_atlas_{backend}_{symmetry_file_label}_{policy}"
+                    else f"initial_final_state_atlas_{backend}_{symmetry_file_label}_{policy}"
                 )
                 if output_suffix:
-                    atlas_stem = f"final_state_atlas_{output_suffix}_{backend}_{policy}"
+                    atlas_stem = f"initial_final_state_atlas_{output_suffix}_{backend}_{policy}"
                 atlas_png = OUTPUT_ROOT / f"{atlas_stem}.png"
                 atlas_pdf = OUTPUT_ROOT / f"{atlas_stem}.pdf"
                 wrote_atlas = _plot_state_atlas(
@@ -1387,13 +1411,15 @@ def _render_publication_set(
                         atlas_png,
                         atlas_pdf,
                         (
-                            f"Final-state atlas: {backend.upper()} "
+                            f"Initial/final atlas: {backend.upper()} "
                             f"{_symmetry_label(stellarator_asymmetric)} "
                             f"{_policy_label(policy).lower()} policy"
                         ),
                     )
                 )
                 if alias_legacy and backend == "cpu" and not stellarator_asymmetric:
+                    shutil.copy2(atlas_png, OUTPUT_ROOT / f"initial_final_state_atlas_{policy}.png")
+                    shutil.copy2(atlas_pdf, OUTPUT_ROOT / f"initial_final_state_atlas_{policy}.pdf")
                     shutil.copy2(atlas_png, OUTPUT_ROOT / f"final_state_atlas_{policy}.png")
                     shutil.copy2(atlas_pdf, OUTPUT_ROOT / f"final_state_atlas_{policy}.pdf")
                     if policy == "continuation":
