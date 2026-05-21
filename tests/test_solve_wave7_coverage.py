@@ -191,3 +191,82 @@ def test_preconditioner_capability_and_small_mesh_shape_helpers():
     sm, sp = solve._sm_sp_from_s_np(np.asarray([0.0]))
     np.testing.assert_allclose(sm, [0.0, 0.0])
     np.testing.assert_allclose(sp, [0.0, 0.0])
+
+
+def test_residual_iter_precompile_setup_branches(load_case_circular_tokamak, monkeypatch):
+    pytest.importorskip("jax")
+
+    _cfg, indata, static, _boundary, state0 = load_case_circular_tokamak
+
+    result = solve.solve_fixed_boundary_residual_iter(
+        state0,
+        static,
+        indata=indata,
+        signgs=1,
+        max_iter=1,
+        step_size=float(indata.get_float("DELT", 1.0)),
+        vmec2000_control=True,
+        jit_forces=False,
+        use_scan=False,
+        precompile_only=True,
+        verbose=False,
+        verbose_vmec2000_table=False,
+    )
+
+    assert result.state is state0
+    assert result.diagnostics == {"precompile_only": True}
+    assert result.w_history.shape == (0,)
+
+    monkeypatch.setenv("VMEC_JAX_FREEB_SAMPLE_EXTERNAL", "0")
+    freeb_static = SimpleNamespace(
+        **{
+            name: getattr(static, name)
+            for name in (
+                "cfg",
+                "modes",
+                "grid",
+                "s",
+            )
+        }
+    )
+    freeb_static.cfg = SimpleNamespace(**vars(static.cfg), lfreeb=True, nvacskip=2)
+    freeb_static.mgrid_metadata = None
+    freeb_static.free_boundary_extcur = None
+    freeb_static.trig_vmec = getattr(static, "trig_vmec", None)
+    freeb_static.m_np = getattr(static, "m_np", None)
+    freeb_static.n_np = getattr(static, "n_np", None)
+    freeb_static.lambda_axis_copy_mask = getattr(static, "lambda_axis_copy_mask", None)
+    freeb_static.tomnsps_masks = getattr(static, "tomnsps_masks", None)
+    freeb_static.tomnsps_masks_edge = getattr(static, "tomnsps_masks_edge", None)
+    freeb_static.signed_maps = getattr(static, "signed_maps", None)
+    for name in (
+        "m_is_m0",
+        "m_is_even",
+        "m_is_odd",
+        "m_is_m1",
+        "m_is_odd_rest",
+        "mn_idx_m",
+        "mn_idx_n",
+        "mn_idx_kp",
+        "mn_idx_kn",
+        "mn_has_kn",
+    ):
+        if hasattr(static, name):
+            setattr(freeb_static, name, getattr(static, name))
+
+    freeb_result = solve.solve_fixed_boundary_residual_iter(
+        state0,
+        freeb_static,
+        indata=indata,
+        signgs=1,
+        max_iter=1,
+        step_size=float(indata.get_float("DELT", 1.0)),
+        vmec2000_control=True,
+        jit_forces=False,
+        use_scan=True,
+        precompile_only=True,
+        verbose=False,
+        verbose_vmec2000_table=False,
+    )
+
+    assert freeb_result.diagnostics == {"precompile_only": True}

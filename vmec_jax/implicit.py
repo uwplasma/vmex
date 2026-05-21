@@ -40,18 +40,20 @@ from .grids import angle_steps
 from .solve import (
     _WoutLikeVmecForces,
     _enforce_fixed_boundary_and_axis,
-    _half_mesh_from_full_mesh,
-    _icurv_full_mesh_from_indata,
-    _mass_half_mesh_from_indata,
     _mask_grad_for_constraints,
     _mode00_index,
-    _pressure_half_mesh_from_indata,
     _zero_edge_rz_force_blocks,
-    _vmec_force_flux_profiles,
     solve_fixed_boundary_gd,
     solve_fixed_boundary_lbfgs,
     solve_fixed_boundary_residual_iter,
     solve_lambda_gd,
+)
+from .solve_profile_helpers import (
+    _half_mesh_from_full_mesh,
+    _icurv_full_mesh_from_indata,
+    _mass_half_mesh_from_indata,
+    _pressure_half_mesh_from_indata,
+    _vmec_force_flux_profiles,
 )
 from .state import VMECState, pack_state, unpack_state
 

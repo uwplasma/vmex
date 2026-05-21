@@ -50,7 +50,7 @@ from .solve_residual_iter_policy import (
     vmec2000_scan_options_from_env as _vmec2000_scan_options_from_env,
     vmec2000_time_control_decision as _vmec2000_time_control_decision,
 )
-from .field import TWOPI, b2_from_bsup, bsup_from_geom, bsup_from_sqrtg_lambda, chips_from_wout_chipf
+from .field import TWOPI, b2_from_bsup, bsup_from_geom, bsup_from_sqrtg_lambda
 from .fourier import eval_fourier_dtheta, eval_fourier_dzeta_phys
 from .geom import eval_geom
 from .grids import angle_steps
@@ -88,6 +88,24 @@ from .solve_options import (
     validate_residual_iteration_options,
     validate_residual_lbfgs_options,
 )
+from .solve_optimizer_helpers import (
+    ensure_descent_direction as _ensure_descent_direction,
+    lbfgs_curvature_tolerance as _resolve_lbfgs_curvature_tol,
+    lbfgs_two_loop_direction as _lbfgs_two_loop_direction,
+)
+from .solve_profile_helpers import (
+    _half_mesh_from_full_mesh,
+    _icurv_full_mesh_from_indata,
+    _mass_half_mesh_from_indata,
+    _pressure_half_mesh_from_indata,
+    _s_half_from_full_mesh_s,
+    _vmec_force_flux_profiles,
+)
+from .solve_residual_iter_geometry_helpers import (
+    _m1_internal_to_physical_pair as _geometry_m1_internal_to_physical_pair,
+    _mn_sin_to_signed_physical_batch as _geometry_mn_sin_to_signed_physical_batch,
+    _rz_norm_np as _geometry_rz_norm_np,
+)
 from .solve_scan_output import postprocess_vmec2000_scan_result, unpack_vmec2000_scan_histories
 from .solve_scan_time_control import (
     scan_restart_decision,
@@ -108,6 +126,10 @@ _HostRestartDecision = _residual_iter_policy.HostRestartDecision
 _ResidualIterHistoryRecord = _residual_iter_policy.ResidualIterHistoryRecord
 _Vmec2000ScanOptions = _residual_iter_policy.Vmec2000ScanOptions
 _Vmec2000TimeControlDecision = _residual_iter_policy.Vmec2000TimeControlDecision
+
+_m1_internal_to_physical_pair = _geometry_m1_internal_to_physical_pair
+_mn_sin_to_signed_physical_batch = _geometry_mn_sin_to_signed_physical_batch
+_rz_norm_np = _geometry_rz_norm_np
 
 
 class _ForceBlocks(NamedTuple):
@@ -2525,14 +2547,6 @@ def _resolve_grad_tol(
     return float(np.sqrt(_dtype_eps(dtype)) * scale)
 
 
-def _resolve_lbfgs_curvature_tol(s_vec: Any, y_vec: Any) -> float:
-    s_np = np.asarray(s_vec)
-    y_np = np.asarray(y_vec)
-    dtype = np.result_type(s_np.dtype, y_np.dtype)
-    scale = float(np.linalg.norm(np.ravel(s_np)) * np.linalg.norm(np.ravel(y_np)))
-    return float(_dtype_eps(dtype) * scale)
-
-
 def _resolve_cg_tol(
     cg_tol: float | None,
     *,
@@ -3325,34 +3339,6 @@ def solve_fixed_boundary_lbfgs(
         w_and_grad = jit(w_and_grad)
         w_terms = jit(w_terms)
 
-    def _lbfgs_direction(g_flat, s_hist, y_hist):
-        if not s_hist:
-            return -g_flat
-        q = g_flat
-        alpha = []
-        rho = []
-        for s_i, y_i in zip(reversed(s_hist), reversed(y_hist)):
-            ys = jnp.dot(y_i, s_i)
-            rho_i = jnp.where(ys != 0, 1.0 / ys, 0.0)
-            a_i = rho_i * jnp.dot(s_i, q)
-            q = q - a_i * y_i
-            alpha.append(a_i)
-            rho.append(rho_i)
-
-        # Initial inverse-Hessian scaling (common L-BFGS choice)
-        s0 = s_hist[-1]
-        y0 = y_hist[-1]
-        ys0 = jnp.dot(y0, s0)
-        yy0 = jnp.dot(y0, y0)
-        gamma0 = jnp.where(yy0 != 0, ys0 / yy0, 1.0)
-        r = gamma0 * q
-
-        for s_i, y_i, a_i, rho_i in zip(s_hist, y_hist, reversed(alpha), reversed(rho)):
-            beta = rho_i * jnp.dot(y_i, r)
-            r = r + s_i * (a_i - beta)
-
-        return -r
-
     # Start from a constraint-satisfying state.
     state = _enforce_fixed_boundary_and_axis(
         state0,
@@ -3410,11 +3396,8 @@ def solve_fixed_boundary_lbfgs(
         if grad_rms < float(grad_tol_eff):
             break
 
-        p_flat = _lbfgs_direction(g_flat, s_hist, y_hist)
-        # Ensure descent direction; otherwise fall back to steepest descent.
-        gtp = float(np.asarray(jnp.dot(g_flat, p_flat)))
-        if not np.isfinite(gtp) or gtp >= 0.0:
-            p_flat = -g_flat
+        p_flat = _lbfgs_two_loop_direction(g_flat, s_hist, y_hist)
+        p_flat, _gtp, _fallback_to_descent = _ensure_descent_direction(g_flat, p_flat)
 
         accepted = False
         step = step0
@@ -3590,106 +3573,6 @@ class _WoutLikeVmecForces:
             chipf_internal=children[7],
             chips_eff=children[8],
         )
-
-
-def _vmec_force_flux_profiles(*, phipf, chipf, signgs: int, flux_is_internal: bool, iotaf=None, iotas=None):
-    phipf = jnp.asarray(phipf)
-    chipf = None if chipf is None else jnp.asarray(chipf)
-    if flux_is_internal:
-        phipf_internal = phipf
-        chipf_internal = chipf
-    else:
-        scale = jnp.asarray(TWOPI, dtype=phipf.dtype) * jnp.asarray(int(signgs), dtype=phipf.dtype)
-        phipf_internal = phipf / scale
-        chipf_internal = None if chipf is None else (chipf / scale)
-    if chipf_internal is not None:
-        chips_eff = chips_from_wout_chipf(
-            chipf=chipf_internal,
-            phipf=phipf_internal,
-            iotaf=iotaf,
-            iotas=iotas,
-            assume_half_if_unknown=True,
-        )
-    else:
-        iota = iotaf if iotaf is not None else iotas
-        if iota is None:
-            chips_eff = jnp.zeros_like(phipf_internal)
-        else:
-            chips_eff = jnp.asarray(iota, dtype=phipf_internal.dtype) * phipf_internal
-    return phipf_internal, chipf_internal, chips_eff
-
-
-def _s_half_from_full_mesh_s(s):
-    s = jnp.asarray(s)
-    if int(s.shape[0]) < 2:
-        return s
-    return jnp.concatenate([s[:1], 0.5 * (s[1:] + s[:-1])], axis=0)
-
-
-def _half_mesh_from_full_mesh(x):
-    x = jnp.asarray(x)
-    if int(x.shape[0]) < 2:
-        return x
-    return jnp.concatenate([x[:1], 0.5 * (x[1:] + x[:-1])], axis=0)
-
-
-def _pressure_half_mesh_from_indata(*, indata, s_full):
-    from .profiles import eval_profiles
-
-    s_half = _s_half_from_full_mesh_s(s_full)
-    prof = eval_profiles(indata, s_half)
-    return jnp.asarray(prof.get("pressure", jnp.zeros_like(s_half)))
-
-
-def _mass_half_mesh_from_indata(*, indata, s_full, phips, r00, gamma, lrfp: bool = False, chips=None):
-    """Compute VMEC mass profile on half mesh: mass = pmass * (|vnorm|*r00)^gamma."""
-    from .profiles import eval_profiles
-
-    s_half = _s_half_from_full_mesh_s(s_full)
-    prof = eval_profiles(indata, s_half)
-    pmass = jnp.asarray(prof.get("pressure", jnp.zeros_like(s_half)))
-    vnorm = jnp.asarray(phips)
-    if lrfp and (chips is not None):
-        vnorm = jnp.asarray(chips)
-    mass = pmass * (jnp.abs(vnorm) * jnp.asarray(r00, dtype=pmass.dtype)) ** jnp.asarray(gamma, dtype=pmass.dtype)
-    if int(mass.shape[0]) > 0:
-        mass = mass.at[0].set(jnp.asarray(0.0, dtype=mass.dtype))
-    return mass
-
-
-def _icurv_full_mesh_from_indata(*, indata, s_full, signgs: int):
-    from .profiles import eval_profiles
-
-    s_full = jnp.asarray(s_full)
-    ncurr = int(indata.get_int("NCURR", 0))
-    if ncurr != 1:
-        return jnp.zeros_like(s_full)
-
-    curtor = float(indata.get_float("CURTOR", 0.0))
-    if abs(curtor) <= np.finfo(float).eps:
-        return jnp.zeros_like(s_full)
-
-    # VMEC stores icurv on the half mesh (same indexing as phips/chips/iotas),
-    # evaluated at s = (i-1.5)*hs for i>=2. Mirror that here.
-    s_half = _s_half_from_full_mesh_s(s_full)
-    prof = eval_profiles(indata, s_half)
-    icurv_raw = jnp.asarray(prof.get("current", jnp.zeros_like(s_half)))
-    if int(icurv_raw.shape[0]) != int(s_full.shape[0]):
-        icurv_raw = jnp.zeros_like(s_half)
-
-    # VMEC scales by pcurr(1) (edge), not the last half-mesh value.
-    pedge_prof = eval_profiles(indata, jnp.asarray([1.0], dtype=s_full.dtype))
-    pedge = jnp.asarray(pedge_prof.get("current", jnp.asarray([0.0], dtype=s_full.dtype)))[0]
-    valid_pedge = jnp.abs(pedge) > jnp.asarray(abs(np.finfo(float).eps * curtor), dtype=s_full.dtype)
-
-    mu0 = 4e-7 * np.pi
-    currv = mu0 * curtor
-    denom = jnp.where(valid_pedge, pedge, jnp.asarray(1.0, dtype=s_full.dtype))
-    scale = jnp.asarray(float(signgs) * currv / (2.0 * np.pi), dtype=icurv_raw.dtype) / denom
-    icurv = jnp.where(valid_pedge, scale * icurv_raw, jnp.zeros_like(s_full))
-    if int(icurv.shape[0]) > 0:
-        icurv = icurv.at[0].set(0.0)
-    return icurv
 
 
 def solve_fixed_boundary_lbfgs_vmec_residual(
@@ -4016,33 +3899,6 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
     grad_tol_eff: float | None = None
     zero_m1_fsqz_target = float(ftol_target)
 
-    def _lbfgs_direction(g_flat, s_hist, y_hist):
-        if not s_hist:
-            return -g_flat
-        q = g_flat
-        alpha = []
-        rho = []
-        for s_i, y_i in zip(reversed(s_hist), reversed(y_hist)):
-            ys = jnp.dot(y_i, s_i)
-            rho_i = jnp.where(ys != 0, 1.0 / ys, 0.0)
-            a_i = rho_i * jnp.dot(s_i, q)
-            q = q - a_i * y_i
-            alpha.append(a_i)
-            rho.append(rho_i)
-
-        s0 = s_hist[-1]
-        y0 = y_hist[-1]
-        ys0 = jnp.dot(y0, s0)
-        yy0 = jnp.dot(y0, y0)
-        gamma0 = jnp.where(yy0 != 0, ys0 / yy0, 1.0)
-        r = gamma0 * q
-
-        for s_i, y_i, a_i, rho_i in zip(s_hist, y_hist, reversed(alpha), reversed(rho)):
-            beta = rho_i * jnp.dot(y_i, r)
-            r = r + s_i * (a_i - beta)
-
-        return -r
-
     for it in range(max_iter):
         grad_rms = _grad_rms_state(grad)
         grad_rms_history.append(grad_rms)
@@ -4057,10 +3913,8 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
         if grad_rms < float(grad_tol_eff):
             break
 
-        p_flat = _lbfgs_direction(g_flat, s_hist, y_hist)
-        gtp = float(np.asarray(jnp.dot(g_flat, p_flat)))
-        if not np.isfinite(gtp) or gtp >= 0.0:
-            p_flat = -g_flat
+        p_flat = _lbfgs_two_loop_direction(g_flat, s_hist, y_hist)
+        p_flat, _gtp, _fallback_to_descent = _ensure_descent_direction(g_flat, p_flat)
 
         accepted = False
         step = step0
@@ -6361,14 +6215,11 @@ def solve_fixed_boundary_residual_iter(
         has_kn_np = kn_idx_np >= 0
     kn_idx = jnp.asarray(kn_idx_np)
     has_kn = jnp.asarray(has_kn_np)
-    has_kn_any = bool(np.any(has_kn_np))
     # NumPy index arrays for _rz_norm_np (avoid JAX dispatch on preconditioner rebuilds).
     _kp_idx_np = kp_idx_np
     _m_idx_np = m_idx_np
     _n_idx_np = n_idx_np
     _include_rcc_np = (_m_idx_np > 0) | (_n_idx_np > 0)
-    _is_m0_1d = _m_idx_np == 0
-    _is_n0_1d = _n_idx_np == 0
     _rz_norm_lthreed = bool(getattr(static.cfg, "lthreed", True))
     _rz_norm_lasym = bool(getattr(static.cfg, "lasym", False))
 
@@ -6378,51 +6229,17 @@ def solve_fixed_boundary_residual_iter(
         Used by the host_update_assembly path to compute fnorm1 without
         blocking on XLA.  Semantically identical to _rz_norm(state).
         """
-        Rcos = np.asarray(state.Rcos)
-        Zsin = np.asarray(state.Zsin)
-        rpos = Rcos[:, _kp_idx_np]
-        zpos = Zsin[:, _kp_idx_np]
-        rneg = np.zeros_like(rpos)
-        zneg = np.zeros_like(zpos)
-        if has_kn_any:
-            hk = has_kn_np
-            rneg[:, hk] = Rcos[:, kn_idx_np[hk]]
-            zneg[:, hk] = Zsin[:, kn_idx_np[hk]]
-        # Rebuild signed (m,n) representation.
-        rcc = rpos + np.where(has_kn_np, rneg, 0.0)
-        zsc = np.where(has_kn_np, zpos + zneg, zpos)
-        rss = np.where(_is_n0_1d | _is_m0_1d, 0.0, np.where(has_kn_np, rpos - rneg, 0.0))
-        zsc = np.where((~_is_n0_1d) & _is_m0_1d, 0.0, zsc)
-        zcs = np.where(_is_n0_1d, 0.0, np.where(has_kn_np, zneg - zpos, -zpos))
-        sl = slice(1, None)
-        rz = float(
-            np.dot(zsc[sl].ravel(), zsc[sl].ravel())
-            + np.dot((_include_rcc_np * rcc[sl]).ravel(), (_include_rcc_np * rcc[sl]).ravel())
+        return _geometry_rz_norm_np(
+            state,
+            kp_idx_np=_kp_idx_np,
+            kn_idx_np=kn_idx_np,
+            has_kn_np=has_kn_np,
+            m_idx_np=_m_idx_np,
+            n_idx_np=_n_idx_np,
+            include_rcc_np=_include_rcc_np,
+            lthreed=_rz_norm_lthreed,
+            lasym=_rz_norm_lasym,
         )
-        if _rz_norm_lthreed:
-            rz += float(np.dot(rss[sl].ravel(), rss[sl].ravel()) + np.dot(zcs[sl].ravel(), zcs[sl].ravel()))
-        if _rz_norm_lasym:
-            Rsin = np.asarray(state.Rsin)
-            Zcos = np.asarray(state.Zcos)
-            rs_pos = Rsin[:, _kp_idx_np]
-            zc_pos = Zcos[:, _kp_idx_np]
-            rs_neg = np.zeros_like(rs_pos)
-            zc_neg = np.zeros_like(zc_pos)
-            if has_kn_any:
-                hk = has_kn_np
-                rs_neg[:, hk] = Rsin[:, kn_idx_np[hk]]
-                zc_neg[:, hk] = Zcos[:, kn_idx_np[hk]]
-            rsc = np.where(has_kn_np, rs_pos + rs_neg, np.where(_is_n0_1d, rs_pos, np.where(_is_m0_1d, 0.0, rs_pos)))
-            rcs = np.where(has_kn_np, rs_neg - rs_pos, np.where(_is_n0_1d, 0.0, np.where(_is_m0_1d, -rs_pos, 0.0)))
-            zcc = zc_pos + np.where(has_kn_np, zc_neg, 0.0)
-            zss = np.where(_is_n0_1d | _is_m0_1d, 0.0, np.where(has_kn_np, zc_pos - zc_neg, 0.0))
-            rz += float(
-                np.dot(rsc[sl].ravel(), rsc[sl].ravel())
-                + np.dot(rcs[sl].ravel(), rcs[sl].ravel())
-                + np.dot(zcc[sl].ravel(), zcc[sl].ravel())
-                + np.dot(zss[sl].ravel(), zss[sl].ravel())
-            )
-        return rz
 
     m0_mask = np.asarray(
         getattr(static, "m_is_m0", None)
@@ -6474,23 +6291,11 @@ def solve_fixed_boundary_residual_iter(
 
     def _m1_internal_to_physical_pair(rss, zcs):
         """Convert VMEC internal m=1 (rss,zcs) pair to physical coefficients."""
-        if rss is None and zcs is None:
-            return None, None
-        if rss is None:
-            zcs_arr = jnp.asarray(zcs)
-            rss_arr = jnp.zeros_like(zcs_arr)
-        else:
-            rss_arr = jnp.asarray(rss)
-        if zcs is None:
-            zcs_arr = jnp.zeros_like(rss_arr)
-        else:
-            zcs_arr = jnp.asarray(zcs)
-        if not use_m1_pair_convert:
-            return rss_arr, zcs_arr
-        tmp = rss_arr[:, 1, :]
-        rss_arr = rss_arr.at[:, 1, :].set(tmp + zcs_arr[:, 1, :])
-        zcs_arr = zcs_arr.at[:, 1, :].set(tmp - zcs_arr[:, 1, :])
-        return rss_arr, zcs_arr
+        return _geometry_m1_internal_to_physical_pair(
+            rss,
+            zcs,
+            use_m1_pair_convert=use_m1_pair_convert,
+        )
 
     scalxc_mn = vmec_scalxc_from_s(s=s, mpol=int(static.cfg.mpol)).astype(jnp.asarray(state0.Rcos).dtype)[:, :, None]
     if not bool(divide_by_scalxc_for_update):
@@ -6562,12 +6367,12 @@ def solve_fixed_boundary_residual_iter(
         return _mn_cos_to_signed(cc, ss)
 
     def _mn_sin_to_signed_physical_batch(sc, cs):
-        sc = jnp.asarray(sc) / scalxc_mn
-        if cs is None:
-            cs = jnp.zeros_like(sc)
-        else:
-            cs = jnp.asarray(cs) / scalxc_mn
-        return _mn_sin_to_signed_batch(sc, cs)
+        return _geometry_mn_sin_to_signed_physical_batch(
+            sc,
+            cs,
+            scalxc_mn=scalxc_mn,
+            mn_sin_to_signed_batch=_mn_sin_to_signed_batch,
+        )
 
     def _rz_norm(state: VMECState) -> Any:
         """R/Z norm (exclude R(0,0) offset) in (m,n>=0) storage.
