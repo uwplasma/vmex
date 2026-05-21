@@ -1,0 +1,231 @@
+import numpy as np
+import pytest
+
+from vmec_jax.solve_residual_iter_runtime_helpers import (
+    _converged_residuals_scan_fast,
+    _format_ptau_dump_row,
+    _maybe_dump_ptau,
+    _ptau_dump_enabled,
+    _scan_block_until_ready,
+    _scan_device_run_ready,
+    _scan_print_uses_debug_callback,
+    _scan_print_uses_debug_print,
+    _scan_print_uses_io_callback,
+    _vmec_freeb_plascur_from_bcovar,
+)
+
+
+def test_ptau_dump_enabled_requires_env_and_directory():
+    assert not _ptau_dump_enabled(dump_ptau_env="", dump_dir="/tmp")
+    assert not _ptau_dump_enabled(dump_ptau_env="0", dump_dir="/tmp")
+    assert not _ptau_dump_enabled(dump_ptau_env="1", dump_dir="")
+    assert _ptau_dump_enabled(dump_ptau_env="yes", dump_dir="/tmp")
+
+
+def test_format_ptau_dump_row_matches_legacy_fields():
+    row = _format_ptau_dump_row(
+        iter_idx=7,
+        ptau_min=-1.25,
+        ptau_max=2.5,
+        tau_min_state=None,
+        tau_max_state=3.0,
+        badjac_ptau=None,
+        badjac_state=True,
+        badjac_used=False,
+        mode="scan",
+        label="iter",
+    )
+
+    assert row == (
+        "7 iter scan -1.2500000000000000e+00 2.5000000000000000e+00 "
+        "nan 3.0000000000000000e+00 -1 1 0\n"
+    )
+
+
+def test_maybe_dump_ptau_writes_header_and_swallows_io_failures(tmp_path):
+    assert not _maybe_dump_ptau(
+        iter_idx=1,
+        ptau_min=0.0,
+        ptau_max=0.0,
+        tau_min_state=None,
+        tau_max_state=None,
+        badjac_ptau=None,
+        badjac_state=None,
+        badjac_used=False,
+        mode="host",
+        label="skip",
+        dump_ptau_env="0",
+        dump_dir=str(tmp_path),
+    )
+
+    assert _maybe_dump_ptau(
+        iter_idx=2,
+        ptau_min=-0.5,
+        ptau_max=0.75,
+        tau_min_state=-0.25,
+        tau_max_state=0.25,
+        badjac_ptau=True,
+        badjac_state=False,
+        badjac_used=True,
+        mode="host",
+        label="probe",
+        dump_ptau_env="1",
+        dump_dir=str(tmp_path),
+    )
+    lines = (tmp_path / "ptau_minmax.log").read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "iter label mode ptau_min ptau_max state_min state_max bad_ptau bad_state bad_used"
+    assert lines[1].startswith("2 probe host -5.0000000000000000e-01 7.5000000000000000e-01")
+    assert lines[1].endswith("1 0 1")
+
+    assert not _maybe_dump_ptau(
+        iter_idx=3,
+        ptau_min=0.0,
+        ptau_max=0.0,
+        tau_min_state=None,
+        tau_max_state=None,
+        badjac_ptau=None,
+        badjac_state=None,
+        badjac_used=False,
+        mode="host",
+        label="bad",
+        dump_ptau_env="1",
+        dump_dir=str(tmp_path / "missing" / "nested"),
+    )
+
+
+def test_scan_block_until_ready_falls_back_to_tree_leaves():
+    class ReadyLeaf:
+        def __init__(self):
+            self.ready = False
+
+        def block_until_ready(self):
+            self.ready = True
+            return self
+
+    leaf = ReadyLeaf()
+
+    def block_until_ready(_value):
+        raise RuntimeError("not a whole-tree value")
+
+    def tree_map(fn, value):
+        return {key: fn(item) for key, item in value.items()}
+
+    result = _scan_block_until_ready(
+        {"leaf": leaf, "plain": 3},
+        block_until_ready=block_until_ready,
+        tree_map=tree_map,
+    )
+
+    assert result["leaf"] is leaf
+    assert leaf.ready
+    assert result["plain"] == 3
+
+
+def test_scan_device_run_ready_records_only_when_enabled():
+    times = iter([10.25, 11.0])
+    stats = {"scan_device_dispatch_s": 0.0, "scan_device_ready_s": 0.0, "scan_device_run_s": 0.0}
+    calls = []
+
+    assert _scan_device_run_ready(
+        start=None,
+        value="value",
+        scan_timing_enabled=True,
+        perf_counter=lambda: next(times),
+        block_until_ready=lambda value: value,
+        tree_map=lambda fn, value: value,
+        record_ready=lambda **kwargs: calls.append(kwargs) or True,
+        stats=stats,
+    ) == "value"
+    assert calls == []
+
+    result = _scan_device_run_ready(
+        start=10.0,
+        value="value",
+        scan_timing_enabled=True,
+        perf_counter=lambda: next(times),
+        block_until_ready=lambda value: f"{value}-ready",
+        tree_map=lambda fn, value: value,
+        record_ready=lambda **kwargs: calls.append(kwargs) or True,
+        stats=stats,
+    )
+
+    assert result == "value-ready"
+    assert calls == [
+        {
+            "start": 10.0,
+            "dispatch_done": 10.25,
+            "ready_done": 11.0,
+            "stats": stats,
+        }
+    ]
+
+
+def test_converged_residuals_scan_fast_supports_strict_and_total_target():
+    assert _converged_residuals_scan_fast(0.1, 0.2, 0.3, ftol=0.25, fsq_total_target=None) is False
+    assert _converged_residuals_scan_fast(0.1, 0.2, 0.3, ftol=0.4, fsq_total_target=None) is True
+    assert _converged_residuals_scan_fast(0.4, 0.4, 0.1, ftol=0.2, fsq_total_target=1.0) is True
+
+    arr = _converged_residuals_scan_fast(
+        np.asarray([0.1, 0.4]),
+        np.asarray([0.1, 0.4]),
+        np.asarray([0.1, 0.4]),
+        ftol=0.2,
+        fsq_total_target=0.9,
+    )
+    np.testing.assert_array_equal(arr, np.asarray([True, False]))
+
+
+def test_vmec_freeb_plascur_from_bcovar_uses_finite_value_or_fallback():
+    def plascur_edge_from_bcovar(**kwargs):
+        assert kwargs == {"bc": "bc", "trig": "trig", "wout": "wout", "s": "s"}
+        return np.asarray(4.25)
+
+    assert _vmec_freeb_plascur_from_bcovar(
+        "bc",
+        1.5,
+        plascur_edge_from_bcovar=plascur_edge_from_bcovar,
+        trig="trig",
+        wout="wout",
+        s="s",
+    ) == 4.25
+
+    assert _vmec_freeb_plascur_from_bcovar(
+        "bc",
+        1.5,
+        plascur_edge_from_bcovar=lambda **_: np.nan,
+        trig=None,
+        wout=None,
+        s=None,
+    ) == 1.5
+    assert _vmec_freeb_plascur_from_bcovar(
+        "bc",
+        1.5,
+        plascur_edge_from_bcovar=lambda **_: (_ for _ in ()).throw(RuntimeError("bad")),
+        trig=None,
+        wout=None,
+        s=None,
+    ) == 1.5
+
+
+@pytest.mark.parametrize(
+    ("mode", "debug_print_fn", "expected"),
+    [("debug_print", object(), True), ("debug_print", None, False), ("debug_callback", object(), False)],
+)
+def test_scan_print_uses_debug_print(mode, debug_print_fn, expected):
+    assert _scan_print_uses_debug_print(scan_print_mode=mode, debug_print_fn=debug_print_fn) is expected
+
+
+@pytest.mark.parametrize(
+    ("mode", "debug_module", "expected"),
+    [("debug_callback", object(), True), ("debug_callback", None, False), ("debug_print", object(), False)],
+)
+def test_scan_print_uses_debug_callback(mode, debug_module, expected):
+    assert _scan_print_uses_debug_callback(scan_print_mode=mode, debug_module=debug_module) is expected
+
+
+@pytest.mark.parametrize(
+    ("mode", "io_callback_fn", "expected"),
+    [("io_callback", object(), True), ("io_callback", None, False), ("debug_print", object(), False)],
+)
+def test_scan_print_uses_io_callback(mode, io_callback_fn, expected):
+    assert _scan_print_uses_io_callback(scan_print_mode=mode, io_callback_fn=io_callback_fn) is expected
