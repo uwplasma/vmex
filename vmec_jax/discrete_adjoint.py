@@ -725,6 +725,7 @@ def checkpoint_tape_state_vjp(
         and tape.dynamic_base_carries_stacked is not None
         and tape.stacked_step_traces is not None
         and tape.step_trace_static_flags is not None
+        and _dynamic_basepoint_payload_shapes_match(tape.stacked_step_traces, tape.dynamic_base_carries_stacked)
     ):
         carry0 = tape.dynamic_initial_carry
         final_carry_cotangents = (
@@ -965,11 +966,22 @@ def _build_dynamic_replay_payload(
     from ._compat import jax
 
     use_device_stack = jax.default_backend() == "gpu"
+    jax_array_type = getattr(jax, "Array", ())
+
+    def _as_stack_array(x):
+        if use_device_stack:
+            if jax_array_type and isinstance(x, jax_array_type):
+                return x
+            return jnp.asarray(x)
+        if isinstance(x, np.ndarray):
+            return x
+        return np.asarray(x)
 
     def _stack_dynamic_values(*xs):
+        arrays = [_as_stack_array(x) for x in xs]
         if use_device_stack:
-            return jnp.stack([jnp.asarray(x) for x in xs], axis=0)
-        return np.stack([np.asarray(x) for x in xs], axis=0)
+            return jnp.stack(arrays, axis=0)
+        return np.stack(arrays, axis=0)
 
     dynamic_static_flags = dict(static_flags)
     dynamic_static_flags["layout"] = step_traces[0]["state_pre"].layout
@@ -997,13 +1009,16 @@ def _build_dynamic_replay_payload(
         pad_trace = dict(filtered[-1])
         pad_trace["active"] = False
         filtered = filtered + tuple(dict(pad_trace) for _ in range(target_len - len(filtered)))
-    stacked = jax.tree_util.tree_map(_stack_dynamic_values, *filtered)
+    stacked = {
+        key: _stack_dynamic_values(*(trace[key] for trace in filtered))
+        for key in filtered[0]
+    }
     base_carries = tuple(_dynamic_replay_initial_carry(trace) for trace in step_traces)
     if target_len > len(base_carries):
         pad_carry = base_carries[-1]
-        base_carries = base_carries + tuple(pad_carry for _ in range(target_len - len(base_carries)))
+        base_carries = base_carries + (pad_carry,) * (target_len - len(base_carries))
     stacked_base_carries = jax.tree_util.tree_map(_stack_dynamic_values, *base_carries)
-    initial_carry = _dynamic_replay_initial_carry(step_traces[0])
+    initial_carry = base_carries[0]
     return stacked, dynamic_static_flags, initial_carry, stacked_base_carries
 
 
@@ -1019,6 +1034,26 @@ def _stacked_trace_signature(stacked) -> tuple[tuple[tuple[int, ...], str], ...]
             dtype = np.asarray(leaf).dtype
         signature.append((shape, np.dtype(dtype).str))
     return tuple(signature)
+
+
+def _stacked_leading_axis_size(stacked) -> int | None:
+    from ._compat import jax
+
+    sizes: set[int] = set()
+    for leaf in jax.tree_util.tree_leaves(stacked):
+        shape = tuple(getattr(leaf, "shape", np.shape(leaf)))
+        if not shape:
+            return None
+        sizes.add(int(shape[0]))
+    if len(sizes) != 1:
+        return None
+    return next(iter(sizes))
+
+
+def _dynamic_basepoint_payload_shapes_match(stacked, stacked_base_carries) -> bool:
+    trace_len = _stacked_leading_axis_size(stacked)
+    carry_len = _stacked_leading_axis_size(stacked_base_carries)
+    return trace_len is not None and trace_len == carry_len
 
 
 def _dynamic_replay_supported(
@@ -1589,6 +1624,7 @@ def checkpoint_tape_state_jvp_columns(
         and stacked is not None
         and static_flags is not None
         and rebuild_preconditioner
+        and _dynamic_basepoint_payload_shapes_match(stacked, tape.dynamic_base_carries_stacked)
     ):
         stacked_base_carries = tape.dynamic_base_carries_stacked
         carry0 = jax.tree_util.tree_map(lambda x: x[0], stacked_base_carries)
