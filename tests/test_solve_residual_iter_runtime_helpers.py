@@ -2,9 +2,14 @@ import numpy as np
 import pytest
 
 from vmec_jax.solve_residual_iter_runtime_helpers import (
+    _build_residual_iter_timing_report,
+    _build_resume_state_base,
     _converged_residuals_scan_fast,
     _format_ptau_dump_row,
+    _format_residual_iter_timing_message,
     _maybe_dump_ptau,
+    _maybe_print_nonscan_state_debug,
+    _nonscan_state_debug_payload,
     _ptau_dump_enabled,
     _scan_block_until_ready,
     _scan_device_run_ready,
@@ -229,3 +234,173 @@ def test_scan_print_uses_debug_callback(mode, debug_module, expected):
 )
 def test_scan_print_uses_io_callback(mode, io_callback_fn, expected):
     assert _scan_print_uses_io_callback(scan_print_mode=mode, io_callback_fn=io_callback_fn) is expected
+
+
+class _State:
+    def __init__(self):
+        self.Rcos = np.asarray([[1.0, 2.0]])
+        self.Zsin = np.asarray([[3.0, 4.0]])
+        self.Lsin = np.asarray([[5.0, 6.0]])
+
+
+class _Norms:
+    fnorm = 2.0
+    fnormL = 3.0
+    r1 = 4.0
+
+
+def test_nonscan_state_debug_payload_and_optional_print():
+    state = _State()
+    checkpoint = _State()
+    checkpoint.Rcos = np.asarray([[10.0]])
+    checkpoint.Zsin = np.asarray([[20.0]])
+    checkpoint.Lsin = np.asarray([[30.0]])
+
+    payload = _nonscan_state_debug_payload(
+        state=state,
+        state_checkpoint=checkpoint,
+        gcr2=np.asarray(0.5),
+        gcz2=np.asarray(0.25),
+        gcl2=np.asarray(0.75),
+        norms_used=_Norms(),
+    )
+
+    assert payload["rcos_sum"] == 3.0
+    assert payload["zsin_ck"] == 20.0
+    assert payload["fsqr"] == 4.0
+    assert payload["fsqz"] == 2.0
+    assert payload["fsql"] == 2.25
+
+    rows = []
+    emitted = _maybe_print_nonscan_state_debug(
+        debug_iter_env="7",
+        iter2=7,
+        state=state,
+        state_checkpoint=checkpoint,
+        gcr2=0.5,
+        gcz2=0.25,
+        gcl2=0.75,
+        norms_used=_Norms(),
+        print_fn=lambda text, **kwargs: rows.append((text, kwargs)),
+    )
+    assert emitted
+    assert rows[0][0].startswith("[nonscan-state] iter=7")
+    assert rows[0][1] == {"flush": True}
+
+    assert not _maybe_print_nonscan_state_debug(
+        debug_iter_env="bad",
+        iter2=7,
+        state=state,
+        state_checkpoint=checkpoint,
+        gcr2=0.5,
+        gcz2=0.25,
+        gcl2=0.75,
+        norms_used=_Norms(),
+        print_fn=lambda *_args, **_kwargs: None,
+    )
+
+
+def test_residual_iter_timing_report_and_message():
+    stats = {
+        "iterations": 4,
+        "setup_total": 10.0,
+        "setup_axis_reset": 3.0,
+        "setup_axis_reset_compute_forces": 1.0,
+        "iteration_loop": 20.0,
+        "iteration_prepare": 1.0,
+        "compute_forces": 8.0,
+        "compute_forces_first": 3.0,
+        "compute_forces_rest": 5.0,
+        "compute_forces_calls": 9,
+        "iteration_residual_metrics": 2.0,
+        "preconditioner": 3.0,
+        "precond_refresh": 1.5,
+        "update": 4.0,
+        "update_state": 2.5,
+        "update_trace_build": 0.25,
+        "update_trace_finalize": 0.5,
+        "iteration_post_update": 1.0,
+        "finalize": 0.75,
+        "precond_apply": 1.25,
+        "precond_mode_scale": 0.5,
+    }
+
+    report = _build_residual_iter_timing_report(
+        stats,
+        solve_total_s=42.0,
+        timing_detail_enabled=True,
+    )
+
+    assert report["iterations"] == 4
+    assert report["setup_unattributed_s"] == 7.0
+    assert report["setup_axis_reset_unattributed_s"] == 2.0
+    assert report["iteration_loop_unattributed_s"] == 1.0
+    assert report["compute_forces_per_iter_s"] == 2.0
+    assert report["precond_apply_per_iter_s"] == 0.3125
+
+    msg = _format_residual_iter_timing_message(report, timing_detail_enabled=True)
+    assert "iters=4" in msg
+    assert "compute_forces=8.000e+00s" in msg
+    assert "precond_apply=1.250e+00s" in msg
+
+
+def test_build_resume_state_base_counts_optional_free_boundary_runtime():
+    class Runtime:
+        update_count = "5"
+        reuse_count = "6"
+
+    base = _build_resume_state_base(
+        time_step=0.25,
+        inv_tau=[1.0, 2.0],
+        fsq_prev=3.0,
+        fsq0_prev=4.0,
+        flip_sign=-1.0,
+        iter1=8,
+        last_iter2=9,
+        ijacob=2,
+        bad_resets=1,
+        res0=0.1,
+        res1=0.2,
+        prev_rz_fsq=0.3,
+        bad_growth_streak=4,
+        huge_force_restart_count=5,
+        vmec2000_cache_valid=True,
+        freeb_ivac=1,
+        freeb_ivacskip=2,
+        freeb_nvacskip=3,
+        freeb_nvskip0=4,
+        freeb_last_model="nestor",
+        freeb_nestor_runtime=Runtime(),
+    )
+
+    assert base["time_step"] == 0.25
+    assert base["iter_offset"] == 9
+    assert base["freeb_model"] == "nestor"
+    assert base["freeb_nestor_update_count"] == 5
+    assert base["freeb_nestor_reuse_count"] == 6
+
+    base_none = _build_resume_state_base(
+        time_step=0.25,
+        inv_tau=[],
+        fsq_prev=0.0,
+        fsq0_prev=0.0,
+        flip_sign=1.0,
+        iter1=0,
+        last_iter2=0,
+        ijacob=0,
+        bad_resets=0,
+        res0=0.0,
+        res1=0.0,
+        prev_rz_fsq=0.0,
+        bad_growth_streak=0,
+        huge_force_restart_count=0,
+        vmec2000_cache_valid=False,
+        freeb_ivac=0,
+        freeb_ivacskip=0,
+        freeb_nvacskip=0,
+        freeb_nvskip0=0,
+        freeb_last_model="none",
+        freeb_nestor_runtime=None,
+    )
+    assert base_none["freeb_nestor_update_count"] == 0
+    assert base_none["freeb_nestor_reuse_count"] == 0

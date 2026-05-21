@@ -51,8 +51,12 @@ from .solve_residual_iter_policy import (
     vmec2000_time_control_decision as _vmec2000_time_control_decision,
 )
 from .solve_residual_iter_runtime_helpers import (
+    _build_residual_iter_timing_report,
+    _build_resume_state_base,
     _converged_residuals_scan_fast as _runtime_converged_residuals_scan_fast,
+    _format_residual_iter_timing_message,
     _maybe_dump_ptau as _runtime_maybe_dump_ptau,
+    _maybe_print_nonscan_state_debug,
     _scan_device_run_ready as _runtime_scan_device_run_ready,
     _scan_print_uses_debug_callback,
     _scan_print_uses_debug_print,
@@ -10052,38 +10056,17 @@ def solve_fixed_boundary_residual_iter(
                 fsqz = norms_used.r1 * norms_used.fnorm * gcz2
                 fsql = norms_used.fnormL * gcl2
             debug_iter_env = _env_debug_iter
-            if debug_iter_env:
-                try:
-                    debug_iter = int(debug_iter_env)
-                except Exception:
-                    debug_iter = -1
-                if debug_iter > 0 and int(iter2) == debug_iter:
-                    try:
-                        gcr2_val = float(np.asarray(gcr2))
-                        gcz2_val = float(np.asarray(gcz2))
-                        gcl2_val = float(np.asarray(gcl2))
-                        fn_val = float(np.asarray(norms_used.fnorm))
-                        r1_val = float(np.asarray(norms_used.r1))
-                        rcos_sum = float(np.sum(np.asarray(state.Rcos)))
-                        zsin_sum = float(np.sum(np.asarray(state.Zsin)))
-                        lsin_sum = float(np.sum(np.asarray(state.Lsin)))
-                        rcos_ck = float(np.sum(np.asarray(state_checkpoint.Rcos)))
-                        zsin_ck = float(np.sum(np.asarray(state_checkpoint.Zsin)))
-                        lsin_ck = float(np.sum(np.asarray(state_checkpoint.Lsin)))
-                        fsqr_dbg = float(np.asarray(norms_used.r1 * norms_used.fnorm * gcr2))
-                        fsqz_dbg = float(np.asarray(norms_used.r1 * norms_used.fnorm * gcz2))
-                        fsql_dbg = float(np.asarray(norms_used.fnormL * gcl2))
-                        print(
-                            f"[nonscan-state] iter={iter2} rcos_sum={rcos_sum:.6e} "
-                            f"zsin_sum={zsin_sum:.6e} lsin_sum={lsin_sum:.6e} "
-                            f"rcos_ck={rcos_ck:.6e} zsin_ck={zsin_ck:.6e} lsin_ck={lsin_ck:.6e} "
-                            f"gcr2={gcr2_val:.6e} gcz2={gcz2_val:.6e} gcl2={gcl2_val:.6e} "
-                            f"fnorm={fn_val:.6e} r1={r1_val:.6e} "
-                            f"fsqr={fsqr_dbg:.6e} fsqz={fsqz_dbg:.6e} fsql={fsql_dbg:.6e}",
-                            flush=True,
-                        )
-                    except Exception:
-                        pass
+            _maybe_print_nonscan_state_debug(
+                debug_iter_env=debug_iter_env,
+                iter2=int(iter2),
+                state=state,
+                state_checkpoint=state_checkpoint,
+                gcr2=gcr2,
+                gcz2=gcz2,
+                gcl2=gcl2,
+                norms_used=norms_used,
+                print_fn=print,
+            )
             if bool(vmec2000_control) and bool(vmec2000_cache_valid) and (not bool(need_bcovar_update)):
                 rz_scale = cache_rz_scale
                 l_scale = cache_l_scale
@@ -12793,128 +12776,48 @@ def solve_fixed_boundary_residual_iter(
             timing_stats["iteration_loop"] = float(t_finalize_start) - float(t_iteration_loop_start)
         if t_finalize_start is not None:
             timing_stats["finalize"] = time.perf_counter() - float(t_finalize_start)
-        setup_unattributed = max(
-            0.0,
-            float(timing_stats["setup_total"]) - float(timing_stats["setup_axis_reset"]),
+        timing_report = _build_residual_iter_timing_report(
+            timing_stats,
+            solve_total_s=float(time.perf_counter() - float(_solve_wall_start)),
+            timing_detail_enabled=bool(timing_detail_enabled),
         )
-        setup_axis_reset_unattributed = max(
-            0.0,
-            float(timing_stats["setup_axis_reset"]) - float(timing_stats["setup_axis_reset_compute_forces"]),
-        )
-        loop_leaf_total = (
-            float(timing_stats["iteration_prepare"])
-            + float(timing_stats["compute_forces"])
-            + float(timing_stats["iteration_residual_metrics"])
-            + float(timing_stats["preconditioner"])
-            + float(timing_stats["update"])
-            + float(timing_stats["iteration_post_update"])
-        )
-        timing_stats["iteration_loop_unattributed"] = max(
-            0.0,
-            float(timing_stats["iteration_loop"]) - loop_leaf_total,
-        )
-        iters = max(int(timing_stats["iterations"]), 1)
-        timing_report = {
-            "iterations": int(timing_stats["iterations"]),
-            "solve_total_s": float(time.perf_counter() - float(_solve_wall_start)),
-            "setup_total_s": float(timing_stats["setup_total"]),
-            "setup_axis_reset_s": float(timing_stats["setup_axis_reset"]),
-            "setup_axis_reset_compute_forces_s": float(timing_stats["setup_axis_reset_compute_forces"]),
-            "setup_axis_reset_unattributed_s": float(setup_axis_reset_unattributed),
-            "setup_unattributed_s": float(setup_unattributed),
-            "iteration_loop_s": float(timing_stats["iteration_loop"]),
-            "iteration_prepare_s": float(timing_stats["iteration_prepare"]),
-            "compute_forces_s": float(timing_stats["compute_forces"]),
-            "compute_forces_first_s": float(timing_stats["compute_forces_first"]),
-            "compute_forces_rest_s": float(timing_stats["compute_forces_rest"]),
-            "compute_forces_calls": int(timing_stats["compute_forces_calls"]),
-            "iteration_residual_metrics_s": float(timing_stats["iteration_residual_metrics"]),
-            "preconditioner_s": float(timing_stats["preconditioner"]),
-            "precond_refresh_s": float(timing_stats["precond_refresh"]),
-            "update_s": float(timing_stats["update"]),
-            "update_state_s": float(timing_stats["update_state"]),
-            "update_trace_build_s": float(timing_stats["update_trace_build"]),
-            "update_trace_finalize_s": float(timing_stats["update_trace_finalize"]),
-            "iteration_post_update_s": float(timing_stats["iteration_post_update"]),
-            "iteration_loop_unattributed_s": float(timing_stats["iteration_loop_unattributed"]),
-            "finalize_s": float(timing_stats["finalize"]),
-            "setup_per_iter_s": float(timing_stats["setup_total"]) / iters,
-            "iteration_prepare_per_iter_s": float(timing_stats["iteration_prepare"]) / iters,
-            "compute_forces_per_iter_s": float(timing_stats["compute_forces"]) / iters,
-            "iteration_residual_metrics_per_iter_s": float(timing_stats["iteration_residual_metrics"]) / iters,
-            "preconditioner_per_iter_s": float(timing_stats["preconditioner"]) / iters,
-            "update_per_iter_s": float(timing_stats["update"]) / iters,
-            "update_state_per_iter_s": float(timing_stats["update_state"]) / iters,
-            "update_trace_build_per_iter_s": float(timing_stats["update_trace_build"]) / iters,
-            "update_trace_finalize_per_iter_s": float(timing_stats["update_trace_finalize"]) / iters,
-            "iteration_post_update_per_iter_s": float(timing_stats["iteration_post_update"]) / iters,
-            "iteration_loop_unattributed_per_iter_s": float(timing_stats["iteration_loop_unattributed"]) / iters,
-        }
-        if timing_detail_enabled:
-            timing_report.update(
-                {
-                    "precond_apply_s": float(timing_stats["precond_apply"]),
-                    "precond_mode_scale_s": float(timing_stats["precond_mode_scale"]),
-                    "precond_apply_per_iter_s": float(timing_stats["precond_apply"]) / iters,
-                    "precond_mode_scale_per_iter_s": float(timing_stats["precond_mode_scale"]) / iters,
-                }
-            )
+        timing_stats["iteration_loop_unattributed"] = float(timing_report["iteration_loop_unattributed_s"])
         diag["timing"] = timing_report
         try:
-            detail_text = ""
-            if timing_detail_enabled:
-                detail_text = (
-                    f"precond_apply={timing_report['precond_apply_s']:.3e}s "
-                    f"precond_mode={timing_report['precond_mode_scale_s']:.3e}s "
-                )
             print(
-                "[vmec_jax timing] "
-                f"iters={timing_report['iterations']} "
-                f"compute_forces={timing_report['compute_forces_s']:.3e}s "
-                f"precond={timing_report['preconditioner_s']:.3e}s "
-                f"precond_refresh={timing_report['precond_refresh_s']:.3e}s "
-                f"{detail_text}"
-                f"update={timing_report['update_s']:.3e}s "
-                f"update_state={timing_report['update_state_s']:.3e}s "
-                f"trace_build={timing_report['update_trace_build_s']:.3e}s "
-                f"trace_final={timing_report['update_trace_finalize_s']:.3e}s "
-                f"(per-iter: {timing_report['compute_forces_per_iter_s']:.3e}, "
-                f"{timing_report['preconditioner_per_iter_s']:.3e}, "
-                f"{timing_report['update_per_iter_s']:.3e})",
+                _format_residual_iter_timing_message(
+                    timing_report,
+                    timing_detail_enabled=bool(timing_detail_enabled),
+                ),
                 flush=True,
             )
         except Exception:
             pass
     resume_state_payload = None
     if resume_state_mode != "none":
-        resume_state_base = {
-            "time_step": float(time_step),
-            "inv_tau": list(inv_tau),
-            "fsq_prev": float(fsq_prev),
-            "fsq0_prev": float(fsq0_prev),
-            "flip_sign": float(flip_sign),
-            "iter1": int(iter1),
-            "iter_offset": int(last_iter2),
-            "ijacob": int(ijacob),
-            "bad_resets": int(bad_resets),
-            "res0": float(res0),
-            "res1": float(res1),
-            "prev_rz_fsq": float(prev_rz_fsq),
-            "bad_growth_streak": int(bad_growth_streak),
-            "huge_force_restart_count": int(huge_force_restart_count),
-            "vmec2000_cache_valid": bool(vmec2000_cache_valid),
-            "freeb_ivac": int(freeb_ivac),
-            "freeb_ivacskip": int(freeb_ivacskip),
-            "freeb_nvacskip": int(freeb_nvacskip),
-            "freeb_nvskip0": int(freeb_nvskip0),
-            "freeb_model": str(freeb_last_model),
-            "freeb_nestor_update_count": (
-                0 if freeb_nestor_runtime is None else int(getattr(freeb_nestor_runtime, "update_count", 0))
-            ),
-            "freeb_nestor_reuse_count": (
-                0 if freeb_nestor_runtime is None else int(getattr(freeb_nestor_runtime, "reuse_count", 0))
-            ),
-        }
+        resume_state_base = _build_resume_state_base(
+            time_step=time_step,
+            inv_tau=inv_tau,
+            fsq_prev=fsq_prev,
+            fsq0_prev=fsq0_prev,
+            flip_sign=flip_sign,
+            iter1=iter1,
+            last_iter2=last_iter2,
+            ijacob=ijacob,
+            bad_resets=bad_resets,
+            res0=res0,
+            res1=res1,
+            prev_rz_fsq=prev_rz_fsq,
+            bad_growth_streak=bad_growth_streak,
+            huge_force_restart_count=huge_force_restart_count,
+            vmec2000_cache_valid=vmec2000_cache_valid,
+            freeb_ivac=freeb_ivac,
+            freeb_ivacskip=freeb_ivacskip,
+            freeb_nvacskip=freeb_nvacskip,
+            freeb_nvskip0=freeb_nvskip0,
+            freeb_last_model=freeb_last_model,
+            freeb_nestor_runtime=freeb_nestor_runtime,
+        )
         resume_state_heavy = None
         if resume_state_mode == "full":
             resume_state_heavy = {
