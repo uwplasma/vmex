@@ -28,7 +28,11 @@ from .redl_bootstrap import (
     redl_bootstrap_mismatch_from_profiles,
     trapped_fraction_from_modb_sqrtg,
 )
-from .solve import _half_mesh_from_full_mesh, _icurv_full_mesh_from_indata, _mass_half_mesh_from_indata
+from .solve_profile_helpers import (
+    _half_mesh_from_full_mesh,
+    _icurv_full_mesh_from_indata,
+    _mass_half_mesh_from_indata,
+)
 from .vmec_bcovar import vmec_bcovar_half_mesh_from_wout
 from .vmec_residue import vmec_force_norms_from_bcovar_dynamic
 from .wout import _chipf_from_chips, equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state

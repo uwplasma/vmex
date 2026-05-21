@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 import vmec_jax.solve_diagnostics_io as dio
+import vmec_jax.solve_profile_helpers as sph
 
 
 def _kernel_terms(ns: int = 3):
@@ -35,6 +36,9 @@ def test_solve_reexports_extracted_helpers():
     assert solve._maybe_dump_jacobian_terms_record is dio._maybe_dump_jacobian_terms_record
     assert solve._format_vmec2000_iter_row is dio._format_vmec2000_iter_row
     assert solve._normalize_resume_state_mode is dio._normalize_resume_state_mode
+    assert solve._vmec_force_flux_profiles is sph._vmec_force_flux_profiles
+    assert solve._mass_half_mesh_from_indata is sph._mass_half_mesh_from_indata
+    assert solve._icurv_full_mesh_from_indata is sph._icurv_full_mesh_from_indata
 
 
 def test_resume_state_modes_and_payloads(monkeypatch):
