@@ -29,6 +29,7 @@ def test_minimal_seed_showcase_case_map_uses_three_coefficient_inputs() -> None:
     case_fields = {field.name for field in fields(generator.MinimalSeedCase)}
     assert {"default_max_mode", "default_use_ess", "default_policy"}.isdisjoint(case_fields)
     assert generator.DEFAULT_CASE_ORDER == (
+        "qi_circular_nfp1",
         "qi_nfp1",
         "qi_nfp2",
         "qi_nfp3",
@@ -39,6 +40,9 @@ def test_minimal_seed_showcase_case_map_uses_three_coefficient_inputs() -> None:
     )
     for case_name in generator.DEFAULT_CASE_ORDER:
         case = generator.SHOWCASE_CASES[case_name]
+        if case_name == "qi_circular_nfp1":
+            assert case.input_file.name == "input.circular_tokamak"
+            continue
         text = Path(case.input_file).read_text()
         assert f"NFP = {case.nfp}" in text
         assert "RBC(0,0)" in text
@@ -138,7 +142,7 @@ def test_minimal_seed_showcase_config_patch_is_bounded_and_non_mutating() -> Non
     assert patched.project_input_boundary_to_max_mode is True
     assert patched.min_vmec_mode >= 5
     assert patched.qi_preseed_qp is False
-    assert case.qi_policy_case == "qi_stel_seed_3127"
+    assert case.qi_policy_case == "minimal_nfp3_qi"
     assert case.qi_reference_input.name == "input.nfp3_QI_fixed_resolution_final"
 
 
@@ -189,7 +193,7 @@ def test_minimal_seed_showcase_dispatches_qi_to_staged_runner(tmp_path: Path, mo
     assert config.input_file == tmp_path / "input.target_helicity_seed"
     assert config.max_mode == 3
     assert config.policy == "continuation"
-    assert config.policy_case == "nfp2_qi"
+    assert config.policy_case == "minimal_nfp2_qi"
     assert config.reference_input.name == "input.nfp2_QI"
     assert config.max_nfev == 4
     assert config.inner_max_iter == 11

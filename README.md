@@ -96,6 +96,9 @@ objective history over all stages, and initial/final outer-LCFS Boozer `|B|`
 line contours. Extended policy discussion, LASYM panels, finite-beta examples,
 QI seed robustness, failure modes, full CPU/GPU sweep tables, and additional
 QI case coverage live in the docs.
+The QI seed-robustness rows are case-specific gate checks; they are not
+aspect-6 README best-row promotion evidence unless the sweep renderer promotes
+them explicitly.
 
 | Target | Backend | Policy | max_mode | ESS | Final J | QI legacy | Mirror | Aspect | Iota | Wall time |
 |---|---|---|---:|---|---:|---:|---:|---:|---:|---:|
@@ -120,10 +123,14 @@ QI case coverage live in the docs.
   <img src="docs/_static/figures/readme_best_optimization_qi.png" width="980" />
 </p>
 
-Reproduce the compact README rows and panels with:
+Reproduce the compact README rows and panels with the individual optimization
+scripts and renderer:
 
 ```bash
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 3 --ess both --qi-qp-preseed off --rerun
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QA_optimization.py
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QH_optimization.py
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QP_optimization.py
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_optimization.py
 PYTHONPATH=. python examples/optimization/render_readme_best_optimizations.py
 ```
 
