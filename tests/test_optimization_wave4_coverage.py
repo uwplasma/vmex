@@ -203,6 +203,76 @@ def test_qh_qs_residual_factories_fallback_sign_and_min_abs_iota_cotangent(monke
     assert np.all(np.isfinite(np.asarray(cotangent)))
 
 
+def test_qs_residual_factory_objective_helper_matches_weighted_residual_cost(monkeypatch) -> None:
+    import jax.numpy as jnp
+    import vmec_jax.modes as modes_module
+    import vmec_jax.quasisymmetry as qs_module
+    import vmec_jax.wout as wout_module
+
+    static = SimpleNamespace(
+        s=np.asarray([0.0, 1.0]),
+        modes=ModeTable(m=np.asarray([0]), n=np.asarray([0])),
+        cfg=SimpleNamespace(mpol=1, ntor=0, ntheta=3, nzeta=3, nfp=1),
+    )
+    state = _state_from_coeffs(r=2.0, rs=0.4, z=0.5)
+
+    monkeypatch.setattr(opt_module, "flux_profiles_from_indata", lambda *_args, **_kwargs: "flux")
+    monkeypatch.setattr(opt_module, "_pressure_profile_for_static", lambda *_args, **_kwargs: jnp.asarray([0.0, 1.0]))
+    monkeypatch.setattr(
+        modes_module,
+        "nyquist_mode_table_from_grid",
+        lambda **_kwargs: SimpleNamespace(m=np.asarray([0]), n=np.asarray([0])),
+    )
+    monkeypatch.setattr(qs_module, "_quasisymmetry_angle_cache", lambda **_kwargs: "angle-cache")
+
+    def fake_qs_ratio(**kwargs):
+        state_arg = kwargs["state"]
+        residual = state_arg.Zcos[0, 0] + 2.0 * state_arg.Rcos[0, 0]
+        return {
+            "residuals1d": jnp.asarray([residual], dtype=jnp.float64),
+            "total": residual * residual,
+        }
+
+    monkeypatch.setattr(qs_module, "quasisymmetry_ratio_residual_from_state", fake_qs_ratio)
+    monkeypatch.setattr(
+        wout_module,
+        "equilibrium_aspect_ratio_from_state",
+        lambda *, state, static: state.Rcos[0, 0] + 1.0,
+    )
+    monkeypatch.setattr(
+        wout_module,
+        "equilibrium_iota_profiles_from_state",
+        lambda **kwargs: (
+            None,
+            jnp.asarray([0.0, kwargs["state"].Rsin[0, 0] + 0.2], dtype=jnp.float64),
+            None,
+        ),
+    )
+
+    residuals_fn = make_qs_residuals_fn(
+        static,
+        object(),
+        signgs=1,
+        target_aspect=2.5,
+        target_iota=0.7,
+        aspect_weight=2.0,
+        iota_weight=3.0,
+        qs_weight=4.0,
+        surfaces=[0.5],
+    )
+
+    residual = np.asarray(residuals_fn(state), dtype=float)
+    value, cotangent = residuals_fn._state_objective_value_and_cotangent_from_packed(
+        pack_state(state),
+        state.layout,
+    )
+
+    np.testing.assert_allclose(float(np.asarray(value)), 0.5 * float(np.dot(residual, residual)))
+    assert residuals_fn._n_non_qs == 2
+    assert np.all(np.isfinite(np.asarray(cotangent)))
+    assert np.asarray(cotangent).shape == np.asarray(pack_state(state)).shape
+
+
 def test_device_selection_context_move_and_recursive_dispatch_branches(monkeypatch) -> None:
     import vmec_jax._compat as compat
 

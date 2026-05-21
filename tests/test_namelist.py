@@ -51,6 +51,70 @@ def test_fortran_repeat_syntax_is_expanded(tmp_path: Path):
     assert ai[11] == 0.8
 
 
+def test_indata_parser_handles_comments_slices_repeats_and_raw_tokens(tmp_path: Path):
+    txt = """
+&INDATA
+  MGRID_FILE = 'grid!literal.nc' ! comment outside the quoted string
+  RAXIS_CC(:) = 1.0, 2.5D+0
+  ZERO_REPEAT = 0*7.0
+  EMPTY_REPEAT = 2*
+  RAW_TOKEN = not_a_number
+  FLAG_LIST = .TRUE., .FALSE.
+  EMPTY_VALUE =
+  RBC(0,-1) = 3.0
+/
+"""
+    path = tmp_path / "input.parser_edges"
+    path.write_text(txt)
+
+    indata = read_indata(path)
+
+    assert indata.get("MGRID_FILE") == "grid!literal.nc"
+    assert indata.get("RAXIS_CC") == [1.0, 2.5]
+    assert indata.get("ZERO_REPEAT") == "0*7.0"
+    assert indata.get("EMPTY_REPEAT") == "2*"
+    assert indata.get("RAW_TOKEN") == "not_a_number"
+    assert indata.get_bool("FLAG_LIST") is True
+    assert "EMPTY_VALUE" not in indata.scalars
+    assert indata.indexed["RBC"][(0, -1)] == 3.0
+
+
+def test_indata_getters_and_parser_error_paths(tmp_path: Path):
+    indata = InData(
+        scalars={
+            "EMPTY_LIST": [],
+            "BAD_INT": "not-int",
+            "BAD_FLOAT": "not-float",
+        },
+        indexed={},
+    )
+
+    assert indata.get_int("EMPTY_LIST", default=7) == 7
+    assert indata.get_float("EMPTY_LIST", default=1.25) == 1.25
+    assert indata.get_bool("EMPTY_LIST") is False
+    assert indata.get_int("BAD_INT", default=9) == 9
+    assert indata.get_float("BAD_FLOAT", default=2.5) == 2.5
+
+    no_block = tmp_path / "input.no_block"
+    no_block.write_text("&OTHER\n  NFP = 1\n/\n")
+    with pytest.raises(ValueError, match="No &INDATA found"):
+        read_indata(no_block)
+
+    no_end = tmp_path / "input.no_end"
+    no_end.write_text("&INDATA\n  NFP = 1\n")
+    with pytest.raises(ValueError, match="No terminating '/'"):
+        read_indata(no_end)
+
+    empty = tmp_path / "input.empty"
+    empty.write_text("&INDATA\n  ! no assignments\n/\n")
+    assert read_indata(empty).scalars == {}
+
+    bad_indexed = tmp_path / "input.bad_indexed"
+    bad_indexed.write_text("&INDATA\n  RBC(0,0) = 1.0, 2.0\n/\n")
+    with pytest.raises(ValueError, match="Indexed assignment RBC"):
+        read_indata(bad_indexed)
+
+
 def test_write_indata_roundtrips_scalars_lists_and_indexed_values(tmp_path: Path):
     source = InData(
         scalars={

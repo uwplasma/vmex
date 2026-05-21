@@ -696,6 +696,31 @@ def test_least_squares_problem_collects_problem_metadata() -> None:
     }
 
 
+def test_least_squares_problem_plain_tuple_uses_simsopt_weight_semantics() -> None:
+    from vmec_jax.optimization_workflow import LeastSquaresProblem
+
+    def vector_objective(ctx, state):
+        assert ctx == "ctx"
+        return np.asarray([state, state + 1.0], dtype=float)
+
+    problem = LeastSquaresProblem.from_tuples(
+        [
+            (vector_objective, np.asarray([1.0, 3.0]), 9.0),
+        ]
+    )
+
+    assert problem.is_qi is False
+    assert problem.objective_terms[0].name == "vector_objective"
+    np.testing.assert_allclose(
+        np.asarray(problem.objective_terms[0].residual("ctx", 2.0)),
+        [3.0, 0.0],
+    )
+
+    for bad_weight in (-1.0, np.inf, np.nan):
+        with pytest.raises(ValueError, match="finite and non-negative"):
+            LeastSquaresProblem.from_tuples([(vector_objective, 0.0, bad_weight)])
+
+
 def test_workflow_stage_policy_helpers_are_explicit() -> None:
     from vmec_jax.optimization_workflow import objectives_track_iota, qs_stage_budget, qs_stage_modes, repeated_stage_modes
     from vmec_jax.optimization_workflow import ObjectiveTerm

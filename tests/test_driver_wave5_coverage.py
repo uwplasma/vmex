@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import numpy as np
@@ -63,6 +64,102 @@ def test_stage_switch_reason_covers_zero_and_nonpositive_decay_edges():
         )
         is None
     )
+
+
+def test_result_residual_convergence_and_budget_helpers_cover_fallbacks():
+    assert driver._result_final_residuals(None) is None
+    explicit = SimpleNamespace(diagnostics={"final_fsqr": "1.0", "final_fsqz": 2.0, "final_fsql": np.float64(3.0)})
+    assert driver._result_final_residuals(explicit) == (1.0, 2.0, 3.0)
+
+    history = SimpleNamespace(
+        diagnostics={"final_fsqr": object(), "final_fsqz": 2.0, "final_fsql": 3.0, "requested_ftol": 10.0},
+        fsqr2_history=np.asarray([4.0, 5.0]),
+        fsqz2_history=np.asarray([6.0, 7.0]),
+        fsql2_history=np.asarray([8.0, 9.0]),
+    )
+    assert driver._result_final_residuals(history) == (5.0, 7.0, 9.0)
+
+    diag_history = SimpleNamespace(
+        diagnostics={
+            "fsqr_full": np.asarray([1.25]),
+            "fsqz_full": np.asarray([2.5]),
+            "fsql_full": np.asarray([3.75]),
+        },
+        fsqr2_history=np.asarray([object()], dtype=object),
+        fsqz2_history=np.asarray([1.0]),
+        fsql2_history=np.asarray([1.0]),
+    )
+    assert driver._result_final_residuals(diag_history) == (1.25, 2.5, 3.75)
+
+    no_residuals = SimpleNamespace(
+        diagnostics={"fsqr_full": np.asarray([object()], dtype=object), "fsqz_full": [1.0], "fsql_full": [1.0]},
+        fsqr2_history=np.asarray([object()], dtype=object),
+        fsqz2_history=np.asarray([1.0]),
+        fsql2_history=np.asarray([1.0]),
+    )
+    assert driver._result_final_residuals(no_residuals) is None
+    assert driver._result_final_fsq(None) == np.inf
+    assert driver._result_final_fsq(no_residuals) == np.inf
+
+    assert driver._result_meets_requested_ftol(SimpleNamespace(diagnostics={"converged_strict": True}), ftol=0.0)
+    assert not driver._result_meets_requested_ftol(SimpleNamespace(diagnostics={"converged_strict": False}), ftol=1.0)
+    assert driver._result_meets_requested_ftol(SimpleNamespace(diagnostics={"converged": True}), ftol=0.0)
+    assert not driver._result_meets_requested_ftol(no_residuals, ftol=1.0)
+    assert driver._result_meets_requested_ftol(history, ftol=10.0)
+    assert not driver._result_meets_requested_ftol(history, ftol=1.0)
+    assert not driver._result_hits_total_target(None, fsq_total_target=1.0)
+    assert not driver._result_hits_total_target(history, fsq_total_target=None)
+    assert driver._result_hits_total_target(history, fsq_total_target=100.0)
+
+    assert driver._allocate_integer_budget(total=0, weights=[1, 2]) == [0, 0]
+    assert driver._allocate_integer_budget(total=5, weights=[]) == []
+    assert driver._allocate_integer_budget(total=5, weights=[0, -1, 0]) == [0, 0, 5]
+    assert sum(driver._allocate_integer_budget(total=7, weights=[1, 2, 3])) == 7
+    assert driver._accelerated_cli_budgeted_total_iters(total_budget=10, ns_stages=[]) == 10
+    assert driver._accelerated_cli_budgeted_total_iters(total_budget=100, ns_stages=[25, 100]) == 50
+    assert driver._accelerated_cli_budgeted_stage_iters(total_budget=8, ns_stages=[]) == [8]
+    assert driver._accelerated_cli_budgeted_stage_iters(total_budget=1, ns_stages=[8, 9])[-1] == 1
+    assert driver._distribute_stage_iters(iters=0, nstep=4) == [0]
+    assert driver._distribute_stage_iters(iters=3, nstep=1) == [3]
+    assert driver._distribute_stage_iters(iters=2, nstep=5) == [2]
+    assert driver._distribute_stage_iters(iters=7, nstep=3) == [3, 2, 2]
+
+
+def test_stage_chunk_result_merging_preserves_histories_and_terminal_metadata():
+    first = _result(n=2)
+    first = replace(
+        first,
+        diagnostics={
+            "step_status_history": np.asarray(["accepted"], dtype=object),
+            "fsq_prev_history": np.asarray([2.0]),
+        },
+    )
+    second = replace(
+        _result(n=3),
+        diagnostics={
+            "step_status_history": np.asarray(["restart", "accepted"], dtype=object),
+            "time_step_history": np.asarray([0.5, 0.25]),
+        },
+    )
+
+    single = driver._merge_stage_chunk_results([first], mode_i="accelerated")
+    assert single.diagnostics["accelerated_stage_chunked"] is False
+    assert single.diagnostics["accelerated_stage_effective_mode"] == "accelerated"
+
+    merged = driver._merge_stage_chunk_results([first, second], mode_i="parity")
+
+    assert merged.state is second.state
+    assert merged.n_iter == first.n_iter + second.n_iter + 1
+    np.testing.assert_allclose(merged.w_history, np.concatenate([first.w_history, second.w_history]))
+    np.testing.assert_array_equal(
+        merged.diagnostics["step_status_history"],
+        np.asarray(["accepted", "restart", "accepted"], dtype=object),
+    )
+    np.testing.assert_allclose(merged.diagnostics["fsq_prev_history"], [2.0])
+    np.testing.assert_allclose(merged.diagnostics["time_step_history"], [0.5, 0.25])
+    assert merged.diagnostics["accelerated_stage_chunked"] is True
+    assert merged.diagnostics["accelerated_stage_effective_mode"] == "parity"
+    np.testing.assert_array_equal(merged.diagnostics["accelerated_stage_chunk_iters"], [2, 3])
 
 
 def test_wout_from_fixed_boundary_run_uses_sparse_history_sampling_and_restores_env(monkeypatch, tmp_path):

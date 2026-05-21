@@ -1003,6 +1003,18 @@ def _plot_state_atlas(
         policy=policy,
     )
     if not problems:
+        problems = tuple(
+            problem
+            for problem in PROBLEMS
+            if any(
+                result.backend == backend
+                and bool(result.stellarator_asymmetric) == bool(stellarator_asymmetric)
+                and result.policy == policy
+                and result.problem == problem
+                for result in results
+            )
+        )
+    if not problems:
         return False
     columns = [(mode, use_ess) for mode in modes for use_ess in ESS_OPTIONS]
     ncols = len(columns)

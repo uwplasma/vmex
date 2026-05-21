@@ -78,6 +78,77 @@ def test_qi_residual_from_boozer_output_handles_surface_weights_and_sine_modes()
     assert float(np.asarray(mirror["mirror_ratio"][0])) > float(np.asarray(mirror["mirror_ratio"][1]))
 
 
+def test_qi_mirror_ratio_rank1_inputs_and_validation_edges():
+    pytest.importorskip("jax")
+
+    from vmec_jax.quasi_isodynamic import mirror_ratio_penalty_from_boozer_modes
+
+    out = mirror_ratio_penalty_from_boozer_modes(
+        bmnc_b=np.asarray([1.0, 0.2]),
+        bmns_b=np.asarray([0.0, 0.05]),
+        xm_b=np.asarray([0, 1]),
+        xn_b=np.asarray([0, 1]),
+        nfp=1,
+        weights=[4.0],
+        threshold=0.0,
+        ntheta=16,
+        nphi=16,
+        smooth_extrema=1.0e-2,
+        smooth_penalty=1.0e-2,
+    )
+
+    assert np.asarray(out["residuals1d"]).shape == (1,)
+    assert float(np.asarray(out["mirror_ratio"][0])) > 0.0
+    np.testing.assert_allclose(
+        np.asarray(out["residuals1d"])[0],
+        np.asarray(out["penalty"])[0] * 2.0,
+    )
+
+    with pytest.raises(ValueError, match="same mode dimension"):
+        mirror_ratio_penalty_from_boozer_modes(
+            bmnc_b=np.asarray([[1.0, 0.1]]),
+            xm_b=np.asarray([0]),
+            xn_b=np.asarray([0]),
+            nfp=1,
+        )
+    with pytest.raises(ValueError, match="same shape"):
+        mirror_ratio_penalty_from_boozer_modes(
+            bmnc_b=np.asarray([[1.0, 0.1]]),
+            bmns_b=np.asarray([[0.0, 0.0, 0.0]]),
+            xm_b=np.asarray([0, 1]),
+            xn_b=np.asarray([0, 1]),
+            nfp=1,
+        )
+    with pytest.raises(ValueError, match="weights must have"):
+        mirror_ratio_penalty_from_boozer_modes(
+            bmnc_b=np.asarray([[1.0, 0.1]]),
+            xm_b=np.asarray([0, 1]),
+            xn_b=np.asarray([0, 1]),
+            nfp=1,
+            weights=[1.0, 2.0],
+        )
+
+
+def test_qi_boundary_elongation_proxy_tracks_ellipse_and_validates_phi():
+    pytest.importorskip("jax")
+
+    from vmec_jax.quasi_isodynamic import boundary_max_elongation_from_rz
+
+    theta = np.linspace(0.0, 2.0 * np.pi, 64, endpoint=False)
+    phi = np.linspace(0.0, 2.0 * np.pi, 5, endpoint=False)
+    R = 3.0 + np.cos(theta)[:, None] * np.ones_like(phi)[None, :]
+    Z = 0.5 * np.sin(theta)[:, None] * np.ones_like(phi)[None, :]
+
+    out = boundary_max_elongation_from_rz(R, Z, phi=phi, smooth_extrema=1.0e-2)
+
+    assert float(np.asarray(out["max_elongation"])) > 1.5
+    assert np.all(np.isfinite(np.asarray(out["elongation"])))
+    with pytest.raises(ValueError, match="phi must have"):
+        boundary_max_elongation_from_rz(R, Z, phi=phi[:-1])
+    with pytest.raises(ValueError, match="R and Z"):
+        boundary_max_elongation_from_rz(R[:, :, None], Z)
+
+
 def test_qi_residual_from_state_uses_nearest_half_mesh_and_boozer_wrapper(monkeypatch):
     pytest.importorskip("jax")
 
@@ -144,6 +215,72 @@ def test_qi_residual_from_state_uses_nearest_half_mesh_and_boozer_wrapper(monkey
     np.testing.assert_array_equal(calls["booz"]["surface_indices"], [0, 2])
     np.testing.assert_allclose(np.asarray(out["surfaces"]), [0.25, 0.75])
     np.testing.assert_array_equal(np.asarray(out["surface_indices"]), [0, 2])
+    assert np.isfinite(float(np.asarray(out["total"])))
+
+
+def test_qi_residual_from_state_accepts_precomputed_boozer_grid_and_scalar_surface(monkeypatch):
+    pytest.importorskip("jax")
+
+    import sys
+
+    import vmec_jax.booz_input as booz_input
+    from vmec_jax.quasi_isodynamic import quasi_isodynamic_residual_from_state
+
+    calls = {}
+    fake_booz_module = ModuleType("booz_xform_jax")
+
+    def fail_prepare_booz_xform_constants_from_inputs(**_kwargs):
+        raise AssertionError("precomputed Boozer constants should be reused")
+
+    def fake_booz_xform_from_inputs(*, inputs, constants, grids, surface_indices, jit):
+        calls["booz"] = {
+            "inputs": inputs,
+            "constants": constants,
+            "grids": grids,
+            "surface_indices": np.asarray(surface_indices),
+            "jit": jit,
+        }
+        return {
+            "bmnc_b": np.asarray([[1.0, 0.03]], dtype=float),
+            "ixm_b": np.asarray([0, 0], dtype=float),
+            "ixn_b": np.asarray([0, 1], dtype=float),
+            "iota_b": np.asarray([0.42], dtype=float),
+            "nfp_b": np.asarray(3),
+        }
+
+    fake_booz_module.prepare_booz_xform_constants_from_inputs = fail_prepare_booz_xform_constants_from_inputs
+    fake_booz_module.booz_xform_from_inputs = fake_booz_xform_from_inputs
+    monkeypatch.setitem(sys.modules, "booz_xform_jax", fake_booz_module)
+    monkeypatch.setattr(
+        booz_input,
+        "booz_xform_inputs_from_state",
+        lambda **_kwargs: SimpleNamespace(rmnc=np.zeros((5, 2)), nfp=3),
+    )
+
+    out = quasi_isodynamic_residual_from_state(
+        state="state",
+        static=SimpleNamespace(cfg=SimpleNamespace(lasym=False)),
+        indata="indata",
+        signgs=1,
+        surfaces=0.6,
+        weights=[2.0],
+        nphi=17,
+        nalpha=5,
+        n_bounce=4,
+        branch_width_weight=0.0,
+        shuffle_profile_weight=0.0,
+        booz_constants="precomputed-constants",
+        booz_grids="precomputed-grids",
+        surface_indices=np.asarray([3], dtype=np.int32),
+        pressure_local=np.asarray([0.0, 1.0]),
+    )
+
+    assert calls["booz"]["constants"] == "precomputed-constants"
+    assert calls["booz"]["grids"] == "precomputed-grids"
+    assert calls["booz"]["jit"] is False
+    np.testing.assert_array_equal(calls["booz"]["surface_indices"], [3])
+    np.testing.assert_allclose(np.asarray(out["surfaces"]), [0.6])
+    np.testing.assert_array_equal(np.asarray(out["surface_indices"]), [3])
     assert np.isfinite(float(np.asarray(out["total"])))
 
 

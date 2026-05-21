@@ -78,6 +78,19 @@ def _fake_dynamic_trace(
     }
 
 
+def _state_with_scalar(state: VMECState, value: float) -> VMECState:
+    arr = np.full_like(np.asarray(state.Rcos, dtype=float), float(value))
+    return VMECState(
+        layout=state.layout,
+        Rcos=arr.copy(),
+        Rsin=arr.copy(),
+        Zcos=arr.copy(),
+        Zsin=arr.copy(),
+        Lcos=arr.copy(),
+        Lsin=arr.copy(),
+    )
+
+
 def _fake_supported_dynamic_trace(**overrides) -> dict:
     trace = _fake_dynamic_trace()
     trace.update(
@@ -443,6 +456,107 @@ def test_direct_checkpoint_tape_reruns_full_trace_when_dynamic_trace_unsupported
     assert tape.step_trace_static_flags == {"precond_jmax": 1}
     assert stack_calls == [(trace_full,)]
     assert tape.diagnostics["timing"]["iterations"] == 2
+
+
+def test_checkpoint_tape_builder_collects_step_payloads_until_converged(monkeypatch):
+    trace0 = _fake_supported_dynamic_trace(lambda_update_scale=0.5)
+    state0 = trace0["state_pre"]
+    state1 = _state_with_scalar(state0, 1.0)
+    state2 = _state_with_scalar(state0, 2.0)
+    calls = []
+
+    def fake_replay_step(state, static, *, resume_state, solve_kwargs):
+        calls.append((state, static, resume_state, dict(solve_kwargs)))
+        idx = len(calls)
+        converged = idx == 2
+        next_state = state1 if idx == 1 else state2
+        return SimpleNamespace(
+            state=next_state,
+            diagnostics={
+                "iter2_history": [idx],
+                "step_status_history": ["momentum"],
+                "time_step_history": [0.25 * idx],
+                "fsq_curr_history": [1.0 / idx],
+                "state_advanced_history": [True],
+                "resume_state": {"step": idx, "fsq": 1.0 / idx},
+                "adjoint_step_trace": [{**trace0, "lambda_update_scale": 0.25 * idx}],
+                "converged": converged,
+            },
+        )
+
+    monkeypatch.setattr(da, "replay_residual_checkpoint_step", fake_replay_step)
+
+    tape = da.build_residual_checkpoint_tape(
+        state0,
+        "static",
+        indata={"nstep": 1},
+        signgs=-1,
+        max_iter=5,
+        ftol=1.0e-6,
+        step_size=0.75,
+        light_history=True,
+    )
+
+    assert len(calls) == 2
+    assert calls[0][2] is None
+    assert calls[1][2] == {"step": 1, "fsq": 1.0}
+    assert calls[0][3]["signgs"] == -1
+    assert calls[0][3]["light_history"] is False
+    assert calls[0][3]["resume_state_mode"] == "full"
+    np.testing.assert_allclose(np.asarray(tape.final_packed_state), np.asarray(da.pack_state(state2)))
+    assert tape.packed_states.shape == (2, int(state0.layout.size))
+    assert [r["step"] for r in tape.resume_states] == [1, 2]
+    assert len(tape.step_traces) == 2
+    np.testing.assert_allclose(tape.trace.time_step, [0.25, 0.5])
+
+
+def test_dynamic_fsq1_uses_vmec2000_lambda_norm_and_safe_zero_rz_norm(monkeypatch):
+    import vmec_jax.vmec_residue as residue
+
+    def fake_gcx2_from_tomnsps(**_kwargs):
+        return (np.asarray(2.0), np.asarray(3.0), np.asarray(5.0))
+
+    rz_norm_values = iter((np.asarray(4.0), np.asarray(0.0), np.asarray(4.0)))
+
+    def fake_rz_norm_from_state(**_kwargs):
+        return next(rz_norm_values)
+
+    monkeypatch.setattr(residue, "vmec_gcx2_from_tomnsps", fake_gcx2_from_tomnsps)
+    monkeypatch.setattr(residue, "vmec_rz_norm_from_state", fake_rz_norm_from_state)
+
+    trace = _fake_dynamic_trace()
+    state = trace["state_pre"]
+    static = SimpleNamespace(s=np.asarray([0.0, 0.5, 1.0]), cfg=SimpleNamespace(lconm1=True))
+    frzl = SimpleNamespace(
+        flsc=np.asarray([[9.0], [1.0], [2.0]]),
+        flcs=np.asarray([[9.0], [3.0], [4.0]]),
+        flcc=np.asarray([[9.0], [5.0], [6.0]]),
+        flss=np.asarray([[9.0], [7.0], [8.0]]),
+    )
+
+    vmec2000 = da._dynamic_fsq1_from_force_channels(
+        state_pre=state,
+        static=static,
+        vmec2000_control=True,
+        frzl_pre=frzl,
+    )
+    zero_norm = da._dynamic_fsq1_from_force_channels(
+        state_pre=state,
+        static=static,
+        vmec2000_control=False,
+        frzl_pre=frzl,
+    )
+    non_vmec2000 = da._dynamic_fsq1_from_force_channels(
+        state_pre=state,
+        static=static,
+        vmec2000_control=False,
+        frzl_pre=frzl,
+    )
+
+    expected_lambda_full = (1 + 4 + 9 + 16 + 25 + 36 + 49 + 64) * 0.5
+    assert float(np.asarray(vmec2000)) == pytest.approx((2.0 + 3.0) / 4.0 + expected_lambda_full)
+    assert float(np.asarray(zero_norm)) == pytest.approx(5.0 * 0.5)
+    assert float(np.asarray(non_vmec2000)) == pytest.approx((2.0 + 3.0) / 4.0 + 5.0 * 0.5)
 
 
 def test_concat_residual_iteration_traces_empty_is_typed():

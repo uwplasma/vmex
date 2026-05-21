@@ -462,15 +462,16 @@ def test_boundary_mode_limits_normalize_anisotropic_stage_descriptors():
 
 def test_create_x_scale_normalizes_lowest_level_and_decays_high_modes():
     specs = [
+        BoundaryParamSpec("rc00", "rc", 0, 0, 0),
         BoundaryParamSpec("rc10", "rc", 0, 1, 0),
-        BoundaryParamSpec("rc20", "rc", 1, 2, 0),
+        BoundaryParamSpec("rc2m2", "rc", 1, 2, -2),
         BoundaryParamSpec("rc33", "rc", 2, 3, 3),
     ]
 
-    np.testing.assert_allclose(create_x_scale(specs, alpha=0.0), np.ones(3))
+    np.testing.assert_allclose(create_x_scale(specs, alpha=0.0), np.ones(4))
     np.testing.assert_allclose(
         create_x_scale(specs, alpha=0.5),
-        np.array([1.0, np.exp(-0.5), np.exp(-1.0)]),
+        np.array([np.exp(0.5), 1.0, np.exp(-0.5), np.exp(-1.0)]),
     )
 
 

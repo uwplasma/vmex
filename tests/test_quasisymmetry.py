@@ -196,7 +196,9 @@ def test_quasisymmetry_nyquist_coeff_helpers_project_known_modes_and_validate_in
 
     empty_modes = ModeTable(m=np.array([], dtype=int), n=np.array([], dtype=int))
     empty = _vmec_wrout_nyquist_cos_coeffs_jax(f=constant, modes=empty_modes, trig=trig)
+    empty_sin = _vmec_wrout_nyquist_sin_coeffs_jax(f=constant, modes=empty_modes, trig=trig)
     assert np.asarray(empty).shape == (2, 0)
+    assert np.asarray(empty_sin).shape == (2, 0)
 
     np.testing.assert_allclose(np.asarray(_half_grid(1, np.float64)), [])
     big_endian = np.array([1.0, 2.0], dtype=">f8")
@@ -208,6 +210,8 @@ def test_quasisymmetry_nyquist_coeff_helpers_project_known_modes_and_validate_in
         _vmec_wrout_nyquist_sin_coeffs_jax(f=np.zeros((2, 3)), modes=modes, trig=trig)
     with pytest.raises(ValueError, match="smaller than VMEC ntheta2"):
         _vmec_wrout_nyquist_cos_coeffs_jax(f=np.zeros((1, int(trig.ntheta2) - 1, 5)), modes=modes, trig=trig)
+    with pytest.raises(ValueError, match="smaller than VMEC ntheta2"):
+        _vmec_wrout_nyquist_sin_coeffs_jax(f=np.zeros((1, int(trig.ntheta2) - 1, 5)), modes=modes, trig=trig)
     with pytest.raises(ValueError, match="Input theta grid"):
         _vmec_symoutput_split_jax(f=np.zeros((1, int(trig.ntheta2) - 1, 5)), trig=trig)
     with pytest.raises(ValueError, match="Expected f with shape"):

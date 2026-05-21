@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import sys
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 import vmec_jax.wout as wout_module
 from vmec_jax.modes import ModeTable
 from vmec_jax.state import StateLayout, VMECState
 from vmec_jax.vmec_tomnsp import vmec_trig_tables
 from vmec_jax.wout import (
+    _apply_nyquist_half_weight,
     _bsubuv_parity_from_state,
     _compute_bsubs_half_mesh,
     _filter_bsubuv_jxbforce_lasym_loop,
@@ -416,6 +419,65 @@ def test_jxbforce_loop_filters_cover_single_surface_and_nyquist_weight_branches(
     assert np.all(np.isfinite(deriv_v))
 
 
+def test_jxbforce_filters_validate_shapes_and_preserve_identity_when_filter_disabled() -> None:
+    trig = vmec_trig_tables(ntheta=4, nzeta=3, nfp=1, mmax=1, nmax=1, lasym=False, cache=False)
+    nt2 = int(trig.ntheta2)
+    nzeta = int(np.asarray(trig.cosnv).shape[0])
+    shape = (2, nt2, nzeta)
+    base = _grid_field(shape, 0.1, scale=0.05)
+
+    with pytest.raises(ValueError, match="Parity bsubu/bsubv shape mismatch"):
+        _filter_bsubuv_jxbforce_parity_loop(
+            bsubu_even=base,
+            bsubu_odd=base[:, :1, :],
+            bsubv_even=base,
+            bsubv_odd=base,
+            trig=trig,
+            mmax_force=1,
+            nmax_force=1,
+        )
+    with pytest.raises(ValueError, match="bsubu grid smaller than ntheta2"):
+        _filter_bsubuv_jxbforce_parity_loop(
+            bsubu_even=base[:, :1, :],
+            bsubu_odd=base[:, :1, :],
+            bsubv_even=base[:, :1, :],
+            bsubv_odd=base[:, :1, :],
+            trig=trig,
+            mmax_force=1,
+            nmax_force=1,
+        )
+    with pytest.raises(ValueError, match="bsubu grid smaller than ntheta2"):
+        _filter_bsubuv_jxbforce_loop(
+            bsubu=base[:, :1, :],
+            bsubv=base[:, :1, :],
+            trig=trig,
+            mmax_force=1,
+            nmax_force=1,
+        )
+
+    parity_u, parity_v = _filter_bsubuv_jxbforce_parity_loop(
+        bsubu_even=base,
+        bsubu_odd=2.0 * base,
+        bsubv_even=-base,
+        bsubv_odd=-2.0 * base,
+        trig=trig,
+        mmax_force=-1,
+        nmax_force=1,
+    )
+    np.testing.assert_allclose(parity_u, base)
+    np.testing.assert_allclose(parity_v, -base)
+
+    loop_u, loop_v = _filter_bsubuv_jxbforce_loop(
+        bsubu=base,
+        bsubv=-base,
+        trig=trig,
+        mmax_force=-1,
+        nmax_force=1,
+    )
+    np.testing.assert_allclose(loop_u, base)
+    np.testing.assert_allclose(loop_v, -base)
+
+
 def test_lasym_filter_loop_covers_fallback_channels_and_nyquist_weight_branch() -> None:
     trig = vmec_trig_tables(ntheta=4, nzeta=5, nfp=1, mmax=2, nmax=2, lasym=True, cache=False)
     ns = 1
@@ -438,6 +500,49 @@ def test_lasym_filter_loop_covers_fallback_channels_and_nyquist_weight_branch() 
     assert filtered_v.shape == shape
     assert np.all(np.isfinite(filtered_u))
     assert np.all(np.isfinite(filtered_v))
+
+
+def test_nyquist_half_weight_validates_shapes_and_preserves_unweighted_cases() -> None:
+    trig = vmec_trig_tables(ntheta=4, nzeta=3, nfp=1, mmax=1, nmax=1, lasym=False, cache=False)
+    modes_empty = ModeTable(m=np.asarray([], dtype=int), n=np.asarray([], dtype=int))
+    coeff_empty = np.zeros((2, 0))
+    got_cos, got_sin = _apply_nyquist_half_weight(
+        coeff_cos=coeff_empty,
+        coeff_sin=coeff_empty,
+        modes=modes_empty,
+        trig=trig,
+    )
+    assert got_cos is coeff_empty
+    assert got_sin is coeff_empty
+
+    modes_unweighted = ModeTable(m=np.asarray([0], dtype=int), n=np.asarray([0], dtype=int))
+    coeff = np.asarray([[2.0], [4.0]])
+    got_cos, got_sin = _apply_nyquist_half_weight(
+        coeff_cos=coeff,
+        coeff_sin=-coeff,
+        modes=modes_unweighted,
+        trig=trig,
+    )
+    assert got_cos is coeff
+    np.testing.assert_allclose(got_sin, -coeff)
+
+    with pytest.raises(ValueError, match="Expected coeff arrays"):
+        _apply_nyquist_half_weight(
+            coeff_cos=np.ones((1, 1, 1)),
+            coeff_sin=np.ones((1, 1)),
+            modes=modes_unweighted,
+            trig=trig,
+        )
+
+
+def test_read_and_write_wout_report_missing_netcdf_dependency(monkeypatch, tmp_path) -> None:
+    monkeypatch.setitem(sys.modules, "netCDF4", None)
+
+    with pytest.raises(ImportError, match=r"netCDF4 is required to read wout files"):
+        wout_module.read_wout(tmp_path / "wout_missing_dependency.nc")
+
+    with pytest.raises(ImportError, match=r"netCDF4 is required to write wout files"):
+        wout_module.write_wout(tmp_path / "wout_missing_dependency.nc", SimpleNamespace())
 
 
 def test_getbsubs_coefficients_use_lstsq_when_direct_solve_fails(monkeypatch) -> None:

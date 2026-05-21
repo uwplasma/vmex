@@ -169,6 +169,32 @@ def test_cli_run_mode_uses_cpu_default_policy_and_explicit_output(monkeypatch, t
     assert calls["kwargs"]["max_iter"] == 3
 
 
+def test_cli_run_mode_uses_gpu_default_policy(monkeypatch, tmp_path: Path) -> None:
+    input_path = tmp_path / "input.case"
+    input_path.write_text("&INDATA\n/\n")
+    indata = InData(scalars={}, indexed={})
+    calls = {}
+
+    monkeypatch.setattr(cli, "read_indata", lambda path: indata)
+    monkeypatch.setattr(
+        cli,
+        "_default_non_autodiff_solver_policy_for_backend",
+        lambda _indata, backend: ("accelerated", True) if backend == "gpu" else ("default", False),
+    )
+
+    def fake_run_fixed_boundary(path: str, **kwargs):
+        calls["kwargs"] = kwargs
+        return SimpleNamespace(state=SimpleNamespace(Rcos=0.0))
+
+    monkeypatch.setattr(cli, "run_fixed_boundary", fake_run_fixed_boundary)
+    monkeypatch.setattr(cli, "write_wout_from_fixed_boundary_run", lambda path, run, *, include_fsq: path.write_text("wout"))
+
+    assert cli.main([str(input_path), "--solver-device", "gpu"]) == 0
+    assert calls["kwargs"]["solver_device"] == "gpu"
+    assert calls["kwargs"]["solver_mode"] == "accelerated"
+    assert calls["kwargs"]["performance_mode"] is True
+
+
 def test_cli_run_mode_explicit_solver_flags_and_vmecpp_restart(monkeypatch, tmp_path: Path) -> None:
     input_path = tmp_path / "input.case"
     input_path.write_text("&INDATA\n/\n")
@@ -246,6 +272,92 @@ def test_cli_profile_hooks_are_best_effort(monkeypatch, tmp_path: Path) -> None:
     assert ("block_until_ready", "ready") in calls
     assert ("stop_trace", None) in calls
     assert ("stop_server", None) in calls
+
+
+def test_cli_profile_hook_failures_do_not_block_solver(monkeypatch, tmp_path: Path) -> None:
+    input_path = tmp_path / "input.case"
+    input_path.write_text("&INDATA\n/\n")
+    indata = InData(scalars={}, indexed={})
+
+    class RaisingProfiler:
+        @staticmethod
+        def start_server(port: int):
+            raise RuntimeError(f"cannot start {port}")
+
+        @staticmethod
+        def start_trace(path: str, *, create_perfetto_trace: bool):
+            raise RuntimeError(f"cannot trace {path}")
+
+    fake_jax = SimpleNamespace(
+        profiler=RaisingProfiler,
+        default_backend=lambda: (_ for _ in ()).throw(RuntimeError("no backend")),
+    )
+    calls = {}
+
+    monkeypatch.setitem(sys.modules, "jax", fake_jax)
+    monkeypatch.setenv("VMEC_JAX_PROFILE_DIR", str(tmp_path / "profile"))
+    monkeypatch.setenv("VMEC_JAX_PROFILE_SERVER", "1")
+    monkeypatch.setattr(cli, "read_indata", lambda path: indata)
+    monkeypatch.setattr(cli, "default_non_autodiff_solver_policy", lambda _: ("default", True))
+
+    def fake_run_fixed_boundary(path: str, **kwargs):
+        calls["kwargs"] = kwargs
+        return SimpleNamespace(state=SimpleNamespace(Rcos="not-awaited"))
+
+    monkeypatch.setattr(cli, "run_fixed_boundary", fake_run_fixed_boundary)
+    monkeypatch.setattr(cli, "write_wout_from_fixed_boundary_run", lambda path, run, *, include_fsq: path.write_text("wout"))
+
+    assert cli.main([str(input_path)]) == 0
+    assert calls["kwargs"]["use_scan"] is False
+
+
+def test_cli_profile_cleanup_failures_are_best_effort(monkeypatch, tmp_path: Path) -> None:
+    input_path = tmp_path / "input.case"
+    input_path.write_text("&INDATA\n/\n")
+    indata = InData(scalars={}, indexed={})
+    calls: list[str] = []
+
+    class CleanupRaisingProfiler:
+        @staticmethod
+        def start_server(port: int):
+            calls.append(f"start_server:{port}")
+            return object()
+
+        @staticmethod
+        def stop_server():
+            calls.append("stop_server")
+            raise RuntimeError("stop server failed")
+
+        @staticmethod
+        def start_trace(path: str, *, create_perfetto_trace: bool):
+            calls.append(f"start_trace:{create_perfetto_trace}")
+
+        @staticmethod
+        def stop_trace():
+            calls.append("stop_trace")
+            raise RuntimeError("stop trace failed")
+
+    def raise_block_until_ready(value):
+        calls.append(f"block:{value}")
+        raise RuntimeError("device wait failed")
+
+    fake_jax = SimpleNamespace(
+        profiler=CleanupRaisingProfiler,
+        block_until_ready=raise_block_until_ready,
+    )
+
+    monkeypatch.setitem(sys.modules, "jax", fake_jax)
+    monkeypatch.setenv("VMEC_JAX_PROFILE_DIR", str(tmp_path / "profile"))
+    monkeypatch.setenv("VMEC_JAX_PROFILE_SERVER", "1")
+    monkeypatch.setattr(cli, "read_indata", lambda path: indata)
+    monkeypatch.setattr(cli, "default_non_autodiff_solver_policy", lambda _: ("default", True))
+    monkeypatch.setattr(cli, "run_fixed_boundary", lambda path, **kwargs: SimpleNamespace(state=SimpleNamespace(Rcos="ready")))
+    monkeypatch.setattr(cli, "write_wout_from_fixed_boundary_run", lambda path, run, *, include_fsq: path.write_text("wout"))
+
+    assert cli.main([str(input_path)]) == 0
+    assert "block:ready" in calls
+    assert "stop_trace" in calls
+    assert "stop_server" in calls
 
 
 def test_cli_errors_for_missing_input_invalid_jit_and_read_failure(monkeypatch, tmp_path: Path) -> None:

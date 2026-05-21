@@ -65,8 +65,13 @@ from vmec_jax.solve import (
     _vmec_force_flux_profiles,
     _vmec_scale_m1_factors_from_mats,
     _vmec2000_cadence_selected,
+    _free_boundary_prev_rz_fsq_next,
+    _free_boundary_should_damp_constraint_baseline,
+    _free_boundary_turnon_resets_iter1_immediately,
     _zero_coeff_column,
     _zero_coeff_column_np,
+    _zero_edge_rz_force_block,
+    _zero_edge_rz_force_blocks,
     _zero_velocity_blocks_like,
     first_step_diagnostics,
     solve_lambda_gd,
@@ -810,6 +815,79 @@ def test_axis_reset_state_merge_replaces_only_m0_geometry_and_preserves_lambda()
 
     full = _merge_axis_reset_state(st=state, st_axis=axis_state, static=static, full_reset=True)
     assert full is axis_state
+
+
+def test_axis_reset_state_merge_uses_cached_m0_mask_when_available():
+    state = _state_from_value(2.0, ns=2, k=3)
+    axis_state = _state_from_value(8.0, ns=2, k=3)
+    static = SimpleNamespace(
+        modes=SimpleNamespace(m=np.array([99, 99, 99])),
+        m_is_m0=np.asarray([0.0, 1.0, 0.0]),
+    )
+
+    merged = _merge_axis_reset_state(st=state, st_axis=axis_state, static=static, full_reset=False)
+
+    np.testing.assert_allclose(np.asarray(merged.Rcos), np.array([[2.0, 8.0, 2.0], [2.0, 8.0, 2.0]]))
+    np.testing.assert_allclose(np.asarray(merged.Zsin), np.array([[2.0, 8.0, 2.0], [2.0, 8.0, 2.0]]))
+    np.testing.assert_allclose(np.asarray(merged.Lcos), np.asarray(state.Lcos))
+
+
+def test_zero_edge_rz_force_blocks_preserves_lambda_and_short_mesh_numpy_identity():
+    one_row = np.asarray([[1.0, 2.0]])
+    assert _zero_edge_rz_force_block(one_row) is one_row
+
+    block = np.arange(6.0).reshape(3, 2)
+    zeroed = _zero_edge_rz_force_block(block)
+    assert zeroed is not block
+    np.testing.assert_allclose(zeroed[:-1], block[:-1])
+    np.testing.assert_allclose(zeroed[-1], 0.0)
+    np.testing.assert_allclose(block[-1], [4.0, 5.0])
+
+    frzl = TomnspsRZL(
+        frcc=block,
+        frss=block + 10.0,
+        fzsc=block + 20.0,
+        fzcs=block + 30.0,
+        flsc=block + 40.0,
+        flcs=block + 50.0,
+        frsc=block + 60.0,
+        frcs=block + 70.0,
+        fzcc=block + 80.0,
+        fzss=block + 90.0,
+        flcc=block + 100.0,
+        flss=block + 110.0,
+    )
+
+    masked = _zero_edge_rz_force_blocks(frzl)
+
+    for name in ("frcc", "frss", "fzsc", "fzcs", "frsc", "frcs", "fzcc", "fzss"):
+        np.testing.assert_allclose(np.asarray(getattr(masked, name))[-1], 0.0)
+    for name in ("flsc", "flcs", "flcc", "flss"):
+        np.testing.assert_allclose(np.asarray(getattr(masked, name)), np.asarray(getattr(frzl, name)))
+
+
+def test_free_boundary_turnon_cadence_branches_follow_vmec_controls():
+    assert _free_boundary_prev_rz_fsq_next(
+        prev_fsq_before=7.0,
+        fsq_rz_curr=0.25,
+        turnon_restart=True,
+        preserve_turnon_restart=True,
+    ) == pytest.approx(7.0)
+    assert _free_boundary_prev_rz_fsq_next(
+        prev_fsq_before=7.0,
+        fsq_rz_curr=0.25,
+        turnon_restart=True,
+        preserve_turnon_restart=False,
+    ) == pytest.approx(0.25)
+
+    assert _free_boundary_should_damp_constraint_baseline(freeb_ivac=1, freeb_turnon_iter=False, lthreed=True)
+    assert not _free_boundary_should_damp_constraint_baseline(freeb_ivac=1, freeb_turnon_iter=True, lthreed=True)
+    assert _free_boundary_should_damp_constraint_baseline(freeb_ivac=1, freeb_turnon_iter=True, lthreed=False)
+    assert not _free_boundary_should_damp_constraint_baseline(freeb_ivac=-1, freeb_turnon_iter=False, lthreed=False)
+
+    assert _free_boundary_turnon_resets_iter1_immediately(lthreed=False, lasym=True)
+    assert _free_boundary_turnon_resets_iter1_immediately(lthreed=True, lasym=False)
+    assert not _free_boundary_turnon_resets_iter1_immediately(lthreed=True, lasym=True)
 
 
 def test_vmec_scale_m1_factors_jax_and_reassembly_contract():

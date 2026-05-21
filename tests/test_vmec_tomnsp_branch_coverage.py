@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import replace
+from types import ModuleType, SimpleNamespace
 
 import numpy as np
+import pytest
 
 import vmec_jax.vmec_tomnsp as vt
 from vmec_jax.vmec_tomnsp import tomnspa_rzl, tomnsps_masks, tomnsps_rzl, vmec_trig_tables
@@ -51,6 +54,33 @@ def test_tomnsps_fft_fused_and_split_paths_are_consistent(monkeypatch) -> None:
     assert axisym.frss is None
     assert axisym.fzcs is None
     assert axisym.flcs is None
+
+
+def test_tomnsp_pytree_roundtrips_preserve_cached_tables_and_outputs() -> None:
+    trig = vmec_trig_tables(ntheta=6, nzeta=3, nfp=2, mmax=2, nmax=1, lasym=True, cache=False)
+
+    children, aux = trig.tree_flatten()
+    restored = type(trig).tree_unflatten(aux, children)
+
+    assert restored.ntheta1 == trig.ntheta1
+    assert restored.ntheta2 == trig.ntheta2
+    assert restored.ntheta3 == trig.ntheta3
+    assert restored.dnorm == trig.dnorm
+    np.testing.assert_allclose(np.asarray(restored.cosmu), np.asarray(trig.cosmu))
+    np.testing.assert_allclose(np.asarray(restored.basis_zeta_all), np.asarray(trig.basis_zeta_all))
+
+    rzl = vt.TomnspsRZL(
+        frcc=np.ones((1, 1, 1)),
+        frss=None,
+        fzsc=np.ones((1, 1, 1)) * 2.0,
+        fzcs=None,
+        flsc=np.ones((1, 1, 1)) * 3.0,
+        flcs=None,
+    )
+    rzl_children, rzl_aux = rzl.tree_flatten()
+    rzl_restored = vt.TomnspsRZL.tree_unflatten(rzl_aux, rzl_children)
+    np.testing.assert_allclose(rzl_restored.frcc, rzl.frcc)
+    assert rzl_restored.frss is None
 
 
 def test_tomnsps_unfused_dft_fallback_tables_host_masks_and_deterministic_reductions(monkeypatch) -> None:
@@ -115,6 +145,66 @@ def test_tomnsps_unfused_dft_fallback_tables_host_masks_and_deterministic_reduct
     np.testing.assert_allclose(np.asarray(fallback), [[1.0]])
 
 
+def test_tomnsp_validation_cache_and_zero_size_helper_branches(monkeypatch) -> None:
+    with pytest.raises(ValueError, match="Invalid theta sizes"):
+        vmec_trig_tables(ntheta=0, nzeta=1, nfp=1, mmax=0, nmax=0, lasym=False, cache=False)
+    with pytest.raises(ValueError, match="nzeta must be positive"):
+        vmec_trig_tables(ntheta=4, nzeta=0, nfp=1, mmax=0, nmax=0, lasym=False, cache=False)
+    with pytest.raises(ValueError, match="nfp must be positive"):
+        vmec_trig_tables(ntheta=4, nzeta=1, nfp=0, mmax=0, nmax=0, lasym=False, cache=False)
+    with pytest.raises(ValueError, match="mmax/nmax must be nonnegative"):
+        vmec_trig_tables(ntheta=4, nzeta=1, nfp=1, mmax=-1, nmax=0, lasym=False, cache=False)
+
+    first = vmec_trig_tables(ntheta=4, nzeta=2, nfp=1, mmax=0, nmax=0, lasym=True, cache=True)
+    second = vmec_trig_tables(ntheta=4, nzeta=2, nfp=1, mmax=0, nmax=0, lasym=True, cache=True)
+    assert second is first
+    assert vt.vmec_angle_grid(ntheta=4, nzeta=0, nfp=1, lasym=False, cache=False).zeta.shape == (1,)
+    assert vt.vmec_angle_grid(ntheta=4, nzeta=2, nfp=1, lasym=True, cache=False).theta.shape == (4,)
+    cached_grid = vt.vmec_angle_grid(ntheta=4, nzeta=2, nfp=1, lasym=False, cache=True)
+    assert vt.vmec_angle_grid(ntheta=4, nzeta=2, nfp=1, lasym=False, cache=True) is cached_grid
+    with pytest.raises(ValueError, match="Invalid theta sizes"):
+        vt.vmec_angle_grid(ntheta=0, nzeta=2, nfp=1, lasym=False, cache=False)
+    with pytest.raises(ValueError, match="nfp must be positive"):
+        vt.vmec_angle_grid(ntheta=4, nzeta=2, nfp=0, lasym=False, cache=False)
+
+    assert vt._theta_transform_fft(np.ones((1, 1, 0, 2)), mpol=3, dnorm=1.0, mscale=np.ones(3), want_sin=False).shape == (
+        1,
+        1,
+        3,
+        2,
+    )
+    assert vt._zeta_transform_fft(np.ones((2, 0)), ntor=2, nscale=np.ones(3), want_sin=True).shape == (2, 3)
+
+    monkeypatch.setattr(vt, "has_jax", lambda: False)
+    assert vt._cache_allowed() is True
+    np.testing.assert_allclose(vt._einsum("ij,jk->ik", np.ones((1, 1)), np.ones((1, 1))), [[1.0]])
+    arr_theta = np.arange(1 * 1 * 2 * 3 * 1, dtype=float).reshape(1, 1, 2, 3, 1)
+    mat_theta = np.linspace(0.1, 0.3, 3 * 2, dtype=float).reshape(3, 2)
+    np.testing.assert_allclose(vt._theta_contract(arr_theta, mat_theta), np.einsum("apsik,im->apsmk", arr_theta, mat_theta))
+    arr_zeta = np.arange(1 * 2 * 2 * 3, dtype=float).reshape(1, 2, 2, 3)
+    mat_zeta = np.linspace(0.2, 0.8, 3 * 2, dtype=float).reshape(3, 2)
+    np.testing.assert_allclose(vt._zeta_contract(arr_zeta, mat_zeta), np.einsum("psmk,kn->psmn", arr_zeta, mat_zeta))
+    np.testing.assert_array_equal(vt._mparity_mask(4, dtype=np.float64), [1.0, 0.0, 1.0, 0.0])
+    assert vt._mparity_mask(4, dtype=np.float64) is vt._mparity_mask(4, dtype=np.float64)
+
+    fake_jax = ModuleType("jax")
+    fake_jax.core = SimpleNamespace(trace_ctx=SimpleNamespace(is_top_level=lambda: True))
+    monkeypatch.setitem(sys.modules, "jax", fake_jax)
+    monkeypatch.setattr(vt, "has_jax", lambda: True)
+    assert vt._cache_allowed() is True
+
+    fake_jax.core = SimpleNamespace(trace_ctx=SimpleNamespace(is_top_level=lambda: (_ for _ in ()).throw(RuntimeError("trace"))))
+    assert vt._cache_allowed() is False
+    fake_jax.core = SimpleNamespace(trace_ctx=SimpleNamespace(is_top_level=lambda: True))
+
+    with pytest.raises(ValueError, match="ns must be positive"):
+        tomnsps_masks(ns=0, mpol=1, include_edge=True, cache=False)
+    with pytest.raises(ValueError, match="mpol must be positive"):
+        tomnsps_masks(ns=1, mpol=0, include_edge=True, cache=False)
+    masks = tomnsps_masks(ns=3, mpol=2, include_edge=True, dtype=np.float64, cache=True)
+    assert tomnsps_masks(ns=3, mpol=2, include_edge=True, dtype=np.float64, cache=True) is masks
+
+
 def test_tomnspa_unfused_and_fused_zeta_paths_with_scale_envs(monkeypatch) -> None:
     trig = vmec_trig_tables(ntheta=6, nzeta=4, nfp=1, mmax=2, nmax=1, lasym=True, cache=False)
     trig_without_caches = replace(
@@ -167,3 +257,49 @@ def test_tomnspa_unfused_and_fused_zeta_paths_with_scale_envs(monkeypatch) -> No
     assert fused.flcc is not None
     assert fused.flss is not None
     assert np.all(np.isfinite(np.asarray(fused.flcc)))
+
+
+def test_tomnsp_transform_error_paths_and_mask_fallbacks() -> None:
+    trig = vmec_trig_tables(ntheta=6, nzeta=4, nfp=1, mmax=2, nmax=1, lasym=True, cache=False)
+    args = _transform_inputs((3, int(trig.ntheta3), int(np.asarray(trig.cosnv).shape[0])))
+
+    with pytest.raises(ValueError, match="mpol must be positive"):
+        tomnsps_rzl(**args, mpol=0, ntor=1, nfp=1, lasym=True, trig=trig)
+    with pytest.raises(ValueError, match="ntor must be nonnegative"):
+        tomnsps_rzl(**args, mpol=2, ntor=-1, nfp=1, lasym=True, trig=trig)
+    with pytest.raises(ValueError, match="mpol must be positive"):
+        tomnspa_rzl(**args, mpol=0, ntor=1, nfp=1, lasym=True, trig=trig)
+    with pytest.raises(ValueError, match="ntor must be nonnegative"):
+        tomnspa_rzl(**args, mpol=2, ntor=-1, nfp=1, lasym=True, trig=trig)
+
+    bad_grid = replace(trig, ntheta3=int(trig.ntheta3) + 1)
+    with pytest.raises(ValueError, match="Input grid does not match trig tables"):
+        tomnsps_rzl(**args, mpol=2, ntor=1, nfp=1, lasym=True, trig=bad_grid)
+    with pytest.raises(ValueError, match="Input grid does not match trig tables"):
+        tomnspa_rzl(**args, mpol=2, ntor=1, nfp=1, lasym=True, trig=bad_grid)
+
+    mismatched_masks = SimpleNamespace(ns=99, mpol=2, include_edge=False)
+    out = tomnsps_rzl(**args, mpol=2, ntor=1, nfp=1, lasym=True, trig=trig, masks=mismatched_masks)
+    out_asym = tomnspa_rzl(**args, mpol=2, ntor=1, nfp=1, lasym=True, trig=trig, masks=mismatched_masks)
+    assert out.frcc.shape == (3, 2, 2)
+    assert out_asym.frsc.shape == (3, 2, 2)
+
+
+def test_tomnsp_axisymmetric_dft_paths_keep_non_threed_outputs_none(monkeypatch) -> None:
+    trig = vmec_trig_tables(ntheta=6, nzeta=4, nfp=1, mmax=2, nmax=1, lasym=True, cache=False)
+    args = _transform_inputs((3, int(trig.ntheta3), int(np.asarray(trig.cosnv).shape[0])))
+
+    monkeypatch.setattr(vt, "_TOMNSPS_FFT_ENV", "0")
+    vt._TOMNSPS_FFT_CACHE.clear()
+    monkeypatch.setattr(vt, "_TOMNSPS_ZETA_FUSED", False)
+    monkeypatch.setattr(vt, "_TOMNSPA_ZETA_FUSED", False)
+
+    out = tomnsps_rzl(**args, mpol=2, ntor=0, nfp=1, lasym=True, trig=trig)
+    asym = tomnspa_rzl(**args, mpol=2, ntor=0, nfp=1, lasym=True, trig=trig)
+
+    assert out.frss is None
+    assert out.fzcs is None
+    assert out.flcs is None
+    assert asym.frcs is None
+    assert asym.fzss is None
+    assert asym.flss is None

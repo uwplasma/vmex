@@ -137,3 +137,71 @@ def test_qi_stage_checkpoint_writes_history_and_partial_diagnostics_before_audit
     assert diagnostics["aspect"] == 7.2
     assert diagnostics["mean_iota"] == 0.46
     assert checkpoint["history_path"] == str(tmp_path / "history.json")
+
+
+def test_qi_stage_promotion_can_accept_iota_gain_under_relaxed_qi_gate() -> None:
+    mod = _load_module()
+    mod.configure(
+        {
+            "QI_GATE_SMOOTH_MAX": 2.0e-3,
+            "QI_GATE_LEGACY_MAX": 2.0e-3,
+        }
+    )
+    stage = {
+        "accept_if_iota_improves": True,
+        "iota_improvement_min": 0.05,
+        "qi_relax_for_iota": 1.5,
+    }
+    promotion = {
+        "qi_cleanup_promoted": False,
+        "qi_cleanup_rejection_reasons": ["mirror ratio did not improve"],
+        "mean_iota": 0.56,
+        "qi_smooth_total": 2.4e-3,
+        "qi_legacy_total": 2.2e-3,
+    }
+    reference = {
+        "mean_iota": 0.49,
+        "qi_smooth_total": 2.0e-3,
+        "qi_legacy_total": 2.0e-3,
+    }
+
+    out = mod.stage_promotes_candidate(stage, promotion, reference)
+
+    assert out["qi_cleanup_promoted"] is True
+    assert out["qi_cleanup_rejection_reasons"] == []
+    assert "iota increased by" in out["qi_iota_promotion_reason"]
+
+
+def test_qi_stage_promotion_records_rank_and_engineering_gate_failures() -> None:
+    mod = _load_module()
+    stage = {
+        "accept_if_rank_improves": True,
+        "rank_score_relax": 0.0,
+        "accept_if_engineering_score_improves": True,
+        "engineering_score_relax": 0.0,
+        "mirror_improvement_min": 0.02,
+    }
+    promotion = {
+        "qi_cleanup_promoted": True,
+        "qi_cleanup_rejection_reasons": [],
+        "qi_seed_gate_passed": True,
+        "qi_engineering_gate_passed": True,
+        "qi_rank_score": 1.5,
+        "qi_constraint_score": 1.0,
+        "qi_mirror_ratio_max": 0.29,
+    }
+    reference = {
+        "qi_seed_gate_passed": True,
+        "qi_engineering_gate_passed": True,
+        "qi_rank_score": 1.0,
+        "qi_constraint_score": 1.0,
+        "qi_mirror_ratio_max": 0.30,
+    }
+
+    out = mod.stage_promotes_candidate(stage, promotion, reference)
+
+    assert out["qi_cleanup_promoted"] is False
+    reasons = "\n".join(out["qi_cleanup_rejection_reasons"])
+    assert "rank score did not improve" in reasons
+    assert "engineering score did not improve" in reasons
+    assert "mirror ratio did not improve enough" in reasons
