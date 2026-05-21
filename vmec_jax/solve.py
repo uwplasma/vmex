@@ -50,6 +50,15 @@ from .solve_residual_iter_policy import (
     vmec2000_scan_options_from_env as _vmec2000_scan_options_from_env,
     vmec2000_time_control_decision as _vmec2000_time_control_decision,
 )
+from .solve_residual_iter_runtime_helpers import (
+    _converged_residuals_scan_fast as _runtime_converged_residuals_scan_fast,
+    _maybe_dump_ptau as _runtime_maybe_dump_ptau,
+    _scan_device_run_ready as _runtime_scan_device_run_ready,
+    _scan_print_uses_debug_callback,
+    _scan_print_uses_debug_print,
+    _scan_print_uses_io_callback,
+    _vmec_freeb_plascur_from_bcovar as _runtime_vmec_freeb_plascur_from_bcovar,
+)
 from .field import TWOPI, b2_from_bsup, bsup_from_geom, bsup_from_sqrtg_lambda
 from .fourier import eval_fourier_dtheta, eval_fourier_dzeta_phys
 from .geom import eval_geom
@@ -5202,28 +5211,20 @@ def solve_fixed_boundary_residual_iter(
         mode: str,
         label: str,
     ) -> None:
-        if os.getenv("VMEC_JAX_DUMP_PTAU", "") in ("", "0"):
-            return
-        dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "").strip()
-        if not dump_dir:
-            return
-        try:
-            path = Path(dump_dir) / "ptau_minmax.log"
-            if not path.exists():
-                with path.open("w", encoding="utf-8") as f:
-                    f.write("iter label mode ptau_min ptau_max state_min state_max bad_ptau bad_state bad_used\n")
-            with path.open("a", encoding="utf-8") as f:
-                f.write(
-                    f"{int(iter_idx)} {label} {mode} "
-                    f"{float(ptau_min):.16e} {float(ptau_max):.16e} "
-                    f"{float(tau_min_state if tau_min_state is not None else float('nan')):.16e} "
-                    f"{float(tau_max_state if tau_max_state is not None else float('nan')):.16e} "
-                    f"{int(badjac_ptau) if badjac_ptau is not None else -1} "
-                    f"{int(badjac_state) if badjac_state is not None else -1} "
-                    f"{int(bool(badjac_used))}\n"
-                )
-        except Exception:
-            return
+        _runtime_maybe_dump_ptau(
+            iter_idx=iter_idx,
+            ptau_min=ptau_min,
+            ptau_max=ptau_max,
+            tau_min_state=tau_min_state,
+            tau_max_state=tau_max_state,
+            badjac_ptau=badjac_ptau,
+            badjac_state=badjac_state,
+            badjac_used=badjac_used,
+            mode=mode,
+            label=label,
+            dump_ptau_env=os.getenv("VMEC_JAX_DUMP_PTAU", ""),
+            dump_dir=os.getenv("VMEC_JAX_DUMP_DIR", ""),
+        )
 
     def _lambda_preconditioner(bc, *, return_faclam: bool = False, return_debug: bool = False):
         lam_r0scale = float(getattr(trig, "r0scale", 1.0)) if trig is not None else 1.0
@@ -6235,28 +6236,17 @@ def solve_fixed_boundary_residual_iter(
         scan_timing_stats = _new_scan_timing_stats()
         scan_total_start = time.perf_counter() if scan_timing_enabled else None
 
-        def _scan_block_until_ready(value):
-            try:
-                return jax.block_until_ready(value)
-            except Exception:
-                return jax.tree_util.tree_map(
-                    lambda a: a.block_until_ready() if hasattr(a, "block_until_ready") else a,
-                    value,
-                )
-
         def _scan_device_run_ready(start: float | None, value):
-            if not scan_timing_enabled or start is None:
-                return value
-            dispatch_done = time.perf_counter()
-            value = _scan_block_until_ready(value)
-            ready_done = time.perf_counter()
-            _record_scan_device_ready(
+            return _runtime_scan_device_run_ready(
                 start=start,
-                dispatch_done=dispatch_done,
-                ready_done=ready_done,
+                value=value,
+                scan_timing_enabled=scan_timing_enabled,
+                perf_counter=time.perf_counter,
+                block_until_ready=jax.block_until_ready,
+                tree_map=jax.tree_util.tree_map,
+                record_ready=_record_scan_device_ready,
                 stats=scan_timing_stats,
             )
-            return value
 
         _validate_vmec2000_scan_guards(
             backtracking=bool(backtracking),
@@ -6520,10 +6510,13 @@ def solve_fixed_boundary_residual_iter(
             fsq_total_target_j = jnp.asarray(float(fsq_total_target), dtype=dtype)
 
         def _converged_residuals_scan(fsqr, fsqz, fsql):
-            strict = (fsqr <= ftol_j) & (fsqz <= ftol_j) & (fsql <= ftol_j)
-            if fsq_total_target_j is None:
-                return strict
-            return strict | ((fsqr + fsqz + fsql) <= fsq_total_target_j)
+            return _runtime_converged_residuals_scan_fast(
+                fsqr,
+                fsqz,
+                fsql,
+                ftol=ftol_j,
+                fsq_total_target=fsq_total_target_j,
+            )
 
         k_ndamp = 10
         inv_tau0 = jnp.full((k_ndamp,), jnp.asarray(0.15, dtype=dtype) / time_step0)
@@ -7871,43 +7864,50 @@ def solve_fixed_boundary_residual_iter(
                 if print_in_scan:
 
                     def _do_print(_):
-                        if scan_print_mode == "debug_print":
-                            if scan_jax_debug_print is not None:
-                                scan_jax_debug_print(
-                                    "{i:5d}{fsqr:10.2E}{fsqz:10.2E}{fsql:10.2E}{r00:11.3E}{dt:10.2E}{w:12.4E}",
-                                    i=iter2,
-                                    fsqr=fsqr,
-                                    fsqz=fsqz,
-                                    fsql=fsql,
-                                    r00=r00_j,
-                                    dt=time_step_report,
-                                    w=w_mhd,
-                                    ordered=bool(scan_print_ordered),
-                                )
-                        elif scan_print_mode == "debug_callback":
-                            if scan_jax_debug is not None:
+                        if _scan_print_uses_debug_print(
+                            scan_print_mode=scan_print_mode,
+                            debug_print_fn=scan_jax_debug_print,
+                        ):
+                            scan_jax_debug_print(
+                                "{i:5d}{fsqr:10.2E}{fsqz:10.2E}{fsql:10.2E}{r00:11.3E}{dt:10.2E}{w:12.4E}",
+                                i=iter2,
+                                fsqr=fsqr,
+                                fsqz=fsqz,
+                                fsql=fsql,
+                                r00=r00_j,
+                                dt=time_step_report,
+                                w=w_mhd,
+                                ordered=bool(scan_print_ordered),
+                            )
+                        elif _scan_print_uses_debug_callback(
+                            scan_print_mode=scan_print_mode,
+                            debug_module=scan_jax_debug,
+                        ):
 
-                                def _cb(i, fsqr_v, fsqz_v, fsql_v, r00_v, dt_v, w_v):
-                                    print(
-                                        f"{int(i):5d}"
-                                        f"{float(fsqr_v):10.2E}{float(fsqz_v):10.2E}{float(fsql_v):10.2E}"
-                                        f"{float(r00_v):11.3E}{float(dt_v):10.2E}{float(w_v):12.4E}",
-                                        flush=True,
-                                    )
-                                    return None
-
-                                scan_jax_debug.callback(
-                                    _cb,
-                                    iter2,
-                                    fsqr,
-                                    fsqz,
-                                    fsql,
-                                    r00_j,
-                                    time_step_report,
-                                    w_mhd,
-                                    ordered=bool(scan_print_ordered),
+                            def _cb(i, fsqr_v, fsqz_v, fsql_v, r00_v, dt_v, w_v):
+                                print(
+                                    f"{int(i):5d}"
+                                    f"{float(fsqr_v):10.2E}{float(fsqz_v):10.2E}{float(fsql_v):10.2E}"
+                                    f"{float(r00_v):11.3E}{float(dt_v):10.2E}{float(w_v):12.4E}",
+                                    flush=True,
                                 )
-                        else:
+                                return None
+
+                            scan_jax_debug.callback(
+                                _cb,
+                                iter2,
+                                fsqr,
+                                fsqz,
+                                fsql,
+                                r00_j,
+                                time_step_report,
+                                w_mhd,
+                                ordered=bool(scan_print_ordered),
+                            )
+                        elif _scan_print_uses_io_callback(
+                            scan_print_mode=scan_print_mode,
+                            io_callback_fn=_io_callback,
+                        ):
 
                             def _cb_io(i, fsqr_v, fsqz_v, fsql_v, r00_v, dt_v, w_v):
                                 print(
@@ -8659,10 +8659,13 @@ def solve_fixed_boundary_residual_iter(
                 fsq_total_target_j = jnp.asarray(float(fsq_total_target), dtype=dtype)
 
             def _converged_residuals_scan_fast(fsqr, fsqz, fsql):
-                strict = (fsqr <= ftol_j) & (fsqz <= ftol_j) & (fsql <= ftol_j)
-                if fsq_total_target_j is None:
-                    return strict
-                return strict | ((fsqr + fsqz + fsql) <= fsq_total_target_j)
+                return _runtime_converged_residuals_scan_fast(
+                    fsqr,
+                    fsqz,
+                    fsql,
+                    ftol=ftol_j,
+                    fsq_total_target=fsq_total_target_j,
+                )
 
             include_edge_scan = False
             _compute_forces_scan = _compute_forces if jit_forces else _compute_forces_impl
@@ -9030,18 +9033,16 @@ def solve_fixed_boundary_residual_iter(
         """VMEC `ctor` proxy used by NESTOR (`vacuum_par(..., ctor, ...)`)."""
         try:
             from .vmec_lforbal import plascur_edge_from_bcovar
-
-            ctor = plascur_edge_from_bcovar(
-                bc=bc_obj,
+            return _runtime_vmec_freeb_plascur_from_bcovar(
+                bc_obj,
+                fallback=fallback,
+                plascur_edge_from_bcovar=plascur_edge_from_bcovar,
                 trig=trig,
                 wout=wout_like,
                 s=s,
             )
-            ctor_f = float(np.asarray(ctor))
-            if np.isfinite(ctor_f):
-                return float(ctor_f)
         except Exception:
-            pass
+            return float(fallback)
         return float(fallback)
 
     res0 = -1.0
