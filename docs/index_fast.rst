@@ -10,4 +10,4 @@ To build the full documentation locally, run:
 
 .. code-block:: bash
 
-   python -m sphinx -b html docs docs/_build/html
+   LANG=C.UTF-8 LC_ALL=C.UTF-8 python -m sphinx -W -j auto -b html docs docs/_build/html

@@ -77,16 +77,16 @@ Install doc dependencies::
 
 Then build docs::
 
-  LANG=C LC_ALL=C python -m sphinx -b html docs docs/_build/html
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 python -m sphinx -b html docs docs/_build/html
 
 To reproduce the current strict CI / release build locally, use warnings as
 errors::
 
-  LANG=C LC_ALL=C python -m sphinx -W -b html docs docs/_build/html
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 python -m sphinx -W -j auto -b html docs docs/_build/html
 
 The full documentation is not yet nitpicky-clean; use ``-n`` only when working
 specifically on cross-reference cleanup.  Read the Docs builds the full user
 guide with warnings treated as errors.  For local edit cycles where only the
 landing page is needed, use the explicit fast mode::
 
-  SPHINX_FAST=1 LANG=C LC_ALL=C python -m sphinx -b html docs docs/_build/html_fast
+  SPHINX_FAST=1 LANG=C.UTF-8 LC_ALL=C.UTF-8 python -m sphinx -W -j auto -b html docs docs/_build/html_fast

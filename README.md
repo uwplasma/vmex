@@ -146,10 +146,12 @@ reviewed `LASYM = F` best rows only.
 - Validation and VMEC2000 parity status: `docs/validation.rst`
 - Testing and coverage strategy: `docs/testing_strategy.rst`
 - Release checklist and CI gates: `docs/release_checklist.rst`
-- Latest published release: [`v0.0.11`](https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.11)
-- Current release hygiene baseline: latest known green `main` CI at `7030eaf`,
-  validated local required coverage `88.335%` against the `85%` gate; `90%` and
-  `95%` coverage ratchets remain future targets.
+- Latest published release:
+  [`v0.0.11`](https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.11)
+- Release hygiene baseline recorded for `v0.0.11`: green `main` CI at `7030eaf`,
+  local required coverage `88.335%` against the `85%` gate, and `90%` / `95%`
+  coverage ratchets still staged rather than enforced. Re-check GitHub Actions
+  before reusing this baseline for a later release.
 
 ## CLI Reference
 

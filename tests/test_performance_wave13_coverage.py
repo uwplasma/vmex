@@ -1,0 +1,135 @@
+import numpy as np
+import pytest
+
+from vmec_jax.performance_hotspot_helpers import (
+    accumulate_scan_device_ready_timing,
+    exact_parameter_cache_key,
+    exact_parameter_cache_key_fingerprint,
+    explain_scan_cache_key_delta,
+    replay_timing_breakdown,
+)
+from vmec_jax.solve_scan_planning_helpers import build_vmec2000_scan_cache_key
+
+
+def _scan_cache_key(**overrides):
+    params = dict(
+        static_key=("static", (2, 3)),
+        wout_key=("wout", "float64"),
+        edge_signature_key=((2,), "float64"),
+        max_iter_tail=9,
+        preflight_iters=1,
+        iter_offset0=0,
+        step_size=0.2,
+        initial_flip_sign=-1.0,
+        lambda_update_scale=0.5,
+        ftol=1.0e-12,
+        nstep_screen=25,
+        use_restart_triggers=True,
+        vmecpp_restart=False,
+        scan_use_restart_payload=False,
+        stage_prev_fsq=None,
+        stage_transition_factor=50.0,
+        stage_transition_scale=0.5,
+        jit_forces_scan=True,
+        state_only_scan=False,
+        scan_light=False,
+        scan_minimal=True,
+        scan_fallback_iters=20,
+        scan_fallback_accept_frac=0.5,
+        scan_fallback_fsq_factor=50.0,
+        scan_fallback_badjac_limit=10,
+        scan_fallback_fsq_abs=1.0e-2,
+    )
+    params.update(overrides)
+    return build_vmec2000_scan_cache_key(**params)
+
+
+def test_exact_parameter_cache_key_flattens_to_float64_bytes():
+    matrix_params = np.asarray([[1, 2], [3, 4]], dtype=np.float32)
+    vector_params = [1.0, 2.0, 3.0, 4.0]
+
+    assert exact_parameter_cache_key(matrix_params) == exact_parameter_cache_key(vector_params)
+    assert exact_parameter_cache_key([1.0, 2.0]) != exact_parameter_cache_key([1.0, 2.0 + 1.0e-12])
+
+    fingerprint = exact_parameter_cache_key_fingerprint(matrix_params)
+    assert fingerprint["dtype"] == "float64"
+    assert fingerprint["n_params"] == 4
+    assert fingerprint["byte_length"] == 4 * np.dtype(np.float64).itemsize
+    assert fingerprint["cache_key"] == exact_parameter_cache_key(vector_params)
+
+
+def test_scan_cache_key_delta_labels_behavioral_toggles():
+    base = _scan_cache_key()
+    changed = _scan_cache_key(
+        max_iter_tail=10,
+        stage_prev_fsq=3.0,
+        scan_light=True,
+        scan_minimal=False,
+    )
+
+    deltas = explain_scan_cache_key_delta(base, changed)
+
+    assert [(delta.index, delta.field) for delta in deltas] == [
+        (4, "max_iter_tail"),
+        (15, "stage_prev_fsq"),
+        (20, "scan_light"),
+        (21, "scan_minimal"),
+    ]
+    assert deltas[1].before is None
+    assert deltas[1].after == 3.0
+
+
+def test_replay_timing_breakdown_prefers_total_and_falls_back_to_split():
+    profile = {
+        "jacobian_tape_replay": {"count": 2, "wall_time_s": 3.5},
+        "jacobian_tape_replay_dispatch": {"count": 2, "wall_time_s": 0.4},
+        "jacobian_tape_replay_ready": {"count": 2, "wall_time_s": 2.6},
+    }
+
+    breakdown = replay_timing_breakdown(profile, prefix="jacobian")
+
+    assert breakdown == {
+        "total_s": 3.5,
+        "dispatch_s": 0.4,
+        "ready_s": 2.6,
+        "split_total_s": 3.0,
+        "count": 2,
+    }
+
+    split_only = {
+        "state_tangent_tape_replay_dispatch": {"count": 1, "wall_time_s": 0.25},
+        "state_tangent_tape_replay_ready": {"count": 1, "wall_time_s": 0.75},
+    }
+    assert replay_timing_breakdown(split_only, prefix="state_tangent")["total_s"] == pytest.approx(1.0)
+
+
+def test_accumulate_scan_device_ready_timing_is_safe_for_missing_start():
+    stats: dict[str, float] = {}
+
+    assert not accumulate_scan_device_ready_timing(
+        stats,
+        start=None,
+        dispatch_done=11.0,
+        ready_done=13.0,
+    )
+    assert stats == {}
+
+    assert accumulate_scan_device_ready_timing(
+        stats,
+        start=10.0,
+        dispatch_done=11.5,
+        ready_done=14.0,
+    )
+    assert stats["scan_device_dispatch_s"] == pytest.approx(1.5)
+    assert stats["scan_device_ready_s"] == pytest.approx(2.5)
+    assert stats["scan_device_run_s"] == pytest.approx(4.0)
+
+    assert accumulate_scan_device_ready_timing(
+        stats,
+        start=20.0,
+        dispatch_done=20.25,
+        ready_done=21.0,
+    )
+    assert stats["scan_device_dispatch_s"] == pytest.approx(1.75)
+    assert stats["scan_device_ready_s"] == pytest.approx(3.25)
+    assert stats["scan_device_run_s"] == pytest.approx(5.0)
