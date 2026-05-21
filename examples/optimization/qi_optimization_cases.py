@@ -16,6 +16,7 @@ TARGET_HELICITY_SEED_TERMS = (
     ("RBC", (1, 1), TARGET_HELICITY_SEED_AMPLITUDE),
     ("ZBS", (1, 1), TARGET_HELICITY_SEED_AMPLITUDE),
 )
+MINIMAL_QI_LOCAL_STAGE_MIN_NFEV = 8
 
 
 def _parse_float_sequence(value, *, name):
@@ -547,9 +548,30 @@ def _minimal_or_circular_qi_case(
             "max_elongation": float(base.get("max_elongation", 8.2)),
             "smooth_qi_max": float(base.get("qi_gate_smooth_max", 2.0e-3)),
             "legacy_qi_max": float(base.get("qi_gate_legacy_max", 2.0e-3)),
-            "accept_as_baseline": True,
+            # The reference scan is a deterministic proposal generator for
+            # circular/minimal seeds.  Do not let its one-evaluation bookkeeping
+            # solve become the final accepted result; the local cleanup stages
+            # below must run and own promotion.
+            "accept_as_baseline": False,
         }
     )
+    local_stages = []
+    for stage in base.get("mirror_ramp_stages", ()):
+        stage_nfev = max(
+            int(stage.get("max_nfev", base.get("max_nfev", MINIMAL_QI_LOCAL_STAGE_MIN_NFEV))),
+            int(base.get("max_nfev", MINIMAL_QI_LOCAL_STAGE_MIN_NFEV)),
+            MINIMAL_QI_LOCAL_STAGE_MIN_NFEV,
+        )
+        local_stages.append(
+            {
+                **stage,
+                "max_nfev": stage_nfev,
+                # Showcase and staged-runner --max-nfev should be the local
+                # optimizer budget for these reference-seeded cases, not only a
+                # ceiling over legacy one-evaluation audit stages.
+                "use_showcase_max_nfev": True,
+            }
+        )
     return {
         **base,
         "case_goal": case_goal,
@@ -559,6 +581,7 @@ def _minimal_or_circular_qi_case(
         "min_vmec_mode": int(min_vmec_mode),
         "target_helicity_seed_terms": TARGET_HELICITY_SEED_TERMS,
         "boundary_reference_preconditioner": boundary_reference,
+        "mirror_ramp_stages": tuple(local_stages),
     }
 
 

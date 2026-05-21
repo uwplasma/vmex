@@ -39,6 +39,27 @@ def test_resolve_qi_case_defaults_and_aliases(monkeypatch, tmp_path: Path) -> No
     assert case["output_dir"] == tmp_path / "alias_out"
 
 
+def test_minimal_and_circular_qi_cases_require_reference_seeded_local_stage() -> None:
+    mod = _load_cases_module("qi_optimization_cases_minimal_local_stage_test")
+
+    for case_name in (
+        "circular_nfp1_qi",
+        "minimal_nfp1_qi",
+        "minimal_nfp2_qi",
+        "minimal_nfp3_qi",
+        "minimal_nfp4_qi",
+    ):
+        case = mod.QI_CASES[case_name]
+        boundary_reference = case["boundary_reference_preconditioner"]
+        stages = case["mirror_ramp_stages"]
+
+        assert boundary_reference["enabled"] is True
+        assert boundary_reference["accept_as_baseline"] is False
+        assert stages
+        assert all(int(stage["max_nfev"]) >= mod.MINIMAL_QI_LOCAL_STAGE_MIN_NFEV for stage in stages)
+        assert all(stage["use_showcase_max_nfev"] is True for stage in stages)
+
+
 def test_resolve_qi_case_external_input_uses_far_seed_policy_without_reference(monkeypatch, tmp_path: Path) -> None:
     input_path = tmp_path / "input.custom_seed"
     output_dir = tmp_path / "custom_out"

@@ -31,9 +31,10 @@ The split between README and docs is deliberate:
   using the four compact ``readme_best_optimization_*.png`` panels and the
   short reproduction command.
 - This page is the publication home for full sweeps: every CPU/GPU,
-  continuation/direct, ESS on/off, QI preseed/no-preseed, and LASYM row should
-  be represented here through downloadable CSV/JSON summaries plus generated
-  objective-history panels, final-state atlases, and wall-time summary tables.
+  continuation/direct, ESS on/off, QI preseed/no-preseed, ``max_mode=1..4``,
+  and LASYM row should be represented here through downloadable CSV/JSON
+  summaries plus generated objective-history panels, initial/final state
+  atlases, and wall-time summary tables.
 - Additional QI case coverage, including NFP=1/2/3/4 case-gated rows that use
   case-specific aspect targets, belongs here rather than in the README best-row
   section.
@@ -48,8 +49,9 @@ Every published full-sweep result should provide these assets under
   ``objective_panel_all_policies.png/.pdf``, CPU/GPU policy subsets, LASYM
   variants when present, and the legacy ``objective_panel`` aliases.
 - Initial/final 3D and initial/final LCFS ``|B|`` atlases:
-  ``final_state_atlas_*.png/.pdf``.  Boozer-space ``|B|`` must be drawn with
-  line contours, not ``contourf``.
+  ``initial_final_state_atlas_*.png/.pdf``.  Legacy
+  ``final_state_atlas_*.png/.pdf`` aliases are compatibility copies only.
+  Boozer-space ``|B|`` must be drawn with line contours, not ``contourf``.
 - Wall-time and status table figures:
   ``summary_tables_*.png/.pdf`` plus the CSV/JSON downloads above.
 - Optional full report composites:
@@ -58,7 +60,8 @@ Every published full-sweep result should provide these assets under
 The checked-in source tree currently contains the compact README panels, the
 QI case-coverage panel, the constrained-QI status panel, and CSV/JSON summary
 files.  It does not currently contain the full objective-history panels,
-final-state atlases, summary-table images, or publication-panel composites.
+initial/final state atlases, summary-table images, or publication-panel
+composites.
 Those assets must be regenerated or copied into ``docs/_static/figures`` before
 claiming a complete full-sweep docs publication.
 
@@ -92,8 +95,8 @@ Run the CPU production sweep:
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --rerun
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --rerun
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --qi-qp-preseed off --rerun
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --qi-qp-preseed off --rerun
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
 The compact README renderer currently filters QI rows against the same
@@ -108,8 +111,8 @@ regenerate the focused preseed/no-preseed matrix with:
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qi --modes 1,2,3 --ess both --qi-qp-preseed both --rerun
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qi --modes 1,2,3 --ess both --qi-qp-preseed both --rerun
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qi --modes 1,2,3,4 --ess both --qi-qp-preseed both --rerun
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qi --modes 1,2,3,4 --ess both --qi-qp-preseed both --rerun
    PYTHONPATH=. python examples/optimization/render_qi_constrained_sweep.py
 
 Seed-robust QI is a larger validation matrix than the tracked constrained-QI
@@ -159,8 +162,8 @@ Run the GPU production sweep on a machine with a working JAX GPU install:
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --rerun
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --rerun
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --qi-qp-preseed off --rerun
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --qi-qp-preseed off --rerun
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
 Render the compact README panels from the best stellarator-symmetric rows:
@@ -190,10 +193,10 @@ asymmetric modes with ``1e-7``, and writes separate outputs under the
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --stellarator-asymmetric --rerun
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --stellarator-asymmetric --rerun
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --stellarator-asymmetric --rerun
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --stellarator-asymmetric --rerun
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --qi-qp-preseed off --stellarator-asymmetric --rerun
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --qi-qp-preseed off --stellarator-asymmetric --rerun
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --qi-qp-preseed off --stellarator-asymmetric --rerun
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --qi-qp-preseed off --stellarator-asymmetric --rerun
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
 For NVIDIA-only JAX installations, ``JAX_PLATFORMS=cuda`` is also valid.  Do
@@ -375,7 +378,7 @@ Constrained QI Matrix
 ---------------------
 
 The constrained QI renderer compares CPU and available GPU rows for
-``max_mode = 1, 2, 3``, ESS on/off, continuation/direct, and QP-preseed on/off
+``max_mode = 1, 2, 3, 4``, ESS on/off, continuation/direct, and QP-preseed on/off
 using the bundled NFP=2 ``input.nfp2_QI`` seed.  Rerun the commands above to
 populate the CPU/GPU/direct/asymmetric matrix under the current objective
 policy.  For each requested ``max_mode``, the input boundary is projected onto
@@ -440,10 +443,11 @@ the CSV/JSON summaries in sync.  The renderer writes:
 - ``objective_panel_asymmetric_all_policies.png/.pdf``
 - legacy aliases ``objective_panel.png/.pdf``
 
-Final-State Atlases
--------------------
+Initial/Final State Atlases
+---------------------------
 
-The final-state atlases show the LCFS and line contours of ``|B|`` on the LCFS.
+The initial/final state atlases show the initial and final LCFS plus line
+contours of ``|B|`` on the LCFS.
 Each 3-D panel has its own colorbar because the aspect-ratio constraint changes
 the absolute ``|B|`` range.
 
@@ -453,13 +457,13 @@ surface and one colorbar per LCFS ``|B|`` contour panel.
 
 Generated atlas filenames include:
 
-- ``final_state_atlas_continuation.png/.pdf``
-- ``final_state_atlas_direct.png/.pdf``
-- ``final_state_atlas_cpu_continuation.png/.pdf``
-- ``final_state_atlas_cpu_direct.png/.pdf``
-- ``final_state_atlas_gpu_continuation.png/.pdf``
-- ``final_state_atlas_gpu_direct.png/.pdf``
-- ``final_state_atlas_asymmetric_*``
+- ``initial_final_state_atlas_continuation.png/.pdf``
+- ``initial_final_state_atlas_direct.png/.pdf``
+- ``initial_final_state_atlas_cpu_continuation.png/.pdf``
+- ``initial_final_state_atlas_cpu_direct.png/.pdf``
+- ``initial_final_state_atlas_gpu_continuation.png/.pdf``
+- ``initial_final_state_atlas_gpu_direct.png/.pdf``
+- ``initial_final_state_atlas_asymmetric_*``
 - legacy alias ``geometry_atlas.png/.pdf``
 
 Summary Tables
@@ -482,7 +486,7 @@ Generated summary-table figures include ``summary_tables_all_policies``,
 Publication Panel
 -----------------
 
-The full panel combines objective histories, final-state atlases, and summary
+The full panel combines objective histories, initial/final state atlases, and summary
 tables.  It is large by design and should be used for review, not as the only
 README figure.
 

@@ -616,6 +616,14 @@ def boundary_reference_preconditioner_score(
     )
 
 
+def boundary_reference_record_is_qi_safe(record, *, max_mirror_ratio, abs_iota_min):
+    """Return whether a preconditioner summary record satisfies safe gates."""
+
+    return _finite_or_inf(record.get("mirror")) <= float(max_mirror_ratio) and abs(
+        float(record.get("mean_iota") or 0.0)
+    ) >= float(abs_iota_min)
+
+
 def run_boundary_reference_preconditioner(input_file, output_dir, config):
     """Scan same-NFP reference-family boundary jumps and return the selected input."""
 
@@ -722,8 +730,11 @@ def run_boundary_reference_preconditioner(input_file, output_dir, config):
         safe_pool = [
             record
             for record in candidate_pool
-            if _finite_or_inf(record.get("qi_mirror_ratio_max")) <= max_mirror_ratio
-            and abs(float(record.get("mean_iota") or 0.0)) >= abs_iota_min
+            if boundary_reference_record_is_qi_safe(
+                record,
+                max_mirror_ratio=max_mirror_ratio,
+                abs_iota_min=abs_iota_min,
+            )
         ]
         if safe_pool:
             candidate_pool = safe_pool

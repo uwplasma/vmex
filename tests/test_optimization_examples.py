@@ -284,7 +284,9 @@ def test_qi_example_keeps_mirror_cleanup_guarded_by_qi_ceiling() -> None:
     assert "stage_promotion_mirror_threshold = float(" in support_text
     assert "repeats=int(stage.get(\"stage_repeats\", STAGE_REPEATS))" in support_text
     assert "method=str(stage.get(\"method\", METHOD))" in support_text
-    assert "\"max_nfev\": min(int(stage.get(\"max_nfev\", MAX_NFEV)), MAX_NFEV)" in text
+    assert "stage_max_nfev = min(stage_max_nfev, MAX_NFEV)" in text
+    assert "stage.get(\"use_showcase_max_nfev\", False)" in text
+    assert '"use_showcase_max_nfev": True' in cases_text
     assert '"require_engineering_gate": True' in cases_text
     assert "qi_ceiling = vj.QuasiIsodynamicResidualCeiling(" in text
     assert "qi_options=QI_OPTIONS" in text

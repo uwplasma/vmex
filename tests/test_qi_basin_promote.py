@@ -222,6 +222,21 @@ def test_qi_example_stage_promotion_reports_rank_and_engineering_regressions() -
     assert "mirror ratio did not improve enough" in reasons
 
 
+def test_qi_reference_safe_filter_uses_summary_mirror_field() -> None:
+    import examples.optimization.qi_optimization_support as support
+
+    assert support.boundary_reference_record_is_qi_safe(
+        {"mirror": 0.29, "mean_iota": 0.43},
+        max_mirror_ratio=0.30,
+        abs_iota_min=0.41,
+    )
+    assert not support.boundary_reference_record_is_qi_safe(
+        {"mirror": 0.34, "mean_iota": 0.43},
+        max_mirror_ratio=0.30,
+        abs_iota_min=0.41,
+    )
+
+
 def test_cli_requires_candidate_inputs(tmp_path: Path) -> None:
     candidates_file = tmp_path / "top_candidates.json"
     candidates_file.write_text(json.dumps([{"rank": 1, "label": "no-input"}]) + "\n")
