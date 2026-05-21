@@ -140,6 +140,21 @@ The full sweep lane spans QA/QH/QP/QI, CPU/GPU, `max_mode=1..4`, ESS/no ESS,
 continuation/direct, and `LASYM = F/T`; the compact README panels remain the
 reviewed `LASYM = F` best rows only.
 
+## QI From Multiple NFP Seeds
+
+The same `examples/optimization/QI_optimization.py` workflow is also exercised
+on reviewed NFP 1, 2, 3, and 4 QI seed-robustness cases. The full provenance,
+case-specific targets, and table are in `docs/optimization_sweep_results.rst`;
+the panel below is regenerated with:
+
+```bash
+PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
+```
+
+<p align="center">
+  <img src="docs/_static/figures/readme_qi_optimization_cases.png" width="980" />
+</p>
+
 ## Performance, Validation, Release
 
 - Performance notes and benchmark caveats: `docs/performance.rst`
