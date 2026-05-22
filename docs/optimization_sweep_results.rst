@@ -184,6 +184,13 @@ if a future problem config requests a larger replay budget.  Add
 On timeout, the sweep driver terminates the worker process group as well as
 direct children, so stale descendant solver or GPU processes should not survive
 after a recorded timeout row.
+After every completed continuation/QI stage, the runner writes a compact
+``stage_checkpoint.json`` beside the case output.  Timeout and worker-failure
+rows are then annotated from the latest checkpoint when possible, preserving the
+last accepted objective, aspect, iota, QI, mirror, elongation, wall time, and
+stage label in ``case_result.json`` and the CSV summaries.  Treat these
+checkpoint-derived rows as partial diagnostics; publication and README promotion
+still require the independent physics gates and reviewed Boozer contour plots.
 
 Run the non-stellarator-symmetric sweep by adding
 ``--stellarator-asymmetric``.  This sets ``LASYM = T`` in memory, includes
