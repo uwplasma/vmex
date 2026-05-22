@@ -202,7 +202,7 @@ def _record_scan_device_ready(
     start: float | None,
     dispatch_done: float,
     ready_done: float,
-    stats: dict[str, float],
+    stats: dict[str, float | int],
 ) -> bool:
     """Accumulate scan dispatch/ready timing counters."""
 

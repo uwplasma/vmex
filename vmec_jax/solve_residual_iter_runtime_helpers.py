@@ -106,7 +106,7 @@ def _scan_device_run_ready(
     block_until_ready: Callable[[Any], Any],
     tree_map: Callable[[Callable[[Any], Any], Any], Any],
     record_ready: Callable[..., bool],
-    stats: dict[str, float],
+    stats: dict[str, float | int],
 ) -> Any:
     """Block for scan completion and record dispatch/ready timing when enabled."""
 

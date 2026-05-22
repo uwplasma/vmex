@@ -2,6 +2,7 @@ import pytest
 
 from vmec_jax.solve_residual_iter_policy import vmec2000_scan_options_from_env
 from vmec_jax.solve_scan_planning_helpers import (
+    SCAN_TIMING_COUNT_KEYS,
     SCAN_TIMING_KEYS,
     apply_state_only_scan_options,
     build_scan_timing_report,
@@ -93,12 +94,13 @@ def test_scan_timing_enabled_tokens(value):
 
 def test_timing_report_math_excludes_dispatch_breakdown_from_leaf_total():
     stats = new_scan_timing_stats()
-    assert tuple(stats) == SCAN_TIMING_KEYS
+    assert tuple(stats) == SCAN_TIMING_KEYS + SCAN_TIMING_COUNT_KEYS
     stats["scan_setup_s"] = 1.0
     stats["scan_device_dispatch_s"] = 0.25
     stats["scan_device_ready_s"] = 0.75
     stats["scan_device_run_s"] = 1.0
     stats["scan_postprocess_s"] = 2.0
+    stats["scan_runner_cache_hit_count"] = 3
 
     report = build_scan_timing_report(iterations=7, stats=stats, scan_total_s=5.0)
 
@@ -107,10 +109,22 @@ def test_timing_report_math_excludes_dispatch_breakdown_from_leaf_total():
     assert report["scan_unattributed_s"] == pytest.approx(1.0)
     assert report["scan_device_dispatch_s"] == pytest.approx(0.25)
     assert report["scan_device_ready_s"] == pytest.approx(0.75)
+    assert report["scan_runner_cache_hit_count"] == 3
+    assert report["scan_runner_cache_miss_count"] == 0
     assert build_scan_timing_report(iterations=7, stats=stats, scan_total_s=3.0)["scan_unattributed_s"] == 0.0
 
 
 def test_run_flags_disable_fallback_for_state_only_and_chunking_for_traced_scan():
+    normal = resolve_scan_run_flags(
+        state_only=False,
+        scan_differentiated=False,
+        scan_fallback_enabled=True,
+        force_chunked_scan=True,
+    )
+    assert not normal.state_only_scan
+    assert normal.scan_fallback_enabled_run
+    assert normal.force_chunked_scan_run
+
     flags = resolve_scan_run_flags(
         state_only=True,
         scan_differentiated=False,
@@ -168,6 +182,30 @@ def test_scan_options_env_branches_for_minimal_light_and_restart_payload():
     assert not forced_payload_off.scan_use_restart_payload
 
 
+def test_scan_options_explicit_backend_and_print_branches():
+    precompute = _scan_options(scan_precompute_env="yes", tridi_precompute_env="0")
+    assert precompute.scan_use_precomputed
+
+    tridi_precompute = _scan_options(scan_precompute_env="", tridi_precompute_env="1")
+    assert tridi_precompute.scan_use_precomputed
+
+    explicit_lax_off = _scan_options(scan_lax_env="0", tridi_solve_env="lax")
+    assert not explicit_lax_off.scan_use_lax_tridi
+
+    tridi_lax = _scan_options(scan_lax_env="", tridi_solve_env="force")
+    assert tridi_lax.scan_use_lax_tridi
+
+    forced_payload_on = _scan_options(backend_name="gpu", scan_restart_payload_env="yes")
+    assert forced_payload_on.scan_use_restart_payload
+
+    forced_chunked = _scan_options(force_chunked_scan_run=True, scan_print_chunked_env="0")
+    assert forced_chunked.chunked_print
+    assert not forced_chunked.print_in_scan
+
+    invalid_print_mode = _scan_options(scan_print_mode_env="bogus", scan_print_chunked_env="0")
+    assert invalid_print_mode.scan_print_mode == "debug_print"
+
+
 def test_scan_jit_forces_and_preflight_env_branches():
     assert scan_jit_forces_enabled(env_value=None, jit_forces=True)
     assert not scan_jit_forces_enabled(env_value="0", jit_forces=True)
@@ -213,6 +251,15 @@ def test_scan_jit_forces_and_preflight_env_branches():
         ).preflight_iters
         == 1
     )
+    explicit = resolve_scan_preflight_iters(
+        jit_forces_scan=True,
+        vmec2000_control=True,
+        max_iter=5,
+        axis_reset_repeat=False,
+        preflight_env="3",
+    )
+    assert explicit.preflight_default == "0"
+    assert explicit.preflight_iters == 3
 
 
 def test_scan_iteration_plan_defaults_invalid_env_and_clamps_preflight():
@@ -245,6 +292,16 @@ def test_scan_iteration_plan_defaults_invalid_env_and_clamps_preflight():
     )
     assert zero.extra_iters == 0
     assert zero.preflight_iters == 0
+
+    explicit = resolve_scan_iteration_plan(
+        max_iter=4,
+        preflight_iters=1,
+        vmec2000_control=True,
+        extra_iters_env="6",
+    )
+    assert explicit.extra_iters == 6
+    assert explicit.max_iter_scan == 10
+    assert explicit.max_iter_tail == 9
 
 
 def test_scan_chunk_settings_match_quiet_and_printing_modes():
@@ -347,4 +404,14 @@ def test_scan_print_mode_normalization_and_invalid_guard_errors():
             reference_mode=False,
             strict_update=True,
             auto_flip_force=True,
+        )
+    with pytest.raises(ValueError, match="limit_dt_from_force=False"):
+        validate_vmec2000_scan_guards(
+            backtracking=False,
+            limit_dt_from_force=True,
+            limit_update_rms=False,
+            use_direct_fallback=False,
+            reference_mode=False,
+            strict_update=True,
+            auto_flip_force=False,
         )

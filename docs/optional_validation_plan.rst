@@ -24,7 +24,7 @@ release notes for the candidate commit.
 The required CI split remains:
 
 - fast tests on Python 3.10, 3.11, and 3.12,
-- Python 3.11 coverage at the current ``85%`` gate,
+- Python 3.11 coverage at the current ``90%`` gate,
 - bounded physics smoke,
 - parity manifest dry-run smoke,
 - wheel/sdist build plus fast docs,

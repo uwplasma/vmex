@@ -155,8 +155,8 @@ These cases are exercised by:
 
    RUN_FULL=1 pytest tests/test_wout_comprehensive_parity.py -v -k "convergence_only"
 
-QI diagnostics and seed robustness
-----------------------------------
+QI diagnostics and case coverage
+--------------------------------
 
 The required QI tests currently validate the diagnostic definitions and
 metadata contracts rather than claiming global optimizer robustness from every
@@ -176,7 +176,10 @@ The current QI NFP 1-4 coverage panel and CSV document reviewed NFP=1, NFP=2,
 seed-3127, and minimal-seed NFP=4 lanes under their case-specific aspect
 targets:
 ``docs/_static/figures/readme_qi_optimization_cases.png`` and
-``docs/_static/figures/readme_qi_optimization_cases.csv``.  The NFP=4 row is a
+``docs/_static/figures/readme_qi_optimization_cases.csv``.  These artifacts are
+case-gated coverage rows, not a global seed-robustness claim.  The plotted
+initial panels are raw/source input WOUTs that match the paired input decks;
+the plotted final panels are the accepted audited WOUTs.  The NFP=4 row is a
 case-gated minimal-seed lane that uses a same-NFP reference-family proposal
 plus an exact audit, not a long local descent; its CSV row records one
 preconditioner point and one short history segment along with the exact
