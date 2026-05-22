@@ -176,7 +176,7 @@ from .solve_scan_planning_helpers import (
 from .solve_scan_time_control import (
     scan_restart_decision,
     scan_restart_transition,
-    scan_stage_spike_post_scalars,
+    scan_stage_spike_post_update,
     scan_time_control_scalars,
 )
 from .state import VMECState, pack_state, unpack_state
@@ -7680,32 +7680,48 @@ def solve_fixed_boundary_residual_iter(
 
                 fsq0_prev_post = jnp.where(do_restart, fsq0_prev_before, fsq_phys)
 
-                stage_post_scalars = scan_stage_spike_post_scalars(
+                stage_post_update = scan_stage_spike_post_update(
                     time_step=time_step_post,
+                    inv_tau=inv_tau_post,
+                    velocity_blocks=(
+                        vRcc_post,
+                        vRss_post,
+                        vZsc_post,
+                        vZcs_post,
+                        vLsc_post,
+                        vLcs_post,
+                        vRsc_post,
+                        vRcs_post,
+                        vZcc_post,
+                        vZss_post,
+                        vLcc_post,
+                        vLss_post,
+                    ),
+                    iter1=iter1_post,
+                    iter2=iter2,
                     stage_spike=stage_spike,
                     stage_prev_fsq=stage_prev_fsq_j,
                     stage_transition_scale=stage_transition_scale,
+                    k_ndamp=k_ndamp,
+                    dtype=dtype,
                 )
-                time_step_post = stage_post_scalars.time_step
-                if stage_prev_fsq_j is not None:
-                    inv_tau_post = jnp.where(
-                        stage_spike,
-                        jnp.full((k_ndamp,), jnp.asarray(0.15, dtype=dtype) / time_step_post),
-                        inv_tau_post,
-                    )
-                    vRcc_post = jnp.where(stage_spike, jnp.zeros_like(vRcc_post), vRcc_post)
-                    vRss_post = jnp.where(stage_spike, jnp.zeros_like(vRss_post), vRss_post)
-                    vZsc_post = jnp.where(stage_spike, jnp.zeros_like(vZsc_post), vZsc_post)
-                    vZcs_post = jnp.where(stage_spike, jnp.zeros_like(vZcs_post), vZcs_post)
-                    vLsc_post = jnp.where(stage_spike, jnp.zeros_like(vLsc_post), vLsc_post)
-                    vLcs_post = jnp.where(stage_spike, jnp.zeros_like(vLcs_post), vLcs_post)
-                    vRsc_post = jnp.where(stage_spike, jnp.zeros_like(vRsc_post), vRsc_post)
-                    vRcs_post = jnp.where(stage_spike, jnp.zeros_like(vRcs_post), vRcs_post)
-                    vZcc_post = jnp.where(stage_spike, jnp.zeros_like(vZcc_post), vZcc_post)
-                    vZss_post = jnp.where(stage_spike, jnp.zeros_like(vZss_post), vZss_post)
-                    vLcc_post = jnp.where(stage_spike, jnp.zeros_like(vLcc_post), vLcc_post)
-                    vLss_post = jnp.where(stage_spike, jnp.zeros_like(vLss_post), vLss_post)
-                    iter1_post = jnp.where(stage_spike, iter2, iter1_post)
+                time_step_post = stage_post_update.time_step
+                inv_tau_post = stage_post_update.inv_tau
+                (
+                    vRcc_post,
+                    vRss_post,
+                    vZsc_post,
+                    vZcs_post,
+                    vLsc_post,
+                    vLcs_post,
+                    vRsc_post,
+                    vRcs_post,
+                    vZcc_post,
+                    vZss_post,
+                    vLcc_post,
+                    vLss_post,
+                ) = stage_post_update.velocity_blocks
+                iter1_post = stage_post_update.iter1
 
                 def _restart_payload(_):
                     with _maybe_trace("scan/compute_forces:restart"):

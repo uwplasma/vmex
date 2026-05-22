@@ -49,6 +49,13 @@ class ScanStageSpikePostScalars(NamedTuple):
     apply_stage_reset: Any
 
 
+class ScanStageSpikePostUpdate(NamedTuple):
+    time_step: Any
+    inv_tau: Any
+    velocity_blocks: tuple[Any, ...]
+    iter1: Any
+
+
 def scan_time_control_scalars(
     *,
     skip_timecontrol: Any,
@@ -257,3 +264,48 @@ def scan_stage_spike_post_scalars(
         time_step,
     )
     return ScanStageSpikePostScalars(time_step=next_time_step, apply_stage_reset=apply_stage_reset)
+
+
+def scan_stage_spike_post_update(
+    *,
+    time_step: Any,
+    inv_tau: Any,
+    velocity_blocks: tuple[Any, ...],
+    iter1: Any,
+    iter2: Any,
+    stage_spike: Any,
+    stage_prev_fsq: Any | None,
+    stage_transition_scale: float,
+    k_ndamp: int,
+    dtype: Any,
+) -> ScanStageSpikePostUpdate:
+    """Apply VMEC stage-spike damping reset to scalar and velocity state."""
+
+    scalars = scan_stage_spike_post_scalars(
+        time_step=time_step,
+        stage_spike=stage_spike,
+        stage_prev_fsq=stage_prev_fsq,
+        stage_transition_scale=stage_transition_scale,
+    )
+    if stage_prev_fsq is None:
+        return ScanStageSpikePostUpdate(
+            time_step=scalars.time_step,
+            inv_tau=inv_tau,
+            velocity_blocks=tuple(velocity_blocks),
+            iter1=iter1,
+        )
+
+    reset = scalars.apply_stage_reset
+    inv_tau_next = jnp.where(
+        reset,
+        jnp.full((int(k_ndamp),), jnp.asarray(0.15, dtype=dtype) / scalars.time_step),
+        inv_tau,
+    )
+    velocity_next = tuple(jnp.where(reset, jnp.zeros_like(block), block) for block in velocity_blocks)
+    iter1_next = jnp.where(reset, iter2, iter1)
+    return ScanStageSpikePostUpdate(
+        time_step=scalars.time_step,
+        inv_tau=inv_tau_next,
+        velocity_blocks=velocity_next,
+        iter1=iter1_next,
+    )

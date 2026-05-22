@@ -12,6 +12,7 @@ from vmec_jax.solve_scan_time_control import (
     scan_restart_decision,
     scan_restart_transition,
     scan_stage_spike_post_scalars,
+    scan_stage_spike_post_update,
     scan_time_control_scalars,
 )
 
@@ -129,6 +130,73 @@ def test_stage_spike_reason_and_post_scale_match_scan_double_scale_path():
     )
     assert _scalar(post.apply_stage_reset)
     np.testing.assert_allclose(_scalar(post.time_step), 0.005)
+
+
+def test_stage_spike_post_update_resets_damping_and_velocities():
+    velocity_blocks = tuple(jnp.full((2,), float(i + 1)) for i in range(12))
+
+    post = scan_stage_spike_post_update(
+        time_step=jnp.asarray(0.02),
+        inv_tau=jnp.asarray([9.0, 8.0, 7.0]),
+        velocity_blocks=velocity_blocks,
+        iter1=jnp.asarray(4, dtype=jnp.int32),
+        iter2=jnp.asarray(6, dtype=jnp.int32),
+        stage_spike=jnp.asarray(True),
+        stage_prev_fsq=jnp.asarray(1.0),
+        stage_transition_scale=0.5,
+        k_ndamp=3,
+        dtype=jnp.asarray(0.0).dtype,
+    )
+
+    np.testing.assert_allclose(_scalar(post.time_step), 0.01)
+    np.testing.assert_allclose(np.asarray(post.inv_tau), np.full(3, 15.0))
+    assert _scalar(post.iter1) == 6
+    for block in post.velocity_blocks:
+        np.testing.assert_allclose(np.asarray(block), 0.0)
+
+
+def test_stage_spike_post_update_preserves_state_when_inactive_or_no_previous_stage():
+    velocity_blocks = tuple(jnp.full((1,), float(i + 1)) for i in range(12))
+
+    inactive = scan_stage_spike_post_update(
+        time_step=jnp.asarray(0.02),
+        inv_tau=jnp.asarray([9.0]),
+        velocity_blocks=velocity_blocks,
+        iter1=jnp.asarray(4, dtype=jnp.int32),
+        iter2=jnp.asarray(6, dtype=jnp.int32),
+        stage_spike=jnp.asarray(False),
+        stage_prev_fsq=jnp.asarray(1.0),
+        stage_transition_scale=0.5,
+        k_ndamp=1,
+        dtype=jnp.asarray(0.0).dtype,
+    )
+    no_previous = scan_stage_spike_post_update(
+        time_step=jnp.asarray(0.02),
+        inv_tau=jnp.asarray([9.0]),
+        velocity_blocks=velocity_blocks,
+        iter1=jnp.asarray(4, dtype=jnp.int32),
+        iter2=jnp.asarray(6, dtype=jnp.int32),
+        stage_spike=jnp.asarray(True),
+        stage_prev_fsq=None,
+        stage_transition_scale=0.5,
+        k_ndamp=1,
+        dtype=jnp.asarray(0.0).dtype,
+    )
+
+    np.testing.assert_allclose(_scalar(inactive.time_step), 0.02)
+    np.testing.assert_allclose(np.asarray(inactive.inv_tau), [9.0])
+    assert _scalar(inactive.iter1) == 4
+    np.testing.assert_allclose(_scalar(no_previous.time_step), 0.02)
+    np.testing.assert_allclose(np.asarray(no_previous.inv_tau), [9.0])
+    assert _scalar(no_previous.iter1) == 4
+    for original, inactive_block, no_previous_block in zip(
+        velocity_blocks,
+        inactive.velocity_blocks,
+        no_previous.velocity_blocks,
+        strict=True,
+    ):
+        np.testing.assert_allclose(np.asarray(inactive_block), np.asarray(original))
+        np.testing.assert_allclose(np.asarray(no_previous_block), np.asarray(original))
 
 
 def test_vmecpp_bad_progress_uses_bad_progress_reason_and_time_scaling():
