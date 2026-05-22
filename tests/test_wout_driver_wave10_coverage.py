@@ -135,16 +135,17 @@ def test_state_from_wout_lambda_rejects_bad_shapes_and_handles_missing_m(monkeyp
     assert np.all(np.isfinite(state.Lsin))
 
 
-def _state_static_indata(*, ns: int = 3, ac_value=()) -> tuple[VMECState, SimpleNamespace, InData]:
-    cfg = VMECConfig(mpol=2, ntor=0, ns=ns, nfp=1, lasym=False, lthreed=False, lconm1=True, ntheta=4, nzeta=2)
+def _state_static_indata(*, ns: int = 3, ac_value=(), lasym: bool = False) -> tuple[VMECState, SimpleNamespace, InData]:
+    cfg = VMECConfig(mpol=2, ntor=0, ns=ns, nfp=1, lasym=lasym, lthreed=False, lconm1=True, ntheta=4, nzeta=2)
     modes = vmec_mode_table(cfg.mpol, cfg.ntor)
-    layout = StateLayout(ns=ns, K=modes.K, lasym=False)
+    layout = StateLayout(ns=ns, K=modes.K, lasym=lasym)
     radial = np.linspace(0.0, 1.0, ns)[:, None]
+    zeros = np.zeros((ns, modes.K))
     state = VMECState(
         layout=layout,
         Rcos=np.concatenate([1.0 + radial, 0.2 + radial], axis=1),
-        Rsin=np.zeros((ns, modes.K)),
-        Zcos=np.zeros((ns, modes.K)),
+        Rsin=np.concatenate([0.05 + radial, 0.06 + radial], axis=1) if lasym else zeros.copy(),
+        Zcos=np.concatenate([0.07 + radial, 0.08 + radial], axis=1) if lasym else zeros.copy(),
         Zsin=np.concatenate([np.zeros_like(radial), 0.3 + radial], axis=1),
         Lcos=np.concatenate([0.1 + radial, 0.2 + radial], axis=1),
         Lsin=np.concatenate([0.3 + radial, 0.4 + radial], axis=1),
@@ -314,6 +315,37 @@ def test_wout_minimal_equif_correction_and_raw_filter_branch(monkeypatch, tmp_pa
 
     np.testing.assert_allclose(seen["equif_bsubv"], bc.bsubv)
     np.testing.assert_allclose(seen["raw_filter_bsubv"], bc.bsubv + 9.0)
+
+
+def test_wout_minimal_lasym_loop_and_presym_dump_branch(monkeypatch, tmp_path: Path) -> None:
+    state, static, indata = _state_static_indata(ns=3, lasym=True)
+    _bc, _shape = _patch_wout_minimal_dependencies(monkeypatch, cfg=static.cfg)
+    monkeypatch.setenv("VMEC_JAX_SKIP_BSUB_FILTER", "1")
+    monkeypatch.setenv("VMEC_JAX_WROUT_LASYM_LOOP", "1")
+    monkeypatch.setenv("VMEC_JAX_DUMP_BSUB_PRE_SYM", "1")
+    monkeypatch.setenv("VMEC_JAX_DUMP_DIR", str(tmp_path))
+    monkeypatch.setenv("VMEC_JAX_DUMP_TAG", "lasym")
+
+    out = wout_minimal_from_fixed_boundary(
+        path=tmp_path / "wout_lasym.nc",
+        state=state,
+        static=static,
+        indata=indata,
+        signgs=1,
+        fsqr=0.0,
+        fsqz=0.0,
+        fsql=0.0,
+        converged=True,
+    )
+
+    assert out.lasym is True
+    assert out.gmns.shape == out.gmnc.shape
+    assert out.bsubumns.shape == out.bsubumnc.shape
+    dump = tmp_path / "bsub_pre_sym_jax_lasym.dat"
+    assert dump.exists()
+    text = dump.read_text(encoding="utf-8")
+    assert "columns: js lt lz bsubu bsubv bsupu bsupv bsubs" in text
+    assert "ntheta3=" in text
 
 
 def test_wout_minimal_force_bss_and_lambda_zero_or_single_surface_branches(monkeypatch, tmp_path: Path) -> None:
