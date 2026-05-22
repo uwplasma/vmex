@@ -16,7 +16,7 @@ implementation error).
 Reference data
 --------------
 
-Ten bundled ``wout`` reference files are pre-computed with VMEC2000 and shipped
+Eleven bundled ``wout`` reference files are pre-computed with VMEC2000 and shipped
 in ``examples/data/``.  A stable subset is used for strict field-by-field
 end-to-end parity in ``tests/test_wout_comprehensive_parity.py``; the remaining
 references are covered by no-solve profile/current gates, convergence-only
@@ -37,6 +37,8 @@ references are promoted.
 | ``LandremanPaul2021_QA_lowres``          | 3D quasi-axisymmetric (nfp=2)    | False        | fixed   |
 +------------------------------------------+----------------------------------+--------------+---------+
 | ``nfp3_QI_fixed_resolution_final``       | 3D quasi-isodynamic (nfp=3)      | False        | fixed   |
++------------------------------------------+----------------------------------+--------------+---------+
+| ``QI_stel_seed_3127``                    | QI far-seed solved-state fixture | False        | fixed   |
 +------------------------------------------+----------------------------------+--------------+---------+
 | ``li383_low_res``                        | 3D SIMSOPT reference (nfp=3)     | False        | fixed   |
 +------------------------------------------+----------------------------------+--------------+---------+
