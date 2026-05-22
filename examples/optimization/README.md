@@ -305,10 +305,10 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi_boundary_interpolatio
   --max-mirror-ratio 0.35 --max-elongation 8.0
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py \
   --backend-label cpu --solver-device cpu --policy continuation \
-  --problems qi --modes 1,2,3,4 --ess both --qi-qp-preseed both --rerun
+  --problems qi --modes 1,2,3 --ess both --qi-qp-preseed both --rerun
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py \
   --backend-label cpu --solver-device cpu --policy direct \
-  --problems qi --modes 1,2,3,4 --ess both --qi-qp-preseed both --rerun
+  --problems qi --modes 1,2,3 --ess both --qi-qp-preseed both --rerun
 PYTHONPATH=. python examples/optimization/render_qi_constrained_sweep.py
 PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 ```
@@ -361,9 +361,12 @@ Example:
 ```bash
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py \
   --backend-label cpu --solver-device cpu --policy continuation \
-  --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --qi-qp-preseed off --rerun
+  --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --rerun
 PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 ```
+
+Use `--modes 1,2,3,4` only for exploratory high-mode regeneration; the
+checked-in docs snapshots currently publish reviewed `max_mode=1..3` rows.
 
 ## Comparison And Diagnostic Scripts
 
