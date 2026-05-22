@@ -21,7 +21,7 @@ they are only partial snapshots:
   example script but is not active by default.
   The compact README best-row uses the bundled ``input.nfp2_QI`` omnigenity
   seed; the NFP coverage panel uses case-specific inputs, including the
-  seeded ``input.minimal_seed_nfp2`` stress case.
+  seeded ``input.minimal_seed_nfp2_target_helicity`` stress case.
   The production CLI can optionally use a same-mode QP preseed; the current
   best gated QI row starts the constrained QI refinement directly from the seed
   with ``--qi-qp-preseed off``.
@@ -346,7 +346,7 @@ match before the panel is published.
      - CPU min
      - Status
    * - ``examples/data/input.nfp1_QI``
-     - ``results/qi_opt/ess/nfp1_qi_direct_office_20260519``
+     - ``docs/_static/qi_readme_cases/nfp1``
      - ``1.56e-2``
      - ``1.48e-3``
      - ``7.75e-4``
@@ -357,7 +357,7 @@ match before the panel is published.
      - ``15.8``
      - ``case-gated``
    * - ``examples/data/input.minimal_seed_nfp2_target_helicity``
-     - ``examples/optimization/results/minimal_seed_showcase_promote/cpu/cpu/qi_nfp2/continuation/minimal_nfp2_qi/mode3/ess``
+     - ``docs/_static/qi_readme_cases/nfp2_target_helicity``
      - ``1.61e-2``
      - ``1.52e-3``
      - ``5.25e-4``
@@ -368,7 +368,7 @@ match before the panel is published.
      - ``28.7``
      - ``case-gated``
    * - ``examples/data/input.QI_stel_seed_3127``
-     - ``results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516``
+     - ``docs/_static/qi_readme_cases/nfp3_seed3127``
      - ``9.33e-2``
      - ``4.11e-3``
      - ``1.01e-3``
@@ -379,7 +379,7 @@ match before the panel is published.
      - ``4.6``
      - ``case-gated``
    * - ``examples/data/input.minimal_seed_nfp4``
-     - ``results/qi_opt/ess/minimal_nfp4_to_qi_finite_beta_reference``
+     - ``docs/_static/qi_readme_cases/nfp4_minimal``
      - ``2.52e-2``
      - ``2.56e-3``
      - ``2.54e-4``
@@ -409,6 +409,13 @@ Regenerate these lightweight artifacts with:
 .. code-block:: bash
 
    PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
+
+This renderer intentionally consumes the tracked
+``docs/_static/qi_readme_cases`` bundle instead of ignored local
+``results/`` directories, so the figure can be regenerated from a clean clone.
+Raw per-stage ``history.json`` files are kept in that bundle for auditing
+non-monotone or stalled optimizer stages; the public panel plots normalized
+best-so-far traces for readability.
 
 The staged objective panel concatenates every recorded history file used by
 the selected case-specific result.  It plots the best-so-far value in each

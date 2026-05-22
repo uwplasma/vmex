@@ -46,6 +46,7 @@ pip install -e ".[qi]"
 Run the solver with the VMEC2000-style CLI:
 
 ```bash
+curl -L -O https://raw.githubusercontent.com/uwplasma/vmec_jax/main/examples/data/input.nfp4_QH_warm_start
 vmec_jax input.nfp4_QH_warm_start
 ```
 
@@ -62,8 +63,16 @@ Use the Python API:
 import vmec_jax as vj
 
 fixed = vj.run_fixed_boundary("input.nfp4_QH_warm_start")
-freeb = vj.run_free_boundary("input.cth_like_free_bdy_lasym_small")
 vj.plot_wout("wout_nfp4_QH_warm_start.nc", outdir="figures/")
+```
+
+For the bundled small free-boundary example, download both the input deck and
+its magnetic grid into the same folder:
+
+```bash
+curl -L -O https://raw.githubusercontent.com/uwplasma/vmec_jax/main/examples/data/input.cth_like_free_bdy_lasym_small
+curl -L -O https://raw.githubusercontent.com/uwplasma/vmec_jax/main/examples/data/mgrid_cth_like_lasym_small.nc
+vmec_jax input.cth_like_free_bdy_lasym_small
 ```
 
 ## Backend Selection

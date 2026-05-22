@@ -181,3 +181,24 @@ def test_bundled_minimal_seed_inputs_match_factory_contract(nfp: int):
     assert set(got.indexed) == {"RBC", "ZBS"}
     assert got.indexed["RBC"] == {(0, 0): 1.0, (0, 1): 0.2}
     assert got.indexed["ZBS"] == {(0, 1): 0.2}
+
+
+def test_bundled_nfp2_target_helicity_seed_has_documented_high_mode_perturbations():
+    """Guard the reviewed QI panel seed separately from the bare minimal seed."""
+
+    root = Path(__file__).resolve().parents[1]
+    input_path = root / "examples" / "data" / "input.minimal_seed_nfp2_target_helicity"
+    got = read_indata(input_path)
+
+    assert got.get_int("NFP") == 2
+    assert got.get_int("MPOL") == 6
+    assert got.get_int("NTOR") == 6
+    assert got.indexed["RBC"][(0, 0)] == 1.0
+    assert got.indexed["RBC"][(0, 1)] == 0.2
+    assert got.indexed["ZBS"][(0, 1)] == 0.2
+    assert set(got.indexed) == {"RBC", "ZBS"}
+    for family in ("RBC", "ZBS"):
+        modes = set(got.indexed[family])
+        assert all(max(abs(m), abs(n)) <= 3 for m, n in modes)
+        assert any(max(abs(m), abs(n)) == 3 for m, n in modes)
+        assert len(modes) == (25 if family == "RBC" else 24)
