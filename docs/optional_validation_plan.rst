@@ -52,9 +52,12 @@ reviewable text form:
      --format markdown \
      --output results/qi_seed_audit/validation_plan.md
 
-The helper does not run VMEC2000, SIMSOPT, or optimization.  It only records the
-commands and gates that should be executed deliberately by a local or scheduled
-validation lane.
+The helper does not run VMEC2000, SIMSOPT, optimization, or GitHub API
+queries.  Its default CI baseline is an explicit ``unverified`` placeholder;
+pass the verified run metadata with ``--ci-status``, ``--ci-head-sha``,
+``--ci-url``, and ``--ci-completed-at-utc`` only after checking the current
+``main`` workflow.  The manifest records commands and gates that should be
+executed deliberately by a local or scheduled validation lane.
 
 Family-representative QI workflow
 ---------------------------------
@@ -198,13 +201,13 @@ the local machine.
 The additional executable-backed
 ``up_down_asymmetric_tokamak`` nightly gate did not promote.  VMEC2000 and
 ``vmec_jax`` both wrote zero aspect/volume scalars for the low-residual
-zero-pressure end state, so the optional gate now treats aspect as unavailable
-for that specific case and records it as a strict expected gap.  Saved-artifact
-comparison after the physics precheck showed the leading residuals:
-``lmns`` relRMS about ``1.78e-2`` against a ``1e-3`` gate, ``bsupumns`` relRMS
-about ``1.05e-2`` against a ``1e-2`` gate, and ``bsubvmns`` diff RMS about
-``5.72e-4`` against a near-zero VMEC2000 reference.  Geometry, profiles,
-energy, and most magnetic channels stayed within their existing thresholds.
+zero-pressure end state, so the optional gate treats aspect as unavailable for
+that specific case in the saved-artifact comparison.  The leading residuals in
+that dated artifact were ``lmns`` relRMS about ``1.78e-2`` against a ``1e-3``
+gate, ``bsupumns`` relRMS about ``1.05e-2`` against a ``1e-2`` gate, and
+``bsubvmns`` diff RMS about ``5.72e-4`` against a near-zero VMEC2000 reference.
+This remains an optional/instrumented LASYM gap, not a promoted strict external
+parity result.
 
 Next parity gates
 -----------------
@@ -216,8 +219,8 @@ The next parity gates are:
 - Run reviewed repeated-stage family-prefine probes across QI, QP, QH, QA, and
   simple seeds.
 - Keep VMEC2000 executable smoke green before broadening the executable-backed
-  manifest matrix, including the free-boundary ``LASYM=true`` stock-executable
-  vacuum-entry guard:
+  manifest matrix.  The current stock-executable ``LASYM=true`` coverage is a
+  vacuum-entry smoke, not strict field-by-field free-boundary parity:
 
   .. code-block:: bash
 
@@ -225,7 +228,8 @@ The next parity gates are:
      VMEC2000_INTEGRATION=1 \
      pytest -q tests/test_vmec2000_exec_fast_validation.py::test_vmec2000_free_boundary_lasym_true_reaches_vacuum_solve
 
-- Run the optional bounded free-boundary ``LASYM=true`` manifest case.  The
+- Keep the optional bounded free-boundary ``LASYM=true`` manifest case
+  instrumented until strict external parity is demonstrated.  The
   ``freeb_scalpot`` comparator needs an instrumented VMEC2000 executable that
   honors the ``VMEC_DUMP_*`` environment variables; a stock ``xvmec2000`` run
   can still solve the case, but it will not emit the scalpot/vacuum dumps used

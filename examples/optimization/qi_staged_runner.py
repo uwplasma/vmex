@@ -142,8 +142,9 @@ def _build_qi_staged_env(config: QIStagedCaseConfig) -> dict[str, str]:
             )
     if config.solver_device is not None:
         env["VMEC_JAX_QI_SOLVER_DEVICE"] = str(config.solver_device)
-    if config.worker_jax_platforms is not None:
-        env["JAX_PLATFORMS"] = str(config.worker_jax_platforms)
+    worker_jax_platforms = sweep._normalize_worker_jax_platforms(config.worker_jax_platforms)
+    if worker_jax_platforms is not None:
+        env["JAX_PLATFORMS"] = worker_jax_platforms
     if config.max_nfev is not None:
         env["VMEC_JAX_QI_MAX_NFEV"] = str(int(config.max_nfev))
     if config.inner_max_iter is not None:
@@ -426,7 +427,7 @@ def run_qi_staged_case(config: QIStagedCaseConfig) -> sweep.CaseResult:
         total_wall_time_s=wall_time_s,
         output_dir=str(output_dir),
         solver_device=config.solver_device,
-        jax_platforms=config.worker_jax_platforms,
+        jax_platforms=sweep._normalize_worker_jax_platforms(config.worker_jax_platforms),
         input_file=str(config.input_file),
         input_nfp=_input_nfp(Path(config.input_file)),
         target_aspect=_finite_float(diagnostics.get("target_aspect") or history.get("target_aspect")),

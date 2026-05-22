@@ -446,13 +446,13 @@ Current parity status
   ``lasym=True`` channels are covered by bundled/fetched reference physics gates
   and convergence tests.  The ``basic_non_stellsym_pressure`` executable-backed
   finite-beta comparison passed locally after the LASYM covariant-field scaling
-  fix in ``e0b00e7``.  Strict external LASYM parity is still not promoted
-  broadly: the axisymmetric zero-pressure ``up_down_asymmetric_tokamak``
-  nightly comparison remains a known residual gap, led by ``lmns`` and the
-  near-zero ``bsubvmns`` sine covariant channel.  The Boozer input adapter is
-  required to preserve the asymmetric geometry/lambda channels (``rmns``,
-  ``zmnc``, ``lmnc``) and magnetic sine channels through ``booz_xform_jax`` for
-  QI and LASYM Boozer diagnostics.
+  fix in ``e0b00e7`` and remains a dated optional audit note.  Strict external
+  LASYM parity is still not promoted broadly: the axisymmetric zero-pressure
+  ``up_down_asymmetric_tokamak`` nightly comparison remains a known residual
+  gap, led by ``lmns`` and the near-zero ``bsubvmns`` sine covariant channel.
+  The Boozer input adapter is required to preserve the asymmetric
+  geometry/lambda channels (``rmns``, ``zmnc``, ``lmnc``) and magnetic sine
+  channels through ``booz_xform_jax`` for QI and LASYM Boozer diagnostics.
 
 **Free boundary**
   vmec_jax produces converged free-boundary equilibria for the bundled CTH-like
@@ -511,7 +511,9 @@ The canonical parity matrix is defined in ``tools/diagnostics/parity_manifest.to
 
 The manifest covers: fixed-boundary axisymmetric and non-axisymmetric,
 ``lasym=False`` and ``lasym=True``, free-boundary axisymmetric and
-non-axisymmetric.
+non-axisymmetric.  Required CI only smoke-tests the manifest schema and bounded
+dry-run wiring; executing the matrix against VMEC2000 remains an optional local
+or scheduled lane.
 
 Optional VMEC2000 executable checks
 -----------------------------------
@@ -588,7 +590,8 @@ smoke reaches the corresponding VMEC2000 solve.  The stricter converged
 executable-backed ``basic_non_stellsym_pressure`` comparison passed locally
 after the LASYM covariant-field scaling fix in ``e0b00e7``; a 2026-05-19
 bounded rerun found worst relRMS ``bsupumns=3.77e-3``, below the nightly
-``1e-2`` LASYM magnetic tolerance.  The remaining strict external LASYM
+``1e-2`` LASYM magnetic tolerance.  Treat this as dated optional evidence, not
+as a broad strict-LASYM parity promotion.  The remaining strict external LASYM
 nightly gap is the zero-pressure, axisymmetric
 ``up_down_asymmetric_tokamak`` case: a 2026-05-19 rerun still showed
 ``lmns=1.78e-2`` relRMS, ``bsupumns=1.05e-2`` relRMS, and ``bsubvmns``
@@ -614,6 +617,10 @@ The machine-readable list of these bounded parity commands is emitted by:
 .. code-block:: bash
 
    python validation/qi_seed_robustness_plan.py --output results/qi_seed_audit/validation_plan.json
+
+The emitted plan intentionally does not embed a stale green CI run by default.
+Verify the current ``main`` CI run with ``gh run list``/``gh run view`` and pass
+the run metadata to the helper when preparing release-validation artifacts.
 
 Skip behavior is intentional.  Tests marked ``vmec2000`` skip unless
 ``VMEC2000_INTEGRATION=1`` is set.  They also skip, rather than fail, when the

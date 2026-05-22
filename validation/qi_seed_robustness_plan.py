@@ -16,13 +16,18 @@ from pathlib import Path
 from typing import Any
 
 
-LATEST_GREEN_CI = {
+CI_VERIFICATION_PLACEHOLDER = {
     "workflow": "CI",
-    "status": "success",
+    "status": "unverified",
     "branch": "main",
-    "head_sha": "59c7728",
-    "completed_at_utc": "2026-05-14",
-    "url": "https://github.com/uwplasma/vmec_jax/actions/runs/25853220584",
+    "head_sha": "",
+    "completed_at_utc": "",
+    "url": "",
+    "verification_required": True,
+    "verification_command": (
+        "gh run list --repo uwplasma/vmec_jax --branch main "
+        "--workflow CI --limit 5"
+    ),
 }
 
 QI_FAMILY_REPRESENTATIVES = [
@@ -349,7 +354,7 @@ def _lanes() -> list[ValidationLane]:
     ]
 
 
-def build_plan(*, ci: dict[str, str] | None = None) -> dict[str, Any]:
+def build_plan(*, ci: dict[str, Any] | None = None) -> dict[str, Any]:
     """Return a JSON-serializable optional validation plan."""
 
     lanes = _lanes()
@@ -357,7 +362,7 @@ def build_plan(*, ci: dict[str, str] | None = None) -> dict[str, Any]:
     return {
         "schema_version": 2,
         "mode": "optional_qi_seed_robustness_validation_plan",
-        "required_ci_baseline": ci or LATEST_GREEN_CI,
+        "required_ci_baseline": ci or CI_VERIFICATION_PLACEHOLDER,
         "required_ci_policy": {
             "heavy_external_validation_required": False,
             "required_ci_lanes": [lane.lane_id for lane in lanes if lane.required_ci],
@@ -384,7 +389,10 @@ def build_plan(*, ci: dict[str, str] | None = None) -> dict[str, Any]:
             {
                 "gate": "VMEC2000 executable parity",
                 "status": "manual/nightly",
-                "criterion": "Keep smoke executable parity green before broadening the manifest matrix.",
+                "criterion": (
+                    "Keep stock-executable smoke green before broadening the manifest matrix; "
+                    "strict external LASYM parity remains optional/instrumented until known gaps clear."
+                ),
             },
             {
                 "gate": "SIMSOPT diagnostic parity",
@@ -402,12 +410,22 @@ def build_plan(*, ci: dict[str, str] | None = None) -> dict[str, Any]:
 
 
 def render_markdown(plan: dict[str, Any]) -> str:
+    ci = plan["required_ci_baseline"]
+    if ci.get("verification_required"):
+        ci_summary = (
+            "Required CI baseline: unverified. Verify the latest main-branch CI "
+            f"with `{ci['verification_command']}` before using this plan for release validation."
+        )
+    else:
+        ci_summary = (
+            f"Required CI baseline: {ci['status']} "
+            f"({ci.get('completed_at_utc') or 'completion time not recorded'}, "
+            f"{ci.get('head_sha', '')[:12] or 'SHA not recorded'})."
+        )
     lines = [
         "# Optional QI Seed Robustness Validation Plan",
         "",
-        f"Latest required CI baseline: {plan['required_ci_baseline']['status']} "
-        f"({plan['required_ci_baseline']['completed_at_utc']}, "
-        f"{plan['required_ci_baseline']['head_sha'][:12]}).",
+        ci_summary,
         "",
         "## Family Representatives",
     ]
@@ -455,18 +473,25 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ci-status", default=None, help="Override the recorded CI status for local experiments.")
     parser.add_argument("--ci-head-sha", default=None, help="Override the recorded CI head SHA.")
     parser.add_argument("--ci-url", default=None, help="Override the recorded CI run URL.")
+    parser.add_argument("--ci-completed-at-utc", default=None, help="Override the recorded CI completion time.")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
-    ci = dict(LATEST_GREEN_CI)
+    ci = dict(CI_VERIFICATION_PLACEHOLDER)
     if args.ci_status is not None:
         ci["status"] = args.ci_status
+        ci["verification_required"] = False
     if args.ci_head_sha is not None:
         ci["head_sha"] = args.ci_head_sha
+        ci["verification_required"] = False
     if args.ci_url is not None:
         ci["url"] = args.ci_url
+        ci["verification_required"] = False
+    if args.ci_completed_at_utc is not None:
+        ci["completed_at_utc"] = args.ci_completed_at_utc
+        ci["verification_required"] = False
 
     plan = build_plan(ci=ci)
     _write_output(plan, args.output, args.format)
