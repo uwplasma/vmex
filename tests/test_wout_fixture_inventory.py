@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -30,49 +31,9 @@ REQUIRED_WOUT_FIXTURES = (
     WoutInventoryCase("examples/data/wout_nfp4_QH_warm_start.nc", "examples/data/input.nfp4_QH_warm_start"),
     WoutInventoryCase("examples/data/wout_purely_toroidal_field.nc", "examples/data/input.purely_toroidal_field"),
     WoutInventoryCase("examples/data/wout_shaped_tokamak_pressure.nc", "examples/data/input.shaped_tokamak_pressure"),
-    WoutInventoryCase("examples_single_grid/data/wout_ITERModel_reference.nc", "examples_single_grid/data/input.ITERModel"),
-    WoutInventoryCase(
-        "examples_single_grid/data/wout_LandremanPaul2021_QA_lowres_reference.nc",
-        "examples_single_grid/data/input.LandremanPaul2021_QA_lowres",
-    ),
-    WoutInventoryCase(
-        "examples_single_grid/data/wout_LandremanPaul2021_QA_reactorScale_lowres_reference.nc",
-        "examples_single_grid/data/input.LandremanPaul2021_QA_reactorScale_lowres",
-    ),
-    WoutInventoryCase(
-        "examples_single_grid/data/wout_LandremanPaul2021_QH_reactorScale_lowres_reference.nc",
-        "examples_single_grid/data/input.LandremanPaul2021_QH_reactorScale_lowres",
-    ),
-    WoutInventoryCase(
-        "examples_single_grid/data/wout_LandremanSengupta2019_section5.4_B2_A80_reference.nc",
-        "examples_single_grid/data/input.LandremanSengupta2019_section5.4_B2_A80",
-    ),
-    WoutInventoryCase(
-        "examples_single_grid/data/wout_LandremanSenguptaPlunk_section5p3_low_res_reference.nc",
-        "examples_single_grid/data/input.LandremanSenguptaPlunk_section5p3_low_res",
-    ),
     WoutInventoryCase(
         "examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc",
         "examples_single_grid/data/input.basic_non_stellsym_pressure",
-    ),
-    WoutInventoryCase(
-        "examples_single_grid/data/wout_circular_tokamak_aspect_100_reference.nc",
-        "examples_single_grid/data/input.circular_tokamak_aspect_100",
-    ),
-    WoutInventoryCase("examples_single_grid/data/wout_circular_tokamak_reference.nc", "examples_single_grid/data/input.circular_tokamak"),
-    WoutInventoryCase("examples_single_grid/data/wout_cth_like_free_bdy.nc", "examples_single_grid/data/input.cth_like_free_bdy"),
-    WoutInventoryCase(
-        "examples_single_grid/data/wout_purely_toroidal_field_reference.nc",
-        "examples_single_grid/data/input.purely_toroidal_field",
-    ),
-    WoutInventoryCase(
-        "examples_single_grid/data/wout_shaped_tokamak_pressure_reference.nc",
-        "examples_single_grid/data/input.shaped_tokamak_pressure",
-    ),
-    WoutInventoryCase("examples_single_grid/data/wout_solovev_reference.nc", "examples_single_grid/data/input.solovev"),
-    WoutInventoryCase(
-        "examples_single_grid/data/wout_up_down_asymmetric_tokamak_reference.nc",
-        "examples_single_grid/data/input.up_down_asymmetric_tokamak",
     ),
 )
 
@@ -81,13 +42,18 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def test_every_bundled_reference_wout_is_declared() -> None:
+def _tracked_wout_fixtures(repo: Path) -> set[str]:
+    output = subprocess.check_output(
+        ["git", "ls-files", "examples/data/wout*.nc", "examples_single_grid/data/wout*.nc"],
+        cwd=repo,
+        text=True,
+    )
+    return {line.strip() for line in output.splitlines() if line.strip()}
+
+
+def test_every_tracked_bundled_reference_wout_is_declared() -> None:
     repo = _repo_root()
-    discovered = {
-        path.relative_to(repo).as_posix()
-        for folder in (repo / "examples/data", repo / "examples_single_grid/data")
-        for path in folder.glob("wout*.nc")
-    }
+    discovered = _tracked_wout_fixtures(repo)
     declared = {case.wout_rel for case in REQUIRED_WOUT_FIXTURES}
 
     assert discovered == declared
