@@ -62,6 +62,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--method",
         choices=(
+            "auto",
             "scipy",
             "scipy_matrix_free",
             "gauss_newton",
@@ -154,7 +155,17 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--trial-use-scan",
         action="store_true",
-        help="Force relaxed trial residual solves onto the lax.scan path; exact adjoint solves remain trace-capable non-scan.",
+        help="Legacy alias for --trial-scan=on.",
+    )
+    p.add_argument(
+        "--trial-scan",
+        choices=("auto", "on", "off"),
+        default="auto",
+        help=(
+            "Trial residual solve policy: auto uses vmec_jax defaults, on forces "
+            "the lax.scan trial path, and off forces the Python-loop trial path. "
+            "Exact adjoint solves are unchanged."
+        ),
     )
     p.add_argument(
         "--initial-metrics",
@@ -289,6 +300,8 @@ def _normalize_callback_args(args: argparse.Namespace) -> argparse.Namespace:
     """Apply legacy callback aliases after parsing."""
     if args.gradient_only and not args.check_gradient:
         args.callback = "gradient"
+    if getattr(args, "trial_use_scan", False):
+        args.trial_scan = "on"
     return args
 
 
@@ -328,6 +341,7 @@ def _runtime_info() -> dict[str, object]:
             "devices": [str(device) for device in jax.devices()],
             "xla_python_client_preallocate": os.environ.get("XLA_PYTHON_CLIENT_PREALLOCATE"),
             "vmec_jax_opt_jvp_only_exact_tape": os.environ.get("VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE"),
+            "vmec_jax_opt_trial_scan": os.environ.get("VMEC_JAX_OPT_TRIAL_SCAN"),
         }
     except Exception as exc:  # pragma: no cover - diagnostics only
         return {"error": repr(exc)}
@@ -682,6 +696,7 @@ def _build_callback_payload(
         "clear_between_repeats": bool(args.clear_between_repeats),
         "initial_metrics": bool(getattr(args, "initial_metrics", False)),
         "sync_replay_timing": bool(getattr(args, "sync_replay_timing", False)),
+        "trial_scan": str(getattr(args, "trial_scan", "auto")),
         "jvp_only_exact_tape": _effective_jvp_only_exact_tape(args),
         "solver_device_requested": args.solver_device,
         "solver_device_resolved": solver_device_resolved,
@@ -804,6 +819,10 @@ def main() -> int:
         os.environ["VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE"] = (
             "1" if bool(args.jvp_only_exact_tape) else "0"
         )
+    if args.trial_scan == "on":
+        os.environ["VMEC_JAX_OPT_TRIAL_SCAN"] = "1"
+    elif args.trial_scan == "off":
+        os.environ["VMEC_JAX_OPT_TRIAL_SCAN"] = "0"
 
     import vmec_jax as vj
     from vmec_jax._compat import enable_x64
@@ -870,8 +889,10 @@ def main() -> int:
         solver_device=args.solver_device,
     )
     _install_profile_timing_supplements(opt)
-    if args.trial_use_scan:
+    if args.trial_scan == "on":
         opt._trial_solver_kwargs["use_scan"] = True
+    elif args.trial_scan == "off":
+        opt._trial_solver_kwargs["use_scan"] = False
     params0 = np.zeros(len(specs))
     if args.stellarator_asymmetric and float(args.asymmetric_seed) != 0.0:
         for index, spec in enumerate(specs):

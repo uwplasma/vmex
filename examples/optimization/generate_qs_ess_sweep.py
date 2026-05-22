@@ -97,7 +97,7 @@ USE_MODE_CONTINUATION = True
 BACKEND_LABEL = "cpu"
 SOLVER_DEVICE: str | None = None  # None uses JAX default; set "cpu" or "gpu" to force one backend.
 SKIP_EXISTING = True
-CASE_TIMEOUT_S: float | None = 1200.0
+CASE_TIMEOUT_S: float | None = 1800.0
 ESS_ALPHA = 1.2  # Try 1.2 for gentle ESS or 2.5 for stronger high-mode scaling.
 TARGET_ASPECT = 6.0
 QI_TARGET_ASPECT = TARGET_ASPECT
@@ -187,7 +187,7 @@ CASE_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {
 
 # GPU production sweeps use exact discrete-adjoint callbacks with moderately
 # strict accepted/trial VMEC solves, but production quality should not be
-# controlled by small per-case nfev caps.  Let the 20-minute case timeout decide
+# controlled by small per-case nfev caps.  Let the 30-minute case timeout decide
 # whether high-mode LASYM cases are affordable; keep explicit low nfev caps only
 # in ``CASE_BUDGET_OVERRIDES`` for opt-in ``--diagnostic-budgets`` runs.
 GPU_PRODUCTION_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {}
@@ -2963,7 +2963,7 @@ def _parse_args() -> argparse.Namespace:
         help=(
             "Wall-clock timeout per worker case. Use 0 to disable. Timed-out "
             "cases are recorded as crashed so large CPU/GPU sweeps can finish "
-            "and render. Defaults to 1200 s."
+            "and render. Defaults to 1800 s."
         ),
     )
     parser.add_argument(

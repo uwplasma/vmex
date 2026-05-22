@@ -105,7 +105,7 @@ TARGET_HELICITY_SEED_CONFIG = {
 
 # Optimizer parameters.  These are optimization controls only; physics targets
 # stay in the objective tuples below, matching SIMSOPT's teaching workflow.
-METHOD = CASE.get("method", "scipy")  # Try "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint", or "scalar_trust".
+METHOD = CASE.get("method", "scipy")  # Try "auto", "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint", or "scalar_trust".
 SCIPY_TR_SOLVER = "lsmr"  # For METHOD="scipy": "lsmr" is memory-light; "exact" is dense.
 SCIPY_LSMR_MAXITER = None  # None lets SciPy choose; set an int to cap LSMR iterations.
 FTOL = 1.0e-4  # Relative cost-reduction tolerance for the outer optimizer.
