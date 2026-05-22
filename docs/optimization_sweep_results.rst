@@ -416,6 +416,9 @@ This renderer intentionally consumes the tracked
 Raw per-stage ``history.json`` files are kept in that bundle for auditing
 non-monotone or stalled optimizer stages; the public panel plots normalized
 best-so-far traces for readability.
+The bundled preconditioner summaries are also scrubbed to scalar scan metrics
+and selected-``lambda`` flags so the tracked release artifacts do not point at
+local scratch directories from the run host.
 
 The staged objective panel concatenates every recorded history file used by
 the selected case-specific result.  It plots the best-so-far value in each

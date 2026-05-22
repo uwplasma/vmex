@@ -305,6 +305,9 @@ diagnostics, preconditioner summaries, and raw per-stage ``history.json`` files
 from the tracked ``docs/_static/qi_readme_cases`` bundle.  The plotted history
 uses best-so-far stage normalization for readability; inspect those raw
 ``history.json`` files when auditing non-monotone or stalled optimizer stages.
+The tracked preconditioner summaries intentionally keep only scalar scan
+metrics and selected-``lambda`` flags, not local scratch ``input`` or ``wout``
+paths from the original optimization machine.
 
 The robustness probe is intentionally a QI+iota basin test, not a full
 engineering acceptance claim.  ``QI_optimization.py`` is now the single

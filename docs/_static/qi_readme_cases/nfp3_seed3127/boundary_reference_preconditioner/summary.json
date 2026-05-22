@@ -3,7 +3,6 @@
     "aspect": 3.5412367748465985,
     "elongation": 4.001743413166578,
     "failure_reasons": [],
-    "input": "results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516/boundary_reference_preconditioner/lambda_0p998/input.interpolated",
     "lambda": 0.998,
     "legacy_qi": 0.0006348425467063019,
     "mean_iota": -1.0505147666696868,
@@ -12,14 +11,12 @@
     "qi_seed_gate_passed": true,
     "score": 0.6111918953979536,
     "selected": true,
-    "smooth_qi": 0.003434802432162534,
-    "wout": "results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516/boundary_reference_preconditioner/lambda_0p998/wout_interpolated.nc"
+    "smooth_qi": 0.003434802432162534
   },
   {
     "aspect": 3.5283135666172813,
     "elongation": 3.9858741379692972,
     "failure_reasons": [],
-    "input": "results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516/boundary_reference_preconditioner/lambda_1p000/input.interpolated",
     "lambda": 1.0,
     "legacy_qi": 0.001169441141058818,
     "mean_iota": -1.0386951149981156,
@@ -28,14 +25,12 @@
     "qi_seed_gate_passed": true,
     "score": 0.6276559615103956,
     "selected": false,
-    "smooth_qi": 0.004207331141510931,
-    "wout": "results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516/boundary_reference_preconditioner/lambda_1p000/wout_interpolated.nc"
+    "smooth_qi": 0.004207331141510931
   },
   {
     "aspect": 3.5154900214468263,
     "elongation": 3.9701710434131345,
     "failure_reasons": [],
-    "input": "results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516/boundary_reference_preconditioner/lambda_1p002/input.interpolated",
     "lambda": 1.002,
     "legacy_qi": 0.0006977736198241568,
     "mean_iota": -1.046275147962011,
@@ -44,8 +39,7 @@
     "qi_seed_gate_passed": true,
     "score": 0.6199118867844355,
     "selected": false,
-    "smooth_qi": 0.0035415962253588784,
-    "wout": "results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516/boundary_reference_preconditioner/lambda_1p002/wout_interpolated.nc"
+    "smooth_qi": 0.0035415962253588784
   },
   {
     "aspect": 3.5027648975748753,
@@ -53,7 +47,6 @@
     "failure_reasons": [
       "legacy QI=0.0019454 exceeds target 0.00125"
     ],
-    "input": "results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516/boundary_reference_preconditioner/lambda_1p004/input.interpolated",
     "lambda": 1.004,
     "legacy_qi": 0.0019453997214331712,
     "mean_iota": -1.0301944549227184,
@@ -62,14 +55,12 @@
     "qi_seed_gate_passed": false,
     "score": 120.73840023512874,
     "selected": false,
-    "smooth_qi": 0.004814428772682414,
-    "wout": "results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516/boundary_reference_preconditioner/lambda_1p004/wout_interpolated.nc"
+    "smooth_qi": 0.004814428772682414
   },
   {
     "aspect": 3.490136974867354,
     "elongation": 3.939254175755565,
     "failure_reasons": [],
-    "input": "results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516/boundary_reference_preconditioner/lambda_1p006/input.interpolated",
     "lambda": 1.006,
     "legacy_qi": 0.0004570664595465548,
     "mean_iota": -1.0528280293888508,
@@ -78,14 +69,12 @@
     "qi_seed_gate_passed": true,
     "score": 0.6252454896825711,
     "selected": false,
-    "smooth_qi": 0.003100347515897799,
-    "wout": "results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516/boundary_reference_preconditioner/lambda_1p006/wout_interpolated.nc"
+    "smooth_qi": 0.003100347515897799
   },
   {
     "aspect": 3.477605054331945,
     "elongation": 3.9240358814248593,
     "failure_reasons": [],
-    "input": "results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516/boundary_reference_preconditioner/lambda_1p008/input.interpolated",
     "lambda": 1.008,
     "legacy_qi": 0.0006332845673163913,
     "mean_iota": -1.0467324179136746,
@@ -94,14 +83,12 @@
     "qi_seed_gate_passed": true,
     "score": 0.6323954178398159,
     "selected": false,
-    "smooth_qi": 0.003444752596813402,
-    "wout": "results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516/boundary_reference_preconditioner/lambda_1p008/wout_interpolated.nc"
+    "smooth_qi": 0.003444752596813402
   },
   {
     "aspect": 3.4651679576471346,
     "elongation": 3.908974724385422,
     "failure_reasons": [],
-    "input": "results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516/boundary_reference_preconditioner/lambda_1p010/input.interpolated",
     "lambda": 1.01,
     "legacy_qi": 0.0005535379526822985,
     "mean_iota": -1.0499992604169257,
@@ -110,7 +97,6 @@
     "qi_seed_gate_passed": true,
     "score": 0.6378933844951089,
     "selected": false,
-    "smooth_qi": 0.0032784961431392193,
-    "wout": "results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516/boundary_reference_preconditioner/lambda_1p010/wout_interpolated.nc"
+    "smooth_qi": 0.0032784961431392193
   }
 ]

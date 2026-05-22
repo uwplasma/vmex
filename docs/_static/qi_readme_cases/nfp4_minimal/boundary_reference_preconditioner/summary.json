@@ -3,7 +3,6 @@
     "aspect": 6.011359624500751,
     "elongation": 4.139128905686922,
     "failure_reasons": [],
-    "input": "results/qi_opt/ess/minimal_nfp4_to_qi_finite_beta_reference/boundary_reference_preconditioner/lambda_1p000/input.interpolated",
     "lambda": 1.0,
     "legacy_qi": 0.0006906891043209739,
     "mean_iota": -1.2661601636941948,
@@ -12,7 +11,6 @@
     "qi_seed_gate_passed": true,
     "score": 2.9208600810148453,
     "selected": true,
-    "smooth_qi": 0.0028813736717792707,
-    "wout": "results/qi_opt/ess/minimal_nfp4_to_qi_finite_beta_reference/boundary_reference_preconditioner/lambda_1p000/wout_interpolated.nc"
+    "smooth_qi": 0.0028813736717792707
   }
 ]
