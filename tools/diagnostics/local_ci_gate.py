@@ -20,7 +20,7 @@ import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[2]
-COVERAGE_FAIL_UNDER = 85
+COVERAGE_FAIL_UNDER = 90
 
 PHYSICS_SMOKE_TESTS = (
     "tests/test_wout_comprehensive_parity.py::test_wout_comprehensive_parity[circular_tokamak]",

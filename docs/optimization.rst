@@ -11,8 +11,8 @@ This page covers:
 - the key source files and public API,
 - the algorithms (Gauss-Newton, line search, adjoint replay),
 - how to reproduce the QA, QH, QP, and QI examples,
-- figures comparing ``max_mode=1, 2, 3, 4`` optimisation results and sweep
-  policies.
+- regeneration targets for ``max_mode=1, 2, 3, 4`` optimisation sweeps and
+  checked-in partial snapshot interpretation.
 
 Current reproducible workflow
 -----------------------------
@@ -122,13 +122,13 @@ quasisymmetry sweep path:
 For a clean reproduction, keep ``--rerun`` on the generator.  Without it,
 existing successful ``showcase_case.json`` rows are reused, which can leave old
 rows on disk; the renderer skips known-stale rows by default and
-``--include-stale`` should be reserved for debugging.  The current QI dispatch
-writes staged-run outputs under ``.../qi_nfp1/continuation/nfp1_qi``,
-``.../qi_nfp2/continuation/nfp2_qi``,
-``.../qi_nfp3/continuation/qi_stel_seed_3127``, and
-``.../qi_nfp4/continuation/nfp4_qi``.  Any QI showcase rows under
-``.../qi_nfp*/continuation/qp_preseed/...`` predate this dispatch and should
-not be treated as current staged-QI evidence.  Any QA/QP showcase rows without
+``--include-stale`` should be reserved for debugging.  The current
+common-minimal QI dispatch uses policy-case names ``minimal_nfp1_qi``,
+``minimal_nfp2_qi``, ``minimal_nfp3_qi``, and ``minimal_nfp4_qi``.  Any older
+QI showcase rows under ``.../qi_nfp*/continuation/qp_preseed/...`` or the
+legacy case names ``nfp1_qi``, ``nfp2_qi``, ``qi_stel_seed_3127``, and
+``nfp4_qi`` predate this dispatch and should not be treated as current
+common-minimal staged-QI evidence.  Any QA/QP showcase rows without
 ``reference_preseed`` provenance also predate the current common-seed policy.
 
 The saved CPU stress-test panel below is deliberately included as a
@@ -830,17 +830,17 @@ omnigenity-style policy ``[1, 1, 2, 2, 2]`` for ``max_mode=2`` and
 ``[1, 1, 2, 2, 2, 3, 3, 3]`` for ``max_mode=3``.  QI repeats the requested
 active space five times, matching the reference omnigenity workflow.
 
-The generated objective panels contain the full CPU/GPU policy sweep.  Solid
-curves met the optimizer success criterion; dashed curves are stopped, failed,
-or budgeted lanes.  The summary tables identify whether a dashed lane reached
-``max_nfev``, hit the 1200 second timeout, or failed earlier such as from GPU
-OOM.  Curves are split by objective stage and plotted as best-so-far values
-within that stage, so QP preseed and full constrained QI refinement are not
-treated as one continuous scalar objective.  The QA input follows the
-omnigenity ``input.nfp22_QA`` deck and carries nonzero mode-1 boundary terms so
-the iota residual has a useful derivative.  Direct QA without ESS remains a
-weak policy for high direct-start modes; staged continuation is the default
-research-grade policy for QA.
+When the full matrix is regenerated, the objective panels contain the CPU/GPU
+policy sweep.  Solid curves met the optimizer success criterion; dashed curves
+are stopped, failed, or budgeted lanes.  The summary tables identify whether a
+dashed lane reached ``max_nfev``, hit the 1200 second timeout, or failed
+earlier such as from GPU OOM.  Curves are split by objective stage and plotted
+as best-so-far values within that stage, so QP preseed and full constrained QI
+refinement are not treated as one continuous scalar objective.  The QA input
+follows the omnigenity ``input.nfp22_QA`` deck and carries nonzero mode-1
+boundary terms so the iota residual has a useful derivative.  Direct QA without
+ESS remains a weak policy for high direct-start modes; staged continuation is
+the default research-grade policy for QA.
 
 The large all-policy panels, atlases, summary-table images, and PDF snapshots
 are generated assets.  Recreate them from the sweep results with the commands

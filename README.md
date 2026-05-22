@@ -91,14 +91,11 @@ Editable optimization examples live in `examples/optimization/`. Start with
 `docs/piecewise_omnigenous_plan.rst` for the pwO planning and acceptance gates.
 
 The README intentionally shows only the best current stellarator-symmetric
-QA/QH/QP/QI rows. Each panel contains initial and final 3D LCFS views, the
-objective history over all stages, and initial/final outer-LCFS Boozer `|B|`
-line contours. Extended policy discussion, LASYM panels, finite-beta examples,
-QI seed robustness, failure modes, the checked-in partial CPU/GPU sweep
-snapshot, and full-matrix artifact requirements live in the docs.
-The QI seed-robustness rows are case-specific gate checks; they are not
-aspect-6 README best-row promotion evidence unless the sweep renderer promotes
-them explicitly.
+QA/QH/QP/QI rows. Each panel contains initial/final 3D LCFS views, objective
+history over all stages, and initial/final Boozer `|B|` line contours. Extended
+policy discussion, LASYM panels, finite-beta examples, QI seed robustness,
+failure modes, partial CPU/GPU sweep snapshots, and full-matrix artifact
+requirements live in the docs.
 
 | Target | Backend | Policy | max_mode | ESS | Final J | QI legacy | Mirror | Aspect | Iota | Wall time |
 |---|---|---|---:|---|---:|---:|---:|---:|---:|---:|
@@ -136,26 +133,16 @@ PYTHONPATH=. python examples/optimization/render_readme_best_optimizations.py
 
 Full sweep reproduction targets, generated result tables, QI multi-NFP
 coverage, and publication asset requirements are in
-`docs/optimization_sweep_results.rst`. The checked-in sweep snapshot is
-partial: CPU/GPU rows are present only where artifacts exist, currently without
-a complete `max_mode=4` matrix or full publication atlas/table figure set. The
-compact README panels remain the reviewed `LASYM = F` best rows only.
+`docs/optimization_sweep_results.rst`. The compact README panels remain the
+reviewed `LASYM = F` best rows only.
 
 ## QI From Multiple NFP Seeds
 
-The same `examples/optimization/QI_optimization.py` workflow is also exercised
-on case-gated NFP 1, 2, 3, and 4 QI seed-robustness examples. The full
-provenance, case-specific targets, and table are in
-`docs/optimization_sweep_results.rst`; broad simple-seed robustness across all
-families remains an active validation lane rather than a completed guarantee.
-The current QI coverage panel uses the NFP=1 and NFP=2 QI seed decks, the NFP=3
-seed-3127 deck, and the NFP=4 common-minimal seed; it is therefore distinct from
-the common-minimal-seed stress matrix in the docs.
-The renderer now requires every initial LCFS and Boozer `|B|` panel to come from
-a WOUT whose boundary matches the row's source input, allowing VMEC's equivalent
-canonical phase convention, before any reference-family preconditioning or
-local QI cleanup. The NFP=4 row is the common minimal seed
-`input.minimal_seed_nfp4`, not the finite-beta stress fixture.
+The same `examples/optimization/QI_optimization.py` workflow is exercised on
+case-gated NFP 1, 2, 3, and 4 QI seed-robustness examples. The panel below is
+coverage evidence for those configured cases, not a blanket guarantee that any
+arbitrary VMEC input reaches QI without tuning. Provenance, gates, and
+case-specific targets are documented in `docs/optimization_sweep_results.rst`.
 The panel below is regenerated with:
 
 ```bash
