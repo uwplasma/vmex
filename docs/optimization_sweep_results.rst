@@ -420,6 +420,7 @@ assets are:
 
 - :download:`minimal_seed_showcase_summary.csv <_static/figures/minimal_seed_showcase_summary.csv>`
 - ``minimal_seed_showcase_objective_panel.png``
+- ``minimal_seed_showcase_state_panel.png``
 
 Those assets currently document the state of the refreshed minimal-seed lane as
 follows:
@@ -483,7 +484,17 @@ Regenerate the current common-minimal showcase with:
 Keep ``--rerun`` for release reproduction.  Without it, successful
 ``showcase_case.json`` rows may be reused from an older local run; the renderer
 skips known-stale rows by default and ``--include-stale`` should be used only
-for debugging.
+for debugging.  The renderer writes both a compact objective-history panel and,
+when the required WOUT artifacts are available, a state panel with actual
+first optimized LCFS, final LCFS, initial Boozer ``|B|`` line contours, final
+Boozer ``|B|`` line contours, and the full best-so-far objective history.
+Rows without non-stale initial/final WOUT provenance are omitted from that
+state panel instead of being silently replaced by stale artifacts.
+
+.. image:: _static/figures/minimal_seed_showcase_state_panel.png
+   :width: 100%
+   :align: center
+   :alt: Common minimal-seed initial/final state and Boozer contour stress-test panel
 
 Objective Histories
 -------------------

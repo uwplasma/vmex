@@ -149,6 +149,18 @@ publication-quality optimization result.
    :align: center
    :alt: Common minimal-seed optimization stress-test histories
 
+The companion state panel is generated only for non-stale rows with available
+initial/final WOUT provenance.  It shows the actual first optimized LCFS, final
+LCFS, full best-so-far objective history, and initial/final Boozer ``|B|`` line
+contours.  It is a diagnostic status artifact, not a README promotion panel:
+currently it covers the non-stale QA/QH/QP stress rows while the current
+minimal-seed QI rows remain missing.
+
+.. image:: _static/figures/minimal_seed_showcase_state_panel.png
+   :width: 100%
+   :align: center
+   :alt: Common minimal-seed initial/final state and Boozer contour stress-test panel
+
 The rendered table is available as
 :download:`minimal_seed_showcase_summary.csv <_static/figures/minimal_seed_showcase_summary.csv>`.
 
