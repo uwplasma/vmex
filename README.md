@@ -149,8 +149,16 @@ best-row promotion evidence.
 The panel below is regenerated with:
 
 ```bash
+PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp1_qi python examples/optimization/QI_optimization.py
+PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp2_qi python examples/optimization/QI_optimization.py
+PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp3_qi python examples/optimization/QI_optimization.py
+PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi python examples/optimization/QI_optimization.py
 PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 ```
+
+Exact archived output directories and target-aspect overrides for the current
+checked-in NFP panel, plus the bounded minimal-seed showcase command, are in
+`docs/optimization_sweep_results.rst`.
 
 <p align="center">
   <img src="docs/_static/figures/readme_qi_optimization_cases.png" width="980" />
