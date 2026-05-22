@@ -6511,7 +6511,7 @@ def solve_fixed_boundary_residual_iter(
         scan_timing_stats = _new_scan_timing_stats()
         scan_total_start = time.perf_counter() if scan_timing_enabled else None
 
-        def _scan_device_run_ready(start: float | None, value):
+        def _scan_device_run_ready(start: float | None, value, *, cache_status: str | None = None):
             return _runtime_scan_device_run_ready(
                 start=start,
                 value=value,
@@ -6521,6 +6521,7 @@ def solve_fixed_boundary_residual_iter(
                 tree_map=jax.tree_util.tree_map,
                 record_ready=_record_scan_device_ready,
                 stats=scan_timing_stats,
+                cache_status=cache_status,
             )
 
         _validate_vmec2000_scan_guards(
@@ -8377,7 +8378,7 @@ def solve_fixed_boundary_residual_iter(
                     scan_timing_stats["scan_runner_cache_bypass_count"] = (
                         int(scan_timing_stats.get("scan_runner_cache_bypass_count", 0)) + 1
                     )
-                return jit(_run_scan)
+                return jit(_run_scan), "bypass"
             cache_lookup_start = time.perf_counter() if scan_timing_enabled else None
             cached_run = _jit_cache_get(_SCAN_RUNNER_CACHE, key)
             if scan_timing_enabled and cache_lookup_start is not None:
@@ -8398,12 +8399,12 @@ def solve_fixed_boundary_residual_iter(
                 )
                 if scan_timing_enabled and cache_build_start is not None:
                     scan_timing_stats["scan_runner_cache_build_s"] += time.perf_counter() - float(cache_build_start)
-                return cached_runner
+                return cached_runner, "miss"
             if scan_timing_enabled:
                 scan_timing_stats["scan_runner_cache_hit_count"] = (
                     int(scan_timing_stats.get("scan_runner_cache_hit_count", 0)) + 1
                 )
-            return cached_run
+            return cached_run, "hit"
 
         def _emit_scan_prints(
             *,
@@ -8475,11 +8476,11 @@ def solve_fixed_boundary_residual_iter(
                     break
                 chunk_len = min(int(chunk_size), int(remaining)) if chunk_cap_remaining else int(chunk_size)
                 it_seq = jnp.arange(start_idx, start_idx + int(chunk_len), dtype=jnp.int32)
-                runner = _get_scan_runner(int(chunk_len))
+                runner, cache_status = _get_scan_runner(int(chunk_len))
                 t_device = time.perf_counter() if scan_timing_enabled else None
                 carry, hist_chunk = runner(carry, it_seq)
                 if scan_timing_enabled and t_device is not None:
-                    carry, hist_chunk = _scan_device_run_ready(t_device, (carry, hist_chunk))
+                    carry, hist_chunk = _scan_device_run_ready(t_device, (carry, hist_chunk), cache_status=cache_status)
                 if not state_only_scan:
                     fsq_min_global_j = jnp.minimum(
                         fsq_min_global_j,
@@ -8535,7 +8536,7 @@ def solve_fixed_boundary_residual_iter(
             if abort_scan_host:
                 carry_final = carry_final._replace(abort_scan=jnp.asarray(True))
         else:
-            runner = _get_scan_runner(int(max_iter_tail) if int(max_iter_tail) > 0 else int(max_iter_scan))
+            runner, cache_status = _get_scan_runner(int(max_iter_tail) if int(max_iter_tail) > 0 else int(max_iter_scan))
             if preflight_iters > 0:
                 # Preflight the first iteration outside the jitted scan to avoid
                 # XLA aliasing issues in the initial tomnsps pass.
@@ -8564,7 +8565,11 @@ def solve_fixed_boundary_residual_iter(
                     t_device = time.perf_counter() if scan_timing_enabled else None
                     carry_final, hist_tail = runner(carry_pre, it_seq)
                     if scan_timing_enabled and t_device is not None:
-                        carry_final, hist_tail = _scan_device_run_ready(t_device, (carry_final, hist_tail))
+                        carry_final, hist_tail = _scan_device_run_ready(
+                            t_device,
+                            (carry_final, hist_tail),
+                            cache_status=cache_status,
+                        )
                     if state_only_scan:
                         hist = None
                     else:
@@ -8581,7 +8586,7 @@ def solve_fixed_boundary_residual_iter(
                 t_device = time.perf_counter() if scan_timing_enabled else None
                 carry_final, hist = runner(carry_init, it_seq)
                 if scan_timing_enabled and t_device is not None:
-                    carry_final, hist = _scan_device_run_ready(t_device, (carry_final, hist))
+                    carry_final, hist = _scan_device_run_ready(t_device, (carry_final, hist), cache_status=cache_status)
                 if state_only_scan:
                     hist = None
         scan_postprocess_start = time.perf_counter() if scan_timing_enabled else None
@@ -9060,6 +9065,7 @@ def solve_fixed_boundary_residual_iter(
 
             scan_run_setup_start = time.perf_counter() if scan_timing_enabled else None
             cached_run = None if differentiating_scan else _jit_cache_get(_SCAN_RUNNER_CACHE, scan_cache_key)
+            scan_runner_cache_status = "bypass" if differentiating_scan else ("miss" if cached_run is None else "hit")
             if scan_timing_enabled:
                 if scan_run_setup_start is not None:
                     scan_timing_stats["scan_runner_cache_lookup_s"] += time.perf_counter() - float(
@@ -9107,6 +9113,7 @@ def solve_fixed_boundary_residual_iter(
                     tree_map=jax.tree_util.tree_map,
                     record_ready=_record_scan_device_ready,
                     stats=scan_timing_stats,
+                    cache_status=scan_runner_cache_status,
                 )
             scan_materialize_start = time.perf_counter() if scan_timing_enabled else None
             state_final, converged_final, converged_iter_final, _, _, _ = carry_final

@@ -395,12 +395,22 @@ def _record_scan_device_ready(
     dispatch_done: float,
     ready_done: float,
     stats: dict[str, float | int],
+    cache_status: str | None = None,
 ) -> bool:
     """Accumulate scan dispatch/ready timing counters."""
 
     if start is None:
         return False
-    stats["scan_device_dispatch_s"] += dispatch_done - float(start)
-    stats["scan_device_ready_s"] += ready_done - dispatch_done
-    stats["scan_device_run_s"] += ready_done - float(start)
+    dispatch_s = dispatch_done - float(start)
+    ready_s = ready_done - dispatch_done
+    run_s = ready_done - float(start)
+    stats["scan_device_dispatch_s"] += dispatch_s
+    stats["scan_device_ready_s"] += ready_s
+    stats["scan_device_run_s"] += run_s
+    status = str(cache_status or "").strip().lower()
+    if status in ("hit", "miss", "bypass"):
+        prefix = f"scan_runner_cache_{status}"
+        stats[f"{prefix}_dispatch_s"] += dispatch_s
+        stats[f"{prefix}_ready_s"] += ready_s
+        stats[f"{prefix}_device_run_s"] += run_s
     return True
