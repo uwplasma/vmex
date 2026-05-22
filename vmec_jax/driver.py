@@ -235,6 +235,24 @@ def _default_use_scan_for_backend(indata, backend: str, solver_mode: str | None)
     return False
 
 
+def _resolve_jit_forces_auto_policy(flag: bool | str, static_i: VMECStatic, niter_i: int) -> bool:
+    if isinstance(flag, str):
+        if flag.strip().lower() != "auto":
+            return True
+        try:
+            nmodes_i = int(np.asarray(static_i.modes.m).size)
+            nrzt = int(static_i.cfg.ns) * int(static_i.cfg.ntheta) * int(static_i.cfg.nzeta)
+            work = nmodes_i * nrzt
+        except Exception:
+            return True
+        # Heuristic: avoid JIT for very small workloads unless the stage will run
+        # long enough to amortize compilation cost.
+        if int(niter_i) >= 5:
+            return True
+        return bool(work >= 2_000_000)
+    return bool(flag)
+
+
 def _result_final_residuals(result) -> tuple[float, float, float] | None:
     if result is None:
         return None
@@ -1791,19 +1809,7 @@ def run_fixed_boundary(
             return out
 
         def _resolve_finish_jit_forces(static_i: VMECStatic, niter_i: int) -> bool:
-            if isinstance(jit_forces, str):
-                if jit_forces.strip().lower() != "auto":
-                    return True
-                try:
-                    nmodes_i = int(np.asarray(static_i.modes.m).size)
-                    nrzt = int(static_i.cfg.ns) * int(static_i.cfg.ntheta) * int(static_i.cfg.nzeta)
-                    work = nmodes_i * nrzt
-                except Exception:
-                    return True
-                if int(niter_i) >= 5:
-                    return True
-                return bool(work >= 2_000_000)
-            return bool(jit_forces)
+            return _resolve_jit_forces_auto_policy(jit_forces, static_i, niter_i)
 
         def _run_finish_attempt(*, budget_i: int, mode_i: str, use_scan_i: bool, performance_mode_i: bool):
             static_i = best_run.static
@@ -2573,21 +2579,7 @@ def run_fixed_boundary(
             multigrid_resume = env_resume.strip().lower() not in ("", "0", "false", "no")
 
         def _resolve_jit_forces(flag: bool | str, static_i: VMECStatic, niter_i: int) -> bool:
-            if isinstance(flag, str):
-                if flag.strip().lower() != "auto":
-                    return True
-                try:
-                    nmodes_i = int(np.asarray(static_i.modes.m).size)
-                    nrzt = int(static_i.cfg.ns) * int(static_i.cfg.ntheta) * int(static_i.cfg.nzeta)
-                    work = nmodes_i * nrzt
-                except Exception:
-                    return True
-                # Heuristic: avoid JIT for very small workloads unless the stage
-                # will run long enough to amortize compilation cost.
-                if int(niter_i) >= 5:
-                    return True
-                return bool(work >= 2_000_000)
-            return bool(flag)
+            return _resolve_jit_forces_auto_policy(flag, static_i, niter_i)
 
         env_precompile_stages = os.getenv("VMEC_JAX_PRECOMPILE_STAGES", "0")
         precompile_stages = env_precompile_stages.strip().lower() not in ("", "0", "false", "no")
