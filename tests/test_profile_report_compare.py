@@ -372,6 +372,50 @@ def test_profile_summary_prefers_split_replay_and_tangent_buckets() -> None:
     assert summary["exact_optimizer_patch_target"]["name"] == "jacobian_tape_replay_ready"
 
 
+def test_callback_report_summary_exposes_cold_sample_hotspot() -> None:
+    report = _callback_report(
+        total_wall_time_s=20.0,
+        samples=2,
+        rss_peak_mib=256,
+        replay_wall_time_s=4.0,
+        accepted_replays=2,
+        solve_count=3,
+        cache_entry_growth=4,
+        solver_device="gpu",
+    )
+    report["samples"][0]["profile_delta"] = {
+        "jacobian_total": {"count": 1, "wall_time_s": 16.0},
+        "exact_tape_build": {"count": 1, "wall_time_s": 3.0},
+        "jacobian_tape_replay": {"count": 1, "wall_time_s": 9.0},
+        "jacobian_tape_replay_dispatch": {"count": 1, "wall_time_s": 8.5},
+        "jacobian_tape_replay_ready": {"count": 1, "wall_time_s": 0.5},
+        "jacobian_residual_tangents": {"count": 1, "wall_time_s": 2.0},
+    }
+    report["samples"][1]["profile_delta"] = {
+        "jacobian_total": {"count": 1, "wall_time_s": 4.0},
+        "jacobian_tape_replay": {"count": 1, "wall_time_s": 1.0},
+        "jacobian_tape_replay_dispatch": {"count": 1, "wall_time_s": 0.9},
+        "jacobian_tape_replay_ready": {"count": 1, "wall_time_s": 0.1},
+    }
+
+    summary = compare_tool.summarize_payload(report, label="gpu")
+
+    samples = summary["sample_profile_summaries"]
+    assert len(samples) == 2
+    assert samples[0]["repeat"] == 0
+    assert samples[0]["metrics"]["accepted_replay_dispatch_s"] == 8.5
+    assert samples[0]["metrics"]["accepted_replay_ready_s"] == 0.5
+    assert samples[0]["metrics"]["replay_time_s"] == 9.0
+    assert samples[0]["exact_optimizer_patch_target"]["name"] == "jacobian_tape_replay_dispatch"
+    assert samples[0]["exact_optimizer_patch_target"]["share_of_total"] == pytest.approx(0.85)
+    assert samples[1]["exact_optimizer_patch_target"]["name"] == "jacobian_tape_replay_dispatch"
+
+    comparison = compare_tool.build_comparison([summary, summary], baseline="0")
+    text = compare_tool.format_text(comparison)
+    assert "Cold callback patch targets" in text
+    assert "gpu repeat 0: jacobian_tape_replay_dispatch" in text
+
+
 def test_comparison_reports_ratios_against_baseline() -> None:
     cpu = compare_tool.summarize_payload(
         _callback_report(

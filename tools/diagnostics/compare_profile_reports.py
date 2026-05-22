@@ -1078,6 +1078,57 @@ def _top_profile(
     return rows[: max(0, int(limit))]
 
 
+SAMPLE_PROFILE_METRICS = {
+    "exact_tape_build_s",
+    "exact_tape_build_jvp_only_s",
+    "exact_tape_build_solve_call_s",
+    "exact_tape_build_dynamic_payload_s",
+    "initial_tangents_s",
+    "initial_tangents_linearize_s",
+    "initial_tangents_vmap_dispatch_s",
+    "initial_tangents_vmap_ready_s",
+    "residual_tangents_s",
+    "accepted_replay_dispatch_s",
+    "accepted_replay_ready_s",
+}
+
+
+def _sample_profile_summaries(payload: dict[str, Any], *, top_profile: int) -> list[dict[str, Any]]:
+    """Summarize per-repeat callback profile deltas when a report includes them."""
+
+    samples = payload.get("samples")
+    if not isinstance(samples, list):
+        return []
+
+    out: list[dict[str, Any]] = []
+    for index, sample in enumerate(samples):
+        if not isinstance(sample, dict) or not isinstance(sample.get("profile_delta"), dict):
+            continue
+        profile = _normalize_profile(sample["profile_delta"])
+        wall_time_s = _as_float(sample.get("wall_time_s"))
+        metrics = {
+            metric: _profile_metric_time(profile, metric, names)
+            for metric, names in EXACT_PROFILE_METRIC_NAMES.items()
+            if metric in SAMPLE_PROFILE_METRICS
+        }
+        metrics["replay_time_s"] = _accepted_replay_profile_time(profile)
+        out.append(
+            {
+                "index": index,
+                "repeat": _as_int(sample.get("repeat")),
+                "wall_time_s": wall_time_s,
+                "param_step_norm": _as_float(sample.get("param_step_norm")),
+                "metrics": metrics,
+                "exact_optimizer_patch_target": _exact_optimizer_patch_target(
+                    profile,
+                    total_runtime_s=wall_time_s,
+                ),
+                "top_profile": _top_profile(profile, limit=top_profile),
+            }
+        )
+    return out
+
+
 def _exact_optimizer_patch_target(
     profile: dict[str, dict[str, float | int]],
     *,
@@ -1297,6 +1348,7 @@ def summarize_payload(
             profile,
             total_runtime_s=_as_float(metrics.get("total_runtime_s")),
         ),
+        "sample_profile_summaries": _sample_profile_summaries(payload, top_profile=top_profile),
         "top_profile": _top_profile(profile, limit=top_profile),
     }
 
@@ -1508,6 +1560,27 @@ def format_text(comparison: dict[str, Any]) -> str:
     if patch_targets:
         lines.extend(["", "Exact optimizer patch targets:"])
         lines.extend(patch_targets)
+    sample_targets = []
+    for report in reports:
+        samples = report.get("sample_profile_summaries")
+        if not isinstance(samples, list) or not samples:
+            continue
+        cold = samples[0]
+        target = cold.get("exact_optimizer_patch_target")
+        if not isinstance(target, dict):
+            continue
+        wall = _as_float(target.get("wall_time_s"))
+        share = _as_float(target.get("share_of_total"))
+        repeat = _as_int(cold.get("repeat"))
+        repeat_text = str(cold.get("index") if repeat is None else repeat)
+        wall_text = "n/a" if wall is None else f"{wall:.3f}s"
+        share_text = "" if share is None else f", {100.0 * share:.1f}% of repeat"
+        sample_targets.append(
+            f"  {report['label']} repeat {repeat_text}: {target.get('name')} ({wall_text}{share_text})"
+        )
+    if sample_targets:
+        lines.extend(["", "Cold callback patch targets:"])
+        lines.extend(sample_targets)
     return "\n".join(lines)
 
 

@@ -48,14 +48,13 @@ acceptance criteria or evidence changes.
 - The duplicate finite-beta stage-one output path now has the same
   selected-best-exact-state save contract as the main QS workflow, so
   ``input.final`` and ``wout_final.nc`` cannot drift there either.
-- Required CI coverage is above the 85% gate. The May 20 required coverage
-  tier after the coverage/performance wave passed locally (`1433 passed,
-  121 skipped`) in 6:20 with 88.335% coverage. The optional converged
-  VMEC2000 parity gate passed locally with `VMEC2000_INTEGRATION=1` earlier
-  in the same validation push. Treat this as about 88% current required
-  coverage. The 90% and 95% gates are staged future ratchets; reaching 95%
-  still requires large `solve.py` orchestration/refactor work (`solve.py`
-  alone has 2443 missing lines in the current coverage report).
+- Required CI coverage is above the 85% gate. The May 22 required coverage
+  tier after the driver/solver refactor wave passed locally (`1913 passed,
+  20 skipped, 101 deselected`) in 7:08 with 93.04% coverage. The optional
+  converged VMEC2000 parity gate passed locally with `VMEC2000_INTEGRATION=1`
+  earlier in the validation push. The 95% gate remains staged; reaching it
+  still requires more `solve.py` orchestration/refactor work (`solve.py`
+  remains the dominant missing-line source).
 - VMEC2000 converged-wout parity now has a fast bundled matrix gate across
   fixed/free, axisymmetric/non-axisymmetric, LASYM, and single/multigrid
   representatives. The executable-backed end-state gate remains opt-in:

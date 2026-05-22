@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import importlib.util
 import json
 import os
@@ -1102,6 +1103,72 @@ def test_readme_renderer_derives_raw_wout_for_nonraw_qp_mode1_initial_wout(tmp_p
 
     assert renderer._preoptimization_wout_path(run) == derived_wout
     assert derive_calls == [(input_file, continuation_dir)]
+
+
+def test_readme_best_renderer_accepts_vmec_canonical_phase_equivalent_wout(monkeypatch, tmp_path):
+    renderer = _load_readme_renderer_module()
+    input_file = tmp_path / "input.phase"
+    input_file.write_text(
+        "&INDATA\n"
+        "  NFP = 3\n"
+        "  RBC(0,0) = 1.0\n"
+        "  RBC(1,0) = -0.2\n"
+        "  ZBS(1,0) = -0.3\n"
+        "  RBC(-2,1) = -0.04\n"
+        "  ZBS(-2,1) = -0.05\n"
+        "  RBC(-2,2) = 0.06\n"
+        "  ZBS(-2,2) = -0.07\n"
+        "/\n"
+    )
+
+    wout = SimpleNamespace(
+        nfp=3,
+        xm=np.asarray([0, 0, 1, 2], dtype=int),
+        xn=np.asarray([0, 3, 6, 6], dtype=int),
+        rmnc=np.asarray([[1.0, -0.2, 0.04, 0.06]], dtype=float),
+        rmns=np.zeros((1, 4), dtype=float),
+        zmnc=np.zeros((1, 4), dtype=float),
+        zmns=np.asarray([[0.0, -0.3, -0.05, 0.07]], dtype=float),
+    )
+    monkeypatch.setattr(renderer, "read_wout", lambda _path: wout)
+
+    assert renderer._boundary_mismatches(input_file, tmp_path / "wout.nc") == []
+
+
+def test_readme_best_summary_records_initial_and_final_wout(tmp_path, monkeypatch):
+    renderer = _load_readme_renderer_module()
+
+    out_csv = tmp_path / "readme_best_optimizations.csv"
+    output_dir = tmp_path / "run"
+    output_dir.mkdir()
+    input_file = tmp_path / "input.raw"
+    input_file.write_text("&INDATA\n  NFP = 2\n  RBC(0,0) = 1.0\n/\n")
+    initial_wout = output_dir / "wout_initial.nc"
+    final_wout = output_dir / "wout_final.nc"
+    initial_wout.write_text("initial")
+    final_wout.write_text("final")
+
+    monkeypatch.setattr(renderer, "OUT_CSV", out_csv)
+    monkeypatch.setattr(renderer, "_preoptimization_wout_path", lambda _run: initial_wout)
+    run = renderer.BestRun(
+        problem="qa",
+        policy="direct",
+        max_mode=1,
+        use_ess=False,
+        objective_final=1.0,
+        aspect_final=6.0,
+        iota_final=0.42,
+        total_wall_time_s=60.0,
+        output_dir=output_dir,
+        input_file=input_file,
+    )
+
+    renderer._write_readme_summary([run])
+
+    with out_csv.open(newline="") as f:
+        row = next(csv.DictReader(f))
+    assert row["initial_wout"] == str(initial_wout)
+    assert row["final_wout"] == str(final_wout)
 
 
 def test_readme_renderer_filters_qi_rows_by_qi_target_aspect():

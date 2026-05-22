@@ -453,6 +453,90 @@ def _sanitize_resume_state_for_same_grid(resume_state, *, step_size: float):
     return out
 
 
+def _sanitize_minimal_resume_state_for_finish(resume_state):
+    if not isinstance(resume_state, dict):
+        return resume_state
+    time_step = resume_state.get("time_step", None)
+    if time_step is None:
+        return resume_state
+    try:
+        time_step_f = float(time_step)
+    except Exception:
+        return resume_state
+    out = {
+        "time_step": float(time_step_f),
+        "inv_tau": list(resume_state.get("inv_tau", [0.15 / max(abs(time_step_f), 1.0e-16)] * 10)),
+        "iter_offset": int(resume_state.get("iter_offset", 0)),
+        "vmec2000_cache_valid": bool(resume_state.get("vmec2000_cache_valid", False)),
+    }
+    if "flip_sign" in resume_state:
+        try:
+            out["flip_sign"] = float(resume_state["flip_sign"])
+        except Exception:
+            pass
+    return out
+
+
+def _resolve_vmec2000_stage_controls(
+    *,
+    nstep: int,
+    niter_list,
+    ftol_list,
+    max_iter: int,
+    max_iter_overridden: bool,
+    multigrid_use_input_niter: bool,
+    multigrid_user_provided: bool,
+    accelerated_single_grid_default: bool,
+    indata,
+) -> tuple[list[int], list[float], list[int] | None, list[float] | None]:
+    nstep = int(nstep)
+    niter_stages_input = [int(v) for v in niter_list] if niter_list and len(niter_list) == nstep else None
+    ftol_stages_input = [float(v) for v in ftol_list] if ftol_list and len(ftol_list) == nstep else None
+    accelerated_single_grid_budget = (
+        bool(accelerated_single_grid_default)
+        and (not bool(multigrid_user_provided))
+        and int(nstep) == 1
+        and bool(niter_list)
+        and (not bool(max_iter_overridden))
+    )
+    if multigrid_use_input_niter:
+        niter_stages = niter_stages_input
+        ftol_stages = ftol_stages_input
+        if niter_stages is None:
+            if accelerated_single_grid_budget:
+                # Collapsed accelerated single-grid runs still honor the total staged input budget.
+                niter_stages = [int(max_iter)]
+            elif max_iter_overridden:
+                niter_stages = _distribute_stage_iters(iters=int(max_iter), nstep=int(nstep))
+            else:
+                niter_stage = int(indata.get_int("NITER", int(max_iter)))
+                niter_stages = [niter_stage] * nstep
+        else:
+            budget = int(max_iter)
+            remaining = max(0, budget)
+            out = [0] * nstep
+            for i in range(nstep):
+                if remaining <= 0:
+                    break
+                cap = max(0, int(niter_stages[i]))
+                take = min(cap, remaining)
+                out[i] = take
+                remaining -= take
+            niter_stages = out
+        if ftol_stages is None:
+            if bool(accelerated_single_grid_default) and int(nstep) == 1 and bool(ftol_list):
+                ftol_stages = [float(ftol_list[-1])]
+            else:
+                ftol_stages = [float(indata.get_float("FTOL", 1e-13))] * nstep
+    else:
+        niter_stages = _distribute_stage_iters(iters=int(max_iter), nstep=int(nstep))
+        if ftol_stages_input is not None:
+            ftol_stages = ftol_stages_input
+        else:
+            ftol_stages = [float(indata.get_float("FTOL", 1e-13))] * nstep
+    return niter_stages, ftol_stages, niter_stages_input, ftol_stages_input
+
+
 _STAGE_CHUNK_DIAG_KEYS = (
     "step_status_history",
     "restart_reason_history",
@@ -1785,29 +1869,6 @@ def run_fixed_boundary(
         staged_followup_modes = np.asarray([], dtype=object)
         staged_followup_fsq = np.zeros((0,), dtype=float)
 
-        def _sanitize_minimal_resume_state(resume_state):
-            if not isinstance(resume_state, dict):
-                return resume_state
-            time_step = resume_state.get("time_step", None)
-            if time_step is None:
-                return resume_state
-            try:
-                time_step_f = float(time_step)
-            except Exception:
-                return resume_state
-            out = {
-                "time_step": float(time_step_f),
-                "inv_tau": list(resume_state.get("inv_tau", [0.15 / max(abs(time_step_f), 1.0e-16)] * 10)),
-                "iter_offset": int(resume_state.get("iter_offset", 0)),
-                "vmec2000_cache_valid": bool(resume_state.get("vmec2000_cache_valid", False)),
-            }
-            if "flip_sign" in resume_state:
-                try:
-                    out["flip_sign"] = float(resume_state["flip_sign"])
-                except Exception:
-                    pass
-            return out
-
         def _resolve_finish_jit_forces(static_i: VMECStatic, niter_i: int) -> bool:
             return _resolve_jit_forces_auto_policy(jit_forces, static_i, niter_i)
 
@@ -2158,7 +2219,7 @@ def run_fixed_boundary(
         diag["accelerated_single_grid_default"] = bool(accelerated_single_grid_default)
         if bool(accelerated_mode):
             diag["resume_state_mode"] = "minimal"
-            diag["resume_state"] = _sanitize_minimal_resume_state(diag.get("resume_state"))
+            diag["resume_state"] = _sanitize_minimal_resume_state_for_finish(diag.get("resume_state"))
         best_run = replace(best_run, result=replace(best_run.result, diagnostics=diag))
         return best_run
 
@@ -2505,59 +2566,17 @@ def run_fixed_boundary(
         ftol_array = indata.get("FTOL_ARRAY", None)
         niter_list = _as_list(niter_array)
         ftol_list = _as_list(ftol_array)
-        niter_stages_input = [int(v) for v in niter_list] if niter_list and len(niter_list) == nstep else None
-        ftol_stages_input = [float(v) for v in ftol_list] if ftol_list and len(ftol_list) == nstep else None
-        accelerated_single_grid_budget = (
-            bool(accelerated_single_grid_default)
-            and (not bool(multigrid_user_provided))
-            and int(nstep) == 1
-            and bool(niter_list)
-            and (not bool(max_iter_overridden))
+        niter_stages, ftol_stages, niter_stages_input, _ftol_stages_input = _resolve_vmec2000_stage_controls(
+            nstep=int(nstep),
+            niter_list=niter_list,
+            ftol_list=ftol_list,
+            max_iter=int(max_iter),
+            max_iter_overridden=bool(max_iter_overridden),
+            multigrid_use_input_niter=bool(multigrid_use_input_niter),
+            multigrid_user_provided=bool(multigrid_user_provided),
+            accelerated_single_grid_default=bool(accelerated_single_grid_default),
+            indata=indata,
         )
-        if multigrid_use_input_niter:
-            niter_stages = niter_stages_input
-            ftol_stages = ftol_stages_input
-            if niter_stages is None:
-                if accelerated_single_grid_budget:
-                    # Accelerated single-grid runs collapse the staged solve to
-                    # a single final-grid solve, but they should still honor
-                    # the total input iteration budget implied by NITER_ARRAY.
-                    niter_stages = [int(max_iter)]
-                elif max_iter_overridden:
-                    # Explicit caller budget: distribute total iterations across stages.
-                    niter_stages = _distribute_stage_iters(iters=int(max_iter), nstep=int(nstep))
-                else:
-                    # VMEC2000 semantics: when NITER_ARRAY is absent, NITER applies
-                    # to each stage (not split across stages).
-                    niter_stage = int(indata.get_int("NITER", int(max_iter)))
-                    niter_stages = [niter_stage] * nstep
-            else:
-                # Respect caller `max_iter` as a total budget while preserving
-                # VMEC2000 stage order semantics: consume iterations on coarse
-                # stages first, then proceed to finer stages.
-                budget = int(max_iter)
-                remaining = max(0, budget)
-                out = [0] * nstep
-                for i in range(nstep):
-                    if remaining <= 0:
-                        break
-                    cap = max(0, int(niter_stages[i]))
-                    take = min(cap, remaining)
-                    out[i] = take
-                    remaining -= take
-                niter_stages = out
-            if ftol_stages is None:
-                if bool(accelerated_single_grid_default) and int(nstep) == 1 and bool(ftol_list):
-                    ftol_stages = [float(ftol_list[-1])]
-                else:
-                    ftol_stages = [float(indata.get_float("FTOL", 1e-13))] * nstep
-        else:
-            niter_stages = _distribute_stage_iters(iters=int(max_iter), nstep=int(nstep))
-            # VMEC2000 uses FTOL_ARRAY when present, even for single-stage runs.
-            if ftol_stages_input is not None:
-                ftol_stages = ftol_stages_input
-            else:
-                ftol_stages = [float(indata.get_float("FTOL", 1e-13))] * nstep
 
         # Run coarse -> fine stages with VMEC `interp.f` interpolation.
         stage_results: list[SolveVmecResidualResult] = []

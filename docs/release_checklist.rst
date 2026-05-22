@@ -139,7 +139,7 @@ with a no-dependencies wheel download after publication.
 The release notes should list user-visible changes, validation coverage, known
 limitations, and any optional external validation that was not run.
 The next release candidate should cite the latest completed green CI run after
-re-checking the newest ``main`` workflow, the validated ``92.32%`` local
+re-checking the newest ``main`` workflow, the validated ``93.04%`` local
 required coverage result from May 22, 2026, the unchanged ``85%`` enforced
 coverage gate, and the fact that ``95%`` coverage still requires deeper
 ``solve.py`` coverage/refactor work.

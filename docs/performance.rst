@@ -146,6 +146,49 @@ read as a mixed result rather than a broad VMEC2000 speedup claim:
   Jacobian callback.  The conservative state-backed path is still used for
   custom residuals and histories that request an explicit ``iota_fn``.
 
+**17. JVP-only exact tapes are experimental**
+  ``VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE=1`` and the diagnostics flag
+  ``--jvp-only-exact-tape`` omit reverse-mode base-carry storage from accepted
+  exact tapes when only JVP columns are needed.  This is intentionally off by
+  default.  A 2026-05-22 QH mode-2 exact-callback profile on ``office`` showed a
+  modest CPU total-time improvement but higher RSS, while GPU replay regressed
+  sharply.  Treat the flag as a profiling probe until replay parity and GPU
+  dispatch costs are understood.
+
+  .. list-table:: QH mode-2 accepted Jacobian profile, ``office``, 2026-05-22
+     :header-rows: 1
+
+     * - Device
+       - JVP-only
+       - Total
+       - Tape build
+       - Replay
+       - RSS growth
+     * - CPU
+       - off
+       - 31.373 s
+       - 6.635 s
+       - 11.246 s
+       - 1934.6 MiB
+     * - CPU
+       - on
+       - 28.199 s
+       - 3.432 s
+       - 18.724 s
+       - 2760.3 MiB
+     * - GPU
+       - off
+       - 20.356 s
+       - 8.395 s
+       - 5.543 s
+       - 922.4 MiB
+     * - GPU
+       - on
+       - 56.347 s
+       - 8.043 s
+       - 41.794 s
+       - 1378.2 MiB
+
 CPU/GPU profiling playbook
 --------------------------
 
