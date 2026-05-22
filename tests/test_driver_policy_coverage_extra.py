@@ -509,3 +509,149 @@ def test_force_nojit_uses_disable_jit_context_for_stage_solve(
     assert run.result.diagnostics["converged"] is True
     assert contexts == ["disable_jit", "disable_jit"]
     assert calls == [False]
+
+
+def test_compilation_cache_primary_and_tmp_mkdir_failures_are_ignored(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    cfg = _cfg(ns=3)
+    indata = _indata(NS=3)
+    _install_driver_fakes(monkeypatch, cfg=cfg, indata=indata)
+    monkeypatch.setenv("VMEC_JAX_COMPILATION_CACHE", "1")
+    monkeypatch.delenv("VMEC_JAX_DISABLE_COMPILATION_CACHE", raising=False)
+    monkeypatch.setattr("vmec_jax._compat._default_compilation_cache_dir", lambda: tmp_path / "cache")
+
+    mkdir_calls: list[str] = []
+    cache_dirs: list[str] = []
+    updates: list[tuple] = []
+
+    class FailingPath:
+        def __init__(self, value):
+            self.value = str(value)
+
+        def mkdir(self, **_kwargs):
+            mkdir_calls.append(self.value)
+            raise OSError("synthetic unwritable cache")
+
+    jax_module = type(sys)("jax")
+    jax_module.config = SimpleNamespace(update=lambda *args: updates.append(args))
+    experimental_module = type(sys)("jax.experimental")
+    cache_module = type(sys)("jax.experimental.compilation_cache")
+    cache_module.compilation_cache = SimpleNamespace(set_cache_dir=lambda path: cache_dirs.append(path))
+    monkeypatch.setitem(sys.modules, "jax", jax_module)
+    monkeypatch.setitem(sys.modules, "jax.experimental", experimental_module)
+    monkeypatch.setitem(sys.modules, "jax.experimental.compilation_cache", cache_module)
+    monkeypatch.setattr(driver, "Path", FailingPath)
+
+    run = driver.run_fixed_boundary(
+        tmp_path / "input.cache_fallback_failure",
+        use_initial_guess=True,
+        verbose=False,
+        grid=object(),
+        _auto_cli_fixed_boundary_mode=False,
+    )
+
+    assert run.result is None
+    assert mkdir_calls == [str(tmp_path / "cache"), "/tmp/vmec_jax/jax_compilation_cache"]
+    assert cache_dirs == []
+    assert updates == []
+
+
+def test_dynamic_scan_invalid_env_values_fall_back_and_keep_scan_when_histories_match(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    cfg = _cfg(ns=4, lasym=True)
+    indata = _indata(NITER=4, LASYM=True)
+    _install_driver_fakes(monkeypatch, cfg=cfg, indata=indata)
+    monkeypatch.setenv("VMEC_JAX_DISABLE_JIT_INIT", "1")
+    monkeypatch.setenv("VMEC_JAX_LASYM_USE_SCAN", "1")
+    monkeypatch.setenv("VMEC_JAX_SCAN_PARITY_GUARD", "0")
+    monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN", "1")
+    monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_TIMED", "0")
+    monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_ITERS", "bad-int")
+    monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_FSQ_RTOL", "bad-float")
+    monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_ATOL", "bad-float")
+    calls: list[dict] = []
+
+    def fake_solver(state, static, **kwargs):
+        del static
+        use_scan = bool(kwargs["use_scan"])
+        calls.append({"max_iter": int(kwargs["max_iter"]), "use_scan": use_scan})
+        return _result(
+            state,
+            fsq=1.0e-12,
+            converged=True,
+            max_iter=int(kwargs["max_iter"]),
+            diagnostics={"use_scan": use_scan, "vmec2000_scan": use_scan},
+        )
+
+    monkeypatch.setattr(driver, "solve_fixed_boundary_residual_iter", fake_solver)
+
+    run = driver.run_fixed_boundary(
+        tmp_path / "input.dynamic_scan_invalid_env",
+        solver="vmec2000_iter",
+        solver_mode="default",
+        max_iter=4,
+        verbose=True,
+        multigrid=False,
+        use_scan=True,
+        jit_forces=False,
+        grid=object(),
+        _auto_cli_fixed_boundary_mode=False,
+    )
+
+    assert calls == [
+        {"max_iter": 3, "use_scan": True},
+        {"max_iter": 3, "use_scan": False},
+        {"max_iter": 4, "use_scan": True},
+    ]
+    assert "dynamic scan parity probe: backend=cpu iters=3 fsq_ok=True -> use_scan=True" in capsys.readouterr().out
+    assert run.result.diagnostics["use_scan"] is True
+
+
+def test_cli_finisher_short_circuits_when_initial_run_is_already_strict_converged(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    cfg = _cfg(ns=3)
+    indata = _indata(NITER=2, FTOL=1.0e-8)
+    _install_driver_fakes(monkeypatch, cfg=cfg, indata=indata)
+    monkeypatch.setenv("VMEC_JAX_DISABLE_JIT_INIT", "1")
+    calls: list[dict] = []
+
+    def fake_solver(state, static, **kwargs):
+        del static
+        calls.append({"max_iter": int(kwargs["max_iter"]), "use_scan": bool(kwargs["use_scan"])})
+        return _result(
+            state,
+            fsq=1.0e-12,
+            converged=True,
+            max_iter=int(kwargs["max_iter"]),
+            diagnostics={"ftol": float(kwargs["ftol"])},
+        )
+
+    monkeypatch.setattr(driver, "solve_fixed_boundary_residual_iter", fake_solver)
+
+    run = driver.run_fixed_boundary(
+        tmp_path / "input.strict_converged_short_circuit",
+        solver="vmec2000_iter",
+        solver_mode="accelerated",
+        max_iter=2,
+        verbose=False,
+        multigrid=False,
+        cli_fixed_boundary_mode=True,
+        use_scan=False,
+        jit_forces=False,
+        grid=object(),
+    )
+
+    assert calls == [{"max_iter": 2, "use_scan": False}]
+    diag = run.result.diagnostics
+    assert diag["converged"] is True
+    assert diag["converged_strict"] is True
+    assert np.asarray(diag["cli_fixed_boundary_finish_budgets"]).tolist() == []
+    assert np.asarray(diag["cli_fixed_boundary_finish_modes"]).tolist() == []
+    assert diag["cli_fixed_boundary_full_parity_fallback"] is False
