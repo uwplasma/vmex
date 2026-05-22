@@ -279,6 +279,7 @@ class ResidualCheckpointTape:
     dynamic_initial_carry: Any | None = None
     dynamic_base_carries_stacked: Any | None = None
     diagnostics: dict[str, Any] | None = None
+    jvp_only: bool = False
 
 
 def _empty_trace() -> ResidualIterationTrace:
@@ -553,6 +554,7 @@ def build_residual_checkpoint_tape_direct(
     light_history: bool = True,
     store_trace: bool = False,
     store_full_step_traces: bool = True,
+    jvp_only: bool = False,
     solver_kwargs: dict[str, Any] | None = None,
 ) -> ResidualCheckpointTape:
     """Build a replay tape from one direct residual solve with adjoint tracing."""
@@ -617,6 +619,7 @@ def build_residual_checkpoint_tape_direct(
             dynamic_stacked, dynamic_static_flags, dynamic_initial_carry, dynamic_base_carries_stacked = _build_dynamic_replay_payload(
                 step_traces,
                 step_trace_static_flags,
+                store_base_carries=not bool(jvp_only),
             )
             _record_timing("tape_dynamic_payload_build_s", dynamic_payload_start)
             if not store_full_step_traces:
@@ -661,6 +664,7 @@ def build_residual_checkpoint_tape_direct(
         dynamic_initial_carry=dynamic_initial_carry,
         dynamic_base_carries_stacked=dynamic_base_carries_stacked,
         diagnostics=compact_diagnostics,
+        jvp_only=bool(jvp_only and not step_traces and dynamic_base_carries_stacked is None),
     )
 
 
@@ -693,6 +697,11 @@ def checkpoint_tape_state_vjp(
 ):
     """Reverse a packed-state cotangent through the extracted step tape."""
     from ._compat import jax
+
+    if bool(getattr(tape, "jvp_only", False)):
+        raise ValueError(
+            "JVP-only checkpoint tapes omit reverse replay basepoints; rebuild the tape with jvp_only=False."
+        )
 
     if (
         _dynamic_replay_mode() == "whole_scan"
@@ -962,6 +971,8 @@ def _replay_values_equal(a, b) -> bool:
 def _build_dynamic_replay_payload(
     step_traces: tuple[dict[str, Any], ...],
     static_flags: dict[str, Any],
+    *,
+    store_base_carries: bool = True,
 ):
     from ._compat import jax
 
@@ -1013,12 +1024,14 @@ def _build_dynamic_replay_payload(
         key: _stack_dynamic_values(*(trace[key] for trace in filtered))
         for key in filtered[0]
     }
-    base_carries = tuple(_dynamic_replay_initial_carry(trace) for trace in step_traces)
-    if target_len > len(base_carries):
-        pad_carry = base_carries[-1]
-        base_carries = base_carries + (pad_carry,) * (target_len - len(base_carries))
-    stacked_base_carries = jax.tree_util.tree_map(_stack_dynamic_values, *base_carries)
-    initial_carry = base_carries[0]
+    initial_carry = _dynamic_replay_initial_carry(step_traces[0])
+    stacked_base_carries = None
+    if store_base_carries:
+        base_carries = (initial_carry,) + tuple(_dynamic_replay_initial_carry(trace) for trace in step_traces[1:])
+        if target_len > len(base_carries):
+            pad_carry = base_carries[-1]
+            base_carries = base_carries + (pad_carry,) * (target_len - len(base_carries))
+        stacked_base_carries = jax.tree_util.tree_map(_stack_dynamic_values, *base_carries)
     return stacked, dynamic_static_flags, initial_carry, stacked_base_carries
 
 

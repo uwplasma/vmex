@@ -2254,11 +2254,14 @@ class FixedBoundaryExactOptimizer:
         self._profile_add("scan_exact_state_solve", time.perf_counter() - t0)
         return state
 
-    def _solve_exact_with_tape(self, params, *, return_payload: bool = False):
+    def _solve_exact_with_tape(self, params, *, return_payload: bool = False, jvp_only: bool = False):
         """Run exact solve + build adjoint tape, with caching."""
         if self._solver_device_name is not None and not self._inside_solver_device_context:
             return self._run_in_solver_device_context(
-                self._solve_exact_with_tape, params, return_payload=return_payload
+                self._solve_exact_with_tape,
+                params,
+                return_payload=return_payload,
+                jvp_only=jvp_only,
             )
         from ._compat import jnp as _jnp
         from .discrete_adjoint import build_residual_checkpoint_tape_direct
@@ -2288,18 +2291,24 @@ class FixedBoundaryExactOptimizer:
             light_history=True,
             store_trace=False,
             store_full_step_traces=False,
+            jvp_only=bool(jvp_only),
         )
         tape_build_wall_s = time.perf_counter() - t_tape
         self._profile_add("exact_tape_build", tape_build_wall_s)
+        if jvp_only:
+            self._profile_add("exact_tape_build_jvp_only", tape_build_wall_s)
         self._profile_exact_tape_solver_timing(tape, tape_build_wall_s)
         t_unpack = time.perf_counter()
         state = unpack_state(_jnp.asarray(tape.final_packed_state, dtype=_jnp.float64), self._layout)
         payload = {"tape": tape, "axis_override": axis_override}
         self._exact_cache.clear()
-        self._exact_cache[cache_key] = (state, payload)
+        if not jvp_only:
+            self._exact_cache[cache_key] = (state, payload)
         self._remember_exact_state(cache_key, state)
         self._profile_add("exact_unpack_cache", time.perf_counter() - t_unpack)
         self._profile_add("exact_solve_with_tape_total", time.perf_counter() - t_total)
+        if jvp_only:
+            self._profile_add("exact_solve_with_tape_jvp_only_total", time.perf_counter() - t_total)
         return (state, payload) if return_payload else state
 
     # ── public residual / Jacobian interface ──────────────────────────────────
@@ -2352,7 +2361,7 @@ class FixedBoundaryExactOptimizer:
         from .discrete_adjoint import checkpoint_tape_state_jvp_columns
 
         params = _jnp.asarray(params, dtype=_jnp.float64)
-        state, payload = self._solve_exact_with_tape(params, return_payload=True)
+        state, payload = self._solve_exact_with_tape_for_jvp(params)
         if int(params.size) == 0:
             empty = _jnp.zeros((0, int(self._layout.size)), dtype=_jnp.float64)
             return state, empty
@@ -2379,6 +2388,28 @@ class FixedBoundaryExactOptimizer:
             final_tangents,
         )
         return state, final_tangents
+
+    def _solve_exact_with_tape_for_jvp(self, params):
+        """Build an exact tape optimized for forward tangent-column replay."""
+        solve = self._solve_exact_with_tape
+        if not self._jvp_only_exact_tape_enabled():
+            return solve(params, return_payload=True)
+        try:
+            from inspect import Parameter, signature
+
+            parameters = signature(solve).parameters
+            accepts_jvp_only = "jvp_only" in parameters or any(
+                parameter.kind == Parameter.VAR_KEYWORD for parameter in parameters.values()
+            )
+        except (TypeError, ValueError):
+            accepts_jvp_only = True
+        if accepts_jvp_only:
+            return solve(params, return_payload=True, jvp_only=True)
+        return solve(params, return_payload=True)
+
+    def _jvp_only_exact_tape_enabled(self) -> bool:
+        flag = os.getenv("VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE", "").strip().lower()
+        return flag in ("1", "true", "yes", "on")
 
     def _initial_tangent_columns(self, params, axis_override, *, profile_prefix: str):
         """Return cached packed initial-state tangents for boundary parameters."""
