@@ -122,6 +122,26 @@ def test_performance_matrix_explicit_backend_env_overrides():
     assert cpu_env["JAX_ENABLE_X64"] == "1"
 
 
+def test_performance_matrix_trial_scan_env_and_summary():
+    tool = _load_tool()
+
+    args_on = tool._build_parser().parse_args(["--backend", "auto", "--trial-scan", "on"])
+    env_on = tool.child_env(backend="auto", args=args_on, base_env={"PYTHONPATH": ""})
+    assert env_on["VMEC_JAX_OPT_TRIAL_SCAN"] == "1"
+    assert tool.env_summary(env_on)["VMEC_JAX_OPT_TRIAL_SCAN"] == "1"
+
+    args_off = tool._build_parser().parse_args(["--backend", "auto", "--trial-scan", "off"])
+    env_off = tool.child_env(backend="auto", args=args_off, base_env={"PYTHONPATH": ""})
+    assert env_off["VMEC_JAX_OPT_TRIAL_SCAN"] == "0"
+    assert tool.env_summary(env_off)["VMEC_JAX_OPT_TRIAL_SCAN"] == "0"
+
+    args_legacy = tool._build_parser().parse_args(
+        ["--backend", "auto", "--trial-scan", "off", "--trial-use-scan"]
+    )
+    env_legacy = tool.child_env(backend="auto", args=args_legacy, base_env={"PYTHONPATH": ""})
+    assert env_legacy["VMEC_JAX_OPT_TRIAL_SCAN"] == "1"
+
+
 def test_performance_matrix_fixed_command_uses_backend_solver_device(tmp_path):
     tool = _load_tool()
     args = tool._build_parser().parse_args(

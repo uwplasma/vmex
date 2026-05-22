@@ -200,6 +200,9 @@ def test_qh_qs_residual_factories_fallback_sign_and_min_abs_iota_cotangent(monke
 
     qh = make_qh_residuals_fn(static, object(), target_aspect=2.5, aspect_weight=2.0, qs_weight=3.0)
     np.testing.assert_allclose(np.asarray(qh(state)), [1.0, 1.5])
+    assert qh._objective_family == "qs"
+    assert qh._helicity_m == 1
+    assert qh._helicity_n == -1
 
     qs = make_qs_residuals_fn(
         static,
@@ -213,6 +216,9 @@ def test_qh_qs_residual_factories_fallback_sign_and_min_abs_iota_cotangent(monke
     residual = np.asarray(qs(state), dtype=float)
     cotangent = qs._state_cotangent_from_packed(pack_state(state), state.layout, jnp.asarray([1.0, 1.0]))
 
+    assert qs._objective_family == "qs"
+    assert qs._helicity_m == 1
+    assert qs._helicity_n == 0
     assert residual.shape == (2,)
     assert residual[0] > 0.0
     assert np.all(np.isfinite(np.asarray(cotangent)))

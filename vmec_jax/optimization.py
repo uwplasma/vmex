@@ -1534,14 +1534,26 @@ class FixedBoundaryExactOptimizer:
     def _has_stellarator_asymmetric_parameter_specs(self) -> bool:
         return any(str(spec.kind).lower() in ("rs", "zc") for spec in self._specs)
 
+    def _has_stellarator_asymmetric_configuration(self) -> bool:
+        if self._has_stellarator_asymmetric_parameter_specs():
+            return True
+        get_bool = getattr(self._indata, "get_bool", None)
+        if callable(get_bool):
+            try:
+                return bool(get_bool("LASYM", False))
+            except Exception:
+                pass
+        return bool(getattr(getattr(self._static, "cfg", None), "lasym", False))
+
     def _resolve_optimizer_method(self, method: str, scipy_lsmr_maxiter: int | None) -> tuple[str, int | None, str | None]:
         """Resolve optimizer method aliases and the opt-in automatic policy.
 
-        ``method="auto"`` is intentionally conservative: it only chooses the
-        matrix-free trust-region path for the profiled QA, stellarator-symmetric,
-        high-mode CPU/default-backend case where dense exact Jacobian replay is
-        known to dominate.  It never moves work between CPU and GPU; explicit
-        device choices are preserved.
+        ``method="auto"`` is intentionally conservative and device-preserving:
+        it only chooses the matrix-free trust-region path for the profiled QA,
+        stellarator-symmetric, high-mode CPU/default-backend lane where
+        cold-process and memory-pressure profiles motivated the option.  It does
+        not guarantee the fastest warm wall time for every QA run, and it never
+        moves work between CPU and GPU; explicit device choices are preserved.
         """
 
         method_key = str(method).strip().lower().replace("-", "_")
@@ -1555,10 +1567,10 @@ class FixedBoundaryExactOptimizer:
             return method_key, scipy_lsmr_maxiter, None
 
         backend = _optimizer_backend_name(self._solver_device_name)
-        if backend in ("gpu", "cuda", "rocm", "tpu"):
+        if backend in ("gpu", "cuda", "rocm", "tpu", "metal"):
             return "scipy", scipy_lsmr_maxiter, f"auto:dense-preserves-{backend}"
-        if self._has_stellarator_asymmetric_parameter_specs():
-            return "scipy", scipy_lsmr_maxiter, "auto:dense-lasymspecs"
+        if self._has_stellarator_asymmetric_configuration():
+            return "scipy", scipy_lsmr_maxiter, "auto:dense-lasym"
 
         helicity_m = None if self._helicity_m is None else int(self._helicity_m)
         helicity_n = None if self._helicity_n is None else int(self._helicity_n)
@@ -3547,9 +3559,11 @@ class FixedBoundaryExactOptimizer:
         method:
             Outer least-squares method. Supported values are ``"gauss_newton"``
             and ``"scipy"``. ``"auto"`` keeps the current device selection and
-            resolves to a profiled method for known cases: currently matrix-free
-            SciPy for high-mode, stellarator-symmetric QA on CPU/default CPU,
-            otherwise dense SciPy. ``"scipy"`` uses ``scipy.optimize.least_squares``
+            resolves to a conservative device-preserving method for known cases:
+            currently matrix-free SciPy for high-mode, stellarator-symmetric QA
+            on CPU/default CPU, otherwise dense SciPy. This is an opt-in policy
+            and not a guarantee that every warm QA run is fastest.
+            ``"scipy"`` uses ``scipy.optimize.least_squares``
             with the exact residual and discrete-adjoint Jacobian callbacks,
             which is more robust on some QA/QH examples.
             ``"scipy_matrix_free"`` uses the same SciPy trust-region solver

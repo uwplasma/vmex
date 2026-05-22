@@ -131,6 +131,8 @@ plus CSV. They are
 documented in `docs/optimization_sweep_results.rst` as status artifacts, not as
 aspect-6 README best-row promotion or global seed-robustness evidence.
 
+![QI NFP coverage](docs/_static/figures/readme_qi_optimization_cases.png)
+
 ## Performance, Validation, Release
 
 - Performance notes and benchmark caveats: `docs/performance.rst`
@@ -143,7 +145,7 @@ aspect-6 README best-row promotion or global seed-robustness evidence.
   run with `gh run list --repo uwplasma/vmec_jax --branch main --workflow CI
   --limit 5` before tagging.
 - Required fast coverage gate is now `95%`; the latest local CI-equivalent
-  run reached `95.02%` on this development batch.
+  run reached `95.06%` on this development batch.
 
 ## CLI Reference
 

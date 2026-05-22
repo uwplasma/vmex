@@ -28,6 +28,7 @@ def _run_ready_optimizer(residual: np.ndarray | None = None) -> FixedBoundaryExa
     opt = object.__new__(FixedBoundaryExactOptimizer)
     opt._scan_exact_path = "tape"
     opt._solver_device_name = None
+    opt._indata = InData(scalars={"LASYM": False}, indexed={})
     opt._inside_solver_device_context = False
     opt._trial_residual_cache = OrderedDict()
     opt._exact_cache = {}
@@ -36,7 +37,7 @@ def _run_ready_optimizer(residual: np.ndarray | None = None) -> FixedBoundaryExa
     opt._initial_tangent_cache = {}
     opt._last_jacobian_key = [None]
     opt._last_jacobian_residual = None
-    opt._static = SimpleNamespace()
+    opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=False))
     opt._inner_max_iter = 11
     opt._inner_ftol = 1.0e-9
     opt._trial_max_iter = 3
@@ -139,6 +140,13 @@ def test_auto_method_resolver_uses_matrix_free_only_for_profiled_qa_cpu_case(mon
         "auto:dense-preserves-gpu",
     )
 
+    opt._solver_device_name = "metal"
+    assert opt._resolve_optimizer_method("auto", None) == (
+        "scipy",
+        None,
+        "auto:dense-preserves-metal",
+    )
+
     opt._solver_device_name = None
     opt._helicity_n = -1
     assert opt._resolve_optimizer_method("auto", 7) == (
@@ -152,8 +160,17 @@ def test_auto_method_resolver_uses_matrix_free_only_for_profiled_qa_cpu_case(mon
     assert opt._resolve_optimizer_method("auto", None) == (
         "scipy",
         None,
-        "auto:dense-lasymspecs",
+        "auto:dense-lasym",
     )
+
+    opt._specs = [BoundaryParamSpec("rc30", "rc", 0, 3, 0)]
+    opt._indata = InData(scalars={"LASYM": True}, indexed={})
+    assert opt._resolve_optimizer_method("auto", None) == (
+        "scipy",
+        None,
+        "auto:dense-lasym",
+    )
+    opt._indata = InData(scalars={"LASYM": False}, indexed={})
 
     opt._specs = []
     assert opt._resolve_optimizer_method("auto", None) == (

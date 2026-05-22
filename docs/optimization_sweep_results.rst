@@ -19,7 +19,9 @@ they are only partial snapshots:
   maximum-LCFS-elongation penalty, and a smooth ``abs(mean_iota) >= 0.41``
   lower bound.  ``LgradB`` is available as an optional commented term in the
   example script but is not active by default.
-  The QI rows use the bundled ``input.nfp2_QI`` omnigenity seed.
+  The compact README best-row uses the bundled ``input.nfp2_QI`` omnigenity
+  seed; the NFP coverage panel uses case-specific inputs, including the
+  seeded ``input.minimal_seed_nfp2`` stress case.
   The production CLI can optionally use a same-mode QP preseed; the current
   best gated QI row starts the constrained QI refinement directly from the seed
   with ``--qi-qp-preseed off``.
@@ -315,9 +317,9 @@ match before the panel is published.
      VMEC_JAX_QI_TARGET_ASPECT=10 \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp1_qi_direct_office_20260519 \
      python examples/optimization/QI_optimization.py
-   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp2_qi \
-     VMEC_JAX_QI_TARGET_ASPECT=10 \
-     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp2_qi \
+   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=minimal_nfp2_qi \
+     VMEC_JAX_QI_TARGET_ASPECT=6 \
+     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/minimal_nfp2_to_qi_reference \
      python examples/optimization/QI_optimization.py
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp3_qi \
      VMEC_JAX_QI_TARGET_ASPECT=4 \
@@ -354,16 +356,16 @@ match before the panel is published.
      - ``0.5369``
      - ``15.8``
      - ``case-gated``
-   * - ``examples/data/input.nfp2_QI``
-     - ``results/qi_opt/ess/nfp2_qi``
-     - ``1.17e-2``
-     - ``1.13e-3``
-     - ``3.09e-4``
-     - ``0.225/0.30``
-     - ``6.43/8.2``
-     - ``9.999/10.0``
-     - ``-0.5043``
-     - ``14.7``
+   * - ``examples/data/input.minimal_seed_nfp2_target_helicity``
+     - ``examples/optimization/results/minimal_seed_showcase_promote/cpu/cpu/qi_nfp2/continuation/minimal_nfp2_qi/mode3/ess``
+     - ``1.61e-2``
+     - ``1.52e-3``
+     - ``5.25e-4``
+     - ``0.240/0.30``
+     - ``6.51/8.2``
+     - ``6.006/6.0``
+     - ``-0.5994``
+     - ``28.7``
      - ``case-gated``
    * - ``examples/data/input.QI_stel_seed_3127``
      - ``results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516``
