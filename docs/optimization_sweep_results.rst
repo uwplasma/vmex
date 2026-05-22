@@ -34,10 +34,10 @@ The split between README and docs is deliberate:
   short reproduction command.
 - This page is the intended publication home for complete sweeps.  A complete
   publication should represent every CPU/GPU, continuation/direct, ESS on/off,
-  QI preseed/no-preseed, ``max_mode=1..4``, and LASYM row through downloadable
+  QI preseed/no-preseed, ``max_mode=1..3`` checked-in row through downloadable
   CSV/JSON summaries plus generated objective-history panels, initial/final
-  state atlases, and wall-time summary tables.  The checked-in assets are a
-  partial snapshot unless those rows and figures are present.
+  state atlases, and wall-time summary tables.  ``max_mode=4`` commands are
+  regeneration targets until matching rows and figures are present.
 - Additional QI case coverage, including NFP=1/2/3/4 case-gated rows that use
   case-specific aspect targets, belongs here rather than in the README best-row
   section.
@@ -239,10 +239,10 @@ aspect-6 target.  The selected QI row is chosen with the legacy branch
 diagnostic, mirror-ratio, elongation, iota, and aspect-ratio gates used as
 promotion evidence rather than as exact equality constraints; small numerical
 slack is expected when independent Boozer diagnostics are recomputed after the
-optimization.  These panels include the original deck LCFS before any
-``max_mode=1`` optimization work, final LCFS, per-stage objective history, and
-initial/final outer-surface ``|B|`` line contours in Boozer coordinates
-evaluated with ``booz_xform_jax``.
+optimization.  These panels include the stage-initial LCFS used by the selected
+optimization row, final LCFS, per-stage objective history, and initial/final
+outer-surface ``|B|`` line contours in Boozer coordinates evaluated with
+``booz_xform_jax``.
 The source table is also available as
 :download:`readme_best_optimizations.csv <_static/figures/readme_best_optimizations.csv>`.
 
@@ -279,11 +279,12 @@ the existing ``QI_optimization.py`` outputs, records the final smooth QI
 metric, legacy QI metric, mirror ratio, elongation, iota, aspect, and CPU wall
 time, and draws source-initial and final Boozer ``|B|`` line contours only
 after the initial WOUT boundary matches the paired input deck.  These are
-case-specific gate checks, not extra aspect-6 README best-row promotions:
-NFP=1/2 use target aspect 10, the seed-3127 NFP=3 lane uses target aspect 4,
-and the NFP=4 row uses the minimal seed plus a same-NFP finite-beta QI
-reference-family proposal.  Finite-beta NFP=4 remains a separate stress
-fixture.
+archived mixed-target case checks, not current aspect-6 README best-row
+promotions: NFP=1/2 use target aspect 10, the seed-3127 NFP=3 lane uses target
+aspect 4, and the NFP=4 row uses the minimal seed plus a same-NFP finite-beta
+QI reference-family proposal.  Regenerate all rows with the current uniform
+aspect-6 policy before using this figure as current README promotion evidence.
+Finite-beta NFP=4 remains a separate stress fixture.
 
 The NFP=3 seed-3127 row uses
 ``examples/data/wout_QI_stel_seed_3127.nc`` as the raw initial artifact.  The
@@ -297,9 +298,9 @@ audited WOUT; preconditioner scan points are provenance for basin capture, not
 the final acceptance diagnostic.
 
 To refresh the exact rows used by this panel, run the source optimizations with
-the target-aspect and output-dir overrides below before rendering.  Bare
-``VMEC_JAX_QI_RUN_CASE=...`` commands use the current aspect-6 public defaults;
-the explicit overrides reproduce the reviewed figure rows.  The NFP=3 case can
+the target-aspect and output-dir overrides below before rendering.  The explicit
+overrides reproduce the archived mixed-target figure rows; omit them only when
+regenerating the current uniform aspect-6 policy.  The NFP=3 case can
 be selected as ``nfp3_qi``; that is a convenience alias for the
 ``input.QI_stel_seed_3127`` robustness lane.  If the NFP=3 raw artifact is
 replaced during a refresh, the replacement must pass the renderer's boundary
