@@ -51,7 +51,10 @@ FREE_BOUNDARY_ASSET_CASES = (
 ROUNDTRIP_CASES = (
     RoundtripCase("axisymmetric_vacuum", "examples/data/wout_circular_tokamak.nc", expect_lasym=False),
     RoundtripCase("stellarator_asymmetric", "examples/data/wout_basic_non_stellsym_simsopt.nc", expect_lasym=True),
-    RoundtripCase("free_boundary", "examples_single_grid/data/wout_cth_like_free_bdy.nc", expect_lasym=False),
+    pytest.param(
+        RoundtripCase("free_boundary", "examples_single_grid/data/wout_cth_like_free_bdy.nc", expect_lasym=False),
+        marks=pytest.mark.full,
+    ),
 )
 
 
@@ -136,7 +139,8 @@ def test_representative_bundled_wouts_roundtrip_without_losing_physics_metadata(
     pytest.importorskip("netCDF4")
 
     src = _repo_root() / case.wout_rel
-    assert src.exists(), case.wout_rel
+    if not src.exists():
+        pytest.skip(f"{case.wout_rel} is a fetched validation WOUT; run tools/fetch_assets.py")
     original = read_wout(src)
     assert bool(original.lasym) is case.expect_lasym
 
@@ -239,7 +243,10 @@ def test_wout_residual_trace_shows_converged_final_state(case: RoundtripCase) ->
     """Bundled WOUT traces must retain enough information to prove convergence."""
     pytest.importorskip("netCDF4")
 
-    wout = read_wout(_repo_root() / case.wout_rel)
+    src = _repo_root() / case.wout_rel
+    if not src.exists():
+        pytest.skip(f"{case.wout_rel} is a fetched validation WOUT; run tools/fetch_assets.py")
+    wout = read_wout(src)
     fsqt = np.asarray(wout.fsqt, dtype=float)
     active = fsqt[fsqt > 0.0]
     assert active.size >= 2
