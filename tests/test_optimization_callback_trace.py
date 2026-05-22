@@ -538,6 +538,14 @@ def test_exact_optimizer_callback_report_schema_and_budget_status() -> None:
                 "param_step_norm": 1.0e-4,
                 "shape": [3],
                 "profile_delta": {},
+                "replay_scan_cache_diagnostics": {
+                    "replay_checkpoint_scan_cache_hit_count": 1,
+                    "replay_checkpoint_scan_cache_miss_count": 2,
+                    "replay_checkpoint_scan_cache_lookup_s": 0.01,
+                    "replay_checkpoint_scan_cache_build_s": 0.05,
+                    "replay_dynamic_scan_cache_miss_count": 1,
+                    "replay_dynamic_scan_cache_build_s": 0.07,
+                },
                 "cache_growth": {"total_entries_delta": 2},
             }
         ],
@@ -558,6 +566,8 @@ def test_exact_optimizer_callback_report_schema_and_budget_status() -> None:
     assert report["report_kind"] == "exact_optimizer_callback_profile"
     assert report["callback"] == "exact"
     assert report["jvp_only_exact_tape"] is False
+    assert report["replay_scan_cache_diagnostics"]["replay_checkpoint_scan_cache_miss_count"] == 2
+    assert report["replay_scan_cache_diagnostics"]["replay_dynamic_scan_cache_build_s"] == 0.07
     assert report["cache"]["growth"]["total_entries_delta"] == 2
     assert report["budget_status"]["ok"] is False
     assert {

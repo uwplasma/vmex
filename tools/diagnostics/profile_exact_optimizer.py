@@ -493,6 +493,44 @@ def _profile_count(profile: dict[str, dict[str, float | int]], names: tuple[str,
     return int(sum(int(profile.get(name, {}).get("count", 0)) for name in names))
 
 
+def _replay_scan_cache_snapshot(*, reset: bool = False) -> dict[str, int | float]:
+    try:
+        from vmec_jax.discrete_adjoint import replay_scan_cache_diagnostics
+
+        return dict(replay_scan_cache_diagnostics(reset=reset))
+    except Exception:
+        return {}
+
+
+def _replay_scan_cache_delta(
+    before: dict[str, int | float],
+    after: dict[str, int | float],
+) -> dict[str, int | float]:
+    out: dict[str, int | float] = {}
+    for key in sorted(set(before) | set(after)):
+        b = before.get(key, 0)
+        a = after.get(key, 0)
+        if str(key).endswith("_count"):
+            out[key] = int(a) - int(b)
+        else:
+            out[key] = float(a) - float(b)
+    return out
+
+
+def _sum_replay_scan_cache_diagnostics(samples: list[dict[str, Any]]) -> dict[str, int | float]:
+    out: dict[str, int | float] = {}
+    for sample in samples:
+        diagnostics = sample.get("replay_scan_cache_diagnostics")
+        if not isinstance(diagnostics, dict):
+            continue
+        for key, value in diagnostics.items():
+            if str(key).endswith("_count"):
+                out[key] = int(out.get(key, 0)) + int(value)
+            else:
+                out[key] = float(out.get(key, 0.0)) + float(value)
+    return out
+
+
 def _current_rss_bytes() -> int | None:
     try:
         import psutil  # type: ignore
@@ -653,6 +691,7 @@ def _build_callback_payload(
         "rss_after_bytes": rss_after_bytes,
         "samples": samples,
         "profile": profile,
+        "replay_scan_cache_diagnostics": _sum_replay_scan_cache_diagnostics(samples),
         "cache": {
             "before": cache_before,
             "after": cache_after,
@@ -690,6 +729,11 @@ def _install_profile_timing_supplements(opt) -> None:
         ("compute_forces_first_s", "compute_forces_first"),
         ("compute_forces_rest_s", "compute_forces_rest"),
     )
+    supplemental_counter_keys = (
+        ("scan_runner_cache_hit_count", "scan_runner_cache_hit_count"),
+        ("scan_runner_cache_miss_count", "scan_runner_cache_miss_count"),
+        ("scan_runner_cache_bypass_count", "scan_runner_cache_bypass_count"),
+    )
 
     def _profile_solver_timing_with_supplements(
         diagnostics,
@@ -702,7 +746,7 @@ def _install_profile_timing_supplements(opt) -> None:
             f"{profile_prefix}_{suffix}": int(
                 getattr(opt, "_profile", {}).get(f"{profile_prefix}_{suffix}", {}).get("count", 0)
             )
-            for _key, suffix in supplemental_keys
+            for _key, suffix in supplemental_keys + supplemental_counter_keys
         }
         solver_total = original(
             diagnostics,
@@ -727,6 +771,22 @@ def _install_profile_timing_supplements(opt) -> None:
             except Exception:
                 continue
             opt._profile_add(profile_name, value)
+        for key, suffix in supplemental_counter_keys:
+            if key not in timing:
+                continue
+            profile_name = f"{profile_prefix}_{suffix}"
+            after_count = int(getattr(opt, "_profile", {}).get(profile_name, {}).get("count", 0))
+            if after_count != before_counts[profile_name]:
+                continue
+            try:
+                value = int(timing.get(key, 0))
+            except Exception:
+                continue
+            add_counter = getattr(opt, "_profile_add_counter", None)
+            if callable(add_counter):
+                add_counter(profile_name, value)
+            else:
+                opt._profile_add(profile_name, float(value))
         return solver_total
 
     opt._profile_solver_timing = _profile_solver_timing_with_supplements
@@ -850,6 +910,7 @@ def main() -> int:
                 params = params0
             profile_before = opt._profile_dump()
             repeat_cache_before = _cache_snapshot(opt)
+            replay_scan_before = _replay_scan_cache_snapshot(reset=True)
             repeat_rss_before = _current_rss_bytes()
             t0 = time.perf_counter()
             if args.callback == "trial":
@@ -885,6 +946,7 @@ def main() -> int:
                 raise ValueError(args.callback)
             wall_time_s = time.perf_counter() - t0
             profile_after = opt._profile_dump()
+            replay_scan_after = _replay_scan_cache_snapshot(reset=True)
             repeat_cache_after = _cache_snapshot(opt)
             repeat_rss_after = _current_rss_bytes()
             repeat_growth = _cache_growth(repeat_cache_before, repeat_cache_after)
@@ -895,6 +957,7 @@ def main() -> int:
                 "param_step_norm": float(np.linalg.norm(params - params0)),
                 "shape": shape,
                 "profile_delta": _profile_delta(profile_before, profile_after),
+                "replay_scan_cache_diagnostics": _replay_scan_cache_delta(replay_scan_before, replay_scan_after),
                 "cache_before": repeat_cache_before,
                 "cache_after": repeat_cache_after,
                 "cache_growth": repeat_growth,

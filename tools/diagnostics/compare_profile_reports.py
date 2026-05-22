@@ -90,6 +90,9 @@ EXACT_PROFILE_METRIC_NAMES = {
     "trial_solver_scan_initial_compute_forces_s": ("trial_solver_scan_initial_compute_forces",),
     "trial_solver_scan_axis_reset_compute_forces_s": ("trial_solver_scan_axis_reset_compute_forces",),
     "trial_solver_scan_run_setup_s": ("trial_solver_scan_run_setup",),
+    "trial_solver_scan_runner_cache_hit_count": ("trial_solver_scan_runner_cache_hit_count",),
+    "trial_solver_scan_runner_cache_miss_count": ("trial_solver_scan_runner_cache_miss_count",),
+    "trial_solver_scan_runner_cache_bypass_count": ("trial_solver_scan_runner_cache_bypass_count",),
     "trial_solver_scan_preflight_s": ("trial_solver_scan_preflight",),
     "trial_solver_scan_device_run_s": ("trial_solver_scan_device_run",),
     "trial_solver_scan_device_dispatch_s": ("trial_solver_scan_device_dispatch",),
@@ -116,6 +119,9 @@ EXACT_PROFILE_METRIC_NAMES = {
         "forward_exact_solver_scan_axis_reset_compute_forces",
     ),
     "forward_exact_solver_scan_run_setup_s": ("forward_exact_solver_scan_run_setup",),
+    "forward_exact_solver_scan_runner_cache_hit_count": ("forward_exact_solver_scan_runner_cache_hit_count",),
+    "forward_exact_solver_scan_runner_cache_miss_count": ("forward_exact_solver_scan_runner_cache_miss_count",),
+    "forward_exact_solver_scan_runner_cache_bypass_count": ("forward_exact_solver_scan_runner_cache_bypass_count",),
     "forward_exact_solver_scan_preflight_s": ("forward_exact_solver_scan_preflight",),
     "forward_exact_solver_scan_device_run_s": ("forward_exact_solver_scan_device_run",),
     "forward_exact_solver_scan_device_dispatch_s": ("forward_exact_solver_scan_device_dispatch",),
@@ -143,6 +149,9 @@ EXACT_PROFILE_METRIC_NAMES = {
     "exact_tape_solver_iteration_post_update_s": ("exact_tape_solver_iteration_post_update",),
     "exact_tape_solver_iteration_loop_unattributed_s": ("exact_tape_solver_iteration_loop_unattributed",),
     "exact_tape_solver_finalize_s": ("exact_tape_solver_finalize",),
+    "exact_tape_solver_scan_runner_cache_hit_count": ("exact_tape_solver_scan_runner_cache_hit_count",),
+    "exact_tape_solver_scan_runner_cache_miss_count": ("exact_tape_solver_scan_runner_cache_miss_count",),
+    "exact_tape_solver_scan_runner_cache_bypass_count": ("exact_tape_solver_scan_runner_cache_bypass_count",),
 }
 
 EXACT_PROFILE_CONTAINER_PRIORITY = {
@@ -226,6 +235,9 @@ METRIC_ORDER = (
     "trial_solver_scan_initial_compute_forces_s",
     "trial_solver_scan_axis_reset_compute_forces_s",
     "trial_solver_scan_run_setup_s",
+    "trial_solver_scan_runner_cache_hit_count",
+    "trial_solver_scan_runner_cache_miss_count",
+    "trial_solver_scan_runner_cache_bypass_count",
     "trial_solver_scan_preflight_s",
     "trial_solver_scan_device_run_s",
     "trial_solver_scan_device_dispatch_s",
@@ -250,6 +262,9 @@ METRIC_ORDER = (
     "forward_exact_solver_scan_initial_compute_forces_s",
     "forward_exact_solver_scan_axis_reset_compute_forces_s",
     "forward_exact_solver_scan_run_setup_s",
+    "forward_exact_solver_scan_runner_cache_hit_count",
+    "forward_exact_solver_scan_runner_cache_miss_count",
+    "forward_exact_solver_scan_runner_cache_bypass_count",
     "forward_exact_solver_scan_preflight_s",
     "forward_exact_solver_scan_device_run_s",
     "forward_exact_solver_scan_device_dispatch_s",
@@ -277,6 +292,13 @@ METRIC_ORDER = (
     "exact_tape_solver_iteration_post_update_s",
     "exact_tape_solver_iteration_loop_unattributed_s",
     "exact_tape_solver_finalize_s",
+    "exact_tape_solver_scan_runner_cache_hit_count",
+    "exact_tape_solver_scan_runner_cache_miss_count",
+    "exact_tape_solver_scan_runner_cache_bypass_count",
+    "replay_scan_cache_hit_count",
+    "replay_scan_cache_miss_count",
+    "replay_scan_cache_lookup_s",
+    "replay_scan_cache_build_s",
     "compile_time_s",
     "replay_time_s",
     "cache_time_s",
@@ -334,6 +356,9 @@ METRIC_LABELS = {
     "trial_solver_scan_initial_compute_forces_s": "trial solver scan initial force assembly",
     "trial_solver_scan_axis_reset_compute_forces_s": "trial solver scan axis-reset force assembly",
     "trial_solver_scan_run_setup_s": "trial solver scan run setup",
+    "trial_solver_scan_runner_cache_hit_count": "trial scan runner cache hits",
+    "trial_solver_scan_runner_cache_miss_count": "trial scan runner cache misses",
+    "trial_solver_scan_runner_cache_bypass_count": "trial scan runner cache bypasses",
     "trial_solver_scan_preflight_s": "trial solver scan preflight",
     "trial_solver_scan_device_run_s": "trial solver scan device run",
     "trial_solver_scan_device_dispatch_s": "trial solver scan device dispatch",
@@ -360,6 +385,9 @@ METRIC_LABELS = {
         "forward exact solver scan axis-reset force assembly"
     ),
     "forward_exact_solver_scan_run_setup_s": "forward exact solver scan run setup",
+    "forward_exact_solver_scan_runner_cache_hit_count": "forward exact scan runner cache hits",
+    "forward_exact_solver_scan_runner_cache_miss_count": "forward exact scan runner cache misses",
+    "forward_exact_solver_scan_runner_cache_bypass_count": "forward exact scan runner cache bypasses",
     "forward_exact_solver_scan_preflight_s": "forward exact solver scan preflight",
     "forward_exact_solver_scan_device_run_s": "forward exact solver scan device run",
     "forward_exact_solver_scan_device_dispatch_s": "forward exact solver scan device dispatch",
@@ -387,6 +415,13 @@ METRIC_LABELS = {
     "exact_tape_solver_iteration_post_update_s": "exact tape solver post-update",
     "exact_tape_solver_iteration_loop_unattributed_s": "exact tape solver loop unattributed",
     "exact_tape_solver_finalize_s": "exact tape solver finalize",
+    "exact_tape_solver_scan_runner_cache_hit_count": "exact tape solver scan runner cache hits",
+    "exact_tape_solver_scan_runner_cache_miss_count": "exact tape solver scan runner cache misses",
+    "exact_tape_solver_scan_runner_cache_bypass_count": "exact tape solver scan runner cache bypasses",
+    "replay_scan_cache_hit_count": "replay scan-cache hits",
+    "replay_scan_cache_miss_count": "replay scan-cache misses",
+    "replay_scan_cache_lookup_s": "replay scan-cache lookup",
+    "replay_scan_cache_build_s": "replay scan-cache build",
     "compile_time_s": "compile time",
     "replay_time_s": "replay time",
     "cache_time_s": "cache time",
@@ -479,6 +514,7 @@ BOTTLENECK_METRICS = (
     ("exact_tape_solver_iteration_post_update_s", "exact tape solver post-update"),
     ("exact_tape_solver_iteration_loop_unattributed_s", "exact tape solver loop unattributed"),
     ("exact_tape_solver_finalize_s", "exact tape solver finalization"),
+    ("replay_scan_cache_build_s", "replay scan-cache build"),
     ("replay_time_s", "accepted-point replay"),
     ("compile_time_s", "compile/JIT"),
     ("cache_time_s", "cache bookkeeping"),
@@ -1060,6 +1096,45 @@ def _cache_entry_growth(payload: dict[str, Any]) -> int | None:
     return None
 
 
+def _replay_scan_cache_metric(payload: dict[str, Any], suffix: str) -> float | int | None:
+    diagnostics = payload.get("replay_scan_cache_diagnostics")
+    if isinstance(diagnostics, dict):
+        values = [
+            diagnostics.get(key)
+            for key in diagnostics
+            if str(key).startswith("replay_") and str(key).endswith(f"_scan_cache_{suffix}")
+        ]
+        if values:
+            if suffix.endswith("_count"):
+                return int(sum(int(value or 0) for value in values))
+            return float(sum(float(value or 0.0) for value in values))
+
+    samples = payload.get("samples")
+    if isinstance(samples, list):
+        values = [
+            _replay_scan_cache_metric(sample, suffix)
+            for sample in samples
+            if isinstance(sample, dict)
+        ]
+        if any(value is not None for value in values):
+            if suffix.endswith("_count"):
+                return int(sum(int(value or 0) for value in values))
+            return float(sum(float(value or 0.0) for value in values))
+
+    runs = payload.get("runs")
+    if isinstance(runs, list):
+        values = [
+            _replay_scan_cache_metric(run, suffix)
+            for run in runs
+            if isinstance(run, dict)
+        ]
+        if any(value is not None for value in values):
+            if suffix.endswith("_count"):
+                return int(sum(int(value or 0) for value in values))
+            return float(sum(float(value or 0.0) for value in values))
+    return None
+
+
 def _top_profile(
     profile: dict[str, dict[str, float | int]],
     *,
@@ -1073,6 +1148,7 @@ def _top_profile(
             "mean_wall_time_s": float(rec.get("mean_wall_time_s", 0.0)),
         }
         for name, rec in profile.items()
+        if not str(name).endswith("_count")
     ]
     rows.sort(key=lambda row: float(row["wall_time_s"]), reverse=True)
     return rows[: max(0, int(limit))]
@@ -1090,6 +1166,9 @@ SAMPLE_PROFILE_METRICS = {
     "residual_tangents_s",
     "accepted_replay_dispatch_s",
     "accepted_replay_ready_s",
+    "trial_solver_scan_runner_cache_miss_count",
+    "forward_exact_solver_scan_runner_cache_miss_count",
+    "exact_tape_solver_scan_runner_cache_miss_count",
 }
 
 
@@ -1112,6 +1191,10 @@ def _sample_profile_summaries(payload: dict[str, Any], *, top_profile: int) -> l
             if metric in SAMPLE_PROFILE_METRICS
         }
         metrics["replay_time_s"] = _accepted_replay_profile_time(profile)
+        metrics["replay_scan_cache_hit_count"] = _replay_scan_cache_metric(sample, "hit_count")
+        metrics["replay_scan_cache_miss_count"] = _replay_scan_cache_metric(sample, "miss_count")
+        metrics["replay_scan_cache_lookup_s"] = _replay_scan_cache_metric(sample, "lookup_s")
+        metrics["replay_scan_cache_build_s"] = _replay_scan_cache_metric(sample, "build_s")
         out.append(
             {
                 "index": index,
@@ -1312,6 +1395,10 @@ def summarize_payload(
         "accepted_point_replay_count": _accepted_replay_count(payload, profile),
         "cache_entries_after": _cache_entries_after(payload),
         "cache_entry_growth": _cache_entry_growth(payload),
+        "replay_scan_cache_hit_count": _replay_scan_cache_metric(payload, "hit_count"),
+        "replay_scan_cache_miss_count": _replay_scan_cache_metric(payload, "miss_count"),
+        "replay_scan_cache_lookup_s": _replay_scan_cache_metric(payload, "lookup_s"),
+        "replay_scan_cache_build_s": _replay_scan_cache_metric(payload, "build_s"),
     }
 
     runtime = payload.get("runtime") if isinstance(payload.get("runtime"), dict) else {}
