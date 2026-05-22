@@ -411,6 +411,80 @@ stage, normalized to that stage's first objective, with dashed separators markin
 objective-definition or weight changes.  For the seed-3127 lane, the inset is
 a boundary-reference interpolation scan, not an optimizer trajectory.
 
+Minimal-Seed Showcase Snapshot
+------------------------------
+
+The minimal-seed showcase is a bounded stress/reproduction lane for the common
+three-coefficient input family, not a README best-row table.  The checked-in
+assets are:
+
+- :download:`minimal_seed_showcase_summary.csv <_static/figures/minimal_seed_showcase_summary.csv>`
+- ``minimal_seed_showcase_objective_panel.png``
+
+Those assets currently document the state of the refreshed minimal-seed lane as
+follows:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 16 12 12 12 14 34
+
+   * - Case
+     - Problem
+     - NFP
+     - Status
+     - Completion
+     - Release interpretation
+   * - ``qi_circular_nfp1``
+     - QI
+     - 1
+     - ``partial``
+     - timeout
+     - Recorded as a bounded stress row only.
+   * - ``qa_nfp2``
+     - QA
+     - 2
+     - ``partial``
+     - crashed checkpoint
+     - Not promoted in the refreshed static summary.
+   * - ``qh_nfp4``
+     - QH
+     - 4
+     - ``ok``
+     - success
+     - Current common-minimal completion gate pass.
+   * - ``qp_nfp2``
+     - QP
+     - 2
+     - ``ok``
+     - success
+     - Current completion gate pass, but still a refinement target.
+
+Current non-stale common-minimal QI outputs for ``minimal_nfp1_qi``,
+``minimal_nfp2_qi``, ``minimal_nfp3_qi``, and ``minimal_nfp4_qi`` are not
+present in the checked-in summary.  Do not infer a successful QI
+minimal-seed reproduction from the older ``qi_circular_nfp1`` partial row or
+from the separate QI NFP coverage panel above.  The NFP coverage panel uses
+reviewed case-gated QI inputs and, for NFP=4, a minimal seed plus a same-NFP
+finite-beta QI reference-family basin-capture step; it is not the same artifact
+as the common-minimal showcase.
+
+Regenerate the current common-minimal showcase with:
+
+.. code-block:: bash
+
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_minimal_seed_showcase.py \
+     --cases all --backend-label cpu --solver-device cpu --worker-jax-platforms cpu \
+     --policy continuation --max-mode 3 --ess on \
+     --max-nfev 30 --continuation-nfev 20 \
+     --inner-max-iter 120 --trial-max-iter 120 \
+     --inner-ftol 1e-9 --trial-ftol 1e-9 --case-timeout-s 1200 --rerun
+   PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py
+
+Keep ``--rerun`` for release reproduction.  Without it, successful
+``showcase_case.json`` rows may be reused from an older local run; the renderer
+skips known-stale rows by default and ``--include-stale`` should be used only
+for debugging.
+
 Objective Histories
 -------------------
 
