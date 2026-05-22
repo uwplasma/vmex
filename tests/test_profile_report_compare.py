@@ -317,6 +317,9 @@ def test_profile_summary_extracts_scan_solver_buckets() -> None:
     report["profile"]["trial_solver_scan_initial_compute_forces"] = {"count": 1, "wall_time_s": 0.05}
     report["profile"]["trial_solver_scan_axis_reset_compute_forces"] = {"count": 1, "wall_time_s": 0.06}
     report["profile"]["trial_solver_scan_run_setup"] = {"count": 1, "wall_time_s": 0.09}
+    report["profile"]["trial_solver_scan_runner_cache_hit_count"] = {"count": 1, "wall_time_s": 3.0}
+    report["profile"]["trial_solver_scan_runner_cache_miss_count"] = {"count": 1, "wall_time_s": 2.0}
+    report["profile"]["trial_solver_scan_runner_cache_bypass_count"] = {"count": 1, "wall_time_s": 1.0}
     report["profile"]["trial_solver_scan_preflight"] = {"count": 1, "wall_time_s": 0.07}
     report["profile"]["trial_solver_scan_device_run"] = {"count": 1, "wall_time_s": 2.5}
     report["profile"]["trial_solver_scan_device_dispatch"] = {"count": 1, "wall_time_s": 0.4}
@@ -332,6 +335,9 @@ def test_profile_summary_extracts_scan_solver_buckets() -> None:
     assert summary["metrics"]["trial_solver_scan_initial_compute_forces_s"] == 0.05
     assert summary["metrics"]["trial_solver_scan_axis_reset_compute_forces_s"] == 0.06
     assert summary["metrics"]["trial_solver_scan_run_setup_s"] == 0.09
+    assert summary["metrics"]["trial_solver_scan_runner_cache_hit_count"] == 3.0
+    assert summary["metrics"]["trial_solver_scan_runner_cache_miss_count"] == 2.0
+    assert summary["metrics"]["trial_solver_scan_runner_cache_bypass_count"] == 1.0
     assert summary["metrics"]["trial_solver_scan_preflight_s"] == 0.07
     assert summary["metrics"]["trial_solver_scan_device_run_s"] == 2.5
     assert summary["metrics"]["trial_solver_scan_device_dispatch_s"] == 0.4
@@ -340,6 +346,9 @@ def test_profile_summary_extracts_scan_solver_buckets() -> None:
     assert summary["metrics"]["trial_solver_scan_postprocess_s"] == 0.3
     assert summary["metrics"]["trial_solver_scan_unattributed_s"] == 0.08
     assert summary["exact_optimizer_patch_target"]["name"] == "trial_solver_scan_device_ready"
+    assert "trial_solver_scan_runner_cache_miss_count" not in {
+        entry["name"] for entry in summary["top_profile"]
+    }
 
 
 def test_profile_summary_prefers_split_replay_and_tangent_buckets() -> None:
@@ -372,6 +381,41 @@ def test_profile_summary_prefers_split_replay_and_tangent_buckets() -> None:
     assert summary["exact_optimizer_patch_target"]["name"] == "jacobian_tape_replay_ready"
 
 
+def test_profile_summary_extracts_replay_scan_cache_diagnostics() -> None:
+    report = _callback_report(
+        total_wall_time_s=20.0,
+        samples=2,
+        rss_peak_mib=256,
+        replay_wall_time_s=3.0,
+        accepted_replays=2,
+        solve_count=3,
+        cache_entry_growth=4,
+        solver_device="cpu",
+    )
+    report["replay_scan_cache_diagnostics"] = {
+        "replay_checkpoint_scan_cache_hit_count": 2,
+        "replay_checkpoint_scan_cache_miss_count": 1,
+        "replay_checkpoint_scan_cache_lookup_s": 0.01,
+        "replay_checkpoint_scan_cache_build_s": 0.20,
+        "replay_dynamic_basepoint_scan_cache_hit_count": 4,
+        "replay_dynamic_basepoint_scan_cache_miss_count": 3,
+        "replay_dynamic_basepoint_scan_cache_lookup_s": 0.03,
+        "replay_dynamic_basepoint_scan_cache_build_s": 0.40,
+    }
+
+    summary = compare_tool.summarize_payload(report, label="cpu")
+
+    assert summary["metrics"]["replay_scan_cache_hit_count"] == 6
+    assert summary["metrics"]["replay_scan_cache_miss_count"] == 4
+    assert summary["metrics"]["replay_scan_cache_lookup_s"] == pytest.approx(0.04)
+    assert summary["metrics"]["replay_scan_cache_build_s"] == pytest.approx(0.60)
+
+    comparison = compare_tool.build_comparison([summary, summary], baseline="cpu")
+    text = compare_tool.format_text(comparison)
+    assert "replay scan-cache misses" in text
+    assert "replay scan-cache build" in text
+
+
 def test_callback_report_summary_exposes_cold_sample_hotspot() -> None:
     report = _callback_report(
         total_wall_time_s=20.0,
@@ -391,11 +435,19 @@ def test_callback_report_summary_exposes_cold_sample_hotspot() -> None:
         "jacobian_tape_replay_ready": {"count": 1, "wall_time_s": 0.5},
         "jacobian_residual_tangents": {"count": 1, "wall_time_s": 2.0},
     }
+    report["samples"][0]["replay_scan_cache_diagnostics"] = {
+        "replay_checkpoint_scan_cache_miss_count": 1,
+        "replay_checkpoint_scan_cache_build_s": 0.3,
+    }
     report["samples"][1]["profile_delta"] = {
         "jacobian_total": {"count": 1, "wall_time_s": 4.0},
         "jacobian_tape_replay": {"count": 1, "wall_time_s": 1.0},
         "jacobian_tape_replay_dispatch": {"count": 1, "wall_time_s": 0.9},
         "jacobian_tape_replay_ready": {"count": 1, "wall_time_s": 0.1},
+    }
+    report["samples"][1]["replay_scan_cache_diagnostics"] = {
+        "replay_checkpoint_scan_cache_hit_count": 1,
+        "replay_checkpoint_scan_cache_lookup_s": 0.01,
     }
 
     summary = compare_tool.summarize_payload(report, label="gpu")
@@ -406,6 +458,8 @@ def test_callback_report_summary_exposes_cold_sample_hotspot() -> None:
     assert samples[0]["metrics"]["accepted_replay_dispatch_s"] == 8.5
     assert samples[0]["metrics"]["accepted_replay_ready_s"] == 0.5
     assert samples[0]["metrics"]["replay_time_s"] == 9.0
+    assert samples[0]["metrics"]["replay_scan_cache_miss_count"] == 1
+    assert samples[0]["metrics"]["replay_scan_cache_build_s"] == 0.3
     assert samples[0]["exact_optimizer_patch_target"]["name"] == "jacobian_tape_replay_dispatch"
     assert samples[0]["exact_optimizer_patch_target"]["share_of_total"] == pytest.approx(0.85)
     assert samples[1]["exact_optimizer_patch_target"]["name"] == "jacobian_tape_replay_dispatch"

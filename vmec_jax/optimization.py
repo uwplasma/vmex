@@ -1662,6 +1662,14 @@ class FixedBoundaryExactOptimizer:
         rec["count"] = int(rec["count"]) + 1
         rec["wall_time_s"] = float(rec["wall_time_s"]) + float(dt)
 
+    def _profile_add_counter(self, name: str, value: int | float) -> None:
+        """Record a diagnostic counter in the profile schema without timing it."""
+        if not hasattr(self, "_profile"):
+            self._profile = {}
+        rec = self._profile.setdefault(name, {"count": 0, "wall_time_s": 0.0})
+        rec["count"] = int(rec["count"]) + 1
+        rec["wall_time_s"] = float(rec["wall_time_s"]) + float(value)
+
     def _profile_solver_timing(
         self,
         diagnostics,
@@ -1713,6 +1721,11 @@ class FixedBoundaryExactOptimizer:
             ("scan_postprocess_s", "scan_postprocess"),
             ("scan_unattributed_s", "scan_unattributed"),
         )
+        counter_keys = (
+            ("scan_runner_cache_hit_count", "scan_runner_cache_hit_count"),
+            ("scan_runner_cache_miss_count", "scan_runner_cache_miss_count"),
+            ("scan_runner_cache_bypass_count", "scan_runner_cache_bypass_count"),
+        )
         outer_solver_total_keys = {"setup_total_s", "iteration_loop_s", "finalize_s", "scan_total_s"}
         fallback_solver_total_keys = {"compute_forces_s", "preconditioner_s", "update_s", "scan_total_s"}
         has_outer_solver_total = any(key in timing for key in outer_solver_total_keys)
@@ -1726,6 +1739,14 @@ class FixedBoundaryExactOptimizer:
             self._profile_add(f"{profile_prefix}_{suffix}", value)
             if key in (outer_solver_total_keys if has_outer_solver_total else fallback_solver_total_keys):
                 solver_total += max(0.0, value)
+        for key, suffix in counter_keys:
+            if key not in timing:
+                continue
+            try:
+                value = int(timing.get(key, 0))
+            except Exception:
+                continue
+            self._profile_add_counter(f"{profile_prefix}_{suffix}", value)
         if unattributed_name is not None:
             self._profile_add(unattributed_name, max(0.0, float(phase_wall_s) - solver_total))
         return solver_total
