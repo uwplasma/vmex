@@ -1057,6 +1057,36 @@ def test_state_vjp_whole_scan_uses_linearized_dynamic_runner(monkeypatch):
     np.testing.assert_allclose(np.asarray(out), [3.0, 6.0, 9.0])
 
 
+def test_jvp_columns_whole_scan_uses_linearized_dynamic_runner(monkeypatch):
+    monkeypatch.setenv("VMEC_JAX_DYNAMIC_REPLAY_MODE", "whole_scan")
+
+    def fake_runner(*, static, stacked, static_flags):
+        def run(carry_init, _stacked):
+            return (carry_init[0] * 4.0, *carry_init[1:])
+
+        return run
+
+    monkeypatch.setattr(da, "_checkpoint_tape_dynamic_scan_runner", fake_runner)
+    carry0 = (np.zeros(3, dtype=float),) + tuple(np.ones((2,), dtype=float) * idx for idx in range(1, 15))
+    tape = SimpleNamespace(
+        step_traces=(),
+        dynamic_initial_carry=carry0,
+        dynamic_base_carries_stacked=None,
+        stacked_step_traces={"active": np.asarray([True])},
+        step_trace_static_flags={"precond_jmax": 1},
+    )
+
+    tangents = np.asarray([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    out = da.checkpoint_tape_state_jvp_columns(
+        tape=tape,
+        static="static",
+        initial_tangents=tangents,
+        rebuild_preconditioner=True,
+    )
+
+    np.testing.assert_allclose(np.asarray(out), tangents * 4.0)
+
+
 def test_empty_tape_jvp_and_vjp_are_identity():
     tape = SimpleNamespace(
         step_traces=(),

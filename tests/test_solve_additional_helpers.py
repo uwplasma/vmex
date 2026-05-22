@@ -65,6 +65,7 @@ from vmec_jax.solve import (
     _vmec2000_scan_options_from_env,
     _vmec_force_flux_profiles,
     _vmec_scale_m1_factors_from_mats,
+    _write_axis_reset_dump,
     _vmec2000_cadence_selected,
     _free_boundary_prev_rz_fsq_next,
     _free_boundary_should_damp_constraint_baseline,
@@ -924,6 +925,51 @@ def test_initial_axis_reset_decision_force_reset_bypasses_residual_floor():
     assert three_d.reset
     assert disabled.bad_jacobian
     assert not disabled.reset
+
+
+def test_write_axis_reset_dump_validates_optional_diagnostic_file(tmp_path):
+    coeffs = np.asarray([1.0, 2.0, 3.0])
+
+    assert not _write_axis_reset_dump(
+        axis_dump_dir="",
+        ns=5,
+        ntor=2,
+        used_state_guess=False,
+        raxis_cc=coeffs,
+        raxis_cs=coeffs,
+        zaxis_cc=coeffs,
+        zaxis_cs=coeffs,
+    )
+
+    assert _write_axis_reset_dump(
+        axis_dump_dir=tmp_path,
+        ns=5,
+        ntor=2,
+        used_state_guess=True,
+        raxis_cc=coeffs,
+        raxis_cs=coeffs + 10.0,
+        zaxis_cc=coeffs + 20.0,
+        zaxis_cs=coeffs + 30.0,
+    )
+
+    text = (tmp_path / "axis_reset_ns5.dat").read_text(encoding="utf-8")
+    assert "# used_state_guess=1" in text
+    assert "n raxis_cc raxis_cs zaxis_cc zaxis_cs" in text
+    assert "   2  3.0000000000000000e+00  1.3000000000000000e+01" in text
+
+
+def test_write_axis_reset_dump_returns_false_for_incomplete_coefficients(tmp_path):
+    assert not _write_axis_reset_dump(
+        axis_dump_dir=tmp_path,
+        ns=3,
+        ntor=2,
+        used_state_guess=False,
+        raxis_cc=np.asarray([1.0]),
+        raxis_cs=np.asarray([0.0]),
+        zaxis_cc=np.asarray([0.0]),
+        zaxis_cs=np.asarray([0.0]),
+    )
+    assert not (tmp_path / "axis_reset_ns3.dat").exists()
 
 
 def test_zero_edge_rz_force_blocks_preserves_lambda_and_short_mesh_numpy_identity():
