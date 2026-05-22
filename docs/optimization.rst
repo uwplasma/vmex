@@ -517,6 +517,12 @@ branch-shuffle diagnostic.
    ]
    qi_problem = vj.LeastSquaresProblem.from_tuples(objective_tuples)
 
+The staged QI example also passes an explicit
+``qis.make_qi_optimization_context(globals(), strict=True)`` into helper
+routines.  ``strict=True`` makes missing script constants fail immediately
+instead of silently falling back to legacy module globals, while still keeping
+the scientific objective list assembled directly in the script.
+
 For QI cleanup work, rank solved candidates with the no-solve component report
 before promoting any scalar objective result.  Mirror-ratio cleanup must be
 guarded by a QI residual ceiling or by an independent engineering promotion

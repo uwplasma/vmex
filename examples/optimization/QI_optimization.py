@@ -399,7 +399,7 @@ def solve_qi_stage(
     )
 
 
-QI_CONTEXT = qis.make_qi_optimization_context(globals())
+QI_CONTEXT = qis.make_qi_optimization_context(globals(), strict=True)
 active_input_file = INPUT_FILE
 active_input_file = qis.run_target_helicity_seed_preconditioner(
     active_input_file,

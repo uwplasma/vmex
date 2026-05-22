@@ -22,6 +22,11 @@ controls only.  Scientific targets stay in the explicit objective tuple list
 or, for QI field terms, in the shared `QuasiIsodynamicOptions` and objective
 objects.
 
+For staged QI runs, pass an explicit
+`qis.make_qi_optimization_context(globals(), strict=True)` into the helper
+calls.  Strict mode catches missing script constants early and prevents the
+example from silently borrowing legacy module globals.
+
 ## Objective Tuple Pattern
 
 Use explicit SIMSOPT-style tuples and keep the list visible:

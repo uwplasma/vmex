@@ -169,7 +169,7 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "from tools.diagnostics" not in support_text.split("def _load_basin_prefilter_tools")[0]
     assert len(text.splitlines()) < 650
     assert "qis.configure(globals())" not in text
-    assert "QI_CONTEXT = qis.make_qi_optimization_context(globals())" in text
+    assert "QI_CONTEXT = qis.make_qi_optimization_context(globals(), strict=True)" in text
     assert "ctx=QI_CONTEXT" in text
     assert 'RUN_CASE = "nfp2_qi"' in text
     assert "RUN_CASE, CASE = resolve_qi_case(RUN_CASE)" in text
