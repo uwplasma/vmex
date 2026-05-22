@@ -176,7 +176,8 @@ def test_performance_matrix_exact_command_can_request_memory_profile(tmp_path):
             "exact",
             "--lsmr-maxiter",
             "5",
-            "--trial-use-scan",
+            "--trial-scan",
+            "off",
             "--trace",
             "--device-memory-profile",
             "--vmec-timing-detail",
@@ -204,12 +205,25 @@ def test_performance_matrix_exact_command_can_request_memory_profile(tmp_path):
     assert command[command.index("--method") + 1] == "scipy_matrix_free"
     assert command[command.index("--scipy-tr-solver") + 1] == "exact"
     assert command[command.index("--lsmr-maxiter") + 1] == "5"
-    assert "--trial-use-scan" in command
+    assert command[command.index("--trial-scan") + 1] == "off"
     assert "--vmec-timing-detail" in command
     assert "--sync-replay-timing" in command
     assert "--jvp-only-exact-tape" in command
     assert command[command.index("--trace-outdir") + 1] == str(trace)
     assert command[command.index("--device-memory-profile-out") + 1] == str(memory)
+
+
+def test_exact_optimizer_profiler_trial_scan_flag_normalization(monkeypatch):
+    exact_tool = _load_exact_tool()
+
+    legacy = exact_tool._normalize_callback_args(
+        exact_tool._parse_args(["--trial-use-scan", "--method", "auto"])
+    )
+    explicit_off = exact_tool._normalize_callback_args(exact_tool._parse_args(["--trial-scan", "off"]))
+
+    assert legacy.trial_scan == "on"
+    assert legacy.method == "auto"
+    assert explicit_off.trial_scan == "off"
 
 
 def test_exact_callback_summary_preserves_cold_tangent_replay_and_scan_trial_buckets():

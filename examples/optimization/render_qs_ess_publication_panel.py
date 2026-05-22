@@ -639,7 +639,7 @@ def _row_has_history(
             mode_results.append(result)
         if all(result is not None for result in mode_results):
             return True
-    # Partial LASYM matrices are publishable: a 1200 s timeout or OOM is useful
+    # Partial LASYM matrices are publishable: a bounded-time timeout or OOM is useful
     # sweep information.  Missing lanes are kept as blank cells instead of
     # emitting stale "pending" labels into README figures.
     return has_any

@@ -103,7 +103,7 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_minimal_see
   --policy continuation --max-mode 3 --ess on \
   --max-nfev 30 --continuation-nfev 20 \
   --inner-max-iter 120 --trial-max-iter 120 \
-  --inner-ftol 1e-9 --trial-ftol 1e-9 --case-timeout-s 1200 --rerun
+  --inner-ftol 1e-9 --trial-ftol 1e-9 --case-timeout-s 1800 --rerun
 PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py
 ```
 
@@ -383,7 +383,10 @@ Use `tools/diagnostics/profile_exact_optimizer.py` for exact optimizer callback
 profiling and `tools/diagnostics/profile_fixed_boundary.py` for raw solver
 throughput. Accepted-point exact callbacks default to the tape path on both CPU
 and GPU; use `VMEC_JAX_OPT_EXACT_PATH=scan` only for scan-exact diagnostics.
-CPU/GPU command examples live in `docs/performance.rst`.
+CPU/GPU command examples live in `docs/performance.rst`. Optimization scripts
+may set `METHOD = "auto"` to let vmec_jax choose a profiled optimizer method
+without changing the requested device; at present this only promotes the QA
+high-mode CPU/default-backend case to the matrix-free trust-region path.
 
 For QI-specific GPU diagnostics, isolate the Boozer/QI residual from optimizer
 bookkeeping first:

@@ -162,7 +162,7 @@ def _build_parser() -> argparse.ArgumentParser:
     exact.add_argument("--trial-ftol", type=float, default=1.0e-10)
     exact.add_argument(
         "--method",
-        choices=("scipy", "scipy_matrix_free", "gauss_newton", "lbfgs_adjoint", "scalar_trust"),
+        choices=("auto", "scipy", "scipy_matrix_free", "gauss_newton", "lbfgs_adjoint", "scalar_trust"),
         default="scipy",
         help="Optimizer method for exact-callback --callback run profiling.",
     )
@@ -176,7 +176,13 @@ def _build_parser() -> argparse.ArgumentParser:
     exact.add_argument(
         "--trial-use-scan",
         action="store_true",
-        help="Forward --trial-use-scan to profile_exact_optimizer for relaxed trial solves.",
+        help="Legacy alias for --trial-scan=on.",
+    )
+    exact.add_argument(
+        "--trial-scan",
+        choices=("auto", "on", "off"),
+        default="auto",
+        help="Forward trial residual solve policy to profile_exact_optimizer.",
     )
     exact.set_defaults(jvp_only_exact_tape=None)
     exact.add_argument(
@@ -263,6 +269,11 @@ def child_env(
         env["VMEC_JAX_DYNAMIC_REPLAY_MODE"] = str(args.dynamic_replay_mode)
     if getattr(args, "sync_replay_timing", False):
         env["VMEC_JAX_OPT_SYNC_REPLAY_TIMING"] = "1"
+    trial_scan = "on" if getattr(args, "trial_use_scan", False) else str(getattr(args, "trial_scan", "auto"))
+    if trial_scan == "on":
+        env["VMEC_JAX_OPT_TRIAL_SCAN"] = "1"
+    elif trial_scan == "off":
+        env["VMEC_JAX_OPT_TRIAL_SCAN"] = "0"
     if getattr(args, "jvp_only_exact_tape", None) is not None:
         env["VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE"] = (
             "1" if bool(args.jvp_only_exact_tape) else "0"
@@ -279,6 +290,7 @@ def env_summary(env: dict[str, str]) -> dict[str, str | None]:
         "VMEC_JAX_DYNAMIC_REPLAY_BUCKET",
         "VMEC_JAX_DYNAMIC_REPLAY_MODE",
         "VMEC_JAX_OPT_SYNC_REPLAY_TIMING",
+        "VMEC_JAX_OPT_TRIAL_SCAN",
         "VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE",
     )
     return {key: env.get(key) for key in keys if env.get(key) is not None}
@@ -407,8 +419,9 @@ def build_child_command(
     ]
     if int(args.lsmr_maxiter) > 0:
         command.extend(["--lsmr-maxiter", str(int(args.lsmr_maxiter))])
-    if args.trial_use_scan:
-        command.append("--trial-use-scan")
+    trial_scan = "on" if args.trial_use_scan else str(args.trial_scan)
+    if trial_scan != "auto":
+        command.extend(["--trial-scan", trial_scan])
     if args.jvp_only_exact_tape is True:
         command.append("--jvp-only-exact-tape")
     elif args.jvp_only_exact_tape is False:

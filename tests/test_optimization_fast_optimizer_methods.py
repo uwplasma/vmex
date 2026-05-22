@@ -52,6 +52,10 @@ def _run_ready_optimizer(residual: np.ndarray | None = None) -> FixedBoundaryExa
     opt._qs_total_from_state_fn = lambda _state: (_ for _ in ()).throw(
         AssertionError("metadata residuals should avoid state QS callback")
     )
+    opt._objective_family = "qs"
+    opt._helicity_m = 1
+    opt._helicity_n = 0
+    opt._specs = [BoundaryParamSpec("rc30", "rc", 0, 3, 0)]
     opt._base_params_vector = lambda: np.asarray([0.1], dtype=float)
     opt._evaluate_residuals_from_state = lambda _state: residual.copy()
     opt._solve_exact_with_tape = lambda _params, return_payload=False: (state, {}) if return_payload else state
@@ -117,6 +121,66 @@ def test_fixed_boundary_exact_optimizer_init_can_be_unit_constructed(monkeypatch
     assert opt._has_residual_block_metadata is True
     assert opt._scan_exact_path == "tape"
     assert opt._trial_residual_cache_max == 8
+
+
+def test_auto_method_resolver_uses_matrix_free_only_for_profiled_qa_cpu_case(monkeypatch):
+    opt = _run_ready_optimizer()
+
+    assert opt._resolve_optimizer_method("auto", None) == (
+        "scipy_matrix_free",
+        4,
+        "auto:qa-high-mode-matrix-free",
+    )
+
+    opt._solver_device_name = "gpu"
+    assert opt._resolve_optimizer_method("auto", None) == (
+        "scipy",
+        None,
+        "auto:dense-preserves-gpu",
+    )
+
+    opt._solver_device_name = None
+    opt._helicity_n = -1
+    assert opt._resolve_optimizer_method("auto", 7) == (
+        "scipy",
+        7,
+        "auto:dense-default",
+    )
+
+    opt._helicity_n = 0
+    opt._specs = [BoundaryParamSpec("rs30", "rs", 0, 3, 0)]
+    assert opt._resolve_optimizer_method("auto", None) == (
+        "scipy",
+        None,
+        "auto:dense-lasymspecs",
+    )
+
+    opt._specs = []
+    assert opt._resolve_optimizer_method("auto", None) == (
+        "scipy",
+        None,
+        "auto:dense-default",
+    )
+
+    opt._specs = [BoundaryParamSpec("rc20", "rc", 0, 2, 0)]
+    assert opt._resolve_optimizer_method("matrix-free", 9) == ("scipy_matrix_free", 9, None)
+    assert opt._resolve_optimizer_method("scipy-mf", None) == ("scipy_matrix_free", None, None)
+    assert opt._resolve_optimizer_method("trf", None) == ("scipy", None, None)
+
+
+def test_optimizer_backend_name_preserves_explicit_device_and_falls_back(monkeypatch):
+    import vmec_jax._compat as compat
+
+    assert opt_module._optimizer_backend_name("gpu") == "gpu"
+
+    monkeypatch.setattr(compat, "jax", SimpleNamespace(default_backend=lambda: "METAL"))
+    assert opt_module._optimizer_backend_name(None) == "metal"
+
+    def bad_default_backend():
+        raise RuntimeError("synthetic backend probe failure")
+
+    monkeypatch.setattr(compat, "jax", SimpleNamespace(default_backend=bad_default_backend))
+    assert opt_module._optimizer_backend_name(None) == "cpu"
 
 
 def test_move_to_solver_device_recurses_dataclasses_namedtuples_and_containers(monkeypatch):
@@ -452,7 +516,7 @@ def test_run_scipy_path_scales_callbacks_and_records_trace(monkeypatch):
     assert result["_history_dump"]["callback_trace"]["summary"]["jacobian:exact_tape_replay"]["count"] == 1
 
 
-def test_run_scipy_matrix_free_path_wraps_scaled_linear_operator(monkeypatch):
+def test_run_auto_method_records_resolved_matrix_free_policy(monkeypatch):
     pytest.importorskip("scipy.optimize")
     import scipy.optimize
 
@@ -481,7 +545,7 @@ def test_run_scipy_matrix_free_path_wraps_scaled_linear_operator(monkeypatch):
         np.testing.assert_allclose(op.rmatvec(np.asarray([1.0, 2.0, 3.0])), [12.0])
         assert method == "trf"
         assert tr_solver == "lsmr"
-        assert tr_options == {"maxiter": 5}
+        assert tr_options == {"maxiter": 4}
         return SimpleNamespace(
             x=np.asarray([0.2]),
             cost=0.25,
@@ -498,10 +562,9 @@ def test_run_scipy_matrix_free_path_wraps_scaled_linear_operator(monkeypatch):
 
     result = opt.run(
         np.asarray([0.0]),
-        method="scipy_matrix_free",
+        method="auto",
         max_nfev=4,
         x_scale=np.asarray([2.0]),
-        scipy_lsmr_maxiter=5,
         verbose=0,
     )
 
@@ -510,7 +573,10 @@ def test_run_scipy_matrix_free_path_wraps_scaled_linear_operator(monkeypatch):
     np.testing.assert_allclose(operator_calls["rmatvec"], [1.0, 2.0, 3.0])
     np.testing.assert_allclose(result["x"], [0.3])
     assert result["_history_dump"]["method"] == "scipy_matrix_free"
+    assert result["_history_dump"]["method_requested"] == "auto"
+    assert result["_history_dump"]["method_auto_reason"] == "auto:qa-high-mode-matrix-free"
     assert result["_history_dump"]["scipy_tr_solver"] == "lsmr"
+    assert opt._profile["method_auto_scipy_matrix_free"]["count"] == 1
 
 
 def test_run_scipy_matrix_free_scales_multi_parameter_linear_operator(monkeypatch):

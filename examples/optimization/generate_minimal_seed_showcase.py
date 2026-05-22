@@ -35,7 +35,7 @@ Examples:
     --policy continuation --max-mode 3 --ess on \\
     --max-nfev 30 --continuation-nfev 20 \\
     --inner-max-iter 120 --trial-max-iter 120 \\
-    --inner-ftol 1e-9 --trial-ftol 1e-9 --case-timeout-s 1200 --rerun
+    --inner-ftol 1e-9 --trial-ftol 1e-9 --case-timeout-s 1800 --rerun
 
   # Render completed cases.
   python examples/optimization/render_minimal_seed_showcase.py
@@ -835,7 +835,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--inner-ftol", type=float, default=1e-9)
     parser.add_argument("--trial-max-iter", type=int, default=120)
     parser.add_argument("--trial-ftol", type=float, default=1e-9)
-    parser.add_argument("--case-timeout-s", type=float, default=600.0)
+    parser.add_argument("--case-timeout-s", type=float, default=1800.0)
     parser.add_argument(
         "--reference-preseed-blend",
         type=float,

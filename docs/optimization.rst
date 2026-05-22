@@ -117,7 +117,7 @@ non-stale common-minimal QI completions:
      --policy continuation --max-mode 3 --ess on \
      --max-nfev 30 --continuation-nfev 20 \
      --inner-max-iter 120 --trial-max-iter 120 \
-     --inner-ftol 1e-9 --trial-ftol 1e-9 --case-timeout-s 1200 --rerun
+     --inner-ftol 1e-9 --trial-ftol 1e-9 --case-timeout-s 1800 --rerun
    PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py
 
 For a clean reproduction, keep ``--rerun`` on the generator.  Without it,
@@ -573,7 +573,7 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
    MAX_MODE = 3
    MIN_VMEC_MODE = 6
    MAX_NFEV = 30
-   METHOD = "scipy"            # also: "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint", "scalar_trust"
+   METHOD = "scipy"            # also: "auto", "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint", "scalar_trust"
    SCIPY_TR_SOLVER = "lsmr"    # also: "exact" for small dense trust-region solves
    SOLVER_DEVICE = None        # set to "cpu" or "gpu" to force one backend
    SAVE_STAGE_INPUTS = True    # keep per-stage input decks
@@ -859,7 +859,7 @@ figures are regenerated.
 When the full matrix is regenerated, the objective panels contain the CPU/GPU
 policy sweep.  Solid curves met the optimizer success criterion; dashed curves
 are stopped, failed, or budgeted lanes.  The summary tables identify whether a
-dashed lane reached ``max_nfev``, hit the 1200 second timeout, or failed
+dashed lane reached ``max_nfev``, hit the per-case timeout, or failed
 earlier such as from GPU OOM.  Curves are split by objective stage and plotted
 as best-so-far values within that stage, so QP preseed and full constrained QI
 refinement are not treated as one continuous scalar objective.  The QA input
@@ -892,7 +892,7 @@ Run the constrained QI preseed/no-preseed matrix explicitly with:
    PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qi --modes 1,2,3 --ess both --qi-qp-preseed both --rerun
    PYTHONPATH=. python examples/optimization/render_qi_constrained_sweep.py
 
-The default per-case timeout is ``1200 s``.  The current omnigenity-style
+The default per-case timeout is ``1800 s``.  The current omnigenity-style
 science configs use ``inner_max_iter = trial_max_iter = 120`` and
 ``ftol = trial_ftol = 1e-9``.  GPU production sweeps cap those values at 180
 if a future config requests a larger replay budget, so high-mode/LASYM cases
@@ -951,7 +951,7 @@ and full publication panels when those cases are present.
    PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --stellarator-asymmetric --rerun
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
-The checked-in LASYM summary rows are partial 1200 second lanes rather than a
+The checked-in LASYM summary rows are partial bounded-time lanes rather than a
 complete matrix.  This is intentional: timeout and GPU-memory failures are
 useful performance data for the asymmetric exact/replay path.  LASYM
 figures/atlases must be regenerated before being described as published

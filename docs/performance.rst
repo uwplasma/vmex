@@ -1195,13 +1195,15 @@ least-squares solver with ``method="scipy_matrix_free"``:
      --method scipy_matrix_free --lsmr-maxiter 4 --max-nfev 2
 
 This matrix-free trust-region lane is useful for profiling, memory-pressure
-fallbacks, and future larger parameter-count cases, but it is not yet the
-default.  On current QA ``max_mode=3`` CPU diagnostics, dense vectorized column
-replay remains faster than matrix-free LSMR because LSMR still needs multiple
-reverse products per trust-region step.  The matrix-free path implements
-batched ``J @ X`` products and cached split residual-block ``J.Tv`` products,
-so the next optimization target is the reverse VMEC tape replay and the number
-of LSMR iterations, not replacing the production optimizer policy prematurely.
+fallbacks, and larger parameter-count cases, but it is not a global default
+because it is problem dependent.  Use ``method="auto"`` when you want vmec_jax
+to choose only explicitly profiled safe cases without changing the requested
+device.  The current automatic policy is conservative: it may select
+matrix-free LSMR for high-mode, stellarator-symmetric QA on CPU/default CPU,
+but keeps QH, LASYM cases, and explicit GPU runs on the dense SciPy path until
+case-specific matrix-free profiles show a benefit.  The trial residual path can
+be compared explicitly with ``profile_exact_optimizer.py --trial-scan
+auto|on|off``.
 
 A 2026-05-20 matrix-free cleanup removed one redundant initialization AD pass:
 ``residual_linear_operator`` now obtains the frozen-axis initial-state
