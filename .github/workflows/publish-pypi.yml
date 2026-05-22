@@ -18,6 +18,7 @@ jobs:
   build:
     name: Build release distributions
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -59,6 +60,7 @@ jobs:
   publish:
     name: Publish release distributions to PyPI
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: build
     environment:
       name: pypi

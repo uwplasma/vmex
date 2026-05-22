@@ -303,10 +303,19 @@ class FixedBoundaryVMEC:
         min_vmec_mode: int = 5,
         output_dir: Path | str = Path("results/optimization"),
         project_input_boundary_to_max_mode: bool = False,
+        simple_seed: bool = False,
+        simple_seed_perturbation: float = 1.0e-5,
         include: Sequence[str] = ("rc", "zs"),
         fix: Sequence[str] = ("rc00",),
     ) -> "FixedBoundaryVMEC":
-        """Load a VMEC input file and apply the optimization resolution policy."""
+        """Load a VMEC input file and apply the optimization resolution policy.
+
+        ``simple_seed=True`` replaces the boundary by the standard
+        near-circular three-coefficient seed plus deterministic tiny active
+        higher-mode perturbations.  This is useful for stress-testing whether
+        QA/QH/QP/QI examples can leave the zero-transform branch without
+        changing the raw input deck on disk.
+        """
 
         from . import load_config
         from .config import config_from_indata
@@ -318,6 +327,14 @@ class FixedBoundaryVMEC:
             max_mode=max_mode,
             min_vmec_mode=min_vmec_mode,
         )
+        if bool(simple_seed):
+            indata = simple_omnigenity_seed_indata(
+                indata,
+                max_mode=max_mode,
+                include=include,
+                fix=fix,
+                perturbation=simple_seed_perturbation,
+            )
         return cls(
             input_file=input_path,
             cfg=config_from_indata(indata),
@@ -414,7 +431,9 @@ class LeastSquaresProblem:
     """Least-squares objective assembled from ``(function, target, weight)`` tuples.
 
     As in SIMSOPT, tuple ``weight`` is an objective weight.  Internally the
-    residual is ``sqrt(weight) * (function - target)``.
+    residual is ``sqrt(weight) * (function - target)``.  The examples pass
+    objective ``.J`` methods here, which keeps physics targets and weights in
+    the tuple list rather than in the driver/solver call.
     """
 
     objective_terms: tuple[ObjectiveTerm, ...] = ()
@@ -424,10 +443,21 @@ class LeastSquaresProblem:
 
     @classmethod
     def from_tuples(cls, tuples: Sequence[tuple[Callable, float | np.ndarray, float]]):
-        """Create a problem from ``(callable, target, weight)`` tuples."""
+        """Create a problem from SIMSOPT-style ``(J, target, weight)`` tuples.
+
+        ``J`` is usually an objective object's ``.J`` method, such as
+        ``(AspectRatio().J, 6.0, 1.0)``.  Plain callables are also accepted when
+        they use the workflow signature ``J(ctx, state)``.  ``weight`` is the
+        least-squares objective weight, not the residual multiplier.
+        """
 
         assembly = _LeastSquaresProblemAssembly()
-        for fn, target, weight in tuples:
+        for item in tuples:
+            if len(item) != 3:
+                raise ValueError("Least-squares objective tuples must be (callable, target, weight).")
+            fn, target, weight = item
+            if not callable(fn):
+                raise TypeError("Least-squares objective tuple first entry must be callable.")
             assembly.add_tuple(fn, target, weight)
         return cls(
             tuple(assembly.objective_terms),
@@ -1864,6 +1894,126 @@ def rebuild_for_optimization_resolution(indata, *, max_mode: int, min_vmec_mode:
     return rebuild_indata_with_resolution(indata, mpol=vmec_mpol, ntor=vmec_mpol)
 
 
+def simple_omnigenity_seed_indata(
+    indata,
+    *,
+    max_mode: int,
+    include: Sequence[str] = ("rc", "zs"),
+    fix: Sequence[str] = ("rc00",),
+    perturbation: float = 1.0e-5,
+    r0: float | None = None,
+    rbc01: float | None = None,
+    zbs01: float | None = None,
+):
+    """Return an input deck with a simple deterministic omnigenity seed boundary.
+
+    The seed keeps only the near-circular base shape ``RBC(0,0)``,
+    ``RBC(0,1)``, and ``ZBS(0,1)`` from the source deck unless explicit values
+    are supplied.  Every other active optimizable boundary coefficient with
+    ``max(abs(m), abs(n)) <= max_mode`` is set to a deterministic
+    ``±perturbation`` value.  This avoids exactly-zero Jacobian columns when
+    examples start far from a QA/QH/QP/QI warm-start boundary.
+    """
+
+    max_mode_i = int(max_mode)
+    perturbation = float(perturbation)
+    if max_mode_i < 0:
+        raise ValueError("max_mode must be non-negative.")
+    if not math.isfinite(perturbation) or perturbation < 0.0:
+        raise ValueError("perturbation must be finite and non-negative.")
+
+    boundary_keys = {"RBC", "RBS", "ZBC", "ZBS"}
+    include_set = {str(item).lower() for item in include}
+    fix_set = {str(item).lower() for item in fix}
+    family_keys = {
+        "rc": "RBC",
+        "rs": "RBS",
+        "zc": "ZBC",
+        "zs": "ZBS",
+    }
+    kind_offsets = {"rc": 17, "rs": 29, "zc": 43, "zs": 59}
+
+    def _source_value(key: str, index: tuple[int, int], default: float) -> float:
+        return float(indata.indexed.get(key, {}).get(index, default))
+
+    def _sign(kind: str, m_i: int, n_i: int) -> float:
+        parity = (kind_offsets[kind] + 1009 * int(m_i) + 9176 * (int(n_i) + 8192)) % 2
+        return 1.0 if parity == 0 else -1.0
+
+    def _spec_name(kind: str, m_i: int, n_i: int) -> str:
+        n_str = f"{int(n_i):+d}".replace("+", "")
+        return f"{kind}{int(m_i)}{n_str}"
+
+    out = copy.deepcopy(indata)
+    out.indexed = {
+        key: copy.deepcopy(values)
+        for key, values in indata.indexed.items()
+        if str(key).upper() not in boundary_keys
+    }
+    out.indexed["RBC"] = {
+        (0, 0): _source_value("RBC", (0, 0), 1.0) if r0 is None else float(r0),
+        (0, 1): _source_value("RBC", (0, 1), 0.2) if rbc01 is None else float(rbc01),
+    }
+    out.indexed["ZBS"] = {
+        (0, 1): _source_value("ZBS", (0, 1), 0.2) if zbs01 is None else float(zbs01),
+    }
+
+    preserved = {("RBC", (0, 0)), ("RBC", (0, 1)), ("ZBS", (0, 1))}
+    for m_i in range(0, max_mode_i + 1):
+        n_values = range(0, max_mode_i + 1) if m_i == 0 else range(-max_mode_i, max_mode_i + 1)
+        for n_i in n_values:
+            if m_i == 0 and n_i == 0:
+                continue
+            for kind, key in family_keys.items():
+                if kind not in include_set:
+                    continue
+                spec_name = _spec_name(kind, m_i, n_i)
+                if spec_name.lower() in fix_set or (key, (n_i, m_i)) in preserved:
+                    continue
+                out.indexed.setdefault(key, {})[(n_i, m_i)] = _sign(kind, m_i, n_i) * perturbation
+
+    return out
+
+
+def prepare_simple_omnigenity_seed_input(
+    input_file,
+    output_dir,
+    *,
+    max_mode: int,
+    min_vmec_mode: int = 5,
+    enabled: bool = True,
+    include: Sequence[str] = ("rc", "zs"),
+    fix: Sequence[str] = ("rc00",),
+    perturbation: float = 1.0e-5,
+    filename: str = "input.simple_seed",
+):
+    """Write and return a simple omnigenity seed input path when enabled."""
+
+    input_path = Path(input_file)
+    if not bool(enabled):
+        return input_path
+
+    from .namelist import read_indata, write_indata
+
+    output_path = Path(output_dir) / filename
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    indata = read_indata(input_path)
+    indata = rebuild_for_optimization_resolution(
+        indata,
+        max_mode=max_mode,
+        min_vmec_mode=min_vmec_mode,
+    )
+    seeded = simple_omnigenity_seed_indata(
+        indata,
+        max_mode=max_mode,
+        include=include,
+        fix=fix,
+        perturbation=perturbation,
+    )
+    write_indata(output_path, seeded)
+    return output_path
+
+
 def interpolate_indata_boundary(
     seed_indata,
     reference_indata,
@@ -3105,10 +3255,12 @@ __all__ = [
     "quasisymmetry_objective",
     "rebuild_for_optimization_resolution",
     "repeated_stage_modes",
+    "prepare_simple_omnigenity_seed_input",
     "residuals_from_objectives",
     "run_fixed_boundary_objective_optimization",
     "run_quasi_isodynamic_objective_optimization",
     "save_qs_final_outputs",
     "save_qs_stage_artifacts",
+    "simple_omnigenity_seed_indata",
     "VolavgB",
 ]
