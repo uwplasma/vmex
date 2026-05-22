@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 import vmec_jax.discrete_adjoint as da
-from vmec_jax.state import StateLayout, VMECState
+from vmec_jax.state import StateLayout, VMECState, pack_state, unpack_state
 
 
 def _fake_tape(nbytes: int):
@@ -105,6 +105,36 @@ def _fake_supported_dynamic_trace(**overrides) -> dict:
     return trace
 
 
+def _fake_jax_replay_trace(
+    *,
+    lambda_update_scale: float = 1.0,
+    precond_jmax: int = 1,
+    dynamic_supported: bool = True,
+) -> dict:
+    trace = _fake_supported_dynamic_trace(
+        lambda_update_scale=lambda_update_scale,
+        precond_jmax=int(precond_jmax),
+    )
+    trace.update(
+        {
+            "wout_like": np.asarray(0.0),
+            "trig": np.asarray(0.0),
+            "precond_mats": np.asarray(1.0),
+            "lam_prec": np.asarray(1.0),
+        }
+    )
+    if not dynamic_supported:
+        trace.update(
+            {
+                "branch": "synthetic_fallback",
+                "step_status": "synthetic_fallback",
+                "restart_reason": "none",
+                "restart_path": "none",
+            }
+        )
+    return trace
+
+
 def _fake_restart_trace(**overrides) -> dict:
     trace = _fake_supported_dynamic_trace(
         step_status="restart_bad_progress",
@@ -121,6 +151,20 @@ def _fake_carry_stacked(width: int = 3):
 
 def _fake_carry(width: int = 3):
     return (np.zeros(width, dtype=float),) + tuple(np.zeros(1, dtype=float) for _ in range(14))
+
+
+def _dynamic_scan_static_flags(*, precond_jmax: int = 1) -> dict:
+    return {
+        "apply_lforbal": False,
+        "include_edge_residual": True,
+        "apply_m1_constraints": True,
+        "limit_update_rms": False,
+        "limit_dt_from_force": False,
+        "vmec2000_control": True,
+        "divide_by_scalxc_for_update": False,
+        "signgs": 1,
+        "precond_jmax": int(precond_jmax),
+    }
 
 
 def test_replay_column_chunk_default_honors_env_target(monkeypatch):
@@ -269,6 +313,116 @@ def test_scan_cache_limit_lru_and_clear(monkeypatch):
     assert not da._CHECKPOINT_TAPE_DYNAMIC_SCAN_CACHE
     assert not da._CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_SCAN_CACHE
     assert not da._CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_VJP_SCAN_CACHE
+
+
+def test_checkpoint_scan_runner_factories_reuse_cached_runners(monkeypatch):
+    monkeypatch.setenv("VMEC_JAX_SCAN_CACHE_LIMIT", "8")
+    da.clear_replay_scan_caches()
+    static = object()
+
+    trace = _fake_jax_replay_trace()
+    stacked, generic_flags = da._stack_replay_step_traces((trace,))
+    generic = da._checkpoint_tape_scan_runner(
+        static=static,
+        stacked=stacked,
+        static_flags=generic_flags,
+        rebuild_preconditioner=False,
+    )
+    generic_again = da._checkpoint_tape_scan_runner(
+        static=static,
+        stacked=stacked,
+        static_flags=generic_flags,
+        rebuild_preconditioner=False,
+    )
+
+    dynamic_flags = _dynamic_scan_static_flags(precond_jmax=2)
+    dynamic_stacked = {
+        "active": np.asarray([True, False]),
+        "delta": np.asarray([1.0, 2.0]),
+    }
+    dynamic = da._checkpoint_tape_dynamic_scan_runner(
+        static=static,
+        stacked=dynamic_stacked,
+        static_flags=dynamic_flags,
+    )
+    dynamic_again = da._checkpoint_tape_dynamic_scan_runner(
+        static=static,
+        stacked=dynamic_stacked,
+        static_flags=dynamic_flags,
+    )
+
+    stacked_base_carries = (np.zeros((2, 1), dtype=float),)
+    basepoint = da._checkpoint_tape_dynamic_basepoint_scan_runner(
+        static=static,
+        stacked=dynamic_stacked,
+        stacked_base_carries=stacked_base_carries,
+        static_flags=dynamic_flags,
+    )
+    basepoint_again = da._checkpoint_tape_dynamic_basepoint_scan_runner(
+        static=static,
+        stacked=dynamic_stacked,
+        stacked_base_carries=stacked_base_carries,
+        static_flags=dynamic_flags,
+    )
+    basepoint_vjp = da._checkpoint_tape_dynamic_basepoint_vjp_scan_runner(
+        static=static,
+        stacked=dynamic_stacked,
+        stacked_base_carries=stacked_base_carries,
+        static_flags=dynamic_flags,
+    )
+    basepoint_vjp_again = da._checkpoint_tape_dynamic_basepoint_vjp_scan_runner(
+        static=static,
+        stacked=dynamic_stacked,
+        stacked_base_carries=stacked_base_carries,
+        static_flags=dynamic_flags,
+    )
+
+    assert generic is generic_again
+    assert dynamic is dynamic_again
+    assert basepoint is basepoint_again
+    assert basepoint_vjp is basepoint_vjp_again
+    assert len(da._CHECKPOINT_TAPE_SCAN_CACHE) == 1
+    assert len(da._CHECKPOINT_TAPE_DYNAMIC_SCAN_CACHE) == 1
+    assert len(da._CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_SCAN_CACHE) == 1
+    assert len(da._CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_VJP_SCAN_CACHE) == 1
+    da.clear_replay_scan_caches()
+
+
+def test_checkpoint_tape_dynamic_scan_runner_skips_inactive_trace_entries(monkeypatch):
+    from vmec_jax._compat import jnp
+
+    da.clear_replay_scan_caches()
+    static = object()
+
+    def fake_dynamic_step(carry, trace, *, static, static_flags, preconditioner_jmax_override):
+        assert static is not None
+        assert static_flags["precond_jmax"] == 7
+        assert preconditioner_jmax_override == 7
+        delta = jnp.asarray(trace["delta"], dtype=jnp.asarray(carry[0]).dtype)
+        return tuple(jnp.asarray(part) + delta for part in carry)
+
+    monkeypatch.setattr(da, "_packed_dynamic_replay_step_from_carry", fake_dynamic_step)
+    stacked = {
+        "active": np.asarray([True, False, True]),
+        "delta": np.asarray([2.0, 100.0, 3.0]),
+    }
+    static_flags = _dynamic_scan_static_flags(precond_jmax=7)
+    run_scan = da._checkpoint_tape_dynamic_scan_runner(
+        static=static,
+        stacked=stacked,
+        static_flags=static_flags,
+    )
+    assert run_scan is da._checkpoint_tape_dynamic_scan_runner(
+        static=static,
+        stacked=stacked,
+        static_flags=static_flags,
+    )
+
+    carry_final = run_scan((np.asarray([1.0, 2.0]), np.asarray([10.0])), stacked)
+
+    np.testing.assert_allclose(np.asarray(carry_final[0]), [6.0, 7.0])
+    np.testing.assert_allclose(np.asarray(carry_final[1]), [15.0])
+    da.clear_replay_scan_caches()
 
 
 def test_dynamic_replay_mode_env_aliases(monkeypatch):
@@ -544,6 +698,56 @@ def test_direct_checkpoint_tape_jvp_only_can_preserve_basepoint_carries_for_fast
         da.checkpoint_tape_state_vjp(tape=tape, static="static", final_cotangent=np.zeros(6))
 
 
+def test_direct_checkpoint_tape_jvp_only_without_steps_reports_identity(monkeypatch):
+    monkeypatch.delenv("VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES", raising=False)
+    state = _fake_dynamic_trace()["state_pre"]
+
+    def fake_solve(state0, static, *, adjoint_trace, **kwargs):
+        assert state0 is state
+        assert static == "static"
+        assert adjoint_trace is True
+        return SimpleNamespace(
+            state=state,
+            diagnostics={
+                "adjoint_step_trace": [],
+                "timing": {"iterations": 0},
+                "converged": True,
+            },
+        )
+
+    monkeypatch.setattr("vmec_jax.solve.solve_fixed_boundary_residual_iter", fake_solve)
+
+    tape = da.build_residual_checkpoint_tape_direct(
+        state,
+        "static",
+        indata={},
+        signgs=1,
+        max_iter=0,
+        store_full_step_traces=False,
+        jvp_only=True,
+    )
+
+    tangent = np.arange(6.0)
+    columns = np.arange(12.0).reshape(2, 6)
+    assert tape.step_traces == ()
+    assert tape.dynamic_initial_carry is None
+    assert tape.dynamic_base_carries_stacked is None
+    assert tape.jvp_only is True
+    assert tape.diagnostics["jvp_only_basepoint_carries_enabled"] is False
+    assert tape.diagnostics["jvp_only_fast_basepoint_scan_available"] is False
+    assert tape.diagnostics["jvp_only_replay_path"] == "identity"
+    np.testing.assert_allclose(
+        np.asarray(da.checkpoint_tape_state_jvp(tape=tape, static="static", initial_tangent=tangent)),
+        tangent,
+    )
+    np.testing.assert_allclose(
+        np.asarray(da.checkpoint_tape_state_jvp_columns(tape=tape, static="static", initial_tangents=columns)),
+        columns,
+    )
+    with pytest.raises(ValueError, match="forward-replay only"):
+        da.checkpoint_tape_state_vjp(tape=tape, static="static", final_cotangent=tangent)
+
+
 def test_direct_checkpoint_tape_reruns_full_trace_when_dynamic_trace_unsupported(monkeypatch):
     trace_dynamic = _fake_dynamic_trace()
     trace_full = _fake_supported_dynamic_trace(lambda_update_scale=0.75)
@@ -588,6 +792,132 @@ def test_direct_checkpoint_tape_reruns_full_trace_when_dynamic_trace_unsupported
     assert tape.step_trace_static_flags == {"precond_jmax": 1}
     assert stack_calls == [(trace_full,)]
     assert tape.diagnostics["timing"]["iterations"] == 2
+
+
+def test_checkpoint_tape_state_jvp_columns_runs_generic_scan_runner(monkeypatch):
+    from vmec_jax._compat import jnp
+
+    da.clear_replay_scan_caches()
+    static = object()
+    trace = _fake_jax_replay_trace(lambda_update_scale=2.0)
+    stacked, static_flags = da._stack_replay_step_traces((trace,))
+    calls = []
+
+    def fake_strict_update(state, static, **kwargs):
+        calls.append(
+            {
+                "static": static,
+                "mats_is_none": kwargs["mats"] is None,
+                "jmax": kwargs["jmax"],
+                "lam_prec_is_none": kwargs["lam_prec"] is None,
+                "w_mode_mn_is_none": kwargs["w_mode_mn"] is None,
+                "override": kwargs["preconditioner_jmax_override"],
+            }
+        )
+        x = pack_state(state)
+        scale = jnp.asarray(kwargs["lambda_update_scale"], dtype=jnp.asarray(x).dtype)
+        return {"step": {"state_post": unpack_state(scale * x, state.layout)}}
+
+    monkeypatch.setattr(da, "strict_update_one_step_from_state", fake_strict_update)
+    tape = da.ResidualCheckpointTape(
+        final_packed_state=np.zeros(6),
+        packed_states=np.zeros((0, 6)),
+        trace=da.concat_residual_iteration_traces([]),
+        resume_states=(),
+        step_traces=(trace,),
+        stacked_step_traces=stacked,
+        step_trace_static_flags=static_flags,
+    )
+    tangents = np.arange(12.0).reshape(2, 6)
+
+    run_scan = da._checkpoint_tape_scan_runner(
+        static=static,
+        stacked=stacked,
+        static_flags=static_flags,
+        rebuild_preconditioner=False,
+    )
+    assert run_scan is da._checkpoint_tape_scan_runner(
+        static=static,
+        stacked=stacked,
+        static_flags=static_flags,
+        rebuild_preconditioner=False,
+    )
+    out = da.checkpoint_tape_state_jvp_columns(
+        tape=tape,
+        static=static,
+        initial_tangents=tangents,
+        rebuild_preconditioner=False,
+    )
+
+    np.testing.assert_allclose(np.asarray(out), 2.0 * tangents)
+    assert calls == [
+        {
+            "static": static,
+            "mats_is_none": False,
+            "jmax": 1,
+            "lam_prec_is_none": False,
+            "w_mode_mn_is_none": False,
+            "override": None,
+        }
+    ]
+    da.clear_replay_scan_caches()
+
+
+def test_checkpoint_tape_state_jvp_columns_rebuild_preconditioner_with_variable_jmax(monkeypatch):
+    from vmec_jax._compat import jnp
+
+    trace0 = _fake_jax_replay_trace(lambda_update_scale=2.0, precond_jmax=1, dynamic_supported=False)
+    trace1 = _fake_jax_replay_trace(lambda_update_scale=3.0, precond_jmax=4, dynamic_supported=False)
+    calls = []
+
+    def fake_strict_update(state, _static, **kwargs):
+        calls.append(
+            {
+                "mats_is_none": kwargs["mats"] is None,
+                "jmax": kwargs["jmax"],
+                "lam_prec_is_none": kwargs["lam_prec"] is None,
+                "w_mode_mn_is_none": kwargs["w_mode_mn"] is None,
+                "override": kwargs["preconditioner_jmax_override"],
+            }
+        )
+        x = pack_state(state)
+        scale = jnp.asarray(kwargs["lambda_update_scale"], dtype=jnp.asarray(x).dtype)
+        return {"step": {"state_post": unpack_state(scale * x, state.layout)}}
+
+    monkeypatch.setattr(da, "strict_update_one_step_from_state", fake_strict_update)
+    tape = da.ResidualCheckpointTape(
+        final_packed_state=np.zeros(6),
+        packed_states=np.zeros((0, 6)),
+        trace=da.concat_residual_iteration_traces([]),
+        resume_states=(),
+        step_traces=(trace0, trace1),
+    )
+    tangents = np.ones((2, 6), dtype=float)
+
+    out = da.checkpoint_tape_state_jvp_columns(
+        tape=tape,
+        static=object(),
+        initial_tangents=tangents,
+        rebuild_preconditioner=True,
+    )
+
+    np.testing.assert_allclose(np.asarray(out), 6.0 * tangents)
+    assert calls == [
+        {
+            "mats_is_none": True,
+            "jmax": None,
+            "lam_prec_is_none": True,
+            "w_mode_mn_is_none": True,
+            "override": 1,
+        },
+        {
+            "mats_is_none": True,
+            "jmax": None,
+            "lam_prec_is_none": True,
+            "w_mode_mn_is_none": True,
+            "override": 4,
+        },
+    ]
 
 
 def test_checkpoint_tape_builder_collects_step_payloads_until_converged(monkeypatch):
