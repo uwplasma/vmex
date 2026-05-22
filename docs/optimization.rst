@@ -1180,8 +1180,9 @@ Two practical lessons from that study are now reflected in the example:
 ``QI_optimization.py`` is now the single recommended multi-seed entry point.
 The driver keeps the user-facing workflow in one place, while the bundled case
 catalog lives in ``qi_optimization_cases.py`` and the staged promotion,
-checkpoint, and reference-family helper routines live in
-``qi_optimization_support.py``.
+checkpoint, and reference-family helper routines are provided by
+``vmec_jax.qi_optimization`` and re-exported by the local
+``qi_optimization_support.py`` compatibility shim.
 Set ``VMEC_JAX_QI_RUN_CASE`` at launch time, or change ``RUN_CASE`` at the top
 of the file, to one of the bundled cases:
 

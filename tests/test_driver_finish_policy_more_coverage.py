@@ -189,6 +189,73 @@ def test_cli_explicit_multigrid_niter_exhaustion_skips_finish_fallbacks(
     assert diag["converged"] is False
 
 
+def test_cli_single_grid_finish_attempt_promotes_strict_accelerated_result(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[dict] = []
+
+    def fake_solver(state, static, **kwargs):
+        calls.append(
+            {
+                "max_iter": int(kwargs["max_iter"]),
+                "use_scan": bool(kwargs["use_scan"]),
+                "fsq_total_target": kwargs.get("fsq_total_target"),
+                "resume_state_mode": kwargs.get("resume_state_mode"),
+            }
+        )
+        if len(calls) == 1:
+            return _result(
+                _state(static.cfg.ns, "initial"),
+                max_iter=int(kwargs["max_iter"]),
+                fsq=1.0e-3,
+                converged=False,
+                use_scan=bool(kwargs["use_scan"]),
+            )
+        return _result(
+            _state(static.cfg.ns, "finish"),
+            max_iter=int(kwargs["max_iter"]),
+            fsq=1.0e-10,
+            converged=False,
+            use_scan=bool(kwargs["use_scan"]),
+        )
+
+    _install_light_driver(monkeypatch, cfg=_cfg(ns=5), indata=_indata(NITER=4, FTOL=1.0e-8), solver=fake_solver)
+
+    run = driver.run_fixed_boundary(
+        tmp_path / "input.finish_promotes",
+        solver="vmec2000_iter",
+        solver_mode="accelerated",
+        max_iter=4,
+        verbose=False,
+        multigrid=False,
+        use_scan=False,
+        jit_forces=False,
+        grid=object(),
+        cli_fixed_boundary_mode=True,
+        _auto_cli_fixed_boundary_mode=False,
+    )
+
+    assert calls == [
+        {"max_iter": 4, "use_scan": False, "fsq_total_target": None, "resume_state_mode": "minimal"},
+        {
+            "max_iter": 4,
+            "use_scan": False,
+            "fsq_total_target": pytest.approx(driver._accelerated_fsq_total_target_from_ftol(1.0e-8)),
+            "resume_state_mode": "minimal",
+        },
+    ]
+    assert run.state.label == "finish"
+    diag = run.result.diagnostics
+    assert diag["cli_fixed_boundary_initial_policy"] == "single_grid"
+    assert np.asarray(diag["cli_fixed_boundary_finish_budgets"]).tolist() == [4]
+    assert np.asarray(diag["cli_fixed_boundary_finish_modes"]).tolist() == ["accelerated"]
+    assert np.asarray(diag["cli_fixed_boundary_finish_converged"]).tolist() == [True]
+    assert diag["cli_fixed_boundary_full_parity_fallback"] is False
+    assert diag["converged"] is True
+    assert diag["converged_strict"] is True
+
+
 def test_scan_parity_guard_keeps_scan_when_probe_histories_match(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

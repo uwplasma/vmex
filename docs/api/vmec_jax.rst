@@ -33,6 +33,7 @@ Submodules
    vmec_jax.modes
    vmec_jax.namelist
    vmec_jax.optimization
+   vmec_jax.qi_optimization
    vmec_jax.optimization_workflow
    vmec_jax.profiles
    vmec_jax.qi_diagnostics
