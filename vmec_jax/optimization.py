@@ -87,6 +87,20 @@ def _skip_exhausted_gauss_newton_jacobian() -> bool:
     return flag in ("1", "true", "yes", "on")
 
 
+def _optimizer_backend_name(solver_device_name: str | None) -> str:
+    """Return the active optimizer backend name without changing device policy."""
+
+    backend = str(solver_device_name or "").strip().lower()
+    if backend:
+        return backend
+    try:
+        from ._compat import jax as _jax
+
+        return str(_jax.default_backend()).strip().lower() if _jax is not None else "cpu"
+    except Exception:
+        return "cpu"
+
+
 def _coeff_label(prefix: str, m: int, n: int) -> str:
     n_str = f"{n:+d}".replace("+", "")
     return f"{prefix}{m}{n_str}"
@@ -959,6 +973,9 @@ def make_qh_residuals_fn(
     residuals_from_state._n_non_qs = 1
     residuals_from_state._aspect_target = float(target_aspect)
     residuals_from_state._aspect_weight = float(aspect_weight)
+    residuals_from_state._objective_family = "qs"
+    residuals_from_state._helicity_m = int(helicity_m)
+    residuals_from_state._helicity_n = int(helicity_n)
     residuals_from_state._qs_total_from_state = (
         lambda state: float(_qs_eval_from_state(state)["total"]) * float(qs_weight) ** 2
     )
@@ -1244,6 +1261,9 @@ def make_qs_residuals_fn(
     )
     residuals_from_state._aspect_target = None if target_aspect is None else float(target_aspect)
     residuals_from_state._aspect_weight = float(aspect_weight)
+    residuals_from_state._objective_family = "qs"
+    residuals_from_state._helicity_m = int(helicity_m)
+    residuals_from_state._helicity_n = int(helicity_n)
     residuals_from_state._qs_total_from_state = (
         lambda state: float(_qs_eval_from_state(state)["total"]) * float(qs_weight) ** 2
     )
@@ -1360,6 +1380,9 @@ class FixedBoundaryExactOptimizer:
         self._qs_total_from_state_fn = getattr(residuals_fn, "_qs_total_from_state", None)
         self._aspect_target = getattr(residuals_fn, "_aspect_target", None)
         self._aspect_weight = float(getattr(residuals_fn, "_aspect_weight", 1.0))
+        self._objective_family = getattr(residuals_fn, "_objective_family", None)
+        self._helicity_m = getattr(residuals_fn, "_helicity_m", None)
+        self._helicity_n = getattr(residuals_fn, "_helicity_n", None)
 
         # Derive signgs from the initial guess.
         state0 = initial_guess_from_boundary(static, boundary, indata, vmec_project=True)
@@ -1502,6 +1525,47 @@ class FixedBoundaryExactOptimizer:
         if name in ("", "none", "auto", "default"):
             return None
         return name
+
+    def _spec_max_mode(self) -> int:
+        if not self._specs:
+            return 0
+        return max(max(abs(int(spec.m)), abs(int(spec.n))) for spec in self._specs)
+
+    def _has_stellarator_asymmetric_parameter_specs(self) -> bool:
+        return any(str(spec.kind).lower() in ("rs", "zc") for spec in self._specs)
+
+    def _resolve_optimizer_method(self, method: str, scipy_lsmr_maxiter: int | None) -> tuple[str, int | None, str | None]:
+        """Resolve optimizer method aliases and the opt-in automatic policy.
+
+        ``method="auto"`` is intentionally conservative: it only chooses the
+        matrix-free trust-region path for the profiled QA, stellarator-symmetric,
+        high-mode CPU/default-backend case where dense exact Jacobian replay is
+        known to dominate.  It never moves work between CPU and GPU; explicit
+        device choices are preserved.
+        """
+
+        method_key = str(method).strip().lower().replace("-", "_")
+        aliases = {
+            "matrix_free": "scipy_matrix_free",
+            "scipy_mf": "scipy_matrix_free",
+            "trf": "scipy",
+        }
+        method_key = aliases.get(method_key, method_key)
+        if method_key not in ("auto", "adaptive"):
+            return method_key, scipy_lsmr_maxiter, None
+
+        backend = _optimizer_backend_name(self._solver_device_name)
+        if backend in ("gpu", "cuda", "rocm", "tpu"):
+            return "scipy", scipy_lsmr_maxiter, f"auto:dense-preserves-{backend}"
+        if self._has_stellarator_asymmetric_parameter_specs():
+            return "scipy", scipy_lsmr_maxiter, "auto:dense-lasymspecs"
+
+        helicity_m = None if self._helicity_m is None else int(self._helicity_m)
+        helicity_n = None if self._helicity_n is None else int(self._helicity_n)
+        if self._objective_family == "qs" and helicity_m == 1 and helicity_n == 0 and self._spec_max_mode() >= 3:
+            return "scipy_matrix_free", 4 if scipy_lsmr_maxiter is None else scipy_lsmr_maxiter, "auto:qa-high-mode-matrix-free"
+
+        return "scipy", scipy_lsmr_maxiter, "auto:dense-default"
 
     def _select_exact_path(self) -> str:
         """Choose the accepted-point differentiation path.
@@ -3482,7 +3546,10 @@ class FixedBoundaryExactOptimizer:
             Initial parameter vector (usually ``np.zeros(len(specs))``).
         method:
             Outer least-squares method. Supported values are ``"gauss_newton"``
-            and ``"scipy"``. ``"scipy"`` uses ``scipy.optimize.least_squares``
+            and ``"scipy"``. ``"auto"`` keeps the current device selection and
+            resolves to a profiled method for known cases: currently matrix-free
+            SciPy for high-mode, stellarator-symmetric QA on CPU/default CPU,
+            otherwise dense SciPy. ``"scipy"`` uses ``scipy.optimize.least_squares``
             with the exact residual and discrete-adjoint Jacobian callbacks,
             which is more robust on some QA/QH examples.
             ``"scipy_matrix_free"`` uses the same SciPy trust-region solver
@@ -3595,7 +3662,13 @@ class FixedBoundaryExactOptimizer:
         self._remember_best_exact_point(params0_arr, res0, cost0)
 
         # ── outer least-squares loop ────────────────────────────────────────
-        method_key = str(method).strip().lower()
+        method_requested = str(method).strip().lower().replace("-", "_")
+        method_key, scipy_lsmr_maxiter, method_auto_reason = self._resolve_optimizer_method(
+            method_requested,
+            scipy_lsmr_maxiter,
+        )
+        if method_auto_reason is not None:
+            self._profile_add(f"method_auto_{method_key}", 0.0)
         if method_key == "gauss_newton":
             result = gauss_newton_least_squares(
                 self.residual_fun,
@@ -4131,6 +4204,9 @@ class FixedBoundaryExactOptimizer:
                 }
         else:
             raise ValueError(f"Unknown optimization method '{method}'.")
+        result["method"] = method_key
+        result["method_requested"] = method_requested
+        result["method_auto_reason"] = method_auto_reason
         self._post_jacobian_clear()
 
         # ── final evaluation ────────────────────────────────────────────────
@@ -4255,6 +4331,8 @@ class FixedBoundaryExactOptimizer:
             "gtol": gtol,
             "xtol": xtol,
             "method": method_key,
+            "method_requested": method_requested,
+            "method_auto_reason": method_auto_reason,
             "exact_path": self._scan_exact_path,
             "scipy_tr_solver": (
                 scipy_tr_solver
