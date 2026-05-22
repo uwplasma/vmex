@@ -82,7 +82,7 @@ JAX_PLATFORMS=cuda vmec_jax input.nfp4_QH_warm_start
 From Python, leave `solver_device` unset to inherit JAX's default backend, or
 pass `solver_device="cpu"` / `solver_device="gpu"` explicitly.
 
-## Best Optimization Examples
+## Optimization Examples
 
 Editable optimization examples live in `examples/optimization/`. Start with
 `examples/optimization/README.md` for workflow anatomy, then use
@@ -90,10 +90,9 @@ Editable optimization examples live in `examples/optimization/`. Start with
 `docs/optimization_sweep_results.rst` for generated sweep tables/figures, and
 `docs/piecewise_omnigenous_plan.rst` for the pwO planning and acceptance gates.
 
-The README intentionally shows only the best current stellarator-symmetric
-QA/QH/QP/QI rows. Each panel contains initial/final 3D LCFS views, objective
-history over all stages, and initial/final Boozer `|B|` line contours. Extended
-policy discussion, LASYM panels, finite-beta examples, QI case coverage,
+The README intentionally keeps only the compact best current
+stellarator-symmetric QA/QH/QP/QI rows. Extended policy discussion, LASYM
+panels, finite-beta examples, QI NFP 1/2/3/4 coverage, minimal-seed status,
 failure modes, partial CPU/GPU sweep snapshots, and full-matrix artifact
 requirements live in the docs.
 
@@ -104,21 +103,8 @@ requirements live in the docs.
 | QP | CPU | continuation | 3 | no | 5.38e-02 |  |  | 6.015 | -0.6724 | 3.9 min |
 | QI | CPU | qi_default | 3 | yes | 1.37e-02 | 4.31e-04 | 0.272 | 6.002 | -0.5690 | 10.9 min |
 
-<p align="center">
-  <img src="docs/_static/figures/readme_best_optimization_qa.png" width="980" />
-</p>
-
-<p align="center">
-  <img src="docs/_static/figures/readme_best_optimization_qh.png" width="980" />
-</p>
-
-<p align="center">
-  <img src="docs/_static/figures/readme_best_optimization_qp.png" width="980" />
-</p>
-
-<p align="center">
-  <img src="docs/_static/figures/readme_best_optimization_qi.png" width="980" />
-</p>
+Reviewed best-row panel assets are checked in as
+`docs/_static/figures/readme_best_optimization_*.png`.
 
 Reproduce the compact README rows and panels with the individual optimization
 scripts and renderer:
@@ -131,38 +117,10 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_optimization.py
 PYTHONPATH=. python examples/optimization/render_readme_best_optimizations.py
 ```
 
-Full sweep reproduction targets, generated result tables, QI multi-NFP
-coverage, and publication asset requirements are in
-`docs/optimization_sweep_results.rst`. The compact README panels remain the
-reviewed `LASYM = F` best rows only.
-
-## QI From Multiple NFP Inputs
-
-The same `examples/optimization/QI_optimization.py` workflow is exercised on
-case-gated NFP 1, 2, 3, and 4 QI input lanes. The panel below is coverage
-evidence for those configured cases, not a seed-robustness claim and not a
-blanket guarantee that arbitrary VMEC inputs reach QI without tuning. The
-initial panels use the source-input WOUTs; final panels use the accepted
-case-gated outputs. Provenance, gates, and case-specific targets are documented
-in `docs/optimization_sweep_results.rst`; these rows are not aspect-6 README
-best-row promotion evidence.
-The panel below is regenerated with:
-
-```bash
-PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp1_qi python examples/optimization/QI_optimization.py
-PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp2_qi python examples/optimization/QI_optimization.py
-PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp3_qi python examples/optimization/QI_optimization.py
-PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi python examples/optimization/QI_optimization.py
-PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
-```
-
-Exact archived output directories and target-aspect overrides for the current
-checked-in NFP panel, plus the bounded minimal-seed showcase command, are in
-`docs/optimization_sweep_results.rst`.
-
-<p align="center">
-  <img src="docs/_static/figures/readme_qi_optimization_cases.png" width="980" />
-</p>
+Additional checked-in optimization assets include the QI NFP 1/2/3/4
+case-coverage panel/CSV and the minimal-seed showcase panel/CSV. They are
+documented in `docs/optimization_sweep_results.rst` as coverage/status
+artifacts, not as extra README best-row promotion evidence.
 
 ## Performance, Validation, Release
 
