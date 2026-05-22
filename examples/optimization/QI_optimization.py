@@ -399,16 +399,27 @@ def solve_qi_stage(
     )
 
 
-qis.configure(globals())
+QI_CONTEXT = qis.make_qi_optimization_context(globals())
 active_input_file = INPUT_FILE
 active_input_file = qis.run_target_helicity_seed_preconditioner(
     active_input_file,
     OUTPUT_DIR,
     TARGET_HELICITY_SEED_CONFIG,
+    ctx=QI_CONTEXT,
 )
 BOUNDARY_REFERENCE_PRECONDITIONER = dict(CASE.get("boundary_reference_preconditioner", {}))
-active_input_file = qis.run_boundary_reference_preconditioner(active_input_file, OUTPUT_DIR, BOUNDARY_REFERENCE_PRECONDITIONER)
-active_input_file = qis.run_basin_prefilter(active_input_file, OUTPUT_DIR, dict(CASE.get("basin_prefilter", {})))
+active_input_file = qis.run_boundary_reference_preconditioner(
+    active_input_file,
+    OUTPUT_DIR,
+    BOUNDARY_REFERENCE_PRECONDITIONER,
+    ctx=QI_CONTEXT,
+)
+active_input_file = qis.run_basin_prefilter(
+    active_input_file,
+    OUTPUT_DIR,
+    dict(CASE.get("basin_prefilter", {})),
+    ctx=QI_CONTEXT,
+)
 
 if QI_PREFINE:
     print("Running QI-only pre-refinement before applying scalar constraints ...")
@@ -429,6 +440,7 @@ result, promotion_log = qis.run_qi_stage_policy(
     make_qi_problem=make_qi_problem,
     boundary_reference_preconditioner=BOUNDARY_REFERENCE_PRECONDITIONER,
     mirror_ramp_stages=MIRROR_RAMP_STAGES,
+    ctx=QI_CONTEXT,
 )
 
 if result is None:
@@ -448,7 +460,12 @@ saved_paths = {
     "history": OUTPUT_DIR / "history.json",
 }
 print("\nRunning the raw input deck once for initial comparison plots ...")
-raw_initial_run = qis.save_raw_seed_initial_artifacts(INPUT_FILE, saved_paths["initial_input"], saved_paths["initial_wout"])
+raw_initial_run = qis.save_raw_seed_initial_artifacts(
+    INPUT_FILE,
+    saved_paths["initial_input"],
+    saved_paths["initial_wout"],
+    ctx=QI_CONTEXT,
+)
 final_optimizer.save_input(saved_paths["final_input"], result.final_params)
 final_optimizer.save_wout(saved_paths["final_wout"], result.final_params, state=result.final_state)
 final_optimizer.save_history(saved_paths["history"], final_result)
