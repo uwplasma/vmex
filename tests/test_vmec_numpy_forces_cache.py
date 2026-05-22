@@ -95,7 +95,9 @@ def test_np_stack_cache_prunes_dead_and_excess_entries():
 def test_np_module_array_and_elementwise_wrappers_match_numpy():
     x = _NpModule.array([[1, 2], [3, 4]], dtype=float)
     y = _NpModule.asarray(x, dtype=float)
+    z = _NpModule.array([[1, 2], [3, 4]])
     assert y is x
+    assert isinstance(z, _NpArray)
     np.testing.assert_allclose(_NpModule.zeros((2,), dtype=int), np.zeros((2,), dtype=int))
     np.testing.assert_allclose(_NpModule.ones((2,)), np.ones((2,)))
     assert _NpModule.empty_like(x).shape == x.shape
@@ -182,6 +184,20 @@ def test_numpy_module_patch_restores_force_path_modules_and_numpy_mode():
     assert compat.has_jax()
 
 
+def test_numpy_module_patch_deletes_attrs_that_were_absent(monkeypatch):
+    import vmec_jax.vmec_numpy_forces as vmn
+
+    class DummyModule:
+        pass
+
+    dummy = DummyModule()
+    monkeypatch.setattr(vmn, "_PATCHES", [(dummy, [("temporary_jnp", _NP_MODULE)])])
+
+    with _numpy_module_patch():
+        assert dummy.temporary_jnp is _NP_MODULE
+    assert not hasattr(dummy, "temporary_jnp")
+
+
 def test_np_einsum_fast_paths_match_generic_einsum():
     rng = np.random.default_rng(1)
     cases = [
@@ -203,6 +219,10 @@ def test_np_einsum_fast_paths_match_generic_einsum():
 def test_to_numpy_recursive_handles_nested_dataclasses_and_fallbacks():
     from dataclasses import dataclass
 
+    class BadArray:
+        def __array__(self, dtype=None, copy=None):
+            raise TypeError("not array-like")
+
     @dataclass(frozen=True)
     class Inner:
         arr: object
@@ -220,6 +240,8 @@ def test_to_numpy_recursive_handles_nested_dataclasses_and_fallbacks():
     assert converted.inner.label == "a"
     assert converted.scalar == 3
     np.testing.assert_allclose(_to_numpy_recursive([4.0, 5.0]), [4.0, 5.0])
+    bad = BadArray()
+    assert _to_numpy_recursive(bad) is bad
 
 
 @dataclass(frozen=True)
@@ -280,3 +302,43 @@ def test_compute_forces_numpy_converts_state_and_constraint_inputs():
     assert forwarded["include_edge_residual"] is False
     np.testing.assert_allclose(forwarded["freeb_bsqvac_half"], [[[7.0]]])
     assert forwarded["iter_idx"] == 9
+
+
+def test_compute_forces_numpy_falls_back_when_optional_inputs_cannot_convert():
+    class BadState:
+        Rcos = Rsin = Zcos = Zsin = Lcos = Lsin = object()
+
+    class BadArray:
+        def __array__(self, dtype=None, copy=None):
+            raise TypeError("not array-like")
+
+    bad = BadArray()
+    seen = {}
+
+    def fake_compute_forces_impl(state_np, **kwargs):
+        seen["state"] = state_np
+        seen["kwargs"] = kwargs
+        return "fallback-result"
+
+    result = compute_forces_numpy(
+        fake_compute_forces_impl,
+        BadState(),
+        include_edge=False,
+        include_edge_residual=False,
+        constraint_rcon0=bad,
+        constraint_zcon0=bad,
+        constraint_precond_diag=(bad, bad),
+        constraint_tcon=bad,
+        constraint_precond_active=bad,
+        constraint_tcon_active=bad,
+        zero_m1=0.0,
+    )
+
+    assert result == "fallback-result"
+    assert isinstance(seen["state"], BadState)
+    assert seen["kwargs"]["constraint_rcon0"] is bad
+    assert seen["kwargs"]["constraint_zcon0"] is bad
+    assert seen["kwargs"]["constraint_precond_diag"] == (bad, bad)
+    assert seen["kwargs"]["constraint_tcon"] is bad
+    assert seen["kwargs"]["constraint_precond_active"] is bad
+    assert seen["kwargs"]["constraint_tcon_active"] is bad

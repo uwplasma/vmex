@@ -50,6 +50,38 @@ class _QIFieldViolation:
         return workflow.QIObjectiveTerm(f"{self.name}_constraint", _evaluate, qi_options=self.options)
 
 
+class _StateSignedViolation:
+    name = "signed_x"
+
+    def to_constraint_term(self):
+        def _residual(_ctx, state):
+            return jnp.asarray([state.x], dtype=jnp.float64)
+
+        return workflow.ObjectiveTerm(
+            self.name,
+            _residual,
+            target=0.0,
+            weight=1.0,
+            total=lambda ctx, state: jnp.sum(_residual(ctx, state) ** 2),
+            metadata={"signed": True},
+        )
+
+
+class _QIFieldPositiveViolation:
+    name = "qi_positive_violation"
+    requires_qi_field = True
+
+    def __init__(self, options):
+        self.options = options
+
+    def to_qi_term(self, residual_weight: float):
+        def _evaluate(_ctx, _state, field):
+            residual = jnp.asarray(field["violation"], dtype=jnp.float64) * float(residual_weight)
+            return residual, jnp.sum(residual * residual)
+
+        return workflow.QIObjectiveTerm(self.name, _evaluate, qi_options=self.options)
+
+
 def test_augmented_lagrangian_state_constraint_projects_shifted_violation() -> None:
     constraint = workflow.AugmentedLagrangianConstraint(
         _StateViolation(),
@@ -65,6 +97,59 @@ def test_augmented_lagrangian_state_constraint_projects_shifted_violation() -> N
     np.testing.assert_allclose(np.asarray(term.residual(ctx, SimpleNamespace(x=0.20))), [0.5])
     assert term.name == "al_positive_x"
     assert term.metadata["synthetic"] is True
+
+
+def test_augmented_lagrangian_direct_methods_and_invalid_objective_branches() -> None:
+    constraint = workflow.AugmentedLagrangianConstraint(
+        _StateViolation(),
+        multiplier=0.0,
+        penalty=4.0,
+        softness=0.0,
+    )
+    with pytest.raises(RuntimeError, match="assembled through LeastSquaresProblem"):
+        constraint.J(SimpleNamespace(), SimpleNamespace(x=1.0))
+
+    capped = constraint.updated(violation=1.0, penalty_growth=10.0, max_penalty=5.0)
+    assert capped.multiplier == pytest.approx(4.0)
+    assert capped.penalty == pytest.approx(5.0)
+
+    class NoObjectiveHooks:
+        pass
+
+    with pytest.raises(ValueError, match="must expose to_objective_term"):
+        workflow.AugmentedLagrangianConstraint(NoObjectiveHooks()).to_objective_term(target=0.0, residual_weight=1.0)
+    with pytest.raises(ValueError, match="must expose to_qi_term"):
+        workflow.AugmentedLagrangianConstraint(NoObjectiveHooks()).to_qi_term(1.0)
+
+
+def test_augmented_lagrangian_signed_state_and_qi_fallback_paths() -> None:
+    state_term = workflow.AugmentedLagrangianConstraint(
+        _StateSignedViolation(),
+        multiplier=0.0,
+        penalty=4.0,
+        softness=0.0,
+        name="bounded_x",
+    ).to_objective_term(target=0.0, residual_weight=2.0)
+
+    residual = state_term.residual(SimpleNamespace(), SimpleNamespace(x=0.25))
+    np.testing.assert_allclose(np.asarray(residual), [1.0])
+    assert float(state_term.total(SimpleNamespace(), SimpleNamespace(x=0.25))) == pytest.approx(1.0)
+    assert state_term.metadata["signed"] is True
+
+    options = workflow.QuasiIsodynamicOptions(surfaces=np.asarray([0.5]))
+    qi_term = workflow.AugmentedLagrangianConstraint(
+        _QIFieldPositiveViolation(options),
+        multiplier=0.0,
+        penalty=9.0,
+        softness=0.0,
+    ).to_qi_term(2.0)
+    residual, total = qi_term.residual_and_total(
+        SimpleNamespace(),
+        SimpleNamespace(),
+        {"violation": jnp.asarray([0.25], dtype=jnp.float64)},
+    )
+    np.testing.assert_allclose(np.asarray(residual), [1.5])
+    assert float(total) == pytest.approx(2.25)
 
 
 def test_augmented_lagrangian_multiplier_update_is_projected_and_can_grow_penalty() -> None:

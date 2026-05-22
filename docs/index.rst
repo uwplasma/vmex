@@ -11,9 +11,8 @@ vmec-jax documentation
 - end-to-end differentiability (JAX autodiff),
 - performance profiling and tuned default paths, with CPU/GPU benchmark results
   documented per case rather than implied globally,
-- required fast coverage enforced at the 90% gate; the 95% gate remains staged
-  pending a fresh release-candidate coverage run and remaining solver/refactor
-  coverage work,
+- required fast coverage enforced at the 95% gate after the latest
+  CI-equivalent coverage ratchet,
 - stepwise validation against VMEC2000 output (``wout_*.nc``).
 
 .. only:: not fast
