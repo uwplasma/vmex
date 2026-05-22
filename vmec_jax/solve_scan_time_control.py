@@ -56,6 +56,16 @@ class ScanStageSpikePostUpdate(NamedTuple):
     iter1: Any
 
 
+class ScanFallbackProbeUpdate(NamedTuple):
+    probe_count: Any
+    probe_bad_jac: Any
+    probe_accept: Any
+    probe_fsq_start: Any
+    probe_fsq_min: Any
+    probe_fsq_max: Any
+    abort_scan: Any
+
+
 def scan_time_control_scalars(
     *,
     skip_timecontrol: Any,
@@ -308,4 +318,90 @@ def scan_stage_spike_post_update(
         inv_tau=inv_tau_next,
         velocity_blocks=velocity_next,
         iter1=iter1_next,
+    )
+
+
+def scan_fallback_probe_update(
+    *,
+    enabled: bool,
+    scan_core: bool,
+    probe_count: Any,
+    probe_bad_jac: Any,
+    probe_accept: Any,
+    probe_fsq_start: Any,
+    probe_fsq_min: Any,
+    probe_fsq_max: Any,
+    fallback_active: Any,
+    abort_scan: Any,
+    fsq_phys: Any,
+    fsq1: Any,
+    bad_jacobian: Any,
+    accepted: Any,
+    abort_scan_on_badjac: bool,
+    fallback_iters: Any,
+    badjac_limit: Any,
+    accept_frac: Any,
+    fsq_factor: Any,
+    fsq_abs: Any,
+    improve: Any,
+    dtype: Any,
+) -> ScanFallbackProbeUpdate:
+    """Update early scan-fallback probe counters and abort decision."""
+
+    nan_fsq = (~jnp.isfinite(fsq_phys)) | (~jnp.isfinite(fsq1))
+    abort_base = abort_scan | nan_fsq | (bad_jacobian & jnp.asarray(abort_scan_on_badjac))
+    if (not bool(enabled)) or bool(scan_core):
+        return ScanFallbackProbeUpdate(
+            probe_count=probe_count,
+            probe_bad_jac=probe_bad_jac,
+            probe_accept=probe_accept,
+            probe_fsq_start=probe_fsq_start,
+            probe_fsq_min=probe_fsq_min,
+            probe_fsq_max=probe_fsq_max,
+            abort_scan=abort_base,
+        )
+
+    one_i = jnp.asarray(1, dtype=jnp.int32)
+    zero_i = jnp.asarray(0, dtype=jnp.int32)
+    probe_active = (probe_count < fallback_iters) & fallback_active
+    probe_inc = jnp.where(probe_active, one_i, zero_i)
+    probe_count_new = probe_count + probe_inc
+    probe_bad_jac_new = probe_bad_jac + jnp.where(probe_active & bad_jacobian, one_i, zero_i)
+    probe_accept_new = probe_accept + jnp.where(probe_active & accepted, one_i, zero_i)
+    probe_fsq_start_new = jnp.where(probe_active & (probe_count == 0), fsq_phys, probe_fsq_start)
+    probe_fsq_min_new = jnp.where(probe_active, jnp.minimum(probe_fsq_min, fsq_phys), probe_fsq_min)
+    probe_fsq_max_new = jnp.where(probe_active, jnp.maximum(probe_fsq_max, fsq_phys), probe_fsq_max)
+
+    has_probe = (probe_count_new >= fallback_iters) & fallback_active
+    accepted_frac = probe_accept_new.astype(dtype) / jnp.maximum(
+        probe_count_new.astype(dtype),
+        jnp.asarray(1.0, dtype=dtype),
+    )
+    probe_start = jnp.maximum(probe_fsq_start_new, jnp.asarray(1.0e-30, dtype=dtype))
+    probe_ratio = probe_fsq_max_new / probe_start
+    bad_progress = probe_ratio > fsq_factor
+    probe_improve = probe_fsq_min_new <= (probe_fsq_start_new * improve)
+    stagnation_trigger = (
+        has_probe
+        & (~probe_improve)
+        & (probe_fsq_min_new > fsq_abs)
+        & (bad_progress | (accepted_frac < accept_frac))
+    )
+    accepted_trigger = has_probe & (accepted_frac < accept_frac) & (probe_fsq_min_new > fsq_abs) & bad_progress
+    bad_jac_trigger = (
+        (probe_bad_jac_new > badjac_limit)
+        & (probe_fsq_min_new > fsq_abs)
+        & (probe_count_new > 0)
+        & bad_progress
+    )
+    scan_fallback_abort = (bad_jac_trigger | accepted_trigger | stagnation_trigger) & fallback_active
+
+    return ScanFallbackProbeUpdate(
+        probe_count=probe_count_new,
+        probe_bad_jac=probe_bad_jac_new,
+        probe_accept=probe_accept_new,
+        probe_fsq_start=probe_fsq_start_new,
+        probe_fsq_min=probe_fsq_min_new,
+        probe_fsq_max=probe_fsq_max_new,
+        abort_scan=abort_base | scan_fallback_abort,
     )

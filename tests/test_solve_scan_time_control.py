@@ -9,6 +9,7 @@ from vmec_jax.solve_scan_time_control import (
     RESTART_NONE,
     RESTART_STAGE,
     RESTART_TIME,
+    scan_fallback_probe_update,
     scan_restart_decision,
     scan_restart_transition,
     scan_stage_spike_post_scalars,
@@ -19,6 +20,103 @@ from vmec_jax.solve_scan_time_control import (
 
 def _scalar(value):
     return np.asarray(value).item()
+
+
+def _probe_update(**overrides):
+    kwargs = {
+        "enabled": True,
+        "scan_core": False,
+        "probe_count": jnp.asarray(0, dtype=jnp.int32),
+        "probe_bad_jac": jnp.asarray(0, dtype=jnp.int32),
+        "probe_accept": jnp.asarray(0, dtype=jnp.int32),
+        "probe_fsq_start": jnp.asarray(99.0),
+        "probe_fsq_min": jnp.asarray(jnp.inf),
+        "probe_fsq_max": jnp.asarray(0.0),
+        "fallback_active": jnp.asarray(True),
+        "abort_scan": jnp.asarray(False),
+        "fsq_phys": jnp.asarray(1.0),
+        "fsq1": jnp.asarray(1.0),
+        "bad_jacobian": jnp.asarray(False),
+        "accepted": jnp.asarray(True),
+        "abort_scan_on_badjac": True,
+        "fallback_iters": jnp.asarray(2, dtype=jnp.int32),
+        "badjac_limit": jnp.asarray(1, dtype=jnp.int32),
+        "accept_frac": jnp.asarray(0.75),
+        "fsq_factor": jnp.asarray(1.5),
+        "fsq_abs": jnp.asarray(1.0e-8),
+        "improve": jnp.asarray(0.5),
+        "dtype": jnp.asarray(0.0).dtype,
+    }
+    kwargs.update(overrides)
+    return scan_fallback_probe_update(**kwargs)
+
+
+def test_scan_fallback_probe_preserves_counters_when_disabled_but_keeps_abort_gates():
+    update = _probe_update(
+        enabled=False,
+        probe_count=jnp.asarray(3, dtype=jnp.int32),
+        probe_bad_jac=jnp.asarray(2, dtype=jnp.int32),
+        probe_accept=jnp.asarray(1, dtype=jnp.int32),
+        probe_fsq_start=jnp.asarray(4.0),
+        probe_fsq_min=jnp.asarray(3.0),
+        probe_fsq_max=jnp.asarray(5.0),
+        fsq1=jnp.asarray(jnp.nan),
+        bad_jacobian=jnp.asarray(True),
+    )
+
+    assert _scalar(update.probe_count) == 3
+    assert _scalar(update.probe_bad_jac) == 2
+    assert _scalar(update.probe_accept) == 1
+    np.testing.assert_allclose(_scalar(update.probe_fsq_start), 4.0)
+    np.testing.assert_allclose(_scalar(update.probe_fsq_min), 3.0)
+    np.testing.assert_allclose(_scalar(update.probe_fsq_max), 5.0)
+    assert _scalar(update.abort_scan)
+
+
+def test_scan_fallback_probe_records_first_active_probe_step():
+    update = _probe_update(fsq_phys=jnp.asarray(2.0), fsq1=jnp.asarray(2.0))
+
+    assert _scalar(update.probe_count) == 1
+    assert _scalar(update.probe_bad_jac) == 0
+    assert _scalar(update.probe_accept) == 1
+    np.testing.assert_allclose(_scalar(update.probe_fsq_start), 2.0)
+    np.testing.assert_allclose(_scalar(update.probe_fsq_min), 2.0)
+    np.testing.assert_allclose(_scalar(update.probe_fsq_max), 2.0)
+    assert not _scalar(update.abort_scan)
+
+
+def test_scan_fallback_probe_aborts_on_stagnating_bad_progress():
+    update = _probe_update(
+        probe_count=jnp.asarray(1, dtype=jnp.int32),
+        probe_accept=jnp.asarray(0, dtype=jnp.int32),
+        probe_fsq_start=jnp.asarray(1.0),
+        probe_fsq_min=jnp.asarray(1.1),
+        probe_fsq_max=jnp.asarray(1.6),
+        fsq_phys=jnp.asarray(2.0),
+        accepted=jnp.asarray(False),
+    )
+
+    assert _scalar(update.probe_count) == 2
+    assert _scalar(update.probe_accept) == 0
+    np.testing.assert_allclose(_scalar(update.probe_fsq_min), 1.1)
+    np.testing.assert_allclose(_scalar(update.probe_fsq_max), 2.0)
+    assert _scalar(update.abort_scan)
+
+
+def test_scan_fallback_probe_bad_jacobian_limit_triggers_abort():
+    update = _probe_update(
+        probe_count=jnp.asarray(1, dtype=jnp.int32),
+        probe_bad_jac=jnp.asarray(1, dtype=jnp.int32),
+        probe_fsq_start=jnp.asarray(1.0),
+        probe_fsq_min=jnp.asarray(1.1),
+        probe_fsq_max=jnp.asarray(2.0),
+        fsq_phys=jnp.asarray(2.5),
+        bad_jacobian=jnp.asarray(True),
+        abort_scan_on_badjac=False,
+    )
+
+    assert _scalar(update.probe_bad_jac) == 2
+    assert _scalar(update.abort_scan)
 
 
 def test_bad_jacobian_blocks_checkpoint_and_restarts_with_ijacob_increment():

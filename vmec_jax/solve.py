@@ -174,6 +174,7 @@ from .solve_scan_planning_helpers import (
     validate_vmec2000_scan_guards as _validate_vmec2000_scan_guards,
 )
 from .solve_scan_time_control import (
+    scan_fallback_probe_update,
     scan_restart_decision,
     scan_restart_transition,
     scan_stage_spike_post_update,
@@ -8007,83 +8008,38 @@ def solve_fixed_boundary_residual_iter(
                     carry_adv.accepted_count,
                     carry_adv.accepted_count + jnp.asarray(accepted, dtype=jnp.int32),
                 )
-                nan_fsq = (~jnp.isfinite(fsq_phys)) | (~jnp.isfinite(fsq1))
                 fallback_active = carry_adv.fallback_active
-                if scan_fallback_enabled_run and (not bool(scan_core)):
-                    # Track the first N probe steps independent of iter2/iter_offset.
-                    probe_active = (carry_adv.probe_count < scan_fallback_iters_j) & fallback_active
-                    probe_inc = jnp.where(
-                        probe_active,
-                        jnp.asarray(1, dtype=jnp.int32),
-                        jnp.asarray(0, dtype=jnp.int32),
-                    )
-                    probe_count_new = carry_adv.probe_count + probe_inc
-                    probe_bad_jac_new = carry_adv.probe_bad_jac + jnp.where(
-                        probe_active & bad_jacobian,
-                        jnp.asarray(1, dtype=jnp.int32),
-                        jnp.asarray(0, dtype=jnp.int32),
-                    )
-                    probe_accept_new = carry_adv.probe_accept + jnp.where(
-                        probe_active & accepted,
-                        jnp.asarray(1, dtype=jnp.int32),
-                        jnp.asarray(0, dtype=jnp.int32),
-                    )
-                    probe_fsq_start_new = jnp.where(
-                        probe_active & (carry_adv.probe_count == 0),
-                        fsq_phys,
-                        carry_adv.probe_fsq_start,
-                    )
-                    probe_fsq_min_new = jnp.where(
-                        probe_active,
-                        jnp.minimum(carry_adv.probe_fsq_min, fsq_phys),
-                        carry_adv.probe_fsq_min,
-                    )
-                    probe_fsq_max_new = jnp.where(
-                        probe_active,
-                        jnp.maximum(carry_adv.probe_fsq_max, fsq_phys),
-                        carry_adv.probe_fsq_max,
-                    )
-                    has_probe = (probe_count_new >= scan_fallback_iters_j) & fallback_active
-                    accepted_frac = probe_accept_new.astype(dtype) / jnp.maximum(
-                        probe_count_new.astype(dtype), jnp.asarray(1.0, dtype=dtype)
-                    )
-                    probe_start = jnp.maximum(probe_fsq_start_new, jnp.asarray(1.0e-30, dtype=dtype))
-                    probe_ratio = probe_fsq_max_new / probe_start
-                    bad_progress = probe_ratio > scan_fallback_fsq_factor_j
-                    probe_improve = probe_fsq_min_new <= (probe_fsq_start_new * scan_fallback_improve_j)
-                    stagnation_trigger = (
-                        has_probe
-                        & (~probe_improve)
-                        & (probe_fsq_min_new > scan_fallback_fsq_abs_j)
-                        & (bad_progress | (accepted_frac < scan_fallback_accept_frac_j))
-                    )
-                    accepted_trigger = (
-                        has_probe
-                        & (accepted_frac < scan_fallback_accept_frac_j)
-                        & (probe_fsq_min_new > scan_fallback_fsq_abs_j)
-                        & bad_progress
-                    )
-                    bad_jac_trigger = (
-                        (probe_bad_jac_new > scan_fallback_badjac_limit_j)
-                        & (probe_fsq_min_new > scan_fallback_fsq_abs_j)
-                        & (probe_count_new > 0)
-                        & bad_progress
-                    )
-                    scan_fallback_abort = (bad_jac_trigger | accepted_trigger | stagnation_trigger) & fallback_active
-                    abort_scan_new = (
-                        carry_adv.abort_scan
-                        | nan_fsq
-                        | (bad_jacobian & jnp.asarray(abort_scan_on_badjac))
-                        | scan_fallback_abort
-                    )
-                else:
-                    probe_count_new = carry_adv.probe_count
-                    probe_bad_jac_new = carry_adv.probe_bad_jac
-                    probe_accept_new = carry_adv.probe_accept
-                    probe_fsq_start_new = carry_adv.probe_fsq_start
-                    probe_fsq_min_new = carry_adv.probe_fsq_min
-                    probe_fsq_max_new = carry_adv.probe_fsq_max
-                    abort_scan_new = carry_adv.abort_scan | nan_fsq | (bad_jacobian & jnp.asarray(abort_scan_on_badjac))
+                probe_update = scan_fallback_probe_update(
+                    enabled=scan_fallback_enabled_run,
+                    scan_core=bool(scan_core),
+                    probe_count=carry_adv.probe_count,
+                    probe_bad_jac=carry_adv.probe_bad_jac,
+                    probe_accept=carry_adv.probe_accept,
+                    probe_fsq_start=carry_adv.probe_fsq_start,
+                    probe_fsq_min=carry_adv.probe_fsq_min,
+                    probe_fsq_max=carry_adv.probe_fsq_max,
+                    fallback_active=fallback_active,
+                    abort_scan=carry_adv.abort_scan,
+                    fsq_phys=fsq_phys,
+                    fsq1=fsq1,
+                    bad_jacobian=bad_jacobian,
+                    accepted=accepted,
+                    abort_scan_on_badjac=abort_scan_on_badjac,
+                    fallback_iters=scan_fallback_iters_j,
+                    badjac_limit=scan_fallback_badjac_limit_j,
+                    accept_frac=scan_fallback_accept_frac_j,
+                    fsq_factor=scan_fallback_fsq_factor_j,
+                    fsq_abs=scan_fallback_fsq_abs_j,
+                    improve=scan_fallback_improve_j,
+                    dtype=dtype,
+                )
+                probe_count_new = probe_update.probe_count
+                probe_bad_jac_new = probe_update.probe_bad_jac
+                probe_accept_new = probe_update.probe_accept
+                probe_fsq_start_new = probe_update.probe_fsq_start
+                probe_fsq_min_new = probe_update.probe_fsq_min
+                probe_fsq_max_new = probe_update.probe_fsq_max
+                abort_scan_new = probe_update.abort_scan
 
                 if bool(vmec2000_control):
                     cache_valid_out = cache_valid_use
