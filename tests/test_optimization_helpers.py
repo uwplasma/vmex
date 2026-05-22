@@ -1303,6 +1303,76 @@ def test_state_tangent_columns_cache_hit_skips_initial_linearization_setup(monke
     assert opt._profile["jacobian_initial_tangents_cache_hit"]["count"] == 1
 
 
+def test_state_tangent_columns_requests_jvp_only_exact_tape(monkeypatch):
+    import vmec_jax.discrete_adjoint as discrete_adjoint
+
+    monkeypatch.setenv("VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE", "1")
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._layout = SimpleNamespace(size=3)
+    opt._static = object()
+    opt._profile = {}
+    opt._discrete_jacobian_helper_cache = {}
+    opt._initial_tangent_cache = {"cached": jnp.asarray([[1.0, 2.0, 3.0]])}
+    opt._initial_tangent_cache_key = lambda _params: "cached"
+    opt._lasym_replay_column_chunk = lambda _n_params: None
+    solve_calls = []
+
+    def fake_solve(_params, *, return_payload=False, jvp_only=False):
+        solve_calls.append((bool(return_payload), bool(jvp_only)))
+        return "state", {"tape": "jvp-tape", "axis_override": {}}
+
+    opt._solve_exact_with_tape = fake_solve
+    monkeypatch.setattr(
+        discrete_adjoint,
+        "checkpoint_tape_state_jvp_columns",
+        lambda **kwargs: kwargs["initial_tangents"],
+    )
+
+    state, final_tangents = opt._state_and_tangent_columns(
+        np.asarray([0.0]),
+        profile_prefix="jacobian",
+    )
+
+    assert state == "state"
+    np.testing.assert_allclose(np.asarray(final_tangents), [[1.0, 2.0, 3.0]])
+    assert solve_calls == [(True, True)]
+
+
+def test_state_tangent_columns_uses_full_exact_tape_by_default(monkeypatch):
+    import vmec_jax.discrete_adjoint as discrete_adjoint
+
+    monkeypatch.delenv("VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE", raising=False)
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._layout = SimpleNamespace(size=3)
+    opt._static = object()
+    opt._profile = {}
+    opt._discrete_jacobian_helper_cache = {}
+    opt._initial_tangent_cache = {"cached": jnp.asarray([[1.0, 2.0, 3.0]])}
+    opt._initial_tangent_cache_key = lambda _params: "cached"
+    opt._lasym_replay_column_chunk = lambda _n_params: None
+    solve_calls = []
+
+    def fake_solve(_params, *, return_payload=False, jvp_only=False):
+        solve_calls.append((bool(return_payload), bool(jvp_only)))
+        return "state", {"tape": "full-tape", "axis_override": {}}
+
+    opt._solve_exact_with_tape = fake_solve
+    monkeypatch.setattr(
+        discrete_adjoint,
+        "checkpoint_tape_state_jvp_columns",
+        lambda **kwargs: kwargs["initial_tangents"],
+    )
+
+    state, final_tangents = opt._state_and_tangent_columns(
+        np.asarray([0.0]),
+        profile_prefix="jacobian",
+    )
+
+    assert state == "state"
+    np.testing.assert_allclose(np.asarray(final_tangents), [[1.0, 2.0, 3.0]])
+    assert solve_calls == [(True, False)]
+
+
 def test_gradient_callback_reuses_cached_initial_tangents(monkeypatch):
     import vmec_jax.discrete_adjoint as discrete_adjoint
 

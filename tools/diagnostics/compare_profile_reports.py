@@ -42,6 +42,7 @@ SOLVE_PROFILE_NAMES = {
 
 EXACT_PROFILE_METRIC_NAMES = {
     "exact_tape_build_s": ("exact_tape_build",),
+    "exact_tape_build_jvp_only_s": ("exact_tape_build_jvp_only",),
     "exact_tape_build_solve_call_s": ("exact_tape_build_solve_call",),
     "exact_tape_build_final_state_pack_s": ("exact_tape_build_final_state_pack",),
     "exact_tape_build_step_trace_extract_s": ("exact_tape_build_step_trace_extract",),
@@ -98,6 +99,7 @@ EXACT_PROFILE_METRIC_NAMES = {
     "trial_solver_scan_unattributed_s": ("trial_solver_scan_unattributed",),
     "trial_solve_unattributed_s": ("solve_forward_trial_unattributed",),
     "exact_solve_s": ("solve_forward_exact", "solve_forward_exact_total", "exact_solve_with_tape_total"),
+    "exact_solve_with_tape_jvp_only_s": ("exact_solve_with_tape_jvp_only_total",),
     "forward_exact_solver_compute_forces_s": ("forward_exact_solver_compute_forces",),
     "forward_exact_solver_compute_forces_first_s": ("forward_exact_solver_compute_forces_first",),
     "forward_exact_solver_compute_forces_rest_s": ("forward_exact_solver_compute_forces_rest",),
@@ -193,6 +195,7 @@ METRIC_ORDER = (
     "qi_warm_min_s",
     "qi_warm_mean_s",
     "exact_tape_build_s",
+    "exact_tape_build_jvp_only_s",
     "exact_tape_build_solve_call_s",
     "exact_tape_build_final_state_pack_s",
     "exact_tape_build_step_trace_extract_s",
@@ -232,6 +235,7 @@ METRIC_ORDER = (
     "trial_solver_scan_unattributed_s",
     "trial_solve_unattributed_s",
     "exact_solve_s",
+    "exact_solve_with_tape_jvp_only_s",
     "forward_exact_solver_compute_forces_s",
     "forward_exact_solver_compute_forces_first_s",
     "forward_exact_solver_compute_forces_rest_s",
@@ -299,6 +303,7 @@ METRIC_LABELS = {
     "qi_warm_min_s": "QI warm min",
     "qi_warm_mean_s": "QI warm mean",
     "exact_tape_build_s": "exact tape build",
+    "exact_tape_build_jvp_only_s": "exact tape build JVP-only",
     "exact_tape_build_solve_call_s": "exact tape build solve call",
     "exact_tape_build_final_state_pack_s": "exact tape build final state pack",
     "exact_tape_build_step_trace_extract_s": "exact tape build step trace extract",
@@ -338,6 +343,7 @@ METRIC_LABELS = {
     "trial_solver_scan_unattributed_s": "trial solver scan unattributed",
     "trial_solve_unattributed_s": "trial solve unattributed",
     "exact_solve_s": "exact solve",
+    "exact_solve_with_tape_jvp_only_s": "exact solve with tape JVP-only",
     "forward_exact_solver_compute_forces_s": "forward exact solver compute_forces",
     "forward_exact_solver_compute_forces_first_s": "forward exact solver first compute_forces",
     "forward_exact_solver_compute_forces_rest_s": "forward exact solver remaining compute_forces",
@@ -399,6 +405,7 @@ BOTTLENECK_METRICS = (
     ("vmec_preconditioner_s", "VMEC preconditioner"),
     ("vmec_update_s", "VMEC state update"),
     ("exact_tape_build_s", "exact tape build"),
+    ("exact_tape_build_jvp_only_s", "exact tape build JVP-only"),
     ("exact_tape_build_solve_call_s", "exact tape build solve call"),
     ("exact_tape_build_final_state_pack_s", "exact tape build final state pack"),
     ("exact_tape_build_step_trace_extract_s", "exact tape build step-trace extract"),
@@ -435,6 +442,7 @@ BOTTLENECK_METRICS = (
     ("trial_solver_scan_unattributed_s", "trial scan unattributed"),
     ("trial_solve_unattributed_s", "trial solver unattributed"),
     ("exact_solve_s", "accepted exact solve"),
+    ("exact_solve_with_tape_jvp_only_s", "accepted exact JVP-only solve"),
     ("forward_exact_solver_compute_forces_s", "forward exact solver force assembly"),
     ("forward_exact_solver_compute_forces_first_s", "forward exact solver first force assembly"),
     ("forward_exact_solver_compute_forces_rest_s", "forward exact solver remaining force assembly"),
@@ -1270,6 +1278,11 @@ def summarize_payload(
         "jax_default_backend": payload.get("jax_default_backend") or runtime.get("default_backend"),
         "jax_version": payload.get("jax_version") or runtime.get("jax_version"),
         "active_gpu": payload.get("active_gpu") if "active_gpu" in payload else runtime.get("active_gpu"),
+        "jvp_only_exact_tape": (
+            payload.get("jvp_only_exact_tape")
+            if "jvp_only_exact_tape" in payload
+            else runtime.get("vmec_jax_opt_jvp_only_exact_tape")
+        ),
         "jit_booz": _get_path(payload, ("qi_resolution", "jit_booz")),
         "contamination_warnings": payload.get("contamination_warnings"),
         "run_repeats": payload.get("run_repeats"),

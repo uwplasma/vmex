@@ -263,6 +263,7 @@ def test_exact_optimizer_profile_parser_accepts_cache_budget_args() -> None:
             "warn",
             "--vmec-timing-detail",
             "--sync-replay-timing",
+            "--jvp-only-exact-tape",
             "--initial-metrics",
         ]
     )
@@ -282,6 +283,7 @@ def test_exact_optimizer_profile_parser_accepts_cache_budget_args() -> None:
     assert args.budget_action == "warn"
     assert args.vmec_timing_detail is True
     assert args.sync_replay_timing is True
+    assert args.jvp_only_exact_tape is True
     assert args.initial_metrics is True
 
 
@@ -289,6 +291,7 @@ def test_exact_optimizer_profile_skips_initial_metrics_by_default() -> None:
     args = exact_profile_tool._parse_args(["--callback", "jacobian"])
 
     assert args.initial_metrics is False
+    assert args.jvp_only_exact_tape is None
 
 
 def test_exact_optimizer_profile_gradient_alias_preserves_check_gradient() -> None:
@@ -554,6 +557,7 @@ def test_exact_optimizer_callback_report_schema_and_budget_status() -> None:
     assert report["schema_version"] == 2
     assert report["report_kind"] == "exact_optimizer_callback_profile"
     assert report["callback"] == "exact"
+    assert report["jvp_only_exact_tape"] is False
     assert report["cache"]["growth"]["total_entries_delta"] == 2
     assert report["budget_status"]["ok"] is False
     assert {

@@ -178,6 +178,22 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Forward --trial-use-scan to profile_exact_optimizer for relaxed trial solves.",
     )
+    exact.set_defaults(jvp_only_exact_tape=None)
+    exact.add_argument(
+        "--jvp-only-exact-tape",
+        dest="jvp_only_exact_tape",
+        action="store_true",
+        help=(
+            "Forward VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE=1 to exact-callback "
+            "profilers for lean-tape before/after comparisons."
+        ),
+    )
+    exact.add_argument(
+        "--no-jvp-only-exact-tape",
+        dest="jvp_only_exact_tape",
+        action="store_false",
+        help="Forward VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE=0 to exact-callback profilers.",
+    )
     qi = parser.add_argument_group("qi-boozer mode")
     qi.add_argument("--repeat", type=int, default=2, help="QI residual evaluations after the VMEC solve.")
     qi.add_argument("--mpol", type=int, default=6)
@@ -247,6 +263,10 @@ def child_env(
         env["VMEC_JAX_DYNAMIC_REPLAY_MODE"] = str(args.dynamic_replay_mode)
     if getattr(args, "sync_replay_timing", False):
         env["VMEC_JAX_OPT_SYNC_REPLAY_TIMING"] = "1"
+    if getattr(args, "jvp_only_exact_tape", None) is not None:
+        env["VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE"] = (
+            "1" if bool(args.jvp_only_exact_tape) else "0"
+        )
     return env
 
 
@@ -259,6 +279,7 @@ def env_summary(env: dict[str, str]) -> dict[str, str | None]:
         "VMEC_JAX_DYNAMIC_REPLAY_BUCKET",
         "VMEC_JAX_DYNAMIC_REPLAY_MODE",
         "VMEC_JAX_OPT_SYNC_REPLAY_TIMING",
+        "VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE",
     )
     return {key: env.get(key) for key in keys if env.get(key) is not None}
 
@@ -388,6 +409,10 @@ def build_child_command(
         command.extend(["--lsmr-maxiter", str(int(args.lsmr_maxiter))])
     if args.trial_use_scan:
         command.append("--trial-use-scan")
+    if args.jvp_only_exact_tape is True:
+        command.append("--jvp-only-exact-tape")
+    elif args.jvp_only_exact_tape is False:
+        command.append("--no-jvp-only-exact-tape")
     if args.vmec_timing:
         command.append("--vmec-timing")
     if args.vmec_timing_detail:
@@ -492,7 +517,9 @@ def print_report(payload: dict[str, Any]) -> None:
                 _metric(summary, "qi_first_call_s"),
                 _metric(summary, "qi_warm_min_s"),
                 _metric(summary, "exact_solve_s"),
+                _metric(summary, "exact_solve_with_tape_jvp_only_s"),
                 _metric(summary, "exact_tape_build_s"),
+                _metric(summary, "exact_tape_build_jvp_only_s"),
                 _metric(summary, "exact_tape_build_unattributed_s"),
                 _metric(summary, "replay_time_s"),
                 _metric(summary, "accepted_replay_dispatch_s"),
@@ -518,7 +545,9 @@ def print_report(payload: dict[str, Any]) -> None:
         "qi_first_s",
         "qi_warm_s",
         "exact_s",
+        "exact_jvp_s",
         "tape_build_s",
+        "tape_jvp_s",
         "tape_unattr_s",
         "replay_s",
         "replay_dispatch_s",
