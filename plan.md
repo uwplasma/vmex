@@ -600,10 +600,12 @@ Realistic next targets for this development cycle:
    gate to reviewed higher-resolution evidence: smooth QI, legacy QI, mirror
    ratio, elongation, iota, aspect ratio, and Boozer `|B|` contour quality.
 3. Continue GPU optimization only where profiling points to a concrete source
-   change.  Current evidence says the expensive cold exact callback is split
-   between tape build, force/residual work, and replay/residual linearization;
-   the next isolated lane is `checkpoint_tape_state_jvp_columns` and related
-   dynamic-basepoint replay.
+   change.  The guarded JVP-only basepoint-carry prototype restored QH mode-2
+   GPU replay parity in a short office profile, but it remains opt-in until
+   larger mode and trajectory matrices confirm the RSS/runtime tradeoff.  Current
+   evidence says the expensive cold exact callback is split between tape build,
+   force/residual work, and replay/residual linearization; the next isolated lane
+   is `checkpoint_tape_state_jvp_columns` and related dynamic-basepoint replay.
 4. Keep refactors small and test-backed.  Good next seams are pure helper
    extractions or schema/routing cleanup already covered by fast tests.  Broad
    rewrites of `solve.py`, `wout.py`, `free_boundary.py`, and replay
