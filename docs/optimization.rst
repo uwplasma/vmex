@@ -874,6 +874,12 @@ are bounded without silently switching to diagnostic budgets.  Add
 Timed-out sweep workers are started in a private process group when supported;
 the parent terminates that group, including solver or GPU descendant processes,
 before writing the timeout result.
+The continuation runner also writes a bounded ``stage_checkpoint.json`` after
+each completed stage.  If a later high-mode/QI stage times out, the final
+``case_result.json`` is annotated from that checkpoint so the CSV still preserves
+the last accepted objective, aspect, iota, QI, mirror, elongation, timing, and
+stage label.  These partial rows are useful diagnostics, but they are not
+promoted as README best rows unless their independent physics gates pass.
 
 To recreate one row, restrict ``--policy`` and ``--problems``.  For example,
 this reruns the current README-best QA row:

@@ -145,6 +145,10 @@ reviewed `LASYM = F` best rows only.
 The same `examples/optimization/QI_optimization.py` workflow is also exercised
 on reviewed NFP 1, 2, 3, and 4 QI seed-robustness cases. The full provenance,
 case-specific targets, and table are in `docs/optimization_sweep_results.rst`;
+the row labels in the panel give the actual source input, and the initial LCFS
+and Boozer `|B|` panels are the raw VMEC input state before any reference-family
+preconditioning or local QI cleanup. The NFP=4 row is the common minimal seed
+`input.minimal_seed_nfp4`, not the finite-beta stress fixture.
 the panel below is regenerated with:
 
 ```bash

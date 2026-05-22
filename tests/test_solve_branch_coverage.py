@@ -935,3 +935,208 @@ def test_disabled_lambda_dump_helpers_return_without_outputs(tmp_path, monkeypat
     solve._maybe_dump_lamcal(lam_debug={"blam_pre": np.asarray([1.0])}, static=static, iter_idx=7)
 
     assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.skipif(not has_jax(), reason="JAX-backed helper branches require JAX")
+def test_radial_mesh_and_axis_reset_helpers_cover_small_mesh_edges():
+    rhs = np.asarray([[1.0, 2.0], [3.0, 4.0]])
+    assert solve._radial_tridi_smooth_dirichlet(rhs, alpha=0.0, skip_nonpositive=True) is rhs
+
+    with pytest.raises(ValueError, match="ndim>=2"):
+        solve._radial_tridi_smooth_dirichlet(np.asarray([1.0]), alpha=1.0)
+    with pytest.raises(ValueError, match=r"\(ns,K\) or \(ns,M,N\)"):
+        solve._radial_tridi_smooth_dirichlet(np.ones((3, 1, 1, 1)), alpha=1.0)
+    with pytest.raises(ValueError, match="ndim>=2"):
+        solve._radial_tridi_smooth_dirichlet(np.ones((3, 1, 1)), alpha=1.0, allow_3d=False)
+
+    unchanged_short = solve._radial_tridi_smooth_dirichlet(np.ones((2, 2, 1)), alpha=1.0)
+    np.testing.assert_allclose(np.asarray(unchanged_short), 1.0)
+
+    smoothed_3d = solve._radial_tridi_smooth_dirichlet(np.arange(4.0).reshape(4, 1, 1), alpha=0.5)
+    assert np.asarray(smoothed_3d).shape == (4, 1, 1)
+    np.testing.assert_allclose(np.asarray(smoothed_3d)[[0, -1], 0, 0], [0.0, 3.0])
+
+    np.testing.assert_allclose(solve._pshalf_from_s_np(np.asarray([0.25])), [0.5])
+    np.testing.assert_allclose(np.asarray(solve._pshalf_from_s_jax(np.asarray([0.25]), float)), [0.5])
+    sm, sp = solve._sm_sp_from_s_np(np.asarray([0.0]))
+    np.testing.assert_allclose(sm, [0.0, 0.0])
+    np.testing.assert_allclose(sp, [0.0, 0.0])
+
+    st = _tiny_solver_state(ns=3)
+    st_axis = _tiny_solver_state(ns=3, interior=7.0)
+    assert solve._merge_axis_reset_state(st=st, st_axis=st_axis, static=_static(m=(0, 1)), full_reset=True) is st_axis
+    merged = solve._merge_axis_reset_state(
+        st=st,
+        st_axis=st_axis,
+        static=SimpleNamespace(modes=SimpleNamespace(m=np.asarray([0, 1]))),
+        full_reset=False,
+    )
+    np.testing.assert_allclose(np.asarray(merged.Rcos)[:, 0], np.asarray(st_axis.Rcos)[:, 0])
+    np.testing.assert_allclose(np.asarray(merged.Rcos)[:, 1], np.asarray(st.Rcos)[:, 1])
+
+
+@pytest.mark.skipif(not has_jax(), reason="JAX-backed helper branches require JAX")
+def test_mode_gauge_and_constraint_helpers_cover_boundary_cases():
+    assert solve._mode00_index(SimpleNamespace(m=np.asarray([1, 2]), n=np.asarray([0, 0]))) is None
+    assert solve._mode00_index(SimpleNamespace(m=np.asarray([1, 0]), n=np.asarray([0, 0]))) == 1
+
+    arr = jnp.asarray([[1.0, 2.0, 3.0]])
+    same_lcos, same_lsin = solve._enforce_lambda_gauge(arr, arr + 10.0, idx00=None)
+    assert same_lcos is arr
+    assert same_lsin is not None
+    np.testing.assert_allclose(np.asarray(solve._zero_coeff_column(arr[:, :1], idx=0)), [[0.0]])
+    np.testing.assert_allclose(np.asarray(solve._zero_coeff_column(arr, idx=-1)), [[1.0, 2.0, 3.0]])
+    np.testing.assert_allclose(np.asarray(solve._zero_coeff_column(arr, idx=2)), [[1.0, 2.0, 0.0]])
+    np.testing.assert_allclose(np.asarray(solve._zero_coeff_column(arr, idx=1)), [[1.0, 0.0, 3.0]])
+
+    mode_arr = jnp.asarray(np.arange(12.0).reshape(2, 3, 2))
+    replacement = jnp.asarray([[100.0, 101.0], [102.0, 103.0]])
+    assert solve._replace_mode_slice(None, mode_idx=0, replacement=replacement) is None
+    np.testing.assert_allclose(np.asarray(solve._replace_mode_slice(mode_arr, mode_idx=-1, replacement=replacement)), np.asarray(mode_arr))
+    np.testing.assert_allclose(np.asarray(solve._replace_mode_slice(mode_arr, mode_idx=0, replacement=replacement))[:, 0, :], replacement)
+    np.testing.assert_allclose(np.asarray(solve._replace_mode_slice(mode_arr, mode_idx=2, replacement=replacement))[:, 2, :], replacement)
+    np.testing.assert_allclose(np.asarray(solve._replace_mode_slice(mode_arr, mode_idx=1, replacement=replacement))[:, 1, :], replacement)
+    assert solve._scale_mode_slice(None, mode_idx=1, scale=np.asarray([2.0, 3.0])) is None
+    np.testing.assert_allclose(np.asarray(solve._scale_mode_slice(mode_arr, mode_idx=5, scale=np.asarray([2.0, 3.0]))), np.asarray(mode_arr))
+    scaled = solve._scale_mode_slice(mode_arr, mode_idx=1, scale=np.asarray([2.0, 3.0]))
+    np.testing.assert_allclose(np.asarray(scaled)[:, 1, :], np.asarray(mode_arr)[:, 1, :] * np.asarray([[2.0], [3.0]]))
+
+    np.testing.assert_allclose(solve._zero_coeff_column_np([[1.0, 2.0]], idx=5), [[1.0, 2.0]])
+    assert solve._replace_mode_slice_np(None, mode_idx=0, replacement=replacement) is None
+    np.testing.assert_allclose(solve._replace_mode_slice_np(mode_arr, mode_idx=5, replacement=replacement), np.asarray(mode_arr))
+    assert solve._scale_mode_slice_np(None, mode_idx=0, scale=np.asarray([1.0])) is None
+    np.testing.assert_allclose(solve._scale_mode_slice_np(mode_arr, mode_idx=5, scale=np.asarray([2.0, 3.0])), np.asarray(mode_arr))
+
+    state = _state_from_array(np.arange(6.0).reshape(2, 3))
+    assert (
+        solve._apply_vmec_lambda_axis_rules_to_state(
+            state,
+            enforce_vmec_lambda_axis=False,
+            host_update_assembly=True,
+            idx00=1,
+        )
+        is state
+    )
+    host = solve._apply_vmec_lambda_axis_rules_to_state(
+        state,
+        enforce_vmec_lambda_axis=True,
+        host_update_assembly=True,
+        idx00=1,
+    )
+    np.testing.assert_allclose(np.asarray(host.Lcos)[:, 1], 0.0)
+    device = solve._apply_vmec_lambda_axis_rules_to_state(
+        state,
+        enforce_vmec_lambda_axis=True,
+        host_update_assembly=False,
+        idx00=2,
+    )
+    np.testing.assert_allclose(np.asarray(device.Lsin)[:, 2], 0.0)
+
+    full = solve._enforce_field_rows(
+        np.asarray([[1.0, 2.0], [3.0, 4.0]]),
+        axis_mask=np.asarray([1.0, 0.0]),
+        edge_row=np.asarray([5.0, 6.0]),
+    )
+    np.testing.assert_allclose(np.asarray(full), [[1.0, 0.0], [5.0, 6.0]])
+    single = solve._enforce_field_rows(
+        np.asarray([[1.0, 2.0]]),
+        axis_mask=np.asarray([1.0, 0.0]),
+        edge_row=np.asarray([5.0, 6.0]),
+    )
+    np.testing.assert_allclose(np.asarray(single), [[5.0, 0.0]])
+
+
+@pytest.mark.skipif(not has_jax(), reason="M=1 scaling helper branches require JAX")
+def test_m1_preconditioner_scaling_host_and_device_branches():
+    arr = np.ones((3, 2, 1), dtype=float)
+    frzl = TomnspsRZL(
+        frcc=arr,
+        frss=2.0 * arr,
+        fzsc=3.0 * arr,
+        fzcs=4.0 * arr,
+        flsc=5.0 * arr,
+        flcs=6.0 * arr,
+        frsc=7.0 * arr,
+        frcs=8.0 * arr,
+        fzcc=9.0 * arr,
+        fzss=10.0 * arr,
+        flcc=11.0 * arr,
+        flss=12.0 * arr,
+    )
+    mats = {
+        "dr": np.asarray([[0.0], [-2.0], [0.0], [-1.0]]).reshape(2, 2, 1),
+        "dz": np.asarray([[0.0], [-6.0], [0.0], [-1.0]]).reshape(2, 2, 1),
+    }
+
+    assert solve._scale_m1_precond_rhs_from_mats(frzl, mats, lconm1=False, mpol=3, host_update_assembly=True) is frzl
+    assert solve._scale_m1_precond_rhs_from_mats(frzl, mats, lconm1=True, mpol=1, host_update_assembly=True) is frzl
+
+    host = solve._scale_m1_precond_rhs_from_mats(frzl, mats, lconm1=True, mpol=3, host_update_assembly=True)
+    np.testing.assert_allclose(np.asarray(host.frss)[:, 1, 0], [0.5, 1.0, 2.0])
+    np.testing.assert_allclose(np.asarray(host.fzcs)[:, 1, 0], [3.0, 2.0, 4.0])
+    np.testing.assert_allclose(np.asarray(host.frsc)[:, 1, 0], [1.75, 3.5, 7.0])
+    np.testing.assert_allclose(np.asarray(host.fzcc)[:, 1, 0], [6.75, 4.5, 9.0])
+
+    device = solve._scale_m1_precond_rhs_from_mats(frzl, mats, lconm1=True, mpol=3, host_update_assembly=False)
+    np.testing.assert_allclose(np.asarray(device.frss)[:, 1, 0], [0.5, 1.0, 2.0])
+    np.testing.assert_allclose(np.asarray(device.fzcs)[:, 1, 0], [3.0, 2.0, 4.0])
+
+    empty_mats = {"dr": np.empty((0, 2, 1)), "dz": np.empty((0, 2, 1))}
+    assert (
+        solve._scale_m1_precond_rhs_from_mats(
+            frzl,
+            empty_mats,
+            lconm1=True,
+            mpol=3,
+            host_update_assembly=True,
+        )
+        is frzl
+    )
+    assert (
+        solve._scale_m1_precond_rhs_from_mats(
+            frzl,
+            empty_mats,
+            lconm1=True,
+            mpol=3,
+            host_update_assembly=False,
+        )
+        is frzl
+    )
+
+
+def test_dump_helpers_cover_enabled_iteration_and_directory_fallbacks(tmp_path, monkeypatch):
+    static = _static(ns=2, mpol=2, ntor=1, lasym=True, lthreed=True)
+    monkeypatch.setenv("VMEC_JAX_DUMP_DIR", str(tmp_path))
+    monkeypatch.setenv("VMEC_JAX_DUMP_ITER", "4")
+
+    monkeypatch.setenv("VMEC_JAX_DUMP_PRECOND_MATS", "1")
+    solve._maybe_dump_precond_mats(
+        mats={"ar": np.asarray([1.0]), "dz": np.asarray([2.0]), "ignored": np.asarray([3.0])},
+        static=static,
+        iter_idx=4,
+        jmax=9,
+        used_cache=True,
+    )
+    with np.load(tmp_path / "precond_mats_ns2_iter4.npz") as data:
+        assert bool(data["used_cache"])
+        assert set(data.files) >= {"ar", "dz", "jmax"}
+        assert "ignored" not in data.files
+
+    monkeypatch.setenv("VMEC_JAX_DUMP_LAM", "1")
+    monkeypatch.delenv("VMEC_JAX_DUMP_LAM_ITER", raising=False)
+    frzl_pre = _filled_forces(shape=(2, 2, 1))
+    frzl_post = _filled_forces(shape=(2, 2, 1))
+    frzl_post.flcs = 2.0 * np.asarray(frzl_post.flcs)
+    solve._maybe_dump_lam_gcl(frzl_pre=frzl_pre, frzl_post=frzl_post, static=static, iter_idx=4, delta_s=0.5)
+    assert (tmp_path / "lam_gcl_ns2_iter4.npz").exists()
+    text = (tmp_path / "lam_fsql1_ns2_iter4.dat").read_text()
+    assert "lambda fsql1" in text
+
+    monkeypatch.setenv("VMEC_JAX_DUMP_SCALARS", "1")
+    norms = SimpleNamespace(wb=1.0, wp=2.0, volume=3.0, r2=4.0, fnorm=5.0, fnormL=6.0)
+    solve._maybe_dump_scalars(norms=norms, iter_idx=4, ns=2)
+    assert "bcovar scalars" in (tmp_path / "scalars_ns2_iter4.dat").read_text()
+
+    monkeypatch.setenv("VMEC_JAX_DUMP_GCX2", "1")
+    solve._maybe_dump_gcx2(gcr2=1.0, gcz2=2.0, gcl2=3.0, iter_idx=4, include_edge=True, ns=2)
+    assert "gcx2 dump" in (tmp_path / "gcx2_ns2_iter4.dat").read_text()

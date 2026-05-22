@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -165,6 +166,9 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "import qi_optimization_support as qis" in text
     assert len(text.splitlines()) < 600
     assert 'RUN_CASE = "nfp2_qi"' in text
+    assert "RUN_CASE, CASE = resolve_qi_case(RUN_CASE)" in text
+    assert "def resolve_qi_case(default_run_case: str | None = None):" in cases_text
+    assert "RUN_CASE_DEFAULT if default_run_case is None else str(default_run_case)" in cases_text
     assert "VMEC_JAX_QI_RUN_CASE" in cases_text
     assert "VMEC_JAX_QI_INPUT" in cases_text
     assert "VMEC_JAX_QI_OUTPUT_DIR" in cases_text
@@ -272,6 +276,28 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "qi_mirror_ratio_by_surface" in text
     assert 'saved_paths["initial_wout"]' in text
     assert 'saved_paths["history"]' in text
+
+
+def test_qi_case_resolver_respects_editable_default_and_env(monkeypatch) -> None:
+    module_path = ROOT / "examples" / "optimization" / "qi_optimization_cases.py"
+    spec = importlib.util.spec_from_file_location("qi_optimization_cases_for_test", module_path)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    monkeypatch.delenv("VMEC_JAX_QI_RUN_CASE", raising=False)
+    monkeypatch.delenv("VMEC_JAX_QI_INPUT", raising=False)
+    monkeypatch.delenv("VMEC_JAX_QI_OUTPUT_DIR", raising=False)
+
+    run_case, case = module.resolve_qi_case("nfp1_qi")
+    assert run_case == "nfp1_qi"
+    assert case["input_file"].name == "input.nfp1_QI"
+
+    monkeypatch.setenv("VMEC_JAX_QI_RUN_CASE", "minimal_nfp2_qi")
+    run_case, case = module.resolve_qi_case("nfp3_qi")
+    assert run_case == "minimal_nfp2_qi"
+    assert case["input_file"].name == "input.minimal_seed_nfp2"
 
 
 def test_qi_example_keeps_mirror_cleanup_guarded_by_qi_ceiling() -> None:

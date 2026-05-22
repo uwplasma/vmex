@@ -33,7 +33,7 @@ enable_x64(True)
 
 AVAILABLE_QI_CASES = tuple(sorted(QI_CASES))
 RUN_CASE = "nfp2_qi"  # Try "nfp1_qi", "nfp3_qi", "nfp4_qi", "nfp4_qi_finite_beta", or "nfp4_qh_warm_to_qi".
-RUN_CASE, CASE = resolve_qi_case()
+RUN_CASE, CASE = resolve_qi_case(RUN_CASE)
 
 # Problem parameters.  The default case uses the bundled NFP=2 omnigenity seed
 # because it gives the current best mirror-aware QI result in this repository.

@@ -643,10 +643,10 @@ QI_CASES.update(
 RUN_CASE_DEFAULT = "nfp2_qi"
 
 
-def resolve_qi_case():
+def resolve_qi_case(default_run_case: str | None = None):
     """Return ``(run_case, case)`` after applying QI example environment overrides."""
 
-    RUN_CASE = RUN_CASE_DEFAULT
+    RUN_CASE = RUN_CASE_DEFAULT if default_run_case is None else str(default_run_case)
     _EXTERNAL_INPUT = os.environ.get("VMEC_JAX_QI_INPUT")
     if _EXTERNAL_INPUT:
         _external_label = os.environ.get(
