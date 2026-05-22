@@ -142,7 +142,8 @@ The same `examples/optimization/QI_optimization.py` workflow is exercised on
 case-gated NFP 1, 2, 3, and 4 QI seed-robustness examples. The panel below is
 coverage evidence for those configured cases, not a blanket guarantee that any
 arbitrary VMEC input reaches QI without tuning. Provenance, gates, and
-case-specific targets are documented in `docs/optimization_sweep_results.rst`.
+case-specific targets are documented in `docs/optimization_sweep_results.rst`;
+these rows are not aspect-6 README best-row promotion evidence.
 The panel below is regenerated with:
 
 ```bash

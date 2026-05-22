@@ -899,8 +899,11 @@ def test_redl_bootstrap_mismatch_normalization_and_grad():
 
 
 def test_redl_bootstrap_formula_matches_simsopt_when_available():
-    simsopt_bootstrap = pytest.importorskip("simsopt.mhd.bootstrap")
-    simsopt_profiles = pytest.importorskip("simsopt.mhd.profiles")
+    try:
+        simsopt_bootstrap = pytest.importorskip("simsopt.mhd.bootstrap")
+        simsopt_profiles = pytest.importorskip("simsopt.mhd.profiles")
+    except RuntimeError as exc:
+        pytest.skip(f"SIMSOPT bootstrap import failed: {exc}")
 
     s = np.asarray([0.2, 0.5, 0.8])
     ne_coeffs = np.asarray([3.0e20, 0.0, -2.0e20])
