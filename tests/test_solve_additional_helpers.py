@@ -24,6 +24,7 @@ from vmec_jax.solve import (
     _grad_rms_state,
     _half_mesh_from_full_mesh,
     _host_restart_decision,
+    _initial_axis_reset_decision,
     _jit_cache_get,
     _jit_cache_limit,
     _jit_cache_put,
@@ -830,6 +831,99 @@ def test_axis_reset_state_merge_uses_cached_m0_mask_when_available():
     np.testing.assert_allclose(np.asarray(merged.Rcos), np.array([[2.0, 8.0, 2.0], [2.0, 8.0, 2.0]]))
     np.testing.assert_allclose(np.asarray(merged.Zsin), np.array([[2.0, 8.0, 2.0], [2.0, 8.0, 2.0]]))
     np.testing.assert_allclose(np.asarray(merged.Lcos), np.asarray(state.Lcos))
+
+
+def test_initial_axis_reset_decision_requires_state_confirmation_when_configured():
+    decision = _initial_axis_reset_decision(
+        bad_jacobian_ptau=True,
+        bad_jacobian_state=False,
+        badjac_use_state=True,
+        fsq_phys=2.0,
+        axis_reset_fsq_min=1.0,
+        force_axis_reset=False,
+        axis_reset_always_3d=False,
+        lthreed=True,
+    )
+
+    assert not decision.bad_jacobian
+    assert not decision.force_reset
+    assert not decision.reset
+
+    confirmed = _initial_axis_reset_decision(
+        bad_jacobian_ptau=True,
+        bad_jacobian_state=True,
+        badjac_use_state=True,
+        fsq_phys=2.0,
+        axis_reset_fsq_min=1.0,
+        force_axis_reset=False,
+        axis_reset_always_3d=False,
+        lthreed=True,
+    )
+
+    assert confirmed.bad_jacobian
+    assert confirmed.reset
+
+
+@pytest.mark.parametrize("fsq_phys", [None, np.nan, 0.5])
+def test_initial_axis_reset_decision_residual_floor_suppresses_bad_jacobian(fsq_phys):
+    decision = _initial_axis_reset_decision(
+        bad_jacobian_ptau=True,
+        bad_jacobian_state=False,
+        badjac_use_state=False,
+        fsq_phys=fsq_phys,
+        axis_reset_fsq_min=1.0,
+        force_axis_reset=False,
+        axis_reset_always_3d=False,
+        lthreed=True,
+    )
+
+    assert not decision.bad_jacobian
+    assert not decision.reset
+
+
+def test_initial_axis_reset_decision_force_reset_bypasses_residual_floor():
+    explicit = _initial_axis_reset_decision(
+        bad_jacobian_ptau=False,
+        bad_jacobian_state=False,
+        badjac_use_state=False,
+        fsq_phys=0.0,
+        axis_reset_fsq_min=1.0,
+        force_axis_reset=True,
+        axis_reset_always_3d=False,
+        lthreed=False,
+        vmec2000_control=False,
+        lmove_axis=False,
+    )
+    three_d = _initial_axis_reset_decision(
+        bad_jacobian_ptau=None,
+        bad_jacobian_state=False,
+        badjac_use_state=False,
+        fsq_phys=None,
+        axis_reset_fsq_min=1.0,
+        force_axis_reset=False,
+        axis_reset_always_3d=True,
+        lthreed=True,
+        vmec2000_control=True,
+        lmove_axis=True,
+    )
+    disabled = _initial_axis_reset_decision(
+        bad_jacobian_ptau=True,
+        bad_jacobian_state=False,
+        badjac_use_state=False,
+        fsq_phys=2.0,
+        axis_reset_fsq_min=1.0,
+        force_axis_reset=False,
+        axis_reset_always_3d=False,
+        lthreed=True,
+        axis_reset_enabled=False,
+    )
+
+    assert explicit.force_reset
+    assert explicit.reset
+    assert three_d.force_reset
+    assert three_d.reset
+    assert disabled.bad_jacobian
+    assert not disabled.reset
 
 
 def test_zero_edge_rz_force_blocks_preserves_lambda_and_short_mesh_numpy_identity():

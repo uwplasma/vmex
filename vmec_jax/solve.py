@@ -813,6 +813,54 @@ class _ScanResumeInitialFields(NamedTuple):
     state_checkpoint: Any
 
 
+class _InitialAxisResetDecision(NamedTuple):
+    bad_jacobian: bool
+    force_reset: bool
+    reset: bool
+
+
+def _initial_axis_reset_decision(
+    *,
+    bad_jacobian_ptau: bool | None,
+    bad_jacobian_state: bool,
+    badjac_use_state: bool,
+    fsq_phys: float | None,
+    axis_reset_fsq_min: float,
+    force_axis_reset: bool,
+    axis_reset_always_3d: bool,
+    lthreed: bool,
+    vmec2000_control: bool = True,
+    lmove_axis: bool = True,
+    axis_reset_enabled: bool = True,
+) -> _InitialAxisResetDecision:
+    """Pure control-flow gate for VMEC-style initial magnetic-axis resets."""
+
+    if bad_jacobian_ptau is None:
+        bad_jacobian = bool(bad_jacobian_state)
+    elif bool(badjac_use_state):
+        bad_jacobian = bool(bad_jacobian_ptau) and bool(bad_jacobian_state)
+    else:
+        bad_jacobian = bool(bad_jacobian_ptau)
+
+    fsq_min = max(0.0, float(axis_reset_fsq_min))
+    if bad_jacobian and fsq_min > 0.0:
+        if fsq_phys is None:
+            bad_jacobian = False
+        else:
+            fsq_val = float(fsq_phys)
+            if (not np.isfinite(fsq_val)) or (fsq_val < fsq_min):
+                bad_jacobian = False
+
+    force_reset = bool(force_axis_reset) or (
+        bool(vmec2000_control) and bool(lmove_axis) and bool(lthreed) and bool(axis_reset_always_3d)
+    )
+    return _InitialAxisResetDecision(
+        bad_jacobian=bool(bad_jacobian),
+        force_reset=bool(force_reset),
+        reset=bool(axis_reset_enabled) and (bool(bad_jacobian) or bool(force_reset)),
+    )
+
+
 def _initialize_scan_resume_state(
     resume_state: dict | None,
     *,
@@ -6841,20 +6889,20 @@ def solve_fixed_boundary_residual_iter(
                 except Exception:
                     bad_jacobian_state = False
 
-            if bad_jacobian_ptau is None:
-                bad_jacobian0 = bad_jacobian_state
-            else:
-                if badjac_use_state:
-                    # Require both ptau and state sign changes to avoid
-                    # false-positive axis resets on benign cases.
-                    bad_jacobian0 = bool(bad_jacobian_ptau) and bool(bad_jacobian_state)
-                else:
-                    bad_jacobian0 = bool(bad_jacobian_ptau)
-            if bad_jacobian0 and axis_reset_fsq_min > 0.0:
-                if (fsq_phys0_val is None) or (not np.isfinite(fsq_phys0_val)):
-                    bad_jacobian0 = False
-                elif fsq_phys0_val < axis_reset_fsq_min:
-                    bad_jacobian0 = False
+            axis_reset_decision = _initial_axis_reset_decision(
+                bad_jacobian_ptau=bad_jacobian_ptau,
+                bad_jacobian_state=bad_jacobian_state,
+                badjac_use_state=badjac_use_state,
+                fsq_phys=fsq_phys0_val,
+                axis_reset_fsq_min=axis_reset_fsq_min,
+                force_axis_reset=force_axis_reset,
+                axis_reset_always_3d=axis_reset_always_3d,
+                lthreed=bool(getattr(static.cfg, "lthreed", True)),
+                vmec2000_control=vmec2000_control,
+                lmove_axis=lmove_axis,
+                axis_reset_enabled=axis_reset_enabled,
+            )
+            bad_jacobian0 = axis_reset_decision.bad_jacobian
             if axis_reset_debug:
                 try:
                     fsq_debug_val = float("nan") if fsq_phys0_val is None else float(fsq_phys0_val)
@@ -6868,13 +6916,22 @@ def solve_fixed_boundary_residual_iter(
                     )
                 except Exception:
                     pass
-        force_axis_reset_init = bool(force_axis_reset) or (
-            bool(vmec2000_control)
-            and bool(lmove_axis)
-            and bool(getattr(static.cfg, "lthreed", True))
-            and axis_reset_always_3d
-        )
-        if axis_reset_enabled and (bad_jacobian0 or force_axis_reset_init):
+        else:
+            axis_reset_decision = _initial_axis_reset_decision(
+                bad_jacobian_ptau=None,
+                bad_jacobian_state=False,
+                badjac_use_state=badjac_use_state,
+                fsq_phys=fsq_phys0_val,
+                axis_reset_fsq_min=axis_reset_fsq_min,
+                force_axis_reset=force_axis_reset,
+                axis_reset_always_3d=axis_reset_always_3d,
+                lthreed=bool(getattr(static.cfg, "lthreed", True)),
+                vmec2000_control=vmec2000_control,
+                lmove_axis=lmove_axis,
+                axis_reset_enabled=axis_reset_enabled,
+            )
+        force_axis_reset_init = axis_reset_decision.force_reset
+        if axis_reset_decision.reset:
             if bool(verbose) and bool(vmec2000_control) and bool(verbose_vmec2000_table):
                 if bad_jacobian0 or force_axis_reset_init:
                     print(" INITIAL JACOBIAN CHANGED SIGN!", flush=True)
@@ -9796,20 +9853,17 @@ def solve_fixed_boundary_residual_iter(
             except Exception:
                 fsq_phys0_val = None
 
-            if bad_jacobian_ptau is None:
-                bad_jacobian0 = bad_jacobian_state
-            else:
-                if badjac_use_state:
-                    # Require both ptau and state sign changes to avoid
-                    # false-positive axis resets on benign cases.
-                    bad_jacobian0 = bool(bad_jacobian_ptau) and bool(bad_jacobian_state)
-                else:
-                    bad_jacobian0 = bool(bad_jacobian_ptau)
-            if bad_jacobian0 and axis_reset_fsq_min > 0.0:
-                if (fsq_phys0_val is None) or (not np.isfinite(fsq_phys0_val)):
-                    bad_jacobian0 = False
-                elif fsq_phys0_val < axis_reset_fsq_min:
-                    bad_jacobian0 = False
+            axis_reset_decision = _initial_axis_reset_decision(
+                bad_jacobian_ptau=bad_jacobian_ptau,
+                bad_jacobian_state=bad_jacobian_state,
+                badjac_use_state=badjac_use_state,
+                fsq_phys=fsq_phys0_val,
+                axis_reset_fsq_min=axis_reset_fsq_min,
+                force_axis_reset=force_axis_reset,
+                axis_reset_always_3d=axis_reset_always_3d,
+                lthreed=bool(getattr(cfg, "lthreed", True)),
+            )
+            bad_jacobian0 = axis_reset_decision.bad_jacobian
             if axis_reset_debug:
                 try:
                     fsq_debug_val = float("nan") if fsq_phys0_val is None else float(fsq_phys0_val)
@@ -9824,10 +9878,8 @@ def solve_fixed_boundary_residual_iter(
                 except Exception:
                     pass
 
-            force_axis_reset_init = bool(force_axis_reset) or (
-                bool(getattr(cfg, "lthreed", True)) and axis_reset_always_3d
-            )
-            if bad_jacobian0 or force_axis_reset_init:
+            force_axis_reset_init = axis_reset_decision.force_reset
+            if axis_reset_decision.reset:
                 if verbose and bool(vmec2000_control) and bool(verbose_vmec2000_table):
                     if bad_jacobian0 or force_axis_reset_init:
                         print(" INITIAL JACOBIAN CHANGED SIGN!", flush=True)

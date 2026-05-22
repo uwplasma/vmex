@@ -123,3 +123,68 @@ def test_preconditioner_matrices_and_apply_edge_paths():
     cfg_skip = _cfg(lthreed=True, lasym=False)
     assert p1d.rz_preconditioner(frzl_in=frzl, bc=bc, k=k, trig=None, s=s, cfg=cfg_skip) is frzl
     assert p1d.rz_preconditioner_apply(frzl_in=frzl, mats=mats, jmax=jmax, cfg=cfg_skip) is frzl
+
+
+def test_preconditioner_full_apply_and_faclam_debug_branch():
+    cfg = _cfg(mpol=2, ntor=1, lthreed=True, lasym=False)
+    s = np.linspace(0.0, 1.0, 3)
+    bc = _bc(ns=3)
+    k = _k(ns=3)
+
+    lam, faclam, debug = p1d.lambda_preconditioner(
+        bc=bc,
+        trig=SimpleNamespace(r0scale=1.0),
+        s=s,
+        cfg=cfg,
+        return_faclam=True,
+        return_debug=True,
+    )
+
+    assert lam.shape == (3, 2, 2)
+    np.testing.assert_allclose(faclam, lam)
+    assert set(debug) == {"blam_pre", "clam_pre", "dlam_pre", "blam_post", "clam_post", "dlam_post"}
+    assert np.count_nonzero(np.asarray(debug["dlam_pre"])) > 0
+
+    base = np.arange(3 * 2 * 2, dtype=float).reshape(3, 2, 2) + 1.0
+    frzl = TomnspsRZL(frcc=base, frss=None, fzsc=-base, fzcs=None, flsc=np.zeros_like(base), flcs=None)
+    out = p1d.rz_preconditioner(frzl_in=frzl, bc=bc, k=k, trig=None, s=s, cfg=_cfg(mpol=2, ntor=1))
+
+    assert out is not frzl
+    assert out.frcc.shape == base.shape
+    assert out.fzsc.shape == base.shape
+    assert np.all(np.isfinite(out.frcc))
+    assert np.all(np.isfinite(out.fzsc))
+
+
+def test_preconditioning_matrix_rejects_incomplete_radial_inputs():
+    kwargs = dict(
+        xs=np.ones((2, 1, 1)),
+        xu12=np.ones((2, 1, 1)),
+        xu_e=np.ones((3, 1, 1)),
+        xu_o=np.ones((3, 1, 1)),
+        x1_o=np.ones((3, 1, 1)),
+        r12=np.ones((2, 1, 1)),
+        total_pressure=np.ones((2, 1, 1)),
+        tau=np.ones((2, 1, 1)),
+        bsupv=np.ones((2, 1, 1)),
+        sqrtg=np.ones((2, 1, 1)),
+        w_int=np.ones((1,)),
+        sqrt_sh=np.ones((2,)),
+        sm=np.ones((2,)),
+        sp=np.ones((2,)),
+        delta_s=1.0,
+    )
+
+    cases = [
+        ("xu_e", "xu_e must have ns_half\\+1 entries"),
+        ("xu_o", "xu_o must have ns_half\\+1 entries"),
+        ("x1_o", "x1_o must have ns_half\\+1 entries"),
+        ("sqrt_sh", "sqrt_sh must have ns_half entries"),
+        ("sm", "sm/sp must have ns_half entries"),
+        ("sp", "sm/sp must have ns_half entries"),
+    ]
+    for key, message in cases:
+        bad = dict(kwargs)
+        bad[key] = np.ones((1, 1, 1)) if key.startswith("x") else np.ones((1,))
+        with np.testing.assert_raises_regex(ValueError, message):
+            p1d._compute_preconditioning_matrix(**bad)

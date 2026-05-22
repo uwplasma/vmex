@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -11,10 +13,13 @@ from vmec_jax.init_guess import (
     _axis_parity_from_state_lasym,
     _boundary_cross_section_areas,
     _boundary_is_traced,
+    _flip_boundary_theta,
     _guess_axis_from_boundary,
     _recompute_axis_from_boundary,
     _undo_m1_constraint_for_recompute,
+    _vmec_lflip_from_boundary,
     _vmec_lflip_from_boundary_jax,
+    extract_axis_override_from_state,
     initial_guess_from_boundary,
 )
 from vmec_jax.namelist import InData
@@ -201,3 +206,69 @@ def test_axis_override_preserves_lasym_projection_and_parity_channels() -> None:
     assert parity["pr1_odd"].shape == expected_shape
     assert np.max(np.abs(parity["pr1_odd"])) > 0.0
     assert np.max(np.abs(parity["pz1_even"])) > 0.0
+
+    parity_with_default_trig = _axis_parity_from_state_lasym(state=state, static=static)
+    np.testing.assert_allclose(parity_with_default_trig["pr1_even"], parity["pr1_even"])
+
+
+def test_numpy_lflip_and_axis_override_fallback_indexing() -> None:
+    cfg = VMECConfig(
+        mpol=2,
+        ntor=1,
+        ns=3,
+        nfp=1,
+        lasym=False,
+        lconm1=False,
+        lthreed=True,
+        ntheta=8,
+        nzeta=4,
+    )
+    static = build_static(cfg)
+    boundary = _ellipse_boundary(static)
+    k10 = _k_index(static.modes, 1, 0)
+    k11 = _k_index(static.modes, 1, 1)
+    k1m1 = _k_index(static.modes, 1, -1)
+
+    decisive = BoundaryCoeffs(
+        R_cos=np.asarray(boundary.R_cos),
+        R_sin=np.asarray(boundary.R_sin),
+        Z_cos=np.asarray(boundary.Z_cos),
+        Z_sin=-np.asarray(boundary.Z_sin),
+    )
+    assert _vmec_lflip_from_boundary(static, decisive) is True
+
+    ambiguous = BoundaryCoeffs(
+        R_cos=np.asarray(boundary.R_cos).copy(),
+        R_sin=np.asarray(boundary.R_sin),
+        Z_cos=np.asarray(boundary.Z_cos),
+        Z_sin=np.zeros_like(boundary.Z_sin),
+    )
+    assert _vmec_lflip_from_boundary(static, ambiguous) is None
+
+    one_sided = BoundaryCoeffs(
+        R_cos=np.arange(static.modes.K, dtype=float),
+        R_sin=10.0 + np.arange(static.modes.K, dtype=float),
+        Z_cos=20.0 + np.arange(static.modes.K, dtype=float),
+        Z_sin=30.0 + np.arange(static.modes.K, dtype=float),
+    )
+    flipped = _flip_boundary_theta(static, one_sided)
+    assert flipped.R_cos[k11] == pytest.approx(-one_sided.R_cos[k1m1])
+    assert flipped.R_sin[k11] == pytest.approx(one_sided.R_sin[k1m1])
+    assert flipped.Z_cos[k10] == pytest.approx(-one_sided.Z_cos[k10])
+    assert flipped.Z_sin[k10] == pytest.approx(one_sided.Z_sin[k10])
+
+    state = initial_guess_from_boundary(
+        static,
+        boundary,
+        InData(scalars={"RAXIS_CC": [9.0, 0.5], "ZAXIS_CS": [0.0, 0.25]}, indexed={}),
+        infer_axis_if_missing=False,
+        vmec_project=True,
+    )
+    # Exercise the fallback path that builds m0_n_index when a custom static-like
+    # object does not cache it.
+    static_no_index = SimpleNamespace(cfg=static.cfg, modes=static.modes)
+    axis = extract_axis_override_from_state(state, static_no_index)
+
+    m0_indices = [_k_index(static.modes, 0, 0), _k_index(static.modes, 0, 1)]
+    np.testing.assert_allclose(np.asarray(axis["raxis_cc"]), np.asarray(state.Rcos)[0, m0_indices])
+    np.testing.assert_allclose(np.asarray(axis["zaxis_cs"]), np.asarray(state.Zsin)[0, m0_indices])

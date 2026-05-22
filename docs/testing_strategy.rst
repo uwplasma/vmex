@@ -18,20 +18,19 @@ Target State
 - Local CI-equivalent coverage runs should record pass/skip/deselect counts,
   coverage percentage, runtime, Python/JAX versions, and commit SHA in the
   release notes or validation artifact for the candidate being checked.
-- Near-term coverage target: keep the required ``85%`` actual line coverage gate
+- Near-term coverage target: keep the required ``90%`` actual line coverage gate
   green with meaningful fast and bounded-physics tests while preserving
   acceptable coverage runtime.  Recent local CI-equivalent runs have measured
   about ``93%`` fast-suite coverage, but those measurements are audit
-  artifacts rather than a hard-coded current baseline.  The enforced gate
-  remains ``85%`` until CI has carried a higher baseline for multiple green
-  runs.
-- Next staged coverage target: raise the required Python 3.11 gate to ``90%``
-  after CI confirms the local result remains stable with acceptable runtime and
-  the added coverage comes from required tests rather than optional local
-  dependencies.
+  artifacts rather than a hard-coded current baseline.  The enforced gate is
+  kept below the latest measured coverage to leave room for platform variance.
+- Next staged coverage target: raise the required Python 3.11 gate above
+  ``90%`` only after CI confirms the local result remains stable with
+  acceptable runtime and the added coverage comes from required tests rather
+  than optional local dependencies.
 - Long-term required coverage: raise the required gate to ``95%`` after the
   solver/driver refactors and physics-kernel seams below have their own focused
-  tests.  The current Python 3.11 required coverage gate is ``85%``.
+  tests.  The current Python 3.11 required coverage gate is ``90%``.
 - Nightly/manual coverage: larger VMEC2000, GPU, and full-resolution physics
   checks run outside the required PR gate.
 - Repository checkout size: keep the tracked source tree small enough that a
@@ -159,7 +158,7 @@ Required CI-equivalent coverage:
      --cov=vmec_jax \
      --cov-report=xml \
      --cov-report=term:skip-covered \
-     --cov-fail-under=85
+     --cov-fail-under=90
 
 Full-physics coverage add-on when assets are available:
 
@@ -198,9 +197,9 @@ safe to run on a normal developer machine:
   helpers.
 - Repository size audit using
   ``tools/diagnostics/repo_size_audit.py --top 20 --max-total-mib 60 --max-file-mib 5``.
-- Fast required pytest suite with the current ``85%`` coverage fail-under:
+- Fast required pytest suite with the current ``90%`` coverage fail-under:
   ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000 and not simsopt"``
-  plus ``--cov=vmec_jax`` and ``--cov-fail-under=85``.
+  plus ``--cov=vmec_jax`` and ``--cov-fail-under=90``.
 - Bounded physics smoke after ``python tools/fetch_assets.py``.
 - Wheel/sdist build.
 - Fast Sphinx docs with ``SPHINX_FAST=1``.
@@ -246,10 +245,10 @@ the recommended local escalation path.
        dry-run wiring only, not evidence that the external manifest matrix has
        completed.
    * - Coverage gate
-     - ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000 and not simsopt" --cov=vmec_jax --cov-report=xml --cov-report=term:skip-covered --cov-fail-under=85``
+     - ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000 and not simsopt" --cov=vmec_jax --cov-report=xml --cov-report=term:skip-covered --cov-fail-under=90``
      - Python 3.11 required CI coverage job.  Record the measured coverage,
        pass/skip/deselect counts, runtime, and commit SHA in the validation
-       artifact for the candidate being checked; the gate itself remains 85%
+       artifact for the candidate being checked; the gate itself remains 90%
        while optional executable validation stays in separate opt-in lanes.
    * - Optimization workflow smoke
      - ``pytest -q tests/test_optimization_examples.py tests/test_qs_ess_render_smoke.py``
@@ -538,21 +537,18 @@ The required CI gate is staged deliberately:
      - Gate
      - Required evidence before changing CI
      - CI action
-   * - Current
+   * - Completed
      - ``--cov-fail-under=85``
-     - Fast-suite coverage is green on Python 3.11 with ``.[plots]`` installed
-       above the enforced threshold in recent local audit artifacts, and
-       required CI remains independent of VMEC2000, SIMSOPT, GPUs, and large
-       downloaded assets.
-     - Keep enforced.
-   * - 90%
+     - The earlier 85% gate was carried by required CI and then superseded by a
+       local CI-equivalent 93.18% run on 2026-05-22.
+     - Superseded.
+   * - Current
      - ``--cov-fail-under=90``
      - A local CI-equivalent run reaches at least 90% actual package coverage,
        keeps acceptable runtime, and the uncovered-line triage shows remaining
        gaps are mostly full/optional physics lanes rather than untested public
        fast workflows.
-     - Raise only in the Python 3.11 coverage job after that evidence is
-       recorded in release notes or a validation artifact.
+     - Keep enforced.
    * - 95%
      - ``--cov-fail-under=95``
      - Solver/driver seams have focused unit or bundled-parity tests, public
@@ -579,7 +575,7 @@ the same lines are covered by required fast or bundled-parity tests.
    artifacts.
 5. Raise ``--cov-fail-under`` in stages after the corresponding tests are
    merged and a clean local CI-equivalent coverage run proves the next gate is
-   feasible.  The planned ratchets are 90% and 95%, not intermediate increases
+   feasible.  The remaining planned ratchet is 95%, not intermediate increases
    based only on incidental coverage movement.
 
 

@@ -17,15 +17,18 @@ from vmec_jax.plotting import (
     _load_wout_if_path,
     _mode_table_from_wout,
     _objective_iota_series,
+    axis_rz_from_state_physical,
     axis_rz_from_wout_physical,
     bmag_from_state_physical,
     bmag_from_state_vmec_realspace,
     bmag_from_wout_physical,
+    boozer_bmag_grid_from_state,
     bsub_from_wout,
     bsup_from_wout,
     plot_3d_boundary_comparison,
     plot_bmag_contours,
     plot_objective_history,
+    surface_rz_from_state_physical,
     surface_rz_from_wout,
     surface_rz_from_wout_physical,
     vmecplot2_bmag_grid,
@@ -264,6 +267,16 @@ def test_bmag_from_state_paths_require_flux_source_and_return_positive_fields() 
         sqrtg_floor=1.0e-12,
         bmag_floor=1.0e-30,
     )
+    b_with_derived_flux_scaling = bmag_from_state_physical(
+        state,
+        static,
+        theta=theta,
+        phi=phi,
+        s_index=s_index,
+        signgs=int(wout.signgs),
+        phipf=np.asarray(wout.phipf),
+        chipf=np.asarray(wout.chipf),
+    )
     b_vmec_realspace = bmag_from_state_vmec_realspace(
         state,
         static,
@@ -275,15 +288,54 @@ def test_bmag_from_state_paths_require_flux_source_and_return_positive_fields() 
         flux_is_internal=True,
         sqrtg_floor=1.0e-12,
     )
+    b_vmec_realspace_derived_scaling = bmag_from_state_vmec_realspace(
+        state,
+        static,
+        s_index=s_index,
+        signgs=int(wout.signgs),
+        phipf=np.asarray(wout.phipf),
+        chipf=np.asarray(wout.chipf),
+    )
 
     assert b_from_indata.shape == (theta.size, phi.size)
     assert b_with_explicit_flux.shape == b_from_indata.shape
+    assert b_with_derived_flux_scaling.shape == b_from_indata.shape
     assert b_vmec_realspace.ndim == 2
+    assert b_vmec_realspace_derived_scaling.shape == b_vmec_realspace.shape
     assert np.all(np.isfinite(b_from_indata))
     assert np.all(np.isfinite(b_with_explicit_flux))
+    assert np.all(np.isfinite(b_with_derived_flux_scaling))
     assert np.all(np.isfinite(b_vmec_realspace))
+    assert np.all(np.isfinite(b_vmec_realspace_derived_scaling))
     assert float(np.min(b_from_indata)) > 0.0
     assert float(np.min(b_vmec_realspace)) > 0.0
+
+
+def test_state_physical_surface_helpers_scale_phi_by_field_period() -> None:
+    pytest.importorskip("jax")
+    pytest.importorskip("netCDF4")
+    state, static, _indata, _wout = _small_circular_state_static()
+    theta = np.asarray([0.0, np.pi])
+    phi = np.asarray([0.0])
+
+    R, Z = surface_rz_from_state_physical(
+        state,
+        static.modes,
+        theta=theta,
+        phi=phi,
+        s_index=int(static.cfg.ns) - 1,
+        nfp=int(static.cfg.nfp),
+    )
+    R_axis, Z_axis = axis_rz_from_state_physical(state, static.modes, phi=phi, nfp=int(static.cfg.nfp))
+
+    assert R.shape == (2, 1)
+    assert Z.shape == (2, 1)
+    assert R_axis.shape == (1,)
+    assert Z_axis.shape == (1,)
+    assert np.all(np.isfinite(R))
+    assert np.all(np.isfinite(Z))
+    assert np.all(np.isfinite(R_axis))
+    assert np.all(np.isfinite(Z_axis))
 
 
 def test_plot_wrappers_default_outdir_without_rendering(monkeypatch, tmp_path) -> None:
@@ -317,3 +369,81 @@ def test_plot_wrappers_default_outdir_without_rendering(monkeypatch, tmp_path) -
         ("bmag", "loaded:initial.nc", "loaded:final.nc", Path(".")),
         ("history", history_path, tmp_path),
     ]
+
+
+def test_boozer_bmag_grid_validates_and_synthesizes_optional_sine_modes(monkeypatch) -> None:
+    import sys
+    import vmec_jax.booz_input as booz_input
+    import vmec_jax.quasi_isodynamic as qi
+
+    calls = []
+
+    def fake_prepare(*, inputs, mboz, nboz, asym):
+        calls.append(("prepare", inputs.rmnc.shape, mboz, nboz, asym))
+        return "constants", "grids"
+
+    def fake_booz(*, inputs, constants, grids, surface_indices, jit):
+        calls.append(("booz", constants, grids, np.asarray(surface_indices), jit))
+        return {
+            "bmnc_b": np.asarray([[2.0, 0.5], [3.0, 1.0]]),
+            "ixm_b": np.asarray([0.0, 1.0]),
+            "ixn_b": np.asarray([0.0, 2.0]),
+            "nfp_b": np.asarray([2]),
+        }
+
+    fake_module = SimpleNamespace(
+        prepare_booz_xform_constants_from_inputs=fake_prepare,
+        booz_xform_from_inputs=fake_booz,
+    )
+    monkeypatch.setitem(sys.modules, "booz_xform_jax", fake_module)
+    monkeypatch.setattr(
+        booz_input,
+        "booz_xform_inputs_from_state",
+        lambda **_kwargs: SimpleNamespace(rmnc=np.zeros((4, 1))),
+    )
+    monkeypatch.setattr(qi, "_nearest_half_mesh_indices", lambda surfaces, n_half: np.asarray([0, n_half - 1]))
+    static = SimpleNamespace(cfg=SimpleNamespace(lasym=False, nfp=5))
+
+    with pytest.raises(ValueError, match="surfaces must contain at least one value"):
+        boozer_bmag_grid_from_state("state", static=static, indata="indata", signgs=1, surfaces=())
+    with pytest.raises(ValueError, match="ntheta and nphi must both be at least 4"):
+        boozer_bmag_grid_from_state("state", static=static, indata="indata", signgs=1, ntheta=3)
+
+    theta, phi, bmag, booz = boozer_bmag_grid_from_state(
+        "state",
+        static=static,
+        indata="indata",
+        signgs=-1,
+        surfaces=(0.25, 1.0),
+        surface_index=-1,
+        mboz=4,
+        nboz=5,
+        ntheta=4,
+        nphi=5,
+        phimin=0.25,
+        jit_booz=True,
+    )
+
+    assert theta.shape == (4,)
+    assert phi[0] == pytest.approx(0.25)
+    assert phi[-1] == pytest.approx(0.25 + np.pi)
+    assert bmag.shape == (4, 5)
+    expected = 3.0 + np.cos(theta[:, None] - 2.0 * phi[None, :])
+    np.testing.assert_allclose(bmag, expected)
+    assert "bmnc_b" in booz
+    assert calls[0] == ("prepare", (4, 1), 4, 5, False)
+    assert calls[1][0] == "booz"
+    np.testing.assert_array_equal(calls[1][3], [0, 3])
+    assert calls[1][4] is True
+
+    with pytest.raises(IndexError, match="surface_index 2 is outside Boozer surface range"):
+        boozer_bmag_grid_from_state(
+            "state",
+            static=static,
+            indata="indata",
+            signgs=1,
+            surfaces=(1.0,),
+            surface_index=2,
+            ntheta=4,
+            nphi=4,
+        )
