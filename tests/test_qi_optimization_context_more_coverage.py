@@ -261,6 +261,54 @@ def test_stage_checkpoint_preserves_partial_history_and_context_root(
     assert history["history"][-1]["objective"] == 1.0
 
 
+def test_save_raw_seed_initial_artifacts_uses_context_solver_device(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    ctx = _context(tmp_path, SOLVER_DEVICE="gpu")
+    calls: list[tuple[str, object]] = []
+    sentinel_indata = object()
+    sentinel_run = object()
+
+    monkeypatch.setattr(qio.vj, "read_indata", lambda path: calls.append(("read", Path(path))) or sentinel_indata)
+    monkeypatch.setattr(
+        qio.vj,
+        "write_indata",
+        lambda path, indata: calls.append(("write_input", (Path(path), indata))) or Path(path).write_text("input\n"),
+    )
+    monkeypatch.setattr(
+        qio.vj,
+        "run_fixed_boundary",
+        lambda path, *, solver_device, verbose: calls.append(("run", (Path(path), solver_device, verbose))) or sentinel_run,
+    )
+    monkeypatch.setattr(
+        qio.vj,
+        "write_wout_from_fixed_boundary_run",
+        lambda path, run: calls.append(("write_wout", (Path(path), run))) or Path(path).write_text("wout\n"),
+    )
+
+    run = qio.save_raw_seed_initial_artifacts(
+        tmp_path / "input.seed",
+        tmp_path / "nested" / "input.initial",
+        tmp_path / "nested" / "wout_initial.nc",
+        ctx=ctx,
+    )
+
+    assert run is sentinel_run
+    assert (tmp_path / "nested" / "input.initial").read_text() == "input\n"
+    assert (tmp_path / "nested" / "wout_initial.nc").read_text() == "wout\n"
+    assert calls == [
+        ("read", tmp_path / "input.seed"),
+        ("write_input", (tmp_path / "nested" / "input.initial", sentinel_indata)),
+        ("run", (tmp_path / "input.seed", "gpu", False)),
+        ("write_wout", (tmp_path / "nested" / "wout_initial.nc", sentinel_run)),
+    ]
+
+
+def test_basin_prefilter_disabled_returns_input_path(tmp_path: Path) -> None:
+    assert qio.run_basin_prefilter(tmp_path / "input.seed", tmp_path / "out", {"enabled": False}) == tmp_path / "input.seed"
+
+
 def test_stage_promotion_branches_use_context_gates(tmp_path: Path) -> None:
     ctx = _context(tmp_path, QI_GATE_SMOOTH_MAX=1.0e-3, QI_GATE_LEGACY_MAX=2.0e-3)
     iota_stage = {

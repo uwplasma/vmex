@@ -104,7 +104,15 @@ requirements live in the docs.
 | QI | CPU | qi_default | 3 | yes | 1.37e-02 | 4.31e-04 | 0.272 | 6.002 | -0.5690 | 10.9 min |
 
 Reviewed best-row panel assets are checked in as
-`docs/_static/figures/readme_best_optimization_*.png`.
+`docs/_static/figures/readme_best_optimization_qa.png`,
+`docs/_static/figures/readme_best_optimization_qh.png`,
+`docs/_static/figures/readme_best_optimization_qp.png`, and
+`docs/_static/figures/readme_best_optimization_qi.png`.
+
+![QA optimization](docs/_static/figures/readme_best_optimization_qa.png)
+![QH optimization](docs/_static/figures/readme_best_optimization_qh.png)
+![QP optimization](docs/_static/figures/readme_best_optimization_qp.png)
+![QI optimization](docs/_static/figures/readme_best_optimization_qi.png)
 
 Reproduce the compact README rows and panels with the individual optimization
 scripts and renderer:
@@ -119,8 +127,8 @@ PYTHONPATH=. python examples/optimization/render_readme_best_optimizations.py
 
 Additional checked-in optimization assets include the QI NFP 1/2/3/4
 case-coverage panel/CSV and the minimal-seed showcase panel/CSV. They are
-documented in `docs/optimization_sweep_results.rst` as coverage/status
-artifacts, not as extra README best-row promotion evidence.
+documented in `docs/optimization_sweep_results.rst` as case-specific
+coverage/status artifacts, not as aspect-6 README best-row promotion evidence.
 
 ## Performance, Validation, Release
 
@@ -133,9 +141,8 @@ artifacts, not as extra README best-row promotion evidence.
 - Release-candidate CI baseline: re-check the newest completed green `main`
   run with `gh run list --repo uwplasma/vmec_jax --branch main --workflow CI
   --limit 5` before tagging.
-- Required fast coverage gate is currently `90%`; `95%` remains the next
-  ratchet and should be claimed only from a fresh coverage run on the
-  release-candidate commit.
+- Required fast coverage gate is now `95%`; the latest local CI-equivalent
+  run reached `95.02%` on this development batch.
 
 ## CLI Reference
 

@@ -66,6 +66,87 @@ def test_objective_factory_callbacks_dispatch_to_helpers(monkeypatch) -> None:
     assert lgradb.total(ctx, "state") == 325.0
 
 
+def test_enable_line_buffered_output_is_idempotent_and_tolerates_stream_errors(monkeypatch) -> None:
+    import vmec_jax.optimization_workflow as workflow
+
+    class RaisingStream:
+        def __init__(self):
+            self.calls = 0
+
+        def reconfigure(self, **kwargs):
+            self.calls += 1
+            assert kwargs == {"line_buffering": True}
+            raise TypeError("not supported")
+
+    class PlainStream:
+        pass
+
+    stream = RaisingStream()
+    monkeypatch.setattr(workflow, "_LINE_BUFFERING_ENABLED", False)
+    monkeypatch.setattr(sys, "stdout", stream)
+    monkeypatch.setattr(sys, "stderr", PlainStream())
+
+    workflow._enable_line_buffered_output()
+    workflow._enable_line_buffered_output()
+
+    assert stream.calls == 1
+    assert workflow._LINE_BUFFERING_ENABLED is True
+
+
+def test_workflow_mode_limit_seed_and_summary_guard_branches(capsys) -> None:
+    import vmec_jax.optimization_workflow as workflow
+    from vmec_jax.namelist import minimal_fixed_boundary_indata
+
+    assert workflow.normalize_boundary_mode_limits({"max_m": 1, "max_n": 3}).mode == 3
+    with pytest.raises(ValueError, match="mode/max_mode"):
+        workflow.normalize_boundary_mode_limits({})
+    with pytest.raises(ValueError, match="At least one"):
+        workflow.normalize_boundary_mode_limits((None, None))
+    with pytest.raises(ValueError, match="Boundary stage tuples"):
+        workflow.normalize_boundary_mode_limits((1, 2, 3, 4))
+
+    seed = minimal_fixed_boundary_indata(nfp=2)
+    with pytest.raises(ValueError, match="non-negative"):
+        workflow.simple_omnigenity_seed_indata(seed, max_mode=-1)
+    with pytest.raises(ValueError, match="finite and non-negative"):
+        workflow.simple_omnigenity_seed_indata(seed, max_mode=1, perturbation=float("nan"))
+    with pytest.raises(ValueError, match="lambda must be finite"):
+        workflow.interpolate_indata_boundary(seed, seed, float("nan"))
+    with pytest.raises(ValueError, match="bmnc_b"):
+        workflow._slice_boozer_surfaces({}, 0)
+
+    workflow.print_qs_problem_summary(
+        method="gauss-newton",
+        max_nfev=3,
+        use_mode_continuation=False,
+        use_ess=False,
+        ess_alpha=1.0,
+        objectives=[],
+        specs=[BoundaryParamSpec(name="rc01", kind="rc", index=0, m=0, n=1)],
+        x_scale=np.asarray([1.0]),
+        optimizer=SimpleNamespace(
+            aspect_ratio=lambda _params: 6.0,
+            quasisymmetry_objective=lambda _params: 1.0e-3,
+        ),
+        params0=np.asarray([0.0]),
+    )
+    workflow.print_qs_final_summary(
+        {
+            "message": "done",
+            "_history_dump": {
+                "aspect_final": 6.0,
+                "iota_final": 0.42,
+                "qs_final": 1.0e-4,
+                "objective_final": 1.0e-3,
+                "objective_initial": 2.0e-3,
+            },
+        }
+    )
+    out = capsys.readouterr().out
+    assert "ESS disabled - uniform scales." in out
+    assert "Mean iota (final):" in out
+
+
 def test_least_squares_tuple_weights_are_simsopt_style() -> None:
     from vmec_jax.optimization_workflow import LeastSquaresProblem
 

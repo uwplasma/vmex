@@ -21,6 +21,83 @@ def _data_dir() -> Path:
     return Path(__file__).resolve().parents[1] / "examples" / "data"
 
 
+def test_qi_diagnostic_scalar_helpers_cover_unavailable_and_subset_branches() -> None:
+    from vmec_jax.qi_diagnostics import (
+        QIDiagnosticOptions,
+        _failure_message,
+        _finite_float,
+        _first_float,
+        _handle_error,
+        _legacy_nphi_out,
+        _list_or_none,
+        _max_float,
+        _mean_nonaxis_float,
+        _min_float,
+        _nfp_from_boozer_output,
+        _normalized_excess,
+        _surface_subset,
+        _surface_subset_weights,
+    )
+
+    class BadArray:
+        def __array__(self, dtype=None, copy=None):
+            raise TypeError("not array-like")
+
+    assert _first_float(None) is None
+    assert _first_float([]) is None
+    assert _finite_float(BadArray()) is None
+    assert _finite_float([]) is None
+    assert _finite_float([np.inf]) is None
+    assert _max_float(None) is None
+    assert _max_float([]) is None
+    assert _min_float(None) is None
+    assert _min_float([]) is None
+    assert _list_or_none(None) is None
+    assert _list_or_none([]) == []
+    assert _list_or_none(np.asarray([1, 2], dtype=np.int64)) == [1, 2]
+    assert _list_or_none(np.asarray([1.25, 2.5])) == [1.25, 2.5]
+    assert _mean_nonaxis_float(None) is None
+    assert _mean_nonaxis_float([]) is None
+    assert _mean_nonaxis_float([np.nan]) is None
+    assert _mean_nonaxis_float([0.0, 2.0, 4.0]) == pytest.approx(3.0)
+    assert _nfp_from_boozer_output({}, None) is None
+    assert _nfp_from_boozer_output({"nfp_b": np.asarray([])}, None) is None
+    assert _nfp_from_boozer_output({"nfp_b": np.asarray([3])}, None) == 3
+    assert _legacy_nphi_out(QIDiagnosticOptions(nphi=11, legacy_nphi_out=19)) == 19
+    assert _legacy_nphi_out(QIDiagnosticOptions(nphi=17, legacy_nphi_out=None)) == 401
+
+    record: dict[str, object] = {}
+    _handle_error(record, "smooth_error", RuntimeError("bad"), fail_on_error=False)
+    assert record["smooth_error"] == "RuntimeError: bad"
+    with pytest.raises(RuntimeError, match="bad"):
+        _handle_error({}, "smooth_error", RuntimeError("bad"), fail_on_error=True)
+
+    booz = {
+        "bmnc_b": np.arange(6.0).reshape(3, 2),
+        "iota_b": np.asarray([0.1, 0.2, 0.3]),
+        "scalar": np.asarray(7.0),
+    }
+    assert _surface_subset(booz, None) is booz
+    subset = _surface_subset(booz, -1)
+    np.testing.assert_allclose(subset["bmnc_b"], [[4.0, 5.0]])
+    np.testing.assert_allclose(subset["iota_b"], [0.3])
+    np.testing.assert_allclose(subset["scalar"], 7.0)
+    with pytest.raises(ValueError, match="surface dimension"):
+        _surface_subset({"bmnc_b": np.asarray(1.0)}, 0)
+    with pytest.raises(ValueError, match="outside"):
+        _surface_subset(booz, 9)
+
+    assert _surface_subset_weights(None, booz=booz, surface_index=-1) is None
+    assert _surface_subset_weights([1.0, 2.0], booz=booz, surface_index=-1) == [1.0, 2.0]
+    assert _surface_subset_weights([1.0, 2.0, 3.0], booz=booz, surface_index=-1) == [3.0]
+    assert _normalized_excess(None, 1.0) is None
+    assert _normalized_excess(2.0, None) == 2.0
+    assert _normalized_excess(2.0, 4.0) == 0.5
+    assert _failure_message("mirror", None, 0.2, upper=True) == "mirror is unavailable"
+    assert _failure_message("mirror", 0.3, None, upper=True) == "mirror gate is disabled"
+    assert _failure_message("iota", 0.1, 0.4, upper=False) == "iota=0.1 is below target 0.4"
+
+
 def test_qi_diagnostics_from_boozer_output_records_core_metrics():
     pytest.importorskip("jax")
 

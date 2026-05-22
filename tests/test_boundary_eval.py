@@ -196,3 +196,38 @@ def test_boundary_m1_constraint_roundtrip_lasym_three_dimensional():
     np.testing.assert_allclose(np.asarray(restored.R_sin), raw.R_sin)
     np.testing.assert_allclose(np.asarray(restored.Z_cos), raw.Z_cos)
     np.testing.assert_allclose(np.asarray(restored.Z_sin), raw.Z_sin)
+
+
+def test_boundary_m1_constraint_undo_jax_path_matches_numpy():
+    modes = vmec_mode_table(mpol=3, ntor=1)
+    size = len(modes.m)
+    raw = BoundaryCoeffs(
+        R_cos=np.linspace(1.0, 2.0, size),
+        R_sin=np.concatenate([[0.0], np.linspace(0.1, 0.2, size - 1)]),
+        Z_cos=np.concatenate([[0.0], np.linspace(-0.2, 0.3, size - 1)]),
+        Z_sin=np.concatenate([[0.0], np.linspace(0.4, 0.9, size - 1)]),
+    )
+    constrained = boundary_apply_vmec_m1_constraint(raw, modes, lthreed=True, lasym=True)
+    expected = boundary_undo_vmec_m1_constraint(constrained, modes, lthreed=True, lasym=True)
+
+    @jax.jit
+    def undo_jax(r_cos, r_sin, z_cos, z_sin):
+        out = boundary_undo_vmec_m1_constraint(
+            BoundaryCoeffs(R_cos=r_cos, R_sin=r_sin, Z_cos=z_cos, Z_sin=z_sin),
+            modes,
+            lthreed=True,
+            lasym=True,
+        )
+        return out.R_cos, out.R_sin, out.Z_cos, out.Z_sin
+
+    actual = undo_jax(
+        jax.numpy.asarray(constrained.R_cos),
+        jax.numpy.asarray(constrained.R_sin),
+        jax.numpy.asarray(constrained.Z_cos),
+        jax.numpy.asarray(constrained.Z_sin),
+    )
+
+    np.testing.assert_allclose(np.asarray(actual[0]), np.asarray(expected.R_cos))
+    np.testing.assert_allclose(np.asarray(actual[1]), np.asarray(expected.R_sin))
+    np.testing.assert_allclose(np.asarray(actual[2]), np.asarray(expected.Z_cos))
+    np.testing.assert_allclose(np.asarray(actual[3]), np.asarray(expected.Z_sin))
