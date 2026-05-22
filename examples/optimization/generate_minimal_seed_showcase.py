@@ -818,7 +818,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--cases", type=str, default="all", help="Comma-separated cases or 'all'.")
     parser.add_argument("--backend-label", type=str, default="cpu")
     parser.add_argument("--solver-device", type=str, default="cpu", help="Use 'cpu', 'gpu', or 'none'.")
-    parser.add_argument("--worker-jax-platforms", type=str, default="cpu", help="Use 'inherit', 'cpu', or 'gpu'.")
+    parser.add_argument(
+        "--worker-jax-platforms",
+        type=str,
+        default="cpu",
+        help="Use 'inherit', 'cpu', or 'cuda'. The user-facing alias 'gpu' maps to 'cuda'.",
+    )
     parser.add_argument("--policy", choices=("continuation", "direct"), default="continuation")
     parser.add_argument("--max-mode", type=int, default=3)
     parser.add_argument("--ess", choices=("on", "off"), default="on")
@@ -849,9 +854,7 @@ def main() -> None:
     args = _parse_args()
     case_names = _parse_case_names(args.cases)
     solver_device = None if str(args.solver_device).lower() in {"", "none", "default"} else str(args.solver_device)
-    worker_jax_platforms = (
-        None if str(args.worker_jax_platforms).lower() in {"", "none", "inherit"} else str(args.worker_jax_platforms)
-    )
+    worker_jax_platforms = sweep._normalize_worker_jax_platforms(args.worker_jax_platforms)
     budget = MinimalSeedBudget(
         max_nfev=int(args.max_nfev),
         continuation_nfev=int(args.continuation_nfev),

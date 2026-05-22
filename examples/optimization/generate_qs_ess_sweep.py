@@ -1189,6 +1189,25 @@ def _default_worker_jax_platforms(solver_device: str | None) -> str | None:
     return None
 
 
+def _normalize_worker_jax_platforms(value: str | None) -> str | None:
+    """Normalize user-facing platform names for the ``JAX_PLATFORMS`` variable.
+
+    ``jax.default_backend()`` reports NVIDIA devices as ``gpu``, but
+    ``JAX_PLATFORMS`` expects the concrete backend name ``cuda``.  Accept the
+    user-facing ``gpu`` spelling here so worker subprocesses do not fail on
+    CUDA-only JAX installs.
+    """
+
+    if value is None:
+        return None
+    text = str(value).strip()
+    if text.lower() in ("", "none", "inherit", "auto"):
+        return None
+    parts = [part.strip() for part in text.split(",")]
+    normalized = ["cuda" if part.lower() == "gpu" else part for part in parts if part]
+    return ",".join(normalized) if normalized else None
+
+
 def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, solver_device: str | None):
     if bool(problem_cfg.project_input_boundary_to_max_mode):
         indata0 = vj.truncate_indata_boundary_modes(indata0, max_mode=max_mode)
@@ -2929,7 +2948,7 @@ def main() -> None:
     elif worker_jax_platforms_arg.lower() == "auto":
         worker_jax_platforms = _default_worker_jax_platforms(solver_device)
     else:
-        worker_jax_platforms = worker_jax_platforms_arg
+        worker_jax_platforms = _normalize_worker_jax_platforms(worker_jax_platforms_arg)
 
     output_root.mkdir(parents=True, exist_ok=True)
     ctx = mp.get_context("spawn")

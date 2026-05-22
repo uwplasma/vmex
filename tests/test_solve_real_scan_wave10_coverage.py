@@ -112,3 +112,48 @@ def test_vmec2000_scan_invalid_guards_raise(load_case_circular_tokamak, monkeypa
 
     with pytest.raises(ValueError, match=match):
         _run_vmec2000_scan(state0, static, indata, **overrides)
+
+
+def test_accelerated_scan_one_step_updates_state_and_histories(load_case_circular_tokamak, monkeypatch):
+    pytest.importorskip("jax")
+
+    _cfg, indata, static, _boundary, state0 = load_case_circular_tokamak
+    _quiet_scan_env(monkeypatch)
+    monkeypatch.setenv("VMEC_JAX_SCAN_LIGHT", "0")
+    monkeypatch.setenv("VMEC_JAX_SCAN_MINIMAL", "0")
+    monkeypatch.setenv("VMEC_JAX_SCAN_FALLBACK", "0")
+
+    result = solve.solve_fixed_boundary_residual_iter(
+        state0,
+        static,
+        indata=indata,
+        signgs=1,
+        max_iter=1,
+        step_size=float(indata.get_float("DELT", 1.0)),
+        vmec2000_control=False,
+        strict_update=False,
+        backtracking=False,
+        auto_flip_force=False,
+        use_restart_triggers=False,
+        use_direct_fallback=False,
+        precond_radial_alpha=0.0,
+        precond_lambda_alpha=0.0,
+        jit_forces=False,
+        use_scan=True,
+        scan_minimal_default=False,
+        verbose=False,
+        verbose_vmec2000_table=False,
+    )
+
+    diag = result.diagnostics
+    assert result.n_iter == 1
+    assert diag["use_scan"] is True
+    assert diag["accelerated_scan"] is True
+    assert diag.get("vmec2000_scan") is not True
+    assert result.fsqr2_history.shape == (1,)
+    assert result.fsqz2_history.shape == (1,)
+    assert result.fsql2_history.shape == (1,)
+    assert result.grad_rms_history.shape == (0,)
+    assert result.step_history.shape == (0,)
+    assert np.isfinite(result.w_history[-1])
+    assert not np.allclose(np.asarray(result.state.Rcos), np.asarray(state0.Rcos))
