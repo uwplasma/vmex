@@ -76,6 +76,7 @@ def test_performance_matrix_auto_backend_preserves_jax_selection():
             "--dynamic-replay-mode",
             "whole_scan",
             "--sync-replay-timing",
+            "--jvp-only-exact-tape",
         ]
     )
     env = tool.child_env(
@@ -94,6 +95,7 @@ def test_performance_matrix_auto_backend_preserves_jax_selection():
     assert env["VMEC_JAX_REPLAY_COLUMN_CHUNK"] == "16"
     assert env["VMEC_JAX_DYNAMIC_REPLAY_MODE"] == "whole_scan"
     assert env["VMEC_JAX_OPT_SYNC_REPLAY_TIMING"] == "1"
+    assert env["VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE"] == "1"
     assert "JAX_ENABLE_X64" not in env
 
 
@@ -179,6 +181,7 @@ def test_performance_matrix_exact_command_can_request_memory_profile(tmp_path):
             "--device-memory-profile",
             "--vmec-timing-detail",
             "--sync-replay-timing",
+            "--jvp-only-exact-tape",
         ]
     )
     report = tmp_path / "report.json"
@@ -204,6 +207,7 @@ def test_performance_matrix_exact_command_can_request_memory_profile(tmp_path):
     assert "--trial-use-scan" in command
     assert "--vmec-timing-detail" in command
     assert "--sync-replay-timing" in command
+    assert "--jvp-only-exact-tape" in command
     assert command[command.index("--trace-outdir") + 1] == str(trace)
     assert command[command.index("--device-memory-profile-out") + 1] == str(memory)
 
@@ -221,7 +225,9 @@ def test_exact_callback_summary_preserves_cold_tangent_replay_and_scan_trial_buc
         "profile": {
             "jacobian_total": {"count": 1, "wall_time_s": 9.5},
             "exact_solve_with_tape_total": {"count": 1, "wall_time_s": 4.0},
+            "exact_solve_with_tape_jvp_only_total": {"count": 1, "wall_time_s": 3.5},
             "exact_tape_build": {"count": 1, "wall_time_s": 3.0},
+            "exact_tape_build_jvp_only": {"count": 1, "wall_time_s": 2.8},
             "exact_tape_build_unattributed": {"count": 1, "wall_time_s": 0.7},
             "jacobian_initial_tangents": {"count": 1, "wall_time_s": 1.4},
             "jacobian_initial_tangents_linearize": {"count": 1, "wall_time_s": 0.3},
@@ -249,6 +255,8 @@ def test_exact_callback_summary_preserves_cold_tangent_replay_and_scan_trial_buc
     metrics = summary["metrics"]
 
     assert metrics["replay_time_s"] == 2.1
+    assert metrics["exact_solve_with_tape_jvp_only_s"] == 3.5
+    assert metrics["exact_tape_build_jvp_only_s"] == 2.8
     assert metrics["accepted_replay_dispatch_s"] == 0.2
     assert metrics["accepted_replay_ready_s"] == 1.9
     assert metrics["initial_tangents_s"] == 1.4

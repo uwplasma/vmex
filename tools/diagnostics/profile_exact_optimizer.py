@@ -202,6 +202,22 @@ def _build_parser() -> argparse.ArgumentParser:
             "timers split dispatch from device-ready time. Diagnostics only."
         ),
     )
+    p.set_defaults(jvp_only_exact_tape=None)
+    p.add_argument(
+        "--jvp-only-exact-tape",
+        dest="jvp_only_exact_tape",
+        action="store_true",
+        help=(
+            "Enable VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE for forward-tangent exact "
+            "callbacks. Diagnostics only; use to compare the lean tape path."
+        ),
+    )
+    p.add_argument(
+        "--no-jvp-only-exact-tape",
+        dest="jvp_only_exact_tape",
+        action="store_false",
+        help="Explicitly disable VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE in the child profile.",
+    )
     p.add_argument(
         "--budget-total-wall-s",
         type=float,
@@ -311,9 +327,22 @@ def _runtime_info() -> dict[str, object]:
             "default_backend": str(jax.default_backend()),
             "devices": [str(device) for device in jax.devices()],
             "xla_python_client_preallocate": os.environ.get("XLA_PYTHON_CLIENT_PREALLOCATE"),
+            "vmec_jax_opt_jvp_only_exact_tape": os.environ.get("VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE"),
         }
     except Exception as exc:  # pragma: no cover - diagnostics only
         return {"error": repr(exc)}
+
+
+def _env_flag_enabled(name: str) -> bool:
+    flag = os.getenv(name, "").strip().lower()
+    return flag in ("1", "true", "yes", "on")
+
+
+def _effective_jvp_only_exact_tape(args: argparse.Namespace) -> bool:
+    value = getattr(args, "jvp_only_exact_tape", None)
+    if value is not None:
+        return bool(value)
+    return _env_flag_enabled("VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE")
 
 
 def _cache_len(value: Any) -> int:
@@ -615,6 +644,7 @@ def _build_callback_payload(
         "clear_between_repeats": bool(args.clear_between_repeats),
         "initial_metrics": bool(getattr(args, "initial_metrics", False)),
         "sync_replay_timing": bool(getattr(args, "sync_replay_timing", False)),
+        "jvp_only_exact_tape": _effective_jvp_only_exact_tape(args),
         "solver_device_requested": args.solver_device,
         "solver_device_resolved": solver_device_resolved,
         "runtime": _runtime_info() if runtime is None else runtime,
@@ -710,6 +740,10 @@ def main() -> int:
         os.environ["VMEC_JAX_TIMING_DETAIL"] = "1"
     if args.sync_replay_timing:
         os.environ["VMEC_JAX_OPT_SYNC_REPLAY_TIMING"] = "1"
+    if args.jvp_only_exact_tape is not None:
+        os.environ["VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE"] = (
+            "1" if bool(args.jvp_only_exact_tape) else "0"
+        )
 
     import vmec_jax as vj
     from vmec_jax._compat import enable_x64
