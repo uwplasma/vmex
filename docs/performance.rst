@@ -151,9 +151,12 @@ read as a mixed result rather than a broad VMEC2000 speedup claim:
   ``--jvp-only-exact-tape`` omit reverse-mode base-carry storage from accepted
   exact tapes when only JVP columns are needed.  This is intentionally off by
   default.  A 2026-05-22 QH mode-2 exact-callback profile on ``office`` showed a
-  modest CPU total-time improvement but higher RSS, while GPU replay regressed
-  sharply.  Treat the flag as a profiling probe until replay parity and GPU
-  dispatch costs are understood.
+  modest CPU total-time improvement but higher RSS, while the original GPU
+  JVP-only replay regressed sharply.  A guarded follow-up with
+  ``VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES=1`` restored the GPU replay
+  path to near-full-tape performance by preserving the dynamic basepoint carries
+  needed for the basepoint scan runner.  Treat both flags as profiling probes
+  until larger mode and optimizer-trajectory matrices confirm the tradeoff.
 
   .. list-table:: QH mode-2 accepted Jacobian profile, ``office``, 2026-05-22
      :header-rows: 1
@@ -188,6 +191,12 @@ read as a mixed result rather than a broad VMEC2000 speedup claim:
        - 8.043 s
        - 41.794 s
        - 1378.2 MiB
+     * - GPU
+       - on + basepoint carries
+       - 24.249 s
+       - 11.069 s
+       - 6.461 s
+       - 922.2 MiB
 
 CPU/GPU profiling playbook
 --------------------------
@@ -514,9 +523,11 @@ An experimental forward-only tape mode is available for profiling with
 ``VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE=1``.  It omits reverse-replay base carries
 from accepted-point tapes used only for JVP column replay.  May 2026 profiling
 showed a modest CPU total-time improvement but higher RSS and replay cost, while
-the GPU path regressed sharply.  It is deliberately not a default.  Do not
-enable it for production sweeps unless the matching CPU/GPU callback profile
-improves.
+the original GPU path regressed sharply.  The additional opt-in
+``VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES=1`` preserves enough dynamic
+basepoint state to recover the fast basepoint replay path on the profiled GPU
+case.  It is deliberately not a default because larger mode and full optimizer
+trajectory matrices still need review.
 
 Representative May 2026 callback timings after the backend-adaptive replay
 bucket, scalar-gradient tangent-cache, and GPU replay-chunk changes were:
