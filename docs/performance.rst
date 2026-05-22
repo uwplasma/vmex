@@ -512,10 +512,11 @@ and ``"default"`` inherit JAX's active backend; pass ``solver_device="cpu"`` or
 
 An experimental forward-only tape mode is available for profiling with
 ``VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE=1``.  It omits reverse-replay base carries
-from accepted-point tapes used only for JVP column replay.  This reduces tape
-state in the intended GPU path, but May 2026 cold CPU profiling showed a small
-regression, so it is deliberately not a default.  Do not enable it for
-production sweeps unless the matching CPU/GPU callback profile improves.
+from accepted-point tapes used only for JVP column replay.  May 2026 profiling
+showed a modest CPU total-time improvement but higher RSS and replay cost, while
+the GPU path regressed sharply.  It is deliberately not a default.  Do not
+enable it for production sweeps unless the matching CPU/GPU callback profile
+improves.
 
 Representative May 2026 callback timings after the backend-adaptive replay
 bucket, scalar-gradient tangent-cache, and GPU replay-chunk changes were:
@@ -2604,11 +2605,11 @@ Cached mode scaling
 ``1/(mscale*nscale)`` so initial-guess construction avoids repeated gathers
 from the trig tables.
 
-Latest branch notes
--------------------
+Historical free-boundary cache note
+-----------------------------------
 
-On the current optimized branch, the last free-boundary cleanup pass cached
-more of the static external-boundary sampling setup on the host:
+A May 2026 free-boundary cleanup pass cached more of the static
+external-boundary sampling setup on the host:
 
 - phase-independent second-derivative mode factors,
 - angular ``phi`` grids for the sampled boundary mesh,

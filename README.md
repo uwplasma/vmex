@@ -144,8 +144,10 @@ compact README panels remain the reviewed `LASYM = F` best rows only.
 ## QI From Multiple NFP Seeds
 
 The same `examples/optimization/QI_optimization.py` workflow is also exercised
-on reviewed NFP 1, 2, 3, and 4 QI seed-robustness cases. The full provenance,
-case-specific targets, and table are in `docs/optimization_sweep_results.rst`.
+on case-gated NFP 1, 2, 3, and 4 QI seed-robustness examples. The full
+provenance, case-specific targets, and table are in
+`docs/optimization_sweep_results.rst`; broad simple-seed robustness across all
+families remains an active validation lane rather than a completed guarantee.
 The renderer now requires every initial LCFS and Boozer `|B|` panel to come from
 a WOUT whose boundary matches the row's source input, allowing VMEC's equivalent
 canonical phase convention, before any reference-family preconditioning or
@@ -169,16 +171,17 @@ PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 - Release checklist and CI gates: `docs/release_checklist.rst`
 - Latest published release:
   [`v0.0.11`](https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.11)
-- Release hygiene baseline recorded for `v0.0.11`: green `main` CI at `7030eaf`,
-  local required coverage `88.335%` against the `85%` gate, and `90%` / `95%`
-  coverage ratchets still staged rather than enforced. Re-check GitHub Actions
-  before reusing this baseline for a later release.
+- Historical release hygiene baseline recorded for `v0.0.11`: green `main` CI at
+  `7030eaf`, local required coverage `88.335%` against the then-current `85%`
+  gate, and `90%` / `95%` coverage ratchets still staged rather than enforced.
+  This is historical release evidence only; re-check GitHub Actions before
+  reusing any baseline for a later release.
 - Most recent completed green `main` CI checked during the 2026-05-22 release
   hygiene audit: run `26297711706` at `e90d1a2`. Re-check GitHub Actions
   before cutting any release candidate.
-- Latest local CI-equivalent coverage check: `93.04%`
-  (`1913 passed, 20 skipped, 101 deselected` in 7m08s on 2026-05-22) against
-  the current `85%` required gate; `95%` remains staged pending deeper
+- Latest local CI-equivalent coverage check: `93.18%`
+  (`1924 passed, 20 skipped, 101 deselected` in 7m20s on 2026-05-22) against
+  the current `90%` required gate; `95%` remains staged pending deeper
   `solve.py` coverage/refactor work.
 
 ## CLI Reference

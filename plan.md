@@ -1,9 +1,9 @@
 # VMEC-JAX Research-Grade Roadmap
 
-Last updated: 2026-05-20
+Last updated: 2026-05-22
 Primary branch: `main`
 Baseline release: `v0.0.11`
-Latest known green `main` CI: `7030eaf`
+Latest known green `main` CI: `e90d1a2`
 
 This is the living execution plan for making `vmec_jax` accurate, fast,
 differentiable, documented, and usable by external researchers. Update it when
@@ -48,9 +48,9 @@ acceptance criteria or evidence changes.
 - The duplicate finite-beta stage-one output path now has the same
   selected-best-exact-state save contract as the main QS workflow, so
   ``input.final`` and ``wout_final.nc`` cannot drift there either.
-- Required CI coverage is above the 85% gate. The May 22 required coverage
-  tier after the driver/solver refactor wave passed locally (`1913 passed,
-  20 skipped, 101 deselected`) in 7:08 with 93.04% coverage. The optional
+- Required CI coverage is above the 90% gate. The May 22 required coverage
+  tier after the driver/solver refactor wave passed locally (`1924 passed,
+  20 skipped, 101 deselected`) in 7:20 with 93.18% coverage. The optional
   converged VMEC2000 parity gate passed locally with `VMEC2000_INTEGRATION=1`
   earlier in the validation push. The 95% gate remains staged; reaching it
   still requires more `solve.py` orchestration/refactor work (`solve.py`
@@ -349,17 +349,18 @@ Acceptance:
 
 ## Progress Snapshot
 
-Updated 2026-05-20 after the bundled profile/current wout parity gates, QI
+Updated 2026-05-22 after the bundled profile/current wout parity gates, QI
 selection hardening, exact-Jacobian host-materialization cleanup,
 continuation/exact-history hardening, LASYM-Boozer parity, release-checklist
-push, 85% coverage-gate push, optional SIMSOPT/VMEC2000 gate expansion, the
+push, 85% and 90% coverage-gate pushes, optional SIMSOPT/VMEC2000 gate expansion, the
 converged-wout parity matrix/benchmark pass, QI diagnostic/objective branch
 hardening, the exact-output/API/release hygiene push, the custom QI seed audit
 documentation/regression gate, the v0.0.10 release, scan-runner cache reuse
 across boundary trials, detailed scan-timing diagnostics, reference-state wout
-roundtrip diagnostics, the green `main` CI run for `7030eaf`, LASYM bsubv
+roundtrip diagnostics, the green `main` CI run for `e90d1a2`, LASYM bsubv
 wout parity tightening, QI staged-history provenance cleanup, the v0.0.11
-release, and the QI optimization driver split:
+release, the QI optimization driver split, and the May 22 helper/refactor
+coverage wave:
 
 - Continuation correctness: 100%. Source fix is implemented and covered by
   synthetic repeated-stage tests, a real boundary-projection stage test, and
@@ -475,16 +476,16 @@ release, and the QI optimization driver split:
   mechanics live in `qi_optimization_cases.py` and
   `qi_optimization_support.py`. Large
   solver/wout/free-boundary splits remain deferred behind parity gates.
-- Docs/release hygiene: current release hygiene baseline is green at `7030eaf`
-  with local required coverage validated at 88.335%.
+- Docs/release hygiene: latest completed green main CI is `e90d1a2`, and local
+  required coverage is validated at 93.18% on the May 22 fast suite.
   Performance/discrete-adjoint/docs reflect the
   current replay and finite-beta policies, diagnostics docs cover detailed
   preconditioner timing, and a command-level release checklist now ties local
   gates, tools/validation lint/compile checks, GitHub Actions, artifact hygiene,
   and optional research-grade checks together. Read the Docs is configured to
-  fail on Sphinx warnings, release docs use the 85% coverage gate, and package
+  fail on Sphinx warnings, release docs use the 90% coverage gate, and package
   discovery is locked to the `vmec_jax` namespace. Full local Sphinx and the
-  required 85% coverage command is green at 88.335%; released reference assets
+  required 90% coverage command is green at 93.18%; released reference assets
   are ignored so local full-tier refreshes cannot accidentally bloat commits.
   The documented custom QI seed audit command was validated end-to-end on
   `input.QI_stel_seed_3127`; final seed-robust QI and GPU-production artifacts
@@ -492,10 +493,9 @@ release, and the QI optimization driver split:
 
 Release-critical lanes requested in this push (continuation, exact
 accepted-point output, VMEC parity/physics gates, and docs/release hygiene) are
-near closure, but the broader roadmap remains open. The 85% coverage gate is
-locked locally at about 88% current coverage; seed-robust QI mirror cleanup,
-staged 90% and 95% coverage ratchets, and larger-mode GPU replay remain future
-work.
+near closure, but the broader roadmap remains open. The 90% coverage gate is
+locked locally at 93.18% current coverage; seed-robust QI mirror cleanup, the
+95% coverage ratchet, and larger-mode GPU replay remain future work.
 
 Acceptance:
 
@@ -530,9 +530,10 @@ Acceptance:
       quasisymmetry, parity, and constraint branches.
 - [x] Raise required CI coverage to 85% with meaningful plotting, solver,
       optimization, validation-plan, and optional-reference-gate coverage.
-- [ ] Continue raising required CI coverage toward 95% in staged steps: 90%,
-      then 95%, after additional source refactors and physics gates reduce
-      runtime pressure.
+- [x] Raise required CI coverage to 90% after the May 22 local fast suite
+      reached 93.18% in 7m20s.
+- [ ] Continue raising required CI coverage toward 95% after additional source
+      refactors and physics gates reduce runtime pressure.
 - [ ] Add targeted tests before coverage-only tests: physics gates first, branch
       logic second, I/O/schema third.
 - [ ] Keep required CI under 10 minutes by using small fixtures and nightly heavy
@@ -590,18 +591,19 @@ Acceptance:
 
 Realistic next targets for this development cycle:
 
-1. Keep the required CI coverage gate at 85% and preserve sub-ten-minute py3.11
+1. Keep the required CI coverage gate at 90% and preserve sub-ten-minute py3.11
    coverage runtime by pruning duplicate helper tests, splitting slow
    validation into optional tiers, or refactoring the largest modules so fewer
-   synthetic branch tests are required. Current required coverage is about 88%;
-   the 90% and 95% gates are staged ratchets, not completed targets.
+   synthetic branch tests are required. Current required coverage is 93.18%;
+   the 95% gate is the next staged ratchet, not a completed target.
 2. Raise the solved-state QI diagnostic from the new low-resolution bundled
    gate to reviewed higher-resolution evidence: smooth QI, legacy QI, mirror
    ratio, elongation, iota, aspect ratio, and Boozer `|B|` contour quality.
 3. Continue GPU optimization only where profiling points to a concrete source
-   change.  Current evidence says exact tape build is subsecond in bounded CPU
-   cases; the bottleneck is replay/residual linearization/VJP in
-   `checkpoint_tape_state_jvp_columns` and related dynamic-basepoint replay.
+   change.  Current evidence says the expensive cold exact callback is split
+   between tape build, force/residual work, and replay/residual linearization;
+   the next isolated lane is `checkpoint_tape_state_jvp_columns` and related
+   dynamic-basepoint replay.
 4. Keep refactors small and test-backed.  Good next seams are pure helper
    extractions or schema/routing cleanup already covered by fast tests.  Broad
    rewrites of `solve.py`, `wout.py`, `free_boundary.py`, and replay

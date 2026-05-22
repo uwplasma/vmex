@@ -119,6 +119,10 @@ def _fake_carry_stacked(width: int = 3):
     return (np.zeros((1, width), dtype=float),) + tuple(np.zeros((1, 1), dtype=float) for _ in range(14))
 
 
+def _fake_carry(width: int = 3):
+    return (np.zeros(width, dtype=float),) + tuple(np.zeros(1, dtype=float) for _ in range(14))
+
+
 def test_replay_column_chunk_default_honors_env_target(monkeypatch):
     monkeypatch.setenv("VMEC_JAX_REPLAY_COLUMN_TARGET_MB", "0.001")
     tape = _fake_tape(128)
@@ -417,7 +421,8 @@ def test_direct_checkpoint_tape_records_build_leaf_timing(monkeypatch):
     assert tape.step_trace_static_flags == {"stacked": True}
 
 
-def test_direct_checkpoint_tape_jvp_only_omits_dynamic_base_carries(monkeypatch):
+def test_direct_checkpoint_tape_jvp_only_omits_dynamic_base_carries_by_default(monkeypatch):
+    monkeypatch.delenv("VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES", raising=False)
     trace = _fake_dynamic_trace()
     state = trace["state_pre"]
     store_base_carry_requests = []
@@ -459,8 +464,84 @@ def test_direct_checkpoint_tape_jvp_only_omits_dynamic_base_carries(monkeypatch)
     assert tape.dynamic_initial_carry == "carry0"
     assert tape.dynamic_base_carries_stacked is None
     assert tape.jvp_only is True
+    assert tape.diagnostics["jvp_only_basepoint_carries_enabled"] is False
+    assert tape.diagnostics["jvp_only_fast_basepoint_scan_available"] is False
+    assert tape.diagnostics["jvp_only_replay_path"] == "dynamic_whole_scan_linearize"
+    assert tape.diagnostics["jvp_only_replay_fallback_reason"] == "basepoint_carries_not_stored"
     with pytest.raises(ValueError, match="JVP-only checkpoint tapes"):
         da.checkpoint_tape_state_vjp(tape=tape, static="static", final_cotangent=np.zeros(1))
+
+
+def test_direct_checkpoint_tape_jvp_only_can_preserve_basepoint_carries_for_fast_scan(monkeypatch):
+    monkeypatch.setenv("VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES", "1")
+    trace = _fake_dynamic_trace()
+    state = trace["state_pre"]
+    store_base_carry_requests = []
+
+    def fake_solve(state0, static, *, adjoint_trace, **kwargs):
+        assert state0 is state
+        assert static == "static"
+        assert adjoint_trace is True
+        return SimpleNamespace(
+            state=state,
+            diagnostics={
+                "adjoint_step_trace": [trace],
+                "timing": {},
+            },
+        )
+
+    def fake_dynamic_payload(step_traces, static_flags, *, store_base_carries=True):
+        store_base_carry_requests.append(bool(store_base_carries))
+        base_carries = _fake_carry_stacked(width=6) if store_base_carries else None
+        return {"active": np.asarray([True])}, {"precond_jmax": 1}, _fake_carry(width=6), base_carries
+
+    runner_calls = []
+
+    def fake_runner(*, static, stacked, stacked_base_carries, static_flags):
+        def run(carry_tangents0, stacked_base_carries_in, stacked_traces_in):
+            runner_calls.append(np.asarray(carry_tangents0[0]).shape)
+            assert stacked_base_carries_in is stacked_base_carries
+            assert stacked_traces_in is stacked
+            return carry_tangents0
+
+        return run
+
+    monkeypatch.setattr("vmec_jax.solve.solve_fixed_boundary_residual_iter", fake_solve)
+    monkeypatch.setattr(da, "_dynamic_replay_supported", lambda *, tape, rebuild_preconditioner: True)
+    monkeypatch.setattr(da, "_build_dynamic_replay_payload", fake_dynamic_payload)
+    monkeypatch.setattr(da, "_checkpoint_tape_dynamic_basepoint_scan_runner", fake_runner)
+
+    tape = da.build_residual_checkpoint_tape_direct(
+        state,
+        "static",
+        indata={},
+        signgs=1,
+        max_iter=3,
+        ftol=0.0,
+        store_full_step_traces=False,
+        jvp_only=True,
+    )
+
+    assert store_base_carry_requests == [True]
+    assert tape.step_traces == ()
+    assert tape.dynamic_base_carries_stacked is not None
+    assert tape.jvp_only is True
+    assert tape.diagnostics["jvp_only_basepoint_carries_enabled"] is True
+    assert tape.diagnostics["jvp_only_fast_basepoint_scan_available"] is True
+    assert tape.diagnostics["jvp_only_replay_path"] == "dynamic_basepoint_scan"
+
+    tangents = np.arange(12, dtype=float).reshape(2, 6)
+    out = da.checkpoint_tape_state_jvp_columns(
+        tape=tape,
+        static="static",
+        initial_tangents=tangents,
+        rebuild_preconditioner=True,
+    )
+
+    np.testing.assert_allclose(np.asarray(out), tangents)
+    assert runner_calls == [(2, 6)]
+    with pytest.raises(ValueError, match="forward-replay only"):
+        da.checkpoint_tape_state_vjp(tape=tape, static="static", final_cotangent=np.zeros(6))
 
 
 def test_direct_checkpoint_tape_reruns_full_trace_when_dynamic_trace_unsupported(monkeypatch):

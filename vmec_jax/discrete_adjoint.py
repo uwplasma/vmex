@@ -168,6 +168,11 @@ def _dynamic_replay_mode() -> str:
     return "basepoint"
 
 
+def _jvp_only_exact_tape_basepoint_carries_enabled() -> bool:
+    flag = os.getenv("VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES", "").strip().lower()
+    return flag in ("1", "true", "yes", "on")
+
+
 def _replay_column_chunk_default(*, tape, tangents) -> int | None:
     """Return an automatic replay-column chunk size for large exact Jacobians.
 
@@ -602,6 +607,7 @@ def build_residual_checkpoint_tape_direct(
     step_trace_static_flags = None
     dynamic_initial_carry = None
     dynamic_base_carries_stacked = None
+    preserve_jvp_basepoint_carries = bool(jvp_only and _jvp_only_exact_tape_basepoint_carries_enabled())
     if step_traces:
         step_trace_static_flags = _static_flags_from_replay_step_traces(step_traces)
         tentative_tape = ResidualCheckpointTape(
@@ -619,7 +625,7 @@ def build_residual_checkpoint_tape_direct(
             dynamic_stacked, dynamic_static_flags, dynamic_initial_carry, dynamic_base_carries_stacked = _build_dynamic_replay_payload(
                 step_traces,
                 step_trace_static_flags,
-                store_base_carries=not bool(jvp_only),
+                store_base_carries=(not bool(jvp_only)) or preserve_jvp_basepoint_carries,
             )
             _record_timing("tape_dynamic_payload_build_s", dynamic_payload_start)
             if not store_full_step_traces:
@@ -653,6 +659,25 @@ def build_residual_checkpoint_tape_direct(
     timing = compact_diagnostics.setdefault("timing", {})
     for key, value in tape_timing.items():
         timing[key] = float(timing.get(key, 0.0)) + float(value)
+    if jvp_only:
+        fast_basepoint_available = bool(
+            dynamic_base_carries_stacked is not None
+            and stacked_step_traces is not None
+            and step_trace_static_flags is not None
+            and _dynamic_basepoint_payload_shapes_match(stacked_step_traces, dynamic_base_carries_stacked)
+        )
+        compact_diagnostics["jvp_only_basepoint_carries_enabled"] = bool(preserve_jvp_basepoint_carries)
+        compact_diagnostics["jvp_only_fast_basepoint_scan_available"] = fast_basepoint_available
+        if fast_basepoint_available:
+            compact_diagnostics["jvp_only_replay_path"] = "dynamic_basepoint_scan"
+        elif dynamic_initial_carry is not None and not step_traces:
+            compact_diagnostics["jvp_only_replay_path"] = "dynamic_whole_scan_linearize"
+            compact_diagnostics["jvp_only_replay_fallback_reason"] = "basepoint_carries_not_stored"
+        elif step_traces:
+            compact_diagnostics["jvp_only_replay_path"] = "step_trace_replay"
+            compact_diagnostics["jvp_only_replay_fallback_reason"] = "dynamic_exact_tape_unsupported"
+        else:
+            compact_diagnostics["jvp_only_replay_path"] = "identity"
     return ResidualCheckpointTape(
         final_packed_state=final_packed_state,
         packed_states=np.zeros((0, int(state0.layout.size)), dtype=float),
@@ -664,7 +689,7 @@ def build_residual_checkpoint_tape_direct(
         dynamic_initial_carry=dynamic_initial_carry,
         dynamic_base_carries_stacked=dynamic_base_carries_stacked,
         diagnostics=compact_diagnostics,
-        jvp_only=bool(jvp_only and not step_traces and dynamic_base_carries_stacked is None),
+        jvp_only=bool(jvp_only and not step_traces),
     )
 
 
@@ -700,7 +725,7 @@ def checkpoint_tape_state_vjp(
 
     if bool(getattr(tape, "jvp_only", False)):
         raise ValueError(
-            "JVP-only checkpoint tapes omit reverse replay basepoints; rebuild the tape with jvp_only=False."
+            "JVP-only checkpoint tapes are forward-replay only; rebuild the tape with jvp_only=False."
         )
 
     if (
