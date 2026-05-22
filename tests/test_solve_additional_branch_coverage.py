@@ -9,6 +9,7 @@ import pytest
 import vmec_jax.solve as solve
 from vmec_jax._compat import has_jax, jnp
 from vmec_jax.state import StateLayout, VMECState
+from vmec_jax.vmec_tomnsp import TomnspsRZL
 
 
 def _static(*, ns: int = 2, mpol: int = 2, ntor: int = 1, lthreed: bool = True, lasym: bool = False):
@@ -109,6 +110,119 @@ def test_fixed_boundary_gd_backtracks_then_reports_line_search_failure(monkeypat
     np.testing.assert_allclose(np.asarray(result.state.Rcos), np.asarray(state0.Rcos))
     np.testing.assert_allclose(result.step_history, [500.0])
     assert "line search failed to improve objective" in capsys.readouterr().out
+
+
+@pytest.mark.skipif(not has_jax(), reason="fixed-boundary L-BFGS requires JAX")
+def test_fixed_boundary_lbfgs_backtracks_then_reports_line_search_failure(monkeypatch, capsys):
+    _install_quadratic_geometry(monkeypatch)
+    state0 = _gd_state(interior=2.0)
+
+    result = solve.solve_fixed_boundary_lbfgs(
+        state0,
+        _gd_static(),
+        phipf=np.ones(3),
+        chipf=np.zeros(3),
+        signgs=1,
+        lamscale=1.0,
+        pressure=np.zeros(3),
+        max_iter=1,
+        step_size=1_000.0,
+        grad_tol=0.0,
+        max_backtracks=1,
+        bt_factor=0.5,
+        verbose=True,
+    )
+
+    assert result.n_iter == 0
+    np.testing.assert_allclose(np.asarray(result.state.Rcos), np.asarray(state0.Rcos))
+    np.testing.assert_allclose(result.step_history, [500.0])
+    assert "line search failed; stopping" in capsys.readouterr().out
+
+
+def test_top_level_force_block_and_cache_helpers_cover_unusual_branches(monkeypatch):
+    monkeypatch.setenv("VMEC_JAX_TEST_CACHE_LIMIT", "not-an-int")
+    assert solve._jit_cache_limit("VMEC_JAX_TEST_CACHE_LIMIT", 3) == 3
+
+    cache = {}
+    assert solve._jit_cache_get(cache, ("missing",)) is None
+    ordered = solve.OrderedDict([(("a",), 1), (("b",), 2)])
+    assert solve._jit_cache_get(ordered, ("a",)) == 1
+    assert list(ordered) == [("b",), ("a",)]
+
+    monkeypatch.setenv("VMEC_JAX_TEST_CACHE_LIMIT", "1")
+    solve._jit_cache_put(ordered, ("c",), 3, env_name="VMEC_JAX_TEST_CACHE_LIMIT", default=3)
+    assert list(ordered) == [("c",)]
+    monkeypatch.setenv("VMEC_JAX_TEST_CACHE_LIMIT", "0")
+    assert solve._jit_cache_put(ordered, ("d",), 4, env_name="VMEC_JAX_TEST_CACHE_LIMIT", default=3) == 4
+    assert ("d",) not in ordered
+
+    base = np.arange(8.0).reshape(2, 2, 2) + 1.0
+    blocks = solve._ForceBlocks(
+        frcc=base,
+        frss=None,
+        fzsc=base + 1.0,
+        fzcs=None,
+        flsc=base + 2.0,
+        flcs=None,
+        frsc=None,
+        frcs=None,
+        fzcc=None,
+        fzss=None,
+        flcc=None,
+        flss=None,
+    )
+    zero = np.zeros_like(base)
+    weighted = solve._mode_weight_force_blocks_np(blocks, w_mode_mn=np.asarray([[2.0, 3.0], [4.0, 5.0]]), zeros_coeff=zero)
+    np.testing.assert_allclose(weighted.frcc, base * np.asarray([[[2.0, 3.0], [4.0, 5.0]]]))
+    assert weighted.frss is zero
+
+    frzl_pre = SimpleNamespace(flsc=np.ones((2, 1, 1)), flcs=None, flcc=None, flss=None)
+    assert float(np.asarray(solve._lambda_preconditioned_full_norm(frzl_pre, use_jax=False))) == pytest.approx(1.0)
+    frzl_pre_full = SimpleNamespace(
+        flsc=np.ones((2, 1, 1)),
+        flcs=np.ones((2, 1, 1)) * 2.0,
+        flcc=np.ones((2, 1, 1)) * 3.0,
+        flss=np.ones((2, 1, 1)) * 4.0,
+    )
+    assert float(np.asarray(solve._lambda_preconditioned_full_norm(frzl_pre_full, use_jax=True))) == pytest.approx(30.0)
+
+    finite_dt = solve._safe_dt_from_force_blocks(dt_nominal=1.0, max_coeff_delta_rms=1.0e-4, blocks=blocks)
+    assert finite_dt < 1.0
+    zero_blocks = blocks._replace(frcc=np.zeros_like(base), fzsc=np.zeros_like(base), flsc=np.zeros_like(base))
+    assert solve._safe_dt_from_force_blocks(dt_nominal=0.25, max_coeff_delta_rms=1.0e-4, blocks=zero_blocks) == pytest.approx(0.25)
+
+
+@pytest.mark.skipif(not has_jax(), reason="fused preconditioner-output scaling requires JAX")
+def test_preconditioner_output_scaling_jit_covers_missing_optional_blocks(monkeypatch):
+    solve._PRECOND_OUTPUT_SCALE_JIT_CACHE.clear()
+
+    base = np.arange(8.0).reshape(2, 2, 2) + 1.0
+    frzl = TomnspsRZL(
+        frcc=jnp.asarray(base),
+        frss=None,
+        fzsc=jnp.asarray(base + 1.0),
+        fzcs=None,
+        flsc=jnp.asarray(base + 2.0),
+        flcs=None,
+        frsc=None,
+        frcs=None,
+        fzcc=None,
+        fzss=None,
+        flcc=None,
+        flss=None,
+    )
+    lam_prec = jnp.ones_like(frzl.flsc) * 0.5
+    weights = jnp.asarray([[2.0, 3.0], [4.0, 5.0]])
+
+    scaler = solve._preconditioner_output_scaling_jit(apply_lambda_update_scale=False)
+    assert scaler is solve._preconditioner_output_scaling_jit(apply_lambda_update_scale=False)
+    raw, scaled = scaler(frzl, lam_prec, weights, 0.25)
+
+    weight_np = np.asarray(weights)[None, :, :]
+    np.testing.assert_allclose(np.asarray(raw[4]), (base + 2.0) * 0.5)
+    np.testing.assert_allclose(np.asarray(raw[6]), np.zeros_like(base))
+    np.testing.assert_allclose(np.asarray(scaled[0]), base * weight_np)
+    np.testing.assert_allclose(np.asarray(scaled[4]), (base + 2.0) * 0.5 * weight_np)
 
 
 def test_free_boundary_vmec_cadence_handles_invalid_fsq_activation_and_full_updates(monkeypatch):
