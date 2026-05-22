@@ -182,8 +182,9 @@ def test_readme_renderer_points_nfp4_row_at_minimal_seed() -> None:
 
     assert nfp4.label == "NFP=4 minimal seed"
     assert nfp4.input_file.name == "input.minimal_seed_nfp4"
-    assert "minimal_nfp4_to_qi_finite_beta_reference" in str(nfp4.output_dir)
+    assert nfp4.output_dir == ROOT / "docs" / "_static" / "qi_readme_cases" / "nfp4_minimal"
     assert "nfp4_qi_finite_beta" not in str(nfp4.output_dir)
+    assert nfp4.initial_wout == nfp4.output_dir / "wout_initial.nc"
     assert nfp4.validation_status == "case-gated"
     assert nfp4.preconditioner_summary is not None
     assert nfp4.preconditioner_summary.name == "summary.json"
@@ -194,8 +195,9 @@ def test_readme_renderer_points_nfp3_at_bundled_raw_initial_artifact() -> None:
 
     nfp3 = next(case for case in mod.CASES if case.label == "NFP=3 seed 3127")
 
-    assert nfp3.initial_wout == ROOT / "examples" / "data" / "wout_QI_stel_seed_3127.nc"
-    assert nfp3.initial_wout.name == "wout_QI_stel_seed_3127.nc"
+    bundled_raw_wout = ROOT / "examples" / "data" / "wout_QI_stel_seed_3127.nc"
+    assert nfp3.initial_wout == ROOT / "docs" / "_static" / "qi_readme_cases" / "nfp3_seed3127" / "wout_initial.nc"
+    assert nfp3.initial_wout.read_bytes() == bundled_raw_wout.read_bytes()
 
 
 def test_real_nfp3_raw_initial_wout_matches_input_boundary() -> None:
