@@ -74,6 +74,17 @@ _CHECKPOINT_TAPE_SCAN_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
 _CHECKPOINT_TAPE_DYNAMIC_SCAN_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
 _CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_SCAN_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
 _CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_VJP_SCAN_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
+_REPLAY_SCAN_CACHE_LABELS: tuple[str, ...] = (
+    "checkpoint",
+    "dynamic",
+    "dynamic_basepoint",
+    "dynamic_basepoint_vjp",
+)
+_REPLAY_SCAN_CACHE_DIAGNOSTICS: dict[str, int | float] = {
+    f"replay_{label}_scan_cache_{suffix}": 0.0 if suffix.endswith("_s") else 0
+    for label in _REPLAY_SCAN_CACHE_LABELS
+    for suffix in ("lookup_s", "build_s", "hit_count", "miss_count")
+}
 
 _DIRECT_TAPE_TIMING_KEYS = (
     "tape_solve_call_s",
@@ -111,12 +122,43 @@ def _lru_cache_put(cache: OrderedDict[tuple[Any, ...], Any], key: tuple[Any, ...
         cache.popitem(last=False)
 
 
+def replay_scan_cache_diagnostics(*, reset: bool = False) -> dict[str, int | float]:
+    """Return optional replay-scan cache diagnostics used for performance triage."""
+    out = dict(_REPLAY_SCAN_CACHE_DIAGNOSTICS)
+    if bool(reset):
+        for key in _REPLAY_SCAN_CACHE_DIAGNOSTICS:
+            _REPLAY_SCAN_CACHE_DIAGNOSTICS[key] = 0.0 if key.endswith("_s") else 0
+    return out
+
+
+def _replay_scan_cache_diagnostics_enabled() -> bool:
+    env = os.getenv("VMEC_JAX_TIMING", "").strip().lower()
+    return env not in ("", "0", "false", "no")
+
+
+def _record_replay_scan_cache_lookup(
+    label: str,
+    *,
+    hit: bool,
+    lookup_s: float,
+    build_s: float = 0.0,
+) -> None:
+    if not _replay_scan_cache_diagnostics_enabled():
+        return
+    prefix = f"replay_{label}_scan_cache"
+    _REPLAY_SCAN_CACHE_DIAGNOSTICS[f"{prefix}_lookup_s"] += float(lookup_s)
+    _REPLAY_SCAN_CACHE_DIAGNOSTICS[f"{prefix}_build_s"] += float(build_s)
+    count_key = f"{prefix}_{'hit' if bool(hit) else 'miss'}_count"
+    _REPLAY_SCAN_CACHE_DIAGNOSTICS[count_key] = int(_REPLAY_SCAN_CACHE_DIAGNOSTICS[count_key]) + 1
+
+
 def clear_replay_scan_caches() -> None:
     """Drop cached replay-scan runners to release compiled executable refs."""
     _CHECKPOINT_TAPE_SCAN_CACHE.clear()
     _CHECKPOINT_TAPE_DYNAMIC_SCAN_CACHE.clear()
     _CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_SCAN_CACHE.clear()
     _CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_VJP_SCAN_CACHE.clear()
+    replay_scan_cache_diagnostics(reset=True)
 
 
 _DEFAULT_REPLAY_COLUMN_TARGET_MB = 4096.0
@@ -1420,9 +1462,14 @@ def _checkpoint_tape_scan_runner(*, static, stacked, static_flags, rebuild_preco
         None if static_flags["precond_jmax"] is None else int(static_flags["precond_jmax"]),
         _stacked_trace_signature(stacked),
     )
+    diagnostics_enabled = _replay_scan_cache_diagnostics_enabled()
+    lookup_start = time.perf_counter() if diagnostics_enabled else None
     cached = _lru_cache_get(_CHECKPOINT_TAPE_SCAN_CACHE, key)
+    lookup_s = time.perf_counter() - float(lookup_start) if lookup_start is not None else 0.0
     if cached is not None:
+        _record_replay_scan_cache_lookup("checkpoint", hit=True, lookup_s=lookup_s)
         return cached
+    build_start = time.perf_counter() if diagnostics_enabled else None
 
     def _step_scan(carry, trace):
         tangents = carry
@@ -1452,6 +1499,12 @@ def _checkpoint_tape_scan_runner(*, static, stacked, static_flags, rebuild_preco
         return tangents
 
     _lru_cache_put(_CHECKPOINT_TAPE_SCAN_CACHE, key, _run_scan)
+    _record_replay_scan_cache_lookup(
+        "checkpoint",
+        hit=False,
+        lookup_s=lookup_s,
+        build_s=time.perf_counter() - float(build_start) if build_start is not None else 0.0,
+    )
     return _run_scan
 
 
@@ -1471,9 +1524,14 @@ def _checkpoint_tape_dynamic_scan_runner(*, static, stacked, static_flags):
         int(static_flags["precond_jmax"]),
         _stacked_trace_signature(stacked),
     )
+    diagnostics_enabled = _replay_scan_cache_diagnostics_enabled()
+    lookup_start = time.perf_counter() if diagnostics_enabled else None
     cached = _lru_cache_get(_CHECKPOINT_TAPE_DYNAMIC_SCAN_CACHE, key)
+    lookup_s = time.perf_counter() - float(lookup_start) if lookup_start is not None else 0.0
     if cached is not None:
+        _record_replay_scan_cache_lookup("dynamic", hit=True, lookup_s=lookup_s)
         return cached
+    build_start = time.perf_counter() if diagnostics_enabled else None
 
     def _step_scan(carry, trace):
         active = jnp.asarray(trace["active"], dtype=bool) if "active" in trace else jnp.asarray(True, dtype=bool)
@@ -1496,6 +1554,12 @@ def _checkpoint_tape_dynamic_scan_runner(*, static, stacked, static_flags):
         return carry
 
     _lru_cache_put(_CHECKPOINT_TAPE_DYNAMIC_SCAN_CACHE, key, _run_scan)
+    _record_replay_scan_cache_lookup(
+        "dynamic",
+        hit=False,
+        lookup_s=lookup_s,
+        build_s=time.perf_counter() - float(build_start) if build_start is not None else 0.0,
+    )
     return _run_scan
 
 
@@ -1516,9 +1580,14 @@ def _checkpoint_tape_dynamic_basepoint_scan_runner(*, static, stacked, stacked_b
         _stacked_trace_signature(stacked),
         _stacked_trace_signature(stacked_base_carries),
     )
+    diagnostics_enabled = _replay_scan_cache_diagnostics_enabled()
+    lookup_start = time.perf_counter() if diagnostics_enabled else None
     cached = _lru_cache_get(_CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_SCAN_CACHE, key)
+    lookup_s = time.perf_counter() - float(lookup_start) if lookup_start is not None else 0.0
     if cached is not None:
+        _record_replay_scan_cache_lookup("dynamic_basepoint", hit=True, lookup_s=lookup_s)
         return cached
+    build_start = time.perf_counter() if diagnostics_enabled else None
 
     def _step_scan(carry_tangents, inputs):
         carry_base, trace = inputs
@@ -1550,6 +1619,12 @@ def _checkpoint_tape_dynamic_basepoint_scan_runner(*, static, stacked, stacked_b
         return carry_tangents
 
     _lru_cache_put(_CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_SCAN_CACHE, key, _run_scan)
+    _record_replay_scan_cache_lookup(
+        "dynamic_basepoint",
+        hit=False,
+        lookup_s=lookup_s,
+        build_s=time.perf_counter() - float(build_start) if build_start is not None else 0.0,
+    )
     return _run_scan
 
 
@@ -1570,9 +1645,14 @@ def _checkpoint_tape_dynamic_basepoint_vjp_scan_runner(*, static, stacked, stack
         _stacked_trace_signature(stacked),
         _stacked_trace_signature(stacked_base_carries),
     )
+    diagnostics_enabled = _replay_scan_cache_diagnostics_enabled()
+    lookup_start = time.perf_counter() if diagnostics_enabled else None
     cached = _lru_cache_get(_CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_VJP_SCAN_CACHE, key)
+    lookup_s = time.perf_counter() - float(lookup_start) if lookup_start is not None else 0.0
     if cached is not None:
+        _record_replay_scan_cache_lookup("dynamic_basepoint_vjp", hit=True, lookup_s=lookup_s)
         return cached
+    build_start = time.perf_counter() if diagnostics_enabled else None
 
     def _step_scan(carry_cotangents, inputs):
         carry_base, trace = inputs
@@ -1612,6 +1692,12 @@ def _checkpoint_tape_dynamic_basepoint_vjp_scan_runner(*, static, stacked, stack
         return initial_cotangents
 
     _lru_cache_put(_CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_VJP_SCAN_CACHE, key, _run_scan)
+    _record_replay_scan_cache_lookup(
+        "dynamic_basepoint_vjp",
+        hit=False,
+        lookup_s=lookup_s,
+        build_s=time.perf_counter() - float(build_start) if build_start is not None else 0.0,
+    )
     return _run_scan
 
 
@@ -2643,6 +2729,7 @@ __all__ = [
     "preconditioned_force_channels_from_raw_forces",
     "preconditioned_force_channels_from_rz_output",
     "raw_force_residual_from_state",
+    "replay_scan_cache_diagnostics",
     "replay_residual_checkpoint_step",
     "strict_update_accepted_step",
     "strict_update_one_step_from_state",

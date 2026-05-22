@@ -317,7 +317,9 @@ def test_scan_cache_limit_lru_and_clear(monkeypatch):
 
 def test_checkpoint_scan_runner_factories_reuse_cached_runners(monkeypatch):
     monkeypatch.setenv("VMEC_JAX_SCAN_CACHE_LIMIT", "8")
+    monkeypatch.setenv("VMEC_JAX_TIMING", "1")
     da.clear_replay_scan_caches()
+    assert all(value == 0 for value in da.replay_scan_cache_diagnostics(reset=False).values())
     static = object()
 
     trace = _fake_jax_replay_trace()
@@ -385,6 +387,13 @@ def test_checkpoint_scan_runner_factories_reuse_cached_runners(monkeypatch):
     assert len(da._CHECKPOINT_TAPE_DYNAMIC_SCAN_CACHE) == 1
     assert len(da._CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_SCAN_CACHE) == 1
     assert len(da._CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_VJP_SCAN_CACHE) == 1
+    diagnostics = da.replay_scan_cache_diagnostics(reset=True)
+    for label in ("checkpoint", "dynamic", "dynamic_basepoint", "dynamic_basepoint_vjp"):
+        assert diagnostics[f"replay_{label}_scan_cache_miss_count"] == 1
+        assert diagnostics[f"replay_{label}_scan_cache_hit_count"] == 1
+        assert diagnostics[f"replay_{label}_scan_cache_lookup_s"] >= 0.0
+        assert diagnostics[f"replay_{label}_scan_cache_build_s"] >= 0.0
+    assert all(value == 0 for value in da.replay_scan_cache_diagnostics(reset=False).values())
     da.clear_replay_scan_caches()
 
 

@@ -8369,16 +8369,35 @@ def solve_fixed_boundary_residual_iter(
             if scan_differentiated:
                 # A runner created during a JAX transform closes over traced
                 # constants from the solve setup. Keep it local to the transform.
+                if scan_timing_enabled:
+                    scan_timing_stats["scan_runner_cache_bypass_count"] = (
+                        int(scan_timing_stats.get("scan_runner_cache_bypass_count", 0)) + 1
+                    )
                 return jit(_run_scan)
+            cache_lookup_start = time.perf_counter() if scan_timing_enabled else None
             cached_run = _jit_cache_get(_SCAN_RUNNER_CACHE, key)
+            if scan_timing_enabled and cache_lookup_start is not None:
+                scan_timing_stats["scan_runner_cache_lookup_s"] += time.perf_counter() - float(cache_lookup_start)
             if cached_run is None:
+                if scan_timing_enabled:
+                    scan_timing_stats["scan_runner_cache_miss_count"] = (
+                        int(scan_timing_stats.get("scan_runner_cache_miss_count", 0)) + 1
+                    )
+                cache_build_start = time.perf_counter() if scan_timing_enabled else None
                 runner = jit(_run_scan)
-                return _jit_cache_put(
+                cached_runner = _jit_cache_put(
                     _SCAN_RUNNER_CACHE,
                     key,
                     runner,
                     env_name="VMEC_JAX_SCAN_RUNNER_CACHE_SIZE",
                     default=32,
+                )
+                if scan_timing_enabled and cache_build_start is not None:
+                    scan_timing_stats["scan_runner_cache_build_s"] += time.perf_counter() - float(cache_build_start)
+                return cached_runner
+            if scan_timing_enabled:
+                scan_timing_stats["scan_runner_cache_hit_count"] = (
+                    int(scan_timing_stats.get("scan_runner_cache_hit_count", 0)) + 1
                 )
             return cached_run
 
