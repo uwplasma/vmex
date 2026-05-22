@@ -118,7 +118,7 @@ def _lasym_optional_only_residual(state: VMECState) -> TomnspsRZL:
     )
 
 
-def _install_fake_physics(monkeypatch, residual_from_state):
+def _install_fake_physics(monkeypatch, residual_from_state, *, sqrtg_value: float = 1.0):
     import vmec_jax.boundary as boundary_mod
     import vmec_jax.energy as energy_mod
     import vmec_jax.vmec_forces as forces_mod
@@ -148,7 +148,7 @@ def _install_fake_physics(monkeypatch, residual_from_state):
     )
 
     def fake_forces(*, state, **_kwargs):
-        sqrtg = jnp.ones((3, 1, 1), dtype=jnp.asarray(state.Rcos).dtype)
+        sqrtg = jnp.full((3, 1, 1), float(sqrtg_value), dtype=jnp.asarray(state.Rcos).dtype)
         return SimpleNamespace(state=state, bc=SimpleNamespace(jac=SimpleNamespace(sqrtg=sqrtg)))
 
     monkeypatch.setattr(forces_mod, "vmec_forces_rz_from_wout", fake_forces)
@@ -206,6 +206,39 @@ def test_lbfgs_auto_scales_accepts_one_step_and_stops_on_nonfinite_trial(monkeyp
     assert stopped.n_iter == 0
     np.testing.assert_allclose(stopped.w_history, [1.0])
     np.testing.assert_allclose(stopped.step_history, [1.0])
+
+
+def test_lbfgs_builds_missing_trig_jits_gradient_and_warns_on_negative_jacobian(monkeypatch, capsys):
+    import vmec_jax.vmec_tomnsp as tomnsp_mod
+
+    static = _tiny_static()
+    static.trig_vmec = None
+    generated_trig = SimpleNamespace(name="generated-trig")
+    trig_calls = []
+    monkeypatch.setattr(
+        tomnsp_mod,
+        "vmec_trig_tables",
+        lambda **kwargs: trig_calls.append(kwargs) or generated_trig,
+    )
+    _install_fake_physics(monkeypatch, _single_r_residual, sqrtg_value=-1.0)
+
+    result = solve_mod.solve_fixed_boundary_lbfgs_vmec_residual(
+        _state_with_interior_rcos(2.0),
+        static,
+        indata=_TinyInData(),
+        signgs=1,
+        include_constraint_force=False,
+        max_iter=1,
+        jit_grad=True,
+        verbose=True,
+    )
+
+    assert trig_calls
+    assert trig_calls[0]["ntheta"] == 4
+    assert trig_calls[0]["mmax"] == 1
+    assert result.n_iter >= 0
+    assert result.diagnostics["objective_scale"] == pytest.approx(0.25)
+    assert "initial Jacobian has non-positive entries" in capsys.readouterr().out
 
 
 def test_gn_lasym_optional_blocks_auto_scale_and_accept_real_cg_step(monkeypatch):
