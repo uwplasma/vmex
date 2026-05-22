@@ -167,6 +167,13 @@ PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
   local required coverage `88.335%` against the `85%` gate, and `90%` / `95%`
   coverage ratchets still staged rather than enforced. Re-check GitHub Actions
   before reusing this baseline for a later release.
+- Latest checked `main` CI for release-candidate hygiene: run `26204014729`
+  completed green at `ed86718` on 2026-05-21, with manual/nightly
+  `physics-full` skipped as expected for a push run.
+- Latest local CI-equivalent coverage check: `92.32%`
+  (`1824 passed, 20 skipped, 101 deselected` in 7m19s on 2026-05-22) against
+  the current `85%` required gate; `95%` remains staged pending deeper
+  `solve.py` coverage/refactor work.
 
 ## CLI Reference
 

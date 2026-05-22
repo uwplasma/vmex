@@ -4,14 +4,15 @@ Testing, Coverage, and Repository Size Strategy
 This page defines the validation target for ``vmec-jax``.  The goal is not to
 collect many smoke tests; the goal is a compact, physics-based test suite that
 protects VMEC2000 parity, numerical correctness, differentiability, and user
-workflows while keeping required CI under ten minutes.
+workflows while keeping required CI bounded by explicit job timeouts.
 
 
 Target State
 ------------
 
-- Required CI wall time: under ten minutes for the required test, docs, and
-  build jobs on GitHub-hosted CPU runners.
+- Required CI wall time: keep required test, docs, and build jobs within their
+  configured GitHub Actions timeouts on hosted CPU runners; the Python matrix
+  can currently run longer than ten minutes while the coverage leg completes.
 - Routine local gate:
   ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000 and not simsopt"``.
 - Local CI-equivalent coverage runs should record pass/skip/deselect counts,
@@ -19,13 +20,15 @@ Target State
   release notes or validation artifact for the candidate being checked.
 - Near-term coverage target: keep the required ``85%`` actual line coverage gate
   green with meaningful fast and bounded-physics tests while preserving
-  sub-ten-minute coverage runtime.  The current required fast-suite coverage is
-  ``88.335%`` from the validated May 20 local CI-equivalent run.  Treat this as
-  about ``88%`` current required coverage; the enforced gate remains ``85%``.
+  acceptable coverage runtime.  The current required fast-suite coverage is
+  ``92.32%`` from the validated May 22 local CI-equivalent run
+  (``1824 passed, 20 skipped, 101 deselected`` in 7m19s).  Treat this as about
+  ``92%`` current required coverage; the enforced gate remains ``85%`` until CI
+  has carried the higher baseline for multiple green runs.
 - Next staged coverage target: raise the required Python 3.11 gate to ``90%``
-  only after a clean local CI-equivalent run demonstrates at least 90% package
-  coverage on the fast suite, the runtime remains acceptable, and the added
-  coverage comes from required tests rather than optional local dependencies.
+  after CI confirms the local result remains stable with acceptable runtime and
+  the added coverage comes from required tests rather than optional local
+  dependencies.
 - Long-term required coverage: raise the required gate to ``95%`` after the
   solver/driver refactors and physics-kernel seams below have their own focused
   tests.  The current Python 3.11 required coverage gate is ``85%``.
@@ -243,7 +246,7 @@ the recommended local escalation path.
    * - Coverage gate
      - ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000 and not simsopt" --cov=vmec_jax --cov-report=xml --cov-report=term:skip-covered --cov-fail-under=85``
      - Python 3.11 required CI coverage job.  The latest local equivalent
-       measured ``88.335%`` coverage and enforces the 85% coverage gate while
+       measured ``92.32%`` coverage and enforces the 85% coverage gate while
        keeping optional executable validation in separate opt-in lanes.
    * - Optimization workflow smoke
      - ``pytest -q tests/test_optimization_examples.py tests/test_qs_ess_render_smoke.py``
@@ -534,7 +537,7 @@ The required CI gate is staged deliberately:
    * - Current
      - ``--cov-fail-under=85``
      - Fast-suite coverage is green on Python 3.11 with ``.[plots]`` installed
-       at about 88% actual package coverage, and required CI remains independent
+       at about 92% actual package coverage, and required CI remains independent
        of VMEC2000, SIMSOPT, GPUs, and large downloaded assets.
      - Keep enforced.
    * - 90%

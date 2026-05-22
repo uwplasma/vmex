@@ -187,6 +187,7 @@ from .optimization_workflow import (
     least_squares_solve,
     mean_iota_objective,
     normalize_boundary_mode_limits,
+    prepare_simple_omnigenity_seed_input,
     qs_stage_modes,
     qi_boozer_b_target_objective,
     qi_lgradb_objective,
@@ -200,6 +201,7 @@ from .optimization_workflow import (
     repeated_stage_modes,
     run_fixed_boundary_objective_optimization,
     run_quasi_isodynamic_objective_optimization,
+    simple_omnigenity_seed_indata,
     VolavgB,
 )
 from .coords import Coords, eval_coords
@@ -478,6 +480,7 @@ __all__ = [
     "least_squares_solve",
     "mean_iota_objective",
     "normalize_boundary_mode_limits",
+    "prepare_simple_omnigenity_seed_input",
     "qs_stage_modes",
     "qi_boozer_b_target_objective",
     "qi_lgradb_objective",
@@ -491,6 +494,7 @@ __all__ = [
     "repeated_stage_modes",
     "run_fixed_boundary_objective_optimization",
     "run_quasi_isodynamic_objective_optimization",
+    "simple_omnigenity_seed_indata",
     "VolavgB",
     "Coords",
     "eval_coords",

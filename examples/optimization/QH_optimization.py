@@ -19,11 +19,21 @@ enable_x64(True)
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
 # Problem parameters.  Edit these directly for a different case.
-INPUT_FILE = DATA_DIR / "input.nfp4_QH_warm_start"
+WARM_START_INPUT_FILE = DATA_DIR / "input.nfp4_QH_warm_start"
+SIMPLE_SEED_INPUT_FILE = DATA_DIR / "input.minimal_seed_nfp4"
 OUTPUT_DIR = Path("results/qh_opt/ess")
 MAX_MODE = 3
 MIN_VMEC_MODE = 6
-USE_MODE_CONTINUATION = True
+USE_SIMPLE_SEED = True  # Start from near-circular RBC(0,0), RBC(0,1), ZBS(0,1).
+INPUT_FILE = SIMPLE_SEED_INPUT_FILE if USE_SIMPLE_SEED else WARM_START_INPUT_FILE
+INPUT_FILE = vj.prepare_simple_omnigenity_seed_input(
+    INPUT_FILE,
+    OUTPUT_DIR,
+    max_mode=MAX_MODE,
+    min_vmec_mode=MIN_VMEC_MODE,
+    enabled=USE_SIMPLE_SEED,
+)
+USE_MODE_CONTINUATION = not USE_SIMPLE_SEED
 MAX_NFEV = 30
 CONTINUATION_NFEV = 30
 STAGE_MODES = vj.qs_stage_modes(
@@ -49,6 +59,7 @@ ALPHA = 1.2  # ESS high-mode scaling strength.
 # Common alternatives:
 # METHOD = "gauss_newton"
 # METHOD = "lbfgs_adjoint"
+# USE_SIMPLE_SEED = False
 # USE_MODE_CONTINUATION = False
 # STAGE_MODES = [MAX_MODE]
 # USE_ESS = False

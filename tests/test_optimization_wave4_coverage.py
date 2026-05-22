@@ -60,6 +60,21 @@ def test_boundary_specs_and_indexed_maps_skip_negative_m_modes() -> None:
     assert maps["ZBS"][(-1, 1)] == pytest.approx(0.4)
 
 
+def test_least_squares_problem_rejects_malformed_simsopt_tuples() -> None:
+    from vmec_jax.optimization_workflow import LeastSquaresProblem
+
+    def objective(_ctx, _state):
+        return np.asarray([1.0])
+
+    problem = LeastSquaresProblem.from_tuples([(objective, 0.0, 4.0)])
+    np.testing.assert_allclose(problem.objective_terms[0].residual(None, None), [2.0])
+
+    with pytest.raises(ValueError, match="objective tuples must be"):
+        LeastSquaresProblem.from_tuples([(objective, 0.0)])
+    with pytest.raises(TypeError, match="first entry must be callable"):
+        LeastSquaresProblem.from_tuples([("not-callable", 0.0, 1.0)])
+
+
 def test_gauss_newton_verbose_termination_and_damping_edges(monkeypatch, capsys) -> None:
     gtol_result = gauss_newton_least_squares(
         lambda _x: np.asarray([0.0]),

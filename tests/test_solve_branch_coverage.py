@@ -5,6 +5,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+import vmec_jax.solve as solve
+from vmec_jax._compat import has_jax, jnp
 from vmec_jax.field import TWOPI
 from vmec_jax.namelist import InData
 from vmec_jax.profiles import MU0
@@ -24,6 +26,7 @@ from vmec_jax.solve import (
     _vmec_scale_m1_factors_from_mats_np,
 )
 from vmec_jax.state import StateLayout, VMECState
+from vmec_jax.vmec_tomnsp import TomnspsRZL
 
 
 def _static(*, m=(0, 1, 2), n=(0, 1, -1), nfp=2, ns=3, mpol=3, ntor=1, lasym=False, lthreed=True):
@@ -71,6 +74,203 @@ def _filled_forces(shape=(2, 2, 2)):
         frcs=a(10),
         fzss=a(11),
         flss=a(12),
+    )
+
+
+def _tiny_solver_static(*, ns: int = 3):
+    return SimpleNamespace(
+        cfg=SimpleNamespace(nfp=1),
+        modes=SimpleNamespace(m=np.asarray([0, 1]), n=np.asarray([0, 0])),
+        s=np.asarray([0.0]) if int(ns) == 1 else np.linspace(0.0, 1.0, int(ns)),
+        grid=SimpleNamespace(theta=np.asarray([0.0, np.pi]), zeta=np.asarray([0.0])),
+        basis=object(),
+    )
+
+
+def _tiny_solver_state(*, ns: int = 3, interior: float = 2.0) -> VMECState:
+    ns = int(ns)
+    layout = StateLayout(ns=ns, K=2, lasym=False)
+    zeros = np.zeros((ns, 2), dtype=float)
+    rcos = zeros.copy()
+    rcos[:, 0] = 1.0
+    if ns == 1:
+        rcos[0, 1] = float(interior)
+    else:
+        rcos[1, 1] = float(interior)
+        rcos[-1, 1] = 0.25
+    return VMECState(
+        layout=layout,
+        Rcos=rcos,
+        Rsin=zeros.copy(),
+        Zcos=zeros.copy(),
+        Zsin=zeros.copy(),
+        Lcos=zeros.copy(),
+        Lsin=zeros.copy(),
+    )
+
+
+def _tiny_lambda_state() -> VMECState:
+    state = _tiny_solver_state(ns=1)
+    return VMECState(
+        layout=state.layout,
+        Rcos=state.Rcos,
+        Rsin=state.Rsin,
+        Zcos=state.Zcos,
+        Zsin=state.Zsin,
+        Lcos=np.asarray([[0.0, 0.3]], dtype=float),
+        Lsin=np.asarray([[0.0, -0.4]], dtype=float),
+    )
+
+
+def _install_quadratic_geometry(monkeypatch):
+    def fake_eval_geom(state, _static):
+        rsum = jnp.sum(jnp.asarray(state.Rcos), axis=1)
+        return SimpleNamespace(sqrtg=rsum[:, None, None] ** 2 + 1.0)
+
+    monkeypatch.setattr(solve, "eval_geom", fake_eval_geom)
+    monkeypatch.setattr(solve, "bsup_from_geom", lambda _g, **_kwargs: (0.0, 0.0))
+    monkeypatch.setattr(solve, "b2_from_bsup", lambda g, _bsupu, _bsupv: jnp.ones_like(g.sqrtg))
+
+
+def _install_tiny_lambda_problem(monkeypatch):
+    def fake_eval_geom(state, _static):
+        shape = jnp.asarray(state.Lcos).shape
+        return SimpleNamespace(
+            g_tt=jnp.ones(shape),
+            g_tp=jnp.zeros(shape),
+            g_pp=jnp.ones(shape),
+            sqrtg=jnp.ones(shape),
+        )
+
+    monkeypatch.setattr(solve, "eval_geom", fake_eval_geom)
+    monkeypatch.setattr(solve, "eval_fourier_dtheta", lambda Lcos, _Lsin, *_args, **_kwargs: jnp.asarray(Lcos))
+    monkeypatch.setattr(solve, "eval_fourier_dzeta_phys", lambda _Lcos, Lsin, *_args, **_kwargs: jnp.asarray(Lsin))
+    monkeypatch.setattr(
+        solve,
+        "bsup_from_sqrtg_lambda",
+        lambda *, lam_u, lam_v, **_kwargs: (lam_u, lam_v),
+    )
+
+
+def _negate_state(state: VMECState) -> VMECState:
+    return VMECState(
+        layout=state.layout,
+        Rcos=-jnp.asarray(state.Rcos),
+        Rsin=-jnp.asarray(state.Rsin),
+        Zcos=-jnp.asarray(state.Zcos),
+        Zsin=-jnp.asarray(state.Zsin),
+        Lcos=-jnp.asarray(state.Lcos),
+        Lsin=-jnp.asarray(state.Lsin),
+    )
+
+
+class _TinyResidualInData:
+    scalars = {}
+    indexed = {}
+
+    def get_float(self, name, default=0.0):
+        return {"FTOL": 0.0, "TCON0": 1.0, "GAMMA": 0.0}.get(str(name).upper(), default)
+
+    def get_bool(self, name, default=False):
+        return {"LFORBAL": False, "LRFP": False}.get(str(name).upper(), default)
+
+    def get_int(self, name, default=0):
+        return {"NCURR": 0}.get(str(name).upper(), default)
+
+
+def _tiny_residual_static():
+    cfg = SimpleNamespace(
+        ns=3,
+        mpol=2,
+        ntor=0,
+        nfp=1,
+        ntheta=4,
+        nzeta=1,
+        lasym=False,
+        lthreed=True,
+        lconm1=True,
+    )
+    modes = SimpleNamespace(m=np.asarray([0, 1]), n=np.asarray([0, 0]), K=2)
+    return SimpleNamespace(
+        cfg=cfg,
+        s=jnp.asarray([0.0, 0.5, 1.0]),
+        modes=modes,
+        trig_vmec=SimpleNamespace(name="fake-trig"),
+    )
+
+
+def _single_mode_residual(state: VMECState) -> TomnspsRZL:
+    z = jnp.zeros((3, 2, 1), dtype=jnp.asarray(state.Rcos).dtype)
+    x = jnp.asarray(state.Rcos)[1, 1]
+    return TomnspsRZL(
+        frcc=z.at[1, 1, 0].set(x),
+        frss=None,
+        fzsc=z,
+        fzcs=None,
+        flsc=z,
+        flcs=None,
+    )
+
+
+def _nan_residual(state: VMECState) -> TomnspsRZL:
+    z = jnp.zeros((3, 2, 1), dtype=jnp.asarray(state.Rcos).dtype)
+    return TomnspsRZL(
+        frcc=z.at[1, 1, 0].set(jnp.asarray(jnp.nan, dtype=z.dtype)),
+        frss=None,
+        fzsc=z,
+        fzcs=None,
+        flsc=z,
+        flcs=None,
+    )
+
+
+def _install_fake_residual_physics(monkeypatch, residual_from_state):
+    import vmec_jax.boundary as boundary_mod
+    import vmec_jax.energy as energy_mod
+    import vmec_jax.vmec_forces as forces_mod
+    import vmec_jax.vmec_residue as residue_mod
+
+    monkeypatch.setattr(
+        energy_mod,
+        "flux_profiles_from_indata",
+        lambda _indata, s, signgs: SimpleNamespace(
+            chipf=jnp.zeros_like(jnp.asarray(s)),
+            phips=jnp.ones_like(jnp.asarray(s)),
+            phipf=jnp.ones_like(jnp.asarray(s)),
+        ),
+    )
+    monkeypatch.setattr(
+        boundary_mod,
+        "boundary_from_indata",
+        lambda _indata, _modes, **_kwargs: SimpleNamespace(R_cos=np.asarray([1.0, 0.0])),
+    )
+    monkeypatch.setattr(solve, "_mass_half_mesh_from_indata", lambda **_kwargs: jnp.zeros(3))
+    monkeypatch.setattr(solve, "_pressure_half_mesh_from_indata", lambda **_kwargs: jnp.zeros(3))
+    monkeypatch.setattr(solve, "_icurv_full_mesh_from_indata", lambda **_kwargs: jnp.zeros(3))
+    monkeypatch.setattr(
+        solve,
+        "_vmec_force_flux_profiles",
+        lambda **kwargs: (jnp.asarray(kwargs["phipf"]), jnp.asarray(kwargs["chipf"]), jnp.asarray(kwargs["chipf"])),
+    )
+
+    def fake_forces(*, state, **_kwargs):
+        sqrtg = jnp.ones((3, 1, 1), dtype=jnp.asarray(state.Rcos).dtype)
+        return SimpleNamespace(state=state, bc=SimpleNamespace(jac=SimpleNamespace(sqrtg=sqrtg)))
+
+    monkeypatch.setattr(forces_mod, "vmec_forces_rz_from_wout", fake_forces)
+    monkeypatch.setattr(
+        forces_mod,
+        "vmec_residual_internal_from_kernels",
+        lambda k, **_kwargs: residual_from_state(k.state),
+    )
+    monkeypatch.setattr(
+        residue_mod,
+        "vmec_force_norms_from_bcovar_dynamic",
+        lambda **_kwargs: SimpleNamespace(
+            r1=jnp.asarray(1.0),
+            fnorm=jnp.asarray(1.0),
+            fnormL=jnp.asarray(1.0),
+        ),
     )
 
 
@@ -384,3 +584,354 @@ def test_lambda_preconditioner_dump_uses_vmec_t_channel_layout(tmp_path, monkeyp
         np.testing.assert_allclose(data["pfaclam"][:, 0, 0, 1], 0.0)
         np.testing.assert_allclose(data["faclam"][..., 0], 10.0 * expected)
         np.testing.assert_allclose(data["faclam"][:, 0, 0, 1], 0.0)
+
+
+def test_solve_entrypoints_raise_importerror_when_jax_unavailable(monkeypatch):
+    monkeypatch.setattr(solve, "has_jax", lambda: False)
+    state = object()
+    static = object()
+    common_flux = dict(phipf=None, chipf=None, signgs=1, lamscale=None)
+
+    calls = [
+        (
+            "solve_lambda_gd requires JAX",
+            lambda: solve.solve_lambda_gd(state, static, **common_flux),
+        ),
+        (
+            "solve_fixed_boundary_gd requires JAX",
+            lambda: solve.solve_fixed_boundary_gd(state, static, **common_flux),
+        ),
+        (
+            "solve_fixed_boundary_lbfgs requires JAX",
+            lambda: solve.solve_fixed_boundary_lbfgs(state, static, **common_flux),
+        ),
+        (
+            "solve_fixed_boundary_lbfgs_vmec_residual requires JAX",
+            lambda: solve.solve_fixed_boundary_lbfgs_vmec_residual(state, static, indata=object(), signgs=1),
+        ),
+        (
+            "solve_fixed_boundary_gn_vmec_residual requires JAX",
+            lambda: solve.solve_fixed_boundary_gn_vmec_residual(state, static, indata=object(), signgs=1),
+        ),
+        (
+            "solve_fixed_boundary_residual_iter requires JAX",
+            lambda: solve.solve_fixed_boundary_residual_iter(state, static, indata=object(), signgs=1),
+        ),
+        (
+            "first_step_diagnostics requires JAX",
+            lambda: solve.first_step_diagnostics(state, static, indata=object(), signgs=1),
+        ),
+    ]
+
+    for message, call in calls:
+        with pytest.raises(ImportError, match=message):
+            call()
+
+
+@pytest.mark.skipif(not has_jax(), reason="toy solver branches require JAX")
+def test_solve_lambda_gd_one_surface_defaults_spacing_and_breaks_on_tolerance(monkeypatch, capsys):
+    _install_tiny_lambda_problem(monkeypatch)
+
+    result = solve.solve_lambda_gd(
+        _tiny_lambda_state(),
+        _tiny_solver_static(ns=1),
+        phipf=np.ones(1),
+        chipf=np.ones(1),
+        signgs=1,
+        lamscale=np.ones(1),
+        max_iter=2,
+        grad_tol=1.0e9,
+        verbose=True,
+    )
+
+    assert result.n_iter == 0
+    assert result.grad_rms_history.shape == (1,)
+    assert result.step_history.shape == (0,)
+    assert "[solve_lambda_gd] iter=000" in capsys.readouterr().out
+
+
+@pytest.mark.skipif(not has_jax(), reason="toy fixed-boundary branches require JAX")
+def test_fixed_boundary_gd_jitted_differentiable_one_surface_uses_pressure_default(monkeypatch):
+    _install_quadratic_geometry(monkeypatch)
+
+    result = solve.solve_fixed_boundary_gd(
+        _tiny_solver_state(ns=1),
+        _tiny_solver_static(ns=1),
+        phipf=np.ones(1),
+        chipf=np.zeros(1),
+        signgs=1,
+        lamscale=1.0,
+        pressure=None,
+        max_iter=1,
+        step_size=0.1,
+        jit_grad=True,
+        differentiable=True,
+        stop_grad_in_update=True,
+        verbose=False,
+    )
+
+    assert result.n_iter == 1
+    assert result.w_history.shape == (1,)
+    np.testing.assert_allclose(np.asarray(result.step_history), [0.1])
+
+
+@pytest.mark.skipif(not has_jax(), reason="toy fixed-boundary branches require JAX")
+def test_fixed_boundary_gd_falls_back_to_raw_gradient_when_preconditioner_rejects(monkeypatch, capsys):
+    _install_quadratic_geometry(monkeypatch)
+
+    def uphill_preconditioner(grad, *_args, **_kwargs):
+        return _negate_state(grad)
+
+    monkeypatch.setattr(solve, "_apply_preconditioner", uphill_preconditioner)
+
+    result = solve.solve_fixed_boundary_gd(
+        _tiny_solver_state(ns=3, interior=2.0),
+        _tiny_solver_static(ns=3),
+        phipf=np.ones(3),
+        chipf=np.zeros(3),
+        signgs=1,
+        lamscale=1.0,
+        pressure=np.zeros(3),
+        max_iter=1,
+        step_size=0.25,
+        grad_tol=0.0,
+        max_backtracks=0,
+        preconditioner="mode_diag",
+        verbose=True,
+    )
+
+    assert result.n_iter == 1
+    assert result.w_history[-1] < result.w_history[0]
+    assert "fallback to unpreconditioned gradient" in capsys.readouterr().out
+
+
+@pytest.mark.skipif(not has_jax(), reason="toy L-BFGS branches require JAX")
+def test_fixed_boundary_lbfgs_one_surface_jitted_convergence_break(monkeypatch, capsys):
+    _install_quadratic_geometry(monkeypatch)
+
+    result = solve.solve_fixed_boundary_lbfgs(
+        _tiny_solver_state(ns=1),
+        _tiny_solver_static(ns=1),
+        phipf=np.ones(1),
+        chipf=np.zeros(1),
+        signgs=1,
+        lamscale=1.0,
+        pressure=None,
+        max_iter=1,
+        grad_tol=1.0e9,
+        jit_grad=True,
+        verbose=True,
+    )
+
+    assert result.n_iter == 0
+    assert result.grad_rms_history.shape == (1,)
+    assert "[solve_fixed_boundary_lbfgs] iter=000" in capsys.readouterr().out
+
+
+@pytest.mark.skipif(not has_jax(), reason="toy L-BFGS branches require JAX")
+def test_fixed_boundary_lbfgs_failure_and_history_limit_branches(monkeypatch, capsys):
+    _install_quadratic_geometry(monkeypatch)
+    static = _tiny_solver_static(ns=3)
+
+    failed = solve.solve_fixed_boundary_lbfgs(
+        _tiny_solver_state(ns=3, interior=2.0),
+        static,
+        phipf=np.ones(3),
+        chipf=np.zeros(3),
+        signgs=1,
+        lamscale=1.0,
+        pressure=np.zeros(3),
+        max_iter=1,
+        step_size=1000.0,
+        grad_tol=0.0,
+        max_backtracks=0,
+        verbose=True,
+    )
+
+    assert failed.n_iter == 0
+    np.testing.assert_allclose(failed.step_history, [1000.0])
+    assert "line search failed" in capsys.readouterr().out
+
+    accepted = solve.solve_fixed_boundary_lbfgs(
+        _tiny_solver_state(ns=3, interior=2.0),
+        static,
+        phipf=np.ones(3),
+        chipf=np.zeros(3),
+        signgs=1,
+        lamscale=1.0,
+        pressure=np.zeros(3),
+        max_iter=3,
+        step_size=0.25,
+        history_size=1,
+        grad_tol=0.0,
+        max_backtracks=2,
+        verbose=False,
+    )
+
+    assert accepted.n_iter >= 2
+    assert np.all(np.diff(accepted.w_history) < 0.0)
+
+
+@pytest.mark.skipif(not has_jax(), reason="toy residual optimizer branches require JAX")
+def test_residual_lbfgs_accepts_best_finite_step_after_rejected_trial(monkeypatch, capsys):
+    _install_fake_residual_physics(monkeypatch, _single_mode_residual)
+    monkeypatch.setattr(solve, "_ensure_descent_direction", lambda g, _p: (jnp.zeros_like(g), 0.0, False))
+
+    result = solve.solve_fixed_boundary_lbfgs_vmec_residual(
+        _tiny_solver_state(ns=3, interior=2.0),
+        _tiny_residual_static(),
+        indata=_TinyResidualInData(),
+        signgs=1,
+        include_constraint_force=True,
+        max_iter=1,
+        max_backtracks=0,
+        verbose=True,
+    )
+
+    assert result.n_iter == 1
+    np.testing.assert_allclose(result.w_history, [1.0, 1.0])
+    assert result.diagnostics["include_constraint_force"] is True
+    assert "accepting best finite step" in capsys.readouterr().out
+
+
+@pytest.mark.skipif(not has_jax(), reason="toy residual optimizer branches require JAX")
+def test_residual_gn_rejects_nonfinite_initial_objective(monkeypatch):
+    _install_fake_residual_physics(monkeypatch, _nan_residual)
+
+    with pytest.raises(ValueError, match="non-finite residual objective"):
+        solve.solve_fixed_boundary_gn_vmec_residual(
+            _tiny_solver_state(ns=3, interior=2.0),
+            _tiny_residual_static(),
+            indata=_TinyResidualInData(),
+            signgs=1,
+            include_constraint_force=True,
+            max_iter=1,
+            jit_kernels=False,
+            verbose=False,
+        )
+
+
+@pytest.mark.skipif(not has_jax(), reason="HLO dump branch coverage requires JAX")
+def test_hlo_dump_key_fallback_as_text_and_verbose_error_paths(tmp_path, monkeypatch):
+    jax_mod = pytest.importorskip("jax")
+    import builtins
+
+    class RaisingStatic:
+        @property
+        def cfg(self):
+            raise RuntimeError("no cfg")
+
+    class FakeTextIr:
+        def as_text(self):
+            return "fake-as-text"
+
+    class FakeLowered:
+        def compiler_ir(self, dialect):
+            assert dialect == "hlo"
+            return FakeTextIr()
+
+    class FakeJitted:
+        def lower(self, *_args, **_kwargs):
+            return FakeLowered()
+
+    monkeypatch.setenv("VMEC_JAX_DUMP_HLO_DIR", str(tmp_path))
+    monkeypatch.setattr(jax_mod, "jit", lambda _fn: FakeJitted())
+    solve._HLO_DUMPED_KEYS.clear()
+
+    solve._maybe_dump_hlo_kernel(
+        label="tiny",
+        fn=lambda x: x,
+        args=(1,),
+        kwargs={},
+        static=RaisingStatic(),
+        wout_like=SimpleNamespace(),
+        force=True,
+    )
+
+    assert (tmp_path / "hlo_tiny_ns0_mpol0_ntor0.txt").read_text() == "fake-as-text"
+
+    real_import = builtins.__import__
+
+    def import_without_jax(name, *args, **kwargs):
+        if name == "jax":
+            raise ImportError("blocked jax import")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", import_without_jax)
+    solve._maybe_dump_hlo_kernel(
+        label="importfail",
+        fn=lambda x: x,
+        args=(1,),
+        kwargs={},
+        static=SimpleNamespace(cfg=SimpleNamespace(ns=2, ntheta=4)),
+        wout_like=SimpleNamespace(mpol=3, ntor=1, nfp=5, lasym=True),
+        force=True,
+    )
+    monkeypatch.setattr(builtins, "__import__", real_import)
+
+    class FailingJitted:
+        def lower(self, *_args, **_kwargs):
+            raise RuntimeError("lower boom")
+
+    class StringOnlyIr:
+        def __str__(self):
+            return "xla-string"
+
+    def string_xla_computation(_fn):
+        def inner(*_args, **_kwargs):
+            return StringOnlyIr()
+
+        return inner
+
+    monkeypatch.setattr(jax_mod, "jit", lambda _fn: FailingJitted())
+    monkeypatch.setattr(jax_mod, "xla_computation", string_xla_computation, raising=False)
+    solve._HLO_DUMPED_KEYS.clear()
+
+    solve._maybe_dump_hlo_kernel(
+        label="xla",
+        fn=lambda x: x,
+        args=(1,),
+        kwargs={},
+        static=SimpleNamespace(cfg=SimpleNamespace(ns=2, ntheta=4)),
+        wout_like=SimpleNamespace(mpol=3, ntor=1, nfp=5, lasym=True),
+        force=True,
+    )
+
+    assert (tmp_path / "hlo_xla_ns2_mpol3_ntor1.txt").read_text() == "xla-string"
+
+    def failing_xla_computation(_fn):
+        def inner(*_args, **_kwargs):
+            raise RuntimeError("xla boom")
+
+        return inner
+
+    monkeypatch.setenv("VMEC_JAX_DUMP_HLO_VERBOSE", "1")
+    monkeypatch.setattr(jax_mod, "jit", lambda _fn: FailingJitted())
+    monkeypatch.setattr(jax_mod, "xla_computation", failing_xla_computation, raising=False)
+    solve._HLO_DUMPED_KEYS.clear()
+
+    solve._maybe_dump_hlo_kernel(
+        label="fail",
+        fn=lambda x: x,
+        args=(1,),
+        kwargs={},
+        static=SimpleNamespace(cfg=SimpleNamespace(ns=2, ntheta=4)),
+        wout_like=SimpleNamespace(mpol=3, ntor=1, nfp=5, lasym=True),
+        force=True,
+    )
+
+    error_text = (tmp_path / "hlo_fail_error_ns2_mpol3_ntor1.txt").read_text()
+    assert "lower boom" in error_text
+    assert "xla boom" in error_text
+
+
+def test_disabled_lambda_dump_helpers_return_without_outputs(tmp_path, monkeypatch):
+    monkeypatch.delenv("VMEC_JAX_DUMP_LAM", raising=False)
+    monkeypatch.delenv("VMEC_JAX_DUMP_LAMCAL", raising=False)
+    monkeypatch.setenv("VMEC_JAX_DUMP_DIR", str(tmp_path))
+    static = _static(ns=2, mpol=2, ntor=0)
+
+    solve._maybe_dump_lam_fsql1(fsql1_pre=1.0, fsql1_post=2.0, static=static, iter_idx=7)
+    solve._maybe_dump_lamcal(lam_debug={"blam_pre": np.asarray([1.0])}, static=static, iter_idx=7)
+
+    assert not list(tmp_path.iterdir())

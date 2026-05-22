@@ -81,6 +81,84 @@ def test_least_squares_tuple_weights_are_simsopt_style() -> None:
         LeastSquaresProblem.from_tuples([(residual_value, 0.0, np.inf)])
 
 
+def test_simple_omnigenity_seed_indata_keeps_base_and_perturbs_active_modes() -> None:
+    from vmec_jax.namelist import minimal_fixed_boundary_indata
+    from vmec_jax.optimization_workflow import simple_omnigenity_seed_indata
+
+    source = minimal_fixed_boundary_indata(nfp=2, r0=1.1, rbc01=0.17, zbs01=0.19)
+    source.indexed["RBC"][(2, 2)] = 7.0
+    source.indexed["RBS"] = {(1, 1): 8.0}
+
+    seeded = simple_omnigenity_seed_indata(source, max_mode=1, perturbation=1.0e-5)
+
+    assert source.indexed["RBC"][(2, 2)] == 7.0
+    assert source.indexed["RBS"][(1, 1)] == 8.0
+    assert "RBS" not in seeded.indexed
+    assert "ZBC" not in seeded.indexed
+    assert (2, 2) not in seeded.indexed["RBC"]
+    assert seeded.indexed["RBC"][(0, 0)] == pytest.approx(1.1)
+    assert seeded.indexed["RBC"][(0, 1)] == pytest.approx(0.17)
+    assert seeded.indexed["ZBS"][(0, 1)] == pytest.approx(0.19)
+
+    for index in ((1, 0), (-1, 1), (1, 1)):
+        assert abs(seeded.indexed["RBC"][index]) == pytest.approx(1.0e-5)
+        assert abs(seeded.indexed["ZBS"][index]) == pytest.approx(1.0e-5)
+
+
+def test_prepare_simple_omnigenity_seed_input_writes_rebuilt_seed(tmp_path: Path) -> None:
+    from vmec_jax.namelist import minimal_fixed_boundary_indata, read_indata, write_indata
+    from vmec_jax.optimization_workflow import prepare_simple_omnigenity_seed_input
+
+    source_path = tmp_path / "input.seed"
+    write_indata(source_path, minimal_fixed_boundary_indata(nfp=3, mpol=2, ntor=2))
+
+    disabled = prepare_simple_omnigenity_seed_input(source_path, tmp_path / "unused", max_mode=2, enabled=False)
+    assert disabled == source_path
+
+    output_path = prepare_simple_omnigenity_seed_input(
+        source_path,
+        tmp_path / "nested" / "case",
+        max_mode=2,
+        min_vmec_mode=5,
+        perturbation=2.0e-5,
+    )
+
+    assert output_path == tmp_path / "nested" / "case" / "input.simple_seed"
+    seeded = read_indata(output_path)
+    assert seeded.scalars["MPOL"] == 5
+    assert seeded.scalars["NTOR"] == 5
+    assert abs(seeded.indexed["RBC"][(2, 2)]) == pytest.approx(2.0e-5)
+    assert abs(seeded.indexed["ZBS"][(-2, 2)]) == pytest.approx(2.0e-5)
+
+
+def test_fixed_boundary_vmec_from_input_can_apply_simple_seed(tmp_path: Path) -> None:
+    from vmec_jax.namelist import minimal_fixed_boundary_indata, write_indata
+    from vmec_jax.optimization_workflow import FixedBoundaryVMEC
+
+    source = minimal_fixed_boundary_indata(nfp=2, r0=1.3, rbc01=0.11, zbs01=0.12, mpol=2, ntor=2)
+    source.indexed["RBC"][(3, 3)] = 9.0
+    input_path = tmp_path / "input.seed"
+    write_indata(input_path, source)
+
+    vmec = FixedBoundaryVMEC.from_input(
+        input_path,
+        max_mode=1,
+        min_vmec_mode=5,
+        output_dir=tmp_path / "out",
+        simple_seed=True,
+        simple_seed_perturbation=3.0e-5,
+    )
+
+    assert vmec.input_file == input_path
+    assert vmec.indata.scalars["MPOL"] == 5
+    assert vmec.indata.scalars["NTOR"] == 5
+    assert vmec.indata.indexed["RBC"][(0, 0)] == pytest.approx(1.3)
+    assert vmec.indata.indexed["RBC"][(0, 1)] == pytest.approx(0.11)
+    assert vmec.indata.indexed["ZBS"][(0, 1)] == pytest.approx(0.12)
+    assert (3, 3) not in vmec.indata.indexed["RBC"]
+    assert abs(vmec.indata.indexed["RBC"][(1, 0)]) == pytest.approx(3.0e-5)
+
+
 def test_mean_iota_handles_axis_only_and_full_profiles(monkeypatch) -> None:
     import vmec_jax.optimization_workflow as workflow
 

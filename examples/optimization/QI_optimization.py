@@ -47,6 +47,10 @@ STRESS_FIXTURE_NOTES = tuple(CASE.get("stress_fixture_notes", ()))
 KNOWN_BEST_NFP4_QUICK_AUDIT = dict(CASE.get("known_best_nfp4_quick_audit", {}))
 MAX_MODE = int(os.environ.get("VMEC_JAX_QI_MAX_MODE", CASE["max_mode"]))
 MIN_VMEC_MODE = int(os.environ.get("VMEC_JAX_QI_MIN_VMEC_MODE", CASE.get("min_vmec_mode", max(6, MAX_MODE + 3))))
+USE_SIMPLE_SEED = os.environ.get("VMEC_JAX_QI_USE_SIMPLE_SEED", "1").strip().lower() not in {"0", "false", "no", "off"}
+INPUT_FILE = vj.prepare_simple_omnigenity_seed_input(
+    INPUT_FILE, OUTPUT_DIR, max_mode=MAX_MODE, min_vmec_mode=MIN_VMEC_MODE, enabled=USE_SIMPLE_SEED
+)
 _USE_MODE_CONTINUATION_ENV = os.environ.get("VMEC_JAX_QI_USE_MODE_CONTINUATION")
 USE_MODE_CONTINUATION = (
     bool(CASE["use_mode_continuation"])
@@ -297,6 +301,7 @@ print(f"  input file:      {INPUT_FILE}")
 print(f"  output dir:      {OUTPUT_DIR}")
 print(f"  max_mode:        {MAX_MODE}")
 print(f"  min_vmec_mode:   {MIN_VMEC_MODE}")
+print(f"  simple seed:     {USE_SIMPLE_SEED}")
 print(f"  stage_modes:     {STAGE_MODES}")
 print(f"  max_nfev:        {MAX_NFEV}")
 print(f"  ESS:             {USE_ESS} (alpha={ALPHA})")

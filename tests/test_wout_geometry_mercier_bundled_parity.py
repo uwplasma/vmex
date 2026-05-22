@@ -34,12 +34,40 @@ JXB_MERCIER_CASES = (
 )
 
 
+AXIS_MODE_CASES = (
+    ("axisym", "examples/data/wout_circular_tokamak.nc"),
+    ("nonaxis", "examples/data/wout_nfp4_QH_warm_start.nc"),
+    ("lasym_nonaxis", "examples/data/wout_basic_non_stellsym_simsopt.nc"),
+    ("single_grid_lasym_axisym", "examples_single_grid/data/wout_up_down_asymmetric_tokamak_reference.nc"),
+    (
+        "single_grid_lasym_nonaxis_finite_beta",
+        "examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc",
+    ),
+)
+
+
+JACOBIAN_VOLUME_CASES = (
+    ("axisym", "examples/data/wout_circular_tokamak.nc"),
+    ("finite_beta_axisym", "examples/data/wout_shaped_tokamak_pressure.nc"),
+    ("nonaxis", "examples/data/wout_nfp4_QH_warm_start.nc"),
+    ("lasym_nonaxis", "examples/data/wout_basic_non_stellsym_simsopt.nc"),
+    (
+        "single_grid_lasym_nonaxis_finite_beta",
+        "examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc",
+    ),
+)
+
+
 def _data_dir() -> Path:
     return Path(__file__).resolve().parents[1] / "examples" / "data"
 
 
 def _single_grid_data_dir() -> Path:
     return Path(__file__).resolve().parents[1] / "examples_single_grid" / "data"
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[1]
 
 
 def _static_aligned_to_wout(cfg, wout):
@@ -53,6 +81,62 @@ def _static_aligned_to_wout(cfg, wout):
         lthreed=bool(int(wout.ntor) > 0),
     )
     return build_static(cfg)
+
+
+@pytest.mark.parametrize(("case_name", "wout_rel"), AXIS_MODE_CASES)
+def test_bundled_wout_axis_metadata_matches_axis_fourier_modes(case_name: str, wout_rel: str) -> None:
+    """Axis metadata should stay identical to the m=0 axis Fourier coefficients."""
+    pytest.importorskip("netCDF4")
+
+    wout = read_wout(_repo_root() / wout_rel)
+    ntor = int(wout.ntor)
+    nfp = int(wout.nfp)
+
+    expected_raxis_cc = np.zeros(ntor + 1)
+    expected_raxis_cs = np.zeros(ntor + 1)
+    expected_zaxis_cc = np.zeros(ntor + 1)
+    expected_zaxis_cs = np.zeros(ntor + 1)
+    for mode_idx, (m_mode, n_mode) in enumerate(zip(np.asarray(wout.xm, dtype=int), np.asarray(wout.xn, dtype=int))):
+        if int(m_mode) != 0:
+            continue
+        n_idx = abs(int(n_mode)) // nfp
+        if n_idx > ntor:
+            continue
+        expected_raxis_cc[n_idx] = float(wout.rmnc[0, mode_idx])
+        expected_raxis_cs[n_idx] = float(wout.rmns[0, mode_idx])
+        expected_zaxis_cc[n_idx] = float(wout.zmnc[0, mode_idx])
+        expected_zaxis_cs[n_idx] = float(wout.zmns[0, mode_idx])
+
+    np.testing.assert_allclose(np.asarray(wout.raxis_cc), expected_raxis_cc, rtol=0.0, atol=0.0, err_msg=case_name)
+    np.testing.assert_allclose(np.asarray(wout.raxis_cs), expected_raxis_cs, rtol=0.0, atol=0.0, err_msg=case_name)
+    np.testing.assert_allclose(np.asarray(wout.zaxis_cc), expected_zaxis_cc, rtol=0.0, atol=0.0, err_msg=case_name)
+    np.testing.assert_allclose(np.asarray(wout.zaxis_cs), expected_zaxis_cs, rtol=0.0, atol=0.0, err_msg=case_name)
+
+
+@pytest.mark.parametrize(("case_name", "wout_rel"), JACOBIAN_VOLUME_CASES)
+def test_bundled_wout_vp_matches_jacobian_constant_mode(case_name: str, wout_rel: str) -> None:
+    """The VMEC volume derivative is signgs times the sqrt(g) m=n=0 mode."""
+    pytest.importorskip("netCDF4")
+
+    wout = read_wout(_repo_root() / wout_rel)
+    mask = (np.asarray(wout.xm_nyq, dtype=int) == 0) & (np.asarray(wout.xn_nyq, dtype=int) == 0)
+    assert np.count_nonzero(mask) == 1, case_name
+    mode_idx = int(np.flatnonzero(mask)[0])
+
+    np.testing.assert_allclose(
+        np.asarray(wout.gmns, dtype=float)[:, mode_idx],
+        0.0,
+        rtol=0.0,
+        atol=0.0,
+        err_msg=f"{case_name}: sine sqrt(g) constant mode must stay zero",
+    )
+    np.testing.assert_allclose(
+        np.asarray(wout.vp, dtype=float),
+        float(wout.signgs) * np.asarray(wout.gmnc, dtype=float)[:, mode_idx],
+        rtol=1.0e-14,
+        atol=5.0e-14,
+        err_msg=f"{case_name}: vp no longer closes with the gmnc m=n=0 Jacobian mode",
+    )
 
 
 @pytest.mark.parametrize(("case_name", "input_name", "wout_name"), GEOMETRY_CASES)
