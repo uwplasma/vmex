@@ -216,6 +216,113 @@ def test_lasym_internal_residual_uses_sym_and_asym_transforms(monkeypatch):
     np.testing.assert_allclose(np.asarray(out.flss), 12.0)
 
 
+def test_lasym_symforce_split_matches_vmec_reflection_rules(monkeypatch):
+    trig = vmec_trig_tables(ntheta=8, nzeta=3, nfp=1, mmax=1, nmax=1, lasym=True)
+    ns = 1
+    shape = (ns, int(trig.ntheta3), 3)
+    coeff_shape = (ns, 2, 2)
+    zeros_out = TomnspsRZL(
+        frcc=np.zeros(coeff_shape),
+        frss=np.zeros(coeff_shape),
+        fzsc=np.zeros(coeff_shape),
+        fzcs=np.zeros(coeff_shape),
+        flsc=np.zeros(coeff_shape),
+        flcs=np.zeros(coeff_shape),
+    )
+    asym_out = TomnspsRZL(
+        frcc=np.zeros(coeff_shape),
+        frss=None,
+        fzsc=np.zeros(coeff_shape),
+        fzcs=None,
+        flsc=np.zeros(coeff_shape),
+        flcs=None,
+        frsc=np.zeros(coeff_shape),
+        frcs=np.zeros(coeff_shape),
+        fzcc=np.zeros(coeff_shape),
+        fzss=np.zeros(coeff_shape),
+        flcc=np.zeros(coeff_shape),
+        flss=np.zeros(coeff_shape),
+    )
+
+    armn = np.arange(np.prod(shape), dtype=float).reshape(shape)
+    brmn = 100.0 + armn
+    k = _kernel(shape)
+    k = VmecRZForceKernels(
+        armn_e=armn,
+        armn_o=k.armn_o,
+        brmn_e=brmn,
+        brmn_o=k.brmn_o,
+        crmn_e=k.crmn_e,
+        crmn_o=k.crmn_o,
+        azmn_e=k.azmn_e,
+        azmn_o=k.azmn_o,
+        bzmn_e=k.bzmn_e,
+        bzmn_o=k.bzmn_o,
+        czmn_e=k.czmn_e,
+        czmn_o=k.czmn_o,
+        bc=k.bc,
+        arcon_e=k.arcon_e,
+        arcon_o=k.arcon_o,
+        azcon_e=k.azcon_e,
+        azcon_o=k.azcon_o,
+        gcon=k.gcon,
+        pr1_even=k.pr1_even,
+        pr1_odd=k.pr1_odd,
+        pz1_even=k.pz1_even,
+        pz1_odd=k.pz1_odd,
+        pru_even=k.pru_even,
+        pru_odd=k.pru_odd,
+        pzu_even=k.pzu_even,
+        pzu_odd=k.pzu_odd,
+        prv_even=k.prv_even,
+        prv_odd=k.prv_odd,
+        pzv_even=k.pzv_even,
+        pzv_odd=k.pzv_odd,
+    )
+    captured: dict[str, dict[str, np.ndarray]] = {}
+
+    def fake_tomnsps_rzl(**kwargs):
+        captured["sym"] = {name: np.asarray(kwargs[name]) for name in ("armn_even", "brmn_even")}
+        return zeros_out
+
+    def fake_tomnspa_rzl(**kwargs):
+        captured["asym"] = {name: np.asarray(kwargs[name]) for name in ("armn_even", "brmn_even")}
+        return asym_out
+
+    monkeypatch.setattr(vf, "tomnsps_rzl", fake_tomnsps_rzl)
+    monkeypatch.setattr(vf, "tomnspa_rzl", fake_tomnspa_rzl)
+
+    vf.vmec_residual_internal_from_kernels(
+        k,
+        cfg_ntheta=8,
+        cfg_nzeta=3,
+        wout=SimpleNamespace(nfp=1, mpol=2, ntor=1, lasym=True),
+        trig=trig,
+    )
+
+    nt2 = int(trig.ntheta2)
+    nt1 = int(trig.ntheta1)
+    i0 = np.arange(nt2)
+    ir0 = np.where(i0 == 0, 0, nt1 - i0)
+    kk = (shape[2] - np.arange(shape[2])) % shape[2]
+    armn_ref = armn[:, ir0, :][:, :, kk]
+    brmn_ref = brmn[:, ir0, :][:, :, kk]
+
+    expected_armn_sym = armn.copy()
+    expected_armn_sym[:, :nt2, :] = 0.5 * (armn[:, :nt2, :] + armn_ref)
+    expected_armn_asym = np.zeros_like(armn)
+    expected_armn_asym[:, :nt2, :] = 0.5 * (armn[:, :nt2, :] - armn_ref)
+    expected_brmn_sym = brmn.copy()
+    expected_brmn_sym[:, :nt2, :] = 0.5 * (brmn[:, :nt2, :] - brmn_ref)
+    expected_brmn_asym = np.zeros_like(brmn)
+    expected_brmn_asym[:, :nt2, :] = 0.5 * (brmn[:, :nt2, :] + brmn_ref)
+
+    np.testing.assert_allclose(captured["sym"]["armn_even"], expected_armn_sym)
+    np.testing.assert_allclose(captured["asym"]["armn_even"], expected_armn_asym)
+    np.testing.assert_allclose(captured["sym"]["brmn_even"], expected_brmn_sym)
+    np.testing.assert_allclose(captured["asym"]["brmn_even"], expected_brmn_asym)
+
+
 def test_constraint_zcon_override_shape_mismatch():
     cfg = _cfg(ns=3, mpol=2, ntor=1, ntheta=6, nzeta=3, lthreed=True)
     static = build_static(cfg)

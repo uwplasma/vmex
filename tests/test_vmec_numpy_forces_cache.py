@@ -1,15 +1,26 @@
+from dataclasses import dataclass
+import gc
 import numpy as np
 
+import vmec_jax._compat as compat
+import vmec_jax.vmec_forces as vf
 from vmec_jax.vmec_numpy_forces import (
     _NP_STACK_CACHE,
+    _NP_STACK_CACHE_LIMIT,
     _NP_STACK_CACHE_MAX_BYTES,
+    _NP_MODULE,
     _NumpyJaxShim,
     _NumpyLaxShim,
+    _NpArray,
     _NpFftModule,
     _NpModule,
+    _idx_has_fancy,
+    _numpy_module_patch,
     _np_einsum,
+    _prune_np_stack_cache,
     _to_numpy_recursive,
     clear_numpy_force_caches,
+    compute_forces_numpy,
 )
 
 
@@ -36,6 +47,49 @@ def test_np_stack_cache_skips_large_force_path_inputs():
 
     assert out.shape == (2, n)
     assert len(_NP_STACK_CACHE) == 0
+
+
+def test_np_at_indexer_preserves_functional_set_and_accumulates_duplicate_fancy_indices():
+    arr = _NpModule.asarray(np.arange(6.0).reshape(2, 3))
+    view_before_set = arr[:, 1]
+    updated = arr.at[:, 1].set([-10.0, -20.0])
+
+    np.testing.assert_allclose(arr, np.arange(6.0).reshape(2, 3))
+    np.testing.assert_allclose(view_before_set, [1.0, 4.0])
+    np.testing.assert_allclose(updated[:, 1], [-10.0, -20.0])
+
+    accumulated = _NpModule.zeros((3,), dtype=float)
+    returned = accumulated.at[np.asarray([0, 0, 2])].add(np.asarray([1.0, 2.0, 4.0]))
+    assert returned is accumulated
+    np.testing.assert_allclose(accumulated, [3.0, 0.0, 4.0])
+
+    accumulated.at[1].add(5.0)
+    np.testing.assert_allclose(accumulated, [3.0, 5.0, 4.0])
+    assert _idx_has_fancy((slice(None), np.asarray([0, 1])))
+    assert not _idx_has_fancy((slice(None), np.asarray(1)))
+
+
+def test_np_stack_cache_prunes_dead_and_excess_entries():
+    clear_numpy_force_caches()
+    _prune_np_stack_cache()
+    assert len(_NP_STACK_CACHE) == 0
+
+    def add_dead_entry() -> None:
+        a = np.ones((2,), dtype=float)
+        b = np.zeros((2,), dtype=float)
+        _NpModule.stack([a, b], axis=0)
+
+    add_dead_entry()
+    gc.collect()
+    _prune_np_stack_cache()
+    assert len(_NP_STACK_CACHE) == 0
+
+    arrays = []
+    for idx in range(_NP_STACK_CACHE_LIMIT + 2):
+        arrays.append((np.full((1,), idx, dtype=float), np.full((1,), -idx, dtype=float)))
+        _NpModule.stack(arrays[-1], axis=0)
+    assert len(_NP_STACK_CACHE) <= _NP_STACK_CACHE_LIMIT
+    clear_numpy_force_caches()
 
 
 def test_np_module_array_and_elementwise_wrappers_match_numpy():
@@ -116,6 +170,18 @@ def test_np_fft_and_jax_lax_shims_match_numpy():
         assert _NumpyJaxShim.block_until_ready(5) == 5
 
 
+def test_numpy_module_patch_restores_force_path_modules_and_numpy_mode():
+    original_jnp = vf.jnp
+    assert compat.has_jax()
+
+    with _numpy_module_patch():
+        assert vf.jnp is _NP_MODULE
+        assert not compat.has_jax()
+
+    assert vf.jnp is original_jnp
+    assert compat.has_jax()
+
+
 def test_np_einsum_fast_paths_match_generic_einsum():
     rng = np.random.default_rng(1)
     cases = [
@@ -154,3 +220,63 @@ def test_to_numpy_recursive_handles_nested_dataclasses_and_fallbacks():
     assert converted.inner.label == "a"
     assert converted.scalar == 3
     np.testing.assert_allclose(_to_numpy_recursive([4.0, 5.0]), [4.0, 5.0])
+
+
+@dataclass(frozen=True)
+class _State:
+    Rcos: object
+    Rsin: object
+    Zcos: object
+    Zsin: object
+    Lcos: object
+    Lsin: object
+
+
+def test_compute_forces_numpy_converts_state_and_constraint_inputs():
+    state = _State(
+        Rcos=np.asarray([[1.0]]),
+        Rsin=np.asarray([[2.0]]),
+        Zcos=np.asarray([[3.0]]),
+        Zsin=np.asarray([[4.0]]),
+        Lcos=np.asarray([[5.0]]),
+        Lsin=np.asarray([[6.0]]),
+    )
+    calls = []
+
+    def fake_compute_forces_impl(state_np, **kwargs):
+        calls.append((state_np, kwargs))
+        assert isinstance(state_np.Rcos, _NpArray)
+        assert isinstance(kwargs["constraint_precond_diag"][0], _NpArray)
+        assert isinstance(kwargs["constraint_precond_diag"][1], _NpArray)
+        assert isinstance(kwargs["constraint_tcon"], _NpArray)
+        assert isinstance(kwargs["constraint_rcon0"], _NpArray)
+        assert isinstance(kwargs["constraint_zcon0"], _NpArray)
+        assert kwargs["constraint_precond_active"] is True
+        assert kwargs["constraint_tcon_active"] is False
+        assert kwargs["zero_m1"] == 0.25
+        assert vf.jnp is _NP_MODULE
+        return "forces-result"
+
+    result = compute_forces_numpy(
+        fake_compute_forces_impl,
+        state,
+        include_edge=True,
+        include_edge_residual=False,
+        zero_m1=np.asarray(0.25),
+        freeb_bsqvac_half=np.asarray([[[7.0]]]),
+        constraint_rcon0=np.asarray([[[1.0]]]),
+        constraint_zcon0=np.asarray([[[2.0]]]),
+        constraint_precond_diag=(np.asarray([3.0]), np.asarray([4.0])),
+        constraint_tcon=np.asarray([5.0]),
+        constraint_precond_active=np.asarray(True),
+        constraint_tcon_active=np.asarray(False),
+        iter_idx=9,
+    )
+
+    assert result == "forces-result"
+    assert len(calls) == 1
+    forwarded = calls[0][1]
+    assert forwarded["include_edge"] is True
+    assert forwarded["include_edge_residual"] is False
+    np.testing.assert_allclose(forwarded["freeb_bsqvac_half"], [[[7.0]]])
+    assert forwarded["iter_idx"] == 9

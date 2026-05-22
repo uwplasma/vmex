@@ -8,7 +8,14 @@ import vmec_jax.vmec_forces as vf
 from vmec_jax.config import VMECConfig
 from vmec_jax.namelist import InData
 from vmec_jax.static import build_static
-from vmec_jax.vmec_bcovar import _pshalf_from_s, vmec_bcovar_half_mesh_from_wout
+from vmec_jax.vmec_bcovar import (
+    _apply_vmec_lambda_axis_closure,
+    _half_mesh_from_even_odd,
+    _metric_cross_even_odd,
+    _metric_even_odd,
+    _pshalf_from_s,
+    vmec_bcovar_half_mesh_from_wout,
+)
 from vmec_jax.wout import MU0, _compute_equif_wout, _vmec_symoutput_split
 
 
@@ -168,6 +175,96 @@ def test_bcovar_lasym_channels_recombine_to_covariant_fields() -> None:
         np.asarray(bc.bsubv),
         np.asarray(bc.bsubv_parity_even) + pshalf * np.asarray(bc.bsubv_parity_odd),
         atol=1.0e-12,
+    )
+
+
+def test_bcovar_even_odd_metric_reconstructs_physical_half_mesh() -> None:
+    s = np.asarray([0.0, 0.25, 1.0])
+    a0 = np.asarray([[[1.0]], [[1.2]], [[1.5]]])
+    a1 = np.asarray([[[0.3]], [[-0.1]], [[0.2]]])
+    b0 = np.asarray([[[0.4]], [[0.7]], [[0.9]]])
+    b1 = np.asarray([[[-0.2]], [[0.5]], [[0.1]]])
+
+    even, odd = _metric_even_odd(a0=a0, a1=a1, b0=b0, b1=b1, s=s)
+    full = (a0 + np.sqrt(s)[:, None, None] * a1) ** 2 + (b0 + np.sqrt(s)[:, None, None] * b1) ** 2
+    np.testing.assert_allclose(np.asarray(even) + np.sqrt(s)[:, None, None] * np.asarray(odd), full)
+
+    cross_even, cross_odd = _metric_cross_even_odd(a0=a0, a1=a1, b0=b0, b1=b1, s=s)
+    cross_full = (a0 + np.sqrt(s)[:, None, None] * a1) * (b0 + np.sqrt(s)[:, None, None] * b1)
+    np.testing.assert_allclose(np.asarray(cross_even) + np.sqrt(s)[:, None, None] * np.asarray(cross_odd), cross_full)
+
+    half = np.asarray(_half_mesh_from_even_odd(even, odd, s=s))
+    pshalf = np.asarray(_pshalf_from_s(s))[:, None, None]
+    expected_inner = 0.5 * (even[1:] + even[:-1] + pshalf[1:] * (odd[1:] + odd[:-1]))
+    np.testing.assert_allclose(half, np.concatenate([expected_inner[:1], expected_inner], axis=0))
+
+    singleton_even = np.asarray([[[3.0]]])
+    np.testing.assert_allclose(
+        np.asarray(_half_mesh_from_even_odd(singleton_even, np.asarray([[[9.0]]]), s=np.asarray([0.0]))),
+        singleton_even,
+    )
+
+
+def test_bcovar_lambda_axis_closure_copies_only_three_dimensional_m0_modes() -> None:
+    lsin = np.asarray(
+        [
+            [10.0, 20.0, 30.0, 40.0],
+            [11.0, 21.0, 31.0, 41.0],
+            [12.0, 22.0, 32.0, 42.0],
+        ]
+    )
+    m_modes = np.asarray([0, 0, 1, 0])
+    n_modes = np.asarray([0, 1, 1, -1])
+
+    closed = np.asarray(
+        _apply_vmec_lambda_axis_closure(
+            Lsin=lsin,
+            m_modes=m_modes,
+            n_modes=n_modes,
+            lthreed=True,
+            ntor=1,
+        )
+    )
+    expected = lsin.copy()
+    expected[0, 1] = lsin[1, 1]
+    np.testing.assert_allclose(closed, expected)
+
+    mask_closed = np.asarray(
+        _apply_vmec_lambda_axis_closure(
+            Lsin=lsin,
+            m_modes=m_modes,
+            n_modes=n_modes,
+            axis_copy_mask=np.asarray([False, False, False, True]),
+            lthreed=True,
+            ntor=1,
+        )
+    )
+    expected_mask = lsin.copy()
+    expected_mask[0, 3] = lsin[1, 3]
+    np.testing.assert_allclose(mask_closed, expected_mask)
+    np.testing.assert_allclose(
+        np.asarray(
+            _apply_vmec_lambda_axis_closure(
+                Lsin=lsin,
+                m_modes=m_modes,
+                n_modes=n_modes,
+                lthreed=False,
+                ntor=1,
+            )
+        ),
+        lsin,
+    )
+    np.testing.assert_allclose(
+        np.asarray(
+            _apply_vmec_lambda_axis_closure(
+                Lsin=lsin,
+                m_modes=m_modes,
+                n_modes=n_modes,
+                lthreed=True,
+                ntor=0,
+            )
+        ),
+        lsin,
     )
 
 
