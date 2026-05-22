@@ -845,8 +845,9 @@ The large all-policy panels, atlases, summary-table images, and PDF snapshots
 are generated assets.  Recreate them from the sweep results with the commands
 below.  The README keeps only the four compact best-result PNGs; full
 publication sweeps belong in :doc:`optimization_sweep_results` with reviewed
-objective-history panels, initial/final 3D and Boozer ``|B|`` line-contour
-atlases, and wall-time/status summaries copied into ``docs/_static/figures``.
+objective-history panels, initial/final 3D and VMEC-angle ``|B|``
+line-contour atlases, and wall-time/status summaries copied into
+``docs/_static/figures``.
 
 .. code-block:: bash
 
@@ -926,9 +927,9 @@ and full publication panels when those cases are present.
 The published LASYM figures are partial 1200 second lanes rather than a
 complete matrix.  This is intentional: timeout and GPU-memory failures are
 useful performance data for the asymmetric exact/replay path.  The current
-frozen snapshot contains 13 CPU LASYM rows and 61 GPU LASYM rows.  The CPU
-subset has 6 successful rows, 6 crashed rows, and 1 budgeted stop; the GPU
-subset has 19 successful rows, 10 crashed rows, and 32 budgeted stops.
+frozen snapshot contains 23 CPU LASYM rows and 36 GPU LASYM rows.  The CPU
+subset has 11 successful rows, 8 crashed rows, and 4 budgeted stops; the GPU
+subset has 11 successful rows, no crashed rows, and 25 budgeted stops.
 
 For NVIDIA-only JAX installations, ``JAX_PLATFORMS=cuda`` is also valid.  Do
 not use ``JAX_PLATFORMS=gpu``: some JAX versions interpret that as both CUDA

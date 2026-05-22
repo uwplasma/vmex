@@ -77,9 +77,11 @@ The required release baseline is:
 - The bounded physics smoke job succeeds.
 - Manual/nightly physics jobs may be skipped, but must not fail.
 
-As of 2026-05-21, the latest checked green ``main`` CI baseline is run
-``26204014729`` at commit ``ed86718``.  Re-check GitHub Actions before cutting
-any later release candidate rather than assuming that baseline still applies.
+During the 2026-05-22 release-hygiene audit, the most recent completed green
+``main`` CI baseline was run ``26295697108`` at commit ``7b6b8ca``.  A newer
+run, ``26296817585`` at commit ``300f9af``, was still in progress when checked.
+Re-check GitHub Actions before cutting any release candidate rather than
+assuming that audit snapshot still applies.
 
 The current CI workflow also includes a dedicated full-docs job.  Treat both
 ``Build (wheel/sdist + docs)`` and ``Docs (full guide)`` as release blockers.
@@ -136,10 +138,11 @@ with a no-dependencies wheel download after publication.
 
 The release notes should list user-visible changes, validation coverage, known
 limitations, and any optional external validation that was not run.
-The next release candidate should cite the ``ed86718``-or-newer green CI run,
-the validated ``92.32%`` local required coverage result from May 22, 2026, the
-unchanged ``85%`` enforced coverage gate, and the fact that ``95%`` coverage
-still requires deeper ``solve.py`` coverage/refactor work.
+The next release candidate should cite the latest completed green CI run after
+re-checking the newest ``main`` workflow, the validated ``92.32%`` local
+required coverage result from May 22, 2026, the unchanged ``85%`` enforced
+coverage gate, and the fact that ``95%`` coverage still requires deeper
+``solve.py`` coverage/refactor work.
 
 Optional research-grade gates
 -----------------------------

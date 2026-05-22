@@ -344,7 +344,7 @@ promotion evidence.
 ## Sweep And Rendering Tools
 
 - `generate_qs_ess_sweep.py`: CPU/GPU QA/QH/QP/QI policy sweep over mode continuation, ESS, and maximum boundary mode.
-- `render_qs_ess_publication_panel.py`: render full-sweep docs assets from sweep outputs: objective histories over all stages, initial/final 3D atlases, initial/final LCFS Boozer `|B|` line-contour atlases, and wall-time/status summary tables.
+- `render_qs_ess_publication_panel.py`: render full-sweep docs assets from sweep outputs: objective histories over all stages, initial/final 3D atlases, initial/final VMEC-angle LCFS `|B|` line-contour atlases, and wall-time/status summary tables.
 - `render_readme_best_optimizations.py`: render only the compact README best-row figures and CSV table.
 - `render_qi_readme_cases.py`: render the NFP=1-4 QI docs coverage figure and CSV from existing `QI_optimization.py` outputs, using Boozer `|B|` line contours only.
 - `render_qi_constrained_sweep.py`: render QI-focused constrained-sweep diagnostics.

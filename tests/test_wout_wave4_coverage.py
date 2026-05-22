@@ -327,4 +327,6 @@ def test_compute_mercier_exact_sum_symmetrizes_full_grid_inputs_and_stays_finite
         trig=trig,
         geom=geom,
     )
-    np.testing.assert_allclose(short, np.zeros((2,)))
+    assert len(short) == 8
+    for profile in short:
+        np.testing.assert_allclose(profile, np.zeros((2,)))

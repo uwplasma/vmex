@@ -64,6 +64,33 @@ def test_default_non_autodiff_solver_policy_for_backend_uses_input_structure(bac
     assert driver._default_non_autodiff_solver_policy_for_backend(indata, backend) == expected
 
 
+def test_resolve_jit_forces_auto_policy_preserves_explicit_flags():
+    static = SimpleNamespace(
+        modes=SimpleNamespace(m=np.arange(3)),
+        cfg=SimpleNamespace(ns=3, ntheta=4, nzeta=5),
+    )
+
+    assert driver._resolve_jit_forces_auto_policy(False, static, niter_i=100) is False
+    assert driver._resolve_jit_forces_auto_policy(True, static, niter_i=0) is True
+    assert driver._resolve_jit_forces_auto_policy("false", static, niter_i=0) is True
+
+
+def test_resolve_jit_forces_auto_policy_uses_work_and_iteration_thresholds():
+    small = SimpleNamespace(
+        modes=SimpleNamespace(m=np.arange(2)),
+        cfg=SimpleNamespace(ns=3, ntheta=4, nzeta=5),
+    )
+    large = SimpleNamespace(
+        modes=SimpleNamespace(m=np.arange(2_000)),
+        cfg=SimpleNamespace(ns=50, ntheta=50, nzeta=1),
+    )
+
+    assert driver._resolve_jit_forces_auto_policy("auto", small, niter_i=4) is False
+    assert driver._resolve_jit_forces_auto_policy(" auto ", small, niter_i=5) is True
+    assert driver._resolve_jit_forces_auto_policy("AUTO", large, niter_i=1) is True
+    assert driver._resolve_jit_forces_auto_policy("auto", object(), niter_i=1) is True
+
+
 @pytest.mark.parametrize("solver_device", [None, "", " none ", "AUTO", "default"])
 def test_resolve_fixed_boundary_solver_device_inherits_default_for_auto_values(solver_device):
     assert (
