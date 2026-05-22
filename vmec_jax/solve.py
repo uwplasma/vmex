@@ -8602,6 +8602,7 @@ def solve_fixed_boundary_residual_iter(
             diagnostics = {
                 "use_scan": True,
                 "vmec2000_scan": True,
+                "scan_path": "vmec2000",
                 "state_only": True,
                 "history_mode": "none",
                 "history_none": True,
@@ -8683,6 +8684,7 @@ def solve_fixed_boundary_residual_iter(
                     diagnostics={
                         "use_scan": True,
                         "vmec2000_scan": True,
+                        "scan_path": "vmec2000",
                         "traced_scan": True,
                         "resume_state": traced_resume_state,
                     },
@@ -8790,6 +8792,7 @@ def solve_fixed_boundary_residual_iter(
             diagnostics={
                 "use_scan": True,
                 "vmec2000_scan": True,
+                "scan_path": "vmec2000",
                 "ftol": float(ftol),
                 "requested_ftol": float(ftol),
                 "light_history": bool(scan_light),
@@ -8856,6 +8859,10 @@ def solve_fixed_boundary_residual_iter(
                     "use_direct_fallback=False, reference_mode=False."
                 )
 
+            scan_timing_enabled = _scan_timing_enabled(os.getenv("VMEC_JAX_TIMING", ""))
+            scan_timing_stats = _new_scan_timing_stats()
+            scan_total_start = time.perf_counter() if scan_timing_enabled else None
+
             dtype = jnp.asarray(state0.Rcos).dtype
             time_step_j = jnp.asarray(float(step_size), dtype=dtype)
             flip_sign_j = jnp.asarray(float(initial_flip_sign), dtype=dtype)
@@ -8890,6 +8897,8 @@ def solve_fixed_boundary_residual_iter(
                 bool(apply_m1_constraints),
                 bool(jit_forces),
             )
+            if scan_timing_enabled and scan_total_start is not None:
+                scan_timing_stats["scan_setup_s"] += time.perf_counter() - float(scan_total_start)
 
             def _scan_step(carry, it):
                 state, converged, converged_iter, last_fsqr, last_fsqz, last_fsql = carry
@@ -9045,8 +9054,23 @@ def solve_fixed_boundary_residual_iter(
                 )
                 return jax.lax.scan(_scan_step, carry0, jnp.arange(max_iter, dtype=jnp.int32))
 
+            scan_run_setup_start = time.perf_counter() if scan_timing_enabled else None
             cached_run = None if differentiating_scan else _jit_cache_get(_SCAN_RUNNER_CACHE, scan_cache_key)
+            if scan_timing_enabled:
+                if scan_run_setup_start is not None:
+                    scan_timing_stats["scan_runner_cache_lookup_s"] += time.perf_counter() - float(
+                        scan_run_setup_start
+                    )
+                if differentiating_scan:
+                    scan_timing_stats["scan_runner_cache_bypass_count"] = (
+                        int(scan_timing_stats.get("scan_runner_cache_bypass_count", 0)) + 1
+                    )
             if cached_run is None:
+                if scan_timing_enabled and (not differentiating_scan):
+                    scan_timing_stats["scan_runner_cache_miss_count"] = (
+                        int(scan_timing_stats.get("scan_runner_cache_miss_count", 0)) + 1
+                    )
+                cache_build_start = time.perf_counter() if scan_timing_enabled else None
                 _run_scan = jit(_run_scan)
                 if not differentiating_scan:
                     _run_scan = _jit_cache_put(
@@ -9056,31 +9080,72 @@ def solve_fixed_boundary_residual_iter(
                         env_name="VMEC_JAX_SCAN_RUNNER_CACHE_SIZE",
                         default=32,
                     )
+                if scan_timing_enabled and cache_build_start is not None:
+                    scan_timing_stats["scan_runner_cache_build_s"] += time.perf_counter() - float(cache_build_start)
             else:
+                if scan_timing_enabled:
+                    scan_timing_stats["scan_runner_cache_hit_count"] = (
+                        int(scan_timing_stats.get("scan_runner_cache_hit_count", 0)) + 1
+                    )
                 _run_scan = cached_run
+            if scan_timing_enabled and scan_run_setup_start is not None:
+                scan_timing_stats["scan_run_setup_s"] += time.perf_counter() - float(scan_run_setup_start)
 
+            scan_device_start = time.perf_counter() if scan_timing_enabled else None
             carry_final, hist = _run_scan(state)
+            if scan_timing_enabled and scan_device_start is not None:
+                carry_final, hist = _runtime_scan_device_run_ready(
+                    start=scan_device_start,
+                    value=(carry_final, hist),
+                    scan_timing_enabled=True,
+                    perf_counter=time.perf_counter,
+                    block_until_ready=jax.block_until_ready,
+                    tree_map=jax.tree_util.tree_map,
+                    record_ready=_record_scan_device_ready,
+                    stats=scan_timing_stats,
+                )
+            scan_materialize_start = time.perf_counter() if scan_timing_enabled else None
             state_final, converged_final, converged_iter_final, _, _, _ = carry_final
             fsqr_hist, fsqz_hist, fsql_hist = hist
             w_hist = fsqr_hist + fsqz_hist + fsql_hist
+            w_hist_np = np.asarray(w_hist)
+            fsqr_hist_np = np.asarray(fsqr_hist)
+            fsqz_hist_np = np.asarray(fsqz_hist)
+            fsql_hist_np = np.asarray(fsql_hist)
             converged_host = bool(np.asarray(converged_final))
             converged_iter_host = int(np.asarray(converged_iter_final)) if converged_host else -1
             n_iter_host = int(converged_iter_host) if converged_host else int(max_iter)
+            if scan_timing_enabled and scan_materialize_start is not None:
+                scan_timing_stats["scan_host_materialize_s"] += time.perf_counter() - float(scan_materialize_start)
+            scan_timing_report = None
+            if scan_timing_enabled:
+                scan_total_s = (
+                    time.perf_counter() - float(scan_total_start)
+                    if scan_total_start is not None
+                    else sum(scan_timing_stats.values())
+                )
+                scan_timing_report = _build_scan_timing_report(
+                    iterations=int(n_iter_host),
+                    stats=scan_timing_stats,
+                    scan_total_s=float(scan_total_s),
+                )
             res_scan_fast = SolveVmecResidualResult(
                 state=state_final,
                 n_iter=n_iter_host,
-                w_history=np.asarray(w_hist),
-                fsqr2_history=np.asarray(fsqr_hist),
-                fsqz2_history=np.asarray(fsqz_hist),
-                fsql2_history=np.asarray(fsql_hist),
+                w_history=w_hist_np,
+                fsqr2_history=fsqr_hist_np,
+                fsqz2_history=fsqz_hist_np,
+                fsql2_history=fsql_hist_np,
                 grad_rms_history=np.asarray([], dtype=float),
                 step_history=np.asarray([], dtype=float),
                 diagnostics={
                     "use_scan": True,
                     "accelerated_scan": True,
+                    "scan_path": "accelerated",
                     "fsq_total_target": fsq_total_target,
                     "converged": converged_host,
                     "converged_iter": converged_iter_host,
+                    **({"timing": scan_timing_report} if scan_timing_report is not None else {}),
                 },
             )
             return _attach_freeb_diag(res_scan_fast)
