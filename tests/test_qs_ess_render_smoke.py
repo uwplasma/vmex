@@ -104,17 +104,33 @@ def test_qs_ess_sweep_profile_summary_fields():
                 "jacobian_total": {"count": 2, "wall_time_s": 7.5},
                 "solve_forward_trial_total": {"count": 4, "wall_time_s": 3.0},
                 "exact_tape_build": {"count": 2, "wall_time_s": 2.5},
+                "exact_tape_build_solve_call": {"count": 2, "wall_time_s": 2.1},
+                "exact_tape_build_unattributed": {"count": 2, "wall_time_s": 0.4},
+                "exact_tape_solver_compute_forces_first": {"count": 2, "wall_time_s": 0.2},
+                "exact_tape_solver_compute_forces_rest": {"count": 2, "wall_time_s": 0.8},
+                "trial_solver_scan_total": {"count": 4, "wall_time_s": 1.75},
+                "trial_solver_scan_device_dispatch": {"count": 4, "wall_time_s": 0.25},
+                "trial_solver_scan_device_ready": {"count": 4, "wall_time_s": 1.1},
+                "trial_solver_scan_host_materialize": {"count": 4, "wall_time_s": 0.15},
                 "write_wout": 0.25,
                 "ignored": {"wall_time_s": "not-a-float"},
             }
         }
     )
 
-    assert summary["profile_wall_time_s"] == pytest.approx(13.25)
+    assert summary["profile_wall_time_s"] == pytest.approx(20.0)
     assert summary["profile_top_name"] == "jacobian_total"
     assert summary["profile_top_wall_time_s"] == pytest.approx(7.5)
     assert summary["profile_solve_forward_trial_total_wall_time_s"] == pytest.approx(3.0)
     assert summary["profile_exact_tape_build_wall_time_s"] == pytest.approx(2.5)
+    assert summary["profile_exact_tape_build_solve_call_wall_time_s"] == pytest.approx(2.1)
+    assert summary["profile_exact_tape_build_unattributed_wall_time_s"] == pytest.approx(0.4)
+    assert summary["profile_exact_tape_solver_compute_forces_first_wall_time_s"] == pytest.approx(0.2)
+    assert summary["profile_exact_tape_solver_compute_forces_rest_wall_time_s"] == pytest.approx(0.8)
+    assert summary["profile_trial_solver_scan_total_wall_time_s"] == pytest.approx(1.75)
+    assert summary["profile_trial_solver_scan_device_dispatch_wall_time_s"] == pytest.approx(0.25)
+    assert summary["profile_trial_solver_scan_device_ready_wall_time_s"] == pytest.approx(1.1)
+    assert summary["profile_trial_solver_scan_host_materialize_wall_time_s"] == pytest.approx(0.15)
     assert summary["profile_jacobian_total_wall_time_s"] == pytest.approx(7.5)
     assert summary["profile_write_wout_wall_time_s"] == pytest.approx(0.25)
 
