@@ -205,6 +205,8 @@ def test_implicit_adjoint_helpers_cover_shape_errors_and_dense_callback(monkeypa
     )
 
     np.testing.assert_array_equal(np.asarray(full_active_keep_indices(jnp.ones(3))), np.arange(3))
+    with pytest.raises(ValueError, match="one-dimensional"):
+        full_active_keep_indices(jnp.ones((1, 2)))
     with pytest.raises(ValueError, match="non-negative"):
         full_active_keep_indices(-1)
     with pytest.raises(ValueError, match="x_active_star must be one-dimensional"):
@@ -243,6 +245,24 @@ def test_implicit_adjoint_helpers_cover_shape_errors_and_dense_callback(monkeypa
     assert calls == [((2, 2), (2,), 0.5)]
 
 
+def test_vmec_residual_jitted_primal_uses_traced_solve_callback(monkeypatch):
+    import vmec_jax.implicit as implicit
+    from vmec_jax._compat import enable_x64, jax, jnp
+
+    enable_x64(True)
+    state0 = _state(xp=jnp)
+    static = _static()
+    _install_residual_fakes(monkeypatch, implicit, jnp, state0)
+    options = _options(implicit)
+
+    @jax.jit
+    def edge_value(scale):
+        st = _solve_from_scale(implicit, state0, static, jnp, scale, options=options)
+        return st.Rcos[-1, 0] + st.Zsin[-1, 0]
+
+    assert float(edge_value(jnp.asarray(1.2))) == pytest.approx(3.0)
+
+
 def test_vmec_residual_keep_all_tangent_direct_bicgstab(monkeypatch):
     import jax.scipy.sparse.linalg as sparse_linalg
     import vmec_jax.implicit as implicit
@@ -271,6 +291,53 @@ def test_vmec_residual_keep_all_tangent_direct_bicgstab(monkeypatch):
     assert calls == [((2,), (2,), 1.0e-10, 0.0, 4)]
     assert float(value) == pytest.approx(2.31)
     assert float(tangent) == pytest.approx(0.21)
+
+
+def test_vmec_residual_keep_all_tangent_chunked_default_and_cg_fallback(monkeypatch):
+    import vmec_jax.implicit as implicit
+    from vmec_jax._compat import enable_x64, jax, jnp
+
+    enable_x64(True)
+    state0 = _state(xp=jnp)
+    static = _static()
+    _install_residual_fakes(monkeypatch, implicit, jnp, state0)
+    monkeypatch.setenv("VMEC_JAX_IMPLICIT_KEEP_ALL_ACTIVE", "1")
+
+    chunked_options = _options(implicit, residual_tangent_mode="chunked")
+
+    def chunked_scalar(scale):
+        st = _solve_from_scale(implicit, state0, static, jnp, scale, options=chunked_options)
+        return st.Rcos[-1, 0] - 0.1 * st.Zsin[-1, 0]
+
+    chunked_value, chunked_tangent = jax.jvp(chunked_scalar, (jnp.asarray(0.9),), (jnp.asarray(0.2),))
+    assert float(chunked_value) == pytest.approx(1.755)
+    assert float(chunked_tangent) == pytest.approx(0.39)
+
+    calls = []
+
+    def fake_lineax(_matvec, b, *, tol, max_iter, **_kwargs):
+        calls.append(("lineax", np.asarray(b).shape, tol, max_iter))
+        return None, False, {}
+
+    def fake_cg(matvec, rhs, *, tol, max_iter):
+        calls.append(("cg", np.asarray(matvec(jnp.ones_like(rhs))).shape, np.asarray(rhs).shape, tol, max_iter))
+        return jnp.zeros_like(rhs)
+
+    monkeypatch.setattr(implicit, "_lineax_bicgstab_solve", fake_lineax)
+    monkeypatch.setattr(implicit, "_cg_solve", fake_cg)
+    cg_options = _options(implicit, residual_tangent_mode="auto")
+
+    def cg_scalar(scale):
+        st = _solve_from_scale(implicit, state0, static, jnp, scale, options=cg_options)
+        return 0.5 * st.Rcos[-1, 0] + st.Zsin[-1, 0]
+
+    _value, tangent = jax.jvp(cg_scalar, (jnp.asarray(1.0),), (jnp.asarray(0.1),))
+
+    assert calls == [
+        ("lineax", (2,), 1.0e-10, 4),
+        ("cg", (2,), (2,), 1.0e-10, 4),
+    ]
+    assert float(tangent) == pytest.approx(0.15)
 
 
 def test_vmec_residual_keep_all_backward_lineax_bad_num_steps(monkeypatch):
