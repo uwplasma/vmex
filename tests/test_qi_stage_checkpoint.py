@@ -21,6 +21,21 @@ def _load_module():
     return module
 
 
+def test_public_qi_optimization_module_and_compat_shim_share_api() -> None:
+    import examples.optimization.qi_optimization_support as compat
+    import vmec_jax.qi_optimization as public
+
+    assert compat.target_helicity_seed_terms is public.target_helicity_seed_terms
+    assert compat.write_qi_stage_checkpoint is public.write_qi_stage_checkpoint
+    assert compat.stage_promotes_candidate is public.stage_promotes_candidate
+    assert compat.target_helicity_seed_terms(max_mode=1) == public.target_helicity_seed_terms(max_mode=1)
+    assert "run_qi_stage_policy" in public.__all__
+    assert "_jsonable" not in public.__all__
+    compat.configure({"COMPAT_TEST_SENTINEL": 7})
+    assert compat.COMPAT_TEST_SENTINEL == 7
+    assert public.COMPAT_TEST_SENTINEL == 7
+
+
 def test_qi_stage_checkpoint_preserves_partial_metrics_gates_and_provenance(tmp_path: Path) -> None:
     mod = _load_module()
     mod.configure({"OUTPUT_DIR": tmp_path})

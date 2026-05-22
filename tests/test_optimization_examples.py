@@ -157,13 +157,16 @@ def test_primary_example_solve_calls_do_not_take_physics_shortcuts() -> None:
 def test_qi_example_uses_qi_problem_api() -> None:
     text = (ROOT / "examples" / "optimization" / "QI_optimization.py").read_text()
     cases_text = (ROOT / "examples" / "optimization" / "qi_optimization_cases.py").read_text()
-    support_text = (ROOT / "examples" / "optimization" / "qi_optimization_support.py").read_text()
+    support_text = (ROOT / "vmec_jax" / "qi_optimization.py").read_text()
+    compat_text = (ROOT / "examples" / "optimization" / "qi_optimization_support.py").read_text()
     combined = "\n".join([text, cases_text, support_text])
 
     assert "run_quasi_isodynamic_objective_optimization(" not in text
     assert "QI_CASES = {" in cases_text
     assert "from qi_optimization_cases import QI_CASES, resolve_qi_case" in text
     assert "import qi_optimization_support as qis" in text
+    assert "from vmec_jax.qi_optimization import *" in compat_text
+    assert "from tools.diagnostics" not in support_text.split("def _load_basin_prefilter_tools")[0]
     assert len(text.splitlines()) < 600
     assert 'RUN_CASE = "nfp2_qi"' in text
     assert "RUN_CASE, CASE = resolve_qi_case(RUN_CASE)" in text
@@ -303,7 +306,7 @@ def test_qi_case_resolver_respects_editable_default_and_env(monkeypatch) -> None
 def test_qi_example_keeps_mirror_cleanup_guarded_by_qi_ceiling() -> None:
     text = (ROOT / "examples" / "optimization" / "QI_optimization.py").read_text()
     cases_text = (ROOT / "examples" / "optimization" / "qi_optimization_cases.py").read_text()
-    support_text = (ROOT / "examples" / "optimization" / "qi_optimization_support.py").read_text()
+    support_text = (ROOT / "vmec_jax" / "qi_optimization.py").read_text()
     combined = "\n".join([text, cases_text, support_text])
 
     assert '"mirror_weight": 20.0' in cases_text

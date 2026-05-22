@@ -202,9 +202,10 @@ remain available for custom inspection.
 top-level controls, construct objective tuples, call `least_squares_solve`,
 then save and plot from the returned result.  Its case catalog lives in
 `qi_optimization_cases.py`, and the seed-robust promotion/checkpoint helpers
-live in `qi_optimization_support.py`.  The scientific defaults remain visible
-in the driver, and physics terms stay in objective tuples rather than being
-passed as shortcut arguments into `least_squares_solve`.
+are imported from `vmec_jax.qi_optimization` through the compatibility shim
+`qi_optimization_support.py`.  The scientific defaults remain visible in the
+driver, and physics terms stay in objective tuples rather than being passed as
+shortcut arguments into `least_squares_solve`.
 
 Run one case from the repository root:
 
