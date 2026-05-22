@@ -461,6 +461,9 @@ class CaseResult:
     profile_trial_solver_scan_runner_cache_hit_count: float | None = None
     profile_trial_solver_scan_runner_cache_miss_count: float | None = None
     profile_trial_solver_scan_runner_cache_bypass_count: float | None = None
+    profile_trial_solver_scan_runner_cache_hit_device_run_wall_time_s: float | None = None
+    profile_trial_solver_scan_runner_cache_miss_device_run_wall_time_s: float | None = None
+    profile_trial_solver_scan_runner_cache_bypass_device_run_wall_time_s: float | None = None
     profile_trial_solver_scan_device_dispatch_wall_time_s: float | None = None
     profile_trial_solver_scan_device_ready_wall_time_s: float | None = None
     profile_trial_solver_scan_host_materialize_wall_time_s: float | None = None
@@ -601,6 +604,9 @@ def _profile_summary_fields(history: dict | None) -> dict[str, object]:
             "profile_trial_solver_scan_runner_cache_hit_count": None,
             "profile_trial_solver_scan_runner_cache_miss_count": None,
             "profile_trial_solver_scan_runner_cache_bypass_count": None,
+            "profile_trial_solver_scan_runner_cache_hit_device_run_wall_time_s": None,
+            "profile_trial_solver_scan_runner_cache_miss_device_run_wall_time_s": None,
+            "profile_trial_solver_scan_runner_cache_bypass_device_run_wall_time_s": None,
             "profile_trial_solver_scan_device_dispatch_wall_time_s": None,
             "profile_trial_solver_scan_device_ready_wall_time_s": None,
             "profile_trial_solver_scan_host_materialize_wall_time_s": None,
@@ -655,6 +661,15 @@ def _profile_summary_fields(history: dict | None) -> dict[str, object]:
         ),
         "profile_trial_solver_scan_runner_cache_bypass_count": _profile_wall_time(
             profile, "trial_solver_scan_runner_cache_bypass_count"
+        ),
+        "profile_trial_solver_scan_runner_cache_hit_device_run_wall_time_s": _profile_wall_time(
+            profile, "trial_solver_scan_runner_cache_hit_device_run"
+        ),
+        "profile_trial_solver_scan_runner_cache_miss_device_run_wall_time_s": _profile_wall_time(
+            profile, "trial_solver_scan_runner_cache_miss_device_run"
+        ),
+        "profile_trial_solver_scan_runner_cache_bypass_device_run_wall_time_s": _profile_wall_time(
+            profile, "trial_solver_scan_runner_cache_bypass_device_run"
         ),
         "profile_trial_solver_scan_device_dispatch_wall_time_s": _profile_wall_time(
             profile, "trial_solver_scan_device_dispatch"
@@ -1777,6 +1792,15 @@ def _case_result_from_history(
         "profile_trial_solver_scan_runner_cache_bypass_count": profile_summary[
             "profile_trial_solver_scan_runner_cache_bypass_count"
         ],
+        "profile_trial_solver_scan_runner_cache_hit_device_run_wall_time_s": profile_summary[
+            "profile_trial_solver_scan_runner_cache_hit_device_run_wall_time_s"
+        ],
+        "profile_trial_solver_scan_runner_cache_miss_device_run_wall_time_s": profile_summary[
+            "profile_trial_solver_scan_runner_cache_miss_device_run_wall_time_s"
+        ],
+        "profile_trial_solver_scan_runner_cache_bypass_device_run_wall_time_s": profile_summary[
+            "profile_trial_solver_scan_runner_cache_bypass_device_run_wall_time_s"
+        ],
         "profile_trial_solver_scan_device_dispatch_wall_time_s": profile_summary[
             "profile_trial_solver_scan_device_dispatch_wall_time_s"
         ],
@@ -2827,6 +2851,9 @@ def _write_summary_csv(results: list[CaseResult], path: Path) -> None:
                 "profile_trial_solver_scan_runner_cache_hit_count",
                 "profile_trial_solver_scan_runner_cache_miss_count",
                 "profile_trial_solver_scan_runner_cache_bypass_count",
+                "profile_trial_solver_scan_runner_cache_hit_device_run_wall_time_s",
+                "profile_trial_solver_scan_runner_cache_miss_device_run_wall_time_s",
+                "profile_trial_solver_scan_runner_cache_bypass_device_run_wall_time_s",
                 "profile_trial_solver_scan_device_dispatch_wall_time_s",
                 "profile_trial_solver_scan_device_ready_wall_time_s",
                 "profile_trial_solver_scan_host_materialize_wall_time_s",
