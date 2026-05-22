@@ -105,14 +105,12 @@ PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py
 Keep `--rerun` for a fresh local reproduction.  Without it, existing
 successful `showcase_case.json` rows are reused and can leave old outputs on
 disk; the renderer skips known-stale rows by default, and `--include-stale`
-should be reserved for debugging.  Current QI
-showcase outputs should appear under `.../qi_nfp1/continuation/nfp1_qi`,
-`.../qi_nfp2/continuation/nfp2_qi`, and
-`.../qi_nfp3/continuation/qi_stel_seed_3127`, and
-`.../qi_nfp4/continuation/nfp4_qi`; old QI rows under
-`.../continuation/qp_preseed/...` predate the staged dispatch.  Old QA/QP
-rows without `reference_preseed` metadata also predate the current
-reference-family preseed policy.
+should be reserved for debugging.  Current common-minimal QI rows use policy
+case names `minimal_nfp1_qi`, `minimal_nfp2_qi`, `minimal_nfp3_qi`, and
+`minimal_nfp4_qi`; old QI rows under `.../continuation/qp_preseed/...` or the
+legacy case names `nfp1_qi`, `nfp2_qi`, `qi_stel_seed_3127`, and `nfp4_qi`
+predate the staged dispatch.  Old QA/QP rows without `reference_preseed`
+metadata also predate the current reference-family preseed policy.
 When a case hits `--case-timeout-s`, the runner terminates the worker process
 group, including solver or GPU descendant processes, before writing the timeout
 result.
@@ -283,12 +281,12 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/audit_qi_seed_suitab
   --prefine-manifest results/qi_seed_audit/prefine_manifest.json \
   --prefine-output-dir results/qi_seed_audit/prefine_probes
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_seed_robustness.py
+PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp1_qi python examples/optimization/QI_optimization.py
+PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp2_qi python examples/optimization/QI_optimization.py
 PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127 \
   VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/qi_stel_seed_3127_current_public_final \
   python examples/optimization/QI_optimization.py
-PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi_finite_beta \
-  VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp4_qi_finite_beta \
-  python examples/optimization/QI_optimization.py
+PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi python examples/optimization/QI_optimization.py
 PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi_boundary_interpolation_scan.py \
   --seed-input examples/data/input.QI_stel_seed_3127 \
   --reference-input examples/data/input.nfp3_QI_fixed_resolution_final \

@@ -11,7 +11,7 @@ def test_local_ci_gate_documents_required_local_lanes() -> None:
     text = SCRIPT.read_text()
 
     required_fragments = (
-        "COVERAGE_FAIL_UNDER = 85",
+        "COVERAGE_FAIL_UNDER = 90",
         '"cli-smoke-help"',
         '"cli-smoke-solve"',
         '"compile"',

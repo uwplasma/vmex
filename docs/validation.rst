@@ -172,12 +172,13 @@ handling, including stellarator-asymmetric geometry and magnetic channels, and
 synthetic ranking consistency.  It is intentionally cheap enough for ordinary
 development.
 
-The current constrained-QI sweep artifacts document reviewed NFP=1, NFP=2,
+The current QI NFP 1-4 coverage panel and CSV document reviewed NFP=1, NFP=2,
 seed-3127, and minimal-seed NFP=4 lanes under their case-specific aspect
-targets.  The NFP=4 README/docs row is a case-gated minimal-seed lane that uses
-a same-NFP reference-family proposal plus an exact audit, not a long local
-descent: the companion
-``docs/_static/figures/readme_qi_optimization_cases.csv`` row records one
+targets:
+``docs/_static/figures/readme_qi_optimization_cases.png`` and
+``docs/_static/figures/readme_qi_optimization_cases.csv``.  The NFP=4 row is a
+case-gated minimal-seed lane that uses a same-NFP reference-family proposal
+plus an exact audit, not a long local descent; its CSV row records one
 preconditioner point and one short history segment along with the exact
 ``qi_seed_gate_passed``/``qi_engineering_gate_passed``/``qi_gate_failures``
 fields.  The separate

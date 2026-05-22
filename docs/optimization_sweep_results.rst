@@ -2,8 +2,9 @@ Optimization Sweep Results
 ==========================
 
 This page collects the generated optimization sweep artifacts used by the
-README and the main optimization guide.  The current sweep covers QA, QH, QP,
-and QI targets:
+README and the main optimization guide.  The full regeneration target covers
+QA, QH, QP, and QI targets; checked-in artifacts are explicitly labeled when
+they are only partial snapshots:
 
 - QA: the reference omnigenity NFP=2 QA deck, aspect ratio near 6,
   signed mean iota target 0.42, and quasi-axisymmetry.
@@ -12,7 +13,8 @@ and QI targets:
 - QP: aspect ratio near 6, quasi-poloidal symmetry, and a smooth
   ``abs(mean_iota) >= 0.41`` lower bound, using the same bundled NFP=2 seed as
   the QI runs.
-- QI: aspect ratio near 6 in the compact README best-row sweep, a differentiable smooth Boozer-space quasi-isodynamic
+- QI: aspect ratio near 6 in the compact README best-row sweep, a
+  differentiable smooth Boozer-space quasi-isodynamic
   residual evaluated through ``booz_xform_jax``, maximum mirror-ratio penalty,
   maximum-LCFS-elongation penalty, and a smooth ``abs(mean_iota) >= 0.41``
   lower bound.  ``LgradB`` is available as an optional commented term in the
@@ -132,12 +134,13 @@ contains only a single CPU continuation ``max_mode=3`` status row without a
 same-mode QP preseed.
 
 Seed-robust QI is a larger validation matrix than the tracked constrained-QI
-snapshot.  The current artifacts use the bundled NFP=2 QI seed and optional
-same-mode QP preseed.  Before documenting QI as robust to arbitrary starts,
-run the constrained objective from QI, QP, QH, QA, and a simple
-non-omnigenous boundary seed, then inspect both numerical gates and Boozer
-``|B|`` contour plots.  Until those rows are generated and curated, treat the
-full multi-seed matrix as deferred validation rather than a required
+snapshot.  The constrained-QI matrix artifacts use the bundled NFP=2 QI seed
+and optional same-mode QP preseed; the separate README/docs NFP 1-4 coverage
+panel uses case-gated source decks.  Before documenting QI as robust to
+arbitrary starts, run the constrained objective from QI, QP, QH, QA, and a
+simple non-omnigenous boundary seed, then inspect both numerical gates and
+Boozer ``|B|`` contour plots.  Until those rows are generated and curated,
+treat the full multi-seed matrix as deferred validation rather than a required
 reproduction command.
 
 Use the bounded seed preflight to choose and document starting points before
