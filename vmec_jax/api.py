@@ -66,11 +66,13 @@ from .optimization_workflow import (
     VolavgB,
     boozer_b_target_from_wout,
     least_squares_solve,
+    prepare_simple_omnigenity_seed_input,
     qi_boozer_b_target_objective,
     qi_max_elongation_constraint,
     qi_mirror_ratio_constraint,
     qs_stage_modes,
     repeated_stage_modes,
+    simple_omnigenity_seed_indata,
 )
 from .quasi_isodynamic import (
     lgradb_from_state,
@@ -187,8 +189,10 @@ __all__ = [
     "finite_beta_global_residuals_from_state",
     "finite_beta_scalars_from_state",
     "least_squares_solve",
+    "prepare_simple_omnigenity_seed_input",
     "qs_stage_modes",
     "repeated_stage_modes",
+    "simple_omnigenity_seed_indata",
     # Plotting helpers
     "bmag_from_state_physical",
     "bmag_from_wout",

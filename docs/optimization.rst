@@ -85,14 +85,16 @@ coefficients.  Use those inputs to test whether a QA/QH/QP/QI policy can build
 the target field structure from a common seed that does not already encode the
 target helicity.
 
-Keep those raw input decks unchanged.  The deterministic target-helicity
-seeding contract for this optimization lane is an optimization-time
-perturbation, not a seed-file change: add only tiny ``1e-5``
-``RBC/ZBS`` mode-1 hints, leave existing minimal modes such as ``RBC(0,1)``
-and ``ZBS(0,1)`` unchanged, and let the active ``max_mode`` projection remove
-hint modes that are not yet active.  The current deterministic hint set is
-``RBC(1,0)``, ``ZBS(1,0)``, ``RBC(-1,1)``, ``ZBS(-1,1)``,
-``RBC(1,1)``, and ``ZBS(1,1)`` in VMEC input-index convention.
+Keep those raw input decks unchanged.  The standalone QA/QH/QP examples use
+``vj.prepare_simple_omnigenity_seed_input(...)`` as an optimization-time
+preprocessor: it writes ``input.simple_seed`` in the run directory, preserves
+only ``RBC(0,0)``, ``RBC(0,1)``, and ``ZBS(0,1)`` from the selected seed deck,
+and fills active ``RBC/ZBS`` modes up to ``max_mode`` with deterministic
+``1e-5`` perturbations.  This keeps the published input files minimal while
+avoiding exactly-zero Jacobian columns in direct max-mode stress tests.  The
+lower-level staged QI policy also has a mode-1 target-helicity preconditioner
+with the deterministic hint set ``RBC(1,0)``, ``ZBS(1,0)``, ``RBC(-1,1)``,
+``ZBS(-1,1)``, ``RBC(1,1)``, and ``ZBS(1,1)`` in VMEC input-index convention.
 The QA and QP common-minimal rows additionally use an explicit
 optimization-time reference-family preseed without modifying the raw input
 decks: QA blends the active low-order RBC/ZBS space 25% toward

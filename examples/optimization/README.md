@@ -65,13 +65,17 @@ omnigenous structure from a seed that does not already contain the target
 helicity.  Higher Fourier coefficients should be introduced by `max_mode`,
 mode continuation, ESS, or a staged QI policy, not by the seed file itself.
 
-For deterministic target-helicity seeding in this common-minimal-seed lane,
-keep the raw input files exactly as above and add only optimization-time hints:
-tiny `1e-5` `RBC/ZBS` mode-1 terms.  Do not replace an already nonzero
-minimal mode such as `RBC(0,1)`/`ZBS(0,1)`, and let the active `max_mode`
-projection remove hints that are outside the current stage.  The current
-deterministic hint set is `RBC(1,0)`, `ZBS(1,0)`, `RBC(-1,1)`,
-`ZBS(-1,1)`, `RBC(1,1)`, and `ZBS(1,1)` in VMEC input-index convention.
+For deterministic simple-seed runs, keep the raw input files exactly as above
+and add only optimization-time hints.  The standalone QA/QH/QP examples call
+`vj.prepare_simple_omnigenity_seed_input(...)`, which writes an `input.simple_seed`
+under the run directory.  That generated input keeps only `RBC(0,0)`,
+`RBC(0,1)`, and `ZBS(0,1)` from the selected seed deck, then fills active
+`RBC/ZBS` modes up to `max_mode` with deterministic `1e-5` perturbations so
+the Jacobian does not start on an exactly zero-transform branch.  The raw
+bundled input decks are not modified.  The lower-level QI staged policy also
+has a mode-1 target-helicity preconditioner with the deterministic hint set
+`RBC(1,0)`, `ZBS(1,0)`, `RBC(-1,1)`, `ZBS(-1,1)`, `RBC(1,1)`, and `ZBS(1,1)`
+in VMEC input-index convention.
 The QA and QP common-minimal rows also use an explicit optimization-time
 reference-family preseed: QA blends active low-order RBC/ZBS terms 25% toward
 `input.nfp2_QA_omnigenity`, and QP blends 10% toward `input.nfp2_QI`.  This is

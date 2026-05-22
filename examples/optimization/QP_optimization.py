@@ -19,12 +19,22 @@ enable_x64(True)
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
 # Problem parameters.  QP is a quasisymmetry target with HELICITY_M=0.  We use
-# the nfp=2 QI seed so QP and QI start from the same boundary family.
-INPUT_FILE = DATA_DIR / "input.nfp2_QI"
+# the same nfp=2 minimal seed family as QI in the simple-seed lane.
+WARM_START_INPUT_FILE = DATA_DIR / "input.nfp2_QI"
+SIMPLE_SEED_INPUT_FILE = DATA_DIR / "input.minimal_seed_nfp2"
 OUTPUT_DIR = Path("results/qp_opt/no_ess")
 MAX_MODE = 3
 MIN_VMEC_MODE = 6
-USE_MODE_CONTINUATION = True
+USE_SIMPLE_SEED = True  # Start from near-circular RBC(0,0), RBC(0,1), ZBS(0,1).
+INPUT_FILE = SIMPLE_SEED_INPUT_FILE if USE_SIMPLE_SEED else WARM_START_INPUT_FILE
+INPUT_FILE = vj.prepare_simple_omnigenity_seed_input(
+    INPUT_FILE,
+    OUTPUT_DIR,
+    max_mode=MAX_MODE,
+    min_vmec_mode=MIN_VMEC_MODE,
+    enabled=USE_SIMPLE_SEED,
+)
+USE_MODE_CONTINUATION = not USE_SIMPLE_SEED
 MAX_NFEV = 40
 CONTINUATION_NFEV = 30
 STAGE_MODES = vj.qs_stage_modes(
@@ -50,6 +60,7 @@ ALPHA = 1.2  # ESS high-mode scaling strength.
 # Common alternatives:
 # METHOD = "gauss_newton"
 # METHOD = "lbfgs_adjoint"
+# USE_SIMPLE_SEED = False
 # USE_MODE_CONTINUATION = False
 # STAGE_MODES = [MAX_MODE]
 # USE_ESS = True

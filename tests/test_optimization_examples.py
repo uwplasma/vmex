@@ -67,6 +67,9 @@ def test_fixed_boundary_qs_examples_are_standalone_workflows() -> None:
         assert "The solve call only receives optimizer, continuation, device, and output" in text
         assert "SAVE_STAGE_INPUTS = True" in text
         assert "SAVE_STAGE_WOUTS = False" in text
+        assert "USE_SIMPLE_SEED = True" in text
+        assert "prepare_simple_omnigenity_seed_input(" in text
+        assert "input.minimal_seed_nfp" in text
         assert "save_stage_inputs=SAVE_STAGE_INPUTS" in text
         assert "save_stage_wouts=SAVE_STAGE_WOUTS" in text
         assert "target_aspect=" not in text
@@ -167,6 +170,8 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "VMEC_JAX_QI_OUTPUT_DIR" in cases_text
     assert "VMEC_JAX_QI_MAX_MODE" in text
     assert "VMEC_JAX_QI_MAX_NFEV" in text
+    assert "VMEC_JAX_QI_USE_SIMPLE_SEED" in text
+    assert "prepare_simple_omnigenity_seed_input(" in text
     assert "Unknown QI RUN_CASE" in cases_text
     assert '"nfp1_qi"' in cases_text
     assert 'QI_CASES["nfp3_qi"]' in cases_text
