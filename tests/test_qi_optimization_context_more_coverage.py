@@ -74,6 +74,21 @@ def test_context_factory_accepts_uppercase_and_lowercase_overrides(tmp_path: Pat
     assert ctx.target_abs_iota_min == pytest.approx(0.41)
 
 
+def test_context_factory_strict_mode_does_not_read_module_globals(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    values = _context_values(tmp_path)
+    values.pop("MAX_MODE")
+    monkeypatch.setattr(qio, "MAX_MODE", 99, raising=False)
+
+    legacy = qio.make_qi_optimization_context(values)
+    assert legacy.max_mode == 99
+
+    with pytest.raises(KeyError, match="MAX_MODE"):
+        qio.make_qi_optimization_context(values, strict=True)
+
+
 def test_explicit_context_and_default_context_override_poisoned_globals(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

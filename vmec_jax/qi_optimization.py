@@ -142,8 +142,20 @@ _CONTEXT_FIELDS = {
 _DEFAULT_CONTEXT: QIOptimizationContext | None = None
 
 
-def make_qi_optimization_context(context: dict | None = None, /, **overrides) -> QIOptimizationContext:
-    """Build a typed staged-QI helper context from script constants."""
+def make_qi_optimization_context(
+    context: dict | None = None,
+    /,
+    *,
+    strict: bool = False,
+    **overrides,
+) -> QIOptimizationContext:
+    """Build a typed staged-QI helper context from script constants.
+
+    ``strict=True`` is recommended for standalone examples: every required
+    control must be present in ``context`` or ``overrides``.  The default
+    ``strict=False`` preserves compatibility with older scripts that installed
+    constants with :func:`configure` and relied on module globals.
+    """
 
     values = {}
     if context:
@@ -156,7 +168,7 @@ def make_qi_optimization_context(context: dict | None = None, /, **overrides) ->
             return values[field]
         if upper in values:
             return values[upper]
-        if upper in globals():
+        if not strict and upper in globals():
             return globals()[upper]
         raise KeyError(upper)
 
