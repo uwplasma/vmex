@@ -59,7 +59,7 @@ def test_qi_staged_runner_builds_external_input_environment(tmp_path: Path) -> N
     assert env["VMEC_JAX_QI_INNER_MAX_ITER"] == "21"
     assert env["VMEC_JAX_QI_TRIAL_FTOL"] == "2e-08"
     assert env["VMEC_JAX_QI_SOLVER_DEVICE"] == "gpu"
-    assert env["JAX_PLATFORMS"] == "gpu"
+    assert env["JAX_PLATFORMS"] == "cuda"
     lambdas = tuple(float(value) for value in env["VMEC_JAX_QI_REFERENCE_LAMBDAS"].split(","))
     assert lambdas[:3] == pytest.approx((0.994, 0.995, 0.996))
     assert lambdas[-1] == pytest.approx(1.010)

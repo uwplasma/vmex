@@ -20,11 +20,11 @@ Target State
   release notes or validation artifact for the candidate being checked.
 - Near-term coverage target: keep the required ``85%`` actual line coverage gate
   green with meaningful fast and bounded-physics tests while preserving
-  acceptable coverage runtime.  The current required fast-suite coverage is
-  ``92.32%`` from the validated May 22 local CI-equivalent run
-  (``1824 passed, 20 skipped, 101 deselected`` in 7m19s).  Treat this as about
-  ``92%`` current required coverage; the enforced gate remains ``85%`` until CI
-  has carried the higher baseline for multiple green runs.
+  acceptable coverage runtime.  Recent local CI-equivalent runs have measured
+  about ``92%`` fast-suite coverage, but those measurements are audit
+  artifacts rather than a hard-coded current baseline.  The enforced gate
+  remains ``85%`` until CI has carried a higher baseline for multiple green
+  runs.
 - Next staged coverage target: raise the required Python 3.11 gate to ``90%``
   after CI confirms the local result remains stable with acceptable runtime and
   the added coverage comes from required tests rather than optional local
@@ -242,12 +242,15 @@ the recommended local escalation path.
      - Cheap schema and fixture-path check for the fixed/free-boundary parity
        sweep manifest.  It does not launch VMEC2000; it protects the bounded
        optional sweep matrix from stale local inputs, unbounded compare-mode
-       entries, and accidental removal of required physics classes.
+       entries, and accidental removal of required physics classes.  This is
+       dry-run wiring only, not evidence that the external manifest matrix has
+       completed.
    * - Coverage gate
      - ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000 and not simsopt" --cov=vmec_jax --cov-report=xml --cov-report=term:skip-covered --cov-fail-under=85``
-     - Python 3.11 required CI coverage job.  The latest local equivalent
-       measured ``92.32%`` coverage and enforces the 85% coverage gate while
-       keeping optional executable validation in separate opt-in lanes.
+     - Python 3.11 required CI coverage job.  Record the measured coverage,
+       pass/skip/deselect counts, runtime, and commit SHA in the validation
+       artifact for the candidate being checked; the gate itself remains 85%
+       while optional executable validation stays in separate opt-in lanes.
    * - Optimization workflow smoke
      - ``pytest -q tests/test_optimization_examples.py tests/test_qs_ess_render_smoke.py``
      - After changing objective tuple construction, examples, or sweep
@@ -288,8 +291,9 @@ the recommended local escalation path.
        green.  The ``basic_non_stellsym_pressure`` converged LASYM finite-beta
        representative passed locally after the LASYM covariant-field scaling
        fix in ``e0b00e7`` and remained below the nightly LASYM magnetic
-       tolerance in a bounded 2026-05-19 rerun; keep it as a dated optional
-       external gate rather than a required PR check. Keep
+       tolerance in a bounded 2026-05-19 rerun; keep it as dated optional
+       evidence rather than a broad strict-LASYM parity promotion or required
+       PR check. Keep
        ``tests/test_vmec2000_exec_fast_validation.py::test_fast_vmec2000_stage_trace_validation_cases``
        for deliberate short-trace regressions.
    * - External SIMSOPT tier
@@ -537,8 +541,9 @@ The required CI gate is staged deliberately:
    * - Current
      - ``--cov-fail-under=85``
      - Fast-suite coverage is green on Python 3.11 with ``.[plots]`` installed
-       at about 92% actual package coverage, and required CI remains independent
-       of VMEC2000, SIMSOPT, GPUs, and large downloaded assets.
+       above the enforced threshold in recent local audit artifacts, and
+       required CI remains independent of VMEC2000, SIMSOPT, GPUs, and large
+       downloaded assets.
      - Keep enforced.
    * - 90%
      - ``--cov-fail-under=90``

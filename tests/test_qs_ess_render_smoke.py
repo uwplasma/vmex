@@ -75,6 +75,11 @@ def test_qs_ess_sweep_worker_jax_platform_policy():
     assert sweep._default_worker_jax_platforms("cpu") == "cpu"
     assert sweep._default_worker_jax_platforms("default") is None
     assert sweep._default_worker_jax_platforms("gpu") is None
+    assert sweep._normalize_worker_jax_platforms(None) is None
+    assert sweep._normalize_worker_jax_platforms("inherit") is None
+    assert sweep._normalize_worker_jax_platforms("gpu") == "cuda"
+    assert sweep._normalize_worker_jax_platforms("cpu,gpu") == "cpu,cuda"
+    assert sweep._normalize_worker_jax_platforms("cuda") == "cuda"
 
 
 def test_qs_ess_sweep_sets_missing_wall_time():
