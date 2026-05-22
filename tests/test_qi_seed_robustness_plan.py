@@ -44,7 +44,9 @@ def test_plan_keeps_external_validation_optional():
     plan = mod.build_plan()
     lanes = {lane["lane_id"]: lane for lane in plan["lanes"]}
 
-    assert plan["required_ci_baseline"]["status"] == "success"
+    assert plan["required_ci_baseline"]["status"] == "unverified"
+    assert plan["required_ci_baseline"]["verification_required"] is True
+    assert "gh run list" in plan["required_ci_baseline"]["verification_command"]
     assert plan["required_ci_policy"]["heavy_external_validation_required"] is False
     assert lanes["simsopt-optional"]["required_ci"] is False
     assert lanes["vmec2000-optional"]["required_ci"] is False
