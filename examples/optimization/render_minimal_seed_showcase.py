@@ -385,11 +385,160 @@ def render_objective_panel(records: list[ShowcaseRecord], out_png: Path) -> Path
     return out_png
 
 
+def _local_repo_path(value: str | Path | None, *, output_dir: Path | None = None) -> Path | None:
+    """Map local or remote provenance paths back onto this checkout when possible."""
+
+    if value in (None, ""):
+        return None
+    path = Path(str(value))
+    if path.exists():
+        return path
+    if output_dir is not None:
+        candidate = output_dir / path.name
+        if candidate.exists():
+            return candidate
+    text = str(value).replace("\\", "/")
+    for marker in ("examples/data/", "examples/optimization/results/"):
+        if marker in text:
+            candidate = ROOT / marker / text.split(marker, 1)[1]
+            if candidate.exists():
+                return candidate
+    return path
+
+
+def _record_metadata(record: ShowcaseRecord) -> dict:
+    return _metadata_for_result(record.output_dir / "case_result.json")
+
+
+def _initial_input_for_record(record: ShowcaseRecord) -> Path | None:
+    """Return the input deck that represents the actual first optimized point."""
+
+    metadata = _record_metadata(record)
+    seed_meta = metadata.get("target_helicity_seed") or {}
+    seeded = _local_repo_path(seed_meta.get("seeded_input_file"), output_dir=record.output_dir)
+    if seeded is not None and seeded.exists():
+        return seeded
+    preseed_meta = metadata.get("reference_preseed") or {}
+    preseeded = _local_repo_path(preseed_meta.get("preseeded_input_file"), output_dir=record.output_dir)
+    if preseeded is not None and preseeded.exists():
+        return preseeded
+    case_meta = metadata.get("minimal_seed_case") or {}
+    return _local_repo_path(case_meta.get("input_file"), output_dir=record.output_dir)
+
+
+def _stage_checkpoint_wout(record: ShowcaseRecord, name: str) -> Path | None:
+    checkpoint = record.output_dir / "stage_checkpoint.json"
+    if not checkpoint.exists():
+        return None
+    try:
+        data = json.loads(checkpoint.read_text())
+    except json.JSONDecodeError:
+        return None
+    diagnostics_path = _local_repo_path(data.get("diagnostics_path"), output_dir=record.output_dir)
+    if diagnostics_path is None:
+        return None
+    candidate = diagnostics_path.parent / name
+    return candidate if candidate.exists() else None
+
+
+def _final_wout_for_record(record: ShowcaseRecord) -> Path | None:
+    for candidate in (
+        record.output_dir / "wout_final.nc",
+        _stage_checkpoint_wout(record, "wout_final.nc"),
+    ):
+        if candidate is not None and candidate.exists():
+            return candidate
+    nested = sorted(record.output_dir.glob("*/wout_final.nc"))
+    return nested[-1] if nested else None
+
+
+def _initial_wout_for_record(record: ShowcaseRecord) -> Path | None:
+    input_file = _initial_input_for_record(record)
+    if input_file is None or not input_file.exists():
+        return None
+    try:
+        from render_readme_best_optimizations import _validated_or_derived_raw_initial_wout
+    except ImportError:
+        return None
+    candidate = record.output_dir / "wout_initial.nc"
+    if not candidate.exists():
+        stage_candidate = _stage_checkpoint_wout(record, "wout_initial.nc")
+        candidate = stage_candidate if stage_candidate is not None else candidate
+    try:
+        return _validated_or_derived_raw_initial_wout(
+            candidate,
+            input_file,
+            record.output_dir,
+            context=f"{record.case_name} minimal-seed initial wout",
+        )
+    except Exception:
+        return None
+
+
+def render_state_panel(records: list[ShowcaseRecord], out_png: Path) -> Path | None:
+    """Render initial/final LCFS, Boozer contours, and objective histories."""
+
+    candidates = [
+        (record, _initial_wout_for_record(record), _final_wout_for_record(record))
+        for record in records
+        if record.stale_reason is None
+    ]
+    candidates = [
+        (record, initial_wout, final_wout)
+        for record, initial_wout, final_wout in candidates
+        if initial_wout is not None and final_wout is not None and final_wout.exists()
+    ]
+    if not candidates:
+        return None
+
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        from matplotlib import pyplot as plt
+        from render_readme_best_optimizations import _plot_boozer_bmag, _plot_lcfs
+        from vmec_jax.wout import read_wout
+    except Exception:
+        return None
+
+    nrows = len(candidates)
+    fig = plt.figure(figsize=(22.0, 4.4 * nrows), constrained_layout=True)
+    gs = fig.add_gridspec(nrows, 5, width_ratios=(1.05, 1.05, 1.0, 1.05, 1.05))
+    for row, (record, initial_wout, final_wout) in enumerate(candidates):
+        ax0 = fig.add_subplot(gs[row, 0], projection="3d")
+        ax1 = fig.add_subplot(gs[row, 1], projection="3d")
+        ax2 = fig.add_subplot(gs[row, 2])
+        ax3 = fig.add_subplot(gs[row, 3])
+        ax4 = fig.add_subplot(gs[row, 4])
+
+        _plot_lcfs(ax0, read_wout(initial_wout), f"{record.case_name}: initial")
+        _plot_lcfs(ax1, read_wout(final_wout), "final")
+        segments = objective_segments(record)
+        if not segments:
+            ax2.text(0.5, 0.5, "history missing", ha="center", va="center", transform=ax2.transAxes)
+        for wall_min, values in segments:
+            ax2.semilogy(wall_min, values, color="#1f4e79", linewidth=1.8)
+            ax2.scatter(wall_min[-1], values[-1], s=16, color="#d95f02", zorder=3)
+        ax2.set_title("Best objective history", fontsize=9)
+        ax2.set_xlabel("Wall time (min)")
+        ax2.set_ylabel("Best objective")
+        ax2.grid(True, alpha=0.25, linestyle=":")
+        _plot_boozer_bmag(ax3, initial_wout, r"Initial $|B|$")
+        _plot_boozer_bmag(ax4, final_wout, r"Final $|B|$")
+
+    fig.suptitle("Common minimal-seed initial/final optimization states", fontsize=13, x=0.01, y=1.01, ha="left")
+    out_png.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_png, dpi=220, bbox_inches="tight")
+    plt.close(fig)
+    return out_png
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--output-root", type=Path, default=RESULTS_ROOT)
     parser.add_argument("--figure-dir", type=Path, default=FIGURE_DIR)
     parser.add_argument("--summary-only", action="store_true", help="Write CSV only; skip Matplotlib rendering.")
+    parser.add_argument("--skip-state-panel", action="store_true", help="Skip initial/final geometry and Boozer panel.")
     parser.add_argument(
         "--include-stale",
         action="store_true",
@@ -425,6 +574,13 @@ def main() -> None:
         rendered = render_objective_panel(all_records, out_png)
         if rendered is not None:
             print(f"Wrote {rendered}")
+        if not bool(args.skip_state_panel):
+            state_png = Path(args.figure_dir) / "minimal_seed_showcase_state_panel.png"
+            rendered_state = render_state_panel(all_records, state_png)
+            if rendered_state is not None:
+                print(f"Wrote {rendered_state}")
+            else:
+                print("No current minimal-seed state panel rendered; missing non-stale initial/final wout artifacts.")
 
 
 if __name__ == "__main__":
