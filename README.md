@@ -164,17 +164,12 @@ PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 - Release checklist and CI gates: `docs/release_checklist.rst`
 - Latest published release:
   [`v0.0.11`](https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.11)
-- Historical release hygiene baseline recorded for `v0.0.11`: green `main` CI at
-  `7030eaf`, local required coverage `88.335%` against the then-current `85%`
-  gate, and planned `90%` / `95%` coverage ratchets.
-  This is historical release evidence only; re-check GitHub Actions before
-  reusing any baseline for a later release.
-- Most recent completed green `main` CI checked during the 2026-05-22 release
-  hygiene audit: run `26297711706` at `e90d1a2`. Re-check GitHub Actions
-  before cutting any release candidate.
-- Latest local CI-equivalent coverage check: above `93%` against the current
-  `90%` required gate; `95%` remains staged pending deeper `solve.py`
-  coverage/refactor work.
+- Release-candidate CI baseline: re-check the newest completed green `main`
+  run with `gh run list --repo uwplasma/vmec_jax --branch main --workflow CI
+  --limit 5` before tagging.
+- Required fast coverage gate is currently `90%`; `95%` remains the next
+  ratchet and should be claimed only from a fresh coverage run on the
+  release-candidate commit.
 
 ## CLI Reference
 

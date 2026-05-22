@@ -195,18 +195,20 @@ The second audit command uses the far-seed QI gate convention from
 ``QI_optimization.py``: legacy QI below ``2e-3`` and smooth differentiable QI
 below ``5e-3``.
 
-The bare ``VMEC_JAX_QI_RUN_CASE=...`` commands use the current aspect-6 public
-defaults.  The explicit target-aspect and output-dir overrides above reproduce
-the reviewed rows currently embedded in the docs QI coverage figure.
+The explicit target-aspect and output-dir overrides above reproduce the
+archived mixed-target rows currently embedded in the docs QI coverage figure.
+Omit those overrides only when regenerating the current uniform aspect-6 policy.
 
 The docs QI coverage figure is rendered from existing reviewed
-``QI_optimization.py`` outputs.  These rows are case-specific gate checks, not
-additional aspect-6 README best-row promotions: the NFP=1 and NFP=2 lanes use
-target aspect 10, the seed-3127 lane uses target aspect 4, and the NFP=4 row is
-the common-minimal-seed path with a same-NFP finite-beta QI reference-family
-preconditioner.  The source input remains the three-coefficient minimal seed;
-the finite-beta NFP=4 input is kept as a separate stress fixture, not as the
-README initial state:
+``QI_optimization.py`` outputs.  These rows are archived mixed-target case
+checks, not additional aspect-6 README best-row promotions: the NFP=1 and NFP=2
+lanes use target aspect 10, the seed-3127 lane uses target aspect 4, and the
+NFP=4 row is the common-minimal-seed path with a same-NFP finite-beta QI
+reference-family preconditioner.  Regenerate all rows with the current uniform
+aspect-6 policy before using this figure as current README promotion evidence.
+The source input remains the three-coefficient minimal seed; the finite-beta
+NFP=4 input is kept as a separate stress fixture, not as the README initial
+state:
 
 .. list-table::
    :header-rows: 1

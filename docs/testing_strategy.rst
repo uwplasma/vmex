@@ -539,8 +539,8 @@ The required CI gate is staged deliberately:
      - CI action
    * - Completed
      - ``--cov-fail-under=85``
-     - The earlier 85% gate was carried by required CI and then superseded by a
-       local CI-equivalent run above 93% on 2026-05-22.
+     - The earlier 85% gate was carried by required CI and superseded after
+       local CI-equivalent coverage exceeded the next gate.
      - Superseded.
    * - Current
      - ``--cov-fail-under=90``
