@@ -9,7 +9,9 @@ from vmec_jax.solve_scan_payload_helpers import (
     ScanForcePayload,
     ScanStepFields,
     build_scan_force_payload,
+    current_scan_payload,
     mask_scan_restart_force_payload,
+    restart_scan_payload,
     select_scan_force_payload,
     select_scan_step_fields,
 )
@@ -66,6 +68,32 @@ def _payload(tag: float, *, cache_valid=True) -> ScanForcePayload:
 
 def _fake_cond(pred, true_fun, false_fun, operand):
     return true_fun(operand) if bool(np.asarray(pred)) else false_fun(operand)
+
+
+def _build_payload_kwargs(*, frzl_rz: TomnspsRZL, apply_lambda_update_scale: bool = True) -> dict:
+    return {
+        "frzl_rz": frzl_rz,
+        "cache_lam_prec": np.asarray(2.0),
+        "w_mode_mn": np.full((2, 2), 3.0),
+        "lambda_update_scale_j": np.asarray(5.0),
+        "apply_lambda_update_scale": apply_lambda_update_scale,
+        "fsqr": 1.0,
+        "fsqz": 2.0,
+        "fsql": 3.0,
+        "f_norm1": 0.5,
+        "delta_s": 0.25,
+        "s": np.linspace(0.0, 1.0, 3),
+        "lconm1": True,
+        "cache_precond_diag": ("diag",),
+        "cache_tcon": "tcon",
+        "cache_norms": "norms",
+        "cache_rz_scale": "rzs",
+        "cache_l_scale": "ls",
+        "cache_rz_norm": 4.0,
+        "cache_f_norm1": 0.5,
+        "cache_rz_mats": "mats",
+        "cache_valid": True,
+    }
 
 
 def test_mask_scan_restart_force_payload_preserves_or_zeros_and_invalidates_cache():
@@ -173,6 +201,27 @@ def test_build_scan_force_payload_uses_lasym_optional_blocks_and_current_optiona
         + np.sum(np.full((2, 2, 2), 200.0) ** 2)
     ) * 0.25
     np.testing.assert_allclose(np.asarray(payload.fsql1), expected_fsql1)
+
+
+def test_scan_payload_wrappers_include_nonzero_flcs_in_lambda_metric():
+    base = np.full((3, 2, 2), 1.0)
+    frzl = TomnspsRZL(
+        frcc=base,
+        frss=None,
+        fzsc=base + 2.0,
+        fzcs=None,
+        flsc=base + 4.0,
+        flcs=base + 5.0,
+    )
+    kwargs = _build_payload_kwargs(frzl_rz=frzl, apply_lambda_update_scale=False)
+
+    current = current_scan_payload(**kwargs)
+    restart = restart_scan_payload(**kwargs)
+
+    np.testing.assert_allclose(np.asarray(current.blocks.flcs), np.full((3, 2, 2), 36.0))
+    expected_fsql1 = (np.sum(np.full((2, 2, 2), 10.0) ** 2) + np.sum(np.full((2, 2, 2), 12.0) ** 2)) * 0.25
+    np.testing.assert_allclose(np.asarray(current.fsql1), expected_fsql1)
+    np.testing.assert_allclose(np.asarray(restart.fsql1), expected_fsql1)
 
 
 def test_select_scan_force_payload_restart_and_no_restart_paths():

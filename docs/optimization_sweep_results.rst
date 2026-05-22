@@ -40,7 +40,8 @@ The split between README and docs is deliberate:
   exploratory regeneration lane until matching rows and figures are present.
 - Additional QI case coverage, including NFP=1/2/3/4 case-gated rows that use
   case-specific aspect targets, belongs here rather than in the README best-row
-  section.
+  section.  Those rows are distinct from the pending common-minimal-seed QI
+  regeneration matrix.
 
 Every published full-sweep result should provide these assets under
 ``docs/_static/figures``:
@@ -302,7 +303,7 @@ the target-aspect and output-dir overrides below before rendering.  The explicit
 overrides reproduce the archived mixed-target figure rows; omit them only when
 regenerating the current uniform aspect-6 policy.  The NFP=3 case can
 be selected as ``nfp3_qi``; that is a convenience alias for the
-``input.QI_stel_seed_3127`` robustness lane.  If the NFP=3 raw artifact is
+``input.QI_stel_seed_3127`` far-seed lane.  If the NFP=3 raw artifact is
 replaced during a refresh, the replacement must pass the renderer's boundary
 match before the panel is published.
 
@@ -422,7 +423,7 @@ assets are:
 - ``minimal_seed_showcase_objective_panel.png``
 - ``minimal_seed_showcase_state_panel.png``
 
-Those assets currently document the state of the refreshed minimal-seed lane as
+Those checked-in assets currently document the minimal-seed showcase snapshot as
 follows:
 
 .. list-table::

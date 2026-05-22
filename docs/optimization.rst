@@ -63,7 +63,7 @@ driver for reproducible comparison tables:
      - NFP=2 QI seed, aspect near 6, ``abs(mean_iota) >= 0.41``, QP residual.  The final optimized QP row is also the seed for the separate :doc:`piecewise_omnigenous_plan`.
    * - QI
      - ``examples/optimization/QI_optimization.py``
-     - NFP=2 QI default lane with Boozer-space QI, mirror, elongation, QI ceiling, ESS, and repeated same-mode continuation; the README best-row sweep uses aspect target 6, while seed-robustness cases may choose case-specific aspect targets.
+     - NFP=2 QI default lane with Boozer-space QI, mirror, elongation, QI ceiling, ESS, and repeated same-mode continuation; the README best-row sweep uses aspect target 6, while case-coverage and far-seed probes may choose case-specific aspect targets.
 
 When using sweep commands, keep backend selection and report labeling separate.
 ``--backend-label`` only names output directories and table rows; it does not
@@ -104,11 +104,11 @@ This gives the transform residual a usable derivative before local exact
 optimization and is recorded in ``showcase_case.json``.
 
 The bounded common-seed showcase runner maps those inputs to QI NFP=1/2/3/4,
-QA NFP=2, QH NFP=4, and QP NFP=2.  The QI rows use
-``examples/optimization/qi_staged_runner.py`` to call the standalone
-``QI_optimization.py`` staged/reference-family policy, so they exercise the
-same robust QI machinery used for far-seed examples rather than the simpler
-quasisymmetry sweep path:
+QA NFP=2, QH NFP=4, and QP NFP=2.  The QI rows dispatch through
+``examples/optimization/qi_staged_runner.py`` to the standalone
+``QI_optimization.py`` staged/reference-family policy rather than the simpler
+quasisymmetry sweep path.  Current checked-in artifacts do not yet contain
+non-stale common-minimal QI completions:
 
 .. code-block:: bash
 
@@ -138,11 +138,11 @@ checkout ``qh_nfp4`` and ``qp_nfp2`` currently reach the active metadata and
 completion gates.  ``qp_nfp2`` is still a refinement target because its final
 quasisymmetry residual is larger than the promoted README examples.
 ``qi_circular_nfp1`` and ``qa_nfp2`` remain non-promoted stress rows in the
-summary CSV, and current non-stale ``qi_nfp1``/``qi_nfp2``/``qi_nfp3``/``qi_nfp4``
-minimal-seed outputs are missing.  Regenerate with the command above before
-changing those promotion claims.  Until the remaining rows pass, this is a
-compact regression target for the seed-robust optimization lane, not a
-publication-quality optimization result.
+summary CSV, and current non-stale ``minimal_nfp1_qi``/``minimal_nfp2_qi``/
+``minimal_nfp3_qi``/``minimal_nfp4_qi`` outputs are missing.  Regenerate with
+the command above before changing those promotion claims.  Until the remaining
+rows pass, this is a compact regression target for the seed-robust optimization
+lane, not a publication-quality optimization result.
 
 .. image:: _static/figures/minimal_seed_showcase_objective_panel.png
    :width: 100%
@@ -216,12 +216,12 @@ The docs QI coverage figure is rendered from existing reviewed
 ``QI_optimization.py`` outputs.  These rows are archived mixed-target case
 checks, not additional aspect-6 README best-row promotions: the NFP=1 and NFP=2
 lanes use target aspect 10, the seed-3127 lane uses target aspect 4, and the
-NFP=4 row is the common-minimal-seed path with a same-NFP finite-beta QI
-reference-family preconditioner.  Regenerate all rows with the current uniform
+NFP=4 row starts from the three-coefficient minimal seed with a same-NFP
+finite-beta QI reference-family preconditioner.  It is not a completed
+common-minimal QI showcase row.  Regenerate all rows with the current uniform
 aspect-6 policy before using this figure as current README promotion evidence.
-The source input remains the three-coefficient minimal seed; the finite-beta
-NFP=4 input is kept as a separate stress fixture, not as the README initial
-state:
+The finite-beta NFP=4 input is kept as a separate stress fixture, not as the
+README initial state:
 
 .. list-table::
    :header-rows: 1
@@ -317,10 +317,11 @@ evidence.
 
 ``VMEC_JAX_QI_RUN_CASE=nfp4_qi`` starts from
 ``examples/data/input.minimal_seed_nfp4``, whose boundary contains only
-``RBC(0,0)``, ``RBC(0,1)``, and ``ZBS(0,1)``.  The current passing path uses a
-same-NFP finite-beta QI reference-family proposal as a deterministic basin
-capture step, then runs a bounded local QI audit/refine stage.  This is a
-case-gated NFP=4 result, not yet proof that arbitrary NFP=4 seeds converge.
+``RBC(0,0)``, ``RBC(0,1)``, and ``ZBS(0,1)``.  The checked-in passing coverage
+row uses a same-NFP finite-beta QI reference-family proposal as a deterministic
+basin-capture step, then runs a bounded local QI audit/refine stage.  This is a
+case-gated NFP=4 result, not a non-stale common-minimal showcase row and not yet
+proof that arbitrary NFP=4 seeds converge.
 ``VMEC_JAX_QI_RUN_CASE=nfp4_qi_finite_beta`` is a finite-beta NFP=4 stress
 fixture, not the README initial-state row.
 ``VMEC_JAX_QI_RUN_CASE=nfp4_qh_warm_to_qi`` remains an explicit non-passing
@@ -1216,12 +1217,13 @@ of the file, to one of the bundled cases:
    RUN_CASE = "nfp2_qi"             # default NFP=2 mirror-aware QI lane
    RUN_CASE = "nfp3_qi"             # NFP=3 alias for qi_stel_seed_3127
    RUN_CASE = "qi_stel_seed_3127"   # descriptive name for the NFP=3 far seed
-   RUN_CASE = "nfp4_qi"             # NFP=4 common-minimal-seed QI candidate
+   RUN_CASE = "nfp4_qi"             # NFP=4 case-gated minimal-seed QI lane
    RUN_CASE = "nfp4_qi_finite_beta" # NFP=4 finite-beta stress fixture
    RUN_CASE = "nfp4_qh_warm_to_qi"  # NFP=4 diagnostic stress test, using the input NFP
 
-The docs NFP=4 QI coverage case is a case-gated common-minimal-seed result with a
-same-NFP reference-family preconditioner.  The finite-beta and QH-warm-start
+The docs NFP=4 QI coverage case starts from the common minimal NFP=4 input but
+uses a same-NFP reference-family preconditioner; keep it separate from the
+pending common-minimal QI showcase matrix.  The finite-beta and QH-warm-start
 NFP=4 cases are stress fixtures; keep them out of promoted QI robustness tables
 unless their independent diagnostics are reviewed and the docs renderer is
 intentionally retargeted.
@@ -1327,7 +1329,7 @@ diagnostics pass, so a lower-mirror local step cannot overwrite the accepted
 QI baseline if it damages legacy QI or the mirror gate.
 
 For historical comparison, the earlier same-NFP reference-family scan used by
-the ``qi_stel_seed_3127`` robustness case was:
+the ``qi_stel_seed_3127`` far-seed case was:
 
 .. code-block:: bash
 
@@ -1347,7 +1349,7 @@ The following local landscape scan illustrates why the raw
 mirror ratio, but poor elongation and low transform.  Nearby boundary moves in
 ``rc01`` and ``zs01`` can keep the mirror low only in a narrow valley and do not
 fix the elongation/transform issue by themselves.  This is why the promoted
-robustness lane uses a larger reference-family move before local cleanup.  The
+case-gated lane uses a larger reference-family move before local cleanup.  The
 plot is generated with contour lines, not filled contours, so the competing
 ridges are visible.
 

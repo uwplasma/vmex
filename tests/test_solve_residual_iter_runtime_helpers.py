@@ -161,6 +161,7 @@ def test_scan_device_run_ready_records_only_when_enabled():
             "dispatch_done": 10.25,
             "ready_done": 11.0,
             "stats": stats,
+            "cache_status": None,
         }
     ]
 

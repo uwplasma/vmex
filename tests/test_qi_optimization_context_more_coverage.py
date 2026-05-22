@@ -385,3 +385,139 @@ def test_stage_promotion_branches_use_context_gates(tmp_path: Path) -> None:
         ctx=ctx,
     )
     assert first_baseline["qi_cleanup_promoted"] is True
+
+
+def test_private_scalar_and_json_helpers_cover_invalid_inputs() -> None:
+    assert np.isnan(qio._diagnostic_float({"value": None}, "value"))
+    assert qio._diagnostic_float({"value": "1.25"}, "value") == pytest.approx(1.25)
+    assert qio._finite_or_inf("not-a-number") == float("inf")
+    assert qio._finite_or_inf(np.nan) == float("inf")
+    assert qio._finite_or_none("not-a-number") is None
+    assert qio._finite_or_none(np.inf) is None
+    assert qio._parse_float_sequence(" ,  ", name="values") is None
+    assert qio._jsonable(np.asarray(3.25)) == pytest.approx(3.25)
+
+    class BadArray:
+        def __array__(self, dtype=None):
+            del dtype
+            raise RuntimeError("no array view")
+
+        def __str__(self):
+            return "bad-array"
+
+    assert qio._jsonable(BadArray()) == "bad-array"
+
+
+def test_seed_term_normalisation_defaults_and_nonnumeric_existing_coefficients(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    ctx = _context(tmp_path, MAX_MODE=1)
+
+    default_terms = qio._normalise_seed_terms({"enabled": True, "amplitude": 2.0e-5}, ctx=ctx)
+    assert default_terms
+    assert {term[0] for term in default_terms} == {"RBC", "ZBS"}
+    assert {term[2] for term in default_terms} == {2.0e-5}
+
+    manual_terms = qio._normalise_seed_terms([("rbc", ("-1", "1"), "0.125")], ctx=ctx)
+    assert manual_terms == (("RBC", (-1, 1), 0.125),)
+
+    source = qio.InData(scalars={"NFP": 2}, indexed={"RBC": {(1, 0): "bad-existing-value"}})
+    written = {}
+    monkeypatch.setattr(qio.vj, "read_indata", lambda path: source)
+
+    def fake_write_indata(path, indata):
+        written["path"] = Path(path)
+        written["indata"] = indata
+        Path(path).write_text("seeded\n")
+
+    monkeypatch.setattr(qio.vj, "write_indata", fake_write_indata)
+
+    out = qio.run_target_helicity_seed_preconditioner(
+        tmp_path / "input.seed",
+        tmp_path,
+        {"terms": [("RBC", (1, 0), 0.5)], "only_if_abs_below": 0.0},
+        ctx=ctx,
+    )
+
+    assert out == tmp_path / "target_helicity_seed" / "input.target_helicity_seed"
+    assert written["path"] == out
+    assert written["indata"].indexed["RBC"][(1, 0)] == pytest.approx(0.5)
+    metadata = json.loads((tmp_path / "target_helicity_seed" / "metadata.json").read_text())
+    assert metadata["inserted"] == [{"family": "RBC", "m": 0, "n": 1, "value": 0.5}]
+
+
+def test_qi_diagnostics_helpers_build_options_and_targets(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    ctx = _context(tmp_path)
+    calls = []
+    annotated = []
+
+    def fake_qi_diagnostics_from_state(**kwargs):
+        calls.append(kwargs)
+        return {"mean_iota": 0.44, "qi_smooth_total": 1.0e-4}
+
+    def fake_annotate(diagnostics, *, targets):
+        annotated.append((diagnostics, targets))
+        out = dict(diagnostics)
+        out["smooth_gate"] = targets.smooth_qi_max
+        out["legacy_gate"] = targets.legacy_qi_max
+        out["target_aspect"] = targets.target_aspect
+        out["abs_iota_min"] = targets.abs_iota_min
+        out["mirror_ratio_max"] = targets.mirror_ratio_max
+        out["max_elongation"] = targets.max_elongation
+        return out
+
+    monkeypatch.setattr(qio.vj, "qi_diagnostics_from_state", fake_qi_diagnostics_from_state)
+    monkeypatch.setattr(qio, "annotate_qi_seed_suitability", fake_annotate)
+
+    stage_result = SimpleNamespace(
+        final_state="stage-state",
+        final_optimizer=SimpleNamespace(static="stage-static", indata="stage-indata", signgs=-1),
+    )
+    result_diagnostics = qio.qi_diagnostics_for_result(
+        stage_result,
+        mirror_threshold=0.33,
+        mirror_surface_index=-1,
+        ctx=ctx,
+    )
+
+    assert calls[0]["state"] == "stage-state"
+    assert calls[0]["static"] == "stage-static"
+    assert calls[0]["surfaces"] is ctx.surfaces
+    assert calls[0]["options"].mirror_threshold == pytest.approx(0.33)
+    assert calls[0]["options"].mirror_surface_index == -1
+    assert calls[0]["options"].elongation_threshold == pytest.approx(ctx.max_elongation)
+    assert result_diagnostics["smooth_gate"] == pytest.approx(ctx.qi_gate_smooth_max)
+    assert result_diagnostics["legacy_gate"] == pytest.approx(ctx.qi_gate_legacy_max)
+
+    run = SimpleNamespace(state="run-state", static="run-static", indata="run-indata", signgs=1)
+    run_diagnostics = qio.qi_diagnostics_for_run(
+        run,
+        mirror_threshold=0.44,
+        mirror_surface_index=0,
+        target_aspect=7.0,
+        abs_iota_min=0.52,
+        max_elongation=9.0,
+        resolution={"nphi": 33, "n_bounce": 35},
+        smooth_qi_max=4.0e-3,
+        legacy_qi_max=5.0e-3,
+        ctx=ctx,
+    )
+
+    assert calls[1]["state"] == "run-state"
+    assert calls[1]["static"] == "run-static"
+    assert calls[1]["options"].nphi == 33
+    assert calls[1]["options"].n_bounce == 35
+    assert calls[1]["options"].nalpha == ctx.qi_options.nalpha
+    assert calls[1]["options"].mirror_threshold == pytest.approx(0.44)
+    assert calls[1]["options"].elongation_threshold == pytest.approx(9.0)
+    assert run_diagnostics["smooth_gate"] == pytest.approx(4.0e-3)
+    assert run_diagnostics["legacy_gate"] == pytest.approx(5.0e-3)
+    assert run_diagnostics["target_aspect"] == pytest.approx(7.0)
+    assert run_diagnostics["abs_iota_min"] == pytest.approx(0.52)
+    assert run_diagnostics["mirror_ratio_max"] == pytest.approx(0.44)
+    assert run_diagnostics["max_elongation"] == pytest.approx(9.0)
+    assert len(annotated) == 2

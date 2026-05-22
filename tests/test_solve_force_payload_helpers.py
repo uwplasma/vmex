@@ -100,6 +100,19 @@ def test_zero_edge_rz_force_blocks_masks_only_rz_payload() -> None:
     assert zero_edge_rz_force_block(one_row) is one_row
 
 
+def test_zero_edge_rz_force_block_handles_none_and_device_array_path() -> None:
+    assert zero_edge_rz_force_block(None) is None
+
+    one_row = np.ones((1, 2))
+    short = zero_edge_rz_force_block(one_row, preserve_numpy=False)
+    np.testing.assert_allclose(np.asarray(short), one_row)
+
+    block = np.arange(6.0).reshape(3, 2)
+    masked = zero_edge_rz_force_block(block, preserve_numpy=False)
+    np.testing.assert_allclose(np.asarray(masked)[:-1], block[:-1])
+    np.testing.assert_allclose(np.asarray(masked)[-1], 0.0)
+
+
 def test_normalize_force_blocks_preserves_numpy_blocks_and_optional_none() -> None:
     frzl = _blocks()
     frzl = TomnspsRZL(
@@ -122,6 +135,30 @@ def test_normalize_force_blocks_preserves_numpy_blocks_and_optional_none() -> No
     assert got.frcc is frzl.frcc
     assert got.frss is None
     assert got.flcs is None
+
+
+def test_normalize_force_blocks_falls_back_for_non_dataclass_payload() -> None:
+    base = np.asarray([[1.0, np.nan]])
+    frzl = SimpleNamespace(
+        frcc=base,
+        frss=None,
+        fzsc=base + 1.0,
+        fzcs=None,
+        flsc=base + 2.0,
+        flcs=None,
+        frsc=None,
+        frcs=None,
+        fzcc=None,
+        fzss=None,
+        flcc=None,
+        flss=None,
+    )
+
+    got = normalize_force_blocks(frzl)
+
+    assert isinstance(got, TomnspsRZL)
+    np.testing.assert_allclose(np.asarray(got.frcc), base)
+    assert got.frss is None
 
 
 def test_preconditioner_output_payload_scales_only_lambda_blocks() -> None:

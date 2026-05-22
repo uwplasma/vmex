@@ -186,7 +186,8 @@ case-gated minimal-seed lane that uses a same-NFP reference-family proposal
 plus an exact audit, not a long local descent; its CSV row records one
 preconditioner point and one short history segment along with the exact
 ``qi_seed_gate_passed``/``qi_engineering_gate_passed``/``qi_gate_failures``
-fields.  The separate
+fields.  It is separate from the common-minimal showcase, whose current
+checked-in summary does not contain non-stale QI completions.  The separate
 ``nfp4_qi_finite_beta`` and ``nfp4_qh_warm_to_qi`` cases remain stress lanes
 rather than broad arbitrary-seed NFP=4 robustness claims.  These rows are not
 additional aspect-6 README best-row promotions.

@@ -989,3 +989,257 @@ def test_lgradb_and_redl_object_state_paths_validate_and_scale(monkeypatch) -> N
     assert redl.Ti_coeffs == (4.0, 5.0)
     with pytest.raises(ValueError, match="target=0"):
         redl.to_objective_term(target=1.0, residual_weight=1.0)
+
+
+def test_fixed_boundary_result_properties_and_timing_summaries() -> None:
+    import vmec_jax.optimization_workflow as workflow
+
+    first_history = {
+        "history": [{"objective": 5.0}, {"objective": 4.0}],
+        "nfev": 2,
+        "total_wall_time_s": 1.25,
+    }
+    final_history = {
+        "history": [{"objective": 3.0}, {"not_objective": 0.0}],
+        "njev": 4,
+        "nit": 5,
+    }
+    first_result = {"_state_initial": "initial-state", "_history_dump": first_history}
+    final_result = {
+        "x": [9.0, 10.0],
+        "_state_final": "final-state",
+        "_history_dump": final_history,
+        "nfev": 7,
+        "njev": 8,
+        "nit": 9,
+    }
+    first_record = (1, "optimizer-1", np.asarray([1.0, 2.0]), first_result)
+    final_record = (2, "optimizer-2", np.asarray([3.0, 4.0]), final_result)
+
+    result = workflow.FixedBoundaryOptimizationResult(
+        stage_records=[first_record, final_record],
+        final_optimizer="optimizer-2",
+        final_result=final_result,
+        stage_modes=[1, 2],
+    )
+
+    assert result.initial_stage is first_record
+    assert result.final_stage is final_record
+    assert result.initial_optimizer == "optimizer-1"
+    np.testing.assert_allclose(result.initial_params, [1.0, 2.0])
+    assert result.initial_result is first_result
+    assert result.initial_state == "initial-state"
+    assert result.history == final_history
+    assert result.history_entries == ({"objective": 3.0}, {"not_objective": 0.0})
+    assert result.stage_histories == (first_history, final_history)
+    np.testing.assert_allclose(result.objective_history, [3.0, np.nan])
+    np.testing.assert_allclose(result.final_params, [9.0, 10.0])
+    assert result.final_state == "final-state"
+    assert result.stage_timing_summaries[0]["mode"] == 1
+    assert result.stage_timing_summaries[0]["nfev"] == 2
+    assert result.timing_summary["nfev"] == 7
+    assert result.timing_summary["njev"] == 4
+    assert result.timing_summary["stages"][1]["mode"] == 2
+
+
+def test_least_squares_problem_rejects_bad_tuples_and_mismatched_qi_options() -> None:
+    import vmec_jax.optimization_workflow as workflow
+
+    options = workflow.QuasiIsodynamicOptions(surfaces=np.asarray([0.5]))
+    other_options = workflow.QuasiIsodynamicOptions(surfaces=np.asarray([0.25]))
+
+    class FakeQIObjective:
+        requires_qi_field = True
+
+        def __init__(self, qi_options, name: str):
+            self.qi_options = qi_options
+            self.name = name
+
+        def J(self, _ctx, _state):
+            raise RuntimeError("assembled through LeastSquaresProblem")
+
+        def to_qi_term(self, residual_weight: float):
+            def _evaluate(_ctx, _state, field):
+                residual = np.asarray(field["residual"], dtype=float) * float(residual_weight)
+                return residual, np.sum(residual * residual)
+
+            return workflow.QIObjectiveTerm(self.name, _evaluate, qi_options=self.qi_options)
+
+    with pytest.raises(ValueError, match="must be \\(callable, target, weight\\)"):
+        workflow.LeastSquaresProblem.from_tuples([(lambda ctx, state: 0.0, 0.0)])
+    with pytest.raises(TypeError, match="first entry must be callable"):
+        workflow.LeastSquaresProblem.from_tuples([(object(), 0.0, 1.0)])
+    with pytest.raises(ValueError, match="finite and non-negative"):
+        workflow.LeastSquaresProblem.from_tuples([(lambda ctx, state: 0.0, 0.0, -1.0)])
+    with pytest.raises(ValueError, match="target=0"):
+        workflow.LeastSquaresProblem.from_tuples([(FakeQIObjective(options, "qi").J, 1.0, 1.0)])
+
+    problem = workflow.LeastSquaresProblem.from_tuples([(FakeQIObjective(options, "qi").J, 0.0, 4.0)])
+    assert problem.is_qi
+    assert problem.qi_options is options
+    assert len(problem.qi_objective_terms) == 1
+
+    with pytest.raises(ValueError, match="must share one"):
+        workflow.LeastSquaresProblem.from_tuples(
+            [
+                (FakeQIObjective(options, "qi-a").J, 0.0, 1.0),
+                (FakeQIObjective(other_options, "qi-b").J, 0.0, 1.0),
+            ]
+        )
+
+
+def test_qi_and_qs_object_wrappers_build_terms_without_solves(monkeypatch) -> None:
+    import vmec_jax.optimization_workflow as workflow
+
+    options = workflow.QuasiIsodynamicOptions(surfaces=np.asarray([0.5]))
+    ctx = SimpleNamespace(static="static", indata="indata", signgs=-1, flux="flux", pressure="pressure")
+
+    qi_wrappers = [
+        (workflow.QuasiIsodynamicResidual(options), "qi"),
+        (
+            workflow.QuasiIsodynamicResidualCeiling(
+                maximum=1.5,
+                smooth_penalty=0.1,
+                qi_options=options,
+            ),
+            "qi_ceiling",
+        ),
+        (
+            workflow.MirrorRatio(
+                threshold=0.2,
+                ntheta=5,
+                nphi=7,
+                surface_index=-1,
+                phimin=0.1,
+                smooth_extrema=0.2,
+                smooth_penalty=0.3,
+                normalize_surfaces=False,
+                qi_options=options,
+            ),
+            "mirror_ratio",
+        ),
+        (
+            workflow.BoozerBTarget(
+                target_bmnc=np.ones((1, 2)),
+                target_bmns=np.zeros((1, 2)),
+                normalize=False,
+                include_b00=True,
+                qi_options=options,
+            ),
+            "boozer_b_target",
+        ),
+        (
+            workflow.MaxElongation(
+                threshold=5.0,
+                ntheta=6,
+                nphi=4,
+                smooth_extrema=0.2,
+                smooth_penalty=0.3,
+                qi_options=options,
+            ),
+            "max_elongation",
+        ),
+    ]
+    for wrapper, expected_name in qi_wrappers:
+        with pytest.raises(RuntimeError, match="must be evaluated inside"):
+            wrapper.J(ctx, "state")
+        assert wrapper.to_qi_term(2.0).name == expected_name
+
+    assert qi_wrappers[2][0].to_constraint_qi_term().name == "mirror_ratio_constraint"
+    assert qi_wrappers[4][0].to_constraint_qi_term().name == "max_elongation_constraint"
+
+    def fake_quasisymmetry_ratio_residual_from_state(**kwargs):
+        assert kwargs["surfaces"] == (0.5,)
+        assert kwargs["helicity_m"] == 1
+        assert kwargs["helicity_n"] == -1
+        return {"residuals1d": np.asarray([0.25, 0.5]), "total": 0.3125}
+
+    monkeypatch.setattr(
+        workflow,
+        "quasisymmetry_ratio_residual_from_state",
+        fake_quasisymmetry_ratio_residual_from_state,
+    )
+    qs = workflow.QuasisymmetryRatioResidual(helicity_m=1, helicity_n=-1, surfaces=(0.5,))
+    np.testing.assert_allclose(np.asarray(qs.J(ctx, "state")), [0.25, 0.5])
+    assert qs.total(ctx, "state") == pytest.approx(0.3125)
+    with pytest.raises(ValueError, match="target=0"):
+        qs.to_objective_term(target=1.0, residual_weight=1.0)
+    term = qs.to_objective_term(target=0.0, residual_weight=2.0)
+    np.testing.assert_allclose(np.asarray(term.residual(ctx, "state")), [0.5, 1.0])
+    assert term.total(ctx, "state") == pytest.approx(1.25)
+
+    lgradb = workflow.LgradB(threshold=0.3, s_index=-2, ntheta=3, nphi=5, smooth_penalty=0.1)
+    with pytest.raises(ValueError, match="target=0"):
+        lgradb.to_objective_term(target=1.0, residual_weight=1.0)
+    assert lgradb.to_qi_term(1.5).name == "LgradB"
+
+
+def test_state_objective_wrappers_use_monkeypatched_state_helpers(monkeypatch) -> None:
+    import vmec_jax.optimization_workflow as workflow
+
+    ctx = SimpleNamespace(
+        static=SimpleNamespace(s=np.asarray([0.0, 0.5, 1.0])),
+        indata="indata",
+        signgs=1,
+        flux="flux",
+        pressure="pressure",
+    )
+
+    def fake_finite_beta_scalars_from_state(**kwargs):
+        assert kwargs["state"] == "state"
+        assert kwargs["static"] is ctx.static
+        return {"vp": np.asarray([4.0, 2.0]), "volavgB": 2.5, "betatotal": 0.03}
+
+    monkeypatch.setattr(workflow, "finite_beta_scalars_from_state", fake_finite_beta_scalars_from_state)
+    monkeypatch.setattr(workflow, "magnetic_well_from_vp", lambda vp: 0.05)
+
+    well = workflow.MagneticWell(minimum=0.10, softness=0.01)
+    assert float(np.asarray(well.J(ctx, "state"))) > 0.0
+    with pytest.raises(ValueError, match="target=0"):
+        well.to_objective_term(target=1.0, residual_weight=1.0)
+    np.testing.assert_allclose(
+        np.asarray(workflow.VolavgB().to_objective_term(target=2.0, residual_weight=3.0).residual(ctx, "state")),
+        [1.5],
+    )
+    np.testing.assert_allclose(
+        np.asarray(workflow.BetaTotal().to_objective_term(target=0.01, residual_weight=10.0).residual(ctx, "state")),
+        [0.2],
+    )
+
+    def fake_mercier_terms_from_state(**kwargs):
+        assert kwargs["state"] == "state"
+        return {
+            "DMerc": np.asarray([0.0, -0.1, 0.2]),
+            "jdotb": np.asarray([1.0, 2.0, 3.0]),
+            "bdotb": np.asarray([4.0, 5.0, 6.0]),
+            "bdotgradv": np.asarray([7.0, 8.0, 9.0]),
+            "sqrtg": np.asarray([[1.0, 0.0], [2.0, 4.0], [5.0, 6.0]]),
+            "itheta": np.asarray([[2.0, 8.0], [2.0, 8.0], [10.0, 12.0]]),
+            "izeta": np.asarray([[6.0, 16.0], [6.0, 16.0], [20.0, 24.0]]),
+            "torcur": np.asarray([0.0, 1.0, 2.0]),
+            "ip": np.asarray([3.0, 4.0, 5.0]),
+        }
+
+    monkeypatch.setattr(workflow, "mercier_terms_from_state", fake_mercier_terms_from_state)
+
+    dmerc = workflow.DMerc(minimum=0.0, softness=0.01, mmax_force=2, nmax_force=3)
+    assert np.asarray(dmerc.J(ctx, "state")).shape == (1,)
+    with pytest.raises(ValueError, match="target=0"):
+        dmerc.to_objective_term(target=1.0, residual_weight=1.0)
+
+    np.testing.assert_allclose(np.asarray(workflow.JDotB(normalize=2.0).J(ctx, "state")), [1.0])
+    np.testing.assert_allclose(
+        np.asarray(workflow.BDotB(surfaces=(0.0, 1.0), normalize=2.0).J(ctx, "state")),
+        [2.0, 3.0],
+    )
+    np.testing.assert_allclose(np.asarray(workflow.ToroidalCurrentGradient(normalize=2.0).J(ctx, "state")), [2.0])
+
+    j_vector = workflow.JVector(surfaces=(0.0,), normalize=1.0)
+    np.testing.assert_allclose(np.asarray(j_vector.J(ctx, "state")), [2.0, 6.0, 0.0, 0.0])
+
+    monkeypatch.setattr(
+        workflow,
+        "b_cartesian_from_state",
+        lambda state, static, **kwargs: np.asarray([[1.0, 2.0, 3.0]]) if state == "state" and static is ctx.static else None,
+    )
+    np.testing.assert_allclose(np.asarray(workflow.BVector(s_index=-2, normalize=2.0).J(ctx, "state")), [0.5, 1.0, 1.5])
