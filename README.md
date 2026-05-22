@@ -93,7 +93,7 @@ Editable optimization examples live in `examples/optimization/`. Start with
 The README intentionally shows only the best current stellarator-symmetric
 QA/QH/QP/QI rows. Each panel contains initial/final 3D LCFS views, objective
 history over all stages, and initial/final Boozer `|B|` line contours. Extended
-policy discussion, LASYM panels, finite-beta examples, QI seed robustness,
+policy discussion, LASYM panels, finite-beta examples, QI case coverage,
 failure modes, partial CPU/GPU sweep snapshots, and full-matrix artifact
 requirements live in the docs.
 
@@ -136,14 +136,16 @@ coverage, and publication asset requirements are in
 `docs/optimization_sweep_results.rst`. The compact README panels remain the
 reviewed `LASYM = F` best rows only.
 
-## QI From Multiple NFP Seeds
+## QI From Multiple NFP Inputs
 
 The same `examples/optimization/QI_optimization.py` workflow is exercised on
-case-gated NFP 1, 2, 3, and 4 QI seed-robustness examples. The panel below is
-coverage evidence for those configured cases, not a blanket guarantee that any
-arbitrary VMEC input reaches QI without tuning. Provenance, gates, and
-case-specific targets are documented in `docs/optimization_sweep_results.rst`;
-these rows are not aspect-6 README best-row promotion evidence.
+case-gated NFP 1, 2, 3, and 4 QI input lanes. The panel below is coverage
+evidence for those configured cases, not a seed-robustness claim and not a
+blanket guarantee that arbitrary VMEC inputs reach QI without tuning. The
+initial panels use the source-input WOUTs; final panels use the accepted
+case-gated outputs. Provenance, gates, and case-specific targets are documented
+in `docs/optimization_sweep_results.rst`; these rows are not aspect-6 README
+best-row promotion evidence.
 The panel below is regenerated with:
 
 ```bash
@@ -164,16 +166,15 @@ PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
   [`v0.0.11`](https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.11)
 - Historical release hygiene baseline recorded for `v0.0.11`: green `main` CI at
   `7030eaf`, local required coverage `88.335%` against the then-current `85%`
-  gate, and `90%` / `95%` coverage ratchets still staged rather than enforced.
+  gate, and planned `90%` / `95%` coverage ratchets.
   This is historical release evidence only; re-check GitHub Actions before
   reusing any baseline for a later release.
 - Most recent completed green `main` CI checked during the 2026-05-22 release
   hygiene audit: run `26297711706` at `e90d1a2`. Re-check GitHub Actions
   before cutting any release candidate.
-- Latest local CI-equivalent coverage check: `93.18%`
-  (`1924 passed, 20 skipped, 101 deselected` in 7m20s on 2026-05-22) against
-  the current `90%` required gate; `95%` remains staged pending deeper
-  `solve.py` coverage/refactor work.
+- Latest local CI-equivalent coverage check: above `93%` against the current
+  `90%` required gate; `95%` remains staged pending deeper `solve.py`
+  coverage/refactor work.
 
 ## CLI Reference
 

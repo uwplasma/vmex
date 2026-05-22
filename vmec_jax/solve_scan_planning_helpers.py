@@ -13,12 +13,20 @@ SCAN_TIMING_KEYS: tuple[str, ...] = (
     "scan_initial_compute_forces_s",
     "scan_axis_reset_compute_forces_s",
     "scan_run_setup_s",
+    "scan_runner_cache_lookup_s",
+    "scan_runner_cache_build_s",
     "scan_preflight_s",
     "scan_device_run_s",
     "scan_device_dispatch_s",
     "scan_device_ready_s",
     "scan_host_materialize_s",
     "scan_postprocess_s",
+)
+
+SCAN_TIMING_COUNT_KEYS: tuple[str, ...] = (
+    "scan_runner_cache_hit_count",
+    "scan_runner_cache_miss_count",
+    "scan_runner_cache_bypass_count",
 )
 
 
@@ -46,19 +54,23 @@ def scan_timing_enabled(env_value: str) -> bool:
     return str(env_value).strip().lower() not in ("", "0", "false", "no")
 
 
-def new_scan_timing_stats() -> dict[str, float]:
+def new_scan_timing_stats() -> dict[str, float | int]:
     """Return a fresh timing accumulator with the solver's stable key set."""
-    return {key: 0.0 for key in SCAN_TIMING_KEYS}
+    return {
+        **{key: 0.0 for key in SCAN_TIMING_KEYS},
+        **{key: 0 for key in SCAN_TIMING_COUNT_KEYS},
+    }
 
 
 def build_scan_timing_report(
     *,
     iterations: int,
-    stats: dict[str, float],
+    stats: dict[str, float | int],
     scan_total_s: float,
 ) -> dict[str, float | int]:
     """Build the public timing diagnostic report from timing accumulators."""
     normalized = {key: float(stats.get(key, 0.0)) for key in SCAN_TIMING_KEYS}
+    counts = {key: int(stats.get(key, 0)) for key in SCAN_TIMING_COUNT_KEYS}
     scan_leaf_total_s = sum(
         value
         for key, value in normalized.items()
@@ -69,6 +81,7 @@ def build_scan_timing_report(
         "iterations": int(iterations),
         "scan_total_s": total,
         **normalized,
+        **counts,
         "scan_unattributed_s": max(0.0, total - float(scan_leaf_total_s)),
     }
 

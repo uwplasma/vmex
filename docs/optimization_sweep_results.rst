@@ -114,10 +114,10 @@ the corresponding CSV/JSON rows and publication figures are present under
 ``docs/_static/figures``.
 
 The compact README renderer currently filters QI rows against the same
-aspect-6 target as QA/QH/QP.  The standalone ``QI_optimization.py`` robustness
-cases may still use case-specific aspect targets when mirror ratio or far-seed
-basin capture is the experiment; those rows are documented separately and are
-not mixed into the README best-row table.
+aspect-6 target as QA/QH/QP.  The standalone ``QI_optimization.py``
+case-coverage lanes may still use case-specific aspect targets when mirror
+ratio or far-seed basin capture is the experiment; those rows are documented
+separately and are not mixed into the README best-row table.
 
 The constrained QI study has one extra axis: whether the QI solve starts from a
 same-mode QP preseed.  The production CLI default is ``--qi-qp-preseed off``;
@@ -134,13 +134,14 @@ contains only a single CPU continuation ``max_mode=3`` status row without a
 same-mode QP preseed.
 
 Seed-robust QI is a larger validation matrix than the tracked constrained-QI
-snapshot.  The constrained-QI matrix artifacts use the bundled NFP=2 QI seed
-and optional same-mode QP preseed; the separate README/docs NFP 1-4 coverage
-panel uses case-gated source decks.  Before documenting QI as robust to
-arbitrary starts, run the constrained objective from QI, QP, QH, QA, and a
-simple non-omnigenous boundary seed, then inspect both numerical gates and
-Boozer ``|B|`` contour plots.  Until those rows are generated and curated,
-treat the full multi-seed matrix as deferred validation rather than a required
+snapshot and the checked-in NFP coverage panel.  The constrained-QI matrix
+artifacts use the bundled NFP=2 QI seed and optional same-mode QP preseed; the
+separate README/docs NFP 1-4 panel uses case-gated source decks and
+case-specific targets.  Before documenting QI as robust to arbitrary starts,
+run the constrained objective from QI, QP, QH, QA, and a simple
+non-omnigenous boundary seed, then inspect both numerical gates and Boozer
+``|B|`` contour plots.  Until those rows are generated and curated, treat the
+full multi-seed matrix as deferred validation rather than a required
 reproduction command.
 
 Use the bounded seed preflight to choose and document starting points before
@@ -271,15 +272,16 @@ QI_optimization Input Coverage
 The dedicated QI docs renderer is a lightweight snapshot renderer for
 case-gated QI lanes; it does not rerun optimization jobs.  The current rows are
 the NFP=1 and NFP=2 QI seed decks, the NFP=3 seed-3127 deck, and the NFP=4
-minimal-seed lane.  This figure is separate from the common-minimal-seed stress
-matrix, whose non-stale QI NFP=1/2/3/4 rows are not yet complete.  The renderer
-reads the existing ``QI_optimization.py`` outputs,
-records the final smooth QI metric, legacy QI metric, mirror ratio, elongation,
-iota, aspect, and CPU wall time, and draws initial and final Boozer ``|B|`` with
-line contours only after the initial WOUT boundary matches the paired input
-deck.  These are case-specific gate checks, not extra aspect-6 README best-row
-promotions: NFP=1/2 use target aspect 10, the seed-3127 NFP=3 lane uses target
-aspect 4, and the NFP=4 row uses the minimal seed plus a same-NFP finite-beta QI
+minimal-seed lane.  This figure is separate from the deferred
+common-minimal-seed stress matrix and should not be read as evidence that one
+common simple seed optimizes successfully for every NFP.  The renderer reads
+the existing ``QI_optimization.py`` outputs, records the final smooth QI
+metric, legacy QI metric, mirror ratio, elongation, iota, aspect, and CPU wall
+time, and draws source-initial and final Boozer ``|B|`` line contours only
+after the initial WOUT boundary matches the paired input deck.  These are
+case-specific gate checks, not extra aspect-6 README best-row promotions:
+NFP=1/2 use target aspect 10, the seed-3127 NFP=3 lane uses target aspect 4,
+and the NFP=4 row uses the minimal seed plus a same-NFP finite-beta QI
 reference-family proposal.  Finite-beta NFP=4 remains a separate stress
 fixture.
 
@@ -289,6 +291,10 @@ renderer validates it against ``examples/data/input.QI_stel_seed_3127`` under
 the direct VMEC input convention or VMEC's equivalent canonical phase
 convention, and fails if neither boundary map matches; there is no
 known-artifact exception bypass.
+For lanes with a reference-family preconditioner, the plotted initial panel is
+still the raw/source input WOUT and the plotted final panel is the accepted
+audited WOUT; preconditioner scan points are provenance for basin capture, not
+the final acceptance diagnostic.
 
 To refresh the exact rows used by this panel, run the source optimizations with
 the target-aspect and output-dir overrides below before rendering.  Bare
@@ -387,10 +393,10 @@ Source table snapshot:
 :download:`readme_qi_optimization_cases.csv <_static/figures/readme_qi_optimization_cases.csv>`.
 In that generated CSV, ``validation_status=case-gated`` records
 case-specific QI gate status from the renderer and should not be read as
-aspect-6 README best-row promotion evidence; the NFP=4 row is case-gated by
-the minimal-seed plus same-NFP reference-family path.  The NFP=3 raw initial
-artifact is now checked by the renderer instead of accepted through a
-case-specific exception.
+aspect-6 README best-row promotion evidence or global seed-robustness
+evidence; the NFP=4 row is case-gated by the minimal-seed plus same-NFP
+reference-family path.  The NFP=3 raw initial artifact is now checked by the
+renderer instead of accepted through a case-specific exception.
 
 Regenerate these lightweight artifacts with:
 
@@ -407,13 +413,14 @@ a boundary-reference interpolation scan, not an optimizer trajectory.
 Objective Histories
 -------------------
 
-The all-policy panel contains every available backend/policy row.  Solid curves
-met the optimizer success criterion; dashed curves are stopped, failed, or
-budgeted lanes.  The summary tables distinguish ``max_nfev`` stops from
-1200 second timeouts and GPU-memory failures.  Curves are split by objective
-stage and plotted as best-so-far values within that stage, so QP preseed and
-full constrained QI refinement are not treated as one continuous scalar
-objective.  Vertical dotted lines mark continuation stage boundaries.
+When regenerated, the all-policy panel contains every available backend/policy
+row.  Solid curves met the optimizer success criterion; dashed curves are
+stopped, failed, or budgeted lanes.  The summary tables distinguish
+``max_nfev`` stops from 1200 second timeouts and GPU-memory failures.  Curves
+are split by objective stage and plotted as best-so-far values within that
+stage, so QP preseed and full constrained QI refinement are not treated as one
+continuous scalar objective.  Vertical dotted lines mark continuation stage
+boundaries.
 
 Constrained QI Matrix
 ---------------------
