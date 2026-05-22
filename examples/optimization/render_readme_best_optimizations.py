@@ -409,15 +409,39 @@ def _boundary_maps_from_wout(wout_path: Path) -> dict[str, dict[tuple[int, int],
     return maps
 
 
-def _boundary_mismatches(
-    input_file: Path,
-    wout_path: Path,
+def _boundary_maps_from_wout_vmec_input_convention(wout_path: Path) -> dict[str, dict[tuple[int, int], float]]:
+    """Return WOUT boundary modes in the VMEC input phase convention."""
+
+    wout = read_wout(wout_path)
+    arrays = {
+        "RBC": np.asarray(wout.rmnc[-1], dtype=float),
+        "RBS": np.asarray(wout.rmns[-1], dtype=float),
+        "ZBC": np.asarray(wout.zmnc[-1], dtype=float),
+        "ZBS": np.asarray(wout.zmns[-1], dtype=float),
+    }
+    nfp = int(wout.nfp)
+    maps: dict[str, dict[tuple[int, int], float]] = {family: {} for family in BOUNDARY_FAMILIES}
+    for family, values in arrays.items():
+        for m_i_raw, xn_i, value in zip(np.asarray(wout.xm, dtype=int), np.asarray(wout.xn, dtype=int), values):
+            m_i = int(m_i_raw)
+            n_wout = int(round(float(xn_i) / float(nfp))) if nfp else int(xn_i)
+            if m_i == 0:
+                n_i = n_wout
+                sign = 1.0
+            else:
+                n_i = -n_wout
+                sign = float((-1) ** m_i) if family in ("RBC", "RBS") else float((-1) ** (m_i + 1))
+            maps[family][(n_i, m_i)] = sign * float(value)
+    return maps
+
+
+def _boundary_mismatches_for_actual(
+    expected: dict[str, dict[tuple[int, int], float]],
+    actual: dict[str, dict[tuple[int, int], float]],
     *,
-    abs_tol: float = 5.0e-8,
-    rel_tol: float = 5.0e-8,
+    abs_tol: float,
+    rel_tol: float,
 ) -> list[str]:
-    expected = _boundary_maps_from_input(input_file)
-    actual = _boundary_maps_from_wout(wout_path)
     mismatches: list[str] = []
     for family in BOUNDARY_FAMILIES:
         keys = set(expected[family]) | {key for key, value in actual[family].items() if abs(value) > abs_tol}
@@ -430,6 +454,30 @@ def _boundary_mismatches(
                 if len(mismatches) >= 8:
                     return mismatches
     return mismatches
+
+
+def _boundary_mismatches(
+    input_file: Path,
+    wout_path: Path,
+    *,
+    abs_tol: float = 5.0e-8,
+    rel_tol: float = 5.0e-8,
+) -> list[str]:
+    expected = _boundary_maps_from_input(input_file)
+    candidates = (
+        _boundary_maps_from_wout(wout_path),
+        _boundary_maps_from_wout_vmec_input_convention(wout_path),
+    )
+    mismatch_sets = tuple(
+        _boundary_mismatches_for_actual(
+            expected,
+            actual,
+            abs_tol=abs_tol,
+            rel_tol=rel_tol,
+        )
+        for actual in candidates
+    )
+    return min(mismatch_sets, key=len)
 
 
 def _assert_wout_matches_input_boundary(wout_path: Path, input_file: Path, *, context: str) -> None:
@@ -666,9 +714,13 @@ def _write_readme_summary(runs: list[BestRun]) -> None:
                 "iota_final",
                 "wall_time_min",
                 "output_dir",
+                "initial_wout",
+                "final_wout",
             ]
         )
         for run in runs:
+            initial_wout = _preoptimization_wout_path(run)
+            final_wout = run.output_dir / "wout_final.nc"
             writer.writerow(
                 [
                     run.problem,
@@ -686,6 +738,8 @@ def _write_readme_summary(runs: list[BestRun]) -> None:
                     f"{run.iota_final:.16e}",
                     f"{run.total_wall_time_s / 60.0:.6f}",
                     _repo_relative_path(run.output_dir),
+                    _repo_relative_path(initial_wout),
+                    _repo_relative_path(final_wout),
                 ]
             )
 

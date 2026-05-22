@@ -21,7 +21,7 @@ Target State
 - Near-term coverage target: keep the required ``85%`` actual line coverage gate
   green with meaningful fast and bounded-physics tests while preserving
   acceptable coverage runtime.  Recent local CI-equivalent runs have measured
-  about ``92%`` fast-suite coverage, but those measurements are audit
+  about ``93%`` fast-suite coverage, but those measurements are audit
   artifacts rather than a hard-coded current baseline.  The enforced gate
   remains ``85%`` until CI has carried a higher baseline for multiple green
   runs.

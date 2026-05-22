@@ -174,11 +174,10 @@ PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
   coverage ratchets still staged rather than enforced. Re-check GitHub Actions
   before reusing this baseline for a later release.
 - Most recent completed green `main` CI checked during the 2026-05-22 release
-  hygiene audit: run `26295697108` at `7b6b8ca`. A newer run (`26296817585`
-  at `300f9af`) was still in progress when checked, so re-check GitHub Actions
+  hygiene audit: run `26297711706` at `e90d1a2`. Re-check GitHub Actions
   before cutting any release candidate.
-- Latest local CI-equivalent coverage check: `92.32%`
-  (`1824 passed, 20 skipped, 101 deselected` in 7m19s on 2026-05-22) against
+- Latest local CI-equivalent coverage check: `93.04%`
+  (`1913 passed, 20 skipped, 101 deselected` in 7m08s on 2026-05-22) against
   the current `85%` required gate; `95%` remains staged pending deeper
   `solve.py` coverage/refactor work.
 
