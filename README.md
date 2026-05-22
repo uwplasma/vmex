@@ -94,8 +94,8 @@ The README intentionally shows only the best current stellarator-symmetric
 QA/QH/QP/QI rows. Each panel contains initial and final 3D LCFS views, the
 objective history over all stages, and initial/final outer-LCFS Boozer `|B|`
 line contours. Extended policy discussion, LASYM panels, finite-beta examples,
-QI seed robustness, failure modes, full CPU/GPU sweep tables, and additional
-QI case coverage live in the docs.
+QI seed robustness, failure modes, the checked-in partial CPU/GPU sweep
+snapshot, and full-matrix artifact requirements live in the docs.
 The QI seed-robustness rows are case-specific gate checks; they are not
 aspect-6 README best-row promotion evidence unless the sweep renderer promotes
 them explicitly.
@@ -134,22 +134,24 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_optimization.py
 PYTHONPATH=. python examples/optimization/render_readme_best_optimizations.py
 ```
 
-Full sweep reproduction, generated result tables, QI multi-NFP coverage, and
-publication asset requirements are in `docs/optimization_sweep_results.rst`.
-The full sweep lane spans QA/QH/QP/QI, CPU/GPU, `max_mode=1..4`, ESS/no ESS,
-continuation/direct, and `LASYM = F/T`; the compact README panels remain the
-reviewed `LASYM = F` best rows only.
+Full sweep reproduction targets, generated result tables, QI multi-NFP
+coverage, and publication asset requirements are in
+`docs/optimization_sweep_results.rst`. The checked-in sweep snapshot is
+partial: CPU/GPU rows are present only where artifacts exist, currently without
+a complete `max_mode=4` matrix or full publication atlas/table figure set. The
+compact README panels remain the reviewed `LASYM = F` best rows only.
 
 ## QI From Multiple NFP Seeds
 
 The same `examples/optimization/QI_optimization.py` workflow is also exercised
 on reviewed NFP 1, 2, 3, and 4 QI seed-robustness cases. The full provenance,
-case-specific targets, and table are in `docs/optimization_sweep_results.rst`;
-the row labels in the panel give the actual source input, and the initial LCFS
-and Boozer `|B|` panels are the raw VMEC input state before any reference-family
-preconditioning or local QI cleanup. The NFP=4 row is the common minimal seed
+case-specific targets, and table are in `docs/optimization_sweep_results.rst`.
+The renderer now requires every initial LCFS and Boozer `|B|` panel to come from
+a WOUT whose boundary matches the row's source input, allowing VMEC's equivalent
+canonical phase convention, before any reference-family preconditioning or
+local QI cleanup. The NFP=4 row is the common minimal seed
 `input.minimal_seed_nfp4`, not the finite-beta stress fixture.
-the panel below is regenerated with:
+The panel below is regenerated with:
 
 ```bash
 PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py

@@ -246,6 +246,53 @@ def test_compute_mercier_lasym_lbsubs_branch_with_reduced_bsub_inputs(monkeypatc
     assert np.any(np.asarray(outputs[5]) != 0.0)
 
 
+def test_compute_mercier_short_mesh_returns_all_zero_component_profiles():
+    ns = 2
+    modes = ModeTable(m=np.asarray([0], dtype=int), n=np.asarray([0], dtype=int))
+    layout = StateLayout(ns=ns, K=1, lasym=False)
+    state = VMECState(
+        layout=layout,
+        Rcos=np.ones((ns, 1)),
+        Rsin=np.zeros((ns, 1)),
+        Zcos=np.zeros((ns, 1)),
+        Zsin=np.zeros((ns, 1)),
+        Lcos=np.zeros((ns, 1)),
+        Lsin=np.zeros((ns, 1)),
+    )
+    trig = vmec_trig_tables(ntheta=4, nzeta=1, nfp=1, mmax=0, nmax=0, lasym=False, cache=False)
+    shape = (ns, int(trig.ntheta2), int(np.asarray(trig.cosnv).shape[0]))
+
+    outputs = wout_module._compute_mercier(
+        state=state,
+        geom_modes=modes,
+        s=np.asarray([0.0, 1.0]),
+        lconm1=False,
+        lthreed=False,
+        lasym=False,
+        nfp=1,
+        lbsubs=False,
+        mmax_force=0,
+        nmax_force=0,
+        pres=np.asarray([0.0, 0.1]),
+        vp=np.asarray([1.0, 1.2]),
+        phips=np.asarray([0.0, 1.0]),
+        iotas=np.asarray([0.0, 0.3]),
+        bsq=np.ones(shape),
+        sqrtg=np.ones(shape),
+        bsubu=np.ones(shape),
+        bsubv=np.ones(shape),
+        bsupu=np.ones(shape),
+        bsupv=np.ones(shape),
+        trig=trig,
+        geom={},
+    )
+
+    assert len(outputs) == 8
+    assert all(arr.shape == (ns,) for arr in outputs)
+    for profile in outputs:
+        np.testing.assert_allclose(profile, 0.0, atol=0.0)
+
+
 def test_finite_beta_zero_field_scalars_and_bcovar_tree_roundtrip(monkeypatch):
     static = SimpleNamespace(s=jnp.asarray([0.0]), trig_vmec=object())
     monkeypatch.setattr(finite_beta, "equilibrium_aspect_ratio_from_state", lambda **_kwargs: jnp.asarray(4.0))

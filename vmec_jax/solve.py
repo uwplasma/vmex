@@ -63,6 +63,10 @@ from .solve_residual_iter_runtime_helpers import (
     _scan_print_uses_io_callback,
     _vmec_freeb_plascur_from_bcovar as _runtime_vmec_freeb_plascur_from_bcovar,
 )
+from .solve_residual_iter_update_helpers import (
+    ResidualVelocityBlocks as _ResidualVelocityBlocks,
+    host_momentum_update_np as _host_momentum_update_np,
+)
 from .field import TWOPI, b2_from_bsup, bsup_from_geom, bsup_from_sqrtg_lambda
 from .fourier import eval_fourier_dtheta, eval_fourier_dzeta_phys
 from .geom import eval_geom
@@ -11779,32 +11783,22 @@ def solve_fixed_boundary_residual_iter(
                 update_rms_preclip = None
                 scl = 1.0
             elif host_update_assembly:
-                # Stack all 12 velocity/force arrays → single NumPy fused op.
-                # Eliminates 12 JAX dispatches (~0.20ms) + update_rms JAX (~0.26ms).
-                # Velocities are kept as NumPy views; downstream NumPy-aware paths
-                # (_mn_cos_to_signed_physical, etc.) accept them directly.
-                _V = np.stack(
-                    [
-                        np.asarray(vRcc),
-                        np.asarray(vRss),
-                        np.asarray(vRsc),
-                        np.asarray(vRcs),
-                        np.asarray(vZsc),
-                        np.asarray(vZcs),
-                        np.asarray(vZcc),
-                        np.asarray(vZss),
-                        np.asarray(vLsc),
-                        np.asarray(vLcs),
-                        np.asarray(vLcc),
-                        np.asarray(vLss),
-                    ]
-                )
-                # In-place update: V = fac*(b1*V + scale*F) — avoids 3 temp arrays.
-                # _F is a new array (forces change every iter) so in-place mul is safe.
-                _fac_b1 = fac * b1
-                _fac_fs = fac * force_scale * flip_sign
-                _F = np.stack(
-                    [
+                host_update = _host_momentum_update_np(
+                    velocities=_ResidualVelocityBlocks(
+                        vRcc,
+                        vRss,
+                        vRsc,
+                        vRcs,
+                        vZsc,
+                        vZcs,
+                        vZcc,
+                        vZss,
+                        vLsc,
+                        vLcs,
+                        vLcc,
+                        vLss,
+                    ),
+                    forces=_ResidualVelocityBlocks(
                         frcc_u,
                         frss_u,
                         frsc_u,
@@ -11817,16 +11811,20 @@ def solve_fixed_boundary_residual_iter(
                         flcs_u,
                         flcc_u,
                         flss_u,
-                    ]
+                    ),
+                    b1=b1,
+                    fac=fac,
+                    force_scale=force_scale,
+                    flip_sign=flip_sign,
+                    dt_eff=dt_eff,
+                    compute_update_rms=need_update_rms,
                 )
-                np.multiply(_V, _fac_b1, out=_V)
-                np.multiply(_F, _fac_fs, out=_F)
-                np.add(_V, _F, out=_V)
                 # Unpack as NumPy array views — no JAX conversion here.
-                (vRcc, vRss, vRsc, vRcs, vZsc, vZcs, vZcc, vZss, vLsc, vLcs, vLcc, vLss) = _V
+                (vRcc, vRss, vRsc, vRcs, vZsc, vZcs, vZcc, vZss, vLsc, vLcs, vLcc, vLss) = (
+                    host_update.velocities
+                )
                 if need_update_rms:
-                    # RMS via dot-product avoids 2 extra temp arrays.
-                    update_rms_j = abs(dt_eff) * np.sqrt(np.dot(_V.ravel(), _V.ravel()) / _V.size)
+                    update_rms_j = host_update.update_rms
                 else:
                     update_rms_j = jnp.asarray(0.0, dtype=jnp.asarray(vRcc).dtype)
             else:

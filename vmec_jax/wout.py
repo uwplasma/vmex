@@ -2754,7 +2754,8 @@ def _compute_mercier(
     """Port of VMEC mercier.f to compute Mercier and jxbforce-style scalars."""
     ns = int(pres.shape[0])
     if ns < 3:
-        return np.zeros((ns,), dtype=float)
+        zero = np.zeros((ns,), dtype=float)
+        return tuple(zero.copy() for _ in range(8))
     hs = 1.0 / float(ns - 1)
 
     sqrtg = np.asarray(sqrtg, dtype=float)

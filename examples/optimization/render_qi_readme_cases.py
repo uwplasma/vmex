@@ -37,7 +37,6 @@ class QICase:
     validation_status: str = "case-gated"
     history_paths: tuple[Path, ...] = ()
     preconditioner_summary: Path | None = None
-    raw_initial_wout_exception: str = ""
 
 
 CASES = (
@@ -127,10 +126,6 @@ CASES = (
         / "qi_stel_seed_3127_mirror_calibrated_20260516"
         / "boundary_reference_preconditioner"
         / "summary.json",
-        raw_initial_wout_exception=(
-            "Known curated raw wout artifact for the seed-3127 reference family; "
-            "its VMEC boundary phase convention predates the paired input deck."
-        ),
     ),
     QICase(
         label="NFP=4 minimal seed",
@@ -163,9 +158,6 @@ CASES = (
 )
 
 BOUNDARY_FAMILIES = ("RBC", "RBS", "ZBC", "ZBS")
-KNOWN_RAW_WOUT_ARTIFACTS = {
-    (REPO_ROOT / "examples" / "data" / "wout_QI_stel_seed_3127.nc").resolve()
-}
 
 
 def _load_json(path: Path) -> dict:
@@ -199,15 +191,46 @@ def _boundary_maps_from_wout(wout_path: Path) -> dict[str, dict[tuple[int, int],
     return maps
 
 
-def _boundary_mismatches(
-    input_file: Path,
-    wout_path: Path,
+def _boundary_maps_from_wout_vmec_input_convention(wout_path: Path) -> dict[str, dict[tuple[int, int], float]]:
+    """Return WOUT boundary modes in the VMEC input phase convention.
+
+    Some externally generated VMEC input decks use a poloidal phase convention
+    equivalent to VMEC's canonical output after a theta shift. The physical LCFS
+    is the same, but coefficients appear under ``n -> -n`` and parity-dependent
+    signs for ``m > 0``. Accepting this map prevents the README renderer from
+    rejecting a true raw WOUT just because VMEC wrote the equivalent canonical
+    representation.
+    """
+    wout = read_wout(wout_path)
+    arrays = {
+        "RBC": np.asarray(wout.rmnc[-1], dtype=float),
+        "RBS": np.asarray(wout.rmns[-1], dtype=float),
+        "ZBC": np.asarray(wout.zmnc[-1], dtype=float),
+        "ZBS": np.asarray(wout.zmns[-1], dtype=float),
+    }
+    nfp = int(wout.nfp)
+    maps: dict[str, dict[tuple[int, int], float]] = {family: {} for family in BOUNDARY_FAMILIES}
+    for family, values in arrays.items():
+        for m_i_raw, xn_i, value in zip(np.asarray(wout.xm, dtype=int), np.asarray(wout.xn, dtype=int), values):
+            m_i = int(m_i_raw)
+            n_wout = int(round(float(xn_i) / float(nfp))) if nfp else int(xn_i)
+            if m_i == 0:
+                n_i = n_wout
+                sign = 1.0
+            else:
+                n_i = -n_wout
+                sign = float((-1) ** m_i) if family in ("RBC", "RBS") else float((-1) ** (m_i + 1))
+            maps[family][(n_i, m_i)] = sign * float(value)
+    return maps
+
+
+def _boundary_mismatches_for_actual(
+    expected: dict[str, dict[tuple[int, int], float]],
+    actual: dict[str, dict[tuple[int, int], float]],
     *,
-    abs_tol: float = 5.0e-8,
-    rel_tol: float = 5.0e-8,
+    abs_tol: float,
+    rel_tol: float,
 ) -> list[str]:
-    expected = _boundary_maps_from_input(input_file)
-    actual = _boundary_maps_from_wout(wout_path)
     mismatches: list[str] = []
     for family in BOUNDARY_FAMILIES:
         keys = set(expected[family]) | {key for key, value in actual[family].items() if abs(value) > abs_tol}
@@ -222,27 +245,46 @@ def _boundary_mismatches(
     return mismatches
 
 
+def _boundary_mismatches(
+    input_file: Path,
+    wout_path: Path,
+    *,
+    abs_tol: float = 5.0e-8,
+    rel_tol: float = 5.0e-8,
+) -> list[str]:
+    expected = _boundary_maps_from_input(input_file)
+    candidates = (
+        _boundary_maps_from_wout(wout_path),
+        _boundary_maps_from_wout_vmec_input_convention(wout_path),
+    )
+    mismatch_sets = tuple(
+        _boundary_mismatches_for_actual(
+            expected,
+            actual,
+            abs_tol=abs_tol,
+            rel_tol=rel_tol,
+        )
+        for actual in candidates
+    )
+    return min(mismatch_sets, key=len)
+
+
 def _assert_wout_matches_input_boundary(wout_path: Path, input_file: Path, *, context: str) -> None:
     mismatches = _boundary_mismatches(input_file, wout_path)
     if mismatches:
         joined = "; ".join(mismatches)
         raise RuntimeError(
             f"{context} is not the raw input boundary for {input_file}: {joined}. "
-            "Use a raw initial wout or add a named known-artifact exception."
+            "Regenerate or provide a raw initial wout that matches the paired input deck."
         )
 
 
 def _validate_case_initial_wout(case: QICase) -> None:
-    try:
-        _assert_wout_matches_input_boundary(
-            case.initial_wout,
-            case.input_file,
-            context=f"{case.label} initial_wout",
-        )
-    except RuntimeError:
-        if case.raw_initial_wout_exception and case.initial_wout.resolve() in KNOWN_RAW_WOUT_ARTIFACTS:
-            return
-        raise
+    _assert_wout_matches_input_boundary(
+        case.initial_wout,
+        case.input_file,
+        context=f"{case.label} initial_wout",
+    )
 
 
 def _history_paths(case: QICase) -> tuple[Path, ...]:

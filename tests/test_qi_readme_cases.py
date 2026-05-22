@@ -189,6 +189,24 @@ def test_readme_renderer_points_nfp4_row_at_minimal_seed() -> None:
     assert nfp4.preconditioner_summary.name == "summary.json"
 
 
+def test_readme_renderer_points_nfp3_at_bundled_raw_initial_artifact() -> None:
+    mod = _load_module()
+
+    nfp3 = next(case for case in mod.CASES if case.label == "NFP=3 seed 3127")
+
+    assert nfp3.initial_wout == ROOT / "examples" / "data" / "wout_QI_stel_seed_3127.nc"
+    assert nfp3.initial_wout.name == "wout_QI_stel_seed_3127.nc"
+
+
+def test_real_nfp3_raw_initial_wout_matches_input_boundary() -> None:
+    mod = _load_module()
+
+    nfp3 = next(case for case in mod.CASES if case.label == "NFP=3 seed 3127")
+
+    assert mod._boundary_mismatches(nfp3.input_file, nfp3.initial_wout) == []
+    mod._validate_case_initial_wout(nfp3)
+
+
 def test_readme_renderer_detects_flat_objective_history() -> None:
     mod = _load_module()
 
@@ -343,21 +361,44 @@ def test_readme_renderer_rejects_initial_wout_that_does_not_match_input(monkeypa
         mod._validate_case_initial_wout(case)
 
 
-def test_readme_renderer_allows_only_known_raw_wout_artifact_exception(monkeypatch, tmp_path: Path) -> None:
+def test_readme_renderer_accepts_vmec_canonical_phase_equivalent_wout(monkeypatch, tmp_path: Path) -> None:
+    mod = _load_module()
+    input_file = tmp_path / "input.phase"
+    input_file.write_text(
+        "&INDATA\n"
+        "  NFP = 3\n"
+        "  RBC(0,0) = 1.0\n"
+        "  RBC(1,0) = -0.2\n"
+        "  ZBS(1,0) = -0.3\n"
+        "  RBC(-2,1) = -0.04\n"
+        "  ZBS(-2,1) = -0.05\n"
+        "  RBC(-2,2) = 0.06\n"
+        "  ZBS(-2,2) = -0.07\n"
+        "/\n"
+    )
+
+    class Wout:
+        pass
+
+    wout = Wout()
+    wout.nfp = 3
+    wout.xm = np.asarray([0, 0, 1, 2], dtype=int)
+    wout.xn = np.asarray([0, 3, 6, 6], dtype=int)
+    wout.rmnc = np.asarray([[1.0, -0.2, 0.04, 0.06]], dtype=float)
+    wout.rmns = np.zeros((1, 4), dtype=float)
+    wout.zmnc = np.zeros((1, 4), dtype=float)
+    wout.zmns = np.asarray([[0.0, -0.3, -0.05, 0.07]], dtype=float)
+    monkeypatch.setattr(mod, "read_wout", lambda _path: wout)
+
+    assert mod._boundary_mismatches(input_file, tmp_path / "wout.nc") == []
+
+
+def test_readme_renderer_has_no_raw_wout_artifact_exception_bypass(monkeypatch, tmp_path: Path) -> None:
     mod = _load_module()
     case = _synthetic_case(mod, tmp_path, "NFP=3 seed 3127", nfp=3)
-    case = mod.QICase(
-        label=case.label,
-        input_file=case.input_file,
-        output_dir=case.output_dir,
-        initial_wout=case.initial_wout,
-        note=case.note,
-        raw_initial_wout_exception="synthetic exception",
-    )
     monkeypatch.setattr(mod, "read_wout", lambda _path: _synthetic_wout(nfp=3, rbc01=0.95))
 
+    assert not hasattr(case, "raw_initial_wout_exception")
+    assert not hasattr(mod, "KNOWN_RAW_WOUT_ARTIFACTS")
     with pytest.raises(RuntimeError, match="not the raw input boundary"):
         mod._validate_case_initial_wout(case)
-
-    monkeypatch.setattr(mod, "KNOWN_RAW_WOUT_ARTIFACTS", {case.initial_wout.resolve()})
-    mod._validate_case_initial_wout(case)

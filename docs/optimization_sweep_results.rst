@@ -30,11 +30,12 @@ The split between README and docs is deliberate:
 - ``README.md`` shows only the best reviewed ``LASYM = F`` QA/QH/QP/QI rows,
   using the four compact ``readme_best_optimization_*.png`` panels and the
   short reproduction command.
-- This page is the publication home for full sweeps: every CPU/GPU,
-  continuation/direct, ESS on/off, QI preseed/no-preseed, ``max_mode=1..4``,
-  and LASYM row should be represented here through downloadable CSV/JSON
-  summaries plus generated objective-history panels, initial/final state
-  atlases, and wall-time summary tables.
+- This page is the intended publication home for complete sweeps.  A complete
+  publication should represent every CPU/GPU, continuation/direct, ESS on/off,
+  QI preseed/no-preseed, ``max_mode=1..4``, and LASYM row through downloadable
+  CSV/JSON summaries plus generated objective-history panels, initial/final
+  state atlases, and wall-time summary tables.  The checked-in assets are a
+  partial snapshot unless those rows and figures are present.
 - Additional QI case coverage, including NFP=1/2/3/4 case-gated rows that use
   case-specific aspect targets, belongs here rather than in the README best-row
   section.
@@ -48,20 +49,26 @@ Every published full-sweep result should provide these assets under
 - Objective history over all stages:
   ``objective_panel_all_policies.png/.pdf``, CPU/GPU policy subsets, LASYM
   variants when present, and the legacy ``objective_panel`` aliases.
-- Initial/final 3D and initial/final LCFS ``|B|`` atlases:
+- Initial/final 3D and initial/final VMEC-angle LCFS ``|B|`` atlases:
   ``initial_final_state_atlas_*.png/.pdf``.  Legacy
   ``final_state_atlas_*.png/.pdf`` aliases are compatibility copies only.
-  Boozer-space ``|B|`` must be drawn with line contours, not ``contourf``.
+  The full-sweep atlas renderer uses VMEC ``theta/zeta`` grids from
+  ``vmecplot2_bmag_grid``; do not describe these as Boozer-space atlases.
+  Boozer-space line contours are limited to the compact README and dedicated
+  QI case panels generated through ``booz_xform_jax``.
 - Wall-time and status table figures:
   ``summary_tables_*.png/.pdf`` plus the CSV/JSON downloads above.
 - Optional full report composites:
   ``publication_panel_full.png/.pdf`` and LASYM variants.
 
 The checked-in source tree currently contains the compact README panels, the
-QI case-coverage panel, the constrained-QI status panel, and CSV/JSON summary
-files.  It does not currently contain the full objective-history panels,
-initial/final state atlases, summary-table images, or publication-panel
-composites.
+QI case-coverage snapshot, the constrained-QI status panel, and CSV/JSON summary
+files.  ``qs_ess_summary_all.csv`` is a partial CPU/GPU snapshot with available
+``max_mode=1..3`` rows and no checked-in ``max_mode=4`` rows;
+``qi_constrained_summary.csv`` currently contains one CPU ``max_mode=3``
+continuation status row.  It does not currently contain the full
+objective-history panels, initial/final state atlases, summary-table images, or
+publication-panel composites.
 Those assets must be regenerated or copied into ``docs/_static/figures`` before
 claiming a complete full-sweep docs publication.
 
@@ -99,6 +106,11 @@ Run the CPU production sweep:
    PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --qi-qp-preseed off --rerun
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
+These commands describe the complete regeneration target, not the contents of
+the checked-in snapshot.  Do not cite a full ``max_mode=4`` CPU/GPU matrix until
+the corresponding CSV/JSON rows and publication figures are present under
+``docs/_static/figures``.
+
 The compact README renderer currently filters QI rows against the same
 aspect-6 target as QA/QH/QP.  The standalone ``QI_optimization.py`` robustness
 cases may still use case-specific aspect targets when mirror ratio or far-seed
@@ -114,6 +126,10 @@ regenerate the focused preseed/no-preseed matrix with:
    PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qi --modes 1,2,3,4 --ess both --qi-qp-preseed both --rerun
    PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qi --modes 1,2,3,4 --ess both --qi-qp-preseed both --rerun
    PYTHONPATH=. python examples/optimization/render_qi_constrained_sweep.py
+
+The checked-in constrained-QI snapshot is not that full matrix; it currently
+contains only a single CPU continuation ``max_mode=3`` status row without a
+same-mode QP preseed.
 
 Seed-robust QI is a larger validation matrix than the tracked constrained-QI
 snapshot.  The current artifacts use the bundled NFP=2 QI seed and optional
@@ -249,23 +265,33 @@ The source table is also available as
 QI_optimization Input Coverage
 ------------------------------
 
-The dedicated QI docs renderer covers the reviewed NFP=1, 2, 3, and the
-NFP=4 minimal-seed QI lanes without rerunning optimization jobs.  It
-reads the existing ``QI_optimization.py`` outputs, records the final smooth QI
-metric, legacy QI metric, mirror ratio,
-elongation, iota, aspect, and CPU wall time, and draws initial and final
-Boozer ``|B|`` with line contours only.  These are case-specific gate checks,
-not extra aspect-6 README best-row promotions: NFP=1/2 use target aspect 10,
-the seed-3127 NFP=3 lane uses target aspect 4, and the NFP=4 row uses the
-minimal seed plus a same-NFP finite-beta QI reference-family proposal.
-Finite-beta NFP=4 remains a separate stress fixture.
+The dedicated QI docs renderer is a lightweight snapshot renderer for the
+reviewed NFP=1, 2, 3, and the NFP=4 minimal-seed QI lanes; it does not rerun
+optimization jobs.  It reads the existing ``QI_optimization.py`` outputs,
+records the final smooth QI metric, legacy QI metric, mirror ratio, elongation,
+iota, aspect, and CPU wall time, and draws initial and final Boozer ``|B|`` with
+line contours only after the initial WOUT boundary matches the paired input
+deck.  These are case-specific gate checks, not extra aspect-6 README best-row
+promotions: NFP=1/2 use target aspect 10, the seed-3127 NFP=3 lane uses target
+aspect 4, and the NFP=4 row uses the minimal seed plus a same-NFP finite-beta QI
+reference-family proposal.  Finite-beta NFP=4 remains a separate stress
+fixture.
+
+The NFP=3 seed-3127 row uses
+``examples/data/wout_QI_stel_seed_3127.nc`` as the raw initial artifact.  The
+renderer validates it against ``examples/data/input.QI_stel_seed_3127`` under
+the direct VMEC input convention or VMEC's equivalent canonical phase
+convention, and fails if neither boundary map matches; there is no
+known-artifact exception bypass.
 
 To refresh the exact rows used by this panel, run the source optimizations with
 the target-aspect and output-dir overrides below before rendering.  Bare
 ``VMEC_JAX_QI_RUN_CASE=...`` commands use the current aspect-6 public defaults;
 the explicit overrides reproduce the reviewed figure rows.  The NFP=3 case can
 be selected as ``nfp3_qi``; that is a convenience alias for the
-``input.QI_stel_seed_3127`` robustness lane.
+``input.QI_stel_seed_3127`` robustness lane.  If the NFP=3 raw artifact is
+replaced during a refresh, the replacement must pass the renderer's boundary
+match before the panel is published.
 
 .. code-block:: bash
 
@@ -351,12 +377,14 @@ be selected as ``nfp3_qi``; that is a convenience alias for the
    :align: center
    :alt: QI optimization coverage for reviewed NFP=1, 2, 3, and 4 inputs
 
-Source table:
+Source table snapshot:
 :download:`readme_qi_optimization_cases.csv <_static/figures/readme_qi_optimization_cases.csv>`.
 In that generated CSV, ``validation_status=case-gated`` records
 case-specific QI gate status from the renderer and should not be read as
 aspect-6 README best-row promotion evidence; the NFP=4 row is case-gated by
-the minimal-seed plus same-NFP reference-family path.
+the minimal-seed plus same-NFP reference-family path.  The NFP=3 raw initial
+artifact is now checked by the renderer instead of accepted through a
+case-specific exception.
 
 Regenerate these lightweight artifacts with:
 
@@ -384,13 +412,16 @@ objective.  Vertical dotted lines mark continuation stage boundaries.
 Constrained QI Matrix
 ---------------------
 
-The constrained QI renderer compares CPU and available GPU rows for
+The constrained QI renderer can compare CPU and available GPU rows for
 ``max_mode = 1, 2, 3, 4``, ESS on/off, continuation/direct, and QP-preseed on/off
-using the bundled NFP=2 ``input.nfp2_QI`` seed.  Rerun the commands above to
-populate the CPU/GPU/direct/asymmetric matrix under the current objective
-policy.  For each requested ``max_mode``, the input boundary is projected onto
-``max(abs(m), abs(n)) <= max_mode`` before the stage is built, so the
-``max_mode=1`` rows zero the mode-2 coefficients present in the warm start.
+using the bundled NFP=2 ``input.nfp2_QI`` seed.  The checked-in constrained
+snapshot is partial: it contains one CPU continuation ``max_mode=3`` status row
+and no GPU, direct, QP-preseed, or ``max_mode=4`` constrained-QI rows.  Rerun
+the commands above to populate the full CPU/GPU/direct/asymmetric matrix under
+the current objective policy.  For each requested ``max_mode``, the input
+boundary is projected onto ``max(abs(m), abs(n)) <= max_mode`` before the stage
+is built, so the ``max_mode=1`` rows zero the mode-2 coefficients present in the
+warm start.
 The QI objective is intentionally not ranked by scalar objective alone: rows
 are also evaluated by the legacy branch-squash/stretch/shuffle diagnostic,
 raw smooth QI residual, maximum mirror ratio, maximum LCFS elongation,
@@ -400,11 +431,11 @@ the same ranking as the legacy diagnostic on the seed and reference
 omnigenity cases.  Rows that stop at ``max_nfev`` but have valid VMEC solves
 and satisfy the physics gates are kept as valid stopped rows.
 
-The checked-in target-6 constrained-QI matrix is a transparent status artifact,
-not the promoted QI result.  At the moment it contains the bounded partial
-continuation row that was stopped by the 1200 second checkpoint before full
-diagnostics were available.  The README best QI row therefore comes from the
-standalone ``QI_optimization.py`` target-6 lane until the full constrained
+The checked-in target-6 constrained-QI artifact is a transparent partial status
+snapshot, not the promoted QI result.  At the moment it contains the bounded
+partial continuation row that was stopped by the 1200 second checkpoint before
+full diagnostics were available.  The README best QI row therefore comes from
+the standalone ``QI_optimization.py`` target-6 lane until the full constrained
 CPU/GPU matrix is rerun and passes the same QI, mirror, elongation, iota, and
 aspect gates.
 
@@ -436,9 +467,10 @@ Non-stellarator-symmetric LASYM runs use the same script with
 ``--stellarator-asymmetric``.  The current LASYM artifacts are intentionally
 published as partial 1200 second lanes.  Timeout and OOM rows are kept because
 they document the current cost envelope of the asymmetric exact/replay path.
-The frozen snapshot has 13 CPU LASYM rows and 61 GPU LASYM rows.
+The checked-in summary snapshot has 23 CPU LASYM rows and 36 GPU LASYM rows.
 
-The objective-history figures are generated artifacts.  Regenerate them with
+The objective-history figures are generated artifacts and are not part of the
+current checked-in snapshot.  Regenerate them with
 ``PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py``
 after producing or fetching the sweep results.  For a complete docs
 publication, copy the reviewed outputs into ``docs/_static/figures`` and keep
@@ -454,15 +486,16 @@ Initial/Final State Atlases
 ---------------------------
 
 The initial/final state atlases show the initial and final LCFS plus line
-contours of ``|B|`` on the LCFS.
+contours of ``|B|`` on the LCFS in VMEC ``theta/zeta`` coordinates.
 Each 3-D panel has its own colorbar because the aspect-ratio constraint changes
-the absolute ``|B|`` range.
+the absolute ``|B|`` range.  These are not Boozer-coordinate atlases; the full
+sweep renderer gets the contour grid from ``vmecplot2_bmag_grid``.
 
 Partial LASYM atlases are rendered separately.  Missing or failed lanes are
 shown as placeholders, while successful lanes include one colorbar per 3-D
 surface and one colorbar per LCFS ``|B|`` contour panel.
 
-Generated atlas filenames include:
+When generated, atlas filenames include:
 
 - ``initial_final_state_atlas_continuation.png/.pdf``
 - ``initial_final_state_atlas_direct.png/.pdf``
@@ -472,6 +505,8 @@ Generated atlas filenames include:
 - ``initial_final_state_atlas_gpu_direct.png/.pdf``
 - ``initial_final_state_atlas_asymmetric_*``
 - legacy alias ``geometry_atlas.png/.pdf``
+
+No ``initial_final_state_atlas_*.png/.pdf`` files are currently checked in.
 
 Summary Tables
 --------------

@@ -681,3 +681,78 @@ def test_bsubs_correction_helpers_keep_inputs_when_coefficients_are_unavailable(
         sum_w=lambda arr: float(np.sum(arr)),
     )
     np.testing.assert_allclose(early_true[0], bsubs)
+
+
+def test_lasym_bsubs_correction_reconstructs_available_coefficients_on_full_grid(monkeypatch) -> None:
+    trig = vmec_trig_tables(ntheta=4, nzeta=1, nfp=1, mmax=2, nmax=0, lasym=True, cache=False)
+    ns = 4
+    nt2 = int(trig.ntheta2)
+    nt3 = int(trig.ntheta3)
+    nzeta = int(np.asarray(trig.cosnv).shape[0])
+    reduced_shape = (ns, nt2, nzeta)
+    surface = np.arange(np.prod(reduced_shape), dtype=float).reshape(reduced_shape)
+
+    coeff = np.zeros((nt2, 1, 2), dtype=float)
+    coeff[1, 0, 0] = 0.25
+    coeff[2, 0, 1] = -0.125
+    coeff_calls = []
+
+    def fake_getbsubs_coeffs(**kwargs):
+        coeff_calls.append(kwargs)
+        assert kwargs["frho"].shape == (nt3, nzeta)
+        assert kwargs["bsupu"].shape == (nt3, nzeta)
+        assert kwargs["bsupv"].shape == (nt3, nzeta)
+        return coeff
+
+    monkeypatch.setattr(wout_module, "_jxbforce_getbsubs_coeffs_lasym_true", fake_getbsubs_coeffs)
+
+    bsubs, bsubsu, bsubsv = _jxbforce_apply_bsubs_correction_lasym_true(
+        bsubu=0.2 + 0.01 * surface,
+        bsubv=0.3 + 0.02 * surface,
+        bsubs=np.zeros(reduced_shape),
+        bsubsu=np.zeros(reduced_shape),
+        bsubsv=np.zeros(reduced_shape),
+        bsupu=0.4 + 0.03 * surface,
+        bsupv=0.5 + 0.04 * surface,
+        sqrtg=1.0 + 0.01 * surface,
+        pres=np.asarray([0.0, 0.3, 0.2, 0.1]),
+        vp=np.asarray([1.0, 1.2, 1.4, 1.6]),
+        hs=1.0 / 3.0,
+        signgs=1.0,
+        trig=trig,
+        nfp=1,
+        sum_w=lambda arr: float(np.sum(arr)),
+    )
+
+    sinmu = np.asarray(trig.sinmu, dtype=float)[:nt2, : coeff.shape[0]]
+    cosmu = np.asarray(trig.cosmu, dtype=float)[:nt2, : coeff.shape[0]]
+    sinmum = np.asarray(trig.sinmum, dtype=float)[:nt2, : coeff.shape[0]]
+    cosmum = np.asarray(trig.cosmum, dtype=float)[:nt2, : coeff.shape[0]]
+    bsubs_s = np.einsum("jm,m->j", sinmu, coeff[:, 0, 0])[:, None]
+    bsubs_a = np.einsum("jm,m->j", cosmu, coeff[:, 0, 1])[:, None]
+    bsubsu_s = np.einsum("jm,m->j", cosmum, coeff[:, 0, 0])[:, None]
+    bsubsu_a = np.einsum("jm,m->j", sinmum, coeff[:, 0, 1])[:, None]
+
+    def extend(par0: np.ndarray, par1: np.ndarray) -> np.ndarray:
+        full = np.zeros((nt3, nzeta), dtype=float)
+        full[:nt2] = par0 + par1
+        for theta_idx in range(nt2):
+            mirror = 0 if theta_idx == 0 else int(trig.ntheta1) - theta_idx
+            if mirror >= nt2:
+                full[mirror] = par0[theta_idx] - par1[theta_idx]
+        return full
+
+    expected_bsubs = extend(bsubs_a, bsubs_s)
+    expected_bsubsu = extend(bsubsu_s, bsubsu_a)
+
+    assert len(coeff_calls) == ns - 2
+    assert bsubs.shape == (ns, nt3, nzeta)
+    assert bsubsu.shape == (ns, nt3, nzeta)
+    assert bsubsv.shape == (ns, nt3, nzeta)
+    np.testing.assert_allclose(bsubs[1], expected_bsubs, atol=1.0e-15)
+    np.testing.assert_allclose(bsubs[2], expected_bsubs, atol=1.0e-15)
+    np.testing.assert_allclose(bsubsu[1], expected_bsubsu, atol=1.0e-15)
+    np.testing.assert_allclose(bsubsu[2], expected_bsubsu, atol=1.0e-15)
+    np.testing.assert_allclose(bsubsv, 0.0, atol=1.0e-15)
+    np.testing.assert_allclose(bsubs[0], 2.0 * bsubs[1] - bsubs[2], atol=1.0e-15)
+    np.testing.assert_allclose(bsubs[-1], -bsubs[-2], atol=1.0e-15)
