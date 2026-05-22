@@ -195,7 +195,7 @@ Render the compact README panels from the best stellarator-symmetric rows:
 
    PYTHONPATH=. python examples/optimization/render_readme_best_optimizations.py
 
-The default per-case timeout is 1200 seconds.  The current README science
+The default per-case timeout is 1800 seconds.  The current README science
 configs use NFP=4 for QH, aspect targets near 6 for QA/QH/QP/QI, signed iota
 0.42 for QA, and high-priority ``abs(mean_iota) >= 0.41`` constraints for
 QH/QP/QI.
@@ -481,7 +481,7 @@ Regenerate the current common-minimal showcase with:
      --policy continuation --max-mode 3 --ess on \
      --max-nfev 30 --continuation-nfev 20 \
      --inner-max-iter 120 --trial-max-iter 120 \
-     --inner-ftol 1e-9 --trial-ftol 1e-9 --case-timeout-s 1200 --rerun
+     --inner-ftol 1e-9 --trial-ftol 1e-9 --case-timeout-s 1800 --rerun
    PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py
 
 Keep ``--rerun`` for release reproduction.  Without it, successful
@@ -505,7 +505,7 @@ Objective Histories
 When regenerated, the all-policy panel contains every available backend/policy
 row.  Solid curves met the optimizer success criterion; dashed curves are
 stopped, failed, or budgeted lanes.  The summary tables distinguish
-``max_nfev`` stops from 1200 second timeouts and GPU-memory failures.  Curves
+``max_nfev`` stops from bounded per-case timeouts and GPU-memory failures.  Curves
 are split by objective stage and plotted as best-so-far values within that
 stage, so QP preseed and full constrained QI refinement are not treated as one
 continuous scalar objective.  Vertical dotted lines mark continuation stage
@@ -567,7 +567,7 @@ optimizer is seed-robust across unrelated QA/QH/QP/simple starts.
 
 Non-stellarator-symmetric LASYM runs use the same script with
 ``--stellarator-asymmetric``.  The current LASYM artifacts are intentionally
-published as partial 1200 second lanes.  Timeout and OOM rows are kept because
+published as partial bounded-time lanes.  Timeout and OOM rows are kept because
 they document the current cost envelope of the asymmetric exact/replay path.
 The checked-in summary snapshot has 23 CPU LASYM rows and 36 GPU LASYM rows.
 
