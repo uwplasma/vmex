@@ -122,6 +122,45 @@ def test_qi_helper_scalar_parsers_and_scores(tmp_path: Path) -> None:
     assert not qio.boundary_reference_record_is_qi_safe({"mirror": 0.4, "mean_iota": -0.5}, max_mirror_ratio=0.3, abs_iota_min=0.4)
 
 
+def test_explicit_qi_context_overrides_legacy_globals(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    qi_options = _configure(tmp_path / "legacy")
+    ctx = qio.make_qi_optimization_context(
+        max_mode=5,
+        output_dir=tmp_path / "explicit",
+        opt_qi_resolution={"nphi": 19},
+        surfaces=np.asarray([0.25]),
+    )
+    assert ctx.max_mode == 5
+    assert ctx.output_dir == tmp_path / "explicit"
+
+    monkeypatch.setattr(qio, "MAX_MODE", 99, raising=False)
+    monkeypatch.setattr(qio, "STAGE_REPEATS", 99, raising=False)
+    monkeypatch.setattr(qio, "OUTPUT_DIR", tmp_path / "poisoned", raising=False)
+    monkeypatch.setattr(
+        qio.vj,
+        "repeated_stage_modes",
+        lambda **kwargs: [kwargs["max_mode"], kwargs["repeats"]],
+    )
+
+    assert qio.stage_modes_for({"stage_repeats": 2}, ctx=ctx) == [5, 2]
+    opt = qio.make_basin_prefilter_options({}, ctx=ctx)
+    assert opt.nphi == 19
+    assert np.asarray(opt.surfaces).tolist() == [0.25]
+    assert opt.include_bounce_endpoints == qi_options.include_bounce_endpoints
+
+    qio.write_qi_stage_checkpoint(
+        tmp_path / "stage",
+        stage_index=1,
+        stage_name="explicit",
+        stage_modes=[1],
+        stage_result=SimpleNamespace(history={"objective_final": 0.5}),
+        diagnostics={},
+        ctx=ctx,
+    )
+    assert (tmp_path / "explicit" / "stage_checkpoint.json").exists()
+    assert not (tmp_path / "poisoned" / "stage_checkpoint.json").exists()
+
+
 def test_target_helicity_seed_preconditioner_writes_seeded_input(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _configure(tmp_path)
     source = InData(
@@ -296,7 +335,11 @@ def test_run_basin_prefilter_uses_lazy_tools_and_selects_candidate(
     )
     monkeypatch.setattr(qio, "boundary_param_names", lambda specs: ["rc01", "zs01"])
     monkeypatch.setattr(qio, "create_x_scale", lambda specs, alpha: np.ones(2))
-    monkeypatch.setattr(qio, "make_basin_prefilter_options", lambda config: SimpleNamespace(surfaces=np.asarray([1.0])))
+    monkeypatch.setattr(
+        qio,
+        "make_basin_prefilter_options",
+        lambda config, **_kwargs: SimpleNamespace(surfaces=np.asarray([1.0])),
+    )
     monkeypatch.setattr(
         qio,
         "_load_basin_prefilter_tools",

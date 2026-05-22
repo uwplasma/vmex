@@ -167,7 +167,10 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "import qi_optimization_support as qis" in text
     assert "from vmec_jax.qi_optimization import *" in compat_text
     assert "from tools.diagnostics" not in support_text.split("def _load_basin_prefilter_tools")[0]
-    assert len(text.splitlines()) < 600
+    assert len(text.splitlines()) < 650
+    assert "qis.configure(globals())" not in text
+    assert "QI_CONTEXT = qis.make_qi_optimization_context(globals())" in text
+    assert "ctx=QI_CONTEXT" in text
     assert 'RUN_CASE = "nfp2_qi"' in text
     assert "RUN_CASE, CASE = resolve_qi_case(RUN_CASE)" in text
     assert "def resolve_qi_case(default_run_case: str | None = None):" in cases_text
@@ -235,9 +238,9 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "qi_options=" not in solve_call
     assert "plot=" not in solve_call
     assert "print_optimization_outputs" not in text
-    assert "def save_raw_seed_initial_artifacts(input_file, input_out, wout_out):" in support_text
+    assert "def save_raw_seed_initial_artifacts(input_file, input_out, wout_out, *, ctx:" in support_text
     assert "vj.write_indata(input_out, vj.read_indata(input_file))" in support_text
-    assert "vj.run_fixed_boundary(input_file, solver_device=SOLVER_DEVICE, verbose=False)" in support_text
+    assert "vj.run_fixed_boundary(input_file, solver_device=_ctx(ctx, \"solver_device\"), verbose=False)" in support_text
     assert "vj.write_wout_from_fixed_boundary_run(wout_out, run)" in support_text
     assert "raw_initial_run = qis.save_raw_seed_initial_artifacts(" in text
     assert "INPUT_FILE," in text
@@ -314,10 +317,10 @@ def test_qi_example_keeps_mirror_cleanup_guarded_by_qi_ceiling() -> None:
     assert '"mirror_ramp_stages": (' in cases_text
     assert '"name": "matrix_free_mirror030"' in cases_text
     assert '"require_mirror_improvement": False' in cases_text
-    assert "stage_smooth_qi_max = float(stage.get(\"smooth_qi_max\", QI_GATE_SMOOTH_MAX))" in support_text
+    assert "stage_smooth_qi_max = float(stage.get(\"smooth_qi_max\", _ctx(ctx, \"qi_gate_smooth_max\")))" in support_text
     assert "stage_promotion_mirror_threshold = float(" in support_text
-    assert "repeats=int(stage.get(\"stage_repeats\", STAGE_REPEATS))" in support_text
-    assert "method=str(stage.get(\"method\", METHOD))" in support_text
+    assert "repeats=int(stage.get(\"stage_repeats\", _ctx(ctx, \"stage_repeats\")))" in support_text
+    assert "method=str(stage.get(\"method\", _ctx(ctx, \"method\")))" in support_text
     assert "stage_max_nfev = min(stage_max_nfev, MAX_NFEV)" in text
     assert "stage.get(\"use_showcase_max_nfev\", False)" in text
     assert '"use_showcase_max_nfev": True' in cases_text

@@ -8,6 +8,7 @@ and checkpoint helpers used by that script and sweep drivers.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 from pathlib import Path
 
@@ -47,12 +48,14 @@ def _load_basin_prefilter_tools():
 __all__ = [
     "TARGET_HELICITY_SEED_AMPLITUDE",
     "TARGET_HELICITY_SEED_MODE_TERMS",
+    "QIOptimizationContext",
     "basin_prefilter_score",
     "boundary_reference_preconditioner_score",
     "boundary_reference_record_is_qi_safe",
     "configure",
     "engineering_promotion_score",
     "make_basin_prefilter_options",
+    "make_qi_optimization_context",
     "promotion_score",
     "qi_diagnostics_for_result",
     "qi_diagnostics_for_run",
@@ -68,10 +71,146 @@ __all__ = [
 ]
 
 
+@dataclass(frozen=True)
+class QIOptimizationContext:
+    """Explicit staged-QI controls shared by helper routines.
+
+    The example scripts still show the optimization workflow directly. This
+    context only replaces the older ``configure(globals())`` helper plumbing so
+    source users can reason about which controls are passed into staged helpers.
+    """
+
+    alpha: float
+    continuation_nfev: int
+    inner_max_iter: int
+    jit_booz: bool
+    max_elongation: float
+    max_mirror_ratio: float
+    max_mode: int
+    max_nfev: int
+    method: str
+    min_vmec_mode: int
+    mirror_surface_index: object
+    mirror_weight: float
+    opt_qi_resolution: dict
+    output_dir: Path
+    qi_gate_legacy_max: float
+    qi_gate_smooth_max: float
+    qi_options: object
+    qi_weight: float
+    solver_device: str | None
+    stage_modes: tuple
+    stage_repeats: int
+    surfaces: object
+    target_abs_iota_min: float
+    target_aspect: float
+    trial_ftol: float
+    use_ess: bool
+    use_mode_continuation: bool
+
+
+_CONTEXT_FIELDS = {
+    "alpha": "ALPHA",
+    "continuation_nfev": "CONTINUATION_NFEV",
+    "inner_max_iter": "INNER_MAX_ITER",
+    "jit_booz": "JIT_BOOZ",
+    "max_elongation": "MAX_ELONGATION",
+    "max_mirror_ratio": "MAX_MIRROR_RATIO",
+    "max_mode": "MAX_MODE",
+    "max_nfev": "MAX_NFEV",
+    "method": "METHOD",
+    "min_vmec_mode": "MIN_VMEC_MODE",
+    "mirror_surface_index": "MIRROR_SURFACE_INDEX",
+    "mirror_weight": "MIRROR_WEIGHT",
+    "opt_qi_resolution": "OPT_QI_RESOLUTION",
+    "output_dir": "OUTPUT_DIR",
+    "qi_gate_legacy_max": "QI_GATE_LEGACY_MAX",
+    "qi_gate_smooth_max": "QI_GATE_SMOOTH_MAX",
+    "qi_options": "QI_OPTIONS",
+    "qi_weight": "QI_WEIGHT",
+    "solver_device": "SOLVER_DEVICE",
+    "stage_modes": "STAGE_MODES",
+    "stage_repeats": "STAGE_REPEATS",
+    "surfaces": "SURFACES",
+    "target_abs_iota_min": "TARGET_ABS_IOTA_MIN",
+    "target_aspect": "TARGET_ASPECT",
+    "trial_ftol": "TRIAL_FTOL",
+    "use_ess": "USE_ESS",
+    "use_mode_continuation": "USE_MODE_CONTINUATION",
+}
+
+_DEFAULT_CONTEXT: QIOptimizationContext | None = None
+
+
+def make_qi_optimization_context(context: dict | None = None, /, **overrides) -> QIOptimizationContext:
+    """Build a typed staged-QI helper context from script constants."""
+
+    values = {}
+    if context:
+        values.update(context)
+    values.update(overrides)
+
+    def get(field: str):
+        upper = _CONTEXT_FIELDS[field]
+        if field in values:
+            return values[field]
+        if upper in values:
+            return values[upper]
+        if upper in globals():
+            return globals()[upper]
+        raise KeyError(upper)
+
+    return QIOptimizationContext(
+        alpha=float(get("alpha")),
+        continuation_nfev=int(get("continuation_nfev")),
+        inner_max_iter=int(get("inner_max_iter")),
+        jit_booz=bool(get("jit_booz")),
+        max_elongation=float(get("max_elongation")),
+        max_mirror_ratio=float(get("max_mirror_ratio")),
+        max_mode=int(get("max_mode")),
+        max_nfev=int(get("max_nfev")),
+        method=str(get("method")),
+        min_vmec_mode=int(get("min_vmec_mode")),
+        mirror_surface_index=get("mirror_surface_index"),
+        mirror_weight=float(get("mirror_weight")),
+        opt_qi_resolution=dict(get("opt_qi_resolution") or {}),
+        output_dir=Path(get("output_dir")),
+        qi_gate_legacy_max=float(get("qi_gate_legacy_max")),
+        qi_gate_smooth_max=float(get("qi_gate_smooth_max")),
+        qi_options=get("qi_options"),
+        qi_weight=float(get("qi_weight")),
+        solver_device=get("solver_device"),
+        stage_modes=tuple(get("stage_modes")),
+        stage_repeats=int(get("stage_repeats")),
+        surfaces=get("surfaces"),
+        target_abs_iota_min=float(get("target_abs_iota_min")),
+        target_aspect=float(get("target_aspect")),
+        trial_ftol=float(get("trial_ftol")),
+        use_ess=bool(get("use_ess")),
+        use_mode_continuation=bool(get("use_mode_continuation")),
+    )
+
+
+def _resolve_context(ctx: QIOptimizationContext | None = None) -> QIOptimizationContext | None:
+    return _DEFAULT_CONTEXT if ctx is None else ctx
+
+
+def _ctx(ctx: QIOptimizationContext | None, field: str):
+    resolved = _resolve_context(ctx)
+    if resolved is not None:
+        return getattr(resolved, field)
+    return globals()[_CONTEXT_FIELDS[field]]
+
+
 def configure(context: dict) -> None:
     """Install script-level constants used by the staged helper routines."""
 
+    global _DEFAULT_CONTEXT
     globals().update(context)
+    try:
+        _DEFAULT_CONTEXT = make_qi_optimization_context(context)
+    except KeyError:
+        _DEFAULT_CONTEXT = None
 
 
 def _diagnostic_float(record, key):
@@ -138,7 +277,7 @@ def target_helicity_seed_terms(*, max_mode, amplitude=TARGET_HELICITY_SEED_AMPLI
     )
 
 
-def _normalise_seed_terms(config):
+def _normalise_seed_terms(config, *, ctx: QIOptimizationContext | None = None):
     """Return target-helicity seed terms from case config or compact tuples."""
 
     if not config:
@@ -149,7 +288,7 @@ def _normalise_seed_terms(config):
         terms = config.get("terms")
         if terms is None:
             terms = target_helicity_seed_terms(
-                max_mode=int(config.get("max_mode", MAX_MODE)),
+                max_mode=int(config.get("max_mode", _ctx(ctx, "max_mode"))),
                 amplitude=float(config.get("amplitude", TARGET_HELICITY_SEED_AMPLITUDE)),
             )
     else:
@@ -160,7 +299,7 @@ def _normalise_seed_terms(config):
     return tuple(normalised)
 
 
-def run_target_helicity_seed_preconditioner(input_file, output_dir, config):
+def run_target_helicity_seed_preconditioner(input_file, output_dir, config, *, ctx: QIOptimizationContext | None = None):
     """Insert deterministic 1e-5 target-helicity modes before local QI solves.
 
     The source VMEC input is left untouched.  Existing nonzero coefficients are
@@ -169,7 +308,7 @@ def run_target_helicity_seed_preconditioner(input_file, output_dir, config):
     """
 
     config = dict(config or {}) if isinstance(config, dict) else {"terms": config}
-    terms = _normalise_seed_terms(config)
+    terms = _normalise_seed_terms(config, ctx=ctx)
     if not terms:
         return Path(input_file)
     source = vj.read_indata(input_file)
@@ -286,7 +425,7 @@ def _partial_diagnostics_from_history(history: dict, diagnostics: dict) -> dict:
     return out
 
 
-def save_raw_seed_initial_artifacts(input_file, input_out, wout_out):
+def save_raw_seed_initial_artifacts(input_file, input_out, wout_out, *, ctx: QIOptimizationContext | None = None):
     """Save the unpreconditioned VMEC input deck and its solved WOUT."""
 
     input_out = Path(input_out)
@@ -294,7 +433,7 @@ def save_raw_seed_initial_artifacts(input_file, input_out, wout_out):
     input_out.parent.mkdir(parents=True, exist_ok=True)
     wout_out.parent.mkdir(parents=True, exist_ok=True)
     vj.write_indata(input_out, vj.read_indata(input_file))
-    run = vj.run_fixed_boundary(input_file, solver_device=SOLVER_DEVICE, verbose=False)
+    run = vj.run_fixed_boundary(input_file, solver_device=_ctx(ctx, "solver_device"), verbose=False)
     vj.write_wout_from_fixed_boundary_run(wout_out, run)
     return run
 
@@ -328,28 +467,29 @@ def basin_prefilter_score(metrics, targets, config):
     )
 
 
-def make_basin_prefilter_options(config):
+def make_basin_prefilter_options(config, *, ctx: QIOptimizationContext | None = None):
+    qi_options = _ctx(ctx, "qi_options")
     return vj.QIDiagnosticOptions(
-        surfaces=SURFACES,
-        mboz=_resolution_value(OPT_QI_RESOLUTION, "mboz", QI_OPTIONS.mboz),
-        nboz=_resolution_value(OPT_QI_RESOLUTION, "nboz", QI_OPTIONS.nboz),
-        nphi=_resolution_value(OPT_QI_RESOLUTION, "nphi", QI_OPTIONS.nphi),
-        nalpha=_resolution_value(OPT_QI_RESOLUTION, "nalpha", QI_OPTIONS.nalpha),
-        n_bounce=_resolution_value(OPT_QI_RESOLUTION, "n_bounce", QI_OPTIONS.n_bounce),
-        include_bounce_endpoints=QI_OPTIONS.include_bounce_endpoints,
-        phimin=float(QI_OPTIONS.phimin),
-        jit_booz=JIT_BOOZ,
-        mirror_threshold=float(config.get("mirror_threshold", MAX_MIRROR_RATIO)),
+        surfaces=_ctx(ctx, "surfaces"),
+        mboz=_resolution_value(_ctx(ctx, "opt_qi_resolution"), "mboz", qi_options.mboz),
+        nboz=_resolution_value(_ctx(ctx, "opt_qi_resolution"), "nboz", qi_options.nboz),
+        nphi=_resolution_value(_ctx(ctx, "opt_qi_resolution"), "nphi", qi_options.nphi),
+        nalpha=_resolution_value(_ctx(ctx, "opt_qi_resolution"), "nalpha", qi_options.nalpha),
+        n_bounce=_resolution_value(_ctx(ctx, "opt_qi_resolution"), "n_bounce", qi_options.n_bounce),
+        include_bounce_endpoints=qi_options.include_bounce_endpoints,
+        phimin=float(qi_options.phimin),
+        jit_booz=_ctx(ctx, "jit_booz"),
+        mirror_threshold=float(config.get("mirror_threshold", _ctx(ctx, "max_mirror_ratio"))),
         mirror_ntheta=int(config.get("mirror_ntheta", 32)),
         mirror_nphi=int(config.get("mirror_nphi", 32)),
-        mirror_surface_index=config.get("mirror_surface_index", MIRROR_SURFACE_INDEX),
-        elongation_threshold=float(config.get("max_elongation", MAX_ELONGATION)),
+        mirror_surface_index=config.get("mirror_surface_index", _ctx(ctx, "mirror_surface_index")),
+        elongation_threshold=float(config.get("max_elongation", _ctx(ctx, "max_elongation"))),
         elongation_ntheta=int(config.get("elongation_ntheta", 24)),
         elongation_nphi=int(config.get("elongation_nphi", 8)),
     )
 
 
-def run_basin_prefilter(input_file, output_dir, config):
+def run_basin_prefilter(input_file, output_dir, config, *, ctx: QIOptimizationContext | None = None):
     """Run a bounded large-step prefilter and return the selected input deck."""
 
     if not bool(config.get("enabled", False)):
@@ -361,8 +501,8 @@ def run_basin_prefilter(input_file, output_dir, config):
     survey_dir.mkdir(parents=True, exist_ok=True)
     stage = build_diagnostic_stage(
         input_path=Path(input_file),
-        max_mode=MAX_MODE,
-        min_vmec_mode=MIN_VMEC_MODE,
+        max_mode=_ctx(ctx, "max_mode"),
+        min_vmec_mode=_ctx(ctx, "min_vmec_mode"),
         include=("rc", "zs"),
         fix=("rc00",),
         project_input_boundary_to_max_mode=True,
@@ -370,10 +510,10 @@ def run_basin_prefilter(input_file, output_dir, config):
         inner_ftol=float(config.get("inner_ftol", 1.0e-8)),
         trial_max_iter=int(config.get("trial_max_iter", 30)),
         trial_ftol=float(config.get("trial_ftol", 1.0e-8)),
-        solver_device=SOLVER_DEVICE,
+        solver_device=_ctx(ctx, "solver_device"),
     )
     names = boundary_param_names(stage.specs)
-    x_scale = create_x_scale(stage.specs, alpha=float(config.get("alpha", ALPHA)))
+    x_scale = create_x_scale(stage.specs, alpha=float(config.get("alpha", _ctx(ctx, "alpha"))))
     candidates = generate_basin_candidates(
         names=names,
         x_scale=x_scale,
@@ -384,14 +524,14 @@ def run_basin_prefilter(input_file, output_dir, config):
         directions=tuple(config.get("directions", ("axes", "rademacher"))),
         include_zero=True,
     )[: max(1, int(config.get("max_candidates", 24)))]
-    options = make_basin_prefilter_options(config)
+    options = make_basin_prefilter_options(config, ctx=ctx)
     targets = SurveyTargets(
-        smooth_qi_max=QI_GATE_SMOOTH_MAX,
-        legacy_qi_max=QI_GATE_LEGACY_MAX,
-        mirror_ratio_max=float(config.get("mirror_threshold", MAX_MIRROR_RATIO)),
-        max_elongation=float(config.get("max_elongation", MAX_ELONGATION)),
-        abs_iota_min=TARGET_ABS_IOTA_MIN,
-        target_aspect=TARGET_ASPECT,
+        smooth_qi_max=_ctx(ctx, "qi_gate_smooth_max"),
+        legacy_qi_max=_ctx(ctx, "qi_gate_legacy_max"),
+        mirror_ratio_max=float(config.get("mirror_threshold", _ctx(ctx, "max_mirror_ratio"))),
+        max_elongation=float(config.get("max_elongation", _ctx(ctx, "max_elongation"))),
+        abs_iota_min=_ctx(ctx, "target_abs_iota_min"),
+        target_aspect=_ctx(ctx, "target_aspect"),
         aspect_tolerance=2.0,
     )
     records = []
@@ -463,43 +603,46 @@ def qi_diagnostics_for_result(
     mirror_surface_index,
     smooth_qi_max=None,
     legacy_qi_max=None,
+    ctx: QIOptimizationContext | None = None,
 ):
-    smooth_qi_max = QI_GATE_SMOOTH_MAX if smooth_qi_max is None else float(smooth_qi_max)
-    legacy_qi_max = QI_GATE_LEGACY_MAX if legacy_qi_max is None else float(legacy_qi_max)
+    qi_options = _ctx(ctx, "qi_options")
+    surfaces = _ctx(ctx, "surfaces")
+    smooth_qi_max = _ctx(ctx, "qi_gate_smooth_max") if smooth_qi_max is None else float(smooth_qi_max)
+    legacy_qi_max = _ctx(ctx, "qi_gate_legacy_max") if legacy_qi_max is None else float(legacy_qi_max)
     opt = stage_result.final_optimizer
     diagnostic_options = vj.QIDiagnosticOptions(
-        surfaces=SURFACES,
-        mboz=QI_OPTIONS.mboz,
-        nboz=QI_OPTIONS.nboz,
-        nphi=QI_OPTIONS.nphi,
-        nalpha=QI_OPTIONS.nalpha,
-        n_bounce=QI_OPTIONS.n_bounce,
-        include_bounce_endpoints=QI_OPTIONS.include_bounce_endpoints,
-        softness=QI_OPTIONS.softness,
-        width_weight=QI_OPTIONS.width_weight,
-        branch_width_weight=QI_OPTIONS.branch_width_weight,
-        branch_width_softness=QI_OPTIONS.branch_width_softness,
-        profile_weight=QI_OPTIONS.profile_weight,
-        shuffle_profile_weight=QI_OPTIONS.shuffle_profile_weight,
-        shuffle_profile_softness=QI_OPTIONS.shuffle_profile_softness,
-        shuffle_profile_nphi_out=QI_OPTIONS.shuffle_profile_nphi_out,
-        weighted_shuffle_profile_weight=QI_OPTIONS.weighted_shuffle_profile_weight,
-        weighted_shuffle_profile_softness=QI_OPTIONS.weighted_shuffle_profile_softness,
-        aligned_profile_weight=QI_OPTIONS.aligned_profile_weight,
-        aligned_profile_softness=QI_OPTIONS.aligned_profile_softness,
-        aligned_profile_trap_level=QI_OPTIONS.aligned_profile_trap_level,
-        aligned_profile_trap_softness=QI_OPTIONS.aligned_profile_trap_softness,
-        phimin=float(QI_OPTIONS.phimin),
+        surfaces=surfaces,
+        mboz=qi_options.mboz,
+        nboz=qi_options.nboz,
+        nphi=qi_options.nphi,
+        nalpha=qi_options.nalpha,
+        n_bounce=qi_options.n_bounce,
+        include_bounce_endpoints=qi_options.include_bounce_endpoints,
+        softness=qi_options.softness,
+        width_weight=qi_options.width_weight,
+        branch_width_weight=qi_options.branch_width_weight,
+        branch_width_softness=qi_options.branch_width_softness,
+        profile_weight=qi_options.profile_weight,
+        shuffle_profile_weight=qi_options.shuffle_profile_weight,
+        shuffle_profile_softness=qi_options.shuffle_profile_softness,
+        shuffle_profile_nphi_out=qi_options.shuffle_profile_nphi_out,
+        weighted_shuffle_profile_weight=qi_options.weighted_shuffle_profile_weight,
+        weighted_shuffle_profile_softness=qi_options.weighted_shuffle_profile_softness,
+        aligned_profile_weight=qi_options.aligned_profile_weight,
+        aligned_profile_softness=qi_options.aligned_profile_softness,
+        aligned_profile_trap_level=qi_options.aligned_profile_trap_level,
+        aligned_profile_trap_softness=qi_options.aligned_profile_trap_softness,
+        phimin=float(qi_options.phimin),
         mirror_threshold=mirror_threshold,
         mirror_surface_index=mirror_surface_index,
-        elongation_threshold=MAX_ELONGATION,
+        elongation_threshold=_ctx(ctx, "max_elongation"),
     )
     diagnostics = vj.qi_diagnostics_from_state(
         state=stage_result.final_state,
         static=opt.static,
         indata=opt.indata,
         signgs=opt.signgs,
-        surfaces=SURFACES,
+        surfaces=surfaces,
         options=diagnostic_options,
     )
     return annotate_qi_seed_suitability(
@@ -507,10 +650,10 @@ def qi_diagnostics_for_result(
         targets=QISeedSuitabilityTargets(
             smooth_qi_max=smooth_qi_max,
             legacy_qi_max=legacy_qi_max,
-            target_aspect=TARGET_ASPECT,
-            abs_iota_min=TARGET_ABS_IOTA_MIN,
+            target_aspect=_ctx(ctx, "target_aspect"),
+            abs_iota_min=_ctx(ctx, "target_abs_iota_min"),
             mirror_ratio_max=mirror_threshold,
-            max_elongation=MAX_ELONGATION,
+            max_elongation=_ctx(ctx, "max_elongation"),
         ),
     )
 
@@ -526,34 +669,37 @@ def qi_diagnostics_for_run(
     resolution=None,
     smooth_qi_max=None,
     legacy_qi_max=None,
+    ctx: QIOptimizationContext | None = None,
 ):
     """Independent QI diagnostics for a raw fixed-boundary VMEC run."""
 
-    smooth_qi_max = QI_GATE_SMOOTH_MAX if smooth_qi_max is None else float(smooth_qi_max)
-    legacy_qi_max = QI_GATE_LEGACY_MAX if legacy_qi_max is None else float(legacy_qi_max)
+    qi_options = _ctx(ctx, "qi_options")
+    surfaces = _ctx(ctx, "surfaces")
+    smooth_qi_max = _ctx(ctx, "qi_gate_smooth_max") if smooth_qi_max is None else float(smooth_qi_max)
+    legacy_qi_max = _ctx(ctx, "qi_gate_legacy_max") if legacy_qi_max is None else float(legacy_qi_max)
     diagnostic_options = vj.QIDiagnosticOptions(
-        surfaces=SURFACES,
-        mboz=_resolution_value(resolution or {}, "mboz", QI_OPTIONS.mboz),
-        nboz=_resolution_value(resolution or {}, "nboz", QI_OPTIONS.nboz),
-        nphi=_resolution_value(resolution or {}, "nphi", QI_OPTIONS.nphi),
-        nalpha=_resolution_value(resolution or {}, "nalpha", QI_OPTIONS.nalpha),
-        n_bounce=_resolution_value(resolution or {}, "n_bounce", QI_OPTIONS.n_bounce),
-        include_bounce_endpoints=QI_OPTIONS.include_bounce_endpoints,
-        softness=QI_OPTIONS.softness,
-        width_weight=QI_OPTIONS.width_weight,
-        branch_width_weight=QI_OPTIONS.branch_width_weight,
-        branch_width_softness=QI_OPTIONS.branch_width_softness,
-        profile_weight=QI_OPTIONS.profile_weight,
-        shuffle_profile_weight=QI_OPTIONS.shuffle_profile_weight,
-        shuffle_profile_softness=QI_OPTIONS.shuffle_profile_softness,
-        shuffle_profile_nphi_out=QI_OPTIONS.shuffle_profile_nphi_out,
-        weighted_shuffle_profile_weight=QI_OPTIONS.weighted_shuffle_profile_weight,
-        weighted_shuffle_profile_softness=QI_OPTIONS.weighted_shuffle_profile_softness,
-        aligned_profile_weight=QI_OPTIONS.aligned_profile_weight,
-        aligned_profile_softness=QI_OPTIONS.aligned_profile_softness,
-        aligned_profile_trap_level=QI_OPTIONS.aligned_profile_trap_level,
-        aligned_profile_trap_softness=QI_OPTIONS.aligned_profile_trap_softness,
-        phimin=float(QI_OPTIONS.phimin),
+        surfaces=surfaces,
+        mboz=_resolution_value(resolution or {}, "mboz", qi_options.mboz),
+        nboz=_resolution_value(resolution or {}, "nboz", qi_options.nboz),
+        nphi=_resolution_value(resolution or {}, "nphi", qi_options.nphi),
+        nalpha=_resolution_value(resolution or {}, "nalpha", qi_options.nalpha),
+        n_bounce=_resolution_value(resolution or {}, "n_bounce", qi_options.n_bounce),
+        include_bounce_endpoints=qi_options.include_bounce_endpoints,
+        softness=qi_options.softness,
+        width_weight=qi_options.width_weight,
+        branch_width_weight=qi_options.branch_width_weight,
+        branch_width_softness=qi_options.branch_width_softness,
+        profile_weight=qi_options.profile_weight,
+        shuffle_profile_weight=qi_options.shuffle_profile_weight,
+        shuffle_profile_softness=qi_options.shuffle_profile_softness,
+        shuffle_profile_nphi_out=qi_options.shuffle_profile_nphi_out,
+        weighted_shuffle_profile_weight=qi_options.weighted_shuffle_profile_weight,
+        weighted_shuffle_profile_softness=qi_options.weighted_shuffle_profile_softness,
+        aligned_profile_weight=qi_options.aligned_profile_weight,
+        aligned_profile_softness=qi_options.aligned_profile_softness,
+        aligned_profile_trap_level=qi_options.aligned_profile_trap_level,
+        aligned_profile_trap_softness=qi_options.aligned_profile_trap_softness,
+        phimin=float(qi_options.phimin),
         mirror_threshold=float(mirror_threshold),
         mirror_surface_index=mirror_surface_index,
         elongation_threshold=float(max_elongation),
@@ -563,7 +709,7 @@ def qi_diagnostics_for_run(
         static=run.static,
         indata=run.indata,
         signgs=run.signgs,
-        surfaces=SURFACES,
+        surfaces=surfaces,
         options=diagnostic_options,
     )
     return annotate_qi_seed_suitability(
@@ -589,6 +735,7 @@ def write_qi_stage_checkpoint(
     diagnostics,
     promotion=None,
     role="stage",
+    ctx: QIOptimizationContext | None = None,
 ):
     """Persist QI stage metrics before root finalization can be reached."""
 
@@ -641,7 +788,7 @@ def write_qi_stage_checkpoint(
         _write_json_atomic(history_path, history)
     _write_json_atomic(diagnostics_path, diagnostics)
     _write_json_atomic(checkpoint_path, checkpoint)
-    _write_json_atomic(OUTPUT_DIR / "stage_checkpoint.json", checkpoint)
+    _write_json_atomic(_ctx(ctx, "output_dir") / "stage_checkpoint.json", checkpoint)
     return checkpoint_path
 
 
@@ -675,7 +822,7 @@ def boundary_reference_record_is_qi_safe(record, *, max_mirror_ratio, abs_iota_m
     ) >= float(abs_iota_min)
 
 
-def run_boundary_reference_preconditioner(input_file, output_dir, config):
+def run_boundary_reference_preconditioner(input_file, output_dir, config, *, ctx: QIOptimizationContext | None = None):
     """Scan same-NFP reference-family boundary jumps and return the selected input."""
 
     config = dict(config or {})
@@ -689,7 +836,7 @@ def run_boundary_reference_preconditioner(input_file, output_dir, config):
     reference = vj.read_indata(reference_input)
     keys = tuple(str(key).upper() for key in config.get("keys", ("RBC", "ZBS", "RBS", "ZBC")))
     lambdas = tuple(float(value) for value in config.get("lambdas", (0.99, 0.995, 1.0)))
-    max_mode = int(config.get("max_mode", MAX_MODE))
+    max_mode = int(config.get("max_mode", _ctx(ctx, "max_mode")))
     records = []
     print("\nBoundary-reference QI preconditioner:")
     print(f"  reference input: {reference_input}")
@@ -710,26 +857,27 @@ def run_boundary_reference_preconditioner(input_file, output_dir, config):
             candidate = vj.rebuild_for_optimization_resolution(
                 candidate,
                 max_mode=max_mode,
-                min_vmec_mode=MIN_VMEC_MODE,
+                min_vmec_mode=_ctx(ctx, "min_vmec_mode"),
             )
             vj.write_indata(input_out, candidate)
             run = vj.run_fixed_boundary(
                 input_out,
-                max_iter=int(config.get("max_iter", INNER_MAX_ITER)),
-                solver_device=SOLVER_DEVICE,
+                max_iter=int(config.get("max_iter", _ctx(ctx, "inner_max_iter"))),
+                solver_device=_ctx(ctx, "solver_device"),
                 verbose=False,
             )
             vj.write_wout_from_fixed_boundary_run(wout_out, run)
             diagnostics = qi_diagnostics_for_run(
                 run,
-                mirror_threshold=float(config.get("max_mirror_ratio", MAX_MIRROR_RATIO)),
-                mirror_surface_index=config.get("mirror_surface_index", MIRROR_SURFACE_INDEX),
-                target_aspect=float(config.get("target_aspect", TARGET_ASPECT)),
-                abs_iota_min=float(config.get("abs_iota_min", TARGET_ABS_IOTA_MIN)),
-                max_elongation=float(config.get("max_elongation", MAX_ELONGATION)),
+                mirror_threshold=float(config.get("max_mirror_ratio", _ctx(ctx, "max_mirror_ratio"))),
+                mirror_surface_index=config.get("mirror_surface_index", _ctx(ctx, "mirror_surface_index")),
+                target_aspect=float(config.get("target_aspect", _ctx(ctx, "target_aspect"))),
+                abs_iota_min=float(config.get("abs_iota_min", _ctx(ctx, "target_abs_iota_min"))),
+                max_elongation=float(config.get("max_elongation", _ctx(ctx, "max_elongation"))),
                 resolution=config.get("diagnostic_qi_resolution"),
-                smooth_qi_max=float(config.get("smooth_qi_max", QI_GATE_SMOOTH_MAX)),
-                legacy_qi_max=float(config.get("legacy_qi_max", QI_GATE_LEGACY_MAX)),
+                smooth_qi_max=float(config.get("smooth_qi_max", _ctx(ctx, "qi_gate_smooth_max"))),
+                legacy_qi_max=float(config.get("legacy_qi_max", _ctx(ctx, "qi_gate_legacy_max"))),
+                ctx=ctx,
             )
             score = boundary_reference_preconditioner_score(
                 diagnostics,
@@ -776,8 +924,8 @@ def run_boundary_reference_preconditioner(input_file, output_dir, config):
 
     candidate_pool = [record for record in successful if bool(record.get("qi_engineering_gate_passed"))] or successful
     if bool(config.get("prefer_qi_safe_candidates", True)):
-        max_mirror_ratio = float(config.get("max_mirror_ratio", MAX_MIRROR_RATIO))
-        abs_iota_min = float(config.get("abs_iota_min", TARGET_ABS_IOTA_MIN))
+        max_mirror_ratio = float(config.get("max_mirror_ratio", _ctx(ctx, "max_mirror_ratio")))
+        abs_iota_min = float(config.get("abs_iota_min", _ctx(ctx, "target_abs_iota_min")))
         safe_pool = [
             record
             for record in candidate_pool
@@ -805,16 +953,16 @@ def run_boundary_reference_preconditioner(input_file, output_dir, config):
     return Path(selected["input"])
 
 
-def stage_modes_for(stage):
+def stage_modes_for(stage, *, ctx: QIOptimizationContext | None = None):
     if "stage_mode_limits" in stage:
         return [vj.normalize_boundary_mode_limits(mode) for mode in stage["stage_mode_limits"]]
     if "stage_modes" in stage:
         return [int(mode) for mode in stage["stage_modes"]]
     return vj.repeated_stage_modes(
-        max_mode=MAX_MODE,
-        use_mode_continuation=USE_MODE_CONTINUATION,
-        continuation_nfev=CONTINUATION_NFEV,
-        repeats=int(stage.get("stage_repeats", STAGE_REPEATS)),
+        max_mode=_ctx(ctx, "max_mode"),
+        use_mode_continuation=_ctx(ctx, "use_mode_continuation"),
+        continuation_nfev=_ctx(ctx, "continuation_nfev"),
+        repeats=int(stage.get("stage_repeats", _ctx(ctx, "stage_repeats"))),
     )
 
 
@@ -845,7 +993,13 @@ def engineering_promotion_score(record):
     )
 
 
-def stage_promotes_candidate(stage, promotion, reference_diagnostics):
+def stage_promotes_candidate(
+    stage,
+    promotion,
+    reference_diagnostics,
+    *,
+    ctx: QIOptimizationContext | None = None,
+):
     """Apply the script's staged promotion rule to exact diagnostics."""
 
     reasons = list(promotion.get("qi_cleanup_rejection_reasons", []))
@@ -855,11 +1009,11 @@ def stage_promotes_candidate(stage, promotion, reference_diagnostics):
         iota_gain = candidate_iota - reference_iota
         qi_relax = float(stage.get("qi_relax_for_iota", 2.0))
         smooth_limit = qi_relax * max(
-            QI_GATE_SMOOTH_MAX,
+            _ctx(ctx, "qi_gate_smooth_max"),
             _finite_or_inf(reference_diagnostics.get("qi_smooth_total")),
         )
         legacy_limit = qi_relax * max(
-            QI_GATE_LEGACY_MAX,
+            _ctx(ctx, "qi_gate_legacy_max"),
             _finite_or_inf(reference_diagnostics.get("qi_legacy_total")),
         )
         if (
@@ -925,6 +1079,7 @@ def run_qi_stage_policy(
     make_qi_problem,
     boundary_reference_preconditioner,
     mirror_ramp_stages,
+    ctx: QIOptimizationContext | None = None,
 ):
     """Run the guarded staged QI policy and return ``(result, promotion_log)``.
 
@@ -939,19 +1094,20 @@ def run_qi_stage_policy(
             active_input_file,
             output_dir,
             make_qi_problem(),
-            max_nfev=MAX_NFEV,
-            label=f"QI optimization (max_mode={MAX_MODE}, {'ESS' if USE_ESS else 'no ESS'})",
+            max_nfev=_ctx(ctx, "max_nfev"),
+            label=f"QI optimization (max_mode={_ctx(ctx, 'max_mode')}, {'ESS' if _ctx(ctx, 'use_ess') else 'no ESS'})",
             save_final_outputs=False,
         )
         write_qi_stage_checkpoint(
             output_dir,
             stage_index=1,
             stage_name="qi_optimization",
-            stage_modes=STAGE_MODES,
+            stage_modes=_ctx(ctx, "stage_modes"),
             stage_result=result,
             diagnostics={},
             promotion={"diagnostics_pending": True},
             role="stage_pre_diagnostics",
+            ctx=ctx,
         )
         return result, promotion_log
 
@@ -967,10 +1123,10 @@ def run_qi_stage_policy(
         accepted_result = solve_qi_stage(
             active_input_file,
             baseline_output_dir,
-            make_qi_problem({"qi_weight": QI_WEIGHT, "qi_ceiling_weight": 0.0}),
+            make_qi_problem({"qi_weight": _ctx(ctx, "qi_weight"), "qi_ceiling_weight": 0.0}),
             max_nfev=1,
-            label=f"QI boundary-reference baseline (max_mode={MAX_MODE})",
-            stage_modes=(MAX_MODE,),
+            label=f"QI boundary-reference baseline (max_mode={_ctx(ctx, 'max_mode')})",
+            stage_modes=(_ctx(ctx, "max_mode"),),
             method="scipy_matrix_free",
             use_mode_continuation=False,
         )
@@ -978,26 +1134,29 @@ def run_qi_stage_policy(
             baseline_output_dir,
             stage_index=0,
             stage_name="boundary_reference_baseline",
-            stage_modes=(MAX_MODE,),
+            stage_modes=(_ctx(ctx, "max_mode"),),
             stage_result=accepted_result,
             diagnostics={},
             promotion={"qi_cleanup_promoted": True, "baseline": True, "diagnostics_pending": True},
             role="boundary_reference_baseline_pre_diagnostics",
+            ctx=ctx,
         )
         accepted_seed_diagnostics = qi_diagnostics_for_result(
             accepted_result,
-            mirror_threshold=MAX_MIRROR_RATIO,
-            mirror_surface_index=MIRROR_SURFACE_INDEX,
+            mirror_threshold=_ctx(ctx, "max_mirror_ratio"),
+            mirror_surface_index=_ctx(ctx, "mirror_surface_index"),
+            ctx=ctx,
         )
         write_qi_stage_checkpoint(
             baseline_output_dir,
             stage_index=0,
             stage_name="boundary_reference_baseline",
-            stage_modes=(MAX_MODE,),
+            stage_modes=(_ctx(ctx, "max_mode"),),
             stage_result=accepted_result,
             diagnostics=accepted_seed_diagnostics,
             promotion={"qi_cleanup_promoted": True, "baseline": True},
             role="boundary_reference_baseline",
+            ctx=ctx,
         )
         best_result = accepted_result
         best_diagnostics = accepted_seed_diagnostics
@@ -1005,16 +1164,16 @@ def run_qi_stage_policy(
     for stage_index, stage in enumerate(mirror_ramp_stages, start=1):
         stage_name = stage["name"]
         stage_output_dir = Path(output_dir) / f"mirror_ramp_{stage_index:02d}_{stage_name}"
-        stage_modes_i = stage_modes_for(stage)
+        stage_modes_i = stage_modes_for(stage, ctx=ctx)
         stage_result = solve_qi_stage(
             active_input_file,
             stage_output_dir,
             make_qi_problem(stage),
-            max_nfev=int(stage.get("max_nfev", MAX_NFEV)),
-            label=f"QI {stage_name} (max_mode={MAX_MODE}, {'ESS' if USE_ESS else 'no ESS'})",
+            max_nfev=int(stage.get("max_nfev", _ctx(ctx, "max_nfev"))),
+            label=f"QI {stage_name} (max_mode={_ctx(ctx, 'max_mode')}, {'ESS' if _ctx(ctx, 'use_ess') else 'no ESS'})",
             stage_modes=stage_modes_i,
-            method=str(stage.get("method", METHOD)),
-            use_mode_continuation=bool(stage.get("use_mode_continuation", USE_MODE_CONTINUATION)),
+            method=str(stage.get("method", _ctx(ctx, "method"))),
+            use_mode_continuation=bool(stage.get("use_mode_continuation", _ctx(ctx, "use_mode_continuation"))),
             scalar_step_bound=stage.get("scalar_step_bound"),
             lbfgs_step_bound=stage.get("lbfgs_step_bound"),
         )
@@ -1027,18 +1186,20 @@ def run_qi_stage_policy(
             diagnostics={},
             promotion={"diagnostics_pending": True},
             role="mirror_ramp_pre_diagnostics",
+            ctx=ctx,
         )
-        stage_mirror_threshold = float(stage.get("mirror_threshold", MAX_MIRROR_RATIO))
+        stage_mirror_threshold = float(stage.get("mirror_threshold", _ctx(ctx, "max_mirror_ratio")))
         stage_promotion_mirror_threshold = float(stage.get("promotion_mirror_threshold", stage_mirror_threshold))
-        stage_mirror_surface_index = stage.get("mirror_surface_index", MIRROR_SURFACE_INDEX)
-        stage_smooth_qi_max = float(stage.get("smooth_qi_max", QI_GATE_SMOOTH_MAX))
-        stage_legacy_qi_max = float(stage.get("legacy_qi_max", QI_GATE_LEGACY_MAX))
+        stage_mirror_surface_index = stage.get("mirror_surface_index", _ctx(ctx, "mirror_surface_index"))
+        stage_smooth_qi_max = float(stage.get("smooth_qi_max", _ctx(ctx, "qi_gate_smooth_max")))
+        stage_legacy_qi_max = float(stage.get("legacy_qi_max", _ctx(ctx, "qi_gate_legacy_max")))
         reference_diagnostics = None if accepted_result is None else qi_diagnostics_for_result(
             accepted_result,
             mirror_threshold=stage_promotion_mirror_threshold,
             mirror_surface_index=stage_mirror_surface_index,
             smooth_qi_max=stage_smooth_qi_max,
             legacy_qi_max=stage_legacy_qi_max,
+            ctx=ctx,
         )
         stage_diagnostics = qi_diagnostics_for_result(
             stage_result,
@@ -1046,6 +1207,7 @@ def run_qi_stage_policy(
             mirror_surface_index=stage_mirror_surface_index,
             smooth_qi_max=stage_smooth_qi_max,
             legacy_qi_max=stage_legacy_qi_max,
+            ctx=ctx,
         )
         promotion = vj.qi_cleanup_candidate_promotable(
             stage_diagnostics,
@@ -1053,20 +1215,20 @@ def run_qi_stage_policy(
             targets=QISeedSuitabilityTargets(
                 smooth_qi_max=stage_smooth_qi_max,
                 legacy_qi_max=stage_legacy_qi_max,
-                target_aspect=TARGET_ASPECT,
-                abs_iota_min=TARGET_ABS_IOTA_MIN,
+                target_aspect=_ctx(ctx, "target_aspect"),
+                abs_iota_min=_ctx(ctx, "target_abs_iota_min"),
                 mirror_ratio_max=stage_promotion_mirror_threshold,
-                max_elongation=MAX_ELONGATION,
+                max_elongation=_ctx(ctx, "max_elongation"),
             ),
             require_seed_gate=bool(stage.get("require_seed_gate", True)),
             require_mirror_improvement=bool(
                 stage.get("require_mirror_improvement", accepted_seed_diagnostics is not None)
-                and float(stage.get("mirror_weight", MIRROR_WEIGHT)) > 0.0
+                and float(stage.get("mirror_weight", _ctx(ctx, "mirror_weight"))) > 0.0
             ),
             require_engineering_gate=bool(stage.get("require_engineering_gate", False)),
             mirror_improvement_min=float(stage.get("mirror_improvement_min", 0.0)),
         )
-        promotion = stage_promotes_candidate(stage, promotion, reference_diagnostics)
+        promotion = stage_promotes_candidate(stage, promotion, reference_diagnostics, ctx=ctx)
         write_qi_stage_checkpoint(
             stage_output_dir,
             stage_index=stage_index,
@@ -1076,6 +1238,7 @@ def run_qi_stage_policy(
             diagnostics=stage_diagnostics,
             promotion=promotion,
             role="mirror_ramp",
+            ctx=ctx,
         )
         promotion_log.append(
             {
@@ -1083,7 +1246,7 @@ def run_qi_stage_policy(
                 "name": stage_name,
                 "output_dir": str(stage_output_dir),
                 "stage_modes": [_jsonable(vj.normalize_boundary_mode_limits(mode).__dict__) for mode in stage_modes_i],
-                "method": str(stage.get("method", METHOD)),
+                "method": str(stage.get("method", _ctx(ctx, "method"))),
                 "promoted": bool(promotion["qi_cleanup_promoted"]),
                 "smooth_qi": promotion.get("qi_smooth_total"),
                 "legacy_qi": promotion.get("qi_legacy_total"),
