@@ -451,6 +451,14 @@ class CaseResult:
     profile_solve_forward_trial_total_wall_time_s: float | None = None
     profile_solve_forward_exact_total_wall_time_s: float | None = None
     profile_exact_tape_build_wall_time_s: float | None = None
+    profile_exact_tape_build_solve_call_wall_time_s: float | None = None
+    profile_exact_tape_build_unattributed_wall_time_s: float | None = None
+    profile_exact_tape_solver_compute_forces_first_wall_time_s: float | None = None
+    profile_exact_tape_solver_compute_forces_rest_wall_time_s: float | None = None
+    profile_trial_solver_scan_total_wall_time_s: float | None = None
+    profile_trial_solver_scan_device_dispatch_wall_time_s: float | None = None
+    profile_trial_solver_scan_device_ready_wall_time_s: float | None = None
+    profile_trial_solver_scan_host_materialize_wall_time_s: float | None = None
     profile_jacobian_total_wall_time_s: float | None = None
     profile_write_wout_wall_time_s: float | None = None
     output_dir: str | None = None
@@ -578,6 +586,14 @@ def _profile_summary_fields(history: dict | None) -> dict[str, object]:
             "profile_solve_forward_trial_total_wall_time_s": None,
             "profile_solve_forward_exact_total_wall_time_s": None,
             "profile_exact_tape_build_wall_time_s": None,
+            "profile_exact_tape_build_solve_call_wall_time_s": None,
+            "profile_exact_tape_build_unattributed_wall_time_s": None,
+            "profile_exact_tape_solver_compute_forces_first_wall_time_s": None,
+            "profile_exact_tape_solver_compute_forces_rest_wall_time_s": None,
+            "profile_trial_solver_scan_total_wall_time_s": None,
+            "profile_trial_solver_scan_device_dispatch_wall_time_s": None,
+            "profile_trial_solver_scan_device_ready_wall_time_s": None,
+            "profile_trial_solver_scan_host_materialize_wall_time_s": None,
             "profile_jacobian_total_wall_time_s": None,
             "profile_write_wout_wall_time_s": None,
         }
@@ -602,6 +618,28 @@ def _profile_summary_fields(history: dict | None) -> dict[str, object]:
             profile, "solve_forward_exact_total"
         ),
         "profile_exact_tape_build_wall_time_s": _profile_wall_time(profile, "exact_tape_build"),
+        "profile_exact_tape_build_solve_call_wall_time_s": _profile_wall_time(
+            profile, "exact_tape_build_solve_call"
+        ),
+        "profile_exact_tape_build_unattributed_wall_time_s": _profile_wall_time(
+            profile, "exact_tape_build_unattributed"
+        ),
+        "profile_exact_tape_solver_compute_forces_first_wall_time_s": _profile_wall_time(
+            profile, "exact_tape_solver_compute_forces_first"
+        ),
+        "profile_exact_tape_solver_compute_forces_rest_wall_time_s": _profile_wall_time(
+            profile, "exact_tape_solver_compute_forces_rest"
+        ),
+        "profile_trial_solver_scan_total_wall_time_s": _profile_wall_time(profile, "trial_solver_scan_total"),
+        "profile_trial_solver_scan_device_dispatch_wall_time_s": _profile_wall_time(
+            profile, "trial_solver_scan_device_dispatch"
+        ),
+        "profile_trial_solver_scan_device_ready_wall_time_s": _profile_wall_time(
+            profile, "trial_solver_scan_device_ready"
+        ),
+        "profile_trial_solver_scan_host_materialize_wall_time_s": _profile_wall_time(
+            profile, "trial_solver_scan_host_materialize"
+        ),
         "profile_jacobian_total_wall_time_s": _profile_wall_time(profile, "jacobian_total"),
         "profile_write_wout_wall_time_s": _profile_wall_time(profile, "write_wout"),
     }
@@ -1665,6 +1703,30 @@ def _case_result_from_history(
             "profile_solve_forward_exact_total_wall_time_s"
         ],
         "profile_exact_tape_build_wall_time_s": profile_summary["profile_exact_tape_build_wall_time_s"],
+        "profile_exact_tape_build_solve_call_wall_time_s": profile_summary[
+            "profile_exact_tape_build_solve_call_wall_time_s"
+        ],
+        "profile_exact_tape_build_unattributed_wall_time_s": profile_summary[
+            "profile_exact_tape_build_unattributed_wall_time_s"
+        ],
+        "profile_exact_tape_solver_compute_forces_first_wall_time_s": profile_summary[
+            "profile_exact_tape_solver_compute_forces_first_wall_time_s"
+        ],
+        "profile_exact_tape_solver_compute_forces_rest_wall_time_s": profile_summary[
+            "profile_exact_tape_solver_compute_forces_rest_wall_time_s"
+        ],
+        "profile_trial_solver_scan_total_wall_time_s": profile_summary[
+            "profile_trial_solver_scan_total_wall_time_s"
+        ],
+        "profile_trial_solver_scan_device_dispatch_wall_time_s": profile_summary[
+            "profile_trial_solver_scan_device_dispatch_wall_time_s"
+        ],
+        "profile_trial_solver_scan_device_ready_wall_time_s": profile_summary[
+            "profile_trial_solver_scan_device_ready_wall_time_s"
+        ],
+        "profile_trial_solver_scan_host_materialize_wall_time_s": profile_summary[
+            "profile_trial_solver_scan_host_materialize_wall_time_s"
+        ],
         "profile_jacobian_total_wall_time_s": profile_summary["profile_jacobian_total_wall_time_s"],
         "profile_write_wout_wall_time_s": profile_summary["profile_write_wout_wall_time_s"],
         "output_dir": str(output_dir),
@@ -2696,6 +2758,14 @@ def _write_summary_csv(results: list[CaseResult], path: Path) -> None:
                 "profile_solve_forward_trial_total_wall_time_s",
                 "profile_solve_forward_exact_total_wall_time_s",
                 "profile_exact_tape_build_wall_time_s",
+                "profile_exact_tape_build_solve_call_wall_time_s",
+                "profile_exact_tape_build_unattributed_wall_time_s",
+                "profile_exact_tape_solver_compute_forces_first_wall_time_s",
+                "profile_exact_tape_solver_compute_forces_rest_wall_time_s",
+                "profile_trial_solver_scan_total_wall_time_s",
+                "profile_trial_solver_scan_device_dispatch_wall_time_s",
+                "profile_trial_solver_scan_device_ready_wall_time_s",
+                "profile_trial_solver_scan_host_materialize_wall_time_s",
                 "profile_jacobian_total_wall_time_s",
                 "profile_write_wout_wall_time_s",
                 "jax_backend",
