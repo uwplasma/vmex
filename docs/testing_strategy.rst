@@ -21,7 +21,8 @@ Target State
 - Current coverage target: keep the required ``95%`` actual line coverage gate
   green with meaningful fast and bounded-physics tests while preserving
   acceptable coverage runtime.  The current Python 3.11 required coverage gate
-  is ``95%`` after the latest local CI-equivalent ratchet reached ``95.06%``.
+  is ``95%`` after the latest local CI-equivalent ratchet reached ``95.10%`` on
+  commit ``1037744``.
 - Nightly/manual coverage: larger VMEC2000, GPU, and full-resolution physics
   checks run outside the required PR gate.
 - Repository checkout size: keep the tracked source tree small enough that a
