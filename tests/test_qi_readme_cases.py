@@ -164,7 +164,13 @@ def test_readme_renderer_keeps_deferred_case_from_promotion(
     monkeypatch.setattr(mod, "_load_json", fake_load_json)
 
     record = mod._case_record(
-        _synthetic_case(mod, tmp_path, "NFP=4 minimal seed", nfp=4, validation_status="deferred")
+        _synthetic_case(
+            mod,
+            tmp_path,
+            "NFP=4 minimal + QI-reference proposal",
+            nfp=4,
+            validation_status="deferred",
+        )
     )
 
     assert record["qi_nfp"] == 4
@@ -175,12 +181,12 @@ def test_readme_renderer_keeps_deferred_case_from_promotion(
     assert record["qi_gate_failures"] == "smooth_qi;legacy_qi;mirror"
 
 
-def test_readme_renderer_points_nfp4_row_at_minimal_seed() -> None:
+def test_readme_renderer_points_nfp4_row_at_reference_proposal_seed() -> None:
     mod = _load_module()
 
     nfp4 = mod.CASES[-1]
 
-    assert nfp4.label == "NFP=4 minimal seed"
+    assert nfp4.label == "NFP=4 minimal + QI-reference proposal"
     assert nfp4.input_file.name == "input.minimal_seed_nfp4"
     assert nfp4.output_dir == ROOT / "docs" / "_static" / "qi_readme_cases" / "nfp4_minimal"
     assert "nfp4_qi_finite_beta" not in str(nfp4.output_dir)
@@ -349,6 +355,9 @@ def test_real_qi_readme_csv_contains_only_clean_case_gated_rows() -> None:
     assert {row["qi_gate_failures"] for row in rows} == {""}
     assert {row["qi_seed_gate_passed"] for row in rows} == {"True"}
     assert {row["qi_engineering_gate_passed"] for row in rows} == {"True"}
+    labels = {row["case"] for row in rows}
+    assert "NFP=2 target-helicity seed" in labels
+    assert "NFP=4 minimal + QI-reference proposal" in labels
     nfp4 = next(row for row in rows if int(row["qi_nfp"]) == 4)
     assert int(nfp4["preconditioner_points"]) == 1
     assert float(nfp4["selected_lambda"]) == pytest.approx(1.0)

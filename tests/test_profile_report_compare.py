@@ -381,6 +381,44 @@ def test_profile_summary_prefers_split_replay_and_tangent_buckets() -> None:
     assert summary["exact_optimizer_patch_target"]["name"] == "jacobian_tape_replay_ready"
 
 
+def test_profile_summary_accounts_projected_replay_buckets() -> None:
+    report = _callback_report(
+        total_wall_time_s=20.0,
+        samples=2,
+        rss_peak_mib=256,
+        replay_wall_time_s=0.0,
+        accepted_replays=2,
+        solve_count=3,
+        cache_entry_growth=4,
+        solver_device="gpu",
+    )
+    report["profile"].pop("jacobian_tape_replay")
+    report["profile"].pop("jacobian_residual_tangents")
+    report["profile"]["jacobian_projected_replay_total"] = {
+        "count": 2,
+        "wall_time_s": 4.0,
+        "mean_wall_time_s": 2.0,
+    }
+    report["profile"]["jacobian_projected_tape_replay_dispatch"] = {
+        "count": 2,
+        "wall_time_s": 0.7,
+        "mean_wall_time_s": 0.35,
+    }
+    report["profile"]["jacobian_projected_replay_residual_tangents"] = {
+        "count": 2,
+        "wall_time_s": 3.3,
+        "mean_wall_time_s": 1.65,
+    }
+
+    summary = compare_tool.summarize_payload(report, label="gpu")
+
+    assert summary["metrics"]["replay_time_s"] == 4.0
+    assert summary["metrics"]["accepted_replay_dispatch_s"] == 0.7
+    assert summary["metrics"]["projected_residual_tangents_s"] == 3.3
+    assert summary["metrics"]["accepted_point_replay_count"] == 2
+    assert summary["exact_optimizer_patch_target"]["name"] == "jacobian_projected_replay_residual_tangents"
+
+
 def test_profile_summary_extracts_replay_scan_cache_diagnostics() -> None:
     report = _callback_report(
         total_wall_time_s=20.0,

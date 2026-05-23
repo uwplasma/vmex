@@ -583,3 +583,51 @@ def test_exact_optimizer_callback_report_schema_and_budget_status() -> None:
         "accepted_replays",
     }
     assert report["budget_status"]["measurements"]["accepted_replays"] == 1
+
+
+def test_exact_optimizer_callback_budget_status_counts_projected_replay() -> None:
+    args = exact_profile_tool._parse_args(
+        [
+            "--callback",
+            "jacobian",
+            "--budget-replay-wall-s",
+            "0.2",
+            "--budget-residual-tangent-wall-s",
+            "0.1",
+            "--budget-accepted-replays",
+            "0",
+        ]
+    )
+
+    report = exact_profile_tool._build_callback_payload(
+        args=args,
+        specs_count=8,
+        solver_device_resolved="gpu",
+        samples=[{"repeat": 0, "wall_time_s": 0.5, "profile_delta": {}}],
+        profile={
+            "jacobian_projected_replay_total": {"count": 1, "wall_time_s": 0.25, "mean_wall_time_s": 0.25},
+            "jacobian_projected_replay_residual_tangents": {
+                "count": 1,
+                "wall_time_s": 0.15,
+                "mean_wall_time_s": 0.15,
+            },
+        },
+        cache_before={"optimizer": {}, "total_entries": 0},
+        cache_after={"optimizer": {}, "total_entries": 0},
+        rss_before_bytes=None,
+        rss_after_bytes=None,
+        total_wall_s=0.5,
+        runtime={"default_backend": "gpu"},
+    )
+
+    assert report["budget_status"]["ok"] is False
+    assert {
+        item["name"] for item in report["budget_status"]["exceeded"]
+    } == {
+        "replay_wall_s",
+        "residual_tangent_wall_s",
+        "accepted_replays",
+    }
+    assert report["budget_status"]["measurements"]["replay_wall_s"] == 0.25
+    assert report["budget_status"]["measurements"]["residual_tangent_wall_s"] == 0.15
+    assert report["budget_status"]["measurements"]["accepted_replays"] == 1
