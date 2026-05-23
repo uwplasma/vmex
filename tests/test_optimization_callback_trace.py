@@ -264,6 +264,7 @@ def test_exact_optimizer_profile_parser_accepts_cache_budget_args() -> None:
             "--vmec-timing-detail",
             "--sync-replay-timing",
             "--jvp-only-exact-tape",
+            "--jvp-only-basepoint-carries",
             "--initial-metrics",
         ]
     )
@@ -284,6 +285,7 @@ def test_exact_optimizer_profile_parser_accepts_cache_budget_args() -> None:
     assert args.vmec_timing_detail is True
     assert args.sync_replay_timing is True
     assert args.jvp_only_exact_tape is True
+    assert args.jvp_only_basepoint_carries is True
     assert args.initial_metrics is True
 
 
@@ -292,6 +294,7 @@ def test_exact_optimizer_profile_skips_initial_metrics_by_default() -> None:
 
     assert args.initial_metrics is False
     assert args.jvp_only_exact_tape is None
+    assert args.jvp_only_basepoint_carries is None
 
 
 def test_exact_optimizer_profile_gradient_alias_preserves_check_gradient() -> None:
