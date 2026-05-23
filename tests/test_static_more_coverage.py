@@ -80,3 +80,17 @@ def test_build_static_can_disable_vmec_phase_cache(monkeypatch) -> None:
     assert getattr(out.trig_vmec, "phase_stack", None) is None
     assert out.tomnsps_masks is not None
     assert out.tomnsps_masks_edge is not None
+
+
+def test_build_static_populates_vmec_phase_cache_by_default(monkeypatch) -> None:
+    monkeypatch.delenv("VMEC_JAX_CACHE_VMEC_PHASE", raising=False)
+
+    out = static_mod.build_static(_cfg(ns=3, ntor=1))
+
+    assert out.trig_vmec is not None
+    assert out.trig_vmec.phase_stack is not None
+    assert out.trig_vmec.phase_dtheta_stack is not None
+    assert out.trig_vmec.phase_dzeta_stack is not None
+    assert out.trig_vmec.phase_stack.shape[0] == 2 * out.modes.m.size
+    assert out.trig_vmec.phase_stack_m is out.modes.m
+    assert out.trig_vmec.phase_stack_n is out.modes.n

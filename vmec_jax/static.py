@@ -15,7 +15,7 @@ easier to write fast, end-to-end differentiable kernels later.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import os
 import numpy as np
 
@@ -167,11 +167,14 @@ def build_static(
                     dtype=np.asarray(trig_vmec.cosmu).dtype,
                 )
 
-                trig_vmec.phase_stack = vmec_phase_stack
-                trig_vmec.phase_dtheta_stack = vmec_phase_dtheta_stack
-                trig_vmec.phase_dzeta_stack = vmec_phase_dzeta_stack
-                trig_vmec.phase_stack_m = modes.m
-                trig_vmec.phase_stack_n = modes.n
+                trig_vmec = replace(
+                    trig_vmec,
+                    phase_stack=vmec_phase_stack,
+                    phase_dtheta_stack=vmec_phase_dtheta_stack,
+                    phase_dzeta_stack=vmec_phase_dzeta_stack,
+                    phase_stack_m=modes.m,
+                    phase_stack_n=modes.n,
+                )
             except Exception:
                 vmec_phase_stack = None
                 vmec_phase_dtheta_stack = None
