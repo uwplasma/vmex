@@ -35,6 +35,10 @@ def test_m1_internal_to_physical_pair_converts_only_m1_row_and_handles_none() ->
     np.testing.assert_allclose(np.asarray(passthrough_rss), rss)
     np.testing.assert_allclose(np.asarray(passthrough_zcs), np.zeros_like(rss))
 
+    filled_rss, filled_zcs = _m1_internal_to_physical_pair(None, zcs, use_m1_pair_convert=False)
+    np.testing.assert_allclose(np.asarray(filled_rss), np.zeros_like(zcs))
+    np.testing.assert_allclose(np.asarray(filled_zcs), zcs)
+
     assert _m1_internal_to_physical_pair(None, None, use_m1_pair_convert=True) == (None, None)
 
 

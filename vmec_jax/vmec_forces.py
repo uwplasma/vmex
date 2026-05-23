@@ -651,10 +651,9 @@ def _diff_forward_half_noavg(a):
     a = jnp.asarray(a)
     if a.shape[0] < 2:
         return a
-    out = a
-    out = out.at[:-1].set(a[1:] - a[:-1])
-    out = out.at[-1].set(-a[-1])
-    return out
+    body = a[1:] - a[:-1]
+    tail = -a[-1:]
+    return jnp.concatenate([body, tail], axis=0)
 
 
 def _avg_forward_half(a):
@@ -662,10 +661,67 @@ def _avg_forward_half(a):
     a = jnp.asarray(a)
     if a.shape[0] < 2:
         return a
-    out = a
-    out = out.at[:-1].set(0.5 * (a[:-1] + a[1:]))
-    out = out.at[-1].set(0.5 * a[-1])
-    return out
+    body = 0.5 * (a[:-1] + a[1:])
+    tail = 0.5 * a[-1:]
+    return jnp.concatenate([body, tail], axis=0)
+
+
+def _add_edge_row(a, delta):
+    a = jnp.asarray(a)
+    if a.shape[0] == 0:
+        return a
+    return jnp.concatenate([a[:-1], a[-1:] + jnp.asarray(delta)[None, ...]], axis=0)
+
+
+def _avg_forward_half_to_int_or_zero(a):
+    a = jnp.asarray(a)
+    if a.shape[0] < 2:
+        return jnp.zeros_like(a)
+    body = 0.5 * (a[:-1] + a[1:])
+    tail = 0.5 * a[-1:]
+    return jnp.concatenate([body, tail], axis=0)
+
+
+def _scale_lambda_full_mesh(a, lamscale):
+    a = jnp.asarray(a)
+    if a.shape[0] < 2:
+        return a
+    return jnp.concatenate([a[:1], -lamscale * a[1:]], axis=0)
+
+
+def _scale_lambda_full_mesh_zero_axis(a, lamscale):
+    a = jnp.asarray(a)
+    if a.shape[0] < 2:
+        return jnp.zeros_like(a)
+    return jnp.concatenate([jnp.zeros_like(a[:1]), -lamscale * a[1:]], axis=0)
+
+
+def _odd_force_radial_updates(*, armn_o, azmn_o, brmn_o, bzmn_o, lu_o, pzu_0, pru_0, bsqr_s, lv_es):
+    """Build odd-parity radial updates without repeated whole-array .at copies."""
+    if armn_o.shape[0] == 0:
+        return armn_o, azmn_o, brmn_o, bzmn_o, lu_o
+
+    armn_tail = -armn_o[-1:] - pzu_0[-1:] * bsqr_s[-1:] + 0.5 * lv_es[-1:]
+    azmn_tail = -azmn_o[-1:] + pru_0[-1:] * bsqr_s[-1:]
+    brmn_tail = 0.5 * brmn_o[-1:]
+    bzmn_tail = 0.5 * bzmn_o[-1:]
+
+    if armn_o.shape[0] < 2:
+        return armn_tail, azmn_tail, brmn_tail, bzmn_tail, lu_o
+
+    armn_body = armn_o[1:] - armn_o[:-1] - pzu_0[:-1] * bsqr_s[:-1] + 0.5 * (lv_es[:-1] + lv_es[1:])
+    azmn_body = azmn_o[1:] - azmn_o[:-1] + pru_0[:-1] * bsqr_s[:-1]
+    brmn_body = 0.5 * (brmn_o[:-1] + brmn_o[1:])
+    bzmn_body = 0.5 * (bzmn_o[:-1] + bzmn_o[1:])
+    lu_body = lu_o[:-1] + lu_o[1:]
+
+    return (
+        jnp.concatenate([armn_body, armn_tail], axis=0),
+        jnp.concatenate([azmn_body, azmn_tail], axis=0),
+        jnp.concatenate([brmn_body, brmn_tail], axis=0),
+        jnp.concatenate([bzmn_body, bzmn_tail], axis=0),
+        jnp.concatenate([lu_body, lu_o[-1:]], axis=0),
+    )
 
 
 def vmec_forces_rz_from_wout(
@@ -890,19 +946,17 @@ def vmec_forces_rz_from_wout(
     lu_o = dshalfds * lu_e
 
     # Odd-parity kernels.
-    if armn_o.shape[0] >= 2:
-        armn_o = armn_o.at[:-1].set(
-            armn_o[1:] - armn_o[:-1] - pzu_0[:-1] * bsqr_s[:-1] + 0.5 * (lv_es[:-1] + lv_es[1:])
-        )
-        azmn_o = azmn_o.at[:-1].set(azmn_o[1:] - azmn_o[:-1] + pru_0[:-1] * bsqr_s[:-1])
-        brmn_o = brmn_o.at[:-1].set(0.5 * (brmn_o[:-1] + brmn_o[1:]))
-        bzmn_o = bzmn_o.at[:-1].set(0.5 * (bzmn_o[:-1] + bzmn_o[1:]))
-        lu_o = lu_o.at[:-1].set(lu_o[:-1] + lu_o[1:])
-
-    armn_o = armn_o.at[-1].set(-armn_o[-1] - pzu_0[-1] * bsqr_s[-1] + 0.5 * lv_es[-1])
-    azmn_o = azmn_o.at[-1].set(-azmn_o[-1] + pru_0[-1] * bsqr_s[-1])
-    brmn_o = brmn_o.at[-1].set(0.5 * brmn_o[-1])
-    bzmn_o = bzmn_o.at[-1].set(0.5 * bzmn_o[-1])
+    armn_o, azmn_o, brmn_o, bzmn_o, lu_o = _odd_force_radial_updates(
+        armn_o=armn_o,
+        azmn_o=azmn_o,
+        brmn_o=brmn_o,
+        bzmn_o=bzmn_o,
+        lu_o=lu_o,
+        pzu_0=pzu_0,
+        pru_0=pru_0,
+        bsqr_s=bsqr_s,
+        lv_es=lv_es,
+    )
 
     # Scale GIJ for odd-kernel contributions by s (VMEC: sqrts^2).
     ss = (psqrts * psqrts).astype(guu_i.dtype)
@@ -1020,10 +1074,10 @@ def vmec_forces_rz_from_wout(
                     zu0_phys_edge=np.asarray(zu0_edge),
                     ru0_phys_edge=np.asarray(ru0_edge),
                 )
-        armn_e = armn_e.at[-1].add(zu0_edge * rbsq_edge)
-        armn_o = armn_o.at[-1].add(zu0_edge * rbsq_edge)
-        azmn_e = azmn_e.at[-1].add(-ru0_edge * rbsq_edge)
-        azmn_o = azmn_o.at[-1].add(-ru0_edge * rbsq_edge)
+        armn_e = _add_edge_row(armn_e, zu0_edge * rbsq_edge)
+        armn_o = _add_edge_row(armn_o, zu0_edge * rbsq_edge)
+        azmn_e = _add_edge_row(azmn_e, -ru0_edge * rbsq_edge)
+        azmn_o = _add_edge_row(azmn_o, -ru0_edge * rbsq_edge)
 
     # ---------------------------------------------------------------------
     # Constraint force pipeline: compute gcon from ztemp via alias and apply
@@ -1066,7 +1120,7 @@ def vmec_forces_rz_from_wout(
     azcon_o = con.azcon_o
     gcon = con.gcon
 
-    return VmecRZForceKernels(
+    result = VmecRZForceKernels(
         armn_e=armn_e,
         armn_o=armn_o,
         brmn_e=brmn_e,
@@ -1215,10 +1269,8 @@ def vmec_forces_rz_from_wout_reference_fields(
         if ns_ < 2:
             return even
         psh = _pshalf_from_s(s)[:, None, None]
-        out = jnp.zeros_like(even)
-        out = out.at[1:].set(0.5 * (even[1:] + even[:-1] + psh[1:] * (odd_int[1:] + odd_int[:-1])))
-        out = out.at[0].set(out[1])
-        return out
+        inner = 0.5 * (even[1:] + even[:-1] + psh[1:] * (odd_int[1:] + odd_int[:-1]))
+        return jnp.concatenate([inner[:1], inner], axis=0)
 
     ss0 = s[:, None, None]
     guu_e = pru_0 * pru_0 + pzu_0 * pzu_0 + ss0 * (pru_1 * pru_1 + pzu_1 * pzu_1)
@@ -1287,19 +1339,17 @@ def vmec_forces_rz_from_wout_reference_fields(
     lu_o = dshalfds * lu_e
 
     # Odd-parity kernels.
-    if armn_o.shape[0] >= 2:
-        armn_o = armn_o.at[:-1].set(
-            armn_o[1:] - armn_o[:-1] - pzu_0[:-1] * bsqr_s[:-1] + 0.5 * (lv_es[:-1] + lv_es[1:])
-        )
-        azmn_o = azmn_o.at[:-1].set(azmn_o[1:] - azmn_o[:-1] + pru_0[:-1] * bsqr_s[:-1])
-        brmn_o = brmn_o.at[:-1].set(0.5 * (brmn_o[:-1] + brmn_o[1:]))
-        bzmn_o = bzmn_o.at[:-1].set(0.5 * (bzmn_o[:-1] + bzmn_o[1:]))
-        lu_o = lu_o.at[:-1].set(lu_o[:-1] + lu_o[1:])
-
-    armn_o = armn_o.at[-1].set(-armn_o[-1] - pzu_0[-1] * bsqr_s[-1] + 0.5 * lv_es[-1])
-    azmn_o = azmn_o.at[-1].set(-azmn_o[-1] + pru_0[-1] * bsqr_s[-1])
-    brmn_o = brmn_o.at[-1].set(0.5 * brmn_o[-1])
-    bzmn_o = bzmn_o.at[-1].set(0.5 * bzmn_o[-1])
+    armn_o, azmn_o, brmn_o, bzmn_o, lu_o = _odd_force_radial_updates(
+        armn_o=armn_o,
+        azmn_o=azmn_o,
+        brmn_o=brmn_o,
+        bzmn_o=bzmn_o,
+        lu_o=lu_o,
+        pzu_0=pzu_0,
+        pru_0=pru_0,
+        bsqr_s=bsqr_s,
+        lv_es=lv_es,
+    )
 
     ss = (psqrts * psqrts).astype(guu_i.dtype)
     guu_s = guu_i * ss
@@ -1340,20 +1390,12 @@ def vmec_forces_rz_from_wout_reference_fields(
     # re-deriving bsubv_e from lambda derivatives, which can amplify small
     # discrepancies in the reference path.
     ns = int(s.shape[0])
-    bsubu_e = jnp.zeros_like(bsubu)
-    bsubv_e = jnp.zeros_like(bsubv)
-    if ns >= 2:
-        bsubu_e = bsubu_e.at[:-1].set(0.5 * (bsubu[:-1] + bsubu[1:]))
-        bsubu_e = bsubu_e.at[-1].set(0.5 * bsubu[-1])
-        bsubv_e = bsubv_e.at[:-1].set(0.5 * (bsubv[:-1] + bsubv[1:]))
-        bsubv_e = bsubv_e.at[-1].set(0.5 * bsubv[-1])
+    bsubu_e = _avg_forward_half_to_int_or_zero(bsubu)
+    bsubv_e = _avg_forward_half_to_int_or_zero(bsubv)
 
     # Scale for tomnsps (skip axis surface).
-    clmn_even = jnp.zeros_like(bsubu_e)
-    blmn_even = jnp.zeros_like(bsubv_e)
-    if ns >= 2:
-        clmn_even = clmn_even.at[1:].set(-lamscale * bsubu_e[1:])
-        blmn_even = blmn_even.at[1:].set(-lamscale * bsubv_e[1:])
+    clmn_even = _scale_lambda_full_mesh_zero_axis(bsubu_e, lamscale)
+    blmn_even = _scale_lambda_full_mesh_zero_axis(bsubv_e, lamscale)
     clmn_odd = psqrts * clmn_even
     blmn_odd = psqrts * blmn_even
 
@@ -1634,8 +1676,8 @@ def vmec_residual_internal_from_kernels(
         # VMEC updates only i<=ntheta2; values for i>ntheta2 are retained on the
         # symmetric arrays and unused for the antisymmetric ones (tomnspa uses
         # the restricted interval). Preserve the original data to match VMEC.
-        a_sym = a.at[:, :nt2, :].set(a_sym_half)
-        a_asym = jnp.zeros_like(a).at[:, :nt2, :].set(a_asym_half)
+        a_sym = jnp.concatenate([a_sym_half, a[:, nt2:, :]], axis=1)
+        a_asym = jnp.concatenate([a_asym_half, jnp.zeros_like(a[:, nt2:, :])], axis=1)
         return a_sym, a_asym
 
     mask_pack = masks

@@ -52,6 +52,21 @@ def _resolve_wout(root: Path, wout_rel: str) -> Path:
             5e-5,
             1e-4,
         ),
+        pytest.param(
+            "nfp4_QH_warm_start",
+            "examples/data/input.nfp4_QH_warm_start",
+            "examples/data/wout_nfp4_QH_warm_start.nc",
+            1e-3,
+            1e-4,
+            marks=pytest.mark.xfail(
+                strict=True,
+                reason=(
+                    "Nonaxis getfsq scalar parity is tracked but not promoted: "
+                    "the current z-force scalar differs from VMEC2000 while "
+                    "the R/lambda channels already agree tightly."
+                ),
+            ),
+        ),
     ],
 )
 def test_getfsq_parity_against_wout(case_name: str, input_rel: str, wout_rel: str, rtol_rz: float, rtol_l: float):

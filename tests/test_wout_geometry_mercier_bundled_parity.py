@@ -189,7 +189,11 @@ def test_bundled_wout_mercier_and_jxbforce_profile_closures(wout_name: str) -> N
         + np.asarray(wout.Dgeod, dtype=float)
     )
     np.testing.assert_allclose(dmerc, parts, rtol=0.0, atol=0.0)
-    assert np.all(np.isfinite(dmerc))
+    for name in ("DMerc", "Dshear", "Dcurr", "Dwell", "Dgeod"):
+        values = np.asarray(getattr(wout, name), dtype=float)
+        assert values.shape == (int(wout.ns),), name
+        assert np.all(np.isfinite(values)), name
+        np.testing.assert_allclose(values[[0, -1]], 0.0, rtol=0.0, atol=0.0, err_msg=name)
     assert np.any(np.abs(dmerc[1:-1]) > 0.0)
 
     for name in ("jdotb", "bdotb", "bdotgradv"):
@@ -227,6 +231,8 @@ def test_single_grid_lasym_finite_beta_wout_diagnostic_closures() -> None:
         + np.asarray(wout.Dgeod, dtype=float)
     )
     np.testing.assert_allclose(dmerc, dmerc_parts, rtol=0.0, atol=0.0)
+    for name in ("DMerc", "Dshear", "Dcurr", "Dwell", "Dgeod"):
+        np.testing.assert_allclose(np.asarray(getattr(wout, name), dtype=float)[[0, -1]], 0.0, rtol=0.0, atol=0.0)
     assert np.linalg.norm(dmerc[1:-1]) > 0.0
 
     for name in ("rmns", "zmnc", "lmnc", "bmns", "bsubumns", "bsubvmns"):
