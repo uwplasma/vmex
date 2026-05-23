@@ -373,10 +373,10 @@ in the same case: ``35.76 s`` CPU and ``44.96 s`` GPU profile time.
 The same commit was profiled with a one-callback QH mode-2 exact Jacobian
 matrix on ``office`` (``inner_max_iter=40``, ``trial_max_iter=20``,
 ``--sync-replay-timing``).  The GPU profile was faster end-to-end than CPU
-(``14.84 s`` versus ``29.32 s``), with GPU accepted exact solve ``6.65 s``,
-tape build ``4.96 s``, replay ``6.14 s``, and initial tangent construction
-``2.04 s``.  CPU spent ``10.98 s`` in the exact solve, ``6.96 s`` in tape build,
-``6.58 s`` in replay, ``7.76 s`` in initial tangents, and ``4.00 s`` in
+(``15.45 s`` versus ``29.88 s``), with GPU accepted exact solve ``7.20 s``,
+tape build ``5.45 s``, replay ``6.16 s``, and initial tangent construction
+``2.09 s``.  CPU spent ``11.02 s`` in the exact solve, ``7.16 s`` in tape build,
+``6.72 s`` in replay, ``8.19 s`` in initial tangents, and ``3.95 s`` in
 residual tangents.  This keeps the current GPU optimization target focused on
 cold accepted-point tape/replay/tangent construction; forcing scan for GPU is
 not justified by these profiles.
