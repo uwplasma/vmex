@@ -396,6 +396,16 @@ nearly neutral: CPU profile time was ``29.97 s`` and GPU profile time was
 ``14.95 s``.  That is a small GPU win for this one callback, but not enough to
 change the default without larger mode and full optimizer-trajectory coverage.
 
+A larger QH mode-3 exact-Jacobian callback on ``office`` then showed that the
+projected-replay residual path was the wrong default for GPU.  With projected
+replay enabled the one-callback profile took ``69.06 s`` wall time
+(``63.53 s`` profile time, ``33.40 s`` replay, ``10.00 s`` projected residual
+tangents).  The same callback with projected replay disabled took ``21.59 s``
+wall time (``16.29 s`` profile time, ``4.29 s`` replay, ``2.38 s`` residual
+tangents).  ``VMEC_JAX_OPT_PROJECTED_REPLAY_RESIDUALS=1`` is therefore an
+explicit diagnostic probe; production GPU exact callbacks use the standard full
+replay path unless a future profile matrix reverses this result.
+
 For raw ``input.nfp2_QI`` follow-up profiling, keep the production-like scan
 measurement separate from phase attribution.  The scan path is best inspected
 with XProf traces because the force/preconditioner/update work is inside one
@@ -2418,9 +2428,9 @@ The scan preconditioner can use XLA's fused tridiagonal solver with
 pretransposed coefficients (``dl/d/du``).  Current bounded profiles show this
 is the fastest measured CPU scan path, while GPU optimization-trial callbacks
 still prefer the older scan path.  The default therefore follows the backend:
-CPU uses fused scan, GPU keeps the older scan path until the projected replay
-and launch-count lanes are fixed.  Keep the explicit env overrides for
-parity/perf bisection:
+CPU uses fused scan, GPU keeps the older scan path while the exact-callback
+replay and launch-count lanes are still being optimized.  Keep the explicit env
+overrides for parity/perf bisection:
 
 - ``VMEC_JAX_SCAN_PRECOND_LAXTRIDI=0``: force the older Thomas scan path.
 - ``VMEC_JAX_SCAN_PRECOND_LAXTRIDI=1``: explicitly request the fused scan path.

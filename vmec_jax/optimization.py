@@ -2633,17 +2633,10 @@ class FixedBoundaryExactOptimizer:
         flag = os.getenv("VMEC_JAX_OPT_PROJECTED_REPLAY_RESIDUALS")
         if flag is not None:
             return flag.strip().lower() in ("1", "true", "yes", "on")
-        backend_name = None
-        if self._solver_device_name is not None:
-            backend_name = str(self._solver_device_name).lower()
-        else:
-            try:
-                from ._compat import jax as _jax
-
-                backend_name = str(_jax.default_backend()).lower()
-            except Exception:
-                backend_name = None
-        return backend_name in ("gpu", "cuda", "rocm")
+        # QH mode-3 GPU profiles showed this path was launch dominated and
+        # much slower than the standard full replay path. Keep it as an
+        # explicit diagnostic probe instead of enabling it by backend.
+        return False
 
     def _discrete_jacobian_residual_helper(self, params_size: int, residuals_from_packed, *, jax):
         """Return cached residual/Jacobian projection helper for packed tangents."""
