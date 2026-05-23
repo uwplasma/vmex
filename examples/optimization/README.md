@@ -164,8 +164,7 @@ The examples pass `save_final_outputs=False` and then call
 diagnostics and plots.  For custom filenames, call `result.initial_optimizer`
 and `result.final_optimizer` directly; for convenience, omit
 `save_final_outputs=False` to let `least_squares_solve` write the default final
-artifacts. `result.final_params` and `result.final_state` refer to the selected
-exact accepted point, not an unreplayed relaxed trial point.
+artifacts. `result.final_params` and `result.final_state` refer to the selected exact accepted point, not an unreplayed relaxed trial point.
 For continuation details, start with
 `result.initial_stage` and `result.final_stage`; use
 `result.stage_histories` and `result.stage_timing_summaries` for per-stage

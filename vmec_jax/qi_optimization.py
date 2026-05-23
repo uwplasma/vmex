@@ -53,7 +53,9 @@ __all__ = [
     "boundary_reference_preconditioner_score",
     "boundary_reference_record_is_qi_safe",
     "configure",
+    "diagnostic_float",
     "engineering_promotion_score",
+    "jsonable",
     "make_basin_prefilter_options",
     "make_qi_optimization_context",
     "promotion_score",
@@ -230,6 +232,12 @@ def _diagnostic_float(record, key):
     return float(value) if value is not None else float("nan")
 
 
+def diagnostic_float(record, key):
+    """Return a scalar diagnostic value, or ``nan`` when it is unavailable."""
+
+    return _diagnostic_float(record, key)
+
+
 def _finite_or_inf(value):
     try:
         out = float(value)
@@ -387,6 +395,12 @@ def _jsonable(value):
     if arr.ndim == 0:
         return _jsonable(arr.item())
     return _jsonable(arr.tolist())
+
+
+def jsonable(value):
+    """Convert NumPy/JAX-like values into JSON-serializable containers."""
+
+    return _jsonable(value)
 
 
 def _write_json_atomic(path, payload) -> None:

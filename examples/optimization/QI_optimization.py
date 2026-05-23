@@ -552,20 +552,20 @@ expected_non_passing_stress = EXPECTED_GATE_STATUS == "non_passing_stress_fixtur
 engineering_gate_passed = bool(diagnostics["qi_engineering_gate_passed"])
 diagnostics["qi_case_expected_outcome_met"] = not engineering_gate_passed if expected_non_passing_stress else engineering_gate_passed
 diagnostics_path = OUTPUT_DIR / "diagnostics.json"
-diagnostics_path.write_text(json.dumps(qis._jsonable(diagnostics), indent=2, sort_keys=True) + "\n")
+diagnostics_path.write_text(json.dumps(qis.jsonable(diagnostics), indent=2, sort_keys=True) + "\n")
 saved_paths["diagnostics"] = diagnostics_path
 
-smooth_qi = qis._diagnostic_float(diagnostics, "qi_smooth_total")
-legacy_qi = qis._diagnostic_float(diagnostics, "qi_legacy_total")
-mean_iota = qis._diagnostic_float(diagnostics, "mean_iota")
+smooth_qi = qis.diagnostic_float(diagnostics, "qi_smooth_total")
+legacy_qi = qis.diagnostic_float(diagnostics, "qi_legacy_total")
+mean_iota = qis.diagnostic_float(diagnostics, "mean_iota")
 print("\nIndependent QI promotion gate:")
 print(f"  smooth QI:       {smooth_qi:.6e}  (limit {QI_GATE_SMOOTH_MAX:.1e})")
 print(f"  legacy QI:       {legacy_qi:.6e}  (limit {QI_GATE_LEGACY_MAX:.1e})")
-print(f"  aspect ratio:    {qis._diagnostic_float(diagnostics, 'aspect'):.6g}  (target {TARGET_ASPECT:.3g})")
+print(f"  aspect ratio:    {qis.diagnostic_float(diagnostics, 'aspect'):.6g}  (target {TARGET_ASPECT:.3g})")
 print(f"  abs(mean iota):  {abs(mean_iota):.6g}  (minimum {TARGET_ABS_IOTA_MIN:.3g})")
-print(f"  mirror ratio:    {qis._diagnostic_float(diagnostics, 'qi_mirror_ratio_max'):.6g}  (target {MAX_MIRROR_RATIO:.3g})")
+print(f"  mirror ratio:    {qis.diagnostic_float(diagnostics, 'qi_mirror_ratio_max'):.6g}  (target {MAX_MIRROR_RATIO:.3g})")
 print(f"  mirror by surf:  {diagnostics.get('qi_mirror_ratio_by_surface')}")
-print(f"  max elongation:  {qis._diagnostic_float(diagnostics, 'qi_max_elongation'):.6g}  (target {MAX_ELONGATION:.3g})")
+print(f"  max elongation:  {qis.diagnostic_float(diagnostics, 'qi_max_elongation'):.6g}  (target {MAX_ELONGATION:.3g})")
 print(f"  QI seed gate:    {bool(diagnostics['qi_seed_gate_passed'])}")
 print(f"  full eng. gate:  {engineering_gate_passed}")
 print(f"  rank score:      {diagnostics['qi_rank_score']:.6e}")

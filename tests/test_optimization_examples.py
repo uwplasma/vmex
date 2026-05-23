@@ -265,7 +265,7 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "reference_diagnostics = None if accepted_result is None else qi_diagnostics_for_result(" in support_text
     assert "mirror_ramp_promotion_log.json" in text
     assert "diagnostics.json" in text
-    assert "json.dumps(qis._jsonable(diagnostics)" in text
+    assert "json.dumps(qis.jsonable(diagnostics)" in text
     assert "qi_seed_gate_passed" in text
     assert "engineering_gate_passed" in text
     assert "qi_mirror_ratio_by_surface" in text
