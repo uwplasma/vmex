@@ -1063,6 +1063,7 @@ def test_readme_renderer_uses_preoptimization_initial_wout(tmp_path, monkeypatch
         iota_final=0.4,
         total_wall_time_s=1.0,
         output_dir=direct_qi_dir,
+        input_file=input_file,
     )
     qa = renderer.BestRun(
         problem="qa",

@@ -105,6 +105,17 @@ CONVERGED_PARITY_CASES = (
         timeout_s=240.0,
     ),
     ConvergedParityCase(
+        case="nfp4_QH_finite_beta",
+        input_relpath="examples/data/input.nfp4_QH_finite_beta",
+        updates={},
+        lfreeb=False,
+        axisymmetric=False,
+        lasym=False,
+        multigrid=True,
+        nightly=True,
+        timeout_s=300.0,
+    ),
+    ConvergedParityCase(
         case="cth_like_free_bdy",
         input_relpath="examples_single_grid/data/input.cth_like_free_bdy",
         updates={

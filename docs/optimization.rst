@@ -1255,7 +1255,9 @@ the reviewed docs figure:
      VMEC_JAX_QI_TARGET_ASPECT=4 \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516 \
      python examples/optimization/QI_optimization.py
-   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi python examples/optimization/QI_optimization.py
+   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi \
+     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/minimal_nfp4_to_qi_finite_beta_reference \
+     python examples/optimization/QI_optimization.py
 
 These commands create candidate result directories under ``results/``.  After
 reviewing the diagnostics and plots, replace the matching
