@@ -46,6 +46,16 @@ def _as_float_list(x: Any) -> list[float]:
     return [float(x)]
 
 
+def _has_nonzero_profile_coeffs(values: Any) -> bool:
+    """Return True when a namelist coefficient field has a nonzero entry."""
+
+    try:
+        coeffs = np.asarray(_as_float_list(values), dtype=float).reshape(-1)
+    except Exception:
+        return True
+    return bool(coeffs.size > 0 and np.any(coeffs != 0.0))
+
+
 def _poly_no_const(coeffs_1based, x):
     """Evaluate Σ_{i>=1} a_i x^i, where `coeffs_1based[i-1] == a_i`."""
     # Use np.asarray so coeffs[k] in the Python loop is a plain NumPy scalar, not
@@ -187,6 +197,32 @@ def flux_profiles_from_indata(indata: InData, s, *, signgs: int) -> FluxProfiles
     aphi_arr = jnp.asarray(aphi, dtype=s.dtype)
 
     lrfp = bool(indata.get_bool("LRFP", False))
+    has_iota_profile = _has_nonzero_profile_coeffs(indata.get("AI", []))
+
+    # Common CLI path: APHI is absent/default, so torflux(s)=s and
+    # torflux_deriv=1. Avoid compiling tiny JIT helpers and, for current-driven
+    # inputs without AI, avoid evaluating the full pressure/current profile just
+    # to discover that the iota profile is zero.
+    if (not bool(lrfp)) and len(aphi) == 1 and float(aphi[0]) == 1.0:
+        torflux_edge = (
+            jnp.asarray(signgs, dtype=s.dtype)
+            * jnp.asarray(phiedge, dtype=s.dtype)
+            / jnp.asarray(TWOPI, dtype=s.dtype)
+        )
+        phipf = torflux_edge * jnp.ones_like(s)
+        if has_iota_profile:
+            prof = eval_profiles(indata, s)
+            chipf = torflux_edge * prof.get("iota", jnp.zeros_like(s))
+        else:
+            chipf = jnp.zeros_like(s)
+        if ns < 2:
+            s_half = s
+        else:
+            s_half = jnp.concatenate([s[:1], 0.5 * (s[1:] + s[:-1])], axis=0)
+        phips = torflux_edge * jnp.ones_like(s_half)
+        phips = phips.at[0].set(jnp.zeros_like(phips[0]))
+        lamscale = lamscale_from_phips(phips, s)
+        return FluxProfiles(phipf=phipf, chipf=chipf, phips=phips, signgs=int(signgs), lamscale=lamscale)
 
     # Use cached JIT'd functions when possible (non-RFP path).
     aphi_tuple = tuple(float(x) for x in aphi)
@@ -199,6 +235,8 @@ def flux_profiles_from_indata(indata: InData, s, *, signgs: int) -> FluxProfiles
         _torflux = cached_torflux
 
         def _polflux_deriv(x):
+            if not has_iota_profile:
+                return jnp.zeros_like(x)
             tf = _torflux(x)
             tf = jnp.minimum(tf, jnp.asarray(1.0, dtype=tf.dtype))
             prof = eval_profiles(indata, tf)

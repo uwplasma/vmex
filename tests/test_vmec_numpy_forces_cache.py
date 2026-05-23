@@ -3,6 +3,8 @@ import gc
 import numpy as np
 
 import vmec_jax._compat as compat
+import vmec_jax.solve as solve_mod
+import vmec_jax.solve_force_payload_helpers as payload_helpers_mod
 import vmec_jax.vmec_forces as vf
 from vmec_jax.vmec_numpy_forces import (
     _NP_STACK_CACHE,
@@ -174,13 +176,22 @@ def test_np_fft_and_jax_lax_shims_match_numpy():
 
 def test_numpy_module_patch_restores_force_path_modules_and_numpy_mode():
     original_jnp = vf.jnp
+    original_solve_jnp = solve_mod.jnp
+    original_solve_jax = solve_mod.jax
+    original_payload_jnp = payload_helpers_mod.jnp
     assert compat.has_jax()
 
     with _numpy_module_patch():
         assert vf.jnp is _NP_MODULE
+        assert solve_mod.jnp is _NP_MODULE
+        assert isinstance(solve_mod.jax, _NumpyJaxShim)
+        assert payload_helpers_mod.jnp is _NP_MODULE
         assert not compat.has_jax()
 
     assert vf.jnp is original_jnp
+    assert solve_mod.jnp is original_solve_jnp
+    assert solve_mod.jax is original_solve_jax
+    assert payload_helpers_mod.jnp is original_payload_jnp
     assert compat.has_jax()
 
 

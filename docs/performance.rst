@@ -1379,6 +1379,26 @@ optimization path can avoid the many finite-difference VMEC subprocess columns
 that SIMSOPT+VMEC2000 needs.  It does mean that single-solve CPU/GPU runtime
 remains an active performance lane before claiming broad VMEC2000 runtime wins.
 
+Finite-beta CPU profile: May 2026
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The ``examples/data/input.nfp4_QH_finite_beta`` case is a useful stress test
+because it combines finite pressure/current profiles, ``mpol=5``, ``ntor=5``,
+and a two-stage ``NS_ARRAY=[5, 51]`` schedule.  On the local Apple CPU host,
+VMEC2000 converges this case in about ``3.3 s``.  Before the May 2026 profile
+cleanup, the public ``vmec_jax`` CPU path took about ``25.3 s`` cold for the
+same converged multigrid run.  After moving concrete profile evaluation and the
+CPU force helper post-processing out of residual JAX dispatch fragments, the
+same diagnostic run takes about ``20.6 s`` cold while preserving the final
+residual (``~5.6e-13``).
+
+The current bottleneck is therefore no longer the cubic current/pressure
+profile helper itself.  The remaining gap is dominated by many small
+XLA:CPU compile/dispatch fragments and host-side setup around the
+VMEC-control loop.  Future single-solve CPU work should target fewer JAX
+entry points per iteration and a less fragmented cold-start setup path before
+claiming VMEC2000-competitive finite-beta runtime.
+
 The figure rows and provenance are available as:
 
 - :download:`readme_runtime_compare.csv <_static/figures/readme_runtime_compare.csv>`

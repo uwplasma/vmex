@@ -86,6 +86,36 @@ def test_current_profile_spline_i_and_ip_follow_vmec_integral_convention():
     np.testing.assert_allclose(np.asarray(direct["current"]), 2.0 * s, rtol=1.0e-12, atol=1.0e-12)
 
 
+def test_concrete_jax_profile_grid_uses_host_equivalent_path():
+    if not has_jax():
+        pytest.skip("JAX is required for concrete JAX array profile coverage")
+
+    indata = InData(
+        scalars={
+            "PMASS_TYPE": "two_power",
+            "PIOTA_TYPE": "power_series",
+            "PCURR_TYPE": "cubic_spline_ip",
+            "AM": [4.0, 2.0, 1.0],
+            "AI": [0.25, 0.5],
+            "AC": [1.0],
+            "AC_AUX_S": [0.0, 0.5, 1.0],
+            "AC_AUX_F": [0.0, 1.0, 0.0],
+            "PRES_SCALE": 2.0,
+            "BLOAT": 1.0,
+            "SPRES_PED": 1.0,
+            "LRFP": False,
+            "NCURR": 1,
+        },
+        indexed={},
+    )
+    s_np = np.linspace(0.0, 1.0, 7)
+    prof_np = eval_profiles(indata, s_np)
+    prof_jax = eval_profiles(indata, jnp.asarray(s_np))
+
+    for key in ("pressure_pa", "pressure", "iota", "current"):
+        np.testing.assert_allclose(np.asarray(prof_jax[key]), np.asarray(prof_np[key]), rtol=1.0e-12, atol=1.0e-12)
+
+
 def test_profile_coeff_padding_stays_jit_differentiable_for_traced_current_coeffs():
     if not has_jax():
         pytest.skip("JAX is required for traced profile coefficient coverage")

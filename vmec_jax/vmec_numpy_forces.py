@@ -708,8 +708,17 @@ def _build_patches() -> list[tuple[Any, list[tuple[str, Any]]]]:
     import vmec_jax.vmec_constraints as _vmec_constraints
     import vmec_jax.fourier as _fourier
     import vmec_jax.field as _field
+    import vmec_jax.solve as _solve
+    import vmec_jax.solve_force_payload_helpers as _solve_force_payload_helpers
 
     patches = [
+        (_solve, [
+            ("jnp", _NP_MODULE),
+            ("jax", _JAX_SHIM),
+        ]),
+        (_solve_force_payload_helpers, [
+            ("jnp", _NP_MODULE),
+        ]),
         (_vmec_forces, [
             ("jnp", _NP_MODULE),
             ("jax", _JAX_SHIM),
