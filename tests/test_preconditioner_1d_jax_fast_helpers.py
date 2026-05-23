@@ -340,6 +340,43 @@ def test_rz_preconditioner_numpy_jax_precomputed_and_lax_agree():
     assert minimal.fzcs is None
 
 
+def test_high_mode_non_lasym_precomputed_tridi_matches_direct_apply():
+    pytest.importorskip("jax")
+
+    from vmec_jax.preconditioner_1d_jax import rz_preconditioner_apply
+
+    cfg = _cfg(mpol=5, ntor=4, lthreed=True, lasym=False)
+    mats = _manual_mats(ns=5, mpol=5, nrange=5)
+    frzl = _frzl(ns=5, mpol=5, nrange=5, include_optional=False)
+
+    direct = rz_preconditioner_apply(
+        frzl_in=frzl,
+        mats=mats,
+        jmax=5,
+        cfg=cfg,
+        use_precomputed=False,
+        use_lax_tridi=False,
+    )
+    precomputed = rz_preconditioner_apply(
+        frzl_in=frzl,
+        mats=mats,
+        jmax=5,
+        cfg=cfg,
+        use_precomputed=True,
+        use_lax_tridi=False,
+    )
+
+    for attr in ("frcc", "fzsc", "flsc"):
+        np.testing.assert_allclose(
+            np.asarray(getattr(precomputed, attr)),
+            np.asarray(getattr(direct, attr)),
+            rtol=1e-3,
+            atol=5e-4,
+        )
+    assert precomputed.frss is None
+    assert precomputed.fzcs is None
+
+
 def test_rz_preconditioner_apply_jit_reuses_inactive_placeholders(monkeypatch):
     from vmec_jax import preconditioner_1d_jax as p1d
     from vmec_jax.vmec_tomnsp import TomnspsRZL

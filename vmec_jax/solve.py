@@ -11954,6 +11954,11 @@ def solve_fixed_boundary_residual_iter(
                     "trig": trig,
                     "w_mode_mn": _adjoint_trace_array(w_mode_mn),
                     "precond_jmax": int(jmax),
+                    "preconditioner_use_precomputed_tridi": (
+                        None
+                        if preconditioner_use_precomputed_tridi is None
+                        else bool(preconditioner_use_precomputed_tridi)
+                    ),
                     "inv_tau_before": _adjoint_trace_array(inv_tau),
                     "fsq_prev_before": float(fsq_prev_before),
                     "reset_inv_tau": bool(iter2 == iter1),

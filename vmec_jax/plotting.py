@@ -1589,10 +1589,10 @@ def plot_wout(
     Replicates the output of the standalone ``vmecPlot2.py`` script in a
     vectorised, vmec_jax-native form.  Four figures are written:
 
-    * ``<name>_VMECparams.pdf``  — 9-panel profile + |B| overview
+    * ``<name>_VMECparams.pdf``  — 9-panel profile + ``|B|`` overview
     * ``<name>_poloidal_plot.png`` — LCFS cross-sections at multiple toroidal angles
     * ``<name>_VMECsurfaces.pdf``  — nested flux-surface cross-sections (8 panels)
-    * ``<name>_VMEC_3Dplot.png``   — 3-D LCFS surface coloured by |B|
+    * ``<name>_VMEC_3Dplot.png``   — 3-D LCFS surface coloured by ``|B|``
 
     Parameters
     ----------

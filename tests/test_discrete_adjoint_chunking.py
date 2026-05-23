@@ -403,10 +403,19 @@ def test_checkpoint_tape_dynamic_scan_runner_skips_inactive_trace_entries(monkey
     da.clear_replay_scan_caches()
     static = object()
 
-    def fake_dynamic_step(carry, trace, *, static, static_flags, preconditioner_jmax_override):
+    def fake_dynamic_step(
+        carry,
+        trace,
+        *,
+        static,
+        static_flags,
+        preconditioner_jmax_override,
+        preconditioner_use_precomputed_tridi=None,
+    ):
         assert static is not None
         assert static_flags["precond_jmax"] == 7
         assert preconditioner_jmax_override == 7
+        assert preconditioner_use_precomputed_tridi is None
         delta = jnp.asarray(trace["delta"], dtype=jnp.asarray(carry[0]).dtype)
         return tuple(jnp.asarray(part) + delta for part in carry)
 

@@ -139,7 +139,7 @@ case-specific artifacts are not aspect-6 README best-row promotion evidence.
 - Testing and coverage strategy: `docs/testing_strategy.rst`
 - Release checklist and CI gates: `docs/release_checklist.rst`
 - Latest published release:
-  [`v0.0.12`](https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.12)
+  [`v0.0.13`](https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.13)
 - Release-candidate CI baseline: re-check the newest completed green `main`
   run with `gh run list --repo uwplasma/vmec_jax --branch main --workflow CI
   --limit 5` before tagging.

@@ -18,6 +18,44 @@ def _require_slow() -> None:
         pytest.skip("Set RUN_SLOW=1 to run slow QH derivative checks")
 
 
+def test_replay_tridi_policy_helpers_and_static_flags():
+    import vmec_jax.discrete_adjoint as da
+
+    assert da._tridi_policy_cache_value(None) == -1
+    assert da._tridi_policy_cache_value(False) == 0
+    assert da._tridi_policy_cache_value(True) == 1
+    assert da._trace_preconditioner_use_precomputed_tridi({}) is None
+    assert da._trace_preconditioner_use_precomputed_tridi({"preconditioner_use_precomputed_tridi": True}) is True
+    assert (
+        da._trace_preconditioner_use_precomputed_tridi(
+            {"preconditioner_use_precomputed_tridi": False},
+            {"preconditioner_use_precomputed_tridi": True},
+        )
+        is True
+    )
+
+    base_trace = {
+        key: 1
+        for key in (
+            "apply_lforbal",
+            "include_edge_residual",
+            "apply_m1_constraints",
+            "limit_update_rms",
+            "limit_dt_from_force",
+            "vmec2000_control",
+            "divide_by_scalxc_for_update",
+            "signgs",
+        )
+    }
+    base_trace["precond_jmax"] = 4
+    base_trace["preconditioner_use_precomputed_tridi"] = True
+    flags = da._static_flags_from_replay_step_traces((dict(base_trace), dict(base_trace)))
+    assert flags["preconditioner_use_precomputed_tridi"] is True
+    bad = dict(base_trace, preconditioner_use_precomputed_tridi=False)
+    with pytest.raises(ValueError, match="tridiagonal policy"):
+        da._static_flags_from_replay_step_traces((base_trace, bad))
+
+
 def test_qh_warm_start_fixture_loads_expected_case(load_case_qh_warm_start):
     _cfg, _indata, static, boundary, _state0 = load_case_qh_warm_start
 

@@ -131,7 +131,7 @@ Current release note
 --------------------
 
 The latest prepared release from this checklist is
-`v0.0.12 <https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.12>`_, built
+`v0.0.13 <https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.13>`_, built
 from the matching release tag after the required CI gates pass.  Verify PyPI
 with a no-dependencies wheel download after publication.
 Package-index descriptions are immutable for already-published files, so any

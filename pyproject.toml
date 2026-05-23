@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vmec-jax"
-version = "0.0.12"
+version = "0.0.13"
 description = "End-to-end differentiable JAX implementation of VMEC2000 for fixed and free-boundary equilibria."
 readme = "README.md"
 requires-python = ">=3.10"
