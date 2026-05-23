@@ -502,6 +502,49 @@ def test_lasym_filter_loop_covers_fallback_channels_and_nyquist_weight_branch() 
     assert np.all(np.isfinite(filtered_v))
 
 
+def test_lasym_filter_parity_channels_zero_s_uses_unscaled_axis_branch() -> None:
+    trig = vmec_trig_tables(ntheta=4, nzeta=3, nfp=1, mmax=1, nmax=1, lasym=True, cache=False)
+    nt3 = int(trig.ntheta3)
+    nzeta = int(np.asarray(trig.cosnv).shape[0])
+    shape = (1, nt3, nzeta)
+    bsubu = _grid_field(shape, 0.2, scale=0.03)
+    bsubv = _grid_field(shape, -0.1, scale=0.02)
+    even_u = 0.5 * bsubu
+    odd_u = -0.25 * bsubu
+    even_v = 0.75 * bsubv
+    odd_v = 0.40 * bsubv
+
+    from_zero_s = _filter_bsubuv_jxbforce_lasym_loop(
+        bsubu=bsubu,
+        bsubv=bsubv,
+        trig=trig,
+        mmax_force=1,
+        nmax_force=1,
+        s=np.asarray([0.0]),
+        bsubu_even=even_u,
+        bsubu_odd=odd_u,
+        bsubv_even=even_v,
+        bsubv_odd=odd_v,
+    )
+    from_no_s = _filter_bsubuv_jxbforce_lasym_loop(
+        bsubu=bsubu,
+        bsubv=bsubv,
+        trig=trig,
+        mmax_force=1,
+        nmax_force=1,
+        s=None,
+        bsubu_even=even_u,
+        bsubu_odd=odd_u,
+        bsubv_even=even_v,
+        bsubv_odd=odd_v,
+    )
+
+    for actual, expected in zip(from_zero_s, from_no_s, strict=True):
+        assert actual.shape == shape
+        assert np.all(np.isfinite(actual))
+        np.testing.assert_allclose(actual, expected, rtol=1.0e-14, atol=1.0e-14)
+
+
 def test_nyquist_half_weight_validates_shapes_and_preserves_unweighted_cases() -> None:
     trig = vmec_trig_tables(ntheta=4, nzeta=3, nfp=1, mmax=1, nmax=1, lasym=False, cache=False)
     modes_empty = ModeTable(m=np.asarray([], dtype=int), n=np.asarray([], dtype=int))

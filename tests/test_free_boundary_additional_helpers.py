@@ -190,6 +190,20 @@ def test_mgrid_interpolation_uses_unit_current_when_raw_currents_are_absent():
         interpolate_mgrid_bfield(bad_bounds, r=0.5, z=0.5, phi=0.0)
 
 
+def test_mgrid_interpolation_explicit_empty_extcur_zeroes_raw_current_field():
+    data = _mgrid_data(raw_cur=(2.0, -1.0))
+
+    br_zero, bp_zero, bz_zero = interpolate_mgrid_bfield(data, r=2.0, z=0.0, phi=0.0, extcur=())
+    np.testing.assert_allclose(br_zero, 0.0)
+    np.testing.assert_allclose(bp_zero, 0.0)
+    np.testing.assert_allclose(bz_zero, 0.0)
+
+    br_first, bp_first, bz_first = interpolate_mgrid_bfield(data, r=2.0, z=0.0, phi=0.0, extcur=(3.0,))
+    assert float(abs(br_first)) > 0.0
+    assert float(abs(bp_first)) > 0.0
+    assert float(abs(bz_first)) > 0.0
+
+
 def test_boundary_metric_field_projection_and_degenerate_determinant_floor():
     R = np.array([[2.0]])
     Ru = np.array([[1.0]])

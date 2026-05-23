@@ -2087,7 +2087,7 @@ For free-boundary staging, use the dedicated benchmark script:
 .. code-block:: bash
 
   python tools/benchmarks/bench_free_boundary_wp1.py \
-    --input examples/data/input.DIII-D \
+    --input examples/data/input.DIII-D_lasym_false \
     --interp-points 20000 \
     --interp-repeats 5
 

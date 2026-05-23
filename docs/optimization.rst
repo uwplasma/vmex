@@ -657,32 +657,10 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
        save_final_outputs=False,
    )
 
-   initial_optimizer = result.initial_optimizer
-   final_optimizer = result.final_optimizer
-   final_result = result.final_result
    history = result.history
    objective_history = result.objective_history
    timing = result.timing_summary
-   saved_paths = {
-       "initial_input": OUTPUT_DIR / "input.initial",
-       "final_input": OUTPUT_DIR / "input.final",
-       "initial_wout": OUTPUT_DIR / "wout_initial.nc",
-       "final_wout": OUTPUT_DIR / "wout_final.nc",
-       "history": OUTPUT_DIR / "history.json",
-   }
-   initial_optimizer.save_input(saved_paths["initial_input"], result.initial_params)
-   initial_optimizer.save_wout(
-       saved_paths["initial_wout"],
-       result.initial_params,
-       state=result.initial_state,
-   )
-   final_optimizer.save_input(saved_paths["final_input"], result.final_params)
-   final_optimizer.save_wout(
-       saved_paths["final_wout"],
-       result.final_params,
-       state=result.final_state,
-   )
-   final_optimizer.save_history(saved_paths["history"], final_result)
+   saved_paths = vj.save_optimization_result(result, output_dir=OUTPUT_DIR)
 
    print(f"Final aspect ratio:    {history['aspect_final']:.6g}")
    print(f"Final mean iota:       {history['iota_final']:.6g}")
@@ -690,7 +668,7 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
    print(f"Wall time:             {timing['total_wall_time_s']:.2f} s")
    print(f"Recent objectives:     {objective_history[-3:]}")
 
-   wout_final = vj.load_wout(saved_paths["final_wout"])
+   wout_final = vj.load_wout(saved_paths.final_wout)
    theta, zeta, b_lcfs = vj.vmecplot2_bmag_grid(
        wout_final,
        s_index=-1,
@@ -702,21 +680,27 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
 
    plot_paths = {
        "boundary_comparison": vj.plot_3d_boundary_comparison(
-           saved_paths["initial_wout"],
-           saved_paths["final_wout"],
+           saved_paths.initial_wout,
+           saved_paths.final_wout,
            outdir=OUTPUT_DIR,
        ),
        "bmag_contours": vj.plot_bmag_contours(
-           saved_paths["initial_wout"],
-           saved_paths["final_wout"],
+           saved_paths.initial_wout,
+           saved_paths.final_wout,
            outdir=OUTPUT_DIR,
        ),
        "objective_history": vj.plot_objective_history(
-           saved_paths["history"],
+           saved_paths.history,
            outdir=OUTPUT_DIR,
        ),
    }
    print(plot_paths)
+
+The helper above only writes the standard artifacts.  If you need custom
+filenames, call ``result.initial_optimizer.save_input``,
+``result.initial_optimizer.save_wout``, ``result.final_optimizer.save_input``,
+``result.final_optimizer.save_wout``, and
+``result.final_optimizer.save_history`` directly.
 
 Objective callbacks receive ``(ctx, state)`` and may return a scalar or vector.
 For continuation runs, use ``result.initial_stage`` and ``result.final_stage``
@@ -872,7 +856,7 @@ dashed lane reached ``max_nfev``, hit the per-case timeout, or failed
 earlier such as from GPU OOM.  Curves are split by objective stage and plotted
 as best-so-far values within that stage, so QP preseed and full constrained QI
 refinement are not treated as one continuous scalar objective.  The QA input
-follows the omnigenity ``input.nfp22_QA`` deck and carries nonzero mode-1
+follows the omnigenity ``input.nfp2_QA_omnigenity`` deck and carries nonzero mode-1
 boundary terms so the iota residual has a useful derivative.  Direct QA without
 ESS remains a weak policy for high direct-start modes; staged continuation is
 the default research-grade policy for QA.
