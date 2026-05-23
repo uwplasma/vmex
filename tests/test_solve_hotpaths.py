@@ -12,6 +12,7 @@ from vmec_jax.init_guess import initial_guess_from_boundary
 from vmec_jax.solve import (
     _enforce_field_rows,
     _enforce_fixed_boundary_and_axis,
+    _preconditioner_output_payload_jit,
     _preconditioner_output_scaling_jit,
     _replace_mode_slice,
     _scale_mode_slice,
@@ -199,6 +200,61 @@ def test_preconditioner_output_scaling_jit_matches_reference():
             np.testing.assert_allclose(got_arr, want_arr)
     for got_arr, want_arr in zip(upd, want_upd):
         np.testing.assert_allclose(got_arr, want_arr)
+
+
+def test_preconditioner_output_payload_jit_matches_scaling_and_fsq1_reference():
+    pytest.importorskip("jax")
+
+    shape = (3, 2, 2)
+    base = np.arange(np.prod(shape), dtype=float).reshape(shape) / 10.0 + 0.5
+    frzl_rz = TomnspsRZL(
+        frcc=base,
+        frss=base + 1.0,
+        fzsc=base + 2.0,
+        fzcs=base + 3.0,
+        flsc=base + 4.0,
+        flcs=base + 5.0,
+        frsc=base + 6.0,
+        frcs=base + 7.0,
+        fzcc=base + 8.0,
+        fzss=base + 9.0,
+        flcc=base + 10.0,
+        flss=base + 11.0,
+    )
+    lam_prec = np.linspace(0.25, 0.75, shape[0])[:, None, None]
+    w_mode_mn = np.array([[1.0, 0.5], [0.25, 0.125]])
+    lambda_scale = np.asarray(3.0)
+    f_norm1 = np.asarray(2.0)
+    delta_s = np.asarray(0.125)
+    s = np.linspace(0.0, 1.0, shape[0])
+
+    payload = _preconditioner_output_payload_jit(
+        apply_lambda_update_scale=True,
+        vmec2000_control=True,
+        lconm1=True,
+    )
+    pre, upd, diag = payload(frzl_rz, lam_prec, w_mode_mn, lambda_scale, f_norm1, delta_s, s)
+
+    scaler = _preconditioner_output_scaling_jit(apply_lambda_update_scale=True)
+    pre_ref, upd_ref = scaler(frzl_rz, lam_prec, w_mode_mn, lambda_scale)
+    for got, want in zip(pre, pre_ref, strict=True):
+        np.testing.assert_allclose(np.asarray(got), np.asarray(want))
+    for got, want in zip(upd, upd_ref, strict=True):
+        np.testing.assert_allclose(np.asarray(got), np.asarray(want))
+
+    gcr2 = np.sum(np.asarray(pre_ref[0]) ** 2) + np.sum(np.asarray(pre_ref[1]) ** 2)
+    gcr2 = gcr2 + np.sum(np.asarray(pre_ref[6]) ** 2) + np.sum(np.asarray(pre_ref[7]) ** 2)
+    gcz2 = np.sum(np.asarray(pre_ref[2]) ** 2) + np.sum(np.asarray(pre_ref[3]) ** 2)
+    gcz2 = gcz2 + np.sum(np.asarray(pre_ref[8]) ** 2) + np.sum(np.asarray(pre_ref[9]) ** 2)
+    gcl2_full = (
+        np.sum(np.asarray(pre_ref[4])[1:] ** 2)
+        + np.sum(np.asarray(pre_ref[5])[1:] ** 2)
+        + np.sum(np.asarray(pre_ref[10])[1:] ** 2)
+        + np.sum(np.asarray(pre_ref[11])[1:] ** 2)
+    )
+    np.testing.assert_allclose(np.asarray(diag[3]), gcr2 * f_norm1)
+    np.testing.assert_allclose(np.asarray(diag[4]), gcz2 * f_norm1)
+    np.testing.assert_allclose(np.asarray(diag[5]), gcl2_full * delta_s)
 
 
 def test_preconditioner_output_scaling_gate_is_gpu_only_without_gpu(monkeypatch):

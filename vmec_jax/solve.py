@@ -182,12 +182,15 @@ from .solve_scan_time_control import (
     scan_time_control_scalars,
 )
 from .state import VMECState, pack_state, unpack_state
+from .vmec_residue import vmec_gcx2_from_tomnsps
+from .vmec_tomnsp import TomnspsRZL
 
 
 _SCAN_RUNNER_CACHE: OrderedDict[tuple, Any] = OrderedDict()
 _COMPUTE_FORCES_CACHE: OrderedDict[tuple, Any] = OrderedDict()
 _STRICT_UPDATE_STEP_JIT_CACHE: OrderedDict[tuple, Any] = OrderedDict()
 _PRECOND_OUTPUT_SCALE_JIT_CACHE: OrderedDict[tuple, Any] = OrderedDict()
+_PRECOND_OUTPUT_PAYLOAD_JIT_CACHE: OrderedDict[tuple, Any] = OrderedDict()
 
 
 _HostRestartDecision = _residual_iter_policy.HostRestartDecision
@@ -419,6 +422,81 @@ def _preconditioner_output_scaling_jit(*, apply_lambda_update_scale: bool):
         key,
         compiled,
         env_name="VMEC_JAX_PRECOND_OUTPUT_SCALE_CACHE_SIZE",
+        default=4,
+    )
+
+
+def _preconditioner_output_payload_jit(
+    *,
+    apply_lambda_update_scale: bool,
+    vmec2000_control: bool,
+    lconm1: bool,
+):
+    """Return a cached GPU payload builder for preconditioner outputs and fsq1.
+
+    This keeps the VMEC2000 convention that ``lambda_update_scale`` only changes
+    coefficient updates; the preconditioned lambda residual diagnostic still uses
+    the unscaled ``faclam*gcl`` norm.
+    """
+
+    if not has_jax():
+        return None
+    key = (bool(apply_lambda_update_scale), bool(vmec2000_control), bool(lconm1))
+    cached = _jit_cache_get(_PRECOND_OUTPUT_PAYLOAD_JIT_CACHE, key)
+    if cached is not None:
+        return cached
+
+    def _payload(frzl_rz, lam_prec, w_mode_mn, lambda_update_scale_j, f_norm1, delta_s, s):
+        (pre_blocks, update_blocks) = _preconditioner_output_scaling_jit(
+            apply_lambda_update_scale=bool(apply_lambda_update_scale)
+        )(frzl_rz, lam_prec, w_mode_mn, lambda_update_scale_j)
+        (frcc, frss, fzsc, fzcs, flsc, flcs, frsc, frcs, fzcc, fzss, flcc, flss) = pre_blocks
+        frzl_pre = TomnspsRZL(
+            frcc=frcc,
+            frss=frss,
+            fzsc=fzsc,
+            fzcs=fzcs,
+            flsc=flsc,
+            flcs=flcs,
+            frsc=frsc,
+            frcs=frcs,
+            fzcc=fzcc,
+            fzss=fzss,
+            flcc=flcc,
+            flss=flss,
+        )
+        gcr2_p, gcz2_p, gcl2_p = vmec_gcx2_from_tomnsps(
+            frzl=frzl_pre,
+            lconm1=bool(lconm1),
+            apply_m1_constraints=False,
+            include_edge=True,
+            apply_scalxc=False,
+            s=s,
+        )
+        f_norm1_j = jnp.asarray(f_norm1)
+        finite_fnorm1 = jnp.isfinite(f_norm1_j)
+        fsqr1 = jnp.where(finite_fnorm1, gcr2_p * f_norm1_j, jnp.asarray(0.0, dtype=jnp.asarray(gcr2_p).dtype))
+        fsqz1 = jnp.where(finite_fnorm1, gcz2_p * f_norm1_j, jnp.asarray(0.0, dtype=jnp.asarray(gcz2_p).dtype))
+        if bool(vmec2000_control):
+            gcl2_full = _lambda_preconditioned_full_norm(frzl_pre, use_jax=True)
+            fsql1 = gcl2_full * delta_s
+        else:
+            fsql1 = gcl2_p * delta_s
+        fsqr1_safe = jnp.where(jnp.isfinite(fsqr1), fsqr1, jnp.asarray(0.0, dtype=jnp.asarray(fsqr1).dtype))
+        fsqz1_safe = jnp.where(jnp.isfinite(fsqz1), fsqz1, jnp.asarray(0.0, dtype=jnp.asarray(fsqz1).dtype))
+        fsql1_safe = jnp.where(jnp.isfinite(fsql1), fsql1, jnp.asarray(0.0, dtype=jnp.asarray(fsql1).dtype))
+        return (
+            pre_blocks,
+            update_blocks,
+            (gcr2_p, gcz2_p, gcl2_p, fsqr1_safe, fsqz1_safe, fsql1_safe),
+        )
+
+    compiled = jax.jit(_payload)
+    return _jit_cache_put(
+        _PRECOND_OUTPUT_PAYLOAD_JIT_CACHE,
+        key,
+        compiled,
+        env_name="VMEC_JAX_PRECOND_OUTPUT_PAYLOAD_CACHE_SIZE",
         default=4,
     )
 
@@ -10423,6 +10501,7 @@ def solve_fixed_boundary_residual_iter(
             t_precond_start = time.perf_counter() if timing_enabled else None
             frzl_lam_pre = None
             preconditioner_outputs_scaled = False
+            preconditioner_fsq1_ready = False
             use_fused_precond_output_scaling = (not bool(host_update_assembly)) and jax.default_backend() != "cpu"
             if bool(vmec2000_control) and bool(cfg.lthreed):
                 from .preconditioner_1d_jax import (
@@ -10536,8 +10615,26 @@ def solve_fixed_boundary_residual_iter(
                         _preconditioner_output_blocks_np(frzl_rz=frzl_rz, lam_prec=lam_prec)
                     )
                 elif use_fused_precond_output_scaling:
-                    scale_outputs = _preconditioner_output_scaling_jit(
-                        apply_lambda_update_scale=(lambda_update_scale != 1.0)
+                    if (
+                        bool(vmec2000_control)
+                        and bool(vmec2000_cache_valid)
+                        and (not bool(need_bcovar_update))
+                        and (cache_rz_norm is not None)
+                        and (cache_f_norm1 is not None)
+                    ):
+                        rz_norm = jnp.asarray(cache_rz_norm)
+                        f_norm1 = jnp.asarray(cache_f_norm1)
+                    else:
+                        rz_norm = _rz_norm(state)
+                        f_norm1 = jnp.where(
+                            rz_norm != 0.0,
+                            1.0 / rz_norm,
+                            jnp.asarray(float("inf"), dtype=rz_norm.dtype),
+                        )
+                    payload_outputs = _preconditioner_output_payload_jit(
+                        apply_lambda_update_scale=(lambda_update_scale != 1.0),
+                        vmec2000_control=bool(vmec2000_control),
+                        lconm1=bool(getattr(static.cfg, "lconm1", True)),
                     )
                     (
                         (frcc, frss, fzsc, fzcs, flsc, flcs, frsc, frcs, fzcc, fzss, flcc, flss),
@@ -10555,8 +10652,13 @@ def solve_fixed_boundary_residual_iter(
                             flcc_u,
                             flss_u,
                         ),
-                    ) = scale_outputs(frzl_rz, lam_prec, w_mode_mn, lambda_update_scale_j)
+                        (gcr2_p, gcz2_p, gcl2_p, fsqr1_safe, fsqz1_safe, fsql1_safe),
+                    ) = payload_outputs(frzl_rz, lam_prec, w_mode_mn, lambda_update_scale_j, f_norm1, delta_s, s)
+                    fsqr1 = fsqr1_safe
+                    fsqz1 = fsqz1_safe
+                    fsql1 = fsql1_safe
                     preconditioner_outputs_scaled = True
+                    preconditioner_fsq1_ready = True
                 else:
                     frcc = jnp.asarray(frzl_rz.frcc)
                     frss = frzl_rz.frss
@@ -10701,8 +10803,26 @@ def solve_fixed_boundary_residual_iter(
                         _preconditioner_output_blocks_np(frzl_rz=frzl_rz, lam_prec=lam_prec)
                     )
                 elif use_fused_precond_output_scaling:
-                    scale_outputs = _preconditioner_output_scaling_jit(
-                        apply_lambda_update_scale=(lambda_update_scale != 1.0)
+                    if (
+                        bool(vmec2000_control)
+                        and bool(vmec2000_cache_valid)
+                        and (not bool(need_bcovar_update))
+                        and (cache_rz_norm is not None)
+                        and (cache_f_norm1 is not None)
+                    ):
+                        rz_norm = jnp.asarray(cache_rz_norm)
+                        f_norm1 = jnp.asarray(cache_f_norm1)
+                    else:
+                        rz_norm = _rz_norm(state)
+                        f_norm1 = jnp.where(
+                            rz_norm != 0.0,
+                            1.0 / rz_norm,
+                            jnp.asarray(float("inf"), dtype=rz_norm.dtype),
+                        )
+                    payload_outputs = _preconditioner_output_payload_jit(
+                        apply_lambda_update_scale=(lambda_update_scale != 1.0),
+                        vmec2000_control=bool(vmec2000_control),
+                        lconm1=bool(getattr(static.cfg, "lconm1", True)),
                     )
                     (
                         (frcc, frss, fzsc, fzcs, flsc, flcs, frsc, frcs, fzcc, fzss, flcc, flss),
@@ -10720,8 +10840,13 @@ def solve_fixed_boundary_residual_iter(
                             flcc_u,
                             flss_u,
                         ),
-                    ) = scale_outputs(frzl_rz, lam_prec, w_mode_mn, lambda_update_scale_j)
+                        (gcr2_p, gcz2_p, gcl2_p, fsqr1_safe, fsqz1_safe, fsql1_safe),
+                    ) = payload_outputs(frzl_rz, lam_prec, w_mode_mn, lambda_update_scale_j, f_norm1, delta_s, s)
+                    fsqr1 = fsqr1_safe
+                    fsqz1 = fsqz1_safe
+                    fsql1 = fsql1_safe
                     preconditioner_outputs_scaled = True
+                    preconditioner_fsq1_ready = True
                 else:
                     frcc = jnp.asarray(frzl_rz.frcc)
                     frss = frzl_rz.frss
@@ -10948,7 +11073,9 @@ def solve_fixed_boundary_residual_iter(
                         )
 
             # Damping for the fixed-point update.
-            if host_update_assembly:
+            if preconditioner_fsq1_ready:
+                pass
+            elif host_update_assembly:
                 # NumPy path: avoids 6+ JAX dispatches for sum-of-squares.
                 gcr2_p, gcz2_p, gcl2_p = vmec_gcx2_from_tomnsps_np(
                     frzl=frzl_pre,
@@ -11045,9 +11172,22 @@ def solve_fixed_boundary_residual_iter(
                 # Extremely small late-iteration channels can occasionally surface
                 # as NaN/Inf through mixed 0*Inf paths in XLA. VMEC treats these
                 # as effectively zero for the preconditioned residual diagnostics.
-                fsqr1_safe = jnp.where(jnp.isfinite(fsqr1), fsqr1, jnp.asarray(0.0, dtype=jnp.asarray(fsqr1).dtype))
-                fsqz1_safe = jnp.where(jnp.isfinite(fsqz1), fsqz1, jnp.asarray(0.0, dtype=jnp.asarray(fsqz1).dtype))
-                fsql1_safe = jnp.where(jnp.isfinite(fsql1), fsql1, jnp.asarray(0.0, dtype=jnp.asarray(fsql1).dtype))
+                if not preconditioner_fsq1_ready:
+                    fsqr1_safe = jnp.where(
+                        jnp.isfinite(fsqr1),
+                        fsqr1,
+                        jnp.asarray(0.0, dtype=jnp.asarray(fsqr1).dtype),
+                    )
+                    fsqz1_safe = jnp.where(
+                        jnp.isfinite(fsqz1),
+                        fsqz1,
+                        jnp.asarray(0.0, dtype=jnp.asarray(fsqz1).dtype),
+                    )
+                    fsql1_safe = jnp.where(
+                        jnp.isfinite(fsql1),
+                        fsql1,
+                        jnp.asarray(0.0, dtype=jnp.asarray(fsql1).dtype),
+                    )
                 fsq1 = float(jax.device_get(fsqr1_safe + fsqz1_safe + fsql1_safe))
             precond_diag_host: tuple[float, float, float] | None = None
 

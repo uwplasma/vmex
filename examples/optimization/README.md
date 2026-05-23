@@ -292,6 +292,11 @@ PYTHONPATH=. python examples/optimization/render_qi_constrained_sweep.py
 PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 ```
 
+The short ``VMEC_JAX_QI_RUN_CASE=...`` commands above run the current script
+defaults. To reproduce the archived ``readme_qi_optimization_cases.png`` panel
+exactly, use the case-specific target-aspect and output-directory overrides in
+``docs/optimization.rst``.
+
 The constrained-QI sweep is the compact bundled-seed matrix, not the staged
 far-seed runner.  If its summary reports a stale QI target aspect, rerun the
 two sweep commands above with the current target-6 policy before using the

@@ -1,5 +1,5 @@
-problem,backend,policy,max_mode,use_ess,success,crashed,objective_final,aspect_final,iota_final,total_wall_time_s,output_dir,qi_qp_preseed,qi_raw_total,qi_legacy_total,qi_mirror_ratio_max,qi_max_elongation
-qa,cpu,continuation,3,true,true,false,4.3529665295501840e-04,6.0004130250917429e+00,4.1998701523191673e-01,3.2324184000000000e+02,docs/_static/readme_best_cases/qa,,,,,
-qh,cpu,continuation,3,true,true,false,1.9020658657913731e-03,5.9998422835664469e+00,-1.2053175464211250e+00,2.3429232000000001e+02,docs/_static/readme_best_cases/qh,,,,,
-qp,cpu,continuation,3,false,true,false,5.3756799858181381e-02,6.0154975435372302e+00,-6.7243761239251765e-01,2.3596374000000000e+02,docs/_static/readme_best_cases/qp,,,,,
-qi,cpu,qi_default,3,true,true,false,1.3662335066482617e-02,6.0023861083357106e+00,-5.6897087175359229e-01,6.5462712000000000e+02,docs/_static/readme_best_cases/qi,false,1.3169566068252858e-03,4.3111874058800539e-04,2.7170752847883950e-01,6.8998318531926746e+00
+problem,backend,policy,max_mode,use_ess,success,crashed,objective_final,aspect_final,iota_final,total_wall_time_s,output_dir,input_file,qi_qp_preseed,qi_raw_total,qi_legacy_total,qi_mirror_ratio_max,qi_max_elongation
+qa,cpu,continuation,3,true,true,false,4.3529665295501840e-04,6.0004130250917429e+00,4.1998701523191673e-01,3.2324184000000000e+02,docs/_static/readme_best_cases/qa,examples/data/input.nfp2_QA_omnigenity,,,,,
+qh,cpu,continuation,3,true,true,false,1.9020658657913731e-03,5.9998422835664469e+00,-1.2053175464211250e+00,2.3429232000000001e+02,docs/_static/readme_best_cases/qh,examples/data/input.nfp4_QH_warm_start,,,,,
+qp,cpu,continuation,3,false,true,false,5.3756799858181381e-02,6.0154975435372302e+00,-6.7243761239251765e-01,2.3596374000000000e+02,docs/_static/readme_best_cases/qp,examples/data/input.nfp2_QI,,,,,
+qi,cpu,qi_default,3,true,true,false,1.3662335066482617e-02,6.0023861083357106e+00,-5.6897087175359229e-01,6.5462712000000000e+02,docs/_static/readme_best_cases/qi,examples/data/input.nfp2_QI,false,1.3169566068252858e-03,4.3111874058800539e-04,2.7170752847883950e-01,6.8998318531926746e+00

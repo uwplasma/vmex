@@ -1083,10 +1083,14 @@ allocations from the accelerator R/Z preconditioner-apply wrapper.  On the
 same RTX A4000 stack, ``input.nfp4_QH_warm_start`` dropped from about
 ``22.9 s`` to ``13.9 s`` with identical convergence, while
 ``input.nfp4_QH_finite_beta`` dropped from about ``93.0 s`` to ``58.6 s``.
-The detailed timer still attributes most of the remaining GPU time to
-``precond_apply`` (about ``17.1 s`` on the finite-beta final stage), so the
-next GPU target remains fusing or restructuring the radial preconditioner and
-state-update path rather than the already-fast force assembly kernels.
+The follow-up fused preconditioner payload pass combined accelerator-side
+lambda scaling, mode weighting, and preconditioned residual diagnostics.  In a
+fresh no-warmup profile this kept the warm-start case at about ``13.5 s`` and
+reduced ``input.nfp4_QH_finite_beta`` to about ``50.2 s``.  The detailed timer
+still attributes most remaining GPU time to ``precond_apply`` (about ``17.0 s``
+on the finite-beta final stage), so the next GPU target remains restructuring
+the radial tridiagonal preconditioner itself rather than the already-fast force
+assembly kernels.
 
 Converged QH public default, ``max_iter=500``:
 

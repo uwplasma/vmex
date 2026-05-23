@@ -99,9 +99,9 @@ Editable optimization examples live in `examples/optimization/`. Start with
 
 The README intentionally keeps only the compact best current
 stellarator-symmetric QA/QH/QP/QI rows. Extended policy discussion, LASYM
-panels, finite-beta examples, QI NFP 1/2/3/4 coverage, minimal-seed status,
-failure modes, partial CPU/GPU sweep snapshots, and full-matrix artifact
-requirements live in the docs.
+panels, finite-beta examples, extended QI NFP provenance and limitations,
+minimal-seed status, failure modes, partial CPU/GPU sweep snapshots, and
+full-matrix artifact requirements live in the docs.
 
 | Target | Backend | Policy | max_mode | ESS | Final J | QI legacy | Mirror | Aspect | Iota | Wall time |
 |---|---|---|---:|---|---:|---:|---:|---:|---:|---:|
@@ -118,12 +118,12 @@ README table is only the current compact promotion snapshot.
 ![QP optimization](docs/_static/figures/readme_best_optimization_qp.png)
 ![QI optimization](docs/_static/figures/readme_best_optimization_qi.png)
 
-### QI from different NFP seeds
+### QI from different NFP inputs
 
-The same `QI_optimization.py` workflow can be run from simple NFP 1, 2, 3,
-and 4 seed inputs by changing the input variables at the top of the script.
-The current NFP coverage panel is case-gated rather than a uniform aspect-ratio
-promotion table; full provenance and limitations are in the docs.
+The same `QI_optimization.py` workflow can be run from reviewed case-specific
+NFP 1, 2, 3, and 4 inputs by changing the input variables at the top of the
+script. The current NFP coverage panel is case-gated rather than a uniform
+aspect-ratio promotion table; full provenance and limitations are in the docs.
 
 ![QI optimization from NFP seeds](docs/_static/figures/readme_qi_optimization_cases.png)
 

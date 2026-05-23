@@ -596,9 +596,9 @@ def _preoptimization_wout_path(run: BestRun) -> Path:
     """
 
     original = run.output_dir / "wout_original.nc"
-    if original.exists():
-        return original
     input_file = _raw_input_file_for_run(run)
+    if original.exists():
+        return _validated_raw_initial_wout(original, input_file, context=f"{run.problem} wout_original")
     if run.policy == "continuation":
         mode1 = run.output_dir.parent.parent / "mode1" / run.output_dir.name / "wout_initial.nc"
         if mode1.exists():
@@ -756,6 +756,7 @@ def _write_readme_summary(runs: list[BestRun]) -> None:
                 "iota_final",
                 "wall_time_min",
                 "output_dir",
+                "input_file",
                 "initial_wout",
                 "final_wout",
             ]
@@ -780,6 +781,7 @@ def _write_readme_summary(runs: list[BestRun]) -> None:
                     f"{run.iota_final:.16e}",
                     f"{run.total_wall_time_s / 60.0:.6f}",
                     _repo_relative_path(run.output_dir),
+                    "" if run.input_file is None else _repo_relative_path(run.input_file),
                     _repo_relative_path(initial_wout),
                     _repo_relative_path(final_wout),
                 ]
