@@ -261,6 +261,28 @@ class FixedBoundaryOptimizationResult:
 
 
 @dataclass(frozen=True)
+class OptimizationOutputPaths:
+    """Canonical files written by fixed-boundary optimization examples."""
+
+    initial_input: Path
+    final_input: Path
+    initial_wout: Path
+    final_wout: Path
+    history: Path
+
+    def as_dict(self) -> dict[str, Path]:
+        """Return path names in the same order used by the example reports."""
+
+        return {
+            "initial_input": self.initial_input,
+            "final_input": self.final_input,
+            "initial_wout": self.initial_wout,
+            "final_wout": self.final_wout,
+            "history": self.history,
+        }
+
+
+@dataclass(frozen=True)
 class QIObjectiveTerm:
     """One field-quality objective that shares a Boozer/QI field evaluation."""
 
@@ -3046,6 +3068,54 @@ def save_qs_final_outputs(
     final_optimizer.save_history(output_dir / "history.json", final_result)
 
 
+def optimization_output_paths(output_dir: str | Path) -> OptimizationOutputPaths:
+    """Return the canonical final-artifact paths for an optimization run."""
+
+    output_dir = Path(output_dir)
+    return OptimizationOutputPaths(
+        initial_input=output_dir / "input.initial",
+        final_input=output_dir / "input.final",
+        initial_wout=output_dir / "wout_initial.nc",
+        final_wout=output_dir / "wout_final.nc",
+        history=output_dir / "history.json",
+    )
+
+
+def save_optimization_result(
+    result: FixedBoundaryOptimizationResult,
+    *,
+    output_dir: str | Path | None = None,
+    paths: OptimizationOutputPaths | None = None,
+) -> OptimizationOutputPaths:
+    """Save initial/final inputs, wouts, and history from a solve result.
+
+    The examples use this for the mechanical file writes only.  Diagnostics,
+    plotting, and any extra exports should remain explicit in the user script.
+    """
+
+    if paths is None:
+        if output_dir is None:
+            raise ValueError("Either output_dir or paths must be provided.")
+        paths = optimization_output_paths(output_dir)
+    for path in paths.as_dict().values():
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+    result.initial_optimizer.save_input(paths.initial_input, result.initial_params)
+    result.initial_optimizer.save_wout(
+        paths.initial_wout,
+        result.initial_params,
+        state=result.initial_state,
+    )
+    result.final_optimizer.save_input(paths.final_input, result.final_params)
+    result.final_optimizer.save_wout(
+        paths.final_wout,
+        result.final_params,
+        state=result.final_state,
+    )
+    result.final_optimizer.save_history(paths.history, result.final_result)
+    return paths
+
+
 def annotate_qs_final_history(
     final_result: dict,
     *,
@@ -3218,6 +3288,7 @@ __all__ = [
     "MeanIota",
     "MirrorRatio",
     "ObjectiveTerm",
+    "OptimizationOutputPaths",
     "QuasiIsodynamicOptions",
     "QuasiIsodynamicResidual",
     "QuasiIsodynamicResidualCeiling",
@@ -3242,6 +3313,7 @@ __all__ = [
     "mean_iota_objective",
     "normalize_boundary_mode_limits",
     "objectives_track_iota",
+    "optimization_output_paths",
     "qs_stage_budget",
     "qs_stage_modes",
     "qi_lgradb_objective",
@@ -3259,6 +3331,7 @@ __all__ = [
     "residuals_from_objectives",
     "run_fixed_boundary_objective_optimization",
     "run_quasi_isodynamic_objective_optimization",
+    "save_optimization_result",
     "save_qs_final_outputs",
     "save_qs_stage_artifacts",
     "simple_omnigenity_seed_indata",

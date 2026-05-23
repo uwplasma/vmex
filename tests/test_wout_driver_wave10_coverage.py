@@ -135,6 +135,87 @@ def test_state_from_wout_lambda_rejects_bad_shapes_and_handles_missing_m(monkeyp
     assert np.all(np.isfinite(state.Lsin))
 
 
+def test_state_from_wout_recovers_internal_lambda_for_half_mesh_parity_branches(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    base = _tiny_wout(tmp_path / "wout_lambda.nc", ns=4, m_modes=(0, 1, 2, 3))
+    m_modes = np.asarray(base.xm, dtype=int)
+    ns = int(base.ns)
+    phipf_internal = np.asarray([1.0, 1.25, 1.5, 2.0])
+    lamscale = 2.5
+
+    internal_lmns = np.asarray(
+        [
+            [0.20, -0.10, 0.00, 0.00],
+            [0.25, -0.125, 0.12, -0.04],
+            [0.32, 0.02, 0.18, 0.03],
+            [0.45, 0.07, 0.24, 0.08],
+        ],
+        dtype=float,
+    )
+    internal_lmnc = -0.4 * internal_lmns + np.asarray([0.01, 0.02, 0.03, 0.04])[None, :]
+    internal_lmnc[1, m_modes == 0] = internal_lmnc[0, m_modes == 0] * phipf_internal[1] / phipf_internal[0]
+    internal_lmnc[1, m_modes == 1] = internal_lmnc[0, m_modes == 1] * phipf_internal[1] / phipf_internal[0]
+    internal_lmnc[0, m_modes > 1] = 0.0
+
+    def wout_lambda_from_internal(internal: np.ndarray) -> np.ndarray:
+        s = np.linspace(0.0, 1.0, ns, dtype=float)
+        hs = float(s[1] - s[0])
+        sqrts_f = np.zeros((ns + 1,), dtype=float)
+        shalf_f = np.zeros((ns + 1,), dtype=float)
+        for i in range(1, ns + 1):
+            sqrts_f[i] = np.sqrt(max(hs * float(i - 1), 0.0))
+            shalf_f[i] = np.sqrt(hs * abs(float(i) - 1.5))
+        sqrts_f[ns] = 1.0
+
+        sm_f = np.zeros((ns + 1,), dtype=float)
+        sp_f = np.zeros((ns + 1,), dtype=float)
+        for i in range(2, ns + 1):
+            sm_f[i] = shalf_f[i] / sqrts_f[i] if sqrts_f[i] != 0.0 else 0.0
+            if i < ns:
+                sp_f[i] = shalf_f[i + 1] / sqrts_f[i] if sqrts_f[i] != 0.0 else 0.0
+            else:
+                sp_f[i] = 1.0 / sqrts_f[i] if sqrts_f[i] != 0.0 else 0.0
+        sp_f[1] = sm_f[2]
+
+        pre_wrout = np.asarray(internal, dtype=float) * lamscale / phipf_internal[:, None]
+        out = np.zeros_like(pre_wrout)
+        for col, mval in enumerate(m_modes):
+            if int(mval) == 1:
+                out[1, col] = 0.5 * pre_wrout[0, col] * (sm_f[2] + sp_f[1])
+            elif int(mval) == 0:
+                out[1, col] = pre_wrout[0, col]
+            elif (int(mval) % 2) == 0:
+                out[1, col] = 0.5 * pre_wrout[1, col]
+            else:
+                out[1, col] = 0.5 * pre_wrout[1, col] * sm_f[2]
+
+            for js in range(3, ns + 1):
+                if (int(mval) % 2) == 0:
+                    out[js - 1, col] = 0.5 * (pre_wrout[js - 1, col] + pre_wrout[js - 2, col])
+                else:
+                    out[js - 1, col] = 0.5 * (
+                        pre_wrout[js - 1, col] * sm_f[js] + sp_f[js - 1] * pre_wrout[js - 2, col]
+                    )
+        return out
+
+    monkeypatch.setattr(field_module, "lamscale_from_phips", lambda _phips, _s: lamscale)
+    wout = replace(
+        base,
+        signgs=-1,
+        phipf=-(2.0 * np.pi) * phipf_internal,
+        lmns=wout_lambda_from_internal(internal_lmns),
+        lmnc=wout_lambda_from_internal(internal_lmnc),
+    )
+
+    state = state_from_wout(wout)
+
+    mode_scale = np.where(m_modes == 0, 1.0, 1.0 / np.sqrt(2.0))[None, :]
+    np.testing.assert_allclose(state.Lsin, internal_lmns * mode_scale, rtol=1.0e-13, atol=1.0e-13)
+    np.testing.assert_allclose(state.Lcos, internal_lmnc * mode_scale, rtol=1.0e-13, atol=1.0e-13)
+
+
 def _state_static_indata(*, ns: int = 3, ac_value=(), lasym: bool = False) -> tuple[VMECState, SimpleNamespace, InData]:
     cfg = VMECConfig(mpol=2, ntor=0, ns=ns, nfp=1, lasym=lasym, lthreed=False, lconm1=True, ntheta=4, nzeta=2)
     modes = vmec_mode_table(cfg.mpol, cfg.ntor)

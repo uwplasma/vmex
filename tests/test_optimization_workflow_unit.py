@@ -829,6 +829,82 @@ def test_save_final_outputs_records_targets_and_reruns(monkeypatch, tmp_path) ->
     }
 
 
+def test_save_optimization_result_writes_canonical_artifacts(tmp_path) -> None:
+    import vmec_jax.optimization_workflow as workflow
+
+    calls = []
+
+    class FakeOptimizer:
+        def __init__(self, label):
+            self.label = label
+
+        def save_input(self, path, params):
+            calls.append((self.label, "input", path.name, tuple(np.asarray(params))))
+            path.write_text("input")
+
+        def save_wout(self, path, params, *, state=None):
+            calls.append((self.label, "wout", path.name, tuple(np.asarray(params)), state))
+            path.write_text("wout")
+
+        def save_history(self, path, result):
+            calls.append((self.label, "history", path.name, result["message"]))
+            path.write_text("history")
+
+    initial_optimizer = FakeOptimizer("initial")
+    final_optimizer = FakeOptimizer("final")
+    final_result = {
+        "x": np.asarray([4.0, 5.0]),
+        "message": "converged",
+        "_state_final": "statef",
+        "_history_dump": {"history": [{"objective": 1.0}], "total_wall_time_s": 2.0},
+    }
+    result = workflow.FixedBoundaryOptimizationResult(
+        stage_records=[
+            (
+                1,
+                initial_optimizer,
+                np.asarray([1.0, 2.0]),
+                {"_state_initial": "state0", "_history_dump": {}},
+            )
+        ],
+        final_optimizer=final_optimizer,
+        final_result=final_result,
+        stage_modes=[1],
+    )
+
+    paths = workflow.save_optimization_result(result, output_dir=tmp_path)
+
+    assert paths == workflow.OptimizationOutputPaths(
+        initial_input=tmp_path / "input.initial",
+        final_input=tmp_path / "input.final",
+        initial_wout=tmp_path / "wout_initial.nc",
+        final_wout=tmp_path / "wout_final.nc",
+        history=tmp_path / "history.json",
+    )
+    assert paths.as_dict()["final_wout"] == tmp_path / "wout_final.nc"
+    assert ("initial", "input", "input.initial", (1.0, 2.0)) in calls
+    assert ("initial", "wout", "wout_initial.nc", (1.0, 2.0), "state0") in calls
+    assert ("final", "input", "input.final", (4.0, 5.0)) in calls
+    assert ("final", "wout", "wout_final.nc", (4.0, 5.0), "statef") in calls
+    assert ("final", "history", "history.json", "converged") in calls
+    for path in paths.as_dict().values():
+        assert path.exists()
+
+
+def test_save_optimization_result_requires_destination() -> None:
+    import vmec_jax.optimization_workflow as workflow
+
+    result = workflow.FixedBoundaryOptimizationResult(
+        stage_records=[],
+        final_optimizer=object(),
+        final_result={},
+        stage_modes=[],
+    )
+
+    with pytest.raises(ValueError, match="Either output_dir or paths"):
+        workflow.save_optimization_result(result)
+
+
 def test_combine_stage_histories_handles_single_stage_and_iota_boundaries() -> None:
     import vmec_jax.optimization_workflow as workflow
 

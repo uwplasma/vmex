@@ -140,6 +140,14 @@ limitations, and any optional external validation that was not run.
 The next release candidate should cite the latest completed green CI run after
 re-checking the newest ``main`` workflow and the latest passing local coverage
 result from the release-candidate commit at the enforced ``95%`` coverage gate.
+After the release is public, verify the package index and installation state:
+
+- PyPI should show the new release and ``pip install vmec-jax==X.Y.Z`` should
+  import the same version from a clean virtual environment.
+- Conda-forge may lag PyPI; README wording should not imply the feedstock is
+  already synchronized when it is one release behind.
+- Release notes should use post-publication wording once the tag is published,
+  not "must be green before this release is published" phrasing.
 
 Optional research-grade gates
 -----------------------------
