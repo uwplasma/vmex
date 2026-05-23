@@ -1392,6 +1392,14 @@ CPU force helper post-processing out of residual JAX dispatch fragments, the
 same diagnostic run takes about ``20.6 s`` cold while preserving the final
 residual (``~5.6e-13``).
 
+With an explicit CPU persistent cache
+(``VMEC_JAX_COMPILATION_CACHE=1`` and an isolated
+``VMEC_JAX_COMPILATION_CACHE_DIR``), the second fresh-process run of the same
+case drops to about ``12.7 s`` on this host.  This is useful for repeated local
+profiling, but CPU cache use remains opt-in because XLA:CPU cache entries are
+native AOT executables and can emit host-feature mismatch warnings if reused
+across incompatible machines or JAX/JAXLIB versions.
+
 The current bottleneck is therefore no longer the cubic current/pressure
 profile helper itself.  The remaining gap is dominated by many small
 XLA:CPU compile/dispatch fragments and host-side setup around the
