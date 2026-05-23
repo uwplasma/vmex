@@ -276,8 +276,9 @@ QI_optimization Input Coverage
 
 The dedicated QI docs renderer is a lightweight snapshot renderer for
 case-gated QI lanes; it does not rerun optimization jobs.  The current rows are
-the NFP=1 and NFP=2 QI seed decks, the NFP=3 seed-3127 deck, and the NFP=4
-minimal-seed lane.  This figure is separate from the deferred
+the NFP=1 QI seed deck, the NFP=2 target-helicity seed deck, the NFP=3
+seed-3127 deck, and the NFP=4 minimal-seed lane.  This figure is separate from
+the deferred
 common-minimal-seed stress matrix and should not be read as evidence that one
 common simple seed optimizes successfully for every NFP.  The renderer reads
 the existing ``QI_optimization.py`` outputs, records the final smooth QI
@@ -285,10 +286,11 @@ metric, legacy QI metric, mirror ratio, elongation, iota, aspect, and CPU wall
 time, and draws source-initial and final Boozer ``|B|`` line contours only
 after the initial WOUT boundary matches the paired input deck.  These are
 archived mixed-target case checks, not current aspect-6 README best-row
-promotions: NFP=1/2 use target aspect 10, the seed-3127 NFP=3 lane uses target
-aspect 4, and the NFP=4 row uses the minimal seed plus a same-NFP finite-beta
-QI reference-family proposal.  Regenerate all rows with the current uniform
-aspect-6 policy before using this figure as current README promotion evidence.
+promotions: NFP=1 uses target aspect 10, the NFP=2 target-helicity lane uses
+target aspect 6, the seed-3127 NFP=3 lane uses target aspect 4, and the NFP=4
+row uses the minimal seed plus a same-NFP finite-beta QI reference-family
+proposal.  Regenerate all rows with the current uniform aspect-6 policy before
+using this figure as current README promotion evidence.
 Finite-beta NFP=4 remains a separate stress fixture.
 
 The NFP=3 seed-3127 row uses
@@ -317,7 +319,10 @@ match before the panel is published.
      VMEC_JAX_QI_TARGET_ASPECT=10 \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp1_qi_direct_office_20260519 \
      python examples/optimization/QI_optimization.py
-   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=minimal_nfp2_qi \
+   PYTHONPATH=. JAX_PLATFORMS=cpu \
+     VMEC_JAX_QI_INPUT=examples/data/input.minimal_seed_nfp2_target_helicity \
+     VMEC_JAX_QI_POLICY_CASE=nfp2_qi \
+     VMEC_JAX_QI_LABEL=nfp2_target_helicity \
      VMEC_JAX_QI_TARGET_ASPECT=6 \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/minimal_nfp2_to_qi_reference \
      python examples/optimization/QI_optimization.py
@@ -329,6 +334,11 @@ match before the panel is published.
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/minimal_nfp4_to_qi_finite_beta_reference \
      python examples/optimization/QI_optimization.py
    PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
+
+The optimization commands above create candidate result directories under
+``results/``.  After reviewing diagnostics and plots, replace the corresponding
+``docs/_static/qi_readme_cases/<case>/`` bundle before rendering; the renderer
+does not read ignored local result directories.
 
 .. list-table::
    :header-rows: 1
