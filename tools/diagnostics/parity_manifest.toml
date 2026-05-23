@@ -308,6 +308,29 @@ max_total_runtime_s = 45.0
 goal = "Bounded Landreman HSX QHS fixed-boundary parity and CPU/GPU benchmark diversity probe."
 
 [[cases]]
+id = "fixed_nonaxis_lasym_false_landreman_kuboozer_n4qh"
+tier = "planning"
+enabled = true
+compare = "stage_trace"
+source = "landreman/vmec_equilibria"
+input = "../vmec_equilibria/KuBoozer_2011_NuclFusion_QHS/n4qh.b4.a79a/input.n4qh.b4.a79a"
+lfreeb = false
+lasym = false
+axisymmetric = false
+nfp = 4
+ntor = 6
+single_ns = 16
+max_iter = 8
+vmec_nstep = 1
+rtol = 5e-2
+atol = 1e-10
+dump_level = "lite"
+vmec_timeout = 180
+max_runtime_s = 25.0
+max_total_runtime_s = 45.0
+goal = "Bounded Ku-Boozer QHS fixed-boundary parity probe; covers multiline multigrid input patching without free-boundary mgrids."
+
+[[cases]]
 id = "freeb_nonaxis_lasym_false_cth_like"
 tier = "smoke"
 enabled = true
