@@ -98,9 +98,9 @@ penalties.  A commented ``LgradB`` block is included for users who want that
 extra regularization term.  The extra terms are imported from
 ``vmec_jax.optimization_workflow`` and assembled explicitly in the script, so
 users can change weights or add terms such as magnetic-well depth by appending
-another residual block in the same section.  Install the optional dependency set with
-``python -m pip install ".[qi]"`` before running QI cases from a source
-checkout.
+another residual block in the same section.  QI examples use
+``booz_xform_jax``, which is installed by the plain ``vmec-jax`` package and by
+``python -m pip install .`` from a source checkout.
 
 Sweep Reproduction
 ------------------
