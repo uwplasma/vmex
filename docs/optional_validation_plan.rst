@@ -279,6 +279,12 @@ eight-iteration checks that broaden external coverage across SIMSOPT QH,
 SIMSOPT W7-X, SIMSOPT ``LASYM=true`` basic non-stellarator-symmetric,
 Landreman W7-X, Landreman NCSX, and Landreman HSX-QHS fixed-boundary assets
 without vendoring the external inputs or requiring free-boundary mgrid files.
+The refreshed local run
+``outputs/parity_sweeps_external_full6/20260522_224144/summary.json`` passed
+all six rows against ``~/bin/xvmec2000`` with per-row runtimes between
+``13.45 s`` and ``15.10 s``.  This is still optional evidence because the
+inputs live in local external checkouts, but it is the current bounded
+VMEC2000 matrix for SIMSOPT/Landreman fixed-boundary assets.
 The Landreman Ku/Boozer QHS deck remains a tracked candidate asset, but it is
 not promoted to the executable manifest because the current stage-trace
 comparator needs a dedicated multigrid/reference-state shape path for that

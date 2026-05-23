@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tools.diagnostics.parity_sweep_manifest import DEFAULT_MANIFEST, _parse_manifest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -56,6 +58,27 @@ def test_optional_validation_plan_uses_live_ci_verification() -> None:
     assert "head SHA:" not in plan
     assert "verified green CI baseline" not in validation
     assert "Last recorded local CI-equivalent coverage baseline" not in testing_strategy
+
+
+def test_optional_validation_lasym_freeb_example_matches_manifest_case() -> None:
+    plan = (ROOT / "docs" / "optional_validation_plan.rst").read_text()
+    _meta, cases = _parse_manifest(DEFAULT_MANIFEST)
+    case = next(case for case in cases if case["id"] == "freeb_nonaxis_lasym_true_cth_like_local")
+
+    assert "--ids freeb_nonaxis_lasym_true_cth_like_local" in plan
+    assert "--manifest tools/diagnostics/parity_manifest.toml" in plan
+    assert "--vmec-exec \"$VMEC2000_EXEC\"" in plan
+    assert "freeb_scalpot" in plan
+    assert "VMEC_DUMP_*" in plan
+
+    assert case["tier"] == "planning"
+    assert case["compare"] == "freeb_scalpot"
+    assert case["source"] == "vmec_jax/examples"
+    assert bool(case["lfreeb"]) is True
+    assert bool(case["lasym"]) is True
+    assert bool(case["axisymmetric"]) is False
+    assert set(case["runtime_thresholds_s_by_iter"]) == {"80", "100"}
+    assert set(case["metric_thresholds_rel_scaled_by_iter"]) == {"80", "100"}
 
 
 def test_qi_case_specific_artifacts_are_not_documented_as_aspect6_promotions() -> None:

@@ -361,6 +361,26 @@ GPU exact-callback replay path use the JVP-only/basepoint-carry policy when it
 passes the larger validation matrix, then target raw fixed-boundary GPU
 force/update fusion and launch-count reduction.
 
+A follow-up ``LASYM=true`` finite-beta fixed-boundary profile on ``office``
+(``input.basic_non_stellsym_pressure``, 20 iterations, non-scan production
+path, no warmup) measured ``21.38 s`` profile time on CPU and ``26.15 s`` on
+GPU.  GPU force assembly was faster (``1.29 s`` versus ``2.31 s``), but GPU
+preconditioner time was slower (``2.48 s`` versus ``1.09 s``), so the next raw
+GPU solve target for this lane is preconditioner/update launch structure rather
+than the force kernel alone.  Forcing the scan path was slower on both devices
+in the same case: ``35.76 s`` CPU and ``44.96 s`` GPU profile time.
+
+The same commit was profiled with a one-callback QH mode-2 exact Jacobian
+matrix on ``office`` (``inner_max_iter=40``, ``trial_max_iter=20``,
+``--sync-replay-timing``).  The GPU profile was faster end-to-end than CPU
+(``14.84 s`` versus ``29.32 s``), with GPU accepted exact solve ``6.65 s``,
+tape build ``4.96 s``, replay ``6.14 s``, and initial tangent construction
+``2.04 s``.  CPU spent ``10.98 s`` in the exact solve, ``6.96 s`` in tape build,
+``6.58 s`` in replay, ``7.76 s`` in initial tangents, and ``4.00 s`` in
+residual tangents.  This keeps the current GPU optimization target focused on
+cold accepted-point tape/replay/tangent construction; forcing scan for GPU is
+not justified by these profiles.
+
 For raw ``input.nfp2_QI`` follow-up profiling, keep the production-like scan
 measurement separate from phase attribution.  The scan path is best inspected
 with XProf traces because the force/preconditioner/update work is inside one
@@ -489,6 +509,11 @@ The matrix table surfaces ``exact_s``, ``tape_build_s``,
 ``tape_unattr_s``, ``replay_s``, ``replay_dispatch_s``,
 ``replay_ready_s``, ``init_tangent_s``, ``resid_tangent_s``, ``callbacks``,
 and ``replays`` when the child exact-callback report exposes those metrics.
+When the child reports contain the detailed buckets, the wrapper also prints
+separate ``Trial scan timing``, ``Scan cache details``, and
+``Projected replay / JVP details`` tables and embeds the same sections in the
+matrix JSON.  Use those sections to distinguish scan-cache misses from
+projected-replay residual tangent cost before changing solver kernels.
 Use ``--sync-replay-timing`` only for targeted cold-bucket diagnostics: it
 adds ``block_until_ready`` synchronization so dispatch and device-ready buckets
 are attributable, but that synchronization is not representative of production

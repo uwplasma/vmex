@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
+import sys
 
 from tools.diagnostics.parity_sweep_manifest import (
     DEFAULT_MANIFEST,
@@ -269,3 +271,100 @@ def test_free_boundary_scalpot_command_contract_is_iter_specific(tmp_path: Path)
     assert "--max-iter" in cmd and cmd[cmd.index("--max-iter") + 1] == "100"
     assert "--workdir" in cmd and Path(cmd[cmd.index("--workdir") + 1]) == tmp_path / "freeb"
     assert "--json" in cmd and Path(cmd[cmd.index("--json") + 1]) == json_path
+
+
+def test_parity_manifest_dry_run_writes_executable_summary_without_vmec2000(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    """Dry-run should validate stage/free-boundary command wiring without external VMEC."""
+
+    from tools.diagnostics import parity_sweep_manifest as manifest_runner
+
+    input_path = tmp_path / "input.synthetic"
+    input_path.write_text("&INDATA\n/\n", encoding="utf-8")
+    manifest_path = tmp_path / "parity_manifest.toml"
+    manifest_path.write_text(
+        f"""
+version = 7
+name = "synthetic dry-run"
+
+[[cases]]
+id = "stage_case"
+tier = "smoke"
+enabled = true
+compare = "stage_trace"
+input = "{input_path}"
+max_iter = 4
+rtol = 1e-4
+atol = 1e-12
+dump_level = "lite"
+vmec_timeout = 11
+
+[[cases]]
+id = "freeb_case"
+tier = "smoke"
+enabled = true
+compare = "freeb_scalpot"
+input = "{input_path}"
+max_iter = 8
+iter_list = [3, 8]
+vmec_timeout = 22
+max_runtime_s = 10.0
+max_total_runtime_s = 30.0
+
+[cases.metric_thresholds_rel_scaled_by_iter."3"]
+source_sym = 1e-2
+
+[cases.runtime_thresholds_s_by_iter."3"]
+max_runtime_s = 5.0
+
+[cases.runtime_thresholds_s_by_iter."8"]
+max_runtime_s = 5.0
+""".strip(),
+        encoding="utf-8",
+    )
+
+    output_root = tmp_path / "out"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "parity_sweep_manifest.py",
+            "--manifest",
+            str(manifest_path),
+            "--vmec-exec",
+            str(tmp_path / "missing_xvmec2000"),
+            "--tier",
+            "smoke",
+            "--dry-run",
+            "--output-root",
+            str(output_root),
+        ],
+    )
+
+    assert manifest_runner.main() == 0
+
+    stdout = capsys.readouterr().out
+    assert "selected_cases=2" in stdout
+    assert "DRY-RUN:" in stdout
+    summary_path = next(output_root.glob("*/summary.json"))
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    cases = {case["id"]: case for case in summary["cases"]}
+
+    assert summary["manifest_version"] == 7
+    assert summary["failed_cases"] == 0
+    assert summary["selected_case_count"] == 2
+    assert cases["stage_case"]["status"] == "pass"
+    assert cases["stage_case"]["runs"] == [{"returncode": 0, "runtime_s": 0.0, "stdout_path": ""}]
+    assert "--max-iter" in cases["stage_case"]["cmd"]
+    assert cases["stage_case"]["cmd"][cases["stage_case"]["cmd"].index("--max-iter") + 1] == "4"
+
+    freeb = cases["freeb_case"]
+    assert freeb["status"] == "pass"
+    assert [run["iter"] for run in freeb["runs"]] == [3, 8]
+    assert all(run["returncode"] == 0 for run in freeb["runs"])
+    assert "metric_thresholds_rel_scaled" not in freeb
+    assert freeb["runtime_thresholds_s"]["pass"] is True
+    assert freeb["runtime_thresholds_s"]["observed_total_runtime_s"] == 0.0
