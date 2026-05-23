@@ -1436,12 +1436,9 @@ class FixedBoundaryExactOptimizer:
         )
         self._trial_solver_kwargs = dict(
             _base,
-            # Trial-point residuals do not need an adjoint tape. Use the scan
-            # loop by default because May 2026 CPU/GPU exact-optimizer profiles
-            # showed lower warm trial-solve cost for QH mode-1/mode-3. The
-            # accepted-point exact Jacobian path remains the discrete-adjoint
-            # tape path; VMEC_JAX_OPT_TRIAL_SCAN=0 keeps the old non-scan trial
-            # path available for diagnostics.
+            # Trial-point residuals do not need an adjoint tape. The backend
+            # policy keeps CPU on scan by default, while cold GPU trial profiles
+            # favor the non-scan path. VMEC_JAX_OPT_TRIAL_SCAN overrides this.
             jit_forces="auto",
             use_scan=self._use_scan_for_trial_solves(),
         )
@@ -1646,16 +1643,23 @@ class FixedBoundaryExactOptimizer:
         Exact-optimizer trial residuals are short, trace-compatible VMEC solves
         called repeatedly by SciPy's trust-region line search.  They do not need
         an adjoint tape.  May 2026 repeat-run diagnostics showed the scan trial
-        path has materially lower warm cost than the non-scan path on QH mode-1
-        and mode-3 for both CPU and GPU, while the accepted-point exact
-        differentiation path remains the non-scan discrete-adjoint tape.
+        path has lower CPU warm cost, while cold GPU mode-2 trial profiles were
+        faster on the non-scan path.  Environment overrides always win.
         """
         forced = os.getenv("VMEC_JAX_OPT_TRIAL_SCAN", "").strip().lower()
         if forced in ("1", "true", "yes", "on", "scan"):
             return True
         if forced in ("0", "false", "no", "off", "loop", "none"):
             return False
-        return True
+        backend = str(getattr(self, "_solver_device_name", None) or "").strip().lower()
+        if not backend:
+            try:
+                from ._compat import jax as _jax
+
+                backend = str(_jax.default_backend()).strip().lower() if _jax is not None else "cpu"
+            except Exception:
+                backend = "cpu"
+        return backend not in ("gpu", "cuda", "tpu", "rocm")
 
     def _solver_device_context(self):
         if self._solver_device_name is None:

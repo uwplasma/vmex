@@ -268,7 +268,7 @@ planning manifest after bounded ``xvmec2000`` stage-trace checks against
      --source-root landreman_vmec_equilibria=/Users/rogeriojorge/local/vmec_equilibria \
      --json-out outputs/external_vmec_assets/all_local_inventory.json
 
-   EXTERNAL_IDS="fixed_nonaxis_lasym_false_simsopt_qh_reactor_lowres_external,fixed_nonaxis_lasym_false_landreman_w7x_standard_boundary,fixed_nonaxis_lasym_false_landreman_ncsx_fixed_boundary"
+   EXTERNAL_IDS="fixed_nonaxis_lasym_false_simsopt_qh_reactor_lowres_external,fixed_nonaxis_lasym_false_landreman_w7x_standard_boundary,fixed_nonaxis_lasym_false_landreman_ncsx_fixed_boundary,fixed_nonaxis_lasym_false_simsopt_w7x_standard,fixed_nonaxis_lasym_true_simsopt_basic_non_stellsym_external,fixed_nonaxis_lasym_false_landreman_hsx_qhs_fixed"
    python tools/diagnostics/parity_sweep_manifest.py \
      --vmec-exec ~/bin/xvmec2000 \
      --ids "$EXTERNAL_IDS" \
@@ -276,22 +276,26 @@ planning manifest after bounded ``xvmec2000`` stage-trace checks against
 
 Those rows stay optional ``planning`` entries.  They are bounded single-grid,
 eight-iteration checks that broaden external coverage across SIMSOPT QH,
-Landreman W7-X, and Landreman NCSX fixed-boundary assets without vendoring the
-external inputs or requiring free-boundary mgrid files.  The pre-existing
+SIMSOPT W7-X, SIMSOPT ``LASYM=true`` basic non-stellarator-symmetric,
+Landreman W7-X, Landreman NCSX, and Landreman HSX-QHS fixed-boundary assets
+without vendoring the external inputs or requiring free-boundary mgrid files.
+The Landreman Ku/Boozer QHS deck remains a tracked candidate asset, but it is
+not promoted to the executable manifest because the current stage-trace
+comparator needs a dedicated multigrid/reference-state shape path for that
+deck.  The pre-existing
 SIMSOPT ``LandremanSenguptaPlunk_section5p3`` LASYM=true planning probe
 remained a non-promoted target in the same run context because the strict
 ``2e-3`` stage-trace gate failed at iteration 10 with a maximum printed
 ``fsqz`` relative difference of about ``2.97e-2``.
 
-The 2026-05-22 optional converged-WOUT nightly rerun classified two remaining
-non-promoted lanes:
+The 2026-05-22 optional converged-WOUT nightly rerun, plus the follow-up LASYM
+``bsubvmns`` fix, classify the current optional lanes as follows:
 
 - ``LandremanPaul2021_QA_lowres`` converged-WOUT parity passed locally against
   ``~/bin/xvmec2000``.
-- ``basic_non_stellsym_pressure`` remains an expected-fail converged
-  ``LASYM=true`` finite-beta WOUT diagnostic row: geometry, scalar, and
-  stage-trace checks pass, but the asymmetric ``bsubvmns`` channel differed
-  from VMEC2000 with relRMS about ``1.45e-1``.
+- ``basic_non_stellsym_pressure`` converged ``LASYM=true`` finite-beta WOUT
+  parity now passes locally after the asymmetric ``bsubvmns`` channel was
+  reconstructed from VMEC's corrected half-mesh IEQUI source.
 - ``cth_like_free_bdy`` converged-WOUT parity is skipped in the optional
   pytest matrix until it is reduced to a bounded gate; the promoted
   free-boundary evidence is still the stock-executable stage-trace smoke.

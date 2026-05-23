@@ -214,6 +214,9 @@ def test_solver_device_context_and_trial_scan_env_branches(monkeypatch) -> None:
     monkeypatch.setenv("VMEC_JAX_OPT_TRIAL_SCAN", "scan")
     assert opt._use_scan_for_trial_solves() is True
     monkeypatch.delenv("VMEC_JAX_OPT_TRIAL_SCAN")
+    opt._solver_device_name = "gpu"
+    assert opt._use_scan_for_trial_solves() is False
+    opt._solver_device_name = "cpu"
     assert opt._use_scan_for_trial_solves() is True
 
 
