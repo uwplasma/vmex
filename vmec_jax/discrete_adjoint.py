@@ -164,6 +164,13 @@ def clear_replay_scan_caches() -> None:
 _DEFAULT_REPLAY_COLUMN_TARGET_MB = 4096.0
 
 
+def _backend_is_accelerator(backend: str) -> bool:
+    """Return true for JAX accelerator backend names that should stay on device."""
+
+    normalized = str(backend).strip().lower()
+    return normalized in {"gpu", "cuda", "rocm"} or normalized.startswith(("gpu:", "cuda:", "rocm:"))
+
+
 def _dynamic_replay_bucket_default() -> int:
     try:
         backend = str(jax.default_backend()).lower()
@@ -174,7 +181,7 @@ def _dynamic_replay_bucket_default() -> int:
     # the smaller bucket is still faster there, so keep the default
     # backend-sensitive instead of requiring users to tune an environment
     # variable for normal CPU/GPU optimization runs.
-    return 128 if backend in {"gpu", "cuda", "rocm"} else 32
+    return 128 if _backend_is_accelerator(backend) else 32
 
 
 def _dynamic_replay_bucket_size() -> int:
@@ -1043,7 +1050,7 @@ def _build_dynamic_replay_payload(
 ):
     from ._compat import jax
 
-    use_device_stack = jax.default_backend() == "gpu"
+    use_device_stack = _backend_is_accelerator(jax.default_backend())
     jax_array_type = getattr(jax, "Array", ())
 
     def _as_stack_array(x):

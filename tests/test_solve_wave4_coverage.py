@@ -81,6 +81,7 @@ def test_jit_cache_helpers_cover_no_jax_and_cached_paths(monkeypatch):
     assert solve_mod._strict_update_step_jit(
         fake_static,
         limit_update_rms=False,
+        need_update_rms=False,
         divide_by_scalxc_for_update=False,
     ) is None
     assert solve_mod._preconditioner_output_scaling_jit(apply_lambda_update_scale=False) is None
@@ -92,14 +93,29 @@ def test_jit_cache_helpers_cover_no_jax_and_cached_paths(monkeypatch):
     first_step = solve_mod._strict_update_step_jit(
         fake_static,
         limit_update_rms=True,
+        need_update_rms=True,
         divide_by_scalxc_for_update=False,
     )
     second_step = solve_mod._strict_update_step_jit(
         fake_static,
         limit_update_rms=True,
+        need_update_rms=True,
         divide_by_scalxc_for_update=False,
     )
     assert second_step is first_step
+    no_rms_step = solve_mod._strict_update_step_jit(
+        fake_static,
+        limit_update_rms=False,
+        need_update_rms=False,
+        divide_by_scalxc_for_update=False,
+    )
+    yes_rms_step = solve_mod._strict_update_step_jit(
+        fake_static,
+        limit_update_rms=False,
+        need_update_rms=True,
+        divide_by_scalxc_for_update=False,
+    )
+    assert yes_rms_step is not no_rms_step
 
     first_scale = solve_mod._preconditioner_output_scaling_jit(apply_lambda_update_scale=True)
     second_scale = solve_mod._preconditioner_output_scaling_jit(apply_lambda_update_scale=True)

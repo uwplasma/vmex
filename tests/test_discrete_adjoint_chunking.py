@@ -1078,9 +1078,10 @@ def test_dynamic_replay_payload_promotes_varying_constants(monkeypatch):
     np.testing.assert_allclose(np.asarray(stacked["w_mode_mn"])[:, 0], [1.0, 2.0])
 
 
-def test_dynamic_replay_payload_stacks_on_device_for_gpu_backend(monkeypatch):
+@pytest.mark.parametrize("backend", ["gpu", "cuda", "rocm", "cuda:0"])
+def test_dynamic_replay_payload_stacks_on_device_for_accelerator_backend(monkeypatch, backend):
     monkeypatch.setenv("VMEC_JAX_DYNAMIC_REPLAY_BUCKET", "1")
-    monkeypatch.setattr(da.jax, "default_backend", lambda: "gpu")
+    monkeypatch.setattr(da.jax, "default_backend", lambda: backend)
     traces = (_fake_dynamic_trace(lambda_update_scale=0.5),)
     static_flags = da._static_flags_from_replay_step_traces(traces)
 
@@ -1091,6 +1092,7 @@ def test_dynamic_replay_payload_stacks_on_device_for_gpu_backend(monkeypatch):
 
     assert hasattr(stacked["lambda_update_scale"], "dtype")
     np.testing.assert_allclose(np.asarray(stacked["lambda_update_scale"]), [0.5])
+    assert da._dynamic_replay_bucket_default() == 128
 
 
 def test_dynamic_replay_support_and_restart_classifiers():
