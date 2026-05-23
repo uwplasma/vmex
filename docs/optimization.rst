@@ -150,10 +150,13 @@ lane, not a publication-quality optimization result.
    :alt: Common minimal-seed optimization stress-test histories
 
 The companion state panel is generated only for non-stale rows with available
-initial/final WOUT provenance.  It shows the actual first optimized LCFS, final
-LCFS, full best-so-far objective history, and initial/final Boozer ``|B|`` line
-contours.  It is a diagnostic status artifact, not a README promotion panel:
-currently it covers the non-stale QA/QH/QP stress rows while the current
+initial/final WOUT provenance.  It shows the raw user-facing minimal seed,
+final LCFS, full best-so-far objective history, and initial/final Boozer
+``|B|`` line contours.  Optimization-time target-helicity or reference-family
+preseeds are tracked separately in the CSV via ``stage_seed_kind`` and
+``stage_seed_input`` so a later stage input cannot be mistaken for the raw
+initial seed.  It is a diagnostic status artifact, not a README promotion
+panel: currently it covers the non-stale QA/QH/QP stress rows while the current
 minimal-seed QI rows remain missing.
 
 .. image:: _static/figures/minimal_seed_showcase_state_panel.png
@@ -163,6 +166,9 @@ minimal-seed QI rows remain missing.
 
 The rendered table is available as
 :download:`minimal_seed_showcase_summary.csv <_static/figures/minimal_seed_showcase_summary.csv>`.
+Its provenance columns ``initial_kind``, ``initial_input``, ``initial_wout``,
+``stage_seed_kind``, ``stage_seed_input``, and ``final_wout`` distinguish the
+raw seed, first optimization-time seed, and final artifact used by the plots.
 
 For generated comparison artifacts, run QA/QH/QP/QI with the current QI
 default of no same-mode QP preseed, then run the focused QI matrix separately

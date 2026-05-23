@@ -494,6 +494,66 @@ def test_exact_optimizer_profiles_scan_solver_timing_buckets() -> None:
     assert profile["solve_forward_trial_unattributed"]["wall_time_s"] == pytest.approx(0.10)
 
 
+def test_profile_exact_supplements_scan_cache_status_timing_on_older_optimizer() -> None:
+    class OlderOptimizer:
+        def __init__(self) -> None:
+            self._profile = {}
+
+        def _profile_add(self, name: str, wall_time_s: float) -> None:
+            rec = self._profile.setdefault(name, {"count": 0, "wall_time_s": 0.0})
+            rec["count"] += 1
+            rec["wall_time_s"] += float(wall_time_s)
+            rec["mean_wall_time_s"] = rec["wall_time_s"] / rec["count"]
+
+        def _profile_add_counter(self, name: str, value: int) -> None:
+            rec = self._profile.setdefault(name, {"count": 0, "wall_time_s": 0.0})
+            rec["count"] += 1
+            rec["wall_time_s"] += int(value)
+            rec["mean_wall_time_s"] = rec["wall_time_s"] / rec["count"]
+
+        def _profile_solver_timing(
+            self,
+            diagnostics,
+            *,
+            profile_prefix: str,
+            phase_wall_s: float,
+            unattributed_name: str | None,
+        ) -> float:
+            del unattributed_name
+            self._profile_add(f"{profile_prefix}_scan_total", phase_wall_s)
+            return phase_wall_s
+
+    opt = OlderOptimizer()
+    exact_profile_tool._install_profile_timing_supplements(opt)
+    opt._profile_solver_timing(
+        {
+            "timing": {
+                "scan_runner_cache_lookup_s": 0.02,
+                "scan_runner_cache_build_s": 0.30,
+                "scan_runner_cache_hit_count": 2,
+                "scan_runner_cache_miss_count": 1,
+                "scan_runner_cache_bypass_count": 0,
+                "scan_runner_cache_hit_device_run_s": 0.40,
+                "scan_runner_cache_hit_dispatch_s": 0.05,
+                "scan_runner_cache_hit_ready_s": 0.35,
+                "scan_runner_cache_miss_device_run_s": 1.20,
+                "scan_runner_cache_miss_dispatch_s": 0.10,
+                "scan_runner_cache_miss_ready_s": 1.10,
+            }
+        },
+        profile_prefix="trial_solver",
+        phase_wall_s=1.8,
+        unattributed_name=None,
+    )
+
+    assert opt._profile["trial_solver_scan_runner_cache_lookup"]["wall_time_s"] == 0.02
+    assert opt._profile["trial_solver_scan_runner_cache_build"]["wall_time_s"] == 0.30
+    assert opt._profile["trial_solver_scan_runner_cache_hit_count"]["wall_time_s"] == 2
+    assert opt._profile["trial_solver_scan_runner_cache_miss_count"]["wall_time_s"] == 1
+    assert opt._profile["trial_solver_scan_runner_cache_hit_ready"]["wall_time_s"] == 0.35
+    assert opt._profile["trial_solver_scan_runner_cache_miss_ready"]["wall_time_s"] == 1.10
+
+
 def test_exact_optimizer_callback_report_schema_and_budget_status() -> None:
     args = exact_profile_tool._parse_args(
         [

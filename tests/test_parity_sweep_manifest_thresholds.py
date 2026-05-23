@@ -13,6 +13,7 @@ from tools.diagnostics.parity_sweep_manifest import (
 
 
 REPO_ROOT = DEFAULT_MANIFEST.parents[2]
+CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
 
 def test_parity_manifest_smoke_tier_covers_required_physics_classes() -> None:
@@ -37,6 +38,15 @@ def test_parity_manifest_smoke_tier_covers_required_physics_classes() -> None:
     assert has_case(lfreeb=False, lasym=False, axisymmetric=False)
     assert has_case(lfreeb=False, lasym=True, axisymmetric=False)
     assert has_case(lfreeb=True, lasym=False)
+
+
+def test_ci_parity_smoke_dry_run_covers_full_smoke_tier() -> None:
+    """Keep required CI from silently sampling only part of the smoke manifest."""
+
+    workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "parity_sweep_manifest.py --tier smoke" in workflow
+    assert "--max-cases" not in workflow
 
 
 def test_parity_manifest_has_optional_bounded_freeb_lasym_true_case() -> None:

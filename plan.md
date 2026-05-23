@@ -3,7 +3,7 @@
 Last updated: 2026-05-23
 Primary branch: `main`
 Baseline release: `v0.0.12`
-Latest known green `main` CI: `afaa223`
+Latest known green `main` CI: `1037744`
 
 This is the living execution plan for making `vmec_jax` accurate, fast,
 differentiable, documented, and usable by external researchers. Update it when
@@ -54,9 +54,14 @@ acceptance criteria or evidence changes.
   3.10/3.11/3.12 with the same 95% py3.11 gate. After the post-release
   workflow/API/performance patches through `13ccef8`, the clean local
   CI-equivalent gate passed again with `2147 passed, 20 skipped, 107 deselected`
-  in 8:08 and 95.06% coverage. The optional converged VMEC2000 parity gate
-  remains opt-in with `VMEC2000_INTEGRATION=1`. `solve.py` still dominates the
-  missing-line surface, so future coverage should come from physics-gated
+  in 8:08 and 95.06% coverage. After the QI public-helper, WOUT physics-gate,
+  profiling-budget, and optimization-output test additions through `1037744`,
+  the local required gate passed with `2153 passed, 20 skipped, 107 deselected`
+  in 8:05 and 95.10% coverage; full Sphinx also passed warning-clean. The
+  matching GitHub Actions run passed docs, build, parity dry-run, physics smoke,
+  and Python 3.10/3.11/3.12 fast tests. The optional converged VMEC2000 parity
+  gate remains opt-in with `VMEC2000_INTEGRATION=1`. `solve.py` still dominates
+  the missing-line surface, so future coverage should come from physics-gated
   refactor seams rather than scaffolding.
 - VMEC2000 converged-wout parity now has a fast bundled matrix gate across
   fixed/free, axisymmetric/non-axisymmetric, LASYM, and single/multigrid
@@ -491,9 +496,9 @@ coverage wave:
   solver/wout/free-boundary splits remain deferred behind parity gates.
 - Docs/release hygiene: latest released baseline is `v0.0.12`, with PyPI
   publication verified. Post-release `main` has local warning-clean Sphinx and a
-  clean 95% CI-equivalent coverage pass on `13ccef8`; the matching GitHub
-  Actions run had docs/build/physics-smoke/parity-manifest jobs green while the
-  fast-test matrix was still running when this status was recorded.
+  clean 95% CI-equivalent coverage pass on `1037744`; the matching GitHub
+  Actions run passed docs/build/physics-smoke/parity-manifest jobs plus the
+  Python 3.10/3.11/3.12 fast-test matrix.
   Performance/discrete-adjoint/docs reflect the current replay and finite-beta
   policies, diagnostics docs cover detailed preconditioner timing, and a
   command-level release checklist now ties local gates, tools/validation
@@ -549,8 +554,8 @@ Acceptance:
       reached 93.18% in 7m20s.
 - [x] Raise required CI coverage to 95% after additional source refactors,
       parity/physics gates, and branch tests. The latest clean local
-      CI-equivalent run reached 95.06% with `2147 passed, 20 skipped,
-      107 deselected` in 8:08.
+      CI-equivalent run reached 95.10% with `2153 passed, 20 skipped,
+      107 deselected` in 8:05.
 - [x] Add targeted tests before coverage-only tests: physics gates first, branch
       logic second, I/O/schema third.
 - [x] Keep required CI under 10 minutes by using small fixtures and nightly heavy
@@ -611,7 +616,7 @@ Realistic next targets for this development cycle:
 1. Keep the required CI coverage gate at 95% and preserve sub-ten-minute py3.11
    coverage runtime by pruning duplicate helper tests, splitting slow
    validation into optional tiers, or refactoring the largest modules so fewer
-   synthetic branch tests are required. Current required coverage is 95.06%;
+   synthetic branch tests are required. Current required coverage is 95.10%;
    the next staged ratchet should come from solver/physics refactor seams rather
    than superficial call coverage.
 2. Raise the solved-state QI diagnostic from the new low-resolution bundled

@@ -437,6 +437,13 @@ assets are:
 - ``minimal_seed_showcase_objective_panel.png``
 - ``minimal_seed_showcase_state_panel.png``
 
+The summary CSV is provenance-aware: ``initial_input`` and ``initial_wout``
+refer to the raw user-facing minimal seed shown in the state panel,
+``stage_seed_kind`` and ``stage_seed_input`` identify any target-helicity or
+reference-family preseed used by the optimizer, and ``final_wout`` identifies
+the promoted final output.  This prevents a continuation or staged-QI
+``input.initial`` file from being silently displayed as the raw seed.
+
 Those checked-in assets currently document the minimal-seed showcase snapshot as
 follows:
 

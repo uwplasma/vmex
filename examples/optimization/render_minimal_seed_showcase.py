@@ -60,6 +60,18 @@ class ShowcaseRecord:
     stale_reason: str | None = None
 
 
+@dataclass(frozen=True)
+class ShowcaseProvenance:
+    """Input/output paths needed to distinguish raw seed and stage seed states."""
+
+    initial_kind: str
+    initial_input: Path | None
+    stage_seed_kind: str
+    stage_seed_input: Path | None
+    initial_wout: Path | None
+    final_wout: Path | None
+
+
 def _float_or_none(value) -> float | None:
     if value in (None, ""):
         return None
@@ -320,10 +332,17 @@ def write_summary_csv(records: list[ShowcaseRecord], path: Path) -> None:
                 "qi_mirror_ratio_max",
                 "qi_max_elongation",
                 "message",
+                "initial_kind",
+                "initial_input",
+                "initial_wout",
+                "stage_seed_kind",
+                "stage_seed_input",
+                "final_wout",
                 "output_dir",
             ]
         )
         for record in records:
+            provenance = provenance_for_record(record)
             writer.writerow(
                 [
                     record.case_name,
@@ -343,6 +362,12 @@ def write_summary_csv(records: list[ShowcaseRecord], path: Path) -> None:
                     "" if record.qi_mirror_ratio_max is None else f"{record.qi_mirror_ratio_max:.16e}",
                     "" if record.qi_max_elongation is None else f"{record.qi_max_elongation:.16e}",
                     display_message(record),
+                    provenance.initial_kind,
+                    "" if provenance.initial_input is None else _repo_relative_path(provenance.initial_input),
+                    "" if provenance.initial_wout is None else _repo_relative_path(provenance.initial_wout),
+                    provenance.stage_seed_kind,
+                    "" if provenance.stage_seed_input is None else _repo_relative_path(provenance.stage_seed_input),
+                    "" if provenance.final_wout is None else _repo_relative_path(provenance.final_wout),
                     _repo_relative_path(record.output_dir),
                 ]
             )
@@ -411,19 +436,41 @@ def _record_metadata(record: ShowcaseRecord) -> dict:
 
 
 def _initial_input_for_record(record: ShowcaseRecord) -> Path | None:
-    """Return the input deck that represents the actual first optimized point."""
+    """Return the raw VMEC seed deck for a minimal-seed showcase record.
+
+    This deliberately ignores optimization-time target-helicity and
+    reference-family preseed files.  README/docs state panels should show the
+    user-facing seed, not a later stage input that already contains hints.
+    """
 
     metadata = _record_metadata(record)
-    seed_meta = metadata.get("target_helicity_seed") or {}
-    seeded = _local_repo_path(seed_meta.get("seeded_input_file"), output_dir=record.output_dir)
-    if seeded is not None and seeded.exists():
-        return seeded
-    preseed_meta = metadata.get("reference_preseed") or {}
-    preseeded = _local_repo_path(preseed_meta.get("preseeded_input_file"), output_dir=record.output_dir)
-    if preseeded is not None and preseeded.exists():
-        return preseeded
     case_meta = metadata.get("minimal_seed_case") or {}
     return _local_repo_path(case_meta.get("input_file"), output_dir=record.output_dir)
+
+
+def _stage_seed_for_record(record: ShowcaseRecord) -> tuple[str, Path | None]:
+    """Return the first optimization-time input and its provenance kind."""
+
+    raw_input = _initial_input_for_record(record)
+    metadata = _record_metadata(record)
+    preseed_meta = metadata.get("reference_preseed") or {}
+    seed_meta = metadata.get("target_helicity_seed") or {}
+    seeded = _local_repo_path(seed_meta.get("seeded_input_file"), output_dir=record.output_dir)
+    preseeded = _local_repo_path(preseed_meta.get("preseeded_input_file"), output_dir=record.output_dir)
+    has_seed = seeded is not None and seeded.exists()
+    preseed_enabled = _bool_value(preseed_meta.get("enabled"))
+    preseed_is_distinct = (
+        preseeded is not None
+        and preseed_enabled
+        and (raw_input is None or preseeded.resolve() != raw_input.resolve())
+    )
+    if has_seed and preseed_is_distinct:
+        return "reference_preseed+target_helicity_seed", seeded
+    if has_seed:
+        return "target_helicity_seed", seeded
+    if preseed_is_distinct:
+        return "reference_preseed", preseeded
+    return "raw_seed", raw_input
 
 
 def _stage_checkpoint_wout(record: ShowcaseRecord, name: str) -> Path | None:
@@ -460,10 +507,13 @@ def _initial_wout_for_record(record: ShowcaseRecord) -> Path | None:
         from render_readme_best_optimizations import _validated_or_derived_raw_initial_wout
     except ImportError:
         return None
-    candidate = record.output_dir / "wout_initial.nc"
+    candidate = record.output_dir / "wout_original.nc"
+    if not candidate.exists() and record.policy == "continuation":
+        mode1 = record.output_dir.parent.parent / "mode1" / record.output_dir.name / "wout_initial.nc"
+        if mode1.exists():
+            candidate = mode1
     if not candidate.exists():
-        stage_candidate = _stage_checkpoint_wout(record, "wout_initial.nc")
-        candidate = stage_candidate if stage_candidate is not None else candidate
+        candidate = record.output_dir / "wout_initial.nc"
     try:
         return _validated_or_derived_raw_initial_wout(
             candidate,
@@ -473,6 +523,27 @@ def _initial_wout_for_record(record: ShowcaseRecord) -> Path | None:
         )
     except Exception:
         return None
+
+
+def _existing_initial_wout_for_record(record: ShowcaseRecord) -> Path | None:
+    """Return a proven raw-seed initial WOUT path only if it already exists."""
+
+    candidate = record.output_dir / "wout_original.nc"
+    return candidate if candidate.exists() else None
+
+
+def provenance_for_record(record: ShowcaseRecord) -> ShowcaseProvenance:
+    """Return README/docs provenance paths without running VMEC."""
+
+    stage_seed_kind, stage_seed_input = _stage_seed_for_record(record)
+    return ShowcaseProvenance(
+        initial_kind="raw_seed",
+        initial_input=_initial_input_for_record(record),
+        stage_seed_kind=stage_seed_kind,
+        stage_seed_input=stage_seed_input,
+        initial_wout=_existing_initial_wout_for_record(record),
+        final_wout=_final_wout_for_record(record),
+    )
 
 
 def render_state_panel(records: list[ShowcaseRecord], out_png: Path) -> Path | None:
@@ -511,7 +582,11 @@ def render_state_panel(records: list[ShowcaseRecord], out_png: Path) -> Path | N
         ax3 = fig.add_subplot(gs[row, 3])
         ax4 = fig.add_subplot(gs[row, 4])
 
-        _plot_lcfs(ax0, read_wout(initial_wout), f"{record.case_name}: initial")
+        stage_seed_kind, _stage_seed_input = _stage_seed_for_record(record)
+        seed_label = "raw minimal seed"
+        if stage_seed_kind != "raw_seed":
+            seed_label = f"raw minimal seed\n(stage seed: {stage_seed_kind})"
+        _plot_lcfs(ax0, read_wout(initial_wout), f"{record.case_name}: {seed_label}")
         _plot_lcfs(ax1, read_wout(final_wout), "final")
         segments = objective_segments(record)
         if not segments:

@@ -35,7 +35,7 @@ jobs:
 
       - name: Manifest smoke sweep (dry-run)
         run: |
-          python tools/diagnostics/parity_sweep_manifest.py --tier smoke --max-cases 4 --dry-run --vmec-exec /usr/bin/true
+          python tools/diagnostics/parity_sweep_manifest.py --tier smoke --dry-run --vmec-exec /usr/bin/true
 
   test:
     name: Fast Tests (py${{ matrix.python-version }})

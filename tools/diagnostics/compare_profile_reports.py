@@ -62,6 +62,8 @@ EXACT_PROFILE_METRIC_NAMES = {
     ),
     "residual_tangents_s": ("jacobian_residual_tangents",),
     "projected_residual_tangents_s": ("jacobian_projected_replay_residual_tangents",),
+    "projected_replay_total_s": ("jacobian_projected_replay_total",),
+    "projected_replay_dispatch_s": ("jacobian_projected_tape_replay_dispatch",),
     "accepted_replay_dispatch_s": (
         "jacobian_tape_replay_dispatch",
         "jacobian_projected_tape_replay_dispatch",
@@ -92,6 +94,8 @@ EXACT_PROFILE_METRIC_NAMES = {
     "trial_solver_scan_initial_compute_forces_s": ("trial_solver_scan_initial_compute_forces",),
     "trial_solver_scan_axis_reset_compute_forces_s": ("trial_solver_scan_axis_reset_compute_forces",),
     "trial_solver_scan_run_setup_s": ("trial_solver_scan_run_setup",),
+    "trial_solver_scan_runner_cache_lookup_s": ("trial_solver_scan_runner_cache_lookup",),
+    "trial_solver_scan_runner_cache_build_s": ("trial_solver_scan_runner_cache_build",),
     "trial_solver_scan_runner_cache_hit_count": ("trial_solver_scan_runner_cache_hit_count",),
     "trial_solver_scan_runner_cache_miss_count": ("trial_solver_scan_runner_cache_miss_count",),
     "trial_solver_scan_runner_cache_bypass_count": ("trial_solver_scan_runner_cache_bypass_count",),
@@ -99,6 +103,15 @@ EXACT_PROFILE_METRIC_NAMES = {
     "trial_solver_scan_device_run_s": ("trial_solver_scan_device_run",),
     "trial_solver_scan_device_dispatch_s": ("trial_solver_scan_device_dispatch",),
     "trial_solver_scan_device_ready_s": ("trial_solver_scan_device_ready",),
+    "trial_solver_scan_runner_cache_hit_device_run_s": ("trial_solver_scan_runner_cache_hit_device_run",),
+    "trial_solver_scan_runner_cache_hit_dispatch_s": ("trial_solver_scan_runner_cache_hit_dispatch",),
+    "trial_solver_scan_runner_cache_hit_ready_s": ("trial_solver_scan_runner_cache_hit_ready",),
+    "trial_solver_scan_runner_cache_miss_device_run_s": ("trial_solver_scan_runner_cache_miss_device_run",),
+    "trial_solver_scan_runner_cache_miss_dispatch_s": ("trial_solver_scan_runner_cache_miss_dispatch",),
+    "trial_solver_scan_runner_cache_miss_ready_s": ("trial_solver_scan_runner_cache_miss_ready",),
+    "trial_solver_scan_runner_cache_bypass_device_run_s": ("trial_solver_scan_runner_cache_bypass_device_run",),
+    "trial_solver_scan_runner_cache_bypass_dispatch_s": ("trial_solver_scan_runner_cache_bypass_dispatch",),
+    "trial_solver_scan_runner_cache_bypass_ready_s": ("trial_solver_scan_runner_cache_bypass_ready",),
     "trial_solver_scan_host_materialize_s": ("trial_solver_scan_host_materialize",),
     "trial_solver_scan_postprocess_s": ("trial_solver_scan_postprocess",),
     "trial_solver_scan_unattributed_s": ("trial_solver_scan_unattributed",),
@@ -226,6 +239,8 @@ METRIC_ORDER = (
     "initial_projection_s",
     "residual_tangents_s",
     "projected_residual_tangents_s",
+    "projected_replay_total_s",
+    "projected_replay_dispatch_s",
     "accepted_replay_dispatch_s",
     "accepted_replay_ready_s",
     "trial_solve_s",
@@ -243,6 +258,8 @@ METRIC_ORDER = (
     "trial_solver_scan_initial_compute_forces_s",
     "trial_solver_scan_axis_reset_compute_forces_s",
     "trial_solver_scan_run_setup_s",
+    "trial_solver_scan_runner_cache_lookup_s",
+    "trial_solver_scan_runner_cache_build_s",
     "trial_solver_scan_runner_cache_hit_count",
     "trial_solver_scan_runner_cache_miss_count",
     "trial_solver_scan_runner_cache_bypass_count",
@@ -250,6 +267,15 @@ METRIC_ORDER = (
     "trial_solver_scan_device_run_s",
     "trial_solver_scan_device_dispatch_s",
     "trial_solver_scan_device_ready_s",
+    "trial_solver_scan_runner_cache_hit_device_run_s",
+    "trial_solver_scan_runner_cache_hit_dispatch_s",
+    "trial_solver_scan_runner_cache_hit_ready_s",
+    "trial_solver_scan_runner_cache_miss_device_run_s",
+    "trial_solver_scan_runner_cache_miss_dispatch_s",
+    "trial_solver_scan_runner_cache_miss_ready_s",
+    "trial_solver_scan_runner_cache_bypass_device_run_s",
+    "trial_solver_scan_runner_cache_bypass_dispatch_s",
+    "trial_solver_scan_runner_cache_bypass_ready_s",
     "trial_solver_scan_host_materialize_s",
     "trial_solver_scan_postprocess_s",
     "trial_solver_scan_unattributed_s",
@@ -348,6 +374,8 @@ METRIC_LABELS = {
     "initial_projection_s": "initial VJP/projection",
     "residual_tangents_s": "residual tangents",
     "projected_residual_tangents_s": "projected residual tangents",
+    "projected_replay_total_s": "projected replay total",
+    "projected_replay_dispatch_s": "projected replay dispatch",
     "accepted_replay_dispatch_s": "accepted replay dispatch",
     "accepted_replay_ready_s": "accepted replay ready",
     "trial_solve_s": "trial solve",
@@ -365,6 +393,8 @@ METRIC_LABELS = {
     "trial_solver_scan_initial_compute_forces_s": "trial solver scan initial force assembly",
     "trial_solver_scan_axis_reset_compute_forces_s": "trial solver scan axis-reset force assembly",
     "trial_solver_scan_run_setup_s": "trial solver scan run setup",
+    "trial_solver_scan_runner_cache_lookup_s": "trial scan runner cache lookup",
+    "trial_solver_scan_runner_cache_build_s": "trial scan runner cache build",
     "trial_solver_scan_runner_cache_hit_count": "trial scan runner cache hits",
     "trial_solver_scan_runner_cache_miss_count": "trial scan runner cache misses",
     "trial_solver_scan_runner_cache_bypass_count": "trial scan runner cache bypasses",
@@ -372,6 +402,15 @@ METRIC_LABELS = {
     "trial_solver_scan_device_run_s": "trial solver scan device run",
     "trial_solver_scan_device_dispatch_s": "trial solver scan device dispatch",
     "trial_solver_scan_device_ready_s": "trial solver scan device ready",
+    "trial_solver_scan_runner_cache_hit_device_run_s": "trial scan cache-hit device run",
+    "trial_solver_scan_runner_cache_hit_dispatch_s": "trial scan cache-hit dispatch",
+    "trial_solver_scan_runner_cache_hit_ready_s": "trial scan cache-hit ready",
+    "trial_solver_scan_runner_cache_miss_device_run_s": "trial scan cache-miss device run",
+    "trial_solver_scan_runner_cache_miss_dispatch_s": "trial scan cache-miss dispatch",
+    "trial_solver_scan_runner_cache_miss_ready_s": "trial scan cache-miss ready",
+    "trial_solver_scan_runner_cache_bypass_device_run_s": "trial scan cache-bypass device run",
+    "trial_solver_scan_runner_cache_bypass_dispatch_s": "trial scan cache-bypass dispatch",
+    "trial_solver_scan_runner_cache_bypass_ready_s": "trial scan cache-bypass ready",
     "trial_solver_scan_host_materialize_s": "trial solver scan host materialize",
     "trial_solver_scan_postprocess_s": "trial solver scan postprocess",
     "trial_solver_scan_unattributed_s": "trial solver scan unattributed",
@@ -463,6 +502,8 @@ BOTTLENECK_METRICS = (
     ("initial_projection_s", "initial VJP/projection"),
     ("residual_tangents_s", "residual tangent projection"),
     ("projected_residual_tangents_s", "projected residual tangent projection"),
+    ("projected_replay_total_s", "projected replay total"),
+    ("projected_replay_dispatch_s", "projected replay dispatch"),
     ("accepted_replay_dispatch_s", "accepted-point replay dispatch"),
     ("accepted_replay_ready_s", "accepted-point replay ready"),
     ("trial_solve_s", "trial solve"),
@@ -478,10 +519,21 @@ BOTTLENECK_METRICS = (
     ("trial_solver_scan_initial_compute_forces_s", "trial scan initial force assembly"),
     ("trial_solver_scan_axis_reset_compute_forces_s", "trial scan axis-reset force assembly"),
     ("trial_solver_scan_run_setup_s", "trial scan run setup"),
+    ("trial_solver_scan_runner_cache_lookup_s", "trial scan cache lookup"),
+    ("trial_solver_scan_runner_cache_build_s", "trial scan cache build"),
     ("trial_solver_scan_preflight_s", "trial scan preflight"),
     ("trial_solver_scan_device_run_s", "trial scan device run"),
     ("trial_solver_scan_device_dispatch_s", "trial scan device dispatch"),
     ("trial_solver_scan_device_ready_s", "trial scan device ready"),
+    ("trial_solver_scan_runner_cache_hit_device_run_s", "trial scan cache-hit device run"),
+    ("trial_solver_scan_runner_cache_hit_dispatch_s", "trial scan cache-hit dispatch"),
+    ("trial_solver_scan_runner_cache_hit_ready_s", "trial scan cache-hit ready"),
+    ("trial_solver_scan_runner_cache_miss_device_run_s", "trial scan cache-miss device run"),
+    ("trial_solver_scan_runner_cache_miss_dispatch_s", "trial scan cache-miss dispatch"),
+    ("trial_solver_scan_runner_cache_miss_ready_s", "trial scan cache-miss ready"),
+    ("trial_solver_scan_runner_cache_bypass_device_run_s", "trial scan cache-bypass device run"),
+    ("trial_solver_scan_runner_cache_bypass_dispatch_s", "trial scan cache-bypass dispatch"),
+    ("trial_solver_scan_runner_cache_bypass_ready_s", "trial scan cache-bypass ready"),
     ("trial_solver_scan_host_materialize_s", "trial scan host materialize"),
     ("trial_solver_scan_postprocess_s", "trial scan postprocess"),
     ("trial_solver_scan_unattributed_s", "trial scan unattributed"),
@@ -540,6 +592,7 @@ EXACT_OPTIMIZER_PATCH_TARGET_NAMES = {
     "jacobian_tape_replay",
     "jacobian_projected_tape_replay_dispatch",
     "jacobian_projected_replay_residual_tangents",
+    "jacobian_projected_replay_total",
     "gradient_tape_replay",
     "state_tangent_tape_replay",
     "b_cartesian_tangent_tape_replay",
@@ -587,10 +640,21 @@ EXACT_OPTIMIZER_PATCH_TARGET_NAMES = {
     "trial_solver_scan_initial_compute_forces",
     "trial_solver_scan_axis_reset_compute_forces",
     "trial_solver_scan_run_setup",
+    "trial_solver_scan_runner_cache_lookup",
+    "trial_solver_scan_runner_cache_build",
     "trial_solver_scan_preflight",
     "trial_solver_scan_device_run",
     "trial_solver_scan_device_dispatch",
     "trial_solver_scan_device_ready",
+    "trial_solver_scan_runner_cache_hit_device_run",
+    "trial_solver_scan_runner_cache_hit_dispatch",
+    "trial_solver_scan_runner_cache_hit_ready",
+    "trial_solver_scan_runner_cache_miss_device_run",
+    "trial_solver_scan_runner_cache_miss_dispatch",
+    "trial_solver_scan_runner_cache_miss_ready",
+    "trial_solver_scan_runner_cache_bypass_device_run",
+    "trial_solver_scan_runner_cache_bypass_dispatch",
+    "trial_solver_scan_runner_cache_bypass_ready",
     "trial_solver_scan_host_materialize",
     "trial_solver_scan_postprocess",
     "trial_solver_scan_unattributed",
@@ -917,6 +981,18 @@ def _profile_named_time(profile: dict[str, dict[str, float | int]], names: Itera
     return sum(values) if values else None
 
 
+def _profile_named_count(profile: dict[str, dict[str, float | int]], names: Iterable[str]) -> int | None:
+    """Return summed counts for exact profile names that are present."""
+
+    name_set = {str(name) for name in names}
+    values = [
+        int(rec.get("count", 0))
+        for name, rec in profile.items()
+        if str(name) in name_set
+    ]
+    return sum(values) if values else None
+
+
 def _profile_metric_time(
     profile: dict[str, dict[str, float | int]],
     metric: str,
@@ -1166,6 +1242,134 @@ def _top_profile(
     return rows[: max(0, int(limit))]
 
 
+def _metric_float(metrics: dict[str, Any], key: str) -> float | None:
+    return _as_float(metrics.get(key))
+
+
+def _metric_int(metrics: dict[str, Any], key: str) -> int | None:
+    value = _as_float(metrics.get(key))
+    if value is None:
+        return None
+    return int(round(value))
+
+
+def _scan_trial_summary(metrics: dict[str, Any]) -> dict[str, Any] | None:
+    """Group trial-scan timing and cache-status metrics for actionability."""
+
+    timing_keys = (
+        "trial_solver_scan_total_s",
+        "trial_solver_scan_setup_s",
+        "trial_solver_scan_initial_compute_forces_s",
+        "trial_solver_scan_axis_reset_compute_forces_s",
+        "trial_solver_scan_run_setup_s",
+        "trial_solver_scan_preflight_s",
+        "trial_solver_scan_device_run_s",
+        "trial_solver_scan_device_dispatch_s",
+        "trial_solver_scan_device_ready_s",
+        "trial_solver_scan_host_materialize_s",
+        "trial_solver_scan_postprocess_s",
+        "trial_solver_scan_unattributed_s",
+        "trial_solver_scan_runner_cache_lookup_s",
+        "trial_solver_scan_runner_cache_build_s",
+    )
+    count_keys = (
+        "trial_solver_scan_runner_cache_hit_count",
+        "trial_solver_scan_runner_cache_miss_count",
+        "trial_solver_scan_runner_cache_bypass_count",
+    )
+    if not any(_metric_float(metrics, key) is not None for key in (*timing_keys, *count_keys)):
+        return None
+
+    status: dict[str, dict[str, float | int | None]] = {}
+    for name in ("hit", "miss", "bypass"):
+        status[name] = {
+            "count": _metric_int(metrics, f"trial_solver_scan_runner_cache_{name}_count"),
+            "device_run_s": _metric_float(metrics, f"trial_solver_scan_runner_cache_{name}_device_run_s"),
+            "dispatch_s": _metric_float(metrics, f"trial_solver_scan_runner_cache_{name}_dispatch_s"),
+            "ready_s": _metric_float(metrics, f"trial_solver_scan_runner_cache_{name}_ready_s"),
+        }
+
+    count_values = [
+        status_name["count"]
+        for status_name in status.values()
+        if status_name["count"] is not None
+    ]
+    miss_count = status["miss"]["count"]
+    total_count = sum(int(value) for value in count_values) if count_values else None
+    dominant_status = max(
+        (
+            (name, _as_float(values.get("device_run_s")) or 0.0)
+            for name, values in status.items()
+        ),
+        key=lambda item: item[1],
+    )
+    return {
+        "total_s": _metric_float(metrics, "trial_solver_scan_total_s"),
+        "setup_s": _metric_float(metrics, "trial_solver_scan_setup_s"),
+        "initial_compute_forces_s": _metric_float(
+            metrics, "trial_solver_scan_initial_compute_forces_s"
+        ),
+        "axis_reset_compute_forces_s": _metric_float(
+            metrics, "trial_solver_scan_axis_reset_compute_forces_s"
+        ),
+        "run_setup_s": _metric_float(metrics, "trial_solver_scan_run_setup_s"),
+        "preflight_s": _metric_float(metrics, "trial_solver_scan_preflight_s"),
+        "device_run_s": _metric_float(metrics, "trial_solver_scan_device_run_s"),
+        "device_dispatch_s": _metric_float(metrics, "trial_solver_scan_device_dispatch_s"),
+        "device_ready_s": _metric_float(metrics, "trial_solver_scan_device_ready_s"),
+        "host_materialize_s": _metric_float(metrics, "trial_solver_scan_host_materialize_s"),
+        "postprocess_s": _metric_float(metrics, "trial_solver_scan_postprocess_s"),
+        "unattributed_s": _metric_float(metrics, "trial_solver_scan_unattributed_s"),
+        "cache_lookup_s": _metric_float(metrics, "trial_solver_scan_runner_cache_lookup_s"),
+        "cache_build_s": _metric_float(metrics, "trial_solver_scan_runner_cache_build_s"),
+        "cache_status": status,
+        "cache_miss_fraction": (
+            float(miss_count) / float(total_count)
+            if miss_count is not None and total_count not in (None, 0)
+            else None
+        ),
+        "dominant_cache_status_by_device_run": (
+            dominant_status[0] if dominant_status[1] > 0.0 else None
+        ),
+    }
+
+
+def _projected_replay_summary(
+    metrics: dict[str, Any],
+    *,
+    profile: dict[str, dict[str, float | int]] | None = None,
+    total_runtime_s: float | None = None,
+) -> dict[str, Any] | None:
+    """Group projected replay accounting separately from generic replay time."""
+
+    total_s = _metric_float(metrics, "projected_replay_total_s")
+    dispatch_s = _metric_float(metrics, "projected_replay_dispatch_s")
+    residual_s = _metric_float(metrics, "projected_residual_tangents_s")
+    if total_s is None and dispatch_s is None and residual_s is None:
+        return None
+    count = None
+    if profile is not None:
+        count = _profile_named_count(profile, ("jacobian_projected_replay_total",))
+    if count is None:
+        count = _metric_int(metrics, "accepted_point_replay_count")
+    return {
+        "total_s": total_s,
+        "dispatch_s": dispatch_s,
+        "residual_tangents_s": residual_s,
+        "count": count,
+        "share_of_total": (
+            float(total_s) / float(total_runtime_s)
+            if total_s is not None and total_runtime_s is not None and total_runtime_s > 0.0
+            else None
+        ),
+        "residual_tangent_share_of_projected": (
+            float(residual_s) / float(total_s)
+            if residual_s is not None and total_s is not None and total_s > 0.0
+            else None
+        ),
+    }
+
+
 SAMPLE_PROFILE_METRICS = {
     "exact_tape_build_s",
     "exact_tape_build_jvp_only_s",
@@ -1177,8 +1381,25 @@ SAMPLE_PROFILE_METRICS = {
     "initial_tangents_vmap_ready_s",
     "residual_tangents_s",
     "projected_residual_tangents_s",
+    "projected_replay_total_s",
+    "projected_replay_dispatch_s",
     "accepted_replay_dispatch_s",
     "accepted_replay_ready_s",
+    "trial_solver_scan_total_s",
+    "trial_solver_scan_runner_cache_lookup_s",
+    "trial_solver_scan_runner_cache_build_s",
+    "trial_solver_scan_device_run_s",
+    "trial_solver_scan_device_dispatch_s",
+    "trial_solver_scan_device_ready_s",
+    "trial_solver_scan_runner_cache_hit_device_run_s",
+    "trial_solver_scan_runner_cache_hit_dispatch_s",
+    "trial_solver_scan_runner_cache_hit_ready_s",
+    "trial_solver_scan_runner_cache_miss_device_run_s",
+    "trial_solver_scan_runner_cache_miss_dispatch_s",
+    "trial_solver_scan_runner_cache_miss_ready_s",
+    "trial_solver_scan_runner_cache_bypass_device_run_s",
+    "trial_solver_scan_runner_cache_bypass_dispatch_s",
+    "trial_solver_scan_runner_cache_bypass_ready_s",
     "trial_solver_scan_runner_cache_miss_count",
     "forward_exact_solver_scan_runner_cache_miss_count",
     "exact_tape_solver_scan_runner_cache_miss_count",
@@ -1215,6 +1436,12 @@ def _sample_profile_summaries(payload: dict[str, Any], *, top_profile: int) -> l
                 "wall_time_s": wall_time_s,
                 "param_step_norm": _as_float(sample.get("param_step_norm")),
                 "metrics": metrics,
+                "trial_scan_summary": _scan_trial_summary(metrics),
+                "projected_replay_summary": _projected_replay_summary(
+                    metrics,
+                    profile=profile,
+                    total_runtime_s=wall_time_s,
+                ),
                 "exact_optimizer_patch_target": _exact_optimizer_patch_target(
                     profile,
                     total_runtime_s=wall_time_s,
@@ -1298,6 +1525,31 @@ def _exact_optimizer_patch_target(
         ):
             # The split dispatch/ready buckets identify whether this is a
             # compile/launch issue or actual device-body execution.
+            continue
+        if name_s in {
+            "trial_solver_scan_device_run",
+            "trial_solver_scan_device_dispatch",
+            "trial_solver_scan_device_ready",
+        } and any(
+            float(profile[child].get("wall_time_s", 0.0)) > 0.0
+            for status in ("hit", "miss", "bypass")
+            for child in (
+                f"trial_solver_scan_runner_cache_{status}_device_run",
+                f"trial_solver_scan_runner_cache_{status}_dispatch",
+                f"trial_solver_scan_runner_cache_{status}_ready",
+            )
+            if child in profile
+        ):
+            # When scan timing is split by cache status, those buckets explain
+            # whether misses, hits, or bypasses are driving the broad trial scan.
+            continue
+        if name_s.endswith("_device_run") and "_scan_runner_cache_" in name_s and any(
+            float(profile[child].get("wall_time_s", 0.0)) > 0.0
+            for child in (name_s.replace("_device_run", "_dispatch"), name_s.replace("_device_run", "_ready"))
+            if child in profile
+        ):
+            # Prefer cache-status dispatch/ready leaves over their enclosing
+            # cache-status device-run bucket when split timing is available.
             continue
         if name_s not in EXACT_OPTIMIZER_PATCH_TARGET_NAMES:
             continue
@@ -1443,6 +1695,12 @@ def summarize_payload(
         "path": None if path is None else str(path),
         "metadata": metadata,
         "metrics": metrics,
+        "trial_scan_summary": _scan_trial_summary(metrics),
+        "projected_replay_summary": _projected_replay_summary(
+            metrics,
+            profile=profile,
+            total_runtime_s=_as_float(metrics.get("total_runtime_s")),
+        ),
         "bottleneck_hint": _bottleneck_hint(metrics),
         "exact_optimizer_patch_target": _exact_optimizer_patch_target(
             profile,
@@ -1628,6 +1886,85 @@ def format_text(comparison: dict[str, Any]) -> str:
             share = "" if total <= 0.0 else f", {100.0 * wall / total:.1f}%"
             formatted.append(f"{entry['name']}={wall:.3f}s{share}")
         lines.append(f"  {report['label']}: " + "; ".join(formatted))
+
+    projected_rows = []
+    for report in reports:
+        projected = report.get("projected_replay_summary")
+        if not isinstance(projected, dict):
+            continue
+        projected_rows.append(
+            [
+                str(report["label"]),
+                _format_value(projected.get("total_s"), "projected_replay_total_s"),
+                _format_value(projected.get("dispatch_s"), "projected_replay_dispatch_s"),
+                _format_value(projected.get("residual_tangents_s"), "projected_residual_tangents_s"),
+                _format_value(projected.get("count"), "accepted_point_replay_count"),
+                (
+                    "n/a"
+                    if _as_float(projected.get("share_of_total")) is None
+                    else f"{100.0 * float(projected['share_of_total']):.1f}%"
+                ),
+            ]
+        )
+    if projected_rows:
+        lines.extend(["", "Projected replay totals:"])
+        lines.append(
+            _table(
+                ["label", "total_s", "dispatch_s", "residual_tangent_s", "count", "share"],
+                projected_rows,
+            )
+        )
+
+    scan_rows = []
+    for report in reports:
+        scan = report.get("trial_scan_summary")
+        if not isinstance(scan, dict):
+            continue
+        cache_status = scan.get("cache_status") if isinstance(scan.get("cache_status"), dict) else {}
+        hit = cache_status.get("hit") if isinstance(cache_status.get("hit"), dict) else {}
+        miss = cache_status.get("miss") if isinstance(cache_status.get("miss"), dict) else {}
+        bypass = cache_status.get("bypass") if isinstance(cache_status.get("bypass"), dict) else {}
+        miss_fraction = _as_float(scan.get("cache_miss_fraction"))
+        scan_rows.append(
+            [
+                str(report["label"]),
+                _format_value(scan.get("total_s"), "trial_solver_scan_total_s"),
+                _format_value(scan.get("device_dispatch_s"), "trial_solver_scan_device_dispatch_s"),
+                _format_value(scan.get("device_ready_s"), "trial_solver_scan_device_ready_s"),
+                _format_value(scan.get("cache_lookup_s"), "trial_solver_scan_runner_cache_lookup_s"),
+                _format_value(scan.get("cache_build_s"), "trial_solver_scan_runner_cache_build_s"),
+                _format_value(hit.get("count"), "trial_solver_scan_runner_cache_hit_count"),
+                _format_value(miss.get("count"), "trial_solver_scan_runner_cache_miss_count"),
+                _format_value(bypass.get("count"), "trial_solver_scan_runner_cache_bypass_count"),
+                "n/a" if miss_fraction is None else f"{100.0 * miss_fraction:.1f}%",
+                _format_value(
+                    miss.get("device_run_s"),
+                    "trial_solver_scan_runner_cache_miss_device_run_s",
+                ),
+                str(scan.get("dominant_cache_status_by_device_run") or "n/a"),
+            ]
+        )
+    if scan_rows:
+        lines.extend(["", "Trial scan timing/cache status:"])
+        lines.append(
+            _table(
+                [
+                    "label",
+                    "total_s",
+                    "dispatch_s",
+                    "ready_s",
+                    "lookup_s",
+                    "build_s",
+                    "hits",
+                    "misses",
+                    "bypasses",
+                    "miss_frac",
+                    "miss_device_s",
+                    "dominant",
+                ],
+                scan_rows,
+            )
+        )
     hints = []
     for report in reports:
         hint = report.get("bottleneck_hint")

@@ -745,8 +745,19 @@ def _install_profile_timing_supplements(opt) -> None:
     supplemental_keys = (
         ("scan_setup_s", "scan_setup"),
         ("scan_run_setup_s", "scan_run_setup"),
+        ("scan_runner_cache_lookup_s", "scan_runner_cache_lookup"),
+        ("scan_runner_cache_build_s", "scan_runner_cache_build"),
         ("compute_forces_first_s", "compute_forces_first"),
         ("compute_forces_rest_s", "compute_forces_rest"),
+        ("scan_runner_cache_hit_device_run_s", "scan_runner_cache_hit_device_run"),
+        ("scan_runner_cache_hit_dispatch_s", "scan_runner_cache_hit_dispatch"),
+        ("scan_runner_cache_hit_ready_s", "scan_runner_cache_hit_ready"),
+        ("scan_runner_cache_miss_device_run_s", "scan_runner_cache_miss_device_run"),
+        ("scan_runner_cache_miss_dispatch_s", "scan_runner_cache_miss_dispatch"),
+        ("scan_runner_cache_miss_ready_s", "scan_runner_cache_miss_ready"),
+        ("scan_runner_cache_bypass_device_run_s", "scan_runner_cache_bypass_device_run"),
+        ("scan_runner_cache_bypass_dispatch_s", "scan_runner_cache_bypass_dispatch"),
+        ("scan_runner_cache_bypass_ready_s", "scan_runner_cache_bypass_ready"),
     )
     supplemental_counter_keys = (
         ("scan_runner_cache_hit_count", "scan_runner_cache_hit_count"),
