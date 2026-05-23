@@ -429,6 +429,70 @@ def test_wout_minimal_lasym_loop_and_presym_dump_branch(monkeypatch, tmp_path: P
     assert "ntheta3=" in text
 
 
+def test_wout_minimal_lasym_bsubvmns_uses_corrected_asymmetric_source_only(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    state, static, indata = _state_static_indata(ns=3, lasym=True)
+    bc, shape = _patch_wout_minimal_dependencies(monkeypatch, cfg=static.cfg)
+    trig = wout_module.vmec_trig_tables(
+        ntheta=static.cfg.ntheta,
+        nzeta=static.cfg.nzeta,
+        nfp=static.cfg.nfp,
+        mmax=static.cfg.mpol - 1,
+        nmax=static.cfg.ntor,
+        lasym=True,
+        cache=False,
+    )
+    corrected_bsubv = np.asarray(bc.bsubv, dtype=float) + 100.0 + np.arange(np.prod(shape), dtype=float).reshape(shape)
+    raw_bsubv_sym, raw_bsubv_asym = wout_module._vmec_symoutput_split(
+        f=np.asarray(bc.bsubv, dtype=float),
+        trig=trig,
+    )
+    _, corrected_bsubv_asym = wout_module._vmec_symoutput_split(f=corrected_bsubv, trig=trig)
+    cos_inputs: list[np.ndarray] = []
+    sin_inputs: list[np.ndarray] = []
+
+    def fake_equif_correction(**kwargs):
+        np.testing.assert_allclose(np.asarray(kwargs["bsubv"]), bc.bsubv)
+        np.testing.assert_allclose(np.asarray(kwargs["bsubv_e"]), bc.bsubv_e)
+        return corrected_bsubv
+
+    def fake_cos_coeffs(*, f, modes, trig):
+        del trig
+        cos_inputs.append(np.asarray(f, dtype=float).copy())
+        return np.full((shape[0], modes.K), float(len(cos_inputs)), dtype=float)
+
+    def fake_sin_coeffs(*, f, modes, trig):
+        del trig
+        sin_inputs.append(np.asarray(f, dtype=float).copy())
+        return np.full((shape[0], modes.K), -float(len(sin_inputs)), dtype=float)
+
+    monkeypatch.setenv("VMEC_JAX_SKIP_BSUB_FILTER", "1")
+    monkeypatch.setattr(wout_module, "_apply_bsubv_equif_correction", fake_equif_correction)
+    monkeypatch.setattr(wout_module, "_vmec_wrout_nyquist_cos_coeffs", fake_cos_coeffs)
+    monkeypatch.setattr(wout_module, "_vmec_wrout_nyquist_sin_coeffs", fake_sin_coeffs)
+
+    out = wout_minimal_from_fixed_boundary(
+        path=tmp_path / "wout_lasym_bsubv_source.nc",
+        state=state,
+        static=static,
+        indata=indata,
+        signgs=1,
+        fsqr=0.0,
+        fsqz=0.0,
+        fsql=0.0,
+        converged=True,
+    )
+
+    assert out.lasym is True
+    assert len(cos_inputs) >= 4
+    assert len(sin_inputs) >= 5
+    np.testing.assert_allclose(cos_inputs[3], raw_bsubv_sym)
+    np.testing.assert_allclose(sin_inputs[4], corrected_bsubv_asym)
+    assert not np.allclose(sin_inputs[4], raw_bsubv_asym)
+
+
 def test_wout_minimal_force_bss_and_lambda_zero_or_single_surface_branches(monkeypatch, tmp_path: Path) -> None:
     state, static, indata = _state_static_indata(ns=1)
     bc, shape = _patch_wout_minimal_dependencies(monkeypatch, cfg=static.cfg)

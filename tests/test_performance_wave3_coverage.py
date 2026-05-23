@@ -39,11 +39,45 @@ def test_matrix_report_surfaces_cold_exact_callback_buckets(capsys):
                         "accepted_replay_ready_s": 2.0,
                         "initial_tangents_s": 1.5,
                         "residual_tangents_s": 0.7,
+                        "projected_replay_total_s": 1.1,
+                        "projected_replay_dispatch_s": 0.2,
+                        "projected_residual_tangents_s": 0.9,
+                        "trial_solver_scan_total_s": 1.6,
+                        "trial_solver_scan_setup_s": 0.1,
+                        "trial_solver_scan_run_setup_s": 0.2,
+                        "trial_solver_scan_preflight_s": 0.05,
                         "trial_solver_scan_device_run_s": 0.4,
+                        "trial_solver_scan_device_dispatch_s": 0.06,
+                        "trial_solver_scan_device_ready_s": 0.34,
+                        "trial_solver_scan_host_materialize_s": 0.07,
+                        "trial_solver_scan_postprocess_s": 0.08,
+                        "trial_solver_scan_unattributed_s": 0.12,
+                        "trial_solver_scan_runner_cache_lookup_s": 0.03,
+                        "trial_solver_scan_runner_cache_build_s": 0.25,
+                        "trial_solver_scan_runner_cache_hit_count": 2,
+                        "trial_solver_scan_runner_cache_miss_count": 1,
+                        "trial_solver_scan_runner_cache_bypass_count": 0,
+                        "trial_solver_scan_runner_cache_hit_ready_s": 0.11,
+                        "trial_solver_scan_runner_cache_miss_ready_s": 0.23,
+                        "replay_scan_cache_hit_count": 4,
+                        "replay_scan_cache_miss_count": 3,
+                        "replay_scan_cache_lookup_s": 0.04,
+                        "replay_scan_cache_build_s": 0.5,
                         "callback_count": 1,
                         "accepted_point_replay_count": 1,
                         "contamination_warning_count": 0,
-                    }
+                    },
+                    "metadata": {
+                        "jvp_only_exact_tape": True,
+                        "jvp_only_basepoint_carries": True,
+                    },
+                    "projected_replay_summary": {
+                        "total_s": 1.1,
+                        "dispatch_s": 0.2,
+                        "residual_tangents_s": 0.9,
+                        "count": 1,
+                        "share_of_total": 0.11,
+                    },
                 },
                 "report_path": "/tmp/qh_m2_gpu_jacobian.json",
             }
@@ -60,9 +94,24 @@ def test_matrix_report_surfaces_cold_exact_callback_buckets(capsys):
     assert "replay_ready_s" in output
     assert "callbacks" in output
     assert "replays" in output
+    assert "Trial scan timing:" in output
+    assert "trial_scan_s" in output
+    assert "run_setup_s" in output
+    assert "Scan cache details:" in output
+    assert "trial_hits" in output
+    assert "trial_misses" in output
+    assert "replay_hits" in output
+    assert "replay_misses" in output
+    assert "Projected replay / JVP details:" in output
+    assert "jvp_tape" in output
+    assert "base_carries" in output
+    assert "proj_replay_s" in output
+    assert "proj_resid_tangent_s" in output
     assert "qh_m2_gpu_jacobian.json" in output
     assert "3.000" in output
     assert "0.600" in output
+    assert "True" in output
+    assert "1.100" in output
 
 
 def test_exact_callback_matrix_dry_run_records_replay_tuning_without_gpu_run(tmp_path):

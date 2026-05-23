@@ -311,6 +311,76 @@ def test_exact_callback_summary_preserves_cold_tangent_replay_and_scan_trial_buc
     assert summary["exact_optimizer_patch_target"]["name"] == "jacobian_tape_replay_ready"
 
 
+def test_performance_matrix_loaded_summary_adds_scan_cache_and_jvp_sections(tmp_path):
+    tool = _load_tool()
+    report = tmp_path / "profile.json"
+    report.write_text(
+        json.dumps(
+            {
+                "report_kind": "exact_optimizer_callback_profile",
+                "problem": "qh",
+                "max_mode": 2,
+                "callback": "jacobian",
+                "solver_device_resolved": "cpu",
+                "total_wall_time_s": 12.0,
+                "jvp_only_exact_tape": True,
+                "jvp_only_basepoint_carries": True,
+                "samples": [{"repeat": 0, "wall_time_s": 12.0}],
+                "replay_scan_cache_diagnostics": {
+                    "replay_checkpoint_scan_cache_hit_count": 2,
+                    "replay_checkpoint_scan_cache_miss_count": 1,
+                    "replay_checkpoint_scan_cache_lookup_s": 0.01,
+                    "replay_checkpoint_scan_cache_build_s": 0.2,
+                    "replay_dynamic_basepoint_scan_cache_hit_count": 3,
+                    "replay_dynamic_basepoint_scan_cache_miss_count": 4,
+                    "replay_dynamic_basepoint_scan_cache_lookup_s": 0.02,
+                    "replay_dynamic_basepoint_scan_cache_build_s": 0.3,
+                },
+                "profile": {
+                    "exact_solve_with_tape_jvp_only_total": {"count": 1, "wall_time_s": 5.0},
+                    "exact_tape_build_jvp_only": {"count": 1, "wall_time_s": 4.5},
+                    "jacobian_initial_tangents_vmap_dispatch": {"count": 1, "wall_time_s": 0.4},
+                    "jacobian_initial_tangents_vmap_ready": {"count": 1, "wall_time_s": 0.8},
+                    "jacobian_projected_replay_total": {"count": 2, "wall_time_s": 3.0},
+                    "jacobian_projected_tape_replay_dispatch": {"count": 2, "wall_time_s": 0.5},
+                    "jacobian_projected_replay_residual_tangents": {"count": 2, "wall_time_s": 2.5},
+                    "trial_solver_scan_total": {"count": 1, "wall_time_s": 1.2},
+                    "trial_solver_scan_runner_cache_lookup": {"count": 1, "wall_time_s": 0.03},
+                    "trial_solver_scan_runner_cache_build": {"count": 1, "wall_time_s": 0.2},
+                    "trial_solver_scan_runner_cache_hit_count": {"count": 1, "wall_time_s": 2.0},
+                    "trial_solver_scan_runner_cache_miss_count": {"count": 1, "wall_time_s": 1.0},
+                    "trial_solver_scan_runner_cache_hit_ready": {"count": 1, "wall_time_s": 0.6},
+                    "trial_solver_scan_runner_cache_miss_ready": {"count": 1, "wall_time_s": 0.9},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = tool._load_profile_summary(report, label="cpu")
+    assert summary is not None
+
+    scan_cache = summary["matrix_scan_cache_summary"]
+    projected_jvp = summary["matrix_projected_replay_jvp_summary"]
+
+    assert scan_cache["trial"]["total_s"] == 1.2
+    assert scan_cache["trial"]["cache"]["hit_count"] == 2
+    assert scan_cache["trial"]["cache"]["miss_count"] == 1
+    assert scan_cache["trial"]["cache"]["hit_ready_s"] == 0.6
+    assert scan_cache["trial"]["cache"]["miss_ready_s"] == 0.9
+    assert scan_cache["replay"]["hit_count"] == 5
+    assert scan_cache["replay"]["miss_count"] == 5
+    assert scan_cache["replay"]["lookup_s"] == 0.03
+    assert scan_cache["replay"]["build_s"] == 0.5
+    assert projected_jvp["jvp"]["exact_tape"] is True
+    assert projected_jvp["jvp"]["basepoint_carries"] is True
+    assert projected_jvp["jvp"]["exact_solve_with_tape_s"] == 5.0
+    assert projected_jvp["jvp"]["tape_build_s"] == 4.5
+    assert projected_jvp["projected_replay"]["total_s"] == 3.0
+    assert projected_jvp["projected_replay"]["dispatch_s"] == 0.5
+    assert projected_jvp["projected_replay"]["residual_tangents_s"] == 2.5
+
+
 def test_exact_optimizer_point_cache_clear_preserves_initial_tangent_cache():
     exact_tool = _load_exact_tool()
 

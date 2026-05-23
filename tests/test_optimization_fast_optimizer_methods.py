@@ -124,6 +124,58 @@ def test_fixed_boundary_exact_optimizer_init_can_be_unit_constructed(monkeypatch
     assert opt._trial_residual_cache_max == 8
 
 
+def test_fixed_boundary_exact_optimizer_init_preserves_gpu_trial_scan_policy(monkeypatch):
+    state0 = SimpleNamespace(layout=SimpleNamespace(size=8))
+    static = SimpleNamespace(s=np.asarray([0.0, 0.5, 1.0]), cfg=SimpleNamespace(lasym=False))
+    indata = InData(scalars={"NITER": 12, "FTOL": 1.0e-12, "DELT": 0.2}, indexed={})
+    boundary = _boundary()
+
+    residuals_fn = lambda _state: np.asarray([1.0, 2.0])
+    residuals_fn._n_non_qs = 2
+
+    monkeypatch.setattr(FixedBoundaryExactOptimizer, "_make_residuals_eval_fn", lambda self, fn: fn)
+    monkeypatch.setattr(opt_module, "initial_guess_from_boundary", lambda *args, **kwargs: state0)
+    monkeypatch.setattr(opt_module, "eval_geom", lambda *_args, **_kwargs: SimpleNamespace(sqrtg=np.ones((2, 2))))
+    monkeypatch.setattr(opt_module, "signgs_from_sqrtg", lambda *_args, **_kwargs: 1)
+    monkeypatch.setattr(opt_module, "flux_profiles_from_indata", lambda *_args, **_kwargs: object())
+
+    monkeypatch.delenv("VMEC_JAX_OPT_TRIAL_SCAN", raising=False)
+    monkeypatch.delenv("VMEC_JAX_OPT_EXACT_TRIDI_PRECOMPUTE", raising=False)
+    monkeypatch.delenv("VMEC_JAX_OPT_EXACT_TRIDI_PRECOMPUTE_MAX_DOFS", raising=False)
+    opt_gpu = FixedBoundaryExactOptimizer(
+        static,
+        indata,
+        boundary,
+        [BoundaryParamSpec("rc10", "rc", 0, 1, 0)],
+        residuals_fn,
+        inner_max_iter=7,
+        inner_ftol=2.0e-9,
+        solver_device="gpu",
+    )
+
+    assert opt_gpu._solver_device_name == "gpu"
+    assert opt_gpu._trial_solver_kwargs["use_scan"] is False
+    assert opt_gpu._trial_solver_kwargs["resume_state_mode"] == "none"
+    assert opt_gpu._exact_solver_kwargs["use_scan"] is False
+    assert opt_gpu._exact_solver_kwargs["preconditioner_use_precomputed_tridi"] is True
+    assert opt_gpu._scan_exact_path == "tape"
+
+    monkeypatch.setenv("VMEC_JAX_OPT_TRIAL_SCAN", "scan")
+    opt_forced_scan = FixedBoundaryExactOptimizer(
+        static,
+        indata,
+        boundary,
+        [BoundaryParamSpec("rc10", "rc", 0, 1, 0)],
+        residuals_fn,
+        inner_max_iter=7,
+        inner_ftol=2.0e-9,
+        solver_device="gpu",
+    )
+
+    assert opt_forced_scan._trial_solver_kwargs["use_scan"] is True
+    assert opt_forced_scan._exact_solver_kwargs["use_scan"] is False
+
+
 def test_auto_method_resolver_uses_matrix_free_only_for_profiled_qa_cpu_case(monkeypatch):
     opt = _run_ready_optimizer()
 

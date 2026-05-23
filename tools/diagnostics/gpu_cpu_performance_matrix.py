@@ -474,9 +474,13 @@ def _load_profile_summary(report_path: Path, *, label: str) -> dict[str, Any] | 
     except Exception:
         return None
     try:
+        diagnostics_dir = str(Path(__file__).resolve().parent)
+        if diagnostics_dir not in sys.path:
+            sys.path.insert(0, diagnostics_dir)
         from compare_profile_reports import summarize_payload
 
-        return summarize_payload(payload, path=report_path, label=label, top_profile=6)
+        summary = summarize_payload(payload, path=report_path, label=label, top_profile=6)
+        return _augment_profile_summary(summary, payload=payload)
     except Exception:
         return {"label": label, "path": str(report_path), "payload_keys": sorted(payload)}
 
@@ -519,6 +523,7 @@ def run_backend(args: argparse.Namespace, backend: str, outdir: Path) -> dict[st
     entry["wall_time_s"] = float(time.perf_counter() - t0)
     entry["exit_code"] = int(completed.returncode)
     entry["summary"] = _load_profile_summary(report_path, label=backend)
+    _attach_matrix_summary_sections(entry)
     return entry
 
 
@@ -539,10 +544,284 @@ def _metric(summary: dict[str, Any] | None, key: str) -> Any:
     return metrics.get(key)
 
 
+def _summary_section(summary: dict[str, Any] | None, key: str) -> dict[str, Any]:
+    if not isinstance(summary, dict):
+        return {}
+    value = summary.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _metadata_value(summary: dict[str, Any] | None, key: str) -> Any:
+    return _summary_section(summary, "metadata").get(key)
+
+
+def _run_env_value(run: dict[str, Any] | None, key: str) -> Any:
+    if not isinstance(run, dict):
+        return None
+    env = run.get("env")
+    if not isinstance(env, dict):
+        return None
+    return env.get(key)
+
+
+def _metadata_or_env(
+    run: dict[str, Any] | None,
+    summary: dict[str, Any] | None,
+    *,
+    metadata_key: str,
+    env_key: str,
+) -> Any:
+    return _first_present(_metadata_value(summary, metadata_key), _run_env_value(run, env_key))
+
+
+def _contains_data(value: Any) -> bool:
+    if isinstance(value, dict):
+        return any(_contains_data(child) for child in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_contains_data(child) for child in value)
+    return value is not None
+
+
+def _scan_status_metric(summary: dict[str, Any] | None, status: str, key: str) -> Any:
+    trial_scan = _summary_section(summary, "trial_scan_summary")
+    cache_status = trial_scan.get("cache_status")
+    if not isinstance(cache_status, dict):
+        return None
+    status_metrics = cache_status.get(status)
+    if not isinstance(status_metrics, dict):
+        return None
+    return status_metrics.get(key)
+
+
+def _matrix_scan_cache_summary(summary: dict[str, Any] | None) -> dict[str, Any]:
+    trial_scan = _summary_section(summary, "trial_scan_summary")
+    return {
+        "trial": {
+            "total_s": _first_present(_metric(summary, "trial_solver_scan_total_s"), trial_scan.get("total_s")),
+            "setup_s": _first_present(_metric(summary, "trial_solver_scan_setup_s"), trial_scan.get("setup_s")),
+            "run_setup_s": _first_present(
+                _metric(summary, "trial_solver_scan_run_setup_s"),
+                trial_scan.get("run_setup_s"),
+            ),
+            "preflight_s": _first_present(
+                _metric(summary, "trial_solver_scan_preflight_s"),
+                trial_scan.get("preflight_s"),
+            ),
+            "device_run_s": _first_present(
+                _metric(summary, "trial_solver_scan_device_run_s"),
+                trial_scan.get("device_run_s"),
+            ),
+            "device_dispatch_s": _first_present(
+                _metric(summary, "trial_solver_scan_device_dispatch_s"),
+                trial_scan.get("device_dispatch_s"),
+            ),
+            "device_ready_s": _first_present(
+                _metric(summary, "trial_solver_scan_device_ready_s"),
+                trial_scan.get("device_ready_s"),
+            ),
+            "host_materialize_s": _first_present(
+                _metric(summary, "trial_solver_scan_host_materialize_s"),
+                trial_scan.get("host_materialize_s"),
+            ),
+            "postprocess_s": _first_present(
+                _metric(summary, "trial_solver_scan_postprocess_s"),
+                trial_scan.get("postprocess_s"),
+            ),
+            "unattributed_s": _first_present(
+                _metric(summary, "trial_solver_scan_unattributed_s"),
+                trial_scan.get("unattributed_s"),
+            ),
+            "cache": {
+                "lookup_s": _first_present(
+                    _metric(summary, "trial_solver_scan_runner_cache_lookup_s"),
+                    trial_scan.get("cache_lookup_s"),
+                ),
+                "build_s": _first_present(
+                    _metric(summary, "trial_solver_scan_runner_cache_build_s"),
+                    trial_scan.get("cache_build_s"),
+                ),
+                "hit_count": _first_present(
+                    _metric(summary, "trial_solver_scan_runner_cache_hit_count"),
+                    _scan_status_metric(summary, "hit", "count"),
+                ),
+                "miss_count": _first_present(
+                    _metric(summary, "trial_solver_scan_runner_cache_miss_count"),
+                    _scan_status_metric(summary, "miss", "count"),
+                ),
+                "bypass_count": _first_present(
+                    _metric(summary, "trial_solver_scan_runner_cache_bypass_count"),
+                    _scan_status_metric(summary, "bypass", "count"),
+                ),
+                "miss_fraction": trial_scan.get("cache_miss_fraction"),
+                "hit_device_run_s": _first_present(
+                    _metric(summary, "trial_solver_scan_runner_cache_hit_device_run_s"),
+                    _scan_status_metric(summary, "hit", "device_run_s"),
+                ),
+                "hit_dispatch_s": _first_present(
+                    _metric(summary, "trial_solver_scan_runner_cache_hit_dispatch_s"),
+                    _scan_status_metric(summary, "hit", "dispatch_s"),
+                ),
+                "hit_ready_s": _first_present(
+                    _metric(summary, "trial_solver_scan_runner_cache_hit_ready_s"),
+                    _scan_status_metric(summary, "hit", "ready_s"),
+                ),
+                "miss_device_run_s": _first_present(
+                    _metric(summary, "trial_solver_scan_runner_cache_miss_device_run_s"),
+                    _scan_status_metric(summary, "miss", "device_run_s"),
+                ),
+                "miss_dispatch_s": _first_present(
+                    _metric(summary, "trial_solver_scan_runner_cache_miss_dispatch_s"),
+                    _scan_status_metric(summary, "miss", "dispatch_s"),
+                ),
+                "miss_ready_s": _first_present(
+                    _metric(summary, "trial_solver_scan_runner_cache_miss_ready_s"),
+                    _scan_status_metric(summary, "miss", "ready_s"),
+                ),
+                "bypass_device_run_s": _first_present(
+                    _metric(summary, "trial_solver_scan_runner_cache_bypass_device_run_s"),
+                    _scan_status_metric(summary, "bypass", "device_run_s"),
+                ),
+                "bypass_dispatch_s": _first_present(
+                    _metric(summary, "trial_solver_scan_runner_cache_bypass_dispatch_s"),
+                    _scan_status_metric(summary, "bypass", "dispatch_s"),
+                ),
+                "bypass_ready_s": _first_present(
+                    _metric(summary, "trial_solver_scan_runner_cache_bypass_ready_s"),
+                    _scan_status_metric(summary, "bypass", "ready_s"),
+                ),
+            },
+        },
+        "replay": {
+            "hit_count": _metric(summary, "replay_scan_cache_hit_count"),
+            "miss_count": _metric(summary, "replay_scan_cache_miss_count"),
+            "lookup_s": _metric(summary, "replay_scan_cache_lookup_s"),
+            "build_s": _metric(summary, "replay_scan_cache_build_s"),
+        },
+    }
+
+
+def _matrix_projected_replay_jvp_summary(
+    run: dict[str, Any] | None,
+    summary: dict[str, Any] | None,
+) -> dict[str, Any]:
+    projected = _summary_section(summary, "projected_replay_summary")
+    return {
+        "jvp": {
+            "exact_tape": _metadata_or_env(
+                run,
+                summary,
+                metadata_key="jvp_only_exact_tape",
+                env_key="VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE",
+            ),
+            "basepoint_carries": _metadata_or_env(
+                run,
+                summary,
+                metadata_key="jvp_only_basepoint_carries",
+                env_key="VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES",
+            ),
+            "exact_solve_with_tape_s": _metric(summary, "exact_solve_with_tape_jvp_only_s"),
+            "tape_build_s": _metric(summary, "exact_tape_build_jvp_only_s"),
+            "initial_tangents_s": _metric(summary, "initial_tangents_s"),
+            "initial_tangents_linearize_s": _metric(summary, "initial_tangents_linearize_s"),
+            "initial_tangents_vmap_dispatch_s": _metric(summary, "initial_tangents_vmap_dispatch_s"),
+            "initial_tangents_vmap_ready_s": _metric(summary, "initial_tangents_vmap_ready_s"),
+            "residual_tangents_s": _metric(summary, "residual_tangents_s"),
+        },
+        "projected_replay": {
+            "total_s": _first_present(
+                _metric(summary, "projected_replay_total_s"),
+                projected.get("total_s"),
+            ),
+            "dispatch_s": _first_present(
+                _metric(summary, "projected_replay_dispatch_s"),
+                projected.get("dispatch_s"),
+            ),
+            "residual_tangents_s": _first_present(
+                _metric(summary, "projected_residual_tangents_s"),
+                projected.get("residual_tangents_s"),
+            ),
+            "count": projected.get("count"),
+            "share_of_total": projected.get("share_of_total"),
+            "residual_tangent_share_of_projected": projected.get("residual_tangent_share_of_projected"),
+        },
+    }
+
+
+def _augment_profile_summary(summary: dict[str, Any], *, payload: dict[str, Any]) -> dict[str, Any]:
+    metadata = summary.setdefault("metadata", {})
+    if isinstance(metadata, dict):
+        runtime = payload.get("runtime")
+        if not isinstance(runtime, dict):
+            runtime = {}
+        metadata.setdefault("trial_scan", payload.get("trial_scan") or runtime.get("vmec_jax_opt_trial_scan"))
+        metadata.setdefault("sync_replay_timing", payload.get("sync_replay_timing"))
+        metadata.setdefault(
+            "jvp_only_basepoint_carries",
+            payload.get("jvp_only_basepoint_carries")
+            if "jvp_only_basepoint_carries" in payload
+            else runtime.get("vmec_jax_jvp_only_exact_tape_basepoint_carries"),
+        )
+    if _contains_data(_matrix_scan_cache_summary(summary)):
+        summary["matrix_scan_cache_summary"] = _matrix_scan_cache_summary(summary)
+    projected_jvp = _matrix_projected_replay_jvp_summary(None, summary)
+    if _contains_data(projected_jvp):
+        summary["matrix_projected_replay_jvp_summary"] = projected_jvp
+    return summary
+
+
+def _attach_matrix_summary_sections(run: dict[str, Any]) -> None:
+    summary = run.get("summary")
+    if not isinstance(summary, dict):
+        return
+    scan_cache = _matrix_scan_cache_summary(summary)
+    if _contains_data(scan_cache):
+        summary["matrix_scan_cache_summary"] = scan_cache
+    projected_jvp = _matrix_projected_replay_jvp_summary(run, summary)
+    if _contains_data(projected_jvp):
+        summary["matrix_projected_replay_jvp_summary"] = projected_jvp
+
+
+def _print_table(headers: tuple[str, ...], rows: list[tuple[Any, ...]]) -> None:
+    widths = [
+        max(len(headers[col]), *(len(_format_cell(row[col])) for row in rows)) if rows else len(headers[col])
+        for col in range(len(headers))
+    ]
+    print("  ".join(headers[col].ljust(widths[col]) for col in range(len(headers))))
+    print("  ".join("-" * widths[col] for col in range(len(headers))))
+    for row in rows:
+        print("  ".join(_format_cell(row[col]).ljust(widths[col]) for col in range(len(headers))))
+
+
+def _print_optional_table(title: str, headers: tuple[str, ...], rows: list[tuple[Any, ...]]) -> None:
+    if not rows or not any(any(value is not None for value in row[1:]) for row in rows):
+        return
+    print()
+    print(title)
+    _print_table(headers, rows)
+
+
 def print_report(payload: dict[str, Any]) -> None:
     rows = []
+    trial_scan_timing_rows = []
+    scan_cache_rows = []
+    projected_jvp_rows = []
     for run in payload["runs"]:
         summary = run.get("summary")
+        _attach_matrix_summary_sections(run)
+        scan_cache = _matrix_scan_cache_summary(summary)
+        trial_scan = scan_cache["trial"]
+        trial_cache = trial_scan["cache"]
+        replay_cache = scan_cache["replay"]
+        projected_jvp = _matrix_projected_replay_jvp_summary(run, summary)
+        jvp = projected_jvp["jvp"]
+        projected = projected_jvp["projected_replay"]
         rows.append(
             (
                 run["backend"],
@@ -572,6 +851,58 @@ def print_report(payload: dict[str, Any]) -> None:
                 run["report_path"],
             )
         )
+        trial_scan_timing_rows.append(
+            (
+                run["backend"],
+                trial_scan["total_s"],
+                trial_scan["setup_s"],
+                trial_scan["run_setup_s"],
+                trial_scan["preflight_s"],
+                trial_scan["device_run_s"],
+                trial_scan["device_dispatch_s"],
+                trial_scan["device_ready_s"],
+                trial_scan["host_materialize_s"],
+                trial_scan["postprocess_s"],
+                trial_scan["unattributed_s"],
+            )
+        )
+        scan_cache_rows.append(
+            (
+                run["backend"],
+                trial_cache["hit_count"],
+                trial_cache["miss_count"],
+                trial_cache["bypass_count"],
+                trial_cache["miss_fraction"],
+                trial_cache["lookup_s"],
+                trial_cache["build_s"],
+                trial_cache["hit_ready_s"],
+                trial_cache["miss_ready_s"],
+                trial_cache["bypass_ready_s"],
+                replay_cache["hit_count"],
+                replay_cache["miss_count"],
+                replay_cache["lookup_s"],
+                replay_cache["build_s"],
+            )
+        )
+        projected_jvp_rows.append(
+            (
+                run["backend"],
+                jvp["exact_tape"],
+                jvp["basepoint_carries"],
+                jvp["exact_solve_with_tape_s"],
+                jvp["tape_build_s"],
+                jvp["initial_tangents_s"],
+                jvp["initial_tangents_linearize_s"],
+                jvp["initial_tangents_vmap_dispatch_s"],
+                jvp["initial_tangents_vmap_ready_s"],
+                jvp["residual_tangents_s"],
+                projected["total_s"],
+                projected["dispatch_s"],
+                projected["residual_tangents_s"],
+                projected["count"],
+                projected["share_of_total"],
+            )
+        )
     headers = (
         "backend",
         "exit",
@@ -599,14 +930,65 @@ def print_report(payload: dict[str, Any]) -> None:
         "warnings",
         "report",
     )
-    widths = [
-        max(len(headers[col]), *(len(_format_cell(row[col])) for row in rows)) if rows else len(headers[col])
-        for col in range(len(headers))
-    ]
-    print("  ".join(headers[col].ljust(widths[col]) for col in range(len(headers))))
-    print("  ".join("-" * widths[col] for col in range(len(headers))))
-    for row in rows:
-        print("  ".join(_format_cell(row[col]).ljust(widths[col]) for col in range(len(headers))))
+    _print_table(headers, rows)
+    _print_optional_table(
+        "Trial scan timing:",
+        (
+            "backend",
+            "trial_scan_s",
+            "setup_s",
+            "run_setup_s",
+            "preflight_s",
+            "device_s",
+            "dispatch_s",
+            "ready_s",
+            "host_s",
+            "post_s",
+            "unattr_s",
+        ),
+        trial_scan_timing_rows,
+    )
+    _print_optional_table(
+        "Scan cache details:",
+        (
+            "backend",
+            "trial_hits",
+            "trial_misses",
+            "trial_bypasses",
+            "trial_miss_frac",
+            "trial_lookup_s",
+            "trial_build_s",
+            "trial_hit_ready_s",
+            "trial_miss_ready_s",
+            "trial_bypass_ready_s",
+            "replay_hits",
+            "replay_misses",
+            "replay_lookup_s",
+            "replay_build_s",
+        ),
+        scan_cache_rows,
+    )
+    _print_optional_table(
+        "Projected replay / JVP details:",
+        (
+            "backend",
+            "jvp_tape",
+            "base_carries",
+            "exact_jvp_s",
+            "tape_jvp_s",
+            "init_tangent_s",
+            "init_linearize_s",
+            "init_vmap_dispatch_s",
+            "init_vmap_ready_s",
+            "resid_tangent_s",
+            "proj_replay_s",
+            "proj_dispatch_s",
+            "proj_resid_tangent_s",
+            "proj_count",
+            "proj_share",
+        ),
+        projected_jvp_rows,
+    )
 
 
 def _format_cell(value: Any) -> str:
