@@ -1486,28 +1486,16 @@ def rz_preconditioner_apply_jit(
 
     frcc = frzl_in.frcc
     fzsc = frzl_in.fzsc
-    # Use np.zeros for placeholder arrays (not needed by the JIT code for the
-    # active branches, but JAX requires positional args).  This avoids 4–6
-    # eager JAX device allocations per preconditioner call when the arrays are
-    # unused (e.g. non-lasym case where frsc/frcs/fzcc/fzss are None).
-    # np.zeros(shape, dtype) never triggers JAX dispatch or device copies.
-    import numpy as _np_prec_local
-    _frcc_shape = frcc.shape
-    _fzsc_shape = fzsc.shape
-    try:
-        _frcc_dtype = frcc.dtype
-        _fzsc_dtype = fzsc.dtype
-    except AttributeError:
-        _frcc_dtype = None
-        _fzsc_dtype = None
-    _zl_frcc = _np_prec_local.zeros(_frcc_shape, dtype=_frcc_dtype)
-    _zl_fzsc = _np_prec_local.zeros(_fzsc_shape, dtype=_fzsc_dtype)
-    frss = frzl_in.frss if has_frss else _zl_frcc
-    fzcs = frzl_in.fzcs if has_fzcs else _zl_fzsc
-    frsc = getattr(frzl_in, "frsc", None) if has_frsc else _zl_frcc
-    frcs = getattr(frzl_in, "frcs", None) if has_frcs else _zl_frcc
-    fzcc = getattr(frzl_in, "fzcc", None) if has_fzcc else _zl_fzsc
-    fzss = getattr(frzl_in, "fzss", None) if has_fzss else _zl_fzsc
+    # Inactive optional blocks are compile-time unused by _apply_jit.  Reuse
+    # existing operands as placeholders instead of allocating NumPy zeros here:
+    # on accelerators those host placeholders still become call arguments and
+    # add per-iteration host->device transfer overhead.
+    frss = frzl_in.frss if has_frss else frcc
+    fzcs = frzl_in.fzcs if has_fzcs else fzsc
+    frsc = getattr(frzl_in, "frsc", None) if has_frsc else frcc
+    frcs = getattr(frzl_in, "frcs", None) if has_frcs else frcc
+    fzcc = getattr(frzl_in, "fzcc", None) if has_fzcc else fzsc
+    fzss = getattr(frzl_in, "fzss", None) if has_fzss else fzsc
     flsc = frzl_in.flsc
     flcs = frzl_in.flcs
     flcc = getattr(frzl_in, "flcc", None)

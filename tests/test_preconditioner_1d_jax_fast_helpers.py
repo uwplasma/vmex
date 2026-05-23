@@ -340,6 +340,58 @@ def test_rz_preconditioner_numpy_jax_precomputed_and_lax_agree():
     assert minimal.fzcs is None
 
 
+def test_rz_preconditioner_apply_jit_reuses_inactive_placeholders(monkeypatch):
+    from vmec_jax import preconditioner_1d_jax as p1d
+    from vmec_jax.vmec_tomnsp import TomnspsRZL
+
+    mats = _manual_mats()
+    frzl = _frzl(include_optional=False)
+    seen = {}
+
+    def fake_make_apply(**_kwargs):
+        def fake_apply(
+            frcc,
+            fzsc,
+            frss,
+            fzcs,
+            frsc,
+            frcs,
+            fzcc,
+            fzss,
+            *_args,
+        ):
+            seen.update(
+                frcc=frcc,
+                fzsc=fzsc,
+                frss=frss,
+                fzcs=fzcs,
+                frsc=frsc,
+                frcs=frcs,
+                fzcc=fzcc,
+                fzss=fzss,
+            )
+            return TomnspsRZL(frcc=frcc, frss=None, fzsc=fzsc, fzcs=None, flsc=frzl.flsc, flcs=None)
+
+        return fake_apply
+
+    monkeypatch.setattr(p1d, "_make_rz_preconditioner_apply_jit", fake_make_apply)
+    out = p1d.rz_preconditioner_apply_jit(
+        frzl_in=frzl,
+        mats=mats,
+        jmax=4,
+        cfg=_cfg(mpol=3, ntor=1, lthreed=False, lasym=False),
+    )
+
+    assert out.frss is None
+    assert out.fzcs is None
+    assert seen["frss"] is seen["frcc"]
+    assert seen["frsc"] is seen["frcc"]
+    assert seen["frcs"] is seen["frcc"]
+    assert seen["fzcs"] is seen["fzsc"]
+    assert seen["fzcc"] is seen["fzsc"]
+    assert seen["fzss"] is seen["fzsc"]
+
+
 def test_numpy_tridiagonal_edge_cases():
     from vmec_jax import preconditioner_1d_jax as p1d
 

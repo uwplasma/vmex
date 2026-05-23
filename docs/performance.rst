@@ -1078,6 +1078,16 @@ The public auto-selected CPU/GPU policy therefore uses the non-scan loop for
 ordinary fixed-boundary production solves.  Explicit fast-mode requests still
 use scan so developers can compare or profile it directly.
 
+A later 2026-05-23 ``office`` pass removed per-iteration host placeholder
+allocations from the accelerator R/Z preconditioner-apply wrapper.  On the
+same RTX A4000 stack, ``input.nfp4_QH_warm_start`` dropped from about
+``22.9 s`` to ``13.9 s`` with identical convergence, while
+``input.nfp4_QH_finite_beta`` dropped from about ``93.0 s`` to ``58.6 s``.
+The detailed timer still attributes most of the remaining GPU time to
+``precond_apply`` (about ``17.1 s`` on the finite-beta final stage), so the
+next GPU target remains fusing or restructuring the radial preconditioner and
+state-update path rather than the already-fast force assembly kernels.
+
 Converged QH public default, ``max_iter=500``:
 
 .. list-table::
