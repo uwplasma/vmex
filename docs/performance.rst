@@ -380,6 +380,10 @@ tape build ``5.45 s``, replay ``6.16 s``, and initial tangent construction
 residual tangents.  This keeps the current GPU optimization target focused on
 cold accepted-point tape/replay/tangent construction; forcing scan for GPU is
 not justified by these profiles.
+A matched run with ``--jvp-only-exact-tape --jvp-only-basepoint-carries`` was
+nearly neutral: CPU profile time was ``29.97 s`` and GPU profile time was
+``14.95 s``.  That is a small GPU win for this one callback, but not enough to
+change the default without larger mode and full optimizer-trajectory coverage.
 
 For raw ``input.nfp2_QI`` follow-up profiling, keep the production-like scan
 measurement separate from phase attribution.  The scan path is best inspected
