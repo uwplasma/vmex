@@ -643,6 +643,42 @@ def test_non_lasym_gpu_keeps_tridi_legacy_default(monkeypatch):
     )
 
 
+def test_run_fixed_boundary_gpu_lasym_passes_precomputed_tridi_policy(monkeypatch):
+    input_path = Path(__file__).resolve().parents[1] / "examples/data/input.basic_non_stellsym_pressure"
+    monkeypatch.delenv("VMEC_JAX_TRIDI_PRECOMPUTE", raising=False)
+    monkeypatch.setattr(driver_module, "_default_backend_name", lambda: "gpu")
+    captured = {}
+
+    def _fake_solver(state, static, **kwargs):
+        captured["kwargs"] = dict(kwargs)
+        return SolveVmecResidualResult(
+            state=state,
+            n_iter=1,
+            w_history=np.asarray([1.0], dtype=float),
+            fsqr2_history=np.asarray([1.0], dtype=float),
+            fsqz2_history=np.asarray([0.0], dtype=float),
+            fsql2_history=np.asarray([0.0], dtype=float),
+            grad_rms_history=np.asarray([], dtype=float),
+            step_history=np.asarray([], dtype=float),
+            diagnostics={"converged": False, "use_scan": bool(kwargs["use_scan"])},
+        )
+
+    monkeypatch.setattr(solve_module, "solve_fixed_boundary_residual_iter", _fake_solver)
+    monkeypatch.setattr(driver_module, "solve_fixed_boundary_residual_iter", _fake_solver)
+
+    run_fixed_boundary(
+        input_path,
+        solver="vmec2000_iter",
+        solver_mode="accelerated",
+        max_iter=1,
+        multigrid=False,
+        use_scan=False,
+        verbose=False,
+    )
+
+    assert captured["kwargs"]["preconditioner_use_precomputed_tridi"] is True
+
+
 def test_default_non_autodiff_solver_policy_keeps_free_boundary_on_robust_path():
     freeb_input = Path(__file__).resolve().parents[1] / "examples/data/input.cth_like_free_bdy"
     _cfg_freeb, indata_freeb = load_config(freeb_input)
