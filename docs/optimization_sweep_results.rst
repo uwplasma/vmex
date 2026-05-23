@@ -244,7 +244,7 @@ aspect-6 target.  The selected QI row is chosen with the legacy branch
 diagnostic, mirror-ratio, elongation, iota, and aspect-ratio gates used as
 promotion evidence rather than as exact equality constraints; small numerical
 slack is expected when independent Boozer diagnostics are recomputed after the
-optimization.  These panels include the stage-initial LCFS used by the selected
+optimization.  These panels include the raw/deck initial LCFS for the selected
 optimization row, final LCFS, per-stage objective history, and initial/final
 outer-surface ``|B|`` line contours in Boozer coordinates evaluated with
 ``booz_xform_jax``.
