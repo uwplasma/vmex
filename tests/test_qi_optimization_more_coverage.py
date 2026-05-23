@@ -138,7 +138,7 @@ def test_jsonable_parse_float_sequence_and_partial_history_helpers() -> None:
         "partial": True,
         "diagnostics_pending": True,
     }
-    assert qio._jsonable(
+    assert qio.jsonable(
         {
             "path": Path("input.demo"),
             "finite_scalar": np.float64(4.0),
@@ -153,6 +153,8 @@ def test_jsonable_parse_float_sequence_and_partial_history_helpers() -> None:
         "array": [1.0, None],
         "nested": [2, "fallback-string"],
     }
+    assert qio.diagnostic_float({"aspect": np.float64(6.0)}, "aspect") == pytest.approx(6.0)
+    assert np.isnan(qio.diagnostic_float({}, "missing"))
 
 
 def test_basin_prefilter_score_weights_qi_iota_and_engineering_terms() -> None:
