@@ -163,7 +163,7 @@ aspect-6 README best-row promotion or global seed-robustness evidence.
   run with `gh run list --repo uwplasma/vmec_jax --branch main --workflow CI
   --limit 5` before tagging.
 - Required fast coverage gate is now `95%`; the latest local CI-equivalent
-  run reached `95.06%` on this development batch.
+  run reached `95.10%` on this development batch.
 
 ## CLI Reference
 

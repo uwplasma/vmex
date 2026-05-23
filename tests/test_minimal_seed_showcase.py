@@ -505,6 +505,10 @@ def test_minimal_seed_renderer_loads_records_and_returns_monotone_segments(tmp_p
 
     output_dir = tmp_path / "cpu" / "qa_nfp2" / "continuation" / "mode3" / "ess"
     output_dir.mkdir(parents=True)
+    (output_dir / "input.reference_preseed").write_text("reference preseed")
+    (output_dir / "input.target_helicity_seed").write_text("target helicity seed")
+    (output_dir / "wout_original.nc").write_text("raw initial wout placeholder")
+    (output_dir / "wout_final.nc").write_text("final wout placeholder")
     case = generator.SHOWCASE_CASES["qa_nfp2"]
     (output_dir / "showcase_case.json").write_text(
         json.dumps(
@@ -523,6 +527,11 @@ def test_minimal_seed_renderer_loads_records_and_returns_monotone_segments(tmp_p
                     "reference_input": str(case.reference_preseed_input),
                     "preseeded_input_file": str(output_dir / "input.reference_preseed"),
                     "changes": [{"family": "RBC", "n": 1, "m": 0, "old": 0.0, "new": 1e-3}],
+                },
+                "target_helicity_seed": {
+                    "enabled": True,
+                    "seeded_input_file": str(output_dir / "input.target_helicity_seed"),
+                    "terms": [{"family": "RBC", "n": 1, "m": 0, "value": 1e-5}],
                 },
                 "policy": "continuation",
                 "max_mode": 3,
@@ -591,6 +600,13 @@ def test_minimal_seed_renderer_loads_records_and_returns_monotone_segments(tmp_p
     records = renderer.best_records(renderer.load_records(tmp_path))
     assert len(records) == 1
     assert records[0].case_name == "qa_nfp2"
+    provenance = renderer.provenance_for_record(records[0])
+    assert provenance.initial_kind == "raw_seed"
+    assert provenance.initial_input.name == "input.minimal_seed_nfp2"
+    assert provenance.stage_seed_kind == "reference_preseed+target_helicity_seed"
+    assert provenance.stage_seed_input.name == "input.target_helicity_seed"
+    assert provenance.initial_wout.name == "wout_original.nc"
+    assert provenance.final_wout.name == "wout_final.nc"
 
     stale_dir = tmp_path / "cpu" / "qa_nfp2_old" / "continuation" / "mode3" / "ess"
     stale_dir.mkdir(parents=True)
@@ -666,4 +682,9 @@ def test_minimal_seed_renderer_loads_records_and_returns_monotone_segments(tmp_p
     assert "status" in summary_text
     assert "crashed" in summary_text
     assert "message" in summary_text
+    assert "initial_kind" in summary_text
+    assert "initial_input" in summary_text
+    assert "stage_seed_kind" in summary_text
+    assert "final_wout" in summary_text
+    assert "reference_preseed+target_helicity_seed" in summary_text
     assert "qa_nfp2" in summary_text

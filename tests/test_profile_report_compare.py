@@ -306,7 +306,7 @@ def test_profile_summary_extracts_scan_solver_buckets() -> None:
         total_wall_time_s=20.0,
         samples=2,
         rss_peak_mib=256,
-        replay_wall_time_s=2.0,
+        replay_wall_time_s=0.2,
         accepted_replays=2,
         solve_count=3,
         cache_entry_growth=4,
@@ -317,6 +317,8 @@ def test_profile_summary_extracts_scan_solver_buckets() -> None:
     report["profile"]["trial_solver_scan_initial_compute_forces"] = {"count": 1, "wall_time_s": 0.05}
     report["profile"]["trial_solver_scan_axis_reset_compute_forces"] = {"count": 1, "wall_time_s": 0.06}
     report["profile"]["trial_solver_scan_run_setup"] = {"count": 1, "wall_time_s": 0.09}
+    report["profile"]["trial_solver_scan_runner_cache_lookup"] = {"count": 1, "wall_time_s": 0.11}
+    report["profile"]["trial_solver_scan_runner_cache_build"] = {"count": 1, "wall_time_s": 0.22}
     report["profile"]["trial_solver_scan_runner_cache_hit_count"] = {"count": 1, "wall_time_s": 3.0}
     report["profile"]["trial_solver_scan_runner_cache_miss_count"] = {"count": 1, "wall_time_s": 2.0}
     report["profile"]["trial_solver_scan_runner_cache_bypass_count"] = {"count": 1, "wall_time_s": 1.0}
@@ -324,6 +326,39 @@ def test_profile_summary_extracts_scan_solver_buckets() -> None:
     report["profile"]["trial_solver_scan_device_run"] = {"count": 1, "wall_time_s": 2.5}
     report["profile"]["trial_solver_scan_device_dispatch"] = {"count": 1, "wall_time_s": 0.4}
     report["profile"]["trial_solver_scan_device_ready"] = {"count": 1, "wall_time_s": 2.1}
+    report["profile"]["trial_solver_scan_runner_cache_hit_device_run"] = {
+        "count": 1,
+        "wall_time_s": 0.6,
+    }
+    report["profile"]["trial_solver_scan_runner_cache_hit_dispatch"] = {
+        "count": 1,
+        "wall_time_s": 0.1,
+    }
+    report["profile"]["trial_solver_scan_runner_cache_hit_ready"] = {"count": 1, "wall_time_s": 0.5}
+    report["profile"]["trial_solver_scan_runner_cache_miss_device_run"] = {
+        "count": 1,
+        "wall_time_s": 1.5,
+    }
+    report["profile"]["trial_solver_scan_runner_cache_miss_dispatch"] = {
+        "count": 1,
+        "wall_time_s": 0.2,
+    }
+    report["profile"]["trial_solver_scan_runner_cache_miss_ready"] = {
+        "count": 1,
+        "wall_time_s": 1.3,
+    }
+    report["profile"]["trial_solver_scan_runner_cache_bypass_device_run"] = {
+        "count": 1,
+        "wall_time_s": 0.4,
+    }
+    report["profile"]["trial_solver_scan_runner_cache_bypass_dispatch"] = {
+        "count": 1,
+        "wall_time_s": 0.1,
+    }
+    report["profile"]["trial_solver_scan_runner_cache_bypass_ready"] = {
+        "count": 1,
+        "wall_time_s": 0.3,
+    }
     report["profile"]["trial_solver_scan_host_materialize"] = {"count": 1, "wall_time_s": 0.2}
     report["profile"]["trial_solver_scan_postprocess"] = {"count": 1, "wall_time_s": 0.3}
     report["profile"]["trial_solver_scan_unattributed"] = {"count": 1, "wall_time_s": 0.08}
@@ -335,6 +370,8 @@ def test_profile_summary_extracts_scan_solver_buckets() -> None:
     assert summary["metrics"]["trial_solver_scan_initial_compute_forces_s"] == 0.05
     assert summary["metrics"]["trial_solver_scan_axis_reset_compute_forces_s"] == 0.06
     assert summary["metrics"]["trial_solver_scan_run_setup_s"] == 0.09
+    assert summary["metrics"]["trial_solver_scan_runner_cache_lookup_s"] == 0.11
+    assert summary["metrics"]["trial_solver_scan_runner_cache_build_s"] == 0.22
     assert summary["metrics"]["trial_solver_scan_runner_cache_hit_count"] == 3.0
     assert summary["metrics"]["trial_solver_scan_runner_cache_miss_count"] == 2.0
     assert summary["metrics"]["trial_solver_scan_runner_cache_bypass_count"] == 1.0
@@ -342,13 +379,33 @@ def test_profile_summary_extracts_scan_solver_buckets() -> None:
     assert summary["metrics"]["trial_solver_scan_device_run_s"] == 2.5
     assert summary["metrics"]["trial_solver_scan_device_dispatch_s"] == 0.4
     assert summary["metrics"]["trial_solver_scan_device_ready_s"] == 2.1
+    assert summary["metrics"]["trial_solver_scan_runner_cache_hit_device_run_s"] == 0.6
+    assert summary["metrics"]["trial_solver_scan_runner_cache_hit_dispatch_s"] == 0.1
+    assert summary["metrics"]["trial_solver_scan_runner_cache_hit_ready_s"] == 0.5
+    assert summary["metrics"]["trial_solver_scan_runner_cache_miss_device_run_s"] == 1.5
+    assert summary["metrics"]["trial_solver_scan_runner_cache_miss_dispatch_s"] == 0.2
+    assert summary["metrics"]["trial_solver_scan_runner_cache_miss_ready_s"] == 1.3
+    assert summary["metrics"]["trial_solver_scan_runner_cache_bypass_device_run_s"] == 0.4
+    assert summary["metrics"]["trial_solver_scan_runner_cache_bypass_dispatch_s"] == 0.1
+    assert summary["metrics"]["trial_solver_scan_runner_cache_bypass_ready_s"] == 0.3
     assert summary["metrics"]["trial_solver_scan_host_materialize_s"] == 0.2
     assert summary["metrics"]["trial_solver_scan_postprocess_s"] == 0.3
     assert summary["metrics"]["trial_solver_scan_unattributed_s"] == 0.08
-    assert summary["exact_optimizer_patch_target"]["name"] == "trial_solver_scan_device_ready"
+    assert summary["trial_scan_summary"]["cache_lookup_s"] == 0.11
+    assert summary["trial_scan_summary"]["cache_build_s"] == 0.22
+    assert summary["trial_scan_summary"]["cache_status"]["miss"]["count"] == 2
+    assert summary["trial_scan_summary"]["cache_status"]["miss"]["device_run_s"] == 1.5
+    assert summary["trial_scan_summary"]["cache_miss_fraction"] == pytest.approx(2.0 / 6.0)
+    assert summary["trial_scan_summary"]["dominant_cache_status_by_device_run"] == "miss"
+    assert summary["exact_optimizer_patch_target"]["name"] == "trial_solver_scan_runner_cache_miss_ready"
     assert "trial_solver_scan_runner_cache_miss_count" not in {
         entry["name"] for entry in summary["top_profile"]
     }
+    comparison = compare_tool.build_comparison([summary, summary], baseline="cpu")
+    text = compare_tool.format_text(comparison)
+    assert "Trial scan timing/cache status" in text
+    assert "miss_frac" in text
+    assert "33.3%" in text
 
 
 def test_profile_summary_prefers_split_replay_and_tangent_buckets() -> None:
@@ -413,10 +470,24 @@ def test_profile_summary_accounts_projected_replay_buckets() -> None:
     summary = compare_tool.summarize_payload(report, label="gpu")
 
     assert summary["metrics"]["replay_time_s"] == 4.0
+    assert summary["metrics"]["projected_replay_total_s"] == 4.0
+    assert summary["metrics"]["projected_replay_dispatch_s"] == 0.7
     assert summary["metrics"]["accepted_replay_dispatch_s"] == 0.7
     assert summary["metrics"]["projected_residual_tangents_s"] == 3.3
     assert summary["metrics"]["accepted_point_replay_count"] == 2
+    assert summary["projected_replay_summary"]["total_s"] == 4.0
+    assert summary["projected_replay_summary"]["dispatch_s"] == 0.7
+    assert summary["projected_replay_summary"]["residual_tangents_s"] == 3.3
+    assert summary["projected_replay_summary"]["count"] == 2
+    assert summary["projected_replay_summary"]["share_of_total"] == pytest.approx(0.2)
+    assert summary["projected_replay_summary"]["residual_tangent_share_of_projected"] == pytest.approx(
+        3.3 / 4.0
+    )
     assert summary["exact_optimizer_patch_target"]["name"] == "jacobian_projected_replay_residual_tangents"
+    comparison = compare_tool.build_comparison([summary, summary], baseline="gpu")
+    text = compare_tool.format_text(comparison)
+    assert "Projected replay totals" in text
+    assert "residual_tangent_s" in text
 
 
 def test_profile_summary_extracts_replay_scan_cache_diagnostics() -> None:
