@@ -77,6 +77,7 @@ def test_performance_matrix_auto_backend_preserves_jax_selection():
             "whole_scan",
             "--sync-replay-timing",
             "--jvp-only-exact-tape",
+            "--jvp-only-basepoint-carries",
         ]
     )
     env = tool.child_env(
@@ -96,6 +97,7 @@ def test_performance_matrix_auto_backend_preserves_jax_selection():
     assert env["VMEC_JAX_DYNAMIC_REPLAY_MODE"] == "whole_scan"
     assert env["VMEC_JAX_OPT_SYNC_REPLAY_TIMING"] == "1"
     assert env["VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE"] == "1"
+    assert env["VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES"] == "1"
     assert "JAX_ENABLE_X64" not in env
 
 

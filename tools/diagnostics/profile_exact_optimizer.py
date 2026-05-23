@@ -233,6 +233,22 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_false",
         help="Explicitly disable VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE in the child profile.",
     )
+    p.set_defaults(jvp_only_basepoint_carries=None)
+    p.add_argument(
+        "--jvp-only-basepoint-carries",
+        dest="jvp_only_basepoint_carries",
+        action="store_true",
+        help=(
+            "Enable VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES=1. "
+            "Use with --jvp-only-exact-tape for GPU replay diagnostics."
+        ),
+    )
+    p.add_argument(
+        "--no-jvp-only-basepoint-carries",
+        dest="jvp_only_basepoint_carries",
+        action="store_false",
+        help="Explicitly disable VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES.",
+    )
     p.add_argument(
         "--budget-total-wall-s",
         type=float,
@@ -345,6 +361,9 @@ def _runtime_info() -> dict[str, object]:
             "devices": [str(device) for device in jax.devices()],
             "xla_python_client_preallocate": os.environ.get("XLA_PYTHON_CLIENT_PREALLOCATE"),
             "vmec_jax_opt_jvp_only_exact_tape": os.environ.get("VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE"),
+            "vmec_jax_jvp_only_exact_tape_basepoint_carries": os.environ.get(
+                "VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES"
+            ),
             "vmec_jax_opt_trial_scan": os.environ.get("VMEC_JAX_OPT_TRIAL_SCAN"),
         }
     except Exception as exc:  # pragma: no cover - diagnostics only
@@ -361,6 +380,13 @@ def _effective_jvp_only_exact_tape(args: argparse.Namespace) -> bool:
     if value is not None:
         return bool(value)
     return _env_flag_enabled("VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE")
+
+
+def _effective_jvp_only_basepoint_carries(args: argparse.Namespace) -> bool:
+    value = getattr(args, "jvp_only_basepoint_carries", None)
+    if value is not None:
+        return bool(value)
+    return _env_flag_enabled("VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES")
 
 
 def _cache_len(value: Any) -> int:
@@ -702,6 +728,7 @@ def _build_callback_payload(
         "sync_replay_timing": bool(getattr(args, "sync_replay_timing", False)),
         "trial_scan": str(getattr(args, "trial_scan", "auto")),
         "jvp_only_exact_tape": _effective_jvp_only_exact_tape(args),
+        "jvp_only_basepoint_carries": _effective_jvp_only_basepoint_carries(args),
         "solver_device_requested": args.solver_device,
         "solver_device_resolved": solver_device_resolved,
         "runtime": _runtime_info() if runtime is None else runtime,
@@ -833,6 +860,10 @@ def main() -> int:
     if args.jvp_only_exact_tape is not None:
         os.environ["VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE"] = (
             "1" if bool(args.jvp_only_exact_tape) else "0"
+        )
+    if args.jvp_only_basepoint_carries is not None:
+        os.environ["VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES"] = (
+            "1" if bool(args.jvp_only_basepoint_carries) else "0"
         )
     if args.trial_scan == "on":
         os.environ["VMEC_JAX_OPT_TRIAL_SCAN"] = "1"

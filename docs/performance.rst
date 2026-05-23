@@ -198,6 +198,18 @@ read as a mixed result rather than a broad VMEC2000 speedup claim:
        - 6.461 s
        - 922.2 MiB
 
+  A follow-up bounded QH mode-2 cold-Jacobian profile
+  (``inner_max_iter=60``, one perturbed callback, replay synchronization
+  enabled) showed the same direction more strongly: full tape measured
+  ``51.1 s`` on ``office`` GPU, dominated by
+  ``jacobian_projected_tape_replay_dispatch=21.7 s`` and exact-state setup,
+  while JVP-only plus basepoint carries measured ``15.8 s`` with
+  ``jacobian_projected_tape_replay_dispatch=4.1 s``.  The matching local CPU
+  probe regressed from ``16.5 s`` to ``19.6 s``.  The next low-risk runtime
+  patch is therefore a GPU-only auto policy for the JVP-only/basepoint-carry
+  tape path, gated by exact-callback parity and a larger mode/case matrix;
+  it should not be enabled on CPU by default.
+
 CPU/GPU profiling playbook
 --------------------------
 
@@ -523,11 +535,14 @@ An experimental forward-only tape mode is available for profiling with
 ``VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE=1``.  It omits reverse-replay base carries
 from accepted-point tapes used only for JVP column replay.  May 2026 profiling
 showed a modest CPU total-time improvement but higher RSS and replay cost, while
-the original GPU path regressed sharply.  The additional opt-in
-``VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES=1`` preserves enough dynamic
-basepoint state to recover the fast basepoint replay path on the profiled GPU
-case.  It is deliberately not a default because larger mode and full optimizer
-trajectory matrices still need review.
+the original GPU path regressed sharply.  Set
+``VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES=1`` as an additional opt-in to
+preserve enough dynamic basepoint state for the fast basepoint replay path on
+the profiled GPU case.  It is deliberately not a default because larger mode and
+full optimizer trajectory matrices still need review.  The diagnostics wrappers
+expose the pair as ``--jvp-only-exact-tape --jvp-only-basepoint-carries`` so
+CPU/GPU matrices can record the exact environment without hand-written shell
+exports.
 
 Representative May 2026 callback timings after the backend-adaptive replay
 bucket, scalar-gradient tangent-cache, and GPU replay-chunk changes were:
