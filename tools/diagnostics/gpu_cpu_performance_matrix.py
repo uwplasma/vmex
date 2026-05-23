@@ -314,6 +314,8 @@ def env_summary(env: dict[str, str]) -> dict[str, str | None]:
         "VMEC_JAX_OPT_TRIAL_SCAN",
         "VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE",
         "VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES",
+        "VMEC_JAX_TRIDI_PRECOMPUTE",
+        "VMEC_JAX_TRIDI_SOLVE",
     )
     return {key: env.get(key) for key in keys if env.get(key) is not None}
 

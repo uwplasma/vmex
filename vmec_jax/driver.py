@@ -253,6 +253,36 @@ def _resolve_jit_forces_auto_policy(flag: bool | str, static_i: VMECStatic, nite
     return bool(flag)
 
 
+def _default_preconditioner_use_precomputed_tridi(
+    *,
+    cfg,
+    backend: str,
+    performance_mode: bool,
+    use_scan: bool,
+) -> bool | None:
+    """Choose the R/Z preconditioner tridiagonal-solver policy for public runs.
+
+    ``None`` delegates to the lower-level environment default.  The automatic
+    enabled case is intentionally narrow: May 2026 profiling showed a large GPU
+    win for raw LASYM fixed-boundary solves, and VMEC2000 short-trace parity was
+    checked for that path.  CPU and non-LASYM runs keep the legacy default unless
+    users set ``VMEC_JAX_TRIDI_PRECOMPUTE`` explicitly.
+    """
+
+    if os.getenv("VMEC_JAX_TRIDI_PRECOMPUTE") is not None:
+        return None
+    backend_l = str(backend).strip().lower()
+    if backend_l not in ("gpu", "cuda", "rocm", "tpu"):
+        return None
+    if not bool(performance_mode):
+        return None
+    if bool(use_scan):
+        return None
+    if not bool(getattr(cfg, "lasym", False)):
+        return None
+    return True
+
+
 def _result_final_residuals(result) -> tuple[float, float, float] | None:
     if result is None:
         return None
@@ -1881,6 +1911,12 @@ def run_fixed_boundary(
                 and (not bool(static_i.cfg.lasym))
                 and (_default_backend_name() == "cpu")
             )
+            preconditioner_use_precomputed_tridi_i = _default_preconditioner_use_precomputed_tridi(
+                cfg=static_i.cfg,
+                backend=policy_backend,
+                performance_mode=bool(performance_mode_i),
+                use_scan=bool(use_scan_i),
+            )
             if step_size is _STEP_SIZE_SENTINEL or step_size is None:
                 step_size_finish = float(indata.get_float("DELT", 5e-3))
             else:
@@ -1928,6 +1964,7 @@ def run_fixed_boundary(
                 resume_state_mode=finish_resume_state_mode,
                 fsq_total_target=finish_fsq_total_target,
                 host_update_assembly=host_update_assembly_i,
+                preconditioner_use_precomputed_tridi=preconditioner_use_precomputed_tridi_i,
                 jit_forces=_resolve_finish_jit_forces(static_i, int(budget_i)),
             )
             return replace(best_run, state=res_i.state, result=res_i)
@@ -2858,6 +2895,12 @@ def run_fixed_boundary(
                 and (not bool(cfg_i.lasym))
                 and (_default_backend_name() == "cpu")
             )
+            stage_preconditioner_use_precomputed_tridi = _default_preconditioner_use_precomputed_tridi(
+                cfg=cfg_i,
+                backend=policy_backend,
+                performance_mode=bool(performance_mode),
+                use_scan=bool(scan_mode),
+            )
             solve_kwargs = dict(
                 indata=indata,
                 signgs=signgs,
@@ -2894,6 +2937,7 @@ def run_fixed_boundary(
                 resume_state_mode=stage_resume_state_mode,
                 fsq_total_target=stage_fsq_total_target,
                 host_update_assembly=stage_host_update_assembly,
+                preconditioner_use_precomputed_tridi=stage_preconditioner_use_precomputed_tridi,
             )
             dynamic_scan_default = "1" if bool(cfg.lasym) else "0"
             dynamic_scan_env = os.getenv("VMEC_JAX_DYNAMIC_SCAN", dynamic_scan_default).strip().lower()

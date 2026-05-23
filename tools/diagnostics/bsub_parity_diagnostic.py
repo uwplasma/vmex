@@ -65,7 +65,7 @@ def main():
     try:
         import netCDF4  # noqa: F401
     except Exception as e:  # pragma: no cover
-        raise SystemExit("This example requires netCDF4 (pip install -e .[netcdf]).") from e
+        raise SystemExit("This example requires netCDF4 (pip install -e .).") from e
 
     for name, input_rel, wout_rel in CASES:
         input_path = REPO_ROOT / input_rel

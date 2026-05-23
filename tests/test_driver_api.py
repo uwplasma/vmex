@@ -583,6 +583,66 @@ def test_gpu_lasym_current_staged_solver_device_cpu_is_explicit():
     assert device == "cpu"
 
 
+def test_gpu_lasym_non_scan_uses_precomputed_tridi_default(monkeypatch):
+    input_path = Path(__file__).resolve().parents[1] / "examples/data/input.basic_non_stellsym_pressure"
+    cfg, _indata = load_config(input_path)
+    monkeypatch.delenv("VMEC_JAX_TRIDI_PRECOMPUTE", raising=False)
+
+    assert (
+        driver_module._default_preconditioner_use_precomputed_tridi(
+            cfg=cfg,
+            backend="gpu",
+            performance_mode=True,
+            use_scan=False,
+        )
+        is True
+    )
+    assert (
+        driver_module._default_preconditioner_use_precomputed_tridi(
+            cfg=cfg,
+            backend="cpu",
+            performance_mode=True,
+            use_scan=False,
+        )
+        is None
+    )
+    assert (
+        driver_module._default_preconditioner_use_precomputed_tridi(
+            cfg=cfg,
+            backend="gpu",
+            performance_mode=True,
+            use_scan=True,
+        )
+        is None
+    )
+    monkeypatch.setenv("VMEC_JAX_TRIDI_PRECOMPUTE", "0")
+    assert (
+        driver_module._default_preconditioner_use_precomputed_tridi(
+            cfg=cfg,
+            backend="gpu",
+            performance_mode=True,
+            use_scan=False,
+        )
+        is None
+    )
+
+
+def test_non_lasym_gpu_keeps_tridi_legacy_default(monkeypatch):
+    input_path = Path(__file__).resolve().parents[1] / "examples/data/input.nfp4_QH_warm_start"
+    cfg, _indata = load_config(input_path)
+    monkeypatch.delenv("VMEC_JAX_TRIDI_PRECOMPUTE", raising=False)
+
+    assert (
+        driver_module._default_preconditioner_use_precomputed_tridi(
+            cfg=cfg,
+            backend="gpu",
+            performance_mode=True,
+            use_scan=False,
+        )
+        is None
+    )
+
+
 def test_default_non_autodiff_solver_policy_keeps_free_boundary_on_robust_path():
     freeb_input = Path(__file__).resolve().parents[1] / "examples/data/input.cth_like_free_bdy"
     _cfg_freeb, indata_freeb = load_config(freeb_input)

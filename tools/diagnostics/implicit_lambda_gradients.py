@@ -42,7 +42,7 @@ def _import_matplotlib():
 
         return plt
     except Exception as e:  # pragma: no cover
-        raise SystemExit("matplotlib is required for this example (pip install -e .[plots])") from e
+        raise SystemExit("matplotlib is required for this example (pip install -e .)") from e
 
 
 def _set_pub_style(plt):
@@ -72,7 +72,7 @@ def main() -> None:
     args = p.parse_args()
 
     if not has_jax():
-        raise SystemExit("This example requires JAX (pip install -e .[jax])")
+        raise SystemExit("This example requires JAX (pip install -e .)")
     enable_x64(True)
 
     outdir = Path(args.outdir)

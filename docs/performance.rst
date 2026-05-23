@@ -370,6 +370,17 @@ GPU solve target for this lane is preconditioner/update launch structure rather
 than the force kernel alone.  Forcing the scan path was slower on both devices
 in the same case: ``35.76 s`` CPU and ``44.96 s`` GPU profile time.
 
+The next ``office`` pass isolated the preconditioner piece: enabling
+precomputed Thomas coefficients for the same raw LASYM GPU profile reduced
+wrapper time from ``30.50 s`` to ``11.33 s`` and detailed preconditioner time
+from ``2.66 s`` to ``0.74 s``.  Short VMEC2000 trace parity was then checked for
+the LASYM finite-pressure case and the QH warm-start case.  The public
+production policy now enables this path automatically only for non-scan,
+performance-mode accelerator LASYM solves; CPU, scan, and non-LASYM fixed
+boundary solves keep the legacy environment-controlled default.  Set
+``VMEC_JAX_TRIDI_PRECOMPUTE=0`` to disable this narrow GPU/LASYM default during
+diagnostics, or ``=1`` to force it in lower-level experiments.
+
 The same commit was profiled with a one-callback QH mode-2 exact Jacobian
 matrix on ``office`` (``inner_max_iter=40``, ``trial_max_iter=20``,
 ``--sync-replay-timing``).  The GPU profile was faster end-to-end than CPU

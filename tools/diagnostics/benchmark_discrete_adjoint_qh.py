@@ -59,7 +59,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if not has_jax():
-        raise SystemExit("This script requires JAX (pip install -e '.[jax]').")
+        raise SystemExit("This script requires JAX (pip install -e .).")
     enable_x64(True)
 
     cfg, indata = load_config(REPO_ROOT / args.input)
