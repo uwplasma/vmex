@@ -239,6 +239,75 @@ max_total_runtime_s = 45.0
 goal = "Bounded Landreman NCSX fixed-boundary-from-free-boundary parity probe that avoids the missing free-boundary mgrid."
 
 [[cases]]
+id = "fixed_nonaxis_lasym_false_simsopt_w7x_standard"
+tier = "planning"
+enabled = true
+compare = "stage_trace"
+source = "simsopt/tests"
+input = "../simsopt/tests/test_files/input.W7-X_standard_configuration"
+lfreeb = false
+lasym = false
+axisymmetric = false
+nfp = 5
+ntor = 10
+single_ns = 13
+max_iter = 8
+vmec_nstep = 1
+rtol = 5e-2
+atol = 1e-10
+dump_level = "lite"
+vmec_timeout = 180
+max_runtime_s = 25.0
+max_total_runtime_s = 45.0
+goal = "Bounded SIMSOPT W7-X standard fixed-boundary parity probe."
+
+[[cases]]
+id = "fixed_nonaxis_lasym_true_simsopt_basic_non_stellsym_external"
+tier = "planning"
+enabled = true
+compare = "stage_trace"
+source = "simsopt/tests"
+input = "../simsopt/tests/test_files/input.basic_non_stellsym"
+lfreeb = false
+lasym = true
+axisymmetric = false
+nfp = 1
+ntor = 2
+single_ns = 13
+max_iter = 8
+vmec_nstep = 1
+rtol = 5e-2
+atol = 1e-10
+dump_level = "lite"
+vmec_timeout = 120
+max_runtime_s = 25.0
+max_total_runtime_s = 45.0
+goal = "Bounded external SIMSOPT LASYM=true fixed-boundary parity probe."
+
+[[cases]]
+id = "fixed_nonaxis_lasym_false_landreman_hsx_qhs_fixed"
+tier = "planning"
+enabled = true
+compare = "stage_trace"
+source = "landreman/vmec_equilibria"
+input = "../vmec_equilibria/HSX/QHS_vac_ns201_fixed/input.HSX_QHS_vacuum_ns201"
+lfreeb = false
+lasym = false
+axisymmetric = false
+nfp = 4
+ntor = 10
+single_ns = 11
+max_iter = 8
+vmec_nstep = 1
+rtol = 5e-2
+atol = 1e-10
+dump_level = "lite"
+vmec_timeout = 180
+max_runtime_s = 25.0
+max_total_runtime_s = 45.0
+goal = "Bounded Landreman HSX QHS fixed-boundary parity and CPU/GPU benchmark diversity probe."
+
+[[cases]]
 id = "freeb_nonaxis_lasym_false_cth_like"
 tier = "smoke"
 enabled = true

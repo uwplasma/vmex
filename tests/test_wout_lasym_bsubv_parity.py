@@ -287,6 +287,7 @@ def test_basic_non_stellsym_pressure_generation_preserves_lasym_channels(
         "bsupumns",
         "bsupvmns",
         "bsubumns",
+        "bsubvmns",
         "bsubumnc",
     )
     for name in strict_nyquist_channels:

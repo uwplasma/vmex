@@ -468,11 +468,12 @@ Current parity status
 **Stellarator-asymmetric (lasym=True)**
   ``lasym=True`` channels are covered by bundled/fetched reference physics gates
   and convergence tests.  The ``basic_non_stellsym_pressure`` executable-backed
-  finite-beta comparison passed locally after the LASYM covariant-field scaling
-  fix in ``e0b00e7`` and remains a dated optional audit note.  Strict external
-  LASYM parity is still not promoted broadly: the axisymmetric zero-pressure
-  ``up_down_asymmetric_tokamak`` nightly comparison remains a known residual
-  gap, led by ``lmns`` and the near-zero ``bsubvmns`` sine covariant channel.
+  finite-beta comparison passes the optional nightly converged-WOUT matrix after
+  reconstructing the asymmetric ``bsubvmns`` channel from VMEC's corrected
+  half-mesh IEQUI source.  Strict external LASYM parity is still not promoted
+  broadly: the axisymmetric zero-pressure ``up_down_asymmetric_tokamak``
+  nightly comparison remains a known residual gap, led by ``lmns`` and the
+  near-zero ``bsubvmns`` sine covariant channel.
   The Boozer input adapter is required to preserve the asymmetric
   geometry/lambda channels (``rmns``, ``zmnc``, ``lmnc``) and magnetic sine
   channels through ``booz_xform_jax`` for QI and LASYM Boozer diagnostics.
@@ -607,26 +608,20 @@ Set ``VMEC2000_NIGHTLY=1`` as well to include the slower non-axisymmetric,
    VMEC2000_NIGHTLY=1 \
    pytest -q tests/test_vmec2000_converged_parity.py
 
-The fetched single-grid ``lasym=True`` finite-beta fixture is currently a
-required bundled-reference physics gate, and the short executable-backed stage
-smoke reaches the corresponding VMEC2000 solve.  The stricter converged
-executable-backed ``basic_non_stellsym_pressure`` row remains an expected-fail
-optional diagnostic as of the 2026-05-22 local rerun: geometry, scalar, and
-stage-trace checks pass, but the asymmetric ``bsubvmns`` output channel differs
-from VMEC2000 with relRMS about ``1.45e-1``.  The separate zero-pressure,
-axisymmetric ``up_down_asymmetric_tokamak`` strict external LASYM gap also
-remains non-promoted: a 2026-05-19 rerun showed ``lmns=1.78e-2`` relRMS,
+The fetched single-grid ``lasym=True`` finite-beta fixture is a required
+bundled-reference physics gate, and the executable-backed
+``basic_non_stellsym_pressure`` converged-WOUT row passes locally against
+``~/bin/xvmec2000`` after the asymmetric ``bsubvmns`` output channel was switched
+to VMEC's corrected half-mesh IEQUI source.  The separate zero-pressure,
+axisymmetric ``up_down_asymmetric_tokamak`` strict external LASYM gap remains
+non-promoted: a 2026-05-19 rerun showed ``lmns=1.78e-2`` relRMS,
 ``bsupumns=1.05e-2`` relRMS, and ``bsubvmns`` ``diff_rms=5.72e-4`` against a
 near-zero ``ref_rms=4.10e-5``.  The ``reference_state_roundtrip_rel_rms`` split
-from the converged-wout benchmark isolates this into two blockers: ``lmns``
-roundtrips from the VMEC2000 state at ``8.04e-17`` relRMS, so the lambda gap is
-solved-state convergence, while ``bsubvmns`` already differs at ``1.20e1``
-relRMS in the reference-state roundtrip, so the sine covariant-channel gap is in
-``wrout`` reconstruction or postprocessing.  The ``mode_hotspots`` diagnostic
-keeps the lambda work focused on the ``m=1,3,4`` LASYM channels and the
-near-zero ``bsubvmns`` comparison on absolute error.  The free-boundary
-converged-WOUT row is skipped until it is reduced to a bounded nightly gate; use
-the promoted stage-trace free-boundary smoke for routine executable parity.
+from the converged-wout benchmark keeps the remaining lambda work focused on
+the ``m=1,3,4`` LASYM channels and the near-zero ``bsubvmns`` comparison on
+absolute error.  The free-boundary converged-WOUT row is skipped until it is
+reduced to a bounded nightly gate; use the promoted stage-trace free-boundary
+smoke for routine executable parity.
 
 Optional SIMSOPT formula parity is similarly guarded and targeted:
 

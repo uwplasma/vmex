@@ -129,8 +129,10 @@ read as a mixed result rather than a broad VMEC2000 speedup claim:
 
 **14. Scan trial residuals**
   Relaxed trial residual solves in optimization loops use the trace-compatible
-  scan forward path by default.  Set ``VMEC_JAX_OPT_TRIAL_SCAN=0`` only when
-  comparing against the older non-scan trial path.
+  scan forward path by default on CPU.  Cold GPU mode-2 trial profiles were
+  faster on the older non-scan path, so GPU trial residuals default to non-scan
+  unless ``VMEC_JAX_OPT_TRIAL_SCAN=1`` is set.  Set
+  ``VMEC_JAX_OPT_TRIAL_SCAN=0`` to force the non-scan path on any backend.
 
 **15. Fused accelerator update step**
   The exact optimizer's strict fixed-boundary accepted-point solve uses a
@@ -200,15 +202,12 @@ read as a mixed result rather than a broad VMEC2000 speedup claim:
 
   A follow-up bounded QH mode-2 cold-Jacobian profile
   (``inner_max_iter=60``, one perturbed callback, replay synchronization
-  enabled) showed the same direction more strongly: full tape measured
-  ``51.1 s`` on ``office`` GPU, dominated by
-  ``jacobian_projected_tape_replay_dispatch=21.7 s`` and exact-state setup,
-  while JVP-only plus basepoint carries measured ``15.8 s`` with
-  ``jacobian_projected_tape_replay_dispatch=4.1 s``.  The matching local CPU
-  probe regressed from ``16.5 s`` to ``19.6 s``.  The next low-risk runtime
-  patch is therefore a GPU-only auto policy for the JVP-only/basepoint-carry
-  tape path, gated by exact-callback parity and a larger mode/case matrix;
-  it should not be enabled on CPU by default.
+  enabled) showed that JVP-only plus basepoint carries can reduce one GPU replay
+  microcase, but the broader CPU/GPU matrix did not support making it a default:
+  the latest one-callback full-tape totals were ``16.6 s`` on CPU and ``16.0 s``
+  on GPU, while JVP-only plus basepoint carries measured ``19.5 s`` on CPU and
+  ``16.5 s`` on GPU.  The flags remain profiling-only until a larger mode/case
+  matrix shows a consistent end-to-end optimizer win.
 
 CPU/GPU profiling playbook
 --------------------------
@@ -534,13 +533,16 @@ the discrete-adjoint tape path on both CPU and GPU by default.  May 2026
 are still useful for parity/profiling experiments but can be much slower than
 tape on production-like cold GPU callbacks.  Set
 ``VMEC_JAX_OPT_EXACT_PATH=tape`` or ``VMEC_JAX_OPT_EXACT_PATH=scan`` to force
-one accepted-point path for parity or profiling.  Relaxed trial residuals
-default to the trace-compatible scan forward
-path because the same profiling showed lower warm trial-solve cost for QH
-mode-1/mode-3 on both CPU and GPU.  Set ``VMEC_JAX_OPT_TRIAL_SCAN=0`` to force
-the old non-scan trial path for diagnostics.  ``solver_device=None``, ``"auto"``,
-and ``"default"`` inherit JAX's active backend; pass ``solver_device="cpu"`` or
-``"gpu"`` only when you want an explicit override.
+one accepted-point path for parity or profiling.  Relaxed trial residuals use
+the trace-compatible scan forward path by default on CPU.  The May 2026 bounded
+QH mode-2 matrix measured ``8.19 s`` for CPU scan trials versus ``7.23 s`` for
+CPU non-scan trials, but the GPU default-scan trial took ``15.58 s`` versus
+``8.43 s`` with scan disabled.  The production policy therefore keeps CPU on
+the scan-compatible path and defaults GPU/CUDA/ROCm trial residuals to non-scan.
+Set ``VMEC_JAX_OPT_TRIAL_SCAN=1`` or ``0`` to force either path for diagnostics.
+``solver_device=None``, ``"auto"``, and ``"default"`` inherit JAX's active
+backend; pass ``solver_device="cpu"`` or ``"gpu"`` only when you want an explicit
+override.
 
 An experimental forward-only tape mode is available for profiling with
 ``VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE=1``.  It omits reverse-replay base carries
@@ -553,7 +555,9 @@ the profiled GPU case.  It is deliberately not a default because larger mode and
 full optimizer trajectory matrices still need review.  The diagnostics wrappers
 expose the pair as ``--jvp-only-exact-tape --jvp-only-basepoint-carries`` so
 CPU/GPU matrices can record the exact environment without hand-written shell
-exports.
+exports.  The latest bounded matrix keeps this path experimental rather than a
+GPU default because it did not beat the full tape end-to-end on the tested
+mode-2 QH callback.
 
 Representative May 2026 callback timings after the backend-adaptive replay
 bucket, scalar-gradient tangent-cache, and GPU replay-chunk changes were:

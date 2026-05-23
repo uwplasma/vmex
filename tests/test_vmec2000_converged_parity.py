@@ -103,11 +103,6 @@ CONVERGED_PARITY_CASES = (
         multigrid=False,
         nightly=True,
         timeout_s=240.0,
-        xfail_reason=(
-            "optional converged LASYM=true finite-beta WOUT channel gap: "
-            "geometry/scalars and stage trace pass, but bsubvmns relRMS is "
-            "about 1.45e-1 against VMEC2000"
-        ),
     ),
     ConvergedParityCase(
         case="cth_like_free_bdy",

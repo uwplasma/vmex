@@ -5124,9 +5124,13 @@ def wout_minimal_from_fixed_boundary(
     bsubv_lasym_asym_filter_u = None
     if bool(lasym) and hasattr(bc, "bsubv_e"):
         # VMEC fileout forces IEQUI=1 before wrout. Diagnostics show only the
-        # LASYM bsubv sine output channel follows this IEQUI source; keep the
-        # existing raw channels for bsubvmnc/bsubu parity.
-        bsubv_lasym_asym_source = np.asarray(getattr(bc, "bsubv_e"), dtype=float).copy()
+        # LASYM bsubv sine output channel follows this corrected half-mesh IEQUI
+        # source; keep the existing raw channels for bsubvmnc/bsubu parity.
+        bsubv_lasym_asym_source = _apply_bsubv_equif_correction(
+            bsubv=np.asarray(getattr(bc, "bsubv"), dtype=float),
+            bsubv_e=np.asarray(getattr(bc, "bsubv_e"), dtype=float),
+            trig=trig,
+        )
     if os.getenv("VMEC_JAX_DUMP_BSUB_SOURCES", "") not in ("", "0"):
         tag = os.getenv("VMEC_JAX_DUMP_TAG", "").strip()
         outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
@@ -5174,10 +5178,10 @@ def wout_minimal_from_fixed_boundary(
     iequi = 1
     # VMEC parity: keep the raw bsubv path by default for Mercier/jdotb parity.
     disable_equif_corr = os.getenv("VMEC_JAX_DISABLE_BSUBV_EQUI_CORR", "1") not in ("", "0")
-    if (iequi == 1) and (not disable_equif_corr) and getattr(bc, "bsubv_preblend", None) is not None:
+    if (iequi == 1) and (not disable_equif_corr) and getattr(bc, "bsubv_e", None) is not None:
         bsubv_diag = _apply_bsubv_equif_correction(
             bsubv=bsubv_diag,
-            bsubv_e=np.asarray(bc.bsubv_preblend),
+            bsubv_e=np.asarray(bc.bsubv_e),
             trig=trig,
         )
         bsubv_diag_from_raw = False
