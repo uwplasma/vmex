@@ -41,3 +41,16 @@ def test_project_metadata_has_public_package_links() -> None:
     assert project["urls"]["Documentation"] == "https://vmec-jax.readthedocs.io/en/latest/"
     assert project["urls"]["Repository"] == "https://github.com/uwplasma/vmec_jax"
     assert project["urls"]["Changelog"] == "https://github.com/uwplasma/vmec_jax/releases"
+
+
+def test_plain_install_includes_plotting_and_qi_dependencies() -> None:
+    data = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    project_dependencies = set(data["project"]["dependencies"])
+    optional_dependencies = data.get("project", {}).get("optional-dependencies", {})
+
+    assert "matplotlib" in project_dependencies
+    assert "booz_xform_jax>=0.1.1" in project_dependencies
+    assert "plots" not in optional_dependencies
+    assert "plot" not in optional_dependencies
+    assert "qi" not in optional_dependencies
+    assert "booz" not in optional_dependencies

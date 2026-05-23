@@ -20,12 +20,9 @@ From PyPI:
 pip install vmec-jax
 ```
 
-Plotting examples need `matplotlib`; QI optimization also uses `booz_xform_jax`
-for the differentiable Boozer transform:
-
-```bash
-pip install "vmec-jax[plots,qi]"
-```
+The plain package includes plotting support (`matplotlib`) and the
+differentiable Boozer transform dependency (`booz_xform_jax`) used by the QI
+examples, so there is no separate plotting or QI extra to install.
 
 From conda-forge (the feedstock can lag PyPI by a release):
 
@@ -39,7 +36,7 @@ Developer install from source:
 ```bash
 git clone https://github.com/uwplasma/vmec_jax
 cd vmec_jax
-pip install -e ".[qi]"
+pip install -e .
 ```
 
 ## Quick Start
@@ -150,6 +147,28 @@ documented in `docs/optimization_sweep_results.rst` as status artifacts, not as
 aspect-6 README best-row promotion or global seed-robustness evidence.
 
 ![QI NFP coverage](docs/_static/figures/readme_qi_optimization_cases.png)
+
+Each row in `readme_qi_optimization_cases.png` is produced by the same editable
+script. To run one case, open `examples/optimization/QI_optimization.py`, set
+`RUN_CASE` at the top to one of `nfp1_qi`, `nfp2_qi`, `nfp3_qi`, or `nfp4_qi`,
+and run:
+
+```bash
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_optimization.py
+```
+
+That script intentionally exposes the full workflow instead of hiding it behind
+one high-level wrapper: it selects the seed VMEC input, optionally builds the
+simple or target-helicity seed, runs the configured preconditioner/local stages,
+assembles the QI residual blocks and weights, calls the least-squares optimizer,
+writes the final VMEC input/wout/history artifacts, prints the final QI,
+mirror, elongation, aspect-ratio, and iota metrics from the result object, and
+renders the 3D, Boozer-`|B|`, and objective-history plots. To rerender the
+checked-in NFP panel after updating cases, run:
+
+```bash
+PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
+```
 
 ## Performance, Validation, Release
 

@@ -51,7 +51,7 @@ def main() -> None:
     from vmec_jax.vmec_parity import vmec_m1_physical_to_internal_signed
 
     if not has_jax():
-        raise SystemExit("This example requires JAX (pip install -e '.[jax]').")
+        raise SystemExit("This example requires JAX (pip install -e .).")
     enable_x64(True)
 
     root = Path(__file__).resolve().parents[2]

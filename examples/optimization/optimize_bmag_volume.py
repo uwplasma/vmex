@@ -37,7 +37,7 @@ def main() -> None:
     from vmec_jax.integrals import volume_from_sqrtg_vmec
 
     if not has_jax():
-        raise SystemExit("This example requires JAX (pip install -e '.[jax]').")
+        raise SystemExit("This example requires JAX (pip install -e .).")
     enable_x64(True)
 
     root = Path(__file__).resolve().parents[2]

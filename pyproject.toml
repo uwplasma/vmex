@@ -26,6 +26,8 @@ dependencies = [
   "jax",
   "jaxlib",
   "netCDF4",
+  "matplotlib",
+  "booz_xform_jax>=0.1.1",
   "tomli; python_version < '3.11'",
 ]
 
@@ -41,15 +43,10 @@ Issues = "https://github.com/uwplasma/vmec_jax/issues"
 Changelog = "https://github.com/uwplasma/vmec_jax/releases"
 
 [project.optional-dependencies]
-jax = ["jax", "jaxlib"]
-netcdf = ["netCDF4"]
 docs = [
   "sphinx",
   "furo",
 ]
-plots = ["matplotlib"]
-booz = ["booz_xform_jax>=0.1.1"]
-qi = ["booz_xform_jax>=0.1.1"]
 dev = ["pytest", "pytest-cov", "ruff", "mypy", "types-setuptools"]
 
 [tool.setuptools.packages.find]

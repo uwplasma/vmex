@@ -671,7 +671,7 @@ def _booz_xform_on_outer_surface(wout_path: Path):
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError(
             "render_qi_readme_cases.py requires booz_xform_jax. "
-            "Install it with `pip install .[qi]` from the repository root."
+            "Install it with `pip install .` from the repository root."
         ) from exc
 
     bx = Booz_xform(verbose=0)

@@ -31,7 +31,7 @@ def _import_matplotlib():
         mpl.use("Agg", force=True)
         import matplotlib.pyplot as plt
     except Exception as e:  # pragma: no cover
-        raise SystemExit("This example requires matplotlib (pip install -e .[plots]).") from e
+        raise SystemExit("This example requires matplotlib (pip install -e .).") from e
     return plt
 
 

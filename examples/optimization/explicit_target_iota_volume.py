@@ -62,7 +62,7 @@ def main() -> None:
     from vmec_jax.wout import _icurv_full_mesh_from_indata
 
     if not has_jax():
-        raise SystemExit("This example requires JAX (pip install -e '.[jax]').")
+        raise SystemExit("This example requires JAX (pip install -e .).")
     enable_x64(True)
 
     root = Path(__file__).resolve().parents[2]

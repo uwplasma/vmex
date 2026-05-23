@@ -139,9 +139,9 @@ Local Coverage Workflow
 -----------------------
 
 Run coverage from the repository root after installing the development extras
-or at least ``pytest-cov``.  The CI coverage job installs ``.[plots]`` so the
-matplotlib-backed plotting tests contribute to the required line-coverage gate
-instead of being skipped.
+or at least ``pytest-cov``.  The CI coverage job installs the plain package,
+which includes matplotlib-backed plotting support, so plotting tests contribute
+to the required line-coverage gate instead of being skipped.
 
 Required CI-equivalent coverage:
 
