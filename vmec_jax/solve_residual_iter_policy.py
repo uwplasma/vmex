@@ -232,7 +232,7 @@ def vmec2000_scan_options_from_env(
     scan_lax_env_l = str(scan_lax_env).strip().lower()
     if scan_lax_env_l:
         scan_use_lax_tridi = _solve_runtime._runtime_env_enabled(scan_lax_env_l)
-    else:
+    elif str(tridi_solve_env).strip():
         scan_use_lax_tridi = str(tridi_solve_env).strip().lower() in (
             "1",
             "true",
@@ -240,6 +240,12 @@ def vmec2000_scan_options_from_env(
             "lax",
             "force",
         )
+    else:
+        # Scan-based trial solves are the default optimization trial path.  The
+        # fused XLA tridiagonal solver is consistently faster on CPU, but
+        # current GPU optimization-trial profiles are still better with the
+        # older scan path.  Keep explicit env overrides for parity/perf bisection.
+        scan_use_lax_tridi = str(backend_name).strip().lower() == "cpu"
 
     scan_restart_payload_env_l = str(scan_restart_payload_env).strip().lower()
     if scan_restart_payload_env_l in ("1", "true", "yes"):

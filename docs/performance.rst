@@ -2036,7 +2036,9 @@ Python-side synchronization on every step.
 Defaults:
 
 - Live printing is **enabled** when ``verbose`` and ``vmec2000_control`` are on.
-- The backend uses ``jax.debug.print`` (differentiable).
+- The VMEC2000-control scan path defaults to ``debug_callback`` for ordered
+  host-side row formatting.  ``debug_print`` remains available for simpler
+  device-side debug printing.
 
 Disable live printing with:
 
@@ -2062,8 +2064,8 @@ histories needed for VMEC-style printing.
 
 Advanced knobs (not required for normal use):
 
-- ``VMEC_JAX_SCAN_PRINT_MODE=debug_print`` (default)
-- ``VMEC_JAX_SCAN_PRINT_MODE=debug_callback`` (alternate callback)
+- ``VMEC_JAX_SCAN_PRINT_MODE=debug_callback`` (default for VMEC2000-control scan)
+- ``VMEC_JAX_SCAN_PRINT_MODE=debug_print`` (device-side debug printing)
 - ``VMEC_JAX_SCAN_PRINT_ORDERED=1`` to force ordered prints (may reduce parallelism)
 
 DFT tomnsps (GEMM path)
@@ -2365,19 +2367,19 @@ In more detail:
    force/residual/control pipeline on-device for longer stretches, and reducing
    per-iteration host orchestration.
 
-Experimental tridiagonal solver (scan only)
--------------------------------------------
+Fused tridiagonal solver (scan only)
+------------------------------------
 
-The scan preconditioner can optionally use XLA's fused tridiagonal solver with
-pretransposed coefficients (``dl/d/du``) computed once per stage. This can be
-faster but is **not parity-safe** in general.
+The scan preconditioner can use XLA's fused tridiagonal solver with
+pretransposed coefficients (``dl/d/du``).  Current bounded profiles show this
+is the fastest measured CPU scan path, while GPU optimization-trial callbacks
+still prefer the older scan path.  The default therefore follows the backend:
+CPU uses fused scan, GPU keeps the older scan path until the projected replay
+and launch-count lanes are fixed.  Keep the explicit env overrides for
+parity/perf bisection:
 
-Enable for experiments only:
-
-- ``VMEC_JAX_TRIDI_SOLVE=1`` (build pretransposed coefficients)
-- ``VMEC_JAX_SCAN_PRECOND_LAXTRIDI=1`` (use the fused solver in scan)
-
-If parity diverges, leave these disabled (the default).
+- ``VMEC_JAX_SCAN_PRECOND_LAXTRIDI=0``: force the older Thomas scan path.
+- ``VMEC_JAX_SCAN_PRECOND_LAXTRIDI=1``: explicitly request the fused scan path.
 
 Boundary decomposition cache + JAX-friendly initial guess
 ---------------------------------------------------------

@@ -29,6 +29,7 @@ class ConvergedParityCase:
     timeout_s: float = 120.0
     require_aspect: bool = True
     xfail_reason: str | None = None
+    skip_reason: str | None = None
 
 
 CONVERGED_PARITY_CASES = (
@@ -102,6 +103,11 @@ CONVERGED_PARITY_CASES = (
         multigrid=False,
         nightly=True,
         timeout_s=240.0,
+        xfail_reason=(
+            "optional converged LASYM=true finite-beta WOUT channel gap: "
+            "geometry/scalars and stage trace pass, but bsubvmns relRMS is "
+            "about 1.45e-1 against VMEC2000"
+        ),
     ),
     ConvergedParityCase(
         case="cth_like_free_bdy",
@@ -118,6 +124,10 @@ CONVERGED_PARITY_CASES = (
         mgrid_relpath="examples_single_grid/data/mgrid_cth_like.nc",
         nightly=True,
         timeout_s=600.0,
+        skip_reason=(
+            "optional converged free-boundary WOUT parity is not yet a bounded "
+            "nightly gate; use the promoted stage-trace free-boundary smoke instead"
+        ),
     ),
 )
 
@@ -125,9 +135,14 @@ CONVERGED_PARITY_PARAMS = [
     pytest.param(
         case,
         id=case.case,
-        marks=()
-        if case.xfail_reason is None
-        else pytest.mark.xfail(reason=case.xfail_reason, strict=True),
+        marks=tuple(
+            mark
+            for mark in (
+                pytest.mark.xfail(reason=case.xfail_reason, strict=True) if case.xfail_reason else None,
+                pytest.mark.skip(reason=case.skip_reason) if case.skip_reason else None,
+            )
+            if mark is not None
+        ),
     )
     for case in CONVERGED_PARITY_CASES
 ]

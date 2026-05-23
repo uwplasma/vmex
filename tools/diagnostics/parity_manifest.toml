@@ -170,6 +170,75 @@ vmec_timeout = 180
 goal = "Fixed-boundary LASYM=true finite-pressure parity target."
 
 [[cases]]
+id = "fixed_nonaxis_lasym_false_simsopt_qh_reactor_lowres_external"
+tier = "planning"
+enabled = true
+compare = "stage_trace"
+source = "simsopt/tests"
+input = "../simsopt/tests/test_files/input.LandremanPaul2021_QH_reactorScale_lowres"
+lfreeb = false
+lasym = false
+axisymmetric = false
+nfp = 4
+ntor = 8
+single_ns = 12
+max_iter = 8
+vmec_nstep = 1
+rtol = 5e-2
+atol = 1e-10
+dump_level = "lite"
+vmec_timeout = 180
+max_runtime_s = 25.0
+max_total_runtime_s = 45.0
+goal = "Bounded SIMSOPT QH reactor-scale low-resolution fixed-boundary parity probe against local external assets."
+
+[[cases]]
+id = "fixed_nonaxis_lasym_false_landreman_w7x_standard_boundary"
+tier = "planning"
+enabled = true
+compare = "stage_trace"
+source = "landreman/vmec_equilibria"
+input = "../vmec_equilibria/W7-X/Standard_fixed_boundary/input.W7-X_standard_configuration"
+lfreeb = false
+lasym = false
+axisymmetric = false
+nfp = 5
+ntor = 10
+single_ns = 13
+max_iter = 8
+vmec_nstep = 1
+rtol = 5e-2
+atol = 1e-10
+dump_level = "lite"
+vmec_timeout = 180
+max_runtime_s = 25.0
+max_total_runtime_s = 45.0
+goal = "Bounded Landreman W7-X standard fixed-boundary parity probe without the missing free-boundary mgrid dependency."
+
+[[cases]]
+id = "fixed_nonaxis_lasym_false_landreman_ncsx_fixed_boundary"
+tier = "planning"
+enabled = true
+compare = "stage_trace"
+source = "landreman/vmec_equilibria"
+input = "../vmec_equilibria/NCSX/fixed_boundary_from_free_boundary/input.ncsx_c09r00_fixed"
+lfreeb = false
+lasym = false
+axisymmetric = false
+nfp = 3
+ntor = 6
+single_ns = 9
+max_iter = 8
+vmec_nstep = 1
+rtol = 5e-2
+atol = 1e-10
+dump_level = "lite"
+vmec_timeout = 180
+max_runtime_s = 25.0
+max_total_runtime_s = 45.0
+goal = "Bounded Landreman NCSX fixed-boundary-from-free-boundary parity probe that avoids the missing free-boundary mgrid."
+
+[[cases]]
 id = "freeb_nonaxis_lasym_false_cth_like"
 tier = "smoke"
 enabled = true

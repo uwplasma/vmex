@@ -183,6 +183,11 @@ def test_scan_options_env_branches_for_minimal_light_and_restart_payload():
 
 
 def test_scan_options_explicit_backend_and_print_branches():
+    default_cpu_lax = _scan_options(backend_name="cpu", scan_lax_env="", tridi_solve_env="")
+    default_gpu_lax = _scan_options(backend_name="gpu", scan_lax_env="", tridi_solve_env="")
+    assert default_cpu_lax.scan_use_lax_tridi
+    assert not default_gpu_lax.scan_use_lax_tridi
+
     precompute = _scan_options(scan_precompute_env="yes", tridi_precompute_env="0")
     assert precompute.scan_use_precomputed
 

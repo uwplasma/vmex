@@ -1,0 +1,213 @@
+version = 1
+name = "external VMEC validation and benchmark asset candidates"
+notes = "Candidate upstream VMEC decks and reference files for optional validation. This manifest intentionally stores URLs and metadata only; do not vendor large or license-unclear files into the repo."
+
+[repositories.simsopt]
+name = "hiddenSymmetries/simsopt"
+url = "https://github.com/hiddenSymmetries/simsopt"
+ref = "1b0cc3a96063197cdbdd01559e04c25456fbe6ff"
+default_branch = "master"
+license = "MIT"
+license_url = "https://github.com/hiddenSymmetries/simsopt/blob/1b0cc3a96063197cdbdd01559e04c25456fbe6ff/LICENSE"
+redistribution = "input decks and small references may be bundled if needed with MIT attribution; prefer fetched assets for larger NetCDF references."
+
+[repositories.landreman_vmec_equilibria]
+name = "landreman/vmec_equilibria"
+url = "https://github.com/landreman/vmec_equilibria"
+ref = "41fcf8beb9fb743f0ee6e9c1397981e7ac7b29aa"
+default_branch = "master"
+license = "none visible in GitHub metadata"
+license_url = ""
+redistribution = "reference or fetch explicitly for local validation; do not vendor into the repo unless licensing is clarified."
+
+[[assets]]
+id = "simsopt_fixed_axisym_circular_tokamak"
+repository = "simsopt"
+path = "tests/test_files/input.circular_tokamak"
+url = "https://github.com/hiddenSymmetries/simsopt/blob/1b0cc3a96063197cdbdd01559e04c25456fbe6ff/tests/test_files/input.circular_tokamak"
+raw_url = "https://raw.githubusercontent.com/hiddenSymmetries/simsopt/1b0cc3a96063197cdbdd01559e04c25456fbe6ff/tests/test_files/input.circular_tokamak"
+companion_paths = ["tests/test_files/wout_circular_tokamak_reference.nc"]
+families = ["tokamak", "axisymmetric", "fixed_boundary", "lasym_false", "vacuum"]
+recommendation = "small_fixture_or_existing_bundled_case"
+size_class = "small_text"
+notes = "Minimal axisymmetric VMEC2000 parity and CLI smoke case; vmec_jax already ships an equivalent circular tokamak input and wout."
+
+[[assets]]
+id = "simsopt_fixed_axisym_itermodel"
+repository = "simsopt"
+path = "tests/test_files/input.ITERModel"
+url = "https://github.com/hiddenSymmetries/simsopt/blob/1b0cc3a96063197cdbdd01559e04c25456fbe6ff/tests/test_files/input.ITERModel"
+raw_url = "https://raw.githubusercontent.com/hiddenSymmetries/simsopt/1b0cc3a96063197cdbdd01559e04c25456fbe6ff/tests/test_files/input.ITERModel"
+companion_paths = ["tests/test_files/wout_ITERModel_reference.nc"]
+families = ["tokamak", "axisymmetric", "fixed_boundary", "lasym_false", "multigrid"]
+recommendation = "small_fixture_or_fetched_reference"
+size_class = "small_text_small_wout"
+notes = "Axisymmetric multigrid tokamak stress case with small reference wout."
+
+[[assets]]
+id = "simsopt_fixed_nonaxis_lasym_true_basic"
+repository = "simsopt"
+path = "tests/test_files/input.basic_non_stellsym"
+url = "https://github.com/hiddenSymmetries/simsopt/blob/1b0cc3a96063197cdbdd01559e04c25456fbe6ff/tests/test_files/input.basic_non_stellsym"
+raw_url = "https://raw.githubusercontent.com/hiddenSymmetries/simsopt/1b0cc3a96063197cdbdd01559e04c25456fbe6ff/tests/test_files/input.basic_non_stellsym"
+companion_paths = []
+families = ["stellarator", "nonaxisymmetric", "fixed_boundary", "lasym_true", "finite_beta"]
+recommendation = "small_fixture"
+size_class = "small_text"
+notes = "Cheap LASYM=true fixed-boundary non-axisymmetric smoke candidate."
+
+[[assets]]
+id = "simsopt_fixed_nonaxis_lasym_false_qa_lowres"
+repository = "simsopt"
+path = "tests/test_files/input.LandremanPaul2021_QA_lowres"
+url = "https://github.com/hiddenSymmetries/simsopt/blob/1b0cc3a96063197cdbdd01559e04c25456fbe6ff/tests/test_files/input.LandremanPaul2021_QA_lowres"
+raw_url = "https://raw.githubusercontent.com/hiddenSymmetries/simsopt/1b0cc3a96063197cdbdd01559e04c25456fbe6ff/tests/test_files/input.LandremanPaul2021_QA_lowres"
+companion_paths = ["tests/test_files/wout_LandremanPaul2021_QA_lowres.nc"]
+families = ["stellarator", "nonaxisymmetric", "fixed_boundary", "lasym_false", "qa", "multigrid"]
+recommendation = "existing_bundled_case"
+size_class = "small_text_medium_wout"
+notes = "Primary QA parity/performance fixture; vmec_jax already ships the input and reference wout."
+
+[[assets]]
+id = "simsopt_fixed_nonaxis_lasym_false_qh_reactor_lowres"
+repository = "simsopt"
+path = "tests/test_files/input.LandremanPaul2021_QH_reactorScale_lowres"
+url = "https://github.com/hiddenSymmetries/simsopt/blob/1b0cc3a96063197cdbdd01559e04c25456fbe6ff/tests/test_files/input.LandremanPaul2021_QH_reactorScale_lowres"
+raw_url = "https://raw.githubusercontent.com/hiddenSymmetries/simsopt/1b0cc3a96063197cdbdd01559e04c25456fbe6ff/tests/test_files/input.LandremanPaul2021_QH_reactorScale_lowres"
+companion_paths = ["tests/test_files/wout_LandremanPaul2021_QH_reactorScale_lowres_reference.nc"]
+families = ["stellarator", "nonaxisymmetric", "fixed_boundary", "lasym_false", "qh", "finite_beta", "performance"]
+recommendation = "fetched_asset"
+size_class = "small_text_medium_wout"
+notes = "Representative QH reactor-scale low-resolution benchmark for CPU/GPU timing and converged-wout parity."
+
+[[assets]]
+id = "simsopt_fixed_nonaxis_lasym_true_landreman_sengupta_plunk"
+repository = "simsopt"
+path = "tests/test_files/input.LandremanSenguptaPlunk_section5p3"
+url = "https://github.com/hiddenSymmetries/simsopt/blob/1b0cc3a96063197cdbdd01559e04c25456fbe6ff/tests/test_files/input.LandremanSenguptaPlunk_section5p3"
+raw_url = "https://raw.githubusercontent.com/hiddenSymmetries/simsopt/1b0cc3a96063197cdbdd01559e04c25456fbe6ff/tests/test_files/input.LandremanSenguptaPlunk_section5p3"
+companion_paths = ["tests/test_files/wout_LandremanSenguptaPlunk_section5p3_reference.nc"]
+families = ["stellarator", "nonaxisymmetric", "fixed_boundary", "lasym_true", "finite_beta"]
+recommendation = "small_fixture_or_fetched_reference"
+size_class = "small_text_small_wout"
+notes = "Good candidate to strengthen LASYM=true finite-pressure fixed-boundary parity."
+
+[[assets]]
+id = "simsopt_free_boundary_w7x_generated_mgrid"
+repository = "simsopt"
+path = "examples/2_Intermediate/free_boundary_vmec.py"
+url = "https://github.com/hiddenSymmetries/simsopt/blob/1b0cc3a96063197cdbdd01559e04c25456fbe6ff/examples/2_Intermediate/free_boundary_vmec.py"
+raw_url = "https://raw.githubusercontent.com/hiddenSymmetries/simsopt/1b0cc3a96063197cdbdd01559e04c25456fbe6ff/examples/2_Intermediate/free_boundary_vmec.py"
+companion_paths = ["tests/test_files/input.W7-X_standard_configuration"]
+families = ["stellarator", "nonaxisymmetric", "free_boundary", "lasym_false", "generated_mgrid", "w7x"]
+recommendation = "fetched_or_generated_asset"
+size_class = "script_generates_mgrid"
+notes = "SIMSOPT workflow writes mgrid.w7x.nc from coils, then runs VMEC free-boundary; useful as an optional integration gate, not a static required fixture."
+
+[[assets]]
+id = "simsopt_fixed_nonaxis_w7x_standard"
+repository = "simsopt"
+path = "tests/test_files/input.W7-X_standard_configuration"
+url = "https://github.com/hiddenSymmetries/simsopt/blob/1b0cc3a96063197cdbdd01559e04c25456fbe6ff/tests/test_files/input.W7-X_standard_configuration"
+raw_url = "https://raw.githubusercontent.com/hiddenSymmetries/simsopt/1b0cc3a96063197cdbdd01559e04c25456fbe6ff/tests/test_files/input.W7-X_standard_configuration"
+companion_paths = []
+families = ["stellarator", "nonaxisymmetric", "fixed_boundary", "lasym_false", "w7x", "multigrid"]
+recommendation = "fetched_asset"
+size_class = "medium_text"
+notes = "Fixed-boundary W7-X standard configuration; also used as seed by the generated-mgrid free-boundary example."
+
+[[assets]]
+id = "landreman_fixed_axisym_itermodel"
+repository = "landreman_vmec_equilibria"
+path = "ITER_model/ns201/input.ITERModel"
+url = "https://github.com/landreman/vmec_equilibria/blob/41fcf8beb9fb743f0ee6e9c1397981e7ac7b29aa/ITER_model/ns201/input.ITERModel"
+raw_url = "https://raw.githubusercontent.com/landreman/vmec_equilibria/41fcf8beb9fb743f0ee6e9c1397981e7ac7b29aa/ITER_model/ns201/input.ITERModel"
+companion_paths = ["ITER_model/ns201/wout_ITERModel.nc"]
+families = ["tokamak", "axisymmetric", "fixed_boundary", "lasym_false", "multigrid"]
+recommendation = "reference_or_explicit_fetch_only"
+size_class = "small_text_small_wout"
+notes = "Axisymmetric ITER-like full ns201 deck; license is not visible, so keep as optional fetched validation."
+
+[[assets]]
+id = "landreman_fixed_nonaxis_hsx_qhs_vac_ns201"
+repository = "landreman_vmec_equilibria"
+path = "HSX/QHS_vac_ns201_fixed/input.HSX_QHS_vacuum_ns201"
+url = "https://github.com/landreman/vmec_equilibria/blob/41fcf8beb9fb743f0ee6e9c1397981e7ac7b29aa/HSX/QHS_vac_ns201_fixed/input.HSX_QHS_vacuum_ns201"
+raw_url = "https://raw.githubusercontent.com/landreman/vmec_equilibria/41fcf8beb9fb743f0ee6e9c1397981e7ac7b29aa/HSX/QHS_vac_ns201_fixed/input.HSX_QHS_vacuum_ns201"
+companion_paths = ["HSX/QHS_vac_ns201_fixed/wout_HSX_QHS_vacuum_ns201.nc"]
+families = ["stellarator", "nonaxisymmetric", "fixed_boundary", "lasym_false", "qhs", "high_ns", "performance"]
+recommendation = "reference_or_explicit_fetch_only"
+size_class = "medium_text_large_wout"
+notes = "High-resolution HSX QHS fixed-boundary case; useful for GPU/CPU cold-solve benchmarking."
+
+[[assets]]
+id = "landreman_fixed_nonaxis_kuboozer_n4qh"
+repository = "landreman_vmec_equilibria"
+path = "KuBoozer_2011_NuclFusion_QHS/n4qh.b4.a79a/input.n4qh.b4.a79a"
+url = "https://github.com/landreman/vmec_equilibria/blob/41fcf8beb9fb743f0ee6e9c1397981e7ac7b29aa/KuBoozer_2011_NuclFusion_QHS/n4qh.b4.a79a/input.n4qh.b4.a79a"
+raw_url = "https://raw.githubusercontent.com/landreman/vmec_equilibria/41fcf8beb9fb743f0ee6e9c1397981e7ac7b29aa/KuBoozer_2011_NuclFusion_QHS/n4qh.b4.a79a/input.n4qh.b4.a79a"
+companion_paths = ["KuBoozer_2011_NuclFusion_QHS/n4qh.b4.a79a/wout_n4qh.b4.a79a.nc"]
+families = ["stellarator", "nonaxisymmetric", "fixed_boundary", "lasym_false", "qhs"]
+recommendation = "reference_or_explicit_fetch_only"
+size_class = "medium_text_small_wout"
+notes = "Published QHS-like fixed-boundary candidate for cross-code benchmark diversity."
+
+[[assets]]
+id = "landreman_fixed_nonaxis_ncsx_from_free_boundary"
+repository = "landreman_vmec_equilibria"
+path = "NCSX/fixed_boundary_from_free_boundary/input.ncsx_c09r00_fixed"
+url = "https://github.com/landreman/vmec_equilibria/blob/41fcf8beb9fb743f0ee6e9c1397981e7ac7b29aa/NCSX/fixed_boundary_from_free_boundary/input.ncsx_c09r00_fixed"
+raw_url = "https://raw.githubusercontent.com/landreman/vmec_equilibria/41fcf8beb9fb743f0ee6e9c1397981e7ac7b29aa/NCSX/fixed_boundary_from_free_boundary/input.ncsx_c09r00_fixed"
+companion_paths = ["NCSX/fixed_boundary_from_free_boundary/wout_ncsx_c09r00_fixed.nc"]
+families = ["stellarator", "nonaxisymmetric", "fixed_boundary", "lasym_false", "ncsx"]
+recommendation = "reference_or_explicit_fetch_only"
+size_class = "medium_text_medium_wout"
+notes = "Fixed-boundary counterpart to an NCSX free-boundary VMEC-wiki case; useful before trying missing-mgrid free-boundary source."
+
+[[assets]]
+id = "landreman_free_nonaxis_ncsx_vmec_wiki"
+repository = "landreman_vmec_equilibria"
+path = "NCSX/free_boundary_from_vmec_wiki/input.ncsx_c09r00_free"
+url = "https://github.com/landreman/vmec_equilibria/blob/41fcf8beb9fb743f0ee6e9c1397981e7ac7b29aa/NCSX/free_boundary_from_vmec_wiki/input.ncsx_c09r00_free"
+raw_url = "https://raw.githubusercontent.com/landreman/vmec_equilibria/41fcf8beb9fb743f0ee6e9c1397981e7ac7b29aa/NCSX/free_boundary_from_vmec_wiki/input.ncsx_c09r00_free"
+companion_paths = ["NCSX/free_boundary_from_vmec_wiki/wout_ncsx_c09r00_free.nc"]
+families = ["stellarator", "nonaxisymmetric", "free_boundary", "lasym_false", "ncsx"]
+recommendation = "reference_or_explicit_fetch_only_missing_mgrid"
+size_class = "medium_text_medium_wout_missing_mgrid"
+notes = "References mgrid_c09r00.nc, which is not present in landreman/vmec_equilibria; track as a free-boundary target only after locating the mgrid source."
+
+[[assets]]
+id = "landreman_free_nonaxis_hsx"
+repository = "landreman_vmec_equilibria"
+path = "HSX/free_boundary/input.HSX"
+url = "https://github.com/landreman/vmec_equilibria/blob/41fcf8beb9fb743f0ee6e9c1397981e7ac7b29aa/HSX/free_boundary/input.HSX"
+raw_url = "https://raw.githubusercontent.com/landreman/vmec_equilibria/41fcf8beb9fb743f0ee6e9c1397981e7ac7b29aa/HSX/free_boundary/input.HSX"
+companion_paths = ["HSX/free_boundary/wout_HSX.nc"]
+families = ["stellarator", "nonaxisymmetric", "free_boundary", "lasym_false", "hsx"]
+recommendation = "reference_or_explicit_fetch_only_missing_mgrid"
+size_class = "medium_text_medium_wout_missing_mgrid"
+notes = "References mgrid_hsx_complete.nc, which is not present in landreman/vmec_equilibria; useful once the mgrid is available."
+
+[[assets]]
+id = "landreman_free_nonaxis_w7x_standard"
+repository = "landreman_vmec_equilibria"
+path = "W7-X/Standard/input.txt"
+url = "https://github.com/landreman/vmec_equilibria/blob/41fcf8beb9fb743f0ee6e9c1397981e7ac7b29aa/W7-X/Standard/input.txt"
+raw_url = "https://raw.githubusercontent.com/landreman/vmec_equilibria/41fcf8beb9fb743f0ee6e9c1397981e7ac7b29aa/W7-X/Standard/input.txt"
+companion_paths = ["W7-X/Standard/wout.nc"]
+families = ["stellarator", "nonaxisymmetric", "free_boundary", "lasym_false", "w7x"]
+recommendation = "reference_or_explicit_fetch_only_missing_mgrid"
+size_class = "small_text_large_wout_missing_mgrid"
+notes = "References mgrid_w7x_nv36_hires.nc, which is not present in landreman/vmec_equilibria; prefer the SIMSOPT generated-mgrid workflow for runnable optional tests."
+
+[[assets]]
+id = "landreman_fixed_nonaxis_w7x_standard_boundary"
+repository = "landreman_vmec_equilibria"
+path = "W7-X/Standard_fixed_boundary/input.W7-X_standard_configuration"
+url = "https://github.com/landreman/vmec_equilibria/blob/41fcf8beb9fb743f0ee6e9c1397981e7ac7b29aa/W7-X/Standard_fixed_boundary/input.W7-X_standard_configuration"
+raw_url = "https://raw.githubusercontent.com/landreman/vmec_equilibria/41fcf8beb9fb743f0ee6e9c1397981e7ac7b29aa/W7-X/Standard_fixed_boundary/input.W7-X_standard_configuration"
+companion_paths = ["W7-X/Standard_fixed_boundary/wout_W7-X_standard_configuration.nc"]
+families = ["stellarator", "nonaxisymmetric", "fixed_boundary", "lasym_false", "w7x"]
+recommendation = "reference_or_explicit_fetch_only"
+size_class = "medium_text_medium_wout"
+notes = "Fixed-boundary extraction from a W7-X free-boundary standard configuration; useful without the missing W7-X mgrid."

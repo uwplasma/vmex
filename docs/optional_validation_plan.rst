@@ -160,6 +160,53 @@ final output and increments ``rejected_trial_exact_history_count``.
 Optional external lanes
 -----------------------
 
+External VMEC asset intake
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Candidate SIMSOPT and Landreman ``vmec_equilibria`` decks are tracked in
+``validation/external_vmec_asset_manifest.toml``.  This manifest is
+metadata-only: it records pinned source URLs, visible license status,
+physics-family tags, companion reference files, and whether an asset is a good
+small fixture, an explicit fetched asset, or only a reference target.
+Use the inventory helper to list or verify candidates without copying upstream
+data into the repository:
+
+.. code-block:: bash
+
+   python tools/diagnostics/external_vmec_asset_inventory.py \
+     --family stellarator --family fixed_boundary
+
+   python tools/diagnostics/external_vmec_asset_inventory.py \
+     --repository landreman_vmec_equilibria \
+     --source-root landreman_vmec_equilibria=outputs/external_benchmark_sources/vmec_equilibria \
+     --fail-missing
+
+The current policy is:
+
+- SIMSOPT assets are MIT licensed upstream.  Small text input decks may be
+  bundled with attribution when they materially improve required CI; larger
+  NetCDF references should stay fetched or optional.
+- ``landreman/vmec_equilibria`` has no visible GitHub license metadata.  Keep
+  those cases as explicit local-fetch/reference validation targets unless the
+  license is clarified.
+- Free-boundary Landreman inputs are useful targets, but several reference
+  missing mgrid files in that repository.  Prefer the SIMSOPT W7-X generated
+  mgrid workflow, or keep those Landreman rows as blocked optional lanes until
+  the corresponding mgrid source is identified.
+
+Representative candidates already recorded there include:
+
+- SIMSOPT circular tokamak and ITERModel axisymmetric fixed-boundary decks.
+- SIMSOPT ``basic_non_stellsym`` and
+  ``LandremanSenguptaPlunk_section5p3`` for fixed-boundary ``LASYM=true``.
+- SIMSOPT ``LandremanPaul2021_QA_lowres`` and
+  ``LandremanPaul2021_QH_reactorScale_lowres`` for QA/QH non-axisymmetric
+  fixed-boundary parity and performance.
+- SIMSOPT ``examples/2_Intermediate/free_boundary_vmec.py`` for a W7-X
+  generated-mgrid free-boundary workflow.
+- Landreman ``HSX_QHS_vacuum_ns201``, Ku/Boozer QHS, NCSX, W7-X, and ITER-like
+  fixed-boundary decks as optional reference/fetch-only validation targets.
+
 SIMSOPT formula parity:
 
 .. code-block:: bash
@@ -208,6 +255,46 @@ gate, ``bsupumns`` relRMS about ``1.05e-2`` against a ``1e-2`` gate, and
 ``bsubvmns`` diff RMS about ``5.72e-4`` against a near-zero VMEC2000 reference.
 This remains an optional/instrumented LASYM gap, not a promoted strict external
 parity result.
+
+On 2026-05-22, local external fixed-boundary probes were added to the optional
+planning manifest after bounded ``xvmec2000`` stage-trace checks against
+``/Users/rogeriojorge/local/simsopt`` and
+``/Users/rogeriojorge/local/vmec_equilibria``:
+
+.. code-block:: bash
+
+   python tools/diagnostics/external_vmec_asset_inventory.py \
+     --source-root simsopt=/Users/rogeriojorge/local/simsopt \
+     --source-root landreman_vmec_equilibria=/Users/rogeriojorge/local/vmec_equilibria \
+     --json-out outputs/external_vmec_assets/all_local_inventory.json
+
+   EXTERNAL_IDS="fixed_nonaxis_lasym_false_simsopt_qh_reactor_lowres_external,fixed_nonaxis_lasym_false_landreman_w7x_standard_boundary,fixed_nonaxis_lasym_false_landreman_ncsx_fixed_boundary"
+   python tools/diagnostics/parity_sweep_manifest.py \
+     --vmec-exec ~/bin/xvmec2000 \
+     --ids "$EXTERNAL_IDS" \
+     --output-root outputs/parity_sweeps_external_matrix
+
+Those rows stay optional ``planning`` entries.  They are bounded single-grid,
+eight-iteration checks that broaden external coverage across SIMSOPT QH,
+Landreman W7-X, and Landreman NCSX fixed-boundary assets without vendoring the
+external inputs or requiring free-boundary mgrid files.  The pre-existing
+SIMSOPT ``LandremanSenguptaPlunk_section5p3`` LASYM=true planning probe
+remained a non-promoted target in the same run context because the strict
+``2e-3`` stage-trace gate failed at iteration 10 with a maximum printed
+``fsqz`` relative difference of about ``2.97e-2``.
+
+The 2026-05-22 optional converged-WOUT nightly rerun classified two remaining
+non-promoted lanes:
+
+- ``LandremanPaul2021_QA_lowres`` converged-WOUT parity passed locally against
+  ``~/bin/xvmec2000``.
+- ``basic_non_stellsym_pressure`` remains an expected-fail converged
+  ``LASYM=true`` finite-beta WOUT diagnostic row: geometry, scalar, and
+  stage-trace checks pass, but the asymmetric ``bsubvmns`` channel differed
+  from VMEC2000 with relRMS about ``1.45e-1``.
+- ``cth_like_free_bdy`` converged-WOUT parity is skipped in the optional
+  pytest matrix until it is reduced to a bounded gate; the promoted
+  free-boundary evidence is still the stock-executable stage-trace smoke.
 
 Next parity gates
 -----------------

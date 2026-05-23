@@ -105,7 +105,7 @@ TARGET_HELICITY_SEED_CONFIG = {
 
 # Optimizer parameters.  These are optimization controls only; physics targets
 # stay in the objective tuples below, matching SIMSOPT's teaching workflow.
-METHOD = CASE.get("method", "scipy")  # Try "auto", "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint", or "scalar_trust".
+METHOD = os.environ.get("VMEC_JAX_QI_METHOD", CASE.get("method", "scipy"))  # Try "auto", "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint", or "scalar_trust".
 SCIPY_TR_SOLVER = "lsmr"  # For METHOD="scipy": "lsmr" is memory-light; "exact" is dense.
 SCIPY_LSMR_MAXITER = None  # None lets SciPy choose; set an int to cap LSMR iterations.
 FTOL = 1.0e-4  # Relative cost-reduction tolerance for the outer optimizer.
@@ -119,6 +119,21 @@ _SOLVER_DEVICE_ENV = os.environ.get("VMEC_JAX_QI_SOLVER_DEVICE")
 SOLVER_DEVICE = None if _SOLVER_DEVICE_ENV in (None, "", "none", "None") else _SOLVER_DEVICE_ENV  # Set "cpu" or "gpu" to force one backend.
 USE_ESS = os.environ.get("VMEC_JAX_QI_USE_ESS", "1").strip().lower() not in {"0", "false", "no", "off"}
 ALPHA = float(os.environ.get("VMEC_JAX_QI_ESS_ALPHA", 1.2))  # ESS high-mode scaling strength.
+STAGE_METHOD_OVERRIDE = os.environ.get("VMEC_JAX_QI_STAGE_METHOD")  # Override staged cleanup method for bounded experiments.
+SCALAR_STEP_BOUND_OVERRIDE = os.environ.get("VMEC_JAX_QI_SCALAR_STEP_BOUND")  # Useful with METHOD/STAGE_METHOD="scalar_trust".
+LBFGS_STEP_BOUND_OVERRIDE = os.environ.get("VMEC_JAX_QI_LBFGS_STEP_BOUND")  # Useful with METHOD/STAGE_METHOD="lbfgs_adjoint".
+if STAGE_METHOD_OVERRIDE or SCALAR_STEP_BOUND_OVERRIDE or LBFGS_STEP_BOUND_OVERRIDE:
+    overridden_stages = []
+    for stage in MIRROR_RAMP_STAGES:
+        stage_override = dict(stage)
+        if STAGE_METHOD_OVERRIDE:
+            stage_override["method"] = STAGE_METHOD_OVERRIDE
+        if SCALAR_STEP_BOUND_OVERRIDE is not None:
+            stage_override["scalar_step_bound"] = float(SCALAR_STEP_BOUND_OVERRIDE)
+        if LBFGS_STEP_BOUND_OVERRIDE is not None:
+            stage_override["lbfgs_step_bound"] = float(LBFGS_STEP_BOUND_OVERRIDE)
+        overridden_stages.append(stage_override)
+    MIRROR_RAMP_STAGES = tuple(overridden_stages)
 # Common alternatives:
 # METHOD = "gauss_newton"
 # METHOD = "lbfgs_adjoint"

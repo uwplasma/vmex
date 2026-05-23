@@ -201,6 +201,12 @@ checked-in summary does not contain non-stale QI completions.  The separate
 ``nfp4_qi_finite_beta`` and ``nfp4_qh_warm_to_qi`` cases remain stress lanes
 rather than broad arbitrary-seed NFP=4 robustness claims.  These rows are not
 additional aspect-6 README best-row promotions.
+May 2026 bounded NFP=4 reruns that reproduce this metric envelope should be
+recorded as QA/provenance checks unless they provide a new reviewed
+``docs/_static/qi_readme_cases/nfp4_minimal`` replacement bundle.  Do not
+regenerate the README/docs NFP=4 panel from scratch solely from a scratch
+result directory; keep the row documented as case-gated and
+reference-preconditioned.
 ``examples/optimization/QI_optimization.py``
 is the bounded multi-seed entry point for extending this to other inputs: set
 ``RUN_CASE = "nfp2_qi"``, ``RUN_CASE = "qi_stel_seed_3127"``, or add a new
@@ -604,23 +610,23 @@ Set ``VMEC2000_NIGHTLY=1`` as well to include the slower non-axisymmetric,
 The fetched single-grid ``lasym=True`` finite-beta fixture is currently a
 required bundled-reference physics gate, and the short executable-backed stage
 smoke reaches the corresponding VMEC2000 solve.  The stricter converged
-executable-backed ``basic_non_stellsym_pressure`` comparison passed locally
-after the LASYM covariant-field scaling fix in ``e0b00e7``; a 2026-05-19
-bounded rerun found worst relRMS ``bsupumns=3.77e-3``, below the nightly
-``1e-2`` LASYM magnetic tolerance.  Treat this as dated optional evidence, not
-as a broad strict-LASYM parity promotion.  The remaining strict external LASYM
-nightly gap is the zero-pressure, axisymmetric
-``up_down_asymmetric_tokamak`` case: a 2026-05-19 rerun still showed
-``lmns=1.78e-2`` relRMS, ``bsupumns=1.05e-2`` relRMS, and ``bsubvmns``
-``diff_rms=5.72e-4`` against a near-zero ``ref_rms=4.10e-5``.  The
-``reference_state_roundtrip_rel_rms`` split from the converged-wout benchmark
-isolates this into two blockers: ``lmns`` roundtrips from the VMEC2000 state at
-``8.04e-17`` relRMS, so the lambda gap is solved-state convergence, while
-``bsubvmns`` already differs at ``1.20e1`` relRMS in the reference-state
-roundtrip, so the sine covariant-channel gap is in ``wrout`` reconstruction or
-postprocessing.  The ``mode_hotspots`` diagnostic keeps the lambda work focused
-on the ``m=1,3,4`` LASYM channels and the near-zero ``bsubvmns`` comparison on
-absolute error.
+executable-backed ``basic_non_stellsym_pressure`` row remains an expected-fail
+optional diagnostic as of the 2026-05-22 local rerun: geometry, scalar, and
+stage-trace checks pass, but the asymmetric ``bsubvmns`` output channel differs
+from VMEC2000 with relRMS about ``1.45e-1``.  The separate zero-pressure,
+axisymmetric ``up_down_asymmetric_tokamak`` strict external LASYM gap also
+remains non-promoted: a 2026-05-19 rerun showed ``lmns=1.78e-2`` relRMS,
+``bsupumns=1.05e-2`` relRMS, and ``bsubvmns`` ``diff_rms=5.72e-4`` against a
+near-zero ``ref_rms=4.10e-5``.  The ``reference_state_roundtrip_rel_rms`` split
+from the converged-wout benchmark isolates this into two blockers: ``lmns``
+roundtrips from the VMEC2000 state at ``8.04e-17`` relRMS, so the lambda gap is
+solved-state convergence, while ``bsubvmns`` already differs at ``1.20e1``
+relRMS in the reference-state roundtrip, so the sine covariant-channel gap is in
+``wrout`` reconstruction or postprocessing.  The ``mode_hotspots`` diagnostic
+keeps the lambda work focused on the ``m=1,3,4`` LASYM channels and the
+near-zero ``bsubvmns`` comparison on absolute error.  The free-boundary
+converged-WOUT row is skipped until it is reduced to a bounded nightly gate; use
+the promoted stage-trace free-boundary smoke for routine executable parity.
 
 Optional SIMSOPT formula parity is similarly guarded and targeted:
 
