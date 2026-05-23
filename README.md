@@ -124,15 +124,23 @@ Reviewed best-row panel assets are checked in as
 ![QP optimization](docs/_static/figures/readme_best_optimization_qp.png)
 ![QI optimization](docs/_static/figures/readme_best_optimization_qi.png)
 
-Reproduce the compact README rows and panels with the individual optimization
-scripts and renderer:
+Refresh the checked-in compact README rows and panels from the reviewed artifact
+bundle with:
+
+```bash
+PYTHONPATH=. python examples/optimization/render_readme_best_optimizations.py
+```
+
+To promote newly run optimizations into those rows, first run the individual
+scripts, inspect the outputs, and copy the accepted `history.json`,
+`wout_original.nc`, and `wout_final.nc` artifacts into
+`docs/_static/readme_best_cases/<case>/` before rerunning the renderer:
 
 ```bash
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QA_optimization.py
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QH_optimization.py
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QP_optimization.py
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_optimization.py
-PYTHONPATH=. python examples/optimization/render_readme_best_optimizations.py
 ```
 
 Additional checked-in optimization assets include case-specific, case-gated QI

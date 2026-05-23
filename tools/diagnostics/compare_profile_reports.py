@@ -61,8 +61,10 @@ EXACT_PROFILE_METRIC_NAMES = {
         "linear_operator_initial_transpose",
     ),
     "residual_tangents_s": ("jacobian_residual_tangents",),
+    "projected_residual_tangents_s": ("jacobian_projected_replay_residual_tangents",),
     "accepted_replay_dispatch_s": (
         "jacobian_tape_replay_dispatch",
+        "jacobian_projected_tape_replay_dispatch",
         "gradient_tape_replay_dispatch",
         "state_tangent_tape_replay_dispatch",
         "b_cartesian_tangent_tape_replay_dispatch",
@@ -168,12 +170,17 @@ EXACT_PROFILE_CONTAINER_PRIORITY = {
 
 ACCEPTED_REPLAY_PROFILE_NAMES = {
     "jacobian_tape_replay",
+    "jacobian_projected_replay_total",
     "gradient_tape_replay",
     "state_tangent_tape_replay",
     "b_cartesian_tangent_tape_replay",
     "linear_operator_tape_vjp",
 }
-ACCEPTED_REPLAY_DISPATCH_PROFILE_NAMES = {f"{name}_dispatch" for name in ACCEPTED_REPLAY_PROFILE_NAMES}
+ACCEPTED_REPLAY_DISPATCH_PROFILE_NAMES = {
+    f"{name}_dispatch" for name in ACCEPTED_REPLAY_PROFILE_NAMES
+} | {
+    "jacobian_projected_tape_replay_dispatch",
+}
 ACCEPTED_REPLAY_READY_PROFILE_NAMES = {f"{name}_ready" for name in ACCEPTED_REPLAY_PROFILE_NAMES}
 
 INITIAL_TANGENT_DETAIL_NAMES = {
@@ -218,6 +225,7 @@ METRIC_ORDER = (
     "initial_tangents_vmap_ready_s",
     "initial_projection_s",
     "residual_tangents_s",
+    "projected_residual_tangents_s",
     "accepted_replay_dispatch_s",
     "accepted_replay_ready_s",
     "trial_solve_s",
@@ -339,6 +347,7 @@ METRIC_LABELS = {
     "initial_tangents_vmap_ready_s": "initial tangents vmap ready",
     "initial_projection_s": "initial VJP/projection",
     "residual_tangents_s": "residual tangents",
+    "projected_residual_tangents_s": "projected residual tangents",
     "accepted_replay_dispatch_s": "accepted replay dispatch",
     "accepted_replay_ready_s": "accepted replay ready",
     "trial_solve_s": "trial solve",
@@ -453,6 +462,7 @@ BOTTLENECK_METRICS = (
     ("initial_tangents_vmap_ready_s", "initial tangent vmap ready"),
     ("initial_projection_s", "initial VJP/projection"),
     ("residual_tangents_s", "residual tangent projection"),
+    ("projected_residual_tangents_s", "projected residual tangent projection"),
     ("accepted_replay_dispatch_s", "accepted-point replay dispatch"),
     ("accepted_replay_ready_s", "accepted-point replay ready"),
     ("trial_solve_s", "trial solve"),
@@ -528,6 +538,8 @@ EXACT_OPTIMIZER_PATCH_TARGET_NAMES = {
     "exact_tape_build_dynamic_payload",
     "exact_tape_build_trace_stack",
     "jacobian_tape_replay",
+    "jacobian_projected_tape_replay_dispatch",
+    "jacobian_projected_replay_residual_tangents",
     "gradient_tape_replay",
     "state_tangent_tape_replay",
     "b_cartesian_tangent_tape_replay",
@@ -1164,6 +1176,7 @@ SAMPLE_PROFILE_METRICS = {
     "initial_tangents_vmap_dispatch_s",
     "initial_tangents_vmap_ready_s",
     "residual_tangents_s",
+    "projected_residual_tangents_s",
     "accepted_replay_dispatch_s",
     "accepted_replay_ready_s",
     "trial_solver_scan_runner_cache_miss_count",

@@ -25,13 +25,17 @@ if str(REPO_ROOT) not in sys.path:
 
 ACCEPTED_REPLAY_PROFILE_NAMES = (
     "jacobian_tape_replay",
+    "jacobian_projected_replay_total",
     "gradient_tape_replay",
     "state_tangent_tape_replay",
     "b_cartesian_tangent_tape_replay",
     "linear_operator_tape_vjp",
 )
 TAPE_BUILD_PROFILE_NAMES = ("exact_tape_build",)
-RESIDUAL_TANGENT_PROFILE_NAMES = ("jacobian_residual_tangents",)
+RESIDUAL_TANGENT_PROFILE_NAMES = (
+    "jacobian_residual_tangents",
+    "jacobian_projected_replay_residual_tangents",
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:

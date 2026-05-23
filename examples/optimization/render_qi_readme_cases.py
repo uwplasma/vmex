@@ -52,11 +52,11 @@ CASES = (
         ),
     ),
     QICase(
-        label="NFP=2 minimal seed",
+        label="NFP=2 target-helicity seed",
         input_file=REPO_ROOT / "examples" / "data" / "input.minimal_seed_nfp2_target_helicity",
         output_dir=ARTIFACT_DIR / "nfp2_target_helicity",
         initial_wout=ARTIFACT_DIR / "nfp2_target_helicity" / "wout_initial.nc",
-        note="aspect-6 minimal-seed mirror-aware QI lane",
+        note="aspect-6 target-helicity hinted mirror-aware QI lane",
         history_paths=(
             ARTIFACT_DIR
             / "nfp2_target_helicity"
@@ -88,7 +88,7 @@ CASES = (
         / "summary.json",
     ),
     QICase(
-        label="NFP=4 minimal seed",
+        label="NFP=4 minimal + QI-reference proposal",
         input_file=REPO_ROOT / "examples" / "data" / "input.minimal_seed_nfp4",
         output_dir=ARTIFACT_DIR / "nfp4_minimal",
         initial_wout=ARTIFACT_DIR / "nfp4_minimal" / "wout_initial.nc",
@@ -778,7 +778,7 @@ def _render(records: list[dict[str, str | float]]) -> None:
         width_ratios=(1.05, 1.05, 1.0, 1.08, 1.08),
     )
     fig.suptitle(
-        "QI_optimization coverage for NFP=1, 2, 3, plus an NFP=4 minimal-seed case",
+        "QI_optimization coverage for NFP=1, 2, 3, plus an NFP=4 reference-proposal case",
         fontsize=13,
         x=0.02,
         y=0.992,
