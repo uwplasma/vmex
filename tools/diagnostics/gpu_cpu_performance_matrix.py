@@ -200,6 +200,23 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_false",
         help="Forward VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE=0 to exact-callback profilers.",
     )
+    exact.set_defaults(jvp_only_basepoint_carries=None)
+    exact.add_argument(
+        "--jvp-only-basepoint-carries",
+        dest="jvp_only_basepoint_carries",
+        action="store_true",
+        help=(
+            "Forward VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES=1 to "
+            "exact-callback profilers. Use with --jvp-only-exact-tape for GPU "
+            "replay diagnostics."
+        ),
+    )
+    exact.add_argument(
+        "--no-jvp-only-basepoint-carries",
+        dest="jvp_only_basepoint_carries",
+        action="store_false",
+        help="Forward VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES=0 to exact-callback profilers.",
+    )
     qi = parser.add_argument_group("qi-boozer mode")
     qi.add_argument("--repeat", type=int, default=2, help="QI residual evaluations after the VMEC solve.")
     qi.add_argument("--mpol", type=int, default=6)
@@ -278,6 +295,10 @@ def child_env(
         env["VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE"] = (
             "1" if bool(args.jvp_only_exact_tape) else "0"
         )
+    if getattr(args, "jvp_only_basepoint_carries", None) is not None:
+        env["VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES"] = (
+            "1" if bool(args.jvp_only_basepoint_carries) else "0"
+        )
     return env
 
 
@@ -292,6 +313,7 @@ def env_summary(env: dict[str, str]) -> dict[str, str | None]:
         "VMEC_JAX_OPT_SYNC_REPLAY_TIMING",
         "VMEC_JAX_OPT_TRIAL_SCAN",
         "VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE",
+        "VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES",
     )
     return {key: env.get(key) for key in keys if env.get(key) is not None}
 
@@ -426,6 +448,10 @@ def build_child_command(
         command.append("--jvp-only-exact-tape")
     elif args.jvp_only_exact_tape is False:
         command.append("--no-jvp-only-exact-tape")
+    if args.jvp_only_basepoint_carries is True:
+        command.append("--jvp-only-basepoint-carries")
+    elif args.jvp_only_basepoint_carries is False:
+        command.append("--no-jvp-only-basepoint-carries")
     if args.vmec_timing:
         command.append("--vmec-timing")
     if args.vmec_timing_detail:
