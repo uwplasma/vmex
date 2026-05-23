@@ -627,7 +627,7 @@ def test_gpu_lasym_non_scan_uses_precomputed_tridi_default(monkeypatch):
     )
 
 
-def test_non_lasym_gpu_keeps_tridi_legacy_default(monkeypatch):
+def test_low_mode_non_lasym_gpu_keeps_tridi_legacy_default(monkeypatch):
     input_path = Path(__file__).resolve().parents[1] / "examples/data/input.nfp4_QH_warm_start"
     cfg, _indata = load_config(input_path)
     monkeypatch.delenv("VMEC_JAX_TRIDI_PRECOMPUTE", raising=False)
@@ -638,6 +638,40 @@ def test_non_lasym_gpu_keeps_tridi_legacy_default(monkeypatch):
             backend="gpu",
             performance_mode=True,
             use_scan=False,
+        )
+        is None
+    )
+
+
+def test_high_mode_non_lasym_gpu_uses_precomputed_tridi_default(monkeypatch):
+    input_path = Path(__file__).resolve().parents[1] / "examples/data/input.nfp4_QH_finite_beta"
+    cfg, _indata = load_config(input_path)
+    monkeypatch.delenv("VMEC_JAX_TRIDI_PRECOMPUTE", raising=False)
+
+    assert (
+        driver_module._default_preconditioner_use_precomputed_tridi(
+            cfg=cfg,
+            backend="gpu",
+            performance_mode=True,
+            use_scan=False,
+        )
+        is True
+    )
+    assert (
+        driver_module._default_preconditioner_use_precomputed_tridi(
+            cfg=cfg,
+            backend="cpu",
+            performance_mode=True,
+            use_scan=False,
+        )
+        is None
+    )
+    assert (
+        driver_module._default_preconditioner_use_precomputed_tridi(
+            cfg=cfg,
+            backend="gpu",
+            performance_mode=True,
+            use_scan=True,
         )
         is None
     )

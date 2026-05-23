@@ -7189,6 +7189,8 @@ def solve_fixed_boundary_residual_iter(
             trig=trig,
             s=s,
             cfg=cfg,
+            use_precomputed=bool(scan_use_precomputed),
+            use_lax_tridi=bool(scan_use_lax_tridi),
         )
         # `rz_preconditioner_matrices` is JIT-compiled, so the returned jmax
         # may be a tracer when the scan solve is differentiated.  For fixed
@@ -7458,6 +7460,8 @@ def solve_fixed_boundary_residual_iter(
                         trig=trig,
                         s=s,
                         cfg=cfg,
+                        use_precomputed=bool(scan_use_precomputed),
+                        use_lax_tridi=bool(scan_use_lax_tridi),
                     )
                     # jmax is constant for fixed ns; reuse the static jmax0
                     return (
@@ -7925,7 +7929,15 @@ def solve_fixed_boundary_residual_iter(
                     cache_lam_prec_r = _lambda_preconditioner(k_r.bc)
                     from .preconditioner_1d_jax import rz_preconditioner_matrices
 
-                    mats_r, _jmin, jmax_r = rz_preconditioner_matrices(bc=k_r.bc, k=k_r, trig=trig, s=s, cfg=cfg)
+                    mats_r, _jmin, jmax_r = rz_preconditioner_matrices(
+                        bc=k_r.bc,
+                        k=k_r,
+                        trig=trig,
+                        s=s,
+                        cfg=cfg,
+                        use_precomputed=bool(scan_use_precomputed),
+                        use_lax_tridi=bool(scan_use_lax_tridi),
+                    )
                     cache_valid_r = jnp.asarray(True)
 
                     frzl_rhs_r = _scale_m1_precond_rhs(frzl_r, mats_r)
@@ -10386,6 +10398,7 @@ def solve_fixed_boundary_residual_iter(
                         s=s,
                         cfg=cfg,
                         jmax_override=precond_jmax_override,
+                        use_precomputed=preconditioner_use_precomputed_tridi,
                     )
                     cache_prec_rz_mats = mats
                     cache_prec_rz_jmax = None if _tree_has_tracer(k) else int(jmax)
@@ -10555,6 +10568,7 @@ def solve_fixed_boundary_residual_iter(
                         s=s,
                         cfg=cfg,
                         jmax_override=precond_jmax_override,
+                        use_precomputed=preconditioner_use_precomputed_tridi,
                     )
                     cache_prec_lam_prec = lam_prec
                     cache_prec_faclam = faclam_dump
@@ -10743,6 +10757,7 @@ def solve_fixed_boundary_residual_iter(
                         s=s,
                         cfg=cfg,
                         jmax_override=precond_jmax_override,
+                        use_precomputed=preconditioner_use_precomputed_tridi,
                     )
                     cache_prec_lam_prec = lam_prec
                     cache_prec_faclam = faclam_dump

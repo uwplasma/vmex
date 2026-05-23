@@ -463,7 +463,7 @@ def _resolve_tridi_flags(*, use_precomputed: bool | None, use_lax_tridi: bool | 
     return bool(use_precomputed), bool(use_lax_tridi)
 
 
-@partial(jit, static_argnames=("cfg", "jmax_override"))
+@partial(jit, static_argnames=("cfg", "jmax_override", "use_precomputed", "use_lax_tridi"))
 def _assemble_rz_preconditioner_matrices_impl(
     *,
     arm,
@@ -636,7 +636,7 @@ def _assemble_rz_preconditioner_matrices_impl(
     return mats, jmin, int(ns_f)
 
 
-@partial(jit, static_argnames=("cfg", "jmax_override"))
+@partial(jit, static_argnames=("cfg", "jmax_override", "use_precomputed", "use_lax_tridi"))
 def _rz_preconditioner_matrices_impl(
     *,
     bc,

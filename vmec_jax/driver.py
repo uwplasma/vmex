@@ -263,10 +263,11 @@ def _default_preconditioner_use_precomputed_tridi(
     """Choose the R/Z preconditioner tridiagonal-solver policy for public runs.
 
     ``None`` delegates to the lower-level environment default.  The automatic
-    enabled case is intentionally narrow: May 2026 profiling showed a large GPU
-    win for raw LASYM fixed-boundary solves, and VMEC2000 short-trace parity was
-    checked for that path.  CPU and non-LASYM runs keep the legacy default unless
-    users set ``VMEC_JAX_TRIDI_PRECOMPUTE`` explicitly.
+    enabled cases are intentionally narrow: May 2026 profiling showed a large
+    GPU win for raw LASYM fixed-boundary solves, and a smaller but repeatable
+    win for higher-mode non-LASYM fixed-boundary solves.  Small non-LASYM decks
+    keep the legacy Thomas path because precomputing coefficients can lose more
+    to setup/launch overhead than it saves.
     """
 
     if os.getenv("VMEC_JAX_TRIDI_PRECOMPUTE") is not None:
@@ -278,9 +279,15 @@ def _default_preconditioner_use_precomputed_tridi(
         return None
     if bool(use_scan):
         return None
-    if not bool(getattr(cfg, "lasym", False)):
-        return None
-    return True
+    if bool(getattr(cfg, "lasym", False)):
+        return True
+    try:
+        mpol = int(getattr(cfg, "mpol", 0))
+        ntor = int(getattr(cfg, "ntor", 0))
+        signed_mode_count = mpol * (2 * ntor + 1) - ntor if ntor > 0 else mpol
+    except Exception:
+        signed_mode_count = 0
+    return True if signed_mode_count >= 32 else None
 
 
 def _result_final_residuals(result) -> tuple[float, float, float] | None:

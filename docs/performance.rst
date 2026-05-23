@@ -392,11 +392,15 @@ precomputed Thomas coefficients for the same raw LASYM GPU profile reduced
 wrapper time from ``30.50 s`` to ``11.33 s`` and detailed preconditioner time
 from ``2.66 s`` to ``0.74 s``.  Short VMEC2000 trace parity was then checked for
 the LASYM finite-pressure case and the QH warm-start case.  The public
-production policy now enables this path automatically only for non-scan,
-performance-mode accelerator LASYM solves; CPU, scan, and non-LASYM fixed
-boundary solves keep the legacy environment-controlled default.  Set
-``VMEC_JAX_TRIDI_PRECOMPUTE=0`` to disable this narrow GPU/LASYM default during
-diagnostics, or ``=1`` to force it in lower-level experiments.
+production policy now enables this path automatically for non-scan,
+performance-mode accelerator LASYM solves, and for higher-mode accelerator
+non-LASYM solves where the mode count is large enough to amortize the
+coefficient setup.  Small non-LASYM decks keep the legacy default: the
+2026-05-23 QH warm-start profile regressed from ``13.4 s`` to ``14.4 s`` when
+precomputation was forced, while the 50-mode finite-beta QH profile improved
+from ``52.6 s`` to ``49.4 s`` with the same iteration count and final residual.
+Set ``VMEC_JAX_TRIDI_PRECOMPUTE=0`` to disable this narrow accelerator default
+during diagnostics, or ``=1`` to force it in lower-level experiments.
 
 The same commit was profiled with a one-callback QH mode-2 exact Jacobian
 matrix on ``office`` (``inner_max_iter=40``, ``trial_max_iter=20``,
@@ -1086,8 +1090,11 @@ same RTX A4000 stack, ``input.nfp4_QH_warm_start`` dropped from about
 The follow-up fused preconditioner payload pass combined accelerator-side
 lambda scaling, mode weighting, and preconditioned residual diagnostics.  In a
 fresh no-warmup profile this kept the warm-start case at about ``13.5 s`` and
-reduced ``input.nfp4_QH_finite_beta`` to about ``50.2 s``.  The detailed timer
-still attributes most remaining GPU time to ``precond_apply`` (about ``17.0 s``
+reduced ``input.nfp4_QH_finite_beta`` to about ``50.2 s``.  Enabling the
+precomputed Thomas path only for high-mode non-LASYM accelerator cases then
+kept the low-mode QH warm-start case on its legacy path while reducing the
+finite-beta QH default profile to about ``50.7 s``.  The detailed timer
+still attributes most remaining GPU time to ``precond_apply`` (about ``16.2 s``
 on the finite-beta final stage), so the next GPU target remains restructuring
 the radial tridiagonal preconditioner itself rather than the already-fast force
 assembly kernels.
