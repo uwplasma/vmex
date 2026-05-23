@@ -118,6 +118,15 @@ README table is only the current compact promotion snapshot.
 ![QP optimization](docs/_static/figures/readme_best_optimization_qp.png)
 ![QI optimization](docs/_static/figures/readme_best_optimization_qi.png)
 
+### QI from different NFP seeds
+
+The same `QI_optimization.py` workflow can be run from simple NFP 1, 2, 3,
+and 4 seed inputs by changing the input variables at the top of the script.
+The current NFP coverage panel is case-gated rather than a uniform aspect-ratio
+promotion table; full provenance and limitations are in the docs.
+
+![QI optimization from NFP seeds](docs/_static/figures/readme_qi_optimization_cases.png)
+
 Reproduction commands, artifact-promotion rules, case-specific QI NFP coverage,
 and full sweep publication requirements are documented in
 `docs/optimization.rst` and `docs/optimization_sweep_results.rst`; those
