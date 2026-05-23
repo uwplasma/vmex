@@ -134,6 +134,9 @@ The latest prepared release from this checklist is
 `v0.0.12 <https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.12>`_, built
 from the matching release tag after the required CI gates pass.  Verify PyPI
 with a no-dependencies wheel download after publication.
+Package-index descriptions are immutable for already-published files, so any
+README or installation wording merged after the latest public tag will not
+appear on PyPI until the next release upload.
 
 The release notes should list user-visible changes, validation coverage, known
 limitations, and any optional external validation that was not run.

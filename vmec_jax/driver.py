@@ -2456,6 +2456,32 @@ def run_fixed_boundary(
 
     def _initial_guess_with_optional_nojit(static_in, bdy_in, *, force_disable_jit: bool = False):
         disable_env = os.getenv("VMEC_JAX_DISABLE_JIT_INIT", "") not in ("", "0")
+        use_numpy_init = False
+        if bool(performance_mode) and (_default_backend_name() == "cpu") and not force_disable_jit:
+            env_numpy_init = os.getenv("VMEC_JAX_CPU_NUMPY_INIT_GUESS", "1").strip().lower()
+            if env_numpy_init not in ("", "0", "false", "no"):
+                try:
+                    from .multigrid import _contains_jax_tracer
+
+                    use_numpy_init = not _contains_jax_tracer(bdy_in)
+                except Exception:
+                    use_numpy_init = False
+        if use_numpy_init:
+            try:
+                from .vmec_numpy_forces import _numpy_module_patch
+
+                with _numpy_module_patch():
+                    return initial_guess_from_boundary(
+                        static_in,
+                        bdy_in,
+                        indata,
+                        vmec_project=vmec_project,
+                        infer_axis_if_missing=axis_infer_missing,
+                    )
+            except Exception:
+                # Fall through to the standard JAX path if the NumPy-compatible
+                # shim is missing an operation for an uncommon initialization.
+                pass
         if not (disable_env or force_disable_jit):
             return initial_guess_from_boundary(
                 static_in,

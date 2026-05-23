@@ -209,6 +209,23 @@ read as a mixed result rather than a broad VMEC2000 speedup claim:
   ``16.5 s`` on GPU.  The flags remain profiling-only until a larger mode/case
   matrix shows a consistent end-to-end optimizer win.
 
+**18. NumPy multigrid interpolation for ordinary stage transfers**
+  Non-differentiated ``NS_ARRAY`` stage transfers now use the host NumPy path
+  for radial VMEC interpolation, while traced/autodiff calls stay on the JAX
+  implementation.  This avoids one-time XLA dispatch during ordinary
+  multigrid startup without changing the interpolation convention or the final
+  residual.
+
+**19. NumPy initialization fast path for ordinary CPU solves**
+  Public CPU performance-mode fixed-boundary runs now build non-traced initial
+  guesses under the same NumPy compatibility shim used by the CPU force loop.
+  Differentiated/traced calls and explicit JAX/GPU paths still use the JAX
+  implementation.  The pure-NumPy VMEC axis recompute scan is also vectorized.
+  On the finite-beta QH multigrid profile above this kept the converged
+  residual at ``5.6e-13`` while reducing local wall time to about ``21.5 s`` on
+  the development Mac; the next major CPU target remains force assembly
+  (``vmec_bcovar_half_mesh_from_wout`` / ``vmec_forces_rz_from_wout``).
+
 CPU/GPU profiling playbook
 --------------------------
 
@@ -356,9 +373,9 @@ A bounded QH warm-start non-scan profile on 2026-05-23
 was faster end-to-end in that cold profile, but the VMEC phase timers still
 showed slower accelerator micro-kernels: ``compute_forces`` was ``1.03 s`` on
 GPU versus ``0.094 s`` on CPU, and ``update`` was ``0.133 s`` on GPU versus
-``0.008 s`` on CPU.  This supports the current priority order: first make the
-GPU exact-callback replay path use the JVP-only/basepoint-carry policy when it
-passes the larger validation matrix, then target raw fixed-boundary GPU
+``0.008 s`` on CPU.  This supports the current priority order: keep full-tape
+GPU exact callbacks as the production default while using JVP-only/basepoint
+carry as an explicit profiling probe, then target raw fixed-boundary GPU
 force/update fusion and launch-count reduction.
 
 A follow-up ``LASYM=true`` finite-beta fixed-boundary profile on ``office``
@@ -395,6 +412,35 @@ A matched run with ``--jvp-only-exact-tape --jvp-only-basepoint-carries`` was
 nearly neutral: CPU profile time was ``29.97 s`` and GPU profile time was
 ``14.95 s``.  That is a small GPU win for this one callback, but not enough to
 change the default without larger mode and full optimizer-trajectory coverage.
+
+A 2026-05-23 GPU sidecar pass on ``office`` at ``4d61eab`` used one QH mode-2
+cold Jacobian callback (``inner_max_iter=20``, ``trial_max_iter=20``,
+``--sync-replay-timing``) plus matched trial and raw-LASYM probes.  Full-tape
+exact took ``13.29 s`` on CPU and ``36.81 s`` on GPU; the GPU regression was
+the accepted replay dispatch bucket (``21.10 s`` dispatch, ``0.00 s`` ready),
+not tangent construction (GPU initial/residual tangents ``2.04 s``/``2.46 s``).
+The same GPU callback with
+``--jvp-only-exact-tape --jvp-only-basepoint-carries`` dropped to ``14.48 s``
+and replay to ``3.62 s``, but the matched CPU JVP-only callback regressed to
+``27.86 s`` with ``8.96 s`` in initial tangents.  Treat this as a GPU-only
+candidate that needs mode-3 and full-trajectory validation before changing
+defaults.
+
+The same sidecar confirmed the trial-scan policy.  Forced scan trial solves
+spent ``6.76 s`` in the CPU scan block and ``11.68 s`` in the GPU scan block;
+the GPU device bucket was almost entirely dispatch/compile-like
+(``10.24 s`` dispatch, ``0.001 s`` ready).  Disabling scan reduced the trial
+profiles to ``4.46 s`` on CPU and ``6.76 s`` on GPU, so cold GPU trial
+callbacks should stay on the non-scan path unless a warm-cache sweep shows a
+different result.
+
+For raw ``LASYM=true`` ``input.basic_non_stellsym_pressure`` non-scan solves
+(``20`` iterations, single-grid, no warmup, detailed timing), the same pass
+measured ``7.98 s`` on CPU and ``8.84 s`` on GPU.  Force assembly was comparable
+(``1.29 s`` CPU, ``1.27 s`` GPU), GPU update was faster (``0.14 s`` versus
+``0.41 s``), and GPU preconditioner apply remained slower (``0.44 s`` versus
+``0.27 s``).  The raw LASYM target remains preconditioner/apply launch
+structure and residual wrapper overhead rather than force assembly alone.
 
 A larger QH mode-3 exact-Jacobian callback on ``office`` then showed that the
 projected-replay residual path was the wrong default for GPU.  With projected
@@ -1524,8 +1570,12 @@ non-parity performance track:
 
 Current behavior of this first slice:
 
-- fixed-boundary stages force the masked VMEC-control scan path and skip the
-  parity-oriented scan-selection probes,
+- auto-selected public fixed-boundary API/CLI runs use the profiled non-scan
+  VMEC-control loop unless an explicit scan/fast request is made,
+- explicit ``solver_mode="accelerated"`` callers keep the historical scan
+  default unless ``use_scan=False`` is supplied,
+- ordinary non-scan production runs skip the parity-oriented scan-selection
+  probes; use the dynamic scan controls below only for targeted diagnostics,
 - when the caller does not explicitly request multigrid, accelerated
   fixed-boundary runs now default to a single final-grid stage. This avoids
   per-stage interpolation and recompilation overhead that was dominating the

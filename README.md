@@ -110,65 +110,14 @@ requirements live in the docs.
 | QP | CPU | continuation | 3 | no | 5.38e-02 |  |  | 6.015 | -0.6724 | 3.9 min |
 | QI | CPU | qi_default | 3 | yes | 1.37e-02 | 4.31e-04 | 0.272 | 6.002 | -0.5690 | 10.9 min |
 
-Reviewed best-row panel assets are checked in as
-`docs/_static/figures/readme_best_optimization_qa.png`,
-`docs/_static/figures/readme_best_optimization_qh.png`,
-`docs/_static/figures/readme_best_optimization_qp.png`, and
-`docs/_static/figures/readme_best_optimization_qi.png`.
-
 ![QA optimization](docs/_static/figures/readme_best_optimization_qa.png)
 ![QH optimization](docs/_static/figures/readme_best_optimization_qh.png)
 ![QP optimization](docs/_static/figures/readme_best_optimization_qp.png)
 ![QI optimization](docs/_static/figures/readme_best_optimization_qi.png)
 
-Refresh the checked-in compact README rows and panels from the reviewed artifact
-bundle with:
-
-```bash
-PYTHONPATH=. python examples/optimization/render_readme_best_optimizations.py
-```
-
-To promote newly run optimizations into those rows, first run the individual
-scripts, inspect the outputs, and copy the accepted `history.json`,
-`wout_original.nc`, and `wout_final.nc` artifacts into
-`docs/_static/readme_best_cases/<case>/` before rerunning the renderer:
-
-```bash
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QA_optimization.py
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QH_optimization.py
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QP_optimization.py
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_optimization.py
-```
-
-Additional checked-in optimization assets include case-specific, case-gated QI
-NFP 1/2/3/4 panel/CSV rows and the minimal-seed showcase objective/state panels
-plus CSV. They are
-documented in `docs/optimization_sweep_results.rst` as status artifacts, not as
-aspect-6 README best-row promotion or global seed-robustness evidence.
-
-![QI NFP coverage](docs/_static/figures/readme_qi_optimization_cases.png)
-
-Each row in `readme_qi_optimization_cases.png` is produced by the same editable
-script. To run one case, open `examples/optimization/QI_optimization.py`, set
-`RUN_CASE` at the top to one of `nfp1_qi`, `nfp2_qi`, `nfp3_qi`, or `nfp4_qi`,
-and run:
-
-```bash
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_optimization.py
-```
-
-That script intentionally exposes the full workflow instead of hiding it behind
-one high-level wrapper: it selects the seed VMEC input, optionally builds the
-simple or target-helicity seed, runs the configured preconditioner/local stages,
-assembles the QI residual blocks and weights, calls the least-squares optimizer,
-writes the final VMEC input/wout/history artifacts, prints the final QI,
-mirror, elongation, aspect-ratio, and iota metrics from the result object, and
-renders the 3D, Boozer-`|B|`, and objective-history plots. To rerender the
-checked-in NFP panel after updating cases, run:
-
-```bash
-PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
-```
+Reproduction commands, artifact-promotion rules, QI NFP coverage, and full
+sweep publication requirements are documented in
+`docs/optimization.rst` and `docs/optimization_sweep_results.rst`.
 
 ## Performance, Validation, Release
 
@@ -181,8 +130,8 @@ PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 - Release-candidate CI baseline: re-check the newest completed green `main`
   run with `gh run list --repo uwplasma/vmec_jax --branch main --workflow CI
   --limit 5` before tagging.
-- Required fast coverage gate is now `95%`; the latest local CI-equivalent
-  run reached `95.10%` on this development batch.
+- Required fast coverage gate is `95%`; record the current CI/local coverage
+  result from the release-candidate commit in the release notes.
 
 ## CLI Reference
 

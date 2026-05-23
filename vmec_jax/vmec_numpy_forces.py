@@ -712,11 +712,19 @@ def _build_patches() -> list[tuple[Any, list[tuple[str, Any]]]]:
     import vmec_jax.vmec_constraints as _vmec_constraints
     import vmec_jax.fourier as _fourier
     import vmec_jax.field as _field
+    import vmec_jax.boundary as _boundary
+    import vmec_jax.init_guess as _init_guess
     import vmec_jax.multigrid as _multigrid
     import vmec_jax.solve as _solve
     import vmec_jax.solve_force_payload_helpers as _solve_force_payload_helpers
 
     patches = [
+        (_init_guess, [
+            ("jnp", _NP_MODULE),
+        ]),
+        (_boundary, [
+            ("jnp", _NP_MODULE),
+        ]),
         (_multigrid, [
             ("jnp", _NP_MODULE),
         ]),

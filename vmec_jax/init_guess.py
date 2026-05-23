@@ -677,13 +677,13 @@ def _recompute_axis_from_state_vmec(
     axis_r0 = pr1_even[0, 0, :]
     axis_z0 = pz1_even[0, 0, :]
 
-    for iv in range(nzeta):
-        if (not bool(cfg.lasym)) and (iv > nzeta // 2):
-            src = nzeta - iv
-            rcom[iv] = rcom[src]
-            zcom[iv] = -zcom[src]
-            continue
+    lasym = bool(cfg.lasym)
+    grid_count = max(int(n_grid), 0)
+    grid_denom = float(max(grid_count - 1, 1))
+    grid_frac = np.arange(grid_count, dtype=float) / grid_denom
+    planes_to_compute = range(nzeta) if lasym else range(nzeta // 2 + 1)
 
+    for iv in planes_to_compute:
         rmin = float(np.min(r1b[:, iv]))
         rmax = float(np.max(r1b[:, iv]))
         zmin = float(np.min(z1b[:, iv]))
@@ -695,27 +695,53 @@ def _recompute_axis_from_state_vmec(
         zs = (z1b[:, iv] - z12[:, iv]) / ds + axis_z0[iv]
         tau0 = ru12[:, iv] * zs - zu12[:, iv] * rs
 
-        mintau = 0.0
-        for iz in range(n_grid):
-            zlim = zmin + (zmax - zmin) * float(iz) / float(max(n_grid - 1, 1))
-            if (not bool(cfg.lasym)) and (iv == 0 or iv == nzeta // 2):
-                zlim = 0.0
-                if iz > 0:
-                    break
-            for ir in range(n_grid):
-                rlim = rmin + (rmax - rmin) * float(ir) / float(max(n_grid - 1, 1))
-                tau = int(signgs) * (tau0 - ru12[:, iv] * zlim + zu12[:, iv] * rlim)
-                mintemp = float(np.min(tau))
-                if mintemp > mintau:
-                    mintau = mintemp
-                    rbest = rlim
-                    zbest = zlim
-                elif mintemp == mintau:
-                    if abs(zbest) > abs(zlim):
-                        zbest = zlim
+        if grid_count > 0:
+            r_grid = rmin + (rmax - rmin) * grid_frac
+            if (not lasym) and (iv == 0 or iv == nzeta // 2):
+                z_grid = np.zeros((1,), dtype=float)
+            else:
+                z_grid = zmin + (zmax - zmin) * grid_frac
+
+            tau = int(signgs) * (
+                tau0[None, None, :]
+                - ru12[:, iv][None, None, :] * z_grid[:, None, None]
+                + zu12[:, iv][None, None, :] * r_grid[None, :, None]
+            )
+            min_tau = np.min(tau, axis=2)
+            max_tau = float(np.max(min_tau))
+
+            if max_tau > 0.0:
+                best_mask = min_tau == max_tau
+                first_flat = int(np.argmax(best_mask.reshape(-1)))
+                iz_best, ir_best = divmod(first_flat, int(r_grid.size))
+                rbest = float(r_grid[ir_best])
+                zbest = float(z_grid[iz_best])
+                row_has_best = np.any(best_mask, axis=1)
+                if np.any(row_has_best):
+                    z_abs = np.abs(z_grid)
+                    best_abs = float(np.min(z_abs[row_has_best]))
+                    z_rows = np.nonzero(row_has_best & (z_abs == best_abs))[0]
+                    if z_rows.size and abs(zbest) > abs(float(z_grid[int(z_rows[0])])):
+                        zbest = float(z_grid[int(z_rows[0])])
+            elif max_tau == 0.0:
+                zero_rows = np.any(min_tau == 0.0, axis=1)
+                if np.any(zero_rows):
+                    z_abs = np.abs(z_grid)
+                    better_rows = zero_rows & (z_abs < abs(zbest))
+                    if np.any(better_rows):
+                        best_abs = float(np.min(z_abs[better_rows]))
+                        z_rows = np.nonzero(better_rows & (z_abs == best_abs))[0]
+                        if z_rows.size:
+                            zbest = float(z_grid[int(z_rows[0])])
 
         rcom[iv] = rbest
         zcom[iv] = zbest
+
+    if not lasym:
+        for iv in range(nzeta // 2 + 1, nzeta):
+            src = nzeta - iv
+            rcom[iv] = rcom[src]
+            zcom[iv] = -zcom[src]
 
     cosnv = np.asarray(trig.cosnv, dtype=float)
     sinnv = np.asarray(trig.sinnv, dtype=float)

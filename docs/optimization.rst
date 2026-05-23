@@ -198,7 +198,10 @@ then run the bounded robustness probe or select a ``RUN_CASE`` in
      VMEC_JAX_QI_TARGET_ASPECT=10 \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp1_qi_direct_office_20260519 \
      python examples/optimization/QI_optimization.py
-   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=minimal_nfp2_qi \
+   PYTHONPATH=. JAX_PLATFORMS=cpu \
+     VMEC_JAX_QI_INPUT=examples/data/input.minimal_seed_nfp2_target_helicity \
+     VMEC_JAX_QI_POLICY_CASE=nfp2_qi \
+     VMEC_JAX_QI_LABEL=nfp2_target_helicity \
      VMEC_JAX_QI_TARGET_ASPECT=6 \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/minimal_nfp2_to_qi_reference \
      python examples/optimization/QI_optimization.py
@@ -220,12 +223,13 @@ Omit those overrides only when regenerating the current uniform aspect-6 policy.
 
 The docs QI coverage figure is rendered from existing reviewed
 ``QI_optimization.py`` outputs.  These rows are archived mixed-target case
-checks, not additional aspect-6 README best-row promotions: the NFP=1 and NFP=2
-lanes use target aspect 10, the seed-3127 lane uses target aspect 4, and the
-NFP=4 row starts from the three-coefficient minimal seed with a same-NFP
-finite-beta QI reference-family preconditioner.  It is not a completed
-common-minimal QI showcase row.  Regenerate all rows with the current uniform
-aspect-6 policy before using this figure as current README promotion evidence.
+checks, not additional aspect-6 README best-row promotions: the NFP=1 lane uses
+target aspect 10, the NFP=2 target-helicity lane uses target aspect 6, the
+seed-3127 lane uses target aspect 4, and the NFP=4 row starts from the
+three-coefficient minimal seed with a same-NFP finite-beta QI reference-family
+preconditioner.  It is not a completed common-minimal QI showcase row.
+Regenerate all rows with the current uniform aspect-6 policy before using this
+figure as current README promotion evidence.
 The finite-beta NFP=4 input is kept as a separate stress fixture, not as the
 README initial state:
 
@@ -1230,21 +1234,29 @@ NFP=4 cases are stress fixtures; keep them out of promoted QI robustness tables
 unless their independent diagnostics are reviewed and the docs renderer is
 intentionally retargeted.
 
-For example, to run the bundled near-axis stellarator seed without editing the
-script:
+For example, to run the archived coverage lanes without editing the script:
 
 .. code-block:: bash
 
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp1_qi \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp1_qi_direct_office_20260519 \
      python examples/optimization/QI_optimization.py
-   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=minimal_nfp2_qi \
+   PYTHONPATH=. JAX_PLATFORMS=cpu \
+     VMEC_JAX_QI_INPUT=examples/data/input.minimal_seed_nfp2_target_helicity \
+     VMEC_JAX_QI_POLICY_CASE=nfp2_qi \
+     VMEC_JAX_QI_LABEL=nfp2_target_helicity \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/minimal_nfp2_to_qi_reference \
      python examples/optimization/QI_optimization.py
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp3_qi \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516 \
      python examples/optimization/QI_optimization.py
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi python examples/optimization/QI_optimization.py
+
+These commands create candidate result directories under ``results/``.  After
+reviewing the diagnostics and plots, replace the matching
+``docs/_static/qi_readme_cases/<case>/`` bundle before running
+``render_qi_readme_cases.py``; the renderer intentionally consumes the tracked
+docs bundle rather than ignored local result directories.
 
 The script takes ``nfp`` from the VMEC input file, so NFP=1/2/3/4 do not need
 separate drivers.  To try a different VMEC input deck, add one dictionary entry
