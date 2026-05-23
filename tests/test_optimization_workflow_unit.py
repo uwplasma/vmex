@@ -65,6 +65,12 @@ def test_objective_factory_callbacks_dispatch_to_helpers(monkeypatch) -> None:
     np.testing.assert_allclose(lgradb.residual(ctx, "state"), [10.0, 15.0])
     assert lgradb.total(ctx, "state") == 325.0
 
+    ceiling_object = workflow.AbsMeanIotaCeiling(0.25, softness=0.0)
+    np.testing.assert_allclose(ceiling_object.J(ctx, "state"), 0.08, rtol=1.0e-12, atol=1.0e-12)
+    ceiling_term = ceiling_object.to_objective_term(target=999.0, residual_weight=3.0)
+    assert ceiling_term.metadata == {"iota_abs_max": 0.25}
+    assert ceiling_term.track_iota is True
+
 
 def test_enable_line_buffered_output_is_idempotent_and_tolerates_stream_errors(monkeypatch) -> None:
     import vmec_jax.optimization_workflow as workflow
