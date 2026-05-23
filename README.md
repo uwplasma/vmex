@@ -110,14 +110,18 @@ requirements live in the docs.
 | QP | CPU | continuation | 3 | no | 5.38e-02 |  |  | 6.015 | -0.6724 | 3.9 min |
 | QI | CPU | qi_default | 3 | yes | 1.37e-02 | 4.31e-04 | 0.272 | 6.002 | -0.5690 | 10.9 min |
 
+Metric definitions and policy details are in `docs/optimization.rst`; the
+README table is only the current compact promotion snapshot.
+
 ![QA optimization](docs/_static/figures/readme_best_optimization_qa.png)
 ![QH optimization](docs/_static/figures/readme_best_optimization_qh.png)
 ![QP optimization](docs/_static/figures/readme_best_optimization_qp.png)
 ![QI optimization](docs/_static/figures/readme_best_optimization_qi.png)
 
-Reproduction commands, artifact-promotion rules, QI NFP coverage, and full
-sweep publication requirements are documented in
-`docs/optimization.rst` and `docs/optimization_sweep_results.rst`.
+Reproduction commands, artifact-promotion rules, case-specific QI NFP coverage,
+and full sweep publication requirements are documented in
+`docs/optimization.rst` and `docs/optimization_sweep_results.rst`; those
+case-specific artifacts are not aspect-6 README best-row promotion evidence.
 
 ## Performance, Validation, Release
 

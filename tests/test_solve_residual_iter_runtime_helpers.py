@@ -299,6 +299,17 @@ def test_nonscan_state_debug_payload_and_optional_print():
         norms_used=_Norms(),
         print_fn=lambda *_args, **_kwargs: None,
     )
+    assert not _maybe_print_nonscan_state_debug(
+        debug_iter_env="7",
+        iter2=7,
+        state=state,
+        state_checkpoint=checkpoint,
+        gcr2=0.5,
+        gcz2=0.25,
+        gcl2=0.75,
+        norms_used=_Norms(),
+        print_fn=lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("closed pipe")),
+    )
 
 
 def test_residual_iter_timing_report_and_message():

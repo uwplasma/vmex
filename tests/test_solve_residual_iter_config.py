@@ -54,6 +54,13 @@ def test_bad_jacobian_state_mode_and_tolerance_policy():
     )
 
 
+def test_bad_jacobian_invalid_relative_tolerance_falls_back_to_zero():
+    cfg = parse_bad_jacobian_config({"VMEC_JAX_PTAU_TOL": "2.5e-6", "VMEC_JAX_PTAU_TOL_REL": "not-a-float"})
+
+    assert cfg.ptau_tol == pytest.approx(2.5e-6)
+    assert cfg.ptau_tol_rel == 0.0
+
+
 def test_heavy_dump_flags_disable_jit_and_force_full_history():
     env = {HEAVY_DUMP_ENVS[0]: "1"}
 

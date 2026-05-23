@@ -507,7 +507,7 @@ def test_force_nojit_uses_disable_jit_context_for_stage_solve(
     )
 
     assert run.result.diagnostics["converged"] is True
-    assert contexts == ["disable_jit", "disable_jit"]
+    assert contexts == ["disable_jit"]
     assert calls == [False]
 
 

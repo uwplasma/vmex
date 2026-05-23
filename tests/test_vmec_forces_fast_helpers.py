@@ -5,14 +5,20 @@ from types import SimpleNamespace
 import numpy as np
 
 import vmec_jax.vmec_forces as vf
+from vmec_jax import vmec_bcovar as vb
 from vmec_jax.vmec_forces import (
     VmecRZResidualCoeffs,
+    _add_edge_row,
     _avg_forward_half,
+    _avg_forward_half_to_int_or_zero,
     _avg_forward_half_to_int,
     _diff_forward_half,
     _diff_forward_half_noavg,
+    _odd_force_radial_updates,
     _parse_iter_list,
     _pshalf_from_s,
+    _scale_lambda_full_mesh,
+    _scale_lambda_full_mesh_zero_axis,
     _select_parity_coeffs,
     _sum_forward_half,
     _with_axis_zero,
@@ -39,6 +45,98 @@ def test_force_helper_radial_stencils_match_vmec_forward_rules() -> None:
     np.testing.assert_allclose(np.asarray(_diff_forward_half(one, one)), one)
     np.testing.assert_allclose(np.asarray(_diff_forward_half_noavg(one)), one)
     np.testing.assert_allclose(np.asarray(_avg_forward_half(one)), one)
+
+
+def test_force_refactor_helpers_cover_edge_and_single_surface_branches() -> None:
+    empty = np.zeros((0, 2), dtype=float)
+    one = np.asarray([[2.0, -3.0]], dtype=float)
+    three = np.arange(6.0, dtype=float).reshape(3, 2)
+
+    np.testing.assert_allclose(np.asarray(_add_edge_row(empty, np.asarray([1.0, 2.0]))), empty)
+    np.testing.assert_allclose(np.asarray(_add_edge_row(three, np.asarray([10.0, 20.0]))), [[0, 1], [2, 3], [14, 25]])
+
+    np.testing.assert_allclose(np.asarray(_avg_forward_half_to_int_or_zero(one)), np.zeros_like(one))
+    np.testing.assert_allclose(np.asarray(_avg_forward_half_to_int_or_zero(three)), [[1, 2], [3, 4], [2, 2.5]])
+
+    np.testing.assert_allclose(np.asarray(_scale_lambda_full_mesh(one, 7.0)), one)
+    np.testing.assert_allclose(np.asarray(_scale_lambda_full_mesh(three, 2.0)), [[0, 1], [-4, -6], [-8, -10]])
+    np.testing.assert_allclose(np.asarray(_scale_lambda_full_mesh_zero_axis(one, 7.0)), np.zeros_like(one))
+    np.testing.assert_allclose(
+        np.asarray(_scale_lambda_full_mesh_zero_axis(three, 2.0)),
+        [[0, 0], [-4, -6], [-8, -10]],
+    )
+
+    armn_o = np.asarray([[1.0], [3.0], [6.0]])
+    azmn_o = np.asarray([[2.0], [5.0], [9.0]])
+    brmn_o = np.asarray([[4.0], [8.0], [12.0]])
+    bzmn_o = np.asarray([[10.0], [14.0], [20.0]])
+    lu_o = np.asarray([[1.0], [2.0], [4.0]])
+    pzu_0 = np.asarray([[0.5], [0.25], [0.125]])
+    pru_0 = np.asarray([[0.2], [0.3], [0.4]])
+    bsqr_s = np.asarray([[2.0], [4.0], [8.0]])
+    lv_es = np.asarray([[1.0], [3.0], [5.0]])
+
+    empty_out = _odd_force_radial_updates(
+        armn_o=empty,
+        azmn_o=empty,
+        brmn_o=empty,
+        bzmn_o=empty,
+        lu_o=empty,
+        pzu_0=empty,
+        pru_0=empty,
+        bsqr_s=empty,
+        lv_es=empty,
+    )
+    assert all(out_i is in_i for out_i, in_i in zip(empty_out, (empty, empty, empty, empty, empty), strict=True))
+
+    out = _odd_force_radial_updates(
+        armn_o=armn_o,
+        azmn_o=azmn_o,
+        brmn_o=brmn_o,
+        bzmn_o=bzmn_o,
+        lu_o=lu_o,
+        pzu_0=pzu_0,
+        pru_0=pru_0,
+        bsqr_s=bsqr_s,
+        lv_es=lv_es,
+    )
+    np.testing.assert_allclose(np.asarray(out[0]), [[3.0], [6.0], [-4.5]])
+    np.testing.assert_allclose(np.asarray(out[1]), [[3.4], [5.2], [-5.8]])
+    np.testing.assert_allclose(np.asarray(out[2]), [[6.0], [10.0], [6.0]])
+    np.testing.assert_allclose(np.asarray(out[3]), [[12.0], [17.0], [10.0]])
+    np.testing.assert_allclose(np.asarray(out[4]), [[3.0], [6.0], [4.0]])
+
+    single_out = _odd_force_radial_updates(
+        armn_o=armn_o[:1],
+        azmn_o=azmn_o[:1],
+        brmn_o=brmn_o[:1],
+        bzmn_o=bzmn_o[:1],
+        lu_o=lu_o[:1],
+        pzu_0=pzu_0[:1],
+        pru_0=pru_0[:1],
+        bsqr_s=bsqr_s[:1],
+        lv_es=lv_es[:1],
+    )
+    np.testing.assert_allclose(np.asarray(single_out[0]), [[-1.5]])
+    np.testing.assert_allclose(np.asarray(single_out[4]), lu_o[:1])
+
+
+def test_bcovar_refactor_radial_helpers_cover_empty_and_single_surface_branches() -> None:
+    empty = np.zeros((0, 2), dtype=float)
+    one = np.asarray([[5.0, -1.0]], dtype=float)
+    three = np.arange(6.0, dtype=float).reshape(3, 2)
+
+    np.testing.assert_allclose(np.asarray(vb._replace_axis_row(empty, np.asarray([9.0, 9.0]))), empty)
+    np.testing.assert_allclose(np.asarray(vb._replace_axis_row(three, np.asarray([9.0, 8.0]))), [[9, 8], [2, 3], [4, 5]])
+    np.testing.assert_allclose(np.asarray(vb._replace_edge_row(empty, np.asarray([9.0, 9.0]))), empty)
+    np.testing.assert_allclose(np.asarray(vb._replace_edge_row(three, np.asarray([9.0, 8.0]))), [[0, 1], [2, 3], [9, 8]])
+    np.testing.assert_allclose(np.asarray(vb._with_axis_zero(empty)), empty)
+    np.testing.assert_allclose(np.asarray(vb._with_axis_zero(three)), [[0, 0], [2, 3], [4, 5]])
+    np.testing.assert_allclose(np.asarray(vb._prepend_axis_zero(three[1:], three)), [[0, 0], [2, 3], [4, 5]])
+    np.testing.assert_allclose(np.asarray(vb._avg_forward_half_to_int_or_zero(one)), np.zeros_like(one))
+    np.testing.assert_allclose(np.asarray(vb._avg_forward_half_to_int_or_zero(three)), [[1, 2], [3, 4], [2, 2.5]])
+    np.testing.assert_allclose(np.asarray(vb._scale_lambda_full_mesh(one, 3.0)), one)
+    np.testing.assert_allclose(np.asarray(vb._scale_lambda_full_mesh(three, 3.0)), [[0, 1], [-6, -9], [-12, -15]])
 
 
 def test_force_helper_pshalf_and_iter_list_edges() -> None:

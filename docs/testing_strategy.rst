@@ -576,15 +576,16 @@ Repository Size Plan
 
 The current source tree is dominated by generated documentation figures and
 reference outputs.  The target is to keep only source, small fixtures, and
-current README figures in git.
+reviewed README/docs-critical figures in git.
 
 Actions:
 
 - Keep generated optimization sweeps under ``examples/optimization/results/``
   ignored and out of the repository.
-- Keep only README-critical PNGs in ``docs/_static/figures``.  Keep large
-  publication panels, PDFs, and historical atlases as generated local artifacts
-  under ``examples/optimization/results`` or attach them to GitHub releases.
+- Keep only README/docs-critical reviewed PNGs and compact summaries in
+  ``docs/_static/figures``.  Keep exploratory sweeps, superseded publication
+  panels, PDFs, historical atlases, and raw optimization outputs under
+  ``examples/optimization/results`` or attach them to GitHub releases.
 - Replace committed large ``wout`` references with small compressed fixtures
   or generated-on-demand assets where runtime permits.
 - Add a size audit to every release checklist and eventually to CI with a

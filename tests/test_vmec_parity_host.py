@@ -208,8 +208,12 @@ def test_signed_mode_uncached_and_cached_round_trips_with_missing_negative_modes
     assert _mn_index_maps(empty_modes)[0:2] == (0, 0)
     empty_maps = signed_maps_from_modes(empty_modes)
     empty_coeffs = np.zeros((2, 0))
+    assert np.asarray(_signed_to_mn_cos(empty_coeffs, np.zeros((0, 0)), np.zeros((0, 0)))[0]).shape == (2, 0, 0)
+    assert np.asarray(_signed_to_mn_sin(empty_coeffs, np.zeros((0, 0)), np.zeros((0, 0)))[0]).shape == (2, 0, 0)
     assert np.asarray(_signed_to_mn_cos_cached(empty_coeffs, maps=empty_maps)[0]).shape == (2, 0, 0)
     assert np.asarray(_signed_to_mn_sin_cached(empty_coeffs, maps=empty_maps)[0]).shape == (2, 0, 0)
+    assert _signed_to_mn_cos_host(empty_coeffs, maps=empty_maps)[0].shape == (2, 0, 0)
+    assert _signed_to_mn_sin_host(empty_coeffs, maps=empty_maps)[0].shape == (2, 0, 0)
     assert _mn_cos_to_signed(np.zeros((2, 0, 0)), np.zeros((2, 0, 0)), np.zeros((0, 0)), np.zeros((0, 0)), 0).shape == (
         2,
         0,
@@ -218,6 +222,14 @@ def test_signed_mode_uncached_and_cached_round_trips_with_missing_negative_modes
         2,
         0,
     )
+
+    nonempty_maps = signed_maps_from_modes(vmec_mode_table(2, 1))
+    rcc0 = np.zeros((2, nonempty_maps.mpol, nonempty_maps.nrange))
+    rss0 = np.zeros_like(rcc0)
+    assert np.asarray(_mn_cos_to_signed_cached(rcc0, rss0, maps=nonempty_maps, ncoeff=0)).shape == (2, 0)
+    assert _mn_cos_to_signed_host(rcc0, rss0, maps=nonempty_maps, ncoeff=0).shape == (2, 0)
+    assert np.asarray(_mn_sin_to_signed_cached(rcc0, rss0, maps=nonempty_maps, ncoeff=0)).shape == (2, 0)
+    assert _mn_sin_to_signed_host(rcc0, rss0, maps=nonempty_maps, ncoeff=0).shape == (2, 0)
 
 
 def test_m1_physical_internal_signed_conversion_is_invertible_and_has_early_returns():

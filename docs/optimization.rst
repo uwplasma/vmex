@@ -1234,20 +1234,25 @@ NFP=4 cases are stress fixtures; keep them out of promoted QI robustness tables
 unless their independent diagnostics are reviewed and the docs renderer is
 intentionally retargeted.
 
-For example, to run the archived coverage lanes without editing the script:
+For example, to run the archived coverage lanes without editing the script,
+including the case-specific aspect-ratio and output-directory overrides used by
+the reviewed docs figure:
 
 .. code-block:: bash
 
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp1_qi \
+     VMEC_JAX_QI_TARGET_ASPECT=10 \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp1_qi_direct_office_20260519 \
      python examples/optimization/QI_optimization.py
    PYTHONPATH=. JAX_PLATFORMS=cpu \
      VMEC_JAX_QI_INPUT=examples/data/input.minimal_seed_nfp2_target_helicity \
      VMEC_JAX_QI_POLICY_CASE=nfp2_qi \
      VMEC_JAX_QI_LABEL=nfp2_target_helicity \
+     VMEC_JAX_QI_TARGET_ASPECT=6 \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/minimal_nfp2_to_qi_reference \
      python examples/optimization/QI_optimization.py
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp3_qi \
+     VMEC_JAX_QI_TARGET_ASPECT=4 \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516 \
      python examples/optimization/QI_optimization.py
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi python examples/optimization/QI_optimization.py

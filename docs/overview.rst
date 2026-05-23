@@ -99,17 +99,21 @@ Jacobian proxy on VMEC’s reduced theta grid.
 Design principles
 -----------------
 
-Minimal dependencies
+Runtime dependencies
 ~~~~~~~~~~~~~~~~~~~~
 
-Core runtime:
+The plain ``vmec-jax`` package is the supported runtime lane.  It installs the
+solver, plotting stack, NetCDF I/O, and JAX-native Boozer transform dependency
+used by the optimization examples:
 
-- ``numpy`` (required)
-- ``jax`` + ``jaxlib`` (optional, required for differentiation and performance)
+- ``numpy``
+- ``jax`` and ``jaxlib``
+- ``netCDF4``
+- ``matplotlib``
+- ``booz_xform_jax``
 
-Optional:
-
-- ``netCDF4`` for reading/writing ``wout_*.nc`` regression data.
+The only extras are development/documentation conveniences such as ``docs`` and
+``dev``; there is no separate plotting or QI extra for users to remember.
 
 Regression-first development
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

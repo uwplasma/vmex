@@ -51,6 +51,15 @@ def test_np_stack_cache_skips_large_force_path_inputs():
     assert len(_NP_STACK_CACHE) == 0
 
 
+def test_np_stack_cache_skips_non_weakrefable_inputs():
+    clear_numpy_force_caches()
+
+    out = _NpModule.stack([1.0, 2.0], axis=0)
+
+    np.testing.assert_allclose(out, [1.0, 2.0])
+    assert len(_NP_STACK_CACHE) == 0
+
+
 def test_np_at_indexer_preserves_functional_set_and_accumulates_duplicate_fancy_indices():
     arr = _NpModule.asarray(np.arange(6.0).reshape(2, 3))
     view_before_set = arr[:, 1]
@@ -245,6 +254,13 @@ def test_to_numpy_recursive_handles_nested_dataclasses_and_fallbacks():
         scalar: int
         optional: object = None
 
+    @dataclass(frozen=True)
+    class BadConstruct:
+        arr: object
+
+        def __init__(self, arr):
+            raise RuntimeError("constructor intentionally unavailable")
+
     obj = Outer(Inner([1.0, 2.0], "a"), 3)
     converted = _to_numpy_recursive(obj)
     assert isinstance(converted.inner.arr, np.ndarray)
@@ -253,6 +269,14 @@ def test_to_numpy_recursive_handles_nested_dataclasses_and_fallbacks():
     np.testing.assert_allclose(_to_numpy_recursive([4.0, 5.0]), [4.0, 5.0])
     bad = BadArray()
     assert _to_numpy_recursive(bad) is bad
+
+    obj_with_bad_field = Outer(Inner(bad, "bad"), 4)
+    converted_bad_field = _to_numpy_recursive(obj_with_bad_field)
+    assert converted_bad_field.inner.arr is bad
+
+    unconstructable = object.__new__(BadConstruct)
+    object.__setattr__(unconstructable, "arr", [1.0, 2.0])
+    assert _to_numpy_recursive(unconstructable) is unconstructable
 
 
 @dataclass(frozen=True)

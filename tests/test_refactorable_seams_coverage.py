@@ -91,6 +91,9 @@ def test_zero_edge_rz_force_block_numpy_short_and_copy_paths() -> None:
     np.testing.assert_allclose(masked[-1], 0.0)
     np.testing.assert_allclose(block[-1], [4.0, 5.0])
 
+    short_device_path = zero_edge_rz_force_block(one_row, preserve_numpy=False)
+    np.testing.assert_allclose(np.asarray(short_device_path), one_row)
+
 
 def test_sum_square_blocks_returns_zero_with_reference_dtype() -> None:
     frzl = SimpleNamespace(frcc=np.ones((2, 3), dtype=np.float32), empty=None)

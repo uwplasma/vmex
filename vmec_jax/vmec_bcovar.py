@@ -203,6 +203,49 @@ def _half_mesh_from_even_odd(even, odd_int, *, s):
     return jnp.concatenate([inner[:1], inner], axis=0)
 
 
+def _replace_axis_row(a, row):
+    a = jnp.asarray(a)
+    if a.shape[0] == 0:
+        return a
+    return jnp.concatenate([jnp.asarray(row)[None, ...], a[1:]], axis=0)
+
+
+def _replace_edge_row(a, row):
+    a = jnp.asarray(a)
+    if a.shape[0] == 0:
+        return a
+    return jnp.concatenate([a[:-1], jnp.asarray(row)[None, ...]], axis=0)
+
+
+def _with_axis_zero(a):
+    a = jnp.asarray(a)
+    if a.shape[0] == 0:
+        return a
+    return jnp.concatenate([jnp.zeros_like(a[:1]), a[1:]], axis=0)
+
+
+def _prepend_axis_zero(body, like):
+    return jnp.concatenate([jnp.zeros_like(jnp.asarray(like)[:1]), body], axis=0)
+
+
+def _avg_forward_half_to_int_or_zero(a):
+    """Forward-average half mesh to integer mesh, matching zero output for ns < 2."""
+    a = jnp.asarray(a)
+    if a.shape[0] < 2:
+        return jnp.zeros_like(a)
+    body = 0.5 * (a[:-1] + a[1:])
+    tail = 0.5 * a[-1:]
+    return jnp.concatenate([body, tail], axis=0)
+
+
+def _scale_lambda_full_mesh(a, lamscale):
+    """Apply VMEC's lambda-force scaling while preserving the raw axis row."""
+    a = jnp.asarray(a)
+    if a.shape[0] < 2:
+        return a
+    return jnp.concatenate([a[:1], -lamscale * a[1:]], axis=0)
+
+
 def _metric_even_odd(*, a0, a1, b0, b1, s):
     """Even/odd decomposition of (a0 + sqrt(s)a1)^2 + (b0 + sqrt(s)b1)^2."""
     s = jnp.asarray(s)
@@ -252,7 +295,7 @@ def _apply_vmec_lambda_axis_closure(
 
     axis_copy_mask = jnp.asarray(axis_copy_mask_np, dtype=Lsin.dtype)
     axis_row = jnp.where(axis_copy_mask != 0, Lsin[1, :], Lsin[0, :])
-    return Lsin.at[0, :].set(axis_row)
+    return _replace_axis_row(Lsin, axis_row)
 
 
 def vmec_bcovar_half_mesh_from_wout(
@@ -459,7 +502,7 @@ def vmec_bcovar_half_mesh_from_wout(
         if odd_is_internal:
             out = phys_m1 + phys_rest
             if out.shape[0] >= 2:
-                out = out.at[0].set(phys_m1[1])
+                out = _replace_axis_row(out, phys_m1[1])
             return out
         return internal_odd_from_physical_vmec_m1(odd_m1_phys=phys_m1, odd_mge2_phys=phys_rest, s=s)
 
@@ -473,7 +516,7 @@ def vmec_bcovar_half_mesh_from_wout(
         if odd_is_internal:
             out = phys_m1 + phys_rest
             if out.shape[0] >= 2:
-                out = out.at[0].set(phys_m1[1])
+                out = _replace_axis_row(out, phys_m1[1])
             return out
         return internal_odd_from_physical_vmec_jlam(odd_m1_phys=phys_m1, odd_mge2_phys=phys_rest, s=s)
 
@@ -486,7 +529,7 @@ def vmec_bcovar_half_mesh_from_wout(
             if odd_is_internal:
                 out = phys_m1 + phys_rest
                 if out.shape[0] >= 2:
-                    out = out.at[0].set(phys_m1[1])
+                    out = _replace_axis_row(out, phys_m1[1])
                 return out
             if lambda_field:
                 return internal_odd_from_physical_vmec_jlam(odd_m1_phys=phys_m1, odd_mge2_phys=phys_rest, s=s)
@@ -603,18 +646,19 @@ def vmec_bcovar_half_mesh_from_wout(
     guv = _half_mesh_from_even_odd(guv_e, guv_o, s=s)
     gvv = _half_mesh_from_even_odd(gvv_e_total, gvv_o_total, s=s)
     if ns >= 1:
-        guv = guv.at[0].set(jnp.zeros_like(guv[0]))
-        gvv = gvv.at[0].set(jnp.zeros_like(gvv[0]))
+        guv = _with_axis_zero(guv)
+        gvv = _with_axis_zero(gvv)
 
     def _half_even_odd_full(e_full, o_full):
-        e_half = jnp.zeros_like(guu)
-        o_half = jnp.zeros_like(guu)
-        if ns >= 2:
-            e_half = e_half.at[1:].set(0.5 * (e_full[1:] + e_full[:-1]))
-            o_half = o_half.at[1:].set(0.5 * (o_full[1:] + o_full[:-1]))
-            e_half = e_half.at[0].set(e_half[1])
-            o_half = o_half.at[0].set(o_half[1])
-        return e_half, o_half
+        if ns < 2:
+            z = jnp.zeros_like(guu)
+            return z, z
+        e_body = 0.5 * (e_full[1:] + e_full[:-1])
+        o_body = 0.5 * (o_full[1:] + o_full[:-1])
+        return (
+            jnp.concatenate([e_body[:1], e_body], axis=0),
+            jnp.concatenate([o_body[:1], o_body], axis=0),
+        )
 
     guu_eh, guu_oh = _half_even_odd_full(guu_e, guu_o)
     guv_eh, guv_oh = _half_even_odd_full(guv_e, guv_o)
@@ -706,22 +750,22 @@ def vmec_bcovar_half_mesh_from_wout(
     pshalf = _pshalf_from_s(s)[:, None, None]
 
     # Radial full->half average (Fortran: for l=2..ns).
-    bsupu = jnp.zeros_like(jac.sqrtg)
-    bsupv = jnp.zeros_like(jac.sqrtg)
     bsupu_even = jnp.zeros_like(jac.sqrtg)
     bsupu_odd = jnp.zeros_like(jac.sqrtg)
     bsupv_even = jnp.zeros_like(jac.sqrtg)
     bsupv_odd = jnp.zeros_like(jac.sqrtg)
+    bsupu = jnp.zeros_like(jac.sqrtg)
+    bsupv = jnp.zeros_like(jac.sqrtg)
     if ns >= 2:
         avg_lu0 = lu0_full[1:] + lu0_full[:-1]
         avg_lu1 = lu1_full[1:] + lu1_full[:-1]
         avg_lv0 = lv0_full[1:] + lv0_full[:-1]
         avg_lv1 = lv1_full[1:] + lv1_full[:-1]
 
-        bsupv_even = bsupv_even.at[1:].set(0.5 * overg[1:] * avg_lu0)
-        bsupv_odd = bsupv_odd.at[1:].set(0.5 * overg[1:] * avg_lu1)
-        bsupu_even = bsupu_even.at[1:].set(0.5 * overg[1:] * avg_lv0)
-        bsupu_odd = bsupu_odd.at[1:].set(0.5 * overg[1:] * avg_lv1)
+        bsupv_even = _prepend_axis_zero(0.5 * overg[1:] * avg_lu0, jac.sqrtg)
+        bsupv_odd = _prepend_axis_zero(0.5 * overg[1:] * avg_lu1, jac.sqrtg)
+        bsupu_even = _prepend_axis_zero(0.5 * overg[1:] * avg_lv0, jac.sqrtg)
+        bsupu_odd = _prepend_axis_zero(0.5 * overg[1:] * avg_lv1, jac.sqrtg)
 
         bsupv = bsupv_even + pshalf * bsupv_odd
         bsupu = bsupu_even + pshalf * bsupu_odd
@@ -736,7 +780,7 @@ def vmec_bcovar_half_mesh_from_wout(
             # run on the same angular discretization as guu/bsupu/bsupv.
             dnorm3 = jnp.asarray(getattr(trig, "dnorm3", 0.0), dtype=bsupu.dtype)
             pwint = jnp.broadcast_to(dnorm3, bsupu.shape)
-            pwint = pwint.at[0].set(jnp.zeros_like(bsupu[0]))
+            pwint = _with_axis_zero(pwint)
 
         top = jnp.asarray(icurv, dtype=bsupu.dtype) - jnp.sum(
             pwint * ((guu * bsupu) + (guv * bsupv)),
@@ -747,8 +791,7 @@ def vmec_bcovar_half_mesh_from_wout(
         chips_dyn = jnp.asarray(chips_eff, dtype=bsupu.dtype)
         safe_bot = jnp.where(bot != 0.0, bot, jnp.asarray(1.0, dtype=bot.dtype))
         chips_new = jnp.where(bot != 0.0, top / safe_bot, chips_dyn)
-        chips_dyn = chips_dyn.at[0].set(jnp.asarray(0.0, dtype=chips_dyn.dtype))
-        chips_dyn = chips_dyn.at[1:].set(chips_new[1:])
+        chips_dyn = jnp.concatenate([jnp.zeros_like(chips_dyn[:1]), chips_new[1:]], axis=0)
         chips_eff = chips_dyn
 
     # `add_fluxes`: VMEC updates `bsupu` in VMEC orientation:
@@ -786,12 +829,12 @@ def vmec_bcovar_half_mesh_from_wout(
 
     # VMEC enforces axis bsup*=0 explicitly.
     if ns >= 1:
-        bsupu = bsupu.at[0].set(jnp.zeros_like(bsupu[0]))
-        bsupv = bsupv.at[0].set(jnp.zeros_like(bsupv[0]))
-        bsupu_even = bsupu_even.at[0].set(jnp.zeros_like(bsupu_even[0]))
-        bsupv_even = bsupv_even.at[0].set(jnp.zeros_like(bsupv_even[0]))
-        bsupu_odd = bsupu_odd.at[0].set(jnp.zeros_like(bsupu_odd[0]))
-        bsupv_odd = bsupv_odd.at[0].set(jnp.zeros_like(bsupv_odd[0]))
+        bsupu = _with_axis_zero(bsupu)
+        bsupv = _with_axis_zero(bsupv)
+        bsupu_even = _with_axis_zero(bsupu_even)
+        bsupv_even = _with_axis_zero(bsupv_even)
+        bsupu_odd = _with_axis_zero(bsupu_odd)
+        bsupv_odd = _with_axis_zero(bsupv_odd)
 
     bsubu = guu * bsupu + guv * bsupv
     bsubv = guv * bsupu + gvv * bsupv
@@ -888,7 +931,7 @@ def vmec_bcovar_half_mesh_from_wout(
                 f"expected {bsq.shape[1:]}, got {vac_edge.shape}"
             )
         bsq_edge = vac_edge + pres_h[-1]
-        bsq = bsq.at[-1, :, :].set(bsq_edge)
+        bsq = _replace_edge_row(bsq, bsq_edge)
 
     # Force-kernel inputs matching what `forces.f` expects after `bcovar`.
     gij_b_uu = (bsupu * bsupu) * jac.sqrtg
@@ -926,51 +969,48 @@ def vmec_bcovar_half_mesh_from_wout(
     )
     phipog = jnp.where(jac.sqrtg != 0, 1.0 / phipog_safe, 0.0)
     if ns >= 1:
-        phipog = phipog.at[0].set(jnp.zeros_like(phipog[0]))
+        phipog = _with_axis_zero(phipog)
     lvv = phipog * gvv
 
     if bool(use_wout_bsub_for_lambda):
         # Reference parity mode: use averaged wout bsub* directly.
-        bsubu_e = jnp.zeros_like(bsubu_lambda)
-        bsubv_e = jnp.zeros_like(bsubv_lambda)
         bsubu_tmp = jnp.zeros_like(bsubu_lambda)
         bsubv_preblend = jnp.zeros_like(bsubv_lambda)
-        bsubv_avg = jnp.zeros_like(bsubv_lambda)
-        if ns >= 2:
-            bsubu_e = bsubu_e.at[:-1].set(0.5 * (bsubu_lambda[:-1] + bsubu_lambda[1:]))
-            bsubu_e = bsubu_e.at[-1].set(0.5 * bsubu_lambda[-1])
-            bsubv_e = bsubv_e.at[:-1].set(0.5 * (bsubv_lambda[:-1] + bsubv_lambda[1:]))
-            bsubv_e = bsubv_e.at[-1].set(0.5 * bsubv_lambda[-1])
-            bsubv_avg = bsubv_e
+        bsubu_e = _avg_forward_half_to_int_or_zero(bsubu_lambda)
+        bsubv_e = _avg_forward_half_to_int_or_zero(bsubv_lambda)
+        bsubv_avg = bsubv_e
     else:
         # Intermediate full-mesh bsubv_e (before blending), following bcovar.f.
-        bsubv_e = jnp.zeros_like(bsubv)
-        if ns >= 2:
-            bsubv_e = bsubv_e.at[:-1].set(0.5 * (lvv[:-1] + lvv[1:]) * lu0_force[:-1])
-            bsubv_e = bsubv_e.at[-1].set(0.5 * lvv[-1] * lu0_force[-1])
-
         lvv_sh = lvv * pshalf
         bsubu_tmp = guv * bsupu  # bcovar: pguv*bsupu (sigma_an=1 isotropic)
         if ns >= 2:
-            bsubv_e = bsubv_e.at[:-1].add(
-                0.5 * ((lvv_sh[:-1] + lvv_sh[1:]) * lu1[:-1] + bsubu_tmp[:-1] + bsubu_tmp[1:])
+            bsubv_base = jnp.concatenate(
+                [
+                    0.5 * (lvv[:-1] + lvv[1:]) * lu0_force[:-1],
+                    0.5 * lvv[-1:] * lu0_force[-1:],
+                ],
+                axis=0,
             )
-            bsubv_e = bsubv_e.at[-1].add(0.5 * (lvv_sh[-1] * lu1[-1] + bsubu_tmp[-1]))
+            bsubv_extra = jnp.concatenate(
+                [
+                    0.5 * ((lvv_sh[:-1] + lvv_sh[1:]) * lu1[:-1] + bsubu_tmp[:-1] + bsubu_tmp[1:]),
+                    0.5 * (lvv_sh[-1:] * lu1[-1:] + bsubu_tmp[-1:]),
+                ],
+                axis=0,
+            )
+            bsubv_e = bsubv_base + bsubv_extra
+        else:
+            bsubv_e = jnp.zeros_like(bsubv)
         bsubv_preblend = bsubv_e
 
         # Average lambda forces onto full radial mesh (bsubu_e from bsubu half mesh).
-        bsubu_e = jnp.zeros_like(bsubu)
-        if ns >= 2:
-            bsubu_e = bsubu_e.at[:-1].set(0.5 * (bsubu[:-1] + bsubu[1:]))
-            bsubu_e = bsubu_e.at[-1].set(0.5 * bsubu[-1])
+        bsubu_e = _avg_forward_half_to_int_or_zero(bsubu)
 
         # Blend bsubv_e with half-mesh bsubv average using bdamp(s) (VMEC: bdamp=2*pdamp*(1-s)).
         pdamp = 0.05
         bdamp = (2.0 * pdamp * (1.0 - s)).astype(jnp.asarray(bsubv_e).dtype)[:, None, None]
         if ns >= 2:
-            bsubv_avg = jnp.zeros_like(bsubv_e)
-            bsubv_avg = bsubv_avg.at[:-1].set(0.5 * (bsubv[:-1] + bsubv[1:]))
-            bsubv_avg = bsubv_avg.at[-1].set(0.5 * bsubv[-1])
+            bsubv_avg = _avg_forward_half_to_int_or_zero(bsubv)
             bsubv_e = bdamp * bsubv_e + (1.0 - bdamp) * bsubv_avg
         else:
             bsubv_e = bdamp * bsubv_e + (1.0 - bdamp) * bsubv_e
@@ -983,16 +1023,8 @@ def vmec_bcovar_half_mesh_from_wout(
     #
     # VMEC also exposes odd-m pieces as sqrt(s)*bsub*_e.
     psqrts = jnp.sqrt(jnp.maximum(s, 0.0))[:, None, None]
-    clmn_even = jnp.zeros_like(bsubu_e)
-    blmn_even = jnp.zeros_like(bsubv_e)
-    if ns >= 1:
-        # VMEC leaves the axis entries unscaled (the -lamscale factor is applied
-        # only for js>=2). Preserve the raw axis values to match tomnsps dumps.
-        clmn_even = clmn_even.at[0].set(bsubu_e[0])
-        blmn_even = blmn_even.at[0].set(bsubv_e[0])
-    if ns >= 2:
-        clmn_even = clmn_even.at[1:].set(-lamscale * bsubu_e[1:])
-        blmn_even = blmn_even.at[1:].set(-lamscale * bsubv_e[1:])
+    clmn_even = _scale_lambda_full_mesh(bsubu_e, lamscale)
+    blmn_even = _scale_lambda_full_mesh(bsubv_e, lamscale)
     clmn_odd = psqrts * clmn_even
     blmn_odd = psqrts * blmn_even
 
