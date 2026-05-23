@@ -6317,12 +6317,46 @@ def solve_fixed_boundary_residual_iter(
             use_m1_pair_convert=use_m1_pair_convert,
         )
 
-    scalxc_mn = vmec_scalxc_from_s(s=s, mpol=int(static.cfg.mpol)).astype(jnp.asarray(state0.Rcos).dtype)[:, :, None]
-    if not bool(divide_by_scalxc_for_update):
-        scalxc_mn = jnp.ones_like(scalxc_mn)
-    scalxc_mn_np = (
-        np.asarray(scalxc_mn, dtype=float) if bool(host_update_assembly) and (not _tree_has_tracer(scalxc_mn)) else None
+    _state0_dtype = (
+        np.asarray(state0.Rcos).dtype
+        if bool(host_update_assembly) and (not _tree_has_tracer(state0.Rcos))
+        else jnp.asarray(state0.Rcos).dtype
     )
+
+    def _vmec_scalxc_from_s_np(s_in, *, mpol: int, dtype) -> np.ndarray:
+        """NumPy VMEC scalxc for the non-differentiated CPU host-update path."""
+        s_np = np.asarray(s_in, dtype=dtype)
+        ns_local = int(s_np.shape[0])
+        mpol_local = int(mpol)
+        if ns_local == 0 or mpol_local <= 0:
+            return np.zeros((ns_local, max(mpol_local, 0)), dtype=dtype)
+        sqrts = np.sqrt(np.maximum(s_np, 0.0)).astype(dtype, copy=False)
+        sqrts = np.array(sqrts, dtype=dtype, copy=True)
+        sqrts[-1] = np.asarray(1.0, dtype=dtype)
+        sq2 = sqrts[1] if ns_local >= 2 else np.asarray(1.0, dtype=dtype)
+        scal_odd = 1.0 / np.maximum(sqrts, sq2)
+        is_odd = (np.arange(mpol_local) % 2) == 1
+        return np.where(is_odd[None, :], scal_odd[:, None], np.ones((ns_local, mpol_local), dtype=dtype))
+
+    if bool(host_update_assembly) and (not _tree_has_tracer(s)):
+        if bool(divide_by_scalxc_for_update):
+            scalxc_mn_np = _vmec_scalxc_from_s_np(s, mpol=int(static.cfg.mpol), dtype=_state0_dtype)[:, :, None]
+        else:
+            scalxc_mn_np = np.ones((int(np.asarray(s).shape[0]), int(static.cfg.mpol), 1), dtype=_state0_dtype)
+        # Keep a JAX value available for scan/exact helper closures, but avoid
+        # constructing it through eager JAX elementwise primitives on the host path.
+        scalxc_mn = jnp.asarray(scalxc_mn_np)
+    else:
+        scalxc_mn = vmec_scalxc_from_s(s=s, mpol=int(static.cfg.mpol)).astype(jnp.asarray(state0.Rcos).dtype)[
+            :, :, None
+        ]
+        if not bool(divide_by_scalxc_for_update):
+            scalxc_mn = jnp.ones_like(scalxc_mn)
+        scalxc_mn_np = (
+            np.asarray(scalxc_mn, dtype=float)
+            if bool(host_update_assembly) and (not _tree_has_tracer(scalxc_mn))
+            else None
+        )
 
     def _mn_cos_to_signed_host(cc, ss):
         # Single-DGEMM path: [cc, ss] @ _AB_cos (= vstack([A_cos, B_cos]))
@@ -6451,18 +6485,33 @@ def solve_fixed_boundary_residual_iter(
         w = (1.0 + k2) ** (-float(mode_diag_exponent))
         return w.astype(dtype)
 
+    def _mode_diag_weights_mn_np(dtype):
+        m = np.arange(mpol, dtype=float)
+        n = np.arange(nrange, dtype=float) * float(nfp)
+        k2 = (m[:, None] * m[:, None]) + (n[None, :] * n[None, :])
+        return ((1.0 + k2) ** (-float(mode_diag_exponent))).astype(dtype)
+
     # Precompute per-iteration constants once.
-    w_mode_mn = _mode_diag_weights_mn(jnp.asarray(state0.Rcos).dtype)
-    # NumPy copy for host-path mode-diagonal step (avoids 36 JAX dispatches/iter).
-    w_mode_mn_np = np.asarray(w_mode_mn) if bool(host_update_assembly) and (not _tree_has_tracer(w_mode_mn)) else None
+    if bool(host_update_assembly) and (not _tree_has_tracer(state0.Rcos)):
+        w_mode_mn_np = _mode_diag_weights_mn_np(_state0_dtype)
+        # JAX value is still needed by scan/exact helper closures, but the raw
+        # CPU host-update path consumes the NumPy copy directly.
+        w_mode_mn = jnp.asarray(w_mode_mn_np)
+    else:
+        w_mode_mn = _mode_diag_weights_mn(jnp.asarray(state0.Rcos).dtype)
+        # NumPy copy for host-path mode-diagonal step (avoids 36 JAX dispatches/iter).
+        w_mode_mn_np = (
+            np.asarray(w_mode_mn) if bool(host_update_assembly) and (not _tree_has_tracer(w_mode_mn)) else None
+        )
     # Precompute axis mask for _enforce_fixed_boundary_and_axis_np (avoids 7000+
     # _axis_m0_mask JAX dispatches per solve — saves ~0.5s real).
-    _state0_dtype = (
-        np.asarray(state0.Rcos).dtype
-        if bool(host_update_assembly) and (not _tree_has_tracer(state0.Rcos))
-        else jnp.asarray(state0.Rcos).dtype
-    )
-    _precomputed_axis_mask_np = np.asarray(_axis_m0_mask(static, dtype=_state0_dtype)) if host_update_assembly else None
+    if bool(host_update_assembly):
+        if getattr(static, "m_is_m0", None) is not None:
+            _precomputed_axis_mask_np = np.asarray(static.m_is_m0, dtype=_state0_dtype)
+        else:
+            _precomputed_axis_mask_np = (np.asarray(static.modes.m) == 0).astype(_state0_dtype)
+    else:
+        _precomputed_axis_mask_np = None
     # Cache JAX scalar constants used every iteration (avoids 7000+
     # jnp.asarray dispatches for zero_m1 and constraint_precond_active).
     if host_update_assembly and has_jax():
@@ -6489,17 +6538,31 @@ def solve_fixed_boundary_residual_iter(
         else jnp.asarray(1.0, dtype=jnp.asarray(state0.Rcos).dtype)
     )
 
-    state = _enforce_fixed_boundary_and_axis(
-        state0,
-        static,
-        edge_Rcos=edge_Rcos,
-        edge_Rsin=edge_Rsin,
-        edge_Zcos=edge_Zcos,
-        edge_Zsin=edge_Zsin,
-        enforce_edge=not bool(free_boundary_enabled),
-        enforce_lambda_axis=True,
-        idx00=idx00,
-    )
+    if bool(host_update_assembly):
+        state = _enforce_fixed_boundary_and_axis_np(
+            state0,
+            static,
+            edge_Rcos=edge_Rcos,
+            edge_Rsin=edge_Rsin,
+            edge_Zcos=edge_Zcos,
+            edge_Zsin=edge_Zsin,
+            enforce_edge=not bool(free_boundary_enabled),
+            enforce_lambda_axis=True,
+            idx00=idx00,
+            precomputed_axis_mask=_precomputed_axis_mask_np,
+        )
+    else:
+        state = _enforce_fixed_boundary_and_axis(
+            state0,
+            static,
+            edge_Rcos=edge_Rcos,
+            edge_Rsin=edge_Rsin,
+            edge_Zcos=edge_Zcos,
+            edge_Zsin=edge_Zsin,
+            enforce_edge=not bool(free_boundary_enabled),
+            enforce_lambda_axis=True,
+            idx00=idx00,
+        )
     state = _apply_vmec_lambda_axis_rules(state)
 
     ftol = float(indata.get_float("FTOL", 1e-13)) if ftol is None else float(ftol)
