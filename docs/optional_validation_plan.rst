@@ -285,10 +285,13 @@ all six rows against ``~/bin/xvmec2000`` with per-row runtimes between
 ``13.45 s`` and ``15.10 s``.  This is still optional evidence because the
 inputs live in local external checkouts, but it is the current bounded
 VMEC2000 matrix for SIMSOPT/Landreman fixed-boundary assets.
-The Landreman Ku/Boozer QHS deck remains a tracked candidate asset, but it is
-not promoted to the executable manifest because the current stage-trace
-comparator needs a dedicated multigrid/reference-state shape path for that
-deck.  The pre-existing
+The Landreman Ku/Boozer QHS deck is now a bounded optional manifest row after
+the comparator learned to patch multiline ``NS_ARRAY``/``NITER_ARRAY``/
+``FTOL_ARRAY`` assignments and to ignore ``NITER=-1`` final-reference
+``threed1`` records.  The local probe
+``outputs/parity_sweeps_external_kuboozer_probe/n4qh_4013d3d`` passed the
+eight-iteration ``single_ns=16`` stage-trace gate with zero residual-scalar
+drift and matching final-grid WOUT geometry.  The pre-existing
 SIMSOPT ``LandremanSenguptaPlunk_section5p3`` LASYM=true planning probe
 remained a non-promoted target in the same run context because the strict
 ``2e-3`` stage-trace gate failed at iteration 10 with a maximum printed

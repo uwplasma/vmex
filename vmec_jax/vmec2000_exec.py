@@ -49,7 +49,7 @@ class Vmec2000ExecResult:
 
 
 _RE_STAGE = re.compile(
-    r"^\s*NS\s*=\s*(\d+)\s+NO\.\s+FOURIER\s+MODES\s*=\s*(\d+)\s+FTOLV\s*=\s*([0-9.DdEe+-]+)\s+NITER\s*=\s*(\d+)"
+    r"^\s*NS\s*=\s*(\d+)\s+NO\.\s+FOURIER\s+MODES\s*=\s*(\d+)\s+FTOLV\s*=\s*([0-9.DdEe+-]+)\s+NITER\s*=\s*([+-]?\d+)"
 )
 
 
@@ -80,6 +80,10 @@ def _parse_vmec2000_threed1(path: Path) -> list[Vmec2000Threed1Stage]:
             ns = int(m.group(1))
             ftolv = float(m.group(3).replace("D", "E").replace("d", "E"))
             niter = int(m.group(4))
+            if niter < 0:
+                current = None
+                in_table = False
+                continue
             current = Vmec2000Threed1Stage(ns=ns, niter=niter, ftolv=ftolv, rows=[])
             continue
 
@@ -125,16 +129,21 @@ def _patch_indata(text: str, *, updates: dict[str, str]) -> str:
     found = {k.upper(): False for k in updates}
 
     key_re = {k.upper(): re.compile(rf"^(\s*){re.escape(k)}\s*=", flags=re.IGNORECASE) for k in updates}
+    any_assignment_re = re.compile(r"^\s*[A-Za-z][A-Za-z0-9_]*(?:\([^)]*\))?\s*=")
 
-    for i, line in enumerate(lines):
+    i = 0
+    while i < len(lines):
+        line = lines[i]
         stripped = line.strip()
         if stripped.upper().startswith("&INDATA"):
             in_block = True
+            i += 1
             continue
         if in_block and stripped.startswith("/"):
             end_idx = i
             break
         if not in_block:
+            i += 1
             continue
         for key, regex in key_re.items():
             m = regex.match(line)
@@ -142,6 +151,17 @@ def _patch_indata(text: str, *, updates: dict[str, str]) -> str:
                 indent = m.group(1) or ""
                 lines[i] = f"{indent}{key} = {updates[key]}"
                 found[key] = True
+                j = i + 1
+                while j < len(lines):
+                    next_stripped = lines[j].strip()
+                    if next_stripped.startswith("/") or any_assignment_re.match(lines[j]):
+                        break
+                    if next_stripped and not next_stripped.startswith(("!", "#")):
+                        del lines[j]
+                        continue
+                    break
+                break
+        i += 1
 
     if in_block and end_idx is None:
         end_idx = len(lines)

@@ -93,12 +93,68 @@ def test_patch_indata_replaces_inserts_before_terminator_and_preserves_newline()
     assert patched.count("NITER = 7") == 1
 
 
+def test_patch_indata_drops_multiline_array_continuations() -> None:
+    text = "\n".join(
+        [
+            "&INDATA",
+            "  NS_ARRAY = 16, 49,",
+            "     99,",
+            "  NITER_ARRAY = 20,",
+            "     40,",
+            "  FTOL_ARRAY = 1.0e-8,",
+            "     1.0e-10,",
+            "  MPOL = 8",
+            "/",
+            "",
+        ]
+    )
+
+    patched = _patch_indata(
+        text,
+        updates={
+            "NS_ARRAY": "16",
+            "NITER_ARRAY": "8",
+            "FTOL_ARRAY": "1.0000000000000000e-08",
+        },
+    )
+
+    lines = patched.splitlines()
+    assert "  NS_ARRAY = 16" in lines
+    assert "  NITER_ARRAY = 8" in lines
+    assert "  FTOL_ARRAY = 1.0000000000000000e-08" in lines
+    assert not any(line.strip() in {"99,", "40,", "1.0e-10,"} for line in lines)
+    assert "  MPOL = 8" in lines
+
+
 def test_patch_indata_handles_unterminated_or_missing_indata_block() -> None:
     unterminated = "&INDATA\n  NITER = 10"
     patched = _patch_indata(unterminated, updates={"NITER": "3", "NTOR": "2"})
 
     assert patched.splitlines() == ["&INDATA", "  NITER = 3", "  NTOR = 2"]
     assert _patch_indata("not a namelist", updates={"NITER": "3"}) == "not a namelist"
+
+
+def test_parse_vmec2000_threed1_skips_signed_negative_reference_header(tmp_path: Path) -> None:
+    threed1 = tmp_path / "threed1.signed"
+    threed1.write_text(
+        "\n".join(
+            [
+                "  NS =  13 NO. FOURIER MODES =  10 FTOLV =  1.0E-08 NITER =     2",
+                " ITER FSQR FSQZ FSQL fsqr fsqz fsql DELT RAX WMHD",
+                "  1 1.0E-1 2.0E-1 3.0E-1 4.0E-1 5.0E-1 6.0E-1 7.0E-1 8.0E-1 9.0E-1",
+                "  NS =  16 NO. FOURIER MODES =  85 FTOLV =  1.0E-10 NITER =    -1",
+                " ITER FSQR FSQZ FSQL fsqr fsqz fsql DELT RAX WMHD",
+                "  1 1.0E-2 2.0E-2 3.0E-2 4.0E-2 5.0E-2 6.0E-2 7.0E-2 8.0E-2 9.0E-2",
+            ]
+        )
+    )
+
+    stages = _parse_vmec2000_threed1(threed1)
+
+    assert len(stages) == 1
+    assert stages[0].ns == 13
+    assert stages[0].niter == 2
+    assert [row.it for row in stages[0].rows] == [1]
 
 
 def test_case_name_and_threed1_discovery_precedence(tmp_path: Path) -> None:
