@@ -125,6 +125,40 @@ def test_preconditioner_matrices_and_apply_edge_paths():
     assert p1d.rz_preconditioner_apply(frzl_in=frzl, mats=mats, jmax=jmax, cfg=cfg_skip) is frzl
 
 
+def test_preconditioner_cached_apply_clamps_jmax_and_zeros_nonzero_m_axis() -> None:
+    cfg = _cfg(mpol=2, ntor=0, lthreed=False, lasym=False)
+    shape = (3, 2, 1)
+    mats = {
+        "ar": np.zeros(shape),
+        "br": np.zeros(shape),
+        "dr": np.full(shape, 2.0),
+        "az": np.zeros(shape),
+        "bz": np.zeros(shape),
+        "dz": np.full(shape, 4.0),
+    }
+    base = np.arange(np.prod(shape), dtype=float).reshape(shape) + 1.0
+    frzl = TomnspsRZL(frcc=base, frss=None, fzsc=-base, fzcs=None, flsc=np.zeros_like(base), flcs=None)
+
+    no_active_surfaces = p1d.rz_preconditioner_apply(frzl_in=frzl, mats=mats, jmax=-5, cfg=cfg)
+    np.testing.assert_allclose(no_active_surfaces.frcc, base)
+    np.testing.assert_allclose(no_active_surfaces.fzsc, -base)
+
+    full = p1d.rz_preconditioner_apply(frzl_in=frzl, mats=mats, jmax=99, cfg=cfg)
+    expected_r = base.copy()
+    expected_z = -base.copy()
+    expected_r[:, 0, :] *= 0.5
+    expected_z[:, 0, :] *= 0.25
+    expected_r[0, 1, :] = 0.0
+    expected_z[0, 1, :] = 0.0
+    expected_r[1:, 1, :] *= 0.5
+    expected_z[1:, 1, :] *= 0.25
+
+    np.testing.assert_allclose(full.frcc, expected_r)
+    np.testing.assert_allclose(full.fzsc, expected_z)
+    np.testing.assert_allclose(full.frcc[0, 1, :], 0.0)
+    np.testing.assert_allclose(full.fzsc[0, 1, :], 0.0)
+
+
 def test_preconditioner_full_apply_and_faclam_debug_branch():
     cfg = _cfg(mpol=2, ntor=1, lthreed=True, lasym=False)
     s = np.linspace(0.0, 1.0, 3)

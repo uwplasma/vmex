@@ -20,13 +20,14 @@ From PyPI:
 pip install vmec-jax
 ```
 
-QI optimization uses `booz_xform_jax` for the differentiable Boozer transform:
+Plotting examples need `matplotlib`; QI optimization also uses `booz_xform_jax`
+for the differentiable Boozer transform:
 
 ```bash
-pip install "vmec-jax[qi]"
+pip install "vmec-jax[plots,qi]"
 ```
 
-From conda-forge:
+From conda-forge (the feedstock can lag PyPI by a release):
 
 ```bash
 pixi add vmec-jax

@@ -10,6 +10,17 @@ readme = "README.md"
 requires-python = ">=3.10"
 authors = [{name = "vmec_jax contributors"}]
 license = "MIT"
+keywords = ["vmec", "stellarator", "mhd", "jax", "optimization"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Physics",
+]
 
 dependencies = [
   "numpy",
@@ -22,6 +33,13 @@ dependencies = [
 [project.scripts]
 vmec_jax = "vmec_jax.cli:main"
 xvmec_jax = "vmec_jax.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/uwplasma/vmec_jax"
+Documentation = "https://vmec-jax.readthedocs.io/en/latest/"
+Repository = "https://github.com/uwplasma/vmec_jax"
+Issues = "https://github.com/uwplasma/vmec_jax/issues"
+Changelog = "https://github.com/uwplasma/vmec_jax/releases"
 
 [project.optional-dependencies]
 jax = ["jax", "jaxlib"]

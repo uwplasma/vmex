@@ -79,31 +79,19 @@ def test_fixed_boundary_qs_examples_are_standalone_workflows() -> None:
         assert "qi_options=" not in text
         assert "plot=" not in text
         assert "print_optimization_outputs" not in text
-        assert "initial_optimizer = result.initial_optimizer" in text
-        assert "final_optimizer = result.final_optimizer" in text
-        assert "result.final_result" in text
         assert "history = result.history" in text
         assert "objective_history = result.objective_history" in text
         assert "timing = result.timing_summary" in text
-        assert "result.initial_params" in text
-        assert "result.initial_state" in text
-        assert "result.final_params" in text
-        assert "result.final_state" in text
-        assert "saved_paths = {" in text
-        assert "initial_optimizer.save_input(" in text
-        assert "initial_optimizer.save_wout(" in text
-        assert "final_optimizer.save_input(" in text
-        assert "final_optimizer.save_wout(" in text
-        assert "final_optimizer.save_history(" in text
+        assert "saved_paths = vj.save_optimization_result(result, output_dir=OUTPUT_DIR)" in text
         assert "Files saved from result objects" in text
-        assert 'vj.load_wout(saved_paths["final_wout"])' in text
+        assert "vj.load_wout(saved_paths.final_wout)" in text
         assert "vmecplot2_bmag_grid(" in text
         assert "plot_3d_boundary_comparison(" in text
         assert "plot_bmag_contours(" in text
         assert "plot_objective_history(" in text
         assert "Plotting is a normal post-processing block" in text
-        assert 'saved_paths["initial_wout"]' in text
-        assert 'saved_paths["history"]' in text
+        assert "saved_paths.initial_wout" in text
+        assert "saved_paths.history" in text
 
 
 def test_optimization_readme_and_docs_teach_visible_workflow_anatomy() -> None:
@@ -118,9 +106,10 @@ def test_optimization_readme_and_docs_teach_visible_workflow_anatomy() -> None:
     assert "Do not pass physics shortcuts such as ``target_aspect`` or ``qi_options``" in docs_flat
     assert "Recommended workflow API" in docs
     assert "FixedBoundaryOptimizationResult" in docs
-    assert "save_input" in readme
-    assert "save_wout" in readme
-    assert "save_history" in readme
+    assert "save_optimization_result" in readme
+    assert "save_input" in docs
+    assert "save_wout" in docs
+    assert "save_history" in docs
     assert "save_final_outputs=False" in readme
     assert "plot_paths = {" in readme
     assert "vj.plot_3d_boundary_comparison(" in readme

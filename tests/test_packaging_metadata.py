@@ -30,3 +30,14 @@ def test_package_exposes_installed_version() -> None:
     assert vmec_jax.__version__ == data["project"]["version"]
     if not Path(vmec_jax.__file__).resolve().is_relative_to(ROOT):
         assert vmec_jax.__version__ == package_version("vmec-jax")
+
+
+def test_project_metadata_has_public_package_links() -> None:
+    data = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    project = data["project"]
+
+    assert "stellarator" in project["keywords"]
+    assert "Topic :: Scientific/Engineering :: Physics" in project["classifiers"]
+    assert project["urls"]["Documentation"] == "https://vmec-jax.readthedocs.io/en/latest/"
+    assert project["urls"]["Repository"] == "https://github.com/uwplasma/vmec_jax"
+    assert project["urls"]["Changelog"] == "https://github.com/uwplasma/vmec_jax/releases"

@@ -152,36 +152,13 @@ result = vj.least_squares_solve(
     save_final_outputs=False,
 )
 
-# Results are plain Python objects.  The explicit calls below show where to
-# customize filenames or add additional exports in a SIMSOPT-style workflow.
-initial_optimizer = result.initial_optimizer
-final_optimizer = result.final_optimizer
-final_result = result.final_result
+# Results are plain Python objects.  The call below only saves the standard
+# artifacts; diagnostics and plots remain explicit in this script.
 history = result.history
 objective_history = result.objective_history
 timing = result.timing_summary
 
-saved_paths = {
-    "initial_input": OUTPUT_DIR / "input.initial",
-    "final_input": OUTPUT_DIR / "input.final",
-    "initial_wout": OUTPUT_DIR / "wout_initial.nc",
-    "final_wout": OUTPUT_DIR / "wout_final.nc",
-    "history": OUTPUT_DIR / "history.json",
-}
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-initial_optimizer.save_input(saved_paths["initial_input"], result.initial_params)
-initial_optimizer.save_wout(
-    saved_paths["initial_wout"],
-    result.initial_params,
-    state=result.initial_state,
-)
-final_optimizer.save_input(saved_paths["final_input"], result.final_params)
-final_optimizer.save_wout(
-    saved_paths["final_wout"],
-    result.final_params,
-    state=result.final_state,
-)
-final_optimizer.save_history(saved_paths["history"], final_result)
+saved_paths = vj.save_optimization_result(result, output_dir=OUTPUT_DIR)
 
 print("\nFinal diagnostics from result.history:")
 print(f"  aspect ratio:     {history['aspect_final']:.6g}")
@@ -192,10 +169,10 @@ print(f"  wall time:        {timing['total_wall_time_s']:.2f} s")
 print(f"  objective samples: {objective_history[:5]} ... {objective_history[-3:]}")
 
 print("\nFiles saved from result objects:")
-for name, path in saved_paths.items():
+for name, path in saved_paths.as_dict().items():
     print(f"  {name}: {path}")
 
-wout_final = vj.load_wout(saved_paths["final_wout"])
+wout_final = vj.load_wout(saved_paths.final_wout)
 theta, zeta, b_lcfs = vj.vmecplot2_bmag_grid(
     wout_final,
     s_index=-1,
@@ -212,17 +189,17 @@ if MAKE_PLOTS:
     # instead of relying on hidden plotting side effects from the solve.
     plot_paths = {
         "boundary_comparison": vj.plot_3d_boundary_comparison(
-            saved_paths["initial_wout"],
-            saved_paths["final_wout"],
+            saved_paths.initial_wout,
+            saved_paths.final_wout,
             outdir=OUTPUT_DIR,
         ),
         "bmag_contours": vj.plot_bmag_contours(
-            saved_paths["initial_wout"],
-            saved_paths["final_wout"],
+            saved_paths.initial_wout,
+            saved_paths.final_wout,
             outdir=OUTPUT_DIR,
         ),
         "objective_history": vj.plot_objective_history(
-            saved_paths["history"],
+            saved_paths.history,
             outdir=OUTPUT_DIR,
         ),
     }
