@@ -72,6 +72,14 @@ def test_bundled_converged_wout_physics_gates(case: BundledWoutPhysicsCase) -> N
     assert ns >= 3
     assert mnmax > 0
     assert mnmax_nyq > 0
+    assert int(wout.signgs) in (-1, 1)
+
+    axis_shape = (int(wout.ntor) + 1,)
+    for name in ("raxis_cc", "zaxis_cs", "raxis_cs", "zaxis_cc"):
+        axis = np.asarray(getattr(wout, name), dtype=float)
+        _assert_shape(name, axis, axis_shape)
+        assert np.isfinite(axis).all(), name
+    assert float(np.asarray(wout.raxis_cc, dtype=float)[0]) > 0.0
 
     for name in ("rmnc", "zmns", "lmns", "rmns", "zmnc", "lmnc"):
         _assert_shape(name, getattr(wout, name), (ns, mnmax))
@@ -79,6 +87,15 @@ def test_bundled_converged_wout_physics_gates(case: BundledWoutPhysicsCase) -> N
     for name in ("gmnc", "bmnc", "bsupumnc", "bsupvmnc", "bsubumnc", "bsubvmnc"):
         _assert_shape(name, getattr(wout, name), (ns, mnmax_nyq))
         assert np.isfinite(np.asarray(getattr(wout, name), dtype=float)).all(), name
+    if not bool(wout.lasym):
+        for name in ("rmns", "zmnc", "lmnc", "raxis_cs", "zaxis_cc"):
+            np.testing.assert_allclose(getattr(wout, name), 0.0, atol=0.0)
+    else:
+        asymmetry = sum(
+            float(np.max(np.abs(np.asarray(getattr(wout, name), dtype=float))))
+            for name in ("rmns", "zmnc", "lmnc", "raxis_cs", "zaxis_cc")
+        )
+        assert asymmetry > 0.0
 
     residual_components = np.asarray([wout.fsqr, wout.fsqz, wout.fsql], dtype=float)
     assert np.isfinite(residual_components).all()

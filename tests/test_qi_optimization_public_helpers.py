@@ -194,6 +194,113 @@ def test_target_helicity_seed_preconditioner_writes_seeded_input(monkeypatch: py
     assert qio.run_target_helicity_seed_preconditioner("input.seed", tmp_path, {"enabled": False}) == Path("input.seed")
 
 
+def test_run_basin_prefilter_saves_candidate_inputs_and_records_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _configure(tmp_path)
+
+    class Candidate:
+        def __init__(self, label: str, params: list[float]):
+            self.label = label
+            self.params = np.asarray(params, dtype=float)
+
+        def as_record(self, names):
+            return {
+                "label": self.label,
+                "params": self.params.tolist(),
+                "named_params": dict(zip(names, self.params, strict=True)),
+            }
+
+    class Optimizer:
+        def _solve_forward(self, params, *, trial):
+            assert trial is True
+            if float(params[0]) < 0.0:
+                raise RuntimeError("boom")
+            return SimpleNamespace(label="state")
+
+        def save_input(self, path, params):
+            path = Path(path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"params={np.asarray(params).tolist()}\n")
+
+    stage = SimpleNamespace(
+        specs=[SimpleNamespace(name="rc01")],
+        optimizer=Optimizer(),
+        ctx=SimpleNamespace(static="static", indata="indata", signgs=-1, flux="flux", pressure="pressure"),
+    )
+
+    monkeypatch.setattr(qio, "boundary_param_names", lambda _specs: ["rc01"])
+    monkeypatch.setattr(qio, "create_x_scale", lambda _specs, *, alpha: np.asarray([alpha], dtype=float))
+    monkeypatch.setattr(qio, "make_basin_prefilter_options", lambda _config, *, ctx=None: SimpleNamespace(surfaces=[1.0]))
+    monkeypatch.setattr(
+        qio,
+        "_load_basin_prefilter_tools",
+        lambda: (
+            lambda **kwargs: SimpleNamespace(**kwargs),
+            lambda **_kwargs: [Candidate("bad:one", [-1.0]), Candidate("good:two", [2.0])],
+            lambda records, *, targets: records,
+            lambda rows, path: Path(path).write_text(f"{len(rows)} rows\n"),
+            lambda **_kwargs: stage,
+        ),
+    )
+    monkeypatch.setattr(
+        qio.vj,
+        "qi_diagnostics_from_state",
+        lambda **_kwargs: {
+            "qi_smooth_total": 1.0e-4,
+            "qi_legacy_total": 2.0e-4,
+            "qi_mirror_ratio_max": 0.2,
+            "qi_max_elongation": 4.0,
+            "mean_iota": 0.5,
+            "aspect": 6.0,
+        },
+    )
+
+    selected = qio.run_basin_prefilter("input.seed", tmp_path, {"enabled": True, "alpha": 2.0})
+
+    selected_path = tmp_path / "basin_prefilter" / "candidates" / "good_two" / "input.candidate"
+    assert selected == selected_path
+    assert selected_path.exists()
+    rows = json.loads((tmp_path / "basin_prefilter" / "candidates.json").read_text())
+    failed = next(row for row in rows if row["label"] == "bad:one")
+    successful = next(row for row in rows if row["label"] == "good:two")
+    assert failed["error"] == "RuntimeError: boom"
+    assert successful["input_path"] == str(selected_path)
+    assert successful["prefilter_rank"] == 1
+
+
+def test_boundary_reference_preconditioner_raises_when_all_candidates_fail(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _configure(tmp_path)
+    monkeypatch.setattr(qio.vj, "read_indata", lambda _path: InData(scalars={}, indexed={}))
+    monkeypatch.setattr(
+        qio.vj,
+        "interpolate_indata_boundary",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("interpolation failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="no successful candidates"):
+        qio.run_boundary_reference_preconditioner(
+            "input.seed",
+            tmp_path,
+            {
+                "enabled": True,
+                "reference_input": "input.reference",
+                "lambdas": (0.5, 1.0),
+            },
+        )
+
+    summary = json.loads((tmp_path / "boundary_reference_preconditioner" / "summary.json").read_text())
+    assert [row["lambda"] for row in summary] == [0.5, 1.0]
+    for row in summary:
+        assert row["selected"] is False
+        assert row["score"] == float("inf")
+        assert row["error"] == "RuntimeError: interpolation failed"
+
+
 def test_make_options_and_diagnostics_helpers_use_configured_targets(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
