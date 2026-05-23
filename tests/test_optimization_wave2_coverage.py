@@ -345,14 +345,14 @@ def test_projected_replay_residuals_env_and_backend_branches(monkeypatch) -> Non
     assert opt._projected_replay_residuals_enabled() is True
     monkeypatch.delenv("VMEC_JAX_OPT_PROJECTED_REPLAY_RESIDUALS")
 
-    assert opt._projected_replay_residuals_enabled() is True
+    assert opt._projected_replay_residuals_enabled() is False
 
     opt._solver_device_name = "cpu"
     assert opt._projected_replay_residuals_enabled() is False
 
     opt._solver_device_name = None
     monkeypatch.setattr(compat, "jax", SimpleNamespace(default_backend=lambda: "cuda"))
-    assert opt._projected_replay_residuals_enabled() is True
+    assert opt._projected_replay_residuals_enabled() is False
     monkeypatch.setattr(compat, "jax", SimpleNamespace(default_backend=lambda: "cpu"))
     assert opt._projected_replay_residuals_enabled() is False
     monkeypatch.setattr(
