@@ -26,6 +26,7 @@ vmec-jax documentation
       quickstart
       optimization
       optimization_sweep_results
+      free_boundary_coil_optimization
 
    .. toctree::
       :maxdepth: 2

@@ -73,6 +73,58 @@ curl -L -O https://raw.githubusercontent.com/uwplasma/vmec_jax/main/examples/dat
 vmec_jax input.cth_like_free_bdy_lasym_small
 ```
 
+## Single-Stage Free-Boundary Coil Optimization
+
+The research branch `feature/freeb-essos-coil-single-stage` adds the first
+coil-aware free-boundary lane. The compatibility path still uses VMEC-style
+`mgrid` files, but the new path can sample the external field directly from
+differentiable JAX Biot-Savart coils. This is the architecture needed for a
+true single-stage loop:
+
+```text
+coil Fourier dofs/currents -> direct Biot-Savart field -> free-boundary VMEC
+-> wout/Boozer/QS diagnostics -> coil-only objective update
+```
+
+![Direct-coil free-boundary architecture](docs/_static/figures/freeb_single_stage_architecture.png)
+
+The current numerical smoke example uses ESSOS Landreman-Paul QA coils. It
+first writes an `mgrid` from the same coils, then runs the same four-point
+nominal beta scan with both free-boundary backends: generated `mgrid` and
+direct JAX coils. In this low-resolution run, the two `vmec_jax` providers
+produce identical scalar equilibrium diagnostics recorded in the JSON summary.
+
+| Backend | beta (%) | residual norm | aspect | mean iota | wall time (s) |
+|---|---:|---:|---:|---:|---:|
+| direct coils | 0.000 | 1.090e-02 | 6.0000 | 0.39318 | 1.26 |
+| generated mgrid | 0.000 | 1.090e-02 | 6.0000 | 0.39318 | 11.92 |
+| direct coils | 1.000 | 1.090e-02 | 6.0000 | 0.39318 | 1.26 |
+| generated mgrid | 1.000 | 1.090e-02 | 6.0000 | 0.39318 | 1.26 |
+
+![Direct-coil beta scan](docs/_static/figures/freeb_single_stage_beta_scan.png)
+
+![Direct-coil provider parity](docs/_static/figures/freeb_single_stage_provider_parity.png)
+
+Reproduce the scan and plots from a developer checkout with the ESSOS mgrid
+branch on `PYTHONPATH`:
+
+```bash
+PYTHONPATH=/Users/rogeriojorge/local/ESSOS_mgrid_pr:$PYTHONPATH \
+  python examples/free_boundary_essos_coils_beta_scan.py \
+  --outdir results/free_boundary_essos_coils_beta_scan_readme
+
+python tools/diagnostics/render_freeb_single_stage_readme.py \
+  --summary results/free_boundary_essos_coils_beta_scan_readme/summary.json \
+  --outdir docs/_static/figures
+```
+
+What is fully in this branch: JAX-native coil-field sampling, ESSOS coil
+conversion, generated-mgrid compatibility, direct-coil free-boundary forward
+solves, provider-gradient tests, and dense toy vacuum-adjoint tests. What is
+not claimed yet: publication-level exact gradients through the full production
+free-boundary/NESTOR solve. The implementation plan and validation status are
+tracked in `plan_freeb.md` and `docs/free_boundary_coil_optimization.rst`.
+
 ## Backend Selection
 
 `vmec_jax` follows the selected JAX backend. If CPU-only JAX is installed, runs

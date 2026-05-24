@@ -790,31 +790,62 @@ WP2 Pure JAX coil Biot-Savart:                 75%
 WP3 ESSOS adapter:                             80%
 WP4 JAX mgrid interpolation:                   85%
 WP5 Free-boundary provider hook:               65%
-WP6 Direct-coil forward example:               65%
+WP6 Direct-coil forward example:               75%
 WP7 Vacuum adjoint scaffold:                  100%
 WP8 Gradient checks:                           65%
 WP9 VMEC2000 diagnostics:                      25%
 WP10 Benchmarks:                                0%
 WP11 Coil-only QS optimization example:         0%
 WP12 Robust coil perturbations:                 0%
-WP13 Documentation:                            10%
-WP14 CI policy:                                20%
-Overall branch completion:                     48%
+WP13 Documentation:                            45%
+WP14 CI policy:                                25%
+Overall branch completion:                     51%
 ```
 
 ## Immediate Next Steps
 
-1. Commit and push the ESSOS mgrid export branch, then open the ESSOS PR.
-2. Commit and push the `vmec_jax` direct-provider runtime hook and Landreman-Paul QA beta-scan example.
-3. Add the VMEC2000 comparison diagnostic using ESSOS-generated mgrid versus direct-coil sampling.
-4. Add the first coil-only QS optimization example, using only coil dofs/currents as optimization variables.
-5. Add docs page `docs/free_boundary_coil_optimization.rst` that clearly separates provider-level differentiability from full free-boundary adjoint phase-2 work.
+1. Add the first coil-only QS optimization example, using only coil dofs/currents as optimization variables.
+2. Add benchmark scripts for direct-coil field sampling, free-boundary solves, and provider gradients.
+3. Continue the VMEC2000 generated-mgrid comparison diagnostic until the optional xfail can be bounded or promoted.
+4. Add robust coil perturbation utilities and deterministic tests.
+5. Re-check PR CI, including Codecov patch coverage, after each commit.
 
 ## Need From User
 
 Nothing is required right now. The next implementation step can proceed locally. Later, maintainers should decide whether ESSOS mgrid export should be released before the `vmec_jax` example is promoted from research example to documented workflow.
 
 ## Work Log
+
+### 2026-05-24 README/docs visualization slice
+
+Steps taken:
+
+1. Ran the ESSOS Landreman-Paul QA four-point beta scan with generated-mgrid and direct-coil providers:
+   `PYTHONPATH=/Users/rogeriojorge/local/ESSOS_mgrid_pr:$PYTHONPATH python examples/free_boundary_essos_coils_beta_scan.py --outdir results/free_boundary_essos_coils_beta_scan_readme`.
+2. Added `tools/diagnostics/render_freeb_single_stage_readme.py` to render reviewer-facing figures from the JSON summary.
+3. Generated:
+   - `docs/_static/figures/freeb_single_stage_architecture.png`
+   - `docs/_static/figures/freeb_single_stage_beta_scan.png`
+   - `docs/_static/figures/freeb_single_stage_provider_parity.png`
+   - `docs/_static/figures/freeb_single_stage_beta_scan_summary.csv`
+4. Added `docs/free_boundary_coil_optimization.rst` and linked it from `docs/index.rst`.
+5. Added a README section for the direct-coil single-stage free-boundary lane.
+
+Results obtained:
+
+1. The mgrid and direct-coil `vmec_jax` providers produced identical recorded scalar diagnostics in the low-resolution beta scan.
+2. The first mgrid point includes cold-start overhead; subsequent direct/mgrid timings are about 1.26 s per case for this smoke setting.
+3. The documentation now separates implemented provider-level differentiability from the phase-2 production free-boundary/NESTOR adjoint.
+
+Best next steps:
+
+1. Run the docs build and the direct-coil fast tests after this documentation slice.
+2. Commit and push this README/docs visualization update.
+3. Start WP11, the coil-only optimization example, because the architecture and forward beta-scan evidence are now visible.
+
+Need from user:
+
+Nothing now.
 
 ### 2026-05-24
 
