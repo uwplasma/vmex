@@ -11,6 +11,7 @@ from vmec_jax.external_fields import (
     apply_stellarator_symmetry_to_currents,
     apply_stellarator_symmetry_to_curves,
     biot_savart_xyz,
+    build_coil_field_geometry,
     coil_coil_distance_soft,
     coil_current_norm,
     coil_curvatures,
@@ -22,9 +23,9 @@ from vmec_jax.external_fields import (
     fourier_curves_to_gamma,
     length_penalty,
     sample_coil_field_cylindrical,
+    sample_coil_field_cylindrical_from_geometry,
     sample_external_field_cylindrical,
 )
-from vmec_jax.external_fields.coils_jax import build_coil_field_geometry, sample_coil_field_cylindrical_from_geometry
 
 
 def _circle_params(*, current: float = 3.0, radius: float = 1.2, n_segments: int = 256) -> CoilFieldParams:

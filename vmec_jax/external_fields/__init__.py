@@ -10,6 +10,7 @@ from .coils_jax import (
     apply_stellarator_symmetry_to_currents,
     apply_stellarator_symmetry_to_curves,
     biot_savart_xyz,
+    build_coil_field_geometry,
     coil_coil_distance_soft,
     coil_current_norm,
     coil_curvatures,
@@ -21,6 +22,8 @@ from .coils_jax import (
     fourier_curves_to_gamma,
     length_penalty,
     sample_coil_field_cylindrical,
+    sample_coil_field_cylindrical_from_geometry,
+    sample_coil_field_xyz_from_geometry,
 )
 from .essos_adapter import from_essos_coils
 from .mgrid_jax import MGridFieldParams, interpolate_mgrid_bfield_jax, sample_mgrid_field_cylindrical
@@ -33,6 +36,7 @@ __all__ = [
     "apply_stellarator_symmetry_to_currents",
     "apply_stellarator_symmetry_to_curves",
     "biot_savart_xyz",
+    "build_coil_field_geometry",
     "coil_coil_distance_soft",
     "coil_current_norm",
     "coil_curvatures",
@@ -46,6 +50,8 @@ __all__ = [
     "interpolate_mgrid_bfield_jax",
     "length_penalty",
     "sample_coil_field_cylindrical",
+    "sample_coil_field_cylindrical_from_geometry",
+    "sample_coil_field_xyz_from_geometry",
     "sample_external_field_cylindrical",
     "sample_mgrid_field_cylindrical",
 ]
