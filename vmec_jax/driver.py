@@ -1226,6 +1226,7 @@ def run_fixed_boundary(
     external_field_provider_kind: str | None = None,
     external_field_provider_static: Any = None,
     external_field_provider_params: Any = None,
+    free_boundary_activate_fsq: float | None = None,
     _auto_cli_fixed_boundary_mode: bool = True,
     _solver_device_context_active: bool = False,
 ):
@@ -2985,6 +2986,7 @@ def run_fixed_boundary(
                 external_field_provider_kind=external_field_provider_kind,
                 external_field_provider_static=external_field_provider_static,
                 external_field_provider_params=external_field_provider_params,
+                free_boundary_activate_fsq=free_boundary_activate_fsq,
             )
             dynamic_scan_default = "1" if bool(cfg.lasym) else "0"
             dynamic_scan_env = os.getenv("VMEC_JAX_DYNAMIC_SCAN", dynamic_scan_default).strip().lower()

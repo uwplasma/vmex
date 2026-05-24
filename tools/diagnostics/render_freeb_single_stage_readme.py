@@ -84,9 +84,13 @@ def _write_csv(runs: list[dict[str, Any]], outdir: Path) -> Path:
         "free_boundary_ivac",
         "free_boundary_nestor_model",
         "free_boundary_vacuum_stub",
+        "free_boundary_activate_fsq",
+        "free_boundary_bnormal_rms",
+        "free_boundary_bsqvac_rms",
+        "free_boundary_gsource_rms",
     ]
     with out.open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fields)
+        writer = csv.DictWriter(f, fieldnames=fields, lineterminator="\n")
         writer.writeheader()
         for run in sorted(runs, key=lambda r: (float(r["nominal_beta_percent"]), str(r["backend"]))):
             writer.writerow({field: run.get(field) for field in fields})
@@ -188,12 +192,14 @@ def render_beta_scan(runs: list[dict[str, Any]], outdir: Path) -> Path:
 
     fig, axes = plt.subplots(2, 3, figsize=(13.2, 7.4), constrained_layout=True)
     for ax, (metric, ylabel, scale) in zip(axes.ravel(), metrics, strict=True):
+        plotted_y: list[float] = []
         for backend in ("mgrid", "direct"):
             if backend not in grouped:
                 continue
             backend_runs = grouped[backend]
             x = np.array([float(run["nominal_beta_percent"]) for run in backend_runs])
             y = np.array([float(run[metric]) for run in backend_runs])
+            plotted_y.extend(float(v) for v in y if np.isfinite(v))
             ax.plot(
                 x,
                 y,
@@ -207,14 +213,29 @@ def render_beta_scan(runs: list[dict[str, Any]], outdir: Path) -> Path:
         ax.set_ylabel(ylabel)
         if scale == "log":
             ax.set_yscale("log")
-            ax.set_ylim(5.0e-3, 2.0e-2)
+            positive = [v for v in plotted_y if v > 0.0]
+            if positive:
+                ymin = min(positive)
+                ymax = max(positive)
+                if np.isclose(ymin, ymax):
+                    ymin *= 0.8
+                    ymax *= 1.25
+                ax.set_ylim(max(ymin * 0.8, 1.0e-16), ymax * 1.25)
         else:
             ax.ticklabel_format(axis="y", style="plain", useOffset=False)
         if metric == "aspect":
             ax.axhline(6.0, color="#475569", linewidth=1.0, linestyle=":", label="A=6")
-            ax.set_ylim(5.98, 6.02)
+            vals = plotted_y + [6.0]
+            lo = min(vals)
+            hi = max(vals)
+            pad = max(0.02, 0.08 * max(hi - lo, 1.0e-12))
+            ax.set_ylim(lo - pad, hi + pad)
         if metric == "mean_iota":
-            ax.set_ylim(0.385, 0.400)
+            if plotted_y:
+                lo = min(plotted_y)
+                hi = max(plotted_y)
+                pad = max(0.01, 0.08 * max(hi - lo, 1.0e-12))
+                ax.set_ylim(lo - pad, hi + pad)
         if metric == "beta_proxy_percent":
             ax.set_ylim(bottom=0.0)
         ax.margins(x=0.08)

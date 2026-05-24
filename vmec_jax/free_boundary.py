@@ -352,6 +352,7 @@ class NestorSolveResult:
     solve_time_s: float
     sample_time_s: float
     model: str = "spectral_poisson_external_only"
+    diagnostics: dict[str, float | str | bool] | None = None
 
 
 def _dense_lu_factor(matrix: np.ndarray) -> Any | None:
@@ -3140,6 +3141,7 @@ def nestor_external_only_step(
     sample_time = max(0.0, time.perf_counter() - t0)
     ntheta, nzeta = sample.R.shape
     selected_mode, mode_reason = _select_nestor_mode(ntheta=ntheta, nzeta=nzeta)
+    provider_kind = "mgrid" if external_field_provider_kind is None else str(external_field_provider_kind).strip().lower()
 
     if ivacskip is not None:
         reuse_step = (int(ivacskip) != 0 and runtime is not None)
@@ -3329,6 +3331,32 @@ def nestor_external_only_step(
     bsqvac = np.asarray(vac_total.bsqvac)
     solve_time = max(0.0, time.perf_counter() - ts)
 
+    def _rms(arr: Any) -> float:
+        vals = np.asarray(arr, dtype=float)
+        return float(np.sqrt(np.mean(vals * vals))) if vals.size else 0.0
+
+    diagnostics: dict[str, float | str | bool] = {
+        "provider_kind": provider_kind,
+        "reused": bool(reuse_step),
+        "rhs_mode": str(rhs_mode),
+        "mode": str(used_mode),
+        "br_rms": _rms(sample.br),
+        "bp_rms": _rms(sample.bp),
+        "bz_rms": _rms(sample.bz),
+        "bnormal_rms": _rms(sample.vac_ext.bnormal),
+        "bnormal_unit_rms": _rms(sample.vac_ext.bnormal_unit),
+        "rhs_rms": _rms(rhs),
+        "gsource_rms": _rms(gsource_vmec),
+        "bsqvac_rms": _rms(bsqvac),
+        "bsqvac_mean": float(np.mean(np.asarray(bsqvac, dtype=float))) if np.asarray(bsqvac).size else 0.0,
+    }
+    if bvec_mode is not None:
+        diagnostics["bvec_mode_rms"] = _rms(bvec_mode)
+    if bvec_mode_nonsing is not None:
+        diagnostics["bvec_mode_nonsing_rms"] = _rms(bvec_mode_nonsing)
+    if bvec_mode_analytic is not None:
+        diagnostics["bvec_mode_analytic_rms"] = _rms(bvec_mode_analytic)
+
     res = NestorSolveResult(
         vac_total=vac_total,
         phi=phi,
@@ -3336,6 +3364,7 @@ def nestor_external_only_step(
         solve_time_s=solve_time,
         sample_time_s=sample_time,
         model=used_mode,
+        diagnostics=diagnostics,
     )
     source_sym_cached = runtime_source_sym_cached
     bvec_nonsing_cached = runtime_bvec_nonsing_cached

@@ -53,12 +53,13 @@ the JSON summary for this low-resolution smoke run. The scan records both the
 input ``PRES_SCALE`` and the output energy ratio ``100 W_p / W_B`` so future
 plots cannot accidentally validate only the vacuum case.
 
-Current limitation: with the short README solve budget the VMEC2000-style
-free-boundary/NESTOR cadence does not turn on the active vacuum solve. Forced
-turn-on tests do enter the dense NESTOR-like model, but the high-pressure
-finite-beta residuals are not yet bounded enough for promotion. Therefore this
-page currently documents finite-pressure direct-provider plumbing, not a final
-single-stage finite-beta optimization claim.
+The example uses ``--activate-fsq 1.0`` by default. This forces early
+VMEC2000-style NESTOR turn-on so the short run exercises active finite-pressure
+vacuum coupling instead of stopping in the inactive ``ivac=-1`` cadence. That
+is useful for provider validation, but it is not yet a converged high-beta
+result: the active residual norm remains large and must be bounded against
+VMEC2000 before this becomes a promoted finite-beta single-stage optimization
+claim.
 
 .. image:: _static/figures/freeb_single_stage_provider_parity.png
    :alt: Direct-coil provider parity
@@ -77,7 +78,8 @@ merged and released, put the ESSOS branch checkout on ``PYTHONPATH``.
 
    PYTHONPATH=/Users/rogeriojorge/local/ESSOS_mgrid_pr:$PYTHONPATH \
      python examples/free_boundary_essos_coils_beta_scan.py \
-     --outdir results/free_boundary_essos_coils_beta_scan_readme
+     --outdir results/free_boundary_essos_coils_beta_scan_readme \
+     --activate-fsq 1.0
 
 Render the README/docs figures from the generated JSON summary:
 
@@ -105,6 +107,9 @@ Current fast tests cover:
   nonzero pressure;
 - generated-``mgrid`` versus direct-coil ``vmec_jax`` provider parity for the
   ESSOS Landreman-Paul QA finite-pressure smoke case;
+- active direct-coil NESTOR-step sensitivity to coil-current changes, including
+  the expected linear normal-field/source scaling and quadratic ``bsqvac``
+  scaling;
 - dense toy vacuum-adjoint tests.
 
 The optional VMEC2000 generated-``mgrid`` comparison is present but xfailed for
@@ -117,7 +122,8 @@ Next Implementation Steps
 -------------------------
 
 - Make active NESTOR/free-boundary vacuum coupling respond robustly to direct
-  coil parameters in finite-pressure cases.
+  coil parameters in finite-pressure accepted equilibria, not only in the
+  isolated active NESTOR step.
 - Add the first coil-only optimization example where the plasma boundary is
   never an independent optimization variable, only after the accepted
   equilibrium is demonstrably sensitive to coil parameters.

@@ -144,6 +144,10 @@ def summarize_run(run, wout_path: Path, *, backend: str, beta_percent: float, wa
         "free_boundary_ivac": None,
         "free_boundary_nestor_model": None,
         "free_boundary_vacuum_stub": None,
+        "free_boundary_activate_fsq": None,
+        "free_boundary_bnormal_rms": None,
+        "free_boundary_bsqvac_rms": None,
+        "free_boundary_gsource_rms": None,
     }
     for key in ("final_fsqr", "final_fsqz", "final_fsql"):
         val = diag.get(key)
@@ -154,6 +158,12 @@ def summarize_run(run, wout_path: Path, *, backend: str, beta_percent: float, wa
         summary["free_boundary_ivac"] = freeb_diag.get("ivac")
         summary["free_boundary_nestor_model"] = freeb_diag.get("nestor_model")
         summary["free_boundary_vacuum_stub"] = freeb_diag.get("vacuum_stub")
+        summary["free_boundary_activate_fsq"] = freeb_diag.get("activate_fsq")
+        nestor_diag = freeb_diag.get("last_nestor_diagnostics")
+        if isinstance(nestor_diag, dict):
+            summary["free_boundary_bnormal_rms"] = nestor_diag.get("bnormal_rms")
+            summary["free_boundary_bsqvac_rms"] = nestor_diag.get("bsqvac_rms")
+            summary["free_boundary_gsource_rms"] = nestor_diag.get("gsource_rms")
     try:
         summary["aspect"] = float(equilibrium_aspect_ratio_from_state(state=run.state, static=run.static))
     except Exception:
@@ -188,6 +198,7 @@ def run_one_case(
     output_dir: Path,
     beta_percent: float,
     max_iter: int,
+    activate_fsq: float | None,
     direct_coil_params=None,
 ) -> dict[str, Any]:
     """Run one mgrid or direct-coil free-boundary case."""
@@ -200,6 +211,7 @@ def run_one_case(
             multigrid=False,
             verbose=False,
             jit_forces=False,
+            free_boundary_activate_fsq=activate_fsq,
         )
     elif backend == "direct":
         run = run_free_boundary(
@@ -210,6 +222,7 @@ def run_one_case(
             jit_forces=False,
             external_field_provider_kind="direct_coils",
             external_field_provider_params=direct_coil_params,
+            free_boundary_activate_fsq=activate_fsq,
         )
     else:
         raise ValueError(f"unknown backend {backend!r}")
@@ -237,6 +250,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mgrid-rmax", type=float, default=15.0)
     parser.add_argument("--mgrid-zmin", type=float, default=-5.0)
     parser.add_argument("--mgrid-zmax", type=float, default=5.0)
+    parser.add_argument(
+        "--activate-fsq",
+        type=float,
+        default=1.0,
+        help=(
+            "Free-boundary activation threshold for this finite-pressure research example. "
+            "Use 1e-3 for literal VMEC2000 cadence parity; the default forces early "
+            "vacuum coupling so direct-coil and mgrid backends are exercised in short runs."
+        ),
+    )
     parser.add_argument("--skip-mgrid-runs", action="store_true")
     parser.add_argument("--skip-direct-runs", action="store_true")
     args = parser.parse_args(argv)
@@ -298,6 +321,7 @@ def main(argv: list[str] | None = None) -> int:
                     output_dir=outdir,
                     beta_percent=beta_percent,
                     max_iter=args.max_iter,
+                    activate_fsq=args.activate_fsq,
                 )
             )
 
@@ -323,6 +347,7 @@ def main(argv: list[str] | None = None) -> int:
                     output_dir=outdir,
                     beta_percent=beta_percent,
                     max_iter=args.max_iter,
+                    activate_fsq=args.activate_fsq,
                     direct_coil_params=direct_params,
                 )
             )

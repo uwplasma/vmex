@@ -789,32 +789,69 @@ WP1 Provider base API:                         100%
 WP2 Pure JAX coil Biot-Savart:                 75%
 WP3 ESSOS adapter:                             80%
 WP4 JAX mgrid interpolation:                   85%
-WP5 Free-boundary provider hook:               60%
-WP6 Direct-coil forward example:               75%
+WP5 Free-boundary provider hook:               70%
+WP6 Direct-coil forward example:               80%
 WP7 Vacuum adjoint scaffold:                  100%
-WP8 Gradient checks:                           70%
-WP9 VMEC2000 diagnostics:                      25%
-WP10 Benchmarks:                                0%
+WP8 Gradient checks:                           75%
+WP9 VMEC2000 diagnostics:                      30%
+WP10 Benchmarks/diagnostics:                   10%
 WP11 Coil-only QS optimization example:         5%
 WP12 Robust coil perturbations:                 0%
-WP13 Documentation:                            50%
-WP14 CI policy:                                30%
-Overall branch completion:                     51%
+WP13 Documentation:                            60%
+WP14 CI policy:                                40%
+Overall branch completion:                     56%
 ```
 
 ## Immediate Next Steps
 
-1. Add the first coil-only QS optimization example, using only coil dofs/currents as optimization variables.
-2. Add benchmark scripts for direct-coil field sampling, free-boundary solves, and provider gradients.
-3. Continue the VMEC2000 generated-mgrid comparison diagnostic until the optional xfail can be bounded or promoted.
-4. Add robust coil perturbation utilities and deterministic tests.
-5. Re-check PR CI, including Codecov patch coverage, after each commit.
+1. Fix accepted-state free-boundary correctness: recompute final residuals and diagnostics on the accepted final state with a fresh active NESTOR sample.
+2. Make active finite-pressure accepted equilibria respond robustly to direct-coil current/geometry changes, not only the isolated NESTOR step.
+3. Add benchmark scripts for direct-coil field sampling, free-boundary solves, and provider gradients.
+4. Continue the VMEC2000 generated-mgrid comparison diagnostic until the optional xfail can be bounded or promoted.
+5. Add the first coil-only QS optimization example only after accepted-state direct-coil sensitivity is validated.
+6. Add robust coil perturbation utilities and deterministic tests.
+7. Re-check PR CI, including Codecov patch coverage, after each commit.
 
 ## Need From User
 
 Nothing is required right now. The next implementation step can proceed locally. Later, maintainers should decide whether ESSOS mgrid export should be released before the `vmec_jax` example is promoted from research example to documented workflow.
 
 ## Work Log
+
+### 2026-05-24 Active finite-pressure direct-coil diagnostics
+
+Steps taken:
+
+1. Added explicit `free_boundary_activate_fsq` plumbing through `run_free_boundary`/`run_fixed_boundary` into the VMEC-style free-boundary cadence. This keeps literal VMEC2000 parity as the default while allowing short research examples/tests to force active vacuum coupling without hidden environment variables.
+2. Added `NestorSolveResult.diagnostics` and propagated `free_boundary.last_nestor_diagnostics` into solve diagnostics. The diagnostics record provider kind, normal-field source magnitudes, RHS/source norms, and coupled `bsqvac` magnitudes.
+3. Corrected the run-level `free_boundary.vacuum_stub` diagnostic so it is `False` when an active NESTOR-like model actually ran.
+4. Added `tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`, covering active NESTOR-step sensitivity to direct-coil current and explicit forced-activation diagnostics. The optional full-solve ESSOS sensitivity guard remains `RUN_FULL`/xfail until accepted-state sensitivity is fixed.
+5. Added `tools/diagnostics/freeb_direct_provider_sensitivity.py` for current-scale and geometry-perturbation sweeps with JSON summaries.
+6. Updated `examples/free_boundary_essos_coils_beta_scan.py` with explicit `--activate-fsq` and extra active NESTOR summary channels.
+7. Regenerated `docs/_static/figures/freeb_single_stage_beta_scan.png`, `docs/_static/figures/freeb_single_stage_provider_parity.png`, and `docs/_static/figures/freeb_single_stage_beta_scan_summary.csv`.
+8. Fixed the beta-scan renderer y-limits so active residual/aspect/iota values are visible instead of clipped by the previous inactive-smoke ranges.
+
+Results obtained:
+
+1. The isolated active NESTOR bridge is sensitive to direct-coil current: normal-field/source channels scale linearly with current and `bsqvac` scales quadratically.
+2. The active finite-pressure ESSOS beta scan now reports `ivac=3`, `nestor_model=vmec2000_like_dense_integral`, and `vacuum_stub=False`.
+3. Direct-coil and generated-mgrid providers still agree for the same active finite-pressure path to recorded precision in the low-resolution scan.
+4. The active residual norm is still large (`~7.25`), so this remains provider/coupling validation, not a converged finite-beta optimization result.
+5. Tests passed:
+   - `pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py tests/test_free_boundary_coil_provider_forward.py tests/test_free_boundary_vacuum_adjoint.py`: 10 passed, 1 skipped in 16.13 s.
+   - `PYTHONPATH=/Users/rogeriojorge/local/ESSOS_mgrid_pr:$PYTHONPATH pytest -q tests/test_external_fields_coils_jax.py tests/test_external_fields_essos_adapter.py tests/test_external_fields_mgrid_jax.py tests/test_free_boundary_vacuum_adjoint.py tests/test_free_boundary_coil_provider_forward.py tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py tests/test_free_boundary_essos_coil_parity.py::test_essos_direct_coil_free_boundary_matches_generated_mgrid_backend`: 28 passed, 1 skipped in 42.63 s.
+6. Docs build passed: `python -m sphinx -T -b html docs /tmp/vmec_jax_freeb_docs`.
+
+Best next steps:
+
+1. Recompute final accepted-state residuals and active NESTOR diagnostics after the last accepted update; current `final_fsqr/final_fsqz/final_fsql` are last pre-update values.
+2. Refresh NESTOR sampling for trial/accepted states, so accepted-state sensitivity to coil changes is measured against the updated boundary rather than a stale pre-trial boundary.
+3. Promote the optional full-solve direct-coil sensitivity xfail to a passing gate once accepted-state sensitivity is bounded.
+4. Only then add the first coil-only single-stage QS optimization example.
+
+Need from user:
+
+Nothing now.
 
 ### 2026-05-24 Finite-pressure free-boundary correction
 

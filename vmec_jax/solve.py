@@ -1233,6 +1233,7 @@ def _free_boundary_iter_controls_vmec(
     nvacskip: int,
     nvskip0: int,
     fsq_rz_prev: float,
+    activate_fsq: float | None = None,
 ) -> tuple[int, int, int]:
     """VMEC2000-style `ivac/ivacskip/nvacskip` update (funct3d, ictrl_prec2d=0).
 
@@ -1251,7 +1252,10 @@ def _free_boundary_iter_controls_vmec(
     if not np.isfinite(fs) or fs < 0.0:
         fs = 1.0
 
-    activate_threshold = float(os.getenv("VMEC_JAX_FREEB_ACTIVATE_FSQ", "1.0e-3") or 1.0e-3)
+    if activate_fsq is None:
+        activate_threshold = float(os.getenv("VMEC_JAX_FREEB_ACTIVATE_FSQ", "1.0e-3") or 1.0e-3)
+    else:
+        activate_threshold = float(activate_fsq)
     # VMEC funct3d:
     #   IF (iter2 > 1 .AND. fsqr+fsqz <= 1e-3) ivac = ivac + 1
     # Keep this literal behavior for cadence parity.
@@ -4865,6 +4869,7 @@ def solve_fixed_boundary_residual_iter(
     external_field_provider_kind: str | None = None,
     external_field_provider_static: Any = None,
     external_field_provider_params: Any = None,
+    free_boundary_activate_fsq: float | None = None,
     state_only: bool = False,
 ) -> SolveVmecResidualResult:
     """VMEC-style fixed-point update loop using preconditioned force residuals."""
@@ -9478,6 +9483,7 @@ def solve_fixed_boundary_residual_iter(
     freeb_nestor_runtime: NestorRuntimeState | None = None
     freeb_bsqvac_half_current = None
     freeb_last_model = "none"
+    freeb_last_diagnostics: dict[str, Any] = {}
     freeb_plascur = 0.0
     try:
         icurv_arr = np.asarray(getattr(wout_like, "icurv", np.asarray([0.0], dtype=float)), dtype=float)
@@ -10094,6 +10100,7 @@ def solve_fixed_boundary_residual_iter(
                         nvacskip=int(freeb_nvacskip),
                         nvskip0=int(freeb_nvskip0),
                         fsq_rz_prev=float(fsq_rz_prev),
+                        activate_fsq=free_boundary_activate_fsq,
                     )
                     freeb_controls_cached = (
                         int(freeb_ivac),
@@ -10221,6 +10228,9 @@ def solve_fixed_boundary_residual_iter(
                         freeb_reused = bool(getattr(nestor_res, "reused", False))
                         freeb_solve_time = float(getattr(nestor_res, "solve_time_s", 0.0))
                         freeb_sample_time = float(getattr(nestor_res, "sample_time_s", 0.0))
+                        diag_nestor = getattr(nestor_res, "diagnostics", None)
+                        if isinstance(diag_nestor, dict):
+                            freeb_last_diagnostics = dict(diag_nestor)
                         bsqvac_edge = np.asarray(nestor_res.vac_total.bsqvac, dtype=float)
                         if (
                             bsqvac_edge.ndim == 2
@@ -13129,7 +13139,9 @@ def solve_fixed_boundary_residual_iter(
             "ivacskip": int(freeb_ivacskip),
             "couple_edge": bool(freeb_couple_edge),
             "nestor_model": str(freeb_last_model),
-            "vacuum_stub": True,
+            "vacuum_stub": not bool(str(freeb_last_model).strip() and str(freeb_last_model) != "none"),
+            "activate_fsq": None if free_boundary_activate_fsq is None else float(free_boundary_activate_fsq),
+            "last_nestor_diagnostics": dict(freeb_last_diagnostics),
         },
         "freeb_ivac_history": np.asarray(freeb_ivac_history, dtype=int),
         "freeb_ivacskip_history": np.asarray(freeb_ivacskip_history, dtype=int),

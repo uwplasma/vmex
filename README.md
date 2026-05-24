@@ -97,16 +97,18 @@ are present, and that direct-coil and generated-`mgrid` provider samples produce
 identical recorded scalar diagnostics.
 
 This is not yet the promoted high-beta free-boundary optimization result:
-with the short README budget the VMEC2000-style NESTOR turn-on remains below
-the activation threshold, so the branch still needs the active finite-pressure
-vacuum-coupling lane before making publication-level single-stage claims.
+the example now forces early VMEC2000-style NESTOR turn-on for a short active
+finite-pressure smoke, but the residuals are not yet bounded tightly enough for
+publication-level single-stage claims. The important current result is that
+direct-coil and generated-`mgrid` backends agree for the same finite-pressure
+active-coupling path.
 
 | Backend | pressure scale | beta proxy `100Wp/WB` (%) | residual norm | aspect | mean iota | wall time (s) |
 |---|---:|---:|---:|---:|---:|---:|
-| direct coils | 11.487 | 4.200e-05 | 1.090e-02 | 6.0000 | 0.39318 | 1.25 |
-| generated mgrid | 11.487 | 4.200e-05 | 1.090e-02 | 6.0000 | 0.39318 | 1.23 |
-| direct coils | 34.462 | 1.260e-04 | 1.090e-02 | 6.0000 | 0.39318 | 1.24 |
-| generated mgrid | 34.462 | 1.260e-04 | 1.090e-02 | 6.0000 | 0.39318 | 1.26 |
+| direct coils | 11.487 | 4.600e-05 | 7.247e+00 | 5.8434 | 0.16253 | 2.37 |
+| generated mgrid | 11.487 | 4.600e-05 | 7.247e+00 | 5.8434 | 0.16253 | 1.78 |
+| direct coils | 34.462 | 1.380e-04 | 7.247e+00 | 5.8434 | 0.16253 | 2.38 |
+| generated mgrid | 34.462 | 1.380e-04 | 7.247e+00 | 5.8434 | 0.16253 | 1.76 |
 
 ![Direct-coil beta scan](docs/_static/figures/freeb_single_stage_beta_scan.png)
 
@@ -118,7 +120,8 @@ branch on `PYTHONPATH`:
 ```bash
 PYTHONPATH=/Users/rogeriojorge/local/ESSOS_mgrid_pr:$PYTHONPATH \
   python examples/free_boundary_essos_coils_beta_scan.py \
-  --outdir results/free_boundary_essos_coils_beta_scan_readme
+  --outdir results/free_boundary_essos_coils_beta_scan_readme \
+  --activate-fsq 1.0
 
 python tools/diagnostics/render_freeb_single_stage_readme.py \
   --summary results/free_boundary_essos_coils_beta_scan_readme/summary.json \
