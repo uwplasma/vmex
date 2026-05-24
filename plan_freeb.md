@@ -901,12 +901,12 @@ WP4 JAX mgrid interpolation:                   85%
 WP5 Free-boundary provider hook:               91%
 WP6 Direct-coil forward example:               90%
 WP7 Vacuum adjoint scaffold:                  100%
-WP8 Gradient checks:                           94%
+WP8 Gradient checks:                           95%
 WP9 VMEC2000 diagnostics:                      86%
 WP10 Benchmarks/diagnostics:                   95%
 WP11 Coil-only QS optimization example:        82%
 WP12 Robust coil perturbations:               100%
-WP13 Documentation:                            95%
+WP13 Documentation:                            96%
 WP14 CI policy:                                88%
 Overall branch completion:                     93%
 ```

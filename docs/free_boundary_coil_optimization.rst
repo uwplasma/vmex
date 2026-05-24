@@ -66,7 +66,7 @@ The validation ladder is:
 5. Boozer/QS objective: the same complete-solve finite-difference checks after
    Boozer/QS diagnostics are in the objective path.
 
-Only the first two rungs are implemented as fast tests today. The production
+The first three rungs are implemented as fast tests today. The production
 NESTOR adjoint is therefore still a phase-2 deliverable. The intended design is
 to expose a JAX-native NESTOR operator ``A(q) phi = b(q, I, c)`` where ``q`` is
 the VMEC boundary state and ``I, c`` are coil currents and curve coefficients.
@@ -502,6 +502,9 @@ Current fast tests cover:
 - dense toy vacuum-adjoint tests.
 - direct-coil to implicit dense-vacuum-chain finite-difference checks for one
   current scale and one Fourier geometry perturbation.
+- JAX boundary-field projection value parity with the current NumPy
+  implementation plus finite-difference checks with respect to both field
+  samples and boundary geometry.
 
 The optional VMEC2000 generated-``mgrid`` comparison is present but xfailed for
 now. VMEC2000 reads the generated grid and advances the trace locally, but the

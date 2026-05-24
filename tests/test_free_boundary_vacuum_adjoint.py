@@ -5,7 +5,12 @@ import pytest
 
 from vmec_jax._compat import enable_x64
 from vmec_jax.external_fields import CoilFieldParams, sample_coil_field_cylindrical
-from vmec_jax.free_boundary_adjoint import dense_vacuum_residual, dense_vacuum_solve_jax
+from vmec_jax.free_boundary import vacuum_boundary_fields_from_cylindrical
+from vmec_jax.free_boundary_adjoint import (
+    dense_vacuum_residual,
+    dense_vacuum_solve_jax,
+    vacuum_boundary_fields_from_cylindrical_jax,
+)
 
 
 def _well_conditioned_matrix():
@@ -191,3 +196,104 @@ def test_dense_vacuum_adjoint_chain_wrt_coil_geometry_matches_finite_difference(
 
     assert abs(float(exact)) > 1.0e-8
     np.testing.assert_allclose(exact, fd, rtol=2.0e-6, atol=1.0e-10)
+
+
+def _boundary_projection_inputs():
+    from vmec_jax._compat import jnp
+
+    br = jnp.asarray([[0.11, -0.07], [0.05, 0.09]], dtype=float)
+    bp = jnp.asarray([[0.31, 0.22], [-0.18, 0.14]], dtype=float)
+    bz = jnp.asarray([[-0.12, 0.08], [0.16, -0.05]], dtype=float)
+    R = jnp.asarray([[1.2, 1.1], [0.9, 1.05]], dtype=float)
+    Ru = jnp.asarray([[0.03, -0.04], [0.02, 0.05]], dtype=float)
+    Zu = jnp.asarray([[0.25, 0.23], [0.21, 0.24]], dtype=float)
+    Rv = jnp.asarray([[0.07, 0.02], [-0.05, 0.04]], dtype=float)
+    Zv = jnp.asarray([[0.01, -0.03], [0.06, -0.02]], dtype=float)
+    return br, bp, bz, R, Ru, Zu, Rv, Zv
+
+
+def test_jax_boundary_projection_matches_numpy_reference():
+    enable_x64(True)
+    br, bp, bz, R, Ru, Zu, Rv, Zv = _boundary_projection_inputs()
+
+    actual = vacuum_boundary_fields_from_cylindrical_jax(
+        br=br,
+        bp=bp,
+        bz=bz,
+        R=R,
+        Ru=Ru,
+        Zu=Zu,
+        Rv=Rv,
+        Zv=Zv,
+    )
+    expected = vacuum_boundary_fields_from_cylindrical(
+        br=np.asarray(br),
+        bp=np.asarray(bp),
+        bz=np.asarray(bz),
+        R=np.asarray(R),
+        Ru=np.asarray(Ru),
+        Zu=np.asarray(Zu),
+        Rv=np.asarray(Rv),
+        Zv=np.asarray(Zv),
+    )
+
+    for key in ("bu", "bv", "bsupu", "bsupv", "bsqvac", "bnormal", "bnormal_unit", "det_guv"):
+        np.testing.assert_allclose(actual[key], getattr(expected, key), rtol=1.0e-13, atol=1.0e-13)
+
+
+def test_jax_boundary_projection_gradient_wrt_field_matches_finite_difference():
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jax, jnp
+
+    enable_x64(True)
+    br, bp, bz, R, Ru, Zu, Rv, Zv = _boundary_projection_inputs()
+    weights = jnp.asarray([[0.4, -0.2], [0.7, -0.5]], dtype=float)
+    direction = jnp.asarray([[0.3, -0.1], [0.2, 0.5]], dtype=float)
+
+    def objective(scale):
+        vac = vacuum_boundary_fields_from_cylindrical_jax(
+            br=br + scale * direction,
+            bp=bp,
+            bz=bz,
+            R=R,
+            Ru=Ru,
+            Zu=Zu,
+            Rv=Rv,
+            Zv=Zv,
+        )
+        return jnp.sum(weights * vac["bsqvac"]) + 0.2 * jnp.sum(vac["bnormal_unit"] ** 2)
+
+    exact = jax.grad(objective)(0.0)
+    eps = 1.0e-6
+    fd = (objective(eps) - objective(-eps)) / (2.0 * eps)
+
+    np.testing.assert_allclose(exact, fd, rtol=5.0e-8, atol=1.0e-10)
+
+
+def test_jax_boundary_projection_gradient_wrt_geometry_matches_finite_difference():
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jax, jnp
+
+    enable_x64(True)
+    br, bp, bz, R, Ru, Zu, Rv, Zv = _boundary_projection_inputs()
+    weights = jnp.asarray([[0.4, -0.2], [0.7, -0.5]], dtype=float)
+    direction = jnp.asarray([[0.1, 0.2], [-0.3, 0.4]], dtype=float)
+
+    def objective(scale):
+        vac = vacuum_boundary_fields_from_cylindrical_jax(
+            br=br,
+            bp=bp,
+            bz=bz,
+            R=R + scale * direction,
+            Ru=Ru,
+            Zu=Zu,
+            Rv=Rv,
+            Zv=Zv,
+        )
+        return jnp.sum(weights * vac["bsqvac"]) + 0.2 * jnp.sum(vac["bnormal"] ** 2)
+
+    exact = jax.grad(objective)(0.0)
+    eps = 1.0e-6
+    fd = (objective(eps) - objective(-eps)) / (2.0 * eps)
+
+    np.testing.assert_allclose(exact, fd, rtol=5.0e-8, atol=1.0e-10)

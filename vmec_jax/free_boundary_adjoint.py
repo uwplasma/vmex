@@ -66,3 +66,71 @@ def dense_vacuum_residual(A: Any, x: Any, b: Any) -> Any:
     """Return ``A @ x - b`` for tests and diagnostics."""
 
     return jnp.asarray(A) @ jnp.asarray(x) - jnp.asarray(b)
+
+
+def vacuum_boundary_fields_from_cylindrical_jax(
+    *,
+    br: Any,
+    bp: Any,
+    bz: Any,
+    R: Any,
+    Ru: Any,
+    Zu: Any,
+    Rv: Any,
+    Zv: Any,
+    det_floor: float = 1.0e-30,
+) -> dict[str, Any]:
+    """JAX version of the VMEC boundary-field projection scaffold.
+
+    This mirrors ``free_boundary.vacuum_boundary_fields_from_cylindrical`` for
+    derivative tests.  It intentionally returns a plain dict rather than the
+    NumPy dataclass used by the production bridge, so it can be transformed by
+    ``jax.grad``/``jax.jacfwd`` while the full NESTOR path is still being
+    ported.
+    """
+
+    br_arr = jnp.asarray(br)
+    bp_arr = jnp.asarray(bp)
+    bz_arr = jnp.asarray(bz)
+    R_arr = jnp.asarray(R)
+    Ru_arr = jnp.asarray(Ru)
+    Zu_arr = jnp.asarray(Zu)
+    Rv_arr = jnp.asarray(Rv)
+    Zv_arr = jnp.asarray(Zv)
+
+    g_uu = Ru_arr * Ru_arr + Zu_arr * Zu_arr
+    g_uv = Ru_arr * Rv_arr + Zu_arr * Zv_arr
+    g_vv = R_arr * R_arr + Rv_arr * Rv_arr + Zv_arr * Zv_arr
+    det = g_uu * g_vv - g_uv * g_uv
+    det_safe = jnp.where(
+        jnp.abs(det) >= float(det_floor),
+        det,
+        jnp.sign(det + 1.0e-300) * float(det_floor),
+    )
+
+    bu = br_arr * Ru_arr + bz_arr * Zu_arr
+    bv = br_arr * Rv_arr + bp_arr * R_arr + bz_arr * Zv_arr
+    bsupu = (g_vv * bu - g_uv * bv) / det_safe
+    bsupv = (g_uu * bv - g_uv * bu) / det_safe
+    bsqvac = 0.5 * (bu * bsupu + bv * bsupv)
+
+    n_r = -R_arr * Zu_arr
+    n_phi = Zu_arr * Rv_arr - Ru_arr * Zv_arr
+    n_z = R_arr * Ru_arr
+    bnormal = br_arr * n_r + bp_arr * n_phi + bz_arr * n_z
+    n_norm = jnp.sqrt(n_r * n_r + n_phi * n_phi + n_z * n_z)
+    bnormal_unit = bnormal / jnp.where(n_norm > 0.0, n_norm, 1.0)
+
+    return {
+        "bu": bu,
+        "bv": bv,
+        "bsupu": bsupu,
+        "bsupv": bsupv,
+        "bsqvac": bsqvac,
+        "bnormal": bnormal,
+        "bnormal_unit": bnormal_unit,
+        "g_uu": g_uu,
+        "g_uv": g_uv,
+        "g_vv": g_vv,
+        "det_guv": det,
+    }
