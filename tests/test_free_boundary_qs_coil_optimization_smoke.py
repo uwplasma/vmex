@@ -30,6 +30,18 @@ def test_robust_smooth_cli_risk_maps_to_smooth_max():
     assert module.robust_risk_method("smooth") == "smooth_max"
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Full coil -> direct-coil free-boundary solve -> Boozer/QS exact "
+        "gradient validation is phase 2; current tests validate provider, "
+        "projection, dense-vacuum, and dense mode-space adjoint pieces."
+    ),
+)
+def test_full_free_boundary_qs_exact_gradient_validation_phase2_marker():
+    raise NotImplementedError("production NESTOR/QS exact-gradient validation is not promoted yet")
+
+
 def test_robust_circle_smoke_uses_bounded_perturbed_scenarios(tmp_path, monkeypatch):
     pytest.importorskip("jax")
     module = _load_example_module()

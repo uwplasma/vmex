@@ -51,6 +51,7 @@ Steps taken:
 35. Added an optional VMEC2000 generated-mgrid trace-smoke gate below the full WOUT-parity xfail, and made the quick benchmark matrix exercise one active NESTOR update.
 36. Added a JAX-native dense mode-space vacuum-solve scaffold with grid-potential reconstruction and finite-difference gradient tests through a projected direct-coil chain.
 37. Split free-boundary external-boundary sampling diagnostics into setup, boundary-geometry synthesis, external-field sampling, axis-field sampling, projection, and total timing buckets.
+38. Added an explicit strict xfail marker for full coil-to-free-boundary-to-Boozer/QS exact-gradient validation, keeping phase-2 status visible in the test suite.
 
 Results obtained:
 
@@ -94,6 +95,7 @@ Results obtained:
 41. The optional VMEC2000 trace-smoke test skips cleanly without `VMEC2000_INTEGRATION=1`.
 42. `python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py`: 18 passed in 6.54 s after adding the dense mode-space scaffold.
 43. Quick sample-breakdown benchmark completed; warm final direct-coil sample was about `0.00427 s`, with external-field sampling about `0.00385 s` and boundary/projection phases below one millisecond.
+44. `python -m pytest -q tests/test_free_boundary_qs_coil_optimization_smoke.py::test_full_free_boundary_qs_exact_gradient_validation_phase2_marker`: 1 xfailed in 0.04 s.
 
 Best next steps:
 
