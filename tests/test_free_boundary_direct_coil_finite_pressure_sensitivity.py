@@ -340,6 +340,10 @@ def test_forced_activation_reports_direct_coil_nestor_diagnostics(tmp_path: Path
     assert freeb["vacuum_stub"] is False
     assert freeb["activate_fsq"] == 1.0e99
     assert freeb["nestor_model"].startswith("vmec2000_like_dense_integral")
+    assert freeb["final_nestor_recompute_attempted"] is True
+    assert freeb["final_nestor_recompute_failed"] is False
+    assert freeb["final_nestor_sample_time_s"] > 0.0
+    assert freeb["final_nestor_solve_time_s"] > 0.0
     nestor_diag = freeb["last_nestor_diagnostics"]
     assert nestor_diag["provider_kind"] == "direct_coils"
     assert nestor_diag["bnormal_rms"] > 0.0

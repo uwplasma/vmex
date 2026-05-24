@@ -13138,7 +13138,12 @@ def solve_fixed_boundary_residual_iter(
     final_nestor_diagnostics = dict(freeb_last_diagnostics)
     final_vacuum_stub = not bool(str(final_nestor_model).strip() and str(final_nestor_model) != "none")
     final_bsqvac_half_current = freeb_bsqvac_half_current
+    final_nestor_recompute_attempted = False
+    final_nestor_recompute_failed = False
+    final_nestor_sample_time_s = 0.0
+    final_nestor_solve_time_s = 0.0
     if bool(free_boundary_enabled and freeb_couple_edge) and not final_vacuum_stub:
+        final_nestor_recompute_attempted = True
         try:
             nestor_final, _freeb_nestor_runtime_final = nestor_external_only_step(
                 state=state,
@@ -13153,6 +13158,8 @@ def solve_fixed_boundary_residual_iter(
                 external_field_provider_static=external_field_provider_static,
                 external_field_provider_params=external_field_provider_params,
             )
+            final_nestor_sample_time_s = float(getattr(nestor_final, "sample_time_s", 0.0))
+            final_nestor_solve_time_s = float(getattr(nestor_final, "solve_time_s", 0.0))
             final_nestor_model = str(getattr(nestor_final, "model", final_nestor_model))
             diag_final = getattr(nestor_final, "diagnostics", None)
             if isinstance(diag_final, dict):
@@ -13167,6 +13174,7 @@ def solve_fixed_boundary_residual_iter(
             final_bsqvac_half_current = bsqvac_edge_final
             final_vacuum_stub = False
         except Exception:
+            final_nestor_recompute_failed = True
             final_bsqvac_half_current = freeb_bsqvac_half_current
     if bool(free_boundary_enabled) and final_bsqvac_half_current is not None:
         try:
@@ -13284,6 +13292,10 @@ def solve_fixed_boundary_residual_iter(
             "vacuum_stub": bool(final_vacuum_stub),
             "activate_fsq": None if free_boundary_activate_fsq is None else float(free_boundary_activate_fsq),
             "last_nestor_diagnostics": dict(final_nestor_diagnostics),
+            "final_nestor_recompute_attempted": bool(final_nestor_recompute_attempted),
+            "final_nestor_recompute_failed": bool(final_nestor_recompute_failed),
+            "final_nestor_sample_time_s": float(final_nestor_sample_time_s),
+            "final_nestor_solve_time_s": float(final_nestor_solve_time_s),
         },
         "freeb_ivac_history": np.asarray(freeb_ivac_history, dtype=int),
         "freeb_ivacskip_history": np.asarray(freeb_ivacskip_history, dtype=int),

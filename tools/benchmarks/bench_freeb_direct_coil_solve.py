@@ -370,6 +370,10 @@ def _free_boundary_summary(run: Any) -> dict[str, Any]:
     if isinstance(freeb, dict):
         out["vacuum_stub"] = bool(freeb.get("vacuum_stub", True))
         out["nestor_model"] = freeb.get("nestor_model")
+        out["final_nestor_recompute_attempted"] = bool(freeb.get("final_nestor_recompute_attempted", False))
+        out["final_nestor_recompute_failed"] = bool(freeb.get("final_nestor_recompute_failed", False))
+        out["final_nestor_sample_time_s"] = float(freeb.get("final_nestor_sample_time_s", 0.0) or 0.0)
+        out["final_nestor_solve_time_s"] = float(freeb.get("final_nestor_solve_time_s", 0.0) or 0.0)
         last_diag = freeb.get("last_nestor_diagnostics") or {}
         out["last_provider_kind"] = last_diag.get("provider_kind")
         if isinstance(last_diag, dict) and last_diag:
@@ -691,6 +695,10 @@ def _format_sampler_diagnostics(case: dict[str, Any]) -> str:
         parts.append(f"final_sample={_format_seconds(diag.get('sample_time_s'))}")
     if diag.get("solve_time_s") is not None:
         parts.append(f"final_solve={_format_seconds(diag.get('solve_time_s'))}")
+    if freeb.get("final_nestor_sample_time_s") is not None:
+        parts.append(f"final_recompute_sample={_format_seconds(freeb.get('final_nestor_sample_time_s'))}")
+    if freeb.get("final_nestor_solve_time_s") is not None:
+        parts.append(f"final_recompute_solve={_format_seconds(freeb.get('final_nestor_solve_time_s'))}")
     phase_keys = (
         ("cache", "cache_build_time_s"),
         ("source", "source_time_s"),

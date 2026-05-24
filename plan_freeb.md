@@ -36,6 +36,7 @@ Steps taken:
 20. Added chunked `ip`-block evaluation for the remaining nonsingular Green-function kernel, with `VMEC_JAX_FREEB_NONSINGULAR_IP_CHUNK` as a memory/performance knob.
 21. Tightened docs/example reproduction commands for optional ESSOS assets by documenting `ESSOS_INPUT_DIR`, and clarified that direct/generated-`mgrid` agreement is within recorded precision/roundoff rather than exact symbolic equality.
 22. Added a chunk-size invariance regression for the nonsingular source/matrix terms.
+23. Exposed final accepted-state NESTOR recompute timing separately in solver diagnostics and direct-coil benchmark summaries so benchmarks no longer hide the correctness-critical final vacuum recompute inside broad finalize time.
 
 Results obtained:
 
@@ -64,11 +65,12 @@ Results obtained:
 23. Focused chunking regression passed: 4 passed in 5.47 s; direct-coil finite-pressure/provider/example tests passed: 12 passed, 1 skipped in 17.66 s.
 24. Medium chunking benchmark (`sample_points=600`, `coils=8`, `segments=96`) improved from `IP_CHUNK=1` final source `0.062 s`, final solve `0.073 s`, warm solve `0.346 s` to default chunk final source `0.020 s`, final solve `0.031 s`, warm solve `0.266 s`.
 25. Larger dense chunking benchmark (`sample_points=2352`, `coils=8`, `segments=128`) improved final source from about `0.362 s` to `0.292 s`, final solve from about `0.480 s` to `0.407 s`, and warm solve from about `1.32 s` to `1.14 s`.
+26. Final recompute timing benchmark now reports `final_recompute_sample` and `final_recompute_solve`; the medium direct-coil case records about `0.012 s` final sampling and `0.027 s` final dense solve, matching the final accepted-state diagnostics.
 
 Best next steps:
 
-1. Target final recompute visibility and reuse safety: accepted-state recompute is correctness-critical, but benchmarks should report it separately so the total NESTOR cost is explicit.
-2. Run a direct-coil case that enters backtracking and confirm the new trial counters capture rejected NESTOR sampling cost in a full driver trace.
+1. Run a direct-coil case that enters backtracking and confirm the new trial counters capture rejected NESTOR sampling cost in a full driver trace.
+2. Continue preconditioner/update launch-cost profiling on small/medium cases, where free-boundary source assembly is no longer dominant.
 3. Extend the full-loop finite-difference smoke from current-only proxy objective to a validated Boozer/QS promotion test when affordable.
 4. Either raise the VMEC2000 generated-mgrid diagnostic to a convergence-oriented multi-grid input or mark the current single-stage generated-mgrid case as optional underconverged external evidence.
 
