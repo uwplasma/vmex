@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+from copy import deepcopy
+from pathlib import Path
+
 import numpy as np
 
 from vmec_jax._compat import enable_x64
 from vmec_jax.external_fields import CoilFieldParams, sample_coil_field_cylindrical
 from vmec_jax.free_boundary import ExternalBoundarySample, sample_free_boundary_external_field
+from vmec_jax.namelist import read_indata, write_indata
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _circle_coil_params() -> CoilFieldParams:
@@ -95,3 +102,48 @@ def test_sample_free_boundary_external_field_adds_axis_field_separately():
     np.testing.assert_allclose(sample.br_axis, axis[0], rtol=0.0, atol=0.0)
     assert sample.axis_r.shape == (R.shape[-1],)
     assert sample.axis_z.shape == (R.shape[-1],)
+
+
+def test_run_free_boundary_accepts_direct_coil_provider_without_mgrid_file(tmp_path):
+    enable_x64(True)
+    from vmec_jax.driver import run_free_boundary
+
+    indata = deepcopy(read_indata(ROOT / "examples" / "data" / "input.LandremanPaul2021_QA_reactorScale_lowres"))
+    indata.scalars.update(
+        {
+            "LFREEB": True,
+            "MGRID_FILE": "DIRECT_COILS",
+            "EXTCUR": [1.0],
+            "NS_ARRAY": [12],
+            "NITER_ARRAY": [1],
+            "FTOL_ARRAY": [1.0e-8],
+            "NITER": 1,
+            "FTOL": 1.0e-8,
+            "MPOL": 3,
+            "NTOR": 2,
+            "NZETA": 4,
+            "NTHETA": 0,
+            "NVACSKIP": 4,
+            "PRES_SCALE": 0.0,
+            "AM": [1.0, -1.0],
+        }
+    )
+    input_path = tmp_path / "input.direct_coil_smoke"
+    write_indata(input_path, indata)
+
+    run = run_free_boundary(
+        input_path,
+        max_iter=1,
+        multigrid=False,
+        verbose=False,
+        jit_forces=False,
+        external_field_provider_kind="direct_coils",
+        external_field_provider_params=_circle_coil_params(),
+    )
+
+    diag = run.result.diagnostics
+    assert diag["free_boundary_external_field"]["provider_kind"] == "direct_coils"
+    assert diag["free_boundary_external_field"]["reason"] == "direct_provider_runtime_path"
+    assert np.isfinite(float(diag["final_fsqr"]))
+    assert np.isfinite(float(diag["final_fsqz"]))
+    assert np.isfinite(float(diag["final_fsql"]))
