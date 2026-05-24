@@ -1,8 +1,8 @@
 Free-Boundary Coil Optimization
 ===============================
 
-This page documents the research branch for true single-stage free-boundary
-optimization with differentiable coils. The existing VMEC-compatible
+This page documents the research branch toward true single-stage
+free-boundary optimization with differentiable coils. The existing VMEC-compatible
 ``mgrid`` path remains the parity backend. The new direct-coil path evaluates
 the external field from coil Fourier coefficients and currents in JAX, so the
 coil parameters can become the independent optimization variables.
@@ -114,10 +114,21 @@ The committed numerical summary is stored in
 Reproduction
 ------------
 
-Run the minimal direct-coil forward example from the repository root.  This path
-loads ESSOS coils, converts them to ``CoilFieldParams``, solves one
-finite-pressure free-boundary equilibrium without writing an ``mgrid`` file, and
-writes ``wout_direct_coils.nc`` plus ``summary.json``.
+Run the dependency-light direct-coil forward example from the repository root.
+This path constructs a synthetic circular ``CoilFieldParams`` object directly in
+``vmec_jax`` and writes ``wout_direct_coils.nc`` plus ``summary.json`` without
+requiring ESSOS assets or an ``mgrid`` file.
+
+.. code-block:: bash
+
+   python examples/free_boundary_direct_coils_forward.py \
+     --max-iter 4 \
+     --outdir results/free_boundary_direct_coils_forward
+
+Run the ESSOS direct-coil forward example from the repository root.  This path
+loads ESSOS coils, converts them to ``CoilFieldParams``, runs one
+low-resolution finite-pressure free-boundary forward smoke without writing an
+``mgrid`` file, and writes ``wout_direct_coils.nc`` plus ``summary.json``.
 
 .. code-block:: bash
 

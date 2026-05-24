@@ -9,8 +9,9 @@
 [![Docs](https://img.shields.io/readthedocs/vmec-jax/latest?label=docs)](https://vmec-jax.readthedocs.io/en/latest/)
 [![PyPI downloads](https://img.shields.io/pypi/dm/vmec-jax)](https://pypi.org/project/vmec-jax/)
 
-End-to-end differentiable JAX implementation of **VMEC2000** for fixed-boundary
-and free-boundary ideal-MHD equilibria.
+JAX implementation of **VMEC2000** for fixed-boundary and VMEC-compatible
+free-boundary ideal-MHD equilibria. Supported promoted paths are differentiable;
+full free-boundary vacuum/NESTOR adjoints remain a research lane.
 
 ## Install
 

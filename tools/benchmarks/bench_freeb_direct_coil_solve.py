@@ -41,6 +41,17 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--warm-repeats", type=int, default=1, help="Warm solve repeats after the cold solve.")
     p.add_argument("--jit-forces", action="store_true", help="Enable JIT force kernels. Off by default for bounded CPU runs.")
     p.add_argument("--activate-fsq", type=float, default=1.0e99, help="Force active direct-coil NESTOR coupling early.")
+    p.add_argument("--synthetic-ns", type=int, default=7, help="Synthetic direct-coil radial grid size.")
+    p.add_argument("--synthetic-mpol", type=int, default=4, help="Synthetic direct-coil poloidal mode count.")
+    p.add_argument("--synthetic-ntor", type=int, default=0, help="Synthetic direct-coil toroidal mode count.")
+    p.add_argument("--synthetic-nzeta", type=int, default=2, help="Synthetic direct-coil toroidal grid size.")
+    p.add_argument("--synthetic-ntheta", type=int, default=8, help="Synthetic direct-coil poloidal grid size.")
+    p.add_argument("--synthetic-nvacskip", type=int, default=1, help="Synthetic direct-coil vacuum refresh cadence.")
+    p.add_argument("--synthetic-n-segments", type=int, default=64, help="Synthetic direct-coil segments per base coil.")
+    p.add_argument("--synthetic-n-base-coils", type=int, default=1, help="Synthetic direct-coil base coil count.")
+    p.add_argument("--synthetic-nfp", type=int, default=1, help="Synthetic direct-coil field periods.")
+    p.add_argument("--synthetic-stellsym", action="store_true", help="Expand synthetic coils with stellarator symmetry.")
+    p.add_argument("--synthetic-chunk-size", type=int, default=0, help="Synthetic direct-coil point chunk size; 0 disables chunking.")
     p.add_argument("--include-essos", action="store_true", help="Also run an optional small ESSOS fixture case.")
     p.add_argument("--coils-json", type=Path, default=None, help="Optional ESSOS coil JSON.")
     p.add_argument("--input", type=Path, default=DEFAULT_INPUT, help="Base input for optional ESSOS case.")
@@ -359,7 +370,10 @@ def _free_boundary_summary(run: Any) -> dict[str, Any]:
     if isinstance(freeb, dict):
         out["vacuum_stub"] = bool(freeb.get("vacuum_stub", True))
         out["nestor_model"] = freeb.get("nestor_model")
-        out["last_provider_kind"] = (freeb.get("last_nestor_diagnostics") or {}).get("provider_kind")
+        last_diag = freeb.get("last_nestor_diagnostics") or {}
+        out["last_provider_kind"] = last_diag.get("provider_kind")
+        if isinstance(last_diag, dict) and last_diag:
+            out["last_nestor_diagnostics"] = last_diag
     for key in (
         "freeb_full_update_history",
         "freeb_nestor_reused_history",
@@ -400,24 +414,59 @@ def _solver_timing_summary(run: Any) -> dict[str, Any]:
     return out
 
 
-def _circle_coil_params() -> Any:
+def _circle_coil_params(
+    *,
+    n_segments: int = 64,
+    n_base_coils: int = 1,
+    nfp: int = 1,
+    stellsym: bool = False,
+    chunk_size: int | None = None,
+) -> Any:
     from vmec_jax._compat import jnp
     from vmec_jax.external_fields import CoilFieldParams
 
-    dofs = jnp.zeros((1, 3, 3), dtype=float)
-    dofs = dofs.at[0, 0, 2].set(1.8)
-    dofs = dofs.at[0, 1, 1].set(1.8)
+    n_base = max(1, int(n_base_coils))
+    dofs = jnp.zeros((n_base, 3, 3), dtype=float)
+    for idx in range(n_base):
+        phase = 2.0 * np.pi * float(idx) / float(n_base)
+        radius = 1.8 + (0.04 * ((idx % 3) - 1) if n_base > 1 else 0.0)
+        dofs = dofs.at[idx, 0, 2].set(radius)
+        dofs = dofs.at[idx, 1, 1].set(radius)
+        if n_base > 1:
+            dofs = dofs.at[idx, 0, 0].set(0.08 * np.cos(phase))
+            dofs = dofs.at[idx, 1, 0].set(0.08 * np.sin(phase))
+            dofs = dofs.at[idx, 2, 1].set(0.04 * np.sin(phase))
+            dofs = dofs.at[idx, 2, 2].set(0.04 * np.cos(phase))
     return CoilFieldParams(
         base_curve_dofs=dofs,
-        base_currents=jnp.asarray([3.0e7], dtype=float),
-        n_segments=64,
-        nfp=1,
-        stellsym=False,
+        base_currents=jnp.full((n_base,), 3.0e7 / float(n_base), dtype=float),
+        n_segments=max(8, int(n_segments)),
+        nfp=max(1, int(nfp)),
+        stellsym=bool(stellsym),
+        chunk_size=chunk_size,
     )
 
 
-def _write_tiny_direct_input(path: Path, *, max_iter: int) -> Path:
+def _write_tiny_direct_input(
+    path: Path,
+    *,
+    max_iter: int,
+    ns: int = 7,
+    mpol: int = 4,
+    ntor: int = 0,
+    nzeta: int = 2,
+    ntheta: int = 8,
+    nfp: int = 1,
+    nvacskip: int = 1,
+) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
+    ns_i = max(3, int(ns))
+    mpol_i = max(2, int(mpol))
+    ntor_i = max(0, int(ntor))
+    nzeta_i = max(1, int(nzeta))
+    ntheta_i = max(4, int(ntheta))
+    nfp_i = max(1, int(nfp))
+    nvacskip_i = max(1, int(nvacskip))
     path.write_text(
         f"""
 &INDATA
@@ -425,19 +474,19 @@ def _write_tiny_direct_input(path: Path, *, max_iter: int) -> Path:
   MGRID_FILE = 'DIRECT_COILS'
   EXTCUR = 1.0
   LASYM = F
-  NFP = 1
-  MPOL = 4
-  NTOR = 0
-  NS = 7
-  NZETA = 2
-  NTHETA = 8
-  NS_ARRAY = 7
+  NFP = {nfp_i}
+  MPOL = {mpol_i}
+  NTOR = {ntor_i}
+  NS = {ns_i}
+  NZETA = {nzeta_i}
+  NTHETA = {ntheta_i}
+  NS_ARRAY = {ns_i}
   FTOL_ARRAY = 1.0E-8
   NITER_ARRAY = {int(max_iter)}
   NITER = {int(max_iter)}
   FTOL = 1.0E-8
   NSTEP = 20
-  NVACSKIP = 1
+  NVACSKIP = {nvacskip_i}
   GAMMA = 0.0
   PHIEDGE = 1.0
   CURTOR = 0.0
@@ -628,6 +677,31 @@ def _format_trial_nestor_timing(case: dict[str, Any]) -> str:
     )
 
 
+def _format_sampler_diagnostics(case: dict[str, Any]) -> str:
+    freeb = case.get("free_boundary", {})
+    if not isinstance(freeb, dict):
+        return ""
+    diag = freeb.get("last_nestor_diagnostics", {})
+    if not isinstance(diag, dict) or not diag:
+        return ""
+    parts: list[str] = []
+    if diag.get("sample_points") is not None:
+        parts.append(f"sample_points={diag.get('sample_points')}")
+    if diag.get("sample_time_s") is not None:
+        parts.append(f"final_sample={_format_seconds(diag.get('sample_time_s'))}")
+    if diag.get("solve_time_s") is not None:
+        parts.append(f"final_solve={_format_seconds(diag.get('solve_time_s'))}")
+    if diag.get("provider_jit_sampler") is not None:
+        parts.append(f"jit_sampler={diag.get('provider_jit_sampler')}")
+    if diag.get("provider_chunk_size") is not None:
+        parts.append(f"chunk_size={diag.get('provider_chunk_size')}")
+    if diag.get("provider_coil_count") is not None:
+        parts.append(f"coils={diag.get('provider_coil_count')}")
+    if diag.get("provider_segments_per_coil") is not None:
+        parts.append(f"segments={diag.get('provider_segments_per_coil')}")
+    return "" if not parts else " " + " ".join(parts)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if int(args.max_iter) < 1:
@@ -648,12 +722,55 @@ def main(argv: list[str] | None = None) -> int:
             "warm_repeats": int(args.warm_repeats),
             "jit_forces": bool(args.jit_forces),
             "activate_fsq": float(args.activate_fsq),
+            "synthetic": {
+                "ns": int(args.synthetic_ns),
+                "mpol": int(args.synthetic_mpol),
+                "ntor": int(args.synthetic_ntor),
+                "nzeta": int(args.synthetic_nzeta),
+                "ntheta": int(args.synthetic_ntheta),
+                "nvacskip": int(args.synthetic_nvacskip),
+                "n_segments": int(args.synthetic_n_segments),
+                "n_base_coils": int(args.synthetic_n_base_coils),
+                "nfp": int(args.synthetic_nfp),
+                "stellsym": bool(args.synthetic_stellsym),
+                "chunk_size": None if int(args.synthetic_chunk_size) <= 0 else int(args.synthetic_chunk_size),
+            },
+            "env": {
+                "VMEC_JAX_FREEB_JIT_COIL_SAMPLER": os.getenv("VMEC_JAX_FREEB_JIT_COIL_SAMPLER"),
+                "VMEC_JAX_FREEB_DISABLE_COIL_GEOMETRY_CACHE": os.getenv(
+                    "VMEC_JAX_FREEB_DISABLE_COIL_GEOMETRY_CACHE"
+                ),
+            },
         },
         "cases": [],
     }
 
-    synthetic_input = _write_tiny_direct_input(workdir / "input.bench_direct_coil_synthetic", max_iter=int(args.max_iter))
-    payload["cases"].append(_bench_case("synthetic_direct_coil_solve", synthetic_input, _circle_coil_params(), args))
+    synthetic_input = _write_tiny_direct_input(
+        workdir / "input.bench_direct_coil_synthetic",
+        max_iter=int(args.max_iter),
+        ns=int(args.synthetic_ns),
+        mpol=int(args.synthetic_mpol),
+        ntor=int(args.synthetic_ntor),
+        nzeta=int(args.synthetic_nzeta),
+        ntheta=int(args.synthetic_ntheta),
+        nfp=int(args.synthetic_nfp),
+        nvacskip=int(args.synthetic_nvacskip),
+    )
+    synthetic_chunk_size = None if int(args.synthetic_chunk_size) <= 0 else int(args.synthetic_chunk_size)
+    payload["cases"].append(
+        _bench_case(
+            "synthetic_direct_coil_solve",
+            synthetic_input,
+            _circle_coil_params(
+                n_segments=int(args.synthetic_n_segments),
+                n_base_coils=int(args.synthetic_n_base_coils),
+                nfp=int(args.synthetic_nfp),
+                stellsym=bool(args.synthetic_stellsym),
+                chunk_size=synthetic_chunk_size,
+            ),
+            args,
+        )
+    )
 
     if args.include_essos:
         try:
@@ -687,6 +804,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"cold_or_compile={case['cold_or_compile_s']:.6f}s warm_min={warm_min}"
                 f"{_format_active_nestor_timing(case)}"
                 f"{_format_trial_nestor_timing(case)}"
+                f"{_format_sampler_diagnostics(case)}"
             )
         else:
             print(f"[bench-freeb-direct-coil-solve] {case['label']}: skipped ({case.get('reason', 'unknown')})")

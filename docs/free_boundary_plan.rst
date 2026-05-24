@@ -6,7 +6,8 @@ VMEC2000-parity-targeted free-boundary capability in ``vmec-jax`` while
 preserving:
 
 - fixed-boundary parity and defaults,
-- end-to-end differentiability,
+- selected differentiable JAX paths today, with full free-boundary/NESTOR
+  adjoints as the research target,
 - profiled CPU performance on the supported public paths,
 - bounded memory usage.
 

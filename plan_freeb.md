@@ -10,13 +10,13 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-05-24 after the direct-coil cache/hygiene batch.
+Last updated: 2026-05-24 after the direct-coil forward examples and benchmark diagnostics batch.
 
 Steps taken:
 
 1. Cached direct-coil geometry is wired through the free-boundary provider bridge for host-forward runs.
 2. The cached and uncached direct-coil free-boundary paths now have an end-to-end parity regression.
-3. The finite-pressure direct-coil lane now has a full-loop current-only finite-difference slope-stability smoke.
+3. The finite-pressure direct-coil lane now has a full-loop current-only proxy-objective finite-difference slope-stability smoke; this is not a production exact full-solve adjoint or a validated QS-gradient claim.
 4. Public README/docs/examples/tests/tools no longer embed maintainer-local absolute paths, enforced by a docs hygiene regression.
 5. The VMEC2000/direct-coil/mgrid diagnostic now fails hard for explicitly invalid user paths while keeping optional auto-discovery skips.
 6. Benchmarks now report active NESTOR sample/solve timing summaries and cold-to-warm improvement.
@@ -24,12 +24,15 @@ Steps taken:
 8. Cached direct-coil geometry can now use a host-forward JIT sampler, guarded by `VMEC_JAX_FREEB_JIT_COIL_SAMPLER`.
 9. Added `examples/free_boundary_essos_coils_forward.py` as the minimal ESSOS-direct-coil forward example that writes one input, WOUT, and JSON summary without generating an mgrid.
 10. Finite-pressure free-boundary examples now default to `--activate-fsq 1e99` so short smoke runs exercise active NESTOR coupling instead of silently staying in the inactive vacuum-stub cadence.
+11. Added `examples/free_boundary_direct_coils_forward.py` as a dependency-light pure-`CoilFieldParams` forward example that needs no ESSOS assets.
+12. Benchmarks now expose synthetic grid/coil knobs and last-sample diagnostics including sample points, JIT sampler flag, coil count, and segments per coil.
+13. Public docs now avoid overclaiming full free-boundary/NESTOR adjoints or converged high-beta direct-coil equilibria.
 
 Results obtained:
 
-1. `pytest -q -m "not full and not vmec2000 and not simsopt"`: 2235 passed, 26 skipped, 111 deselected, 1 xfailed in 5m52s before the final hygiene additions.
-2. Targeted direct-coil/hygiene tests after the final additions: 11 passed, 1 skipped in 17.83 s.
-3. Full Sphinx build after docs hygiene changes succeeded in `/tmp/vmec_jax_freeb_docs_hygiene_final`.
+1. `pytest -q -m "not full and not vmec2000 and not simsopt"`: 2241 passed, 26 skipped, 111 deselected, 1 xfailed in 5m48s.
+2. Targeted direct-coil/docs tests after the final additions: 9 passed in 2.34 s.
+3. Full Sphinx build after docs hygiene changes succeeded in `/tmp/vmec_jax_freeb_docs_claim_hygiene`.
 4. Direct-coil/mgrid diagnostic smoke completed with expected `vmec2000_skipped` and `jax_direct_vs_mgrid_passed=True`.
 5. Explicit bad `--coils-json` now exits nonzero and writes `status=failed`, `reason=explicit_essos_or_coils_path_invalid`.
 6. Tiny direct-coil solve benchmark reports active NESTOR sample timing improving from about `0.51 s` cold to `0.0048 s` warm.
@@ -40,15 +43,16 @@ Results obtained:
 11. Optional VMEC2000 generated-mgrid diagnostic was attempted with `NITER=1`, `50`, and `500`; VMEC2000 completed without WOUT in all cases, with `fsq_total_last` improving to about `5.4e-3` at 500 iterations but still reporting `Try increasing NITER`.
 12. `examples/free_boundary_essos_coils_forward.py --beta 1.0 --max-iter 20` wrote a direct-coil WOUT and active-NESTOR summary with `free_boundary_vacuum_stub=false`. The residual is still intentionally large, so this remains a forward coupling smoke rather than a converged finite-beta promotion case.
 13. Trial-counter regression now records nonzero `freeb_nestor_trial_sample_time_history` on a solver-level direct-coil path that enters trial scoring.
+14. `examples/free_boundary_direct_coils_forward.py --outdir tmp/free_boundary_direct_coils_forward_run_smoke --max-iter 1 --n-segments 8 --ns 7 --nzeta 2 --ntheta 8` wrote a synthetic direct-coil WOUT with finite one-iteration residuals (`fsqr≈7.3e-4`, `fsqz≈1.6e-4`, `fsql≈5.3e-4`).
+15. Larger synthetic direct-coil benchmark with `sample_points=78`, `coils=16`, `segments=128` reported JIT sampler warm active sampling around `0.0106 s` versus non-JIT around `0.0092 s`; whole warm solve time stayed about `0.25 s`, so this small case is dominated by non-sampling work.
+16. Subagent larger spectral-mode benchmark with `sample_points=2352`, `coils=8`, `segments=128` found the JIT sampler reduced warm active sampling from `0.0588 s` to `0.0545 s` (about 7%), but total warm wall time remained about `0.35 s`; dense NESTOR mode remains the main performance bottleneck.
 
 Best next steps:
 
-1. Run a larger direct-coil boundary grid where field sampling is a material part of solve time and quantify the JIT sampler payoff.
-2. Run a direct-coil case that enters backtracking and confirm the new trial counters capture rejected NESTOR sampling cost.
-3. Add a pure-`CoilFieldParams` forward example if PR reviewers want a dependency-light direct-coil WOUT example that does not require ESSOS assets.
-4. Target the remaining non-sampling warm-solve cost in preconditioner/update/force assembly after the sampler path is measured on larger grids.
-5. Extend the full-loop finite-difference smoke from current-only proxy objective to a validated Boozer/QS promotion test when affordable.
-6. Either raise the VMEC2000 generated-mgrid diagnostic to a convergence-oriented multi-grid input or mark the current single-stage generated-mgrid case as optional underconverged external evidence.
+1. Target dense NESTOR/preconditioner/finalization cost; sampler JIT helps field-only cases but is not the dominant full-solve cost.
+2. Run a direct-coil case that enters backtracking and confirm the new trial counters capture rejected NESTOR sampling cost in a full driver trace.
+3. Extend the full-loop finite-difference smoke from current-only proxy objective to a validated Boozer/QS promotion test when affordable.
+4. Either raise the VMEC2000 generated-mgrid diagnostic to a convergence-oriented multi-grid input or mark the current single-stage generated-mgrid case as optional underconverged external evidence.
 
 Need from user:
 
@@ -57,13 +61,13 @@ Nothing now.
 Open-lane completion estimates:
 
 1. External provider architecture: 93%.
-2. Direct-coil finite-pressure forward lane: 91%.
+2. Direct-coil finite-pressure forward lane: 93%.
 3. ESSOS/mgrid/VMEC2000 comparison lane: 82%.
 4. Full-loop gradient validation: 55%.
-5. Robust/optimization examples: 78%.
-6. Performance/benchmarking: 75%.
-7. Docs/release hygiene: 90%.
-8. Overall branch completion: 84%.
+5. Robust/optimization examples: 80%.
+6. Performance/benchmarking: 78%.
+7. Docs/release hygiene: 92%.
+8. Overall branch completion: 86%.
 
 ## Mission
 
@@ -838,7 +842,7 @@ Minimum branch acceptance:
 
 Stretch acceptance:
 
-1. Full exact gradient through a low-resolution free-boundary solve with coil current as the only variable, validated by finite differences.
+1. Validated full-solve gradient through a low-resolution free-boundary solve with coil current as the only variable, bounded against finite differences.
 2. QS objective gradient wrt coil current or Fourier coefficient, validated by finite differences.
 3. Robust 4-sample coil perturbation optimization run.
 4. GPU benchmark for direct-coil field sampling.

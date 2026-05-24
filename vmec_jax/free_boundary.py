@@ -3338,12 +3338,17 @@ def nestor_external_only_step(
         vals = np.asarray(arr, dtype=float)
         return float(np.sqrt(np.mean(vals * vals))) if vals.size else 0.0
 
-    diagnostics: dict[str, float | str | bool] = {
+    diagnostics: dict[str, Any] = {
         "provider_kind": provider_kind,
         "reused": bool(reuse_step),
         "source_reused": bool(source_reused),
         "rhs_mode": str(rhs_mode),
         "mode": str(used_mode),
+        "sample_time_s": float(sample_time),
+        "solve_time_s": float(solve_time),
+        "sample_ntheta": int(ntheta),
+        "sample_nzeta": int(nzeta),
+        "sample_points": int(ntheta * nzeta),
         "br_rms": _rms(sample.br),
         "bp_rms": _rms(sample.bp),
         "bz_rms": _rms(sample.bz),
@@ -3354,6 +3359,28 @@ def nestor_external_only_step(
         "bsqvac_rms": _rms(bsqvac),
         "bsqvac_mean": float(np.mean(np.asarray(bsqvac, dtype=float))) if np.asarray(bsqvac).size else 0.0,
     }
+    if isinstance(external_field_provider_static, dict):
+        diagnostics["provider_coil_geometry_cached"] = bool("coil_geometry" in external_field_provider_static)
+        diagnostics["provider_jit_sampler"] = bool(external_field_provider_static.get("jit_sampler", False))
+        diagnostics["provider_cache_scope"] = str(external_field_provider_static.get("cache_scope", ""))
+        diagnostics["provider_regularization_epsilon"] = float(
+            external_field_provider_static.get(
+                "regularization_epsilon",
+                getattr(external_field_provider_params, "regularization_epsilon", 0.0),
+            )
+        )
+        chunk_size_diag = external_field_provider_static.get(
+            "chunk_size",
+            getattr(external_field_provider_params, "chunk_size", None),
+        )
+        diagnostics["provider_chunk_size"] = None if chunk_size_diag is None else int(chunk_size_diag)
+        geometry = external_field_provider_static.get("coil_geometry")
+        if isinstance(geometry, tuple) and len(geometry) >= 1:
+            shape = tuple(int(dim) for dim in getattr(geometry[0], "shape", ())[:2])
+            if len(shape) >= 1:
+                diagnostics["provider_coil_count"] = int(shape[0])
+            if len(shape) >= 2:
+                diagnostics["provider_segments_per_coil"] = int(shape[1])
     if bvec_mode is not None:
         diagnostics["bvec_mode_rms"] = _rms(bvec_mode)
     if bvec_mode_nonsing is not None:
