@@ -8,6 +8,50 @@ Baseline commit: `3657e0c release: prepare v0.0.13`
 
 Date opened: 2026-05-24
 
+## Current Release Status
+
+Last updated: 2026-05-24 after the direct-coil cache/hygiene batch.
+
+Steps taken:
+
+1. Cached direct-coil geometry is wired through the free-boundary provider bridge for host-forward runs.
+2. The cached and uncached direct-coil free-boundary paths now have an end-to-end parity regression.
+3. The finite-pressure direct-coil lane now has a full-loop current-only finite-difference slope-stability smoke.
+4. Public README/docs/examples/tests/tools no longer embed maintainer-local absolute paths, enforced by a docs hygiene regression.
+5. The VMEC2000/direct-coil/mgrid diagnostic now fails hard for explicitly invalid user paths while keeping optional auto-discovery skips.
+6. Benchmarks now report active NESTOR sample/solve timing summaries and cold-to-warm improvement.
+
+Results obtained:
+
+1. `pytest -q -m "not full and not vmec2000 and not simsopt"`: 2235 passed, 26 skipped, 111 deselected, 1 xfailed in 5m52s before the final hygiene additions.
+2. Targeted direct-coil/hygiene tests after the final additions: 11 passed, 1 skipped in 17.83 s.
+3. Full Sphinx build after docs hygiene changes succeeded in `/tmp/vmec_jax_freeb_docs_hygiene_final`.
+4. Direct-coil/mgrid diagnostic smoke completed with expected `vmec2000_skipped` and `jax_direct_vs_mgrid_passed=True`.
+5. Explicit bad `--coils-json` now exits nonzero and writes `status=failed`, `reason=explicit_essos_or_coils_path_invalid`.
+6. Tiny direct-coil solve benchmark reports active NESTOR sample timing improving from about `0.51 s` cold to `0.0048 s` warm.
+
+Best next steps:
+
+1. Add timing counters for active NESTOR trial/backtracking calls, which are currently underreported compared with accepted updates.
+2. Prototype a jitted host-forward sampler for cached direct-coil geometry to reduce eager JAX dispatch and `np.asarray` synchronization.
+3. Extend the full-loop finite-difference smoke from current-only proxy objective to a validated Boozer/QS promotion test when affordable.
+4. Run the VMEC2000 integration diagnostic without `--skip-vmec2000` on the smallest case and archive the JSON result.
+
+Need from user:
+
+Nothing now.
+
+Open-lane completion estimates:
+
+1. External provider architecture: 93%.
+2. Direct-coil finite-pressure forward lane: 88%.
+3. ESSOS/mgrid/VMEC2000 comparison lane: 82%.
+4. Full-loop gradient validation: 55%.
+5. Robust/optimization examples: 76%.
+6. Performance/benchmarking: 69%.
+7. Docs/release hygiene: 88%.
+8. Overall branch completion: 81%.
+
 ## Mission
 
 Implement the first research-grade lane toward true free-boundary, coil-aware, single-stage optimization in `vmec_jax`:
@@ -859,10 +903,12 @@ Results obtained:
 
 Best next steps:
 
-1. Run larger CPU/GPU provider benchmarks to decide whether cached geometry is
-   worth threading into the free-boundary provider bridge.
-2. Add a full-loop finite-difference gradient smoke for a coil-current-only
-   objective before promoting the phase-1 proxy toward Boozer/QS.
+1. Run larger CPU/GPU provider benchmarks with the cached free-boundary bridge
+   enabled and use the active-NESTOR timing breakdown to target the next
+   scan-trial and replay hot spots.
+2. Add and validate a full-loop finite-difference stability smoke for a
+   coil-current-only objective before promoting the phase-1 proxy toward
+   Boozer/QS.
 3. Keep robust full-solve scenarios as Python-loop examples until the production
    free-boundary path is batch-transformable.
 

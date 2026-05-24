@@ -62,8 +62,6 @@ def _candidate_essos_input_dirs() -> list[Path]:
         [
             REPO_ROOT.parent / "ESSOS_mgrid_pr" / "examples" / "input_files",
             REPO_ROOT.parent / "ESSOS" / "examples" / "input_files",
-            Path("/Users/rogeriojorge/local/ESSOS_mgrid_pr/examples/input_files"),
-            Path("/Users/rogeriojorge/local/ESSOS/examples/input_files"),
             Path.cwd() / "examples" / "input_files",
         ]
     )

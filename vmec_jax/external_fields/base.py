@@ -58,7 +58,11 @@ def sample_external_field_cylindrical(
         External-field backend name.
     provider_static:
         Non-differentiable provider metadata.  The direct-coil provider does
-        not require this argument in phase 1.
+        not require this argument in phase 1.  Host-side free-boundary drivers
+        may pass a prebuilt ``coil_geometry`` cache here for forward
+        benchmarking; callers that need gradients with respect to changing
+        coil parameters should leave this unset so geometry is rebuilt from
+        ``provider_params`` inside the transformed function.
     provider_params:
         Pytree containing differentiable provider parameters.
     R, Z, phi:

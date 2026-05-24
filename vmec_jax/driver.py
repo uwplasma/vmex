@@ -2356,6 +2356,7 @@ def run_fixed_boundary(
                 "coil_geometry": build_coil_field_geometry(external_field_provider_params),
                 "regularization_epsilon": getattr(external_field_provider_params, "regularization_epsilon", 0.0),
                 "chunk_size": getattr(external_field_provider_params, "chunk_size", None),
+                "cache_scope": "host_forward_only",
             }
         except Exception:
             # Preserve the original uncached direct-provider path if a custom

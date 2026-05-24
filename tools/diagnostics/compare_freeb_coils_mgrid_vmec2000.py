@@ -53,9 +53,7 @@ def _candidate_essos_roots() -> list[Path]:
     candidates.extend(
         [
             REPO_ROOT.parent / "ESSOS_mgrid_pr",
-            Path("/Users/rogeriojorge/local/ESSOS_mgrid_pr"),
             REPO_ROOT.parent / "ESSOS",
-            Path("/Users/rogeriojorge/local/ESSOS"),
         ]
     )
     return candidates
@@ -565,7 +563,7 @@ def _load_essos(args: argparse.Namespace) -> tuple[Any, Path, Path | None, str]:
     if args.coils_json is not None:
         coils_json = args.coils_json.expanduser().resolve()
         if not coils_json.exists():
-            raise FileNotFoundError(f"Requested --coils-json does not exist: {coils_json}")
+            raise ValueError(f"explicit --coils-json does not exist: {coils_json}")
     else:
         coils_json = _find_default_coils_json(preferred_root)
 
@@ -705,6 +703,13 @@ def _run_vmec2000_case(
         }
 
     exec_path = args.vmec2000_exec.expanduser().resolve() if args.vmec2000_exec is not None else find_vmec2000_exec()
+    if args.vmec2000_exec is not None and (exec_path is None or not exec_path.exists()):
+        return None, None, {
+            "status": "error",
+            "reason": "explicit_vmec2000_exec_not_found",
+            "exec_path": args.vmec2000_exec,
+            "help": "Fix --vmec2000-exec or omit it to allow auto-discovery/skip behavior.",
+        }
     if exec_path is None or not exec_path.exists():
         return None, None, {
             "status": "skipped",
@@ -822,7 +827,7 @@ def _dependency_skip(
     payload["reason"] = reason
     payload["error"] = error
     payload["help"] = (
-        "Use --essos-root /Users/rogeriojorge/local/ESSOS_mgrid_pr or set ESSOS_ROOT/ESSOS_INPUT_DIR. "
+        "Use --essos-root /path/to/ESSOS_mgrid_pr or set ESSOS_ROOT/ESSOS_INPUT_DIR. "
         "The ESSOS checkout must provide Coils.to_mgrid."
     )
     payload["finished_at_utc"] = _now_utc()
@@ -857,6 +862,15 @@ def main(argv: list[str] | None = None) -> int:
     try:
         coils, coils_json, essos_root, essos_module = _load_essos(args)
     except Exception as exc:
+        explicit_path_error = args.coils_json is not None or args.essos_root is not None
+        if explicit_path_error:
+            payload["status"] = "failed"
+            payload["reason"] = "explicit_essos_or_coils_path_invalid"
+            payload["error"] = repr(exc)
+            payload["finished_at_utc"] = _now_utc()
+            _write_json(out, payload)
+            print(f"[compare-freeb-coils] failed explicit ESSOS/coils path: {exc!r}", file=sys.stderr)
+            return 1
         return _dependency_skip(
             payload=payload,
             out=out,
@@ -995,7 +1009,9 @@ def main(argv: list[str] | None = None) -> int:
     if vmec_status in ("skipped", "timeout", "no_wout", "error"):
         warning = f"vmec2000_{vmec_status}"
         warnings.append(warning)
-        if bool(args.require_vmec2000):
+        if bool(args.require_vmec2000) or (
+            args.vmec2000_exec is not None and vmec_status == "error"
+        ):
             hard_errors.append(warning)
 
     if wout_vmec2000 is not None:

@@ -119,7 +119,7 @@ Before promoting pwO to README examples, require:
   gradient agreement,
 - agreement with the local ``omnigenity_optimization/class_pwO.py`` diagnostic
   ranking on the QP seed, QI seed, and at least one known pwO input from
-  ``/Users/rogeriojorge/local/omnigenity_optimization/inputs``,
+  ``$OMNIGENITY_OPTIMIZATION_ROOT/inputs``,
 - VMEC2000 parity for the promoted final WOUT at the same fixed-boundary input,
 - Boozer-resolution convergence of the pwO score,
 - no regression in QA/QH/QP/QI production figures and local CI gate.

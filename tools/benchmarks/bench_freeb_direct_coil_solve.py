@@ -160,6 +160,123 @@ def _summarize_timings(times: list[float]) -> dict[str, float | int | None]:
     }
 
 
+def _as_1d_float_array(value: Any) -> np.ndarray:
+    try:
+        return np.asarray(value, dtype=float).reshape(-1)
+    except Exception:
+        return np.zeros((0,), dtype=float)
+
+
+def _as_1d_int_array(value: Any) -> np.ndarray:
+    try:
+        return np.asarray(value, dtype=int).reshape(-1)
+    except Exception:
+        return np.zeros((0,), dtype=int)
+
+
+def _pad_1d(array: np.ndarray, size: int, *, value: float | int) -> np.ndarray:
+    if array.size >= size:
+        return array[:size]
+    return np.pad(array, (0, size - int(array.size)), constant_values=value)
+
+
+def _summarize_seconds(values: np.ndarray) -> dict[str, float | int | None]:
+    finite = np.asarray(values, dtype=float).reshape(-1)
+    finite = finite[np.isfinite(finite)]
+    if finite.size == 0:
+        return {"count": 0, "total_s": 0.0, "mean_s": None, "min_s": None, "max_s": None}
+    return {
+        "count": int(finite.size),
+        "total_s": float(np.sum(finite)),
+        "mean_s": float(np.mean(finite)),
+        "min_s": float(np.min(finite)),
+        "max_s": float(np.max(finite)),
+    }
+
+
+def _active_nestor_timing_summary(diag: dict[str, Any]) -> dict[str, Any]:
+    sample = _as_1d_float_array(diag.get("freeb_nestor_sample_time_history", []))
+    solve = _as_1d_float_array(diag.get("freeb_nestor_solve_time_history", []))
+    reused = _as_1d_int_array(diag.get("freeb_nestor_reused_history", []))
+    full_update = _as_1d_int_array(diag.get("freeb_full_update_history", []))
+    size = max(int(sample.size), int(solve.size), int(reused.size), int(full_update.size))
+    if size == 0:
+        return {
+            "recorded_steps": 0,
+            "active_steps": 0,
+            "full_update_steps": 0,
+            "reused_steps": 0,
+            "sampled_steps": 0,
+            "sample_time_s": _summarize_seconds(np.zeros((0,), dtype=float)),
+            "solve_time_s": _summarize_seconds(np.zeros((0,), dtype=float)),
+        }
+
+    sample = _pad_1d(sample, size, value=0.0)
+    solve = _pad_1d(solve, size, value=0.0)
+    reused = _pad_1d(reused, size, value=0)
+    full_update = _pad_1d(full_update, size, value=0)
+    active = (full_update != 0) | (reused != 0) | (sample > 0.0) | (solve > 0.0)
+    return {
+        "recorded_steps": size,
+        "active_steps": int(np.count_nonzero(active)),
+        "full_update_steps": int(np.count_nonzero(full_update)),
+        "reused_steps": int(np.count_nonzero(reused)),
+        "sampled_steps": int(np.count_nonzero(sample > 0.0)),
+        "sample_time_s": _summarize_seconds(sample[active]),
+        "solve_time_s": _summarize_seconds(solve[active]),
+    }
+
+
+def _timing_improvement(cold_total_s: Any, warm_total_s: Any) -> dict[str, float | None]:
+    try:
+        cold = float(cold_total_s)
+        warm = float(warm_total_s)
+    except Exception:
+        return {
+            "cold_total_s": None,
+            "warm_total_s": None,
+            "delta_s": None,
+            "speedup": None,
+            "reduction_pct": None,
+        }
+    if not (np.isfinite(cold) and np.isfinite(warm)):
+        cold = None
+        warm = None
+    if cold is None or warm is None:
+        return {
+            "cold_total_s": cold,
+            "warm_total_s": warm,
+            "delta_s": None,
+            "speedup": None,
+            "reduction_pct": None,
+        }
+    return {
+        "cold_total_s": cold,
+        "warm_total_s": warm,
+        "delta_s": float(cold - warm),
+        "speedup": None if warm <= 0.0 else float(cold / warm),
+        "reduction_pct": None if cold <= 0.0 else float(100.0 * (cold - warm) / cold),
+    }
+
+
+def _active_nestor_timing_improvement(
+    cold_solver_timing: dict[str, Any],
+    warm_solver_timing: dict[str, Any],
+) -> dict[str, Any]:
+    cold = cold_solver_timing.get("active_nestor_timing_summary", {})
+    warm = warm_solver_timing.get("active_nestor_timing_summary", {})
+    cold_sample = cold.get("sample_time_s", {}) if isinstance(cold, dict) else {}
+    warm_sample = warm.get("sample_time_s", {}) if isinstance(warm, dict) else {}
+    cold_solve = cold.get("solve_time_s", {}) if isinstance(cold, dict) else {}
+    warm_solve = warm.get("solve_time_s", {}) if isinstance(warm, dict) else {}
+    return {
+        "cold_active_steps": cold.get("active_steps") if isinstance(cold, dict) else None,
+        "warm_active_steps": warm.get("active_steps") if isinstance(warm, dict) else None,
+        "sample_time_s": _timing_improvement(cold_sample.get("total_s"), warm_sample.get("total_s")),
+        "solve_time_s": _timing_improvement(cold_solve.get("total_s"), warm_solve.get("total_s")),
+    }
+
+
 def _last_float(value: Any) -> float | None:
     try:
         arr = np.asarray(value, dtype=float).reshape(-1)
@@ -226,6 +343,7 @@ def _solver_timing_summary(run: Any) -> dict[str, Any]:
     ):
         if key in diag:
             out[key] = diag[key]
+    out["active_nestor_timing_summary"] = _active_nestor_timing_summary(diag)
     return out
 
 
@@ -295,8 +413,6 @@ def _candidate_essos_dirs() -> list[Path]:
         [
             REPO_ROOT.parent / "ESSOS_mgrid_pr" / "examples" / "input_files",
             REPO_ROOT.parent / "ESSOS" / "examples" / "input_files",
-            Path("/Users/rogeriojorge/local/ESSOS_mgrid_pr/examples/input_files"),
-            Path("/Users/rogeriojorge/local/ESSOS/examples/input_files"),
         ]
     )
     return candidates
@@ -377,17 +493,61 @@ def _bench_case(label: str, input_path: Path, params: Any, args: argparse.Namesp
     for _ in range(max(0, int(args.warm_repeats))):
         dt, warm_run = _time_once(run_once)
         warm_times.append(dt)
+    cold_solver_timing = _solver_timing_summary(cold_run)
+    warm_solver_timing = _solver_timing_summary(warm_run)
     return {
         "label": label,
         "status": "completed",
         "input": input_path,
         "cold_or_compile_s": cold_s,
         "warm": _summarize_timings(warm_times),
-        "cold_solver_timing": _solver_timing_summary(cold_run),
-        "warm_solver_timing": _solver_timing_summary(warm_run),
+        "cold_solver_timing": cold_solver_timing,
+        "warm_solver_timing": warm_solver_timing,
+        "active_nestor_timing_improvement": _active_nestor_timing_improvement(cold_solver_timing, warm_solver_timing),
         "fsq": _fsq_summary(warm_run),
         "free_boundary": _free_boundary_summary(warm_run),
     }
+
+
+def _format_seconds(value: Any) -> str:
+    try:
+        seconds = float(value)
+    except Exception:
+        return "n/a"
+    return "n/a" if not np.isfinite(seconds) else f"{seconds:.6f}s"
+
+
+def _format_speedup(value: Any) -> str:
+    try:
+        speedup = float(value)
+    except Exception:
+        return "n/a"
+    return "n/a" if not np.isfinite(speedup) else f"{speedup:.2f}x"
+
+
+def _format_active_nestor_timing(case: dict[str, Any]) -> str:
+    improvement = case.get("active_nestor_timing_improvement", {})
+    if not isinstance(improvement, dict):
+        return ""
+    try:
+        active_steps = int(improvement.get("cold_active_steps") or 0) + int(
+            improvement.get("warm_active_steps") or 0
+        )
+    except Exception:
+        active_steps = 0
+    if active_steps <= 0:
+        return ""
+    sample = improvement.get("sample_time_s", {})
+    solve = improvement.get("solve_time_s", {})
+    if not isinstance(sample, dict) or not isinstance(solve, dict):
+        return ""
+    return (
+        " active_nestor_sample_total="
+        f"{_format_seconds(sample.get('cold_total_s'))}->{_format_seconds(sample.get('warm_total_s'))}"
+        f" speedup={_format_speedup(sample.get('speedup'))}"
+        " active_nestor_solve_total="
+        f"{_format_seconds(solve.get('cold_total_s'))}->{_format_seconds(solve.get('warm_total_s'))}"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -447,6 +607,7 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 f"[bench-freeb-direct-coil-solve] {case['label']}: "
                 f"cold_or_compile={case['cold_or_compile_s']:.6f}s warm_min={warm_min}"
+                f"{_format_active_nestor_timing(case)}"
             )
         else:
             print(f"[bench-freeb-direct-coil-solve] {case['label']}: skipped ({case.get('reason', 'unknown')})")

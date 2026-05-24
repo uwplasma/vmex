@@ -83,20 +83,22 @@ can be optimization variables:
 
 ```text
 coil Fourier dofs/currents -> direct Biot-Savart field -> free-boundary VMEC
--> wout/Boozer/QS diagnostics -> coil-only objective update
+-> wout/proxy diagnostics -> coil-only objective update
 ```
 
 Current status: direct-coil finite-pressure support is a phase-1
 provider/coupling validation lane. Low-resolution ESSOS LP-QA finite-pressure
 smokes run through both generated-`mgrid` and direct-coil backends and match the
-recorded scalar diagnostics, including active NESTOR samples. This is not yet a
-promoted high-beta coil optimization result or a production full-solve adjoint.
+recorded scalar diagnostics, including active NESTOR samples. Boozer/QS
+full-loop gradients remain phase-2 promotion work; this is not yet a promoted
+high-beta coil optimization result or a production full-solve adjoint.
 
 Run the low-resolution direct-coil/generated-`mgrid` scan from a developer
 checkout with the ESSOS mgrid branch on `PYTHONPATH`:
 
 ```bash
-PYTHONPATH=/Users/rogeriojorge/local/ESSOS_mgrid_pr:$PYTHONPATH \
+export ESSOS_ROOT=/path/to/ESSOS_mgrid_pr
+PYTHONPATH=$ESSOS_ROOT:$PYTHONPATH \
   python examples/free_boundary_essos_coils_beta_scan.py \
   --outdir results/free_boundary_essos_coils_beta_scan_readme \
   --activate-fsq 1.0

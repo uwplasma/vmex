@@ -17,8 +17,33 @@ from vmec_jax.state import pack_state
 
 ROOT = Path(__file__).resolve().parents[1]
 LPQA_INPUT = ROOT / "examples" / "data" / "input.LandremanPaul2021_QA_reactorScale_lowres"
-LPQA_COILS = Path("/Users/rogeriojorge/local/ESSOS_mgrid_pr/examples/input_files/ESSOS_biot_savart_LandremanPaulQA.json")
 FINITE_PRESSURE_SCALE = 34.46233666638
+LPQA_COIL_FILE = "ESSOS_biot_savart_LandremanPaulQA.json"
+
+
+def _candidate_essos_input_dirs() -> list[Path]:
+    candidates: list[Path] = []
+    if os.getenv("ESSOS_INPUT_DIR"):
+        candidates.append(Path(os.environ["ESSOS_INPUT_DIR"]).expanduser())
+    candidates.extend(
+        [
+            ROOT.parent / "ESSOS_mgrid_pr" / "examples" / "input_files",
+            ROOT.parent / "ESSOS" / "examples" / "input_files",
+            Path.cwd() / "examples" / "input_files",
+        ]
+    )
+    return candidates
+
+
+def _find_lpqa_coils() -> Path:
+    for directory in _candidate_essos_input_dirs():
+        path = directory / LPQA_COIL_FILE
+        if path.exists():
+            return path
+    return _candidate_essos_input_dirs()[0] / LPQA_COIL_FILE
+
+
+LPQA_COILS = _find_lpqa_coils()
 
 
 pytestmark = pytest.mark.skipif(not has_jax(), reason="direct-coil finite-pressure sensitivity tests require JAX")
@@ -263,6 +288,62 @@ def test_forced_activation_reports_direct_coil_nestor_diagnostics(tmp_path: Path
     assert nestor_diag["provider_kind"] == "direct_coils"
     assert nestor_diag["bnormal_rms"] > 0.0
     assert nestor_diag["bsqvac_rms"] > 0.0
+
+
+def test_direct_coil_current_only_objective_fd_slope_is_stable(tmp_path: Path) -> None:
+    """Central finite-difference slopes should be stable for a current-only direct-coil objective."""
+
+    enable_x64(True)
+    from examples.optimization.free_boundary_QS_coil_optimization import (
+        apply_coil_variables,
+        objective_from_summary,
+        run_direct_free_boundary,
+        summarize_run,
+    )
+
+    input_path = _write_tiny_direct_freeb_input(tmp_path / "input.direct_current_fd_slope")
+    base_params = _circle_coil_params(current=3.0e7)
+    variables = [("current", (0,))]
+
+    def objective(x: float) -> float:
+        params = apply_coil_variables(
+            base_params,
+            np.asarray([x], dtype=float),
+            variables=variables,
+            current_step=0.02,
+            dof_step=0.0,
+        )
+        run, wall_s = run_direct_free_boundary(
+            input_path,
+            params,
+            vmec_max_iter=4,
+            activate_fsq=1.0e99,
+        )
+        summary = summarize_run(
+            run,
+            params,
+            objective=np.nan,
+            wall_s=wall_s,
+            target_aspect=6.0,
+            target_iota=0.4,
+        )
+        return objective_from_summary(
+            summary,
+            residual_weight=1.0,
+            aspect_weight=0.0,
+            iota_weight=0.0,
+        )
+
+    slopes = []
+    for eps in (0.25, 0.125):
+        forward = objective(eps)
+        backward = objective(-eps)
+        slopes.append((forward - backward) / (2.0 * eps))
+
+    slopes = np.asarray(slopes, dtype=float)
+    assert np.all(np.isfinite(slopes))
+    assert np.min(np.abs(slopes)) > 1.0e-7
+    np.testing.assert_allclose(slopes[0], slopes[1], rtol=5.0e-6, atol=1.0e-12)
 
 
 @pytest.mark.full

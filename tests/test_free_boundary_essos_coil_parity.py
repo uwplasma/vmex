@@ -16,14 +16,40 @@ from vmec_jax.wout import read_wout
 
 ROOT = Path(__file__).resolve().parents[1]
 LPQA_INPUT = ROOT / "examples" / "data" / "input.LandremanPaul2021_QA_reactorScale_lowres"
-LPQA_COILS = Path("/Users/rogeriojorge/local/ESSOS_mgrid_pr/examples/input_files/ESSOS_biot_savart_LandremanPaulQA.json")
 FINITE_PRESSURE_SCALE = 34.46233666638
+LPQA_COIL_FILE = "ESSOS_biot_savart_LandremanPaulQA.json"
+
+
+def _candidate_essos_input_dirs() -> list[Path]:
+    candidates: list[Path] = []
+    if os.getenv("ESSOS_INPUT_DIR"):
+        candidates.append(Path(os.environ["ESSOS_INPUT_DIR"]).expanduser())
+    candidates.extend(
+        [
+            ROOT.parent / "ESSOS_mgrid_pr" / "examples" / "input_files",
+            ROOT.parent / "ESSOS" / "examples" / "input_files",
+            Path.cwd() / "examples" / "input_files",
+        ]
+    )
+    return candidates
+
+
+def _find_lpqa_coils() -> Path:
+    for directory in _candidate_essos_input_dirs():
+        path = directory / LPQA_COIL_FILE
+        if path.exists():
+            return path
+    return _candidate_essos_input_dirs()[0] / LPQA_COIL_FILE
+
+
+LPQA_COILS = _find_lpqa_coils()
 
 
 def _load_lpqa_essos_coils():
     essos_coils = pytest.importorskip("essos.coils")
     if not LPQA_COILS.exists():
-        pytest.skip(f"missing local ESSOS Landreman-Paul QA coils: {LPQA_COILS}")
+        searched = ", ".join(str(path) for path in _candidate_essos_input_dirs())
+        pytest.skip(f"missing ESSOS Landreman-Paul QA coils; set ESSOS_INPUT_DIR. Searched: {searched}")
     coils = essos_coils.Coils_from_json(str(LPQA_COILS))
     if not hasattr(coils, "to_mgrid"):
         pytest.skip("ESSOS Coils.to_mgrid is not available; use ESSOS PR #33 or newer")

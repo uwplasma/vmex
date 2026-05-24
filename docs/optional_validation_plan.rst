@@ -258,14 +258,13 @@ parity result.
 
 On 2026-05-22, local external fixed-boundary probes were added to the optional
 planning manifest after bounded ``xvmec2000`` stage-trace checks against
-``/Users/rogeriojorge/local/simsopt`` and
-``/Users/rogeriojorge/local/vmec_equilibria``:
+``$SIMSOPT_ROOT`` and ``$LANDREMAN_VMEC_EQUILIBRIA_ROOT``:
 
 .. code-block:: bash
 
    python tools/diagnostics/external_vmec_asset_inventory.py \
-     --source-root simsopt=/Users/rogeriojorge/local/simsopt \
-     --source-root landreman_vmec_equilibria=/Users/rogeriojorge/local/vmec_equilibria \
+     --source-root simsopt=$SIMSOPT_ROOT \
+     --source-root landreman_vmec_equilibria=$LANDREMAN_VMEC_EQUILIBRIA_ROOT \
      --json-out outputs/external_vmec_assets/all_local_inventory.json
 
    EXTERNAL_IDS="fixed_nonaxis_lasym_false_simsopt_qh_reactor_lowres_external,fixed_nonaxis_lasym_false_landreman_w7x_standard_boundary,fixed_nonaxis_lasym_false_landreman_ncsx_fixed_boundary,fixed_nonaxis_lasym_false_simsopt_w7x_standard,fixed_nonaxis_lasym_true_simsopt_basic_non_stellsym_external,fixed_nonaxis_lasym_false_landreman_hsx_qhs_fixed"

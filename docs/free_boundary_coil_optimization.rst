@@ -17,8 +17,12 @@ The intended single-stage loop is:
    coil Fourier dofs/currents
       -> differentiable Biot-Savart external field
       -> vmec_jax free-boundary equilibrium
-      -> wout/Boozer/QS diagnostics
+      -> wout/proxy diagnostics
       -> coil-only objective update
+
+Boozer/QS diagnostics are the intended promotion target for this lane, but the
+current branch keeps the single-stage optimization example on a cheap
+VMEC-residual/aspect/iota proxy until complete full-loop gradient checks pass.
 
 .. image:: _static/figures/freeb_single_stage_architecture.png
    :alt: Direct-coil free-boundary architecture
@@ -115,7 +119,8 @@ merged and released, put the ESSOS branch checkout on ``PYTHONPATH``.
 
 .. code-block:: bash
 
-   PYTHONPATH=/Users/rogeriojorge/local/ESSOS_mgrid_pr:$PYTHONPATH \
+   export ESSOS_ROOT=/path/to/ESSOS_mgrid_pr
+   PYTHONPATH=$ESSOS_ROOT:$PYTHONPATH \
      python examples/free_boundary_essos_coils_beta_scan.py \
      --outdir results/free_boundary_essos_coils_beta_scan_readme \
      --activate-fsq 1.0
@@ -126,7 +131,8 @@ sensitivity studies with stronger coils:
 
 .. code-block:: bash
 
-   PYTHONPATH=/Users/rogeriojorge/local/ESSOS_mgrid_pr:$PYTHONPATH \
+   export ESSOS_ROOT=/path/to/ESSOS_mgrid_pr
+   PYTHONPATH=$ESSOS_ROOT:$PYTHONPATH \
      python examples/free_boundary_essos_coils_beta_scan.py \
      --outdir results/free_boundary_essos_coils_beta_scan_scaled \
      --coil-current-scale 100 \
@@ -180,7 +186,8 @@ For the ESSOS Landreman-Paul QA coils, put ESSOS on ``PYTHONPATH`` and use:
 
 .. code-block:: bash
 
-   PYTHONPATH=/Users/rogeriojorge/local/ESSOS_mgrid_pr:$PYTHONPATH \
+   export ESSOS_ROOT=/path/to/ESSOS_mgrid_pr
+   PYTHONPATH=$ESSOS_ROOT:$PYTHONPATH \
      python examples/optimization/free_boundary_QS_coil_optimization.py \
      --smoke \
      --max-evals 3 \
@@ -304,7 +311,8 @@ executable is available:
 
 .. code-block:: bash
 
-   PYTHONPATH=/Users/rogeriojorge/local/ESSOS_mgrid_pr:$PYTHONPATH \
+   export ESSOS_ROOT=/path/to/ESSOS_mgrid_pr
+   PYTHONPATH=$ESSOS_ROOT:$PYTHONPATH \
      python tools/diagnostics/compare_freeb_coils_mgrid_vmec2000.py \
        --out results/freeb_coils_mgrid_vmec2000.json \
        --workdir results/freeb_coils_mgrid_vmec2000_work
@@ -313,7 +321,8 @@ For a quick provider-only smoke, skip VMEC2000 explicitly:
 
 .. code-block:: bash
 
-   PYTHONPATH=/Users/rogeriojorge/local/ESSOS_mgrid_pr:$PYTHONPATH \
+   export ESSOS_ROOT=/path/to/ESSOS_mgrid_pr
+   PYTHONPATH=$ESSOS_ROOT:$PYTHONPATH \
      python tools/diagnostics/compare_freeb_coils_mgrid_vmec2000.py \
        --niter 1 \
        --skip-vmec2000 \

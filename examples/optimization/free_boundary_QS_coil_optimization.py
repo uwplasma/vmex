@@ -12,8 +12,9 @@ The phase-1 objective is deliberately cheap:
 * aspect-ratio target,
 * mean-iota target.
 
-TODO: replace or augment this proxy with Boozer/QS residuals once that path is
-cheap enough for this single-stage free-boundary coil loop.
+Phase-2 note: replace or augment this proxy with Boozer/QS residuals once that
+path is cheap enough for this single-stage free-boundary coil loop and complete
+full-loop finite-difference checks pass.
 
 Run a minimal smoke from the repository root:
 
@@ -89,8 +90,6 @@ def candidate_essos_input_dirs() -> list[Path]:
         [
             REPO_ROOT.parent / "ESSOS" / "examples" / "input_files",
             REPO_ROOT.parent / "ESSOS_mgrid_pr" / "examples" / "input_files",
-            Path("/Users/rogeriojorge/local/ESSOS/examples/input_files"),
-            Path("/Users/rogeriojorge/local/ESSOS_mgrid_pr/examples/input_files"),
         ]
     )
     return candidates
@@ -608,7 +607,7 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
         "optimized_variables": [{"kind": kind, "index": index} for kind, index in variables],
         "objective_model": {
             "description": "Cheap residual/aspect/iota proxy; Boozer/QS residual is intentionally deferred.",
-            "todo": "Add Boozer/QS objective when affordable for single-stage free-boundary coil optimization.",
+            "phase2_note": "Add Boozer/QS objective after full-loop gradients are validated.",
             "residual_weight": float(args.residual_weight),
             "aspect_weight": float(args.aspect_weight),
             "iota_weight": float(args.iota_weight),

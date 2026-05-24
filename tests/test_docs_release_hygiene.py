@@ -35,6 +35,25 @@ def test_root_readme_stays_concise_and_defers_extended_claims() -> None:
         assert fragment not in readme
 
 
+def test_public_free_boundary_files_do_not_embed_local_absolute_paths() -> None:
+    forbidden = "/" + "Users/rogeriojorge"
+    checked_roots = [
+        ROOT / "README.md",
+        ROOT / "docs",
+        ROOT / "examples",
+        ROOT / "tests",
+        ROOT / "tools",
+    ]
+    for root in checked_roots:
+        paths = [root] if root.is_file() else list(root.rglob("*"))
+        for path in paths:
+            if any(part in {"_build", "__pycache__", ".pytest_cache"} for part in path.parts):
+                continue
+            if not path.is_file() or path.suffix in {".png", ".jpg", ".jpeg", ".pdf", ".nc", ".pyc"}:
+                continue
+            assert forbidden not in path.read_text(errors="ignore"), f"local absolute path leaked into {path}"
+
+
 def test_optimization_docs_explain_explicit_final_output_control() -> None:
     guide = (ROOT / "docs" / "optimization.rst").read_text()
     examples_readme = (ROOT / "examples" / "optimization" / "README.md").read_text()
