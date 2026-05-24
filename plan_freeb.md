@@ -27,6 +27,8 @@ Steps taken:
 11. Added `examples/free_boundary_direct_coils_forward.py` as a dependency-light pure-`CoilFieldParams` forward example that needs no ESSOS assets.
 12. Benchmarks now expose synthetic grid/coil knobs and last-sample diagnostics including sample points, JIT sampler flag, coil count, and segments per coil.
 13. Public docs now avoid overclaiming full free-boundary/NESTOR adjoints or converged high-beta direct-coil equilibria.
+14. Phase-1 coil-only optimization summaries now expose active free-boundary/NESTOR diagnostics, and the current-only finite-difference smoke asserts it is measuring active direct-coil coupling.
+15. Optional VMEC2000 generated-mgrid diagnostics now classify no-WOUT completions with structured underconverged metadata instead of leaving users to parse raw stdout tails.
 
 Results obtained:
 
@@ -46,6 +48,8 @@ Results obtained:
 14. `examples/free_boundary_direct_coils_forward.py --outdir tmp/free_boundary_direct_coils_forward_run_smoke --max-iter 1 --n-segments 8 --ns 7 --nzeta 2 --ntheta 8` wrote a synthetic direct-coil WOUT with finite one-iteration residuals (`fsqr≈7.3e-4`, `fsqz≈1.6e-4`, `fsql≈5.3e-4`).
 15. Larger synthetic direct-coil benchmark with `sample_points=78`, `coils=16`, `segments=128` reported JIT sampler warm active sampling around `0.0106 s` versus non-JIT around `0.0092 s`; whole warm solve time stayed about `0.25 s`, so this small case is dominated by non-sampling work.
 16. Subagent larger spectral-mode benchmark with `sample_points=2352`, `coils=8`, `segments=128` found the JIT sampler reduced warm active sampling from `0.0588 s` to `0.0545 s` (about 7%), but total warm wall time remained about `0.35 s`; dense NESTOR mode remains the main performance bottleneck.
+17. Targeted active-coupling summary tests passed: 2 passed in 7.81 s.
+18. VMEC2000 parser/optional LASYM validation tests passed locally as 1 passed, 1 skipped in 0.40 s without `VMEC2000_INTEGRATION=1`.
 
 Best next steps:
 
@@ -62,12 +66,12 @@ Open-lane completion estimates:
 
 1. External provider architecture: 93%.
 2. Direct-coil finite-pressure forward lane: 93%.
-3. ESSOS/mgrid/VMEC2000 comparison lane: 82%.
-4. Full-loop gradient validation: 55%.
-5. Robust/optimization examples: 80%.
+3. ESSOS/mgrid/VMEC2000 comparison lane: 84%.
+4. Full-loop gradient validation: 57%.
+5. Robust/optimization examples: 82%.
 6. Performance/benchmarking: 78%.
 7. Docs/release hygiene: 92%.
-8. Overall branch completion: 86%.
+8. Overall branch completion: 87%.
 
 ## Mission
 

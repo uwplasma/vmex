@@ -58,6 +58,7 @@ VMEC2000_CONVERGED_WOUT_CASES = (
     ),
 )
 VMEC2000_FREEB_LASYM_TIMEOUT_S = 60.0
+VMEC2000_FREEB_LASYM_MAX_FSQ_TOTAL = 2.0e-1
 
 
 def _vmec2000_exec_or_skip() -> Path:
@@ -181,6 +182,20 @@ def test_vmec2000_free_boundary_lasym_true_reaches_vacuum_solve(tmp_path: Path) 
     assert result.stages[-1].rows[-1].it >= 100
     wout_path = result.workdir / "wout_cth_like_free_bdy_lasym_small.nc"
     assert wout_path.exists(), f"VMEC2000 did not produce {wout_path.name}"
+
+    from vmec_jax.wout import read_wout
+
+    wout = read_wout(wout_path)
+    assert int(wout.ns) == 15
+    assert int(wout.mpol) == 5
+    assert int(wout.ntor) == 4
+    assert int(wout.nfp) == 5
+    assert bool(wout.lasym) is True
+    fsq_total = float(wout.fsqr + wout.fsqz + wout.fsql)
+    assert np.isfinite([fsq_total, wout.wb, wout.wp]).all()
+    assert fsq_total < VMEC2000_FREEB_LASYM_MAX_FSQ_TOTAL
+    assert float(wout.wb) > 0.0
+    assert float(wout.wp) > 0.0
 
 
 @pytest.mark.parametrize(

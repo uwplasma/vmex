@@ -278,6 +278,8 @@ def summarize_run(
     target_iota: float,
 ) -> dict[str, Any]:
     diag = getattr(run.result, "diagnostics", {}) if run.result is not None else {}
+    freeb = diag.get("free_boundary", {}) if isinstance(diag, dict) else {}
+    nestor = freeb.get("last_nestor_diagnostics", {}) if isinstance(freeb, dict) else {}
     fsqr = float_or_none(diag.get("final_fsqr"))
     fsqz = float_or_none(diag.get("final_fsqz"))
     fsql = float_or_none(diag.get("final_fsql"))
@@ -316,6 +318,10 @@ def summarize_run(
         "target_iota": float(target_iota),
         "coil_current_norm": float(np.asarray(coil_current_norm(params))),
         "mean_coil_length": float(np.mean(np.asarray(coil_lengths(params), dtype=float))),
+        "free_boundary_vacuum_stub": freeb.get("vacuum_stub") if isinstance(freeb, dict) else None,
+        "free_boundary_nestor_model": freeb.get("nestor_model") if isinstance(freeb, dict) else None,
+        "free_boundary_bnormal_rms": nestor.get("bnormal_rms") if isinstance(nestor, dict) else None,
+        "free_boundary_bsqvac_rms": nestor.get("bsqvac_rms") if isinstance(nestor, dict) else None,
         "vmec_history": {
             "w": array_history(getattr(result, "w_history", None)),
             "fsqr2": array_history(getattr(result, "fsqr2_history", None)),

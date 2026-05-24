@@ -685,6 +685,47 @@ def _vmec2000_summary(vmec2000_result: Any) -> dict[str, Any]:
     }
 
 
+def _vmec2000_underconverged_details(summary: dict[str, Any]) -> dict[str, Any]:
+    stages = summary.get("stages") or []
+    last_stage = stages[-1] if stages else {}
+    last_row = summary.get("last_row") or {}
+    niter = _safe_float(last_stage.get("niter"))
+    last_it = _safe_float(last_row.get("it"))
+    ftolv = _safe_float(last_stage.get("ftolv"))
+    preconditioned_parts = [
+        _safe_float(last_row.get(name))
+        for name in ("fsqr1", "fsqz1", "fsql1")
+    ]
+    preconditioned_fsq_total = None
+    if all(value is not None for value in preconditioned_parts):
+        preconditioned_fsq_total = float(sum(value for value in preconditioned_parts if value is not None))
+
+    tails = list(summary.get("stdout_tail") or []) + list(summary.get("threed1_tail") or [])
+    printed_try_increasing_niter = any("Try increasing NITER" in line for line in tails)
+    reached_niter = bool(niter is not None and last_it is not None and int(last_it) >= int(niter))
+    classification = "unknown_no_wout"
+    if reached_niter and printed_try_increasing_niter:
+        classification = "reached_niter_without_wout"
+    elif printed_try_increasing_niter:
+        classification = "vmec2000_requested_more_iterations"
+
+    details: dict[str, Any] = {
+        "classification": classification,
+        "printed_try_increasing_niter": printed_try_increasing_niter,
+        "reached_niter": reached_niter,
+        "last_it": None if last_it is None else int(last_it),
+        "niter": None if niter is None else int(niter),
+        "ftolv": ftolv,
+        "physical_fsq_total_last": _safe_float(summary.get("fsq_total_last")),
+        "preconditioned_fsq_total_last": preconditioned_fsq_total,
+        "delt0r_last": _safe_float(last_row.get("delt0r")),
+        "w_last": _safe_float(last_row.get("w")),
+    }
+    if preconditioned_fsq_total is not None and ftolv not in (None, 0.0):
+        details["preconditioned_fsq_total_over_ftolv"] = float(preconditioned_fsq_total / ftolv)
+    return details
+
+
 def _run_vmec2000_case(
     *,
     mgrid_input: Path,
@@ -754,7 +795,11 @@ def _run_vmec2000_case(
     if not wout_path.exists():
         summary["status"] = "no_wout"
         summary["reason"] = "vmec2000_completed_without_wout"
-        summary["help"] = "Inspect stdout_tail, stderr_tail, threed1_tail, and the VMEC2000 workdir files in this JSON."
+        summary["underconverged"] = _vmec2000_underconverged_details(summary)
+        summary["help"] = (
+            "Inspect underconverged, stdout_tail, stderr_tail, threed1_tail, "
+            "and the VMEC2000 workdir files in this JSON."
+        )
         return result, None, summary
 
     wout = read_wout(wout_path)

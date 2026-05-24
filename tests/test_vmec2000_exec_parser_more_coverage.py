@@ -13,6 +13,9 @@ from vmec_jax.vmec2000_exec import (
     flatten_threed1,
     threed1_fsq_total,
 )
+from tools.diagnostics.compare_freeb_coils_mgrid_vmec2000 import (
+    _vmec2000_underconverged_details,
+)
 
 
 def test_parse_vmec2000_threed1_ignores_noise_and_flushes_stage_at_eof(tmp_path: Path) -> None:
@@ -176,3 +179,35 @@ def test_case_name_and_threed1_discovery_precedence(tmp_path: Path) -> None:
     direct = tmp_path / "threed1.case"
     direct.write_text("")
     assert _find_threed1_file(tmp_path, case="case") == direct
+
+
+def test_freeb_generated_mgrid_no_wout_summary_marks_underconverged() -> None:
+    details = _vmec2000_underconverged_details(
+        {
+            "fsq_total_last": 0.004002,
+            "last_row": {
+                "it": 5000,
+                "fsqr": 0.00162,
+                "fsqz": 0.00140,
+                "fsql": 0.000982,
+                "fsqr1": 1.29e-6,
+                "fsqz1": 1.17e-6,
+                "fsql1": 2.75e-5,
+                "delt0r": 0.0129,
+                "w": 9875.4,
+            },
+            "stages": [{"ns": 12, "niter": 5000, "ftolv": 1.0e-8, "row_count": 26}],
+            "stdout_tail": [" Try increasing NITER"],
+            "threed1_tail": [],
+        }
+    )
+
+    assert details["classification"] == "reached_niter_without_wout"
+    assert details["printed_try_increasing_niter"] is True
+    assert details["reached_niter"] is True
+    assert details["last_it"] == 5000
+    assert details["niter"] == 5000
+    assert details["ftolv"] == pytest.approx(1.0e-8)
+    assert details["physical_fsq_total_last"] == pytest.approx(0.004002)
+    assert details["preconditioned_fsq_total_last"] == pytest.approx(2.996e-5)
+    assert details["preconditioned_fsq_total_over_ftolv"] == pytest.approx(2996.0)

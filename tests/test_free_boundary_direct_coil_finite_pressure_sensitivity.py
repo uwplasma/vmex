@@ -376,6 +376,10 @@ def test_direct_coil_current_only_objective_fd_slope_is_stable(tmp_path: Path) -
             target_aspect=6.0,
             target_iota=0.4,
         )
+        assert summary["free_boundary_vacuum_stub"] is False
+        assert summary["free_boundary_nestor_model"].startswith("vmec2000_like_dense_integral")
+        assert summary["free_boundary_bnormal_rms"] > 0.0
+        assert summary["free_boundary_bsqvac_rms"] > 0.0
         return objective_from_summary(
             summary,
             residual_weight=1.0,
