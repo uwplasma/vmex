@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 import os
 from pathlib import Path
 
@@ -229,6 +230,159 @@ def _assert_fsq_total_same_scale(wout_jax, wout_vmec2000) -> None:
     _assert_same_sign_and_scale("fsq_total", fsq_jax, fsq_vmec2000, max_ratio=10.0)
 
 
+def _scalar_gap(got_wout, ref_wout, name: str) -> dict[str, float | None]:
+    if not (hasattr(got_wout, name) and hasattr(ref_wout, name)):
+        return {"got": None, "ref": None, "abs_delta": None, "rel_delta": None}
+    got = float(getattr(got_wout, name))
+    ref = float(getattr(ref_wout, name))
+    abs_delta = abs(got - ref)
+    rel_delta = abs_delta / max(abs(ref), 1.0e-300)
+    return {"got": got, "ref": ref, "abs_delta": abs_delta, "rel_delta": rel_delta}
+
+
+def _array_gap(got, ref, *, radial_skip: int = 0, mode_mask: np.ndarray | None = None) -> dict[str, float | int]:
+    got_arr = np.asarray(got, dtype=float)
+    ref_arr = np.asarray(ref, dtype=float)
+    if got_arr.shape != ref_arr.shape:
+        return {"shape_mismatch": 1, "got_size": int(got_arr.size), "ref_size": int(ref_arr.size)}
+    if radial_skip and got_arr.ndim >= 1:
+        got_arr = got_arr[radial_skip:, ...]
+        ref_arr = ref_arr[radial_skip:, ...]
+    if mode_mask is not None:
+        got_arr = got_arr[..., mode_mask]
+        ref_arr = ref_arr[..., mode_mask]
+    diff = got_arr - ref_arr
+    abs_rms = float(np.sqrt(np.mean(diff * diff)))
+    ref_rms = float(np.sqrt(np.mean(ref_arr * ref_arr)))
+    return {
+        "size": int(got_arr.size),
+        "abs_rms_delta": abs_rms,
+        "rel_rms_delta": abs_rms / max(ref_rms, 1.0e-300),
+        "max_abs_delta": float(np.max(np.abs(diff))),
+    }
+
+
+def _wout_gap_report(wout_jax, wout_vmec2000) -> dict[str, object]:
+    report: dict[str, object] = {
+        "layout": {
+            "jax": {
+                "ns": int(wout_jax.ns),
+                "mpol": int(wout_jax.mpol),
+                "ntor": int(wout_jax.ntor),
+                "nfp": int(wout_jax.nfp),
+                "lasym": bool(wout_jax.lasym),
+                "signgs": int(getattr(wout_jax, "signgs", 0)),
+            },
+            "vmec2000": {
+                "ns": int(wout_vmec2000.ns),
+                "mpol": int(wout_vmec2000.mpol),
+                "ntor": int(wout_vmec2000.ntor),
+                "nfp": int(wout_vmec2000.nfp),
+                "lasym": bool(wout_vmec2000.lasym),
+                "signgs": int(getattr(wout_vmec2000, "signgs", 0)),
+            },
+        },
+        "scalars": {},
+        "profiles": {},
+        "low_order_modes": {},
+    }
+    scalar_names = (
+        "aspect",
+        "Aminor_p",
+        "Rmajor_p",
+        "volume_p",
+        "wb",
+        "wp",
+        "betatotal",
+        "betapol",
+        "betator",
+        "betaxis",
+        "fsqr",
+        "fsqz",
+        "fsql",
+    )
+    report["scalars"] = {name: _scalar_gap(wout_jax, wout_vmec2000, name) for name in scalar_names}
+    for name in ("iotas", "iotaf", "pres", "presf", "vp", "phipf", "phips", "chipf", "buco", "bvco", "jcuru", "jcurv", "equif"):
+        if hasattr(wout_jax, name) and hasattr(wout_vmec2000, name):
+            report["profiles"][name] = _array_gap(
+                getattr(wout_jax, name),
+                getattr(wout_vmec2000, name),
+                radial_skip=1,
+            )
+
+    try:
+        low_order = _low_order_mode_mask(wout_vmec2000)
+        for name in ("rmnc", "zmns", "lmns", "bmnc", "gmnc", "bsubumnc", "bsubvmnc", "bsupumnc", "bsupvmnc"):
+            if hasattr(wout_jax, name) and hasattr(wout_vmec2000, name):
+                report["low_order_modes"][name] = _array_gap(
+                    getattr(wout_jax, name),
+                    getattr(wout_vmec2000, name),
+                    radial_skip=1,
+                    mode_mask=low_order,
+                )
+    except Exception as exc:
+        report["low_order_modes_error"] = repr(exc)
+    return report
+
+
+def _write_wout_gap_report(path: Path, *, wout_jax, wout_vmec2000) -> None:
+    report = _wout_gap_report(wout_jax, wout_vmec2000)
+    path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    worst_scalars = sorted(
+        (
+            (name, values.get("rel_delta"))
+            for name, values in report.get("scalars", {}).items()
+            if isinstance(values, dict) and values.get("rel_delta") is not None
+        ),
+        key=lambda item: float(item[1]),
+        reverse=True,
+    )[:5]
+    print(f"VMEC2000 WOUT gap report: {path}")
+    print(f"Worst scalar relative gaps: {worst_scalars}")
+
+
+def _write_vmec2000_no_wout_report(path: Path, vmec2000) -> None:
+    threed_tail: list[str] = []
+    if vmec2000.threed1_path is not None and vmec2000.threed1_path.exists():
+        threed_tail = vmec2000.threed1_path.read_text(errors="replace").splitlines()[-80:]
+    payload = {
+        "status": "vmec2000_no_wout",
+        "workdir": str(vmec2000.workdir),
+        "input_path": str(vmec2000.input_path),
+        "runtime_s": float(vmec2000.runtime_s),
+        "stdout_tail": vmec2000.stdout.splitlines()[-40:],
+        "stderr_tail": vmec2000.stderr.splitlines()[-40:],
+        "files": sorted(p.name for p in vmec2000.workdir.iterdir()),
+        "threed1_path": None if vmec2000.threed1_path is None else str(vmec2000.threed1_path),
+        "threed1_tail": threed_tail,
+        "stages": [
+            {
+                "ns": int(stage.ns),
+                "niter": int(stage.niter),
+                "ftolv": float(stage.ftolv),
+                "row_count": len(stage.rows),
+                "last_row": None
+                if not stage.rows
+                else {
+                    "it": int(stage.rows[-1].it),
+                    "fsqr": float(stage.rows[-1].fsqr),
+                    "fsqz": float(stage.rows[-1].fsqz),
+                    "fsql": float(stage.rows[-1].fsql),
+                    "fsqr1": float(stage.rows[-1].fsqr1),
+                    "fsqz1": float(stage.rows[-1].fsqz1),
+                    "fsql1": float(stage.rows[-1].fsql1),
+                    "delt0r": stage.rows[-1].delt0r,
+                    "r00": stage.rows[-1].r00,
+                    "w": stage.rows[-1].w,
+                },
+            }
+            for stage in vmec2000.stages
+        ],
+    }
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    print(f"VMEC2000 did not write WOUT; diagnostic report: {path}")
+
+
 def _vmec2000_wout_path(vmec2000) -> Path:
     case = vmec2000.input_path.name.removeprefix("input.")
     return vmec2000.workdir / f"wout_{case}.nc"
@@ -298,8 +452,15 @@ def test_vmec2000_generated_mgrid_free_boundary_matches_vmec_jax_and_direct_coil
 
     vmec2000 = run_xvmec2000(mgrid_input, exec_path=exe, workdir=tmp_path / "vmec2000", timeout_s=90, keep_workdir=True)
     wout_vmec2000_path = _vmec2000_wout_path(vmec2000)
+    if not wout_vmec2000_path.exists():
+        _write_vmec2000_no_wout_report(tmp_path / "vmec2000_no_wout_report.json", vmec2000)
     assert wout_vmec2000_path.exists(), f"VMEC2000 did not produce {wout_vmec2000_path.name}"
     wout_vmec2000 = read_wout(wout_vmec2000_path)
 
+    _write_wout_gap_report(
+        tmp_path / "vmec2000_wout_gap_report.json",
+        wout_jax=wout_mgrid,
+        wout_vmec2000=wout_vmec2000,
+    )
     _assert_vmec2000_generated_mgrid_wout_matches_vmec_jax(wout_mgrid, wout_vmec2000)
     _assert_fsq_total_same_scale(wout_mgrid, wout_vmec2000)
