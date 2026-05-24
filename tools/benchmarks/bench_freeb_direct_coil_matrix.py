@@ -90,7 +90,88 @@ def _case_counts(payload: dict[str, Any] | None) -> dict[str, int]:
     return counts
 
 
-def _timing_snapshot(payload: dict[str, Any] | None) -> list[dict[str, Any]]:
+def _compact_nestor_snapshot(case: dict[str, Any]) -> dict[str, Any] | None:
+    freeb = case.get("free_boundary")
+    last_diag = freeb.get("last_nestor_diagnostics") if isinstance(freeb, dict) else None
+    if not (
+        isinstance(case.get("active_nestor_timing_improvement"), dict)
+        or isinstance(case.get("trial_nestor_timing_improvement"), dict)
+        or isinstance(last_diag, dict)
+    ):
+        return None
+
+    final_diagnostics: dict[str, Any] = {}
+    if isinstance(last_diag, dict):
+        phase_time_s = {
+            label: last_diag[key]
+            for label, key in (
+                ("cache_build", "cache_build_time_s"),
+                ("source", "source_time_s"),
+                ("bvec", "bvec_time_s"),
+                ("matrix", "matrix_time_s"),
+                ("linear_solve", "linear_solve_time_s"),
+                ("vacuum_channels", "vacuum_channels_time_s"),
+            )
+            if key in last_diag
+        }
+        provider = {
+            label: last_diag[key]
+            for label, key in (
+                ("jit_sampler", "provider_jit_sampler"),
+                ("chunk_size", "provider_chunk_size"),
+                ("coil_count", "provider_coil_count"),
+                ("segments_per_coil", "provider_segments_per_coil"),
+                ("geometry_cached", "provider_geometry_cached"),
+            )
+            if key in last_diag
+        }
+        lu_built = {
+            label: last_diag[key]
+            for label, key in (
+                ("physical_matrix", "physical_matrix_lu_built"),
+                ("mode_matrix", "mode_matrix_lu_built"),
+            )
+            if key in last_diag
+        }
+        final_diagnostics = {
+            key: last_diag[key]
+            for key in ("sample_points", "sample_time_s", "solve_time_s")
+            if key in last_diag
+        }
+        if phase_time_s:
+            final_diagnostics["phase_time_s"] = phase_time_s
+        if provider:
+            final_diagnostics["provider"] = provider
+        if lu_built:
+            final_diagnostics["lu_built"] = lu_built
+
+    out: dict[str, Any] = {
+        "active": {
+            "cold": case.get("cold_solver_timing", {}).get("active_nestor_timing_summary"),
+            "warm": case.get("warm_solver_timing", {}).get("active_nestor_timing_summary"),
+            "improvement": case.get("active_nestor_timing_improvement"),
+        },
+        "trial": {
+            "cold": case.get("cold_solver_timing", {}).get("trial_nestor_timing_summary"),
+            "warm": case.get("warm_solver_timing", {}).get("trial_nestor_timing_summary"),
+            "improvement": case.get("trial_nestor_timing_improvement"),
+        },
+    }
+    if isinstance(freeb, dict):
+        out["model"] = freeb.get("nestor_model")
+        out["provider_kind"] = freeb.get("last_provider_kind")
+        out["final_recompute"] = {
+            "attempted": freeb.get("final_nestor_recompute_attempted"),
+            "failed": freeb.get("final_nestor_recompute_failed"),
+            "sample_time_s": freeb.get("final_nestor_sample_time_s"),
+            "solve_time_s": freeb.get("final_nestor_solve_time_s"),
+        }
+    if final_diagnostics:
+        out["final_diagnostics"] = final_diagnostics
+    return out
+
+
+def _timing_snapshot(payload: dict[str, Any] | None, *, include_nestor: bool = False) -> list[dict[str, Any]]:
     if not payload:
         return []
     rows: list[dict[str, Any]] = []
@@ -106,6 +187,10 @@ def _timing_snapshot(payload: dict[str, Any] | None) -> list[dict[str, Any]]:
             row["warm_mean_s"] = warm.get("mean_s")
         if case.get("reason"):
             row["reason"] = case.get("reason")
+        if bool(include_nestor):
+            nestor = _compact_nestor_snapshot(case)
+            if nestor:
+                row["nestor"] = nestor
         rows.append(row)
     return rows
 
@@ -193,7 +278,7 @@ def _run_child(label: str, out: Path, args: list[str], *, backend: str, timeout_
             "child_status": None if payload is None else payload.get("status"),
             "child_backend": None if payload is None else payload.get("backend"),
             "case_counts": _case_counts(payload),
-            "timings": _timing_snapshot(payload),
+            "timings": _timing_snapshot(payload, include_nestor=(label == "direct_solve")),
         }
     except subprocess.TimeoutExpired as exc:
         return {

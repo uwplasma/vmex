@@ -10,7 +10,7 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-05-24 after the CPU free-boundary preconditioner policy batch.
+Last updated: 2026-05-24 after the exact-adjoint validation and free-boundary profiling batch.
 
 Steps taken:
 
@@ -42,6 +42,11 @@ Steps taken:
 26. Added shared multigrid schedule arguments (`--ns-array`, `--niter-array`, `--ftol-array`) to the generated-mgrid/direct-coil/VMEC2000 diagnostic so promotion runs no longer need mixed-iteration VMEC2000-only overrides.
 27. Narrowed the CPU free-boundary tridiagonal policy to direct-coil provider runs only after CI caught a legacy `mgrid` free-boundary parity regression in `cth_like_free_bdy`.
 28. VMEC2000-only `--vmec2000-niter` overrides are now labeled as mixed-schedule/non-promotable in the diagnostic JSON.
+29. Hardened the discrete-adjoint chunking and finite-pressure direct-coil sensitivity tests after CI exposed stale callback signatures and an insensitive finite-pressure proxy metric.
+30. Added a direct-coil current/geometry to dense implicit vacuum solve gradient chain in the vacuum-adjoint tests.
+31. Added a JAX-transformable cylindrical-to-boundary vacuum-field projection helper and value/gradient parity tests against the existing NumPy projection.
+32. Exposed active/trial NESTOR sample/solve profile buckets for trial, forward-exact, and exact-tape solver summaries.
+33. Added compact nested NESTOR timing details to the free-boundary direct-coil benchmark matrix so direct-solve rows preserve the final recompute and last-sample breakdown without making provider/gradient rows noisy.
 
 Results obtained:
 
@@ -76,6 +81,10 @@ Results obtained:
 32. Fully forced `VMEC_JAX_TRIDI_PRECOMPUTE=1 VMEC_JAX_TRIDI_SOLVE=lax` benchmark now runs after the helper shape fix and reports preconditioner apply about `0.0095-0.010 s`, but broader solve-level shape coverage is still needed before using that path outside guarded cached-matrix cases.
 33. The new shared-schedule provider-only diagnostic smoke completed with `ns_array=[5, 7]`, `uses_multigrid_schedule=True`, `jax_direct_vs_mgrid_passed=True`, and only the expected `vmec2000_skipped` warning.
 34. Direct-provider benchmark after narrowing still reports warm solve about `0.249 s`; local legacy `cth_like_free_bdy` physics-smoke reproduction skipped because the optional mgrid asset is not present locally, so CI remains the authoritative check for that row.
+35. CI-targeted fast tests after the adjoint/chunking hardening passed locally: 66 passed, 1 skipped in 15.86 s.
+36. Full Sphinx documentation built successfully after the latest exact-adjoint documentation update.
+37. Projection-gradient validation now checks the boundary projection chain with respect to cylindrical vacuum-field samples and boundary geometry, not only dense toy linear solves.
+38. Quick free-boundary direct-coil benchmark matrix completed with CPU provider, direct-solve, and gradient rows all `completed`; the direct-solve row now retains a nested NESTOR details block when diagnostics are emitted.
 
 Best next steps:
 
@@ -284,6 +293,10 @@ Implementation implications from sources reviewed:
 16. NESTOR's free-boundary vacuum field is an integral-equation Neumann solve on the plasma boundary. The correct exact-gradient path is therefore a JAX-native operator and transpose solve for that linear problem, not reverse-mode taping through legacy NumPy NESTOR internals.
 17. VMEC adjoint literature for stellarator optimization shows why complete-solve adjoints are needed before claiming scalable QS-gradient validation: finite-difference cost grows with the number of design variables, while one adjoint solve can recover the sensitivity of a scalar objective to many boundary/coil parameters.
 18. DESC's JAX equilibrium/optimization workflow is relevant as a validation target for API and derivative behavior: exact derivatives should be exposed through clean pytrees and objective functions, while finite differences remain promotion tests rather than the production gradient path.
+19. QS metric literature emphasizes that Boozer-coordinate QS objectives are coordinate-dependent diagnostics of the solved equilibrium, so the validation ladder must include both equilibrium-state sensitivities and Boozer/QS post-processing sensitivities before claiming full coil-to-QS exact gradients. Source: https://www.cambridge.org/core/journals/journal-of-plasma-physics/article/measures-of-quasisymmetry-for-stellarators/01B9DFE86A23964F331E0E0615B4E7A2
+20. Free-boundary coil optimization literature reinforces that direct free-boundary solves are more expensive and fragile than fixed-boundary or quasi-free-boundary approximations. The implementation must therefore preserve cheap provider/mgrid validation gates and only promote direct-coil exact gradients after finite-difference checks on full solves. Source: https://www.sciencedirect.com/science/article/pii/S0021999122002091
+21. SPEC/SIMSOPT free-boundary optimization work motivates adding optional physics gates beyond VMEC residuals, including magnetic-surface quality and finite-beta behavior, because matching boundary coefficients alone does not prove robust nested-surface quality. Source: https://arxiv.org/abs/2111.15564
+22. Recent single-stage and stochastic single-stage coil optimization work supports adding robust coil perturbation objectives early, but not mixing robust objectives into the default validation path until deterministic single-stage gradients are validated. Sources: https://arxiv.org/abs/2406.07830 and https://arxiv.org/abs/2603.11699
 
 ## Proposed Package Layout
 
@@ -901,14 +914,14 @@ WP4 JAX mgrid interpolation:                   85%
 WP5 Free-boundary provider hook:               91%
 WP6 Direct-coil forward example:               90%
 WP7 Vacuum adjoint scaffold:                  100%
-WP8 Gradient checks:                           95%
+WP8 Gradient checks:                           96%
 WP9 VMEC2000 diagnostics:                      86%
-WP10 Benchmarks/diagnostics:                   95%
+WP10 Benchmarks/diagnostics:                   96%
 WP11 Coil-only QS optimization example:        82%
 WP12 Robust coil perturbations:               100%
-WP13 Documentation:                            96%
-WP14 CI policy:                                88%
-Overall branch completion:                     93%
+WP13 Documentation:                            97%
+WP14 CI policy:                                89%
+Overall branch completion:                     94%
 ```
 
 ## Immediate Next Steps
@@ -925,6 +938,39 @@ Overall branch completion:                     93%
 Nothing is required right now. The next implementation step can proceed locally. Later, maintainers should decide whether ESSOS mgrid export should be released before the `vmec_jax` example is promoted from research example to documented workflow.
 
 ## Work Log
+
+### 2026-05-24 Exact-adjoint validation and direct-coil benchmark matrix
+
+Steps taken:
+
+1. Fixed CI-exposed regressions in the discrete-adjoint chunking fake callback and the finite-pressure direct-coil sensitivity smoke.
+2. Added current and geometry coefficient gradient tests for a direct-coil Biot-Savart sample feeding the dense implicit vacuum-solve scaffold.
+3. Added `vacuum_boundary_fields_from_cylindrical_jax`, a JAX-transformable boundary projection helper matching the current NumPy projection.
+4. Added projection value parity and finite-difference gradient tests with respect to cylindrical vacuum-field samples and boundary geometry.
+5. Exposed accepted/trial NESTOR sample and solve timing buckets through solver profiling summaries and comparison reports.
+6. Added compact nested NESTOR timing summaries to the free-boundary direct-coil benchmark matrix for direct-solve rows only.
+7. Updated docs and this plan to keep the exact-adjoint claim precise: direct-coil fields, dense vacuum-solve scaffold, and projection gradients are validated; the full production NESTOR/QS solve adjoint remains phase 2.
+
+Results obtained:
+
+1. `python -m pytest -q tests/test_discrete_adjoint_chunking.py tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`: 59 passed, 1 skipped in 13.56 s.
+2. `python -m pytest -q tests/test_discrete_adjoint_chunking.py tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py tests/test_free_boundary_vacuum_adjoint.py`: 66 passed, 1 skipped in 15.86 s.
+3. `python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py tests/test_profile_report_compare.py`: 31 passed in 4.36 s.
+4. `python -m pytest -q tests/test_freeb_direct_coil_matrix_benchmark.py tests/test_profile_report_compare.py`: 24 passed in 0.05 s.
+5. `python -m ruff check vmec_jax/free_boundary_adjoint.py tests/test_free_boundary_vacuum_adjoint.py tools/benchmarks/bench_freeb_direct_coil_matrix.py tests/test_freeb_direct_coil_matrix_benchmark.py`: passed.
+6. Full Sphinx documentation build passed.
+7. `python tools/benchmarks/bench_freeb_direct_coil_matrix.py --quick --timeout-s 120 --out tmp/bench_freeb_direct_coil_matrix_quick_after_nested/summary.json`: completed CPU provider, direct-solve, and gradient rows.
+
+Best next steps:
+
+1. Poll PR CI and fix any remaining physics-smoke or patch-coverage failures.
+2. Add the first full-solve finite-difference validation gate that includes the JAX boundary projection and dense NESTOR primitive in one scalar objective.
+3. Continue VMEC2000 generated-mgrid parity work until the optional xfail can be bounded against converged WOUT data.
+4. Start the production NESTOR adjoint design by extracting a JAX-native mode-space operator and transpose solve behind `jax.lax.custom_linear_solve`.
+
+Need from user:
+
+Nothing now.
 
 ### 2026-05-24 CPU free-boundary preconditioner policy
 
