@@ -792,14 +792,14 @@ WP4 JAX mgrid interpolation:                   85%
 WP5 Free-boundary provider hook:               65%
 WP6 Direct-coil forward example:               65%
 WP7 Vacuum adjoint scaffold:                  100%
-WP8 Gradient checks:                           50%
-WP9 VMEC2000 diagnostics:                      10%
+WP8 Gradient checks:                           65%
+WP9 VMEC2000 diagnostics:                      25%
 WP10 Benchmarks:                                0%
 WP11 Coil-only QS optimization example:         0%
 WP12 Robust coil perturbations:                 0%
 WP13 Documentation:                            10%
-WP14 CI policy:                                10%
-Overall branch completion:                     45%
+WP14 CI policy:                                20%
+Overall branch completion:                     48%
 ```
 
 ## Immediate Next Steps
@@ -892,6 +892,33 @@ Best next steps:
 2. Push the `vmec_jax` feature branch.
 3. Add VMEC2000 comparison diagnostics for the generated mgrid/direct-coil cases.
 4. Add the first coil-only QS optimization example.
+
+Need from user:
+
+Nothing now.
+
+### 2026-05-24 Optional three-way free-boundary parity gate
+
+Steps taken:
+
+1. Added `tests/test_free_boundary_essos_coil_parity.py`.
+2. The default/ESSOS-enabled test builds an ESSOS Landreman-Paul QA mgrid, runs `vmec_jax` free-boundary through the mgrid backend, runs the same case through the direct differentiable coil backend, writes both wouts, and verifies matching `rmnc`, `zmns`, `lmns`, `iotas`, `iotaf`, aspect, and magnetic energy.
+3. Added an optional `VMEC2000_INTEGRATION=1` test that runs local `xvmec2000` on the generated mgrid and compares against the two `vmec_jax` paths.
+4. Marked the VMEC2000 generated-mgrid comparison as `xfail` for now because the local VMEC2000 executable reads the generated mgrid and produces traces, but the current `vmec_jax` free-boundary trace is not yet bounded against VMEC2000 for this generated-coil case.
+5. Checked ESSOS PR CI and fixed unrelated current-JAX breakages in the ESSOS PR branch: `jax.jax.tree_util` removal, `jnp.clip(a_min=...)` removal, older `jaxopt` `jax.tree_map` usage, and exact float equality in a test.
+
+Results obtained:
+
+1. `PYTHONPATH=/Users/rogeriojorge/local/ESSOS_mgrid_pr:$PYTHONPATH pytest -q tests/test_free_boundary_essos_coil_parity.py::test_essos_direct_coil_free_boundary_matches_generated_mgrid_backend tests/test_free_boundary_essos_coil_parity.py::test_vmec2000_generated_mgrid_free_boundary_matches_vmec_jax_and_direct_coils` passed with one skipped VMEC2000 gate when `VMEC2000_INTEGRATION` is unset.
+2. `VMEC2000_INTEGRATION=1 ... pytest -q tests/test_free_boundary_essos_coil_parity.py::test_vmec2000_generated_mgrid_free_boundary_matches_vmec_jax_and_direct_coils -rx` reports the expected xfail.
+3. `PYTHONPATH=/Users/rogeriojorge/local/ESSOS_mgrid_pr:$PYTHONPATH pytest -q tests/test_external_fields_coils_jax.py tests/test_external_fields_essos_adapter.py tests/test_external_fields_mgrid_jax.py tests/test_free_boundary_vacuum_adjoint.py tests/test_free_boundary_coil_provider_forward.py tests/test_free_boundary_essos_coil_parity.py::test_essos_direct_coil_free_boundary_matches_generated_mgrid_backend` passed: 25 passed in 26.19 s.
+4. In ESSOS, `pytest -q` passed: 96 passed in 29.09 s.
+
+Best next steps:
+
+1. Fix the generated-mgrid VMEC2000 parity gap by comparing the VMEC2000 NESTOR sampling/projection path against `vmec_jax` on the same boundary after the same first accepted free-boundary update.
+2. Promote the optional xfail to a passing VMEC2000 integration gate once traces and wout output are bounded.
+3. Add the first coil-only QS optimization example.
 
 Need from user:
 
