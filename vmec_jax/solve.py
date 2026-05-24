@@ -10261,6 +10261,57 @@ def solve_fixed_boundary_residual_iter(
                     freeb_solve_time = 0.0
                     freeb_sample_time = 0.0
 
+            def _freeb_bsqvac_half_for_trial_state(candidate_state: VMECState):
+                """Return a non-mutating direct-provider vacuum field for trials.
+
+                Legacy mgrid runs keep VMEC's committed ivac/ivacskip cadence.
+                Direct coil providers need candidate-state sampling during
+                trial/backtracking scoring so the trial boundary is not scored
+                against stale pre-update vacuum source data. The scratch
+                runtime returned by NESTOR is intentionally discarded so
+                rejected trials cannot mutate the accepted runtime state.
+                """
+
+                if not bool(free_boundary_enabled and freeb_couple_edge):
+                    return freeb_bsqvac_half_current
+                if freeb_bsqvac_half_current is None:
+                    return None
+                provider_kind_trial = (
+                    "mgrid"
+                    if external_field_provider_kind is None
+                    else str(external_field_provider_kind).strip().lower()
+                )
+                if provider_kind_trial in ("", "mgrid", "legacy_mgrid"):
+                    return freeb_bsqvac_half_current
+                if int(freeb_ivac_effective) < 1:
+                    return freeb_bsqvac_half_current
+                try:
+                    nestor_trial, _runtime_trial = nestor_external_only_step(
+                        state=candidate_state,
+                        static=static,
+                        ivac=1,
+                        ivacskip=0,
+                        iter_idx=int(iter2),
+                        runtime=freeb_nestor_runtime,
+                        extcur=tuple(getattr(static, "free_boundary_extcur", ()) or ()),
+                        plascur=float(freeb_plascur),
+                        external_field_provider_kind=external_field_provider_kind,
+                        external_field_provider_static=external_field_provider_static,
+                        external_field_provider_params=external_field_provider_params,
+                    )
+                    bsqvac_edge_trial = np.asarray(nestor_trial.vac_total.bsqvac, dtype=float)
+                    if (
+                        bsqvac_edge_trial.ndim == 2
+                        and int(bsqvac_edge_trial.shape[1]) == 1
+                        and int(getattr(static.cfg, "nzeta", 1)) > 1
+                    ):
+                        bsqvac_edge_trial = np.repeat(bsqvac_edge_trial, int(static.cfg.nzeta), axis=1)
+                    return bsqvac_edge_trial
+                except Exception:
+                    if _env_freeb_raise not in ("", "0", "false", "no"):
+                        raise
+                    return freeb_bsqvac_half_current
+
             constraint_rcon0_current = None
             constraint_zcon0_current = None
             if (
@@ -11089,7 +11140,7 @@ def solve_fixed_boundary_residual_iter(
                         st_try,
                         include_edge=True,
                         zero_m1=zero_m1,
-                        freeb_bsqvac_half=freeb_bsqvac_half_current,
+                        freeb_bsqvac_half=_freeb_bsqvac_half_for_trial_state(st_try),
                         constraint_precond_diag=constraint_precond_diag,
                         constraint_tcon=constraint_tcon_override,
                         constraint_precond_active=constraint_precond_active,
@@ -12359,11 +12410,12 @@ def solve_fixed_boundary_residual_iter(
                 state_try = _apply_vmec_lambda_axis_rules(state_try)
             probe_bad_jacobian = False
             if need_trial_eval:
+                freeb_bsqvac_half_trial = _freeb_bsqvac_half_for_trial_state(state_try)
                 _, _, gcr2_t, gcz2_t, gcl2_t, _, _, norms_t = _compute_forces_iter(
                     state_try,
                     include_edge=include_edge,
                     zero_m1=zero_m1,
-                    freeb_bsqvac_half=freeb_bsqvac_half_current,
+                    freeb_bsqvac_half=freeb_bsqvac_half_trial,
                     constraint_precond_diag=constraint_precond_diag,
                     constraint_tcon=constraint_tcon_override,
                     constraint_precond_active=constraint_precond_active,
@@ -12383,7 +12435,7 @@ def solve_fixed_boundary_residual_iter(
                         state_try,
                         include_edge=include_edge,
                         zero_m1=jnp.asarray(0.0, dtype=zero_m1.dtype),
-                        freeb_bsqvac_half=freeb_bsqvac_half_current,
+                        freeb_bsqvac_half=freeb_bsqvac_half_trial,
                         constraint_precond_diag=constraint_precond_diag,
                         constraint_tcon=constraint_tcon_override,
                         constraint_precond_active=constraint_precond_active,
@@ -12450,11 +12502,12 @@ def solve_fixed_boundary_residual_iter(
                             idx00=idx00,
                         )
                     state_try = _apply_vmec_lambda_axis_rules(state_try)
+                    freeb_bsqvac_half_trial = _freeb_bsqvac_half_for_trial_state(state_try)
                     _, _, gcr2_t, gcz2_t, gcl2_t, _, _, norms_t = _compute_forces_iter(
                         state_try,
                         include_edge=include_edge,
                         zero_m1=zero_m1,
-                        freeb_bsqvac_half=freeb_bsqvac_half_current,
+                        freeb_bsqvac_half=freeb_bsqvac_half_trial,
                         constraint_precond_diag=constraint_precond_diag,
                         constraint_tcon=constraint_tcon_override,
                         constraint_precond_active=constraint_precond_active,
@@ -12549,11 +12602,12 @@ def solve_fixed_boundary_residual_iter(
                         idx00=idx00,
                     )
                     state_dir = _apply_vmec_lambda_axis_rules(state_dir)
+                    freeb_bsqvac_half_dir = _freeb_bsqvac_half_for_trial_state(state_dir)
                     _, _, gcr2_d, gcz2_d, gcl2_d, _, _, norms_d = _compute_forces_iter(
                         state_dir,
                         include_edge=include_edge,
                         zero_m1=zero_m1,
-                        freeb_bsqvac_half=freeb_bsqvac_half_current,
+                        freeb_bsqvac_half=freeb_bsqvac_half_dir,
                         constraint_precond_diag=constraint_precond_diag,
                         constraint_tcon=constraint_tcon_override,
                         constraint_precond_active=constraint_precond_active,
@@ -12840,11 +12894,12 @@ def solve_fixed_boundary_residual_iter(
                     idx00=idx00,
                 )
                 state_try = _apply_vmec_lambda_axis_rules(state_try)
+                freeb_bsqvac_half_trial = _freeb_bsqvac_half_for_trial_state(state_try)
                 _, _, gcr2_t, gcz2_t, gcl2_t, _, _, norms_t = _compute_forces_iter(
                     state_try,
                     include_edge=include_edge,
                     zero_m1=zero_m1,
-                    freeb_bsqvac_half=freeb_bsqvac_half_current,
+                    freeb_bsqvac_half=freeb_bsqvac_half_trial,
                     constraint_precond_diag=constraint_precond_diag,
                     constraint_tcon=constraint_tcon_override,
                     constraint_precond_active=constraint_precond_active,
