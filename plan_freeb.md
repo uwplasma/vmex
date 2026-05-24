@@ -536,6 +536,7 @@ Deliverables:
 tools/benchmarks/bench_external_field_providers.py
 tools/benchmarks/bench_freeb_direct_coil_solve.py
 tools/benchmarks/bench_freeb_coil_gradient.py
+tools/benchmarks/bench_freeb_direct_coil_matrix.py
 ```
 
 Benchmark matrix:
@@ -563,7 +564,11 @@ Acceptance:
 1. Benchmarks are non-CI by default.
 2. GPU benchmark runs when JAX GPU backend is installed.
 
-Status: 0%.
+Status: 60%. Lightweight provider, direct free-boundary solve, coil-gradient,
+and matrix-runner scripts are present. The matrix runner records CPU quick rows
+by default and writes a skipped GPU row when `--include-gpu` is requested
+without an available JAX GPU backend. Full ncoil/nsegment/grid production
+matrix and plots remain future work.
 
 ### WP11: Coil-Only Free-Boundary QS Optimization Example
 

@@ -198,6 +198,10 @@ The branch includes lightweight, non-CI benchmark scripts:
 
 .. code-block:: bash
 
+   python tools/benchmarks/bench_freeb_direct_coil_matrix.py \
+     --quick \
+     --out results/bench_freeb_direct_coil_matrix/summary.json
+
    python tools/benchmarks/bench_external_field_providers.py \
      --points 48 --segments 48 \
      --out results/bench_external_field_providers.json
@@ -214,6 +218,23 @@ Each benchmark writes JSON with backend/device information, cold/compile
 timing, warm timing, and the problem dimensions. Defaults are intentionally
 small and CPU-safe; GPU production benchmarks should raise the grid and segment
 counts explicitly.
+
+The matrix runner is the quickest smoke command for the direct-coil benchmark
+lane. It runs the provider, direct free-boundary solve, and coil-gradient
+scripts with small CPU-only defaults, writes each child JSON into the output
+directory, and records their paths plus compact timing/status rows in
+``summary.json``. GPU rows are opt-in:
+
+.. code-block:: bash
+
+   python tools/benchmarks/bench_freeb_direct_coil_matrix.py \
+     --quick \
+     --include-gpu \
+     --backend-note "local workstation smoke" \
+     --out results/bench_freeb_direct_coil_matrix_gpu/summary.json
+
+If no JAX GPU device is available, the matrix records a skipped GPU row rather
+than falling back silently to CPU.
 
 Validation Status
 -----------------
