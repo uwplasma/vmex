@@ -105,10 +105,10 @@ active-coupling path.
 
 | Backend | pressure scale | beta proxy `100Wp/WB` (%) | residual norm | aspect | mean iota | wall time (s) |
 |---|---:|---:|---:|---:|---:|---:|
-| direct coils | 11.487 | 4.600e-05 | 7.247e+00 | 5.8434 | 0.16253 | 2.37 |
-| generated mgrid | 11.487 | 4.600e-05 | 7.247e+00 | 5.8434 | 0.16253 | 1.78 |
-| direct coils | 34.462 | 1.380e-04 | 7.247e+00 | 5.8434 | 0.16253 | 2.38 |
-| generated mgrid | 34.462 | 1.380e-04 | 7.247e+00 | 5.8434 | 0.16253 | 1.76 |
+| direct coils | 11.487 | 4.600e-05 | 2.971e+00 | 5.8434 | 0.16253 | 2.62 |
+| generated mgrid | 11.487 | 4.600e-05 | 2.971e+00 | 5.8434 | 0.16253 | 1.98 |
+| direct coils | 34.462 | 1.380e-04 | 2.971e+00 | 5.8434 | 0.16253 | 2.61 |
+| generated mgrid | 34.462 | 1.380e-04 | 2.971e+00 | 5.8434 | 0.16253 | 1.96 |
 
 ![Direct-coil beta scan](docs/_static/figures/freeb_single_stage_beta_scan.png)
 

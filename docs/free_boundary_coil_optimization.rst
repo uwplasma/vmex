@@ -56,10 +56,11 @@ plots cannot accidentally validate only the vacuum case.
 The example uses ``--activate-fsq 1.0`` by default. This forces early
 VMEC2000-style NESTOR turn-on so the short run exercises active finite-pressure
 vacuum coupling instead of stopping in the inactive ``ivac=-1`` cadence. That
-is useful for provider validation, but it is not yet a converged high-beta
-result: the active residual norm remains large and must be bounded against
-VMEC2000 before this becomes a promoted finite-beta single-stage optimization
-claim.
+is useful for provider validation. The residuals shown here are recomputed on
+the accepted final state with a fresh active NESTOR sample, but this is still
+not a converged high-beta result: the active residual norm remains large and
+must be bounded against VMEC2000 before this becomes a promoted finite-beta
+single-stage optimization claim.
 
 .. image:: _static/figures/freeb_single_stage_provider_parity.png
    :alt: Direct-coil provider parity

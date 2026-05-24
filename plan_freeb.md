@@ -789,23 +789,23 @@ WP1 Provider base API:                         100%
 WP2 Pure JAX coil Biot-Savart:                 75%
 WP3 ESSOS adapter:                             80%
 WP4 JAX mgrid interpolation:                   85%
-WP5 Free-boundary provider hook:               70%
-WP6 Direct-coil forward example:               80%
+WP5 Free-boundary provider hook:               78%
+WP6 Direct-coil forward example:               82%
 WP7 Vacuum adjoint scaffold:                  100%
-WP8 Gradient checks:                           75%
+WP8 Gradient checks:                           78%
 WP9 VMEC2000 diagnostics:                      30%
 WP10 Benchmarks/diagnostics:                   10%
 WP11 Coil-only QS optimization example:         5%
 WP12 Robust coil perturbations:                 0%
-WP13 Documentation:                            60%
-WP14 CI policy:                                40%
-Overall branch completion:                     56%
+WP13 Documentation:                            62%
+WP14 CI policy:                                42%
+Overall branch completion:                     58%
 ```
 
 ## Immediate Next Steps
 
-1. Fix accepted-state free-boundary correctness: recompute final residuals and diagnostics on the accepted final state with a fresh active NESTOR sample.
-2. Make active finite-pressure accepted equilibria respond robustly to direct-coil current/geometry changes, not only the isolated NESTOR step.
+1. Make active finite-pressure accepted equilibria respond robustly to direct-coil current/geometry changes, not only the isolated NESTOR step.
+2. Refresh NESTOR sampling for trial/accepted states so direct-provider updates are not measured against stale pre-trial boundary/source data.
 3. Add benchmark scripts for direct-coil field sampling, free-boundary solves, and provider gradients.
 4. Continue the VMEC2000 generated-mgrid comparison diagnostic until the optional xfail can be bounded or promoted.
 5. Add the first coil-only QS optimization example only after accepted-state direct-coil sensitivity is validated.
@@ -817,6 +817,42 @@ Overall branch completion:                     56%
 Nothing is required right now. The next implementation step can proceed locally. Later, maintainers should decide whether ESSOS mgrid export should be released before the `vmec_jax` example is promoted from research example to documented workflow.
 
 ## Work Log
+
+### 2026-05-24 Accepted-state active residual recompute
+
+Steps taken:
+
+1. Added a final active NESTOR resample on the accepted final state for free-boundary runs with active edge coupling.
+2. Recomputed the reported final residuals from the accepted state and fresh active vacuum sample instead of reporting the last pre-update residuals.
+3. Added diagnostics for both recomputed final residuals and previous pre-update final residuals:
+   - `final_residual_recomputed_on_accepted_state`,
+   - `pre_update_final_fsqr`,
+   - `pre_update_final_fsqz`,
+   - `pre_update_final_fsql`.
+4. Regenerated the README/docs beta-scan figures and CSV summary using accepted-state residuals.
+5. Updated the free-boundary coil optimization docs to state that the active smoke residuals are accepted-state recomputes, but still not converged high-beta results.
+
+Results obtained:
+
+1. Forced-active direct-coil smoke residual reporting now drops from the stale pre-update scale to the accepted-state recompute scale.
+2. The README beta-scan residual norm changed from about `7.25` to about `2.97` after accepted-state recompute.
+3. Direct-coil and generated-mgrid providers still agree to recorded precision for the low-resolution active smoke.
+4. Verification passed:
+   - `pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py tests/test_free_boundary_coil_provider_forward.py tests/test_free_boundary_essos_coil_parity.py::test_essos_direct_coil_free_boundary_matches_generated_mgrid_backend`: 6 passed, 1 skipped in 29.83 s.
+   - `pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py tests/test_free_boundary_coil_provider_forward.py tests/test_free_boundary_vacuum_adjoint.py`: 10 passed, 1 skipped in 15.51 s.
+   - `python -m sphinx -T -b html docs /tmp/vmec_jax_freeb_docs`: passed.
+   - `ruff check vmec_jax/solve.py`: passed.
+   - `git diff --check`: passed.
+
+Best next steps:
+
+1. Fix direct-provider source/runtime refresh so active accepted-state equilibria show bounded sensitivity to coil current and geometry, not just isolated NESTOR-step sensitivity.
+2. Instrument scan/trial timing and cold exact/direct-provider costs.
+3. Add robust-coil utilities and benchmark scripts in parallel with the direct-provider sensitivity fix.
+
+Need from user:
+
+Nothing now.
 
 ### 2026-05-24 Active finite-pressure direct-coil diagnostics
 
