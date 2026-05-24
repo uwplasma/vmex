@@ -2305,6 +2305,17 @@ not the promoted parity path.  To keep dense-coupling runtime bounded:
 - Poisson spectral denominators are stage-static,
 - ``ivacskip`` reuses prior potential (skip solve) when ``ivac != 1``.
 
+Optimization profile reports now expose free-boundary NESTOR timing buckets
+for each solver phase. Look for keys such as
+``trial_solver_freeb_nestor_sample_s``,
+``trial_solver_freeb_nestor_trial_sample_s``,
+``forward_exact_solver_freeb_nestor_sample_s``, and
+``exact_tape_solver_freeb_nestor_sample_s`` in
+``tools/diagnostics/compare_profile_reports.py`` output. These buckets make
+the cold exact callback/tape path actionable: direct-coil Biot-Savart sampling,
+vacuum scalar-potential solves, accepted active updates, and rejected trial
+updates are no longer hidden inside a single solve timer.
+
 Control flags:
 
 .. code-block:: bash

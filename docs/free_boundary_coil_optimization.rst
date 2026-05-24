@@ -350,6 +350,13 @@ If no JAX GPU device is available, the matrix records a skipped GPU row rather
 than falling back silently to CPU. Use ``--no-quick`` only for a larger local
 benchmark budget.
 
+The direct-solve child JSON includes active and trial NESTOR timing summaries:
+sample time, scalar-potential solve time, reuse counts, failed trial counts,
+and the final recompute sampler/solver timings. These fields are the first
+place to inspect when a direct-coil free-boundary solve is slow, because they
+separate Biot-Savart sampling cost from the vacuum linear solve and from
+solver-trial replay overhead.
+
 The child scripts are still useful when isolating one lane:
 
 .. code-block:: bash

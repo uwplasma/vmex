@@ -235,6 +235,54 @@ def test_profile_summary_extracts_solver_subphase_buckets() -> None:
     assert summary["metrics"]["forward_exact_solver_update_state_s"] == 0.50
 
 
+def test_profile_summary_extracts_free_boundary_nestor_buckets() -> None:
+    report = _callback_report(
+        total_wall_time_s=20.0,
+        samples=2,
+        rss_peak_mib=256,
+        replay_wall_time_s=2.0,
+        accepted_replays=2,
+        solve_count=3,
+        cache_entry_growth=4,
+        solver_device="cpu",
+    )
+    report["profile"]["trial_solver_freeb_nestor_sample"] = {"count": 1, "wall_time_s": 0.11}
+    report["profile"]["trial_solver_freeb_nestor_solve"] = {"count": 1, "wall_time_s": 0.12}
+    report["profile"]["trial_solver_freeb_nestor_trial_sample"] = {"count": 1, "wall_time_s": 0.13}
+    report["profile"]["trial_solver_freeb_nestor_trial_solve"] = {"count": 1, "wall_time_s": 0.14}
+    report["profile"]["trial_solver_freeb_nestor_full_update_count"] = {"count": 1, "wall_time_s": 2.0}
+    report["profile"]["trial_solver_freeb_nestor_reused_count"] = {"count": 1, "wall_time_s": 3.0}
+    report["profile"]["trial_solver_freeb_nestor_trial_reused_count"] = {"count": 1, "wall_time_s": 4.0}
+    report["profile"]["trial_solver_freeb_nestor_trial_failed_count"] = {"count": 1, "wall_time_s": 5.0}
+    report["profile"]["forward_exact_solver_freeb_nestor_sample"] = {"count": 1, "wall_time_s": 0.21}
+    report["profile"]["forward_exact_solver_freeb_nestor_solve"] = {"count": 1, "wall_time_s": 0.22}
+    report["profile"]["forward_exact_solver_freeb_nestor_trial_sample"] = {"count": 1, "wall_time_s": 0.23}
+    report["profile"]["forward_exact_solver_freeb_nestor_trial_solve"] = {"count": 1, "wall_time_s": 0.24}
+    report["profile"]["exact_tape_solver_freeb_nestor_sample"] = {"count": 1, "wall_time_s": 0.31}
+    report["profile"]["exact_tape_solver_freeb_nestor_solve"] = {"count": 1, "wall_time_s": 0.32}
+    report["profile"]["exact_tape_solver_freeb_nestor_trial_sample"] = {"count": 1, "wall_time_s": 0.33}
+    report["profile"]["exact_tape_solver_freeb_nestor_trial_solve"] = {"count": 1, "wall_time_s": 0.34}
+
+    summary = compare_tool.summarize_payload(report, label="cpu")
+
+    assert summary["metrics"]["trial_solver_freeb_nestor_sample_s"] == 0.11
+    assert summary["metrics"]["trial_solver_freeb_nestor_solve_s"] == 0.12
+    assert summary["metrics"]["trial_solver_freeb_nestor_trial_sample_s"] == 0.13
+    assert summary["metrics"]["trial_solver_freeb_nestor_trial_solve_s"] == 0.14
+    assert summary["metrics"]["trial_solver_freeb_nestor_full_update_count"] == 2.0
+    assert summary["metrics"]["trial_solver_freeb_nestor_reused_count"] == 3.0
+    assert summary["metrics"]["trial_solver_freeb_nestor_trial_reused_count"] == 4.0
+    assert summary["metrics"]["trial_solver_freeb_nestor_trial_failed_count"] == 5.0
+    assert summary["metrics"]["forward_exact_solver_freeb_nestor_sample_s"] == 0.21
+    assert summary["metrics"]["forward_exact_solver_freeb_nestor_solve_s"] == 0.22
+    assert summary["metrics"]["forward_exact_solver_freeb_nestor_trial_sample_s"] == 0.23
+    assert summary["metrics"]["forward_exact_solver_freeb_nestor_trial_solve_s"] == 0.24
+    assert summary["metrics"]["exact_tape_solver_freeb_nestor_sample_s"] == 0.31
+    assert summary["metrics"]["exact_tape_solver_freeb_nestor_solve_s"] == 0.32
+    assert summary["metrics"]["exact_tape_solver_freeb_nestor_trial_sample_s"] == 0.33
+    assert summary["metrics"]["exact_tape_solver_freeb_nestor_trial_solve_s"] == 0.34
+
+
 def test_profile_summary_extracts_solve_call_internal_buckets() -> None:
     report = _callback_report(
         total_wall_time_s=20.0,

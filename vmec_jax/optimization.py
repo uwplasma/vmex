@@ -1750,6 +1750,52 @@ class FixedBoundaryExactOptimizer:
         rec["count"] = int(rec["count"]) + 1
         rec["wall_time_s"] = float(rec["wall_time_s"]) + float(value)
 
+    def _profile_solver_free_boundary_timing(self, diagnostics, *, profile_prefix: str) -> None:
+        if not isinstance(diagnostics, dict):
+            return
+
+        def _sum_time(key: str) -> float | None:
+            if key not in diagnostics:
+                return None
+            try:
+                arr = np.asarray(diagnostics.get(key), dtype=float).reshape(-1)
+            except Exception:
+                return None
+            arr = arr[np.isfinite(arr)]
+            if arr.size == 0:
+                return None
+            return float(np.sum(arr))
+
+        def _count_nonzero(key: str) -> int | None:
+            if key not in diagnostics:
+                return None
+            try:
+                arr = np.asarray(diagnostics.get(key), dtype=int).reshape(-1)
+            except Exception:
+                return None
+            if arr.size == 0:
+                return None
+            return int(np.count_nonzero(arr))
+
+        for key, suffix in (
+            ("freeb_nestor_sample_time_history", "freeb_nestor_sample"),
+            ("freeb_nestor_solve_time_history", "freeb_nestor_solve"),
+            ("freeb_nestor_trial_sample_time_history", "freeb_nestor_trial_sample"),
+            ("freeb_nestor_trial_solve_time_history", "freeb_nestor_trial_solve"),
+        ):
+            value = _sum_time(key)
+            if value is not None:
+                self._profile_add(f"{profile_prefix}_{suffix}", value)
+        for key, suffix in (
+            ("freeb_full_update_history", "freeb_nestor_full_update_count"),
+            ("freeb_nestor_reused_history", "freeb_nestor_reused_count"),
+            ("freeb_nestor_trial_reused_history", "freeb_nestor_trial_reused_count"),
+            ("freeb_nestor_trial_failed_history", "freeb_nestor_trial_failed_count"),
+        ):
+            value = _count_nonzero(key)
+            if value is not None:
+                self._profile_add_counter(f"{profile_prefix}_{suffix}", value)
+
     def _profile_solver_timing(
         self,
         diagnostics,
@@ -1838,6 +1884,7 @@ class FixedBoundaryExactOptimizer:
             except Exception:
                 continue
             self._profile_add_counter(f"{profile_prefix}_{suffix}", value)
+        self._profile_solver_free_boundary_timing(diagnostics, profile_prefix=profile_prefix)
         if unattributed_name is not None:
             self._profile_add(unattributed_name, max(0.0, float(phase_wall_s) - solver_total))
         return solver_total
