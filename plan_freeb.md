@@ -35,6 +35,7 @@ Results obtained:
 8. Targeted trial-timing tests passed: 3 passed in 8.03 s.
 9. Field-only probe on a 32x32 grid with 4-fold stellarator symmetry: cached geometry sampling changed from about `0.45 s` regular cold / `9-10 ms` regular warm to `0.067 s` JIT cold / `4-6 ms` JIT warm.
 10. The tiny full-solve benchmark remains dominated by non-sampling work: JIT and non-JIT direct-coil solve smokes both report about `6.09 s` cold and `0.19 s` warm.
+11. Optional VMEC2000 generated-mgrid diagnostic was attempted with `NITER=1`, `50`, and `500`; VMEC2000 completed without WOUT in all cases, with `fsq_total_last` improving to about `5.4e-3` at 500 iterations but still reporting `Try increasing NITER`.
 
 Best next steps:
 
@@ -42,7 +43,7 @@ Best next steps:
 2. Run a direct-coil case that enters backtracking and confirm the new trial counters capture rejected NESTOR sampling cost.
 3. Target the remaining non-sampling warm-solve cost in preconditioner/update/force assembly after the sampler path is measured on larger grids.
 4. Extend the full-loop finite-difference smoke from current-only proxy objective to a validated Boozer/QS promotion test when affordable.
-5. Run the VMEC2000 integration diagnostic without `--skip-vmec2000` on the smallest case and archive the JSON result.
+5. Either raise the VMEC2000 generated-mgrid diagnostic to a convergence-oriented multi-grid input or mark the current single-stage generated-mgrid case as optional underconverged external evidence.
 
 Need from user:
 
