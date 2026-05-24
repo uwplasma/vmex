@@ -81,6 +81,9 @@ def _write_csv(runs: list[dict[str, Any]], outdir: Path) -> Path:
         "wb",
         "beta_proxy",
         "beta_proxy_percent",
+        "free_boundary_ivac",
+        "free_boundary_nestor_model",
+        "free_boundary_vacuum_stub",
     ]
     with out.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fields)

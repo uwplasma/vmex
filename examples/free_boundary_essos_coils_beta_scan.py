@@ -141,11 +141,19 @@ def summarize_run(run, wout_path: Path, *, backend: str, beta_percent: float, wa
         "wb": None,
         "beta_proxy": None,
         "beta_proxy_percent": None,
+        "free_boundary_ivac": None,
+        "free_boundary_nestor_model": None,
+        "free_boundary_vacuum_stub": None,
     }
     for key in ("final_fsqr", "final_fsqz", "final_fsql"):
         val = diag.get(key)
         if val is not None:
             summary[key.replace("final_", "")] = float(val)
+    freeb_diag = diag.get("free_boundary")
+    if isinstance(freeb_diag, dict):
+        summary["free_boundary_ivac"] = freeb_diag.get("ivac")
+        summary["free_boundary_nestor_model"] = freeb_diag.get("nestor_model")
+        summary["free_boundary_vacuum_stub"] = freeb_diag.get("vacuum_stub")
     try:
         summary["aspect"] = float(equilibrium_aspect_ratio_from_state(state=run.state, static=run.static))
     except Exception:

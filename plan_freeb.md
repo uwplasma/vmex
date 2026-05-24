@@ -789,17 +789,17 @@ WP1 Provider base API:                         100%
 WP2 Pure JAX coil Biot-Savart:                 75%
 WP3 ESSOS adapter:                             80%
 WP4 JAX mgrid interpolation:                   85%
-WP5 Free-boundary provider hook:               65%
+WP5 Free-boundary provider hook:               60%
 WP6 Direct-coil forward example:               75%
 WP7 Vacuum adjoint scaffold:                  100%
 WP8 Gradient checks:                           70%
 WP9 VMEC2000 diagnostics:                      25%
 WP10 Benchmarks:                                0%
-WP11 Coil-only QS optimization example:         0%
+WP11 Coil-only QS optimization example:         5%
 WP12 Robust coil perturbations:                 0%
 WP13 Documentation:                            50%
 WP14 CI policy:                                30%
-Overall branch completion:                     52%
+Overall branch completion:                     51%
 ```
 
 ## Immediate Next Steps
@@ -830,19 +830,23 @@ Steps taken:
 3. Updated the README/docs plot renderer to show `PRES_SCALE` and `100 W_p/W_B` directly.
 4. Updated the README and docs wording to state that zero pressure is only a reference point and finite-pressure points are the meaningful free-boundary check.
 5. Changed direct-coil free-boundary provider tests to use nonzero pressure instead of validating only a vacuum case.
+6. Attempted the first coil-only current/geometry optimization smoke and found that accepted equilibria were not sensitive to direct-coil parameter changes under the current free-boundary cadence.
+7. Audited run diagnostics and found the short README scan ends with `ivac=-1`, `nestor_model=none`, and `vacuum_stub=True`; forced turn-on enters the dense NESTOR-like path but finite-pressure residuals are not yet bounded.
 
 Results obtained:
 
-1. The finite-pressure scan still shows exact recorded scalar parity between generated-mgrid and direct-coil providers.
+1. The finite-pressure scan still shows exact recorded scalar parity between generated-mgrid and direct-coil provider plumbing.
 2. The finite-pressure test subset passed: `4 passed in 23.79 s`.
 3. The local docs build passed.
-4. A trial near actual `1%` beta proxy was too aggressive for this low-resolution smoke and produced large residuals, so the README plot now labels this as a finite-pressure smoke rather than a converged high-beta demonstration.
+4. A trial near actual `1%` beta proxy was too aggressive for this low-resolution smoke and produced large residuals.
+5. The current direct-coil branch must not claim coil-only single-stage optimization yet: active vacuum coupling needs to respond robustly to direct-coil parameter changes first.
 
 Best next steps:
 
-1. Add a dedicated finite-beta/high-pressure direct-coil benchmark with a more appropriate resolution and solver budget.
-2. Continue with the first coil-only optimization example, but require nonzero pressure in the promoted free-boundary path.
-3. Investigate the high-pressure residual blow-up before making any 1% beta performance or physics claim.
+1. Fix active finite-pressure NESTOR/free-boundary coupling so direct-coil current/geometry changes alter the accepted equilibrium.
+2. Add a regression test that fails if a direct-coil parameter perturbation leaves the active free-boundary solve unchanged.
+3. Only then add the first coil-only optimization example; require nonzero pressure and non-stub active vacuum coupling.
+4. Investigate the high-pressure residual blow-up before making any 1% beta performance or physics claim.
 
 Need from user:
 

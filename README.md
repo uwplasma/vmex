@@ -90,11 +90,16 @@ coil Fourier dofs/currents -> direct Biot-Savart field -> free-boundary VMEC
 
 The current numerical smoke example uses ESSOS Landreman-Paul QA coils. It
 first writes an `mgrid` from the same coils, then runs the same four-point
-finite-pressure scan with both free-boundary backends: generated `mgrid` and
-direct JAX coils. The zero-pressure endpoint is included only as a reference;
-the finite-pressure points are the meaningful free-boundary check. In this
-low-resolution run, the two `vmec_jax` providers produce identical scalar
-equilibrium diagnostics recorded in the JSON summary.
+finite-pressure scan through both external-field backends: generated `mgrid`
+and direct JAX coils. The zero-pressure endpoint is included only as a
+reference. The finite-pressure points verify that pressure and energy channels
+are present, and that direct-coil and generated-`mgrid` provider samples produce
+identical recorded scalar diagnostics.
+
+This is not yet the promoted high-beta free-boundary optimization result:
+with the short README budget the VMEC2000-style NESTOR turn-on remains below
+the activation threshold, so the branch still needs the active finite-pressure
+vacuum-coupling lane before making publication-level single-stage claims.
 
 | Backend | pressure scale | beta proxy `100Wp/WB` (%) | residual norm | aspect | mean iota | wall time (s) |
 |---|---:|---:|---:|---:|---:|---:|
@@ -122,10 +127,12 @@ python tools/diagnostics/render_freeb_single_stage_readme.py \
 
 What is fully in this branch: JAX-native coil-field sampling, ESSOS coil
 conversion, generated-mgrid compatibility, direct-coil free-boundary forward
-solves, provider-gradient tests, and dense toy vacuum-adjoint tests. What is
-not claimed yet: publication-level exact gradients through the full production
-free-boundary/NESTOR solve. The implementation plan and validation status are
-tracked in `plan_freeb.md` and `docs/free_boundary_coil_optimization.rst`.
+provider plumbing, provider-gradient tests, and dense toy vacuum-adjoint tests.
+What is not claimed yet: publication-level exact gradients through the full
+production free-boundary/NESTOR solve, or a coil-only optimization whose
+accepted equilibrium is demonstrably sensitive to coil parameters after active
+vacuum coupling. The implementation plan and validation status are tracked in
+`plan_freeb.md` and `docs/free_boundary_coil_optimization.rst`.
 
 ## Backend Selection
 

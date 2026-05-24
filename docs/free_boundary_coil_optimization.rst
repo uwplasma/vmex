@@ -34,10 +34,10 @@ finite-difference checks of complete solves pass.
 Low-Resolution Beta Scan
 ------------------------
 
-The first reviewer-facing diagnostic uses ESSOS Landreman-Paul QA coils and a
-four-point pressure scan. The zero-pressure endpoint is retained as a reference,
-but the promoted checks are the finite-pressure points. The same coil set is
-used two ways:
+The first diagnostic uses ESSOS Landreman-Paul QA coils and a four-point
+pressure scan. The zero-pressure endpoint is retained as a reference, but the
+finite-pressure points are the meaningful provider-plumbing checks. The same
+coil set is used two ways:
 
 1. ESSOS coils are sampled onto an ``mgrid`` file and solved by the legacy
    free-boundary compatibility path.
@@ -52,6 +52,13 @@ The scalar diagnostics from the two ``vmec_jax`` providers agree exactly in
 the JSON summary for this low-resolution smoke run. The scan records both the
 input ``PRES_SCALE`` and the output energy ratio ``100 W_p / W_B`` so future
 plots cannot accidentally validate only the vacuum case.
+
+Current limitation: with the short README solve budget the VMEC2000-style
+free-boundary/NESTOR cadence does not turn on the active vacuum solve. Forced
+turn-on tests do enter the dense NESTOR-like model, but the high-pressure
+finite-beta residuals are not yet bounded enough for promotion. Therefore this
+page currently documents finite-pressure direct-provider plumbing, not a final
+single-stage finite-beta optimization claim.
 
 .. image:: _static/figures/freeb_single_stage_provider_parity.png
    :alt: Direct-coil provider parity
@@ -94,10 +101,10 @@ Current fast tests cover:
   coefficients, and evaluation coordinates;
 - ESSOS adapter value parity when ESSOS is installed;
 - JAX ``mgrid`` interpolation value and gradient checks;
-- a direct-coil free-boundary runtime hook that does not require an ``mgrid``
-  file;
-- generated-``mgrid`` versus direct-coil ``vmec_jax`` free-boundary parity for
-  the ESSOS Landreman-Paul QA smoke case;
+- a direct-coil runtime hook that does not require an ``mgrid`` file and uses
+  nonzero pressure;
+- generated-``mgrid`` versus direct-coil ``vmec_jax`` provider parity for the
+  ESSOS Landreman-Paul QA finite-pressure smoke case;
 - dense toy vacuum-adjoint tests.
 
 The optional VMEC2000 generated-``mgrid`` comparison is present but xfailed for
@@ -109,8 +116,11 @@ the existing VMEC2000-parity ``mgrid`` fixtures.
 Next Implementation Steps
 -------------------------
 
+- Make active NESTOR/free-boundary vacuum coupling respond robustly to direct
+  coil parameters in finite-pressure cases.
 - Add the first coil-only optimization example where the plasma boundary is
-  never an independent optimization variable.
+  never an independent optimization variable, only after the accepted
+  equilibrium is demonstrably sensitive to coil parameters.
 - Promote the VMEC2000 generated-``mgrid`` comparison after the direct/mgrid
   trace discrepancy is bounded.
 - Replace the dense toy vacuum-adjoint scaffold with the production
