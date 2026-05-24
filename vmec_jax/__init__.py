@@ -143,6 +143,7 @@ from .free_boundary import (
     covariant_boundary_field_from_cylindrical,
     contravariant_boundary_field_from_covariant,
     vacuum_boundary_fields_from_cylindrical,
+    sample_free_boundary_external_field,
     sample_external_vacuum_diagnostics,
     nestor_external_only_step,
     initial_free_boundary_state,

@@ -918,6 +918,101 @@ def vacuum_boundary_fields_from_cylindrical(
     )
 
 
+def sample_free_boundary_external_field(
+    *,
+    R: Any,
+    Z: Any,
+    Ru: Any,
+    Zu: Any,
+    Rv: Any,
+    Zv: Any,
+    phi: Any,
+    provider_kind: str,
+    provider_static: Any = None,
+    provider_params: Any = None,
+    axis_field: tuple[Any, Any, Any] | None = None,
+    axis_r: Any | None = None,
+    axis_z: Any | None = None,
+    label: str | None = None,
+) -> ExternalBoundarySample:
+    """Project a provider-sampled external field onto VMEC boundary channels.
+
+    This is the phase-1 provider bridge: it reuses the existing VMEC/NESTOR
+    boundary-channel data model while allowing the external field to come from
+    the provider API instead of a precomputed mgrid file.  The direct provider
+    itself remains JAX-differentiable; this compatibility bridge materializes
+    NumPy arrays because the current production free-boundary path is still
+    VMEC/NESTOR-style host code.
+    """
+
+    from .external_fields import sample_external_field_cylindrical
+
+    R_arr = np.asarray(R, dtype=float)
+    Z_arr = np.asarray(Z, dtype=float)
+    Ru_arr = np.asarray(Ru, dtype=float)
+    Zu_arr = np.asarray(Zu, dtype=float)
+    Rv_arr = np.asarray(Rv, dtype=float)
+    Zv_arr = np.asarray(Zv, dtype=float)
+    phi_arr = np.asarray(phi, dtype=float)
+    br_ext, bp_ext, bz_ext = sample_external_field_cylindrical(
+        provider_kind,
+        provider_static,
+        provider_params,
+        R_arr,
+        Z_arr,
+        phi_arr,
+    )
+    br_ext = np.asarray(br_ext, dtype=float)
+    bp_ext = np.asarray(bp_ext, dtype=float)
+    bz_ext = np.asarray(bz_ext, dtype=float)
+    if axis_field is None:
+        br_axis = np.zeros_like(br_ext)
+        bp_axis = np.zeros_like(bp_ext)
+        bz_axis = np.zeros_like(bz_ext)
+    else:
+        br_axis = np.asarray(axis_field[0], dtype=float)
+        bp_axis = np.asarray(axis_field[1], dtype=float)
+        bz_axis = np.asarray(axis_field[2], dtype=float)
+    br = br_ext + br_axis
+    bp = bp_ext + bp_axis
+    bz = bz_ext + bz_axis
+    vac = vacuum_boundary_fields_from_cylindrical(
+        br=br,
+        bp=bp,
+        bz=bz,
+        R=R_arr,
+        Ru=Ru_arr,
+        Zu=Zu_arr,
+        Rv=Rv_arr,
+        Zv=Zv_arr,
+    )
+    nzeta = int(R_arr.shape[-1]) if R_arr.ndim else 1
+    axis_r_arr = np.zeros(nzeta, dtype=float) if axis_r is None else np.asarray(axis_r, dtype=float)
+    axis_z_arr = np.zeros(nzeta, dtype=float) if axis_z is None else np.asarray(axis_z, dtype=float)
+    return ExternalBoundarySample(
+        mgrid_path=str(label or provider_kind),
+        R=R_arr,
+        Z=Z_arr,
+        Ru=Ru_arr,
+        Zu=Zu_arr,
+        Rv=Rv_arr,
+        Zv=Zv_arr,
+        phi=phi_arr,
+        br=br,
+        bp=bp,
+        bz=bz,
+        br_mgrid=br_ext,
+        bp_mgrid=bp_ext,
+        bz_mgrid=bz_ext,
+        br_axis=br_axis,
+        bp_axis=bp_axis,
+        bz_axis=bz_axis,
+        axis_r=axis_r_arr,
+        axis_z=axis_z_arr,
+        vac_ext=vac,
+    )
+
+
 def _sample_external_boundary_arrays(
     *,
     state: Any,

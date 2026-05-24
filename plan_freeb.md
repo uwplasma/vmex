@@ -789,7 +789,7 @@ WP1 Provider base API:                         100%
 WP2 Pure JAX coil Biot-Savart:                 75%
 WP3 ESSOS adapter:                             80%
 WP4 JAX mgrid interpolation:                   85%
-WP5 Free-boundary provider hook:                0%
+WP5 Free-boundary provider hook:               35%
 WP6 Direct-coil forward example:                0%
 WP7 Vacuum adjoint scaffold:                  100%
 WP8 Gradient checks:                           50%
@@ -799,7 +799,7 @@ WP11 Coil-only QS optimization example:         0%
 WP12 Robust coil perturbations:                 0%
 WP13 Documentation:                             0%
 WP14 CI policy:                                 0%
-Overall branch completion:                     33%
+Overall branch completion:                     37%
 ```
 
 ## Immediate Next Steps
@@ -839,6 +839,31 @@ Best next steps:
 1. Implement provider base API.
 2. Implement pure JAX direct-coil provider and tests.
 3. Add optional ESSOS parity adapter.
+
+Need from user:
+
+Nothing now.
+
+### 2026-05-24 Free-boundary provider bridge
+
+Steps taken:
+
+1. Added `sample_free_boundary_external_field(...)` in `free_boundary.py`.
+2. The helper samples any external-field provider at boundary arrays and projects the result into the existing `ExternalBoundarySample` / `VacuumBoundaryFields` data model.
+3. Added optional axis-field addition so direct-coil fields and axis-current fields remain separable in diagnostics.
+4. Exported the helper through `vmec_jax.__init__`.
+5. Added tests for direct-coil provider projection and axis-field separation.
+
+Results obtained:
+
+1. `pytest -q tests/test_free_boundary_coil_provider_forward.py` passed: 2 passed in 2.17 s.
+2. `pytest -q tests/test_external_fields_coils_jax.py tests/test_external_fields_essos_adapter.py tests/test_external_fields_mgrid_jax.py tests/test_free_boundary_vacuum_adjoint.py tests/test_free_boundary_coil_provider_forward.py` passed: 24 passed in 15.04 s.
+
+Best next steps:
+
+1. Commit the provider bridge.
+2. Refactor the state/static free-boundary sampler so it can call the provider bridge after constructing boundary geometry.
+3. Add a low-resolution direct-coil free-boundary forward example once the state/static hook is available.
 
 Need from user:
 
