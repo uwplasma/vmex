@@ -16,6 +16,7 @@ from vmec_jax.wout import read_wout
 ROOT = Path(__file__).resolve().parents[1]
 LPQA_INPUT = ROOT / "examples" / "data" / "input.LandremanPaul2021_QA_reactorScale_lowres"
 LPQA_COILS = Path("/Users/rogeriojorge/local/ESSOS_mgrid_pr/examples/input_files/ESSOS_biot_savart_LandremanPaulQA.json")
+FINITE_PRESSURE_SCALE = 34.46233666638
 
 
 def _load_lpqa_essos_coils():
@@ -43,7 +44,14 @@ def _write_lpqa_mgrid(coils, path: Path) -> Path:
     return path
 
 
-def _write_freeb_input(path: Path, *, mgrid_file: str | Path, niter: int = 2, ftol: float = 1.0e-8) -> Path:
+def _write_freeb_input(
+    path: Path,
+    *,
+    mgrid_file: str | Path,
+    niter: int = 2,
+    ftol: float = 1.0e-8,
+    pressure_scale: float = FINITE_PRESSURE_SCALE,
+) -> Path:
     indata = deepcopy(read_indata(LPQA_INPUT))
     indata.scalars.update(
         {
@@ -60,7 +68,7 @@ def _write_freeb_input(path: Path, *, mgrid_file: str | Path, niter: int = 2, ft
             "NZETA": 6,
             "NTHETA": 0,
             "NVACSKIP": 6,
-            "PRES_SCALE": 0.0,
+            "PRES_SCALE": float(pressure_scale),
             "AM": [1.0, -1.0],
         }
     )
@@ -125,6 +133,8 @@ def test_essos_direct_coil_free_boundary_matches_generated_mgrid_backend(tmp_pat
         np.testing.assert_allclose(getattr(wout_direct, name), getattr(wout_mgrid, name), rtol=1.0e-12, atol=1.0e-12)
     np.testing.assert_allclose(wout_direct.aspect, wout_mgrid.aspect, rtol=1.0e-12, atol=1.0e-12)
     np.testing.assert_allclose(wout_direct.wb, wout_mgrid.wb, rtol=1.0e-12, atol=1.0e-12)
+    assert float(wout_direct.wp) > 0.0
+    np.testing.assert_allclose(wout_direct.wp, wout_mgrid.wp, rtol=1.0e-12, atol=1.0e-12)
 
 
 @pytest.mark.vmec2000

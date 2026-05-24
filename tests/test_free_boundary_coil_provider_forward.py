@@ -124,7 +124,7 @@ def test_run_free_boundary_accepts_direct_coil_provider_without_mgrid_file(tmp_p
             "NZETA": 4,
             "NTHETA": 0,
             "NVACSKIP": 4,
-            "PRES_SCALE": 0.0,
+            "PRES_SCALE": 1.0,
             "AM": [1.0, -1.0],
         }
     )

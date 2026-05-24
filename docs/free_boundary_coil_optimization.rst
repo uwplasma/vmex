@@ -35,8 +35,9 @@ Low-Resolution Beta Scan
 ------------------------
 
 The first reviewer-facing diagnostic uses ESSOS Landreman-Paul QA coils and a
-four-point nominal pressure scan from zero beta to one percent beta. The same
-coil set is used two ways:
+four-point pressure scan. The zero-pressure endpoint is retained as a reference,
+but the promoted checks are the finite-pressure points. The same coil set is
+used two ways:
 
 1. ESSOS coils are sampled onto an ``mgrid`` file and solved by the legacy
    free-boundary compatibility path.
@@ -48,7 +49,9 @@ coil set is used two ways:
    :width: 100%
 
 The scalar diagnostics from the two ``vmec_jax`` providers agree exactly in
-the JSON summary for this low-resolution smoke run.
+the JSON summary for this low-resolution smoke run. The scan records both the
+input ``PRES_SCALE`` and the output energy ratio ``100 W_p / W_B`` so future
+plots cannot accidentally validate only the vacuum case.
 
 .. image:: _static/figures/freeb_single_stage_provider_parity.png
    :alt: Direct-coil provider parity

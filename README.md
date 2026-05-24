@@ -90,16 +90,18 @@ coil Fourier dofs/currents -> direct Biot-Savart field -> free-boundary VMEC
 
 The current numerical smoke example uses ESSOS Landreman-Paul QA coils. It
 first writes an `mgrid` from the same coils, then runs the same four-point
-nominal beta scan with both free-boundary backends: generated `mgrid` and
-direct JAX coils. In this low-resolution run, the two `vmec_jax` providers
-produce identical scalar equilibrium diagnostics recorded in the JSON summary.
+finite-pressure scan with both free-boundary backends: generated `mgrid` and
+direct JAX coils. The zero-pressure endpoint is included only as a reference;
+the finite-pressure points are the meaningful free-boundary check. In this
+low-resolution run, the two `vmec_jax` providers produce identical scalar
+equilibrium diagnostics recorded in the JSON summary.
 
-| Backend | beta (%) | residual norm | aspect | mean iota | wall time (s) |
-|---|---:|---:|---:|---:|---:|
-| direct coils | 0.000 | 1.090e-02 | 6.0000 | 0.39318 | 1.26 |
-| generated mgrid | 0.000 | 1.090e-02 | 6.0000 | 0.39318 | 11.92 |
-| direct coils | 1.000 | 1.090e-02 | 6.0000 | 0.39318 | 1.26 |
-| generated mgrid | 1.000 | 1.090e-02 | 6.0000 | 0.39318 | 1.26 |
+| Backend | pressure scale | beta proxy `100Wp/WB` (%) | residual norm | aspect | mean iota | wall time (s) |
+|---|---:|---:|---:|---:|---:|---:|
+| direct coils | 11.487 | 4.200e-05 | 1.090e-02 | 6.0000 | 0.39318 | 1.25 |
+| generated mgrid | 11.487 | 4.200e-05 | 1.090e-02 | 6.0000 | 0.39318 | 1.23 |
+| direct coils | 34.462 | 1.260e-04 | 1.090e-02 | 6.0000 | 0.39318 | 1.24 |
+| generated mgrid | 34.462 | 1.260e-04 | 1.090e-02 | 6.0000 | 0.39318 | 1.26 |
 
 ![Direct-coil beta scan](docs/_static/figures/freeb_single_stage_beta_scan.png)
 

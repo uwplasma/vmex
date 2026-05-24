@@ -75,6 +75,12 @@ def _write_csv(runs: list[dict[str, Any]], outdir: Path) -> Path:
         "fsq_norm",
         "aspect",
         "mean_iota",
+        "pressure_scale",
+        "max_pressure",
+        "wp",
+        "wb",
+        "beta_proxy",
+        "beta_proxy_percent",
     ]
     with out.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fields)
@@ -169,13 +175,15 @@ def render_beta_scan(runs: list[dict[str, Any]], outdir: Path) -> Path:
     labels = {"mgrid": "ESSOS coils -> mgrid", "direct": "Direct JAX coils"}
     markers = {"mgrid": "o", "direct": "s"}
     metrics = [
+        ("pressure_scale", "VMEC PRES_SCALE", "linear"),
+        ("beta_proxy_percent", r"$100 W_p/W_B$ (%)", "linear"),
         ("fsq_norm", "residual norm", "log"),
         ("aspect", "aspect ratio", "linear"),
         ("mean_iota", "mean iota", "linear"),
         ("wall_s", "wall time (s)", "linear"),
     ]
 
-    fig, axes = plt.subplots(2, 2, figsize=(10.8, 7.1), constrained_layout=True)
+    fig, axes = plt.subplots(2, 3, figsize=(13.2, 7.4), constrained_layout=True)
     for ax, (metric, ylabel, scale) in zip(axes.ravel(), metrics, strict=True):
         for backend in ("mgrid", "direct"):
             if backend not in grouped:
@@ -204,19 +212,21 @@ def render_beta_scan(runs: list[dict[str, Any]], outdir: Path) -> Path:
             ax.set_ylim(5.98, 6.02)
         if metric == "mean_iota":
             ax.set_ylim(0.385, 0.400)
+        if metric == "beta_proxy_percent":
+            ax.set_ylim(bottom=0.0)
         ax.margins(x=0.08)
     axes[0, 0].legend(frameon=False, loc="best")
-    axes[1, 1].text(
+    axes[1, 2].text(
         0.02,
         0.96,
         "First point includes cold-start overhead.",
-        transform=axes[1, 1].transAxes,
+        transform=axes[1, 2].transAxes,
         ha="left",
         va="top",
         color="#475569",
         fontsize=8.5,
     )
-    fig.suptitle("Low-resolution free-boundary beta scan from Landreman-Paul QA ESSOS coils", weight="bold")
+    fig.suptitle("Finite-pressure free-boundary scan from Landreman-Paul QA ESSOS coils", weight="bold")
     out = outdir / "freeb_single_stage_beta_scan.png"
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)

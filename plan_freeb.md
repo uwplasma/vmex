@@ -792,14 +792,14 @@ WP4 JAX mgrid interpolation:                   85%
 WP5 Free-boundary provider hook:               65%
 WP6 Direct-coil forward example:               75%
 WP7 Vacuum adjoint scaffold:                  100%
-WP8 Gradient checks:                           65%
+WP8 Gradient checks:                           70%
 WP9 VMEC2000 diagnostics:                      25%
 WP10 Benchmarks:                                0%
 WP11 Coil-only QS optimization example:         0%
 WP12 Robust coil perturbations:                 0%
-WP13 Documentation:                            45%
-WP14 CI policy:                                25%
-Overall branch completion:                     51%
+WP13 Documentation:                            50%
+WP14 CI policy:                                30%
+Overall branch completion:                     52%
 ```
 
 ## Immediate Next Steps
@@ -815,6 +815,38 @@ Overall branch completion:                     51%
 Nothing is required right now. The next implementation step can proceed locally. Later, maintainers should decide whether ESSOS mgrid export should be released before the `vmec_jax` example is promoted from research example to documented workflow.
 
 ## Work Log
+
+### 2026-05-24 Finite-pressure free-boundary correction
+
+Steps taken:
+
+1. Audited the README beta-scan summary and confirmed the first documentation slice showed nonzero pressure profiles only indirectly.
+2. Added explicit pressure and energy diagnostics to `examples/free_boundary_essos_coils_beta_scan.py`:
+   - input `pressure_scale`,
+   - `wp`,
+   - `wb`,
+   - `beta_proxy = W_p / W_B`,
+   - `beta_proxy_percent = 100 W_p / W_B`.
+3. Updated the README/docs plot renderer to show `PRES_SCALE` and `100 W_p/W_B` directly.
+4. Updated the README and docs wording to state that zero pressure is only a reference point and finite-pressure points are the meaningful free-boundary check.
+5. Changed direct-coil free-boundary provider tests to use nonzero pressure instead of validating only a vacuum case.
+
+Results obtained:
+
+1. The finite-pressure scan still shows exact recorded scalar parity between generated-mgrid and direct-coil providers.
+2. The finite-pressure test subset passed: `4 passed in 23.79 s`.
+3. The local docs build passed.
+4. A trial near actual `1%` beta proxy was too aggressive for this low-resolution smoke and produced large residuals, so the README plot now labels this as a finite-pressure smoke rather than a converged high-beta demonstration.
+
+Best next steps:
+
+1. Add a dedicated finite-beta/high-pressure direct-coil benchmark with a more appropriate resolution and solver budget.
+2. Continue with the first coil-only optimization example, but require nonzero pressure in the promoted free-boundary path.
+3. Investigate the high-pressure residual blow-up before making any 1% beta performance or physics claim.
+
+Need from user:
+
+Nothing now.
 
 ### 2026-05-24 README/docs visualization slice
 

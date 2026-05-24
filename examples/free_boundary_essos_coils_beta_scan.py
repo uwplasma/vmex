@@ -36,7 +36,7 @@ import numpy as np
 from vmec_jax.driver import run_free_boundary, write_wout_from_fixed_boundary_run
 from vmec_jax.external_fields import from_essos_coils
 from vmec_jax.namelist import read_indata, write_indata
-from vmec_jax.wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
+from vmec_jax.wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state, read_wout
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -135,6 +135,12 @@ def summarize_run(run, wout_path: Path, *, backend: str, beta_percent: float, wa
         "fsql": None,
         "aspect": None,
         "mean_iota": None,
+        "pressure_scale": float(PRESSURE_SCALE_FOR_ONE_PERCENT_BETA) * float(beta_percent),
+        "max_pressure": None,
+        "wp": None,
+        "wb": None,
+        "beta_proxy": None,
+        "beta_proxy_percent": None,
     }
     for key in ("final_fsqr", "final_fsqz", "final_fsql"):
         val = diag.get(key)
@@ -152,6 +158,16 @@ def summarize_run(run, wout_path: Path, *, backend: str, beta_percent: float, wa
             signgs=int(run.signgs),
         )
         summary["mean_iota"] = float(np.nanmean(np.asarray(iotas, dtype=float)))
+    except Exception:
+        pass
+    try:
+        wout = read_wout(wout_path)
+        summary["max_pressure"] = float(np.nanmax(np.asarray(wout.presf, dtype=float)))
+        summary["wp"] = float(wout.wp)
+        summary["wb"] = float(wout.wb)
+        if float(wout.wb) != 0.0:
+            summary["beta_proxy"] = float(wout.wp) / float(wout.wb)
+            summary["beta_proxy_percent"] = 100.0 * float(wout.wp) / float(wout.wb)
     except Exception:
         pass
     return summary
