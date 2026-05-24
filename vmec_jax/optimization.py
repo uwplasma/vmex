@@ -1808,6 +1808,7 @@ class FixedBoundaryExactOptimizer:
             return 0.0
         timing = diagnostics.get("timing")
         if not isinstance(timing, dict):
+            self._profile_solver_free_boundary_timing(diagnostics, profile_prefix=profile_prefix)
             return 0.0
         solver_total = 0.0
         timing_keys = (

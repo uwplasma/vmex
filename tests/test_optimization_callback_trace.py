@@ -424,6 +424,33 @@ def test_exact_optimizer_profiles_trial_solver_timing_buckets() -> None:
     assert profile["solve_forward_trial_unattributed"]["wall_time_s"] == pytest.approx(0.15)
 
 
+def test_exact_optimizer_profiles_free_boundary_buckets_without_generic_timing() -> None:
+    opt = FixedBoundaryExactOptimizer.__new__(FixedBoundaryExactOptimizer)
+    opt._profile = {}
+
+    solver_total = opt._profile_solver_timing(
+        {
+            "freeb_nestor_sample_time_history": [0.1, 0.2],
+            "freeb_nestor_solve_time_history": [0.03],
+            "freeb_nestor_trial_sample_time_history": [0.04],
+            "freeb_full_update_history": [1, 0, 1],
+            "freeb_nestor_reused_history": [0, 1, 0],
+        },
+        profile_prefix="trial_solver",
+        phase_wall_s=0.5,
+        unattributed_name="solve_forward_trial_unattributed",
+    )
+    profile = opt._profile_dump()
+
+    assert solver_total == 0.0
+    assert profile["trial_solver_freeb_nestor_sample"]["wall_time_s"] == pytest.approx(0.3)
+    assert profile["trial_solver_freeb_nestor_solve"]["wall_time_s"] == pytest.approx(0.03)
+    assert profile["trial_solver_freeb_nestor_trial_sample"]["wall_time_s"] == pytest.approx(0.04)
+    assert profile["trial_solver_freeb_nestor_full_update_count"]["wall_time_s"] == 2.0
+    assert profile["trial_solver_freeb_nestor_reused_count"]["wall_time_s"] == 1.0
+    assert "solve_forward_trial_unattributed" not in profile
+
+
 def test_exact_optimizer_profiles_solver_outer_timing_without_double_counting() -> None:
     opt = FixedBoundaryExactOptimizer.__new__(FixedBoundaryExactOptimizer)
     opt._profile = {}

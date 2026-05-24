@@ -437,6 +437,72 @@ def test_essos_direct_coil_free_boundary_matches_generated_mgrid_backend(tmp_pat
 
 
 @pytest.mark.vmec2000
+def test_vmec2000_generated_mgrid_trace_smoke_records_iteration_rows(tmp_path: Path) -> None:
+    """Optional VMEC2000 trace gate below the full WOUT-parity xfail.
+
+    This does not promote generated-``mgrid`` WOUT parity.  It proves the
+    diagnostic can run VMEC2000 on the same generated grid, records at least one
+    VMEC2000 iteration row, and keeps the shared multigrid schedule promotable.
+    """
+
+    if os.environ.get("VMEC2000_INTEGRATION", "0") != "1":
+        pytest.skip("Set VMEC2000_INTEGRATION=1 to run VMEC2000 executable parity tests")
+    exe = find_vmec2000_exec()
+    if exe is None:
+        pytest.skip("xvmec2000 executable not found")
+    _load_lpqa_essos_coils()
+
+    from tools.diagnostics.compare_freeb_coils_mgrid_vmec2000 import main as compare_main
+
+    out = tmp_path / "freeb_coils_trace_smoke.json"
+    rc = compare_main(
+        [
+            "--vmec2000-exec",
+            str(exe),
+            "--ns-array",
+            "5,7",
+            "--niter-array",
+            "1,1",
+            "--ftol-array",
+            "1e-8,1e-8",
+            "--mpol",
+            "3",
+            "--ntor",
+            "2",
+            "--mgrid-nphi",
+            "4",
+            "--nzeta",
+            "4",
+            "--nvacskip",
+            "4",
+            "--vmec2000-timeout",
+            "120",
+            "--out",
+            str(out),
+            "--workdir",
+            str(tmp_path / "freeb_coils_trace_smoke_work"),
+        ]
+    )
+
+    assert rc == 0
+    payload = json.loads(out.read_text())
+    assert payload["comparisons"]["vmec_jax_direct_vs_generated_mgrid"]["passed"] is True
+    assert payload["configuration"]["uses_multigrid_schedule"] is True
+    assert payload["configuration"]["mixed_vmec2000_schedule_non_promotable"] is False
+    vmec2000 = payload["backends"]["vmec2000_generated_mgrid"]
+    assert vmec2000["status"] in {"completed", "no_wout"}
+    assert vmec2000["iteration_row_count"] > 0
+    if vmec2000["status"] == "no_wout":
+        assert vmec2000["underconverged"]["classification"] in {
+            "reached_niter_without_wout",
+            "no_iteration_rows",
+            "underconverged_or_unknown",
+        }
+    else:
+        assert payload["summary"]["vmec2000_wout_available"] is True
+
+
+@pytest.mark.vmec2000
 @pytest.mark.xfail(
     reason=(
         "Generated ESSOS-mgrid VMEC2000 free-boundary WOUT parity is not bounded "

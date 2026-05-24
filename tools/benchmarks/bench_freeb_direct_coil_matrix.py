@@ -207,7 +207,7 @@ def _child_specs(*, quick: bool, outdir: Path, backend: str) -> list[tuple[str, 
             (
                 "direct_solve",
                 outdir / f"bench_freeb_direct_coil_solve{suffix}",
-                ["--max-iter", "1", "--warm-repeats", "0"],
+                ["--max-iter", "2", "--warm-repeats", "1"],
             ),
             (
                 "gradient",
