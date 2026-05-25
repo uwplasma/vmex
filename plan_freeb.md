@@ -10,7 +10,7 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-05-25 after active generated-`mgrid` diagnostics, VMEC2000 `DEL-BSQ` reporting, and VMEC-style mgrid plane subsampling fixes.
+Last updated: 2026-05-25 after active dump-to-dump diagnostics, VMEC2000 `DEL-BSQ` reporting, and VMEC-style mgrid plane subsampling fixes.
 
 Steps taken:
 
@@ -195,6 +195,7 @@ Results obtained:
 106. Added compact vmec_jax free-boundary/NESTOR diagnostics to the generated-`mgrid` comparison JSON so direct and generated-`mgrid` runs record active-coupling status plus `bnormal_rms`, `gsource_rms`, `bsqvac_rms`, and `bsqvac_mean`.
 107. Added `--activate-fsq` to the generated-`mgrid` comparison tool and updated optional ESSOS/VMEC2000 gates to force active NESTOR coupling for short vmec_jax parity diagnostics.
 108. Fixed VMEC-style `mgrid` toroidal plane selection in both NumPy and JAX interpolators: when the file has `kp > nzeta`, vmec_jax now samples file planes `0, nskip, 2*nskip, ...`, matching VMEC2000 `read_mgrid_nc` instead of taking the first `nzeta` planes.
+109. Added `--activate-fsq` to the VMEC2000 scalpot/vacuum dump comparator and added a JAX `dbsq_edge_proxy` dump based on `gcon -` extrapolated plasma `bsq`, giving VMEC2000 `DEL-BSQ` a direct JAX-side edge-balance diagnostic when generated-`mgrid` traces do not promote a WOUT.
 
 Best next steps:
 
@@ -1030,7 +1031,7 @@ WP5 Free-boundary provider hook:               95%
 WP6 Direct-coil forward example:               90%
 WP7 Vacuum adjoint scaffold:                  100%
 WP8 Gradient checks:                           99%
-WP9 VMEC2000 diagnostics:                      91%
+WP9 VMEC2000 diagnostics:                      92%
 WP10 Benchmarks/diagnostics:                  100%
 WP11 Coil-only QS optimization example:        83%
 WP12 Robust coil perturbations:               100%

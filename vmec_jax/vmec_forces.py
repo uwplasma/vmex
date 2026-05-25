@@ -1057,12 +1057,24 @@ def vmec_forces_rz_from_wout(
             if env not in ("", "0", "false", "no"):
                 outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
                 outdir.mkdir(parents=True, exist_ok=True)
+                plasma_bsq_edge = jnp.asarray(bc.bsq[-1], dtype=vac_edge.dtype)
+                if int(bc.bsq.shape[0]) >= 2:
+                    plasma_bsq_edge_extrap = (
+                        1.5 * jnp.asarray(bc.bsq[-1], dtype=vac_edge.dtype)
+                        - 0.5 * jnp.asarray(bc.bsq[-2], dtype=vac_edge.dtype)
+                    )
+                else:
+                    plasma_bsq_edge_extrap = plasma_bsq_edge
+                dbsq_edge_proxy = jnp.abs(gcon_edge - plasma_bsq_edge_extrap)
                 np.savez(
                     outdir / f"freeb_coupling_iter{int(iter_idx)}.npz",
                     gcon_edge=np.asarray(gcon_edge),
                     rbsq_edge=np.asarray(rbsq_edge),
                     bsqvac_edge=np.asarray(vac_edge),
                     pres_edge=np.asarray(pres_edge),
+                    plasma_bsq_edge=np.asarray(plasma_bsq_edge),
+                    plasma_bsq_edge_extrap=np.asarray(plasma_bsq_edge_extrap),
+                    dbsq_edge_proxy=np.asarray(dbsq_edge_proxy),
                     pr1_even_edge=np.asarray(pr1_0[-1]),
                     pr1_odd_edge=np.asarray(pr1_1[-1]),
                     # VMEC funct3d/forces uses physical pzu0/pru0:

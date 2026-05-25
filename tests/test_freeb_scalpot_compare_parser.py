@@ -8,6 +8,7 @@ from tools.diagnostics.vmec2000_exec_freeb_scalpot_compare import (
     _gc_metric_block,
     _parse_bextern_dump,
     _parse_fouri_dump,
+    _parse_freeb_coupling_dump,
     _parse_gc_dump,
     _parse_scalpot_dump,
 )
@@ -183,6 +184,32 @@ def test_parse_gc_dump_reads_vmec_layout(tmp_path: Path) -> None:
     np.testing.assert_allclose(got["gcr"][2, 0, 2, 3], 7.5e-1)
     np.testing.assert_allclose(got["gcz"][2, 0, 2, 3], -8.5e-1)
     np.testing.assert_allclose(got["gcl"][2, 0, 2, 3], 9.5e-1)
+
+
+def test_parse_freeb_coupling_dump_reads_dbsq_and_edge_channels(tmp_path: Path) -> None:
+    p = tmp_path / "freeb_coupling_iter8.dat"
+    p.write_text(
+        "\n".join(
+            [
+                "# free-boundary coupling dump",
+                "iter2=8",
+                "presf_ns=1.5D-03",
+                "cols: i pgcon rbsq dbsq bsqvac p1e p1o pzu0 pru0",
+                "1  1.0D+00  2.0D+00  3.0D+00  4.0D+00  5.0D+00  6.0D+00  7.0D+00  8.0D+00",
+                "2  1.5D+00  2.5D+00  3.5D+00  4.5D+00  5.5D+00  6.5D+00  7.5D+00  8.5D+00",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    got = _parse_freeb_coupling_dump(p)
+
+    assert got["iter2"] == 8
+    np.testing.assert_allclose(got["presf_ns"], 1.5e-3)
+    np.testing.assert_allclose(got["pgcon"], np.array([1.0, 1.5]))
+    np.testing.assert_allclose(got["rbsq"], np.array([2.0, 2.5]))
+    np.testing.assert_allclose(got["dbsq"], np.array([3.0, 3.5]))
+    np.testing.assert_allclose(got["bsqvac"], np.array([4.0, 4.5]))
 
 
 def test_gc_metric_block_transposes_jax_gc_axes() -> None:

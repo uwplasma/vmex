@@ -267,7 +267,13 @@ def test_freeb_edge_coupling_synthetic_pressure_scale_and_dump(monkeypatch, tmp_
     rbsq_edge = gcon_edge * (4.0 + 0.5) * 2.0 * 0.5
     np.testing.assert_allclose(np.asarray(edge.armn_e - base.armn_e)[-1], (2.0 + 0.5) * rbsq_edge)
     np.testing.assert_allclose(np.asarray(edge.azmn_e - base.azmn_e)[-1], -(1.0 + 0.25) * rbsq_edge)
-    assert (tmp_path / "freeb_coupling_iter7.npz").exists()
+    dump_path = tmp_path / "freeb_coupling_iter7.npz"
+    assert dump_path.exists()
+    with np.load(dump_path) as dump:
+        assert "plasma_bsq_edge" in dump.files
+        assert "plasma_bsq_edge_extrap" in dump.files
+        assert "dbsq_edge_proxy" in dump.files
+        np.testing.assert_allclose(dump["dbsq_edge_proxy"], np.abs(dump["gcon_edge"] - dump["plasma_bsq_edge_extrap"]))
 
     with pytest.raises(ValueError, match="freeb_bsqvac_half shape mismatch"):
         vmec_forces_rz_from_wout(

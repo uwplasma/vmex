@@ -553,8 +553,18 @@ For one-off debugging of a specific iteration, run the comparator directly:
        --vmec-exec "$VMEC2000_EXEC" \
        --iter 80 \
        --max-iter 120 \
+       --activate-fsq 1e99 \
        --workdir results/freeb_scalpot_cth_like_lasym \
        --json results/freeb_scalpot_cth_like_lasym/summary.json
+
+``--activate-fsq`` is a vmec-jax-only diagnostic override. It is useful for
+short traces because VMEC2000's production cadence can delay vacuum activation
+until after the bounded iteration window; forcing the JAX side active makes the
+dump compare the active boundary-field, scalar-potential, and edge-pressure
+channels immediately. The comparator also records a JAX ``dbsq_edge_proxy``
+based on ``gcon -`` extrapolated plasma ``bsq`` so VMEC2000 ``DEL-BSQ``
+failures can be localized to sampled external field, NESTOR solve, or edge
+magnetic-pressure balance.
 
 The generated-``mgrid`` VMEC2000 comparison for the ESSOS LP-QA coil validation case is
 still non-promoted/xfailed. The current promoted signal for this branch is

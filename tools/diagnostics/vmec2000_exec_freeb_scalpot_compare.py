@@ -824,6 +824,16 @@ def main() -> int:
     p.add_argument("--iter", type=int, default=1, help="Iteration index to compare.")
     p.add_argument("--max-iter", type=int, default=2, help="vmec_jax max_iter.")
     p.add_argument(
+        "--activate-fsq",
+        type=float,
+        default=None,
+        help=(
+            "Forward to vmec_jax as free_boundary_activate_fsq. Use a large "
+            "value such as 1e99 to force active free-boundary coupling in "
+            "short dump-to-dump diagnostics."
+        ),
+    )
+    p.add_argument(
         "--multigrid",
         type=str,
         choices=("auto", "on", "off"),
@@ -882,16 +892,19 @@ def main() -> int:
             }
         )
 
+    vmec_returncodes: list[int] = []
+
     def _run_vmec_with_dump_iter(dump_iter: int) -> None:
         env_vmec = env_vmec_base.copy()
         env_vmec["VMEC_DUMP_ITER"] = str(int(dump_iter))
-        subprocess.run(
+        completed = subprocess.run(
             [str(vmec_exec), run_input.name],
             cwd=str(workdir),
             env=env_vmec,
-            check=True,
+            check=False,
             timeout=300,
         )
+        vmec_returncodes.append(int(completed.returncode))
 
     _run_vmec_with_dump_iter(int(args.iter))
 
@@ -935,6 +948,7 @@ def main() -> int:
             verbose=False,
             performance_mode=False,
             use_scan=False,
+            free_boundary_activate_fsq=None if args.activate_fsq is None else float(args.activate_fsq),
         )
     finally:
         os.environ.clear()
@@ -1005,6 +1019,8 @@ def main() -> int:
         "iter": int(args.iter),
         "jax_iter_used": int(jax_iter_used),
         "jax_multigrid": bool(use_multigrid),
+        "activate_fsq": None if args.activate_fsq is None else float(args.activate_fsq),
+        "vmec_returncodes": list(vmec_returncodes),
         "mode_map_applied": bool(mode_map is not None),
         "vmec_scalpot_meta": {
             "iter2": int(vmec_scal.get("iter2", -1)),
@@ -1726,6 +1742,7 @@ def main() -> int:
         field_pairs = (
             ("pgcon", "gcon_edge"),
             ("rbsq", "rbsq_edge"),
+            ("dbsq", "dbsq_edge_proxy"),
             ("bsqvac", "bsqvac_edge"),
             ("p1e", "pr1_even_edge"),
             ("p1o", "pr1_odd_edge"),

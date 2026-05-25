@@ -181,12 +181,17 @@ reports upstream source-channel deltas:
   ``bexn_term_z``) from ``brad*snr``, ``bphi*snv``, ``bz*snz`` to localize
   source drift to geometry vs field contributions.
 - free-boundary edge-coupling channels from ``funct3d``/``forces``
-  (``pgcon``, ``rbsq``, ``bsqvac``, ``p1e/p1o``, ``pzu0/pru0``) plus an
-  inferred ``ohs`` check to flag multigrid stage misalignment in comparisons.
+  (``pgcon``, ``rbsq``, ``dbsq``, ``bsqvac``, ``p1e/p1o``,
+  ``pzu0/pru0``) plus an inferred ``ohs`` check to flag multigrid stage
+  misalignment in comparisons. On the vmec-jax side, ``dbsq`` is reported as a
+  diagnostic proxy from ``gcon -`` extrapolated plasma ``bsq`` so VMEC2000
+  ``DEL-BSQ`` failures can be localized before full WOUT promotion.
 
 The comparator now also caps VMEC ``NITER_ARRAY`` stages to the requested
 ``--max-iter`` budget when multigrid is active, so VMEC and vmec-jax dumps are
 generated from the same stage window during short turn-on diagnostics.
+It also accepts ``--activate-fsq`` to force vmec-jax active vacuum coupling
+during intentionally short dump-to-dump traces.
 
 Updated benchmark snapshot (March 2026):
 
