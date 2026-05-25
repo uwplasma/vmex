@@ -1,0 +1,11 @@
+backend,group,case,cold_or_compile_s,warm_min_s
+cpu,provider,synthetic_direct_coils,0.2029542732052505,0.00014677364379167557
+cpu,provider,synthetic_direct_coils_cached_geometry,0.08879062486812472,4.804693162441254e-05
+cpu,direct_solve,synthetic_direct_coil_solve,9.675109913107008,0.340402462054044
+cpu,gradient,direct_coil_field_value_and_grad,0.2653694050386548,5.038594827055931e-05
+cpu,gradient,dense_vacuum_adjoint_rhs_grad,0.08803809015080333,5.042273551225662e-05
+gpu,provider,synthetic_direct_coils,0.3353633196093142,0.00038886768743395805
+gpu,provider,synthetic_direct_coils_cached_geometry,0.16151832696050406,0.0002169809304177761
+gpu,direct_solve,synthetic_direct_coil_solve,28.65132995415479,2.2390361400321126
+gpu,gradient,direct_coil_field_value_and_grad,0.7666193339973688,0.00030480697751045227
+gpu,gradient,dense_vacuum_adjoint_rhs_grad,0.1060328995808959,0.00027443375438451767

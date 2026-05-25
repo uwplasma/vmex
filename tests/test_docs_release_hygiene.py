@@ -119,3 +119,23 @@ def test_qi_case_specific_artifacts_are_not_documented_as_aspect6_promotions() -
 
     assert ",promoted," not in qi_cases_csv
     assert ",case-gated," in qi_cases_csv
+
+
+def test_free_boundary_readme_and_docs_publish_current_validation_artifacts() -> None:
+    readme = (ROOT / "README.md").read_text()
+    freeb_docs = (ROOT / "docs" / "free_boundary_coil_optimization.rst").read_text()
+
+    required_readme_artifacts = (
+        "freeb_single_stage_architecture.png",
+        "freeb_single_stage_beta_scan.png",
+        "freeb_single_stage_provider_parity.png",
+        "freeb_single_stage_benchmark_matrix.png",
+    )
+    for artifact in required_readme_artifacts:
+        assert artifact in readme
+        assert (ROOT / "docs" / "_static" / "figures" / artifact).exists()
+
+    assert "freeb_single_stage_benchmark_matrix.csv" in freeb_docs
+    assert "bounded validation example" in freeb_docs
+    assert "smoke scaffold" not in freeb_docs
+    assert "placeholder" not in freeb_docs.lower()

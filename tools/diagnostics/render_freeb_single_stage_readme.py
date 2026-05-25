@@ -16,6 +16,9 @@ from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SUMMARY = REPO_ROOT / "results" / "free_boundary_essos_coils_beta_scan_readme" / "summary.json"
+DEFAULT_BENCHMARK_SUMMARY = (
+    REPO_ROOT / "results" / "bench_freeb_direct_coil_matrix_office_gpu_after_cuda_detection" / "summary.json"
+)
 DEFAULT_OUTDIR = REPO_ROOT / "docs" / "_static" / "figures"
 
 
@@ -94,6 +97,111 @@ def _write_csv(runs: list[dict[str, Any]], outdir: Path) -> Path:
         writer.writeheader()
         for run in sorted(runs, key=lambda r: (float(r["nominal_beta_percent"]), str(r["backend"]))):
             writer.writerow({field: run.get(field) for field in fields})
+    return out
+
+
+def _load_benchmark_rows(summary_path: Path | None) -> list[dict[str, Any]]:
+    if summary_path is None or not summary_path.exists():
+        return []
+    data = json.loads(summary_path.read_text())
+    rows: list[dict[str, Any]] = []
+    for row in data.get("rows", []):
+        backend = str(row.get("backend", "unknown"))
+        label = str(row.get("label", "unknown"))
+        for timing in row.get("timings", []):
+            if timing.get("status") != "completed":
+                continue
+            rows.append(
+                {
+                    "backend": backend,
+                    "group": label,
+                    "case": str(timing.get("label", label)),
+                    "cold_or_compile_s": timing.get("cold_or_compile_s"),
+                    "warm_min_s": timing.get("warm_min_s"),
+                }
+            )
+    return rows
+
+
+def render_benchmark_matrix(summary_path: Path | None, outdir: Path) -> Path | None:
+    rows = _load_benchmark_rows(summary_path)
+    if not rows:
+        return None
+
+    preferred = [
+        ("provider", "synthetic_direct_coils"),
+        ("provider", "synthetic_direct_coils_cached_geometry"),
+        ("direct_solve", "synthetic_direct_coil_solve"),
+        ("gradient", "direct_coil_field_value_and_grad"),
+        ("gradient", "dense_vacuum_adjoint_rhs_grad"),
+    ]
+    labels = {
+        ("provider", "synthetic_direct_coils"): "field",
+        ("provider", "synthetic_direct_coils_cached_geometry"): "field\ncached",
+        ("direct_solve", "synthetic_direct_coil_solve"): "direct\nsolve",
+        ("gradient", "direct_coil_field_value_and_grad"): "field+grad",
+        ("gradient", "dense_vacuum_adjoint_rhs_grad"): "vacuum\nadjoint",
+    }
+    backends = ["cpu", "gpu"]
+    colors = {"cpu": "#2563eb", "gpu": "#dc2626"}
+
+    fig, axes = plt.subplots(1, 2, figsize=(12.6, 4.6), constrained_layout=True)
+    for ax, metric, title in (
+        (axes[0], "cold_or_compile_s", "cold / compile path"),
+        (axes[1], "warm_min_s", "warm cached path"),
+    ):
+        x = np.arange(len(preferred), dtype=float)
+        width = 0.36
+        plotted: list[float] = []
+        for offset, backend in zip((-width / 2, width / 2), backends, strict=True):
+            vals: list[float] = []
+            for group, case in preferred:
+                match = next(
+                    (
+                        row
+                        for row in rows
+                        if row["backend"] == backend and row["group"] == group and row["case"] == case
+                    ),
+                    None,
+                )
+                value = np.nan if match is None else float(match[metric])
+                vals.append(value)
+                if np.isfinite(value) and value > 0.0:
+                    plotted.append(value)
+            ax.bar(x + offset, vals, width=width, color=colors[backend], alpha=0.86, label=backend.upper())
+        ax.set_yscale("log")
+        if plotted:
+            ax.set_ylim(min(plotted) * 0.45, max(plotted) * 2.2)
+        ax.set_xticks(x, [labels[item] for item in preferred])
+        ax.set_ylabel("wall time (s)")
+        ax.set_title(title, weight="bold")
+        ax.legend(frameon=False)
+        ax.grid(True, which="both", axis="y", alpha=0.22)
+    fig.suptitle("Direct-coil provider benchmark matrix on CPU and CUDA", weight="bold")
+    fig.text(
+        0.5,
+        -0.02,
+        "Small direct solves are CPU-favorable in this profile; GPU wins are expected first in larger batched/tangent workloads.",
+        ha="center",
+        color="#475569",
+        fontsize=9,
+    )
+    out = outdir / "freeb_single_stage_benchmark_matrix.png"
+    fig.savefig(out, bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
+def write_benchmark_csv(summary_path: Path | None, outdir: Path) -> Path | None:
+    rows = _load_benchmark_rows(summary_path)
+    if not rows:
+        return None
+    out = outdir / "freeb_single_stage_benchmark_matrix.csv"
+    fields = ["backend", "group", "case", "cold_or_compile_s", "warm_min_s"]
+    with out.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fields, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(rows)
     return out
 
 
@@ -310,6 +418,7 @@ def render_provider_parity(runs: list[dict[str, Any]], outdir: Path) -> Path:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--summary", type=Path, default=DEFAULT_SUMMARY)
+    parser.add_argument("--benchmark-summary", type=Path, default=DEFAULT_BENCHMARK_SUMMARY)
     parser.add_argument("--outdir", type=Path, default=DEFAULT_OUTDIR)
     args = parser.parse_args()
 
@@ -322,6 +431,12 @@ def main() -> int:
         render_provider_parity(runs, args.outdir),
         _write_csv(runs, args.outdir),
     ]
+    benchmark_plot = render_benchmark_matrix(args.benchmark_summary, args.outdir)
+    if benchmark_plot is not None:
+        outputs.append(benchmark_plot)
+    benchmark_csv = write_benchmark_csv(args.benchmark_summary, args.outdir)
+    if benchmark_csv is not None:
+        outputs.append(benchmark_csv)
     for output in outputs:
         print(output)
     return 0

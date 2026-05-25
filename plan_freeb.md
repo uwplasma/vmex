@@ -10,7 +10,7 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-05-25 after adding a cached compiled closure for the opt-in JAX NESTOR driver path and benchmarking it against the host bridge.
+Last updated: 2026-05-25 after integrating `origin/main`, publishing the free-boundary README/docs validation figures, and rerunning the focused free-boundary physics gates.
 
 Steps taken:
 
@@ -72,6 +72,11 @@ Steps taken:
 56. Made the JAX analytic/singular operator JIT-compatible by keeping static VMEC coefficient/mode-index tables as host constants instead of tracer scalars.
 57. Preserved pytest compatibility by falling back to the eager JAX operator when the global test fixture has `jax_disable_jit=True`.
 58. Added driver diagnostics for `jax_nestor_operator_jitted` and `jax_nestor_operator_cache_hit`.
+59. Verified the feature branch is already up to date with `origin/main`.
+60. Rendered and committed the direct-coil CPU/CUDA benchmark matrix and CSV from the office benchmark JSON.
+61. Added the architecture, finite-pressure beta scan, direct/generated-`mgrid` provider parity, and CPU/CUDA benchmark matrix to the README while keeping detailed caveats in Sphinx docs.
+62. Populated `docs/free_boundary_coil_optimization.rst` with the benchmark matrix, CSV provenance, GPU interpretation, and updated finite-pressure validation language.
+63. Added a release-hygiene regression that requires the free-boundary README/docs validation artifacts to remain present and avoids describing the bounded validation example as a scaffold.
 
 Results obtained:
 
@@ -156,6 +161,8 @@ Results obtained:
 78. Patched the direct-coil benchmark matrix to use concrete JAX GPU platform names (`cuda`/`rocm`) instead of the generic `gpu` alias, because the office JAX install reports devices as `cuda:*` while `JAX_PLATFORMS=gpu` tries unavailable ROCm first.
 79. Office quick CPU/GPU direct-coil benchmark matrix completed after the platform fix. CUDA provider and gradient microbenchmarks passed, but the tiny direct free-boundary solve remains slower on GPU (`warm_min≈2.24 s`) than CPU (`warm_min≈0.34 s`). The recorded final NESTOR sample/solve times are small (`sample≈0.0126 s`, `solve≈0.0062 s` on GPU), so the remaining GPU lane is launch/compile/replay overhead around the full solve rather than the final dense solve itself.
 80. Office GPU QH mode-2 exact-Jacobian profile completed within budget after the free-boundary work: callback walls were `15.12 s` cold and `3.21 s` warm; tape build averaged `3.61 s`, replay dispatch `2.49 s`, residual tangents `1.11 s`, and initial tangents `1.06 s`. The automatic GPU JVP-only/basepoint-carry policy was active.
+81. Documentation/hygiene checks passed after the README/docs plot refresh: `ruff`, targeted docs-release pytest, `git diff --check`, and strict Sphinx with `-W`.
+82. Focused free-boundary physics/adjoint gates passed after the docs refresh: `54 passed, 1 skipped in 47.55 s` across the dense vacuum-adjoint, fast free-boundary physics, and direct-coil finite-pressure sensitivity suites.
 
 Best next steps:
 

@@ -113,7 +113,8 @@ single-stage coil optimizer:
 - ``mgrid`` remains the VMEC2000-compatible parity backend.
 - Direct coils are supported as a JAX external-field provider for forward
   free-boundary solves, including nonzero pressure profiles.
-- The finite-pressure evidence is a low-resolution active-coupling smoke:
+- The finite-pressure evidence is a low-resolution active-coupling validation
+  run:
   generated-``mgrid`` and direct-coil providers from the same ESSOS LP-QA coil
   set agree within recorded precision/roundoff in the recorded scalar
   diagnostics, and direct NESTOR samples respond to coil-current changes.
@@ -132,7 +133,7 @@ single-stage coil optimizer:
   host bridge remains the default production path until complete-solve adjoints
   are promoted.
 
-In short: direct-coil finite-pressure plumbing is present and smoke-tested; a
+In short: direct-coil finite-pressure plumbing is present and validation-tested; a
 converged high-beta direct-coil design, publication-grade gradients through the
 full free-boundary/NESTOR solve, and VMEC2000-bounded generated-``mgrid`` trace
 parity are not claimed yet.
@@ -155,7 +156,7 @@ coil set is used two ways:
    :width: 100%
 
 The scalar diagnostics from the two ``vmec_jax`` providers agree within the
-recorded JSON precision/roundoff for this low-resolution smoke run. The scan
+recorded JSON precision/roundoff for this low-resolution validation run. The scan
 records both the input ``PRES_SCALE`` and the output energy ratio
 ``100 W_p / W_B`` so future plots cannot accidentally validate only the vacuum
 case.
@@ -171,7 +172,8 @@ single-stage optimization claim.
 
 Use ``--activate-fsq 1e-3`` when checking literal VMEC2000 activation cadence.
 Use a larger value, such as the default ``1e99``, only
-when the goal is to force active coupling early in a deliberately short smoke.
+when the goal is to force active coupling early in a deliberately short
+validation run.
 Those early-activation runs are provider/coupling diagnostics, not evidence
 that the accepted equilibrium is converged to the same state as a long
 VMEC2000 run.
@@ -199,7 +201,7 @@ requiring ESSOS assets or an ``mgrid`` file.
 
 Run the ESSOS direct-coil forward example from the repository root.  This path
 loads ESSOS coils, converts them to ``CoilFieldParams``, runs one
-low-resolution finite-pressure free-boundary forward smoke without writing an
+low-resolution finite-pressure free-boundary forward validation run without writing an
 ``mgrid`` file, and writes ``wout_direct_coils.nc`` plus ``summary.json``.
 
 .. code-block:: bash
@@ -226,7 +228,7 @@ Run the matched beta scan from the repository root. Until the ESSOS
      --activate-fsq 1e99
 
 The ESSOS Landreman-Paul QA fixture has relatively weak currents for the short
-finite-pressure smoke. Use ``--coil-current-scale`` to run matched direct/mgrid
+finite-pressure validation run. Use ``--coil-current-scale`` to run matched direct/mgrid
 sensitivity studies with stronger coils:
 
 .. code-block:: bash
@@ -245,6 +247,7 @@ Render the README/docs figures from the generated JSON summary:
 
    python tools/diagnostics/render_freeb_single_stage_readme.py \
      --summary results/free_boundary_essos_coils_beta_scan_readme/summary.json \
+     --benchmark-summary results/bench_freeb_direct_coil_matrix/summary.json \
      --outdir docs/_static/figures
 
 The example writes ``input.*`` decks, ``wout_*.nc`` files, a generated mgrid,
@@ -252,10 +255,10 @@ and ``summary.json`` in the output directory. Those runtime files are ignored
 by git; the committed figures and CSV are generated artifacts for documentation
 only.
 
-Phase-1 Coil-Only Optimization Smoke
-------------------------------------
+Phase-1 Coil-Only Optimization Validation
+-----------------------------------------
 
-The initial single-stage optimization example is deliberately a smoke scaffold,
+The initial single-stage optimization example is a bounded validation example,
 not a promoted QS design. It optimizes only coil currents and selected coil
 Fourier coefficients. The VMEC plasma boundary coefficients are never included
 in the optimization vector; the plasma surface is recomputed by a direct-coil
@@ -269,7 +272,8 @@ The default objective is a cheap proxy:
 
 The example records ``history.json``, ``summary.json``, and the best ``wout``.
 It exits with code ``77`` when optional ESSOS assets are unavailable. For a
-dependency-light developer smoke, use the synthetic circular coil provider:
+dependency-light bounded validation run, use the synthetic circular coil
+provider:
 
 .. code-block:: bash
 
@@ -327,8 +331,8 @@ plus one solve per perturbation sample. The resulting ``history.json`` contains
 per-scenario entries, while ``summary.json`` records the robust aggregation
 options under ``robust_objective``.
 
-For a finite-pressure robust smoke, add the same finite-pressure flags used by
-the deterministic smoke, for example ``--pressure-scale 100`` and
+For a finite-pressure robust validation run, add the same finite-pressure flags
+used by the deterministic validation run, for example ``--pressure-scale 100`` and
 ``--activate-fsq 1e99``. Keep ``--max-evals`` and ``--robust-samples`` small
 because the solve count multiplies quickly.
 
@@ -369,12 +373,24 @@ timing/status rows in ``summary.json``. GPU rows are opt-in:
    python tools/benchmarks/bench_freeb_direct_coil_matrix.py \
      --quick \
      --include-gpu \
-     --backend-note "local workstation smoke" \
+     --backend-note "local workstation validation" \
      --out results/bench_freeb_direct_coil_matrix_gpu/summary.json
 
 If no JAX GPU device is available, the matrix records a skipped GPU row rather
 than falling back silently to CPU. Use ``--no-quick`` only for a larger local
 benchmark budget.
+
+.. image:: _static/figures/freeb_single_stage_benchmark_matrix.png
+   :alt: Direct-coil CPU and CUDA benchmark matrix
+   :width: 100%
+
+The committed CPU/CUDA matrix CSV is stored in
+``docs/_static/figures/freeb_single_stage_benchmark_matrix.csv``. The current
+office benchmark shows tiny direct free-boundary solves are CPU-favorable,
+while provider and gradient microbenchmarks have small enough kernel payloads
+that CUDA launch overhead dominates. GPU production work should therefore focus
+on larger batched/tangent workloads and accepted-point replay amortization, not
+on claiming a speedup from these tiny validation cases.
 
 The direct-solve child JSON includes active and trial NESTOR timing summaries:
 sample time, scalar-potential solve time, reuse counts, failed trial counts,
@@ -430,7 +446,7 @@ executable is available:
        --niter-array 100,500,2000 \
        --ftol-array 1e-8,1e-10,1e-12
 
-For a quick provider-only smoke, skip VMEC2000 explicitly:
+For a quick provider-only validation run, skip VMEC2000 explicitly:
 
 .. code-block:: bash
 
@@ -460,7 +476,7 @@ direct-coil runs. Use this shared schedule for promotion runs. The
 ``--vmec2000-niter`` override is only for diagnostics because it intentionally
 changes the VMEC2000 schedule without changing the ``vmec_jax`` schedule.
 
-The stock-executable smoke needs only a local VMEC2000 binary. It verifies that
+The stock-executable validation run needs only a local VMEC2000 binary. It verifies that
 the bundled asymmetric free-boundary deck reaches the vacuum solve:
 
 .. code-block:: bash
@@ -500,7 +516,7 @@ For one-off debugging of a specific iteration, run the comparator directly:
        --workdir results/freeb_scalpot_cth_like_lasym \
        --json results/freeb_scalpot_cth_like_lasym/summary.json
 
-The generated-``mgrid`` VMEC2000 comparison for the ESSOS LP-QA coil smoke is
+The generated-``mgrid`` VMEC2000 comparison for the ESSOS LP-QA coil validation case is
 still non-promoted/xfailed. The current promoted signal for this branch is
 ``vmec_jax`` direct-coil versus generated-``mgrid`` provider agreement within
 recorded precision/roundoff plus the active NESTOR coupling sensitivity checks
@@ -518,7 +534,7 @@ Current fast tests cover:
 - a direct-coil runtime hook that does not require an ``mgrid`` file and uses
   nonzero pressure;
 - generated-``mgrid`` versus direct-coil ``vmec_jax`` provider parity for the
-  ESSOS Landreman-Paul QA finite-pressure smoke case;
+  ESSOS Landreman-Paul QA finite-pressure validation case;
 - active direct-coil NESTOR-step sensitivity to coil-current changes, including
   the expected linear normal-field/source scaling and quadratic ``bsqvac``
   scaling;
@@ -557,7 +573,7 @@ Next Implementation Steps
   once the complete direct-coil free-boundary loop has validated gradients.
 - Promote the VMEC2000 generated-``mgrid`` comparison after the direct/mgrid
   trace discrepancy is bounded.
-- Replace the dense toy vacuum-adjoint scaffold with the production
+- Replace the dense validation vacuum-adjoint primitive with the production
   matrix-free/custom-linear-solve NESTOR operator.
 - Promote the toy direct-coil/vacuum-chain gradient checks to complete
   low-resolution free-boundary finite-difference checks, then to Boozer/QS

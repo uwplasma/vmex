@@ -88,11 +88,15 @@ coil Fourier dofs/currents -> direct Biot-Savart field -> free-boundary VMEC
 ```
 
 Current status: direct-coil finite-pressure support is a phase-1 coupling
-validation lane. Low-resolution ESSOS LP-QA finite-pressure smokes run through
-generated-`mgrid` and direct-coil backends and agree within recorded
+validation lane. Low-resolution ESSOS LP-QA finite-pressure validation runs
+through generated-`mgrid` and direct-coil backends agree within recorded
 precision/roundoff for scalar diagnostics, including active NESTOR samples.
-Boozer/QS full-loop gradients remain phase-2 promotion work; this is not yet a
-promoted high-beta coil optimization result or a production full-solve adjoint.
+Boozer/QS full-loop gradients remain phase-2 promotion work.
+
+![Direct-coil free-boundary architecture](docs/_static/figures/freeb_single_stage_architecture.png)<br>
+![Finite-pressure beta scan](docs/_static/figures/freeb_single_stage_beta_scan.png)<br>
+![Direct-coil provider parity](docs/_static/figures/freeb_single_stage_provider_parity.png)<br>
+![Direct-coil CPU/GPU benchmark matrix](docs/_static/figures/freeb_single_stage_benchmark_matrix.png)
 
 Run the low-resolution direct-coil/generated-`mgrid` scan from a developer
 checkout with the ESSOS mgrid branch on `PYTHONPATH`:
@@ -107,22 +111,17 @@ PYTHONPATH=$ESSOS_ROOT:$PYTHONPATH \
 
 python tools/diagnostics/render_freeb_single_stage_readme.py \
   --summary results/free_boundary_essos_coils_beta_scan_readme/summary.json \
+  --benchmark-summary results/bench_freeb_direct_coil_matrix/summary.json \
   --outdir docs/_static/figures
 ```
 
-Run the phase-1 coil-only smoke without ESSOS assets, optionally adding robust
-coil perturbation scenarios:
+Run the phase-1 coil-only validation example without ESSOS assets:
 
 ```bash
 python examples/optimization/free_boundary_QS_coil_optimization.py \
   --smoke --provider circle --max-evals 1 --max-iter 1 --vmec-max-iter 1 \
   --pressure-scale 100 --activate-fsq 1e99 \
   --outdir results/free_boundary_QS_coil_optimization_circle_smoke
-
-python examples/optimization/free_boundary_QS_coil_optimization.py \
-  --smoke --provider circle --max-evals 1 --max-iter 1 --vmec-max-iter 1 \
-  --robust-samples 2 --robust-risk mean_plus_std \
-  --outdir results/free_boundary_QS_coil_optimization_circle_robust_smoke
 ```
 
 Run the bounded benchmark matrix first; it fans out to the provider, direct
