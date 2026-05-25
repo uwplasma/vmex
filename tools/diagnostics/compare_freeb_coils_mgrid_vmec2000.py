@@ -131,6 +131,26 @@ def _parser() -> argparse.ArgumentParser:
         help="Override VMEC2000 NITER/NITER_ARRAY only; vmec_jax still uses --niter.",
     )
     p.add_argument("--vmec2000-timeout", type=float, default=90.0)
+    p.add_argument(
+        "--vmec2000-promotion-probes",
+        action="store_true",
+        help=(
+            "If VMEC2000 does not produce a WOUT, run extra bounded diagnostic "
+            "probes with looser output/promote settings and record their status."
+        ),
+    )
+    p.add_argument(
+        "--vmec2000-probe-ftols",
+        type=str,
+        default="1e-2",
+        help="Comma-separated FTOL/FTOL_ARRAY values for --vmec2000-promotion-probes.",
+    )
+    p.add_argument(
+        "--vmec2000-probe-max-main-iterations",
+        type=str,
+        default="2,5",
+        help="Comma-separated MAX_MAIN_ITERATIONS values for --vmec2000-promotion-probes.",
+    )
     p.add_argument("--require-essos", action="store_true", help="Exit nonzero if ESSOS or Coils.to_mgrid is unavailable.")
     p.add_argument("--require-vmec2000", action="store_true", help="Exit nonzero if VMEC2000 is unavailable or no WOUT is produced.")
     p.add_argument(
@@ -205,6 +225,10 @@ def _format_namelist_array(values: list[int] | list[float]) -> str:
         f"{float(value):.16e}" if isinstance(value, float) else str(int(value))
         for value in values
     )
+
+
+def _format_namelist_float(value: float) -> str:
+    return f"{float(value):.16e}"
 
 
 def _jsonify(value: Any) -> Any:
@@ -825,6 +849,131 @@ def _vmec2000_nonzero_status(summary: dict[str, Any]) -> tuple[str, str, str]:
     )
 
 
+def _classify_vmec2000_result_summary(summary: dict[str, Any], *, wout_path: Path) -> None:
+    """Mutate a VMEC2000 summary with status/reason/help based on output state."""
+
+    summary["wout_path"] = wout_path
+    if int(summary.get("returncode") or 0) != 0:
+        status, reason, help_text = _vmec2000_nonzero_status(summary)
+        summary["status"] = status
+        summary["reason"] = reason
+        summary["underconverged"] = _vmec2000_underconverged_details(summary)
+        summary["help"] = help_text
+        return
+    if not wout_path.exists():
+        summary["status"] = "no_wout"
+        summary["reason"] = "vmec2000_completed_without_wout"
+        summary["underconverged"] = _vmec2000_underconverged_details(summary)
+        summary["help"] = (
+            "Inspect underconverged, stdout_tail, stderr_tail, threed1_tail, "
+            "and the VMEC2000 workdir files in this JSON."
+        )
+        return
+    summary["status"] = "completed"
+
+
+def _vmec2000_probe_updates(args: argparse.Namespace) -> list[dict[str, Any]]:
+    """Return bounded VMEC2000-only probe patches for WOUT promotion diagnostics."""
+
+    ns_array, niter_array, _ = _diagnostic_schedule(args)
+    ftols = _parse_float_array(args.vmec2000_probe_ftols, name="vmec2000-probe-ftols")
+    max_main_values = _parse_int_array(
+        args.vmec2000_probe_max_main_iterations,
+        name="vmec2000-probe-max-main-iterations",
+    )
+
+    probes: list[dict[str, Any]] = []
+    for ftol in ftols:
+        probes.append(
+            {
+                "label": f"loose_ftol_{ftol:g}",
+                "updates": {
+                    "FTOL": _format_namelist_float(ftol),
+                    "FTOL_ARRAY": _format_namelist_array([float(ftol)] * len(ns_array)),
+                },
+            }
+        )
+    probes.append(
+        {
+            "label": "force_full3d_output",
+            "updates": {
+                "LFULL3D1OUT": "T",
+                "NITER": str(int(niter_array[-1])),
+                "NITER_ARRAY": _format_namelist_array(niter_array),
+            },
+        }
+    )
+    for max_main in max_main_values:
+        probes.append(
+            {
+                "label": f"max_main_iterations_{max_main}",
+                "updates": {
+                    "MAX_MAIN_ITERATIONS": str(int(max_main)),
+                    "NITER": str(int(niter_array[-1])),
+                    "NITER_ARRAY": _format_namelist_array(niter_array),
+                },
+            }
+        )
+    return probes
+
+
+def _run_vmec2000_promotion_probes(
+    *,
+    mgrid_input: Path,
+    mgrid_path: Path,
+    workdir: Path,
+    args: argparse.Namespace,
+) -> list[dict[str, Any]]:
+    """Run optional bounded VMEC2000 probes after a no-WOUT/more-iter result."""
+
+    from vmec_jax.vmec2000_exec import find_vmec2000_exec, run_xvmec2000
+
+    exec_path = args.vmec2000_exec.expanduser().resolve() if args.vmec2000_exec is not None else find_vmec2000_exec()
+    if exec_path is None or not exec_path.exists():
+        return [
+            {
+                "label": "promotion_probes",
+                "status": "skipped",
+                "reason": "vmec2000_exec_not_found",
+            }
+        ]
+
+    records: list[dict[str, Any]] = []
+    for probe in _vmec2000_probe_updates(args):
+        label = str(probe["label"])
+        probe_workdir = workdir / label
+        probe_workdir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(mgrid_path, probe_workdir / mgrid_path.name)
+        try:
+            result = run_xvmec2000(
+                mgrid_input,
+                exec_path=exec_path,
+                workdir=probe_workdir,
+                timeout_s=float(args.vmec2000_timeout),
+                indata_updates={str(key): str(value) for key, value in probe["updates"].items()},
+                keep_workdir=True,
+            )
+        except subprocess.TimeoutExpired as exc:
+            records.append(
+                {
+                    "label": label,
+                    "status": "timeout",
+                    "reason": "vmec2000_timeout",
+                    "updates": probe["updates"],
+                    "timeout_s": float(args.vmec2000_timeout),
+                    "error": repr(exc),
+                }
+            )
+            continue
+        summary = _vmec2000_summary(result)
+        summary["label"] = label
+        summary["updates"] = probe["updates"]
+        summary["exec_path"] = exec_path
+        _classify_vmec2000_result_summary(summary, wout_path=_vmec2000_wout_path(result))
+        records.append(summary)
+    return records
+
+
 def _run_vmec2000_case(
     *,
     mgrid_input: Path,
@@ -896,22 +1045,8 @@ def _run_vmec2000_case(
         summary["mixed_schedule_reason"] = "--vmec2000-niter overrides only the VMEC2000 NITER_ARRAY"
         summary["vmec2000_niter_override"] = int(args.vmec2000_niter)
     wout_path = _vmec2000_wout_path(result)
-    summary["wout_path"] = wout_path
-    if int(summary.get("returncode") or 0) != 0:
-        status, reason, help_text = _vmec2000_nonzero_status(summary)
-        summary["status"] = status
-        summary["reason"] = reason
-        summary["underconverged"] = _vmec2000_underconverged_details(summary)
-        summary["help"] = help_text
-        return result, None, summary
-    if not wout_path.exists():
-        summary["status"] = "no_wout"
-        summary["reason"] = "vmec2000_completed_without_wout"
-        summary["underconverged"] = _vmec2000_underconverged_details(summary)
-        summary["help"] = (
-            "Inspect underconverged, stdout_tail, stderr_tail, threed1_tail, "
-            "and the VMEC2000 workdir files in this JSON."
-        )
+    _classify_vmec2000_result_summary(summary, wout_path=wout_path)
+    if summary["status"] in {"more_iter_exit", "nonzero_exit", "no_wout"}:
         return result, None, summary
 
     wout = read_wout(wout_path)
@@ -1173,6 +1308,14 @@ def main(argv: list[str] | None = None) -> int:
     payload["backends"]["vmec2000_generated_mgrid"] = vmec2000_summary
 
     vmec_status = str(vmec2000_summary.get("status", "unknown"))
+    if bool(args.vmec2000_promotion_probes) and vmec_status in {"no_wout", "more_iter_exit", "nonzero_exit"}:
+        print("[compare-freeb-coils] running VMEC2000 WOUT-promotion probes")
+        payload["backends"]["vmec2000_generated_mgrid"]["promotion_probes"] = _run_vmec2000_promotion_probes(
+            mgrid_input=mgrid_input,
+            mgrid_path=mgrid_path,
+            workdir=vmec2000_workdir / "promotion_probes",
+            args=args,
+        )
     if vmec_status in ("skipped", "timeout", "no_wout", "more_iter_exit", "nonzero_exit", "error"):
         warning = f"vmec2000_{vmec_status}"
         warnings.append(warning)

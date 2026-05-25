@@ -474,6 +474,24 @@ generated-grid crashes stay visible in the promotion evidence. The current
 low-iteration LP-QA generated-``mgrid`` VMEC2000 leg is a ``more_iter_exit``
 WOUT-promotion gap, not a direct-coil provider failure.
 
+For local WOUT-promotion investigation, add ``--vmec2000-promotion-probes``.
+This optional mode leaves the default comparison untouched, then records
+bounded VMEC2000-only follow-up attempts such as loose ``FTOL_ARRAY``,
+``LFULL3D1OUT=T``, and small ``MAX_MAIN_ITERATIONS`` values when the first
+VMEC2000 leg exits before WOUT. These probe rows are diagnostic evidence only:
+they are not used for direct-coil versus generated-``mgrid`` scoring because
+they intentionally alter only the VMEC2000 input deck.
+
+.. code-block:: bash
+
+   PYTHONPATH=$ESSOS_ROOT:$PYTHONPATH \
+     python tools/diagnostics/compare_freeb_coils_mgrid_vmec2000.py \
+       --vmec2000-exec /path/to/xvmec2000 \
+       --vmec2000-promotion-probes \
+       --vmec2000-probe-ftols 1e-2,1e-3 \
+       --vmec2000-probe-max-main-iterations 2,5 \
+       --out results/freeb_coils_mgrid_vmec2000_with_probes.json
+
 The ``--ns-array``, ``--niter-array``, and ``--ftol-array`` options define a
 shared multigrid schedule used by both the ``vmec_jax`` generated-``mgrid`` and
 direct-coil runs. Use this shared schedule for promotion runs. The

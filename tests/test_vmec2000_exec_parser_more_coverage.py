@@ -17,10 +17,12 @@ from vmec_jax.vmec2000_exec import (
 )
 from tools.diagnostics.compare_freeb_coils_mgrid_vmec2000 import (
     _base_payload,
+    _classify_vmec2000_result_summary,
     _diagnostic_schedule,
     _make_freeb_indata,
     _parser,
     _vmec2000_nonzero_status,
+    _vmec2000_probe_updates,
     _vmec2000_underconverged_details,
     _vmec2000_summary,
 )
@@ -423,3 +425,69 @@ def test_freeb_diagnostic_payload_marks_vmec2000_niter_override_non_promotable(t
 
     assert payload["configuration"]["vmec2000_niter"] == 500
     assert payload["configuration"]["mixed_vmec2000_schedule_non_promotable"] is True
+
+
+def test_vmec2000_promotion_probe_updates_are_bounded_vmec2000_only_patches() -> None:
+    args = _parser().parse_args(
+        [
+            "--ns-array",
+            "5,7",
+            "--niter-array",
+            "20,40",
+            "--ftol-array",
+            "1e-6,1e-8",
+            "--vmec2000-probe-ftols",
+            "1e-2,1e-3",
+            "--vmec2000-probe-max-main-iterations",
+            "2,4",
+        ]
+    )
+
+    probes = _vmec2000_probe_updates(args)
+
+    labels = [probe["label"] for probe in probes]
+    assert labels == [
+        "loose_ftol_0.01",
+        "loose_ftol_0.001",
+        "force_full3d_output",
+        "max_main_iterations_2",
+        "max_main_iterations_4",
+    ]
+    assert probes[0]["updates"]["FTOL"] == "1.0000000000000000e-02"
+    assert probes[0]["updates"]["FTOL_ARRAY"] == "1.0000000000000000e-02, 1.0000000000000000e-02"
+    assert probes[2]["updates"]["LFULL3D1OUT"] == "T"
+    assert probes[2]["updates"]["NITER_ARRAY"] == "20, 40"
+    assert probes[3]["updates"]["MAX_MAIN_ITERATIONS"] == "2"
+
+
+def test_classify_vmec2000_summary_completed_no_wout_and_more_iter(tmp_path: Path) -> None:
+    completed = {"returncode": 0, "last_row": {"it": 1}, "stages": [{"niter": 2, "ftolv": 1e-6}]}
+    wout = tmp_path / "wout_case.nc"
+    wout.write_bytes(b"placeholder")
+
+    _classify_vmec2000_result_summary(completed, wout_path=wout)
+
+    assert completed["status"] == "completed"
+    assert completed["wout_path"] == wout
+
+    no_wout = {
+        "returncode": 0,
+        "last_row": {"it": 2, "fsqr1": 1.0, "fsqz1": 2.0, "fsql1": 3.0},
+        "stages": [{"niter": 2, "ftolv": 1e-6}],
+        "stdout_tail": [" Try increasing NITER"],
+        "threed1_tail": [],
+    }
+    _classify_vmec2000_result_summary(no_wout, wout_path=tmp_path / "missing.nc")
+    assert no_wout["status"] == "no_wout"
+    assert no_wout["underconverged"]["classification"] == "reached_niter_without_wout"
+
+    more_iter = {
+        "returncode": 2,
+        "last_row": {"it": 1, "fsqr1": 1.0, "fsqz1": 2.0, "fsql1": 3.0},
+        "stages": [{"niter": 2, "ftolv": 1e-6}],
+        "stdout_tail": [],
+        "threed1_tail": [],
+    }
+    _classify_vmec2000_result_summary(more_iter, wout_path=tmp_path / "missing_more.nc")
+    assert more_iter["status"] == "more_iter_exit"
+    assert more_iter["reason"] == "vmec2000_more_iterations_required"

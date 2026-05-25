@@ -172,6 +172,8 @@ Results obtained:
 83. Local loose generated-`mgrid` VMEC2000 probe now reports `vmec2000_status=more_iter_exit`, `returncode=2`, and `classification=vmec2000_more_iter_exit` rather than conflating VMEC's "more iterations required" status with a crash; the same run still shows `jax_direct_vs_mgrid_passed=True`.
 84. Focused VMEC2000 parser/trace tests passed after adding return-code diagnostics: `15 passed, 1 skipped in 0.53 s`.
 85. After the relative-`mgrid` copy fix, local direct `run_xvmec2000` probes confirm VMEC2000 opens the generated grid and returns `more_iter_flag=2` before WOUT for both zero-pressure and finite-pressure LPQA generated-grid runs. The gap is therefore WOUT-promotion/convergence evidence, not finite-pressure-only behavior or a direct-coil provider failure.
+86. Added optional VMEC2000 WOUT-promotion probes to `compare_freeb_coils_mgrid_vmec2000.py`. These record VMEC2000-only follow-up attempts (`LFULL3D1OUT`, loose `FTOL_ARRAY`, and bounded `MAX_MAIN_ITERATIONS`) under `promotion_probes` without changing default comparison scoring.
+87. The promotion-probe implementation passed ruff, `git diff --check`, focused parser diagnostics (`20 passed`), and strict Sphinx. A real local LPQA generated-grid probe with VMEC2000 recorded all probe attempts as `more_iter_exit` while keeping `jax_direct_vs_mgrid_passed=True`.
 
 Best next steps:
 
@@ -1007,7 +1009,7 @@ WP5 Free-boundary provider hook:               95%
 WP6 Direct-coil forward example:               90%
 WP7 Vacuum adjoint scaffold:                  100%
 WP8 Gradient checks:                           99%
-WP9 VMEC2000 diagnostics:                      86%
+WP9 VMEC2000 diagnostics:                      88%
 WP10 Benchmarks/diagnostics:                   99%
 WP11 Coil-only QS optimization example:        82%
 WP12 Robust coil perturbations:               100%
