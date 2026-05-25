@@ -76,6 +76,7 @@ def _frzl(*, ns: int = 3, mpol: int = 2, nrange: int = 2) -> TomnspsRZL:
 
 def test_jit_cache_helpers_cover_no_jax_and_cached_paths(monkeypatch):
     fake_static = SimpleNamespace(cfg=SimpleNamespace(ns=3, mpol=2, ntor=1, lasym=False))
+    fake_static_equivalent = SimpleNamespace(cfg=SimpleNamespace(ns=3, mpol=2, ntor=1, lasym=False))
 
     monkeypatch.setattr(solve_mod, "has_jax", lambda: False)
     assert solve_mod._strict_update_step_jit(
@@ -103,6 +104,13 @@ def test_jit_cache_helpers_cover_no_jax_and_cached_paths(monkeypatch):
         divide_by_scalxc_for_update=False,
     )
     assert second_step is first_step
+    equivalent_step = solve_mod._strict_update_step_jit(
+        fake_static_equivalent,
+        limit_update_rms=True,
+        need_update_rms=True,
+        divide_by_scalxc_for_update=False,
+    )
+    assert equivalent_step is first_step
     no_rms_step = solve_mod._strict_update_step_jit(
         fake_static,
         limit_update_rms=False,

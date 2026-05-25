@@ -231,6 +231,33 @@ def _jit_cache_put(cache: OrderedDict[tuple, Any], key: tuple, value, *, env_nam
     return value
 
 
+def _strict_update_static_cache_key(static) -> tuple[Any, ...]:
+    """Return a structural cache key for strict-update kernels.
+
+    The strict-update kernel only depends on VMEC mode/radial layout metadata,
+    not on the Python object identity of ``static``.  Keying on ``id(static)``
+    caused accepted-point exact optimizer solves to compile/cache a new GPU
+    update kernel for each otherwise-identical callback.
+    """
+
+    cfg = static.cfg
+    modes = getattr(static, "modes", None)
+    s = getattr(static, "s", None)
+    s_shape = tuple(getattr(s, "shape", ()))
+    s_dtype = str(getattr(s, "dtype", ""))
+    return (
+        int(getattr(cfg, "ns", 0)),
+        int(getattr(cfg, "mpol", 0)),
+        int(getattr(cfg, "ntor", 0)),
+        int(getattr(cfg, "nfp", 0)),
+        bool(getattr(cfg, "lasym", False)),
+        bool(getattr(cfg, "lthreed", False)),
+        int(getattr(modes, "K", 0)) if modes is not None else 0,
+        s_shape,
+        s_dtype,
+    )
+
+
 def _strict_update_step_jit(
     static,
     *,
@@ -241,13 +268,8 @@ def _strict_update_step_jit(
     """Return a cached fused strict-update step for accelerator exact solves."""
     if not has_jax():
         return None
-    cfg = static.cfg
     key = (
-        id(static),
-        int(getattr(cfg, "ns", 0)),
-        int(getattr(cfg, "mpol", 0)),
-        int(getattr(cfg, "ntor", 0)),
-        bool(getattr(cfg, "lasym", False)),
+        _strict_update_static_cache_key(static),
         bool(limit_update_rms),
         bool(need_update_rms),
         bool(divide_by_scalxc_for_update),

@@ -10,7 +10,7 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-05-25 after integrating `origin/main`, publishing the free-boundary README/docs validation figures, and rerunning the focused free-boundary physics gates.
+Last updated: 2026-05-25 after profiling the CPU/GPU exact optimizer path and removing object-identity churn from the GPU strict-update kernel cache.
 
 Steps taken:
 
@@ -176,15 +176,18 @@ Results obtained:
 87. The promotion-probe implementation passed ruff, `git diff --check`, focused parser diagnostics (`20 passed`), and strict Sphinx. A real local LPQA generated-grid probe with VMEC2000 recorded all probe attempts as `more_iter_exit` while keeping `jax_direct_vs_mgrid_passed=True`.
 88. Local CPU exact-callback profiling on QH mode 2 showed the input-deck `NITER` path costs `76.95 s` for two exact Jacobian callbacks (`46.95 s` cold, `30.00 s` warm), dominated by accepted replay dispatch (`47.43 s`) and exact tape solve/force assembly (`23.24 s`/`13.87 s`). A bounded `INNER_MAX_ITER=60` comparison reduced total callback time to `16.90 s`, confirming that long accepted solves plus replay dispatch are the current performance target.
 89. Removed eager JAX work from exact-optimizer initial-tangent cache-key construction by adding a NumPy boundary update for host-side lflip branch detection. The QH mode-2 bounded CPU profile improved from `16.90 s` to `16.26 s` for two exact Jacobian callbacks, and the `jacobian_initial_tangents_cache_key` timer dropped from `0.73 s` to below printed precision. JVP-only exact tape remained neutral on CPU (`16.66 s`), so it should stay a GPU/diagnostic policy.
+90. Office GPU QH mode-2 bounded exact-Jacobian profile after the NumPy cache-key patch completed in `17.10 s` for two callbacks (`14.33 s` cold, `2.77 s` warm). GPU warm force assembly is now faster than CPU (`0.079 s` vs `0.290 s`), but GPU warm preconditioner/update remains slower (`0.647 s`/`0.132 s` vs CPU `0.020 s`/`0.018 s`), so the remaining GPU target is dispatch/amortization in the accepted-update loop rather than field/force arithmetic.
+91. A forced broader GPU accepted-point tridiagonal-precompute profile (`VMEC_JAX_OPT_EXACT_TRIDI_PRECOMPUTE_MAX_DOFS=128`) regressed the two-callback wall time to `33.03 s`, with replay dispatch inflating to `19.54 s`. The existing guarded precompute threshold should remain conservative; this is not the right promotion lever for QH mode 2.
+92. Replaced the strict-update JIT cache key's `id(static)` component with a structural VMEC static signature. This avoids compiling/cache-growing a new GPU update kernel for each otherwise-identical accepted exact callback while keeping the numerical update map unchanged.
 
 Best next steps:
 
 1. Promote the opt-in complete-solve FD gate from finite/nonzero response to AD-vs-central-FD once the production full-solve adjoint is threaded through accepted-state quantities.
-2. Profile and reduce cold exact tape build/solve and initial tangent construction on GPU; the latest comparison shows replay dispatch is not the only remaining blocker.
+2. Rerun the GPU bounded exact-Jacobian profile after the structural strict-update cache key and verify `_STRICT_UPDATE_STEP_JIT_CACHE` no longer grows across identical callbacks.
 3. Keep the opt-in JAX NESTOR driver path as validation-only until the accepted-solve compilation/dispatch cost is removed. The host bridge remains the production/default route.
 4. Keep coverage above 95% as new operator code is promoted from validation scaffolds into production paths.
 5. For GPU performance, prioritize accepted-point replay/tangent construction and compilation/dispatch amortization over tiny raw direct-solve offload; the current microbenchmarks show tiny solves are still CPU-favorable.
-6. Next GPU optimization target is still exact-tape build plus replay dispatch. The latest warm QH mode-2 Jacobian callback is `3.21 s`; the practical target for production sweeps is below `1 s` warm callback for this size.
+6. If the structural strict-update cache key removes repeated update-kernel churn but warm GPU callbacks remain above `1 s`, the next patch should fuse accepted preconditioner output scaling with strict update to reduce per-iteration GPU launches.
 
 Need from user:
 
