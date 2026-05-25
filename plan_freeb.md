@@ -10,7 +10,7 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-05-25 after profiling the CPU/GPU exact optimizer path and removing object-identity churn from the GPU strict-update kernel cache.
+Last updated: 2026-05-25 after exposing the exact optimizer path, adding tape-vs-scan break-even diagnostics, and fixing the corresponding workflow-unit CI regression.
 
 Steps taken:
 
@@ -185,11 +185,13 @@ Results obtained:
 96. Re-profiled the scan-differentiated exact path on GPU. It has prohibitive cold compile cost (`110.6 s`) but a faster warm callback (`1.27 s`) than the current tape path (`2.54 s` warm). This is a long-run amortization option, not a first-call default.
 97. Re-profiled the matrix-free linear-operator path on GPU. The current implementation is not production-competitive for this QH mode-2 callback (`82.2 s` cold, `5.47 s` warm), dominated by repeated `Jv`/`J^T v` replay dispatch.
 98. Exposed the accepted-point exact differentiation path as `FixedBoundaryExactOptimizer(..., exact_path={None,'auto','tape','scan'})` and threaded it through the objective-workflow helpers and profiling CLI. This gives long GPU runs a script-level way to opt into scan-exact without relying on hidden environment variables, while keeping the low-cold-cost tape path as default.
+99. Added `tools/diagnostics/compare_exact_path_profiles.py` to compute the cold/warm tape-vs-scan break-even from saved exact-callback profiles. For the current QH mode-2 GPU profile, scan-exact needs about 75 accepted callbacks to beat the tape path, so the default policy remains tape.
+100. Fixed the workflow-unit fake optimizer to accept and assert the newly threaded `exact_path` argument after GitHub Actions exposed the stale mock in the Python 3.10 fast-test lane.
 
 Best next steps:
 
 1. Promote the opt-in complete-solve FD gate from finite/nonzero response to AD-vs-central-FD once the production full-solve adjoint is threaded through accepted-state quantities.
-2. Keep `exact_path='scan'` as an explicit long-run GPU option only; the latest profile shows it warms faster but needs roughly many accepted callbacks to amortize the `~110 s` cold compile.
+2. Keep `exact_path='scan'` as an explicit long-run GPU option only; the latest profile shows it warms faster but needs roughly 75 accepted callbacks to amortize the `~110 s` cold compile.
 3. Keep the opt-in JAX NESTOR driver path as validation-only until the accepted-solve compilation/dispatch cost is removed. The host bridge remains the production/default route.
 4. Keep coverage above 95% as new operator code is promoted from validation scaffolds into production paths.
 5. For GPU performance, prioritize accepted-point replay/tangent construction and compilation/dispatch amortization over tiny raw direct-solve offload; the current microbenchmarks show tiny solves are still CPU-favorable.
