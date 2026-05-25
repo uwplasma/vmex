@@ -475,7 +475,7 @@ def test_vmec2000_exec_discovery_and_fake_run(monkeypatch, tmp_path: Path) -> No
                 ]
             )
         )
-        return SimpleNamespace(stdout="ok", stderr="")
+        return SimpleNamespace(returncode=0, stdout="ok", stderr="")
 
     times = iter([10.0, 12.5])
     monkeypatch.setattr(vx.time, "perf_counter", lambda: next(times))
@@ -492,6 +492,7 @@ def test_vmec2000_exec_discovery_and_fake_run(monkeypatch, tmp_path: Path) -> No
 
     assert result.workdir == workdir
     assert result.input_path == workdir / "input.case"
+    assert result.returncode == 0
     assert "NITER = 2" in result.input_path.read_text()
     assert result.stdout == "ok"
     assert result.stderr == ""

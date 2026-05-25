@@ -41,6 +41,7 @@ class Vmec2000Threed1Stage:
 class Vmec2000ExecResult:
     workdir: Path
     input_path: Path
+    returncode: int
     stdout: str
     stderr: str
     runtime_s: float
@@ -274,6 +275,7 @@ def run_xvmec2000(
         result = Vmec2000ExecResult(
             workdir=workdir_path,
             input_path=dest,
+            returncode=int(getattr(proc, "returncode", 0)),
             stdout=proc.stdout,
             stderr=proc.stderr,
             runtime_s=float(runtime_s),

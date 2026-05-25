@@ -716,6 +716,7 @@ def _vmec2000_summary(vmec2000_result: Any) -> dict[str, Any]:
         "status": "completed",
         "workdir": vmec2000_result.workdir,
         "input_path": vmec2000_result.input_path,
+        "returncode": int(getattr(vmec2000_result, "returncode", 0)),
         "runtime_s": float(vmec2000_result.runtime_s),
         "threed1_path": vmec2000_result.threed1_path,
         "threed1_tail": _tail_text(vmec2000_result.threed1_path, lines=80),
@@ -768,15 +769,21 @@ def _vmec2000_underconverged_details(summary: dict[str, Any]) -> dict[str, Any]:
 
     tails = list(summary.get("stdout_tail") or []) + list(summary.get("threed1_tail") or [])
     printed_try_increasing_niter = any("Try increasing NITER" in line for line in tails)
+    returncode = int(summary.get("returncode") or 0)
+    nonzero_returncode = returncode != 0
     reached_niter = bool(niter is not None and last_it is not None and int(last_it) >= int(niter))
     classification = "unknown_no_wout"
-    if reached_niter and printed_try_increasing_niter:
+    if nonzero_returncode:
+        classification = "vmec2000_nonzero_exit"
+    elif reached_niter and printed_try_increasing_niter:
         classification = "reached_niter_without_wout"
     elif printed_try_increasing_niter:
         classification = "vmec2000_requested_more_iterations"
 
     details: dict[str, Any] = {
         "classification": classification,
+        "returncode": returncode,
+        "nonzero_returncode": nonzero_returncode,
         "printed_try_increasing_niter": printed_try_increasing_niter,
         "reached_niter": reached_niter,
         "last_it": None if last_it is None else int(last_it),
@@ -864,6 +871,15 @@ def _run_vmec2000_case(
         summary["vmec2000_niter_override"] = int(args.vmec2000_niter)
     wout_path = _vmec2000_wout_path(result)
     summary["wout_path"] = wout_path
+    if int(summary.get("returncode") or 0) != 0:
+        summary["status"] = "nonzero_exit"
+        summary["reason"] = "vmec2000_returned_nonzero"
+        summary["underconverged"] = _vmec2000_underconverged_details(summary)
+        summary["help"] = (
+            "VMEC2000 exited nonzero before producing a WOUT. Inspect returncode, "
+            "stdout_tail, stderr_tail, threed1_tail, and the workdir files."
+        )
+        return result, None, summary
     if not wout_path.exists():
         summary["status"] = "no_wout"
         summary["reason"] = "vmec2000_completed_without_wout"
@@ -1133,7 +1149,7 @@ def main(argv: list[str] | None = None) -> int:
     payload["backends"]["vmec2000_generated_mgrid"] = vmec2000_summary
 
     vmec_status = str(vmec2000_summary.get("status", "unknown"))
-    if vmec_status in ("skipped", "timeout", "no_wout", "error"):
+    if vmec_status in ("skipped", "timeout", "no_wout", "nonzero_exit", "error"):
         warning = f"vmec2000_{vmec_status}"
         warnings.append(warning)
         if bool(args.require_vmec2000) or (

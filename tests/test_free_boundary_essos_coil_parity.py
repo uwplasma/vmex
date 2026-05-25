@@ -490,11 +490,12 @@ def test_vmec2000_generated_mgrid_trace_smoke_records_iteration_rows(tmp_path: P
     assert payload["configuration"]["uses_multigrid_schedule"] is True
     assert payload["configuration"]["mixed_vmec2000_schedule_non_promotable"] is False
     vmec2000 = payload["backends"]["vmec2000_generated_mgrid"]
-    assert vmec2000["status"] in {"completed", "no_wout"}
+    assert vmec2000["status"] in {"completed", "no_wout", "nonzero_exit"}
     assert vmec2000["iteration_row_count"] > 0
-    if vmec2000["status"] == "no_wout":
+    if vmec2000["status"] in {"no_wout", "nonzero_exit"}:
         assert vmec2000["underconverged"]["classification"] in {
             "reached_niter_without_wout",
+            "vmec2000_nonzero_exit",
             "no_iteration_rows",
             "underconverged_or_unknown",
         }

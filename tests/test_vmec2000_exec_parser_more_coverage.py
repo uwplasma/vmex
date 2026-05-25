@@ -218,6 +218,35 @@ def test_freeb_generated_mgrid_no_wout_summary_marks_underconverged() -> None:
     assert details["preconditioned_fsq_total_over_ftolv"] == pytest.approx(2996.0)
 
 
+def test_freeb_generated_mgrid_nonzero_exit_is_not_labeled_underconverged() -> None:
+    details = _vmec2000_underconverged_details(
+        {
+            "returncode": -11,
+            "fsq_total_last": 0.00202,
+            "last_row": {
+                "it": 54,
+                "fsqr": 6.90e-4,
+                "fsqz": 6.25e-4,
+                "fsql": 7.05e-4,
+                "fsqr1": 1.56e-6,
+                "fsqz1": 1.89e-6,
+                "fsql1": 9.95e-5,
+                "delt0r": 0.687,
+                "w": 10071.0,
+            },
+            "stages": [{"ns": 5, "niter": 300, "ftolv": 1.0e-3, "row_count": 2}],
+            "stdout_tail": [],
+            "threed1_tail": [],
+        }
+    )
+
+    assert details["classification"] == "vmec2000_nonzero_exit"
+    assert details["returncode"] == -11
+    assert details["nonzero_returncode"] is True
+    assert details["reached_niter"] is False
+    assert details["printed_try_increasing_niter"] is False
+
+
 def test_freeb_diagnostic_schedule_scalar_fallback_and_indata_arrays() -> None:
     args = _parser().parse_args(["--ns", "9", "--niter", "7", "--ftol", "1e-6", "--mgrid-nphi", "4"])
 
