@@ -107,6 +107,7 @@ Results obtained:
 47. GPU QH mode-2 exact-Jacobian profile on `office`, repeats=2, auto JVP/basepoint-carry policy: cold callback `13.41 s`, warm callback `1.34 s`; profile markers confirm `exact_tape_jvp_only_auto_gpu` and `exact_tape_jvp_only_basepoint_carries_auto`.
 48. The explicit full-tape GPU comparison was slightly slower overall (`14.97 s` total versus `14.74 s` auto) but had slightly lower replay dispatch (`3.54 s` versus `3.65 s` auto). The auto policy is still directionally useful, but the next performance target is cold tape build/solve and initial tangent construction rather than replay dispatch alone.
 49. Full fast CI coverage gate passed locally: `2290 passed, 26 skipped, 112 deselected, 2 xfailed` in 7m14s with total coverage `95.14%` and `--cov-fail-under=95` satisfied.
+50. Added explicit validation-error tests for the JAX NESTOR operator blocks; focused module coverage for `vmec_jax/free_boundary_adjoint.py` is now 99% (`31 passed` in the focused suite).
 
 Best next steps:
 
