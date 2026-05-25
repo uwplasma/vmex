@@ -10,7 +10,7 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-05-25 after dry-run optimization diagnostics, ESSOS adapter validation, VMEC2000 runtime-error classification, bounded AD-vs-FD NESTOR gradient checks, same-branch CPU/GPU benchmark-matrix reporting with non-JIT and JIT-force direct-solve rows, solve-loop timing capture for direct-coil benchmark rows, JIT-force defaults for direct-coil examples, accepted-boundary direct-coil replay AD-vs-FD promotion, free-boundary-aware fused strict-update support, a clarified complete-loop exact-adjoint promotion boundary, and the first opt-in bad-Jacobian state-probe performance knob.
+Last updated: 2026-05-25 after dry-run optimization diagnostics, ESSOS adapter validation, VMEC2000 runtime-error classification, bounded AD-vs-FD NESTOR gradient checks, same-branch CPU/GPU benchmark-matrix reporting with non-JIT and JIT-force direct-solve rows, solve-loop timing capture for direct-coil benchmark rows, JIT-force defaults for direct-coil examples, accepted-boundary direct-coil replay AD-vs-FD promotion, free-boundary-aware fused strict-update support, a clarified complete-loop exact-adjoint promotion boundary, the first opt-in bad-Jacobian state-probe performance knob, and the post-main-merge CI repair pass.
 
 Steps taken:
 
@@ -1068,8 +1068,8 @@ WP10 Benchmarks/diagnostics:                  100%
 WP11 Coil-only QS optimization example:        89%
 WP12 Robust coil perturbations:               100%
 WP13 Documentation:                            99%
-WP14 CI policy:                                94%
-Overall branch completion:                   98.5%
+WP14 CI policy:                                95%
+Overall branch completion:                   98.7%
 ```
 
 ## Immediate Next Steps
@@ -1086,6 +1086,44 @@ Overall branch completion:                   98.5%
 Nothing is required right now. The next implementation step can proceed locally. Later, maintainers should decide whether ESSOS mgrid export should be released before the `vmec_jax` example is promoted from research example to documented workflow.
 
 ## Work Log
+
+### 2026-05-25 Main-merge CI repair pass
+
+Steps taken:
+
+1. Merged `origin/main` into `feature/freeb-essos-coil-single-stage` and pushed
+   merge commit `a21df71`.
+2. Preserved the direct-coil/free-boundary provider hooks while carrying forward
+   the main-branch GPU scan, preconditioner, timing, and coverage-gate changes.
+3. Fixed the exact-optimizer profiling helper defaults in commit `6388f58`, so
+   legacy tests and CLI helpers can still call the JVP policy helpers without
+   explicitly passing profile/runtime dictionaries.
+4. Scoped the `bsubsmns` WOUT comparison for two smoke references whose bundled
+   VMEC2000 artifacts predate the current jxbforce/wrout radial-covariant-field
+   convention. All primary geometry, contravariant fields, covariant `u/v`
+   fields, profiles, scalar energy/shape, and convergence checks remain strict.
+
+Results obtained:
+
+1. Merge-conflict focused tests passed: `85 passed, 1 skipped`.
+2. Direct-coil docs/benchmark smoke after merge passed: `16 passed`.
+3. Free-boundary NESTOR/AD focused gates passed: `7 passed`.
+4. Exact-profile helper tests passed locally: `30 passed`.
+5. The bounded CI physics-smoke command passed locally after the scoped
+   `bsubsmns` handling: `37 passed, 1 skipped in 57.09 s`.
+6. Strict Sphinx, ruff on touched Python files, and `git diff --check` passed.
+
+Best next steps:
+
+1. Push the WOUT smoke repair and verify the next PR CI run.
+2. Keep the `bsubsmns` scope narrow until the bundled VMEC2000 WOUT references
+   are regenerated with the current convention.
+3. Continue the performance lane on GPU accepted replay/tangent dispatch and the
+   optional bad-Jacobian state-probe benchmark matrix.
+
+Need from user:
+
+Nothing now.
 
 ### 2026-05-25 Free-boundary integration push
 
