@@ -475,6 +475,8 @@ exits remain ``nonzero_exit`` so true generated-grid crashes stay visible in the
 promotion evidence. The current low-iteration LP-QA generated-``mgrid`` VMEC2000
 leg is a ``more_iter_exit`` WOUT-promotion gap, not a direct-coil provider
 failure: recent traces show small force rows but ``DEL-BSQ`` still near one.
+The JSON includes ``delbsq_over_ftolv`` so this free-boundary residual can be
+tracked separately from ``FSQR``, ``FSQZ``, and ``FSQL``.
 
 For local WOUT-promotion investigation, add ``--vmec2000-promotion-probes``.
 This optional mode leaves the default comparison untouched, then records

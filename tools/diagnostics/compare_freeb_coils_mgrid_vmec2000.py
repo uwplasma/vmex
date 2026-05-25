@@ -834,6 +834,9 @@ def _vmec2000_underconverged_details(summary: dict[str, Any]) -> dict[str, Any]:
     }
     if preconditioned_fsq_total is not None and ftolv not in (None, 0.0):
         details["preconditioned_fsq_total_over_ftolv"] = float(preconditioned_fsq_total / ftolv)
+    delbsq_last = details["delbsq_last"]
+    if delbsq_last is not None and ftolv not in (None, 0.0):
+        details["delbsq_over_ftolv"] = float(abs(delbsq_last) / ftolv)
     return details
 
 

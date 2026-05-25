@@ -268,6 +268,7 @@ def test_freeb_generated_mgrid_more_iter_returncode_is_vmec_status_not_crash() -
     assert details["more_iter_returncode"] is True
     assert details["printed_try_increasing_niter"] is True
     assert details["delbsq_last"] == pytest.approx(1.0)
+    assert details["delbsq_over_ftolv"] == pytest.approx(1000.0)
     assert details["fedge_last"] == pytest.approx(0.0)
     assert status == "more_iter_exit"
     assert reason == "vmec2000_more_iterations_required"

@@ -191,6 +191,7 @@ Results obtained:
 102. Re-ran the optional VMEC2000 generated-mgrid trace smoke with `/Users/rogeriojorge/local/ESSOS_mgrid_pr` on `PYTHONPATH`; the gate passed (`1 passed in 19.01 s`). The default local ESSOS checkout still skips cleanly because it does not yet expose `Coils.to_mgrid`.
 103. Re-ran the ESSOS generated-`mgrid` vs direct-coil vmec_jax parity gate with the ESSOS mgrid branch; it passed (`1 passed in 14.68 s`).
 104. Extended the VMEC2000 `threed1` parser and generated-`mgrid` diagnostic JSON to retain `BETA`, `<M>`, `DEL-BSQ`, and `FEDGE` from free-boundary iteration rows. A fresh local generated-`mgrid` trace confirms the current WOUT-promotion blocker is `DEL-BSQ≈1`, while vmec_jax direct-coil and generated-`mgrid` still agree.
+105. Added `delbsq_over_ftolv` to the VMEC2000 underconvergence summary so WOUT-promotion reports distinguish force residual progress from the free-boundary vacuum-boundary mismatch.
 
 Best next steps:
 
