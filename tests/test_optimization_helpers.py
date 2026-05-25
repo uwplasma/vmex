@@ -1,3 +1,6 @@
+import os
+from collections import OrderedDict
+
 import numpy as np
 import jax.numpy as jnp
 import pytest
@@ -1080,7 +1083,7 @@ def test_lbfgs_adjoint_respects_scalar_evaluation_budget(monkeypatch):
 
     opt = object.__new__(FixedBoundaryExactOptimizer)
     opt._scan_exact_path = "tape"
-    opt._trial_residual_cache = {}
+    opt._trial_residual_cache = OrderedDict()
     opt._exact_cache = {}
     opt._static = SimpleNamespace()
     opt._solver_device_name = None
@@ -1139,7 +1142,7 @@ def test_scalar_trust_improves_quadratic_with_hard_budget(monkeypatch):
 
     opt = object.__new__(FixedBoundaryExactOptimizer)
     opt._scan_exact_path = "tape"
-    opt._trial_residual_cache = {}
+    opt._trial_residual_cache = OrderedDict()
     opt._exact_cache = {}
     opt._static = SimpleNamespace()
     opt._solver_device_name = None
@@ -1194,6 +1197,237 @@ def test_scalar_trust_improves_quadratic_with_hard_budget(monkeypatch):
     assert objective_calls == [0.0, 0.25, 0.5, 0.75, 1.0]
     assert result["_history_dump"]["method"] == "scalar_trust"
     assert result["_history_dump"]["scalar_step_bound"] == pytest.approx(0.25)
+
+
+def test_scalar_trust_uses_lbfgs_direction_on_anisotropic_quadratic(monkeypatch):
+    state = object()
+    last_x = [np.zeros(2)]
+
+    monkeypatch.setattr(
+        "vmec_jax.wout.equilibrium_aspect_ratio_from_state",
+        lambda **_kwargs: 1.0,
+    )
+
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._scan_exact_path = "tape"
+    opt._trial_residual_cache = OrderedDict()
+    opt._exact_cache = {}
+    opt._static = SimpleNamespace()
+    opt._solver_device_name = None
+    opt._inner_max_iter = 0
+    opt._inner_ftol = 0.0
+    opt._trial_max_iter = 0
+    opt._trial_ftol = 0.0
+    opt._post_jacobian_clear = lambda *args, **kwargs: None
+    opt._profile_dump = lambda: opt._profile
+    opt._cached_exact_state = lambda _x: None
+    opt._base_params_vector = lambda: np.zeros(2)
+    opt._exact_cache_key = lambda x: tuple(np.asarray(x, dtype=float).round(12))
+    opt._qs_total_from_state = lambda _state, res: float(np.dot(res, res))
+
+    def residual_fun(x):
+        x = np.asarray(x, dtype=float)
+        return np.asarray([10.0 * (x[0] - 1.0), x[1] - 1.0], dtype=float)
+
+    def solve_exact(x, return_payload=False):
+        last_x[0] = np.asarray(x, dtype=float)
+        return (state, {}) if return_payload else state
+
+    opt.residual_fun = residual_fun
+    opt._evaluate_residuals_from_state = lambda _state: residual_fun(last_x[0])
+    opt._solve_exact_with_tape = solve_exact
+    opt._solve_forward = lambda x, trial=True: solve_exact(x, return_payload=False)
+
+    def objective_and_gradient(x):
+        residual = residual_fun(x)
+        return 0.5 * float(np.dot(residual, residual)), np.asarray(
+            [100.0 * (x[0] - 1.0), x[1] - 1.0],
+            dtype=float,
+        )
+
+    opt.objective_and_gradient_fun = objective_and_gradient
+
+    result = opt.run(
+        np.zeros(2),
+        method="scalar_trust",
+        max_nfev=8,
+        scalar_step_bound=1.0,
+        ftol=0.0,
+        gtol=1e-10,
+        verbose=0,
+    )
+
+    assert result["cost"] < 1.0e-6
+    np.testing.assert_allclose(result["x"], np.ones(2), atol=1.0e-3, rtol=0.0)
+    assert opt._profile["scalar_trust_lbfgs_direction"]["count"] >= 1
+
+
+def test_scalar_trust_backtracking_does_not_permanently_collapse_radius(monkeypatch):
+    state = object()
+    last_x = [np.zeros(1)]
+
+    monkeypatch.setattr(
+        "vmec_jax.wout.equilibrium_aspect_ratio_from_state",
+        lambda **_kwargs: 1.0,
+    )
+
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._scan_exact_path = "tape"
+    opt._trial_residual_cache = OrderedDict()
+    opt._exact_cache = {}
+    opt._static = SimpleNamespace()
+    opt._solver_device_name = None
+    opt._inner_max_iter = 0
+    opt._inner_ftol = 0.0
+    opt._trial_max_iter = 0
+    opt._trial_ftol = 0.0
+    opt._post_jacobian_clear = lambda *args, **kwargs: None
+    opt._profile = {}
+    opt._profile_dump = lambda: opt._profile
+    opt._scalar_trust_cost_only_trials = True
+    opt._cached_exact_state = lambda _x: None
+    opt._base_params_vector = lambda: np.zeros(1)
+    opt._exact_cache_key = lambda x: tuple(np.asarray(x, dtype=float).round(12))
+    opt._qs_total_from_state = lambda _state, res: float(np.dot(res, res))
+
+    def residual_fun(x):
+        x_value = float(np.asarray(x)[0])
+        return np.asarray([10.0 * (x_value - 0.5)], dtype=float)
+
+    def solve_exact(x, return_payload=False):
+        last_x[0] = np.asarray(x, dtype=float)
+        return (state, {}) if return_payload else state
+
+    opt.residual_fun = residual_fun
+    opt._evaluate_residuals_from_state = lambda _state: residual_fun(last_x[0])
+    opt._solve_exact_with_tape = solve_exact
+    opt._solve_forward = lambda x, trial=True: solve_exact(x, return_payload=False)
+
+    objective_calls = []
+
+    def objective_and_gradient(x):
+        x = np.asarray(x, dtype=float)
+        objective_calls.append(float(x[0]))
+        residual = float(residual_fun(x)[0])
+        return 0.5 * residual * residual, np.asarray([100.0 * (x[0] - 0.5)], dtype=float)
+
+    opt.objective_and_gradient_fun = objective_and_gradient
+
+    result = opt.run(
+        np.asarray([0.0]),
+        method="scalar_trust",
+        max_nfev=4,
+        scalar_step_bound=1.0,
+        ftol=0.0,
+        gtol=1e-12,
+        verbose=0,
+    )
+
+    assert objective_calls == [0.0, 0.1, 0.5]
+    assert result["cost"] < 1.0e-12
+    np.testing.assert_allclose(result["x"], np.asarray([0.5]), atol=1.0e-12, rtol=0.0)
+    assert opt._profile["scalar_trust_backtracked_accept"]["count"] == 1
+    assert opt._profile["scalar_trust_cost_only_trial"]["count"] >= 1
+
+
+def test_scalar_trust_reuses_best_exact_state_for_final_output(monkeypatch):
+    monkeypatch.setattr(
+        "vmec_jax.wout.equilibrium_aspect_ratio_from_state",
+        lambda **_kwargs: 1.0,
+    )
+
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._scan_exact_path = "tape"
+    opt._trial_residual_cache = OrderedDict()
+    opt._exact_cache = {}
+    opt._exact_state_cache = {}
+    opt._exact_residual_cache = {}
+    opt._exact_state_key_by_id = {}
+    opt._static = SimpleNamespace()
+    opt._solver_device_name = None
+    opt._inner_max_iter = 0
+    opt._inner_ftol = 0.0
+    opt._trial_max_iter = 0
+    opt._trial_ftol = 0.0
+    opt._post_jacobian_clear = lambda *args, **kwargs: None
+    opt._profile = {}
+    opt._profile_dump = lambda: opt._profile
+    opt._scalar_trust_cost_only_trials = True
+    opt._base_params_vector = lambda: np.zeros(1)
+    opt._exact_cache_key = lambda x: tuple(np.asarray(x, dtype=float).round(12))
+    opt._qs_total_from_state = lambda _state, res: float(np.dot(res, res))
+    opt._cached_exact_state = FixedBoundaryExactOptimizer._cached_exact_state.__get__(
+        opt,
+        FixedBoundaryExactOptimizer,
+    )
+    opt._remember_exact_state = FixedBoundaryExactOptimizer._remember_exact_state.__get__(
+        opt,
+        FixedBoundaryExactOptimizer,
+    )
+    opt._remember_exact_residual = FixedBoundaryExactOptimizer._remember_exact_residual.__get__(
+        opt,
+        FixedBoundaryExactOptimizer,
+    )
+
+    residual_by_state = {}
+    objective_calls = []
+    initial_state = SimpleNamespace(name="initial")
+    residual_by_state[id(initial_state)] = np.asarray([2.0], dtype=float)
+
+    def residual_fun(_x):
+        return np.asarray([2.0], dtype=float)
+
+    def solve_exact(x, return_payload=False):
+        # The scalar path should keep the best state from objective callbacks.
+        # A second solve here would be finalization rebuilding the best point.
+        if objective_calls:
+            raise AssertionError("final output should reuse the best exact scalar state")
+        opt._remember_exact_state(opt._exact_cache_key(x), initial_state)
+        return (initial_state, {}) if return_payload else initial_state
+
+    def objective_and_gradient(x):
+        x = np.asarray(x, dtype=float)
+        objective_calls.append(float(x[0]))
+        call_index = len(objective_calls)
+        if call_index == 1:
+            cost, grad = 1.0, -1.0
+        elif call_index == 2:
+            cost, grad = 0.25, -1.0
+        else:
+            cost, grad = 0.5, -1.0
+        state = SimpleNamespace(name=f"scalar-{call_index}")
+        residual_by_state[id(state)] = np.asarray([np.sqrt(2.0 * cost)], dtype=float)
+        key = opt._exact_cache_key(x)
+        opt._exact_cache = {key: (state, {})}
+        opt._remember_exact_state(key, state)
+        return cost, np.asarray([grad], dtype=float)
+
+    opt.residual_fun = residual_fun
+    opt._evaluate_residuals_from_state = lambda state: residual_by_state[id(state)]
+    opt._solve_exact_with_tape = solve_exact
+    def forward_residual_fun(x):
+        x_value = float(np.asarray(x)[0])
+        cost = 0.25 if np.isclose(x_value, 0.25) else 0.5
+        return np.asarray([np.sqrt(2.0 * cost)], dtype=float)
+
+    opt._solve_forward = lambda x, trial=True: solve_exact(x, return_payload=False)
+    opt.objective_and_gradient_fun = objective_and_gradient
+    opt.forward_residual_fun = forward_residual_fun
+
+    result = opt.run(
+        np.asarray([0.0]),
+        method="scalar_trust",
+        max_nfev=3,
+        scalar_step_bound=0.25,
+        ftol=0.0,
+        gtol=0.0,
+        verbose=0,
+    )
+
+    assert objective_calls == [0.0, 0.25]
+    np.testing.assert_allclose(result["x"], [0.25])
+    assert result["cost"] == pytest.approx(0.25)
+    assert opt._exact_state_cache
 
 
 def test_qs_total_prefers_metadata_function_over_residual_vector():
@@ -1371,6 +1605,47 @@ def test_state_tangent_columns_uses_full_exact_tape_by_default(monkeypatch):
     assert state == "state"
     np.testing.assert_allclose(np.asarray(final_tangents), [[1.0, 2.0, 3.0]])
     assert solve_calls == [(True, False)]
+
+
+def test_state_tangent_columns_defaults_jvp_only_on_gpu(monkeypatch):
+    import vmec_jax.discrete_adjoint as discrete_adjoint
+
+    monkeypatch.delenv("VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE", raising=False)
+    monkeypatch.delenv("VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES", raising=False)
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._solver_device_name = "gpu"
+    opt._layout = SimpleNamespace(size=3)
+    opt._static = object()
+    opt._profile = {}
+    opt._discrete_jacobian_helper_cache = {}
+    opt._initial_tangent_cache = {"cached": jnp.asarray([[1.0, 2.0, 3.0]])}
+    opt._initial_tangent_cache_key = lambda _params: "cached"
+    opt._lasym_replay_column_chunk = lambda _n_params: None
+    solve_calls = []
+    basepoint_env_seen = []
+
+    def fake_solve(_params, *, return_payload=False, jvp_only=False):
+        solve_calls.append((bool(return_payload), bool(jvp_only)))
+        basepoint_env_seen.append(os.environ.get("VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES"))
+        return "state", {"tape": "gpu-jvp-tape", "axis_override": {}}
+
+    opt._solve_exact_with_tape = fake_solve
+    monkeypatch.setattr(
+        discrete_adjoint,
+        "checkpoint_tape_state_jvp_columns",
+        lambda **kwargs: kwargs["initial_tangents"],
+    )
+
+    state, final_tangents = opt._state_and_tangent_columns(
+        np.asarray([0.0]),
+        profile_prefix="jacobian",
+    )
+
+    assert state == "state"
+    np.testing.assert_allclose(np.asarray(final_tangents), [[1.0, 2.0, 3.0]])
+    assert solve_calls == [(True, True)]
+    assert basepoint_env_seen == ["1"]
+    assert os.environ.get("VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES") is None
 
 
 def test_gradient_callback_reuses_cached_initial_tangents(monkeypatch):
@@ -1615,8 +1890,20 @@ def test_fixed_boundary_optimizer_solver_device_inherits_by_default():
     assert opt._resolve_solver_device(None) is None
     assert opt._resolve_solver_device("auto") is None
     assert opt._resolve_solver_device("default") is None
-    assert opt._resolve_solver_device("cpu") == "cpu"
+    assert opt._resolve_solver_device("cpu") is None
     assert opt._resolve_solver_device("gpu") == "gpu"
+
+
+def test_fixed_boundary_optimizer_solver_device_noops_on_active_gpu(monkeypatch):
+    import vmec_jax._compat as compat
+
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    monkeypatch.setattr(compat, "jax", SimpleNamespace(default_backend=lambda: "gpu"))
+
+    assert opt._resolve_solver_device("gpu") is None
+    assert opt._resolve_solver_device("cuda") is None
+    assert opt._resolve_solver_device("rocm") is None
+    assert opt._resolve_solver_device("cpu") == "cpu"
 
 
 def test_fixed_boundary_optimizer_trial_scan_default_and_env_override(monkeypatch):
@@ -1624,10 +1911,10 @@ def test_fixed_boundary_optimizer_trial_scan_default_and_env_override(monkeypatc
     opt._solver_device_name = "cpu"
 
     monkeypatch.delenv("VMEC_JAX_OPT_TRIAL_SCAN", raising=False)
-    assert opt._use_scan_for_trial_solves() is True
+    assert opt._use_scan_for_trial_solves() is False
 
     opt._solver_device_name = "gpu"
-    assert opt._use_scan_for_trial_solves() is False
+    assert opt._use_scan_for_trial_solves() is True
 
     monkeypatch.setenv("VMEC_JAX_OPT_TRIAL_SCAN", "0")
     assert opt._use_scan_for_trial_solves() is False
@@ -2034,10 +2321,11 @@ def test_gpu_replay_chunk_covers_symmetric_mode2(monkeypatch):
 
     assert opt._lasym_replay_column_chunk(23) is None
     assert opt._lasym_replay_column_chunk(24) is None
-    assert opt._lasym_replay_column_chunk(96) is None
+    assert opt._lasym_replay_column_chunk(96) == 24
 
     opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=False))
     assert opt._lasym_replay_column_chunk(24) is None
+    assert opt._lasym_replay_column_chunk(48) == 24
 
 
 def test_lasym_replay_chunk_env_override(monkeypatch):
@@ -2057,6 +2345,7 @@ def test_lasym_replay_chunk_bad_env_falls_back_to_auto(monkeypatch):
     opt._solver_device_name = "gpu"
 
     assert opt._lasym_replay_column_chunk(24) is None
+    assert opt._lasym_replay_column_chunk(48) == 24
 
     monkeypatch.setenv("VMEC_JAX_LASYM_REPLAY_COLUMN_CHUNK", "off")
     assert opt._lasym_replay_column_chunk(24) is None

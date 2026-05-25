@@ -18,6 +18,9 @@ From PyPI
 
   python -m pip install vmec-jax
 
+PyPI can lag repository tags.  Check the package-index version before pinning or
+advertising an exact release.
+
 The plain install includes plotting support and the differentiable
 ``booz_xform_jax`` dependency used by the QI optimization examples.  There is
 no separate plotting or QI extra.
@@ -35,6 +38,9 @@ or into a conda environment with `conda
 <https://docs.conda.io/projects/conda/>`_::
 
   conda install --channel conda-forge vmec-jax
+
+The feedstock may lag both PyPI and the repository tag; verify the available
+conda-forge version when documenting a release.
 
 From source
 -----------

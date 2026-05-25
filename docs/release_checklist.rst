@@ -127,16 +127,18 @@ matches ``project.version`` in ``pyproject.toml`` after stripping an optional
 leading ``v``.  Do not publish a tag unless ``pyproject.toml`` has the same
 version and the CI gates above are green.
 
-Current release note
---------------------
+Current repository release note
+-------------------------------
 
-The latest prepared release from this checklist is
+The latest repository tag prepared from this checklist is
 `v0.0.13 <https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.13>`_, built
 from the matching release tag after the required CI gates pass.  Verify PyPI
 with a no-dependencies wheel download after publication.
 Package-index descriptions are immutable for already-published files, so any
 README or installation wording merged after the latest public tag will not
 appear on PyPI until the next release upload.
+Do not describe the repository tag as the latest PyPI or conda-forge package
+unless the corresponding package index has been checked.
 
 The release notes should list user-visible changes, validation coverage, known
 limitations, and any optional external validation that was not run.
@@ -147,8 +149,8 @@ After the release is public, verify the package index and installation state:
 
 - PyPI should show the new release and ``pip install vmec-jax==X.Y.Z`` should
   import the same version from a clean virtual environment.
-- Conda-forge may lag PyPI; README wording should not imply the feedstock is
-  already synchronized when it is one release behind.
+- Conda-forge may lag PyPI, and PyPI may lag repository tags; README wording
+  should not imply any package index is already synchronized.
 - Release notes should use post-publication wording once the tag is published,
   not "must be green before this release is published" phrasing.
 
@@ -175,3 +177,24 @@ claiming a broader physics milestone:
   optional same-NFP ``BoozerBTarget`` homotopy lane when a solved QI reference
   wout is available.  Treat trial-solve landscape/basin scans as triage only;
   use exact-solve diagnostics before promotion claims.
+
+Latest local release-hygiene snapshot
+-------------------------------------
+
+The latest documented local rerun is ``outputs/rerun_20260525_123334``.  It is
+not a release gate by itself, but it is the current evidence bundle to cite
+until a newer release-candidate run replaces it:
+
+- VMEC2000 stage-trace parity smoke: ``6`` selected cases, ``0`` failures.
+- VMEC2000 stage-trace parity full tier: ``1`` selected QH warm-start case,
+  ``0`` failures.
+- CPU/GPU fixed-boundary and exact-callback performance profiles were rerun for
+  QH warm start, QH finite beta, LASYM pressure, QH mode-2 exact callback, and
+  QI Boozer/residual isolation.
+- The profiler/reporting low-hanging fix from that rerun was metadata only:
+  GPU exact callbacks were already using effective JVP-only exact tapes with
+  basepoint carries, while the compact matrix summary had echoed only the
+  requested CLI flag.  Do not present this as a solver speedup.
+
+Before tagging, replace this dated snapshot with fresh local/CI evidence from
+the exact release-candidate commit.

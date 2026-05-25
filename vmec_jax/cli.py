@@ -36,6 +36,28 @@ def resolve_wout_path(*, input_path: Path, outdir: Path | None, output: Path | N
     return base_dir / f"wout_{case}.nc"
 
 
+def _start_wout_io_warmup():
+    """Optionally import the heavy netCDF writer dependency during the solve."""
+    env = os.getenv("VMEC_JAX_WOUT_IO_WARMUP", "0").strip().lower()
+    if env in ("", "0", "false", "no", "off"):
+        return None
+    try:
+        import importlib
+        import threading
+
+        def _warmup() -> None:
+            try:
+                importlib.import_module("netCDF4")
+            except Exception:
+                pass
+
+        thread = threading.Thread(target=_warmup, name="vmec-jax-wout-io-warmup", daemon=True)
+        thread.start()
+        return thread
+    except Exception:
+        return None
+
+
 def _parse_jit_forces(value: str):
     val = str(value).strip().lower()
     if val in ("auto", ""):
@@ -162,6 +184,7 @@ def main(argv: list[str] | None = None) -> int:
     output = Path(args.output).expanduser().resolve() if args.output else None
     wout_path = resolve_wout_path(input_path=input_path, outdir=outdir, output=output)
     wout_path.parent.mkdir(parents=True, exist_ok=True)
+    wout_warmup_thread = _start_wout_io_warmup()
 
     try:
         indata = read_indata(input_path)
@@ -270,11 +293,14 @@ def main(argv: list[str] | None = None) -> int:
                     default_policy_backend = str(jax.default_backend()).strip().lower() or "cpu"
                 except Exception:
                     default_policy_backend = "cpu"
-            run_kwargs["use_scan"] = _default_use_scan_for_backend(
+            use_scan_default = _default_use_scan_for_backend(
                 indata,
                 str(default_policy_backend),
                 str(solver_mode),
             )
+            if str(default_policy_backend).strip().lower() == "cpu":
+                use_scan_default = False
+            run_kwargs["use_scan"] = bool(use_scan_default)
         if max_iter_arg is not None:
             run_kwargs["max_iter"] = int(max_iter_arg)
         run = run_fixed_boundary(str(input_path), **run_kwargs)
@@ -302,6 +328,11 @@ def main(argv: list[str] | None = None) -> int:
             except Exception:
                 pass
 
+    if wout_warmup_thread is not None:
+        try:
+            wout_warmup_thread.join()
+        except Exception:
+            pass
     write_wout_from_fixed_boundary_run(wout_path, run, include_fsq=True)
     return 0
 

@@ -628,6 +628,8 @@ def test_exact_optimizer_callback_report_schema_and_budget_status() -> None:
     assert report["schema_version"] == 2
     assert report["report_kind"] == "exact_optimizer_callback_profile"
     assert report["callback"] == "exact"
+    assert report["jvp_only_exact_tape_requested"] is False
+    assert report["jvp_only_basepoint_carries_requested"] is False
     assert report["jvp_only_exact_tape"] is False
     assert report["replay_scan_cache_diagnostics"]["replay_checkpoint_scan_cache_miss_count"] == 2
     assert report["replay_scan_cache_diagnostics"]["replay_dynamic_scan_cache_build_s"] == 0.07
@@ -646,6 +648,48 @@ def test_exact_optimizer_callback_report_schema_and_budget_status() -> None:
         "accepted_replays",
     }
     assert report["budget_status"]["measurements"]["accepted_replays"] == 1
+
+
+def test_exact_optimizer_callback_report_marks_effective_gpu_jvp_defaults() -> None:
+    args = exact_profile_tool._parse_args(
+        [
+            "--problem",
+            "qh",
+            "--max-mode",
+            "2",
+            "--callback",
+            "jacobian",
+        ]
+    )
+    report = exact_profile_tool._build_callback_payload(
+        args=args,
+        specs_count=24,
+        solver_device_resolved="default",
+        samples=[{"repeat": 0, "wall_time_s": 1.0, "replay_scan_cache_diagnostics": {}}],
+        profile={
+            "exact_solve_with_tape_jvp_only_total": {
+                "count": 1,
+                "wall_time_s": 4.0,
+                "mean_wall_time_s": 4.0,
+            },
+            "exact_tape_build_jvp_only": {
+                "count": 1,
+                "wall_time_s": 3.0,
+                "mean_wall_time_s": 3.0,
+            },
+        },
+        cache_before={"total_entries": 0},
+        cache_after={"total_entries": 0},
+        rss_before_bytes=None,
+        rss_after_bytes=None,
+        total_wall_s=4.5,
+        runtime={"default_backend": "gpu"},
+    )
+
+    assert report["jvp_only_exact_tape_requested"] is False
+    assert report["jvp_only_basepoint_carries_requested"] is False
+    assert report["jvp_only_exact_tape"] is True
+    assert report["jvp_only_basepoint_carries"] is True
 
 
 def test_exact_optimizer_callback_budget_status_counts_projected_replay() -> None:

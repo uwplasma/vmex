@@ -12,8 +12,8 @@ Typical usage::
    fixed = vj.run_fixed_boundary("examples/data/input.circular_tokamak")
    freeb = vj.run_free_boundary("examples/data/input.cth_like_free_bdy_lasym_small")
 
-The optimization examples intentionally use the top-level import, which mirrors
-this public surface plus the broader scientific namespace::
+The primary optimization examples intentionally use the top-level import, which
+mirrors this public surface plus the broader scientific namespace::
 
    import vmec_jax as vj
 

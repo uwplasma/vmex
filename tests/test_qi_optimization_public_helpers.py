@@ -94,7 +94,11 @@ def test_qi_helper_scalar_parsers_and_scores(tmp_path: Path) -> None:
         "partial": True,
         "diagnostics_pending": True,
     }
-    assert qio._partial_diagnostics_from_history({"objective_final": 1.0}, {"existing": 2.0}) == {"existing": 2.0}
+    assert qio._partial_diagnostics_from_history({"objective_final": 1.0}, {"existing": 2.0}) == {
+        "existing": 2.0,
+        "objective_final": 1.0,
+        "partial": True,
+    }
 
     targets = SimpleNamespace(
         smooth_qi_max=1.0,

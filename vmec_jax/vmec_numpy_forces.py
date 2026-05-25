@@ -522,11 +522,11 @@ _PATCHES: list[tuple[Any, list[tuple[str, Any]]]] | None = None
 _NP_MPARITY_CACHE: dict = {}
 _NP_MASKS_CACHE: dict = {}
 _NP_TOMNSPS_MASK_CACHE: dict = {}
-# Force FFT path in NumPy mode by injecting a pre-populated cache that returns
-# True.  The real _TOMNSPS_FFT_CACHE returns False on CPU (JAX backend = cpu),
-# but numpy.fft.rfft is always available and FFT is strictly faster than DFT
-# for ntheta >= 8.
-_NP_TOMNSPS_FFT_CACHE: list = [True]
+# Keep NumPy-mode Fourier-transform policy aligned with vmec_tomnsp: CPU uses
+# the DFT/GEMM path by default and VMEC_JAX_TOMNSPS_FFT=0/1 remains the explicit
+# override.  Earlier NumPy-mode code forced FFT here; May 2026 finite-beta CPU
+# profiles showed that this regressed the host hot path for typical small ntor.
+_NP_TOMNSPS_FFT_CACHE: list = []
 
 # vmec_parity: SignedModeMaps has '_j' JAX fields (mask_pos_j, idx_pos_safe_j …)
 # that are indexed as n0[None,:,:] inside _mn_sin_to_signed_cached, triggering
@@ -702,6 +702,8 @@ def _np_einsum(expr: str, *operands, **kwargs) -> _NpArray:
 
 def _build_patches() -> list[tuple[Any, list[tuple[str, Any]]]]:
     """Build the patch list from already-imported modules."""
+    import vmec_jax.energy as _energy
+    import vmec_jax.profiles as _profiles
     import vmec_jax.vmec_forces as _vmec_forces
     import vmec_jax.vmec_bcovar as _vmec_bcovar
     import vmec_jax.vmec_jacobian as _vmec_jacobian
@@ -717,8 +719,16 @@ def _build_patches() -> list[tuple[Any, list[tuple[str, Any]]]]:
     import vmec_jax.multigrid as _multigrid
     import vmec_jax.solve as _solve
     import vmec_jax.solve_force_payload_helpers as _solve_force_payload_helpers
+    import vmec_jax.solve_profile_helpers as _solve_profile_helpers
 
     patches = [
+        (_energy, [
+            ("jnp", _NP_MODULE),
+            ("jax", _JAX_SHIM),
+        ]),
+        (_profiles, [
+            ("jnp", _NP_MODULE),
+        ]),
         (_init_guess, [
             ("jnp", _NP_MODULE),
         ]),
@@ -735,12 +745,19 @@ def _build_patches() -> list[tuple[Any, list[tuple[str, Any]]]]:
         (_solve_force_payload_helpers, [
             ("jnp", _NP_MODULE),
         ]),
+        (_solve_profile_helpers, [
+            ("jnp", _NP_MODULE),
+        ]),
         (_vmec_forces, [
             ("jnp", _NP_MODULE),
             ("jax", _JAX_SHIM),
         ]),
         (_vmec_bcovar, [
             ("jnp", _NP_MODULE),
+            (
+                "vmec_m1_internal_to_physical_signed",
+                _vmec_parity.vmec_m1_internal_to_physical_signed_host,
+            ),
         ]),
         (_vmec_jacobian, [
             ("jnp", _NP_MODULE),
@@ -753,9 +770,9 @@ def _build_patches() -> list[tuple[Any, list[tuple[str, Any]]]]:
             # triggering JAX __getitem__ dispatch (saves ~6500 JAX dispatches/iter).
             ("_MPARITY_CACHE", _NP_MPARITY_CACHE),
             ("_TOMNSPS_MASK_CACHE", _NP_TOMNSPS_MASK_CACHE),
-            # Override the FFT-enable cache to True so _get_tomnsps_fft() returns
-            # True in NumPy mode.  numpy.fft.rfft is always available and faster
-            # than the DFT-GEMM fallback for ntheta >= ~8.
+            # Use a separate cache so NumPy-mode calls do not share stale JAX
+            # transform policy entries, but leave it empty so _get_tomnsps_fft()
+            # still honors VMEC_JAX_TOMNSPS_FFT and the CPU/GPU default policy.
             ("_TOMNSPS_FFT_CACHE", _NP_TOMNSPS_FFT_CACHE),
         ]),
         (_vmec_parity, [

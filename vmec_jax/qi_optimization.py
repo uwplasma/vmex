@@ -430,8 +430,8 @@ def _partial_diagnostics_from_history(history: dict, diagnostics: dict) -> dict:
     """Keep diagnostics.json useful before expensive independent QI diagnostics run."""
 
     out = dict(diagnostics)
-    if out:
-        return out
+    had_diagnostics = bool(out)
+    added_history_fields = False
     mapping = {
         "objective_final": "objective_final",
         "qs_final": "qs_final",
@@ -443,9 +443,12 @@ def _partial_diagnostics_from_history(history: dict, diagnostics: dict) -> dict:
     }
     for out_key, history_key in mapping.items():
         value = history.get(history_key)
-        if value is not None:
+        if value is not None and out.get(out_key) is None:
             out[out_key] = value
-    if out:
+            added_history_fields = True
+    if out and added_history_fields:
+        out.setdefault("partial", True)
+    if out and not had_diagnostics:
         out["partial"] = True
         out["diagnostics_pending"] = True
     return out

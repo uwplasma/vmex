@@ -17,13 +17,7 @@ from typing import Optional
 import numpy as np
 from .boundary import boundary_from_indata
 from .config import VMECConfig, load_config
-from .energy import FluxProfiles, _iotaf_from_iotas, flux_profiles_from_indata
-from .free_boundary import (
-    MGridMetadata,
-    PreparedMGrid,
-    prepare_mgrid_for_config,
-    validate_free_boundary_config,
-)
+from .energy import FluxProfiles, _iotaf_from_iotas, flux_profiles_from_indata, flux_profiles_from_indata_host_default
 from .init_guess import initial_guess_from_boundary
 from .multigrid import interp_vmec_state
 from .profiles import eval_profiles
@@ -35,6 +29,52 @@ from .solve import (
 )
 from .static import VMECStatic, build_static
 from .wout import WoutData, read_wout, state_from_wout
+
+
+def _free_boundary_module():
+    from importlib import import_module
+
+    return import_module(".free_boundary", __package__)
+
+
+def __getattr__(name: str):
+    if name in {"MGridMetadata", "PreparedMGrid"}:
+        value = getattr(_free_boundary_module(), name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def validate_free_boundary_config(cfg: VMECConfig, *, strict: bool = False) -> None:
+    """Lazily validate free-boundary inputs.
+
+    This wrapper preserves the historical driver-level monkeypatch point while
+    keeping fixed-boundary CLI startup from importing NESTOR/free-boundary code.
+    """
+
+    return _free_boundary_module().validate_free_boundary_config(cfg, strict=strict)
+
+
+def prepare_mgrid_for_config(cfg: VMECConfig, *, load_fields: bool = True, strict: bool = False):
+    """Lazily prepare mgrid metadata/fields for free-boundary inputs."""
+
+    return _free_boundary_module().prepare_mgrid_for_config(cfg, load_fields=load_fields, strict=strict)
+
+
+def _free_boundary_static_inputs(
+    cfg: VMECConfig,
+    *,
+    load_fields: bool,
+    strict: bool,
+) -> tuple[object | None, tuple[float, ...] | None]:
+    if not bool(getattr(cfg, "lfreeb", False)):
+        return None, None
+    validate_free_boundary_config(cfg, strict=strict)
+    prepared_fb = prepare_mgrid_for_config(cfg, load_fields=load_fields, strict=strict)
+    PreparedMGrid = getattr(_free_boundary_module(), "PreparedMGrid")
+    if isinstance(prepared_fb, PreparedMGrid):
+        return prepared_fb.metadata, prepared_fb.extcur
+    return None, None
 
 
 @dataclass(frozen=True)
@@ -69,6 +109,43 @@ def _default_backend_name() -> str:
         return str(jax.default_backend()).strip().lower() or "cpu"
     except Exception:
         return "cpu"
+
+
+def _host_update_assembly_driver_default(
+    *,
+    cfg: VMECConfig,
+    performance_mode: bool,
+    backend: str,
+    use_scan: bool,
+) -> bool:
+    """Resolve the public driver default for CPU host-update assembly.
+
+    ``VMEC_JAX_HOST_UPDATE_ASSEMBLY`` is intentionally a diagnostic override:
+    it lets performance profiles compare the host NumPy path against the fully
+    JAX update path without changing user-facing solver arguments.
+    """
+
+    backend_name = str(backend).strip().lower()
+    # Host NumPy update assembly is fastest for low-mode CPU solves because it
+    # avoids per-step JAX dispatch.  On larger spectral/radial grids the repeated
+    # host state assembly dominates; let solve.py's fused strict-update JIT take
+    # those cases instead.
+    nrange = int(getattr(cfg, "ntor", 0)) + 1
+    if bool(getattr(cfg, "lasym", False)):
+        nrange = 2 * int(getattr(cfg, "ntor", 0)) + 1
+    update_work = int(getattr(cfg, "ns", 0)) * int(getattr(cfg, "mpol", 0)) * int(nrange)
+    try:
+        work_limit = int(os.getenv("VMEC_JAX_HOST_UPDATE_CPU_WORK_LIMIT", "1000"))
+    except Exception:
+        work_limit = 1000
+    use_host_update_default = update_work < work_limit
+    default = bool(performance_mode) and (backend_name == "cpu") and (not bool(use_scan)) and use_host_update_default
+    env = os.getenv("VMEC_JAX_HOST_UPDATE_ASSEMBLY", "").strip().lower()
+    if env in ("1", "true", "yes", "on"):
+        return (backend_name == "cpu") and (not bool(use_scan))
+    if env in ("0", "false", "no", "off"):
+        return False
+    return bool(default)
 
 
 def _resolve_fixed_boundary_solver_device_name(
@@ -199,10 +276,11 @@ def _default_non_autodiff_solver_policy_for_backend(indata, backend: str) -> tup
         return "parity", False
 
     if str(backend).strip().lower() == "cpu":
-        # The accelerated scan path is still the right default for LASYM cases
-        # and current-driven multigrid inputs that need the stricter finish
-        # behavior. For ordinary CPU fixed-boundary solves, the VMEC-control
-        # host-update path has much lower first-process latency and memory use.
+        # LASYM and current-driven multigrid inputs still use the accelerated
+        # solver mode for stricter finish behavior, but the backend-aware scan
+        # selector keeps auto-selected CPU solves on the VMEC-control loop.
+        # Ordinary CPU fixed-boundary solves use the VMEC-control host-update
+        # path for lower first-process latency and memory use.
         if bool(indata.get_bool("LASYM", False)):
             return "accelerated", True
         ncurr = int(indata.get_int("NCURR", 0))
@@ -223,16 +301,42 @@ def _default_use_scan_for_backend(indata, backend: str, solver_mode: str | None)
 
     Explicit ``solver_mode=...`` callers keep the historical scan default in
     :func:`run_fixed_boundary`; this helper is for auto-selected API/CLI policy.
-    For ordinary fixed-boundary solves, profiling on CPU and NVIDIA GPUs shows
-    the non-scan VMEC-control loop reaches converged equilibria with lower
-    end-to-end latency than the scan loop.  The scan path remains available for
-    differentiable/experimental workflows and explicit fast-mode requests.
+    For ordinary small CPU fixed-boundary solves, the non-scan VMEC-control
+    loop has lower first-process latency and memory use.  High-mode/high-budget
+    CPU decks amortize scan compilation and can be materially faster.  On
+    NVIDIA GPUs, May 2026 profiles show the scan loop is materially faster for
+    raw fixed-boundary throughput, so GPU/CUDA/ROCm default to scan unless the
+    user passes ``use_scan=False``.
     """
 
-    # Keep the parameters in the signature because this policy has changed with
-    # backend/input profiling and is intentionally centralized here.
-    _ = (indata, backend, _normalize_solver_mode(solver_mode=solver_mode, performance_mode=True))
-    return False
+    _ = (indata, _normalize_solver_mode(solver_mode=solver_mode, performance_mode=True))
+    backend_l = str(backend).strip().lower()
+    if backend_l in ("gpu", "cuda", "rocm"):
+        return True
+    if backend_l != "cpu":
+        return False
+
+    def _get_int(name: str, default: int) -> int:
+        try:
+            return int(indata.get_int(name, default))
+        except Exception:
+            try:
+                return int(indata.get(name, default))
+            except Exception:
+                return int(default)
+
+    ns_values = _as_list_like(getattr(indata, "get", lambda *_args: None)("NS_ARRAY", None))
+    niter_values = _as_list_like(getattr(indata, "get", lambda *_args: None)("NITER_ARRAY", None))
+    ns_max = max([_get_int("NS", 0), *[int(v) for v in (ns_values or []) if v is not None]], default=0)
+    niter_max = max(
+        [_get_int("NITER", 0), *[int(v) for v in (niter_values or []) if v is not None]],
+        default=0,
+    )
+    mpol = max(1, _get_int("MPOL", 1))
+    ntor = max(0, _get_int("NTOR", 0))
+    signed_mode_count = mpol * (2 * ntor + 1) - ntor if ntor > 0 else mpol
+    work = int(ns_max) * int(niter_max) * int(max(1, signed_mode_count))
+    return bool(work >= 2_000_000)
 
 
 def _resolve_jit_forces_auto_policy(flag: bool | str, static_i: VMECStatic, niter_i: int) -> bool:
@@ -264,10 +368,12 @@ def _default_preconditioner_use_precomputed_tridi(
 
     ``None`` delegates to the lower-level environment default.  The automatic
     enabled cases are intentionally narrow: May 2026 profiling showed a large
-    GPU win for raw LASYM fixed-boundary solves, and a smaller but repeatable
-    win for higher-mode non-LASYM fixed-boundary solves.  Small non-LASYM decks
-    keep the legacy Thomas path because precomputing coefficients can lose more
-    to setup/launch overhead than it saves.
+    GPU win for scan solves when the tridiagonal coefficients are materialized
+    once outside the loop, a large win for raw LASYM fixed-boundary solves, and
+    a smaller but repeatable win for higher-mode non-LASYM fixed-boundary
+    solves.  Small non-LASYM non-scan decks keep the legacy Thomas path because
+    precomputing coefficients can lose more to setup/launch overhead than it
+    saves.
     """
 
     if os.getenv("VMEC_JAX_TRIDI_PRECOMPUTE") is not None:
@@ -278,7 +384,7 @@ def _default_preconditioner_use_precomputed_tridi(
     if not bool(performance_mode):
         return None
     if bool(use_scan):
-        return None
+        return True
     if bool(getattr(cfg, "lasym", False)):
         return True
     try:
@@ -616,7 +722,7 @@ _STAGE_CHUNK_DIAG_KEYS = (
 def _result_with_diag(result_i: SolveVmecResidualResult, **updates) -> SolveVmecResidualResult:
     diag = dict(result_i.diagnostics)
     diag.update(updates)
-    return SolveVmecResidualResult(
+    out = SolveVmecResidualResult(
         state=result_i.state,
         n_iter=int(result_i.n_iter),
         w_history=np.asarray(result_i.w_history),
@@ -627,6 +733,17 @@ def _result_with_diag(result_i: SolveVmecResidualResult, **updates) -> SolveVmec
         step_history=np.asarray(result_i.step_history),
         diagnostics=diag,
     )
+    return _copy_final_force_payload(out, result_i)
+
+
+def _copy_final_force_payload(result_i: SolveVmecResidualResult, source_i) -> SolveVmecResidualResult:
+    payload = getattr(source_i, "_final_force_payload", None)
+    if payload is not None:
+        try:
+            object.__setattr__(result_i, "_final_force_payload", payload)
+        except Exception:
+            pass
+    return result_i
 
 
 def _merge_stage_chunk_results(
@@ -659,7 +776,7 @@ def _merge_stage_chunk_results(
         [int(r.n_iter) + 1 for r in results_i],
         dtype=int,
     )
-    return SolveVmecResidualResult(
+    out = SolveVmecResidualResult(
         state=last.state,
         n_iter=int(sum(int(r.n_iter) + 1 for r in results_i) - 1),
         w_history=_cat_hist("w_history"),
@@ -670,6 +787,7 @@ def _merge_stage_chunk_results(
         step_history=_cat_hist("step_history"),
         diagnostics=diag,
     )
+    return _copy_final_force_payload(out, last)
 
 
 def _stage_switch_reason_from_progress(
@@ -845,14 +963,27 @@ def _final_flux_profiles_from_state(
         mass=mass,
         gamma=gamma,
     )
-    bc_pre = vmec_bcovar_half_mesh_from_wout(
-        state=state,
-        static=static_in,
-        wout=wout_like_pre,
-        pres=pressure_out,
-        use_vmec_synthesis=True,
-        trig=trig,
-    )
+    if traced:
+        bc_pre = vmec_bcovar_half_mesh_from_wout(
+            state=state,
+            static=static_in,
+            wout=wout_like_pre,
+            pres=pressure_out,
+            use_vmec_synthesis=True,
+            trig=trig,
+        )
+    else:
+        from .vmec_numpy_forces import _numpy_module_patch
+
+        with _numpy_module_patch():
+            bc_pre = vmec_bcovar_half_mesh_from_wout(
+                state=state,
+                static=static_in,
+                wout=wout_like_pre,
+                pres=pressure_out,
+                use_vmec_synthesis=True,
+                trig=trig,
+            )
 
     sqrtg = _asarray(bc_pre.jac.sqrtg)
     safe_sqrtg = xp.where(sqrtg != 0.0, sqrtg, 1.0)
@@ -1029,7 +1160,8 @@ def wout_from_fixed_boundary_run(
     """Build a minimal VMEC-style ``WoutData`` from a fixed-boundary run.
 
     This is the in-memory counterpart to :func:`write_wout_from_fixed_boundary_run`.
-    Set ``fast_bcovar=True`` to enable the fast bcovar path for this call.
+    The fast bcovar path is the default; set ``fast_bcovar=False`` to force the
+    legacy force-kernel output path for debugging.
     """
     from .wout import wout_minimal_from_fixed_boundary
 
@@ -1092,6 +1224,9 @@ def wout_from_fixed_boundary_run(
             fsql=float(fsql),
             fsqt=fsqt,
             converged=converged,
+            flux_override=getattr(run, "flux", None),
+            profiles_override=getattr(run, "profiles", None),
+            force_payload_override=getattr(getattr(run, "result", None), "_final_force_payload", None),
         )
     finally:
         if fast_bcovar is not None:
@@ -1143,9 +1278,7 @@ def load_example(
     """Load a bundled example case (config + static + optional wout/state)."""
     input_path, wout_path = example_paths(case, root=root)
     cfg, indata = load_config(str(input_path))
-    prepared_fb = prepare_mgrid_for_config(cfg, load_fields=False, strict=False)
-    fb_meta = prepared_fb.metadata if isinstance(prepared_fb, PreparedMGrid) else None
-    fb_extcur = prepared_fb.extcur if isinstance(prepared_fb, PreparedMGrid) else None
+    fb_meta, fb_extcur = _free_boundary_static_inputs(cfg, load_fields=False, strict=False)
     static = build_static(cfg, grid=grid, mgrid_metadata=fb_meta, free_boundary_extcur=fb_extcur)
     if with_wout and wout_path is not None:
         wout = read_wout(wout_path)
@@ -1229,7 +1362,7 @@ def run_fixed_boundary(
     t_start = time.perf_counter()
     max_iter_overridden = max_iter is not _MAX_ITER_SENTINEL
 
-    def _maybe_enable_compilation_cache() -> None:
+    def _maybe_enable_compilation_cache(*, accelerator_requested: bool = False) -> None:
         if os.getenv("VMEC_JAX_COMPILATION_CACHE", "").strip().lower() in ("0", "false", "no", "off"):
             return
         if os.getenv("VMEC_JAX_DISABLE_COMPILATION_CACHE", "") not in ("", "0"):
@@ -1237,6 +1370,22 @@ def run_fixed_boundary(
         from ._compat import _default_compilation_cache_dir
 
         cache_dir = _default_compilation_cache_dir()
+        if (
+            not cache_dir
+            and bool(accelerator_requested)
+            and "JAX_COMPILATION_CACHE_DIR" not in os.environ
+            and "VMEC_JAX_COMPILATION_CACHE_DIR" not in os.environ
+            and "VMEC_JAX_COMPILATION_CACHE" not in os.environ
+        ):
+            # solver_device="gpu" is a vmec_jax runtime request, not a JAX env
+            # var, so _compat cannot see it during package import.  Enable the
+            # same machine-scoped cache policy here before the first solve
+            # compilation so fresh GPU CLI/API processes can reuse kernels.
+            os.environ["VMEC_JAX_COMPILATION_CACHE"] = "1"
+            try:
+                cache_dir = _default_compilation_cache_dir()
+            finally:
+                os.environ.pop("VMEC_JAX_COMPILATION_CACHE", None)
         if str(cache_dir).strip().lower() in ("disabled", "0", "false", "no", "off"):
             return
         if not cache_dir:
@@ -1365,8 +1514,8 @@ def run_fixed_boundary(
         for very small workloads to reduce first-iteration latency.
     performance_mode:
         If True, allow the optimized fixed-boundary policy instead of strict
-        VMEC2000 parity. Auto-selected public runs currently use the non-scan
-        VMEC-control loop for converged production performance; explicit
+        VMEC2000 parity. Auto-selected public runs use the VMEC-control
+        non-scan loop on CPU and the scan-lifted loop on GPU/CUDA/ROCm; explicit
         accelerated/fast-mode requests keep the scan path unless ``use_scan`` is
         set to False.
     solver_mode:
@@ -1388,24 +1537,33 @@ def run_fixed_boundary(
         enable_x64(True)
     except Exception:
         pass
-    _maybe_enable_compilation_cache()
-    cfg, indata = load_config(str(input_path))
-    solver_mode_explicit = solver_mode is not None
     requested_solver_device = "auto" if solver_device is None else str(solver_device).strip().lower()
     policy_backend = (
         requested_solver_device
         if requested_solver_device in ("cpu", "gpu")
         else _default_backend_name()
     )
+    if not bool(_solver_device_context_active):
+        _maybe_enable_compilation_cache(
+            accelerator_requested=str(policy_backend).strip().lower() in ("gpu", "cuda", "rocm", "tpu")
+        )
+    cfg, indata = load_config(str(input_path))
+    solver_mode_explicit = solver_mode is not None
     if solver_mode is None and bool(performance_mode):
         solver_mode, performance_mode = _default_non_autodiff_solver_policy_for_backend(indata, policy_backend)
     solver_mode_eff = _normalize_solver_mode(solver_mode=solver_mode, performance_mode=bool(performance_mode))
     if use_scan is None:
-        use_scan = (
-            True
-            if bool(solver_mode_explicit)
-            else _default_use_scan_for_backend(indata, policy_backend, solver_mode_eff)
-        )
+        if bool(solver_mode_explicit):
+            use_scan = True
+        else:
+            use_scan = _default_use_scan_for_backend(indata, policy_backend, solver_mode_eff)
+            if bool(verbose) and str(policy_backend).strip().lower() == "cpu":
+                # CPU scan is valuable for quiet high-work solves, but VMEC-style
+                # table output needs host-visible progress rows. Chunked scan
+                # printing loses the CPU win, so keep interactive CLI runs on
+                # the host VMEC-control loop unless the caller explicitly
+                # requests use_scan=True.
+                use_scan = False
     else:
         use_scan = bool(use_scan)
     accelerated_mode = solver_mode_eff == "accelerated"
@@ -1462,10 +1620,11 @@ def run_fixed_boundary(
             axis_infer_missing = True
         if disable_axis_infer:
             axis_infer_missing = False
-        if (not disable_axis_infer) and bool(performance_mode) and bool(cfg.lasym):
-            # LASYM scan probes are more stable and much faster once the initial
-            # axis guess is inferred up front. Keep the conservative VMEC-style
-            # raw-axis start in parity mode.
+        if (not disable_axis_infer) and bool(performance_mode):
+            # Performance-mode fixed-boundary solves infer a boundary-based
+            # magnetic axis up front instead of paying for a bad-Jacobian
+            # reset solve in the first VMEC iteration. Keep the conservative
+            # VMEC-style raw-axis start in parity mode.
             axis_infer_missing = True
 
     ns_list_for_device = _as_list_like(indata.get("NS_ARRAY", None))
@@ -1492,7 +1651,14 @@ def run_fixed_boundary(
         except Exception:
             devices = []
         if devices:
-            with jax.default_device(devices[0]):
+            from .vmec_tomnsp import tomnsps_fft_policy_override
+
+            tomnsps_fft_override = (
+                str(solver_device_name).strip().lower() in ("gpu", "cuda", "rocm", "tpu")
+                if os.getenv("VMEC_JAX_TOMNSPS_FFT") is None
+                else None
+            )
+            with jax.default_device(devices[0]), tomnsps_fft_policy_override(tomnsps_fft_override):
                 routed_run = run_fixed_boundary(
                     input_path,
                     solver=solver,
@@ -1913,10 +2079,11 @@ def run_fixed_boundary(
             static_i = best_run.static
             mode_i_l = str(mode_i).strip().lower()
             scan_minimal_default_i = True if (bool(performance_mode_i) and (not bool(verbose))) else None
-            host_update_assembly_i = (
-                bool(performance_mode_i)
-                and (not bool(static_i.cfg.lasym))
-                and (_default_backend_name() == "cpu")
+            host_update_assembly_i = _host_update_assembly_driver_default(
+                cfg=static_i.cfg,
+                performance_mode=bool(performance_mode_i),
+                backend=_default_backend_name(),
+                use_scan=bool(use_scan_i),
             )
             preconditioner_use_precomputed_tridi_i = _default_preconditioner_use_precomputed_tridi(
                 cfg=static_i.cfg,
@@ -1972,6 +2139,7 @@ def run_fixed_boundary(
                 fsq_total_target=finish_fsq_total_target,
                 host_update_assembly=host_update_assembly_i,
                 preconditioner_use_precomputed_tridi=preconditioner_use_precomputed_tridi_i,
+                return_final_force_payload=True,
                 jit_forces=_resolve_finish_jit_forces(static_i, int(budget_i)),
             )
             return replace(best_run, state=res_i.state, result=res_i)
@@ -2330,13 +2498,7 @@ def run_fixed_boundary(
 
     fb_strict_env = os.getenv("VMEC_JAX_FREEB_STRICT", "1").strip().lower()
     fb_strict = fb_strict_env not in ("", "0", "false", "no")
-    validate_free_boundary_config(cfg, strict=fb_strict)
-    prepared_fb = prepare_mgrid_for_config(cfg, load_fields=False, strict=fb_strict)
-    fb_meta: MGridMetadata | None = None
-    fb_extcur: tuple[float, ...] | None = None
-    if isinstance(prepared_fb, PreparedMGrid):
-        fb_meta = prepared_fb.metadata
-        fb_extcur = prepared_fb.extcur
+    fb_meta, fb_extcur = _free_boundary_static_inputs(cfg, load_fields=False, strict=fb_strict)
 
     # Build the initial state on either the final grid (single-grid solvers and
     # use_initial_guess) or on the first multigrid stage for VMEC-style solves.
@@ -2409,7 +2571,9 @@ def run_fixed_boundary(
         return build_static(cfg_in, grid=grid)
 
     def _profiles_from_static(static_in: VMECStatic):
-        flux_local = flux_profiles_from_indata(indata, static_in.s, signgs=signgs)
+        flux_local = flux_profiles_from_indata_host_default(indata, static_in.s, signgs=signgs)
+        if flux_local is None:
+            flux_local = flux_profiles_from_indata(indata, static_in.s, signgs=signgs)
         # VMEC evaluates pressure/iota/current profiles on the radial half mesh.
         if int(cfg.ns) < 2:
             s_half = np.asarray(static_in.s)
@@ -2923,10 +3087,11 @@ def run_fixed_boundary(
                 if (stage_accelerated_mode and not is_last_stage)
                 else None
             )
-            stage_host_update_assembly = (
-                bool(performance_mode)
-                and (not bool(cfg_i.lasym))
-                and (_default_backend_name() == "cpu")
+            stage_host_update_assembly = _host_update_assembly_driver_default(
+                cfg=cfg_i,
+                performance_mode=bool(performance_mode),
+                backend=_default_backend_name(),
+                use_scan=bool(scan_mode),
             )
             stage_preconditioner_use_precomputed_tridi = _default_preconditioner_use_precomputed_tridi(
                 cfg=cfg_i,
@@ -2971,6 +3136,7 @@ def run_fixed_boundary(
                 fsq_total_target=stage_fsq_total_target,
                 host_update_assembly=stage_host_update_assembly,
                 preconditioner_use_precomputed_tridi=stage_preconditioner_use_precomputed_tridi,
+                return_final_force_payload=True,
             )
             dynamic_scan_default = "1" if bool(cfg.lasym) else "0"
             dynamic_scan_env = os.getenv("VMEC_JAX_DYNAMIC_SCAN", dynamic_scan_default).strip().lower()
@@ -3158,6 +3324,12 @@ def run_fixed_boundary(
                 chunk_resume_state = resume_state_stage
                 stage_switch_reason = None
                 stage_monitor_used = True
+                stage_monitor_scan = bool(scan_mode) and str(policy_backend).lower() in (
+                    "gpu",
+                    "cuda",
+                    "rocm",
+                    "tpu",
+                )
                 remaining_budget = int(niter_i)
                 stage_first_chunk = True
 
@@ -3168,7 +3340,7 @@ def run_fixed_boundary(
                         "max_iter": int(chunk_budget),
                         "resume_state": chunk_resume_state,
                         "stage_prev_fsq": stage_prev_fsq if bool(stage_first_chunk) else None,
-                        "use_scan": False,
+                        "use_scan": bool(stage_monitor_scan),
                         "jit_warmup_iters": int(jit_warmup_noscan),
                         "jit_precompile": bool(jit_precompile_noscan),
                     }
@@ -3210,7 +3382,7 @@ def run_fixed_boundary(
                             "max_iter": int(remaining_budget),
                             "resume_state": chunk_resume_state,
                             "stage_prev_fsq": None,
-                            "use_scan": False,
+                            "use_scan": bool(stage_monitor_scan),
                             "jit_warmup_iters": 0,
                             "jit_precompile": False,
                         }
@@ -3397,7 +3569,7 @@ def run_fixed_boundary(
                     [np.asarray(r.diagnostics.get(k, np.zeros((0,), dtype=float))) for r in stage_results]
                 )
 
-        res = SolveVmecResidualResult(
+        res = _copy_final_force_payload(SolveVmecResidualResult(
             state=state,
             n_iter=int(sum(int(r.n_iter) + 1 for r in stage_results) - 1),
             w_history=_cat("w_history"),
@@ -3407,7 +3579,7 @@ def run_fixed_boundary(
             grad_rms_history=_cat("grad_rms_history"),
             step_history=_cat("step_history"),
             diagnostics=diag,
-        )
+        ), stage_results[-1])
         # Optional scan corrector: run a single non-scan VMEC2000 step to
         # re-anchor the final state before writing wout outputs.
         try:
@@ -3462,6 +3634,7 @@ def run_fixed_boundary(
                     fsq_total_target=(
                         _accelerated_fsq_total_target_from_ftol(float(ftol_corr)) if accelerated_mode else None
                     ),
+                    return_final_force_payload=True,
                 )
                 res_corr = solve_fixed_boundary_residual_iter(
                     res.state,
@@ -3472,7 +3645,7 @@ def run_fixed_boundary(
                 diag = dict(res.diagnostics)
                 diag["scan_wout_corrector"] = True
                 diag["scan_wout_corrector_iters"] = int(res_corr.n_iter)
-                res = SolveVmecResidualResult(
+                res = _copy_final_force_payload(SolveVmecResidualResult(
                     state=res_corr.state,
                     n_iter=res.n_iter,
                     w_history=res.w_history,
@@ -3482,7 +3655,7 @@ def run_fixed_boundary(
                     grad_rms_history=res.grad_rms_history,
                     step_history=res.step_history,
                     diagnostics=diag,
-                )
+                ), res_corr)
             except Exception:
                 pass
         final_requested_ftol = _requested_final_ftol(indata=indata, ftol_list_input=ftol_list_input)
@@ -3502,7 +3675,7 @@ def run_fixed_boundary(
             _result_hits_total_target(res, fsq_total_target=float(final_target_fsq))
         )
         final_diag["converged"] = bool(final_diag["converged_strict"])
-        res = SolveVmecResidualResult(
+        res = _copy_final_force_payload(SolveVmecResidualResult(
             state=res.state,
             n_iter=int(res.n_iter),
             w_history=np.asarray(res.w_history),
@@ -3512,7 +3685,7 @@ def run_fixed_boundary(
             grad_rms_history=np.asarray(res.grad_rms_history),
             step_history=np.asarray(res.step_history),
             diagnostics=final_diag,
-        )
+        ), res)
         # Use the static from the last executed stage (static_prev) when
         # available.  This ensures that static.cfg.ns matches the actual
         # solved state's ns even when the final NS_ARRAY stage is skipped
@@ -3527,7 +3700,10 @@ def run_fixed_boundary(
             if not converged and int(res.n_iter) >= int(niter_i):
                 print(" Try increasing NITER or PRE_NITER if the preconditioner is on.", flush=True)
             print("", flush=True)
-            print(" EXECUTION TERMINATED NORMALLY", flush=True)
+            if converged:
+                print(" EXECUTION TERMINATED NORMALLY", flush=True)
+            else:
+                print(" EXECUTION FINISHED WITHOUT REQUESTED CONVERGENCE", flush=True)
             print("", flush=True)
             case_name = Path(input_path).name
             if case_name.startswith("input."):

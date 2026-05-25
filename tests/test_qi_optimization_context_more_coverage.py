@@ -213,7 +213,17 @@ def test_jsonable_history_and_partial_diagnostics_helpers() -> None:
         "partial": True,
         "diagnostics_pending": True,
     }
-    assert qio._partial_diagnostics_from_history(history, {"existing": 1}) == {"existing": 1}
+    assert qio._partial_diagnostics_from_history(history, {"existing": 1}) == {
+        "existing": 1,
+        "objective_final": np.float64(1.25),
+        "qs_final": np.float64(2.0e-3),
+        "aspect": np.float64(6.0),
+        "mean_iota": np.float64(0.43),
+        "nfev": np.int64(7),
+        "njev": np.int64(3),
+        "total_wall_time_s": np.float64(12.5),
+        "partial": True,
+    }
 
 
 def test_stage_checkpoint_preserves_partial_history_and_context_root(

@@ -14,6 +14,7 @@ from vmec_jax.solve_scan_planning_helpers import (
     resolve_scan_run_flags,
     scan_chunk_settings,
     scan_jit_forces_enabled,
+    scan_jit_preflight_enabled,
     scan_timing_enabled,
     validate_vmec2000_scan_guards,
 )
@@ -40,7 +41,7 @@ def _scan_options(**overrides):
         scan_trace_env="0",
         abort_scan_env="0",
         scan_precompute_env="",
-        tridi_precompute_env="0",
+        tridi_precompute_env="",
         scan_lax_env="",
         tridi_solve_env="",
         scan_restart_payload_env="",
@@ -54,6 +55,7 @@ def _cache_key(**overrides):
         static_key=("static", (2, 3)),
         wout_key=("wout", "float64"),
         edge_signature_key=((2,), "float64"),
+        tomnsps_policy_key=("tomnsps", "auto"),
         max_iter_tail=9,
         preflight_iters=1,
         iter_offset0=0,
@@ -64,6 +66,8 @@ def _cache_key(**overrides):
         nstep_screen=25,
         use_restart_triggers=True,
         vmecpp_restart=False,
+        scan_use_precomputed=False,
+        scan_use_lax_tridi=False,
         scan_use_restart_payload=False,
         stage_prev_fsq=None,
         stage_transition_factor=50.0,
@@ -99,18 +103,24 @@ def test_timing_report_math_excludes_dispatch_breakdown_from_leaf_total():
     stats["scan_device_dispatch_s"] = 0.25
     stats["scan_device_ready_s"] = 0.75
     stats["scan_device_run_s"] = 1.0
+    stats["scan_runner_cache_miss_device_run_s"] = 0.6
+    stats["scan_runner_cache_miss_ready_s"] = 0.2
+    stats["scan_runner_cache_build_s"] = 0.1
     stats["scan_postprocess_s"] = 2.0
     stats["scan_runner_cache_hit_count"] = 3
 
-    report = build_scan_timing_report(iterations=7, stats=stats, scan_total_s=5.0)
+    report = build_scan_timing_report(iterations=7, stats=stats, scan_total_s=5.9)
 
     assert report["iterations"] == 7
-    assert report["scan_total_s"] == 5.0
+    assert report["scan_total_s"] == 5.9
     assert report["scan_unattributed_s"] == pytest.approx(1.0)
     assert report["scan_device_dispatch_s"] == pytest.approx(0.25)
     assert report["scan_device_ready_s"] == pytest.approx(0.75)
     assert report["scan_runner_cache_hit_count"] == 3
     assert report["scan_runner_cache_miss_count"] == 0
+    assert report["scan_cold_cache_miss_s"] == pytest.approx(0.6)
+    assert report["scan_cold_cache_miss_ready_s"] == pytest.approx(0.2)
+    assert report["scan_cache_build_wrapper_s"] == pytest.approx(0.1)
     assert build_scan_timing_report(iterations=7, stats=stats, scan_total_s=3.0)["scan_unattributed_s"] == 0.0
 
 
@@ -185,11 +195,16 @@ def test_scan_options_env_branches_for_minimal_light_and_restart_payload():
 def test_scan_options_explicit_backend_and_print_branches():
     default_cpu_lax = _scan_options(backend_name="cpu", scan_lax_env="", tridi_solve_env="")
     default_gpu_lax = _scan_options(backend_name="gpu", scan_lax_env="", tridi_solve_env="")
-    assert default_cpu_lax.scan_use_lax_tridi
+    assert not default_cpu_lax.scan_use_lax_tridi
     assert not default_gpu_lax.scan_use_lax_tridi
+    assert default_cpu_lax.scan_use_precomputed
+    assert default_gpu_lax.scan_use_precomputed
 
     precompute = _scan_options(scan_precompute_env="yes", tridi_precompute_env="0")
     assert precompute.scan_use_precomputed
+
+    explicit_precompute_off = _scan_options(backend_name="gpu", scan_precompute_env="0", tridi_precompute_env="")
+    assert not explicit_precompute_off.scan_use_precomputed
 
     tridi_precompute = _scan_options(scan_precompute_env="", tridi_precompute_env="1")
     assert tridi_precompute.scan_use_precomputed
@@ -215,6 +230,11 @@ def test_scan_jit_forces_and_preflight_env_branches():
     assert scan_jit_forces_enabled(env_value=None, jit_forces=True)
     assert not scan_jit_forces_enabled(env_value="0", jit_forces=True)
     assert scan_jit_forces_enabled(env_value="yes", jit_forces=False)
+    assert scan_jit_preflight_enabled(env_value=None, backend_name="gpu", scan_differentiated=False)
+    assert not scan_jit_preflight_enabled(env_value=None, backend_name="cpu", scan_differentiated=False)
+    assert not scan_jit_preflight_enabled(env_value=None, backend_name="cuda", scan_differentiated=True)
+    assert not scan_jit_preflight_enabled(env_value="0", backend_name="gpu", scan_differentiated=False)
+    assert scan_jit_preflight_enabled(env_value="yes", backend_name="cpu", scan_differentiated=True)
 
     assert (
         resolve_scan_preflight_iters(
@@ -363,7 +383,10 @@ def test_scan_cache_key_is_stable_and_tracks_behavioral_toggles():
     assert equivalent == base
     assert _cache_key(scan_light=True) != base
     assert _cache_key(stage_prev_fsq=3) != base
-    assert _cache_key(stage_prev_fsq=3)[15] == 3.0
+    assert _cache_key(tomnsps_policy_key=("tomnsps", "fft")) != base
+    assert _cache_key(scan_use_precomputed=True) != base
+    assert _cache_key(scan_use_lax_tridi=True) != base
+    assert _cache_key(stage_prev_fsq=3)[18] == 3.0
 
 
 def test_scan_print_mode_normalization_and_invalid_guard_errors():

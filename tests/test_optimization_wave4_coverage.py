@@ -508,7 +508,9 @@ def test_jacobian_tracking_exact_residual_after_jacobian_and_save_wout_cache(mon
         "residual_sum": float(np.sum(res)),
     }
     owner._exact_history_accepts = lambda cost: bool(cost <= 1.0)
-    owner._remember_best_exact_point = lambda params, residual, cost=None: setattr(owner, "_best_seen", (params, residual, cost))
+    owner._remember_best_exact_point = lambda params, residual, cost=None, **kwargs: setattr(
+        owner, "_best_seen", (params, residual, cost, kwargs.get("state"))
+    )
     owner.jacobian_fun = lambda _params: np.asarray([[7.0]])
 
     np.testing.assert_allclose(owner._jacobian_fun_tracked(np.asarray([0.0])), [[7.0]])

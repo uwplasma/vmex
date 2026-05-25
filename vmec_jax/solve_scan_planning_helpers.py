@@ -91,6 +91,9 @@ def build_scan_timing_report(
         "scan_total_s": total,
         **normalized,
         **counts,
+        "scan_cold_cache_miss_s": float(normalized["scan_runner_cache_miss_device_run_s"]),
+        "scan_cold_cache_miss_ready_s": float(normalized["scan_runner_cache_miss_ready_s"]),
+        "scan_cache_build_wrapper_s": float(normalized["scan_runner_cache_build_s"]),
         "scan_unattributed_s": max(0.0, total - float(scan_leaf_total_s)),
     }
 
@@ -168,6 +171,20 @@ def scan_jit_forces_enabled(*, env_value: str | None, jit_forces: bool) -> bool:
     if env_value is None:
         return bool(jit_forces)
     return str(env_value).strip().lower() not in ("", "0", "false", "no")
+
+
+def scan_jit_preflight_enabled(
+    *,
+    env_value: str | None,
+    backend_name: str,
+    scan_differentiated: bool,
+) -> bool:
+    """Resolve whether scan preflight should use a cached one-step JIT runner."""
+
+    if env_value is not None:
+        return str(env_value).strip().lower() not in ("", "0", "false", "no")
+    backend = str(backend_name).strip().lower()
+    return backend not in ("", "cpu") and (not bool(scan_differentiated))
 
 
 def resolve_scan_preflight_iters(
@@ -256,6 +273,7 @@ def build_vmec2000_scan_cache_key(
     static_key: Any,
     wout_key: Any,
     edge_signature_key: Any,
+    tomnsps_policy_key: Any = None,
     max_iter_tail: int,
     preflight_iters: int,
     iter_offset0: int,
@@ -266,6 +284,8 @@ def build_vmec2000_scan_cache_key(
     nstep_screen: int,
     use_restart_triggers: bool,
     vmecpp_restart: bool,
+    scan_use_precomputed: bool = False,
+    scan_use_lax_tridi: bool = False,
     scan_use_restart_payload: bool,
     stage_prev_fsq: float | None,
     stage_transition_factor: float,
@@ -286,6 +306,7 @@ def build_vmec2000_scan_cache_key(
         static_key,
         wout_key,
         edge_signature_key,
+        tomnsps_policy_key,
         int(max_iter_tail),
         int(preflight_iters),
         int(iter_offset0),
@@ -296,6 +317,8 @@ def build_vmec2000_scan_cache_key(
         int(nstep_screen),
         bool(use_restart_triggers),
         bool(vmecpp_restart),
+        bool(scan_use_precomputed),
+        bool(scan_use_lax_tridi),
         bool(scan_use_restart_payload),
         None if stage_prev_fsq is None else float(stage_prev_fsq),
         float(stage_transition_factor),

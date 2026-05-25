@@ -211,6 +211,25 @@ def _install_fast_wout_stubs(
     return calls
 
 
+def _fake_force_payload(bc, shape: tuple[int, int, int]):
+    zeros = np.zeros(shape, dtype=float)
+    return SimpleNamespace(
+        bc=bc,
+        pr1_even=zeros,
+        pr1_odd=zeros,
+        pz1_even=zeros,
+        pz1_odd=zeros,
+        pru_even=zeros,
+        pru_odd=zeros,
+        pzu_even=zeros,
+        pzu_odd=zeros,
+        prv_even=zeros,
+        prv_odd=zeros,
+        pzv_even=zeros,
+        pzv_odd=zeros,
+    )
+
+
 def _run_wout_minimal(monkeypatch: pytest.MonkeyPatch, tmp_path, **stub_kwargs):
     _cfg, _modes, state, static, indata = _case_objects()
     converged = stub_kwargs.pop("converged", True)
@@ -228,6 +247,39 @@ def _run_wout_minimal(monkeypatch: pytest.MonkeyPatch, tmp_path, **stub_kwargs):
         converged=converged,
     )
     return out, calls
+
+
+def test_reuse_final_bcovar_env_uses_payload_even_on_fast_path(tmp_path, monkeypatch):
+    cfg, _modes, state, static, indata = _case_objects()
+    trig = _trig_for_cfg(cfg)
+    full_shape = (cfg.ns, int(trig.ntheta1), int(np.asarray(trig.cosnv).shape[0]))
+    calls = _install_fast_wout_stubs(monkeypatch)
+    payload = _fake_force_payload(calls["bc"], full_shape)
+
+    bcovar_calls = []
+
+    def unexpected_bcovar(**kwargs):
+        bcovar_calls.append(kwargs)
+        raise AssertionError("fast bcovar recompute should be skipped")
+
+    monkeypatch.setenv("VMEC_JAX_WOUT_FAST_BCOVAR", "1")
+    monkeypatch.setenv("VMEC_JAX_WOUT_REUSE_FINAL_BCOVAR", "1")
+    monkeypatch.setattr(bcovar_module, "vmec_bcovar_half_mesh_from_wout", unexpected_bcovar)
+
+    wout = wout_module.wout_minimal_from_fixed_boundary(
+        path=tmp_path / "wout_reuse_payload.nc",
+        state=state,
+        static=static,
+        indata=indata,
+        signgs=1,
+        fsqr=0.01,
+        fsqz=0.02,
+        fsql=0.03,
+        force_payload_override=payload,
+    )
+
+    assert bcovar_calls == []
+    assert np.asarray(wout.bmnc).shape[0] == cfg.ns
 
 
 def test_enable_bsubs_env_overrides_namelist_for_mercier(tmp_path, monkeypatch):
@@ -263,21 +315,26 @@ def test_mercier_failure_is_swallowed_unless_strict(tmp_path, monkeypatch):
         _run_wout_minimal(monkeypatch, tmp_path, mercier_impl=raise_mercier)
 
 
-def test_nonconverged_beta_retention_env(tmp_path, monkeypatch):
+def test_nonconverged_beta_retention_and_legacy_zero_env(tmp_path, monkeypatch):
     beta = (1.25, 2.5, 3.75, 5.0)
 
     wout_default, _calls = _run_wout_minimal(monkeypatch, tmp_path, beta=beta, converged=False)
-    assert wout_default.betatotal == 0.0
-    assert wout_default.betapol == 0.0
-    assert wout_default.betator == 0.0
+    assert wout_default.betapol == pytest.approx(beta[0])
+    assert wout_default.betator == pytest.approx(beta[1])
+    assert wout_default.betatotal == pytest.approx(beta[2])
     assert wout_default.betaxis == pytest.approx(beta[3])
+    assert wout_default.Aminor_p == pytest.approx(0.5)
+    assert wout_default.Rmajor_p == pytest.approx(1.5)
+    assert wout_default.aspect == pytest.approx(3.0)
+    assert wout_default.volume_p == pytest.approx(2.0)
+    assert wout_default.vmec_jax_converged is False
 
-    monkeypatch.setenv("VMEC_JAX_WOUT_KEEP_NONCONVERGED_BETA", "1")
-    wout_keep, _calls = _run_wout_minimal(monkeypatch, tmp_path, beta=beta, converged=False)
-    assert wout_keep.betapol == pytest.approx(beta[0])
-    assert wout_keep.betator == pytest.approx(beta[1])
-    assert wout_keep.betatotal == pytest.approx(beta[2])
-    assert wout_keep.betaxis == pytest.approx(beta[3])
+    monkeypatch.setenv("VMEC_JAX_WOUT_ZERO_NONCONVERGED_BETA", "1")
+    wout_legacy, _calls = _run_wout_minimal(monkeypatch, tmp_path, beta=beta, converged=False)
+    assert wout_legacy.betatotal == 0.0
+    assert wout_legacy.betapol == 0.0
+    assert wout_legacy.betator == 0.0
+    assert wout_legacy.betaxis == pytest.approx(beta[3])
 
 
 def test_forced_bss_uses_symforced_force_kernel_arrays(tmp_path, monkeypatch):

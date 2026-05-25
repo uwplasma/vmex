@@ -18,7 +18,11 @@ from .modes import nyquist_mode_table_from_grid
 from .namelist import InData
 from .state import StateLayout, VMECState
 from .fourier import eval_fourier
-from .vmec_parity import vmec_m1_internal_to_physical_signed, vmec_m1_physical_to_internal_signed
+from .vmec_parity import (
+    vmec_m1_internal_to_physical_signed,
+    vmec_m1_internal_to_physical_signed_host,
+    vmec_m1_physical_to_internal_signed,
+)
 from .vmec_realspace import (
     vmec_realspace_synthesis,
     vmec_realspace_synthesis_dtheta,
@@ -4371,6 +4375,15 @@ def read_wout(path: str | Path) -> WoutData:
 
         pcurr_type = read_type_field(ds.variables, "pcurr_type")
         piota_type = read_type_field(ds.variables, "piota_type")
+        ier_flag = read_optional_int_scalar(ds.variables, "ier_flag", 0)
+        vmec_jax_converged_var = ds.variables.get("vmec_jax_converged__logical__")
+        if vmec_jax_converged_var is None:
+            vmec_jax_converged = ier_flag == 0
+        else:
+            vmec_jax_converged = _bool_from_nc(vmec_jax_converged_var[:])
+        vmec_jax_status = read_type_field(ds.variables, "vmec_jax_status")
+        if not vmec_jax_status:
+            vmec_jax_status = "converged" if bool(vmec_jax_converged) else "nonconverged"
 
     return WoutData(
         path=path,
@@ -4442,6 +4455,9 @@ def read_wout(path: str | Path) -> WoutData:
         ac_aux_f=ac_aux_f,
         pcurr_type=pcurr_type,
         piota_type=piota_type,
+        ier_flag=ier_flag,
+        vmec_jax_converged=bool(vmec_jax_converged),
+        vmec_jax_status=vmec_jax_status,
     )
 
 
@@ -4516,6 +4532,10 @@ def write_wout(path: str | Path, wout: WoutData, *, overwrite: bool = False) -> 
         write_int_variable(ds, "nfp", (), np.asarray(int(wout.nfp)))
         write_int_variable(ds, "signgs", (), np.asarray(int(wout.signgs)))
         write_int_variable(ds, "lasym__logical__", (), np.asarray(int(bool(wout.lasym))))
+        wout_converged = bool(getattr(wout, "vmec_jax_converged", True))
+        ier_flag = int(getattr(wout, "ier_flag", 0 if wout_converged else 1))
+        write_int_variable(ds, "ier_flag", (), np.asarray(ier_flag))
+        write_int_variable(ds, "vmec_jax_converged__logical__", (), np.asarray(int(wout_converged)))
         write_int_variable(ds, "mnmax", (), np.asarray(int(getattr(wout, "mnmax", mnmax))))
         write_int_variable(
             ds,
@@ -4629,6 +4649,11 @@ def write_wout(path: str | Path, wout: WoutData, *, overwrite: bool = False) -> 
 
         write_fixed_width_string_variable(ds, "pcurr_type", getattr(wout, "pcurr_type", ""))
         write_fixed_width_string_variable(ds, "piota_type", getattr(wout, "piota_type", ""))
+        write_fixed_width_string_variable(
+            ds,
+            "vmec_jax_status",
+            getattr(wout, "vmec_jax_status", "converged" if wout_converged else "nonconverged"),
+        )
 
 
 def wout_minimal_from_fixed_boundary(
@@ -4643,6 +4668,9 @@ def wout_minimal_from_fixed_boundary(
     fsql: float,
     fsqt: np.ndarray | None = None,
     converged: bool | None = None,
+    flux_override=None,
+    profiles_override: dict | None = None,
+    force_payload_override=None,
 ) -> WoutData:
     """Build a minimal :class:`WoutData` from an input-only fixed-boundary run.
 
@@ -4675,7 +4703,7 @@ def wout_minimal_from_fixed_boundary(
     wout_light_env = os.getenv("VMEC_JAX_WOUT_LIGHT", "").strip().lower()
     wout_light = wout_light_env not in ("", "0", "false", "no")
     wout_fast_bcovar_env = os.getenv("VMEC_JAX_WOUT_FAST_BCOVAR", "").strip().lower()
-    wout_fast_bcovar = wout_fast_bcovar_env not in ("", "0", "false", "no")
+    wout_fast_bcovar = wout_fast_bcovar_env not in ("0", "false", "no", "off")
     if wout_light:
         # Light output favors speed; also use the fast bcovar path.
         wout_fast_bcovar = True
@@ -4727,10 +4755,13 @@ def wout_minimal_from_fixed_boundary(
 
     if wout_timing_enabled:
         t0 = _time.perf_counter()
-    if wout_light:
-        geom = _vmec_realspace_geom_light_from_state(state=state, modes=static.modes, trig=trig)
-    else:
-        geom = vmec_realspace_geom_from_state(state=state, modes=static.modes, trig=trig)
+    from .vmec_numpy_forces import _numpy_module_patch
+
+    with _numpy_module_patch():
+        if wout_light:
+            geom = _vmec_realspace_geom_light_from_state(state=state, modes=static.modes, trig=trig)
+        else:
+            geom = vmec_realspace_geom_from_state(state=state, modes=static.modes, trig=trig)
     if has_jax():
         try:
             geom = jax.device_get(geom)
@@ -4742,7 +4773,7 @@ def wout_minimal_from_fixed_boundary(
 
     # Flux and profiles on VMEC half mesh.
     s = np.asarray(static.s)
-    flux = flux_profiles_from_indata(indata, s, signgs=int(signgs))
+    flux = flux_override if flux_override is not None else flux_profiles_from_indata(indata, s, signgs=int(signgs))
     chipf_wout = np.asarray(flux.chipf)
     phips = np.asarray(flux.phips)
     if phips.size:
@@ -4753,7 +4784,7 @@ def wout_minimal_from_fixed_boundary(
         s_half = s
     else:
         s_half = np.concatenate([s[:1], 0.5 * (s[1:] + s[:-1])], axis=0)
-    prof = eval_profiles(indata, s_half)
+    prof = dict(profiles_override) if profiles_override is not None else eval_profiles(indata, s_half)
     pres = np.asarray(prof.get("pressure", np.zeros((ns,), dtype=float)))
     if pres.size:
         pres = pres.copy()
@@ -4786,9 +4817,13 @@ def wout_minimal_from_fixed_boundary(
 
     iotaf = np.asarray(_iotaf_from_iotas(iotas, lrfp=bool(indata.get_bool("LRFP", False))))
 
-    # For current-driven runs (ncurr=1), VMEC updates iota from the force balance
-    # (add_fluxes). Recompute iotas/iotaf from the final state to match VMEC2000.
-    if ncurr == 1 and os.getenv("VMEC_JAX_DISABLE_WOUT_NCURR_RECOMPUTE", "0") in ("", "0"):
+    # For current-driven runs (ncurr=1), VMEC updates iota from the force
+    # balance (add_fluxes). Recompute iotas/iotaf from the final state to match
+    # VMEC2000 even when callers supplied input-derived flux/profile payloads.
+    if (
+        ncurr == 1
+        and os.getenv("VMEC_JAX_DISABLE_WOUT_NCURR_RECOMPUTE", "0") in ("", "0")
+    ):
         chips, iotas, iotaf = equilibrium_iota_profiles_from_state(
             state=state,
             static=static,
@@ -4808,7 +4843,7 @@ def wout_minimal_from_fixed_boundary(
     nscale = np.where(np.abs(n_arr) == 0, 1.0, sqrt2)
     mode_scale = (mscale * nscale)[None, :]
     lconm1 = bool(getattr(cfg, "lconm1", True))
-    Rcos_use, Zsin_use, Rsin_use, Zcos_use = vmec_m1_internal_to_physical_signed(
+    Rcos_use, Zsin_use, Rsin_use, Zcos_use = vmec_m1_internal_to_physical_signed_host(
         Rcos=np.asarray(state.Rcos, dtype=float),
         Zsin=np.asarray(state.Zsin, dtype=float),
         Rsin=np.asarray(state.Rsin, dtype=float),
@@ -4919,18 +4954,41 @@ def wout_minimal_from_fixed_boundary(
     k_force = None
     if wout_timing_enabled:
         t0 = _time.perf_counter()
-    if wout_fast_bcovar:
-        bc = vmec_bcovar_half_mesh_from_wout(
-            state=state,
-            static=static,
-            wout=wout_like,
-            pres=pres,
-            use_wout_bsup=False,
-            use_wout_bsub_for_lambda=False,
-            use_wout_bmag_for_bsq=False,
-            use_vmec_synthesis=True,
-            trig=None,
-        )
+    reuse_final_bcovar_env = os.getenv("VMEC_JAX_WOUT_REUSE_FINAL_BCOVAR", "").strip().lower()
+    reuse_final_bcovar = reuse_final_bcovar_env not in ("", "0", "false", "no", "off")
+    if force_payload_override is not None and (reuse_final_bcovar or not wout_fast_bcovar) and (not force_iequi1):
+        k_force = force_payload_override
+        if has_jax():
+            try:
+                k_force = jax.device_get(k_force)
+            except Exception:
+                pass
+        bc = k_force.bc
+        geom["pr1_even"] = np.asarray(k_force.pr1_even, dtype=float)
+        geom["pr1_odd"] = np.asarray(k_force.pr1_odd, dtype=float)
+        geom["pz1_even"] = np.asarray(k_force.pz1_even, dtype=float)
+        geom["pz1_odd"] = np.asarray(k_force.pz1_odd, dtype=float)
+        geom["pru_even"] = np.asarray(k_force.pru_even, dtype=float)
+        geom["pru_odd"] = np.asarray(k_force.pru_odd, dtype=float)
+        geom["pzu_even"] = np.asarray(k_force.pzu_even, dtype=float)
+        geom["pzu_odd"] = np.asarray(k_force.pzu_odd, dtype=float)
+        geom["prv_even"] = np.asarray(k_force.prv_even, dtype=float)
+        geom["prv_odd"] = np.asarray(k_force.prv_odd, dtype=float)
+        geom["pzv_even"] = np.asarray(k_force.pzv_even, dtype=float)
+        geom["pzv_odd"] = np.asarray(k_force.pzv_odd, dtype=float)
+    elif wout_fast_bcovar:
+        with _numpy_module_patch():
+            bc = vmec_bcovar_half_mesh_from_wout(
+                state=state,
+                static=static,
+                wout=wout_like,
+                pres=pres,
+                use_wout_bsup=False,
+                use_wout_bsub_for_lambda=False,
+                use_wout_bmag_for_bsq=False,
+                use_vmec_synthesis=True,
+                trig=None,
+            )
         if has_jax():
             try:
                 bc = jax.device_get(bc)
@@ -5008,6 +5066,24 @@ def wout_minimal_from_fixed_boundary(
             return arr_np
         # Enforce stellarator symmetry on the full grid when lasym=False.
         return _vmec_symforce_apply(f=arr_np, trig=trig, kind=kind)
+
+    if use_force_bss and (k_force is None):
+        wout_force_vmec_synth_env = os.getenv("VMEC_JAX_WOUT_FORCE_VMEC_SYNTH", "").strip().lower()
+        wout_force_vmec_synth = wout_force_vmec_synth_env not in ("", "0", "false", "no")
+        k_force = vmec_forces_rz_from_wout(
+            state=state,
+            static=static,
+            wout=wout_like,
+            indata=indata_wout,
+            use_wout_bsup=False,
+            use_vmec_synthesis=wout_force_vmec_synth,
+            trig=None,
+        )
+        if has_jax():
+            try:
+                k_force = jax.device_get(k_force)
+            except Exception:
+                pass
 
     if use_force_bss and (k_force is not None):
         if hasattr(k_force, "crmn_e") and hasattr(k_force, "czmn_e"):
@@ -5095,11 +5171,6 @@ def wout_minimal_from_fixed_boundary(
         Zu=np.asarray(geom["Zu"]),
         wint=wint,
     )
-    if not bool(converged):
-        Aminor_p = 0.0
-        Rmajor_p = 0.0
-        aspect = 0.0
-        volume_p = 0.0
 
     # buco/bvco/jcur* will be computed after aligning bsubu sign for wout output.
     buco = bvco = jcuru = jcurv = None
@@ -5727,14 +5798,18 @@ def wout_minimal_from_fixed_boundary(
             if os.getenv("VMEC_JAX_STRICT_WOUT_DIAGNOSTICS", "") not in ("", "0"):
                 raise
 
-    # Match VMEC2000 wrout behavior for non-converged runs.
-    keep_beta_nonconv = os.getenv("VMEC_JAX_WOUT_KEEP_NONCONVERGED_BETA", "").strip().lower() not in (
+    # vmec_jax writes VMEC++-style diagnostic wout files for non-converged runs:
+    # preserve every field computed from the last state and mark solver status.
+    # Keep an explicit legacy escape hatch for tests/comparisons that require
+    # VMEC2000's non-converged beta zeroing behavior.
+    zero_beta_nonconv = os.getenv("VMEC_JAX_WOUT_ZERO_NONCONVERGED_BETA", "").strip().lower() not in (
         "",
         "0",
         "false",
         "no",
+        "off",
     )
-    if (not bool(converged)) and (not keep_beta_nonconv):
+    if (not bool(converged)) and bool(zero_beta_nonconv):
         betatotal = 0.0
         betapol = 0.0
         betator = 0.0
@@ -5936,6 +6011,9 @@ def wout_minimal_from_fixed_boundary(
         ac_aux_f=np.asarray(ac_aux_f, dtype=float),
         pcurr_type=str(pcurr_type),
         piota_type=str(piota_type),
+        ier_flag=0 if bool(converged) else 1,
+        vmec_jax_converged=bool(converged),
+        vmec_jax_status="converged" if bool(converged) else "nonconverged",
     )
 
     if wout_timing_enabled:

@@ -129,7 +129,7 @@ def _scan_options(**overrides):
         scan_trace_env="0",
         abort_scan_env="0",
         scan_precompute_env="",
-        tridi_precompute_env="0",
+        tridi_precompute_env="",
         scan_lax_env="",
         tridi_solve_env="",
         scan_restart_payload_env="",
@@ -174,8 +174,10 @@ def test_vmec2000_scan_options_dump_forces_full_history_and_print_chunking():
 def test_vmec2000_scan_options_env_overrides_preconditioner_and_restart_flags():
     default_cpu_lax = _scan_options(backend_name="cpu", scan_lax_env="", tridi_solve_env="")
     default_gpu_lax = _scan_options(backend_name="gpu", scan_lax_env="", tridi_solve_env="")
-    assert default_cpu_lax.scan_use_lax_tridi
+    assert not default_cpu_lax.scan_use_lax_tridi
     assert not default_gpu_lax.scan_use_lax_tridi
+    assert default_cpu_lax.scan_use_precomputed
+    assert default_gpu_lax.scan_use_precomputed
 
     opts = _scan_options(
         backend_name="gpu",

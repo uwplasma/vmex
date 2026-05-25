@@ -11,6 +11,25 @@ import vmec_jax.vmec_tomnsp as vt
 from vmec_jax.vmec_tomnsp import tomnspa_rzl, tomnsps_masks, tomnsps_rzl, vmec_trig_tables
 
 
+def test_tomnsps_fft_policy_override_is_scoped(monkeypatch) -> None:
+    monkeypatch.setattr(vt, "_TOMNSPS_FFT_ENV", "")
+    vt._TOMNSPS_FFT_CACHE[:] = [False]
+
+    with vt.tomnsps_fft_policy_override(True):
+        assert vt._TOMNSPS_FFT_ENV == "1"
+        assert vt._TOMNSPS_FFT_CACHE == []
+        assert vt._get_tomnsps_fft() is True
+
+    assert vt._TOMNSPS_FFT_ENV == ""
+    assert vt._TOMNSPS_FFT_CACHE == [False]
+
+    monkeypatch.setattr(vt, "_TOMNSPS_FFT_ENV", "0")
+    vt._TOMNSPS_FFT_CACHE.clear()
+    with vt.tomnsps_fft_policy_override(True):
+        assert vt._TOMNSPS_FFT_ENV == "0"
+        assert vt._get_tomnsps_fft() is False
+
+
 def _transform_inputs(shape: tuple[int, int, int]) -> dict[str, np.ndarray]:
     base = np.linspace(-0.7, 0.9, int(np.prod(shape)), dtype=float).reshape(shape)
     names = (

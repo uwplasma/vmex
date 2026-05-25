@@ -233,7 +233,7 @@ def test_vmec_verbose_final_summary_reports_exhausted_unconverged_stage(monkeypa
 
     out = capsys.readouterr().out
     assert "Try increasing NITER or PRE_NITER if the preconditioner is on." in out
-    assert "EXECUTION TERMINATED NORMALLY" in out
+    assert "EXECUTION FINISHED WITHOUT REQUESTED CONVERGENCE" in out
     assert "FILE : verbose_final" in out
     assert "NUMBER OF JACOBIAN RESETS =    2" in out
     assert run.result.diagnostics["converged"] is False

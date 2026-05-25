@@ -365,8 +365,8 @@ def test_precompile_only_jit_precompile_exercises_force_cache_and_lower(monkeypa
 
     monkeypatch.setattr(solve, "jit", fake_jit)
 
-    first = _run_precompile_only(_static(), jit_forces=True, jit_precompile=True)
-    second = _run_precompile_only(_static(), jit_forces=True, jit_precompile=True)
+    first = _run_precompile_only(_static(), jit_forces=True, jit_precompile=True, host_update_assembly=False)
+    second = _run_precompile_only(_static(), jit_forces=True, jit_precompile=True, host_update_assembly=False)
 
     assert first.diagnostics == {"precompile_only": True}
     assert second.diagnostics == {"precompile_only": True}

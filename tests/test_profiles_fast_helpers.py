@@ -6,7 +6,7 @@ import pytest
 from vmec_jax import profiles as profiles_mod
 from vmec_jax._compat import has_jax, jax, jnp
 from vmec_jax.namelist import InData
-from vmec_jax.profiles import eval_profiles
+from vmec_jax.profiles import ProfileInputs, eval_profiles
 
 
 def test_profile_private_helpers_and_fallbacks():
@@ -132,3 +132,140 @@ def test_profile_coeff_padding_stays_jit_differentiable_for_traced_current_coeff
 
     np.testing.assert_allclose(np.asarray(current), [0.0, 0.75, 2.0], rtol=1.0e-12, atol=1.0e-12)
     np.testing.assert_allclose(np.asarray(grad), [1.5, 0.625], rtol=1.0e-12, atol=1.0e-12)
+
+
+def test_traced_profile_paths_cover_two_power_pedestal_lrfp_and_spline_currents():
+    if not has_jax():
+        pytest.skip("JAX is required for traced profile coverage")
+
+    @jax.jit
+    def two_power_profile(am, ai, ac, s):
+        cfg = ProfileInputs(
+            pmass_type="two_power",
+            piota_type="power_series",
+            pcurr_type="two_power",
+            am=am,
+            ai=ai,
+            ac=ac,
+            ac_aux_s=jnp.asarray([]),
+            ac_aux_f=jnp.asarray([]),
+            pres_scale=2.0,
+            bloat=1.0,
+            spres_ped=0.5,
+            lrfp=True,
+            ncurr=1,
+        )
+        prof = eval_profiles(cfg, s)
+        return prof["pressure_pa"], prof["iota"], prof["current"]
+
+    @jax.jit
+    def spline_profiles(s):
+        base = dict(
+            pmass_type="power_series",
+            piota_type="power_series",
+            am=jnp.asarray([0.0]),
+            ai=jnp.asarray([]),
+            ac=jnp.asarray([1.0]),
+            ac_aux_s=jnp.asarray([0.0, 1.0]),
+            ac_aux_f=jnp.asarray([0.0, 2.0]),
+            pres_scale=1.0,
+            bloat=1.0,
+            spres_ped=1.0,
+            lrfp=False,
+            ncurr=1,
+        )
+        current_ip = eval_profiles(ProfileInputs(pcurr_type="cubic_spline_ip", **base), s)["current"]
+        current_i = eval_profiles(ProfileInputs(pcurr_type="cubic_spline_i", **base), s)["current"]
+        empty_ip = eval_profiles(
+            ProfileInputs(
+                pcurr_type="cubic_spline_ip",
+                **{**base, "ac_aux_s": jnp.asarray([]), "ac_aux_f": jnp.asarray([])},
+            ),
+            s,
+        )["current"]
+        empty_i = eval_profiles(
+            ProfileInputs(
+                pcurr_type="cubic_spline_i",
+                **{**base, "ac_aux_s": jnp.asarray([]), "ac_aux_f": jnp.asarray([])},
+            ),
+            s,
+        )["current"]
+        return current_ip, current_i, empty_ip, empty_i
+
+    s = jnp.asarray([0.0, 0.25, 0.75])
+    pressure_pa, iota, current = two_power_profile(
+        jnp.asarray([10.0, 2.0, 1.0]),
+        jnp.asarray([0.0, 2.0]),
+        jnp.asarray([3.0, 2.0, 1.0]),
+        s,
+    )
+    expected_pressure = 20.0 * (1.0 - np.asarray(s) ** 2)
+    expected_pressure = np.where(np.asarray(s) > 0.5, 20.0 * (1.0 - 0.5**2), expected_pressure)
+    np.testing.assert_allclose(np.asarray(pressure_pa), expected_pressure, rtol=1.0e-12, atol=1.0e-12)
+    assert np.isinf(np.asarray(iota)[0])
+    np.testing.assert_allclose(np.asarray(iota)[1:], 1.0 / (2.0 * np.asarray(s)[1:]), rtol=1.0e-12)
+    assert np.all(np.asarray(current) >= 0.0)
+
+    current_ip, current_i, empty_ip, empty_i = spline_profiles(s)
+    np.testing.assert_allclose(np.asarray(current_ip), np.asarray(s) ** 2, rtol=1.0e-12, atol=1.0e-12)
+    np.testing.assert_allclose(np.asarray(current_i), 2.0 * np.asarray(s), rtol=1.0e-12, atol=1.0e-12)
+    np.testing.assert_allclose(np.asarray(empty_ip), np.zeros_like(np.asarray(s)), atol=0.0)
+    np.testing.assert_allclose(np.asarray(empty_i), np.zeros_like(np.asarray(s)), atol=0.0)
+
+
+def test_eager_jax_profile_fallback_matches_vmec_profile_formulas(monkeypatch):
+    """Force the differentiable profile path and validate VMEC profile formulas."""
+    if not has_jax():
+        pytest.skip("JAX is required for eager JAX profile coverage")
+
+    monkeypatch.setattr(profiles_mod, "_can_use_numpy_profile_eval", lambda _s_grid: False)
+    s = jnp.asarray([0.0, 0.25, 0.75])
+    cfg = ProfileInputs(
+        pmass_type="two_power",
+        piota_type="power_series",
+        pcurr_type="two_power",
+        am=jnp.asarray([10.0, 2.0, 1.0]),
+        ai=jnp.asarray([0.0, 2.0]),
+        ac=jnp.asarray([3.0, 2.0, 1.0]),
+        ac_aux_s=jnp.asarray([]),
+        ac_aux_f=jnp.asarray([]),
+        pres_scale=2.0,
+        bloat=1.0,
+        spres_ped=0.5,
+        lrfp=True,
+        ncurr=1,
+    )
+    prof = eval_profiles(cfg, s)
+
+    expected_pressure = 20.0 * (1.0 - np.asarray(s) ** 2)
+    expected_pressure = np.where(np.asarray(s) > 0.5, 20.0 * (1.0 - 0.5**2), expected_pressure)
+    np.testing.assert_allclose(np.asarray(prof["pressure_pa"]), expected_pressure, rtol=1.0e-12, atol=1.0e-12)
+    np.testing.assert_allclose(np.asarray(prof["pressure"]), profiles_mod.MU0 * expected_pressure, rtol=1.0e-12)
+    assert np.isinf(np.asarray(prof["iota"])[0])
+    np.testing.assert_allclose(np.asarray(prof["iota"])[1:], 1.0 / (2.0 * np.asarray(s)[1:]), rtol=1.0e-12)
+    assert np.all(np.asarray(prof["current"]) >= 0.0)
+
+    spline_base = dict(
+        pmass_type="power_series",
+        piota_type="power_series",
+        am=jnp.asarray([0.0]),
+        ai=jnp.asarray([]),
+        ac=jnp.asarray([1.0]),
+        ac_aux_s=jnp.asarray([0.0, 1.0]),
+        ac_aux_f=jnp.asarray([0.0, 2.0]),
+        pres_scale=1.0,
+        bloat=1.0,
+        spres_ped=1.0,
+        lrfp=False,
+        ncurr=1,
+    )
+    current_ip = eval_profiles(ProfileInputs(pcurr_type="cubic_spline_ip", **spline_base), s)["current"]
+    current_i = eval_profiles(ProfileInputs(pcurr_type="cubic_spline_i", **spline_base), s)["current"]
+    np.testing.assert_allclose(np.asarray(current_ip), np.asarray(s) ** 2, rtol=1.0e-12, atol=1.0e-12)
+    np.testing.assert_allclose(np.asarray(current_i), 2.0 * np.asarray(s), rtol=1.0e-12, atol=1.0e-12)
+
+    empty_base = {**spline_base, "ac_aux_s": jnp.asarray([]), "ac_aux_f": jnp.asarray([])}
+    empty_ip = eval_profiles(ProfileInputs(pcurr_type="cubic_spline_ip", **empty_base), s)["current"]
+    empty_i = eval_profiles(ProfileInputs(pcurr_type="cubic_spline_i", **empty_base), s)["current"]
+    np.testing.assert_allclose(np.asarray(empty_ip), np.zeros_like(np.asarray(s)), atol=0.0)
+    np.testing.assert_allclose(np.asarray(empty_i), np.zeros_like(np.asarray(s)), atol=0.0)

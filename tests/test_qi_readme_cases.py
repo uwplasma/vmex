@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import csv
 import importlib.util
+import json
 from pathlib import Path
 import sys
-import csv
 
 import numpy as np
 import pytest
@@ -213,6 +214,33 @@ def test_real_nfp3_raw_initial_wout_matches_input_boundary() -> None:
 
     assert mod._boundary_mismatches(nfp3.input_file, nfp3.initial_wout) == []
     mod._validate_case_initial_wout(nfp3)
+
+
+def test_nfp3_case_catalog_matches_checked_in_readme_metadata() -> None:
+    cases_mod = _load_cases_module()
+    artifact_dir = ROOT / "docs" / "_static" / "qi_readme_cases" / "nfp3_seed3127"
+    history = json.loads((artifact_dir / "history.json").read_text())
+    diagnostics = json.loads(
+        (artifact_dir / "diagnostics.json").read_text()
+    )
+
+    case = cases_mod.QI_CASES["nfp3_qi"]
+
+    assert case["target_aspect"] == pytest.approx(history["target_aspect"])
+    assert case["target_aspect"] == pytest.approx(diagnostics["target_aspect"])
+    assert case["target_aspect"] == pytest.approx(cases_mod.SEED3127_REVIEWED_TARGET_ASPECT)
+    assert "aspect4" in str(case["output_dir"])
+
+
+def test_real_nfp4_raw_initial_wout_matches_minimal_seed_and_final_differs() -> None:
+    mod = _load_module()
+
+    nfp4 = next(case for case in mod.CASES if case.label == "NFP=4 minimal + QI-reference proposal")
+    final_wout = nfp4.output_dir / "wout_final.nc"
+
+    assert nfp4.initial_wout.read_bytes() != final_wout.read_bytes()
+    assert mod._boundary_mismatches(nfp4.input_file, nfp4.initial_wout) == []
+    mod._validate_case_initial_wout(nfp4)
 
 
 def test_readme_renderer_detects_flat_objective_history() -> None:

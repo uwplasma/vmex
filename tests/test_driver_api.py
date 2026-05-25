@@ -362,6 +362,135 @@ def test_host_update_assembly_matches_jax_update_path():
     np.testing.assert_allclose(np.asarray(res_host.w_history), np.asarray(res_jax.w_history), rtol=1e-12, atol=1e-12)
 
 
+def test_host_update_assembly_matches_jax_update_path_lasym():
+    root = Path(__file__).resolve().parents[1]
+    input_path = root / "examples/data/input.basic_non_stellsym_pressure"
+    cfg, indata = load_config(str(input_path))
+    grid = vmec_angle_grid(ntheta=10, nzeta=8, nfp=cfg.nfp, lasym=True)
+    static = build_static(cfg, grid=grid)
+    boundary = boundary_from_indata(indata, static.modes)
+    state0 = initial_guess_from_boundary(static, boundary, indata, vmec_project=False)
+
+    common = dict(
+        indata=indata,
+        signgs=-1,
+        ftol=float(indata.get_float("FTOL", 1.0e-13)),
+        max_iter=1,
+        step_size=float(indata.get_float("DELT", 5e-3)),
+        include_constraint_force=True,
+        apply_m1_constraints=True,
+        precond_radial_alpha=0.5,
+        precond_lambda_alpha=0.5,
+        mode_diag_exponent=0.0,
+        auto_flip_force=False,
+        divide_by_scalxc_for_update=False,
+        lambda_update_scale=1.0,
+        enforce_vmec_lambda_axis=True,
+        vmec2000_control=True,
+        strict_update=True,
+        backtracking=False,
+        reference_mode=False,
+        use_restart_triggers=True,
+        vmecpp_restart=False,
+        use_direct_fallback=False,
+        verbose=False,
+        verbose_vmec2000_table=False,
+        jit_forces=False,
+        use_scan=False,
+    )
+
+    res_jax = solve_fixed_boundary_residual_iter(
+        state0,
+        static,
+        host_update_assembly=False,
+        **common,
+    )
+    res_host = solve_fixed_boundary_residual_iter(
+        state0,
+        static,
+        host_update_assembly=True,
+        **common,
+    )
+
+    for name in ("Rcos", "Rsin", "Zcos", "Zsin", "Lcos", "Lsin"):
+        np.testing.assert_allclose(
+            np.asarray(getattr(res_host.state, name)),
+            np.asarray(getattr(res_jax.state, name)),
+            rtol=1e-12,
+            atol=1e-12,
+        )
+    np.testing.assert_allclose(np.asarray(res_host.w_history), np.asarray(res_jax.w_history), rtol=1e-12, atol=1e-12)
+
+
+def test_host_update_assembly_driver_default_env_override(monkeypatch):
+    root = Path(__file__).resolve().parents[1]
+    cfg, _indata = load_config(str(root / "examples/data/input.nfp4_QH_warm_start"))
+    cfg_high_work, _indata_high_work = load_config(str(root / "examples/data/input.nfp4_QH_finite_beta"))
+    cfg_lasym, _indata_lasym = load_config(str(root / "examples/data/input.basic_non_stellsym_pressure"))
+
+    monkeypatch.delenv("VMEC_JAX_HOST_UPDATE_ASSEMBLY", raising=False)
+    monkeypatch.delenv("VMEC_JAX_HOST_UPDATE_CPU_WORK_LIMIT", raising=False)
+    assert driver_module._host_update_assembly_driver_default(
+        cfg=cfg,
+        performance_mode=True,
+        backend="cpu",
+        use_scan=False,
+    )
+    assert not driver_module._host_update_assembly_driver_default(
+        cfg=cfg,
+        performance_mode=True,
+        backend="gpu",
+        use_scan=False,
+    )
+    assert not driver_module._host_update_assembly_driver_default(
+        cfg=cfg,
+        performance_mode=True,
+        backend="cpu",
+        use_scan=True,
+    )
+    assert driver_module._host_update_assembly_driver_default(
+        cfg=cfg_lasym,
+        performance_mode=True,
+        backend="cpu",
+        use_scan=False,
+    )
+    assert not driver_module._host_update_assembly_driver_default(
+        cfg=cfg_high_work,
+        performance_mode=True,
+        backend="cpu",
+        use_scan=False,
+    )
+
+    monkeypatch.setenv("VMEC_JAX_HOST_UPDATE_ASSEMBLY", "0")
+    assert not driver_module._host_update_assembly_driver_default(
+        cfg=cfg,
+        performance_mode=True,
+        backend="cpu",
+        use_scan=False,
+    )
+    monkeypatch.delenv("VMEC_JAX_HOST_UPDATE_ASSEMBLY", raising=False)
+    monkeypatch.setenv("VMEC_JAX_HOST_UPDATE_CPU_WORK_LIMIT", "999999")
+    assert driver_module._host_update_assembly_driver_default(
+        cfg=cfg_high_work,
+        performance_mode=True,
+        backend="cpu",
+        use_scan=False,
+    )
+    monkeypatch.setenv("VMEC_JAX_HOST_UPDATE_ASSEMBLY", "1")
+    assert not driver_module._host_update_assembly_driver_default(
+        cfg=cfg,
+        performance_mode=True,
+        backend="cpu",
+        use_scan=True,
+    )
+    assert driver_module._host_update_assembly_driver_default(
+        cfg=cfg,
+        performance_mode=True,
+        backend="cpu",
+        use_scan=False,
+    )
+
+
 def test_lasym_performance_mode_infers_axis_for_fast_path():
     root = Path(__file__).resolve().parents[1]
     input_path = root / "examples/data/input.up_down_asymmetric_tokamak"
@@ -490,11 +619,14 @@ def test_default_use_scan_policy_is_backend_and_input_aware():
     _cfg_simple, indata_simple = load_config(simple_input)
     lasym_input = Path(__file__).resolve().parents[1] / "examples/data/input.up_down_asymmetric_tokamak"
     _cfg_lasym, indata_lasym = load_config(lasym_input)
+    finite_beta_input = Path(__file__).resolve().parents[1] / "examples/data/input.nfp4_QH_finite_beta"
+    _cfg_finite_beta, indata_finite_beta = load_config(finite_beta_input)
 
     assert driver_module._default_use_scan_for_backend(indata_simple, "cpu", "default") is False
-    assert driver_module._default_use_scan_for_backend(indata_simple, "gpu", "accelerated") is False
+    assert driver_module._default_use_scan_for_backend(indata_simple, "gpu", "accelerated") is True
     assert driver_module._default_use_scan_for_backend(indata_lasym, "cpu", "accelerated") is False
-    assert driver_module._default_use_scan_for_backend(indata_simple, "gpu", "parity") is False
+    assert driver_module._default_use_scan_for_backend(indata_simple, "gpu", "parity") is True
+    assert driver_module._default_use_scan_for_backend(indata_finite_beta, "cpu", "accelerated") is True
 
 
 def test_default_non_autodiff_solver_policy_uses_accelerated_for_gpu(monkeypatch):
@@ -613,7 +745,7 @@ def test_gpu_lasym_non_scan_uses_precomputed_tridi_default(monkeypatch):
             performance_mode=True,
             use_scan=True,
         )
-        is None
+        is True
     )
     monkeypatch.setenv("VMEC_JAX_TRIDI_PRECOMPUTE", "0")
     assert (
@@ -673,7 +805,7 @@ def test_high_mode_non_lasym_gpu_uses_precomputed_tridi_default(monkeypatch):
             performance_mode=True,
             use_scan=True,
         )
-        is None
+        is True
     )
 
 
@@ -747,6 +879,123 @@ def test_run_fixed_boundary_gpu_high_mode_non_lasym_passes_precomputed_tridi_pol
     )
 
     assert captured["kwargs"]["preconditioner_use_precomputed_tridi"] is True
+
+
+def test_run_fixed_boundary_gpu_scan_passes_precomputed_tridi_policy(monkeypatch):
+    input_path = Path(__file__).resolve().parents[1] / "examples/data/input.nfp4_QH_warm_start"
+    monkeypatch.delenv("VMEC_JAX_TRIDI_PRECOMPUTE", raising=False)
+    monkeypatch.setattr(driver_module, "_default_backend_name", lambda: "gpu")
+    captured = {}
+
+    def _fake_solver(state, static, **kwargs):
+        captured["kwargs"] = dict(kwargs)
+        return SolveVmecResidualResult(
+            state=state,
+            n_iter=1,
+            w_history=np.asarray([1.0], dtype=float),
+            fsqr2_history=np.asarray([1.0], dtype=float),
+            fsqz2_history=np.asarray([0.0], dtype=float),
+            fsql2_history=np.asarray([0.0], dtype=float),
+            grad_rms_history=np.asarray([], dtype=float),
+            step_history=np.asarray([], dtype=float),
+            diagnostics={"converged": False, "use_scan": bool(kwargs["use_scan"])},
+        )
+
+    monkeypatch.setattr(solve_module, "solve_fixed_boundary_residual_iter", _fake_solver)
+    monkeypatch.setattr(driver_module, "solve_fixed_boundary_residual_iter", _fake_solver)
+
+    run_fixed_boundary(
+        input_path,
+        solver="vmec2000_iter",
+        solver_mode="accelerated",
+        max_iter=1,
+        multigrid=False,
+        use_scan=True,
+        verbose=False,
+    )
+
+    assert captured["kwargs"]["use_scan"] is True
+    assert captured["kwargs"]["preconditioner_use_precomputed_tridi"] is True
+
+
+def test_run_fixed_boundary_gpu_auto_policy_uses_scan_and_precomputed_tridi(monkeypatch):
+    input_path = Path(__file__).resolve().parents[1] / "examples/data/input.nfp4_QH_warm_start"
+    monkeypatch.delenv("VMEC_JAX_TRIDI_PRECOMPUTE", raising=False)
+    monkeypatch.setattr(driver_module, "_default_backend_name", lambda: "gpu")
+    captured = {}
+
+    def _fake_solver(state, static, **kwargs):
+        captured["kwargs"] = dict(kwargs)
+        return SolveVmecResidualResult(
+            state=state,
+            n_iter=1,
+            w_history=np.asarray([1.0], dtype=float),
+            fsqr2_history=np.asarray([1.0], dtype=float),
+            fsqz2_history=np.asarray([0.0], dtype=float),
+            fsql2_history=np.asarray([0.0], dtype=float),
+            grad_rms_history=np.asarray([], dtype=float),
+            step_history=np.asarray([], dtype=float),
+            diagnostics={
+                "converged": True,
+                "use_scan": bool(kwargs["use_scan"]),
+                "resume_state": {},
+                "light_history": True,
+            },
+        )
+
+    monkeypatch.setattr(solve_module, "solve_fixed_boundary_residual_iter", _fake_solver)
+    monkeypatch.setattr(driver_module, "solve_fixed_boundary_residual_iter", _fake_solver)
+
+    run_fixed_boundary(
+        input_path,
+        solver="vmec2000_iter",
+        max_iter=1,
+        multigrid=False,
+        verbose=False,
+    )
+
+    assert captured["kwargs"]["use_scan"] is True
+    assert captured["kwargs"]["preconditioner_use_precomputed_tridi"] is True
+
+
+def test_run_fixed_boundary_gpu_auto_policy_env_tridi_override_delegates(monkeypatch):
+    input_path = Path(__file__).resolve().parents[1] / "examples/data/input.nfp4_QH_warm_start"
+    monkeypatch.setenv("VMEC_JAX_TRIDI_PRECOMPUTE", "0")
+    monkeypatch.setattr(driver_module, "_default_backend_name", lambda: "gpu")
+    captured = {}
+
+    def _fake_solver(state, static, **kwargs):
+        captured["kwargs"] = dict(kwargs)
+        return SolveVmecResidualResult(
+            state=state,
+            n_iter=1,
+            w_history=np.asarray([1.0], dtype=float),
+            fsqr2_history=np.asarray([1.0], dtype=float),
+            fsqz2_history=np.asarray([0.0], dtype=float),
+            fsql2_history=np.asarray([0.0], dtype=float),
+            grad_rms_history=np.asarray([], dtype=float),
+            step_history=np.asarray([], dtype=float),
+            diagnostics={
+                "converged": True,
+                "use_scan": bool(kwargs["use_scan"]),
+                "resume_state": {},
+                "light_history": True,
+            },
+        )
+
+    monkeypatch.setattr(solve_module, "solve_fixed_boundary_residual_iter", _fake_solver)
+    monkeypatch.setattr(driver_module, "solve_fixed_boundary_residual_iter", _fake_solver)
+
+    run_fixed_boundary(
+        input_path,
+        solver="vmec2000_iter",
+        max_iter=1,
+        multigrid=False,
+        verbose=False,
+    )
+
+    assert captured["kwargs"]["use_scan"] is True
+    assert captured["kwargs"]["preconditioner_use_precomputed_tridi"] is None
 
 
 def test_default_non_autodiff_solver_policy_keeps_free_boundary_on_robust_path():
@@ -1075,7 +1324,7 @@ def test_cli_solver_device_gpu_uses_gpu_performance_policy(monkeypatch, tmp_path
     assert rc == 0
     assert captured["solver_mode"] == "accelerated"
     assert captured["solver_device"] == "gpu"
-    assert captured["use_scan"] is False
+    assert captured["use_scan"] is True
 
 
 def test_cli_defaults_to_parity_on_staged_fixed_boundary_without_niter_array(monkeypatch, tmp_path):

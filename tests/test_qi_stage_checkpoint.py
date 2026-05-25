@@ -89,6 +89,8 @@ def test_qi_stage_checkpoint_preserves_partial_metrics_gates_and_provenance(tmp_
     assert stage_history["objective_initial"] == 4.0
     assert stage_history["objective_final"] == 1.25
     assert stage_diagnostics["qi_engineering_gate_passed"] is True
+    assert stage_diagnostics["objective_final"] == 1.25
+    assert stage_diagnostics["partial"] is True
     assert checkpoint["partial"] is True
     assert checkpoint["role"] == "mirror_ramp"
     assert checkpoint["history"]["objective_initial"] == 4.0

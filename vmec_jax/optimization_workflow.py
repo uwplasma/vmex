@@ -220,6 +220,27 @@ class FixedBoundaryOptimizationResult:
         )
 
     @property
+    def stage_results(self) -> tuple[dict, ...]:
+        """Raw optimizer result dictionaries in mode-continuation order."""
+
+        return tuple(result for _mode, _optimizer, _params0, result in self.stage_records)
+
+    @property
+    def stage_optimizers(self) -> tuple[FixedBoundaryExactOptimizer, ...]:
+        """Optimizer objects for each mode-continuation stage."""
+
+        return tuple(optimizer for _mode, optimizer, _params0, _result in self.stage_records)
+
+    @property
+    def stage_initial_params(self) -> tuple[np.ndarray, ...]:
+        """Initial boundary-parameter vectors for each stage."""
+
+        return tuple(
+            np.asarray(params0, dtype=float)
+            for _mode, _optimizer, params0, _result in self.stage_records
+        )
+
+    @property
     def objective_history(self) -> np.ndarray:
         """Objective values over full-solve callbacks as a NumPy array."""
 
@@ -258,6 +279,21 @@ class FixedBoundaryOptimizationResult:
         summary = _result_timing_summary(self.final_result, history=self.history)
         summary["stages"] = self.stage_timing_summaries
         return summary
+
+    @property
+    def summary(self) -> dict[str, object]:
+        """Compact result summary for example reports and notebooks."""
+
+        history = self.history
+        return {
+            "stage_modes": tuple(int(mode) for mode in self.stage_modes),
+            "objective_initial": history.get("objective_initial"),
+            "objective_final": history.get("objective_final"),
+            "aspect_final": history.get("aspect_final"),
+            "iota_final": history.get("iota_final"),
+            "field_objective_final": history.get("qs_final"),
+            "timing": self.timing_summary,
+        }
 
 
 @dataclass(frozen=True)
@@ -493,6 +529,42 @@ class LeastSquaresProblem:
         """Whether the problem contains Boozer-space QI field objectives."""
 
         return bool(self.qi_objective_terms)
+
+    @property
+    def scalar_objective_names(self) -> tuple[str, ...]:
+        """Names of state-space objective terms assembled from tuples."""
+
+        return tuple(term.name for term in self.objective_terms)
+
+    @property
+    def qi_objective_names(self) -> tuple[str, ...]:
+        """Names of Boozer/QI objective terms assembled from tuples."""
+
+        return tuple(term.name for term in self.qi_objective_terms)
+
+    @property
+    def objective_names(self) -> tuple[str, ...]:
+        """All objective names in residual assembly order."""
+
+        return self.scalar_objective_names + self.qi_objective_names
+
+    @property
+    def objective_count(self) -> int:
+        """Total number of objective terms assembled from user tuples."""
+
+        return len(self.objective_terms) + len(self.qi_objective_terms)
+
+    @property
+    def summary(self) -> dict[str, object]:
+        """Compact description of the assembled least-squares problem."""
+
+        return {
+            "objective_count": self.objective_count,
+            "scalar_objectives": self.scalar_objective_names,
+            "qi_objectives": self.qi_objective_names,
+            "is_qi": self.is_qi,
+            "metadata": dict(self.metadata),
+        }
 
 
 @dataclass(frozen=True)

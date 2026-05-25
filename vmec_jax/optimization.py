@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 from dataclasses import dataclass, fields, is_dataclass, replace
 import json
 import math
@@ -391,6 +391,35 @@ def apply_boundary_params(
             z_cos = z_cos.at[spec.index].add(params[idx])
         elif spec.kind == "zs":
             z_sin = z_sin.at[spec.index].add(params[idx])
+        else:
+            raise ValueError(f"Unknown boundary parameter kind '{spec.kind}'")
+
+    return BoundaryCoeffs(R_cos=r_cos, R_sin=r_sin, Z_cos=z_cos, Z_sin=z_sin)
+
+
+def _apply_boundary_params_numpy(
+    boundary: BoundaryCoeffs,
+    specs: Sequence[BoundaryParamSpec],
+    params: np.ndarray,
+) -> BoundaryCoeffs:
+    """Apply parameter updates on the host for branch/cache-key logic."""
+    params = np.asarray(params, dtype=float).reshape(-1)
+    r_cos = np.asarray(boundary.R_cos, dtype=float).copy()
+    r_sin = np.asarray(boundary.R_sin, dtype=float).copy()
+    z_cos = np.asarray(boundary.Z_cos, dtype=float).copy()
+    z_sin = np.asarray(boundary.Z_sin, dtype=float).copy()
+
+    for idx, spec in enumerate(specs):
+        if idx >= int(params.size):
+            break
+        if spec.kind == "rc":
+            r_cos[spec.index] += float(params[idx])
+        elif spec.kind == "rs":
+            r_sin[spec.index] += float(params[idx])
+        elif spec.kind == "zc":
+            z_cos[spec.index] += float(params[idx])
+        elif spec.kind == "zs":
+            z_sin[spec.index] += float(params[idx])
         else:
             raise ValueError(f"Unknown boundary parameter kind '{spec.kind}'")
 
@@ -1436,9 +1465,11 @@ class FixedBoundaryExactOptimizer:
         )
         self._trial_solver_kwargs = dict(
             _base,
-            # Trial-point residuals do not need an adjoint tape. The backend
-            # policy keeps CPU on scan by default, while cold GPU trial profiles
-            # favor the non-scan path. VMEC_JAX_OPT_TRIAL_SCAN overrides this.
+            # Trial-point residuals do not need an adjoint tape.  Use a
+            # backend-aware policy: CPU stays on the VMEC-control loop for
+            # convergence/control parity, while accelerator backends use scan
+            # to reduce launch overhead. VMEC_JAX_OPT_TRIAL_SCAN overrides this
+            # for diagnostics.
             jit_forces="auto",
             use_scan=self._use_scan_for_trial_solves(),
         )
@@ -1471,6 +1502,7 @@ class FixedBoundaryExactOptimizer:
         self._remember_initial_state(np.zeros(len(self._specs), dtype=float), state0)
         self._initial_state_packed_helper = None
         self._initial_tangent_cache: dict = {}
+        self._initial_tangent_direction_cache: dict = {}
         self._last_jacobian_residual: np.ndarray | None = None
         self._last_jacobian_source = "exact_tape_replay"
         self._trial_residual_cache: OrderedDict[bytes, np.ndarray] = OrderedDict()
@@ -1487,6 +1519,7 @@ class FixedBoundaryExactOptimizer:
         self._last_jacobian_key: list = [None]
         self._iota_fn = None  # set by run() when iota tracking is requested
         self._best_exact_params: np.ndarray | None = None
+        self._best_exact_state: VMECState | None = None
         self._best_exact_residual: np.ndarray | None = None
         self._best_exact_cost: float = math.inf
         self._exact_history_rejected_count: int = 0
@@ -1520,6 +1553,25 @@ class FixedBoundaryExactOptimizer:
     def _resolve_solver_device(self, solver_device: str | None) -> str | None:
         name = "auto" if solver_device is None else str(solver_device).strip().lower()
         if name in ("", "none", "auto", "default"):
+            return None
+        try:
+            from ._compat import jax as _jax
+
+            current_backend = str(_jax.default_backend()).strip().lower() if _jax is not None else ""
+        except Exception:
+            current_backend = ""
+        aliases = {
+            "gpu": {"gpu", "cuda", "rocm", "tpu"},
+            "cuda": {"gpu", "cuda"},
+            "rocm": {"gpu", "rocm"},
+            "tpu": {"tpu"},
+            "cpu": {"cpu"},
+        }
+        if current_backend in aliases.get(name, {name}):
+            # Explicitly requesting the already-active backend should not wrap
+            # every callback in a default_device context or move static data a
+            # second time.  On GPU this path is materially slower for new
+            # accepted-point exact tapes.
             return None
         return name
 
@@ -1563,7 +1615,7 @@ class FixedBoundaryExactOptimizer:
         if method_key not in ("auto", "adaptive"):
             return method_key, scipy_lsmr_maxiter, None
 
-        backend = _optimizer_backend_name(self._solver_device_name)
+        backend = _optimizer_backend_name(getattr(self, "_solver_device_name", None))
         if backend in ("gpu", "cuda", "rocm", "tpu", "metal"):
             return "scipy", scipy_lsmr_maxiter, f"auto:dense-preserves-{backend}"
         if self._has_stellarator_asymmetric_configuration():
@@ -1642,9 +1694,10 @@ class FixedBoundaryExactOptimizer:
 
         Exact-optimizer trial residuals are short, trace-compatible VMEC solves
         called repeatedly by SciPy's trust-region line search.  They do not need
-        an adjoint tape.  May 2026 repeat-run diagnostics showed the scan trial
-        path has lower CPU warm cost, while cold GPU mode-2 trial profiles were
-        faster on the non-scan path.  Environment overrides always win.
+        an adjoint tape.  May 2026 callback profiles showed CPU scan can be
+        slower and less well behaved for QH mode-2 trial residuals, while the
+        current ``office`` GPU path is faster on scan for the same residual
+        norm.  Environment overrides always win.
         """
         forced = os.getenv("VMEC_JAX_OPT_TRIAL_SCAN", "").strip().lower()
         if forced in ("1", "true", "yes", "on", "scan"):
@@ -1659,7 +1712,7 @@ class FixedBoundaryExactOptimizer:
                 backend = str(_jax.default_backend()).strip().lower() if _jax is not None else "cpu"
             except Exception:
                 backend = "cpu"
-        return backend not in ("gpu", "cuda", "tpu", "rocm")
+        return backend in ("gpu", "cuda", "tpu", "rocm")
 
     def _solver_device_context(self):
         if self._solver_device_name is None:
@@ -1715,7 +1768,17 @@ class FixedBoundaryExactOptimizer:
     def _run_in_solver_device_context(self, fn, *args, **kwargs):
         if self._solver_device_name is None or self._inside_solver_device_context:
             return fn(*args, **kwargs)
-        with self._solver_device_context():
+        from .vmec_tomnsp import tomnsps_fft_policy_override
+
+        backend_name = str(self._solver_device_name).strip().lower()
+        tomnsps_fft_override = (
+            backend_name in ("gpu", "cuda", "rocm", "tpu")
+            if os.getenv("VMEC_JAX_TOMNSPS_FFT") is None
+            else None
+        )
+        with ExitStack() as stack:
+            stack.enter_context(self._solver_device_context())
+            stack.enter_context(tomnsps_fft_policy_override(tomnsps_fft_override))
             self._inside_solver_device_context = True
             try:
                 return fn(*args, **kwargs)
@@ -2006,8 +2069,11 @@ class FixedBoundaryExactOptimizer:
         return state0
 
     def _use_jit_initial_state(self) -> bool:
-        flag = os.getenv("VMEC_JAX_OPT_JIT_INITIAL_STATE", "1").strip().lower()
-        return flag not in ("", "0", "false", "no", "off")
+        flag = os.getenv("VMEC_JAX_OPT_JIT_INITIAL_STATE")
+        if flag is not None:
+            return flag.strip().lower() not in ("", "0", "false", "no", "off")
+        backend = _optimizer_backend_name(getattr(self, "_solver_device_name", None))
+        return backend not in ("gpu", "cuda", "rocm")
 
     def _initial_state_from_params_jit(self, params) -> VMECState | None:
         """Return the projected initial state using a cached JIT helper when safe."""
@@ -2040,10 +2106,17 @@ class FixedBoundaryExactOptimizer:
 
         try:
             packed = helper(_jnp.asarray(params, dtype=_jnp.float64))
-            packed = jax.block_until_ready(packed)
+            if self._sync_initial_state_projection_enabled():
+                packed = jax.block_until_ready(packed)
             return unpack_state(packed, self._layout)
         except Exception:
             return None
+
+    def _sync_initial_state_projection_enabled(self) -> bool:
+        """Return whether the JIT initial-state projection should synchronize."""
+
+        flag = os.getenv("VMEC_JAX_OPT_SYNC_INITIAL_STATE", "").strip().lower()
+        return flag in ("1", "true", "yes", "on")
 
     def _remember_exact_state(self, cache_key: bytes, state: VMECState) -> None:
         self._exact_state_cache = {cache_key: state}
@@ -2073,7 +2146,14 @@ class FixedBoundaryExactOptimizer:
             )
         }
 
-    def _remember_best_exact_point(self, params, residual: np.ndarray, cost: float | None = None) -> None:
+    def _remember_best_exact_point(
+        self,
+        params,
+        residual: np.ndarray,
+        cost: float | None = None,
+        *,
+        state: VMECState | None = None,
+    ) -> None:
         """Track the best exact accepted-point residual seen during one run."""
 
         residual_arr = np.asarray(residual, dtype=float).reshape(-1)
@@ -2082,9 +2162,20 @@ class FixedBoundaryExactOptimizer:
         if not np.isfinite(float(cost)) or not np.all(np.isfinite(residual_arr)):
             return
         if float(cost) < float(getattr(self, "_best_exact_cost", math.inf)):
+            cache_key = self._exact_cache_key(params)
             self._best_exact_cost = float(cost)
             self._best_exact_params = np.asarray(params, dtype=float).reshape(-1).copy()
             self._best_exact_residual = residual_arr.copy()
+            best_state = state
+            if best_state is not None and not self._state_matches_params(best_state, params):
+                best_state = None
+            if best_state is None:
+                exact_cache = getattr(self, "_exact_cache", {})
+                if cache_key in exact_cache:
+                    best_state = exact_cache[cache_key][0]
+                else:
+                    best_state = getattr(self, "_exact_state_cache", {}).get(cache_key)
+            self._best_exact_state = best_state
 
     def _exact_history_accepts(self, cost: float) -> bool:
         """Return whether an exact callback row should enter accepted history."""
@@ -2173,6 +2264,24 @@ class FixedBoundaryExactOptimizer:
             apply_m1_constraint=False,
         )
 
+    def _boundary_from_params_numpy(self, params) -> BoundaryCoeffs:
+        """Boundary coefficients with parameters applied on the host."""
+        boundary = _apply_boundary_params_numpy(
+            self._boundary_input if self._boundary_input is not None else self._boundary,
+            self._specs,
+            np.asarray(params, dtype=float),
+        )
+        if self._boundary_input is None:
+            return boundary
+        from .boundary import boundary_from_input_convention
+
+        return boundary_from_input_convention(
+            boundary,
+            self._static.modes,
+            lasym=bool(self._static.cfg.lasym),
+            apply_m1_constraint=False,
+        )
+
     def _boundary_input_from_params(self, params) -> BoundaryCoeffs:
         """Boundary coefficients in VMEC input convention for ``params``."""
         from ._compat import jnp as _jnp
@@ -2195,7 +2304,13 @@ class FixedBoundaryExactOptimizer:
         from .init_guess import _vmec_lflip_from_boundary
 
         try:
-            boundary = self._boundary_from_params(np.asarray(params, dtype=float))
+            boundary = self._boundary_from_params_numpy(np.asarray(params, dtype=float))
+        except Exception:
+            try:
+                boundary = self._boundary_from_params(params)
+            except Exception:
+                return None
+        try:
             lflip = _vmec_lflip_from_boundary(self._static, boundary)
         except Exception:
             return None
@@ -2430,6 +2545,10 @@ class FixedBoundaryExactOptimizer:
         if self._solver_device_name is not None and not self._inside_solver_device_context:
             return self._run_in_solver_device_context(self.residual_fun, params)
         cache_key = self._exact_cache_key(params)
+        cached = self._cached_exact_residual(params, cache_key=cache_key)
+        if cached is not None:
+            self._profile_add("residual_exact_cache_hit", 0.0)
+            return cached
         if self._scan_exact_path == "scan":
             # Avoid compiling a second residual-only scan executable.  The exact
             # optimizer immediately needs the same accepted-point state for
@@ -2516,12 +2635,36 @@ class FixedBoundaryExactOptimizer:
         except (TypeError, ValueError):
             accepts_jvp_only = True
         if accepts_jvp_only:
-            return solve(params, return_payload=True, jvp_only=True)
+            env_name = "VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES"
+            set_basepoint_default = self._jvp_only_basepoint_carries_default_enabled()
+            old_basepoint_env = os.environ.get(env_name)
+            if set_basepoint_default:
+                os.environ[env_name] = "1"
+            try:
+                return solve(params, return_payload=True, jvp_only=True)
+            finally:
+                if set_basepoint_default:
+                    if old_basepoint_env is None:
+                        os.environ.pop(env_name, None)
+                    else:
+                        os.environ[env_name] = old_basepoint_env
         return solve(params, return_payload=True)
 
     def _jvp_only_exact_tape_enabled(self) -> bool:
         flag = os.getenv("VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE", "").strip().lower()
-        return flag in ("1", "true", "yes", "on")
+        if flag:
+            return flag in ("1", "true", "yes", "on")
+        backend = _optimizer_backend_name(getattr(self, "_solver_device_name", None))
+        return backend in ("gpu", "cuda", "rocm")
+
+    def _jvp_only_basepoint_carries_default_enabled(self) -> bool:
+        """Preserve JVP-only base carries by default on GPU exact callbacks."""
+
+        flag = os.getenv("VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES", "").strip().lower()
+        if flag:
+            return False
+        backend = _optimizer_backend_name(getattr(self, "_solver_device_name", None))
+        return backend in ("gpu", "cuda", "rocm")
 
     def _initial_tangent_columns(self, params, axis_override, *, profile_prefix: str):
         """Return cached packed initial-state tangents for boundary parameters."""
@@ -2558,22 +2701,29 @@ class FixedBoundaryExactOptimizer:
                 )
                 return _jnp.asarray(pack_state(s0), dtype=_jnp.float64)
 
-            t_eye = time.perf_counter()
-            directions = _jnp.eye(int(params.size), dtype=params.dtype)
-            self._profile_add(f"{profile_prefix}_initial_tangents_eye", time.perf_counter() - t_eye)
             t_linearize = time.perf_counter()
             _, initial_state_linear = jax.linearize(_initial_state_packed, params)
             self._profile_add(
                 f"{profile_prefix}_initial_tangents_linearize",
                 time.perf_counter() - t_linearize,
             )
-            t_vmap = time.perf_counter()
-            initial_tangents = jax.vmap(initial_state_linear)(directions)
-            initial_tangents = self._profile_async_phase(
-                f"{profile_prefix}_initial_tangents_vmap",
-                t_vmap,
-                initial_tangents,
-            )
+            if int(params.size) == 1:
+                t_jvp = time.perf_counter()
+                initial_tangents = initial_state_linear(_jnp.ones_like(params))[None, :]
+                initial_tangents = self._profile_async_phase(
+                    f"{profile_prefix}_initial_tangents_single_jvp",
+                    t_jvp,
+                    initial_tangents,
+                )
+            else:
+                directions = self._initial_tangent_directions(params, profile_prefix=profile_prefix)
+                t_vmap = time.perf_counter()
+                initial_tangents = jax.vmap(initial_state_linear)(directions)
+                initial_tangents = self._profile_async_phase(
+                    f"{profile_prefix}_initial_tangents_vmap",
+                    t_vmap,
+                    initial_tangents,
+                )
             if cache_key is not None:
                 t_store = time.perf_counter()
                 self._initial_tangent_cache[cache_key] = initial_tangents
@@ -2588,6 +2738,27 @@ class FixedBoundaryExactOptimizer:
             time.perf_counter() - t_initial,
         )
         return initial_tangents
+
+    def _initial_tangent_directions(self, params, *, profile_prefix: str):
+        """Return cached identity directions used for dense initial-state JVPs."""
+        from ._compat import jnp as _jnp
+
+        if not hasattr(self, "_initial_tangent_direction_cache"):
+            self._initial_tangent_direction_cache = {}
+        dtype = _jnp.asarray(params).dtype
+        backend = _optimizer_backend_name(getattr(self, "_solver_device_name", None))
+        cache_key = (int(_jnp.asarray(params).size), str(dtype), backend)
+        directions = self._initial_tangent_direction_cache.get(cache_key)
+        if directions is not None:
+            self._profile_add(f"{profile_prefix}_initial_tangents_eye_cache_hit", 0.0)
+            return directions
+
+        self._profile_add(f"{profile_prefix}_initial_tangents_eye_cache_miss", 0.0)
+        t_eye = time.perf_counter()
+        directions = _jnp.eye(cache_key[0], dtype=dtype)
+        self._initial_tangent_direction_cache[cache_key] = directions
+        self._profile_add(f"{profile_prefix}_initial_tangents_eye", time.perf_counter() - t_eye)
+        return directions
 
     def _lasym_replay_column_chunk(self, n_params: int) -> int | None:
         """Replay-column chunk heuristic for dense exact Jacobians."""
@@ -2612,10 +2783,13 @@ class FixedBoundaryExactOptimizer:
             except Exception:
                 backend_name = None
         if backend_name in ("gpu", "cuda", "rocm"):
-            # GPU exact replay is launch/transpose dominated for the tested
-            # 24-DOF QH path, and full-column replay has been faster than the
-            # old forced chunk-8 default.  Leave explicit env overrides and the
-            # lower-level memory guard to handle genuinely oversized cases.
+            # GPU exact replay is launch/transpose dominated.  The tested
+            # 24-DOF QH mode-2 path is fastest unchunked, while the 48-DOF
+            # QH mode-3 path is much faster with two 24-column replay chunks.
+            # Leave explicit env overrides in charge for larger profiling
+            # sweeps until a broader mode/LASYM matrix justifies another step.
+            if int(n_params) >= 48:
+                return 24
             return None
         if backend_name == "tpu":
             return None
@@ -2627,16 +2801,33 @@ class FixedBoundaryExactOptimizer:
             return 4
         return None
 
-    def _projected_replay_residuals_enabled(self) -> bool:
+    def _projected_replay_residuals_enabled(self, n_params: int | None = None) -> bool:
         """Whether dense Jacobians should project replayed tangents without an intermediate sync."""
 
         flag = os.getenv("VMEC_JAX_OPT_PROJECTED_REPLAY_RESIDUALS")
         if flag is not None:
             return flag.strip().lower() in ("1", "true", "yes", "on")
-        # QH mode-3 GPU profiles showed this path was launch dominated and
-        # much slower than the standard full replay path. Keep it as an
-        # explicit diagnostic probe instead of enabling it by backend.
-        return False
+        backend = _optimizer_backend_name(getattr(self, "_solver_device_name", None))
+        if backend not in ("gpu", "cuda", "rocm"):
+            return False
+        if n_params is None:
+            return False
+        if bool(getattr(getattr(self._static, "cfg", None), "lasym", False)):
+            return False
+        # Mode-2 GPU profiles (24 columns) were slower with projected replay.
+        # Mode-3 QA/QH profiles (48 columns) were neutral-to-much-faster because
+        # the residual projection avoids a large intermediate tangent transfer.
+        # LASYM mode-2 profiles also have 48+ columns, but projected replay is
+        # currently much slower there, so keep LASYM on the conservative path.
+        return int(n_params) >= 48
+
+    def _fused_projected_replay_enabled(self) -> bool:
+        """Whether projected replay should fuse replay and residual projection when possible."""
+
+        flag = os.getenv("VMEC_JAX_OPT_FUSED_PROJECTED_REPLAY", "").strip().lower()
+        if flag:
+            return flag in ("1", "true", "yes", "on")
+        return True
 
     def _discrete_jacobian_residual_helper(self, params_size: int, residuals_from_packed, *, jax):
         """Return cached residual/Jacobian projection helper for packed tangents."""
@@ -2667,6 +2858,110 @@ class FixedBoundaryExactOptimizer:
             self._profile_add("jacobian_residual_tangent_helper_cache_hit", time.perf_counter() - t_helper)
         return helper_cache
 
+    def _fused_dynamic_basepoint_projected_replay_helper(
+        self,
+        *,
+        tape,
+        params_size: int,
+        residuals_from_packed,
+        initial_tangents,
+        column_chunk: int | None,
+        jax,
+    ):
+        """Return a fused dynamic-basepoint replay/projection helper when eligible."""
+
+        if column_chunk is not None or not self._fused_projected_replay_enabled():
+            return None
+        stacked = getattr(tape, "stacked_step_traces", None)
+        stacked_base_carries = getattr(tape, "dynamic_base_carries_stacked", None)
+        static_flags = getattr(tape, "step_trace_static_flags", None)
+        if stacked is None or stacked_base_carries is None or static_flags is None:
+            return None
+
+        from .discrete_adjoint import (
+            _checkpoint_tape_dynamic_basepoint_scan_runner,
+            _dynamic_basepoint_payload_shapes_match,
+            _replay_column_chunk_default,
+            _tridi_policy_cache_value,
+            _stacked_trace_signature,
+        )
+
+        if not _dynamic_basepoint_payload_shapes_match(stacked, stacked_base_carries):
+            return None
+        # The fused path intentionally bypasses checkpoint_tape_state_jvp_columns,
+        # so defer to the standard replay path whenever explicit or automatic
+        # chunking would be active.
+        if os.environ.get("VMEC_JAX_REPLAY_COLUMN_CHUNK") is not None:
+            return None
+        from ._compat import jnp as _jnp
+
+        auto_chunk = _replay_column_chunk_default(
+            tape=tape,
+            tangents=_jnp.asarray(initial_tangents),
+        )
+        if auto_chunk is not None and int(params_size) > int(auto_chunk):
+            return None
+
+        helper_key = (
+            "fused_dynamic_basepoint_projected_replay",
+            int(params_size),
+            int(self._layout.size),
+            id(self._residuals_fn),
+            id(self._static),
+            _stacked_trace_signature(stacked),
+            _stacked_trace_signature(stacked_base_carries),
+            bool(static_flags["apply_lforbal"]),
+            bool(static_flags["include_edge_residual"]),
+            bool(static_flags["apply_m1_constraints"]),
+            bool(static_flags["limit_update_rms"]),
+            bool(static_flags["limit_dt_from_force"]),
+            bool(static_flags["vmec2000_control"]),
+            bool(static_flags["divide_by_scalxc_for_update"]),
+            int(static_flags["signgs"]),
+            int(static_flags["precond_jmax"]),
+            _tridi_policy_cache_value(static_flags.get("preconditioner_use_precomputed_tridi", None)),
+        )
+        t_helper = time.perf_counter()
+        helper_cache = self._discrete_jacobian_helper_cache.get(helper_key)
+        if helper_cache is not None:
+            self._profile_add(
+                "jacobian_fused_projected_replay_helper_cache_hit",
+                time.perf_counter() - t_helper,
+            )
+            return helper_cache
+
+        run_scan = _checkpoint_tape_dynamic_basepoint_scan_runner(
+            static=self._static,
+            stacked=stacked,
+            stacked_base_carries=stacked_base_carries,
+            static_flags=static_flags,
+        )
+
+        @jax.jit
+        def _fused_project(initial_tangents, packed_state, stacked_base_carries_in, stacked_traces_in):
+            tangents = _jnp.asarray(initial_tangents)
+            carry0 = jax.tree_util.tree_map(lambda x: x[0], stacked_base_carries_in)
+
+            def _zeros_like(arr):
+                arr = _jnp.asarray(arr)
+                return _jnp.zeros((tangents.shape[0],) + arr.shape, dtype=arr.dtype)
+
+            carry_tangents0 = (tangents,) + tuple(_zeros_like(arr) for arr in carry0[1:])
+            final_carry_tangents = run_scan(
+                carry_tangents0,
+                stacked_base_carries_in,
+                stacked_traces_in,
+            )
+            residuals, residual_linear = jax.linearize(residuals_from_packed, packed_state)
+            return residuals, jax.vmap(residual_linear)(final_carry_tangents[0]).T
+
+        helper_cache = {
+            "fused_project": _fused_project,
+        }
+        self._discrete_jacobian_helper_cache[helper_key] = helper_cache
+        self._profile_add("jacobian_fused_projected_replay_helper_build", time.perf_counter() - t_helper)
+        return helper_cache
+
     def _jacobian_fun_projected_replay(self, params, exact_param_key, *, t_total: float) -> np.ndarray:
         """Dense exact Jacobian path that avoids synchronizing full state tangents."""
 
@@ -2680,12 +2975,12 @@ class FixedBoundaryExactOptimizer:
         def _residuals_from_packed(packed):
             return self._residuals_fn(unpack_state(packed, self._layout))
 
-        helper_cache = self._discrete_jacobian_residual_helper(
-            int(params.size),
-            _residuals_from_packed,
-            jax=jax,
-        )
         if int(params.size) == 0:
+            helper_cache = self._discrete_jacobian_residual_helper(
+                int(params.size),
+                _residuals_from_packed,
+                jax=jax,
+            )
             residuals = helper_cache["residual_tangent_jacobian"](
                 packed_final,
                 _jnp.zeros((0, int(self._layout.size)), dtype=_jnp.float64),
@@ -2706,6 +3001,38 @@ class FixedBoundaryExactOptimizer:
         column_chunk = self._lasym_replay_column_chunk(int(params.size))
         if column_chunk is not None:
             self._profile_add(f"jacobian_projected_replay_column_chunk_{column_chunk}", 0.0)
+        fused_helper = self._fused_dynamic_basepoint_projected_replay_helper(
+            tape=payload["tape"],
+            params_size=int(params.size),
+            residuals_from_packed=_residuals_from_packed,
+            initial_tangents=initial_tangents,
+            column_chunk=column_chunk,
+            jax=jax,
+        )
+        if fused_helper is not None:
+            t_replay = time.perf_counter()
+            residuals, jac = fused_helper["fused_project"](
+                initial_tangents,
+                packed_final,
+                payload["tape"].dynamic_base_carries_stacked,
+                payload["tape"].stacked_step_traces,
+            )
+            residuals, jac = jax.block_until_ready((residuals, jac))
+            self._profile_add("jacobian_fused_projected_replay_total", time.perf_counter() - t_replay)
+            self._last_jacobian_residual = np.asarray(residuals, dtype=float)
+            self._remember_exact_residual(exact_param_key, self._last_jacobian_residual)
+            t_host = time.perf_counter()
+            out = np.asarray(jac, dtype=float)
+            self._profile_add("jacobian_host_materialize", time.perf_counter() - t_host)
+            self._remember_exact_jacobian(exact_param_key, out, self._last_jacobian_residual)
+            self._last_jacobian_source = "exact_tape_fused_projected_replay"
+            self._profile_add("jacobian_total", time.perf_counter() - t_total)
+            return out
+        helper_cache = self._discrete_jacobian_residual_helper(
+            int(params.size),
+            _residuals_from_packed,
+            jax=jax,
+        )
         t_replay = time.perf_counter()
         final_tangents = checkpoint_tape_state_jvp_columns(
             tape=payload["tape"],
@@ -2773,7 +3100,7 @@ class FixedBoundaryExactOptimizer:
             return np.asarray(jac_cached, dtype=float).copy()
 
         params = _jnp.asarray(params, dtype=_jnp.float64)
-        if self._projected_replay_residuals_enabled():
+        if self._projected_replay_residuals_enabled(int(params.size)):
             return self._jacobian_fun_projected_replay(params, exact_param_key, t_total=t_total)
 
         state, final_tangents = self._state_and_tangent_columns(
@@ -3231,6 +3558,7 @@ class FixedBoundaryExactOptimizer:
             if self._last_jacobian_residual is not None
             else self._cached_exact_residual(cache_key=key)
         )
+        cached_state = None
         if self._last_jacobian_residual is not None and self._can_build_history_from_residuals():
             entry = self._history_entry_from_residuals(
                 self._last_jacobian_residual,
@@ -3257,7 +3585,7 @@ class FixedBoundaryExactOptimizer:
         if entry is not None and self._exact_history_accepts(float(entry["cost"])):
             self._history.append(entry)
             if exact_residual is not None:
-                self._remember_best_exact_point(params, exact_residual, float(entry["cost"]))
+                self._remember_best_exact_point(params, exact_residual, float(entry["cost"]), state=cached_state)
         elif entry is not None:
             self._exact_history_rejected_count += 1
         elif exact_residual is not None:
@@ -3313,6 +3641,12 @@ class FixedBoundaryExactOptimizer:
             self._initial_state_cache.clear()
         self._initial_state_packed_helper = None
         self._initial_tangent_cache.clear()
+        if hasattr(self, "_initial_tangent_direction_cache"):
+            self._initial_tangent_direction_cache.clear()
+        if hasattr(self, "_discrete_jacobian_helper_cache"):
+            self._discrete_jacobian_helper_cache.clear()
+        if hasattr(self, "_scan_exact_helper_cache"):
+            self._scan_exact_helper_cache.clear()
         self._last_jacobian_residual = None
         self._post_jacobian_clear(clear_compiled=True)
 
@@ -3494,8 +3828,8 @@ class FixedBoundaryExactOptimizer:
             static=self._static,
             state=state,
             result=None,
-            flux=self._flux,
-            profiles={},
+            flux=self._flux if hasattr(self._flux, "chipf") else None,
+            profiles=None,
             signgs=self._signgs,
         )
         write_wout_from_fixed_boundary_run(str(path), run, include_fsq=False, fast_bcovar=True)
@@ -3570,9 +3904,10 @@ class FixedBoundaryExactOptimizer:
             minimizes the same scalar objective using one reverse discrete
             adjoint gradient per callback; it is experimental but scales much
             better with boundary-parameter count on mode-2/3 diagnostics.
-            ``"scalar_trust"`` is a safeguarded scalar-adjoint steepest-descent
-            path with monotone accepted steps and a hard evaluation budget.  It
-            is intended for profiling high-parameter-count cases before a full
+            ``"scalar_trust"`` is a safeguarded scalar-adjoint path with
+            monotone accepted steps, limited-memory inverse-Hessian directions,
+            aggressive backtracking, and a hard evaluation budget.  It is
+            intended for profiling high-parameter-count cases before a full
             matrix-free least-squares trust-region implementation is available.
         max_nfev:
             Maximum residual/Jacobian evaluations.
@@ -3648,6 +3983,7 @@ class FixedBoundaryExactOptimizer:
         self._wall_t0 = time.perf_counter()
         self._iota_fn = iota_fn  # stored so _jacobian_fun_tracked can use it
         self._best_exact_params = None
+        self._best_exact_state = None
         self._best_exact_residual = None
         self._best_exact_cost = math.inf
         self._exact_history_rejected_count = 0
@@ -3670,7 +4006,7 @@ class FixedBoundaryExactOptimizer:
         qs_total0 = float(entry0["qs_objective"])
         aspect0 = float(entry0["aspect"])
         self._history.append(entry0)
-        self._remember_best_exact_point(params0_arr, res0, cost0)
+        self._remember_best_exact_point(params0_arr, res0, cost0, state=state0)
 
         # ── outer least-squares loop ────────────────────────────────────────
         method_requested = str(method).strip().lower().replace("-", "_")
@@ -3714,6 +4050,7 @@ class FixedBoundaryExactOptimizer:
                 "cost": float("inf"),
                 "x": x_current.copy(),
                 "y": y_current.copy(),
+                "state": None,
                 "grad_x": np.zeros_like(params0_arr),
                 "grad_y": np.zeros_like(y_current),
             }
@@ -3737,7 +4074,7 @@ class FixedBoundaryExactOptimizer:
                     if exact_residual is None:
                         exact_residual = self._cached_exact_residual(cache_key=key)
                     if exact_residual is not None:
-                        self._remember_best_exact_point(x, exact_residual, entry_cost)
+                        self._remember_best_exact_point(x, exact_residual, entry_cost, state=cached_state)
                     last_history_key[0] = key
                 else:
                     self._exact_history_rejected_count += 1
@@ -3749,16 +4086,26 @@ class FixedBoundaryExactOptimizer:
                 cost, grad_x = self.objective_and_gradient_fun(x)
                 grad_y = np.asarray(grad_x, dtype=float) * scale
                 if float(cost) < float(best_eval["cost"]):
+                    best_state = self._cached_exact_state(x)
                     best_eval.update(
                         {
                             "cost": float(cost),
                             "x": np.asarray(x, dtype=float).copy(),
                             "y": np.asarray(y, dtype=float).copy(),
+                            "state": best_state,
                             "grad_x": np.asarray(grad_x, dtype=float).copy(),
                             "grad_y": grad_y.copy(),
                         }
                     )
                 return float(cost), np.asarray(x, dtype=float), grad_y
+
+            def _trial_cost_y(y):
+                x = np.asarray(y, dtype=float) * scale - base_params
+                t0 = time.perf_counter()
+                residual = np.asarray(self.forward_residual_fun(x), dtype=float).reshape(-1)
+                cost = 0.5 * float(np.dot(residual, residual))
+                self._profile_add("scalar_trust_cost_only_trial", time.perf_counter() - t0)
+                return cost, x
 
             cost_current, x_current, grad_y = _evaluate_y(y_current)
             grad_norm = float(np.linalg.norm(grad_y, ord=np.inf))
@@ -3769,6 +4116,49 @@ class FixedBoundaryExactOptimizer:
                 if success_result
                 else "maximum number of scalar objective evaluations is exceeded"
             )
+            lbfgs_pairs: list[tuple[np.ndarray, np.ndarray, float]] = []
+            max_lbfgs_pairs = 8
+            armijo_c1 = 1.0e-4
+            backtrack_factor = 0.1
+            cost_only_trial_flag = os.getenv("VMEC_JAX_OPT_SCALAR_COST_ONLY_TRIALS")
+            cost_only_trials = (
+                bool(getattr(self, "_scalar_trust_cost_only_trials", False))
+                if cost_only_trial_flag is None
+                else cost_only_trial_flag.strip().lower() in ("1", "true", "yes", "on")
+            )
+
+            def _scalar_trust_direction(grad):
+                grad = np.asarray(grad, dtype=float)
+                if not lbfgs_pairs:
+                    self._profile_add("scalar_trust_gradient_direction", 0.0)
+                    return -grad
+
+                q = grad.copy()
+                alphas: list[float] = []
+                for s_vec, y_vec, rho in reversed(lbfgs_pairs):
+                    alpha = float(rho * np.dot(s_vec, q))
+                    alphas.append(alpha)
+                    q = q - alpha * y_vec
+
+                s_last, y_last, _rho_last = lbfgs_pairs[-1]
+                yy_last = float(np.dot(y_last, y_last))
+                sy_last = float(np.dot(s_last, y_last))
+                h0 = sy_last / yy_last if yy_last > 0.0 and sy_last > 0.0 else 1.0
+                h0 = min(1.0e6, max(1.0e-12, h0))
+                r = h0 * q
+                for (s_vec, y_vec, rho), alpha in zip(lbfgs_pairs, reversed(alphas)):
+                    beta = float(rho * np.dot(y_vec, r))
+                    r = r + s_vec * (alpha - beta)
+
+                direction = -r
+                if (
+                    not np.all(np.isfinite(direction))
+                    or float(np.dot(direction, grad)) >= -1.0e-14 * max(1.0, float(np.linalg.norm(grad) ** 2))
+                ):
+                    self._profile_add("scalar_trust_gradient_direction", 0.0)
+                    return -grad
+                self._profile_add("scalar_trust_lbfgs_direction", 0.0)
+                return direction
 
             while not success_result and eval_count < max_scalar_evals:
                 grad_norm_2 = float(np.linalg.norm(grad_y))
@@ -3776,22 +4166,84 @@ class FixedBoundaryExactOptimizer:
                     message_result = "zero or non-finite scalar-adjoint gradient"
                     break
 
+                direction_y = _scalar_trust_direction(grad_y)
+                direction_norm = float(np.linalg.norm(direction_y))
+                if not np.isfinite(direction_norm) or direction_norm <= 0.0:
+                    message_result = "zero or non-finite scalar-adjoint search direction"
+                    break
+                base_step_y = direction_y * min(1.0, radius / direction_norm)
+                directional_decrease = -float(np.dot(grad_y, base_step_y))
+                if directional_decrease <= 0.0 or not np.isfinite(directional_decrease):
+                    base_step_y = -grad_y * min(1.0, radius / grad_norm_2)
+                    directional_decrease = -float(np.dot(grad_y, base_step_y))
+                    lbfgs_pairs.clear()
+
                 accepted = False
-                while eval_count < max_scalar_evals and radius >= min_radius:
-                    step_y = -grad_y * min(1.0, radius / grad_norm_2)
+                shrink = 1.0
+                while eval_count < max_scalar_evals:
+                    step_y = shrink * base_step_y
+                    if float(np.linalg.norm(step_y)) < min_radius:
+                        break
                     y_trial = y_current + step_y
-                    cost_trial, x_trial, grad_trial = _evaluate_y(y_trial)
-                    if np.isfinite(cost_trial) and cost_trial < cost_current:
+                    armijo_limit = cost_current - armijo_c1 * shrink * max(0.0, directional_decrease)
+                    if cost_only_trials:
+                        cost_trial_estimate, x_trial = _trial_cost_y(y_trial)
+                        passes_trial_filter = np.isfinite(cost_trial_estimate) and (
+                            cost_trial_estimate <= armijo_limit or cost_trial_estimate < cost_current
+                        )
+                        if not passes_trial_filter:
+                            self._profile_add("scalar_trust_rejected_step", 0.0)
+                            shrink *= backtrack_factor
+                            continue
+                        cost_trial, x_trial, grad_trial = _evaluate_y(y_trial)
+                        if not (
+                            np.isfinite(cost_trial)
+                            and (cost_trial <= armijo_limit or cost_trial < cost_current)
+                        ):
+                            self._profile_add("scalar_trust_exact_validation_rejected_step", 0.0)
+                            shrink *= backtrack_factor
+                            continue
+                    else:
+                        cost_trial, x_trial, grad_trial = _evaluate_y(y_trial)
+                    if np.isfinite(cost_trial) and (
+                        cost_trial <= armijo_limit or cost_trial < cost_current
+                    ):
                         y_current = y_trial
                         x_current = x_trial
                         cost_previous = cost_current
                         cost_current = cost_trial
+                        step_accepted = np.asarray(step_y, dtype=float)
+                        grad_delta = np.asarray(grad_trial, dtype=float) - np.asarray(grad_y, dtype=float)
                         grad_y = grad_trial
                         grad_norm = float(np.linalg.norm(grad_y, ord=np.inf))
                         accepted_steps += 1
                         accepted = True
+                        sy = float(np.dot(step_accepted, grad_delta))
+                        curvature_floor = 1.0e-12 * max(
+                            1.0,
+                            float(np.linalg.norm(step_accepted)) * float(np.linalg.norm(grad_delta)),
+                        )
+                        if sy > curvature_floor and np.all(np.isfinite(grad_delta)):
+                            lbfgs_pairs.append((step_accepted, grad_delta, 1.0 / sy))
+                            if len(lbfgs_pairs) > max_lbfgs_pairs:
+                                del lbfgs_pairs[0]
                         _record_history_from_cached_state(x_current, cost_current)
-                        radius = min(initial_radius, max(radius * 1.5, radius))
+                        step_norm = float(np.linalg.norm(step_accepted))
+                        if shrink < 1.0:
+                            # Backtracking is a local globalization choice, not
+                            # evidence that future quasi-Newton directions need
+                            # a permanently tiny trust radius.  Re-expand to the
+                            # previous rejected scale so the next accepted-point
+                            # callback can still make useful progress.
+                            radius = min(
+                                initial_radius,
+                                max(2.0 * step_norm, step_norm / backtrack_factor),
+                            )
+                            self._profile_add("scalar_trust_backtracked_accept", 0.0)
+                        elif step_norm >= 0.8 * radius:
+                            radius = min(initial_radius, max(radius * 1.5, radius))
+                        else:
+                            radius = min(initial_radius, max(radius, 2.0 * step_norm))
                         if abs(cost_previous - cost_current) <= float(ftol) * max(1.0, abs(cost_current)):
                             success_result = True
                             status_result = 2
@@ -3801,7 +4253,8 @@ class FixedBoundaryExactOptimizer:
                             status_result = 1
                             message_result = "`gtol` termination condition is satisfied."
                         break
-                    radius *= 0.5
+                    self._profile_add("scalar_trust_rejected_step", 0.0)
+                    shrink *= backtrack_factor
 
                 if success_result:
                     break
@@ -3813,6 +4266,9 @@ class FixedBoundaryExactOptimizer:
                 message_result = "maximum number of scalar objective evaluations is exceeded"
 
             x_result = np.asarray(best_eval["x"], dtype=float)
+            best_state = best_eval.get("state")
+            if best_state is not None:
+                self._remember_exact_state(self._exact_cache_key(x_result), best_state)
             cost_result = float(best_eval["cost"])
             result = {
                 "x": x_result,
@@ -3871,7 +4327,7 @@ class FixedBoundaryExactOptimizer:
                     if exact_residual is None:
                         exact_residual = self._cached_exact_residual(cache_key=key)
                     if exact_residual is not None:
-                        self._remember_best_exact_point(x, exact_residual, entry_cost)
+                        self._remember_best_exact_point(x, exact_residual, entry_cost, state=cached_state)
                     last_history_key[0] = key
                 else:
                     self._exact_history_rejected_count += 1
@@ -3974,7 +4430,7 @@ class FixedBoundaryExactOptimizer:
                     if exact_residual is None:
                         exact_residual = self._cached_exact_residual(cache_key=key)
                     if exact_residual is not None:
-                        self._remember_best_exact_point(x, exact_residual, entry_cost)
+                        self._remember_best_exact_point(x, exact_residual, entry_cost, state=cached_state)
                     last_history_key[0] = key
                 else:
                     self._exact_history_rejected_count += 1
@@ -4228,6 +4684,7 @@ class FixedBoundaryExactOptimizer:
         selected_best_exact = bool(result.pop("_selected_best_exact_point", False))
         optimizer_exception = result.pop("_optimizer_exception", None)
         best_exact_params = getattr(self, "_best_exact_params", None)
+        best_exact_state = getattr(self, "_best_exact_state", None)
         best_exact_residual = getattr(self, "_best_exact_residual", None)
         best_exact_cost = float(getattr(self, "_best_exact_cost", math.inf))
 
@@ -4261,6 +4718,8 @@ class FixedBoundaryExactOptimizer:
                     res_final = np.asarray(best_exact_residual, dtype=float).reshape(-1)
                     state_final = self._cached_exact_state(result["x"])
                     if state_final is None:
+                        state_final = best_exact_state
+                    if state_final is None:
                         state_final = (
                             self._solve_scan_exact_state(result["x"])
                             if self._scan_exact_path == "scan"
@@ -4271,6 +4730,9 @@ class FixedBoundaryExactOptimizer:
                         "Final exact accepted-point solve failed and no prior exact "
                         "accepted point is available for final output."
                     ) from exc
+
+        if state_final is not None:
+            self._remember_exact_state(final_key, state_final)
 
         final_wall_time_s = time.perf_counter() - self._wall_t0
         if self._history:
@@ -4306,6 +4768,8 @@ class FixedBoundaryExactOptimizer:
             res_final = np.asarray(best_exact_residual, dtype=float).reshape(-1)
             state_final = self._cached_exact_state(result["x"])
             if state_final is None:
+                state_final = best_exact_state
+            if state_final is None:
                 try:
                     state_final = (
                         self._solve_scan_exact_state(result["x"])
@@ -4329,6 +4793,9 @@ class FixedBoundaryExactOptimizer:
             cost_final = float(entry_final["cost"])
             qs_total_final = float(entry_final["qs_objective"])
             aspect_final = float(entry_final["aspect"])
+
+        if state_final is not None:
+            self._remember_exact_state(final_key, state_final)
 
         result["cost"] = float(cost_final)
         result["objective"] = float(2.0 * cost_final)

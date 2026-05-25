@@ -117,6 +117,12 @@ class WoutData:
     pcurr_type: str
     piota_type: str
 
+    # vmec_jax solver status metadata.  VMEC2000 often leaves partially failed
+    # outputs ambiguous; vmec_jax keeps computed fields and marks status.
+    ier_flag: int = 0
+    vmec_jax_converged: bool = True
+    vmec_jax_status: str = "converged"
+
 
 def _bool_from_nc(x: Any) -> bool:
     # VMEC stores *_logical__ as 0/1 integers in netcdf.

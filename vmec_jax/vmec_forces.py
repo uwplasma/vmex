@@ -824,6 +824,19 @@ def vmec_forces_rz_from_wout(
         )
 
     phips = wout_eff.phips
+    # This conversion is needed both by bcovar and by the constraint kernels.
+    # Compute it once per force evaluation and pass it through to bcovar.
+    geom_start = time.perf_counter()
+    Rcos_int, Zsin_int, Rsin_int, Zcos_int = vmec_m1_internal_to_physical_signed(
+        Rcos=state.Rcos,
+        Zsin=state.Zsin,
+        Rsin=state.Rsin,
+        Zcos=state.Zcos,
+        modes=static.modes,
+        lthreed=bool(getattr(static.cfg, "lthreed", True)),
+        lasym=bool(getattr(static.cfg, "lasym", False)),
+        lconm1=bool(getattr(static.cfg, "lconm1", True)),
+    )
     bcovar_start = time.perf_counter()
     with _trace("bcovar"):
         bc, bc_parity = vmec_bcovar_half_mesh_from_wout(
@@ -838,23 +851,12 @@ def vmec_forces_rz_from_wout(
             use_vmec_synthesis=use_vmec_synthesis,
             trig=trig,
             return_parity_aux=True,
+            state_physical_signed=(Rcos_int, Zsin_int, Rsin_int, Zcos_int),
         )
     _vmec_force_profile_log("bcovar_done", bcovar_start)
 
     # VMEC stores internal coefficients; undo the m=1 internal constraint for
     # R/Z before real-space synthesis.
-    geom_start = time.perf_counter()
-    Rcos_int, Zsin_int, Rsin_int, Zcos_int = vmec_m1_internal_to_physical_signed(
-        Rcos=state.Rcos,
-        Zsin=state.Zsin,
-        Rsin=state.Rsin,
-        Zcos=state.Zcos,
-        modes=static.modes,
-        lthreed=bool(getattr(static.cfg, "lthreed", True)),
-        lasym=bool(getattr(static.cfg, "lasym", False)),
-        lconm1=bool(getattr(static.cfg, "lconm1", True)),
-    )
-
     state_geom = SimpleNamespace(
         Rcos=jnp.asarray(Rcos_int),
         Rsin=jnp.asarray(Rsin_int),

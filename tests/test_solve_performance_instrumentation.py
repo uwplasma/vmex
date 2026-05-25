@@ -21,6 +21,14 @@ def test_residual_iter_timing_report_exposes_force_eval_aliases() -> None:
         "compute_forces_first": 0.15,
         "compute_forces_rest": 0.25,
         "compute_forces_calls": 3,
+        "compute_forces_main": 0.4,
+        "compute_forces_main_calls": 3,
+        "compute_forces_auto_flip": 0.03,
+        "compute_forces_auto_flip_calls": 2,
+        "compute_forces_trial": 0.05,
+        "compute_forces_trial_calls": 1,
+        "compute_forces_backtracking": 0.07,
+        "compute_forces_backtracking_calls": 1,
         "preconditioner": 0.12,
         "precond_apply": 0.08,
         "precond_mode_scale": 0.01,
@@ -43,6 +51,10 @@ def test_residual_iter_timing_report_exposes_force_eval_aliases() -> None:
     assert report["force_eval_rest_s"] == pytest.approx(report["compute_forces_rest_s"])
     assert report["force_eval_calls"] == report["compute_forces_calls"]
     assert report["force_eval_per_iter_s"] == pytest.approx(0.2)
+    assert report["compute_forces_main_s"] == pytest.approx(0.4)
+    assert report["force_eval_extra_s"] == pytest.approx(0.15)
+    assert report["force_eval_all_s"] == pytest.approx(0.55)
+    assert report["force_eval_all_calls"] == 7
 
 
 def test_accelerated_scan_timing_is_opt_in_and_path_labeled(

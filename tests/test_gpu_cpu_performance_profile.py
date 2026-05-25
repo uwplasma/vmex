@@ -2,6 +2,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import sys
 
 import vmec_jax.discrete_adjoint as da
 
@@ -52,6 +53,67 @@ def _load_exact_tool():
     assert spec.loader is not None
     spec.loader.exec_module(module)
     return module
+
+
+def _fixed_profiler_args(fixed_tool, **overrides):
+    values = {
+        "input": "input.test",
+        "iters": 2,
+        "solver_mode": "accelerated",
+        "solver_device": "cpu",
+        "multigrid": False,
+        "use_input_niter": False,
+        "use_scan": None,
+        "jit_forces": False,
+        "no_jit_forces": False,
+        "auto_cli_policy": False,
+        "dynamic_scan": False,
+        "require_scan": False,
+        "require_no_scan": False,
+        "phase_timing": {},
+    }
+    values.update(overrides)
+    return fixed_tool.argparse.Namespace(**values)
+
+
+def _fixed_profiler_run(diagnostics):
+    class Result:
+        n_iter = 2
+        w_history = [1.0, 0.5]
+        fsqr2_history = [0.1, 0.05]
+        fsqz2_history = [0.2, 0.1]
+        fsql2_history = [0.3, 0.15]
+
+    Result.diagnostics = diagnostics
+
+    class Run:
+        result = Result()
+
+    return Run()
+
+
+class _FixedProfilerJaxModule:
+    __version__ = "test"
+
+    @staticmethod
+    def devices():
+        return ["cpu0"]
+
+    @staticmethod
+    def default_backend():
+        return "cpu"
+
+
+class _ExactProfilerJaxModule:
+    __version__ = "test"
+
+    @staticmethod
+    def devices():
+        return ["cpu0"]
+
+    @staticmethod
+    def default_backend():
+        return "cpu"
 
 
 def test_replay_column_chunk_override_is_nonfatal_for_bad_env():
@@ -155,6 +217,7 @@ def test_performance_matrix_fixed_command_uses_backend_solver_device(tmp_path):
             "--iters",
             "7",
             "--no-warmup",
+            "--use-input-niter",
             "--vmec-timing-detail",
         ]
     )
@@ -172,10 +235,50 @@ def test_performance_matrix_fixed_command_uses_backend_solver_device(tmp_path):
     assert command[command.index("--solver-device") + 1] == "gpu"
     assert command[command.index("--iters") + 1] == "7"
     assert "--simple-profile" in command
+    assert "--use-input-niter" in command
     assert "--use-scan" not in command
+    assert "--no-use-scan" not in command
     assert "--no-auto-cli-policy" in command
     assert "--no-multigrid" in command
     assert "--vmec-timing-detail" in command
+
+
+def test_performance_matrix_fixed_command_can_force_non_scan(tmp_path):
+    tool = _load_tool()
+    args = tool._build_parser().parse_args(
+        [
+            "--mode",
+            "fixed-boundary",
+            "--backend",
+            "gpu",
+            "--no-use-scan",
+        ]
+    )
+
+    command = tool.build_child_command(
+        args=args,
+        backend="gpu",
+        report_path=tmp_path / "report.json",
+        trace_dir=tmp_path / "trace",
+    )
+
+    assert "--no-use-scan" in command
+    assert "--use-scan" not in command
+
+
+def test_fixed_boundary_profiler_scan_policy_is_tristate(monkeypatch):
+    tool = _load_fixed_tool()
+
+    monkeypatch.setattr(sys, "argv", ["profile_fixed_boundary.py", "--input", "input.test"])
+    default = tool._parse_args()
+    monkeypatch.setattr(sys, "argv", ["profile_fixed_boundary.py", "--input", "input.test", "--use-scan"])
+    forced_scan = tool._parse_args()
+    monkeypatch.setattr(sys, "argv", ["profile_fixed_boundary.py", "--input", "input.test", "--no-use-scan"])
+    forced_nonscan = tool._parse_args()
+
+    assert default.use_scan is None
+    assert forced_scan.use_scan is True
+    assert forced_nonscan.use_scan is False
 
 
 def test_performance_matrix_exact_command_can_request_memory_profile(tmp_path):
@@ -246,6 +349,88 @@ def test_exact_optimizer_profiler_trial_scan_flag_normalization(monkeypatch):
     assert legacy.trial_scan == "on"
     assert legacy.method == "auto"
     assert explicit_off.trial_scan == "off"
+
+
+def test_exact_profiler_runtime_info_records_device_timing():
+    exact_tool = _load_exact_tool()
+    phase_timing = {}
+
+    runtime = exact_tool._jax_runtime_info(_ExactProfilerJaxModule, phase_timing=phase_timing)
+
+    assert runtime["jax_version"] == "test"
+    assert runtime["default_backend"] == "cpu"
+    assert runtime["devices"] == ["cpu0"]
+    assert "jax_devices_s" in runtime
+    assert phase_timing["jax_devices_s"] == runtime["jax_devices_s"]
+
+
+def test_exact_callback_payload_exposes_common_timing_aliases():
+    exact_tool = _load_exact_tool()
+    args = exact_tool._parse_args(["--callback", "jacobian", "--trial-scan", "off"])
+    profile = {
+        "jacobian_total": {"count": 1, "wall_time_s": 1.25, "mean_wall_time_s": 1.25},
+        "trial_solver_scan_runner_cache_hit_count": {
+            "count": 1,
+            "wall_time_s": 2.0,
+            "mean_wall_time_s": 2.0,
+        },
+    }
+    phase_timing = {
+        "process_to_main_s": 0.01,
+        "vmec_jax_import_s": 0.02,
+        "jax_devices_pre_run_s": 0.03,
+        "jax_devices_s": 0.04,
+    }
+
+    payload = exact_tool._build_callback_payload(
+        args=args,
+        specs_count=3,
+        solver_device_resolved="cpu",
+        samples=[{"repeat": 0, "wall_time_s": 2.5}],
+        profile=profile,
+        cache_before={"total_entries": 0},
+        cache_after={"total_entries": 0},
+        rss_before_bytes=None,
+        rss_after_bytes=None,
+        total_wall_s=2.5,
+        phase_timing=phase_timing,
+        runtime={"default_backend": "cpu"},
+    )
+
+    assert payload["total_wall_time_s"] == 2.5
+    assert payload["wall_time_s"] == 2.5
+    assert payload["phase_timing"]["run_wall_s"] == 2.5
+    assert payload["phase_timing"]["process_to_main_s"] == 0.01
+    assert payload["phase_timing"]["vmec_jax_import_s"] == 0.02
+    assert payload["phase_timing"]["jax_devices_pre_run_s"] == 0.03
+    assert payload["phase_timing"]["jax_devices_s"] == 0.04
+    assert payload["timing"]["jacobian_total"] == 1.25
+    assert payload["timing"]["trial_solver_scan_runner_cache_hit_count"] == 2
+    json.dumps(exact_tool._json_safe(payload))
+
+
+def test_exact_run_history_payload_exposes_timing_aliases():
+    exact_tool = _load_exact_tool()
+    history = {
+        "total_wall_time_s": 4.0,
+        "profile": {
+            "exact_tape_build": {"count": 1, "wall_time_s": 1.5, "mean_wall_time_s": 1.5},
+            "jacobian_tape_replay": {"count": 2, "wall_time_s": 0.75, "mean_wall_time_s": 0.375},
+        },
+    }
+
+    payload = exact_tool._history_payload_with_aliases(
+        history,
+        phase_timing={"process_to_main_s": 0.01, "vmec_jax_import_s": 0.02},
+    )
+
+    assert payload["total_wall_time_s"] == 4.0
+    assert payload["wall_time_s"] == 4.0
+    assert payload["phase_timing"]["run_wall_s"] == 4.0
+    assert payload["phase_timing"]["vmec_jax_import_s"] == 0.02
+    assert payload["timing"]["exact_tape_build"] == 1.5
+    assert payload["timing"]["jacobian_tape_replay"] == 0.75
+    json.dumps(exact_tool._json_safe(payload))
 
 
 def test_exact_callback_summary_preserves_cold_tangent_replay_and_scan_trial_buckets():
@@ -381,6 +566,35 @@ def test_performance_matrix_loaded_summary_adds_scan_cache_and_jvp_sections(tmp_
     assert projected_jvp["projected_replay"]["residual_tangents_s"] == 2.5
 
 
+def test_performance_matrix_loaded_summary_infers_effective_jvp_from_profile(tmp_path):
+    tool = _load_tool()
+    report = tmp_path / "profile.json"
+    report.write_text(
+        json.dumps(
+            {
+                "report_kind": "exact_optimizer_callback_profile",
+                "callback": "jacobian",
+                "solver_device_resolved": "default",
+                "runtime": {"default_backend": "gpu"},
+                "total_wall_time_s": 8.0,
+                "jvp_only_exact_tape": False,
+                "jvp_only_basepoint_carries": False,
+                "samples": [{"repeat": 0, "wall_time_s": 8.0}],
+                "profile": {
+                    "exact_solve_with_tape_jvp_only_total": {"count": 1, "wall_time_s": 5.0},
+                    "exact_tape_build_jvp_only": {"count": 1, "wall_time_s": 4.5},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = tool._load_profile_summary(report, label="gpu")
+
+    assert summary["matrix_projected_replay_jvp_summary"]["jvp"]["exact_tape"] is True
+    assert summary["matrix_projected_replay_jvp_summary"]["jvp"]["basepoint_carries"] is True
+
+
 def test_exact_optimizer_point_cache_clear_preserves_initial_tangent_cache():
     exact_tool = _load_exact_tool()
 
@@ -456,45 +670,143 @@ def test_fixed_boundary_profiler_compacts_timing_diagnostics():
     }
 
 
-def test_fixed_boundary_profiler_reports_effective_jit_default():
+def test_fixed_boundary_profiler_summary_exposes_wall_and_host_update_timing():
     fixed_tool = _load_fixed_tool()
-    args = fixed_tool.argparse.Namespace(
-        input="input.test",
-        iters=2,
-        solver_mode="accelerated",
-        solver_device="cpu",
-        multigrid=False,
-        use_input_niter=False,
-        use_scan=True,
-        jit_forces=False,
-        no_jit_forces=False,
-        auto_cli_policy=False,
-        dynamic_scan=False,
+    args = _fixed_profiler_args(fixed_tool, use_scan=False)
+    timing = {
+        "iterations": 3,
+        "solve_total_s": 2.0,
+        "compute_forces_s": 0.8,
+        "preconditioner_s": 0.4,
+        "update_s": 0.3,
+        "update_state_s": 0.25,
+        "update_state_per_iter_s": 0.08333333333333333,
+    }
+
+    summary = fixed_tool._summarize_run(
+        args=args,
+        run=_fixed_profiler_run({"use_scan": False, "timing": timing}),
+        wall_time=1.5,
+        jax_module=_FixedProfilerJaxModule,
     )
 
-    class Result:
-        diagnostics = {}
-        n_iter = 2
-        w_history = [1.0, 0.5]
-        fsqr2_history = [0.1, 0.05]
-        fsqz2_history = [0.2, 0.1]
-        fsql2_history = [0.3, 0.15]
+    assert summary["wall_time_sec"] == 1.5
+    assert summary["wall_time_s"] == 1.5
+    assert summary["phase_timing"]["run_wall_s"] == 1.5
+    assert "jax_devices_s" in summary["phase_timing"]
+    assert summary["timing"]["update_state_s"] == 0.25
+    assert summary["diagnostics"]["timing"]["update_state_s"] == 0.25
+    assert summary["args"]["use_scan"] is False
+    json.dumps(fixed_tool._json_safe(summary))
 
-    class Run:
-        result = Result()
 
-    class JaxModule:
-        __version__ = "test"
+def test_fixed_boundary_profiler_summary_exposes_scan_timing_fields():
+    fixed_tool = _load_fixed_tool()
+    args = _fixed_profiler_args(fixed_tool, use_scan=True)
+    timing = {
+        "iterations": 4,
+        "scan_total_s": 3.0,
+        "scan_setup_s": 0.2,
+        "scan_run_setup_s": 0.3,
+        "scan_device_run_s": 1.5,
+        "scan_device_dispatch_s": 0.2,
+        "scan_device_ready_s": 1.3,
+        "scan_host_materialize_s": 0.4,
+        "scan_postprocess_s": 0.1,
+        "scan_unattributed_s": 0.5,
+        "scan_runner_cache_hit_count": 1,
+        "scan_runner_cache_miss_count": 2,
+        "scan_runner_cache_bypass_count": 0,
+    }
 
-        @staticmethod
-        def devices():
-            return ["cpu0"]
+    summary = fixed_tool._summarize_run(
+        args=args,
+        run=_fixed_profiler_run({"use_scan": True, "vmec2000_scan": True, "timing": timing}),
+        wall_time=3.25,
+        jax_module=_FixedProfilerJaxModule,
+    )
 
-        @staticmethod
-        def default_backend():
-            return "cpu"
+    assert summary["wall_time_s"] == 3.25
+    assert summary["timing"]["scan_total_s"] == 3.0
+    assert summary["timing"]["scan_device_dispatch_s"] == 0.2
+    assert summary["timing"]["scan_device_ready_s"] == 1.3
+    assert summary["timing"]["scan_host_materialize_s"] == 0.4
+    assert summary["timing"]["scan_runner_cache_hit_count"] == 1
+    assert summary["diagnostics"]["timing"]["scan_runner_cache_miss_count"] == 2
+    assert summary["args"]["use_scan"] is True
+    json.dumps(fixed_tool._json_safe(summary))
 
-    summary = fixed_tool._summarize_run(args=args, run=Run(), wall_time=1.25, jax_module=JaxModule)
+
+def test_fixed_boundary_profiler_prints_host_update_and_scan_timing(capsys):
+    fixed_tool = _load_fixed_tool()
+    args = _fixed_profiler_args(fixed_tool, use_scan=True)
+    summary = fixed_tool._summarize_run(
+        args=args,
+        run=_fixed_profiler_run(
+            {
+                "use_scan": True,
+                "timing": {
+                    "iterations": 2,
+                    "update_state_s": 0.25,
+                    "scan_total_s": 2.0,
+                    "scan_device_ready_s": 1.3,
+                    "scan_runner_cache_hit_count": 1,
+                },
+            }
+        ),
+        wall_time=2.5,
+        jax_module=_FixedProfilerJaxModule,
+    )
+
+    fixed_tool._print_run_summary(summary)
+
+    output = capsys.readouterr().out
+    assert "update_state_s=0.25" in output
+    assert "scan_total_s=2" in output
+    assert "scan_device_ready_s=1.3" in output
+    assert "scan_runner_cache_hit_count=1" in output
+
+
+def test_fixed_boundary_profiler_scan_requirement_detects_policy_mismatch():
+    fixed_tool = _load_fixed_tool()
+    require_scan = _fixed_profiler_args(fixed_tool, require_scan=True)
+    require_no_scan = _fixed_profiler_args(fixed_tool, require_no_scan=True)
+
+    assert (
+        fixed_tool._scan_requirement_error(
+            require_scan,
+            {"diagnostics": {"use_scan": False, "vmec2000_scan": False}},
+        )
+        == "Required scan path, but run diagnostics did not report scan execution."
+    )
+    assert (
+        fixed_tool._scan_requirement_error(
+            require_no_scan,
+            {"diagnostics": {"use_scan": True}},
+        )
+        == "Required non-scan path, but run diagnostics reported scan execution."
+    )
+    assert (
+        fixed_tool._scan_requirement_error(
+            _fixed_profiler_args(fixed_tool, require_scan=True, require_no_scan=True),
+            {"diagnostics": {}},
+        )
+        == "Specify at most one of --require-scan or --require-no-scan."
+    )
+    assert fixed_tool._scan_requirement_error(require_scan, {"diagnostics": {"vmec2000_scan": True}}) is None
+    assert fixed_tool._scan_requirement_error(require_no_scan, {"diagnostics": {"use_scan": False}}) is None
+
+
+def test_fixed_boundary_profiler_reports_effective_jit_default():
+    fixed_tool = _load_fixed_tool()
+    args = _fixed_profiler_args(fixed_tool, use_scan=True)
+
+    summary = fixed_tool._summarize_run(
+        args=args,
+        run=_fixed_profiler_run({}),
+        wall_time=1.25,
+        jax_module=_FixedProfilerJaxModule,
+    )
 
     assert fixed_tool._effective_jit_forces(args) is True
     assert summary["args"]["jit_forces"] is True

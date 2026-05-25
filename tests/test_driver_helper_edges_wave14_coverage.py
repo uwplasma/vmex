@@ -65,8 +65,9 @@ def test_list_and_float_normalizers_cover_scalar_iterable_and_invalid_inputs() -
     assert driver._as_list_like(v for v in (6, 7)) == [6, 7]
 
 
-def test_default_use_scan_for_backend_validates_solver_mode_even_though_policy_is_false() -> None:
+def test_default_use_scan_for_backend_validates_solver_mode_and_gpu_policy() -> None:
     assert driver._default_use_scan_for_backend(_Input(), "cpu", "safe") is False
+    assert driver._default_use_scan_for_backend(_Input(), "gpu", "safe") is True
     with pytest.raises(ValueError, match="Unknown solver_mode"):
         driver._default_use_scan_for_backend(_Input(), "cpu", "definitely-not-valid")
 
@@ -322,7 +323,7 @@ def test_load_example_passes_prepared_mgrid_metadata_without_wout(monkeypatch: p
     data_dir.mkdir(parents=True)
     input_path = data_dir / "input.freeb"
     input_path.write_text("&INDATA\n/\n")
-    cfg = SimpleNamespace(marker="cfg")
+    cfg = SimpleNamespace(marker="cfg", lfreeb=True)
     indata = object()
     static = object()
     metadata = MGridMetadata(
@@ -356,6 +357,7 @@ def test_load_example_passes_prepared_mgrid_metadata_without_wout(monkeypatch: p
         return static
 
     monkeypatch.setattr(driver, "load_config", fake_load_config)
+    monkeypatch.setattr(driver, "validate_free_boundary_config", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(driver, "prepare_mgrid_for_config", fake_prepare_mgrid_for_config)
     monkeypatch.setattr(driver, "build_static", fake_build_static)
 

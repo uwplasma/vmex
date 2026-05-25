@@ -140,12 +140,16 @@ def host_update_assembly_policy(
     use_scan: bool,
     backend_name: str,
     state_has_tracer: bool,
+    allow_accelerator: bool = False,
 ) -> HostUpdateAssemblyPolicy:
     """Resolve whether the non-scan CPU solve should assemble updates on host."""
     backend = str(backend_name).strip().lower()
+    backend_allowed = (backend == "cpu") or (
+        bool(allow_accelerator) and backend in ("gpu", "cuda", "rocm", "tpu")
+    )
     auto_enabled = (not bool(use_scan)) and (backend == "cpu") and (not bool(state_has_tracer))
     enabled = auto_enabled if requested is None else bool(requested)
-    enabled = bool(enabled) and (not bool(use_scan)) and (backend == "cpu")
+    enabled = bool(enabled) and (not bool(use_scan)) and bool(backend_allowed)
     return HostUpdateAssemblyPolicy(enabled=bool(enabled), auto_enabled=bool(auto_enabled))
 
 
@@ -228,7 +232,15 @@ def vmec2000_scan_options_from_env(
     if scan_precompute_env_l:
         scan_use_precomputed = _solve_runtime._runtime_env_enabled(scan_precompute_env_l)
     else:
-        scan_use_precomputed = _solve_runtime._runtime_env_enabled(tridi_precompute_env)
+        tridi_precompute_env_l = str(tridi_precompute_env).strip().lower()
+        if tridi_precompute_env_l:
+            scan_use_precomputed = _solve_runtime._runtime_env_enabled(tridi_precompute_env_l)
+        else:
+            # VMEC2000 scan parity is most robust when the Thomas coefficients
+            # are materialized once outside the loop.  This is required for
+            # converged finite-beta CPU scan solves and is also the fast GPU
+            # path; explicit env overrides remain available for bisection.
+            scan_use_precomputed = True
     scan_lax_env_l = str(scan_lax_env).strip().lower()
     if scan_lax_env_l:
         scan_use_lax_tridi = _solve_runtime._runtime_env_enabled(scan_lax_env_l)
@@ -241,11 +253,10 @@ def vmec2000_scan_options_from_env(
             "force",
         )
     else:
-        # Scan-based trial solves are the default optimization trial path.  The
-        # fused XLA tridiagonal solver is consistently faster on CPU, but
-        # current GPU optimization-trial profiles are still better with the
-        # older scan path.  Keep explicit env overrides for parity/perf bisection.
-        scan_use_lax_tridi = str(backend_name).strip().lower() == "cpu"
+        # The fused lax tridiagonal solver is useful for bisection but does not
+        # preserve convergence on all VMEC2000 scan decks. Keep the robust
+        # Thomas path as the default on every backend.
+        scan_use_lax_tridi = False
 
     scan_restart_payload_env_l = str(scan_restart_payload_env).strip().lower()
     if scan_restart_payload_env_l in ("1", "true", "yes"):

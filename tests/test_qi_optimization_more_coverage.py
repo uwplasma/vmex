@@ -126,7 +126,17 @@ def test_jsonable_parse_float_sequence_and_partial_history_helpers() -> None:
     assert qio._parse_float_sequence("1, 2.5 3", name="radii") == (1.0, 2.5, 3.0)
     with pytest.raises(ValueError, match="radii must be"):
         qio._parse_float_sequence("1, nope", name="radii")
-    assert qio._partial_diagnostics_from_history(history, existing) == existing
+    assert qio._partial_diagnostics_from_history(history, existing) == {
+        "qi_smooth_total": 1.0e-3,
+        "objective_final": np.float64(1.25),
+        "qs_final": np.float64(2.5e-3),
+        "aspect": np.float64(7.5),
+        "mean_iota": np.float64(-0.42),
+        "nfev": np.int64(8),
+        "njev": np.int64(3),
+        "total_wall_time_s": np.float64(12.0),
+        "partial": True,
+    }
     assert partial == {
         "objective_final": np.float64(1.25),
         "qs_final": np.float64(2.5e-3),

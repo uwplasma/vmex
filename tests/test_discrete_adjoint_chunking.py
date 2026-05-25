@@ -1104,6 +1104,17 @@ def test_dynamic_replay_payload_stacks_on_device_for_accelerator_backend(monkeyp
     assert da._dynamic_replay_bucket_default() == 128
 
 
+def test_generic_replay_stack_uses_device_arrays_for_accelerator_backend(monkeypatch):
+    monkeypatch.setattr(da.jax, "default_backend", lambda: "gpu")
+    trace = _fake_jax_replay_trace()
+
+    stacked, _static_flags = da._stack_replay_step_traces((trace,))
+
+    assert hasattr(stacked["lambda_update_scale"], "dtype")
+    assert "jax" in type(stacked["lambda_update_scale"]).__module__.lower()
+    np.testing.assert_allclose(np.asarray(stacked["lambda_update_scale"]), [1.0])
+
+
 def test_dynamic_replay_support_and_restart_classifiers():
     supported = _fake_supported_dynamic_trace()
     restart = _fake_restart_trace()
@@ -1138,6 +1149,46 @@ def test_replay_values_equal_handles_objects_and_fallback_equality():
             return isinstance(other, Unarrayable)
 
     assert da._replay_values_equal(Unarrayable(), Unarrayable())
+
+
+def test_segmented_dynamic_replay_uses_static_flags_without_full_stack(monkeypatch):
+    trace = _fake_supported_dynamic_trace()
+    tape = SimpleNamespace(
+        dynamic_initial_carry=None,
+        dynamic_base_carries_stacked=None,
+        stacked_step_traces=None,
+        step_trace_static_flags=None,
+        step_traces=(trace,),
+    )
+    calls = []
+
+    def fail_stack(_segment):
+        raise AssertionError("segmented dynamic replay should not build a generic stacked trace")
+
+    def fake_dynamic_payload(segment, static_flags, **_kwargs):
+        calls.append(static_flags)
+        stacked = {"active": np.asarray([True])}
+        base_carries = _fake_carry_stacked(width=2)
+        return stacked, dict(static_flags), _fake_carry(width=2), base_carries
+
+    def fake_runner(**_kwargs):
+        return lambda carry_tangents, _base_carries, _stacked: carry_tangents
+
+    monkeypatch.setattr(da, "_stack_replay_step_traces", fail_stack)
+    monkeypatch.setattr(da, "_build_dynamic_replay_payload", fake_dynamic_payload)
+    monkeypatch.setattr(da, "_checkpoint_tape_dynamic_basepoint_scan_runner", fake_runner)
+
+    tangents = np.asarray([[1.0, 2.0], [3.0, 4.0]])
+    out = da.checkpoint_tape_state_jvp_columns(
+        tape=tape,
+        static=object(),
+        initial_tangents=tangents,
+        rebuild_preconditioner=True,
+    )
+
+    np.testing.assert_allclose(np.asarray(out), tangents)
+    assert calls
+    assert calls[0]["precond_jmax"] == 1
 
 
 def test_stacked_trace_signature_uses_asarray_dtype_for_proxy_leaf():

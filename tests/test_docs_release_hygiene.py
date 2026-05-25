@@ -16,7 +16,7 @@ def test_root_readme_stays_concise_and_defers_extended_claims() -> None:
     assert "docs/optimization_sweep_results.rst" in readme
     assert "docs/performance.rst" in readme
     assert "docs/release_checklist.rst" in readme
-    assert "Latest published release:" in readme
+    assert "Latest repository release tag:" in readme
     assert "readme_best_optimization_qa.png" in readme
     assert "readme_best_optimization_qh.png" in readme
     assert "readme_best_optimization_qp.png" in readme

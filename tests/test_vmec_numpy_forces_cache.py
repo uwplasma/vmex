@@ -218,6 +218,25 @@ def test_numpy_module_patch_deletes_attrs_that_were_absent(monkeypatch):
     assert not hasattr(dummy, "temporary_jnp")
 
 
+def test_numpy_module_patch_honors_tomnsps_fft_policy(monkeypatch):
+    import vmec_jax.vmec_numpy_forces as vmn
+    import vmec_jax.vmec_tomnsp as vt
+
+    vmn._NP_TOMNSPS_FFT_CACHE.clear()
+    monkeypatch.setattr(vt, "_TOMNSPS_FFT_ENV", "0")
+    with _numpy_module_patch():
+        assert vt._TOMNSPS_FFT_CACHE is vmn._NP_TOMNSPS_FFT_CACHE
+        assert vt._get_tomnsps_fft() is False
+        assert vmn._NP_TOMNSPS_FFT_CACHE == [False]
+
+    vmn._NP_TOMNSPS_FFT_CACHE.clear()
+    monkeypatch.setattr(vt, "_TOMNSPS_FFT_ENV", "1")
+    with _numpy_module_patch():
+        assert vt._get_tomnsps_fft() is True
+        assert vmn._NP_TOMNSPS_FFT_CACHE == [True]
+    vmn._NP_TOMNSPS_FFT_CACHE.clear()
+
+
 def test_np_einsum_fast_paths_match_generic_einsum():
     rng = np.random.default_rng(1)
     cases = [

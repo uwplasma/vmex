@@ -61,8 +61,23 @@ def test_realspace_cache_guards_reject_stale_or_malformed_phase_payloads() -> No
     )
     assert vr._phase_stack_from_trig(modes, trig_with_stack, "missing") is None
     assert vr._phase_stack_from_trig(modes, trig_with_stack, "phase_stack") is phase
-    wrong_identity_modes = SimpleNamespace(m=modes.m.copy(), n=modes.n)
-    assert vr._phase_stack_from_trig(wrong_identity_modes, trig_with_stack, "phase_stack") is None
+    copied_modes = SimpleNamespace(m=modes.m.copy(), n=modes.n.copy())
+    assert vr._phase_stack_from_trig(copied_modes, trig_with_stack, "phase_stack") is phase
+    wrong_value_modes = SimpleNamespace(m=modes.m + 1, n=modes.n)
+    assert vr._phase_stack_from_trig(wrong_value_modes, trig_with_stack, "phase_stack") is None
+
+
+def test_realspace_scalxc_mode_cache_reuses_static_table() -> None:
+    modes, _trig = _small_modes_and_trig(lasym=False)
+    s = np.linspace(0.0, 1.0, 4)
+
+    vr._SCALXC_MN_CACHE.clear()
+    first = vr._scalxc_mn_for_s(s=s, modes=modes, m_np=np.asarray(modes.m), dtype=np.float64)
+    second = vr._scalxc_mn_for_s(s=s, modes=modes, m_np=np.asarray(modes.m), dtype=np.float64)
+
+    assert second is first
+    assert np.asarray(first).shape == (4, int(modes.K))
+    vr._SCALXC_MN_CACHE.clear()
 
 
 @pytest.mark.parametrize(

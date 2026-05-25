@@ -105,6 +105,35 @@ def test_callback_report_summary_extracts_bottleneck_metrics() -> None:
     assert summary["top_profile"][0]["name"] == "exact_solve_with_tape_total"
 
 
+def test_callback_report_summary_infers_effective_gpu_jvp_metadata() -> None:
+    payload = _callback_report(
+        total_wall_time_s=8.0,
+        samples=1,
+        rss_peak_mib=256,
+        replay_wall_time_s=2.0,
+        accepted_replays=1,
+        solve_count=2,
+        cache_entry_growth=1,
+        solver_device="default",
+    )
+    payload["runtime"] = {"default_backend": "gpu"}
+    payload["jvp_only_exact_tape"] = False
+    payload["jvp_only_basepoint_carries"] = False
+    payload["profile"]["exact_solve_with_tape_jvp_only_total"] = {
+        "count": 1,
+        "wall_time_s": 3.0,
+    }
+    payload["profile"]["exact_tape_build_jvp_only"] = {
+        "count": 1,
+        "wall_time_s": 2.5,
+    }
+
+    summary = compare_tool.summarize_payload(payload, label="gpu")
+
+    assert summary["metadata"]["jvp_only_exact_tape"] is True
+    assert summary["metadata"]["jvp_only_basepoint_carries"] is True
+
+
 def test_profile_summary_extracts_linear_operator_transpose_projection() -> None:
     report = _callback_report(
         total_wall_time_s=10.0,

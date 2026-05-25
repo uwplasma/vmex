@@ -51,7 +51,7 @@ def test_load_example_forwards_prepared_mgrid_metadata_and_extcur(monkeypatch, t
     input_path = data_dir / "input.freeb"
     input_path.write_text("&INDATA\n/\n")
 
-    cfg = SimpleNamespace(ns=5)
+    cfg = SimpleNamespace(ns=5, lfreeb=True)
     indata = object()
     static = object()
     metadata = MGridMetadata(
@@ -81,6 +81,7 @@ def test_load_example_forwards_prepared_mgrid_metadata_and_extcur(monkeypatch, t
         return prepared
 
     monkeypatch.setattr(driver, "load_config", fake_load_config)
+    monkeypatch.setattr(driver, "validate_free_boundary_config", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(driver, "prepare_mgrid_for_config", fake_prepare_mgrid_for_config)
 
     def fake_build_static(cfg_arg, **kwargs):

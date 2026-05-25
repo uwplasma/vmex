@@ -154,7 +154,7 @@ def test_fixed_boundary_exact_optimizer_init_preserves_gpu_trial_scan_policy(mon
     )
 
     assert opt_gpu._solver_device_name == "gpu"
-    assert opt_gpu._trial_solver_kwargs["use_scan"] is False
+    assert opt_gpu._trial_solver_kwargs["use_scan"] is True
     assert opt_gpu._trial_solver_kwargs["resume_state_mode"] == "none"
     assert opt_gpu._exact_solver_kwargs["use_scan"] is False
     assert opt_gpu._exact_solver_kwargs["preconditioner_use_precomputed_tridi"] is True
@@ -476,6 +476,25 @@ def test_residual_callbacks_remember_exact_and_trial_residuals():
     assert opt._profile["trial_residual_cache_hit"]["count"] == 1
 
 
+def test_residual_fun_reuses_cached_exact_residual_without_resolve():
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._profile = {}
+    opt._solver_device_name = None
+    opt._inside_solver_device_context = False
+    opt._scan_exact_path = "tape"
+    opt._last_jacobian_key = [None]
+    opt._exact_cache_key = lambda params: np.asarray(params, dtype=float).reshape(-1).tobytes()
+    key = opt._exact_cache_key(np.asarray([1.0]))
+    opt._exact_residual_cache = {key: np.asarray([3.0, 4.0])}
+    opt._solve_exact_with_tape = lambda _params: (_ for _ in ()).throw(
+        AssertionError("cached residual should avoid exact resolve")
+    )
+
+    np.testing.assert_allclose(opt.residual_fun(np.asarray([1.0])), [3.0, 4.0])
+    assert opt._profile["exact_residual_cache_hit"]["count"] == 1
+    assert opt._profile["residual_exact_cache_hit"]["count"] == 1
+
+
 def test_cache_helpers_and_clear_caches_manage_small_payloads():
     opt = object.__new__(FixedBoundaryExactOptimizer)
     opt._profile = {}
@@ -488,6 +507,9 @@ def test_cache_helpers_and_clear_caches_manage_small_payloads():
     opt._trial_residual_cache = OrderedDict()
     opt._trial_residual_cache_max = 0
     opt._initial_tangent_cache = {"x": object()}
+    opt._initial_tangent_direction_cache = {"directions": object()}
+    opt._discrete_jacobian_helper_cache = {"helper": object()}
+    opt._scan_exact_helper_cache = {"scan": object()}
     opt._last_jacobian_residual = np.asarray([1.0])
     cleared = []
     opt._post_jacobian_clear = lambda *, clear_compiled=False: cleared.append(clear_compiled)
@@ -507,8 +529,26 @@ def test_cache_helpers_and_clear_caches_manage_small_payloads():
     assert opt._exact_state_cache == {}
     assert opt._exact_residual_cache == {}
     assert opt._initial_tangent_cache == {}
+    assert opt._initial_tangent_direction_cache == {}
+    assert opt._discrete_jacobian_helper_cache == {}
+    assert opt._scan_exact_helper_cache == {}
     assert opt._last_jacobian_residual is None
     assert cleared == [True]
+
+
+def test_initial_tangent_directions_reuse_identity_matrix():
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._profile = {}
+    opt._solver_device_name = "cpu"
+    opt._initial_tangent_direction_cache = {}
+
+    first = opt._initial_tangent_directions(np.asarray([0.0, 1.0]), profile_prefix="jacobian")
+    second = opt._initial_tangent_directions(np.asarray([2.0, 3.0]), profile_prefix="jacobian")
+
+    assert first is second
+    np.testing.assert_allclose(np.asarray(first), np.eye(2))
+    assert opt._profile["jacobian_initial_tangents_eye_cache_miss"]["count"] == 1
+    assert opt._profile["jacobian_initial_tangents_eye_cache_hit"]["count"] == 1
 
 
 def test_aspect_and_quasisymmetry_wrappers_use_configured_exact_path(monkeypatch):

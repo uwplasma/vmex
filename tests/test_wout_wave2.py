@@ -194,6 +194,44 @@ def test_write_wout_logs_set_fill_off_failure(tmp_path, monkeypatch, capsys):
     assert "fill toggle failed" in capsys.readouterr().out
 
 
+def test_nonconverged_wout_roundtrip_preserves_fields_and_status(tmp_path):
+    netcdf4 = pytest.importorskip("netCDF4")
+    source = _tiny_wout(tmp_path / "source.nc", ns=3, m_modes=(0, 1))
+    source = WoutData(
+        **{
+            **source.__dict__,
+            "fsqr": 0.1,
+            "fsqz": 0.2,
+            "fsql": 0.3,
+            "betatotal": 4.0,
+            "betapol": 5.0,
+            "betator": 6.0,
+            "ier_flag": 1,
+            "vmec_jax_converged": False,
+            "vmec_jax_status": "nonconverged",
+        }
+    )
+
+    out = tmp_path / "wout_nonconverged.nc"
+    write_wout(out, source)
+    reread = wout_module.read_wout(out)
+
+    assert reread.ier_flag == 1
+    assert reread.vmec_jax_converged is False
+    assert reread.vmec_jax_status == "nonconverged"
+    assert reread.fsqr == pytest.approx(0.1)
+    assert reread.fsqz == pytest.approx(0.2)
+    assert reread.fsql == pytest.approx(0.3)
+    assert reread.betatotal == pytest.approx(4.0)
+    assert reread.betapol == pytest.approx(5.0)
+    assert reread.betator == pytest.approx(6.0)
+
+    with netcdf4.Dataset(out) as ds:
+        assert int(ds.variables["ier_flag"][:]) == 1
+        assert int(ds.variables["vmec_jax_converged__logical__"][:]) == 0
+        assert "vmec_jax_status" in ds.variables
+
+
 def test_wout_minimal_light_nonconverged_dumps_and_defaults(tmp_path, monkeypatch, capsys):
     cfg = VMECConfig(
         mpol=2,
@@ -337,11 +375,16 @@ def test_wout_minimal_light_nonconverged_dumps_and_defaults(tmp_path, monkeypatc
 
     np.testing.assert_allclose(wout.buco, 0.0)
     np.testing.assert_allclose(wout.equif, 0.0)
-    assert wout.Aminor_p == 0.0
-    assert wout.volume_p == 0.0
-    assert wout.betatotal == 0.0
+    assert wout.Aminor_p == pytest.approx(1.0)
+    assert wout.Rmajor_p == pytest.approx(2.0)
+    assert wout.aspect == pytest.approx(2.0)
+    assert wout.volume_p == pytest.approx(3.0)
+    assert wout.betatotal == pytest.approx(0.25)
     assert wout.betapol == 0.0
     assert wout.betator == 0.0
+    assert wout.ier_flag == 1
+    assert wout.vmec_jax_converged is False
+    assert wout.vmec_jax_status == "nonconverged"
     assert wout.ac[0] == pytest.approx(2.5)
     assert wout.pcurr_type == "power_series"
     assert wout.piota_type == "power_series"

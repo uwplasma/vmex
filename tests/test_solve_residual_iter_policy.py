@@ -48,6 +48,16 @@ def test_host_update_assembly_policy_matches_cpu_non_scan_defaults():
     )
     assert not accelerator_disabled.enabled
 
+    accelerator_explicit = host_update_assembly_policy(
+        requested=True,
+        use_scan=False,
+        backend_name="gpu",
+        state_has_tracer=False,
+        allow_accelerator=True,
+    )
+    assert accelerator_explicit.enabled
+    assert not accelerator_explicit.auto_enabled
+
 
 @pytest.mark.parametrize(
     ("value", "env_value", "expected"),

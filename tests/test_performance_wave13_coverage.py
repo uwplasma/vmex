@@ -16,6 +16,7 @@ def _scan_cache_key(**overrides):
         static_key=("static", (2, 3)),
         wout_key=("wout", "float64"),
         edge_signature_key=((2,), "float64"),
+        tomnsps_policy_key=("tomnsps", "auto"),
         max_iter_tail=9,
         preflight_iters=1,
         iter_offset0=0,
@@ -26,6 +27,8 @@ def _scan_cache_key(**overrides):
         nstep_screen=25,
         use_restart_triggers=True,
         vmecpp_restart=False,
+        scan_use_precomputed=False,
+        scan_use_lax_tridi=False,
         scan_use_restart_payload=False,
         stage_prev_fsq=None,
         stage_transition_factor=50.0,
@@ -63,6 +66,8 @@ def test_scan_cache_key_delta_labels_behavioral_toggles():
     changed = _scan_cache_key(
         max_iter_tail=10,
         stage_prev_fsq=3.0,
+        scan_use_precomputed=True,
+        scan_use_lax_tridi=True,
         scan_light=True,
         scan_minimal=False,
     )
@@ -70,13 +75,15 @@ def test_scan_cache_key_delta_labels_behavioral_toggles():
     deltas = explain_scan_cache_key_delta(base, changed)
 
     assert [(delta.index, delta.field) for delta in deltas] == [
-        (4, "max_iter_tail"),
-        (15, "stage_prev_fsq"),
-        (20, "scan_light"),
-        (21, "scan_minimal"),
+        (5, "max_iter_tail"),
+        (15, "scan_use_precomputed"),
+        (16, "scan_use_lax_tridi"),
+        (18, "stage_prev_fsq"),
+        (23, "scan_light"),
+        (24, "scan_minimal"),
     ]
-    assert deltas[1].before is None
-    assert deltas[1].after == 3.0
+    assert deltas[3].before is None
+    assert deltas[3].after == 3.0
 
 
 def test_replay_timing_breakdown_prefers_total_and_falls_back_to_split():

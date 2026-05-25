@@ -368,3 +368,59 @@ max_runtime_s = 5.0
     assert "metric_thresholds_rel_scaled" not in freeb
     assert freeb["runtime_thresholds_s"]["pass"] is True
     assert freeb["runtime_thresholds_s"]["observed_total_runtime_s"] == 0.0
+
+
+def test_parity_manifest_explicit_ids_fail_closed_on_unknown_case(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Requested parity cases should not be silently skipped by a typo."""
+
+    from tools.diagnostics import parity_sweep_manifest as manifest_runner
+
+    input_path = tmp_path / "input.synthetic"
+    input_path.write_text("&INDATA\n/\n", encoding="utf-8")
+    manifest_path = tmp_path / "parity_manifest.toml"
+    manifest_path.write_text(
+        f"""
+version = 1
+name = "synthetic ids"
+
+[[cases]]
+id = "known_case"
+tier = "smoke"
+enabled = true
+compare = "stage_trace"
+input = "{input_path}"
+max_iter = 4
+rtol = 1e-4
+atol = 1e-12
+dump_level = "lite"
+vmec_timeout = 11
+""".strip(),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "parity_sweep_manifest.py",
+            "--manifest",
+            str(manifest_path),
+            "--vmec-exec",
+            str(tmp_path / "missing_xvmec2000"),
+            "--ids",
+            "known_case,typo_case",
+            "--dry-run",
+            "--output-root",
+            str(tmp_path / "out"),
+        ],
+    )
+
+    try:
+        manifest_runner.main()
+    except SystemExit as exc:
+        assert str(exc) == "unknown case id(s): typo_case"
+    else:  # pragma: no cover - defensive assertion for clearer failure output
+        raise AssertionError("unknown explicit parity case id should fail closed")

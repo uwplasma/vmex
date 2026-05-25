@@ -17,17 +17,31 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import os
+from typing import TYPE_CHECKING
+
 import numpy as np
 
 from .config import VMECConfig
-from .free_boundary import (
-    FreeBoundaryRuntimeState,
-    MGridMetadata,
-    initial_free_boundary_state,
-)
 from .fourier import HelicalBasis, build_helical_basis
 from .grids import AngleGrid, make_angle_grid
 from .modes import ModeTable, vmec_mode_table
+
+if TYPE_CHECKING:
+    from .free_boundary import FreeBoundaryRuntimeState, MGridMetadata
+
+
+def initial_free_boundary_state(cfg: VMECConfig):
+    """Lazily construct free-boundary runtime state.
+
+    Fixed-boundary runs dominate the CLI/examples path, so avoid importing the
+    comparatively heavy free-boundary/NESTOR module unless ``LFREEB`` is active.
+    The wrapper remains module-level so tests and downstream users can
+    monkeypatch it as before.
+    """
+
+    from .free_boundary import initial_free_boundary_state as _impl
+
+    return _impl(cfg)
 
 
 @dataclass(frozen=True)

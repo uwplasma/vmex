@@ -284,6 +284,45 @@ def flux_profiles_from_indata(indata: InData, s, *, signgs: int) -> FluxProfiles
     return FluxProfiles(phipf=phipf, chipf=chipf, phips=phips, signgs=int(signgs), lamscale=lamscale)
 
 
+def flux_profiles_from_indata_host_default(indata: InData, s, *, signgs: int) -> FluxProfiles | None:
+    """Return NumPy flux profiles for the common non-RFP default-APHI path.
+
+    This helper is intentionally narrow: it avoids eager XLA compilation in
+    CLI/driver finalization for input-only profiles, while leaving all
+    non-default APHI, RFP, and explicit-iota cases on the differentiable JAX
+    implementation above.
+    """
+    aphi = _as_float_list(indata.get("APHI", []))
+    if not aphi:
+        aphi = [1.0]
+    if bool(indata.get_bool("LRFP", False)):
+        return None
+    if len(aphi) != 1 or float(aphi[0]) != 1.0:
+        return None
+    if _has_nonzero_profile_coeffs(indata.get("AI", [])):
+        return None
+
+    s_np = np.asarray(s, dtype=float)
+    if s_np.ndim != 1:
+        return None
+    torflux_edge = float(signgs) * float(indata.get_float("PHIEDGE", 1.0)) / float(TWOPI)
+    phipf = np.full_like(s_np, torflux_edge, dtype=float)
+    chipf = np.zeros_like(s_np, dtype=float)
+    if int(s_np.shape[0]) < 2:
+        s_half = s_np
+    else:
+        s_half = np.concatenate([s_np[:1], 0.5 * (s_np[1:] + s_np[:-1])], axis=0)
+    phips = np.full_like(s_half, torflux_edge, dtype=float)
+    if phips.size:
+        phips[0] = 0.0
+    if phips.size < 2:
+        lamscale = np.asarray(1.0, dtype=float)
+    else:
+        hs = float(s_np[1] - s_np[0])
+        lamscale = np.asarray(np.sqrt(hs * np.sum(phips[1:] ** 2)), dtype=float)
+    return FluxProfiles(phipf=phipf, chipf=chipf, phips=phips, signgs=int(signgs), lamscale=lamscale)
+
+
 def integrate_volume_density(density, sqrtg, s, theta, zeta, *, nfp: int, signgs: int):
     """Integrate `density` over the full torus using `sqrtg` and grid spacings."""
     density = jnp.asarray(density)

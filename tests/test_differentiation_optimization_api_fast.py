@@ -94,6 +94,58 @@ def test_run_selects_best_exact_accepted_point_for_final_outputs(monkeypatch) ->
     np.testing.assert_allclose(callbacks["initial_jacobian"], [[1.0]])
 
 
+def test_run_reuses_retained_best_exact_state_when_final_replay_fails(monkeypatch) -> None:
+    import scipy.optimize
+
+    opt = _quadratic_stub_optimizer()
+    replay_attempts = []
+
+    def fake_least_squares(fun, x0, jac, **kwargs):
+        fun(np.asarray(x0, dtype=float))
+        jac(np.asarray(x0, dtype=float))
+        opt._exact_state_cache.clear()
+
+        def fail_final_replay(params, return_payload=False):
+            replay_attempts.append(np.asarray(params, dtype=float).copy())
+            raise RuntimeError("synthetic final replay failure")
+
+        opt._solve_exact_with_tape = fail_final_replay
+        return SimpleNamespace(
+            x=np.asarray([1.0]),
+            cost=0.5 * 1.1**2,
+            nfev=2,
+            njev=1,
+            success=True,
+            status=1,
+            message="fake scipy returned worse final point",
+        )
+
+    monkeypatch.setattr(scipy.optimize, "least_squares", fake_least_squares)
+
+    result = opt.run(np.asarray([0.0]), method="scipy", max_nfev=2, verbose=0)
+
+    np.testing.assert_allclose(result["x"], [0.0])
+    assert result["_state_final"].params[0] == pytest.approx(0.0)
+    assert result["_history_dump"]["selected_best_exact_point"] is True
+    assert len(replay_attempts) == 1
+    np.testing.assert_allclose(replay_attempts[0], [1.0])
+
+
+def test_remember_best_exact_point_ignores_mismatched_supplied_state() -> None:
+    opt = _quadratic_stub_optimizer()
+    params = np.asarray([0.0])
+    matching_state = SimpleNamespace(params=params.copy())
+    stale_state = SimpleNamespace(params=np.asarray([99.0]))
+    params_key = opt._exact_cache_key(params)
+    stale_key = opt._exact_cache_key(np.asarray([99.0]))
+    opt._exact_state_cache = {params_key: matching_state}
+    opt._exact_state_key_by_id = {id(matching_state): params_key, id(stale_state): stale_key}
+
+    opt._remember_best_exact_point(params, np.asarray([0.1, 0.0]), state=stale_state)
+
+    assert opt._best_exact_state is matching_state
+
+
 def test_matrix_free_branch_routes_scaled_linear_operator_products(monkeypatch) -> None:
     import scipy.optimize
     from scipy.sparse.linalg import LinearOperator

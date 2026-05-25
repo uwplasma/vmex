@@ -1086,30 +1086,76 @@ def _rz_preconditioner_apply_arrays(
         rhs_z_stack = jnp.stack(z_blocks, axis=-1)
 
         rhs_r0_stack = rhs_r_stack[:, 0, :]
-        if use_lax_tridi and (dlr_t is not None) and (dr_t is not None) and (dur_t is not None):
+        rhs_z0_stack = rhs_z_stack[:, 0, :]
+        sol_rm_full = None
+        sol_zm_full = None
+        combined_precomputed = bool(use_precomputed) and (not bool(use_lax_tridi)) and mpol > 1 and jmax > 1
+        if combined_precomputed:
+            # Combine the m=0 and m>0 systems into one padded Thomas solve.
+            # The m>0 radial block starts at j=1 in VMEC; row 0 is a harmless
+            # identity equation with zero RHS, so the recurrence matches the
+            # shorter j=1..jmax-1 solve but uses one accelerator scan.
+            b0 = jnp.stack([br[:, 0, :], bz[:, 0, :]], axis=1)
+            c0 = jnp.stack([cr[:, 0, :], cz[:, 0, :]], axis=1)
+            i0 = jnp.stack([ir[:, 0, :], iz[:, 0, :]], axis=1)
+            rhs0 = jnp.stack([rhs_r0_stack, rhs_z0_stack], axis=1)
+            b0 = jnp.broadcast_to(b0, (jmax, 2, nrange))
+            c0 = jnp.broadcast_to(c0, (jmax, 2, nrange))
+            i0 = jnp.broadcast_to(i0, (jmax, 2, nrange))
+
+            bm = jnp.stack([br[1:jmax, 1:, :], bz[1:jmax, 1:, :]], axis=1)
+            cm = jnp.stack([cr[1:jmax, 1:, :], cz[1:jmax, 1:, :]], axis=1)
+            im = jnp.stack([ir[1:jmax, 1:, :], iz[1:jmax, 1:, :]], axis=1)
+            rhsm = jnp.stack([rhs_r_stack[1:, 1:, :], rhs_z_stack[1:, 1:, :]], axis=1)
+            bm = jnp.broadcast_to(bm, (jmax - 1, 2, mpol - 1, nrange))
+            cm = jnp.broadcast_to(cm, (jmax - 1, 2, mpol - 1, nrange))
+            im = jnp.broadcast_to(im, (jmax - 1, 2, mpol - 1, nrange))
+
+            pad_coeff = jnp.zeros((1, 2, mpol - 1, nrange), dtype=bm.dtype)
+            pad_inv = jnp.ones((1, 2, mpol - 1, nrange), dtype=im.dtype)
+            pad_rhs = jnp.zeros((1, 2, mpol - 1, nrange, rhs0.shape[-1]), dtype=rhsm.dtype)
+
+            b_all = jnp.concatenate([b0[:, :, None, :], jnp.concatenate([pad_coeff, bm], axis=0)], axis=2)
+            c_all = jnp.concatenate([c0[:, :, None, :], jnp.concatenate([pad_coeff, cm], axis=0)], axis=2)
+            i_all = jnp.concatenate([i0[:, :, None, :], jnp.concatenate([pad_inv, im], axis=0)], axis=2)
+            rhs_all = jnp.concatenate([rhs0[:, :, None, :, :], jnp.concatenate([pad_rhs, rhsm], axis=0)], axis=2)
+
+            sol_all = _tridi_solve_precomputed(b_all, c_all, i_all, rhs_all)
+            sol_r0_stack = sol_all[:, 0, 0, :, :]
+            sol_z0_stack = sol_all[:, 1, 0, :, :]
+            sol_rm_full = sol_all[:, 0, 1:, :, :]
+            sol_zm_full = sol_all[:, 1, 1:, :, :]
+        elif use_lax_tridi and (dlr_t is not None) and (dr_t is not None) and (dur_t is not None):
             dlr0 = dlr_t[0, :, :jmax]
             dr0 = dr_t[0, :, :jmax]
             dur0 = dur_t[0, :, :jmax]
             sol_r0_stack = _tridi_solve_batched_jmin0_lax_pretransposed(dlr0, dr0, dur0, rhs_r0_stack)
-        elif use_precomputed:
-            sol_r0_stack = _tridi_solve_precomputed(
-                br[:, 0, :], cr[:, 0, :], ir[:, 0, :], rhs_r0_stack
-            )
         else:
-            sol_r0_stack = _tridi_solve_batched_jmin0(
-                ar[:, 0, :], dr[:, 0, :], br[:, 0, :], rhs_r0_stack, use_lax_tridi=use_lax_tridi
-            )
-        rhs_z0_stack = rhs_z_stack[:, 0, :]
-        if use_lax_tridi and (dlz_t is not None) and (dz_t is not None) and (duz_t is not None):
+            sol_r0_stack = None
+        if (not combined_precomputed) and use_lax_tridi and (dlz_t is not None) and (dz_t is not None) and (duz_t is not None):
             dlz0 = dlz_t[0, :, :jmax]
             dz0 = dz_t[0, :, :jmax]
             duz0 = duz_t[0, :, :jmax]
             sol_z0_stack = _tridi_solve_batched_jmin0_lax_pretransposed(dlz0, dz0, duz0, rhs_z0_stack)
-        elif use_precomputed:
-            sol_z0_stack = _tridi_solve_precomputed(
-                bz[:, 0, :], cz[:, 0, :], iz[:, 0, :], rhs_z0_stack
+        elif not combined_precomputed:
+            sol_z0_stack = None
+
+        if bool(use_precomputed) and (not bool(use_lax_tridi)) and (not combined_precomputed):
+            # R and Z use independent tridiagonal coefficients but identical
+            # radial lengths and block counts. Batch them through one Thomas
+            # forward/backward scan to reduce nested scan work on accelerators.
+            b0 = jnp.stack([br[:, 0, :], bz[:, 0, :]], axis=1)
+            c0 = jnp.stack([cr[:, 0, :], cz[:, 0, :]], axis=1)
+            i0 = jnp.stack([ir[:, 0, :], iz[:, 0, :]], axis=1)
+            rhs0 = jnp.stack([rhs_r0_stack, rhs_z0_stack], axis=1)
+            sol0 = _tridi_solve_precomputed(b0, c0, i0, rhs0)
+            sol_r0_stack = sol0[:, 0, ...]
+            sol_z0_stack = sol0[:, 1, ...]
+        elif sol_r0_stack is None:
+            sol_r0_stack = _tridi_solve_batched_jmin0(
+                ar[:, 0, :], dr[:, 0, :], br[:, 0, :], rhs_r0_stack, use_lax_tridi=use_lax_tridi
             )
-        else:
+        if sol_z0_stack is None:
             sol_z0_stack = _tridi_solve_batched_jmin0(
                 az[:, 0, :], dz[:, 0, :], bz[:, 0, :], rhs_z0_stack, use_lax_tridi=use_lax_tridi
             )
@@ -1139,8 +1185,6 @@ def _rz_preconditioner_apply_arrays(
             fzss_u = fzss_u.at[:jmax, 0, :].set(sol_z0_stack[..., idx])
             idx += 1
 
-        sol_rm_full = None
-        sol_zm_full = None
         if mpol > 1 and jmax > 1:
             a_r = ar[1:jmax, 1:, :]
             d_r = dr[1:jmax, 1:, :]
@@ -1150,32 +1194,42 @@ def _rz_preconditioner_apply_arrays(
             b_z = bz[1:jmax, 1:, :]
 
             rhs_rm_stack = rhs_r_stack[1:, 1:, :]
-            if use_lax_tridi and (dlr_t is not None) and (dr_t is not None) and (dur_t is not None):
+            if sol_rm_full is not None:
+                sol_rm = sol_rm_full[1:, ...]
+            elif use_lax_tridi and (dlr_t is not None) and (dr_t is not None) and (dur_t is not None):
                 dlr_m = dlr_t[1:, :, : jmax - 1]
                 dr_m = dr_t[1:, :, : jmax - 1]
                 dur_m = dur_t[1:, :, : jmax - 1]
                 sol_rm = _tridi_solve_batched_jmin0_lax_pretransposed(dlr_m, dr_m, dur_m, rhs_rm_stack)
-            elif use_precomputed:
-                sol_rm = _tridi_solve_precomputed(
-                    b_r, cr[1:jmax, 1:, :], ir[1:jmax, 1:, :], rhs_rm_stack
-                )
             else:
-                sol_rm = _tridi_solve_batched_jmin0(a_r, d_r, b_r, rhs_rm_stack, use_lax_tridi=use_lax_tridi)
-            pad_r = jnp.zeros((1, mpol - 1, nrange, sol_rm.shape[-1]), dtype=sol_rm.dtype)
-            sol_rm_full = jnp.concatenate([pad_r, sol_rm], axis=0)
+                sol_rm = None
 
             rhs_zm_stack = rhs_z_stack[1:, 1:, :]
-            if use_lax_tridi and (dlz_t is not None) and (dz_t is not None) and (duz_t is not None):
+            if sol_zm_full is not None:
+                sol_zm = sol_zm_full[1:, ...]
+            elif use_lax_tridi and (dlz_t is not None) and (dz_t is not None) and (duz_t is not None):
                 dlz_m = dlz_t[1:, :, : jmax - 1]
                 dz_m = dz_t[1:, :, : jmax - 1]
                 duz_m = duz_t[1:, :, : jmax - 1]
                 sol_zm = _tridi_solve_batched_jmin0_lax_pretransposed(dlz_m, dz_m, duz_m, rhs_zm_stack)
-            elif use_precomputed:
-                sol_zm = _tridi_solve_precomputed(
-                    b_z, cz[1:jmax, 1:, :], iz[1:jmax, 1:, :], rhs_zm_stack
-                )
             else:
+                sol_zm = None
+
+            if (sol_rm_full is None) and bool(use_precomputed) and (not bool(use_lax_tridi)):
+                bm = jnp.stack([b_r, b_z], axis=1)
+                cm = jnp.stack([cr[1:jmax, 1:, :], cz[1:jmax, 1:, :]], axis=1)
+                im = jnp.stack([ir[1:jmax, 1:, :], iz[1:jmax, 1:, :]], axis=1)
+                rhsm = jnp.stack([rhs_rm_stack, rhs_zm_stack], axis=1)
+                solm = _tridi_solve_precomputed(bm, cm, im, rhsm)
+                sol_rm = solm[:, 0, ...]
+                sol_zm = solm[:, 1, ...]
+            elif sol_rm is None:
+                sol_rm = _tridi_solve_batched_jmin0(a_r, d_r, b_r, rhs_rm_stack, use_lax_tridi=use_lax_tridi)
+            if sol_zm is None:
                 sol_zm = _tridi_solve_batched_jmin0(a_z, d_z, b_z, rhs_zm_stack, use_lax_tridi=use_lax_tridi)
+
+            pad_r = jnp.zeros((1, mpol - 1, nrange, sol_rm.shape[-1]), dtype=sol_rm.dtype)
+            sol_rm_full = jnp.concatenate([pad_r, sol_rm], axis=0)
             pad_z = jnp.zeros((1, mpol - 1, nrange, sol_zm.shape[-1]), dtype=sol_zm.dtype)
             sol_zm_full = jnp.concatenate([pad_z, sol_zm], axis=0)
             idx = 0

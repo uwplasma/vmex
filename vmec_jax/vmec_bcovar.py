@@ -312,6 +312,7 @@ def vmec_bcovar_half_mesh_from_wout(
     use_vmec_synthesis: bool = False,
     trig: VmecTrigTables | None = None,
     return_parity_aux: bool = False,
+    state_physical_signed: tuple[Any, Any, Any, Any] | None = None,
 ) -> VmecHalfMeshBcovar:
     """Compute VMEC-style half-mesh metric and B components for parity tests.
 
@@ -368,16 +369,19 @@ def vmec_bcovar_half_mesh_from_wout(
     ns = int(s.shape[0])
     # VMEC stores internal coefficients. Undo the m=1 internal constraint for
     # R/Z before real-space synthesis.
-    Rcos_int, Zsin_int, Rsin_int, Zcos_int = vmec_m1_internal_to_physical_signed(
-        Rcos=state.Rcos,
-        Zsin=state.Zsin,
-        Rsin=state.Rsin,
-        Zcos=state.Zcos,
-        modes=static.modes,
-        lthreed=bool(getattr(static.cfg, "lthreed", True)),
-        lasym=bool(getattr(static.cfg, "lasym", False)),
-        lconm1=bool(getattr(static.cfg, "lconm1", True)),
-    )
+    if state_physical_signed is None:
+        Rcos_int, Zsin_int, Rsin_int, Zcos_int = vmec_m1_internal_to_physical_signed(
+            Rcos=state.Rcos,
+            Zsin=state.Zsin,
+            Rsin=state.Rsin,
+            Zcos=state.Zcos,
+            modes=static.modes,
+            lthreed=bool(getattr(static.cfg, "lthreed", True)),
+            lasym=bool(getattr(static.cfg, "lasym", False)),
+            lconm1=bool(getattr(static.cfg, "lconm1", True)),
+        )
+    else:
+        Rcos_int, Zsin_int, Rsin_int, Zcos_int = state_physical_signed
 
     Rcos_geom = jnp.asarray(Rcos_int)
     Rsin_geom = jnp.asarray(Rsin_int)

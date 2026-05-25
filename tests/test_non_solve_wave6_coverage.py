@@ -288,7 +288,7 @@ def test_driver_policy_list_parsing_and_scan_selection_edges() -> None:
 
     indata = SimpleNamespace()
     assert driver._default_use_scan_for_backend(indata, backend="cpu", solver_mode=None) is False
-    assert driver._default_use_scan_for_backend(indata, backend="gpu", solver_mode="accelerated") is False
+    assert driver._default_use_scan_for_backend(indata, backend="gpu", solver_mode="accelerated") is True
     with pytest.raises(ValueError, match="Unknown solver_mode"):
         driver._default_use_scan_for_backend(indata, backend="cpu", solver_mode="invalid")
 

@@ -150,8 +150,12 @@ def test_jit_initial_state_env_and_clear_caches(monkeypatch) -> None:
 
     monkeypatch.delenv("VMEC_JAX_OPT_JIT_INITIAL_STATE", raising=False)
     assert FixedBoundaryExactOptimizer._use_jit_initial_state(opt) is True
+    opt._solver_device_name = "gpu"
+    assert FixedBoundaryExactOptimizer._use_jit_initial_state(opt) is False
     monkeypatch.setenv("VMEC_JAX_OPT_JIT_INITIAL_STATE", "0")
     assert FixedBoundaryExactOptimizer._use_jit_initial_state(opt) is False
+    monkeypatch.setenv("VMEC_JAX_OPT_JIT_INITIAL_STATE", "1")
+    assert FixedBoundaryExactOptimizer._use_jit_initial_state(opt) is True
 
     FixedBoundaryExactOptimizer.clear_caches(opt)
     assert opt._initial_state_packed_helper is None
@@ -215,9 +219,9 @@ def test_solver_device_context_and_trial_scan_env_branches(monkeypatch) -> None:
     assert opt._use_scan_for_trial_solves() is True
     monkeypatch.delenv("VMEC_JAX_OPT_TRIAL_SCAN")
     opt._solver_device_name = "gpu"
-    assert opt._use_scan_for_trial_solves() is False
-    opt._solver_device_name = "cpu"
     assert opt._use_scan_for_trial_solves() is True
+    opt._solver_device_name = "cpu"
+    assert opt._use_scan_for_trial_solves() is False
 
 
 def test_exact_tape_precomputed_tridi_policy_backend_and_env(monkeypatch) -> None:
@@ -273,6 +277,10 @@ def test_optimizer_init_moves_static_boundary_and_boundary_input(monkeypatch) ->
         moved.append(value)
         return value
 
+    # The optimizer now no-ops explicit device selection if that backend is
+    # already active.  Make the active backend different here so this test
+    # still covers the recursive static/boundary transfer path.
+    monkeypatch.setattr("vmec_jax._compat.jax", SimpleNamespace(default_backend=lambda: "gpu"))
     monkeypatch.setattr(FixedBoundaryExactOptimizer, "_move_to_solver_device", fake_move)
     monkeypatch.setattr(FixedBoundaryExactOptimizer, "_make_residuals_eval_fn", lambda self, fn: fn)
     monkeypatch.setattr(opt_module, "initial_guess_from_boundary", lambda *args, **kwargs: state0)
@@ -316,7 +324,7 @@ def test_lasym_replay_column_chunk_env_and_backend_branches(monkeypatch) -> None
 
     assert opt._lasym_replay_column_chunk(23) is None
     assert opt._lasym_replay_column_chunk(24) is None
-    assert opt._lasym_replay_column_chunk(96) is None
+    assert opt._lasym_replay_column_chunk(96) == 24
 
     opt._solver_device_name = "tpu"
     assert opt._lasym_replay_column_chunk(128) is None
@@ -331,6 +339,7 @@ def test_lasym_replay_column_chunk_env_and_backend_branches(monkeypatch) -> None
 
     opt._solver_device_name = "gpu"
     assert opt._lasym_replay_column_chunk(24) is None
+    assert opt._lasym_replay_column_chunk(48) == 24
 
 
 def test_projected_replay_residuals_env_and_backend_branches(monkeypatch) -> None:
@@ -345,22 +354,29 @@ def test_projected_replay_residuals_env_and_backend_branches(monkeypatch) -> Non
     assert opt._projected_replay_residuals_enabled() is True
     monkeypatch.delenv("VMEC_JAX_OPT_PROJECTED_REPLAY_RESIDUALS")
 
-    assert opt._projected_replay_residuals_enabled() is False
+    opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=False))
+    assert opt._projected_replay_residuals_enabled(24) is False
+    assert opt._projected_replay_residuals_enabled(48) is True
 
+    opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=True))
+    assert opt._projected_replay_residuals_enabled(48) is False
+
+    opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=False))
     opt._solver_device_name = "cpu"
-    assert opt._projected_replay_residuals_enabled() is False
+    assert opt._projected_replay_residuals_enabled(48) is False
 
     opt._solver_device_name = None
     monkeypatch.setattr(compat, "jax", SimpleNamespace(default_backend=lambda: "cuda"))
-    assert opt._projected_replay_residuals_enabled() is False
+    assert opt._projected_replay_residuals_enabled(48) is True
+    assert opt._projected_replay_residuals_enabled(24) is False
     monkeypatch.setattr(compat, "jax", SimpleNamespace(default_backend=lambda: "cpu"))
-    assert opt._projected_replay_residuals_enabled() is False
+    assert opt._projected_replay_residuals_enabled(48) is False
     monkeypatch.setattr(
         compat,
         "jax",
         SimpleNamespace(default_backend=lambda: (_ for _ in ()).throw(RuntimeError("backend probe failed"))),
     )
-    assert opt._projected_replay_residuals_enabled() is False
+    assert opt._projected_replay_residuals_enabled(48) is False
 
 
 def test_projected_replay_jacobian_path_projects_without_intermediate_sync(monkeypatch) -> None:
@@ -409,6 +425,152 @@ def test_projected_replay_jacobian_path_projects_without_intermediate_sync(monke
     assert remembered["jacobian"][0] == b"exact-key"
     assert opt._profile["jacobian_projected_tape_replay_dispatch"]["count"] == 1
     assert opt._profile["jacobian_projected_replay_residual_tangents"]["count"] == 1
+
+
+def test_projected_replay_jacobian_path_can_fuse_dynamic_basepoint(monkeypatch) -> None:
+    import jax.numpy as jnp
+    import vmec_jax.discrete_adjoint as adjoint_module
+
+    monkeypatch.setenv("VMEC_JAX_OPT_FUSED_PROJECTED_REPLAY", "1")
+    state = _state_from_coeffs(r=1.0, rs=2.0, z=3.0, zs=4.0, l=5.0, ls=6.0)
+    layout_size = int(state.layout.size)
+    tangents = jnp.asarray(
+        [
+            np.arange(layout_size, dtype=float) + 1.0,
+            np.arange(layout_size, dtype=float) + 10.0,
+        ],
+        dtype=jnp.float64,
+    )
+    stacked = {"active": jnp.asarray([True])}
+    stacked_base_carries = (jnp.zeros((1, layout_size), dtype=jnp.float64),) + tuple(
+        jnp.zeros((1, 1), dtype=jnp.float64) for _ in range(14)
+    )
+    static_flags = {
+        "apply_lforbal": False,
+        "include_edge_residual": True,
+        "apply_m1_constraints": True,
+        "limit_update_rms": False,
+        "limit_dt_from_force": False,
+        "vmec2000_control": True,
+        "divide_by_scalxc_for_update": False,
+        "signgs": 1,
+        "precond_jmax": 1,
+    }
+    tape = SimpleNamespace(
+        stacked_step_traces=stacked,
+        dynamic_base_carries_stacked=stacked_base_carries,
+        step_trace_static_flags=static_flags,
+    )
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._layout = state.layout
+    opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=False))
+    opt._profile = {}
+    opt._discrete_jacobian_helper_cache = {}
+    opt._solve_exact_with_tape_for_jvp = lambda _params: (
+        state,
+        {"tape": tape, "axis_override": {"axis": "unused"}},
+    )
+    opt._initial_tangent_columns = lambda _params, _axis_override, *, profile_prefix: tangents
+    opt._lasym_replay_column_chunk = lambda _n_params: None
+    opt._residuals_fn = lambda state_arg: pack_state(state_arg)[:2]
+    remembered = {}
+    opt._remember_exact_residual = lambda key, residual: remembered.update({"residual": (key, residual)})
+    opt._remember_exact_jacobian = lambda key, jac, residual: remembered.update({"jacobian": (key, jac, residual)})
+
+    def fake_runner(*, static, stacked, stacked_base_carries, static_flags):
+        def run_scan(carry_tangents0, _stacked_base_carries_in, _stacked_traces_in):
+            return (carry_tangents0[0] + 2.0,) + tuple(carry_tangents0[1:])
+
+        return run_scan
+
+    monkeypatch.setattr(adjoint_module, "_checkpoint_tape_dynamic_basepoint_scan_runner", fake_runner)
+    monkeypatch.setattr(adjoint_module, "_dynamic_basepoint_payload_shapes_match", lambda *_args: True)
+    monkeypatch.setattr(adjoint_module, "_stacked_trace_signature", lambda _tree: ("sig",))
+
+    jac = opt._jacobian_fun_projected_replay(
+        jnp.asarray([0.0, 0.0], dtype=jnp.float64),
+        b"exact-key",
+        t_total=opt_module.time.perf_counter(),
+    )
+
+    np.testing.assert_allclose(jac, [[3.0, 12.0], [4.0, 13.0]])
+    np.testing.assert_allclose(opt._last_jacobian_residual, np.asarray(pack_state(state)[:2]))
+    assert opt._last_jacobian_source == "exact_tape_fused_projected_replay"
+    assert remembered["residual"][0] == b"exact-key"
+    assert remembered["jacobian"][0] == b"exact-key"
+    assert opt._profile["jacobian_fused_projected_replay_total"]["count"] == 1
+    assert "jacobian_projected_tape_replay_dispatch" not in opt._profile
+    assert "jacobian_residual_tangent_helper_build" not in opt._profile
+    assert all(
+        "stacked" not in cache and "stacked_base_carries" not in cache
+        for cache in opt._discrete_jacobian_helper_cache.values()
+    )
+
+
+def test_projected_replay_fused_path_respects_explicit_column_chunk(monkeypatch) -> None:
+    import jax.numpy as jnp
+    import vmec_jax.discrete_adjoint as adjoint_module
+
+    monkeypatch.setenv("VMEC_JAX_OPT_FUSED_PROJECTED_REPLAY", "1")
+    monkeypatch.setenv("VMEC_JAX_REPLAY_COLUMN_CHUNK", "2")
+    state = _state_from_coeffs(r=1.0, rs=2.0, z=3.0, zs=4.0, l=5.0, ls=6.0)
+    layout_size = int(state.layout.size)
+    tangents = jnp.asarray(
+        [
+            np.arange(layout_size, dtype=float) + 1.0,
+            np.arange(layout_size, dtype=float) + 10.0,
+            np.arange(layout_size, dtype=float) + 20.0,
+        ],
+        dtype=jnp.float64,
+    )
+    tape = SimpleNamespace(
+        stacked_step_traces={"active": jnp.asarray([True])},
+        dynamic_base_carries_stacked=(jnp.zeros((1, layout_size), dtype=jnp.float64),)
+        + tuple(jnp.zeros((1, 1), dtype=jnp.float64) for _ in range(14)),
+        step_trace_static_flags={
+            "apply_lforbal": False,
+            "include_edge_residual": True,
+            "apply_m1_constraints": True,
+            "limit_update_rms": False,
+            "limit_dt_from_force": False,
+            "vmec2000_control": True,
+            "divide_by_scalxc_for_update": False,
+            "signgs": 1,
+            "precond_jmax": 1,
+        },
+    )
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._layout = state.layout
+    opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=False))
+    opt._profile = {}
+    opt._discrete_jacobian_helper_cache = {}
+    opt._solve_exact_with_tape_for_jvp = lambda _params: (
+        state,
+        {"tape": tape, "axis_override": {"axis": "unused"}},
+    )
+    opt._initial_tangent_columns = lambda _params, _axis_override, *, profile_prefix: tangents
+    opt._lasym_replay_column_chunk = lambda _n_params: None
+    opt._residuals_fn = lambda state_arg: pack_state(state_arg)[:2]
+    opt._remember_exact_residual = lambda _key, _residual: None
+    opt._remember_exact_jacobian = lambda _key, _jac, _residual: None
+    monkeypatch.setattr(adjoint_module, "_dynamic_basepoint_payload_shapes_match", lambda *_args: True)
+    monkeypatch.setattr(adjoint_module, "_stacked_trace_signature", lambda _tree: ("sig",))
+    monkeypatch.setattr(
+        adjoint_module,
+        "checkpoint_tape_state_jvp_columns",
+        lambda **kwargs: kwargs["initial_tangents"] + 5.0,
+    )
+
+    jac = opt._jacobian_fun_projected_replay(
+        jnp.asarray([0.0, 0.0, 0.0], dtype=jnp.float64),
+        b"exact-key",
+        t_total=opt_module.time.perf_counter(),
+    )
+
+    np.testing.assert_allclose(jac, [[6.0, 15.0, 25.0], [7.0, 16.0, 26.0]])
+    assert opt._last_jacobian_source == "exact_tape_projected_replay"
+    assert "jacobian_fused_projected_replay_total" not in opt._profile
+    assert opt._profile["jacobian_projected_tape_replay_dispatch"]["count"] == 1
 
 
 def test_cached_exact_residual_none_and_lasym_backend_probe_failure(monkeypatch) -> None:

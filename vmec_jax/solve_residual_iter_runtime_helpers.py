@@ -350,10 +350,34 @@ def _build_residual_iter_timing_report(
         "iteration_loop_unattributed_per_iter_s": float(iteration_loop_unattributed) / iters,
     }
     if timing_detail_enabled:
+        main_force = float(timing_stats.get("compute_forces_main", timing_stats["compute_forces"]))
+        auto_flip_force = float(timing_stats.get("compute_forces_auto_flip", 0.0))
+        trial_force = float(timing_stats.get("compute_forces_trial", 0.0))
+        backtracking_force = float(timing_stats.get("compute_forces_backtracking", 0.0))
+        all_force = main_force + auto_flip_force + trial_force + backtracking_force
         timing_report.update(
             {
+                "compute_forces_main_s": main_force,
+                "compute_forces_main_calls": int(timing_stats.get("compute_forces_main_calls", 0)),
+                "compute_forces_auto_flip_s": auto_flip_force,
+                "compute_forces_auto_flip_calls": int(timing_stats.get("compute_forces_auto_flip_calls", 0)),
+                "compute_forces_trial_s": trial_force,
+                "compute_forces_trial_calls": int(timing_stats.get("compute_forces_trial_calls", 0)),
+                "compute_forces_backtracking_s": backtracking_force,
+                "compute_forces_backtracking_calls": int(timing_stats.get("compute_forces_backtracking_calls", 0)),
+                "force_eval_all_s": all_force,
+                "force_eval_all_calls": int(
+                    timing_stats.get("compute_forces_main_calls", 0)
+                    + timing_stats.get("compute_forces_auto_flip_calls", 0)
+                    + timing_stats.get("compute_forces_trial_calls", 0)
+                    + timing_stats.get("compute_forces_backtracking_calls", 0)
+                ),
+                "force_eval_extra_s": all_force - main_force,
                 "precond_apply_s": float(timing_stats["precond_apply"]),
                 "precond_mode_scale_s": float(timing_stats["precond_mode_scale"]),
+                "compute_forces_main_per_iter_s": main_force / iters,
+                "force_eval_all_per_iter_s": all_force / iters,
+                "force_eval_extra_per_iter_s": (all_force - main_force) / iters,
                 "precond_apply_per_iter_s": float(timing_stats["precond_apply"]) / iters,
                 "precond_mode_scale_per_iter_s": float(timing_stats["precond_mode_scale"]) / iters,
             }
@@ -369,6 +393,8 @@ def _format_residual_iter_timing_message(
     detail_text = ""
     if timing_detail_enabled:
         detail_text = (
+            f"force_main={float(timing_report['compute_forces_main_s']):.3e}s "
+            f"force_extra={float(timing_report['force_eval_extra_s']):.3e}s "
             f"precond_apply={float(timing_report['precond_apply_s']):.3e}s "
             f"precond_mode={float(timing_report['precond_mode_scale_s']):.3e}s "
         )

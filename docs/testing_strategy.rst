@@ -456,8 +456,11 @@ Optimization gates:
   metadata and sign/range regression, not a replacement for
   publication-resolution Boozer contour review.
 - GPU optimization tests should assert the device-aware defaults separately:
-  accepted-point exact callbacks default to tape on CPU and GPU, while relaxed
-  trial residuals default to scan unless ``VMEC_JAX_OPT_TRIAL_SCAN=0`` is set.
+  accepted-point exact callbacks default to the tape path on CPU and GPU, CPU
+  keeps full tapes, GPU/CUDA/ROCm uses JVP-only exact tapes with basepoint
+  carries when exact-tape env vars are unset, and relaxed trial residuals
+  default to the VMEC-control loop on CPU and to scan on GPU/CUDA/ROCm unless
+  ``VMEC_JAX_OPT_TRIAL_SCAN`` explicitly forces either path.
 - Exact optimizer tests should preserve final-output correctness: when trial
   solves and exact accepted-point replays disagree, histories and saved outputs
   must select the best finite exact accepted point rather than an unreplayed
@@ -499,6 +502,16 @@ QI seed-robustness gates:
   score, engineering constraints, and Boozer contour plots.  That matrix is
   manual/nightly validation until it is cheap enough to summarize as curated
   artifacts.
+
+Latest local optional evidence:
+
+- ``outputs/rerun_20260525_123334`` passed the VMEC2000 stage-trace smoke
+  matrix (``6`` cases, ``0`` failures) and the selected full QH warm-start row
+  (``1`` case, ``0`` failures).  Treat this as dated release-candidate evidence,
+  not as a permanent substitute for rerunning the matrix on the final commit.
+- The same rerun refreshed CPU/GPU profiler reports for fixed-boundary,
+  exact-callback, and QI Boozer/residual isolation.  Performance regressions
+  should be diagnosed from those JSON reports before broadening the matrix.
 
 The current detailed lane list and next parity gates are in
 :doc:`optional_validation_plan`.

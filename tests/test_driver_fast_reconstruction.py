@@ -470,7 +470,7 @@ def test_load_example_and_wrappers_use_lightweight_dependencies(monkeypatch, tmp
     assert loaded.wout is wout
     assert loaded.state is state
     assert calls["load_config_path"] == str(input_path)
-    assert calls["mgrid"] == (cfg, {"load_fields": False, "strict": False})
+    assert "mgrid" not in calls
     assert calls["static_kwargs"] == {"grid": "grid", "mgrid_metadata": None, "free_boundary_extcur": None}
     assert calls["read_wout_path"] == wout_path
     assert calls["state_wout"] is wout

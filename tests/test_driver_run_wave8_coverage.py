@@ -156,8 +156,12 @@ def test_run_fixed_boundary_dispatches_fixed_and_free_static_branches(monkeypatc
     assert run.cfg is cfg
     assert run.state.label == "solved"
     assert run.profiles["finalized"] is True
-    assert calls["validate_free_boundary"] == [(cfg, True)]
-    assert calls["prepare_mgrid"] == [(cfg, False, True)]
+    if lfreeb:
+        assert calls["validate_free_boundary"] == [(cfg, True)]
+        assert calls["prepare_mgrid"] == [(cfg, False, True)]
+    else:
+        assert calls["validate_free_boundary"] == []
+        assert calls["prepare_mgrid"] == []
     build_kwargs = calls["build_static"][0][1]
     if lfreeb:
         assert "mgrid_metadata" in build_kwargs

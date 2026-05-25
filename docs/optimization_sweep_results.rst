@@ -305,10 +305,10 @@ audited WOUT; preconditioner scan points are provenance for basin capture, not
 the final acceptance diagnostic.
 
 To refresh the exact rows used by this panel, run the source optimizations with
-the target-aspect and output-dir overrides below before rendering.  The explicit
+the target-aspect and output-dir values below before rendering.  The explicit
 overrides reproduce the archived mixed-target figure rows; omit them only when
-regenerating the current uniform aspect-6 policy.  The NFP=3 case can
-be selected as ``nfp3_qi``; that is a convenience alias for the
+regenerating the current uniform aspect-6 policy.  The NFP=3 case can be
+selected as ``nfp3_qi``; that is a convenience alias for the
 ``input.QI_stel_seed_3127`` far-seed lane.  If the NFP=3 raw artifact is
 replaced during a refresh, the replacement must pass the renderer's boundary
 match before the panel is published.

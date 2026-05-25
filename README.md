@@ -20,11 +20,14 @@ From PyPI:
 pip install vmec-jax
 ```
 
+PyPI and conda-forge can lag the repository tags. If you need an exact release,
+check the package-index version before installing or pinning it.
+
 The plain package includes plotting support (`matplotlib`) and the
 differentiable Boozer transform dependency (`booz_xform_jax`) used by the QI
 examples, so there is no separate plotting or QI extra to install.
 
-From conda-forge (the feedstock can lag PyPI by a release):
+From conda-forge:
 
 ```bash
 pixi add vmec-jax
@@ -122,8 +125,11 @@ README table is only the current compact promotion snapshot.
 
 The same `QI_optimization.py` workflow can be run from reviewed case-specific
 NFP 1, 2, 3, and 4 inputs by changing the input variables at the top of the
-script. The current NFP coverage panel is case-gated rather than a uniform
-aspect-ratio promotion table; full provenance and limitations are in the docs.
+script or by selecting one of the archived cases. The current NFP coverage
+panel is case-gated rather than a uniform aspect-ratio promotion table: NFP=1
+uses a higher target aspect ratio, NFP=2 uses the target-helicity seed/policy,
+NFP=3 uses a lower target aspect ratio, and NFP=4 uses its own reference-family
+case. Full provenance and limitations are in the docs.
 
 ![QI optimization from NFP seeds](docs/_static/figures/readme_qi_optimization_cases.png)
 
@@ -138,8 +144,14 @@ case-specific artifacts are not aspect-6 README best-row promotion evidence.
 - Validation and VMEC2000 parity status: `docs/validation.rst`
 - Testing and coverage strategy: `docs/testing_strategy.rst`
 - Release checklist and CI gates: `docs/release_checklist.rst`
-- Latest published release:
+- Latest documented local rerun snapshot:
+  `outputs/rerun_20260525_123334`, with VMEC2000 stage-trace parity
+  smoke/full failures `0/6` and `0/1`; see `docs/performance.rst` and
+  `docs/validation.rst` for the current timing and parity caveats.
+- Latest repository release tag:
   [`v0.0.13`](https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.13)
+- Package indexes may lag the repository tag; verify PyPI/conda-forge before
+  advertising a package-index release.
 - Release-candidate CI baseline: re-check the newest completed green `main`
   run with `gh run list --repo uwplasma/vmec_jax --branch main --workflow CI
   --limit 5` before tagging.

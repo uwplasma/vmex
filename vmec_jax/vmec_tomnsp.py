@@ -22,6 +22,7 @@ transform itself is primarily exercised for the parity kernel work.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
@@ -495,6 +496,33 @@ _TOMNSPS_FFT_ENV: str = os.environ.get("VMEC_JAX_TOMNSPS_FFT", "").strip().lower
 _TOMNSPS_FFT_CACHE: list[bool] = []  # populated on first call
 
 
+@contextmanager
+def tomnsps_fft_policy_override(enabled: bool | None):
+    """Temporarily override auto TOMNSPS FFT policy when the solver device is explicit.
+
+    JAX's ``default_device`` context does not change ``jax.default_backend()``.
+    Without this override, a process imported on CPU can keep the CPU DFT/GEMM
+    policy even when a public solve is explicitly routed to GPU.
+    """
+
+    global _TOMNSPS_FFT_ENV
+
+    if enabled is None or _TOMNSPS_FFT_ENV in ("1", "true", "yes", "0", "false", "no"):
+        yield
+        return
+
+    old_env = _TOMNSPS_FFT_ENV
+    old_cache = list(_TOMNSPS_FFT_CACHE)
+    _TOMNSPS_FFT_ENV = "1" if bool(enabled) else "0"
+    _TOMNSPS_FFT_CACHE.clear()
+    try:
+        yield
+    finally:
+        _TOMNSPS_FFT_ENV = old_env
+        _TOMNSPS_FFT_CACHE.clear()
+        _TOMNSPS_FFT_CACHE.extend(old_cache)
+
+
 def _get_tomnsps_fft() -> bool:
     """Return whether to use the FFT synthesis path (lazy, cached after first call)."""
     if _TOMNSPS_FFT_CACHE:
@@ -683,8 +711,8 @@ def _mparity_mask(mpol: int, *, dtype) -> np.ndarray:
 
 
 def _select_mparity(a_even, a_odd, mask_even: jnp.ndarray):
-    mask = mask_even[None, :, None]
-    return mask * a_even + (1.0 - mask) * a_odd
+    mask = jnp.asarray(mask_even)[None, :, None] > 0
+    return jnp.where(mask, a_even, a_odd)
 
 
 def tomnsps_masks(

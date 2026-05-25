@@ -539,6 +539,36 @@ non-axisymmetric.  Required CI only smoke-tests the manifest schema and bounded
 dry-run wiring; executing the matrix against VMEC2000 remains an optional local
 or scheduled lane.
 
+Latest local executable rerun
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The 2026-05-25 local rerun under ``outputs/rerun_20260525_123334`` used
+``/Users/rogeriojorge/local/STELLOPT/VMEC2000/Release/xvmec2000`` and passed
+all selected stage-trace comparisons:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Matrix
+     - Cases
+     - Failed
+     - Representative coverage
+   * - ``parity_smoke``
+     - ``6``
+     - ``0``
+     - circular tokamak, ITERModel, up/down asymmetric tokamak,
+       Landreman-Paul QA low resolution, ``basic_non_stellsym_pressure``, and
+       bundled CTH-like free-boundary LASYM deck
+   * - ``parity_full``
+     - ``1``
+     - ``0``
+     - ``input.nfp4_QH_warm_start`` fixed-boundary QH stage trace
+
+These are bounded stage-trace checks, not a replacement for the optional
+converged-WOUT nightly matrix.  They are useful release-candidate evidence that
+the latest dirty performance/refactor work has not broken the short VMEC2000
+trace path.
+
 Optional VMEC2000 executable checks
 -----------------------------------
 

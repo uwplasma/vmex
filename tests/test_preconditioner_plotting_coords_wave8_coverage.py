@@ -191,11 +191,13 @@ def test_vmec_realspace_cache_validation_and_stacked_fallback_equivalence() -> N
     assert sin_phase.shape == cos_phase.shape
     assert _PHASE_CACHE[key][0].shape == cos_phase.shape
 
-    wrong_identity_modes = ModeTable(m=modes.m.copy(), n=modes.n.copy())
+    copied_modes = ModeTable(m=modes.m.copy(), n=modes.n.copy())
     phase_stack = np.ones((2 * modes.K, trig.ntheta3, trig.cosnv.shape[0]))
     trig_with_stack = replace(trig, phase_stack=phase_stack, phase_stack_m=modes.m, phase_stack_n=modes.n)
     assert _phase_stack_from_trig(modes, trig_with_stack, "phase_stack") is phase_stack
-    assert _phase_stack_from_trig(wrong_identity_modes, trig_with_stack, "phase_stack") is None
+    assert _phase_stack_from_trig(copied_modes, trig_with_stack, "phase_stack") is phase_stack
+    wrong_value_modes = ModeTable(m=modes.m + 1, n=modes.n)
+    assert _phase_stack_from_trig(wrong_value_modes, trig_with_stack, "phase_stack") is None
 
     stacked = vmec_realspace_synthesis(
         coeff_cos=coeff_cos,

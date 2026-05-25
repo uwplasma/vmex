@@ -161,9 +161,9 @@ def test_wout_minimal_constructor_threads_synthetic_physics_diagnostics(monkeypa
     assert generated.ac[0] == 1.25
     assert generated.pcurr_type == "power_series"
     assert generated.piota_type == "power_series"
-    assert generated.betatotal == 0.0
-    assert generated.betapol == 0.0
-    assert generated.betator == 0.0
+    assert generated.betatotal == 0.33
+    assert generated.betapol == 0.11
+    assert generated.betator == 0.22
     np.testing.assert_allclose(generated.DMerc, np.ones(ns))
     np.testing.assert_allclose(generated.bdotgradv, np.full(ns, 8.0))
     assert mercier_calls and mercier_calls[0]["lbsubs"] is True

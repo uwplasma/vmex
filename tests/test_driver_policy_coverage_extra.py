@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from contextlib import contextmanager
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -265,7 +266,7 @@ def test_run_fixed_boundary_nojit_initial_guess_falls_back_when_jax_context_fail
     assert run.result is None
     assert run.state.label == "initial"
     assert calls["initial_guess"] == [
-        {"vmec_project": True, "infer_axis_if_missing": False},
+        {"vmec_project": True, "infer_axis_if_missing": True},
     ]
 
 
@@ -556,6 +557,71 @@ def test_compilation_cache_primary_and_tmp_mkdir_failures_are_ignored(
     assert mkdir_calls == [str(tmp_path / "cache"), "/tmp/vmec_jax/jax_compilation_cache"]
     assert cache_dirs == []
     assert updates == []
+
+
+def test_gpu_solver_device_enables_default_compilation_cache(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    cfg = _cfg(ns=3)
+    indata = _indata(NS=3)
+    _install_driver_fakes(monkeypatch, cfg=cfg, indata=indata)
+    monkeypatch.delenv("VMEC_JAX_COMPILATION_CACHE", raising=False)
+    monkeypatch.delenv("VMEC_JAX_COMPILATION_CACHE_DIR", raising=False)
+    monkeypatch.delenv("JAX_COMPILATION_CACHE_DIR", raising=False)
+    monkeypatch.delenv("VMEC_JAX_DISABLE_COMPILATION_CACHE", raising=False)
+
+    cache_calls: list[str | None] = []
+
+    def fake_default_cache_dir():
+        cache_calls.append(os.environ.get("VMEC_JAX_COMPILATION_CACHE"))
+        if os.environ.get("VMEC_JAX_COMPILATION_CACHE") == "1":
+            return tmp_path / "gpu-cache"
+        return None
+
+    monkeypatch.setattr("vmec_jax._compat._default_compilation_cache_dir", fake_default_cache_dir)
+
+    cache_dirs: list[str] = []
+    updates: list[tuple] = []
+
+    class FakeJaxModule:
+        config = SimpleNamespace(update=lambda *args: updates.append(args))
+
+        @staticmethod
+        def devices(kind=None):
+            return [f"{kind or 'gpu'}:0"]
+
+        @staticmethod
+        @contextmanager
+        def default_device(_device):
+            yield
+
+    experimental_module = type(sys)("jax.experimental")
+    cache_module = type(sys)("jax.experimental.compilation_cache")
+    cache_module.compilation_cache = SimpleNamespace(set_cache_dir=lambda path: cache_dirs.append(path))
+    monkeypatch.setitem(sys.modules, "jax", FakeJaxModule)
+    monkeypatch.setitem(sys.modules, "jax.experimental", experimental_module)
+    monkeypatch.setitem(sys.modules, "jax.experimental.compilation_cache", cache_module)
+
+    monkeypatch.setattr(
+        driver,
+        "solve_fixed_boundary_residual_iter",
+        lambda state, static, **_kwargs: _result(state, fsq=0.0, converged=True),
+    )
+
+    driver.run_fixed_boundary(
+        tmp_path / "input.gpu_cache",
+        use_initial_guess=True,
+        verbose=False,
+        grid=object(),
+        solver_device="gpu",
+        _auto_cli_fixed_boundary_mode=False,
+    )
+
+    assert cache_calls == [None, "1"]
+    assert os.environ.get("VMEC_JAX_COMPILATION_CACHE") is None
+    assert cache_dirs == [str(tmp_path / "gpu-cache")]
+    assert ("jax_enable_compilation_cache", True) in updates
 
 
 def test_dynamic_scan_invalid_env_values_fall_back_and_keep_scan_when_histories_match(

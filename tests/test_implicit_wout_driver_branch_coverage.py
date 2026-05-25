@@ -516,6 +516,10 @@ def test_driver_small_policy_and_serialization_helpers(monkeypatch, tmp_path):
     assert captured[-1]["converged"] is True
     assert driver.os.environ["VMEC_JAX_WOUT_FAST_BCOVAR"] == "keep"
 
+    run.result.diagnostics["converged"] = False
+    driver.wout_from_fixed_boundary_run(run, include_fsq=True, fast_bcovar=True)
+    assert captured[-1]["converged"] is False
+
     run_fallback = driver.FixedBoundaryRun(
         cfg=SimpleNamespace(),
         indata=_Indata(),

@@ -36,7 +36,24 @@ def test_resolve_qi_case_defaults_and_aliases(monkeypatch, tmp_path: Path) -> No
     assert run_case == "nfp3_qi"
     assert case["input_file"].name == "input.QI_stel_seed_3127"
     assert case["case_goal"] == "NFP=3 far-seed QI robustness lane"
+    assert case["target_aspect"] == pytest.approx(mod.SEED3127_REVIEWED_TARGET_ASPECT)
     assert case["output_dir"] == tmp_path / "alias_out"
+
+
+def test_nfp3_qi_catalog_matches_reviewed_seed3127_target_aspect(monkeypatch) -> None:
+    monkeypatch.delenv("VMEC_JAX_QI_INPUT", raising=False)
+    monkeypatch.delenv("VMEC_JAX_QI_OUTPUT_DIR", raising=False)
+    monkeypatch.setenv("VMEC_JAX_QI_RUN_CASE", "nfp3_qi")
+    mod = _load_cases_module("qi_optimization_cases_nfp3_reviewed_target_test")
+
+    run_case, case = mod.resolve_qi_case()
+
+    assert run_case == "nfp3_qi"
+    assert case["target_aspect"] == pytest.approx(mod.SEED3127_REVIEWED_TARGET_ASPECT)
+    assert case["boundary_reference_preconditioner"]["target_aspect"] == pytest.approx(
+        mod.SEED3127_REVIEWED_TARGET_ASPECT
+    )
+    assert "aspect4" in str(case["output_dir"])
 
 
 def test_minimal_and_circular_qi_cases_require_reference_seeded_local_stage() -> None:

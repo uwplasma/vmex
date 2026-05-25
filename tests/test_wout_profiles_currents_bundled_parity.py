@@ -11,7 +11,8 @@ from vmec_jax.energy import _iotaf_from_iotas, flux_profiles_from_indata
 from vmec_jax.integrals import cumrect_s_halfmesh
 from vmec_jax.modes import vmec_mode_table
 from vmec_jax.profiles import MU0, eval_profiles
-from vmec_jax.wout import read_wout
+from vmec_jax.static import build_static
+from vmec_jax.wout import _chipf_from_chips, equilibrium_iota_profiles_from_state, read_wout, state_from_wout
 
 
 PROFILE_CASES = (
@@ -70,6 +71,24 @@ CURRENT_CASES = (
     ("single_grid_lasym_pressure", "examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc"),
 )
 
+CURRENT_DRIVEN_STATE_CASES = (
+    (
+        "LandremanPaul2021_QA_lowres",
+        "examples/data/input.LandremanPaul2021_QA_lowres",
+        "examples/data/wout_LandremanPaul2021_QA_lowres.nc",
+    ),
+    (
+        "nfp4_QH_warm_start",
+        "examples/data/input.nfp4_QH_warm_start",
+        "examples/data/wout_nfp4_QH_warm_start.nc",
+    ),
+    (
+        "QI_stel_seed_3127",
+        "examples/data/input.QI_stel_seed_3127",
+        "examples/data/wout_QI_stel_seed_3127.nc",
+    ),
+)
+
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
@@ -98,6 +117,82 @@ def _vmec_half_from_full(values: np.ndarray) -> np.ndarray:
     out[1:-1] = 0.5 * (values[1:-1] + values[2:])
     out[-1] = 1.5 * values[-1] - 0.5 * values[-2]
     return out
+
+
+@pytest.mark.parametrize(
+    ("case_name", "input_name", "wout_name"),
+    CURRENT_DRIVEN_STATE_CASES,
+    ids=[case[0] for case in CURRENT_DRIVEN_STATE_CASES],
+)
+def test_current_driven_iota_profiles_recompute_from_bundled_state(
+    case_name: str,
+    input_name: str,
+    wout_name: str,
+) -> None:
+    """Current-driven accepted states must regenerate VMEC add-fluxes profiles.
+
+    These are no-solve parity gates: the geometry is read from a VMEC2000 WOUT,
+    then vmec_jax recomputes ``chips``, ``iotas``, ``iotaf``, and WOUT
+    half-mesh ``chipf`` from that state.  This catches regressions where output
+    writers accidentally use input-only zero-current profiles for ``NCURR=1``.
+    """
+
+    pytest.importorskip("jax")
+    pytest.importorskip("netCDF4")
+    from vmec_jax._compat import enable_x64
+
+    enable_x64(True)
+
+    repo_root = _repo_root()
+    input_path = repo_root / input_name
+    wout_path = repo_root / wout_name
+    if not input_path.exists() or not wout_path.exists():
+        pytest.skip(f"Missing bundled current-driven fixture: {case_name}")
+
+    cfg, indata = load_config(str(input_path))
+    if int(indata.get_int("NCURR", 0)) != 1:
+        pytest.skip(f"{case_name} is not current-driven")
+
+    wout = read_wout(wout_path)
+    static = build_static(cfg)
+    state = state_from_wout(wout)
+
+    chips, iotas, iotaf = equilibrium_iota_profiles_from_state(
+        state=state,
+        static=static,
+        indata=indata,
+        signgs=int(wout.signgs),
+    )
+    chips_np = np.asarray(chips, dtype=float)
+    iotas_np = np.asarray(iotas, dtype=float)
+    iotaf_np = np.asarray(iotaf, dtype=float)
+    chipf_internal = np.asarray(_chipf_from_chips(chips_np), dtype=float)
+    chipf_wout = chipf_internal * (2.0 * np.pi * int(wout.signgs))
+
+    assert np.all(np.isfinite(chips_np))
+    assert np.all(np.isfinite(iotas_np))
+    assert np.all(np.isfinite(iotaf_np))
+    np.testing.assert_allclose(
+        iotas_np,
+        np.asarray(wout.iotas, dtype=float),
+        rtol=2.5e-11,
+        atol=2.5e-11,
+        err_msg=f"{case_name}: recomputed current-driven iotas drifted",
+    )
+    np.testing.assert_allclose(
+        iotaf_np,
+        np.asarray(wout.iotaf, dtype=float),
+        rtol=2.5e-11,
+        atol=2.5e-11,
+        err_msg=f"{case_name}: recomputed current-driven iotaf drifted",
+    )
+    np.testing.assert_allclose(
+        chipf_wout,
+        np.asarray(wout.chipf, dtype=float),
+        rtol=2.5e-11,
+        atol=2.5e-11,
+        err_msg=f"{case_name}: recomputed current-driven chipf drifted",
+    )
 
 
 def _input_r00(indata) -> float:

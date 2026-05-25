@@ -64,6 +64,13 @@ silence the iteration table, and ``--outdir`` or ``--output`` to control where
 the ``wout_*.nc`` file is written. If you only want a short debug run, pass
 ``--max-iter`` and ``--no-multigrid`` (single grid).
 
+``vmec_jax`` writes diagnostic ``wout`` files from the last available state even
+when the requested residual tolerance is not reached. These files preserve the
+computed geometry, profiles, field diagnostics, and residual traces, and mark
+the solver status with ``ier_flag`` plus ``vmec_jax_converged__logical__`` and
+``vmec_jax_status``. Treat ``vmec_jax_status = nonconverged`` as a diagnostic
+checkpoint rather than a validated equilibrium.
+
 Free-boundary CLI smoke test
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

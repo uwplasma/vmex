@@ -344,7 +344,7 @@ class ResidualIterationTrace:
 class ResidualCheckpointTape:
     """Replay-friendly checkpoints from repeated one-step residual solves."""
 
-    final_packed_state: np.ndarray
+    final_packed_state: Any
     packed_states: np.ndarray
     trace: ResidualIterationTrace
     resume_states: tuple[dict[str, Any] | None, ...]
@@ -666,7 +666,7 @@ def build_residual_checkpoint_tape_direct(
 
     result = _solve_with_timing(solve_kwargs)
     pack_start = time.perf_counter()
-    final_packed_state = np.asarray(pack_state(result.state), dtype=float)
+    final_packed_state = jnp.asarray(pack_state(result.state), dtype=jnp.float64)
     _record_timing("tape_final_state_pack_s", pack_start)
     trace_extract_start = time.perf_counter()
     step_traces = tuple(result.diagnostics.get("adjoint_step_trace", ()))
@@ -716,7 +716,7 @@ def build_residual_checkpoint_tape_direct(
                 solve_kwargs_full["adjoint_trace_mode"] = "full"
                 result = _solve_with_timing(solve_kwargs_full)
                 pack_start = time.perf_counter()
-                final_packed_state = np.asarray(pack_state(result.state), dtype=float)
+                final_packed_state = jnp.asarray(pack_state(result.state), dtype=jnp.float64)
                 _record_timing("tape_final_state_pack_s", pack_start)
                 trace_extract_start = time.perf_counter()
                 step_traces = tuple(result.diagnostics.get("adjoint_step_trace", ()))
@@ -1053,7 +1053,25 @@ def _stack_replay_step_traces(step_traces: tuple[dict[str, Any], ...]):
     from ._compat import jax
 
     filtered = tuple({key: trace[key] for key in _REPLAY_STEP_TRACE_KEYS} for trace in step_traces)
-    stacked = jax.tree_util.tree_map(lambda *xs: np.stack([np.asarray(x) for x in xs], axis=0), *filtered)
+    use_device_stack = _backend_is_accelerator(jax.default_backend())
+    jax_array_type = getattr(jax, "Array", ())
+
+    def _as_stack_array(x):
+        if use_device_stack:
+            if jax_array_type and isinstance(x, jax_array_type):
+                return x
+            return jnp.asarray(x)
+        if isinstance(x, np.ndarray):
+            return x
+        return np.asarray(x)
+
+    def _stack_values(*xs):
+        arrays = [_as_stack_array(x) for x in xs]
+        if use_device_stack:
+            return jnp.stack(arrays, axis=0)
+        return np.stack(arrays, axis=0)
+
+    stacked = jax.tree_util.tree_map(_stack_values, *filtered)
     static_flags = _static_flags_from_replay_step_traces(step_traces)
     return stacked, static_flags
 
@@ -1844,7 +1862,7 @@ def checkpoint_tape_state_jvp_columns(
                 while end < len(tape.step_traces) and _dynamic_replay_trace_supported(tape.step_traces[end]):
                     end += 1
                 segment = tuple(tape.step_traces[idx:end])
-                segment_static_flags = _stack_replay_step_traces(segment)[1]
+                segment_static_flags = _static_flags_from_replay_step_traces(segment)
                 segment_stacked, segment_dynamic_flags, _segment_initial_carry, segment_base_carries = _build_dynamic_replay_payload(
                     segment,
                     segment_static_flags,

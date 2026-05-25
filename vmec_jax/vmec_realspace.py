@@ -25,6 +25,8 @@ _PHASE_DZETA_CACHE: dict[tuple[int, int], tuple[Any, Any]] = {}
 _PHASE_STACK_CACHE: dict[tuple[int, int], Any] = {}
 _PHASE_DTHETA_STACK_CACHE: dict[tuple[int, int], Any] = {}
 _PHASE_DZETA_STACK_CACHE: dict[tuple[int, int], Any] = {}
+_SCALXC_MN_CACHE: dict[tuple[int, int, str, int, int], Any] = {}
+_SCALXC_MN_CACHE_LIMIT = 128
 
 
 def _phase_cache_key(modes: ModeTable, trig: VmecTrigTables) -> tuple[int, int]:
@@ -86,6 +88,29 @@ def _vmec_mode_scaling(*, m: Any, n: Any, trig: VmecTrigTables) -> Any:
     return 1.0 / (jnp.take(mscale, m_idx, axis=0) * jnp.take(nscale, n1_idx, axis=0))
 
 
+def _scalxc_mn_for_s(*, s: Any, modes: ModeTable, m_np: np.ndarray, dtype: Any) -> Any:
+    """Return ``vmec_scalxc_from_s(s)[:, modes.m]`` with a top-level cache."""
+    s_arr = jnp.asarray(s)
+    ns = int(s_arr.shape[0])
+    key = None
+    if _cache_allowed():
+        try:
+            key = (id(s), id(modes), str(np.dtype(dtype)), ns, int(m_np.shape[0]))
+            cached = _SCALXC_MN_CACHE.get(key)
+            if cached is not None and tuple(cached.shape) == (ns, int(m_np.shape[0])):
+                return cached
+        except Exception:
+            key = None
+    mpol = int(np.max(m_np)) + 1
+    scalxc = vmec_scalxc_from_s(s=s_arr, mpol=mpol).astype(dtype)
+    scalxc_mn = scalxc[:, np.asarray(m_np, dtype=np.int32)]
+    if key is not None:
+        if len(_SCALXC_MN_CACHE) >= _SCALXC_MN_CACHE_LIMIT:
+            _SCALXC_MN_CACHE.pop(next(iter(_SCALXC_MN_CACHE)), None)
+        _SCALXC_MN_CACHE[key] = scalxc_mn
+    return scalxc_mn
+
+
 def _vmec_phase_tables(*, m: Any, n: Any, trig: VmecTrigTables):
     m_idx, n1_idx, sgn_np = _mode_index_arrays(m=m, n=n)
     sgn = jnp.asarray(sgn_np)
@@ -140,13 +165,24 @@ def _vmec_phase_tables_stacked_cached(*, modes: ModeTable, trig: VmecTrigTables,
     return phase
 
 
+def _same_mode_array(candidate: Any, expected: Any) -> bool:
+    if candidate is expected:
+        return True
+    try:
+        candidate_np = np.asarray(candidate)
+        expected_np = np.asarray(expected)
+        return candidate_np.shape == expected_np.shape and bool(np.array_equal(candidate_np, expected_np))
+    except Exception:
+        return False
+
+
 def _phase_stack_from_trig(modes: ModeTable, trig: VmecTrigTables, attr: str) -> Any | None:
     phase = getattr(trig, attr, None)
     if phase is None:
         return None
-    if getattr(trig, "phase_stack_m", None) is not modes.m:
+    if not _same_mode_array(getattr(trig, "phase_stack_m", None), modes.m):
         return None
-    if getattr(trig, "phase_stack_n", None) is not modes.n:
+    if not _same_mode_array(getattr(trig, "phase_stack_n", None), modes.n):
         return None
     return phase
 
@@ -295,9 +331,7 @@ def vmec_realspace_synthesis(
                 s = jnp.asarray([0.0], dtype=coeff_cos.dtype)
             else:
                 s = jnp.linspace(0.0, 1.0, ns, dtype=coeff_cos.dtype)
-        mpol = int(np.max(m_np)) + 1
-        scalxc = vmec_scalxc_from_s(s=jnp.asarray(s), mpol=mpol).astype(coeff_cos.dtype)
-        scalxc_mn = scalxc[:, m]
+        scalxc_mn = _scalxc_mn_for_s(s=s, modes=modes, m_np=m_np, dtype=coeff_cos.dtype)
         scalxc_shape = (1,) * (coeff_cos.ndim - 2) + scalxc_mn.shape
         coeff_cos = coeff_cos * scalxc_mn.reshape(scalxc_shape)
         coeff_sin = coeff_sin * scalxc_mn.reshape(scalxc_shape)
@@ -331,6 +365,12 @@ def vmec_realspace_synthesis_multi(
     """Synthesize multiple real-space fields (base/derivatives) in one batched call."""
     coeff_cos = jnp.asarray(coeff_cos)
     coeff_sin = jnp.asarray(coeff_sin)
+    # In the CPU host-update force path, jnp is temporarily replaced by the
+    # NumPy shim.  Full-solve profiles for the scalxc-weighted odd-channel
+    # synthesis are faster with three smaller contractions than with one large
+    # stacked contraction; keep the fused form for JAX/XLA backends.
+    if bool(apply_scalxc) and bool(use_stacked_dot) and type(jnp).__name__ == "_NpModule":
+        use_stacked_dot = False
     m_np = np.asarray(modes.m)
     m = jnp.asarray(m_np).astype(jnp.int32)
     n = jnp.asarray(modes.n).astype(jnp.int32)
@@ -355,9 +395,7 @@ def vmec_realspace_synthesis_multi(
                 s = jnp.asarray([0.0], dtype=coeff_cos.dtype)
             else:
                 s = jnp.linspace(0.0, 1.0, ns, dtype=coeff_cos.dtype)
-        mpol = int(np.max(m_np)) + 1
-        scalxc = vmec_scalxc_from_s(s=jnp.asarray(s), mpol=mpol).astype(coeff_cos.dtype)
-        scalxc_mn = scalxc[:, m]
+        scalxc_mn = _scalxc_mn_for_s(s=s, modes=modes, m_np=m_np, dtype=coeff_cos.dtype)
         scalxc_shape = (1,) * (coeff_cos.ndim - 2) + scalxc_mn.shape
         coeff_cos = coeff_cos * scalxc_mn.reshape(scalxc_shape)
         coeff_sin = coeff_sin * scalxc_mn.reshape(scalxc_shape)
@@ -583,9 +621,7 @@ def vmec_realspace_synthesis_dtheta(
                 s = jnp.asarray([0.0], dtype=coeff_cos.dtype)
             else:
                 s = jnp.linspace(0.0, 1.0, ns, dtype=coeff_cos.dtype)
-        mpol = int(np.max(m_np)) + 1
-        scalxc = vmec_scalxc_from_s(s=jnp.asarray(s), mpol=mpol).astype(coeff_cos.dtype)
-        scalxc_mn = scalxc[:, m]
+        scalxc_mn = _scalxc_mn_for_s(s=s, modes=modes, m_np=m_np, dtype=coeff_cos.dtype)
         scalxc_shape = (1,) * (coeff_cos.ndim - 2) + scalxc_mn.shape
         coeff_cos = coeff_cos * scalxc_mn.reshape(scalxc_shape)
         coeff_sin = coeff_sin * scalxc_mn.reshape(scalxc_shape)
@@ -642,9 +678,7 @@ def vmec_realspace_synthesis_dzeta_phys(
                 s = jnp.asarray([0.0], dtype=coeff_cos.dtype)
             else:
                 s = jnp.linspace(0.0, 1.0, ns, dtype=coeff_cos.dtype)
-        mpol = int(np.max(m_np)) + 1
-        scalxc = vmec_scalxc_from_s(s=jnp.asarray(s), mpol=mpol).astype(coeff_cos.dtype)
-        scalxc_mn = scalxc[:, m]
+        scalxc_mn = _scalxc_mn_for_s(s=s, modes=modes, m_np=m_np, dtype=coeff_cos.dtype)
         scalxc_shape = (1,) * (coeff_cos.ndim - 2) + scalxc_mn.shape
         coeff_cos = coeff_cos * scalxc_mn.reshape(scalxc_shape)
         coeff_sin = coeff_sin * scalxc_mn.reshape(scalxc_shape)
