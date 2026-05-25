@@ -93,11 +93,24 @@ Run the low-resolution direct-coil/generated-`mgrid` scan:
 ```bash
 export ESSOS_ROOT=/path/to/ESSOS_mgrid_pr
 export ESSOS_INPUT_DIR=$ESSOS_ROOT/examples/input_files
-PYTHONPATH=$ESSOS_ROOT:$PYTHONPATH \
+PYTHONPATH=.:$ESSOS_ROOT:$PYTHONPATH \
   python examples/free_boundary_essos_coils_beta_scan.py \
   --outdir results/free_boundary_essos_coils_beta_scan_readme \
   --activate-fsq 1e99
+```
 
+Run the bounded provider/solve/gradient benchmark matrix before rendering the
+README figures:
+
+```bash
+python tools/benchmarks/bench_freeb_direct_coil_matrix.py \
+  --quick \
+  --out results/bench_freeb_direct_coil_matrix/summary.json
+```
+
+Then render the figures:
+
+```bash
 python tools/diagnostics/render_freeb_single_stage_readme.py \
   --summary results/free_boundary_essos_coils_beta_scan_readme/summary.json \
   --benchmark-summary results/bench_freeb_direct_coil_matrix/summary.json \
@@ -111,14 +124,6 @@ python examples/optimization/free_boundary_QS_coil_optimization.py \
   --smoke --provider circle --max-evals 1 --max-iter 1 --vmec-max-iter 1 \
   --pressure-scale 100 --activate-fsq 1e99 \
   --outdir results/free_boundary_QS_coil_optimization_circle_smoke
-```
-
-Run the bounded provider/solve/gradient benchmark matrix:
-
-```bash
-python tools/benchmarks/bench_freeb_direct_coil_matrix.py \
-  --quick \
-  --out results/bench_freeb_direct_coil_matrix/summary.json
 ```
 
 Detailed caveats and optional VMEC2000 diagnostics are in

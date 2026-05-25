@@ -223,7 +223,7 @@ low-resolution finite-pressure free-boundary forward validation run without writ
 
    export ESSOS_ROOT=/path/to/ESSOS_mgrid_pr
    export ESSOS_INPUT_DIR=$ESSOS_ROOT/examples/input_files
-   PYTHONPATH=$ESSOS_ROOT:$PYTHONPATH \
+   PYTHONPATH=.:$ESSOS_ROOT:$PYTHONPATH \
      python examples/free_boundary_essos_coils_forward.py \
      --beta 1.0 \
      --max-iter 20 \
@@ -237,7 +237,7 @@ Run the matched beta scan from the repository root. Until the ESSOS
 
    export ESSOS_ROOT=/path/to/ESSOS_mgrid_pr
    export ESSOS_INPUT_DIR=$ESSOS_ROOT/examples/input_files
-   PYTHONPATH=$ESSOS_ROOT:$PYTHONPATH \
+   PYTHONPATH=.:$ESSOS_ROOT:$PYTHONPATH \
      python examples/free_boundary_essos_coils_beta_scan.py \
      --outdir results/free_boundary_essos_coils_beta_scan_readme \
      --activate-fsq 1e99
@@ -250,13 +250,21 @@ sensitivity studies with stronger coils:
 
    export ESSOS_ROOT=/path/to/ESSOS_mgrid_pr
    export ESSOS_INPUT_DIR=$ESSOS_ROOT/examples/input_files
-   PYTHONPATH=$ESSOS_ROOT:$PYTHONPATH \
+   PYTHONPATH=.:$ESSOS_ROOT:$PYTHONPATH \
      python examples/free_boundary_essos_coils_beta_scan.py \
      --outdir results/free_boundary_essos_coils_beta_scan_scaled \
      --coil-current-scale 100 \
      --activate-fsq 1e99
 
-Render the README/docs figures from the generated JSON summary:
+Generate the benchmark summary used by the README/docs figure renderer:
+
+.. code-block:: bash
+
+   python tools/benchmarks/bench_freeb_direct_coil_matrix.py \
+     --quick \
+     --out results/bench_freeb_direct_coil_matrix/summary.json
+
+Render the README/docs figures from the generated JSON summaries:
 
 .. code-block:: bash
 
@@ -321,7 +329,7 @@ For the ESSOS Landreman-Paul QA coils, put ESSOS on ``PYTHONPATH`` and use:
 
    export ESSOS_ROOT=/path/to/ESSOS_mgrid_pr
    export ESSOS_INPUT_DIR=$ESSOS_ROOT/examples/input_files
-   PYTHONPATH=$ESSOS_ROOT:$PYTHONPATH \
+   PYTHONPATH=.:$ESSOS_ROOT:$PYTHONPATH \
      python examples/optimization/free_boundary_QS_coil_optimization.py \
      --smoke \
      --max-evals 3 \

@@ -16,13 +16,13 @@ Run from the repository root:
 
     export ESSOS_ROOT=/path/to/ESSOS_mgrid_pr
     export ESSOS_INPUT_DIR=$ESSOS_ROOT/examples/input_files
-    PYTHONPATH=$ESSOS_ROOT:$PYTHONPATH python examples/free_boundary_essos_coils_beta_scan.py
+    PYTHONPATH=.:$ESSOS_ROOT:$PYTHONPATH python examples/free_boundary_essos_coils_beta_scan.py
 
 Use smaller settings for a quick smoke run:
 
     export ESSOS_ROOT=/path/to/ESSOS_mgrid_pr
     export ESSOS_INPUT_DIR=$ESSOS_ROOT/examples/input_files
-    PYTHONPATH=$ESSOS_ROOT:$PYTHONPATH python examples/free_boundary_essos_coils_beta_scan.py --betas 0 1 --max-iter 2 --mgrid-nr 8 --mgrid-nz 8 --mgrid-nphi 4 --activate-fsq 1e99
+    PYTHONPATH=.:$ESSOS_ROOT:$PYTHONPATH python examples/free_boundary_essos_coils_beta_scan.py --betas 0 1 --max-iter 2 --mgrid-nr 8 --mgrid-nz 8 --mgrid-nphi 4 --activate-fsq 1e99
 """
 
 from __future__ import annotations
@@ -35,6 +35,10 @@ import sys
 import time
 from typing import Any
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 import numpy as np
 
 from vmec_jax.driver import run_free_boundary, write_wout_from_fixed_boundary_run
@@ -42,8 +46,6 @@ from vmec_jax.external_fields import from_essos_coils
 from vmec_jax.namelist import read_indata, write_indata
 from vmec_jax.wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state, read_wout
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_INPUT = REPO_ROOT / "examples" / "data" / "input.LandremanPaul2021_QA_reactorScale_lowres"
 DEFAULT_RESULTS = REPO_ROOT / "results" / "free_boundary_essos_coils_beta_scan"
 DEFAULT_NOMINAL_BETA_PERCENT = (0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0)

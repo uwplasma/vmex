@@ -10,7 +10,7 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-05-25 after dry-run optimization diagnostics, ESSOS adapter validation, VMEC2000 runtime-error classification, bounded AD-vs-FD NESTOR gradient checks, same-branch CPU/GPU benchmark-matrix reporting with non-JIT and JIT-force direct-solve rows, solve-loop timing capture for direct-coil benchmark rows, JIT-force defaults for direct-coil examples, accepted-boundary direct-coil replay AD-vs-FD promotion, free-boundary-aware fused strict-update support, a clarified complete-loop exact-adjoint promotion boundary, the first opt-in bad-Jacobian state-probe performance knob, a fused preconditioned-`fsq1` payload benchmark, a tightened optional VMEC2000 generated-`mgrid` trace gate, and strict-update precompile coverage.
+Last updated: 2026-05-25 after dry-run optimization diagnostics, ESSOS adapter validation, VMEC2000 runtime-error classification, bounded AD-vs-FD NESTOR gradient checks, same-branch CPU/GPU benchmark-matrix reporting with non-JIT and JIT-force direct-solve rows, solve-loop timing capture for direct-coil benchmark rows, JIT-force defaults for direct-coil examples, accepted-boundary direct-coil replay AD-vs-FD promotion, free-boundary-aware fused strict-update support, a clarified complete-loop exact-adjoint promotion boundary, the first opt-in bad-Jacobian state-probe performance knob, a fused preconditioned-`fsq1` payload benchmark, a tightened optional VMEC2000 generated-`mgrid` trace gate, strict-update precompile coverage, and source-checkout reproduction fixes for ESSOS beta-scan/figure commands.
 
 Steps taken:
 
@@ -87,6 +87,8 @@ Steps taken:
 71. Rechecked the exact-adjoint promotion boundary: the blocker is not coil-field AD, boundary projection AD, dense JAX NESTOR AD, accepted-boundary replay AD, or finite-difference accepted-state response. The remaining blocker is differentiating through the nonlinear `run_free_boundary` iteration loop instead of holding the accepted state fixed.
 72. Split residual-loop control timing into fsq1, bad-Jacobian, VMEC time-control, restart, evolve, and unattributed buckets. The two-iteration office direct-coil probe shows `iteration_control_badjac_s` now dominates warm CUDA control time.
 73. Added `VMEC_JAX_BADJAC_INITIAL_STATE_PROBE_ITERS` as an opt-in performance knob. The default remains `2` to preserve the existing VMEC-style first-two-iteration state-Jacobian safety probe; setting it to `0` is only for profiling/parity experiments.
+74. Hardened the ESSOS beta-scan and forward example source-checkout commands: examples now insert the repository root before importing `vmec_jax`, and README/docs reproduction snippets use `PYTHONPATH=.:$ESSOS_ROOT:$PYTHONPATH`.
+75. Reordered the README/docs reproduction flow so users generate the benchmark matrix JSON before running the figure renderer that consumes it.
 
 Results obtained:
 
@@ -230,6 +232,7 @@ Results obtained:
 137. The same opt-in bad-Jacobian probe setting on `office` CUDA reduced warm time from `0.276 s` to `0.181 s`, `iteration_control_s` from `0.090 s` to `0.0127 s`, and `iteration_control_badjac_s` from `0.077 s` to `0.0006 s`.
 138. The non-scan residual path now matches the scan path bad-Jacobian policy: VMEC-style `ptau` sign checking is the default, and the expensive state-Jacobian probe only runs when `VMEC_JAX_BADJAC_STATE_PROBE=1`. A local JIT-force direct-coil benchmark reports warm time about `0.024 s` with `iteration_control_badjac_s≈3.8e-4 s`.
 139. Office CPU/CUDA matrix at commit `79c65e1` confirmed the promoted default: the `--jit-forces` direct-coil row reports CPU warm `0.057 s`, CUDA warm `0.183 s`, CUDA `iteration_control_badjac_s≈6.1e-4 s`, and CUDA force assembly is faster than CPU. The remaining GPU tax is `iteration_control_fsq1_s` plus preconditioner/update dispatch.
+140. Source-checkout reproduction checks passed: both ESSOS free-boundary example scripts import cleanly with `--help`, the focused forward/optimization example tests report `9 passed, 1 xfailed`, and strict Sphinx builds the updated docs without warnings.
 
 Best next steps:
 
@@ -1069,9 +1072,9 @@ WP9 VMEC2000 diagnostics:                      96%
 WP10 Benchmarks/diagnostics:                  100%
 WP11 Coil-only QS optimization example:        89%
 WP12 Robust coil perturbations:               100%
-WP13 Documentation:                            99%
-WP14 CI policy:                                97%
-Overall branch completion:                   99.0%
+WP13 Documentation:                           100%
+WP14 CI policy:                                98%
+Overall branch completion:                   99.2%
 ```
 
 ## Immediate Next Steps
