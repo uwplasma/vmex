@@ -10,7 +10,7 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-05-25 after docs/release hygiene review of dry-run optimization summaries, VMEC2000 dump classification, and CPU/GPU benchmark-matrix reporting.
+Last updated: 2026-05-25 after dry-run optimization diagnostics, ESSOS adapter validation, VMEC2000 runtime-error classification, bounded AD-vs-FD NESTOR gradient checks, and same-branch CPU/GPU benchmark-matrix reporting.
 
 Steps taken:
 
@@ -201,14 +201,19 @@ Results obtained:
 112. The VMEC2000 scalpot/vacuum dump comparator now distinguishes VMEC run failures from missing instrumentation. `scalpot` and `vacuum` dumps are required; `bextern`, `fouri`, free-boundary coupling, and GC dumps remain optional. Nonzero VMEC exits are fatal only when required dumps are absent; usable instrumented dumps are still compared and return codes are recorded.
 113. The direct-coil benchmark matrix now emits a top-level matched CPU/GPU comparison block for cold/compile, warm runtime, active NESTOR, final recompute, and final external-field sampling buckets when both backends complete.
 114. Public docs were reviewed for stale/over-claiming language: WOUT parity is separated from instrumented dump-to-dump checks, benchmark language is scoped to the current tiny diagnostic matrix, and full Boozer/QS gradient claims remain phase-2 only.
+115. ESSOS adapter conversion now validates ESSOS-like curve/current shapes and positive chunk sizes without importing ESSOS at module import time; duck-type robustness tests cover these failures.
+116. Optional generated-`mgrid` VMEC2000 WOUT parity is no longer a broad test-level xfail. It xfails only when VMEC2000 fails to promote a generated-grid run to WOUT; if VMEC2000 writes WOUT, the WOUT-level parity assertions run normally.
+117. VMEC2000 generated-grid diagnostics now classify runtime-error exits separately from legitimate `more_iter` exits. The latest LPQA local probe opens the generated grid and prints rows, but VMEC2000 exits with a runtime error before WOUT; vmec_jax direct-coil and generated-`mgrid` paths still pass active parity.
+118. Added a bounded AD-vs-central-FD gate through the fixed-boundary JAX chain direct coils -> boundary projection -> VMEC/NESTOR source/matrix assembly -> dense mode solve for one coil current and one coil Fourier geometry coefficient.
+119. The latest office CPU/CUDA direct-coil quick matrix shows cold/compile is faster on CUDA (`6.77 s` versus CPU `10.74 s`) but warm tiny direct solve remains slower on CUDA (`2.48 s` versus CPU `0.325 s`). Final NESTOR solve time is not the bottleneck (`0.0069 s` CUDA versus `0.0062 s` CPU); the next performance target is warm solve-loop dispatch around residual/update/preconditioner work.
 
 Best next steps:
 
-1. Promote the opt-in complete-solve FD gate from finite/nonzero response to AD-vs-central-FD once the production full-solve adjoint is threaded through accepted-state quantities.
+1. Promote the fixed-boundary direct-coil/NESTOR AD-vs-FD gate to accepted free-boundary solves once the host NumPy state bridge is removed or wrapped by a validated custom adjoint.
 2. Keep `exact_path='scan'` as an explicit long-run GPU option only; the latest profile shows it warms faster but needs roughly 75 accepted callbacks to amortize the `~110 s` cold compile.
 3. Keep the opt-in JAX NESTOR driver path as validation-only until the accepted-solve compilation/dispatch cost is removed. The host bridge remains the production/default route.
 4. Keep coverage above 95% as new operator code is promoted from validation scaffolds into production paths.
-5. For GPU performance, prioritize accepted-point replay/tangent construction and compilation/dispatch amortization over tiny raw direct-solve offload; the current microbenchmarks show tiny solves are still CPU-favorable.
+5. For GPU performance, instrument the warm direct-coil solve loop outside final NESTOR recompute; current microbenchmarks show tiny solves are still CPU-favorable despite fast final dense solves.
 6. Warm GPU QH mode-2 tape callbacks are still above the `1 s` production target; the next patch should reduce accepted replay/tangent dispatch or avoid rebuilding accepted tapes at nearby callbacks. Matrix-free is not yet the answer on GPU because repeated VJP/JVP replay is slower than dense materialization for the profiled case.
 
 Need from user:
@@ -1030,18 +1035,18 @@ authoritative current plan snapshot for the free-boundary direct-coil branch.
 WP0 Branch foundation and plan:                100%
 WP1 Provider base API:                         100%
 WP2 Pure JAX coil Biot-Savart:                 92%
-WP3 ESSOS adapter:                             86%
+WP3 ESSOS adapter:                             88%
 WP4 JAX mgrid interpolation:                   91%
 WP5 Free-boundary provider hook:               95%
 WP6 Direct-coil forward example:               90%
 WP7 Vacuum adjoint scaffold:                  100%
-WP8 Gradient checks:                           99%
-WP9 VMEC2000 diagnostics:                      93%
+WP8 Gradient checks:                          100%
+WP9 VMEC2000 diagnostics:                      94%
 WP10 Benchmarks/diagnostics:                  100%
-WP11 Coil-only QS optimization example:        86%
+WP11 Coil-only QS optimization example:        87%
 WP12 Robust coil perturbations:               100%
 WP13 Documentation:                            99%
-WP14 CI policy:                                92%
+WP14 CI policy:                                93%
 Overall branch completion:                     98%
 ```
 
@@ -1051,7 +1056,7 @@ Overall branch completion:                     98%
 2. Continue the VMEC2000 generated-mgrid WOUT comparator until the optional xfail can be bounded or promoted.
 3. Replace the phase-1 coil-only optimization proxy with Boozer/QS residuals only after the direct-coil free-boundary loop has validated gradients.
 4. Profile and reduce cold exact tape build/solve and initial tangent construction on GPU; convert benchmark JSON summaries into documentation plots.
-5. Promote the opt-in complete-solve FD gate from finite/nonzero response to AD-vs-central-FD once the production full-solve adjoint is threaded through accepted-state quantities.
+5. Promote the fixed-boundary direct-coil/NESTOR AD-vs-FD gate to the full accepted free-boundary solve loop once the production full-solve adjoint is threaded through accepted-state quantities.
 6. Re-check PR CI, including Codecov patch coverage, after each commit.
 
 ## Need From User
@@ -1059,6 +1064,36 @@ Overall branch completion:                     98%
 Nothing is required right now. The next implementation step can proceed locally. Later, maintainers should decide whether ESSOS mgrid export should be released before the `vmec_jax` example is promoted from research example to documented workflow.
 
 ## Work Log
+
+### 2026-05-25 Free-boundary integration push
+
+Steps taken:
+
+1. Hardened the phase-1 coil-only optimization example with a `--dry-run` path, coil-only variable manifests, weighted objective-term histories, robust-scenario summaries, and coil diagnostics.
+2. Validated ESSOS adapter inputs without making ESSOS a hard import-time dependency.
+3. Reworked VMEC2000 generated-`mgrid` failure classification: missing required dumps, nonzero runtime failures, legitimate `more_iter` exits, and no-WOUT promotion blockers are now separated in JSON and tests.
+4. Narrowed the optional VMEC2000 generated-`mgrid` WOUT parity xfail so WOUT-level parity runs normally whenever VMEC2000 actually writes a WOUT.
+5. Added a bounded fixed-boundary AD-vs-central-FD validation rung through direct coils, boundary projection, VMEC/NESTOR source/matrix assembly, and dense mode solve.
+6. Ran same-branch local CPU and remote `office` CPU/CUDA direct-coil benchmark matrices and used the new `cpu_gpu_comparison` block to identify the remaining GPU bottleneck.
+
+Results obtained:
+
+1. Consolidated focused validation passed: 76 provider/vacuum/robust tests, 24 optimization/comparator/benchmark tests, strict Sphinx, ruff, and diff checks before commit `047c20f`.
+2. ESSOS adapter focused validation passed: 28 external-field tests plus ruff before commit `4b6f44b`.
+3. VMEC2000 parser/optional parity validation passed: 37 tests passed, 2 skipped before commit `dacf3be`; the optional LPQA generated-grid WOUT gate now xfails only for the observed no-WOUT blocker.
+4. Fixed-boundary direct-coil/NESTOR AD-vs-FD validation passed for one current and one geometry coefficient. The complete outer VMEC solve still has finite-response smoke coverage only.
+5. Local CPU quick matrix direct solve: cold about `7.21 s`, warm about `0.180 s`.
+6. Office CUDA quick matrix direct solve: cold/compile faster on CUDA than CPU (`6.77 s` vs `10.74 s`), but warm full direct solve slower on CUDA (`2.48 s` vs `0.325 s`). Final NESTOR solve itself is not the bottleneck.
+
+Best next steps:
+
+1. Instrument the warm direct-coil solve loop around residual/update/preconditioner dispatch; do not spend the next performance pass on final dense NESTOR solve time.
+2. Promote fixed-boundary AD-vs-FD to accepted free-boundary solves only after the host NumPy state bridge is removed or covered by a validated custom adjoint.
+3. Keep VMEC2000 generated-grid WOUT parity optional until the local VMEC runtime-error/no-WOUT blocker is resolved.
+
+Need from user:
+
+Nothing now.
 
 ### 2026-05-25 Documentation/release hygiene review
 

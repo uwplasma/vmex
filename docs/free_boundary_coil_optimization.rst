@@ -632,10 +632,14 @@ Current fast tests cover:
 - dense mode-space vacuum solve and reconstruction tests, including
   stellarator-symmetric and LASYM-style basis blocks plus finite-difference
   gradients through a direct-coil projected source/RHS/mode-space chain.
+- fixed-boundary AD-vs-central-finite-difference checks for one coil current
+  and one coil Fourier geometry coefficient through the JAX chain
+  direct coils -> boundary projection -> VMEC/NESTOR source/matrix assembly
+  -> dense mode solve.
 - a guarded, opt-in low-resolution complete-solve finite-difference smoke for
   one coil current and one Fourier geometry coefficient; this checks finite
-  nonzero response, not a production AD-vs-finite-difference full-solve
-  adjoint.
+  nonzero outer-loop response, not a production AD-vs-finite-difference
+  full-solve adjoint.
 
 The optional VMEC2000 generated-``mgrid`` comparison is present but xfailed for
 now. VMEC2000 reads the generated grid and advances the trace locally, but the
@@ -657,9 +661,9 @@ Next Implementation Steps
   trace discrepancy is bounded.
 - Replace the dense validation vacuum-adjoint primitive with the production
   matrix-free/custom-linear-solve NESTOR operator.
-- Promote the toy direct-coil/vacuum-chain gradient checks to complete
-  low-resolution free-boundary finite-difference checks, then to Boozer/QS
-  gradient checks.
+- Promote the fixed-boundary direct-coil/NESTOR AD-vs-FD gate to the accepted
+  free-boundary solve loop once the host NumPy state bridge is removed or
+  wrapped by a validated custom adjoint, then add Boozer/QS gradient checks.
 - Run larger CPU/GPU benchmark matrices before making broad accelerator claims;
   keep the JSON summaries and documentation plots refreshed from those runs.
 

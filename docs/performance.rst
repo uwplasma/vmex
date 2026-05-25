@@ -2334,6 +2334,16 @@ not a proof that the full free-boundary solve should run on GPU: recent
 CPU/CUDA summaries show the final NESTOR sample/solve buckets are millisecond
 scale while the whole tiny GPU solve remains slower than CPU.
 
+The 2026-05-25 same-branch ``office`` quick matrix showed the same pattern:
+the direct-solve cold/compile bucket was faster on CUDA than CPU
+(``6.77 s`` versus ``10.74 s``), but the warm tiny direct solve was slower
+(``2.48 s`` on CUDA versus ``0.325 s`` on CPU).  The final accepted-state
+NESTOR solve itself was not the bottleneck (CUDA ``0.0069 s`` versus CPU
+``0.0062 s``); the larger remaining cost is warm solve-loop dispatch and small
+kernel overhead outside the final recompute.  The next performance pass should
+therefore instrument residual/update/preconditioner dispatch in the warm
+direct-coil solve loop before optimizing the dense NESTOR linear solve.
+
 Control flags:
 
 .. code-block:: bash
