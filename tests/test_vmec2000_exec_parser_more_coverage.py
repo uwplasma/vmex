@@ -26,6 +26,7 @@ from tools.diagnostics.compare_freeb_coils_mgrid_vmec2000 import (
     _vmec2000_probe_updates,
     _vmec2000_underconverged_details,
     _vmec2000_summary,
+    _wout_file_diagnostics,
 )
 
 
@@ -606,3 +607,21 @@ def test_classify_vmec2000_summary_completed_no_wout_and_more_iter(tmp_path: Pat
     _classify_vmec2000_result_summary(more_iter, wout_path=tmp_path / "missing_more.nc")
     assert more_iter["status"] == "more_iter_exit"
     assert more_iter["reason"] == "vmec2000_more_iterations_required"
+
+
+def test_wout_file_diagnostics_records_scalar_only_error_wout(tmp_path: Path) -> None:
+    netcdf4 = pytest.importorskip("netCDF4")
+    wout = tmp_path / "wout_error.nc"
+    with netcdf4.Dataset(wout, "w") as ds:
+        ds.createDimension("ext_current", 1)
+        ier = ds.createVariable("ier_flag", "i4")
+        ier.assignValue(7)
+        ds.createVariable("extcur", "f8", ("ext_current",))[:] = [1.0]
+
+    diagnostics = _wout_file_diagnostics(wout)
+
+    assert diagnostics["exists"] is True
+    assert diagnostics["size_bytes"] > 0
+    assert diagnostics["ier_flag"] == 7
+    assert diagnostics["has_mode_table"] is False
+    assert "xm" not in diagnostics["variables"]

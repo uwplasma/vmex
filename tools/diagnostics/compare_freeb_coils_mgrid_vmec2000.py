@@ -1033,6 +1033,55 @@ def _classify_vmec2000_result_summary(summary: dict[str, Any], *, wout_path: Pat
     summary["status"] = "completed"
 
 
+def _wout_file_diagnostics(path: Path) -> dict[str, Any]:
+    """Return compact metadata for a WOUT file that could not be parsed."""
+
+    out: dict[str, Any] = {
+        "path": path,
+        "exists": path.exists(),
+        "size_bytes": path.stat().st_size if path.exists() else None,
+    }
+    if not path.exists():
+        return out
+    try:
+        from netCDF4 import Dataset
+
+        with Dataset(path) as ds:
+            out["dimensions"] = {str(name): len(value) for name, value in ds.dimensions.items()}
+            variables = sorted(str(name) for name in ds.variables.keys())
+            out["variables"] = variables
+            out["has_mode_table"] = "xm" in variables and "xn" in variables
+            if "ier_flag" in ds.variables:
+                out["ier_flag"] = int(ds.variables["ier_flag"][()])
+    except Exception as exc:
+        out["netcdf_error"] = repr(exc)
+    return out
+
+
+def _mark_unreadable_vmec2000_wout(summary: dict[str, Any], *, wout_path: Path, error: Exception) -> None:
+    summary["status"] = "wout_unreadable"
+    summary["reason"] = "vmec2000_wout_read_failed"
+    summary["wout_read_error"] = repr(error)
+    summary["wout_file"] = _wout_file_diagnostics(wout_path)
+    summary["help"] = (
+        "VMEC2000 wrote a WOUT file, but vmec_jax could not parse it. "
+        "Inspect wout_file.ier_flag, variables, stdout_tail, threed1_tail, "
+        "and the generated input/mgrid in the VMEC2000 workdir."
+    )
+
+
+def _read_vmec2000_wout_for_summary(summary: dict[str, Any], *, wout_path: Path) -> Any | None:
+    from vmec_jax.wout import read_wout
+
+    try:
+        wout = read_wout(wout_path)
+    except Exception as exc:
+        _mark_unreadable_vmec2000_wout(summary, wout_path=wout_path, error=exc)
+        return None
+    summary["wout"] = _wout_summary(wout)
+    return wout
+
+
 def _vmec2000_probe_updates(args: argparse.Namespace) -> list[dict[str, Any]]:
     """Return bounded VMEC2000-only probe patches for WOUT promotion diagnostics."""
 
@@ -1130,7 +1179,10 @@ def _run_vmec2000_promotion_probes(
         summary["label"] = label
         summary["updates"] = probe["updates"]
         summary["exec_path"] = exec_path
-        _classify_vmec2000_result_summary(summary, wout_path=_vmec2000_wout_path(result))
+        wout_path = _vmec2000_wout_path(result)
+        _classify_vmec2000_result_summary(summary, wout_path=wout_path)
+        if summary["status"] == "completed":
+            _read_vmec2000_wout_for_summary(summary, wout_path=wout_path)
         records.append(summary)
     return records
 
@@ -1143,8 +1195,6 @@ def _run_vmec2000_case(
     args: argparse.Namespace,
 ) -> tuple[Any | None, Any | None, dict[str, Any]]:
     from vmec_jax.vmec2000_exec import find_vmec2000_exec, run_xvmec2000
-    from vmec_jax.wout import read_wout
-
     if args.skip_vmec2000:
         return None, None, {
             "status": "skipped",
@@ -1210,8 +1260,9 @@ def _run_vmec2000_case(
     if summary["status"] in {"more_iter_exit", "nonzero_exit", "no_wout"}:
         return result, None, summary
 
-    wout = read_wout(wout_path)
-    summary["wout"] = _wout_summary(wout)
+    wout = _read_vmec2000_wout_for_summary(summary, wout_path=wout_path)
+    if wout is None:
+        return result, None, summary
     return result, wout, summary
 
 
@@ -1483,7 +1534,7 @@ def main(argv: list[str] | None = None) -> int:
     payload["backends"]["vmec2000_generated_mgrid"] = vmec2000_summary
 
     vmec_status = str(vmec2000_summary.get("status", "unknown"))
-    if bool(args.vmec2000_promotion_probes) and vmec_status in {"no_wout", "more_iter_exit", "nonzero_exit"}:
+    if bool(args.vmec2000_promotion_probes) and vmec_status in {"no_wout", "more_iter_exit", "nonzero_exit", "wout_unreadable"}:
         print("[compare-freeb-coils] running VMEC2000 WOUT-promotion probes")
         payload["backends"]["vmec2000_generated_mgrid"]["promotion_probes"] = _run_vmec2000_promotion_probes(
             mgrid_input=mgrid_input,
@@ -1491,7 +1542,7 @@ def main(argv: list[str] | None = None) -> int:
             workdir=vmec2000_workdir / "promotion_probes",
             args=args,
         )
-    if vmec_status in ("skipped", "timeout", "no_wout", "more_iter_exit", "nonzero_exit", "error"):
+    if vmec_status in ("skipped", "timeout", "no_wout", "more_iter_exit", "nonzero_exit", "wout_unreadable", "error"):
         warning = f"vmec2000_{vmec_status}"
         warnings.append(warning)
         if bool(args.require_vmec2000) or (

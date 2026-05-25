@@ -78,8 +78,15 @@ The validation ladder is:
 7. Boozer/QS objective: the same complete-solve finite-difference checks after
    Boozer/QS diagnostics are in the objective path.
 
-The first six rungs are implemented as fast tests today. The combined JAX
-operator is also threaded into the free-boundary driver behind the opt-in
+The first five AD-vs-FD rungs are implemented as fast tests today. Rung 6 is
+split deliberately: complete accepted direct-coil solves have fast
+finite-difference response guards for current and one Fourier geometry
+coefficient, but accepted-solve AD-vs-FD remains an expected-xfail promotion
+gate. The current blocker is that tracing ``run_free_boundary`` with
+``jax.grad`` does not yet expose accepted NESTOR diagnostics as differentiable
+data; the traced accepted solve can remain on the vacuum-stub/no-diagnostics
+path before a scalar metric is available for comparison with FD. The combined
+JAX operator is also threaded into the free-boundary driver behind the opt-in
 ``VMEC_JAX_FREEB_JAX_NESTOR_OPERATOR=1`` diagnostic flag for low-resolution
 validation. For stellarator-symmetric runs, the JAX path reconstructs the full
 VMEC angular grid internally for the nonsingular Green block while keeping the
@@ -121,6 +128,9 @@ single-stage coil optimizer:
 - The fast validation lane also includes tiny accepted-state
   finite-difference slope-stability checks for direct-coil current and one
   direct-coil Fourier geometry coefficient.
+- Accepted-solve AD-vs-FD is not promoted yet: the current expected-xfail
+  guard confirms that the full ``run_free_boundary`` trace does not yet expose
+  accepted NESTOR diagnostics as differentiable data.
 - The active NESTOR sensitivity checks validate the provider/coupling layer:
   normal-field/source channels scale linearly with current changes and
   ``bsqvac`` scales quadratically. They do not yet validate a full accepted
@@ -312,9 +322,10 @@ For the ESSOS Landreman-Paul QA coils, put ESSOS on ``PYTHONPATH`` and use:
      --max-evals 3 \
      --outdir results/free_boundary_QS_coil_optimization_essos_smoke
 
-The next promotion step is replacing the cheap proxy with a Boozer/QS objective
-and validating finite-difference gradients of the complete direct-coil
-free-boundary loop.
+The next promotion step is first making accepted-solve AD-vs-FD pass for a
+complete direct-coil free-boundary loop. Only after that should this example
+replace the cheap proxy with a Boozer/QS objective and validate the same
+complete-loop gradients through the QS diagnostic path.
 
 Each accepted objective evaluation records a weighted objective-term breakdown
 for the residual, aspect-ratio, and mean-iota proxy terms. Robust runs keep the
@@ -381,10 +392,11 @@ first command is the matrix runner:
      --quick \
      --out results/bench_freeb_direct_coil_matrix/summary.json
 
-The matrix runner executes the provider, direct free-boundary solve, and
-coil-gradient scripts with small CPU-only defaults. It writes each child JSON
-into the output directory and records the child paths plus compact
-timing/status rows in ``summary.json``. GPU rows are opt-in:
+The matrix runner executes the provider, direct free-boundary solve with and
+without JIT force kernels, and coil-gradient scripts with small CPU-only
+defaults. It writes each child JSON into the output directory and records the
+child paths plus compact timing/status rows in ``summary.json``. GPU rows are
+opt-in:
 
 .. code-block:: bash
 

@@ -368,7 +368,18 @@ def _write_wout_gap_report(path: Path, *, wout_jax, wout_vmec2000) -> None:
     print(f"Worst scalar relative gaps: {worst_scalars}")
 
 
-def _write_vmec2000_no_wout_report(path: Path, vmec2000) -> None:
+def _classify_vmec2000_no_wout(vmec2000) -> dict[str, object]:
+    from tools.diagnostics.compare_freeb_coils_mgrid_vmec2000 import (
+        _classify_vmec2000_result_summary,
+        _vmec2000_summary,
+    )
+
+    summary = _vmec2000_summary(vmec2000)
+    _classify_vmec2000_result_summary(summary, wout_path=_vmec2000_wout_path(vmec2000))
+    return summary
+
+
+def _write_vmec2000_no_wout_report(path: Path, vmec2000, *, classified_summary: dict[str, object] | None = None) -> None:
     threed_tail: list[str] = []
     if vmec2000.threed1_path is not None and vmec2000.threed1_path.exists():
         threed_tail = vmec2000.threed1_path.read_text(errors="replace").splitlines()[-80:]
@@ -383,6 +394,10 @@ def _write_vmec2000_no_wout_report(path: Path, vmec2000) -> None:
         "files": sorted(p.name for p in vmec2000.workdir.iterdir()),
         "threed1_path": None if vmec2000.threed1_path is None else str(vmec2000.threed1_path),
         "threed1_tail": threed_tail,
+        "classified_status": None if classified_summary is None else classified_summary.get("status"),
+        "classified_reason": None if classified_summary is None else classified_summary.get("reason"),
+        "classified_wout_path": None if classified_summary is None else str(classified_summary.get("wout_path")),
+        "underconverged": None if classified_summary is None else classified_summary.get("underconverged"),
         "stages": [
             {
                 "ns": int(stage.ns),
@@ -551,11 +566,29 @@ def test_vmec2000_generated_mgrid_free_boundary_matches_vmec_jax_and_direct_coil
     vmec2000 = run_xvmec2000(mgrid_input, exec_path=exe, workdir=tmp_path / "vmec2000", timeout_s=90, keep_workdir=True)
     wout_vmec2000_path = _vmec2000_wout_path(vmec2000)
     if not wout_vmec2000_path.exists():
+        classified_summary = _classify_vmec2000_no_wout(vmec2000)
         report_path = tmp_path / "vmec2000_no_wout_report.json"
-        _write_vmec2000_no_wout_report(report_path, vmec2000)
-        pytest.xfail(
-            "Generated ESSOS-mgrid VMEC2000 WOUT promotion blocker: "
-            f"VMEC2000 did not produce {wout_vmec2000_path.name}; report={report_path}"
+        _write_vmec2000_no_wout_report(report_path, vmec2000, classified_summary=classified_summary)
+        xfail_classifications = {
+            "reached_niter_without_wout",
+            "vmec2000_more_iter_exit",
+            "vmec2000_requested_more_iterations",
+            "unknown_no_wout",
+        }
+        underconverged = classified_summary.get("underconverged") or {}
+        if (
+            classified_summary.get("status") in {"no_wout", "more_iter_exit"}
+            and isinstance(underconverged, dict)
+            and underconverged.get("classification") in xfail_classifications
+        ):
+            pytest.xfail(
+                "Generated ESSOS-mgrid VMEC2000 WOUT promotion blocker: "
+                f"status={classified_summary.get('status')} "
+                f"classification={underconverged.get('classification')}; report={report_path}"
+            )
+        pytest.fail(
+            "VMEC2000 did not produce a WOUT for a non-promotable reason: "
+            f"status={classified_summary.get('status')} reason={classified_summary.get('reason')}; report={report_path}"
         )
     wout_vmec2000 = read_wout(wout_vmec2000_path)
 

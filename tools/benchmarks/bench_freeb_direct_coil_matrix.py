@@ -440,6 +440,11 @@ def _child_specs(*, quick: bool, outdir: Path, backend: str) -> list[tuple[str, 
                 ["--max-iter", "2", "--warm-repeats", "1"],
             ),
             (
+                "direct_solve_jit_forces",
+                outdir / f"bench_freeb_direct_coil_solve_jit_forces{suffix}",
+                ["--max-iter", "2", "--warm-repeats", "1", "--jit-forces"],
+            ),
+            (
                 "gradient",
                 outdir / f"bench_freeb_coil_gradient{suffix}",
                 ["--points", "8", "--segments", "8", "--matrix-size", "8", "--warm-repeats", "1"],
@@ -457,6 +462,11 @@ def _child_specs(*, quick: bool, outdir: Path, backend: str) -> list[tuple[str, 
             ["--max-iter", "2", "--warm-repeats", "1"],
         ),
         (
+            "direct_solve_jit_forces",
+            outdir / f"bench_freeb_direct_coil_solve_jit_forces{suffix}",
+            ["--max-iter", "2", "--warm-repeats", "1", "--jit-forces"],
+        ),
+        (
             "gradient",
             outdir / f"bench_freeb_coil_gradient{suffix}",
             ["--points", "24", "--segments", "48", "--matrix-size", "24", "--warm-repeats", "5"],
@@ -468,6 +478,7 @@ def _script_for(label: str) -> Path:
     return {
         "provider": REPO_ROOT / "tools" / "benchmarks" / "bench_external_field_providers.py",
         "direct_solve": REPO_ROOT / "tools" / "benchmarks" / "bench_freeb_direct_coil_solve.py",
+        "direct_solve_jit_forces": REPO_ROOT / "tools" / "benchmarks" / "bench_freeb_direct_coil_solve.py",
         "gradient": REPO_ROOT / "tools" / "benchmarks" / "bench_freeb_coil_gradient.py",
     }[label]
 
@@ -483,7 +494,7 @@ def _run_child(
 ) -> dict[str, Any]:
     env = os.environ.copy()
     env["PYTHONPATH"] = f"{REPO_ROOT}{os.pathsep}{env.get('PYTHONPATH', '')}" if env.get("PYTHONPATH") else str(REPO_ROOT)
-    if label == "direct_solve":
+    if label.startswith("direct_solve"):
         env.setdefault("VMEC_JAX_TIMING", "1")
         env.setdefault("VMEC_JAX_TIMING_DETAIL", "1")
     if backend == "cpu":
@@ -520,7 +531,7 @@ def _run_child(
             "child_status": None if payload is None else payload.get("status"),
             "child_backend": None if payload is None else payload.get("backend"),
             "case_counts": _case_counts(payload),
-            "timings": _timing_snapshot(payload, include_nestor=(label == "direct_solve")),
+            "timings": _timing_snapshot(payload, include_nestor=label.startswith("direct_solve")),
         }
     except subprocess.TimeoutExpired as exc:
         return {
