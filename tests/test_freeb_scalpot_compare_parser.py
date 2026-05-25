@@ -1,16 +1,22 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+import sys
 
 import numpy as np
 
 from tools.diagnostics.vmec2000_exec_freeb_scalpot_compare import (
     _gc_metric_block,
+    _missing_vmec_dump_report,
+    _missing_required_vmec_dumps,
+    main,
     _parse_bextern_dump,
     _parse_fouri_dump,
     _parse_freeb_coupling_dump,
     _parse_gc_dump,
     _parse_scalpot_dump,
+    _vmec_run_failure_report,
 )
 
 
@@ -228,3 +234,142 @@ def test_parse_fortran_float_handles_missing_exponent_marker() -> None:
     np.testing.assert_allclose(_parse_fortran_float("1.0D+03"), 1.0e3, rtol=0.0, atol=0.0)
     np.testing.assert_allclose(_parse_fortran_float("1.0564215887228806-316"), 1.0564215887228806e-316, rtol=0.0, atol=0.0)
     np.testing.assert_allclose(_parse_fortran_float("-2.5+02"), -2.5e2, rtol=0.0, atol=0.0)
+
+
+def test_missing_vmec_dump_report_marks_required_vs_optional(tmp_path: Path) -> None:
+    dump_dir = tmp_path / "vmec_dumps"
+    dump_dir.mkdir()
+    (dump_dir / "bextern_iter80.dat").write_text("# optional dump\n", encoding="utf-8")
+
+    got = _missing_vmec_dump_report(
+        vmec_dump_dir=dump_dir,
+        iter_target=80,
+        vmec_returncodes=[0],
+        vmec_exec=tmp_path / "xvmec2000",
+        input_path=tmp_path / "input.test",
+        workdir=tmp_path,
+        missing_required=["scalpot", "vacuum"],
+    )
+
+    assert got["status"] == "error"
+    assert got["error"]["code"] == "missing_vmec_dumps"
+    assert got["error"]["instrumentation_required"] is True
+    assert got["error"]["vmec_completed_successfully"] is True
+    assert got["error"]["missing_required"] == ["scalpot", "vacuum"]
+    assert got["vmec_dump_requirements"]["required"] == ["scalpot", "vacuum"]
+    assert "bextern" in got["vmec_dump_requirements"]["optional"]
+    assert got["vmec_dump_inventory"]["required"]["scalpot"]["count"] == 0
+    assert got["vmec_dump_inventory"]["optional"]["bextern"]["count"] == 1
+
+
+def test_missing_required_vmec_dumps_requires_scalpot_and_vacuum(tmp_path: Path) -> None:
+    dump_dir = tmp_path / "vmec_dumps"
+    dump_dir.mkdir()
+
+    assert _missing_required_vmec_dumps(dump_dir, 80) == ["scalpot", "vacuum"]
+
+    (dump_dir / "scalpot_iter80_ivacskip0.dat").write_text("# scalpot\n", encoding="utf-8")
+    assert _missing_required_vmec_dumps(dump_dir, 80) == ["vacuum"]
+
+    (dump_dir / "vacuum_iter80_ivacskip0.dat").write_text("# vacuum\n", encoding="utf-8")
+    assert _missing_required_vmec_dumps(dump_dir, 80) == []
+
+
+def test_vmec_run_failure_report_does_not_call_missing_dumps_instrumentation(tmp_path: Path) -> None:
+    got = _vmec_run_failure_report(
+        vmec_returncodes=[11],
+        vmec_exec=tmp_path / "xvmec2000",
+        input_path=tmp_path / "input.test",
+        workdir=tmp_path,
+        vmec_dump_dir=tmp_path / "vmec_dumps",
+        iter_target=80,
+        missing_required=["vacuum"],
+    )
+
+    assert got["status"] == "error"
+    assert got["error"]["code"] == "vmec2000_failed"
+    assert got["error"]["returncodes"] == [11]
+    assert got["error"]["missing_required"] == ["vacuum"]
+    assert "instrumentation" in got["error"]["message"]
+
+
+def test_main_writes_json_for_successful_uninstrumented_vmec(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    input_path = tmp_path / "input.test"
+    input_path.write_text("&INDATA\n  MGRID_FILE = 'NONE'\n/\n", encoding="utf-8")
+    vmec_exec = tmp_path / "xvmec2000"
+    vmec_exec.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    vmec_exec.chmod(0o755)
+    workdir = tmp_path / "work"
+    json_path = tmp_path / "summary.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "vmec2000_exec_freeb_scalpot_compare.py",
+            "--input",
+            str(input_path),
+            "--vmec-exec",
+            str(vmec_exec),
+            "--iter",
+            "80",
+            "--max-iter",
+            "1",
+            "--workdir",
+            str(workdir),
+            "--json",
+            str(json_path),
+        ],
+    )
+
+    assert main() == 2
+
+    got = json.loads(json_path.read_text(encoding="utf-8"))
+    printed = json.loads(capsys.readouterr().out)
+    assert printed == got
+    assert got["error"]["code"] == "missing_vmec_dumps"
+    assert got["error"]["missing_required"] == ["scalpot", "vacuum"]
+    assert got["vmec_returncodes"] == [0]
+    assert not any((workdir / "jax_dumps").iterdir())
+
+
+def test_main_reports_nonzero_vmec_without_dumps_as_execution_failure(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    input_path = tmp_path / "input.test"
+    input_path.write_text("&INDATA\n  MGRID_FILE = 'NONE'\n/\n", encoding="utf-8")
+    vmec_exec = tmp_path / "xvmec2000"
+    vmec_exec.write_text("#!/bin/sh\nexit 11\n", encoding="utf-8")
+    vmec_exec.chmod(0o755)
+    workdir = tmp_path / "work"
+    json_path = tmp_path / "summary.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "vmec2000_exec_freeb_scalpot_compare.py",
+            "--input",
+            str(input_path),
+            "--vmec-exec",
+            str(vmec_exec),
+            "--iter",
+            "80",
+            "--max-iter",
+            "1",
+            "--workdir",
+            str(workdir),
+            "--json",
+            str(json_path),
+        ],
+    )
+
+    assert main() == 2
+
+    got = json.loads(json_path.read_text(encoding="utf-8"))
+    printed = json.loads(capsys.readouterr().out)
+    assert printed == got
+    assert got["error"]["code"] == "vmec2000_failed"
+    assert got["error"]["returncodes"] == [11]
+    assert got["error"]["missing_required"] == ["scalpot", "vacuum"]
+    assert not any((workdir / "jax_dumps").iterdir())

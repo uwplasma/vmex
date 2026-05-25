@@ -225,6 +225,119 @@ def _timing_snapshot(payload: dict[str, Any] | None, *, include_nestor: bool = F
     return rows
 
 
+def _finite_float(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except Exception:
+        return None
+    return number if number == number and number not in (float("inf"), float("-inf")) else None
+
+
+def _ratio(numerator: Any, denominator: Any) -> float | None:
+    num = _finite_float(numerator)
+    den = _finite_float(denominator)
+    if num is None or den is None or den == 0.0:
+        return None
+    return float(num / den)
+
+
+def _nested_value(data: dict[str, Any], path: tuple[str, ...]) -> Any:
+    current: Any = data
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
+def _case_metrics(case: dict[str, Any]) -> dict[str, Any]:
+    nestor = case.get("nestor") if isinstance(case.get("nestor"), dict) else {}
+    return {
+        "cold_or_compile_s": _finite_float(case.get("cold_or_compile_s")),
+        "warm_min_s": _finite_float(case.get("warm_min_s")),
+        "warm_mean_s": _finite_float(case.get("warm_mean_s")),
+        "active_nestor_warm_sample_s": _finite_float(
+            _nested_value(nestor, ("active", "warm", "sample_time_s", "total_s"))
+        ),
+        "active_nestor_warm_solve_s": _finite_float(
+            _nested_value(nestor, ("active", "warm", "solve_time_s", "total_s"))
+        ),
+        "trial_nestor_warm_sample_s": _finite_float(
+            _nested_value(nestor, ("trial", "warm", "sample_time_s", "total_s"))
+        ),
+        "final_recompute_sample_s": _finite_float(_nested_value(nestor, ("final_recompute", "sample_time_s"))),
+        "final_recompute_solve_s": _finite_float(_nested_value(nestor, ("final_recompute", "solve_time_s"))),
+        "final_external_field_sample_s": _finite_float(
+            _nested_value(nestor, ("final_diagnostics", "sample_phase_time_s", "external_field"))
+        ),
+        "sample_points": _nested_value(nestor, ("final_diagnostics", "sample_points")),
+        "provider": _nested_value(nestor, ("final_diagnostics", "provider")),
+    }
+
+
+def _cpu_gpu_comparison(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Build a compact cross-backend comparison from already-recorded child JSON."""
+
+    by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for row in rows:
+        if row.get("status") != "completed":
+            continue
+        backend = str(row.get("backend", ""))
+        label = str(row.get("label", ""))
+        for case in row.get("timings", []):
+            if not isinstance(case, dict) or case.get("status") != "completed":
+                continue
+            case_label = str(case.get("label", ""))
+            by_key[(backend, label, case_label)] = case
+
+    comparisons: list[dict[str, Any]] = []
+    labels = sorted({(label, case_label) for _, label, case_label in by_key})
+    for label, case_label in labels:
+        cpu = by_key.get(("cpu", label, case_label))
+        gpu = by_key.get(("gpu", label, case_label))
+        if cpu is None or gpu is None:
+            continue
+        cpu_metrics = _case_metrics(cpu)
+        gpu_metrics = _case_metrics(gpu)
+        comparisons.append(
+            {
+                "label": label,
+                "case": case_label,
+                "cpu": cpu_metrics,
+                "gpu": gpu_metrics,
+                "ratios_gpu_over_cpu": {
+                    "cold_or_compile": _ratio(
+                        gpu_metrics.get("cold_or_compile_s"),
+                        cpu_metrics.get("cold_or_compile_s"),
+                    ),
+                    "warm_min": _ratio(gpu_metrics.get("warm_min_s"), cpu_metrics.get("warm_min_s")),
+                    "warm_mean": _ratio(gpu_metrics.get("warm_mean_s"), cpu_metrics.get("warm_mean_s")),
+                    "active_nestor_warm_sample": _ratio(
+                        gpu_metrics.get("active_nestor_warm_sample_s"),
+                        cpu_metrics.get("active_nestor_warm_sample_s"),
+                    ),
+                    "active_nestor_warm_solve": _ratio(
+                        gpu_metrics.get("active_nestor_warm_solve_s"),
+                        cpu_metrics.get("active_nestor_warm_solve_s"),
+                    ),
+                    "final_recompute_sample": _ratio(
+                        gpu_metrics.get("final_recompute_sample_s"),
+                        cpu_metrics.get("final_recompute_sample_s"),
+                    ),
+                    "final_recompute_solve": _ratio(
+                        gpu_metrics.get("final_recompute_solve_s"),
+                        cpu_metrics.get("final_recompute_solve_s"),
+                    ),
+                    "final_external_field_sample": _ratio(
+                        gpu_metrics.get("final_external_field_sample_s"),
+                        cpu_metrics.get("final_external_field_sample_s"),
+                    ),
+                },
+            }
+        )
+    return comparisons
+
+
 def _child_specs(*, quick: bool, outdir: Path, backend: str) -> list[tuple[str, Path, list[str]]]:
     suffix = f"_{backend}.json"
     if quick:
@@ -372,6 +485,7 @@ def main(argv: list[str] | None = None) -> int:
             )
 
     status = "completed" if all(row["status"] in {"completed", "skipped"} for row in rows) else "failed"
+    comparisons = _cpu_gpu_comparison(rows)
     payload = {
         "status": status,
         "script": str(Path(__file__).resolve()),
@@ -381,6 +495,7 @@ def main(argv: list[str] | None = None) -> int:
         "gpu_probe": gpu_probe,
         "output_dir": outdir,
         "rows": rows,
+        "cpu_gpu_comparison": comparisons,
     }
     _write_json(summary, payload)
 
@@ -388,6 +503,18 @@ def main(argv: list[str] | None = None) -> int:
     for row in rows:
         detail = row.get("reason") or row.get("child_status") or row.get("returncode")
         print(f"[bench-freeb-direct-coil-matrix] {row['backend']} {row['label']}: {row['status']} ({detail})")
+    for item in comparisons:
+        ratios = item.get("ratios_gpu_over_cpu", {})
+        warm_ratio = ratios.get("warm_min")
+        cold_ratio = ratios.get("cold_or_compile")
+        if warm_ratio is None and cold_ratio is None:
+            continue
+        warm_text = "n/a" if warm_ratio is None else f"{warm_ratio:.2f}x"
+        cold_text = "n/a" if cold_ratio is None else f"{cold_ratio:.2f}x"
+        print(
+            "[bench-freeb-direct-coil-matrix] "
+            f"gpu/cpu {item['label']} {item['case']}: cold={cold_text} warm_min={warm_text}"
+        )
     return 0 if status == "completed" else 1
 
 

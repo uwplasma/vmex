@@ -10,7 +10,7 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-05-25 after active dump-to-dump diagnostics, VMEC2000 `DEL-BSQ` reporting, and VMEC-style mgrid plane subsampling fixes.
+Last updated: 2026-05-25 after docs/release hygiene review of dry-run optimization summaries, VMEC2000 dump classification, and CPU/GPU benchmark-matrix reporting.
 
 Steps taken:
 
@@ -196,6 +196,11 @@ Results obtained:
 107. Added `--activate-fsq` to the generated-`mgrid` comparison tool and updated optional ESSOS/VMEC2000 gates to force active NESTOR coupling for short vmec_jax parity diagnostics.
 108. Fixed VMEC-style `mgrid` toroidal plane selection in both NumPy and JAX interpolators: when the file has `kp > nzeta`, vmec_jax now samples file planes `0, nskip, 2*nskip, ...`, matching VMEC2000 `read_mgrid_nc` instead of taking the first `nzeta` planes.
 109. Added `--activate-fsq` to the VMEC2000 scalpot/vacuum dump comparator and added a JAX `dbsq_edge_proxy` dump based on `gcon -` extrapolated plasma `bsq`, giving VMEC2000 `DEL-BSQ` a direct JAX-side edge-balance diagnostic when generated-`mgrid` traces do not promote a WOUT.
+110. Added a phase-1 optimization `--dry-run` path that writes the generated input, selected coil variables, objective/optimizer configuration, robust-objective options, and baseline coil diagnostics without running VMEC or the optimizer.
+111. Objective histories now record weighted residual/aspect/iota proxy-term breakdowns; robust runs also retain per-scenario objective terms and nominal min/mean/std/max scenario summaries.
+112. The VMEC2000 scalpot/vacuum dump comparator now distinguishes VMEC run failures from missing instrumentation. `scalpot` and `vacuum` dumps are required; `bextern`, `fouri`, free-boundary coupling, and GC dumps remain optional. Nonzero VMEC exits are fatal only when required dumps are absent; usable instrumented dumps are still compared and return codes are recorded.
+113. The direct-coil benchmark matrix now emits a top-level matched CPU/GPU comparison block for cold/compile, warm runtime, active NESTOR, final recompute, and final external-field sampling buckets when both backends complete.
+114. Public docs were reviewed for stale/over-claiming language: WOUT parity is separated from instrumented dump-to-dump checks, benchmark language is scoped to the current tiny diagnostic matrix, and full Boozer/QS gradient claims remain phase-2 only.
 
 Best next steps:
 
@@ -1026,17 +1031,17 @@ WP0 Branch foundation and plan:                100%
 WP1 Provider base API:                         100%
 WP2 Pure JAX coil Biot-Savart:                 92%
 WP3 ESSOS adapter:                             86%
-WP4 JAX mgrid interpolation:                   90%
+WP4 JAX mgrid interpolation:                   91%
 WP5 Free-boundary provider hook:               95%
 WP6 Direct-coil forward example:               90%
 WP7 Vacuum adjoint scaffold:                  100%
 WP8 Gradient checks:                           99%
-WP9 VMEC2000 diagnostics:                      92%
+WP9 VMEC2000 diagnostics:                      93%
 WP10 Benchmarks/diagnostics:                  100%
-WP11 Coil-only QS optimization example:        83%
+WP11 Coil-only QS optimization example:        86%
 WP12 Robust coil perturbations:               100%
-WP13 Documentation:                            98%
-WP14 CI policy:                                91%
+WP13 Documentation:                            99%
+WP14 CI policy:                                92%
 Overall branch completion:                     98%
 ```
 
@@ -1054,6 +1059,32 @@ Overall branch completion:                     98%
 Nothing is required right now. The next implementation step can proceed locally. Later, maintainers should decide whether ESSOS mgrid export should be released before the `vmec_jax` example is promoted from research example to documented workflow.
 
 ## Work Log
+
+### 2026-05-25 Documentation/release hygiene review
+
+Steps taken:
+
+1. Reviewed the current uncommitted README/Sphinx docs changes against the branch scope: phase-1 direct-coil coupling validation, optional VMEC2000 promotion diagnostics, validation-only JAX NESTOR operator work, and phase-2 Boozer/QS/full-adjoint promotion.
+2. Kept the new phase-1 optimization documentation scoped to dry-run metadata, weighted proxy-objective terms, and robust scenario summaries rather than claiming promoted QS optimization.
+3. Kept the benchmark documentation scoped to matched CPU/GPU diagnostic buckets; the tiny direct-solve CUDA row remains evidence of launch/compile overhead, not broad GPU superiority.
+4. Clarified VMEC2000 diagnostic language so WOUT-promotion checks are separate from instrumented dump-to-dump checks, and so only `scalpot`/`vacuum` dumps are fatal in the dump comparator.
+
+Completion update:
+
+1. WP4 JAX mgrid interpolation moves to 91% after the VMEC-style plane-subsampling fix and docs review; remaining risk is broader generated-grid parity evidence.
+2. WP9 VMEC2000 diagnostics moves to 93% after structured missing-dump versus VMEC-failure reporting; remaining risk is promoted WOUT parity for generated ESSOS grids.
+3. WP11 Coil-only QS optimization example moves to 86% after dry-run manifests and proxy-term/robust-scenario reporting; remaining risk is replacing the phase-1 proxy with Boozer/QS only after complete-loop gradient validation.
+4. WP13 Documentation moves to 99% after the claim-hygiene pass; remaining risk is keeping docs synchronized with optional ESSOS and VMEC2000 instrumentation availability.
+5. WP14 CI policy moves to 92% after the added docs/tests coverage around release hygiene; remaining risk is maintaining patch coverage while validation scaffolds are promoted.
+
+Verification:
+
+1. `git diff --check -- README.md docs/free_boundary_coil_optimization.rst docs/performance.rst docs/free_boundary_plan.rst plan_freeb.md`: passed.
+2. `python -m sphinx -W -j auto -b html docs docs/_build/html`: passed.
+
+Need from user:
+
+Nothing now.
 
 ### 2026-05-24 Exact-adjoint validation and direct-coil benchmark matrix
 

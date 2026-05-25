@@ -104,3 +104,78 @@ def test_gpu_platform_name_prefers_concrete_jax_backend() -> None:
     assert matrix._gpu_platform_name({"platforms": ["gpu"], "devices": ["cuda:0"]}) == "cuda"
     assert matrix._gpu_platform_name({"platforms": ["rocm"]}) == "rocm"
     assert matrix._gpu_platform_name({"platforms": ["gpu"]}) == "gpu"
+
+
+def test_cpu_gpu_comparison_matches_completed_cases_and_reports_nestor_ratios() -> None:
+    def timing(cold: float, warm_min: float, *, sample: float, solve: float) -> dict:
+        return {
+            "label": "synthetic_direct_coil_solve",
+            "status": "completed",
+            "cold_or_compile_s": cold,
+            "warm_min_s": warm_min,
+            "warm_mean_s": warm_min * 2.0,
+            "nestor": {
+                "active": {
+                    "warm": {
+                        "sample_time_s": {"total_s": sample},
+                        "solve_time_s": {"total_s": solve},
+                    }
+                },
+                "trial": {"warm": {"sample_time_s": {"total_s": sample * 2.0}}},
+                "final_recompute": {
+                    "sample_time_s": sample * 3.0,
+                    "solve_time_s": solve * 4.0,
+                },
+                "final_diagnostics": {
+                    "sample_points": 64,
+                    "sample_phase_time_s": {"external_field": sample * 5.0},
+                    "provider": {"coil_count": 2},
+                },
+            },
+        }
+
+    comparisons = matrix._cpu_gpu_comparison(
+        [
+            {
+                "label": "direct_solve",
+                "backend": "cpu",
+                "status": "completed",
+                "timings": [timing(4.0, 2.0, sample=0.1, solve=0.2)],
+            },
+            {
+                "label": "direct_solve",
+                "backend": "gpu",
+                "status": "completed",
+                "timings": [timing(2.0, 0.5, sample=0.05, solve=0.1)],
+            },
+            {
+                "label": "direct_solve",
+                "backend": "gpu",
+                "status": "failed",
+                "timings": [timing(1.0, 1.0, sample=1.0, solve=1.0)],
+            },
+            {
+                "label": "gradient",
+                "backend": "cpu",
+                "status": "completed",
+                "timings": [timing(1.0, 1.0, sample=1.0, solve=1.0)],
+            },
+        ]
+    )
+
+    assert len(comparisons) == 1
+    comparison = comparisons[0]
+    assert comparison["label"] == "direct_solve"
+    assert comparison["case"] == "synthetic_direct_coil_solve"
+    assert comparison["cpu"]["sample_points"] == 64
+    assert comparison["gpu"]["provider"] == {"coil_count": 2}
+    assert comparison["ratios_gpu_over_cpu"] == {
+        "cold_or_compile": 0.5,
+        "warm_min": 0.25,
+        "warm_mean": 0.25,
+        "active_nestor_warm_sample": 0.5,
+        "active_nestor_warm_solve": 0.5,
+        "final_recompute_sample": 0.5,
+        "final_recompute_solve": 0.5,
+        "final_external_field_sample": 0.5,
+    }

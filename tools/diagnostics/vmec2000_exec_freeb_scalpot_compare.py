@@ -656,6 +656,137 @@ def _find_latest_dump(directory: Path, pattern: str) -> Path | None:
     return matches[-1] if matches else None
 
 
+def _vmec_dump_patterns(iter_target: int) -> dict[str, dict[str, str]]:
+    it = int(iter_target)
+    return {
+        "required": {
+            "scalpot": f"scalpot_iter{it}_ivacskip*.dat",
+            "vacuum": f"vacuum_iter{it}_ivacskip*.dat",
+        },
+        "optional": {
+            "bextern": f"bextern_iter{it}.dat",
+            "fouri": f"fouri_iter{it}.dat",
+            "freeb_coupling": f"freeb_coupling_iter{it}.dat",
+            "gc_raw": f"gc_raw*_iter{it}.dat",
+            "gc_precond": f"gc_precond*_iter{it}.dat",
+        },
+    }
+
+
+def _vmec_dump_inventory(vmec_dump_dir: Path, iter_target: int) -> dict[str, Any]:
+    patterns = _vmec_dump_patterns(iter_target)
+    out: dict[str, Any] = {"required": {}, "optional": {}}
+    for kind, specs in patterns.items():
+        for name, pattern in specs.items():
+            matches = sorted(vmec_dump_dir.glob(pattern))
+            out[kind][name] = {
+                "pattern": pattern,
+                "count": len(matches),
+                "files": [str(p) for p in matches],
+            }
+    return out
+
+
+def _missing_required_vmec_dumps(vmec_dump_dir: Path, iter_target: int) -> list[str]:
+    inventory = _vmec_dump_inventory(vmec_dump_dir, iter_target)
+    required = inventory.get("required", {})
+    missing: list[str] = []
+    for name in ("scalpot", "vacuum"):
+        if int(required.get(name, {}).get("count", 0)) <= 0:
+            missing.append(name)
+    return missing
+
+
+def _missing_vmec_dump_report(
+    *,
+    vmec_dump_dir: Path,
+    iter_target: int,
+    vmec_returncodes: list[int],
+    vmec_exec: Path,
+    input_path: Path,
+    workdir: Path,
+    missing_required: list[str],
+) -> dict[str, Any]:
+    return {
+        "status": "error",
+        "ok": False,
+        "error": {
+            "code": "missing_vmec_dumps",
+            "message": (
+                "VMEC2000 completed without required instrumented dump files. "
+                "Use a VMEC2000 executable built with the VMEC_DUMP_* hooks for this comparator."
+            ),
+            "missing_required": list(missing_required),
+            "instrumentation_required": True,
+            "vmec_completed_successfully": bool(vmec_returncodes) and all(rc == 0 for rc in vmec_returncodes),
+        },
+        "iter": int(iter_target),
+        "workdir": str(workdir),
+        "vmec_exec": str(vmec_exec),
+        "input": str(input_path),
+        "vmec_dump_dir": str(vmec_dump_dir),
+        "vmec_returncodes": list(vmec_returncodes),
+        "vmec_dump_requirements": {
+            "required": ["scalpot", "vacuum"],
+            "optional": ["bextern", "fouri", "freeb_coupling", "gc_raw", "gc_precond"],
+            "note": "Only required dumps are fatal; optional dumps are included when present.",
+        },
+        "vmec_dump_inventory": _vmec_dump_inventory(vmec_dump_dir, iter_target),
+        "requested_vmec_dump_env": {
+            "VMEC_DUMP_SCALPOT": "1",
+            "VMEC_DUMP_BEXTERN": "1",
+            "VMEC_DUMP_FOURI": "1",
+            "VMEC_DUMP_FREEB_COUPLING": "1",
+            "VMEC_DUMP_DIR": str(vmec_dump_dir),
+            "VMEC_DUMP_ITER": str(int(iter_target)),
+        },
+    }
+
+
+def _vmec_run_failure_report(
+    *,
+    vmec_returncodes: list[int],
+    vmec_exec: Path,
+    input_path: Path,
+    workdir: Path,
+    vmec_dump_dir: Path,
+    iter_target: int,
+    missing_required: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "status": "error",
+        "ok": False,
+        "error": {
+            "code": "vmec2000_failed",
+            "message": (
+                "VMEC2000 exited with a nonzero status; not treating missing dumps "
+                "as an instrumentation issue."
+            ),
+            "returncodes": list(vmec_returncodes),
+            "missing_required": list(missing_required or []),
+        },
+        "iter": int(iter_target),
+        "workdir": str(workdir),
+        "vmec_exec": str(vmec_exec),
+        "input": str(input_path),
+        "vmec_dump_dir": str(vmec_dump_dir),
+        "vmec_returncodes": list(vmec_returncodes),
+        "vmec_dump_inventory": _vmec_dump_inventory(vmec_dump_dir, iter_target),
+    }
+
+
+def _emit_failure(report: dict[str, Any], json_path: Path | None) -> None:
+    if json_path is not None:
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(report, indent=2)
+        json_path.write_text(payload, encoding="utf-8")
+        print(payload)
+        return
+    err = report.get("error", {})
+    msg = str(err.get("message") or err.get("code") or "comparator failed")
+    raise SystemExit(msg)
+
+
 def _gc_metric_block(vmec_arr: np.ndarray, jax_arr: np.ndarray) -> dict[str, Any]:
     if (
         np.ndim(vmec_arr) == 4
@@ -893,8 +1024,9 @@ def main() -> int:
         )
 
     vmec_returncodes: list[int] = []
+    vmec_dump_warnings: list[str] = []
 
-    def _run_vmec_with_dump_iter(dump_iter: int) -> None:
+    def _run_vmec_with_dump_iter(dump_iter: int) -> int:
         env_vmec = env_vmec_base.copy()
         env_vmec["VMEC_DUMP_ITER"] = str(int(dump_iter))
         completed = subprocess.run(
@@ -905,12 +1037,40 @@ def main() -> int:
             timeout=300,
         )
         vmec_returncodes.append(int(completed.returncode))
+        return int(completed.returncode)
 
-    _run_vmec_with_dump_iter(int(args.iter))
+    first_vmec_rc = _run_vmec_with_dump_iter(int(args.iter))
+    missing_required = _missing_required_vmec_dumps(vmec_dump_dir, int(args.iter))
+    if first_vmec_rc != 0 and missing_required:
+        _emit_failure(
+            _vmec_run_failure_report(
+                vmec_returncodes=vmec_returncodes,
+                vmec_exec=vmec_exec,
+                input_path=run_input,
+                workdir=workdir,
+                vmec_dump_dir=vmec_dump_dir,
+                iter_target=int(args.iter),
+                missing_required=missing_required,
+            ),
+            args.json,
+        )
+        return 2
 
     vmec_scalpot_files = sorted(vmec_dump_dir.glob(f"scalpot_iter{int(args.iter)}_ivacskip*.dat"))
-    if not vmec_scalpot_files:
-        raise SystemExit(f"missing VMEC scalpot dump in {vmec_dump_dir}")
+    if missing_required:
+        _emit_failure(
+            _missing_vmec_dump_report(
+                vmec_dump_dir=vmec_dump_dir,
+                iter_target=int(args.iter),
+                vmec_returncodes=vmec_returncodes,
+                vmec_exec=vmec_exec,
+                input_path=run_input,
+                workdir=workdir,
+                missing_required=missing_required,
+            ),
+            args.json,
+        )
+        return 2
     vmec_scal = _parse_scalpot_dump(vmec_scalpot_files[0])
     # On reuse steps (`ivacskip>0`), VMEC dump for target iteration may only
     # contain LU-form matrix data. Pull the source-cache reference iteration
@@ -921,7 +1081,12 @@ def main() -> int:
     if vmec_ivacskip > 0 and vmec_source_cache_iter >= 0:
         ref = vmec_dump_dir / f"scalpot_iter{vmec_source_cache_iter}_ivacskip0.dat"
         if not ref.exists():
-            _run_vmec_with_dump_iter(vmec_source_cache_iter)
+            source_cache_rc = _run_vmec_with_dump_iter(vmec_source_cache_iter)
+            if source_cache_rc != 0 and not ref.exists():
+                vmec_dump_warnings.append(
+                    "VMEC source-cache rerun exited nonzero and did not write "
+                    f"{ref.name}; matrix comparison will use the target dump fallback."
+                )
 
     # Run vmec_jax
     from vmec_jax.driver import run_fixed_boundary
@@ -969,10 +1134,21 @@ def main() -> int:
         stage: _find_latest_dump(jax_dump_dir, f"gc_{stage}*_iter{int(args.iter)}.npz")
         for stage in ("raw", "precond")
     }
-    if not vmec_scalpot_files:
-        raise SystemExit(f"missing VMEC scalpot dump in {vmec_dump_dir}")
-    if not vmec_vac_files:
-        raise SystemExit(f"missing VMEC vacuum dump in {vmec_dump_dir}")
+    missing_required = _missing_required_vmec_dumps(vmec_dump_dir, int(args.iter))
+    if missing_required:
+        _emit_failure(
+            _missing_vmec_dump_report(
+                vmec_dump_dir=vmec_dump_dir,
+                iter_target=int(args.iter),
+                vmec_returncodes=vmec_returncodes,
+                vmec_exec=vmec_exec,
+                input_path=run_input,
+                workdir=workdir,
+                missing_required=missing_required,
+            ),
+            args.json,
+        )
+        return 2
     jax_iter_used = int(args.iter)
     if not jax_npz.exists():
         candidates = []
@@ -1021,6 +1197,12 @@ def main() -> int:
         "jax_multigrid": bool(use_multigrid),
         "activate_fsq": None if args.activate_fsq is None else float(args.activate_fsq),
         "vmec_returncodes": list(vmec_returncodes),
+        "vmec_dump_warnings": list(vmec_dump_warnings),
+        "vmec_dump_requirements": {
+            "required": ["scalpot", "vacuum"],
+            "optional": ["bextern", "fouri", "freeb_coupling", "gc_raw", "gc_precond"],
+            "note": "Only required dumps are fatal; optional dumps are compared when present.",
+        },
         "mode_map_applied": bool(mode_map is not None),
         "vmec_scalpot_meta": {
             "iter2": int(vmec_scal.get("iter2", -1)),

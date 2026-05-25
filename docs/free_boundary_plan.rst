@@ -163,14 +163,21 @@ A dedicated free-boundary comparator is now available:
 
 - ``tools/diagnostics/vmec2000_exec_freeb_scalpot_compare.py``
 
-It runs VMEC2000 with ``VMEC_DUMP_SCALPOT=1``, ``VMEC_DUMP_BEXTERN=1``,
-``VMEC_DUMP_FOURI=1`` and vmec-jax with
-``VMEC_JAX_DUMP_SCALPOT=1`` on the same input, then reports deltas for:
+It runs VMEC2000 with ``VMEC_DUMP_SCALPOT=1`` and related optional
+``VMEC_DUMP_*`` hooks enabled, and vmec-jax with ``VMEC_JAX_DUMP_SCALPOT=1``
+on the same input. VMEC2000 ``scalpot`` and ``vacuum`` dumps are required for
+this comparator; ``bextern``, ``fouri``, free-boundary coupling, and GC dumps
+are compared when present. A successful VMEC2000 run without the required dumps
+is reported as a structured ``missing_vmec_dumps`` instrumentation error.
+Nonzero VMEC2000 exits are fatal only when the required dumps are absent; when
+the dumps exist, the comparator continues and records return codes. The
+comparator reports deltas for:
 
 - scalpot RHS vector (VMEC mode space vs vmec-jax projected mode space),
 - scalpot matrix (VMEC LU-space matrix vs vmec-jax projected dense operator),
 - vacuum boundary ``bsqvac`` channel.
-- fouri non-singular source channels (``gsource``, ``source_sym``, ``bvecNS``).
+- optional fouri non-singular source channels (``gsource``, ``source_sym``,
+  ``bvecNS``).
 
 When VMEC2000 includes ``VMEC_DUMP_BEXTERN`` support, the comparator also
 reports upstream source-channel deltas:
@@ -180,7 +187,7 @@ reports upstream source-channel deltas:
 - ``bexn`` decomposition channels (``bexn_term_r``, ``bexn_term_phi``,
   ``bexn_term_z``) from ``brad*snr``, ``bphi*snv``, ``bz*snz`` to localize
   source drift to geometry vs field contributions.
-- free-boundary edge-coupling channels from ``funct3d``/``forces``
+- optional free-boundary edge-coupling channels from ``funct3d``/``forces``
   (``pgcon``, ``rbsq``, ``dbsq``, ``bsqvac``, ``p1e/p1o``,
   ``pzu0/pru0``) plus an inferred ``ohs`` check to flag multigrid stage
   misalignment in comparisons. On the vmec-jax side, ``dbsq`` is reported as a

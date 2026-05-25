@@ -272,8 +272,20 @@ The default objective is a cheap proxy:
 
 The example records ``history.json``, ``summary.json``, and the best ``wout``.
 It exits with code ``77`` when optional ESSOS assets are unavailable. For a
-dependency-light bounded validation run, use the synthetic circular coil
-provider:
+dependency-light setup check that does not run VMEC or the optimizer, use
+``--dry-run``. This writes ``summary.json`` with the generated VMEC input path,
+selected coil variables, objective weights, robust-objective options, and
+baseline coil diagnostics:
+
+.. code-block:: bash
+
+   python examples/optimization/free_boundary_QS_coil_optimization.py \
+     --smoke \
+     --dry-run \
+     --provider circle \
+     --outdir results/free_boundary_QS_coil_optimization_circle_preview
+
+For a bounded validation run, use the synthetic circular coil provider:
 
 .. code-block:: bash
 
@@ -302,6 +314,11 @@ For the ESSOS Landreman-Paul QA coils, put ESSOS on ``PYTHONPATH`` and use:
 The next promotion step is replacing the cheap proxy with a Boozer/QS objective
 and validating finite-difference gradients of the complete direct-coil
 free-boundary loop.
+
+Each accepted objective evaluation records a weighted objective-term breakdown
+for the residual, aspect-ratio, and mean-iota proxy terms. Robust runs keep the
+per-scenario objective terms in ``history.json`` and record aggregate
+min/mean/std/max scenario diagnostics on the nominal evaluation summary.
 
 Robust Coil Perturbations
 -------------------------
@@ -530,6 +547,15 @@ VMEC2000 executable that honors the ``VMEC_DUMP_*`` environment variables. It
 compares VMEC2000 scalpot/vacuum/bextern dumps with the dense ``vmec_jax``
 free-boundary path for a self-contained generated-``mgrid`` case:
 
+The comparator treats VMEC2000 ``scalpot`` and ``vacuum`` dumps as required.
+``bextern``, ``fouri``, free-boundary coupling, and GC dumps remain optional and
+are compared when present. If a stock VMEC2000 executable exits successfully but
+does not emit the required dumps, ``--json`` records a structured
+``missing_vmec_dumps`` error with the requested dump environment and dump-file
+inventory. Nonzero VMEC2000 exits are fatal only when the required dumps are
+missing; if the instrumented dumps exist, the comparator continues and records
+the VMEC return codes in the JSON output.
+
 .. code-block:: bash
 
    export VMEC2000_EXEC=/path/to/xvmec2000
@@ -583,8 +609,8 @@ Current fast tests cover:
 - JAX ``mgrid`` interpolation value and gradient checks;
 - a direct-coil runtime hook that does not require an ``mgrid`` file and uses
   nonzero pressure;
-- generated-``mgrid`` versus direct-coil ``vmec_jax`` provider parity for the
-  ESSOS Landreman-Paul QA finite-pressure validation case;
+- active generated-``mgrid`` versus direct-coil ``vmec_jax`` provider parity
+  for the ESSOS Landreman-Paul QA finite-pressure validation case;
 - active direct-coil NESTOR-step sensitivity to coil-current changes, including
   the expected linear normal-field/source scaling and quadratic ``bsqvac``
   scaling;
@@ -606,12 +632,18 @@ Current fast tests cover:
 - dense mode-space vacuum solve and reconstruction tests, including
   stellarator-symmetric and LASYM-style basis blocks plus finite-difference
   gradients through a direct-coil projected source/RHS/mode-space chain.
+- a guarded, opt-in low-resolution complete-solve finite-difference smoke for
+  one coil current and one Fourier geometry coefficient; this checks finite
+  nonzero response, not a production AD-vs-finite-difference full-solve
+  adjoint.
 
 The optional VMEC2000 generated-``mgrid`` comparison is present but xfailed for
 now. VMEC2000 reads the generated grid and advances the trace locally, but the
 current generated-``mgrid`` free-boundary parity gap is not bounded tightly
-enough for a promoted gate. That is a validation task, not a reason to regress
-the existing VMEC2000-parity ``mgrid`` fixtures.
+enough for a promoted gate. Dump-to-dump VMEC2000 comparisons require an
+instrumented executable that honors the ``VMEC_DUMP_*`` environment variables.
+That is a validation task, not a reason to regress the existing
+VMEC2000-parity ``mgrid`` fixtures.
 
 Next Implementation Steps
 -------------------------
@@ -628,8 +660,8 @@ Next Implementation Steps
 - Promote the toy direct-coil/vacuum-chain gradient checks to complete
   low-resolution free-boundary finite-difference checks, then to Boozer/QS
   gradient checks.
-- Run the benchmark matrix on CPU and GPU and turn the JSON summaries into
-  documentation plots.
+- Run larger CPU/GPU benchmark matrices before making broad accelerator claims;
+  keep the JSON summaries and documentation plots refreshed from those runs.
 
 Literature Anchors
 ------------------

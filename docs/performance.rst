@@ -2316,6 +2316,24 @@ the cold exact callback/tape path actionable: direct-coil Biot-Savart sampling,
 vacuum scalar-potential solves, accepted active updates, and rejected trial
 updates are no longer hidden inside a single solve timer.
 
+For the lightweight direct-coil benchmark matrix, use the top-level
+``cpu_gpu_comparison`` block in the summary JSON before drawing conclusions
+from wrapper wall time alone.  It reports matched CPU/GPU ratios for cold
+compile, warm minimum runtime, active NESTOR sample/solve time, and final
+accepted-state recompute buckets when the direct-solve row emitted those
+diagnostics.  A typical quick run is:
+
+.. code-block:: bash
+
+  PYTHONPATH=. python tools/benchmarks/bench_freeb_direct_coil_matrix.py \
+    --quick --include-gpu --timeout-s 240 \
+    --out results/bench_freeb_direct_coil_matrix/summary.json
+
+The current tiny direct-solve case is intentionally a launch/compile diagnostic,
+not a proof that the full free-boundary solve should run on GPU: recent
+CPU/CUDA summaries show the final NESTOR sample/solve buckets are millisecond
+scale while the whole tiny GPU solve remains slower than CPU.
+
 Control flags:
 
 .. code-block:: bash

@@ -20,6 +20,11 @@ Run a minimal smoke from the repository root:
 
     python examples/optimization/free_boundary_QS_coil_optimization.py --smoke --provider circle
 
+Preview the generated input, selected coil variables, objective weights, and
+baseline coil diagnostics without running VMEC:
+
+    python examples/optimization/free_boundary_QS_coil_optimization.py --smoke --dry-run --provider circle
+
 For the optional ESSOS provider, set the ESSOS checkout and input directory:
 
     export ESSOS_ROOT=/path/to/ESSOS_mgrid_pr
@@ -233,6 +238,64 @@ def apply_coil_variables(
     return base_params.with_arrays(base_curve_dofs=jnp.asarray(dofs), base_currents=jnp.asarray(currents))
 
 
+def coil_diagnostics(params: CoilFieldParams) -> dict[str, Any]:
+    lengths = np.asarray(coil_lengths(params), dtype=float).reshape(-1)
+    currents = np.asarray(params.base_currents, dtype=float).reshape(-1)
+    dofs = np.asarray(params.base_curve_dofs, dtype=float)
+    return {
+        "n_base_coils": int(currents.size),
+        "n_segments": int(params.n_segments),
+        "nfp": int(params.nfp),
+        "stellsym": bool(params.stellsym),
+        "current_scale": float(params.current_scale),
+        "current_min": float(np.min(currents)) if currents.size else None,
+        "current_max": float(np.max(currents)) if currents.size else None,
+        "coil_current_norm": float(np.asarray(coil_current_norm(params))),
+        "mean_coil_length": float(np.mean(lengths)) if lengths.size else None,
+        "min_coil_length": float(np.min(lengths)) if lengths.size else None,
+        "max_coil_length": float(np.max(lengths)) if lengths.size else None,
+        "base_curve_dofs_shape": [int(v) for v in dofs.shape],
+        "nonzero_base_curve_dofs": int(np.count_nonzero(np.abs(dofs) > 0.0)),
+    }
+
+
+def variable_records(
+    variables: list[tuple[str, tuple[int, ...]]],
+    base_params: CoilFieldParams,
+    *,
+    current_step: float,
+    dof_step: float,
+) -> list[dict[str, Any]]:
+    currents = np.asarray(base_params.base_currents, dtype=float)
+    dofs = np.asarray(base_params.base_curve_dofs, dtype=float)
+    records: list[dict[str, Any]] = []
+    for kind, index in variables:
+        record: dict[str, Any] = {"kind": kind, "index": index}
+        if kind == "current":
+            i = index[0]
+            record.update(
+                {
+                    "base_value": float(currents[i]),
+                    "parameterization": "multiplicative",
+                    "unit_x_delta": float(currents[i]) * float(current_step),
+                    "current_step_fraction": float(current_step),
+                }
+            )
+        elif kind == "fourier_dof":
+            record.update(
+                {
+                    "base_value": float(dofs[index]),
+                    "parameterization": "additive",
+                    "unit_x_delta": float(dof_step),
+                    "dof_step": float(dof_step),
+                }
+            )
+        else:  # pragma: no cover - defensive programming for future variable kinds.
+            record["parameterization"] = "unknown"
+        records.append(record)
+    return records
+
+
 def float_or_none(value: Any) -> float | None:
     if value is None:
         return None
@@ -343,12 +406,63 @@ def objective_from_summary(
     aspect_weight: float,
     iota_weight: float,
 ) -> float:
+    return float(
+        objective_terms_from_summary(
+            summary,
+            residual_weight=residual_weight,
+            aspect_weight=aspect_weight,
+            iota_weight=iota_weight,
+        )["total"]
+    )
+
+
+def objective_terms_from_summary(
+    summary: dict[str, Any],
+    *,
+    residual_weight: float,
+    aspect_weight: float,
+    iota_weight: float,
+) -> dict[str, Any]:
     residual = float(summary.get("residual_proxy") or 0.0)
     aspect = summary.get("aspect")
     mean_iota = summary.get("mean_iota")
-    aspect_penalty = 0.0 if aspect is None else (float(aspect) - float(summary["target_aspect"])) ** 2
-    iota_penalty = 0.0 if mean_iota is None else (float(mean_iota) - float(summary["target_iota"])) ** 2
-    return float(residual_weight) * residual + float(aspect_weight) * aspect_penalty + float(iota_weight) * iota_penalty
+    aspect_error = None if aspect is None else float(aspect) - float(summary["target_aspect"])
+    iota_error = None if mean_iota is None else float(mean_iota) - float(summary["target_iota"])
+    aspect_penalty = 0.0 if aspect_error is None else aspect_error**2
+    iota_penalty = 0.0 if iota_error is None else iota_error**2
+    residual_term = float(residual_weight) * residual
+    aspect_term = float(aspect_weight) * aspect_penalty
+    iota_term = float(iota_weight) * iota_penalty
+    missing_terms = []
+    if aspect is None:
+        missing_terms.append("aspect")
+    if mean_iota is None:
+        missing_terms.append("mean_iota")
+    return {
+        "total": float(residual_term + aspect_term + iota_term),
+        "residual": {
+            "value": residual,
+            "weight": float(residual_weight),
+            "contribution": float(residual_term),
+        },
+        "aspect": {
+            "value": None if aspect is None else float(aspect),
+            "target": float(summary["target_aspect"]),
+            "error": aspect_error,
+            "squared_error": float(aspect_penalty),
+            "weight": float(aspect_weight),
+            "contribution": float(aspect_term),
+        },
+        "mean_iota": {
+            "value": None if mean_iota is None else float(mean_iota),
+            "target": float(summary["target_iota"]),
+            "error": iota_error,
+            "squared_error": float(iota_penalty),
+            "weight": float(iota_weight),
+            "contribution": float(iota_term),
+        },
+        "missing_unweighted_terms": missing_terms,
+    }
 
 
 def robust_risk_method(method: str) -> str:
@@ -385,6 +499,12 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
     )
     if not variables:
         raise ValueError("No coil optimization variables selected. Increase --max-current-vars or --max-fourier-vars.")
+    variable_manifest = variable_records(
+        variables,
+        base_params,
+        current_step=float(args.current_step),
+        dof_step=float(args.dof_step),
+    )
 
     outdir = args.outdir.resolve()
     outdir.mkdir(parents=True, exist_ok=True)
@@ -400,6 +520,35 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
         pressure_scale=float(args.pressure_scale),
     )
 
+    objective_model = {
+        "description": "Cheap residual/aspect/iota proxy; Boozer/QS residual is intentionally deferred.",
+        "phase2_note": "Add Boozer/QS objective after full-loop gradients are validated.",
+        "target_aspect": float(args.target_aspect),
+        "target_iota": float(args.target_iota),
+        "residual_weight": float(args.residual_weight),
+        "aspect_weight": float(args.aspect_weight),
+        "iota_weight": float(args.iota_weight),
+        "failure_objective": float(args.failure_objective),
+    }
+    vmec_config = {
+        "input_template": args.input,
+        "generated_input": input_path,
+        "vmec_max_iter": int(args.vmec_max_iter),
+        "ftol": float(args.ftol),
+        "ns": int(args.ns),
+        "mpol": int(args.mpol),
+        "ntor": int(args.ntor),
+        "nzeta": int(args.nzeta),
+        "pressure_scale": float(args.pressure_scale),
+        "activate_fsq": float(args.activate_fsq),
+    }
+    optimizer_config = {
+        "method": "Powell",
+        "max_iter": int(args.max_iter),
+        "max_evals": int(args.max_evals),
+        "xtol": float(args.xtol),
+        "ftol": float(args.optimizer_ftol),
+    }
     history: list[dict[str, Any]] = []
     best: dict[str, Any] | None = None
     robust_samples: CoilPerturbationSample | None = None
@@ -407,18 +556,6 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
     if int(args.robust_samples) < 0:
         raise ValueError("--robust-samples must be non-negative.")
     if int(args.robust_samples) > 0:
-        if jax is None:  # pragma: no cover - JAX is a declared dependency in CI.
-            raise RuntimeError("JAX is required for --robust-samples.")
-        robust_samples = sample_coil_perturbations(
-            jax.random.PRNGKey(int(args.robust_seed)),
-            base_params,
-            int(args.robust_samples),
-            current_sigma=float(args.robust_current_sigma),
-            displacement_sigma=float(args.robust_displacement_sigma),
-            toroidal_phase_sigma=float(args.robust_toroidal_phase_sigma),
-            centerline_sigma=float(args.robust_centerline_sigma),
-            centerline_include_constant=bool(args.robust_centerline_include_constant),
-        )
         robust_options = {
             "samples": int(args.robust_samples),
             "scenario_count_including_nominal": int(args.robust_samples) + 1,
@@ -433,6 +570,41 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
             "centerline_sigma": float(args.robust_centerline_sigma),
             "centerline_include_constant": bool(args.robust_centerline_include_constant),
         }
+        if not bool(args.dry_run):
+            if jax is None:  # pragma: no cover - JAX is a declared dependency in CI.
+                raise RuntimeError("JAX is required for --robust-samples.")
+            robust_samples = sample_coil_perturbations(
+                jax.random.PRNGKey(int(args.robust_seed)),
+                base_params,
+                int(args.robust_samples),
+                current_sigma=float(args.robust_current_sigma),
+                displacement_sigma=float(args.robust_displacement_sigma),
+                toroidal_phase_sigma=float(args.robust_toroidal_phase_sigma),
+                centerline_sigma=float(args.robust_centerline_sigma),
+                centerline_include_constant=bool(args.robust_centerline_include_constant),
+            )
+    if bool(args.dry_run):
+        summary = {
+            "phase": "phase-1-smoke",
+            "scope": "coil-only direct-coil free-boundary scaffold",
+            "dry_run": True,
+            "plasma_boundary_optimized": False,
+            "optimized_variables": variable_manifest,
+            "objective_model": objective_model,
+            "provider": provider_metadata,
+            "baseline_coils": coil_diagnostics(base_params),
+            "vmec_config": vmec_config,
+            "optimizer_config": optimizer_config,
+            "input": input_path,
+            "outdir": outdir,
+            "history_json": outdir / "history.json",
+            "best_wout": outdir / "wout_best_direct_coil_phase1.nc",
+        }
+        if robust_options is not None:
+            summary["robust_objective"] = robust_options
+        write_json(outdir / "summary.json", summary)
+        print(f"Dry run: wrote {outdir / 'summary.json'} without running VMEC or the optimizer.")
+        return summary
 
     def evaluate(x: np.ndarray) -> float:
         nonlocal best
@@ -471,13 +643,15 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
                         target_aspect=float(args.target_aspect),
                         target_iota=float(args.target_iota),
                     )
-                    scenario_objective = objective_from_summary(
+                    objective_terms = objective_terms_from_summary(
                         provisional,
                         residual_weight=float(args.residual_weight),
                         aspect_weight=float(args.aspect_weight),
                         iota_weight=float(args.iota_weight),
                     )
+                    scenario_objective = float(objective_terms["total"])
                     provisional["objective"] = scenario_objective
+                    provisional["objective_terms"] = objective_terms
                     if scenario_id == 0:
                         nominal_run = run
                     scenario_entries.append(
@@ -514,12 +688,19 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
                     )
                 )
             )
+            scenario_arr = np.asarray(scenario_objectives, dtype=float)
             nominal_summary = dict(scenario_entries[0]["summary"])
+            nominal_objective_terms = nominal_summary.pop("objective_terms", None)
             nominal_summary.update(
                 {
                     "objective": objective,
                     "nominal_objective": float(scenario_objectives[0]),
+                    "nominal_objective_terms": nominal_objective_terms,
                     "scenario_objectives": scenario_objectives,
+                    "scenario_objective_min": float(np.min(scenario_arr)),
+                    "scenario_objective_max": float(np.max(scenario_arr)),
+                    "scenario_objective_mean": float(np.mean(scenario_arr)),
+                    "scenario_objective_std": float(np.std(scenario_arr)),
                     "robust_samples": int(args.robust_samples),
                     "robust_risk": str(args.robust_risk),
                 }
@@ -527,7 +708,8 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
             entry = {
                 "eval": eval_id,
                 "x": np.asarray(x, dtype=float).tolist(),
-                "variables": [{"kind": kind, "index": index} for kind, index in variables],
+                "variables": variable_manifest,
+                "coil_diagnostics": coil_diagnostics(params),
                 "summary": nominal_summary,
                 "scenarios": scenario_entries,
             }
@@ -538,7 +720,9 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
             print(
                 f"eval={eval_id:03d} objective={objective:.6e} "
                 f"nominal={scenario_objectives[0]:.6e} robust_samples={int(args.robust_samples)} "
-                f"risk={args.robust_risk} wall_s={sum(float(s['summary'].get('wall_s') or 0.0) for s in scenario_entries):.2f}",
+                f"risk={args.robust_risk} scenario_max={float(np.max(scenario_arr)):.6e} "
+                f"scenario_std={float(np.std(scenario_arr)):.3e} "
+                f"wall_s={sum(float(s['summary'].get('wall_s') or 0.0) for s in scenario_entries):.2f}",
                 flush=True,
             )
             history.append(entry)
@@ -560,17 +744,20 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
                 target_aspect=float(args.target_aspect),
                 target_iota=float(args.target_iota),
             )
-            objective = objective_from_summary(
+            objective_terms = objective_terms_from_summary(
                 provisional,
                 residual_weight=float(args.residual_weight),
                 aspect_weight=float(args.aspect_weight),
                 iota_weight=float(args.iota_weight),
             )
+            objective = float(objective_terms["total"])
             provisional["objective"] = objective
+            provisional["objective_terms"] = objective_terms
             entry = {
                 "eval": eval_id,
                 "x": np.asarray(x, dtype=float).tolist(),
-                "variables": [{"kind": kind, "index": index} for kind, index in variables],
+                "variables": variable_manifest,
+                "coil_diagnostics": coil_diagnostics(params),
                 "summary": provisional,
             }
             if best is None or objective < float(best["summary"]["objective"]):
@@ -579,7 +766,10 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
             print(
                 f"eval={eval_id:03d} objective={objective:.6e} "
                 f"residual={provisional['residual_proxy']:.3e} aspect={provisional['aspect']} "
-                f"mean_iota={provisional['mean_iota']} wall_s={wall_s:.2f}",
+                f"mean_iota={provisional['mean_iota']} "
+                f"residual_term={objective_terms['residual']['contribution']:.3e} "
+                f"aspect_term={objective_terms['aspect']['contribution']:.3e} "
+                f"iota_term={objective_terms['mean_iota']['contribution']:.3e} wall_s={wall_s:.2f}",
                 flush=True,
             )
         except Exception as exc:
@@ -587,7 +777,8 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
             entry = {
                 "eval": eval_id,
                 "x": np.asarray(x, dtype=float).tolist(),
-                "variables": [{"kind": kind, "index": index} for kind, index in variables],
+                "variables": variable_manifest,
+                "coil_diagnostics": coil_diagnostics(params),
                 "error": f"{type(exc).__name__}: {exc}",
                 "summary": {"objective": objective},
             }
@@ -614,16 +805,14 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
     summary = {
         "phase": "phase-1-smoke",
         "scope": "coil-only direct-coil free-boundary scaffold",
+        "dry_run": False,
         "plasma_boundary_optimized": False,
-        "optimized_variables": [{"kind": kind, "index": index} for kind, index in variables],
-        "objective_model": {
-            "description": "Cheap residual/aspect/iota proxy; Boozer/QS residual is intentionally deferred.",
-            "phase2_note": "Add Boozer/QS objective after full-loop gradients are validated.",
-            "residual_weight": float(args.residual_weight),
-            "aspect_weight": float(args.aspect_weight),
-            "iota_weight": float(args.iota_weight),
-        },
+        "optimized_variables": variable_manifest,
+        "objective_model": objective_model,
         "provider": provider_metadata,
+        "baseline_coils": coil_diagnostics(base_params),
+        "vmec_config": vmec_config,
+        "optimizer_config": optimizer_config,
         "input": input_path,
         "outdir": outdir,
         "optimizer": {
@@ -650,6 +839,11 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--smoke", action="store_true", help="Use tiny defaults for a fast phase-1 smoke.")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Write configuration and coil/variable diagnostics without running VMEC or the optimizer.",
+    )
     parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
     parser.add_argument("--outdir", type=Path, default=DEFAULT_OUTDIR)
     parser.add_argument("--provider", choices=("essos", "circle"), default="essos")
