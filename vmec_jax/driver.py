@@ -1160,17 +1160,25 @@ def wout_from_fixed_boundary_run(
     """Build a minimal VMEC-style ``WoutData`` from a fixed-boundary run.
 
     This is the in-memory counterpart to :func:`write_wout_from_fixed_boundary_run`.
-    The fast bcovar path is the default; set ``fast_bcovar=False`` to force the
-    legacy force-kernel output path for debugging.
+    The fast bcovar path is the default for production runs. Runs created with
+    ``solver_mode="parity"`` use the legacy force-kernel output path unless
+    ``fast_bcovar`` is explicitly provided, preserving VMEC2000 WOUT parity for
+    validation gates.
     """
     from .wout import wout_minimal_from_fixed_boundary
 
     path = Path(path) if path is not None else Path("wout_vmec_jax.nc")
 
+    fast_bcovar_eff = fast_bcovar
+    if fast_bcovar_eff is None:
+        diagnostics = getattr(getattr(run, "result", None), "diagnostics", {}) or {}
+        if str(diagnostics.get("solver_mode", "")).strip().lower() == "parity":
+            fast_bcovar_eff = False
+
     prev_fast_bcovar = None
-    if fast_bcovar is not None:
+    if fast_bcovar_eff is not None:
         prev_fast_bcovar = os.getenv("VMEC_JAX_WOUT_FAST_BCOVAR")
-        os.environ["VMEC_JAX_WOUT_FAST_BCOVAR"] = "1" if fast_bcovar else "0"
+        os.environ["VMEC_JAX_WOUT_FAST_BCOVAR"] = "1" if fast_bcovar_eff else "0"
 
     try:
         fsqt = None
@@ -1229,7 +1237,7 @@ def wout_from_fixed_boundary_run(
             force_payload_override=getattr(getattr(run, "result", None), "_final_force_payload", None),
         )
     finally:
-        if fast_bcovar is not None:
+        if fast_bcovar_eff is not None:
             if prev_fast_bcovar is None:
                 os.environ.pop("VMEC_JAX_WOUT_FAST_BCOVAR", None)
             else:

@@ -542,6 +542,69 @@ def test_wout_from_fixed_boundary_run_include_fsq_false_restores_existing_fast_e
     assert os.environ["VMEC_JAX_WOUT_FAST_BCOVAR"] == "original"
 
 
+def test_wout_from_fixed_boundary_run_parity_mode_uses_legacy_bcovar_by_default(monkeypatch, tmp_path):
+    import vmec_jax.wout as wout_module
+
+    captured_env = []
+
+    def _fake_wout_minimal_from_fixed_boundary(**kwargs):
+        captured_env.append(os.getenv("VMEC_JAX_WOUT_FAST_BCOVAR"))
+        return SimpleNamespace(path=kwargs["path"])
+
+    monkeypatch.setattr(wout_module, "wout_minimal_from_fixed_boundary", _fake_wout_minimal_from_fixed_boundary)
+    monkeypatch.setattr(driver, "residual_scalars_from_state", lambda **_kwargs: pytest.fail("unexpected recompute"))
+    monkeypatch.delenv("VMEC_JAX_WOUT_FAST_BCOVAR", raising=False)
+    run = driver.FixedBoundaryRun(
+        cfg=object(),
+        indata=object(),
+        static=object(),
+        state=object(),
+        result=SimpleNamespace(diagnostics={"solver_mode": "parity"}),
+        flux=None,
+        profiles={},
+        signgs=1,
+    )
+
+    driver.wout_from_fixed_boundary_run(run, include_fsq=False, path=tmp_path / "wout_parity.nc")
+
+    assert captured_env == ["0"]
+    assert os.getenv("VMEC_JAX_WOUT_FAST_BCOVAR") is None
+
+
+def test_wout_from_fixed_boundary_run_explicit_fast_bcovar_overrides_parity_mode(monkeypatch, tmp_path):
+    import vmec_jax.wout as wout_module
+
+    captured_env = []
+
+    def _fake_wout_minimal_from_fixed_boundary(**kwargs):
+        captured_env.append(os.getenv("VMEC_JAX_WOUT_FAST_BCOVAR"))
+        return SimpleNamespace(path=kwargs["path"])
+
+    monkeypatch.setattr(wout_module, "wout_minimal_from_fixed_boundary", _fake_wout_minimal_from_fixed_boundary)
+    monkeypatch.setattr(driver, "residual_scalars_from_state", lambda **_kwargs: pytest.fail("unexpected recompute"))
+    monkeypatch.delenv("VMEC_JAX_WOUT_FAST_BCOVAR", raising=False)
+    run = driver.FixedBoundaryRun(
+        cfg=object(),
+        indata=object(),
+        static=object(),
+        state=object(),
+        result=SimpleNamespace(diagnostics={"solver_mode": "parity"}),
+        flux=None,
+        profiles={},
+        signgs=1,
+    )
+
+    driver.wout_from_fixed_boundary_run(
+        run,
+        include_fsq=False,
+        path=tmp_path / "wout_parity_fast.nc",
+        fast_bcovar=True,
+    )
+
+    assert captured_env == ["1"]
+    assert os.getenv("VMEC_JAX_WOUT_FAST_BCOVAR") is None
+
+
 def test_wout_from_fixed_boundary_run_uses_complete_result_histories_without_recompute(monkeypatch, tmp_path):
     import vmec_jax.wout as wout_module
 
