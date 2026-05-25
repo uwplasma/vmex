@@ -79,6 +79,7 @@ Steps taken:
 63. Added a release-hygiene regression that requires the free-boundary README/docs validation artifacts to remain present and avoids describing the bounded validation example as a scaffold.
 64. Threaded VMEC2000 subprocess return codes through `run_xvmec2000` and the generated-`mgrid` diagnostic.
 65. Reclassified generated-`mgrid` VMEC2000 failures with nonzero return codes as `nonzero_exit` instead of conflating them with ordinary no-WOUT underconvergence.
+66. Fixed `run_xvmec2000` to copy relative `MGRID_FILE` assets from the input deck directory into the executable workdir, preventing accidental fixed-boundary fallbacks in local optional diagnostics.
 
 Results obtained:
 
@@ -167,6 +168,7 @@ Results obtained:
 82. Focused free-boundary physics/adjoint gates passed after the docs refresh: `54 passed, 1 skipped in 47.55 s` across the dense vacuum-adjoint, fast free-boundary physics, and direct-coil finite-pressure sensitivity suites.
 83. Local loose generated-`mgrid` VMEC2000 probe now reports `vmec2000_status=nonzero_exit`, `returncode=2`, and `classification=vmec2000_nonzero_exit` rather than `no_wout`; the same run still shows `jax_direct_vs_mgrid_passed=True`.
 84. Focused VMEC2000 parser/trace tests passed after adding return-code diagnostics: `15 passed, 1 skipped in 0.53 s`.
+85. After the relative-`mgrid` copy fix, local direct `run_xvmec2000` probes confirm VMEC2000 opens the generated grid and exits nonzero before WOUT for both zero-pressure and finite-pressure LPQA generated-grid runs. The gap is therefore generated-grid/VMEC2000 consumption, not finite-pressure-only behavior.
 
 Best next steps:
 

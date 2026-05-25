@@ -52,6 +52,7 @@ class Vmec2000ExecResult:
 _RE_STAGE = re.compile(
     r"^\s*NS\s*=\s*(\d+)\s+NO\.\s+FOURIER\s+MODES\s*=\s*(\d+)\s+FTOLV\s*=\s*([0-9.DdEe+-]+)\s+NITER\s*=\s*([+-]?\d+)"
 )
+_RE_MGRID_FILE = re.compile(r"^\s*MGRID_FILE\s*=\s*['\"]?([^'\",\s]+)['\"]?", flags=re.IGNORECASE | re.MULTILINE)
 
 
 def _parse_vmec2000_threed1(path: Path) -> list[Vmec2000Threed1Stage]:
@@ -223,6 +224,19 @@ def _find_threed1_file(workdir: Path, *, case: str) -> Path | None:
     return matches[0] if matches else None
 
 
+def _relative_mgrid_file(text: str) -> str | None:
+    """Return a relative VMEC ``MGRID_FILE`` reference from a namelist, if present."""
+    match = _RE_MGRID_FILE.search(text)
+    if match is None:
+        return None
+    value = match.group(1).strip()
+    if not value or value.upper() in {"NONE", "DIRECT_COILS"}:
+        return None
+    if Path(value).is_absolute():
+        return None
+    return value
+
+
 def run_xvmec2000(
     input_path: Path,
     *,
@@ -254,6 +268,13 @@ def run_xvmec2000(
         if indata_updates:
             patched = _patch_indata(dest.read_text(), updates={k.upper(): str(v) for k, v in indata_updates.items()})
             dest.write_text(patched)
+        mgrid_name = _relative_mgrid_file(dest.read_text())
+        if mgrid_name is not None:
+            source = input_path.parent / mgrid_name
+            target = workdir_path / mgrid_name
+            if source.exists() and source.resolve() != target.resolve():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, target)
 
         cmd = [str(exec_path), dest.name]
         t0 = time.perf_counter()

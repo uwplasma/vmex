@@ -11,6 +11,7 @@ from vmec_jax.vmec2000_exec import (
     _infer_case_name,
     _parse_vmec2000_threed1,
     _patch_indata,
+    _relative_mgrid_file,
     flatten_threed1,
     threed1_fsq_total,
 )
@@ -140,6 +141,14 @@ def test_patch_indata_handles_unterminated_or_missing_indata_block() -> None:
 
     assert patched.splitlines() == ["&INDATA", "  NITER = 3", "  NTOR = 2"]
     assert _patch_indata("not a namelist", updates={"NITER": "3"}) == "not a namelist"
+
+
+def test_relative_mgrid_file_parser_only_returns_copyable_relative_assets() -> None:
+    assert _relative_mgrid_file("&INDATA\n MGRID_FILE = 'mgrid_test.nc'\n/\n") == "mgrid_test.nc"
+    assert _relative_mgrid_file('&INDATA\n MGRID_FILE = "subdir/mgrid_test.nc"\n/\n') == "subdir/mgrid_test.nc"
+    assert _relative_mgrid_file("&INDATA\n MGRID_FILE = 'DIRECT_COILS'\n/\n") is None
+    assert _relative_mgrid_file("&INDATA\n MGRID_FILE = '/tmp/mgrid_test.nc'\n/\n") is None
+    assert _relative_mgrid_file("&INDATA\n NITER = 1\n/\n") is None
 
 
 def test_parse_vmec2000_threed1_skips_signed_negative_reference_header(tmp_path: Path) -> None:

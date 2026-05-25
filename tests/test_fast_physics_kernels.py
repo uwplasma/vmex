@@ -454,7 +454,8 @@ def test_vmec2000_exec_discovery_and_fake_run(monkeypatch, tmp_path: Path) -> No
     assert find_vmec2000_exec(root=tmp_path / "none" / "child") is None
 
     input_path = tmp_path / "input.case"
-    input_path.write_text("&INDATA\n  NITER = 20\n/\n")
+    input_path.write_text("&INDATA\n  NITER = 20\n  MGRID_FILE = 'mgrid.test'\n/\n")
+    (tmp_path / "mgrid.test").write_text("synthetic mgrid placeholder")
     workdir = tmp_path / "work"
 
     with pytest.raises(FileNotFoundError, match="VMEC2000 executable"):
@@ -462,6 +463,7 @@ def test_vmec2000_exec_discovery_and_fake_run(monkeypatch, tmp_path: Path) -> No
 
     def fake_run(cmd, *, cwd, capture_output, text, timeout, check):
         assert cmd == [str(default_exec), "input.case"]
+        assert (Path(cwd) / "mgrid.test").read_text() == "synthetic mgrid placeholder"
         assert capture_output is True
         assert text is True
         assert timeout == 12.0
