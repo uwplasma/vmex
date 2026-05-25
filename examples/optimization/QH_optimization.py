@@ -54,6 +54,7 @@ INNER_FTOL = 1.0e-9  # Accepted-point VMEC tolerance; 0 uses FTOL from the input
 TRIAL_MAX_ITER = 120  # Trial-point VMEC iterations; 0 follows the accepted/input budget.
 TRIAL_FTOL = 1.0e-9  # Trial-point VMEC tolerance; 0 follows the accepted/input tolerance.
 SOLVER_DEVICE = None  # None uses JAX default; set "cpu" or "gpu" to force one backend.
+EXACT_PATH = None  # None/"tape" favors cold starts; use "scan" only for long warm GPU runs.
 USE_ESS = True  # Set False for an unscaled trust-region solve.
 ALPHA = 1.2  # ESS high-mode scaling strength.
 # Common alternatives:
@@ -141,6 +142,7 @@ result = vj.least_squares_solve(
     trial_max_iter=TRIAL_MAX_ITER,
     trial_ftol=TRIAL_FTOL,
     solver_device=SOLVER_DEVICE,
+    exact_path=EXACT_PATH,
     scipy_tr_solver=SCIPY_TR_SOLVER,
     scipy_lsmr_maxiter=SCIPY_LSMR_MAXITER,
     save_stage_inputs=SAVE_STAGE_INPUTS,

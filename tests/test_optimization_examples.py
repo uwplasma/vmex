@@ -1304,6 +1304,7 @@ def test_least_squares_solve_dispatches_regular_problem(monkeypatch, tmp_path) -
         use_ess=True,
         ess_alpha=2.5,
         solver_device="cpu",
+        exact_path="scan",
         save_stage_wouts=True,
         save_final_outputs=False,
     )
@@ -1323,6 +1324,7 @@ def test_least_squares_solve_dispatches_regular_problem(monkeypatch, tmp_path) -
     assert captured["include"] == ("rc", "zs")
     assert captured["fix"] == ("rc00",)
     assert captured["solver_device"] == "cpu"
+    assert captured["exact_path"] == "scan"
     assert captured["save_stage_wouts"] is True
     assert captured["save_final_outputs"] is False
 
@@ -1377,6 +1379,7 @@ def test_least_squares_solve_dispatches_qi_problem(monkeypatch, tmp_path) -> Non
         trial_max_iter=0,
         trial_ftol=0.0,
         solver_device="gpu",
+        exact_path="tape",
         save_final_outputs=False,
     )
 
@@ -1409,6 +1412,7 @@ def test_least_squares_solve_dispatches_qi_problem(monkeypatch, tmp_path) -> Non
     assert captured["trial_max_iter"] == 0
     assert captured["trial_ftol"] == 0.0
     assert captured["solver_device"] == "gpu"
+    assert captured["exact_path"] == "tape"
     assert captured["save_final_outputs"] is False
 
 

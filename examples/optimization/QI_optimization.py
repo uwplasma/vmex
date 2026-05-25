@@ -117,6 +117,8 @@ TRIAL_MAX_ITER = int(os.environ.get("VMEC_JAX_QI_TRIAL_MAX_ITER", CASE.get("tria
 TRIAL_FTOL = float(os.environ.get("VMEC_JAX_QI_TRIAL_FTOL", CASE.get("trial_ftol", 1.0e-9)))  # 0 follows accepted/input tolerance.
 _SOLVER_DEVICE_ENV = os.environ.get("VMEC_JAX_QI_SOLVER_DEVICE")
 SOLVER_DEVICE = None if _SOLVER_DEVICE_ENV in (None, "", "none", "None") else _SOLVER_DEVICE_ENV  # Set "cpu" or "gpu" to force one backend.
+_EXACT_PATH_ENV = os.environ.get("VMEC_JAX_QI_EXACT_PATH")
+EXACT_PATH = None if _EXACT_PATH_ENV in (None, "", "none", "None", "auto") else _EXACT_PATH_ENV  # Set "scan" only for long warm GPU runs.
 USE_ESS = os.environ.get("VMEC_JAX_QI_USE_ESS", "1").strip().lower() not in {"0", "false", "no", "off"}
 ALPHA = float(os.environ.get("VMEC_JAX_QI_ESS_ALPHA", 1.2))  # ESS high-mode scaling strength.
 STAGE_METHOD_OVERRIDE = os.environ.get("VMEC_JAX_QI_STAGE_METHOD")  # Override staged cleanup method for bounded experiments.
@@ -320,6 +322,7 @@ print(f"  simple seed:     {USE_SIMPLE_SEED}")
 print(f"  stage_modes:     {STAGE_MODES}")
 print(f"  max_nfev:        {MAX_NFEV}")
 print(f"  ESS:             {USE_ESS} (alpha={ALPHA})")
+print(f"  solver/exact:    device={SOLVER_DEVICE or 'JAX default'}, exact_path={EXACT_PATH or 'default tape'}")
 print(f"  target aspect:   {TARGET_ASPECT}")
 print(f"  abs iota floor:  {TARGET_ABS_IOTA_MIN}")
 print(f"  QI branch weight:{QI_OPTIONS.branch_width_weight}")
@@ -404,6 +407,7 @@ def solve_qi_stage(
         trial_max_iter=TRIAL_MAX_ITER,
         trial_ftol=TRIAL_FTOL,
         solver_device=SOLVER_DEVICE,
+        exact_path=EXACT_PATH,
         scipy_tr_solver=SCIPY_TR_SOLVER,
         scipy_lsmr_maxiter=SCIPY_LSMR_MAXITER,
         lbfgs_step_bound=lbfgs_step_bound,
