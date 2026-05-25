@@ -3078,7 +3078,14 @@ direct-coil benchmark at commit ``79c65e1``, the default ptau-only
 about ``0.183 s``.  The CUDA ``iteration_control_badjac_s`` bucket is now below
 ``0.001 s``.  The remaining CUDA tax in this tiny benchmark is mostly
 ``iteration_control_fsq1_s`` and preconditioner/update dispatch, not the
-accepted-state NESTOR solve or direct-coil Biot-Savart sampling.
+accepted-state NESTOR solve or direct-coil Biot-Savart sampling.  A follow-up
+commit (``9e0a0df``) returned the preconditioned ``fsq1`` scalar directly from
+the fused preconditioner payload.  The helper is covered by unit tests, but the
+same ``office`` CPU/CUDA matrix did not show a robust speedup
+(``--jit-forces`` CPU warm about ``0.060 s``, CUDA warm about ``0.224 s``).
+This narrows the next GPU target to reducing synchronization and dispatch in
+the accepted-point control/preconditioner path rather than optimizing
+Biot-Savart sampling or the final NESTOR solve.
 
 Control flags:
 

@@ -10,7 +10,7 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-05-25 after dry-run optimization diagnostics, ESSOS adapter validation, VMEC2000 runtime-error classification, bounded AD-vs-FD NESTOR gradient checks, same-branch CPU/GPU benchmark-matrix reporting with non-JIT and JIT-force direct-solve rows, solve-loop timing capture for direct-coil benchmark rows, JIT-force defaults for direct-coil examples, accepted-boundary direct-coil replay AD-vs-FD promotion, free-boundary-aware fused strict-update support, a clarified complete-loop exact-adjoint promotion boundary, the first opt-in bad-Jacobian state-probe performance knob, and the post-main-merge CI repair pass.
+Last updated: 2026-05-25 after dry-run optimization diagnostics, ESSOS adapter validation, VMEC2000 runtime-error classification, bounded AD-vs-FD NESTOR gradient checks, same-branch CPU/GPU benchmark-matrix reporting with non-JIT and JIT-force direct-solve rows, solve-loop timing capture for direct-coil benchmark rows, JIT-force defaults for direct-coil examples, accepted-boundary direct-coil replay AD-vs-FD promotion, free-boundary-aware fused strict-update support, a clarified complete-loop exact-adjoint promotion boundary, the first opt-in bad-Jacobian state-probe performance knob, a fused preconditioned-`fsq1` payload benchmark, and a tightened optional VMEC2000 generated-`mgrid` trace gate.
 
 Steps taken:
 
@@ -1065,13 +1065,13 @@ WP5 Free-boundary provider hook:               95%
 WP6 Direct-coil forward example:               92%
 WP7 Vacuum adjoint scaffold:                  100%
 WP8 Gradient checks:                          100%
-WP9 VMEC2000 diagnostics:                      95%
+WP9 VMEC2000 diagnostics:                      96%
 WP10 Benchmarks/diagnostics:                  100%
 WP11 Coil-only QS optimization example:        89%
 WP12 Robust coil perturbations:               100%
 WP13 Documentation:                            99%
-WP14 CI policy:                                96%
-Overall branch completion:                   98.9%
+WP14 CI policy:                                97%
+Overall branch completion:                   99.0%
 ```
 
 ## Immediate Next Steps
@@ -1088,6 +1088,45 @@ Overall branch completion:                   98.9%
 Nothing is required right now. The next implementation step can proceed locally. Later, maintainers should decide whether ESSOS mgrid export should be released before the `vmec_jax` example is promoted from research example to documented workflow.
 
 ## Work Log
+
+### 2026-05-25 VMEC2000 trace-gate and fused-fsq1 benchmark pass
+
+Steps taken:
+
+1. Strengthened the optional VMEC2000 generated-`mgrid` trace smoke so it now
+   asserts VMEC2000 opened the generated vacuum grid and parsed DEL-BSQ/FEDGE
+   edge-balance metadata, not only that iteration rows were present.
+2. Ran the follow-up `office` CPU/CUDA benchmark matrix for commit `9e0a0df`,
+   where the fused preconditioner payload returns `fsq1_safe` directly.
+3. Updated performance documentation to record that the fused `fsq1` payload is
+   tested but did not produce a robust CUDA speedup in the tiny active
+   direct-coil matrix.
+
+Results obtained:
+
+1. The optional VMEC2000 trace-smoke gate passed locally with
+   `VMEC2000_INTEGRATION=1` and skipped cleanly without the integration flag.
+2. The `9e0a0df` `office` matrix completed all CPU and GPU rows.  The
+   `--jit-forces` direct-solve row reported CPU warm `0.060 s`, CUDA warm
+   `0.224 s`, CUDA `iteration_control_fsq1_s≈0.012 s`, and CUDA
+   `iteration_control_badjac_s≈5.8e-4 s`.
+3. The result confirms that the large bad-Jacobian state-probe tax remains
+   fixed, while the next material GPU target is accepted-point
+   synchronization/dispatch across `fsq1`, preconditioner, and update control.
+
+Best next steps:
+
+1. Do not pursue more scalar-only `fsq1` micro-optimizations unless profiling
+   shows a new regression; target broader accepted-point control/preconditioner
+   fusion or synchronization removal.
+2. Keep the VMEC2000 generated-`mgrid` WOUT parity xfail bounded until
+   VMEC2000 writes a WOUT for the generated-grid LPQA case.
+3. Let PR CI finish and patch only real failures; canceled runs are expected
+   when superseded by newer pushes.
+
+Need from user:
+
+Nothing now.
 
 ### 2026-05-25 Bad-Jacobian control-path performance pass
 

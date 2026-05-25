@@ -465,7 +465,9 @@ def test_vmec2000_generated_mgrid_trace_smoke_records_iteration_rows(tmp_path: P
 
     This does not promote generated-``mgrid`` WOUT parity.  It proves the
     diagnostic can run VMEC2000 on the same generated grid, records at least one
-    VMEC2000 iteration row, and keeps the shared multigrid schedule promotable.
+    VMEC2000 iteration row, confirms VMEC2000 opened the generated grid, parses
+    DEL-BSQ/FEDGE edge-balance metadata, and keeps the shared multigrid
+    schedule promotable.
     """
 
     if os.environ.get("VMEC2000_INTEGRATION", "0") != "1":
@@ -517,9 +519,14 @@ def test_vmec2000_generated_mgrid_trace_smoke_records_iteration_rows(tmp_path: P
     assert payload["configuration"]["mixed_vmec2000_schedule_non_promotable"] is False
     vmec2000 = payload["backends"]["vmec2000_generated_mgrid"]
     assert vmec2000["status"] in {"completed", "no_wout", "more_iter_exit", "nonzero_exit"}
+    assert vmec2000["opened_mgrid"] is True
     assert vmec2000["iteration_row_count"] > 0
+    assert vmec2000["last_row"] is not None
+    assert np.isfinite(float(vmec2000["last_row"]["delbsq"]))
+    assert np.isfinite(float(vmec2000["last_row"]["fedge"]))
     if vmec2000["status"] in {"no_wout", "more_iter_exit", "nonzero_exit"}:
-        assert vmec2000["underconverged"]["classification"] in {
+        underconverged = vmec2000["underconverged"]
+        assert underconverged["classification"] in {
             "reached_niter_without_wout",
             "vmec2000_more_iter_exit",
             "vmec2000_runtime_error",
@@ -527,6 +534,9 @@ def test_vmec2000_generated_mgrid_trace_smoke_records_iteration_rows(tmp_path: P
             "vmec2000_requested_more_iterations",
             "unknown_no_wout",
         }
+        assert np.isfinite(float(underconverged["delbsq_last"]))
+        assert np.isfinite(float(underconverged["fedge_last"]))
+        assert np.isfinite(float(underconverged["delbsq_over_ftolv"]))
     else:
         assert payload["summary"]["vmec2000_wout_available"] is True
 
