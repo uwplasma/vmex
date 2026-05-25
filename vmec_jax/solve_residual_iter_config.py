@@ -119,6 +119,22 @@ def bad_jacobian_tau_tolerance(*, ptau_tol: float, ptau_tol_rel: float, tau_scal
     return max(abs(float(ptau_tol)), 0.0)
 
 
+def should_probe_bad_jacobian_state(
+    *,
+    state_probe: bool,
+    initial_state_probe_iters: int,
+    iter_idx: int,
+) -> bool:
+    """Return whether to run the optional expensive state-Jacobian safety probe.
+
+    The production bad-Jacobian check uses VMEC's cheap ``ptau`` sign change
+    proxy.  The full state-Jacobian probe is a diagnostic/parity knob because it
+    adds host/device work in the first few iterations, especially on GPU.
+    """
+
+    return bool(state_probe) and int(initial_state_probe_iters) > 0 and int(iter_idx) <= int(initial_state_probe_iters)
+
+
 def resolve_dump_history_config(
     *,
     env: Mapping[str, str | None],

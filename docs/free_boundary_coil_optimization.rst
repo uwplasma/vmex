@@ -651,7 +651,8 @@ Current fast tests cover:
 - a direct-coil runtime hook that does not require an ``mgrid`` file and uses
   nonzero pressure;
 - active generated-``mgrid`` versus direct-coil ``vmec_jax`` provider parity
-  for the ESSOS Landreman-Paul QA finite-pressure validation case;
+  for the ESSOS Landreman-Paul QA finite-pressure validation case when the
+  optional ESSOS assets and ``Coils.to_mgrid`` path are available;
 - active direct-coil NESTOR-step sensitivity to coil-current changes, including
   the expected linear normal-field/source scaling and quadratic ``bsqvac``
   scaling;

@@ -227,7 +227,8 @@ Results obtained:
 134. Residual-iteration timing now records `iteration_control_s` and propagates it through solver diagnostics, optimizer profiles, and the free-boundary direct-coil benchmark matrix.
 135. Residual-loop control split timing on `office` localized the remaining control overhead: CPU warm min `0.096 s`, CUDA warm min `0.313 s` with timing detail, CPU `iteration_control_badjac_s≈0.032 s`, and CUDA `iteration_control_badjac_s≈0.088 s`. CUDA `iteration_control_fsq1_s≈0.017 s`; update-state remains about one millisecond.
 136. The bad-Jacobian state-probe path is now configurable without changing default parity behavior. A local one-repeat CPU probe on the tiny active direct-coil benchmark reduced warm time from `0.048 s` to `0.044 s` and `iteration_control_badjac_s` from `0.0156 s` to `0.0092 s` with `VMEC_JAX_BADJAC_INITIAL_STATE_PROBE_ITERS=0`.
-137. The same opt-in bad-Jacobian probe setting on `office` CUDA reduced warm time from `0.276 s` to `0.181 s`, `iteration_control_s` from `0.090 s` to `0.0127 s`, and `iteration_control_badjac_s` from `0.077 s` to `0.0006 s`. This is a large enough improvement to keep the lane active, but the default remains `2` until VMEC2000 parity and bad-Jacobian reset behavior are checked.
+137. The same opt-in bad-Jacobian probe setting on `office` CUDA reduced warm time from `0.276 s` to `0.181 s`, `iteration_control_s` from `0.090 s` to `0.0127 s`, and `iteration_control_badjac_s` from `0.077 s` to `0.0006 s`.
+138. The non-scan residual path now matches the scan path bad-Jacobian policy: VMEC-style `ptau` sign checking is the default, and the expensive state-Jacobian probe only runs when `VMEC_JAX_BADJAC_STATE_PROBE=1`. A local JIT-force direct-coil benchmark reports warm time about `0.024 s` with `iteration_control_badjac_s≈3.8e-4 s`.
 
 Best next steps:
 
@@ -235,7 +236,7 @@ Best next steps:
 2. Keep `exact_path='scan'` as an explicit long-run GPU option only; the latest profile shows it warms faster but needs roughly 75 accepted callbacks to amortize the `~110 s` cold compile.
 3. Keep the opt-in JAX NESTOR driver path as validation-only until the accepted-solve compilation/dispatch cost is removed. The host bridge remains the production/default route.
 4. Keep coverage above 95% as new operator code is promoted from validation scaffolds into production paths.
-5. For GPU performance, keep JIT force kernels as the production default for direct-coil examples, use the free-boundary-aware fused strict-update path on non-CPU backends, and benchmark the opt-in `VMEC_JAX_BADJAC_INITIAL_STATE_PROBE_ITERS=0` ptau-only path. Do not change the default until VMEC2000 parity and bad-Jacobian reset behavior are checked.
+5. For GPU performance, keep JIT force kernels as the production default for direct-coil examples, use the free-boundary-aware fused strict-update path on non-CPU backends, and keep the state-Jacobian bad-Jacobian probe as an explicit parity/debug knob via `VMEC_JAX_BADJAC_STATE_PROBE=1`.
 6. Warm GPU QH mode-2 tape callbacks are still above the `1 s` production target; the next patch should reduce accepted replay/tangent dispatch or avoid rebuilding accepted tapes at nearby callbacks. Matrix-free is not yet the answer on GPU because repeated VJP/JVP replay is slower than dense materialization for the profiled case.
 
 Need from user:
@@ -733,7 +734,7 @@ tests/test_external_fields_coils_jax.py
 tests/test_external_fields_essos_adapter.py
 tests/test_external_fields_mgrid_jax.py
 tests/test_free_boundary_coil_provider_forward.py
-tests/test_free_boundary_coil_provider_gradients.py
+tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py
 tests/test_free_boundary_vacuum_adjoint.py
 ```
 
@@ -777,7 +778,7 @@ Deliverables:
 Tests:
 
 ```bash
-RUN_VMEC2000=1 pytest -q tests/test_vmec2000_freeb_coil_compare.py
+VMEC2000_INTEGRATION=1 pytest -q tests/test_free_boundary_essos_coil_parity.py::test_vmec2000_generated_mgrid_free_boundary_matches_vmec_jax_and_direct_coils
 ```
 
 Acceptance:
@@ -971,7 +972,7 @@ Optional tests:
 
 ```bash
 RUN_FULL=1 pytest -q tests/test_free_boundary_qs_coil_optimization_smoke.py
-RUN_VMEC2000=1 pytest -q tests/test_vmec2000_freeb_coil_compare.py
+VMEC2000_INTEGRATION=1 pytest -q tests/test_free_boundary_essos_coil_parity.py::test_vmec2000_generated_mgrid_free_boundary_matches_vmec_jax_and_direct_coils
 ```
 
 Heavy benchmark commands:
@@ -1034,7 +1035,7 @@ Minimum branch acceptance:
 2. New pure-JAX coil provider matches ESSOS Biot-Savart on simple coils when ESSOS is installed.
 3. JAX mgrid interpolation matches legacy mgrid interpolation on synthetic fields.
 4. Direct-coil provider can drive one low-resolution free-boundary solve and write a `wout`.
-5. VMEC2000 comparison script exists and runs locally when `RUN_VMEC2000=1`.
+5. VMEC2000 comparison script exists and runs locally when `VMEC2000_INTEGRATION=1`.
 6. Coil-only free-boundary optimization example exists and does not use plasma boundary coefficients as optimization variables.
 7. Gradient checks exist for coil currents, coil Fourier coefficients, and evaluation coordinates.
 8. Vacuum solve custom-adjoint scaffold exists with dense toy tests.
@@ -1068,13 +1069,13 @@ WP10 Benchmarks/diagnostics:                  100%
 WP11 Coil-only QS optimization example:        89%
 WP12 Robust coil perturbations:               100%
 WP13 Documentation:                            99%
-WP14 CI policy:                                95%
-Overall branch completion:                   98.7%
+WP14 CI policy:                                96%
+Overall branch completion:                   98.9%
 ```
 
 ## Immediate Next Steps
 
-1. Target the remaining GPU direct-solve warm overhead in update and unattributed loop dispatch now that JIT force kernels remove the force bucket as the main CUDA tax.
+1. Re-run the office CPU/CUDA direct-coil benchmark matrix after the default ptau-only bad-Jacobian policy patch, then update docs with the final warm GPU/CPU ratios.
 2. Keep the opt-in JAX NESTOR driver path as validation-only until the accepted-solve compilation/dispatch cost is removed. The host bridge remains the production/default route.
 3. Continue the VMEC2000 generated-mgrid WOUT comparator until the optional xfail can be bounded or promoted.
 4. Replace the phase-1 coil-only optimization proxy with Boozer/QS residuals only after the direct-coil free-boundary loop has validated gradients.
@@ -1086,6 +1087,43 @@ Overall branch completion:                   98.7%
 Nothing is required right now. The next implementation step can proceed locally. Later, maintainers should decide whether ESSOS mgrid export should be released before the `vmec_jax` example is promoted from research example to documented workflow.
 
 ## Work Log
+
+### 2026-05-25 Bad-Jacobian control-path performance pass
+
+Steps taken:
+
+1. Audited the remaining CUDA direct-coil warm-solve overhead from the office
+   benchmark matrix and confirmed the state-Jacobian bad-Jacobian probe was a
+   major named control-path cost.
+2. Changed the non-scan residual path to match the scan path: the production
+   default uses the cheap VMEC-style `ptau` sign check, and the expensive
+   state-Jacobian probe is enabled only with `VMEC_JAX_BADJAC_STATE_PROBE=1`.
+3. Added a focused unit regression for the bad-Jacobian state-probe gate.
+4. Cleaned stale plan/doc references found by the PR-gap audit: optional
+   VMEC2000 gates now use `VMEC2000_INTEGRATION=1`, and ESSOS generated-`mgrid`
+   parity is explicitly described as optional asset-dependent coverage.
+
+Results obtained:
+
+1. Focused tests passed: `41 passed in 13.49 s`.
+2. The accepted-boundary direct-coil replay AD-vs-FD gate passed:
+   `1 passed in 8.52 s`.
+3. Local JIT-force direct-coil benchmark with solver timing enabled reported
+   warm solve `0.024 s` and warm `iteration_control_badjac_s≈3.8e-4 s`.
+4. Local physics-smoke subset passed: `34 passed, 1 skipped in 49.28 s`.
+5. Strict Sphinx build passed after the documentation cleanup.
+
+Best next steps:
+
+1. Re-run the office CPU/CUDA benchmark matrix with this default ptau-only
+   policy and record the final matched ratios.
+2. Push the patch and verify the new PR CI run.
+3. Continue the phase-2 free-boundary full-loop adjoint and VMEC2000 WOUT
+   promotion lanes without overclaiming them in docs.
+
+Need from user:
+
+Nothing now.
 
 ### 2026-05-25 Main-merge CI repair pass
 

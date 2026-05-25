@@ -11,6 +11,7 @@ from vmec_jax.solve_residual_iter_config import (
     resolve_debug_print_config,
     resolve_dump_history_config,
     resolve_nstep_screen,
+    should_probe_bad_jacobian_state,
 )
 
 
@@ -75,6 +76,14 @@ def test_bad_jacobian_initial_state_probe_can_be_disabled():
     cfg = parse_bad_jacobian_config({"VMEC_JAX_BADJAC_INITIAL_STATE_PROBE_ITERS": "0"})
 
     assert cfg.initial_state_probe_iters == 0
+
+
+def test_bad_jacobian_state_probe_requires_explicit_probe_flag():
+    assert should_probe_bad_jacobian_state(state_probe=False, initial_state_probe_iters=2, iter_idx=1) is False
+    assert should_probe_bad_jacobian_state(state_probe=True, initial_state_probe_iters=2, iter_idx=1) is True
+    assert should_probe_bad_jacobian_state(state_probe=True, initial_state_probe_iters=2, iter_idx=2) is True
+    assert should_probe_bad_jacobian_state(state_probe=True, initial_state_probe_iters=2, iter_idx=3) is False
+    assert should_probe_bad_jacobian_state(state_probe=True, initial_state_probe_iters=0, iter_idx=1) is False
 
 
 def test_heavy_dump_flags_disable_jit_and_force_full_history():

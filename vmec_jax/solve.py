@@ -37,6 +37,7 @@ from .solve_residual_iter_config import (
     resolve_debug_print_config as _resolve_debug_print_config,
     resolve_dump_history_config as _resolve_dump_history_config,
     resolve_nstep_screen as _resolve_nstep_screen,
+    should_probe_bad_jacobian_state as _should_probe_bad_jacobian_state,
 )
 from .solve_residual_iter_policy import (
     append_residual_iter_history_record as _append_residual_iter_history_record,
@@ -12259,9 +12260,10 @@ def solve_fixed_boundary_residual_iter(
                         tau_tol = max(1.0e-12, 1.0e-3 * tau_scale)
                         bad_jacobian_ptau = (min_tau_ptau < -tau_tol) and (max_tau_ptau > tau_tol)
 
-                state_probe = (
-                    bool(badjac_initial_state_probe_iters > 0)
-                    and (int(iter2) <= int(badjac_initial_state_probe_iters))
+                state_probe = _should_probe_bad_jacobian_state(
+                    state_probe=bool(badjac_state_probe),
+                    initial_state_probe_iters=int(badjac_initial_state_probe_iters),
+                    iter_idx=int(iter2),
                 )
                 need_state_jac = (
                     badjac_use_state

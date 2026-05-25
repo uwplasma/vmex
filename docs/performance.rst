@@ -3067,17 +3067,16 @@ the same ``office`` probe measured about ``0.089 s`` in that bucket on CUDA
 versus ``0.033 s`` on CPU.  The next split-timing pass showed that nearly all
 of this bucket is the early bad-Jacobian state probe
 (``iteration_control_badjac_s``): about ``0.088 s`` on CUDA and ``0.032 s`` on
-CPU for the two-iteration active direct-coil probe.  The default still preserves
-VMEC-style first-two-iteration state probing.  For performance experiments
-only, set ``VMEC_JAX_BADJAC_INITIAL_STATE_PROBE_ITERS=0`` to quantify the
-ptau-only path before changing any production defaults.  On the ``office``
-CPU/CUDA A/B for the tiny active direct-coil benchmark, this opt-in path
-reduced CPU warm time from ``0.048 s`` to ``0.044 s`` locally and reduced CUDA
-warm time from ``0.276 s`` to ``0.181 s`` on ``office``.  The CUDA
-``iteration_control_badjac_s`` bucket fell from ``0.077 s`` to below
-``0.001 s``.  Keep this as an opt-in diagnostic knob
-until VMEC2000 parity and bad-Jacobian reset behavior are checked without the
-first-two-iteration state probe.
+CPU for the two-iteration active direct-coil probe.  The production default now
+uses the cheap VMEC-style ``ptau`` sign check and keeps the more expensive
+state-Jacobian probe as an explicit diagnostic/parity option.  Set
+``VMEC_JAX_BADJAC_STATE_PROBE=1`` to enable the state probe, with
+``VMEC_JAX_BADJAC_INITIAL_STATE_PROBE_ITERS`` controlling how many initial
+iterations are probed.  On the ``office`` CPU/CUDA A/B for the tiny active
+direct-coil benchmark, the ptau-only path reduced CPU warm time from ``0.048 s``
+to ``0.044 s`` locally and reduced CUDA warm time from ``0.276 s`` to
+``0.181 s`` on ``office``.  The CUDA ``iteration_control_badjac_s`` bucket fell
+from ``0.077 s`` to below ``0.001 s``.
 
 Control flags:
 
@@ -3085,7 +3084,8 @@ Control flags:
 
   export VMEC_JAX_FREEB_COUPLE_EDGE=1         # default: on
   export VMEC_JAX_FREEB_SAMPLE_EXTERNAL=1     # default: on
-  export VMEC_JAX_BADJAC_INITIAL_STATE_PROBE_ITERS=2  # default: VMEC-style safety probe
+  export VMEC_JAX_BADJAC_STATE_PROBE=0        # default: ptau-only bad-Jacobian check
+  export VMEC_JAX_BADJAC_INITIAL_STATE_PROBE_ITERS=2  # used only when state probe is enabled
 
 If profiling free-boundary solver-only cost, disable sampling diagnostics:
 
