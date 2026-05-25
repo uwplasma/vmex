@@ -10,7 +10,7 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-05-24 after the exact-adjoint validation and free-boundary profiling batch.
+Last updated: 2026-05-25 after the JAX-native NESTOR matrix/operator validation and GPU exact-tape profiling batch.
 
 Steps taken:
 
@@ -54,6 +54,10 @@ Steps taken:
 38. Split free-boundary external-boundary sampling diagnostics into setup, boundary-geometry synthesis, external-field sampling, axis-field sampling, projection, and total timing buckets.
 39. Added an explicit strict xfail marker for full coil-to-free-boundary-to-Boozer/QS exact-gradient validation, keeping phase-2 status visible in the test suite.
 40. Added a guarded GPU-only automatic JVP-exact-tape policy with basepoint carries for accepted-point exact Jacobian callbacks; CPU keeps the full tape default and explicit env overrides still win.
+41. Added JAX-native VMEC/NESTOR mode-matrix assembly from precomputed `grpmn`, matching the host `fouri.f`-style helper for stellarator-symmetric and LASYM cases.
+42. Added a low-resolution JAX-native nonsingular Green-function source/matrix assembly helper that differentiates through geometry and external normal-field source inputs.
+43. Chained direct-coil/provider validation through JAX boundary projection, VMEC source/RHS projection, nonsingular Green assembly, mode-matrix assembly, and dense implicit mode-space solve.
+44. Ran GPU exact-Jacobian profiling on `office` to compare the new automatic GPU JVP-only/basepoint-carry policy against explicit full-tape replay.
 
 Results obtained:
 
@@ -98,13 +102,18 @@ Results obtained:
 42. `python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py`: 22 passed in 7.42 s after adding the JAX source/RHS projection rung.
 43. Quick sample-breakdown benchmark completed; warm final direct-coil sample was about `0.00427 s`, with external-field sampling about `0.00385 s` and boundary/projection phases below one millisecond.
 44. `python -m pytest -q tests/test_free_boundary_qs_coil_optimization_smoke.py::test_full_free_boundary_qs_exact_gradient_validation_phase2_marker`: 1 xfailed in 0.04 s.
+45. `python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py`: 30 passed in 12.41 s after adding the mode-matrix and nonsingular Green-assembly validation rungs.
+46. `python -m ruff check vmec_jax/free_boundary_adjoint.py tests/test_free_boundary_vacuum_adjoint.py`: passed.
+47. GPU QH mode-2 exact-Jacobian profile on `office`, repeats=2, auto JVP/basepoint-carry policy: cold callback `13.41 s`, warm callback `1.34 s`; profile markers confirm `exact_tape_jvp_only_auto_gpu` and `exact_tape_jvp_only_basepoint_carries_auto`.
+48. The explicit full-tape GPU comparison was slightly slower overall (`14.97 s` total versus `14.74 s` auto) but had slightly lower replay dispatch (`3.54 s` versus `3.65 s` auto). The auto policy is still directionally useful, but the next performance target is cold tape build/solve and initial tangent construction rather than replay dispatch alone.
+49. Full fast CI coverage gate passed locally: `2290 passed, 26 skipped, 112 deselected, 2 xfailed` in 7m14s with total coverage `95.14%` and `--cov-fail-under=95` satisfied.
 
 Best next steps:
 
-1. Confirm CI physics smoke is green on the narrowed direct-provider-only tridiagonal policy.
-2. Run a direct-coil case that enters backtracking and confirm the new trial counters capture rejected NESTOR sampling cost in a full driver trace.
-3. Expand solve-level coverage for the lax-tridiagonal preconditioner path and then decide whether the remaining fallback-to-precomputed cases can be eliminated safely.
-4. Extend the full-loop finite-difference smoke from current-only proxy objective to a validated Boozer/QS promotion test when affordable.
+1. Promote the JAX-native nonsingular Green assembly from low-resolution validation helper toward the production NESTOR operator by porting the singular/analytic terms and wrapping the mode solve in a custom transpose solve.
+2. Profile and reduce cold exact tape build/solve and initial tangent construction on GPU; the latest comparison shows replay dispatch is not the only remaining blocker.
+3. Extend the full-loop finite-difference smoke from current-only proxy objective to a validated Boozer/QS promotion test when affordable.
+4. Keep coverage above 95% as new operator code is promoted from validation scaffolds into production paths.
 
 Need from user:
 
@@ -116,11 +125,11 @@ batch, superseded by the authoritative Progress Tracker below:
 1. External provider architecture: 93%.
 2. Direct-coil finite-pressure forward lane: 93%.
 3. ESSOS/mgrid/VMEC2000 comparison lane: 84%.
-4. Full-loop gradient validation: 60%.
+4. Full-loop gradient validation: 68%.
 5. Robust/optimization examples: 82%.
 6. Performance/benchmarking: 90%.
 7. Docs/release hygiene: 92%.
-8. Overall branch completion: 91%.
+8. Overall branch completion: 92%.
 
 ## Mission
 

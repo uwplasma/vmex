@@ -161,6 +161,303 @@ def mode_rhs_from_gsource_jax(
     return jnp.concatenate([bsin, bcos], axis=0)
 
 
+def mode_matrix_from_grpmn_jax(
+    grpmn: Any,
+    *,
+    sin_basis: Any,
+    xmpot: Any,
+    n_raw: Any,
+    lasym: bool,
+    cos_basis: Any | None = None,
+    mn0: int = 0,
+) -> Any:
+    """Build the VMEC/NESTOR mode matrix from Green-function mode samples.
+
+    This is the JAX equivalent of the host ``_vmec_mode_matrix_from_grpmn``
+    helper.  It validates the matrix-assembly half of the NESTOR adjoint
+    contract: once the Green-function kernel samples ``grpmn`` are available in
+    JAX, the mode matrix can be assembled, solved, and differentiated without
+    crossing back to NumPy.
+    """
+
+    g = jnp.asarray(grpmn)
+    sin = jnp.asarray(sin_basis)
+    if g.ndim != 2:
+        raise ValueError("grpmn must be a 2D array")
+    if sin.ndim != 2:
+        raise ValueError("sin_basis must be a 2D array")
+    mnpd = int(sin.shape[1])
+    if g.shape[0] < mnpd:
+        raise ValueError("invalid_grpmn_shape")
+
+    xmpot_arr = jnp.asarray(xmpot)
+    n_raw_arr = jnp.asarray(n_raw)
+    skip_col = jnp.logical_and(xmpot_arr == 0, n_raw_arr < 0)
+    pi3 = float(4.0 * (jnp.pi**3))
+
+    gsin = g[:mnpd, :]
+    a11 = gsin @ sin
+    a11 = jnp.where(skip_col[None, :], 0.0, a11)
+    a11 = a11 + pi3 * jnp.eye(mnpd, dtype=a11.dtype)
+
+    if not bool(lasym):
+        return a11
+
+    if g.shape[0] < 2 * mnpd:
+        raise ValueError("invalid_grpmn_shape_lasym")
+    if cos_basis is None:
+        raise ValueError("cos_basis is required for LASYM mode matrix assembly")
+    cos = jnp.asarray(cos_basis)
+    if cos.shape != sin.shape:
+        raise ValueError("cos_basis must match sin_basis shape")
+
+    gcos = g[mnpd : 2 * mnpd, :]
+    a12 = jnp.where(skip_col[None, :], 0.0, gsin @ cos)
+    a21 = jnp.where(skip_col[None, :], 0.0, gcos @ sin)
+    a22 = jnp.where(skip_col[None, :], 0.0, gcos @ cos)
+    a22 = a22 + pi3 * jnp.eye(mnpd, dtype=a22.dtype)
+    if 0 <= int(mn0) < mnpd:
+        a22 = a22.at[int(mn0), int(mn0)].add(pi3)
+
+    top = jnp.concatenate([a11, a12], axis=1)
+    bottom = jnp.concatenate([a21, a22], axis=1)
+    return jnp.concatenate([top, bottom], axis=0)
+
+
+def vmec_nonsingular_terms_from_bexni_jax(
+    *,
+    R: Any,
+    Z: Any,
+    Ru: Any,
+    Zu: Any,
+    Rv: Any,
+    Zv: Any,
+    ruu: Any,
+    ruv: Any,
+    rvv: Any,
+    zuu: Any,
+    zuv: Any,
+    zvv: Any,
+    bexni: Any,
+    basis: dict[str, Any],
+    tables: dict[str, Any],
+    signgs: int,
+    nvper: int,
+) -> tuple[Any, Any]:
+    """JAX VMEC/NESTOR nonsingular Green-function source/matrix assembly.
+
+    This mirrors the core low-resolution algebra in
+    ``free_boundary._vmec_nonsingular_terms_from_bexni`` once the boundary
+    geometry and second derivatives are already sampled on the full VMEC
+    angular grid.  The trigonometric and tangent tables are treated as static
+    constants, while the boundary geometry and external normal-field source are
+    differentiable JAX inputs.
+
+    The helper is intentionally explicit rather than performance-tuned.  It is
+    the validation bridge between the phase-1 dense mode-space adjoint scaffold
+    and the future production NESTOR operator: tests can now differentiate
+    through Green-kernel source assembly, mode projection, matrix assembly, and
+    the implicit dense solve without crossing to NumPy.
+    """
+
+    R2 = jnp.asarray(R)
+    Z2 = jnp.asarray(Z)
+    Ru2 = jnp.asarray(Ru)
+    Zu2 = jnp.asarray(Zu)
+    Rv2 = jnp.asarray(Rv)
+    Zv2 = jnp.asarray(Zv)
+    ruu2 = jnp.asarray(ruu)
+    ruv2 = jnp.asarray(ruv)
+    rvv2 = jnp.asarray(rvv)
+    zuu2 = jnp.asarray(zuu)
+    zuv2 = jnp.asarray(zuv)
+    zvv2 = jnp.asarray(zvv)
+    if R2.ndim != 2:
+        raise ValueError("R must be a 2D full-grid array")
+    for name, arr in (
+        ("Z", Z2),
+        ("Ru", Ru2),
+        ("Zu", Zu2),
+        ("Rv", Rv2),
+        ("Zv", Zv2),
+        ("ruu", ruu2),
+        ("ruv", ruv2),
+        ("rvv", rvv2),
+        ("zuu", zuu2),
+        ("zuv", zuv2),
+        ("zvv", zvv2),
+    ):
+        if arr.shape != R2.shape:
+            raise ValueError(f"{name} must match R shape")
+
+    nu = int(R2.shape[0])
+    nv = int(R2.shape[1])
+    nuv_full = int(nu * nv)
+    nuv3 = int(basis["nuv3"])
+    mf = int(basis["mf"])
+    nf = int(basis["nf"])
+    mnpd = int(basis["mnpd"])
+    lasym = bool(basis["lasym"])
+    mnpd2 = int(basis["mnpd2"])
+    onp = float(basis["onp"])
+    sign = float(int(signgs))
+    nvper = max(1, int(nvper))
+    if int(basis.get("nu_full", nu)) != nu:
+        raise ValueError("R grid must use basis['nu_full'] rows")
+
+    Rf = jnp.reshape(R2, (-1,))
+    Zf = jnp.reshape(Z2, (-1,))
+    R_uf = jnp.reshape(Ru2, (-1,))
+    Z_uf = jnp.reshape(Zu2, (-1,))
+    R_vf = jnp.reshape(Rv2, (-1,))
+    Z_vf = jnp.reshape(Zv2, (-1,))
+    ruuf = jnp.reshape(ruu2, (-1,))
+    ruvf = jnp.reshape(ruv2, (-1,))
+    rvvf = jnp.reshape(rvv2, (-1,))
+    zuuf = jnp.reshape(zuu2, (-1,))
+    zuvf = jnp.reshape(zuv2, (-1,))
+    zvvf = jnp.reshape(zvv2, (-1,))
+
+    snr = sign * Rf * Z_uf
+    snv = sign * (R_uf * Z_vf - R_vf * Z_uf)
+    snz = -sign * Rf * R_uf
+    drv = -(Rf * snr + Zf * snz)
+    guu_b = R_uf * R_uf + Z_uf * Z_uf
+    guv_b = (R_uf * R_vf + Z_uf * Z_vf) * onp * 2.0
+    gvv_b = (R_vf * R_vf + Z_vf * Z_vf + Rf * Rf) * (onp * onp)
+    auu = 0.5 * (snr * ruuf + snz * zuuf)
+    auv = (snr * ruvf + snv * R_uf + snz * zuvf) * onp
+    avv = (snv * R_vf + 0.5 * (snr * (rvvf - Rf) + snz * zvvf)) * (onp * onp)
+    rzb2 = Rf * Rf + Zf * Zf
+
+    idx_all = jnp.asarray(tables["idx_all"], dtype=jnp.int32)
+    tanu = jnp.asarray(tables["tanu"])
+    tanv = jnp.asarray(tables["tanv"])
+    cosuv = jnp.asarray(tables["cosuv"])
+    sinuv = jnp.asarray(tables["sinuv"])
+    cosper = jnp.asarray(tables["cosper"])
+    sinper = jnp.asarray(tables["sinper"])
+    cosv_tab = jnp.asarray(tables["cosv_tab"])
+    sinv_tab = jnp.asarray(tables["sinv_tab"])
+    cosui = jnp.asarray(tables["cosui"])
+    sinui = jnp.asarray(tables["sinui"])
+    nu_fourp = int(cosui.shape[1])
+    if nu_fourp <= 0:
+        raise ValueError("invalid nonsingular table shape")
+
+    rcosuv = Rf * cosuv
+    rsinuv = Rf * sinuv
+    bex = jnp.reshape(jnp.asarray(bexni), (-1,))
+    if int(bex.shape[0]) < nuv3:
+        raise ValueError("bexni must contain at least basis['nuv3'] entries")
+    bex = bex[:nuv3]
+
+    imirr_full = jnp.asarray(basis["imirr_full"], dtype=jnp.int32)
+    idx_u = jnp.arange(nu_fourp, dtype=jnp.int32)
+    idx_v = jnp.arange(nv, dtype=jnp.int32)
+    iuv_grid = idx_u[:, None] * int(nv) + idx_v[None, :]
+    iref_grid = imirr_full[iuv_grid]
+    cosv_modes = 0.5 * onp * cosv_tab[: nf + 1, :]
+    sinv_modes = 0.5 * onp * sinv_tab[: nf + 1, :]
+    mf1 = int(mf + 1)
+    idx_p_rows: list[int] = []
+    idx_m_rows: list[int] = []
+    negative_positions: list[int] = []
+    flat_pos = 0
+    for m in range(mf + 1):
+        for n in range(nf + 1):
+            idx_p_rows.append(int(m + (n + nf) * mf1))
+            if n != 0 and m != 0:
+                idx_m_rows.append(int(m + ((-n) + nf) * mf1))
+                negative_positions.append(int(flat_pos))
+            flat_pos += 1
+    idx_p_flat = jnp.asarray(idx_p_rows, dtype=jnp.int32)
+    idx_m_negative = jnp.asarray(idx_m_rows, dtype=jnp.int32)
+    negative_positions_arr = jnp.asarray(negative_positions, dtype=jnp.int32)
+    sinm_sym = sinui[: mf + 1, :]
+    cosm_sym = -cosui[: mf + 1, :]
+    sinm_asym = cosui[: mf + 1, :]
+    cosm_asym = sinui[: mf + 1, :]
+
+    gstore = jnp.zeros((nuv_full,), dtype=Rf.dtype)
+    grpmn = jnp.zeros((mnpd2, nuv3), dtype=Rf.dtype)
+
+    for ip in range(nuv3):
+        xip = rcosuv[ip]
+        yip = rsinuv[ip]
+        ivoff = int(nuv_full - ip)
+        iskip = int(ip // max(1, nv))
+        iuoff = int(nuv_full - nv * iskip)
+        gsave = rzb2[ip] + rzb2 - 2.0 * Zf[ip] * Zf
+        dsave = drv[ip] + Zf * snz[ip]
+        delgr = jnp.zeros((nuv_full,), dtype=Rf.dtype)
+        delgrp = jnp.zeros((nuv_full,), dtype=Rf.dtype)
+
+        for kp in range(nvper):
+            xper = xip * cosper[kp] - yip * sinper[kp]
+            yper = yip * cosper[kp] + xip * sinper[kp]
+            sxsave = (snr[ip] * xper - snv[ip] * yper) / Rf[ip]
+            sysave = (snr[ip] * yper + snv[ip] * xper) / Rf[ip]
+            base = gsave - 2.0 * (xper * rcosuv + yper * rsinuv)
+            deriv_num = rcosuv * sxsave + rsinuv * sysave + dsave
+
+            if kp == 0 or nv == 1:
+                tidx_u = idx_all + iuoff
+                ivoff_k = ivoff + (2 * nu * kp if nv == 1 else 0)
+                tidx_v = idx_all + ivoff_k
+                tanu_use = tanu[tidx_u]
+                tanv_use = tanv[tidx_v]
+                ga1 = tanu_use * (guu_b[ip] * tanu_use + guv_b[ip] * tanv_use) + gvv_b[ip] * tanv_use * tanv_use
+                ga2 = tanu_use * (auu[ip] * tanu_use + auv[ip] * tanv_use) + avv[ip] * tanv_use * tanv_use
+                ga2 = ga2 / ga1
+                ga1s = 1.0 / jnp.sqrt(ga1)
+                mask = idx_all != ip if kp == 0 else jnp.ones((nuv_full,), dtype=bool)
+                safe_base = jnp.where(mask, base, 1.0)
+                ftemp = 1.0 / safe_base
+                htemp = jnp.sqrt(ftemp)
+                deriv = ftemp * htemp * deriv_num
+                delgr = delgr + jnp.where(mask, htemp - ga1s, 0.0)
+                delgrp = delgrp + jnp.where(mask, deriv - ga2 * ga1s, 0.0)
+            else:
+                ftemp = 1.0 / base
+                htemp = jnp.sqrt(ftemp)
+                delgr = delgr + htemp
+                delgrp = delgrp + ftemp * htemp * deriv_num
+
+        if nv == 1 and nvper > 1:
+            scale = 1.0 / float(nvper)
+            delgr = delgr * scale
+            delgrp = delgrp * scale
+
+        gstore = gstore + bex[ip] * delgr
+        del_iuv = delgrp[iuv_grid]
+        del_ref = delgrp[iref_grid]
+        ka_grid = del_iuv - del_ref
+        g1_sym = jnp.einsum("uv,fv->uf", ka_grid, cosv_modes)
+        g2_sym = jnp.einsum("uv,fv->uf", ka_grid, sinv_modes)
+
+        gcos = jnp.einsum("mu,uf->mf", sinm_sym, g1_sym)
+        gsin = jnp.einsum("mu,uf->mf", cosm_sym, g2_sym)
+        total_plus = jnp.reshape(gcos + gsin, (-1,))
+        total_minus = jnp.reshape(gcos - gsin, (-1,))
+        grpmn = grpmn.at[idx_p_flat, ip].add(total_plus)
+        grpmn = grpmn.at[idx_m_negative, ip].add(total_minus[negative_positions_arr])
+
+        if lasym:
+            ks_grid = del_iuv + del_ref
+            g1_asym = jnp.einsum("uv,fv->uf", ks_grid, cosv_modes)
+            g2_asym = jnp.einsum("uv,fv->uf", ks_grid, sinv_modes)
+            gcos_asym = jnp.einsum("mu,uf->mf", sinm_asym, g1_asym)
+            gsin_asym = jnp.einsum("mu,uf->mf", cosm_asym, g2_asym)
+            total_plus_asym = jnp.reshape(gcos_asym + gsin_asym, (-1,))
+            total_minus_asym = jnp.reshape(gcos_asym - gsin_asym, (-1,))
+            row_off = int(mnpd)
+            grpmn = grpmn.at[row_off + idx_p_flat, ip].add(total_plus_asym)
+            grpmn = grpmn.at[row_off + idx_m_negative, ip].add(total_minus_asym[negative_positions_arr])
+
+    return gstore, grpmn
+
+
 def dense_mode_vacuum_solve_jax(
     mode_matrix: Any,
     rhs_mode: Any,

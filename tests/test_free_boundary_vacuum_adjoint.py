@@ -7,16 +7,23 @@ from vmec_jax._compat import enable_x64
 from vmec_jax.external_fields import CoilFieldParams, sample_coil_field_cylindrical
 from vmec_jax.free_boundary import (
     _build_vmec_mode_basis,
+    _ensure_vmec_nonsingular_kernel_tables,
     _vmec_bvec_from_gsource,
+    _vmec_mode_matrix_from_grpmn,
+    _vmec_nonsingular_terms_from_bexni,
     _vmec_source_from_gsource,
+    ExternalBoundarySample,
+    VacuumBoundaryFields,
     vacuum_boundary_fields_from_cylindrical,
 )
 from vmec_jax.free_boundary_adjoint import (
     dense_mode_vacuum_solve_jax,
     dense_vacuum_residual,
     dense_vacuum_solve_jax,
+    mode_matrix_from_grpmn_jax,
     mode_rhs_from_gsource_jax,
     vacuum_boundary_fields_from_cylindrical_jax,
+    vmec_nonsingular_terms_from_bexni_jax,
     vmec_source_from_gsource_jax,
 )
 
@@ -160,6 +167,105 @@ def _mode_rhs_from_basis(gsource, basis):
     )
 
 
+def _mode_matrix_from_basis(grpmn, basis):
+    return mode_matrix_from_grpmn_jax(
+        grpmn,
+        sin_basis=basis["sinmni"],
+        cos_basis=basis["cosmni"],
+        xmpot=basis["xmpot"],
+        n_raw=basis["n_raw"],
+        lasym=bool(basis["lasym"]),
+        mn0=int(basis["mn0"]),
+    )
+
+
+def _nonsingular_boundary_sample(*, radius_shift: float = 0.0):
+    basis = _mode_basis_for_rhs_tests(lasym=True)
+    ntheta = int(basis["nu_full"])
+    nzeta = 5
+    theta = np.asarray(basis["theta"], dtype=float).reshape(ntheta, nzeta)
+    zeta = np.asarray(basis["zeta"], dtype=float).reshape(ntheta, nzeta)
+    R = 1.25 + 0.04 * radius_shift + 0.05 * np.cos(theta) + 0.02 * np.cos(theta - zeta)
+    Z = 0.18 * np.sin(theta) + 0.03 * np.sin(theta + zeta)
+    Ru = -0.05 * np.sin(theta) - 0.02 * np.sin(theta - zeta)
+    Zu = 0.18 * np.cos(theta) + 0.03 * np.cos(theta + zeta)
+    Rv = 0.02 * np.sin(theta - zeta)
+    Zv = 0.03 * np.cos(theta + zeta)
+    ruu = -0.05 * np.cos(theta) - 0.02 * np.cos(theta - zeta)
+    ruv = 0.02 * np.cos(theta - zeta)
+    rvv = -0.02 * np.cos(theta - zeta)
+    zuu = -0.18 * np.sin(theta) - 0.03 * np.sin(theta + zeta)
+    zuv = -0.03 * np.sin(theta + zeta)
+    zvv = -0.03 * np.sin(theta + zeta)
+    zeros = np.zeros_like(R)
+    ones = np.ones_like(R)
+    vac = VacuumBoundaryFields(
+        bu=zeros,
+        bv=zeros,
+        bsupu=zeros,
+        bsupv=zeros,
+        bsqvac=zeros,
+        bnormal=zeros,
+        bnormal_unit=zeros,
+        g_uu=ones,
+        g_uv=zeros,
+        g_vv=ones,
+        det_guv=ones,
+    )
+    sample = ExternalBoundarySample(
+        mgrid_path="synthetic",
+        R=R,
+        Z=Z,
+        Ru=Ru,
+        Zu=Zu,
+        Rv=Rv,
+        Zv=Zv,
+        phi=zeta / float(basis["nfp"]),
+        br=zeros,
+        bp=zeros,
+        bz=zeros,
+        br_mgrid=zeros,
+        bp_mgrid=zeros,
+        bz_mgrid=zeros,
+        br_axis=zeros,
+        bp_axis=zeros,
+        bz_axis=zeros,
+        axis_r=np.zeros((1,), dtype=float),
+        axis_z=np.zeros((1,), dtype=float),
+        vac_ext=vac,
+        ruu=ruu,
+        ruv=ruv,
+        rvv=rvv,
+        zuu=zuu,
+        zuv=zuv,
+        zvv=zvv,
+    )
+    return basis, sample
+
+
+def _jax_nonsingular_terms(sample, basis, bexni):
+    tables = _ensure_vmec_nonsingular_kernel_tables(basis=basis, nv=sample.R.shape[1], nvper=2)
+    return vmec_nonsingular_terms_from_bexni_jax(
+        R=sample.R,
+        Z=sample.Z,
+        Ru=sample.Ru,
+        Zu=sample.Zu,
+        Rv=sample.Rv,
+        Zv=sample.Zv,
+        ruu=sample.ruu,
+        ruv=sample.ruv,
+        rvv=sample.rvv,
+        zuu=sample.zuu,
+        zuv=sample.zuv,
+        zvv=sample.zvv,
+        bexni=bexni,
+        basis=basis,
+        tables=tables,
+        signgs=1,
+        nvper=2,
+    )
+
+
 @pytest.mark.parametrize("lasym", [False, True])
 def test_jax_vmec_source_and_mode_rhs_match_numpy_reference(lasym):
     enable_x64(True)
@@ -203,6 +309,161 @@ def test_jax_vmec_mode_rhs_gradient_wrt_gsource_matches_finite_difference(lasym)
     eps = 1.0e-6
     fd = (objective(eps) - objective(-eps)) / (2.0 * eps)
     np.testing.assert_allclose(exact, fd, rtol=3.0e-9, atol=1.0e-11)
+
+
+@pytest.mark.parametrize("lasym", [False, True])
+def test_jax_vmec_mode_matrix_matches_numpy_reference(lasym):
+    enable_x64(True)
+    basis = _mode_basis_for_rhs_tests(lasym=lasym)
+    mnpd2 = int(basis["mnpd2"])
+    nuv3 = int(basis["nuv3"])
+    rows = np.arange(mnpd2, dtype=float)[:, None]
+    cols = np.arange(nuv3, dtype=float)[None, :]
+    grpmn = 0.04 * np.sin(0.3 + 0.2 * rows + 0.1 * cols) + 0.02 * np.cos(0.4 * rows - 0.3 * cols)
+
+    actual = _mode_matrix_from_basis(grpmn, basis)
+    expected = _vmec_mode_matrix_from_grpmn(grpmn=grpmn, basis=basis)
+
+    np.testing.assert_allclose(actual, expected, rtol=1.0e-13, atol=1.0e-13)
+
+
+@pytest.mark.parametrize("lasym", [False, True])
+def test_jax_vmec_mode_matrix_gradient_wrt_grpmn_matches_finite_difference(lasym):
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jax, jnp
+
+    enable_x64(True)
+    basis = _mode_basis_for_rhs_tests(lasym=lasym)
+    mnpd2 = int(basis["mnpd2"])
+    nuv3 = int(basis["nuv3"])
+    rows = np.arange(mnpd2, dtype=float)[:, None]
+    cols = np.arange(nuv3, dtype=float)[None, :]
+    grpmn = jnp.asarray(
+        0.03 * np.sin(0.2 + 0.15 * rows + 0.1 * cols)
+        + 0.01 * np.cos(0.25 * rows - 0.35 * cols),
+        dtype=float,
+    )
+    direction = jnp.asarray(np.cos(0.4 * rows + 0.2 * cols), dtype=float)
+    weights = jnp.asarray(np.sin(0.1 + np.arange(int(_mode_matrix_from_basis(grpmn, basis).size))), dtype=float)
+    weights = jnp.reshape(weights, _mode_matrix_from_basis(grpmn, basis).shape)
+
+    def objective(scale):
+        matrix = _mode_matrix_from_basis(grpmn + scale * direction, basis)
+        return jnp.vdot(weights, matrix)
+
+    exact = jax.grad(objective)(0.0)
+    eps = 1.0e-6
+    fd = (objective(eps) - objective(-eps)) / (2.0 * eps)
+
+    np.testing.assert_allclose(exact, fd, rtol=3.0e-9, atol=1.0e-11)
+
+
+@pytest.mark.parametrize("lasym", [False, True])
+def test_jax_vmec_source_matrix_solve_chain_gradients_match_finite_difference(lasym):
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jax, jnp
+
+    enable_x64(True)
+    basis = _mode_basis_for_rhs_tests(lasym=lasym)
+    gsource = jnp.asarray(np.linspace(-0.2, 0.35, int(basis["nuv_full"]), dtype=float))
+    g_direction = jnp.asarray(np.sin(np.arange(int(basis["nuv_full"]), dtype=float) + 0.2))
+    mnpd2 = int(basis["mnpd2"])
+    nuv3 = int(basis["nuv3"])
+    rows = np.arange(mnpd2, dtype=float)[:, None]
+    cols = np.arange(nuv3, dtype=float)[None, :]
+    grpmn = jnp.asarray(0.01 * np.sin(0.4 + 0.2 * rows + 0.15 * cols), dtype=float)
+    grpmn_direction = jnp.asarray(0.02 * np.cos(0.2 * rows - 0.1 * cols), dtype=float)
+    phi_weights = jnp.asarray(np.cos(0.3 + np.arange(nuv3, dtype=float)), dtype=float)
+
+    def response(source_scale, matrix_scale):
+        rhs = _mode_rhs_from_basis(gsource + source_scale * g_direction, basis)
+        matrix = _mode_matrix_from_basis(grpmn + matrix_scale * grpmn_direction, basis)
+        out = dense_mode_vacuum_solve_jax(
+            matrix,
+            rhs,
+            basis["sinmni"],
+            basis["cosmni"] if lasym else None,
+        )
+        return 0.5 * jnp.vdot(out["mode_coeffs"], out["mode_coeffs"]) + 0.1 * jnp.vdot(
+            phi_weights,
+            out["phi_flat"],
+        )
+
+    exact_source = jax.grad(lambda scale: response(scale, 0.0))(0.0)
+    exact_matrix = jax.grad(lambda scale: response(0.0, scale))(0.0)
+    eps = 1.0e-6
+    fd_source = (response(eps, 0.0) - response(-eps, 0.0)) / (2.0 * eps)
+    fd_matrix = (response(0.0, eps) - response(0.0, -eps)) / (2.0 * eps)
+
+    np.testing.assert_allclose(exact_source, fd_source, rtol=5.0e-8, atol=1.0e-10)
+    np.testing.assert_allclose(exact_matrix, fd_matrix, rtol=5.0e-8, atol=1.0e-10)
+
+
+def test_jax_vmec_nonsingular_green_terms_match_numpy_reference():
+    enable_x64(True)
+    basis, sample = _nonsingular_boundary_sample()
+    bexni = np.linspace(-0.18, 0.24, int(basis["nuv3"]), dtype=float)
+
+    actual_gsource, actual_grpmn = _jax_nonsingular_terms(sample, basis, bexni)
+    expected_gsource, expected_grpmn = _vmec_nonsingular_terms_from_bexni(
+        sample=sample,
+        basis=basis,
+        bexni=bexni,
+        signgs=1,
+        nvper=2,
+    )
+
+    np.testing.assert_allclose(actual_gsource, expected_gsource, rtol=2.0e-12, atol=2.0e-12)
+    np.testing.assert_allclose(actual_grpmn, expected_grpmn, rtol=2.0e-12, atol=2.0e-12)
+
+
+def test_jax_vmec_nonsingular_green_solve_chain_gradients_match_finite_difference():
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jax, jnp
+
+    enable_x64(True)
+    basis, sample = _nonsingular_boundary_sample()
+    base_bex = jnp.asarray(np.linspace(-0.18, 0.24, int(basis["nuv3"]), dtype=float))
+    bex_direction = jnp.asarray(np.cos(0.2 + np.arange(int(basis["nuv3"]), dtype=float)))
+    phi_weights = jnp.asarray(np.sin(0.1 + np.arange(int(basis["nuv3"]), dtype=float)), dtype=float)
+
+    def response(source_scale, geometry_scale):
+        tables = _ensure_vmec_nonsingular_kernel_tables(basis=basis, nv=sample.R.shape[1], nvper=2)
+        gsource, grpmn = vmec_nonsingular_terms_from_bexni_jax(
+            R=jnp.asarray(sample.R) + 0.04 * geometry_scale,
+            Z=sample.Z,
+            Ru=sample.Ru,
+            Zu=sample.Zu,
+            Rv=sample.Rv,
+            Zv=sample.Zv,
+            ruu=sample.ruu,
+            ruv=sample.ruv,
+            rvv=sample.rvv,
+            zuu=sample.zuu,
+            zuv=sample.zuv,
+            zvv=sample.zvv,
+            bexni=base_bex + source_scale * bex_direction,
+            basis=basis,
+            tables=tables,
+            signgs=1,
+            nvper=2,
+        )
+        rhs = _mode_rhs_from_basis(gsource, basis)
+        matrix = _mode_matrix_from_basis(grpmn, basis)
+        out = dense_mode_vacuum_solve_jax(matrix, rhs, basis["sinmni"], basis["cosmni"])
+        return 0.5 * jnp.vdot(out["mode_coeffs"], out["mode_coeffs"]) + 0.1 * jnp.vdot(
+            phi_weights,
+            out["phi_flat"],
+        )
+
+    exact_source = jax.grad(lambda scale: response(scale, 0.0))(0.0)
+    exact_geometry = jax.grad(lambda scale: response(0.0, scale))(0.0)
+    eps = 1.0e-6
+    fd_source = (response(eps, 0.0) - response(-eps, 0.0)) / (2.0 * eps)
+    fd_geometry = (response(0.0, eps) - response(0.0, -eps)) / (2.0 * eps)
+
+    np.testing.assert_allclose(exact_source, fd_source, rtol=7.0e-7, atol=1.0e-10)
+    np.testing.assert_allclose(exact_geometry, fd_geometry, rtol=7.0e-7, atol=1.0e-10)
 
 
 def _mode_vacuum_inputs(*, lasym: bool = False):
