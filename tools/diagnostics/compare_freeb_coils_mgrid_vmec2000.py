@@ -717,6 +717,7 @@ def _vmec2000_summary(vmec2000_result: Any) -> dict[str, Any]:
         "workdir": vmec2000_result.workdir,
         "input_path": vmec2000_result.input_path,
         "returncode": int(getattr(vmec2000_result, "returncode", 0)),
+        "opened_mgrid": "Opening vacuum field file:" in vmec2000_result.stdout,
         "runtime_s": float(vmec2000_result.runtime_s),
         "threed1_path": vmec2000_result.threed1_path,
         "threed1_tail": _tail_text(vmec2000_result.threed1_path, lines=80),

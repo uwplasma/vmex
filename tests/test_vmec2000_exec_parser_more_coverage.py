@@ -21,6 +21,7 @@ from tools.diagnostics.compare_freeb_coils_mgrid_vmec2000 import (
     _make_freeb_indata,
     _parser,
     _vmec2000_underconverged_details,
+    _vmec2000_summary,
 )
 
 
@@ -254,6 +255,24 @@ def test_freeb_generated_mgrid_nonzero_exit_is_not_labeled_underconverged() -> N
     assert details["nonzero_returncode"] is True
     assert details["reached_niter"] is False
     assert details["printed_try_increasing_niter"] is False
+
+
+def test_vmec2000_summary_records_whether_mgrid_was_opened(tmp_path: Path) -> None:
+    result = SimpleNamespace(
+        workdir=tmp_path,
+        input_path=tmp_path / "input.case",
+        returncode=0,
+        stdout="header\n  Opening vacuum field file: mgrid_test.nc\n",
+        stderr="",
+        runtime_s=0.25,
+        threed1_path=None,
+        stages=[],
+    )
+
+    summary = _vmec2000_summary(result)
+
+    assert summary["returncode"] == 0
+    assert summary["opened_mgrid"] is True
 
 
 def test_freeb_diagnostic_schedule_scalar_fallback_and_indata_arrays() -> None:

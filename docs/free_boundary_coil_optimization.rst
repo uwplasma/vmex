@@ -465,12 +465,13 @@ override ``--nzeta``, choose a value compatible with the generated grid
 (``kp``).
 
 If VMEC2000 exits before writing ``wout_*.nc``, the JSON still records the
-workdir, return code, stdout/stderr tails, ``threed1`` tail, and parsed
-iteration trace. Nonzero VMEC2000 exits are reported as ``nonzero_exit`` rather
-than as ordinary underconvergence, so generated-grid crashes are visible in the
-promotion evidence. That is the expected current behavior for the low-iteration
-LP-QA generated ``mgrid`` case; it is a generated-``mgrid``/VMEC2000 parity gap
-to bound, not a direct-coil provider failure.
+workdir, return code, whether VMEC2000 opened the vacuum grid, stdout/stderr
+tails, ``threed1`` tail, and parsed iteration trace. Nonzero VMEC2000 exits are
+reported as ``nonzero_exit`` rather than as ordinary underconvergence, so
+generated-grid crashes are visible in the promotion evidence. That is the
+expected current behavior for the low-iteration LP-QA generated ``mgrid`` case;
+it is a generated-``mgrid``/VMEC2000 parity gap to bound, not a direct-coil
+provider failure.
 
 The ``--ns-array``, ``--niter-array``, and ``--ftol-array`` options define a
 shared multigrid schedule used by both the ``vmec_jax`` generated-``mgrid`` and

@@ -80,6 +80,7 @@ Steps taken:
 64. Threaded VMEC2000 subprocess return codes through `run_xvmec2000` and the generated-`mgrid` diagnostic.
 65. Reclassified generated-`mgrid` VMEC2000 failures with nonzero return codes as `nonzero_exit` instead of conflating them with ordinary no-WOUT underconvergence.
 66. Fixed `run_xvmec2000` to copy relative `MGRID_FILE` assets from the input deck directory into the executable workdir, preventing accidental fixed-boundary fallbacks in local optional diagnostics.
+67. Added `opened_mgrid` to generated-`mgrid` VMEC2000 diagnostic summaries so parity evidence confirms the executable actually consumed the vacuum grid.
 
 Results obtained:
 
