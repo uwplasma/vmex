@@ -153,6 +153,8 @@ Results obtained:
 75. Conclusion from the benchmark: the compiled low-resolution JAX operator is correct and fast in isolation, but the current driver path still pays accepted-solve compilation/dispatch cost. It should remain opt-in for validation while the next performance rung moves compilation outside accepted-state timing or replaces the dense route with a matrix-free/custom-linear-solve operator.
 76. Bounded generated-`mgrid`/direct-coil LPQA diagnostic passed with VMEC2000 skipped: `jax_direct_vs_mgrid_passed=True`; direct and generated-`mgrid` WOUT arrays/scalars matched within the configured `1e-12` tolerance.
 77. Optional VMEC2000 short leg completed without WOUT (`vmec2000_status=no_wout`) while the vmec_jax direct/generated-`mgrid` comparison still passed. This keeps the VMEC2000 promotion lane open rather than overclaiming external WOUT parity.
+78. Patched the direct-coil benchmark matrix to use concrete JAX GPU platform names (`cuda`/`rocm`) instead of the generic `gpu` alias, because the office JAX install reports devices as `cuda:*` while `JAX_PLATFORMS=gpu` tries unavailable ROCm first.
+79. Office quick CPU/GPU direct-coil benchmark matrix completed after the platform fix. CUDA provider and gradient microbenchmarks passed, but the tiny direct free-boundary solve remains slower on GPU (`warm_min≈2.24 s`) than CPU (`warm_min≈0.34 s`). The recorded final NESTOR sample/solve times are small (`sample≈0.0126 s`, `solve≈0.0062 s` on GPU), so the remaining GPU lane is launch/compile/replay overhead around the full solve rather than the final dense solve itself.
 
 Best next steps:
 
@@ -160,6 +162,7 @@ Best next steps:
 2. Profile and reduce cold exact tape build/solve and initial tangent construction on GPU; the latest comparison shows replay dispatch is not the only remaining blocker.
 3. Keep the opt-in JAX NESTOR driver path as validation-only until the accepted-solve compilation/dispatch cost is removed. The host bridge remains the production/default route.
 4. Keep coverage above 95% as new operator code is promoted from validation scaffolds into production paths.
+5. For GPU performance, prioritize accepted-point replay/tangent construction and compilation/dispatch amortization over tiny raw direct-solve offload; the current microbenchmarks show tiny solves are still CPU-favorable.
 
 Need from user:
 
