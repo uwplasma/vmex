@@ -220,7 +220,7 @@ Results obtained:
 130. Strict Sphinx build passed after tightening the free-boundary coil-optimization status wording.
 131. The fused strict-update helper now accepts `enforce_edge=False`; GPU direct-coil free-boundary solves can use the same cached update step without accidentally pinning the LCFS.
 132. Targeted strict-update validation passed: `tests/test_solve_wave4_coverage.py` -> 22 passed, and `tests/test_discrete_adjoint_qh.py -k strict_update` -> 12 passed, 1 skipped.
-133. Office CPU/CUDA direct-coil benchmark after the free-boundary-aware strict update: CPU warm `0.093 s`, CUDA warm `0.249 s`; CUDA `update_state` fell to about `0.001 s`, leaving `iteration_control_s` as the dominant named/non-kernel control bucket.
+133. Office CPU/CUDA direct-coil benchmark after the free-boundary-aware strict update: CPU warm `0.098 s`, CUDA warm `0.255 s`; CUDA `update_state` fell to about `0.001 s`, leaving `iteration_control_s` as the dominant named control bucket (`0.089 s` CUDA versus `0.033 s` CPU).
 134. Residual-iteration timing now records `iteration_control_s` and propagates it through solver diagnostics, optimizer profiles, and the free-boundary direct-coil benchmark matrix.
 
 Best next steps:

@@ -2338,11 +2338,13 @@ diagnostics, not proof that full free-boundary solves should run on GPU.  The
 row was still CPU-favorable (``2.07 s`` CUDA versus ``0.328 s`` CPU warm), while
 ``--jit-forces`` reduced the tiny CUDA warm solve to ``0.313 s`` and CPU to
 ``0.101 s``.  Making the fused strict update free-boundary-aware then reduced
-the tiny CUDA warm solve further to ``0.249 s`` by cutting the warm
+the tiny CUDA warm solve further to about ``0.25 s`` by cutting the warm
 ``update_state`` bucket to about ``0.001 s``.  The final accepted-state NESTOR
 solve itself remains millisecond-scale.  The residual runtime is now dominated
 by the ``iteration_control_s`` bucket, which covers host-side residual
-acceptance/time-control logic between preconditioning and the accepted update.
+acceptance/time-control logic between preconditioning and the accepted update;
+the same ``office`` probe measured about ``0.089 s`` in that bucket on CUDA
+versus ``0.033 s`` on CPU.
 
 Control flags:
 
