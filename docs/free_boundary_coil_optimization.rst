@@ -78,14 +78,18 @@ The validation ladder is:
 7. Boozer/QS objective: the same complete-solve finite-difference checks after
    Boozer/QS diagnostics are in the objective path.
 
-The first five rungs are implemented as fast tests today. The combined JAX
+The first six rungs are implemented as fast tests today. The combined JAX
 operator is also threaded into the free-boundary driver behind the opt-in
 ``VMEC_JAX_FREEB_JAX_NESTOR_OPERATOR=1`` diagnostic flag for low-resolution
 validation. For stellarator-symmetric runs, the JAX path reconstructs the full
 VMEC angular grid internally for the nonsingular Green block while keeping the
 analytic/singular block on the active grid, matching the host bridge. The
-production NESTOR adjoint is therefore still a phase-2 deliverable. The intended
-design is
+JAX operator closure can be precompiled and cached with
+``VMEC_JAX_FREEB_JAX_NESTOR_JIT_OPERATOR=1`` (the default when JIT is enabled),
+but the host bridge remains the production/default route because the compiled
+operator is still a validation primitive, not yet the final matrix-free
+adjoint. The production NESTOR adjoint is therefore still a phase-2 deliverable.
+The intended design is
 to expose a JAX-native NESTOR operator ``A(q) phi = b(q, I, c)`` where ``q`` is
 the VMEC boundary state and ``I, c`` are coil currents and curve coefficients.
 The backward pass should solve ``A(q)^T lambda = dJ/dphi`` and then use JAX

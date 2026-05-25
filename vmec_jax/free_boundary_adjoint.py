@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
+
 from vmec_jax._compat import jax, jnp
 
 
@@ -577,7 +579,10 @@ def vmec_analytic_terms_from_geometry_jax(
     bcos = jnp.zeros((mf + 1, 2 * nf + 1), dtype=Rf.dtype)
     gsin = jnp.zeros((mf + 1, 2 * nf + 1, npts), dtype=Rf.dtype)
     gcos = jnp.zeros((mf + 1, 2 * nf + 1, npts), dtype=Rf.dtype)
-    cmns = jnp.asarray(basis["cmns"])
+    # ``cmns`` is a static VMEC analytic-integral coefficient table, not a
+    # differentiable variable.  Keep it as a host constant so the compiled
+    # closure can skip exact-zero coefficients without tracer booleans.
+    cmns = np.asarray(basis["cmns"])
 
     sign1 = 1.0
     fl1 = 0.0
@@ -637,8 +642,8 @@ def vmec_analytic_terms_from_geometry_jax(
         tlm = tlm_next
         tlpm = tlp + tlm
 
-    xmpot = jnp.asarray(basis["xmpot"], dtype=jnp.int32)
-    n_raw = jnp.asarray(basis["n_raw"], dtype=jnp.int32)
+    xmpot = np.asarray(basis["xmpot"], dtype=np.int32)
+    n_raw = np.asarray(basis["n_raw"], dtype=np.int32)
     out_s = jnp.zeros((mnpd,), dtype=Rf.dtype)
     out_c = jnp.zeros((mnpd,), dtype=Rf.dtype)
     gr_s = jnp.zeros((mnpd, npts), dtype=Rf.dtype)

@@ -10,7 +10,7 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-05-25 after threading the combined JAX NESTOR operator into an opt-in free-boundary driver path.
+Last updated: 2026-05-25 after adding a cached compiled closure for the opt-in JAX NESTOR driver path and benchmarking it against the host bridge.
 
 Steps taken:
 
@@ -62,12 +62,16 @@ Steps taken:
 46. Added combined analytic+nonsingular mode-space solve gradient checks for source and boundary-geometry perturbations.
 47. Added `dense_vmec_nestor_mode_solve_jax`, a single combined JAX operator API for low-resolution NESTOR validation that assembles nonsingular and analytic/singular terms, projects to mode space, and solves with the custom-linear-solve dense mode primitive.
 48. Threaded the combined JAX VMEC/NESTOR mode operator into `nestor_external_only_step` behind `VMEC_JAX_FREEB_JAX_NESTOR_OPERATOR=1`.
-49. Kept the new driver path guarded to full-grid-compatible cases; reduced stellarator-symmetric half-grid production solves still use the host-validated bridge.
+49. Kept the new driver path guarded to explicit active-grid-compatible cases while preserving the host bridge as the production/default route.
 50. Added diagnostics for `jax_nestor_operator_applied`, `jax_nestor_operator_reason`, and `jax_nestor_operator_time_s`.
 51. Added a host-vs-JAX driver parity regression for a tiny LASYM full-grid case, including `phi`, `bsqvac`, and scalar diagnostic parity.
 52. Added a forced-active LASYM direct-coil complete-solve finite-difference gate using `VMEC_JAX_FREEB_JAX_NESTOR_OPERATOR=1`; it checks finite nonzero central-FD response for one coil current and one Fourier geometry coefficient.
 53. Ported JAX-side full-grid reconstruction for stellarator-symmetric reduced active-grid samples in the combined dense VMEC/NESTOR operator. The nonsingular Green block receives the reconstructed full grid while the analytic/singular block stays on the active grid, matching the host bridge.
 54. Switched the opt-in complete-solve finite-difference gate to the default stellarator-symmetric path after the reduced-grid reconstruction landed.
+55. Added a shape/content-keyed compiled-closure cache for the opt-in JAX VMEC/NESTOR operator. The closure bakes mode-basis and Green-function tables as static constants while keeping boundary geometry and external normal-field source arrays dynamic.
+56. Made the JAX analytic/singular operator JIT-compatible by keeping static VMEC coefficient/mode-index tables as host constants instead of tracer scalars.
+57. Preserved pytest compatibility by falling back to the eager JAX operator when the global test fixture has `jax_disable_jit=True`.
+58. Added driver diagnostics for `jax_nestor_operator_jitted` and `jax_nestor_operator_cache_hit`.
 
 Results obtained:
 
@@ -139,12 +143,20 @@ Results obtained:
 69. Reduced-grid JAX operator parity checks passed: `2 passed in 3.00 s` for the reduced stellarator-symmetric host parity and guard tests.
 70. Default stellarator-symmetric opt-in complete-solve FD gate passed: `1 passed in 14.54 s`.
 71. Focused free-boundary/JAX-NESTOR suites passed after reduced-grid support: `54 passed, 1 skipped in 48.47 s`.
+72. Focused JAX NESTOR driver and direct-coil FD tests passed after adding the compiled-closure cache and pytest eager fallback: `3 passed in 14.49 s`.
+73. Isolated cached compiled JAX NESTOR operator calls warm to roughly `0.00015-0.00035 s` after a one-time compile on the tiny combined analytic+nonsingular test operator.
+74. Bounded CPU driver comparison showed:
+    - host bridge synthetic direct-coil warm active solve: about `0.0027 s`;
+    - eager opt-in JAX NESTOR warm active solve: about `2.48 s`;
+    - cached/precompiled opt-in JAX NESTOR warm active solve in the driver: about `1.49 s`;
+    - optional ESSOS fixture remains fast but did not force active NESTOR in the one-iteration smoke (`n_iter=0`, no active update).
+75. Conclusion from the benchmark: the compiled low-resolution JAX operator is correct and fast in isolation, but the current driver path still pays accepted-solve compilation/dispatch cost. It should remain opt-in for validation while the next performance rung moves compilation outside accepted-state timing or replaces the dense route with a matrix-free/custom-linear-solve operator.
 
 Best next steps:
 
 1. Promote the opt-in complete-solve FD gate from finite/nonzero response to AD-vs-central-FD once the production full-solve adjoint is threaded through accepted-state quantities.
 2. Profile and reduce cold exact tape build/solve and initial tangent construction on GPU; the latest comparison shows replay dispatch is not the only remaining blocker.
-3. Compare the opt-in JAX NESTOR driver path against the host bridge on a small real direct-coil finite-pressure case, then decide whether it can become the validation default for low-resolution direct-coil cases.
+3. Keep the opt-in JAX NESTOR driver path as validation-only until the accepted-solve compilation/dispatch cost is removed. The host bridge remains the production/default route.
 4. Keep coverage above 95% as new operator code is promoted from validation scaffolds into production paths.
 
 Need from user:
@@ -968,22 +980,22 @@ WP1 Provider base API:                         100%
 WP2 Pure JAX coil Biot-Savart:                 92%
 WP3 ESSOS adapter:                             84%
 WP4 JAX mgrid interpolation:                   85%
-WP5 Free-boundary provider hook:               94%
+WP5 Free-boundary provider hook:               95%
 WP6 Direct-coil forward example:               90%
 WP7 Vacuum adjoint scaffold:                  100%
 WP8 Gradient checks:                           99%
 WP9 VMEC2000 diagnostics:                      86%
-WP10 Benchmarks/diagnostics:                   98%
+WP10 Benchmarks/diagnostics:                   99%
 WP11 Coil-only QS optimization example:        82%
 WP12 Robust coil perturbations:               100%
 WP13 Documentation:                            97%
 WP14 CI policy:                                90%
-Overall branch completion:                     96%
+Overall branch completion:                     97%
 ```
 
 ## Immediate Next Steps
 
-1. Compare the opt-in JAX NESTOR driver path against the host bridge on a small real direct-coil finite-pressure case, then decide whether it can become the validation default for low-resolution direct-coil cases.
+1. Keep the opt-in JAX NESTOR driver path as validation-only until the accepted-solve compilation/dispatch cost is removed. The host bridge remains the production/default route.
 2. Continue the VMEC2000 generated-mgrid WOUT comparator until the optional xfail can be bounded or promoted.
 3. Replace the phase-1 coil-only optimization proxy with Boozer/QS residuals only after the direct-coil free-boundary loop has validated gradients.
 4. Profile and reduce cold exact tape build/solve and initial tangent construction on GPU; convert benchmark JSON summaries into documentation plots.

@@ -9,6 +9,7 @@ WP0 scope:
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import hashlib
 import os
 import re
 import time
@@ -31,6 +32,7 @@ _FREEB_HOST_PHASE_CACHE: dict[tuple[int, int, tuple[str, ...]], np.ndarray] = {}
 _FREEB_TRIG_CACHE: dict[tuple[int, int, int, int, int, bool], Any] = {}
 _FREEB_BOUNDARY_SETUP_CACHE: dict[tuple[int, int], Any] = {}
 _FREEB_WINT_CACHE: dict[tuple[int, int, int], np.ndarray] = {}
+_FREEB_JAX_NESTOR_OPERATOR_FN_CACHE: dict[tuple[Any, ...], Any] = {}
 
 
 def _freeb_host_phase_stack(*, modes: Any, trig: Any, derivs: tuple[str, ...]) -> np.ndarray:
@@ -3106,6 +3108,168 @@ def _env_truthy(name: str, default: bool = False) -> bool:
     return raw.strip().lower() not in ("", "0", "false", "no")
 
 
+_JAX_NESTOR_BASIS_KEYS = (
+    "lasym",
+    "mf",
+    "nf",
+    "mn0",
+    "mnpd",
+    "mnpd2",
+    "nu_full",
+    "nuv3",
+    "nuv_full",
+    "onp",
+    "cmns",
+    "cos_phase",
+    "cosmni",
+    "imirr",
+    "imirr_full",
+    "n_raw",
+    "sin_phase",
+    "sinmni",
+    "theta",
+    "wint",
+    "xmpot",
+    "zeta",
+)
+
+
+def _digest_array_for_cache(value: Any) -> tuple[tuple[int, ...], str, str]:
+    arr = np.ascontiguousarray(np.asarray(value))
+    digest = hashlib.blake2b(arr.view(np.uint8), digest_size=16).hexdigest()
+    return tuple(int(i) for i in arr.shape), str(arr.dtype), digest
+
+
+def _mapping_cache_signature(mapping: dict[str, Any], keys: tuple[str, ...] | None = None) -> tuple[Any, ...]:
+    selected = tuple(sorted(mapping)) if keys is None else tuple(key for key in keys if key in mapping)
+    signature: list[Any] = []
+    for key in selected:
+        value = mapping[key]
+        if isinstance(value, dict):
+            continue
+        signature.append((key, _digest_array_for_cache(value)))
+    return tuple(signature)
+
+
+def _compact_jax_nestor_basis(basis: dict[str, Any]) -> dict[str, Any]:
+    return {key: basis[key] for key in _JAX_NESTOR_BASIS_KEYS if key in basis}
+
+
+def _jax_nestor_operator_cache_key(
+    *,
+    basis: dict[str, Any],
+    tables: dict[str, Any],
+    signgs: int,
+    nvper: int,
+    include_analytic: bool,
+    symmetric: bool,
+    input_signature: tuple[Any, ...] = (),
+) -> tuple[Any, ...]:
+    return (
+        int(signgs),
+        int(nvper),
+        bool(include_analytic),
+        bool(symmetric),
+        tuple(input_signature),
+        _mapping_cache_signature(basis, _JAX_NESTOR_BASIS_KEYS),
+        _mapping_cache_signature(tables),
+    )
+
+
+def _jax_nestor_input_signature(args: tuple[Any, ...]) -> tuple[Any, ...]:
+    return tuple((tuple(int(i) for i in np.asarray(arg).shape), str(np.asarray(arg).dtype)) for arg in args)
+
+
+def _jitted_jax_nestor_operator(
+    *,
+    basis: dict[str, Any],
+    tables: dict[str, Any],
+    signgs: int,
+    nvper: int,
+    include_analytic: bool,
+    symmetric: bool = False,
+    example_args: tuple[Any, ...] = (),
+) -> tuple[Any | None, bool]:
+    """Return a cached compiled dense JAX NESTOR operator closure.
+
+    The closure bakes mode-basis and kernel-table arrays as static constants so
+    the active free-boundary update does not execute the JAX operator as many
+    small eager dispatches. This cache is intentionally used only by the opt-in
+    research path selected with ``VMEC_JAX_FREEB_JAX_NESTOR_OPERATOR=1``.
+    """
+
+    try:
+        from ._compat import jax as _jax
+        from .free_boundary_adjoint import dense_vmec_nestor_mode_solve_jax
+    except Exception:
+        return None, False
+    if _jax is None:
+        return None, False
+    if bool(getattr(_jax.config, "jax_disable_jit", False)):
+        return None, False
+
+    key = _jax_nestor_operator_cache_key(
+        basis=basis,
+        tables=tables,
+        signgs=int(signgs),
+        nvper=int(nvper),
+        include_analytic=bool(include_analytic),
+        symmetric=bool(symmetric),
+        input_signature=_jax_nestor_input_signature(tuple(example_args)),
+    )
+    cached = _FREEB_JAX_NESTOR_OPERATOR_FN_CACHE.get(key)
+    if cached is not None:
+        return cached, True
+
+    if len(_FREEB_JAX_NESTOR_OPERATOR_FN_CACHE) >= 32:
+        _FREEB_JAX_NESTOR_OPERATOR_FN_CACHE.clear()
+
+    basis_static = _compact_jax_nestor_basis(basis)
+    tables_static = {key: tables[key] for key in sorted(tables)}
+
+    def _compiled(
+        R: Any,
+        Z: Any,
+        Ru: Any,
+        Zu: Any,
+        Rv: Any,
+        Zv: Any,
+        ruu: Any,
+        ruv: Any,
+        rvv: Any,
+        zuu: Any,
+        zuv: Any,
+        zvv: Any,
+        bexni: Any,
+    ) -> dict[str, Any]:
+        return dense_vmec_nestor_mode_solve_jax(
+            R=R,
+            Z=Z,
+            Ru=Ru,
+            Zu=Zu,
+            Rv=Rv,
+            Zv=Zv,
+            ruu=ruu,
+            ruv=ruv,
+            rvv=rvv,
+            zuu=zuu,
+            zuv=zuv,
+            zvv=zvv,
+            bexni=bexni,
+            basis=basis_static,
+            tables=tables_static,
+            signgs=int(signgs),
+            nvper=int(nvper),
+            include_analytic=bool(include_analytic),
+            symmetric=bool(symmetric),
+        )
+
+    jitted = _jax.jit(_compiled)
+    compiled = jitted.lower(*example_args).compile() if example_args else jitted
+    _FREEB_JAX_NESTOR_OPERATOR_FN_CACHE[key] = compiled
+    return compiled, False
+
+
 def _jax_nestor_operator_guard(
     *,
     sample: ExternalBoundarySample,
@@ -3158,7 +3322,7 @@ def _solve_vmec_like_mode_with_jax_nestor_operator(
     signgs: int,
     nvper: int,
     include_analytic: bool,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, bool, bool]:
     """Run the experimental dense JAX VMEC/NESTOR mode operator.
 
     Returns ``(phi, potvac, rhs_mode, mode_matrix, grpmn_total, gsource)``.
@@ -3173,26 +3337,56 @@ def _solve_vmec_like_mode_with_jax_nestor_operator(
         nv=int(np.asarray(sample.R).shape[1]),
         nvper=max(1, int(nvper)),
     )
-    out = dense_vmec_nestor_mode_solve_jax(
-        R=np.asarray(sample.R, dtype=float),
-        Z=np.asarray(sample.Z, dtype=float),
-        Ru=np.asarray(sample.Ru, dtype=float),
-        Zu=np.asarray(sample.Zu, dtype=float),
-        Rv=np.asarray(sample.Rv, dtype=float),
-        Zv=np.asarray(sample.Zv, dtype=float),
-        ruu=np.asarray(sample.ruu, dtype=float),
-        ruv=np.asarray(sample.ruv, dtype=float),
-        rvv=np.asarray(sample.rvv, dtype=float),
-        zuu=np.asarray(sample.zuu, dtype=float),
-        zuv=np.asarray(sample.zuv, dtype=float),
-        zvv=np.asarray(sample.zvv, dtype=float),
-        bexni=np.asarray(bexni, dtype=float),
-        basis=basis,
-        tables=tables,
-        signgs=int(signgs),
-        nvper=max(1, int(nvper)),
-        include_analytic=bool(include_analytic),
-    )
+    R = np.asarray(sample.R, dtype=float)
+    Z = np.asarray(sample.Z, dtype=float)
+    Ru = np.asarray(sample.Ru, dtype=float)
+    Zu = np.asarray(sample.Zu, dtype=float)
+    Rv = np.asarray(sample.Rv, dtype=float)
+    Zv = np.asarray(sample.Zv, dtype=float)
+    ruu = np.asarray(sample.ruu, dtype=float)
+    ruv = np.asarray(sample.ruv, dtype=float)
+    rvv = np.asarray(sample.rvv, dtype=float)
+    zuu = np.asarray(sample.zuu, dtype=float)
+    zuv = np.asarray(sample.zuv, dtype=float)
+    zvv = np.asarray(sample.zvv, dtype=float)
+    bexni_arr = np.asarray(bexni, dtype=float)
+    operator_args = (R, Z, Ru, Zu, Rv, Zv, ruu, ruv, rvv, zuu, zuv, zvv, bexni_arr)
+    compiled = None
+    cache_hit = False
+    if _env_truthy("VMEC_JAX_FREEB_JAX_NESTOR_JIT_OPERATOR", True):
+        compiled, cache_hit = _jitted_jax_nestor_operator(
+            basis=basis,
+            tables=tables,
+            signgs=int(signgs),
+            nvper=max(1, int(nvper)),
+            include_analytic=bool(include_analytic),
+            example_args=operator_args,
+        )
+    if compiled is None:
+        out = dense_vmec_nestor_mode_solve_jax(
+            R=R,
+            Z=Z,
+            Ru=Ru,
+            Zu=Zu,
+            Rv=Rv,
+            Zv=Zv,
+            ruu=ruu,
+            ruv=ruv,
+            rvv=rvv,
+            zuu=zuu,
+            zuv=zuv,
+            zvv=zvv,
+            bexni=bexni_arr,
+            basis=basis,
+            tables=tables,
+            signgs=int(signgs),
+            nvper=max(1, int(nvper)),
+            include_analytic=bool(include_analytic),
+        )
+        jit_used = False
+    else:
+        out = compiled(*operator_args)
+        jit_used = True
     potvac = np.asarray(out["mode_coeffs"], dtype=float)
     rhs_mode = np.asarray(out["rhs_mode"], dtype=float)
     mode_matrix = np.asarray(out["mode_matrix"], dtype=float)
@@ -3232,6 +3426,8 @@ def _solve_vmec_like_mode_with_jax_nestor_operator(
         mode_matrix,
         grpmn,
         gsource_nonsing,
+        jit_used,
+        cache_hit,
     )
 
 
@@ -3384,6 +3580,8 @@ def nestor_external_only_step(
     jax_nestor_operator_applied = False
     jax_nestor_operator_reason = "disabled"
     jax_nestor_operator_time_s = 0.0
+    jax_nestor_operator_jitted = False
+    jax_nestor_operator_cache_hit = False
     cache_build_time_s = 0.0
     source_time_s = 0.0
     bvec_time_s = 0.0
@@ -3531,6 +3729,8 @@ def nestor_external_only_step(
                                         amatrix_mode_from_grpmn,
                                         grpmn_total,
                                         gsource_vmec,
+                                        jax_operator_jitted,
+                                        jax_operator_cache_hit,
                                     ) = _solve_vmec_like_mode_with_jax_nestor_operator(
                                         sample=sample,
                                         basis=cache.mode_basis,
@@ -3551,6 +3751,8 @@ def nestor_external_only_step(
                                     )
                                     matrix_override_applied = True
                                     jax_nestor_operator_applied = True
+                                    jax_nestor_operator_jitted = bool(jax_operator_jitted)
+                                    jax_nestor_operator_cache_hit = bool(jax_operator_cache_hit)
                                     jax_nestor_operator_reason = "applied"
                                     jax_operator_solved = True
                                 except Exception as exc:
@@ -3637,6 +3839,8 @@ def nestor_external_only_step(
         "jax_nestor_operator_applied": bool(jax_nestor_operator_applied),
         "jax_nestor_operator_reason": str(jax_nestor_operator_reason),
         "jax_nestor_operator_time_s": float(jax_nestor_operator_time_s),
+        "jax_nestor_operator_jitted": bool(jax_nestor_operator_jitted),
+        "jax_nestor_operator_cache_hit": bool(jax_nestor_operator_cache_hit),
         "sample_ntheta": int(ntheta),
         "sample_nzeta": int(nzeta),
         "sample_points": int(ntheta * nzeta),
