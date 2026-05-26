@@ -11,20 +11,29 @@ import hashlib
 import io
 import tarfile
 import urllib.request
+from dataclasses import dataclass
 from collections.abc import Sequence
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-DEFAULT_TAG = "assets-20260316-nc"
-ASSET_NAME = "vmec_jax_assets_20260316_nc_only.tar.gz"
-DEFAULT_URL = (
+REFERENCE_TAG = "assets-20260316-nc"
+REFERENCE_ASSET_NAME = "vmec_jax_assets_20260316_nc_only.tar.gz"
+REFERENCE_URL = (
     "https://github.com/uwplasma/vmec_jax/releases/download/"
-    f"{DEFAULT_TAG}/{ASSET_NAME}"
+    f"{REFERENCE_TAG}/{REFERENCE_ASSET_NAME}"
 )
-DEFAULT_SHA256 = "3344fc2401fffed240ee57ae741ec521594c592627c76dae203503f485e4c0d8"
+REFERENCE_SHA256 = "3344fc2401fffed240ee57ae741ec521594c592627c76dae203503f485e4c0d8"
 
-COMMON_ASSET_PATHS = (
+WOUT_FIXTURES_TAG = "assets-20260526-wout-fixtures"
+WOUT_FIXTURES_ASSET_NAME = "vmec_jax_wout_fixtures_20260526.tar.gz"
+WOUT_FIXTURES_URL = (
+    "https://github.com/uwplasma/vmec_jax/releases/download/"
+    f"{WOUT_FIXTURES_TAG}/{WOUT_FIXTURES_ASSET_NAME}"
+)
+WOUT_FIXTURES_SHA256 = "e9fd844a4ebed043576eec8ac2b17f7ff3e2a0e0a1b5adfc89742139101e00f9"
+
+REFERENCE_ASSET_PATHS = (
     "examples/data/mgrid_cth_like.nc",
     "examples/data/mgrid_d3d_ef.nc",
     "examples/data/wout_*_reference.nc",
@@ -32,6 +41,42 @@ COMMON_ASSET_PATHS = (
     "examples_single_grid/data/mgrid_d3d_ef.nc",
     "examples_single_grid/data/wout_*_reference.nc",
 )
+
+WOUT_FIXTURE_PATHS = (
+    "examples/data/wout_*.nc",
+    "examples_single_grid/data/wout_*.nc",
+    "docs/_static/readme_best_cases/*/wout_*.nc",
+    "docs/_static/qi_readme_cases/*/wout_*.nc",
+)
+
+
+@dataclass(frozen=True)
+class AssetBundle:
+    name: str
+    url: str
+    sha256: str
+    common_paths: tuple[str, ...]
+
+    @property
+    def marker_name(self) -> str:
+        return f".assets_installed_{self.name}.txt"
+
+
+DEFAULT_BUNDLES = (
+    AssetBundle(
+        name="reference-nc",
+        url=REFERENCE_URL,
+        sha256=REFERENCE_SHA256,
+        common_paths=REFERENCE_ASSET_PATHS,
+    ),
+    AssetBundle(
+        name="wout-fixtures",
+        url=WOUT_FIXTURES_URL,
+        sha256=WOUT_FIXTURES_SHA256,
+        common_paths=WOUT_FIXTURE_PATHS,
+    ),
+)
+BUNDLES_BY_NAME = {bundle.name: bundle for bundle in DEFAULT_BUNDLES}
 
 
 def _sha256(data: bytes) -> str:
@@ -50,49 +95,88 @@ def _safe_extract(tf: tarfile.TarFile, dest: Path) -> None:
     tf.extractall(dest_resolved)
 
 
-def _print_bundle_info(url: str, sha256: str) -> None:
-    print(f"Asset bundle URL: {url}")
-    print(f"Expected SHA256:  {sha256 or '(not checked)'}")
-    print("Common installed paths:")
-    for path in COMMON_ASSET_PATHS:
-        print(f"  {path}")
+def _print_bundle_info(bundles: Sequence[AssetBundle]) -> None:
+    print("Asset bundles:")
+    for bundle in bundles:
+        print(f"- {bundle.name}")
+        print(f"  URL:             {bundle.url}")
+        print(f"  Expected SHA256: {bundle.sha256 or '(not checked)'}")
+        print("  Common installed paths:")
+        for path in bundle.common_paths:
+            print(f"    {path}")
+
+
+def _selected_default_bundles(names: Sequence[str] | None) -> tuple[AssetBundle, ...]:
+    if not names or "all" in names:
+        return DEFAULT_BUNDLES
+    selected: list[AssetBundle] = []
+    seen: set[str] = set()
+    for name in names:
+        if name in seen:
+            continue
+        seen.add(name)
+        selected.append(BUNDLES_BY_NAME[name])
+    return tuple(selected)
+
+
+def _download_and_extract_bundle(bundle: AssetBundle, *, dest: Path, force: bool) -> None:
+    marker = dest / bundle.marker_name
+    if marker.exists() and not force:
+        print(f"Assets already installed for bundle {bundle.name!r} at {dest}. Use --force to re-download.")
+        return
+
+    print(f"Downloading {bundle.name} assets from: {bundle.url}")
+    with urllib.request.urlopen(bundle.url) as resp:
+        data = resp.read()
+
+    digest = _sha256(data)
+    if bundle.sha256 and digest != bundle.sha256:
+        raise SystemExit(f"SHA256 mismatch for {bundle.name}: expected {bundle.sha256}, got {digest}")
+
+    print(f"Extracting {bundle.name} assets...")
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tf:
+        _safe_extract(tf, dest)
+
+    marker.write_text(f"{bundle.url}\n{digest}\n")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--url", type=str, default=DEFAULT_URL, help="Asset tarball URL.")
-    p.add_argument("--sha256", type=str, default=DEFAULT_SHA256, help="Expected SHA256.")
+    p.add_argument(
+        "--bundle",
+        action="append",
+        choices=("all", *BUNDLES_BY_NAME.keys()),
+        help="Default asset bundle to install. May be repeated. Defaults to all bundles.",
+    )
+    p.add_argument("--url", type=str, default="", help="Custom asset tarball URL. Overrides --bundle.")
+    p.add_argument("--sha256", type=str, default="", help="Expected SHA256 for --url.")
     p.add_argument("--dest", type=str, default=str(REPO_ROOT), help="Destination repo root.")
     p.add_argument("--force", action="store_true", help="Re-download even if files already exist.")
     p.add_argument("--list", action="store_true", help="Print the default bundle location and common paths.")
     p.add_argument("--dry-run", action="store_true", help="Print what would be downloaded without fetching it.")
     args = p.parse_args(argv)
 
+    if args.url:
+        bundles = (
+            AssetBundle(
+                name="custom",
+                url=args.url,
+                sha256=args.sha256,
+                common_paths=(),
+            ),
+        )
+    else:
+        bundles = _selected_default_bundles(args.bundle)
+
     if args.list or args.dry_run:
-        _print_bundle_info(args.url, args.sha256)
+        _print_bundle_info(bundles)
         if args.dry_run:
             print("Dry run: no files downloaded or extracted.")
         return 0
 
     dest = Path(args.dest).expanduser().resolve()
-    marker = dest / ".assets_installed"
-    if marker.exists() and not args.force:
-        print(f"Assets already installed at {dest}. Use --force to re-download.")
-        return 0
-
-    print(f"Downloading assets from: {args.url}")
-    with urllib.request.urlopen(args.url) as resp:
-        data = resp.read()
-
-    digest = _sha256(data)
-    if args.sha256 and digest != args.sha256:
-        raise SystemExit(f"SHA256 mismatch: expected {args.sha256}, got {digest}")
-
-    print("Extracting assets...")
-    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tf:
-        _safe_extract(tf, dest)
-
-    marker.write_text(f"{args.url}\n{digest}\n")
+    for bundle in bundles:
+        _download_and_extract_bundle(bundle, dest=dest, force=bool(args.force))
     print("Assets installed.")
     return 0
 

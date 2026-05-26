@@ -84,6 +84,10 @@ jobs:
         run: |
           python tools/diagnostics/repo_size_audit.py --top 20 --max-total-mib 50 --max-file-mib 2
 
+      - name: Fetch optional WOUT fixtures
+        run: |
+          python tools/fetch_assets.py --bundle wout-fixtures
+
       - name: Run tests
         env:
           JAX_ENABLE_X64: "1"

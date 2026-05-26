@@ -75,6 +75,8 @@ instance/
 docs/_build/
 docs/api/generated/
 docs/_static/figures/**/wout_*.nc
+docs/_static/readme_best_cases/**/wout_*.nc
+docs/_static/qi_readme_cases/**/wout_*.nc
 docs/_static/figures/readme_*_vmec2000_trace/
 docs/_static/figures/readme_*_wout_audit.json
 docs/_static/figures/readme_best_optimization_*.pdf
@@ -87,9 +89,9 @@ examples/data/*_VMEC*.png
 examples/data/*_VMEC*.pdf
 examples/data/*_poloidal_plot.png
 examples/data/*reference*.nc
+examples/data/wout_*.nc
 examples/optimization/results/
 examples_single_grid/data/wout_*.nc
-!examples_single_grid/data/wout_*_reference.nc
 outputs/
 results/
 tmp/
@@ -239,11 +241,8 @@ __marimo__/
 .tmp/
 # Large netCDF assets are fetched on-demand (see tools/fetch_assets.py)
 examples/data/*.nc
-# Allow small bundled VMEC2000 reference wout files (used by parity tests)
-!examples/data/wout_*.nc
 examples_single_grid/data/*.nc
-!examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc
-.assets_installed
+.assets_installed*
 
 # Root-level generated VMEC run artifacts
 /parvmecinfo.txt

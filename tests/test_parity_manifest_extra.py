@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from tools.diagnostics.parity_sweep_manifest import DEFAULT_MANIFEST, _parse_manifest
 from vmec_jax.namelist import read_indata
 
@@ -82,7 +84,8 @@ def test_lasym_finite_beta_smoke_manifest_is_bounded_and_asset_backed() -> None:
     input_path = _resolve_repo_path(str(case["input"]))
     reference_wout = REPO_ROOT / "examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc"
     assert input_path.exists()
-    assert reference_wout.exists()
+    if not reference_wout.exists():
+        pytest.skip("Optional LASYM finite-beta WOUT fixture is missing. Run tools/fetch_assets.py --bundle wout-fixtures.")
 
     indata = read_indata(input_path)
     assert bool(indata.get_bool("LASYM")) is True

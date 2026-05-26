@@ -38,28 +38,62 @@ def require_slow() -> None:
 
 
 _ASSET_SENTINEL = _ROOT / "examples" / "data" / "wout_circular_tokamak_reference.nc"
+_WOUT_FIXTURE_SENTINEL = _ROOT / "examples" / "data" / "wout_circular_tokamak.nc"
 
-# Bundled wout files that are always present in the repo (VMEC2000 ground truth).
-_BUNDLED_WOUT_SENTINEL = _ROOT / "examples" / "data" / "wout_circular_tokamak.nc"
+# Tests that exercise optional generated/reference WOUT fixtures.  The fixtures
+# live in a release asset bundle, not in git, so default local test runs skip
+# these modules until ``python tools/fetch_assets.py --bundle wout-fixtures`` is
+# run.  CI fetches them before coverage runs.
+_OPTIONAL_WOUT_FIXTURE_TEST_FILES = {
+    "test_booz_input.py",
+    "test_converged_wout_matrix_parity.py",
+    "test_physics_gate_wave13_coverage.py",
+    "test_physics_parity_helper_gates.py",
+    "test_plotting_fast_helpers.py",
+    "test_qi_diagnostics.py",
+    "test_qi_readme_cases.py",
+    "test_qi_seed_suitability_audit.py",
+    "test_qs_ess_render_smoke.py",
+    "test_quasisymmetry.py",
+    "test_residue_getfsq_parity.py",
+    "test_validation_gates_extra.py",
+    "test_wout_beta_eqfor_bundled_parity.py",
+    "test_wout_chipf_bundled_parity.py",
+    "test_wout_contravariant_field_gate.py",
+    "test_wout_fixture_inventory.py",
+    "test_wout_family_converged_quantities.py",
+    "test_wout_geometry_mercier_bundled_parity.py",
+    "test_wout_lasym_bsubv_parity.py",
+    "test_wout_physics_gates.py",
+}
+
+
+def _wout_fixtures_available() -> bool:
+    return _WOUT_FIXTURE_SENTINEL.exists()
 
 
 def _assets_available() -> bool:
     """Return True if full-test reference assets are available.
 
-    Accepts either the large downloaded reference NC (wout_*_reference.nc) OR the
-    always-bundled VMEC2000 ground-truth files (wout_*.nc).  This allows ``RUN_FULL=1``
-    to exercise the comprehensive parity tests even without downloading the extra
-    reference assets.
+    Accepts either the downloaded reference NC (``wout_*_reference.nc``) OR the
+    optional WOUT fixture bundle restored by ``tools/fetch_assets.py``.
     """
-    return _ASSET_SENTINEL.exists() or _BUNDLED_WOUT_SENTINEL.exists()
+    return _ASSET_SENTINEL.exists() or _wout_fixtures_available()
 
 
 def pytest_collection_modifyitems(config, items):
     has_assets = _assets_available()
+    has_wout_fixtures = _wout_fixtures_available()
     run_full = os.environ.get("RUN_FULL", "") == "1"
     if run_full and not has_assets:
         raise pytest.UsageError("RUN_FULL=1 but example assets are missing. Run tools/fetch_assets.py")
     for item in items:
+        if not has_wout_fixtures and Path(str(item.fspath)).name in _OPTIONAL_WOUT_FIXTURE_TEST_FILES:
+            item.add_marker(
+                pytest.mark.skip(
+                    reason="Optional WOUT fixtures are missing. Run tools/fetch_assets.py --bundle wout-fixtures."
+                )
+            )
         if item.get_closest_marker("full") is not None:
             if not run_full:
                 item.add_marker(pytest.mark.skip(reason="Full tests disabled. Set RUN_FULL=1."))
