@@ -601,8 +601,8 @@ Actions:
   ``examples/optimization/results`` or attach them to GitHub releases.
 - Replace committed large ``wout`` references with small compressed fixtures
   or generated-on-demand assets where runtime permits.
-- Add a size audit to every release checklist and eventually to CI with a
-  documented threshold.
+- Keep the size audit in every release checklist and in CI with the documented
+  threshold below.
 - Avoid committing both PNG and PDF versions unless both are directly linked
   from docs.
 
@@ -610,10 +610,10 @@ Run the current audit with:
 
 .. code-block:: bash
 
-   python tools/diagnostics/repo_size_audit.py --top 40
+   python tools/diagnostics/repo_size_audit.py --top 40 --max-total-mib 50 --max-file-mib 2
 
-Required CI also runs the audit with an initial source-tree ceiling of
-``60 MiB`` total and ``5 MiB`` per tracked file.  Increase those limits only
+Required CI also runs the audit with a source-tree ceiling of
+``50 MiB`` total and ``2 MiB`` per tracked file.  Increase those limits only
 when a new small reference fixture has a documented physics-test purpose.
 
 
