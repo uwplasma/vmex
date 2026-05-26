@@ -107,11 +107,13 @@ keeps memory independent of the number of vacuum-solver iterations and keeps
 gradient cost approximately independent of the number of coil optimization
 parameters.
 
-Finite-pressure direct-coil support is currently a provider/coupling validation
-lane: active NESTOR diagnostics respond to coil-current changes and matched
+Finite-pressure direct-coil support is currently a promoted forward validation
+lane: active NESTOR diagnostics respond to coil-current changes, matched
 direct/generated-``mgrid`` samples agree within recorded precision/roundoff,
-but accepted-equilibrium sensitivity and high-beta convergence remain promotion
-gates.
+and the corrected ESSOS LP-QA stellarator pressure-continuation case now
+converges with both generated-``mgrid`` and direct differentiable coil
+providers. Accepted-equilibrium sensitivity and exact full-solve gradients
+remain phase-2 promotion gates.
 
 Current Status
 --------------
@@ -122,18 +124,18 @@ single-stage coil optimizer:
 - ``mgrid`` remains the VMEC2000-compatible parity backend.
 - Direct coils are supported as a JAX external-field provider for forward
   free-boundary solves, including nonzero pressure profiles.
-- The finite-pressure evidence is a low-resolution active-coupling validation
-  run:
-  generated-``mgrid`` and direct-coil providers from the same ESSOS LP-QA coil
-  set agree within recorded precision/roundoff in the recorded scalar
-  diagnostics, and direct NESTOR samples respond to coil-current changes.
-- The promoted high-resolution finite-beta reference evidence is currently the
-  VMEC2000-compatible DIII-D ``mgrid`` benchmark, not the LP-QA direct-coil
-  stellarator path: final ``ns=101``, final ``FTOL=1e-12``, and actual WOUT
-  beta through 2.18%.
-- The ESSOS LP-QA stellarator high-beta promotion gate is still open. The
-  corrected unit-scale coil/input pair converges in vacuum and low beta, but
-  pressure scans lose convergence before actual 1--2% WOUT beta.
+- The finite-pressure evidence includes active-coupling provider validation
+  and an LP-QA stellarator pressure-continuation lane. Generated-``mgrid`` and
+  direct-coil providers from the same ESSOS LP-QA coil set converge to actual
+  WOUT beta values above 1%.
+- The promoted high-resolution finite-beta reference evidence also includes the
+  VMEC2000-compatible DIII-D ``mgrid`` benchmark: final ``ns=101``, final
+  ``FTOL=1e-12``, and actual WOUT beta through 2.18%.
+- The previous LP-QA direct-coil failure was traced to the automatic CPU
+  ``lax.tridiagonal_solve`` preconditioner policy, not to direct Biot-Savart
+  sampling or NESTOR ``bsqvac`` construction. The safe default now keeps the
+  Thomas R/Z solve for direct free-boundary runs unless users force the lax
+  path explicitly for diagnostics.
 - The fast validation lane also includes tiny accepted-state
   finite-difference slope-stability checks for direct-coil current and one
   direct-coil Fourier geometry coefficient.
@@ -347,16 +349,45 @@ generated-``mgrid`` pressure-continuation lane. A local ``ns=16,31`` run with
      - 6.343
      - 0.191
 
-This is a finite-beta stellarator ``mgrid`` promotion result for the branch. It
-does not yet promote the direct-coil nonlinear-control path. Current direct
-diagnostics show that the exact direct Biot-Savart field matches the generated
-``mgrid`` field at the initial LP-QA boundary to roughly ``1e-3`` relative RMS,
-and the first NESTOR vacuum-pressure field ``bsqvac`` matches to roughly
-``1e-3`` relative RMS. The direct nonlinear free-boundary iteration still loses
-convergence for the same high-beta LP-QA sequence, so full direct-coil LP-QA
-promotion remains phase-2 work.
+The same pressure-continuation schedule now also promotes with the direct
+differentiable coil provider, after disabling the unsafe automatic CPU
+``lax.tridiagonal_solve`` R/Z preconditioner policy:
 
-Lessons from the failed earlier attempts:
+.. list-table::
+   :header-rows: 1
+
+   * - Nominal beta label
+     - Actual WOUT beta
+     - WOUT ``fsqr+fsqz+fsql``
+     - Aspect
+     - Mean iota
+   * - 0.0
+     - 0.00%
+     - ``1.63e-8``
+     - 6.014
+     - 0.405
+   * - 0.5
+     - 0.72%
+     - ``1.73e-8``
+     - 6.048
+     - 0.402
+   * - 1.0
+     - 1.49%
+     - ``1.80e-8``
+     - 6.097
+     - 0.393
+   * - 2.0
+     - 3.42%
+     - ``4.74e-7``
+     - 6.343
+     - 0.201
+
+This is the promoted finite-beta stellarator direct-coil forward result for
+phase 1. It does not promote the full nonlinear exact-adjoint path: current
+phase-2 gradients still stop at accepted-boundary replay and dense low-grid
+NESTOR primitives.
+
+Lessons from the earlier failed attempts:
 
 - pairing the default ESSOS coils with the reactor-scale LP-QA input is invalid
   without coil scaling and caused the original high-resolution failure;
@@ -364,26 +395,22 @@ Lessons from the failed earlier attempts:
   subroutine, while a small hand-tuned flux magnitude destroys the scale;
 - direct pressure jumps are much less robust than pressure continuation from
   accepted lower-beta equilibria;
-- the exact direct-coil free-boundary iteration needs a phase-2 nonlinear
-  control/adjoint pass before it should be advertised as high-beta production.
+- the direct provider needs the safe Thomas R/Z preconditioner by default.
+  Forcing the CPU ``lax`` tridiagonal path can generate a nonphysical first
+  active R/Z update even when direct and generated-``mgrid`` ``bsqvac`` agree
+  to roughly ``1e-3`` relative RMS.
 
 The next promotion tests should use the same pressure-continuation schedule,
-increase the radial resolution to ``ns=101``, and continue the direct-provider
-solver-control work until the exact coil path converges to the same accepted
-finite-beta branch.
+increase the radial resolution to ``ns=101``, and continue exact full-solve
+AD-vs-central-FD validation through the nonlinear iteration loop.
 
 Direct-provider phase-2 diagnostics now record accepted NESTOR histories for
 ``bnormal``, ``gsource``, ``bsqvac``, and source reuse. A short LP-QA vacuum
-trace shows that the direct exact field can produce an oversized first active
-boundary update while the generated-``mgrid`` compatibility backend stays in
-the convergent basin. The public driver exposes ``limit_update_rms`` and the
-beta-scan example exposes ``--direct-coil-limit-update-rms`` for this diagnostic
-lane. The limiter removes pathological near-zero direct-field samples after
-oversized updates, but it is not by itself a promotion result: the LP-QA
-direct-coil branch still stalls at large residual in the current nonlinear
-control path. The next phase-2 diagnostic must compare the first-active
-force/update payloads from generated ``mgrid`` and direct coils on the same
-state.
+trace showed that the unsafe ``lax`` tridiagonal path converted identical raw
+R/Z residual blocks into an oversized first active update. The public driver
+still exposes ``limit_update_rms`` and the beta-scan example exposes
+``--direct-coil-limit-update-rms`` for future nonlinear-control diagnostics,
+but the LP-QA promotion result above does not require that limiter.
 
 Generate the benchmark summary used by the README/docs figure renderer:
 
@@ -765,11 +792,11 @@ based on ``gcon -`` extrapolated plasma ``bsq`` so VMEC2000 ``DEL-BSQ``
 failures can be localized to sampled external field, NESTOR solve, or edge
 magnetic-pressure balance.
 
-The generated-``mgrid`` VMEC2000 comparison for the ESSOS LP-QA coil validation case is
-still non-promoted/xfailed. The current promoted signal for this branch is
-``vmec_jax`` direct-coil versus generated-``mgrid`` provider agreement within
-recorded precision/roundoff plus the active NESTOR coupling sensitivity checks
-listed below.
+The generated-``mgrid`` VMEC2000 comparison for the ESSOS LP-QA coil validation
+case is still non-promoted/xfailed. The current promoted LP-QA signal for this
+branch is ``vmec_jax`` direct-coil versus generated-``mgrid`` provider
+agreement within recorded precision/roundoff, active NESTOR coupling
+sensitivity checks, and the direct pressure-continuation sequence above.
 
 Validation Status
 -----------------

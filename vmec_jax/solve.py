@@ -14397,6 +14397,7 @@ def solve_fixed_boundary_residual_iter(
             "nestor_model": str(final_nestor_model),
             "vacuum_stub": bool(final_vacuum_stub),
             "activate_fsq": None if free_boundary_activate_fsq is None else float(free_boundary_activate_fsq),
+            "plascur": float(freeb_plascur),
             "last_nestor_diagnostics": dict(final_nestor_diagnostics),
             "final_nestor_recompute_attempted": bool(final_nestor_recompute_attempted),
             "final_nestor_recompute_failed": bool(final_nestor_recompute_failed),

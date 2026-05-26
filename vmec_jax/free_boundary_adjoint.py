@@ -997,6 +997,9 @@ def direct_coil_boundary_bnormal_rms_jax(
     Zu: Any,
     Rv: Any,
     Zv: Any,
+    br_add: Any = 0.0,
+    bp_add: Any = 0.0,
+    bz_add: Any = 0.0,
 ) -> Any:
     """Replay the accepted-boundary direct-coil normal-field RMS in JAX.
 
@@ -1016,6 +1019,9 @@ def direct_coil_boundary_bnormal_rms_jax(
         jnp.asarray(Z),
         jnp.asarray(phi),
     )
+    br = br + jnp.asarray(br_add, dtype=br.dtype)
+    bp = bp + jnp.asarray(bp_add, dtype=bp.dtype)
+    bz = bz + jnp.asarray(bz_add, dtype=bz.dtype)
     vac = vacuum_boundary_fields_from_cylindrical_jax(
         br=br,
         bp=bp,

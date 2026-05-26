@@ -136,14 +136,23 @@ def test_mgrid_interpolation_clamps_periodizes_and_validates_shapes():
     clamped, _, _ = interpolate_mgrid_bfield(data, r=3.0, z=-1.0, phi=0.0)
     np.testing.assert_allclose(periodic, clamped)
 
+    data_kv = _mgrid_data(kp=6)
     vmec_kv, _, _ = interpolate_mgrid_bfield(
-        data,
+        data_kv,
         r=np.array([[1.0, 1.0, 1.0]]),
         z=np.array([[-1.0, -1.0, -1.0]]),
         phi=np.zeros((1, 3)),
         use_vmec_kv=True,
     )
-    np.testing.assert_allclose(vmec_kv, np.array([[-100.0, -90.0, -90.0]]))
+    np.testing.assert_allclose(vmec_kv, np.array([[-100.0, -80.0, -60.0]]))
+    with pytest.raises(ValueError, match="must be divisible"):
+        interpolate_mgrid_bfield(
+            data,
+            r=np.array([[1.0, 1.0, 1.0]]),
+            z=np.array([[-1.0, -1.0, -1.0]]),
+            phi=np.zeros((1, 3)),
+            use_vmec_kv=True,
+        )
     with pytest.raises(ValueError, match="explicit zeta axis"):
         interpolate_mgrid_bfield(data, r=1.0, z=0.0, phi=0.0, use_vmec_kv=True)
 

@@ -10,7 +10,7 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-05-26 after pressure-continuation LP-QA generated-`mgrid` promotion, direct-provider first-step diagnostics, guarded direct-coil update limiting, README size-gate fixes, and refreshed PR #18 CI triage. Do not merge PR #18 yet.
+Last updated: 2026-05-26 after pressure-continuation LP-QA generated-`mgrid` promotion, direct-provider first-step diagnostics, guarded direct-coil update limiting, direct LP-QA convergence after disabling unsafe automatic CPU `lax` tridiagonal preconditioning, README size-gate fixes, and refreshed PR #18 CI triage. Do not merge PR #18 yet.
 
 Steps taken:
 
@@ -85,6 +85,10 @@ Steps taken:
 69. Added accepted NESTOR diagnostic histories for `bnormal`, `gsource`, `bsqvac`, source reuse, and provider source-reuse policy.
 70. Tested direct source-reuse off, exact trial resampling, legacy RHS reuse, lower `DELT`, normal activation threshold, and current scales `0.8/1.0/1.2`. None made LP-QA direct coils converge.
 71. Wired `limit_update_rms` through the public driver and added `--direct-coil-limit-update-rms` to the LP-QA beta-scan example as an explicit phase-2 diagnostic control. This prevents pathological near-zero direct field samples after oversized updates, but LP-QA direct still stalls around `fsq ~ 14.5-14.8`, so it is not a promotion result.
+72. Isolated the direct LP-QA first-active failure to the automatic CPU `lax.tridiagonal_solve` preconditioner policy: raw force kernels and `bsqvac` edge coupling match generated `mgrid`, but the lax R/Z preconditioner converts the first identical raw residual into a nonphysical update.
+73. Changed the public driver default so direct free-boundary runs keep the safe Thomas R/Z tridiagonal solve unless a user explicitly forces `VMEC_JAX_TRIDI_SOLVE`.
+74. Re-ran the direct-coil LP-QA pressure-continuation lane with the safe default. It now promotes all four nominal pressure points with actual WOUT betas `0.00%, 0.72%, 1.49%, 3.42%` and WOUT `fsqr+fsqz+fsql` from `1.6e-8` to `4.7e-7`.
+75. Updated README/docs to mark LP-QA direct high-beta forward convergence as phase-1 promoted, while keeping full nonlinear exact-adjoint gradients as phase-2.
 65. Reclassified generated-`mgrid` VMEC2000 exits with structured return-code metadata, preserving true nonzero failures while separating VMEC's source-level `more_iter_flag=2`.
 66. Fixed `run_xvmec2000` to copy relative `MGRID_FILE` assets from the input deck directory into the executable workdir, preventing accidental fixed-boundary fallbacks in local optional diagnostics.
 67. Added `opened_mgrid` to generated-`mgrid` VMEC2000 diagnostic summaries so parity evidence confirms the executable actually consumed the vacuum grid.
@@ -267,10 +271,10 @@ Results obtained:
 Best next steps:
 
 1. Commit and push the direct-provider diagnostic histories plus guarded direct update limiting after the focused tests/docs build pass.
-2. Pull the new PR #18 CI logs when checks complete; expected old failures were already reproduced/fixed locally.
-3. Continue phase-2 by comparing the first active direct and generated-`mgrid` force payloads, not only the sampled Biot-Savart field. The remaining gap appears in the free-boundary force/control branch after `bsqvac` construction.
-4. Add a targeted diagnostic that writes first-active-step force terms and boundary update blocks for mgrid/direct LP-QA from the same state.
-5. Only after the first-active force mismatch is isolated, continue the JAX NESTOR complete-loop AD-vs-central-FD rung.
+2. Pull the new PR #18 CI logs when checks complete; py3.10 failed on the previous pushed head and needs log triage after GitHub makes logs available.
+3. Add or strengthen parity coverage for the CPU `lax.tridiagonal_solve` R/Z preconditioner before re-enabling it as an automatic policy.
+4. Continue the JAX NESTOR complete-loop AD-vs-central-FD rung now that direct LP-QA forward convergence is unblocked.
+5. Increase LP-QA direct radial resolution to `ns=101` as a nonblocking reviewer-quality promotion run.
 6. Keep coverage above 95% as new operator code is promoted from validation scaffolds into production paths.
 
 Need from user:

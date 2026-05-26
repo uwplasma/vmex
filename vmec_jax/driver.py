@@ -410,25 +410,18 @@ def _default_preconditioner_use_lax_tridi(
     """Choose the CPU R/Z preconditioner tridiagonal-solve primitive.
 
     ``None`` delegates to the lower-level environment default.  May 2026
-    profiling showed that XLA's batched ``lax.linalg.tridiagonal_solve`` lowers
-    CPU free-boundary preconditioner-apply cost once paired with the
-    precomputed coefficient policy above.  Keep scan/GPU and fixed-boundary
-    runs on their existing policies until they have separate profiling
-    evidence.
+    profiling showed that XLA's batched ``lax.linalg.tridiagonal_solve`` can
+    lower CPU free-boundary preconditioner-apply cost, but LP-QA direct-coil
+    parity diagnostics showed that the automatic direct-provider lax path can
+    produce a nonphysical first R/Z update.  Keep the safe Thomas path as the
+    default until the lax tridiagonal primitive has free-boundary parity gates.
+    Users and benchmarks can still force it with ``VMEC_JAX_TRIDI_SOLVE``.
     """
 
     if os.getenv("VMEC_JAX_TRIDI_SOLVE") is not None:
         return None
-    backend_l = str(backend).strip().lower()
-    if backend_l != "cpu":
-        return None
-    if not bool(performance_mode):
-        return None
-    if bool(use_scan):
-        return None
-    if not bool(getattr(cfg, "lfreeb", False)) or not bool(direct_external_provider):
-        return None
-    return True
+    del backend, cfg, direct_external_provider, use_scan, performance_mode
+    return None
 
 
 def _result_final_residuals(result) -> tuple[float, float, float] | None:
@@ -527,7 +520,7 @@ def _allocate_integer_budget(*, total: int, weights: list[int]) -> list[int]:
         order = sorted(range(len(raw)), key=lambda idx: (raw[idx] - float(out[idx])), reverse=True)
         for idx in order[:remaining]:
             out[idx] += 1
-    elif remaining < 0:
+    elif remaining < 0:  # pragma: no cover - floors of nonnegative shares cannot overspend.
         order = sorted(range(len(raw)), key=lambda idx: (raw[idx] - float(out[idx])))
         for idx in order[: abs(remaining)]:
             if out[idx] > 0:

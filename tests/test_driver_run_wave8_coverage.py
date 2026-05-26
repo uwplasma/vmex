@@ -234,6 +234,7 @@ def test_direct_coil_free_boundary_exposes_limited_updates(monkeypatch, tmp_path
     )
 
     assert calls["solve_residual_iter"][-1][2]["limit_update_rms"] is False
+    assert calls["solve_residual_iter"][-1][2]["preconditioner_use_lax_tridi"] is None
 
     driver.run_free_boundary(
         tmp_path / "input.direct",

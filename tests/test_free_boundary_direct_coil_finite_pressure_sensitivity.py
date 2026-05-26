@@ -635,9 +635,17 @@ def test_jax_nestor_operator_accepted_solve_ad_matches_central_fd_for_current(
     assert nestor["jax_nestor_operator_reason"] == "applied"
     assert "bnormal_rms" in nestor
 
+    plascur = float(freeb.get("plascur", 0.0))
+    sample_coils_only = _sample_external_boundary_arrays(
+        state=run.state,
+        static=run.static,
+        external_field_provider_kind="direct_coils",
+        external_field_provider_params=base_params,
+    )
     sample = _sample_external_boundary_arrays(
         state=run.state,
         static=run.static,
+        plascur=plascur,
         external_field_provider_kind="direct_coils",
         external_field_provider_params=base_params,
     )
@@ -648,6 +656,9 @@ def test_jax_nestor_operator_accepted_solve_ad_matches_central_fd_for_current(
     Zu = jnp.asarray(sample.Zu)
     Rv = jnp.asarray(sample.Rv)
     Zv = jnp.asarray(sample.Zv)
+    br_axis = jnp.asarray(sample.br - sample_coils_only.br)
+    bp_axis = jnp.asarray(sample.bp - sample_coils_only.bp)
+    bz_axis = jnp.asarray(sample.bz - sample_coils_only.bz)
 
     def accepted_bnormal_metric(scale):
         return direct_coil_boundary_bnormal_rms_jax(
@@ -659,6 +670,9 @@ def test_jax_nestor_operator_accepted_solve_ad_matches_central_fd_for_current(
             Zu=Zu,
             Rv=Rv,
             Zv=Zv,
+            br_add=br_axis,
+            bp_add=bp_axis,
+            bz_add=bz_axis,
         )
 
     np.testing.assert_allclose(

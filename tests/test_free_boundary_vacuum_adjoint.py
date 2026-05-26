@@ -508,6 +508,53 @@ def test_jax_vmec_analytic_terms_match_numpy_reference(lasym):
     np.testing.assert_allclose(actual_grpmn, expected_grpmn, rtol=4.0e-12, atol=4.0e-12)
 
 
+def test_jax_vmec_analytic_terms_validate_geometry_basis_and_source_shapes():
+    enable_x64(True)
+    basis, sample = _nonsingular_boundary_sample()
+    bexni = np.linspace(-0.11, 0.29, int(basis["nuv3"]), dtype=float)
+
+    with pytest.raises(ValueError, match="R must be a 2D"):
+        vmec_analytic_terms_from_geometry_jax(
+            R=np.ravel(sample.R),
+            Ru=sample.Ru,
+            Rv=sample.Rv,
+            Zu=sample.Zu,
+            Zv=sample.Zv,
+            ruu=sample.ruu,
+            ruv=sample.ruv,
+            rvv=sample.rvv,
+            zuu=sample.zuu,
+            zuv=sample.zuv,
+            zvv=sample.zvv,
+            bexni=bexni,
+            basis=basis,
+            signgs=1,
+        )
+    with pytest.raises(ValueError, match="Ru must match R shape"):
+        vmec_analytic_terms_from_geometry_jax(
+            R=sample.R,
+            Ru=sample.Ru[:, :-1],
+            Rv=sample.Rv,
+            Zu=sample.Zu,
+            Zv=sample.Zv,
+            ruu=sample.ruu,
+            ruv=sample.ruv,
+            rvv=sample.rvv,
+            zuu=sample.zuu,
+            zuv=sample.zuv,
+            zvv=sample.zvv,
+            bexni=bexni,
+            basis=basis,
+            signgs=1,
+        )
+    bad_basis = dict(basis)
+    bad_basis["theta"] = np.asarray(basis["theta"])[:-1]
+    with pytest.raises(ValueError, match="basis theta/zeta"):
+        _jax_analytic_terms(sample, bad_basis, bexni)
+    with pytest.raises(ValueError, match="bexni"):
+        _jax_analytic_terms(sample, basis, bexni[:2])
+
+
 @pytest.mark.parametrize("lasym", [False, True])
 def test_jax_vmec_analytic_mode_solve_chain_gradients_match_finite_difference(lasym):
     pytest.importorskip("jax")
