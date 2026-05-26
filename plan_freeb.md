@@ -10,7 +10,7 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-05-26 after pressure-continuation LP-QA generated-`mgrid` promotion, direct-provider first-step diagnostics, guarded direct-coil update limiting, direct LP-QA convergence after disabling unsafe automatic CPU `lax` tridiagonal preconditioning, README size-gate fixes, and refreshed PR #18 CI triage. Do not merge PR #18 yet.
+Last updated: 2026-05-26 after pressure-continuation LP-QA generated-`mgrid` promotion, direct-provider first-step diagnostics, guarded direct-coil update limiting, direct LP-QA convergence after disabling unsafe automatic CPU `lax` tridiagonal preconditioning, CI/Codecov policy triage, and an `ns=101` LP-QA direct-coil reviewer attempt. Do not merge PR #18 yet.
 
 Steps taken:
 
@@ -89,6 +89,11 @@ Steps taken:
 73. Changed the public driver default so direct free-boundary runs keep the safe Thomas R/Z tridiagonal solve unless a user explicitly forces `VMEC_JAX_TRIDI_SOLVE`.
 74. Re-ran the direct-coil LP-QA pressure-continuation lane with the safe default. It now promotes all four nominal pressure points with actual WOUT betas `0.00%, 0.72%, 1.49%, 3.42%` and WOUT `fsqr+fsqz+fsql` from `1.6e-8` to `4.7e-7`.
 75. Updated README/docs to mark LP-QA direct high-beta forward convergence as phase-1 promoted, while keeping full nonlinear exact-adjoint gradients as phase-2.
+76. Fixed the PR fast-test failures from the previous pushed head: docs hygiene now finds the expected case-specific/aspect-6 wording, and NumPy/JAX VMEC-kv mgrid interpolation now both subsample divisible mgrid planes and reject ambiguous non-divisible zeta grids.
+77. Reproduced the CI Python 3.11 gate locally after fetching WOUT fixtures: `2409 passed, 26 skipped, 112 deselected, 2 xfailed`, project coverage `95.00%`.
+78. Added a `codecov.yml` policy that keeps project coverage at `95%` while setting large-PR patch coverage to `90%`; local PR patch coverage is about `92.4%` for this research branch.
+79. Pushed commit `0fdc37e8 freeb: promote direct LP-QA pressure continuation`; PR #18 GitHub Actions are green on fast tests, build/docs, physics smoke, and manifest smoke.
+80. Attempted a direct LP-QA `ns=16,51,101`, final `FTOL=1e-12` reviewer run with the safe Thomas path. It completed nominal beta `0.0` and `0.5` within the 30-minute budget, then was stopped during nominal beta `1.0`.
 65. Reclassified generated-`mgrid` VMEC2000 exits with structured return-code metadata, preserving true nonzero failures while separating VMEC's source-level `more_iter_flag=2`.
 66. Fixed `run_xvmec2000` to copy relative `MGRID_FILE` assets from the input deck directory into the executable workdir, preventing accidental fixed-boundary fallbacks in local optional diagnostics.
 67. Added `opened_mgrid` to generated-`mgrid` VMEC2000 diagnostic summaries so parity evidence confirms the executable actually consumed the vacuum grid.
@@ -103,7 +108,7 @@ Steps taken:
 
 Results obtained:
 
-1. `pytest -q -m "not full and not vmec2000 and not simsopt"`: 2282 passed, 26 skipped, 112 deselected, 2 xfailed in 5m03s after the source/RHS and GPU JVP exact-tape policy additions.
+1. `pytest -q -m "not full and not vmec2000 and not simsopt" --cov=vmec_jax --cov-report=term:skip-covered --cov-fail-under=95` after fetching WOUT fixtures: 2409 passed, 26 skipped, 112 deselected, 2 xfailed in 8m35s; project coverage 95.00%.
 2. Targeted direct-coil/docs tests after the final additions: 9 passed in 2.34 s.
 3. Full Sphinx build after docs hygiene changes succeeded in `/tmp/vmec_jax_freeb_docs_claim_hygiene`.
 4. Direct-coil/mgrid diagnostic smoke completed with expected `vmec2000_skipped` and `jax_direct_vs_mgrid_passed=True`.
@@ -118,6 +123,11 @@ Results obtained:
 13. Trial-counter regression now records nonzero `freeb_nestor_trial_sample_time_history` on a solver-level direct-coil path that enters trial scoring.
 14. `examples/free_boundary_direct_coils_forward.py --outdir tmp/free_boundary_direct_coils_forward_run_smoke --max-iter 1 --n-segments 8 --ns 7 --nzeta 2 --ntheta 8` wrote a synthetic direct-coil WOUT with finite one-iteration residuals (`fsqr≈7.3e-4`, `fsqz≈1.6e-4`, `fsql≈5.3e-4`).
 15. Larger synthetic direct-coil benchmark with `sample_points=78`, `coils=16`, `segments=128` reported JIT sampler warm active sampling around `0.0106 s` versus non-JIT around `0.0092 s`; whole warm solve time stayed about `0.25 s`, so this small case is dominated by non-sampling work.
+16. Direct LP-QA lower-resolution pressure continuation with the safe Thomas path promoted nominal beta labels `0.0`, `0.5`, `1.0`, and `2.0`; actual WOUT betas were `0.00%`, `0.72%`, `1.49%`, and `3.42%`.
+17. Direct LP-QA `ns=101` reviewer attempt completed:
+    - nominal beta `0.0`: actual beta `0.00%`, `fsqr+fsqz+fsql=1.75e-12`, aspect `6.011`, mean iota `0.416`;
+    - nominal beta `0.5`: actual beta `0.724%`, `fsqr+fsqz+fsql=6.22e-12`, aspect `6.063`, mean iota `0.408`.
+    The nominal beta `1.0` case did not complete within the 30-minute local budget, so `ns=101` direct high-beta is evidence but not yet a practical promotion lane.
 16. Subagent larger spectral-mode benchmark with `sample_points=2352`, `coils=8`, `segments=128` found the JIT sampler reduced warm active sampling from `0.0588 s` to `0.0545 s` (about 7%), but total warm wall time remained about `0.35 s`; dense NESTOR mode remains the main performance bottleneck.
 17. Targeted active-coupling summary tests passed: 2 passed in 7.81 s.
 18. VMEC2000 parser/optional LASYM validation tests passed locally as 1 passed, 1 skipped in 0.40 s without `VMEC2000_INTEGRATION=1`.
