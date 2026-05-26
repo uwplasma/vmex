@@ -10,7 +10,7 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-05-25 after dry-run optimization diagnostics, ESSOS adapter validation, VMEC2000 runtime-error classification, bounded AD-vs-FD NESTOR gradient checks, same-branch CPU/GPU benchmark-matrix reporting with non-JIT and JIT-force direct-solve rows, solve-loop timing capture for direct-coil benchmark rows, JIT-force defaults for direct-coil examples, accepted-boundary direct-coil replay AD-vs-FD promotion, free-boundary-aware fused strict-update support, a clarified complete-loop exact-adjoint promotion boundary, the first opt-in bad-Jacobian state-probe performance knob, a fused preconditioned-`fsq1` payload benchmark, a tightened optional VMEC2000 generated-`mgrid` trace gate, strict-update precompile coverage, source-checkout reproduction fixes for ESSOS beta-scan/figure commands, accepted-control payload batching, the local 95% fast coverage gate, and the `origin/main` size-gate merge.
+Last updated: 2026-05-25 after dry-run optimization diagnostics, ESSOS adapter validation, VMEC2000 runtime-error classification, bounded AD-vs-FD NESTOR gradient checks, same-branch CPU/GPU benchmark-matrix reporting with non-JIT and JIT-force direct-solve rows, solve-loop timing capture for direct-coil benchmark rows, JIT-force defaults for direct-coil examples, accepted-boundary direct-coil replay AD-vs-FD promotion, free-boundary-aware fused strict-update support, a clarified complete-loop exact-adjoint promotion boundary, the first opt-in bad-Jacobian state-probe performance knob, a fused preconditioned-`fsq1` payload benchmark, a tightened optional VMEC2000 generated-`mgrid` trace gate, strict-update precompile coverage, source-checkout reproduction fixes for ESSOS beta-scan/figure commands, accepted-control payload batching, repeated local 95% fast coverage gates, final local CPU direct-coil performance evidence, and the latest `origin/main` docs/size-gate merges.
 
 Steps taken:
 
@@ -241,14 +241,19 @@ Results obtained:
 146. Merged the force-updated `origin/main` size-gate branch into the feature branch, keeping the free-boundary work while accepting current-main generated-asset hygiene (`outputs/...summary.json` deleted, asset-fetch tests restored).
 147. Fixed the merge regression in `tools/fetch_assets.py` by restoring `COMMON_ASSET_PATHS`.
 148. Re-ran the post-merge full local fast gate with coverage: `2437 passed, 26 skipped, 112 deselected, 2 xfailed` in 8m36s, total coverage `95.00%`.
+149. Merged the latest `origin/main` docs updates (`e97af3e`) into the feature branch; the merge touched only Sphinx optimization/testing/release-checklist pages.
+150. Re-ran the focused post-merge lint/test batch after the latest merge: ruff passed and `48 passed in 19.20s`.
+151. Re-ran the full post-merge fast coverage gate: `2437 passed, 26 skipped, 112 deselected, 2 xfailed` in 8m28s, total coverage `95.00%`.
+152. Ran the final local CPU direct-coil benchmark matrix. The best quick row (`direct_solve_jit_forces_badjac_probe0`) reports cold/compile `1.354 s`, warm-min `0.0235 s`, active NESTOR sample `0.0515 s -> 0.00092 s`, final sample `4.6e-4 s`, and final solve `3.1e-3 s`.
 
 Best next steps:
 
-1. Wait for the restarted GitHub Actions matrix after the coverage/performance commits.
-2. If CI remains green, mark PR #17 ready for review.
-3. Keep the opt-in JAX NESTOR driver path as validation-only until the accepted-solve compilation/dispatch cost is removed. The host bridge remains the production/default route.
-4. Keep coverage above 95% as new operator code is promoted from validation scaffolds into production paths.
-5. Re-run the CUDA benchmark on `office` when SSH is reachable; no additional local blocker remains for PR readiness.
+1. Push the latest main merge and plan update.
+2. Wait for the restarted GitHub Actions matrix after the coverage/performance commits.
+3. If CI remains green, mark PR #17 ready for review.
+4. Keep the opt-in JAX NESTOR driver path as validation-only until the accepted-solve compilation/dispatch cost is removed. The host bridge remains the production/default route.
+5. Keep coverage above 95% as new operator code is promoted from validation scaffolds into production paths.
+6. Re-run the CUDA benchmark on `office` when SSH is reachable; no additional local blocker remains for PR readiness.
 
 Need from user:
 
