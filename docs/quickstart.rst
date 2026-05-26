@@ -5,6 +5,18 @@ Install directly from PyPI::
 
   pip install vmec-jax
 
+Run the bundled CLI test
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+The fastest first check after a PyPI install is::
+
+  vmec_jax --test
+
+This does not require a source checkout.  It copies the packaged
+``input.nfp4_QH_warm_start`` into ``vmec_jax_test/``, runs the fixed-boundary
+solver, writes ``wout_nfp4_QH_warm_start.nc``, plots the WOUT file into
+``vmec_jax_test/figures/``, and prints the equivalent manual commands.
+
 Run the minimal showcase (recommended)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

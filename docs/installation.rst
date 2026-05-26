@@ -72,6 +72,9 @@ that consume stored WOUTs::
   python tools/fetch_assets.py --list
   python tools/fetch_assets.py
 
+After installation, ``vmec_jax --test`` runs a packaged quick-start input and
+therefore works even outside a source checkout.
+
 Build docs locally
 ------------------
 

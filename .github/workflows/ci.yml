@@ -75,6 +75,13 @@ jobs:
             --quiet \
             --outdir /tmp/vmec_jax_cli_smoke
           test -f /tmp/vmec_jax_cli_smoke/wout_circular_tokamak.nc
+          vmec_jax --test \
+            --max-iter 3 \
+            --quiet \
+            --outdir /tmp/vmec_jax_cli_bundled_smoke
+          test -f /tmp/vmec_jax_cli_bundled_smoke/input.nfp4_QH_warm_start
+          test -f /tmp/vmec_jax_cli_bundled_smoke/wout_nfp4_QH_warm_start.nc
+          test -f /tmp/vmec_jax_cli_bundled_smoke/figures/nfp4_QH_warm_start_VMEC_3Dplot.png
 
       - name: Compile (Python)
         run: |

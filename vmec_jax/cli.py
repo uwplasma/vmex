@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
+from importlib import resources
 from pathlib import Path
 
 from .driver import (
@@ -14,6 +16,8 @@ from .driver import (
     write_wout_from_fixed_boundary_run,
 )
 from .namelist import read_indata
+
+_TEST_INPUT_NAME = "input.nfp4_QH_warm_start"
 
 
 def _case_from_input(path: Path) -> str:
@@ -74,6 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="vmec_jax",
         description=(
             "Run vmec_jax equilibrium solver or plot a wout file.\n\n"
+            "  vmec_jax --test          — run and plot the bundled quick-start case\n"
             "  vmec_jax input.*           — run the solver\n"
             "  vmec_jax --plot wout_*.nc  — generate diagnostic plots"
         ),
@@ -95,6 +100,14 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="Generate diagnostic plots from a wout_*.nc file (skips the solver).",
+    )
+    p.add_argument(
+        "--test",
+        action="store_true",
+        help=(
+            "Run the bundled input.nfp4_QH_warm_start quick-start case, write "
+            "the input and wout files, and plot the resulting wout."
+        ),
     )
     p.add_argument("--outdir", type=str, default=None, help="Directory for wout_*.nc output.")
     p.add_argument("--output", type=str, default=None, help="Explicit wout_*.nc path.")
@@ -158,9 +171,85 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _copy_test_input(outdir: Path) -> Path:
+    """Copy the packaged quick-start input into ``outdir`` and return its path."""
+    outdir.mkdir(parents=True, exist_ok=True)
+    dst = outdir / _TEST_INPUT_NAME
+    resource = resources.files("vmec_jax").joinpath("data", _TEST_INPUT_NAME)
+    with resources.as_file(resource) as src:
+        shutil.copyfile(src, dst)
+    return dst
+
+
+def _run_bundled_test(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    """Run the packaged quick-start case and plot the resulting WOUT file."""
+    if args.input is not None:
+        parser.error("--test does not take an input path")
+    if args.plot is not None:
+        parser.error("--test and --plot are mutually exclusive")
+
+    outdir = Path(args.outdir).expanduser().resolve() if args.outdir else Path.cwd().resolve() / "vmec_jax_test"
+    input_path = _copy_test_input(outdir)
+    wout_path = resolve_wout_path(
+        input_path=input_path,
+        outdir=outdir,
+        output=Path(args.output).expanduser().resolve() if args.output else None,
+    )
+    plot_dir = outdir / "figures"
+
+    print("vmec_jax bundled test")
+    print("---------------------")
+    print("This quick-start run uses the packaged fixed-boundary QH warm-start input.")
+    print(f"1. Wrote the VMEC input file to: {input_path}")
+    print("2. Running vmec_jax to solve the equilibrium and write a WOUT file.")
+    print()
+    print("Equivalent manual command:")
+    print(f"  vmec_jax {input_path} --output {wout_path}")
+    print()
+
+    solver_argv = [str(input_path), "--output", str(wout_path)]
+    if args.solver_device is not None:
+        solver_argv.extend(["--solver-device", str(args.solver_device)])
+    if bool(args.parity):
+        solver_argv.append("--parity")
+    if bool(args.fast):
+        solver_argv.append("--fast")
+    if args.solver_mode is not None:
+        solver_argv.extend(["--solver-mode", str(args.solver_mode)])
+    if args.max_iter is not None:
+        solver_argv.extend(["--max-iter", str(args.max_iter)])
+    if args.jit_forces != "auto":
+        solver_argv.extend(["--jit-forces", str(args.jit_forces)])
+    if bool(args.quiet):
+        solver_argv.append("--quiet")
+
+    rc = main(solver_argv)
+    if rc != 0:
+        return rc
+
+    print()
+    print(f"3. Wrote the WOUT file to: {wout_path}")
+    print(f"4. Plotting the WOUT file into: {plot_dir}")
+    print()
+    print("Equivalent manual plotting command:")
+    print(f"  vmec_jax --plot {wout_path} --outdir {plot_dir}")
+    print()
+
+    from .plotting import plot_wout
+
+    plot_dir.mkdir(parents=True, exist_ok=True)
+    plot_wout(wout_path, outdir=plot_dir)
+    print()
+    print("Bundled test complete. You can now inspect the input, WOUT file, and figures above.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if bool(args.test):
+        return _run_bundled_test(args, parser)
 
     # ── --plot mode: generate diagnostic plots from a wout file ────────────────
     if args.plot is not None:

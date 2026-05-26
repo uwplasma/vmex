@@ -106,6 +106,51 @@ def test_cli_plot_mode_dispatches_without_solver(monkeypatch, tmp_path: Path) ->
     assert calls == [(wout.resolve(), (tmp_path / "plots").resolve())]
 
 
+def test_cli_test_mode_copies_packaged_input_solves_and_plots(monkeypatch, tmp_path: Path, capsys) -> None:
+    outdir = tmp_path / "demo"
+    calls = {}
+    indata = InData(scalars={"NITER": 1}, indexed={})
+
+    monkeypatch.setattr(cli, "read_indata", lambda _path: indata)
+    monkeypatch.setattr(cli, "default_non_autodiff_solver_policy", lambda _indata: ("default", True))
+    monkeypatch.setattr(cli, "_default_use_scan_for_backend", lambda _indata, _backend, _mode: False)
+
+    def fake_run_fixed_boundary(path: str, **kwargs):
+        calls["run_path"] = Path(path)
+        calls["run_kwargs"] = kwargs
+        return SimpleNamespace(state=SimpleNamespace(Rcos=0.0))
+
+    def fake_write_wout(path: Path, run, *, include_fsq: bool):
+        calls["wout_path"] = path
+        calls["include_fsq"] = include_fsq
+        path.write_text("wout")
+
+    def fake_plot_wout(path: Path, *, outdir: Path):
+        calls["plot_path"] = path
+        calls["plot_outdir"] = outdir
+
+    monkeypatch.setattr(cli, "run_fixed_boundary", fake_run_fixed_boundary)
+    monkeypatch.setattr(cli, "write_wout_from_fixed_boundary_run", fake_write_wout)
+    monkeypatch.setitem(sys.modules, "vmec_jax.plotting", SimpleNamespace(plot_wout=fake_plot_wout))
+
+    assert cli.main(["--test", "--outdir", str(outdir), "--quiet"]) == 0
+
+    input_path = outdir / "input.nfp4_QH_warm_start"
+    wout_path = outdir / "wout_nfp4_QH_warm_start.nc"
+    assert input_path.exists()
+    assert "&INDATA" in input_path.read_text()
+    assert wout_path.read_text() == "wout"
+    assert calls["run_path"] == input_path.resolve()
+    assert calls["run_kwargs"]["verbose"] is False
+    assert calls["wout_path"] == wout_path.resolve()
+    assert calls["include_fsq"] is True
+    assert calls["plot_path"] == wout_path.resolve()
+    assert calls["plot_outdir"] == (outdir / "figures").resolve()
+    output = capsys.readouterr().out
+    assert "Equivalent manual command" in output
+    assert "Equivalent manual plotting command" in output
+
+
 def test_cli_errors_for_missing_plot_or_input(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as no_input:
         cli.main([])
@@ -114,6 +159,10 @@ def test_cli_errors_for_missing_plot_or_input(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as missing_plot:
         cli.main(["--plot", str(tmp_path / "missing.nc")])
     assert missing_plot.value.code == 2
+
+    with pytest.raises(SystemExit) as test_with_input:
+        cli.main(["--test", str(tmp_path / "input.case")])
+    assert test_with_input.value.code == 2
 
 
 def test_cli_errors_for_invalid_jit_and_conflicting_solver_mode_flags(tmp_path: Path) -> None:
