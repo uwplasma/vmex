@@ -127,9 +127,10 @@ PYTHONPATH=.:$ESSOS_ROOT:$PYTHONPATH \
 ```
 
 The DIII-D reference scan reaches final `ns=101`, `FTOL=1e-12`, and actual
-WOUT betas through 2.18%. The LP-QA generated-`mgrid` stellarator lane reaches
-actual WOUT betas above 1% with pressure continuation. The direct-coil LP-QA
-nonlinear-control path is still phase-2 work. See
+WOUT betas through 2.18%. The LP-QA stellarator pressure-continuation lane now
+promotes for both generated-`mgrid` and direct differentiable coil providers,
+with actual WOUT betas above 1%. Full nonlinear exact-adjoint gradients through
+the free-boundary iteration remain phase-2 work. See
 `docs/free_boundary_coil_optimization.rst` for reviewer plots, VMEC2000
 comparisons, benchmarks, limitations, and the full-solve adjoint plan.
 
@@ -175,8 +176,9 @@ README table is only the current compact promotion snapshot.
 ### QI from different NFP inputs
 
 The same `QI_optimization.py` workflow can be run from reviewed NFP 1, 2, 3,
-and 4 inputs by changing the input variables at the top of the script. Full
-case-specific provenance and limitations are in the docs.
+and 4 inputs by changing the input variables at the top of the script. This is
+case-specific evidence, not an aspect-6 README best-row promotion; full
+provenance and limitations are in the docs.
 
 ![QI optimization from NFP seeds](docs/_static/figures/readme_qi_optimization_cases.png)
 

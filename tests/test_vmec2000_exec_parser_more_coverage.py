@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 
 import numpy as np
 import pytest
 
 from vmec_jax.vmec2000_exec import (
+    _default_exec_candidates,
     _find_threed1_file,
     _infer_case_name,
     _parse_vmec2000_threed1,
     _patch_indata,
+    _relative_mgrid_file,
     flatten_threed1,
+    find_vmec2000_exec,
+    run_xvmec2000,
     threed1_fsq_total,
 )
 
@@ -126,6 +131,23 @@ def test_patch_indata_drops_multiline_array_continuations() -> None:
     assert "  MPOL = 8" in lines
 
 
+def test_patch_indata_stops_continuation_drop_at_comment() -> None:
+    text = "\n".join(
+        [
+            "&INDATA",
+            "  NS_ARRAY = 16,",
+            "  ! keep this comment",
+            "/",
+            "",
+        ]
+    )
+
+    patched = _patch_indata(text, updates={"NS_ARRAY": "5"})
+
+    assert "  NS_ARRAY = 5" in patched.splitlines()
+    assert "  ! keep this comment" in patched.splitlines()
+
+
 def test_patch_indata_handles_unterminated_or_missing_indata_block() -> None:
     unterminated = "&INDATA\n  NITER = 10"
     patched = _patch_indata(unterminated, updates={"NITER": "3", "NTOR": "2"})
@@ -176,3 +198,70 @@ def test_case_name_and_threed1_discovery_precedence(tmp_path: Path) -> None:
     direct = tmp_path / "threed1.case"
     direct.write_text("")
     assert _find_threed1_file(tmp_path, case="case") == direct
+
+
+def test_vmec2000_exec_helpers_cover_path_discovery_and_relative_mgrid(monkeypatch, tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    exec_path = root / "STELLOPT" / "VMEC2000" / "Release" / "xvmec2000"
+    exec_path.parent.mkdir(parents=True)
+    exec_path.write_text("#!/bin/sh\n")
+
+    assert _default_exec_candidates(root, include_user_bin=False)[0] == exec_path
+    assert Path.home() / "bin" / "xvmec2000" in _default_exec_candidates(root, include_user_bin=True)
+    assert find_vmec2000_exec(root=root) == exec_path
+
+    env_exec = tmp_path / "env_xvmec2000"
+    env_exec.write_text("#!/bin/sh\n")
+    monkeypatch.setenv("VMEC2000_EXEC", str(env_exec))
+    assert find_vmec2000_exec(root=root) == env_exec
+
+    assert _relative_mgrid_file("MGRID_FILE = 'mgrid_test.nc'") == "mgrid_test.nc"
+    assert _relative_mgrid_file("MGRID_FILE = 'NONE'") is None
+    assert _relative_mgrid_file("MGRID_FILE = 'DIRECT_COILS'") is None
+    assert _relative_mgrid_file(f"MGRID_FILE = '{tmp_path / 'absolute.nc'}'") is None
+    assert _relative_mgrid_file("&INDATA\n/") is None
+
+
+def test_run_xvmec2000_copies_relative_mgrid_and_cleans_temp(monkeypatch, tmp_path: Path) -> None:
+    exec_path = tmp_path / "xvmec2000"
+    exec_path.write_text("#!/bin/sh\n")
+    input_path = tmp_path / "input.case"
+    input_path.write_text("&INDATA\n  MGRID_FILE = 'mgrid_case.nc'\n  NITER = 99\n/\n")
+    (tmp_path / "mgrid_case.nc").write_text("synthetic mgrid")
+
+    seen: dict[str, object] = {}
+
+    def fake_run(cmd, *, cwd, capture_output, text, timeout, check):
+        seen["cmd"] = list(cmd)
+        seen["cwd"] = Path(cwd)
+        seen["capture_output"] = capture_output
+        seen["text"] = text
+        seen["timeout"] = timeout
+        seen["check"] = check
+        assert (Path(cwd) / "input.case").exists()
+        assert (Path(cwd) / "mgrid_case.nc").read_text() == "synthetic mgrid"
+        assert "NITER = 3" in (Path(cwd) / "input.case").read_text()
+        (Path(cwd) / "threed1.case").write_text(
+            "  NS =  5 NO. FOURIER MODES =  3 FTOLV =  1.0E-08 NITER =  3\n"
+            " ITER FSQR FSQZ FSQL fsqr1 fsqz1 fsql1 DELT0R\n"
+            "  1 1.0E-1 2.0E-1 3.0E-1 4.0E-1 5.0E-1 6.0E-1 7.0E-1\n"
+        )
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr("vmec_jax.vmec2000_exec.subprocess.run", fake_run)
+
+    result = run_xvmec2000(
+        input_path,
+        exec_path=exec_path,
+        workdir=None,
+        timeout_s=12.5,
+        indata_updates={"niter": "3"},
+        keep_workdir=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == "ok"
+    assert len(result.stages) == 1
+    assert seen["cmd"] == [str(exec_path), "input.case"]
+    assert seen["timeout"] == pytest.approx(12.5)
+    assert not Path(result.workdir).exists()

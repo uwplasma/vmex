@@ -490,7 +490,7 @@ def interpolate_mgrid_bfield(
     # - VMEC becoil path uses a zeta-grid index (no toroidal interpolation),
     # - generic path uses periodic toroidal interpolation in physical angle.
     if bool(use_vmec_kv):
-        if rr.ndim < 1:
+        if rr.ndim == 0:
             raise ValueError("use_vmec_kv=True requires array inputs with an explicit zeta axis")
         nzeta = int(rr.shape[-1]) if int(rr.shape[-1]) > 0 else kp
         if kp == 1:
@@ -498,11 +498,14 @@ def interpolate_mgrid_bfield(
         else:
             if nzeta < 1:
                 raise ValueError("use_vmec_kv=True requires at least one zeta plane")
-            # VMEC becoil indexing uses the VMEC zeta index directly after
-            # read_mgrid_nc has loaded the available planes. If a tiny fixture
-            # has fewer mgrid planes than VMEC zeta points, clamp to the last
-            # available plane rather than rescaling toroidal angle.
-            k_idx = np.minimum(np.arange(nzeta, dtype=np.int64), kp - 1)
+            if kp % nzeta != 0:
+                raise ValueError(
+                    "use_vmec_kv=True requires the number of mgrid zeta planes "
+                    "to be divisible by the VMEC zeta axis length; kp must be divisible by nzeta"
+                )
+            # VMEC becoil samples the mgrid planes corresponding to the VMEC
+            # zeta grid without toroidal interpolation.
+            k_idx = np.arange(nzeta, dtype=np.int64) * int(kp // nzeta)
         k0 = np.broadcast_to(k_idx.reshape((1,) * (rr.ndim - 1) + (nzeta,)), rr.shape).reshape(-1)
         k1 = k0
         wk = np.zeros_like(fr)

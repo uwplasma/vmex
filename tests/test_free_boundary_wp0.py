@@ -788,12 +788,12 @@ def test_interpolate_mgrid_bfield_trilinear_linear_field():
     np.testing.assert_allclose(bz_q, -expected, rtol=1e-12, atol=1e-12)
 
 
-def test_interpolate_mgrid_bfield_vmec_kv_no_rescale():
+def test_interpolate_mgrid_bfield_vmec_kv_subsamples_divisible_planes():
     meta = MGridMetadata(
         path="dummy.nc",
         ir=2,
         jz=2,
-        kp=6,
+        kp=8,
         nfp=1,
         nextcur=1,
         rmin=0.0,
@@ -814,8 +814,8 @@ def test_interpolate_mgrid_bfield_vmec_kv_no_rescale():
         bz[0, k, :, :] = -float(k)
     data = MGridData(metadata=meta, br=br, bp=bp, bz=bz)
 
-    # VMEC becoil indexing uses kv = 1 + mod(i-1,nv), clamped by np0b.
-    # For nzeta=4, this should sample planes k=0,1,2,3 (no kp rescaling).
+    # VMEC becoil samples the mgrid planes matching the VMEC zeta grid.
+    # For kp=8 and nzeta=4, this should sample planes k=0,2,4,6.
     r = np.full((2, 4), 0.5)
     z = np.full((2, 4), 0.5)
     phi = np.zeros((2, 4))
@@ -826,7 +826,7 @@ def test_interpolate_mgrid_bfield_vmec_kv_no_rescale():
         phi=phi,
         use_vmec_kv=True,
     )
-    expected_k = np.array([0.0, 1.0, 2.0, 3.0], dtype=float)
+    expected_k = np.array([0.0, 2.0, 4.0, 6.0], dtype=float)
     expected = np.broadcast_to(expected_k[None, :], r.shape)
     np.testing.assert_allclose(br_q, expected, rtol=0.0, atol=1e-14)
     np.testing.assert_allclose(bp_q, 10.0 * expected, rtol=0.0, atol=1e-14)
