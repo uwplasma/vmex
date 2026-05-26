@@ -126,6 +126,11 @@ PYTHONPATH=.:$ESSOS_ROOT:$PYTHONPATH \
   --max-iter 1200 --activate-fsq 1e99
 ```
 
+Long high-resolution pressure scans can be resumed without repeating completed
+beta points by rerunning the same command with `--resume-existing`; existing
+`wout_*_beta_*.nc` files are reused as pressure-continuation seeds when their
+residuals satisfy the promotion threshold.
+
 The DIII-D reference scan reaches final `ns=101`, `FTOL=1e-12`, and actual
 WOUT betas through 2.18%. The LP-QA stellarator pressure-continuation lane now
 promotes for both generated-`mgrid` and direct differentiable coil providers,
