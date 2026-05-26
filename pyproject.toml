@@ -54,6 +54,9 @@ where = ["."]
 include = ["vmec_jax*"]
 exclude = ["tests*", "docs*", "examples*", "tools*", "validation*", "results*", "build*", "dist*"]
 
+[tool.setuptools.package-data]
+vmec_jax = ["data/input.nfp4_QH_warm_start"]
+
 [tool.pytest.ini_options]
 markers = [
   "vmec2000: integration tests requiring a local VMEC2000 build (+ mpi4py/netCDF4)",
