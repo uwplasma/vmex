@@ -151,3 +151,10 @@
   ZBC(1,2) = -0.0001,
 /
 &END
+
+&BOOZ_XFORM_JAX
+  LBOOZ = F
+  MBOOZ = 32
+  NBOOZ = 32
+  BOOZ_SURFACES = 'all'
+/

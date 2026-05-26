@@ -78,6 +78,42 @@ silence the iteration table, and ``--outdir`` or ``--output`` to control where
 the ``wout_*.nc`` file is written. If you only want a short debug run, pass
 ``--max-iter`` and ``--no-multigrid`` (single grid).
 
+Boozer-coordinate CLI workflow
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The plain ``vmec-jax`` install includes ``booz_xform_jax``.  Use
+``vmec_jax --booz`` to run a Boozer transform after a VMEC solve, or directly
+from an existing ``wout_*.nc`` file.  The default transform resolution is
+``mbooz = 32``, ``nbooz = 32``, with all VMEC surfaces included::
+
+  vmec_jax --booz input.nfp4_QH_warm_start
+  vmec_jax --booz --plot input.nfp4_QH_warm_start
+  vmec_jax --booz wout_nfp4_QH_warm_start.nc
+  vmec_jax --plot boozmn_nfp4_QH_warm_start.nc
+
+``--booz --plot`` writes the usual ``wout_*.nc``, runs ``booz_xform_jax``,
+writes ``boozmn_*.nc``, and then creates:
+
+- mid-radius and LCFS ``|B|`` contour-line plots in Boozer coordinates,
+- radial Boozer ``|B|`` spectra grouped into QA/axisymmetric, QH, mirror, and
+  non-symmetric mode families,
+- an LCFS Fourier spectrum for the largest Boozer modes.
+
+Override the transform resolution or selected surfaces from the CLI::
+
+  vmec_jax --booz wout_nfp4_QH_warm_start.nc --mbooz 48 --nbooz 48
+  vmec_jax --booz wout_nfp4_QH_warm_start.nc --booz-surfaces "0.25,0.5,1.0"
+
+Input decks can carry Boozer defaults in a separate namelist.  ``LBOOZ = F`` is
+the safe default used by the example inputs; passing ``--booz`` overrides it::
+
+  &BOOZ_XFORM_JAX
+    LBOOZ = F
+    MBOOZ = 32
+    NBOOZ = 32
+    BOOZ_SURFACES = 'all'
+  /
+
 ``vmec_jax`` writes diagnostic ``wout`` files from the last available state even
 when the requested residual tolerance is not reached. These files preserve the
 computed geometry, profiles, field diagnostics, and residual traces, and mark
@@ -162,11 +198,14 @@ Most users should start from the small public API in ``vmec_jax.api``::
       max_iter=10,
       verbose=True,
   )
+  wout_path = "wout_shaped_tokamak_pressure_vmec_jax.nc"
   wout = vj.write_wout_from_fixed_boundary_run(
-      "wout_shaped_tokamak_pressure_vmec_jax.nc",
+      wout_path,
       run,
       include_fsq=True,
   )
+  boozmn = vj.run_booz_xform(wout_path, mbooz=32, nbooz=32)
+  vj.plot_boozmn(boozmn, outdir="figures/")
 
   # If you only need an in-memory wout object (no file I/O):
   wout_mem = vj.wout_from_fixed_boundary_run(run, include_fsq=True)

@@ -27,6 +27,13 @@ from .driver import (
     write_wout_from_fixed_boundary_run,
 )
 from .boundary import boundary_from_input_convention, boundary_input_from_indata
+from .booz import (
+    BoozConfig,
+    parse_booz_surfaces,
+    read_booz_config,
+    resolve_boozmn_path,
+    run_booz_xform,
+)
 from .booz_input import booz_xform_inputs_from_state
 from .field import b_cartesian_from_state, signgs_from_sqrtg
 from .energy import flux_profiles_from_indata
@@ -100,7 +107,12 @@ from .plotting import (
     profiles_from_wout,
     plot_3d_boundary_comparison,
     plot_bmag_contours,
+    plot_boozmn,
+    plot_boozmn_bmag_contours,
+    plot_boozmn_mode_families,
+    plot_boozmn_spectrum,
     plot_boozer_bmag_contours_from_state,
+    plot_boozer_lcfs_bmag_comparison,
     plot_objective_history,
     plot_wout,
     surface_rz_from_wout_physical,
@@ -126,6 +138,18 @@ from .qi_diagnostics import (
     qi_promotion_score,
     rank_qi_seed_records,
 )
+from .qi_optimization import (
+    QIOptimizationContext,
+    diagnostic_float,
+    jsonable,
+    make_qi_optimization_context,
+    qi_diagnostics_for_result,
+    run_boundary_reference_preconditioner,
+    run_qi_stage_policy,
+    run_target_helicity_seed_preconditioner,
+    save_raw_seed_initial_artifacts,
+    target_helicity_seed_terms,
+)
 from .visualization import export_vtk_surface_and_fieldline
 from .wout import read_wout, state_from_wout
 
@@ -148,6 +172,11 @@ __all__ = [
     "write_indata",
     "minimal_fixed_boundary_indata",
     "booz_xform_inputs_from_state",
+    "BoozConfig",
+    "parse_booz_surfaces",
+    "read_booz_config",
+    "resolve_boozmn_path",
+    "run_booz_xform",
     "lgradb_from_state",
     "lgradb_penalty_from_state",
     "max_elongation_penalty_from_state",
@@ -164,6 +193,16 @@ __all__ = [
     "qi_diagnostics_from_state",
     "qi_promotion_score",
     "rank_qi_seed_records",
+    "QIOptimizationContext",
+    "diagnostic_float",
+    "jsonable",
+    "make_qi_optimization_context",
+    "qi_diagnostics_for_result",
+    "run_boundary_reference_preconditioner",
+    "run_qi_stage_policy",
+    "run_target_helicity_seed_preconditioner",
+    "save_raw_seed_initial_artifacts",
+    "target_helicity_seed_terms",
     # Optimization workflow helpers used by examples
     "FixedBoundaryVMEC",
     "FixedBoundaryOptimizationResult",
@@ -218,7 +257,12 @@ __all__ = [
     "profiles_from_wout",
     "plot_3d_boundary_comparison",
     "plot_bmag_contours",
+    "plot_boozmn",
+    "plot_boozmn_bmag_contours",
+    "plot_boozmn_mode_families",
+    "plot_boozmn_spectrum",
     "plot_boozer_bmag_contours_from_state",
+    "plot_boozer_lcfs_bmag_comparison",
     "plot_objective_history",
     "plot_wout",
     "surface_rz_from_wout_physical",

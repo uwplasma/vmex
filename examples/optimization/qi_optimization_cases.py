@@ -6,8 +6,12 @@ import os
 from pathlib import Path
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
-DEFAULT_QI_TARGET_ASPECT = 6.0
-SEED3127_REVIEWED_TARGET_ASPECT = 4.0
+DEFAULT_QI_TARGET_ASPECT = 5.0
+DEFAULT_INNER_MAX_ITER = 450
+DEFAULT_INNER_FTOL = 1.0e-9
+DEFAULT_TRIAL_MAX_ITER = 450
+DEFAULT_TRIAL_FTOL = 1.0e-9
+SEED3127_REVIEWED_TARGET_ASPECT = DEFAULT_QI_TARGET_ASPECT
 TARGET_HELICITY_SEED_AMPLITUDE = 1.0e-5
 TARGET_HELICITY_SEED_TERMS = (
     ("RBC", (1, 0), TARGET_HELICITY_SEED_AMPLITUDE),
@@ -38,7 +42,7 @@ QI_CASES = {
     "nfp1_qi": {
         "case_goal": "NFP=1 mirror-aware QI lane",
         "input_file": DATA_DIR / "input.nfp1_QI",
-        "output_dir": Path("results/qi_opt/ess/nfp1_qi_aspect6"),
+        "output_dir": Path("results/qi_opt/ess/nfp1_qi_aspect5"),
         "max_mode": 3,
         "min_vmec_mode": 6,
         "method": "scipy_matrix_free",
@@ -81,7 +85,7 @@ QI_CASES = {
     "nfp2_qi": {
         "case_goal": "default NFP=2 mirror-aware QI lane",
         "input_file": DATA_DIR / "input.nfp2_QI",
-        "output_dir": Path("results/qi_opt/ess/nfp2_qi_aspect6"),
+        "output_dir": Path("results/qi_opt/ess/nfp2_qi_aspect5"),
         "max_mode": 3,
         "min_vmec_mode": 6,
         "method": "scipy_matrix_free",
@@ -127,17 +131,14 @@ QI_CASES = {
     "qi_stel_seed_3127": {
         "case_goal": "far-seed staged QI robustness lane with reference-family global preconditioning",
         "input_file": DATA_DIR / "input.QI_stel_seed_3127",
-        "output_dir": Path("results/qi_opt/ess/qi_stel_seed_3127_aspect4"),
+        "output_dir": Path("results/qi_opt/ess/qi_stel_seed_3127_aspect5"),
         "max_mode": 4,
         "min_vmec_mode": 6,
         "use_mode_continuation": False,
         "stage_repeats": 1,
         "max_nfev": 8,
-        # The reviewed seed-3127 artifact is an archived aspect-4 robustness
-        # lane. Keep the catalog default aligned with that metadata so
-        # ``VMEC_JAX_QI_RUN_CASE=nfp3_qi`` is reproducible without hidden
-        # overrides; aspect-6 regeneration remains a diagnostic experiment until
-        # it passes the same QI/mirror/iota/aspect gates.
+        # The public robustness lane now uses the same aspect target as the
+        # QA/QH/QP examples. Older aspect-4 artifacts remain archival only.
         "target_aspect": SEED3127_REVIEWED_TARGET_ASPECT,
         "target_abs_iota_min": 0.41,
         "mirror_threshold": 0.35,
@@ -277,10 +278,10 @@ QI_CASES = {
         "use_mode_continuation": True,
         "stage_repeats": 1,
         "max_nfev": 1,
-        "inner_max_iter": 0,
-        "inner_ftol": 0.0,
-        "trial_max_iter": 0,
-        "trial_ftol": 0.0,
+        "inner_max_iter": DEFAULT_INNER_MAX_ITER,
+        "inner_ftol": DEFAULT_INNER_FTOL,
+        "trial_max_iter": DEFAULT_TRIAL_MAX_ITER,
+        "trial_ftol": DEFAULT_TRIAL_FTOL,
         "target_aspect": DEFAULT_QI_TARGET_ASPECT,
         "target_abs_iota_min": 0.41,
         "max_elongation": 8.2,
@@ -349,14 +350,11 @@ QI_CASES = {
         "use_mode_continuation": True,
         "stage_repeats": 1,
         "max_nfev": 1,
-        "inner_max_iter": 0,
-        "inner_ftol": 0.0,
-        "trial_max_iter": 0,
-        "trial_ftol": 0.0,
-        # This finite-beta NFP=4 reference is already near its best aspect-ratio
-        # branch.  The audit gate targets the aspect-6 branch represented by
-        # the input deck rather than using the older high-aspect vacuum policy.
-        "target_aspect": 6.0,
+        "inner_max_iter": DEFAULT_INNER_MAX_ITER,
+        "inner_ftol": DEFAULT_INNER_FTOL,
+        "trial_max_iter": DEFAULT_TRIAL_MAX_ITER,
+        "trial_ftol": DEFAULT_TRIAL_FTOL,
+        "target_aspect": DEFAULT_QI_TARGET_ASPECT,
         "target_abs_iota_min": 0.41,
         "max_elongation": 8.2,
         "mirror_threshold": 0.35,
@@ -411,7 +409,7 @@ QI_CASES = {
             "smooth_qi": 8.421446105814759e-3,
             "legacy_qi": 5.205127302950363e-3,
             "mirror_ratio": 3.133889788613409e-1,
-            "audit_command": "audit_qi_seed_suitability.py --quick --target-aspect 6 --max-mirror-ratio 0.35",
+            "audit_command": "audit_qi_seed_suitability.py --quick --target-aspect 5 --max-mirror-ratio 0.35",
         },
         "max_mode": 3,
         "min_vmec_mode": 6,

@@ -93,7 +93,7 @@ def test_fixed_boundary_qs_examples_are_standalone_workflows() -> None:
         assert "vj.load_wout(saved_paths.final_wout)" in text
         assert "vmecplot2_bmag_grid(" in text
         assert "plot_3d_boundary_comparison(" in text
-        assert "plot_bmag_contours(" in text
+        assert "plot_boozer_lcfs_bmag_comparison(" in text
         assert "plot_objective_history(" in text
         assert "Plotting is a normal post-processing block" in text
         assert "saved_paths.initial_wout" in text
@@ -105,8 +105,9 @@ def test_qp_example_documents_zero_transform_escape_policy() -> None:
     readme = (ROOT / "examples" / "optimization" / "README.md").read_text()
     docs = (ROOT / "docs" / "optimization.rst").read_text()
 
-    assert "SIMPLE_SEED_PERTURBATION = 1.0e-2" in text
-    assert "STAGE_MODES = [1, 2, 2]" in text
+    assert "SIMPLE_SEED_PERTURBATION = 1.0e-5" in text
+    assert "vj.qs_stage_modes(" in text
+    assert "lower-mode continuation sequence" in text
     assert "zero-iota branch" in docs
     assert "zero-transform basin" in readme
 
@@ -130,8 +131,16 @@ def test_optimization_readme_and_docs_teach_visible_workflow_anatomy() -> None:
     assert "save_final_outputs=False" in readme
     assert "plot_paths = {" in readme
     assert "vj.plot_3d_boundary_comparison(" in readme
-    assert "vj.plot_bmag_contours(" in readme
+    assert "vj.plot_boozer_lcfs_bmag_comparison(" in readme
     assert "vj.plot_objective_history(" in readme
+    for obsolete_qi_driver_detail in (
+        "VMEC_JAX_QI",
+        "RUN_CASE",
+        "qis.make_qi_optimization_context",
+        "qi_optimization_support",
+    ):
+        assert obsolete_qi_driver_detail not in readme
+        assert obsolete_qi_driver_detail not in docs
 
 
 def test_primary_examples_use_direct_plotting_apis_not_generic_helpers() -> None:
@@ -144,7 +153,7 @@ def test_primary_examples_use_direct_plotting_apis_not_generic_helpers() -> None
 
     for text in texts:
         assert "vj.plot_3d_boundary_comparison(" in text
-        assert "vj.plot_bmag_contours(" in text
+        assert "vj.plot_boozer_lcfs_bmag_comparison(" in text
         assert "vj.plot_objective_history(" in text
 
 
@@ -165,81 +174,40 @@ def test_qi_example_uses_qi_problem_api() -> None:
     cases_text = (ROOT / "examples" / "optimization" / "qi_optimization_cases.py").read_text()
     support_text = (ROOT / "vmec_jax" / "qi_optimization.py").read_text()
     compat_text = (ROOT / "examples" / "optimization" / "qi_optimization_support.py").read_text()
-    combined = "\n".join([text, cases_text, support_text])
 
     assert "run_quasi_isodynamic_objective_optimization(" not in text
     assert "QI_CASES = {" in cases_text
-    assert "from qi_optimization_cases import QI_CASES, resolve_qi_case" in text
-    assert "import qi_optimization_support as qis" in text
+    assert "from qi_optimization_cases import" not in text
+    assert "import qi_optimization_support" not in text
     assert "from vmec_jax.qi_optimization import *" in compat_text
     assert "from tools.diagnostics" not in support_text.split("def _load_basin_prefilter_tools")[0]
-    assert len(text.splitlines()) < 650
+    assert len(text.splitlines()) < 450
     assert "qis.configure(globals())" not in text
-    assert "QI_CONTEXT = qis.make_qi_optimization_context(globals(), strict=True)" in text
+    assert "os.environ" not in text
+    assert "RUN_CASE" not in text
+    assert "CASE =" not in text
+    assert "QI_CONTEXT = vj.make_qi_optimization_context(" in text
     assert "ctx=QI_CONTEXT" in text
-    assert 'RUN_CASE = "nfp2_qi"' in text
-    assert "RUN_CASE, CASE = resolve_qi_case(RUN_CASE)" in text
-    assert "def resolve_qi_case(default_run_case: str | None = None):" in cases_text
-    assert "RUN_CASE_DEFAULT if default_run_case is None else str(default_run_case)" in cases_text
-    assert "VMEC_JAX_QI_RUN_CASE" in cases_text
-    assert "VMEC_JAX_QI_INPUT" in cases_text
-    assert "VMEC_JAX_QI_OUTPUT_DIR" in cases_text
-    assert "VMEC_JAX_QI_MAX_MODE" in text
-    assert "VMEC_JAX_QI_MAX_NFEV" in text
-    assert "VMEC_JAX_QI_USE_SIMPLE_SEED" in text
-    assert 'bool(CASE.get("use_simple_seed", False))' in text
+    assert 'INPUT_FILE = DATA_DIR / "input.nfp2_QI"' in text
+    assert 'INPUT_FILE = DATA_DIR / "input.QI_stel_seed_3127"' in text
+    assert "USE_SIMPLE_SEED = False" in text
+    assert "USE_TARGET_HELICITY_SEED = True" in text
+    assert "USE_REFERENCE_FAMILY_SEED = False" in text
     assert "prepare_simple_omnigenity_seed_input(" in text
-    assert "RAW_INPUT_FILE = CASE[\"input_file\"]" in text
-    assert "qis.save_raw_seed_initial_artifacts(\n    RAW_INPUT_FILE," in text
-    assert "Unknown QI RUN_CASE" in cases_text
-    assert '"nfp1_qi"' in cases_text
-    assert 'QI_CASES["nfp3_qi"]' in cases_text
-    assert '"qi_stel_seed_3127"' in cases_text
-    assert '"nfp4_qi_finite_beta"' in cases_text
-    assert '"nfp4_qh_warm_to_qi"' in cases_text
-    assert 'DATA_DIR / "input.nfp1_QI"' in cases_text
-    assert 'DATA_DIR / "input.QI_stel_seed_3127"' in cases_text
-    assert 'DATA_DIR / "input.nfp4_QI_finite_beta"' in cases_text
-    assert 'DATA_DIR / "input.nfp4_QH_warm_start"' in cases_text
-    assert 'CASE.get("inner_max_iter", 120)' in text
-    assert '"inner_max_iter": 0' in cases_text
-    assert '"trial_max_iter": 0' in cases_text
-    assert 'QI_GATE_LEGACY_MAX = float(CASE.get("qi_gate_legacy_max", 2.0e-3))' in text
-    assert '"phimin": 0.0' in cases_text
-    assert '"weighted_shuffle_profile_weight": 0.0' in cases_text
-    assert '"method": "scipy_matrix_free"' in cases_text
-    assert '"mirror_threshold": 0.30' in cases_text
-    assert '"mirror_surface_index": None' in cases_text
-    assert '"qi_ceiling_max": 2.0e-3' in cases_text
-    assert '"mirror_ramp_stages": (' in cases_text
-    assert '"name": "matrix_free_mirror030"' in cases_text
-    assert '"mirror_threshold": 0.21' in cases_text
-    assert '"promotion_mirror_threshold": 0.30' in cases_text
-    assert '"require_engineering_gate": True' in cases_text
-    assert '"stage_repeats": 1' in cases_text
-    assert '"boozer_target_wout": None' in cases_text
-    assert '"boozer_target_normalize": True' in cases_text
-    assert "Optional homotopy target for far seeds" in cases_text
-    assert "boozer_b_target_from_wout(" in text
-    assert "BoozerBTarget(" in text
-    assert '"use_augmented_lagrangian_constraints": False' in cases_text
-    assert "AugmentedLagrangianConstraint(" in text
-    assert "AL constraints:" in text
+    assert "run_target_helicity_seed_preconditioner(" in text
+    assert "run_boundary_reference_preconditioner(" in text
+    assert "RAW_INPUT_FILE = INPUT_FILE" in text
     assert "QuasiIsodynamicOptions(" in text
     assert "QuasiIsodynamicResidual(QI_OPTIONS)" in text
     assert "QuasiIsodynamicResidualCeiling(" in text
-    assert "qi_options=QI_OPTIONS" in text
-    assert "Small stage helper: physics is still assembled explicitly" in text
-    assert "branch_width_weight=QI_OPTIONS.branch_width_weight" in combined
-    assert "weighted_shuffle_profile_weight=QI_OPTIONS.weighted_shuffle_profile_weight" in combined
+    assert "MirrorRatio(" in text
+    assert "MaxElongation(" in text
     assert "objective_tuples = [" in text
     assert "LeastSquaresProblem.from_tuples(" in text
     assert "Assembled least-squares problem" in text
     assert "problem.objective_names" in text
     assert "problem.scalar_objective_names" in text
     assert "problem.qi_objective_names" in text
-    assert "def make_qi_problem(stage=None):" in text
-    assert "problem = make_qi_problem()" in text
     assert "def make_vmec_for_stage(" not in text
     assert "least_squares_solve(" in text
     assert "SAVE_STAGE_INPUTS = True" in text
@@ -256,13 +224,13 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "vj.write_indata(input_out, vj.read_indata(input_file))" in support_text
     assert "vj.run_fixed_boundary(input_file, solver_device=_ctx(ctx, \"solver_device\"), verbose=False)" in support_text
     assert "vj.write_wout_from_fixed_boundary_run(wout_out, run)" in support_text
-    assert "raw_initial_run = qis.save_raw_seed_initial_artifacts(" in text
+    assert "raw_initial_run = vj.save_raw_seed_initial_artifacts(" in text
     assert "INPUT_FILE," in text
     assert 'saved_paths["initial_input"],' in text
     assert 'saved_paths["initial_wout"],' in text
     assert "first_result_for_outputs" not in text
     assert "initial_result_for_outputs" not in text
-    assert "final_optimizer = result.final_optimizer" in text
+    assert "result.final_optimizer" in text
     assert "result.final_result" in text
     assert "history = result.history" in text
     assert "objective_history = result.objective_history" in text
@@ -272,29 +240,23 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "result.final_params" in text
     assert "result.final_state" in text
     assert "saved_paths = {" in text
-    assert "final_optimizer.save_input(" in text
-    assert "final_optimizer.save_wout(" in text
-    assert "final_optimizer.save_history(" in text
+    assert "result.final_optimizer.save_input(" in text
+    assert "result.final_optimizer.save_wout(" in text
+    assert "result.final_optimizer.save_history(" in text
     assert "Files saved for raw-seed/final comparison" in text
     assert 'vj.load_wout(saved_paths["final_wout"])' in text
     assert "vmecplot2_bmag_grid(" in text
     assert "plot_3d_boundary_comparison(" in text
-    assert "plot_bmag_contours(" in text
+    assert "plot_boozer_lcfs_bmag_comparison(" in text
     assert "plot_objective_history(" in text
-    assert "Plotting is explicit post-processing" in text
-    assert '"boozer_bmag_initial": vj.plot_boozer_bmag_contours_from_state(' in text
-    assert "raw_initial_run.state" in text
-    assert "plot_boozer_bmag_contours_from_state(" in text
+    assert "Generating initial-vs-final LCFS |B| contour comparison in Boozer coordinates" in text
     assert "qi_diagnostics_from_state(" in text
     assert "qi_cleanup_candidate_promotable(" in support_text
     assert "require_engineering_gate=bool(stage.get(\"require_engineering_gate\", False))" in support_text
     assert "reference_diagnostics = None if accepted_result is None else qi_diagnostics_for_result(" in support_text
-    assert "mirror_ramp_promotion_log.json" in text
     assert "diagnostics.json" in text
-    assert "json.dumps(qis.jsonable(diagnostics)" in text
-    assert "qi_seed_gate_passed" in text
-    assert "engineering_gate_passed" in text
-    assert "qi_mirror_ratio_by_surface" in text
+    assert "json.dumps(vj.jsonable(diagnostics)" in text
+    assert "qi_mirror_ratio_max" in text
     assert 'saved_paths["initial_wout"]' in text
     assert 'saved_paths["history"]' in text
 
@@ -325,7 +287,6 @@ def test_qi_example_keeps_mirror_cleanup_guarded_by_qi_ceiling() -> None:
     text = (ROOT / "examples" / "optimization" / "QI_optimization.py").read_text()
     cases_text = (ROOT / "examples" / "optimization" / "qi_optimization_cases.py").read_text()
     support_text = (ROOT / "vmec_jax" / "qi_optimization.py").read_text()
-    combined = "\n".join([text, cases_text, support_text])
 
     assert '"mirror_weight": 20.0' in cases_text
     assert '"qi_ceiling_weight": 0.0' in cases_text
@@ -336,28 +297,23 @@ def test_qi_example_keeps_mirror_cleanup_guarded_by_qi_ceiling() -> None:
     assert "stage_promotion_mirror_threshold = float(" in support_text
     assert "repeats=int(stage.get(\"stage_repeats\", _ctx(ctx, \"stage_repeats\")))" in support_text
     assert "method=str(stage.get(\"method\", _ctx(ctx, \"method\")))" in support_text
-    assert "stage_max_nfev = min(stage_max_nfev, MAX_NFEV)" in text
-    assert "stage.get(\"use_showcase_max_nfev\", False)" in text
     assert '"use_showcase_max_nfev": True' in cases_text
     assert '"require_engineering_gate": True' in cases_text
     assert "qi_ceiling = vj.QuasiIsodynamicResidualCeiling(" in text
     assert "qi_options=QI_OPTIONS" in text
     assert "mirror = vj.MirrorRatio(" in text
-    assert "AugmentedLagrangianConstraint(" in text
-    assert "use_augmented_lagrangian_constraints" in combined
-    assert 'surface_index=_stage_value(stage, "mirror_surface_index", MIRROR_SURFACE_INDEX)' in text
-    assert "Mirror-ramp cleanup stages must include QuasiIsodynamicResidualCeiling" in text
-    assert "or require the independent QI engineering gate" in text
-    assert "_stage_value(stage, \"qi_ceiling_weight\", QI_CEILING_WEIGHT)" in text
+    assert "surface_index=MIRROR_SURFACE_INDEX" in text
+    assert "stage_promotes_candidate(" in support_text
+    assert "require_engineering_gate=bool(stage.get(\"require_engineering_gate\", False))" in support_text
+    assert "_stage_value(stage, \"qi_ceiling_weight\", QI_CEILING_WEIGHT)" not in text
     assert "reference=reference_diagnostics" in support_text
-    assert "objective_tuples.append((qi_ceiling.J, 0.0, qi_ceiling_weight))" in text
-    assert "objective_tuples.append((mirror.J, 0.0, mirror_weight))" in text
+    assert "objective_tuples.append((qi_ceiling.J, 0.0, QI_CEILING_WEIGHT))" in text
+    assert "(mirror.J, 0.0, MIRROR_WEIGHT)" in text
     assert text.index("qi_ceiling = vj.QuasiIsodynamicResidualCeiling(") < text.index("mirror = vj.MirrorRatio(")
-    assert text.index("if qi_ceiling_weight > 0.0:") < text.index("if mirror_weight > 0.0:")
+    assert text.index("QI_CEILING_WEIGHT > 0.0") > text.index("objective_tuples = [")
 
 
 def test_qi_nfp4_case_is_explicit_nonpassing_stress_fixture() -> None:
-    text = (ROOT / "examples" / "optimization" / "QI_optimization.py").read_text()
     cases_text = (ROOT / "examples" / "optimization" / "qi_optimization_cases.py").read_text()
     docs = "\n".join(
         [
@@ -372,10 +328,6 @@ def test_qi_nfp4_case_is_explicit_nonpassing_stress_fixture() -> None:
     assert '"expected_gate_failures": ("smooth_qi", "legacy_qi", "mirror")' in cases_text
     assert '"known_best_nfp4_quick_audit": {' in cases_text
     assert "external_nfp4_qi_wfq0" in cases_text
-    assert "qi_case_expected_gate_status" in text
-    assert "qi_case_stress_fixture" in text
-    assert "qi_case_expected_outcome_met" in text
-    assert "expected_non_passing_stress" in text
     assert "NFP=4 QI" in docs
     assert "nfp3_qi" in docs
     assert "nfp4_qi_finite_beta" in docs
@@ -683,7 +635,6 @@ def test_least_squares_problem_rejects_mixed_qi_options() -> None:
 
 def test_qi_field_objectives_raise_outside_qi_solve() -> None:
     from vmec_jax.optimization_workflow import (
-        MaxElongation,
         MirrorRatio,
         QuasiIsodynamicOptions,
         QuasiIsodynamicResidual,
@@ -695,12 +646,26 @@ def test_qi_field_objectives_raise_outside_qi_solve() -> None:
         QuasiIsodynamicResidual(qi_options),
         QuasiIsodynamicResidualCeiling(maximum=1.0e-2, qi_options=qi_options),
         MirrorRatio(threshold=1.2, qi_options=qi_options),
-        MaxElongation(threshold=4.0, qi_options=qi_options),
     ]
 
     for objective in objectives:
         with pytest.raises(RuntimeError, match="inside a QI solve"):
             objective.J(None, None)
+
+
+def test_mirror_and_elongation_can_be_plain_state_objectives() -> None:
+    from vmec_jax.optimization_workflow import LeastSquaresProblem, MaxElongation, MirrorRatio
+
+    problem = LeastSquaresProblem.from_tuples(
+        [
+            (MirrorRatio(threshold=0.3, surfaces=[0.5, 1.0]).J, 0.0, 4.0),
+            (MaxElongation(threshold=8.0).J, 0.0, 9.0),
+        ]
+    )
+
+    assert not problem.is_qi
+    assert problem.qi_options is None
+    assert [term.name for term in problem.objective_terms] == ["mirror_ratio", "max_elongation"]
 
 
 def test_mirror_ratio_objective_records_all_surface_smoothing_options() -> None:
@@ -1521,6 +1486,7 @@ def test_magnetic_well_tuple_stays_regular_state_objective(monkeypatch) -> None:
 def test_public_api_reexports_example_optimization_contract() -> None:
     import vmec_jax as vj
     import vmec_jax.api as api
+    import vmec_jax.booz as booz
     import vmec_jax.optimization_workflow as workflow
     import vmec_jax.plotting as plotting
     import vmec_jax.qi_diagnostics as qi_diagnostics
@@ -1590,10 +1556,25 @@ def test_public_api_reexports_example_optimization_contract() -> None:
     for name in (
         "plot_3d_boundary_comparison",
         "plot_bmag_contours",
+        "plot_boozmn",
+        "plot_boozmn_bmag_contours",
+        "plot_boozmn_mode_families",
+        "plot_boozmn_spectrum",
         "plot_boozer_bmag_contours_from_state",
+        "plot_boozer_lcfs_bmag_comparison",
         "plot_objective_history",
     ):
         assert getattr(api, name) is getattr(plotting, name)
+
+    for name in (
+        "BoozConfig",
+        "parse_booz_surfaces",
+        "read_booz_config",
+        "resolve_boozmn_path",
+        "run_booz_xform",
+    ):
+        assert getattr(api, name) is getattr(booz, name)
+        assert getattr(vj, name) is getattr(booz, name)
 
 
 def test_jxbforce_profile_tuple_stays_regular_state_objective() -> None:

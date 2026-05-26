@@ -22,10 +22,10 @@ controls only.  Scientific targets stay in the explicit objective tuple list
 or, for QI field terms, in the shared `QuasiIsodynamicOptions` and objective
 objects.
 
-For staged QI runs, pass an explicit
-`qis.make_qi_optimization_context(globals(), strict=True)` into the helper
-calls.  Strict mode catches missing script constants early and prevents the
-example from silently borrowing legacy module globals.
+The QI example follows the same pattern but has more visible physics objects:
+`QuasiIsodynamicOptions`, `QuasiIsodynamicResidual`, `MirrorRatio`,
+`MaxElongation`, and optional seed-preparation helpers are all configured as
+ordinary top-level variables before the objective tuple list is built.
 
 ## Objective Tuple Pattern
 
@@ -78,10 +78,10 @@ under the run directory.  That generated input keeps only `RBC(0,0)`,
 `RBC/ZBS` modes up to `max_mode` with deterministic `1e-5` perturbations so
 the Jacobian does not start on an exactly zero-transform branch.  The raw
 bundled input decks are not modified.  QP is more sensitive to the
-zero-transform basin from the common minimal seed, so `QP_optimization.py`
-keeps this hint explicit as `SIMPLE_SEED_PERTURBATION = 1e-2` and uses a
-repeated mode-2 continuation cleanup by default; users can set it back to
-`1e-5` or remove the `STAGE_MODES` override for direct high-mode experiments.
+zero-transform basin in direct high-mode starts from the common minimal seed,
+so `QP_optimization.py` keeps the same `SIMPLE_SEED_PERTURBATION = 1e-5` as
+QA/QH but repeats intermediate continuation modes before the final high-mode
+cleanup.
 The lower-level QI staged policy also
 has a mode-1 target-helicity preconditioner with the deterministic hint set
 `RBC(1,0)`, `ZBS(1,0)`, `RBC(-1,1)`, `ZBS(-1,1)`, `RBC(1,1)`, and `ZBS(1,1)`
@@ -152,7 +152,7 @@ plot_paths = {
         saved_paths.final_wout,
         outdir=OUTPUT_DIR,
     ),
-    "bmag_contours": vj.plot_bmag_contours(
+    "boozer_lcfs_bmag_contours": vj.plot_boozer_lcfs_bmag_comparison(
         saved_paths.initial_wout,
         saved_paths.final_wout,
         outdir=OUTPUT_DIR,
@@ -181,20 +181,20 @@ remain available for custom inspection.
 - `QA_optimization.py`: recommended quasi-axisymmetric fixed-boundary optimization.
 - `QH_optimization.py`: recommended quasi-helical fixed-boundary optimization.
 - `QP_optimization.py`: quasi-poloidal fixed-boundary optimization from the NFP=2 QI seed.
-- `QI_optimization.py`: recommended quasi-isodynamic optimization with Boozer-space QI metrics, mirror-ratio and elongation penalties, repeated same-mode continuation, and ESS. It is a staged driver: each phase can change optimizer, mode sequence, weights, and promotion gates, and only exact independent diagnostics decide whether a stage is promoted. Set `VMEC_JAX_QI_RUN_CASE` or change the top-level `RUN_CASE` to run the bundled `nfp1_qi`, `nfp2_qi`, `nfp3_qi`/`qi_stel_seed_3127`, `nfp4_qi`, or diagnostic `nfp4_qh_warm_to_qi` stress case.
+- `QI_optimization.py`: recommended quasi-isodynamic optimization with Boozer-space QI metrics, mirror-ratio and elongation penalties, repeated same-mode continuation, and ESS. Edit `INPUT_FILE`, `OUTPUT_DIR`, seed helpers, objective weights, and optimizer controls at the top of the script, then run it directly.
 - `qa_optimization_finite_beta.py`, `qh_optimization_finite_beta.py`, and `qi_optimization_finite_beta.py`:
   finite-beta stage-1 examples with pressure/current-profile terms. These intentionally use
   `FixedBoundaryExactOptimizer` directly because each continuation stage builds custom
   finite-pressure/current residual closures; the helper only standardizes stage artifacts.
 
-`QI_optimization.py` now keeps the same visible workflow as QA/QH/QP: edit
+`QI_optimization.py` keeps the same visible workflow as QA/QH/QP: edit
 top-level controls, construct objective tuples, call `least_squares_solve`,
-then save and plot from the returned result.  Its case catalog lives in
-`qi_optimization_cases.py`, and the seed-robust promotion/checkpoint helpers
-are imported from `vmec_jax.qi_optimization` through the compatibility shim
-`qi_optimization_support.py`.  The scientific defaults remain visible in the
-driver, and physics terms stay in objective tuples rather than being passed as
-shortcut arguments into `least_squares_solve`.
+then save and plot from the returned result.  If a far seed needs basin
+capture before local QI cleanup, enable `USE_TARGET_HELICITY_SEED` or
+`USE_REFERENCE_FAMILY_SEED` in that script and point `REFERENCE_INPUT_FILE` at
+a scientifically appropriate same-NFP reference.  The scientific defaults
+remain visible in the driver, and physics terms stay in objective tuples
+rather than being passed as shortcut arguments into `least_squares_solve`.
 
 Run one case from the repository root:
 
@@ -274,12 +274,8 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/audit_qi_seed_suitab
   --prefine-manifest results/qi_seed_audit/prefine_manifest.json \
   --prefine-output-dir results/qi_seed_audit/prefine_probes
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_seed_robustness.py
-PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp1_qi python examples/optimization/QI_optimization.py
-PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp2_qi python examples/optimization/QI_optimization.py
-PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127 \
-  VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/qi_stel_seed_3127_current_public_final \
-  python examples/optimization/QI_optimization.py
-PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi python examples/optimization/QI_optimization.py
+# Edit INPUT_FILE and OUTPUT_DIR at the top of QI_optimization.py, then run:
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_optimization.py
 PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi_boundary_interpolation_scan.py \
   --seed-input examples/data/input.QI_stel_seed_3127 \
   --reference-input examples/data/input.nfp3_QI_fixed_resolution_final \
@@ -300,10 +296,11 @@ PYTHONPATH=. python examples/optimization/render_qi_constrained_sweep.py
 PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 ```
 
-The short ``VMEC_JAX_QI_RUN_CASE=...`` commands above run the current script
-defaults. To reproduce the archived ``readme_qi_optimization_cases.png`` panel
-exactly, use the case-specific target-aspect and output-directory overrides in
-``docs/optimization.rst``.
+To reproduce a specific reviewed NFP=1/2/3/4 QI row, edit the top-level
+`INPUT_FILE`, `OUTPUT_DIR`, and optional `REFERENCE_INPUT_FILE` values in
+`QI_optimization.py`, then run the command above.  The archived
+`readme_qi_optimization_cases.png` panel is rendered from reviewed output
+bundles under `docs/_static/qi_readme_cases`.
 
 The constrained-QI sweep is the compact bundled-seed matrix, not the staged
 far-seed runner.  If its summary reports a stale QI target aspect, rerun the
@@ -325,15 +322,13 @@ For seed-robustness experiments, first run the audit, then use
 `audit_qi_seed_suitability.py --prefine-probes plan` to write a reviewed
 manifest before launching expensive prefine probes.
 
-`QI_optimization.py` also accepts `VMEC_JAX_QI_INPUT=/path/to/input.my_seed`
-for an external VMEC input deck; it will use the same conservative far-seed
-QI+iota policy as `qi_stel_seed_3127` unless you add a custom `QI_CASES` entry
-in `qi_optimization_cases.py`.
-`QI_seed_robustness.py` accepts `VMEC_JAX_QI_SEED_INPUT`,
-`VMEC_JAX_QI_SEED_OUTPUT_DIR`, and `VMEC_JAX_QI_SEED_MAX_NFEV` for small local
-probes. These variables are environment overrides for the top-level script
-settings, not a separate wrapper API or a replacement for the no-optimization
-audit.
+For a new external VMEC input deck, set `INPUT_FILE = Path("/path/to/input.my_seed")`
+at the top of `QI_optimization.py`.  If the seed is far from QI, first run
+`audit_qi_seed_suitability.py`, then enable `USE_REFERENCE_FAMILY_SEED` with a
+same-NFP reference or use the target-helicity seed helper before local
+optimization.  `QI_seed_robustness.py` remains available for small diagnostic
+probes, but the recommended user-facing QI path is the editable
+`QI_optimization.py` workflow.
 
 `tools/diagnostics/qi_landscape_scan.py` and `qi_basin_survey.py` are useful for
 mapping rugged seed neighborhoods, but their default executed diagnostics use

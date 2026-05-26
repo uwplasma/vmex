@@ -35,6 +35,7 @@ from .config import load_config
 from .static import build_static
 from .driver import example_paths
 from .wout import read_wout, state_from_wout
+from .booz import run_booz_xform
 
 
 @dataclass(frozen=True)
@@ -1365,8 +1366,8 @@ def plot_boozer_bmag_contours_from_state(
     cs = ax.contour(phi2d, theta2d, bmag, levels=levels, cmap="viridis", linewidths=1.0)
     fig.colorbar(cs, ax=ax, label="|B| (T)")
     ax.set_title(title)
-    ax.set_xlabel("Boozer toroidal angle φ_B (rad)")
-    ax.set_ylabel("Boozer poloidal angle θ_B (rad)")
+    ax.set_xlabel(r"Boozer toroidal angle $\phi_B$ (rad)")
+    ax.set_ylabel(r"Boozer poloidal angle $\theta_B$ (rad)")
     ax.set_yticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
     ax.set_yticklabels(["0", "π/2", "π", "3π/2", "2π"])
     ax.set_ylim(0, 2.0 * np.pi)
@@ -1375,6 +1376,346 @@ def plot_boozer_bmag_contours_from_state(
     fig.savefig(out, dpi=180, bbox_inches="tight")
     plt.close(fig)
     return out
+
+
+def _load_booz_if_path(booz):
+    if hasattr(booz, "bmnc_b") and hasattr(booz, "xm_b"):
+        return booz
+    try:
+        from booz_xform_jax import Booz_xform
+    except Exception as exc:  # pragma: no cover - dependency is optional at import time
+        raise ImportError(
+            "Boozer plotting requires booz_xform_jax. Install vmec-jax from the "
+            "current package metadata or run `pip install booz_xform_jax`."
+        ) from exc
+    bx = Booz_xform(verbose=0)
+    bx.read_boozmn(str(booz))
+    return bx
+
+
+def _boozer_mode_amplitudes(bx) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    bmnc = np.asarray(bx.bmnc_b, dtype=float)
+    bmns_raw = getattr(bx, "bmns_b", None)
+    bmns = np.zeros_like(bmnc) if bmns_raw is None else np.asarray(bmns_raw, dtype=float)
+    amp = np.sqrt(bmnc**2 + bmns**2)
+    xm = np.asarray(bx.xm_b, dtype=int)
+    xn = np.asarray(bx.xn_b, dtype=int)
+    return amp, bmnc, xm, xn
+
+
+def _boozer_mode_group(m: int, n: int, nfp: int) -> tuple[str, str]:
+    if m == 0 and n == 0:
+        return "B00", "black"
+    if n == 0:
+        return "QA / axisymmetric (n=0)", "tab:green"
+    if m == 0:
+        return "Mirror (m=0,n≠0)", "darkgoldenrod"
+    if n == nfp * m:
+        return "QH + (n=NFP m)", "tab:purple"
+    if n == -nfp * m:
+        return "QH - (n=-NFP m)", "tab:cyan"
+    return "Other non-symmetric", "tab:red"
+
+
+def _booz_bmag_grid(bx, *, js: int, ntheta: int = 128, nphi: int = 256) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    _amp, bmnc, xm, xn = _boozer_mode_amplitudes(bx)
+    bmns_raw = getattr(bx, "bmns_b", None)
+    bmns = np.zeros_like(bmnc) if bmns_raw is None else np.asarray(bmns_raw, dtype=float)
+    nfp = int(getattr(bx, "nfp", getattr(bx, "nfp_b", 1)))
+    theta = np.linspace(0.0, 2.0 * np.pi, int(ntheta), endpoint=True)
+    phi = np.linspace(0.0, 2.0 * np.pi / float(nfp), int(nphi), endpoint=True)
+    angle = theta[:, None, None] * xm[None, None, :] - phi[None, :, None] * xn[None, None, :]
+    bmag = np.sum(
+        bmnc[:, js][None, None, :] * np.cos(angle)
+        + bmns[:, js][None, None, :] * np.sin(angle),
+        axis=-1,
+    )
+    return theta, phi, bmag
+
+
+def _booz_surface_label(bx, js: int, *, outer: bool = False) -> str:
+    if outer:
+        return "Plasma boundary"
+    return "Mid radius"
+
+
+def plot_boozmn_bmag_contours(
+    boozmn,
+    *,
+    outdir: str | Path | None = None,
+    name: str | None = None,
+    ntheta: int = 128,
+    nphi: int = 256,
+) -> Path:
+    """Plot mid-radius and outermost Boozer ``|B|`` line contours from ``boozmn``."""
+
+    prepare_matplotlib_3d()
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    bx = _load_booz_if_path(boozmn)
+    ns_b = int(np.asarray(bx.bmnc_b).shape[1])
+    if ns_b < 1:
+        raise ValueError("Boozer output contains no computed surfaces")
+    mid = max(0, min(ns_b - 1, ns_b // 2))
+    outer = ns_b - 1
+    selected = [(False, mid), (True, outer)] if mid != outer else [(True, outer)]
+
+    path = Path(boozmn) if isinstance(boozmn, (str, Path)) else Path("boozmn")
+    label = name or path.stem
+    outdir = Path(outdir) if outdir is not None else path.parent
+    outdir.mkdir(parents=True, exist_ok=True)
+    out = outdir / f"{label}_BoozerB_contours.png"
+
+    fig, axes = plt.subplots(1, len(selected), figsize=(7.5 * len(selected), 4.6), squeeze=False)
+    for ax, (is_outer, js) in zip(axes[0], selected):
+        theta, phi, bmag = _booz_bmag_grid(bx, js=js, ntheta=ntheta, nphi=nphi)
+        phi2d, theta2d = np.meshgrid(phi, theta)
+        levels = _line_contour_levels(bmag, count=24)
+        cs = ax.contour(phi2d, theta2d, bmag, levels=levels, cmap="viridis", linewidths=1.0)
+        fig.colorbar(cs, ax=ax, label="|B| (T)")
+        ax.set_title(_booz_surface_label(bx, js, outer=is_outer))
+        ax.set_xlabel(r"Boozer toroidal angle $\phi_B$ (rad)")
+        ax.set_ylabel(r"Boozer poloidal angle $\theta_B$ (rad)")
+        ax.set_yticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
+        ax.set_yticklabels(["0", "π/2", "π", "3π/2", "2π"])
+        ax.set_ylim(0, 2.0 * np.pi)
+    fig.suptitle("Boozer-coordinate |B| contours", fontsize=13)
+    fig.tight_layout()
+    fig.savefig(out, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
+def plot_boozer_lcfs_bmag_comparison(
+    wout_initial,
+    wout_final,
+    *,
+    outdir: str | Path | None = None,
+    name: str = "boozer_lcfs_bmag_comparison",
+    mbooz: int = 32,
+    nbooz: int = 32,
+    ntheta: int = 128,
+    nphi: int = 256,
+    jit: bool = False,
+) -> Path:
+    """Plot initial/final LCFS ``|B|`` contours in Boozer coordinates.
+
+    This helper is intended for optimization examples.  It runs
+    ``booz_xform_jax`` on each WOUT file using the outermost Boozer surface,
+    then plots line contours in ``(phi_B, theta_B)``.  VMEC-angle contour plots
+    are useful for parity checks; quasisymmetry and omnigenity should be judged
+    in Boozer coordinates.
+    """
+
+    prepare_matplotlib_3d()
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    initial_path = Path(wout_initial)
+    final_path = Path(wout_final)
+    if outdir is None:
+        outdir = final_path.parent
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    booz_initial = run_booz_xform(
+        initial_path,
+        output_path=outdir / f"{name}_initial_boozmn.nc",
+        mbooz=mbooz,
+        nbooz=nbooz,
+        surfaces=(1.0,),
+        jit=jit,
+        verbose=False,
+    )
+    booz_final = run_booz_xform(
+        final_path,
+        output_path=outdir / f"{name}_final_boozmn.nc",
+        mbooz=mbooz,
+        nbooz=nbooz,
+        surfaces=(1.0,),
+        jit=jit,
+        verbose=False,
+    )
+
+    fig, axes = plt.subplots(1, 2, figsize=(13.5, 4.8), squeeze=False)
+    for ax, boozmn, title in (
+        (axes[0, 0], booz_initial, "Initial plasma boundary"),
+        (axes[0, 1], booz_final, "Optimized plasma boundary"),
+    ):
+        bx = _load_booz_if_path(boozmn)
+        ns_b = int(np.asarray(bx.bmnc_b).shape[1])
+        if ns_b < 1:
+            raise ValueError(f"Boozer output contains no computed surfaces: {boozmn}")
+        theta, phi, bmag = _booz_bmag_grid(bx, js=ns_b - 1, ntheta=ntheta, nphi=nphi)
+        phi2d, theta2d = np.meshgrid(phi, theta)
+        cs = ax.contour(
+            phi2d,
+            theta2d,
+            bmag,
+            levels=_line_contour_levels(bmag, count=25),
+            cmap="viridis",
+            linewidths=1.0,
+        )
+        fig.colorbar(cs, ax=ax, label="|B| (T)")
+        ax.set_title(f"{title} in Boozer coordinates")
+        ax.set_xlabel(r"Boozer toroidal angle $\phi_B$ (rad)")
+        ax.set_ylabel(r"Boozer poloidal angle $\theta_B$ (rad)")
+        ax.set_yticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
+        ax.set_yticklabels(["0", "π/2", "π", "3π/2", "2π"])
+        ax.set_ylim(0, 2.0 * np.pi)
+
+    fig.suptitle("Initial vs final LCFS |B| line contours in Boozer coordinates", fontsize=13)
+    fig.tight_layout()
+    out = outdir / f"{name}.png"
+    fig.savefig(out, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
+def plot_boozmn_mode_families(
+    boozmn,
+    *,
+    outdir: str | Path | None = None,
+    name: str | None = None,
+    max_modes: int = 80,
+) -> Path:
+    """Plot radial Boozer ``|B|`` mode amplitudes grouped by symmetry family."""
+
+    prepare_matplotlib_3d()
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    bx = _load_booz_if_path(boozmn)
+    amp, _bmnc, xm, xn = _boozer_mode_amplitudes(bx)
+    nfp = int(getattr(bx, "nfp", 1))
+    s_b = np.asarray(getattr(bx, "s_b", np.linspace(0.0, 1.0, amp.shape[1])), dtype=float)
+    if s_b.size != amp.shape[1]:
+        s_b = np.linspace(0.0, 1.0, amp.shape[1])
+
+    outer_amp = amp[:, -1]
+    order = np.argsort(-outer_amp)[: max(1, min(int(max_modes), amp.shape[0]))]
+    path = Path(boozmn) if isinstance(boozmn, (str, Path)) else Path("boozmn")
+    label = name or path.stem
+    outdir = Path(outdir) if outdir is not None else path.parent
+    outdir.mkdir(parents=True, exist_ok=True)
+    out = outdir / f"{label}_Boozer_mode_families.png"
+
+    fig, ax = plt.subplots(1, 1, figsize=(8.5, 5.2))
+    used_labels: set[str] = set()
+    for idx in order:
+        group, color = _boozer_mode_group(int(xm[idx]), int(xn[idx]), nfp)
+        line_label = group if group not in used_labels else None
+        used_labels.add(group)
+        alpha = 0.9 if line_label else 0.35
+        width = 1.8 if group != "Other non-symmetric" else 1.0
+        ax.semilogy(s_b, np.maximum(amp[idx], 1e-16), color=color, alpha=alpha, linewidth=width, label=line_label)
+    ax.set_xlabel("Normalized toroidal flux s")
+    ax.set_ylabel("|B_mn| amplitude (T)")
+    ax.set_title("Boozer |B| radial spectra by symmetry family")
+    s_min = float(np.nanmin(s_b))
+    s_max = float(np.nanmax(s_b))
+    if np.isclose(s_min, s_max):
+        pad = 0.05 if s_min == 0.0 else 0.05 * abs(s_min)
+        s_min -= pad
+        s_max += pad
+    ax.set_xlim(s_min, s_max)
+    ax.grid(True, alpha=0.25)
+    ax.legend(fontsize=9, loc="best")
+    fig.tight_layout()
+    fig.savefig(out, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
+def plot_boozmn_spectrum(
+    boozmn,
+    *,
+    outdir: str | Path | None = None,
+    name: str | None = None,
+    surface_index: int = -1,
+    nmodes: int = 40,
+) -> Path:
+    """Plot the largest Boozer ``|B|`` Fourier amplitudes on one surface."""
+
+    prepare_matplotlib_3d()
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    bx = _load_booz_if_path(boozmn)
+    amp, _bmnc, xm, xn = _boozer_mode_amplitudes(bx)
+    nfp = int(getattr(bx, "nfp", 1))
+    ns_b = int(amp.shape[1])
+    js = int(surface_index)
+    if js < 0:
+        js += ns_b
+    if js < 0 or js >= ns_b:
+        raise IndexError(f"surface_index {surface_index} is outside Boozer surface range 0..{ns_b - 1}")
+    order = np.argsort(-amp[:, js])[: max(1, min(int(nmodes), amp.shape[0]))]
+    colors = [_boozer_mode_group(int(xm[idx]), int(xn[idx]), nfp)[1] for idx in order]
+    labels = [f"({int(xm[idx])},{int(xn[idx])})" for idx in order]
+
+    path = Path(boozmn) if isinstance(boozmn, (str, Path)) else Path("boozmn")
+    label = name or path.stem
+    outdir = Path(outdir) if outdir is not None else path.parent
+    outdir.mkdir(parents=True, exist_ok=True)
+    out = outdir / f"{label}_Boozer_lcfs_spectrum.png"
+
+    fig, ax = plt.subplots(1, 1, figsize=(max(8.0, 0.24 * len(order)), 5.0))
+    x = np.arange(len(order))
+    ax.bar(x, np.maximum(amp[order, js], 1e-16), color=colors, width=0.8)
+    ax.set_yscale("log")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=75, ha="right", fontsize=8)
+    ax.set_ylabel("|B_mn| amplitude (T)")
+    ax.set_xlabel("Boozer mode (m,n), largest on selected surface")
+    ax.set_title(f"Boozer |B| spectrum on {_booz_surface_label(bx, js, outer=(js == ns_b - 1))}")
+    legend_items: dict[str, str] = {}
+    for idx in order:
+        group, color = _boozer_mode_group(int(xm[idx]), int(xn[idx]), nfp)
+        legend_items[group] = color
+    handles = [plt.Line2D([0], [0], color=color, lw=4, label=group) for group, color in legend_items.items()]
+    ax.legend(handles=handles, fontsize=8, loc="best")
+    ax.grid(True, axis="y", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(out, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
+def plot_boozmn(
+    boozmn_path: str | Path,
+    outdir: str | Path | None = None,
+    *,
+    name: str | None = None,
+    show: bool = False,
+) -> dict[str, Path]:
+    """Generate polished Boozer-coordinate diagnostic plots from ``boozmn``."""
+
+    boozmn_path = Path(boozmn_path)
+    if outdir is None:
+        outdir = boozmn_path.parent
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    paths = {
+        "bmag_contours": plot_boozmn_bmag_contours(boozmn_path, outdir=outdir, name=name),
+        "mode_families": plot_boozmn_mode_families(boozmn_path, outdir=outdir, name=name),
+        "lcfs_spectrum": plot_boozmn_spectrum(boozmn_path, outdir=outdir, name=name),
+    }
+    if show:
+        prepare_matplotlib_3d()
+        import matplotlib.pyplot as plt
+
+        plt.show()
+    return paths
 
 
 def _objective_iota_series(hist: list[dict]) -> list[float] | None:
@@ -1400,6 +1741,25 @@ def _best_so_far_stage_segments(
             continue
         x_segment = np.arange(start, stop, dtype=int)
         y_segment = np.minimum.accumulate([max(v, floor) for v in vals[start:stop]])
+        segments.append((x_segment, y_segment))
+        start = stop
+    return segments
+
+
+def _raw_stage_segments(
+    values: Iterable[float],
+    stage_boundaries: Iterable[int],
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Split raw objective values by stage without monotone filtering."""
+    vals = [float(v) for v in values]
+    segments: list[tuple[np.ndarray, np.ndarray]] = []
+    start = 0
+    stops = [int(b) + 1 for b in stage_boundaries if int(b) + 1 < len(vals)]
+    for stop in stops + [len(vals)]:
+        if stop <= start:
+            continue
+        x_segment = np.arange(start, stop, dtype=int)
+        y_segment = np.asarray(vals[start:stop], dtype=float)
         segments.append((x_segment, y_segment))
         start = stop
     return segments
@@ -1437,11 +1797,30 @@ def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
 
     # --- panel 1: QS residuals ---
     # Stage-preseeded optimizations can switch objective definitions (for
-    # example QP preseed -> QI preseed -> full constrained QI). Plot each stage
-    # separately and show the best-so-far value within that stage so rejected
-    # trial points or objective switches are not drawn as false increases.
-    for x_segment, y_segment in _best_so_far_stage_segments(qs_vals, data.get("stage_boundaries", [])):
-        ax1.semilogy(x_segment, y_segment, "o-", color="steelblue", linewidth=2, markersize=6)
+    # example QP preseed -> QI preseed -> full constrained QI). Split by stage
+    # but plot the raw accepted-callback history so users can see whether the
+    # optimizer is actually moving. A thin dashed best-so-far overlay preserves
+    # the monotone diagnostic without hiding rejected/rebounded steps.
+    for i, (x_segment, y_segment) in enumerate(_raw_stage_segments(qs_vals, data.get("stage_boundaries", []))):
+        ax1.semilogy(
+            x_segment,
+            np.maximum(y_segment, 1e-16),
+            "o-",
+            color="steelblue",
+            linewidth=2,
+            markersize=6,
+            label="Raw QS residuals" if i == 0 else None,
+        )
+    for i, (x_segment, y_segment) in enumerate(_best_so_far_stage_segments(qs_vals, data.get("stage_boundaries", []))):
+        ax1.semilogy(
+            x_segment,
+            y_segment,
+            "--",
+            color="black",
+            linewidth=1.0,
+            alpha=0.45,
+            label="Best so far" if i == 0 else None,
+        )
     qs_pos = [max(v, 1e-16) for v in qs_vals]  # avoid log(0)
     ax1.set_ylabel("QS residuals ∑r²", fontsize=11)
     opt_label = data.get("label", "Optimisation")
@@ -1449,7 +1828,7 @@ def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
         f"{opt_label}  ({nfev} evals, {total_time:.0f} s)",
         fontsize=11,
     )
-    ax1.axhline(qs_pos[-1], color="steelblue", linestyle="--", alpha=0.4,
+    ax1.axhline(qs_pos[-1], color="steelblue", linestyle=":", alpha=0.4,
                 label=f"Final: {qs_vals[-1]:.2e}")
     ax1.legend(fontsize=9)
     ax1.grid(True, alpha=0.3)
@@ -1740,16 +2119,16 @@ def plot_wout(
     ax.set_title("DMerc")
     ax.set_xlabel(xLabel)
 
-    _titles_b = ["|B| at half radius", "|B| at LCFS"]
-    _iradii_b = [int(round(ns * 0.25)), ns - 1]
+    _titles_b = ["Mid radius |B|", "Plasma boundary |B|"]
+    _iradii_b = [int(np.argmin(np.abs(s - 0.5))), ns - 1]
     for _col, (_irad, _ttl) in enumerate(zip(_iradii_b, _titles_b)):
         B_b = _eval_bmag(_irad, theta_b, zeta_b)
         zeta2d_b, theta2d_b = np.meshgrid(zeta_b, theta_b)
         ax = axes1[2, 1 + _col]
         cf = ax.contour(zeta2d_b, theta2d_b, B_b, 20, cmap="viridis", linewidths=0.8)
-        ax.set_title(f"{_ttl}\n(1-based idx {_irad + 1})")
-        ax.set_xlabel("ζ")
-        ax.set_ylabel("θ")
+        ax.set_title(_ttl)
+        ax.set_xlabel(r"$\zeta$")
+        ax.set_ylabel(r"$\theta$")
         fig1.colorbar(cf, ax=ax)
         iota_val = float(iotaf[_irad])
         if iota_val > 0:

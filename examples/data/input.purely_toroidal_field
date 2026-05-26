@@ -36,3 +36,10 @@
   RBC(0, 1) =  1.000    ZBS(0, 1) =  1.470
   RBC(0, 2) =  0.106    ZBS(0, 2) = -0.160
  /
+
+&BOOZ_XFORM_JAX
+  LBOOZ = F
+  MBOOZ = 32
+  NBOOZ = 32
+  BOOZ_SURFACES = 'all'
+/

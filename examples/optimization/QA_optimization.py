@@ -23,8 +23,8 @@ DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 WARM_START_INPUT_FILE = DATA_DIR / "input.nfp2_QA_omnigenity"
 SIMPLE_SEED_INPUT_FILE = DATA_DIR / "input.minimal_seed_nfp2"
 OUTPUT_DIR = Path("results/qa_opt/ess")
-MAX_MODE = 3
-MIN_VMEC_MODE = 6
+MAX_MODE = 4
+MIN_VMEC_MODE = MAX_MODE+2
 USE_SIMPLE_SEED = True  # Start from near-circular RBC(0,0), RBC(0,1), ZBS(0,1).
 SIMPLE_SEED_PERTURBATION = 1.0e-5  # Tiny nonzero active modes keep derivatives away from exactly zero.
 INPUT_FILE = SIMPLE_SEED_INPUT_FILE if USE_SIMPLE_SEED else WARM_START_INPUT_FILE
@@ -37,8 +37,8 @@ INPUT_FILE = vj.prepare_simple_omnigenity_seed_input(
     perturbation=SIMPLE_SEED_PERTURBATION,
 )
 USE_MODE_CONTINUATION = not USE_SIMPLE_SEED
-MAX_NFEV = 60
-CONTINUATION_NFEV = 60
+MAX_NFEV = 30
+CONTINUATION_NFEV = 15
 STAGE_MODES = vj.qs_stage_modes(
     max_mode=MAX_MODE,
     use_mode_continuation=USE_MODE_CONTINUATION,
@@ -47,15 +47,15 @@ STAGE_MODES = vj.qs_stage_modes(
 
 # Optimizer parameters.
 METHOD = "scipy"  # Try also "auto", "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint", or "scalar_trust".
-SCIPY_TR_SOLVER = "lsmr"  # For METHOD="scipy": "lsmr" is memory-light; "exact" is dense.
+SCIPY_TR_SOLVER = "exact"  # For METHOD="scipy": "lsmr" is memory-light; "exact" is dense.
 SCIPY_LSMR_MAXITER = None  # None lets SciPy choose; set an int to cap LSMR iterations.
-FTOL = 1.0e-4  # Relative cost-reduction tolerance for the outer optimizer.
-GTOL = 1.0e-4  # Gradient optimality tolerance for the outer optimizer.
-XTOL = 1.0e-4  # Step-size tolerance for the outer optimizer.
-INNER_MAX_ITER = 120  # Accepted-point VMEC iterations; 0 uses NITER from the input deck.
-INNER_FTOL = 1.0e-9  # Accepted-point VMEC tolerance; 0 uses FTOL from the input deck.
-TRIAL_MAX_ITER = 120  # Trial-point VMEC iterations; 0 follows the accepted/input budget.
-TRIAL_FTOL = 1.0e-9  # Trial-point VMEC tolerance; 0 follows the accepted/input tolerance.
+FTOL = 1.0e-5  # Relative cost-reduction tolerance for the outer optimizer.
+GTOL = 1.0e-5  # Gradient optimality tolerance for the outer optimizer.
+XTOL = 1.0e-6  # Step-size tolerance for the outer optimizer.
+INNER_MAX_ITER = 550  # Accepted-point VMEC iterations; 0 uses NITER from the input deck.
+INNER_FTOL = 1.0e-10  # Accepted-point VMEC tolerance; 0 uses FTOL from the input deck.
+TRIAL_MAX_ITER = 550  # Trial-point VMEC iterations; 0 follows the accepted/input budget.
+TRIAL_FTOL = 1.0e-10  # Trial-point VMEC tolerance; 0 follows the accepted/input tolerance.
 SOLVER_DEVICE = None  # None uses JAX default; set "cpu" or "gpu" to force one backend.
 USE_ESS = True  # Set False for an unscaled trust-region solve.
 ALPHA = 1.2  # ESS high-mode scaling strength.
@@ -74,8 +74,8 @@ MAKE_PLOTS = True
 
 # Physics targets and least-squares objective weights.  These are SIMSOPT-style
 # tuple weights, so vmec_jax minimizes sqrt(weight) * (J - target).
-TARGET_ASPECT = 6.0
-TARGET_IOTA = 0.42
+TARGET_ASPECT = 5.0
+TARGET_IOTA = 0.41
 HELICITY_M = 1
 HELICITY_N = 0
 SURFACES = np.arange(0.0, 1.01, 0.1)
@@ -194,13 +194,14 @@ print(f"  Bmin/Bmax:  {np.min(b_lcfs):.6g} / {np.max(b_lcfs):.6g}")
 if MAKE_PLOTS:
     # Plotting is a normal post-processing block; add or remove entries here
     # instead of relying on hidden plotting side effects from the solve.
+    print("\nGenerating initial-vs-final LCFS |B| contour comparison in Boozer coordinates:")
     plot_paths = {
         "boundary_comparison": vj.plot_3d_boundary_comparison(
             saved_paths.initial_wout,
             saved_paths.final_wout,
             outdir=OUTPUT_DIR,
         ),
-        "bmag_contours": vj.plot_bmag_contours(
+        "initial_vs_final_lcfs_boozer_bmag_contours": vj.plot_boozer_lcfs_bmag_comparison(
             saved_paths.initial_wout,
             saved_paths.final_wout,
             outdir=OUTPUT_DIR,

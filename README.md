@@ -80,13 +80,40 @@ vmec_jax --plot wout_nfp4_QH_warm_start.nc
 vmec_jax --plot wout_nfp4_QH_warm_start.nc --outdir figures/
 ```
 
+Run Boozer coordinates with the bundled `booz_xform_jax` dependency. By default
+`vmec_jax --booz` uses `mbooz = 32`, `nbooz = 32`, and all VMEC surfaces:
+
+```bash
+vmec_jax --booz input.nfp4_QH_warm_start
+vmec_jax --booz --plot input.nfp4_QH_warm_start
+vmec_jax --booz wout_nfp4_QH_warm_start.nc
+vmec_jax --plot boozmn_nfp4_QH_warm_start.nc
+```
+
+`--booz --plot` writes the usual `wout_*.nc`, runs `booz_xform_jax`, writes
+`boozmn_*.nc`, and creates Boozer-coordinate `|B|` contour and spectrum plots.
+Input decks can also carry opt-in Boozer defaults without changing the VMEC solve:
+
+```fortran
+&BOOZ_XFORM_JAX
+  LBOOZ = F
+  MBOOZ = 32
+  NBOOZ = 32
+  BOOZ_SURFACES = 'all'
+/
+```
+
 Use the Python API:
 
 ```python
 import vmec_jax as vj
 
-fixed = vj.run_fixed_boundary("input.nfp4_QH_warm_start")
-vj.plot_wout("wout_nfp4_QH_warm_start.nc", outdir="figures/")
+run = vj.run_fixed_boundary("input.nfp4_QH_warm_start")
+wout_path = "wout_nfp4_QH_warm_start.nc"
+vj.write_wout_from_fixed_boundary_run(wout_path, run, include_fsq=True)
+vj.plot_wout(wout_path, outdir="figures/")
+boozmn = vj.run_booz_xform(wout_path, mbooz=32, nbooz=32)
+vj.plot_boozmn(boozmn, outdir="figures/")
 ```
 
 For the bundled small free-boundary example, download both the input deck and
@@ -184,7 +211,9 @@ case-specific artifacts are not aspect-6 README best-row promotion evidence.
 
 ```text
 vmec_jax input.*           run the equilibrium solver and write wout_*.nc
-vmec_jax --plot wout.nc    generate diagnostic plots
+vmec_jax --plot wout.nc    generate VMEC diagnostic plots from a WOUT file
+vmec_jax --booz wout.nc    run booz_xform_jax and write boozmn_*.nc
+vmec_jax --plot boozmn.nc  generate Boozer contour and spectrum plots
 vmec_jax --parity input.*  force the conservative VMEC2000-style loop
 vmec_jax --help            show the full option list
 ```
