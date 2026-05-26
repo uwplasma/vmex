@@ -10,7 +10,10 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-05-26 after pressure-continuation LP-QA generated-`mgrid` promotion, direct-provider first-step diagnostics, guarded direct-coil update limiting, direct LP-QA convergence after disabling unsafe automatic CPU `lax` tridiagonal preconditioning, CI/Codecov policy triage, and an `ns=101` LP-QA direct-coil reviewer attempt. Do not merge PR #18 yet.
+Last updated: 2026-05-27 after merging latest `main` into the feature branch,
+rerendering reviewer WOUT panels for DIII-D and LP-QA finite-beta scans,
+attaching those figures to PR #18 outside git, and rerunning the local
+direct-coil benchmark matrix. Do not merge PR #18 yet.
 
 Steps taken:
 
@@ -110,6 +113,29 @@ Steps taken:
 73. Added `VMEC_JAX_BADJAC_INITIAL_STATE_PROBE_ITERS` as an opt-in performance knob. The default remains `2` to preserve the existing VMEC-style first-two-iteration state-Jacobian safety probe; setting it to `0` is only for profiling/parity experiments.
 74. Hardened the ESSOS beta-scan and forward example source-checkout commands: examples now insert the repository root before importing `vmec_jax`, and README/docs reproduction snippets use `PYTHONPATH=.:$ESSOS_ROOT:$PYTHONPATH`.
 75. Reordered the README/docs reproduction flow so users generate the benchmark matrix JSON before running the figure renderer that consumes it.
+76. Merged the latest `origin/main` into `feature/freeb-essos-coil-single-stage`
+    via the local `refresh/freeb-slim` work branch and pushed the merge commit
+    to PR #18. The merge brought in the latest plotting/Boozer/API and
+    optimization-example refactors.
+77. Added `tools/diagnostics/render_freeb_beta_wout_panels.py`, a reusable
+    WOUT-native renderer for iota profiles, multi-surface cross sections, and
+    LCFS line-contour `|B|` panels.
+78. Rendered the strict LP-QA direct-coil `ns=101` panel from WOUTs at actual
+    beta `0.00%, 0.72%, 1.51%, 1.93%`, all with final residual sums below
+    `6.3e-12`.
+79. Located the DIII-D axisymmetric `ns=101` WOUT scan and rendered the
+    corresponding `mgrid` panel at actual beta `0.00%, 0.32%, 0.67%, 1.01%,
+    1.49%, 2.18%`, all with residual sums near `1.0e-12`.
+80. Attached the DIII-D and LP-QA reviewer panels plus CSV summaries to PR #18
+    through a public Gist instead of committing generated figures/WOUTs.
+81. Re-ran the local CPU direct-coil benchmark matrix after the main merge.
+    The quick synthetic direct-solve row shows warm `jit_forces` solves around
+    `0.038 s`, versus `0.151 s` for the no-JIT row; active NESTOR field
+    sampling is no longer the dominant warm CPU cost.
+82. Rechecked the phase-2 boundary: accepted-boundary AD-vs-FD gates are
+    passing for current and one Fourier geometry coefficient, but the full
+    nonlinear `run_free_boundary` iteration still materializes host state and
+    remains the next exact-gradient blocker.
 
 Results obtained:
 
@@ -118,6 +144,18 @@ Results obtained:
 3. Full Sphinx build after docs hygiene changes succeeded in `/tmp/vmec_jax_freeb_docs_claim_hygiene`.
 4. Direct-coil/mgrid diagnostic smoke completed with expected `vmec2000_skipped` and `jax_direct_vs_mgrid_passed=True`.
 5. Explicit bad `--coils-json` now exits nonzero and writes `status=failed`, `reason=explicit_essos_or_coils_path_invalid`.
+6. Post-main-merge focused tests passed locally:
+   `31 passed in 21.51 s` for direct-coil/example/free-boundary finite-pressure
+   sensitivity plus the newly merged plotting/Boozer CLI tests.
+7. `ruff check vmec_jax tests examples/free_boundary_essos_coils_beta_scan.py
+   docs/conf.py` passed after the main merge.
+8. `ruff check tools/diagnostics/render_freeb_beta_wout_panels.py` passed.
+9. PR #18 CI on merge commit `bb93eb10` has docs/build/physics-smoke/manifest
+   jobs passing while fast-test jobs continue running.
+10. Local generated reviewer artifacts:
+    `/tmp/freeb_publication_panels/diiid_mgrid_beta_ns101_panel.{svg,pdf,png}`,
+    `/tmp/freeb_publication_panels/lpqa_direct_coil_beta_ns101_panel.{svg,pdf,png}`,
+    and matching CSV summaries.
 6. Tiny direct-coil solve benchmark reports active NESTOR sample timing improving from about `0.51 s` cold to `0.0048 s` warm.
 7. Trial timing smoke completed; the tiny synthetic path records zero trial calls, so its benchmarked direct-coil cost is accepted NESTOR sampling rather than hidden backtracking work.
 8. Targeted trial-timing tests passed: 3 passed in 8.03 s.

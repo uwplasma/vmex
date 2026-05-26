@@ -309,6 +309,8 @@ pull request/Gist rather than committed to git:
 
 - SVG: https://gist.githubusercontent.com/rogeriojorge/a49e7a21330fbc8ab99229d2b05de708/raw/pr18_diiid_freeb_beta_ns101_comparison.svg
 - Summary JSON: https://gist.githubusercontent.com/rogeriojorge/a49e7a21330fbc8ab99229d2b05de708/raw/pr18_diiid_freeb_beta_ns101_summary.json
+- WOUT-panel SVG: https://gist.githubusercontent.com/rogeriojorge/ad9e20e1728b5d9794217d86d577c24c/raw/diiid_mgrid_beta_ns101_panel.svg
+- WOUT-panel CSV: https://gist.githubusercontent.com/rogeriojorge/ad9e20e1728b5d9794217d86d577c24c/raw/diiid_mgrid_beta_ns101_panel_summary.csv
 
 The plotted WOUTs use final ``ns=101`` and final ``FTOL=1e-12``. The actual
 WOUT beta values are 0.00%, 0.32%, 0.67%, 1.01%, 1.49%, and 2.18%; all final
@@ -420,6 +422,39 @@ sequence; that row is useful high-beta continuation evidence but not strict
 final-``FTOL=1e-12`` evidence. The ``--resume-existing`` path exists so
 intermediate nominal beta labels can continue from persisted WOUTs instead of
 restarting the scan.
+
+The strict direct-coil LP-QA reviewer WOUT-panel is attached to PR #18 instead
+of committed to the repository:
+
+- WOUT-panel SVG: https://gist.githubusercontent.com/rogeriojorge/ad9e20e1728b5d9794217d86d577c24c/raw/lpqa_direct_coil_beta_ns101_panel.svg
+- WOUT-panel CSV: https://gist.githubusercontent.com/rogeriojorge/ad9e20e1728b5d9794217d86d577c24c/raw/lpqa_direct_coil_beta_ns101_panel_summary.csv
+
+The WOUT-panel renderer is reusable for both ``mgrid`` and direct-coil scans:
+
+.. code-block:: bash
+
+   python tools/diagnostics/render_freeb_beta_wout_panels.py \
+     --summary results/free_boundary_essos_coils_beta_scan_highres/summary.json \
+     --backend direct \
+     --max-actual-beta 2.05 \
+     --title "LP-QA direct-coil free-boundary finite-beta scan (ns=101)" \
+     --stem lpqa_direct_coil_beta_ns101_panel \
+     --outdir /tmp/freeb_publication_panels
+
+or, for existing DIII-D WOUTs:
+
+.. code-block:: bash
+
+   python tools/diagnostics/render_freeb_beta_wout_panels.py \
+     --wout "0.00%=wout_diiid_b0_mg101.nc" \
+     --wout "0.32%=wout_diiid_b025_mg101.nc" \
+     --wout "0.67%=wout_diiid_b050_mg101.nc" \
+     --wout "1.01%=wout_diiid_b072_mg101.nc" \
+     --wout "1.49%=wout_diiid_b100_mg101.nc" \
+     --wout "2.18%=wout_diiid_b135_mg101.nc" \
+     --title "DIII-D mgrid free-boundary finite-beta scan (ns=101)" \
+     --stem diiid_mgrid_beta_ns101_panel \
+     --outdir /tmp/freeb_publication_panels
 
 Direct-provider phase-2 diagnostics now record accepted NESTOR histories for
 ``bnormal``, ``gsource``, ``bsqvac``, and source reuse. A short LP-QA vacuum

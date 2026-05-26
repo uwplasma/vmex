@@ -42,11 +42,9 @@ cd vmec_jax
 pip install -e .
 ```
 
-The repository intentionally keeps generated WOUT fixtures and large optional
-validation assets out of git.  A source clone contains the VMEC input decks and
-small magnetic grids needed for ordinary examples; run the inputs to generate
-new `wout_*.nc` files.  If you need the full released WOUT/reference bundle for
-CI-style validation or docs regeneration, download it with:
+Generated WOUT fixtures and large optional validation assets stay out of git.
+Run bundled inputs to generate new `wout_*.nc` files, or fetch the released
+reference bundle for CI-style validation and docs regeneration:
 
 ```bash
 python tools/fetch_assets.py --list
@@ -80,8 +78,7 @@ vmec_jax --plot wout_nfp4_QH_warm_start.nc
 vmec_jax --plot wout_nfp4_QH_warm_start.nc --outdir figures/
 ```
 
-Run Boozer coordinates with the bundled `booz_xform_jax` dependency. By default
-`vmec_jax --booz` uses `mbooz = 32`, `nbooz = 32`, and all VMEC surfaces:
+Run Boozer coordinates with the bundled `booz_xform_jax` dependency:
 
 ```bash
 vmec_jax --booz input.nfp4_QH_warm_start
@@ -90,18 +87,8 @@ vmec_jax --booz wout_nfp4_QH_warm_start.nc
 vmec_jax --plot boozmn_nfp4_QH_warm_start.nc
 ```
 
-`--booz --plot` writes the usual `wout_*.nc`, runs `booz_xform_jax`, writes
-`boozmn_*.nc`, and creates Boozer-coordinate `|B|` contour and spectrum plots.
-Input decks can also carry opt-in Boozer defaults without changing the VMEC solve:
-
-```fortran
-&BOOZ_XFORM_JAX
-  LBOOZ = F
-  MBOOZ = 32
-  NBOOZ = 32
-  BOOZ_SURFACES = 'all'
-/
-```
+`--booz --plot` writes the usual WOUT, Boozer `boozmn_*.nc`, and
+Boozer-coordinate `|B|` contour and spectrum plots.
 
 Use the Python API:
 
@@ -139,32 +126,16 @@ python examples/free_boundary_direct_coils_forward.py \
   --outdir results/free_boundary_direct_coils_forward
 ```
 
-With ESSOS on `PYTHONPATH`, run the finite-pressure ESSOS-coil beta scan. The
-matched `mgrid` lane requires an ESSOS checkout with `Coils.to_mgrid`. Add
-`--skip-mgrid-runs` for a direct-coil-only run with released ESSOS:
-
-```bash
-export ESSOS_ROOT=/path/to/ESSOS_mgrid_pr
-PYTHONPATH=.:$ESSOS_ROOT:$PYTHONPATH \
-  python examples/free_boundary_essos_coils_beta_scan.py \
-  --input examples/data/input.LandremanPaul2021_QA_lowres \
-  --phiedge=-0.025 --betas 0 1 2 --pressure-continuation \
-  --ns-array 16,31 --niter-array 600,1200 --ftol-array 1e-8,1e-8 \
-  --max-iter 1200 --activate-fsq 1e99
-```
-
-Long high-resolution pressure scans can be resumed without repeating completed
-beta points by rerunning the same command with `--resume-existing`; existing
-`wout_*_beta_*.nc` files are reused as pressure-continuation seeds when their
-residuals satisfy the promotion threshold.
+With ESSOS on `PYTHONPATH`, `examples/free_boundary_essos_coils_beta_scan.py`
+runs finite-pressure coil beta scans. Use `--resume-existing` to reuse completed
+`wout_*_beta_*.nc` pressure-continuation seeds.
 
 The DIII-D reference scan reaches final `ns=101`, `FTOL=1e-12`, and actual
 WOUT betas through 2.18%. The LP-QA stellarator pressure-continuation lane now
-promotes for both generated-`mgrid` and direct differentiable coil providers,
-with actual WOUT betas above 1%. Full nonlinear exact-adjoint gradients through
-the free-boundary iteration remain phase-2 work. See
-`docs/free_boundary_coil_optimization.rst` for reviewer plots, VMEC2000
-comparisons, benchmarks, limitations, and the full-solve adjoint plan.
+promotes strict direct differentiable-coil rows through actual WOUT beta 1.93%.
+Full nonlinear exact-adjoint gradients through the free-boundary iteration
+remain phase-2 work; see `docs/free_boundary_coil_optimization.rst` for plots,
+VMEC2000 comparisons, benchmarks, limitations, and the full-solve adjoint plan.
 
 ## Backend Selection
 
@@ -214,8 +185,7 @@ provenance and limitations are in the docs.
 
 ![QI optimization from NFP seeds](docs/_static/figures/readme_qi_optimization_cases.png)
 
-Reproduction commands, artifact-promotion rules, and full sweep requirements
-are documented in `docs/optimization.rst` and
+Reproduction commands and full sweep rules are in `docs/optimization.rst` and
 `docs/optimization_sweep_results.rst`.
 
 ## Performance, Validation, Release
@@ -226,8 +196,6 @@ are documented in `docs/optimization.rst` and
 - Release checklist and CI gates: `docs/release_checklist.rst`
 - Latest repository release tag:
   [`v0.0.13`](https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.13)
-- Package indexes may lag the repository tag; verify PyPI/conda-forge before
-  advertising a package-index release.
 - Required fast coverage gate is `95%`; record the current CI/local coverage
   result from the release-candidate commit in the release notes.
 

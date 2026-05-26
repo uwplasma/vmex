@@ -1918,6 +1918,11 @@ def run_qi_prefine_probe(plan: dict[str, Any], *, workflow: Any | None = None) -
         include_bounce_endpoints=bool(qi_options_raw.get("include_bounce_endpoints", False)),
         phimin=float(qi_options_raw["phimin"]),
     )
+    qi_surfaces = tuple(float(surface) for surface in getattr(qi_options, "surfaces", qi_options_raw["surfaces"]))
+    qi_mboz = int(getattr(qi_options, "mboz", qi_options_raw["mboz"]))
+    qi_nboz = int(getattr(qi_options, "nboz", qi_options_raw["nboz"]))
+    qi_phimin = float(getattr(qi_options, "phimin", qi_options_raw["phimin"]))
+    qi_jit_booz = bool(getattr(qi_options, "jit_booz", False))
     objective_tuples = []
     qi = workflow.QuasiIsodynamicResidual(qi_options)
     objective_tuples.append((qi.J, 0.0, float(qi_options_raw["weight"])))
@@ -1937,9 +1942,9 @@ def run_qi_prefine_probe(plan: dict[str, Any], *, workflow: Any | None = None) -
     if float(qi_options_raw.get("mirror_weight", 0.0)) > 0.0:
         mirror = workflow.MirrorRatio(
             threshold=float(qi_options_raw.get("mirror_threshold", DEFAULT_MAX_MIRROR_RATIO)),
-            surfaces=qi_options.surfaces,
-            mboz=qi_options.mboz,
-            nboz=qi_options.nboz,
+            surfaces=qi_surfaces,
+            mboz=qi_mboz,
+            nboz=qi_nboz,
             ntheta=int(qi_options_raw.get("mirror_ntheta", 32)),
             nphi=int(qi_options_raw.get("mirror_nphi", 32)),
             surface_index=(
@@ -1947,8 +1952,8 @@ def run_qi_prefine_probe(plan: dict[str, Any], *, workflow: Any | None = None) -
                 if qi_options_raw.get("mirror_surface_index", None) is None
                 else int(qi_options_raw.get("mirror_surface_index"))
             ),
-            phimin=qi_options.phimin,
-            jit_booz=qi_options.jit_booz,
+            phimin=qi_phimin,
+            jit_booz=qi_jit_booz,
         )
         objective_tuples.append((mirror.J, 0.0, float(qi_options_raw["mirror_weight"])))
     if float(qi_options_raw.get("elongation_weight", 0.0)) > 0.0:
