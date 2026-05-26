@@ -46,6 +46,8 @@ from .optimization import (
 from .modes import nyquist_mode_table_from_grid, vmec_mode_table
 from .quasi_isodynamic import (
     _nearest_half_mesh_indices,
+    _smooth_reduce_max,
+    _smooth_reduce_min,
     lgradb_penalty_from_state,
     max_elongation_penalty_from_state,
     mirror_ratio_penalty_from_boozer_output,
@@ -1102,6 +1104,123 @@ class MirrorRatio:
             smooth_extrema=self.smooth_extrema,
             normalize_surfaces=self.normalize_surfaces,
             qi_options=self.qi_options,
+        )
+
+
+class VMECMirrorRatio:
+    """Fast mirror-ratio penalty evaluated directly from VMEC ``|B|``.
+
+    The scalar mirror ratio ``(Bmax - Bmin) / (Bmax + Bmin)`` does not require
+    Boozer coordinates.  This objective samples the VMEC/JAX real-space field
+    on the solver grid and avoids the ``booz_xform_jax`` transform used by
+    :class:`MirrorRatio`.  It is intended as a lightweight optimization term;
+    final quasisymmetry/omnigenity review should still use Boozer-coordinate
+    contour and spectral diagnostics.
+    """
+
+    name = "mirror_ratio"
+
+    def __init__(
+        self,
+        *,
+        threshold: float,
+        surfaces=(1.0,),
+        surface_index: int | None = None,
+        smooth_extrema: float = 0.0,
+        smooth_penalty: float = 0.0,
+        normalize_surfaces: bool = True,
+        bmag_floor: float = 1.0e-300,
+    ):
+        self.threshold = float(threshold)
+        self.surfaces = tuple(float(value) for value in _as_sequence(surfaces))
+        self.surface_index = None if surface_index is None else int(surface_index)
+        self.smooth_extrema = float(smooth_extrema)
+        self.smooth_penalty = float(smooth_penalty)
+        self.normalize_surfaces = bool(normalize_surfaces)
+        self.bmag_floor = float(bmag_floor)
+
+    @property
+    def requires_qi_field(self) -> bool:
+        return False
+
+    def _selected_surface_indices_and_weights(self, ctx: StageContext) -> tuple[list[int], jnp.ndarray]:
+        surfaces = self.surfaces
+        if not surfaces:
+            raise ValueError("VMECMirrorRatio surfaces must contain at least one surface.")
+        if self.surface_index is not None:
+            idx = int(self.surface_index)
+            if idx < 0:
+                idx += len(surfaces)
+            if idx < 0 or idx >= len(surfaces):
+                raise IndexError(
+                    f"surface_index {self.surface_index} is outside VMECMirrorRatio surface range 0..{len(surfaces) - 1}"
+                )
+            surfaces = (surfaces[idx],)
+        s_grid = np.asarray(ctx.static.s, dtype=float)
+        indices = [int(np.argmin(np.abs(s_grid - float(surface)))) for surface in surfaces]
+        if bool(self.normalize_surfaces):
+            weights = jnp.full((len(indices),), 1.0 / float(max(len(indices), 1)), dtype=jnp.float64)
+        else:
+            weights = jnp.ones((len(indices),), dtype=jnp.float64)
+        return indices, weights
+
+    def _evaluate_state(self, ctx: StageContext, state):
+        indices, weights = self._selected_surface_indices_and_weights(ctx)
+        ratios = []
+        bmax_values = []
+        bmin_values = []
+        tiny = jnp.asarray(jnp.finfo(jnp.float64).tiny, dtype=jnp.float64)
+        for s_index in indices:
+            bcart = b_cartesian_from_state(
+                state,
+                ctx.static,
+                indata=ctx.indata,
+                signgs=ctx.signgs,
+                s_index=int(s_index),
+            )
+            bcart = jnp.asarray(bcart, dtype=jnp.float64)
+            bmag = jnp.sqrt(
+                jnp.maximum(
+                    jnp.sum(bcart * bcart, axis=-1),
+                    jnp.asarray(self.bmag_floor, dtype=jnp.float64),
+                )
+            )
+            bmax = _smooth_reduce_max(bmag, axis=(0, 1), softness=float(self.smooth_extrema))
+            bmin = _smooth_reduce_min(bmag, axis=(0, 1), softness=float(self.smooth_extrema))
+            bmin_positive = jnp.maximum(bmin, tiny)
+            denom = jnp.maximum(bmax + bmin_positive, tiny)
+            ratios.append((bmax - bmin_positive) / denom)
+            bmax_values.append(bmax)
+            bmin_values.append(bmin)
+        mirror_ratio = jnp.asarray(ratios, dtype=jnp.float64)
+        penalty = _smooth_positive_part(mirror_ratio - float(self.threshold), softness=float(self.smooth_penalty))
+        residuals1d = penalty * jnp.sqrt(weights)
+        total = jnp.sum(residuals1d * residuals1d)
+        return {
+            "residuals1d": residuals1d,
+            "total": total,
+            "penalty": penalty,
+            "mirror_ratio": mirror_ratio,
+            "bmax": jnp.asarray(bmax_values, dtype=jnp.float64),
+            "bmin": jnp.asarray(bmin_values, dtype=jnp.float64),
+            "threshold": jnp.asarray(float(self.threshold), dtype=jnp.float64),
+        }
+
+    def J(self, ctx: StageContext, state):
+        return self._evaluate_state(ctx, state)["residuals1d"]
+
+    def total(self, ctx: StageContext, state):
+        return self._evaluate_state(ctx, state)["total"]
+
+    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        if not _target_is_zero(target):
+            raise ValueError("VMECMirrorRatio is an upper-bound penalty and requires target=0.")
+        return ObjectiveTerm(
+            self.name,
+            self.J,
+            target=0.0,
+            weight=residual_weight,
+            total=lambda ctx, state: float(residual_weight) ** 2 * self.total(ctx, state),
         )
 
 
@@ -3585,6 +3704,7 @@ __all__ = [
     "MaxElongation",
     "MeanIota",
     "MirrorRatio",
+    "VMECMirrorRatio",
     "ObjectiveTerm",
     "OptimizationOutputPaths",
     "QuasiIsodynamicOptions",

@@ -88,8 +88,6 @@ MAX_ELONGATION = 10.0
 MIRROR_WEIGHT = 20.0
 ELONGATION_WEIGHT = 10.0
 MIRROR_SURFACES = np.linspace(0.1, 1.0, 6)
-MBOZ = 18
-NBOZ = 18
 
 
 # Optimizable VMEC object.
@@ -110,13 +108,12 @@ qs = vj.QuasisymmetryRatioResidual(
     helicity_n=HELICITY_N,
     surfaces=SURFACES,
 )
-mirror = vj.MirrorRatio(
+# Mirror ratio is coordinate-invariant, so this VMEC-space objective is faster
+# than running Boozer at every optimizer callback.  The final plots below still
+# use Boozer coordinates to assess omnigeneity visually.
+mirror = vj.VMECMirrorRatio(
     threshold=MAX_MIRROR_RATIO,
     surfaces=MIRROR_SURFACES,
-    mboz=MBOZ,
-    nboz=NBOZ,
-    ntheta=96,
-    nphi=96,
     smooth_extrema=2.0e-2,
     smooth_penalty=2.0e-2,
 )
