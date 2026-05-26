@@ -113,34 +113,25 @@ python examples/free_boundary_direct_coils_forward.py \
 ```
 
 With ESSOS on `PYTHONPATH`, run the finite-pressure ESSOS-coil beta scan. The
-matched `mgrid` lane requires an ESSOS checkout with `Coils.to_mgrid`; add
-`--skip-mgrid-runs` to exercise only the differentiable direct-coil provider
-with released ESSOS:
+matched `mgrid` lane requires an ESSOS checkout with `Coils.to_mgrid`. Add
+`--skip-mgrid-runs` for a direct-coil-only run with released ESSOS:
 
 ```bash
 export ESSOS_ROOT=/path/to/ESSOS_mgrid_pr
-export ESSOS_INPUT_DIR=$ESSOS_ROOT/examples/input_files
 PYTHONPATH=.:$ESSOS_ROOT:$PYTHONPATH \
   python examples/free_boundary_essos_coils_beta_scan.py \
-  --outdir results/free_boundary_essos_coils_beta_scan \
   --input examples/data/input.LandremanPaul2021_QA_lowres \
-  --phiedge=-0.025 \
-  --betas 0 1 2 \
-  --pressure-scale-for-one-percent-beta 1000 \
-  --ns 31 \
-  --ftol 1e-8 \
-  --max-iter 1000 \
-  --activate-fsq 1.0
+  --phiedge=-0.025 --betas 0 1 2 --pressure-continuation \
+  --ns-array 16,31 --niter-array 600,1200 --ftol-array 1e-8,1e-8 \
+  --max-iter 1200 --activate-fsq 1e99
 ```
 
-The DIII-D high-resolution finite-beta reference scan is a promoted mgrid
-validation artifact for this branch: final `ns=101`, final `FTOL=1e-12`, and
-actual WOUT betas through 2.18%. The ESSOS LP-QA stellarator high-beta
-promotion gate is still open: the corrected unit-scale coil/input pair
-converges in vacuum and low beta, but loses convergence before actual 1-2%
-beta. See `docs/free_boundary_coil_optimization.rst` for the external
-reviewer plots, provider architecture, VMEC2000 comparison commands, benchmark
-commands, current phase-1 limitations, and the phase-2 full-solve adjoint plan.
+The DIII-D reference scan reaches final `ns=101`, `FTOL=1e-12`, and actual
+WOUT betas through 2.18%. The LP-QA generated-`mgrid` stellarator lane reaches
+actual WOUT betas above 1% with pressure continuation. The direct-coil LP-QA
+nonlinear-control path is still phase-2 work. See
+`docs/free_boundary_coil_optimization.rst` for reviewer plots, VMEC2000
+comparisons, benchmarks, limitations, and the full-solve adjoint plan.
 
 ## Backend Selection
 
@@ -161,16 +152,10 @@ pass `solver_device="cpu"` / `solver_device="gpu"` explicitly.
 ## Optimization Examples
 
 Editable optimization examples live in `examples/optimization/`. Start with
-`examples/optimization/README.md` for workflow anatomy, then use
-`docs/optimization.rst` for the full method guide,
-`docs/optimization_sweep_results.rst` for generated sweep tables/figures, and
-`docs/piecewise_omnigenous_plan.rst` for the pwO planning and acceptance gates.
-
-The README intentionally keeps only the compact best current
-stellarator-symmetric QA/QH/QP/QI rows. Extended policy discussion, LASYM
-panels, finite-beta examples, extended QI NFP provenance and limitations,
-minimal-seed status, failure modes, partial CPU/GPU sweep snapshots, and
-full-matrix artifact requirements live in the docs.
+`examples/optimization/README.md`, then use `docs/optimization.rst`,
+`docs/optimization_sweep_results.rst`, and
+`docs/piecewise_omnigenous_plan.rst` for the full method guide, sweep tables,
+pwO plan, LASYM panels, finite-beta cases, and QI provenance.
 
 | Target | Backend | Policy | max_mode | ESS | Final J | QI legacy | Mirror | Aspect | Iota | Wall time |
 |---|---|---|---:|---|---:|---:|---:|---:|---:|---:|
@@ -189,20 +174,15 @@ README table is only the current compact promotion snapshot.
 
 ### QI from different NFP inputs
 
-The same `QI_optimization.py` workflow can be run from reviewed case-specific
-NFP 1, 2, 3, and 4 inputs by changing the input variables at the top of the
-script or by selecting one of the archived cases. The current NFP coverage
-panel is case-gated rather than a uniform aspect-ratio promotion table: NFP=1
-uses a higher target aspect ratio, NFP=2 uses the target-helicity seed/policy,
-NFP=3 uses a lower target aspect ratio, and NFP=4 uses its own reference-family
-case. Full provenance and limitations are in the docs.
+The same `QI_optimization.py` workflow can be run from reviewed NFP 1, 2, 3,
+and 4 inputs by changing the input variables at the top of the script. Full
+case-specific provenance and limitations are in the docs.
 
 ![QI optimization from NFP seeds](docs/_static/figures/readme_qi_optimization_cases.png)
 
-Reproduction commands, artifact-promotion rules, case-specific QI NFP coverage,
-and full sweep publication requirements are documented in
-`docs/optimization.rst` and `docs/optimization_sweep_results.rst`; those
-case-specific artifacts are not aspect-6 README best-row promotion evidence.
+Reproduction commands, artifact-promotion rules, and full sweep requirements
+are documented in `docs/optimization.rst` and
+`docs/optimization_sweep_results.rst`.
 
 ## Performance, Validation, Release
 
@@ -210,17 +190,10 @@ case-specific artifacts are not aspect-6 README best-row promotion evidence.
 - Validation and VMEC2000 parity status: `docs/validation.rst`
 - Testing and coverage strategy: `docs/testing_strategy.rst`
 - Release checklist and CI gates: `docs/release_checklist.rst`
-- Latest documented local rerun snapshot:
-  `outputs/rerun_20260525_123334`, with VMEC2000 stage-trace parity
-  smoke/full failures `0/6` and `0/1`; see `docs/performance.rst` and
-  `docs/validation.rst` for the current timing and parity caveats.
 - Latest repository release tag:
   [`v0.0.13`](https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.13)
 - Package indexes may lag the repository tag; verify PyPI/conda-forge before
   advertising a package-index release.
-- Release-candidate CI baseline: re-check the newest completed green `main`
-  run with `gh run list --repo uwplasma/vmec_jax --branch main --workflow CI
-  --limit 5` before tagging.
 - Required fast coverage gate is `95%`; record the current CI/local coverage
   result from the release-candidate commit in the release notes.
 

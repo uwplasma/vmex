@@ -174,6 +174,81 @@ def _coil_plasma_scale_summary(coils, indata) -> dict[str, float]:
     }
 
 
+def _vmec_input_n_from_wout_xn(xn_value: float, *, nfp: int) -> int:
+    """Convert VMEC WOUT ``xn`` convention back to namelist ``n``."""
+
+    if nfp > 0:
+        scaled = float(xn_value) / float(nfp)
+        rounded = int(round(scaled))
+        if abs(scaled - rounded) < 1.0e-8:
+            return rounded
+    return int(round(float(xn_value)))
+
+
+def continue_indata_from_wout_boundary(base_indata, wout) -> Any:
+    """Warm-start a free-boundary input from the accepted WOUT LCFS and axis.
+
+    VMEC free-boundary pressure ramps are substantially more robust when the
+    next pressure point starts from the previously accepted free-boundary LCFS
+    rather than from the original vacuum-boundary guess.  This helper updates
+    only geometry/axis fields; pressure, mgrid/direct-provider settings, and
+    run controls remain owned by :func:`make_free_boundary_indata`.
+    """
+
+    indata = deepcopy(base_indata)
+    nfp = max(1, int(getattr(wout, "nfp", indata.get_int("NFP", 1))))
+    mpol = int(indata.get_int("MPOL", getattr(wout, "mpol", 0)))
+    ntor = int(indata.get_int("NTOR", getattr(wout, "ntor", 0)))
+    lasym = bool(indata.get_bool("LASYM", getattr(wout, "lasym", False)))
+
+    boundary_maps: dict[str, dict[tuple[int, int], float]] = {"RBC": {}, "ZBS": {}}
+    if lasym:
+        boundary_maps["RBS"] = {}
+        boundary_maps["ZBC"] = {}
+
+    xm = np.asarray(wout.xm, dtype=int)
+    xn = np.asarray(wout.xn, dtype=float)
+    rmnc = np.asarray(wout.rmnc, dtype=float)[-1]
+    zmns = np.asarray(wout.zmns, dtype=float)[-1]
+    rmns = np.asarray(getattr(wout, "rmns", np.zeros_like(wout.rmnc)), dtype=float)[-1]
+    zmnc = np.asarray(getattr(wout, "zmnc", np.zeros_like(wout.zmns)), dtype=float)[-1]
+    for k, (m_i, xn_i) in enumerate(zip(xm, xn, strict=True)):
+        m = int(m_i)
+        n = _vmec_input_n_from_wout_xn(float(xn_i), nfp=nfp)
+        if m < 0 or m > mpol or abs(n) > ntor:
+            continue
+        boundary_maps["RBC"][(n, m)] = float(rmnc[k])
+        boundary_maps["ZBS"][(n, m)] = float(zmns[k])
+        if lasym:
+            boundary_maps["RBS"][(n, m)] = float(rmns[k])
+            boundary_maps["ZBC"][(n, m)] = float(zmnc[k])
+
+    for name in ("RBC", "ZBS", "RBS", "ZBC"):
+        if name in boundary_maps:
+            indata.indexed[name] = boundary_maps[name]
+        else:
+            indata.indexed.pop(name, None)
+
+    if hasattr(wout, "raxis_cc"):
+        indata.scalars["RAXIS_CC"] = [float(x) for x in np.asarray(wout.raxis_cc, dtype=float)]
+    if hasattr(wout, "zaxis_cs"):
+        indata.scalars["ZAXIS_CS"] = [float(x) for x in np.asarray(wout.zaxis_cs, dtype=float)]
+    if lasym and hasattr(wout, "raxis_cs"):
+        indata.scalars["RAXIS_CS"] = [float(x) for x in np.asarray(wout.raxis_cs, dtype=float)]
+    if lasym and hasattr(wout, "zaxis_cc"):
+        indata.scalars["ZAXIS_CC"] = [float(x) for x in np.asarray(wout.zaxis_cc, dtype=float)]
+    return indata
+
+
+def _summary_is_promotable_for_pressure_continuation(summary: dict[str, Any], *, max_fsq: float) -> bool:
+    values = [summary.get("fsqr"), summary.get("fsqz"), summary.get("fsql")]
+    try:
+        fsq_total = float(sum(float(v) for v in values if v is not None))
+    except Exception:
+        return False
+    return bool(np.isfinite(fsq_total) and fsq_total <= float(max_fsq) and Path(str(summary.get("wout", ""))).exists())
+
+
 def summarize_run(run, wout_path: Path, *, backend: str, beta_percent: float, wall_s: float) -> dict[str, Any]:
     """Collect lightweight scalar diagnostics for the JSON summary."""
 
@@ -234,6 +309,11 @@ def summarize_run(run, wout_path: Path, *, backend: str, beta_percent: float, wa
         pass
     try:
         wout = read_wout(wout_path)
+        for name in ("fsqr", "fsqz", "fsql", "aspect"):
+            if hasattr(wout, name):
+                value = float(getattr(wout, name))
+                if np.isfinite(value):
+                    summary[name] = value
         summary["max_pressure"] = float(np.nanmax(np.asarray(wout.presf, dtype=float)))
         summary["wp"] = float(wout.wp)
         summary["wb"] = float(wout.wb)
@@ -255,6 +335,8 @@ def run_one_case(
     max_iter: int,
     activate_fsq: float | None,
     direct_coil_params=None,
+    direct_coil_source_reuse: bool = True,
+    direct_coil_trial_resample: bool = False,
 ) -> dict[str, Any]:
     """Run one mgrid or direct-coil free-boundary case."""
 
@@ -276,6 +358,10 @@ def run_one_case(
             verbose=False,
             jit_forces=False,
             external_field_provider_kind="direct_coils",
+            external_field_provider_static={
+                "allow_source_reuse": bool(direct_coil_source_reuse),
+                "resample_trial_bsqvac": bool(direct_coil_trial_resample),
+            },
             external_field_provider_params=direct_coil_params,
             free_boundary_activate_fsq=activate_fsq,
         )
@@ -336,6 +422,26 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--pressure-continuation",
+        action="store_true",
+        help=(
+            "Warm-start each finite-pressure point from the previously converged "
+            "free-boundary LCFS for the same backend. This is the recommended "
+            "promotion path for LP-QA finite-pressure scans because direct "
+            "pressure jumps can leave the free-boundary iteration outside the "
+            "convergent basin."
+        ),
+    )
+    parser.add_argument(
+        "--pressure-continuation-max-fsq",
+        type=float,
+        default=1.0e-6,
+        help=(
+            "Maximum fsqr+fsqz+fsql allowed before a run is accepted as the "
+            "seed for the next --pressure-continuation step."
+        ),
+    )
+    parser.add_argument(
         "--phiedge",
         type=float,
         default=DEFAULT_FREE_BOUNDARY_PHIEDGE,
@@ -366,6 +472,26 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--skip-mgrid-runs", action="store_true")
     parser.add_argument("--skip-direct-runs", action="store_true")
+    parser.add_argument(
+        "--disable-direct-coil-source-reuse",
+        action="store_true",
+        help=(
+            "Disable VMEC-style cached-source reuse for direct-coil runs. "
+            "The default keeps reuse enabled because the coils are fixed during "
+            "each equilibrium solve; lower-level tests still cover the no-stale-"
+            "source path when provider parameters change between calls."
+        ),
+    )
+    parser.add_argument(
+        "--direct-coil-trial-resample",
+        action="store_true",
+        help=(
+            "Recompute the direct-coil vacuum field on trial/rejected boundaries. "
+            "This is useful for phase-2 exact-control experiments. The default "
+            "keeps VMEC-style accepted-state vacuum during trial scoring, which "
+            "is more robust for finite-pressure LP-QA continuation."
+        ),
+    )
     parser.add_argument(
         "--allow-scale-mismatch",
         action="store_true",
@@ -428,11 +554,23 @@ def main(argv: list[str] | None = None) -> int:
             flush=True,
         )
     summaries = []
+    continuation_bases: dict[str, Any] = {}
+    continuation_has_promoted_seed: dict[str, bool] = {}
+    if args.pressure_continuation:
+        continuation_template = deepcopy(base_indata)
+        continuation_template.scalars["MPOL"] = int(args.mpol)
+        continuation_template.scalars["NTOR"] = int(args.ntor)
+        continuation_bases = {
+            "mgrid": deepcopy(continuation_template),
+            "direct": deepcopy(continuation_template),
+        }
+        continuation_has_promoted_seed = {"mgrid": False, "direct": False}
     for beta_percent in args.betas:
         beta_tag = f"{float(beta_percent):.3f}".replace(".", "p")
         if not args.skip_mgrid_runs:
+            mgrid_base = continuation_bases.get("mgrid", base_indata)
             mgrid_indata = make_free_boundary_indata(
-                base_indata,
+                mgrid_base,
                 beta_percent=beta_percent,
                 mgrid_file=mgrid_file.name,
                 niter=args.max_iter,
@@ -450,21 +588,31 @@ def main(argv: list[str] | None = None) -> int:
             input_mgrid = outdir / f"input.lpqa_mgrid_beta_{beta_tag}"
             write_indata(input_mgrid, mgrid_indata)
             print(f"Running mgrid beta={beta_percent:.3f}%: {input_mgrid}")
-            summaries.append(
-                run_one_case(
-                    backend="mgrid",
-                    input_path=input_mgrid,
-                    output_dir=outdir,
-                    beta_percent=beta_percent,
-                    pressure_scale_for_one_percent_beta=args.pressure_scale_for_one_percent_beta,
-                    max_iter=args.max_iter,
-                    activate_fsq=args.activate_fsq,
-                )
+            summary = run_one_case(
+                backend="mgrid",
+                input_path=input_mgrid,
+                output_dir=outdir,
+                beta_percent=beta_percent,
+                pressure_scale_for_one_percent_beta=args.pressure_scale_for_one_percent_beta,
+                max_iter=args.max_iter,
+                activate_fsq=args.activate_fsq,
             )
+            summary["pressure_continuation_seeded_from_previous"] = bool(
+                continuation_has_promoted_seed.get("mgrid", False)
+            )
+            summary["pressure_continuation_promoted_seed"] = False
+            if args.pressure_continuation and _summary_is_promotable_for_pressure_continuation(
+                summary, max_fsq=args.pressure_continuation_max_fsq
+            ):
+                continuation_bases["mgrid"] = continue_indata_from_wout_boundary(mgrid_base, read_wout(summary["wout"]))
+                continuation_has_promoted_seed["mgrid"] = True
+                summary["pressure_continuation_promoted_seed"] = True
+            summaries.append(summary)
 
         if not args.skip_direct_runs:
+            direct_base = continuation_bases.get("direct", base_indata)
             direct_indata = make_free_boundary_indata(
-                base_indata,
+                direct_base,
                 beta_percent=beta_percent,
                 mgrid_file="DIRECT_COILS",
                 niter=args.max_iter,
@@ -482,18 +630,31 @@ def main(argv: list[str] | None = None) -> int:
             input_direct = outdir / f"input.lpqa_direct_beta_{beta_tag}"
             write_indata(input_direct, direct_indata)
             print(f"Running direct-coil beta={beta_percent:.3f}%: {input_direct}")
-            summaries.append(
-                run_one_case(
-                    backend="direct",
-                    input_path=input_direct,
-                    output_dir=outdir,
-                    beta_percent=beta_percent,
-                    pressure_scale_for_one_percent_beta=args.pressure_scale_for_one_percent_beta,
-                    max_iter=args.max_iter,
-                    activate_fsq=args.activate_fsq,
-                    direct_coil_params=direct_params,
-                )
+            summary = run_one_case(
+                backend="direct",
+                input_path=input_direct,
+                output_dir=outdir,
+                beta_percent=beta_percent,
+                pressure_scale_for_one_percent_beta=args.pressure_scale_for_one_percent_beta,
+                max_iter=args.max_iter,
+                activate_fsq=args.activate_fsq,
+                direct_coil_params=direct_params,
+                direct_coil_source_reuse=not args.disable_direct_coil_source_reuse,
+                direct_coil_trial_resample=args.direct_coil_trial_resample,
             )
+            summary["pressure_continuation_seeded_from_previous"] = bool(
+                continuation_has_promoted_seed.get("direct", False)
+            )
+            summary["pressure_continuation_promoted_seed"] = False
+            if args.pressure_continuation and _summary_is_promotable_for_pressure_continuation(
+                summary, max_fsq=args.pressure_continuation_max_fsq
+            ):
+                continuation_bases["direct"] = continue_indata_from_wout_boundary(
+                    direct_base, read_wout(summary["wout"])
+                )
+                continuation_has_promoted_seed["direct"] = True
+                summary["pressure_continuation_promoted_seed"] = True
+            summaries.append(summary)
 
     summary_path = outdir / "summary.json"
     summary_path.write_text(
@@ -504,6 +665,10 @@ def main(argv: list[str] | None = None) -> int:
                 "coil_current_scale": float(args.coil_current_scale),
                 "phiedge_override": None if args.phiedge is None else float(args.phiedge),
                 "pressure_scale_for_one_percent_beta": float(args.pressure_scale_for_one_percent_beta),
+                "pressure_continuation": bool(args.pressure_continuation),
+                "pressure_continuation_max_fsq": float(args.pressure_continuation_max_fsq),
+                "direct_coil_source_reuse": not bool(args.disable_direct_coil_source_reuse),
+                "direct_coil_trial_resample": bool(args.direct_coil_trial_resample),
                 "coil_plasma_scale_summary": scale_summary,
                 "ns_array": ns_array or [int(args.ns)],
                 "niter_array": niter_array or [int(args.max_iter)],

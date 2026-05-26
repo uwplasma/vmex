@@ -155,13 +155,11 @@ def interpolate_mgrid_bfield_jax(
         if kp == 1:
             k_idx = jnp.zeros(nzeta, dtype=jnp.int32)
         else:
-            if nzeta < 1 or kp % nzeta != 0:
-                raise ValueError(f"mgrid kp={kp} must be divisible by VMEC nzeta={nzeta} for use_vmec_kv=True")
-            # Mirror VMEC read_mgrid_nc: reduce file planes by
-            # 1:np0b:nskip (1-based) before becoil indexing. In 0-based
-            # file-plane indices this is 0, nskip, 2*nskip, ...
-            nskip = kp // nzeta
-            k_idx = jnp.arange(nzeta, dtype=jnp.int32) * int(nskip)
+            if nzeta < 1:
+                raise ValueError("use_vmec_kv=True requires at least one zeta plane")
+            # Mirror VMEC becoil indexing: use the VMEC zeta index directly
+            # and clamp if a tiny synthetic fixture has fewer mgrid planes.
+            k_idx = jnp.minimum(jnp.arange(nzeta, dtype=jnp.int32), kp - 1)
         k0 = jnp.broadcast_to(k_idx.reshape((1,) * (rr.ndim - 1) + (nzeta,)), rr.shape).reshape(-1)
         k1 = k0
         wk = jnp.zeros_like(fr)

@@ -255,12 +255,20 @@ to run the direct-coil provider without generating a magnetic grid.
      --phiedge=-0.025 \
      --betas 0 1 2 \
      --pressure-scale-for-one-percent-beta 1000 \
-     --ns 31 \
+     --pressure-continuation \
+     --pressure-continuation-max-fsq 1e-6 \
+     --ns-array 16,31 \
+     --niter-array 600,1200 \
+     --ftol-array 1e-8,1e-8 \
      --mpol 5 \
      --ntor 5 \
-     --activate-fsq 1.0
+     --mgrid-nphi 24 \
+     --max-iter 1200 \
+     --activate-fsq 1e99
 
-Use staged radial continuation for high-resolution promotion attempts:
+Use staged radial continuation for high-resolution promotion attempts. Keep
+``--pressure-continuation`` enabled so each pressure point starts from the
+previous accepted free-boundary LCFS:
 
 .. code-block:: bash
 
@@ -273,6 +281,8 @@ Use staged radial continuation for high-resolution promotion attempts:
      --phiedge=-0.025 \
      --betas 0 1 2 \
      --pressure-scale-for-one-percent-beta 1000 \
+     --pressure-continuation \
+     --pressure-continuation-max-fsq 1e-6 \
      --ns-array 16,31,51,101 \
      --niter-array 1000,2000,4000,12000 \
      --ftol-array 1e-8,1e-10,1e-11,1e-12 \
@@ -304,20 +314,63 @@ artifact.
 High-Resolution LP-QA Stellarator Gate
 --------------------------------------
 
-The LP-QA stellarator promotion gate is currently unresolved. The corrected
-unit-scale input and coil pair converges in vacuum and low pressure in
-VMEC2000-generated-``mgrid`` tests. However:
+The corrected unit-scale LP-QA input and ESSOS coil pair now has a promoted
+generated-``mgrid`` pressure-continuation lane. A local ``ns=16,31`` run with
+``PHIEDGE=-0.025`` and ``PRES_SCALE = 1000 * nominal_beta_percent`` produced:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Nominal beta label
+     - Actual WOUT beta
+     - WOUT ``fsqr+fsqz+fsql``
+     - Aspect
+     - Mean iota
+   * - 0.0
+     - 0.00%
+     - ``1.66e-8``
+     - 6.013
+     - 0.409
+   * - 0.5
+     - 0.72%
+     - ``1.67e-8``
+     - 6.046
+     - 0.405
+   * - 1.0
+     - 1.49%
+     - ``1.02e-8``
+     - 6.098
+     - 0.395
+   * - 2.0
+     - 3.43%
+     - ``7.94e-7``
+     - 6.343
+     - 0.191
+
+This is a finite-beta stellarator ``mgrid`` promotion result for the branch. It
+does not yet promote the direct-coil nonlinear-control path. Current direct
+diagnostics show that the exact direct Biot-Savart field matches the generated
+``mgrid`` field at the initial LP-QA boundary to roughly ``1e-3`` relative RMS,
+and the first NESTOR vacuum-pressure field ``bsqvac`` matches to roughly
+``1e-3`` relative RMS. The direct nonlinear free-boundary iteration still loses
+convergence for the same high-beta LP-QA sequence, so full direct-coil LP-QA
+promotion remains phase-2 work.
+
+Lessons from the failed earlier attempts:
 
 - pairing the default ESSOS coils with the reactor-scale LP-QA input is invalid
   without coil scaling and caused the original high-resolution failure;
 - the native reactor-scale ``PHIEDGE`` has the wrong sign for the vacuum
   subroutine, while a small hand-tuned flux magnitude destroys the scale;
-- the unit-scale corrected pair with ``PHIEDGE=-0.025`` converges at vacuum and
-  low pressure, but direct pressure jumps fail before actual 1--2% WOUT beta.
+- direct pressure jumps are much less robust than pressure continuation from
+  accepted lower-beta equilibria;
+- the exact direct-coil free-boundary iteration needs a phase-2 nonlinear
+  control/adjoint pass before it should be advertised as high-beta production.
 
-The next promotion tests should use pressure continuation from accepted lower
-beta equilibria, staged radial continuation, and a calibrated stellarator coil
-set whose vacuum field and VMEC flux scale agree at the target beta.
+The next promotion tests should use the same pressure-continuation schedule,
+increase the radial resolution to ``ns=101``, and continue the direct-provider
+solver-control work until the exact coil path converges to the same accepted
+finite-beta branch.
 
 Generate the benchmark summary used by the README/docs figure renderer:
 

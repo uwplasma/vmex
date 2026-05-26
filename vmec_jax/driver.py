@@ -2561,9 +2561,15 @@ def run_fixed_boundary(
     provider_kind_eff = "" if external_field_provider_kind is None else str(external_field_provider_kind).strip().lower()
     if (
         direct_external_provider
-        and external_field_provider_static_eff is None
         and provider_kind_eff in ("direct_coils", "coils", "coil")
         and external_field_provider_params is not None
+        and (
+            external_field_provider_static_eff is None
+            or (
+                isinstance(external_field_provider_static_eff, dict)
+                and "coil_geometry" not in external_field_provider_static_eff
+            )
+        )
         and os.getenv("VMEC_JAX_FREEB_DISABLE_COIL_GEOMETRY_CACHE", "").strip().lower()
         not in ("1", "true", "yes", "on")
     ):
@@ -2571,7 +2577,13 @@ def run_fixed_boundary(
             from .external_fields import build_coil_field_geometry
 
             jit_sampler_env = os.getenv("VMEC_JAX_FREEB_JIT_COIL_SAMPLER", "1").strip().lower()
+            static_base = (
+                {}
+                if external_field_provider_static_eff is None
+                else dict(external_field_provider_static_eff)
+            )
             external_field_provider_static_eff = {
+                **static_base,
                 "coil_geometry": build_coil_field_geometry(external_field_provider_params),
                 "regularization_epsilon": getattr(external_field_provider_params, "regularization_epsilon", 0.0),
                 "chunk_size": getattr(external_field_provider_params, "chunk_size", None),

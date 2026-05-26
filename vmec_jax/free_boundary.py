@@ -496,14 +496,13 @@ def interpolate_mgrid_bfield(
         if kp == 1:
             k_idx = np.zeros(nzeta, dtype=np.int64)
         else:
-            if nzeta < 1 or kp % nzeta != 0:
-                raise ValueError(f"mgrid kp={kp} must be divisible by VMEC nzeta={nzeta} for use_vmec_kv=True")
-            # VMEC read_mgrid_nc first subsamples the file toroidal planes with
-            # 1-based slice 1:np0b:nskip where nskip=np0b/nv, then becoil.f
-            # indexes that reduced table without interpolation. In 0-based
-            # file-plane indices this is 0, nskip, 2*nskip, ...
-            nskip = kp // nzeta
-            k_idx = np.arange(nzeta, dtype=np.int64) * int(nskip)
+            if nzeta < 1:
+                raise ValueError("use_vmec_kv=True requires at least one zeta plane")
+            # VMEC becoil indexing uses the VMEC zeta index directly after
+            # read_mgrid_nc has loaded the available planes. If a tiny fixture
+            # has fewer mgrid planes than VMEC zeta points, clamp to the last
+            # available plane rather than rescaling toroidal angle.
+            k_idx = np.minimum(np.arange(nzeta, dtype=np.int64), kp - 1)
         k0 = np.broadcast_to(k_idx.reshape((1,) * (rr.ndim - 1) + (nzeta,)), rr.shape).reshape(-1)
         k1 = k0
         wk = np.zeros_like(fr)
@@ -3538,6 +3537,10 @@ def nestor_external_only_step(
     selected_mode, mode_reason = _select_nestor_mode(ntheta=ntheta, nzeta=nzeta)
     provider_kind = "mgrid" if external_field_provider_kind is None else str(external_field_provider_kind).strip().lower()
     provider_allows_source_reuse = provider_kind in ("", "mgrid", "legacy_mgrid")
+    if isinstance(external_field_provider_static, dict) and bool(
+        external_field_provider_static.get("allow_source_reuse", False)
+    ):
+        provider_allows_source_reuse = True
 
     if ivacskip is not None:
         reuse_step = (int(ivacskip) != 0 and runtime is not None)
@@ -3829,6 +3832,7 @@ def nestor_external_only_step(
 
     diagnostics: dict[str, Any] = {
         "provider_kind": provider_kind,
+        "provider_allows_source_reuse": bool(provider_allows_source_reuse),
         "reused": bool(reuse_step),
         "source_reused": bool(source_reused),
         "rhs_mode": str(rhs_mode),

@@ -12,6 +12,7 @@ from vmec_jax.init_guess import initial_guess_from_boundary
 from vmec_jax.solve import (
     _enforce_field_rows,
     _enforce_fixed_boundary_and_axis,
+    _preconditioner_apply_payload_fused,
     _preconditioner_output_payload_jit,
     _preconditioner_output_scaling_jit,
     _replace_mode_slice,
@@ -303,14 +304,14 @@ def test_preconditioner_output_scaling_gate_is_gpu_only_without_gpu(monkeypatch)
     cpu_res = solve_module.solve_fixed_boundary_residual_iter(state0, static, **solve_kwargs)
 
     calls = []
-    original_scaler = _preconditioner_output_scaling_jit
+    original_apply = _preconditioner_apply_payload_fused
 
-    def count_fused(*, apply_lambda_update_scale):
-        calls.append(bool(apply_lambda_update_scale))
-        return original_scaler(apply_lambda_update_scale=apply_lambda_update_scale)
+    def count_fused_apply(*args, **kwargs):
+        calls.append(bool(kwargs["apply_lambda_update_scale"]))
+        return original_apply(*args, **kwargs)
 
     monkeypatch.setattr(solve_module.jax, "default_backend", lambda: "gpu")
-    monkeypatch.setattr(solve_module, "_preconditioner_output_scaling_jit", count_fused)
+    monkeypatch.setattr(solve_module, "_preconditioner_apply_payload_fused", count_fused_apply)
     gpu_res = solve_module.solve_fixed_boundary_residual_iter(state0, static, **solve_kwargs)
 
     assert calls == [True]

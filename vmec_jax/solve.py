@@ -11113,6 +11113,10 @@ def solve_fixed_boundary_residual_iter(
                 )
                 if provider_kind_trial in ("", "mgrid", "legacy_mgrid"):
                     return freeb_bsqvac_half_current
+                if isinstance(external_field_provider_static, dict) and not bool(
+                    external_field_provider_static.get("resample_trial_bsqvac", True)
+                ):
+                    return freeb_bsqvac_half_current
                 if int(freeb_ivac_effective) < 1:
                     return freeb_bsqvac_half_current
                 try:

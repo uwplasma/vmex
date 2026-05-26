@@ -411,11 +411,13 @@ def test_checkpoint_tape_dynamic_scan_runner_skips_inactive_trace_entries(monkey
         static_flags,
         preconditioner_jmax_override,
         preconditioner_use_precomputed_tridi=None,
+        preconditioner_use_lax_tridi=None,
     ):
         assert static is not None
         assert static_flags["precond_jmax"] == 7
         assert preconditioner_jmax_override == 7
         assert preconditioner_use_precomputed_tridi is None
+        assert preconditioner_use_lax_tridi is None
         delta = jnp.asarray(trace["delta"], dtype=jnp.asarray(carry[0]).dtype)
         return tuple(jnp.asarray(part) + delta for part in carry)
 

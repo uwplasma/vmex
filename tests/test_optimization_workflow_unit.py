@@ -382,6 +382,7 @@ def test_build_quasi_isodynamic_stage_wires_shared_field_residuals(monkeypatch) 
             trial_max_iter,
             trial_ftol,
             solver_device,
+            exact_path=None,
         ):
             captured.update(
                 {
@@ -396,6 +397,7 @@ def test_build_quasi_isodynamic_stage_wires_shared_field_residuals(monkeypatch) 
                     "trial_max_iter": trial_max_iter,
                     "trial_ftol": trial_ftol,
                     "solver_device": solver_device,
+                    "exact_path": exact_path,
                 }
             )
 

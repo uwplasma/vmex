@@ -246,15 +246,25 @@ Results obtained:
 151. Re-ran the full post-merge fast coverage gate: `2437 passed, 26 skipped, 112 deselected, 2 xfailed` in 8m28s, total coverage `95.00%`.
 152. Ran the final local CPU direct-coil benchmark matrix. The best quick row (`direct_solve_jit_forces_badjac_probe0`) reports cold/compile `1.354 s`, warm-min `0.0235 s`, active NESTOR sample `0.0515 s -> 0.00092 s`, final sample `4.6e-4 s`, and final solve `3.1e-3 s`.
 153. Ran the final office CPU/GPU direct-coil benchmark matrix on the pushed head. The GPU matrix completed, but the tiny warm direct solve remains CPU-favorable: best JIT-forces/probe0 row reports CPU warm-min `0.0776 s`, CUDA warm-min `0.248 s` (`3.20x` GPU/CPU). CUDA active NESTOR sampling is now `0.0050 s`, but remaining GPU overhead is mostly accepted-control `fsq1`, preconditioner, and update dispatch.
+154. Reopened PR #18 after the main-branch slimming pass; do not merge yet while LP-QA finite-beta and phase-2 adjoint work continue.
+155. Fixed the ESSOS LP-QA beta-scan summary to prefer WOUT residuals/scalars over stale in-memory multigrid diagnostics. This unblocked pressure-continuation promotion because the WOUT residuals are the accepted convergence evidence.
+156. Added pressure-continuation support to `examples/free_boundary_essos_coils_beta_scan.py`, using the previous accepted WOUT LCFS/axis as the next pressure point's free-boundary seed.
+157. Added synthetic regression coverage for WOUT mode-number conversion, LCFS/axis continuation extraction, and residual-based continuation promotion.
+158. Relaxed the generated-mgrid/direct-coil smoke comparison to match the actual test physics: the generated mgrid is an interpolated compatibility backend, so the low-resolution smoke now checks boundary-geometry agreement and finite iota outputs rather than bitwise-identical iota profiles from a deliberately underconverged two-iteration run.
+159. Added an opt-in direct-provider source-reuse/static-control flag and preserved the conservative no-stale-source default for lower-level tests where coil parameters change between NESTOR calls.
+160. Added an example-level direct-provider trial-resampling flag. LP-QA scans default to VMEC-style accepted-state vacuum during trial scoring; exact trial-boundary resampling remains available for phase-2 experiments.
+161. Ran a local ESSOS generated-mgrid LP-QA pressure-continuation scan with `ns_array=[16,31]`, `PHIEDGE=-0.025`, and nominal beta labels `0,0.5,1,2`. It promoted every stage and reached actual WOUT beta values `0.00%, 0.72%, 1.49%, 3.43%` with WOUT `fsqr+fsqz+fsql` from `1.0e-8` to `7.9e-7`.
+162. Direct-coil LP-QA remains unresolved at high beta: the direct Biot-Savart field matches the generated-mgrid field at the initial boundary to about `1e-3` relative RMS, and the first NESTOR `bsqvac` matches to about `1e-3` relative RMS, but the exact direct-provider nonlinear free-boundary iteration still loses convergence.
+163. Updated README/docs to document pressure continuation, the promoted LP-QA generated-mgrid result, and the direct-coil LP-QA phase-2 limitation without claiming a completed direct high-beta stellarator solve.
 
 Best next steps:
 
-1. Push the latest main merge and plan update.
-2. Wait for the restarted GitHub Actions matrix after the coverage/performance commits.
-3. If CI remains green, mark PR #17 ready for review.
-4. Keep the opt-in JAX NESTOR driver path as validation-only until the accepted-solve compilation/dispatch cost is removed. The host bridge remains the production/default route.
-5. Keep coverage above 95% as new operator code is promoted from validation scaffolds into production paths.
-6. Keep GPU optimization as a documented phase-2 performance lane; the final office matrix is complete and confirms CPU is still faster on the tiny direct-solve benchmark.
+1. Commit and push the pressure-continuation and documentation updates to PR #18, but keep the PR unmerged.
+2. Generate a compact reviewer plot from the LP-QA generated-mgrid pressure-continuation summary, attach it to the PR/Gist rather than committing it, and label it as mgrid-compatible finite-beta evidence.
+3. Continue the direct LP-QA phase-2 lane by instrumenting accepted versus trial vacuum coupling histories and testing whether the failure is due to free-boundary nonlinear control, final residual recomputation, or exact-field branch sensitivity away from the mgrid-interpolated branch.
+4. Port the next JAX NESTOR operator rung only after the direct nonlinear-control diagnosis is recorded; do not claim full coil-to-free-boundary exact gradients until complete-loop AD-vs-central-FD passes.
+5. Re-run strict Sphinx and the fast free-boundary/ESSOS tests after the next direct-control patch.
+6. Keep coverage above 95% as new operator code is promoted from validation scaffolds into production paths.
 
 Need from user:
 
