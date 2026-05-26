@@ -253,6 +253,24 @@ def summarize_run(run, wout_path: Path, *, backend: str, beta_percent: float, wa
     """Collect lightweight scalar diagnostics for the JSON summary."""
 
     diag = getattr(run.result, "diagnostics", {}) if run.result is not None else {}
+
+    def _history_head_tail(name: str, *, n: int = 6) -> dict[str, Any] | None:
+        arr = diag.get(name)
+        if arr is None:
+            return None
+        try:
+            values = np.asarray(arr)
+            if values.size == 0:
+                return {"count": 0, "head": [], "tail": []}
+            flat = values.reshape(-1)
+            return {
+                "count": int(flat.size),
+                "head": [float(x) for x in flat[:n]],
+                "tail": [float(x) for x in flat[-n:]],
+            }
+        except Exception:
+            return None
+
     summary: dict[str, Any] = {
         "backend": backend,
         "nominal_beta_percent": float(beta_percent),
@@ -277,6 +295,10 @@ def summarize_run(run, wout_path: Path, *, backend: str, beta_percent: float, wa
         "free_boundary_bnormal_rms": None,
         "free_boundary_bsqvac_rms": None,
         "free_boundary_gsource_rms": None,
+        "free_boundary_bnormal_rms_history": _history_head_tail("freeb_nestor_bnormal_rms_history"),
+        "free_boundary_bsqvac_rms_history": _history_head_tail("freeb_nestor_bsqvac_rms_history"),
+        "free_boundary_gsource_rms_history": _history_head_tail("freeb_nestor_gsource_rms_history"),
+        "free_boundary_source_reused_history": _history_head_tail("freeb_nestor_source_reused_history"),
     }
     for key in ("final_fsqr", "final_fsqz", "final_fsql"):
         val = diag.get(key)
@@ -337,6 +359,7 @@ def run_one_case(
     direct_coil_params=None,
     direct_coil_source_reuse: bool = True,
     direct_coil_trial_resample: bool = False,
+    direct_coil_limit_update_rms: bool = False,
 ) -> dict[str, Any]:
     """Run one mgrid or direct-coil free-boundary case."""
 
@@ -364,6 +387,7 @@ def run_one_case(
             },
             external_field_provider_params=direct_coil_params,
             free_boundary_activate_fsq=activate_fsq,
+            limit_update_rms=bool(direct_coil_limit_update_rms),
         )
     else:
         raise ValueError(f"unknown backend {backend!r}")
@@ -490,6 +514,15 @@ def main(argv: list[str] | None = None) -> int:
             "This is useful for phase-2 exact-control experiments. The default "
             "keeps VMEC-style accepted-state vacuum during trial scoring, which "
             "is more robust for finite-pressure LP-QA continuation."
+        ),
+    )
+    parser.add_argument(
+        "--direct-coil-limit-update-rms",
+        action="store_true",
+        help=(
+            "Enable the guarded VMEC coefficient-update limiter for direct-coil "
+            "runs. This is a phase-2 diagnostics control; it is off by default "
+            "so provider parity tests preserve the baseline VMEC control path."
         ),
     )
     parser.add_argument(
@@ -641,6 +674,7 @@ def main(argv: list[str] | None = None) -> int:
                 direct_coil_params=direct_params,
                 direct_coil_source_reuse=not args.disable_direct_coil_source_reuse,
                 direct_coil_trial_resample=args.direct_coil_trial_resample,
+                direct_coil_limit_update_rms=args.direct_coil_limit_update_rms,
             )
             summary["pressure_continuation_seeded_from_previous"] = bool(
                 continuation_has_promoted_seed.get("direct", False)
@@ -669,6 +703,7 @@ def main(argv: list[str] | None = None) -> int:
                 "pressure_continuation_max_fsq": float(args.pressure_continuation_max_fsq),
                 "direct_coil_source_reuse": not bool(args.disable_direct_coil_source_reuse),
                 "direct_coil_trial_resample": bool(args.direct_coil_trial_resample),
+                "direct_coil_limit_update_rms": bool(args.direct_coil_limit_update_rms),
                 "coil_plasma_scale_summary": scale_summary,
                 "ns_array": ns_array or [int(args.ns)],
                 "niter_array": niter_array or [int(args.max_iter)],

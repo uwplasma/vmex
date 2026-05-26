@@ -372,6 +372,19 @@ increase the radial resolution to ``ns=101``, and continue the direct-provider
 solver-control work until the exact coil path converges to the same accepted
 finite-beta branch.
 
+Direct-provider phase-2 diagnostics now record accepted NESTOR histories for
+``bnormal``, ``gsource``, ``bsqvac``, and source reuse. A short LP-QA vacuum
+trace shows that the direct exact field can produce an oversized first active
+boundary update while the generated-``mgrid`` compatibility backend stays in
+the convergent basin. The public driver exposes ``limit_update_rms`` and the
+beta-scan example exposes ``--direct-coil-limit-update-rms`` for this diagnostic
+lane. The limiter removes pathological near-zero direct-field samples after
+oversized updates, but it is not by itself a promotion result: the LP-QA
+direct-coil branch still stalls at large residual in the current nonlinear
+control path. The next phase-2 diagnostic must compare the first-active
+force/update payloads from generated ``mgrid`` and direct coils on the same
+state.
+
 Generate the benchmark summary used by the README/docs figure renderer:
 
 .. code-block:: bash

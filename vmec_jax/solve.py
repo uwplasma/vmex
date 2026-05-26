@@ -10249,6 +10249,11 @@ def solve_fixed_boundary_residual_iter(
     freeb_ivacskip_history: list[int] = []
     freeb_full_update_history: list[int] = []
     freeb_nestor_reused_history: list[int] = []
+    freeb_nestor_source_reused_history: list[int] = []
+    freeb_nestor_provider_allows_source_reuse_history: list[int] = []
+    freeb_nestor_bnormal_rms_history: list[float] = []
+    freeb_nestor_gsource_rms_history: list[float] = []
+    freeb_nestor_bsqvac_rms_history: list[float] = []
     freeb_nestor_solve_time_history: list[float] = []
     freeb_nestor_sample_time_history: list[float] = []
     freeb_nestor_trial_reused_history: list[int] = []
@@ -11061,6 +11066,27 @@ def solve_fixed_boundary_residual_iter(
                         diag_nestor = getattr(nestor_res, "diagnostics", None)
                         if isinstance(diag_nestor, dict):
                             freeb_last_diagnostics = dict(diag_nestor)
+                            freeb_nestor_source_reused_history.append(
+                                1 if bool(diag_nestor.get("source_reused", False)) else 0
+                            )
+                            freeb_nestor_provider_allows_source_reuse_history.append(
+                                1 if bool(diag_nestor.get("provider_allows_source_reuse", False)) else 0
+                            )
+                            for _key, _hist in (
+                                ("bnormal_rms", freeb_nestor_bnormal_rms_history),
+                                ("gsource_rms", freeb_nestor_gsource_rms_history),
+                                ("bsqvac_rms", freeb_nestor_bsqvac_rms_history),
+                            ):
+                                try:
+                                    _hist.append(float(diag_nestor.get(_key, float("nan"))))
+                                except Exception:
+                                    _hist.append(float("nan"))
+                        else:
+                            freeb_nestor_source_reused_history.append(0)
+                            freeb_nestor_provider_allows_source_reuse_history.append(0)
+                            freeb_nestor_bnormal_rms_history.append(float("nan"))
+                            freeb_nestor_gsource_rms_history.append(float("nan"))
+                            freeb_nestor_bsqvac_rms_history.append(float("nan"))
                         bsqvac_edge = np.asarray(nestor_res.vac_total.bsqvac, dtype=float)
                         if (
                             bsqvac_edge.ndim == 2
@@ -14381,6 +14407,13 @@ def solve_fixed_boundary_residual_iter(
         "freeb_ivacskip_history": np.asarray(freeb_ivacskip_history, dtype=int),
         "freeb_full_update_history": np.asarray(freeb_full_update_history, dtype=int),
         "freeb_nestor_reused_history": np.asarray(freeb_nestor_reused_history, dtype=int),
+        "freeb_nestor_source_reused_history": np.asarray(freeb_nestor_source_reused_history, dtype=int),
+        "freeb_nestor_provider_allows_source_reuse_history": np.asarray(
+            freeb_nestor_provider_allows_source_reuse_history, dtype=int
+        ),
+        "freeb_nestor_bnormal_rms_history": np.asarray(freeb_nestor_bnormal_rms_history, dtype=float),
+        "freeb_nestor_gsource_rms_history": np.asarray(freeb_nestor_gsource_rms_history, dtype=float),
+        "freeb_nestor_bsqvac_rms_history": np.asarray(freeb_nestor_bsqvac_rms_history, dtype=float),
         "freeb_nestor_solve_time_history": np.asarray(freeb_nestor_solve_time_history, dtype=float),
         "freeb_nestor_sample_time_history": np.asarray(freeb_nestor_sample_time_history, dtype=float),
         "freeb_nestor_trial_reused_history": np.asarray(freeb_nestor_trial_reused_history, dtype=int),

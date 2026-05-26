@@ -10,7 +10,7 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-05-25 after dry-run optimization diagnostics, ESSOS adapter validation, VMEC2000 runtime-error classification, bounded AD-vs-FD NESTOR gradient checks, same-branch CPU/GPU benchmark-matrix reporting with non-JIT and JIT-force direct-solve rows, solve-loop timing capture for direct-coil benchmark rows, JIT-force defaults for direct-coil examples, accepted-boundary direct-coil replay AD-vs-FD promotion, free-boundary-aware fused strict-update support, a clarified complete-loop exact-adjoint promotion boundary, the first opt-in bad-Jacobian state-probe performance knob, a fused preconditioned-`fsq1` payload benchmark, a tightened optional VMEC2000 generated-`mgrid` trace gate, strict-update precompile coverage, source-checkout reproduction fixes for ESSOS beta-scan/figure commands, accepted-control payload batching, repeated local 95% fast coverage gates, final local/office CPU-GPU direct-coil performance evidence, and the latest `origin/main` docs/size-gate merges.
+Last updated: 2026-05-26 after pressure-continuation LP-QA generated-`mgrid` promotion, direct-provider first-step diagnostics, guarded direct-coil update limiting, README size-gate fixes, and refreshed PR #18 CI triage. Do not merge PR #18 yet.
 
 Steps taken:
 
@@ -78,6 +78,13 @@ Steps taken:
 62. Populated `docs/free_boundary_coil_optimization.rst` with the benchmark matrix, CSV provenance, GPU interpretation, and updated finite-pressure validation language.
 63. Added a release-hygiene regression that requires the free-boundary README/docs validation artifacts to remain present and avoids describing the bounded validation example as a scaffold.
 64. Threaded VMEC2000 subprocess return codes through `run_xvmec2000` and the generated-`mgrid` diagnostic.
+65. Added pressure continuation to the ESSOS LP-QA beta scan and promoted a generated-`mgrid` stellarator sequence with actual WOUT betas `0.00%, 0.72%, 1.49%, 3.43%`.
+66. Fixed beta-scan summaries to prefer final WOUT residuals/scalars over stale in-memory multigrid diagnostics.
+67. Pushed commit `51ec67ac freeb: add LP-QA pressure continuation`; PR #18 restarted CI on that head.
+68. Reproduced the direct LP-QA failure with a short vacuum trace: generated `mgrid` drops to small residuals while direct coils jump to `fsq ~ 1e17` on the first active update.
+69. Added accepted NESTOR diagnostic histories for `bnormal`, `gsource`, `bsqvac`, source reuse, and provider source-reuse policy.
+70. Tested direct source-reuse off, exact trial resampling, legacy RHS reuse, lower `DELT`, normal activation threshold, and current scales `0.8/1.0/1.2`. None made LP-QA direct coils converge.
+71. Wired `limit_update_rms` through the public driver and added `--direct-coil-limit-update-rms` to the LP-QA beta-scan example as an explicit phase-2 diagnostic control. This prevents pathological near-zero direct field samples after oversized updates, but LP-QA direct still stalls around `fsq ~ 14.5-14.8`, so it is not a promotion result.
 65. Reclassified generated-`mgrid` VMEC2000 exits with structured return-code metadata, preserving true nonzero failures while separating VMEC's source-level `more_iter_flag=2`.
 66. Fixed `run_xvmec2000` to copy relative `MGRID_FILE` assets from the input deck directory into the executable workdir, preventing accidental fixed-boundary fallbacks in local optional diagnostics.
 67. Added `opened_mgrid` to generated-`mgrid` VMEC2000 diagnostic summaries so parity evidence confirms the executable actually consumed the vacuum grid.
@@ -259,11 +266,11 @@ Results obtained:
 
 Best next steps:
 
-1. Commit and push the pressure-continuation and documentation updates to PR #18, but keep the PR unmerged.
-2. Generate a compact reviewer plot from the LP-QA generated-mgrid pressure-continuation summary, attach it to the PR/Gist rather than committing it, and label it as mgrid-compatible finite-beta evidence.
-3. Continue the direct LP-QA phase-2 lane by instrumenting accepted versus trial vacuum coupling histories and testing whether the failure is due to free-boundary nonlinear control, final residual recomputation, or exact-field branch sensitivity away from the mgrid-interpolated branch.
-4. Port the next JAX NESTOR operator rung only after the direct nonlinear-control diagnosis is recorded; do not claim full coil-to-free-boundary exact gradients until complete-loop AD-vs-central-FD passes.
-5. Re-run strict Sphinx and the fast free-boundary/ESSOS tests after the next direct-control patch.
+1. Commit and push the direct-provider diagnostic histories plus guarded direct update limiting after the focused tests/docs build pass.
+2. Pull the new PR #18 CI logs when checks complete; expected old failures were already reproduced/fixed locally.
+3. Continue phase-2 by comparing the first active direct and generated-`mgrid` force payloads, not only the sampled Biot-Savart field. The remaining gap appears in the free-boundary force/control branch after `bsqvac` construction.
+4. Add a targeted diagnostic that writes first-active-step force terms and boundary update blocks for mgrid/direct LP-QA from the same state.
+5. Only after the first-active force mismatch is isolated, continue the JAX NESTOR complete-loop AD-vs-central-FD rung.
 6. Keep coverage above 95% as new operator code is promoted from validation scaffolds into production paths.
 
 Need from user:
