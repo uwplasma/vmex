@@ -360,6 +360,14 @@ def main() -> None:
     )
     p.add_argument("--outdir", default="examples/outputs/bench_fixed_boundary", help="Output directory root.")
     p.add_argument(
+        "--promote-docs-assets",
+        action="store_true",
+        help=(
+            "Copy the rendered benchmark PNGs into docs/_static/figures. "
+            "Leave disabled for routine benchmarking to keep generated artifacts out of git."
+        ),
+    )
+    p.add_argument(
         "--fast",
         action="store_true",
         help="Quick sanity run (reduces cases/iters and uses a smaller ns for vmec_jax).",
@@ -464,12 +472,13 @@ def main() -> None:
     _plot_residuals(traces=traces, outpath=fig_resid)
     _plot_objective(traces=traces, outpath=fig_obj)
 
-    # Copy into docs for README embedding.
-    docs_fig_dir = root / "docs" / "_static" / "figures"
-    docs_fig_dir.mkdir(parents=True, exist_ok=True)
-    (docs_fig_dir / fig_runtime.name).write_bytes(fig_runtime.read_bytes())
-    (docs_fig_dir / fig_resid.name).write_bytes(fig_resid.read_bytes())
-    (docs_fig_dir / fig_obj.name).write_bytes(fig_obj.read_bytes())
+    if bool(args.promote_docs_assets):
+        docs_fig_dir = root / "docs" / "_static" / "figures"
+        docs_fig_dir.mkdir(parents=True, exist_ok=True)
+        (docs_fig_dir / fig_runtime.name).write_bytes(fig_runtime.read_bytes())
+        (docs_fig_dir / fig_resid.name).write_bytes(fig_resid.read_bytes())
+        (docs_fig_dir / fig_obj.name).write_bytes(fig_obj.read_bytes())
+        print(f"[bench] promoted docs assets into: {docs_fig_dir}")
 
     print(f"[bench] wrote: {fig_runtime}")
     print(f"[bench] wrote: {fig_resid}")
