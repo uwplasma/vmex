@@ -156,9 +156,10 @@ single-stage coil optimizer:
   are promoted.
 
 In short: direct-coil finite-pressure plumbing is present and validation-tested;
-high-resolution finite-beta ``mgrid`` validation exists for DIII-D; a converged
-high-beta stellarator direct-coil design, publication-grade gradients through
-the full free-boundary/NESTOR solve, and VMEC2000-bounded generated-``mgrid``
+high-resolution finite-beta ``mgrid`` validation exists for DIII-D; the LP-QA
+stellarator direct-coil forward lane has strict WOUT evidence through actual
+beta 1.93%; publication-grade gradients through the full
+free-boundary/NESTOR nonlinear loop and VMEC2000-bounded generated-``mgrid``
 trace parity are not claimed yet.
 
 Low-Resolution Beta Scan
@@ -303,9 +304,9 @@ from the nominal ``--betas`` labels.
 High-Resolution DIII-D Finite-Beta Benchmark
 --------------------------------------------
 
-The current reviewer-facing high-resolution finite-beta evidence is the
-VMEC2000-compatible DIII-D ``mgrid`` benchmark. The figure is attached to the
-pull request/Gist rather than committed to git:
+The current reviewer-facing high-resolution axisymmetric finite-beta evidence is
+the VMEC2000-compatible DIII-D ``mgrid`` benchmark. The figure is attached to
+the pull request/Gist rather than committed to git:
 
 - SVG: https://gist.githubusercontent.com/rogeriojorge/a49e7a21330fbc8ab99229d2b05de708/raw/pr18_diiid_freeb_beta_ns101_comparison.svg
 - Summary JSON: https://gist.githubusercontent.com/rogeriojorge/a49e7a21330fbc8ab99229d2b05de708/raw/pr18_diiid_freeb_beta_ns101_summary.json
@@ -320,12 +321,38 @@ and LCFS ``|B|`` contours. This is promoted as a free-boundary finite-beta
 ``mgrid`` validation artifact. It is not a direct-coil stellarator promotion
 artifact.
 
+Generate the DIII-D WOUTs from the bundled input and fetched ``mgrid`` asset:
+
+.. code-block:: bash
+
+   python tools/fetch_assets.py --bundle mgrids
+   python tools/diagnostics/run_diiid_mgrid_beta_scan.py \
+     --outdir results/freeb_diiid_mgrid_beta_ns101 \
+     --pressure-scales 0 0.25 0.50 0.72 1.0 1.35 \
+     --ns-array 16,51,101 \
+     --niter-array 1000,4000,20000 \
+     --ftol-array 1e-8,1e-11,1e-12
+
+Then render the panel directly from the generated summary:
+
+.. code-block:: bash
+
+   python tools/diagnostics/render_freeb_beta_wout_panels.py \
+     --summary results/freeb_diiid_mgrid_beta_ns101/summary.json \
+     --title "DIII-D mgrid free-boundary finite-beta scan (ns=101)" \
+     --stem diiid_mgrid_beta_ns101_panel \
+     --outdir /tmp/freeb_publication_panels
+
 High-Resolution LP-QA Stellarator Gate
 --------------------------------------
 
-The corrected unit-scale LP-QA input and ESSOS coil pair now has a promoted
-generated-``mgrid`` pressure-continuation lane. A local ``ns=16,31`` run with
-``PHIEDGE=-0.025`` and ``PRES_SCALE = 1000 * nominal_beta_percent`` produced:
+The corrected unit-scale LP-QA input and ESSOS coil pair has two validation
+layers. The strict direct-coil ``ns=101`` WOUT panel is the phase-1 promoted
+stellarator claim. The lower-resolution ``ns=16,31`` rows below are provenance
+and pressure-continuation diagnostics that explain how the basin was reached;
+they are not the publication-grade promotion rows. A local ``ns=16,31`` run
+with ``PHIEDGE=-0.025`` and ``PRES_SCALE = 1000 * nominal_beta_percent``
+produced:
 
 .. list-table::
    :header-rows: 1
@@ -356,8 +383,8 @@ generated-``mgrid`` pressure-continuation lane. A local ``ns=16,31`` run with
      - 6.343
      - 0.191
 
-The same pressure-continuation schedule now also promotes with the direct
-differentiable coil provider, after disabling the unsafe automatic CPU
+The same low-resolution pressure-continuation schedule also follows the direct
+differentiable coil provider after disabling the unsafe automatic CPU
 ``lax.tridiagonal_solve`` R/Z preconditioner policy:
 
 .. list-table::
@@ -389,10 +416,10 @@ differentiable coil provider, after disabling the unsafe automatic CPU
      - 6.343
      - 0.201
 
-This is the promoted finite-beta stellarator direct-coil forward result for
-phase 1. It does not promote the full nonlinear exact-adjoint path: current
-phase-2 gradients still stop at accepted-boundary replay and dense low-grid
-NESTOR primitives.
+These low-resolution rows are not the promoted phase-1 claim; the strict
+``ns=101`` WOUT panel below is. Neither row set promotes the full nonlinear
+exact-adjoint path: current phase-2 gradients still stop at accepted-boundary
+replay and dense low-grid NESTOR primitives.
 
 Lessons from the earlier failed attempts:
 
@@ -407,21 +434,13 @@ Lessons from the earlier failed attempts:
   active R/Z update even when direct and generated-``mgrid`` ``bsqvac`` agree
   to roughly ``1e-3`` relative RMS.
 
-The next promotion tests should use the same pressure-continuation schedule,
-increase the radial resolution to ``ns=101``, and continue exact full-solve
-AD-vs-central-FD validation through the nonlinear iteration loop. A strict
-direct-coil ``ns=16,51,101`` local continuation run has already converged the
-vacuum, nominal ``0.5``, and nominal ``1.0`` beta labels at final
-``FTOL=1e-12``. The nominal ``0.5`` label has actual WOUT beta about
-``0.724%`` and ``fsqr+fsqz+fsql=6.22e-12``; the nominal ``1.0`` label has
-actual WOUT beta about ``1.508%`` and ``fsqr+fsqz+fsql=5.52e-12``. A refined
-intermediate nominal ``1.25`` label reaches actual WOUT beta about ``1.932%``
-with ``fsqr+fsqz+fsql=2.97e-12``. The nominal ``2.0`` label reaches actual WOUT
-beta about ``3.184%`` and residual sum ``3.75e-7`` from the same continuation
-sequence; that row is useful high-beta continuation evidence but not strict
-final-``FTOL=1e-12`` evidence. The ``--resume-existing`` path exists so
-intermediate nominal beta labels can continue from persisted WOUTs instead of
-restarting the scan.
+The promoted strict direct-coil ``ns=101`` local continuation run converged the
+vacuum, nominal ``0.5``, nominal ``1.0``, and refined nominal ``1.25`` beta
+labels at final ``FTOL=1e-12``. The corresponding actual WOUT beta values are
+``0.00%``, ``0.724%``, ``1.508%``, and ``1.932%`` with residual sums below
+``6.3e-12``. A nominal ``2.0`` label reaches actual WOUT beta about ``3.184%``
+and residual sum ``3.75e-7`` from the same continuation sequence; that row is
+useful stress evidence but is not part of the strict promoted panel.
 
 The strict direct-coil LP-QA reviewer WOUT-panel is attached to PR #18 instead
 of committed to the repository:
@@ -431,17 +450,23 @@ of committed to the repository:
 
 The WOUT-panel renderer is reusable for both ``mgrid`` and direct-coil scans:
 
+The strict LP-QA panel was generated by first running the high-resolution
+pressure-continuation command above for nominal labels ``0``, ``0.5``, ``1.0``,
+and the refined ``1.25`` point. If the scan was interrupted, rerun the same
+command with ``--resume-existing`` so each accepted WOUT is reused as the next
+pressure-continuation seed.
+
 .. code-block:: bash
 
    python tools/diagnostics/render_freeb_beta_wout_panels.py \
-     --summary results/free_boundary_essos_coils_beta_scan_highres/summary.json \
+     --summary results/free_boundary_essos_coils_beta_scan_highres_attempt/summary.json \
      --backend direct \
      --max-actual-beta 2.05 \
      --title "LP-QA direct-coil free-boundary finite-beta scan (ns=101)" \
      --stem lpqa_direct_coil_beta_ns101_panel \
      --outdir /tmp/freeb_publication_panels
 
-or, for existing DIII-D WOUTs:
+For ad hoc existing DIII-D WOUTs, the renderer also accepts explicit files:
 
 .. code-block:: bash
 

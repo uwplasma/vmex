@@ -38,6 +38,14 @@ def _parser() -> argparse.ArgumentParser:
             "ptau-only bad-Jacobian control-path timing is captured in the summary JSON."
         ),
     )
+    p.add_argument(
+        "--include-timing-light",
+        action="store_true",
+        help=(
+            "Add direct-solve rows with VMEC_JAX_TIMING disabled. These rows measure production-like "
+            "wall time without synchronization from detailed timing probes."
+        ),
+    )
     p.add_argument("--backend-note", default="", help="Optional note copied into the summary JSON.")
     p.add_argument("--timeout-s", type=float, default=240.0, help="Per-child benchmark timeout.")
     return p
@@ -495,7 +503,37 @@ def _with_badjac_probe0_rows(specs: list[ChildSpec]) -> list[ChildSpec]:
     return rows
 
 
-def _child_specs(*, quick: bool, outdir: Path, backend: str, include_badjac_probe0: bool = False) -> list[ChildSpec]:
+def _with_timing_light_rows(specs: list[ChildSpec]) -> list[ChildSpec]:
+    rows: list[ChildSpec] = []
+    for label, out, args, env_overrides in specs:
+        rows.append((label, out, args, env_overrides))
+        if label != "direct_solve_jit_forces":
+            continue
+        light_label = f"{label}_timing_light"
+        light_out = out.with_name(f"{out.stem}_timing_light{out.suffix}")
+        rows.append(
+            (
+                light_label,
+                light_out,
+                list(args),
+                {
+                    **env_overrides,
+                    "VMEC_JAX_TIMING": "0",
+                    "VMEC_JAX_TIMING_DETAIL": "0",
+                },
+            )
+        )
+    return rows
+
+
+def _child_specs(
+    *,
+    quick: bool,
+    outdir: Path,
+    backend: str,
+    include_badjac_probe0: bool = False,
+    include_timing_light: bool = False,
+) -> list[ChildSpec]:
     suffix = f"_{backend}.json"
     if quick:
         specs: list[ChildSpec] = [
@@ -524,6 +562,8 @@ def _child_specs(*, quick: bool, outdir: Path, backend: str, include_badjac_prob
                 {},
             ),
         ]
+        if include_timing_light:
+            specs = _with_timing_light_rows(specs)
         return _with_badjac_probe0_rows(specs) if include_badjac_probe0 else specs
     specs = [
         (
@@ -551,6 +591,8 @@ def _child_specs(*, quick: bool, outdir: Path, backend: str, include_badjac_prob
             {},
         ),
     ]
+    if include_timing_light:
+        specs = _with_timing_light_rows(specs)
     return _with_badjac_probe0_rows(specs) if include_badjac_probe0 else specs
 
 
@@ -649,6 +691,7 @@ def main(argv: list[str] | None = None) -> int:
         outdir=outdir,
         backend="cpu",
         include_badjac_probe0=bool(args.include_badjac_probe0),
+        include_timing_light=bool(args.include_timing_light),
     ):
         rows.append(
             _run_child(
@@ -669,6 +712,7 @@ def main(argv: list[str] | None = None) -> int:
                 outdir=outdir,
                 backend="gpu",
                 include_badjac_probe0=bool(args.include_badjac_probe0),
+                include_timing_light=bool(args.include_timing_light),
             ):
                 rows.append(
                     _run_child(
@@ -700,6 +744,7 @@ def main(argv: list[str] | None = None) -> int:
         "quick": bool(args.quick),
         "include_gpu": bool(args.include_gpu),
         "include_badjac_probe0": bool(args.include_badjac_probe0),
+        "include_timing_light": bool(args.include_timing_light),
         "backend_note": str(args.backend_note),
         "gpu_probe": gpu_probe,
         "output_dir": outdir,

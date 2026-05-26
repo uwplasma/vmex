@@ -136,6 +136,20 @@ Steps taken:
     passing for current and one Fourier geometry coefficient, but the full
     nonlinear `run_free_boundary` iteration still materializes host state and
     remains the next exact-gradient blocker.
+83. Added `tools/diagnostics/run_diiid_mgrid_beta_scan.py` so the DIII-D
+    `ns=101` WOUT-panel evidence has a reproducible generation path instead of
+    only local `/tmp` WOUT paths.
+84. Clarified the free-boundary coil optimization docs so the strict LP-QA
+    direct-coil `ns=101` panel is the promoted phase-1 stellarator claim, while
+    the lower-resolution `ns=16,31` rows are explicitly provenance/continuation
+    evidence.
+85. Added a timing-light direct-coil benchmark row that disables
+    `VMEC_JAX_TIMING`/`VMEC_JAX_TIMING_DETAIL`, separating production-like wall
+    time from detailed synchronization-heavy timing probes.
+86. Re-ran a no-timing office GPU direct-coil solve probe. The tiny
+    two-iteration direct-coil warm solve remained slow (`~0.436 s`), so the
+    remaining GPU performance lane is real solver/control/preconditioner
+    dispatch overhead rather than only timing instrumentation overhead.
 
 Results obtained:
 
@@ -325,8 +339,8 @@ Results obtained:
 159. Added an opt-in direct-provider source-reuse/static-control flag and preserved the conservative no-stale-source default for lower-level tests where coil parameters change between NESTOR calls.
 160. Added an example-level direct-provider trial-resampling flag. LP-QA scans default to VMEC-style accepted-state vacuum during trial scoring; exact trial-boundary resampling remains available for phase-2 experiments.
 161. Ran a local ESSOS generated-mgrid LP-QA pressure-continuation scan with `ns_array=[16,31]`, `PHIEDGE=-0.025`, and nominal beta labels `0,0.5,1,2`. It promoted every stage and reached actual WOUT beta values `0.00%, 0.72%, 1.49%, 3.43%` with WOUT `fsqr+fsqz+fsql` from `1.0e-8` to `7.9e-7`.
-162. Direct-coil LP-QA remains unresolved at high beta: the direct Biot-Savart field matches the generated-mgrid field at the initial boundary to about `1e-3` relative RMS, and the first NESTOR `bsqvac` matches to about `1e-3` relative RMS, but the exact direct-provider nonlinear free-boundary iteration still loses convergence.
-163. Updated README/docs to document pressure continuation, the promoted LP-QA generated-mgrid result, and the direct-coil LP-QA phase-2 limitation without claiming a completed direct high-beta stellarator solve.
+162. Direct-coil LP-QA was initially unresolved at high beta: the direct Biot-Savart field matched the generated-mgrid field at the initial boundary to about `1e-3` relative RMS, and the first NESTOR `bsqvac` matched to about `1e-3` relative RMS, but the exact direct-provider nonlinear free-boundary iteration lost convergence before the safe preconditioner policy and pressure-continuation repair.
+163. Updated README/docs to document pressure continuation, the promoted LP-QA generated-mgrid provenance result, and the remaining direct-coil phase-2 limitations without claiming a full nonlinear exact-adjoint path.
 
 Best next steps:
 
@@ -1174,7 +1188,8 @@ Overall branch completion:                   99.6%
 ## Immediate Next Steps
 
 1. Wait for CI on the final pushed commits.
-2. Mark PR #17 ready when required checks are green.
+2. Keep PR #18 open for review when required checks are green; do not merge it
+   until maintainers explicitly approve the phase-1 scope and phase-2 deferrals.
 3. Re-run CUDA performance probes on `office` once SSH is reachable.
 4. Defer complete-loop free-boundary exact adjoints and full Boozer/QS coil-only optimization claims to the next phase after the accepted-state replay validation is replaced by a validated nonlinear-loop custom adjoint.
 5. Profile and reduce cold exact tape build/solve and initial tangent construction on GPU; convert benchmark JSON summaries into documentation plots.
