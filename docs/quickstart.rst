@@ -9,9 +9,10 @@ Run the minimal showcase (recommended)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The simplest way to get started is the axisymmetric showcase. It runs a small
-suite of bundled inputs, writes a ``wout_*.nc`` for each, produces plots, and
-prints a parity summary against bundled VMEC2000 reference ``wout`` files.
-If you have a fresh clone, fetch the optional large assets first::
+suite of input decks, writes a ``wout_*.nc`` for each, and produces plots.  The
+optional parity summary uses released VMEC2000 reference ``wout`` fixtures that
+are intentionally not tracked in git.  Fetch them first when you want CI-style
+validation rather than just generating fresh outputs from the inputs::
 
   python tools/fetch_assets.py --list
   python tools/fetch_assets.py
@@ -36,7 +37,7 @@ Run the test suite::
 
   pytest -q
 
-Run the full test suite (requires netCDF assets)::
+Run the full test suite (requires released netCDF assets)::
 
   python tools/fetch_assets.py
   RUN_FULL=1 pytest -q
@@ -120,7 +121,9 @@ End-to-end solve snapshot
 -------------------------
 
 To run a short fixed-boundary solve and compare a few end-to-end outputs against
-bundled references::
+released references, fetch the optional WOUT fixtures first::
+
+  python tools/fetch_assets.py --bundle wout-fixtures
 
   python tools/diagnostics/end_to_end_solve_parity_summary.py --use-input-niter --fast
 
@@ -130,7 +133,7 @@ External VMEC2000 run (optional)
 --------------------------------
 
 If you have the VMEC2000 Python extension installed (``vmec`` + ``mpi4py`` +
-``netCDF4``), you can run VMEC2000 on an input and compare outputs to bundled
+``netCDF4``), you can run VMEC2000 on an input and compare outputs to released
 references::
 
   python tools/diagnostics/external_vmec_driver_compare.py --case circular_tokamak

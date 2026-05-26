@@ -62,10 +62,12 @@ Editable install (recommended for development)::
 Optional validation assets
 --------------------------
 
-Large VMEC reference ``wout`` files and full-size free-boundary ``mgrid`` files
-are release assets rather than tracked git blobs.  A fresh clone is enough for
-the fast tests and the small bundled examples.  Fetch the optional large bundle
-only when running full physics/parity gates::
+Generated VMEC reference ``wout`` fixtures and full-size free-boundary
+``mgrid`` files are release assets rather than tracked git blobs.  A fresh
+clone is enough to run the input decks and small bundled examples; the example
+``wout_*.nc`` files are generated on demand.  Fetch the optional released
+assets only when running full physics/parity gates or regenerating docs panels
+that consume stored WOUTs::
 
   python tools/fetch_assets.py --list
   python tools/fetch_assets.py

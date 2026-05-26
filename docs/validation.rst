@@ -1,8 +1,10 @@
 Validation and parity with VMEC2000
 ====================================
 
-``vmec_jax`` uses a layered validation matrix.  Required CI validates against
-bundled VMEC2000-produced ``wout`` references, no-solve profile/current gates,
+``vmec_jax`` uses a layered validation matrix.  Required CI fetches released
+VMEC2000-produced ``wout`` fixtures before the parity gates, while a fresh git
+clone keeps only the small input decks needed to generate new ``wout`` files.
+The validation matrix includes no-solve profile/current gates,
 convergence-only end-to-end gates, and focused physics regressions.  Direct
 comparisons against a local VMEC2000 Fortran executable are opt-in
 ``vmec2000`` tests because they require an external executable and are not part
@@ -16,11 +18,11 @@ implementation error).
 Reference data
 --------------
 
-Eleven bundled ``wout`` reference files are pre-computed with VMEC2000 and shipped
-in ``examples/data/``.  A stable subset is used for strict field-by-field
+Eleven ``wout`` reference files are pre-computed with VMEC2000 and shipped as
+release assets restored by ``python tools/fetch_assets.py``.  A stable subset is used for strict field-by-field
 end-to-end parity in ``tests/test_wout_comprehensive_parity.py``; the remaining
 references are covered by no-solve profile/current gates, convergence-only
-end-to-end gates, or optional refreshed-reference lanes until their bundled
+end-to-end gates, or optional refreshed-reference lanes until their released
 references are promoted.
 
 +------------------------------------------+----------------------------------+--------------+---------+
@@ -49,8 +51,8 @@ references are promoted.
 | ``basic_non_stellsym_simsopt``           | lasym=True SIMSOPT reference     | True         | fixed   |
 +------------------------------------------+----------------------------------+--------------+---------+
 
-Large reference wouts and mgrid files not shipped with the git repo can be
-fetched once::
+Reference WOUT fixtures and large mgrid files not shipped with the git repo can
+be fetched once::
 
   python tools/fetch_assets.py
 
@@ -72,7 +74,7 @@ Required CI includes a no-executable residual parity gate:
      tests/test_vmec2000_exec_threed1.py \
      tests/test_parity_sweep_manifest_thresholds.py
 
-``tests/test_residue_getfsq_parity.py`` reads small bundled VMEC2000 ``wout``
+``tests/test_residue_getfsq_parity.py`` reads released VMEC2000 ``wout``
 files, reconstructs the solved state, recomputes the
 ``bcovar -> forces -> tomnsps -> getfsq`` scalar-residual path, and compares
 ``fsqr``, ``fsqz``, and ``fsql`` to the VMEC2000-stored values.  It currently
@@ -82,7 +84,7 @@ keeps the executable trace parser covered with a bundled ``threed1`` fixture
 when ``xvmec2000`` is absent from CI.
 
 ``tests/test_wout_profiles_currents_bundled_parity.py`` is a second required
-no-solve wout-field gate.  It checks converged bundled equilibria directly:
+no-solve wout-field gate.  It checks converged released equilibria directly:
 ``phipf`` and ``phi`` follow the input flux profile and VMEC half-mesh
 integration, finite-beta ``pres/presf`` follow the VMEC radial stencil,
 ``iotaf`` follows the ``iotas`` full-to-half mesh convention, and the stored
@@ -92,7 +94,7 @@ axisymmetric finite-beta, non-axisymmetric current-driven, 3D finite-beta, and
 ``lasym=True`` solved wouts.
 
 ``tests/test_converged_wout_matrix_parity.py`` keeps a CI-safe converged-wout
-matrix over bundled VMEC2000 outputs.  The representative fixtures cover
+matrix over released VMEC2000 outputs.  The representative fixtures cover
 fixed-boundary and free-boundary outputs, axisymmetric and non-axisymmetric
 geometry, ``lasym=False`` and ``lasym=True`` channels, and single-grid plus
 multigrid input decks.  The gate checks metadata consistency against the
@@ -572,8 +574,9 @@ trace path.
 Optional VMEC2000 executable checks
 -----------------------------------
 
-The default required test suite does not need a local VMEC2000 build.  It uses
-bundled ``wout`` references and should be run during routine development with:
+The default required test suite does not need a local VMEC2000 build.  CI
+fetches released ``wout`` references for parity rows; local runs without the
+bundle skip those optional fixture tests cleanly:
 
 .. code-block:: bash
 

@@ -42,9 +42,11 @@ cd vmec_jax
 pip install -e .
 ```
 
-The repository intentionally keeps large optional validation assets out of git.
-If you need the full reference WOUT/mgrid bundle after cloning, download it
-with:
+The repository intentionally keeps generated WOUT fixtures and large optional
+validation assets out of git.  A source clone contains the VMEC input decks and
+small magnetic grids needed for ordinary examples; run the inputs to generate
+new `wout_*.nc` files.  If you need the full released WOUT/reference bundle for
+CI-style validation or docs regeneration, download it with:
 
 ```bash
 python tools/fetch_assets.py --list
@@ -60,7 +62,7 @@ curl -L -O https://raw.githubusercontent.com/uwplasma/vmec_jax/main/examples/dat
 vmec_jax input.nfp4_QH_warm_start
 ```
 
-Plot any `wout_*.nc` file:
+Plot the `wout_*.nc` file produced by that run:
 
 ```bash
 vmec_jax --plot wout_nfp4_QH_warm_start.nc

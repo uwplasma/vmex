@@ -20,9 +20,10 @@ pipeline to JAX:
 - parity-first development against VMEC2000 ``wout_*.nc`` reference outputs.
 
 The recommended end-to-end entrypoint is the axisymmetric showcase script:
-``examples/showcase_axisym_input_to_wout.py``. It runs bundled inputs, writes
-new ``wout_*.nc`` files, produces VMEC-style plots, and prints a small parity
-summary against bundled VMEC2000 reference ``wout`` files.
+``examples/showcase_axisym_input_to_wout.py``. It runs input decks, writes new
+``wout_*.nc`` files, and produces VMEC-style plots.  Parity summaries use
+released VMEC2000 reference ``wout`` fixtures restored with
+``tools/fetch_assets.py`` rather than large tracked blobs.
 
 .. figure:: _static/figures/showcase_shaped_tokamak_pressure_surfaces.png
    :alt: Nested flux surfaces (phi=0)
@@ -118,7 +119,7 @@ The only extras are development/documentation conveniences such as ``docs`` and
 Regression-first development
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Bundled VMEC2000 ``wout_*.nc`` files are treated as ground truth for:
+Released VMEC2000 ``wout_*.nc`` fixtures are treated as ground truth for:
 
 - Fourier mode ordering and normalization,
 - Nyquist ``sqrt(g)`` and B-field coefficients,

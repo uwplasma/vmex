@@ -53,8 +53,8 @@ proves the behavior under review.
        low-cost physics guards.
      - Required on Python 3.10, 3.11, and 3.12.  Python 3.11 also owns the
        line-coverage gate.
-   * - Required bundled parity
-     - Explicit required test-file selections using bundled fixtures and no
+   * - Required fetched-fixture parity
+     - Explicit required test-file selections using released WOUT fixtures and no
        external executables.
      - VMEC2000 residual reconstruction, converged ``wout`` profile/current
        invariants, parser compatibility, and bounded matrix physics gates.
@@ -66,7 +66,7 @@ proves the behavior under review.
      - Larger fixed/free-boundary references, multigrid cases, convergence-only
        representatives, and broader parity matrices.
      - Manual or scheduled/nightly unless a case is reduced enough to promote
-       into required bundled parity.
+       into required fetched-fixture parity.
    * - External VMEC2000
      - ``vmec2000`` marker plus ``VMEC2000_EXEC`` and
        ``VMEC2000_INTEGRATION=1``.
@@ -108,7 +108,7 @@ generated artifacts.
        small workflow assembly.  These tests should stay deterministic and
        dependency-light.
    * - Required CI
-     - Fast suite plus the coverage and bundled-parity commands below.
+     - Fast suite plus the coverage and fetched-fixture parity commands below.
      - Protects importability, package build, fast docs, line coverage, and
        no-executable VMEC2000 parity fixtures.  CI should fail on real numerical
        drift without requiring local VMEC2000, SIMSOPT, GPUs, or large assets.
@@ -223,12 +223,12 @@ the recommended local escalation path.
      - ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000 and not simsopt"``
      - Before pushing ordinary code or docs-adjacent changes that touch tested
        APIs.
-   * - Bundled wout parity gate
-     - ``JAX_ENABLE_X64=1 pytest -q tests/test_residue_getfsq_parity.py tests/test_wout_profiles_currents_bundled_parity.py tests/test_physics_parity_helper_gates.py tests/test_vmec2000_exec_threed1.py``
+   * - Released WOUT parity gate
+     - ``python tools/fetch_assets.py --bundle wout-fixtures && JAX_ENABLE_X64=1 pytest -q tests/test_residue_getfsq_parity.py tests/test_wout_profiles_currents_bundled_parity.py tests/test_physics_parity_helper_gates.py tests/test_vmec2000_exec_threed1.py``
      - Required no-executable physics gate: recompute VMEC2000 ``fsqr/fsqz/fsql``,
        verify flux/pressure/iota/current wout-field invariants, protect small
        Mercier/JXBFORCE/Boozer helper identities, and cover the VMEC2000 trace
-       parser against bundled fixtures.
+       parser against released fixtures.
    * - Parity manifest guard
      - ``pytest -q tests/test_parity_sweep_manifest_thresholds.py``
      - Cheap schema and fixture-path check for the fixed/free-boundary parity
@@ -370,7 +370,7 @@ Core solve gates:
 VMEC2000 parity gates:
 
 - Required CI includes ``tests/test_residue_getfsq_parity.py``.  This reads
-  small bundled VMEC2000 ``wout`` files, reconstructs the equilibrium state,
+  released VMEC2000 ``wout`` fixtures, reconstructs the equilibrium state,
   recomputes the scalar residual pipeline
   ``bcovar -> forces -> tomnsps -> getfsq``, and compares ``fsqr/fsqz/fsql``
   to the values stored by VMEC2000.  It is not a smoke test: it fails on force
@@ -380,14 +380,14 @@ VMEC2000 parity gates:
   ``threed1`` parser used by executable-backed diagnostics is covered by a
   bundled fixture even when ``xvmec2000`` is unavailable.
 - Required CI includes ``tests/test_wout_profiles_currents_bundled_parity.py``.
-  This no-solve gate reads converged bundled ``wout`` fixtures and verifies
+  This no-solve gate reads converged released ``wout`` fixtures and verifies
   input flux profiles, half-mesh ``phi`` integration, finite-beta
   ``pres/presf`` staggering, ``iotas -> iotaf`` radial smoothing, and the
   VMEC surface-averaged Ampere relation
   ``jcuru = -d(bvco)/ds / mu0`` and ``jcurv = d(buco)/ds / mu0`` on interior
   surfaces.
 - Required CI includes ``tests/test_physics_parity_helper_gates.py``.  This
-  small no-solve helper gate uses bundled converged ``wout`` fixtures to
+  small no-solve helper gate uses released converged ``wout`` fixtures to
   protect VMEC Mercier decomposition, JXBFORCE ``bdotgradv`` normalization,
   magnetic-well endpoint extrapolation, Boozer spectral handoff conventions,
   the edge-current ``ctor`` scalar, and the normalized ``equif`` radial
@@ -406,7 +406,7 @@ SIMSOPT parity gates:
 
 - SIMSOPT checks are always optional: tests are marked ``simsopt`` and require
   ``RUN_SIMSOPT_VALIDATION=1`` in addition to the importable SIMSOPT package.
-- Use bundled converged ``wout`` fixtures rather than launching external
+- Use released converged ``wout`` fixtures rather than launching external
   solvers.  The current gate compares the VMEC-only QS formula, the
   state-derived QS diagnostic path reconstructed from ``wout``, and Redl
   bootstrap mismatch normalization against SIMSOPT.

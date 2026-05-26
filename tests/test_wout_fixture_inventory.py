@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import subprocess
 from dataclasses import dataclass
+import importlib.util
 from pathlib import Path
+import sys
 
 import numpy as np
 import pytest
@@ -51,12 +53,32 @@ def _tracked_wout_fixtures(repo: Path) -> set[str]:
     return {line.strip() for line in output.splitlines() if line.strip()}
 
 
-def test_every_tracked_bundled_reference_wout_is_declared() -> None:
+def _load_fetch_assets_module(repo: Path):
+    spec = importlib.util.spec_from_file_location("fetch_assets", repo / "tools" / "fetch_assets.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_wout_fixtures_are_not_tracked_in_git() -> None:
     repo = _repo_root()
     discovered = _tracked_wout_fixtures(repo)
-    declared = {case.wout_rel for case in REQUIRED_WOUT_FIXTURES}
 
-    assert discovered == declared
+    assert discovered == set()
+
+
+def test_wout_fixture_asset_manifest_covers_required_cases() -> None:
+    repo = _repo_root()
+    module = _load_fetch_assets_module(repo)
+    fixture_bundle = module.BUNDLES_BY_NAME["wout-fixtures"]
+    declared = {case.wout_rel for case in REQUIRED_WOUT_FIXTURES}
+    common_paths = set(fixture_bundle.common_paths)
+
+    assert "examples/data/wout_*.nc" in common_paths
+    assert "examples_single_grid/data/wout_*.nc" in common_paths
+    assert declared
 
 
 @pytest.mark.parametrize("case", REQUIRED_WOUT_FIXTURES, ids=lambda case: Path(case.wout_rel).stem)
