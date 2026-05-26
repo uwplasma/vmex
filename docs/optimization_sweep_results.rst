@@ -45,8 +45,9 @@ The split between README and docs is deliberate:
   section.  Those rows are distinct from the pending common-minimal-seed QI
   regeneration matrix.
 
-Every published full-sweep result should provide these assets under
-``docs/_static/figures``:
+Every published full-sweep result should provide these assets in the sweep
+output tree or as GitHub release assets.  Only compact, reviewed,
+documentation-critical artifacts should be copied into ``docs/_static/figures``:
 
 - ``qs_ess_summary_all.csv`` and ``qs_ess_summary_all.json`` with all row
   diagnostics, including wall time, backend/device metadata, success/crash
@@ -68,7 +69,7 @@ Every published full-sweep result should provide these assets under
 
 The checked-in source tree currently contains the compact README panels, the
 QI case-coverage snapshot, the minimal-seed showcase objective/state panels, the
-constrained-QI status panel, and CSV/JSON summary files.
+constrained-QI status panel, and compact CSV/JSON summary files.
 ``qs_ess_summary_all.csv`` is a heterogeneous partial/archive snapshot: current
 CPU README QA/QH/QP rows plus one failed/partial constrained-QI status row,
 older GPU/LASYM rows with incomplete target metadata, and no checked-in
@@ -76,8 +77,8 @@ older GPU/LASYM rows with incomplete target metadata, and no checked-in
 ``max_mode=3`` continuation status row.  It does not currently contain the full
 objective-history panels, initial/final state atlases, summary-table images, or
 publication-panel composites.
-Those assets must be regenerated or copied into ``docs/_static/figures`` before
-claiming a complete full-sweep docs publication.
+Those assets must be regenerated locally, attached to a release, or compacted
+and explicitly reviewed before claiming a complete full-sweep docs publication.
 
 Individual Examples
 -------------------
@@ -604,8 +605,10 @@ The objective-history figures are generated artifacts and are not part of the
 current checked-in snapshot.  Regenerate them with
 ``PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py``
 after producing or fetching the sweep results.  For a complete docs
-publication, copy the reviewed outputs into ``docs/_static/figures`` and keep
-the CSV/JSON summaries in sync.  The renderer writes:
+publication, keep bulky reviewed outputs in the local result tree or attach
+them to a GitHub release; promote only compact documentation-critical assets to
+``docs/_static/figures`` and keep the CSV/JSON summaries in sync.  The renderer
+writes:
 
 - ``objective_panel_all_policies.png/.pdf``
 - ``objective_panel_cpu_policies.png/.pdf``

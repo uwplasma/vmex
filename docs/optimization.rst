@@ -884,11 +884,10 @@ the default research-grade policy for QA.
 
 The large all-policy panels, atlases, summary-table images, and PDF snapshots
 are generated assets.  Recreate them from the sweep results with the commands
-below.  The README keeps only the four compact best-result PNGs; full
-publication sweeps belong in :doc:`optimization_sweep_results` with reviewed
-objective-history panels, initial/final 3D and VMEC-angle ``|B|``
-line-contour atlases, and wall-time/status summaries copied into
-``docs/_static/figures``.
+below.  The README keeps only the compact best-result PNGs; full publication
+sweeps belong in :doc:`optimization_sweep_results` as local result trees or
+release assets.  Copy only compact, reviewed, documentation-critical artifacts
+into ``docs/_static/figures``.
 
 .. code-block:: bash
 
@@ -980,11 +979,12 @@ and ROCm and fail if ROCm is not installed.
 
 The renderer writes these report artifacts under
 ``examples/optimization/results/qs_ess_sweep``.  For ordinary README updates,
-copy only the four compact best-row panels into ``docs/_static/figures``.  For
-a full-sweep docs publication, also copy the reviewed objective panels,
-initial/final state atlases, wall-time summary-table figures, PDF snapshots,
-and synchronized CSV/JSON summaries into ``docs/_static/figures`` and document
-them in :doc:`optimization_sweep_results`.
+copy only compact best-row panels into ``docs/_static/figures``.  For a
+full-sweep docs publication, attach bulky objective panels, initial/final state
+atlases, wall-time summary-table figures, and PDF snapshots to a release unless
+they are compact enough to pass the repository size gate and have been reviewed
+as documentation-critical.  Keep synchronized CSV/JSON summaries compact and
+document the provenance in :doc:`optimization_sweep_results`.
 
 Initial and final equilibria for CPU/GPU continuation/direct cases are
 rendered separately so the 3D surfaces and boundary-field colorbars remain
