@@ -1179,27 +1179,57 @@ def test_mirror_and_elongation_helpers_are_generic_unless_qi_field_is_requested(
     options = workflow.QuasiIsodynamicOptions(surfaces=np.asarray([0.5]))
 
     generic_mirror = workflow.MirrorRatio(threshold=0.3, surfaces=(0.5, 1.0))
+    vmec_mirror = workflow.VMECMirrorRatio(threshold=0.3, surfaces=(0.5, 1.0))
     generic_elongation = workflow.MaxElongation(threshold=5.0, qi_options=options)
     shared_qi_mirror = workflow.MirrorRatio(threshold=0.3, qi_options=options)
 
     assert generic_mirror.requires_qi_field is False
+    assert vmec_mirror.requires_qi_field is False
     assert generic_elongation.requires_qi_field is False
     assert shared_qi_mirror.requires_qi_field is True
 
     generic_problem = workflow.LeastSquaresProblem.from_tuples(
         [
             (generic_mirror.J, 0.0, 1.0),
+            (vmec_mirror.J, 0.0, 1.0),
             (generic_elongation.J, 0.0, 1.0),
         ]
     )
     assert generic_problem.is_qi is False
     assert generic_problem.qi_options is None
-    assert generic_problem.objective_names == ("mirror_ratio", "max_elongation")
+    assert generic_problem.objective_names == ("mirror_ratio", "mirror_ratio", "max_elongation")
 
     qi_problem = workflow.LeastSquaresProblem.from_tuples([(shared_qi_mirror.J, 0.0, 1.0)])
     assert qi_problem.is_qi is True
     assert qi_problem.qi_options is options
     assert qi_problem.qi_objective_names == ("mirror_ratio",)
+
+
+def test_vmec_mirror_ratio_uses_vmec_field_without_boozer(monkeypatch) -> None:
+    import vmec_jax.optimization_workflow as workflow
+
+    calls = []
+
+    def fake_b_cartesian_from_state(*args, **kwargs):
+        calls.append(kwargs["s_index"])
+        return np.asarray(
+            [
+                [[1.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
+                [[3.0, 0.0, 0.0], [4.0, 0.0, 0.0]],
+            ]
+        )
+
+    monkeypatch.setattr(workflow, "b_cartesian_from_state", fake_b_cartesian_from_state)
+    ctx = SimpleNamespace(static=SimpleNamespace(s=np.asarray([0.0, 0.5, 1.0])), indata=object(), signgs=1)
+    objective = workflow.VMECMirrorRatio(threshold=0.2, surfaces=(1.0,))
+
+    residual = objective.J(ctx, state=object())
+
+    np.testing.assert_allclose(np.asarray(residual), np.asarray([0.4]), rtol=1e-12, atol=1e-12)
+    assert calls == [2]
+    assert objective.total(ctx, state=object()) == pytest.approx(0.16)
+    with pytest.raises(ValueError, match="target=0"):
+        objective.to_objective_term(target=1.0, residual_weight=1.0)
 
 
 def test_qi_and_qs_object_wrappers_build_terms_without_solves(monkeypatch) -> None:
