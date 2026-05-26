@@ -10,7 +10,7 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-05-25 after dry-run optimization diagnostics, ESSOS adapter validation, VMEC2000 runtime-error classification, bounded AD-vs-FD NESTOR gradient checks, same-branch CPU/GPU benchmark-matrix reporting with non-JIT and JIT-force direct-solve rows, solve-loop timing capture for direct-coil benchmark rows, JIT-force defaults for direct-coil examples, accepted-boundary direct-coil replay AD-vs-FD promotion, free-boundary-aware fused strict-update support, a clarified complete-loop exact-adjoint promotion boundary, the first opt-in bad-Jacobian state-probe performance knob, a fused preconditioned-`fsq1` payload benchmark, a tightened optional VMEC2000 generated-`mgrid` trace gate, strict-update precompile coverage, source-checkout reproduction fixes for ESSOS beta-scan/figure commands, accepted-control payload batching, repeated local 95% fast coverage gates, final local CPU direct-coil performance evidence, and the latest `origin/main` docs/size-gate merges.
+Last updated: 2026-05-25 after dry-run optimization diagnostics, ESSOS adapter validation, VMEC2000 runtime-error classification, bounded AD-vs-FD NESTOR gradient checks, same-branch CPU/GPU benchmark-matrix reporting with non-JIT and JIT-force direct-solve rows, solve-loop timing capture for direct-coil benchmark rows, JIT-force defaults for direct-coil examples, accepted-boundary direct-coil replay AD-vs-FD promotion, free-boundary-aware fused strict-update support, a clarified complete-loop exact-adjoint promotion boundary, the first opt-in bad-Jacobian state-probe performance knob, a fused preconditioned-`fsq1` payload benchmark, a tightened optional VMEC2000 generated-`mgrid` trace gate, strict-update precompile coverage, source-checkout reproduction fixes for ESSOS beta-scan/figure commands, accepted-control payload batching, repeated local 95% fast coverage gates, final local/office CPU-GPU direct-coil performance evidence, and the latest `origin/main` docs/size-gate merges.
 
 Steps taken:
 
@@ -235,7 +235,7 @@ Results obtained:
 140. Source-checkout reproduction checks passed: both ESSOS free-boundary example scripts import cleanly with `--help`, the focused forward/optimization example tests report `9 passed, 1 xfailed`, and strict Sphinx builds the updated docs without warnings.
 141. Added an accepted-control payload batch for non-CPU, non-debug accepted rows. It computes `fsq1` and `ptau` min/max in one cached JIT payload and one host transfer while preserving CPU, debug, state-Jacobian, converged-row, and fallback semantics.
 142. Local CPU direct-coil benchmark after accepted-control batching reports cold/compile `1.34 s`, warm-min `0.0239 s`, active NESTOR sample `0.0520 s -> 0.00146 s`, final sample `5.8e-4 s`, and final solve `2.8e-3 s` on the tiny active case.
-143. The office CUDA recheck could not run because SSH to `office` timed out; this is an infrastructure block, not a local test or code failure. The last completed office matrix remains the 2026-05-25 JIT-force/default bad-Jacobian policy benchmark above.
+143. The first post-batching office CUDA recheck could not run because SSH to `office` timed out; this was an infrastructure block, not a local test or code failure. A later final office matrix did complete; see step 153.
 144. Added targeted coverage for real provider/physics/helper branches: mgrid pytree and VMEC-plane validation, direct-coil pytree/order-zero/error branches, JAX NESTOR operator guard/cache behavior, VMEC energy profile edge branches, multigrid cache fallbacks, source-version parsing, and CLI cleanup/error branches.
 145. Re-ran the full local fast gate with coverage: `2433 passed, 26 skipped, 112 deselected, 2 xfailed` in 8m43s, total coverage `95.00%`, satisfying `--cov-fail-under=95`.
 146. Merged the force-updated `origin/main` size-gate branch into the feature branch, keeping the free-boundary work while accepting current-main generated-asset hygiene (`outputs/...summary.json` deleted, asset-fetch tests restored).
@@ -245,6 +245,7 @@ Results obtained:
 150. Re-ran the focused post-merge lint/test batch after the latest merge: ruff passed and `48 passed in 19.20s`.
 151. Re-ran the full post-merge fast coverage gate: `2437 passed, 26 skipped, 112 deselected, 2 xfailed` in 8m28s, total coverage `95.00%`.
 152. Ran the final local CPU direct-coil benchmark matrix. The best quick row (`direct_solve_jit_forces_badjac_probe0`) reports cold/compile `1.354 s`, warm-min `0.0235 s`, active NESTOR sample `0.0515 s -> 0.00092 s`, final sample `4.6e-4 s`, and final solve `3.1e-3 s`.
+153. Ran the final office CPU/GPU direct-coil benchmark matrix on the pushed head. The GPU matrix completed, but the tiny warm direct solve remains CPU-favorable: best JIT-forces/probe0 row reports CPU warm-min `0.0776 s`, CUDA warm-min `0.248 s` (`3.20x` GPU/CPU). CUDA active NESTOR sampling is now `0.0050 s`, but remaining GPU overhead is mostly accepted-control `fsq1`, preconditioner, and update dispatch.
 
 Best next steps:
 
@@ -253,7 +254,7 @@ Best next steps:
 3. If CI remains green, mark PR #17 ready for review.
 4. Keep the opt-in JAX NESTOR driver path as validation-only until the accepted-solve compilation/dispatch cost is removed. The host bridge remains the production/default route.
 5. Keep coverage above 95% as new operator code is promoted from validation scaffolds into production paths.
-6. Re-run the CUDA benchmark on `office` when SSH is reachable; no additional local blocker remains for PR readiness.
+6. Keep GPU optimization as a documented phase-2 performance lane; the final office matrix is complete and confirms CPU is still faster on the tiny direct-solve benchmark.
 
 Need from user:
 
