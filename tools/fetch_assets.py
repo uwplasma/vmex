@@ -24,6 +24,15 @@ DEFAULT_URL = (
 )
 DEFAULT_SHA256 = "3344fc2401fffed240ee57ae741ec521594c592627c76dae203503f485e4c0d8"
 
+COMMON_ASSET_PATHS = (
+    "examples/data/mgrid_cth_like.nc",
+    "examples/data/mgrid_d3d_ef.nc",
+    "examples/data/wout_*_reference.nc",
+    "examples_single_grid/data/mgrid_cth_like.nc",
+    "examples_single_grid/data/mgrid_d3d_ef.nc",
+    "examples_single_grid/data/wout_*_reference.nc",
+)
+
 
 def _sha256(data: bytes) -> str:
     h = hashlib.sha256()

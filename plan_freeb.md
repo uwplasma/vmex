@@ -10,7 +10,7 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-05-25 after dry-run optimization diagnostics, ESSOS adapter validation, VMEC2000 runtime-error classification, bounded AD-vs-FD NESTOR gradient checks, same-branch CPU/GPU benchmark-matrix reporting with non-JIT and JIT-force direct-solve rows, solve-loop timing capture for direct-coil benchmark rows, JIT-force defaults for direct-coil examples, accepted-boundary direct-coil replay AD-vs-FD promotion, free-boundary-aware fused strict-update support, a clarified complete-loop exact-adjoint promotion boundary, the first opt-in bad-Jacobian state-probe performance knob, a fused preconditioned-`fsq1` payload benchmark, a tightened optional VMEC2000 generated-`mgrid` trace gate, strict-update precompile coverage, source-checkout reproduction fixes for ESSOS beta-scan/figure commands, accepted-control payload batching, and the local 95% fast coverage gate.
+Last updated: 2026-05-25 after dry-run optimization diagnostics, ESSOS adapter validation, VMEC2000 runtime-error classification, bounded AD-vs-FD NESTOR gradient checks, same-branch CPU/GPU benchmark-matrix reporting with non-JIT and JIT-force direct-solve rows, solve-loop timing capture for direct-coil benchmark rows, JIT-force defaults for direct-coil examples, accepted-boundary direct-coil replay AD-vs-FD promotion, free-boundary-aware fused strict-update support, a clarified complete-loop exact-adjoint promotion boundary, the first opt-in bad-Jacobian state-probe performance knob, a fused preconditioned-`fsq1` payload benchmark, a tightened optional VMEC2000 generated-`mgrid` trace gate, strict-update precompile coverage, source-checkout reproduction fixes for ESSOS beta-scan/figure commands, accepted-control payload batching, the local 95% fast coverage gate, and the `origin/main` size-gate merge.
 
 Steps taken:
 
@@ -238,6 +238,9 @@ Results obtained:
 143. The office CUDA recheck could not run because SSH to `office` timed out; this is an infrastructure block, not a local test or code failure. The last completed office matrix remains the 2026-05-25 JIT-force/default bad-Jacobian policy benchmark above.
 144. Added targeted coverage for real provider/physics/helper branches: mgrid pytree and VMEC-plane validation, direct-coil pytree/order-zero/error branches, JAX NESTOR operator guard/cache behavior, VMEC energy profile edge branches, multigrid cache fallbacks, source-version parsing, and CLI cleanup/error branches.
 145. Re-ran the full local fast gate with coverage: `2433 passed, 26 skipped, 112 deselected, 2 xfailed` in 8m43s, total coverage `95.00%`, satisfying `--cov-fail-under=95`.
+146. Merged the force-updated `origin/main` size-gate branch into the feature branch, keeping the free-boundary work while accepting current-main generated-asset hygiene (`outputs/...summary.json` deleted, asset-fetch tests restored).
+147. Fixed the merge regression in `tools/fetch_assets.py` by restoring `COMMON_ASSET_PATHS`.
+148. Re-ran the post-merge full local fast gate with coverage: `2437 passed, 26 skipped, 112 deselected, 2 xfailed` in 8m36s, total coverage `95.00%`.
 
 Best next steps:
 
