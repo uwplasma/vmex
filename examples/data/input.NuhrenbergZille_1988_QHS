@@ -64,3 +64,10 @@ ZBS(-1,2)=0.248  ! Delta_{2,-1}
 ZBS(-2,2)=-0.038 ! -Delta_{2,-2}
 
 /
+
+&BOOZ_XFORM_JAX
+  LBOOZ = F
+  MBOOZ = 32
+  NBOOZ = 32
+  BOOZ_SURFACES = 'all'
+/

@@ -216,7 +216,7 @@ def test_real_nfp3_raw_initial_wout_matches_input_boundary() -> None:
     mod._validate_case_initial_wout(nfp3)
 
 
-def test_nfp3_case_catalog_matches_checked_in_readme_metadata() -> None:
+def test_nfp3_case_catalog_uses_current_aspect5_policy_with_archived_metadata() -> None:
     cases_mod = _load_cases_module()
     artifact_dir = ROOT / "docs" / "_static" / "qi_readme_cases" / "nfp3_seed3127"
     history = json.loads((artifact_dir / "history.json").read_text())
@@ -226,10 +226,11 @@ def test_nfp3_case_catalog_matches_checked_in_readme_metadata() -> None:
 
     case = cases_mod.QI_CASES["nfp3_qi"]
 
-    assert case["target_aspect"] == pytest.approx(history["target_aspect"])
-    assert case["target_aspect"] == pytest.approx(diagnostics["target_aspect"])
+    assert history["target_aspect"] == pytest.approx(4.0)
+    assert diagnostics["target_aspect"] == pytest.approx(4.0)
     assert case["target_aspect"] == pytest.approx(cases_mod.SEED3127_REVIEWED_TARGET_ASPECT)
-    assert "aspect4" in str(case["output_dir"])
+    assert case["target_aspect"] == pytest.approx(cases_mod.DEFAULT_QI_TARGET_ASPECT)
+    assert "aspect5" in str(case["output_dir"])
 
 
 def test_real_nfp4_raw_initial_wout_matches_minimal_seed_and_final_differs() -> None:

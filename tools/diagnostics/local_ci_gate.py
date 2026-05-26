@@ -107,6 +107,7 @@ def _stages(cli_outdir: Path) -> tuple[Stage, ...]:
                 ),
             ),
         ),
+        Stage("fetch-assets", (_python("tools/fetch_assets.py"),)),
         Stage(
             "fast-pytest-coverage",
             (
@@ -123,7 +124,6 @@ def _stages(cli_outdir: Path) -> tuple[Stage, ...]:
             ),
             env={"JAX_ENABLE_X64": "1"},
         ),
-        Stage("fetch-assets", (_python("tools/fetch_assets.py"),)),
         Stage(
             "physics-smoke",
             (("pytest", "-q", *PHYSICS_SMOKE_TESTS),),

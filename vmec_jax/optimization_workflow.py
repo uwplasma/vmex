@@ -49,6 +49,7 @@ from .quasi_isodynamic import (
     lgradb_penalty_from_state,
     max_elongation_penalty_from_state,
     mirror_ratio_penalty_from_boozer_output,
+    mirror_ratio_penalty_from_state,
     quasi_isodynamic_residual_from_state,
 )
 from .quasisymmetry import quasisymmetry_ratio_residual_from_state
@@ -110,6 +111,7 @@ class ObjectiveTerm:
     total: Callable[[StageContext, object], object] | None = None
     track_iota: bool = False
     metadata: dict[str, object] = field(default_factory=dict)
+    prepare: Callable[[StageContext], "ObjectiveTerm"] | None = None
 
     def residual(self, ctx: StageContext, state) -> object:
         value = _as_vector(self.evaluate(ctx, state))
@@ -119,6 +121,11 @@ class ObjectiveTerm:
         else:
             target = jnp.ravel(target)
         return float(self.weight) * (value - target)
+
+    def bind(self, ctx: StageContext) -> "ObjectiveTerm":
+        """Return a stage-specialized term when the objective has static setup."""
+
+        return self if self.prepare is None else self.prepare(ctx)
 
 
 @dataclass(frozen=True)
@@ -868,15 +875,17 @@ class QuasiIsodynamicResidualCeiling:
 
 
 class MirrorRatio:
-    """Maximum mirror-ratio penalty object for QI solves."""
+    """Maximum mirror-ratio penalty object for solved VMEC states."""
 
     name = "mirror_ratio"
-    requires_qi_field = True
 
     def __init__(
         self,
         *,
         threshold: float,
+        surfaces=(1.0,),
+        mboz: int = 18,
+        nboz: int = 18,
         ntheta: int = 96,
         nphi: int = 96,
         surface_index: int | None = None,
@@ -884,9 +893,13 @@ class MirrorRatio:
         smooth_extrema: float = 0.0,
         smooth_penalty: float = 0.0,
         normalize_surfaces: bool = True,
+        jit_booz: bool = True,
         qi_options: QuasiIsodynamicOptions | None = None,
     ):
         self.threshold = float(threshold)
+        self.surfaces = tuple(float(value) for value in _as_sequence(surfaces))
+        self.mboz = int(mboz)
+        self.nboz = int(nboz)
         self.ntheta = int(ntheta)
         self.nphi = int(nphi)
         self.surface_index = None if surface_index is None else int(surface_index)
@@ -894,10 +907,176 @@ class MirrorRatio:
         self.smooth_extrema = float(smooth_extrema)
         self.smooth_penalty = float(smooth_penalty)
         self.normalize_surfaces = bool(normalize_surfaces)
+        self.jit_booz = bool(jit_booz)
         self.qi_options = qi_options
 
-    def J(self, _ctx: StageContext, _state):
-        raise RuntimeError("MirrorRatio must be evaluated inside a QI solve.")
+    @property
+    def requires_qi_field(self) -> bool:
+        """Reuse a shared QI Boozer field only when explicitly requested."""
+
+        return self.qi_options is not None
+
+    def _selected_surfaces_and_weights(self) -> tuple[tuple[float, ...], list[float] | None]:
+        surfaces = self.surfaces
+        if not surfaces:
+            raise ValueError("MirrorRatio surfaces must contain at least one surface.")
+        if self.surface_index is not None:
+            idx = int(self.surface_index)
+            if idx < 0:
+                idx += len(surfaces)
+            if idx < 0 or idx >= len(surfaces):
+                raise IndexError(
+                    f"surface_index {self.surface_index} is outside MirrorRatio surface range 0..{len(surfaces) - 1}"
+                )
+            return (surfaces[idx],), None
+        if bool(self.normalize_surfaces):
+            return surfaces, [1.0 / float(max(len(surfaces), 1))] * len(surfaces)
+        return surfaces, None
+
+    def _prepare_boozer_constants(self, ctx: StageContext):
+        try:
+            from booz_xform_jax import prepare_booz_xform_constants
+        except Exception as exc:  # pragma: no cover - optional dependency import
+            raise ImportError(
+                "MirrorRatio requires booz_xform_jax. Install it with `pip install booz_xform_jax`."
+            ) from exc
+
+        cfg = ctx.static.cfg
+        main_modes = vmec_mode_table(int(cfg.mpol), int(cfg.ntor))
+        nyq_modes = nyquist_mode_table_from_grid(
+            mpol=int(cfg.mpol),
+            ntor=int(cfg.ntor),
+            ntheta=int(cfg.ntheta),
+            nzeta=int(cfg.nzeta),
+        )
+        return prepare_booz_xform_constants(
+            nfp=int(cfg.nfp),
+            mboz=self.mboz,
+            nboz=self.nboz,
+            asym=bool(cfg.lasym),
+            xm=np.asarray(main_modes.m, dtype=np.int32),
+            xn=np.asarray(main_modes.n * int(cfg.nfp), dtype=np.int32),
+            xm_nyq=np.asarray(nyq_modes.m, dtype=np.int32),
+            xn_nyq=np.asarray(nyq_modes.n * int(cfg.nfp), dtype=np.int32),
+        )
+
+    def _evaluate_state(self, ctx: StageContext, state, *, booz_constants=None, booz_grids=None):
+        surfaces, weights = self._selected_surfaces_and_weights()
+        return mirror_ratio_penalty_from_state(
+            state=state,
+            static=ctx.static,
+            indata=ctx.indata,
+            signgs=ctx.signgs,
+            surfaces=surfaces,
+            weights=weights,
+            mboz=self.mboz,
+            nboz=self.nboz,
+            ntheta=self.ntheta,
+            nphi=self.nphi,
+            phimin=self.phimin,
+            smooth_extrema=self.smooth_extrema,
+            smooth_penalty=self.smooth_penalty,
+            flux_local=ctx.flux,
+            prof_local={"pressure": ctx.pressure},
+            pressure_local=ctx.pressure,
+            jit_booz=self.jit_booz,
+            booz_constants=booz_constants,
+            booz_grids=booz_grids,
+        )
+
+    def J(self, ctx: StageContext, state):
+        if self.qi_options is not None:
+            raise RuntimeError("MirrorRatio with qi_options must be evaluated inside a QI solve.")
+        return self._evaluate_state(ctx, state)["residuals1d"]
+
+    def total(self, ctx: StageContext, state):
+        if self.qi_options is not None:
+            raise RuntimeError("MirrorRatio with qi_options must be evaluated inside a QI solve.")
+        return self._evaluate_state(ctx, state)["total"]
+
+    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        if not _target_is_zero(target):
+            raise ValueError("MirrorRatio is an upper-bound penalty and requires target=0.")
+
+        def _prepare(ctx: StageContext):
+            booz_constants, booz_grids = self._prepare_boozer_constants(ctx)
+
+            def _evaluate(ctx_p: StageContext, state):
+                return self._evaluate_state(
+                    ctx_p,
+                    state,
+                    booz_constants=booz_constants,
+                    booz_grids=booz_grids,
+                )["residuals1d"]
+
+            def _total(ctx_p: StageContext, state):
+                return self._evaluate_state(
+                    ctx_p,
+                    state,
+                    booz_constants=booz_constants,
+                    booz_grids=booz_grids,
+                )["total"]
+
+            return ObjectiveTerm(
+                self.name,
+                _evaluate,
+                target=0.0,
+                weight=residual_weight,
+                total=lambda ctx_p, state: float(residual_weight) ** 2 * _total(ctx_p, state),
+            )
+
+        return ObjectiveTerm(
+            self.name,
+            self.J,
+            target=0.0,
+            weight=residual_weight,
+            total=lambda ctx, state: float(residual_weight) ** 2 * self.total(ctx, state),
+            prepare=_prepare,
+        )
+
+    def to_constraint_term(self) -> ObjectiveTerm:
+        def _evaluate(ctx: StageContext, state, *, booz_constants=None, booz_grids=None):
+            surfaces, weights = self._selected_surfaces_and_weights()
+            mirror = mirror_ratio_penalty_from_state(
+                state=state,
+                static=ctx.static,
+                indata=ctx.indata,
+                signgs=ctx.signgs,
+                surfaces=surfaces,
+                weights=weights,
+                mboz=self.mboz,
+                nboz=self.nboz,
+                ntheta=self.ntheta,
+                nphi=self.nphi,
+                phimin=self.phimin,
+                smooth_extrema=self.smooth_extrema,
+                smooth_penalty=0.0,
+                flux_local=ctx.flux,
+                prof_local={"pressure": ctx.pressure},
+                pressure_local=ctx.pressure,
+                jit_booz=self.jit_booz,
+                booz_constants=booz_constants,
+                booz_grids=booz_grids,
+            )
+            residuals = jnp.asarray(mirror["mirror_ratio"], dtype=jnp.float64) - float(self.threshold)
+            if weights is not None:
+                residuals = residuals * jnp.sqrt(jnp.asarray(weights, dtype=jnp.float64))
+            return residuals
+
+        def _prepare(ctx: StageContext):
+            booz_constants, booz_grids = self._prepare_boozer_constants(ctx)
+
+            def _evaluate_prepared(ctx_p: StageContext, state):
+                return _evaluate(
+                    ctx_p,
+                    state,
+                    booz_constants=booz_constants,
+                    booz_grids=booz_grids,
+                )
+
+            return ObjectiveTerm(f"{self.name}_constraint", _evaluate_prepared, target=0.0, weight=1.0)
+
+        return ObjectiveTerm(f"{self.name}_constraint", _evaluate, target=0.0, weight=1.0, prepare=_prepare)
 
     def to_qi_term(self, residual_weight: float) -> QIObjectiveTerm:
         return qi_mirror_ratio_objective(
@@ -969,10 +1148,9 @@ class BoozerBTarget:
 
 
 class MaxElongation:
-    """Maximum LCFS elongation penalty object for QI solves."""
+    """Maximum LCFS elongation penalty object for solved VMEC states."""
 
     name = "max_elongation"
-    requires_qi_field = True
 
     def __init__(
         self,
@@ -991,8 +1169,47 @@ class MaxElongation:
         self.smooth_penalty = float(smooth_penalty)
         self.qi_options = qi_options
 
-    def J(self, _ctx: StageContext, _state):
-        raise RuntimeError("MaxElongation must be evaluated inside a QI solve.")
+    @property
+    def requires_qi_field(self) -> bool:
+        # Elongation is a VMEC-boundary property, so it never needs the shared
+        # QI Boozer field.  ``qi_options`` is accepted only for source
+        # compatibility with older examples.
+        return False
+
+    def _evaluate_state(self, ctx: StageContext, state, *, smooth_penalty: float | None = None):
+        return max_elongation_penalty_from_state(
+            state=state,
+            static=ctx.static,
+            threshold=self.threshold,
+            ntheta=self.ntheta,
+            nphi=self.nphi,
+            smooth_extrema=self.smooth_extrema,
+            smooth_penalty=self.smooth_penalty if smooth_penalty is None else float(smooth_penalty),
+        )
+
+    def J(self, ctx: StageContext, state):
+        return self._evaluate_state(ctx, state)["residuals1d"]
+
+    def total(self, ctx: StageContext, state):
+        return self._evaluate_state(ctx, state)["total"]
+
+    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        if not _target_is_zero(target):
+            raise ValueError("MaxElongation is an upper-bound penalty and requires target=0.")
+        return ObjectiveTerm(
+            self.name,
+            self.J,
+            target=0.0,
+            weight=residual_weight,
+            total=lambda ctx, state: float(residual_weight) ** 2 * self.total(ctx, state),
+        )
+
+    def to_constraint_term(self) -> ObjectiveTerm:
+        def _evaluate(ctx: StageContext, state):
+            elongation = self._evaluate_state(ctx, state, smooth_penalty=0.0)
+            return jnp.asarray([elongation["max_elongation"] - float(self.threshold)], dtype=jnp.float64)
+
+        return ObjectiveTerm(f"{self.name}_constraint", _evaluate, target=0.0, weight=1.0)
 
     def to_qi_term(self, residual_weight: float) -> QIObjectiveTerm:
         return qi_max_elongation_objective(
@@ -2256,11 +2473,13 @@ def build_fixed_boundary_objective_stage(
 def residuals_from_objectives(objectives: Sequence[ObjectiveTerm], ctx: StageContext):
     """Create the state residual callback consumed by ``FixedBoundaryExactOptimizer``."""
 
-    def residuals_from_state(state, *, ctx=ctx):
+    bound_objectives = tuple(term.bind(ctx) for term in objectives)
+
+    def residuals_from_state(state, *, ctx=ctx, objectives=bound_objectives):
         return jnp.concatenate([term.residual(ctx, state) for term in objectives])
 
-    field_totals = tuple(term.total for term in objectives if term.total is not None)
-    residuals_from_state._n_non_qs = sum(1 for term in objectives if term.total is None)
+    field_totals = tuple(term.total for term in bound_objectives if term.total is not None)
+    residuals_from_state._n_non_qs = sum(1 for term in bound_objectives if term.total is None)
     residuals_from_state._qs_total_from_state = (
         lambda state, ctx=ctx, field_totals=field_totals: float(
             sum(float(total(ctx, state)) for total in field_totals)
@@ -3299,6 +3518,13 @@ def combine_qs_stage_histories(
 def _as_vector(value):
     arr = jnp.asarray(value, dtype=jnp.float64)
     return arr.reshape((1,)) if int(arr.ndim) == 0 else jnp.ravel(arr)
+
+
+def _as_sequence(value) -> tuple:
+    try:
+        return tuple(value)
+    except TypeError:
+        return (value,)
 
 
 def _target_is_zero(target) -> bool:

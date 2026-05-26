@@ -554,6 +554,9 @@ def test_qi_diagnostics_from_bundled_solved_qi_seed_records_state_metrics():
 
     enable_x64(True)
     data_dir = _data_dir()
+    if not (data_dir / "wout_QI_stel_seed_3127.nc").exists():
+        pytest.skip("Optional WOUT fixtures are missing. Run tools/fetch_assets.py --bundle wout-fixtures.")
+
     cfg, indata = load_config(str(data_dir / "input.QI_stel_seed_3127"))
     static = build_static(cfg)
     wout = read_wout(data_dir / "wout_QI_stel_seed_3127.nc")

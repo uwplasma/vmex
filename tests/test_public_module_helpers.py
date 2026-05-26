@@ -61,3 +61,4 @@ def test_lazy_public_api_and_dir_behaviour():
     public_names = vmec_jax.__dir__()
     assert "api" in public_names
     assert "run_fixed_boundary" in public_names
+    assert "run_booz_xform" in public_names

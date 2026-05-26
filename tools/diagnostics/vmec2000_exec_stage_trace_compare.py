@@ -118,7 +118,7 @@ def _parse_int_list_arg(value: str | None) -> list[int] | None:
     text = value.strip()
     if not text:
         return None
-    parts = [p for p in re.split(r"[\\s,]+", text) if p]
+    parts = [p for p in re.split(r"[\s,]+", text) if p]
     if not parts:
         return None
     return [int(float(p)) for p in parts]
@@ -130,7 +130,7 @@ def _parse_float_list_arg(value: str | None) -> list[float] | None:
     text = value.strip()
     if not text:
         return None
-    parts = [p for p in re.split(r"[\\s,]+", text) if p]
+    parts = [p for p in re.split(r"[\s,]+", text) if p]
     if not parts:
         return None
     return [float(p) for p in parts]

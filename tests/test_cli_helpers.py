@@ -34,6 +34,9 @@ def test_cli_case_and_wout_path_conventions(tmp_path: Path) -> None:
     assert cli.resolve_wout_path(input_path=input_path, outdir=None, output=None) == tmp_path / "wout_case.nc"
     assert cli.resolve_wout_path(input_path=input_path, outdir=tmp_path / "out", output=None) == tmp_path / "out" / "wout_case.nc"
     assert cli.resolve_wout_path(input_path=input_path, outdir=None, output=tmp_path / "explicit.nc") == tmp_path / "explicit.nc"
+    assert cli._is_wout_path(Path("wout_case.nc"))
+    assert cli._is_wout_path(Path("equilibrium.nc"))
+    assert not cli._is_wout_path(Path("boozmn_case.nc"))
 
 
 def test_cli_jit_forces_parser_accepts_documented_values() -> None:

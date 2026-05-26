@@ -27,7 +27,12 @@ from vmec_jax.plotting import (
     prepare_matplotlib_3d,
     plot_3d_boundary_comparison,
     plot_bmag_contours,
+    plot_boozmn,
+    plot_boozmn_bmag_contours,
+    plot_boozmn_mode_families,
+    plot_boozmn_spectrum,
     plot_boozer_bmag_contours_from_state,
+    plot_boozer_lcfs_bmag_comparison,
     plot_objective_history,
     plot_qh_optimization,
     plot_wout,
@@ -309,6 +314,116 @@ def test_boozer_bmag_contour_helper_uses_line_contours(tmp_path, monkeypatch):
     assert out.stat().st_size > 0
 
 
+def test_boozmn_plot_helpers_render_synthetic_boozer_output(tmp_path):
+    pytest.importorskip("matplotlib")
+    import inspect
+    import vmec_jax.plotting as plotting
+
+    booz = SimpleNamespace(
+        nfp=2,
+        s_b=np.asarray([0.25, 0.5, 1.0]),
+        xm_b=np.asarray([0, 1, 1, 2, 0]),
+        xn_b=np.asarray([0, 0, 2, -4, 2]),
+        bmnc_b=np.asarray(
+            [
+                [1.0, 1.0, 1.0],
+                [0.1, 0.08, 0.05],
+                [0.03, 0.02, 0.01],
+                [0.02, 0.03, 0.04],
+                [0.01, 0.01, 0.02],
+            ]
+        ),
+        bmns_b=np.zeros((5, 3)),
+    )
+
+    bmag = plot_boozmn_bmag_contours(booz, outdir=tmp_path, name="toy", ntheta=16, nphi=18)
+    families = plot_boozmn_mode_families(booz, outdir=tmp_path, name="toy")
+    spectrum = plot_boozmn_spectrum(booz, outdir=tmp_path, name="toy")
+
+    assert bmag.name == "toy_BoozerB_contours.png"
+    assert families.name == "toy_Boozer_mode_families.png"
+    assert spectrum.name == "toy_Boozer_lcfs_spectrum.png"
+    for path in (bmag, families, spectrum):
+        assert path.stat().st_size > 0
+    assert plotting._booz_surface_label(booz, 1, outer=False) == "Mid radius"
+    assert plotting._booz_surface_label(booz, 2, outer=True) == "Plasma boundary"
+    source = inspect.getsource(plotting.plot_boozmn_bmag_contours)
+    assert r"$\phi_B$" in source
+    assert r"$\theta_B$" in source
+
+
+def test_boozer_lcfs_comparison_runs_booz_and_labels_boozer_axes(tmp_path, monkeypatch):
+    pytest.importorskip("matplotlib")
+    import vmec_jax.plotting as plotting
+
+    calls: list[tuple[Path, Path | None, tuple[float, ...] | None]] = []
+    initial_wout = tmp_path / "wout_initial.nc"
+    final_wout = tmp_path / "wout_final.nc"
+    initial_wout.write_text("initial")
+    final_wout.write_text("final")
+
+    def fake_run_booz_xform(wout_path, *, output_path, surfaces, **_kwargs):
+        output_path = Path(output_path)
+        output_path.write_text("booz")
+        calls.append((Path(wout_path), output_path, surfaces))
+        return output_path
+
+    def fake_load_booz(path):
+        factor = 0.1 if "initial" in Path(path).name else 0.2
+        return SimpleNamespace(
+            nfp=2,
+            s_b=np.asarray([1.0]),
+            xm_b=np.asarray([0, 1, 0]),
+            xn_b=np.asarray([0, 0, 2]),
+            bmnc_b=np.asarray([[1.0], [factor], [0.03]]),
+            bmns_b=np.zeros((3, 1)),
+        )
+
+    monkeypatch.setattr(plotting, "run_booz_xform", fake_run_booz_xform)
+    monkeypatch.setattr(plotting, "_load_booz_if_path", fake_load_booz)
+
+    out = plot_boozer_lcfs_bmag_comparison(
+        initial_wout,
+        final_wout,
+        outdir=tmp_path / "plots",
+        ntheta=16,
+        nphi=18,
+    )
+
+    assert out.name == "boozer_lcfs_bmag_comparison.png"
+    assert out.stat().st_size > 0
+    assert [call[0] for call in calls] == [initial_wout, final_wout]
+    assert all(call[2] == (1.0,) for call in calls)
+
+
+def test_plot_boozmn_dispatches_all_public_boozer_helpers(tmp_path, monkeypatch):
+    import vmec_jax.plotting as plotting
+
+    calls: list[tuple[str, Path, Path, str | None]] = []
+    source = tmp_path / "boozmn_case.nc"
+    source.write_text("placeholder")
+
+    def fake(name: str):
+        def _impl(path, *, outdir, name=None, **_kwargs):
+            calls.append((name or "", Path(path), Path(outdir), name))
+            out = Path(outdir) / f"{name or 'case'}_{fake.__name__}_{len(calls)}.png"
+            out.write_text("plot")
+            return out
+
+        return _impl
+
+    monkeypatch.setattr(plotting, "plot_boozmn_bmag_contours", fake("bmag"))
+    monkeypatch.setattr(plotting, "plot_boozmn_mode_families", fake("families"))
+    monkeypatch.setattr(plotting, "plot_boozmn_spectrum", fake("spectrum"))
+
+    paths = plot_boozmn(source, outdir=tmp_path / "plots", name="custom")
+
+    assert set(paths) == {"bmag_contours", "mode_families", "lcfs_spectrum"}
+    assert [call[1] for call in calls] == [source, source, source]
+    assert all(call[2] == tmp_path / "plots" for call in calls)
+    assert all(call[3] == "custom" for call in calls)
+
+
 def test_plot_qh_optimization_wrapper_dispatches_to_public_helpers(tmp_path, monkeypatch, capsys):
     pytest.importorskip("matplotlib")
     import matplotlib.pyplot as plt
@@ -417,6 +532,8 @@ def test_axisym_overview_requires_reference_wout(monkeypatch, tmp_path):
 
 def test_plot_wout_renders_cli_diagnostic_outputs(monkeypatch, tmp_path, capsys):
     pytest.importorskip("matplotlib")
+    import inspect
+    import vmec_jax.plotting as plotting
     import vmec_jax.wout as wout_module
 
     monkeypatch.setattr(wout_module, "read_wout", lambda path: _toy_wout_with_flux(lasym=True))
@@ -428,6 +545,10 @@ def test_plot_wout_renders_cli_diagnostic_outputs(monkeypatch, tmp_path, capsys)
         assert path.exists()
         assert path.stat().st_size > 0
     assert "[vmec_params]" in capsys.readouterr().out
+    source = inspect.getsource(plotting.plot_wout)
+    assert "Mid radius |B|" in source
+    assert "Plasma boundary |B|" in source
+    assert "1-based idx" not in source
 
 
 def test_fix_matplotlib_3d_sets_equal_radius_limits():

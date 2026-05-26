@@ -7,6 +7,14 @@ import numpy as np
 import pytest
 
 
+def _optional_wout_path(filename: str) -> str:
+    root = os.path.dirname(os.path.dirname(__file__))
+    path = os.path.join(root, "examples", "data", filename)
+    if not os.path.exists(path):
+        pytest.skip(f"Optional WOUT fixture is missing: {filename}. Run tools/fetch_assets.py --bundle wout-fixtures.")
+    return path
+
+
 def _require_slow() -> None:
     if os.environ.get("RUN_SLOW", "") != "1":
         pytest.skip("Set RUN_SLOW=1 to run slow quasisymmetry checks")
@@ -334,8 +342,7 @@ def test_quasisymmetry_ratio_residual_returns_diagnostic_fields():
     from vmec_jax import load_wout
     from vmec_jax.quasisymmetry import quasisymmetry_ratio_residual_from_wout
 
-    root = os.path.dirname(os.path.dirname(__file__))
-    wout = load_wout(os.path.join(root, "examples", "data", "wout_li383_low_res.nc"))
+    wout = load_wout(_optional_wout_path("wout_li383_low_res.nc"))
     qs = quasisymmetry_ratio_residual_from_wout(
         wout,
         surfaces=[0.5],
@@ -523,8 +530,7 @@ def test_quasisymmetry_angle_cache_matches_uncached_wout():
         quasisymmetry_ratio_residual_from_wout,
     )
 
-    root = os.path.dirname(os.path.dirname(__file__))
-    wout = load_wout(os.path.join(root, "examples", "data", "wout_nfp4_QH_warm_start.nc"))
+    wout = load_wout(_optional_wout_path("wout_nfp4_QH_warm_start.nc"))
     cache = _quasisymmetry_angle_cache(
         nfp=int(wout.nfp),
         xm_nyq=wout.xm_nyq,
@@ -596,8 +602,7 @@ def test_quasisymmetry_ratio_residual_regression_on_bundled_wouts(
     from vmec_jax import load_wout
     from vmec_jax.quasisymmetry import quasisymmetry_ratio_residual_from_wout
 
-    root = os.path.dirname(os.path.dirname(__file__))
-    wout = load_wout(os.path.join(root, "examples", "data", filename))
+    wout = load_wout(_optional_wout_path(filename))
     qs = quasisymmetry_ratio_residual_from_wout(
         wout,
         surfaces=[0.25, 0.5, 0.75],
@@ -688,8 +693,7 @@ def test_quasisymmetry_ratio_residual_supports_lasym_wout():
     from vmec_jax import load_wout
     from vmec_jax.quasisymmetry import quasisymmetry_ratio_residual_from_wout
 
-    root = os.path.dirname(os.path.dirname(__file__))
-    wout = load_wout(os.path.join(root, "examples", "data", "wout_basic_non_stellsym_simsopt.nc"))
+    wout = load_wout(_optional_wout_path("wout_basic_non_stellsym_simsopt.nc"))
     assert bool(wout.lasym)
 
     qs = quasisymmetry_ratio_residual_from_wout(

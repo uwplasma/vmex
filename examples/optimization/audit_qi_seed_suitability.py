@@ -1937,6 +1937,9 @@ def run_qi_prefine_probe(plan: dict[str, Any], *, workflow: Any | None = None) -
     if float(qi_options_raw.get("mirror_weight", 0.0)) > 0.0:
         mirror = workflow.MirrorRatio(
             threshold=float(qi_options_raw.get("mirror_threshold", DEFAULT_MAX_MIRROR_RATIO)),
+            surfaces=qi_options.surfaces,
+            mboz=qi_options.mboz,
+            nboz=qi_options.nboz,
             ntheta=int(qi_options_raw.get("mirror_ntheta", 32)),
             nphi=int(qi_options_raw.get("mirror_nphi", 32)),
             surface_index=(
@@ -1944,7 +1947,8 @@ def run_qi_prefine_probe(plan: dict[str, Any], *, workflow: Any | None = None) -
                 if qi_options_raw.get("mirror_surface_index", None) is None
                 else int(qi_options_raw.get("mirror_surface_index"))
             ),
-            qi_options=qi_options,
+            phimin=qi_options.phimin,
+            jit_booz=qi_options.jit_booz,
         )
         objective_tuples.append((mirror.J, 0.0, float(qi_options_raw["mirror_weight"])))
     if float(qi_options_raw.get("elongation_weight", 0.0)) > 0.0:
@@ -1952,7 +1956,6 @@ def run_qi_prefine_probe(plan: dict[str, Any], *, workflow: Any | None = None) -
             threshold=float(qi_options_raw.get("elongation_threshold", DEFAULT_MAX_ELONGATION)),
             ntheta=int(qi_options_raw.get("elongation_ntheta", 24)),
             nphi=int(qi_options_raw.get("elongation_nphi", 8)),
-            qi_options=qi_options,
         )
         objective_tuples.append((elongation.J, 0.0, float(qi_options_raw["elongation_weight"])))
     problem = workflow.LeastSquaresProblem.from_tuples(objective_tuples)

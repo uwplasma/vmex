@@ -132,8 +132,11 @@ def test_getfsq_parity_against_wout(case_name: str, input_rel: str, wout_rel: st
     # `residue/getfsq` outputs on the same (ntheta,nzeta) grid. We keep
     # tolerances modest during the parity push, and tighten as conventions
     # converge.
-    denom_r = max(abs(wout.fsqr), 1e-20)
-    denom_z = max(abs(wout.fsqz), 1e-20)
+    # For converged fixtures with residuals near machine zero, pure relative
+    # error is ill-conditioned.  Treat residuals below this floor as zero-scale
+    # while still requiring absolute differences at the 1e-23--1e-22 level.
+    denom_r = max(abs(wout.fsqr), 1e-18)
+    denom_z = max(abs(wout.fsqz), 1e-18)
     denom_l = max(abs(wout.fsql), 1e-20)
     rel_fsqr = abs(fsqr - wout.fsqr) / denom_r
     rel_fsqz = abs(fsqz - wout.fsqz) / denom_z

@@ -34,3 +34,10 @@
   RBS(0,1) = 0.6
   RBS(0,2) = 0.12
 /
+
+&BOOZ_XFORM_JAX
+  LBOOZ = F
+  MBOOZ = 32
+  NBOOZ = 32
+  BOOZ_SURFACES = 'all'
+/

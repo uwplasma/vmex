@@ -43,8 +43,11 @@ def _data_dir() -> Path:
 
 def _small_circular_state_static():
     data_dir = _data_dir()
+    wout_path = data_dir / "wout_circular_tokamak.nc"
+    if not wout_path.exists():
+        pytest.skip("Optional WOUT fixtures are missing. Run tools/fetch_assets.py --bundle wout-fixtures.")
     cfg, indata = load_config(data_dir / "input.circular_tokamak")
-    wout = read_wout(data_dir / "wout_circular_tokamak.nc")
+    wout = read_wout(wout_path)
     cfg = replace(
         cfg,
         ns=int(wout.ns),

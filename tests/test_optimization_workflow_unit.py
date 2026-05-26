@@ -267,14 +267,15 @@ def test_mean_iota_handles_axis_only_and_full_profiles(monkeypatch) -> None:
     assert float(workflow.mean_iota(ctx, "state")) == pytest.approx(0.4)
 
 
-def test_boozer_target_shape_guards_and_qi_runtime_errors() -> None:
+def test_boozer_target_shape_guards_and_qi_runtime_errors(monkeypatch) -> None:
     import vmec_jax.optimization_workflow as workflow
 
     with pytest.raises(RuntimeError, match="inside a QI solve"):
         workflow.BoozerBTarget(target_bmnc=np.ones((1, 2))).J(None, None)
 
+    options = workflow.QuasiIsodynamicOptions(surfaces=[0.5])
     with pytest.raises(RuntimeError, match="inside a QI solve"):
-        workflow.MaxElongation(threshold=3.0).J(None, None)
+        workflow.MirrorRatio(threshold=0.3, qi_options=options).J(None, None)
 
     term = workflow.qi_boozer_b_target_objective(target_bmnc=np.ones((1, 3)))
     with pytest.raises(ValueError, match="target_bmnc"):
@@ -1225,9 +1226,23 @@ def test_qi_and_qs_object_wrappers_build_terms_without_solves(monkeypatch) -> No
         ),
     ]
     for wrapper, expected_name in qi_wrappers:
-        with pytest.raises(RuntimeError, match="must be evaluated inside"):
-            wrapper.J(ctx, "state")
-        assert wrapper.to_qi_term(2.0).name == expected_name
+        if expected_name != "max_elongation":
+            with pytest.raises(RuntimeError, match="must be evaluated inside"):
+                wrapper.J(ctx, "state")
+        else:
+            monkeypatch.setattr(
+                workflow,
+                "max_elongation_penalty_from_state",
+                lambda **_kwargs: {
+                    "residuals1d": workflow.jnp.asarray([0.0]),
+                    "total": workflow.jnp.asarray(0.0),
+                },
+            )
+            np.testing.assert_allclose(np.asarray(wrapper.J(ctx, "state")), [0.0])
+        if hasattr(wrapper, "to_qi_term"):
+            assert wrapper.to_qi_term(2.0).name == expected_name
+        else:
+            assert expected_name == "max_elongation"
 
     assert qi_wrappers[2][0].to_constraint_qi_term().name == "mirror_ratio_constraint"
     assert qi_wrappers[4][0].to_constraint_qi_term().name == "max_elongation_constraint"

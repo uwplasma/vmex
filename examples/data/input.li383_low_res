@@ -86,3 +86,10 @@
   RBC(3,6) =   7.1096E-05     ZBS(3,6) =   7.1096E-05
   RBC(4,6) =   3.4674E-04     ZBS(4,6) =   3.4674E-04
 /
+
+&BOOZ_XFORM_JAX
+  LBOOZ = F
+  MBOOZ = 32
+  NBOOZ = 32
+  BOOZ_SURFACES = 'all'
+/

@@ -29,7 +29,7 @@ def test_load_example_without_wout_skips_optional_wout_read():
 
     assert example.input_path.exists()
     if example.wout_path is not None:
-        assert example.wout_path.name == "wout_circular_tokamak.nc"
+        assert example.wout_path.name in {"wout_circular_tokamak_reference.nc", "wout_circular_tokamak.nc"}
     assert example.wout is None
     assert example.state is None
     assert example.static.cfg.ns == example.cfg.ns

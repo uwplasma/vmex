@@ -122,7 +122,10 @@ print(f"  mirror target:   {MAX_MIRROR_RATIO}")
 #     threshold=MAX_MIRROR_RATIO,
 #     ntheta=96,
 #     nphi=96,
-#     surface_index=None,  # all QI surfaces, matching the diagnostic gate
+#     surfaces=qi_options.surfaces,
+#     mboz=qi_options.mboz,
+#     nboz=qi_options.nboz,
+#     surface_index=None,  # all selected surfaces, matching the diagnostic gate
 #     smooth_extrema=MIRROR_SMOOTH_EXTREMA,
 #     smooth_penalty=MIRROR_SMOOTH_PENALTY,
 # )

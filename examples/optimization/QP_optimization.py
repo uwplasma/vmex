@@ -22,11 +22,11 @@ DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 # the same nfp=2 minimal seed family as QI in the simple-seed lane.
 WARM_START_INPUT_FILE = DATA_DIR / "input.nfp2_QI"
 SIMPLE_SEED_INPUT_FILE = DATA_DIR / "input.minimal_seed_nfp2"
-OUTPUT_DIR = Path("results/qp_opt/no_ess")
-MAX_MODE = 3
-MIN_VMEC_MODE = 6
+OUTPUT_DIR = Path("results/qp_opt/ess")
+MAX_MODE = 5
+MIN_VMEC_MODE = MAX_MODE+2
 USE_SIMPLE_SEED = True  # Start from near-circular RBC(0,0), RBC(0,1), ZBS(0,1).
-SIMPLE_SEED_PERTURBATION = 1.0e-2  # QP needs a stronger deterministic seed to escape the zero-iota branch.
+SIMPLE_SEED_PERTURBATION = 1.0e-5  # Tiny nonzero active modes keep derivatives away from exactly zero.
 INPUT_FILE = SIMPLE_SEED_INPUT_FILE if USE_SIMPLE_SEED else WARM_START_INPUT_FILE
 INPUT_FILE = vj.prepare_simple_omnigenity_seed_input(
     INPUT_FILE,
@@ -36,33 +36,31 @@ INPUT_FILE = vj.prepare_simple_omnigenity_seed_input(
     enabled=USE_SIMPLE_SEED,
     perturbation=SIMPLE_SEED_PERTURBATION,
 )
-USE_MODE_CONTINUATION = not USE_SIMPLE_SEED
-MAX_NFEV = 40
-CONTINUATION_NFEV = 30
+USE_MODE_CONTINUATION = False
+MAX_NFEV = 30
+CONTINUATION_NFEV = 15
 STAGE_MODES = vj.qs_stage_modes(
     max_mode=MAX_MODE,
     use_mode_continuation=USE_MODE_CONTINUATION,
     continuation_nfev=CONTINUATION_NFEV,
 )
-# Direct QP max_mode=3 cleanup from the minimal seed can step into a worse
-# basin after an excellent repeated mode-2 stage.  Keep this override visible:
-# remove it or set STAGE_MODES = [MAX_MODE] for a direct high-mode experiment.
-if USE_SIMPLE_SEED and MAX_MODE == 3:
-    STAGE_MODES = [1, 2, 2]
+# QP is especially sensitive to direct high-mode starts from the common minimal
+# seed.  Keep a lower-mode continuation sequence enabled by default; the direct
+# ``STAGE_MODES=[MAX_MODE]`` path can produce enormous initial QP residuals.
 
 # Optimizer parameters.
 METHOD = "scipy"  # Try also "auto", "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint", or "scalar_trust".
 SCIPY_TR_SOLVER = "lsmr"  # For METHOD="scipy": "lsmr" is memory-light; "exact" is dense.
 SCIPY_LSMR_MAXITER = None  # None lets SciPy choose; set an int to cap LSMR iterations.
-FTOL = 1.0e-4  # Relative cost-reduction tolerance for the outer optimizer.
-GTOL = 1.0e-4  # Gradient optimality tolerance for the outer optimizer.
-XTOL = 1.0e-4  # Step-size tolerance for the outer optimizer.
-INNER_MAX_ITER = 120  # Accepted-point VMEC iterations; 0 uses NITER from the input deck.
-INNER_FTOL = 1.0e-9  # Accepted-point VMEC tolerance; 0 uses FTOL from the input deck.
-TRIAL_MAX_ITER = 120  # Trial-point VMEC iterations; 0 follows the accepted/input budget.
-TRIAL_FTOL = 1.0e-9  # Trial-point VMEC tolerance; 0 follows the accepted/input tolerance.
+FTOL = 1.0e-5  # Relative cost-reduction tolerance for the outer optimizer.
+GTOL = 1.0e-5  # Gradient optimality tolerance for the outer optimizer.
+XTOL = 1.0e-6  # Step-size tolerance for the outer optimizer.
+INNER_MAX_ITER = 550  # Accepted-point VMEC iterations; 0 uses NITER from the input deck.
+INNER_FTOL = 1.0e-10  # Accepted-point VMEC tolerance; 0 uses FTOL from the input deck.
+TRIAL_MAX_ITER = 550  # Trial-point VMEC iterations; 0 follows the accepted/input budget.
+TRIAL_FTOL = 1.0e-10  # Trial-point VMEC tolerance; 0 follows the accepted/input tolerance.
 SOLVER_DEVICE = None  # None uses JAX default; set "cpu" or "gpu" to force one backend.
-USE_ESS = False  # Set True to scale high-mode boundary variables.
+USE_ESS = True  # Set True to scale high-mode boundary variables.
 ALPHA = 1.2  # ESS high-mode scaling strength.
 # Common alternatives:
 # METHOD = "gauss_newton"
@@ -77,7 +75,7 @@ SAVE_STAGE_INPUTS = True  # Keep per-stage input decks for continuation/debuggin
 SAVE_STAGE_WOUTS = False  # Set True to also write per-stage WOUT files.
 MAKE_PLOTS = True
 
-TARGET_ASPECT = 6.0
+TARGET_ASPECT = 5.0
 TARGET_ABS_IOTA_MIN = 0.41
 HELICITY_M = 0
 HELICITY_N = -1
@@ -85,6 +83,13 @@ SURFACES = np.arange(0.0, 1.01, 0.1)
 ASPECT_WEIGHT = 1.0
 IOTA_FLOOR_WEIGHT = 40_000.0
 QS_WEIGHT = 1.0
+MAX_MIRROR_RATIO = 0.30
+MAX_ELONGATION = 8.0
+MIRROR_WEIGHT = 20.0
+ELONGATION_WEIGHT = 10.0
+MIRROR_SURFACES = np.linspace(0.1, 1.0, 6)
+MBOZ = 18
+NBOZ = 18
 
 
 # Optimizable VMEC object.
@@ -105,10 +110,29 @@ qs = vj.QuasisymmetryRatioResidual(
     helicity_n=HELICITY_N,
     surfaces=SURFACES,
 )
+mirror = vj.MirrorRatio(
+    threshold=MAX_MIRROR_RATIO,
+    surfaces=MIRROR_SURFACES,
+    mboz=MBOZ,
+    nboz=NBOZ,
+    ntheta=96,
+    nphi=96,
+    smooth_extrema=2.0e-2,
+    smooth_penalty=2.0e-2,
+)
+elongation = vj.MaxElongation(
+    threshold=MAX_ELONGATION,
+    ntheta=48,
+    nphi=16,
+    smooth_extrema=2.0e-2,
+    smooth_penalty=2.0e-2,
+)
 objective_tuples = [
     (aspect.J, TARGET_ASPECT, ASPECT_WEIGHT),
     (iota_floor.J, 0.0, IOTA_FLOOR_WEIGHT),
     (qs.J, 0.0, QS_WEIGHT),
+    (mirror.J, 0.0, MIRROR_WEIGHT),
+    (elongation.J, 0.0, ELONGATION_WEIGHT),
     # Optional:
     # (vj.LgradB(threshold=0.30, smooth_penalty=1.0e-3).J, 0.0, 0.01),
     # (vj.MagneticWell(minimum=0.0).J, 0.0, 1.0),
@@ -196,13 +220,14 @@ print(f"  Bmin/Bmax:  {np.min(b_lcfs):.6g} / {np.max(b_lcfs):.6g}")
 if MAKE_PLOTS:
     # Plotting is a normal post-processing block; add or remove entries here
     # instead of relying on hidden plotting side effects from the solve.
+    print("\nGenerating initial-vs-final LCFS |B| contour comparison in Boozer coordinates:")
     plot_paths = {
         "boundary_comparison": vj.plot_3d_boundary_comparison(
             saved_paths.initial_wout,
             saved_paths.final_wout,
             outdir=OUTPUT_DIR,
         ),
-        "bmag_contours": vj.plot_bmag_contours(
+        "initial_vs_final_lcfs_boozer_bmag_contours": vj.plot_boozer_lcfs_bmag_comparison(
             saved_paths.initial_wout,
             saved_paths.final_wout,
             outdir=OUTPUT_DIR,

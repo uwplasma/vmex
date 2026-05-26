@@ -31,8 +31,10 @@ __all__ = [
     "lgradb_from_state",
     "lgradb_penalty_from_state",
     "max_elongation_penalty_from_state",
+    "boozer_output_from_state",
     "mirror_ratio_penalty_from_boozer_modes",
     "mirror_ratio_penalty_from_boozer_output",
+    "mirror_ratio_penalty_from_state",
     "quasi_isodynamic_residual_from_boozer_modes",
     "quasi_isodynamic_residual_from_boozer_output",
     "quasi_isodynamic_residual_from_state",
@@ -1198,6 +1200,72 @@ def quasi_isodynamic_residual_from_state(
     functional ``booz_xform_jax`` API.  ``booz_xform_jax`` is an optional
     runtime dependency; install it to use this state-level objective.
     """
+    field = boozer_output_from_state(
+        state=state,
+        static=static,
+        indata=indata,
+        signgs=signgs,
+        surfaces=surfaces,
+        mboz=mboz,
+        nboz=nboz,
+        flux_local=flux_local,
+        prof_local=prof_local,
+        pressure_local=pressure_local,
+        jit_booz=jit_booz,
+        booz_constants=booz_constants,
+        booz_grids=booz_grids,
+        surface_indices=surface_indices,
+    )
+    out = quasi_isodynamic_residual_from_boozer_output(
+        field["booz"],
+        nfp=int(field["nfp"]),
+        weights=weights,
+        nphi=nphi,
+        nalpha=nalpha,
+        n_bounce=n_bounce,
+        include_bounce_endpoints=include_bounce_endpoints,
+        softness=softness,
+        width_weight=width_weight,
+        branch_width_weight=branch_width_weight,
+        branch_width_softness=branch_width_softness,
+        profile_weight=profile_weight,
+        shuffle_profile_weight=shuffle_profile_weight,
+        shuffle_profile_softness=shuffle_profile_softness,
+        shuffle_profile_nphi_out=shuffle_profile_nphi_out,
+        weighted_shuffle_profile_weight=weighted_shuffle_profile_weight,
+        weighted_shuffle_profile_softness=weighted_shuffle_profile_softness,
+        aligned_profile_weight=aligned_profile_weight,
+        aligned_profile_softness=aligned_profile_softness,
+        aligned_profile_trap_level=aligned_profile_trap_level,
+        aligned_profile_trap_softness=aligned_profile_trap_softness,
+        phimin=phimin,
+    )
+    return {
+        **out,
+        "booz": field["booz"],
+        "surfaces": field["surfaces"],
+        "surface_indices": field["surface_indices"],
+    }
+
+
+def boozer_output_from_state(
+    *,
+    state,
+    static,
+    indata,
+    signgs: int,
+    surfaces,
+    mboz: int = 12,
+    nboz: int = 12,
+    flux_local=None,
+    prof_local=None,
+    pressure_local=None,
+    jit_booz: bool = False,
+    booz_constants=None,
+    booz_grids=None,
+    surface_indices=None,
+):
+    """Evaluate differentiable Boozer ``|B|`` output directly from a VMEC state."""
     _require_jax()
     try:
         from booz_xform_jax import booz_xform_from_inputs, prepare_booz_xform_constants_from_inputs
@@ -1242,33 +1310,70 @@ def quasi_isodynamic_residual_from_state(
         surface_indices=jnp.asarray(surface_indices, dtype=jnp.int32),
         jit=bool(jit_booz),
     )
-    out = quasi_isodynamic_residual_from_boozer_output(
-        booz,
-        nfp=int(inputs.nfp),
-        weights=weights,
-        nphi=nphi,
-        nalpha=nalpha,
-        n_bounce=n_bounce,
-        include_bounce_endpoints=include_bounce_endpoints,
-        softness=softness,
-        width_weight=width_weight,
-        branch_width_weight=branch_width_weight,
-        branch_width_softness=branch_width_softness,
-        profile_weight=profile_weight,
-        shuffle_profile_weight=shuffle_profile_weight,
-        shuffle_profile_softness=shuffle_profile_softness,
-        shuffle_profile_nphi_out=shuffle_profile_nphi_out,
-        weighted_shuffle_profile_weight=weighted_shuffle_profile_weight,
-        weighted_shuffle_profile_softness=weighted_shuffle_profile_softness,
-        aligned_profile_weight=aligned_profile_weight,
-        aligned_profile_softness=aligned_profile_softness,
-        aligned_profile_trap_level=aligned_profile_trap_level,
-        aligned_profile_trap_softness=aligned_profile_trap_softness,
-        phimin=phimin,
-    )
     return {
-        **out,
         "booz": booz,
         "surfaces": surface_values,
         "surface_indices": jnp.asarray(surface_indices),
+        "nfp": int(inputs.nfp),
+    }
+
+
+def mirror_ratio_penalty_from_state(
+    *,
+    state,
+    static,
+    indata,
+    signgs: int,
+    surfaces,
+    weights: Iterable[float] | None = None,
+    mboz: int = 12,
+    nboz: int = 12,
+    ntheta: int = 128,
+    nphi: int = 128,
+    phimin: float = 0.0,
+    smooth_extrema: float = 0.0,
+    smooth_penalty: float = 0.0,
+    threshold: float = 0.21,
+    flux_local=None,
+    prof_local=None,
+    pressure_local=None,
+    jit_booz: bool = False,
+    booz_constants=None,
+    booz_grids=None,
+    surface_indices=None,
+):
+    """Penalize mirror ratio from a solved VMEC state without any QI options."""
+
+    field = boozer_output_from_state(
+        state=state,
+        static=static,
+        indata=indata,
+        signgs=signgs,
+        surfaces=surfaces,
+        mboz=mboz,
+        nboz=nboz,
+        flux_local=flux_local,
+        prof_local=prof_local,
+        pressure_local=pressure_local,
+        jit_booz=jit_booz,
+        booz_constants=booz_constants,
+        booz_grids=booz_grids,
+        surface_indices=surface_indices,
+    )
+    out = mirror_ratio_penalty_from_boozer_output(
+        field["booz"],
+        nfp=int(field["nfp"]),
+        weights=weights,
+        ntheta=ntheta,
+        nphi=nphi,
+        phimin=phimin,
+        smooth_extrema=smooth_extrema,
+        smooth_penalty=smooth_penalty,
+        threshold=threshold,
+    )
+    return {
+        **out,
+        "booz": field["booz"],
+        "surfaces": field["surfaces"],
+        "surface_indices": field["surface_indices"],
     }

@@ -33,3 +33,10 @@
   RBC(0,0) =  6.0     ZBS(0,0) =   0.0
   RBC(0,1) =  2.0     ZBS(0,1) =   2.0
 /
+
+&BOOZ_XFORM_JAX
+  LBOOZ = F
+  MBOOZ = 32
+  NBOOZ = 32
+  BOOZ_SURFACES = 'all'
+/

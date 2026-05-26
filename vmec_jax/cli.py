@@ -18,6 +18,7 @@ from .driver import (
 from .namelist import read_indata
 
 _TEST_INPUT_NAME = "input.nfp4_QH_warm_start"
+_PLOT_AUTO = "__vmec_jax_plot_auto__"
 
 
 def _case_from_input(path: Path) -> str:
@@ -38,6 +39,31 @@ def resolve_wout_path(*, input_path: Path, outdir: Path | None, output: Path | N
     base_dir = Path(outdir) if outdir is not None else input_path.parent
     case = _case_from_input(input_path)
     return base_dir / f"wout_{case}.nc"
+
+
+def _is_wout_path(path: Path) -> bool:
+    lower = path.name.lower()
+    return path.suffix.lower() == ".nc" and not lower.startswith("boozmn_")
+
+
+def _is_boozmn_path(path: Path) -> bool:
+    return path.name.lower().startswith("boozmn_") and path.suffix.lower() == ".nc"
+
+
+def _plot_wout_file(wout_path: Path, outdir: Path) -> None:
+    from .plotting import plot_wout
+
+    print(f"Plotting VMEC WOUT {wout_path.name} → {outdir}/")
+    plot_wout(wout_path, outdir=outdir)
+
+
+def _plot_boozmn_file(boozmn_path: Path, outdir: Path) -> None:
+    from .plotting import plot_boozmn
+
+    print(f"Plotting Boozer output {boozmn_path.name} → {outdir}/")
+    paths = plot_boozmn(boozmn_path, outdir=outdir)
+    for path in paths.values():
+        print(f"  Saved {path}")
 
 
 def _start_wout_io_warmup():
@@ -80,7 +106,8 @@ def build_parser() -> argparse.ArgumentParser:
             "Run vmec_jax equilibrium solver or plot a wout file.\n\n"
             "  vmec_jax --test          — run and plot the bundled quick-start case\n"
             "  vmec_jax input.*           — run the solver\n"
-            "  vmec_jax --plot wout_*.nc  — generate diagnostic plots"
+            "  vmec_jax --plot wout_*.nc  — generate diagnostic plots\n"
+            "  vmec_jax --booz wout_*.nc  — run booz_xform_jax and write boozmn_*.nc"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -96,10 +123,39 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--plot",
-        metavar="wout.nc",
+        metavar="PATH",
+        type=str,
+        nargs="?",
+        const=_PLOT_AUTO,
+        default=None,
+        help=(
+            "Generate plots. With a wout_*.nc file, plot WOUT diagnostics. "
+            "With a boozmn_*.nc file, plot Boozer diagnostics. With an input.* "
+            "file, solve first and then plot the generated WOUT. If PATH is "
+            "omitted, the positional input path is used."
+        ),
+    )
+    p.add_argument(
+        "--booz",
+        action="store_true",
+        help=(
+            "Run booz_xform_jax after solving an input file, or directly from "
+            "a wout_*.nc file. Defaults are mbooz=nbooz=32 and all surfaces."
+        ),
+    )
+    p.add_argument("--mbooz", type=int, default=None, help="Boozer poloidal resolution (default: input &BOOZ_XFORM_JAX MBOOZ or 32).")
+    p.add_argument("--nbooz", type=int, default=None, help="Boozer toroidal resolution (default: input &BOOZ_XFORM_JAX NBOOZ or 32).")
+    p.add_argument(
+        "--booz-surfaces",
         type=str,
         default=None,
-        help="Generate diagnostic plots from a wout_*.nc file (skips the solver).",
+        help="Boozer surfaces as comma/space-separated normalized s values, or 'all' (default).",
+    )
+    p.add_argument("--booz-output", type=str, default=None, help="Explicit boozmn_*.nc output path.")
+    p.add_argument(
+        "--jit-booz",
+        action="store_true",
+        help="JIT the booz_xform_jax transform. Accurate but can add compile time for one-off CLI runs.",
     )
     p.add_argument(
         "--test",
@@ -169,6 +225,56 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--jit-forces", type=str, default="auto", help="JIT force kernels: auto|true|false.")
     p.add_argument("--quiet", action="store_true", help="Silence VMEC-style stdout.")
     return p
+
+
+def _booz_config_for_path(input_path: Path | None, args: argparse.Namespace):
+    from .booz import BoozConfig, parse_booz_surfaces, read_booz_config
+
+    cfg = read_booz_config(input_path) if input_path is not None and input_path.exists() else BoozConfig()
+    cli_surfaces = parse_booz_surfaces(args.booz_surfaces) if args.booz_surfaces is not None else None
+    return BoozConfig(
+        enabled=bool(args.booz) or bool(cfg.enabled),
+        mbooz=int(args.mbooz if args.mbooz is not None else cfg.mbooz),
+        nbooz=int(args.nbooz if args.nbooz is not None else cfg.nbooz),
+        surfaces=cli_surfaces if args.booz_surfaces is not None else cfg.surfaces,
+        jit=bool(args.jit_booz) or bool(cfg.jit),
+    )
+
+
+def _run_booz_for_wout(
+    wout_path: Path,
+    *,
+    source_input_path: Path | None,
+    args: argparse.Namespace,
+    plot: bool,
+    outdir: Path,
+) -> Path:
+    from .booz import resolve_boozmn_path, run_booz_xform
+
+    cfg = _booz_config_for_path(source_input_path, args)
+    booz_output = Path(args.booz_output).expanduser().resolve() if args.booz_output else None
+    boozmn_path = resolve_boozmn_path(
+        source_path=wout_path,
+        outdir=outdir,
+        output=booz_output,
+    )
+    print(
+        "Running booz_xform_jax "
+        f"(mbooz={cfg.mbooz}, nbooz={cfg.nbooz}, surfaces={'all' if cfg.surfaces is None else cfg.surfaces})"
+    )
+    boozmn_path = run_booz_xform(
+        wout_path,
+        output_path=boozmn_path,
+        mbooz=cfg.mbooz,
+        nbooz=cfg.nbooz,
+        surfaces=cfg.surfaces,
+        jit=cfg.jit,
+        verbose=not bool(args.quiet),
+    )
+    print(f"Wrote Boozer output: {boozmn_path}")
+    if plot:
+        _plot_boozmn_file(boozmn_path, outdir)
+    return boozmn_path
 
 
 def _copy_test_input(outdir: Path) -> Path:
@@ -251,25 +357,40 @@ def main(argv: list[str] | None = None) -> int:
     if bool(args.test):
         return _run_bundled_test(args, parser)
 
-    # ── --plot mode: generate diagnostic plots from a wout file ────────────────
-    if args.plot is not None:
-        wout_path = Path(args.plot).expanduser().resolve()
-        if not wout_path.exists():
-            parser.error(f"wout file not found: {wout_path}")
-        outdir = Path(args.outdir).expanduser().resolve() if getattr(args, "outdir", None) else wout_path.parent
-        from .plotting import plot_wout
-        print(f"Plotting {wout_path.name} → {outdir}/")
-        plot_wout(wout_path, outdir=outdir)
-        return 0
+    plot_requested = args.plot is not None
+    target_arg = args.input
+    if args.plot not in (None, _PLOT_AUTO):
+        target_arg = args.plot
+        if args.input is not None:
+            parser.error("provide the target either as --plot PATH or as a positional input, not both")
+    if args.plot == _PLOT_AUTO and target_arg is None:
+        parser.error("--plot requires a PATH or a positional input")
+    if target_arg is None:
+        parser.error("provide a VMEC input file, wout_*.nc with --booz, or use --plot PATH")
 
-    if args.input is None:
-        parser.error("provide a VMEC input file or use --plot wout.nc")
-
-    input_path = Path(args.input).expanduser().resolve()
+    input_path = Path(target_arg).expanduser().resolve()
     if not input_path.exists():
         parser.error(f"input file not found: {input_path}")
 
     outdir = Path(args.outdir).expanduser().resolve() if args.outdir else None
+    plot_outdir = outdir if outdir is not None else input_path.parent
+
+    if _is_boozmn_path(input_path):
+        if not plot_requested:
+            parser.error("boozmn_*.nc inputs are plot-only; use --plot boozmn_*.nc")
+        _plot_boozmn_file(input_path, plot_outdir)
+        return 0
+
+    if _is_wout_path(input_path):
+        if plot_requested:
+            _plot_wout_file(input_path, plot_outdir)
+        if bool(args.booz):
+            _run_booz_for_wout(input_path, source_input_path=None, args=args, plot=plot_requested, outdir=plot_outdir)
+        if (not plot_requested) and (not bool(args.booz)):
+            parser.error("wout_*.nc inputs require --plot and/or --booz")
+        return 0
+
+    # From here onward the target is a VMEC input file.
     output = Path(args.output).expanduser().resolve() if args.output else None
     wout_path = resolve_wout_path(input_path=input_path, outdir=outdir, output=output)
     wout_path.parent.mkdir(parents=True, exist_ok=True)
@@ -423,6 +544,14 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:
             pass
     write_wout_from_fixed_boundary_run(wout_path, run, include_fsq=True)
+    print(f"Wrote WOUT file: {wout_path}")
+
+    if plot_requested:
+        _plot_wout_file(wout_path, plot_outdir)
+
+    booz_cfg = _booz_config_for_path(input_path, args)
+    if booz_cfg.enabled:
+        _run_booz_for_wout(wout_path, source_input_path=input_path, args=args, plot=plot_requested, outdir=plot_outdir)
     return 0
 
 

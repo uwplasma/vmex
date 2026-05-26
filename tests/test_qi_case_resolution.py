@@ -53,7 +53,7 @@ def test_nfp3_qi_catalog_matches_reviewed_seed3127_target_aspect(monkeypatch) ->
     assert case["boundary_reference_preconditioner"]["target_aspect"] == pytest.approx(
         mod.SEED3127_REVIEWED_TARGET_ASPECT
     )
-    assert "aspect4" in str(case["output_dir"])
+    assert "aspect5" in str(case["output_dir"])
 
 
 def test_minimal_and_circular_qi_cases_require_reference_seeded_local_stage() -> None:
@@ -117,7 +117,7 @@ def test_resolve_qi_case_external_reference_overrides_policy_controls(monkeypatc
     assert boundary_reference["enabled"] is True
     assert boundary_reference["reference_input"] == reference_path
     assert boundary_reference["max_mode"] == 2
-    assert boundary_reference["target_aspect"] == pytest.approx(6.0)
+    assert boundary_reference["target_aspect"] == pytest.approx(5.0)
     assert boundary_reference["max_mirror_ratio"] == pytest.approx(0.35)
     assert boundary_reference["smooth_qi_max"] == pytest.approx(3.0e-3)
     assert boundary_reference["legacy_qi_max"] == pytest.approx(2.0e-3)

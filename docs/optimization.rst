@@ -186,8 +186,8 @@ when preseed/no-preseed is the experiment:
    PYTHONPATH=. python examples/optimization/render_qi_constrained_sweep.py
 
 For QI seed robustness, first rank solved seed candidates without optimizing,
-then run the bounded robustness probe or select a ``RUN_CASE`` in
-``QI_optimization.py``:
+then edit the top-level ``INPUT_FILE``, ``OUTPUT_DIR``, seed-helper flags, and
+reference path in ``QI_optimization.py`` before running the standalone script:
 
 .. code-block:: bash
 
@@ -195,24 +195,7 @@ then run the bounded robustness probe or select a ``RUN_CASE`` in
    PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py --quick --smooth-qi-max 5e-3 --legacy-qi-max 2e-3 --csv results/qi_seed3127_audit.csv
    PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py --quick --prefine-probes plan --prefine-manifest results/qi_seed_audit/prefine_manifest.json --prefine-output-dir results/qi_seed_audit/prefine_probes
    PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_seed_robustness.py
-   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp1_qi \
-     VMEC_JAX_QI_TARGET_ASPECT=10 \
-     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp1_qi_direct_office_20260519 \
-     python examples/optimization/QI_optimization.py
-   PYTHONPATH=. JAX_PLATFORMS=cpu \
-     VMEC_JAX_QI_INPUT=examples/data/input.minimal_seed_nfp2_target_helicity \
-     VMEC_JAX_QI_POLICY_CASE=nfp2_qi \
-     VMEC_JAX_QI_LABEL=nfp2_target_helicity \
-     VMEC_JAX_QI_TARGET_ASPECT=6 \
-     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/minimal_nfp2_to_qi_reference \
-     python examples/optimization/QI_optimization.py
-   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp3_qi \
-     VMEC_JAX_QI_TARGET_ASPECT=4 \
-     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516 \
-     python examples/optimization/QI_optimization.py
-   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi \
-     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/minimal_nfp4_to_qi_finite_beta_reference \
-     python examples/optimization/QI_optimization.py
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_optimization.py
 
 The second audit command uses the far-seed QI gate convention from
 ``QI_optimization.py``: legacy QI below ``2e-3`` and smooth differentiable QI
@@ -335,18 +318,17 @@ basin-survey diagnostics use fast trial solves unless ``--exact-solve`` is
 passed; use exact solves before treating their scalar values as promotion
 evidence.
 
-``VMEC_JAX_QI_RUN_CASE=nfp4_qi`` starts from
+The archived NFP=4 QI coverage row starts from
 ``examples/data/input.minimal_seed_nfp4``, whose boundary contains only
 ``RBC(0,0)``, ``RBC(0,1)``, and ``ZBS(0,1)``.  The checked-in passing coverage
 row uses a same-NFP finite-beta QI reference-family proposal as a deterministic
 basin-capture step, then runs a bounded local QI audit/refine stage.  This is a
 case-gated NFP=4 result, not a non-stale common-minimal showcase row and not yet
-proof that arbitrary NFP=4 seeds converge.
-``VMEC_JAX_QI_RUN_CASE=nfp4_qi_finite_beta`` is a finite-beta NFP=4 stress
-fixture, not the README initial-state row.
-``VMEC_JAX_QI_RUN_CASE=nfp4_qh_warm_to_qi`` remains an explicit non-passing
-stress fixture for QH-to-QI conversion and should not be used as a promoted QI
-result.
+proof that arbitrary NFP=4 seeds converge.  The archived labels
+``nfp3_qi``, ``nfp4_qi_finite_beta``, and ``nfp4_qh_warm_to_qi`` remain in the
+sweep/case registry for rendering and stress testing; the finite-beta NFP=4
+entry is a finite-beta NFP=4 stress fixture, and ``nfp4_qh_warm_to_qi`` remains
+an explicit non-passing stress fixture for QH-to-QI conversion.
 
 Motivation: differentiability without finite differences
 ---------------------------------------------------------
@@ -496,8 +478,10 @@ target must be ``0.0``.
 QI objectives use the same tuple syntax, but the QI field-quality terms are
 routed through the Boozer/QI problem path so they can share one Boozer
 transform.  QI tuple targets must be ``0.0``; encode thresholds and smoothing
-inside the objective object, for example ``QuasiIsodynamicOptions``,
-``MirrorRatio(threshold=...)``, or ``MaxElongation(threshold=...)``.
+inside the objective object, for example ``QuasiIsodynamicOptions``.
+``MirrorRatio(threshold=...)`` and ``MaxElongation(threshold=...)`` are
+ordinary solved-VMEC-state objectives, so they can be added to QA/QH/QP/QI
+problems without depending on QI options.
 Use ``include_bounce_endpoints=True`` when you want the smooth QI residual to
 sample the same normalized bounce-level endpoints as the legacy Goodman-style
 branch-shuffle diagnostic.
@@ -522,12 +506,14 @@ branch-shuffle diagnostic.
    qi = vj.QuasiIsodynamicResidual(qi_options)
    mirror = vj.MirrorRatio(
        threshold=0.21,
+       surfaces=qi_options.surfaces,
+       mboz=qi_options.mboz,
+       nboz=qi_options.nboz,
        ntheta=96,
        nphi=96,
-       surface_index=None,       # all QI surfaces
+       surface_index=None,       # all selected surfaces
        smooth_extrema=2.0e-2,    # smoother gradients than hard max/min
        smooth_penalty=2.0e-2,
-       qi_options=qi_options,
    )
    qi_ceiling = vj.QuasiIsodynamicResidualCeiling(
        maximum=2.0e-3,
@@ -538,7 +524,6 @@ branch-shuffle diagnostic.
        threshold=8.0,
        ntheta=48,
        nphi=16,
-       qi_options=qi_options,
    )
 
    objective_tuples = [
@@ -551,11 +536,11 @@ branch-shuffle diagnostic.
    ]
    qi_problem = vj.LeastSquaresProblem.from_tuples(objective_tuples)
 
-The staged QI example also passes an explicit
-``qis.make_qi_optimization_context(globals(), strict=True)`` into helper
-routines.  ``strict=True`` makes missing script constants fail immediately
-instead of silently falling back to legacy module globals, while still keeping
-the scientific objective list assembled directly in the script.
+The staged QI example builds an explicit
+``vj.make_qi_optimization_context(...)`` from the same top-level variables used
+to assemble the objective tuple list.  That context is passed to seed and
+checkpoint helpers so the driver remains editable while shared implementation
+details stay in ``vmec_jax.qi_optimization``.
 
 For QI cleanup work, rank solved candidates with the no-solve component report
 before promoting any scalar objective result.  Mirror-ratio cleanup must be
@@ -696,7 +681,7 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
            saved_paths.final_wout,
            outdir=OUTPUT_DIR,
        ),
-       "bmag_contours": vj.plot_bmag_contours(
+       "boozer_lcfs_bmag_contours": vj.plot_boozer_lcfs_bmag_comparison(
            saved_paths.initial_wout,
            saved_paths.final_wout,
            outdir=OUTPUT_DIR,
@@ -794,13 +779,14 @@ include the source-initial LCFS, final LCFS, objective history, and initial/fina
 Boozer :math:`|B|` line contours.
 
 The common-minimal seed inputs are intentionally close to circular tori and can
-sit on a zero-transform branch.  The QA/QH examples use
-``SIMPLE_SEED_PERTURBATION = 1e-5`` as a tiny derivative seed.  The QP example
-uses ``1e-2`` and a visible ``STAGE_MODES = [1, 2, 2]`` override because the
-May 2026 bounded seed study showed that ``1e-5`` through ``1e-3`` remained on
-the zero-iota branch, while ``1e-2`` produced nonzero transform and a useful
-mode-2 QP minimum.  These are script-level optimization-policy choices: change
-them directly when studying direct high-mode starts or alternate seeds.
+sit on a zero-transform branch.  The QA/QH/QP examples now use
+``SIMPLE_SEED_PERTURBATION = 1e-5`` as a tiny derivative seed.  QP is more
+sensitive to direct high-mode starts, so it uses the same tiny perturbation but
+keeps a lower-mode continuation sequence from ``vj.qs_stage_modes(...)`` before
+the final high-mode cleanup.  This avoids the nonphysical zero-iota branch that
+can otherwise produce enormous initial QP residuals.  These are script-level
+optimization-policy choices: change them directly when studying direct
+high-mode starts or alternate seeds.
 
 
 Full QA/QH/QP/QI policy sweep
@@ -1137,8 +1123,8 @@ Two practical lessons from that study are now reflected in the example:
 - ``least_squares_solve`` uses SIMSOPT tuple semantics, so tuple weights are
   ``sqrt(weight)`` residual multipliers.  Mirror/elongation soft-wall weights
   should be strong enough to prevent pathological shapes but not so dominant
-  that they block the lower-QI basin.  ``MirrorRatio`` defaults to all QI
-  surfaces when ``surface_index=None`` and exposes ``smooth_extrema`` and
+  that they block the lower-QI basin.  ``MirrorRatio`` defaults to all selected
+  Boozer surfaces when ``surface_index=None`` and exposes ``smooth_extrema`` and
   ``smooth_penalty`` to avoid hard max/min gradients during cleanup.
 - The QI branch-width and shuffle-profile terms smooth the well matching
   enough to avoid the noisy objective jumps seen in earlier direct QI attempts,
@@ -1219,145 +1205,65 @@ Two practical lessons from that study are now reflected in the example:
   mirror ratio enough selection weight to use aspect/elongation margin instead
   of always picking the smallest scalar QI residual.
 
-``QI_optimization.py`` is now the single recommended multi-seed entry point.
-The driver keeps the user-facing workflow in one place, while the bundled case
-catalog lives in ``qi_optimization_cases.py`` and the staged promotion,
-checkpoint, and reference-family helper routines are provided by
-``vmec_jax.qi_optimization`` and re-exported by the local
-``qi_optimization_support.py`` compatibility shim.
-Set ``VMEC_JAX_QI_RUN_CASE`` at launch time, or change ``RUN_CASE`` at the top
-of the file, to one of the bundled cases:
+``QI_optimization.py`` is the recommended editable QI entry point.  It no
+longer hides seed selection behind launch-time overrides.  Instead, edit these
+ordinary variables near the top of the script:
 
 .. code-block:: python
 
-   RUN_CASE = "nfp1_qi"             # NFP=1 mirror-aware QI lane
-   RUN_CASE = "nfp2_qi"             # default NFP=2 mirror-aware QI lane
-   RUN_CASE = "nfp3_qi"             # NFP=3 alias for qi_stel_seed_3127
-   RUN_CASE = "qi_stel_seed_3127"   # descriptive name for the NFP=3 far seed
-   RUN_CASE = "nfp4_qi"             # NFP=4 case-gated minimal-seed QI lane
-   RUN_CASE = "nfp4_qi_finite_beta" # NFP=4 finite-beta stress fixture
-   RUN_CASE = "nfp4_qh_warm_to_qi"  # NFP=4 diagnostic stress test, using the input NFP
+   INPUT_FILE = DATA_DIR / "input.nfp2_QI"
+   OUTPUT_DIR = Path("results/qi_opt/ess/nfp2_qi")
+   MAX_MODE = 3
+   USE_SIMPLE_SEED = False
+   USE_TARGET_HELICITY_SEED = True
+   USE_REFERENCE_FAMILY_SEED = False
+   REFERENCE_INPUT_FILE = DATA_DIR / "input.nfp2_QI"
+   TARGET_ASPECT = 5.0
+   TARGET_ABS_IOTA_MIN = 0.41
+   MAX_MIRROR_RATIO = 0.30
+   MAX_ELONGATION = 8.2
 
-The docs NFP=4 QI coverage case starts from the common minimal NFP=4 input but
-uses a same-NFP reference-family preconditioner; keep it separate from the
-pending common-minimal QI showcase matrix.  The finite-beta and QH-warm-start
-NFP=4 cases are stress fixtures; keep them out of promoted QI robustness tables
-unless their independent diagnostics are reviewed and the docs renderer is
-intentionally retargeted.
-
-``QI_optimization.py`` preserves the raw selected input as ``RAW_INPUT_FILE``.
-It only rewrites that input through the simple-seed preprocessor when the case
-sets ``use_simple_seed=True`` or when ``VMEC_JAX_QI_USE_SIMPLE_SEED`` is set to
-a truthy value.  This matters for reviewed seeds such as
-``input.QI_stel_seed_3127``: the default path should audit and optimize the
-actual seed rather than silently replacing it with a three-coefficient toy
-boundary.
-
-For example, to run the archived coverage lanes without editing the script,
-including the case-specific aspect-ratio and output-directory overrides used by
-the reviewed docs figure:
+The script takes ``nfp`` from the VMEC input file, so NFP=1/2/3/4 do not need
+separate drivers.  To try a different VMEC input deck, change only
+``INPUT_FILE`` and ``OUTPUT_DIR`` first, then run:
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp1_qi \
-     VMEC_JAX_QI_TARGET_ASPECT=10 \
-     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp1_qi_direct_office_20260519 \
-     python examples/optimization/QI_optimization.py
-   PYTHONPATH=. JAX_PLATFORMS=cpu \
-     VMEC_JAX_QI_INPUT=examples/data/input.minimal_seed_nfp2_target_helicity \
-     VMEC_JAX_QI_POLICY_CASE=nfp2_qi \
-     VMEC_JAX_QI_LABEL=nfp2_target_helicity \
-     VMEC_JAX_QI_TARGET_ASPECT=6 \
-     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/minimal_nfp2_to_qi_reference \
-     python examples/optimization/QI_optimization.py
-   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp3_qi \
-     VMEC_JAX_QI_TARGET_ASPECT=4 \
-     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516 \
-     python examples/optimization/QI_optimization.py
-   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi \
-     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/minimal_nfp4_to_qi_finite_beta_reference \
-     python examples/optimization/QI_optimization.py
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_optimization.py
 
-These commands create candidate result directories under ``results/``.  After
-reviewing the diagnostics and plots, replace the matching
-``docs/_static/qi_readme_cases/<case>/`` bundle before running
-``render_qi_readme_cases.py``; the renderer intentionally consumes the tracked
-docs bundle rather than ignored local result directories.
+``QI_optimization.py`` preserves the raw selected input as ``RAW_INPUT_FILE``.
+It only rewrites that input when ``USE_SIMPLE_SEED`` is enabled, and then the
+generated ``input.simple_seed`` is written under ``OUTPUT_DIR``.  This matters
+for reviewed seeds such as ``input.QI_stel_seed_3127``: keep
+``USE_SIMPLE_SEED = False`` when you want to audit and optimize the actual
+scientific seed rather than a three-coefficient toy boundary.
 
-The script takes ``nfp`` from the VMEC input file, so NFP=1/2/3/4 do not need
-separate drivers.  To try a different VMEC input deck, add one dictionary entry
-to ``QI_CASES`` in
-``examples/optimization/qi_optimization_cases.py``:
+For far seeds, use the visible seed helpers before the local optimizer:
 
-.. code-block:: python
-
-   QI_CASES["my_seed"] = {
-       "input_file": Path("/absolute/path/to/input.my_seed"),
-       "output_dir": Path("results/qi_opt/ess/my_seed"),
-       "max_mode": 3,
-       "min_vmec_mode": 6,
-       "use_mode_continuation": True,
-       "stage_repeats": 5,
-       "max_nfev": 12,
-       "target_aspect": 6.0,
-       "target_abs_iota_min": 0.41,
-       "mirror_threshold": 0.21,
-       "mirror_surface_index": None,
-       "qi_ceiling_max": 2.0e-2,
-       "qi_ceiling_smooth_penalty": 2.0e-3,
-       "branch_width_weight": 0.5,
-       "weighted_shuffle_profile_weight": 0.0,
-       "phimin": 0.0,
-       # Optional homotopy target for far seeds.  Use a solved QI wout with
-       # the same NFP to steer the Boozer |B| spectrum before QI cleanup.
-       "boozer_target_wout": None,
-       "boozer_target_weight": 0.0,
-       "boozer_target_normalize": True,
-       "boozer_target_include_b00": False,
-       "mirror_weight": 0.0,
-       "elongation_weight": 0.0,
-       "qi_ceiling_weight": 0.0,
-       "shuffle_profile_nphi_out": None,
-   }
-   RUN_CASE = "my_seed"
+- Set ``USE_TARGET_HELICITY_SEED = True`` to add deterministic tiny
+  target-helicity modes when the active modes are exactly zero.
+- Set ``USE_REFERENCE_FAMILY_SEED = True`` and point
+  ``REFERENCE_INPUT_FILE`` at a solved same-NFP QI input when the seed is in a
+  different basin.  The helper scans ``REFERENCE_LAMBDAS`` in boundary space,
+  ranks candidates with independent QI/mirror/iota diagnostics, and writes the
+  selected input under ``OUTPUT_DIR`` before local cleanup.
 
 Keep ``project_input_boundary_to_max_mode=True`` in the
 ``FixedBoundaryVMEC.from_input`` call so a ``max_mode = 1`` run removes higher
 boundary modes from a richer seed, while ``max_mode = 2`` and ``3`` expose the
-corresponding larger parameter spaces.  The optimization script itself only
-needs the VMEC input file.  For a one-off external deck using the conservative
-far-seed policy, set ``VMEC_JAX_QI_INPUT`` and optionally
-``VMEC_JAX_QI_OUTPUT_DIR``:
+corresponding larger parameter spaces.  The standalone script owns the
+optimization policy; ``examples/optimization/qi_optimization_cases.py`` is now
+primarily a sweep/rendering registry for archived docs rows such as
+``nfp3_qi``, ``nfp4_qi_finite_beta``, and ``nfp4_qh_warm_to_qi``.  The
+``nfp4_qi_finite_beta`` row is a finite-beta NFP=4 stress fixture, and
+``nfp4_qh_warm_to_qi`` is an explicit non-passing stress fixture.
 
-.. code-block:: bash
-
-   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_INPUT=/path/to/input.my_seed python examples/optimization/QI_optimization.py
-
-If you have a scientifically appropriate same-NFP QI reference input, add it
-without editing the script:
-
-.. code-block:: bash
-
-   PYTHONPATH=. JAX_PLATFORMS=cpu \
-     VMEC_JAX_QI_INPUT=/path/to/input.my_seed \
-     VMEC_JAX_QI_REFERENCE_INPUT=/path/to/input.same_nfp_qi_reference \
-     python examples/optimization/QI_optimization.py
-
-If you want to rank the seed before optimizing it, first create a matching
+If you want to rank a new seed before optimizing it, first create a matching
 wout with ``vmec_jax /path/to/input.my_seed`` and then run
 ``examples/optimization/audit_qi_seed_suitability.py --case
-label:qi:input_path:wout_path`` as described in :doc:`validation`.
-
-The bundled ``input.QI_stel_seed_3127`` case can be used directly with
-``VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127`` or
-``RUN_CASE = "qi_stel_seed_3127"``.  This far-from-QI seed is configured as a
-reference-family robustness probe: direct local mirror/QI weighting is not
-enough, but a large deterministic boundary-space move toward the same-NFP QI
-family enters the precise-QI basin.  For a new unrelated seed, audit the seed
-first, prefer a solved same-NFP QI reference if one is scientifically
-appropriate, run the boundary-interpolation scan, then accept the result only
-if both the numerical metrics and Boozer ``|B|`` line-contour plot pass the QI
-gate.
+label:qi:input_path:wout_path`` as described in :doc:`validation`.  Promote a
+QI result only if both the numerical metrics and the Boozer ``|B|``
+line-contour plot pass the QI gate.
 
 For local cleanup after a global preconditioner, the script can unlock
 boundary modes anisotropically using ``stage_mode_limits``.  For example,
@@ -1666,14 +1572,18 @@ Parameters: ``specs``, ``alpha`` (default 1.0).
 Bare Gauss-Newton solver with exact Jacobian, Armijo line search, and hooks for
 expensive outer loops.  See ``vmec_jax/optimization.py`` for full signature.
 
-:func:`plot_3d_boundary_comparison`, :func:`plot_bmag_contours`, :func:`plot_objective_history`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Plotting helpers
+~~~~~~~~~~~~~~~~
+
+``plot_3d_boundary_comparison``, ``plot_boozer_lcfs_bmag_comparison``, and
+``plot_objective_history``
 
 Generate the standard optimization figures independently, so user scripts can
 choose only the plots they need:
 
 - ``boundary_comparison.png`` — 3-D LCFS coloured by :math:`|B|`.
-- ``bmag_surface.png`` — :math:`|B|` contour lines on LCFS (θ, φ/nfp).
+- ``boozer_lcfs_bmag_comparison.png`` — initial/final :math:`|B|`
+  contour lines on the LCFS in Boozer coordinates :math:`(\theta_B,\phi_B)`.
 - ``objective_history.png`` — Objective and aspect ratio vs Jacobian index.
 
 :func:`checkpoint_tape_state_jvp_columns`
@@ -1706,8 +1616,9 @@ Source files
        (``quasi_isodynamic_residual_from_state``), mirror-ratio penalty, and
        LCFS elongation and ``LgradB`` penalties.
    * - ``vmec_jax/plotting.py``
-     - ``plot_3d_boundary_comparison``, ``plot_bmag_contours``,
-       and ``plot_objective_history``.
+     - ``plot_3d_boundary_comparison``,
+       ``plot_boozer_lcfs_bmag_comparison``, and
+       ``plot_objective_history``.
    * - ``vmec_jax/driver.py``
      - ``write_wout_from_fixed_boundary_run``, ``wout_from_fixed_boundary_run``.
    * - ``examples/optimization/QH_optimization.py``
