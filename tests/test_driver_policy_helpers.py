@@ -91,6 +91,37 @@ def test_resolve_jit_forces_auto_policy_uses_work_and_iteration_thresholds():
     assert driver._resolve_jit_forces_auto_policy("auto", object(), niter_i=1) is True
 
 
+def test_host_update_default_and_scan_policy_handle_fallback_branches(monkeypatch):
+    cfg = SimpleNamespace(ns=2, mpol=2, ntor=1, lasym=False)
+    monkeypatch.setenv("VMEC_JAX_HOST_UPDATE_CPU_WORK_LIMIT", "not-an-int")
+
+    assert driver._host_update_assembly_driver_default(
+        cfg=cfg,
+        performance_mode=True,
+        backend="cpu",
+        use_scan=False,
+    ) is True
+
+    assert driver._default_use_scan_for_backend(_Input(), "unknown-backend", "default") is False
+
+
+def test_precomputed_tridi_policy_tolerates_bad_mode_counts():
+    class BadModeCfg:
+        lasym = False
+        ntor = 16
+
+        @property
+        def mpol(self):
+            raise RuntimeError("mode metadata unavailable")
+
+    assert driver._default_preconditioner_use_precomputed_tridi(
+        cfg=BadModeCfg(),
+        backend="gpu",
+        performance_mode=True,
+        use_scan=False,
+    ) is None
+
+
 @pytest.mark.parametrize("solver_device", [None, "", " none ", "AUTO", "default"])
 def test_resolve_fixed_boundary_solver_device_inherits_default_for_auto_values(solver_device):
     assert (
@@ -409,6 +440,32 @@ def test_result_final_residuals_uses_flattened_diagnostic_histories():
     assert driver._result_final_residuals(result) == (2.0, 4.0, 6.0)
 
 
+def test_result_final_residuals_ignores_unparseable_explicit_values_and_broken_histories():
+    class BrokenHistoryResult:
+        diagnostics = {
+            "final_fsqr": "not-a-float",
+            "final_fsqz": 2.0,
+            "final_fsql": 3.0,
+            "fsqr_full": [],
+            "fsqz_full": [],
+            "fsql_full": [],
+        }
+
+        @property
+        def fsqr2_history(self):
+            raise RuntimeError("history not materialized")
+
+        @property
+        def fsqz2_history(self):
+            raise RuntimeError("history not materialized")
+
+        @property
+        def fsql2_history(self):
+            raise RuntimeError("history not materialized")
+
+    assert driver._result_final_residuals(BrokenHistoryResult()) is None
+
+
 def test_result_final_fsq_prefers_weight_history_then_residual_sum():
     weighted = SimpleNamespace(
         diagnostics={"final_fsqr": 1.0, "final_fsqz": 2.0, "final_fsql": 3.0},
@@ -456,6 +513,18 @@ def test_result_hits_total_target_clamps_negative_target_and_handles_none():
     assert driver._result_hits_total_target(zero, fsq_total_target=-1.0) is True
     assert driver._result_hits_total_target(nonzero, fsq_total_target=-1.0) is False
     assert driver._result_hits_total_target(zero, fsq_total_target=None) is False
+
+
+def test_copy_final_force_payload_preserves_solver_payload_when_present():
+    source = _stage_result("source", n_iter=1, w_history=[1.0])
+    result = _stage_result("result", n_iter=1, w_history=[2.0])
+    payload = {"fsqr": 1.0}
+    object.__setattr__(source, "_final_force_payload", payload)
+
+    out = driver._copy_final_force_payload(result, source)
+
+    assert out is result
+    assert getattr(out, "_final_force_payload") is payload
 
 
 def test_wout_from_fixed_boundary_run_samples_fsqt_and_falls_back_to_residual_recompute(monkeypatch, tmp_path):

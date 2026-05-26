@@ -72,6 +72,9 @@ def test_radial_integral_helpers_validate_shapes_and_half_mesh_rule() -> None:
 
     with pytest.raises(ValueError, match="same length"):
         cumtrapz_s(jnp.asarray([1.0, 2.0]), s)
+    with pytest.raises(ValueError, match="must be 1D"):
+        cumrect_s_halfmesh(jnp.ones((1, 2)), s)
+    np.testing.assert_allclose(np.asarray(cumrect_s_halfmesh(jnp.asarray([]), jnp.asarray([]))), np.asarray([]))
     with pytest.raises(ValueError, match="non-empty"):
         dvds_from_sqrtg(np.zeros((1, 0, 2)), np.asarray([]), np.asarray([0.0, 1.0]), nfp=1)
     with pytest.raises(ValueError, match="nfp must be positive"):

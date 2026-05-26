@@ -11,6 +11,7 @@ import hashlib
 import io
 import tarfile
 import urllib.request
+from collections.abc import Sequence
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +24,15 @@ DEFAULT_URL = (
 )
 DEFAULT_SHA256 = "3344fc2401fffed240ee57ae741ec521594c592627c76dae203503f485e4c0d8"
 
+COMMON_ASSET_PATHS = (
+    "examples/data/mgrid_cth_like.nc",
+    "examples/data/mgrid_d3d_ef.nc",
+    "examples/data/wout_*_reference.nc",
+    "examples_single_grid/data/mgrid_cth_like.nc",
+    "examples_single_grid/data/mgrid_d3d_ef.nc",
+    "examples_single_grid/data/wout_*_reference.nc",
+)
+
 
 def _sha256(data: bytes) -> str:
     h = hashlib.sha256()
@@ -30,13 +40,39 @@ def _sha256(data: bytes) -> str:
     return h.hexdigest()
 
 
-def main() -> int:
+def _safe_extract(tf: tarfile.TarFile, dest: Path) -> None:
+    """Extract ``tf`` under ``dest`` without allowing path traversal."""
+    dest_resolved = dest.resolve()
+    for member in tf.getmembers():
+        target = (dest_resolved / member.name).resolve()
+        if target != dest_resolved and dest_resolved not in target.parents:
+            raise SystemExit(f"Refusing to extract path outside destination: {member.name}")
+    tf.extractall(dest_resolved)
+
+
+def _print_bundle_info(url: str, sha256: str) -> None:
+    print(f"Asset bundle URL: {url}")
+    print(f"Expected SHA256:  {sha256 or '(not checked)'}")
+    print("Common installed paths:")
+    for path in COMMON_ASSET_PATHS:
+        print(f"  {path}")
+
+
+def main(argv: Sequence[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--url", type=str, default=DEFAULT_URL, help="Asset tarball URL.")
     p.add_argument("--sha256", type=str, default=DEFAULT_SHA256, help="Expected SHA256.")
     p.add_argument("--dest", type=str, default=str(REPO_ROOT), help="Destination repo root.")
     p.add_argument("--force", action="store_true", help="Re-download even if files already exist.")
-    args = p.parse_args()
+    p.add_argument("--list", action="store_true", help="Print the default bundle location and common paths.")
+    p.add_argument("--dry-run", action="store_true", help="Print what would be downloaded without fetching it.")
+    args = p.parse_args(argv)
+
+    if args.list or args.dry_run:
+        _print_bundle_info(args.url, args.sha256)
+        if args.dry_run:
+            print("Dry run: no files downloaded or extracted.")
+        return 0
 
     dest = Path(args.dest).expanduser().resolve()
     marker = dest / ".assets_installed"
@@ -54,7 +90,7 @@ def main() -> int:
 
     print("Extracting assets...")
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tf:
-        tf.extractall(dest)
+        _safe_extract(tf, dest)
 
     marker.write_text(f"{args.url}\n{digest}\n")
     print("Assets installed.")

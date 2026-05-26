@@ -189,7 +189,7 @@ safe to run on a normal developer machine:
 - Python compile check for package, examples, tests, tools, and validation
   helpers.
 - Repository size audit using
-  ``tools/diagnostics/repo_size_audit.py --top 20 --max-total-mib 60 --max-file-mib 5``.
+  ``tools/diagnostics/repo_size_audit.py --top 20 --max-total-mib 50 --max-file-mib 2``.
 - Fast required pytest suite with the current ``95%`` coverage fail-under:
   ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000 and not simsopt"``
   plus ``--cov=vmec_jax`` and ``--cov-fail-under=95``.

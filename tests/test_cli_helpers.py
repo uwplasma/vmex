@@ -66,6 +66,32 @@ def test_cli_wout_io_warmup_is_opt_in(monkeypatch) -> None:
     assert calls == ["netCDF4"]
 
 
+def test_cli_wout_io_warmup_swallows_import_and_thread_start_failures(monkeypatch) -> None:
+    monkeypatch.setenv("VMEC_JAX_WOUT_IO_WARMUP", "yes")
+
+    calls: list[str] = []
+
+    def fake_import_module(name: str):
+        calls.append(name)
+        raise RuntimeError("netcdf unavailable")
+
+    monkeypatch.setattr(importlib, "import_module", fake_import_module)
+
+    thread = cli._start_wout_io_warmup()
+    assert thread is not None
+    thread.join(timeout=5)
+    assert calls == ["netCDF4"]
+
+    class BrokenThread:
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError("threading unavailable")
+
+    monkeypatch.setattr(importlib, "import_module", lambda name: object())
+    monkeypatch.setattr("threading.Thread", BrokenThread)
+
+    assert cli._start_wout_io_warmup() is None
+
+
 def test_cli_plot_mode_dispatches_without_solver(monkeypatch, tmp_path: Path) -> None:
     calls: list[tuple[Path, Path]] = []
     wout = tmp_path / "wout_case.nc"
@@ -88,6 +114,23 @@ def test_cli_errors_for_missing_plot_or_input(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as missing_plot:
         cli.main(["--plot", str(tmp_path / "missing.nc")])
     assert missing_plot.value.code == 2
+
+
+def test_cli_errors_for_invalid_jit_and_conflicting_solver_mode_flags(tmp_path: Path) -> None:
+    input_path = tmp_path / "input.case"
+    input_path.write_text("&INDATA\n/\n")
+
+    with pytest.raises(SystemExit) as invalid_jit:
+        cli.main([str(input_path), "--jit-forces", "not-a-bool"])
+    assert invalid_jit.value.code == 2
+
+    with pytest.raises(SystemExit) as parity_fast:
+        cli.main([str(input_path), "--parity", "--fast"])
+    assert parity_fast.value.code == 2
+
+    with pytest.raises(SystemExit) as mode_alias_conflict:
+        cli.main([str(input_path), "--solver-mode", "parity", "--fast"])
+    assert mode_alias_conflict.value.code == 2
 
 
 def test_cli_run_mode_wires_solver_kwargs_and_output(monkeypatch, tmp_path: Path) -> None:
@@ -217,6 +260,27 @@ def test_cli_cpu_default_keeps_host_loop_when_scan_policy_is_true(monkeypatch, t
     assert cli.main([str(input_path), "--solver-device", "cpu", "--quiet"]) == 0
     assert calls["kwargs"]["verbose"] is False
     assert calls["kwargs"]["use_scan"] is False
+
+
+def test_cli_joins_wout_warmup_best_effort(monkeypatch, tmp_path: Path) -> None:
+    input_path = tmp_path / "input.case"
+    input_path.write_text("&INDATA\n  NITER = 1\n/\n")
+    indata = InData(scalars={"NITER": 1}, indexed={})
+    joined = {"called": False}
+
+    class BrokenJoinThread:
+        def join(self):
+            joined["called"] = True
+            raise RuntimeError("join failed")
+
+    monkeypatch.setattr(cli, "read_indata", lambda path: indata)
+    monkeypatch.setattr(cli, "_start_wout_io_warmup", lambda: BrokenJoinThread())
+    monkeypatch.setattr(cli, "default_non_autodiff_solver_policy", lambda _: ("default", True))
+    monkeypatch.setattr(cli, "run_fixed_boundary", lambda path, **kwargs: SimpleNamespace(state=SimpleNamespace(Rcos=0.0)))
+    monkeypatch.setattr(cli, "write_wout_from_fixed_boundary_run", lambda path, run, *, include_fsq: path.write_text("wout"))
+
+    assert cli.main([str(input_path), "--quiet"]) == 0
+    assert joined["called"] is True
 
 
 def test_cli_run_mode_uses_gpu_default_policy(monkeypatch, tmp_path: Path) -> None:
