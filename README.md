@@ -42,6 +42,15 @@ cd vmec_jax
 pip install -e .
 ```
 
+The repository intentionally keeps large optional validation assets out of git.
+If you need the full reference WOUT/mgrid bundle after cloning, download it
+with:
+
+```bash
+python tools/fetch_assets.py --list
+python tools/fetch_assets.py
+```
+
 ## Quick Start
 
 Run the solver with the VMEC2000-style CLI:

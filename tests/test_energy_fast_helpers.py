@@ -1,16 +1,22 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 
 import vmec_jax.energy as energy_mod
 from vmec_jax.energy import (
     _as_float_list,
+    _has_nonzero_profile_coeffs,
     _iotaf_from_iotas,
     _make_torflux_jit,
     _poly_no_const,
     _poly_no_const_deriv,
+    FluxProfiles,
     flux_profiles_from_indata,
+    flux_profiles_from_indata_host_default,
     integrate_volume_density,
+    magnetic_wb_from_state,
 )
 from vmec_jax.namelist import InData
 
@@ -131,6 +137,79 @@ def test_flux_profiles_default_torflux_uses_iota_profile_when_present(monkeypatc
 
     assert calls["n"] == 1
     np.testing.assert_allclose(np.asarray(flux.chipf), np.full_like(s, 0.25 / np.pi))
+
+
+def test_profile_coeff_detection_treats_unparseable_values_as_nonzero():
+    class BrokenCoeffs:
+        def __float__(self):
+            raise RuntimeError("not a scalar coefficient")
+
+    assert _has_nonzero_profile_coeffs(BrokenCoeffs()) is True
+    assert _has_nonzero_profile_coeffs([]) is False
+    assert _has_nonzero_profile_coeffs([0.0, 1.0e-30]) is True
+
+
+def test_flux_profiles_nondefault_aphi_without_iota_covers_zero_polflux_and_single_surface():
+    s = np.asarray([0.5])
+    indata = InData(scalars={"PHIEDGE": 1.0, "APHI": [1.0, 0.25], "AI": []}, indexed={})
+
+    flux = flux_profiles_from_indata(indata, s, signgs=1)
+
+    assert flux.signgs == 1
+    np.testing.assert_allclose(np.asarray(flux.chipf), np.zeros_like(s))
+    assert np.asarray(flux.phips).shape == (1,)
+    assert np.asarray(flux.phips)[0] == 0.0
+
+
+def test_flux_profiles_host_default_rejects_nondefault_cases_and_matches_default_meshes():
+    s = np.asarray([0.0, 0.5, 1.0])
+    default = InData(scalars={"PHIEDGE": 2.0, "APHI": [1.0], "AI": []}, indexed={})
+
+    flux = flux_profiles_from_indata_host_default(default, s, signgs=-1)
+
+    assert flux is not None
+    np.testing.assert_allclose(flux.phipf, -np.ones_like(s) / np.pi)
+    np.testing.assert_allclose(flux.chipf, np.zeros_like(s))
+    np.testing.assert_allclose(flux.phips, [0.0, -1.0 / np.pi, -1.0 / np.pi])
+    assert flux.lamscale > 0.0
+
+    single = flux_profiles_from_indata_host_default(default, np.asarray([0.0]), signgs=1)
+    assert single is not None
+    np.testing.assert_allclose(single.phips, [0.0])
+    assert float(single.lamscale) == 1.0
+
+    assert flux_profiles_from_indata_host_default(InData(scalars={"LRFP": True}, indexed={}), s, signgs=1) is None
+    assert flux_profiles_from_indata_host_default(InData(scalars={"APHI": [1.0, 0.5]}, indexed={}), s, signgs=1) is None
+    assert flux_profiles_from_indata_host_default(InData(scalars={"AI": [0.25]}, indexed={}), s, signgs=1) is None
+    assert flux_profiles_from_indata_host_default(default, np.zeros((1, 2)), signgs=1) is None
+
+
+def test_magnetic_wb_from_state_uses_vmec_energy_normalization(monkeypatch):
+    static = SimpleNamespace(
+        s=np.asarray([0.0, 1.0]),
+        cfg=SimpleNamespace(nfp=1),
+        grid=SimpleNamespace(theta=np.asarray([0.0, np.pi]), zeta=np.asarray([0.0, np.pi])),
+    )
+    geom = SimpleNamespace(sqrtg=np.ones((2, 2, 2)))
+    flux = FluxProfiles(
+        phipf=np.ones(2),
+        chipf=np.zeros(2),
+        phips=np.asarray([0.0, 1.0]),
+        signgs=1,
+        lamscale=np.asarray(1.0),
+    )
+
+    monkeypatch.setattr(energy_mod, "eval_geom", lambda state, static_arg: geom)
+    monkeypatch.setattr(energy_mod, "flux_profiles_from_indata", lambda indata, s, *, signgs: flux)
+    monkeypatch.setattr(energy_mod, "bsup_from_geom", lambda *args, **kwargs: (np.ones((2, 2, 2)), np.ones((2, 2, 2))))
+    monkeypatch.setattr(energy_mod, "b2_from_bsup", lambda g, u, v: np.full((2, 2, 2), 4.0))
+
+    wb, diag = magnetic_wb_from_state(object(), static, InData(scalars={}, indexed={}), signgs=1)
+
+    expected_energy = np.sum(0.5 * np.full((2, 2, 2), 4.0)) * 1.0 * np.pi * np.pi
+    np.testing.assert_allclose(np.asarray(diag["energy_total"]), expected_energy)
+    np.testing.assert_allclose(np.asarray(wb), expected_energy / ((2.0 * np.pi) ** 2))
+    assert diag["lamscale"] == flux.lamscale
 
 
 def test_integrate_volume_density_single_surface_and_sign():

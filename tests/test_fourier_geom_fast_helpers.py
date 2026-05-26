@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from vmec_jax._compat import tree_util
+import vmec_jax.coords as coords_mod
+import vmec_jax.fourier as fourier_mod
 from vmec_jax.coords import Coords
 from vmec_jax.fourier import (
     HelicalBasis,
@@ -63,6 +66,29 @@ def test_helical_basis_cache_pytree_and_phase_stack_fallbacks():
     internal = np.asarray(eval_fourier(c, s, basis, coeffs_internal=True))
     physical = np.asarray(eval_fourier(c, s, basis, coeffs_internal=False))
     assert not np.allclose(internal, physical)
+
+
+def test_pytree_registration_helpers_tolerate_duplicate_registration(monkeypatch):
+    class Dummy:
+        pass
+
+    def duplicate_registration(cls):
+        raise ValueError("Duplicate custom PyTreeDef type registration")
+
+    monkeypatch.setattr(fourier_mod, "_register_pytree_node_class", duplicate_registration, raising=False)
+    monkeypatch.setattr(coords_mod, "_register_pytree_node_class", duplicate_registration, raising=False)
+    assert fourier_mod.register_pytree_node_class(Dummy) is Dummy
+    assert coords_mod.register_pytree_node_class(Dummy) is Dummy
+
+    def different_registration_error(cls):
+        raise ValueError("different registration error")
+
+    monkeypatch.setattr(fourier_mod, "_register_pytree_node_class", different_registration_error, raising=False)
+    with pytest.raises(ValueError, match="different registration error"):
+        fourier_mod.register_pytree_node_class(Dummy)
+    monkeypatch.setattr(coords_mod, "_register_pytree_node_class", different_registration_error, raising=False)
+    with pytest.raises(ValueError, match="different registration error"):
+        coords_mod.register_pytree_node_class(Dummy)
 
 
 def test_project_to_modes_normalization_and_raw_inner_products():

@@ -71,6 +71,31 @@ def _run_ready_optimizer(residual: np.ndarray | None = None) -> FixedBoundaryExa
     return opt
 
 
+def test_boundary_param_numpy_partial_updates_and_unknown_kind() -> None:
+    boundary = _boundary(k=3)
+    specs = [
+        BoundaryParamSpec("rc10", "rc", 0, 1, 0),
+        BoundaryParamSpec("rs10", "rs", 1, 1, 0),
+        BoundaryParamSpec("zc10", "zc", 1, 1, 0),
+        BoundaryParamSpec("zs10", "zs", 2, 1, 0),
+    ]
+
+    updated = opt_module._apply_boundary_params_numpy(boundary, specs, np.asarray([10.0, 20.0, 30.0, 40.0]))
+
+    np.testing.assert_allclose(updated.R_cos, [11.0, 2.0, 3.0])
+    np.testing.assert_allclose(updated.R_sin, [11.0, 32.0, 13.0])
+    np.testing.assert_allclose(updated.Z_cos, [21.0, 52.0, 23.0])
+    np.testing.assert_allclose(updated.Z_sin, [31.0, 32.0, 73.0])
+
+    partial = opt_module._apply_boundary_params_numpy(boundary, specs, np.asarray([10.0]))
+    np.testing.assert_allclose(partial.R_cos, [11.0, 2.0, 3.0])
+    np.testing.assert_allclose(partial.R_sin, boundary.R_sin)
+
+    bad = [BoundaryParamSpec("bad10", "bad", 0, 1, 0)]
+    with pytest.raises(ValueError, match="Unknown boundary parameter kind"):
+        opt_module._apply_boundary_params_numpy(boundary, bad, np.asarray([1.0]))
+
+
 def test_fixed_boundary_exact_optimizer_init_can_be_unit_constructed(monkeypatch):
     state0 = SimpleNamespace(layout=SimpleNamespace(size=12))
     static = SimpleNamespace(s=np.asarray([0.0, 0.5, 1.0]), cfg=SimpleNamespace(lasym=False))
@@ -235,6 +260,50 @@ def test_auto_method_resolver_uses_matrix_free_only_for_profiled_qa_cpu_case(mon
     assert opt._resolve_optimizer_method("matrix-free", 9) == ("scipy_matrix_free", 9, None)
     assert opt._resolve_optimizer_method("scipy-mf", None) == ("scipy_matrix_free", None, None)
     assert opt._resolve_optimizer_method("trf", None) == ("scipy", None, None)
+
+
+def test_optimizer_private_policy_error_branches(monkeypatch):
+    import vmec_jax._compat as compat
+
+    opt = _run_ready_optimizer()
+
+    def bad_default_backend():
+        raise RuntimeError("synthetic backend failure")
+
+    monkeypatch.setattr(compat, "jax", SimpleNamespace(default_backend=bad_default_backend))
+    assert opt._resolve_solver_device("gpu") == "gpu"
+
+    opt._solver_device_name = None
+    assert opt._use_scan_for_trial_solves() is False
+    assert opt._use_precomputed_tridi_for_exact_tape() is None
+
+    opt._solver_device_name = "gpu"
+    monkeypatch.setenv("VMEC_JAX_OPT_EXACT_TRIDI_PRECOMPUTE_MAX_DOFS", "not-an-int")
+    assert opt._use_precomputed_tridi_for_exact_tape() is True
+    assert opt._select_exact_path() == "tape"
+
+    opt._indata = SimpleNamespace(get_bool=lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("bad")))
+    opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=True))
+    opt._specs = []
+    assert opt._has_stellarator_asymmetric_configuration() is True
+
+    opt._profile_add_counter("synthetic_counter", 3)
+    assert opt._profile["synthetic_counter"] == {"count": 1, "wall_time_s": 3.0}
+    solver_total = opt._profile_solver_timing(
+        {
+            "timing": {
+                "scan_total_s": 2.0,
+                "scan_runner_cache_hit_count": 4,
+                "scan_runner_cache_miss_count": object(),
+            }
+        },
+        profile_prefix="scan",
+        phase_wall_s=5.0,
+        unattributed_name="scan_unattributed_total",
+    )
+    assert solver_total == pytest.approx(2.0)
+    assert opt._profile["scan_scan_runner_cache_hit_count"]["wall_time_s"] == pytest.approx(4.0)
+    assert opt._profile["scan_unattributed_total"]["wall_time_s"] == pytest.approx(3.0)
 
 
 def test_optimizer_backend_name_preserves_explicit_device_and_falls_back(monkeypatch):

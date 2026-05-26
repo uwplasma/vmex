@@ -82,7 +82,7 @@ jobs:
 
       - name: Repository size audit
         run: |
-          python tools/diagnostics/repo_size_audit.py --top 20 --max-total-mib 60 --max-file-mib 5
+          python tools/diagnostics/repo_size_audit.py --top 20 --max-total-mib 50 --max-file-mib 2
 
       - name: Run tests
         env:

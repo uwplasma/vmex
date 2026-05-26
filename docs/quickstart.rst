@@ -13,6 +13,7 @@ suite of bundled inputs, writes a ``wout_*.nc`` for each, produces plots, and
 prints a parity summary against bundled VMEC2000 reference ``wout`` files.
 If you have a fresh clone, fetch the optional large assets first::
 
+  python tools/fetch_assets.py --list
   python tools/fetch_assets.py
 
 For a small free-boundary smoke test that does not require the large asset

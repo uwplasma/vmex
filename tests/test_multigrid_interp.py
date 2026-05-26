@@ -112,6 +112,19 @@ def test_interp_vmec_radial_coeffs_degenerate_grids_and_shape_errors():
         interp_vmec_radial_coeffs(x_old, m=np.asarray([0, 1], dtype=np.int32), ns_new=5)
 
 
+def test_multigrid_cache_and_tracer_helpers_handle_fallbacks(monkeypatch):
+    monkeypatch.setattr(multigrid, "has_jax", lambda: False)
+    assert multigrid._contains_jax_tracer(object()) is False
+
+    monkeypatch.setattr(multigrid, "has_jax", lambda: True)
+    assert isinstance(multigrid._cache_allowed(), bool)
+
+    np.testing.assert_allclose(
+        np.asarray(multigrid._scalxc_vmec(ns=0, m=np.asarray([0, 1]), dtype=float)),
+        np.zeros((0, 2)),
+    )
+
+
 def test_interp_vmec_radial_coeffs_matches_reference_when_cache_disabled(monkeypatch):
     rng = np.random.default_rng(2)
     ns_old = 5

@@ -29,6 +29,29 @@ def test_profile_private_helpers_and_fallbacks():
     np.testing.assert_allclose(np.asarray(f_aux), [1.0, 2.0])
 
 
+def test_numpy_profile_helpers_cover_degenerate_and_unparseable_inputs(monkeypatch):
+    class BrokenArray:
+        def __array__(self, *_args, **_kwargs):
+            raise RuntimeError("cannot materialize")
+
+    np.testing.assert_array_equal(profiles_mod._profile_coeffs_np(BrokenArray()), np.asarray([], dtype=np.float64))
+
+    x = np.asarray([0.0, 0.5, 1.0])
+    np.testing.assert_allclose(profiles_mod._two_power_np([3.0], x), 3.0 * np.ones_like(x))
+    np.testing.assert_allclose(profiles_mod._cubic_spline_profile_np([], [], x, integrate=False), np.zeros_like(x))
+    np.testing.assert_allclose(profiles_mod._cubic_spline_profile_np([0.0], [2.0], x, integrate=False), np.full_like(x, 2.0))
+    np.testing.assert_allclose(profiles_mod._cubic_spline_profile_np([0.0], [2.0], x, integrate=True), 2.0 * x)
+
+    assert profiles_mod._can_use_numpy_profile_eval(BrokenArray()) is False
+
+    if has_jax():
+        arr = jnp.asarray([1.0, 2.0])
+        assert profiles_mod._as_float_list(arr) is arr
+
+        monkeypatch.setattr(profiles_mod, "_is_jax_tracer", lambda _value: True)
+        assert profiles_mod._can_use_numpy_profile_eval(jnp.asarray([0.0, 1.0])) is False
+
+
 def test_two_power_and_empty_current_profile_branches():
     indata = InData(
         scalars={
@@ -269,3 +292,53 @@ def test_eager_jax_profile_fallback_matches_vmec_profile_formulas(monkeypatch):
     empty_i = eval_profiles(ProfileInputs(pcurr_type="cubic_spline_i", **empty_base), s)["current"]
     np.testing.assert_allclose(np.asarray(empty_ip), np.zeros_like(np.asarray(s)), atol=0.0)
     np.testing.assert_allclose(np.asarray(empty_i), np.zeros_like(np.asarray(s)), atol=0.0)
+
+
+def test_eager_jax_profile_path_reports_unsupported_types_and_power_series_current(monkeypatch):
+    if not has_jax():
+        pytest.skip("JAX is required for eager JAX profile coverage")
+
+    monkeypatch.setattr(profiles_mod, "_can_use_numpy_profile_eval", lambda _s_grid: False)
+    s = jnp.asarray([0.0, 0.5, 1.0])
+
+    current = eval_profiles(
+        ProfileInputs(
+            pmass_type="power_series",
+            piota_type="power_series",
+            pcurr_type="power_series",
+            am=jnp.asarray([0.0]),
+            ai=jnp.asarray([]),
+            ac=jnp.asarray([2.0, 3.0]),
+            ac_aux_s=jnp.asarray([]),
+            ac_aux_f=jnp.asarray([]),
+            pres_scale=1.0,
+            bloat=1.0,
+            spres_ped=1.0,
+            lrfp=False,
+            ncurr=1,
+        ),
+        s,
+    )["current"]
+    np.testing.assert_allclose(np.asarray(current), 2.0 * np.asarray(s) + 1.5 * np.asarray(s) ** 2)
+
+    base = dict(
+        pmass_type="power_series",
+        piota_type="power_series",
+        pcurr_type="power_series",
+        am=jnp.asarray([0.0]),
+        ai=jnp.asarray([]),
+        ac=jnp.asarray([]),
+        ac_aux_s=jnp.asarray([]),
+        ac_aux_f=jnp.asarray([]),
+        pres_scale=1.0,
+        bloat=1.0,
+        spres_ped=1.0,
+        lrfp=False,
+        ncurr=1,
+    )
+    with pytest.raises(NotImplementedError, match="pmass_type"):
+        eval_profiles(ProfileInputs(**{**base, "pmass_type": "unsupported"}), s)
+    with pytest.raises(NotImplementedError, match="piota_type"):
+        eval_profiles(ProfileInputs(**{**base, "piota_type": "unsupported", "ai": jnp.asarray([0.1])}), s)
+    with pytest.raises(NotImplementedError, match="pcurr_type"):
+        eval_profiles(ProfileInputs(**{**base, "pcurr_type": "unsupported", "ac": jnp.asarray([1.0])}), s)

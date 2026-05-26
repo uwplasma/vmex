@@ -59,6 +59,17 @@ Editable install (recommended for development)::
 
   python -m pip install -e .
 
+Optional validation assets
+--------------------------
+
+Large VMEC reference ``wout`` files and full-size free-boundary ``mgrid`` files
+are release assets rather than tracked git blobs.  A fresh clone is enough for
+the fast tests and the small bundled examples.  Fetch the optional large bundle
+only when running full physics/parity gates::
+
+  python tools/fetch_assets.py --list
+  python tools/fetch_assets.py
+
 Build docs locally
 ------------------
 
