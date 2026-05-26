@@ -479,9 +479,12 @@ QI objectives use the same tuple syntax, but the QI field-quality terms are
 routed through the Boozer/QI problem path so they can share one Boozer
 transform.  QI tuple targets must be ``0.0``; encode thresholds and smoothing
 inside the objective object, for example ``QuasiIsodynamicOptions``.
-``MirrorRatio(threshold=...)`` and ``MaxElongation(threshold=...)`` are
-ordinary solved-VMEC-state objectives, so they can be added to QA/QH/QP/QI
-problems without depending on QI options.
+``VMECMirrorRatio(threshold=...)`` and ``MaxElongation(threshold=...)`` are
+ordinary solved-VMEC-state objectives, so they can be added to QA/QH/QP
+problems without depending on QI options or running Boozer at every callback.
+``MirrorRatio(threshold=...)`` evaluates the same mirror scalar from Boozer
+``|B|`` modes and is useful when a QI solve already shares one Boozer field or
+when final Boozer diagnostics need exact consistency with the plotted spectra.
 Use ``include_bounce_endpoints=True`` when you want the smooth QI residual to
 sample the same normalized bounce-level endpoints as the legacy Goodman-style
 branch-shuffle diagnostic.
@@ -1128,7 +1131,9 @@ Two practical lessons from that study are now reflected in the example:
   should be strong enough to prevent pathological shapes but not so dominant
   that they block the lower-QI basin.  ``MirrorRatio`` defaults to all selected
   Boozer surfaces when ``surface_index=None`` and exposes ``smooth_extrema`` and
-  ``smooth_penalty`` to avoid hard max/min gradients during cleanup.
+  ``smooth_penalty`` to avoid hard max/min gradients during cleanup.  For
+  QA/QH/QP mirror cleanup, ``VMECMirrorRatio`` is the cheaper VMEC-space
+  alternative because the mirror ratio itself is coordinate-invariant.
 - The QI branch-width and shuffle-profile terms smooth the well matching
   enough to avoid the noisy objective jumps seen in earlier direct QI attempts,
   while preserving the same design ranking as the legacy branch diagnostic on
@@ -1495,7 +1500,8 @@ the problem assembly in user code and standardizes only the repeated mechanics:
        ``objective_history``, and ``timing_summary``.
    * - Objective wrappers such as ``AspectRatio``, ``MeanIota``,
        ``AbsMeanIotaFloor``, ``QuasisymmetryRatioResidual``,
-       ``QuasiIsodynamicResidual``, ``MirrorRatio``, and ``MaxElongation``
+       ``QuasiIsodynamicResidual``, ``MirrorRatio``, ``VMECMirrorRatio``, and
+       ``MaxElongation``
      - Small objects whose ``.J`` methods are placed directly in
        ``objective_tuples``.  QI field objectives share one
        ``QuasiIsodynamicOptions`` object so the Boozer transform is routed

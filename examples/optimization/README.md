@@ -24,8 +24,11 @@ objects.
 
 The QI example follows the same pattern but has more visible physics objects:
 `QuasiIsodynamicOptions`, `QuasiIsodynamicResidual`, `MirrorRatio`,
-`MaxElongation`, and optional seed-preparation helpers are all configured as
-ordinary top-level variables before the objective tuple list is built.
+`VMECMirrorRatio`, `MaxElongation`, and optional seed-preparation helpers are all
+configured as ordinary top-level variables before the objective tuple list is
+built.  Use `VMECMirrorRatio` when you only need a fast mirror-ratio soft wall;
+use `MirrorRatio` when you want the value evaluated from a Boozer transform or
+shared with a QI Boozer field.
 
 ## Objective Tuple Pattern
 
@@ -47,7 +50,8 @@ problem = vj.LeastSquaresProblem.from_tuples(objective_tuples)
 `weight` follows SIMSOPT semantics: the residual is
 `sqrt(weight) * (objective - target)`.  Do not pre-scale callbacks.  QI terms
 use the same tuple form, but encode QI thresholds and smoothing in
-`QuasiIsodynamicOptions`, `MirrorRatio`, and `MaxElongation`; QI tuple targets
+`QuasiIsodynamicOptions`, `MirrorRatio`, `VMECMirrorRatio`, and
+`MaxElongation`; QI tuple targets
 should remain `0.0`. `QuasiIsodynamicOptions` defaults to `jit_booz=True`,
 which is currently faster for the Boozer/QI residual phase on both CPU and GPU;
 set it to `False` only for diagnostics or parity isolation.
