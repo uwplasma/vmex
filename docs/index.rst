@@ -49,6 +49,7 @@ vmec-jax documentation
       release_checklist
       optional_validation_plan
       free_boundary_plan
+      free_boundary_coil_optimization
       performance
 
    .. toctree::

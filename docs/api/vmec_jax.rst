@@ -20,10 +20,12 @@ Submodules
    vmec_jax.coords
    vmec_jax.diagnostics
    vmec_jax.energy
+   vmec_jax.external_fields
    vmec_jax.field
    vmec_jax.fieldlines
    vmec_jax.finite_beta
    vmec_jax.fourier
+   vmec_jax.free_boundary_adjoint
    vmec_jax.geom
    vmec_jax.grids
    vmec_jax.implicit
@@ -42,6 +44,7 @@ Submodules
    vmec_jax.radial
    vmec_jax.redl_bootstrap
    vmec_jax.residuals
+   vmec_jax.robust_coils
    vmec_jax.solve
    vmec_jax.state
    vmec_jax.static

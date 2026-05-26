@@ -288,6 +288,7 @@ def _residual_iter_timing_setup_scalars(timing_stats: dict[str, float]) -> tuple
         + float(timing_stats["compute_forces"])
         + float(timing_stats["iteration_residual_metrics"])
         + float(timing_stats["preconditioner"])
+        + float(timing_stats.get("iteration_control", 0.0))
         + float(timing_stats["update"])
         + float(timing_stats["iteration_post_update"])
     )
@@ -308,6 +309,17 @@ def _build_residual_iter_timing_report(
         _residual_iter_timing_setup_scalars(timing_stats)
     )
     iters = max(int(timing_stats["iterations"]), 1)
+    iteration_control_subtotal = (
+        float(timing_stats.get("iteration_control_fsq1", 0.0))
+        + float(timing_stats.get("iteration_control_badjac", 0.0))
+        + float(timing_stats.get("iteration_control_vmec_time", 0.0))
+        + float(timing_stats.get("iteration_control_restart", 0.0))
+        + float(timing_stats.get("iteration_control_evolve", 0.0))
+    )
+    iteration_control_unattributed = max(
+        0.0,
+        float(timing_stats.get("iteration_control", 0.0)) - iteration_control_subtotal,
+    )
     timing_report: dict[str, float | int] = {
         "iterations": int(timing_stats["iterations"]),
         "solve_total_s": float(solve_total_s),
@@ -328,6 +340,13 @@ def _build_residual_iter_timing_report(
         "force_eval_calls": int(timing_stats["compute_forces_calls"]),
         "iteration_residual_metrics_s": float(timing_stats["iteration_residual_metrics"]),
         "preconditioner_s": float(timing_stats["preconditioner"]),
+        "iteration_control_s": float(timing_stats.get("iteration_control", 0.0)),
+        "iteration_control_fsq1_s": float(timing_stats.get("iteration_control_fsq1", 0.0)),
+        "iteration_control_badjac_s": float(timing_stats.get("iteration_control_badjac", 0.0)),
+        "iteration_control_vmec_time_s": float(timing_stats.get("iteration_control_vmec_time", 0.0)),
+        "iteration_control_restart_s": float(timing_stats.get("iteration_control_restart", 0.0)),
+        "iteration_control_evolve_s": float(timing_stats.get("iteration_control_evolve", 0.0)),
+        "iteration_control_unattributed_s": float(iteration_control_unattributed),
         "precond_refresh_s": float(timing_stats["precond_refresh"]),
         "update_s": float(timing_stats["update"]),
         "update_state_s": float(timing_stats["update_state"]),
@@ -342,6 +361,14 @@ def _build_residual_iter_timing_report(
         "force_eval_per_iter_s": float(timing_stats["compute_forces"]) / iters,
         "iteration_residual_metrics_per_iter_s": float(timing_stats["iteration_residual_metrics"]) / iters,
         "preconditioner_per_iter_s": float(timing_stats["preconditioner"]) / iters,
+        "iteration_control_per_iter_s": float(timing_stats.get("iteration_control", 0.0)) / iters,
+        "iteration_control_fsq1_per_iter_s": float(timing_stats.get("iteration_control_fsq1", 0.0)) / iters,
+        "iteration_control_badjac_per_iter_s": float(timing_stats.get("iteration_control_badjac", 0.0)) / iters,
+        "iteration_control_vmec_time_per_iter_s": float(timing_stats.get("iteration_control_vmec_time", 0.0))
+        / iters,
+        "iteration_control_restart_per_iter_s": float(timing_stats.get("iteration_control_restart", 0.0)) / iters,
+        "iteration_control_evolve_per_iter_s": float(timing_stats.get("iteration_control_evolve", 0.0)) / iters,
+        "iteration_control_unattributed_per_iter_s": float(iteration_control_unattributed) / iters,
         "update_per_iter_s": float(timing_stats["update"]) / iters,
         "update_state_per_iter_s": float(timing_stats["update_state"]) / iters,
         "update_trace_build_per_iter_s": float(timing_stats["update_trace_build"]) / iters,
@@ -397,6 +424,12 @@ def _format_residual_iter_timing_message(
             f"force_extra={float(timing_report['force_eval_extra_s']):.3e}s "
             f"precond_apply={float(timing_report['precond_apply_s']):.3e}s "
             f"precond_mode={float(timing_report['precond_mode_scale_s']):.3e}s "
+            f"control={float(timing_report['iteration_control_s']):.3e}s "
+            f"control_fsq1={float(timing_report['iteration_control_fsq1_s']):.3e}s "
+            f"control_badjac={float(timing_report['iteration_control_badjac_s']):.3e}s "
+            f"control_vmec={float(timing_report['iteration_control_vmec_time_s']):.3e}s "
+            f"control_restart={float(timing_report['iteration_control_restart_s']):.3e}s "
+            f"control_evolve={float(timing_report['iteration_control_evolve_s']):.3e}s "
         )
     return (
         "[vmec_jax timing] "

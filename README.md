@@ -87,6 +87,41 @@ curl -L -O https://raw.githubusercontent.com/uwplasma/vmec_jax/main/examples/dat
 vmec_jax input.cth_like_free_bdy_lasym_small
 ```
 
+### Direct-Coil Free-Boundary Research Lane
+
+The `feature/freeb-essos-coil-single-stage` branch adds a JAX-native
+external-field provider so free-boundary solves can sample differentiable
+Biot-Savart coils directly, while the existing `mgrid` path remains the
+VMEC2000-compatibility backend. Phase-1 generated WOUTs, magnetic grids, and
+reviewer plots are kept out of git.
+
+```bash
+python examples/free_boundary_direct_coils_forward.py \
+  --max-iter 4 \
+  --outdir results/free_boundary_direct_coils_forward
+```
+
+With ESSOS on `PYTHONPATH`, run the finite-pressure direct-coil beta scan:
+
+```bash
+export ESSOS_ROOT=/path/to/ESSOS_mgrid_pr
+export ESSOS_INPUT_DIR=$ESSOS_ROOT/examples/input_files
+PYTHONPATH=.:$ESSOS_ROOT:$PYTHONPATH \
+  python examples/free_boundary_essos_coils_beta_scan.py \
+  --outdir results/free_boundary_essos_coils_beta_scan \
+  --skip-mgrid-runs \
+  --phiedge=-3.0e-2 \
+  --betas 0 0.00138889 0.00277778 \
+  --ns 101 \
+  --ftol 1e-12 \
+  --max-iter 3000 \
+  --activate-fsq 1.0
+```
+
+See `docs/free_boundary_coil_optimization.rst` for the provider architecture,
+VMEC2000 comparison commands, benchmark commands, current phase-1 limitations,
+and the phase-2 full-solve adjoint plan.
+
 ## Backend Selection
 
 `vmec_jax` follows the selected JAX backend. If CPU-only JAX is installed, runs

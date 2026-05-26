@@ -89,6 +89,30 @@ from .booz_input import booz_xform_inputs_from_state
 from .wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
 from .state import VMECState, pack_state, unpack_state
 from .static import VMECStatic, build_static
+from .free_boundary import (
+    FreeBoundaryRuntimeState,
+    MGridMetadata,
+    MGridData,
+    PreparedMGrid,
+    VacuumBoundaryFields,
+    ExternalBoundarySample,
+    NestorPoissonCache,
+    NestorVmecLikeCache,
+    NestorRuntimeState,
+    NestorSolveResult,
+    boundary_metric_from_rz,
+    covariant_boundary_field_from_cylindrical,
+    contravariant_boundary_field_from_covariant,
+    vacuum_boundary_fields_from_cylindrical,
+    sample_free_boundary_external_field as sample_free_boundary_external_field,
+    sample_external_vacuum_diagnostics,
+    nestor_external_only_step,
+    initial_free_boundary_state,
+    interpolate_mgrid_bfield,
+    load_mgrid,
+    prepare_mgrid_for_config,
+    validate_free_boundary_config,
+)
 from .init_guess import extract_axis_override_from_state, initial_guess_from_boundary
 from .optimization import (
     BoundaryParamSpec,
@@ -186,6 +210,7 @@ _LAZY_ATTRS = {
     "covariant_boundary_field_from_cylindrical": ".free_boundary",
     "contravariant_boundary_field_from_covariant": ".free_boundary",
     "vacuum_boundary_fields_from_cylindrical": ".free_boundary",
+    "sample_free_boundary_external_field": ".free_boundary",
     "sample_external_vacuum_diagnostics": ".free_boundary",
     "nestor_external_only_step": ".free_boundary",
     "initial_free_boundary_state": ".free_boundary",
@@ -450,6 +475,7 @@ __all__ = [
     "covariant_boundary_field_from_cylindrical",
     "contravariant_boundary_field_from_covariant",
     "vacuum_boundary_fields_from_cylindrical",
+    "sample_free_boundary_external_field",
     "sample_external_vacuum_diagnostics",
     "nestor_external_only_step",
     "initial_free_boundary_state",

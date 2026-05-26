@@ -36,6 +36,7 @@ class BadJacobianConfig(NamedTuple):
     use_state: bool
     dump_ptau_state: bool
     state_probe: bool
+    initial_state_probe_iters: int
     ptau_tol: float
     ptau_tol_rel: float
 
@@ -93,12 +94,19 @@ def parse_bad_jacobian_config(env: Mapping[str, str | None]) -> BadJacobianConfi
         ptau_tol_rel = 0.0
     if ptau_tol_rel < 0.0:
         ptau_tol_rel = 0.0
+    try:
+        initial_state_probe_iters = int(_env_value(env, "VMEC_JAX_BADJAC_INITIAL_STATE_PROBE_ITERS", "2").strip() or 0)
+    except Exception:
+        initial_state_probe_iters = 2
+    if initial_state_probe_iters < 0:
+        initial_state_probe_iters = 0
 
     return BadJacobianConfig(
         mode=mode,
         use_state=mode == "state",
         dump_ptau_state=env_flag_enabled(_env_value(env, "VMEC_JAX_DUMP_PTAU_STATE", "0")),
         state_probe=env_flag_enabled(_env_value(env, "VMEC_JAX_BADJAC_STATE_PROBE", "0")),
+        initial_state_probe_iters=int(initial_state_probe_iters),
         ptau_tol=ptau_tol,
         ptau_tol_rel=ptau_tol_rel,
     )
@@ -109,6 +117,22 @@ def bad_jacobian_tau_tolerance(*, ptau_tol: float, ptau_tol_rel: float, tau_scal
     if float(ptau_tol_rel) > 0.0:
         return max(abs(float(ptau_tol)), float(ptau_tol_rel) * float(tau_scale))
     return max(abs(float(ptau_tol)), 0.0)
+
+
+def should_probe_bad_jacobian_state(
+    *,
+    state_probe: bool,
+    initial_state_probe_iters: int,
+    iter_idx: int,
+) -> bool:
+    """Return whether to run the optional expensive state-Jacobian safety probe.
+
+    The production bad-Jacobian check uses VMEC's cheap ``ptau`` sign change
+    proxy.  The full state-Jacobian probe is a diagnostic/parity knob because it
+    adds host/device work in the first few iterations, especially on GPU.
+    """
+
+    return bool(state_probe) and int(initial_state_probe_iters) > 0 and int(iter_idx) <= int(initial_state_probe_iters)
 
 
 def resolve_dump_history_config(

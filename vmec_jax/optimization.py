@@ -1351,6 +1351,12 @@ class FixedBoundaryExactOptimizer:
         ``None`` / ``"auto"`` / ``"default"`` inherit JAX's active default
         device. Pass ``"cpu"`` or ``"gpu"`` to explicitly run callbacks under
         that device context.
+    exact_path:
+        Accepted-point differentiation path. ``None`` / ``"auto"`` keeps the
+        default tape path and honors ``VMEC_JAX_OPT_EXACT_PATH``. Pass
+        ``"tape"`` for the low-cold-cost discrete-adjoint tape path, or
+        ``"scan"`` for the high-compile-cost scan-differentiated path that can
+        be faster for long GPU runs after compilation is amortized.
 
     Example
     -------
@@ -1387,8 +1393,10 @@ class FixedBoundaryExactOptimizer:
         trial_max_iter: int | None = None,
         trial_ftol: float | None = None,
         solver_device: str | None = None,
+        exact_path: str | None = None,
     ) -> None:
         self._solver_device_name = self._resolve_solver_device(solver_device)
+        self._exact_path_request = self._resolve_exact_path_request(exact_path)
         self._inside_solver_device_context = False
         if self._solver_device_name is not None:
             static = self._move_to_solver_device(static)
@@ -1575,6 +1583,18 @@ class FixedBoundaryExactOptimizer:
             return None
         return name
 
+    def _resolve_exact_path_request(self, exact_path: str | None) -> str | None:
+        """Validate the optional accepted-point differentiation path request."""
+
+        if exact_path is None:
+            return None
+        name = str(exact_path).strip().lower().replace("-", "_")
+        if name in ("", "none", "auto", "default"):
+            return None
+        if name not in ("tape", "scan"):
+            raise ValueError("exact_path must be one of None, 'auto', 'tape', or 'scan'")
+        return name
+
     def _spec_max_mode(self) -> int:
         if not self._specs:
             return 0
@@ -1638,6 +1658,9 @@ class FixedBoundaryExactOptimizer:
         The environment override ``VMEC_JAX_OPT_EXACT_PATH={tape,scan}``
         remains available for profiling and parity studies.
         """
+        requested = getattr(self, "_exact_path_request", None)
+        if requested in ("scan", "tape"):
+            return str(requested)
         forced = os.getenv("VMEC_JAX_OPT_EXACT_PATH", "").strip().lower()
         if forced in ("scan", "tape"):
             return forced
@@ -1713,6 +1736,31 @@ class FixedBoundaryExactOptimizer:
             except Exception:
                 backend = "cpu"
         return backend in ("gpu", "cuda", "tpu", "rocm")
+
+    def _exact_tape_backend_name(self) -> str:
+        """Return the backend name used for exact-tape optimization policy."""
+
+        backend = str(getattr(self, "_solver_device_name", None) or "").strip().lower()
+        if backend:
+            return backend
+        try:
+            from ._compat import jax as _jax
+
+            return str(_jax.default_backend()).strip().lower() if _jax is not None else "cpu"
+        except Exception:
+            return "cpu"
+
+    @staticmethod
+    def _env_bool_override(name: str) -> bool | None:
+        flag = os.getenv(name, "").strip().lower()
+        if flag in ("1", "true", "yes", "on"):
+            return True
+        if flag in ("0", "false", "no", "off"):
+            return False
+        return None
+
+    def _gpu_like_exact_tape_backend(self) -> bool:
+        return self._exact_tape_backend_name() in ("gpu", "cuda", "tpu", "rocm")
 
     def _solver_device_context(self):
         if self._solver_device_name is None:
@@ -1813,6 +1861,52 @@ class FixedBoundaryExactOptimizer:
         rec["count"] = int(rec["count"]) + 1
         rec["wall_time_s"] = float(rec["wall_time_s"]) + float(value)
 
+    def _profile_solver_free_boundary_timing(self, diagnostics, *, profile_prefix: str) -> None:
+        if not isinstance(diagnostics, dict):
+            return
+
+        def _sum_time(key: str) -> float | None:
+            if key not in diagnostics:
+                return None
+            try:
+                arr = np.asarray(diagnostics.get(key), dtype=float).reshape(-1)
+            except Exception:
+                return None
+            arr = arr[np.isfinite(arr)]
+            if arr.size == 0:
+                return None
+            return float(np.sum(arr))
+
+        def _count_nonzero(key: str) -> int | None:
+            if key not in diagnostics:
+                return None
+            try:
+                arr = np.asarray(diagnostics.get(key), dtype=int).reshape(-1)
+            except Exception:
+                return None
+            if arr.size == 0:
+                return None
+            return int(np.count_nonzero(arr))
+
+        for key, suffix in (
+            ("freeb_nestor_sample_time_history", "freeb_nestor_sample"),
+            ("freeb_nestor_solve_time_history", "freeb_nestor_solve"),
+            ("freeb_nestor_trial_sample_time_history", "freeb_nestor_trial_sample"),
+            ("freeb_nestor_trial_solve_time_history", "freeb_nestor_trial_solve"),
+        ):
+            value = _sum_time(key)
+            if value is not None:
+                self._profile_add(f"{profile_prefix}_{suffix}", value)
+        for key, suffix in (
+            ("freeb_full_update_history", "freeb_nestor_full_update_count"),
+            ("freeb_nestor_reused_history", "freeb_nestor_reused_count"),
+            ("freeb_nestor_trial_reused_history", "freeb_nestor_trial_reused_count"),
+            ("freeb_nestor_trial_failed_history", "freeb_nestor_trial_failed_count"),
+        ):
+            value = _count_nonzero(key)
+            if value is not None:
+                self._profile_add_counter(f"{profile_prefix}_{suffix}", value)
+
     def _profile_solver_timing(
         self,
         diagnostics,
@@ -1825,6 +1919,7 @@ class FixedBoundaryExactOptimizer:
             return 0.0
         timing = diagnostics.get("timing")
         if not isinstance(timing, dict):
+            self._profile_solver_free_boundary_timing(diagnostics, profile_prefix=profile_prefix)
             return 0.0
         solver_total = 0.0
         timing_keys = (
@@ -1841,6 +1936,13 @@ class FixedBoundaryExactOptimizer:
             ("compute_forces_rest_s", "compute_forces_rest"),
             ("iteration_residual_metrics_s", "iteration_residual_metrics"),
             ("preconditioner_s", "preconditioner"),
+            ("iteration_control_s", "iteration_control"),
+            ("iteration_control_fsq1_s", "iteration_control_fsq1"),
+            ("iteration_control_badjac_s", "iteration_control_badjac"),
+            ("iteration_control_vmec_time_s", "iteration_control_vmec_time"),
+            ("iteration_control_restart_s", "iteration_control_restart"),
+            ("iteration_control_evolve_s", "iteration_control_evolve"),
+            ("iteration_control_unattributed_s", "iteration_control_unattributed"),
             ("precond_refresh_s", "precond_refresh"),
             ("precond_apply_s", "preconditioner_apply"),
             ("precond_mode_scale_s", "preconditioner_mode_scale"),
@@ -1901,6 +2003,7 @@ class FixedBoundaryExactOptimizer:
             except Exception:
                 continue
             self._profile_add_counter(f"{profile_prefix}_{suffix}", value)
+        self._profile_solver_free_boundary_timing(diagnostics, profile_prefix=profile_prefix)
         if unattributed_name is not None:
             self._profile_add(unattributed_name, max(0.0, float(phase_wall_s) - solver_total))
         return solver_total
@@ -2265,7 +2368,7 @@ class FixedBoundaryExactOptimizer:
         )
 
     def _boundary_from_params_numpy(self, params) -> BoundaryCoeffs:
-        """Boundary coefficients with parameters applied on the host."""
+        """Host-side boundary update for cache keys and other non-AD logic."""
         boundary = _apply_boundary_params_numpy(
             self._boundary_input if self._boundary_input is not None else self._boundary,
             self._specs,
@@ -2636,35 +2739,32 @@ class FixedBoundaryExactOptimizer:
             accepts_jvp_only = True
         if accepts_jvp_only:
             env_name = "VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES"
-            set_basepoint_default = self._jvp_only_basepoint_carries_default_enabled()
-            old_basepoint_env = os.environ.get(env_name)
-            if set_basepoint_default:
+            previous = os.environ.get(env_name)
+            use_basepoint_carries = self._jvp_only_basepoint_carries_enabled()
+            if previous is None and use_basepoint_carries:
                 os.environ[env_name] = "1"
+                self._profile_add("exact_tape_jvp_only_basepoint_carries_auto", 0.0)
             try:
                 return solve(params, return_payload=True, jvp_only=True)
             finally:
-                if set_basepoint_default:
-                    if old_basepoint_env is None:
-                        os.environ.pop(env_name, None)
-                    else:
-                        os.environ[env_name] = old_basepoint_env
+                if previous is None and use_basepoint_carries:
+                    os.environ.pop(env_name, None)
         return solve(params, return_payload=True)
 
     def _jvp_only_exact_tape_enabled(self) -> bool:
-        flag = os.getenv("VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE", "").strip().lower()
-        if flag:
-            return flag in ("1", "true", "yes", "on")
-        backend = _optimizer_backend_name(getattr(self, "_solver_device_name", None))
-        return backend in ("gpu", "cuda", "rocm")
+        forced = self._env_bool_override("VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE")
+        if forced is not None:
+            return bool(forced)
+        enabled = self._gpu_like_exact_tape_backend()
+        if enabled:
+            self._profile_add("exact_tape_jvp_only_auto_gpu", 0.0)
+        return bool(enabled)
 
-    def _jvp_only_basepoint_carries_default_enabled(self) -> bool:
-        """Preserve JVP-only base carries by default on GPU exact callbacks."""
-
-        flag = os.getenv("VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES", "").strip().lower()
-        if flag:
-            return False
-        backend = _optimizer_backend_name(getattr(self, "_solver_device_name", None))
-        return backend in ("gpu", "cuda", "rocm")
+    def _jvp_only_basepoint_carries_enabled(self) -> bool:
+        forced = self._env_bool_override("VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES")
+        if forced is not None:
+            return bool(forced)
+        return self._gpu_like_exact_tape_backend()
 
     def _initial_tangent_columns(self, params, axis_override, *, profile_prefix: str):
         """Return cached packed initial-state tangents for boundary parameters."""

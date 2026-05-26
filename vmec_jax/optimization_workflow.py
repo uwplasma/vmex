@@ -2185,6 +2185,7 @@ def build_fixed_boundary_objective_stage(
     trial_max_iter: int = 120,
     trial_ftol: float = 1.0e-9,
     solver_device: str | None = None,
+    exact_path: str | None = None,
 ) -> FixedBoundaryObjectiveStage:
     """Build one VMEC/JAX optimization stage from an objective list."""
 
@@ -2241,6 +2242,7 @@ def build_fixed_boundary_objective_stage(
         trial_max_iter=trial_max_iter,
         trial_ftol=trial_ftol,
         solver_device=solver_device,
+        exact_path=exact_path,
     )
     return FixedBoundaryObjectiveStage(
         mode=int(stage_mode),
@@ -2298,6 +2300,7 @@ def run_fixed_boundary_objective_optimization(
     trial_max_iter: int = 120,
     trial_ftol: float = 1.0e-9,
     solver_device: str | None = None,
+    exact_path: str | None = None,
     scipy_tr_solver: str | None = "lsmr",
     scipy_lsmr_maxiter: int | None = None,
     lbfgs_step_bound: float | None = None,
@@ -2331,6 +2334,7 @@ def run_fixed_boundary_objective_optimization(
             trial_max_iter=trial_max_iter,
             trial_ftol=trial_ftol,
             solver_device=solver_device,
+            exact_path=exact_path,
         )
         x_scale = (
             create_x_scale(stage.specs, alpha=float(ess_alpha))
@@ -2489,6 +2493,7 @@ def build_quasi_isodynamic_objective_stage(
     trial_max_iter: int = 120,
     trial_ftol: float = 1.0e-9,
     solver_device: str | None = None,
+    exact_path: str | None = None,
 ) -> FixedBoundaryObjectiveStage:
     """Build one QI stage while sharing one Boozer transform across QI terms."""
 
@@ -2618,6 +2623,7 @@ def build_quasi_isodynamic_objective_stage(
         trial_max_iter=trial_max_iter,
         trial_ftol=trial_ftol,
         solver_device=solver_device,
+        exact_path=exact_path,
     )
     return FixedBoundaryObjectiveStage(
         mode=int(stage_mode),
@@ -2680,6 +2686,7 @@ def run_quasi_isodynamic_objective_optimization(
     trial_max_iter: int = 120,
     trial_ftol: float = 1.0e-9,
     solver_device: str | None = None,
+    exact_path: str | None = None,
     scipy_tr_solver: str | None = "lsmr",
     scipy_lsmr_maxiter: int | None = None,
     lbfgs_step_bound: float | None = None,
@@ -2736,6 +2743,7 @@ def run_quasi_isodynamic_objective_optimization(
             trial_max_iter=trial_max_iter,
             trial_ftol=trial_ftol,
             solver_device=solver_device,
+            exact_path=exact_path,
         )
         x_scale = (
             create_x_scale(stage.specs, alpha=float(ess_alpha))
@@ -2870,6 +2878,7 @@ def least_squares_solve(
     trial_max_iter: int = 120,
     trial_ftol: float = 1.0e-9,
     solver_device: str | None = None,
+    exact_path: str | None = None,
     scipy_tr_solver: str | None = "lsmr",
     scipy_lsmr_maxiter: int | None = None,
     lbfgs_step_bound: float | None = None,
@@ -2954,6 +2963,7 @@ def least_squares_solve(
             trial_max_iter=trial_max_iter,
             trial_ftol=trial_ftol,
             solver_device=solver_device,
+            exact_path=exact_path,
             scipy_tr_solver=scipy_tr_solver,
             scipy_lsmr_maxiter=scipy_lsmr_maxiter,
             lbfgs_step_bound=lbfgs_step_bound,
@@ -2991,6 +3001,7 @@ def least_squares_solve(
         trial_max_iter=trial_max_iter,
         trial_ftol=trial_ftol,
         solver_device=solver_device,
+        exact_path=exact_path,
         scipy_tr_solver=scipy_tr_solver,
         scipy_lsmr_maxiter=scipy_lsmr_maxiter,
         lbfgs_step_bound=lbfgs_step_bound,

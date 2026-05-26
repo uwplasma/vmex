@@ -938,14 +938,21 @@ def _tridi_solve_batched_jmin0_lax_pretransposed(dl_t, d_t, du_t, rhs) -> Any:
     eps = jnp.asarray(1.0e-12, dtype=d_t.dtype)
     d_t = jnp.where(d_t != 0.0, d_t, eps)
     rhs_in = jnp.asarray(rhs)
-    squeeze_rhs = False
-    if rhs_in.ndim == d_t.ndim - 1:
-        rhs_in = rhs_in[..., None]
-        squeeze_rhs = True
+    expected_prefix = (d_t.shape[-1],) + d_t.shape[:-1]
+    squeeze_rhs = rhs_in.ndim <= d_t.ndim
+    if squeeze_rhs:
+        pad_dims = d_t.ndim - rhs_in.ndim
+        rhs_in = rhs_in.reshape(rhs_in.shape + (1,) * pad_dims + (1,))
+    if rhs_in.shape[: d_t.ndim] != expected_prefix:
+        rhs_in = jnp.broadcast_to(rhs_in, expected_prefix + rhs_in.shape[d_t.ndim :])
+    rhs_shape = rhs_in.shape
+    nrhs = functools.reduce(lambda x, y: x * y, rhs_shape[d_t.ndim :], 1)
+    rhs_in = rhs_in.reshape(expected_prefix + (nrhs,))
     # rhs expects system dimension on second-to-last axis.
     rhs_t = jnp.moveaxis(rhs_in, 0, -2)
     sol_t = jax.lax.linalg.tridiagonal_solve(dl_t, d_t, du_t, rhs_t)
     sol = jnp.moveaxis(sol_t, -2, 0)
+    sol = sol.reshape(rhs_shape)
     return sol[..., 0] if squeeze_rhs else sol
 
 
@@ -1510,7 +1517,7 @@ def rz_preconditioner_apply_jit(
         lthreed=lthreed,
         lasym=lasym,
         use_precomputed=bool(use_precomputed),
-        use_lax_tridi=bool(use_lax_tridi),
+        use_lax_tridi=bool(use_lax_tridi and has_lax_t),
         has_frss=has_frss,
         has_fzcs=has_fzcs,
         has_frsc=has_frsc,
