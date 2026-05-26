@@ -130,3 +130,39 @@ def test_beta_scan_summary_checkpoint_preserves_partial_runs(tmp_path):
     )
     complete = json.loads(summary_path.read_text())
     assert complete["complete"] is True
+
+
+def test_beta_scan_resume_existing_case_uses_wout_path(monkeypatch, tmp_path):
+    module = _load_beta_scan_module()
+    assert (
+        module._resume_existing_case(
+            output_dir=tmp_path,
+            backend="direct",
+            beta_percent=0.5,
+            pressure_scale_for_one_percent_beta=1000.0,
+        )
+        is None
+    )
+
+    wout_path = tmp_path / "wout_direct_beta_0.500.nc"
+    wout_path.write_text("placeholder")
+
+    def fake_summarize_existing_wout(path, *, backend, beta_percent):
+        return {
+            "wout": str(path),
+            "backend": backend,
+            "nominal_beta_percent": float(beta_percent),
+            "fsqr": 1.0e-12,
+            "fsqz": 2.0e-12,
+            "fsql": 3.0e-12,
+        }
+
+    monkeypatch.setattr(module, "summarize_existing_wout", fake_summarize_existing_wout)
+    summary = module._resume_existing_case(
+        output_dir=tmp_path,
+        backend="direct",
+        beta_percent=0.5,
+        pressure_scale_for_one_percent_beta=1200.0,
+    )
+    assert summary["wout"] == str(wout_path)
+    assert summary["pressure_scale"] == 600.0

@@ -347,6 +347,55 @@ def summarize_run(run, wout_path: Path, *, backend: str, beta_percent: float, wa
     return summary
 
 
+def summarize_existing_wout(wout_path: Path, *, backend: str, beta_percent: float) -> dict[str, Any]:
+    """Collect summary diagnostics from a pre-existing WOUT file.
+
+    This supports resuming long pressure-continuation scans after an interrupt.
+    The resumed entry has no in-process free-boundary history because only the
+    accepted equilibrium was persisted.
+    """
+
+    wout = read_wout(wout_path)
+    iotas = np.asarray(getattr(wout, "iotas", getattr(wout, "iotaf", [])), dtype=float)
+    wb = float(getattr(wout, "wb", 0.0))
+    wp = float(getattr(wout, "wp", 0.0))
+    summary: dict[str, Any] = {
+        "backend": backend,
+        "nominal_beta_percent": float(beta_percent),
+        "wall_s": 0.0,
+        "wout": str(wout_path),
+        "n_iter": None,
+        "fsqr": float(getattr(wout, "fsqr", np.nan)),
+        "fsqz": float(getattr(wout, "fsqz", np.nan)),
+        "fsql": float(getattr(wout, "fsql", np.nan)),
+        "aspect": float(getattr(wout, "aspect", np.nan)),
+        "mean_iota": float(np.nanmean(iotas)) if iotas.size else None,
+        "pressure_scale": float(PRESSURE_SCALE_FOR_ONE_PERCENT_BETA) * float(beta_percent),
+        "max_pressure": float(np.nanmax(np.asarray(getattr(wout, "presf", [np.nan]), dtype=float))),
+        "wp": wp,
+        "wb": wb,
+        "beta_proxy": wp / wb if wb != 0.0 else None,
+        "beta_proxy_percent": 100.0 * wp / wb if wb != 0.0 else None,
+        "free_boundary_ivac": None,
+        "free_boundary_nestor_model": None,
+        "free_boundary_vacuum_stub": None,
+        "free_boundary_activate_fsq": None,
+        "free_boundary_bnormal_rms": None,
+        "free_boundary_bsqvac_rms": None,
+        "free_boundary_gsource_rms": None,
+        "free_boundary_bnormal_rms_history": None,
+        "free_boundary_bsqvac_rms_history": None,
+        "free_boundary_gsource_rms_history": None,
+        "free_boundary_source_reused_history": None,
+        "resumed_from_existing_wout": True,
+    }
+    return summary
+
+
+def _case_wout_path(output_dir: Path, *, backend: str, beta_percent: float) -> Path:
+    return output_dir / f"wout_{backend}_beta_{float(beta_percent):.3f}.nc"
+
+
 def _summary_payload(
     *,
     coils_json: Path,
@@ -417,6 +466,23 @@ def _write_summary_checkpoint(
     )
 
 
+def _resume_existing_case(
+    *,
+    output_dir: Path,
+    backend: str,
+    beta_percent: float,
+    pressure_scale_for_one_percent_beta: float,
+) -> dict[str, Any] | None:
+    """Return diagnostics for an existing case WOUT, if present."""
+
+    wout_path = _case_wout_path(output_dir, backend=backend, beta_percent=beta_percent)
+    if not wout_path.exists():
+        return None
+    summary = summarize_existing_wout(wout_path, backend=backend, beta_percent=beta_percent)
+    summary["pressure_scale"] = float(pressure_scale_for_one_percent_beta) * float(beta_percent)
+    return summary
+
+
 def run_one_case(
     *,
     backend: str,
@@ -462,7 +528,7 @@ def run_one_case(
     else:
         raise ValueError(f"unknown backend {backend!r}")
     wall_s = time.perf_counter() - t0
-    wout_path = output_dir / f"wout_{backend}_beta_{float(beta_percent):.3f}.nc"
+    wout_path = _case_wout_path(output_dir, backend=backend, beta_percent=beta_percent)
     write_wout_from_fixed_boundary_run(wout_path, run, include_fsq=True)
     summary = summarize_run(run, wout_path, backend=backend, beta_percent=beta_percent, wall_s=wall_s)
     summary["pressure_scale"] = float(pressure_scale_for_one_percent_beta) * float(beta_percent)
@@ -566,6 +632,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--skip-mgrid-runs", action="store_true")
     parser.add_argument("--skip-direct-runs", action="store_true")
+    parser.add_argument(
+        "--resume-existing",
+        action="store_true",
+        help=(
+            "Skip any beta/backend case whose WOUT already exists in --outdir. "
+            "With --pressure-continuation, the existing WOUT is also promoted "
+            "as the seed for the next pressure point if its residual satisfies "
+            "--pressure-continuation-max-fsq."
+        ),
+    )
     parser.add_argument(
         "--disable-direct-coil-source-reuse",
         action="store_true",
@@ -690,40 +766,80 @@ def main(argv: list[str] | None = None) -> int:
                 phiedge=args.phiedge,
             )
             input_mgrid = outdir / f"input.lpqa_mgrid_beta_{beta_tag}"
-            write_indata(input_mgrid, mgrid_indata)
-            print(f"Running mgrid beta={beta_percent:.3f}%: {input_mgrid}")
-            summary = run_one_case(
-                backend="mgrid",
-                input_path=input_mgrid,
-                output_dir=outdir,
-                beta_percent=beta_percent,
-                pressure_scale_for_one_percent_beta=args.pressure_scale_for_one_percent_beta,
-                max_iter=args.max_iter,
-                activate_fsq=args.activate_fsq,
+            summary = (
+                _resume_existing_case(
+                    output_dir=outdir,
+                    backend="mgrid",
+                    beta_percent=beta_percent,
+                    pressure_scale_for_one_percent_beta=args.pressure_scale_for_one_percent_beta,
+                )
+                if args.resume_existing
+                else None
             )
-            summary["pressure_continuation_seeded_from_previous"] = bool(
-                continuation_has_promoted_seed.get("mgrid", False)
-            )
-            summary["pressure_continuation_promoted_seed"] = False
-            if args.pressure_continuation and _summary_is_promotable_for_pressure_continuation(
-                summary, max_fsq=args.pressure_continuation_max_fsq
-            ):
-                continuation_bases["mgrid"] = continue_indata_from_wout_boundary(mgrid_base, read_wout(summary["wout"]))
-                continuation_has_promoted_seed["mgrid"] = True
-                summary["pressure_continuation_promoted_seed"] = True
-            summaries.append(summary)
-            _write_summary_checkpoint(
-                summary_path,
-                coils_json=coils_json,
-                mgrid_file=mgrid_file,
-                args=args,
-                scale_summary=scale_summary,
-                ns_array=ns_array,
-                niter_array=niter_array,
-                ftol_array=ftol_array,
-                summaries=summaries,
-                complete=False,
-            )
+            if summary is not None:
+                print(f"Resuming mgrid beta={beta_percent:.3f}% from existing WOUT: {summary['wout']}")
+                summary["pressure_continuation_seeded_from_previous"] = bool(
+                    continuation_has_promoted_seed.get("mgrid", False)
+                )
+                summary["pressure_continuation_promoted_seed"] = False
+                if args.pressure_continuation and _summary_is_promotable_for_pressure_continuation(
+                    summary, max_fsq=args.pressure_continuation_max_fsq
+                ):
+                    continuation_bases["mgrid"] = continue_indata_from_wout_boundary(
+                        mgrid_base, read_wout(summary["wout"])
+                    )
+                    continuation_has_promoted_seed["mgrid"] = True
+                    summary["pressure_continuation_promoted_seed"] = True
+                summaries.append(summary)
+                _write_summary_checkpoint(
+                    summary_path,
+                    coils_json=coils_json,
+                    mgrid_file=mgrid_file,
+                    args=args,
+                    scale_summary=scale_summary,
+                    ns_array=ns_array,
+                    niter_array=niter_array,
+                    ftol_array=ftol_array,
+                    summaries=summaries,
+                    complete=False,
+                )
+            else:
+                write_indata(input_mgrid, mgrid_indata)
+                print(f"Running mgrid beta={beta_percent:.3f}%: {input_mgrid}")
+                summary = run_one_case(
+                    backend="mgrid",
+                    input_path=input_mgrid,
+                    output_dir=outdir,
+                    beta_percent=beta_percent,
+                    pressure_scale_for_one_percent_beta=args.pressure_scale_for_one_percent_beta,
+                    max_iter=args.max_iter,
+                    activate_fsq=args.activate_fsq,
+                )
+                summary["pressure_continuation_seeded_from_previous"] = bool(
+                    continuation_has_promoted_seed.get("mgrid", False)
+                )
+                summary["pressure_continuation_promoted_seed"] = False
+                if args.pressure_continuation and _summary_is_promotable_for_pressure_continuation(
+                    summary, max_fsq=args.pressure_continuation_max_fsq
+                ):
+                    continuation_bases["mgrid"] = continue_indata_from_wout_boundary(
+                        mgrid_base, read_wout(summary["wout"])
+                    )
+                    continuation_has_promoted_seed["mgrid"] = True
+                    summary["pressure_continuation_promoted_seed"] = True
+                summaries.append(summary)
+                _write_summary_checkpoint(
+                    summary_path,
+                    coils_json=coils_json,
+                    mgrid_file=mgrid_file,
+                    args=args,
+                    scale_summary=scale_summary,
+                    ns_array=ns_array,
+                    niter_array=niter_array,
+                    ftol_array=ftol_array,
+                    summaries=summaries,
+                    complete=False,
+                )
 
         if not args.skip_direct_runs:
             direct_base = continuation_bases.get("direct", base_indata)
@@ -744,46 +860,84 @@ def main(argv: list[str] | None = None) -> int:
                 phiedge=args.phiedge,
             )
             input_direct = outdir / f"input.lpqa_direct_beta_{beta_tag}"
-            write_indata(input_direct, direct_indata)
-            print(f"Running direct-coil beta={beta_percent:.3f}%: {input_direct}")
-            summary = run_one_case(
-                backend="direct",
-                input_path=input_direct,
-                output_dir=outdir,
-                beta_percent=beta_percent,
-                pressure_scale_for_one_percent_beta=args.pressure_scale_for_one_percent_beta,
-                max_iter=args.max_iter,
-                activate_fsq=args.activate_fsq,
-                direct_coil_params=direct_params,
-                direct_coil_source_reuse=not args.disable_direct_coil_source_reuse,
-                direct_coil_trial_resample=args.direct_coil_trial_resample,
-                direct_coil_limit_update_rms=args.direct_coil_limit_update_rms,
-            )
-            summary["pressure_continuation_seeded_from_previous"] = bool(
-                continuation_has_promoted_seed.get("direct", False)
-            )
-            summary["pressure_continuation_promoted_seed"] = False
-            if args.pressure_continuation and _summary_is_promotable_for_pressure_continuation(
-                summary, max_fsq=args.pressure_continuation_max_fsq
-            ):
-                continuation_bases["direct"] = continue_indata_from_wout_boundary(
-                    direct_base, read_wout(summary["wout"])
+            summary = (
+                _resume_existing_case(
+                    output_dir=outdir,
+                    backend="direct",
+                    beta_percent=beta_percent,
+                    pressure_scale_for_one_percent_beta=args.pressure_scale_for_one_percent_beta,
                 )
-                continuation_has_promoted_seed["direct"] = True
-                summary["pressure_continuation_promoted_seed"] = True
-            summaries.append(summary)
-            _write_summary_checkpoint(
-                summary_path,
-                coils_json=coils_json,
-                mgrid_file=mgrid_file,
-                args=args,
-                scale_summary=scale_summary,
-                ns_array=ns_array,
-                niter_array=niter_array,
-                ftol_array=ftol_array,
-                summaries=summaries,
-                complete=False,
+                if args.resume_existing
+                else None
             )
+            if summary is not None:
+                print(f"Resuming direct-coil beta={beta_percent:.3f}% from existing WOUT: {summary['wout']}")
+                summary["pressure_continuation_seeded_from_previous"] = bool(
+                    continuation_has_promoted_seed.get("direct", False)
+                )
+                summary["pressure_continuation_promoted_seed"] = False
+                if args.pressure_continuation and _summary_is_promotable_for_pressure_continuation(
+                    summary, max_fsq=args.pressure_continuation_max_fsq
+                ):
+                    continuation_bases["direct"] = continue_indata_from_wout_boundary(
+                        direct_base, read_wout(summary["wout"])
+                    )
+                    continuation_has_promoted_seed["direct"] = True
+                    summary["pressure_continuation_promoted_seed"] = True
+                summaries.append(summary)
+                _write_summary_checkpoint(
+                    summary_path,
+                    coils_json=coils_json,
+                    mgrid_file=mgrid_file,
+                    args=args,
+                    scale_summary=scale_summary,
+                    ns_array=ns_array,
+                    niter_array=niter_array,
+                    ftol_array=ftol_array,
+                    summaries=summaries,
+                    complete=False,
+                )
+            else:
+                write_indata(input_direct, direct_indata)
+                print(f"Running direct-coil beta={beta_percent:.3f}%: {input_direct}")
+                summary = run_one_case(
+                    backend="direct",
+                    input_path=input_direct,
+                    output_dir=outdir,
+                    beta_percent=beta_percent,
+                    pressure_scale_for_one_percent_beta=args.pressure_scale_for_one_percent_beta,
+                    max_iter=args.max_iter,
+                    activate_fsq=args.activate_fsq,
+                    direct_coil_params=direct_params,
+                    direct_coil_source_reuse=not args.disable_direct_coil_source_reuse,
+                    direct_coil_trial_resample=args.direct_coil_trial_resample,
+                    direct_coil_limit_update_rms=args.direct_coil_limit_update_rms,
+                )
+                summary["pressure_continuation_seeded_from_previous"] = bool(
+                    continuation_has_promoted_seed.get("direct", False)
+                )
+                summary["pressure_continuation_promoted_seed"] = False
+                if args.pressure_continuation and _summary_is_promotable_for_pressure_continuation(
+                    summary, max_fsq=args.pressure_continuation_max_fsq
+                ):
+                    continuation_bases["direct"] = continue_indata_from_wout_boundary(
+                        direct_base, read_wout(summary["wout"])
+                    )
+                    continuation_has_promoted_seed["direct"] = True
+                    summary["pressure_continuation_promoted_seed"] = True
+                summaries.append(summary)
+                _write_summary_checkpoint(
+                    summary_path,
+                    coils_json=coils_json,
+                    mgrid_file=mgrid_file,
+                    args=args,
+                    scale_summary=scale_summary,
+                    ns_array=ns_array,
+                    niter_array=niter_array,
+                    ftol_array=ftol_array,
+                    summaries=summaries,
+                    complete=False,
+                )
 
     _write_summary_checkpoint(
         summary_path,

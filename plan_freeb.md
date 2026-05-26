@@ -95,6 +95,7 @@ Steps taken:
 79. Pushed commit `0fdc37e8 freeb: promote direct LP-QA pressure continuation`; PR #18 GitHub Actions are green on fast tests, build/docs, physics smoke, and manifest smoke.
 80. Attempted a direct LP-QA `ns=16,51,101`, final `FTOL=1e-12` reviewer run with the safe Thomas path. It completed nominal beta `0.0` and `0.5` within the 30-minute budget, then was stopped during nominal beta `1.0`.
 81. Added incremental `summary.json` checkpointing to `examples/free_boundary_essos_coils_beta_scan.py` so interrupted high-resolution pressure-continuation scans preserve completed beta metrics.
+82. Added `--resume-existing` to the LP-QA beta-scan example. Existing `wout_{backend}_beta_*.nc` files are now reused as accepted pressure-continuation seeds when their residuals satisfy the promotion threshold, avoiding restarts of already converged high-resolution beta points.
 65. Reclassified generated-`mgrid` VMEC2000 exits with structured return-code metadata, preserving true nonzero failures while separating VMEC's source-level `more_iter_flag=2`.
 66. Fixed `run_xvmec2000` to copy relative `MGRID_FILE` assets from the input deck directory into the executable workdir, preventing accidental fixed-boundary fallbacks in local optional diagnostics.
 67. Added `opened_mgrid` to generated-`mgrid` VMEC2000 diagnostic summaries so parity evidence confirms the executable actually consumed the vacuum grid.
@@ -130,6 +131,7 @@ Results obtained:
     - nominal beta `0.5`: actual beta `0.724%`, `fsqr+fsqz+fsql=6.22e-12`, aspect `6.063`, mean iota `0.408`.
     The nominal beta `1.0` case did not complete within the 30-minute local budget, so `ns=101` direct high-beta is evidence but not yet a practical promotion lane.
 18. `pytest -q tests/test_free_boundary_essos_coils_forward_example.py` passed after adding beta-scan summary checkpoint coverage.
+19. Added focused resume-helper coverage for the LP-QA beta-scan example so interrupted strict-resolution scans can be resumed from persisted WOUT files.
 16. Subagent larger spectral-mode benchmark with `sample_points=2352`, `coils=8`, `segments=128` found the JIT sampler reduced warm active sampling from `0.0588 s` to `0.0545 s` (about 7%), but total warm wall time remained about `0.35 s`; dense NESTOR mode remains the main performance bottleneck.
 17. Targeted active-coupling summary tests passed: 2 passed in 7.81 s.
 18. VMEC2000 parser/optional LASYM validation tests passed locally as 1 passed, 1 skipped in 0.40 s without `VMEC2000_INTEGRATION=1`.
