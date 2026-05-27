@@ -130,10 +130,11 @@ With ESSOS on `PYTHONPATH`, `examples/free_boundary_essos_coils_beta_scan.py`
 runs finite-pressure coil beta scans. Use `--resume-existing` to reuse completed
 `wout_*_beta_*.nc` pressure-continuation seeds.
 
-The DIII-D reference scan reaches final `ns=101`, `FTOL=1e-12`, and actual
-WOUT betas through 2.18%; the LP-QA direct-coil lane promotes strict forward
-rows through actual WOUT beta 1.93%. Full nonlinear exact-adjoint gradients
-remain phase-2 work; see `docs/free_boundary_coil_optimization.rst`.
+The DIII-D reference scan reaches final `ns=101`, `FTOL=1e-12`, and actual WOUT
+betas through 3.33%; the LP-QA direct-coil lane promotes strict rows through
+1.93%. The panels annotate LCFS RMS shifts and relative LCFS `|B|` changes
+against vacuum; full nonlinear exact-adjoint gradients remain phase-2 work.
+See `docs/free_boundary_coil_optimization.rst`.
 
 ![DIII-D finite-beta mgrid free-boundary scan](docs/_static/figures/freeb_diiid_mgrid_beta_ns101_panel.png)
 

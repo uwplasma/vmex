@@ -161,6 +161,7 @@ jobs:
             'tests/test_wout_profiles_currents_bundled_parity.py::test_bundled_wout_surface_averaged_currents_follow_ampere_radial_difference[single_grid_lasym_pressure]' \
             'tests/test_converged_wout_matrix_parity.py::test_bundled_converged_wout_matrix_physics_gates[fixed_nonaxis_lasym_single_basic_non_stellsym_pressure]' \
             tests/test_driver_api.py::test_run_free_boundary_smoke_on_bundled_small_case \
+            tests/test_free_boundary_beta_response_validation.py::test_free_boundary_pressure_scale_changes_bundled_lcfs_and_field \
             tests/test_qs_ess_render_smoke.py
 
   physics-full:
