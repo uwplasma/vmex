@@ -13,12 +13,12 @@ Date opened: 2026-05-24
 ## Current Release Status
 
 Last updated: 2026-05-27 after stage-level beta-scan checkpointing,
-accepted-boundary direct-coil replay AD-vs-FD validation, latest CPU/GPU
-direct-coil benchmark triage, and the latest `origin/main` merge. PR #18 is
-open and mergeable at commit `bfaae022`; CI has been restarted by the latest
-test commit. The optional ESSOS/direct-coil bootstrap gates are local/manual
-because they require ESSOS assets and launch real free-boundary solves. Do not
-merge PR #18 yet.
+interrupted-stage status marking, accepted-boundary direct-coil replay
+AD-vs-FD validation, latest CPU/GPU direct-coil benchmark triage, and the
+latest `origin/main` merge. PR #18 is open and mergeable at commit
+`476693dc`; CI has been restarted by the latest checkpoint-status commit. The
+optional ESSOS/direct-coil bootstrap gates are local/manual because they require
+ESSOS assets and launch real free-boundary solves. Do not merge PR #18 yet.
 
 Steps taken:
 
@@ -82,6 +82,7 @@ Steps taken:
 58. Added an accepted-boundary direct-coil replay AD-vs-central-FD gate for coil current, one Fourier geometry coefficient, and additive background-field channels.  This validates the direct-coil/provider/projection replay rung without claiming full nonlinear VMEC-loop adjoints.
 59. Reprofiled the direct-coil CUDA row on `office`: the best JIT-forces row remains about `0.21 s` warm end-to-end, with setup, residual scalar materialization, accepted-control `fsq1`, preconditioner dispatch, and finalize overhead dominating over force assembly.
 60. Verified the strict LP-QA checkpoint run now preserves completed and active radial stages before root summary completion; the observed `NS=16` zero-beta stage is a checkpoint/resume validation artifact, not a promoted physics result.
+61. Marked interrupted beta-scan active stages explicitly: controlled SIGTERM/SIGINT now records `status="interrupted"`, generic exceptions record `status="failed"`, and resumable accepted-stage records are preserved.
 
 ### 2026-05-27 Free-boundary beta-scan bootstrap-current preconditioner
 
