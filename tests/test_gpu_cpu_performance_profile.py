@@ -661,6 +661,28 @@ def test_exact_callback_summary_uses_split_replay_when_total_bucket_is_absent():
     assert summary["metrics"]["accepted_point_replay_count"] is None
 
 
+def test_exact_callback_summary_counts_fused_projected_replay():
+    compare = _load_compare_tool()
+    payload = {
+        "report_kind": "exact_optimizer_callback_profile",
+        "total_wall_time_s": 5.0,
+        "samples": [{"repeat": 0, "wall_time_s": 5.0}],
+        "profile": {
+            "jacobian_fused_projected_replay_total": {"count": 1, "wall_time_s": 2.25},
+            "jacobian_initial_tangents": {"count": 1, "wall_time_s": 0.5},
+        },
+    }
+
+    summary = compare.summarize_payload(payload, label="fused-projected", top_profile=2)
+
+    assert summary["metrics"]["replay_time_s"] == 2.25
+    assert summary["metrics"]["projected_replay_total_s"] == 2.25
+    assert summary["metrics"]["accepted_point_replay_count"] == 1
+    assert summary["projected_replay_summary"]["total_s"] == 2.25
+    assert summary["projected_replay_summary"]["count"] == 1
+    assert summary["exact_optimizer_patch_target"]["name"] == "jacobian_fused_projected_replay_total"
+
+
 def test_fixed_boundary_profiler_compacts_timing_diagnostics():
     fixed_tool = _load_fixed_tool()
     compact = fixed_tool._compact_diagnostics(

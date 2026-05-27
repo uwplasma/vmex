@@ -62,7 +62,10 @@ EXACT_PROFILE_METRIC_NAMES = {
     ),
     "residual_tangents_s": ("jacobian_residual_tangents",),
     "projected_residual_tangents_s": ("jacobian_projected_replay_residual_tangents",),
-    "projected_replay_total_s": ("jacobian_projected_replay_total",),
+    "projected_replay_total_s": (
+        "jacobian_projected_replay_total",
+        "jacobian_fused_projected_replay_total",
+    ),
     "projected_replay_dispatch_s": ("jacobian_projected_tape_replay_dispatch",),
     "accepted_replay_dispatch_s": (
         "jacobian_tape_replay_dispatch",
@@ -184,6 +187,7 @@ EXACT_PROFILE_CONTAINER_PRIORITY = {
 ACCEPTED_REPLAY_PROFILE_NAMES = {
     "jacobian_tape_replay",
     "jacobian_projected_replay_total",
+    "jacobian_fused_projected_replay_total",
     "gradient_tape_replay",
     "state_tangent_tape_replay",
     "b_cartesian_tangent_tape_replay",
@@ -593,6 +597,7 @@ EXACT_OPTIMIZER_PATCH_TARGET_NAMES = {
     "jacobian_projected_tape_replay_dispatch",
     "jacobian_projected_replay_residual_tangents",
     "jacobian_projected_replay_total",
+    "jacobian_fused_projected_replay_total",
     "gradient_tape_replay",
     "state_tangent_tape_replay",
     "b_cartesian_tangent_tape_replay",
@@ -1349,7 +1354,13 @@ def _projected_replay_summary(
         return None
     count = None
     if profile is not None:
-        count = _profile_named_count(profile, ("jacobian_projected_replay_total",))
+        count = _profile_named_count(
+            profile,
+            (
+                "jacobian_projected_replay_total",
+                "jacobian_fused_projected_replay_total",
+            ),
+        )
     if count is None:
         count = _metric_int(metrics, "accepted_point_replay_count")
     return {
@@ -1467,7 +1478,9 @@ def _exact_optimizer_patch_target(
     candidates: list[dict[str, Any]] = []
     for name, rec in profile.items():
         name_s = str(name)
-        if name_s in EXACT_OPTIMIZER_CONTAINER_PROFILE_NAMES or name_s.endswith("_total"):
+        if name_s in EXACT_OPTIMIZER_CONTAINER_PROFILE_NAMES or (
+            name_s.endswith("_total") and name_s != "jacobian_fused_projected_replay_total"
+        ):
             continue
         if name_s == "exact_tape_build":
             # ``exact_tape_build`` encloses named tape phases.  If the profiler

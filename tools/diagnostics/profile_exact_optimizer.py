@@ -28,6 +28,7 @@ if str(REPO_ROOT) not in sys.path:
 ACCEPTED_REPLAY_PROFILE_NAMES = (
     "jacobian_tape_replay",
     "jacobian_projected_replay_total",
+    "jacobian_fused_projected_replay_total",
     "gradient_tape_replay",
     "state_tangent_tape_replay",
     "b_cartesian_tangent_tape_replay",
