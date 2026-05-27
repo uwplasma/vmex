@@ -12,11 +12,11 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-05-27 after stage-level beta-scan checkpointing,
+Last updated: 2026-05-28 after stage-level beta-scan checkpointing,
 interrupted-stage status marking, accepted-boundary direct-coil replay
 AD-vs-FD validation, latest CPU/GPU direct-coil benchmark triage, and the
 latest `origin/main` merge. PR #18 is open and mergeable at commit
-`476693dc`; CI has been restarted by the latest checkpoint-status commit. The
+`f40e789d`; CI has been restarted by the latest main-merge commit. The
 optional ESSOS/direct-coil bootstrap gates are local/manual because they require
 ESSOS assets and launch real free-boundary solves. Do not merge PR #18 yet.
 
@@ -83,6 +83,7 @@ Steps taken:
 59. Reprofiled the direct-coil CUDA row on `office`: the best JIT-forces row remains about `0.21 s` warm end-to-end, with setup, residual scalar materialization, accepted-control `fsq1`, preconditioner dispatch, and finalize overhead dominating over force assembly.
 60. Verified the strict LP-QA checkpoint run now preserves completed and active radial stages before root summary completion; the observed `NS=16` zero-beta stage is a checkpoint/resume validation artifact, not a promoted physics result.
 61. Marked interrupted beta-scan active stages explicitly: controlled SIGTERM/SIGINT now records `status="interrupted"`, generic exceptions record `status="failed"`, and resumable accepted-stage records are preserved.
+62. Validated the interruption path on `office` with GNU `timeout -s TERM`: the checkpoint retained the active stage input/WOUT paths, stage settings, `status="interrupted"`, `reason="termination_signal"`, and elapsed wall time.
 
 ### 2026-05-27 Free-boundary beta-scan bootstrap-current preconditioner
 
