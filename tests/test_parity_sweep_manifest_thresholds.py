@@ -78,6 +78,43 @@ def test_parity_manifest_has_optional_bounded_freeb_lasym_true_case() -> None:
     assert case.get("metric_thresholds_rel_scaled_by_iter", {}).get("80", {}).get("source_sym") == 1.0e-2
 
 
+def test_parity_manifest_declares_external_fixed_boundary_dry_run_matrix(tmp_path: Path) -> None:
+    """Keep the optional VMEC2000/SIMSOPT fixed-boundary expansion wired."""
+
+    external_ids = (
+        "fixed_nonaxis_lasym_false_simsopt_qh_reactor_lowres_external",
+        "fixed_nonaxis_lasym_false_landreman_w7x_standard_boundary",
+        "fixed_nonaxis_lasym_false_landreman_ncsx_fixed_boundary",
+        "fixed_nonaxis_lasym_false_simsopt_w7x_standard",
+        "fixed_nonaxis_lasym_true_simsopt_basic_non_stellsym_external",
+        "fixed_nonaxis_lasym_false_landreman_hsx_qhs_fixed",
+        "fixed_nonaxis_lasym_false_landreman_kuboozer_n4qh",
+    )
+    _, cases = _parse_manifest(DEFAULT_MANIFEST)
+    cases_by_id = {case["id"]: case for case in cases}
+
+    assert set(external_ids).issubset(cases_by_id)
+    assert any(bool(cases_by_id[case_id]["lasym"]) for case_id in external_ids)
+
+    for case_id in external_ids:
+        case = cases_by_id[case_id]
+        assert case["tier"] == "planning"
+        assert case["compare"] == "stage_trace"
+        assert bool(case["lfreeb"]) is False
+        assert bool(case["axisymmetric"]) is False
+        assert case["source"] in {"simsopt/tests", "landreman/vmec_equilibria"}
+        assert float(case.get("rtol", 0.0)) > 0.0
+        assert float(case.get("max_runtime_s", 0.0)) > 0.0
+        assert float(case.get("max_total_runtime_s", 0.0)) > 0.0
+
+        cmd = _build_stage_trace_cmd(case, vmec_exec=Path("/opt/vmec/xvmec2000"), workdir=tmp_path / case_id)
+        assert "--input" in cmd and cmd[cmd.index("--input") + 1] == case["input"]
+        assert "--vmec2000" in cmd and cmd[cmd.index("--vmec2000") + 1] == "/opt/vmec/xvmec2000"
+        assert "--single-ns" in cmd and cmd[cmd.index("--single-ns") + 1] == str(case["single_ns"])
+        assert "--max-iter" in cmd and cmd[cmd.index("--max-iter") + 1] == str(case["max_iter"])
+        assert "--vmec-timeout" in cmd and cmd[cmd.index("--vmec-timeout") + 1] == str(float(case["vmec_timeout"]))
+
+
 def test_parity_manifest_smoke_cases_define_accuracy_and_runtime_contracts() -> None:
     """Keep fast parity cases explicit about tolerances, inputs, and cost gates."""
 
