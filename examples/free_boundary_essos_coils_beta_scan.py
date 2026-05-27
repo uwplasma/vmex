@@ -468,6 +468,8 @@ def apply_bootstrap_current_fixed_point_preconditioner(
     mismatch_tol: float,
     vmec_max_iter: int,
     activate_fsq: float | None,
+    max_current_update_norm: float | None = None,
+    return_best_evaluated_on_max_iter: bool = False,
     direct_coil_params=None,
     direct_coil_source_reuse: bool = True,
     direct_coil_trial_resample: bool = False,
@@ -490,6 +492,8 @@ def apply_bootstrap_current_fixed_point_preconditioner(
         "n_current": int(n_current),
         "max_fixed_point_iter": int(max_fixed_point_iter),
         "damping": float(damping),
+        "max_current_update_norm": None if max_current_update_norm is None else float(max_current_update_norm),
+        "return_best_evaluated_on_max_iter": bool(return_best_evaluated_on_max_iter),
         "current_tol": float(current_tol),
         "mismatch_tol": float(mismatch_tol),
         "vmec_max_iter": int(vmec_max_iter),
@@ -509,6 +513,8 @@ def apply_bootstrap_current_fixed_point_preconditioner(
         n_current=int(n_current),
         policy="integrating_factor",
         damping=float(damping),
+        max_current_update_norm=None if max_current_update_norm is None else float(max_current_update_norm),
+        return_best_evaluated_on_max_iter=bool(return_best_evaluated_on_max_iter),
         max_fixed_point_iter=int(max_fixed_point_iter),
         current_tol=float(current_tol),
         mismatch_tol=float(mismatch_tol),
@@ -567,6 +573,9 @@ def apply_bootstrap_current_fixed_point_preconditioner(
                 "final_input": str(final_input),
                 "converged": bool(result.converged),
                 "reason": str(result.reason),
+                "returned_best_evaluated": bool(result.returned_best_evaluated),
+                "best_evaluated_iteration": result.best_evaluated_iteration,
+                "best_evaluated_mismatch_norm": result.best_evaluated_mismatch_norm,
                 "history": history_payload,
             },
             indent=2,
@@ -577,12 +586,21 @@ def apply_bootstrap_current_fixed_point_preconditioner(
         {
             "converged": bool(result.converged),
             "reason": str(result.reason),
+            "returned_best_evaluated": bool(result.returned_best_evaluated),
+            "best_evaluated_iteration": result.best_evaluated_iteration,
+            "best_evaluated_mismatch_norm": result.best_evaluated_mismatch_norm,
             "iterations": len(result.history),
             "final_input": str(final_input),
             "history_json": str(history_json),
             "initial_mismatch_norm": None if not result.history else float(result.history[0].mismatch_norm),
             "final_mismatch_norm": None if not result.history else float(result.history[-1].mismatch_norm),
             "final_current_update_norm": None if not result.history else float(result.history[-1].current_update_norm),
+            "final_effective_damping": (
+                None
+                if not result.history or result.history[-1].effective_damping is None
+                else float(result.history[-1].effective_damping)
+            ),
+            "any_current_update_limited": any(bool(item.current_update_limited) for item in result.history),
             "final_curtor": None if not result.history else float(result.history[-1].curtor),
         }
     )
@@ -630,6 +648,14 @@ def _summary_payload(
         "bootstrap_n_current": int(getattr(args, "bootstrap_n_current", 32)),
         "bootstrap_max_fixed_point_iter": int(getattr(args, "bootstrap_max_fixed_point_iter", 0)),
         "bootstrap_damping": float(getattr(args, "bootstrap_damping", 0.5)),
+        "bootstrap_max_current_update_norm": (
+            None
+            if getattr(args, "bootstrap_max_current_update_norm", None) is None
+            else float(args.bootstrap_max_current_update_norm)
+        ),
+        "bootstrap_return_best_evaluated_current": bool(
+            getattr(args, "bootstrap_return_best_evaluated_current", False)
+        ),
         "coil_plasma_scale_summary": scale_summary,
         "ns_array": ns_array or [int(args.ns)],
         "niter_array": niter_array or [int(args.max_iter)],
@@ -932,6 +958,25 @@ def main(argv: list[str] | None = None) -> int:
         help="Damping applied to each bootstrap-current profile update.",
     )
     parser.add_argument(
+        "--bootstrap-max-current-update-norm",
+        type=float,
+        default=None,
+        help=(
+            "Optional trust-region cap on the normalized bootstrap current-profile "
+            "update. If the damped Picard step exceeds this value, the effective "
+            "damping is reduced for that stage."
+        ),
+    )
+    parser.add_argument(
+        "--bootstrap-return-best-evaluated-current",
+        action="store_true",
+        help=(
+            "If the bootstrap fixed-point loop stops at its iteration budget, "
+            "return the already-solved current profile with the smallest Redl "
+            "mismatch instead of the last proposed, not-yet-solved profile."
+        ),
+    )
+    parser.add_argument(
         "--bootstrap-current-tol",
         type=float,
         default=1.0e-2,
@@ -1101,6 +1146,8 @@ def main(argv: list[str] | None = None) -> int:
                         n_current=args.bootstrap_n_current,
                         max_fixed_point_iter=args.bootstrap_max_fixed_point_iter,
                         damping=args.bootstrap_damping,
+                        max_current_update_norm=args.bootstrap_max_current_update_norm,
+                        return_best_evaluated_on_max_iter=args.bootstrap_return_best_evaluated_current,
                         current_tol=args.bootstrap_current_tol,
                         mismatch_tol=args.bootstrap_mismatch_tol,
                         vmec_max_iter=bootstrap_vmec_max_iter,
@@ -1220,6 +1267,8 @@ def main(argv: list[str] | None = None) -> int:
                         n_current=args.bootstrap_n_current,
                         max_fixed_point_iter=args.bootstrap_max_fixed_point_iter,
                         damping=args.bootstrap_damping,
+                        max_current_update_norm=args.bootstrap_max_current_update_norm,
+                        return_best_evaluated_on_max_iter=args.bootstrap_return_best_evaluated_current,
                         current_tol=args.bootstrap_current_tol,
                         mismatch_tol=args.bootstrap_mismatch_tol,
                         vmec_max_iter=bootstrap_vmec_max_iter,

@@ -101,15 +101,21 @@ fixed-point preconditioner before each finite-beta free-boundary case:
      --bootstrap-surfaces "0.15 0.30 0.45 0.60 0.75 0.90" \
      --bootstrap-n-current 32 \
      --bootstrap-max-fixed-point-iter 2 \
-     --bootstrap-damping 0.5
+     --bootstrap-damping 0.5 \
+     --bootstrap-max-current-update-norm 0.1 \
+     --bootstrap-return-best-evaluated-current
 
 The beta-scan adapter runs the bootstrap-current solve with the same external
 field backend as the final free-boundary case: generated ``mgrid`` for legacy
 parity runs, or direct JAX Biot-Savart coils for the differentiable research
 path.  Per-case ``summary.json`` entries include the bootstrap-current
 convergence flag, mismatch history path, final generated current input, final
-``CURTOR``, and current-update norm.  The option is disabled by default because
-it adds one or more VMEC solves before each pressure point.
+``CURTOR``, effective damping, current-update limiter flag, and current-update
+norm.  The option is disabled by default because it adds one or more VMEC
+solves before each pressure point.  For bounded preconditioning runs, prefer
+``--bootstrap-return-best-evaluated-current`` so the final beta solve receives
+the already-solved current profile with the smallest Redl mismatch, rather than
+the last proposed profile if the Picard loop stops at its iteration budget.
 
 Use the optional active direct-coil gate when changing this path:
 
@@ -130,8 +136,8 @@ also compare with and without the current preconditioner at the same resolution
 and verify that both the Redl mismatch and the final VMEC residual behave
 acceptably.  Very low-resolution or underconverged Picard updates can reduce
 the Redl mismatch while still making the next VMEC equilibrium residual worse,
-so damping and current-step budgets must be treated as numerical continuation
-controls rather than universal defaults.
+so damping and ``--bootstrap-max-current-update-norm`` must be treated as
+numerical continuation controls rather than universal defaults.
 
 Literature Anchors
 ------------------

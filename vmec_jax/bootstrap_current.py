@@ -41,6 +41,8 @@ class BootstrapCurrentOptions:
     n_current: int = 50
     policy: CurrentUpdatePolicy = "integrating_factor"
     damping: float = 0.5
+    max_current_update_norm: float | None = None
+    return_best_evaluated_on_max_iter: bool = False
     anderson_depth: int = 0
     mismatch_tol: float = 1.0e-3
     current_tol: float = 1.0e-3
@@ -62,6 +64,10 @@ class BootstrapCurrentIteration:
     aspect: float | None = None
     mean_iota: float | None = None
     fsq_total: float | None = None
+    effective_damping: float | None = None
+    current_update_limited: bool = False
+    unlimited_current_update_norm: float | None = None
+    max_current_update_norm: float | None = None
 
 
 @dataclass(frozen=True)
@@ -74,6 +80,9 @@ class BootstrapCurrentResult:
     reason: str
     last_run: Any | None = None
     last_diagnostics: dict[str, Any] | None = None
+    returned_best_evaluated: bool = False
+    best_evaluated_iteration: int | None = None
+    best_evaluated_mismatch_norm: float | None = None
 
 
 def _as_1d(name: str, value: Any):
@@ -510,6 +519,8 @@ def bootstrap_current_fixed_point(
 
     if int(options.max_fixed_point_iter) < 1:
         raise ValueError("max_fixed_point_iter must be at least 1")
+    if options.max_current_update_norm is not None and float(options.max_current_update_norm) <= 0.0:
+        raise ValueError("max_current_update_norm must be positive when provided")
     if int(options.anderson_depth) != 0:
         raise NotImplementedError("Anderson acceleration is planned but not implemented yet")
     if solve_fn is None:
@@ -533,6 +544,9 @@ def bootstrap_current_fixed_point(
     history: list[BootstrapCurrentIteration] = []
     last_run = None
     last_diag: dict[str, Any] | None = None
+    best_evaluated_indata = deepcopy(current_indata)
+    best_evaluated_iteration: int | None = None
+    best_evaluated_mismatch_norm = float("inf")
     converged = False
     reason = "max_fixed_point_iter"
 
@@ -579,11 +593,22 @@ def bootstrap_current_fixed_point(
             proposed_current = integrate_current_derivative(s, proposed_derivative)
 
         old_derivative = _current_derivative_from_indata(current_indata, s, options.pcurr_type)
-        new_derivative = damp_current_profile(old_derivative, proposed_derivative, options.damping)
-        new_current = integrate_current_derivative(s, new_derivative)
-        update_norm = jnp.linalg.norm(new_derivative - old_derivative) / (
+        effective_damping = float(options.damping)
+        new_derivative = damp_current_profile(old_derivative, proposed_derivative, effective_damping)
+        update_denominator = (
             jnp.linalg.norm(old_derivative) + jnp.linalg.norm(proposed_derivative) + jnp.asarray(1.0e-300)
         )
+        update_norm = jnp.linalg.norm(new_derivative - old_derivative) / update_denominator
+        unlimited_update_norm = float(np.asarray(update_norm, dtype=np.float64))
+        current_update_limited = False
+        if options.max_current_update_norm is not None:
+            max_update = float(options.max_current_update_norm)
+            if unlimited_update_norm > max_update:
+                effective_damping *= max_update / unlimited_update_norm
+                new_derivative = damp_current_profile(old_derivative, proposed_derivative, effective_damping)
+                update_norm = jnp.linalg.norm(new_derivative - old_derivative) / update_denominator
+                current_update_limited = True
+        new_current = integrate_current_derivative(s, new_derivative)
         next_indata, profile = bootstrap_current_update_to_indata(
             current_indata,
             s=s,
@@ -593,6 +618,10 @@ def bootstrap_current_fixed_point(
             pcurr_type=options.pcurr_type,
         )
         mismatch_norm = float(np.asarray(diag.get("mismatch_norm", np.nan), dtype=np.float64))
+        if np.isfinite(mismatch_norm) and mismatch_norm < best_evaluated_mismatch_norm:
+            best_evaluated_indata = deepcopy(current_indata)
+            best_evaluated_iteration = int(iteration)
+            best_evaluated_mismatch_norm = float(mismatch_norm)
         current_update_norm = float(np.asarray(update_norm, dtype=np.float64))
         history.append(
             BootstrapCurrentIteration(
@@ -606,6 +635,12 @@ def bootstrap_current_fixed_point(
                 aspect=None if diag.get("aspect") is None else float(diag["aspect"]),
                 mean_iota=None if diag.get("mean_iota") is None else float(diag["mean_iota"]),
                 fsq_total=None if diag.get("fsq_total") is None else float(diag["fsq_total"]),
+                effective_damping=float(effective_damping),
+                current_update_limited=bool(current_update_limited),
+                unlimited_current_update_norm=float(unlimited_update_norm),
+                max_current_update_norm=(
+                    None if options.max_current_update_norm is None else float(options.max_current_update_norm)
+                ),
             )
         )
         current_indata = next_indata
@@ -616,13 +651,28 @@ def bootstrap_current_fixed_point(
             reason = "current_and_mismatch_tolerances"
             break
 
+    returned_best_evaluated = False
+    return_indata = current_indata
+    if (
+        not converged
+        and bool(options.return_best_evaluated_on_max_iter)
+        and best_evaluated_iteration is not None
+    ):
+        return_indata = best_evaluated_indata
+        returned_best_evaluated = True
+
     return BootstrapCurrentResult(
-        indata=current_indata,
+        indata=return_indata,
         history=tuple(history),
         converged=bool(converged),
         reason=reason,
         last_run=last_run,
         last_diagnostics=last_diag,
+        returned_best_evaluated=bool(returned_best_evaluated),
+        best_evaluated_iteration=best_evaluated_iteration,
+        best_evaluated_mismatch_norm=(
+            None if not np.isfinite(best_evaluated_mismatch_norm) else float(best_evaluated_mismatch_norm)
+        ),
     )
 
 

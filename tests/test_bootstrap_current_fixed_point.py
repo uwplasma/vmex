@@ -309,6 +309,108 @@ def test_bootstrap_current_fixed_point_runs_callback_loop_to_convergence():
     assert result.history[-1].aspect == pytest.approx(7.0)
 
 
+def test_bootstrap_current_fixed_point_limits_current_update_norm():
+    s = jnp.asarray([0.0, 0.5, 1.0], dtype=jnp.float64)
+    target_derivative = jnp.asarray([1.0, 2.0, 3.0], dtype=jnp.float64)
+    bdotb = jnp.ones_like(s)
+    dpsi_ds = 0.05
+    indata = InData(
+        scalars={
+            "PHIEDGE": 2.0 * np.pi * dpsi_ds,
+            "PCURR_TYPE": "cubic_spline_ip",
+            "CURTOR": 0.0,
+            "NCURR": 1,
+            "AC": [1.0],
+            "AC_AUX_S": [0.0, 0.5, 1.0],
+            "AC_AUX_F": [0.0, 0.0, 0.0],
+        },
+        indexed={},
+    )
+
+    result = vj.bootstrap_current_fixed_point(
+        indata,
+        options=vj.BootstrapCurrentOptions(
+            helicity_n=1,
+            n_current=3,
+            damping=1.0,
+            max_current_update_norm=0.2,
+            max_fixed_point_iter=1,
+        ),
+        solve_fn=lambda _current_indata: SimpleNamespace(signgs=1),
+        diagnostics_fn=lambda _run, _current_indata: {
+            "s": s,
+            "jdotB_redl": target_derivative / (2.0 * np.pi * dpsi_ds),
+            "bdotb": bdotb,
+            "dpds": jnp.zeros_like(s),
+            "dpsi_ds": dpsi_ds,
+            "signgs": 1,
+            "mismatch_norm": 1.0,
+        },
+    )
+
+    np.testing.assert_allclose(result.indata.scalars["AC_AUX_F"], 0.2 * np.asarray(target_derivative), rtol=1.0e-12)
+    assert result.history[0].current_update_limited is True
+    assert result.history[0].effective_damping == pytest.approx(0.2)
+    assert result.history[0].current_update_norm == pytest.approx(0.2)
+    assert result.history[0].unlimited_current_update_norm == pytest.approx(1.0)
+    assert result.history[0].max_current_update_norm == pytest.approx(0.2)
+
+
+def test_bootstrap_current_fixed_point_can_return_best_evaluated_profile_on_budget():
+    s = jnp.asarray([0.0, 0.5, 1.0], dtype=jnp.float64)
+    dpsi_ds = 0.05
+    indata = InData(
+        scalars={
+            "PHIEDGE": 2.0 * np.pi * dpsi_ds,
+            "PCURR_TYPE": "cubic_spline_ip",
+            "CURTOR": 0.0,
+            "NCURR": 1,
+            "AC": [1.0],
+            "AC_AUX_S": [0.0, 0.5, 1.0],
+            "AC_AUX_F": [0.0, 0.0, 0.0],
+        },
+        indexed={},
+    )
+    targets = [jnp.ones_like(s), 2.0 * jnp.ones_like(s)]
+    mismatches = [0.5, 0.2]
+    calls = {"n": 0}
+
+    def diagnostics_fn(_run, _current_indata):
+        i = calls["n"]
+        calls["n"] += 1
+        return {
+            "s": s,
+            "jdotB_redl": targets[i] / (2.0 * np.pi * dpsi_ds),
+            "bdotb": jnp.ones_like(s),
+            "dpds": jnp.zeros_like(s),
+            "dpsi_ds": dpsi_ds,
+            "signgs": 1,
+            "mismatch_norm": mismatches[i],
+        }
+
+    result = vj.bootstrap_current_fixed_point(
+        indata,
+        options=vj.BootstrapCurrentOptions(
+            helicity_n=1,
+            n_current=3,
+            damping=1.0,
+            current_tol=0.0,
+            mismatch_tol=0.0,
+            max_fixed_point_iter=2,
+            return_best_evaluated_on_max_iter=True,
+        ),
+        solve_fn=lambda _current_indata: SimpleNamespace(signgs=1),
+        diagnostics_fn=diagnostics_fn,
+    )
+
+    assert not result.converged
+    assert result.returned_best_evaluated is True
+    assert result.best_evaluated_iteration == 2
+    assert result.best_evaluated_mismatch_norm == pytest.approx(0.2)
+    np.testing.assert_allclose(result.indata.scalars["AC_AUX_F"], np.ones(3), rtol=1.0e-12)
+    np.testing.assert_allclose(result.history[-1].ac_aux_f, 2.0 * np.ones(3), rtol=1.0e-12)
+
+
 def test_bootstrap_current_fixed_point_extends_interior_redl_samples_to_full_current_grid():
     s_redl = jnp.asarray([0.25, 0.5, 0.75], dtype=jnp.float64)
     bdotb = jnp.ones_like(s_redl)
@@ -478,6 +580,13 @@ def test_bootstrap_current_fixed_point_rejects_invalid_iteration_controls():
         vj.bootstrap_current_fixed_point(
             InData(scalars={}, indexed={}),
             options=vj.BootstrapCurrentOptions(helicity_n=0, anderson_depth=1),
+            solve_fn=lambda _indata: object(),
+            diagnostics_fn=lambda _run, _indata: {},
+        )
+    with pytest.raises(ValueError, match="max_current_update_norm"):
+        vj.bootstrap_current_fixed_point(
+            InData(scalars={}, indexed={}),
+            options=vj.BootstrapCurrentOptions(helicity_n=0, max_current_update_norm=0.0),
             solve_fn=lambda _indata: object(),
             diagnostics_fn=lambda _run, _indata: {},
         )

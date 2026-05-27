@@ -181,6 +181,7 @@ def test_beta_scan_bootstrap_current_preconditioner_updates_indata(monkeypatch, 
     def fake_fixed_point(indata, *, options, solve_fn, ne_coeffs, Te_coeffs, Ti_coeffs, Zeff_coeffs):
         assert options.helicity_n == 0
         assert options.n_current == 5
+        assert options.max_current_update_norm == pytest.approx(0.3)
         assert np.asarray(ne_coeffs).size > 0
         assert np.asarray(Te_coeffs).size > 0
         # Exercise the solve callback enough to verify mgrid path rewriting.
@@ -230,6 +231,7 @@ def test_beta_scan_bootstrap_current_preconditioner_updates_indata(monkeypatch, 
         n_current=5,
         max_fixed_point_iter=1,
         damping=0.5,
+        max_current_update_norm=0.3,
         current_tol=1.0e-2,
         mismatch_tol=1.0e-2,
         vmec_max_iter=3,
@@ -240,6 +242,7 @@ def test_beta_scan_bootstrap_current_preconditioner_updates_indata(monkeypatch, 
     assert summary["enabled"] is True
     assert summary["converged"] is True
     assert summary["iterations"] == 1
+    assert summary["max_current_update_norm"] == pytest.approx(0.3)
     assert summary["final_mismatch_norm"] == 0.5
     assert Path(summary["history_json"]).exists()
     assert Path(summary["final_input"]).exists()
@@ -335,6 +338,10 @@ def test_beta_scan_bootstrap_current_direct_coil_active_smoke(tmp_path):
             "0.25 0.50 0.75",
             "--bootstrap-vmec-max-iter",
             "2",
+            "--bootstrap-damping",
+            "0.5",
+            "--bootstrap-max-current-update-norm",
+            "0.1",
             "--max-iter",
             "2",
             "--ns",
@@ -366,5 +373,8 @@ def test_beta_scan_bootstrap_current_direct_coil_active_smoke(tmp_path):
     assert finite_beta["free_boundary_bnormal_rms_history"]["count"] >= 1
     assert finite_beta["bootstrap_current"]["iterations"] == 1
     assert finite_beta["bootstrap_current"]["reason"] == "max_fixed_point_iter"
+    assert finite_beta["bootstrap_current"]["max_current_update_norm"] == pytest.approx(0.1)
+    assert finite_beta["bootstrap_current"]["any_current_update_limited"] is True
+    assert finite_beta["bootstrap_current"]["final_effective_damping"] < 0.5
     assert Path(finite_beta["bootstrap_current"]["history_json"]).exists()
     assert Path(finite_beta["bootstrap_current"]["final_input"]).exists()
