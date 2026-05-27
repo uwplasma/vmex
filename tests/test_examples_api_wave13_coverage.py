@@ -139,7 +139,8 @@ def test_qi_support_stage_modes_for_explicit_limits_and_defaults() -> None:
         BoundaryModeLimits(mode=4, max_m=4, max_n=4),
     ]
     assert explicit_modes == [1, 3, 4]
-    assert default_modes == [4, 4, 4]
+    assert default_modes == [1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4]
+    assert mod.stage_modes_for({"stage_repeats": 3, "stage_mode_policy": "repeat"}) == [4, 4, 4]
 
 
 def test_qi_support_jsonable_and_partial_history_helpers() -> None:

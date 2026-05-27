@@ -62,3 +62,4 @@ def test_lazy_public_api_and_dir_behaviour():
     assert "api" in public_names
     assert "run_fixed_boundary" in public_names
     assert "run_booz_xform" in public_names
+    assert "qi_stage_modes" in public_names

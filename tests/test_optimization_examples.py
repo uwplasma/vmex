@@ -1653,6 +1653,7 @@ def test_public_api_reexports_example_optimization_contract() -> None:
     import vmec_jax.optimization_workflow as workflow
     import vmec_jax.plotting as plotting
     import vmec_jax.qi_diagnostics as qi_diagnostics
+    import vmec_jax.qi_optimization as qi_optimization
     from vmec_jax import finite_beta
 
     workflow_names = (
@@ -1715,6 +1716,10 @@ def test_public_api_reexports_example_optimization_contract() -> None:
     ):
         assert getattr(api, name) is getattr(qi_diagnostics, name)
         assert getattr(vj, name) is getattr(qi_diagnostics, name)
+
+    for name in ("qi_stage_modes",):
+        assert getattr(api, name) is getattr(qi_optimization, name)
+        assert getattr(vj, name) is getattr(qi_optimization, name)
 
     for name in (
         "plot_3d_boundary_comparison",

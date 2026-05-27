@@ -178,6 +178,26 @@ def test_qi_example_cli_defaults_min_vmec_mode_and_accepts_default_solver(monkey
     assert namespace["STAGE_MODES"] == (4, 2, "lower")
 
 
+def test_qi_example_cli_real_stage_mode_policies() -> None:
+    base = {
+        "MAX_MODE": 3,
+        "CONTINUATION_NFEV": 2,
+        "USE_MODE_CONTINUATION": True,
+        "STAGE_REPEATS": 2,
+    }
+
+    lower = dict(base)
+    qio.apply_qi_example_cli_overrides(lower, ["--stage-mode-policy", "lower"])
+    assert lower["STAGE_MODES"] == [1, 1, 2, 2, 2, 3, 3, 3]
+
+    repeat = dict(base)
+    qio.apply_qi_example_cli_overrides(repeat, ["--stage-mode-policy", "repeat"])
+    assert repeat["STAGE_MODES"] == [3, 3]
+
+    with pytest.raises(SystemExit):
+        qio.apply_qi_example_cli_overrides(dict(base), ["--stage-mode-policy", "invalid"])
+
+
 def test_target_helicity_seed_terms_are_deterministic_and_disable_cleanly() -> None:
     expected_mode_1 = (
         ("RBC", (1, 0), 2.5e-5),

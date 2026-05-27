@@ -63,6 +63,7 @@ class QIStagedCaseConfig:
     solver_device: str | None = None
     worker_jax_platforms: str | None = None
     use_ess: bool = True
+    stage_mode_policy: str = "lower"
     max_nfev: int | None = None
     inner_max_iter: int | None = None
     inner_ftol: float | None = None
@@ -152,6 +153,8 @@ def _build_qi_staged_args(config: QIStagedCaseConfig) -> list[str]:
         "--use-mode-continuation" if str(config.policy) == "continuation" else "--no-use-mode-continuation",
         "--use-ess" if bool(config.use_ess) else "--no-use-ess",
         "--make-plots" if bool(config.make_plots) else "--no-make-plots",
+        "--stage-mode-policy",
+        str(config.stage_mode_policy),
     ]
     if config.reference_input is not None:
         args.extend(

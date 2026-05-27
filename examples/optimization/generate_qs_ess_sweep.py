@@ -100,6 +100,7 @@ SOLVER_DEVICE: str | None = None  # None uses JAX default; set "cpu" or "gpu" to
 SKIP_EXISTING = True
 CASE_TIMEOUT_S: float | None = 1800.0
 ESS_ALPHA = 1.2  # Try 1.2 for gentle ESS or 2.5 for stronger high-mode scaling.
+QI_STAGE_MODE_POLICY = "lower"  # "lower" uses QA/QH/QP-style continuation; "repeat" preserves old QI cleanup.
 TARGET_ASPECT = 5.0
 QI_TARGET_ASPECT = TARGET_ASPECT
 TARGET_ABS_IOTA_MIN = 0.41
@@ -1204,7 +1205,13 @@ def _stage_modes_for_problem(
             modes.extend([mode] * (2 if mode == 1 else 3))
         return modes
     if problem_cfg.name == "qi":
-        return [max_mode] * 5
+        return vj.qi_stage_modes(
+            max_mode=max_mode,
+            use_mode_continuation=use_mode_continuation,
+            continuation_nfev=max(1, int(problem_cfg.continuation_nfev)),
+            repeats=5,
+            policy=QI_STAGE_MODE_POLICY,
+        )
     return list(range(1, max_mode + 1))
 
 

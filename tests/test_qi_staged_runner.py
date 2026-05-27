@@ -35,6 +35,7 @@ def test_qi_staged_runner_builds_external_input_cli_and_environment(tmp_path: Pa
         solver_device="gpu",
         worker_jax_platforms="gpu",
         use_ess=False,
+        stage_mode_policy="repeat",
         max_nfev=5,
         inner_max_iter=21,
         inner_ftol=1.0e-8,
@@ -57,6 +58,7 @@ def test_qi_staged_runner_builds_external_input_cli_and_environment(tmp_path: Pa
     assert "--no-use-mode-continuation" in args
     assert "--no-use-ess" in args
     assert "--no-make-plots" in args
+    assert "--stage-mode-policy" in args and "repeat" in args
     assert "--max-nfev" in args and "5" in args
     assert "--inner-max-iter" in args and "21" in args
     assert "--trial-ftol" in args and "2e-08" in args

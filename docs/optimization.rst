@@ -63,7 +63,7 @@ the exact policy matrix and selected best-case provenance.
      - NFP=2 QI seed, aspect target 5, ``abs(mean_iota) >= 0.41``, QP residual.  The final optimized QP row is also the seed for the separate :doc:`piecewise_omnigenous_plan`.
    * - QI
      - ``examples/optimization/QI_optimization.py``
-     - NFP=2 QI default lane with Boozer-space QI, mirror, elongation, QI ceiling, ESS, and repeated same-mode continuation; the README best-row sweep uses aspect target 5, while case-coverage and far-seed probes may choose case-specific aspect targets.
+     - NFP=2 QI default lane with Boozer-space QI, mirror, elongation, QI ceiling, ESS, and lower-mode continuation; set ``STAGE_MODE_POLICY = "repeat"`` for same-mode cleanup when the seed is already in a QI basin.  The README best-row sweep uses aspect target 5, while case-coverage and far-seed probes may choose case-specific aspect targets.
 
 When using sweep commands, keep backend selection and report labeling separate.
 ``--backend-label`` only names output directories and table rows; it does not
@@ -293,14 +293,15 @@ Regenerate the figure and CSV without launching new optimization jobs with:
 
    PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 
-The renderer is clean-clone reproducible: it reads the reviewed WOUT,
-diagnostics, preconditioner summaries, and raw per-stage ``history.json`` files
-from the tracked ``docs/_static/qi_readme_cases`` bundle.  The plotted history
-uses best-so-far stage normalization for readability; inspect those raw
-``history.json`` files when auditing non-monotone or stalled optimizer stages.
-The tracked preconditioner summaries intentionally keep only scalar scan
-metrics and selected-``lambda`` flags, not local scratch ``input`` or ``wout``
-paths from the original optimization machine.
+The renderer reads reviewed local or release-asset WOUT files plus tracked
+diagnostics, preconditioner summaries, and raw per-stage ``history.json`` files.
+Large WOUTs are intentionally ignored by git to keep clones small, so fetch or
+regenerate the corresponding WOUT assets before rerendering from a clean clone.
+The plotted history uses best-so-far stage normalization for readability;
+inspect the raw ``history.json`` files when auditing non-monotone or stalled
+optimizer stages.  The tracked preconditioner summaries intentionally keep only
+scalar scan metrics and selected-``lambda`` flags, not local scratch ``input``
+or ``wout`` paths from the original optimization machine.
 
 The robustness probe is intentionally a QI+iota basin test, not a full
 engineering acceptance claim.  ``QI_optimization.py`` is now the single
@@ -760,8 +761,9 @@ optimization:
    * - QI
      - ``examples/optimization/QI_optimization.py``
      - ``AspectRatio``, ``AbsMeanIotaFloor``, ``QuasiIsodynamicResidual``,
-       ``MirrorRatio``, and ``MaxElongation`` with repeated same-mode
-       continuation and ESS.
+       ``MirrorRatio``, and ``MaxElongation`` with lower-mode continuation and
+       ESS.  Same-mode repeat is available with ``STAGE_MODE_POLICY =
+       "repeat"``.
 
 .. code-block:: bash
 
@@ -852,13 +854,14 @@ Columns in archived checked-in panels may correspond to older
 ``max_mode = 1, 2, 3`` sweep rows.  The current regeneration target extends
 through ``max_mode=5``.  The vertical dotted lines mark continuation stage
 boundaries.  QA/QH/QP
-continuation uses the repeated
-omnigenity-style policy ``[1, 1, 2, 2, 2]`` for ``max_mode=2`` and
+continuation uses the repeated omnigenity-style policy ``[1, 1, 2, 2, 2]`` for
+``max_mode=2`` and
 ``[1, 1, 2, 2, 2, 3, 3, 3]`` for ``max_mode=3``; higher modes follow the same
-repeated-stage pattern when continuation is enabled.  QI repeats the requested
-active space five times, matching the reference omnigenity workflow.  Mode-4 and
-mode-5 rows should be promoted only after matching reviewed CSV/JSON rows and
-figures are regenerated.
+repeated-stage pattern when continuation is enabled.  QI now uses the same
+lower-mode continuation by default; same-mode repeat remains available for
+near-basin cleanup via ``STAGE_MODE_POLICY = "repeat"`` or the corresponding
+CLI flag.  Mode-4 and mode-5 rows should be promoted only after matching
+reviewed CSV/JSON rows and figures are regenerated.
 
 When the full matrix is regenerated, the objective panels contain the CPU/GPU
 policy sweep.  Solid curves met the optimizer success criterion; dashed curves
@@ -1357,8 +1360,8 @@ generator, then run the following validation ladder before promoting a result.
    QH-like spectra in the same order as the legacy branch-shuffle diagnostic.
 
 2. Run the constrained QI matrix before declaring a best policy.  This keeps
-   direct QI, repeated same-mode continuation, ESS, and QP-preseed rows
-   comparable:
+   direct QI, lower-mode continuation, optional same-mode repeat, ESS, and
+   QP-preseed rows comparable:
 
    .. code-block:: bash
 

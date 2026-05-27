@@ -423,12 +423,13 @@ Regenerate these lightweight artifacts with:
 
    PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 
-This renderer intentionally consumes the tracked
+This renderer intentionally consumes the curated
 ``docs/_static/qi_readme_cases`` bundle instead of ignored local
-``results/`` directories, so the figure can be regenerated from a clean clone.
-Raw per-stage ``history.json`` files are kept in that bundle for auditing
-non-monotone or stalled optimizer stages; the public panel plots normalized
-best-so-far traces for readability.
+``results/`` directories.  Large WOUT files in that bundle are ignored by git
+and must be fetched as release assets or regenerated before rerendering from a
+clean clone.  Raw per-stage ``history.json`` files are kept in git for
+auditing non-monotone or stalled optimizer stages; the public panel plots
+normalized best-so-far traces for readability.
 The bundled preconditioner summaries are also scrubbed to scalar scan metrics
 and selected-``lambda`` flags so the tracked release artifacts do not point at
 local scratch directories from the run host.

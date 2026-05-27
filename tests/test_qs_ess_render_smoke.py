@@ -484,7 +484,7 @@ def test_problem_configs_follow_current_seed_and_priority_policy():
     assert qi_cfg.qi_preseed_qi
 
 
-def test_continuation_stage_modes_follow_omnigenity_repeated_policy():
+def test_continuation_stage_modes_follow_omnigenity_repeated_policy(monkeypatch: pytest.MonkeyPatch):
     sweep = _load_sweep_module()
 
     assert sweep._stage_modes_for_problem(
@@ -497,6 +497,12 @@ def test_continuation_stage_modes_follow_omnigenity_repeated_policy():
         max_mode=2,
         use_mode_continuation=True,
     ) == [1, 1, 2, 2, 2]
+    assert sweep._stage_modes_for_problem(
+        sweep.PROBLEM_CONFIGS["qi"],
+        max_mode=3,
+        use_mode_continuation=True,
+    ) == [1, 1, 2, 2, 2, 3, 3, 3]
+    monkeypatch.setattr(sweep, "QI_STAGE_MODE_POLICY", "repeat")
     assert sweep._stage_modes_for_problem(
         sweep.PROBLEM_CONFIGS["qi"],
         max_mode=3,
