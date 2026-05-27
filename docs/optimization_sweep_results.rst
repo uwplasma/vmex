@@ -337,10 +337,11 @@ switching to ``--prefine-probes run``.
 The docs NFP=4 QI coverage lane starts from ``examples/data/input.minimal_seed_nfp4``
 with only ``RBC(0,0)``, ``RBC(0,1)``, and ``ZBS(0,1)`` in the source input,
 then applies a same-NFP finite-beta QI reference-family preconditioner before
-bounded local cleanup.  Use ``VMEC_JAX_QI_RUN_CASE=nfp4_qh_warm_to_qi`` and
-``VMEC_JAX_QI_RUN_CASE=nfp4_qi_finite_beta`` only as stress fixtures unless
-their independent ``diagnostics.json`` records a reviewed smooth/legacy QI and
-mirror-ratio gate pass.
+bounded local cleanup.  Treat the NFP=4 QH-warm and finite-beta QI variants as
+stress fixtures unless their independent ``diagnostics.json`` records a reviewed
+smooth/legacy QI and mirror-ratio gate pass; run them through
+``QI_optimization.py`` with explicit ``--input-file``, ``--reference-input``,
+and ``--output-dir`` overrides rather than legacy environment variables.
 
 Run the GPU production sweep on a machine with a working JAX GPU install:
 
@@ -368,13 +369,17 @@ if a future problem config requests a larger replay budget.  Add
 On timeout, the sweep driver terminates the worker process group as well as
 direct children, so stale descendant solver or GPU processes should not survive
 after a recorded timeout row.
-After every completed continuation/QI stage, the runner writes a compact
-``stage_checkpoint.json`` beside the case output.  Timeout and worker-failure
-rows are then annotated from the latest checkpoint when possible, preserving the
-last accepted objective, aspect, iota, QI, mirror, elongation, wall time, and
-stage label in ``case_result.json`` and the CSV summaries.  Treat these
-checkpoint-derived rows as partial diagnostics; publication and README promotion
-still require the independent physics gates and reviewed Boozer contour plots.
+Before each long QI stage, the runner writes a pending
+``stage_checkpoint.json`` beside the case output.  After a stage solve returns,
+it writes a pre-diagnostic checkpoint, materializes root-level
+``input.initial`` and ``input.final`` files from the selected exact accepted
+point, and then writes the exact-diagnostic promotion checkpoint.  Timeout and
+worker-failure rows are annotated from the latest checkpoint when possible,
+preserving the last accepted objective, aspect, iota, QI, mirror, elongation,
+wall time, and stage label in ``case_result.json`` and the CSV summaries.  Treat
+these checkpoint-derived rows as partial diagnostics; publication and README
+promotion still require the independent physics gates and reviewed Boozer
+contour plots.
 
 Run the non-stellarator-symmetric sweep by adding
 ``--stellarator-asymmetric``.  This sets ``LASYM = T`` in memory, includes
@@ -464,34 +469,25 @@ audited WOUT; preconditioner scan points are provenance for basin capture, not
 the final acceptance diagnostic.
 
 To refresh the exact rows used by this panel, run the source optimizations with
-the target-aspect and output-dir values below before rendering.  The explicit
-overrides reproduce the archived mixed-target figure rows; omit them only when
-regenerating the current uniform aspect-5 policy.  The NFP=1/2/3/4 public
-selectors ``nfp*_qi`` are now aliases for the minimal-seed lanes.  Named
+explicit command-line overrides before rendering.  The example below regenerates
+the current uniform aspect-5 minimal-seed policy for NFP=1/2/3/4.  Named
 far-seed cases such as ``qi_stel_seed_3127`` remain explicit diagnostics.  If
 any raw artifact is replaced during a refresh, the replacement must pass the
 renderer boundary match before the panel is published.
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp1_qi \
-     VMEC_JAX_QI_TARGET_ASPECT=10 \
-     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp1_qi_direct_office_20260519 \
-     python examples/optimization/QI_optimization.py
-   PYTHONPATH=. JAX_PLATFORMS=cpu \
-     VMEC_JAX_QI_INPUT=examples/data/input.minimal_seed_nfp2_target_helicity \
-     VMEC_JAX_QI_POLICY_CASE=nfp2_qi \
-     VMEC_JAX_QI_LABEL=nfp2_target_helicity \
-     VMEC_JAX_QI_TARGET_ASPECT=6 \
-     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/minimal_nfp2_to_qi_reference \
-     python examples/optimization/QI_optimization.py
-   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp3_qi \
-     VMEC_JAX_QI_TARGET_ASPECT=4 \
-     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516 \
-     python examples/optimization/QI_optimization.py
-   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi \
-     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/minimal_nfp4_to_qi_finite_beta_reference \
-     python examples/optimization/QI_optimization.py
+   for nfp in 1 2 3 4; do
+     PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_optimization.py \
+       --input-file examples/data/input.minimal_seed_nfp${nfp} \
+       --output-dir results/qi_opt/ess/minimal_nfp${nfp}_qi \
+       --target-aspect 5 --target-abs-iota-min 0.41 \
+       --max-mode 5 --max-nfev 70 --continuation-nfev 20 \
+       --inner-max-iter 450 --inner-ftol 1e-9 \
+       --trial-max-iter 450 --trial-ftol 1e-9 \
+       --ess-alpha 1.2 --use-ess --use-mode-continuation \
+       --stage-mode-policy lower
+   done
    PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 
 The optimization commands above create candidate result directories under
