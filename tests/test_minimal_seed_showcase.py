@@ -63,15 +63,15 @@ def test_minimal_seed_showcase_target_helicity_seed_terms_are_deterministic() ->
     generator = _load_module("generate_minimal_seed_showcase_target_seed", "generate_minimal_seed_showcase.py")
 
     expected = (
-        ("RBC", (1, 0), 1.0e-5),
-        ("ZBS", (1, 0), 1.0e-5),
-        ("RBC", (-1, 1), 1.0e-5),
-        ("ZBS", (-1, 1), 1.0e-5),
-        ("RBC", (1, 1), 1.0e-5),
-        ("ZBS", (1, 1), 1.0e-5),
+        ("RBC", (1, 0), 1.0e-3),
+        ("ZBS", (1, 0), 1.0e-3),
+        ("RBC", (-1, 1), 1.0e-3),
+        ("ZBS", (-1, 1), 1.0e-3),
+        ("RBC", (1, 1), 1.0e-3),
+        ("ZBS", (1, 1), 1.0e-3),
     )
 
-    assert generator.TARGET_HELICITY_SEED_AMPLITUDE == pytest.approx(1.0e-5)
+    assert generator.TARGET_HELICITY_SEED_AMPLITUDE == pytest.approx(1.0e-3)
     assert generator._target_helicity_seed_terms(max_mode=0) == ()
     assert generator._target_helicity_seed_terms(max_mode=1) == expected
     assert generator._target_helicity_seed_terms(max_mode=1, amplitude=0.0) == ()
