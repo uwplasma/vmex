@@ -567,6 +567,11 @@ def _minimal_or_circular_qi_case(
             {
                 **stage,
                 "max_nfev": stage_nfev,
+                # Minimal/circular seeds may need to move far from a reference
+                # candidate that is QI-safe but too high-aspect.  Keep the
+                # stage policy case-specific, but make aspect localization
+                # explicit for the common aspect-5 showcase lane.
+                "aspect_weight": max(float(stage.get("aspect_weight", 0.0)), 4.0),
                 # Showcase and staged-runner --max-nfev should be the local
                 # optimizer budget for these reference-seeded cases, not only a
                 # ceiling over legacy one-evaluation audit stages.
