@@ -202,7 +202,7 @@ fields.  It is separate from the common-minimal showcase, whose current
 checked-in summary does not contain non-stale QI completions.  The separate
 ``nfp4_qi_finite_beta`` and ``nfp4_qh_warm_to_qi`` cases remain stress lanes
 rather than broad arbitrary-seed NFP=4 robustness claims.  These rows are not
-additional aspect-6 README best-row promotions.
+additional aspect-5 README best-row promotions.
 May 2026 bounded NFP=4 reruns that reproduce this metric envelope should be
 recorded as QA/provenance checks unless they provide a new reviewed
 ``docs/_static/qi_readme_cases/nfp4_minimal`` replacement bundle.  Do not

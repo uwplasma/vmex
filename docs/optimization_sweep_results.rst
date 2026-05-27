@@ -110,8 +110,8 @@ Run the CPU production sweep:
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --rerun
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --rerun
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3,4,5 --ess both --qi-qp-preseed off --max-nfev 60 --continuation-nfev 15 --inner-max-iter 180 --inner-ftol 1e-9 --trial-max-iter 180 --trial-ftol 1e-9 --rerun
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4,5 --ess both --qi-qp-preseed off --max-nfev 60 --continuation-nfev 15 --inner-max-iter 180 --inner-ftol 1e-9 --trial-max-iter 180 --trial-ftol 1e-9 --rerun
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
 These commands describe the complete regeneration target, not the contents of
@@ -120,7 +120,7 @@ the corresponding CSV/JSON rows and publication figures are present under
 ``docs/_static/figures``.
 
 The compact README renderer currently filters QI rows against the same
-aspect-6 target as QA/QH/QP.  The standalone ``QI_optimization.py``
+aspect-5 target as QA/QH/QP.  The standalone ``QI_optimization.py``
 case-coverage lanes may still use case-specific aspect targets when mirror
 ratio or far-seed basin capture is the experiment; those rows are documented
 separately and are not mixed into the README best-row table.
@@ -131,8 +131,8 @@ regenerate the focused preseed/no-preseed matrix with:
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qi --modes 1,2,3 --ess both --qi-qp-preseed both --rerun
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qi --modes 1,2,3 --ess both --qi-qp-preseed both --rerun
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qi --modes 1,2,3,4,5 --ess both --qi-qp-preseed both --max-nfev 60 --continuation-nfev 15 --inner-max-iter 180 --inner-ftol 1e-9 --trial-max-iter 180 --trial-ftol 1e-9 --rerun
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qi --modes 1,2,3,4,5 --ess both --qi-qp-preseed both --max-nfev 60 --continuation-nfev 15 --inner-max-iter 180 --inner-ftol 1e-9 --trial-max-iter 180 --trial-ftol 1e-9 --rerun
    PYTHONPATH=. python examples/optimization/render_qi_constrained_sweep.py
 
 The checked-in constrained-QI snapshot is not that full matrix; it currently
@@ -188,8 +188,8 @@ Run the GPU production sweep on a machine with a working JAX GPU install:
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --rerun
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --rerun
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3,4,5 --ess both --qi-qp-preseed off --max-nfev 60 --continuation-nfev 15 --inner-max-iter 180 --inner-ftol 1e-9 --trial-max-iter 180 --trial-ftol 1e-9 --rerun
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4,5 --ess both --qi-qp-preseed off --max-nfev 60 --continuation-nfev 15 --inner-max-iter 180 --inner-ftol 1e-9 --trial-max-iter 180 --trial-ftol 1e-9 --rerun
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
 Render the compact README panels from the best stellarator-symmetric rows:
@@ -226,10 +226,10 @@ asymmetric modes with ``1e-7``, and writes separate outputs under the
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --stellarator-asymmetric --rerun
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --stellarator-asymmetric --rerun
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --stellarator-asymmetric --rerun
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --stellarator-asymmetric --rerun
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3,4,5 --ess both --qi-qp-preseed off --stellarator-asymmetric --max-nfev 60 --continuation-nfev 15 --inner-max-iter 180 --inner-ftol 1e-9 --trial-max-iter 180 --trial-ftol 1e-9 --rerun
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4,5 --ess both --qi-qp-preseed off --stellarator-asymmetric --max-nfev 60 --continuation-nfev 15 --inner-max-iter 180 --inner-ftol 1e-9 --trial-max-iter 180 --trial-ftol 1e-9 --rerun
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3,4,5 --ess both --qi-qp-preseed off --stellarator-asymmetric --max-nfev 60 --continuation-nfev 15 --inner-max-iter 180 --inner-ftol 1e-9 --trial-max-iter 180 --trial-ftol 1e-9 --rerun
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4,5 --ess both --qi-qp-preseed off --stellarator-asymmetric --max-nfev 60 --continuation-nfev 15 --inner-max-iter 180 --inner-ftol 1e-9 --trial-max-iter 180 --trial-ftol 1e-9 --rerun
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
 For NVIDIA-only JAX installations, ``JAX_PLATFORMS=cuda`` is also valid.  Do
@@ -241,7 +241,7 @@ README Best Rows
 
 The README intentionally shows only one best ``LASYM = F`` result per target.
 QA/QH/QP/QI are selected from the CPU matrix and filtered against the common
-aspect-6 target.  The selected QI row is chosen with the legacy branch
+aspect-5 target.  The selected QI row is chosen with the legacy branch
 diagnostic, mirror-ratio, elongation, iota, and aspect-ratio gates used as
 promotion evidence rather than as exact equality constraints; small numerical
 slack is expected when independent Boozer diagnostics are recomputed after the
@@ -286,11 +286,11 @@ the existing ``QI_optimization.py`` outputs, records the final smooth QI
 metric, legacy QI metric, mirror ratio, elongation, iota, aspect, and CPU wall
 time, and draws source-initial and final Boozer ``|B|`` line contours only
 after the initial WOUT boundary matches the paired input deck.  These are
-archived mixed-target case checks, not current aspect-6 README best-row
+archived mixed-target case checks, not current aspect-5 README best-row
 promotions: NFP=1 uses target aspect 10, the NFP=2 target-helicity lane uses
 target aspect 6, the seed-3127 NFP=3 lane uses target aspect 4, and the NFP=4
 row uses the minimal seed plus a same-NFP finite-beta QI reference-family
-proposal.  Regenerate all rows with the current uniform aspect-6 policy before
+proposal.  Regenerate all rows with the current uniform aspect-5 policy before
 using this figure as current README promotion evidence.
 Finite-beta NFP=4 remains a separate stress fixture.
 
@@ -308,7 +308,7 @@ the final acceptance diagnostic.
 To refresh the exact rows used by this panel, run the source optimizations with
 the target-aspect and output-dir values below before rendering.  The explicit
 overrides reproduce the archived mixed-target figure rows; omit them only when
-regenerating the current uniform aspect-6 policy.  The NFP=3 case can be
+regenerating the current uniform aspect-5 policy.  The NFP=3 case can be
 selected as ``nfp3_qi``; that is a convenience alias for the
 ``input.QI_stel_seed_3127`` far-seed lane.  If the NFP=3 raw artifact is
 replaced during a refresh, the replacement must pass the renderer's boundary
@@ -410,7 +410,7 @@ Source table snapshot:
 :download:`readme_qi_optimization_cases.csv <_static/figures/readme_qi_optimization_cases.csv>`.
 In that generated CSV, ``validation_status=case-gated`` records
 case-specific QI gate status from the renderer and should not be read as
-aspect-6 README best-row promotion evidence or global seed-robustness
+aspect-5 README best-row promotion evidence or global seed-robustness
 evidence; the NFP=4 row is case-gated by the minimal-seed plus same-NFP
 reference-family path.  The NFP=3 raw initial artifact is now checked by the
 renderer instead of accepted through a case-specific exception.

@@ -185,7 +185,7 @@ case. Full provenance and limitations are in the docs.
 Reproduction commands, artifact-promotion rules, case-specific QI NFP coverage,
 and full sweep publication requirements are documented in
 `docs/optimization.rst` and `docs/optimization_sweep_results.rst`; those
-case-specific artifacts are not aspect-6 README best-row promotion evidence.
+case-specific artifacts are not aspect-5 README best-row promotion evidence.
 
 ## Performance, Validation, Release
 

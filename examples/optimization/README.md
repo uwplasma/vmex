@@ -314,7 +314,7 @@ Read the docs NFP=4 QI coverage row as a minimal-seed same-NFP reference-family
 proposal with an exact audit, not as a long local descent.  The generated
 `docs/_static/figures/readme_qi_optimization_cases.csv` row should remain
 `validation_status=case-gated` and `expected_gate_status=candidate`; passing
-gate fields do not make the row an aspect-6 README best row or a common-minimal
+gate fields do not make the row an aspect-5 README best row or a common-minimal
 completion.
 
 For publication-quality QI validation, re-run the diagnostic with higher
@@ -352,13 +352,18 @@ Example:
 ```bash
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py \
   --backend-label cpu --solver-device cpu --policy continuation \
-  --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --rerun
+  --problems qa,qh,qp,qi --modes 1,2,3,4,5 --ess both --qi-qp-preseed off \
+  --max-nfev 60 --continuation-nfev 15 \
+  --inner-max-iter 180 --inner-ftol 1e-9 \
+  --trial-max-iter 180 --trial-ftol 1e-9 --rerun
 PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 ```
 
-Use `--modes 1,2,3,4` only for exploratory high-mode regeneration; checked-in
-docs snapshots currently contain partial/archived `max_mode<=3` rows, not a
-complete reviewed CPU/GPU matrix.
+The sweep driver accepts explicit budget overrides so tuning runs do not require
+editing source constants.  Start from the production-style values above, then
+raise `--inner-ftol` or lower `--inner-max-iter` / `--trial-max-iter` only after
+checking that final objective, aspect, iota, mirror, elongation, and WOUT
+diagnostics are unchanged.
 
 Keep generated full-sweep atlases, PDFs, and bulky report panels in ignored
 result directories or release assets until reviewed.  Checked-in PNG/JPEG

@@ -83,7 +83,7 @@ def test_optional_validation_lasym_freeb_example_matches_manifest_case() -> None
     assert set(case["metric_thresholds_rel_scaled_by_iter"]) == {"80", "100"}
 
 
-def test_qi_case_specific_artifacts_are_not_documented_as_aspect6_promotions() -> None:
+def test_qi_case_specific_artifacts_are_not_documented_as_aspect5_promotions() -> None:
     readme = (ROOT / "README.md").read_text()
     optimization = (ROOT / "docs" / "optimization.rst").read_text()
     sweep_results = (ROOT / "docs" / "optimization_sweep_results.rst").read_text()
@@ -92,7 +92,7 @@ def test_qi_case_specific_artifacts_are_not_documented_as_aspect6_promotions() -
 
     for text in (readme, optimization, sweep_results, validation):
         assert "case-specific" in text
-        assert "aspect-6 README" in text
+        assert "aspect-5 README" in text
         assert "best-row promotion" in text
 
     for text in (readme, optimization, sweep_results):
