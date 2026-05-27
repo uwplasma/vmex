@@ -592,7 +592,6 @@ def _run_showcase_case(
                 policy=str(policy),
                 policy_case=case.qi_policy_case or "qi_stel_seed_3127",
                 reference_input=case.qi_reference_input,
-                reference_lambdas=None,
                 backend_label=str(backend_label),
                 solver_device=solver_device,
                 worker_jax_platforms=worker_jax_platforms,
