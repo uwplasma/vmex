@@ -1083,6 +1083,9 @@ full-mesh surfaces using fixed quadrature for the trapped-particle fraction.
 This keeps the term differentiable and usable in the discrete-adjoint
 least-squares workflow; final validation against a Boozer-space Redl geometry
 choice should still be part of any publication-quality finite-beta study.
+The deterministic plan for converting a Redl ``<J.B>`` profile into a VMEC
+``PCURR_TYPE = "cubic_spline_ip"`` current profile without optimizing shape or
+coil variables is documented in :doc:`bootstrap_current_fixed_point`.
 
 The full multi-page artifact inventory, including legacy aliases, CSV/JSON
 summary downloads, and exact reproduction commands for each standalone example,

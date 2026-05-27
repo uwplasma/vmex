@@ -423,6 +423,196 @@ Need from user:
 
 Nothing now.
 
+### 2026-05-27 Bootstrap-current pure helper implementation
+
+Steps taken:
+
+1. Added `vmec_jax/bootstrap_current.py`.
+2. Implemented pure JAX Redl-to-current helpers:
+   `dpsi_ds_from_vmec_phiedge`, `redl_current_rhs`,
+   `redl_current_derivative_update`,
+   `redl_current_integrating_factor_update`,
+   `integrate_current_derivative`, and `damp_current_profile`.
+3. Implemented VMEC input conversion helpers:
+   `vmec_current_profile_from_bootstrap_update`,
+   `apply_current_profile_to_indata`, and
+   `bootstrap_current_update_to_indata`.
+4. Added `BootstrapCurrentOptions` and `BootstrapCurrentIteration` dataclasses
+   for the upcoming solve-in-the-loop driver and JSON/CSV history.
+5. Exported the helper layer through both `vmec_jax` and `vmec_jax.api`.
+6. Added API docs for `vmec_jax.bootstrap_current`.
+7. Added `tests/test_bootstrap_current_fixed_point.py` with manufactured
+   profile tests, VMEC `cubic_spline_ip` round-trip coverage, sign convention
+   checks, damping/input validation, and JAX gradient coverage through the
+   integrating-factor update.
+8. Trimmed one README line so the existing concise-README hygiene gate remains
+   green.
+
+Results obtained:
+
+1. `python -m pytest -q tests/test_bootstrap_current_fixed_point.py -rx`:
+   7 passed in 2.29 s.
+2. `python -m pytest -q tests/test_bootstrap_current_fixed_point.py tests/test_simsopt_style_profiles.py tests/test_profiles_fast_helpers.py -rx`:
+   22 passed in 5.36 s.
+3. `python -m ruff check vmec_jax/bootstrap_current.py vmec_jax/api.py vmec_jax/__init__.py tests/test_bootstrap_current_fixed_point.py`:
+   passed.
+4. `python -m sphinx -W -b html docs /tmp/vmec_jax_freeb_bootstrap_impl_docs`:
+   passed.
+5. `python -m pytest -q tests/test_docs_release_hygiene.py -rx`:
+   7 passed in 0.03 s.
+6. `git diff --check`: passed.
+
+Best next steps:
+
+1. Implement a small fixed-boundary `bootstrap_current_fixed_point(...)`
+   driver that runs VMEC, evaluates Redl geometry, applies one current-profile
+   update, and records JSON history.
+2. Add a bounded one-update physics gate showing normalized Redl mismatch
+   decreases on a finite-beta fixture.
+3. Add optional SIMSOPT parity against `VmecRedlBootstrapMismatch` for the
+   same generated current-profile input.
+4. Add VMEC2000 replay validation for the final generated input when the
+   executable is available.
+
+Need from user:
+
+Nothing now.
+
+### 2026-05-27 Redl bootstrap-current fixed-point plan
+
+Context:
+
+The user asked whether the VMEC input current can be computed directly from
+the Redl formula so finite-beta cases can have self-consistent bootstrap
+current before adding another optimization layer.  The answer is yes, but not
+by assigning Redl `<J.B>` samples directly to VMEC `AC_AUX_F`.  Redl/SIMSOPT
+return a flux-surface-averaged parallel-current target.  VMEC consumes a
+toroidal-current profile shape plus `CURTOR`, so a conversion and fixed-point
+loop are required.
+
+Literature and code pass:
+
+1. Redl et al. 2021 provides the analytic bootstrap-current fit already used
+   in `vmec_jax.redl_bootstrap` and SIMSOPT.
+2. Landreman/Buller/Drevlak 2022 uses the Redl formula in quasisymmetric
+   finite-beta optimization by penalizing `<J.B>_VMEC - <J.B>_Redl` while
+   including the current profile in the parameter space.
+3. Landreman's VMEC-current note gives the conversion equation from a
+   neoclassical `<J.B>` profile to VMEC's total-current/current-derivative
+   profile and states that an iteration between the MHD equilibrium and
+   bootstrap-current code is required.
+4. STELLOPT VBOOT/SFINCS uses the same equilibrium/bootstrap fixed-point
+   structure.
+5. DESC documents two useful strategies: optimize only the current profile
+   against `BootstrapRedlConsistency`, or run iterative current-profile solves.
+   DESC also documents the practical gate that Redl samples should avoid the
+   magnetic axis and edge when kinetic profiles vanish.
+6. SIMSOPT VMEC docs confirm that `_ip` current profiles represent
+   `dI_T/ds`, while `_i` profiles represent `I_T(s)`, and that `AC_AUX_S/F`
+   are the spline/line-segment profile arrays.
+7. The local `single_stage_optimization_finite_beta` scripts initialize
+   `PCURR_TYPE = "cubic_spline_ip"` and optimize current spline data through
+   `VmecRedlBootstrapMismatch`; they do not directly set `AC_AUX_F` to Redl
+   values.
+
+Design decision:
+
+Implement a deterministic bootstrap-current preconditioner/fixed-point lane
+before claiming a full finite-beta shape/coil optimizer:
+
+```text
+pressure profile + current profile guess
+  -> vmec_jax finite-beta equilibrium
+  -> Redl geometry + <J.B>_Redl
+  -> VMEC current-profile update I(s) or I'(s)
+  -> write NCURR/CURTOR/PCURR_TYPE/AC_AUX_S/AC_AUX_F
+  -> repeat to convergence
+```
+
+Core equation:
+
+```text
+dI/ds + mu0 * I / <B^2> * dp/ds
+  = 2*pi * dpsi/ds * <J.B>_Redl / <B^2>.
+```
+
+Implementation lanes:
+
+1. Add `vmec_jax/bootstrap_current.py` with pure profile-update helpers:
+   `redl_current_derivative_update`, `redl_current_integrating_factor_update`,
+   `vmec_current_profile_from_bootstrap_update`, and
+   `apply_current_profile_to_indata`.
+2. Add dataclasses `BootstrapCurrentOptions` and
+   `BootstrapCurrentIteration` for configuration and JSON/CSV history.
+3. Start with `PCURR_TYPE = "cubic_spline_ip"` because it maps directly to
+   VMEC's `I'(s)` convention and is already used by the finite-beta scripts.
+4. Support three update policies:
+   - `low_beta`: neglect the pressure-gradient correction.
+   - `lagged_pressure`: use the previous equilibrium for the pressure-gradient
+     term.
+   - `integrating_factor`: solve the first-order current-profile ODE and use
+     it as the eventual default once tests are green.
+5. Use damped Picard iteration first, then add safeguarded Anderson
+   acceleration only if it lowers mismatch and preserves finite VMEC residuals.
+6. Keep this driver separate from stage-one geometry/coil optimization.  It is
+   a deterministic profile solve, not a replacement for later shape/coil
+   optimization.
+7. Later, expose the converged current fixed point through implicit
+   differentiation rather than reverse-mode taping through every Picard step.
+
+Tests to add:
+
+1. Manufactured-current unit tests for the low-beta, lagged-pressure, and
+   integrating-factor update formulas.
+2. `InData` mutation/round-trip tests for `NCURR`, `CURTOR`, `PCURR_TYPE`,
+   `AC_AUX_S`, and `AC_AUX_F`.
+3. VMEC current-profile normalization tests for the sign convention
+   `CURTOR = signgs * I(1)`.
+4. Redl-surface selection tests excluding axis and edge profiles where density
+   or temperature vanish.
+5. Differentiability tests for current-update helpers with respect to pressure
+   coefficients and Redl samples.
+6. A physics gate showing one current-profile update reduces Redl mismatch on
+   a bundled finite-beta tokamak.
+7. A bounded fixed-point loop gate showing convergence on a small finite-beta
+   fixture.
+8. Optional SIMSOPT/DESC/VMEC2000 parity gates.
+
+Benchmarks and plots:
+
+1. Fixed-point mismatch and current-update norm versus iteration.
+2. `<J.B>_VMEC` and `<J.B>_Redl` before/after.
+3. `I'(s)` and `I(s)` profile evolution.
+4. Iota, beta, aspect, and VMEC force residuals before/after.
+5. Free-boundary finite-beta response panels with and without the
+   self-consistent bootstrap-current update.
+6. CPU/GPU and Picard/Anderson benchmark matrix with compile, VMEC solve,
+   Redl geometry, and profile-update timing split out.
+
+Docs added:
+
+1. `docs/bootstrap_current_fixed_point.rst` now contains the derivation,
+   planned API, tests, benchmarks, plots, and acceptance criteria.
+2. `docs/index.rst` links the new page under Physics and algorithms.
+3. `docs/optimization.rst` now points finite-beta users to the fixed-point
+   current-profile plan.
+
+Best next steps:
+
+1. Implement `vmec_jax/bootstrap_current.py` pure helpers and unit tests.
+2. Add a tiny fixed-boundary finite-beta fixed-point driver and JSON history.
+3. Validate the generated final input by rerunning `vmec_jax` and optional
+   VMEC2000 on the same deck.
+4. Compare the fixed-point result to the existing SIMSOPT
+   `VmecRedlBootstrapMismatch` current-profile optimization on one QA and one
+   QH case.
+5. Only then thread the fixed-point current preconditioner into free-boundary
+   direct-coil finite-beta examples.
+
+Need from user:
+
+Nothing now.
+
 ### 2026-05-27 Standard finite-beta profile/bootstrap slice
 
 Steps taken:

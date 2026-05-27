@@ -16,6 +16,7 @@ Submodules
    :recursive:
 
    vmec_jax.boundary
+   vmec_jax.bootstrap_current
    vmec_jax.config
    vmec_jax.coords
    vmec_jax.diagnostics
