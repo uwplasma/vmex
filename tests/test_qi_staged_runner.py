@@ -42,6 +42,11 @@ def test_qi_staged_runner_builds_external_input_cli_and_environment(tmp_path: Pa
         trial_max_iter=22,
         trial_ftol=2.0e-8,
         ess_alpha=1.7,
+        qi_mboz=10,
+        qi_nboz=11,
+        qi_nphi=61,
+        qi_nalpha=13,
+        qi_n_bounce=17,
         make_plots=False,
     )
 
@@ -51,7 +56,7 @@ def test_qi_staged_runner_builds_external_input_cli_and_environment(tmp_path: Pa
 
     assert env["JAX_PLATFORMS"] == "cuda"
     assert "--input-file" in args
-    assert joined.endswith("1.7")
+    assert "--ess-alpha" in args and "1.7" in args
     assert str(ROOT / "examples" / "data" / "input.minimal_seed_nfp2") in args
     assert str(tmp_path / "out") in args
     assert "--max-mode" in args and "3" in args
@@ -62,6 +67,11 @@ def test_qi_staged_runner_builds_external_input_cli_and_environment(tmp_path: Pa
     assert "--max-nfev" in args and "5" in args
     assert "--inner-max-iter" in args and "21" in args
     assert "--trial-ftol" in args and "2e-08" in args
+    assert "--qi-mboz" in args and "10" in args
+    assert "--qi-nboz" in args and "11" in args
+    assert "--qi-nphi" in args and "61" in args
+    assert "--qi-nalpha" in args and "13" in args
+    assert "--qi-n-bounce" in args and "17" in args
     assert "--solver-device" in args and "gpu" in args
     assert "--reference-input" in args
     assert str(ROOT / "examples" / "data" / "input.nfp2_QI") in args

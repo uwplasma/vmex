@@ -70,6 +70,11 @@ class QIStagedCaseConfig:
     trial_max_iter: int | None = None
     trial_ftol: float | None = None
     ess_alpha: float | None = None
+    qi_mboz: int | None = None
+    qi_nboz: int | None = None
+    qi_nphi: int | None = None
+    qi_nalpha: int | None = None
+    qi_n_bounce: int | None = None
     reference_lambdas: tuple[float, ...] | None = DEFAULT_REFERENCE_LAMBDAS
     make_plots: bool = True
     timeout_s: float | None = None
@@ -187,6 +192,16 @@ def _build_qi_staged_args(config: QIStagedCaseConfig) -> list[str]:
         args.extend(["--trial-ftol", str(float(config.trial_ftol))])
     if config.ess_alpha is not None:
         args.extend(["--ess-alpha", str(float(config.ess_alpha))])
+    qi_resolution_args = {
+        "--qi-mboz": config.qi_mboz,
+        "--qi-nboz": config.qi_nboz,
+        "--qi-nphi": config.qi_nphi,
+        "--qi-nalpha": config.qi_nalpha,
+        "--qi-n-bounce": config.qi_n_bounce,
+    }
+    for flag, value in qi_resolution_args.items():
+        if value is not None:
+            args.extend([flag, str(int(value))])
     return args
 
 
