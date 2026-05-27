@@ -60,6 +60,7 @@ __all__ = [
     "jsonable",
     "make_basin_prefilter_options",
     "make_qi_optimization_context",
+    "materialize_qi_stage_inputs",
     "promotion_score",
     "qi_diagnostics_for_result",
     "qi_diagnostics_for_run",
@@ -986,6 +987,50 @@ def write_qi_stage_checkpoint(
     return checkpoint_path
 
 
+def materialize_qi_stage_inputs(stage_output_dir, stage_result):
+    """Write root-level stage input files from an optimization result.
+
+    ``least_squares_solve(..., save_final_outputs=False)`` still writes
+    per-mode continuation inputs under nested ``stage_*`` directories.  The QI
+    staged policy advances between mirror-ramp stages using the mirror-ramp
+    root directory, so materialize ``input.final`` there before it becomes the
+    next stage's seed.
+    """
+
+    stage_output_dir = Path(stage_output_dir)
+    stage_output_dir.mkdir(parents=True, exist_ok=True)
+
+    def _get_attr_or_none(name):
+        try:
+            return getattr(stage_result, name)
+        except Exception:
+            return None
+
+    def _params(name, result_key=None):
+        value = _get_attr_or_none(name)
+        if value is not None:
+            return value
+        final_result = _get_attr_or_none("final_result")
+        if isinstance(final_result, dict) and result_key is not None:
+            return final_result.get(result_key)
+        return None
+
+    def _save(optimizer, path, params):
+        if optimizer is None or params is None or not hasattr(optimizer, "save_input"):
+            return False
+        try:
+            optimizer.save_input(path, params)
+            return Path(path).exists()
+        except Exception:
+            return False
+
+    initial_path = stage_output_dir / "input.initial"
+    final_path = stage_output_dir / "input.final"
+    _save(_get_attr_or_none("initial_optimizer"), initial_path, _params("initial_params"))
+    _save(_get_attr_or_none("final_optimizer"), final_path, _params("final_params", "x"))
+    return final_path if final_path.exists() else None
+
+
 def _boundary_reference_checkpoint_diagnostics(output_dir, active_input_file) -> dict:
     """Return selected boundary-reference metrics for a pre-stage checkpoint."""
 
@@ -1391,6 +1436,7 @@ def run_qi_stage_policy(
             label=f"QI optimization (max_mode={_ctx(ctx, 'max_mode')}, {'ESS' if _ctx(ctx, 'use_ess') else 'no ESS'})",
             save_final_outputs=False,
         )
+        materialize_qi_stage_inputs(output_dir, result)
         write_qi_stage_checkpoint(
             output_dir,
             stage_index=1,
@@ -1434,6 +1480,7 @@ def run_qi_stage_policy(
             method="scipy_matrix_free",
             use_mode_continuation=False,
         )
+        materialize_qi_stage_inputs(baseline_output_dir, accepted_result)
         write_qi_stage_checkpoint(
             baseline_output_dir,
             stage_index=0,
@@ -1492,6 +1539,7 @@ def run_qi_stage_policy(
             scalar_step_bound=stage.get("scalar_step_bound"),
             lbfgs_step_bound=stage.get("lbfgs_step_bound"),
         )
+        stage_final_input = materialize_qi_stage_inputs(stage_output_dir, stage_result)
         write_qi_stage_checkpoint(
             stage_output_dir,
             stage_index=stage_index,
@@ -1590,11 +1638,11 @@ def run_qi_stage_policy(
         if promotion["qi_cleanup_promoted"]:
             accepted_result = stage_result
             accepted_seed_diagnostics = stage_diagnostics
-            active_input_file = stage_output_dir / "input.final"
+            active_input_file = stage_final_input or stage_output_dir / "input.final"
         elif accepted_result is None:
             print(
                 f"Initial QI staged policy {stage_name!r} failed the promotion gate; "
                 "continuing with the best exact-diagnostic candidate recorded so far."
             )
-            active_input_file = stage_output_dir / "input.final"
+            active_input_file = stage_final_input or stage_output_dir / "input.final"
     return (accepted_result if accepted_result is not None else best_result), promotion_log
