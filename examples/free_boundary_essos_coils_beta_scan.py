@@ -462,6 +462,40 @@ def _bootstrap_returned_current_payload(result) -> dict[str, Any]:
     }
 
 
+def _apply_multigrid_schedule_to_indata(
+    indata,
+    *,
+    ns_array: tuple[int, ...] | None,
+    niter_array: tuple[int, ...] | None,
+    ftol_array: tuple[float, ...] | None,
+) -> None:
+    """Override a VMEC input schedule in-place when a caller supplies one."""
+
+    if ns_array is None:
+        return
+    ns_values = [int(value) for value in ns_array]
+    niter_values = (
+        [int(value) for value in niter_array]
+        if niter_array is not None
+        else [int(indata.scalars.get("NITER", 0) or 0)] * len(ns_values)
+    )
+    ftol_values = (
+        [float(value) for value in ftol_array]
+        if ftol_array is not None
+        else [float(indata.scalars.get("FTOL", 1.0e-10) or 1.0e-10)] * len(ns_values)
+    )
+    if not (len(ns_values) == len(niter_values) == len(ftol_values)):
+        raise ValueError(
+            "bootstrap ns/niter/ftol schedules must have the same length: "
+            f"{len(ns_values)}, {len(niter_values)}, {len(ftol_values)}"
+        )
+    indata.scalars["NS_ARRAY"] = ns_values
+    indata.scalars["NITER_ARRAY"] = niter_values
+    indata.scalars["FTOL_ARRAY"] = ftol_values
+    indata.scalars["NITER"] = int(niter_values[-1])
+    indata.scalars["FTOL"] = float(ftol_values[-1])
+
+
 def apply_bootstrap_current_fixed_point_preconditioner(
     indata,
     *,
@@ -480,6 +514,9 @@ def apply_bootstrap_current_fixed_point_preconditioner(
     mismatch_tol: float,
     vmec_max_iter: int,
     activate_fsq: float | None,
+    bootstrap_ns_array: tuple[int, ...] | None = None,
+    bootstrap_niter_array: tuple[int, ...] | None = None,
+    bootstrap_ftol_array: tuple[float, ...] | None = None,
     max_current_update_norm: float | None = None,
     return_best_evaluated_on_max_iter: bool = False,
     direct_coil_params=None,
@@ -509,6 +546,11 @@ def apply_bootstrap_current_fixed_point_preconditioner(
         "current_tol": float(current_tol),
         "mismatch_tol": float(mismatch_tol),
         "vmec_max_iter": int(vmec_max_iter),
+        "bootstrap_ns_array": None if bootstrap_ns_array is None else [int(x) for x in bootstrap_ns_array],
+        "bootstrap_niter_array": (
+            None if bootstrap_niter_array is None else [int(x) for x in bootstrap_niter_array]
+        ),
+        "bootstrap_ftol_array": None if bootstrap_ftol_array is None else [float(x) for x in bootstrap_ftol_array],
     }
     if float(beta_percent) <= 0.0:
         summary["skipped"] = "zero_beta"
@@ -536,6 +578,12 @@ def apply_bootstrap_current_fixed_point_preconditioner(
     def solve_fn(current_indata):
         counter["iteration"] += 1
         solve_indata = deepcopy(current_indata)
+        _apply_multigrid_schedule_to_indata(
+            solve_indata,
+            ns_array=bootstrap_ns_array,
+            niter_array=bootstrap_niter_array,
+            ftol_array=bootstrap_ftol_array,
+        )
         if str(backend) == "mgrid":
             configured_mgrid = Path(str(solve_indata.scalars.get("MGRID_FILE", "")))
             if not configured_mgrid.is_absolute():
@@ -685,6 +733,15 @@ def _summary_payload(
         "bootstrap_return_best_evaluated_current": bool(
             getattr(args, "bootstrap_return_best_evaluated_current", False)
         ),
+        "bootstrap_ns_array": None
+        if getattr(args, "bootstrap_ns_array", None) is None
+        else _parse_number_list(args.bootstrap_ns_array, cast=int),
+        "bootstrap_niter_array": None
+        if getattr(args, "bootstrap_niter_array", None) is None
+        else _parse_number_list(args.bootstrap_niter_array, cast=int),
+        "bootstrap_ftol_array": None
+        if getattr(args, "bootstrap_ftol_array", None) is None
+        else _parse_number_list(args.bootstrap_ftol_array, cast=float),
         "coil_plasma_scale_summary": scale_summary,
         "ns_array": ns_array or [int(args.ns)],
         "niter_array": niter_array or [int(args.max_iter)],
@@ -1024,6 +1081,27 @@ def main(argv: list[str] | None = None) -> int:
         help="VMEC max_iter per bootstrap fixed-point stage. Zero reuses --max-iter.",
     )
     parser.add_argument(
+        "--bootstrap-ns-array",
+        type=str,
+        default=None,
+        help=(
+            "Optional NS_ARRAY used only inside bootstrap-current fixed-point VMEC solves. "
+            "If omitted, the preconditioner uses the final scan schedule."
+        ),
+    )
+    parser.add_argument(
+        "--bootstrap-niter-array",
+        type=str,
+        default=None,
+        help="Optional NITER_ARRAY matching --bootstrap-ns-array for bootstrap-current stages.",
+    )
+    parser.add_argument(
+        "--bootstrap-ftol-array",
+        type=str,
+        default=None,
+        help="Optional FTOL_ARRAY matching --bootstrap-ns-array for bootstrap-current stages.",
+    )
+    parser.add_argument(
         "--allow-scale-mismatch",
         action="store_true",
         help="Disable the coil/plasma scale sanity warning for non-default research fixtures.",
@@ -1039,6 +1117,19 @@ def main(argv: list[str] | None = None) -> int:
             ftol_array = [float(args.ftol)] * len(ns_array)
     bootstrap_surfaces = _parse_surfaces(args.bootstrap_surfaces)
     bootstrap_vmec_max_iter = int(args.bootstrap_vmec_max_iter) if int(args.bootstrap_vmec_max_iter) > 0 else int(args.max_iter)
+    bootstrap_ns_array = _parse_number_list(args.bootstrap_ns_array, cast=int)
+    bootstrap_niter_array = _parse_number_list(args.bootstrap_niter_array, cast=int)
+    bootstrap_ftol_array = _parse_number_list(args.bootstrap_ftol_array, cast=float)
+    if bootstrap_ns_array is not None:
+        if bootstrap_niter_array is None:
+            bootstrap_niter_array = [bootstrap_vmec_max_iter] * len(bootstrap_ns_array)
+        if bootstrap_ftol_array is None:
+            bootstrap_ftol_array = [float(args.ftol)] * len(bootstrap_ns_array)
+        if not (len(bootstrap_ns_array) == len(bootstrap_niter_array) == len(bootstrap_ftol_array)):
+            raise ValueError(
+                "bootstrap_ns_array, bootstrap_niter_array, and bootstrap_ftol_array must have the same length: "
+                f"{len(bootstrap_ns_array)}, {len(bootstrap_niter_array)}, {len(bootstrap_ftol_array)}"
+            )
 
     try:
         from essos.coils import Coils_from_json
@@ -1181,6 +1272,11 @@ def main(argv: list[str] | None = None) -> int:
                         mismatch_tol=args.bootstrap_mismatch_tol,
                         vmec_max_iter=bootstrap_vmec_max_iter,
                         activate_fsq=args.activate_fsq,
+                        bootstrap_ns_array=None if bootstrap_ns_array is None else tuple(bootstrap_ns_array),
+                        bootstrap_niter_array=None
+                        if bootstrap_niter_array is None
+                        else tuple(bootstrap_niter_array),
+                        bootstrap_ftol_array=None if bootstrap_ftol_array is None else tuple(bootstrap_ftol_array),
                     )
                 write_indata(input_mgrid, mgrid_indata)
                 print(f"Running mgrid beta={beta_percent:.3f}%: {input_mgrid}")
@@ -1302,6 +1398,11 @@ def main(argv: list[str] | None = None) -> int:
                         mismatch_tol=args.bootstrap_mismatch_tol,
                         vmec_max_iter=bootstrap_vmec_max_iter,
                         activate_fsq=args.activate_fsq,
+                        bootstrap_ns_array=None if bootstrap_ns_array is None else tuple(bootstrap_ns_array),
+                        bootstrap_niter_array=None
+                        if bootstrap_niter_array is None
+                        else tuple(bootstrap_niter_array),
+                        bootstrap_ftol_array=None if bootstrap_ftol_array is None else tuple(bootstrap_ftol_array),
                         direct_coil_params=direct_params,
                         direct_coil_source_reuse=not args.disable_direct_coil_source_reuse,
                         direct_coil_trial_resample=args.direct_coil_trial_resample,

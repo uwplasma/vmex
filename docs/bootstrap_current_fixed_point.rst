@@ -107,6 +107,10 @@ fixed-point preconditioner before each finite-beta free-boundary case:
      --bootstrap-surfaces "0.15 0.30 0.45 0.60 0.75 0.90" \
      --bootstrap-n-current 32 \
      --bootstrap-max-fixed-point-iter 2 \
+     --bootstrap-vmec-max-iter 1200 \
+     --bootstrap-ns-array 16,31 \
+     --bootstrap-niter-array 300,1200 \
+     --bootstrap-ftol-array 1e-7,1e-8 \
      --bootstrap-damping 0.5 \
      --bootstrap-max-current-update-norm 0.1 \
      --bootstrap-return-best-evaluated-current
@@ -122,6 +126,9 @@ solves before each pressure point.  For bounded preconditioning runs, prefer
 ``--bootstrap-return-best-evaluated-current`` so the final beta solve receives
 the already-solved current profile with the smallest Redl mismatch, rather than
 the last proposed profile if the Picard loop stops at its iteration budget.
+The bootstrap-stage multigrid schedule is separate from the final scan schedule
+so the Redl preconditioner can remain cheap while the final finite-beta
+equilibrium still runs at the strict validation resolution.
 
 Use the optional active direct-coil gate when changing this path:
 

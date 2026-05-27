@@ -576,6 +576,7 @@ def _preconditioner_apply_payload_jit(
     vmec2000_control: bool,
     lconm1: bool,
     include_control_ptau: bool,
+    scale_m1_rhs: bool,
 ):
     """Return a cached fused GPU preconditioner-apply/payload kernel.
 
@@ -607,6 +608,7 @@ def _preconditioner_apply_payload_jit(
         bool(vmec2000_control),
         bool(lconm1),
         bool(include_control_ptau),
+        bool(scale_m1_rhs),
     )
     cached = _jit_cache_get(_PRECOND_APPLY_PAYLOAD_JIT_CACHE, key)
     if cached is not None:
@@ -787,8 +789,21 @@ def _preconditioner_apply_payload_jit(
         f_norm1,
         delta_s,
         s,
+        scale_m1_fac_r,
+        scale_m1_fac_z,
         *control_args,
     ):
+        if bool(scale_m1_rhs):
+            scale_r = jnp.asarray(scale_m1_fac_r, dtype=jnp.asarray(frcc).dtype)
+            scale_z = jnp.asarray(scale_m1_fac_z, dtype=jnp.asarray(fzsc).dtype)
+            if bool(has_frss):
+                frss = _scale_mode_slice(frss, mode_idx=1, scale=scale_r)
+            if bool(has_fzcs):
+                fzcs = _scale_mode_slice(fzcs, mode_idx=1, scale=scale_z)
+            if bool(has_frsc):
+                frsc = _scale_mode_slice(frsc, mode_idx=1, scale=scale_r)
+            if bool(has_fzcc):
+                fzcc = _scale_mode_slice(fzcc, mode_idx=1, scale=scale_z)
         frcc_rz, frss_rz, fzsc_rz, fzcs_rz, frsc_rz, frcs_rz, fzcc_rz, fzss_rz = (
             _rz_preconditioner_apply_arrays(
                 ar=ar,
@@ -932,6 +947,7 @@ def _preconditioner_apply_payload_fused(
     control_ptau_arrays: tuple[Any, ...] | None = None,
     control_ptau_pshalf: Any = None,
     control_ptau_ohs: Any = None,
+    scale_m1_rhs: bool = False,
 ):
     """Apply R/Z preconditioning and build update/diagnostic payload in one dispatch."""
 
@@ -963,6 +979,11 @@ def _preconditioner_apply_payload_fused(
         and control_ptau_arrays is not None
         and len(tuple(control_ptau_arrays)) == 8
     )
+    scale_m1_rhs = (
+        bool(scale_m1_rhs)
+        and ("scale_m1_fac_r" in mats)
+        and ("scale_m1_fac_z" in mats)
+    )
 
     has_lax_t = (
         ("dlr_t" in mats)
@@ -992,6 +1013,7 @@ def _preconditioner_apply_payload_fused(
         vmec2000_control=bool(vmec2000_control),
         lconm1=bool(lconm1),
         include_control_ptau=bool(include_control_ptau),
+        scale_m1_rhs=bool(scale_m1_rhs),
     )
 
     frcc = frzl_in.frcc
@@ -1019,6 +1041,14 @@ def _preconditioner_apply_payload_fused(
     dlz_t = mats.get("dlz_t", az)
     dz_t = mats.get("dz_t", az)
     duz_t = mats.get("duz_t", az)
+    scale_m1_fac_r = mats.get(
+        "scale_m1_fac_r",
+        jnp.ones((int(jnp.asarray(frcc).shape[0]),), dtype=jnp.asarray(frcc).dtype),
+    )
+    scale_m1_fac_z = mats.get(
+        "scale_m1_fac_z",
+        jnp.ones((int(jnp.asarray(fzsc).shape[0]),), dtype=jnp.asarray(fzsc).dtype),
+    )
 
     args = (
         frcc,
@@ -1055,6 +1085,8 @@ def _preconditioner_apply_payload_fused(
         f_norm1,
         delta_s,
         s,
+        scale_m1_fac_r,
+        scale_m1_fac_z,
     )
     if bool(include_control_ptau):
         args = (
@@ -2305,6 +2337,10 @@ def _maybe_dump_lamcal(*, lam_debug: dict[str, np.ndarray], static, iter_idx: in
 
 def _vmec_scale_m1_factors_from_mats(mats: dict[str, Any]) -> tuple[Any, Any]:
     """Return VMEC `scale_m1_par` R/Z factors from cached preconditioner data."""
+    cached_r = mats.get("scale_m1_fac_r")
+    cached_z = mats.get("scale_m1_fac_z")
+    if cached_r is not None and cached_z is not None:
+        return jnp.asarray(cached_r), jnp.asarray(cached_z)
     ard = mats.get("ard_parity")
     brd = mats.get("brd_parity")
     azd = mats.get("azd_parity")
@@ -2340,6 +2376,10 @@ def _vmec_scale_m1_factors_from_mats(mats: dict[str, Any]) -> tuple[Any, Any]:
 
 def _vmec_scale_m1_factors_from_mats_np(mats: dict) -> tuple[np.ndarray, np.ndarray]:
     """NumPy version of _vmec_scale_m1_factors_from_mats (no JAX dispatch)."""
+    cached_r = mats.get("scale_m1_fac_r")
+    cached_z = mats.get("scale_m1_fac_z")
+    if cached_r is not None and cached_z is not None:
+        return np.asarray(cached_r), np.asarray(cached_z)
     ard = mats.get("ard_parity")
     brd = mats.get("brd_parity")
     azd = mats.get("azd_parity")
@@ -10664,6 +10704,20 @@ def solve_fixed_boundary_residual_iter(
             host_update_assembly=host_update_assembly,
         )
 
+    def _can_fuse_vmec_scale_m1_precond_rhs(frzl_in: TomnspsRZL, mats: dict[str, Any]) -> bool:
+        if bool(host_update_assembly) or (not bool(getattr(cfg, "lconm1", True))) or int(cfg.mpol) <= 1:
+            return False
+        fac_r = mats.get("scale_m1_fac_r")
+        fac_z = mats.get("scale_m1_fac_z")
+        if fac_r is None or fac_z is None:
+            return False
+        try:
+            return int(getattr(fac_r, "shape", (0,))[0]) == int(frzl_in.frcc.shape[0]) and int(
+                getattr(fac_z, "shape", (0,))[0]
+            ) == int(frzl_in.fzsc.shape[0])
+        except Exception:
+            return False
+
     def _pop_iteration_histories() -> None:
         def _pop(hist):
             if hist:
@@ -11678,12 +11732,13 @@ def solve_fixed_boundary_residual_iter(
                 if lam_debug is not None:
                     _maybe_dump_lamcal(lam_debug=lam_debug, static=static, iter_idx=int(iter2))
                 t_precond_apply_start = time.perf_counter() if timing_detail_enabled else None
-                frzl_rhs = _apply_vmec_scale_m1_precond_rhs(frzl, mats)
                 use_apply_payload_fusion = (
                     bool(use_fused_precond_output_scaling)
                     and need_lam_prec is False
                     and need_lamcal is False
                 )
+                fuse_m1_rhs = bool(use_apply_payload_fusion) and _can_fuse_vmec_scale_m1_precond_rhs(frzl, mats)
+                frzl_rhs = frzl if bool(fuse_m1_rhs) else _apply_vmec_scale_m1_precond_rhs(frzl, mats)
                 if use_apply_payload_fusion:
                     if (
                         bool(vmec2000_control)
@@ -11720,6 +11775,7 @@ def solve_fixed_boundary_residual_iter(
                         control_ptau_arrays=accepted_control_ptau_arrays,
                         control_ptau_pshalf=_ptau_pshalf_jax,
                         control_ptau_ohs=_ptau_ohs_jax,
+                        scale_m1_rhs=bool(fuse_m1_rhs),
                     )
                     if len(_precond_payload) == 4:
                         (
@@ -11937,11 +11993,21 @@ def solve_fixed_boundary_residual_iter(
                 if lam_debug is not None:
                     _maybe_dump_lamcal(lam_debug=lam_debug, static=static, iter_idx=int(iter2))
                 t_precond_apply_start = time.perf_counter() if timing_detail_enabled else None
-                frzl_rhs = _apply_vmec_scale_m1_precond_rhs(frzl, mats) if bool(getattr(cfg, "lasym", False)) else frzl
                 use_apply_payload_fusion = (
                     bool(use_fused_precond_output_scaling)
                     and need_lam_prec is False
                     and need_lamcal is False
+                )
+                need_m1_rhs = bool(getattr(cfg, "lasym", False))
+                fuse_m1_rhs = (
+                    bool(need_m1_rhs)
+                    and bool(use_apply_payload_fusion)
+                    and _can_fuse_vmec_scale_m1_precond_rhs(frzl, mats)
+                )
+                frzl_rhs = (
+                    frzl
+                    if (not bool(need_m1_rhs)) or bool(fuse_m1_rhs)
+                    else _apply_vmec_scale_m1_precond_rhs(frzl, mats)
                 )
                 if use_apply_payload_fusion:
                     if (
@@ -11979,6 +12045,7 @@ def solve_fixed_boundary_residual_iter(
                         control_ptau_arrays=accepted_control_ptau_arrays,
                         control_ptau_pshalf=_ptau_pshalf_jax,
                         control_ptau_ohs=_ptau_ohs_jax,
+                        scale_m1_rhs=bool(fuse_m1_rhs),
                     )
                     if len(_precond_payload) == 4:
                         (

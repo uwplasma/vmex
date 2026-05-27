@@ -613,6 +613,16 @@ def _assemble_rz_preconditioner_matrices_impl(
         "cxd_full": cxd,
         "delta_s": delta_s,
     }
+    if mpol > 1:
+        # VMEC's m=1 RHS scaling is needed every accepted-control step.  Cache
+        # the factors with the preconditioner matrices so accelerator paths can
+        # apply them inside the fused preconditioner payload instead of
+        # launching a separate tiny kernel each iteration.
+        sr = ard[:, 1] + brd[:, 1]
+        sz = azd[:, 1] + bzd[:, 1]
+        denom = sr + sz
+        mats["scale_m1_fac_r"] = jnp.where(denom != 0.0, sr / denom, 1.0)
+        mats["scale_m1_fac_z"] = jnp.where(denom != 0.0, sz / denom, 1.0)
     if cr is not None:
         mats["cr"] = cr
     if ir is not None:

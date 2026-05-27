@@ -278,6 +278,10 @@ finite-beta equilibrium solve, add:
    --bootstrap-helicity-n 0 \
    --bootstrap-max-fixed-point-iter 2 \
    --bootstrap-n-current 32 \
+   --bootstrap-vmec-max-iter 1200 \
+   --bootstrap-ns-array 16,31 \
+   --bootstrap-niter-array 300,1200 \
+   --bootstrap-ftol-array 1e-7,1e-8 \
    --bootstrap-damping 0.5 \
    --bootstrap-max-current-update-norm 0.1 \
    --bootstrap-return-best-evaluated-current
@@ -286,6 +290,10 @@ This leaves the plasma boundary and coils unchanged during the preconditioner;
 only the VMEC current profile is updated from the Redl formula.  The scan
 summary records the per-case bootstrap-current history path, final ``CURTOR``,
 effective damping, and current-step limiter status so these runs are auditable.
+The bootstrap-stage schedule controls are intentionally separate from the final
+scan ``NS_ARRAY``/``NITER_ARRAY``/``FTOL_ARRAY``: use a cheaper Redl-current
+preconditioner schedule, then keep the final finite-beta equilibrium solve at
+the strict resolution required for validation.
 Treat the limiter as a continuation control: a coarse low-resolution Redl
 update can reduce the Redl mismatch while still worsening the next VMEC
 residual if the current step is too large.  The best-evaluated-current option

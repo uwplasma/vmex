@@ -213,7 +213,13 @@ def test_beta_scan_bootstrap_current_preconditioner_updates_indata(monkeypatch, 
 
     def fake_run_free_boundary(input_path, **kwargs):
         assert kwargs["max_iter"] == 3
-        return SimpleNamespace(indata=module.read_indata(input_path), signgs=1)
+        staged = module.read_indata(input_path)
+        assert staged.scalars["NS_ARRAY"] == [8, 16]
+        assert staged.scalars["NITER_ARRAY"] == [2, 3]
+        assert staged.scalars["FTOL_ARRAY"] == [1.0e-6, 1.0e-8]
+        assert staged.scalars["NITER"] == 3
+        assert staged.scalars["FTOL"] == pytest.approx(1.0e-8)
+        return SimpleNamespace(indata=staged, signgs=1)
 
     monkeypatch.setattr(module, "bootstrap_current_fixed_point", fake_fixed_point)
     monkeypatch.setattr(module, "run_free_boundary", fake_run_free_boundary)
@@ -236,6 +242,9 @@ def test_beta_scan_bootstrap_current_preconditioner_updates_indata(monkeypatch, 
         mismatch_tol=1.0e-2,
         vmec_max_iter=3,
         activate_fsq=1.0e99,
+        bootstrap_ns_array=(8, 16),
+        bootstrap_niter_array=(2, 3),
+        bootstrap_ftol_array=(1.0e-6, 1.0e-8),
     )
 
     assert updated.scalars["CURTOR"] == 123.0
@@ -248,6 +257,9 @@ def test_beta_scan_bootstrap_current_preconditioner_updates_indata(monkeypatch, 
     assert summary["returned_mismatch_norm"] == 0.5
     assert summary["returned_current"]["curtor"] == 123.0
     assert summary["returned_current"]["ac_aux_f"] == [2.0, 2.0]
+    assert summary["bootstrap_ns_array"] == [8, 16]
+    assert summary["bootstrap_niter_array"] == [2, 3]
+    assert summary["bootstrap_ftol_array"] == [1.0e-6, 1.0e-8]
     assert Path(summary["history_json"]).exists()
     assert Path(summary["final_input"]).exists()
 

@@ -242,6 +242,17 @@ Results obtained:
     no-bootstrap/bootstrap pair with `--resume-existing` so the strict
     `NS=51` (and later `NS=101`) comparison can accumulate evidence across
     bounded jobs instead of losing all metrics on timeout.
+29. Added separate bootstrap-current VMEC schedule controls
+    (`--bootstrap-ns-array`, `--bootstrap-niter-array`,
+    `--bootstrap-ftol-array`) so the Redl current preconditioner can use a
+    cheaper continuation schedule while the final finite-beta equilibrium scan
+    remains at strict validation resolution.  The new schedule is recorded in
+    both top-level scan summaries and per-case bootstrap-current summaries.
+30. A strict LP-QA bootstrap comparison was restarted with the existing
+    converged direct-coil zero-beta WOUT seeded into the outdir.  The first
+    finite-beta Redl preconditioner stage now completes quickly on the
+    `16,31` schedule; the final strict beta solve is still running under
+    `/tmp/lpqa_direct_ns101_bootstrap_sched_20260527`.
 
 Best next steps:
 
