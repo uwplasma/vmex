@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 import sys
 
+import pytest
+
 import vmec_jax.discrete_adjoint as da
 
 
@@ -449,7 +451,9 @@ def test_exact_callback_summary_preserves_cold_tangent_replay_and_scan_trial_buc
             "exact_solve_with_tape_jvp_only_total": {"count": 1, "wall_time_s": 3.5},
             "exact_tape_build": {"count": 1, "wall_time_s": 3.0},
             "exact_tape_build_jvp_only": {"count": 1, "wall_time_s": 2.8},
+            "exact_tape_build_solve_call": {"count": 1, "wall_time_s": 2.1},
             "exact_tape_build_unattributed": {"count": 1, "wall_time_s": 0.7},
+            "exact_tape_solver_iteration_loop_unattributed": {"count": 1, "wall_time_s": 0.6},
             "jacobian_initial_tangents": {"count": 1, "wall_time_s": 1.4},
             "jacobian_initial_tangents_linearize": {"count": 1, "wall_time_s": 0.3},
             "jacobian_initial_tangents_vmap_dispatch": {"count": 1, "wall_time_s": 0.2},
@@ -457,6 +461,9 @@ def test_exact_callback_summary_preserves_cold_tangent_replay_and_scan_trial_buc
             "jacobian_tape_replay": {"count": 1, "wall_time_s": 2.1},
             "jacobian_tape_replay_dispatch": {"count": 1, "wall_time_s": 0.2},
             "jacobian_tape_replay_ready": {"count": 1, "wall_time_s": 1.9},
+            "jacobian_projected_replay_total": {"count": 1, "wall_time_s": 1.5},
+            "jacobian_projected_tape_replay_dispatch": {"count": 1, "wall_time_s": 0.4},
+            "jacobian_projected_replay_residual_tangents": {"count": 1, "wall_time_s": 1.1},
             "jacobian_residual_tangents": {"count": 1, "wall_time_s": 0.8},
             "exact_tape_solver_compute_forces": {"count": 1, "wall_time_s": 1.7},
             "exact_tape_solver_compute_forces_first": {"count": 1, "wall_time_s": 0.9},
@@ -475,10 +482,15 @@ def test_exact_callback_summary_preserves_cold_tangent_replay_and_scan_trial_buc
     summary = compare.summarize_payload(payload, label="cold-gpu", top_profile=3)
     metrics = summary["metrics"]
 
-    assert metrics["replay_time_s"] == 2.1
+    assert metrics["replay_time_s"] == 3.6
     assert metrics["exact_solve_with_tape_jvp_only_s"] == 3.5
     assert metrics["exact_tape_build_jvp_only_s"] == 2.8
-    assert metrics["accepted_replay_dispatch_s"] == 0.2
+    assert metrics["exact_tape_build_solve_call_s"] == 2.1
+    assert metrics["exact_tape_solver_iteration_loop_unattributed_s"] == 0.6
+    assert metrics["projected_replay_total_s"] == 1.5
+    assert metrics["projected_replay_dispatch_s"] == 0.4
+    assert metrics["projected_residual_tangents_s"] == 1.1
+    assert metrics["accepted_replay_dispatch_s"] == pytest.approx(0.6)
     assert metrics["accepted_replay_ready_s"] == 1.9
     assert metrics["initial_tangents_s"] == 1.4
     assert metrics["initial_tangents_linearize_s"] == 0.3
@@ -493,6 +505,11 @@ def test_exact_callback_summary_preserves_cold_tangent_replay_and_scan_trial_buc
     assert metrics["trial_solver_scan_device_run_s"] == 0.75
     assert metrics["trial_solver_scan_device_dispatch_s"] == 0.05
     assert metrics["trial_solver_scan_device_ready_s"] == 0.7
+    projected = summary["projected_replay_summary"]
+    assert projected["total_s"] == 1.5
+    assert projected["dispatch_s"] == 0.4
+    assert projected["residual_tangents_s"] == 1.1
+    assert projected["count"] == 1
     assert summary["exact_optimizer_patch_target"]["name"] == "jacobian_tape_replay_ready"
 
 
