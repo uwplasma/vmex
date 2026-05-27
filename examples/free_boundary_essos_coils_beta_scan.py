@@ -412,6 +412,26 @@ def _case_wout_path(output_dir: Path, *, backend: str, beta_percent: float) -> P
     return output_dir / f"wout_{backend}_beta_{float(beta_percent):.3f}.nc"
 
 
+def _nominal_pressure_scale(pressure_scale_for_one_percent_beta: float, beta_percent: float) -> float:
+    """Return the historical pressure-scale diagnostic used in scan summaries.
+
+    The standard finite-beta profile writes VMEC ``PRES_SCALE=1`` because the
+    pressure magnitude is already encoded in the profile coefficients.  The
+    scan summary keeps this nominal linear scale as a stable comparison field
+    for existing post-processing and resume tests.
+    """
+
+    return float(pressure_scale_for_one_percent_beta) * float(beta_percent)
+
+
+def _vmec_pres_scale(pressure_scale_for_one_percent_beta: float, beta_percent: float, pressure_profile: str) -> float:
+    """Return the actual VMEC ``PRES_SCALE`` written for a pressure model."""
+
+    if str(pressure_profile).strip().lower() == "standard":
+        return 1.0
+    return _nominal_pressure_scale(pressure_scale_for_one_percent_beta, beta_percent)
+
+
 def _summary_payload(
     *,
     coils_json: Path,
@@ -498,11 +518,8 @@ def _resume_existing_case(
         return None
     summary = summarize_existing_wout(wout_path, backend=backend, beta_percent=beta_percent)
     summary["pressure_profile"] = str(pressure_profile)
-    summary["pressure_scale"] = (
-        1.0
-        if str(pressure_profile) == "standard"
-        else float(pressure_scale_for_one_percent_beta) * float(beta_percent)
-    )
+    summary["pressure_scale"] = _nominal_pressure_scale(pressure_scale_for_one_percent_beta, beta_percent)
+    summary["vmec_pres_scale"] = _vmec_pres_scale(pressure_scale_for_one_percent_beta, beta_percent, pressure_profile)
     return summary
 
 
@@ -556,11 +573,8 @@ def run_one_case(
     write_wout_from_fixed_boundary_run(wout_path, run, include_fsq=True)
     summary = summarize_run(run, wout_path, backend=backend, beta_percent=beta_percent, wall_s=wall_s)
     summary["pressure_profile"] = str(pressure_profile)
-    summary["pressure_scale"] = (
-        1.0
-        if str(pressure_profile) == "standard"
-        else float(pressure_scale_for_one_percent_beta) * float(beta_percent)
-    )
+    summary["pressure_scale"] = _nominal_pressure_scale(pressure_scale_for_one_percent_beta, beta_percent)
+    summary["vmec_pres_scale"] = _vmec_pres_scale(pressure_scale_for_one_percent_beta, beta_percent, pressure_profile)
     return summary
 
 
