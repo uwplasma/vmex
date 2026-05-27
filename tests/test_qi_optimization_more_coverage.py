@@ -51,6 +51,7 @@ def test_qi_example_cli_overrides_update_namespace_and_stage_modes(tmp_path: Pat
         "USE_TARGET_HELICITY_SEED": True,
         "USE_REFERENCE_FAMILY_SEED": False,
         "REFERENCE_LAMBDAS": (0.0, 1.0),
+        "STAGE_MODE_POLICY": "lower",
         "STAGE_REPEATS": 1,
         "MAKE_PLOTS": False,
         "JIT_BOOZ": False,
@@ -61,11 +62,11 @@ def test_qi_example_cli_overrides_update_namespace_and_stage_modes(tmp_path: Pat
     }
     captured = {}
 
-    def fake_repeated_stage_modes(**kwargs):
+    def fake_qi_stage_modes(**kwargs):
         captured.update(kwargs)
-        return ("stage", kwargs["max_mode"], kwargs["repeats"])
+        return ("stage", kwargs["max_mode"], kwargs["repeats"], kwargs["policy"])
 
-    monkeypatch.setattr(qio.vj, "repeated_stage_modes", fake_repeated_stage_modes)
+    monkeypatch.setattr(qio, "qi_stage_modes", fake_qi_stage_modes)
 
     args = qio.apply_qi_example_cli_overrides(
         namespace,
@@ -104,6 +105,8 @@ def test_qi_example_cli_overrides_update_namespace_and_stage_modes(tmp_path: Pat
             "0, 0.5,1",
             "--stage-repeats",
             "4",
+            "--stage-mode-policy",
+            "repeat",
             "--make-plots",
             "--jit-booz",
             "--target-aspect",
@@ -137,18 +140,20 @@ def test_qi_example_cli_overrides_update_namespace_and_stage_modes(tmp_path: Pat
     assert namespace["REFERENCE_INPUT_FILE"] == tmp_path / "input.reference"
     assert namespace["REFERENCE_LAMBDAS"] == (0.0, 0.5, 1.0)
     assert namespace["STAGE_REPEATS"] == 4
+    assert namespace["STAGE_MODE_POLICY"] == "repeat"
     assert namespace["MAKE_PLOTS"] is True
     assert namespace["JIT_BOOZ"] is True
     assert namespace["TARGET_ASPECT"] == pytest.approx(5.0)
     assert namespace["TARGET_ABS_IOTA_MIN"] == pytest.approx(0.45)
     assert namespace["MAX_MIRROR_RATIO"] == pytest.approx(0.25)
     assert namespace["MAX_ELONGATION"] == pytest.approx(9.0)
-    assert namespace["STAGE_MODES"] == ("stage", 5, 4)
+    assert namespace["STAGE_MODES"] == ("stage", 5, 4, "repeat")
     assert captured == {
         "max_mode": 5,
         "use_mode_continuation": False,
         "continuation_nfev": 11,
         "repeats": 4,
+        "policy": "repeat",
     }
 
 
@@ -157,15 +162,20 @@ def test_qi_example_cli_defaults_min_vmec_mode_and_accepts_default_solver(monkey
         "MAX_MODE": 4,
         "CONTINUATION_NFEV": 0,
         "USE_MODE_CONTINUATION": False,
+        "STAGE_MODE_POLICY": "lower",
         "STAGE_REPEATS": 2,
     }
-    monkeypatch.setattr(qio.vj, "repeated_stage_modes", lambda **kwargs: (kwargs["max_mode"], kwargs["repeats"]))
+    monkeypatch.setattr(
+        qio,
+        "qi_stage_modes",
+        lambda **kwargs: (kwargs["max_mode"], kwargs["repeats"], kwargs["policy"]),
+    )
 
     qio.apply_qi_example_cli_overrides(namespace, ["--solver-device", "default"])
 
     assert namespace["MIN_VMEC_MODE"] == 7
     assert namespace["SOLVER_DEVICE"] is None
-    assert namespace["STAGE_MODES"] == (4, 2)
+    assert namespace["STAGE_MODES"] == (4, 2, "lower")
 
 
 def test_target_helicity_seed_terms_are_deterministic_and_disable_cleanly() -> None:
@@ -347,18 +357,24 @@ def test_stage_modes_for_uses_limits_explicit_modes_and_default_repetition(
     monkeypatch.setattr(qio, "STAGE_REPEATS", 3, raising=False)
     monkeypatch.setattr(qio.vj, "normalize_boundary_mode_limits", lambda mode: f"normalised:{mode}")
 
-    def repeated_stage_modes(*, max_mode, use_mode_continuation, continuation_nfev, repeats):
-        return [max_mode, use_mode_continuation, continuation_nfev, repeats]
+    def fake_qi_stage_modes(*, max_mode, use_mode_continuation, continuation_nfev, repeats, policy):
+        return [max_mode, use_mode_continuation, continuation_nfev, repeats, policy]
 
-    monkeypatch.setattr(qio.vj, "repeated_stage_modes", repeated_stage_modes)
+    monkeypatch.setattr(qio, "qi_stage_modes", fake_qi_stage_modes)
 
     assert qio.stage_modes_for({"stage_mode_limits": ("nfirst", (2, 3))}) == [
         "normalised:nfirst",
         "normalised:(2, 3)",
     ]
     assert qio.stage_modes_for({"stage_modes": (1, "2", 3)}) == [1, 2, 3]
-    assert qio.stage_modes_for({}) == [4, True, 2, 3]
-    assert qio.stage_modes_for({"stage_repeats": 5}) == [4, True, 2, 5]
+    assert qio.stage_modes_for({}) == [4, True, 2, 3, "lower"]
+    assert qio.stage_modes_for({"stage_repeats": 5, "stage_mode_policy": "repeat"}) == [
+        4,
+        True,
+        2,
+        5,
+        "repeat",
+    ]
 
 
 def test_promotion_scores_apply_gate_penalties_and_nonfinite_fallbacks() -> None:

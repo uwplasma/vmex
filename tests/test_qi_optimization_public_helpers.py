@@ -141,12 +141,12 @@ def test_explicit_qi_context_overrides_legacy_globals(monkeypatch: pytest.Monkey
     monkeypatch.setattr(qio, "STAGE_REPEATS", 99, raising=False)
     monkeypatch.setattr(qio, "OUTPUT_DIR", tmp_path / "poisoned", raising=False)
     monkeypatch.setattr(
-        qio.vj,
-        "repeated_stage_modes",
-        lambda **kwargs: [kwargs["max_mode"], kwargs["repeats"]],
+        qio,
+        "qi_stage_modes",
+        lambda **kwargs: [kwargs["max_mode"], kwargs["repeats"], kwargs["policy"]],
     )
 
-    assert qio.stage_modes_for({"stage_repeats": 2}, ctx=ctx) == [5, 2]
+    assert qio.stage_modes_for({"stage_repeats": 2, "stage_mode_policy": "repeat"}, ctx=ctx) == [5, 2, "repeat"]
     opt = qio.make_basin_prefilter_options({}, ctx=ctx)
     assert opt.nphi == 19
     assert np.asarray(opt.surfaces).tolist() == [0.25]
@@ -364,7 +364,7 @@ def test_make_options_and_diagnostics_helpers_use_configured_targets(
 
 def test_stage_checkpoint_modes_and_promotion_rules(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _configure(tmp_path)
-    monkeypatch.setattr(qio.vj, "repeated_stage_modes", lambda **kwargs: [kwargs["max_mode"], kwargs["repeats"]])
+    monkeypatch.setattr(qio, "qi_stage_modes", lambda **kwargs: [kwargs["max_mode"], kwargs["repeats"]])
 
     assert qio.stage_modes_for({"stage_modes": [1, 3]}) == [1, 3]
     assert [mode.mode for mode in qio.stage_modes_for({"stage_mode_limits": [1]})] == [1]
