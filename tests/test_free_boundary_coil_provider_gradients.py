@@ -84,3 +84,50 @@ def test_direct_coil_accepted_boundary_replay_gradients_include_background_field
         assert np.isfinite(float(exact))
         assert abs(float(exact)) > 1.0e-8
         np.testing.assert_allclose(exact, fd, rtol=5.0e-7, atol=1.0e-10)
+
+
+def test_direct_coil_accepted_boundary_replay_gradient_wrt_boundary_geometry():
+    """AD/FD gate for accepted-boundary geometry sensitivity.
+
+    The full nonlinear free-boundary adjoint needs the accepted plasma
+    boundary's dependence on coil controls.  This smaller gate keeps that
+    boundary fixed but verifies that the replay primitive is differentiable
+    with respect to accepted ``R``/``Z`` coordinates themselves.
+    """
+
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jax, jnp
+
+    enable_x64(True)
+    data = _accepted_boundary_fixture()
+    params = CoilFieldParams(
+        base_curve_dofs=data["base_dofs"],
+        base_currents=data["base_currents"],
+        n_segments=96,
+        regularization_epsilon=1.0e-9,
+    )
+    dR = jnp.asarray([[0.012, -0.009, 0.007], [-0.011, 0.006, -0.004]], dtype=float)
+    dZ = jnp.asarray([[-0.006, 0.008, -0.005], [0.009, -0.007, 0.004]], dtype=float)
+
+    def objective(boundary_scale):
+        return direct_coil_boundary_bnormal_rms_jax(
+            params,
+            R=data["R"] + boundary_scale * dR,
+            Z=data["Z"] + boundary_scale * dZ,
+            phi=data["phi"],
+            Ru=data["Ru"],
+            Zu=data["Zu"],
+            Rv=data["Rv"],
+            Zv=data["Zv"],
+            br_add=data["br_add"],
+            bp_add=data["bp_add"],
+            bz_add=data["bz_add"],
+        )
+
+    exact = jax.grad(objective)(0.0)
+    eps = 1.0e-5
+    fd = (objective(eps) - objective(-eps)) / (2.0 * eps)
+
+    assert np.isfinite(float(exact))
+    assert abs(float(exact)) > 1.0e-9
+    np.testing.assert_allclose(exact, fd, rtol=2.0e-7, atol=1.0e-10)
