@@ -178,9 +178,17 @@ def test_flux_profiles_host_default_rejects_nondefault_cases_and_matches_default
     np.testing.assert_allclose(single.phips, [0.0])
     assert float(single.lamscale) == 1.0
 
+    with_iota = InData(scalars={"PHIEDGE": 2.0, "APHI": [1.0], "AI": [0.25, 0.5]}, indexed={})
+    host_iota_flux = flux_profiles_from_indata_host_default(with_iota, s, signgs=1)
+    full_iota_flux = flux_profiles_from_indata(with_iota, s, signgs=1)
+    assert host_iota_flux is not None
+    np.testing.assert_allclose(host_iota_flux.phipf, np.asarray(full_iota_flux.phipf))
+    np.testing.assert_allclose(host_iota_flux.chipf, np.asarray(full_iota_flux.chipf))
+    np.testing.assert_allclose(host_iota_flux.phips, np.asarray(full_iota_flux.phips))
+    np.testing.assert_allclose(host_iota_flux.lamscale, np.asarray(full_iota_flux.lamscale))
+
     assert flux_profiles_from_indata_host_default(InData(scalars={"LRFP": True}, indexed={}), s, signgs=1) is None
     assert flux_profiles_from_indata_host_default(InData(scalars={"APHI": [1.0, 0.5]}, indexed={}), s, signgs=1) is None
-    assert flux_profiles_from_indata_host_default(InData(scalars={"AI": [0.25]}, indexed={}), s, signgs=1) is None
     assert flux_profiles_from_indata_host_default(default, np.zeros((1, 2)), signgs=1) is None
 
 
