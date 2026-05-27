@@ -6058,7 +6058,16 @@ def solve_fixed_boundary_residual_iter(
         )
 
     _profile_numpy_patch = None
-    if bool(host_update_assembly) and has_jax() and (not _tree_has_tracer(state0)):
+    host_profile_setup_env = os.getenv("VMEC_JAX_HOST_PROFILE_SETUP", "auto").strip().lower()
+    if host_profile_setup_env == "auto":
+        host_profile_setup = _scan_backend_name() != "cpu"
+    else:
+        host_profile_setup = host_profile_setup_env not in ("", "0", "false", "no", "off")
+    if (
+        (bool(host_update_assembly) or bool(host_profile_setup))
+        and has_jax()
+        and (not _tree_has_tracer(state0))
+    ):
         try:
             from .vmec_numpy_forces import _numpy_module_patch as _profile_numpy_patch
         except Exception:

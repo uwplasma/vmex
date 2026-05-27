@@ -159,3 +159,38 @@ def test_residual_iter_attempts_host_default_flux_profile_setup(
     assert calls
     assert any(calls)
     assert np.isfinite(result.w_history[-1])
+
+
+def test_residual_iter_forced_host_profile_setup_matches_default(
+    load_case_qh_warm_start,
+    monkeypatch,
+) -> None:
+    _cfg, indata, static, _boundary, state0 = load_case_qh_warm_start
+    kwargs = dict(
+        indata=indata,
+        signgs=1,
+        max_iter=1,
+        step_size=float(indata.get_float("DELT", 1.0)),
+        vmec2000_control=False,
+        strict_update=False,
+        backtracking=False,
+        auto_flip_force=False,
+        use_restart_triggers=False,
+        use_direct_fallback=False,
+        precond_radial_alpha=0.0,
+        precond_lambda_alpha=0.0,
+        jit_forces=False,
+        verbose=False,
+        verbose_vmec2000_table=False,
+    )
+
+    monkeypatch.setenv("VMEC_JAX_HOST_PROFILE_SETUP", "0")
+    baseline = solve.solve_fixed_boundary_residual_iter(state0, static, **kwargs)
+
+    monkeypatch.setenv("VMEC_JAX_HOST_PROFILE_SETUP", "1")
+    forced = solve.solve_fixed_boundary_residual_iter(state0, static, **kwargs)
+
+    np.testing.assert_allclose(forced.state.Rcos, baseline.state.Rcos)
+    np.testing.assert_allclose(forced.state.Zsin, baseline.state.Zsin)
+    assert forced.diagnostics["final_fsqr"] == pytest.approx(baseline.diagnostics["final_fsqr"])
+    assert forced.diagnostics["final_fsqz"] == pytest.approx(baseline.diagnostics["final_fsqz"])
