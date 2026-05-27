@@ -365,7 +365,11 @@ Core solve gates:
 - ``LASYM = T`` cases exercise both symmetric and asymmetric coefficient
   blocks and verify that asymmetric modes can change when active.
 - Free-boundary cases verify that the mgrid path and vacuum-field coupling are
-  used, not silently bypassed.
+  used, not silently bypassed.  The physics-smoke tier also includes a bounded
+  finite-pressure CTH-like response check: a zero-pressure and nonzero-pressure
+  free-boundary solve must differ in LCFS geometry and LCFS ``|B|``.  The
+  optional VMEC2000 tier extends this to a DIII-D mgrid finite-beta response
+  comparison against the external executable.
 
 VMEC2000 parity gates:
 

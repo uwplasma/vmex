@@ -25,7 +25,7 @@ from vmec_jax.wout import read_wout
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INPUT = REPO_ROOT / "examples" / "data" / "input.DIII-D_lasym_false"
 DEFAULT_OUTDIR = REPO_ROOT / "results" / "freeb_diiid_mgrid_beta_scan"
-DEFAULT_PRESSURE_SCALES = (0.0, 0.25, 0.50, 0.72, 1.0, 1.35)
+DEFAULT_PRESSURE_SCALES = (0.0, 0.25, 0.50, 0.72, 1.0, 1.35, 1.8)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -102,7 +102,10 @@ def _run_case(base_input: Path, outdir: Path, pressure_scale: float, args: argpa
     indata.scalars["NS_ARRAY"] = ns_array
     indata.scalars["NITER_ARRAY"] = niter_array
     indata.scalars["FTOL_ARRAY"] = ftol_array
-    indata.scalars["NS"] = ns_array[-1]
+    # VMEC2000 reads NS from NS_ARRAY for staged inputs and rejects an explicit
+    # standalone NS in this DIII-D deck.  Keep the generated input executable-
+    # compatible so the same file can be used for vmec_jax and VMEC2000 parity.
+    indata.scalars.pop("NS", None)
     indata.scalars["NITER"] = niter_array[-1]
     indata.scalars["FTOL"] = ftol_array[-1]
 

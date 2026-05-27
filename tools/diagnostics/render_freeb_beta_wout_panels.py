@@ -28,6 +28,12 @@ from vmec_jax.plotting import (  # noqa: E402
     prepare_matplotlib_3d,
     surface_rz_from_wout_physical,
 )
+from vmec_jax.free_boundary_validation import (  # noqa: E402
+    free_boundary_response_metrics,
+    wout_beta_percent,
+    wout_fsq_total,
+    wout_mean_iota,
+)
 from vmec_jax.wout import read_wout  # noqa: E402
 
 
@@ -41,28 +47,6 @@ def _import_matplotlib():
     return plt
 
 
-def _fsq_total(wout: Any) -> float:
-    return float(getattr(wout, "fsqr", np.nan)) + float(getattr(wout, "fsqz", np.nan)) + float(
-        getattr(wout, "fsql", np.nan)
-    )
-
-
-def _beta_percent(wout: Any) -> float:
-    for name in ("betatotal", "beta_total"):
-        value = getattr(wout, name, None)
-        if value is not None:
-            return 100.0 * float(value)
-    return float("nan")
-
-
-def _mean_iota(wout: Any) -> float:
-    values = np.asarray(getattr(wout, "iotaf", getattr(wout, "iotas", [])), dtype=float)
-    values = values[np.isfinite(values)]
-    if values.size > 1:
-        values = values[1:]
-    return float(np.mean(values)) if values.size else float("nan")
-
-
 def _parse_wout_spec(spec: str) -> tuple[str | None, Path]:
     if "=" in spec:
         label, path = spec.split("=", 1)
@@ -73,15 +57,15 @@ def _parse_wout_spec(spec: str) -> tuple[str | None, Path]:
 
 def _runs_from_summary(path: Path, *, backend: str | None, max_actual_beta: float | None) -> list[tuple[str | None, Path]]:
     payload = json.loads(path.read_text())
-    runs = payload.get("runs", [])
+    runs = payload.get("runs", payload.get("rows", []))
     selected: list[tuple[str | None, Path]] = []
     for run in runs:
         if backend is not None and str(run.get("backend", "")).lower() != backend.lower():
             continue
-        beta = run.get("beta_proxy_percent", None)
+        beta = run.get("beta_proxy_percent", run.get("actual_beta_percent", None))
         if beta is not None and max_actual_beta is not None and float(beta) > float(max_actual_beta):
             continue
-        wout = run.get("wout")
+        wout = run.get("wout") or run.get("wout_path")
         if not wout:
             continue
         wout_path = Path(str(wout)).expanduser().resolve()
@@ -93,8 +77,10 @@ def _runs_from_summary(path: Path, *, backend: str | None, max_actual_beta: floa
                 wout_path = alt
         if not wout_path.exists():
             continue
-        nominal = run.get("nominal_beta_percent", None)
-        label = f"nominal {float(nominal):g}%" if nominal is not None else None
+        nominal = run.get("nominal_beta_percent", run.get("pressure_scale", None))
+        label = f"nominal {float(nominal):g}%" if "nominal_beta_percent" in run else None
+        if label is None and "pressure_scale" in run:
+            label = f"pressure scale {float(nominal):g}"
         selected.append((label, wout_path))
     return selected
 
@@ -116,7 +102,7 @@ def _load_cases(args: argparse.Namespace) -> list[dict[str, Any]]:
     cases: list[dict[str, Any]] = []
     for user_label, path in specs:
         wout = read_wout(path)
-        beta = _beta_percent(wout)
+        beta = wout_beta_percent(wout)
         label = user_label or f"{beta:.2f}%"
         if user_label and np.isfinite(beta):
             label = f"{user_label}\nactual {beta:.2f}%"
@@ -127,11 +113,14 @@ def _load_cases(args: argparse.Namespace) -> list[dict[str, Any]]:
                 "wout": wout,
                 "beta_percent": beta,
                 "aspect": float(getattr(wout, "aspect", np.nan)),
-                "mean_iota": _mean_iota(wout),
-                "fsq_total": _fsq_total(wout),
+                "mean_iota": wout_mean_iota(wout),
+                "fsq_total": wout_fsq_total(wout),
             }
         )
     cases.sort(key=lambda item: (np.nan_to_num(item["beta_percent"], nan=1.0e99), str(item["path"])))
+    reference = cases[0]["wout"]
+    for case in cases:
+        case["response"] = free_boundary_response_metrics(reference, case["wout"], ntheta=96, nphi=32).to_dict()
     return cases
 
 
@@ -140,11 +129,29 @@ def _write_summary_csv(cases: list[dict[str, Any]], outdir: Path, stem: str) -> 
     with out.open("w", newline="") as f:
         writer = csv.DictWriter(
             f,
-            fieldnames=["label", "path", "actual_beta_percent", "aspect", "mean_iota", "fsq_total", "ns", "mpol", "ntor", "nfp"],
+            fieldnames=[
+                "label",
+                "path",
+                "actual_beta_percent",
+                "aspect",
+                "mean_iota",
+                "fsq_total",
+                "lcfs_rms_displacement_vs_first",
+                "lcfs_max_displacement_vs_first",
+                "lcfs_b_rel_rms_delta_vs_first",
+                "axis_R_shift_vs_first",
+                "axis_Z_shift_vs_first",
+                "ns",
+                "mpol",
+                "ntor",
+                "nfp",
+            ],
+            lineterminator="\n",
         )
         writer.writeheader()
         for case in cases:
             wout = case["wout"]
+            response = case.get("response", {})
             writer.writerow(
                 {
                     "label": case["label"].replace("\n", " "),
@@ -153,6 +160,11 @@ def _write_summary_csv(cases: list[dict[str, Any]], outdir: Path, stem: str) -> 
                     "aspect": f"{case['aspect']:.8g}",
                     "mean_iota": f"{case['mean_iota']:.8g}",
                     "fsq_total": f"{case['fsq_total']:.8g}",
+                    "lcfs_rms_displacement_vs_first": f"{float(response.get('lcfs_rms_displacement', np.nan)):.8g}",
+                    "lcfs_max_displacement_vs_first": f"{float(response.get('lcfs_max_displacement', np.nan)):.8g}",
+                    "lcfs_b_rel_rms_delta_vs_first": f"{float(response.get('lcfs_b_rel_rms_delta', np.nan)):.8g}",
+                    "axis_R_shift_vs_first": f"{float(response.get('axis_R_shift', np.nan)):.8g}",
+                    "axis_Z_shift_vs_first": f"{float(response.get('axis_Z_shift', np.nan)):.8g}",
                     "ns": int(getattr(wout, "ns", -1)),
                     "mpol": int(getattr(wout, "mpol", -1)),
                     "ntor": int(getattr(wout, "ntor", -1)),
@@ -196,6 +208,7 @@ def render_panel(cases: list[dict[str, Any]], *, title: str, outdir: Path, stem:
     for col, case in enumerate(cases):
         wout = case["wout"]
         ax = fig.add_subplot(gs[1, col])
+        response = case.get("response", {})
         indices = np.unique(np.rint(np.linspace(1, int(wout.ns) - 1, 8)).astype(int))
         for j, s_idx in enumerate(indices):
             R, Z = surface_rz_from_wout_physical(
@@ -206,7 +219,12 @@ def render_panel(cases: list[dict[str, Any]], *, title: str, outdir: Path, stem:
             )
             ax.plot(R[:, 0], Z[:, 0], color=radial_color(j / max(1, len(indices) - 1)), lw=1.0)
         _set_equal_axis(ax)
-        ax.set_title(f"{case['label']}\n{case['aspect']:.2f} aspect, fsq {case['fsq_total']:.1e}", fontsize=10)
+        shift = float(response.get("lcfs_rms_displacement", np.nan))
+        ax.set_title(
+            f"{case['label']}\n{case['aspect']:.2f} aspect, fsq {case['fsq_total']:.1e}\n"
+            f"LCFS rms shift {shift:.3g} vs first",
+            fontsize=10,
+        )
 
     theta_b = np.linspace(0.0, 2.0 * np.pi, 144)
     for col, case in enumerate(cases):
@@ -227,7 +245,12 @@ def render_panel(cases: list[dict[str, Any]], *, title: str, outdir: Path, stem:
         fig.colorbar(contours, ax=ax, fraction=0.046, pad=0.035, label="|B|")
         ax.set_xlabel("Physical toroidal angle phi")
         ax.set_ylabel("Poloidal angle theta")
-        ax.set_title(f"LCFS |B| contours\nrange {np.nanmin(B):.3g}-{np.nanmax(B):.3g}", fontsize=10)
+        bdelta = float(case.get("response", {}).get("lcfs_b_rel_rms_delta", np.nan))
+        ax.set_title(
+            f"LCFS |B| contours\nrange {np.nanmin(B):.3g}-{np.nanmax(B):.3g}; "
+            f"rel Δ {bdelta:.2g}",
+            fontsize=10,
+        )
 
     fig.suptitle(title, fontsize=15)
     outdir.mkdir(parents=True, exist_ok=True)

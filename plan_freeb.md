@@ -173,6 +173,18 @@ Steps taken:
     low-resolution free-boundary solver with `adjoint_trace=True` and verifies
     accepted traces carry finite `freeb_bsqvac_half` plus finite
     `freeb_pres_scale` into replay metadata.
+92. Added WOUT-native finite-beta free-boundary response metrics for LCFS RMS
+    displacement, maximum displacement, axis shift, and LCFS `|B|` relative
+    RMS change.
+93. Fixed the DIII-D beta-scan input writer so staged inputs do not emit a
+    standalone `NS`, preserving VMEC2000 executable compatibility for the same
+    generated inputs used by vmec_jax.
+94. Extended the DIII-D reviewer panel to actual WOUT beta `3.33%` and
+    annotated both DIII-D and LP-QA panels with response metrics relative to
+    the vacuum row.
+95. Added a CI physics-smoke finite-pressure response gate on the bundled
+    CTH-like free-boundary fixture plus an optional VMEC2000 DIII-D
+    finite-beta response/parity gate.
 
 Results obtained:
 
@@ -228,6 +240,19 @@ Results obtained:
     about `0.042 s`.
 27. The active direct-coil trace regression and accepted-boundary AD-vs-FD
     current/geometry gate passed together in 11.59 s after the latest main merge.
+28. The DIII-D `3.33%` actual-beta vmec_jax WOUT converged at final `ns=101`
+    with residual sum `1.06e-12`; compared with vacuum it has LCFS RMS shift
+    `0.352`, maximum LCFS shift `0.478`, magnetic-axis `R` shift `0.381`, and
+    relative LCFS `|B|` RMS change `0.181`.
+29. VMEC2000 run on the same DIII-D `3.33%` generated input converged with
+    residual sum `1.03e-12`.  vmec_jax vs VMEC2000 differences are much smaller
+    than the beta-induced response: aspect absolute difference `6.4e-7`, LCFS
+    RMS displacement between codes `1.7e-6`, and `rmnc/zmns/bmnc` relative RMS
+    differences below `6e-7`.
+30. Focused validation passed locally:
+    `python -m pytest -q tests/test_free_boundary_beta_response_validation.py`
+    reports `2 passed, 1 skipped`; with `RUN_FULL=1 JAX_ENABLE_X64=1`, the
+    finite-pressure response gate passes in about `40 s`.
 16. Subagent larger spectral-mode benchmark with `sample_points=2352`, `coils=8`, `segments=128` found the JIT sampler reduced warm active sampling from `0.0588 s` to `0.0545 s` (about 7%), but total warm wall time remained about `0.35 s`; dense NESTOR mode remains the main performance bottleneck.
 17. Targeted active-coupling summary tests passed: 2 passed in 7.81 s.
 18. VMEC2000 parser/optional LASYM validation tests passed locally as 1 passed, 1 skipped in 0.40 s without `VMEC2000_INTEGRATION=1`.

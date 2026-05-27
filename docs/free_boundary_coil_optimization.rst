@@ -130,7 +130,7 @@ single-stage coil optimizer:
   WOUT beta values above 1%.
 - The promoted high-resolution finite-beta reference evidence also includes the
   VMEC2000-compatible DIII-D ``mgrid`` benchmark: final ``ns=101``, final
-  ``FTOL=1e-12``, and actual WOUT beta through 2.18%.
+  ``FTOL=1e-12``, and actual WOUT beta through 3.33%.
 - The previous LP-QA direct-coil failure was traced to the automatic CPU
   ``lax.tridiagonal_solve`` preconditioner policy, not to direct Biot-Savart
   sampling or NESTOR ``bsqvac`` construction. The safe default now keeps the
@@ -316,29 +316,38 @@ the VMEC2000-compatible DIII-D ``mgrid`` benchmark.
    numerical summary is available as
    :download:`CSV <_static/figures/freeb_diiid_mgrid_beta_ns101_panel_summary.csv>`.
 
-Full-resolution external artifacts remain available for review:
+Full-resolution external artifacts remain available for review without
+committing large vector/PDF files:
 
-- SVG: https://gist.githubusercontent.com/rogeriojorge/a49e7a21330fbc8ab99229d2b05de708/raw/pr18_diiid_freeb_beta_ns101_comparison.svg
-- Summary JSON: https://gist.githubusercontent.com/rogeriojorge/a49e7a21330fbc8ab99229d2b05de708/raw/pr18_diiid_freeb_beta_ns101_summary.json
-- WOUT-panel SVG: https://gist.githubusercontent.com/rogeriojorge/ad9e20e1728b5d9794217d86d577c24c/raw/diiid_mgrid_beta_ns101_panel.svg
-- WOUT-panel CSV: https://gist.githubusercontent.com/rogeriojorge/ad9e20e1728b5d9794217d86d577c24c/raw/diiid_mgrid_beta_ns101_panel_summary.csv
+- WOUT-panel SVG: https://gist.githubusercontent.com/rogeriojorge/f9bfe56c5de71445cf86ea0843dc6629/raw/diiid_mgrid_beta_ns101_panel.svg
+- WOUT-panel CSV: https://gist.githubusercontent.com/rogeriojorge/f9bfe56c5de71445cf86ea0843dc6629/raw/diiid_mgrid_beta_ns101_panel_summary.csv
 
 The plotted WOUTs use final ``ns=101`` and final ``FTOL=1e-12``. The actual
-WOUT beta values are 0.00%, 0.32%, 0.67%, 1.01%, 1.49%, and 2.18%; all final
-``fsqr`` values are below ``1e-12``. The panels show iota profiles,
-beta-induced profile changes relative to vacuum, multi-surface cross sections,
-and LCFS ``|B|`` contours. This is promoted as a free-boundary finite-beta
-``mgrid`` validation artifact. It is not a direct-coil stellarator promotion
-artifact.
+WOUT beta values shown in the compressed panel are 0.00%, 0.67%, 1.49%, 2.18%,
+and 3.33%; all final residual sums are near ``1e-12``. The renderer annotates
+LCFS RMS displacement and relative LCFS ``|B|`` RMS change against the vacuum
+row. At actual WOUT beta 3.33%, the LCFS RMS displacement is about ``0.352``,
+the maximum LCFS displacement is about ``0.478``, the magnetic-axis
+``R``-shift is about ``0.381``, and the relative LCFS ``|B|`` RMS change is
+about ``0.181``. This is promoted as a free-boundary finite-beta ``mgrid``
+validation artifact. It is not a direct-coil stellarator promotion artifact.
+
+Executable-backed VMEC2000 validation was run on the same 3.33% WOUT row. The
+VMEC2000 and vmec_jax high-beta WOUTs agree far below the finite-beta response:
+aspect differs by ``6.4e-7``, ``rmnc`` relative RMS by ``5.6e-7``, ``zmns``
+relative RMS by ``3.5e-7``, ``bmnc`` relative RMS by ``5.1e-7``, and LCFS RMS
+displacement between codes by ``1.7e-6``. The beta-induced LCFS RMS shift is
+therefore about five orders of magnitude larger than the vmec_jax-vs-VMEC2000
+geometric mismatch.
 
 Generate the DIII-D WOUTs from the bundled input and fetched ``mgrid`` asset:
 
 .. code-block:: bash
 
-   python tools/fetch_assets.py --bundle mgrids
+   python tools/fetch_assets.py --bundle reference-nc
    python tools/diagnostics/run_diiid_mgrid_beta_scan.py \
      --outdir results/freeb_diiid_mgrid_beta_ns101 \
-     --pressure-scales 0 0.25 0.50 0.72 1.0 1.35 \
+     --pressure-scales 0 0.50 1.0 1.35 1.8 \
      --ns-array 16,51,101 \
      --niter-array 1000,4000,20000 \
      --ftol-array 1e-8,1e-11,1e-12
@@ -466,8 +475,8 @@ summary figure:
 
 Full-resolution external artifacts remain available for review:
 
-- WOUT-panel SVG: https://gist.githubusercontent.com/rogeriojorge/ad9e20e1728b5d9794217d86d577c24c/raw/lpqa_direct_coil_beta_ns101_panel.svg
-- WOUT-panel CSV: https://gist.githubusercontent.com/rogeriojorge/ad9e20e1728b5d9794217d86d577c24c/raw/lpqa_direct_coil_beta_ns101_panel_summary.csv
+- WOUT-panel SVG: https://gist.githubusercontent.com/rogeriojorge/f9bfe56c5de71445cf86ea0843dc6629/raw/lpqa_direct_coil_beta_ns101_panel.svg
+- WOUT-panel CSV: https://gist.githubusercontent.com/rogeriojorge/f9bfe56c5de71445cf86ea0843dc6629/raw/lpqa_direct_coil_beta_ns101_panel_summary.csv
 
 The WOUT-panel renderer is reusable for both ``mgrid`` and direct-coil scans:
 
@@ -493,11 +502,10 @@ For ad hoc existing DIII-D WOUTs, the renderer also accepts explicit files:
 
    python tools/diagnostics/render_freeb_beta_wout_panels.py \
      --wout "0.00%=wout_diiid_b0_mg101.nc" \
-     --wout "0.32%=wout_diiid_b025_mg101.nc" \
      --wout "0.67%=wout_diiid_b050_mg101.nc" \
-     --wout "1.01%=wout_diiid_b072_mg101.nc" \
      --wout "1.49%=wout_diiid_b100_mg101.nc" \
      --wout "2.18%=wout_diiid_b135_mg101.nc" \
+     --wout "3.33%=wout_diiid_b180_mg101.nc" \
      --title "DIII-D mgrid free-boundary finite-beta scan (ns=101)" \
      --stem diiid_mgrid_beta_ns101_panel \
      --outdir /tmp/freeb_publication_panels
