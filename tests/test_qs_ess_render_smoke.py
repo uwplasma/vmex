@@ -408,6 +408,38 @@ def test_qs_ess_sweep_gpu_production_budgets_are_not_diagnostic_caps():
     assert diag_cfg.trial_max_iter == 40
 
 
+def test_qs_ess_sweep_cli_overrides_take_precedence_over_default_budgets():
+    sweep = _load_sweep_module()
+
+    override = sweep.CaseBudget(
+        max_nfev=17,
+        continuation_nfev=11,
+        inner_max_iter=71,
+        inner_ftol=2.0e-8,
+        trial_max_iter=53,
+        trial_ftol=3.0e-8,
+    )
+
+    cfg = sweep._effective_problem_config(
+        sweep.PROBLEM_CONFIGS["qh"],
+        backend="gpu",
+        policy="direct",
+        problem="qh",
+        max_mode=5,
+        use_ess=True,
+        cli_budget=override,
+        ess_alpha_override=2.5,
+    )
+
+    assert cfg.max_nfev == 17
+    assert cfg.continuation_nfev == 11
+    assert cfg.inner_max_iter == 71
+    assert cfg.inner_ftol == pytest.approx(2.0e-8)
+    assert cfg.trial_max_iter == 53
+    assert cfg.trial_ftol == pytest.approx(3.0e-8)
+    assert cfg.ess_alpha == pytest.approx(2.5)
+
+
 def test_problem_configs_follow_current_seed_and_priority_policy():
     sweep = _load_sweep_module()
 

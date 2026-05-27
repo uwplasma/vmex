@@ -1230,6 +1230,50 @@ def test_vmec_mirror_ratio_uses_vmec_field_without_boozer(monkeypatch) -> None:
         objective.to_objective_term(target=1.0, residual_weight=1.0)
 
 
+def test_vmec_mirror_ratio_smooth_penalty_weights_multiple_surfaces(monkeypatch) -> None:
+    import vmec_jax.optimization_workflow as workflow
+
+    calls = []
+
+    def fake_b_cartesian_from_state(*args, **kwargs):
+        s_index = int(kwargs["s_index"])
+        calls.append(s_index)
+        bmag_by_surface = {
+            0: np.asarray([[1.0, 2.0], [1.5, 1.25]]),
+            2: np.asarray([[1.0, 4.0], [2.0, 3.0]]),
+        }
+        return np.stack(
+            [
+                bmag_by_surface[s_index],
+                np.zeros_like(bmag_by_surface[s_index]),
+                np.zeros_like(bmag_by_surface[s_index]),
+            ],
+            axis=-1,
+        )
+
+    monkeypatch.setattr(workflow, "b_cartesian_from_state", fake_b_cartesian_from_state)
+
+    ctx = SimpleNamespace(static=SimpleNamespace(s=np.asarray([0.0, 0.5, 1.0])), indata=object(), signgs=1)
+    objective = workflow.VMECMirrorRatio(
+        threshold=0.45,
+        surfaces=(0.0, 1.0),
+        smooth_penalty=0.1,
+        normalize_surfaces=True,
+    )
+
+    out = objective._evaluate_state(ctx, state=object())
+
+    expected_ratios = np.asarray([1.0 / 3.0, 3.0 / 5.0])
+    expected_penalty = 0.1 * np.logaddexp((expected_ratios - 0.45) / 0.1, 0.0)
+    expected_residuals = expected_penalty * np.sqrt(0.5)
+
+    assert calls == [0, 2]
+    np.testing.assert_allclose(np.asarray(out["mirror_ratio"]), expected_ratios, rtol=1.0e-12, atol=1.0e-12)
+    np.testing.assert_allclose(np.asarray(out["penalty"]), expected_penalty, rtol=1.0e-12, atol=1.0e-12)
+    np.testing.assert_allclose(np.asarray(out["residuals1d"]), expected_residuals, rtol=1.0e-12, atol=1.0e-12)
+    assert float(out["total"]) == pytest.approx(float(np.sum(expected_residuals**2)))
+
+
 def test_vmec_mirror_ratio_accepts_boozer_style_sampling_aliases() -> None:
     import vmec_jax.optimization_workflow as workflow
 
