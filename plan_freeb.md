@@ -257,6 +257,32 @@ Best next steps:
 Need from user:
 
 Nothing now.
+
+### 2026-05-27 Technical validation lane closure
+
+Steps taken:
+
+1. Re-inspected `tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`.
+2. Confirmed the promoted tiny direct-coil gradient gates already cover:
+   accepted-boundary replay AD-vs-central-FD for one coil current and one
+   Fourier geometry coefficient; and fixed-boundary dense VMEC/NESTOR
+   source/matrix/solve AD-vs-central-FD for the same two controls.
+3. Did not add another default-CI test, because the missing scientific rung is
+   not a small unit-test gap; it is full nonlinear `run_free_boundary`
+   iteration-loop differentiability or a validated custom VJP.
+
+Results obtained:
+
+1. `python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_jax_nestor_operator_accepted_solve_ad_matches_central_fd_for_current_and_geometry tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_jax_nestor_operator_fixed_boundary_ad_matches_central_fd_for_coil_vars tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_jax_nestor_operator_complete_solve_fd_slopes_for_current_and_geometry -rx`:
+   3 passed in 20.33 s.
+
+Remaining blocker:
+
+1. Complete-loop direct-coil AD-vs-FD through the production nonlinear
+   free-boundary solve is still intentionally not promoted.  The current
+   production driver materializes host state between VMEC iterations, so the
+   next rung is a JAX-visible nonlinear loop or a custom VJP for the outer
+   solve.
 57. Preserved pytest compatibility by falling back to the eager JAX operator when the global test fixture has `jax_disable_jit=True`.
 58. Added driver diagnostics for `jax_nestor_operator_jitted` and `jax_nestor_operator_cache_hit`.
 59. Verified the feature branch is already up to date with `origin/main`.
