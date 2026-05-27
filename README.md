@@ -127,8 +127,10 @@ python examples/free_boundary_direct_coils_forward.py \
 ```
 
 With ESSOS on `PYTHONPATH`, `examples/free_boundary_essos_coils_beta_scan.py`
-runs finite-pressure coil beta scans. Use `--resume-existing` to reuse completed
-`wout_*_beta_*.nc` pressure-continuation seeds.
+runs finite-pressure coil beta scans. The default pressure model is the
+SIMSOPT/Landreman-style `e*(ne*Te+ni*Ti)` polynomial profile used by the
+self-consistent bootstrap-current examples. Use `--resume-existing` to reuse
+completed `wout_*_beta_*.nc` pressure-continuation seeds.
 
 The DIII-D reference scan reaches final `ns=101`, `FTOL=1e-12`, and actual WOUT
 betas through 3.33%; the LP-QA direct-coil lane promotes strict rows through

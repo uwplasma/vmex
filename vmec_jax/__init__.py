@@ -136,7 +136,22 @@ from .optimization import (
 )
 from .coords import Coords, eval_coords
 from .geom import Geom, eval_geom
-from .profiles import ProfileInputs, profiles_from_indata, eval_profiles
+from .profiles import (
+    ELEMENTARY_CHARGE,
+    Profile,
+    ProfileInputs,
+    ProfilePolynomial,
+    ProfilePressure,
+    ProfileScaled,
+    StandardFiniteBetaProfiles,
+    eval_profiles,
+    pressure_profile_to_vmec_am,
+    profile_to_power_series_coeffs,
+    profiles_from_indata,
+    standard_finite_beta_profiles,
+    standard_pressure_profile,
+    with_pressure_profile,
+)
 from .finite_beta import (
     FiniteBetaTargets,
     finite_beta_global_residuals_from_state,
@@ -613,9 +628,20 @@ __all__ = [
     "eval_coords",
     "Geom",
     "eval_geom",
+    "ELEMENTARY_CHARGE",
+    "Profile",
     "ProfileInputs",
+    "ProfilePolynomial",
+    "ProfilePressure",
+    "ProfileScaled",
+    "StandardFiniteBetaProfiles",
     "profiles_from_indata",
     "eval_profiles",
+    "pressure_profile_to_vmec_am",
+    "profile_to_power_series_coeffs",
+    "standard_finite_beta_profiles",
+    "standard_pressure_profile",
+    "with_pressure_profile",
     "FiniteBetaTargets",
     "finite_beta_global_residuals_from_state",
     "finite_beta_scalars_from_state",

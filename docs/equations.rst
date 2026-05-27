@@ -325,8 +325,30 @@ bootstrap-current residual.  The residual follows the normalized SIMSOPT form
         \right)^2\right]^{1/2}}.
 
 The Redl term uses polynomial density and temperature profiles in the same
-ascending-coefficient convention as SIMSOPT ``ProfilePolynomial``.  The
-effective trapped-particle fraction is evaluated with fixed Gauss-Legendre
+ascending-coefficient convention as SIMSOPT ``ProfilePolynomial``.  For the
+standard finite-beta stage-one examples, ``vj.standard_finite_beta_profiles``
+constructs
+
+.. math::
+
+   n_e(s) = n_{e0}(1 - 0.99 s^5), \qquad
+   T_e(s) = T_{e0}(1 - 0.99 s),
+
+with ``ni=ne``, ``Ti=Te``, ``Zeff=1``, and
+:math:`p(s)=e(n_eT_e+n_iT_i)` in Pascals.  The amplitudes use the same
+scaling as the SIMSOPT finite-beta/bootstrap examples,
+
+.. math::
+
+   n_{e0} = 3\times 10^{20}
+      \left(\frac{\beta/100}{0.05}\right)^{1/3}, \qquad
+   T_{e0} = 15\,\mathrm{keV}
+      \left(\frac{\beta/100}{0.05}\right)^{2/3}.
+
+``vj.with_pressure_profile`` converts this pressure profile to VMEC ``AM`` and
+``PRES_SCALE`` input fields while ``vj.RedlBootstrapMismatch`` receives the
+same density/temperature coefficients.  The effective trapped-particle
+fraction is evaluated with fixed Gauss-Legendre
 quadrature using the substitution
 :math:`y = \sqrt{1-\lambda B_{\max}}`, which removes the endpoint singularity
 in the standard integral

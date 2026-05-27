@@ -18,6 +18,11 @@ Run from the repository root:
     export ESSOS_ROOT=/path/to/ESSOS_mgrid_pr
     export ESSOS_INPUT_DIR=$ESSOS_ROOT/examples/input_files
     PYTHONPATH=.:$ESSOS_ROOT:$PYTHONPATH python examples/free_boundary_essos_coils_forward.py --beta 1.0 --max-iter 20
+
+The default finite-pressure profile is the standard
+``p = e*(ne*Te + ni*Ti)`` polynomial profile used by the SIMSOPT
+finite-beta/bootstrap examples.  Use ``--pressure-profile linear-scale`` only
+for legacy ``PRES_SCALE*(1-s)`` probes.
 """
 
 from __future__ import annotations
@@ -108,6 +113,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--coils-json", type=Path, default=None)
     parser.add_argument("--outdir", type=Path, default=DEFAULT_OUTDIR)
     parser.add_argument("--beta", type=float, default=1.0, help="Nominal beta percentage for the pressure scale.")
+    parser.add_argument(
+        "--pressure-profile",
+        choices=("standard", "linear-scale"),
+        default="standard",
+        help=(
+            "Pressure-profile model. 'standard' uses e*(ne*Te+ni*Ti) with "
+            "Landreman-style beta scaling; 'linear-scale' preserves the old "
+            "PRES_SCALE*(1-s) plumbing probe."
+        ),
+    )
     parser.add_argument("--max-iter", type=int, default=20)
     parser.add_argument("--ftol", type=float, default=1.0e-8)
     parser.add_argument("--ns", type=int, default=12)
@@ -154,6 +169,7 @@ def main(argv: list[str] | None = None) -> int:
         mpol=int(args.mpol),
         ntor=int(args.ntor),
         nzeta=int(args.nzeta),
+        pressure_profile=str(args.pressure_profile),
         phiedge=float(args.phiedge),
     )
     input_path = outdir / "input.direct_coils"
@@ -178,6 +194,9 @@ def main(argv: list[str] | None = None) -> int:
     summary["input"] = input_path
     summary["coils_json"] = coils_json
     summary["coil_current_scale"] = float(args.coil_current_scale)
+    summary["pressure_profile"] = str(args.pressure_profile)
+    if str(args.pressure_profile) == "standard":
+        summary["pressure_scale"] = 1.0
     summary["jit_forces"] = bool(args.jit_forces)
     summary_path = outdir / "summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, default=_json_default) + "\n")

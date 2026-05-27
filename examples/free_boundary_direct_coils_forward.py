@@ -13,6 +13,10 @@ Quick smoke without running VMEC:
 Short forward run:
 
     python examples/free_boundary_direct_coils_forward.py --max-iter 4
+
+The default pressure is the standard density/temperature-derived finite-beta
+profile. Use ``--pressure-profile linear-scale`` only for the older
+``PRES_SCALE*(1-s)`` smoke profile.
 """
 
 from __future__ import annotations
@@ -38,6 +42,7 @@ from vmec_jax.external_fields import (
     coil_lengths,
     sample_coil_field_cylindrical,
 )
+from vmec_jax.profiles import pressure_profile_to_vmec_am, standard_finite_beta_profiles
 from vmec_jax.wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
 
 
@@ -88,11 +93,23 @@ def write_tiny_direct_free_boundary_input(
     ntor: int = 0,
     nzeta: int = 2,
     ntheta: int = 8,
+    beta_percent: float = 1.0,
+    pressure_profile: str = "standard",
     pressure_scale: float = 1.0e4,
 ) -> Path:
     """Write a low-resolution axisymmetric free-boundary input deck."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
+    pressure_profile = str(pressure_profile).strip().lower()
+    if pressure_profile == "standard":
+        profiles = standard_finite_beta_profiles(float(beta_percent))
+        am, pres_scale = pressure_profile_to_vmec_am(profiles.pressure_pa, pres_scale=1.0)
+    elif pressure_profile in {"linear", "linear-scale", "legacy"}:
+        am = [1.0, -1.0]
+        pres_scale = float(pressure_scale)
+    else:
+        raise ValueError("pressure_profile must be 'standard' or 'linear-scale'")
+    am_text = " ".join(f"{float(value):.16E}" for value in am)
     path.write_text(
         f"""
 &INDATA
@@ -118,8 +135,9 @@ def write_tiny_direct_free_boundary_input(
   CURTOR = 0.0
   SPRES_PED = 1.0
   NCURR = 0
-  PRES_SCALE = {float(pressure_scale):.16E}
-  AM = 1.0 -1.0
+  PMASS_TYPE = 'power_series'
+  PRES_SCALE = {float(pres_scale):.16E}
+  AM = {am_text}
   AI = 0.4 0.0
   AC = 0.0
   RAXIS = 1.0
@@ -218,6 +236,8 @@ def run_forward(args: argparse.Namespace) -> dict[str, Any]:
         ntor=int(args.ntor),
         nzeta=int(args.nzeta),
         ntheta=int(args.ntheta),
+        beta_percent=float(args.beta),
+        pressure_profile=str(args.pressure_profile),
         pressure_scale=float(args.pressure_scale),
     )
 
@@ -248,6 +268,8 @@ def run_forward(args: argparse.Namespace) -> dict[str, Any]:
         dry_run=bool(args.dry_run),
     )
     summary["jit_forces"] = bool(args.jit_forces)
+    summary["beta_percent"] = float(args.beta)
+    summary["pressure_profile"] = str(args.pressure_profile)
     summary_path = outdir / "summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, default=_json_default) + "\n")
     return summary
@@ -264,7 +286,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ntor", type=int, default=0)
     parser.add_argument("--nzeta", type=int, default=2)
     parser.add_argument("--ntheta", type=int, default=8)
-    parser.add_argument("--pressure-scale", type=float, default=1.0e4)
+    parser.add_argument("--beta", type=float, default=1.0, help="Nominal beta percent for --pressure-profile standard.")
+    parser.add_argument(
+        "--pressure-profile",
+        choices=("standard", "linear-scale"),
+        default="standard",
+        help=(
+            "Pressure-profile model. 'standard' uses e*(ne*Te+ni*Ti) with "
+            "Landreman-style beta scaling; 'linear-scale' preserves the old "
+            "PRES_SCALE*(1-s) smoke profile."
+        ),
+    )
+    parser.add_argument("--pressure-scale", type=float, default=1.0e4, help="Legacy PRES_SCALE for --pressure-profile linear-scale.")
     parser.add_argument("--coil-current", type=float, default=3.0e7)
     parser.add_argument("--coil-radius", type=float, default=1.8)
     parser.add_argument("--n-segments", type=int, default=96)

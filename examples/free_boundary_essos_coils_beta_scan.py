@@ -24,6 +24,11 @@ Use smaller settings for a quick smoke run:
     export ESSOS_INPUT_DIR=$ESSOS_ROOT/examples/input_files
     PYTHONPATH=.:$ESSOS_ROOT:$PYTHONPATH python examples/free_boundary_essos_coils_beta_scan.py --betas 0 1 --max-iter 2 --mgrid-nr 8 --mgrid-nz 8 --mgrid-nphi 4 --activate-fsq 1e99
 
+By default, finite pressure is built from the standard density/temperature
+profiles used by the SIMSOPT finite-beta/bootstrap examples,
+``p = e * (ne*Te + ni*Ti)``.  Use ``--pressure-profile linear-scale`` only for
+legacy plumbing probes that need the older ``PRES_SCALE*(1-s)`` profile.
+
 The default ESSOS LP-QA coil JSON is unit-scale.  Use
 ``examples/data/input.LandremanPaul2021_QA_lowres`` with unit-scale mgrid
 bounds, or pass ``--allow-scale-mismatch`` when deliberately testing a scaled
@@ -51,17 +56,18 @@ import numpy as np
 from vmec_jax.driver import run_free_boundary, write_wout_from_fixed_boundary_run
 from vmec_jax.external_fields import from_essos_coils
 from vmec_jax.namelist import read_indata, write_indata
+from vmec_jax.profiles import pressure_profile_to_vmec_am, standard_finite_beta_profiles
 from vmec_jax.wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state, read_wout
 
 DEFAULT_INPUT = REPO_ROOT / "examples" / "data" / "input.LandremanPaul2021_QA_lowres"
 DEFAULT_RESULTS = REPO_ROOT / "results" / "free_boundary_essos_coils_beta_scan"
 DEFAULT_NOMINAL_BETA_PERCENT = (0.0, 1.0, 2.0)
 
-# Calibrated for the unit-scale ESSOS Landreman-Paul QA coil/input pair.  This
-# is a finite-pressure plumbing scale, not a claim that WOUT beta will be 1%.
-# The actual VMEC beta must always be read from WOUT.
+# Legacy linear pressure scale retained for regression/debug runs. The default
+# pressure model below uses density/temperature-derived finite-beta profiles.
 PRESSURE_SCALE_FOR_ONE_PERCENT_BETA = 1000.0
 DEFAULT_FREE_BOUNDARY_PHIEDGE = -0.025
+DEFAULT_PRESSURE_PROFILE = "standard"
 
 
 def _candidate_essos_input_dirs() -> list[Path]:
@@ -112,6 +118,7 @@ def make_free_boundary_indata(
     niter_array: list[int] | None = None,
     ftol_array: list[float] | None = None,
     pressure_scale_for_one_percent_beta: float = PRESSURE_SCALE_FOR_ONE_PERCENT_BETA,
+    pressure_profile: str = DEFAULT_PRESSURE_PROFILE,
     phiedge: float | None = None,
 ) -> Any:
     """Create a small free-boundary input deck for one nominal beta."""
@@ -138,11 +145,20 @@ def make_free_boundary_indata(
     indata.scalars["NZETA"] = int(nzeta)
     indata.scalars["NTHETA"] = 0
     indata.scalars["NVACSKIP"] = max(1, int(nzeta))
-    indata.scalars["PMASS_TYPE"] = "power_series"
-    # p(s) = PRES_SCALE * (1 - s), so beta increases monotonically with the
-    # requested nominal beta percentage.
-    indata.scalars["AM"] = [1.0, -1.0]
-    indata.scalars["PRES_SCALE"] = float(pressure_scale_for_one_percent_beta) * float(beta_percent)
+    pressure_profile = str(pressure_profile).strip().lower()
+    if pressure_profile == "standard":
+        profiles = standard_finite_beta_profiles(float(beta_percent))
+        am, pres_scale = pressure_profile_to_vmec_am(profiles.pressure_pa, pres_scale=1.0)
+        indata.scalars["PMASS_TYPE"] = "power_series"
+        indata.scalars["AM"] = am
+        indata.scalars["PRES_SCALE"] = pres_scale
+    elif pressure_profile in {"linear", "linear-scale", "legacy"}:
+        indata.scalars["PMASS_TYPE"] = "power_series"
+        # p(s) = PRES_SCALE * (1 - s), retained for legacy sensitivity probes.
+        indata.scalars["AM"] = [1.0, -1.0]
+        indata.scalars["PRES_SCALE"] = float(pressure_scale_for_one_percent_beta) * float(beta_percent)
+    else:
+        raise ValueError("pressure_profile must be 'standard' or 'linear-scale'")
     if phiedge is not None:
         indata.scalars["PHIEDGE"] = float(phiedge)
     return indata
@@ -422,6 +438,7 @@ def _summary_payload(
         "coil_current_scale": float(args.coil_current_scale),
         "phiedge_override": None if args.phiedge is None else float(args.phiedge),
         "pressure_scale_for_one_percent_beta": float(args.pressure_scale_for_one_percent_beta),
+        "pressure_profile": str(getattr(args, "pressure_profile", DEFAULT_PRESSURE_PROFILE)),
         "pressure_continuation": bool(args.pressure_continuation),
         "pressure_continuation_max_fsq": float(args.pressure_continuation_max_fsq),
         "direct_coil_source_reuse": not bool(args.disable_direct_coil_source_reuse),
@@ -472,6 +489,7 @@ def _resume_existing_case(
     backend: str,
     beta_percent: float,
     pressure_scale_for_one_percent_beta: float,
+    pressure_profile: str = DEFAULT_PRESSURE_PROFILE,
 ) -> dict[str, Any] | None:
     """Return diagnostics for an existing case WOUT, if present."""
 
@@ -479,7 +497,12 @@ def _resume_existing_case(
     if not wout_path.exists():
         return None
     summary = summarize_existing_wout(wout_path, backend=backend, beta_percent=beta_percent)
-    summary["pressure_scale"] = float(pressure_scale_for_one_percent_beta) * float(beta_percent)
+    summary["pressure_profile"] = str(pressure_profile)
+    summary["pressure_scale"] = (
+        1.0
+        if str(pressure_profile) == "standard"
+        else float(pressure_scale_for_one_percent_beta) * float(beta_percent)
+    )
     return summary
 
 
@@ -492,6 +515,7 @@ def run_one_case(
     pressure_scale_for_one_percent_beta: float,
     max_iter: int,
     activate_fsq: float | None,
+    pressure_profile: str = DEFAULT_PRESSURE_PROFILE,
     direct_coil_params=None,
     direct_coil_source_reuse: bool = True,
     direct_coil_trial_resample: bool = False,
@@ -531,7 +555,12 @@ def run_one_case(
     wout_path = _case_wout_path(output_dir, backend=backend, beta_percent=beta_percent)
     write_wout_from_fixed_boundary_run(wout_path, run, include_fsq=True)
     summary = summarize_run(run, wout_path, backend=backend, beta_percent=beta_percent, wall_s=wall_s)
-    summary["pressure_scale"] = float(pressure_scale_for_one_percent_beta) * float(beta_percent)
+    summary["pressure_profile"] = str(pressure_profile)
+    summary["pressure_scale"] = (
+        1.0
+        if str(pressure_profile) == "standard"
+        else float(pressure_scale_for_one_percent_beta) * float(beta_percent)
+    )
     return summary
 
 
@@ -576,9 +605,20 @@ def main(argv: list[str] | None = None) -> int:
         type=float,
         default=PRESSURE_SCALE_FOR_ONE_PERCENT_BETA,
         help=(
-            "Scale factor multiplying each --betas value to form PRES_SCALE. "
-            "The actual beta must be read from WOUT; this option supports "
-            "calibrated finite-pressure validation scans."
+            "Legacy scale factor for --pressure-profile linear-scale. "
+            "The default standard profile derives pressure from density and "
+            "temperature profiles, so this value is ignored unless the legacy "
+            "linear profile is requested."
+        ),
+    )
+    parser.add_argument(
+        "--pressure-profile",
+        choices=("standard", "linear-scale"),
+        default=DEFAULT_PRESSURE_PROFILE,
+        help=(
+            "Pressure-profile model. 'standard' uses e*(ne*Te+ni*Ti) with "
+            "Landreman-style beta scaling; 'linear-scale' preserves the old "
+            "PRES_SCALE*(1-s) plumbing probe."
         ),
     )
     parser.add_argument(
@@ -763,6 +803,7 @@ def main(argv: list[str] | None = None) -> int:
                 niter_array=niter_array,
                 ftol_array=ftol_array,
                 pressure_scale_for_one_percent_beta=args.pressure_scale_for_one_percent_beta,
+                pressure_profile=args.pressure_profile,
                 phiedge=args.phiedge,
             )
             input_mgrid = outdir / f"input.lpqa_mgrid_beta_{beta_tag}"
@@ -772,6 +813,7 @@ def main(argv: list[str] | None = None) -> int:
                     backend="mgrid",
                     beta_percent=beta_percent,
                     pressure_scale_for_one_percent_beta=args.pressure_scale_for_one_percent_beta,
+                    pressure_profile=args.pressure_profile,
                 )
                 if args.resume_existing
                 else None
@@ -812,6 +854,7 @@ def main(argv: list[str] | None = None) -> int:
                     output_dir=outdir,
                     beta_percent=beta_percent,
                     pressure_scale_for_one_percent_beta=args.pressure_scale_for_one_percent_beta,
+                    pressure_profile=args.pressure_profile,
                     max_iter=args.max_iter,
                     activate_fsq=args.activate_fsq,
                 )
@@ -857,6 +900,7 @@ def main(argv: list[str] | None = None) -> int:
                 niter_array=niter_array,
                 ftol_array=ftol_array,
                 pressure_scale_for_one_percent_beta=args.pressure_scale_for_one_percent_beta,
+                pressure_profile=args.pressure_profile,
                 phiedge=args.phiedge,
             )
             input_direct = outdir / f"input.lpqa_direct_beta_{beta_tag}"
@@ -866,6 +910,7 @@ def main(argv: list[str] | None = None) -> int:
                     backend="direct",
                     beta_percent=beta_percent,
                     pressure_scale_for_one_percent_beta=args.pressure_scale_for_one_percent_beta,
+                    pressure_profile=args.pressure_profile,
                 )
                 if args.resume_existing
                 else None
@@ -906,6 +951,7 @@ def main(argv: list[str] | None = None) -> int:
                     output_dir=outdir,
                     beta_percent=beta_percent,
                     pressure_scale_for_one_percent_beta=args.pressure_scale_for_one_percent_beta,
+                    pressure_profile=args.pressure_profile,
                     max_iter=args.max_iter,
                     activate_fsq=args.activate_fsq,
                     direct_coil_params=direct_params,
