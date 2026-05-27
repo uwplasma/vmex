@@ -179,6 +179,19 @@ from .finite_beta import (
     redl_bootstrap_mismatch_from_state,
     trapped_fraction_from_modb_sqrtg,
 )
+from .bootstrap_current import (
+    BootstrapCurrentIteration,
+    BootstrapCurrentOptions,
+    apply_current_profile_to_indata,
+    bootstrap_current_update_to_indata,
+    damp_current_profile,
+    dpsi_ds_from_vmec_phiedge,
+    integrate_current_derivative,
+    redl_current_derivative_update,
+    redl_current_integrating_factor_update,
+    redl_current_rhs,
+    vmec_current_profile_from_bootstrap_update,
+)
 from .integrals import dvds_from_sqrtg, cumtrapz_s, volume_from_sqrtg
 from .field import (
     b_cartesian_from_state,
@@ -667,6 +680,17 @@ __all__ = [
     "redl_bootstrap_mismatch_from_profiles",
     "redl_bootstrap_mismatch_from_state",
     "trapped_fraction_from_modb_sqrtg",
+    "BootstrapCurrentIteration",
+    "BootstrapCurrentOptions",
+    "apply_current_profile_to_indata",
+    "bootstrap_current_update_to_indata",
+    "damp_current_profile",
+    "dpsi_ds_from_vmec_phiedge",
+    "integrate_current_derivative",
+    "redl_current_derivative_update",
+    "redl_current_integrating_factor_update",
+    "redl_current_rhs",
+    "vmec_current_profile_from_bootstrap_update",
     "dvds_from_sqrtg",
     "cumtrapz_s",
     "volume_from_sqrtg",

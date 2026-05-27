@@ -23,9 +23,8 @@ pip install vmec-jax
 PyPI and conda-forge can lag the repository tags. If you need an exact release,
 check the package-index version before installing or pinning it.
 
-The plain package includes plotting support (`matplotlib`) and the
-differentiable Boozer transform dependency (`booz_xform_jax`) used by the QI
-examples, so there is no separate plotting or QI extra to install.
+The plain package includes plotting support (`matplotlib`) and the differentiable
+Boozer transform dependency (`booz_xform_jax`), so no separate extra is needed.
 
 From conda-forge:
 

@@ -39,6 +39,7 @@ vmec-jax documentation
       piecewise_omnigenous_plan
       simsopt_comparison
       jxbforce_mercier
+      bootstrap_current_fixed_point
 
    .. toctree::
       :maxdepth: 2
