@@ -219,6 +219,11 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
     parser.add_argument("--stage-mode-policy", choices=("lower", "repeat"))
     parser.add_argument("--make-plots", action=argparse.BooleanOptionalAction)
     parser.add_argument("--jit-booz", action=argparse.BooleanOptionalAction)
+    parser.add_argument("--qi-mboz", type=int)
+    parser.add_argument("--qi-nboz", type=int)
+    parser.add_argument("--qi-nphi", type=int)
+    parser.add_argument("--qi-nalpha", type=int)
+    parser.add_argument("--qi-n-bounce", type=int)
     parser.add_argument("--target-aspect", type=float)
     parser.add_argument("--target-abs-iota-min", type=float)
     parser.add_argument("--max-mirror-ratio", type=float)
@@ -262,6 +267,22 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
     set_if("STAGE_MODE_POLICY", args.stage_mode_policy)
     set_if("MAKE_PLOTS", args.make_plots)
     set_if("JIT_BOOZ", args.jit_booz)
+    qi_resolution_updates = {
+        "mboz": args.qi_mboz,
+        "nboz": args.qi_nboz,
+        "nphi": args.qi_nphi,
+        "nalpha": args.qi_nalpha,
+        "n_bounce": args.qi_n_bounce,
+    }
+    if any(value is not None for value in qi_resolution_updates.values()):
+        opt_resolution = dict(namespace.get("OPT_QI_RESOLUTION", {}))
+        audit_resolution = dict(namespace.get("AUDIT_QI_RESOLUTION", opt_resolution))
+        for key, value in qi_resolution_updates.items():
+            if value is not None:
+                opt_resolution[key] = int(value)
+                audit_resolution[key] = int(value)
+        namespace["OPT_QI_RESOLUTION"] = opt_resolution
+        namespace["AUDIT_QI_RESOLUTION"] = audit_resolution
     set_if("TARGET_ASPECT", None if args.target_aspect is None else float(args.target_aspect))
     set_if("TARGET_ABS_IOTA_MIN", None if args.target_abs_iota_min is None else float(args.target_abs_iota_min))
     set_if("MAX_MIRROR_RATIO", None if args.max_mirror_ratio is None else float(args.max_mirror_ratio))
