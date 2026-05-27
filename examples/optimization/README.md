@@ -292,10 +292,10 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi_boundary_interpolatio
   --max-mirror-ratio 0.35 --max-elongation 8.0
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py \
   --backend-label cpu --solver-device cpu --policy continuation \
-  --problems qi --modes 1,2,3 --ess both --qi-qp-preseed both --rerun
+  --problems qi --modes 1,2,3,4,5 --ess both --qi-qp-preseed both --rerun
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py \
   --backend-label cpu --solver-device cpu --policy direct \
-  --problems qi --modes 1,2,3 --ess both --qi-qp-preseed both --rerun
+  --problems qi --modes 1,2,3,4,5 --ess both --qi-qp-preseed both --rerun
 PYTHONPATH=. python examples/optimization/render_qi_constrained_sweep.py
 PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 ```

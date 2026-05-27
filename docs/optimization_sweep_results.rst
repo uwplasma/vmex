@@ -70,10 +70,10 @@ documentation-critical artifacts should be copied into ``docs/_static/figures``:
 The checked-in source tree currently contains the compact README panels, the
 QI case-coverage snapshot, the minimal-seed showcase objective/state panels, the
 constrained-QI status panel, and compact CSV/JSON summary files.
-``qs_ess_summary_all.csv`` is a heterogeneous partial/archive snapshot: current
+``qs_ess_summary_all.csv`` is a heterogeneous partial/archive snapshot: archived
 CPU README QA/QH/QP rows plus one failed/partial constrained-QI status row,
 older GPU/LASYM rows with incomplete target metadata, and no checked-in
-``max_mode=4`` rows.  ``qi_constrained_summary.csv`` currently contains one CPU
+``max_mode>=4`` rows.  ``qi_constrained_summary.csv`` currently contains one CPU
 ``max_mode=3`` continuation status row.  It does not currently contain the full
 objective-history panels, initial/final state atlases, summary-table images, or
 publication-panel composites.
@@ -115,7 +115,7 @@ Run the CPU production sweep:
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
 These commands describe the complete regeneration target, not the contents of
-the checked-in snapshot.  Do not cite a full ``max_mode=4`` CPU/GPU matrix until
+the checked-in snapshot.  Do not cite a full ``max_mode>=4`` CPU/GPU matrix until
 the corresponding CSV/JSON rows and publication figures are present under
 ``docs/_static/figures``.
 
@@ -239,9 +239,11 @@ and ROCm and fail if ROCm is not installed.
 README Best Rows
 ----------------
 
-The README intentionally shows only one best ``LASYM = F`` result per target.
-QA/QH/QP/QI are selected from the CPU matrix and filtered against the common
-aspect-5 target.  The selected QI row is chosen with the legacy branch
+The README regeneration target is one best ``LASYM = F`` result per target.
+Current checked-in README panels are archived aspect-6/mode-3 rows until the
+aspect-5, ``max_mode<=5`` CPU/GPU matrix is promoted.  New QA/QH/QP/QI rows
+must be selected from the reviewed matrix and filtered against the common
+aspect-5 target.  The selected QI row should be chosen with the legacy branch
 diagnostic, mirror-ratio, elongation, iota, and aspect-ratio gates used as
 promotion evidence rather than as exact equality constraints; small numerical
 slack is expected when independent Boozer diagnostics are recomputed after the
@@ -582,12 +584,13 @@ Downloadable constrained-QI summaries:
 - :download:`qi_constrained_summary.json <_static/figures/qi_constrained_summary.json>`
 - :download:`qi_constrained_best.json <_static/figures/qi_constrained_best.json>`
 
-The current README QI row is the CPU ``qi_default`` standalone
+The checked-in archived README QI row is the CPU ``qi_default`` standalone
 ``QI_optimization.py`` lane, ``max_mode=3``, ESS row without a same-mode QP
 preseed: legacy-ranked QI diagnostic ``4.31e-4``, smooth QI diagnostic
 ``1.32e-3``, maximum mirror ratio ``0.272`` for a target ``0.30``, maximum
 elongation ``6.90`` for a target ``8.2``, aspect ratio ``6.002``, mean iota
-``-0.5690``, and total wall time ``10.9 min``.  Best-row selection uses
+``-0.5690``, and total wall time ``10.9 min``.  It is not current aspect-5
+promotion evidence.  Best-row selection uses
 ``vmec_jax.qi_promotion_score``: raw-fallback legacy diagnostics are rejected,
 rows above the loose ``2e-2`` QI promotion ceiling cannot win solely by having
 good mirror/elongation, and engineering-clean rows are preferred over lower-QI

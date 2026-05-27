@@ -527,7 +527,7 @@ branch-shuffle diagnostic.
    )
 
    objective_tuples = [
-       (vj.AspectRatio().J, 6.0, 1.0),
+       (vj.AspectRatio().J, 5.0, 1.0),
        (vj.AbsMeanIotaFloor(0.41).J, 0.0, 200.0**2),
        (qi.J, 0.0, 1.0),
        (qi_ceiling.J, 0.0, 100.0),
@@ -771,9 +771,10 @@ optimization:
    PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_optimization.py
 
 Those scripts write ``input.initial``, ``input.final``, ``wout_initial.nc``,
-``wout_final.nc``, ``history.json``, and per-case diagnostic plots.  The README
-QA/QH/QP rows are selected from reviewed ``qs_ess_sweep`` outputs; the archived
-README QI row is selected from a standalone ``QI_optimization.py`` lane until
+``wout_final.nc``, ``history.json``, and per-case diagnostic plots.  The
+checked-in README QA/QH/QP rows are archived lower-mode rows from reviewed
+``qs_ess_sweep`` outputs; the archived README QI row is selected from a
+standalone ``QI_optimization.py`` lane until
 the current aspect-5 constrained-QI sweep has complete passing rows.  Compact
 panels include the source-initial LCFS, final LCFS, objective history, and
 initial/final Boozer :math:`|B|` line contours.
@@ -915,7 +916,7 @@ stage label.  These partial rows are useful diagnostics, but they are not
 promoted as README best rows unless their independent physics gates pass.
 
 To recreate one row, restrict ``--policy`` and ``--problems``.  For example,
-this reruns the current README-best QA row:
+this reruns the checked-in archived README QA row:
 
 .. code-block:: bash
 
