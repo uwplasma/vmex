@@ -229,7 +229,7 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "import qi_optimization_support" not in text
     assert "from vmec_jax.qi_optimization import *" in compat_text
     assert "from tools.diagnostics" not in support_text.split("def _load_basin_prefilter_tools")[0]
-    assert len(text.splitlines()) < 450
+    assert len(text.splitlines()) < 500
     assert "qis.configure(globals())" not in text
     assert "os.environ" not in text
     assert "RUN_CASE" not in text
@@ -350,13 +350,14 @@ def test_qi_example_keeps_mirror_cleanup_guarded_by_qi_ceiling() -> None:
     assert "qi_ceiling = vj.QuasiIsodynamicResidualCeiling(" in text
     assert "qi_options=QI_OPTIONS" in text
     assert "mirror = vj.VMECMirrorRatio(" in text
-    assert "surface_index=MIRROR_SURFACE_INDEX" in text
+    assert 'surface_index=_stage_value(stage, "mirror_surface_index", MIRROR_SURFACE_INDEX)' in text
+    assert "def make_qi_problem(stage=None):" in text
     assert "stage_promotes_candidate(" in support_text
     assert "require_engineering_gate=bool(stage.get(\"require_engineering_gate\", False))" in support_text
-    assert "_stage_value(stage, \"qi_ceiling_weight\", QI_CEILING_WEIGHT)" not in text
+    assert "_stage_value(stage, \"qi_ceiling_weight\", QI_CEILING_WEIGHT)" in text
     assert "reference=reference_diagnostics" in support_text
     assert "objective_tuples.append((qi_ceiling.J, 0.0, QI_CEILING_WEIGHT))" in text
-    assert "(mirror.J, 0.0, MIRROR_WEIGHT)" in text
+    assert '(mirror.J, 0.0, float(_stage_value(stage, "mirror_weight", MIRROR_WEIGHT)))' in text
     assert text.index("qi_ceiling = vj.QuasiIsodynamicResidualCeiling(") < text.index(
         "mirror = vj.VMECMirrorRatio("
     )

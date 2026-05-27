@@ -149,6 +149,22 @@ def test_qi_helper_scalar_parsers_and_scores(tmp_path: Path) -> None:
     )
 
 
+def test_qi_cli_override_loads_mirror_ramp_stages_json(tmp_path: Path) -> None:
+    stages_path = tmp_path / "stages.json"
+    stages_path.write_text('[{"name": "cleanup", "max_nfev": 5, "mirror_weight": 20.0}]')
+    namespace = {
+        "MAX_MODE": 3,
+        "USE_MODE_CONTINUATION": True,
+        "CONTINUATION_NFEV": 2,
+        "STAGE_REPEATS": 1,
+        "STAGE_MODE_POLICY": "lower",
+    }
+
+    qio.apply_qi_example_cli_overrides(namespace, ["--mirror-ramp-stages-json", str(stages_path)])
+
+    assert namespace["MIRROR_RAMP_STAGES"] == ({"name": "cleanup", "max_nfev": 5, "mirror_weight": 20.0},)
+
+
 def test_explicit_qi_context_overrides_legacy_globals(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     qi_options = _configure(tmp_path / "legacy")
     ctx = qio.make_qi_optimization_context(
@@ -394,6 +410,12 @@ def test_stage_checkpoint_modes_and_promotion_rules(monkeypatch: pytest.MonkeyPa
     assert qio.stage_modes_for({"stage_repeats": 4}) == [3, 4]
     assert qio.promotion_score({"qi_rank_score": 1.0, "qi_constraint_score": 4.0}) == 112.0
     assert qio.engineering_promotion_score({"qi_rank_score": 1.0, "qi_constraint_score": 4.0, "qi_mirror_ratio_max": 0.5}) == 1103.0
+    aspect_far = {"qi_rank_score": 1.0, "qi_constraint_score": 0.0, "aspect_relative_error": 0.36}
+    aspect_near = {"qi_rank_score": 1.0, "qi_constraint_score": 0.0, "aspect_relative_error": 0.04}
+    assert qio.promotion_score(aspect_near) < qio.promotion_score(aspect_far)
+    assert qio.engineering_promotion_score(
+        {**aspect_near, "qi_mirror_ratio_max": 0.3}
+    ) < qio.engineering_promotion_score({**aspect_far, "qi_mirror_ratio_max": 0.3})
 
     promoted = qio.stage_promotes_candidate(
         {"accept_if_iota_improves": True, "iota_improvement_min": 0.05},

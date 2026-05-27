@@ -73,6 +73,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import generate_qs_ess_sweep as sweep
+from qi_optimization_cases import QI_CASES
 import qi_staged_runner
 from vmec_jax.namelist import InData, read_indata, write_indata
 
@@ -510,6 +511,21 @@ def _qp_preseed_config_for_qi_case(
     )
 
 
+def _patch_qi_stage_budget(stage: dict[str, Any], *, budget: MinimalSeedBudget) -> dict[str, Any]:
+    """Return a QI stage dictionary with showcase budgets applied.
+
+    The QI catalog contains reviewed stage policies.  The showcase command line
+    still owns the actual budget, so stages that opt in with
+    ``use_showcase_max_nfev`` inherit the requested production budget instead
+    of their quick local default.
+    """
+
+    out = dict(stage)
+    if bool(out.pop("use_showcase_max_nfev", False)):
+        out["max_nfev"] = int(budget.max_nfev)
+    return out
+
+
 def _write_showcase_metadata(
     output_dir: Path,
     *,
@@ -578,6 +594,11 @@ def _run_showcase_case(
     """Run one minimal-seed case with temporary sweep config overrides."""
 
     if case.problem == "qi":
+        qi_policy = QI_CASES.get(case.qi_policy_case or "qi_stel_seed_3127", {})
+        mirror_ramp_stages = tuple(
+            _patch_qi_stage_budget(stage, budget=budget)
+            for stage in qi_policy.get("mirror_ramp_stages", ())
+        )
         # Give the inner QI subprocess room to catch TimeoutExpired, harvest
         # partial artifacts, and let the outer worker write case_result.json.
         qi_timeout_s = None
@@ -607,6 +628,7 @@ def _run_showcase_case(
                 target_abs_iota_min=0.41,
                 max_mirror_ratio=0.30,
                 max_elongation=10.0,
+                mirror_ramp_stages=mirror_ramp_stages,
                 make_plots=False,
                 timeout_s=qi_timeout_s,
             )

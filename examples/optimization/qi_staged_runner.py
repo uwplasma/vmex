@@ -79,6 +79,7 @@ class QIStagedCaseConfig:
     qi_nalpha: int | None = None
     qi_n_bounce: int | None = None
     reference_lambdas: tuple[float, ...] | None = DEFAULT_REFERENCE_LAMBDAS
+    mirror_ramp_stages: tuple[dict[str, Any], ...] | None = None
     make_plots: bool = True
     timeout_s: float | None = None
 
@@ -216,6 +217,11 @@ def _build_qi_staged_args(config: QIStagedCaseConfig) -> list[str]:
     for flag, value in qi_resolution_args.items():
         if value is not None:
             args.extend([flag, str(int(value))])
+    if config.mirror_ramp_stages is not None:
+        stages_path = Path(config.output_dir).expanduser() / "mirror_ramp_stages.json"
+        stages_path.parent.mkdir(parents=True, exist_ok=True)
+        stages_path.write_text(json.dumps(list(config.mirror_ramp_stages), indent=2, sort_keys=True) + "\n")
+        args.extend(["--mirror-ramp-stages-json", str(stages_path)])
     return args
 
 

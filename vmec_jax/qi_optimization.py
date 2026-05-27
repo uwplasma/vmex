@@ -228,6 +228,7 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
     parser.add_argument("--target-abs-iota-min", type=float)
     parser.add_argument("--max-mirror-ratio", type=float)
     parser.add_argument("--max-elongation", type=float)
+    parser.add_argument("--mirror-ramp-stages-json", type=Path)
     args, _unknown = parser.parse_known_args(argv)
 
     def set_if(name: str, value) -> None:
@@ -287,6 +288,15 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
     set_if("TARGET_ABS_IOTA_MIN", None if args.target_abs_iota_min is None else float(args.target_abs_iota_min))
     set_if("MAX_MIRROR_RATIO", None if args.max_mirror_ratio is None else float(args.max_mirror_ratio))
     set_if("MAX_ELONGATION", None if args.max_elongation is None else float(args.max_elongation))
+    if args.mirror_ramp_stages_json is not None:
+        stages_path = args.mirror_ramp_stages_json.expanduser()
+        try:
+            stages = json.loads(stages_path.read_text())
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid --mirror-ramp-stages-json file: {stages_path}") from exc
+        if not isinstance(stages, list) or not all(isinstance(stage, dict) for stage in stages):
+            raise ValueError("--mirror-ramp-stages-json must contain a JSON list of stage dictionaries.")
+        namespace["MIRROR_RAMP_STAGES"] = tuple(stages)
     namespace["STAGE_MODES"] = qi_stage_modes(
         max_mode=int(namespace["MAX_MODE"]),
         use_mode_continuation=bool(namespace["USE_MODE_CONTINUATION"]),
@@ -1186,11 +1196,13 @@ def promotion_score(record):
 
     seed_penalty = 0.0 if bool(record.get("qi_seed_gate_passed")) else 100.0
     engineering_penalty = 0.0 if bool(record.get("qi_engineering_gate_passed")) else 10.0
+    aspect_relative_error = _finite_or_none(record.get("aspect_relative_error"))
     return (
         seed_penalty
         + engineering_penalty
         + _finite_or_inf(record.get("qi_rank_score"))
         + 0.25 * _finite_or_inf(record.get("qi_constraint_score"))
+        + 25.0 * (0.0 if aspect_relative_error is None else aspect_relative_error)
     )
 
 
@@ -1199,12 +1211,14 @@ def engineering_promotion_score(record):
 
     seed_penalty = 0.0 if bool(record.get("qi_seed_gate_passed")) else 1000.0
     engineering_penalty = 0.0 if bool(record.get("qi_engineering_gate_passed")) else 100.0
+    aspect_relative_error = _finite_or_none(record.get("aspect_relative_error"))
     return (
         seed_penalty
         + engineering_penalty
         + _finite_or_inf(record.get("qi_rank_score"))
         + 0.25 * _finite_or_inf(record.get("qi_constraint_score"))
         + 2.0 * _finite_or_inf(record.get("qi_mirror_ratio_max"))
+        + 25.0 * (0.0 if aspect_relative_error is None else aspect_relative_error)
     )
 
 

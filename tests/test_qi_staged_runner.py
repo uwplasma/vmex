@@ -52,6 +52,7 @@ def test_qi_staged_runner_builds_external_input_cli_and_environment(tmp_path: Pa
         qi_nphi=61,
         qi_nalpha=13,
         qi_n_bounce=17,
+        mirror_ramp_stages=({"name": "cleanup", "max_nfev": 5, "mirror_weight": 20.0},),
         make_plots=False,
     )
 
@@ -85,6 +86,10 @@ def test_qi_staged_runner_builds_external_input_cli_and_environment(tmp_path: Pa
     assert "--solver-device" in args and "gpu" in args
     assert "--reference-input" in args
     assert str(ROOT / "examples" / "data" / "input.nfp2_QI") in args
+    assert "--mirror-ramp-stages-json" in args
+    stages_path = Path(args[args.index("--mirror-ramp-stages-json") + 1])
+    assert stages_path == tmp_path / "out" / "mirror_ramp_stages.json"
+    assert '"name": "cleanup"' in stages_path.read_text()
     lambdas = tuple(float(value) for value in args[args.index("--reference-lambdas") + 1].split(","))
     assert lambdas[:4] == pytest.approx((0.0, 0.1, 0.25, 0.5))
     assert lambdas[-1] == pytest.approx(1.005)
