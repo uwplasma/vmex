@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+import vmec_jax.energy as energy_mod
 import vmec_jax.solve as solve
 from vmec_jax.solve_residual_iter_runtime_helpers import _build_residual_iter_timing_report
 
@@ -117,4 +118,44 @@ def test_accelerated_scan_timing_is_opt_in_and_path_labeled(
         + timing["scan_runner_cache_miss_count"]
         + timing["scan_runner_cache_bypass_count"]
     ) >= 1
+    assert np.isfinite(result.w_history[-1])
+
+
+def test_residual_iter_attempts_host_default_flux_profile_setup(
+    load_case_qh_warm_start,
+    monkeypatch,
+) -> None:
+    _cfg, indata, static, _boundary, state0 = load_case_qh_warm_start
+    original = energy_mod.flux_profiles_from_indata_host_default
+    calls: list[bool] = []
+
+    def wrapped(indata_arg, s_arg, *, signgs):
+        out = original(indata_arg, s_arg, signgs=signgs)
+        calls.append(out is not None)
+        return out
+
+    monkeypatch.setattr(energy_mod, "flux_profiles_from_indata_host_default", wrapped)
+
+    result = solve.solve_fixed_boundary_residual_iter(
+        state0,
+        static,
+        indata=indata,
+        signgs=1,
+        max_iter=1,
+        step_size=float(indata.get_float("DELT", 1.0)),
+        vmec2000_control=False,
+        strict_update=False,
+        backtracking=False,
+        auto_flip_force=False,
+        use_restart_triggers=False,
+        use_direct_fallback=False,
+        precond_radial_alpha=0.0,
+        precond_lambda_alpha=0.0,
+        jit_forces=False,
+        verbose=False,
+        verbose_vmec2000_table=False,
+    )
+
+    assert calls
+    assert any(calls)
     assert np.isfinite(result.w_history[-1])
