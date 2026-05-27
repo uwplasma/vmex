@@ -10,6 +10,10 @@ import pytest
 from vmec_jax import cli
 from vmec_jax.booz import (
     BoozConfig,
+    _as_first,
+    _case_from_vmec_or_wout,
+    _surface_indices_from_values,
+    _truthy,
     parse_booz_surfaces,
     read_booz_config,
     resolve_boozmn_path,
@@ -43,6 +47,24 @@ def test_booz_config_parser_reads_separate_namelist(tmp_path: Path) -> None:
     plain = tmp_path / "input.plain"
     plain.write_text("&INDATA\n/\n")
     assert read_booz_config(plain).enabled is False
+
+
+def test_booz_private_parsers_cover_scalar_truthiness_and_errors(tmp_path: Path) -> None:
+    assert _truthy(True) is True
+    assert _truthy(0) is False
+    assert _truthy(2.0) is True
+    assert _truthy("off", default=True) is False
+    assert _truthy("ON") is True
+    assert _truthy("unknown", default=True) is True
+    assert _as_first([], default="fallback") == "fallback"
+    assert _as_first(["first", "second"]) == "first"
+    assert _case_from_vmec_or_wout(Path("input_case")) == "case"
+    assert _case_from_vmec_or_wout(Path("custom.ext")) == "custom"
+
+    unterminated = tmp_path / "input.bad"
+    unterminated.write_text("&BOOZ_XFORM_JAX\n LBOOZ = T\n")
+    with pytest.raises(ValueError, match="No terminating"):
+        read_booz_config(unterminated)
 
 
 def test_tracked_example_inputs_carry_disabled_boozer_defaults() -> None:
@@ -120,6 +142,22 @@ def test_run_booz_xform_writes_boozmn_with_requested_resolution_and_surfaces(mon
     assert calls["write"] == out
 
 
+def test_booz_surface_indices_accept_integer_indices_and_validate_bounds(tmp_path: Path) -> None:
+    bx = SimpleNamespace(ns_in=4, s_in=np.asarray([0.1, 0.3]))
+
+    assert _surface_indices_from_values(bx, None) is None
+    assert _surface_indices_from_values(bx, (0.0, 0.5, 1.0)) == [0, 1, 3]
+    assert _surface_indices_from_values(SimpleNamespace(ns_in=4, s_in=np.linspace(0.0, 1.0, 4)), (2, 3)) == [2, 3]
+
+    with pytest.raises(ValueError, match="before reading"):
+        _surface_indices_from_values(SimpleNamespace(ns_in=0), (0.5,))
+    with pytest.raises(ValueError, match="outside"):
+        _surface_indices_from_values(SimpleNamespace(ns_in=2, s_in=np.linspace(0.0, 1.0, 2)), (3,))
+
+    with pytest.raises(FileNotFoundError, match="WOUT file not found"):
+        run_booz_xform(tmp_path / "missing_wout.nc")
+
+
 def test_cli_booz_and_plot_dispatch_for_wout_and_boozmn(monkeypatch, tmp_path: Path) -> None:
     wout = tmp_path / "wout_case.nc"
     wout.write_text("wout")
@@ -181,6 +219,67 @@ def test_cli_booz_config_for_path_merges_input_and_cli_options(tmp_path: Path) -
     assert cli._booz_config_for_path(input_path, args) == BoozConfig(
         enabled=True, mbooz=20, nbooz=13, surfaces=None, jit=True
     )
+
+
+def test_cli_run_booz_for_wout_uses_config_output_and_optional_plot(monkeypatch, tmp_path: Path) -> None:
+    input_path = tmp_path / "input.case"
+    input_path.write_text(
+        """
+&INDATA
+/
+&BOOZ_XFORM_JAX
+  LBOOZ = T
+  MBOOZ = 10
+  NBOOZ = 11
+  BOOZ_SURFACES = 0.25, 1.0
+  JIT_BOOZ = T
+/
+""".strip()
+    )
+    wout = tmp_path / "wout_case.nc"
+    wout.write_text("wout")
+    boozmn = tmp_path / "chosen_boozmn.nc"
+    calls: dict[str, object] = {}
+    parser = cli.build_parser()
+    args = parser.parse_args(
+        [
+            str(wout),
+            "--booz",
+            "--booz-output",
+            str(boozmn),
+            "--quiet",
+        ]
+    )
+
+    def fake_run_booz_xform(path, **kwargs):
+        calls["run"] = (Path(path), kwargs)
+        Path(kwargs["output_path"]).write_text("booz")
+        return Path(kwargs["output_path"])
+
+    monkeypatch.setattr("vmec_jax.booz.run_booz_xform", fake_run_booz_xform)
+    monkeypatch.setattr(cli, "_plot_boozmn_file", lambda path, outdir: calls.setdefault("plot", (path, outdir)))
+
+    out = cli._run_booz_for_wout(
+        wout,
+        source_input_path=input_path,
+        args=args,
+        plot=True,
+        outdir=tmp_path / "plots",
+    )
+
+    assert out == boozmn.resolve()
+    assert calls["run"] == (
+        wout,
+        {
+            "output_path": boozmn.resolve(),
+            "mbooz": 10,
+            "nbooz": 11,
+            "surfaces": (0.25, 1.0),
+            "jit": True,
+            "verbose": False,
+        },
+    )
+    assert calls["plot"] == (boozmn.resolve(), tmp_path / "plots")
 
 
 def test_cli_input_booz_plot_runs_after_wout(monkeypatch, tmp_path: Path) -> None:

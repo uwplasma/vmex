@@ -154,6 +154,51 @@ def test_cli_test_mode_copies_packaged_input_solves_and_plots(monkeypatch, tmp_p
     assert "Equivalent manual plotting command" in output
 
 
+def test_cli_test_mode_forwards_optional_solver_flags(monkeypatch, tmp_path: Path) -> None:
+    outdir = tmp_path / "demo"
+    indata = InData(scalars={"NITER": 1}, indexed={})
+    calls = {}
+
+    monkeypatch.setattr(cli, "read_indata", lambda _path: indata)
+    monkeypatch.setattr(cli, "_default_non_autodiff_solver_policy_for_backend", lambda _indata, backend: ("default", False))
+    monkeypatch.setattr(cli, "_default_use_scan_for_backend", lambda _indata, _backend, _mode: True)
+
+    def fake_run_fixed_boundary(path: str, **kwargs):
+        calls["path"] = Path(path)
+        calls["kwargs"] = kwargs
+        return SimpleNamespace(state=SimpleNamespace(Rcos=0.0))
+
+    monkeypatch.setattr(cli, "run_fixed_boundary", fake_run_fixed_boundary)
+    monkeypatch.setattr(cli, "write_wout_from_fixed_boundary_run", lambda path, run, *, include_fsq: path.write_text("wout"))
+    monkeypatch.setitem(sys.modules, "vmec_jax.plotting", SimpleNamespace(plot_wout=lambda path, *, outdir: None))
+
+    assert (
+        cli.main(
+            [
+                "--test",
+                "--outdir",
+                str(outdir),
+                "--solver-device",
+                "cpu",
+                "--solver-mode",
+                "default",
+                "--max-iter",
+                "3",
+                "--jit-forces",
+                "true",
+                "--quiet",
+            ]
+        )
+        == 0
+    )
+
+    assert calls["kwargs"]["solver_device"] == "cpu"
+    assert calls["kwargs"]["solver_mode"] == "default"
+    assert calls["kwargs"]["max_iter"] == 3
+    assert calls["kwargs"]["jit_forces"] is True
+    assert "use_scan" not in calls["kwargs"]
+
+
 def test_cli_errors_for_missing_plot_or_input(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as no_input:
         cli.main([])
@@ -166,6 +211,10 @@ def test_cli_errors_for_missing_plot_or_input(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as test_with_input:
         cli.main(["--test", str(tmp_path / "input.case")])
     assert test_with_input.value.code == 2
+
+    with pytest.raises(SystemExit) as test_with_plot:
+        cli.main(["--test", "--plot", str(tmp_path / "wout_case.nc")])
+    assert test_with_plot.value.code == 2
 
 
 def test_cli_errors_for_invalid_jit_and_conflicting_solver_mode_flags(tmp_path: Path) -> None:
