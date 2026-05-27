@@ -131,6 +131,44 @@ def test_gpu_platform_name_prefers_concrete_jax_backend() -> None:
     assert matrix._gpu_platform_name({"platforms": ["gpu"]}) == "gpu"
 
 
+def test_gpu_available_probes_concrete_accelerator_platforms(monkeypatch) -> None:
+    calls: list[str | None] = []
+
+    class FakeDevice:
+        def __init__(self, platform: str, name: str):
+            self.platform = platform
+            self._name = name
+
+        def __str__(self) -> str:
+            return self._name
+
+    fake_jax = SimpleNamespace(
+        default_backend=lambda: "cpu",
+        devices=lambda platform=None: _fake_devices(platform, calls),
+    )
+
+    def _fake_devices(platform, calls):
+        calls.append(platform)
+        if platform is None:
+            return [FakeDevice("cpu", "TFRT_CPU_0")]
+        if platform == "cuda":
+            return [FakeDevice("cuda", "cuda:0")]
+        raise RuntimeError(f"{platform} unavailable")
+
+    monkeypatch.setattr(matrix, "jax", fake_jax, raising=False)
+    monkeypatch.setattr(matrix, "has_jax", lambda: True, raising=False)
+    monkeypatch.setitem(__import__("sys").modules, "vmec_jax._compat", SimpleNamespace(has_jax=lambda: True, jax=fake_jax))
+
+    available, info = matrix._gpu_available()
+
+    assert available is True
+    assert calls[:2] == [None, "cuda"]
+    assert info["default_backend"] == "cpu"
+    assert "TFRT_CPU_0" in info["devices"]
+    assert "cuda:0" in info["devices"]
+    assert info["platforms"] == ["cpu", "cuda"]
+
+
 def test_child_specs_can_add_badjac_probe0_direct_solve_rows(tmp_path) -> None:
     specs = matrix._child_specs(quick=True, outdir=tmp_path, backend="gpu", include_badjac_probe0=True)
 
