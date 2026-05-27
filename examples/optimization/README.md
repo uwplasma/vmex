@@ -185,7 +185,7 @@ remain available for custom inspection.
 - `QA_optimization.py`: recommended quasi-axisymmetric fixed-boundary optimization.
 - `QH_optimization.py`: recommended quasi-helical fixed-boundary optimization.
 - `QP_optimization.py`: quasi-poloidal fixed-boundary optimization from the NFP=2 QI seed.
-- `QI_optimization.py`: recommended quasi-isodynamic optimization with Boozer-space QI metrics, mirror-ratio and elongation penalties, repeated same-mode continuation, and ESS. Edit `INPUT_FILE`, `OUTPUT_DIR`, seed helpers, objective weights, and optimizer controls at the top of the script, then run it directly.
+- `QI_optimization.py`: recommended quasi-isodynamic optimization with Boozer-space QI metrics, mirror-ratio and elongation penalties, lower-mode continuation by default, and ESS. Edit `INPUT_FILE`, `OUTPUT_DIR`, seed helpers, objective weights, and optimizer controls at the top of the script, then run it directly. Set `STAGE_MODE_POLICY = "repeat"` only when the input is already in a good QI basin and same-mode cleanup is desired.
 - `qa_optimization_finite_beta.py`, `qh_optimization_finite_beta.py`, and `qi_optimization_finite_beta.py`:
   finite-beta stage-1 examples with pressure/current-profile terms. These intentionally use
   `FixedBoundaryExactOptimizer` directly because each continuation stage builds custom

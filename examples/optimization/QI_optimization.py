@@ -58,17 +58,20 @@ SOLVER_DEVICE = None  # None uses JAX default; set "cpu" or "gpu" to force one b
 USE_ESS = True  # Set False for an unscaled trust-region solve.
 ALPHA = 1.2  # ESS high-mode scaling strength.
 USE_MODE_CONTINUATION = True
-CONTINUATION_NFEV = 0
+CONTINUATION_NFEV = 10
 MAX_NFEV = 60
-STAGE_REPEATS = 1
-STAGE_MODES = vj.repeated_stage_modes(
+STAGE_MODE_POLICY = "lower"  # "lower" stages 1..MAX_MODE; "repeat" repeats only MAX_MODE.
+STAGE_REPEATS = 3  # Used only for STAGE_MODE_POLICY="repeat".
+STAGE_MODES = vj.qi_stage_modes(
     max_mode=MAX_MODE,
     use_mode_continuation=USE_MODE_CONTINUATION,
     continuation_nfev=CONTINUATION_NFEV,
     repeats=STAGE_REPEATS,
+    policy=STAGE_MODE_POLICY,
 )
 # Common alternatives:
 # STAGE_MODES = [1, 1, 2, 2, 3, 3]
+# STAGE_MODE_POLICY = "repeat"
 # METHOD = "lbfgs_adjoint"
 # USE_REFERENCE_FAMILY_SEED = True
 # SOLVER_DEVICE = "gpu"

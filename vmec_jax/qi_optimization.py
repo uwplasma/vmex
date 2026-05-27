@@ -63,6 +63,7 @@ __all__ = [
     "promotion_score",
     "qi_diagnostics_for_result",
     "qi_diagnostics_for_run",
+    "qi_stage_modes",
     "run_basin_prefilter",
     "run_boundary_reference_preconditioner",
     "run_qi_stage_policy",
@@ -153,6 +154,39 @@ def _float_tuple(value: str) -> tuple[float, ...]:
     return tuple(float(part.strip()) for part in text.split(",") if part.strip())
 
 
+def qi_stage_modes(
+    *,
+    max_mode: int,
+    use_mode_continuation: bool,
+    continuation_nfev: int,
+    repeats: int = 3,
+    policy: str = "lower",
+) -> list[int]:
+    """Return the stage mode sequence for the QI example workflow.
+
+    ``policy="lower"`` uses the same lower-mode continuation semantics as the
+    QA/QH/QP examples. ``policy="repeat"`` preserves the older QI behavior of
+    repeating the final mode, which can still be useful when the input is
+    already in the right basin.
+    """
+
+    policy_key = str(policy).strip().lower().replace("_", "-")
+    if policy_key in {"lower", "lower-mode", "mode", "qs"}:
+        return vj.qs_stage_modes(
+            max_mode=max_mode,
+            use_mode_continuation=use_mode_continuation,
+            continuation_nfev=continuation_nfev,
+        )
+    if policy_key in {"repeat", "same", "same-mode", "same-mode-repeat"}:
+        return vj.repeated_stage_modes(
+            max_mode=max_mode,
+            use_mode_continuation=use_mode_continuation,
+            continuation_nfev=continuation_nfev,
+            repeats=repeats,
+        )
+    raise ValueError("QI stage mode policy must be 'lower' or 'repeat'.")
+
+
 def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = None) -> argparse.Namespace:
     """Apply optional command-line overrides to a QI example namespace.
 
@@ -182,6 +216,7 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
     parser.add_argument("--reference-input", type=Path)
     parser.add_argument("--reference-lambdas", type=_float_tuple)
     parser.add_argument("--stage-repeats", type=int)
+    parser.add_argument("--stage-mode-policy", choices=("lower", "repeat"))
     parser.add_argument("--make-plots", action=argparse.BooleanOptionalAction)
     parser.add_argument("--jit-booz", action=argparse.BooleanOptionalAction)
     parser.add_argument("--target-aspect", type=float)
@@ -224,17 +259,19 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
     set_if("USE_REFERENCE_FAMILY_SEED", args.use_reference_family_seed)
     set_if("REFERENCE_LAMBDAS", args.reference_lambdas)
     set_if("STAGE_REPEATS", None if args.stage_repeats is None else int(args.stage_repeats))
+    set_if("STAGE_MODE_POLICY", args.stage_mode_policy)
     set_if("MAKE_PLOTS", args.make_plots)
     set_if("JIT_BOOZ", args.jit_booz)
     set_if("TARGET_ASPECT", None if args.target_aspect is None else float(args.target_aspect))
     set_if("TARGET_ABS_IOTA_MIN", None if args.target_abs_iota_min is None else float(args.target_abs_iota_min))
     set_if("MAX_MIRROR_RATIO", None if args.max_mirror_ratio is None else float(args.max_mirror_ratio))
     set_if("MAX_ELONGATION", None if args.max_elongation is None else float(args.max_elongation))
-    namespace["STAGE_MODES"] = vj.repeated_stage_modes(
+    namespace["STAGE_MODES"] = qi_stage_modes(
         max_mode=int(namespace["MAX_MODE"]),
         use_mode_continuation=bool(namespace["USE_MODE_CONTINUATION"]),
         continuation_nfev=int(namespace["CONTINUATION_NFEV"]),
         repeats=int(namespace["STAGE_REPEATS"]),
+        policy=str(namespace.get("STAGE_MODE_POLICY", "lower")),
     )
     return args
 
@@ -1082,11 +1119,12 @@ def stage_modes_for(stage, *, ctx: QIOptimizationContext | None = None):
         return [vj.normalize_boundary_mode_limits(mode) for mode in stage["stage_mode_limits"]]
     if "stage_modes" in stage:
         return [int(mode) for mode in stage["stage_modes"]]
-    return vj.repeated_stage_modes(
+    return qi_stage_modes(
         max_mode=_ctx(ctx, "max_mode"),
         use_mode_continuation=_ctx(ctx, "use_mode_continuation"),
         continuation_nfev=_ctx(ctx, "continuation_nfev"),
         repeats=int(stage.get("stage_repeats", _ctx(ctx, "stage_repeats"))),
+        policy=str(stage.get("stage_mode_policy", "lower")),
     )
 
 
