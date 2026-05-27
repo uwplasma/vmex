@@ -211,20 +211,26 @@ Results obtained:
     complete-solve finite-response check and the accepted-boundary AD-vs-FD
     replay check for one current and one Fourier geometry coefficient:
     `2 passed in 15.27 s`.
-26. Recalibrated the LP-QA pressure labels for actual WOUT beta.  The earlier
-    nominal labels `0.05`, `0.1`, `0.5`, and `1.0` overdrive the coarse
-    direct-coil solves and can produce nonphysical actual beta.  Nominal labels
-    `0.001` and `0.002` give actual beta about `0.395%` and `0.806%` with
-    residual sums `O(1e-9)-O(1e-8)`.
-27. In the actual-beta coarse probe (`NS=8,16`, `MPOL=4`, `NTOR=4`),
-    bootstrap current preserves convergence at nominal `0.001` and `0.002`
-    while reducing Redl mismatch from about `0.418 -> 0.281` and
-    `0.415 -> 0.279`.  A stronger `NS=8,16,31` probe through nominal `0.0025`
-    reached actual beta `1.018%` with residual sum `1.87e-10` and Redl
-    mismatch `0.409 -> 0.274`; the same no-bootstrap row converged with
-    residual sum `1.89e-10`.  This is evidence for safe bootstrap plumbing and
-    Redl-mismatch reduction at about `1%` actual beta, not yet a claim that the
-    bootstrap preconditioner accelerates VMEC convergence.
+26. Recalibrated the LP-QA pressure labels for actual WOUT beta.  The documented
+    nominal labels `0.5`, `1.0`, and `1.25` with the standard pressure profile
+    overdrive the coarse direct-coil `NS=16,31` run: no-bootstrap residual sums
+    were `6.48e-1`, `1.77e0`, and `8.08e-1`; bootstrap reduced Redl mismatch
+    from about `0.408 -> 0.20-0.26` but worsened the final VMEC residuals to
+    `1.04e0`, `4.49e0`, and `3.62e0`.  The diagnostic outputs are
+    `/tmp/vmec_jax_freeb_lpqa_gate_no_bootstrap_ns31/summary.json` and
+    `/tmp/vmec_jax_freeb_lpqa_gate_bootstrap_ns31/summary.json`.
+27. The actual-beta-calibrated coarse promotion probe uses nominal labels
+    `0.001` and `0.0025` with `NS=8,16,31`, `MPOL=5`, and `NTOR=5`.  The
+    no-bootstrap run wrote
+    `/tmp/vmec_jax_freeb_lpqa_gate_no_bootstrap_actualbeta_ns31/summary.json`
+    and converged at actual beta proxies `0.394%` and `1.012%` with residual
+    sums `1.90e-8` and `1.53e-8`.  The bootstrap run wrote
+    `/tmp/vmec_jax_freeb_lpqa_gate_bootstrap_actualbeta_ns31/summary.json`,
+    preserved convergence with residual sums `1.86e-8` and `1.42e-8`, and
+    reduced Redl mismatch from `0.437 -> 0.291` and `0.411 -> 0.276`.  This is
+    evidence for safe bootstrap plumbing and Redl-mismatch reduction at about
+    `1%` actual beta, not yet a claim that the bootstrap preconditioner
+    accelerates VMEC convergence.
 
 Best next steps:
 
