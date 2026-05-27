@@ -290,11 +290,11 @@ the checked-in snapshot.  Do not cite a full ``max_mode>=4`` CPU/GPU matrix unti
 the corresponding CSV/JSON rows and publication figures are present under
 ``docs/_static/figures``.
 
-The historical compact README renderer filters QI rows against the same
+The historical compact figure renderer filters QI rows against the same
 aspect-5 target as QA/QH/QP.  The standalone ``QI_optimization.py``
 case-coverage lanes may still use case-specific aspect targets when mirror
 ratio or far-seed basin capture is the experiment; those rows are documented
-separately and are not mixed into the README best-row table.
+separately and are not mixed into the README figure snapshot.
 
 The constrained QI study has one extra axis: whether the QI solve starts from a
 same-mode QP preseed.  The production CLI default is ``--qi-qp-preseed off``;
@@ -413,7 +413,7 @@ Historical Compact Best Rows
 The four compact ``readme_best_optimization_*.png`` panels below are retained
 as historical aspect-6/mode-3 comparison artifacts.  The active README no
 longer uses them as the primary optimization evidence; it uses the refreshed
-common-minimal QA/QH/QP objective panel and the reviewed QI NFP case panel.
+common-minimal QA/QH/QP state panel and the reviewed QI NFP case panel.
 When replacing these historical panels, select rows from the reviewed matrix
 and filter against the common aspect-5 target.  The selected QI row should be
 chosen with the legacy branch diagnostic, mirror-ratio, elongation, iota, and
@@ -613,7 +613,7 @@ Minimal-Seed Showcase Snapshot
 ------------------------------
 
 The minimal-seed showcase is a bounded stress/reproduction lane for the common
-three-coefficient input family, not a README best-row table.  The checked-in
+three-coefficient input family, not a README table.  The checked-in
 assets are:
 
 - :download:`minimal_seed_showcase_summary.csv <_static/figures/minimal_seed_showcase_summary.csv>`
@@ -723,8 +723,8 @@ reproduction.  Keep ``--rerun`` for release reproduction.  Without it, successfu
 ``showcase_case.json`` rows may be reused from an older local run; the renderer
 skips known-stale rows by default and ``--include-stale`` should be used only
 for debugging.  The renderer writes both a compact objective-history panel and,
-when the required WOUT artifacts are available, a state panel with actual
-first optimized LCFS, final LCFS, initial Boozer ``|B|`` line contours, final
+when the required WOUT artifacts are available, a state panel with the raw
+user-facing seed LCFS, final LCFS, initial Boozer ``|B|`` line contours, final
 Boozer ``|B|`` line contours, and the full best-so-far objective history.
 Rows without non-stale initial/final WOUT provenance are omitted from that
 state panel instead of being silently replaced by stale artifacts.

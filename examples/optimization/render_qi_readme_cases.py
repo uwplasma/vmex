@@ -575,9 +575,6 @@ def _plot_lcfs(ax, wout_path: Path, title: str) -> None:
 def _plot_history(ax, case: QICase) -> None:
     colors = ("#1f4e79", "#d95f02", "#2ca25f", "#756bb1", "#636363")
     segments = _history_segments(case)
-    if _history_is_effectively_flat(segments) and case.preconditioner_summary is not None:
-        _plot_reference_transition(ax, case)
-        return
     offset_iter = 0
     for idx, segment in enumerate(segments):
         objective = np.asarray(segment["objective"], dtype=float)
@@ -781,7 +778,7 @@ def _render(records: list[dict[str, str | float]]) -> None:
         width_ratios=(1.05, 1.05, 1.0, 1.08, 1.08),
     )
     fig.suptitle(
-        "QI_optimization coverage for NFP=1, 2, 3, plus an NFP=4 reference-proposal case",
+        "QI_optimization coverage for NFP=1, 2, 3, and 4",
         fontsize=13,
         x=0.02,
         y=0.992,
