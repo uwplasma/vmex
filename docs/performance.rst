@@ -3050,11 +3050,12 @@ path from the broader example matrix:
     --quick --include-gpu \
     --out /tmp/freeb_matrix_office_gpu_followup/summary.json
 
-On the 2026-05-27 ``office`` CUDA run, the best bounded direct-solve row was
-``direct_solve_jit_forces``.  The warm solve was still CPU-favorable
-(``0.0809 s`` CPU versus ``0.2587 s`` CUDA, ``3.20x`` GPU/CPU), but the detailed
-timers show that the remaining GPU cost is no longer the direct Biot-Savart
-field sample or the dense NESTOR solve:
+On the 2026-05-28 ``office`` CPU/CUDA rerun, the matrix used concrete-platform
+probing so CUDA rows were recorded even under ``JAX_PLATFORMS=cpu,cuda``.  The
+best bounded direct-solve row was ``direct_solve_jit_forces``.  The warm solve
+was still CPU-favorable (``0.0525 s`` CPU versus ``0.2346 s`` CUDA,
+``4.46x`` GPU/CPU), but the detailed timers show that the remaining GPU cost is
+no longer the direct Biot-Savart field sample or the dense NESTOR solve:
 
 .. list-table::
    :header-rows: 1
@@ -3064,25 +3065,35 @@ field sample or the dense NESTOR solve:
      - CUDA
      - CUDA/CPU
    * - setup
-     - ``22.63 ms``
-     - ``81.40 ms``
-     - ``3.60x``
+     - ``9.31 ms``
+     - ``53.81 ms``
+     - ``5.78x``
    * - residual metrics
-     - ``0.97 ms``
-     - ``17.48 ms``
-     - ``18.04x``
+     - ``0.76 ms``
+     - ``29.26 ms``
+     - ``38.32x``
+   * - accepted-control fsq1
+     - ``0.15 ms``
+     - ``14.17 ms``
+     - ``97.06x``
    * - preconditioner apply
-     - ``0.65 ms``
-     - ``8.94 ms``
-     - ``13.81x``
+     - ``1.09 ms``
+     - ``12.65 ms``
+     - ``11.55x``
+   * - force evaluation
+     - ``9.21 ms``
+     - ``8.55 ms``
+     - ``0.93x``
    * - finalize
-     - ``10.51 ms``
-     - ``28.32 ms``
-     - ``2.70x``
+     - ``10.67 ms``
+     - ``11.05 ms``
+     - ``1.04x``
 
 The next GPU optimization target is therefore accepted-control and
-preconditioner/update dispatch amortization, not Biot-Savart sampling or the
-final dense vacuum solve.
+preconditioner/update dispatch amortization plus reusable setup/precompute
+state, not Biot-Savart sampling or the final dense vacuum solve.  Scalar-defer
+is deliberately not the default yet because the residual scalars still drive
+VMEC control flow, history, and free-boundary acceptance logic.
 
 Historical bundled example runtime/memory matrix (March 2026)
 -------------------------------------------------------------

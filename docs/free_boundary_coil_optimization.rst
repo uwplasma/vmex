@@ -728,11 +728,14 @@ than falling back silently to CPU. Use ``--no-quick`` only for a larger local
 benchmark budget.
 
 The benchmark CSV/JSON is written to the requested results directory. The
-current office benchmark shows tiny direct free-boundary solves are CPU-favorable,
-while provider and gradient microbenchmarks have small enough kernel payloads
-that CUDA launch overhead dominates. GPU production work should therefore focus
-on larger batched/tangent workloads and accepted-point replay amortization, not
-on claiming a speedup from these tiny validation cases.
+runner probes concrete accelerator platforms, so mixed launches such as
+``JAX_PLATFORMS=cpu,cuda`` still record CUDA rows even when CPU is the default
+backend.  The current office benchmark shows tiny direct free-boundary solves
+are CPU-favorable, while provider and gradient microbenchmarks have small
+enough kernel payloads that CUDA launch overhead dominates. GPU production work
+should therefore focus on larger batched/tangent workloads and accepted-point
+replay amortization, not on claiming a speedup from these tiny validation
+cases.
 
 The matrix keeps two direct-solve rows: the non-JIT diagnostic path and the
 default fast path with ``--jit-forces``. On the 2026-05-25 office CUDA probe,
@@ -750,6 +753,20 @@ keeps the first-two-iteration VMEC safety probe; use
 knob while checking VMEC2000 parity. On the tiny active direct-coil CUDA probe,
 that opt-in path reduced warm time from ``0.269 s`` to ``0.184 s`` and reduced
 the bad-Jacobian control bucket from ``77 ms`` to below ``1 ms``.
+
+The 2026-05-28 office CPU/CUDA rerun with concrete-platform GPU probing showed
+the same conclusion with finer buckets.  The best ``--jit-forces`` tiny
+direct-solve row was ``0.0525 s`` warm on CPU and ``0.2346 s`` warm on CUDA.
+The force kernel itself was already competitive on CUDA
+(``0.00855 s`` CUDA versus ``0.00921 s`` CPU), and final NESTOR sample/solve
+time was also comparable.  The remaining CUDA overhead was setup
+(``0.0538 s`` versus ``0.00931 s``), residual scalar materialization
+(``0.0293 s`` versus ``0.000764 s``), accepted-control ``fsq1``
+(``0.0142 s`` versus ``0.000146 s``), and preconditioner dispatch
+(``0.0126 s`` versus ``0.00109 s``).  The next GPU patch should therefore cache
+or stage static setup and reduce scalar/control dispatch; scalar-defer is not
+yet the right default because those residual scalars still drive VMEC control
+flow and output history.
 
 The direct-solve child JSON includes active and trial NESTOR timing summaries:
 sample time, scalar-potential solve time, reuse counts, failed trial counts,

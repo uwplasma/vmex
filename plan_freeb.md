@@ -14,11 +14,13 @@ Date opened: 2026-05-24
 
 Last updated: 2026-05-28 after stage-level beta-scan checkpointing,
 interrupted-stage status marking, accepted-boundary direct-coil replay
-AD-vs-FD validation, latest CPU/GPU direct-coil benchmark triage, and the
-latest `origin/main` merge. PR #18 is open and mergeable at commit
-`f40e789d`; CI has been restarted by the latest main-merge commit. The
-optional ESSOS/direct-coil bootstrap gates are local/manual because they require
-ESSOS assets and launch real free-boundary solves. Do not merge PR #18 yet.
+AD-vs-FD validation, latest CPU/GPU direct-coil benchmark triage, concrete GPU
+platform probing in the benchmark matrix, and the latest `origin/main` merge.
+PR #18 is open and conflict-free at commit `e8b6e265`; CI has been restarted
+by the latest benchmark commit and is not considered merge-ready until all
+required checks are green. The optional ESSOS/direct-coil bootstrap gates are
+local/manual because they require ESSOS assets and launch real free-boundary
+solves. Do not merge PR #18 yet.
 
 Steps taken:
 
@@ -84,6 +86,15 @@ Steps taken:
 60. Verified the strict LP-QA checkpoint run now preserves completed and active radial stages before root summary completion; the observed `NS=16` zero-beta stage is a checkpoint/resume validation artifact, not a promoted physics result.
 61. Marked interrupted beta-scan active stages explicitly: controlled SIGTERM/SIGINT now records `status="interrupted"`, generic exceptions record `status="failed"`, and resumable accepted-stage records are preserved.
 62. Validated the interruption path on `office` with GNU `timeout -s TERM`: the checkpoint retained the active stage input/WOUT paths, stage settings, `status="interrupted"`, `reason="termination_signal"`, and elapsed wall time.
+63. Fixed the direct-coil benchmark matrix GPU detector so mixed-platform
+    launches such as `JAX_PLATFORMS=cpu,cuda` probe concrete CUDA/ROCm/GPU
+    device lists instead of relying only on the current default backend.
+64. Re-ran the quick CPU/CUDA direct-coil benchmark matrix on `office` after
+    the detector fix.  The best tiny `--jit-forces` direct solve remains
+    CPU-favorable (`0.0525 s` CPU warm versus `0.2346 s` CUDA warm), but CUDA
+    force assembly is now comparable/slightly faster (`0.00855 s` CUDA versus
+    `0.00921 s` CPU).  The remaining CUDA cost is setup, residual scalar
+    materialization, accepted-control `fsq1`, and preconditioner dispatch.
 
 ### 2026-05-27 Free-boundary beta-scan bootstrap-current preconditioner
 
@@ -202,17 +213,15 @@ Results obtained:
     checks, targeted bootstrap/free-boundary/benchmark tests
     (`34 passed, 1 skipped`), strict Sphinx `-W`, and the optional active
     ESSOS/direct-coil bootstrap beta-scan smoke (`1 passed` in 12.38 s).
-23. Re-ran the direct-coil benchmark matrix locally and on `office` at the
-    current PR head.  The local CPU quick matrix wrote
+23. Re-ran the direct-coil benchmark matrix locally and on `office` during the
+    2026-05-27 performance pass.  The local CPU quick matrix wrote
     `/tmp/freeb_matrix_local_cpu_followup/summary.json`; the office CPU/CUDA
     matrix wrote `/tmp/freeb_matrix_office_gpu_followup/summary.json`.
-24. The best office CUDA row remains `direct_solve_jit_forces`: CPU warm
-    `0.0809 s`, CUDA warm `0.2587 s` (`3.20x` GPU/CPU).  CUDA warm setup
-    (`0.0814 s`), residual metrics (`0.0175 s`), preconditioner apply
-    (`0.00894 s`), and finalize (`0.0283 s`) are all larger than CPU
-    (`0.0226 s`, `0.00097 s`, `0.00065 s`, `0.0105 s`).  The remaining GPU
-    bottleneck is accepted-control/preconditioner dispatch and setup/finalize
-    amortization, not Biot-Savart sampling.
+24. That historical office CUDA row was superseded by the 2026-05-28 concrete
+    GPU-probe matrix above.  The conclusion is unchanged: the best tiny
+    direct-solve row is CPU-favorable, CUDA force assembly is no longer the
+    bottleneck, and the remaining GPU target is setup plus
+    accepted-control/preconditioner dispatch.
 25. The direct-coil finite-pressure sensitivity gate passed for both the
     complete-solve finite-response check and the accepted-boundary AD-vs-FD
     replay check for one current and one Fourier geometry coefficient:

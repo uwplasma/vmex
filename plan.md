@@ -1,10 +1,10 @@
 # VMEC-JAX Research-Grade Roadmap
 
-Last updated: 2026-05-27
+Last updated: 2026-05-28
 Primary branch: `main`
 Baseline release: `v0.0.13`
 Latest known green `main` CI: `152360f`
-Current candidate: plan refresh after `152360f`
+Current candidate: main plus free-boundary direct-coil PR #18 refresh
 
 This is the living execution plan for making `vmec_jax` accurate, fast,
 differentiable, documented, and usable by external researchers. Update it when
@@ -388,6 +388,19 @@ release, the QI optimization driver split, and the May 22 helper/refactor
 coverage wave, the v0.0.13 release, the QI workflow checkpointing push, QI
 resolution-override coverage, and the May 27 minimal-seed helicity-perturbation
 update:
+
+Free-boundary branch addendum, 2026-05-28: PR #18
+(`feature/freeb-essos-coil-single-stage`) has merged latest `origin/main`,
+validated interrupted stage-level beta-scan checkpoints, added
+accepted-boundary direct-coil replay AD-vs-FD coverage, and fixed the direct
+coil benchmark matrix GPU detector so mixed-platform launches such as
+`JAX_PLATFORMS=cpu,cuda` still record concrete CUDA rows.  The latest `office`
+quick CPU/CUDA direct-coil matrix shows the tiny `--jit-forces` direct solve is
+still CPU-favorable (`0.0525 s` CPU warm versus `0.2346 s` CUDA warm), but
+CUDA force assembly is already comparable/slightly faster.  Remaining GPU work
+for the free-boundary branch is setup/precompute reuse and scalar/control plus
+preconditioner dispatch amortization, not Biot-Savart sampling or the dense
+NESTOR solve.
 
 - Continuation correctness: 100%. Source fix is implemented and covered by
   synthetic repeated-stage tests, a real boundary-projection stage test, and
