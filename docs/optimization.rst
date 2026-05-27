@@ -575,10 +575,10 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
 .. code-block:: python
 
    INPUT_FILE = DATA_DIR / "input.nfp4_QH_warm_start"
-   MAX_MODE = 3
-   MIN_VMEC_MODE = 6
+   MAX_MODE = 5
+   MIN_VMEC_MODE = MAX_MODE + 2
    SIMPLE_SEED_PERTURBATION = 1.0e-5
-   MAX_NFEV = 30
+   MAX_NFEV = 60
    METHOD = "scipy"            # also: "auto", "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint", "scalar_trust"
    SCIPY_TR_SOLVER = "lsmr"    # also: "exact" for small dense trust-region solves
    SOLVER_DEVICE = None        # set to "cpu" or "gpu" to force one backend
@@ -586,7 +586,7 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
    SAVE_STAGE_WOUTS = False    # set True to write per-stage WOUT files
    HELICITY_M = 1
    HELICITY_N = -1
-   TARGET_ASPECT = 6.0
+   TARGET_ASPECT = 5.0
    TARGET_ABS_IOTA_MIN = 0.41
    SURFACES = np.arange(0.0, 1.01, 0.1)
 
@@ -1091,7 +1091,7 @@ run:
 
 Both scripts optimize QI, aspect ratio, and a differentiable
 ``abs(mean_iota) >= 0.41`` floor.  The public QA/QH/QP/QI examples now target
-aspect ratio 6 so their README panels can be compared directly.  The
+aspect ratio 5 so their README panels can be compared directly.  The
 ``input.QI_stel_seed_3127`` far-seed lane still needs deterministic same-NFP
 reference-family boundary preconditioning before local cleanup.  The
 preconditioner scans interpolation points between the raw
@@ -1116,7 +1116,7 @@ weights, the branch-shuffle profile residual, ``phimin`` well-interval choices,
 and termination tolerances against the nfp=2
 ``examples/data/input.nfp2_QI`` seed and the bundled near-axis
 ``input.QI_stel_seed_3127`` seed.  The historical far-seed QI lane used
-``max_mode = 4`` with ESS, ``target_aspect = 6.0``,
+``max_mode = 4`` with ESS, ``target_aspect = 5.0``,
 ``abs(mean_iota) >= 0.41``, same-NFP reference-family boundary interpolation,
 and a single QI/iota cleanup with a QI ceiling.  The
 shuffle-profile term is intentionally retained because width-only and
@@ -1292,7 +1292,7 @@ the ``qi_stel_seed_3127`` far-seed case was:
      --reference-input examples/data/input.nfp3_QI_fixed_resolution_final \
      --out-root results/diagnostics/qi_seed3127_boundary_interpolation \
      --lambdas 0.99,0.995,1.0,1.005,1.008,1.01,1.012 \
-     --max-mode 4 --max-iter 80 --target-aspect 6.0 \
+     --max-mode 4 --max-iter 80 --target-aspect 5.0 \
      --surfaces 0.1,0.28,0.46,0.64,0.82,1.0 \
      --mboz 18 --nboz 18 --nphi 151 --nalpha 31 --n-bounce 51 \
      --smooth-qi-max 5e-3 --legacy-qi-max 2e-3 \

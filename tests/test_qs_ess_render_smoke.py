@@ -1239,9 +1239,9 @@ def test_readme_renderer_filters_qi_rows_by_qi_target_aspect():
     renderer = _load_readme_renderer_module()
 
     current_qi = {
-        "target_aspect": "6.0",
+        "target_aspect": "5.0",
         "iota_abs_min": str(renderer.TARGET_ABS_IOTA_MIN),
-        "aspect_final": "6.0",
+        "aspect_final": "5.0",
     }
     legacy_qi = {
         "target_aspect": "10.0",
@@ -1261,8 +1261,8 @@ def test_readme_renderer_can_use_dedicated_qi_result_dir(tmp_path):
     (result_dir / "diagnostics.json").write_text(
         json.dumps(
             {
-                "target_aspect": 6.0,
-                "aspect": 6.01,
+                "target_aspect": 5.0,
+                "aspect": 5.01,
                 "mean_iota": -0.50,
                 "qi_raw_total": 1.1e-3,
                 "qi_legacy_total": 3.0e-4,
@@ -1281,7 +1281,7 @@ def test_readme_renderer_can_use_dedicated_qi_result_dir(tmp_path):
 
     assert row is not None
     assert row["policy"] == "qi_default"
-    assert float(row["target_aspect"]) == pytest.approx(6.0)
+    assert float(row["target_aspect"]) == pytest.approx(5.0)
     assert float(row["qi_legacy_total"]) == pytest.approx(3.0e-4)
 
 

@@ -51,6 +51,8 @@ SCIPY_LSMR_MAXITER = None  # None lets SciPy choose; set an int to cap LSMR iter
 FTOL = 1.0e-5  # Relative cost-reduction tolerance for the outer optimizer.
 GTOL = 1.0e-5  # Gradient optimality tolerance for the outer optimizer.
 XTOL = 1.0e-6  # Step-size tolerance for the outer optimizer.
+# Current budget probe: lowering trial solves below 180 changed the early QH
+# path and increased the QS residual, so keep accepted/trial solves aligned.
 INNER_MAX_ITER = 180  # Accepted-point VMEC iterations; 0 uses NITER from the input deck.
 INNER_FTOL = 1.0e-9  # Accepted-point VMEC tolerance; 0 uses FTOL from the input deck.
 TRIAL_MAX_ITER = 180  # Trial-point VMEC iterations; 0 follows the accepted/input budget.

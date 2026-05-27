@@ -114,6 +114,52 @@ def test_qp_example_documents_zero_transform_escape_policy() -> None:
     assert "zero-transform basin" in readme
 
 
+def test_qs_examples_expose_reviewed_mode5_budgets() -> None:
+    qa = (ROOT / "examples" / "optimization" / "QA_optimization.py").read_text()
+    qh = (ROOT / "examples" / "optimization" / "QH_optimization.py").read_text()
+    qp = (ROOT / "examples" / "optimization" / "QP_optimization.py").read_text()
+
+    for text in (qa, qh, qp):
+        assert "MAX_MODE = 5" in text
+        assert "MAX_NFEV = 60" in text
+        assert "ALPHA = 1.2" in text
+        assert "TARGET_ASPECT = 5.0" in text
+
+    assert "INNER_MAX_ITER = 120" in qa
+    assert "TRIAL_MAX_ITER = 120" in qa
+    assert "INNER_FTOL = 1.0e-9" in qa
+    assert "TRIAL_FTOL = 1.0e-9" in qa
+
+    assert "INNER_MAX_ITER = 180" in qh
+    assert "TRIAL_MAX_ITER = 180" in qh
+    assert "INNER_FTOL = 1.0e-9" in qh
+    assert "TRIAL_FTOL = 1.0e-9" in qh
+
+    assert "INNER_MAX_ITER = 180" in qp
+    assert "TRIAL_MAX_ITER = 60" in qp
+    assert "INNER_FTOL = 1.0e-9" in qp
+    assert "TRIAL_FTOL = 1.0e-8" in qp
+
+
+def test_qp_budget_probe_uses_vmec_space_engineering_terms() -> None:
+    from tools.diagnostics import qs_budget_probe
+
+    problem = qs_budget_probe._objective_problem(
+        "qp",
+        qs_budget_probe.PROBLEM_DEFAULTS["qp"],
+    )
+
+    assert problem.scalar_objective_names == (
+        "aspect",
+        "abs_iota_floor",
+        "qs",
+        "mirror_ratio",
+        "max_elongation",
+    )
+    assert problem.qi_objective_names == ()
+    assert problem.is_qi is False
+
+
 def test_optimization_readme_and_docs_teach_visible_workflow_anatomy() -> None:
     readme = (ROOT / "examples" / "optimization" / "README.md").read_text()
     docs = (ROOT / "docs" / "optimization.rst").read_text()

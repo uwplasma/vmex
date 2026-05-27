@@ -52,10 +52,12 @@ SCIPY_LSMR_MAXITER = None  # None lets SciPy choose; set an int to cap LSMR iter
 FTOL = 1.0e-5  # Relative cost-reduction tolerance for the outer optimizer.
 GTOL = 1.0e-5  # Gradient optimality tolerance for the outer optimizer.
 XTOL = 1.0e-6  # Step-size tolerance for the outer optimizer.
-INNER_MAX_ITER = 60  # Accepted-point VMEC iterations; 0 uses NITER from the input deck.
-INNER_FTOL = 1.0e-6  # Accepted-point VMEC tolerance; 0 uses FTOL from the input deck.
-TRIAL_MAX_ITER = 60  # Trial-point VMEC iterations; 0 follows the accepted/input budget.
-TRIAL_FTOL = 1.0e-6  # Trial-point VMEC tolerance; 0 follows the accepted/input tolerance.
+# Budget probes on the aspect-5 max_mode=4/5 lane show 120/1e-9 matches the
+# conservative 180/1e-9 trajectory while avoiding the too-loose 60/1e-6 branch.
+INNER_MAX_ITER = 120  # Accepted-point VMEC iterations; 0 uses NITER from the input deck.
+INNER_FTOL = 1.0e-9  # Accepted-point VMEC tolerance; 0 uses FTOL from the input deck.
+TRIAL_MAX_ITER = 120  # Trial-point VMEC iterations; 0 follows the accepted/input budget.
+TRIAL_FTOL = 1.0e-9  # Trial-point VMEC tolerance; 0 follows the accepted/input tolerance.
 SOLVER_DEVICE = None  # None uses JAX default; set "cpu" or "gpu" to force one backend.
 USE_ESS = True  # Set False for an unscaled trust-region solve.
 ALPHA = 1.2  # ESS high-mode scaling strength.

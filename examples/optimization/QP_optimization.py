@@ -55,10 +55,12 @@ SCIPY_LSMR_MAXITER = None  # None lets SciPy choose; set an int to cap LSMR iter
 FTOL = 1.0e-5  # Relative cost-reduction tolerance for the outer optimizer.
 GTOL = 1.0e-5  # Gradient optimality tolerance for the outer optimizer.
 XTOL = 1.0e-6  # Step-size tolerance for the outer optimizer.
+# QP budget probe: accepted 180/1e-9 was needed, while trial 60/1e-8 matched
+# the 180/1e-9 short trajectory and cuts trial-solve cost.
 INNER_MAX_ITER = 180  # Accepted-point VMEC iterations; 0 uses NITER from the input deck.
 INNER_FTOL = 1.0e-9  # Accepted-point VMEC tolerance; 0 uses FTOL from the input deck.
-TRIAL_MAX_ITER = 180  # Trial-point VMEC iterations; 0 follows the accepted/input budget.
-TRIAL_FTOL = 1.0e-9  # Trial-point VMEC tolerance; 0 follows the accepted/input tolerance.
+TRIAL_MAX_ITER = 60  # Trial-point VMEC iterations; 0 follows the accepted/input budget.
+TRIAL_FTOL = 1.0e-8  # Trial-point VMEC tolerance; 0 follows the accepted/input tolerance.
 SOLVER_DEVICE = None  # None uses JAX default; set "cpu" or "gpu" to force one backend.
 USE_ESS = True  # Set True to scale high-mode boundary variables.
 ALPHA = 1.2  # ESS high-mode scaling strength.

@@ -56,7 +56,7 @@ CASES = (
         input_file=REPO_ROOT / "examples" / "data" / "input.minimal_seed_nfp2_target_helicity",
         output_dir=ARTIFACT_DIR / "nfp2_target_helicity",
         initial_wout=ARTIFACT_DIR / "nfp2_target_helicity" / "wout_initial.nc",
-        note="aspect-6 target-helicity hinted mirror-aware QI lane",
+        note="aspect-5 target-helicity hinted mirror-aware QI lane",
         history_paths=(
             ARTIFACT_DIR
             / "nfp2_target_helicity"
