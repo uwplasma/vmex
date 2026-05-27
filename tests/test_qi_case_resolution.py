@@ -76,6 +76,10 @@ def test_minimal_and_circular_qi_cases_require_reference_seeded_local_stage() ->
         assert all(int(stage["max_nfev"]) >= mod.MINIMAL_QI_LOCAL_STAGE_MIN_NFEV for stage in stages)
         assert all(stage["use_showcase_max_nfev"] is True for stage in stages)
         assert all(float(stage["aspect_weight"]) >= 4.0 for stage in stages)
+        assert all("stage_modes" in stage or "stage_mode_limits" in stage for stage in stages)
+        if case_name != "minimal_nfp3_qi":
+            assert all(stage["stage_modes"] == (case["max_mode"],) for stage in stages)
+            assert all(stage["use_mode_continuation"] is False for stage in stages)
 
 
 def test_resolve_qi_case_external_input_uses_far_seed_policy_without_reference(monkeypatch, tmp_path: Path) -> None:
