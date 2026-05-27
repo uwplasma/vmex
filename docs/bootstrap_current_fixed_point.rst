@@ -128,7 +128,11 @@ the already-solved current profile with the smallest Redl mismatch, rather than
 the last proposed profile if the Picard loop stops at its iteration budget.
 The bootstrap-stage multigrid schedule is separate from the final scan schedule
 so the Redl preconditioner can remain cheap while the final finite-beta
-equilibrium still runs at the strict validation resolution.
+equilibrium still runs at the strict validation resolution.  For strict
+LP-QA promotion runs, combine this with the beta-scan stage checkpointing:
+``case_checkpoints/{backend}_beta_*.json`` records every accepted radial-grid
+stage, the corresponding input file, WOUT path, VMEC residuals, and active stage
+metadata before the root scan summary is complete.
 
 Use the optional active direct-coil gate when changing this path:
 

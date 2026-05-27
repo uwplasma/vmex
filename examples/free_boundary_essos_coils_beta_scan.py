@@ -44,6 +44,7 @@ from copy import deepcopy
 from dataclasses import asdict
 import json
 from pathlib import Path
+import shutil
 import sys
 import time
 from typing import Any
@@ -424,6 +425,98 @@ def _case_wout_path(output_dir: Path, *, backend: str, beta_percent: float) -> P
     return output_dir / f"wout_{backend}_beta_{float(beta_percent):.3f}.nc"
 
 
+def _case_tag(beta_percent: float) -> str:
+    return f"{float(beta_percent):.3f}".replace(".", "p").replace("-", "m")
+
+
+def _case_checkpoint_path(output_dir: Path, *, backend: str, beta_percent: float) -> Path:
+    return output_dir / "case_checkpoints" / f"{backend}_beta_{_case_tag(beta_percent)}.json"
+
+
+def _stage_wout_path(output_dir: Path, *, backend: str, beta_percent: float, stage_index: int, ns: int) -> Path:
+    return (
+        output_dir
+        / "case_checkpoints"
+        / f"wout_{backend}_beta_{_case_tag(beta_percent)}_stage_{int(stage_index):02d}_ns{int(ns)}.nc"
+    )
+
+
+def _stage_input_path(output_dir: Path, *, backend: str, beta_percent: float, stage_index: int, ns: int) -> Path:
+    return (
+        output_dir
+        / "case_checkpoints"
+        / f"input.{backend}_beta_{_case_tag(beta_percent)}_stage_{int(stage_index):02d}_ns{int(ns)}"
+    )
+
+
+def _json_safe(value):
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
+def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.tmp")
+    tmp.write_text(json.dumps(payload, indent=2, default=_json_safe) + "\n")
+    tmp.replace(path)
+
+
+def _load_case_checkpoint(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text())
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _write_case_checkpoint(
+    path: Path,
+    *,
+    backend: str,
+    beta_percent: float,
+    pressure_profile: str,
+    pressure_scale_for_one_percent_beta: float,
+    ns_array: list[int] | None,
+    niter_array: list[int] | None,
+    ftol_array: list[float] | None,
+    stages: list[dict[str, Any]],
+    complete: bool,
+    final_summary: dict[str, Any] | None = None,
+    active_stage: dict[str, Any] | None = None,
+) -> None:
+    """Persist per-case progress independently of the root scan summary."""
+
+    _write_json_atomic(
+        path,
+        {
+            "complete": bool(complete),
+            "backend": str(backend),
+            "nominal_beta_percent": float(beta_percent),
+            "pressure_profile": str(pressure_profile),
+            "pressure_scale": _nominal_pressure_scale(pressure_scale_for_one_percent_beta, beta_percent),
+            "vmec_pres_scale": _vmec_pres_scale(
+                pressure_scale_for_one_percent_beta,
+                beta_percent,
+                pressure_profile,
+            ),
+            "ns_array": None if ns_array is None else [int(x) for x in ns_array],
+            "niter_array": None if niter_array is None else [int(x) for x in niter_array],
+            "ftol_array": None if ftol_array is None else [float(x) for x in ftol_array],
+            "stage_count": len(stages),
+            "active_stage": active_stage,
+            "stages": stages,
+            "final_summary": final_summary,
+        },
+    )
+
+
 def _nominal_pressure_scale(pressure_scale_for_one_percent_beta: float, beta_percent: float) -> float:
     """Return the historical pressure-scale diagnostic used in scan summaries.
 
@@ -763,21 +856,19 @@ def _write_summary_checkpoint(
     summaries: list[dict[str, Any]],
     complete: bool,
 ) -> None:
-    summary_path.write_text(
-        json.dumps(
-            _summary_payload(
-                coils_json=coils_json,
-                mgrid_file=mgrid_file,
-                args=args,
-                scale_summary=scale_summary,
-                ns_array=ns_array,
-                niter_array=niter_array,
-                ftol_array=ftol_array,
-                summaries=summaries,
-                complete=complete,
-            ),
-            indent=2,
-        )
+    _write_json_atomic(
+        summary_path,
+        _summary_payload(
+            coils_json=coils_json,
+            mgrid_file=mgrid_file,
+            args=args,
+            scale_summary=scale_summary,
+            ns_array=ns_array,
+            niter_array=niter_array,
+            ftol_array=ftol_array,
+            summaries=summaries,
+            complete=complete,
+        ),
     )
 
 
@@ -801,26 +892,19 @@ def _resume_existing_case(
     return summary
 
 
-def run_one_case(
+def _run_free_boundary_backend(
     *,
     backend: str,
     input_path: Path,
-    output_dir: Path,
-    beta_percent: float,
-    pressure_scale_for_one_percent_beta: float,
     max_iter: int,
     activate_fsq: float | None,
-    pressure_profile: str = DEFAULT_PRESSURE_PROFILE,
     direct_coil_params=None,
     direct_coil_source_reuse: bool = True,
     direct_coil_trial_resample: bool = False,
     direct_coil_limit_update_rms: bool = False,
-) -> dict[str, Any]:
-    """Run one mgrid or direct-coil free-boundary case."""
-
-    t0 = time.perf_counter()
+):
     if backend == "mgrid":
-        run = run_free_boundary(
+        return run_free_boundary(
             input_path,
             max_iter=int(max_iter),
             multigrid=False,
@@ -828,8 +912,8 @@ def run_one_case(
             jit_forces=False,
             free_boundary_activate_fsq=activate_fsq,
         )
-    elif backend == "direct":
-        run = run_free_boundary(
+    if backend == "direct":
+        return run_free_boundary(
             input_path,
             max_iter=int(max_iter),
             multigrid=False,
@@ -844,15 +928,354 @@ def run_one_case(
             free_boundary_activate_fsq=activate_fsq,
             limit_update_rms=bool(direct_coil_limit_update_rms),
         )
+    raise ValueError(f"unknown backend {backend!r}")
+
+
+def _set_single_stage_schedule(indata, *, ns: int, niter: int, ftol: float) -> None:
+    indata.scalars["NS_ARRAY"] = [int(ns)]
+    indata.scalars["NITER_ARRAY"] = [int(niter)]
+    indata.scalars["FTOL_ARRAY"] = [float(ftol)]
+    indata.scalars["NITER"] = int(niter)
+    indata.scalars["FTOL"] = float(ftol)
+
+
+def _append_pressure_metadata(
+    summary: dict[str, Any],
+    *,
+    pressure_profile: str,
+    pressure_scale_for_one_percent_beta: float,
+    beta_percent: float,
+) -> dict[str, Any]:
+    summary["pressure_profile"] = str(pressure_profile)
+    summary["pressure_scale"] = _nominal_pressure_scale(pressure_scale_for_one_percent_beta, beta_percent)
+    summary["vmec_pres_scale"] = _vmec_pres_scale(pressure_scale_for_one_percent_beta, beta_percent, pressure_profile)
+    return summary
+
+
+def _run_one_case_staged(
+    *,
+    backend: str,
+    input_path: Path,
+    output_dir: Path,
+    beta_percent: float,
+    pressure_scale_for_one_percent_beta: float,
+    max_iter: int,
+    activate_fsq: float | None,
+    pressure_profile: str,
+    ns_array: list[int],
+    niter_array: list[int],
+    ftol_array: list[float],
+    resume_existing: bool = False,
+    direct_coil_params=None,
+    direct_coil_source_reuse: bool = True,
+    direct_coil_trial_resample: bool = False,
+    direct_coil_limit_update_rms: bool = False,
+) -> dict[str, Any]:
+    """Run one beta/backend case as explicit resumable radial stages."""
+
+    if not (len(ns_array) == len(niter_array) == len(ftol_array)):
+        raise ValueError(
+            "ns_array, niter_array, and ftol_array must have the same length: "
+            f"{len(ns_array)}, {len(niter_array)}, {len(ftol_array)}"
+        )
+    final_wout_path = _case_wout_path(output_dir, backend=backend, beta_percent=beta_percent)
+    checkpoint_path = _case_checkpoint_path(output_dir, backend=backend, beta_percent=beta_percent)
+    existing = _load_case_checkpoint(checkpoint_path) if resume_existing else None
+    stages: list[dict[str, Any]] = []
+    if existing is not None:
+        for stage in existing.get("stages", []):
+            if not isinstance(stage, dict):
+                continue
+            wout = Path(str(stage.get("wout", "")))
+            if bool(stage.get("accepted", False)) and wout.exists():
+                stages.append(stage)
+
+    if len(stages) >= len(ns_array):
+        last_stage = stages[-1]
+        last_wout = Path(str(last_stage["wout"]))
+        if not final_wout_path.exists():
+            shutil.copyfile(last_wout, final_wout_path)
+        summary = summarize_existing_wout(final_wout_path, backend=backend, beta_percent=beta_percent)
+        _append_pressure_metadata(
+            summary,
+            pressure_profile=pressure_profile,
+            pressure_scale_for_one_percent_beta=pressure_scale_for_one_percent_beta,
+            beta_percent=beta_percent,
+        )
+        summary["stage_checkpoint_json"] = str(checkpoint_path)
+        summary["stage_checkpoints"] = stages
+        summary["resumed_from_existing_stage_checkpoint"] = True
+        _write_case_checkpoint(
+            checkpoint_path,
+            backend=backend,
+            beta_percent=beta_percent,
+            pressure_profile=pressure_profile,
+            pressure_scale_for_one_percent_beta=pressure_scale_for_one_percent_beta,
+            ns_array=ns_array,
+            niter_array=niter_array,
+            ftol_array=ftol_array,
+            stages=stages,
+            complete=True,
+            final_summary=summary,
+        )
+        return summary
+
+    current_indata = read_indata(input_path)
+    if stages:
+        current_indata = continue_indata_from_wout_boundary(current_indata, read_wout(stages[-1]["wout"]))
+
+    _write_case_checkpoint(
+        checkpoint_path,
+        backend=backend,
+        beta_percent=beta_percent,
+        pressure_profile=pressure_profile,
+        pressure_scale_for_one_percent_beta=pressure_scale_for_one_percent_beta,
+        ns_array=ns_array,
+        niter_array=niter_array,
+        ftol_array=ftol_array,
+        stages=stages,
+        complete=False,
+        active_stage=None,
+    )
+    final_run = None
+    final_stage_summary: dict[str, Any] | None = None
+    for zero_index in range(len(stages), len(ns_array)):
+        stage_index = zero_index + 1
+        ns = int(ns_array[zero_index])
+        niter = int(niter_array[zero_index])
+        ftol = float(ftol_array[zero_index])
+        stage_indata = deepcopy(current_indata)
+        _set_single_stage_schedule(stage_indata, ns=ns, niter=niter, ftol=ftol)
+        stage_input = _stage_input_path(
+            output_dir,
+            backend=backend,
+            beta_percent=beta_percent,
+            stage_index=stage_index,
+            ns=ns,
+        )
+        stage_wout = _stage_wout_path(
+            output_dir,
+            backend=backend,
+            beta_percent=beta_percent,
+            stage_index=stage_index,
+            ns=ns,
+        )
+        write_indata(stage_input, stage_indata)
+        active_stage = {
+            "stage_index": stage_index,
+            "stage_count": len(ns_array),
+            "ns": ns,
+            "niter": niter,
+            "ftol": ftol,
+            "input": str(stage_input),
+            "wout": str(stage_wout),
+            "status": "running",
+        }
+        _write_case_checkpoint(
+            checkpoint_path,
+            backend=backend,
+            beta_percent=beta_percent,
+            pressure_profile=pressure_profile,
+            pressure_scale_for_one_percent_beta=pressure_scale_for_one_percent_beta,
+            ns_array=ns_array,
+            niter_array=niter_array,
+            ftol_array=ftol_array,
+            stages=stages,
+            complete=False,
+            active_stage=active_stage,
+        )
+        t0 = time.perf_counter()
+        run = _run_free_boundary_backend(
+            backend=backend,
+            input_path=stage_input,
+            max_iter=niter if niter > 0 else max_iter,
+            activate_fsq=activate_fsq,
+            direct_coil_params=direct_coil_params,
+            direct_coil_source_reuse=direct_coil_source_reuse,
+            direct_coil_trial_resample=direct_coil_trial_resample,
+            direct_coil_limit_update_rms=direct_coil_limit_update_rms,
+        )
+        wall_s = time.perf_counter() - t0
+        write_wout_from_fixed_boundary_run(stage_wout, run, include_fsq=True)
+        stage_summary = summarize_run(run, stage_wout, backend=backend, beta_percent=beta_percent, wall_s=wall_s)
+        _append_pressure_metadata(
+            stage_summary,
+            pressure_profile=pressure_profile,
+            pressure_scale_for_one_percent_beta=pressure_scale_for_one_percent_beta,
+            beta_percent=beta_percent,
+        )
+        stage_record = {
+            "stage_index": stage_index,
+            "stage_count": len(ns_array),
+            "accepted": True,
+            "ns": ns,
+            "niter": niter,
+            "ftol": ftol,
+            "input": str(stage_input),
+            "wout": str(stage_wout),
+            "wall_s": float(wall_s),
+            "summary": stage_summary,
+        }
+        stages.append(stage_record)
+        final_run = run
+        final_stage_summary = stage_summary
+        _write_case_checkpoint(
+            checkpoint_path,
+            backend=backend,
+            beta_percent=beta_percent,
+            pressure_profile=pressure_profile,
+            pressure_scale_for_one_percent_beta=pressure_scale_for_one_percent_beta,
+            ns_array=ns_array,
+            niter_array=niter_array,
+            ftol_array=ftol_array,
+            stages=stages,
+            complete=False,
+            active_stage=None,
+        )
+        if zero_index + 1 < len(ns_array):
+            current_indata = continue_indata_from_wout_boundary(stage_indata, read_wout(stage_wout))
+
+    if final_run is not None:
+        write_wout_from_fixed_boundary_run(final_wout_path, final_run, include_fsq=True)
+        summary = summarize_run(
+            final_run,
+            final_wout_path,
+            backend=backend,
+            beta_percent=beta_percent,
+            wall_s=sum(float(stage["wall_s"]) for stage in stages),
+        )
     else:
-        raise ValueError(f"unknown backend {backend!r}")
+        summary = dict(final_stage_summary or {})
+        if final_wout_path.exists():
+            summary = summarize_existing_wout(final_wout_path, backend=backend, beta_percent=beta_percent)
+    _append_pressure_metadata(
+        summary,
+        pressure_profile=pressure_profile,
+        pressure_scale_for_one_percent_beta=pressure_scale_for_one_percent_beta,
+        beta_percent=beta_percent,
+    )
+    summary["stage_checkpoint_json"] = str(checkpoint_path)
+    summary["stage_checkpoints"] = stages
+    summary["resumed_from_existing_stage_checkpoint"] = bool(existing is not None and existing.get("stages"))
+    _write_case_checkpoint(
+        checkpoint_path,
+        backend=backend,
+        beta_percent=beta_percent,
+        pressure_profile=pressure_profile,
+        pressure_scale_for_one_percent_beta=pressure_scale_for_one_percent_beta,
+        ns_array=ns_array,
+        niter_array=niter_array,
+        ftol_array=ftol_array,
+        stages=stages,
+        complete=True,
+        final_summary=summary,
+    )
+    return summary
+
+
+def run_one_case(
+    *,
+    backend: str,
+    input_path: Path,
+    output_dir: Path,
+    beta_percent: float,
+    pressure_scale_for_one_percent_beta: float,
+    max_iter: int,
+    activate_fsq: float | None,
+    pressure_profile: str = DEFAULT_PRESSURE_PROFILE,
+    ns_array: list[int] | None = None,
+    niter_array: list[int] | None = None,
+    ftol_array: list[float] | None = None,
+    resume_existing: bool = False,
+    direct_coil_params=None,
+    direct_coil_source_reuse: bool = True,
+    direct_coil_trial_resample: bool = False,
+    direct_coil_limit_update_rms: bool = False,
+) -> dict[str, Any]:
+    """Run one mgrid or direct-coil free-boundary case."""
+
+    if ns_array is not None:
+        stage_niter = niter_array if niter_array is not None else [int(max_iter)] * len(ns_array)
+        stage_ftol = ftol_array if ftol_array is not None else [float(read_indata(input_path).scalars.get("FTOL", 1.0e-8))] * len(ns_array)
+        return _run_one_case_staged(
+            backend=backend,
+            input_path=input_path,
+            output_dir=output_dir,
+            beta_percent=beta_percent,
+            pressure_scale_for_one_percent_beta=pressure_scale_for_one_percent_beta,
+            max_iter=max_iter,
+            activate_fsq=activate_fsq,
+            pressure_profile=pressure_profile,
+            ns_array=[int(x) for x in ns_array],
+            niter_array=[int(x) for x in stage_niter],
+            ftol_array=[float(x) for x in stage_ftol],
+            resume_existing=resume_existing,
+            direct_coil_params=direct_coil_params,
+            direct_coil_source_reuse=direct_coil_source_reuse,
+            direct_coil_trial_resample=direct_coil_trial_resample,
+            direct_coil_limit_update_rms=direct_coil_limit_update_rms,
+        )
+
+    checkpoint_path = _case_checkpoint_path(output_dir, backend=backend, beta_percent=beta_percent)
+    _write_case_checkpoint(
+        checkpoint_path,
+        backend=backend,
+        beta_percent=beta_percent,
+        pressure_profile=pressure_profile,
+        pressure_scale_for_one_percent_beta=pressure_scale_for_one_percent_beta,
+        ns_array=None,
+        niter_array=None,
+        ftol_array=None,
+        stages=[],
+        complete=False,
+        active_stage={"stage_index": 1, "stage_count": 1, "input": str(input_path), "status": "running"},
+    )
+    t0 = time.perf_counter()
+    run = _run_free_boundary_backend(
+        backend=backend,
+        input_path=input_path,
+        max_iter=max_iter,
+        activate_fsq=activate_fsq,
+        direct_coil_params=direct_coil_params,
+        direct_coil_source_reuse=direct_coil_source_reuse,
+        direct_coil_trial_resample=direct_coil_trial_resample,
+        direct_coil_limit_update_rms=direct_coil_limit_update_rms,
+    )
     wall_s = time.perf_counter() - t0
     wout_path = _case_wout_path(output_dir, backend=backend, beta_percent=beta_percent)
     write_wout_from_fixed_boundary_run(wout_path, run, include_fsq=True)
     summary = summarize_run(run, wout_path, backend=backend, beta_percent=beta_percent, wall_s=wall_s)
-    summary["pressure_profile"] = str(pressure_profile)
-    summary["pressure_scale"] = _nominal_pressure_scale(pressure_scale_for_one_percent_beta, beta_percent)
-    summary["vmec_pres_scale"] = _vmec_pres_scale(pressure_scale_for_one_percent_beta, beta_percent, pressure_profile)
+    _append_pressure_metadata(
+        summary,
+        pressure_profile=pressure_profile,
+        pressure_scale_for_one_percent_beta=pressure_scale_for_one_percent_beta,
+        beta_percent=beta_percent,
+    )
+    stage_summary = dict(summary)
+    stage_record = {
+        "stage_index": 1,
+        "stage_count": 1,
+        "accepted": True,
+        "input": str(input_path),
+        "wout": str(wout_path),
+        "wall_s": float(wall_s),
+        "summary": stage_summary,
+    }
+    summary["stage_checkpoint_json"] = str(checkpoint_path)
+    summary["stage_checkpoints"] = [stage_record]
+    _write_case_checkpoint(
+        checkpoint_path,
+        backend=backend,
+        beta_percent=beta_percent,
+        pressure_profile=pressure_profile,
+        pressure_scale_for_one_percent_beta=pressure_scale_for_one_percent_beta,
+        ns_array=None,
+        niter_array=None,
+        ftol_array=None,
+        stages=[stage_record],
+        complete=True,
+        final_summary=summary,
+    )
     return summary
 
 
@@ -1179,6 +1602,18 @@ def main(argv: list[str] | None = None) -> int:
         )
     summaries = []
     summary_path = outdir / "summary.json"
+    _write_summary_checkpoint(
+        summary_path,
+        coils_json=coils_json,
+        mgrid_file=mgrid_file,
+        args=args,
+        scale_summary=scale_summary,
+        ns_array=ns_array,
+        niter_array=niter_array,
+        ftol_array=ftol_array,
+        summaries=summaries,
+        complete=False,
+    )
     continuation_bases: dict[str, Any] = {}
     continuation_has_promoted_seed: dict[str, bool] = {}
     if args.pressure_continuation:
@@ -1289,6 +1724,10 @@ def main(argv: list[str] | None = None) -> int:
                     pressure_profile=args.pressure_profile,
                     max_iter=args.max_iter,
                     activate_fsq=args.activate_fsq,
+                    ns_array=ns_array,
+                    niter_array=niter_array,
+                    ftol_array=ftol_array,
+                    resume_existing=args.resume_existing,
                 )
                 if mgrid_bootstrap_summary is not None:
                     summary["bootstrap_current"] = mgrid_bootstrap_summary
@@ -1419,6 +1858,10 @@ def main(argv: list[str] | None = None) -> int:
                     pressure_profile=args.pressure_profile,
                     max_iter=args.max_iter,
                     activate_fsq=args.activate_fsq,
+                    ns_array=ns_array,
+                    niter_array=niter_array,
+                    ftol_array=ftol_array,
+                    resume_existing=args.resume_existing,
                     direct_coil_params=direct_params,
                     direct_coil_source_reuse=not args.disable_direct_coil_source_reuse,
                     direct_coil_trial_resample=args.direct_coil_trial_resample,

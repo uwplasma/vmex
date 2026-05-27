@@ -172,6 +172,195 @@ def test_beta_scan_resume_existing_case_uses_wout_path(monkeypatch, tmp_path):
     assert summary["pressure_scale"] == 600.0
 
 
+def _fake_stage_wout():
+    return SimpleNamespace(
+        nfp=2,
+        lasym=False,
+        xm=np.array([0]),
+        xn=np.array([0.0]),
+        rmnc=np.array([[1.0]]),
+        zmns=np.array([[0.0]]),
+        raxis_cc=np.array([1.0]),
+        zaxis_cs=np.array([0.0]),
+    )
+
+
+def test_beta_scan_stage_checkpoint_writes_and_resumes(monkeypatch, tmp_path):
+    module = _load_beta_scan_module()
+    base = module.read_indata(ROOT / "examples" / "data" / "input.LandremanPaul2021_QA_lowres")
+    input_path = tmp_path / "input.case"
+    module.write_indata(input_path, base)
+    calls = []
+
+    def fake_run_free_boundary(path, **kwargs):
+        calls.append((Path(path).name, kwargs["max_iter"]))
+        return SimpleNamespace(
+            result=SimpleNamespace(
+                diagnostics={"final_fsqr": 1.0e-9, "final_fsqz": 2.0e-9, "final_fsql": 3.0e-9},
+                n_iter=kwargs["max_iter"],
+            ),
+            state=None,
+            static=None,
+            indata=module.read_indata(path),
+            signgs=1,
+        )
+
+    def fake_write_wout(path, _run, include_fsq):
+        assert include_fsq is True
+        Path(path).write_text("wout")
+
+    def fake_summarize_run(_run, wout_path, *, backend, beta_percent, wall_s):
+        return {
+            "backend": backend,
+            "nominal_beta_percent": float(beta_percent),
+            "wall_s": float(wall_s),
+            "wout": str(wout_path),
+            "fsqr": 1.0e-9,
+            "fsqz": 2.0e-9,
+            "fsql": 3.0e-9,
+        }
+
+    def fake_summarize_existing_wout(wout_path, *, backend, beta_percent):
+        return {
+            "backend": backend,
+            "nominal_beta_percent": float(beta_percent),
+            "wall_s": 0.0,
+            "wout": str(wout_path),
+            "fsqr": 1.0e-9,
+            "fsqz": 2.0e-9,
+            "fsql": 3.0e-9,
+        }
+
+    monkeypatch.setattr(module, "run_free_boundary", fake_run_free_boundary)
+    monkeypatch.setattr(module, "write_wout_from_fixed_boundary_run", fake_write_wout)
+    monkeypatch.setattr(module, "summarize_run", fake_summarize_run)
+    monkeypatch.setattr(module, "summarize_existing_wout", fake_summarize_existing_wout)
+    monkeypatch.setattr(module, "read_wout", lambda _path: _fake_stage_wout())
+
+    summary = module.run_one_case(
+        backend="mgrid",
+        input_path=input_path,
+        output_dir=tmp_path,
+        beta_percent=0.5,
+        pressure_scale_for_one_percent_beta=1000.0,
+        max_iter=4,
+        activate_fsq=1.0e99,
+        ns_array=[8, 16],
+        niter_array=[2, 3],
+        ftol_array=[1.0e-6, 1.0e-8],
+        resume_existing=True,
+    )
+
+    assert calls == [
+        ("input.mgrid_beta_0p500_stage_01_ns8", 2),
+        ("input.mgrid_beta_0p500_stage_02_ns16", 3),
+    ]
+    checkpoint = json.loads(Path(summary["stage_checkpoint_json"]).read_text())
+    assert checkpoint["complete"] is True
+    assert checkpoint["stage_count"] == 2
+    assert checkpoint["stages"][0]["ns"] == 8
+    assert checkpoint["stages"][1]["ftol"] == pytest.approx(1.0e-8)
+    assert Path(summary["wout"]).exists()
+
+    calls.clear()
+    resumed = module.run_one_case(
+        backend="mgrid",
+        input_path=input_path,
+        output_dir=tmp_path,
+        beta_percent=0.5,
+        pressure_scale_for_one_percent_beta=1000.0,
+        max_iter=4,
+        activate_fsq=1.0e99,
+        ns_array=[8, 16],
+        niter_array=[2, 3],
+        ftol_array=[1.0e-6, 1.0e-8],
+        resume_existing=True,
+    )
+    assert calls == []
+    assert resumed["resumed_from_existing_stage_checkpoint"] is True
+    assert len(resumed["stage_checkpoints"]) == 2
+
+
+def test_beta_scan_stage_checkpoint_survives_interrupted_stage(monkeypatch, tmp_path):
+    module = _load_beta_scan_module()
+    base = module.read_indata(ROOT / "examples" / "data" / "input.LandremanPaul2021_QA_lowres")
+    input_path = tmp_path / "input.case"
+    module.write_indata(input_path, base)
+    calls = []
+
+    def fake_run_free_boundary(path, **kwargs):
+        calls.append(Path(path).name)
+        if len(calls) == 2:
+            raise TimeoutError("simulated wall-time stop")
+        return SimpleNamespace(
+            result=SimpleNamespace(diagnostics={}, n_iter=kwargs["max_iter"]),
+            state=None,
+            static=None,
+            indata=module.read_indata(path),
+            signgs=1,
+        )
+
+    monkeypatch.setattr(module, "run_free_boundary", fake_run_free_boundary)
+    monkeypatch.setattr(module, "write_wout_from_fixed_boundary_run", lambda path, _run, include_fsq: Path(path).write_text("wout"))
+    monkeypatch.setattr(
+        module,
+        "summarize_run",
+        lambda _run, wout_path, *, backend, beta_percent, wall_s: {
+            "backend": backend,
+            "nominal_beta_percent": float(beta_percent),
+            "wall_s": float(wall_s),
+            "wout": str(wout_path),
+            "fsqr": 1.0e-9,
+            "fsqz": 2.0e-9,
+            "fsql": 3.0e-9,
+        },
+    )
+    monkeypatch.setattr(module, "read_wout", lambda _path: _fake_stage_wout())
+
+    with pytest.raises(TimeoutError, match="simulated"):
+        module.run_one_case(
+            backend="direct",
+            input_path=input_path,
+            output_dir=tmp_path,
+            beta_percent=1.0,
+            pressure_scale_for_one_percent_beta=1000.0,
+            max_iter=4,
+            activate_fsq=1.0e99,
+            ns_array=[8, 16],
+            niter_array=[2, 3],
+            ftol_array=[1.0e-6, 1.0e-8],
+            resume_existing=True,
+        )
+
+    checkpoint = json.loads(module._case_checkpoint_path(tmp_path, backend="direct", beta_percent=1.0).read_text())
+    assert checkpoint["complete"] is False
+    assert checkpoint["stage_count"] == 1
+    assert checkpoint["stages"][0]["accepted"] is True
+    assert checkpoint["active_stage"]["stage_index"] == 2
+    assert checkpoint["active_stage"]["status"] == "running"
+    assert Path(checkpoint["stages"][0]["wout"]).exists()
+
+    calls.clear()
+    resumed = module.run_one_case(
+        backend="direct",
+        input_path=input_path,
+        output_dir=tmp_path,
+        beta_percent=1.0,
+        pressure_scale_for_one_percent_beta=1000.0,
+        max_iter=4,
+        activate_fsq=1.0e99,
+        ns_array=[8, 16],
+        niter_array=[2, 3],
+        ftol_array=[1.0e-6, 1.0e-8],
+        resume_existing=True,
+    )
+    assert calls == ["input.direct_beta_1p000_stage_02_ns16"]
+    assert resumed["resumed_from_existing_stage_checkpoint"] is True
+    resumed_checkpoint = json.loads(Path(resumed["stage_checkpoint_json"]).read_text())
+    assert resumed_checkpoint["complete"] is True
+    assert resumed_checkpoint["stage_count"] == 2
+
+
 def test_beta_scan_bootstrap_current_preconditioner_updates_indata(monkeypatch, tmp_path):
     module = _load_beta_scan_module()
     base = module.read_indata(ROOT / "examples" / "data" / "input.LandremanPaul2021_QA_lowres")
