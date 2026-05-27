@@ -44,6 +44,7 @@ from copy import deepcopy
 from dataclasses import asdict
 import json
 from pathlib import Path
+import signal
 import shutil
 import sys
 import time
@@ -72,6 +73,23 @@ PRESSURE_SCALE_FOR_ONE_PERCENT_BETA = 1000.0
 DEFAULT_FREE_BOUNDARY_PHIEDGE = -0.025
 DEFAULT_PRESSURE_PROFILE = "standard"
 DEFAULT_BOOTSTRAP_CURRENT_SURFACES = (0.15, 0.30, 0.45, 0.60, 0.75, 0.90)
+
+
+class _TerminationSignal(KeyboardInterrupt):
+    """Raised when a batch runner terminates the scan process."""
+
+
+def _raise_termination_signal(signum, _frame) -> None:
+    raise _TerminationSignal(f"received signal {int(signum)}")
+
+
+def _install_termination_signal_handlers() -> None:
+    """Convert SIGTERM/SIGINT into Python exceptions so checkpoints flush."""
+
+    for sig_name in ("SIGTERM", "SIGINT"):
+        sig = getattr(signal, sig_name, None)
+        if sig is not None:
+            signal.signal(sig, _raise_termination_signal)
 
 
 def _candidate_essos_input_dirs() -> list[Path]:
@@ -515,6 +533,32 @@ def _write_case_checkpoint(
             "final_summary": final_summary,
         },
     )
+
+
+def _mark_case_checkpoint_active_stage(
+    path: Path,
+    *,
+    status: str,
+    reason: str | None = None,
+    wall_s: float | None = None,
+) -> None:
+    """Update the active stage status after an interrupted run."""
+
+    payload = _load_case_checkpoint(path)
+    if payload is None:
+        return
+    active_stage = payload.get("active_stage")
+    if not isinstance(active_stage, dict):
+        return
+    active_stage = dict(active_stage)
+    active_stage["status"] = str(status)
+    if reason:
+        active_stage["reason"] = str(reason)
+    if wall_s is not None:
+        active_stage["wall_s"] = float(wall_s)
+    payload["active_stage"] = active_stage
+    payload["complete"] = False
+    _write_json_atomic(path, payload)
 
 
 def _nominal_pressure_scale(pressure_scale_for_one_percent_beta: float, beta_percent: float) -> float:
@@ -1085,16 +1129,33 @@ def _run_one_case_staged(
             active_stage=active_stage,
         )
         t0 = time.perf_counter()
-        run = _run_free_boundary_backend(
-            backend=backend,
-            input_path=stage_input,
-            max_iter=niter if niter > 0 else max_iter,
-            activate_fsq=activate_fsq,
-            direct_coil_params=direct_coil_params,
-            direct_coil_source_reuse=direct_coil_source_reuse,
-            direct_coil_trial_resample=direct_coil_trial_resample,
-            direct_coil_limit_update_rms=direct_coil_limit_update_rms,
-        )
+        try:
+            run = _run_free_boundary_backend(
+                backend=backend,
+                input_path=stage_input,
+                max_iter=niter if niter > 0 else max_iter,
+                activate_fsq=activate_fsq,
+                direct_coil_params=direct_coil_params,
+                direct_coil_source_reuse=direct_coil_source_reuse,
+                direct_coil_trial_resample=direct_coil_trial_resample,
+                direct_coil_limit_update_rms=direct_coil_limit_update_rms,
+            )
+        except (KeyboardInterrupt, _TerminationSignal):
+            _mark_case_checkpoint_active_stage(
+                checkpoint_path,
+                status="interrupted",
+                reason="termination_signal",
+                wall_s=time.perf_counter() - t0,
+            )
+            raise
+        except Exception as exc:
+            _mark_case_checkpoint_active_stage(
+                checkpoint_path,
+                status="failed",
+                reason=f"{type(exc).__name__}: {exc}",
+                wall_s=time.perf_counter() - t0,
+            )
+            raise
         wall_s = time.perf_counter() - t0
         write_wout_from_fixed_boundary_run(stage_wout, run, include_fsq=True)
         stage_summary = summarize_run(run, stage_wout, backend=backend, beta_percent=beta_percent, wall_s=wall_s)
@@ -1280,6 +1341,7 @@ def run_one_case(
 
 
 def main(argv: list[str] | None = None) -> int:
+    _install_termination_signal_handlers()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--outdir", type=Path, default=DEFAULT_RESULTS)
     parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
@@ -1391,10 +1453,11 @@ def main(argv: list[str] | None = None) -> int:
         "--resume-existing",
         action="store_true",
         help=(
-            "Skip any beta/backend case whose WOUT already exists in --outdir. "
-            "With --pressure-continuation, the existing WOUT is also promoted "
-            "as the seed for the next pressure point if its residual satisfies "
-            "--pressure-continuation-max-fsq."
+            "Skip completed beta/backend cases and resume accepted radial-stage "
+            "checkpoints even when an interrupted run did not write the final "
+            "root WOUT. With --pressure-continuation, completed WOUTs are also "
+            "promoted as seeds for the next pressure point if their residual "
+            "satisfies --pressure-continuation-max-fsq."
         ),
     )
     parser.add_argument(

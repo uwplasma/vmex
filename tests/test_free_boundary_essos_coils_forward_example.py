@@ -337,7 +337,8 @@ def test_beta_scan_stage_checkpoint_survives_interrupted_stage(monkeypatch, tmp_
     assert checkpoint["stage_count"] == 1
     assert checkpoint["stages"][0]["accepted"] is True
     assert checkpoint["active_stage"]["stage_index"] == 2
-    assert checkpoint["active_stage"]["status"] == "running"
+    assert checkpoint["active_stage"]["status"] == "failed"
+    assert "TimeoutError" in checkpoint["active_stage"]["reason"]
     assert Path(checkpoint["stages"][0]["wout"]).exists()
 
     calls.clear()
@@ -359,6 +360,41 @@ def test_beta_scan_stage_checkpoint_survives_interrupted_stage(monkeypatch, tmp_
     resumed_checkpoint = json.loads(Path(resumed["stage_checkpoint_json"]).read_text())
     assert resumed_checkpoint["complete"] is True
     assert resumed_checkpoint["stage_count"] == 2
+
+
+def test_beta_scan_stage_checkpoint_marks_termination_signal(monkeypatch, tmp_path):
+    module = _load_beta_scan_module()
+    base = module.read_indata(ROOT / "examples" / "data" / "input.LandremanPaul2021_QA_lowres")
+    input_path = tmp_path / "input.case"
+    module.write_indata(input_path, base)
+
+    def fake_run_free_boundary(_path, **_kwargs):
+        raise module._TerminationSignal("simulated SIGTERM")
+
+    monkeypatch.setattr(module, "run_free_boundary", fake_run_free_boundary)
+
+    with pytest.raises(module._TerminationSignal):
+        module.run_one_case(
+            backend="direct",
+            input_path=input_path,
+            output_dir=tmp_path,
+            beta_percent=0.25,
+            pressure_scale_for_one_percent_beta=1000.0,
+            max_iter=4,
+            activate_fsq=1.0e99,
+            ns_array=[8],
+            niter_array=[2],
+            ftol_array=[1.0e-6],
+            resume_existing=True,
+        )
+
+    checkpoint = json.loads(module._case_checkpoint_path(tmp_path, backend="direct", beta_percent=0.25).read_text())
+    assert checkpoint["complete"] is False
+    assert checkpoint["stage_count"] == 0
+    assert checkpoint["active_stage"]["stage_index"] == 1
+    assert checkpoint["active_stage"]["status"] == "interrupted"
+    assert checkpoint["active_stage"]["reason"] == "termination_signal"
+    assert checkpoint["active_stage"]["wall_s"] >= 0.0
 
 
 def test_beta_scan_bootstrap_current_preconditioner_updates_indata(monkeypatch, tmp_path):
