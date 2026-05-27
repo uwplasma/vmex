@@ -413,7 +413,11 @@ default-`APHI` iota profiles.  A follow-up `office` matrix at head `8eb2a342`
 reported CPU warm `0.0521 s` and CUDA warm `0.2318 s` for the tiny
 `--jit-forces` row, with force assembly still near parity; the next GPU lane is
 therefore setup/control/preconditioner staging or caching, not further
-Biot-Savart kernel work.
+Biot-Savart kernel work.  A subsequent host-profile setup policy
+(`VMEC_JAX_HOST_PROFILE_SETUP=auto`) improved the same tiny CUDA row to
+`0.1625 s` warm versus `0.0552 s` CPU, with CUDA setup/profile down to
+`5.6 ms`; remaining GPU work is now residual scalar materialization,
+accepted-control `fsq1`, and preconditioner dispatch.
 
 - Continuation correctness: 100%. Source fix is implemented and covered by
   synthetic repeated-stage tests, a real boundary-projection stage test, and

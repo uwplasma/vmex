@@ -124,6 +124,13 @@ Steps taken:
     `0.0521 s` CPU warm and `0.2318 s` CUDA warm; CUDA force assembly was still
     near parity (`9.68 ms` versus `9.11 ms` CPU), so the remaining GPU target is
     setup/control/preconditioner staging rather than Biot-Savart sampling.
+70. Added `VMEC_JAX_HOST_PROFILE_SETUP=auto` to use the host profile setup path
+    on non-traced accelerator solves.  The next `office` matrix improved the
+    tiny `--jit-forces` CUDA warm solve to `0.1625 s` versus `0.0552 s` CPU;
+    CUDA `setup_boundary_profiles_s` dropped to `5.6 ms` and compute forces
+    stayed slightly faster than CPU.  The remaining named CUDA buckets are
+    residual scalar materialization, accepted-control `fsq1`, and
+    preconditioner dispatch.
 
 ### 2026-05-27 Free-boundary beta-scan bootstrap-current preconditioner
 

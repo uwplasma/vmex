@@ -3129,6 +3129,17 @@ near parity (``9.11 ms`` CPU versus ``9.68 ms`` CUDA).  This confirms the next
 larger performance patch should cache or stage the non-traced setup/control
 payload rather than continuing to optimize the direct coil field kernel.
 
+The follow-up host-profile setup policy adds
+``VMEC_JAX_HOST_PROFILE_SETUP=auto`` (``0`` disables, ``1`` forces) so
+non-traced accelerator setup can also use the host profile path.  On the same
+office quick matrix the tiny ``--jit-forces`` direct-coil row improved to
+``0.0552 s`` warm on CPU and ``0.1625 s`` warm on CUDA (``2.95x`` GPU/CPU).
+The GPU setup/profile bucket dropped to ``5.6 ms`` and force assembly stayed
+slightly faster than CPU (``8.28 ms`` CUDA versus ``9.98 ms`` CPU).  The
+remaining named GPU buckets are residual scalar materialization
+(``18.6 ms``), accepted-control ``fsq1`` (``12.8 ms``), and preconditioner
+dispatch (``10.8 ms``).
+
 Historical bundled example runtime/memory matrix (March 2026)
 -------------------------------------------------------------
 

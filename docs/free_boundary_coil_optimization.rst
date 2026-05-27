@@ -782,6 +782,14 @@ the same performance conclusion: the tiny direct-coil ``--jit-forces`` row was
 itself was still near parity.  The remaining work is setup/control staging, not
 Biot-Savart kernel math.
 
+The host-profile setup path is now controlled by
+``VMEC_JAX_HOST_PROFILE_SETUP``.  With the default ``auto`` policy, the latest
+office CUDA matrix improved the tiny ``--jit-forces`` direct-coil row to
+``0.1625 s`` warm on CUDA versus ``0.0552 s`` on CPU; setup/profile work fell
+to about ``5.6 ms`` on CUDA and the force kernel remained slightly faster on
+CUDA than CPU.  Residual scalar materialization, accepted-control ``fsq1``, and
+preconditioner dispatch are the next production GPU targets.
+
 The direct-solve child JSON includes active and trial NESTOR timing summaries:
 sample time, scalar-potential solve time, reuse counts, failed trial counts,
 and the final recompute sampler/solver timings. The matrix runner also enables
