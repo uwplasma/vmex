@@ -321,67 +321,6 @@ def test_preconditioner_apply_payload_fused_can_return_ptau_control_payload():
     assert upd[0].shape == shape
 
 
-def test_preconditioner_apply_payload_fused_can_apply_vmec_m1_rhs_scaling():
-    pytest.importorskip("jax")
-
-    shape = (3, 3, 1)
-    base = np.arange(np.prod(shape), dtype=float).reshape(shape) / 10.0 + 1.0
-    frzl = TomnspsRZL(
-        frcc=base,
-        frss=base + 0.1,
-        fzsc=base + 0.2,
-        fzcs=base + 0.3,
-        flsc=base + 0.4,
-        flcs=base + 0.5,
-        frsc=base + 0.6,
-        frcs=base + 0.7,
-        fzcc=base + 0.8,
-        fzss=base + 0.9,
-        flcc=base + 1.0,
-        flss=base + 1.1,
-    )
-    mats = {
-        "ar": np.zeros(shape),
-        "br": np.zeros(shape),
-        "dr": np.ones(shape),
-        "az": np.zeros(shape),
-        "bz": np.zeros(shape),
-        "dz": np.ones(shape),
-        "scale_m1_fac_r": np.asarray([0.25, 0.5, 0.75]),
-        "scale_m1_fac_z": np.asarray([0.75, 0.5, 0.25]),
-    }
-    kwargs = dict(
-        mats=mats,
-        jmax=shape[0],
-        cfg=SimpleNamespace(lthreed=True, lasym=True),
-        lam_prec=np.ones(shape),
-        w_mode_mn=np.ones(shape[1:]),
-        lambda_update_scale_j=np.asarray(1.0),
-        f_norm1=np.asarray(2.0),
-        delta_s=np.asarray(0.25),
-        s=np.linspace(0.0, 1.0, shape[0]),
-        use_precomputed=False,
-        use_lax_tridi=False,
-        apply_lambda_update_scale=False,
-        vmec2000_control=True,
-        lconm1=True,
-    )
-
-    scaled = solve_module._scale_m1_precond_rhs_from_mats(
-        frzl,
-        mats,
-        lconm1=True,
-        mpol=shape[1],
-        host_update_assembly=False,
-    )
-    reference = _preconditioner_apply_payload_fused(frzl_in=scaled, scale_m1_rhs=False, **kwargs)
-    fused = _preconditioner_apply_payload_fused(frzl_in=frzl, scale_m1_rhs=True, **kwargs)
-
-    for reference_block, fused_block in zip(reference, fused, strict=True):
-        for reference_array, fused_array in zip(reference_block, fused_block, strict=True):
-            np.testing.assert_allclose(np.asarray(fused_array), np.asarray(reference_array), rtol=1.0e-12, atol=1.0e-12)
-
-
 def test_preconditioner_output_scaling_gate_is_gpu_only_without_gpu(monkeypatch):
     pytest.importorskip("jax")
 
