@@ -90,7 +90,12 @@ def test_qi_case_specific_artifacts_are_not_documented_as_aspect5_promotions() -
     validation = (ROOT / "docs" / "validation.rst").read_text()
     qi_cases_csv = (ROOT / "docs" / "_static" / "figures" / "readme_qi_optimization_cases.csv").read_text()
 
-    for text in (readme, optimization, sweep_results, validation):
+    assert "common-minimal-seed" in readme
+    assert "same minimal-seed policy for QI NFP1/2/3/4" in readme
+    assert "artifact-promotion" in readme
+    assert "rules live in the docs" in readme
+
+    for text in (optimization, sweep_results, validation):
         assert "case-specific" in text
         assert "aspect-5 README" in text
         assert "best-row promotion" in text

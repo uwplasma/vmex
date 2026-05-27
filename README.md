@@ -152,10 +152,11 @@ Editable optimization examples live in `examples/optimization/`. Start with
 The current README snapshot uses compact figures, not a numeric table. The
 first panel shows QA NFP2/3, QH NFP3/4, and QP NFP2/3/4 common-minimal-seed
 GPU runs with aspect target 5, continuation, ESS, and `max_mode=5`. The second
-panel shows reviewed QI NFP1/2/3/4 case-specific staged results; these are not
-aspect-5 README best-row promotion evidence for the still-open uniform
-common-minimal QI matrix. Full numeric tables, caveats, LASYM panels, and
-artifact-promotion rules live in the docs.
+panel documents the same minimal-seed policy for QI NFP1/2/3/4: source inputs
+are circular/minimal torus-like decks, and any reference-family step is an
+explicit deterministic basin proposal rather than the user-facing initial
+condition. Full numeric tables, caveats, LASYM panels, and artifact-promotion
+rules live in the docs.
 
 ![Common minimal-seed QA/QH/QP states](docs/_static/figures/minimal_seed_showcase_state_panel.png)
 ![QI optimization from NFP seeds](docs/_static/figures/readme_qi_optimization_cases.png)
@@ -166,7 +167,7 @@ Reproduce the common-minimal QA/QH/QP rows with:
 PYTHONPATH=. JAX_PLATFORMS=cuda python3 examples/optimization/generate_minimal_seed_showcase.py \
   --cases qa_nfp2,qa_nfp3,qh_nfp3,qh_nfp4,qp_nfp2,qp_nfp3,qp_nfp4 --backend-label gpu \
   --solver-device gpu --worker-jax-platforms cuda --policy continuation --max-mode 5 --ess on \
-  --max-nfev 60 --continuation-nfev 20 --inner-max-iter 550 --inner-ftol 1e-10 \
+  --max-nfev 70 --continuation-nfev 20 --inner-max-iter 550 --inner-ftol 1e-10 \
   --trial-max-iter 550 --trial-ftol 1e-10 \
   --ess-alpha 1.2 --case-timeout-s 7200 --rerun
 PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py --publication-matrix

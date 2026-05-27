@@ -210,14 +210,15 @@ regenerate the README/docs NFP=4 panel from scratch solely from a scratch
 result directory; keep the row documented as case-gated and
 reference-preconditioned.
 ``examples/optimization/QI_optimization.py``
-is the bounded multi-seed entry point for extending this to other inputs: set
-``RUN_CASE = "nfp2_qi"``, ``RUN_CASE = "qi_stel_seed_3127"``, or add a new
-``QI_CASES`` entry in ``examples/optimization/qi_optimization_cases.py`` for
-another VMEC deck.  Use ``RUN_CASE = "nfp4_qi"`` for the minimal-seed
-same-NFP reference-family NFP=4 coverage lane.  Use
-``RUN_CASE = "nfp4_qi_finite_beta"`` or ``RUN_CASE = "nfp4_qh_warm_to_qi"``
-only as NFP=4 stress lanes until their independent diagnostics pass the QI,
-mirror, engineering, and multi-seed gates.
+is the editable entry point for extending this to other inputs: change the
+top-level ``INPUT_FILE`` and ``OUTPUT_DIR`` for a new minimal/circular-like VMEC
+deck.  For archived rendered case lanes or stress tests, use
+``VMEC_JAX_QI_RUN_CASE`` with ``examples/optimization/qi_optimization_cases.py``
+(``nfp1_qi`` through ``nfp4_qi`` are public minimal-seed aliases; named far
+seeds such as ``qi_stel_seed_3127`` are explicit diagnostics).  Use
+``nfp4_qi_finite_beta`` or ``nfp4_qh_warm_to_qi`` only as NFP=4 stress lanes
+until their independent diagnostics pass the QI, mirror, engineering, and
+multi-seed gates.
 The current
 ``qi_stel_seed_3127`` far-seed lane first runs a deterministic same-NFP
 reference-family boundary preconditioner, records the selected candidate as an

@@ -230,7 +230,7 @@ def test_nfp3_case_catalog_uses_current_aspect5_policy_with_archived_metadata() 
     assert diagnostics["target_aspect"] == pytest.approx(4.0)
     assert case["target_aspect"] == pytest.approx(cases_mod.SEED3127_REVIEWED_TARGET_ASPECT)
     assert case["target_aspect"] == pytest.approx(cases_mod.DEFAULT_QI_TARGET_ASPECT)
-    assert "aspect5" in str(case["output_dir"])
+    assert "minimal_nfp3_to_qi_reference" in str(case["output_dir"])
 
 
 def test_real_nfp4_raw_initial_wout_matches_minimal_seed_and_final_differs() -> None:
@@ -277,7 +277,7 @@ def test_qi_case_catalog_defines_nfp4_minimal_seed_candidate() -> None:
     assert case["target_aspect"] == cases_mod.DEFAULT_QI_TARGET_ASPECT
     assert case["mirror_threshold"] == pytest.approx(0.35)
     assert case["qi_gate_legacy_max"] == pytest.approx(2.0e-3)
-    assert "minimal_nfp4_to_qi_finite_beta_reference" in str(case["output_dir"])
+    assert "minimal_nfp4_to_qi_reference" in str(case["output_dir"])
     assert case["boundary_reference_preconditioner"]["reference_input"].name == "input.nfp4_QI_finite_beta"
     assert case["boundary_reference_preconditioner"]["accept_as_baseline"] is True
     assert {family for family, _index, _value in case["target_helicity_seed_terms"]} == {"RBC", "ZBS"}

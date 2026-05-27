@@ -467,7 +467,7 @@ def test_problem_configs_follow_current_seed_and_priority_policy():
     assert qp_cfg.lgradb_threshold == pytest.approx(0.30)
     assert qp_cfg.lgradb_weight == pytest.approx(0.0)
     assert qp_cfg.project_input_boundary_to_max_mode
-    assert qi_cfg.input_file.name == "input.nfp2_QI"
+    assert qi_cfg.input_file.name == "input.minimal_seed_nfp2"
     assert qi_cfg.target_aspect == pytest.approx(5.0)
     assert qi_cfg.iota_abs_min == pytest.approx(0.41)
     assert qi_cfg.iota_weight == pytest.approx(200.0)
