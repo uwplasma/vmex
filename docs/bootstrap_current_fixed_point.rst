@@ -24,15 +24,22 @@ Implemented now:
 - ``vj.apply_current_profile_to_indata`` and
   ``vj.bootstrap_current_update_to_indata`` write the generated current profile
   to a copy of a VMEC ``InData`` object without mutating the original input.
+- ``vj.bootstrap_current_fixed_point`` runs the first VMEC/Redl Picard loop:
+  solve VMEC, evaluate Redl diagnostics, update the VMEC current spline, repeat,
+  and stop on current-update and Redl-mismatch tolerances.  It accepts injected
+  solve/diagnostic callbacks for cheap tests and workflow experiments; the
+  default path writes a temporary input deck and calls ``run_fixed_boundary``.
 - Manufactured-profile tests cover the update formulas, sign convention,
-  VMEC spline-current round trip, damping validation, and autodiff through the
-  pure current-update helpers.
+  VMEC spline-current round trip, damping validation, autodiff through the pure
+  current-update helpers, and callback-level fixed-point convergence.
 
-Next implementation step:
+Next implementation steps:
 
-- Add the solve-in-the-loop fixed-point driver that runs VMEC, evaluates Redl
-  geometry, updates the current profile, writes per-stage inputs/WOUTs, and
-  stops on Redl-mismatch/current-update convergence.
+- Add a finite-beta example that uses ``vj.bootstrap_current_fixed_point`` to
+  generate a self-consistent current profile before a free-boundary beta scan.
+- Add optional SIMSOPT/VMEC2000 validation gates for the generated final input.
+- Add an implicit fixed-point derivative once the production solve loop is
+  validated on finite-beta fixtures.
 
 Literature Anchors
 ------------------
@@ -174,18 +181,20 @@ keeps ``CURTOR``, ``AC_AUX_F``, beta, and VMEC residuals finite.
 Planned API
 -----------
 
-Add a module such as ``vmec_jax/bootstrap_current.py`` with function-first,
-testable helpers:
+``vmec_jax/bootstrap_current.py`` exposes function-first, testable helpers:
 
 ``BootstrapCurrentOptions``
-   Frozen dataclass containing ``helicity_n``, profile coefficients,
-   ``surfaces``, ``n_current``, update policy, damping, Anderson depth,
-   convergence tolerances, and VMEC solve budgets.
+   Frozen dataclass containing ``helicity_n``, optional Redl sample surfaces,
+   current-knot count, update policy, damping, Anderson depth placeholder,
+   convergence tolerances, and current-profile type.
 
 ``BootstrapCurrentIteration``
-   Frozen dataclass or serializable dict containing iteration number,
-   residual norms, ``CURTOR``, ``AC_AUX_S/F``, beta, aspect, mean iota, VMEC
-   force residuals, and output paths.
+   Frozen dataclass containing iteration number, residual norms, ``CURTOR``,
+   ``AC_AUX_S/F``, beta, aspect, mean iota, and VMEC force residual summary.
+
+``BootstrapCurrentResult``
+   Frozen dataclass containing the final ``InData``, fixed-point history,
+   convergence flag/reason, and the last solve/diagnostic payload.
 
 ``redl_current_derivative_update(...)``
    Pure JAX helper returning :math:`I'(s)` for ``low_beta`` and
@@ -204,8 +213,10 @@ testable helpers:
    ``AC_AUX_S/F`` applied.
 
 ``bootstrap_current_fixed_point(...)``
-   Driver that runs the VMEC/Redl iteration, writes per-stage inputs/WOUTs,
-   records JSON/CSV history, and optionally uses Anderson acceleration.
+   Driver that runs the VMEC/Redl iteration and records fixed-point history.
+   The first implementation is callback-friendly and does not yet write
+   per-stage WOUTs/JSON itself; examples can do that from the returned
+   ``BootstrapCurrentResult``.
 
 The first version may be a deterministic preconditioner outside the
 optimization variable vector.  A later version can wrap the converged fixed

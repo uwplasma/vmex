@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+import tempfile
 from typing import Any, Literal
 
 import numpy as np
@@ -24,6 +25,8 @@ import numpy as np
 from ._compat import jnp
 from .integrals import cumtrapz_s
 from .namelist import InData
+from .profiles import ELEMENTARY_CHARGE
+from .redl_bootstrap import polynomial_profile_and_derivative
 
 MU0 = 4e-7 * np.pi
 CurrentUpdatePolicy = Literal["low_beta", "lagged_pressure", "integrating_factor"]
@@ -61,6 +64,18 @@ class BootstrapCurrentIteration:
     fsq_total: float | None = None
 
 
+@dataclass(frozen=True)
+class BootstrapCurrentResult:
+    """Result returned by :func:`bootstrap_current_fixed_point`."""
+
+    indata: InData
+    history: tuple[BootstrapCurrentIteration, ...]
+    converged: bool
+    reason: str
+    last_run: Any | None = None
+    last_diagnostics: dict[str, Any] | None = None
+
+
 def _as_1d(name: str, value: Any):
     arr = jnp.asarray(value, dtype=jnp.float64)
     if int(arr.ndim) != 1:
@@ -91,6 +106,41 @@ def dpsi_ds_from_vmec_phiedge(phiedge: Any, *, signgs: int) -> Any:
     """
 
     return float(1 if int(signgs) >= 0 else -1) * jnp.asarray(phiedge, dtype=jnp.float64) / (2.0 * np.pi)
+
+
+def _pressure_derivative_pa_from_profile_coeffs(*, s, ne_coeffs, Te_coeffs, Ti_coeffs=None, Zeff_coeffs=1.0):
+    """Return ``d(e*(ne*Te + ni*Ti))/ds`` in Pascals for Redl profiles."""
+
+    s = _as_1d("s", s)
+    Ti_coeffs = Te_coeffs if Ti_coeffs is None else Ti_coeffs
+    ne_s, dne_ds = polynomial_profile_and_derivative(ne_coeffs, s)
+    Te_s, dTe_ds = polynomial_profile_and_derivative(Te_coeffs, s)
+    Ti_s, dTi_ds = polynomial_profile_and_derivative(Ti_coeffs, s)
+    Zeff_s, dZeff_ds = polynomial_profile_and_derivative(jnp.atleast_1d(jnp.asarray(Zeff_coeffs)), s)
+    Zeff_s = jnp.maximum(Zeff_s, jnp.asarray(1.0, dtype=jnp.float64))
+    ni_s = ne_s / Zeff_s
+    dni_ds = (dne_ds * Zeff_s - ne_s * dZeff_ds) / (Zeff_s * Zeff_s)
+    return ELEMENTARY_CHARGE * (dne_ds * Te_s + ne_s * dTe_ds + dni_ds * Ti_s + ni_s * dTi_ds)
+
+
+def _current_derivative_from_indata(indata: InData, s: Any, pcurr_type: str) -> Any:
+    """Return the current derivative represented by a VMEC input when available."""
+
+    s = _as_1d("s", s)
+    pcurr_type_l = str(pcurr_type).strip().lower()
+    if pcurr_type_l == "cubic_spline_ip":
+        knots = jnp.asarray(indata.scalars.get("AC_AUX_S", []), dtype=jnp.float64)
+        values = jnp.asarray(indata.scalars.get("AC_AUX_F", []), dtype=jnp.float64)
+        if int(knots.size) >= 2 and int(values.size) == int(knots.size):
+            return jnp.interp(s, knots, values)
+    if pcurr_type_l == "power_series":
+        coeffs = jnp.asarray(indata.scalars.get("AC", []), dtype=jnp.float64).reshape(-1)
+        if int(coeffs.size) > 0:
+            out = jnp.zeros_like(s, dtype=jnp.float64)
+            for coeff in coeffs[::-1]:
+                out = out * s + coeff
+            return out
+    return jnp.zeros_like(s, dtype=jnp.float64)
 
 
 def redl_current_rhs(*, jdotB_redl: Any, bdotb: Any, dpsi_ds: Any) -> Any:
@@ -313,11 +363,232 @@ def bootstrap_current_update_to_indata(
     return out, profile
 
 
+def _default_bootstrap_solve_fn(indata: InData, *, run_kwargs: dict[str, Any] | None = None):
+    """Run VMEC from an in-memory input by writing a temporary input deck."""
+
+    from .driver import run_fixed_boundary
+    from .namelist import write_indata
+
+    kwargs = {} if run_kwargs is None else dict(run_kwargs)
+    kwargs.setdefault("verbose", False)
+    with tempfile.TemporaryDirectory(prefix="vmec_jax_bootstrap_current_") as tmp:
+        path = f"{tmp}/input.bootstrap_current"
+        write_indata(path, indata)
+        return run_fixed_boundary(path, **kwargs)
+
+
+def _default_redl_diagnostics_fn(
+    run,
+    indata: InData,
+    *,
+    options: BootstrapCurrentOptions,
+    ne_coeffs,
+    Te_coeffs,
+    Ti_coeffs=None,
+    Zeff_coeffs=1.0,
+):
+    """Return Redl/VMEC diagnostics from a completed vmec_jax run."""
+
+    from .finite_beta import (
+        redl_bootstrap_mismatch_from_state,
+    )
+    from .wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
+
+    redl = redl_bootstrap_mismatch_from_state(
+        state=run.state,
+        static=run.static,
+        indata=run.indata,
+        signgs=int(run.signgs),
+        helicity_n=int(options.helicity_n),
+        ne_coeffs=ne_coeffs,
+        Te_coeffs=Te_coeffs,
+        Ti_coeffs=Ti_coeffs,
+        Zeff_coeffs=Zeff_coeffs,
+        surfaces=options.surfaces,
+    )
+    geom = redl["geometry"]
+    s = jnp.asarray(geom["s"], dtype=jnp.float64)
+    out = {
+        "s": s,
+        "jdotB_redl": redl["jdotB_redl"],
+        "bdotb": geom["fsa_B2"],
+        "dpds": _pressure_derivative_pa_from_profile_coeffs(
+            s=s,
+            ne_coeffs=ne_coeffs,
+            Te_coeffs=Te_coeffs,
+            Ti_coeffs=Ti_coeffs,
+            Zeff_coeffs=Zeff_coeffs,
+        ),
+        "dpsi_ds": dpsi_ds_from_vmec_phiedge(run.indata.get_float("PHIEDGE", 1.0), signgs=int(run.signgs)),
+        "signgs": int(run.signgs),
+        "mismatch_norm": jnp.linalg.norm(jnp.asarray(redl["residuals1d"], dtype=jnp.float64))
+        / jnp.sqrt(jnp.maximum(jnp.asarray(jnp.size(redl["residuals1d"]), dtype=jnp.float64), 1.0)),
+    }
+    try:
+        out["aspect"] = float(equilibrium_aspect_ratio_from_state(state=run.state, static=run.static))
+    except Exception:
+        pass
+    try:
+        _chips, iotas, _iotaf = equilibrium_iota_profiles_from_state(
+            state=run.state,
+            static=run.static,
+            indata=run.indata,
+            signgs=int(run.signgs),
+        )
+        out["mean_iota"] = float(np.nanmean(np.asarray(iotas, dtype=float)))
+    except Exception:
+        pass
+    diag = getattr(getattr(run, "result", None), "diagnostics", {}) or {}
+    fsqr = diag.get("final_fsqr", diag.get("fsqr"))
+    fsqz = diag.get("final_fsqz", diag.get("fsqz"))
+    fsql = diag.get("final_fsql", diag.get("fsql"))
+    if fsqr is not None and fsqz is not None and fsql is not None:
+        try:
+            out["fsq_total"] = float(fsqr) + float(fsqz) + float(fsql)
+        except Exception:
+            pass
+    return out
+
+
+def bootstrap_current_fixed_point(
+    indata: InData,
+    *,
+    options: BootstrapCurrentOptions,
+    solve_fn=None,
+    diagnostics_fn=None,
+    ne_coeffs=None,
+    Te_coeffs=None,
+    Ti_coeffs=None,
+    Zeff_coeffs=1.0,
+    run_kwargs: dict[str, Any] | None = None,
+) -> BootstrapCurrentResult:
+    """Run a VMEC/Redl fixed-point iteration for a self-consistent current.
+
+    The loop is deliberately callback-friendly: production use can rely on the
+    default vmec_jax solve and Redl diagnostic callbacks, while tests and
+    workflow studies can inject cheap deterministic callbacks.  The optimized
+    quantity is the VMEC current profile only; plasma boundary coefficients are
+    not touched by this helper.
+    """
+
+    if int(options.max_fixed_point_iter) < 1:
+        raise ValueError("max_fixed_point_iter must be at least 1")
+    if int(options.anderson_depth) != 0:
+        raise NotImplementedError("Anderson acceleration is planned but not implemented yet")
+    if solve_fn is None:
+        solve_fn = lambda current_indata: _default_bootstrap_solve_fn(current_indata, run_kwargs=run_kwargs)
+    if diagnostics_fn is None:
+        if ne_coeffs is None or Te_coeffs is None:
+            raise ValueError("ne_coeffs and Te_coeffs are required when diagnostics_fn is not provided")
+
+        def diagnostics_fn(run, current_indata):
+            return _default_redl_diagnostics_fn(
+                run,
+                current_indata,
+                options=options,
+                ne_coeffs=ne_coeffs,
+                Te_coeffs=Te_coeffs,
+                Ti_coeffs=Ti_coeffs,
+                Zeff_coeffs=Zeff_coeffs,
+            )
+
+    current_indata = deepcopy(indata)
+    history: list[BootstrapCurrentIteration] = []
+    last_run = None
+    last_diag: dict[str, Any] | None = None
+    converged = False
+    reason = "max_fixed_point_iter"
+
+    for iteration in range(1, int(options.max_fixed_point_iter) + 1):
+        last_run = solve_fn(current_indata)
+        diag = diagnostics_fn(last_run, current_indata)
+        last_diag = dict(diag)
+        s = _as_1d("diagnostics['s']", diag["s"])
+        signgs = int(diag.get("signgs", getattr(last_run, "signgs", 1)))
+        dpsi_ds = diag.get("dpsi_ds", dpsi_ds_from_vmec_phiedge(current_indata.get_float("PHIEDGE", 1.0), signgs=signgs))
+        if options.policy == "integrating_factor":
+            update = redl_current_integrating_factor_update(
+                s=s,
+                jdotB_redl=diag["jdotB_redl"],
+                bdotb=diag["bdotb"],
+                dpsi_ds=dpsi_ds,
+                dpds=diag["dpds"],
+            )
+            proposed_derivative = update["current_derivative"]
+            proposed_current = update["current"]
+        else:
+            previous_current = diag.get("previous_current")
+            if previous_current is None:
+                previous_current = integrate_current_derivative(
+                    s,
+                    _current_derivative_from_indata(current_indata, s, options.pcurr_type),
+                )
+            proposed_derivative = redl_current_derivative_update(
+                s=s,
+                jdotB_redl=diag["jdotB_redl"],
+                bdotb=diag["bdotb"],
+                dpsi_ds=dpsi_ds,
+                dpds=diag.get("dpds"),
+                previous_current=previous_current,
+                policy=options.policy,
+            )
+            proposed_current = integrate_current_derivative(s, proposed_derivative)
+
+        old_derivative = _current_derivative_from_indata(current_indata, s, options.pcurr_type)
+        new_derivative = damp_current_profile(old_derivative, proposed_derivative, options.damping)
+        new_current = integrate_current_derivative(s, new_derivative)
+        update_norm = jnp.linalg.norm(new_derivative - old_derivative) / (
+            jnp.linalg.norm(old_derivative) + jnp.linalg.norm(proposed_derivative) + jnp.asarray(1.0e-300)
+        )
+        next_indata, profile = bootstrap_current_update_to_indata(
+            current_indata,
+            s=s,
+            current_derivative=new_derivative,
+            current=new_current if options.pcurr_type == "cubic_spline_ip" else proposed_current,
+            signgs=signgs,
+            pcurr_type=options.pcurr_type,
+        )
+        mismatch_norm = float(np.asarray(diag.get("mismatch_norm", np.nan), dtype=np.float64))
+        current_update_norm = float(np.asarray(update_norm, dtype=np.float64))
+        history.append(
+            BootstrapCurrentIteration(
+                iteration=int(iteration),
+                mismatch_norm=mismatch_norm,
+                current_update_norm=current_update_norm,
+                curtor=float(profile["curtor"]),
+                ac_aux_s=tuple(float(x) for x in np.asarray(profile["ac_aux_s"], dtype=np.float64)),
+                ac_aux_f=tuple(float(x) for x in np.asarray(profile["ac_aux_f"], dtype=np.float64)),
+                beta_total=None if diag.get("beta_total") is None else float(diag["beta_total"]),
+                aspect=None if diag.get("aspect") is None else float(diag["aspect"]),
+                mean_iota=None if diag.get("mean_iota") is None else float(diag["mean_iota"]),
+                fsq_total=None if diag.get("fsq_total") is None else float(diag["fsq_total"]),
+            )
+        )
+        current_indata = next_indata
+        if current_update_norm <= float(options.current_tol) and (
+            not np.isfinite(mismatch_norm) or mismatch_norm <= float(options.mismatch_tol)
+        ):
+            converged = True
+            reason = "current_and_mismatch_tolerances"
+            break
+
+    return BootstrapCurrentResult(
+        indata=current_indata,
+        history=tuple(history),
+        converged=bool(converged),
+        reason=reason,
+        last_run=last_run,
+        last_diagnostics=last_diag,
+    )
+
+
 __all__ = [
     "BootstrapCurrentIteration",
     "BootstrapCurrentOptions",
+    "BootstrapCurrentResult",
     "CurrentUpdatePolicy",
     "apply_current_profile_to_indata",
+    "bootstrap_current_fixed_point",
     "bootstrap_current_update_to_indata",
     "damp_current_profile",
     "dpsi_ds_from_vmec_phiedge",

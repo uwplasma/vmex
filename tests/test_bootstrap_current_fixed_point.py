@@ -163,3 +163,75 @@ def test_damping_and_input_validation_branches():
 def test_vmec_flux_derivative_sign_convention():
     assert float(vj.dpsi_ds_from_vmec_phiedge(0.2, signgs=1)) == pytest.approx(0.2 / (2.0 * np.pi))
     assert float(vj.dpsi_ds_from_vmec_phiedge(0.2, signgs=-1)) == pytest.approx(-0.2 / (2.0 * np.pi))
+
+
+def test_bootstrap_current_fixed_point_runs_callback_loop_to_convergence():
+    s = jnp.asarray([0.0, 0.5, 1.0], dtype=jnp.float64)
+    target_derivative = jnp.asarray([0.5, 1.0, 1.5], dtype=jnp.float64)
+    bdotb = 2.0 * jnp.ones_like(s)
+    dpsi_ds = 0.03
+    jdotb_redl = target_derivative * bdotb / (2.0 * np.pi * dpsi_ds)
+    indata = InData(
+        scalars={
+            "PHIEDGE": 2.0 * np.pi * dpsi_ds,
+            "PCURR_TYPE": "cubic_spline_ip",
+            "CURTOR": 0.0,
+            "NCURR": 1,
+            "AC": [1.0],
+            "AC_AUX_S": [0.0, 0.5, 1.0],
+            "AC_AUX_F": [0.0, 0.0, 0.0],
+        },
+        indexed={},
+    )
+    solve_inputs = []
+
+    class FakeRun:
+        signgs = 1
+
+    def solve_fn(current_indata):
+        solve_inputs.append(tuple(float(x) for x in current_indata.scalars["AC_AUX_F"]))
+        return FakeRun()
+
+    def diagnostics_fn(_run, _current_indata):
+        return {
+            "s": s,
+            "jdotB_redl": jdotb_redl,
+            "bdotb": bdotb,
+            "dpds": jnp.zeros_like(s),
+            "dpsi_ds": dpsi_ds,
+            "signgs": 1,
+            "mismatch_norm": 0.0,
+            "aspect": 7.0,
+        }
+
+    result = vj.bootstrap_current_fixed_point(
+        indata,
+        options=vj.BootstrapCurrentOptions(
+            helicity_n=1,
+            damping=1.0,
+            current_tol=1.0e-12,
+            mismatch_tol=1.0e-12,
+            max_fixed_point_iter=4,
+        ),
+        solve_fn=solve_fn,
+        diagnostics_fn=diagnostics_fn,
+    )
+
+    assert result.converged
+    assert result.reason == "current_and_mismatch_tolerances"
+    assert len(result.history) == 2
+    assert solve_inputs[0] == (0.0, 0.0, 0.0)
+    np.testing.assert_allclose(solve_inputs[1], np.asarray(target_derivative), rtol=1.0e-12, atol=1.0e-12)
+    np.testing.assert_allclose(result.indata.scalars["AC_AUX_F"], np.asarray(target_derivative))
+    assert result.indata.scalars["CURTOR"] == pytest.approx(1.0)
+    assert result.history[-1].current_update_norm == pytest.approx(0.0, abs=1.0e-14)
+    assert result.history[-1].aspect == pytest.approx(7.0)
+
+
+def test_bootstrap_current_fixed_point_requires_redl_profiles_for_default_diagnostics():
+    with pytest.raises(ValueError, match="ne_coeffs and Te_coeffs"):
+        vj.bootstrap_current_fixed_point(
+            InData(scalars={}, indexed={}),
+            options=vj.BootstrapCurrentOptions(helicity_n=0, max_fixed_point_iter=1),
+            solve_fn=lambda _indata: object(),
+        )
