@@ -549,11 +549,12 @@ def _minimal_or_circular_qi_case(
             "max_elongation": float(base.get("max_elongation", 8.2)),
             "smooth_qi_max": float(base.get("qi_gate_smooth_max", 2.0e-3)),
             "legacy_qi_max": float(base.get("qi_gate_legacy_max", 2.0e-3)),
-            # The reference scan is a deterministic proposal generator for
-            # circular/minimal seeds.  Do not let its one-evaluation bookkeeping
-            # solve become the final accepted result; the local cleanup stages
-            # below must run and own promotion.
-            "accept_as_baseline": False,
+            # The reference scan is a deterministic proposal generator and a
+            # safe fallback for circular/minimal seeds.  Local cleanup stages
+            # still run and can promote better candidates, but a failed cleanup
+            # must not replace a lower-QI reference candidate with a worse
+            # final state.
+            "accept_as_baseline": True,
         }
     )
     local_stages = []
@@ -563,14 +564,26 @@ def _minimal_or_circular_qi_case(
             int(base.get("max_nfev", MINIMAL_QI_LOCAL_STAGE_MIN_NFEV)),
             MINIMAL_QI_LOCAL_STAGE_MIN_NFEV,
         )
+        direct_mode_override = (
+            {}
+            if ("stage_modes" in stage or "stage_mode_limits" in stage)
+            else {"stage_modes": (int(max_mode),), "use_mode_continuation": False}
+        )
         local_stages.append(
             {
                 **stage,
                 "max_nfev": stage_nfev,
+                **direct_mode_override,
+                # Minimal/circular seeds may need to move far from a reference
+                # candidate that is QI-safe but too high-aspect.  Keep the
+                # stage policy case-specific, but make aspect localization
+                # explicit for the common aspect-5 showcase lane.
+                "aspect_weight": max(float(stage.get("aspect_weight", 0.0)), 4.0),
                 # Showcase and staged-runner --max-nfev should be the local
                 # optimizer budget for these reference-seeded cases, not only a
                 # ceiling over legacy one-evaluation audit stages.
                 "use_showcase_max_nfev": True,
+                "use_showcase_max_mode": True,
             }
         )
     return {

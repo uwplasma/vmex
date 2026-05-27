@@ -306,6 +306,28 @@ def test_optimizer_private_policy_error_branches(monkeypatch):
     assert opt._profile["scan_unattributed_total"]["wall_time_s"] == pytest.approx(3.0)
 
 
+def test_gpu_projected_replay_policy_is_mode3_stellsym_only_by_default(monkeypatch):
+    monkeypatch.delenv("VMEC_JAX_OPT_PROJECTED_REPLAY_RESIDUALS", raising=False)
+
+    opt = _run_ready_optimizer()
+    opt._solver_device_name = "gpu"
+    opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=False))
+
+    assert opt._projected_replay_residuals_enabled(24) is False
+    assert opt._projected_replay_residuals_enabled(48) is True
+
+    opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=True))
+    assert opt._projected_replay_residuals_enabled(48) is False
+    assert opt._lasym_replay_column_chunk(48) == 24
+
+    opt._solver_device_name = "cpu"
+    opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=False))
+    assert opt._projected_replay_residuals_enabled(80) is False
+
+    monkeypatch.setenv("VMEC_JAX_OPT_PROJECTED_REPLAY_RESIDUALS", "1")
+    assert opt._projected_replay_residuals_enabled(1) is True
+
+
 def test_optimizer_backend_name_preserves_explicit_device_and_falls_back(monkeypatch):
     import vmec_jax._compat as compat
 

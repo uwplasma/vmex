@@ -109,6 +109,21 @@ def test_cli_plot_mode_dispatches_without_solver(monkeypatch, tmp_path: Path) ->
     assert calls == [(wout.resolve(), (tmp_path / "plots").resolve())]
 
 
+def test_cli_boozmn_plot_helper_reports_generated_files(monkeypatch, tmp_path: Path, capsys) -> None:
+    saved = {
+        "contours": tmp_path / "plots" / "booz_contours.png",
+        "spectra": tmp_path / "plots" / "booz_spectra.png",
+    }
+    monkeypatch.setitem(sys.modules, "vmec_jax.plotting", SimpleNamespace(plot_boozmn=lambda path, *, outdir: saved))
+
+    cli._plot_boozmn_file(tmp_path / "boozmn_case.nc", tmp_path / "plots")
+
+    out = capsys.readouterr().out
+    assert "Plotting Boozer output boozmn_case.nc" in out
+    assert "booz_contours.png" in out
+    assert "booz_spectra.png" in out
+
+
 def test_cli_test_mode_copies_packaged_input_solves_and_plots(monkeypatch, tmp_path: Path, capsys) -> None:
     outdir = tmp_path / "demo"
     calls = {}

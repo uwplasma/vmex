@@ -96,6 +96,8 @@ avoiding exactly-zero Jacobian columns in direct max-mode stress tests.  The
 lower-level staged QI policy also has a mode-1 target-helicity preconditioner
 with the deterministic hint set ``RBC(1,0)``, ``ZBS(1,0)``, ``RBC(-1,1)``,
 ``ZBS(-1,1)``, ``RBC(1,1)``, and ``ZBS(1,1)`` in VMEC input-index convention.
+The common-minimal showcase uses a ``1e-3`` target-helicity hint by default;
+the raw input decks remain unchanged.
 The QA and QP common-minimal rows additionally use an explicit
 optimization-time reference-family preseed without modifying the raw input
 decks: QA blends the active low-order RBC/ZBS space 25% toward
@@ -104,23 +106,39 @@ This gives the transform residual a usable derivative before local exact
 optimization and is recorded in ``showcase_case.json``.
 
 The bounded common-seed showcase runner maps those inputs to QI NFP=1/2/3/4,
-QA NFP=2, QH NFP=4, and QP NFP=2.  The QI rows dispatch through
+QA NFP=2/3, QH NFP=3/4, and QP NFP=2/3/4 for the full common-minimal target matrix
+(``qp_nfp1`` is also available as a stress row).  The QI rows dispatch through
 ``examples/optimization/qi_staged_runner.py`` to the standalone
 ``QI_optimization.py`` staged/reference-family policy rather than the simpler
-quasisymmetry sweep path.  Current checked-in artifacts do not yet contain
-non-stale common-minimal QI completions:
+quasisymmetry sweep path.  The checked-in objective panel and summary table
+currently contain the synced aspect-5, ``max_mode=5`` QA/QH/QP GPU rows.  The
+common-minimal QI rows remain open; the separate QI NFP panel documents
+reviewed case-gated QI coverage instead of the uniform common-minimal matrix:
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_minimal_seed_showcase.py \
-     --cases all --backend-label cpu --solver-device cpu --worker-jax-platforms cpu \
-     --policy continuation --max-mode 3 --ess on \
-     --max-nfev 30 --continuation-nfev 20 \
-     --inner-max-iter 120 --trial-max-iter 120 \
-     --inner-ftol 1e-9 --trial-ftol 1e-9 --case-timeout-s 1800 --rerun
-   PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py
+   PYTHONPATH=. JAX_PLATFORMS=cuda python3 examples/optimization/generate_minimal_seed_showcase.py \
+     --cases qa_nfp2,qa_nfp3,qh_nfp3,qh_nfp4,qp_nfp2,qp_nfp3,qp_nfp4,qi_nfp1,qi_nfp2,qi_nfp3,qi_nfp4 \
+     --backend-label gpu --solver-device gpu --worker-jax-platforms cuda \
+     --policy continuation --max-mode 5 --ess on \
+     --max-nfev 60 --continuation-nfev 20 \
+     --inner-max-iter 550 --inner-ftol 1e-10 \
+     --trial-max-iter 550 --trial-ftol 1e-10 \
+     --ess-alpha 1.2 --case-timeout-s 7200 --rerun
+   PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py --publication-matrix
 
-For a clean reproduction, keep ``--rerun`` on the generator.  Without it,
+For a bounded one-case smoke render after a timeout or partial QI checkpoint,
+use:
+
+.. code-block:: bash
+
+   PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py \
+     --output-root /path/to/minimal_seed_showcase \
+     --figure-dir /path/to/figures \
+     --cases qi_nfp1 --skip-missing
+
+For a clean reproduction, keep ``--rerun`` on the generator.  Replace the three
+CUDA/GPU flags with ``cpu`` for a slower local CPU-only reproduction.  Without it,
 existing successful ``showcase_case.json`` rows are reused, which can leave old
 rows on disk; the renderer skips known-stale rows by default and
 ``--include-stale`` should be reserved for debugging.  The current
@@ -132,17 +150,14 @@ legacy case names ``nfp1_qi``, ``nfp2_qi``, ``qi_stel_seed_3127``, and
 common-minimal staged-QI evidence.  Any QA/QP showcase rows without
 ``reference_preseed`` provenance also predate the current common-seed policy.
 
-The saved CPU stress-test panel below is deliberately included as a
-failure-revealing artifact.  The renderer skips known-stale rows; in this
-checkout ``qh_nfp4`` and ``qp_nfp2`` currently reach the active metadata and
-completion gates.  ``qp_nfp2`` is still a refinement target because its final
-quasisymmetry residual is larger than the promoted README examples.
-``qi_circular_nfp1`` and ``qa_nfp2`` remain non-promoted stress rows in the
-summary CSV, and current non-stale ``minimal_nfp1_qi``/``minimal_nfp2_qi``/
-``minimal_nfp3_qi``/``minimal_nfp4_qi`` outputs are missing.  Regenerate with
-the command above before changing those promotion claims.  Until the remaining
-rows pass, this is a compact regression target for the seed-robust optimization
-lane, not a publication-quality optimization result.
+The saved objective panel below is a compact status artifact for the current
+common-minimal QA/QH/QP mode-5 rows.  The table includes QA NFP=2/3, QH
+NFP=3/4, and QP NFP=2/3/4.  ``qp_nfp4`` is intentionally retained as a weak
+stress row because it terminates away from the aspect-5 target and has a large
+QP residual.  Current non-stale ``minimal_nfp1_qi``/``minimal_nfp2_qi``/
+``minimal_nfp3_qi``/``minimal_nfp4_qi`` outputs are still missing from the
+common-minimal summary; do not infer QI common-seed success from the separate
+case-gated QI coverage panel.
 
 .. image:: _static/figures/minimal_seed_showcase_objective_panel.png
    :width: 100%
@@ -155,8 +170,9 @@ final LCFS, full best-so-far objective history, and initial/final Boozer
 ``|B|`` line contours.  Optimization-time target-helicity or reference-family
 preseeds are tracked separately in the CSV via ``stage_seed_kind`` and
 ``stage_seed_input`` so a later stage input cannot be mistaken for the raw
-initial seed.  It is a diagnostic status artifact, not a README promotion
-panel: currently it covers the non-stale QA/QH/QP stress rows while the current
+initial seed.  The checked-in state panel is retained as a diagnostic status
+artifact and can lag the objective/CSV refresh; regenerate it from the same
+output root before using geometry panels as promotion evidence.  The current
 minimal-seed QI rows remain missing.
 
 .. image:: _static/figures/minimal_seed_showcase_state_panel.png
@@ -917,6 +933,13 @@ each completed stage.  If a later high-mode/QI stage times out, the final
 the last accepted objective, aspect, iota, QI, mirror, elongation, timing, and
 stage label.  These partial rows are useful diagnostics, but they are not
 promoted as README best rows unless their independent physics gates pass.
+Standalone QI subprocess runs also write the same root checkpoint plus
+per-stage ``qi_stage_checkpoint.json`` files immediately after each completed
+continuation stage, before final Boozer audits or later high-mode stages can
+time out.  For checkpoint/profiling probes, the QI example accepts
+``--qi-mboz``, ``--qi-nboz``, ``--qi-nphi``, ``--qi-nalpha``, and
+``--qi-n-bounce`` overrides; production scripts should usually leave the
+top-level ``OPT_QI_RESOLUTION`` defaults in place.
 
 To recreate one row, restrict ``--policy`` and ``--problems``.  For example,
 this reruns the checked-in archived README QA row:

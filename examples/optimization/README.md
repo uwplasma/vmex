@@ -89,7 +89,8 @@ cleanup.
 The lower-level QI staged policy also
 has a mode-1 target-helicity preconditioner with the deterministic hint set
 `RBC(1,0)`, `ZBS(1,0)`, `RBC(-1,1)`, `ZBS(-1,1)`, `RBC(1,1)`, and `ZBS(1,1)`
-in VMEC input-index convention.
+in VMEC input-index convention.  The minimal-seed showcase uses a `1e-3`
+target-helicity hint by default; the raw seed files remain exactly minimal.
 The QA and QP common-minimal rows also use an explicit optimization-time
 reference-family preseed: QA blends active low-order RBC/ZBS terms 25% toward
 `input.nfp2_QA_omnigenity`, and QP blends 10% toward `input.nfp2_QI`.  This is
@@ -97,26 +98,41 @@ recorded in `showcase_case.json`; rows that lack that provenance predate the
 current seed-robustness policy.
 
 The bounded common-seed showcase is a stress test, not a best-result table.  It
-maps the configured minimal seeds to QI NFP=1/2/3/4, QA NFP=2, QH NFP=4, and QP
-NFP=2, then renders the failure-revealing objective panel used by the docs.  The
+maps the configured minimal seeds to QI NFP=1/2/3/4, QA NFP=2/3, QH NFP=3/4,
+and QP NFP=2/3/4 for the full common-minimal target matrix; `qp_nfp1` is also available
+as a stress row.  It then renders the failure-revealing objective panel used by the docs.  The
 QI rows dispatch through `QI_optimization.py` via `qi_staged_runner.py`, so the
 common minimal seeds use the same staged/reference-family QI policy as the
 standalone QI example instead of the simpler quasisymmetry sweep path.  The
-checked-in panel is intentionally conservative: the renderer skips stale QI rows
-and only promotes rows with current provenance, so missing QI NFP rows indicate
-open validation work rather than successful hidden results.
+checked-in objective panel is intentionally conservative: it currently contains
+synced aspect-5, `max_mode=5` QA/QH/QP rows, keeps QP NFP=4 visible as a weak
+stress row, and does not fabricate missing common-minimal QI rows.  Missing QI
+NFP rows indicate open validation work rather than successful hidden results.
 
 ```bash
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_minimal_seed_showcase.py \
-  --cases all --backend-label cpu --solver-device cpu --worker-jax-platforms cpu \
-  --policy continuation --max-mode 3 --ess on \
-  --max-nfev 30 --continuation-nfev 20 \
-  --inner-max-iter 120 --trial-max-iter 120 \
-  --inner-ftol 1e-9 --trial-ftol 1e-9 --case-timeout-s 1800 --rerun
-PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py
+PYTHONPATH=. JAX_PLATFORMS=cuda python3 examples/optimization/generate_minimal_seed_showcase.py \
+  --cases qa_nfp2,qa_nfp3,qh_nfp3,qh_nfp4,qp_nfp2,qp_nfp3,qp_nfp4,qi_nfp1,qi_nfp2,qi_nfp3,qi_nfp4 \
+  --backend-label gpu --solver-device gpu --worker-jax-platforms cuda \
+  --policy continuation --max-mode 5 --ess on \
+  --max-nfev 60 --continuation-nfev 20 \
+  --inner-max-iter 550 --inner-ftol 1e-10 \
+  --trial-max-iter 550 --trial-ftol 1e-10 \
+  --ess-alpha 1.2 --case-timeout-s 7200 --rerun
+PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py --publication-matrix
 ```
 
-Keep `--rerun` for a fresh local reproduction.  Without it, existing
+For a bounded smoke render after one case or partial timeout, keep roots explicit
+and filter to the attempted case:
+
+```bash
+PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py \
+  --output-root /path/to/minimal_seed_showcase \
+  --figure-dir /path/to/figures \
+  --cases qi_nfp1 --skip-missing
+```
+
+Use `cpu` for `JAX_PLATFORMS`, `--solver-device`, and `--worker-jax-platforms`
+for a slower local CPU-only reproduction.  Keep `--rerun` for a fresh local reproduction.  Without it, existing
 successful `showcase_case.json` rows are reused and can leave old outputs on
 disk; the renderer skips known-stale rows by default, and `--include-stale`
 should be reserved for debugging.  Current common-minimal QI rows use policy
@@ -214,6 +230,11 @@ Optimizer and output controls are also top-level variables, including
 For common-minimal seed studies, also inspect `SIMPLE_SEED_PERTURBATION` and
 `STAGE_MODES`; these are ordinary script-level controls, not hidden solver
 settings.
+QI runs also expose `OPT_QI_RESOLUTION` at the top of `QI_optimization.py`.
+Production examples use the script defaults; sweep/debug subprocesses may pass
+`--qi-mboz`, `--qi-nboz`, `--qi-nphi`, `--qi-nalpha`, and `--qi-n-bounce` to
+lower Boozer/QI resolution for checkpoint or profiling probes without editing
+the script.
 
 For reproducible comparison artifacts, use the sweep driver rather than a
 single edited script.  The current production sweep runs QI directly from its

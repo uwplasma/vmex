@@ -1,9 +1,10 @@
 # VMEC-JAX Research-Grade Roadmap
 
-Last updated: 2026-05-23
+Last updated: 2026-05-27
 Primary branch: `main`
-Baseline release: `v0.0.12`
-Latest known green `main` CI: `1037744`
+Baseline release: `v0.0.13`
+Latest known green `main` CI: `152360f`
+Current candidate: plan refresh after `152360f`
 
 This is the living execution plan for making `vmec_jax` accurate, fast,
 differentiable, documented, and usable by external researchers. Update it when
@@ -59,10 +60,16 @@ acceptance criteria or evidence changes.
   the local required gate passed with `2153 passed, 20 skipped, 107 deselected`
   in 8:05 and 95.10% coverage; full Sphinx also passed warning-clean. The
   matching GitHub Actions run passed docs, build, parity dry-run, physics smoke,
-  and Python 3.10/3.11/3.12 fast tests. The optional converged VMEC2000 parity
-  gate remains opt-in with `VMEC2000_INTEGRATION=1`. `solve.py` still dominates
-  the missing-line surface, so future coverage should come from physics-gated
-  refactor seams rather than scaffolding.
+  and Python 3.10/3.11/3.12 fast tests. On 2026-05-27 after the QI workflow
+  checkpointing, QI resolution-override, and minimal-seed helicity-perturbation
+  patches, the clean local required gate passed with `2328 passed, 20 skipped,
+  109 deselected, 1 xfailed` and 95.00% coverage in about 6:25; full Sphinx
+  also passed with warnings as errors. GitHub Actions is green through
+  `152360f`. The optional
+  converged VMEC2000 parity gate remains opt-in with
+  `VMEC2000_INTEGRATION=1`. `solve.py` still dominates the missing-line
+  surface, so future coverage should come from physics-gated refactor seams
+  rather than scaffolding.
 - VMEC2000 converged-wout parity now has a fast bundled matrix gate across
   fixed/free, axisymmetric/non-axisymmetric, LASYM, and single/multigrid
   representatives. The executable-backed end-state gate remains opt-in:
@@ -89,6 +96,16 @@ acceptance criteria or evidence changes.
   aspect `3.465`, iota `-1.0366` in 1.4 CPU minutes. NFP=4 remains deferred
   rather than completed robustness. The Boozer `|B|` panels
   use line contours only.
+- QI continuation-stage checkpointing is now written at workflow level and by
+  standalone QI subprocesses: completed stages emit per-stage
+  `qi_stage_checkpoint.json` files and a root `stage_checkpoint.json` before
+  later high-mode stages or final Boozer audits can time out. Low-resolution
+  remote GPU smoke validation confirmed the root and per-stage files are
+  present after a later-stage timeout.
+- The common-minimal showcase now uses a deterministic `1e-3`
+  target-helicity perturbation on active hint modes. A focused remote QA NFP=3
+  amplitude study showed `1e-3` reached the iota/aspect gates with a lower final
+  objective than `1e-4`; raw VMEC seed decks remain unchanged.
 - `solve.py`, `wout.py`, `free_boundary.py`, `driver.py`, and optimization
   modules are too large and need staged refactoring after parity gates are locked.
 - The first staged solver/wout refactor has centralized LCFS R/Z residual edge
@@ -357,7 +374,7 @@ Acceptance:
 
 ## Progress Snapshot
 
-Updated 2026-05-22 after the bundled profile/current wout parity gates, QI
+Updated 2026-05-27 after the bundled profile/current wout parity gates, QI
 selection hardening, exact-Jacobian host-materialization cleanup,
 continuation/exact-history hardening, LASYM-Boozer parity, release-checklist
 push, 85% and 90% coverage-gate pushes, optional SIMSOPT/VMEC2000 gate expansion, the
@@ -368,7 +385,9 @@ across boundary trials, detailed scan-timing diagnostics, reference-state wout
 roundtrip diagnostics, the green `main` CI run for `e90d1a2`, LASYM bsubv
 wout parity tightening, QI staged-history provenance cleanup, the v0.0.11
 release, the QI optimization driver split, and the May 22 helper/refactor
-coverage wave:
+coverage wave, the v0.0.13 release, the QI workflow checkpointing push, QI
+resolution-override coverage, and the May 27 minimal-seed helicity-perturbation
+update:
 
 - Continuation correctness: 100%. Source fix is implemented and covered by
   synthetic repeated-stage tests, a real boundary-projection stage test, and
@@ -413,8 +432,12 @@ coverage wave:
   legacy diagnostics from winning README/docs best-row selection.
   `QuasiIsodynamicResidualCeiling` now gives examples and users a differentiable
   soft-wall guard for mirror/elongation cleanup that preserves an accepted QI
-  basin. The remaining open cleanup is running and tuning the guarded mirror
-  schedule across unrelated seeds.
+  basin. Completed-stage QI checkpoint files are written before later-stage
+  timeouts, and the common-minimal showcase uses a `1e-3` target-helicity hint
+  after the QA NFP=3 remote amplitude study improved the final objective while
+  preserving iota/aspect gates. The remaining open cleanup is running and tuning
+  the guarded mirror schedule across unrelated seeds and completing stronger
+  multi-seed promotion evidence.
 - CPU/GPU performance: 97%. Backend-adaptive replay bucketing, scalar-gradient
   tangent reuse, detailed timing, and GPU-only preconditioner-output fusion are
   in place. Hot-path algebra and CPU/GPU fusion gating are now covered by
@@ -494,11 +517,12 @@ coverage wave:
   mechanics live in `qi_optimization_cases.py` and
   `qi_optimization_support.py`. Large
   solver/wout/free-boundary splits remain deferred behind parity gates.
-- Docs/release hygiene: latest released baseline is `v0.0.12`, with PyPI
+- Docs/release hygiene: latest released baseline is `v0.0.13`, with PyPI
   publication verified. Post-release `main` has local warning-clean Sphinx and a
-  clean 95% CI-equivalent coverage pass on `1037744`; the matching GitHub
-  Actions run passed docs/build/physics-smoke/parity-manifest jobs plus the
-  Python 3.10/3.11/3.12 fast-test matrix.
+  clean 95% CI-equivalent coverage pass through the May 27 candidate
+  (`2328 passed, 20 skipped, 109 deselected, 1 xfailed`, 95.00%). GitHub
+  Actions is green through `152360f`, carrying the minimal-seed
+  helicity-perturbation/docs update.
   Performance/discrete-adjoint/docs reflect the current replay and finite-beta
   policies, diagnostics docs cover detailed preconditioner timing, and a
   command-level release checklist now ties local gates, tools/validation

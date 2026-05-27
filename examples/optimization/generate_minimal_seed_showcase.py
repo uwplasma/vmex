@@ -29,16 +29,19 @@ Examples:
   # One quick representative case.
   python examples/optimization/generate_minimal_seed_showcase.py --cases qa_nfp2 --max-nfev 2 --continuation-nfev 2
 
-  # Full minimal/circular README lane on CPU.
-  PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_minimal_seed_showcase.py \\
-    --cases all --backend-label cpu --solver-device cpu --worker-jax-platforms cpu \\
-    --policy continuation --max-mode 3 --ess on \\
-    --max-nfev 30 --continuation-nfev 20 \\
-    --inner-max-iter 120 --trial-max-iter 120 \\
-    --inner-ftol 1e-9 --trial-ftol 1e-9 --case-timeout-s 1800 --rerun
+  # Full aspect-5 README/docs production lane.  Use the CUDA variant on
+  # production GPU hosts; use cpu/cpu/cpu for a slower local reproduction.
+  PYTHONPATH=. JAX_PLATFORMS=cuda python3 examples/optimization/generate_minimal_seed_showcase.py \\
+    --cases qa_nfp2,qa_nfp3,qh_nfp3,qh_nfp4,qp_nfp2,qp_nfp3,qp_nfp4,qi_nfp1,qi_nfp2,qi_nfp3,qi_nfp4 \\
+    --backend-label gpu --solver-device gpu --worker-jax-platforms cuda \\
+    --policy continuation --max-mode 5 --ess on \\
+    --max-nfev 60 --continuation-nfev 20 \\
+    --inner-max-iter 550 --inner-ftol 1e-10 \\
+    --trial-max-iter 550 --trial-ftol 1e-10 \\
+    --ess-alpha 1.2 --case-timeout-s 7200 --rerun
 
   # Render completed cases.
-  python examples/optimization/render_minimal_seed_showcase.py
+  python examples/optimization/render_minimal_seed_showcase.py --publication-matrix
 """
 
 from __future__ import annotations
@@ -70,6 +73,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import generate_qs_ess_sweep as sweep
+from qi_optimization_cases import QI_CASES
 import qi_staged_runner
 from vmec_jax.namelist import InData, read_indata, write_indata
 
@@ -223,7 +227,7 @@ PHYSICS_QA_IOTA_TOL = 0.08
 PHYSICS_QI_LEGACY_MAX = 2.0e-3
 PHYSICS_QI_MIRROR_MAX = 0.40
 PHYSICS_QI_ELONGATION_MAX = 12.0
-TARGET_HELICITY_SEED_AMPLITUDE = 1.0e-5
+TARGET_HELICITY_SEED_AMPLITUDE = 1.0e-3
 TARGET_HELICITY_SEED_MODE_TERMS = (
     ("RBC", (1, 0)),
     ("ZBS", (1, 0)),
@@ -507,6 +511,24 @@ def _qp_preseed_config_for_qi_case(
     )
 
 
+def _patch_qi_stage_budget(stage: dict[str, Any], *, budget: MinimalSeedBudget, max_mode: int) -> dict[str, Any]:
+    """Return a QI stage dictionary with showcase budgets applied.
+
+    The QI catalog contains reviewed stage policies.  The showcase command line
+    still owns the actual budget, so stages that opt in with
+    ``use_showcase_max_nfev`` inherit the requested production budget instead
+    of their quick local default.
+    """
+
+    out = dict(stage)
+    if bool(out.pop("use_showcase_max_nfev", False)):
+        out["max_nfev"] = int(budget.max_nfev)
+    if bool(out.pop("use_showcase_max_mode", False)) and "stage_mode_limits" not in out:
+        out["stage_modes"] = (int(max_mode),)
+        out["use_mode_continuation"] = False
+    return out
+
+
 def _write_showcase_metadata(
     output_dir: Path,
     *,
@@ -575,6 +597,12 @@ def _run_showcase_case(
     """Run one minimal-seed case with temporary sweep config overrides."""
 
     if case.problem == "qi":
+        qi_policy = QI_CASES.get(case.qi_policy_case or "qi_stel_seed_3127", {})
+        mirror_ramp_stages = tuple(
+            _patch_qi_stage_budget(stage, budget=budget, max_mode=max_mode)
+            for stage in qi_policy.get("mirror_ramp_stages", ())
+        )
+        boundary_reference = qi_policy.get("boundary_reference_preconditioner", {})
         # Give the inner QI subprocess room to catch TimeoutExpired, harvest
         # partial artifacts, and let the outer worker write case_result.json.
         qi_timeout_s = None
@@ -589,17 +617,23 @@ def _run_showcase_case(
                 policy=str(policy),
                 policy_case=case.qi_policy_case or "qi_stel_seed_3127",
                 reference_input=case.qi_reference_input,
-                reference_lambdas=None,
+                reference_accept_as_baseline=bool(boundary_reference.get("accept_as_baseline", False)),
                 backend_label=str(backend_label),
                 solver_device=solver_device,
                 worker_jax_platforms=worker_jax_platforms,
                 use_ess=bool(use_ess),
                 max_nfev=int(budget.max_nfev),
+                continuation_nfev=int(budget.continuation_nfev),
                 inner_max_iter=int(budget.inner_max_iter),
                 inner_ftol=float(budget.inner_ftol),
                 trial_max_iter=int(budget.trial_max_iter),
                 trial_ftol=float(budget.trial_ftol),
                 ess_alpha=float(budget.ess_alpha),
+                target_aspect=sweep.TARGET_ASPECT,
+                target_abs_iota_min=0.41,
+                max_mirror_ratio=0.30,
+                max_elongation=10.0,
+                mirror_ramp_stages=mirror_ramp_stages,
                 make_plots=False,
                 timeout_s=qi_timeout_s,
             )
@@ -872,7 +906,7 @@ def _parse_args() -> argparse.Namespace:
         help="Use 'inherit', 'cpu', or 'cuda'. The user-facing alias 'gpu' maps to 'cuda'.",
     )
     parser.add_argument("--policy", choices=("continuation", "direct"), default="continuation")
-    parser.add_argument("--max-mode", type=int, default=3)
+    parser.add_argument("--max-mode", type=int, default=5)
     parser.add_argument("--ess", choices=("on", "off"), default="on")
     parser.add_argument("--max-nfev", type=int, default=8)
     parser.add_argument("--continuation-nfev", type=int, default=8)

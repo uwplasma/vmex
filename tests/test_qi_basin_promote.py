@@ -226,14 +226,22 @@ def test_qi_reference_safe_filter_uses_summary_mirror_field() -> None:
     import examples.optimization.qi_optimization_support as support
 
     assert support.boundary_reference_record_is_qi_safe(
-        {"mirror": 0.29, "mean_iota": 0.43},
+        {"mirror": 0.29, "mean_iota": 0.43, "aspect": 5.2},
         max_mirror_ratio=0.30,
         abs_iota_min=0.41,
+        target_aspect=5.0,
     )
     assert not support.boundary_reference_record_is_qi_safe(
-        {"mirror": 0.34, "mean_iota": 0.43},
+        {"mirror": 0.34, "mean_iota": 0.43, "aspect": 5.2},
         max_mirror_ratio=0.30,
         abs_iota_min=0.41,
+        target_aspect=5.0,
+    )
+    assert not support.boundary_reference_record_is_qi_safe(
+        {"mirror": 0.29, "mean_iota": 0.43, "aspect": 6.6},
+        max_mirror_ratio=0.30,
+        abs_iota_min=0.41,
+        target_aspect=5.0,
     )
 
 

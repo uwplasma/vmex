@@ -42,6 +42,7 @@ TARGET_HELICITY_SEED_AMPLITUDE = 1.0e-5
 USE_REFERENCE_FAMILY_SEED = False  # True scans a nearby reference-family basin first.
 REFERENCE_INPUT_FILE = DATA_DIR / "input.nfp2_QI"
 REFERENCE_LAMBDAS = (0.995, 1.0, 1.005)
+BOUNDARY_REFERENCE_ACCEPT_AS_BASELINE = False  # True keeps the reference candidate as a safe fallback.
 
 # Optimizer parameters.
 METHOD = "scipy_matrix_free"  # Try "scipy", "gauss_newton", "lbfgs_adjoint", or "scalar_trust".
@@ -71,6 +72,7 @@ STAGE_MODES = vj.qi_stage_modes(
 )
 # Common alternatives:
 # STAGE_MODES = [1, 1, 2, 2, 3, 3]
+# MIRROR_RAMP_STAGES = ()
 # STAGE_MODE_POLICY = "repeat"
 # METHOD = "lbfgs_adjoint"
 # USE_REFERENCE_FAMILY_SEED = True
@@ -105,6 +107,24 @@ AUDIT_QI_RESOLUTION = dict(OPT_QI_RESOLUTION)
 
 
 vj.apply_qi_example_cli_overrides(globals())
+
+if "MIRROR_RAMP_STAGES" not in globals():
+    MIRROR_RAMP_STAGES = (
+        {
+            "name": "matrix_free_qi_mirror_cleanup",
+            "max_nfev": MAX_NFEV,
+            "stage_modes": tuple(STAGE_MODES),
+            "method": METHOD,
+            "use_mode_continuation": USE_MODE_CONTINUATION,
+            "mirror_threshold": MAX_MIRROR_RATIO,
+            "promotion_mirror_threshold": MAX_MIRROR_RATIO,
+            "mirror_weight": MIRROR_WEIGHT,
+            "elongation_weight": ELONGATION_WEIGHT,
+            "qi_ceiling_weight": QI_CEILING_WEIGHT,
+            "require_mirror_improvement": False,
+            "require_engineering_gate": True,
+        },
+    )
 
 QI_OPTIONS = vj.QuasiIsodynamicOptions(
     surfaces=SURFACES,
@@ -202,47 +222,60 @@ INPUT_FILE = vj.run_boundary_reference_preconditioner(
     ctx=QI_CONTEXT,
 )
 
-# Objective function. Add/remove terms here to change the science problem.
-aspect = vj.AspectRatio()
-iota_floor = vj.AbsMeanIotaFloor(TARGET_ABS_IOTA_MIN)
-qi = vj.QuasiIsodynamicResidual(QI_OPTIONS)
-qi_ceiling = vj.QuasiIsodynamicResidualCeiling(
-    maximum=QI_CEILING_MAX,
-    smooth_penalty=QI_CEILING_SMOOTH_PENALTY,
-    qi_options=QI_OPTIONS,
-)
-mirror = vj.VMECMirrorRatio(
-    threshold=MAX_MIRROR_RATIO,
-    surfaces=QI_OPTIONS.surfaces,
-    ntheta=96,
-    nphi=96,
-    surface_index=MIRROR_SURFACE_INDEX,
-    smooth_extrema=2.0e-2,
-    smooth_penalty=2.0e-2,
-)
-elongation = vj.MaxElongation(
-    threshold=MAX_ELONGATION,
-    ntheta=48,
-    nphi=16,
-    smooth_extrema=2.0e-2,
-    smooth_penalty=2.0e-2,
-)
-objective_tuples = [
-    (aspect.J, TARGET_ASPECT, ASPECT_WEIGHT),
-    (iota_floor.J, 0.0, IOTA_FLOOR_WEIGHT),
-    (qi.J, 0.0, QI_WEIGHT),
-    (mirror.J, 0.0, MIRROR_WEIGHT),
-    (elongation.J, 0.0, ELONGATION_WEIGHT),
-    # Optional:
-    # (qi_ceiling.J, 0.0, QI_CEILING_WEIGHT),
-    # (vj.LgradB(threshold=0.30, smooth_penalty=1.0e-3).J, 0.0, 0.001),
-    # (vj.MagneticWell(minimum=0.0).J, 0.0, 1.0),
-    # (vj.DMerc(minimum=0.0, softness=1.0e-3).J, 0.0, DMERC_WEIGHT),
-]
-if QI_CEILING_WEIGHT > 0.0:
-    objective_tuples.append((qi_ceiling.J, 0.0, QI_CEILING_WEIGHT))
+def _stage_value(stage, key, default):
+    """Return a stage override while keeping the top-level script readable."""
 
-problem = vj.LeastSquaresProblem.from_tuples(objective_tuples)
+    return default if stage is None or key not in stage else stage[key]
+
+
+def make_qi_problem(stage=None):
+    """Construct the editable least-squares objective for one QI stage."""
+
+    aspect = vj.AspectRatio()
+    iota_floor = vj.AbsMeanIotaFloor(TARGET_ABS_IOTA_MIN)
+    qi = vj.QuasiIsodynamicResidual(QI_OPTIONS)
+    qi_ceiling = vj.QuasiIsodynamicResidualCeiling(
+        maximum=float(_stage_value(stage, "qi_ceiling_max", QI_CEILING_MAX)),
+        smooth_penalty=float(_stage_value(stage, "qi_ceiling_smooth_penalty", QI_CEILING_SMOOTH_PENALTY)),
+        qi_options=QI_OPTIONS,
+    )
+    mirror = vj.VMECMirrorRatio(
+        threshold=float(_stage_value(stage, "mirror_threshold", MAX_MIRROR_RATIO)),
+        surfaces=QI_OPTIONS.surfaces,
+        ntheta=96,
+        nphi=96,
+        surface_index=_stage_value(stage, "mirror_surface_index", MIRROR_SURFACE_INDEX),
+        smooth_extrema=2.0e-2,
+        smooth_penalty=2.0e-2,
+    )
+    elongation = vj.MaxElongation(
+        threshold=float(_stage_value(stage, "max_elongation", MAX_ELONGATION)),
+        ntheta=48,
+        nphi=16,
+        smooth_extrema=2.0e-2,
+        smooth_penalty=2.0e-2,
+    )
+    objective_tuples = [
+        (aspect.J, TARGET_ASPECT, float(_stage_value(stage, "aspect_weight", ASPECT_WEIGHT))),
+        (iota_floor.J, 0.0, float(_stage_value(stage, "iota_floor_weight", IOTA_FLOOR_WEIGHT))),
+        (qi.J, 0.0, float(_stage_value(stage, "qi_weight", QI_WEIGHT))),
+        (mirror.J, 0.0, float(_stage_value(stage, "mirror_weight", MIRROR_WEIGHT))),
+        (elongation.J, 0.0, float(_stage_value(stage, "elongation_weight", ELONGATION_WEIGHT))),
+        # Optional:
+        # (qi_ceiling.J, 0.0, QI_CEILING_WEIGHT),
+        # (vj.LgradB(threshold=0.30, smooth_penalty=1.0e-3).J, 0.0, 0.001),
+        # (vj.MagneticWell(minimum=0.0).J, 0.0, 1.0),
+        # (vj.DMerc(minimum=0.0, softness=1.0e-3).J, 0.0, DMERC_WEIGHT),
+    ]
+    qi_ceiling_weight = float(_stage_value(stage, "qi_ceiling_weight", QI_CEILING_WEIGHT))
+    if stage is None and QI_CEILING_WEIGHT > 0.0:
+        objective_tuples.append((qi_ceiling.J, 0.0, QI_CEILING_WEIGHT))
+    elif qi_ceiling_weight > 0.0:
+        objective_tuples.append((qi_ceiling.J, 0.0, qi_ceiling_weight))
+    return vj.LeastSquaresProblem.from_tuples(objective_tuples)
+
+
+problem = make_qi_problem()
 
 print("\nAssembled least-squares problem:")
 print(f"  objectives: {', '.join(problem.objective_names)}")
@@ -317,9 +350,12 @@ result, promotion_log = vj.run_qi_stage_policy(
     INPUT_FILE,
     OUTPUT_DIR,
     solve_qi_stage=solve_qi_stage,
-    make_qi_problem=lambda stage=None: problem,
-    boundary_reference_preconditioner={"enabled": False},
-    mirror_ramp_stages=(),
+    make_qi_problem=make_qi_problem,
+    boundary_reference_preconditioner={
+        "enabled": USE_REFERENCE_FAMILY_SEED,
+        "accept_as_baseline": BOUNDARY_REFERENCE_ACCEPT_AS_BASELINE,
+    },
+    mirror_ramp_stages=MIRROR_RAMP_STAGES,
     ctx=QI_CONTEXT,
 )
 

@@ -122,8 +122,47 @@ def test_qi_helper_scalar_parsers_and_scores(tmp_path: Path) -> None:
     )
     assert score > 0.0
     assert qio.boundary_reference_preconditioner_score({"qi_rank_score": 1.0, "qi_constraint_score": 2.0}) > 100.0
-    assert qio.boundary_reference_record_is_qi_safe({"mirror": 0.2, "mean_iota": -0.5}, max_mirror_ratio=0.3, abs_iota_min=0.4)
-    assert not qio.boundary_reference_record_is_qi_safe({"mirror": 0.4, "mean_iota": -0.5}, max_mirror_ratio=0.3, abs_iota_min=0.4)
+    aspect_failed_score = qio.boundary_reference_preconditioner_score(
+        {"qi_rank_score": 1.0, "qi_constraint_score": 0.0, "aspect_relative_error": 0.4}
+    )
+    aspect_ok_score = qio.boundary_reference_preconditioner_score(
+        {"qi_rank_score": 1.0, "qi_constraint_score": 0.0, "aspect_relative_error": 0.02}
+    )
+    assert aspect_failed_score > aspect_ok_score
+    assert qio.boundary_reference_record_is_qi_safe(
+        {"mirror": 0.2, "mean_iota": -0.5, "aspect": 5.4},
+        max_mirror_ratio=0.3,
+        abs_iota_min=0.4,
+        target_aspect=5.0,
+    )
+    assert not qio.boundary_reference_record_is_qi_safe(
+        {"mirror": 0.4, "mean_iota": -0.5, "aspect": 5.4},
+        max_mirror_ratio=0.3,
+        abs_iota_min=0.4,
+        target_aspect=5.0,
+    )
+    assert not qio.boundary_reference_record_is_qi_safe(
+        {"mirror": 0.2, "mean_iota": -0.5, "aspect": 7.0},
+        max_mirror_ratio=0.3,
+        abs_iota_min=0.4,
+        target_aspect=5.0,
+    )
+
+
+def test_qi_cli_override_loads_mirror_ramp_stages_json(tmp_path: Path) -> None:
+    stages_path = tmp_path / "stages.json"
+    stages_path.write_text('[{"name": "cleanup", "max_nfev": 5, "mirror_weight": 20.0}]')
+    namespace = {
+        "MAX_MODE": 3,
+        "USE_MODE_CONTINUATION": True,
+        "CONTINUATION_NFEV": 2,
+        "STAGE_REPEATS": 1,
+        "STAGE_MODE_POLICY": "lower",
+    }
+
+    qio.apply_qi_example_cli_overrides(namespace, ["--mirror-ramp-stages-json", str(stages_path)])
+
+    assert namespace["MIRROR_RAMP_STAGES"] == ({"name": "cleanup", "max_nfev": 5, "mirror_weight": 20.0},)
 
 
 def test_explicit_qi_context_overrides_legacy_globals(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -371,6 +410,12 @@ def test_stage_checkpoint_modes_and_promotion_rules(monkeypatch: pytest.MonkeyPa
     assert qio.stage_modes_for({"stage_repeats": 4}) == [3, 4]
     assert qio.promotion_score({"qi_rank_score": 1.0, "qi_constraint_score": 4.0}) == 112.0
     assert qio.engineering_promotion_score({"qi_rank_score": 1.0, "qi_constraint_score": 4.0, "qi_mirror_ratio_max": 0.5}) == 1103.0
+    aspect_far = {"qi_rank_score": 1.0, "qi_constraint_score": 0.0, "aspect_relative_error": 0.36}
+    aspect_near = {"qi_rank_score": 1.0, "qi_constraint_score": 0.0, "aspect_relative_error": 0.04}
+    assert qio.promotion_score(aspect_near) < qio.promotion_score(aspect_far)
+    assert qio.engineering_promotion_score(
+        {**aspect_near, "qi_mirror_ratio_max": 0.3}
+    ) < qio.engineering_promotion_score({**aspect_far, "qi_mirror_ratio_max": 0.3})
 
     promoted = qio.stage_promotes_candidate(
         {"accept_if_iota_improves": True, "iota_improvement_min": 0.05},
@@ -533,6 +578,62 @@ def test_boundary_reference_preconditioner_selects_safe_non_endpoint(
     assert qio.run_boundary_reference_preconditioner("input.seed", tmp_path, {"enabled": False}) == Path("input.seed")
 
 
+def test_boundary_reference_preconditioner_prefers_aspect_pool_before_qi_rank(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _configure(tmp_path)
+    seed = InData(scalars={"NFP": 1}, indexed={})
+    reference = InData(scalars={"NFP": 1}, indexed={})
+    monkeypatch.setattr(qio.vj, "read_indata", lambda path: reference if "reference" in str(path) else seed)
+    monkeypatch.setattr(
+        qio.vj,
+        "interpolate_indata_boundary",
+        lambda seed, reference, lam, **kwargs: InData(scalars={"LAMBDA": lam}, indexed={}),
+    )
+    monkeypatch.setattr(qio.vj, "rebuild_for_optimization_resolution", lambda candidate, **kwargs: candidate)
+    monkeypatch.setattr(qio.vj, "write_indata", lambda path, indata: Path(path).write_text(str(indata.scalars.get("LAMBDA"))))
+    monkeypatch.setattr(qio.vj, "run_fixed_boundary", lambda input_out, **kwargs: SimpleNamespace(path=str(input_out)))
+    monkeypatch.setattr(qio.vj, "write_wout_from_fixed_boundary_run", lambda path, run: Path(path).write_text("wout"))
+
+    def fake_diagnostics(run, **kwargs):
+        lam = float(Path(run.path).read_text())
+        aspect = 5.6 if lam < 0.5 else 7.0
+        return {
+            "qi_smooth_total": 1.0,
+            "qi_legacy_total": 0.2 if lam < 0.5 else 0.001,
+            "qi_mirror_ratio_max": 0.2,
+            "qi_max_elongation": 4.0,
+            "mean_iota": 0.5,
+            "aspect": aspect,
+            "aspect_relative_error": abs(aspect - 5.0) / 5.0,
+            "qi_seed_gate_passed": False,
+            "qi_engineering_gate_passed": False,
+            "qi_failure_reasons": ["synthetic"],
+            "qi_rank_score": 100.0 if lam < 0.5 else 0.001,
+            "qi_constraint_score": 0.0,
+        }
+
+    monkeypatch.setattr(qio, "qi_diagnostics_for_run", fake_diagnostics)
+
+    selected = qio.run_boundary_reference_preconditioner(
+        "input.seed",
+        tmp_path,
+        {
+            "enabled": True,
+            "reference_input": "input.reference",
+            "lambdas": (0.25, 1.0),
+            "target_aspect": 5.0,
+            "aspect_relative_tolerance": 0.35,
+        },
+    )
+
+    assert "lambda_0p250" in str(selected)
+    summary = json.loads((tmp_path / "boundary_reference_preconditioner" / "summary.json").read_text())
+    selected_record = next(record for record in summary if record["selected"])
+    assert selected_record["aspect"] == pytest.approx(5.6)
+
+
 def test_run_qi_stage_policy_no_ramp_writes_pre_diagnostic_checkpoint(tmp_path: Path) -> None:
     _configure(tmp_path)
     calls: list[dict[str, object]] = []
@@ -554,6 +655,64 @@ def test_run_qi_stage_policy_no_ramp_writes_pre_diagnostic_checkpoint(tmp_path: 
     assert promotion_log == []
     assert calls[0]["max_nfev"] == 4
     assert json.loads((tmp_path / "stage_checkpoint.json").read_text())["role"] == "stage_pre_diagnostics"
+
+
+def test_run_qi_stage_policy_writes_pending_checkpoint_before_long_stage(tmp_path: Path) -> None:
+    _configure(tmp_path)
+    pre_dir = tmp_path / "boundary_reference_preconditioner"
+    pre_dir.mkdir()
+    selected_input = pre_dir / "lambda_0p950" / "input.interpolated"
+    selected_input.parent.mkdir()
+    selected_input.write_text("input\n")
+    (pre_dir / "summary.json").write_text(
+        json.dumps(
+            [
+                {
+                    "input": str(selected_input),
+                    "lambda": 0.95,
+                    "selected": True,
+                    "smooth_qi": 1.2e-3,
+                    "legacy_qi": 9.0e-4,
+                    "mirror": 0.28,
+                    "elongation": 4.0,
+                    "mean_iota": 0.43,
+                    "aspect": 5.2,
+                    "aspect_relative_error": 0.04,
+                    "qi_seed_gate_passed": True,
+                    "qi_engineering_gate_passed": True,
+                    "failure_reasons": [],
+                }
+            ]
+        )
+        + "\n"
+    )
+
+    def solve_qi_stage(*_args, **_kwargs):
+        raise RuntimeError("simulated expensive stage failure")
+
+    with pytest.raises(RuntimeError, match="simulated expensive stage failure"):
+        qio.run_qi_stage_policy(
+            selected_input,
+            tmp_path,
+            solve_qi_stage=solve_qi_stage,
+            make_qi_problem=lambda stage=None: {"stage": stage},
+            boundary_reference_preconditioner={"enabled": True},
+            mirror_ramp_stages=[{"name": "long", "stage_modes": [5], "max_nfev": 60}],
+        )
+
+    root_checkpoint = json.loads((tmp_path / "stage_checkpoint.json").read_text())
+    stage_checkpoint = json.loads((tmp_path / "mirror_ramp_01_long" / "qi_stage_checkpoint.json").read_text())
+
+    assert root_checkpoint == stage_checkpoint
+    assert root_checkpoint["role"] == "mirror_ramp_pending"
+    assert root_checkpoint["promotion"]["stage_pending"] is True
+    assert root_checkpoint["diagnostics"]["source"] == "boundary_reference_preconditioner"
+    assert root_checkpoint["diagnostics"]["boundary_reference_input_path"] == str(selected_input)
+    assert root_checkpoint["diagnostics"]["boundary_reference_wout_path"] is None
+    assert root_checkpoint["diagnostics"]["qi_legacy_total"] == pytest.approx(9.0e-4)
+    assert root_checkpoint["diagnostics"]["qi_mirror_ratio_max"] == pytest.approx(0.28)
+    assert root_checkpoint["diagnostics"]["mean_iota"] == pytest.approx(0.43)
+    assert root_checkpoint["diagnostics"]["aspect"] == pytest.approx(5.2)
 
 
 def test_run_qi_stage_policy_mirror_ramp_promotes_guarded_stage(
@@ -643,3 +802,70 @@ def test_run_qi_stage_policy_mirror_ramp_promotes_guarded_stage(
     assert calls[1]["stage_modes"] == [1]
     assert calls[2]["method"] == "lbfgs"
     assert (tmp_path / "mirror_ramp_02_polish" / "qi_stage_checkpoint.json").exists()
+
+
+def test_run_qi_stage_policy_keeps_baseline_when_cleanup_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _configure(tmp_path)
+    calls: list[SimpleNamespace] = []
+
+    def solve_qi_stage(_input_file, _output_dir, _problem, **kwargs):
+        result = SimpleNamespace(
+            label=str(kwargs["label"]),
+            history={"objective_final": len(calls) + 1.0},
+            final_result={},
+            final_state="state",
+            final_optimizer=SimpleNamespace(static="static", indata="indata", signgs=1),
+        )
+        calls.append(result)
+        return result
+
+    def fake_diagnostics(stage_result, **_kwargs):
+        if "baseline" in stage_result.label:
+            return {
+                "qi_rank_score": 1.0,
+                "qi_constraint_score": 0.1,
+                "qi_seed_gate_passed": True,
+                "qi_engineering_gate_passed": True,
+                "qi_mirror_ratio_max": 0.25,
+                "mean_iota": 0.45,
+                "qi_smooth_total": 8.0e-4,
+                "qi_legacy_total": 8.0e-4,
+            }
+        return {
+            "qi_rank_score": 10.0,
+            "qi_constraint_score": 5.0,
+            "qi_seed_gate_passed": False,
+            "qi_engineering_gate_passed": False,
+            "qi_mirror_ratio_max": 0.5,
+            "mean_iota": 0.40,
+            "qi_smooth_total": 2.0e-2,
+            "qi_legacy_total": 2.0e-2,
+        }
+
+    monkeypatch.setattr(qio, "qi_diagnostics_for_result", fake_diagnostics)
+    monkeypatch.setattr(
+        qio.vj,
+        "qi_cleanup_candidate_promotable",
+        lambda stage_diagnostics, **_kwargs: {
+            **stage_diagnostics,
+            "qi_cleanup_promoted": False,
+            "qi_cleanup_rejection_reasons": ["cleanup rejected"],
+        },
+    )
+
+    result, promotion_log = qio.run_qi_stage_policy(
+        "input.seed",
+        tmp_path,
+        solve_qi_stage=solve_qi_stage,
+        make_qi_problem=lambda stage=None: {"stage": stage},
+        boundary_reference_preconditioner={"enabled": True, "accept_as_baseline": True},
+        mirror_ramp_stages=[{"name": "bad_cleanup", "stage_modes": [5], "max_nfev": 2}],
+    )
+
+    assert "boundary-reference baseline" in result.label
+    assert len(calls) == 2
+    assert promotion_log[0]["promoted"] is False
+    assert promotion_log[0]["rejection_reasons"] == ["cleanup rejected"]

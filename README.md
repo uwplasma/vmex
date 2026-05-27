@@ -163,49 +163,63 @@ Editable optimization examples live in `examples/optimization/`. Start with
 `examples/optimization/README.md`, then use `docs/optimization.rst`,
 `docs/optimization_sweep_results.rst`, and `docs/piecewise_omnigenous_plan.rst`.
 
-The table and figures below are an archived aspect-6, ``max_mode <= 3``
-snapshot while the aspect-5, ``max_mode <= 5`` matrix is being regenerated.
-Extended policy discussion, LASYM panels, finite-beta examples, QI provenance,
-failure modes, and full-matrix artifact requirements live in the docs.
+The current README snapshot separates two evidence types. The QA/QH/QP rows
+below are synced common-minimal-seed GPU runs with aspect target 5,
+continuation, ESS, and `max_mode=5`. The QI rows are reviewed case-gated NFP
+coverage from the staged QI workflow; they are case-specific artifacts, not
+aspect-5 README best-row promotion evidence. Extended policy discussion, LASYM
+panels, finite-beta examples, failure modes, and artifact-promotion rules live
+in the docs.
 
-| Target | Backend | Policy | max_mode | ESS | Final J | QI legacy | Mirror | Aspect | Iota | Wall time |
-|---|---|---|---:|---|---:|---:|---:|---:|---:|---:|
-| QA | CPU | continuation | 3 | yes | 4.35e-04 |  |  | 6.000 | 0.4200 | 5.4 min |
-| QH | CPU | continuation | 3 | yes | 1.90e-03 |  |  | 6.000 | -1.2053 | 3.9 min |
-| QP | CPU | continuation | 3 | no | 5.38e-02 |  |  | 6.015 | -0.6724 | 3.9 min |
-| QI | CPU | qi_default | 3 | yes | 1.37e-02 | 4.31e-04 | 0.272 | 6.002 | -0.5690 | 10.9 min |
+| Target | NFP | Evidence | Backend | Policy | max_mode | ESS | Final J | QI legacy | Mirror | Aspect | Iota | Wall time |
+|---|---:|---|---|---|---:|---|---:|---:|---:|---:|---:|---:|
+| QA | 2 | common minimal seed | GPU | continuation | 5 | yes | 1.09e-04 |  |  | 5.000 | 0.4200 | 25.3 min |
+| QA | 3 | common minimal seed | GPU | continuation | 5 | yes | 4.21e-03 |  |  | 5.004 | 0.4201 | 17.3 min |
+| QH | 3 | common minimal seed | GPU | continuation | 5 | yes | 9.14e-04 |  |  | 5.000 | -1.0474 | 17.4 min |
+| QH | 4 | common minimal seed | GPU | continuation | 5 | yes | 2.08e-03 |  |  | 5.000 | -1.6951 | 24.6 min |
+| QP | 2 | common minimal seed | GPU | continuation | 5 | yes | 2.34e-02 |  |  | 5.001 | -0.4177 | 16.7 min |
+| QP | 3 | common minimal seed | GPU | continuation | 5 | yes | 9.80e-02 |  |  | 5.024 | -0.4144 | 14.7 min |
+| QP | 4 | stress row, not promoted | GPU | continuation | 5 | yes | 7.45e+00 |  |  | 6.614 | -0.9373 | 9.4 min |
+| QI | 1 | case-gated staged QI | CPU | staged | case | case | 1.56e-02 | 7.75e-04 | 0.242 | 9.999 | 0.5369 | 15.8 min |
+| QI | 2 | case-gated staged QI | CPU | staged | case | case | 1.61e-02 | 5.25e-04 | 0.240 | 6.006 | -0.5994 | 28.7 min |
+| QI | 3 | case-gated staged QI | CPU | staged | case | case | 9.33e-02 | 1.01e-03 | 0.304 | 3.541 | -1.0401 | 4.6 min |
+| QI | 4 | case-gated staged QI | CPU | staged | case | case | 2.52e-02 | 2.54e-04 | 0.287 | 6.011 | -1.2930 | 0.4 min |
 
-Metric definitions are in `docs/optimization.rst`; do not treat this archived
-table as current aspect-5 promotion evidence.
+The QP NFP=4 row is intentionally visible as a current weak/stress row. The
+uniform aspect-5 QI common-minimal matrix remains an open promotion target; the
+case-gated QI panel shows the current reviewed NFP coverage.
 
-![QA optimization](docs/_static/figures/readme_best_optimization_qa.png)
-![QH optimization](docs/_static/figures/readme_best_optimization_qh.png)
-![QP optimization](docs/_static/figures/readme_best_optimization_qp.png)
-![QI optimization](docs/_static/figures/readme_best_optimization_qi.png)
-
-### QI from different NFP inputs
-
-The same `QI_optimization.py` workflow can be run from reviewed NFP 1, 2, 3,
-and 4 inputs by changing the input variables at the top of the script. This is
-case-specific evidence, not an aspect-6 README best-row promotion; full
-provenance and limitations are in the docs.
-
+![Common minimal-seed QA/QH/QP objective histories](docs/_static/figures/minimal_seed_showcase_objective_panel.png)
 ![QI optimization from NFP seeds](docs/_static/figures/readme_qi_optimization_cases.png)
 
-Reproduction commands, artifact-promotion rules, and full sweep requirements are
-documented in `docs/optimization.rst` and `docs/optimization_sweep_results.rst`.
-Case-specific artifacts are not aspect-5 README promotion evidence.
+Reproduce the common-minimal QA/QH/QP rows with:
+
+```bash
+PYTHONPATH=. JAX_PLATFORMS=cuda python3 examples/optimization/generate_minimal_seed_showcase.py \
+  --cases qa_nfp2,qa_nfp3,qh_nfp3,qh_nfp4,qp_nfp2,qp_nfp3,qp_nfp4 --backend-label gpu \
+  --solver-device gpu --worker-jax-platforms cuda --policy continuation --max-mode 5 --ess on \
+  --max-nfev 60 --continuation-nfev 20 --inner-max-iter 550 --inner-ftol 1e-10 \
+  --trial-max-iter 550 --trial-ftol 1e-10 \
+  --ess-alpha 1.2 --case-timeout-s 7200 --rerun
+PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py --publication-matrix
+```
+Run individual editable examples with `python examples/optimization/QA_optimization.py`,
+`QH_optimization.py`, `QP_optimization.py`, or `QI_optimization.py`. Full
+provenance and artifact rules are in `docs/optimization.rst` and
+`docs/optimization_sweep_results.rst`. Historical panels remain documented as
+`readme_best_optimization_qa.png`, `readme_best_optimization_qh.png`,
+`readme_best_optimization_qp.png`, and `readme_best_optimization_qi.png`.
 
 ## Performance, Validation, Release
 
-- Performance notes and benchmark caveats: `docs/performance.rst`
-- Validation and VMEC2000 parity status: `docs/validation.rst`
-- Testing and coverage strategy: `docs/testing_strategy.rst`
-- Release checklist and CI gates: `docs/release_checklist.rst`
+- Performance notes: `docs/performance.rst`; validation and VMEC2000 parity:
+  `docs/validation.rst`; coverage strategy: `docs/testing_strategy.rst`.
+- Release checklist and CI gates: `docs/release_checklist.rst`; latest local
+  rerun snapshot: `outputs/rerun_20260525_123334`.
 - Latest repository release tag:
-  [`v0.0.13`](https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.13)
-- Required fast coverage gate is `95%`; record the current CI/local coverage
-  result from the release-candidate commit in the release notes.
+  [`v0.0.13`](https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.13).
+- Before tagging, re-check green CI with
+  `gh run list --repo uwplasma/vmec_jax --branch main --workflow CI --limit 5`.
 
 ## CLI Reference
 

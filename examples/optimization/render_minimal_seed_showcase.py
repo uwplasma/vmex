@@ -35,6 +35,23 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from generate_minimal_seed_showcase import DEFAULT_CASE_ORDER, SHOWCASE_CASES
 
+PUBLICATION_CASE_ORDER = (
+    "qa_nfp2",
+    "qa_nfp3",
+    "qh_nfp3",
+    "qh_nfp4",
+    "qp_nfp2",
+    "qp_nfp3",
+    "qp_nfp4",
+    "qi_nfp1",
+    "qi_nfp2",
+    "qi_nfp3",
+    "qi_nfp4",
+)
+PUBLICATION_STRESS_CASE_ORDER = ("qp_nfp1",)
+PUBLICATION_POLICY = "continuation"
+PUBLICATION_MAX_MODE = 5
+
 
 @dataclass(frozen=True)
 class ShowcaseRecord:
@@ -84,6 +101,35 @@ def _float_or_none(value) -> float | None:
 
 def _bool_value(value) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _case_filter(raw_cases: str) -> tuple[str, ...] | None:
+    """Parse a comma-separated case filter; ``all`` keeps the full matrix."""
+
+    if raw_cases.strip().lower() == "all":
+        return None
+    return tuple(case.strip() for case in raw_cases.split(",") if case.strip())
+
+
+def _unknown_case_filter(cases: tuple[str, ...] | None) -> tuple[str, ...]:
+    if cases is None:
+        return ()
+    known = set(SHOWCASE_CASES)
+    return tuple(sorted({case for case in cases if case not in known}))
+
+
+def _filter_records_by_case(records: list[ShowcaseRecord], cases: tuple[str, ...] | None) -> list[ShowcaseRecord]:
+    if cases is None:
+        return records
+    requested = set(cases)
+    return [record for record in records if record.case_name in requested]
+
+
+def _filter_case_order(case_order: tuple[str, ...], cases: tuple[str, ...] | None) -> tuple[str, ...]:
+    if cases is None:
+        return case_order
+    requested = set(cases)
+    return tuple(case_name for case_name in case_order if case_name in requested)
 
 
 def _metadata_for_result(result_path: Path) -> dict:
@@ -205,6 +251,45 @@ def best_records(
             record
             for record in records
             if record.case_name == case_name
+            and (include_stale or record.stale_reason is None)
+            and (
+                not successful_only
+                or (record.success and not record.crashed and record.objective_final is not None)
+            )
+        ]
+        if not candidates:
+            continue
+        selected.append(
+            min(
+                candidates,
+                key=lambda record: (
+                    not (record.success and not record.crashed),
+                    float("inf") if record.objective_final is None else float(record.objective_final),
+                ),
+            )
+        )
+    return selected
+
+
+def publication_records(
+    records: list[ShowcaseRecord],
+    *,
+    successful_only: bool = True,
+    include_stale: bool = False,
+    include_stress: bool = False,
+) -> list[ShowcaseRecord]:
+    """Return the current aspect-5/mode-5 README promotion matrix records."""
+
+    case_order = PUBLICATION_CASE_ORDER + (PUBLICATION_STRESS_CASE_ORDER if include_stress else ())
+    selected: list[ShowcaseRecord] = []
+    for case_name in case_order:
+        candidates = [
+            record
+            for record in records
+            if record.case_name == case_name
+            and record.policy == PUBLICATION_POLICY
+            and int(record.max_mode) == PUBLICATION_MAX_MODE
+            and bool(record.use_ess)
             and (include_stale or record.stale_reason is None)
             and (
                 not successful_only
@@ -405,9 +490,23 @@ def render_objective_panel(records: list[ShowcaseRecord], out_png: Path) -> Path
     fig.suptitle("Common minimal-seed optimization histories", fontsize=13)
     out_png.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
-    fig.savefig(out_png, dpi=220, bbox_inches="tight")
+    _save_compact_png(fig, out_png, dpi=200)
     plt.close(fig)
     return out_png
+
+
+def _save_compact_png(fig, path: Path, *, dpi: int) -> None:
+    """Save a tracked PNG with deterministic lossless compression."""
+
+    try:
+        fig.savefig(
+            path,
+            dpi=dpi,
+            bbox_inches="tight",
+            pil_kwargs={"optimize": True, "compress_level": 9},
+        )
+    except TypeError:
+        fig.savefig(path, dpi=dpi, bbox_inches="tight")
 
 
 def _local_repo_path(value: str | Path | None, *, output_dir: Path | None = None) -> Path | None:
@@ -481,6 +580,16 @@ def _stage_checkpoint_wout(record: ShowcaseRecord, name: str) -> Path | None:
         data = json.loads(checkpoint.read_text())
     except json.JSONDecodeError:
         return None
+    if name == "wout_final.nc":
+        for raw_path in (
+            data.get("wout_path"),
+            data.get("diagnostics", {}).get("boundary_reference_wout_path")
+            if isinstance(data.get("diagnostics"), dict)
+            else None,
+        ):
+            candidate = _local_repo_path(raw_path, output_dir=record.output_dir)
+            if candidate is not None and candidate.exists():
+                return candidate
     diagnostics_path = _local_repo_path(data.get("diagnostics_path"), output_dir=record.output_dir)
     if diagnostics_path is None:
         return None
@@ -567,6 +676,7 @@ def render_state_panel(records: list[ShowcaseRecord], out_png: Path) -> Path | N
 
         matplotlib.use("Agg")
         from matplotlib import pyplot as plt
+        from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
         from render_readme_best_optimizations import _plot_boozer_bmag, _plot_lcfs
         from vmec_jax.wout import read_wout
     except Exception:
@@ -603,7 +713,7 @@ def render_state_panel(records: list[ShowcaseRecord], out_png: Path) -> Path | N
 
     fig.suptitle("Common minimal-seed initial/final optimization states", fontsize=13, x=0.01, y=1.01, ha="left")
     out_png.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_png, dpi=220, bbox_inches="tight")
+    _save_compact_png(fig, out_png, dpi=170)
     plt.close(fig)
     return out_png
 
@@ -612,6 +722,12 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--output-root", type=Path, default=RESULTS_ROOT)
     parser.add_argument("--figure-dir", type=Path, default=FIGURE_DIR)
+    parser.add_argument("--cases", type=str, default="all", help="Comma-separated cases to render, or 'all'.")
+    parser.add_argument(
+        "--skip-missing",
+        action="store_true",
+        help="Do not print missing-case warnings; useful for bounded smoke renders.",
+    )
     parser.add_argument("--summary-only", action="store_true", help="Write CSV only; skip Matplotlib rendering.")
     parser.add_argument("--skip-state-panel", action="store_true", help="Skip initial/final geometry and Boozer panel.")
     parser.add_argument(
@@ -619,27 +735,68 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Include pre-dispatch or otherwise stale records instead of skipping them.",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--publication-matrix",
+        action="store_true",
+        help="Render only successful current aspect-5/mode-5 README promotion rows.",
+    )
+    parser.add_argument(
+        "--include-stress",
+        action="store_true",
+        help="With --publication-matrix, include optional stress rows such as qp_nfp1.",
+    )
+    args = parser.parse_args()
+    unknown_cases = _unknown_case_filter(_case_filter(str(args.cases)))
+    if unknown_cases:
+        parser.error(
+            "unknown --cases value(s): "
+            + ", ".join(unknown_cases)
+            + ". Available cases: "
+            + ", ".join(DEFAULT_CASE_ORDER)
+        )
+    return args
 
 
 def main() -> None:
     args = _parse_args()
-    loaded_records = load_records(args.output_root)
+    case_filter = _case_filter(str(args.cases))
+    loaded_records = _filter_records_by_case(load_records(args.output_root), case_filter)
     stale_records = [record for record in loaded_records if record.stale_reason is not None]
     if not bool(args.include_stale):
         for record in stale_records:
             print(f"Skipping stale {record.case_name} record at {record.output_dir}: {record.stale_reason}")
-    all_records = best_records(
-        loaded_records,
-        successful_only=False,
-        include_stale=bool(args.include_stale),
-    )
+    if bool(args.publication_matrix):
+        all_records = publication_records(
+            loaded_records,
+            successful_only=True,
+            include_stale=bool(args.include_stale),
+            include_stress=bool(args.include_stress),
+        )
+        expected_case_order = PUBLICATION_CASE_ORDER + (
+            PUBLICATION_STRESS_CASE_ORDER if bool(args.include_stress) else ()
+        )
+    else:
+        all_records = best_records(
+            loaded_records,
+            successful_only=False,
+            include_stale=bool(args.include_stale),
+        )
+        expected_case_order = DEFAULT_CASE_ORDER
+    expected_case_order = _filter_case_order(expected_case_order, case_filter)
     if not all_records:
-        print(f"No minimal-seed showcase records found under {args.output_root}")
+        if expected_case_order and not bool(args.skip_missing):
+            print("Missing current minimal-seed records: " + ", ".join(expected_case_order))
+        elif expected_case_order:
+            print(
+                "No selected minimal-seed showcase records found under "
+                f"{args.output_root} for cases: {', '.join(expected_case_order)}"
+            )
+        else:
+            print(f"No minimal-seed showcase records found under {args.output_root}")
         return
     present_cases = {record.case_name for record in all_records}
-    missing = [case_name for case_name in DEFAULT_CASE_ORDER if case_name not in present_cases]
-    if missing:
+    missing = [case_name for case_name in expected_case_order if case_name not in present_cases]
+    if missing and not bool(args.skip_missing):
         print("Missing current minimal-seed records: " + ", ".join(missing))
     summary_csv = Path(args.figure_dir) / "minimal_seed_showcase_summary.csv"
     write_summary_csv(all_records, summary_csv)

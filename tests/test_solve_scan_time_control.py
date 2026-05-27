@@ -181,6 +181,26 @@ def test_bad_jacobian_blocks_checkpoint_and_restarts_with_ijacob_increment():
     assert _scalar(transition.force_bcovar_update)
 
 
+def test_time_control_non_vmec_mode_tracks_residual_norm_for_checkpoint():
+    tc = scan_time_control_scalars(
+        skip_timecontrol=jnp.asarray(False),
+        init_mask=jnp.asarray(True),
+        fsq=jnp.asarray(0.1),
+        fsq_res=jnp.asarray(0.125),
+        fsq_phys=jnp.asarray(0.25),
+        fsq1=jnp.asarray(0.5),
+        fsq_prev_before=jnp.asarray(1.0),
+        res0_prev=jnp.asarray(99.0),
+        res1_prev=jnp.asarray(99.0),
+        bad_jacobian=jnp.asarray(False),
+        vmec2000_control=False,
+    )
+
+    np.testing.assert_allclose(_scalar(tc.res0), 0.125)
+    np.testing.assert_allclose(_scalar(tc.res1), 0.25)
+    assert _scalar(tc.checkpoint_mask)
+
+
 def test_stage_spike_reason_and_post_scale_match_scan_double_scale_path():
     decision = scan_restart_decision(
         skip_timecontrol=jnp.asarray(False),

@@ -140,6 +140,28 @@ def test_scan_output_vmec_control_ignores_accepted_mask():
     np.testing.assert_allclose(out.w_history, np.asarray([5.0, 4.0, 3.0]))
 
 
+def test_scan_output_empty_history_reports_infinite_final_residuals():
+    out = _post(
+        Vmec2000ScanHistories(
+            fsqr=np.asarray([]),
+            fsqz=np.asarray([]),
+            fsql=np.asarray([]),
+            accepted=np.asarray([], dtype=bool),
+            fsqr1=np.asarray([]),
+            fsqz1=np.asarray([]),
+            fsql1=np.asarray([]),
+            zero_m1=np.asarray([], dtype=int),
+            include_edge=np.asarray([], dtype=int),
+        ),
+        max_iter=1,
+    )
+
+    assert out.fsqr_history.size == 0
+    assert np.isinf(out.final_fsqr)
+    assert np.isinf(out.final_fsqz)
+    assert np.isinf(out.final_fsql)
+
+
 def test_scan_output_minimal_and_light_diagnostics():
     minimal = _post(
         unpack_vmec2000_scan_histories(
