@@ -31,11 +31,10 @@ Publication structure
 
 The split between README and docs is deliberate:
 
-- ``README.md`` shows the current reviewed NFP coverage compactly: the
-  aspect-5, ``max_mode=5`` common-minimal QA/QH/QP GPU table and objective
-  panel, plus the case-gated QI NFP=1/2/3/4 panel.  It intentionally labels QP
-  NFP=4 as a weak stress row and does not claim missing uniform aspect-5
-  common-minimal QI rows.
+- ``README.md`` shows the current reviewed NFP coverage compactly with figures
+  only: the aspect-5, ``max_mode=5`` common-minimal QA/QH/QP GPU state panel
+  plus the case-gated QI NFP=1/2/3/4 state panel.  Numeric rows live below.
+  The README does not claim missing uniform aspect-5 common-minimal QI rows.
 - This page is the intended publication home for complete sweeps.  A complete
   publication should represent every CPU/GPU, continuation/direct, ESS on/off,
   QI preseed/no-preseed, ``max_mode=1..5`` reviewed row through downloadable
@@ -46,6 +45,175 @@ The split between README and docs is deliberate:
   case-specific aspect targets, belongs here rather than in the README best-row
   section.  Those rows are distinct from the pending common-minimal-seed QI
   regeneration matrix.
+
+Current README NFP Snapshot
+---------------------------
+
+The README figures correspond to the rows below.  QA/QH/QP rows are current
+common-minimal-seed GPU runs with continuation, ESS, and ``max_mode=5``.  The
+QI rows are case-specific staged results and are not aspect-5 README
+best-row promotion evidence for the pending uniform common-minimal QI matrix.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 7 5 16 9 10 7 7 9 8 8 8 8 9
+
+   * - Target
+     - NFP
+     - Evidence
+     - Backend
+     - Policy
+     - max_mode
+     - ESS
+     - Final J
+     - QI legacy
+     - Mirror
+     - Aspect
+     - Iota
+     - Wall time
+   * - QA
+     - 2
+     - common minimal seed
+     - GPU
+     - continuation
+     - 5
+     - yes
+     - 1.09e-04
+     -
+     -
+     - 5.000
+     - 0.4200
+     - 25.3 min
+   * - QA
+     - 3
+     - common minimal seed
+     - GPU
+     - continuation
+     - 5
+     - yes
+     - 4.21e-03
+     -
+     -
+     - 5.004
+     - 0.4201
+     - 17.3 min
+   * - QH
+     - 3
+     - common minimal seed
+     - GPU
+     - continuation
+     - 5
+     - yes
+     - 9.14e-04
+     -
+     -
+     - 5.000
+     - -1.0474
+     - 17.4 min
+   * - QH
+     - 4
+     - common minimal seed
+     - GPU
+     - continuation
+     - 5
+     - yes
+     - 2.08e-03
+     -
+     -
+     - 5.000
+     - -1.6951
+     - 24.6 min
+   * - QP
+     - 2
+     - common minimal seed
+     - GPU
+     - continuation
+     - 5
+     - yes
+     - 2.34e-02
+     -
+     -
+     - 5.001
+     - -0.4177
+     - 16.7 min
+   * - QP
+     - 3
+     - common minimal seed
+     - GPU
+     - continuation
+     - 5
+     - yes
+     - 9.80e-02
+     -
+     -
+     - 5.024
+     - -0.4144
+     - 14.7 min
+   * - QP
+     - 4
+     - stress row, not promoted
+     - GPU
+     - continuation
+     - 5
+     - yes
+     - 7.45e+00
+     -
+     -
+     - 6.614
+     - -0.9373
+     - 9.4 min
+   * - QI
+     - 1
+     - case-gated staged QI
+     - CPU
+     - staged
+     - case
+     - case
+     - 1.56e-02
+     - 7.75e-04
+     - 0.242
+     - 9.999
+     - 0.5369
+     - 15.8 min
+   * - QI
+     - 2
+     - case-gated staged QI
+     - CPU
+     - staged
+     - case
+     - case
+     - 1.61e-02
+     - 5.25e-04
+     - 0.240
+     - 6.006
+     - -0.5994
+     - 28.7 min
+   * - QI
+     - 3
+     - case-gated staged QI
+     - CPU
+     - staged
+     - case
+     - case
+     - 9.33e-02
+     - 1.01e-03
+     - 0.304
+     - 3.541
+     - -1.0401
+     - 4.6 min
+   * - QI
+     - 4
+     - case-gated staged QI
+     - CPU
+     - staged
+     - case
+     - case
+     - 2.52e-02
+     - 2.54e-04
+     - 0.287
+     - 6.011
+     - -1.2930
+     - 0.4 min
 
 Every published full-sweep result should provide these assets in the sweep
 output tree or as GitHub release assets.  Only compact, reviewed,
