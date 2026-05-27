@@ -5,12 +5,12 @@ Status
 ------
 
 This is a planning and acceptance document for adding piecewise-omnigenous
-optimization (pwO) to ``vmec_jax``.  The immediate seed should be the current
-reviewed optimized QP configuration because its Boozer ``|B|`` contours already
-resemble a piecewise-omnigenous topology more than a clean quasi-poloidally
-symmetric state.  The archived path below records the original planning seed
-and must be replaced by the current aspect-5, reviewed best QP row before any
-pwO result is promoted:
+optimization (pwO) to ``vmec_jax``.  The immediate seed should be the pending
+reviewed aspect-5 optimized QP configuration because its Boozer ``|B|`` contours
+already resemble a piecewise-omnigenous topology more than a clean
+quasi-poloidally symmetric state.  The archived path below records the original
+planning seed and must be replaced by the reviewed aspect-5 best QP row before
+any pwO result is promoted:
 
 .. code-block:: text
 
