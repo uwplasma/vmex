@@ -12,11 +12,12 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-05-27 after wiring the Redl bootstrap-current fixed-point
-preconditioner into the ESSOS free-boundary beta-scan example behind
-`--bootstrap-current-fixed-point`.  PR #18 was green at commit `d2d6693a`
-including Codecov; the new beta-scan preconditioner slice has local targeted
-tests/docs green and is ready to push for CI. Do not merge PR #18 yet.
+Last updated: 2026-05-27 after adding and locally running the optional
+ESSOS/direct-coil active finite-beta beta-scan integration gate for the Redl
+bootstrap-current fixed-point preconditioner. PR #18 is green on GitHub Actions
+at commit `5e90d9b2` including Codecov; the optional gate is local/manual
+because it requires ESSOS assets and launches real free-boundary solves. Do not
+merge PR #18 yet.
 
 Steps taken:
 
@@ -110,15 +111,35 @@ Results obtained:
    6 passed.
 3. `python -m py_compile examples/free_boundary_essos_coils_beta_scan.py`:
    passed.
+4. `python -m ruff check examples/free_boundary_essos_coils_beta_scan.py tests/test_free_boundary_essos_coils_forward_example.py tests/test_bootstrap_current_fixed_point.py tests/test_bootstrap_current_example.py tests/test_bootstrap_current_fixed_point_integration_optional.py docs/conf.py`:
+   passed.
+5. `python -m pytest -q tests/test_free_boundary_essos_coils_forward_example.py tests/test_bootstrap_current_fixed_point.py tests/test_bootstrap_current_example.py tests/test_bootstrap_current_fixed_point_integration_optional.py -rx`:
+   23 passed, 1 skipped.
+6. `python -m sphinx -W -b html docs /tmp/vmec_jax_freeb_docs_resume_check`:
+   passed.
+7. Manual active direct-coil smoke:
+   `PYTHONPATH=.:/Users/rogeriojorge/local/ESSOS_mgrid_pr:$PYTHONPATH ESSOS_INPUT_DIR=/Users/rogeriojorge/local/ESSOS_mgrid_pr/examples/input_files python examples/free_boundary_essos_coils_beta_scan.py --outdir /tmp/vmec_jax_freeb_bootstrap_beta_active_smoke --input examples/data/input.LandremanPaul2021_QA_lowres --skip-mgrid-runs --betas 0 1 --pressure-profile standard --bootstrap-current-fixed-point --bootstrap-helicity-n 0 --bootstrap-max-fixed-point-iter 1 --bootstrap-n-current 8 --bootstrap-surfaces "0.25 0.50 0.75" --bootstrap-vmec-max-iter 2 --max-iter 2 --ns 8 --mpol 3 --ntor 3 --mgrid-nr 8 --mgrid-nz 8 --mgrid-nphi 4 --activate-fsq 1e99 --allow-scale-mismatch`
+   completed and wrote active direct-coil WOUTs plus
+   `/tmp/vmec_jax_freeb_bootstrap_beta_active_smoke/bootstrap_current/direct_beta_1p000_bootstrap_history.json`.
+   The finite-beta row had `free_boundary_vacuum_stub=false`,
+   `free_boundary_nestor_model=vmec2000_like_dense_integral`, and one accepted
+   `bnormal` history entry.
+8. Added optional integration test
+   `RUN_FREEB_BOOTSTRAP_BETA_SCAN=1 ... pytest -q tests/test_free_boundary_essos_coils_forward_example.py::test_beta_scan_bootstrap_current_direct_coil_active_smoke -rx`;
+   it passed locally in 12.81 s.
+9. GitHub Actions for PR #18 on `5e90d9b2` are green: build/docs, fast tests
+   on py3.10/py3.11/py3.12, physics smoke, parity manifest, and Codecov
+   project/patch all passed.
 
 Best next steps:
 
-1. Run Sphinx and the focused free-boundary/bootstrap-current test subset.
-2. Commit/push this beta-scan integration slice and recheck PR #18 CI.
-3. Run a short manual LP-QA direct-coil beta scan with
-   `--bootstrap-current-fixed-point --betas 0 1 --skip-mgrid-runs` when ESSOS
-   assets are available, then compare bootstrap-current versus no-bootstrap
-   beta response.
+1. Commit/push the optional active beta-scan gate.
+2. Run the optional gate again when the final PR head changes before merge.
+3. Next technical rung: compare a short LP-QA beta scan with and without the
+   bootstrap-current preconditioner at the same low resolution, then promote the
+   resulting response metrics only if both paths exercise active NESTOR and the
+   current-profile update improves Redl mismatch or finite-beta response
+   stability.
 
 Need from user:
 

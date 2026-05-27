@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -287,3 +288,83 @@ def test_beta_scan_bootstrap_current_preconditioner_skip_and_validation(tmp_path
             vmec_max_iter=2,
             activate_fsq=None,
         )
+
+
+@pytest.mark.skipif(
+    os.environ.get("RUN_FREEB_BOOTSTRAP_BETA_SCAN", "").strip().lower() not in {"1", "true", "yes"},
+    reason="set RUN_FREEB_BOOTSTRAP_BETA_SCAN=1 to run the optional ESSOS/direct-coil bootstrap beta scan",
+)
+def test_beta_scan_bootstrap_current_direct_coil_active_smoke(tmp_path):
+    """Run a tiny real ESSOS/direct-coil finite-beta scan with Redl feedback.
+
+    This is an optional integration gate because it imports ESSOS assets and
+    launches real free-boundary solves.  It verifies the code path that the
+    mocked tests cannot: finite-pressure direct coils, active NESTOR coupling,
+    and persisted bootstrap-current stage diagnostics.
+    """
+
+    pytest.importorskip("essos.coils")
+    module = _load_beta_scan_module()
+    try:
+        coils_json = module.find_essos_landreman_paul_qa_coils()
+    except FileNotFoundError as exc:
+        pytest.skip(str(exc))
+
+    rc = module.main(
+        [
+            "--outdir",
+            str(tmp_path),
+            "--input",
+            str(ROOT / "examples" / "data" / "input.LandremanPaul2021_QA_lowres"),
+            "--coils-json",
+            str(coils_json),
+            "--skip-mgrid-runs",
+            "--betas",
+            "0",
+            "1",
+            "--pressure-profile",
+            "standard",
+            "--bootstrap-current-fixed-point",
+            "--bootstrap-helicity-n",
+            "0",
+            "--bootstrap-max-fixed-point-iter",
+            "1",
+            "--bootstrap-n-current",
+            "8",
+            "--bootstrap-surfaces",
+            "0.25 0.50 0.75",
+            "--bootstrap-vmec-max-iter",
+            "2",
+            "--max-iter",
+            "2",
+            "--ns",
+            "8",
+            "--mpol",
+            "3",
+            "--ntor",
+            "3",
+            "--mgrid-nr",
+            "8",
+            "--mgrid-nz",
+            "8",
+            "--mgrid-nphi",
+            "4",
+            "--activate-fsq",
+            "1e99",
+            "--allow-scale-mismatch",
+        ]
+    )
+
+    assert rc == 0
+    summary = json.loads((tmp_path / "summary.json").read_text())
+    assert summary["complete"] is True
+    assert len(summary["runs"]) == 2
+    finite_beta = next(run for run in summary["runs"] if run["nominal_beta_percent"] == 1.0)
+    assert finite_beta["backend"] == "direct"
+    assert finite_beta["free_boundary_vacuum_stub"] is False
+    assert finite_beta["free_boundary_nestor_model"] == "vmec2000_like_dense_integral"
+    assert finite_beta["free_boundary_bnormal_rms_history"]["count"] >= 1
+    assert finite_beta["bootstrap_current"]["iterations"] == 1
+    assert finite_beta["bootstrap_current"]["reason"] == "max_fixed_point_iter"
+    assert Path(finite_beta["bootstrap_current"]["history_json"]).exists()
+    assert Path(finite_beta["bootstrap_current"]["final_input"]).exists()
