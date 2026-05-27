@@ -17,6 +17,7 @@ from vmec_jax.solve import (
     _preconditioner_output_payload_jit,
     _preconditioner_output_scaling_jit,
     _replace_mode_slice,
+    _residual_metrics_payload_jit,
     _scale_mode_slice,
     _zero_coeff_column,
 )
@@ -257,6 +258,25 @@ def test_preconditioner_output_payload_jit_matches_scaling_and_fsq1_reference():
     np.testing.assert_allclose(np.asarray(diag[3]), gcr2 * f_norm1)
     np.testing.assert_allclose(np.asarray(diag[4]), gcz2 * f_norm1)
     np.testing.assert_allclose(np.asarray(diag[5]), gcl2_full * delta_s)
+
+
+def test_residual_metrics_payload_jit_matches_direct_formula():
+    pytest.importorskip("jax")
+
+    payload = _residual_metrics_payload_jit()
+    assert payload is not None
+    got = payload(
+        np.asarray(2.0),
+        np.asarray(3.0),
+        np.asarray(5.0),
+        np.asarray(7.0),
+        np.asarray(11.0),
+        np.asarray(13.0),
+    )
+
+    np.testing.assert_allclose(np.asarray(got[0]), 7.0 * 11.0 * 2.0)
+    np.testing.assert_allclose(np.asarray(got[1]), 7.0 * 11.0 * 3.0)
+    np.testing.assert_allclose(np.asarray(got[2]), 13.0 * 5.0)
 
 
 def test_preconditioner_apply_payload_fused_can_return_ptau_control_payload():

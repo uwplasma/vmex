@@ -196,6 +196,7 @@ _STRICT_UPDATE_STEP_JIT_CACHE: OrderedDict[tuple, Any] = OrderedDict()
 _PRECOND_OUTPUT_SCALE_JIT_CACHE: OrderedDict[tuple, Any] = OrderedDict()
 _PRECOND_OUTPUT_PAYLOAD_JIT_CACHE: OrderedDict[tuple, Any] = OrderedDict()
 _PRECOND_APPLY_PAYLOAD_JIT_CACHE: OrderedDict[tuple, Any] = OrderedDict()
+_RESIDUAL_METRICS_PAYLOAD_JIT_CACHE: OrderedDict[tuple, Any] = OrderedDict()
 _ACCEPTED_CONTROL_PAYLOAD_JIT_CACHE: OrderedDict[tuple, Any] = OrderedDict()
 
 
@@ -907,6 +908,38 @@ def _accepted_control_payload_jit():
         key,
         _payload,
         env_name="VMEC_JAX_ACCEPTED_CONTROL_PAYLOAD_CACHE_SIZE",
+        default=2,
+    )
+
+
+def _residual_metrics_payload_jit():
+    """Return a cached JIT helper for physical residual scalar channels.
+
+    The non-scan accelerator path needs ``fsqr/fsqz/fsql`` on the host for
+    VMEC-style convergence, restart, and table decisions before the
+    preconditioner is applied.  Keep the scalar algebra in one JAX payload so
+    the caller only materializes the final tuple.
+    """
+
+    if not has_jax():
+        return None
+    key: tuple[Any, ...] = ()
+    cached = _jit_cache_get(_RESIDUAL_METRICS_PAYLOAD_JIT_CACHE, key)
+    if cached is not None:
+        return cached
+
+    @jax.jit
+    def _payload(gcr2, gcz2, gcl2, r1, fnorm, fnormL):
+        fsqr = jnp.asarray(r1) * jnp.asarray(fnorm) * jnp.asarray(gcr2)
+        fsqz = jnp.asarray(r1) * jnp.asarray(fnorm) * jnp.asarray(gcz2)
+        fsql = jnp.asarray(fnormL) * jnp.asarray(gcl2)
+        return fsqr, fsqz, fsql
+
+    return _jit_cache_put(
+        _RESIDUAL_METRICS_PAYLOAD_JIT_CACHE,
+        key,
+        _payload,
+        env_name="VMEC_JAX_RESIDUAL_METRICS_PAYLOAD_CACHE_SIZE",
         default=2,
     )
 
@@ -11370,9 +11403,20 @@ def solve_fixed_boundary_residual_iter(
                 fsqz = _r1_f * _fnorm_f * _gcz2_f
                 fsql = _fnormL_f * _gcl2_f
             else:
-                fsqr = norms_used.r1 * norms_used.fnorm * gcr2
-                fsqz = norms_used.r1 * norms_used.fnorm * gcz2
-                fsql = norms_used.fnormL * gcl2
+                residual_payload_fn = _residual_metrics_payload_jit() if jax.default_backend() != "cpu" else None
+                if residual_payload_fn is not None:
+                    fsqr, fsqz, fsql = residual_payload_fn(
+                        gcr2,
+                        gcz2,
+                        gcl2,
+                        norms_used.r1,
+                        norms_used.fnorm,
+                        norms_used.fnormL,
+                    )
+                else:
+                    fsqr = norms_used.r1 * norms_used.fnorm * gcr2
+                    fsqz = norms_used.r1 * norms_used.fnorm * gcz2
+                    fsql = norms_used.fnormL * gcl2
             debug_iter_env = _env_debug_iter
             _maybe_print_nonscan_state_debug(
                 debug_iter_env=debug_iter_env,
