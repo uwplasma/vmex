@@ -274,10 +274,22 @@ def _maybe_print_nonscan_state_debug(
     return True
 
 
+_SETUP_PHASE_KEYS = (
+    "setup_static_grid_rebuild",
+    "setup_freeb_policy",
+    "setup_boundary_profiles",
+    "setup_cache_key_hash",
+    "setup_ptau_constants",
+    "setup_index_constants",
+    "setup_update_constants",
+)
+
+
 def _residual_iter_timing_setup_scalars(timing_stats: dict[str, float]) -> tuple[float, float, float]:
+    setup_phase_total = sum(float(timing_stats.get(key, 0.0)) for key in _SETUP_PHASE_KEYS)
     setup_unattributed = max(
         0.0,
-        float(timing_stats["setup_total"]) - float(timing_stats["setup_axis_reset"]),
+        float(timing_stats["setup_total"]) - float(timing_stats["setup_axis_reset"]) - setup_phase_total,
     )
     setup_axis_reset_unattributed = max(
         0.0,
@@ -324,6 +336,13 @@ def _build_residual_iter_timing_report(
         "iterations": int(timing_stats["iterations"]),
         "solve_total_s": float(solve_total_s),
         "setup_total_s": float(timing_stats["setup_total"]),
+        "setup_static_grid_rebuild_s": float(timing_stats.get("setup_static_grid_rebuild", 0.0)),
+        "setup_freeb_policy_s": float(timing_stats.get("setup_freeb_policy", 0.0)),
+        "setup_boundary_profiles_s": float(timing_stats.get("setup_boundary_profiles", 0.0)),
+        "setup_cache_key_hash_s": float(timing_stats.get("setup_cache_key_hash", 0.0)),
+        "setup_ptau_constants_s": float(timing_stats.get("setup_ptau_constants", 0.0)),
+        "setup_index_constants_s": float(timing_stats.get("setup_index_constants", 0.0)),
+        "setup_update_constants_s": float(timing_stats.get("setup_update_constants", 0.0)),
         "setup_axis_reset_s": float(timing_stats["setup_axis_reset"]),
         "setup_axis_reset_compute_forces_s": float(timing_stats["setup_axis_reset_compute_forces"]),
         "setup_axis_reset_unattributed_s": float(setup_axis_reset_unattributed),
@@ -356,6 +375,13 @@ def _build_residual_iter_timing_report(
         "iteration_loop_unattributed_s": float(iteration_loop_unattributed),
         "finalize_s": float(timing_stats["finalize"]),
         "setup_per_iter_s": float(timing_stats["setup_total"]) / iters,
+        "setup_static_grid_rebuild_per_iter_s": float(timing_stats.get("setup_static_grid_rebuild", 0.0)) / iters,
+        "setup_freeb_policy_per_iter_s": float(timing_stats.get("setup_freeb_policy", 0.0)) / iters,
+        "setup_boundary_profiles_per_iter_s": float(timing_stats.get("setup_boundary_profiles", 0.0)) / iters,
+        "setup_cache_key_hash_per_iter_s": float(timing_stats.get("setup_cache_key_hash", 0.0)) / iters,
+        "setup_ptau_constants_per_iter_s": float(timing_stats.get("setup_ptau_constants", 0.0)) / iters,
+        "setup_index_constants_per_iter_s": float(timing_stats.get("setup_index_constants", 0.0)) / iters,
+        "setup_update_constants_per_iter_s": float(timing_stats.get("setup_update_constants", 0.0)) / iters,
         "iteration_prepare_per_iter_s": float(timing_stats["iteration_prepare"]) / iters,
         "compute_forces_per_iter_s": float(timing_stats["compute_forces"]) / iters,
         "force_eval_per_iter_s": float(timing_stats["compute_forces"]) / iters,

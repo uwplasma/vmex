@@ -400,7 +400,9 @@ still CPU-favorable (`0.0525 s` CPU warm versus `0.2346 s` CUDA warm), but
 CUDA force assembly is already comparable/slightly faster.  Remaining GPU work
 for the free-boundary branch is setup/precompute reuse and scalar/control plus
 preconditioner dispatch amortization, not Biot-Savart sampling or the dense
-NESTOR solve.
+NESTOR solve.  The branch now has measurement-only setup sub-buckets in solver
+diagnostics and benchmark summaries so the next cache patch can target the
+dominant setup phase rather than the broad `setup_total_s` container.
 
 - Continuation correctness: 100%. Source fix is implemented and covered by
   synthetic repeated-stage tests, a real boundary-projection stage test, and

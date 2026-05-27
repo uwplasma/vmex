@@ -3095,6 +3095,13 @@ state, not Biot-Savart sampling or the final dense vacuum solve.  Scalar-defer
 is deliberately not the default yet because the residual scalars still drive
 VMEC control flow, history, and free-boundary acceptance logic.
 
+The follow-up instrumentation splits ``setup_total_s`` into static-grid
+rebuild, free-boundary policy, boundary/profile construction, cache-key hashing,
+``ptau`` constants, mode-index constants, and update constants.  Use those keys
+in ``warm_solver_timing.timing`` or in the matrix ``cpu_gpu_comparison`` block
+before implementing the next setup cache; the split is intentionally
+measurement-only and does not change solver numerics.
+
 Historical bundled example runtime/memory matrix (March 2026)
 -------------------------------------------------------------
 

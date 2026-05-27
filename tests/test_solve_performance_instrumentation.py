@@ -10,6 +10,13 @@ from vmec_jax.solve_residual_iter_runtime_helpers import _build_residual_iter_ti
 def test_residual_iter_timing_report_exposes_force_eval_aliases() -> None:
     timing_stats = {
         "setup_total": 0.25,
+        "setup_static_grid_rebuild": 0.01,
+        "setup_freeb_policy": 0.02,
+        "setup_boundary_profiles": 0.03,
+        "setup_cache_key_hash": 0.04,
+        "setup_ptau_constants": 0.005,
+        "setup_index_constants": 0.006,
+        "setup_update_constants": 0.009,
         "setup_axis_reset": 0.05,
         "setup_axis_reset_compute_forces": 0.02,
         "iteration_loop": 1.0,
@@ -55,6 +62,9 @@ def test_residual_iter_timing_report_exposes_force_eval_aliases() -> None:
     assert report["force_eval_extra_s"] == pytest.approx(0.15)
     assert report["force_eval_all_s"] == pytest.approx(0.55)
     assert report["force_eval_all_calls"] == 7
+    assert report["setup_cache_key_hash_s"] == pytest.approx(0.04)
+    assert report["setup_update_constants_s"] == pytest.approx(0.009)
+    assert report["setup_unattributed_s"] == pytest.approx(0.08)
 
 
 def test_accelerated_scan_timing_is_opt_in_and_path_labeled(

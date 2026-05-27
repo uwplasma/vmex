@@ -777,7 +777,10 @@ force evaluation, preconditioner, update, trace construction, and unattributed
 iteration-loop cost. These fields are the first place to inspect when a
 direct-coil free-boundary solve is slow, because they separate Biot-Savart
 sampling, the vacuum linear solve, solver-trial replay overhead, and the higher
-VMEC residual/update loop.
+VMEC residual/update loop.  The setup bucket is also split into static-grid
+rebuild, free-boundary policy, boundary/profile construction, cache-key hashing,
+``ptau`` constants, mode-index constants, and update constants, so GPU setup
+work can be targeted without conflating it with the NESTOR solve.
 
 The child scripts are still useful when isolating one lane:
 

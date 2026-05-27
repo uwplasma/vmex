@@ -95,6 +95,12 @@ Steps taken:
     force assembly is now comparable/slightly faster (`0.00855 s` CUDA versus
     `0.00921 s` CPU).  The remaining CUDA cost is setup, residual scalar
     materialization, accepted-control `fsq1`, and preconditioner dispatch.
+65. Added measurement-only setup sub-buckets to the residual-iteration timing
+    report and benchmark matrix: static-grid rebuild, free-boundary policy,
+    boundary/profile construction, cache-key hashing, `ptau` constants,
+    mode-index constants, and update constants.  A local timing probe confirmed
+    the buckets are populated in real direct-coil solve JSON before changing
+    solver behavior.
 
 ### 2026-05-27 Free-boundary beta-scan bootstrap-current preconditioner
 

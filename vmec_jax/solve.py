@@ -5456,6 +5456,29 @@ def solve_fixed_boundary_residual_iter(
     if not has_jax():
         raise ImportError("solve_fixed_boundary_residual_iter requires JAX (jax + jaxlib)")
 
+    timing_env = os.getenv("VMEC_JAX_TIMING", "").strip().lower()
+    timing_enabled = timing_env not in ("", "0", "false", "no")
+    timing_detail_env = os.getenv("VMEC_JAX_TIMING_DETAIL", "").strip().lower()
+    timing_detail_enabled = timing_enabled and timing_detail_env not in ("", "0", "false", "no")
+    _setup_phase_timings = {
+        "setup_static_grid_rebuild": 0.0,
+        "setup_freeb_policy": 0.0,
+        "setup_boundary_profiles": 0.0,
+        "setup_cache_key_hash": 0.0,
+        "setup_ptau_constants": 0.0,
+        "setup_index_constants": 0.0,
+        "setup_update_constants": 0.0,
+    }
+
+    def _setup_timer_start() -> float | None:
+        return time.perf_counter() if bool(timing_enabled) else None
+
+    def _record_setup_timing(key: str, start: float | None) -> None:
+        if start is not None:
+            _setup_phase_timings[key] = float(_setup_phase_timings.get(key, 0.0)) + (
+                time.perf_counter() - float(start)
+            )
+
     def _device_get_floats(*vals):
         """Batch host materialization for scalar diagnostics.
 
@@ -5634,6 +5657,7 @@ def solve_fixed_boundary_residual_iter(
     # grid (stellarator symmetry) for the force pipeline. Rebuild `static`
     # using `vmec_angle_grid(...)` so the force terms do not mix full-grid and
     # VMEC-grid arrays (which triggers broadcasting errors and parity drift).
+    _t_setup_static_grid = _setup_timer_start()
     cfg = static.cfg
     grid_vmec = vmec_angle_grid(
         ntheta=int(cfg.ntheta),
@@ -5661,8 +5685,10 @@ def solve_fixed_boundary_residual_iter(
             mgrid_metadata=getattr(static, "mgrid_metadata", None),
             free_boundary_extcur=getattr(static, "free_boundary_extcur", None),
         )
+    _record_setup_timing("setup_static_grid_rebuild", _t_setup_static_grid)
     # Free-boundary control + coupling path:
     # VMEC-style ivac/ivacskip cadence with edge bsqvac coupling.
+    _t_setup_freeb_policy = _setup_timer_start()
     free_boundary_enabled = bool(getattr(cfg, "lfreeb", False))
     free_boundary_provider_kind = (
         ""
@@ -5695,6 +5721,7 @@ def solve_fixed_boundary_residual_iter(
         jit_strict_update_enabled = (backend_name != "cpu") or (
             backend_name == "cpu" and (not bool(host_update_assembly)) and update_work >= cpu_work_limit
         )
+    _record_setup_timing("setup_freeb_policy", _t_setup_freeb_policy)
 
     def _attach_freeb_diag(res: SolveVmecResidualResult) -> SolveVmecResidualResult:
         if not bool(free_boundary_enabled):
@@ -5736,6 +5763,7 @@ def solve_fixed_boundary_residual_iter(
             diagnostics=diag_local,
         )
 
+    _t_setup_boundary_profiles = _setup_timer_start()
     idx00 = _mode00_index(static.modes)
     m_modes = np.asarray(
         getattr(static, "m_np", None) if getattr(static, "m_np", None) is not None else static.modes.m, dtype=int
@@ -6086,6 +6114,7 @@ def solve_fixed_boundary_residual_iter(
                 lasym=bool(wout_like.lasym),
                 dtype=jnp.asarray(state0.Rcos).dtype,
             )
+    _record_setup_timing("setup_boundary_profiles", _t_setup_boundary_profiles)
     modes = static.modes
     # Use np.asarray for static setup data – these are closure constants captured
     # by _run_scan and converted to device arrays once at the JIT boundary.
@@ -6126,6 +6155,7 @@ def solve_fixed_boundary_residual_iter(
         constraint_tcon0 = float(indata.get_float("TCON0", 1.0))
     apply_lforbal = bool(indata.get_bool("LFORBAL", False)) if indata is not None else False
 
+    _t_setup_cache_key_hash = _setup_timer_start()
     static_key = (
         int(static.cfg.mpol),
         int(static.cfg.ntor),
@@ -6154,6 +6184,7 @@ def solve_fixed_boundary_residual_iter(
     )
     edge_signature_key = _edge_signature_key(edge_Rcos, edge_Rsin, edge_Zcos, edge_Zsin)
     edge_value_key = _edge_value_key(edge_Rcos, edge_Rsin, edge_Zcos, edge_Zsin)
+    _record_setup_timing("setup_cache_key_hash", _t_setup_cache_key_hash)
 
     def _apply_radial_tridi(a, alpha: float):
         return _radial_tridi_smooth_dirichlet(a, alpha=alpha, skip_nonpositive=True)
@@ -6185,6 +6216,7 @@ def solve_fixed_boundary_residual_iter(
     def _pshalf_from_s(s_arr):
         return _pshalf_from_s_np(s_arr)
 
+    _t_setup_ptau_constants = _setup_timer_start()
     # Precompute pshalf and ohs for the JIT-accelerated ptau check.
     # These are fixed for the lifetime of this NS-stage closure. Keep the
     # cached constants tracer-safe so the residual solver can participate in a
@@ -6214,6 +6246,7 @@ def solve_fixed_boundary_residual_iter(
         else:
             _ptau_pshalf_jax = jnp.asarray(_ptau_pshalf_np, dtype=jnp.float64)
             _ptau_ohs_jax = jnp.asarray(_ptau_ohs_scalar, dtype=jnp.float64)
+    _record_setup_timing("setup_ptau_constants", _t_setup_ptau_constants)
 
     def _ptau_minmax_from_k_host(k) -> tuple[Any | None, Any | None]:
         """Compute VMEC `ptau` min/max on the host for controller decisions."""
@@ -7026,6 +7059,7 @@ def solve_fixed_boundary_residual_iter(
         fsql_out = norms_in.fnormL * gcl2_in
         return fsqr_out, fsqz_out, fsql_out
 
+    _t_setup_index_constants = _setup_timer_start()
     mpol = int(static.cfg.mpol)
     ntor = int(static.cfg.ntor)
     nrange = ntor + 1
@@ -7166,6 +7200,7 @@ def solve_fixed_boundary_residual_iter(
             lthreed=_rz_norm_lthreed,
             lasym=_rz_norm_lasym,
         )
+    _record_setup_timing("setup_index_constants", _t_setup_index_constants)
 
     m0_mask = np.asarray(
         getattr(static, "m_is_m0", None)
@@ -7223,6 +7258,7 @@ def solve_fixed_boundary_residual_iter(
             use_m1_pair_convert=use_m1_pair_convert,
         )
 
+    _t_setup_update_constants = _setup_timer_start()
     _state0_dtype = (
         np.asarray(state0.Rcos).dtype
         if bool(host_update_assembly) and (not _tree_has_tracer(state0.Rcos))
@@ -7497,6 +7533,7 @@ def solve_fixed_boundary_residual_iter(
             stage_prev_fsq_j = jnp.asarray(float(stage_prev_fsq), dtype=dtype)
         except Exception:
             stage_prev_fsq_j = None
+    _record_setup_timing("setup_update_constants", _t_setup_update_constants)
 
     def _run_vmec2000_scan(state_init: VMECState) -> SolveVmecResidualResult:
         scan_timing_enabled = _scan_timing_enabled(os.getenv("VMEC_JAX_TIMING", ""))
@@ -10247,12 +10284,15 @@ def solve_fixed_boundary_residual_iter(
     perfetto_env = os.getenv("VMEC_JAX_PROFILE_PERFETTO", "1")
     profile_perfetto = perfetto_env.strip().lower() not in ("", "0", "false", "no")
 
-    timing_env = os.getenv("VMEC_JAX_TIMING", "").strip().lower()
-    timing_enabled = timing_env not in ("", "0", "false", "no")
-    timing_detail_env = os.getenv("VMEC_JAX_TIMING_DETAIL", "").strip().lower()
-    timing_detail_enabled = timing_enabled and timing_detail_env not in ("", "0", "false", "no")
     timing_stats = {
         "setup_total": 0.0,
+        "setup_static_grid_rebuild": float(_setup_phase_timings["setup_static_grid_rebuild"]),
+        "setup_freeb_policy": float(_setup_phase_timings["setup_freeb_policy"]),
+        "setup_boundary_profiles": float(_setup_phase_timings["setup_boundary_profiles"]),
+        "setup_cache_key_hash": float(_setup_phase_timings["setup_cache_key_hash"]),
+        "setup_ptau_constants": float(_setup_phase_timings["setup_ptau_constants"]),
+        "setup_index_constants": float(_setup_phase_timings["setup_index_constants"]),
+        "setup_update_constants": float(_setup_phase_timings["setup_update_constants"]),
         "setup_axis_reset": 0.0,
         "setup_axis_reset_compute_forces": 0.0,
         "iteration_loop": 0.0,

@@ -23,6 +23,9 @@ def _direct_solve_payload() -> dict:
                         "iterations": 2,
                         "iteration_loop_s": 0.6,
                         "iteration_loop_unattributed_s": 0.1,
+                        "setup_total_s": 0.08,
+                        "setup_cache_key_hash_s": 0.03,
+                        "setup_update_constants_s": 0.02,
                         "iteration_control_s": 0.04,
                         "iteration_control_fsq1_s": 0.02,
                         "iteration_control_badjac_s": 0.01,
@@ -104,6 +107,8 @@ def test_matrix_timing_snapshot_preserves_compact_nestor_details() -> None:
     assert nestor["final_diagnostics"]["provider"]["segments_per_coil"] == 96
     assert nestor["final_diagnostics"]["lu_built"]["mode_matrix"] is True
     assert rows[0]["solver"]["warm"]["solve_total_s"] == 0.7
+    assert rows[0]["solver"]["warm"]["setup_cache_key_hash_s"] == 0.03
+    assert rows[0]["solver"]["warm"]["setup_update_constants_s"] == 0.02
     assert rows[0]["solver"]["warm"]["iteration_loop_unattributed_s"] == 0.1
     assert rows[0]["solver"]["warm"]["iteration_control_s"] == 0.04
     assert rows[0]["solver"]["warm"]["compute_forces_per_iter_s"] == 0.1
@@ -257,6 +262,13 @@ def test_cpu_gpu_comparison_matches_completed_cases_and_reports_nestor_ratios() 
                     "iteration_loop_s": warm_min + 0.5,
                     "iteration_loop_unattributed_s": warm_min + 0.25,
                     "setup_total_s": warm_min + 0.5,
+                    "setup_static_grid_rebuild_s": warm_min + 0.005,
+                    "setup_freeb_policy_s": warm_min + 0.006,
+                    "setup_boundary_profiles_s": warm_min + 0.007,
+                    "setup_cache_key_hash_s": warm_min + 0.008,
+                    "setup_ptau_constants_s": warm_min + 0.009,
+                    "setup_index_constants_s": warm_min + 0.010,
+                    "setup_update_constants_s": warm_min + 0.011,
                     "iteration_control_s": warm_min + 0.15,
                     "iteration_control_fsq1_s": warm_min + 0.05,
                     "iteration_control_badjac_s": warm_min + 0.04,
@@ -335,6 +347,8 @@ def test_cpu_gpu_comparison_matches_completed_cases_and_reports_nestor_ratios() 
     assert comparison["gpu"]["warm_compute_forces_per_iter_s"] == 0.51
     assert comparison["cpu"]["warm_setup_total_s"] == 2.5
     assert comparison["gpu"]["warm_setup_total_s"] == 1.0
+    assert comparison["cpu"]["warm_setup_cache_key_hash_s"] == 2.008
+    assert comparison["gpu"]["warm_setup_cache_key_hash_s"] == 0.508
     assert comparison["cpu"]["warm_iteration_residual_metrics_s"] == 2.125
     assert comparison["gpu"]["warm_iteration_residual_metrics_s"] == 0.625
     assert comparison["cpu"]["warm_finalize_s"] == 2.25
@@ -349,6 +363,13 @@ def test_cpu_gpu_comparison_matches_completed_cases_and_reports_nestor_ratios() 
         "warm_iteration_loop": 1.0 / 2.5,
         "warm_iteration_loop_unattributed": 0.75 / 2.25,
         "warm_setup_total": 1.0 / 2.5,
+        "warm_setup_static_grid_rebuild": 0.505 / 2.005,
+        "warm_setup_freeb_policy": 0.506 / 2.006,
+        "warm_setup_boundary_profiles": 0.507 / 2.007,
+        "warm_setup_cache_key_hash": 0.508 / 2.008,
+        "warm_setup_ptau_constants": 0.509 / 2.009,
+        "warm_setup_index_constants": 0.510 / 2.010,
+        "warm_setup_update_constants": 0.511 / 2.011,
         "warm_iteration_control": 0.65 / 2.15,
         "warm_iteration_control_fsq1": 0.55 / 2.05,
         "warm_iteration_control_badjac": 0.54 / 2.04,

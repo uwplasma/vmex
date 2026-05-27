@@ -236,6 +236,13 @@ _SOLVER_TIMING_KEYS = (
     "iteration_loop_s",
     "iteration_loop_unattributed_s",
     "setup_total_s",
+    "setup_static_grid_rebuild_s",
+    "setup_freeb_policy_s",
+    "setup_boundary_profiles_s",
+    "setup_cache_key_hash_s",
+    "setup_ptau_constants_s",
+    "setup_index_constants_s",
+    "setup_update_constants_s",
     "setup_axis_reset_s",
     "compute_forces_s",
     "compute_forces_first_s",
@@ -349,6 +356,19 @@ def _case_metrics(case: dict[str, Any]) -> dict[str, Any]:
             _nested_value(solver, ("warm", "iteration_loop_unattributed_s"))
         ),
         "warm_setup_total_s": _finite_float(_nested_value(solver, ("warm", "setup_total_s"))),
+        "warm_setup_static_grid_rebuild_s": _finite_float(
+            _nested_value(solver, ("warm", "setup_static_grid_rebuild_s"))
+        ),
+        "warm_setup_freeb_policy_s": _finite_float(_nested_value(solver, ("warm", "setup_freeb_policy_s"))),
+        "warm_setup_boundary_profiles_s": _finite_float(
+            _nested_value(solver, ("warm", "setup_boundary_profiles_s"))
+        ),
+        "warm_setup_cache_key_hash_s": _finite_float(_nested_value(solver, ("warm", "setup_cache_key_hash_s"))),
+        "warm_setup_ptau_constants_s": _finite_float(_nested_value(solver, ("warm", "setup_ptau_constants_s"))),
+        "warm_setup_index_constants_s": _finite_float(_nested_value(solver, ("warm", "setup_index_constants_s"))),
+        "warm_setup_update_constants_s": _finite_float(
+            _nested_value(solver, ("warm", "setup_update_constants_s"))
+        ),
         "warm_iteration_control_s": _finite_float(_nested_value(solver, ("warm", "iteration_control_s"))),
         "warm_iteration_control_fsq1_s": _finite_float(_nested_value(solver, ("warm", "iteration_control_fsq1_s"))),
         "warm_iteration_control_badjac_s": _finite_float(
@@ -452,6 +472,34 @@ def _cpu_gpu_comparison(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "warm_setup_total": _ratio(
                         gpu_metrics.get("warm_setup_total_s"),
                         cpu_metrics.get("warm_setup_total_s"),
+                    ),
+                    "warm_setup_static_grid_rebuild": _ratio(
+                        gpu_metrics.get("warm_setup_static_grid_rebuild_s"),
+                        cpu_metrics.get("warm_setup_static_grid_rebuild_s"),
+                    ),
+                    "warm_setup_freeb_policy": _ratio(
+                        gpu_metrics.get("warm_setup_freeb_policy_s"),
+                        cpu_metrics.get("warm_setup_freeb_policy_s"),
+                    ),
+                    "warm_setup_boundary_profiles": _ratio(
+                        gpu_metrics.get("warm_setup_boundary_profiles_s"),
+                        cpu_metrics.get("warm_setup_boundary_profiles_s"),
+                    ),
+                    "warm_setup_cache_key_hash": _ratio(
+                        gpu_metrics.get("warm_setup_cache_key_hash_s"),
+                        cpu_metrics.get("warm_setup_cache_key_hash_s"),
+                    ),
+                    "warm_setup_ptau_constants": _ratio(
+                        gpu_metrics.get("warm_setup_ptau_constants_s"),
+                        cpu_metrics.get("warm_setup_ptau_constants_s"),
+                    ),
+                    "warm_setup_index_constants": _ratio(
+                        gpu_metrics.get("warm_setup_index_constants_s"),
+                        cpu_metrics.get("warm_setup_index_constants_s"),
+                    ),
+                    "warm_setup_update_constants": _ratio(
+                        gpu_metrics.get("warm_setup_update_constants_s"),
+                        cpu_metrics.get("warm_setup_update_constants_s"),
                     ),
                     "warm_iteration_control": _ratio(
                         gpu_metrics.get("warm_iteration_control_s"),
