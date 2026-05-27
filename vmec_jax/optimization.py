@@ -2920,6 +2920,7 @@ class FixedBoundaryExactOptimizer:
             int(static_flags["signgs"]),
             int(static_flags["precond_jmax"]),
             _tridi_policy_cache_value(static_flags.get("preconditioner_use_precomputed_tridi", None)),
+            _tridi_policy_cache_value(static_flags.get("preconditioner_use_lax_tridi", None)),
         )
         t_helper = time.perf_counter()
         helper_cache = self._discrete_jacobian_helper_cache.get(helper_key)

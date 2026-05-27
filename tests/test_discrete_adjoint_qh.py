@@ -26,10 +26,19 @@ def test_replay_tridi_policy_helpers_and_static_flags():
     assert da._tridi_policy_cache_value(True) == 1
     assert da._trace_preconditioner_use_precomputed_tridi({}) is None
     assert da._trace_preconditioner_use_precomputed_tridi({"preconditioner_use_precomputed_tridi": True}) is True
+    assert da._trace_preconditioner_use_lax_tridi({}) is None
+    assert da._trace_preconditioner_use_lax_tridi({"preconditioner_use_lax_tridi": True}) is True
     assert (
         da._trace_preconditioner_use_precomputed_tridi(
             {"preconditioner_use_precomputed_tridi": False},
             {"preconditioner_use_precomputed_tridi": True},
+        )
+        is True
+    )
+    assert (
+        da._trace_preconditioner_use_lax_tridi(
+            {"preconditioner_use_lax_tridi": False},
+            {"preconditioner_use_lax_tridi": True},
         )
         is True
     )
@@ -49,11 +58,16 @@ def test_replay_tridi_policy_helpers_and_static_flags():
     }
     base_trace["precond_jmax"] = 4
     base_trace["preconditioner_use_precomputed_tridi"] = True
+    base_trace["preconditioner_use_lax_tridi"] = False
     flags = da._static_flags_from_replay_step_traces((dict(base_trace), dict(base_trace)))
     assert flags["preconditioner_use_precomputed_tridi"] is True
+    assert flags["preconditioner_use_lax_tridi"] is False
     bad = dict(base_trace, preconditioner_use_precomputed_tridi=False)
     with pytest.raises(ValueError, match="tridiagonal policy"):
         da._static_flags_from_replay_step_traces((base_trace, bad))
+    bad_lax = dict(base_trace, preconditioner_use_lax_tridi=True)
+    with pytest.raises(ValueError, match="lax tridiagonal policy"):
+        da._static_flags_from_replay_step_traces((base_trace, bad_lax))
 
 
 def test_qh_warm_start_fixture_loads_expected_case(load_case_qh_warm_start):

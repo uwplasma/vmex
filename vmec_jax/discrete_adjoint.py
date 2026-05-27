@@ -316,6 +316,20 @@ def _trace_preconditioner_use_precomputed_tridi(
     return bool(value)
 
 
+def _trace_preconditioner_use_lax_tridi(
+    trace: dict[str, Any],
+    static_flags: dict[str, Any] | None = None,
+) -> bool | None:
+    """Return the lax tridiagonal-solver policy recorded by the primal solve."""
+    if static_flags is not None and "preconditioner_use_lax_tridi" in static_flags:
+        value = static_flags["preconditioner_use_lax_tridi"]
+    else:
+        value = trace.get("preconditioner_use_lax_tridi", None)
+    if value is None:
+        return None
+    return bool(value)
+
+
 @dataclass(frozen=True)
 class ResidualIterationTrace:
     """Structured view of one fixed-boundary residual solve history."""
@@ -875,6 +889,7 @@ def checkpoint_tape_state_vjp(
                 w_mode_mn=None if rebuild_preconditioner else trace["w_mode_mn"],
                 preconditioner_jmax_override=int(trace["precond_jmax"]) if rebuild_preconditioner else None,
                 preconditioner_use_precomputed_tridi=_trace_preconditioner_use_precomputed_tridi(trace),
+                preconditioner_use_lax_tridi=_trace_preconditioner_use_lax_tridi(trace),
                 lambda_update_scale=trace["lambda_update_scale"],
                 dt_eff=trace["dt_eff"],
                 b1=trace["b1"],
@@ -944,6 +959,7 @@ def checkpoint_tape_state_jvp(
                 w_mode_mn=None if rebuild_preconditioner else trace["w_mode_mn"],
                 preconditioner_jmax_override=int(trace["precond_jmax"]) if rebuild_preconditioner else None,
                 preconditioner_use_precomputed_tridi=_trace_preconditioner_use_precomputed_tridi(trace),
+                preconditioner_use_lax_tridi=_trace_preconditioner_use_lax_tridi(trace),
                 lambda_update_scale=trace["lambda_update_scale"],
                 dt_eff=trace["dt_eff"],
                 b1=trace["b1"],
@@ -980,6 +996,7 @@ def _packed_replay_step_from_trace(
     divide_by_scalxc_for_update,
     preconditioner_jmax_override,
     preconditioner_use_precomputed_tridi: bool | None = None,
+    preconditioner_use_lax_tridi: bool | None = None,
 ):
     state = unpack_state(packed_state, trace["state_pre"].layout)
     stored_jmax = preconditioner_jmax_override if preconditioner_jmax_override is not None else trace["precond_jmax"]
@@ -1001,6 +1018,11 @@ def _packed_replay_step_from_trace(
             _trace_preconditioner_use_precomputed_tridi(trace)
             if preconditioner_use_precomputed_tridi is None
             else preconditioner_use_precomputed_tridi
+        ),
+        preconditioner_use_lax_tridi=(
+            _trace_preconditioner_use_lax_tridi(trace)
+            if preconditioner_use_lax_tridi is None
+            else preconditioner_use_lax_tridi
         ),
         lambda_update_scale=trace["lambda_update_scale"],
         dt_eff=trace["dt_eff"],
@@ -1046,6 +1068,10 @@ def _static_flags_from_replay_step_traces(step_traces: tuple[dict[str, Any], ...
     if any(trace.get("preconditioner_use_precomputed_tridi", None) != tridi_policy0 for trace in step_traces[1:]):
         raise ValueError("Replay step trace preconditioner tridiagonal policy must be constant across scan replay.")
     static_flags["preconditioner_use_precomputed_tridi"] = tridi_policy0
+    lax_tridi_policy0 = step_traces[0].get("preconditioner_use_lax_tridi", None)
+    if any(trace.get("preconditioner_use_lax_tridi", None) != lax_tridi_policy0 for trace in step_traces[1:]):
+        raise ValueError("Replay step trace lax tridiagonal policy must be constant across scan replay.")
+    static_flags["preconditioner_use_lax_tridi"] = lax_tridi_policy0
     return static_flags
 
 
@@ -1362,6 +1388,7 @@ def _packed_dynamic_replay_step_from_carry(
     static_flags,
     preconditioner_jmax_override,
     preconditioner_use_precomputed_tridi: bool | None = None,
+    preconditioner_use_lax_tridi: bool | None = None,
 ):
     packed_state, inv_tau, fsq_prev, vRcc_before, vRss_before, vRsc_before, vRcs_before, vZsc_before, vZcs_before, vZcc_before, vZss_before, vLsc_before, vLcs_before, vLcc_before, vLss_before = carry
     layout = static_flags.get("layout", trace["state_pre"].layout if isinstance(trace, dict) and "state_pre" in trace else None)
@@ -1401,6 +1428,11 @@ def _packed_dynamic_replay_step_from_carry(
         if preconditioner_use_precomputed_tridi is None
         else preconditioner_use_precomputed_tridi
     )
+    lax_tridi_policy = (
+        _trace_preconditioner_use_lax_tridi(trace, static_flags)
+        if preconditioner_use_lax_tridi is None
+        else preconditioner_use_lax_tridi
+    )
     preconditioner_out = state_dependent_preconditioner_from_forces(
         k=residual_out["k"],
         static=static,
@@ -1409,6 +1441,7 @@ def _packed_dynamic_replay_step_from_carry(
         jmax_override=preconditioner_jmax_override,
         w_mode_mn=w_mode_mn,
         use_precomputed=tridi_policy,
+        use_lax_tridi=lax_tridi_policy,
     )
     force_out = preconditioned_force_channels_from_raw_forces(
         frzl=residual_out["frzl"],
@@ -1419,6 +1452,7 @@ def _packed_dynamic_replay_step_from_carry(
         w_mode_mn=preconditioner_out["w_mode_mn"],
         lambda_update_scale=lambda_update_scale,
         use_precomputed=tridi_policy,
+        use_lax_tridi=lax_tridi_policy,
     )
     fsq1 = _dynamic_fsq1_from_force_channels(
         state_pre=state_pre,
@@ -1527,6 +1561,7 @@ def _checkpoint_tape_scan_runner(*, static, stacked, static_flags, rebuild_preco
         bool(static_flags["divide_by_scalxc_for_update"]),
         None if static_flags["precond_jmax"] is None else int(static_flags["precond_jmax"]),
         _tridi_policy_cache_value(static_flags.get("preconditioner_use_precomputed_tridi", None)),
+        _tridi_policy_cache_value(static_flags.get("preconditioner_use_lax_tridi", None)),
         _stacked_trace_signature(stacked),
     )
     diagnostics_enabled = _replay_scan_cache_diagnostics_enabled()
@@ -1556,6 +1591,10 @@ def _checkpoint_tape_scan_runner(*, static, stacked, static_flags, rebuild_preco
                 preconditioner_jmax_override=static_flags["precond_jmax"],
                 preconditioner_use_precomputed_tridi=static_flags.get(
                     "preconditioner_use_precomputed_tridi",
+                    None,
+                ),
+                preconditioner_use_lax_tridi=static_flags.get(
+                    "preconditioner_use_lax_tridi",
                     None,
                 ),
             )
@@ -1594,6 +1633,7 @@ def _checkpoint_tape_dynamic_scan_runner(*, static, stacked, static_flags):
         int(static_flags["signgs"]),
         int(static_flags["precond_jmax"]),
         _tridi_policy_cache_value(static_flags.get("preconditioner_use_precomputed_tridi", None)),
+        _tridi_policy_cache_value(static_flags.get("preconditioner_use_lax_tridi", None)),
         _stacked_trace_signature(stacked),
     )
     diagnostics_enabled = _replay_scan_cache_diagnostics_enabled()
@@ -1617,6 +1657,10 @@ def _checkpoint_tape_dynamic_scan_runner(*, static, stacked, static_flags):
                 preconditioner_jmax_override=int(static_flags["precond_jmax"]),
                 preconditioner_use_precomputed_tridi=static_flags.get(
                     "preconditioner_use_precomputed_tridi",
+                    None,
+                ),
+                preconditioner_use_lax_tridi=static_flags.get(
+                    "preconditioner_use_lax_tridi",
                     None,
                 ),
             )
@@ -1654,6 +1698,7 @@ def _checkpoint_tape_dynamic_basepoint_scan_runner(*, static, stacked, stacked_b
         int(static_flags["signgs"]),
         int(static_flags["precond_jmax"]),
         _tridi_policy_cache_value(static_flags.get("preconditioner_use_precomputed_tridi", None)),
+        _tridi_policy_cache_value(static_flags.get("preconditioner_use_lax_tridi", None)),
         _stacked_trace_signature(stacked),
         _stacked_trace_signature(stacked_base_carries),
     )
@@ -1679,6 +1724,10 @@ def _checkpoint_tape_dynamic_basepoint_scan_runner(*, static, stacked, stacked_b
                 preconditioner_jmax_override=int(static_flags["precond_jmax"]),
                 preconditioner_use_precomputed_tridi=static_flags.get(
                     "preconditioner_use_precomputed_tridi",
+                    None,
+                ),
+                preconditioner_use_lax_tridi=static_flags.get(
+                    "preconditioner_use_lax_tridi",
                     None,
                 ),
             )
@@ -1724,6 +1773,7 @@ def _checkpoint_tape_dynamic_basepoint_vjp_scan_runner(*, static, stacked, stack
         int(static_flags["signgs"]),
         int(static_flags["precond_jmax"]),
         _tridi_policy_cache_value(static_flags.get("preconditioner_use_precomputed_tridi", None)),
+        _tridi_policy_cache_value(static_flags.get("preconditioner_use_lax_tridi", None)),
         _stacked_trace_signature(stacked),
         _stacked_trace_signature(stacked_base_carries),
     )
@@ -1749,6 +1799,10 @@ def _checkpoint_tape_dynamic_basepoint_vjp_scan_runner(*, static, stacked, stack
                 preconditioner_jmax_override=int(static_flags["precond_jmax"]),
                 preconditioner_use_precomputed_tridi=static_flags.get(
                     "preconditioner_use_precomputed_tridi",
+                    None,
+                ),
+                preconditioner_use_lax_tridi=static_flags.get(
+                    "preconditioner_use_lax_tridi",
                     None,
                 ),
             )
@@ -1906,6 +1960,10 @@ def checkpoint_tape_state_jvp_columns(
                         trace,
                         static_flags,
                     ),
+                    preconditioner_use_lax_tridi=_trace_preconditioner_use_lax_tridi(
+                        trace,
+                        static_flags,
+                    ),
                 )
 
             _, linear_step = jax.linearize(_step, carry_base)
@@ -1967,6 +2025,10 @@ def checkpoint_tape_state_jvp_columns(
                         else int(trace["precond_jmax"])
                     ),
                     preconditioner_use_precomputed_tridi=_trace_preconditioner_use_precomputed_tridi(
+                        trace,
+                        static_flags,
+                    ),
+                    preconditioner_use_lax_tridi=_trace_preconditioner_use_lax_tridi(
                         trace,
                         static_flags,
                     ),
@@ -2315,6 +2377,7 @@ def preconditioned_force_channels_from_raw_forces(
     w_mode_mn,
     lambda_update_scale=1.0,
     use_precomputed: bool | None = None,
+    use_lax_tridi: bool | None = None,
 ):
     """Apply the radial preconditioner, lambda scaling, and mode scaling."""
     from .preconditioner_1d_jax import rz_preconditioner_apply_jit
@@ -2353,6 +2416,7 @@ def preconditioned_force_channels_from_raw_forces(
         jmax=int(jmax),
         cfg=cfg,
         use_precomputed=use_precomputed,
+        use_lax_tridi=use_lax_tridi,
     )
     out = preconditioned_force_channels_from_rz_output(
         frzl_rz=frzl_rz,
@@ -2461,6 +2525,7 @@ def state_dependent_preconditioner_from_forces(
     w_mode_mn=None,
     mode_diag_exponent: float = 0.0,
     use_precomputed: bool | None = None,
+    use_lax_tridi: bool | None = None,
 ):
     """Rebuild the solver's state-dependent preconditioner objects."""
     from .preconditioner_1d_jax import lambda_preconditioner, rz_preconditioner_matrices
@@ -2482,6 +2547,7 @@ def state_dependent_preconditioner_from_forces(
         cfg=cfg,
         jmax_override=jmax_override,
         use_precomputed=use_precomputed,
+        use_lax_tridi=use_lax_tridi,
     )
     if dtype is None:
         dtype = jnp.asarray(lam_prec).dtype
@@ -2533,6 +2599,7 @@ def strict_update_one_step_from_state(
     divide_by_scalxc_for_update: bool = False,
     preconditioner_jmax_override: int | None = None,
     preconditioner_use_precomputed_tridi: bool | None = None,
+    preconditioner_use_lax_tridi: bool | None = None,
 ):
     """Compose the exact QH one-step map from state through accepted update."""
     residual_out = raw_force_residual_from_state(
@@ -2554,6 +2621,7 @@ def strict_update_one_step_from_state(
             dtype=jnp.asarray(state_pre.Rcos).dtype,
             jmax_override=preconditioner_jmax_override,
             use_precomputed=preconditioner_use_precomputed_tridi,
+            use_lax_tridi=preconditioner_use_lax_tridi,
         )
         mats = preconditioner_out["mats"]
         jmax = preconditioner_out["jmax"]
@@ -2568,6 +2636,7 @@ def strict_update_one_step_from_state(
         w_mode_mn=w_mode_mn,
         lambda_update_scale=lambda_update_scale,
         use_precomputed=preconditioner_use_precomputed_tridi,
+        use_lax_tridi=preconditioner_use_lax_tridi,
     )
     step_out = strict_update_accepted_step(
         state_pre,
