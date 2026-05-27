@@ -1020,6 +1020,8 @@ def _boundary_reference_checkpoint_diagnostics(output_dir, active_input_file) ->
     return {
         **base,
         "source": "boundary_reference_preconditioner",
+        "boundary_reference_input_path": None if selected.get("input") is None else str(selected.get("input")),
+        "boundary_reference_wout_path": None if selected.get("wout") is None else str(selected.get("wout")),
         "lambda": _finite_or_none(selected.get("lambda")),
         "aspect": _finite_or_none(selected.get("aspect")),
         "aspect_relative_error": _finite_or_none(selected.get("aspect_relative_error")),

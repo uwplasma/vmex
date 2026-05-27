@@ -551,6 +551,16 @@ def _stage_checkpoint_wout(record: ShowcaseRecord, name: str) -> Path | None:
         data = json.loads(checkpoint.read_text())
     except json.JSONDecodeError:
         return None
+    if name == "wout_final.nc":
+        for raw_path in (
+            data.get("wout_path"),
+            data.get("diagnostics", {}).get("boundary_reference_wout_path")
+            if isinstance(data.get("diagnostics"), dict)
+            else None,
+        ):
+            candidate = _local_repo_path(raw_path, output_dir=record.output_dir)
+            if candidate is not None and candidate.exists():
+                return candidate
     diagnostics_path = _local_repo_path(data.get("diagnostics_path"), output_dir=record.output_dir)
     if diagnostics_path is None:
         return None

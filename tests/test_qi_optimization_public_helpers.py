@@ -707,6 +707,8 @@ def test_run_qi_stage_policy_writes_pending_checkpoint_before_long_stage(tmp_pat
     assert root_checkpoint["role"] == "mirror_ramp_pending"
     assert root_checkpoint["promotion"]["stage_pending"] is True
     assert root_checkpoint["diagnostics"]["source"] == "boundary_reference_preconditioner"
+    assert root_checkpoint["diagnostics"]["boundary_reference_input_path"] == str(selected_input)
+    assert root_checkpoint["diagnostics"]["boundary_reference_wout_path"] is None
     assert root_checkpoint["diagnostics"]["qi_legacy_total"] == pytest.approx(9.0e-4)
     assert root_checkpoint["diagnostics"]["qi_mirror_ratio_max"] == pytest.approx(0.28)
     assert root_checkpoint["diagnostics"]["mean_iota"] == pytest.approx(0.43)

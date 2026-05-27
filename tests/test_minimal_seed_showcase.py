@@ -187,6 +187,45 @@ def test_minimal_seed_showcase_qi_stage_patch_inherits_requested_max_mode() -> N
     assert "use_showcase_max_mode" not in patched
 
 
+def test_renderer_uses_boundary_reference_wout_from_pending_checkpoint(tmp_path: Path) -> None:
+    renderer = _load_module("render_minimal_seed_showcase_pending_wout", "render_minimal_seed_showcase.py")
+    output_dir = tmp_path / "case"
+    reference_dir = output_dir / "boundary_reference_preconditioner" / "lambda_0p950"
+    reference_dir.mkdir(parents=True)
+    reference_wout = reference_dir / "wout_interpolated.nc"
+    reference_wout.write_text("wout\n")
+    (output_dir / "stage_checkpoint.json").write_text(
+        json.dumps(
+            {
+                "wout_path": str(output_dir / "boundary_reference_baseline" / "wout_final.nc"),
+                "diagnostics_path": str(output_dir / "boundary_reference_baseline" / "diagnostics.json"),
+                "diagnostics": {
+                    "boundary_reference_wout_path": str(reference_wout),
+                },
+            }
+        )
+        + "\n"
+    )
+    record = renderer.ShowcaseRecord(
+        case_name="qi_nfp1",
+        nfp=1,
+        problem="qi",
+        output_dir=output_dir,
+        success=False,
+        crashed=False,
+        message="partial",
+        objective_final=None,
+        aspect_final=6.8,
+        iota_final=0.42,
+        total_wall_time_s=None,
+        policy="continuation",
+        max_mode=5,
+        use_ess=True,
+    )
+
+    assert renderer._final_wout_for_record(record) == reference_wout
+
+
 def test_minimal_seed_showcase_dispatches_qi_to_staged_runner(tmp_path: Path, monkeypatch) -> None:
     generator = _load_module("generate_minimal_seed_showcase_qi_staged", "generate_minimal_seed_showcase.py")
     budget = generator.MinimalSeedBudget(
