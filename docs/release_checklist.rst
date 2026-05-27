@@ -101,6 +101,19 @@ Do not commit optimization result trees, rerun ``wout`` files, profiler traces,
 or generated PDFs unless a small artifact is explicitly referenced by README or
 docs and has a documented validation purpose.
 
+For one-case optimization showcase smoke checks, use the bounded renderer
+instead of refreshing the full production matrix:
+
+.. code-block:: bash
+
+   PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py \
+     --output-root /path/to/minimal_seed_showcase \
+     --figure-dir /path/to/figures \
+     --cases qi_nfp1 --skip-missing
+
+Use the production ``--publication-matrix`` render only after the full
+showcase matrix has been regenerated.
+
 Release tagging gate
 --------------------
 
