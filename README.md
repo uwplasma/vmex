@@ -149,11 +149,10 @@ Editable optimization examples live in `examples/optimization/`. Start with
 `docs/optimization_sweep_results.rst` for generated sweep tables/figures, and
 `docs/piecewise_omnigenous_plan.rst` for the pwO planning and acceptance gates.
 
-The README intentionally keeps only the compact best current
-stellarator-symmetric QA/QH/QP/QI rows. Extended policy discussion, LASYM
-panels, finite-beta examples, extended QI NFP provenance and limitations,
-minimal-seed status, failure modes, partial CPU/GPU sweep snapshots, and
-full-matrix artifact requirements live in the docs.
+The table and figures below are an archived aspect-6, ``max_mode <= 3``
+snapshot while the aspect-5, ``max_mode <= 5`` matrix is being regenerated.
+Extended policy discussion, LASYM panels, finite-beta examples, QI provenance,
+failure modes, and full-matrix artifact requirements live in the docs.
 
 | Target | Backend | Policy | max_mode | ESS | Final J | QI legacy | Mirror | Aspect | Iota | Wall time |
 |---|---|---|---:|---|---:|---:|---:|---:|---:|---:|
@@ -162,8 +161,8 @@ full-matrix artifact requirements live in the docs.
 | QP | CPU | continuation | 3 | no | 5.38e-02 |  |  | 6.015 | -0.6724 | 3.9 min |
 | QI | CPU | qi_default | 3 | yes | 1.37e-02 | 4.31e-04 | 0.272 | 6.002 | -0.5690 | 10.9 min |
 
-Metric definitions and policy details are in `docs/optimization.rst`; the
-README table is only the current compact promotion snapshot.
+Metric definitions are in `docs/optimization.rst`; do not treat this archived
+table as current aspect-5 promotion evidence.
 
 ![QA optimization](docs/_static/figures/readme_best_optimization_qa.png)
 ![QH optimization](docs/_static/figures/readme_best_optimization_qh.png)

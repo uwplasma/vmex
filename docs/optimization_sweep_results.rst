@@ -6,14 +6,14 @@ README and the main optimization guide.  The full regeneration target covers
 QA, QH, QP, and QI targets; checked-in artifacts are explicitly labeled when
 they are only partial snapshots:
 
-- QA: the reference omnigenity NFP=2 QA deck, aspect ratio near 6,
+- QA: the reference omnigenity NFP=2 QA deck, aspect ratio target 5,
   signed mean iota target 0.42, and quasi-axisymmetry.
-- QH: the bundled NFP=4 warm start, aspect ratio near 6, quasi-helical
+- QH: the bundled NFP=4 warm start, aspect ratio target 5, quasi-helical
   symmetry, and a smooth ``abs(mean_iota) >= 0.41`` lower bound.
-- QP: aspect ratio near 6, quasi-poloidal symmetry, and a smooth
+- QP: aspect ratio target 5, quasi-poloidal symmetry, and a smooth
   ``abs(mean_iota) >= 0.41`` lower bound, using the same bundled NFP=2 seed as
   the QI runs.
-- QI: aspect ratio near 6 in the compact README best-row sweep, a
+- QI: aspect ratio target 5 in the compact README best-row sweep, a
   differentiable smooth Boozer-space quasi-isodynamic
   residual evaluated through ``booz_xform_jax``, maximum mirror-ratio penalty,
   maximum-LCFS-elongation penalty, and a smooth ``abs(mean_iota) >= 0.41``
@@ -36,10 +36,10 @@ The split between README and docs is deliberate:
   short reproduction command.
 - This page is the intended publication home for complete sweeps.  A complete
   publication should represent every CPU/GPU, continuation/direct, ESS on/off,
-  QI preseed/no-preseed, ``max_mode=1..3`` checked-in row through downloadable
+  QI preseed/no-preseed, ``max_mode=1..5`` reviewed row through downloadable
   CSV/JSON summaries plus generated objective-history panels, initial/final
-  state atlases, and wall-time summary tables.  Treat ``max_mode=4`` as an
-  exploratory regeneration lane until matching rows and figures are present.
+  state atlases, and wall-time summary tables.  Treat archived ``max_mode<=3``
+  snapshots as historical until matching aspect-5 rows and figures are present.
 - Additional QI case coverage, including NFP=1/2/3/4 case-gated rows that use
   case-specific aspect targets, belongs here rather than in the README best-row
   section.  Those rows are distinct from the pending common-minimal-seed QI
@@ -199,7 +199,7 @@ Render the compact README panels from the best stellarator-symmetric rows:
    PYTHONPATH=. python examples/optimization/render_readme_best_optimizations.py
 
 The default per-case timeout is 1800 seconds.  The current README science
-configs use NFP=4 for QH, aspect targets near 6 for QA/QH/QP/QI, signed iota
+configs use NFP=4 for QH, aspect target 5 for QA/QH/QP/QI, signed iota
 0.42 for QA, and high-priority ``abs(mean_iota) >= 0.41`` constraints for
 QH/QP/QI.
 They use ``inner_max_iter = trial_max_iter = 120`` and
@@ -545,7 +545,7 @@ Constrained QI Matrix
 ---------------------
 
 The constrained QI renderer can compare CPU and available GPU rows for
-``max_mode = 1, 2, 3``, ESS on/off, continuation/direct, and QP-preseed on/off
+``max_mode = 1..5``, ESS on/off, continuation/direct, and QP-preseed on/off
 using the bundled NFP=2 ``input.nfp2_QI`` seed.  The checked-in constrained
 snapshot is partial: it contains one CPU continuation ``max_mode=3`` status row
 and no GPU, direct, or QP-preseed constrained-QI rows.  Rerun
@@ -563,13 +563,13 @@ the same ranking as the legacy diagnostic on the seed and reference
 omnigenity cases.  Rows that stop at ``max_nfev`` but have valid VMEC solves
 and satisfy the physics gates are kept as valid stopped rows.
 
-The checked-in target-6 constrained-QI artifact is a transparent partial status
+The checked-in target-6 constrained-QI artifact is an archived partial status
 snapshot, not the promoted QI result.  At the moment it contains the bounded
 partial continuation row annotated from ``stage_checkpoint.json`` before full
 QI diagnostics were available.  It is a status artifact and must not be
-promoted.  The README best QI row therefore comes from the standalone
-``QI_optimization.py`` target-6 lane until the full constrained CPU/GPU matrix
-is rerun and passes the same QI, mirror, elongation, iota, and aspect gates.
+promoted as current aspect-5 evidence.  The README best QI row should be
+replaced only after the full constrained CPU/GPU matrix is rerun and passes the
+same QI, mirror, elongation, iota, and aspect gates.
 
 .. image:: _static/figures/qi_constrained_objective_panel.png
    :width: 100%

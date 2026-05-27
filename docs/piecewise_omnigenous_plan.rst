@@ -5,10 +5,12 @@ Status
 ------
 
 This is a planning and acceptance document for adding piecewise-omnigenous
-optimization (pwO) to ``vmec_jax``.  The immediate seed is the final optimized
-QP configuration because its Boozer ``|B|`` contours already resemble a
-piecewise-omnigenous topology more than a clean quasi-poloidally symmetric
-state:
+optimization (pwO) to ``vmec_jax``.  The immediate seed should be the current
+reviewed optimized QP configuration because its Boozer ``|B|`` contours already
+resemble a piecewise-omnigenous topology more than a clean quasi-poloidally
+symmetric state.  The archived path below records the original planning seed
+and must be replaced by the current aspect-5, reviewed best QP row before any
+pwO result is promoted:
 
 .. code-block:: text
 
@@ -92,7 +94,7 @@ Phase 2: differentiable local optimization
   explicit objective tuples, ``LeastSquaresProblem.from_tuples(...)``,
   ``least_squares_solve(...)``, then explicit save/plot calls.
 - Use the optimized QP seed first, then test the common minimal NFP=2 seed.
-- Keep aspect target 6 and ``abs(mean_iota) >= 0.41`` for comparability with
+- Keep aspect target 5 and ``abs(mean_iota) >= 0.41`` for comparability with
   README QA/QH/QP/QI results.
 - Use continuation over mode lists and ESS as existing examples do; only add
   global/reference-family preconditioning if local optimization cannot keep the

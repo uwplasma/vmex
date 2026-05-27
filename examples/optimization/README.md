@@ -308,7 +308,7 @@ bundles under `docs/_static/qi_readme_cases`.
 
 The constrained-QI sweep is the compact bundled-seed matrix, not the staged
 far-seed runner.  If its summary reports a stale QI target aspect, rerun the
-two sweep commands above with the current target-6 policy before using the
+two sweep commands above with the current aspect-5 policy before using the
 rendered matrix.
 Read the docs NFP=4 QI coverage row as a minimal-seed same-NFP reference-family
 proposal with an exact audit, not as a long local descent.  The generated

@@ -11,9 +11,8 @@ This page covers:
 - the key source files and public API,
 - the algorithms (Gauss-Newton, line search, adjoint replay),
 - how to reproduce the QA, QH, QP, and QI examples,
-- regeneration targets for checked-in ``max_mode=1, 2, 3`` optimisation
-  sweeps and explicit interpretation of deferred ``max_mode=4`` exploratory
-  rows.
+- regeneration targets for ``max_mode=1..5`` optimisation sweeps and explicit
+  interpretation of archived lower-mode snapshots.
 
 Current reproducible workflow
 -----------------------------
@@ -55,13 +54,13 @@ the exact policy matrix and selected best-case provenance.
      - Notes
    * - QA
      - ``examples/optimization/QA_optimization.py``
-     - NFP=2 QA deck, aspect near 6, signed mean-iota target, QA residual.
+     - NFP=2 QA deck, aspect target 5, signed mean-iota target, QA residual.
    * - QH
      - ``examples/optimization/QH_optimization.py``
-     - NFP=4 warm start, aspect near 6, ``abs(mean_iota) >= 0.41``, QH residual.
+     - NFP=4 warm start, aspect target 5, ``abs(mean_iota) >= 0.41``, QH residual.
    * - QP
      - ``examples/optimization/QP_optimization.py``
-     - NFP=2 QI seed, aspect near 6, ``abs(mean_iota) >= 0.41``, QP residual.  The final optimized QP row is also the seed for the separate :doc:`piecewise_omnigenous_plan`.
+     - NFP=2 QI seed, aspect target 5, ``abs(mean_iota) >= 0.41``, QP residual.  The final optimized QP row is also the seed for the separate :doc:`piecewise_omnigenous_plan`.
    * - QI
      - ``examples/optimization/QI_optimization.py``
      - NFP=2 QI default lane with Boozer-space QI, mirror, elongation, QI ceiling, ESS, and repeated same-mode continuation; the README best-row sweep uses aspect target 5, while case-coverage and far-seed probes may choose case-specific aspect targets.
@@ -773,11 +772,11 @@ optimization:
 
 Those scripts write ``input.initial``, ``input.final``, ``wout_initial.nc``,
 ``wout_final.nc``, ``history.json``, and per-case diagnostic plots.  The README
-QA/QH/QP rows are selected from reviewed ``qs_ess_sweep`` outputs; the README QI
-row is selected from the standalone target-6 ``QI_optimization.py`` lane until
-the constrained-QI sweep has complete passing rows.  Current compact panels
-include the source-initial LCFS, final LCFS, objective history, and initial/final
-Boozer :math:`|B|` line contours.
+QA/QH/QP rows are selected from reviewed ``qs_ess_sweep`` outputs; the archived
+README QI row is selected from a standalone ``QI_optimization.py`` lane until
+the current aspect-5 constrained-QI sweep has complete passing rows.  Compact
+panels include the source-initial LCFS, final LCFS, objective history, and
+initial/final Boozer :math:`|B|` line contours.
 
 The common-minimal seed inputs are intentionally close to circular tori and can
 sit on a zero-transform branch.  The QA/QH/QP examples now use
@@ -795,22 +794,22 @@ Full QA/QH/QP/QI policy sweep
 
 The sweep below compares four target objectives:
 
-- QA: the reference omnigenity NFP=2 QA deck, aspect ratio near 6,
+- QA: the reference omnigenity NFP=2 QA deck, aspect ratio target 5,
   signed mean iota target 0.42, and quasi-axisymmetry.
-- QH: the bundled NFP=4 warm start, aspect ratio near 6, quasi-helical
+- QH: the bundled NFP=4 warm start, aspect ratio target 5, quasi-helical
   symmetry, and a smooth ``abs(mean_iota) >= 0.41`` lower bound.
-- QP: aspect ratio near 6, quasi-poloidal symmetry, and a smooth
+- QP: aspect ratio target 5, quasi-poloidal symmetry, and a smooth
   ``abs(mean_iota) >= 0.41`` lower bound, using the same bundled NFP=2 seed as
   the QI runs.
-- QI: aspect ratio near 6, a differentiable smooth Boozer-space quasi-isodynamic
+- QI: aspect ratio target 5, a differentiable smooth Boozer-space quasi-isodynamic
   residual evaluated through ``booz_xform_jax``, maximum mirror-ratio penalty,
   maximum-LCFS-elongation penalty, and the same smooth
   ``abs(mean_iota) >= 0.41`` lower bound.  ``LgradB`` is available as an
   optional commented term in the example scripts.
 
 The current objective priority is primary symmetry/QI quality and rotational
-transform control first.  The published QA/QH/QP/QI sweep uses aspect ratio
-near 6, with case-specific staged QI diagnostics available for harder far
+transform control first.  The active QA/QH/QP/QI regeneration target uses aspect
+ratio 5, with case-specific staged QI diagnostics available for harder far
 seeds.  QA also uses the signed iota-0.42 target, while QH/QP/QI use
 ``abs(mean_iota) >= 0.41``.  ``LgradB`` remains available for users who want
 extra magnetic-gradient regularization, but it is not active in the default
@@ -848,13 +847,16 @@ the preseed helps or hurts the constrained QI solve.
 interval used by the smooth QI residual.  The bundled NFP=2 seed uses the
 default ``0.0``; set it to ``np.pi / nfp`` when comparing against a reference
 configuration whose well starts one half-period later.
-Columns correspond to the checked-in ``max_mode = 1, 2, 3`` sweep rows.  The
-vertical dotted lines mark continuation stage boundaries.  QA/QH/QP
+Columns in archived checked-in panels may correspond to older
+``max_mode = 1, 2, 3`` sweep rows.  The current regeneration target extends
+through ``max_mode=5``.  The vertical dotted lines mark continuation stage
+boundaries.  QA/QH/QP
 continuation uses the repeated
 omnigenity-style policy ``[1, 1, 2, 2, 2]`` for ``max_mode=2`` and
-``[1, 1, 2, 2, 2, 3, 3, 3]`` for ``max_mode=3``.  QI repeats the requested
-active space five times, matching the reference omnigenity workflow.
-``max_mode=4`` remains an exploratory lane until matching reviewed rows and
+``[1, 1, 2, 2, 2, 3, 3, 3]`` for ``max_mode=3``; higher modes follow the same
+repeated-stage pattern when continuation is enabled.  QI repeats the requested
+active space five times, matching the reference omnigenity workflow.  Mode-4 and
+mode-5 rows should be promoted only after matching reviewed CSV/JSON rows and
 figures are regenerated.
 
 When the full matrix is regenerated, the objective panels contain the CPU/GPU
