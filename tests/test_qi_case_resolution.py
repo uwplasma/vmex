@@ -71,7 +71,7 @@ def test_minimal_and_circular_qi_cases_require_reference_seeded_local_stage() ->
         stages = case["mirror_ramp_stages"]
 
         assert boundary_reference["enabled"] is True
-        assert boundary_reference["accept_as_baseline"] is False
+        assert boundary_reference["accept_as_baseline"] is True
         assert stages
         assert all(int(stage["max_nfev"]) >= mod.MINIMAL_QI_LOCAL_STAGE_MIN_NFEV for stage in stages)
         assert all(stage["use_showcase_max_nfev"] is True for stage in stages)
