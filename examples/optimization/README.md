@@ -121,6 +121,16 @@ PYTHONPATH=. JAX_PLATFORMS=cuda python3 examples/optimization/generate_minimal_s
 PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py --publication-matrix
 ```
 
+For a bounded smoke render after one case or partial timeout, keep roots explicit
+and filter to the attempted case:
+
+```bash
+PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py \
+  --output-root /path/to/minimal_seed_showcase \
+  --figure-dir /path/to/figures \
+  --cases qi_nfp1 --skip-missing
+```
+
 Use `cpu` for `JAX_PLATFORMS`, `--solver-device`, and `--worker-jax-platforms`
 for a slower local CPU-only reproduction.  Keep `--rerun` for a fresh local reproduction.  Without it, existing
 successful `showcase_case.json` rows are reused and can leave old outputs on

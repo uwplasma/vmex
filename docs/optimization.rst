@@ -125,6 +125,16 @@ the aspect-5, ``max_mode=5`` production matrix is promoted:
      --ess-alpha 1.2 --case-timeout-s 7200 --rerun
    PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py --publication-matrix
 
+For a bounded one-case smoke render after a timeout or partial QI checkpoint,
+use:
+
+.. code-block:: bash
+
+   PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py \
+     --output-root /path/to/minimal_seed_showcase \
+     --figure-dir /path/to/figures \
+     --cases qi_nfp1 --skip-missing
+
 For a clean reproduction, keep ``--rerun`` on the generator.  Replace the three
 CUDA/GPU flags with ``cpu`` for a slower local CPU-only reproduction.  Without it,
 existing successful ``showcase_case.json`` rows are reused, which can leave old

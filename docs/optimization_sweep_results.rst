@@ -519,6 +519,17 @@ Regenerate the current aspect-5 common-minimal showcase with:
      --ess-alpha 1.2 --case-timeout-s 7200 --rerun
    PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py --publication-matrix
 
+For bounded smoke rendering of a partial run, use ``--cases`` and
+``--skip-missing`` so the renderer validates the selected case but does not
+warn about the rest of the production matrix:
+
+.. code-block:: bash
+
+   PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py \
+     --output-root /path/to/minimal_seed_showcase \
+     --figure-dir /path/to/figures \
+     --cases qi_nfp1 --skip-missing
+
 Use ``cpu`` for the three CUDA/GPU flags for a slower local CPU-only
 reproduction.  Keep ``--rerun`` for release reproduction.  Without it, successful
 ``showcase_case.json`` rows may be reused from an older local run; the renderer

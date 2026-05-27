@@ -111,6 +111,13 @@ def _case_filter(raw_cases: str) -> tuple[str, ...] | None:
     return tuple(case.strip() for case in raw_cases.split(",") if case.strip())
 
 
+def _unknown_case_filter(cases: tuple[str, ...] | None) -> tuple[str, ...]:
+    if cases is None:
+        return ()
+    known = set(SHOWCASE_CASES)
+    return tuple(sorted({case for case in cases if case not in known}))
+
+
 def _filter_records_by_case(records: list[ShowcaseRecord], cases: tuple[str, ...] | None) -> list[ShowcaseRecord]:
     if cases is None:
         return records
@@ -669,6 +676,7 @@ def render_state_panel(records: list[ShowcaseRecord], out_png: Path) -> Path | N
 
         matplotlib.use("Agg")
         from matplotlib import pyplot as plt
+        from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
         from render_readme_best_optimizations import _plot_boozer_bmag, _plot_lcfs
         from vmec_jax.wout import read_wout
     except Exception:
@@ -737,7 +745,16 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="With --publication-matrix, include optional stress rows such as qp_nfp1.",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    unknown_cases = _unknown_case_filter(_case_filter(str(args.cases)))
+    if unknown_cases:
+        parser.error(
+            "unknown --cases value(s): "
+            + ", ".join(unknown_cases)
+            + ". Available cases: "
+            + ", ".join(DEFAULT_CASE_ORDER)
+        )
+    return args
 
 
 def main() -> None:
@@ -767,7 +784,15 @@ def main() -> None:
         expected_case_order = DEFAULT_CASE_ORDER
     expected_case_order = _filter_case_order(expected_case_order, case_filter)
     if not all_records:
-        print(f"No minimal-seed showcase records found under {args.output_root}")
+        if expected_case_order and not bool(args.skip_missing):
+            print("Missing current minimal-seed records: " + ", ".join(expected_case_order))
+        elif expected_case_order:
+            print(
+                "No selected minimal-seed showcase records found under "
+                f"{args.output_root} for cases: {', '.join(expected_case_order)}"
+            )
+        else:
+            print(f"No minimal-seed showcase records found under {args.output_root}")
         return
     present_cases = {record.case_name for record in all_records}
     missing = [case_name for case_name in expected_case_order if case_name not in present_cases]

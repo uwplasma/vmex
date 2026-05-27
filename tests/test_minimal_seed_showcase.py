@@ -287,6 +287,49 @@ def test_renderer_case_filter_and_skip_missing_cli(monkeypatch: pytest.MonkeyPat
     assert "qi_nfp1" in summary.read_text()
 
 
+def test_renderer_rejects_unknown_case_filter(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    renderer = _load_module("render_minimal_seed_showcase_unknown_case", "render_minimal_seed_showcase.py")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["render_minimal_seed_showcase.py", "--cases", "qi_nfp1,not_a_case"],
+    )
+
+    with pytest.raises(SystemExit):
+        renderer._parse_args()
+
+    assert "unknown --cases value(s): not_a_case" in capsys.readouterr().err
+
+
+def test_renderer_skip_missing_selected_case_keeps_bounded_smoke_nonfatal(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    renderer = _load_module("render_minimal_seed_showcase_missing_case", "render_minimal_seed_showcase.py")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "render_minimal_seed_showcase.py",
+            "--output-root",
+            str(tmp_path / "empty"),
+            "--figure-dir",
+            str(tmp_path / "figures"),
+            "--cases",
+            "qi_nfp1",
+            "--skip-missing",
+            "--summary-only",
+        ],
+    )
+
+    renderer.main()
+
+    captured = capsys.readouterr()
+    assert "Missing current minimal-seed records" not in captured.out
+    assert "qi_nfp1" in captured.out
+
+
 def test_minimal_seed_showcase_dispatches_qi_to_staged_runner(tmp_path: Path, monkeypatch) -> None:
     generator = _load_module("generate_minimal_seed_showcase_qi_staged", "generate_minimal_seed_showcase.py")
     budget = generator.MinimalSeedBudget(
