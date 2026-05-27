@@ -12,13 +12,13 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-05-27 after tightening bootstrap-current trust controls,
-best-evaluated current return-policy diagnostics, low-resolution with/without
-bootstrap direct-coil comparisons, CPU/GPU benchmark metric reporting, and
-actual-beta LP-QA pressure-continuation probes. PR #18 is green on GitHub
-Actions at commit `7e03c26c` including Codecov; the optional ESSOS/direct-coil
-bootstrap gates are local/manual because they require ESSOS assets and launch
-real free-boundary solves. Do not merge PR #18 yet.
+Last updated: 2026-05-27 after stage-level beta-scan checkpointing,
+accepted-boundary direct-coil replay AD-vs-FD validation, latest CPU/GPU
+direct-coil benchmark triage, and the latest `origin/main` merge. PR #18 is
+open and mergeable at commit `bfaae022`; CI has been restarted by the latest
+test commit. The optional ESSOS/direct-coil bootstrap gates are local/manual
+because they require ESSOS assets and launch real free-boundary solves. Do not
+merge PR #18 yet.
 
 Steps taken:
 
@@ -79,6 +79,9 @@ Steps taken:
 55. Added a shape/content-keyed compiled-closure cache for the opt-in JAX VMEC/NESTOR operator. The closure bakes mode-basis and Green-function tables as static constants while keeping boundary geometry and external normal-field source arrays dynamic.
 56. Made the JAX analytic/singular operator JIT-compatible by keeping static VMEC coefficient/mode-index tables as host constants instead of tracer scalars.
 57. Added beta-scan case checkpoints for strict LP-QA bootstrap/no-bootstrap scans.  Each accepted radial-grid stage now writes a per-stage input, WOUT, metrics payload, and `case_checkpoints/{backend}_beta_*.json`, and `--resume-existing` can promote completed stage checkpoints into final case outputs without rerunning accepted stages.
+58. Added an accepted-boundary direct-coil replay AD-vs-central-FD gate for coil current, one Fourier geometry coefficient, and additive background-field channels.  This validates the direct-coil/provider/projection replay rung without claiming full nonlinear VMEC-loop adjoints.
+59. Reprofiled the direct-coil CUDA row on `office`: the best JIT-forces row remains about `0.21 s` warm end-to-end, with setup, residual scalar materialization, accepted-control `fsq1`, preconditioner dispatch, and finalize overhead dominating over force assembly.
+60. Verified the strict LP-QA checkpoint run now preserves completed and active radial stages before root summary completion; the observed `NS=16` zero-beta stage is a checkpoint/resume validation artifact, not a promoted physics result.
 
 ### 2026-05-27 Free-boundary beta-scan bootstrap-current preconditioner
 
@@ -1815,17 +1818,17 @@ WP1 Provider base API:                         100%
 WP2 Pure JAX coil Biot-Savart:                 92%
 WP3 ESSOS adapter:                             88%
 WP4 JAX mgrid interpolation:                   91%
-WP5 Free-boundary provider hook:               95%
+WP5 Free-boundary provider hook:               96%
 WP6 Direct-coil forward example:               92%
 WP7 Vacuum adjoint scaffold:                  100%
 WP8 Gradient checks:                          100%
 WP9 VMEC2000 diagnostics:                      96%
 WP10 Benchmarks/diagnostics:                  100%
-WP11 Coil-only QS optimization example:        89%
+WP11 Coil-only QS optimization example:        90%
 WP12 Robust coil perturbations:               100%
 WP13 Documentation:                           100%
 WP14 CI policy:                               100%
-Overall branch completion:                   99.6%
+Overall branch completion:                   99.7%
 ```
 
 ## Immediate Next Steps
@@ -1833,9 +1836,9 @@ Overall branch completion:                   99.6%
 1. Wait for CI on the final pushed commits.
 2. Keep PR #18 open for review when required checks are green; do not merge it
    until maintainers explicitly approve the phase-1 scope and phase-2 deferrals.
-3. Re-run CUDA performance probes on `office` once SSH is reachable.
+3. Keep strict LP-QA checkpointed finite-beta runs as manual promotion evidence until completed radial stages meet residual gates; do not promote the current long zero-beta checkpoint run as physics evidence.
 4. Defer complete-loop free-boundary exact adjoints and full Boozer/QS coil-only optimization claims to the next phase after the accepted-state replay validation is replaced by a validated nonlinear-loop custom adjoint.
-5. Profile and reduce cold exact tape build/solve and initial tangent construction on GPU; convert benchmark JSON summaries into documentation plots.
+5. Profile and reduce cold exact tape build/solve and initial tangent construction on GPU; the latest CUDA run shows setup and scalar/control dispatch dominate the tiny direct-coil rows.
 6. Re-check PR CI, including Codecov patch coverage, after each commit.
 
 ## Need From User
