@@ -657,6 +657,62 @@ def test_run_qi_stage_policy_no_ramp_writes_pre_diagnostic_checkpoint(tmp_path: 
     assert json.loads((tmp_path / "stage_checkpoint.json").read_text())["role"] == "stage_pre_diagnostics"
 
 
+def test_run_qi_stage_policy_writes_pending_checkpoint_before_long_stage(tmp_path: Path) -> None:
+    _configure(tmp_path)
+    pre_dir = tmp_path / "boundary_reference_preconditioner"
+    pre_dir.mkdir()
+    selected_input = pre_dir / "lambda_0p950" / "input.interpolated"
+    selected_input.parent.mkdir()
+    selected_input.write_text("input\n")
+    (pre_dir / "summary.json").write_text(
+        json.dumps(
+            [
+                {
+                    "input": str(selected_input),
+                    "lambda": 0.95,
+                    "selected": True,
+                    "smooth_qi": 1.2e-3,
+                    "legacy_qi": 9.0e-4,
+                    "mirror": 0.28,
+                    "elongation": 4.0,
+                    "mean_iota": 0.43,
+                    "aspect": 5.2,
+                    "aspect_relative_error": 0.04,
+                    "qi_seed_gate_passed": True,
+                    "qi_engineering_gate_passed": True,
+                    "failure_reasons": [],
+                }
+            ]
+        )
+        + "\n"
+    )
+
+    def solve_qi_stage(*_args, **_kwargs):
+        raise RuntimeError("simulated expensive stage failure")
+
+    with pytest.raises(RuntimeError, match="simulated expensive stage failure"):
+        qio.run_qi_stage_policy(
+            selected_input,
+            tmp_path,
+            solve_qi_stage=solve_qi_stage,
+            make_qi_problem=lambda stage=None: {"stage": stage},
+            boundary_reference_preconditioner={"enabled": True},
+            mirror_ramp_stages=[{"name": "long", "stage_modes": [5], "max_nfev": 60}],
+        )
+
+    root_checkpoint = json.loads((tmp_path / "stage_checkpoint.json").read_text())
+    stage_checkpoint = json.loads((tmp_path / "mirror_ramp_01_long" / "qi_stage_checkpoint.json").read_text())
+
+    assert root_checkpoint == stage_checkpoint
+    assert root_checkpoint["role"] == "mirror_ramp_pending"
+    assert root_checkpoint["promotion"]["stage_pending"] is True
+    assert root_checkpoint["diagnostics"]["source"] == "boundary_reference_preconditioner"
+    assert root_checkpoint["diagnostics"]["qi_legacy_total"] == pytest.approx(9.0e-4)
+    assert root_checkpoint["diagnostics"]["qi_mirror_ratio_max"] == pytest.approx(0.28)
+    assert root_checkpoint["diagnostics"]["mean_iota"] == pytest.approx(0.43)
+    assert root_checkpoint["diagnostics"]["aspect"] == pytest.approx(5.2)
+
+
 def test_run_qi_stage_policy_mirror_ramp_promotes_guarded_stage(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

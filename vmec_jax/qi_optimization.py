@@ -984,6 +984,55 @@ def write_qi_stage_checkpoint(
     return checkpoint_path
 
 
+def _boundary_reference_checkpoint_diagnostics(output_dir, active_input_file) -> dict:
+    """Return selected boundary-reference metrics for a pre-stage checkpoint."""
+
+    summary_path = Path(output_dir) / "boundary_reference_preconditioner" / "summary.json"
+    base = {
+        "active_input_path": str(active_input_file),
+        "partial": True,
+        "source": "stage_pending",
+    }
+    if not summary_path.exists():
+        return {**base, "diagnostics_pending": True}
+    try:
+        records = json.loads(summary_path.read_text())
+    except json.JSONDecodeError:
+        return {**base, "diagnostics_pending": True}
+    if not isinstance(records, list):
+        return {**base, "diagnostics_pending": True}
+
+    active_path = str(Path(active_input_file))
+    selected = None
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        if bool(record.get("selected")):
+            selected = record
+            break
+        if str(record.get("input")) == active_path:
+            selected = record
+    if selected is None:
+        return {**base, "diagnostics_pending": True}
+
+    return {
+        **base,
+        "source": "boundary_reference_preconditioner",
+        "lambda": _finite_or_none(selected.get("lambda")),
+        "aspect": _finite_or_none(selected.get("aspect")),
+        "aspect_relative_error": _finite_or_none(selected.get("aspect_relative_error")),
+        "mean_iota": _finite_or_none(selected.get("mean_iota")),
+        "qi_raw_total": _finite_or_none(selected.get("smooth_qi")),
+        "qi_smooth_total": _finite_or_none(selected.get("smooth_qi")),
+        "qi_legacy_total": _finite_or_none(selected.get("legacy_qi")),
+        "qi_mirror_ratio_max": _finite_or_none(selected.get("mirror")),
+        "qi_max_elongation": _finite_or_none(selected.get("elongation")),
+        "qi_seed_gate_passed": bool(selected.get("qi_seed_gate_passed")),
+        "qi_engineering_gate_passed": bool(selected.get("qi_engineering_gate_passed")),
+        "qi_failure_reasons": list(selected.get("failure_reasons", [])),
+    }
+
+
 def boundary_reference_preconditioner_score(
     diagnostics,
     *,
@@ -1319,6 +1368,17 @@ def run_qi_stage_policy(
 
     promotion_log = []
     if not mirror_ramp_stages:
+        write_qi_stage_checkpoint(
+            output_dir,
+            stage_index=1,
+            stage_name="qi_optimization",
+            stage_modes=_ctx(ctx, "stage_modes"),
+            stage_result=None,
+            diagnostics=_boundary_reference_checkpoint_diagnostics(output_dir, active_input_file),
+            promotion={"stage_pending": True},
+            role="stage_pending",
+            ctx=ctx,
+        )
         result = solve_qi_stage(
             active_input_file,
             output_dir,
@@ -1349,6 +1409,17 @@ def run_qi_stage_policy(
     ):
         baseline_output_dir = Path(output_dir) / "boundary_reference_baseline"
         print("\nRecording boundary-reference candidate as accepted baseline ...")
+        write_qi_stage_checkpoint(
+            baseline_output_dir,
+            stage_index=0,
+            stage_name="boundary_reference_baseline",
+            stage_modes=(_ctx(ctx, "max_mode"),),
+            stage_result=None,
+            diagnostics=_boundary_reference_checkpoint_diagnostics(output_dir, active_input_file),
+            promotion={"stage_pending": True, "baseline": True},
+            role="boundary_reference_baseline_pending",
+            ctx=ctx,
+        )
         accepted_result = solve_qi_stage(
             active_input_file,
             baseline_output_dir,
@@ -1394,6 +1465,17 @@ def run_qi_stage_policy(
         stage_name = stage["name"]
         stage_output_dir = Path(output_dir) / f"mirror_ramp_{stage_index:02d}_{stage_name}"
         stage_modes_i = stage_modes_for(stage, ctx=ctx)
+        write_qi_stage_checkpoint(
+            stage_output_dir,
+            stage_index=stage_index,
+            stage_name=stage_name,
+            stage_modes=stage_modes_i,
+            stage_result=None,
+            diagnostics=_boundary_reference_checkpoint_diagnostics(output_dir, active_input_file),
+            promotion={"stage_pending": True},
+            role="mirror_ramp_pending",
+            ctx=ctx,
+        )
         stage_result = solve_qi_stage(
             active_input_file,
             stage_output_dir,
