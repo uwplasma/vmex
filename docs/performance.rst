@@ -3038,6 +3038,52 @@ If profiling free-boundary solver-only cost, disable sampling diagnostics:
 
   export VMEC_JAX_FREEB_SAMPLE_EXTERNAL=0
 
+Direct-coil CPU/GPU micro-benchmark snapshot
+--------------------------------------------
+
+The direct-coil benchmark matrix isolates the new coil-provider free-boundary
+path from the broader example matrix:
+
+.. code-block:: bash
+
+  python tools/benchmarks/bench_freeb_direct_coil_matrix.py \
+    --quick --include-gpu \
+    --out /tmp/freeb_matrix_office_gpu_followup/summary.json
+
+On the 2026-05-27 ``office`` CUDA run, the best bounded direct-solve row was
+``direct_solve_jit_forces``.  The warm solve was still CPU-favorable
+(``0.0809 s`` CPU versus ``0.2587 s`` CUDA, ``3.20x`` GPU/CPU), but the detailed
+timers show that the remaining GPU cost is no longer the direct Biot-Savart
+field sample or the dense NESTOR solve:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Timing bucket
+     - CPU
+     - CUDA
+     - CUDA/CPU
+   * - setup
+     - ``22.63 ms``
+     - ``81.40 ms``
+     - ``3.60x``
+   * - residual metrics
+     - ``0.97 ms``
+     - ``17.48 ms``
+     - ``18.04x``
+   * - preconditioner apply
+     - ``0.65 ms``
+     - ``8.94 ms``
+     - ``13.81x``
+   * - finalize
+     - ``10.51 ms``
+     - ``28.32 ms``
+     - ``2.70x``
+
+The next GPU optimization target is therefore accepted-control and
+preconditioner/update dispatch amortization, not Biot-Savart sampling or the
+final dense vacuum solve.
+
 Historical bundled example runtime/memory matrix (March 2026)
 -------------------------------------------------------------
 

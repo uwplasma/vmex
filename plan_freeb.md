@@ -14,11 +14,11 @@ Date opened: 2026-05-24
 
 Last updated: 2026-05-27 after tightening bootstrap-current trust controls,
 best-evaluated current return-policy diagnostics, low-resolution with/without
-bootstrap direct-coil comparisons, and CPU/GPU benchmark metric reporting. PR
-#18 was green on GitHub Actions at commit `21999de7` including Codecov before
-this follow-up patch; the optional ESSOS/direct-coil bootstrap gate is
-local/manual because it requires ESSOS assets and launches real free-boundary
-solves. Do not merge PR #18 yet.
+bootstrap direct-coil comparisons, CPU/GPU benchmark metric reporting, and
+actual-beta LP-QA pressure-continuation probes. PR #18 is green on GitHub
+Actions at commit `7e03c26c` including Codecov; the optional ESSOS/direct-coil
+bootstrap gates are local/manual because they require ESSOS assets and launch
+real free-boundary solves. Do not merge PR #18 yet.
 
 Steps taken:
 
@@ -196,6 +196,35 @@ Results obtained:
     checks, targeted bootstrap/free-boundary/benchmark tests
     (`34 passed, 1 skipped`), strict Sphinx `-W`, and the optional active
     ESSOS/direct-coil bootstrap beta-scan smoke (`1 passed` in 12.38 s).
+23. Re-ran the direct-coil benchmark matrix locally and on `office` at the
+    current PR head.  The local CPU quick matrix wrote
+    `/tmp/freeb_matrix_local_cpu_followup/summary.json`; the office CPU/CUDA
+    matrix wrote `/tmp/freeb_matrix_office_gpu_followup/summary.json`.
+24. The best office CUDA row remains `direct_solve_jit_forces`: CPU warm
+    `0.0809 s`, CUDA warm `0.2587 s` (`3.20x` GPU/CPU).  CUDA warm setup
+    (`0.0814 s`), residual metrics (`0.0175 s`), preconditioner apply
+    (`0.00894 s`), and finalize (`0.0283 s`) are all larger than CPU
+    (`0.0226 s`, `0.00097 s`, `0.00065 s`, `0.0105 s`).  The remaining GPU
+    bottleneck is accepted-control/preconditioner dispatch and setup/finalize
+    amortization, not Biot-Savart sampling.
+25. The direct-coil finite-pressure sensitivity gate passed for both the
+    complete-solve finite-response check and the accepted-boundary AD-vs-FD
+    replay check for one current and one Fourier geometry coefficient:
+    `2 passed in 15.27 s`.
+26. Recalibrated the LP-QA pressure labels for actual WOUT beta.  The earlier
+    nominal labels `0.05`, `0.1`, `0.5`, and `1.0` overdrive the coarse
+    direct-coil solves and can produce nonphysical actual beta.  Nominal labels
+    `0.001` and `0.002` give actual beta about `0.395%` and `0.806%` with
+    residual sums `O(1e-9)-O(1e-8)`.
+27. In the actual-beta coarse probe (`NS=8,16`, `MPOL=4`, `NTOR=4`),
+    bootstrap current preserves convergence at nominal `0.001` and `0.002`
+    while reducing Redl mismatch from about `0.418 -> 0.281` and
+    `0.415 -> 0.279`.  A stronger `NS=8,16,31` probe through nominal `0.0025`
+    reached actual beta `1.018%` with residual sum `1.87e-10` and Redl
+    mismatch `0.409 -> 0.274`; the same no-bootstrap row converged with
+    residual sum `1.89e-10`.  This is evidence for safe bootstrap plumbing and
+    Redl-mismatch reduction at about `1%` actual beta, not yet a claim that the
+    bootstrap preconditioner accelerates VMEC convergence.
 
 Best next steps:
 
@@ -203,13 +232,21 @@ Best next steps:
    direct-coil active coupling, persisted Redl-current diagnostics, and optional
    preconditioning, not guaranteed convergence acceleration.
 2. For a future promotion claim, run a converged-resolution LP-QA scan with
-   pressure continuation and the limiter enabled, then require both acceptable
-   final VMEC residuals (`fsqr+fsqz+fsql <= 1e-6` as a minimum gate, preferably
-   near `1e-10` for reviewer figures) and improved Redl mismatch against the
-   same-resolution no-bootstrap run.
-3. Phase-2 adjoint next rung: promote a tiny complete-loop direct-coil AD-vs-FD
-   gate for one current and one Fourier coefficient, then extend to Boozer/QS
-   only after the nonlinear solve loop is differentiable or has a custom VJP.
+   pressure continuation, actual-beta-calibrated labels near `0.001-0.0025`,
+   and the limiter enabled.  Require both acceptable final VMEC residuals
+   (`fsqr+fsqz+fsql <= 1e-6` as a minimum gate, preferably near `1e-10` for
+   reviewer figures) and improved Redl mismatch against the same-resolution
+   no-bootstrap run.
+3. Phase-2 adjoint next rung: replace the finite-response complete-solve gate
+   with a true complete-loop AD-vs-FD gate only after the nonlinear
+   `run_free_boundary` iteration loop has a JAX-visible loop or validated
+   custom VJP.  The accepted-boundary replay path is already AD-vs-FD checked
+   for current and geometry.
+4. Performance next rung: batch or fuse the accepted-control `fsq1`,
+   preconditioner apply, update, and residual-metric dispatch on accelerator
+   paths.  Do not spend the next GPU pass on Biot-Savart sampling or the final
+   dense NESTOR solve unless a new benchmark reverses the current bottleneck
+   ranking.
 
 Need from user:
 
