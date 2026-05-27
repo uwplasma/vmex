@@ -149,19 +149,6 @@ artifacts until refreshed minimal-seed QI artifacts are regenerated.
      - 5.024
      - -0.4144
      - 14.7 min
-   * - QP
-     - 4
-     - stress row, not promoted
-     - GPU
-     - continuation
-     - 5
-     - yes
-     - 7.45e+00
-     -
-     -
-     - 6.614
-     - -0.9373
-     - 9.4 min
    * - QI
      - 1
      - case-gated staged QI

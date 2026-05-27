@@ -20,7 +20,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from jax import core
 
 from ._compat import jnp, has_jax, tree_util
 from .vmec_tomnsp import TomnspsRZL, VmecTrigTables
@@ -30,15 +29,6 @@ from .vmec_parity import signed_maps_from_modes, _signed_to_mn_cos_cached, _sign
 _WINT_CACHE: dict[tuple[int, int], jnp.ndarray] = {}
 _PWINT_CACHE: dict[tuple[int, int, int], jnp.ndarray] = {}
 _SCALXC_CACHE: dict[tuple, jnp.ndarray] = {}
-
-
-def _cache_allowed() -> bool:
-    if not has_jax():
-        return True
-    try:
-        return bool(core.trace_ctx.is_top_level())
-    except Exception:
-        return False
 
 
 def _scalxc_cache_key(*, s: Any, mpol: int) -> tuple:
