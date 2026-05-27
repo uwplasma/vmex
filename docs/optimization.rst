@@ -106,12 +106,14 @@ This gives the transform residual a usable derivative before local exact
 optimization and is recorded in ``showcase_case.json``.
 
 The bounded common-seed showcase runner maps those inputs to QI NFP=1/2/3/4,
-QA NFP=2/3, QH NFP=3/4, and QP NFP=2/3/4 for the README promotion matrix
+QA NFP=2/3, QH NFP=3/4, and QP NFP=2/3/4 for the full common-minimal target matrix
 (``qp_nfp1`` is also available as a stress row).  The QI rows dispatch through
 ``examples/optimization/qi_staged_runner.py`` to the standalone
 ``QI_optimization.py`` staged/reference-family policy rather than the simpler
-quasisymmetry sweep path.  Current checked-in artifacts remain archived until
-the aspect-5, ``max_mode=5`` production matrix is promoted:
+quasisymmetry sweep path.  The checked-in objective panel and summary table
+currently contain the synced aspect-5, ``max_mode=5`` QA/QH/QP GPU rows.  The
+common-minimal QI rows remain open; the separate QI NFP panel documents
+reviewed case-gated QI coverage instead of the uniform common-minimal matrix:
 
 .. code-block:: bash
 
@@ -148,17 +150,14 @@ legacy case names ``nfp1_qi``, ``nfp2_qi``, ``qi_stel_seed_3127``, and
 common-minimal staged-QI evidence.  Any QA/QP showcase rows without
 ``reference_preseed`` provenance also predate the current common-seed policy.
 
-The saved CPU stress-test panel below is deliberately included as a
-failure-revealing artifact.  The renderer skips known-stale rows; in this
-checkout ``qh_nfp4`` and ``qp_nfp2`` currently reach the active metadata and
-completion gates.  ``qp_nfp2`` is still a refinement target because its final
-quasisymmetry residual is larger than the promoted README examples.
-``qi_circular_nfp1`` and ``qa_nfp2`` remain non-promoted stress rows in the
-summary CSV, and current non-stale ``minimal_nfp1_qi``/``minimal_nfp2_qi``/
-``minimal_nfp3_qi``/``minimal_nfp4_qi`` outputs are missing.  Regenerate with
-the command above before changing those promotion claims.  Until the remaining
-rows pass, this is a compact regression target for the seed-robust optimization
-lane, not a publication-quality optimization result.
+The saved objective panel below is a compact status artifact for the current
+common-minimal QA/QH/QP mode-5 rows.  The table includes QA NFP=2/3, QH
+NFP=3/4, and QP NFP=2/3/4.  ``qp_nfp4`` is intentionally retained as a weak
+stress row because it terminates away from the aspect-5 target and has a large
+QP residual.  Current non-stale ``minimal_nfp1_qi``/``minimal_nfp2_qi``/
+``minimal_nfp3_qi``/``minimal_nfp4_qi`` outputs are still missing from the
+common-minimal summary; do not infer QI common-seed success from the separate
+case-gated QI coverage panel.
 
 .. image:: _static/figures/minimal_seed_showcase_objective_panel.png
    :width: 100%
@@ -171,8 +170,9 @@ final LCFS, full best-so-far objective history, and initial/final Boozer
 ``|B|`` line contours.  Optimization-time target-helicity or reference-family
 preseeds are tracked separately in the CSV via ``stage_seed_kind`` and
 ``stage_seed_input`` so a later stage input cannot be mistaken for the raw
-initial seed.  It is a diagnostic status artifact, not a README promotion
-panel: currently it covers the non-stale QA/QH/QP stress rows while the current
+initial seed.  The checked-in state panel is retained as a diagnostic status
+artifact and can lag the objective/CSV refresh; regenerate it from the same
+output root before using geometry panels as promotion evidence.  The current
 minimal-seed QI rows remain missing.
 
 .. image:: _static/figures/minimal_seed_showcase_state_panel.png
