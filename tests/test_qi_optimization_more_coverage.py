@@ -59,6 +59,8 @@ def test_qi_example_cli_overrides_update_namespace_and_stage_modes(tmp_path: Pat
         "TARGET_ABS_IOTA_MIN": 0.41,
         "MAX_MIRROR_RATIO": 0.3,
         "MAX_ELONGATION": 10.0,
+        "OPT_QI_RESOLUTION": {"mboz": 18, "nboz": 18, "nphi": 151, "nalpha": 31, "n_bounce": 51},
+        "AUDIT_QI_RESOLUTION": {"mboz": 18, "nboz": 18, "nphi": 151, "nalpha": 31, "n_bounce": 51},
     }
     captured = {}
 
@@ -109,6 +111,16 @@ def test_qi_example_cli_overrides_update_namespace_and_stage_modes(tmp_path: Pat
             "repeat",
             "--make-plots",
             "--jit-booz",
+            "--qi-mboz",
+            "10",
+            "--qi-nboz",
+            "11",
+            "--qi-nphi",
+            "61",
+            "--qi-nalpha",
+            "13",
+            "--qi-n-bounce",
+            "17",
             "--target-aspect",
             "5",
             "--target-abs-iota-min",
@@ -143,6 +155,8 @@ def test_qi_example_cli_overrides_update_namespace_and_stage_modes(tmp_path: Pat
     assert namespace["STAGE_MODE_POLICY"] == "repeat"
     assert namespace["MAKE_PLOTS"] is True
     assert namespace["JIT_BOOZ"] is True
+    assert namespace["OPT_QI_RESOLUTION"] == {"mboz": 10, "nboz": 11, "nphi": 61, "nalpha": 13, "n_bounce": 17}
+    assert namespace["AUDIT_QI_RESOLUTION"] == {"mboz": 10, "nboz": 11, "nphi": 61, "nalpha": 13, "n_bounce": 17}
     assert namespace["TARGET_ASPECT"] == pytest.approx(5.0)
     assert namespace["TARGET_ABS_IOTA_MIN"] == pytest.approx(0.45)
     assert namespace["MAX_MIRROR_RATIO"] == pytest.approx(0.25)

@@ -215,14 +215,21 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
     parser.add_argument("--use-reference-family-seed", action=argparse.BooleanOptionalAction)
     parser.add_argument("--reference-input", type=Path)
     parser.add_argument("--reference-lambdas", type=_float_tuple)
+    parser.add_argument("--accept-boundary-reference-baseline", action=argparse.BooleanOptionalAction)
     parser.add_argument("--stage-repeats", type=int)
     parser.add_argument("--stage-mode-policy", choices=("lower", "repeat"))
     parser.add_argument("--make-plots", action=argparse.BooleanOptionalAction)
     parser.add_argument("--jit-booz", action=argparse.BooleanOptionalAction)
+    parser.add_argument("--qi-mboz", type=int)
+    parser.add_argument("--qi-nboz", type=int)
+    parser.add_argument("--qi-nphi", type=int)
+    parser.add_argument("--qi-nalpha", type=int)
+    parser.add_argument("--qi-n-bounce", type=int)
     parser.add_argument("--target-aspect", type=float)
     parser.add_argument("--target-abs-iota-min", type=float)
     parser.add_argument("--max-mirror-ratio", type=float)
     parser.add_argument("--max-elongation", type=float)
+    parser.add_argument("--mirror-ramp-stages-json", type=Path)
     args, _unknown = parser.parse_known_args(argv)
 
     def set_if(name: str, value) -> None:
@@ -258,14 +265,40 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
             namespace["USE_REFERENCE_FAMILY_SEED"] = True
     set_if("USE_REFERENCE_FAMILY_SEED", args.use_reference_family_seed)
     set_if("REFERENCE_LAMBDAS", args.reference_lambdas)
+    set_if("BOUNDARY_REFERENCE_ACCEPT_AS_BASELINE", args.accept_boundary_reference_baseline)
     set_if("STAGE_REPEATS", None if args.stage_repeats is None else int(args.stage_repeats))
     set_if("STAGE_MODE_POLICY", args.stage_mode_policy)
     set_if("MAKE_PLOTS", args.make_plots)
     set_if("JIT_BOOZ", args.jit_booz)
+    qi_resolution_updates = {
+        "mboz": args.qi_mboz,
+        "nboz": args.qi_nboz,
+        "nphi": args.qi_nphi,
+        "nalpha": args.qi_nalpha,
+        "n_bounce": args.qi_n_bounce,
+    }
+    if any(value is not None for value in qi_resolution_updates.values()):
+        opt_resolution = dict(namespace.get("OPT_QI_RESOLUTION", {}))
+        audit_resolution = dict(namespace.get("AUDIT_QI_RESOLUTION", opt_resolution))
+        for key, value in qi_resolution_updates.items():
+            if value is not None:
+                opt_resolution[key] = int(value)
+                audit_resolution[key] = int(value)
+        namespace["OPT_QI_RESOLUTION"] = opt_resolution
+        namespace["AUDIT_QI_RESOLUTION"] = audit_resolution
     set_if("TARGET_ASPECT", None if args.target_aspect is None else float(args.target_aspect))
     set_if("TARGET_ABS_IOTA_MIN", None if args.target_abs_iota_min is None else float(args.target_abs_iota_min))
     set_if("MAX_MIRROR_RATIO", None if args.max_mirror_ratio is None else float(args.max_mirror_ratio))
     set_if("MAX_ELONGATION", None if args.max_elongation is None else float(args.max_elongation))
+    if args.mirror_ramp_stages_json is not None:
+        stages_path = args.mirror_ramp_stages_json.expanduser()
+        try:
+            stages = json.loads(stages_path.read_text())
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid --mirror-ramp-stages-json file: {stages_path}") from exc
+        if not isinstance(stages, list) or not all(isinstance(stage, dict) for stage in stages):
+            raise ValueError("--mirror-ramp-stages-json must contain a JSON list of stage dictionaries.")
+        namespace["MIRROR_RAMP_STAGES"] = tuple(stages)
     namespace["STAGE_MODES"] = qi_stage_modes(
         max_mode=int(namespace["MAX_MODE"]),
         use_mode_continuation=bool(namespace["USE_MODE_CONTINUATION"]),
@@ -953,11 +986,63 @@ def write_qi_stage_checkpoint(
     return checkpoint_path
 
 
+def _boundary_reference_checkpoint_diagnostics(output_dir, active_input_file) -> dict:
+    """Return selected boundary-reference metrics for a pre-stage checkpoint."""
+
+    summary_path = Path(output_dir) / "boundary_reference_preconditioner" / "summary.json"
+    base = {
+        "active_input_path": str(active_input_file),
+        "partial": True,
+        "source": "stage_pending",
+    }
+    if not summary_path.exists():
+        return {**base, "diagnostics_pending": True}
+    try:
+        records = json.loads(summary_path.read_text())
+    except json.JSONDecodeError:
+        return {**base, "diagnostics_pending": True}
+    if not isinstance(records, list):
+        return {**base, "diagnostics_pending": True}
+
+    active_path = str(Path(active_input_file))
+    selected = None
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        if bool(record.get("selected")):
+            selected = record
+            break
+        if str(record.get("input")) == active_path:
+            selected = record
+    if selected is None:
+        return {**base, "diagnostics_pending": True}
+
+    return {
+        **base,
+        "source": "boundary_reference_preconditioner",
+        "boundary_reference_input_path": None if selected.get("input") is None else str(selected.get("input")),
+        "boundary_reference_wout_path": None if selected.get("wout") is None else str(selected.get("wout")),
+        "lambda": _finite_or_none(selected.get("lambda")),
+        "aspect": _finite_or_none(selected.get("aspect")),
+        "aspect_relative_error": _finite_or_none(selected.get("aspect_relative_error")),
+        "mean_iota": _finite_or_none(selected.get("mean_iota")),
+        "qi_raw_total": _finite_or_none(selected.get("smooth_qi")),
+        "qi_smooth_total": _finite_or_none(selected.get("smooth_qi")),
+        "qi_legacy_total": _finite_or_none(selected.get("legacy_qi")),
+        "qi_mirror_ratio_max": _finite_or_none(selected.get("mirror")),
+        "qi_max_elongation": _finite_or_none(selected.get("elongation")),
+        "qi_seed_gate_passed": bool(selected.get("qi_seed_gate_passed")),
+        "qi_engineering_gate_passed": bool(selected.get("qi_engineering_gate_passed")),
+        "qi_failure_reasons": list(selected.get("failure_reasons", [])),
+    }
+
+
 def boundary_reference_preconditioner_score(
     diagnostics,
     *,
     mirror_selection_weight=0.01,
     constraint_weight=0.25,
+    aspect_selection_weight=25.0,
 ):
     """Rank reference-family candidates by gates first, then exact metrics."""
 
@@ -965,22 +1050,38 @@ def boundary_reference_preconditioner_score(
     seed_penalty = 0.0 if bool(diagnostics.get("qi_seed_gate_passed")) else 20.0
     rank_score = _finite_or_inf(diagnostics.get("qi_rank_score"))
     constraint_score = _finite_or_inf(diagnostics.get("qi_constraint_score"))
-    mirror = _finite_or_inf(diagnostics.get("qi_mirror_ratio_max"))
+    mirror = _finite_or_none(diagnostics.get("qi_mirror_ratio_max"))
+    aspect_relative_error = _finite_or_none(diagnostics.get("aspect_relative_error"))
     return float(
         engineering_penalty
         + seed_penalty
         + rank_score
         + float(constraint_weight) * constraint_score
-        + float(mirror_selection_weight) * mirror
+        + float(mirror_selection_weight) * (0.0 if mirror is None else mirror)
+        + float(aspect_selection_weight) * (0.0 if aspect_relative_error is None else aspect_relative_error)
     )
 
 
-def boundary_reference_record_is_qi_safe(record, *, max_mirror_ratio, abs_iota_min):
+def boundary_reference_record_is_qi_safe(
+    record,
+    *,
+    max_mirror_ratio,
+    abs_iota_min,
+    target_aspect=None,
+    aspect_relative_tolerance=0.25,
+):
     """Return whether a preconditioner summary record satisfies safe gates."""
 
-    return _finite_or_inf(record.get("mirror")) <= float(max_mirror_ratio) and abs(
-        float(record.get("mean_iota") or 0.0)
-    ) >= float(abs_iota_min)
+    mirror_ok = _finite_or_inf(record.get("mirror")) <= float(max_mirror_ratio)
+    iota_ok = abs(float(record.get("mean_iota") or 0.0)) >= float(abs_iota_min)
+    if target_aspect is None:
+        aspect_ok = True
+    else:
+        aspect = _finite_or_inf(record.get("aspect"))
+        aspect_ok = abs(aspect - float(target_aspect)) / max(float(target_aspect), 1.0e-16) <= float(
+            aspect_relative_tolerance
+        )
+    return mirror_ok and iota_ok and aspect_ok
 
 
 def run_boundary_reference_preconditioner(input_file, output_dir, config, *, ctx: QIOptimizationContext | None = None):
@@ -1044,6 +1145,7 @@ def run_boundary_reference_preconditioner(input_file, output_dir, config, *, ctx
                 diagnostics,
                 mirror_selection_weight=float(config.get("mirror_selection_weight", 0.01)),
                 constraint_weight=float(config.get("constraint_selection_weight", 0.25)),
+                aspect_selection_weight=float(config.get("aspect_selection_weight", 25.0)),
             )
             record = {
                 "lambda": lam,
@@ -1057,6 +1159,7 @@ def run_boundary_reference_preconditioner(input_file, output_dir, config, *, ctx
                 "elongation": _finite_or_none(diagnostics.get("qi_max_elongation")),
                 "mean_iota": _finite_or_none(diagnostics.get("mean_iota")),
                 "aspect": _finite_or_none(diagnostics.get("aspect")),
+                "aspect_relative_error": _finite_or_none(diagnostics.get("aspect_relative_error")),
                 "qi_seed_gate_passed": bool(diagnostics.get("qi_seed_gate_passed")),
                 "qi_engineering_gate_passed": bool(diagnostics.get("qi_engineering_gate_passed")),
                 "failure_reasons": list(diagnostics.get("qi_failure_reasons", [])),
@@ -1084,6 +1187,17 @@ def run_boundary_reference_preconditioner(input_file, output_dir, config, *, ctx
         raise RuntimeError("Boundary-reference preconditioner found no successful candidates.")
 
     candidate_pool = [record for record in successful if bool(record.get("qi_engineering_gate_passed"))] or successful
+    target_aspect = float(config.get("target_aspect", _ctx(ctx, "target_aspect")))
+    aspect_relative_tolerance = float(config.get("aspect_relative_tolerance", 0.37))
+    if bool(config.get("prefer_aspect_candidates", True)):
+        aspect_pool = [
+            record
+            for record in candidate_pool
+            if _finite_or_inf(record.get("aspect_relative_error"))
+            <= aspect_relative_tolerance
+        ]
+        if aspect_pool:
+            candidate_pool = aspect_pool
     if bool(config.get("prefer_qi_safe_candidates", True)):
         max_mirror_ratio = float(config.get("max_mirror_ratio", _ctx(ctx, "max_mirror_ratio")))
         abs_iota_min = float(config.get("abs_iota_min", _ctx(ctx, "target_abs_iota_min")))
@@ -1094,6 +1208,8 @@ def run_boundary_reference_preconditioner(input_file, output_dir, config, *, ctx
                 record,
                 max_mirror_ratio=max_mirror_ratio,
                 abs_iota_min=abs_iota_min,
+                target_aspect=target_aspect,
+                aspect_relative_tolerance=aspect_relative_tolerance,
             )
         ]
         if safe_pool:
@@ -1133,11 +1249,13 @@ def promotion_score(record):
 
     seed_penalty = 0.0 if bool(record.get("qi_seed_gate_passed")) else 100.0
     engineering_penalty = 0.0 if bool(record.get("qi_engineering_gate_passed")) else 10.0
+    aspect_relative_error = _finite_or_none(record.get("aspect_relative_error"))
     return (
         seed_penalty
         + engineering_penalty
         + _finite_or_inf(record.get("qi_rank_score"))
         + 0.25 * _finite_or_inf(record.get("qi_constraint_score"))
+        + 25.0 * (0.0 if aspect_relative_error is None else aspect_relative_error)
     )
 
 
@@ -1146,12 +1264,14 @@ def engineering_promotion_score(record):
 
     seed_penalty = 0.0 if bool(record.get("qi_seed_gate_passed")) else 1000.0
     engineering_penalty = 0.0 if bool(record.get("qi_engineering_gate_passed")) else 100.0
+    aspect_relative_error = _finite_or_none(record.get("aspect_relative_error"))
     return (
         seed_penalty
         + engineering_penalty
         + _finite_or_inf(record.get("qi_rank_score"))
         + 0.25 * _finite_or_inf(record.get("qi_constraint_score"))
         + 2.0 * _finite_or_inf(record.get("qi_mirror_ratio_max"))
+        + 25.0 * (0.0 if aspect_relative_error is None else aspect_relative_error)
     )
 
 
@@ -1252,6 +1372,17 @@ def run_qi_stage_policy(
 
     promotion_log = []
     if not mirror_ramp_stages:
+        write_qi_stage_checkpoint(
+            output_dir,
+            stage_index=1,
+            stage_name="qi_optimization",
+            stage_modes=_ctx(ctx, "stage_modes"),
+            stage_result=None,
+            diagnostics=_boundary_reference_checkpoint_diagnostics(output_dir, active_input_file),
+            promotion={"stage_pending": True},
+            role="stage_pending",
+            ctx=ctx,
+        )
         result = solve_qi_stage(
             active_input_file,
             output_dir,
@@ -1282,6 +1413,17 @@ def run_qi_stage_policy(
     ):
         baseline_output_dir = Path(output_dir) / "boundary_reference_baseline"
         print("\nRecording boundary-reference candidate as accepted baseline ...")
+        write_qi_stage_checkpoint(
+            baseline_output_dir,
+            stage_index=0,
+            stage_name="boundary_reference_baseline",
+            stage_modes=(_ctx(ctx, "max_mode"),),
+            stage_result=None,
+            diagnostics=_boundary_reference_checkpoint_diagnostics(output_dir, active_input_file),
+            promotion={"stage_pending": True, "baseline": True},
+            role="boundary_reference_baseline_pending",
+            ctx=ctx,
+        )
         accepted_result = solve_qi_stage(
             active_input_file,
             baseline_output_dir,
@@ -1327,6 +1469,17 @@ def run_qi_stage_policy(
         stage_name = stage["name"]
         stage_output_dir = Path(output_dir) / f"mirror_ramp_{stage_index:02d}_{stage_name}"
         stage_modes_i = stage_modes_for(stage, ctx=ctx)
+        write_qi_stage_checkpoint(
+            stage_output_dir,
+            stage_index=stage_index,
+            stage_name=stage_name,
+            stage_modes=stage_modes_i,
+            stage_result=None,
+            diagnostics=_boundary_reference_checkpoint_diagnostics(output_dir, active_input_file),
+            promotion={"stage_pending": True},
+            role="mirror_ramp_pending",
+            ctx=ctx,
+        )
         stage_result = solve_qi_stage(
             active_input_file,
             stage_output_dir,

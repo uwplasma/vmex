@@ -49,6 +49,27 @@ def test_booz_config_parser_reads_separate_namelist(tmp_path: Path) -> None:
     assert read_booz_config(plain).enabled is False
 
 
+def test_booz_config_parser_ignores_indexed_and_empty_assignments(tmp_path: Path) -> None:
+    path = tmp_path / "input.case"
+    path.write_text(
+        """
+&BOOZ_XFORM_JAX
+  LBOOZ = T
+  MBOOZ(1) = 99
+  NBOOZ =
+  BOOZ_SURFACES = 0.5
+/
+""".strip()
+    )
+
+    cfg = read_booz_config(path)
+
+    assert cfg.enabled is True
+    assert cfg.mbooz == 32
+    assert cfg.nbooz == 32
+    assert cfg.surfaces == (0.5,)
+
+
 def test_booz_private_parsers_cover_scalar_truthiness_and_errors(tmp_path: Path) -> None:
     assert _truthy(True) is True
     assert _truthy(0) is False
@@ -85,6 +106,7 @@ def test_parse_booz_surfaces_accepts_all_strings_and_indices() -> None:
     assert parse_booz_surfaces("*") is None
     assert parse_booz_surfaces("0.1, 0.5 1.0") == (0.1, 0.5, 1.0)
     assert parse_booz_surfaces([0, 4, 8]) == (0.0, 4.0, 8.0)
+    assert parse_booz_surfaces(0.75) == (0.75,)
 
 
 def test_resolve_boozmn_path_uses_vmec_case_conventions(tmp_path: Path) -> None:

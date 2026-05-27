@@ -13,14 +13,14 @@ they are only partial snapshots:
 - QP: aspect ratio target 5, quasi-poloidal symmetry, and a smooth
   ``abs(mean_iota) >= 0.41`` lower bound, using the same bundled NFP=2 seed as
   the QI runs.
-- QI: aspect ratio target 5 in the compact README best-row sweep, a
+- QI: aspect ratio target 5 in the full common-minimal regeneration target, a
   differentiable smooth Boozer-space quasi-isodynamic
   residual evaluated through ``booz_xform_jax``, maximum mirror-ratio penalty,
   maximum-LCFS-elongation penalty, and a smooth ``abs(mean_iota) >= 0.41``
   lower bound.  ``LgradB`` is available as an optional commented term in the
   example script but is not active by default.
-  The compact README best-row uses the bundled ``input.nfp2_QI`` omnigenity
-  seed; the NFP coverage panel uses case-specific inputs, including the
+  The historical compact best-row panel used the bundled ``input.nfp2_QI``
+  omnigenity seed; the active README NFP coverage panel uses case-specific inputs, including the
   seeded ``input.minimal_seed_nfp2_target_helicity`` stress case.
   The production CLI can optionally use a same-mode QP preseed; the current
   best gated QI row starts the constrained QI refinement directly from the seed
@@ -31,9 +31,11 @@ Publication structure
 
 The split between README and docs is deliberate:
 
-- ``README.md`` shows only the best reviewed ``LASYM = F`` QA/QH/QP/QI rows,
-  using the four compact ``readme_best_optimization_*.png`` panels and the
-  short reproduction command.
+- ``README.md`` shows the current reviewed NFP coverage compactly: the
+  aspect-5, ``max_mode=5`` common-minimal QA/QH/QP GPU table and objective
+  panel, plus the case-gated QI NFP=1/2/3/4 panel.  It intentionally labels QP
+  NFP=4 as a weak stress row and does not claim missing uniform aspect-5
+  common-minimal QI rows.
 - This page is the intended publication home for complete sweeps.  A complete
   publication should represent every CPU/GPU, continuation/direct, ESS on/off,
   QI preseed/no-preseed, ``max_mode=1..5`` reviewed row through downloadable
@@ -67,9 +69,10 @@ documentation-critical artifacts should be copied into ``docs/_static/figures``:
 - Optional full report composites:
   ``publication_panel_full.png/.pdf`` and LASYM variants.
 
-The checked-in source tree currently contains the compact README panels, the
-QI case-coverage snapshot, the minimal-seed showcase objective/state panels, the
-constrained-QI status panel, and compact CSV/JSON summary files.
+The checked-in source tree currently contains the historical compact best-row
+panels, the QI case-coverage snapshot, the minimal-seed showcase
+objective/state panels, the constrained-QI status panel, and compact CSV/JSON
+summary files.
 ``qs_ess_summary_all.csv`` is a heterogeneous partial/archive snapshot: archived
 CPU README QA/QH/QP rows plus one failed/partial constrained-QI status row,
 older GPU/LASYM rows with incomplete target metadata, and no checked-in
@@ -119,7 +122,7 @@ the checked-in snapshot.  Do not cite a full ``max_mode>=4`` CPU/GPU matrix unti
 the corresponding CSV/JSON rows and publication figures are present under
 ``docs/_static/figures``.
 
-The compact README renderer currently filters QI rows against the same
+The historical compact README renderer filters QI rows against the same
 aspect-5 target as QA/QH/QP.  The standalone ``QI_optimization.py``
 case-coverage lanes may still use case-specific aspect targets when mirror
 ratio or far-seed basin capture is the experiment; those rows are documented
@@ -192,7 +195,7 @@ Run the GPU production sweep on a machine with a working JAX GPU install:
    PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4,5 --ess both --qi-qp-preseed off --max-nfev 60 --continuation-nfev 15 --inner-max-iter 180 --inner-ftol 1e-9 --trial-max-iter 180 --trial-ftol 1e-9 --rerun
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
-Render the compact README panels from the best stellarator-symmetric rows:
+Render the historical compact best-row panels from the best stellarator-symmetric rows:
 
 .. code-block:: bash
 
@@ -236,22 +239,20 @@ For NVIDIA-only JAX installations, ``JAX_PLATFORMS=cuda`` is also valid.  Do
 not use ``JAX_PLATFORMS=gpu``: some JAX versions interpret that as both CUDA
 and ROCm and fail if ROCm is not installed.
 
-README Best Rows
-----------------
+Historical Compact Best Rows
+----------------------------
 
-The README regeneration target is one best ``LASYM = F`` result per target.
-Current checked-in README panels are archived aspect-6/mode-3 rows until the
-aspect-5, ``max_mode<=5`` CPU/GPU matrix is promoted.  New QA/QH/QP/QI rows
-must be selected from the reviewed matrix and filtered against the common
-aspect-5 target.  The selected QI row should be chosen with the legacy branch
-diagnostic, mirror-ratio, elongation, iota, and aspect-ratio gates used as
-promotion evidence rather than as exact equality constraints; small numerical
-slack is expected when independent Boozer diagnostics are recomputed after the
-optimization.  These panels include the raw/deck initial LCFS for the selected
-optimization row, final LCFS, per-stage objective history, and initial/final
-outer-surface ``|B|`` line contours in Boozer coordinates evaluated with
-``booz_xform_jax``.
-The source table is also available as
+The four compact ``readme_best_optimization_*.png`` panels below are retained
+as historical aspect-6/mode-3 comparison artifacts.  The active README no
+longer uses them as the primary optimization evidence; it uses the refreshed
+common-minimal QA/QH/QP objective panel and the reviewed QI NFP case panel.
+When replacing these historical panels, select rows from the reviewed matrix
+and filter against the common aspect-5 target.  The selected QI row should be
+chosen with the legacy branch diagnostic, mirror-ratio, elongation, iota, and
+aspect-ratio gates used as promotion evidence rather than as exact equality
+constraints; small numerical slack is expected when independent Boozer
+diagnostics are recomputed after the optimization.  The archived source table
+is available as
 :download:`readme_best_optimizations.csv <_static/figures/readme_best_optimizations.csv>`.
 
 .. image:: _static/figures/readme_best_optimization_qa.png
@@ -451,8 +452,9 @@ assets are:
 - ``minimal_seed_showcase_objective_panel.png``
 - ``minimal_seed_showcase_state_panel.png``
 
-The summary CSV is provenance-aware: ``initial_input`` and ``initial_wout``
-refer to the raw user-facing minimal seed shown in the state panel,
+The summary CSV is provenance-aware: ``initial_input`` records the raw
+user-facing minimal seed and ``initial_wout`` is populated when the state panel
+was refreshed from the same result root,
 ``stage_seed_kind`` and ``stage_seed_input`` identify any target-helicity or
 reference-family preseed used by the optimizer, and ``final_wout`` identifies
 the promoted final output.  This prevents a continuation or staged-QI
@@ -471,30 +473,48 @@ follows:
      - Status
      - Completion
      - Release interpretation
-   * - ``qi_circular_nfp1``
-     - QI
-     - 1
-     - ``partial``
-     - timeout
-     - Recorded as a bounded stress row only.
    * - ``qa_nfp2``
      - QA
      - 2
-     - ``partial``
-     - crashed checkpoint
-     - Not promoted in the refreshed static summary.
+     - ``ok``
+     - success
+     - Current aspect-5, ``max_mode=5`` common-minimal completion gate pass.
+   * - ``qa_nfp3``
+     - QA
+     - 3
+     - ``ok``
+     - success
+     - Current aspect-5, ``max_mode=5`` common-minimal completion gate pass.
+   * - ``qh_nfp3``
+     - QH
+     - 3
+     - ``ok``
+     - success
+     - Current aspect-5, ``max_mode=5`` common-minimal completion gate pass.
    * - ``qh_nfp4``
      - QH
      - 4
      - ``ok``
      - success
-     - Current common-minimal completion gate pass.
+     - Current aspect-5, ``max_mode=5`` common-minimal completion gate pass.
    * - ``qp_nfp2``
      - QP
      - 2
      - ``ok``
      - success
-     - Current completion gate pass, but still a refinement target.
+     - Current aspect-5, ``max_mode=5`` common-minimal completion gate pass.
+   * - ``qp_nfp3``
+     - QP
+     - 3
+     - ``ok``
+     - success
+     - Current aspect-5, ``max_mode=5`` common-minimal completion gate pass.
+   * - ``qp_nfp4``
+     - QP
+     - 4
+     - ``ok``
+     - success
+     - Stress row only: it terminates away from aspect 5 with a large QP residual.
 
 Current non-stale common-minimal QI outputs for ``minimal_nfp1_qi``,
 ``minimal_nfp2_qi``, ``minimal_nfp3_qi``, and ``minimal_nfp4_qi`` are not
@@ -505,19 +525,33 @@ reviewed case-gated QI inputs and, for NFP=4, a minimal seed plus a same-NFP
 finite-beta QI reference-family basin-capture step; it is not the same artifact
 as the common-minimal showcase.
 
-Regenerate the current common-minimal showcase with:
+Regenerate the current aspect-5 common-minimal showcase with:
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_minimal_seed_showcase.py \
-     --cases all --backend-label cpu --solver-device cpu --worker-jax-platforms cpu \
-     --policy continuation --max-mode 3 --ess on \
-     --max-nfev 30 --continuation-nfev 20 \
-     --inner-max-iter 120 --trial-max-iter 120 \
-     --inner-ftol 1e-9 --trial-ftol 1e-9 --case-timeout-s 1800 --rerun
-   PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py
+   PYTHONPATH=. JAX_PLATFORMS=cuda python3 examples/optimization/generate_minimal_seed_showcase.py \
+     --cases qa_nfp2,qa_nfp3,qh_nfp3,qh_nfp4,qp_nfp2,qp_nfp3,qp_nfp4,qi_nfp1,qi_nfp2,qi_nfp3,qi_nfp4 \
+     --backend-label gpu --solver-device gpu --worker-jax-platforms cuda \
+     --policy continuation --max-mode 5 --ess on \
+     --max-nfev 60 --continuation-nfev 20 \
+     --inner-max-iter 550 --inner-ftol 1e-10 \
+     --trial-max-iter 550 --trial-ftol 1e-10 \
+     --ess-alpha 1.2 --case-timeout-s 7200 --rerun
+   PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py --publication-matrix
 
-Keep ``--rerun`` for release reproduction.  Without it, successful
+For bounded smoke rendering of a partial run, use ``--cases`` and
+``--skip-missing`` so the renderer validates the selected case but does not
+warn about the rest of the production matrix:
+
+.. code-block:: bash
+
+   PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py \
+     --output-root /path/to/minimal_seed_showcase \
+     --figure-dir /path/to/figures \
+     --cases qi_nfp1 --skip-missing
+
+Use ``cpu`` for the three CUDA/GPU flags for a slower local CPU-only
+reproduction.  Keep ``--rerun`` for release reproduction.  Without it, successful
 ``showcase_case.json`` rows may be reused from an older local run; the renderer
 skips known-stale rows by default and ``--include-stale`` should be used only
 for debugging.  The renderer writes both a compact objective-history panel and,

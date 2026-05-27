@@ -31,17 +31,29 @@ def test_qi_staged_runner_builds_external_input_cli_and_environment(tmp_path: Pa
         policy="direct",
         policy_case="nfp2_qi",
         reference_input=ROOT / "examples" / "data" / "input.nfp2_QI",
+        reference_accept_as_baseline=True,
         backend_label="gpu",
         solver_device="gpu",
         worker_jax_platforms="gpu",
         use_ess=False,
         stage_mode_policy="repeat",
         max_nfev=5,
+        continuation_nfev=4,
         inner_max_iter=21,
         inner_ftol=1.0e-8,
         trial_max_iter=22,
         trial_ftol=2.0e-8,
         ess_alpha=1.7,
+        target_aspect=5.0,
+        target_abs_iota_min=0.41,
+        max_mirror_ratio=0.3,
+        max_elongation=10.0,
+        qi_mboz=10,
+        qi_nboz=11,
+        qi_nphi=61,
+        qi_nalpha=13,
+        qi_n_bounce=17,
+        mirror_ramp_stages=({"name": "cleanup", "max_nfev": 5, "mirror_weight": 20.0},),
         make_plots=False,
     )
 
@@ -51,7 +63,7 @@ def test_qi_staged_runner_builds_external_input_cli_and_environment(tmp_path: Pa
 
     assert env["JAX_PLATFORMS"] == "cuda"
     assert "--input-file" in args
-    assert joined.endswith("1.7")
+    assert "--ess-alpha" in args and "1.7" in args
     assert str(ROOT / "examples" / "data" / "input.minimal_seed_nfp2") in args
     assert str(tmp_path / "out") in args
     assert "--max-mode" in args and "3" in args
@@ -60,14 +72,29 @@ def test_qi_staged_runner_builds_external_input_cli_and_environment(tmp_path: Pa
     assert "--no-make-plots" in args
     assert "--stage-mode-policy" in args and "repeat" in args
     assert "--max-nfev" in args and "5" in args
+    assert "--continuation-nfev" in args and "4" in args
     assert "--inner-max-iter" in args and "21" in args
     assert "--trial-ftol" in args and "2e-08" in args
+    assert "--target-aspect" in args and "5.0" in args
+    assert "--target-abs-iota-min" in args and "0.41" in args
+    assert "--max-mirror-ratio" in args and "0.3" in args
+    assert "--max-elongation" in args and "10.0" in args
+    assert "--qi-mboz" in args and "10" in args
+    assert "--qi-nboz" in args and "11" in args
+    assert "--qi-nphi" in args and "61" in args
+    assert "--qi-nalpha" in args and "13" in args
+    assert "--qi-n-bounce" in args and "17" in args
     assert "--solver-device" in args and "gpu" in args
     assert "--reference-input" in args
+    assert "--accept-boundary-reference-baseline" in args
     assert str(ROOT / "examples" / "data" / "input.nfp2_QI") in args
+    assert "--mirror-ramp-stages-json" in args
+    stages_path = Path(args[args.index("--mirror-ramp-stages-json") + 1])
+    assert stages_path == tmp_path / "out" / "mirror_ramp_stages.json"
+    assert '"name": "cleanup"' in stages_path.read_text()
     lambdas = tuple(float(value) for value in args[args.index("--reference-lambdas") + 1].split(","))
-    assert lambdas[:3] == pytest.approx((0.994, 0.995, 0.996))
-    assert lambdas[-1] == pytest.approx(1.010)
+    assert lambdas[:4] == pytest.approx((0.0, 0.1, 0.25, 0.5))
+    assert lambdas[-1] == pytest.approx(1.005)
 
 
 def test_qi_staged_runner_can_disable_reference_lambda_override(tmp_path: Path) -> None:

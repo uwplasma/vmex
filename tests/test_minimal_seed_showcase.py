@@ -63,15 +63,15 @@ def test_minimal_seed_showcase_target_helicity_seed_terms_are_deterministic() ->
     generator = _load_module("generate_minimal_seed_showcase_target_seed", "generate_minimal_seed_showcase.py")
 
     expected = (
-        ("RBC", (1, 0), 1.0e-5),
-        ("ZBS", (1, 0), 1.0e-5),
-        ("RBC", (-1, 1), 1.0e-5),
-        ("ZBS", (-1, 1), 1.0e-5),
-        ("RBC", (1, 1), 1.0e-5),
-        ("ZBS", (1, 1), 1.0e-5),
+        ("RBC", (1, 0), 1.0e-3),
+        ("ZBS", (1, 0), 1.0e-3),
+        ("RBC", (-1, 1), 1.0e-3),
+        ("ZBS", (-1, 1), 1.0e-3),
+        ("RBC", (1, 1), 1.0e-3),
+        ("ZBS", (1, 1), 1.0e-3),
     )
 
-    assert generator.TARGET_HELICITY_SEED_AMPLITUDE == pytest.approx(1.0e-5)
+    assert generator.TARGET_HELICITY_SEED_AMPLITUDE == pytest.approx(1.0e-3)
     assert generator._target_helicity_seed_terms(max_mode=0) == ()
     assert generator._target_helicity_seed_terms(max_mode=1) == expected
     assert generator._target_helicity_seed_terms(max_mode=1, amplitude=0.0) == ()
@@ -151,6 +151,185 @@ def test_minimal_seed_showcase_config_patch_is_bounded_and_non_mutating() -> Non
     assert case.qi_reference_input.name == "input.nfp3_QI_fixed_resolution_final"
 
 
+def test_minimal_seed_showcase_default_mode_matches_publication_matrix(monkeypatch) -> None:
+    generator = _load_module("generate_minimal_seed_showcase_defaults", "generate_minimal_seed_showcase.py")
+
+    monkeypatch.setattr(sys, "argv", ["generate_minimal_seed_showcase.py"])
+    args = generator._parse_args()
+
+    assert args.max_mode == 5
+
+
+def test_minimal_seed_showcase_qi_stage_patch_inherits_requested_max_mode() -> None:
+    generator = _load_module("generate_minimal_seed_showcase_qi_stage_patch", "generate_minimal_seed_showcase.py")
+    budget = generator.MinimalSeedBudget(
+        max_nfev=60,
+        continuation_nfev=20,
+        inner_max_iter=550,
+        inner_ftol=1.0e-10,
+        trial_max_iter=550,
+        trial_ftol=1.0e-10,
+    )
+
+    stage = {
+        "name": "cleanup",
+        "max_nfev": 8,
+        "stage_modes": (3,),
+        "use_showcase_max_nfev": True,
+        "use_showcase_max_mode": True,
+    }
+    patched = generator._patch_qi_stage_budget(stage, budget=budget, max_mode=5)
+
+    assert patched["max_nfev"] == 60
+    assert patched["stage_modes"] == (5,)
+    assert patched["use_mode_continuation"] is False
+    assert "use_showcase_max_nfev" not in patched
+    assert "use_showcase_max_mode" not in patched
+
+
+def test_renderer_uses_boundary_reference_wout_from_pending_checkpoint(tmp_path: Path) -> None:
+    renderer = _load_module("render_minimal_seed_showcase_pending_wout", "render_minimal_seed_showcase.py")
+    output_dir = tmp_path / "case"
+    reference_dir = output_dir / "boundary_reference_preconditioner" / "lambda_0p950"
+    reference_dir.mkdir(parents=True)
+    reference_wout = reference_dir / "wout_interpolated.nc"
+    reference_wout.write_text("wout\n")
+    (output_dir / "stage_checkpoint.json").write_text(
+        json.dumps(
+            {
+                "wout_path": str(output_dir / "boundary_reference_baseline" / "wout_final.nc"),
+                "diagnostics_path": str(output_dir / "boundary_reference_baseline" / "diagnostics.json"),
+                "diagnostics": {
+                    "boundary_reference_wout_path": str(reference_wout),
+                },
+            }
+        )
+        + "\n"
+    )
+    record = renderer.ShowcaseRecord(
+        case_name="qi_nfp1",
+        nfp=1,
+        problem="qi",
+        output_dir=output_dir,
+        success=False,
+        crashed=False,
+        message="partial",
+        objective_final=None,
+        aspect_final=6.8,
+        iota_final=0.42,
+        total_wall_time_s=None,
+        policy="continuation",
+        max_mode=5,
+        use_ess=True,
+    )
+
+    assert renderer._final_wout_for_record(record) == reference_wout
+
+
+def test_renderer_case_filter_and_skip_missing_cli(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
+    renderer = _load_module("render_minimal_seed_showcase_case_filter", "render_minimal_seed_showcase.py")
+    output_root = tmp_path / "results"
+    output_dir = output_root / "gpu" / "qi_nfp1" / "continuation" / "minimal_nfp1_qi" / "mode5" / "ess"
+    output_dir.mkdir(parents=True)
+    (output_dir / "case_result.json").write_text(
+        json.dumps(
+            {
+                "problem": "qi",
+                "success": False,
+                "crashed": False,
+                "message": "partial QI stage checkpoint metrics recorded",
+                "policy": "continuation",
+                "max_mode": 5,
+                "use_ess": True,
+                "qi_legacy_total": 1.0e-2,
+                "qi_mirror_ratio_max": 0.25,
+            }
+        )
+    )
+    (output_dir / "showcase_case.json").write_text(
+        json.dumps(
+            {
+                "minimal_seed_case": {
+                    "name": "qi_nfp1",
+                    "nfp": 1,
+                    "qi_policy_case": "minimal_nfp1_qi",
+                },
+                "reference_preseed": {
+                    "enabled": True,
+                    "reference_input": "input.nfp1_QI",
+                    "blend": 0.95,
+                },
+            }
+        )
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "render_minimal_seed_showcase.py",
+            "--output-root",
+            str(output_root),
+            "--figure-dir",
+            str(tmp_path / "figures"),
+            "--cases",
+            "qi_nfp1",
+            "--skip-missing",
+            "--summary-only",
+        ],
+    )
+
+    renderer.main()
+
+    captured = capsys.readouterr()
+    assert "Missing current minimal-seed records" not in captured.out
+    summary = tmp_path / "figures" / "minimal_seed_showcase_summary.csv"
+    assert summary.exists()
+    assert "qi_nfp1" in summary.read_text()
+
+
+def test_renderer_rejects_unknown_case_filter(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    renderer = _load_module("render_minimal_seed_showcase_unknown_case", "render_minimal_seed_showcase.py")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["render_minimal_seed_showcase.py", "--cases", "qi_nfp1,not_a_case"],
+    )
+
+    with pytest.raises(SystemExit):
+        renderer._parse_args()
+
+    assert "unknown --cases value(s): not_a_case" in capsys.readouterr().err
+
+
+def test_renderer_skip_missing_selected_case_keeps_bounded_smoke_nonfatal(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    renderer = _load_module("render_minimal_seed_showcase_missing_case", "render_minimal_seed_showcase.py")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "render_minimal_seed_showcase.py",
+            "--output-root",
+            str(tmp_path / "empty"),
+            "--figure-dir",
+            str(tmp_path / "figures"),
+            "--cases",
+            "qi_nfp1",
+            "--skip-missing",
+            "--summary-only",
+        ],
+    )
+
+    renderer.main()
+
+    captured = capsys.readouterr()
+    assert "Missing current minimal-seed records" not in captured.out
+    assert "qi_nfp1" in captured.out
+
+
 def test_minimal_seed_showcase_dispatches_qi_to_staged_runner(tmp_path: Path, monkeypatch) -> None:
     generator = _load_module("generate_minimal_seed_showcase_qi_staged", "generate_minimal_seed_showcase.py")
     budget = generator.MinimalSeedBudget(
@@ -200,8 +379,12 @@ def test_minimal_seed_showcase_dispatches_qi_to_staged_runner(tmp_path: Path, mo
     assert config.policy == "continuation"
     assert config.policy_case == "minimal_nfp2_qi"
     assert config.reference_input.name == "input.nfp2_QI"
-    assert config.reference_lambdas is None
+    assert config.reference_accept_as_baseline is True
+    assert config.reference_lambdas[:4] == pytest.approx((0.0, 0.1, 0.25, 0.5))
+    assert config.reference_lambdas[-1] == pytest.approx(1.005)
     assert config.max_nfev == 4
+    assert config.continuation_nfev == 3
+    assert config.target_aspect == pytest.approx(5.0)
     assert config.inner_max_iter == 11
     assert config.trial_ftol == pytest.approx(2.0e-8)
     assert generator.sweep.PROBLEM_CONFIGS == original_configs
@@ -605,6 +788,9 @@ def test_minimal_seed_renderer_loads_records_and_returns_monotone_segments(tmp_p
     records = renderer.best_records(renderer.load_records(tmp_path))
     assert len(records) == 1
     assert records[0].case_name == "qa_nfp2"
+    promoted_candidate = replace(records[0], max_mode=5, policy="continuation", use_ess=True)
+    assert renderer.publication_records([promoted_candidate]) == [promoted_candidate]
+    assert renderer.publication_records([replace(promoted_candidate, max_mode=4)]) == []
     provenance = renderer.provenance_for_record(records[0])
     assert provenance.initial_kind == "raw_seed"
     assert provenance.initial_input.name == "input.minimal_seed_nfp2"
@@ -670,6 +856,7 @@ def test_minimal_seed_renderer_loads_records_and_returns_monotone_segments(tmp_p
     )
     all_records = renderer.best_records(renderer.load_records(tmp_path), successful_only=False)
     assert [record.case_name for record in all_records] == ["qa_nfp2", "qh_nfp4"]
+    assert renderer.publication_records(renderer.load_records(tmp_path)) == []
     failed_record = next(record for record in all_records if record.case_name == "qh_nfp4")
     assert renderer.record_status(failed_record) == "failed"
     partial_record = replace(failed_record, crashed=True, message="partial checkpoint metrics recorded")
