@@ -117,6 +117,13 @@ Steps taken:
     `setup_update_constants_s` dropped from `12.3 ms` to `4.7 ms`.  The
     remaining warm CUDA targets are boundary/profile setup, residual scalar
     materialization, accepted-control `fsq1`, and preconditioner dispatch.
+69. Extended the host flux-profile setup path to concrete default-`APHI` iota
+    profiles.  Local CPU quick timing for the tiny `--jit-forces` direct-coil
+    solve was about `0.026 s` warm with `setup_boundary_profiles_s≈1.5 ms`.
+    The matched `office` CPU/CUDA matrix at head `8eb2a342` reported
+    `0.0521 s` CPU warm and `0.2318 s` CUDA warm; CUDA force assembly was still
+    near parity (`9.68 ms` versus `9.11 ms` CPU), so the remaining GPU target is
+    setup/control/preconditioner staging rather than Biot-Savart sampling.
 
 ### 2026-05-27 Free-boundary beta-scan bootstrap-current preconditioner
 

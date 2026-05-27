@@ -3118,6 +3118,17 @@ warm time improved from ``0.180 s`` to ``0.169 s`` and
 remaining warm GPU targets are boundary/profile setup, residual scalar
 materialization, accepted-control ``fsq1``, and preconditioner dispatch.
 
+The next pushed patch extends the host flux-profile fast path to concrete
+default-``APHI`` iota profiles, so the non-traced setup path no longer falls
+back to small eager JAX profile work for common ``AI`` inputs.  A local CPU
+quick benchmark at that head reported the tiny direct-coil ``--jit-forces``
+warm solve at about ``0.026 s`` with ``setup_boundary_profiles_s≈1.5 ms``.
+The matched ``office`` CPU/CUDA matrix still showed the GPU row as
+CPU-favorable (``0.0521 s`` CPU versus ``0.2318 s`` CUDA), with force assembly
+near parity (``9.11 ms`` CPU versus ``9.68 ms`` CUDA).  This confirms the next
+larger performance patch should cache or stage the non-traced setup/control
+payload rather than continuing to optimize the direct coil field kernel.
+
 Historical bundled example runtime/memory matrix (March 2026)
 -------------------------------------------------------------
 

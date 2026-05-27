@@ -773,6 +773,15 @@ or stage static setup and reduce scalar/control dispatch; scalar-defer is not
 yet the right default because those residual scalars still drive VMEC control
 flow and output history.
 
+At the same head, the solver also uses a host flux-profile fast path for
+concrete default-``APHI`` iota profiles.  This is a safe setup-only
+optimization for non-traced forward solves; differentiated/traced profile
+coefficients still use the JAX path.  The follow-up ``office`` matrix reported
+the same performance conclusion: the tiny direct-coil ``--jit-forces`` row was
+``0.0521 s`` warm on CPU and ``0.2318 s`` warm on CUDA, while force assembly
+itself was still near parity.  The remaining work is setup/control staging, not
+Biot-Savart kernel math.
+
 The direct-solve child JSON includes active and trial NESTOR timing summaries:
 sample time, scalar-potential solve time, reuse counts, failed trial counts,
 and the final recompute sampler/solver timings. The matrix runner also enables

@@ -408,7 +408,12 @@ boundary/profile construction and update constants.  Accelerator host-forward
 setup now reuses the existing NumPy row-enforcement path for the initial state
 when not tracing, with an explicit `VMEC_JAX_HOST_SETUP_ENFORCE` override; the
 first CUDA check improved the tiny direct-coil warm solve from `0.180 s` to
-`0.169 s`.
+`0.169 s`.  The host flux-profile setup path now also handles concrete
+default-`APHI` iota profiles.  A follow-up `office` matrix at head `8eb2a342`
+reported CPU warm `0.0521 s` and CUDA warm `0.2318 s` for the tiny
+`--jit-forces` row, with force assembly still near parity; the next GPU lane is
+therefore setup/control/preconditioner staging or caching, not further
+Biot-Savart kernel work.
 
 - Continuation correctness: 100%. Source fix is implemented and covered by
   synthetic repeated-stage tests, a real boundary-projection stage test, and
