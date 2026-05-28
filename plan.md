@@ -65,7 +65,11 @@ acceptance criteria or evidence changes.
   patches, the clean local required gate passed with `2328 passed, 20 skipped,
   109 deselected, 1 xfailed` and 95.00% coverage in about 6:25; full Sphinx
   also passed with warnings as errors. GitHub Actions is green through
-  `152360f`. The optional
+  `152360f`. On 2026-05-27, after the QI staged-seed materialization fix and
+  QI CLI/docs cleanup, the full local required gate passed with
+  `2346 passed, 129 skipped, 1 xfailed` and 95.02% coverage in about 6:56;
+  targeted QI/docs tests and full Sphinx passed, and GitHub Actions was green
+  through `3bfab32`. The optional
   converged VMEC2000 parity gate remains opt-in with
   `VMEC2000_INTEGRATION=1`. `solve.py` still dominates the missing-line
   surface, so future coverage should come from physics-gated refactor seams
@@ -433,11 +437,14 @@ update:
   `QuasiIsodynamicResidualCeiling` now gives examples and users a differentiable
   soft-wall guard for mirror/elongation cleanup that preserves an accepted QI
   basin. Completed-stage QI checkpoint files are written before later-stage
-  timeouts, and the common-minimal showcase uses a `1e-3` target-helicity hint
-  after the QA NFP=3 remote amplitude study improved the final objective while
-  preserving iota/aspect gates. The remaining open cleanup is running and tuning
-  the guarded mirror schedule across unrelated seeds and completing stronger
-  multi-seed promotion evidence.
+  timeouts, QI stages now materialize root-level `input.initial` and
+  `input.final` files before advancing to the next mirror-ramp stage, and the
+  common-minimal showcase uses a `1e-3` target-helicity hint after the QA NFP=3
+  remote amplitude study improved the final objective while preserving
+  iota/aspect gates. A focused real two-stage QI smoke and a mocked regression
+  test now cover the previously failing missing-`input.final` transition. The
+  remaining open cleanup is running and tuning the guarded mirror schedule
+  across unrelated seeds and completing stronger multi-seed promotion evidence.
 - CPU/GPU performance: 97%. Backend-adaptive replay bucketing, scalar-gradient
   tangent reuse, detailed timing, and GPU-only preconditioner-output fusion are
   in place. Hot-path algebra and CPU/GPU fusion gating are now covered by
@@ -519,10 +526,10 @@ update:
   solver/wout/free-boundary splits remain deferred behind parity gates.
 - Docs/release hygiene: latest released baseline is `v0.0.13`, with PyPI
   publication verified. Post-release `main` has local warning-clean Sphinx and a
-  clean 95% CI-equivalent coverage pass through the May 27 candidate
-  (`2328 passed, 20 skipped, 109 deselected, 1 xfailed`, 95.00%). GitHub
-  Actions is green through `152360f`, carrying the minimal-seed
-  helicity-perturbation/docs update.
+  clean 95% CI-equivalent coverage pass through the May 27 staged-seed
+  candidate (`2346 passed, 129 skipped, 1 xfailed`, 95.02%). GitHub Actions is
+  green through `3bfab32`, carrying the QI staged-seed and explicit CLI docs
+  updates.
   Performance/discrete-adjoint/docs reflect the current replay and finite-beta
   policies, diagnostics docs cover detailed preconditioner timing, and a
   command-level release checklist now ties local gates, tools/validation

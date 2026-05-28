@@ -463,6 +463,34 @@ def test_stage_checkpoint_modes_and_promotion_rules(monkeypatch: pytest.MonkeyPa
     assert json.loads((tmp_path / "stage_checkpoint.json").read_text())["diagnostics"]["objective_final"] == 1.0
 
 
+def test_materialize_qi_stage_inputs_uses_final_result_fallback(tmp_path: Path) -> None:
+    saved: list[tuple[Path, list[float]]] = []
+
+    class Optimizer:
+        def save_input(self, path, params) -> None:
+            path = Path(path)
+            values = np.asarray(params, dtype=float).tolist()
+            saved.append((path, values))
+            path.write_text(json.dumps(values) + "\n")
+
+    result = SimpleNamespace(
+        initial_optimizer=Optimizer(),
+        final_optimizer=Optimizer(),
+        initial_params=np.asarray([1.0, 2.0]),
+        final_result={"x": np.asarray([3.0, 4.0])},
+    )
+
+    final_path = qio.materialize_qi_stage_inputs(tmp_path / "stage", result)
+
+    assert final_path == tmp_path / "stage" / "input.final"
+    assert (tmp_path / "stage" / "input.initial").read_text().strip() == "[1.0, 2.0]"
+    assert (tmp_path / "stage" / "input.final").read_text().strip() == "[3.0, 4.0]"
+    assert saved == [
+        (tmp_path / "stage" / "input.initial", [1.0, 2.0]),
+        (tmp_path / "stage" / "input.final", [3.0, 4.0]),
+    ]
+
+
 def test_run_basin_prefilter_uses_lazy_tools_and_selects_candidate(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
