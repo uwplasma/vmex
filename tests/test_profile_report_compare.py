@@ -523,6 +523,8 @@ def test_profile_summary_accounts_projected_replay_buckets() -> None:
     assert summary["projected_replay_summary"]["total_s"] == 4.0
     assert summary["projected_replay_summary"]["dispatch_s"] == 0.7
     assert summary["projected_replay_summary"]["residual_tangents_s"] == 3.3
+    assert summary["projected_replay_summary"]["residual_tangents_dispatch_s"] == 0.5
+    assert summary["projected_replay_summary"]["residual_tangents_ready_s"] == 2.8
     assert summary["projected_replay_summary"]["count"] == 2
     assert summary["projected_replay_summary"]["share_of_total"] == pytest.approx(0.2)
     assert summary["projected_replay_summary"]["residual_tangent_share_of_projected"] == pytest.approx(
@@ -533,6 +535,7 @@ def test_profile_summary_accounts_projected_replay_buckets() -> None:
     text = compare_tool.format_text(comparison)
     assert "Projected replay totals" in text
     assert "residual_tangent_s" in text
+    assert "residual_ready_s" in text
 
 
 def test_profile_summary_extracts_replay_scan_cache_diagnostics() -> None:

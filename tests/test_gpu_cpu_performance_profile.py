@@ -523,6 +523,8 @@ def test_exact_callback_summary_preserves_cold_tangent_replay_and_scan_trial_buc
     assert projected["total_s"] == 1.5
     assert projected["dispatch_s"] == 0.4
     assert projected["residual_tangents_s"] == 1.1
+    assert projected["residual_tangents_dispatch_s"] == 0.2
+    assert projected["residual_tangents_ready_s"] == 0.9
     assert projected["count"] == 1
     assert summary["exact_optimizer_patch_target"]["name"] == "jacobian_tape_replay_ready"
 
