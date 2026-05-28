@@ -1,10 +1,10 @@
 # VMEC-JAX Research-Grade Roadmap
 
-Last updated: 2026-05-27
+Last updated: 2026-05-28
 Primary branch: `main`
 Baseline release: `v0.0.13`
-Latest known green `main` CI: `152360f`
-Current candidate: plan refresh after `152360f`
+Latest known green `main` CI: `800cbec`
+Current candidate: QI staged-seed materialization and coverage-margin refresh
 
 This is the living execution plan for making `vmec_jax` accurate, fast,
 differentiable, documented, and usable by external researchers. Update it when
@@ -69,7 +69,11 @@ acceptance criteria or evidence changes.
   QI CLI/docs cleanup, the full local required gate passed with
   `2346 passed, 129 skipped, 1 xfailed` and 95.02% coverage in about 6:56;
   targeted QI/docs tests and full Sphinx passed, and GitHub Actions was green
-  through `3bfab32`. The optional
+  through `3bfab32`. On 2026-05-28, after adding fallback coverage for
+  root-level QI stage input materialization, the full local gate passed with
+  `2347 passed, 129 skipped, 1 xfailed` and 95.02% coverage in about 6:53,
+  and GitHub Actions passed build, docs, physics smoke, parity smoke, and
+  Python 3.10/3.11/3.12 fast tests through `800cbec`. The optional
   converged VMEC2000 parity gate remains opt-in with
   `VMEC2000_INTEGRATION=1`. `solve.py` still dominates the missing-line
   surface, so future coverage should come from physics-gated refactor seams
@@ -527,9 +531,10 @@ update:
 - Docs/release hygiene: latest released baseline is `v0.0.13`, with PyPI
   publication verified. Post-release `main` has local warning-clean Sphinx and a
   clean 95% CI-equivalent coverage pass through the May 27 staged-seed
-  candidate (`2346 passed, 129 skipped, 1 xfailed`, 95.02%). GitHub Actions is
-  green through `3bfab32`, carrying the QI staged-seed and explicit CLI docs
-  updates.
+  candidate, plus the May 28 staged-seed fallback coverage refresh
+  (`2347 passed, 129 skipped, 1 xfailed`, 95.02%). GitHub Actions is green
+  through `800cbec`, carrying the QI staged-seed, explicit CLI docs updates,
+  and fallback materialization test.
   Performance/discrete-adjoint/docs reflect the current replay and finite-beta
   policies, diagnostics docs cover detailed preconditioner timing, and a
   command-level release checklist now ties local gates, tools/validation
@@ -539,8 +544,10 @@ update:
   locked to the `vmec_jax` namespace. Released reference assets are ignored so
   local full-tier refreshes cannot accidentally bloat commits.
   The documented custom QI seed audit command was validated end-to-end on
-  `input.QI_stel_seed_3127`; final seed-robust QI and GPU-production artifacts
-  remain open.
+  `input.QI_stel_seed_3127`; a production-scale NFP3 GPU staged-seed
+  verification is still running on `office` and has advanced past the previous
+  missing-`input.final` crash into the first mirror-ramp optimization stage.
+  Final seed-robust QI and GPU-production artifacts remain open.
 
 Release-critical lanes requested in this push (continuation, exact
 accepted-point output, VMEC parity/physics gates, and docs/release hygiene) are
