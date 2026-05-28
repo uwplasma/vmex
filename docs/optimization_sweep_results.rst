@@ -49,10 +49,11 @@ Current README NFP Snapshot
 ---------------------------
 
 The README figures correspond to the rows below.  QA/QH/QP rows are current
-common-minimal-seed GPU runs with continuation, ESS, and ``max_mode=5``.  QI
-public entry points now use the same minimal-seed policy; historical rows that
-used older case-specific starts are retained below only as archived reviewed
-artifacts until refreshed minimal-seed QI artifacts are regenerated.
+common-minimal-seed GPU runs with continuation, ESS, and ``max_mode=5``.  The
+QI panel is a reviewed, case-gated NFP snapshot: it keeps the user-facing input
+deck visible and marks deterministic reference-family proposals explicitly
+instead of claiming that every QI NFP row is already solved from one uniform
+common-minimal policy.
 
 .. list-table::
    :header-rows: 1

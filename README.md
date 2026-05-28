@@ -166,11 +166,11 @@ Editable optimization examples live in `examples/optimization/`. Start with
 The current README snapshot uses compact figures, not a numeric table. The
 first panel shows QA NFP2/3, QH NFP3/4, and QP NFP2/3 common-minimal-seed
 GPU runs with aspect target 5, continuation, ESS, and `max_mode=5`. The second
-panel documents the same minimal-seed policy for QI NFP1/2/3/4: source inputs
-are circular/minimal torus-like decks, and any reference-family step is an
-explicit deterministic basin proposal rather than the user-facing initial
-condition. Full numeric tables, caveats, LASYM panels, and artifact-promotion
-rules live in the docs.
+panel shows the current QI NFP1/2/3/4 reviewed snapshot: each row keeps the
+user-facing input deck visible, while case-gated reference-family steps are
+explicit deterministic basin proposals rather than claims that every NFP row is
+already solved from the same common-minimal seed. Full numeric tables, caveats,
+LASYM panels, and artifact-promotion rules live in the docs.
 
 ![Common minimal-seed QA/QH/QP states](docs/_static/figures/minimal_seed_showcase_state_panel.png)
 ![QI optimization from NFP seeds](docs/_static/figures/readme_qi_optimization_cases.png)

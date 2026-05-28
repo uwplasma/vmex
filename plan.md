@@ -3,8 +3,8 @@
 Last updated: 2026-05-28
 Primary branch: `main`
 Baseline release: `v0.0.13`
-Latest known green `main` CI: `800cbec`
-Current candidate: main `800cbec` plus free-boundary direct-coil PR #18 refresh
+Latest known green `main` CI: `3a15af2`
+Current candidate: main `cc33d5c5` plus free-boundary direct-coil PR #18 refresh
 
 This is the living execution plan for making `vmec_jax` accurate, fast,
 differentiable, documented, and usable by external researchers. Update it when
@@ -73,7 +73,13 @@ acceptance criteria or evidence changes.
   root-level QI stage input materialization, the full local gate passed with
   `2347 passed, 129 skipped, 1 xfailed` and 95.02% coverage in about 6:53,
   and GitHub Actions passed build, docs, physics smoke, parity smoke, and
-  Python 3.10/3.11/3.12 fast tests through `800cbec`. The optional
+  Python 3.10/3.11/3.12 fast tests through `800cbec`; the follow-up
+  documentation-only CI evidence refresh also passed the same required jobs
+  through `3a15af2`. After the scan-helper coverage margin and optional
+  SIMSOPT Redl formula gate wiring, the full local required gate passed with
+  `2354 passed, 20 skipped, 110 deselected, 1 xfailed` and 95.09% coverage in
+  about 6:52; full Sphinx passed warning-clean, and the optional aggregate
+  SIMSOPT lane passed with `8 passed` under `RUN_SIMSOPT_VALIDATION=1`. The optional
   converged VMEC2000 parity gate remains opt-in with
   `VMEC2000_INTEGRATION=1`. `solve.py` still dominates the missing-line
   surface, so future coverage should come from physics-gated refactor seams
@@ -389,7 +395,7 @@ Acceptance:
 
 ## Progress Snapshot
 
-Updated 2026-05-27 after the bundled profile/current wout parity gates, QI
+Updated 2026-05-28 after the bundled profile/current wout parity gates, QI
 selection hardening, exact-Jacobian host-materialization cleanup,
 continuation/exact-history hardening, LASYM-Boozer parity, release-checklist
 push, 85% and 90% coverage-gate pushes, optional SIMSOPT/VMEC2000 gate expansion, the
@@ -572,9 +578,11 @@ performance step is structural control-loop staging/fusion.
   publication verified. Post-release `main` has local warning-clean Sphinx and a
   clean 95% CI-equivalent coverage pass through the May 27 staged-seed
   candidate, plus the May 28 staged-seed fallback coverage refresh
-  (`2347 passed, 129 skipped, 1 xfailed`, 95.02%). GitHub Actions is green
-  through `800cbec`, carrying the QI staged-seed, explicit CLI docs updates,
-  and fallback materialization test.
+  and scan-helper margin refresh (`2354 passed, 20 skipped, 110 deselected,
+  1 xfailed`, 95.09%). GitHub Actions is green through `3a15af2`, carrying the
+  QI staged-seed, explicit CLI docs updates, fallback materialization test, and
+  green-candidate documentation refresh; this follow-up candidate has local
+  warning-clean Sphinx and optional SIMSOPT parity evidence.
   Performance/discrete-adjoint/docs reflect the current replay and finite-beta
   policies, diagnostics docs cover detailed preconditioner timing, and a
   command-level release checklist now ties local gates, tools/validation
@@ -694,7 +702,7 @@ Realistic next targets for this development cycle:
 1. Keep the required CI coverage gate at 95% and preserve sub-ten-minute py3.11
    coverage runtime by pruning duplicate helper tests, splitting slow
    validation into optional tiers, or refactoring the largest modules so fewer
-   synthetic branch tests are required. Current required coverage is 95.10%;
+   synthetic branch tests are required. Current required coverage is 95.09%;
    the next staged ratchet should come from solver/physics refactor seams rather
    than superficial call coverage.
 2. Raise the solved-state QI diagnostic from the new low-resolution bundled

@@ -152,6 +152,26 @@ def _optional_parity_commands() -> list[OptionalParityCommand]:
             ],
         ),
         OptionalParityCommand(
+            command_id="simsopt-redl-formula",
+            backend="SIMSOPT",
+            required_ci=False,
+            env=["RUN_SIMSOPT_VALIDATION=1"],
+            command=(
+                "RUN_SIMSOPT_VALIDATION=1 pytest -q "
+                "tests/test_finite_beta_helpers_unit.py::"
+                "test_redl_bootstrap_formula_matches_simsopt_when_available"
+            ),
+            bounded_by=[
+                "uses synthetic three-point profile and geometry arrays only",
+                "launches no VMEC, BOOZ_XFORM, or optimization solve",
+                "skips unless RUN_SIMSOPT_VALIDATION=1 and SIMSOPT is importable",
+            ],
+            validates=[
+                "Redl bootstrap jdotB algebra matches SIMSOPT formula output",
+                "finite-beta current objective wiring keeps a reference-code parity gate",
+            ],
+        ),
+        OptionalParityCommand(
             command_id="vmec2000-converged-wout-smoke",
             backend="VMEC2000 executable",
             required_ci=False,
@@ -322,16 +342,20 @@ def _lanes() -> list[ValidationLane]:
         ),
         ValidationLane(
             lane_id="simsopt-optional",
-            title="Optional SIMSOPT QA/QH formula and state parity",
+            title="Optional SIMSOPT formula and state parity",
             required_ci=False,
             prerequisites=["SIMSOPT installed locally", "RUN_SIMSOPT_VALIDATION=1"],
             command=(
                 "RUN_SIMSOPT_VALIDATION=1 pytest -q "
-                "tests/test_simsopt_optional_validation.py"
+                "tests/test_simsopt_optional_validation.py "
+                "tests/test_redl_bootstrap_simsopt_parity.py "
+                "tests/test_finite_beta_helpers_unit.py::"
+                "test_redl_bootstrap_formula_matches_simsopt_when_available"
             ),
             acceptance=[
                 "VMEC-only QS residuals match SIMSOPT diagnostics on bundled QA and QH wouts.",
                 "State-derived VMEC diagnostics match SIMSOPT on the same converged fixtures.",
+                "Redl bootstrap current formulas match SIMSOPT on synthetic and bundled finite-beta cases.",
                 "The test skips instead of failing when SIMSOPT is unavailable.",
             ],
             artifact_paths=[],
