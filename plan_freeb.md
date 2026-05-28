@@ -176,6 +176,10 @@ Steps taken:
     `direct_coil_projected_mode_fixed_point_jax`, so phase-2 validation no
     longer lives only in test-local glue. The helper is still dense/tiny-scale
     and does not claim a production `run_free_boundary` custom VJP.
+78. Added `direct_coil_projected_mode_fixed_point_objective_jax`, a scalar
+    objective wrapper with component diagnostics for the projected-mode
+    fixed-point helper. The AD-vs-FD gates now target an optimizer-facing
+    scalar objective instead of unpacking a test-local state dictionary.
 78. Ran a fresh-clone CPU/CUDA timing probe on `office` with the normalized
     phase comparison. CPU warm time was `0.0424 s`; CUDA warm time was
     `0.1466 s`. CUDA force evaluation was `10.0 ms`, but residual metrics,

@@ -24,7 +24,7 @@ from vmec_jax.free_boundary_adjoint import (
     dense_vmec_nestor_mode_solve_jax,
     dense_vacuum_residual,
     dense_vacuum_solve_jax,
-    direct_coil_projected_mode_fixed_point_jax,
+    direct_coil_projected_mode_fixed_point_objective_jax,
     mode_matrix_from_grpmn_jax,
     mode_rhs_from_gsource_jax,
     vacuum_boundary_fields_from_cylindrical_jax,
@@ -1364,7 +1364,7 @@ def _toy_coil_projected_mode_fixed_point_response(
         pressure_like = jnp.asarray([0.02, -0.015, 0.01], dtype=float)
         return pressure_like + 0.22 * jnp.tanh(mode_to_state @ mode_coeffs)
 
-    solved = direct_coil_projected_mode_fixed_point_jax(
+    solved = direct_coil_projected_mode_fixed_point_objective_jax(
         coil_params,
         jnp.asarray([0.0, 0.0, 0.0], dtype=float),
         boundary_from_state=boundary_from_state,
@@ -1377,10 +1377,12 @@ def _toy_coil_projected_mode_fixed_point_response(
         nuv3=4,
         nuv_full=4,
         max_iter=14,
+        state_weights=jnp.asarray([1.0, 0.8, 1.2], dtype=float),
+        update_weights=0.08,
+        mode_weights=0.02,
+        fixed_point_residual_weight=10.0,
     )
-    root = solved["state"]
-    final = solved["update"]
-    return 0.5 * jnp.vdot(jnp.asarray([1.0, 0.8, 1.2], dtype=float) * root, root) + 0.08 * jnp.vdot(final, final)
+    return solved["objective"]
 
 
 def test_dense_vacuum_adjoint_chain_wrt_coil_current_matches_finite_difference():
@@ -1533,6 +1535,73 @@ def test_dense_fixed_point_projected_mode_loop_wrt_geometry_matches_finite_diffe
 
     assert abs(float(exact)) > 1.0e-9
     np.testing.assert_allclose(exact, fd, rtol=1.0e-5, atol=1.0e-10)
+
+
+def test_projected_mode_fixed_point_objective_exposes_components():
+    """Check the scalar objective wrapper returns usable diagnostics."""
+
+    from vmec_jax._compat import jnp
+
+    enable_x64(True)
+    value = _toy_coil_projected_mode_fixed_point_response()
+    assert np.isfinite(float(value))
+    assert float(value) > 0.0
+
+    radius = 1.34
+    dofs = jnp.zeros((1, 3, 3), dtype=float)
+    dofs = dofs.at[0, 0, 2].set(radius)
+    dofs = dofs.at[0, 1, 1].set(radius)
+    coil_params = CoilFieldParams(
+        base_curve_dofs=dofs,
+        base_currents=jnp.asarray([5.5e6], dtype=float),
+        n_segments=32,
+        regularization_epsilon=1.0e-9,
+    )
+    phi = jnp.asarray([[0.05, 0.45], [0.85, 1.25]], dtype=float)
+    sin_basis = jnp.asarray(
+        [
+            [0.0, 0.2, -0.3],
+            [0.4, -0.1, 0.5],
+            [-0.2, 0.6, 0.1],
+            [0.7, 0.3, -0.4],
+        ],
+        dtype=float,
+    )
+
+    def boundary_from_state(state):
+        return {
+            "R": jnp.asarray([[0.74, 0.83], [0.89, 0.78]], dtype=float) + 0.02 * state[0],
+            "Z": jnp.asarray([[0.10, -0.13], [0.18, -0.16]], dtype=float) + 0.02 * state[1],
+            "phi": phi,
+            "Ru": jnp.asarray([[0.03, -0.04], [0.02, 0.05]], dtype=float),
+            "Zu": jnp.asarray([[0.20, 0.22], [0.19, 0.21]], dtype=float),
+            "Rv": jnp.asarray([[0.04, 0.01], [-0.03, 0.05]], dtype=float),
+            "Zv": jnp.asarray([[0.02, -0.03], [0.06, -0.01]], dtype=float),
+        }
+
+    def update_from_response(_state, response, _vac, _boundary, _params):
+        return 0.1 * jnp.tanh(jnp.asarray(response["mode_coeffs"])[:2])
+
+    solved = direct_coil_projected_mode_fixed_point_objective_jax(
+        coil_params,
+        jnp.asarray([0.0, 0.0], dtype=float),
+        boundary_from_state=boundary_from_state,
+        update_from_response=update_from_response,
+        mode_matrix=jnp.asarray([[3.2, 0.12, -0.06], [0.16, 2.7, 0.21], [-0.09, 0.24, 2.9]]),
+        sin_basis=sin_basis,
+        xmpot=jnp.asarray([0, 1, 1]),
+        n_raw=jnp.asarray([0, 0, 1]),
+        imirr=jnp.asarray([1, 0, 3, 2]),
+        nuv3=4,
+        nuv_full=4,
+        max_iter=10,
+        state_weights=1.0,
+        mode_weights=0.01,
+    )
+
+    assert {"state", "mode", "fixed_point_residual"}.issubset(solved["objective_components"])
+    np.testing.assert_allclose(solved["fixed_point_residual"], np.zeros(2), atol=1.0e-11)
+    assert float(solved["objective"]) >= float(solved["objective_components"]["state"])
 
 
 def _boundary_projection_inputs():

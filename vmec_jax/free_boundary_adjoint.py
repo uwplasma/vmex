@@ -1281,3 +1281,92 @@ def direct_coil_projected_mode_fixed_point_jax(
         "vac": vac,
         "response": response,
     }
+
+
+def direct_coil_projected_mode_fixed_point_objective_jax(
+    params: Any,
+    initial_state: Any,
+    *,
+    boundary_from_state: Any,
+    update_from_response: Any,
+    mode_matrix: Any,
+    sin_basis: Any,
+    xmpot: Any,
+    n_raw: Any,
+    imirr: Any | None = None,
+    imirr_full: Any | None = None,
+    cos_basis: Any | None = None,
+    onp: float = 1.0,
+    lasym: bool = False,
+    nuv3: int | None = None,
+    nuv_full: int | None = None,
+    max_iter: int = 10,
+    damping: float = 1.0,
+    symmetric: bool = False,
+    state_weights: Any = 1.0,
+    update_weights: Any = 0.0,
+    mode_weights: Any = 0.0,
+    rhs_mode_weights: Any = 0.0,
+    bnormal_weight: float = 0.0,
+    fixed_point_residual_weight: float = 1.0,
+) -> dict[str, Any]:
+    """Return a scalar objective for the projected-mode fixed-point helper.
+
+    This wraps :func:`direct_coil_projected_mode_fixed_point_jax` with the
+    quadratic objective shape used by the phase-2 AD-vs-FD gates.  It is useful
+    for optimizer-facing validation because it exposes the differentiable
+    contract as a scalar objective while still returning the solved state and
+    component values for diagnostics.
+
+    The default objective is a weighted half-norm of the solved fixed-point
+    state plus a small residual guard.  Additional weights can include the
+    fixed-point update, vacuum mode coefficients, mode RHS, and boundary normal
+    field.  All weights may be scalars or arrays broadcastable to the
+    corresponding component.
+    """
+
+    solved = direct_coil_projected_mode_fixed_point_jax(
+        params,
+        initial_state,
+        boundary_from_state=boundary_from_state,
+        update_from_response=update_from_response,
+        mode_matrix=mode_matrix,
+        sin_basis=sin_basis,
+        xmpot=xmpot,
+        n_raw=n_raw,
+        imirr=imirr,
+        imirr_full=imirr_full,
+        cos_basis=cos_basis,
+        onp=onp,
+        lasym=lasym,
+        nuv3=nuv3,
+        nuv_full=nuv_full,
+        max_iter=max_iter,
+        damping=damping,
+        symmetric=symmetric,
+    )
+    components = {
+        "state": _weighted_half_norm(solved["state"], state_weights),
+        "update": _weighted_half_norm(solved["update"], update_weights),
+        "mode": _weighted_half_norm(solved["response"]["mode_coeffs"], mode_weights),
+        "rhs_mode": _weighted_half_norm(solved["response"]["rhs_mode"], rhs_mode_weights),
+        "bnormal": _weighted_half_norm(solved["vac"]["bnormal"], bnormal_weight),
+        "fixed_point_residual": _weighted_half_norm(
+            solved["fixed_point_residual"],
+            fixed_point_residual_weight,
+        ),
+    }
+    objective = sum(components.values())
+    return {
+        **solved,
+        "objective": objective,
+        "objective_components": components,
+    }
+
+
+def _weighted_half_norm(value: Any, weight: Any) -> Any:
+    """Return ``0.5 * sum(weight * value**2)`` with scalar/array weights."""
+
+    arr = jnp.asarray(value)
+    w = jnp.asarray(weight, dtype=arr.dtype)
+    return 0.5 * jnp.sum(w * arr * arr)

@@ -79,11 +79,14 @@ The validation ladder is:
    ``direct_coil_projected_mode_fixed_point_jax`` helper implements the
    moving-boundary validation loop: the current state changes where the coil
    field is sampled, the field is projected through the JAX boundary projection
-   and mode-space vacuum response, and the response updates the next state.
-   This validates the mathematical reverse pass needed by the production
-   free-boundary fixed-point wrapper: solve ``F_x^T lambda = dJ/dx`` at the
-   accepted root and apply ``-F_p^T lambda`` to coil/current parameters. This is
-   still a dense validation primitive, not the production VMEC nonlinear loop.
+   and mode-space vacuum response, and the response updates the next state. The
+   companion ``direct_coil_projected_mode_fixed_point_objective_jax`` helper
+   wraps the solved state in a scalar quadratic objective with component
+   diagnostics for optimizer-facing AD-vs-FD tests. This validates the
+   mathematical reverse pass needed by the production free-boundary fixed-point
+   wrapper: solve ``F_x^T lambda = dJ/dx`` at the accepted root and apply
+   ``-F_p^T lambda`` to coil/current parameters. This is still a dense
+   validation primitive, not the production VMEC nonlinear loop.
 7. Full direct-coil free-boundary solve: a low-resolution scalar objective,
    first with one coil current and then with one Fourier coefficient, bounded
    against finite differences of complete solves.
