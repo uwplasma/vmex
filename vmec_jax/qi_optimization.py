@@ -230,6 +230,19 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
     parser.add_argument("--target-abs-iota-min", type=float)
     parser.add_argument("--max-mirror-ratio", type=float)
     parser.add_argument("--max-elongation", type=float)
+    parser.add_argument("--mirror-surface-index")
+    parser.add_argument("--mirror-weight", type=float)
+    parser.add_argument("--elongation-weight", type=float)
+    parser.add_argument("--qi-gate-smooth-max", type=float)
+    parser.add_argument("--qi-gate-legacy-max", type=float)
+    parser.add_argument("--qi-ceiling-max", type=float)
+    parser.add_argument("--qi-ceiling-smooth-penalty", type=float)
+    parser.add_argument("--audit-qi-mboz", type=int)
+    parser.add_argument("--audit-qi-nboz", type=int)
+    parser.add_argument("--audit-qi-nphi", type=int)
+    parser.add_argument("--audit-qi-nalpha", type=int)
+    parser.add_argument("--audit-qi-n-bounce", type=int)
+    parser.add_argument("--boundary-reference-json", type=Path)
     parser.add_argument("--mirror-ramp-stages-json", type=Path)
     args, _unknown = parser.parse_known_args(argv)
 
@@ -291,6 +304,44 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
     set_if("TARGET_ABS_IOTA_MIN", None if args.target_abs_iota_min is None else float(args.target_abs_iota_min))
     set_if("MAX_MIRROR_RATIO", None if args.max_mirror_ratio is None else float(args.max_mirror_ratio))
     set_if("MAX_ELONGATION", None if args.max_elongation is None else float(args.max_elongation))
+    if args.mirror_surface_index is not None:
+        text = str(args.mirror_surface_index).strip().lower()
+        namespace["MIRROR_SURFACE_INDEX"] = None if text in {"", "none", "null"} else int(text)
+    set_if("MIRROR_WEIGHT", None if args.mirror_weight is None else float(args.mirror_weight))
+    set_if("ELONGATION_WEIGHT", None if args.elongation_weight is None else float(args.elongation_weight))
+    set_if("QI_GATE_SMOOTH_MAX", None if args.qi_gate_smooth_max is None else float(args.qi_gate_smooth_max))
+    set_if("QI_GATE_LEGACY_MAX", None if args.qi_gate_legacy_max is None else float(args.qi_gate_legacy_max))
+    set_if("QI_CEILING_MAX", None if args.qi_ceiling_max is None else float(args.qi_ceiling_max))
+    set_if(
+        "QI_CEILING_SMOOTH_PENALTY",
+        None if args.qi_ceiling_smooth_penalty is None else float(args.qi_ceiling_smooth_penalty),
+    )
+    audit_resolution_updates = {
+        "mboz": args.audit_qi_mboz,
+        "nboz": args.audit_qi_nboz,
+        "nphi": args.audit_qi_nphi,
+        "nalpha": args.audit_qi_nalpha,
+        "n_bounce": args.audit_qi_n_bounce,
+    }
+    if any(value is not None for value in audit_resolution_updates.values()):
+        audit_resolution = dict(namespace.get("AUDIT_QI_RESOLUTION", namespace.get("OPT_QI_RESOLUTION", {})))
+        for key, value in audit_resolution_updates.items():
+            if value is not None:
+                audit_resolution[key] = int(value)
+        namespace["AUDIT_QI_RESOLUTION"] = audit_resolution
+    if args.boundary_reference_json is not None:
+        reference_path = args.boundary_reference_json.expanduser()
+        try:
+            reference_overrides = json.loads(reference_path.read_text())
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid --boundary-reference-json file: {reference_path}") from exc
+        if not isinstance(reference_overrides, dict):
+            raise ValueError("--boundary-reference-json must contain a JSON object.")
+        if reference_overrides.get("reference_input") is not None:
+            reference_overrides["reference_input"] = Path(reference_overrides["reference_input"]).expanduser()
+        if reference_overrides.get("lambdas") is not None:
+            reference_overrides["lambdas"] = tuple(float(value) for value in reference_overrides["lambdas"])
+        namespace["BOUNDARY_REFERENCE_OVERRIDES"] = reference_overrides
     if args.mirror_ramp_stages_json is not None:
         stages_path = args.mirror_ramp_stages_json.expanduser()
         try:

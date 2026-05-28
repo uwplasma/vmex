@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -78,7 +79,11 @@ def test_qi_staged_runner_builds_external_input_cli_and_environment(tmp_path: Pa
     assert "--target-aspect" in args and "5.0" in args
     assert "--target-abs-iota-min" in args and "0.41" in args
     assert "--max-mirror-ratio" in args and "0.3" in args
-    assert "--max-elongation" in args and "10.0" in args
+    assert "--max-elongation" in args and "8.2" in args
+    assert "--qi-ceiling-max" in args and "0.02" in args
+    assert "--qi-ceiling-smooth-penalty" in args and "0.002" in args
+    assert "--mirror-weight" in args and "20.0" in args
+    assert "--elongation-weight" in args and "10.0" in args
     assert "--qi-mboz" in args and "10" in args
     assert "--qi-nboz" in args and "11" in args
     assert "--qi-nphi" in args and "61" in args
@@ -93,8 +98,41 @@ def test_qi_staged_runner_builds_external_input_cli_and_environment(tmp_path: Pa
     assert stages_path == tmp_path / "out" / "mirror_ramp_stages.json"
     assert '"name": "cleanup"' in stages_path.read_text()
     lambdas = tuple(float(value) for value in args[args.index("--reference-lambdas") + 1].split(","))
-    assert lambdas[:4] == pytest.approx((0.0, 0.1, 0.25, 0.5))
-    assert lambdas[-1] == pytest.approx(1.005)
+    assert lambdas == pytest.approx((0.99, 0.995, 1.0, 1.005, 1.01))
+    reference_path = Path(args[args.index("--boundary-reference-json") + 1])
+    reference = json.loads(reference_path.read_text())
+    assert reference["reference_input"].endswith("input.nfp2_QI")
+    assert reference["max_mode"] == 3
+    assert reference["lambdas"] == pytest.approx([0.99, 0.995, 1.0, 1.005, 1.01])
+    assert reference["accept_as_baseline"] is True
+
+
+def test_qi_staged_runner_passes_policy_qi_gates_and_audit_resolution(tmp_path: Path) -> None:
+    runner = _load_runner()
+    config = runner.QIStagedCaseConfig(
+        name="qi_nfp3",
+        input_file=ROOT / "examples" / "data" / "input.minimal_seed_nfp3",
+        output_dir=tmp_path / "out",
+        max_mode=4,
+        policy_case="minimal_nfp3_qi",
+        reference_input=ROOT / "examples" / "data" / "input.nfp3_QI_fixed_resolution_final",
+        max_mirror_ratio=0.30,
+        max_elongation=10.0,
+        make_plots=False,
+    )
+
+    args = runner._build_qi_staged_args(config)
+
+    assert args[args.index("--max-mirror-ratio") + 1] == "0.35"
+    assert args[args.index("--max-elongation") + 1] == "8.2"
+    assert args[args.index("--qi-gate-smooth-max") + 1] == "0.005"
+    assert args[args.index("--qi-gate-legacy-max") + 1] == "0.002"
+    assert args[args.index("--qi-mboz") + 1] == "5"
+    assert args[args.index("--qi-nphi") + 1] == "31"
+    assert args[args.index("--audit-qi-mboz") + 1] == "18"
+    assert args[args.index("--audit-qi-nphi") + 1] == "151"
+    lambdas = tuple(float(value) for value in args[args.index("--reference-lambdas") + 1].split(","))
+    assert lambdas == pytest.approx((0.99, 0.995, 1.0, 1.005, 1.008, 1.01))
 
 
 def test_qi_staged_runner_can_disable_reference_lambda_override(tmp_path: Path) -> None:
@@ -112,6 +150,8 @@ def test_qi_staged_runner_can_disable_reference_lambda_override(tmp_path: Path) 
     args = runner._build_qi_staged_args(config)
 
     assert "--reference-lambdas" not in args
+    reference_path = Path(args[args.index("--boundary-reference-json") + 1])
+    assert "lambdas" not in json.loads(reference_path.read_text())
 
 
 def test_qi_staged_runner_converts_artifacts_to_case_result(tmp_path: Path, monkeypatch) -> None:

@@ -69,6 +69,16 @@ def test_qi_example_cli_overrides_update_namespace_and_stage_modes(tmp_path: Pat
         return ("stage", kwargs["max_mode"], kwargs["repeats"], kwargs["policy"])
 
     monkeypatch.setattr(qio, "qi_stage_modes", fake_qi_stage_modes)
+    reference_json = tmp_path / "reference.json"
+    reference_json.write_text(
+        json.dumps(
+            {
+                "enabled": True,
+                "reference_input": str(tmp_path / "input.reference"),
+                "lambdas": [0.99, 1.0],
+            }
+        )
+    )
 
     args = qio.apply_qi_example_cli_overrides(
         namespace,
@@ -129,6 +139,26 @@ def test_qi_example_cli_overrides_update_namespace_and_stage_modes(tmp_path: Pat
             "0.25",
             "--max-elongation",
             "9",
+            "--mirror-surface-index",
+            "none",
+            "--mirror-weight",
+            "12",
+            "--elongation-weight",
+            "3",
+            "--qi-gate-smooth-max",
+            "3e-3",
+            "--qi-gate-legacy-max",
+            "2e-3",
+            "--qi-ceiling-max",
+            "2e-2",
+            "--qi-ceiling-smooth-penalty",
+            "5e-4",
+            "--audit-qi-mboz",
+            "18",
+            "--audit-qi-nphi",
+            "151",
+            "--boundary-reference-json",
+            str(reference_json),
         ],
     )
 
@@ -156,11 +186,20 @@ def test_qi_example_cli_overrides_update_namespace_and_stage_modes(tmp_path: Pat
     assert namespace["MAKE_PLOTS"] is True
     assert namespace["JIT_BOOZ"] is True
     assert namespace["OPT_QI_RESOLUTION"] == {"mboz": 10, "nboz": 11, "nphi": 61, "nalpha": 13, "n_bounce": 17}
-    assert namespace["AUDIT_QI_RESOLUTION"] == {"mboz": 10, "nboz": 11, "nphi": 61, "nalpha": 13, "n_bounce": 17}
     assert namespace["TARGET_ASPECT"] == pytest.approx(5.0)
     assert namespace["TARGET_ABS_IOTA_MIN"] == pytest.approx(0.45)
     assert namespace["MAX_MIRROR_RATIO"] == pytest.approx(0.25)
     assert namespace["MAX_ELONGATION"] == pytest.approx(9.0)
+    assert namespace["MIRROR_SURFACE_INDEX"] is None
+    assert namespace["MIRROR_WEIGHT"] == pytest.approx(12.0)
+    assert namespace["ELONGATION_WEIGHT"] == pytest.approx(3.0)
+    assert namespace["QI_GATE_SMOOTH_MAX"] == pytest.approx(3.0e-3)
+    assert namespace["QI_GATE_LEGACY_MAX"] == pytest.approx(2.0e-3)
+    assert namespace["QI_CEILING_MAX"] == pytest.approx(2.0e-2)
+    assert namespace["QI_CEILING_SMOOTH_PENALTY"] == pytest.approx(5.0e-4)
+    assert namespace["AUDIT_QI_RESOLUTION"] == {"mboz": 18, "nboz": 11, "nphi": 151, "nalpha": 13, "n_bounce": 17}
+    assert namespace["BOUNDARY_REFERENCE_OVERRIDES"]["reference_input"] == tmp_path / "input.reference"
+    assert namespace["BOUNDARY_REFERENCE_OVERRIDES"]["lambdas"] == (0.99, 1.0)
     assert namespace["STAGE_MODES"] == ("stage", 5, 4, "repeat")
     assert captured == {
         "max_mode": 5,

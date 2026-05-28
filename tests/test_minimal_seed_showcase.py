@@ -225,6 +225,37 @@ def test_renderer_uses_boundary_reference_wout_from_pending_checkpoint(tmp_path:
     assert renderer._final_wout_for_record(record) == reference_wout
 
 
+def test_renderer_records_existing_wout_initial_when_original_is_absent(tmp_path: Path) -> None:
+    renderer = _load_module("render_minimal_seed_showcase_initial_wout", "render_minimal_seed_showcase.py")
+    output_dir = tmp_path / "case"
+    output_dir.mkdir()
+    initial_wout = output_dir / "wout_initial.nc"
+    final_wout = output_dir / "wout_final.nc"
+    initial_wout.write_text("initial\n")
+    final_wout.write_text("final\n")
+    record = renderer.ShowcaseRecord(
+        case_name="qi_nfp1",
+        nfp=1,
+        problem="qi",
+        output_dir=output_dir,
+        success=True,
+        crashed=False,
+        message=None,
+        objective_final=1.0,
+        aspect_final=5.0,
+        iota_final=0.4,
+        total_wall_time_s=1.0,
+        policy="direct",
+        max_mode=5,
+        use_ess=True,
+    )
+
+    provenance = renderer.provenance_for_record(record)
+
+    assert provenance.initial_wout == initial_wout
+    assert provenance.final_wout == final_wout
+
+
 def test_renderer_case_filter_and_skip_missing_cli(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
     renderer = _load_module("render_minimal_seed_showcase_case_filter", "render_minimal_seed_showcase.py")
     output_root = tmp_path / "results"
