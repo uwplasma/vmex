@@ -1670,6 +1670,9 @@ def test_state_objective_wrappers_use_monkeypatched_state_helpers(monkeypatch) -
         assert kwargs["state"] == "state"
         return {
             "DMerc": np.asarray([0.0, -0.1, 0.2]),
+            "D_R": np.asarray([0.0, 0.05, -0.02]),
+            "H": np.asarray([0.0, 0.01, 0.02]),
+            "shear": np.asarray([0.0, 0.4, 0.5]),
             "jdotb": np.asarray([1.0, 2.0, 3.0]),
             "bdotb": np.asarray([4.0, 5.0, 6.0]),
             "bdotgradv": np.asarray([7.0, 8.0, 9.0]),
@@ -1686,6 +1689,11 @@ def test_state_objective_wrappers_use_monkeypatched_state_helpers(monkeypatch) -
     assert np.asarray(dmerc.J(ctx, "state")).shape == (1,)
     with pytest.raises(ValueError, match="target=0"):
         dmerc.to_objective_term(target=1.0, residual_weight=1.0)
+
+    glasser = workflow.GlasserResistiveInterchange(maximum=0.0, softness=0.01, mmax_force=2, nmax_force=3)
+    assert np.asarray(glasser.J(ctx, "state")).shape == (1,)
+    with pytest.raises(ValueError, match="target=0"):
+        glasser.to_objective_term(target=1.0, residual_weight=1.0)
 
     np.testing.assert_allclose(np.asarray(workflow.JDotB(normalize=2.0).J(ctx, "state")), [1.0])
     np.testing.assert_allclose(

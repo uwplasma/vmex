@@ -56,6 +56,7 @@ from .quasi_isodynamic import (
     quasi_isodynamic_residual_from_state,
 )
 from .quasisymmetry import quasisymmetry_ratio_residual_from_state
+from .mercier import glasser_resistive_interchange_from_mercier_terms
 from .static import build_static
 from .wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
 
@@ -1478,6 +1479,68 @@ class DMerc:
     def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
         if not _target_is_zero(target):
             raise ValueError("DMerc is a lower-bound penalty and requires target=0.")
+        return ObjectiveTerm(self.name, self.J, target=0.0, weight=residual_weight)
+
+
+class GlasserResistiveInterchange:
+    """Smooth upper-bound objective for the Glasser resistive criterion.
+
+    The Glasser-Greene-Johnson necessary condition for resistive interchange
+    stability is ``D_R <= 0``.  This objective returns one smooth penalty per
+    interior radial surface for ``D_R > maximum``.  The optional
+    ``shear_epsilon`` regularizes the ``1 / shear**2`` factor for optimization;
+    keep it small and inspect ``glasser_shear_valid`` diagnostics for
+    near-zero-shear surfaces.
+    """
+
+    name = "D_R"
+
+    def __init__(
+        self,
+        *,
+        maximum: float = 0.0,
+        softness: float = 1.0e-3,
+        shear_epsilon: float = 0.0,
+        mmax_force: int | None = None,
+        nmax_force: int | None = None,
+    ):
+        self.maximum = float(maximum)
+        self.softness = float(softness)
+        self.shear_epsilon = float(shear_epsilon)
+        self.mmax_force = None if mmax_force is None else int(mmax_force)
+        self.nmax_force = None if nmax_force is None else int(nmax_force)
+
+    def terms(self, ctx: StageContext, state):
+        terms = mercier_terms_from_state(
+            state=state,
+            static=ctx.static,
+            indata=ctx.indata,
+            signgs=ctx.signgs,
+            mmax_force=self.mmax_force,
+            nmax_force=self.nmax_force,
+        )
+        if self.shear_epsilon == 0.0:
+            return terms
+        return {
+            **terms,
+            **glasser_resistive_interchange_from_mercier_terms(
+                DMerc=terms["DMerc"],
+                shear=terms["shear"],
+                H=terms["H"],
+                shear_epsilon=self.shear_epsilon,
+            ),
+        }
+
+    def J(self, ctx: StageContext, state):
+        d_r = jnp.asarray(self.terms(ctx, state)["D_R"], dtype=jnp.float64)
+        active = d_r[1:-1] if int(d_r.shape[0]) > 2 else jnp.zeros((0,), dtype=d_r.dtype)
+        excess = active - float(self.maximum)
+        softness = jnp.asarray(float(self.softness), dtype=jnp.float64)
+        return softness * jnp.logaddexp(jnp.asarray(0.0, dtype=jnp.float64), excess / softness)
+
+    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        if not _target_is_zero(target):
+            raise ValueError("GlasserResistiveInterchange is an upper-bound penalty and requires target=0.")
         return ObjectiveTerm(self.name, self.J, target=0.0, weight=residual_weight)
 
 
@@ -3820,6 +3883,7 @@ __all__ = [
     "FixedBoundaryVMEC",
     "FixedBoundaryObjectiveStage",
     "FixedBoundaryOptimizationResult",
+    "GlasserResistiveInterchange",
     "JDotB",
     "JVector",
     "LeastSquaresProblem",

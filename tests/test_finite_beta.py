@@ -58,10 +58,11 @@ def test_mercier_terms_are_finite_on_bundled_qi_input():
         signgs=signgs,
     )
 
-    for key in ("DMerc", "Dshear", "Dcurr", "Dwell", "Dgeod", "torcur", "vp"):
+    for key in ("DMerc", "Dshear", "Dcurr", "Dwell", "Dgeod", "D_R", "H", "glasser_correction", "torcur", "vp"):
         arr = np.asarray(terms[key])
         assert arr.shape == np.asarray(static.s).shape
         assert np.all(np.isfinite(arr))
+    assert np.asarray(terms["glasser_shear_valid"]).shape == np.asarray(static.s).shape
 
 
 def test_mercier_terms_from_state_matches_wout_mercier_path_on_bundled_qi_input():

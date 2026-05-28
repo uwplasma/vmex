@@ -43,6 +43,7 @@ from .finite_beta import (
     finite_beta_scalars_from_state,
     magnetic_well_from_state,
 )
+from .mercier import glasser_resistive_interchange_from_mercier_terms
 from .optimization_workflow import (
     AbsMeanIotaFloor,
     AbsMeanIotaCeiling,
@@ -57,6 +58,7 @@ from .optimization_workflow import (
     DMerc,
     FixedBoundaryOptimizationResult,
     FixedBoundaryVMEC,
+    GlasserResistiveInterchange,
     JDotB,
     JVector,
     LeastSquaresProblem,
@@ -242,9 +244,11 @@ __all__ = [
     "ToroidalCurrent",
     "ToroidalCurrentGradient",
     "RedlBootstrapMismatch",
+    "GlasserResistiveInterchange",
     "FiniteBetaTargets",
     "finite_beta_global_residuals_from_state",
     "finite_beta_scalars_from_state",
+    "glasser_resistive_interchange_from_mercier_terms",
     "least_squares_solve",
     "optimization_output_paths",
     "prepare_simple_omnigenity_seed_input",

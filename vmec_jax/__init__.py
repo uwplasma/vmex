@@ -140,6 +140,7 @@ from .finite_beta import (
     redl_bootstrap_mismatch_from_state,
     trapped_fraction_from_modb_sqrtg,
 )
+from .mercier import glasser_resistive_interchange_from_mercier_terms
 from .integrals import dvds_from_sqrtg, cumtrapz_s, volume_from_sqrtg
 from .field import (
     b_cartesian_from_state,
@@ -265,6 +266,7 @@ _LAZY_ATTRS = {
     "DMerc": ".optimization_workflow",
     "FixedBoundaryOptimizationResult": ".optimization_workflow",
     "FixedBoundaryVMEC": ".optimization_workflow",
+    "GlasserResistiveInterchange": ".optimization_workflow",
     "JDotB": ".optimization_workflow",
     "JVector": ".optimization_workflow",
     "LeastSquaresProblem": ".optimization_workflow",
@@ -535,6 +537,7 @@ __all__ = [
     "DMerc",
     "FixedBoundaryOptimizationResult",
     "FixedBoundaryVMEC",
+    "GlasserResistiveInterchange",
     "JDotB",
     "JVector",
     "LeastSquaresProblem",
@@ -593,6 +596,7 @@ __all__ = [
     "FiniteBetaTargets",
     "finite_beta_global_residuals_from_state",
     "finite_beta_scalars_from_state",
+    "glasser_resistive_interchange_from_mercier_terms",
     "jxbforce_profiles_from_realspace",
     "magnetic_well_from_state",
     "magnetic_well_from_vp",
