@@ -1604,6 +1604,90 @@ def test_projected_mode_fixed_point_objective_exposes_components():
     assert float(solved["objective"]) >= float(solved["objective_components"]["state"])
 
 
+def test_projected_mode_fixed_point_objective_value_and_grad_wrt_coil_pytree():
+    """Validate the optimizer-facing scalar objective has coil pytree gradients."""
+
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jax, jnp
+
+    enable_x64(True)
+    radius = 1.34
+    dofs = jnp.zeros((1, 3, 3), dtype=float)
+    dofs = dofs.at[0, 0, 2].set(radius)
+    dofs = dofs.at[0, 1, 1].set(radius)
+    coil_params = CoilFieldParams(
+        base_curve_dofs=dofs,
+        base_currents=jnp.asarray([5.5e6], dtype=float),
+        n_segments=32,
+        regularization_epsilon=1.0e-9,
+    )
+    phi = jnp.asarray([[0.05, 0.45], [0.85, 1.25]], dtype=float)
+    sin_basis = jnp.asarray(
+        [
+            [0.0, 0.2, -0.3],
+            [0.4, -0.1, 0.5],
+            [-0.2, 0.6, 0.1],
+            [0.7, 0.3, -0.4],
+        ],
+        dtype=float,
+    )
+    mode_matrix = jnp.asarray(
+        [[3.2, 0.12, -0.06], [0.16, 2.7, 0.21], [-0.09, 0.24, 2.9]],
+        dtype=float,
+    )
+    mode_to_state = jnp.asarray([[0.08, -0.04, 0.02], [-0.03, 0.06, 0.05]], dtype=float)
+
+    def boundary_from_state(state):
+        shape = jnp.asarray([[0.25, -0.15], [0.35, -0.20]], dtype=float)
+        return {
+            "R": jnp.asarray([[0.74, 0.83], [0.89, 0.78]], dtype=float)
+            + 0.02 * state[0]
+            + 0.01 * state[1] * shape,
+            "Z": jnp.asarray([[0.10, -0.13], [0.18, -0.16]], dtype=float)
+            + 0.025 * state[1],
+            "phi": phi,
+            "Ru": jnp.asarray([[0.03, -0.04], [0.02, 0.05]], dtype=float),
+            "Zu": jnp.asarray([[0.20, 0.22], [0.19, 0.21]], dtype=float),
+            "Rv": jnp.asarray([[0.04, 0.01], [-0.03, 0.05]], dtype=float),
+            "Zv": jnp.asarray([[0.02, -0.03], [0.06, -0.01]], dtype=float),
+        }
+
+    def update_from_response(_state, response, _vac, _boundary, _params):
+        return jnp.asarray([0.01, -0.015], dtype=float) + 0.12 * jnp.tanh(
+            mode_to_state @ jnp.asarray(response["mode_coeffs"])
+        )
+
+    def objective(params):
+        solved = direct_coil_projected_mode_fixed_point_objective_jax(
+            params,
+            jnp.asarray([0.0, 0.0], dtype=float),
+            boundary_from_state=boundary_from_state,
+            update_from_response=update_from_response,
+            mode_matrix=mode_matrix,
+            sin_basis=sin_basis,
+            xmpot=jnp.asarray([0, 1, 1]),
+            n_raw=jnp.asarray([0, 0, 1]),
+            imirr=jnp.asarray([1, 0, 3, 2]),
+            nuv3=4,
+            nuv_full=4,
+            max_iter=10,
+            state_weights=jnp.asarray([1.0, 0.7], dtype=float),
+            mode_weights=0.02,
+            rhs_mode_weights=0.01,
+            bnormal_weight=0.005,
+            fixed_point_residual_weight=10.0,
+        )
+        return solved["objective"]
+
+    value, grad_params = jax.value_and_grad(objective)(coil_params)
+
+    assert np.isfinite(float(value))
+    assert np.all(np.isfinite(np.asarray(grad_params.base_currents)))
+    assert np.all(np.isfinite(np.asarray(grad_params.base_curve_dofs)))
+    assert float(jnp.linalg.norm(grad_params.base_currents)) > 1.0e-18
+    assert float(jnp.linalg.norm(grad_params.base_curve_dofs)) > 1.0e-10
+
+
 def _boundary_projection_inputs():
     from vmec_jax._compat import jnp
 
