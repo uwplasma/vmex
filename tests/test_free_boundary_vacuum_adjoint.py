@@ -18,6 +18,7 @@ from vmec_jax.free_boundary import (
     vacuum_boundary_fields_from_cylindrical,
 )
 from vmec_jax.free_boundary_adjoint import (
+    dense_fixed_point_solve_jax,
     dense_mode_vacuum_solve_jax,
     dense_nonlinear_solve_jax,
     dense_vmec_nestor_mode_solve_jax,
@@ -193,6 +194,40 @@ def test_dense_nonlinear_implicit_adjoint_matches_finite_difference_for_rhs():
     fd = (objective(eps) - objective(-eps)) / (2.0 * eps)
 
     np.testing.assert_allclose(exact, fd, rtol=3.0e-8, atol=1.0e-10)
+
+
+def test_dense_fixed_point_implicit_adjoint_matches_finite_difference_for_rhs():
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jax, jnp
+
+    enable_x64(True)
+    rhs0 = jnp.asarray([0.25, -0.18], dtype=float)
+    direction = jnp.asarray([0.2, -0.4], dtype=float)
+    weights = jnp.asarray([0.8, 1.1], dtype=float)
+
+    def update(state, params):
+        rhs = params["rhs"]
+        return jnp.asarray(
+            [
+                0.12 + 0.18 * jnp.tanh(state[0]) + 0.07 * state[1] + rhs[0],
+                -0.09 + 0.05 * state[0] ** 2 + 0.16 * jnp.sin(state[1]) + rhs[1],
+            ]
+        )
+
+    def objective(scale):
+        root = dense_fixed_point_solve_jax(
+            update,
+            jnp.asarray([0.0, 0.0], dtype=float),
+            {"rhs": rhs0 + scale * direction},
+            max_iter=12,
+        )
+        return 0.5 * jnp.vdot(weights * root, root)
+
+    exact = jax.grad(objective)(0.0)
+    eps = 1.0e-6
+    fd = (objective(eps) - objective(-eps)) / (2.0 * eps)
+
+    np.testing.assert_allclose(exact, fd, rtol=5.0e-8, atol=1.0e-10)
 
 
 def _mode_basis_for_rhs_tests(*, lasym: bool = False):
@@ -1193,6 +1228,167 @@ def _toy_coil_nonlinear_response(*, current_scale: float = 0.0, radius_shift: fl
     return 0.5 * jnp.vdot(weights * root, root) + 0.02 * jnp.vdot(rhs, rhs)
 
 
+def _toy_coil_free_boundary_fixed_point_response(
+    *,
+    current_scale: float = 0.0,
+    radius_shift: float = 0.0,
+):
+    """Direct coils -> state-dependent boundary -> vacuum response fixed point."""
+
+    from vmec_jax._compat import jnp
+
+    radius = 1.28 + 0.02 * radius_shift
+    dofs = jnp.zeros((1, 3, 3), dtype=float)
+    dofs = dofs.at[0, 0, 2].set(radius)
+    dofs = dofs.at[0, 1, 1].set(radius)
+    coil_params = CoilFieldParams(
+        base_curve_dofs=dofs,
+        base_currents=jnp.asarray([4.5e6 * (1.0 + 0.015 * current_scale)], dtype=float),
+        n_segments=64,
+        regularization_epsilon=1.0e-9,
+    )
+    theta_shape = (2, 2)
+    phi = jnp.asarray([[0.0, 0.4], [0.8, 1.2]], dtype=float)
+    Ru = jnp.asarray([[0.02, -0.03], [0.04, -0.02]], dtype=float)
+    Zu = jnp.asarray([[0.19, 0.21], [0.18, 0.20]], dtype=float)
+    Rv = jnp.asarray([[0.03, 0.01], [-0.02, 0.04]], dtype=float)
+    Zv = jnp.asarray([[0.02, -0.01], [0.03, -0.02]], dtype=float)
+    weights = jnp.asarray([[0.4, -0.2], [0.6, -0.3]], dtype=float)
+    A = jnp.asarray([[2.6, 0.18], [-0.12, 2.4]], dtype=float)
+
+    def update(state, params):
+        R = jnp.asarray([[0.72, 0.81], [0.86, 0.76]], dtype=float) + 0.04 * state[0]
+        Z = jnp.asarray([[0.11, -0.12], [0.17, -0.15]], dtype=float) + 0.03 * state[1]
+        br, bphi, bz = sample_coil_field_cylindrical(params["coil"], R, Z, phi)
+        vac = vacuum_boundary_fields_from_cylindrical_jax(
+            br=br,
+            bp=bphi,
+            bz=bz,
+            R=R,
+            Ru=Ru,
+            Zu=Zu,
+            Rv=Rv,
+            Zv=Zv,
+        )
+        rhs = 0.03 * jnp.asarray(
+            [
+                jnp.mean(vac["bnormal_unit"] * weights),
+                jnp.mean((vac["bsqvac"] - jnp.mean(vac["bsqvac"])) * weights),
+            ]
+        )
+        response = dense_vacuum_solve_jax(A, rhs)
+        update_state = jnp.asarray([0.03, -0.02], dtype=float) + 0.45 * jnp.tanh(response)
+        if update_state.shape != (2,):  # pragma: no cover - defensive shape guard.
+            raise AssertionError(f"unexpected update shape {update_state.shape} for boundary grid {theta_shape}")
+        return update_state
+
+    root = dense_fixed_point_solve_jax(
+        update,
+        jnp.asarray([0.0, 0.0], dtype=float),
+        {"coil": coil_params},
+        max_iter=12,
+    )
+    final = update(root, {"coil": coil_params})
+    return 0.5 * jnp.vdot(jnp.asarray([1.1, 0.9], dtype=float) * root, root) + 0.1 * jnp.vdot(final, final)
+
+
+def _toy_coil_projected_mode_fixed_point_response(
+    *,
+    current_scale: float = 0.0,
+    radius_shift: float = 0.0,
+):
+    """Direct coils -> moving boundary -> mode vacuum response -> fixed point."""
+
+    from vmec_jax._compat import jnp
+
+    radius = 1.34 + 0.025 * radius_shift
+    dofs = jnp.zeros((1, 3, 3), dtype=float)
+    dofs = dofs.at[0, 0, 2].set(radius)
+    dofs = dofs.at[0, 1, 1].set(radius)
+    coil_params = CoilFieldParams(
+        base_curve_dofs=dofs,
+        base_currents=jnp.asarray([5.5e6 * (1.0 + 0.012 * current_scale)], dtype=float),
+        n_segments=64,
+        regularization_epsilon=1.0e-9,
+    )
+    phi = jnp.asarray([[0.05, 0.45], [0.85, 1.25]], dtype=float)
+    Ru_base = jnp.asarray([[0.03, -0.04], [0.02, 0.05]], dtype=float)
+    Zu_base = jnp.asarray([[0.20, 0.22], [0.19, 0.21]], dtype=float)
+    Rv_base = jnp.asarray([[0.04, 0.01], [-0.03, 0.05]], dtype=float)
+    Zv_base = jnp.asarray([[0.02, -0.03], [0.06, -0.01]], dtype=float)
+    sin_basis = jnp.asarray(
+        [
+            [0.0, 0.2, -0.3],
+            [0.4, -0.1, 0.5],
+            [-0.2, 0.6, 0.1],
+            [0.7, 0.3, -0.4],
+        ],
+        dtype=float,
+    )
+    mode_matrix = jnp.asarray(
+        [
+            [3.2, 0.12, -0.06],
+            [0.16, 2.7, 0.21],
+            [-0.09, 0.24, 2.9],
+        ],
+        dtype=float,
+    )
+    mode_to_state = jnp.asarray(
+        [
+            [0.09, -0.04, 0.03],
+            [-0.02, 0.08, 0.05],
+            [0.04, 0.03, -0.07],
+        ],
+        dtype=float,
+    )
+
+    def update(state, params):
+        base_R = jnp.asarray([[0.74, 0.83], [0.89, 0.78]], dtype=float)
+        base_Z = jnp.asarray([[0.10, -0.13], [0.18, -0.16]], dtype=float)
+        shape = jnp.asarray([[0.25, -0.15], [0.35, -0.20]], dtype=float)
+        R = base_R + 0.035 * state[0] + 0.018 * state[2] * shape
+        Z = base_Z + 0.028 * state[1] - 0.012 * state[2] * shape
+        Ru = Ru_base + 0.01 * state[2]
+        Zu = Zu_base - 0.008 * state[2]
+        Rv = Rv_base
+        Zv = Zv_base
+        br, bphi, bz = sample_coil_field_cylindrical(params["coil"], R, Z, phi)
+        vac = vacuum_boundary_fields_from_cylindrical_jax(
+            br=br,
+            bp=bphi,
+            bz=bz,
+            R=R,
+            Ru=Ru,
+            Zu=Zu,
+            Rv=Rv,
+            Zv=Zv,
+        )
+        rhs_mode = mode_rhs_from_gsource_jax(
+            vac["bnormal"],
+            sin_basis=sin_basis,
+            xmpot=jnp.asarray([0, 1, 1]),
+            n_raw=jnp.asarray([0, 0, 1]),
+            onp=1.0,
+            lasym=False,
+            imirr=jnp.asarray([1, 0, 3, 2]),
+            nuv3=4,
+            nuv_full=4,
+        )
+        response = dense_mode_vacuum_solve_jax(mode_matrix, rhs_mode, sin_basis)
+        mode_coeffs = jnp.asarray(response["mode_coeffs"])
+        pressure_like = jnp.asarray([0.02, -0.015, 0.01], dtype=float)
+        return pressure_like + 0.22 * jnp.tanh(mode_to_state @ mode_coeffs)
+
+    root = dense_fixed_point_solve_jax(
+        update,
+        jnp.asarray([0.0, 0.0, 0.0], dtype=float),
+        {"coil": coil_params},
+        max_iter=14,
+    )
+    final = update(root, {"coil": coil_params})
+    return 0.5 * jnp.vdot(jnp.asarray([1.0, 0.8, 1.2], dtype=float) * root, root) + 0.08 * jnp.vdot(final, final)
+
+
 def test_dense_vacuum_adjoint_chain_wrt_coil_current_matches_finite_difference():
     """Validate a direct-coil field feeding an implicit vacuum solve."""
 
@@ -1267,6 +1463,82 @@ def test_dense_nonlinear_adjoint_chain_wrt_coil_geometry_matches_finite_differen
 
     assert abs(float(exact)) > 1.0e-8
     np.testing.assert_allclose(exact, fd, rtol=5.0e-6, atol=1.0e-10)
+
+
+def test_dense_fixed_point_direct_coil_loop_wrt_current_matches_finite_difference():
+    """Validate a miniature complete free-boundary fixed-point coil loop."""
+
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jax
+
+    enable_x64(True)
+
+    exact = jax.grad(lambda scale: _toy_coil_free_boundary_fixed_point_response(current_scale=scale))(0.0)
+    eps = 1.0e-4
+    fd = (
+        _toy_coil_free_boundary_fixed_point_response(current_scale=eps)
+        - _toy_coil_free_boundary_fixed_point_response(current_scale=-eps)
+    ) / (2.0 * eps)
+
+    assert abs(float(exact)) > 1.0e-9
+    np.testing.assert_allclose(exact, fd, rtol=8.0e-6, atol=1.0e-10)
+
+
+def test_dense_fixed_point_direct_coil_loop_wrt_geometry_matches_finite_difference():
+    """Validate the fixed-point loop for one coil Fourier geometry coefficient."""
+
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jax
+
+    enable_x64(True)
+
+    exact = jax.grad(lambda shift: _toy_coil_free_boundary_fixed_point_response(radius_shift=shift))(0.0)
+    eps = 1.0e-4
+    fd = (
+        _toy_coil_free_boundary_fixed_point_response(radius_shift=eps)
+        - _toy_coil_free_boundary_fixed_point_response(radius_shift=-eps)
+    ) / (2.0 * eps)
+
+    assert abs(float(exact)) > 1.0e-9
+    np.testing.assert_allclose(exact, fd, rtol=8.0e-6, atol=1.0e-10)
+
+
+def test_dense_fixed_point_projected_mode_loop_wrt_current_matches_finite_difference():
+    """Validate moving-boundary direct-coil fixed point through mode response."""
+
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jax
+
+    enable_x64(True)
+
+    exact = jax.grad(lambda scale: _toy_coil_projected_mode_fixed_point_response(current_scale=scale))(0.0)
+    eps = 1.0e-4
+    fd = (
+        _toy_coil_projected_mode_fixed_point_response(current_scale=eps)
+        - _toy_coil_projected_mode_fixed_point_response(current_scale=-eps)
+    ) / (2.0 * eps)
+
+    assert abs(float(exact)) > 1.0e-9
+    np.testing.assert_allclose(exact, fd, rtol=1.0e-5, atol=1.0e-10)
+
+
+def test_dense_fixed_point_projected_mode_loop_wrt_geometry_matches_finite_difference():
+    """Validate moving-boundary fixed point for one coil Fourier coefficient."""
+
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jax
+
+    enable_x64(True)
+
+    exact = jax.grad(lambda shift: _toy_coil_projected_mode_fixed_point_response(radius_shift=shift))(0.0)
+    eps = 1.0e-4
+    fd = (
+        _toy_coil_projected_mode_fixed_point_response(radius_shift=eps)
+        - _toy_coil_projected_mode_fixed_point_response(radius_shift=-eps)
+    ) / (2.0 * eps)
+
+    assert abs(float(exact)) > 1.0e-9
+    np.testing.assert_allclose(exact, fd, rtol=1.0e-5, atol=1.0e-10)
 
 
 def _boundary_projection_inputs():

@@ -300,6 +300,108 @@ def _timing_improvement(cold_total_s: Any, warm_total_s: Any) -> dict[str, float
     }
 
 
+PHASE_TIMING_KEYS: tuple[tuple[str, str], ...] = (
+    ("setup", "setup_total_s"),
+    ("force_eval", "force_eval_s"),
+    ("residual_metrics", "iteration_residual_metrics_s"),
+    ("accepted_control_fsq1", "iteration_control_fsq1_s"),
+    ("preconditioner", "preconditioner_s"),
+    ("update", "update_s"),
+    ("finalize", "finalize_s"),
+)
+
+
+def _finite_float(value: Any) -> float | None:
+    try:
+        out = float(value)
+    except Exception:
+        return None
+    return out if np.isfinite(out) else None
+
+
+def _phase_timing_summary(solver_timing: dict[str, Any]) -> dict[str, Any]:
+    """Summarize high-level solver timing buckets for performance triage.
+
+    The benchmark already records the raw ``diagnostics.timing`` payload.  This
+    normalized summary makes the direct-coil performance target explicit:
+    setup/control/residual/preconditioner overhead versus force evaluation.
+    """
+
+    timing = solver_timing.get("timing", {}) if isinstance(solver_timing, dict) else {}
+    if not isinstance(timing, dict) or not timing:
+        return {"timing_available": False, "top_named_phases": []}
+
+    solve_total_s = _finite_float(timing.get("solve_total_s"))
+    iterations = _finite_float(timing.get("iterations"))
+    phases: list[dict[str, Any]] = []
+    for name, key in PHASE_TIMING_KEYS:
+        seconds = _finite_float(timing.get(key))
+        if seconds is None:
+            continue
+        per_iter = _finite_float(timing.get(f"{key[:-2]}_per_iter_s")) if key.endswith("_s") else None
+        if per_iter is None and iterations and iterations > 0.0:
+            per_iter = seconds / iterations
+        phases.append(
+            {
+                "name": name,
+                "key": key,
+                "seconds": seconds,
+                "per_iter_s": per_iter,
+                "fraction_of_solve": None
+                if solve_total_s is None or solve_total_s <= 0.0
+                else float(seconds / solve_total_s),
+            }
+        )
+
+    phases.sort(key=lambda phase: float(phase.get("seconds") or 0.0), reverse=True)
+    named_total = float(sum(float(phase["seconds"]) for phase in phases))
+    return {
+        "timing_available": True,
+        "solve_total_s": solve_total_s,
+        "iterations": None if iterations is None else int(iterations),
+        "named_phase_total_s": named_total,
+        "named_phase_fraction_of_solve": None
+        if solve_total_s is None or solve_total_s <= 0.0
+        else float(named_total / solve_total_s),
+        "top_named_phases": phases[:5],
+        "all_named_phases": phases,
+    }
+
+
+def _phase_timing_comparison(
+    cold_solver_timing: dict[str, Any],
+    warm_solver_timing: dict[str, Any],
+) -> dict[str, Any]:
+    cold = _phase_timing_summary(cold_solver_timing)
+    warm = _phase_timing_summary(warm_solver_timing)
+    cold_by_key = {
+        phase["key"]: phase
+        for phase in cold.get("all_named_phases", [])
+        if isinstance(phase, dict) and phase.get("key") is not None
+    }
+    warm_by_key = {
+        phase["key"]: phase
+        for phase in warm.get("all_named_phases", [])
+        if isinstance(phase, dict) and phase.get("key") is not None
+    }
+    buckets: dict[str, Any] = {}
+    for name, key in PHASE_TIMING_KEYS:
+        buckets[name] = {
+            "key": key,
+            "time_s": _timing_improvement(
+                cold_by_key.get(key, {}).get("seconds"),
+                warm_by_key.get(key, {}).get("seconds"),
+            ),
+            "warm_fraction_of_solve": warm_by_key.get(key, {}).get("fraction_of_solve"),
+            "warm_per_iter_s": warm_by_key.get(key, {}).get("per_iter_s"),
+        }
+    return {
+        "cold": cold,
+        "warm": warm,
+        "buckets": buckets,
+    }
+
+
 def _active_nestor_timing_improvement(
     cold_solver_timing: dict[str, Any],
     warm_solver_timing: dict[str, Any],
@@ -609,6 +711,7 @@ def _bench_case(label: str, input_path: Path, params: Any, args: argparse.Namesp
         "warm": _summarize_timings(warm_times),
         "cold_solver_timing": cold_solver_timing,
         "warm_solver_timing": warm_solver_timing,
+        "phase_timing_comparison": _phase_timing_comparison(cold_solver_timing, warm_solver_timing),
         "active_nestor_timing_improvement": _active_nestor_timing_improvement(cold_solver_timing, warm_solver_timing),
         "trial_nestor_timing_improvement": _trial_nestor_timing_improvement(cold_solver_timing, warm_solver_timing),
         "fsq": _fsq_summary(warm_run),
@@ -679,6 +782,26 @@ def _format_trial_nestor_timing(case: dict[str, Any]) -> str:
         f"{_format_seconds(sample.get('cold_total_s'))}->{_format_seconds(sample.get('warm_total_s'))}"
         f" speedup={_format_speedup(sample.get('speedup'))}"
     )
+
+
+def _format_phase_timing(case: dict[str, Any]) -> str:
+    comparison = case.get("phase_timing_comparison", {})
+    if not isinstance(comparison, dict):
+        return ""
+    warm = comparison.get("warm", {})
+    if not isinstance(warm, dict) or not warm.get("timing_available"):
+        return ""
+    phases = warm.get("top_named_phases", [])
+    if not isinstance(phases, list) or not phases:
+        return ""
+    rendered: list[str] = []
+    for phase in phases[:3]:
+        if not isinstance(phase, dict):
+            continue
+        rendered.append(f"{phase.get('name')}={_format_seconds(phase.get('seconds'))}")
+    if not rendered:
+        return ""
+    return " warm_top_phases[" + ",".join(rendered) + "]"
 
 
 def _format_sampler_diagnostics(case: dict[str, Any]) -> str:
@@ -831,6 +954,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"cold_or_compile={case['cold_or_compile_s']:.6f}s warm_min={warm_min}"
                 f"{_format_active_nestor_timing(case)}"
                 f"{_format_trial_nestor_timing(case)}"
+                f"{_format_phase_timing(case)}"
                 f"{_format_sampler_diagnostics(case)}"
             )
         else:

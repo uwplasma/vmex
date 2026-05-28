@@ -74,12 +74,16 @@ The validation ladder is:
    differentiable operator blocks used by the VMEC-like NESTOR solve on
    low-resolution grids. The high-resolution matrix-free production operator
    remains phase-2 work.
-6. Nonlinear implicit-root chain: direct-coil controls feed a dense nonlinear
-   root solve with a custom implicit adjoint. This validates the mathematical
-   reverse pass needed by the production free-boundary fixed-point wrapper:
-   solve ``F_x^T lambda = dJ/dx`` at the accepted root and apply
-   ``-F_p^T lambda`` to coil/current parameters. This is still a dense
-   validation primitive, not the production VMEC nonlinear loop.
+6. Nonlinear fixed-point chain: direct-coil controls feed a dense nonlinear
+   fixed-point solve with a custom implicit adjoint. The promoted fast tests
+   include a moving-boundary loop in which the current state changes where the
+   coil field is sampled, the field is projected through the JAX boundary
+   projection and mode-space vacuum response, and the response updates the
+   next state. This validates the mathematical reverse pass needed by the
+   production free-boundary fixed-point wrapper: solve
+   ``F_x^T lambda = dJ/dx`` at the accepted root and apply ``-F_p^T lambda`` to
+   coil/current parameters. This is still a dense validation primitive, not the
+   production VMEC nonlinear loop.
 7. Full direct-coil free-boundary solve: a low-resolution scalar objective,
    first with one coil current and then with one Fourier coefficient, bounded
    against finite differences of complete solves.
@@ -92,9 +96,10 @@ stellarator-symmetric and ``LASYM`` tiny direct-coil cases: one coil current and
 one Fourier geometry coefficient are checked against central finite differences
 through the chain direct coils -> boundary projection -> VMEC/NESTOR
 source/matrix assembly -> dense mode solve while the plasma boundary is held
-fixed. The nonlinear implicit-root rung is also AD-vs-FD checked for a
-direct-coil current and one Fourier geometry coefficient, but only on a dense
-toy residual whose fixed point is solved inside JAX. Rung 7 is split
+fixed. The nonlinear fixed-point rung is also AD-vs-FD checked for a
+direct-coil current and one Fourier geometry coefficient, including a
+state-dependent boundary sample and projected mode-space vacuum response, but
+only on a dense validation loop solved inside JAX. Rung 7 is split
 deliberately: complete accepted direct-coil solves have
 fast finite-difference response guards for current and one Fourier geometry
 coefficient, and the accepted-state direct-coil normal-field metric now has a

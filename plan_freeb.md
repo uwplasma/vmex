@@ -158,6 +158,20 @@ Steps taken:
 73. Added phase-2 validation tests for the nonlinear primitive: residual-root
     convergence, RHS-parameter AD-vs-central-FD, and direct-coil current plus
     Fourier-geometry controls feeding the nonlinear implicit root.
+74. Added `dense_fixed_point_solve_jax`, a small JAX-visible fixed-point
+    wrapper around the nonlinear implicit-root primitive.  This is the
+    validation-scale model of the production free-boundary loop contract
+    `state = update(state, coil_params)`.
+75. Promoted the miniature complete-loop direct-coil AD-vs-FD rung: tests now
+    cover direct coils -> state-dependent boundary sampling -> JAX boundary
+    projection -> dense mode-space vacuum response -> nonlinear fixed point for
+    both one coil current and one Fourier geometry coefficient.
+76. Added benchmark-level `phase_timing_comparison` summaries for direct-coil
+    solves.  The local timed smoke reported warm `0.01269 s`, with the top
+    named CPU buckets setup (`4.69 ms`, `57%`), force evaluation (`2.47 ms`,
+    `30%`), preconditioner (`0.40 ms`, `4.8%`), and residual metrics
+    (`0.33 ms`, `4.0%`).  This is measurement-only and identifies structural
+    staging/fusion as the next performance target.
 
 ### 2026-05-27 Free-boundary beta-scan bootstrap-current preconditioner
 

@@ -3102,6 +3102,14 @@ in ``warm_solver_timing.timing`` or in the matrix ``cpu_gpu_comparison`` block
 before implementing the next setup cache; the split is intentionally
 measurement-only and does not change solver numerics.
 
+When ``VMEC_JAX_TIMING=1`` is enabled, the direct-coil solve benchmark also
+emits a normalized ``phase_timing_comparison`` block.  It ranks the warm setup,
+force-evaluation, residual-metric, accepted-control ``fsq1``, preconditioner,
+update, and finalize buckets and reports cold-to-warm improvement for each
+bucket.  This is the preferred quick triage view for structural control-loop
+staging and preconditioner/residual-scalar dispatch work because it is stable
+even when the raw timing dictionary grows new sub-buckets.
+
 The first CUDA probe after adding that split reported a warm ``setup_total_s``
 of ``40.4 ms`` on the tiny direct-coil case.  The dominant setup sub-buckets
 were boundary/profile construction (``18.6 ms``), update constants

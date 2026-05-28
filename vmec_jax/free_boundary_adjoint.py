@@ -159,6 +159,45 @@ def dense_nonlinear_solve_jax(
     return _solve(x0, params)
 
 
+def dense_fixed_point_solve_jax(
+    update_fn: Any,
+    initial: Any,
+    params: Any,
+    *,
+    max_iter: int = 10,
+    damping: float = 1.0,
+) -> Any:
+    """Solve ``x = update_fn(x, params)`` with the nonlinear implicit adjoint.
+
+    This is the small JAX-visible fixed-point wrapper used by the
+    free-boundary phase-2 validation ladder.  It models the production coupling
+    pattern, in which the accepted plasma state changes the boundary on which
+    the external field is sampled and the vacuum response updates the state.
+    Gradients are supplied by :func:`dense_nonlinear_solve_jax` through the
+    residual ``x - update_fn(x, params)``.
+
+    The helper is intentionally dense and validation-scale.  It should not be
+    mistaken for the production ``run_free_boundary`` adjoint; it is the tested
+    primitive that a future JAX-visible free-boundary fixed-point loop should
+    reduce to.
+    """
+
+    def residual(state, prm):
+        state_arr = jnp.asarray(state)
+        update = jnp.asarray(update_fn(state_arr, prm))
+        if update.shape != state_arr.shape:
+            raise ValueError("update_fn must return the same shape as initial")
+        return state_arr - update
+
+    return dense_nonlinear_solve_jax(
+        residual,
+        initial,
+        params,
+        max_iter=max_iter,
+        damping=damping,
+    )
+
+
 def _finite_difference_jacobian(fn: Any, x: Any, eps: float = 1.0e-6) -> Any:
     """Small NumPy/JAX-free fallback Jacobian for import-only environments."""
 
