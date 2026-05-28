@@ -412,3 +412,44 @@ def test_cpu_gpu_comparison_matches_completed_cases_and_reports_nestor_ratios() 
         "final_recompute_solve": 0.5,
         "final_external_field_sample": 0.5,
     }
+
+
+def test_gpu_bottleneck_summary_ranks_warm_phase_overheads() -> None:
+    comparisons = [
+        {
+            "label": "direct_solve_jit_forces",
+            "case": "synthetic_direct_coil_solve",
+            "cpu": {
+                "warm_min_s": 0.05,
+                "warm_solver_total_s": 0.04,
+                "warm_compute_forces_s": 0.010,
+                "warm_preconditioner_s": 0.002,
+                "warm_iteration_residual_metrics_s": 0.001,
+            },
+            "gpu": {
+                "warm_min_s": 0.15,
+                "warm_solver_total_s": 0.11,
+                "warm_compute_forces_s": 0.011,
+                "warm_preconditioner_s": 0.020,
+                "warm_iteration_residual_metrics_s": 0.030,
+            },
+            "ratios_gpu_over_cpu": {
+                "warm_min": 3.0,
+                "warm_solver_total": 2.75,
+                "warm_compute_forces": 1.1,
+                "warm_preconditioner": 10.0,
+                "warm_iteration_residual_metrics": 30.0,
+            },
+        }
+    ]
+
+    rows = matrix._gpu_bottleneck_summary(comparisons, top_n=3)
+
+    assert [row["phase"] for row in rows] == [
+        "warm_min",
+        "warm_solver_total",
+        "warm_iteration_residual_metrics",
+    ]
+    assert rows[0]["ratio_gpu_over_cpu"] == 3.0
+    assert abs(rows[0]["gpu_minus_cpu_s"] - 0.10) < 1.0e-15
+    assert rows[2]["ratio_gpu_over_cpu"] == 30.0

@@ -3110,6 +3110,12 @@ bucket.  This is the preferred quick triage view for structural control-loop
 staging and preconditioner/residual-scalar dispatch work because it is stable
 even when the raw timing dictionary grows new sub-buckets.
 
+When both CPU and GPU rows are present, the matrix summary also writes
+``gpu_bottleneck_summary``.  This is a short, sorted list of warm phases for
+which GPU is slower than CPU, including the GPU/CPU ratio and absolute
+``gpu_minus_cpu_s``.  Use this field as the first-pass triage table before
+opening detailed XLA or Perfetto traces.
+
 The first CUDA probe after adding that split reported a warm ``setup_total_s``
 of ``40.4 ms`` on the tiny direct-coil case.  The dominant setup sub-buckets
 were boundary/profile construction (``18.6 ms``), update constants

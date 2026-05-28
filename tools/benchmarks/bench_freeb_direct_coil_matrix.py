@@ -636,6 +636,79 @@ def _cpu_gpu_comparison(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return comparisons
 
 
+_BOTTLENECK_RATIO_TO_METRIC = {
+    "warm_min": "warm_min_s",
+    "warm_mean": "warm_mean_s",
+    "warm_solver_total": "warm_solver_total_s",
+    "warm_iteration_loop": "warm_iteration_loop_s",
+    "warm_iteration_loop_unattributed": "warm_iteration_loop_unattributed_s",
+    "warm_setup_total": "warm_setup_total_s",
+    "warm_setup_static_grid_rebuild": "warm_setup_static_grid_rebuild_s",
+    "warm_setup_freeb_policy": "warm_setup_freeb_policy_s",
+    "warm_setup_boundary_profiles": "warm_setup_boundary_profiles_s",
+    "warm_setup_cache_key_hash": "warm_setup_cache_key_hash_s",
+    "warm_setup_ptau_constants": "warm_setup_ptau_constants_s",
+    "warm_setup_index_constants": "warm_setup_index_constants_s",
+    "warm_setup_update_constants": "warm_setup_update_constants_s",
+    "warm_iteration_control": "warm_iteration_control_s",
+    "warm_iteration_control_fsq1": "warm_iteration_control_fsq1_s",
+    "warm_iteration_control_fsq1_precond_norm": "warm_iteration_control_fsq1_precond_norm_s",
+    "warm_iteration_control_fsq1_scalar_build": "warm_iteration_control_fsq1_scalar_build_s",
+    "warm_iteration_control_fsq1_payload_get": "warm_iteration_control_fsq1_payload_get_s",
+    "warm_iteration_control_fsq1_direct_get": "warm_iteration_control_fsq1_direct_get_s",
+    "warm_iteration_control_fsq1_unattributed": "warm_iteration_control_fsq1_unattributed_s",
+    "warm_iteration_control_badjac": "warm_iteration_control_badjac_s",
+    "warm_iteration_control_badjac_ptau_get": "warm_iteration_control_badjac_ptau_get_s",
+    "warm_iteration_control_badjac_state_jacobian": "warm_iteration_control_badjac_state_jacobian_s",
+    "warm_iteration_control_badjac_unattributed": "warm_iteration_control_badjac_unattributed_s",
+    "warm_iteration_control_vmec_time": "warm_iteration_control_vmec_time_s",
+    "warm_iteration_control_restart": "warm_iteration_control_restart_s",
+    "warm_iteration_control_evolve": "warm_iteration_control_evolve_s",
+    "warm_compute_forces": "warm_compute_forces_s",
+    "warm_preconditioner": "warm_preconditioner_s",
+    "warm_precond_apply": "warm_precond_apply_s",
+    "warm_update": "warm_update_s",
+    "warm_iteration_residual_metrics": "warm_iteration_residual_metrics_s",
+    "warm_finalize": "warm_finalize_s",
+    "active_nestor_warm_sample": "active_nestor_warm_sample_s",
+    "active_nestor_warm_solve": "active_nestor_warm_solve_s",
+    "final_recompute_sample": "final_recompute_sample_s",
+    "final_recompute_solve": "final_recompute_solve_s",
+    "final_external_field_sample": "final_external_field_sample_s",
+}
+
+
+def _gpu_bottleneck_summary(comparisons: list[dict[str, Any]], *, top_n: int = 8) -> list[dict[str, Any]]:
+    """Rank warm GPU-over-CPU bottlenecks from completed comparison rows."""
+
+    rows: list[dict[str, Any]] = []
+    for comparison in comparisons:
+        ratios = comparison.get("ratios_gpu_over_cpu", {})
+        cpu_metrics = comparison.get("cpu", {})
+        gpu_metrics = comparison.get("gpu", {})
+        if not isinstance(ratios, dict) or not isinstance(cpu_metrics, dict) or not isinstance(gpu_metrics, dict):
+            continue
+        for ratio_key, metric_key in _BOTTLENECK_RATIO_TO_METRIC.items():
+            ratio = _finite_float(ratios.get(ratio_key))
+            cpu_s = _finite_float(cpu_metrics.get(metric_key))
+            gpu_s = _finite_float(gpu_metrics.get(metric_key))
+            if ratio is None or cpu_s is None or gpu_s is None or ratio <= 1.0:
+                continue
+            rows.append(
+                {
+                    "label": comparison.get("label"),
+                    "case": comparison.get("case"),
+                    "phase": ratio_key,
+                    "ratio_gpu_over_cpu": ratio,
+                    "cpu_s": cpu_s,
+                    "gpu_s": gpu_s,
+                    "gpu_minus_cpu_s": float(gpu_s - cpu_s),
+                }
+            )
+    rows.sort(key=lambda item: (item["gpu_minus_cpu_s"], item["gpu_s"], item["ratio_gpu_over_cpu"]), reverse=True)
+    return rows[: max(int(top_n), 0)]
+
+
 def _with_badjac_probe0_rows(specs: list[ChildSpec]) -> list[ChildSpec]:
     rows: list[ChildSpec] = []
     for label, out, args, env_overrides in specs:
@@ -883,6 +956,7 @@ def main(argv: list[str] | None = None) -> int:
 
     status = "completed" if all(row["status"] in {"completed", "skipped"} for row in rows) else "failed"
     comparisons = _cpu_gpu_comparison(rows)
+    gpu_bottlenecks = _gpu_bottleneck_summary(comparisons)
     payload = {
         "status": status,
         "script": str(Path(__file__).resolve()),
@@ -895,6 +969,7 @@ def main(argv: list[str] | None = None) -> int:
         "output_dir": outdir,
         "rows": rows,
         "cpu_gpu_comparison": comparisons,
+        "gpu_bottleneck_summary": gpu_bottlenecks,
     }
     _write_json(summary, payload)
 
@@ -913,6 +988,12 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "[bench-freeb-direct-coil-matrix] "
             f"gpu/cpu {item['label']} {item['case']}: cold={cold_text} warm_min={warm_text}"
+        )
+    for item in gpu_bottlenecks[:5]:
+        print(
+            "[bench-freeb-direct-coil-matrix] "
+            f"gpu bottleneck {item['label']} {item['case']} {item['phase']}: "
+            f"{item['ratio_gpu_over_cpu']:.2f}x, +{item['gpu_minus_cpu_s']:.4g}s"
         )
     return 0 if status == "completed" else 1
 

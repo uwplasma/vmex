@@ -207,6 +207,11 @@ Steps taken:
     nonzero central-difference responses of the residual/aspect/iota proxy to
     both one coil-current control and one Fourier curve coefficient. This is a
     complete-solve finite-response guard, not a full-loop exact-gradient claim.
+83. Added `gpu_bottleneck_summary` to the direct-coil benchmark matrix. When
+    both CPU and GPU rows are present, the summary now ranks warm phases where
+    GPU is slower than CPU by absolute overhead and ratio. This makes the next
+    performance pass point directly at residual metrics, preconditioner, setup,
+    or force evaluation without manually parsing nested JSON.
 
 ### 2026-05-27 Free-boundary beta-scan bootstrap-current preconditioner
 
