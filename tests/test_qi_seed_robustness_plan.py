@@ -51,6 +51,7 @@ def test_plan_keeps_external_validation_optional():
     assert lanes["simsopt-optional"]["required_ci"] is False
     assert lanes["vmec2000-optional"]["required_ci"] is False
     assert "RUN_SIMSOPT_VALIDATION=1" in lanes["simsopt-optional"]["command"]
+    assert "test_redl_bootstrap_formula_matches_simsopt_when_available" in lanes["simsopt-optional"]["command"]
     assert "VMEC2000_INTEGRATION=1" in lanes["vmec2000-optional"]["command"]
     assert "pytest" in lanes["required-fast-ci"]["command"]
 
@@ -79,6 +80,7 @@ def test_optional_parity_commands_are_concrete_and_bounded():
     assert {
         "simsopt-qs-family-formula",
         "simsopt-qs-family-state",
+        "simsopt-redl-formula",
         "vmec2000-converged-wout-smoke",
         "vmec2000-stage-trace-smoke",
         "vmec2000-cli-five-iter",
@@ -103,6 +105,9 @@ def test_optional_parity_commands_are_concrete_and_bounded():
         "::test_quasisymmetry_state_diagnostic_family_matches_simsopt_converged_wout"
         in commands["simsopt-qs-family-state"]["command"]
     )
+    assert commands["simsopt-redl-formula"]["env"] == ["RUN_SIMSOPT_VALIDATION=1"]
+    assert "::test_redl_bootstrap_formula_matches_simsopt_when_available" in commands["simsopt-redl-formula"]["command"]
+    assert any("synthetic three-point" in bound for bound in commands["simsopt-redl-formula"]["bounded_by"])
 
     vmec_converged = commands["vmec2000-converged-wout-smoke"]
     assert "VMEC2000_INTEGRATION=1" in vmec_converged["command"]

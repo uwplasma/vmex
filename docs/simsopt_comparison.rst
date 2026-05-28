@@ -302,8 +302,8 @@ Formula-level checks can be run with:
 .. code-block:: bash
 
    RUN_SIMSOPT_VALIDATION=1 pytest -q tests/test_simsopt_optional_validation.py
-   pytest -q tests/test_redl_bootstrap_simsopt_parity.py
-   pytest -q tests/test_finite_beta_helpers_unit.py -k simsopt
+   RUN_SIMSOPT_VALIDATION=1 pytest -q tests/test_redl_bootstrap_simsopt_parity.py
+   RUN_SIMSOPT_VALIDATION=1 pytest -q tests/test_finite_beta_helpers_unit.py::test_redl_bootstrap_formula_matches_simsopt_when_available
 
 The dedicated SIMSOPT validation test is additionally gated by
 ``RUN_SIMSOPT_VALIDATION=1`` so that required CI remains independent of a local

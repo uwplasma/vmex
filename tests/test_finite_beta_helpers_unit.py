@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from types import SimpleNamespace
 
 import numpy as np
@@ -898,6 +899,11 @@ def test_redl_bootstrap_mismatch_normalization_and_grad():
     assert np.isfinite(np.asarray(grad))
 
 
+@pytest.mark.simsopt
+@pytest.mark.skipif(
+    os.environ.get("RUN_SIMSOPT_VALIDATION") != "1",
+    reason="Set RUN_SIMSOPT_VALIDATION=1 to run optional SIMSOPT validation",
+)
 def test_redl_bootstrap_formula_matches_simsopt_when_available():
     try:
         simsopt_bootstrap = pytest.importorskip("simsopt.mhd.bootstrap")
