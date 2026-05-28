@@ -1174,3 +1174,110 @@ def direct_coil_boundary_bnormal_rms_jax(
     )
     bnormal = jnp.ravel(jnp.asarray(vac["bnormal"]))
     return jnp.sqrt(jnp.mean(bnormal * bnormal))
+
+
+def direct_coil_projected_mode_fixed_point_jax(
+    params: Any,
+    initial_state: Any,
+    *,
+    boundary_from_state: Any,
+    update_from_response: Any,
+    mode_matrix: Any,
+    sin_basis: Any,
+    xmpot: Any,
+    n_raw: Any,
+    imirr: Any | None = None,
+    imirr_full: Any | None = None,
+    cos_basis: Any | None = None,
+    onp: float = 1.0,
+    lasym: bool = False,
+    nuv3: int | None = None,
+    nuv_full: int | None = None,
+    max_iter: int = 10,
+    damping: float = 1.0,
+    symmetric: bool = False,
+) -> dict[str, Any]:
+    """Solve a small direct-coil free-boundary fixed-point validation loop.
+
+    ``boundary_from_state(state)`` must return a mapping with ``R``, ``Z``,
+    ``phi``, ``Ru``, ``Zu``, ``Rv``, and ``Zv`` arrays.  At each fixed-point
+    step this helper samples the direct Biot-Savart field on that moving
+    boundary, projects it into VMEC boundary channels, projects the normal
+    source into mode space, solves the dense vacuum mode system, and passes the
+    response to ``update_from_response(state, response, vac, boundary, params)``.
+
+    This is a production-adjacent phase-2 validation primitive.  It exercises
+    the same dependency graph as a free-boundary coil solve at tiny dense scale,
+    while keeping the true production ``run_free_boundary`` loop out of scope
+    until that loop is made JAX-visible or receives its own custom VJP.
+    """
+
+    from .external_fields import sample_coil_field_cylindrical
+
+    required = ("R", "Z", "phi", "Ru", "Zu", "Rv", "Zv")
+
+    def _mode_response_for_state(state, coil_params):
+        boundary = boundary_from_state(state)
+        missing = [name for name in required if name not in boundary]
+        if missing:
+            raise ValueError(f"boundary_from_state missing keys: {missing}")
+        br, bp, bz = sample_coil_field_cylindrical(
+            coil_params,
+            jnp.asarray(boundary["R"]),
+            jnp.asarray(boundary["Z"]),
+            jnp.asarray(boundary["phi"]),
+        )
+        vac = vacuum_boundary_fields_from_cylindrical_jax(
+            br=br,
+            bp=bp,
+            bz=bz,
+            R=boundary["R"],
+            Ru=boundary["Ru"],
+            Zu=boundary["Zu"],
+            Rv=boundary["Rv"],
+            Zv=boundary["Zv"],
+        )
+        rhs_mode = mode_rhs_from_gsource_jax(
+            vac["bnormal"],
+            sin_basis=sin_basis,
+            cos_basis=cos_basis,
+            xmpot=xmpot,
+            n_raw=n_raw,
+            onp=float(onp),
+            lasym=bool(lasym),
+            imirr=imirr,
+            imirr_full=imirr_full,
+            nuv3=nuv3,
+            nuv_full=nuv_full,
+        )
+        response = dense_mode_vacuum_solve_jax(
+            mode_matrix,
+            rhs_mode,
+            sin_basis,
+            cos_basis,
+            symmetric=bool(symmetric),
+        )
+        response = {**response, "rhs_mode": rhs_mode}
+        return boundary, vac, response
+
+    def _update(state, coil_params):
+        boundary, vac, response = _mode_response_for_state(state, coil_params)
+        return update_from_response(state, response, vac, boundary, coil_params)
+
+    root = dense_fixed_point_solve_jax(
+        _update,
+        initial_state,
+        params,
+        max_iter=max_iter,
+        damping=damping,
+    )
+    boundary, vac, response = _mode_response_for_state(root, params)
+    fixed_update = _update(root, params)
+    return {
+        "state": root,
+        "fixed_point_residual": root - fixed_update,
+        "update": fixed_update,
+        "boundary": boundary,
+        "vac": vac,
+        "response": response,
+    }

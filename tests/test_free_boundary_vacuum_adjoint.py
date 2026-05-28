@@ -24,6 +24,7 @@ from vmec_jax.free_boundary_adjoint import (
     dense_vmec_nestor_mode_solve_jax,
     dense_vacuum_residual,
     dense_vacuum_solve_jax,
+    direct_coil_projected_mode_fixed_point_jax,
     mode_matrix_from_grpmn_jax,
     mode_rhs_from_gsource_jax,
     vacuum_boundary_fields_from_cylindrical_jax,
@@ -1342,50 +1343,43 @@ def _toy_coil_projected_mode_fixed_point_response(
         dtype=float,
     )
 
-    def update(state, params):
+    def boundary_from_state(state):
         base_R = jnp.asarray([[0.74, 0.83], [0.89, 0.78]], dtype=float)
         base_Z = jnp.asarray([[0.10, -0.13], [0.18, -0.16]], dtype=float)
         shape = jnp.asarray([[0.25, -0.15], [0.35, -0.20]], dtype=float)
         R = base_R + 0.035 * state[0] + 0.018 * state[2] * shape
         Z = base_Z + 0.028 * state[1] - 0.012 * state[2] * shape
-        Ru = Ru_base + 0.01 * state[2]
-        Zu = Zu_base - 0.008 * state[2]
-        Rv = Rv_base
-        Zv = Zv_base
-        br, bphi, bz = sample_coil_field_cylindrical(params["coil"], R, Z, phi)
-        vac = vacuum_boundary_fields_from_cylindrical_jax(
-            br=br,
-            bp=bphi,
-            bz=bz,
-            R=R,
-            Ru=Ru,
-            Zu=Zu,
-            Rv=Rv,
-            Zv=Zv,
-        )
-        rhs_mode = mode_rhs_from_gsource_jax(
-            vac["bnormal"],
-            sin_basis=sin_basis,
-            xmpot=jnp.asarray([0, 1, 1]),
-            n_raw=jnp.asarray([0, 0, 1]),
-            onp=1.0,
-            lasym=False,
-            imirr=jnp.asarray([1, 0, 3, 2]),
-            nuv3=4,
-            nuv_full=4,
-        )
-        response = dense_mode_vacuum_solve_jax(mode_matrix, rhs_mode, sin_basis)
+        return {
+            "R": R,
+            "Z": Z,
+            "phi": phi,
+            "Ru": Ru_base + 0.01 * state[2],
+            "Zu": Zu_base - 0.008 * state[2],
+            "Rv": Rv_base,
+            "Zv": Zv_base,
+        }
+
+    def update_from_response(_state, response, _vac, _boundary, _params):
         mode_coeffs = jnp.asarray(response["mode_coeffs"])
         pressure_like = jnp.asarray([0.02, -0.015, 0.01], dtype=float)
         return pressure_like + 0.22 * jnp.tanh(mode_to_state @ mode_coeffs)
 
-    root = dense_fixed_point_solve_jax(
-        update,
+    solved = direct_coil_projected_mode_fixed_point_jax(
+        coil_params,
         jnp.asarray([0.0, 0.0, 0.0], dtype=float),
-        {"coil": coil_params},
+        boundary_from_state=boundary_from_state,
+        update_from_response=update_from_response,
+        mode_matrix=mode_matrix,
+        sin_basis=sin_basis,
+        xmpot=jnp.asarray([0, 1, 1]),
+        n_raw=jnp.asarray([0, 0, 1]),
+        imirr=jnp.asarray([1, 0, 3, 2]),
+        nuv3=4,
+        nuv_full=4,
         max_iter=14,
     )
-    final = update(root, {"coil": coil_params})
+    root = solved["state"]
+    final = solved["update"]
     return 0.5 * jnp.vdot(jnp.asarray([1.0, 0.8, 1.2], dtype=float) * root, root) + 0.08 * jnp.vdot(final, final)
 
 
