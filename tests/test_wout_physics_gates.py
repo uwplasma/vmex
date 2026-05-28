@@ -20,7 +20,8 @@ class BundledWoutPhysicsCase:
 
 BUNDLED_WOUT_CASES = (
     BundledWoutPhysicsCase("DSHAPE", residual_rss_limit=1.0e-10),
-    BundledWoutPhysicsCase("LandremanPaul2021_QA_lowres", residual_rss_limit=1.0e-10),
+    # This VMEC2000-style fixture intentionally omits populated aspect scalars.
+    BundledWoutPhysicsCase("LandremanPaul2021_QA_lowres", residual_rss_limit=1.0e-10, require_aspect=False),
     BundledWoutPhysicsCase("QI_stel_seed_3127", residual_rss_limit=1.0e-10),
     BundledWoutPhysicsCase("basic_non_stellsym_simsopt", residual_rss_limit=5.0e-10),
     BundledWoutPhysicsCase("circular_tokamak", residual_rss_limit=1.0e-12),

@@ -10,7 +10,8 @@
 [![PyPI downloads](https://img.shields.io/pypi/dm/vmec-jax)](https://pypi.org/project/vmec-jax/)
 
 End-to-end differentiable JAX implementation of **VMEC2000** for fixed-boundary
-and free-boundary ideal-MHD equilibria.
+workflows, with free-boundary support and direct-coil research paths. Full
+free-boundary solve adjoints remain in development.
 
 ## Install
 
