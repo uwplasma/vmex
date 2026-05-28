@@ -19,6 +19,7 @@ from vmec_jax.free_boundary import (
 )
 from vmec_jax.free_boundary_adjoint import (
     dense_mode_vacuum_solve_jax,
+    dense_nonlinear_solve_jax,
     dense_vmec_nestor_mode_solve_jax,
     dense_vacuum_residual,
     dense_vacuum_solve_jax,
@@ -138,6 +139,60 @@ def test_dense_vacuum_symmetric_mode_uses_symmetric_transpose_solve():
     expected = jnp.linalg.solve(A, cotangent)
 
     np.testing.assert_allclose(grad_b, expected, rtol=1.0e-13, atol=1.0e-13)
+
+
+def _nonlinear_residual(x, params):
+    from vmec_jax._compat import jnp
+
+    rhs = params["rhs"]
+    return jnp.asarray(
+        [
+            x[0] + 0.2 * x[0] ** 3 + 0.1 * x[1] - rhs[0],
+            x[1] + 0.1 * x[0] ** 2 + 0.3 * jnp.sin(x[1]) - rhs[1],
+        ]
+    )
+
+
+def test_dense_nonlinear_solve_drives_residual_to_zero():
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jnp
+
+    enable_x64(True)
+    params = {"rhs": jnp.asarray([0.4, -0.2], dtype=float)}
+    root = dense_nonlinear_solve_jax(
+        _nonlinear_residual,
+        jnp.asarray([0.0, 0.0], dtype=float),
+        params,
+        max_iter=12,
+    )
+
+    residual = _nonlinear_residual(root, params)
+    np.testing.assert_allclose(residual, np.zeros(2), rtol=0.0, atol=1.0e-12)
+
+
+def test_dense_nonlinear_implicit_adjoint_matches_finite_difference_for_rhs():
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jax, jnp
+
+    enable_x64(True)
+    rhs0 = jnp.asarray([0.4, -0.2], dtype=float)
+    direction = jnp.asarray([0.3, -0.5], dtype=float)
+    weights = jnp.asarray([1.2, 0.7], dtype=float)
+
+    def objective(scale):
+        root = dense_nonlinear_solve_jax(
+            _nonlinear_residual,
+            jnp.asarray([0.0, 0.0], dtype=float),
+            {"rhs": rhs0 + scale * direction},
+            max_iter=12,
+        )
+        return 0.5 * jnp.vdot(weights * root, root)
+
+    exact = jax.grad(objective)(0.0)
+    eps = 1.0e-6
+    fd = (objective(eps) - objective(-eps)) / (2.0 * eps)
+
+    np.testing.assert_allclose(exact, fd, rtol=3.0e-8, atol=1.0e-10)
 
 
 def _mode_basis_for_rhs_tests(*, lasym: bool = False):
@@ -1093,6 +1148,51 @@ def _toy_coil_vacuum_response(*, current_scale: float = 0.0, radius_shift: float
     return 0.5 * jnp.vdot(x, x) + 0.1 * jnp.vdot(rhs, rhs)
 
 
+def _toy_coil_nonlinear_response(*, current_scale: float = 0.0, radius_shift: float = 0.0):
+    """Small direct-coil -> nonlinear implicit-root chain for phase-2 checks."""
+
+    from vmec_jax._compat import jnp
+
+    radius = 1.25 + 0.03 * radius_shift
+    dofs = jnp.zeros((1, 3, 3), dtype=float)
+    dofs = dofs.at[0, 0, 2].set(radius)
+    dofs = dofs.at[0, 1, 1].set(radius)
+    params = CoilFieldParams(
+        base_curve_dofs=dofs,
+        base_currents=jnp.asarray([6.0e6 * (1.0 + 0.02 * current_scale)], dtype=float),
+        n_segments=96,
+        regularization_epsilon=1.0e-9,
+    )
+    R = jnp.asarray([0.32, 0.47, 0.61], dtype=float)
+    Z = jnp.asarray([0.09, -0.16, 0.19], dtype=float)
+    phi = jnp.asarray([0.0, 0.35, 0.8], dtype=float)
+    br, bphi, bz = sample_coil_field_cylindrical(params, R, Z, phi)
+    rhs = 0.04 * jnp.stack(
+        (
+            br[0] + 0.2 * bphi[1] - 0.1 * bz[2],
+            bz[1] - 0.3 * br[2] + 0.1 * bphi[0],
+        )
+    )
+
+    def residual(x, residual_params):
+        local_rhs = residual_params["rhs"]
+        return jnp.asarray(
+            [
+                x[0] + 0.1 * x[0] ** 3 + 0.08 * x[1] - local_rhs[0],
+                0.9 * x[1] + 0.05 * x[0] ** 2 + 0.15 * jnp.sin(x[1]) - local_rhs[1],
+            ]
+        )
+
+    root = dense_nonlinear_solve_jax(
+        residual,
+        jnp.asarray([0.0, 0.0], dtype=float),
+        {"rhs": rhs},
+        max_iter=14,
+    )
+    weights = jnp.asarray([0.9, 1.3], dtype=float)
+    return 0.5 * jnp.vdot(weights * root, root) + 0.02 * jnp.vdot(rhs, rhs)
+
+
 def test_dense_vacuum_adjoint_chain_wrt_coil_current_matches_finite_difference():
     """Validate a direct-coil field feeding an implicit vacuum solve."""
 
@@ -1129,6 +1229,44 @@ def test_dense_vacuum_adjoint_chain_wrt_coil_geometry_matches_finite_difference(
 
     assert abs(float(exact)) > 1.0e-8
     np.testing.assert_allclose(exact, fd, rtol=2.0e-6, atol=1.0e-10)
+
+
+def test_dense_nonlinear_adjoint_chain_wrt_coil_current_matches_finite_difference():
+    """Validate direct-coil controls through a nonlinear implicit root."""
+
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jax
+
+    enable_x64(True)
+
+    exact = jax.grad(lambda scale: _toy_coil_nonlinear_response(current_scale=scale))(0.0)
+    eps = 1.0e-4
+    fd = (
+        _toy_coil_nonlinear_response(current_scale=eps)
+        - _toy_coil_nonlinear_response(current_scale=-eps)
+    ) / (2.0 * eps)
+
+    assert abs(float(exact)) > 1.0e-8
+    np.testing.assert_allclose(exact, fd, rtol=5.0e-6, atol=1.0e-10)
+
+
+def test_dense_nonlinear_adjoint_chain_wrt_coil_geometry_matches_finite_difference():
+    """Validate a coil Fourier perturbation through a nonlinear implicit root."""
+
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jax
+
+    enable_x64(True)
+
+    exact = jax.grad(lambda shift: _toy_coil_nonlinear_response(radius_shift=shift))(0.0)
+    eps = 1.0e-4
+    fd = (
+        _toy_coil_nonlinear_response(radius_shift=eps)
+        - _toy_coil_nonlinear_response(radius_shift=-eps)
+    ) / (2.0 * eps)
+
+    assert abs(float(exact)) > 1.0e-8
+    np.testing.assert_allclose(exact, fd, rtol=5.0e-6, atol=1.0e-10)
 
 
 def _boundary_projection_inputs():

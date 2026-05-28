@@ -15,13 +15,14 @@ Date opened: 2026-05-24
 Last updated: 2026-05-28 after stage-level beta-scan checkpointing,
 interrupted-stage status marking, accepted-boundary direct-coil replay
 AD-vs-FD validation, latest CPU/GPU direct-coil benchmark triage, concrete GPU
-platform probing in the benchmark matrix, latest `origin/main` merge, and the
-accelerator-forward host scalar policy probes. PR #18 is open and
-conflict-free at commit `2d9932b4`; CI has been restarted by the latest docs
-commit and is not considered merge-ready until all required checks are green.
-The optional ESSOS/direct-coil bootstrap gates are local/manual because they
-require ESSOS assets and launch real free-boundary solves. Do not merge PR #18
-yet.
+platform probing in the benchmark matrix, latest `origin/main` merge,
+accelerator-forward host scalar policy probes, and dense nonlinear
+implicit-root adjoint validation. PR #18 is open and conflict-free at commit
+`4ec6f532` before the local nonlinear-adjoint update; CI was restarted by the
+latest merge/docs commits and is not considered merge-ready until all required
+checks are green. The optional ESSOS/direct-coil bootstrap gates are
+local/manual because they require ESSOS assets and launch real free-boundary
+solves. Do not merge PR #18 yet.
 
 Steps taken:
 
@@ -150,6 +151,13 @@ Steps taken:
     latest matrix, and timing-light rows stayed GPU-slower.  The next real
     performance step is structural control-loop staging/fusion, not another
     policy flip.
+72. Added `dense_nonlinear_solve_jax`, a dense Newton solve with a custom
+    implicit-root VJP.  Its backward pass solves
+    `F_x.T lambda = dJ/dx` at the converged root and returns
+    `-F_p.T lambda` for arbitrary parameter pytrees.
+73. Added phase-2 validation tests for the nonlinear primitive: residual-root
+    convergence, RHS-parameter AD-vs-central-FD, and direct-coil current plus
+    Fourier-geometry controls feeding the nonlinear implicit root.
 
 ### 2026-05-27 Free-boundary beta-scan bootstrap-current preconditioner
 

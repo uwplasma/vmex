@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 
-from vmec_jax._compat import jax, jnp
+from vmec_jax._compat import jax, jnp, tree_util
 
 
 def dense_vacuum_solve_jax(A: Any, b: Any, *, symmetric: bool = False) -> Any:
@@ -68,6 +68,107 @@ def dense_vacuum_residual(A: Any, x: Any, b: Any) -> Any:
     """Return ``A @ x - b`` for tests and diagnostics."""
 
     return jnp.asarray(A) @ jnp.asarray(x) - jnp.asarray(b)
+
+
+def dense_nonlinear_solve_jax(
+    residual_fn: Any,
+    initial: Any,
+    params: Any,
+    *,
+    max_iter: int = 10,
+    damping: float = 1.0,
+) -> Any:
+    """Solve a small nonlinear residual with an implicit-root adjoint.
+
+    Parameters
+    ----------
+    residual_fn:
+        Callable ``residual_fn(x, params)`` returning a 1D residual array.
+        ``params`` may be any JAX pytree.
+    initial:
+        Initial state for Newton iterations.
+    params:
+        Differentiable residual parameters.
+    max_iter:
+        Number of dense Newton iterations.
+    damping:
+        Scalar multiplier applied to each Newton step.
+
+    Notes
+    -----
+    This is the nonlinear analogue of :func:`dense_vacuum_solve_jax` for the
+    free-boundary phase-2 validation ladder.  The forward pass still uses an
+    explicit dense Newton iteration, but the reverse pass applies the implicit
+    function theorem at the converged root,
+
+    ``F_x.T @ lambda = dJ/dx`` and ``dJ/dp = -F_p.T @ lambda``.
+
+    It is intentionally limited to dense toy systems and validation gates.  It
+    does not claim that the production VMEC/NESTOR nonlinear iteration loop has
+    a full custom adjoint; it provides the tested primitive that loop should be
+    refactored toward.
+    """
+
+    x0 = jnp.asarray(initial)
+    if x0.ndim != 1:
+        raise ValueError("initial must be a 1D state vector")
+    max_iter_i = int(max_iter)
+    if max_iter_i < 0:
+        raise ValueError("max_iter must be non-negative")
+    damping_f = float(damping)
+
+    def _newton_solve(init, prm):
+        def _step(_i, x):
+            residual = jnp.asarray(residual_fn(x, prm))
+            if residual.shape != x.shape:
+                raise ValueError("residual_fn must return the same shape as initial")
+            jac_x = jax.jacfwd(lambda y: jnp.asarray(residual_fn(y, prm)))(x)
+            delta = jnp.linalg.solve(jac_x, residual)
+            return x - damping_f * delta
+
+        if jax is None:  # pragma: no cover - JAX-free import fallback.
+            x = init
+            for _ in range(max_iter_i):
+                residual = jnp.asarray(residual_fn(x, prm))
+                jac_x = _finite_difference_jacobian(lambda y: residual_fn(y, prm), x)
+                x = x - damping_f * jnp.linalg.solve(jac_x, residual)
+            return x
+        return jax.lax.fori_loop(0, max_iter_i, _step, init)
+
+    if jax is None:  # pragma: no cover - dependency fallback.
+        return _newton_solve(x0, params)
+
+    @jax.custom_vjp
+    def _solve(init, prm):
+        return _newton_solve(init, prm)
+
+    def _solve_fwd(init, prm):
+        root = _newton_solve(init, prm)
+        return root, (root, prm, jnp.zeros_like(init))
+
+    def _solve_bwd(saved, root_bar):
+        root, prm, init_zero = saved
+        jac_x = jax.jacfwd(lambda y: jnp.asarray(residual_fn(y, prm)))(root)
+        lam = jnp.linalg.solve(jac_x.T, jnp.asarray(root_bar))
+        _, pullback_params = jax.vjp(lambda pp: jnp.asarray(residual_fn(root, pp)), prm)
+        grad_params = pullback_params(lam)[0]
+        grad_params = tree_util.tree_map(lambda value: -value, grad_params)
+        return init_zero, grad_params
+
+    _solve.defvjp(_solve_fwd, _solve_bwd)
+    return _solve(x0, params)
+
+
+def _finite_difference_jacobian(fn: Any, x: Any, eps: float = 1.0e-6) -> Any:
+    """Small NumPy/JAX-free fallback Jacobian for import-only environments."""
+
+    x_arr = jnp.asarray(x)
+    eye = jnp.eye(int(x_arr.size), dtype=x_arr.dtype)
+    cols = []
+    for k in range(int(x_arr.size)):
+        step = eps * eye[k]
+        cols.append((jnp.asarray(fn(x_arr + step)) - jnp.asarray(fn(x_arr - step))) / (2.0 * eps))
+    return jnp.stack(cols, axis=1)
 
 
 def vmec_source_from_gsource_jax(

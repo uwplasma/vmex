@@ -74,25 +74,35 @@ The validation ladder is:
    differentiable operator blocks used by the VMEC-like NESTOR solve on
    low-resolution grids. The high-resolution matrix-free production operator
    remains phase-2 work.
-6. Full direct-coil free-boundary solve: a low-resolution scalar objective,
+6. Nonlinear implicit-root chain: direct-coil controls feed a dense nonlinear
+   root solve with a custom implicit adjoint. This validates the mathematical
+   reverse pass needed by the production free-boundary fixed-point wrapper:
+   solve ``F_x^T lambda = dJ/dx`` at the accepted root and apply
+   ``-F_p^T lambda`` to coil/current parameters. This is still a dense
+   validation primitive, not the production VMEC nonlinear loop.
+7. Full direct-coil free-boundary solve: a low-resolution scalar objective,
    first with one coil current and then with one Fourier coefficient, bounded
    against finite differences of complete solves.
-7. Boozer/QS objective: the same complete-solve finite-difference checks after
+8. Boozer/QS objective: the same complete-solve finite-difference checks after
    Boozer/QS diagnostics are in the objective path.
 
-The first five AD-vs-FD rungs are implemented as fast tests today, and the
+The first six AD-vs-FD rungs are implemented as fast tests today, and the
 fixed-boundary dense mode-space NESTOR rung is promoted for both
 stellarator-symmetric and ``LASYM`` tiny direct-coil cases: one coil current and
 one Fourier geometry coefficient are checked against central finite differences
 through the chain direct coils -> boundary projection -> VMEC/NESTOR
 source/matrix assembly -> dense mode solve while the plasma boundary is held
-fixed. Rung 6 is split deliberately: complete accepted direct-coil solves have
+fixed. The nonlinear implicit-root rung is also AD-vs-FD checked for a
+direct-coil current and one Fourier geometry coefficient, but only on a dense
+toy residual whose fixed point is solved inside JAX. Rung 7 is split
+deliberately: complete accepted direct-coil solves have
 fast finite-difference response guards for current and one Fourier geometry
 coefficient, and the accepted-state direct-coil normal-field metric now has a
 JAX replay gate whose current derivative matches central FD after freezing the
 accepted plasma boundary. The remaining phase-2 blocker is differentiating
 through the nonlinear ``run_free_boundary`` iteration loop itself, rather than
-through the fixed-boundary or final accepted-boundary replay. The combined
+through the dense toy nonlinear primitive, fixed-boundary operator, or final
+accepted-boundary replay. The combined
 JAX operator is also threaded into the free-boundary driver behind the opt-in
 ``VMEC_JAX_FREEB_JAX_NESTOR_OPERATOR=1`` diagnostic flag for low-resolution
 validation. For stellarator-symmetric runs, the JAX path reconstructs the full
