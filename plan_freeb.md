@@ -192,6 +192,13 @@ Steps taken:
     both base coil currents and Fourier curve coefficients through the
     direct-coil sample, moving-boundary projection, dense mode response, and
     fixed-point objective chain.
+81. Ran the current-head quick direct-coil benchmark matrix locally and on
+    `office` with `--include-gpu --include-timing-light`. Local CPU
+    `direct_solve_jit_forces` warmed at `0.0253 s`. On `office`, the detailed
+    tiny row warmed at `0.0569 s` CPU and `0.1898 s` CUDA; the production-like
+    timing-light row warmed at `0.0719 s` CPU and `0.1462 s` CUDA. Force
+    evaluation stayed near parity, while CUDA residual metrics,
+    preconditioner, and setup remained the dominant overheads.
 
 ### 2026-05-27 Free-boundary beta-scan bootstrap-current preconditioner
 

@@ -3184,6 +3184,18 @@ structural performance lane focused on residual scalar synchronization,
 preconditioner dispatch/application fusion, and reusable setup context; the
 direct-coil field kernel itself is not the limiting bucket for this case.
 
+A follow-up same-head ``office`` matrix on PR head ``599668a`` added the
+``--include-timing-light`` row to separate production-like wall time from
+timing synchronization.  The tiny direct-coil ``--jit-forces`` row measured
+``0.0569 s`` warm on CPU and ``0.1898 s`` warm on CUDA with detailed timing
+enabled.  The timing-light row measured ``0.0719 s`` warm on CPU and
+``0.1462 s`` warm on CUDA.  The detailed CUDA buckets again showed force
+evaluation near CPU parity (``10.7 ms`` versus ``10.4 ms``) while residual
+metrics (``20.1 ms``), preconditioner dispatch/application (``15.7 ms``), and
+setup (``29.1 ms``) dominate.  The performance lane is therefore still
+structural control-loop staging and preconditioner/residual-scalar fusion, not
+Biot-Savart evaluation.
+
 Two opt-in policies were checked and are deliberately not promoted.  Allowing
 the host-update path on accelerators with ``VMEC_JAX_HOST_UPDATE_ON_ACCELERATOR=1``
 made the tiny CUDA row slower in this matrix, and setting
