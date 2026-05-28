@@ -3172,6 +3172,18 @@ diagnostic bucket, but the tiny case is still launch/synchronization dominated.
 Do not claim GPU speedup for this row; use it as the regression target for the
 next residual/preconditioner dispatch fusion pass.
 
+A 2026-05-28 fresh-clone ``office`` rerun with the normalized
+``phase_timing_comparison`` confirmed the same target after the latest merge:
+CPU warm time was ``0.0424 s`` and CUDA warm time was ``0.1466 s`` for the tiny
+direct-coil ``--jit-forces`` row.  The CPU named phases were setup
+(``14.5 ms``), force evaluation (``4.90 ms``), residual metrics
+(``0.64 ms``), and preconditioner (``0.55 ms``).  The CUDA named phases were
+residual metrics (``23.8 ms``), preconditioner (``20.5 ms``), setup
+(``20.2 ms``), and force evaluation (``10.0 ms``).  This keeps the next
+structural performance lane focused on residual scalar synchronization,
+preconditioner dispatch/application fusion, and reusable setup context; the
+direct-coil field kernel itself is not the limiting bucket for this case.
+
 Two opt-in policies were checked and are deliberately not promoted.  Allowing
 the host-update path on accelerators with ``VMEC_JAX_HOST_UPDATE_ON_ACCELERATOR=1``
 made the tiny CUDA row slower in this matrix, and setting
