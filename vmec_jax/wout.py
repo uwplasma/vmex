@@ -3392,6 +3392,37 @@ def _compute_mercier(
     )
 
 
+def _glasser_from_wout_mercier_terms(
+    *,
+    DMerc: np.ndarray,
+    Dshear: np.ndarray,
+    Dcurr: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Return Glasser profiles from persisted VMEC Mercier components.
+
+    Wout files do not store the full Mercier surface integrals needed to
+    reconstruct the preferred state-level ``H`` expression.  For persistence
+    and old-file fallback we use the equivalent current-term reconstruction
+    ``H = -Dcurr`` and ``S^2 = 4*Dshear``.
+    """
+
+    dmerc = np.asarray(DMerc, dtype=float)
+    dshear = np.asarray(Dshear, dtype=float)
+    dcurr = np.asarray(Dcurr, dtype=float)
+    shear2 = np.maximum(4.0 * dshear, 0.0)
+    h_term = -dcurr
+    valid = shear2 > 0.0
+    denom = np.where(valid, shear2, 1.0)
+    correction = np.where(valid, (h_term - 0.5 * shear2) ** 2 / denom, 0.0)
+    d_r = np.where(valid, -dmerc + correction, 0.0)
+    return (
+        np.asarray(d_r, dtype=float),
+        np.asarray(h_term, dtype=float),
+        np.asarray(correction, dtype=float),
+        np.asarray(valid, dtype=bool),
+    )
+
+
 def _apply_nyquist_half_weight(
     *,
     coeff_cos: np.ndarray,
@@ -4368,6 +4399,15 @@ def read_wout(path: str | Path) -> WoutData:
         jdotb = np.asarray(ds.variables.get("jdotb", np.zeros((ns,), dtype=float))[:])
         bdotb = np.asarray(ds.variables.get("bdotb", np.zeros((ns,), dtype=float))[:])
         bdotgradv = np.asarray(ds.variables.get("bdotgradv", np.zeros((ns,), dtype=float))[:])
+        fallback_D_R, fallback_H, fallback_glasser_correction, fallback_glasser_valid = _glasser_from_wout_mercier_terms(
+            DMerc=DMerc,
+            Dshear=Dshear,
+            Dcurr=Dcurr,
+        )
+        D_R = np.asarray(ds.variables.get("D_R", fallback_D_R)[:])
+        H_glasser = np.asarray(ds.variables.get("HGlasser", ds.variables.get("H", fallback_H))[:])
+        glasser_correction = np.asarray(ds.variables.get("GlasserCorrection", fallback_glasser_correction)[:])
+        glasser_shear_valid = np.asarray(ds.variables.get("GlasserShearValid", fallback_glasser_valid)[:], dtype=bool)
 
         ac = np.asarray(ds.variables.get("ac", np.zeros((0,), dtype=float))[:])
         ac_aux_s = np.asarray(ds.variables.get("ac_aux_s", -np.ones((101,), dtype=float))[:])
@@ -4447,6 +4487,10 @@ def read_wout(path: str | Path) -> WoutData:
         Dwell=Dwell,
         Dcurr=Dcurr,
         Dgeod=Dgeod,
+        D_R=D_R,
+        H=H_glasser,
+        glasser_correction=glasser_correction,
+        glasser_shear_valid=glasser_shear_valid,
         jdotb=jdotb,
         bdotb=bdotb,
         bdotgradv=bdotgradv,
@@ -4616,6 +4660,20 @@ def write_wout(path: str | Path, wout: WoutData, *, overwrite: bool = False) -> 
         write_float_variable(ds, "DWell", ("radius",), np.asarray(getattr(wout, "Dwell", np.zeros((ns,), dtype=float))))
         write_float_variable(ds, "DCurr", ("radius",), np.asarray(getattr(wout, "Dcurr", np.zeros((ns,), dtype=float))))
         write_float_variable(ds, "DGeod", ("radius",), np.asarray(getattr(wout, "Dgeod", np.zeros((ns,), dtype=float))))
+        write_float_variable(ds, "D_R", ("radius",), np.asarray(getattr(wout, "D_R", np.zeros((ns,), dtype=float))))
+        write_float_variable(ds, "HGlasser", ("radius",), np.asarray(getattr(wout, "H", np.zeros((ns,), dtype=float))))
+        write_float_variable(
+            ds,
+            "GlasserCorrection",
+            ("radius",),
+            np.asarray(getattr(wout, "glasser_correction", np.zeros((ns,), dtype=float))),
+        )
+        write_float_variable(
+            ds,
+            "GlasserShearValid",
+            ("radius",),
+            np.asarray(getattr(wout, "glasser_shear_valid", np.zeros((ns,), dtype=bool)), dtype=float),
+        )
 
         # Iteration trace (optional).
         write_float_variable(ds, "fsqt", ("nstore_seq",), np.asarray(wout.fsqt))
@@ -5683,6 +5741,10 @@ def wout_minimal_from_fixed_boundary(
     Dcurr = np.zeros((ns,), dtype=float)
     Dwell = np.zeros((ns,), dtype=float)
     Dgeod = np.zeros((ns,), dtype=float)
+    D_R = np.zeros((ns,), dtype=float)
+    H_glasser = np.zeros((ns,), dtype=float)
+    glasser_correction = np.zeros((ns,), dtype=float)
+    glasser_shear_valid = np.zeros((ns,), dtype=bool)
     jdotb = np.zeros((ns,), dtype=float)
     bdotb = np.zeros((ns,), dtype=float)
     bdotgradv = np.zeros((ns,), dtype=float)
@@ -5791,6 +5853,11 @@ def wout_minimal_from_fixed_boundary(
                 bsubu_raw=np.asarray(bsubu_raw, dtype=float),
                 bsubv_raw=np.asarray(bsubv_raw, dtype=float),
                 signgs=int(signgs),
+            )
+            D_R, H_glasser, glasser_correction, glasser_shear_valid = _glasser_from_wout_mercier_terms(
+                DMerc=DMerc,
+                Dshear=Dshear,
+                Dcurr=Dcurr,
             )
             if wout_timing_enabled:
                 wout_timing["mercier_s"] = _time.perf_counter() - t_mercier
@@ -6003,6 +6070,10 @@ def wout_minimal_from_fixed_boundary(
         Dwell=np.asarray(Dwell, dtype=float),
         Dcurr=np.asarray(Dcurr, dtype=float),
         Dgeod=np.asarray(Dgeod, dtype=float),
+        D_R=np.asarray(D_R, dtype=float),
+        H=np.asarray(H_glasser, dtype=float),
+        glasser_correction=np.asarray(glasser_correction, dtype=float),
+        glasser_shear_valid=np.asarray(glasser_shear_valid, dtype=bool),
         jdotb=np.asarray(jdotb, dtype=float),
         bdotb=np.asarray(bdotb, dtype=float),
         bdotgradv=np.asarray(bdotgradv, dtype=float),

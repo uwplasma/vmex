@@ -122,6 +122,22 @@ class WoutData:
     ier_flag: int = 0
     vmec_jax_converged: bool = True
     vmec_jax_status: str = "converged"
+    D_R: np.ndarray | None = None  # (ns,) Glasser resistive-interchange diagnostic
+    H: np.ndarray | None = None  # (ns,) Glasser H term in vmec_jax normalization
+    glasser_correction: np.ndarray | None = None  # (ns,) positive correction added to -DMerc
+    glasser_shear_valid: np.ndarray | None = None  # (ns,) nonzero-shear validity mask
+
+    def __post_init__(self) -> None:
+        zeros = np.zeros((int(self.ns),), dtype=float)
+        false = np.zeros((int(self.ns),), dtype=bool)
+        for name, default in (
+            ("D_R", zeros),
+            ("H", zeros),
+            ("glasser_correction", zeros),
+            ("glasser_shear_valid", false),
+        ):
+            if getattr(self, name) is None:
+                object.__setattr__(self, name, default.copy())
 
 
 def _bool_from_nc(x: Any) -> bool:

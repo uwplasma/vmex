@@ -1,5 +1,5 @@
-JXBFORCE / Mercier Diagnostics (``jdotb``, ``DMerc``)
-=====================================================
+JXBFORCE / Mercier Diagnostics (``jdotb``, ``DMerc``, ``D_R``)
+==============================================================
 
 VMEC2000 writes a set of derived diagnostics related to the Mercier stability
 criterion and to current-related scalars. In the VMEC2000 code base, these
@@ -84,7 +84,8 @@ Glasser Resistive-Interchange Criterion
 
 ``vmec_jax`` also evaluates the resistive interchange diagnostic introduced by
 Glasser, Greene and Johnson and related to the Mercier criterion by Landreman
-and Jorge.  In the notation of Landreman and Jorge,
+and Jorge; see :doc:`references` [10] and [11].  In the notation of Landreman
+and Jorge,
 
 .. math::
 
@@ -118,9 +119,16 @@ does not require that fallback.
 Because the criterion contains ``1 / S^2``, ``D_R`` is physically meaningful
 only away from zero magnetic shear.  Returned dictionaries include
 ``glasser_shear_valid`` for that mask and ``glasser_correction`` for the
-positive correction added to ``-DMerc``.  For optimization, use a small
-``shear_epsilon`` in ``vmec_jax.GlasserResistiveInterchange`` only as a smooth
+positive correction added to ``-DMerc``.  The optimization wrapper follows the
+same sign convention: ``vj.GlasserResistiveInterchange(maximum=0.0)`` applies
+a smooth upper-bound residual to surfaces with ``D_R > 0``, and the
+least-squares tuple target must be ``0.0`` because the bound is encoded by the
+objective object itself.  Use a small ``shear_epsilon`` only as a smooth
 regularization; it does not make zero-shear surfaces physically valid.
+Generated ``wout`` files persist these profiles as ``D_R``, ``HGlasser``,
+``GlasserCorrection`` and ``GlasserShearValid``.  Older VMEC/VMEC++ files that
+do not contain them are read with a fallback reconstruction from ``DMerc``,
+``DShear`` and ``DCurr``.
 
 Key VMEC2000 Convention: Parity Channels For ``bsubu``/``bsubv``
 ----------------------------------------------------------------
