@@ -111,6 +111,13 @@ acceptance criteria or evidence changes.
 - The first staged solver/wout refactor has centralized LCFS R/Z residual edge
   masking, extracted residual-implicit packing/zero-m1 helper seams, and
   removed duplicated bss scalxc undo logic behind direct unit tests.
+- Free-boundary direct-coil performance now has accelerator-forward host scalar
+  policies for non-traced solves. On `office`, the tiny direct-coil
+  `--jit-forces` row measured `0.0528 s` warm on CPU and `0.1857 s` warm on
+  CUDA with detailed timing disabled; accepted-control `fsq1` dropped from
+  about `12.9 ms` to `1.85 ms` in detailed timing. The remaining GPU targets
+  are residual scalar synchronization, setup/profile staging, and preconditioner
+  dispatch/application fusion.
 
 ## Milestone 1: QI Truth And Robustness
 

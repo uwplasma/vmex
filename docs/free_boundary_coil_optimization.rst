@@ -784,11 +784,15 @@ Biot-Savart kernel math.
 
 The host-profile setup path is now controlled by
 ``VMEC_JAX_HOST_PROFILE_SETUP``.  With the default ``auto`` policy, the latest
-office CUDA matrix improved the tiny ``--jit-forces`` direct-coil row to
-``0.1625 s`` warm on CUDA versus ``0.0552 s`` on CPU; setup/profile work fell
-to about ``5.6 ms`` on CUDA and the force kernel remained slightly faster on
-CUDA than CPU.  Residual scalar materialization, accepted-control ``fsq1``, and
-preconditioner dispatch are the next production GPU targets.
+office CUDA matrix improved the tiny ``--jit-forces`` direct-coil row, and the
+follow-up accelerator-forward policies now default
+``VMEC_JAX_HOST_FSQ1_NORMS=auto`` and ``VMEC_JAX_HOST_RESIDUAL_METRICS=auto``
+for non-traced solves.  The detailed timing row measured ``0.1637 s`` warm on
+CUDA versus ``0.0516 s`` on CPU, with accepted-control ``fsq1`` reduced from
+about ``12.9 ms`` to ``1.85 ms``.  The timing-light row, with detailed timing
+synchronization disabled, measured ``0.1857 s`` warm on CUDA versus ``0.0528 s``
+on CPU.  Residual scalar staging and preconditioner dispatch are the next
+production GPU targets.
 
 The same benchmark pass tested existing opt-in knobs and did not promote them:
 ``VMEC_JAX_HOST_UPDATE_ON_ACCELERATOR=1`` was slower for the tiny CUDA row, and

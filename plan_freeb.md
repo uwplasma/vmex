@@ -15,12 +15,13 @@ Date opened: 2026-05-24
 Last updated: 2026-05-28 after stage-level beta-scan checkpointing,
 interrupted-stage status marking, accepted-boundary direct-coil replay
 AD-vs-FD validation, latest CPU/GPU direct-coil benchmark triage, concrete GPU
-platform probing in the benchmark matrix, and the latest `origin/main` merge.
-PR #18 is open and conflict-free at commit `e8b6e265`; CI has been restarted
-by the latest benchmark commit and is not considered merge-ready until all
-required checks are green. The optional ESSOS/direct-coil bootstrap gates are
-local/manual because they require ESSOS assets and launch real free-boundary
-solves. Do not merge PR #18 yet.
+platform probing in the benchmark matrix, latest `origin/main` merge, and the
+accelerator-forward host scalar policy probes. PR #18 is open and
+conflict-free at commit `2d9932b4`; CI has been restarted by the latest docs
+commit and is not considered merge-ready until all required checks are green.
+The optional ESSOS/direct-coil bootstrap gates are local/manual because they
+require ESSOS assets and launch real free-boundary solves. Do not merge PR #18
+yet.
 
 Steps taken:
 
@@ -78,6 +79,17 @@ Steps taken:
 52. Added a forced-active LASYM direct-coil complete-solve finite-difference gate using `VMEC_JAX_FREEB_JAX_NESTOR_OPERATOR=1`; it checks finite nonzero central-FD response for one coil current and one Fourier geometry coefficient.
 53. Ported JAX-side full-grid reconstruction for stellarator-symmetric reduced active-grid samples in the combined dense VMEC/NESTOR operator. The nonsingular Green block receives the reconstructed full grid while the analytic/singular block stays on the active grid, matching the host bridge.
 54. Switched the opt-in complete-solve finite-difference gate to the default stellarator-symmetric path after the reduced-grid reconstruction landed.
+55. Added accepted-control timing splits for the direct-coil solve matrix:
+    `fsq1` preconditioned-norm construction, scalar build, payload/device
+    materialization, ptau retrieval, and state-Jacobian sub-buckets.
+56. Promoted `VMEC_JAX_HOST_FSQ1_NORMS=auto` for non-traced accelerator forward
+    solves after `office` showed the CUDA accepted-control `fsq1` bucket
+    dropping from about `12.9 ms` to `1.85 ms`.
+57. Promoted `VMEC_JAX_HOST_RESIDUAL_METRICS=auto` for non-traced accelerator
+    forward solves and reran timing-light rows. The tiny direct-coil
+    `--jit-forces` row is now `0.0528 s` warm on CPU and `0.1857 s` warm on
+    CUDA without detailed timing synchronization; this is a real improvement
+    but still CPU-favorable for the tiny case.
 55. Added a shape/content-keyed compiled-closure cache for the opt-in JAX VMEC/NESTOR operator. The closure bakes mode-basis and Green-function tables as static constants while keeping boundary geometry and external normal-field source arrays dynamic.
 56. Made the JAX analytic/singular operator JIT-compatible by keeping static VMEC coefficient/mode-index tables as host constants instead of tracer scalars.
 57. Added beta-scan case checkpoints for strict LP-QA bootstrap/no-bootstrap scans.  Each accepted radial-grid stage now writes a per-stage input, WOUT, metrics payload, and `case_checkpoints/{backend}_beta_*.json`, and `--resume-existing` can promote completed stage checkpoints into final case outputs without rerunning accepted stages.

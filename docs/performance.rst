@@ -3156,6 +3156,14 @@ residual scalar synchronization (``20.0 ms``), setup/profile work
 accepted-control ``fsq1`` path and toward residual metric staging plus
 preconditioner dispatch fusion.
 
+The production-like timing-light row, which disables detailed timing
+synchronization, moved in the same direction: the tiny ``--jit-forces`` direct
+coil row measured ``0.0528 s`` warm on CPU and ``0.1857 s`` warm on CUDA
+(``3.52x`` GPU/CPU).  This confirms the policy is not merely improving a
+diagnostic bucket, but the tiny case is still launch/synchronization dominated.
+Do not claim GPU speedup for this row; use it as the regression target for the
+next residual/preconditioner dispatch fusion pass.
+
 Two opt-in policies were checked and are deliberately not promoted.  Allowing
 the host-update path on accelerators with ``VMEC_JAX_HOST_UPDATE_ON_ACCELERATOR=1``
 made the tiny CUDA row slower in this matrix, and setting
