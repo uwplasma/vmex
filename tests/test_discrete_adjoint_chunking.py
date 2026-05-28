@@ -1352,6 +1352,46 @@ def test_jvp_columns_chunks_env_before_dynamic_basepoint_runner(monkeypatch):
     assert diagnostics["replay_jvp_columns_input_column_count"] == 5
 
 
+def test_jvp_columns_dynamic_basepoint_uses_runner_zero_aux(monkeypatch):
+    monkeypatch.delenv("VMEC_JAX_DYNAMIC_REPLAY_MODE", raising=False)
+    calls = []
+
+    class FakeRunner:
+        def __call__(self, *_args, **_kwargs):
+            raise AssertionError("dynamic basepoint path should use runner zero_aux entrypoint")
+
+        def zero_aux(self, state_tangents, stacked_base_carries_in, stacked_traces_in):
+            calls.append(np.asarray(state_tangents).shape)
+            assert stacked_base_carries_in is stacked_base_carries
+            assert stacked_traces_in is stacked
+            return (state_tangents + 2.0,)
+
+    def fake_runner(*, static, stacked, stacked_base_carries, static_flags):
+        return FakeRunner()
+
+    monkeypatch.setattr(da, "_checkpoint_tape_dynamic_basepoint_scan_runner", fake_runner)
+    stacked_base_carries = _fake_carry_stacked(width=3)
+    stacked = {"active": np.asarray([True])}
+    tape = SimpleNamespace(
+        step_traces=(),
+        dynamic_initial_carry=(np.zeros(3, dtype=float),),
+        dynamic_base_carries_stacked=stacked_base_carries,
+        stacked_step_traces=stacked,
+        step_trace_static_flags={"precond_jmax": 1},
+    )
+    tangents = np.arange(6, dtype=float).reshape(2, 3)
+
+    out = da.checkpoint_tape_state_jvp_columns(
+        tape=tape,
+        static="static",
+        initial_tangents=tangents,
+        rebuild_preconditioner=True,
+    )
+
+    np.testing.assert_allclose(np.asarray(out), tangents + 2.0)
+    assert calls == [(2, 3)]
+
+
 def test_jvp_columns_auto_chunk_falls_back_when_env_override_invalid(monkeypatch):
     monkeypatch.delenv("VMEC_JAX_DYNAMIC_REPLAY_MODE", raising=False)
     monkeypatch.setenv("VMEC_JAX_REPLAY_COLUMN_CHUNK", "not-an-int")
