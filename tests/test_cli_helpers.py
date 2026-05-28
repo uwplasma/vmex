@@ -156,7 +156,9 @@ def test_cli_test_mode_copies_packaged_input_solves_and_plots(monkeypatch, tmp_p
     input_path = outdir / "input.nfp4_QH_warm_start"
     wout_path = outdir / "wout_nfp4_QH_warm_start.nc"
     assert input_path.exists()
-    assert "&INDATA" in input_path.read_text()
+    input_text = input_path.read_text()
+    assert "&INDATA" in input_text
+    assert "FTOL_ARRAY  = 1e-12" in input_text
     assert wout_path.read_text() == "wout"
     assert calls["run_path"] == input_path.resolve()
     assert calls["run_kwargs"]["verbose"] is False
@@ -165,6 +167,7 @@ def test_cli_test_mode_copies_packaged_input_solves_and_plots(monkeypatch, tmp_p
     assert calls["plot_path"] == wout_path.resolve()
     assert calls["plot_outdir"] == (outdir / "figures").resolve()
     output = capsys.readouterr().out
+    assert "FTOL_ARRAY = 1e-12" in output
     assert "Equivalent manual command" in output
     assert "Equivalent manual plotting command" in output
 

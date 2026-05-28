@@ -62,9 +62,10 @@ vmec_jax --test
 ```
 
 This copies the packaged `input.nfp4_QH_warm_start` into `vmec_jax_test/`,
-runs the solver, writes `wout_nfp4_QH_warm_start.nc`, and automatically plots
-the WOUT file into `vmec_jax_test/figures/`. The terminal output also prints the
-equivalent manual commands so new users can repeat each step themselves.
+runs the solver with `FTOL_ARRAY = 1e-12` for a faster first check, writes
+`wout_nfp4_QH_warm_start.nc`, and automatically plots the WOUT file into
+`vmec_jax_test/figures/`. The terminal output also prints the equivalent manual
+commands so new users can repeat each step themselves.
 
 To run the same workflow manually with an input downloaded from the repository:
 

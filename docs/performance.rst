@@ -1187,6 +1187,18 @@ execution.  This exposes ``*_tape_replay_dispatch``,
 normal CPU/GPU comparison sweeps because the explicit synchronization changes
 the measured workload.
 
+A 2026-05-28 ``office`` rerun at commit ``b085c15`` used this instrumentation
+on a QH ``max_mode=2`` dense exact-Jacobian callback with one accepted-point
+profile, ``--inner-max-iter 40``, ``--trial-max-iter 20``, and
+``--solver-device gpu``.  The callback took ``12.01 s``.  The replay counters
+reported exactly one ``dynamic_basepoint`` JVP leaf call, ``24`` tangent
+columns, and no chunking.  The measured bottlenecks were
+``exact_tape_build=4.36 s``, ``jacobian_tape_replay=3.60 s``, and
+``jacobian_residual_tangents=2.32 s``.  That result rules out chunk-size
+selection as the immediate blocker for this case; the next optimization target
+is accepted-tape build, replay dispatch/compile-like overhead, and dense
+residual-tangent projection.
+
 For production cache-growth audits, use the same accepted-point callback mode
 with JSON output and explicit budgets.  The report records per-repeat phase
 deltas, optimizer/global JIT cache cardinalities before and after each repeat,

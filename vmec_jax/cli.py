@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 from importlib import resources
 from pathlib import Path
@@ -18,6 +19,7 @@ from .driver import (
 from .namelist import read_indata
 
 _TEST_INPUT_NAME = "input.nfp4_QH_warm_start"
+_TEST_FTOL = 1.0e-12
 _PLOT_AUTO = "__vmec_jax_plot_auto__"
 
 
@@ -284,7 +286,18 @@ def _copy_test_input(outdir: Path) -> Path:
     resource = resources.files("vmec_jax").joinpath("data", _TEST_INPUT_NAME)
     with resources.as_file(resource) as src:
         shutil.copyfile(src, dst)
+    _set_test_input_ftol(dst, ftol=_TEST_FTOL)
     return dst
+
+
+def _set_test_input_ftol(path: Path, *, ftol: float) -> None:
+    """Use a quick-start tolerance without changing the packaged reference deck."""
+    text = path.read_text()
+    replacement = f"FTOL_ARRAY  = {float(ftol):.0e}"
+    new_text, count = re.subn(r"(?im)^\s*FTOL_ARRAY\s*=.*$", f"  {replacement}", text, count=1)
+    if count == 0:
+        new_text = re.sub(r"(?im)^(\s*NITER_ARRAY\s*=.*)$", rf"\1\n  {replacement}", text, count=1)
+    path.write_text(new_text)
 
 
 def _run_bundled_test(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
@@ -307,6 +320,7 @@ def _run_bundled_test(args: argparse.Namespace, parser: argparse.ArgumentParser)
     print("---------------------")
     print("This quick-start run uses the packaged fixed-boundary QH warm-start input.")
     print(f"1. Wrote the VMEC input file to: {input_path}")
+    print(f"   The copied test input uses FTOL_ARRAY = {_TEST_FTOL:.0e} for a faster first run.")
     print("2. Running vmec_jax to solve the equilibrium and write a WOUT file.")
     print()
     print("Equivalent manual command:")
