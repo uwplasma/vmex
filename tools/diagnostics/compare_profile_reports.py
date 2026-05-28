@@ -61,7 +61,15 @@ EXACT_PROFILE_METRIC_NAMES = {
         "linear_operator_initial_transpose",
     ),
     "residual_tangents_s": ("jacobian_residual_tangents",),
+    "residual_tangents_dispatch_s": ("jacobian_residual_tangents_dispatch",),
+    "residual_tangents_ready_s": ("jacobian_residual_tangents_ready",),
     "projected_residual_tangents_s": ("jacobian_projected_replay_residual_tangents",),
+    "projected_residual_tangents_dispatch_s": (
+        "jacobian_projected_replay_residual_tangents_dispatch",
+    ),
+    "projected_residual_tangents_ready_s": (
+        "jacobian_projected_replay_residual_tangents_ready",
+    ),
     "projected_replay_total_s": (
         "jacobian_projected_replay_total",
         "jacobian_fused_projected_replay_total",
@@ -242,7 +250,11 @@ METRIC_ORDER = (
     "initial_tangents_vmap_ready_s",
     "initial_projection_s",
     "residual_tangents_s",
+    "residual_tangents_dispatch_s",
+    "residual_tangents_ready_s",
     "projected_residual_tangents_s",
+    "projected_residual_tangents_dispatch_s",
+    "projected_residual_tangents_ready_s",
     "projected_replay_total_s",
     "projected_replay_dispatch_s",
     "accepted_replay_dispatch_s",
@@ -377,7 +389,11 @@ METRIC_LABELS = {
     "initial_tangents_vmap_ready_s": "initial tangents vmap ready",
     "initial_projection_s": "initial VJP/projection",
     "residual_tangents_s": "residual tangents",
+    "residual_tangents_dispatch_s": "residual tangents dispatch",
+    "residual_tangents_ready_s": "residual tangents ready",
     "projected_residual_tangents_s": "projected residual tangents",
+    "projected_residual_tangents_dispatch_s": "projected residual tangents dispatch",
+    "projected_residual_tangents_ready_s": "projected residual tangents ready",
     "projected_replay_total_s": "projected replay total",
     "projected_replay_dispatch_s": "projected replay dispatch",
     "accepted_replay_dispatch_s": "accepted replay dispatch",
@@ -505,7 +521,11 @@ BOTTLENECK_METRICS = (
     ("initial_tangents_vmap_ready_s", "initial tangent vmap ready"),
     ("initial_projection_s", "initial VJP/projection"),
     ("residual_tangents_s", "residual tangent projection"),
+    ("residual_tangents_dispatch_s", "residual tangent dispatch"),
+    ("residual_tangents_ready_s", "residual tangent ready"),
     ("projected_residual_tangents_s", "projected residual tangent projection"),
+    ("projected_residual_tangents_dispatch_s", "projected residual tangent dispatch"),
+    ("projected_residual_tangents_ready_s", "projected residual tangent ready"),
     ("projected_replay_total_s", "projected replay total"),
     ("projected_replay_dispatch_s", "projected replay dispatch"),
     ("accepted_replay_dispatch_s", "accepted-point replay dispatch"),
@@ -1350,6 +1370,8 @@ def _projected_replay_summary(
     total_s = _metric_float(metrics, "projected_replay_total_s")
     dispatch_s = _metric_float(metrics, "projected_replay_dispatch_s")
     residual_s = _metric_float(metrics, "projected_residual_tangents_s")
+    residual_dispatch_s = _metric_float(metrics, "projected_residual_tangents_dispatch_s")
+    residual_ready_s = _metric_float(metrics, "projected_residual_tangents_ready_s")
     if total_s is None and dispatch_s is None and residual_s is None:
         return None
     count = None
@@ -1367,6 +1389,8 @@ def _projected_replay_summary(
         "total_s": total_s,
         "dispatch_s": dispatch_s,
         "residual_tangents_s": residual_s,
+        "residual_tangents_dispatch_s": residual_dispatch_s,
+        "residual_tangents_ready_s": residual_ready_s,
         "count": count,
         "share_of_total": (
             float(total_s) / float(total_runtime_s)
@@ -1962,6 +1986,14 @@ def format_text(comparison: dict[str, Any]) -> str:
                 _format_value(projected.get("total_s"), "projected_replay_total_s"),
                 _format_value(projected.get("dispatch_s"), "projected_replay_dispatch_s"),
                 _format_value(projected.get("residual_tangents_s"), "projected_residual_tangents_s"),
+                _format_value(
+                    projected.get("residual_tangents_dispatch_s"),
+                    "projected_residual_tangents_dispatch_s",
+                ),
+                _format_value(
+                    projected.get("residual_tangents_ready_s"),
+                    "projected_residual_tangents_ready_s",
+                ),
                 _format_value(projected.get("count"), "accepted_point_replay_count"),
                 (
                     "n/a"
@@ -1974,7 +2006,16 @@ def format_text(comparison: dict[str, Any]) -> str:
         lines.extend(["", "Projected replay totals:"])
         lines.append(
             _table(
-                ["label", "total_s", "dispatch_s", "residual_tangent_s", "count", "share"],
+                [
+                    "label",
+                    "total_s",
+                    "dispatch_s",
+                    "residual_tangent_s",
+                    "residual_dispatch_s",
+                    "residual_ready_s",
+                    "count",
+                    "share",
+                ],
                 projected_rows,
             )
         )

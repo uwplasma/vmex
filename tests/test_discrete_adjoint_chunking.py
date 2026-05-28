@@ -1311,6 +1311,8 @@ def test_dynamic_safe_dt_from_force_arrays_limits_only_finite_nonzero_forces():
 def test_jvp_columns_chunks_env_before_dynamic_basepoint_runner(monkeypatch):
     monkeypatch.delenv("VMEC_JAX_DYNAMIC_REPLAY_MODE", raising=False)
     monkeypatch.setenv("VMEC_JAX_REPLAY_COLUMN_CHUNK", "2")
+    monkeypatch.setenv("VMEC_JAX_TIMING", "1")
+    da.clear_replay_scan_caches()
     calls = []
 
     def fake_runner(*, static, stacked, stacked_base_carries, static_flags):
@@ -1341,6 +1343,13 @@ def test_jvp_columns_chunks_env_before_dynamic_basepoint_runner(monkeypatch):
 
     np.testing.assert_allclose(np.asarray(out), tangents)
     assert calls == [(2, 3), (2, 3), (1, 3)]
+    diagnostics = da.replay_scan_cache_diagnostics(reset=True)
+    assert diagnostics["replay_jvp_columns_chunked_call_count"] == 1
+    assert diagnostics["replay_jvp_columns_chunk_count"] == 3
+    assert diagnostics["replay_jvp_columns_last_chunk_size"] == 2
+    assert diagnostics["replay_jvp_columns_dynamic_basepoint_count"] == 3
+    assert diagnostics["replay_jvp_columns_leaf_call_count"] == 3
+    assert diagnostics["replay_jvp_columns_input_column_count"] == 5
 
 
 def test_jvp_columns_auto_chunk_falls_back_when_env_override_invalid(monkeypatch):

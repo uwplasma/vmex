@@ -2,9 +2,9 @@
 
 Last updated: 2026-05-28
 Primary branch: `main`
-Baseline release: `v0.0.13`
-Latest known green `main` CI: `3a15af2`
-Current candidate: main `cc33d5c5` plus free-boundary direct-coil PR #18 refresh
+Baseline release: `v0.0.14`
+Latest known green `main` CI: `b085c15`
+Current candidate: post-`v0.0.14` performance instrumentation plus free-boundary direct-coil PR #18 refresh
 
 This is the living execution plan for making `vmec_jax` accurate, fast,
 differentiable, documented, and usable by external researchers. Update it when
@@ -79,7 +79,15 @@ acceptance criteria or evidence changes.
   SIMSOPT Redl formula gate wiring, the full local required gate passed with
   `2354 passed, 20 skipped, 110 deselected, 1 xfailed` and 95.09% coverage in
   about 6:52; full Sphinx passed warning-clean, and the optional aggregate
-  SIMSOPT lane passed with `8 passed` under `RUN_SIMSOPT_VALIDATION=1`. The optional
+  SIMSOPT lane passed with `8 passed` under `RUN_SIMSOPT_VALIDATION=1`. After
+  the exact replay JVP instrumentation patch, the same full required gate
+  passed locally with `2354 passed, 20 skipped, 110 deselected, 1 xfailed` and
+  95.09% coverage in about 6:32; GitHub Actions then passed build, docs,
+  parity dry-run, physics smoke, and Python 3.10/3.11/3.12 fast tests through
+  `b085c15`. The `v0.0.14` release-candidate gate then passed locally with the
+  fetched WOUT fixture bundle, the same `2354 passed, 20 skipped,
+  110 deselected, 1 xfailed`, and 95.09% coverage in about 6:51 after updating
+  stale QA fixture constants to the current release asset bundle. The optional
   converged VMEC2000 parity gate remains opt-in with
   `VMEC2000_INTEGRATION=1`. `solve.py` still dominates the missing-line
   surface, so future coverage should come from physics-gated refactor seams
@@ -115,7 +123,11 @@ acceptance criteria or evidence changes.
   `qi_stage_checkpoint.json` files and a root `stage_checkpoint.json` before
   later high-mode stages or final Boozer audits can time out. Low-resolution
   remote GPU smoke validation confirmed the root and per-stage files are
-  present after a later-stage timeout.
+  present after a later-stage timeout. A production-scale NFP3 GPU verification
+  on `office` later timed out at the bounded 6840 s budget without crashing and
+  preserved partial metrics (`legacy QI=5.14e-4`, mirror `0.295`, elongation
+  `3.91`, aspect `3.55`, iota `-1.05`), validating checkpoint durability while
+  keeping promotion and robustness tuning separate from checkpointing.
 - The common-minimal showcase now uses a deterministic `1e-3`
   target-helicity perturbation on active hint modes. A focused remote QA NFP=3
   amplitude study showed `1e-3` reached the iota/aspect gates with a lower final
@@ -311,8 +323,17 @@ Acceptance:
       in `jacobian_tape_replay`, `jacobian_initial_tangents`, and
       `jacobian_residual_tangents`; an `office` cold fixed-boundary smoke still
       favored CPU (`13.80 s` versus `68.86 s` GPU). The next concrete
-      performance target is tangent fusion/reuse, not fixed-boundary force
-      kernels.
+      profiling seam now has timing-only counters for
+      `replay_jvp_columns_*` path selection, chunk count, leaf replay calls,
+      and covered tangent columns, so GPU exact callbacks can separate
+      dynamic-basepoint replay, segmented replay, generic scan fallback, and
+      chunking overhead before changing math. A 2026-05-28 `office` QH mode-2
+      GPU run confirmed this case uses a single unchunked dynamic-basepoint JVP
+      over 24 columns, with `tape_build_wall=4.36 s`, `replay_wall=3.60 s`,
+      and `residual_tangent_wall=2.32 s` inside a `12.01 s` callback. The
+      current performance target is accepted-tape build plus residual
+      tangent/projection fusion or reuse, not fixed-boundary force kernels or
+      replay chunk-size selection.
 - [x] Reuse cached affine initial-state tangents in the scalar-gradient path.
       `objective_and_gradient_fun` now projects the reverse tape cotangent
       through the same cached tangent map as dense exact Jacobians instead of
@@ -509,9 +530,12 @@ performance step is structural control-loop staging/fusion.
   tape replay dropping from about `22.2 s` to about `5.3 s`. Production
   fixed-boundary auto policy now uses the VMEC-control non-scan loop on CPU and
   GPU because May 2026 `office` profiles showed converged GPU non-scan solves
-  faster than scan across QH, QA, QI, and LASYM examples. A fused
-  residual-projected replay experiment was profiled and rejected because it was
-  neutral on non-LASYM QH and slower on chunked LASYM CPU callbacks. The
+  faster than scan across QH, QA, QI, and LASYM examples. The older fused
+  residual-projected replay experiment was rejected because it was neutral on
+  non-LASYM QH and slower on chunked LASYM CPU callbacks, but the current
+  JVP-only/basepoint-carry projected replay path is now the GPU default for
+  stellarator-symmetric callbacks with at least 24 columns after a bounded QH
+  mode-2 profile showed a small win. The
   matrix-free linear-operator path now reuses the transpose of the setup
   `jax.linearize` object instead of tracing a second initial-state VJP, and the
   profile comparator exposes the new `linear_operator_initial_transpose`
@@ -523,10 +547,25 @@ performance step is structural control-loop staging/fusion.
   dynamic replay payload staging recognizes accelerator backend names beyond
   the literal `gpu`. Projected accepted-point replay buckets now also feed the
   profiler budget checks and comparison summaries, so GPU/default replay work is
-  no longer under-attributed as legacy tape-only replay. The next performance
-  blockers are the unattributed compiled work inside accepted VMEC iteration
-  loops, scan-trial timing/cache-key evidence, larger-mode accepted-point replay
-  cost, and dense residual-tangent projection.
+  no longer under-attributed as legacy tape-only replay. The May 28 `office`
+  QH mode-2 GPU exact-Jacobian rerun at `b085c15` used one dynamic-basepoint
+  JVP replay over 24 columns with no chunking (`replay_wall=3.60 s`,
+  `residual_tangent_wall=2.32 s`, `tape_build_wall=4.36 s`, total callback
+  `12.01 s`), confirming that chunk selection is no longer the immediate
+  blocker for this case. A follow-up `office` profile with the new residual
+  projection dispatch/ready split used three perturbed QH mode-2 GPU exact
+  Jacobian callbacks (`13.04 s`, `3.98 s`, `3.27 s`) and showed
+  `jacobian_residual_tangents=2.263 s` split into `2.204 s` dispatch and
+  `0.059 s` device-ready time. Without explicit sync timing, standard replay
+  took `20.76 s` over three callbacks and forced projected replay took
+  `20.23 s`, so the production threshold was lowered from 48 to 24 non-LASYM
+  columns. A May 28 follow-up rejected two additional GPU policies: `whole_scan`
+  replay regressed a QH mode-2 callback to `41.64 s`, and fused
+  replay/projection was slower than regular projected replay (`13.38 s` vs
+  `12.66 s`), so fused projected replay is now opt-in. The next performance
+  blockers are accepted-tape build, replay dispatch/compile-like overhead,
+  dense residual-projection callback construction, scan-trial timing/cache-key
+  evidence, and larger-mode accepted-point replay cost.
 - VMEC parity and physics gates: 99%. Required-tier bundled gates now cover
   `chipf`, stored `B`, input flux/profile propagation, finite-beta
   `pres/presf`, VMEC `iotas -> iotaf` smoothing, surface-averaged current
@@ -574,15 +613,19 @@ performance step is structural control-loop staging/fusion.
   mechanics live in `qi_optimization_cases.py` and
   `qi_optimization_support.py`. Large
   solver/wout/free-boundary splits remain deferred behind parity gates.
-- Docs/release hygiene: latest released baseline is `v0.0.13`, with PyPI
-  publication verified. Post-release `main` has local warning-clean Sphinx and a
+- Docs/release hygiene: release target is `v0.0.14` after `vmec_jax --test`
+  quick-start tolerance tuning. The previous released baseline is `v0.0.13`,
+  with PyPI publication verified. Post-release `main` has local warning-clean Sphinx and a
   clean 95% CI-equivalent coverage pass through the May 27 staged-seed
   candidate, plus the May 28 staged-seed fallback coverage refresh
   and scan-helper margin refresh (`2354 passed, 20 skipped, 110 deselected,
-  1 xfailed`, 95.09%). GitHub Actions is green through `3a15af2`, carrying the
-  QI staged-seed, explicit CLI docs updates, fallback materialization test, and
-  green-candidate documentation refresh; this follow-up candidate has local
-  warning-clean Sphinx and optional SIMSOPT parity evidence.
+  1 xfailed`, 95.09%), plus the exact replay JVP instrumentation rerun at the
+  same 95.09% coverage level and the `v0.0.14` release-candidate rerun
+  (`2354 passed, 20 skipped, 110 deselected, 1 xfailed`, 95.09%). GitHub
+  Actions is green through `b085c15`,
+  carrying the QI staged-seed, explicit CLI docs updates, fallback
+  materialization test, optional SIMSOPT Redl gate wiring, and replay JVP
+  instrumentation.
   Performance/discrete-adjoint/docs reflect the current replay and finite-beta
   policies, diagnostics docs cover detailed preconditioner timing, and a
   command-level release checklist now ties local gates, tools/validation
@@ -593,9 +636,9 @@ performance step is structural control-loop staging/fusion.
   local full-tier refreshes cannot accidentally bloat commits.
   The documented custom QI seed audit command was validated end-to-end on
   `input.QI_stel_seed_3127`; a production-scale NFP3 GPU staged-seed
-  verification is still running on `office` and has advanced past the previous
-  missing-`input.final` crash into the first mirror-ramp optimization stage.
-  Final seed-robust QI and GPU-production artifacts remain open.
+  verification on `office` reached a controlled timeout with durable partial
+  checkpoints and metrics instead of the previous missing-`input.final` crash.
+  Final seed-robust QI promotion and GPU-production artifacts remain open.
 
 Release-critical lanes requested in this push (continuation, exact
 accepted-point output, VMEC parity/physics gates, and docs/release hygiene) are

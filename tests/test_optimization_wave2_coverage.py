@@ -355,7 +355,7 @@ def test_projected_replay_residuals_env_and_backend_branches(monkeypatch) -> Non
     monkeypatch.delenv("VMEC_JAX_OPT_PROJECTED_REPLAY_RESIDUALS")
 
     opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=False))
-    assert opt._projected_replay_residuals_enabled(24) is False
+    assert opt._projected_replay_residuals_enabled(24) is True
     assert opt._projected_replay_residuals_enabled(48) is True
 
     opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=True))
@@ -368,7 +368,7 @@ def test_projected_replay_residuals_env_and_backend_branches(monkeypatch) -> Non
     opt._solver_device_name = None
     monkeypatch.setattr(compat, "jax", SimpleNamespace(default_backend=lambda: "cuda"))
     assert opt._projected_replay_residuals_enabled(48) is True
-    assert opt._projected_replay_residuals_enabled(24) is False
+    assert opt._projected_replay_residuals_enabled(24) is True
     monkeypatch.setattr(compat, "jax", SimpleNamespace(default_backend=lambda: "cpu"))
     assert opt._projected_replay_residuals_enabled(48) is False
     monkeypatch.setattr(
@@ -377,6 +377,19 @@ def test_projected_replay_residuals_env_and_backend_branches(monkeypatch) -> Non
         SimpleNamespace(default_backend=lambda: (_ for _ in ()).throw(RuntimeError("backend probe failed"))),
     )
     assert opt._projected_replay_residuals_enabled(48) is False
+
+
+def test_fused_projected_replay_is_opt_in(monkeypatch) -> None:
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+
+    monkeypatch.delenv("VMEC_JAX_OPT_FUSED_PROJECTED_REPLAY", raising=False)
+    assert opt._fused_projected_replay_enabled() is False
+
+    monkeypatch.setenv("VMEC_JAX_OPT_FUSED_PROJECTED_REPLAY", "1")
+    assert opt._fused_projected_replay_enabled() is True
+
+    monkeypatch.setenv("VMEC_JAX_OPT_FUSED_PROJECTED_REPLAY", "no")
+    assert opt._fused_projected_replay_enabled() is False
 
 
 def test_projected_replay_jacobian_path_projects_without_intermediate_sync(monkeypatch) -> None:

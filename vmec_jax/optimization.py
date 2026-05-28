@@ -2070,6 +2070,23 @@ class FixedBoundaryExactOptimizer:
         self._profile_add(name, total_s)
         return value
 
+    def _profile_blocking_phase(self, name: str, start: float, value):
+        """Record dispatch and mandatory device-ready timing for a blocking callback phase."""
+
+        dispatch_s = time.perf_counter() - float(start)
+        self._profile_add(f"{name}_dispatch", dispatch_s)
+        try:
+            from ._compat import jax as _jax
+
+            t_ready = time.perf_counter()
+            value = _jax.block_until_ready(value)
+            ready_s = time.perf_counter() - t_ready
+        except Exception:
+            ready_s = 0.0
+        self._profile_add(f"{name}_ready", ready_s)
+        self._profile_add(name, dispatch_s + ready_s)
+        return value
+
     def _make_residuals_eval_fn(self, residuals_fn: Callable) -> Callable:
         """Return the non-differentiating residual evaluator used by callbacks."""
         flag = os.getenv("VMEC_JAX_OPT_JIT_RESIDUALS", "1").strip().lower()
@@ -2914,12 +2931,12 @@ class FixedBoundaryExactOptimizer:
             return False
         if bool(getattr(getattr(self._static, "cfg", None), "lasym", False)):
             return False
-        # Mode-2 GPU profiles (24 columns) were slower with projected replay.
-        # Mode-3 QA/QH profiles (48 columns) were neutral-to-much-faster because
-        # the residual projection avoids a large intermediate tangent transfer.
+        # May 2026 office profiles now show a small but repeatable win for
+        # non-LASYM QH mode-2 (24 columns) and larger wins for mode-3+ because
+        # the residual projection avoids an intermediate tangent synchronization.
         # LASYM mode-2 profiles also have 48+ columns, but projected replay is
         # currently much slower there, so keep LASYM on the conservative path.
-        return int(n_params) >= 48
+        return int(n_params) >= 24
 
     def _fused_projected_replay_enabled(self) -> bool:
         """Whether projected replay should fuse replay and residual projection when possible."""
@@ -2927,7 +2944,10 @@ class FixedBoundaryExactOptimizer:
         flag = os.getenv("VMEC_JAX_OPT_FUSED_PROJECTED_REPLAY", "").strip().lower()
         if flag:
             return flag in ("1", "true", "yes", "on")
-        return True
+        # Office GPU profiles on 2026-05-28 show the fused mode-2 QH callback
+        # is slower than the regular projected replay path. Keep fusion opt-in
+        # for diagnostics until a broader matrix shows a reproducible win.
+        return False
 
     def _discrete_jacobian_residual_helper(self, params_size: int, residuals_from_packed, *, jax):
         """Return cached residual/Jacobian projection helper for packed tangents."""
@@ -3118,8 +3138,11 @@ class FixedBoundaryExactOptimizer:
                 payload["tape"].dynamic_base_carries_stacked,
                 payload["tape"].stacked_step_traces,
             )
-            residuals, jac = jax.block_until_ready((residuals, jac))
-            self._profile_add("jacobian_fused_projected_replay_total", time.perf_counter() - t_replay)
+            residuals, jac = self._profile_blocking_phase(
+                "jacobian_fused_projected_replay_total",
+                t_replay,
+                (residuals, jac),
+            )
             self._last_jacobian_residual = np.asarray(residuals, dtype=float)
             self._remember_exact_residual(exact_param_key, self._last_jacobian_residual)
             t_host = time.perf_counter()
@@ -3149,8 +3172,11 @@ class FixedBoundaryExactOptimizer:
 
         t_res = time.perf_counter()
         residuals, jac = helper_cache["residual_tangent_jacobian"](packed_final, final_tangents)
-        residuals, jac = jax.block_until_ready((residuals, jac))
-        self._profile_add("jacobian_projected_replay_residual_tangents", time.perf_counter() - t_res)
+        residuals, jac = self._profile_blocking_phase(
+            "jacobian_projected_replay_residual_tangents",
+            t_res,
+            (residuals, jac),
+        )
         self._profile_add("jacobian_projected_replay_total", time.perf_counter() - t_replay)
         self._last_jacobian_residual = np.asarray(residuals, dtype=float)
         self._remember_exact_residual(exact_param_key, self._last_jacobian_residual)
@@ -3221,10 +3247,13 @@ class FixedBoundaryExactOptimizer:
 
         t_res = time.perf_counter()
         residuals, jac = helper_cache["residual_tangent_jacobian"](packed_final, final_tangents)
-        residuals, jac = jax.block_until_ready((residuals, jac))
+        residuals, jac = self._profile_blocking_phase(
+            "jacobian_residual_tangents",
+            t_res,
+            (residuals, jac),
+        )
         self._last_jacobian_residual = np.asarray(residuals, dtype=float)
         self._remember_exact_residual(exact_param_key, self._last_jacobian_residual)
-        self._profile_add("jacobian_residual_tangents", time.perf_counter() - t_res)
         t_host = time.perf_counter()
         out = np.asarray(jac, dtype=float)
         self._profile_add("jacobian_host_materialize", time.perf_counter() - t_host)

@@ -87,6 +87,25 @@ _REPLAY_SCAN_CACHE_DIAGNOSTICS: dict[str, int | float] = {
     for label in _REPLAY_SCAN_CACHE_LABELS
     for suffix in ("lookup_s", "build_s", "hit_count", "miss_count")
 }
+_REPLAY_JVP_COLUMN_PATH_LABELS: tuple[str, ...] = (
+    "identity",
+    "dynamic_basepoint",
+    "segmented_dynamic_basepoint",
+    "dynamic_linearize",
+    "dynamic_scan_linearize",
+    "generic_per_trace",
+    "generic_scan",
+)
+_REPLAY_SCAN_CACHE_DIAGNOSTICS.update(
+    {
+        **{f"replay_jvp_columns_{label}_count": 0 for label in _REPLAY_JVP_COLUMN_PATH_LABELS},
+        "replay_jvp_columns_leaf_call_count": 0,
+        "replay_jvp_columns_input_column_count": 0,
+        "replay_jvp_columns_chunked_call_count": 0,
+        "replay_jvp_columns_chunk_count": 0,
+        "replay_jvp_columns_last_chunk_size": 0,
+    }
+)
 
 _DIRECT_TAPE_TIMING_KEYS = (
     "tape_solve_call_s",
@@ -152,6 +171,33 @@ def _record_replay_scan_cache_lookup(
     _REPLAY_SCAN_CACHE_DIAGNOSTICS[f"{prefix}_build_s"] += float(build_s)
     count_key = f"{prefix}_{'hit' if bool(hit) else 'miss'}_count"
     _REPLAY_SCAN_CACHE_DIAGNOSTICS[count_key] = int(_REPLAY_SCAN_CACHE_DIAGNOSTICS[count_key]) + 1
+
+
+def _record_replay_jvp_columns_path(label: str, *, n_columns: int) -> None:
+    if not _replay_scan_cache_diagnostics_enabled():
+        return
+    key = f"replay_jvp_columns_{label}_count"
+    if key not in _REPLAY_SCAN_CACHE_DIAGNOSTICS:
+        return
+    _REPLAY_SCAN_CACHE_DIAGNOSTICS[key] = int(_REPLAY_SCAN_CACHE_DIAGNOSTICS[key]) + 1
+    _REPLAY_SCAN_CACHE_DIAGNOSTICS["replay_jvp_columns_leaf_call_count"] = (
+        int(_REPLAY_SCAN_CACHE_DIAGNOSTICS["replay_jvp_columns_leaf_call_count"]) + 1
+    )
+    _REPLAY_SCAN_CACHE_DIAGNOSTICS["replay_jvp_columns_input_column_count"] = (
+        int(_REPLAY_SCAN_CACHE_DIAGNOSTICS["replay_jvp_columns_input_column_count"]) + max(0, int(n_columns))
+    )
+
+
+def _record_replay_jvp_columns_chunking(*, n_chunks: int, chunk_size: int) -> None:
+    if not _replay_scan_cache_diagnostics_enabled():
+        return
+    _REPLAY_SCAN_CACHE_DIAGNOSTICS["replay_jvp_columns_chunked_call_count"] = (
+        int(_REPLAY_SCAN_CACHE_DIAGNOSTICS["replay_jvp_columns_chunked_call_count"]) + 1
+    )
+    _REPLAY_SCAN_CACHE_DIAGNOSTICS["replay_jvp_columns_chunk_count"] = (
+        int(_REPLAY_SCAN_CACHE_DIAGNOSTICS["replay_jvp_columns_chunk_count"]) + max(0, int(n_chunks))
+    )
+    _REPLAY_SCAN_CACHE_DIAGNOSTICS["replay_jvp_columns_last_chunk_size"] = max(0, int(chunk_size))
 
 
 def clear_replay_scan_caches() -> None:
@@ -1895,6 +1941,8 @@ def checkpoint_tape_state_jvp_columns(
 ):
     """Push multiple packed-state tangents forward through the extracted step tape."""
     if not tape.step_traces and tape.dynamic_initial_carry is None:
+        n_columns = int(getattr(initial_tangents, "shape", (0,))[0]) if getattr(initial_tangents, "shape", ()) else 0
+        _record_replay_jvp_columns_path("identity", n_columns=n_columns)
         return jnp.asarray(initial_tangents)
 
     from ._compat import jax
@@ -1911,6 +1959,8 @@ def checkpoint_tape_state_jvp_columns(
             active_column_chunk = _replay_column_chunk_default(tape=tape, tangents=tangents)
         if active_column_chunk is not None and tangents.shape[0] > active_column_chunk:
             outputs = []
+            n_chunks = (int(tangents.shape[0]) + int(active_column_chunk) - 1) // int(active_column_chunk)
+            _record_replay_jvp_columns_chunking(n_chunks=n_chunks, chunk_size=int(active_column_chunk))
             for start in range(0, int(tangents.shape[0]), active_column_chunk):
                 outputs.append(
                     checkpoint_tape_state_jvp_columns(
@@ -1944,6 +1994,7 @@ def checkpoint_tape_state_jvp_columns(
             static_flags=static_flags,
         )
         carry_tangents_final = run_scan(carry_tangents0, stacked_base_carries, stacked)
+        _record_replay_jvp_columns_path("dynamic_basepoint", n_columns=int(tangents.shape[0]))
         return carry_tangents_final[0]
     if tape.step_traces and rebuild_preconditioner:
         carry_tangents = None
@@ -1980,6 +2031,7 @@ def checkpoint_tape_state_jvp_columns(
             carry_tangents = None
             break
         if carry_tangents is not None and idx == len(tape.step_traces):
+            _record_replay_jvp_columns_path("segmented_dynamic_basepoint", n_columns=int(tangents.shape[0]))
             return carry_tangents[0]
     if tape.step_traces and _dynamic_replay_supported(tape=tape, rebuild_preconditioner=rebuild_preconditioner):
         carry0 = _dynamic_replay_initial_carry(tape.step_traces[0])
@@ -2011,6 +2063,7 @@ def checkpoint_tape_state_jvp_columns(
 
             _, linear_step = jax.linearize(_step, carry_base)
             carry_tangents = jax.vmap(linear_step)(carry_tangents)
+        _record_replay_jvp_columns_path("dynamic_linearize", n_columns=int(tangents.shape[0]))
         return carry_tangents[0]
     if tape.dynamic_initial_carry is not None and stacked is not None and static_flags is not None and rebuild_preconditioner:
         carry0 = tape.dynamic_initial_carry
@@ -2043,6 +2096,7 @@ def checkpoint_tape_state_jvp_columns(
 
         _, linear_step = jax.linearize(_run, carry0)
         carry_tangents_final = jax.vmap(linear_step)(carry_tangents0)
+        _record_replay_jvp_columns_path("dynamic_scan_linearize", n_columns=int(tangents.shape[0]))
         return carry_tangents_final[0]
 
     if stacked is None or static_flags is None:
@@ -2079,6 +2133,7 @@ def checkpoint_tape_state_jvp_columns(
 
             _, linear_step = jax.linearize(_step_map, x0)
             tangents = jax.vmap(linear_step)(tangents)
+        _record_replay_jvp_columns_path("generic_per_trace", n_columns=int(tangents.shape[0]))
         return tangents
 
     run_scan = _checkpoint_tape_scan_runner(
@@ -2087,6 +2142,7 @@ def checkpoint_tape_state_jvp_columns(
         static_flags=static_flags,
         rebuild_preconditioner=rebuild_preconditioner,
     )
+    _record_replay_jvp_columns_path("generic_scan", n_columns=int(tangents.shape[0]))
     return run_scan(tangents, stacked)
 
 
