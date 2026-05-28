@@ -200,6 +200,13 @@ Steps taken:
     timing-light row warmed at `0.0719 s` CPU and `0.1462 s` CUDA. Force
     evaluation stayed near parity, while CUDA residual metrics,
     preconditioner, and setup remained the dominant overheads.
+82. Added a complete-run finite-difference response gate for the phase-1
+    coil-only proxy objective used by
+    `examples/optimization/free_boundary_QS_coil_optimization.py`. The test
+    runs tiny active direct-coil free-boundary solves and verifies finite,
+    nonzero central-difference responses of the residual/aspect/iota proxy to
+    both one coil-current control and one Fourier curve coefficient. This is a
+    complete-solve finite-response guard, not a full-loop exact-gradient claim.
 
 ### 2026-05-27 Free-boundary beta-scan bootstrap-current preconditioner
 

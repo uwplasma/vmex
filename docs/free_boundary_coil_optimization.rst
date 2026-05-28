@@ -109,12 +109,16 @@ state-dependent boundary sample and projected mode-space vacuum response, but
 only on a dense validation loop solved inside JAX. Rung 7 is split
 deliberately: complete accepted direct-coil solves have
 fast finite-difference response guards for current and one Fourier geometry
-coefficient, and the accepted-state direct-coil normal-field metric now has a
+coefficient.  The same complete-solve guard now also evaluates the phase-1
+coil-only proxy objective used by
+``examples/optimization/free_boundary_QS_coil_optimization.py`` (VMEC residual
+plus aspect/iota terms) and checks finite central-difference responses to both
+coil controls.  The accepted-state direct-coil normal-field metric also has a
 JAX replay gate whose current derivative matches central FD after freezing the
 accepted plasma boundary. The remaining phase-2 blocker is differentiating
 through the nonlinear ``run_free_boundary`` iteration loop itself, rather than
-through the dense toy nonlinear primitive, fixed-boundary operator, or final
-accepted-boundary replay. The combined
+through the dense toy nonlinear primitive, fixed-boundary operator, complete
+finite-response proxy, or final accepted-boundary replay. The combined
 JAX operator is also threaded into the free-boundary driver behind the opt-in
 ``VMEC_JAX_FREEB_JAX_NESTOR_OPERATOR=1`` diagnostic flag for low-resolution
 validation. For stellarator-symmetric runs, the JAX path reconstructs the full

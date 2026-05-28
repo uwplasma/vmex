@@ -572,6 +572,82 @@ def test_direct_coil_geometry_dof_accepted_state_fd_slope_is_stable(tmp_path: Pa
     np.testing.assert_allclose(slopes[0], slopes[1], rtol=1.0e-4, atol=1.0e-12)
 
 
+def test_direct_coil_complete_solve_proxy_objective_fd_response_for_current_and_geometry(tmp_path: Path) -> None:
+    """The phase-1 coil-only proxy objective should respond smoothly to coil controls."""
+
+    enable_x64(True)
+    from examples.optimization.free_boundary_QS_coil_optimization import (
+        apply_coil_variables,
+        objective_from_summary,
+        objective_terms_from_summary,
+        run_direct_free_boundary,
+        summarize_run,
+    )
+
+    input_path = _write_tiny_direct_freeb_input(
+        tmp_path / "input.direct_proxy_objective_fd",
+        niter=2,
+        mpol=3,
+        ntheta=6,
+    )
+    base_params = _circle_coil_params(current=3.0e7, n_segments=32)
+    variables = [("current", (0,)), ("fourier_dof", (0, 0, 2))]
+    residual_weight = 1.0
+    aspect_weight = 0.02
+    iota_weight = 0.02
+
+    def objective(x_current: float, x_geometry: float) -> float:
+        params = apply_coil_variables(
+            base_params,
+            np.asarray([x_current, x_geometry], dtype=float),
+            variables=variables,
+            current_step=0.02,
+            dof_step=1.0e-2,
+        )
+        run, wall_s = run_direct_free_boundary(
+            input_path,
+            params,
+            vmec_max_iter=2,
+            activate_fsq=1.0e99,
+            jit_forces=False,
+        )
+        summary = summarize_run(
+            run,
+            params,
+            objective=np.nan,
+            wall_s=wall_s,
+            target_aspect=6.0,
+            target_iota=0.4,
+        )
+        terms = objective_terms_from_summary(
+            summary,
+            residual_weight=residual_weight,
+            aspect_weight=aspect_weight,
+            iota_weight=iota_weight,
+        )
+        assert summary["free_boundary_vacuum_stub"] is False
+        assert summary["free_boundary_nestor_model"].startswith("vmec2000_like_dense_integral")
+        assert not terms["missing_unweighted_terms"]
+        assert terms["residual"]["contribution"] > 0.0
+        return objective_from_summary(
+            summary,
+            residual_weight=residual_weight,
+            aspect_weight=aspect_weight,
+            iota_weight=iota_weight,
+        )
+
+    eps = 0.2
+    base = objective(0.0, 0.0)
+    current_slope = (objective(eps, 0.0) - objective(-eps, 0.0)) / (2.0 * eps)
+    geometry_slope = (objective(0.0, eps) - objective(0.0, -eps)) / (2.0 * eps)
+
+    values = np.asarray([base, current_slope, geometry_slope], dtype=float)
+    assert np.all(np.isfinite(values))
+    assert base > 0.0
+    assert abs(float(current_slope)) > 1.0e-12
+    assert abs(float(geometry_slope)) > 1.0e-12
+
+
 def test_jax_nestor_operator_complete_solve_fd_slopes_for_current_and_geometry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
