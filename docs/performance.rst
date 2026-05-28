@@ -1221,6 +1221,14 @@ device-ready time.  The next GPU exact-callback optimization should therefore
 reduce Python/JAX dispatch and callback construction around accepted-point
 replay/projection before spending effort on residual-projection kernel math.
 
+The 2026-05-28 mode-2 GPU policy check also compared regular projected replay
+against the fused replay/projection helper.  Regular projected replay took
+``12.66 s`` for one QH mode-2 exact-Jacobian callback
+(``jacobian_projected_replay_total=6.16 s``), while the fused helper took
+``13.38 s`` (``jacobian_fused_projected_replay_total=6.25 s``).  Fusion is
+therefore opt-in through ``VMEC_JAX_OPT_FUSED_PROJECTED_REPLAY=1``; the default
+uses regular projected replay for non-LASYM GPU mode-2+ cases.
+
 For production cache-growth audits, use the same accepted-point callback mode
 with JSON output and explicit budgets.  The report records per-repeat phase
 deltas, optimizer/global JIT cache cardinalities before and after each repeat,

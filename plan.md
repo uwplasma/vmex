@@ -519,10 +519,13 @@ update:
   `0.059 s` device-ready time. Without explicit sync timing, standard replay
   took `20.76 s` over three callbacks and forced projected replay took
   `20.23 s`, so the production threshold was lowered from 48 to 24 non-LASYM
-  columns. The next performance blockers are accepted-tape build, replay
-  dispatch/compile-like overhead, dense residual-projection callback
-  construction, scan-trial timing/cache-key evidence, and larger-mode
-  accepted-point replay cost.
+  columns. A May 28 follow-up rejected two additional GPU policies: `whole_scan`
+  replay regressed a QH mode-2 callback to `41.64 s`, and fused
+  replay/projection was slower than regular projected replay (`13.38 s` vs
+  `12.66 s`), so fused projected replay is now opt-in. The next performance
+  blockers are accepted-tape build, replay dispatch/compile-like overhead,
+  dense residual-projection callback construction, scan-trial timing/cache-key
+  evidence, and larger-mode accepted-point replay cost.
 - VMEC parity and physics gates: 99%. Required-tier bundled gates now cover
   `chipf`, stored `B`, input flux/profile propagation, finite-beta
   `pres/presf`, VMEC `iotas -> iotaf` smoothing, surface-averaged current

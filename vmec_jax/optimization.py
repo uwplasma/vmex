@@ -2844,7 +2844,10 @@ class FixedBoundaryExactOptimizer:
         flag = os.getenv("VMEC_JAX_OPT_FUSED_PROJECTED_REPLAY", "").strip().lower()
         if flag:
             return flag in ("1", "true", "yes", "on")
-        return True
+        # Office GPU profiles on 2026-05-28 show the fused mode-2 QH callback
+        # is slower than the regular projected replay path. Keep fusion opt-in
+        # for diagnostics until a broader matrix shows a reproducible win.
+        return False
 
     def _discrete_jacobian_residual_helper(self, params_size: int, residuals_from_packed, *, jax):
         """Return cached residual/Jacobian projection helper for packed tangents."""

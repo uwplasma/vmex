@@ -379,6 +379,19 @@ def test_projected_replay_residuals_env_and_backend_branches(monkeypatch) -> Non
     assert opt._projected_replay_residuals_enabled(48) is False
 
 
+def test_fused_projected_replay_is_opt_in(monkeypatch) -> None:
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+
+    monkeypatch.delenv("VMEC_JAX_OPT_FUSED_PROJECTED_REPLAY", raising=False)
+    assert opt._fused_projected_replay_enabled() is False
+
+    monkeypatch.setenv("VMEC_JAX_OPT_FUSED_PROJECTED_REPLAY", "1")
+    assert opt._fused_projected_replay_enabled() is True
+
+    monkeypatch.setenv("VMEC_JAX_OPT_FUSED_PROJECTED_REPLAY", "no")
+    assert opt._fused_projected_replay_enabled() is False
+
+
 def test_projected_replay_jacobian_path_projects_without_intermediate_sync(monkeypatch) -> None:
     import jax.numpy as jnp
     import vmec_jax.discrete_adjoint as adjoint_module
