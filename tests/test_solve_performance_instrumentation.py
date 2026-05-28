@@ -39,6 +39,8 @@ def test_residual_iter_timing_report_exposes_force_eval_aliases() -> None:
         "compute_forces_backtracking_calls": 1,
         "iteration_control": 0.25,
         "iteration_control_fsq1": 0.11,
+        "iteration_control_fsq1_precond_norm": 0.02,
+        "iteration_control_fsq1_scalar_build": 0.01,
         "iteration_control_fsq1_payload_get": 0.04,
         "iteration_control_fsq1_direct_get": 0.02,
         "iteration_control_badjac": 0.08,
@@ -78,7 +80,9 @@ def test_residual_iter_timing_report_exposes_force_eval_aliases() -> None:
     assert report["setup_unattributed_s"] == pytest.approx(0.08)
     assert report["iteration_control_fsq1_payload_get_s"] == pytest.approx(0.04)
     assert report["iteration_control_fsq1_direct_get_s"] == pytest.approx(0.02)
-    assert report["iteration_control_fsq1_unattributed_s"] == pytest.approx(0.05)
+    assert report["iteration_control_fsq1_precond_norm_s"] == pytest.approx(0.02)
+    assert report["iteration_control_fsq1_scalar_build_s"] == pytest.approx(0.01)
+    assert report["iteration_control_fsq1_unattributed_s"] == pytest.approx(0.02)
     assert report["iteration_control_badjac_ptau_get_s"] == pytest.approx(0.03)
     assert report["iteration_control_badjac_state_jacobian_s"] == pytest.approx(0.02)
     assert report["iteration_control_badjac_unattributed_s"] == pytest.approx(0.03)

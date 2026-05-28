@@ -10335,6 +10335,8 @@ def solve_fixed_boundary_residual_iter(
         "iteration_residual_metrics": 0.0,
         "iteration_control": 0.0,
         "iteration_control_fsq1": 0.0,
+        "iteration_control_fsq1_precond_norm": 0.0,
+        "iteration_control_fsq1_scalar_build": 0.0,
         "iteration_control_fsq1_payload_get": 0.0,
         "iteration_control_fsq1_direct_get": 0.0,
         "iteration_control_badjac": 0.0,
@@ -12384,6 +12386,7 @@ def solve_fixed_boundary_residual_iter(
 
             # Damping for the fixed-point update.
             accepted_control_ptau_host: tuple[float, float] | None = None
+            t_fsq1_precond_norm_start = time.perf_counter() if timing_enabled else None
             if preconditioner_fsq1_ready:
                 pass
             elif host_update_assembly:
@@ -12463,6 +12466,10 @@ def solve_fixed_boundary_residual_iter(
                     fsql1 = gcl2_full * delta_s
                 else:
                     fsql1 = gcl2_p * delta_s
+            if timing_enabled and t_fsq1_precond_norm_start is not None:
+                timing_stats["iteration_control_fsq1_precond_norm"] += time.perf_counter() - float(
+                    t_fsq1_precond_norm_start
+                )
             if _env_dump_lam not in ("", "0") and frzl_lam_pre is None:
                 gcr2_raw, gcz2_raw, gcl2_raw = vmec_gcx2_from_tomnsps(
                     frzl=frzl,
@@ -12480,6 +12487,7 @@ def solve_fixed_boundary_residual_iter(
                     iter_idx=int(iter2),
                 )
             if not host_update_assembly:
+                t_fsq1_scalar_build_start = time.perf_counter() if timing_enabled else None
                 # Extremely small late-iteration channels can occasionally surface
                 # as NaN/Inf through mixed 0*Inf paths in XLA. VMEC treats these
                 # as effectively zero for the preconditioned residual diagnostics.
@@ -12503,6 +12511,10 @@ def solve_fixed_boundary_residual_iter(
                     fsq1_j = fsq1_safe
                 else:
                     fsq1_j = fsqr1_safe + fsqz1_safe + fsql1_safe
+                if timing_enabled and t_fsq1_scalar_build_start is not None:
+                    timing_stats["iteration_control_fsq1_scalar_build"] += time.perf_counter() - float(
+                        t_fsq1_scalar_build_start
+                    )
                 use_control_payload = (
                     (not bool(converged_physical))
                     and (bool(reference_mode) or bool(vmec2000_control))

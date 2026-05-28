@@ -334,9 +334,13 @@ def _build_residual_iter_timing_report(
     )
     iteration_control_fsq1_payload_get = float(timing_stats.get("iteration_control_fsq1_payload_get", 0.0))
     iteration_control_fsq1_direct_get = float(timing_stats.get("iteration_control_fsq1_direct_get", 0.0))
+    iteration_control_fsq1_precond_norm = float(timing_stats.get("iteration_control_fsq1_precond_norm", 0.0))
+    iteration_control_fsq1_scalar_build = float(timing_stats.get("iteration_control_fsq1_scalar_build", 0.0))
     iteration_control_fsq1_unattributed = max(
         0.0,
         float(timing_stats.get("iteration_control_fsq1", 0.0))
+        - iteration_control_fsq1_precond_norm
+        - iteration_control_fsq1_scalar_build
         - iteration_control_fsq1_payload_get
         - iteration_control_fsq1_direct_get,
     )
@@ -379,6 +383,8 @@ def _build_residual_iter_timing_report(
         "preconditioner_s": float(timing_stats["preconditioner"]),
         "iteration_control_s": float(timing_stats.get("iteration_control", 0.0)),
         "iteration_control_fsq1_s": float(timing_stats.get("iteration_control_fsq1", 0.0)),
+        "iteration_control_fsq1_precond_norm_s": iteration_control_fsq1_precond_norm,
+        "iteration_control_fsq1_scalar_build_s": iteration_control_fsq1_scalar_build,
         "iteration_control_fsq1_payload_get_s": iteration_control_fsq1_payload_get,
         "iteration_control_fsq1_direct_get_s": iteration_control_fsq1_direct_get,
         "iteration_control_fsq1_unattributed_s": iteration_control_fsq1_unattributed,
@@ -413,6 +419,8 @@ def _build_residual_iter_timing_report(
         "preconditioner_per_iter_s": float(timing_stats["preconditioner"]) / iters,
         "iteration_control_per_iter_s": float(timing_stats.get("iteration_control", 0.0)) / iters,
         "iteration_control_fsq1_per_iter_s": float(timing_stats.get("iteration_control_fsq1", 0.0)) / iters,
+        "iteration_control_fsq1_precond_norm_per_iter_s": iteration_control_fsq1_precond_norm / iters,
+        "iteration_control_fsq1_scalar_build_per_iter_s": iteration_control_fsq1_scalar_build / iters,
         "iteration_control_fsq1_payload_get_per_iter_s": iteration_control_fsq1_payload_get / iters,
         "iteration_control_fsq1_direct_get_per_iter_s": iteration_control_fsq1_direct_get / iters,
         "iteration_control_fsq1_unattributed_per_iter_s": iteration_control_fsq1_unattributed / iters,
@@ -482,6 +490,8 @@ def _format_residual_iter_timing_message(
             f"precond_mode={float(timing_report['precond_mode_scale_s']):.3e}s "
             f"control={float(timing_report['iteration_control_s']):.3e}s "
             f"control_fsq1={float(timing_report['iteration_control_fsq1_s']):.3e}s "
+            f"control_fsq1_norm={float(timing_report['iteration_control_fsq1_precond_norm_s']):.3e}s "
+            f"control_fsq1_scalar={float(timing_report['iteration_control_fsq1_scalar_build_s']):.3e}s "
             f"control_fsq1_payload={float(timing_report['iteration_control_fsq1_payload_get_s']):.3e}s "
             f"control_fsq1_direct={float(timing_report['iteration_control_fsq1_direct_get_s']):.3e}s "
             f"control_badjac={float(timing_report['iteration_control_badjac_s']):.3e}s "
