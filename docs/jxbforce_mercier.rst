@@ -1,5 +1,5 @@
-JXBFORCE / Mercier Diagnostics (``jdotb``, ``DMerc``)
-=====================================================
+JXBFORCE / Mercier Diagnostics (``jdotb``, ``DMerc``, ``D_R``)
+==============================================================
 
 VMEC2000 writes a set of derived diagnostics related to the Mercier stability
 criterion and to current-related scalars. In the VMEC2000 code base, these
@@ -15,14 +15,16 @@ The same finite-beta channel reconstruction is also available to optimization
 scripts through JAX-differentiable helpers:
 
 - ``vmec_jax.mercier_terms_from_state`` returns ``DMerc`` and the component
-  terms, plus ``jdotb``, ``bdotb``, ``bdotgradv``, ``torcur`` and ``ip`` on
-  the full radial mesh.
+  terms, the Glasser resistive-interchange diagnostic ``D_R``, plus
+  ``jdotb``, ``bdotb``, ``bdotgradv``, ``torcur`` and ``ip`` on the full
+  radial mesh.
 - ``vmec_jax.jxbforce_profiles_from_realspace`` exposes the small algebraic
   reduction from real-space channels to those 1D profiles.
-- ``vmec_jax.DMerc``, ``vmec_jax.JDotB``, ``vmec_jax.BDotB``,
-  ``vmec_jax.BDotGradV``, ``vmec_jax.ToroidalCurrent`` and
-  ``vmec_jax.ToroidalCurrentGradient`` are objective objects that can be added
-  directly to ``LeastSquaresProblem.from_tuples``.
+- ``vmec_jax.DMerc``, ``vmec_jax.GlasserResistiveInterchange``,
+  ``vmec_jax.JDotB``, ``vmec_jax.BDotB``, ``vmec_jax.BDotGradV``,
+  ``vmec_jax.ToroidalCurrent`` and ``vmec_jax.ToroidalCurrentGradient`` are
+  objective objects that can be added directly to
+  ``LeastSquaresProblem.from_tuples``.
 - ``vmec_jax.JVector`` exposes the same JXBFORCE channels as flattened
   flux-coordinate current-density components ``(J^theta, J^zeta)``.  Use
   ``vmec_jax.BVector`` for Cartesian ``(Bx, By, Bz)`` targeting on one radial
@@ -39,6 +41,7 @@ Example:
    problem = vj.LeastSquaresProblem.from_tuples(
        [
            (vj.DMerc(minimum=0.0, softness=1.0e-3).J, 0.0, 1.0),
+           (vj.GlasserResistiveInterchange(maximum=0.0, softness=1.0e-3).J, 0.0, 1.0),
            (vj.JDotB(surfaces=(0.25, 0.50, 0.75)).J, 0.0, 1.0e-4),
            (vj.ToroidalCurrent(surfaces=(0.25, 0.50, 0.75)).J, target_torcur, 1.0e-4),
            (vj.RedlBootstrapMismatch(
@@ -75,6 +78,57 @@ approximation.
    "mathematically minimal". In particular, VMEC2000 uses storage conventions
    and symmetry/parity channels tailored to its internal Fourier machinery.
    ``vmec_jax`` mirrors these conventions to reproduce VMEC2000 outputs.
+
+Glasser Resistive-Interchange Criterion
+---------------------------------------
+
+``vmec_jax`` also evaluates the resistive interchange diagnostic introduced by
+Glasser, Greene and Johnson and related to the Mercier criterion by Landreman
+and Jorge; see :doc:`references` [10] and [11].  In the notation of Landreman
+and Jorge,
+
+.. math::
+
+   D_R = -D_{\mathrm{Merc}}
+       + \frac{4 \pi^2}{(\iota')^2}
+         \left[H - \frac{(\iota')^2}{8\pi^2}\right]^2,
+
+with the necessary resistive-MHD condition ``D_R <= 0`` on nonzero-shear
+surfaces.  The VMEC/Ichiguchi algebra in ``vmec_jax`` uses
+:math:`S=d\iota/d\Phi` and :math:`D_{\mathrm{shear}}=S^2/4`, where
+:math:`\Phi=2\pi\psi`.  Therefore the implemented normalized expression is
+
+.. math::
+
+   D_R = -D_{\mathrm{Merc}}
+       + \frac{\left(H - S^2/2\right)^2}{S^2}.
+
+The ``H`` term is reconstructed from the same differentiable surface integrals
+used for ``DMerc``:
+
+.. math::
+
+   H = S \left(t_{JB}
+       - \frac{\langle J\cdot B\rangle}{\langle B^2\rangle} t_{BB}\right).
+
+When only Mercier profile terms are available,
+``glasser_resistive_interchange_from_mercier_terms`` can fall back to
+``H = -Dcurr``.  The full state path uses the ``jdotb/bdotb`` ratio above, so it
+does not require that fallback.
+
+Because the criterion contains ``1 / S^2``, ``D_R`` is physically meaningful
+only away from zero magnetic shear.  Returned dictionaries include
+``glasser_shear_valid`` for that mask and ``glasser_correction`` for the
+positive correction added to ``-DMerc``.  The optimization wrapper follows the
+same sign convention: ``vj.GlasserResistiveInterchange(maximum=0.0)`` applies
+a smooth upper-bound residual to surfaces with ``D_R > 0``, and the
+least-squares tuple target must be ``0.0`` because the bound is encoded by the
+objective object itself.  Use a small ``shear_epsilon`` only as a smooth
+regularization; it does not make zero-shear surfaces physically valid.
+Generated ``wout`` files persist these profiles as ``D_R``, ``HGlasser``,
+``GlasserCorrection`` and ``GlasserShearValid``.  Older VMEC/VMEC++ files that
+do not contain them are read with a fallback reconstruction from ``DMerc``,
+``DShear`` and ``DCurr``.
 
 Key VMEC2000 Convention: Parity Channels For ``bsubu``/``bsubv``
 ----------------------------------------------------------------

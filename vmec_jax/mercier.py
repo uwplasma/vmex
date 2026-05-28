@@ -15,6 +15,78 @@ import numpy as np
 from ._compat import jnp
 
 
+def glasser_resistive_interchange_from_mercier_terms(
+    *,
+    DMerc,
+    shear,
+    H=None,
+    Dcurr=None,
+    tjb=None,
+    tbb=None,
+    jdotb=None,
+    bdotb=None,
+    shear_epsilon: float = 0.0,
+) -> dict[str, Any]:
+    """Return the Glasser resistive-interchange criterion from Mercier terms.
+
+    Landreman & Jorge rewrite the Glasser-Greene-Johnson necessary condition
+    for resistive interchange stability as
+
+    ``D_R = -DMerc + 4*pi^2/iota_prime^2 * (H - iota_prime^2/(8*pi^2))^2``.
+
+    The Mercier implementation in this module uses the VMEC/Ichiguchi
+    normalization in which ``shear = d iota / d Phi`` and
+    ``Dshear = shear**2 / 4``.  Since ``Phi = 2*pi*psi``, the equivalent
+    normalized expression is
+
+    ``D_R = -DMerc + (H - shear**2/2)**2 / shear**2``.
+
+    The strict resistive-interchange necessary condition is ``D_R <= 0`` on
+    surfaces with nonzero magnetic shear.  ``glasser_shear_valid`` marks the
+    surfaces on which this division is physically meaningful.  A positive
+    ``shear_epsilon`` regularizes the denominator for smooth optimization
+    penalties while preserving the validity mask.
+
+    If ``H`` is not supplied, it is reconstructed from VMEC profile data as
+    ``shear * (tjb - (jdotb / bdotb) * tbb)`` when those profiles are
+    available.  If only the VMEC Mercier current term is available, the helper
+    falls back to ``H = -Dcurr``; this is exact when the surface-averaged
+    parallel-current ratio equals the toroidal-current derivative.
+    """
+    DMerc = jnp.asarray(DMerc, dtype=jnp.float64)
+    shear = jnp.asarray(shear, dtype=jnp.float64)
+
+    if H is None:
+        if tjb is not None and tbb is not None and jdotb is not None and bdotb is not None:
+            tjb = jnp.asarray(tjb, dtype=jnp.float64)
+            tbb = jnp.asarray(tbb, dtype=jnp.float64)
+            jdotb = jnp.asarray(jdotb, dtype=jnp.float64)
+            bdotb = jnp.asarray(bdotb, dtype=jnp.float64)
+            ratio = jnp.where(bdotb != 0.0, jdotb / bdotb, 0.0)
+            H = shear * (tjb - ratio * tbb)
+        elif Dcurr is not None:
+            H = -jnp.asarray(Dcurr, dtype=jnp.float64)
+        else:
+            raise ValueError("Either H, Dcurr, or (tjb, tbb, jdotb, bdotb) must be supplied.")
+    H = jnp.asarray(H, dtype=jnp.float64)
+
+    shear2 = shear * shear
+    eps = jnp.asarray(float(shear_epsilon), dtype=jnp.float64)
+    eps2 = eps * eps
+    denom = shear2 + eps2
+    valid = shear2 > eps2
+    denom_safe = jnp.where(denom != 0.0, denom, 1.0)
+    correction_raw = (H - 0.5 * shear2) ** 2 / denom_safe
+    correction = jnp.where(valid | (float(shear_epsilon) > 0.0), correction_raw, 0.0)
+    D_R = jnp.where(valid | (float(shear_epsilon) > 0.0), -DMerc + correction_raw, 0.0)
+    return {
+        "D_R": D_R,
+        "H": H,
+        "glasser_correction": correction,
+        "glasser_shear_valid": valid,
+    }
+
+
 def mercier_terms_from_profile_integrals(
     *,
     s,
@@ -27,6 +99,9 @@ def mercier_terms_from_profile_integrals(
     tbb,
     tjb,
     tjj,
+    jdotb=None,
+    bdotb=None,
+    shear_epsilon: float = 0.0,
     signgs: int = 1,
 ) -> dict[str, Any]:
     """Return JAX-differentiable Mercier terms from 1D VMEC profile integrals.
@@ -56,12 +131,17 @@ def mercier_terms_from_profile_integrals(
     ns = int(s.shape[0])
     zeros = jnp.zeros_like(s, dtype=jnp.float64)
     if ns < 3:
+        valid = jnp.zeros_like(s, dtype=bool)
         return {
             "DMerc": zeros,
             "Dshear": zeros,
             "Dcurr": zeros,
             "Dwell": zeros,
             "Dgeod": zeros,
+            "D_R": zeros,
+            "H": zeros,
+            "glasser_correction": zeros,
+            "glasser_shear_valid": valid,
             "shear": zeros,
             "vpp": zeros,
             "presp": zeros,
@@ -95,12 +175,24 @@ def mercier_terms_from_profile_integrals(
     vpp = zeros.at[1:-1].set(vpp_inner)
     presp = zeros.at[1:-1].set(presp_inner)
     ip = zeros.at[1:-1].set(ip_inner)
+    DMerc = Dshear + Dcurr + Dwell + Dgeod
+    glasser = glasser_resistive_interchange_from_mercier_terms(
+        DMerc=DMerc,
+        shear=shear,
+        Dcurr=Dcurr,
+        tjb=tjb,
+        tbb=tbb,
+        jdotb=jdotb,
+        bdotb=bdotb,
+        shear_epsilon=shear_epsilon,
+    )
     return {
-        "DMerc": Dshear + Dcurr + Dwell + Dgeod,
+        "DMerc": DMerc,
         "Dshear": Dshear,
         "Dcurr": Dcurr,
         "Dwell": Dwell,
         "Dgeod": Dgeod,
+        **glasser,
         "shear": shear,
         "vpp": vpp,
         "presp": presp,
@@ -233,6 +325,7 @@ def jxbforce_profiles_from_realspace(
 
 
 __all__ = [
+    "glasser_resistive_interchange_from_mercier_terms",
     "jxbforce_profiles_from_realspace",
     "mercier_surface_integrals_from_realspace",
     "mercier_terms_from_profile_integrals",

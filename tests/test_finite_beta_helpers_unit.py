@@ -443,6 +443,9 @@ def test_mercier_terms_from_state_composes_stellarator_symmetric_channels(monkey
         "Dcurr",
         "Dwell",
         "Dgeod",
+        "D_R",
+        "H",
+        "glasser_correction",
         "tpp",
         "tbb",
         "tjb",
@@ -455,6 +458,7 @@ def test_mercier_terms_from_state_composes_stellarator_symmetric_channels(monkey
     ):
         assert terms[key].shape == (4,)
         assert np.all(np.isfinite(np.asarray(terms[key])))
+    assert terms["glasser_shear_valid"].shape == (4,)
     for key in ("gpp", "bsubs_half", "bsubs_full", "bsubsu", "bsubsv", "itheta", "izeta", "bdotk", "bdotk_merc", "sqrtg"):
         assert terms[key].shape == shape
         assert np.all(np.isfinite(np.asarray(terms[key])))
@@ -480,7 +484,7 @@ def test_mercier_terms_from_state_is_differentiable(monkeypatch):
             indata=object(),
             signgs=1,
         )
-        return jnp.sum(terms["DMerc"][1:-1])
+        return jnp.sum(terms["DMerc"][1:-1]) + 0.1 * jnp.sum(terms["D_R"][1:-1])
 
     value, grad = jax.value_and_grad(objective)(jnp.asarray(1.0))
     assert np.isfinite(np.asarray(value))
@@ -510,6 +514,9 @@ def test_mercier_terms_from_state_composes_lasym_channels(monkeypatch):
         "Dcurr",
         "Dwell",
         "Dgeod",
+        "D_R",
+        "H",
+        "glasser_correction",
         "tpp",
         "tbb",
         "tjb",
@@ -522,12 +529,28 @@ def test_mercier_terms_from_state_composes_lasym_channels(monkeypatch):
     ):
         assert terms[key].shape == (4,)
         assert np.all(np.isfinite(np.asarray(terms[key])))
+    assert terms["glasser_shear_valid"].shape == (4,)
     for key in ("gpp", "bsubs_half", "bsubs_full", "bsubsu", "bsubsv", "itheta", "izeta", "bdotk", "bdotk_merc", "sqrtg"):
         assert terms[key].shape == shape
         assert np.all(np.isfinite(np.asarray(terms[key])))
 
 
-def _mercier_terms_numpy_reference(*, s, phips, iotas, vp, pres, torcur, tpp, tbb, tjb, tjj, signgs=1):
+def _mercier_terms_numpy_reference(
+    *,
+    s,
+    phips,
+    iotas,
+    vp,
+    pres,
+    torcur,
+    tpp,
+    tbb,
+    tjb,
+    tjj,
+    jdotb=None,
+    bdotb=None,
+    signgs=1,
+):
     s = np.asarray(s, dtype=float)
     phips = np.asarray(phips, dtype=float)
     iotas = np.asarray(iotas, dtype=float)
@@ -539,9 +562,30 @@ def _mercier_terms_numpy_reference(*, s, phips, iotas, vp, pres, torcur, tpp, tb
     tjb = np.asarray(tjb, dtype=float)
     tjj = np.asarray(tjj, dtype=float)
     ns = s.shape[0]
-    out = {key: np.zeros(ns) for key in ("DMerc", "Dshear", "Dcurr", "Dwell", "Dgeod", "shear", "vpp", "presp", "ip")}
+    out = {
+        key: np.zeros(ns)
+        for key in (
+            "DMerc",
+            "Dshear",
+            "Dcurr",
+            "Dwell",
+            "Dgeod",
+            "D_R",
+            "H",
+            "glasser_correction",
+            "shear",
+            "vpp",
+            "presp",
+            "ip",
+        )
+    }
+    out["glasser_shear_valid"] = np.zeros(ns, dtype=bool)
     if ns < 3:
         return out
+    if jdotb is not None:
+        jdotb = np.asarray(jdotb, dtype=float)
+    if bdotb is not None:
+        bdotb = np.asarray(bdotb, dtype=float)
     sign_jac = 1.0 if signgs >= 0 else -1.0
     phip_real = (2.0 * np.pi) * phips * sign_jac
     vp_real = np.zeros_like(phip_real)
@@ -568,6 +612,15 @@ def _mercier_terms_numpy_reference(*, s, phips, iotas, vp, pres, torcur, tpp, tb
         out["vpp"][i] = vpp
         out["presp"][i] = presp
         out["ip"][i] = ip
+        if jdotb is not None and bdotb is not None and bdotb[i] != 0.0:
+            h_term = shear * (tjb[i] - (jdotb[i] / bdotb[i]) * tbb[i])
+        else:
+            h_term = -dcurr
+        out["H"][i] = h_term
+        if shear != 0.0:
+            out["glasser_shear_valid"][i] = True
+            out["glasser_correction"][i] = (h_term - 0.5 * shear * shear) ** 2 / (shear * shear)
+            out["D_R"][i] = -out["DMerc"][i] + out["glasser_correction"][i]
     return out
 
 
@@ -585,6 +638,8 @@ def test_mercier_terms_from_profile_integrals_matches_vmec_algebra():
         tbb=np.array([0.0, 0.7, 0.72, 0.74, 0.0]),
         tjb=np.array([0.0, 0.05, 0.04, 0.03, 0.0]),
         tjj=np.array([0.0, 0.08, 0.07, 0.06, 0.0]),
+        jdotb=np.array([0.0, 0.12, 0.10, 0.08, 0.0]),
+        bdotb=np.array([0.0, 0.90, 0.92, 0.95, 0.0]),
         signgs=1,
     )
 
@@ -592,9 +647,63 @@ def test_mercier_terms_from_profile_integrals_matches_vmec_algebra():
     public_actual = vj.mercier_terms_from_profile_integrals(**data)
     expected = _mercier_terms_numpy_reference(**data)
 
-    for key in ("DMerc", "Dshear", "Dcurr", "Dwell", "Dgeod", "shear", "vpp", "presp", "ip"):
+    for key in (
+        "DMerc",
+        "Dshear",
+        "Dcurr",
+        "Dwell",
+        "Dgeod",
+        "D_R",
+        "H",
+        "glasser_correction",
+        "shear",
+        "vpp",
+        "presp",
+        "ip",
+    ):
         np.testing.assert_allclose(np.asarray(actual[key]), expected[key], rtol=1e-13, atol=1e-13)
         np.testing.assert_allclose(np.asarray(public_actual[key]), expected[key], rtol=1e-13, atol=1e-13)
+    np.testing.assert_array_equal(np.asarray(actual["glasser_shear_valid"]), expected["glasser_shear_valid"])
+    np.testing.assert_array_equal(np.asarray(public_actual["glasser_shear_valid"]), expected["glasser_shear_valid"])
+
+
+def test_glasser_resistive_interchange_matches_landreman_jorge_relation():
+    import jax
+    import vmec_jax as vj
+
+    dmerc = jnp.asarray([0.0, 0.3, -0.1, 0.0], dtype=jnp.float64)
+    shear = jnp.asarray([0.0, 0.8, 1.2, 0.0], dtype=jnp.float64)
+    h_term = jnp.asarray([0.0, 0.25, 0.4, 0.0], dtype=jnp.float64)
+    result = vj.glasser_resistive_interchange_from_mercier_terms(DMerc=dmerc, shear=shear, H=h_term)
+    expected = -np.asarray(dmerc) + (np.asarray(h_term) - 0.5 * np.asarray(shear) ** 2) ** 2 / np.where(
+        np.asarray(shear) != 0.0,
+        np.asarray(shear) ** 2,
+        1.0,
+    )
+    expected[[0, -1]] = 0.0
+    np.testing.assert_allclose(np.asarray(result["D_R"]), expected, rtol=1e-13, atol=1e-13)
+    np.testing.assert_array_equal(np.asarray(result["glasser_shear_valid"]), [False, True, True, False])
+
+    vacuum = vj.glasser_resistive_interchange_from_mercier_terms(
+        DMerc=0.25 * shear * shear,
+        shear=shear,
+        H=jnp.zeros_like(shear),
+    )
+    np.testing.assert_allclose(np.asarray(vacuum["D_R"]), 0.0, atol=1e-13)
+
+    def objective(h_scale):
+        terms = vj.glasser_resistive_interchange_from_mercier_terms(
+            DMerc=dmerc,
+            shear=shear,
+            H=h_scale * h_term,
+            shear_epsilon=1.0e-12,
+        )
+        return jnp.sum(terms["D_R"][1:-1])
+
+    value, grad = jax.value_and_grad(objective)(jnp.asarray(1.0, dtype=jnp.float64))
+    assert np.isfinite(np.asarray(value))
+    assert np.isfinite(np.asarray(grad))
+    assert abs(float(np.asarray(grad))) > 0.0
 
 
 def test_mercier_terms_from_profile_integrals_are_differentiable():
@@ -647,8 +756,9 @@ def test_mercier_short_mesh_helpers_return_zero_profiles():
         tjb=zeros_1d,
         tjj=zeros_1d,
     )
-    for key in ("DMerc", "Dshear", "Dcurr", "Dwell", "Dgeod", "shear", "vpp", "presp", "ip"):
+    for key in ("DMerc", "Dshear", "Dcurr", "Dwell", "Dgeod", "D_R", "H", "glasser_correction", "shear", "vpp", "presp", "ip"):
         np.testing.assert_allclose(np.asarray(terms[key]), 0.0)
+    np.testing.assert_array_equal(np.asarray(terms["glasser_shear_valid"]), [False, False])
 
     shape = (2, 2, 2)
     zeros_3d = jnp.zeros(shape, dtype=jnp.float64)

@@ -103,6 +103,10 @@ def _synthetic_wout(path: Path) -> WoutData:
         Dwell=profile + 12.0,
         Dcurr=profile + 13.0,
         Dgeod=profile + 14.0,
+        D_R=profile + 14.5,
+        H=profile + 14.75,
+        glasser_correction=profile + 14.875,
+        glasser_shear_valid=np.asarray([False, True, True]),
         jdotb=profile + 15.0,
         bdotb=profile + 16.0,
         bdotgradv=profile + 17.0,
@@ -134,6 +138,10 @@ def test_write_wout_roundtrips_synthetic_profiles_and_default_aux_arrays(tmp_pat
     np.testing.assert_allclose(loaded.rmnc, wout.rmnc)
     np.testing.assert_allclose(loaded.bmns, wout.bmns)
     np.testing.assert_allclose(loaded.phi, wout.phi)
+    np.testing.assert_allclose(loaded.D_R, wout.D_R)
+    np.testing.assert_allclose(loaded.H, wout.H)
+    np.testing.assert_allclose(loaded.glasser_correction, wout.glasser_correction)
+    np.testing.assert_array_equal(loaded.glasser_shear_valid, wout.glasser_shear_valid)
     np.testing.assert_allclose(loaded.ac, np.zeros((21,)))
     np.testing.assert_allclose(loaded.ac_aux_s, -np.ones((1,)))
     np.testing.assert_allclose(loaded.ac_aux_f, np.zeros((1,)))
@@ -181,6 +189,11 @@ def test_read_wout_applies_optional_defaults_and_phi_fallback(tmp_path: Path) ->
         write_var(ds, "bsupvmnc", ("radius", "mn_mode_nyq"), nyq + 3.0)
         write_var(ds, "wb", (), 1.5)
         write_var(ds, "volume_p", (), 2.5)
+        write_var(ds, "DMerc", ("radius",), [0.0, 0.30, 0.0])
+        write_var(ds, "DShear", ("radius",), [0.0, 0.16, 0.0])
+        write_var(ds, "DWell", ("radius",), [0.0, 0.0, 0.0])
+        write_var(ds, "DCurr", ("radius",), [0.0, -0.25, 0.0])
+        write_var(ds, "DGeod", ("radius",), [0.0, 0.0, 0.0])
 
     wout = read_wout(path)
     expected_phi = np.asarray(cumrect_s_halfmesh(phipf, np.linspace(0.0, 1.0, ns)))
@@ -196,6 +209,10 @@ def test_read_wout_applies_optional_defaults_and_phi_fallback(tmp_path: Path) ->
     np.testing.assert_allclose(wout.gmns, np.zeros((ns, mnmax_nyq)))
     np.testing.assert_allclose(wout.bmnc, np.zeros((ns, mnmax_nyq)))
     np.testing.assert_allclose(wout.pres, np.zeros((ns,)))
+    np.testing.assert_allclose(wout.H, [0.0, 0.25, 0.0])
+    np.testing.assert_allclose(wout.glasser_correction, [0.0, (0.25 - 0.32) ** 2 / 0.64, 0.0])
+    np.testing.assert_allclose(wout.D_R, [0.0, -0.30 + (0.25 - 0.32) ** 2 / 0.64, 0.0])
+    np.testing.assert_array_equal(wout.glasser_shear_valid, [False, True, False])
     assert wout.fsqt.shape == (0,)
     np.testing.assert_allclose(wout.ac_aux_s, -np.ones((101,)))
 

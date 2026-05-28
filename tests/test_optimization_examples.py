@@ -1614,13 +1614,18 @@ def test_lgradb_tuple_stays_regular_state_objective() -> None:
 
 
 def test_dmerc_tuple_stays_regular_state_objective() -> None:
-    from vmec_jax.optimization_workflow import DMerc, LeastSquaresProblem
+    from vmec_jax.optimization_workflow import DMerc, GlasserResistiveInterchange, LeastSquaresProblem
 
-    problem = LeastSquaresProblem.from_tuples([(DMerc().J, 0.0, 0.25)])
+    problem = LeastSquaresProblem.from_tuples(
+        [
+            (DMerc().J, 0.0, 0.25),
+            (GlasserResistiveInterchange().J, 0.0, 0.5),
+        ]
+    )
 
     assert not problem.is_qi
-    assert len(problem.objective_terms) == 1
-    assert problem.objective_terms[0].name == "DMerc"
+    assert len(problem.objective_terms) == 2
+    assert [term.name for term in problem.objective_terms] == ["DMerc", "D_R"]
     assert len(problem.qi_objective_terms) == 0
 
 
@@ -1631,6 +1636,7 @@ def test_magnetic_well_tuple_stays_regular_state_objective(monkeypatch) -> None:
 
     assert api.MagneticWell is MagneticWell
     assert api.DMerc is workflow.DMerc
+    assert api.GlasserResistiveInterchange is workflow.GlasserResistiveInterchange
 
     monkeypatch.setattr(
         workflow,
@@ -1824,6 +1830,9 @@ def test_finite_beta_objective_terms_expose_residuals_totals_and_metadata(monkey
         x = jnp.asarray(state, dtype=jnp.float64)
         terms = {
             "DMerc": jnp.asarray([0.0, -0.20 + 0.01 * x, 0.10 + 0.02 * x, 0.0], dtype=jnp.float64),
+            "D_R": jnp.asarray([0.0, 0.30 - 0.01 * x, -0.02 + 0.01 * x, 0.0], dtype=jnp.float64),
+            "H": jnp.asarray([0.0, 0.05, 0.06, 0.0], dtype=jnp.float64),
+            "shear": jnp.asarray([0.0, 0.4, 0.5, 0.0], dtype=jnp.float64),
             "jdotb": jnp.asarray([0.0, 10.0 + x, 20.0 + 2.0 * x, 0.0], dtype=jnp.float64),
             "torcur": jnp.asarray([0.0, 3.0 + 0.3 * x, 5.0 + 0.5 * x, 0.0], dtype=jnp.float64),
             "ip": jnp.asarray([0.0, 7.0 + 0.7 * x, 11.0 + 1.1 * x, 0.0], dtype=jnp.float64),
@@ -1851,6 +1860,7 @@ def test_finite_beta_objective_terms_expose_residuals_totals_and_metadata(monkey
         BetaTotal(),
         MagneticWell(minimum=0.50, softness=0.05),
         DMerc(minimum=0.0, softness=0.05),
+        workflow.GlasserResistiveInterchange(maximum=0.0, softness=0.05),
         JDotB(surfaces=(0.25, 0.75), normalize=10.0),
         ToroidalCurrent(surfaces=(0.25, 0.75), normalize=2.0),
         ToroidalCurrentGradient(surfaces=(0.75,), normalize=10.0),
@@ -1867,13 +1877,14 @@ def test_finite_beta_objective_terms_expose_residuals_totals_and_metadata(monkey
         0.04,
         0.0,
         0.0,
+        0.0,
         np.asarray([1.0, 2.0]),
         np.asarray([1.5, 2.5]),
         np.asarray([1.0]),
         0.0,
         0.0,
     ]
-    objective_weights = [4.0, 9.0, 16.0, 25.0, 36.0, 49.0, 64.0, 81.0, 100.0]
+    objective_weights = [4.0, 9.0, 16.0, 25.0, 30.25, 36.0, 49.0, 64.0, 81.0, 100.0]
 
     problem = LeastSquaresProblem.from_tuples(
         [(objective.J, target, weight) for objective, target, weight in zip(objectives, targets, objective_weights)]
@@ -1888,6 +1899,7 @@ def test_finite_beta_objective_terms_expose_residuals_totals_and_metadata(monkey
         "betatotal",
         "magnetic_well",
         "DMerc",
+        "D_R",
         "jdotb",
         "torcur",
         "torcur_prime",
@@ -1931,6 +1943,7 @@ def test_finite_beta_workflow_objectives_are_jax_differentiable(monkeypatch) -> 
         BVector,
         BetaTotal,
         DMerc,
+        GlasserResistiveInterchange,
         JDotB,
         JVector,
         MagneticWell,
@@ -1955,6 +1968,9 @@ def test_finite_beta_workflow_objectives_are_jax_differentiable(monkeypatch) -> 
                 [0.0, 0.02 + 0.01 * scale, -0.03 + 0.02 * scale, 0.0],
                 dtype=jnp.float64,
             ),
+            "D_R": jnp.asarray([0.0, 0.04 + 0.01 * scale, -0.02 + 0.02 * scale, 0.0], dtype=jnp.float64),
+            "H": jnp.asarray([0.0, 0.05 + 0.01 * scale, 0.06 + 0.01 * scale, 0.0], dtype=jnp.float64),
+            "shear": jnp.asarray([0.0, 0.4, 0.5, 0.0], dtype=jnp.float64),
             "jdotb": jnp.asarray([0.0, 0.10 + 0.01 * scale, 0.20 + 0.02 * scale, 0.0], dtype=jnp.float64),
             "bdotb": jnp.asarray([0.0, 1.00 + 0.10 * scale, 1.20 + 0.20 * scale, 0.0], dtype=jnp.float64),
             "bdotgradv": jnp.asarray([0.0, 2.00 + 0.20 * scale, 2.20 + 0.30 * scale, 0.0], dtype=jnp.float64),
@@ -1986,6 +2002,8 @@ def test_finite_beta_workflow_objectives_are_jax_differentiable(monkeypatch) -> 
     well_value, well_grad = jax.value_and_grad(lambda x: well.J(ctx, x))(jnp.asarray(1.0))
     dmerc = DMerc(minimum=0.0, softness=1.0e-2)
     dmerc_value, dmerc_grad = jax.value_and_grad(lambda x: jnp.sum(dmerc.J(ctx, x)))(jnp.asarray(1.0))
+    glasser = GlasserResistiveInterchange(maximum=0.0, softness=1.0e-2)
+    glasser_value, glasser_grad = jax.value_and_grad(lambda x: jnp.sum(glasser.J(ctx, x)))(jnp.asarray(1.0))
     jdotb_value, jdotb_grad = jax.value_and_grad(lambda x: jnp.sum(JDotB(surfaces=(0.25, 0.75)).J(ctx, x)))(
         jnp.asarray(1.0)
     )
@@ -2021,6 +2039,9 @@ def test_finite_beta_workflow_objectives_are_jax_differentiable(monkeypatch) -> 
     assert np.isfinite(np.asarray(dmerc_value))
     assert np.isfinite(np.asarray(dmerc_grad))
     assert abs(float(np.asarray(dmerc_grad))) > 0.0
+    assert np.isfinite(np.asarray(glasser_value))
+    assert np.isfinite(np.asarray(glasser_grad))
+    assert abs(float(np.asarray(glasser_grad))) > 0.0
     np.testing.assert_allclose(np.asarray(jdotb_value), 0.33)
     np.testing.assert_allclose(np.asarray(jdotb_grad), 0.03)
     np.testing.assert_allclose(np.asarray(bdotb_value), 2.5)

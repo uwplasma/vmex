@@ -58,6 +58,7 @@ from .bootstrap_current import (
     redl_current_rhs,
     vmec_current_profile_from_bootstrap_update,
 )
+from .mercier import glasser_resistive_interchange_from_mercier_terms
 from .optimization_workflow import (
     AbsMeanIotaFloor,
     AbsMeanIotaCeiling,
@@ -72,6 +73,7 @@ from .optimization_workflow import (
     DMerc,
     FixedBoundaryOptimizationResult,
     FixedBoundaryVMEC,
+    GlasserResistiveInterchange,
     JDotB,
     JVector,
     LeastSquaresProblem,
@@ -270,9 +272,11 @@ __all__ = [
     "redl_current_integrating_factor_update",
     "redl_current_rhs",
     "vmec_current_profile_from_bootstrap_update",
+    "GlasserResistiveInterchange",
     "FiniteBetaTargets",
     "finite_beta_global_residuals_from_state",
     "finite_beta_scalars_from_state",
+    "glasser_resistive_interchange_from_mercier_terms",
     "least_squares_solve",
     "optimization_output_paths",
     "prepare_simple_omnigenity_seed_input",

@@ -475,6 +475,7 @@ QI terms without changing the optimizer setup:
 
    well = vj.MagneticWell(minimum=0.0, softness=1.0e-3)
    dmerc = vj.DMerc(minimum=0.0, softness=1.0e-3)
+   glasser = vj.GlasserResistiveInterchange(maximum=0.0, softness=1.0e-3)
 
    objective_tuples = [
        (aspect.J, TARGET_ASPECT, ASPECT_WEIGHT),
@@ -482,6 +483,7 @@ QI terms without changing the optimizer setup:
        (qs.J, 0.0, QS_WEIGHT),
        (well.J, 0.0, MAGNETIC_WELL_WEIGHT),
        (dmerc.J, 0.0, DMERC_WEIGHT),
+       (glasser.J, 0.0, GLASSER_WEIGHT),
    ]
    problem = vj.LeastSquaresProblem.from_tuples(objective_tuples)
 
@@ -489,8 +491,16 @@ QI terms without changing the optimizer setup:
 state-derived half-mesh volume derivative, also available directly as
 ``vj.magnetic_well_from_state(...)``.  ``DMerc`` uses the differentiable
 state-level Mercier/JXBFORCE path and returns one smooth lower-bound residual
-per interior full-mesh surface.  Both are lower-bound penalties, so their tuple
-target must be ``0.0``.
+per interior full-mesh surface.  ``GlasserResistiveInterchange`` uses the same
+profile reductions to penalize ``D_R > maximum`` for the resistive
+Glasser-Greene-Johnson necessary condition ``D_R <= 0``.  Since ``D_R`` has a
+``1 / shear**2`` factor, this criterion is physically valid only on nonzero
+magnetic-shear surfaces; inspect ``glasser_shear_valid`` diagnostics before
+interpreting axis-adjacent or zero-shear values.  A positive
+``shear_epsilon`` is only an optimization regularization.  These stability
+objectives encode their thresholds internally, so their tuple target must be
+``0.0``.  See :doc:`jxbforce_mercier` and :doc:`references` [10-11] for the
+normalization and references.
 
 QI objectives use the same tuple syntax, but the QI field-quality terms are
 routed through the Boozer/QI problem path so they can share one Boozer
@@ -637,6 +647,7 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
        # (vj.VolavgB().J, TARGET_VOLAVGB, VOLAVGB_WEIGHT),
        # (vj.BetaTotal().J, TARGET_BETA, BETA_WEIGHT),
        # (vj.DMerc(minimum=0.0, softness=1.0e-3).J, 0.0, DMERC_WEIGHT),
+       # (vj.GlasserResistiveInterchange(maximum=0.0, softness=1.0e-3).J, 0.0, GLASSER_WEIGHT),
        # (vj.JDotB(surfaces=(0.25, 0.50, 0.75)).J, 0.0, JDOTB_WEIGHT),
        # (vj.BDotB(surfaces=(0.25, 0.50, 0.75)).J, TARGET_BDOTB, BDOTB_WEIGHT),
        # (vj.BDotGradV(surfaces=(0.25, 0.50, 0.75)).J, TARGET_BDOTGRADV, BDOTGRADV_WEIGHT),
@@ -1066,9 +1077,11 @@ QI finite-beta refinement as a final research-quality result.
 The current implementation includes differentiable finite-beta global
 diagnostics, current-driven iota through ``PCURR_TYPE = "cubic_spline_ip"``,
 a ``vj.DMerc`` lower-bound residual for stellarator-symmetric and LASYM
-equilibria, VMEC/JXBFORCE profile accessors ``vj.JDotB``, ``vj.BDotB`` and
-``vj.BDotGradV``, and state-derived current-profile accessors
-``vj.ToroidalCurrent`` and ``vj.ToroidalCurrentGradient``.  Pass
+equilibria, a ``vj.GlasserResistiveInterchange`` upper-bound residual for the
+``D_R <= 0`` resistive-interchange condition, VMEC/JXBFORCE profile accessors
+``vj.JDotB``, ``vj.BDotB`` and ``vj.BDotGradV``, and state-derived
+current-profile accessors ``vj.ToroidalCurrent`` and
+``vj.ToroidalCurrentGradient``.  Pass
 ``surfaces=(...)`` to those profile objects to select nearest full-mesh
 surfaces, or omit it to use all interior radial surfaces.  ``ToroidalCurrent``
 uses VMEC's Mercier normalization ``signgs * 2*pi * <B_u>``; its gradient is

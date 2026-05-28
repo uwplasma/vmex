@@ -25,6 +25,24 @@ used in the scripts, including ``example_paths``/``load_example`` and
 helpers. Lower-level solver kernels, force assembly routines, and replay
 internals remain submodule-level APIs.
 
+Glasser resistive-interchange support is available through the public import
+surface as ``vj.GlasserResistiveInterchange``.  Add it to a least-squares
+problem as an upper-bound penalty with a zero tuple target:
+
+.. code-block:: python
+
+   glasser = vj.GlasserResistiveInterchange(maximum=0.0, softness=1.0e-3)
+   objective_tuples = [
+       # ...
+       (glasser.J, 0.0, GLASSER_WEIGHT),
+   ]
+
+The sign convention is the Glasser-Greene-Johnson necessary condition
+``D_R <= 0``; ``maximum=0.0`` penalizes positive ``D_R``.  Because the
+criterion divides by magnetic shear squared, use it only on nonzero-shear
+surfaces when interpreting physics diagnostics.  See :doc:`/jxbforce_mercier`
+for the normalization and references.
+
 The module exports the following user-facing helpers:
 
 .. automodule:: vmec_jax.api

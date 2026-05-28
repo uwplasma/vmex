@@ -35,8 +35,16 @@ Background and canonical references for VMEC and related equilibrium methods:
    ``STELLOPT/VMEC2000/Sources/Input_Output/eqfor.f`` and
    ``STELLOPT/VMEC2000/Sources/Input_Output/mercier.f``.
 
-10. VMEC++ solver/restart structure and parity-relevant control flow:
+10. A. H. Glasser, J. M. Greene, and J. L. Johnson, “Resistive instabilities
+    in general toroidal plasma configurations,” *Physics of Fluids* 18(7),
+    875-888 (1975).
+
+11. M. Landreman and R. Jorge, “Magnetic well and Mercier stability of
+    stellarators near the magnetic axis,” *Journal of Plasma Physics* 86(5),
+    905860510 (2020), arXiv:2006.14881.
+
+12. VMEC++ solver/restart structure and parity-relevant control flow:
     ``vmecpp/src/vmecpp/cpp/vmecpp/vmec/vmec/vmec.cc``.
 
-11. VMEC++ output-quantity and near-axis extrapolation notes:
+13. VMEC++ output-quantity and near-axis extrapolation notes:
     ``vmecpp/src/vmecpp/cpp/vmecpp/vmec/output_quantities/output_quantities.cc``.

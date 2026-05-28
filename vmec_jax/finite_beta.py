@@ -1069,6 +1069,8 @@ def mercier_terms_from_state(
         tbb=surface["tbb"],
         tjb=surface["tjb"],
         tjj=surface["tjj"],
+        jdotb=jxb["jdotb"],
+        bdotb=jxb["bdotb"],
         signgs=int(signgs),
     )
     out = {
