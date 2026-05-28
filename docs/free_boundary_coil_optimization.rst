@@ -790,6 +790,12 @@ to about ``5.6 ms`` on CUDA and the force kernel remained slightly faster on
 CUDA than CPU.  Residual scalar materialization, accepted-control ``fsq1``, and
 preconditioner dispatch are the next production GPU targets.
 
+The same benchmark pass tested existing opt-in knobs and did not promote them:
+``VMEC_JAX_HOST_UPDATE_ON_ACCELERATOR=1`` was slower for the tiny CUDA row, and
+``VMEC_JAX_BADJAC_INITIAL_STATE_PROBE_ITERS=0`` was not a robust speedup after
+the current accepted-control fusion.  Timing-light rows confirmed that timing
+instrumentation is not the dominant remaining wall-time source.
+
 The direct-solve child JSON includes active and trial NESTOR timing summaries:
 sample time, scalar-potential solve time, reuse counts, failed trial counts,
 and the final recompute sampler/solver timings. The matrix runner also enables

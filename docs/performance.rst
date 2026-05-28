@@ -3140,6 +3140,15 @@ remaining named GPU buckets are residual scalar materialization
 (``18.6 ms``), accepted-control ``fsq1`` (``12.8 ms``), and preconditioner
 dispatch (``10.8 ms``).
 
+Two opt-in policies were checked and are deliberately not promoted.  Allowing
+the host-update path on accelerators with ``VMEC_JAX_HOST_UPDATE_ON_ACCELERATOR=1``
+made the tiny CUDA row slower in this matrix, and setting
+``VMEC_JAX_BADJAC_INITIAL_STATE_PROBE_ITERS=0`` did not produce a robust
+speedup after the accepted-control payload fusion.  ``--include-timing-light``
+rows also showed that production-like wall time remains GPU-slower, so the
+remaining work is structural: stage or fuse the VMEC-control residual scalar
+materialization, accepted-control ``fsq1``, and preconditioner dispatch.
+
 Historical bundled example runtime/memory matrix (March 2026)
 -------------------------------------------------------------
 

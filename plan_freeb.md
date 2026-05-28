@@ -131,6 +131,13 @@ Steps taken:
     stayed slightly faster than CPU.  The remaining named CUDA buckets are
     residual scalar materialization, accepted-control `fsq1`, and
     preconditioner dispatch.
+71. Tested `VMEC_JAX_HOST_UPDATE_ON_ACCELERATOR=1`,
+    `VMEC_JAX_BADJAC_INITIAL_STATE_PROBE_ITERS=0`, and timing-light rows on
+    `office`.  None produced a robust improvement over the current default;
+    host-update-on-accelerator was slower, probe0 was noisy/slower in the
+    latest matrix, and timing-light rows stayed GPU-slower.  The next real
+    performance step is structural control-loop staging/fusion, not another
+    policy flip.
 
 ### 2026-05-27 Free-boundary beta-scan bootstrap-current preconditioner
 

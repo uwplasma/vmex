@@ -417,7 +417,10 @@ Biot-Savart kernel work.  A subsequent host-profile setup policy
 (`VMEC_JAX_HOST_PROFILE_SETUP=auto`) improved the same tiny CUDA row to
 `0.1625 s` warm versus `0.0552 s` CPU, with CUDA setup/profile down to
 `5.6 ms`; remaining GPU work is now residual scalar materialization,
-accepted-control `fsq1`, and preconditioner dispatch.
+accepted-control `fsq1`, and preconditioner dispatch.  Follow-up tests of
+`VMEC_JAX_HOST_UPDATE_ON_ACCELERATOR=1`, bad-Jacobian probe bypass, and
+timing-light rows did not justify a default policy change; the next
+performance step is structural control-loop staging/fusion.
 
 - Continuation correctness: 100%. Source fix is implemented and covered by
   synthetic repeated-stage tests, a real boundary-projection stage test, and
