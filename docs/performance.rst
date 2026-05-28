@@ -1183,9 +1183,14 @@ Add ``--sync-replay-timing`` when the question is whether a cold callback is
 spending time in replay dispatch/compile-like overhead or in device-ready
 execution.  This exposes ``*_tape_replay_dispatch``,
 ``*_tape_replay_ready``, ``*_initial_tangents_vmap_dispatch``, and
-``*_initial_tangents_vmap_ready`` buckets in the JSON profile.  Keep it off for
-normal CPU/GPU comparison sweeps because the explicit synchronization changes
-the measured workload.
+``*_initial_tangents_vmap_ready`` buckets in the JSON profile.  Dense
+Jacobian residual projection now reports the same split through
+``jacobian_residual_tangents_dispatch`` and
+``jacobian_residual_tangents_ready``; projected replay reports
+``jacobian_projected_replay_residual_tangents_dispatch`` and
+``jacobian_projected_replay_residual_tangents_ready``.  Keep this option off
+for normal CPU/GPU comparison sweeps because the explicit synchronization
+changes the measured workload.
 
 A 2026-05-28 ``office`` rerun at commit ``b085c15`` used this instrumentation
 on a QH ``max_mode=2`` dense exact-Jacobian callback with one accepted-point
@@ -1198,6 +1203,18 @@ columns, and no chunking.  The measured bottlenecks were
 selection as the immediate blocker for this case; the next optimization target
 is accepted-tape build, replay dispatch/compile-like overhead, and dense
 residual-tangent projection.
+
+A follow-up QH ``max_mode=2`` GPU profile on ``office`` with
+``--inner-max-iter 80``, ``--trial-max-iter 40``,
+``VMEC_JAX_DYNAMIC_REPLAY_MODE=basepoint``,
+``VMEC_JAX_REPLAY_COLUMN_CHUNK=0``, and ``--sync-replay-timing`` confirmed
+that the standard dense residual projection is dispatch/tracing dominated:
+three perturbed exact-Jacobian callbacks took ``13.04 s``, ``3.98 s``, and
+``3.27 s``.  The cumulative ``jacobian_residual_tangents`` bucket was
+``2.263 s``, split into ``2.204 s`` dispatch and only ``0.059 s``
+device-ready time.  The next GPU exact-callback optimization should therefore
+reduce Python/JAX dispatch and callback construction around accepted-point
+replay/projection before spending effort on residual-projection kernel math.
 
 For production cache-growth audits, use the same accepted-point callback mode
 with JSON output and explicit budgets.  The report records per-repeat phase

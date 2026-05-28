@@ -61,7 +61,15 @@ EXACT_PROFILE_METRIC_NAMES = {
         "linear_operator_initial_transpose",
     ),
     "residual_tangents_s": ("jacobian_residual_tangents",),
+    "residual_tangents_dispatch_s": ("jacobian_residual_tangents_dispatch",),
+    "residual_tangents_ready_s": ("jacobian_residual_tangents_ready",),
     "projected_residual_tangents_s": ("jacobian_projected_replay_residual_tangents",),
+    "projected_residual_tangents_dispatch_s": (
+        "jacobian_projected_replay_residual_tangents_dispatch",
+    ),
+    "projected_residual_tangents_ready_s": (
+        "jacobian_projected_replay_residual_tangents_ready",
+    ),
     "projected_replay_total_s": (
         "jacobian_projected_replay_total",
         "jacobian_fused_projected_replay_total",

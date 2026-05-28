@@ -454,6 +454,8 @@ def test_profile_summary_prefers_split_replay_and_tangent_buckets() -> None:
     report["profile"]["jacobian_initial_tangents_vmap"] = {"count": 1, "wall_time_s": 1.0}
     report["profile"]["jacobian_initial_tangents_vmap_dispatch"] = {"count": 1, "wall_time_s": 0.2}
     report["profile"]["jacobian_initial_tangents_vmap_ready"] = {"count": 1, "wall_time_s": 0.8}
+    report["profile"]["jacobian_residual_tangents_dispatch"] = {"count": 2, "wall_time_s": 0.1}
+    report["profile"]["jacobian_residual_tangents_ready"] = {"count": 2, "wall_time_s": 0.5}
 
     summary = compare_tool.summarize_payload(report, label="cpu")
 
@@ -464,6 +466,8 @@ def test_profile_summary_prefers_split_replay_and_tangent_buckets() -> None:
     assert summary["metrics"]["initial_tangents_vmap_s"] == 1.0
     assert summary["metrics"]["initial_tangents_vmap_dispatch_s"] == 0.2
     assert summary["metrics"]["initial_tangents_vmap_ready_s"] == 0.8
+    assert summary["metrics"]["residual_tangents_dispatch_s"] == 0.1
+    assert summary["metrics"]["residual_tangents_ready_s"] == 0.5
     assert summary["exact_optimizer_patch_target"]["name"] == "jacobian_tape_replay_ready"
 
 
@@ -495,6 +499,16 @@ def test_profile_summary_accounts_projected_replay_buckets() -> None:
         "wall_time_s": 3.3,
         "mean_wall_time_s": 1.65,
     }
+    report["profile"]["jacobian_projected_replay_residual_tangents_dispatch"] = {
+        "count": 2,
+        "wall_time_s": 0.5,
+        "mean_wall_time_s": 0.25,
+    }
+    report["profile"]["jacobian_projected_replay_residual_tangents_ready"] = {
+        "count": 2,
+        "wall_time_s": 2.8,
+        "mean_wall_time_s": 1.4,
+    }
 
     summary = compare_tool.summarize_payload(report, label="gpu")
 
@@ -503,6 +517,8 @@ def test_profile_summary_accounts_projected_replay_buckets() -> None:
     assert summary["metrics"]["projected_replay_dispatch_s"] == 0.7
     assert summary["metrics"]["accepted_replay_dispatch_s"] == 0.7
     assert summary["metrics"]["projected_residual_tangents_s"] == 3.3
+    assert summary["metrics"]["projected_residual_tangents_dispatch_s"] == 0.5
+    assert summary["metrics"]["projected_residual_tangents_ready_s"] == 2.8
     assert summary["metrics"]["accepted_point_replay_count"] == 2
     assert summary["projected_replay_summary"]["total_s"] == 4.0
     assert summary["projected_replay_summary"]["dispatch_s"] == 0.7

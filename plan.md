@@ -4,7 +4,7 @@ Last updated: 2026-05-28
 Primary branch: `main`
 Baseline release: `v0.0.14`
 Latest known green `main` CI: `b085c15`
-Current candidate: v0.0.14 release candidate with faster `vmec_jax --test`
+Current candidate: post-`v0.0.14` performance instrumentation
 
 This is the living execution plan for making `vmec_jax` accurate, fast,
 differentiable, documented, and usable by external researchers. Update it when
@@ -509,10 +509,14 @@ update:
   JVP replay over 24 columns with no chunking (`replay_wall=3.60 s`,
   `residual_tangent_wall=2.32 s`, `tape_build_wall=4.36 s`, total callback
   `12.01 s`), confirming that chunk selection is no longer the immediate
-  blocker for this case. The next performance blockers are accepted-tape build,
-  replay dispatch/compile-like overhead, dense residual-tangent projection,
-  scan-trial timing/cache-key evidence, and larger-mode accepted-point replay
-  cost.
+  blocker for this case. A follow-up `office` profile with the new residual
+  projection dispatch/ready split used three perturbed QH mode-2 GPU exact
+  Jacobian callbacks (`13.04 s`, `3.98 s`, `3.27 s`) and showed
+  `jacobian_residual_tangents=2.263 s` split into `2.204 s` dispatch and
+  `0.059 s` device-ready time. The next performance blockers are accepted-tape
+  build, replay dispatch/compile-like overhead, dense residual-projection
+  callback construction, scan-trial timing/cache-key evidence, and larger-mode
+  accepted-point replay cost.
 - VMEC parity and physics gates: 99%. Required-tier bundled gates now cover
   `chipf`, stored `B`, input flux/profile propagation, finite-beta
   `pres/presf`, VMEC `iotas -> iotaf` smoothing, surface-averaged current

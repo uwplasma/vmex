@@ -1967,6 +1967,23 @@ class FixedBoundaryExactOptimizer:
         self._profile_add(name, total_s)
         return value
 
+    def _profile_blocking_phase(self, name: str, start: float, value):
+        """Record dispatch and mandatory device-ready timing for a blocking callback phase."""
+
+        dispatch_s = time.perf_counter() - float(start)
+        self._profile_add(f"{name}_dispatch", dispatch_s)
+        try:
+            from ._compat import jax as _jax
+
+            t_ready = time.perf_counter()
+            value = _jax.block_until_ready(value)
+            ready_s = time.perf_counter() - t_ready
+        except Exception:
+            ready_s = 0.0
+        self._profile_add(f"{name}_ready", ready_s)
+        self._profile_add(name, dispatch_s + ready_s)
+        return value
+
     def _make_residuals_eval_fn(self, residuals_fn: Callable) -> Callable:
         """Return the non-differentiating residual evaluator used by callbacks."""
         flag = os.getenv("VMEC_JAX_OPT_JIT_RESIDUALS", "1").strip().lower()
@@ -3018,8 +3035,11 @@ class FixedBoundaryExactOptimizer:
                 payload["tape"].dynamic_base_carries_stacked,
                 payload["tape"].stacked_step_traces,
             )
-            residuals, jac = jax.block_until_ready((residuals, jac))
-            self._profile_add("jacobian_fused_projected_replay_total", time.perf_counter() - t_replay)
+            residuals, jac = self._profile_blocking_phase(
+                "jacobian_fused_projected_replay_total",
+                t_replay,
+                (residuals, jac),
+            )
             self._last_jacobian_residual = np.asarray(residuals, dtype=float)
             self._remember_exact_residual(exact_param_key, self._last_jacobian_residual)
             t_host = time.perf_counter()
@@ -3049,8 +3069,11 @@ class FixedBoundaryExactOptimizer:
 
         t_res = time.perf_counter()
         residuals, jac = helper_cache["residual_tangent_jacobian"](packed_final, final_tangents)
-        residuals, jac = jax.block_until_ready((residuals, jac))
-        self._profile_add("jacobian_projected_replay_residual_tangents", time.perf_counter() - t_res)
+        residuals, jac = self._profile_blocking_phase(
+            "jacobian_projected_replay_residual_tangents",
+            t_res,
+            (residuals, jac),
+        )
         self._profile_add("jacobian_projected_replay_total", time.perf_counter() - t_replay)
         self._last_jacobian_residual = np.asarray(residuals, dtype=float)
         self._remember_exact_residual(exact_param_key, self._last_jacobian_residual)
@@ -3121,10 +3144,13 @@ class FixedBoundaryExactOptimizer:
 
         t_res = time.perf_counter()
         residuals, jac = helper_cache["residual_tangent_jacobian"](packed_final, final_tangents)
-        residuals, jac = jax.block_until_ready((residuals, jac))
+        residuals, jac = self._profile_blocking_phase(
+            "jacobian_residual_tangents",
+            t_res,
+            (residuals, jac),
+        )
         self._last_jacobian_residual = np.asarray(residuals, dtype=float)
         self._remember_exact_residual(exact_param_key, self._last_jacobian_residual)
-        self._profile_add("jacobian_residual_tangents", time.perf_counter() - t_res)
         t_host = time.perf_counter()
         out = np.asarray(jac, dtype=float)
         self._profile_add("jacobian_host_materialize", time.perf_counter() - t_host)
