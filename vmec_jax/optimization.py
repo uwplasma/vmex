@@ -2831,12 +2831,12 @@ class FixedBoundaryExactOptimizer:
             return False
         if bool(getattr(getattr(self._static, "cfg", None), "lasym", False)):
             return False
-        # Mode-2 GPU profiles (24 columns) were slower with projected replay.
-        # Mode-3 QA/QH profiles (48 columns) were neutral-to-much-faster because
-        # the residual projection avoids a large intermediate tangent transfer.
+        # May 2026 office profiles now show a small but repeatable win for
+        # non-LASYM QH mode-2 (24 columns) and larger wins for mode-3+ because
+        # the residual projection avoids an intermediate tangent synchronization.
         # LASYM mode-2 profiles also have 48+ columns, but projected replay is
         # currently much slower there, so keep LASYM on the conservative path.
-        return int(n_params) >= 48
+        return int(n_params) >= 24
 
     def _fused_projected_replay_enabled(self) -> bool:
         """Whether projected replay should fuse replay and residual projection when possible."""
