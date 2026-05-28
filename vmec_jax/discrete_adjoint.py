@@ -105,6 +105,19 @@ _REPLAY_SCAN_CACHE_DIAGNOSTICS.update(
     }
 )
 
+
+@dataclass(frozen=True)
+class _DynamicBasepointScanRunner:
+    from_carry: Any
+    from_state_tangents: Any
+
+    def __call__(self, carry_tangents0, stacked_base_carries_in, stacked_traces_in):
+        return self.from_carry(carry_tangents0, stacked_base_carries_in, stacked_traces_in)
+
+    def zero_aux(self, state_tangents0, stacked_base_carries_in, stacked_traces_in):
+        return self.from_state_tangents(state_tangents0, stacked_base_carries_in, stacked_traces_in)
+
+
 _DIRECT_TAPE_TIMING_KEYS = (
     "tape_solve_call_s",
     "tape_final_state_pack_s",
@@ -1789,19 +1802,54 @@ def _checkpoint_tape_dynamic_basepoint_scan_runner(*, static, stacked, stacked_b
         step_tangents = jax.lax.cond(active, _advance, lambda carry_tangents_in: carry_tangents_in, carry_tangents)
         return step_tangents, None
 
-    @jax.jit
-    def _run_scan(carry_tangents0, stacked_base_carries_in, stacked_traces_in):
+    def _scan_from_carry(carry_tangents0, stacked_base_carries_in, stacked_traces_in):
         carry_tangents, _ = jax.lax.scan(_step_scan, carry_tangents0, (stacked_base_carries_in, stacked_traces_in))
         return carry_tangents
 
-    _lru_cache_put(_CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_SCAN_CACHE, key, _run_scan)
+    @jax.jit
+    def _run_scan(carry_tangents0, stacked_base_carries_in, stacked_traces_in):
+        return _scan_from_carry(carry_tangents0, stacked_base_carries_in, stacked_traces_in)
+
+    @jax.jit
+    def _run_scan_zero_aux(state_tangents0, stacked_base_carries_in, stacked_traces_in):
+        carry0 = jax.tree_util.tree_map(lambda x: x[0], stacked_base_carries_in)
+
+        def _zeros_like_base(arr):
+            arr = jnp.asarray(arr)
+            return jnp.zeros((state_tangents0.shape[0],) + arr.shape, dtype=arr.dtype)
+
+        carry_tangents0 = (state_tangents0,) + tuple(_zeros_like_base(arr) for arr in carry0[1:])
+        return _scan_from_carry(carry_tangents0, stacked_base_carries_in, stacked_traces_in)
+
+    runner = _DynamicBasepointScanRunner(
+        from_carry=_run_scan,
+        from_state_tangents=_run_scan_zero_aux,
+    )
+    _lru_cache_put(_CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_SCAN_CACHE, key, runner)
     _record_replay_scan_cache_lookup(
         "dynamic_basepoint",
         hit=False,
         lookup_s=lookup_s,
         build_s=time.perf_counter() - float(build_start) if build_start is not None else 0.0,
     )
-    return _run_scan
+    return runner
+
+
+def _run_dynamic_basepoint_scan_zero_aux(*, run_scan, state_tangents, stacked_base_carries, stacked):
+    run_zero_aux = getattr(run_scan, "zero_aux", None)
+    if run_zero_aux is not None:
+        return run_zero_aux(state_tangents, stacked_base_carries, stacked)
+
+    from ._compat import jax
+
+    carry0 = jax.tree_util.tree_map(lambda x: x[0], stacked_base_carries)
+
+    def _zeros_like_base(arr):
+        arr = jnp.asarray(arr)
+        return jnp.zeros((state_tangents.shape[0],) + arr.shape, dtype=arr.dtype)
+
+    carry_tangents0 = (state_tangents,) + tuple(_zeros_like_base(arr) for arr in carry0[1:])
+    return run_scan(carry_tangents0, stacked_base_carries, stacked)
 
 
 def _checkpoint_tape_dynamic_basepoint_vjp_scan_runner(*, static, stacked, stacked_base_carries, static_flags):
@@ -1941,16 +1989,18 @@ def checkpoint_tape_state_jvp_columns(
         and _dynamic_basepoint_payload_shapes_match(stacked, tape.dynamic_base_carries_stacked)
     ):
         stacked_base_carries = tape.dynamic_base_carries_stacked
-        carry0 = jax.tree_util.tree_map(lambda x: x[0], stacked_base_carries)
-        zeros_like = lambda arr: jnp.zeros((tangents.shape[0],) + jnp.asarray(arr).shape, dtype=jnp.asarray(arr).dtype)
-        carry_tangents0 = (tangents,) + tuple(zeros_like(arr) for arr in carry0[1:])
         run_scan = _checkpoint_tape_dynamic_basepoint_scan_runner(
             static=static,
             stacked=stacked,
             stacked_base_carries=stacked_base_carries,
             static_flags=static_flags,
         )
-        carry_tangents_final = run_scan(carry_tangents0, stacked_base_carries, stacked)
+        carry_tangents_final = _run_dynamic_basepoint_scan_zero_aux(
+            run_scan=run_scan,
+            state_tangents=tangents,
+            stacked_base_carries=stacked_base_carries,
+            stacked=stacked,
+        )
         _record_replay_jvp_columns_path("dynamic_basepoint", n_columns=int(tangents.shape[0]))
         return carry_tangents_final[0]
     if tape.step_traces and rebuild_preconditioner:
@@ -1958,10 +2008,6 @@ def checkpoint_tape_state_jvp_columns(
         idx = 0
         while idx < len(tape.step_traces):
             trace = tape.step_traces[idx]
-            if carry_tangents is None:
-                carry0 = _dynamic_replay_initial_carry(trace)
-                zeros_like = lambda arr: jnp.zeros((tangents.shape[0],) + jnp.asarray(arr).shape, dtype=jnp.asarray(arr).dtype)
-                carry_tangents = (tangents,) + tuple(zeros_like(arr) for arr in carry0[1:])
             if _dynamic_replay_trace_supported(trace):
                 end = idx + 1
                 while end < len(tape.step_traces) and _dynamic_replay_trace_supported(tape.step_traces[end]):
@@ -1978,10 +2024,25 @@ def checkpoint_tape_state_jvp_columns(
                     stacked_base_carries=segment_base_carries,
                     static_flags=segment_dynamic_flags,
                 )
-                carry_tangents = run_scan(carry_tangents, segment_base_carries, segment_stacked)
+                if carry_tangents is None:
+                    carry_tangents = _run_dynamic_basepoint_scan_zero_aux(
+                        run_scan=run_scan,
+                        state_tangents=tangents,
+                        stacked_base_carries=segment_base_carries,
+                        stacked=segment_stacked,
+                    )
+                else:
+                    carry_tangents = run_scan(carry_tangents, segment_base_carries, segment_stacked)
                 idx = end
                 continue
             if _dynamic_restart_trace_supported(trace):
+                if carry_tangents is None:
+                    carry0 = _dynamic_replay_initial_carry(trace)
+                    zeros_like = lambda arr: jnp.zeros(
+                        (tangents.shape[0],) + jnp.asarray(arr).shape,
+                        dtype=jnp.asarray(arr).dtype,
+                    )
+                    carry_tangents = (tangents,) + tuple(zeros_like(arr) for arr in carry0[1:])
                 carry_tangents = _restart_carry_tangents(carry_tangents)
                 idx += 1
                 continue
