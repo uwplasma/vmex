@@ -1316,6 +1316,97 @@ def direct_coil_boundary_bnormal_rms_jax(
     return jnp.sqrt(jnp.mean(bnormal * bnormal))
 
 
+def free_boundary_boundary_geometry_jax(
+    state: Any,
+    static: Any,
+    *,
+    sample_nzeta: int | None = None,
+) -> dict[str, Any]:
+    """Synthesize accepted free-boundary geometry through JAX.
+
+    This helper mirrors the geometry portion of the host-side
+    ``_sample_external_boundary_arrays`` path: it applies VMEC's m=1
+    internal-to-physical coefficient conversion, evaluates the last radial
+    surface on the VMEC/NESTOR angular grid, and returns first and exact modal
+    second derivatives.  It intentionally stops before external-field
+    sampling, axis overrides, and legacy mgrid interpolation.
+
+    The function is the phase-2 bridge between accepted-state replay and a
+    future fully JAX-visible free-boundary loop.  Gradients with respect to the
+    accepted VMEC state and direct-coil parameters can pass through this
+    geometry, while production ``run_free_boundary`` still uses the established
+    host sampler until the full NESTOR loop is ported.
+    """
+
+    from .free_boundary import _freeb_boundary_sample_setup
+    from .vmec_parity import vmec_m1_internal_to_physical_signed
+    from .vmec_realspace import vmec_realspace_synthesis_multi
+
+    cfg = static.cfg
+    if sample_nzeta is None:
+        sample_nzeta = 1 if (not bool(getattr(cfg, "lthreed", True))) else int(cfg.nzeta)
+    setup = _freeb_boundary_sample_setup(static=static, sample_nzeta=int(sample_nzeta))
+    trig = setup.trig
+
+    Rcos = jnp.asarray(state.Rcos)
+    Rsin = jnp.asarray(state.Rsin)
+    Zcos = jnp.asarray(state.Zcos)
+    Zsin = jnp.asarray(state.Zsin)
+    Rcos, Zsin, Rsin, Zcos = vmec_m1_internal_to_physical_signed(
+        Rcos=Rcos,
+        Zsin=Zsin,
+        Rsin=Rsin,
+        Zcos=Zcos,
+        modes=static.modes,
+        lthreed=bool(getattr(cfg, "lthreed", True)),
+        lasym=bool(getattr(cfg, "lasym", False)),
+        lconm1=bool(getattr(cfg, "lconm1", True)),
+    )
+
+    coeff_cos = jnp.stack([Rcos[-1:, :], Zcos[-1:, :]], axis=0)
+    coeff_sin = jnp.stack([Rsin[-1:, :], Zsin[-1:, :]], axis=0)
+    base, dtheta, dzeta = vmec_realspace_synthesis_multi(
+        coeff_cos=coeff_cos,
+        coeff_sin=coeff_sin,
+        modes=static.modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=False,
+        derivs=("base", "dtheta", "dzeta"),
+    )
+
+    second_facs = jnp.asarray(setup.second_facs, dtype=coeff_cos.dtype)
+    second_cos = jnp.stack([Rcos[-1:, :], Zcos[-1:, :]], axis=0)[:, None, :, :] * second_facs[None, :, :, :]
+    second_sin = jnp.stack([Rsin[-1:, :], Zsin[-1:, :]], axis=0)[:, None, :, :] * second_facs[None, :, :, :]
+    second_base = vmec_realspace_synthesis_multi(
+        coeff_cos=second_cos,
+        coeff_sin=second_sin,
+        modes=static.modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=False,
+        derivs=("base",),
+    )[0]
+
+    R = base[0, 0]
+    Z = base[1, 0]
+    return {
+        "R": R,
+        "Z": Z,
+        "phi": jnp.asarray(setup.phi_grid, dtype=R.dtype),
+        "Ru": dtheta[0, 0],
+        "Zu": dtheta[1, 0],
+        "Rv": dzeta[0, 0],
+        "Zv": dzeta[1, 0],
+        "ruu": second_base[0, 0, 0],
+        "ruv": second_base[0, 1, 0],
+        "rvv": second_base[0, 2, 0],
+        "zuu": second_base[1, 0, 0],
+        "zuv": second_base[1, 1, 0],
+        "zvv": second_base[1, 2, 0],
+    }
+
+
 def direct_coil_boundary_bsqvac_jax(
     params: Any,
     *,
