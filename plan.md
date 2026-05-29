@@ -1,10 +1,10 @@
 # VMEC-JAX Research-Grade Roadmap
 
-Last updated: 2026-05-28
+Last updated: 2026-05-29
 Primary branch: `main`
 Baseline release: `v0.0.14`
-Latest known green `main` CI: `b085c15`
-Current candidate: post-`v0.0.14` performance instrumentation
+Latest known green `main` CI: `4f0bdb2`
+Current candidate: post-`v0.0.14` stability diagnostics and release-gate refresh
 
 This is the living execution plan for making `vmec_jax` accurate, fast,
 differentiable, documented, and usable by external researchers. Update it when
@@ -87,8 +87,14 @@ acceptance criteria or evidence changes.
   `b085c15`. The `v0.0.14` release-candidate gate then passed locally with the
   fetched WOUT fixture bundle, the same `2354 passed, 20 skipped,
   110 deselected, 1 xfailed`, and 95.09% coverage in about 6:51 after updating
-  stale QA fixture constants to the current release asset bundle. The optional
-  converged VMEC2000 parity gate remains opt-in with
+  stale QA fixture constants to the current release asset bundle. On
+  2026-05-29, after adding Glasser resistive-interchange diagnostics, hardening
+  newer-JAX preconditioner namespace dispatch, and calibrating the weak LASYM
+  finite-beta stability parity gate, GitHub Actions passed build, docs,
+  parity dry-run, physics smoke, and Python 3.10/3.11/3.12 fast tests through
+  `4f0bdb2`. The matching local required gate passed with `2373 passed,
+  20 skipped, 110 deselected, 1 xfailed` and 95.27% coverage in 9:54.
+  The optional converged VMEC2000 parity gate remains opt-in with
   `VMEC2000_INTEGRATION=1`. `solve.py` still dominates the missing-line
   surface, so future coverage should come from physics-gated refactor seams
   rather than scaffolding.
@@ -96,7 +102,13 @@ acceptance criteria or evidence changes.
   fixed/free, axisymmetric/non-axisymmetric, LASYM, and single/multigrid
   representatives. The executable-backed end-state gate remains opt-in:
   `VMEC2000_INTEGRATION=1` runs the bounded circular comparison, while
-  `VMEC2000_NIGHTLY=1` adds the slower matrix representatives.
+  `VMEC2000_NIGHTLY=1` adds the slower matrix representatives. The May 29
+  optional executable pass confirmed the bounded circular tokamak gate, the
+  finite-beta QH `DMerc`/`D_R` gate, and the weak-pressure LASYM finite-beta
+  gate with a combined relative-or-absolute Mercier-profile criterion; the
+  known up/down-asymmetric zero-pressure LASYM gap remains a strict expected
+  failure, and free-boundary WOUT parity remains explicitly skipped until a
+  bounded external mgrid-backed gate is promoted.
 - Full non-VMEC2000 physics coverage with refreshed released assets reaches
   72.35% locally (`74 passed, 4 skipped`, 27:21). This is still short of the
   80% target and is too slow for per-commit required CI without splitting the
@@ -529,7 +541,8 @@ update:
 - VMEC parity and physics gates: 99%. Required-tier bundled gates now cover
   `chipf`, stored `B`, input flux/profile propagation, finite-beta
   `pres/presf`, VMEC `iotas -> iotaf` smoothing, surface-averaged current
-  finite differences, aspect/geometry, Mercier/JXBFORCE profiles, and
+  finite differences, aspect/geometry, Mercier/JXBFORCE profiles, Glasser
+  resistive-interchange `D_R` consistency, and
   VMEC-to-Boozer input spectra, including asymmetric Boozer geometry-channel
   propagation for `lasym=True` plus exact LASYM lambda-channel parity into
   Boozer input objects. A new required-tier converged-wout matrix checks
@@ -537,8 +550,11 @@ update:
   LASYM, and single/multigrid representatives. Optional executable-backed
   converged-wout parity now runs a bounded circular end-state comparison by
   default and keeps slower non-axisymmetric, LASYM, multigrid, and
-  free-boundary representatives behind `VMEC2000_NIGHTLY=1`; the regeneration
-  script records the same metrics across discovered VMEC2000 executables.
+  free-boundary representatives behind `VMEC2000_NIGHTLY=1`; finite-beta QH
+  `DMerc`/`D_R` executable parity passed locally on May 29, and the weak LASYM
+  finite-beta stability gate is bounded by a relative-or-absolute criterion
+  because the profile RMS is small. The regeneration script records the same
+  metrics across discovered VMEC2000 executables.
   Optional SIMSOPT QS parity covers QA and QH formula/state diagnostics. The
   parity manifest now has a fast required contract that keeps the
   self-contained optional free-boundary `LASYM=true` case bounded and ready for
@@ -573,7 +589,8 @@ update:
   mechanics live in `qi_optimization_cases.py` and
   `qi_optimization_support.py`. Large
   solver/wout/free-boundary splits remain deferred behind parity gates.
-- Docs/release hygiene: release target is `v0.0.14` after `vmec_jax --test`
+- Docs/release hygiene: release target is the next patch release after
+  `v0.0.14`, with `vmec_jax --test`
   quick-start tolerance tuning. The previous released baseline is `v0.0.13`,
   with PyPI publication verified. Post-release `main` has local warning-clean Sphinx and a
   clean 95% CI-equivalent coverage pass through the May 27 staged-seed
@@ -582,10 +599,11 @@ update:
   1 xfailed`, 95.09%), plus the exact replay JVP instrumentation rerun at the
   same 95.09% coverage level and the `v0.0.14` release-candidate rerun
   (`2354 passed, 20 skipped, 110 deselected, 1 xfailed`, 95.09%). GitHub
-  Actions is green through `b085c15`,
+  Actions is green through `4f0bdb2`,
   carrying the QI staged-seed, explicit CLI docs updates, fallback
-  materialization test, optional SIMSOPT Redl gate wiring, and replay JVP
-  instrumentation.
+  materialization test, optional SIMSOPT Redl gate wiring, replay JVP
+  instrumentation, Glasser `D_R` docs/examples, and newer-JAX preconditioner
+  compatibility fixes.
   Performance/discrete-adjoint/docs reflect the current replay and finite-beta
   policies, diagnostics docs cover detailed preconditioner timing, and a
   command-level release checklist now ties local gates, tools/validation
