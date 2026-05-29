@@ -82,10 +82,78 @@ approximation.
 Glasser Resistive-Interchange Criterion
 ---------------------------------------
 
+The ideal Mercier criterion is a local interchange-stability condition for a
+nested-flux-surface equilibrium.  VMEC reports it through the scalar profile
+``DMerc`` and the decomposition
+
+.. math::
+
+   D_{\mathrm{Merc}}
+      = D_{\mathrm{shear}}
+      + D_{\mathrm{well}}
+      + D_{\mathrm{curr}}
+      + D_{\mathrm{geod}}.
+
+The sign convention used by VMEC, VMEC++ and ``vmec_jax`` is
+``D_Merc >= 0`` for ideal-MHD Mercier stability.  In the conventional
+VMEC/Bauer notation, the four contributions correspond to:
+
+- ``Dshear``: magnetic-shear stabilization,
+- ``Dwell``: magnetic-well and pressure-gradient contribution,
+- ``Dcurr``: current-gradient / Pfirsch-Schlüter-current contribution, and
+- ``Dgeod``: geodesic-curvature contribution.
+
+A common compact way to write the VMEC-style surface-integral form is
+
+.. math::
+
+   D_{\mathrm{Merc}}
+      &= D_S + D_W + D_I + D_G,\\
+   D_S
+      &= \frac{s}{\iota^2\pi^2}
+         \frac{(\psi_t''\psi_p')^2}{4},\\
+   D_W
+      &= \frac{s}{\iota^2\pi^2}
+         \left\langle
+            \frac{B^2}{|\nabla s|^2}
+            p'\left(V'' - p'\left\langle B^{-2}\right\rangle\right)
+         \right\rangle,\\
+   D_I
+      &= \frac{s}{\iota^2\pi^2}
+         \left[
+            \psi_t'' I'
+            \left\langle\frac{B^2}{|\nabla s|^2}\right\rangle
+            -(\psi_t''\psi_p')
+            \left\langle\frac{J\cdot B}{|\nabla s|^2}\right\rangle
+         \right],\\
+   D_G
+      &= \frac{s}{\iota^2\pi^2}
+         \left[
+            \left\langle\frac{J\cdot B}{|\nabla s|^2}\right\rangle^2
+            -
+            \left\langle\frac{(J\cdot B)^2}{|\nabla s|^2 B^2}\right\rangle
+            \left\langle\frac{B^2}{|\nabla s|^2}\right\rangle
+         \right].
+
+Here :math:`s` is normalized toroidal flux, :math:`p' = dp/ds`,
+:math:`V'' = d^2V/ds^2`, :math:`\psi_t` and :math:`\psi_p` are toroidal and
+poloidal flux functions, and :math:`\langle\cdot\rangle` denotes the VMEC
+flux-surface integral with Jacobian :math:`\sqrt{g}`.  The exact constants and
+normalizations differ across papers depending on whether toroidal flux is
+written as :math:`\psi`, :math:`2\pi\psi`, or :math:`s`; ``vmec_jax`` follows
+VMEC2000 output conventions rather than trying to re-normalize the published
+formula.  The decomposition and sign convention above match the VMEC-style
+description summarized in :doc:`references` [15], while the near-axis
+interpretation and modern derivations are discussed in :doc:`references` [11]
+and [14].
+
 ``vmec_jax`` also evaluates the resistive interchange diagnostic introduced by
 Glasser, Greene and Johnson and related to the Mercier criterion by Landreman
-and Jorge; see :doc:`references` [10] and [11].  In the notation of Landreman
-and Jorge,
+and Jorge; see :doc:`references` [10] and [11].  Glasser-Greene-Johnson showed
+that the finite-resistivity interchange condition is not just the ideal
+Mercier condition with a changed sign: a positive correction, involving
+magnetic shear and a current/pressure-coupling term usually denoted ``H``, is
+added to ``-D_Merc``.  In the notation of Landreman and Jorge,
 
 .. math::
 
@@ -94,7 +162,11 @@ and Jorge,
          \left[H - \frac{(\iota')^2}{8\pi^2}\right]^2,
 
 with the necessary resistive-MHD condition ``D_R <= 0`` on nonzero-shear
-surfaces.  The VMEC/Ichiguchi algebra in ``vmec_jax`` uses
+surfaces.  The difference in sign is intentional: ideal Mercier stability is
+tracked by lower-bounding ``D_Merc``, while resistive-interchange stability is
+tracked by upper-bounding ``D_R``.
+
+The VMEC/Ichiguchi algebra in ``vmec_jax`` uses
 :math:`S=d\iota/d\Phi` and :math:`D_{\mathrm{shear}}=S^2/4`, where
 :math:`\Phi=2\pi\psi`.  Therefore the implemented normalized expression is
 
@@ -110,6 +182,25 @@ used for ``DMerc``:
 
    H = S \left(t_{JB}
        - \frac{\langle J\cdot B\rangle}{\langle B^2\rangle} t_{BB}\right).
+
+The two auxiliary terms are surface-integral reductions of the same real-space
+channels used by JXBFORCE:
+
+.. math::
+
+   t_{JB} \sim
+      \left\langle
+         \frac{J\cdot B}{|\nabla s|^2}
+      \right\rangle,\qquad
+   t_{BB} \sim
+      \left\langle
+         \frac{B^2}{|\nabla s|^2}
+      \right\rangle.
+
+In code these reductions live in ``mercier_surface_integrals_from_realspace``
+and ``mercier_terms_from_profile_integrals``.  They are differentiable JAX
+array operations, so ``DMerc`` and ``D_R`` can be used both as persisted wout
+diagnostics and as least-squares optimization objectives.
 
 When only Mercier profile terms are available,
 ``glasser_resistive_interchange_from_mercier_terms`` can fall back to
@@ -129,6 +220,48 @@ Generated ``wout`` files persist these profiles as ``D_R``, ``HGlasser``,
 ``GlasserCorrection`` and ``GlasserShearValid``.  Older VMEC/VMEC++ files that
 do not contain them are read with a fallback reconstruction from ``DMerc``,
 ``DShear`` and ``DCurr``.
+
+Technical comments
+~~~~~~~~~~~~~~~~~~
+
+- The first and last radial grid points are special in VMEC because many
+  half-mesh quantities are axis/edge extrapolations.  Stability gates therefore
+  focus on interior surfaces unless explicitly testing storage semantics.
+- ``D_R`` contains a ``1 / S^2`` factor.  Near-zero shear can make the
+  diagnostic very large or physically ill-conditioned; inspect
+  ``GlasserShearValid`` before drawing stability conclusions.
+- ``D_Merc`` and ``D_R`` are local necessary criteria, not full global MHD
+  stability proofs.  They are valuable optimization and validation diagnostics,
+  but ballooning, tearing, kinetic, and free-boundary stability checks remain
+  separate physics questions.
+- VMEC2000 writes only the traditional Mercier fields.  ``vmec_jax`` adds
+  ``D_R``, ``HGlasser``, ``GlasserCorrection`` and ``GlasserShearValid`` while
+  preserving VMEC-style arrays so older workflows continue to read the file.
+
+Finite-beta QA profile example
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The example script ``examples/diagnostics/plot_glasser_qa_finite_beta.py`` runs
+the bundled ``examples/data/input.nfp2_QA_finite_beta`` deck, writes an ignored
+temporary ``wout`` file, and plots ``D_Merc`` and ``D_R`` versus normalized
+toroidal flux:
+
+.. code-block:: bash
+
+   python examples/diagnostics/plot_glasser_qa_finite_beta.py
+
+The plot makes the sign conventions explicit: ``D_Merc >= 0`` is the ideal
+Mercier condition, while ``D_R <= 0`` is the Glasser resistive-interchange
+necessary condition on nonzero-shear surfaces.
+
+.. image:: _static/figures/qa_finite_beta_dmerc_dr.png
+   :alt: Finite-beta QA radial profiles of DMerc and DR
+   :width: 88%
+
+In this example, the finite-beta QA equilibrium is Mercier-stable on the
+interior grid by ``D_Merc >= 0``, while ``D_R`` becomes positive over part of
+the radius.  That behavior is expected: the Glasser correction is positive and
+can make the resistive criterion more restrictive than the ideal Mercier gate.
 
 Key VMEC2000 Convention: Parity Channels For ``bsubu``/``bsubv``
 ----------------------------------------------------------------

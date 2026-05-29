@@ -141,7 +141,7 @@ category:
    * - Near-zero or cancellation-limited (buco, jcuru, jcurv, jdotb)
      - 1×10⁻²
      - 1×10⁻⁸
-   * - MHD stability coefficients (DMerc, Dshear, Dwell, Dcurr, Dgeod)
+   * - MHD stability coefficients (DMerc, D_R, Dshear, Dwell, Dcurr, Dgeod)
      - 1×10⁻³
      - 1×10⁻⁸
    * - Equilibrium force residual (equif)
@@ -455,8 +455,9 @@ tools.  All of the following fields are written and tested:
   ``jdotb``, ``bdotb``, ``bdotgradv``, ``equif``.
 - **Axis geometry**: ``raxis_cc``, ``zaxis_cs`` (and ``raxis_cs``,
   ``zaxis_cc`` for lasym).
-- **MHD stability coefficients**: ``DMerc``, ``DShear``, ``DWell``, ``DCurr``,
-  ``DGeod``.
+- **MHD stability coefficients**: ``DMerc``, ``D_R``, ``HGlasser``,
+  ``GlasserCorrection``, ``GlasserShearValid``, ``DShear``, ``DWell``,
+  ``DCurr``, ``DGeod``.
 - **Convergence scalars**: ``fsqr``, ``fsqz``, ``fsql``.
 
 Current parity status

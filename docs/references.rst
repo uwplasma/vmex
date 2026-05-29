@@ -48,3 +48,11 @@ Background and canonical references for VMEC and related equilibrium methods:
 
 13. VMEC++ output-quantity and near-axis extrapolation notes:
     ``vmecpp/src/vmecpp/cpp/vmecpp/vmec/output_quantities/output_quantities.cc``.
+
+14. P. Kim, R. Jorge, and W. Dorland, “The On-Axis Magnetic Well and
+    Mercier's Criterion for Arbitrary Stellarator Geometries,” *Journal of
+    Plasma Physics* 87(4), 905870409 (2021), arXiv:2011.07416.
+
+15. J. Schilling et al., “Magnetohydrodynamic equilibrium and stability
+    properties of the Infinity Two fusion pilot plant,” *Journal of Plasma
+    Physics* 90(6), 905900615 (2024), Appendix B.

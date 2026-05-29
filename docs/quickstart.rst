@@ -122,6 +122,41 @@ the solver status with ``ier_flag`` plus ``vmec_jax_converged__logical__`` and
 ``vmec_jax_status``. Treat ``vmec_jax_status = nonconverged`` as a diagnostic
 checkpoint rather than a validated equilibrium.
 
+Load, save, and inspect a ``wout`` file
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The ``wout_*.nc`` file is the standard VMEC output container.  Use
+``vmec_jax.wout.read_wout`` and ``vmec_jax.wout.write_wout`` when you want to
+inspect or round-trip these files directly:
+
+.. code-block:: python
+
+   import numpy as np
+
+   import vmec_jax as vj
+   from vmec_jax.wout import read_wout, write_wout
+
+   wout = read_wout("wout_nfp4_QH_warm_start.nc")
+   write_wout("wout_nfp4_QH_warm_start_copy.nc", wout, overwrite=True)
+
+   s = np.linspace(0.0, 1.0, int(wout.ns))
+   print("aspect =", float(wout.aspect))
+   print("mean edge iota =", float(wout.iotaf[-1]))
+
+   for js, (sj, iota_j) in enumerate(zip(s, wout.iotaf)):
+       _theta, _zeta, bmag = vj.vmecplot2_bmag_grid(wout, s_index=js)
+       print(f"s={sj:.3f}  iota={float(iota_j): .6e}  <|B|>={float(np.mean(bmag)): .6e}")
+
+The complete runnable example is:
+
+.. code-block:: bash
+
+   python examples/diagnostics/load_save_wout_profiles.py
+
+It creates a ``wout`` from ``examples/data/input.nfp4_QH_warm_start`` if one
+does not already exist, saves a round-trip copy, then prints scalar
+diagnostics, the iota profile, and simple surface-averaged ``|B|`` values.
+
 Free-boundary CLI smoke test
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

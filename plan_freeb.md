@@ -243,6 +243,11 @@ Steps taken:
     the nested JIT wrapper from `_assemble_rz_preconditioner_matrices_impl`.
     The broader post-merge local regression batch passed with `147 passed,
     1 skipped`, so the branch is ready for a fresh CI pass after push.
+90. Merged the newer `origin/main` tip again after it advanced to the Glasser
+    parity hardening changes. Resolved the `implicit.py` and `optimization.py`
+    conflicts by preserving the traced-callback dtype fix and diagnostic
+    objective-cotangent fallback, then re-ran the focused post-merge regression
+    checks.
 
 ### 2026-05-27 Free-boundary beta-scan bootstrap-current preconditioner
 

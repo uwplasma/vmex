@@ -163,3 +163,54 @@ def test_lasym_finite_beta_reference_fixture_has_asymmetric_pressure_signal() ->
     )
     assert float(wout.wp) > 0.0
     assert float(wout.betaxis) > float(wout.betatotal) > 0.0
+
+
+@pytest.mark.parametrize(
+    "wout_rel,min_abs_d_r",
+    (
+        ("examples/data/wout_shaped_tokamak_pressure.nc", 1.0e-7),
+        ("examples/data/wout_li383_low_res.nc", 1.0e-2),
+        ("examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc", 1.0e-4),
+    ),
+    ids=("axisymmetric_pressure", "three_d_finite_beta", "lasym_finite_beta"),
+)
+def test_materialized_finite_beta_glasser_profiles_are_self_consistent(
+    wout_rel: str,
+    min_abs_d_r: float,
+) -> None:
+    """No-solve gate for persisted/fallback Glasser profiles on finite-beta wouts."""
+
+    pytest.importorskip("netCDF4")
+    wout_path = _repo_root() / wout_rel
+    if not wout_path.exists():
+        pytest.skip(f"Missing materialized finite-beta wout fixture: {wout_rel}")
+
+    wout = read_wout(wout_path)
+    ns = int(wout.ns)
+    dmerc = np.asarray(wout.DMerc, dtype=float)
+    d_r = np.asarray(wout.D_R, dtype=float)
+    h_glasser = np.asarray(wout.H, dtype=float)
+    correction = np.asarray(wout.glasser_correction, dtype=float)
+    valid = np.asarray(wout.glasser_shear_valid, dtype=bool)
+
+    for name, arr in (
+        ("DMerc", dmerc),
+        ("D_R", d_r),
+        ("HGlasser", h_glasser),
+        ("GlasserCorrection", correction),
+    ):
+        assert arr.shape == (ns,), name
+        assert np.all(np.isfinite(arr)), name
+    assert valid.shape == (ns,)
+    assert int(np.count_nonzero(valid[1:-1])) >= max(ns - 4, 1)
+
+    np.testing.assert_allclose(
+        d_r,
+        -dmerc + correction,
+        rtol=1.0e-11,
+        atol=1.0e-13,
+        err_msg=f"{wout_rel}: D_R no longer equals -DMerc + GlasserCorrection",
+    )
+    assert np.all(correction[1:-1] >= -1.0e-14)
+    assert float(np.nanmax(np.abs(d_r[1:-1]))) > min_abs_d_r
+    assert float(wout.betatotal) > 0.0
