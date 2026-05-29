@@ -272,6 +272,10 @@ Steps taken:
     flags as the production nonlinear force call. The remaining exact-replay
     delta is localized to lambda-force reconstruction rather than missing
     free-boundary vacuum or constraint inputs.
+95. Raised the CI fast-test job timeout from 30 to 45 minutes after the py3.11
+    coverage lane was canceled at 94% test progress with no test failure. This
+    preserves the same 95% coverage gate and test selection while avoiding a
+    false red caused by coverage overhead on the largest matrix row.
 
 ### 2026-05-27 Free-boundary beta-scan bootstrap-current preconditioner
 
