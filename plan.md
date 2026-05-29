@@ -1337,6 +1337,13 @@ Defer beyond the current cycle:
   (`15.59 s`), and finite-beta QH scan converged in `3.80 s`. This supersedes
   the May 17 raw fixed-boundary GPU default evidence; CPU remains non-scan, and
   exact optimization callbacks retain their separate replay/chunking policy.
+- 2026-05-29: Kept CPU persistent compilation cache explicit opt-in after a
+  cold-process timing check showed it can reduce repeated finite-beta CLI runs
+  (`24.85 s` to `17.47 s`) but still risks XLA:CPU AOT host-feature warnings on
+  some systems. The cache trigger no longer treats merely visible
+  `CUDA_VISIBLE_DEVICES`/ROCm devices as accelerator intent at import time;
+  explicit JAX GPU platform requests and `solver_device="gpu"` still enable the
+  accelerator cache path before solve compilation.
 - 2026-05-17: Tightened the CLI fixed-boundary finish policy for explicit
   low-budget runs. If a caller supplies `max_iter`, all accelerated/parity
   finish attempts combined are capped at `2 * max_iter` and report

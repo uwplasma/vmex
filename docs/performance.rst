@@ -217,10 +217,12 @@ read as a mixed result rather than a broad VMEC2000 speedup claim:
 
 **11. On-disk XLA kernel cache**
   The persistent XLA compilation cache is enabled by default for repeated
-  cold-process accelerator runs, including jobs that expose GPUs through
-  ``CUDA_VISIBLE_DEVICES`` or the ROCm equivalents before import, and public
-  calls that explicitly request ``solver_device="gpu"``. CPU cache use remains
-  opt-in to avoid XLA:CPU AOT host-feature mismatch warnings. Set
+  cold-process accelerator runs when the requested JAX platform is
+  GPU/CUDA/ROCm/TPU or a public call explicitly requests
+  ``solver_device="gpu"``. Merely exposing a GPU through
+  ``CUDA_VISIBLE_DEVICES`` no longer enables the cache during import, so CPU
+  runs on GPU workstations do not accidentally load CPU AOT cache entries. CPU
+  cache use remains opt-in to avoid XLA:CPU AOT host-feature mismatch warnings. Set
   ``VMEC_JAX_COMPILATION_CACHE=1`` to enable it for CPU runs,
   ``VMEC_JAX_COMPILATION_CACHE=0`` to disable it, or
   ``VMEC_JAX_COMPILATION_CACHE_DIR`` to choose the cache location.

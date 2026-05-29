@@ -72,9 +72,7 @@ def test_default_compilation_cache_dir_respects_environment(monkeypatch, tmp_pat
     monkeypatch.delenv("JAX_PLATFORM_NAME")
 
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0")
-    cuda_cache = compat._default_compilation_cache_dir()
-    assert cuda_cache is not None
-    assert cuda_cache.startswith(str(tmp_path / ".cache" / "vmec_jax" / "jax_cache"))
+    assert compat._default_compilation_cache_dir() is None
 
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "-1")
     monkeypatch.setenv("JAX_PLATFORMS", "cpu,gpu")
@@ -203,6 +201,9 @@ def test_default_compilation_cache_dir_handles_home_failure_and_rocm(monkeypatch
     monkeypatch.setattr(pathlib.Path, "home", classmethod(lambda cls: pathlib.Path("/tmp/synthetic-home")))
     monkeypatch.setenv("HIP_VISIBLE_DEVICES", "-1")
     monkeypatch.setenv("ROCR_VISIBLE_DEVICES", "1")
+    assert compat._default_compilation_cache_dir() is None
+
+    monkeypatch.setenv("JAX_PLATFORM_NAME", "rocm")
     assert compat._default_compilation_cache_dir() is not None
 
 
