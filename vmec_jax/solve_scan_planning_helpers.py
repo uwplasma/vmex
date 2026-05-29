@@ -249,10 +249,18 @@ def scan_chunk_settings(
     lthreed: bool,
     backend_name: str,
     chunk_size_env: str,
+    spectral_mode_count: int | None = None,
 ) -> tuple[int, bool]:
     """Resolve scan chunk size without reading process environment."""
     chunk_size_env = str(chunk_size_env).strip()
     backend = str(backend_name).strip().lower()
+    low_mode_accelerator = (
+        backend not in ("", "cpu")
+        and not bool(need_print)
+        and spectral_mode_count is not None
+        and int(spectral_mode_count) <= 16
+        and int(max_iter_scan) > 512
+    )
     if chunk_size_env:
         try:
             chunk_size = max(1, int(chunk_size_env))
@@ -260,11 +268,18 @@ def scan_chunk_settings(
             chunk_size = max(1, int(nstep_screen))
     elif (backend == "cpu") and (not bool(need_print)):
         chunk_size = max(1, int(max_iter_scan))
+    elif low_mode_accelerator:
+        # Fresh-process GPU profiles of low-mode QH warm starts are dominated
+        # by the one large scan executable.  A fixed 256-iteration chunk keeps
+        # the compiled body smaller and reusable inside the same solve.  Higher
+        # mode-count cases keep the full chunk because launch overhead dominates
+        # there.
+        chunk_size = min(max(1, int(max_iter_scan)), 256)
     elif (backend != "cpu") and (not bool(need_print)):
         chunk_size = max(1, int(max_iter_scan))
     else:
         chunk_size = max(1, int(nstep_screen))
-    cap_to_remaining = not bool(need_print)
+    cap_to_remaining = (not bool(need_print)) and (not low_mode_accelerator)
     return chunk_size, cap_to_remaining
 
 

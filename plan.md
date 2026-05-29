@@ -1354,6 +1354,15 @@ Defer beyond the current cycle:
   `55.9/55.5 s`, dominated by `scan_device_dispatch_s`. The next GPU blocker is
   persistent scan executable reuse or reducing scan compile/dispatch cost, not
   additional cache toggles.
+- 2026-05-29: Added the first scan compile/dispatch reduction after the cache
+  alignment result. Quiet accelerator scans with low spectral mode count
+  (`<=16` stored Fourier coefficients) and long budgets (`>512` iterations)
+  now use fixed 256-iteration scan chunks; higher-mode accelerator cases keep
+  one full-length chunk. On `office`, the full input-NITER
+  `input.nfp4_QH_warm_start` GPU profile improved from `15.76 s` to `13.86 s`
+  with identical final residual (`1.109e-13`). The finite-beta QH guardrail
+  stayed on the full chunk because it has 50 modes; forced small chunks
+  regressed it to `60--94 s` versus `54.54 s` for the patched full chunk.
 - 2026-05-29: Added per-stage multigrid wall-time diagnostics to the driver and
   fixed-boundary profiler, then fixed chunked-stage accounting so accelerated
   monitor chunks are summed as one logical stage. Scan-stage `scan_total_s`

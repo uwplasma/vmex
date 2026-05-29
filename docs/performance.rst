@@ -2126,6 +2126,15 @@ tree with ``PYTHONPATH=$PWD`` gave repeated QH warm-start processes of
 ``scan_device_dispatch_s`` (about ``12.5 s`` for QH warm start and ``41.9 s``
 for finite beta), so the next GPU lane is persistent executable reuse or
 reducing scan compile/dispatch cost rather than more driver-side cache toggles.
+The first compile/dispatch reduction that survived the finite-beta guardrail is
+an adaptive low-mode accelerator chunk: quiet GPU scans with at most 16 Fourier
+coefficients and more than 512 iterations use a fixed 256-iteration scan chunk,
+while higher-mode cases keep the full-length chunk.  On ``office`` this reduced
+the full input-NITER ``input.nfp4_QH_warm_start`` fresh GPU profile from
+``15.76 s`` to ``13.86 s`` with the same final residual
+(``1.109e-13``).  The finite-beta QH profile stayed on the full chunk because
+it has 50 modes; forcing smaller chunks regressed that case to
+``60--94 s`` versus the ``54.54 s`` patched full-chunk profile.
 
 The exact-optimizer profile has a different bottleneck from single fixed-boundary
 solves.  A 2026-05-24 bounded ``max_mode=3`` two-evaluation profile on the
@@ -2302,9 +2311,11 @@ Controls:
 - ``VMEC_JAX_DYNAMIC_SCAN_ITERS=<int>``: override the probe window
   (defaults to ``10`` on CPU, ``3`` on accelerators).
 
-For quiet accelerator scans, ``vmec-jax`` also increases the default scan chunk
-target and caps each chunk to the remaining iteration budget. This reduces
-host/device launch overhead without changing the in-scan hold semantics.
+For quiet accelerator scans, ``vmec-jax`` uses a backend- and mode-aware scan
+chunk.  Higher-mode runs use one full-length chunk to minimize host/device
+launch overhead.  Low-mode long-budget runs use fixed 256-iteration chunks to
+reduce fresh-process compile/dispatch latency while reusing the same compiled
+body inside the solve.
 
 Controls:
 

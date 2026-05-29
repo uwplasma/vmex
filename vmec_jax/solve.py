@@ -686,6 +686,7 @@ def _scan_chunk_settings(
     nstep_screen: int,
     need_print: bool,
     lthreed: bool,
+    spectral_mode_count: int | None = None,
 ) -> tuple[int, bool]:
     return _resolve_scan_chunk_settings(
         max_iter_scan=max_iter_scan,
@@ -694,6 +695,7 @@ def _scan_chunk_settings(
         lthreed=lthreed,
         backend_name=_scan_backend_name(),
         chunk_size_env=os.getenv("VMEC_JAX_SCAN_CHUNK_SIZE", ""),
+        spectral_mode_count=spectral_mode_count,
     )
 
 
@@ -8824,6 +8826,7 @@ def solve_fixed_boundary_residual_iter(
                 nstep_screen=int(nstep_screen),
                 need_print=bool(need_print),
                 lthreed=bool(cfg.lthreed),
+                spectral_mode_count=int(ncoeff),
             )
             jit_preflight = _scan_jit_preflight_enabled(
                 env_value=os.getenv("VMEC_JAX_SCAN_JIT_PREFLIGHT"),
