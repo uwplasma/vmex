@@ -7,6 +7,7 @@ from vmec_jax._compat import jax, jnp
 import vmec_jax as vj
 from vmec_jax.namelist import InData
 from vmec_jax.profiles import MU0
+from vmec_jax import profiles as profile_mod
 
 
 def test_profile_polynomial_scaled_and_pressure_match_manual_values():
@@ -32,6 +33,93 @@ def test_profile_polynomial_scaled_and_pressure_match_manual_values():
         rtol=0.0,
         atol=1.0e-30,
     )
+
+
+def test_profile_helpers_cover_vmec_pressure_conversion_edges():
+    """Profile helpers should expose the same physics building blocks users script with."""
+
+    base = vj.ProfilePolynomial(np.asarray([4.0]))
+    scaled = vj.ProfileScaled(base, 2.5)
+    pair_left = vj.ProfilePolynomial(np.asarray([2.0, -0.5]))
+    pair_right = vj.ProfilePolynomial(np.asarray([3.0, 1.0]))
+    pressure = vj.ProfilePressure(pair_left, pair_right, pair_left, pair_right)
+
+    np.testing.assert_allclose(np.asarray(base.dfds([0.0, 0.7])), [0.0, 0.0])
+    np.testing.assert_allclose(vj.profile_to_power_series_coeffs(scaled), [10.0])
+    np.testing.assert_allclose(
+        vj.profile_to_power_series_coeffs(pressure),
+        2.0 * np.polynomial.polynomial.polymul([2.0, -0.5], [3.0, 1.0]),
+    )
+
+    am, pres_scale = vj.pressure_profile_to_vmec_am(
+        vj.ProfilePolynomial(np.asarray([1.0, 2.0, 0.0, 1.0e-16])),
+        pres_scale=2.0,
+        trim_tol=1.0e-15,
+    )
+    assert pres_scale == 2.0
+    np.testing.assert_allclose(am, [0.5, 1.0])
+
+    indata = InData(scalars={"AM": [99.0], "PRES_SCALE": 0.0}, indexed={})
+    updated = vj.with_pressure_profile(indata, vj.ProfilePolynomial(np.asarray([3.0, -1.0])), pres_scale=3.0)
+    assert updated is not indata
+    assert updated.scalars["PMASS_TYPE"] == "power_series"
+    np.testing.assert_allclose(updated.scalars["AM"], [1.0, -1.0 / 3.0])
+
+    with pytest.raises(ValueError, match="at least one"):
+        vj.ProfilePressure()
+    with pytest.raises(ValueError, match="even number"):
+        vj.ProfilePressure(pair_left)
+    with pytest.raises(ValueError, match="pres_scale"):
+        vj.pressure_profile_to_vmec_am(base, pres_scale=0.0)
+    with pytest.raises(TypeError, match="unsupported profile"):
+        vj.profile_to_power_series_coeffs(object())  # type: ignore[arg-type]
+
+
+def test_profile_pytrees_and_parser_helpers_are_stable():
+    """The finite-beta profile classes are pytrees and parser helpers are deterministic."""
+
+    with pytest.raises(NotImplementedError):
+        profile_mod.Profile().f(0.0)
+    with pytest.raises(NotImplementedError):
+        profile_mod.Profile().dfds(0.0)
+
+    polynomial = vj.ProfilePolynomial(jnp.asarray([1.0, 2.0], dtype=jnp.float64))
+    np.testing.assert_allclose(np.asarray(polynomial(0.25)), np.asarray(polynomial.f(0.25)))
+    scaled = vj.ProfileScaled(polynomial, jnp.asarray(4.0, dtype=jnp.float64))
+    pressure = vj.ProfilePressure(polynomial, polynomial)
+    bundle = vj.standard_finite_beta_profiles(2.5)
+
+    children, aux = polynomial.tree_flatten()
+    restored_polynomial = vj.ProfilePolynomial.tree_unflatten(aux, children)
+    np.testing.assert_allclose(np.asarray(restored_polynomial.coeffs), [1.0, 2.0])
+
+    children, aux = scaled.tree_flatten()
+    restored_scaled = vj.ProfileScaled.tree_unflatten(aux, children)
+    np.testing.assert_allclose(np.asarray(restored_scaled.f(0.5)), np.asarray(scaled.f(0.5)))
+
+    children, aux = pressure.tree_flatten()
+    restored_pressure = vj.ProfilePressure.tree_unflatten(aux, children)
+    np.testing.assert_allclose(np.asarray(restored_pressure.dfds(0.5)), np.asarray(pressure.dfds(0.5)))
+
+    np.testing.assert_allclose(np.asarray(bundle.ne_coeffs), np.asarray(bundle.ne.coeffs))
+    np.testing.assert_allclose(np.asarray(bundle.Te_coeffs), np.asarray(bundle.Te.coeffs))
+    np.testing.assert_allclose(np.asarray(bundle.Ti_coeffs), np.asarray(bundle.Ti.coeffs))
+    np.testing.assert_allclose(np.asarray(bundle.Zeff_coeffs), np.asarray(bundle.Zeff.coeffs))
+
+    assert profile_mod._as_float_list(None) == []
+    assert profile_mod._as_float_list([1, "2.5"]) == [1.0, 2.5]
+    assert profile_mod._as_float_list(np.asarray([1.0, 2.0])) == [1.0, 2.0]
+    assert profile_mod._as_float_list("bad-float") == "bad-float"
+    assert profile_mod._lower(None, "Power_Series") == "Power_Series"
+    assert profile_mod._lower([], "power_series") == "power_series"
+    assert profile_mod._lower(["'akima_spline'"], "power_series") == "akima_spline"
+    assert profile_mod._is_jax_tracer(1.0) is False
+    np.testing.assert_allclose(np.asarray(profile_mod._coeff_array([1.0, 2.0], nmin=4)), [1.0, 2.0, 0.0, 0.0])
+    np.testing.assert_allclose(
+        np.asarray(profile_mod._coeff_array(jnp.asarray([3.0, 4.0], dtype=jnp.float64), nmin=4)),
+        [3.0, 4.0, 0.0, 0.0],
+    )
+    np.testing.assert_allclose(profile_mod._coeffs_static_or_jax([5.0, 6.0]), [5.0, 6.0])
 
 
 def test_standard_finite_beta_profiles_match_landreman_stage_one_scaling():

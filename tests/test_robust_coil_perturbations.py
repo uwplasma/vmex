@@ -113,6 +113,22 @@ def test_centerline_gaussian_perturbation_is_deterministic_and_preserves_constan
     assert np.linalg.norm(np.asarray(sample_a.centerline_dof_delta[:, :, 1:])) > 0.0
 
 
+def test_centerline_gaussian_perturbation_can_include_constant_terms():
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jax
+
+    enable_x64(True)
+    params = _circle_params()
+    sample = sample_coil_perturbation(
+        jax.random.PRNGKey(29),
+        params,
+        centerline_sigma=1.0e-3,
+        centerline_include_constant=True,
+    )
+
+    assert np.linalg.norm(np.asarray(sample.centerline_dof_delta[:, :, 0])) > 0.0
+
+
 def test_batched_samples_are_vmap_compatible():
     pytest.importorskip("jax")
     from vmec_jax._compat import jax
@@ -200,6 +216,21 @@ def test_aggregate_risk_methods_are_deterministic_shape_preserving_and_different
     grad_value = jax.grad(lambda x: aggregate_risk(x, "soft_cvar", temperature=0.2, tail_fraction=0.5))(values)
     assert grad_value.shape == values.shape
     assert np.all(np.isfinite(np.asarray(grad_value)))
+
+
+def test_robust_sampling_and_risk_inputs_are_validated():
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jax
+
+    enable_x64(True)
+    params = _circle_params()
+
+    with pytest.raises(ValueError, match="n_samples"):
+        sample_coil_perturbations(jax.random.PRNGKey(37), params, -1)
+    with pytest.raises(ValueError, match="temperature"):
+        aggregate_risk([1.0, 2.0], "smooth_max", temperature=0.0)
+    with pytest.raises(ValueError, match="tail_fraction"):
+        aggregate_risk([1.0, 2.0], "soft_cvar", tail_fraction=0.0)
 
 
 def test_smooth_max_risk_axis_gradient_matches_softmax_weights():
