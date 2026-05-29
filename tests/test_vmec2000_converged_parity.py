@@ -28,6 +28,7 @@ class ConvergedParityCase:
     nightly: bool = False
     timeout_s: float = 120.0
     require_aspect: bool = True
+    stability_abs_limit: float | None = None
     xfail_reason: str | None = None
     skip_reason: str | None = None
 
@@ -103,6 +104,7 @@ CONVERGED_PARITY_CASES = (
         multigrid=False,
         nightly=True,
         timeout_s=240.0,
+        stability_abs_limit=1.0e-3,
     ),
     ConvergedParityCase(
         case="nfp4_QH_finite_beta",
@@ -207,6 +209,37 @@ def _assert_max_abs_diff(name: str, got, ref, *, limit: float, radial_skip: int 
     assert np.isfinite(ref_arr).all()
     max_abs = float(np.max(np.abs(got_arr - ref_arr)))
     assert max_abs < limit, f"{name}: max_abs={max_abs:.3e} >= {limit:.3e}"
+
+
+def _assert_rel_rms_or_abs(
+    name: str,
+    got,
+    ref,
+    *,
+    rel_limit: float,
+    abs_limit: float | None = None,
+    radial_skip: int = 0,
+) -> None:
+    got_arr = np.asarray(got, dtype=float)
+    ref_arr = np.asarray(ref, dtype=float)
+    assert got_arr.shape == ref_arr.shape
+    if got_arr.ndim >= 1 and radial_skip:
+        got_arr = got_arr[radial_skip:, ...]
+        ref_arr = ref_arr[radial_skip:, ...]
+    assert got_arr.size > 0
+    assert np.isfinite(got_arr).all()
+    assert np.isfinite(ref_arr).all()
+    diff = got_arr - ref_arr
+    diff_rms = float(np.sqrt(np.mean(diff**2)))
+    ref_rms = float(np.sqrt(np.mean(ref_arr**2)))
+    rel_rms = diff_rms / ref_rms if ref_rms > 0.0 else diff_rms
+    max_abs = float(np.max(np.abs(diff)))
+    if rel_rms < rel_limit or (abs_limit is not None and max_abs < abs_limit):
+        return
+    msg = f"{name}: rel_rms={rel_rms:.3e} >= {rel_limit:.3e}"
+    if abs_limit is not None:
+        msg += f" and max_abs={max_abs:.3e} >= {abs_limit:.3e}"
+    raise AssertionError(msg)
 
 
 def _vmec_iotaf_from_iotas(iotas: np.ndarray) -> np.ndarray:
@@ -352,7 +385,14 @@ def test_xvmec2000_converged_wout_matches_vmec_jax(case: ConvergedParityCase, tm
         for wout in (wref, wjax):
             _assert_glasser_profiles_self_consistent(wout)
         for name in ("DMerc", "Dshear", "Dwell", "Dgeod"):
-            _assert_rel_rms(name, getattr(wjax, name), getattr(wref, name), limit=2.0e-2, radial_skip=1)
+            _assert_rel_rms_or_abs(
+                name,
+                getattr(wjax, name),
+                getattr(wref, name),
+                rel_limit=2.0e-2,
+                abs_limit=case.stability_abs_limit,
+                radial_skip=1,
+            )
         _assert_max_abs_diff("Dcurr", wjax.Dcurr, wref.Dcurr, limit=5.0e-6, radial_skip=1)
         _assert_max_abs_diff(
             "glasser_correction",
@@ -362,4 +402,11 @@ def test_xvmec2000_converged_wout_matches_vmec_jax(case: ConvergedParityCase, tm
             radial_skip=1,
         )
         for name in ("D_R",):
-            _assert_rel_rms(name, getattr(wjax, name), getattr(wref, name), limit=5.0e-2, radial_skip=1)
+            _assert_rel_rms_or_abs(
+                name,
+                getattr(wjax, name),
+                getattr(wref, name),
+                rel_limit=5.0e-2,
+                abs_limit=case.stability_abs_limit,
+                radial_skip=1,
+            )

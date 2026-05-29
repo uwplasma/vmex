@@ -254,6 +254,10 @@ Steps taken:
     cache now falls back to the validated non-JIT lambda preconditioner for
     non-array pytrees. The failing preconditioner tests and broader merged-tree
     regression batch passed locally (`161 passed, 1 skipped`).
+92. Merged the newer `origin/main` LASYM stability parity calibration commit.
+    Resolved the `preconditioner_1d_jax.py` conflict by keeping main's
+    hash-guarded R/Z preconditioner assembly wrapper and this branch's
+    non-array-pytree lambda-cache fallback.
 
 ### 2026-05-27 Free-boundary beta-scan bootstrap-current preconditioner
 
