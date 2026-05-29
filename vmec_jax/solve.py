@@ -43,6 +43,7 @@ from .solve_residual_iter_policy import (
     append_residual_iter_terminal_history as _append_residual_iter_terminal_history,
     host_restart_decision as _host_restart_decision,
     host_update_assembly_policy as _host_update_assembly_policy,
+    numpy_preconditioner_apply_policy as _numpy_preconditioner_apply_policy,
     resolve_light_history as _resolve_light_history,
     resolve_restart_flags as _resolve_restart_flags,
     residual_iter_history_record as _residual_iter_history_record,
@@ -5738,16 +5739,15 @@ def solve_fixed_boundary_residual_iter(
             use_lax_tridi=use_lax_tridi,
         )
 
-    _numpy_precond_max_iter_env = os.getenv("VMEC_JAX_NUMPY_PRECOND_MAX_ITER", "240").strip()
-    try:
-        _numpy_precond_max_iter = int(_numpy_precond_max_iter_env)
-    except Exception:
-        _numpy_precond_max_iter = 240
-    _use_numpy_preconditioner_apply = (
-        bool(host_update_assembly)
-        and int(_numpy_precond_max_iter) > 0
-        and int(max_iter) <= int(_numpy_precond_max_iter)
+    _numpy_precond_policy = _numpy_preconditioner_apply_policy(
+        host_update_assembly=bool(host_update_assembly),
+        max_iter=int(max_iter),
+        mpol=int(getattr(cfg, "mpol", 0)),
+        ntor=int(getattr(cfg, "ntor", 0)),
+        max_iter_env=os.getenv("VMEC_JAX_NUMPY_PRECOND_MAX_ITER", "240"),
+        min_mode_count_env=os.getenv("VMEC_JAX_NUMPY_PRECOND_MIN_MODES", "16"),
     )
+    _use_numpy_preconditioner_apply = bool(_numpy_precond_policy.enabled)
 
     def _rz_preconditioner_apply_local(
         *,
@@ -10818,10 +10818,7 @@ def solve_fixed_boundary_residual_iter(
             preconditioner_fsq1_ready = False
             use_fused_precond_output_scaling = (not bool(host_update_assembly)) and jax.default_backend() != "cpu"
             if bool(vmec2000_control) and bool(cfg.lthreed):
-                from .preconditioner_1d_jax import (
-                    rz_preconditioner_matrices,
-                    rz_preconditioner_matrices_reassemble,
-                )
+                from .preconditioner_1d_jax import rz_preconditioner_matrices_reassemble
 
                 precond_traced = _tree_has_tracer(k)
                 need_lam_prec = _env_dump_lam not in ("", "0")
@@ -11003,10 +11000,7 @@ def solve_fixed_boundary_residual_iter(
                         pass
                     timing_stats["precond_apply"] += time.perf_counter() - float(t_precond_apply_start)
             elif not bool(cfg.lthreed):
-                from .preconditioner_1d_jax import (
-                    rz_preconditioner_matrices,
-                    rz_preconditioner_matrices_reassemble,
-                )
+                from .preconditioner_1d_jax import rz_preconditioner_matrices_reassemble
 
                 precond_traced = _tree_has_tracer(k)
                 need_lam_prec = _env_dump_lam not in ("", "0")

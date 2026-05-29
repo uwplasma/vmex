@@ -359,13 +359,22 @@ read as a mixed result rather than a broad VMEC2000 speedup claim:
   converged residual at ``5.6e-13``.  Set
   ``VMEC_JAX_HOST_UPDATE_CPU_WORK_LIMIT`` to tune the threshold.
 
-**23. Short CPU trial solves use NumPy preconditioner apply**
+**23. CPU host solves use an adaptive NumPy preconditioner apply**
   The non-scan CPU host-update path uses the pure-NumPy R/Z preconditioner
-  apply for short solves (default threshold ``VMEC_JAX_NUMPY_PRECOND_MAX_ITER=240``).
-  This avoids cold JAX preconditioner compilation in optimization trial/probe
-  solves.  Long converged CLI/API solves keep the compiled preconditioner
-  because it amortizes better over thousands of iterations.  Set
-  ``VMEC_JAX_NUMPY_PRECOND_MAX_ITER=0`` to disable this diagnostic policy.
+  apply for short solves (default threshold
+  ``VMEC_JAX_NUMPY_PRECOND_MAX_ITER=240``) and for moderate/high spectral
+  mode counts (default threshold
+  ``VMEC_JAX_NUMPY_PRECOND_MIN_MODES=16``, with mode count
+  ``mpol * (ntor + 1)``).  This avoids cold JAX preconditioner compilation in
+  optimization trial/probe solves and also helps long CPU host solves when the
+  R/Z preconditioner apply is bandwidth/dispatch dominated.  Low-mode long
+  solves keep the compiled preconditioner because it still amortizes better.
+  On repeated local finite-beta QH multigrid profiles this reduced in-process
+  wall time from the previous ``15.61 s`` baseline to ``13.62--14.29 s``
+  without a material regression in the small QH warm-start profile
+  (``1.64--1.67 s``).  Set
+  ``VMEC_JAX_NUMPY_PRECOND_MAX_ITER=0`` and
+  ``VMEC_JAX_NUMPY_PRECOND_MIN_MODES=0`` to disable this policy.
 
 **24. Fixed-boundary startup avoids free-boundary imports**
   Ordinary fixed-boundary CLI/API runs no longer import or validate the

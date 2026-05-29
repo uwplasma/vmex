@@ -1356,6 +1356,16 @@ Defer beyond the current cycle:
   rewrite was attempted; the safe code change was to make malformed
   `VMEC_JAX_LASYM_REPLAY_COLUMN_CHUNK` values fall back to the measured
   backend/input auto heuristic instead of aborting exact callbacks.
+- 2026-05-29: Added an adaptive CPU host preconditioner-apply policy. The
+  previous NumPy R/Z apply path was limited to short stages through
+  `VMEC_JAX_NUMPY_PRECOND_MAX_ITER=240`; the new policy also enables it for
+  moderate/high spectral mode counts through
+  `VMEC_JAX_NUMPY_PRECOND_MIN_MODES=16` with mode count `mpol * (ntor + 1)`.
+  Repeated local in-process profiling reduced the finite-beta QH multigrid
+  solve from the previous `15.61 s` baseline to `13.62--14.29 s` while leaving
+  the small QH warm-start profile flat within timing noise (`1.64--1.67 s`).
+  This is a CPU-only host-update change and does not force CPU execution for
+  GPU users.
 - 2026-05-17: Added the converged-wout parity matrix and benchmark
   regeneration lane. Required CI now has
   `tests/test_converged_wout_matrix_parity.py`, a no-executable bundled-wout

@@ -6,6 +6,7 @@ import pytest
 from vmec_jax.solve_residual_iter_policy import (
     host_restart_decision,
     host_update_assembly_policy,
+    numpy_preconditioner_apply_policy,
     resolve_light_history,
     resolve_restart_flags,
     scan_fallback_decision,
@@ -57,6 +58,72 @@ def test_host_update_assembly_policy_matches_cpu_non_scan_defaults():
     )
     assert accelerator_explicit.enabled
     assert not accelerator_explicit.auto_enabled
+
+
+def test_numpy_preconditioner_apply_policy_uses_short_or_spectral_cpu_host_path():
+    short_small = numpy_preconditioner_apply_policy(
+        host_update_assembly=True,
+        max_iter=120,
+        mpol=2,
+        ntor=2,
+        max_iter_env="240",
+        min_mode_count_env="16",
+    )
+    assert short_small.enabled
+    assert short_small.mode_count == 6
+
+    long_small = numpy_preconditioner_apply_policy(
+        host_update_assembly=True,
+        max_iter=1500,
+        mpol=2,
+        ntor=2,
+        max_iter_env="240",
+        min_mode_count_env="16",
+    )
+    assert not long_small.enabled
+
+    long_spectral = numpy_preconditioner_apply_policy(
+        host_update_assembly=True,
+        max_iter=3000,
+        mpol=5,
+        ntor=5,
+        max_iter_env="240",
+        min_mode_count_env="16",
+    )
+    assert long_spectral.enabled
+    assert long_spectral.mode_count == 30
+
+    disabled_without_host_update = numpy_preconditioner_apply_policy(
+        host_update_assembly=False,
+        max_iter=120,
+        mpol=5,
+        ntor=5,
+        max_iter_env="240",
+        min_mode_count_env="16",
+    )
+    assert not disabled_without_host_update.enabled
+
+    disabled_by_env = numpy_preconditioner_apply_policy(
+        host_update_assembly=True,
+        max_iter=3000,
+        mpol=5,
+        ntor=5,
+        max_iter_env="0",
+        min_mode_count_env="0",
+    )
+    assert not disabled_by_env.enabled
+
+    parsed_defaults = numpy_preconditioner_apply_policy(
+        host_update_assembly=True,
+        max_iter=3000,
+        mpol=5,
+        ntor=5,
+        max_iter_env="bad",
+        min_mode_count_env="bad",
+    )
+    assert parsed_defaults.enabled
+    assert parsed_defaults.max_iter_cutoff == 240
+    assert parsed_defaults.min_mode_count == 16
 
 
 @pytest.mark.parametrize(

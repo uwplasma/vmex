@@ -21,6 +21,13 @@ class HostUpdateAssemblyPolicy(NamedTuple):
     auto_enabled: bool
 
 
+class NumpyPreconditionerApplyPolicy(NamedTuple):
+    enabled: bool
+    mode_count: int
+    max_iter_cutoff: int
+    min_mode_count: int
+
+
 class RestartFlagPolicy(NamedTuple):
     use_restart_triggers: bool
     use_direct_fallback: bool
@@ -151,6 +158,48 @@ def host_update_assembly_policy(
     enabled = auto_enabled if requested is None else bool(requested)
     enabled = bool(enabled) and (not bool(use_scan)) and bool(backend_allowed)
     return HostUpdateAssemblyPolicy(enabled=bool(enabled), auto_enabled=bool(auto_enabled))
+
+
+def numpy_preconditioner_apply_policy(
+    *,
+    host_update_assembly: bool,
+    max_iter: int,
+    mpol: int,
+    ntor: int,
+    max_iter_env: str,
+    min_mode_count_env: str,
+) -> NumpyPreconditionerApplyPolicy:
+    """Resolve when the CPU host loop should use NumPy R/Z preconditioner apply.
+
+    Short CPU solves avoid repeated JAX dispatch by using the NumPy apply path.
+    Larger spectral problems also benefit from this path even when the stage
+    iteration budget is large; small spectral problems are faster with the JAX
+    apply path after compilation. The defaults preserve the short-solve behavior
+    and enable NumPy apply for moderate/high mode counts.
+    """
+
+    try:
+        max_iter_cutoff = max(0, int(str(max_iter_env).strip()))
+    except Exception:
+        max_iter_cutoff = 240
+    try:
+        min_mode_count = max(0, int(str(min_mode_count_env).strip()))
+    except Exception:
+        min_mode_count = 16
+    try:
+        mode_count = max(0, int(mpol)) * (max(0, int(ntor)) + 1)
+    except Exception:
+        mode_count = 0
+
+    short_stage = max_iter_cutoff > 0 and int(max_iter) <= max_iter_cutoff
+    spectral_stage = min_mode_count > 0 and mode_count >= min_mode_count
+    enabled = bool(host_update_assembly) and (short_stage or spectral_stage)
+    return NumpyPreconditionerApplyPolicy(
+        enabled=bool(enabled),
+        mode_count=int(mode_count),
+        max_iter_cutoff=int(max_iter_cutoff),
+        min_mode_count=int(min_mode_count),
+    )
 
 
 def stage_transition_restart_reason(
