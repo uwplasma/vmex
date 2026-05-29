@@ -2116,13 +2116,15 @@ Public GPU requests now enable the persistent compilation cache automatically
 even when the user selects the GPU through ``solver_device="gpu"`` instead of a
 JAX platform environment variable.  The runtime GPU path mirrors the
 import-time cache setup by setting both ``jax_compilation_cache_dir`` and the
-GPU XLA autotune cache option before first solve compilation.  On ``office``
-after the cache-policy fix,
-fresh-process QH warm-start runs measured ``16.0 s`` to populate and ``5.24 s``
-on the next process.  Fresh-process finite-beta runs measured ``19.8 s`` to
-populate and ``8.12 s`` on the next process.  These are still slower than
-same-process warmed solves, but they are a practical improvement for repeated
-CLI/API GPU jobs without user-side cache tuning.
+GPU XLA autotune cache option before first solve compilation.  A post-fix
+``office`` check showed that this alignment is necessary for correct default
+configuration, but not sufficient to make fresh-process GPU solves reuse the
+compiled scan executable on this stack: repeated QH warm-start processes
+measured ``16.2 s`` and ``16.1 s``, while repeated finite-beta QH processes
+measured ``55.7 s`` and ``55.7 s``.  The dominant term remains
+``scan_device_dispatch_s`` (about ``12.5 s`` for QH warm start and ``36.6 s``
+for finite beta), so the next GPU lane is persistent executable reuse or
+reducing scan compile/dispatch cost rather than more driver-side cache toggles.
 
 The exact-optimizer profile has a different bottleneck from single fixed-boundary
 solves.  A 2026-05-24 bounded ``max_mode=3`` two-evaluation profile on the
