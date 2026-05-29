@@ -547,6 +547,7 @@ def test_compilation_cache_setup_uses_configured_cache_dir(monkeypatch, tmp_path
     assert run.state is not None
     assert cache_calls == [str(cache_dir)]
     assert ("jax_enable_compilation_cache", True) in config_calls
+    assert ("jax_compilation_cache_dir", str(cache_dir)) in config_calls
     assert ("jax_persistent_cache_min_compile_time_secs", 0.25) in config_calls
     assert ("jax_persistent_cache_min_entry_size_bytes", 123) in config_calls
     assert ("jax_compilation_cache_max_size", 456) in config_calls
@@ -1368,6 +1369,9 @@ def test_accelerated_explicit_stage_monitor_switches_to_parity(monkeypatch, tmp_
     assert diag["accelerated_stage_effective_mode"] == "parity"
     np.testing.assert_array_equal(diag["accelerated_stage_probe_chunk_iters"], [200])
     assert np.asarray(diag["multigrid_stage_modes"]).tolist() == ["accelerated", "parity"]
+    assert np.asarray(diag["multigrid_stage_wall_s"]).shape == (2,)
+    assert np.all(np.asarray(diag["multigrid_stage_wall_s"]) >= 0.0)
+    assert np.asarray(diag["multigrid_stage_solve_total_s"]).shape == (2,)
     assert diag["converged"] is True
 
 

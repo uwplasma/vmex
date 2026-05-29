@@ -38,6 +38,22 @@ def test_scan_chunk_settings_accelerator_default(monkeypatch):
     assert cap_to_remaining is True
 
 
+def test_scan_chunk_settings_accelerator_low_mode_long_budget(monkeypatch):
+    monkeypatch.setattr(solve_runtime, "_scan_backend_name", lambda: "gpu")
+    monkeypatch.delenv("VMEC_JAX_SCAN_CHUNK_SIZE", raising=False)
+
+    chunk_size, cap_to_remaining = solve_runtime._scan_chunk_settings(
+        max_iter_scan=1500,
+        nstep_screen=200,
+        need_print=False,
+        lthreed=True,
+        spectral_mode_count=8,
+    )
+
+    assert chunk_size == 256
+    assert cap_to_remaining is False
+
+
 def test_scan_chunk_settings_accelerator_3d_default(monkeypatch):
     monkeypatch.setattr(solve_runtime, "_scan_backend_name", lambda: "gpu")
     monkeypatch.delenv("VMEC_JAX_SCAN_CHUNK_SIZE", raising=False)
@@ -49,9 +65,8 @@ def test_scan_chunk_settings_accelerator_3d_default(monkeypatch):
         lthreed=True,
     )
 
-    # GPU quiet runs now use the full iteration budget as a single chunk to
-    # eliminate host/device sync overhead in the Python chunk loop.
-    # Use VMEC_JAX_SCAN_CHUNK_SIZE to cap this when GPU memory is tight.
+    # Higher-mode GPU quiet runs use the full iteration budget as a single
+    # chunk to avoid Python host/device sync overhead.
     assert chunk_size == 5000
     assert cap_to_remaining is True
 

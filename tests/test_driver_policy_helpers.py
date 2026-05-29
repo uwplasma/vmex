@@ -277,13 +277,31 @@ def test_merge_stage_chunk_results_concatenates_histories_and_diagnostics():
         "first",
         n_iter=1,
         w_history=[1.0, 0.5],
-        diagnostics={"step_status_history": np.asarray([1.0]), "first_only": True},
+        diagnostics={
+            "step_status_history": np.asarray([1.0]),
+            "first_only": True,
+            "timing": {
+                "solve_total_s": 2.0,
+                "iteration_loop_s": 1.5,
+                "compute_forces_calls": 2,
+                "iterations": 2,
+            },
+        },
     )
     second = _stage_result(
         "second",
         n_iter=2,
         w_history=[0.25, 0.125, 0.0625],
-        diagnostics={"step_status_history": np.asarray([2.0, 3.0]), "time_step_history": np.asarray([0.1])},
+        diagnostics={
+            "step_status_history": np.asarray([2.0, 3.0]),
+            "time_step_history": np.asarray([0.1]),
+            "timing": {
+                "scan_total_s": 3.0,
+                "iteration_loop_s": 2.5,
+                "compute_forces_calls": 3,
+                "iterations": 3,
+            },
+        },
     )
 
     merged = driver._merge_stage_chunk_results([first, second], mode_i="accelerated")
@@ -297,6 +315,12 @@ def test_merge_stage_chunk_results_concatenates_histories_and_diagnostics():
     assert merged.diagnostics["accelerated_stage_chunk_count"] == 2
     assert merged.diagnostics["accelerated_stage_chunked"] is True
     assert merged.diagnostics["accelerated_stage_effective_mode"] == "accelerated"
+    assert merged.diagnostics["timing"]["solve_total_s"] == pytest.approx(5.0)
+    assert merged.diagnostics["timing"]["iteration_loop_s"] == pytest.approx(4.0)
+    assert merged.diagnostics["timing"]["compute_forces_calls"] == 5
+    assert merged.diagnostics["timing"]["iterations"] == 5
+    assert merged.diagnostics["timing"]["solve_total_per_iter_s"] == pytest.approx(1.0)
+    np.testing.assert_allclose(merged.diagnostics["timing"]["chunk_solve_total_s"], [2.0, 3.0])
 
 
 def test_merge_stage_chunk_results_marks_single_chunk_without_concatenation():

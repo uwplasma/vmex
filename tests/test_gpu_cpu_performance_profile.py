@@ -283,6 +283,13 @@ def test_fixed_boundary_profiler_scan_policy_is_tristate(monkeypatch):
     assert forced_nonscan.use_scan is False
 
 
+def test_fixed_boundary_profiler_prefers_checkout_source():
+    tool = _load_fixed_tool()
+
+    assert str(REPO_ROOT) in sys.path
+    assert tool._REPO_ROOT == REPO_ROOT
+
+
 def test_performance_matrix_exact_command_can_request_memory_profile(tmp_path):
     tool = _load_tool()
     args = tool._build_parser().parse_args(

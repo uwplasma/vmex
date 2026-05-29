@@ -774,6 +774,76 @@ def _copy_final_force_payload(result_i: SolveVmecResidualResult, source_i) -> So
     return result_i
 
 
+def _timing_solve_total_s(timing_i: dict) -> float:
+    """Return the generic solve wall time from non-scan or scan timing blocks."""
+
+    if not isinstance(timing_i, dict):
+        return float("nan")
+    for key in ("solve_total_s", "scan_total_s"):
+        try:
+            value = float(timing_i.get(key, np.nan))
+        except Exception:
+            value = float("nan")
+        if np.isfinite(value):
+            return value
+    return float("nan")
+
+
+def _aggregate_stage_chunk_timing(results_i: list[SolveVmecResidualResult]) -> dict:
+    """Combine per-chunk timing dictionaries for one logical VMEC stage."""
+
+    timings: list[dict] = []
+    for result_i in results_i:
+        try:
+            timing_i = result_i.diagnostics.get("timing", {})
+        except Exception:
+            timing_i = {}
+        if isinstance(timing_i, dict) and timing_i:
+            timings.append(timing_i)
+    if not timings:
+        return {}
+
+    aggregate: dict[str, object] = dict(timings[-1])
+    sum_keys: set[str] = set()
+    for timing_i in timings:
+        for key, value in timing_i.items():
+            if key.endswith("_per_iter_s") or key.endswith("_first_s"):
+                continue
+            if key.endswith("_s") or key.endswith("_calls") or key == "iterations":
+                try:
+                    float(value)
+                except Exception:
+                    continue
+                sum_keys.add(str(key))
+
+    for key in sum_keys:
+        vals: list[float] = []
+        for timing_i in timings:
+            try:
+                vals.append(float(timing_i.get(key, 0.0)))
+            except Exception:
+                vals.append(0.0)
+        total = float(np.sum(vals))
+        if key.endswith("_calls") or key == "iterations":
+            aggregate[key] = int(round(total))
+        else:
+            aggregate[key] = total
+
+    iterations = max(int(aggregate.get("iterations", 0)), 1)
+    for key, value in list(aggregate.items()):
+        if key.endswith("_s") and not key.endswith("_per_iter_s") and not key.endswith("_first_s"):
+            aggregate[f"{key[:-2]}_per_iter_s"] = float(value) / float(iterations)
+    chunk_solve_total = np.asarray([_timing_solve_total_s(t) for t in timings], dtype=float)
+    valid = chunk_solve_total[np.isfinite(chunk_solve_total)]
+    if valid.size:
+        aggregate["solve_total_s"] = float(np.sum(valid))
+        iterations = max(int(aggregate.get("iterations", 0)), 1)
+        aggregate["solve_total_per_iter_s"] = float(aggregate["solve_total_s"]) / float(iterations)
+    aggregate["chunk_count"] = int(len(timings))
+    aggregate["chunk_solve_total_s"] = chunk_solve_total
+    return aggregate
+
+
 def _merge_stage_chunk_results(
     results_i: list[SolveVmecResidualResult],
     *,
@@ -804,6 +874,9 @@ def _merge_stage_chunk_results(
         [int(r.n_iter) + 1 for r in results_i],
         dtype=int,
     )
+    timing = _aggregate_stage_chunk_timing(results_i)
+    if timing:
+        diag["timing"] = timing
     out = SolveVmecResidualResult(
         state=last.state,
         n_iter=int(sum(int(r.n_iter) + 1 for r in results_i) - 1),
@@ -1450,10 +1523,19 @@ def run_fixed_boundary(
             except Exception:
                 pass
             try:
+                jax.config.update("jax_compilation_cache_dir", cache_dir)
+            except Exception:
+                pass
+            try:
                 min_compile = os.getenv("VMEC_JAX_CACHE_MIN_COMPILE_TIME_SECS", "0")
                 jax.config.update("jax_persistent_cache_min_compile_time_secs", float(min_compile))
                 min_entry = os.getenv("VMEC_JAX_CACHE_MIN_ENTRY_SIZE_BYTES", "-1")
                 jax.config.update("jax_persistent_cache_min_entry_size_bytes", int(min_entry))
+                xla_caches = os.getenv("VMEC_JAX_PERSISTENT_CACHE_XLA_CACHES", "").strip()
+                if not xla_caches and bool(accelerator_requested):
+                    xla_caches = "xla_gpu_per_fusion_autotune_cache_dir"
+                if xla_caches.lower() not in ("", "none", "0", "false", "no", "off"):
+                    jax.config.update("jax_persistent_cache_enable_xla_caches", xla_caches)
                 max_size = os.getenv("VMEC_JAX_COMPILATION_CACHE_MAX_SIZE", "")
                 if max_size:
                     jax.config.update("jax_compilation_cache_max_size", int(max_size))
@@ -1835,6 +1917,8 @@ def run_fixed_boundary(
         stage_state = None
         stage_static_prev = None
         stage_modes: list[str] = []
+        stage_wall_s: list[float] = []
+        stage_solve_total_s: list[float] = []
         for idx, (ns_i, niter_i) in enumerate(zip(ns_stage_list, stage_budgets)):
             is_final_stage = idx == (len(ns_stage_list) - 1)
             stage_mode_i = "accelerated"
@@ -1880,7 +1964,18 @@ def run_fixed_boundary(
                 kwargs["ns_override"] = int(ns_i)
             else:
                 kwargs["restart_state"] = stage_state
+            stage_t0 = time.perf_counter()
             stage_run = run_fixed_boundary(input_path, **kwargs)
+            stage_wall_s.append(float(time.perf_counter() - stage_t0))
+            try:
+                stage_timing = (
+                    stage_run.result.diagnostics.get("timing", {})
+                    if stage_run.result is not None
+                    else {}
+                )
+            except Exception:
+                stage_timing = {}
+            stage_solve_total_s.append(_timing_solve_total_s(stage_timing))
             stage_runs.append(stage_run)
             stage_modes.append(str(stage_mode_i))
             stage_state = stage_run.state
@@ -1897,6 +1992,8 @@ def run_fixed_boundary(
         diag["cli_accelerated_stage_ns"] = np.asarray(ns_stage_list, dtype=int)
         diag["cli_accelerated_stage_niter"] = np.asarray(stage_budgets, dtype=int)
         diag["cli_accelerated_stage_modes"] = np.asarray(stage_modes, dtype=object)
+        diag["cli_accelerated_stage_wall_s"] = np.asarray(stage_wall_s, dtype=float)
+        diag["cli_accelerated_stage_solve_total_s"] = np.asarray(stage_solve_total_s, dtype=float)
         diag["cli_accelerated_stage_fsq"] = np.asarray(
             [float(np.asarray(stage_run.result.w_history)[-1]) for stage_run in stage_runs],
             dtype=float,
@@ -1932,6 +2029,8 @@ def run_fixed_boundary(
         stage_static_prev = restart_static_prev
         stage_resume_state = restart_resume_state
         stage_modes: list[str] = []
+        stage_wall_s: list[float] = []
+        stage_solve_total_s: list[float] = []
         for idx, (ns_i, niter_i, ftol_i) in enumerate(zip(ns_stage_list, niter_stage_list, ftol_stage_list)):
             if int(idx) < int(start_stage_index):
                 continue
@@ -1994,7 +2093,18 @@ def run_fixed_boundary(
                 kwargs["restart_state"] = stage_state
                 if stage_resume_state is not None:
                     kwargs["restart_solver_state"] = stage_resume_state
+            stage_t0 = time.perf_counter()
             stage_run = run_fixed_boundary(input_path, **kwargs)
+            stage_wall_s.append(float(time.perf_counter() - stage_t0))
+            try:
+                stage_timing = (
+                    stage_run.result.diagnostics.get("timing", {})
+                    if stage_run.result is not None
+                    else {}
+                )
+            except Exception:
+                stage_timing = {}
+            stage_solve_total_s.append(_timing_solve_total_s(stage_timing))
             stage_runs.append(stage_run)
             stage_modes.append(str(stage_mode_i))
             stage_state = stage_run.state
@@ -2022,6 +2132,8 @@ def run_fixed_boundary(
             dtype=int,
         )
         diag["cli_staged_followup_stage_modes"] = np.asarray(stage_modes, dtype=object)
+        diag["cli_staged_followup_stage_wall_s"] = np.asarray(stage_wall_s, dtype=float)
+        diag["cli_staged_followup_stage_solve_total_s"] = np.asarray(stage_solve_total_s, dtype=float)
         diag["cli_staged_followup_start_stage_index"] = int(start_stage_index)
         diag["cli_staged_followup_stage_fsq"] = np.asarray(
             [float(np.asarray(stage_run.result.w_history)[-1]) for stage_run in stage_runs],
@@ -2110,6 +2222,8 @@ def run_fixed_boundary(
         staged_followup_niter = np.zeros((0,), dtype=int)
         staged_followup_modes = np.asarray([], dtype=object)
         staged_followup_fsq = np.zeros((0,), dtype=float)
+        staged_followup_wall_s = np.zeros((0,), dtype=float)
+        staged_followup_solve_total_s = np.zeros((0,), dtype=float)
 
         def _resolve_finish_jit_forces(static_i: VMECStatic, niter_i: int) -> bool:
             return _resolve_jit_forces_auto_policy(jit_forces, static_i, niter_i)
@@ -2216,6 +2330,14 @@ def run_fixed_boundary(
                 staged_followup_niter = np.asarray(staged_diag.get("cli_staged_followup_stage_niter", []), dtype=int)
                 staged_followup_modes = np.asarray(staged_diag.get("cli_staged_followup_stage_modes", []), dtype=object)
                 staged_followup_fsq = np.asarray(staged_diag.get("cli_staged_followup_stage_fsq", []), dtype=float)
+                staged_followup_wall_s = np.asarray(
+                    staged_diag.get("cli_staged_followup_stage_wall_s", []),
+                    dtype=float,
+                )
+                staged_followup_solve_total_s = np.asarray(
+                    staged_diag.get("cli_staged_followup_stage_solve_total_s", []),
+                    dtype=float,
+                )
                 staged_fsq_val = float(_result_final_fsq(staged_followup.result))
                 staged_conv = bool(_result_meets_requested_ftol(staged_followup.result, ftol=float(requested_ftol)))
                 if staged_conv or (staged_fsq_val < float(best_fsq)):
@@ -2475,6 +2597,8 @@ def run_fixed_boundary(
         diag["cli_fixed_boundary_staged_followup_niter"] = staged_followup_niter
         diag["cli_fixed_boundary_staged_followup_modes"] = staged_followup_modes
         diag["cli_fixed_boundary_staged_followup_fsq"] = staged_followup_fsq
+        diag["cli_fixed_boundary_staged_followup_wall_s"] = staged_followup_wall_s
+        diag["cli_fixed_boundary_staged_followup_solve_total_s"] = staged_followup_solve_total_s
         diag["multigrid_user_provided"] = bool(multigrid_user_provided)
         diag["accelerated_single_grid_default"] = bool(accelerated_single_grid_default)
         if bool(accelerated_mode):
@@ -2932,11 +3056,14 @@ def run_fixed_boundary(
 
         prev_stage_fsq = None
         stage_mode_history: list[str] = []
+        stage_wall_s: list[float] = []
+        stage_solve_total_s: list[float] = []
         ftol_last = None
         step_size_last = None
         for i, (ns_i, niter_i, ftol_i) in enumerate(zip(ns_stages, niter_stages, ftol_stages)):
             if int(niter_i) <= 0:
                 continue
+            stage_t0 = time.perf_counter()
             stage_accelerated_mode = bool(accelerated_mode)
             if (
                 bool(stage_accelerated_mode)
@@ -3583,6 +3710,12 @@ def run_fixed_boundary(
                     except Exception:
                         pass
             stage_mode_history[-1] = str(stage_mode_i)
+            stage_wall_s.append(float(time.perf_counter() - stage_t0))
+            try:
+                stage_timing = res_i.diagnostics.get("timing", {})
+            except Exception:
+                stage_timing = {}
+            stage_solve_total_s.append(_timing_solve_total_s(stage_timing))
             stage_results.append(res_i)
             stage_statics.append(static_i)
             try:
@@ -3613,6 +3746,8 @@ def run_fixed_boundary(
         diag["multigrid_ftol_stages"] = np.asarray(ftol_stages, dtype=float)
         diag["multigrid_stage_offsets"] = np.asarray(stage_offsets, dtype=int)
         diag["multigrid_stage_modes"] = np.asarray(stage_mode_history, dtype=object)
+        diag["multigrid_stage_wall_s"] = np.asarray(stage_wall_s, dtype=float)
+        diag["multigrid_stage_solve_total_s"] = np.asarray(stage_solve_total_s, dtype=float)
         # Record whether the final stage exhausted its NITER budget (matches
         # xvmec2000 behavior: terminate normally when NITER is reached).
         # n_iter is 0-indexed (999 means 1000 iterations completed).

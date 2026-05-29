@@ -101,9 +101,17 @@ def _scan_chunk_settings(
     need_print: bool,
     lthreed: bool,
     backend_name: str | None = None,
+    spectral_mode_count: int | None = None,
 ) -> tuple[int, bool]:
     chunk_size_env = os.getenv("VMEC_JAX_SCAN_CHUNK_SIZE", "").strip()
     backend = _scan_backend_name() if backend_name is None else str(backend_name).strip().lower()
+    low_mode_accelerator = (
+        backend not in ("", "cpu")
+        and not bool(need_print)
+        and spectral_mode_count is not None
+        and int(spectral_mode_count) <= 16
+        and int(max_iter_scan) > 512
+    )
     if chunk_size_env:
         try:
             chunk_size = max(1, int(chunk_size_env))
@@ -114,17 +122,21 @@ def _scan_chunk_settings(
         # printing, so use one remaining-iteration chunk and avoid the Python
         # chunk loop overhead entirely.
         chunk_size = max(1, int(max_iter_scan))
+    elif low_mode_accelerator:
+        # Quiet low-mode accelerator runs can be dominated by compiling and
+        # dispatching one very large scan executable.  Keep a fixed chunk so the
+        # body is smaller and reused inside the solve; higher-mode cases still
+        # use one full chunk because launch overhead dominates there.
+        chunk_size = min(max(1, int(max_iter_scan)), 256)
     elif (backend != "cpu") and (not bool(need_print)):
-        # Quiet accelerator runs: use the full iteration budget as a single
-        # chunk to eliminate the Python outer-loop host/device sync overhead.
-        # Like the CPU quiet path, this compiles one program for the entire
-        # solve, then breaks early via the carry.converged flag with no further
-        # host syncs. The env override VMEC_JAX_SCAN_CHUNK_SIZE can cap this
-        # when GPU memory is tight.
+        # Quiet higher-mode accelerator runs: use the full iteration budget as a
+        # single chunk to eliminate Python outer-loop host/device sync overhead.
+        # The env override VMEC_JAX_SCAN_CHUNK_SIZE can cap this when GPU memory
+        # is tight.
         chunk_size = max(1, int(max_iter_scan))
     else:
         chunk_size = max(1, int(nstep_screen))
-    cap_to_remaining = not bool(need_print)
+    cap_to_remaining = (not bool(need_print)) and (not low_mode_accelerator)
     return chunk_size, cap_to_remaining
 
 

@@ -144,17 +144,12 @@ def _default_compilation_cache_dir() -> str | None:
 
     platform_name = os.environ.get("JAX_PLATFORM_NAME", "").strip().lower()
     platforms = os.environ.get("JAX_PLATFORMS", "").strip().lower()
-    visible_accelerator = any(
-        os.environ.get(name, "").strip().lower() not in ("", "-1", "none", "no")
-        for name in ("CUDA_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES")
-    )
     accelerator_requested = (
         platform_name in ("gpu", "cuda", "rocm", "tpu")
         or any(
             part.strip() in ("gpu", "cuda", "rocm", "tpu")
             for part in platforms.split(",")
         )
-        or visible_accelerator
     )
     if not (cache_forced or accelerator_requested):
         return None
