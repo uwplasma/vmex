@@ -100,7 +100,8 @@ acceptance criteria or evidence changes.
   25 skipped, 110 deselected, 1 xfailed` and 95.24% coverage in 18:53. A local
   four-worker `pytest-xdist` trial of the same required coverage gate then
   passed with `2376 passed, 20 skipped, 1 xfailed` and 95.21% coverage in 3:07,
-  so the next candidate parallelizes the required fast-test lanes.
+  so the next candidates parallelize the required fast-test lanes and move the
+  duplicate console-script smoke out of the Python-version matrix.
   The optional converged VMEC2000 parity gate remains opt-in with
   `VMEC2000_INTEGRATION=1`. `solve.py` still dominates the missing-line
   surface, so future coverage should come from physics-gated refactor seams
@@ -626,8 +627,9 @@ update:
   checkpoints and metrics instead of the previous missing-`input.final` crash.
   Final seed-robust QI promotion and GPU-production artifacts remain open.
   The current CI runtime target is to keep the same 95% required coverage gate
-  but run the fast-test matrix with four pytest workers, matching the local
-  3:07 coverage trial instead of the previous 18:53 py3.11 CI lane.
+  but run the fast-test matrix with six pytest workers and one separate CLI
+  smoke, building on the local 3:07 coverage trial instead of the previous
+  18:53 py3.11 CI lane.
 
 Release-critical lanes requested in this push (continuation, exact
 accepted-point output, VMEC parity/physics gates, and docs/release hygiene) are

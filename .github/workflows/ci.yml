@@ -60,6 +60,64 @@ jobs:
           python -m pip install .
           python -m pip install pytest pytest-cov pytest-xdist
 
+      - name: Compile (Python)
+        run: |
+          python -m compileall -q vmec_jax
+
+      - name: Repository size audit
+        run: |
+          python tools/diagnostics/repo_size_audit.py --top 20 --max-total-mib 50 --max-file-mib 2
+
+      - name: Fetch optional WOUT fixtures
+        run: |
+          python tools/fetch_assets.py --bundle wout-fixtures
+
+      - name: Run tests
+        env:
+          JAX_ENABLE_X64: "1"
+        run: |
+          if [ "${{ matrix.python-version }}" = "3.11" ]; then
+            pytest -q -n 6 -m "not full and not vmec2000 and not simsopt" --cov=vmec_jax --cov-report=xml --cov-report=term:skip-covered --cov-fail-under=95
+          else
+            pytest -q -n 6 -m "not full and not vmec2000 and not simsopt"
+          fi
+
+      - name: Upload coverage artifact
+        if: matrix.python-version == '3.11'
+        uses: actions/upload-artifact@v5.0.0
+        with:
+          name: coverage-py311
+          path: coverage.xml
+
+      - name: Upload coverage to Codecov
+        if: matrix.python-version == '3.11'
+        uses: codecov/codecov-action@v5
+        with:
+          use_oidc: true
+          files: coverage.xml
+          flags: py311
+          name: py311-full
+          fail_ci_if_error: false
+          verbose: true
+
+  cli-smoke:
+    name: Console Script Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install -U pip
+          python -m pip install .
+
       - name: Console script smoke test
         env:
           JAX_ENABLE_X64: "1"
@@ -82,46 +140,6 @@ jobs:
           test -f /tmp/vmec_jax_cli_bundled_smoke/input.nfp4_QH_warm_start
           test -f /tmp/vmec_jax_cli_bundled_smoke/wout_nfp4_QH_warm_start.nc
           test -f /tmp/vmec_jax_cli_bundled_smoke/figures/nfp4_QH_warm_start_VMEC_3Dplot.png
-
-      - name: Compile (Python)
-        run: |
-          python -m compileall -q vmec_jax
-
-      - name: Repository size audit
-        run: |
-          python tools/diagnostics/repo_size_audit.py --top 20 --max-total-mib 50 --max-file-mib 2
-
-      - name: Fetch optional WOUT fixtures
-        run: |
-          python tools/fetch_assets.py --bundle wout-fixtures
-
-      - name: Run tests
-        env:
-          JAX_ENABLE_X64: "1"
-        run: |
-          if [ "${{ matrix.python-version }}" = "3.11" ]; then
-            pytest -q -n 4 -m "not full and not vmec2000 and not simsopt" --cov=vmec_jax --cov-report=xml --cov-report=term:skip-covered --cov-fail-under=95
-          else
-            pytest -q -n 4 -m "not full and not vmec2000 and not simsopt"
-          fi
-
-      - name: Upload coverage artifact
-        if: matrix.python-version == '3.11'
-        uses: actions/upload-artifact@v5.0.0
-        with:
-          name: coverage-py311
-          path: coverage.xml
-
-      - name: Upload coverage to Codecov
-        if: matrix.python-version == '3.11'
-        uses: codecov/codecov-action@v5
-        with:
-          use_oidc: true
-          files: coverage.xml
-          flags: py311
-          name: py311-full
-          fail_ci_if_error: false
-          verbose: true
 
   physics-smoke:
     name: Physics Smoke (py3.11)
