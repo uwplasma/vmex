@@ -2053,8 +2053,8 @@ Steps taken:
    - the traced NESTOR `bsqvac` exactly matches `freeb_bsqvac_half`;
    - reconstructing `bsqvac` from traced production `potvac` and metric
      channels agrees to roundoff;
-   - replaying the full differentiable coil/sample/NESTOR path still matches
-     the accepted trace to the bounded `2e-5` relative level.
+   - replaying the full differentiable coil/sample/NESTOR path with the traced
+     axis-current addendum matches the accepted trace to roundoff.
 
 Results:
 
@@ -2066,19 +2066,18 @@ Results:
    passed: 20 passed, 1 skipped.
 4. `python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py tests/test_external_fields_coils_jax.py -rx`
    passed: 68 passed.
-5. The remaining replay gap is now isolated below the production potential-to-
-   `bsqvac` bridge. The exact production trace reconstructs roundoff-cleanly;
-   the differentiable full replay differs at `~1e-5` relative level, with the
-   largest observed sample-level discrepancy in direct `br`/`bz` replay.
+5. The remaining replay gap was traced to recomputing the axis-current addendum
+   separately from the accepted NESTOR sample. Once the traced axis addendum is
+   used, the full differentiable direct-coil/NESTOR replay matches accepted
+   `bsqvac` at roundoff (`~1e-16` relative in the local diagnostic).
 
 Next:
 
-1. Use the trace payload to compare direct field sampling and axis-field
-   contributions term-by-term, then decide whether the remaining `~1e-5`
-   mismatch is acceptable numerical replay tolerance or a fixable provider
-   sampling-order issue.
-2. Keep full-loop AD claims at the current bounded validation level until that
-   final replay gap is either eliminated or documented as a stable tolerance.
+1. Promote the next phase-2 rung from accepted-update replay to a tiny
+   complete-loop direct-coil AD-vs-FD gate for one coil current and one Fourier
+   coefficient.
+2. Keep production full-loop custom-adjoint claims deferred until the complete
+   nonlinear solve gate passes.
 3. Let PR CI finish on the trace-payload commit after pushing.
 
 Need from user:

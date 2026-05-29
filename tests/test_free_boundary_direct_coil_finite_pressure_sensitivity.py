@@ -1172,12 +1172,15 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
         )
         return channels["bsqvac"]
 
+    nestor_trace = trace.get("freeb_nestor_trace")
+    assert isinstance(nestor_trace, dict)
+    br_axis = jnp.asarray(nestor_trace["br_axis"])
+    bp_axis = jnp.asarray(nestor_trace["bp_axis"])
+    bz_axis = jnp.asarray(nestor_trace["bz_axis"])
     bsqvac0 = bsqvac_from_coils(base_params)
     assert bsqvac0.shape == np.asarray(trace["freeb_bsqvac_half"]).shape
     assert np.all(np.isfinite(np.asarray(bsqvac0, dtype=float)))
     assert float(np.linalg.norm(np.asarray(bsqvac0, dtype=float))) > 0.0
-    nestor_trace = trace.get("freeb_nestor_trace")
-    assert isinstance(nestor_trace, dict)
     np.testing.assert_allclose(
         np.asarray(nestor_trace["bsqvac"]),
         np.asarray(trace["freeb_bsqvac_half"]),
@@ -1204,7 +1207,7 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
         1.0,
         np.linalg.norm(np.asarray(trace["freeb_bsqvac_half"], dtype=float)),
     )
-    assert bsqvac_rel < 2.0e-5
+    assert bsqvac_rel < 1.0e-13
 
     # The accepted trace must be exactly replayable once the force channels have
     # been computed. This protects accepted-output correctness separately from
