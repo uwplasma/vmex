@@ -1316,6 +1316,110 @@ def direct_coil_boundary_bnormal_rms_jax(
     return jnp.sqrt(jnp.mean(bnormal * bnormal))
 
 
+def direct_coil_boundary_bsqvac_jax(
+    params: Any,
+    *,
+    R: Any,
+    Z: Any,
+    phi: Any,
+    Ru: Any,
+    Zu: Any,
+    Rv: Any,
+    Zv: Any,
+    ruu: Any,
+    ruv: Any,
+    rvv: Any,
+    zuu: Any,
+    zuv: Any,
+    zvv: Any,
+    basis: dict[str, Any],
+    tables: dict[str, Any],
+    signgs: int,
+    nvper: int,
+    br_add: Any = 0.0,
+    bp_add: Any = 0.0,
+    bz_add: Any = 0.0,
+    wint: Any | None = None,
+    include_analytic: bool = True,
+) -> dict[str, Any]:
+    """Replay accepted-boundary direct-coil ``bsqvac`` through JAX NESTOR.
+
+    This is the reusable phase-2 validation primitive for the production
+    accepted-output ladder.  It holds a VMEC plasma boundary fixed, samples the
+    differentiable direct-coil Biot-Savart field on that boundary, projects the
+    normal field into VMEC/NESTOR source space, solves the dense JAX mode-space
+    vacuum response, and reconstructs ``bsqvac`` on the boundary.
+
+    The helper validates and exposes the differentiable accepted-boundary
+    replay contract.  It intentionally does **not** differentiate through the
+    outer host-controlled nonlinear VMEC iteration loop.
+    """
+
+    from .external_fields import sample_coil_field_cylindrical
+
+    R_j = jnp.asarray(R)
+    br, bp, bz = sample_coil_field_cylindrical(
+        params,
+        R_j,
+        jnp.asarray(Z),
+        jnp.asarray(phi),
+    )
+    br = br + jnp.asarray(br_add, dtype=br.dtype)
+    bp = bp + jnp.asarray(bp_add, dtype=bp.dtype)
+    bz = bz + jnp.asarray(bz_add, dtype=bz.dtype)
+    vac = vacuum_boundary_fields_from_cylindrical_jax(
+        br=br,
+        bp=bp,
+        bz=bz,
+        R=R_j,
+        Ru=Ru,
+        Zu=Zu,
+        Rv=Rv,
+        Zv=Zv,
+    )
+    if wint is None:
+        wint_j = jnp.ones_like(R_j)
+    else:
+        wint_j = jnp.asarray(wint, dtype=jnp.asarray(vac["bnormal"]).dtype)
+    bexni = -jnp.asarray(vac["bnormal"]) * wint_j * ((2.0 * jnp.pi) ** 2)
+    mode_solution = dense_vmec_nestor_mode_solve_jax(
+        R=R_j,
+        Z=Z,
+        Ru=Ru,
+        Zu=Zu,
+        Rv=Rv,
+        Zv=Zv,
+        ruu=ruu,
+        ruv=ruv,
+        rvv=rvv,
+        zuu=zuu,
+        zuv=zuv,
+        zvv=zvv,
+        bexni=jnp.ravel(bexni),
+        basis=basis,
+        tables=tables,
+        signgs=int(signgs),
+        nvper=int(nvper),
+        include_analytic=bool(include_analytic),
+    )
+    channels = vacuum_boundary_fields_from_mode_coeffs_jax(
+        mode_solution["mode_coeffs"],
+        basis=basis,
+        bu_ext=vac["bu"],
+        bv_ext=vac["bv"],
+        g_uu=vac["g_uu"],
+        g_uv=vac["g_uv"],
+        g_vv=vac["g_vv"],
+    )
+    return {
+        "bsqvac": channels["bsqvac"],
+        "channels": channels,
+        "mode_solution": mode_solution,
+        "vac": vac,
+        "bexni": bexni,
+    }
+
+
 def direct_coil_projected_mode_fixed_point_jax(
     params: Any,
     initial_state: Any,

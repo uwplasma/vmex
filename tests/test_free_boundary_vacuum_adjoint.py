@@ -1679,6 +1679,132 @@ def test_projected_mode_fixed_point_objective_value_and_grad_wrt_coil_pytree():
         pytree_directional_derivative_check_jax(objective, coil_params, direction, eps=0.0)
 
 
+def test_lasym_projected_mode_fixed_point_objective_ad_matches_central_fd_for_coil_pytree():
+    """Validate the asymmetric direct-coil fixed-point chain with central FD.
+
+    This phase-2 gate exercises a JAX-visible surrogate for the production
+    free-boundary dependency graph:
+
+    direct coil dofs/current -> moving boundary samples -> boundary-normal
+    source -> LASYM sine/cosine mode projection -> dense vacuum solve ->
+    fixed-point update -> scalar objective.
+
+    It intentionally stays at tiny dense scale and does not claim exact
+    gradients through production ``run_free_boundary``.
+    """
+
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jnp
+
+    enable_x64(True)
+    radius = 1.29
+    dofs = jnp.zeros((1, 3, 3), dtype=float)
+    dofs = dofs.at[0, 0, 2].set(radius)
+    dofs = dofs.at[0, 1, 1].set(radius)
+    dofs = dofs.at[0, 2, 0].set(0.035)
+    coil_params = CoilFieldParams(
+        base_curve_dofs=dofs,
+        base_currents=jnp.asarray([4.2e6], dtype=float),
+        n_segments=32,
+        regularization_epsilon=1.0e-9,
+    )
+    phi = jnp.asarray([[0.08, 0.47], [0.91, 1.31]], dtype=float)
+    sin_basis = jnp.asarray(
+        [
+            [0.0, 0.24],
+            [0.35, -0.16],
+            [-0.22, 0.51],
+            [0.62, 0.19],
+        ],
+        dtype=float,
+    )
+    cos_basis = jnp.asarray(
+        [
+            [0.72, -0.11],
+            [0.18, 0.43],
+            [-0.34, 0.27],
+            [0.26, -0.49],
+        ],
+        dtype=float,
+    )
+    mode_matrix = jnp.asarray(
+        [
+            [3.4, 0.11, 0.07, -0.04],
+            [0.09, 3.0, -0.05, 0.08],
+            [0.06, -0.03, 3.2, 0.10],
+            [-0.02, 0.07, 0.12, 3.5],
+        ],
+        dtype=float,
+    )
+    mode_to_state = jnp.asarray(
+        [
+            [0.07, -0.03, 0.04, 0.02],
+            [-0.02, 0.06, 0.03, -0.04],
+            [0.05, 0.02, -0.06, 0.03],
+        ],
+        dtype=float,
+    )
+
+    def boundary_from_state(state):
+        shape = jnp.asarray([[0.20, -0.13], [0.31, -0.22]], dtype=float)
+        return {
+            "R": jnp.asarray([[0.73, 0.84], [0.88, 0.79]], dtype=float)
+            + 0.018 * state[0]
+            + 0.012 * state[2] * shape,
+            "Z": jnp.asarray([[0.12, -0.14], [0.20, -0.17]], dtype=float)
+            + 0.020 * state[1]
+            - 0.010 * state[2] * shape,
+            "phi": phi,
+            "Ru": jnp.asarray([[0.025, -0.035], [0.018, 0.045]], dtype=float) + 0.004 * state[2],
+            "Zu": jnp.asarray([[0.19, 0.22], [0.18, 0.21]], dtype=float) - 0.003 * state[2],
+            "Rv": jnp.asarray([[0.035, 0.012], [-0.026, 0.044]], dtype=float),
+            "Zv": jnp.asarray([[0.018, -0.028], [0.052, -0.014]], dtype=float),
+        }
+
+    def update_from_response(_state, response, _vac, _boundary, _params):
+        return jnp.asarray([0.012, -0.017, 0.009], dtype=float) + 0.11 * jnp.tanh(
+            mode_to_state @ jnp.asarray(response["mode_coeffs"])
+        )
+
+    def objective(params):
+        solved = direct_coil_projected_mode_fixed_point_objective_jax(
+            params,
+            jnp.zeros(3, dtype=float),
+            boundary_from_state=boundary_from_state,
+            update_from_response=update_from_response,
+            mode_matrix=mode_matrix,
+            sin_basis=sin_basis,
+            cos_basis=cos_basis,
+            xmpot=jnp.asarray([0, 1]),
+            n_raw=jnp.asarray([0, 1]),
+            lasym=True,
+            nuv3=4,
+            nuv_full=4,
+            max_iter=12,
+            state_weights=jnp.asarray([1.0, 0.8, 1.1], dtype=float),
+            update_weights=0.03,
+            mode_weights=0.015,
+            rhs_mode_weights=0.008,
+            bnormal_weight=0.004,
+            fixed_point_residual_weight=8.0,
+        )
+        return solved["objective"]
+
+    dofs_direction = jnp.zeros_like(coil_params.base_curve_dofs)
+    dofs_direction = dofs_direction.at[0, 0, 2].set(0.018)
+    dofs_direction = dofs_direction.at[0, 1, 1].set(-0.014)
+    dofs_direction = dofs_direction.at[0, 2, 0].set(0.006)
+    direction = coil_params.with_arrays(
+        base_curve_dofs=dofs_direction,
+        base_currents=0.008 * coil_params.base_currents,
+    )
+
+    check = pytree_directional_derivative_check_jax(objective, coil_params, direction, eps=1.0e-4)
+    assert np.isfinite(float(check["value"]))
+    assert abs(float(check["exact_directional"])) > 1.0e-9
+    np.testing.assert_allclose(check["exact_directional"], check["fd_directional"], rtol=2.5e-5, atol=1.0e-10)
+
+
 def _boundary_projection_inputs():
     from vmec_jax._compat import jnp
 
