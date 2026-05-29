@@ -296,7 +296,7 @@ def test_merge_stage_chunk_results_concatenates_histories_and_diagnostics():
             "step_status_history": np.asarray([2.0, 3.0]),
             "time_step_history": np.asarray([0.1]),
             "timing": {
-                "solve_total_s": 3.0,
+                "scan_total_s": 3.0,
                 "iteration_loop_s": 2.5,
                 "compute_forces_calls": 3,
                 "iterations": 3,
