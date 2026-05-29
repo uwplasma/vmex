@@ -1205,6 +1205,13 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
             preconditioner_use_lax_tridi=trace["preconditioner_use_lax_tridi"],
             freeb_bsqvac_half=bsqvac_from_coils(params),
             freeb_pres_scale=trace["freeb_pres_scale"],
+            constraint_rcon0=trace.get("constraint_rcon0"),
+            constraint_zcon0=trace.get("constraint_zcon0"),
+            constraint_tcon0=trace.get("constraint_tcon0"),
+            constraint_precond_diag=trace.get("constraint_precond_diag"),
+            constraint_tcon=trace.get("constraint_tcon"),
+            constraint_precond_active=trace.get("constraint_precond_active"),
+            constraint_tcon_active=trace.get("constraint_tcon_active"),
             enforce_edge=False,
         )
         state_post = jnp.asarray(pack_state(out["step"]["state_post"]))

@@ -2762,6 +2762,13 @@ def strict_update_one_step_from_state(
     preconditioner_use_lax_tridi: bool | None = None,
     freeb_bsqvac_half=None,
     freeb_pres_scale=None,
+    constraint_tcon0=None,
+    constraint_tcon=None,
+    constraint_precond_diag=None,
+    constraint_precond_active=None,
+    constraint_tcon_active=None,
+    constraint_rcon0=None,
+    constraint_zcon0=None,
     enforce_edge: bool = True,
 ):
     """Compose the exact QH one-step map from state through accepted update."""
@@ -2776,6 +2783,13 @@ def strict_update_one_step_from_state(
         zero_m1=zero_m1,
         freeb_bsqvac_half=freeb_bsqvac_half,
         freeb_pres_scale=freeb_pres_scale,
+        constraint_tcon0=constraint_tcon0,
+        constraint_tcon=constraint_tcon,
+        constraint_precond_diag=constraint_precond_diag,
+        constraint_precond_active=constraint_precond_active,
+        constraint_tcon_active=constraint_tcon_active,
+        constraint_rcon0=constraint_rcon0,
+        constraint_zcon0=constraint_zcon0,
     )
     preconditioner_out = None
     if mats is None or jmax is None or lam_prec is None or w_mode_mn is None:

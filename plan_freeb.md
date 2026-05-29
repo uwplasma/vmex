@@ -265,6 +265,13 @@ Steps taken:
     mixed current/geometry `CoilFieldParams` direction. This still does not
     claim a full custom VJP for the host-controlled nonlinear free-boundary
     loop.
+94. Threaded production free-boundary constraint controls into full adjoint
+    traces and strict-update replay. This closes a real trace-data gap for
+    phase-2 accepted-output correctness: replay now receives the same
+    constraint baseline, cached `tcon`, and constraint preconditioner activity
+    flags as the production nonlinear force call. The remaining exact-replay
+    delta is localized to lambda-force reconstruction rather than missing
+    free-boundary vacuum or constraint inputs.
 
 ### 2026-05-27 Free-boundary beta-scan bootstrap-current preconditioner
 

@@ -13455,6 +13455,11 @@ def solve_fixed_boundary_residual_iter(
             state_backup = state
             t_trace_build_start = time.perf_counter() if timing_enabled and adjoint_trace else None
             if adjoint_trace:
+                constraint_precond_diag_trace = (
+                    None
+                    if constraint_precond_diag is None
+                    else tuple(_adjoint_trace_array(x) for x in constraint_precond_diag)
+                )
                 trace_entry: dict[str, Any] = {
                     "branch": "strict_update",
                     "state_pre": state_backup,
@@ -13496,6 +13501,19 @@ def solve_fixed_boundary_residual_iter(
                         else _adjoint_trace_array(freeb_bsqvac_half_current)
                     ),
                     "freeb_pres_scale": None if freeb_pres_scale is None else float(freeb_pres_scale),
+                    "constraint_rcon0": (
+                        None if constraint_rcon0_current is None else _adjoint_trace_array(constraint_rcon0_current)
+                    ),
+                    "constraint_zcon0": (
+                        None if constraint_zcon0_current is None else _adjoint_trace_array(constraint_zcon0_current)
+                    ),
+                    "constraint_tcon0": None if constraint_tcon0 is None else float(constraint_tcon0),
+                    "constraint_precond_diag": constraint_precond_diag_trace,
+                    "constraint_tcon": None if constraint_tcon_override is None else _adjoint_trace_array(
+                        constraint_tcon_override
+                    ),
+                    "constraint_precond_active": _adjoint_trace_array(constraint_precond_active),
+                    "constraint_tcon_active": _adjoint_trace_array(constraint_tcon_active),
                 }
                 if adjoint_trace_mode == "full":
                     trace_entry.update(
