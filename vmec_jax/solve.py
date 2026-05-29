@@ -10531,6 +10531,7 @@ def solve_fixed_boundary_residual_iter(
     freeb_ivacskip = 0
     freeb_nestor_runtime: NestorRuntimeState | None = None
     freeb_bsqvac_half_current = None
+    freeb_nestor_trace_current = None
     freeb_last_model = "none"
     freeb_last_diagnostics: dict[str, Any] = {}
     freeb_plascur = 0.0
@@ -11249,6 +11250,7 @@ def solve_fixed_boundary_residual_iter(
             # Free-boundary WP2 scaffold: run/update the NESTOR-like external
             # vacuum solve and couple bsqvac on the edge slice into bcovar.
             freeb_bsqvac_half_current = None
+            freeb_nestor_trace_current = None
             freeb_reused = False
             freeb_solve_time = 0.0
             freeb_sample_time = 0.0
@@ -11271,12 +11273,14 @@ def solve_fixed_boundary_residual_iter(
                             external_field_provider_kind=external_field_provider_kind,
                             external_field_provider_static=external_field_provider_static,
                             external_field_provider_params=external_field_provider_params,
+                            collect_trace_arrays=bool(adjoint_trace and adjoint_trace_mode == "full"),
                         )
                         freeb_last_model = str(getattr(nestor_res, "model", "spectral_poisson_external_only"))
                         freeb_reused = bool(getattr(nestor_res, "reused", False))
                         freeb_solve_time = float(getattr(nestor_res, "solve_time_s", 0.0))
                         freeb_sample_time = float(getattr(nestor_res, "sample_time_s", 0.0))
                         diag_nestor = getattr(nestor_res, "diagnostics", None)
+                        freeb_nestor_trace_current = getattr(nestor_res, "trace_arrays", None)
                         if isinstance(diag_nestor, dict):
                             freeb_last_diagnostics = dict(diag_nestor)
                             freeb_nestor_source_reused_history.append(
@@ -11326,6 +11330,7 @@ def solve_fixed_boundary_residual_iter(
                     if _env_freeb_raise not in ("", "0", "false", "no"):
                         raise
                     freeb_bsqvac_half_current = None
+                    freeb_nestor_trace_current = None
                     freeb_reused = False
                     freeb_solve_time = 0.0
                     freeb_sample_time = 0.0
@@ -13500,6 +13505,7 @@ def solve_fixed_boundary_residual_iter(
                     "freeb_pres_scale": None if freeb_pres_scale is None else float(freeb_pres_scale),
                     "freeb_plascur": float(freeb_plascur),
                     "freeb_plascur_for_bsqvac": float(freeb_plascur_for_bsqvac),
+                    "freeb_nestor_trace": freeb_nestor_trace_current,
                     "constraint_rcon0": (
                         None if constraint_rcon0_current is None else _adjoint_trace_array(constraint_rcon0_current)
                     ),

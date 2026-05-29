@@ -356,6 +356,7 @@ class NestorSolveResult:
     sample_time_s: float
     model: str = "spectral_poisson_external_only"
     diagnostics: dict[str, float | str | bool] | None = None
+    trace_arrays: dict[str, Any] | None = None
 
 
 def _dense_lu_factor(matrix: np.ndarray) -> Any | None:
@@ -3453,6 +3454,7 @@ def nestor_external_only_step(
     external_field_provider_kind: str | None = None,
     external_field_provider_static: Any = None,
     external_field_provider_params: Any = None,
+    collect_trace_arrays: bool = False,
 ) -> tuple[NestorSolveResult, NestorRuntimeState]:
     """Simplified NESTOR-style update/reuse with ivacskip-compatible behavior.
 
@@ -3907,6 +3909,47 @@ def nestor_external_only_step(
         diagnostics["physical_matrix_lu_built"] = bool(cache.matrix_lu is not None)
         diagnostics["mode_matrix_lu_built"] = bool(cache.mode_matrix_lu is not None)
 
+    trace_arrays = None
+    if bool(collect_trace_arrays):
+        trace_arrays = {
+            "R": np.asarray(sample.R, dtype=float),
+            "Z": np.asarray(sample.Z, dtype=float),
+            "phi": np.asarray(sample.phi, dtype=float),
+            "Ru": np.asarray(sample.Ru, dtype=float),
+            "Zu": np.asarray(sample.Zu, dtype=float),
+            "Rv": np.asarray(sample.Rv, dtype=float),
+            "Zv": np.asarray(sample.Zv, dtype=float),
+            "br": np.asarray(sample.br, dtype=float),
+            "bp": np.asarray(sample.bp, dtype=float),
+            "bz": np.asarray(sample.bz, dtype=float),
+            "bu_ext": np.asarray(sample.vac_ext.bu, dtype=float),
+            "bv_ext": np.asarray(sample.vac_ext.bv, dtype=float),
+            "bnormal": np.asarray(sample.vac_ext.bnormal, dtype=float),
+            "g_uu": np.asarray(sample.vac_ext.g_uu, dtype=float),
+            "g_uv": np.asarray(sample.vac_ext.g_uv, dtype=float),
+            "g_vv": np.asarray(sample.vac_ext.g_vv, dtype=float),
+            "bsqvac": np.asarray(vac_total.bsqvac, dtype=float),
+            "gsource_vmec": np.asarray(gsource_vmec, dtype=float),
+        }
+        if potvac is not None:
+            trace_arrays["potvac"] = np.asarray(potvac, dtype=float)
+        if bvec_mode is not None:
+            trace_arrays["bvec_mode"] = np.asarray(bvec_mode, dtype=float)
+        if bvec_mode_nonsing is not None:
+            trace_arrays["bvec_mode_nonsing"] = np.asarray(bvec_mode_nonsing, dtype=float)
+        if bvec_mode_analytic is not None:
+            trace_arrays["bvec_mode_analytic"] = np.asarray(bvec_mode_analytic, dtype=float)
+        if grpmn_nonsing is not None:
+            trace_arrays["grpmn_nonsing"] = np.asarray(grpmn_nonsing, dtype=float)
+        if grpmn_analytic is not None:
+            trace_arrays["grpmn_analytic"] = np.asarray(grpmn_analytic, dtype=float)
+        if grpmn_total is not None:
+            trace_arrays["grpmn_total"] = np.asarray(grpmn_total, dtype=float)
+        if amatrix_mode_from_grpmn is not None:
+            trace_arrays["mode_matrix"] = np.asarray(amatrix_mode_from_grpmn, dtype=float)
+        elif isinstance(cache, NestorVmecLikeCache) and cache.mode_matrix is not None:
+            trace_arrays["mode_matrix"] = np.asarray(cache.mode_matrix, dtype=float)
+
     res = NestorSolveResult(
         vac_total=vac_total,
         phi=phi,
@@ -3915,6 +3958,7 @@ def nestor_external_only_step(
         sample_time_s=sample_time,
         model=used_mode,
         diagnostics=diagnostics,
+        trace_arrays=trace_arrays,
     )
     source_sym_cached = runtime_source_sym_cached
     bvec_nonsing_cached = runtime_bvec_nonsing_cached

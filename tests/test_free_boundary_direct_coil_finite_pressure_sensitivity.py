@@ -1176,6 +1176,29 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
     assert bsqvac0.shape == np.asarray(trace["freeb_bsqvac_half"]).shape
     assert np.all(np.isfinite(np.asarray(bsqvac0, dtype=float)))
     assert float(np.linalg.norm(np.asarray(bsqvac0, dtype=float))) > 0.0
+    nestor_trace = trace.get("freeb_nestor_trace")
+    assert isinstance(nestor_trace, dict)
+    np.testing.assert_allclose(
+        np.asarray(nestor_trace["bsqvac"]),
+        np.asarray(trace["freeb_bsqvac_half"]),
+        rtol=0.0,
+        atol=0.0,
+    )
+    trace_channels = vacuum_boundary_fields_from_mode_coeffs_jax(
+        nestor_trace["potvac"],
+        basis=basis,
+        bu_ext=nestor_trace["bu_ext"],
+        bv_ext=nestor_trace["bv_ext"],
+        g_uu=nestor_trace["g_uu"],
+        g_uv=nestor_trace["g_uv"],
+        g_vv=nestor_trace["g_vv"],
+    )
+    np.testing.assert_allclose(
+        np.asarray(trace_channels["bsqvac"]),
+        np.asarray(nestor_trace["bsqvac"]),
+        rtol=1.0e-13,
+        atol=1.0e-12,
+    )
     bsqvac_delta = np.asarray(bsqvac0, dtype=float) - np.asarray(trace["freeb_bsqvac_half"], dtype=float)
     bsqvac_rel = np.linalg.norm(bsqvac_delta) / max(
         1.0,

@@ -2020,7 +2020,7 @@ WP11 Coil-only QS optimization example:        90%
 WP12 Robust coil perturbations:               100%
 WP13 Documentation:                           100%
 WP14 CI policy:                               100%
-Overall branch completion:                   99.8%
+Overall branch completion:                   99.85%
 ```
 
 ## Immediate Next Steps
@@ -2038,6 +2038,52 @@ Overall branch completion:                   99.8%
 Nothing is required right now. The next implementation step can proceed locally. Later, maintainers should decide whether ESSOS mgrid export should be released before the `vmec_jax` example is promoted from research example to documented workflow.
 
 ## Work Log
+
+### 2026-05-29 NESTOR trace-payload replay diagnostics
+
+Steps taken:
+
+1. Added an optional `trace_arrays` payload to `NestorSolveResult`.
+2. Threaded `collect_trace_arrays=True` only for `adjoint_trace_mode="full"`
+   so normal forward runs and default diagnostics remain lightweight.
+3. Captured the exact production NESTOR boundary sample, mode potential,
+   mode/source vectors, metric channels, and `bsqvac` used by the accepted
+   direct-coil update.
+4. Extended the direct-coil accepted-update gate to verify that:
+   - the traced NESTOR `bsqvac` exactly matches `freeb_bsqvac_half`;
+   - reconstructing `bsqvac` from traced production `potvac` and metric
+     channels agrees to roundoff;
+   - replaying the full differentiable coil/sample/NESTOR path still matches
+     the accepted trace to the bounded `2e-5` relative level.
+
+Results:
+
+1. `python -m ruff check vmec_jax/free_boundary.py vmec_jax/solve.py tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+   passed.
+2. `python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree -rx`
+   passed.
+3. `python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py tests/test_free_boundary_coil_provider_forward.py -rx`
+   passed: 20 passed, 1 skipped.
+4. `python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py tests/test_external_fields_coils_jax.py -rx`
+   passed: 68 passed.
+5. The remaining replay gap is now isolated below the production potential-to-
+   `bsqvac` bridge. The exact production trace reconstructs roundoff-cleanly;
+   the differentiable full replay differs at `~1e-5` relative level, with the
+   largest observed sample-level discrepancy in direct `br`/`bz` replay.
+
+Next:
+
+1. Use the trace payload to compare direct field sampling and axis-field
+   contributions term-by-term, then decide whether the remaining `~1e-5`
+   mismatch is acceptable numerical replay tolerance or a fixable provider
+   sampling-order issue.
+2. Keep full-loop AD claims at the current bounded validation level until that
+   final replay gap is either eliminated or documented as a stable tolerance.
+3. Let PR CI finish on the trace-payload commit after pushing.
+
+Need from user:
+
+Nothing now.
 
 ### 2026-05-29 Accepted force-channel replay hardening
 
