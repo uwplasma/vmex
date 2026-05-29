@@ -27,6 +27,7 @@ from vmec_jax.free_boundary_adjoint import (
     direct_coil_projected_mode_fixed_point_objective_jax,
     mode_matrix_from_grpmn_jax,
     mode_rhs_from_gsource_jax,
+    pytree_directional_derivative_check_jax,
     vacuum_boundary_fields_from_cylindrical_jax,
     vmec_analytic_terms_from_geometry_jax,
     vmec_nonsingular_terms_from_bexni_jax,
@@ -1608,7 +1609,7 @@ def test_projected_mode_fixed_point_objective_value_and_grad_wrt_coil_pytree():
     """Validate the optimizer-facing scalar objective has coil pytree gradients."""
 
     pytest.importorskip("jax")
-    from vmec_jax._compat import jax, jnp
+    from vmec_jax._compat import jnp
 
     enable_x64(True)
     radius = 1.34
@@ -1679,34 +1680,28 @@ def test_projected_mode_fixed_point_objective_value_and_grad_wrt_coil_pytree():
         )
         return solved["objective"]
 
-    value, grad_params = jax.value_and_grad(objective)(coil_params)
+    current_direction = coil_params.base_currents * 0.01
+    dofs_direction = jnp.zeros_like(coil_params.base_curve_dofs)
+    dofs_direction = dofs_direction.at[0, 0, 2].set(0.02)
+    dofs_direction = dofs_direction.at[0, 1, 1].set(-0.015)
+    direction = coil_params.with_arrays(
+        base_curve_dofs=dofs_direction,
+        base_currents=current_direction,
+    )
+    check = pytree_directional_derivative_check_jax(objective, coil_params, direction, eps=1.0e-4)
+    value = check["value"]
+    grad_params = check["grad"]
 
     assert np.isfinite(float(value))
     assert np.all(np.isfinite(np.asarray(grad_params.base_currents)))
     assert np.all(np.isfinite(np.asarray(grad_params.base_curve_dofs)))
     assert float(jnp.linalg.norm(grad_params.base_currents)) > 1.0e-18
     assert float(jnp.linalg.norm(grad_params.base_curve_dofs)) > 1.0e-10
+    assert float(check["abs_error"]) < 1.0e-8
+    np.testing.assert_allclose(check["exact_directional"], check["fd_directional"], rtol=2.0e-5, atol=1.0e-10)
 
-    current_direction = coil_params.base_currents * 0.01
-    dofs_direction = jnp.zeros_like(coil_params.base_curve_dofs)
-    dofs_direction = dofs_direction.at[0, 0, 2].set(0.02)
-    dofs_direction = dofs_direction.at[0, 1, 1].set(-0.015)
-
-    def shifted_objective(scale):
-        return objective(
-            coil_params.with_arrays(
-                base_curve_dofs=coil_params.base_curve_dofs + scale * dofs_direction,
-                base_currents=coil_params.base_currents + scale * current_direction,
-            )
-        )
-
-    exact_directional = jnp.vdot(grad_params.base_currents, current_direction) + jnp.vdot(
-        grad_params.base_curve_dofs,
-        dofs_direction,
-    )
-    eps = 1.0e-4
-    fd_directional = (shifted_objective(eps) - shifted_objective(-eps)) / (2.0 * eps)
-    np.testing.assert_allclose(exact_directional, fd_directional, rtol=2.0e-5, atol=1.0e-10)
+    with pytest.raises(ValueError, match="eps"):
+        pytree_directional_derivative_check_jax(objective, coil_params, direction, eps=0.0)
 
 
 def _boundary_projection_inputs():

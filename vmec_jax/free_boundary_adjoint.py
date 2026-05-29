@@ -198,6 +198,82 @@ def dense_fixed_point_solve_jax(
     )
 
 
+def pytree_directional_derivative_check_jax(
+    objective_fn: Any,
+    params: Any,
+    direction: Any,
+    *,
+    eps: float = 1.0e-4,
+) -> dict[str, Any]:
+    """Compare an exact JAX directional derivative with central differences.
+
+    Parameters
+    ----------
+    objective_fn:
+        Scalar objective ``objective_fn(params)``.
+    params:
+        Differentiable parameter pytree.  In this branch the primary use is
+        ``CoilFieldParams``, but the helper is intentionally generic.
+    direction:
+        Pytree with the same differentiable leaves as ``params``.  The central
+        finite-difference check evaluates ``objective_fn(params +/- eps *
+        direction)``.
+    eps:
+        Central finite-difference step.
+
+    Notes
+    -----
+    This is a phase-2 validation utility.  It makes AD-vs-FD gates reusable for
+    direct-coil free-boundary primitives without claiming that the production
+    ``run_free_boundary`` loop already has a full custom VJP.
+    """
+
+    if jax is None:  # pragma: no cover - JAX is required for exact gradients.
+        raise RuntimeError("JAX is required for exact directional derivatives.")
+    step = float(eps)
+    if not step > 0.0:
+        raise ValueError("eps must be positive.")
+
+    def shifted(scale):
+        return tree_util.tree_map(
+            lambda value, delta: jnp.asarray(value) + float(scale) * jnp.asarray(delta),
+            params,
+            direction,
+        )
+
+    value, grad_params = jax.value_and_grad(objective_fn)(params)
+    exact_directional = _pytree_vdot_jax(grad_params, direction)
+    fd_directional = (objective_fn(shifted(step)) - objective_fn(shifted(-step))) / (2.0 * step)
+    abs_error = jnp.abs(exact_directional - fd_directional)
+    rel_error = abs_error / jnp.maximum(jnp.asarray(1.0, dtype=abs_error.dtype), jnp.abs(fd_directional))
+    return {
+        "value": value,
+        "grad": grad_params,
+        "exact_directional": exact_directional,
+        "fd_directional": fd_directional,
+        "abs_error": abs_error,
+        "rel_error": rel_error,
+    }
+
+
+def _pytree_vdot_jax(lhs: Any, rhs: Any) -> Any:
+    """Return the sum of leafwise ``vdot`` values for matching pytrees."""
+
+    products = tree_util.tree_leaves(
+        tree_util.tree_map(
+            lambda left, right: jnp.vdot(jnp.asarray(left), jnp.asarray(right)),
+            lhs,
+            rhs,
+        )
+    )
+    if not products:
+        return jnp.asarray(0.0)
+    total = products[0]
+    for product in products[1:]:
+        total = total + product
+    return total
+
+
 def _finite_difference_jacobian(fn: Any, x: Any, eps: float = 1.0e-6) -> Any:
     """Small NumPy/JAX-free fallback Jacobian for import-only environments."""
 
