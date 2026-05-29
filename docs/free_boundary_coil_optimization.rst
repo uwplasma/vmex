@@ -142,11 +142,11 @@ parameters.
 
 Finite-pressure direct-coil support is currently a promoted forward validation
 lane: active NESTOR diagnostics respond to coil-current changes, matched
-direct/generated-``mgrid`` samples agree within recorded precision/roundoff,
-and the corrected ESSOS LP-QA stellarator pressure-continuation case now
-converges with both generated-``mgrid`` and direct differentiable coil
-providers. Accepted-equilibrium sensitivity and exact full-solve gradients
-remain phase-2 promotion gates.
+direct/generated-``mgrid`` provider samples agree tightly, and WOUT-level
+generated-``mgrid``/direct comparisons are bounded by the documented finite
+tolerances for the corrected ESSOS LP-QA stellarator pressure-continuation case.
+Accepted-equilibrium sensitivity and exact full-solve gradients remain phase-2
+promotion gates.
 
 Current Status
 --------------
@@ -531,6 +531,8 @@ labels at final ``FTOL=1e-12``. The corresponding actual WOUT beta values are
 ``6.3e-12``. A nominal ``2.0`` label reaches actual WOUT beta about ``3.184%``
 and residual sum ``3.75e-7`` from the same continuation sequence; that row is
 useful stress evidence but is not part of the strict promoted panel.
+This is committed PR-review artifact evidence, not a default CI gate and not a
+VMEC2000 generated-``mgrid`` WOUT parity promotion.
 
 The strict direct-coil LP-QA reviewer WOUT-panel is committed as a compressed
 summary figure:
@@ -1021,14 +1023,15 @@ magnetic-pressure balance.
 
 The generated-``mgrid`` VMEC2000 comparison for the ESSOS LP-QA coil validation
 case is still non-promoted/xfailed. The current promoted LP-QA signal for this
-branch is ``vmec_jax`` direct-coil versus generated-``mgrid`` provider
-agreement within recorded precision/roundoff, active NESTOR coupling
-sensitivity checks, and the direct pressure-continuation sequence above.
+branch is ``vmec_jax`` direct-coil versus generated-``mgrid`` provider/sample
+agreement within documented tolerances, active NESTOR coupling sensitivity
+checks, and the direct pressure-continuation sequence above.
 
 Validation Status
 -----------------
 
-Current fast tests cover:
+PR-ready phase-1 evidence is split into default fast gates and optional external
+evidence. The default gates are CI-safe and cover:
 
 - direct-coil Biot-Savart derivatives with respect to currents, coil Fourier
   coefficients, and evaluation coordinates;
@@ -1069,6 +1072,11 @@ Current fast tests cover:
   one coil current and one Fourier geometry coefficient; this checks finite
   nonzero outer-loop response, not a production AD-vs-finite-difference
   full-solve adjoint.
+
+Optional evidence includes ESSOS-backed full finite-pressure response tests,
+VMEC2000 executable comparisons, and ``RUN_FULL=1`` complete-solve finite
+response checks. These are review and nightly lanes rather than default CI
+requirements.
 
 The optional VMEC2000 generated-``mgrid`` comparison is present but xfailed for
 now. VMEC2000 reads the generated grid and advances the trace locally, but the

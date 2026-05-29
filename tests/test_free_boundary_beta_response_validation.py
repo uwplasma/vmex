@@ -2,12 +2,18 @@ from __future__ import annotations
 
 from pathlib import Path
 import shutil
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 from vmec_jax.driver import run_free_boundary, write_wout_from_fixed_boundary_run
-from vmec_jax.free_boundary_validation import free_boundary_response_metrics
+from vmec_jax.free_boundary_validation import (
+    free_boundary_response_metrics,
+    wout_beta_percent,
+    wout_fsq_total,
+    wout_mean_iota,
+)
 from vmec_jax.namelist import read_indata, write_indata
 from vmec_jax.wout import read_wout
 
@@ -38,6 +44,28 @@ def test_free_boundary_response_metrics_detect_geometry_and_field_changes() -> N
     assert metrics.lcfs_max_displacement > 0.05
     assert abs(metrics.mean_iota_delta) > 1.0e-3
     assert metrics.lcfs_b_rel_rms_delta > 1.0e-3
+
+
+def test_free_boundary_response_scalar_helpers_and_nfp_guard() -> None:
+    """Validation helpers should be backend-neutral for WOUT-like objects."""
+
+    reference = SimpleNamespace(nfp=2, betatotal=0.012, iotaf=np.asarray([0.0, 0.2, 0.4]), fsqr=1.0, fsqz=2.0, fsql=3.0)
+    fallback = SimpleNamespace(nfp=2, beta_total=0.034, iotas=np.asarray([0.0, -0.5]), fsqr=0.5, fsqz=0.25, fsql=0.125)
+    no_profiles = SimpleNamespace(nfp=2)
+    wrong_period = SimpleNamespace(nfp=3)
+
+    assert wout_beta_percent(reference) == pytest.approx(1.2)
+    assert wout_beta_percent(fallback) == pytest.approx(3.4)
+    assert np.isnan(wout_beta_percent(no_profiles))
+    assert wout_mean_iota(reference) == pytest.approx(0.3)
+    assert wout_mean_iota(fallback) == pytest.approx(-0.5)
+    assert np.isnan(wout_mean_iota(no_profiles))
+    assert wout_fsq_total(reference) == pytest.approx(6.0)
+    assert wout_fsq_total(fallback) == pytest.approx(0.875)
+    assert np.isnan(wout_fsq_total(no_profiles))
+
+    with pytest.raises(ValueError, match="nfp mismatch"):
+        free_boundary_response_metrics(reference, wrong_period, ntheta=8, nphi=4)
 
 
 def _write_cth_pressure_case(tmp_path: Path, pressure_scale: float) -> Path:

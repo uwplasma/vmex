@@ -14,13 +14,14 @@ Date opened: 2026-05-24
 
 Last updated: 2026-05-29 after the latest `origin/main` integration, direct-coil
 finite-pressure diagnostics hardening, benchmark warm-phase bottleneck
-reporting, and documentation overclaim cleanup. PR #18 is open on
-`feature/freeb-essos-coil-single-stage`; fast CI was failing on stale bundled
-QA WOUT regression constants and a fixture-specific missing-aspect-metadata
-assumption, both now corrected locally pending push. The optional
-ESSOS/direct-coil bootstrap gates remain local/manual because they require
-ESSOS assets and launch real free-boundary solves. Do not merge PR #18 until
-all required checks are green.
+reporting, Codecov coverage-gate strengthening, and documentation overclaim
+cleanup. PR #18 is open on `feature/freeb-essos-coil-single-stage`; GitHub
+Actions were green after the merge, while the project coverage gate was at
+94.88%. The local coverage additions estimate roughly 95.04% project coverage
+against the CI artifact before push. The optional ESSOS/direct-coil bootstrap
+gates remain local/manual because they require ESSOS assets and launch real
+free-boundary solves. Do not merge PR #18 until all required checks, including
+Codecov project coverage, are green.
 
 Steps taken:
 
@@ -118,6 +119,16 @@ Steps taken:
     followed by unattributed setup (`5.9 ms`).  This makes the next real
     performance patch a reusable per-stage setup/context cache rather than a
     coil-sampling or NESTOR-solve change.
+67. Added CI-safe physics/numerics coverage gates for finite-beta profile
+    conversion, backend-neutral free-boundary WOUT scalar validation helpers,
+    robust-coil perturbation validation, and VMEC `jxbforce` corrected-bsubs
+    collocation helpers.
+68. Re-estimated the coverage impact against the downloaded py3.11 CI coverage
+    XML: the added tests cover 63 previously uncovered source lines and lift the
+    estimated project line coverage from 94.88% to about 95.04%.
+69. Cleaned phase-1 direct-coil documentation wording so LP-QA finite-beta rows
+    are described as forward-validation evidence, not generated-mgrid VMEC2000
+    WOUT parity or full nonlinear exact-adjoint promotion.
 67. Added a guarded host-forward setup enforcement policy for non-traced
     accelerator solves.  `VMEC_JAX_HOST_SETUP_ENFORCE=auto` uses the existing
     NumPy row-assignment path for the initial state on accelerator backends

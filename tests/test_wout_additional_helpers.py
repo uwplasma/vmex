@@ -14,6 +14,8 @@ from vmec_jax.wout import (
     MU0,
     WoutData,
     _compute_equif_wout,
+    _jxbforce_getbsubs_coeffs_lasym_false,
+    _jxbforce_getbsubs_coeffs_lasym_true,
     equilibrium_iota_profiles_from_state,
     read_wout,
     write_wout,
@@ -375,6 +377,63 @@ def test_compute_equif_wout_leaves_zero_denominator_surfaces_finite() -> None:
 
     for profile in (buco, bvco, jcuru, jcurv, equif):
         np.testing.assert_allclose(profile, np.zeros((ns,)))
+
+
+def test_jxbforce_getbsubs_coefficients_cover_symmetric_and_asymmetric_collocation() -> None:
+    theta = np.asarray([0.0, 0.5 * np.pi])
+    zeta = np.asarray([0.0, np.pi])
+    trig = SimpleNamespace(
+        ntheta2=2,
+        cosmu=np.stack([np.cos(m * theta) for m in range(2)], axis=1),
+        sinmu=np.stack([np.sin(m * theta) for m in range(2)], axis=1),
+        cosnv=np.stack([np.cos(n * zeta) for n in range(2)], axis=1),
+        sinnv=np.stack([np.sin(n * zeta) for n in range(2)], axis=1),
+    )
+    frho = np.asarray([[1.0, 2.0], [3.0, 4.0]])
+    bsupu = np.full_like(frho, 0.7)
+    bsupv = np.full_like(frho, 1.3)
+
+    coeff = _jxbforce_getbsubs_coeffs_lasym_false(frho=frho, bsupu=bsupu, bsupv=bsupv, trig=trig, nfp=1)
+
+    assert coeff is not None
+    assert coeff.shape == (2, 3)
+    assert np.all(np.isfinite(coeff))
+    np.testing.assert_allclose(coeff[0, 1], 2.692307692307692, rtol=1.0e-12)
+    assert _jxbforce_getbsubs_coeffs_lasym_false(frho=frho[:1], bsupu=bsupu, bsupv=bsupv, trig=trig, nfp=1) is None
+
+    theta_lasym = np.linspace(0.0, np.pi, 3, endpoint=False)
+    zeta_lasym = np.linspace(0.0, 2.0 * np.pi, 3, endpoint=False)
+    trig_lasym = SimpleNamespace(
+        ntheta2=3,
+        ntheta3=3,
+        cosmu=np.stack([np.cos(m * theta_lasym) for m in range(3)], axis=1),
+        sinmu=np.stack([np.sin(m * theta_lasym) for m in range(3)], axis=1),
+        cosnv=np.stack([np.cos(n * zeta_lasym) for n in range(2)], axis=1),
+        sinnv=np.stack([np.sin(n * zeta_lasym) for n in range(2)], axis=1),
+    )
+    frho_lasym = np.arange(1.0, 10.0).reshape(3, 3)
+    bsupu_lasym = np.full_like(frho_lasym, 0.7)
+    bsupv_lasym = np.full_like(frho_lasym, 1.3)
+
+    coeff_lasym = _jxbforce_getbsubs_coeffs_lasym_true(
+        frho=frho_lasym,
+        bsupu=bsupu_lasym,
+        bsupv=bsupv_lasym,
+        trig=trig_lasym,
+        nfp=1,
+    )
+
+    assert coeff_lasym is not None
+    assert coeff_lasym.shape == (3, 3, 2)
+    assert np.all(np.isfinite(coeff_lasym))
+    assert np.linalg.norm(coeff_lasym) > 0.0
+    assert _jxbforce_getbsubs_coeffs_lasym_true(
+        frho=frho_lasym,
+        bsupu=bsupu_lasym[:2],
+        bsupv=bsupv_lasym,
+        trig=trig_lasym,
+        nfp=1,
+    ) is None
 
 
 def test_equilibrium_iota_profiles_iota_driven_branch_uses_prescribed_half_mesh_profile() -> None:
