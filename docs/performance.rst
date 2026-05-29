@@ -398,7 +398,9 @@ read as a mixed result rather than a broad VMEC2000 speedup claim:
   ``profile_fixed_boundary.py`` now records multigrid stage wall time and
   per-stage solver-loop timing in diagnostics.  Chunked accelerated stages are
   aggregated before reporting so stage wall time and VMEC-loop timing are
-  comparable.  On the local finite-beta QH case, the two CPU stages measured
+  comparable, and scan stages report their ``scan_total_s`` timing through the
+  same generic per-stage solve column as non-scan stages.  On the local
+  finite-beta QH case, the two CPU stages measured
   about ``5.1 s`` and ``20.5 s`` wall time, while the aggregated final-stage
   solver-loop timing was about ``20.45 s``.  A
   ``VMEC_JAX_JIT_PRECOMPILE=0`` probe was slower (``29.2 s`` total), so the

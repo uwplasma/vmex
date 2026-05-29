@@ -746,6 +746,21 @@ def _copy_final_force_payload(result_i: SolveVmecResidualResult, source_i) -> So
     return result_i
 
 
+def _timing_solve_total_s(timing_i: dict) -> float:
+    """Return the generic solve wall time from non-scan or scan timing blocks."""
+
+    if not isinstance(timing_i, dict):
+        return float("nan")
+    for key in ("solve_total_s", "scan_total_s"):
+        try:
+            value = float(timing_i.get(key, np.nan))
+        except Exception:
+            value = float("nan")
+        if np.isfinite(value):
+            return value
+    return float("nan")
+
+
 def _aggregate_stage_chunk_timing(results_i: list[SolveVmecResidualResult]) -> dict:
     """Combine per-chunk timing dictionaries for one logical VMEC stage."""
 
@@ -790,11 +805,14 @@ def _aggregate_stage_chunk_timing(results_i: list[SolveVmecResidualResult]) -> d
     for key, value in list(aggregate.items()):
         if key.endswith("_s") and not key.endswith("_per_iter_s") and not key.endswith("_first_s"):
             aggregate[f"{key[:-2]}_per_iter_s"] = float(value) / float(iterations)
+    chunk_solve_total = np.asarray([_timing_solve_total_s(t) for t in timings], dtype=float)
+    valid = chunk_solve_total[np.isfinite(chunk_solve_total)]
+    if valid.size:
+        aggregate["solve_total_s"] = float(np.sum(valid))
+        iterations = max(int(aggregate.get("iterations", 0)), 1)
+        aggregate["solve_total_per_iter_s"] = float(aggregate["solve_total_s"]) / float(iterations)
     aggregate["chunk_count"] = int(len(timings))
-    aggregate["chunk_solve_total_s"] = np.asarray(
-        [float(t.get("solve_total_s", np.nan)) for t in timings],
-        dtype=float,
-    )
+    aggregate["chunk_solve_total_s"] = chunk_solve_total
     return aggregate
 
 
@@ -1917,7 +1935,7 @@ def run_fixed_boundary(
                 )
             except Exception:
                 stage_timing = {}
-            stage_solve_total_s.append(float(stage_timing.get("solve_total_s", np.nan)))
+            stage_solve_total_s.append(_timing_solve_total_s(stage_timing))
             stage_runs.append(stage_run)
             stage_modes.append(str(stage_mode_i))
             stage_state = stage_run.state
@@ -2046,7 +2064,7 @@ def run_fixed_boundary(
                 )
             except Exception:
                 stage_timing = {}
-            stage_solve_total_s.append(float(stage_timing.get("solve_total_s", np.nan)))
+            stage_solve_total_s.append(_timing_solve_total_s(stage_timing))
             stage_runs.append(stage_run)
             stage_modes.append(str(stage_mode_i))
             stage_state = stage_run.state
@@ -3588,7 +3606,7 @@ def run_fixed_boundary(
                 stage_timing = res_i.diagnostics.get("timing", {})
             except Exception:
                 stage_timing = {}
-            stage_solve_total_s.append(float(stage_timing.get("solve_total_s", np.nan)))
+            stage_solve_total_s.append(_timing_solve_total_s(stage_timing))
             stage_results.append(res_i)
             stage_statics.append(static_i)
             try:

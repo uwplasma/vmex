@@ -643,6 +643,11 @@ Set ``VMEC2000_NIGHTLY=1`` as well to include the slower non-axisymmetric,
    VMEC2000_NIGHTLY=1 \
    pytest -q tests/test_vmec2000_converged_parity.py
 
+On 2026-05-29 this nightly command passed locally with
+``~/bin/xvmec2000``: ``4 passed, 1 skipped, 1 xfailed`` in ``15:06``.  The
+skipped row is the intentionally deferred converged free-boundary WOUT parity
+case, and the xfail is the documented zero-pressure axisymmetric LASYM gap.
+
 The fetched single-grid ``lasym=True`` finite-beta fixture is a required
 bundled-reference physics gate, and the executable-backed
 ``basic_non_stellsym_pressure`` converged-WOUT row passes locally against

@@ -1346,13 +1346,14 @@ Defer beyond the current cycle:
   accelerator cache path before solve compilation.
 - 2026-05-29: Added per-stage multigrid wall-time diagnostics to the driver and
   fixed-boundary profiler, then fixed chunked-stage accounting so accelerated
-  monitor chunks are summed as one logical stage. The local finite-beta QH CPU
-  profile now reports the two stage walls (`~5.1 s`, `~20.5 s`) separately
-  from the aggregated stage solver-loop timing (`~20.45 s` for the final
-  stage). Disabling explicit JIT precompile regressed total wall time
-  (`~29.2 s`), so the remaining cold CPU target is the compiled transform/
-  preconditioner work inside the VMEC iteration loop plus shape-stable reuse,
-  not a missing WOUT or driver-side staging cost.
+  monitor chunks are summed as one logical stage. Scan-stage `scan_total_s`
+  now feeds the same generic per-stage solve column as non-scan `solve_total_s`.
+  The local finite-beta QH CPU profile reports the two stage walls (`~5.1 s`,
+  `~20.5 s`) separately from the aggregated stage solver-loop timing
+  (`~20.45 s` for the final stage). Disabling explicit JIT precompile regressed
+  total wall time (`~29.2 s`), so the remaining cold CPU target is the compiled
+  transform/preconditioner work inside the VMEC iteration loop plus
+  shape-stable reuse, not a missing WOUT or driver-side staging cost.
 - 2026-05-17: Tightened the CLI fixed-boundary finish policy for explicit
   low-budget runs. If a caller supplies `max_iter`, all accelerated/parity
   finish attempts combined are capped at `2 * max_iter` and report
@@ -1401,7 +1402,12 @@ Defer beyond the current cycle:
   `~/bin/xvmec2000` plus STELLOPT/PATH executables by default, can opt into
   recursive local executable inventory, de-duplicates symlinks, and writes
   VMEC2000/vmec_jax residual, runtime, scalar, and field rel-RMS summaries for
-  benchmark regeneration.
+  benchmark regeneration. A 2026-05-29 local nightly run with
+  `VMEC2000_EXEC=~/bin/xvmec2000 VMEC2000_INTEGRATION=1 VMEC2000_NIGHTLY=1`
+  passed the bounded executable-backed matrix (`4 passed, 1 skipped,
+  1 xfailed` in `15:06`); the skip is the intentionally deferred converged
+  free-boundary WOUT parity row, and the xfail is the documented zero-pressure
+  LASYM external gap.
 - 2026-05-14: Added an opt-in dense branch-shuffle output grid
   (`shuffle_profile_nphi_out`) to the differentiable QI residual and propagated
   it through diagnostics and `QuasiIsodynamicOptions`. This brings vmec_jax
