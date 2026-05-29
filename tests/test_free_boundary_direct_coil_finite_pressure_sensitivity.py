@@ -1313,6 +1313,225 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
     np.testing.assert_allclose(exact, fd, rtol=3.0e-3, atol=1.0e-10)
 
 
+def test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Replay two accepted direct-coil updates with boundary resampling.
+
+    This is the next phase-2 bridge after accepted-state AD-vs-FD: the first
+    accepted update is replayed, the second NESTOR boundary is resampled from
+    that replayed state, and the second strict update is checked against the
+    production trace.  The boundary sampler is still host/NumPy, so this is a
+    value-parity rung, not a full nonlinear-loop VJP claim.
+    """
+
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jnp
+    from vmec_jax.discrete_adjoint import strict_update_accepted_step, strict_update_one_step_from_state
+    from vmec_jax.driver import run_free_boundary
+    from vmec_jax.free_boundary import (
+        _build_vmec_mode_basis,
+        _ensure_vmec_nonsingular_kernel_tables,
+        _sample_external_boundary_arrays,
+        _vmec_boundary_wint,
+    )
+    from vmec_jax.free_boundary_adjoint import direct_coil_boundary_bsqvac_jax
+    from vmec_jax.solve import solve_fixed_boundary_residual_iter
+    from vmec_jax.state import pack_state
+
+    enable_x64(True)
+    for key, value in {
+        "VMEC_JAX_FREEB_NESTOR_MODE": "dense",
+        "VMEC_JAX_FREEB_DENSE_SOLVE_MODE": "mode",
+        "VMEC_JAX_FREEB_USE_GREENF_SOURCE": "1",
+        "VMEC_JAX_FREEB_EXPERIMENTAL_FOURI_MATRIX": "1",
+        "VMEC_JAX_FREEB_ADD_ANALYTIC_BVEC": "1",
+        "VMEC_JAX_FREEB_JAX_NESTOR_OPERATOR": "1",
+        "VMEC_JAX_FREEB_JAX_NESTOR_JIT_OPERATOR": "0",
+    }.items():
+        monkeypatch.setenv(key, value)
+
+    input_path = _write_tiny_direct_freeb_input(
+        tmp_path / "input.direct_two_step_replay",
+        lasym=False,
+        niter=3,
+        mpol=3,
+        ntheta=6,
+    )
+    base_params = _circle_coil_params(current=3.0e7, n_segments=64)
+    init = run_free_boundary(
+        input_path,
+        use_initial_guess=True,
+        verbose=False,
+        external_field_provider_kind="direct_coils",
+        external_field_provider_params=base_params,
+    )
+    result = solve_fixed_boundary_residual_iter(
+        init.state,
+        init.static,
+        indata=init.indata,
+        signgs=init.signgs,
+        max_iter=3,
+        ftol=1.0e-8,
+        vmec2000_control=True,
+        auto_flip_force=False,
+        use_direct_fallback=True,
+        verbose=False,
+        verbose_vmec2000_table=False,
+        jit_forces=False,
+        use_scan=False,
+        host_update_assembly=False,
+        adjoint_trace=True,
+        adjoint_trace_mode="full",
+        external_field_provider_kind="direct_coils",
+        external_field_provider_params=base_params,
+        free_boundary_activate_fsq=1.0e99,
+    )
+    traces = result.diagnostics.get("adjoint_step_trace", [])
+    active_traces = [trace for trace in traces if trace.get("freeb_bsqvac_half") is not None]
+    assert len(active_traces) >= 2
+    trace0, trace1 = active_traces[:2]
+
+    first_step = strict_update_accepted_step(
+        trace0["state_pre"],
+        init.static,
+        dt_eff=trace0["dt_eff"],
+        b1=trace0["b1"],
+        fac=trace0["fac"],
+        force_scale=trace0["force_scale"],
+        flip_sign=trace0["flip_sign"],
+        vRcc_before=trace0["vRcc_before"],
+        vRss_before=trace0["vRss_before"],
+        vZsc_before=trace0["vZsc_before"],
+        vZcs_before=trace0["vZcs_before"],
+        vLsc_before=trace0["vLsc_before"],
+        vLcs_before=trace0["vLcs_before"],
+        frcc_u=trace0["frcc_u"],
+        frss_u=trace0["frss_u"],
+        fzsc_u=trace0["fzsc_u"],
+        fzcs_u=trace0["fzcs_u"],
+        flsc_u=trace0["flsc_u"],
+        flcs_u=trace0["flcs_u"],
+        max_update_rms=trace0["max_update_rms_pre"],
+        limit_update_rms=trace0["limit_update_rms"],
+        divide_by_scalxc_for_update=trace0["divide_by_scalxc_for_update"],
+        enforce_edge=False,
+    )
+    replayed_state1 = first_step["state_post"]
+    np.testing.assert_allclose(
+        np.asarray(pack_state(replayed_state1)),
+        np.asarray(pack_state(trace0["state_post"])),
+        rtol=0.0,
+        atol=0.0,
+    )
+    np.testing.assert_allclose(
+        np.asarray(pack_state(replayed_state1)),
+        np.asarray(pack_state(trace1["state_pre"])),
+        rtol=1.0e-13,
+        atol=1.0e-13,
+    )
+
+    sample = _sample_external_boundary_arrays(
+        state=replayed_state1,
+        static=init.static,
+        external_field_provider_kind="direct_coils",
+        external_field_provider_params=base_params,
+    )
+    wint = _vmec_boundary_wint(static=init.static, ntheta=sample.R.shape[0], nzeta=sample.R.shape[1])
+    basis = _build_vmec_mode_basis(
+        ntheta=sample.R.shape[0],
+        nzeta=sample.R.shape[1],
+        nfp=int(init.static.cfg.nfp),
+        mf=int(init.static.cfg.mpol) + 1,
+        nf=int(init.static.cfg.ntor),
+        lasym=bool(init.static.cfg.lasym),
+        wint=wint,
+    )
+    nvper = 64 if int(sample.R.shape[1]) == 1 else max(1, int(init.static.cfg.nfp))
+    tables = _ensure_vmec_nonsingular_kernel_tables(basis=basis, nv=sample.R.shape[1], nvper=nvper)
+    nestor_trace = trace1.get("freeb_nestor_trace")
+    assert isinstance(nestor_trace, dict)
+    replay1 = direct_coil_boundary_bsqvac_jax(
+        base_params,
+        R=jnp.asarray(sample.R),
+        Z=jnp.asarray(sample.Z),
+        phi=jnp.asarray(sample.phi),
+        Ru=jnp.asarray(sample.Ru),
+        Zu=jnp.asarray(sample.Zu),
+        Rv=jnp.asarray(sample.Rv),
+        Zv=jnp.asarray(sample.Zv),
+        ruu=jnp.asarray(sample.ruu),
+        ruv=jnp.asarray(sample.ruv),
+        rvv=jnp.asarray(sample.rvv),
+        zuu=jnp.asarray(sample.zuu),
+        zuv=jnp.asarray(sample.zuv),
+        zvv=jnp.asarray(sample.zvv),
+        basis=basis,
+        tables=tables,
+        signgs=int(init.signgs),
+        nvper=nvper,
+        br_add=jnp.asarray(nestor_trace["br_axis"]),
+        bp_add=jnp.asarray(nestor_trace["bp_axis"]),
+        bz_add=jnp.asarray(nestor_trace["bz_axis"]),
+        wint=jnp.asarray(wint),
+        include_analytic=True,
+    )
+    np.testing.assert_allclose(
+        np.asarray(replay1["bsqvac"]),
+        np.asarray(trace1["freeb_bsqvac_half"]),
+        rtol=1.0e-13,
+        atol=1.0e-12,
+    )
+    second_step = strict_update_one_step_from_state(
+        replayed_state1,
+        init.static,
+        wout_like=trace1["wout_like"],
+        trig=trace1["trig"],
+        apply_lforbal=trace1["apply_lforbal"],
+        include_edge_residual=trace1["include_edge_residual"],
+        apply_m1_constraints=trace1["apply_m1_constraints"],
+        zero_m1=trace1["zero_m1"],
+        mats=trace1["precond_mats"],
+        jmax=trace1["precond_jmax"],
+        lam_prec=trace1["lam_prec"],
+        w_mode_mn=trace1["w_mode_mn"],
+        lambda_update_scale=trace1["lambda_update_scale"],
+        dt_eff=trace1["dt_eff"],
+        b1=trace1["b1"],
+        fac=trace1["fac"],
+        force_scale=trace1["force_scale"],
+        flip_sign=trace1["flip_sign"],
+        vRcc_before=trace1["vRcc_before"],
+        vRss_before=trace1["vRss_before"],
+        vZsc_before=trace1["vZsc_before"],
+        vZcs_before=trace1["vZcs_before"],
+        vLsc_before=trace1["vLsc_before"],
+        vLcs_before=trace1["vLcs_before"],
+        max_update_rms=trace1["max_update_rms_pre"],
+        limit_update_rms=trace1["limit_update_rms"],
+        divide_by_scalxc_for_update=trace1["divide_by_scalxc_for_update"],
+        preconditioner_use_precomputed_tridi=trace1["preconditioner_use_precomputed_tridi"],
+        preconditioner_use_lax_tridi=trace1["preconditioner_use_lax_tridi"],
+        freeb_bsqvac_half=replay1["bsqvac"],
+        freeb_pres_scale=trace1["freeb_pres_scale"],
+        constraint_rcon0=trace1.get("constraint_rcon0"),
+        constraint_zcon0=trace1.get("constraint_zcon0"),
+        constraint_tcon0=trace1.get("constraint_tcon0"),
+        constraint_precond_diag=trace1.get("constraint_precond_diag"),
+        constraint_tcon=trace1.get("constraint_tcon"),
+        constraint_precond_active=trace1.get("constraint_precond_active"),
+        constraint_tcon_active=trace1.get("constraint_tcon_active"),
+        enforce_edge=False,
+    )
+    np.testing.assert_allclose(
+        np.asarray(pack_state(second_step["step"]["state_post"])),
+        np.asarray(pack_state(trace1["state_post"])),
+        rtol=1.0e-10,
+        atol=1.0e-11,
+    )
+
+
 @pytest.mark.parametrize("lasym", [False, True], ids=["stellsym", "lasym"])
 def test_jax_nestor_operator_fixed_boundary_ad_matches_central_fd_for_coil_vars(
     tmp_path: Path,

@@ -69,6 +69,47 @@ Need from user:
 
 Nothing now.
 
+### 2026-05-30 Phase-2 two-step replay bridge
+
+Steps taken:
+
+1. Confirmed PR #18 CI for `78260b90` was fully green, including Codecov
+   project/patch and all fast-test jobs.
+2. Added a two-accepted-step direct-coil replay test:
+   `test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state`.
+3. The test replays the first accepted update, verifies the replayed state is
+   the second production trace's input state, resamples the free-boundary
+   geometry from that replayed state, recomputes direct-coil JAX NESTOR
+   ``bsqvac`` on the resampled boundary, and replays the second accepted update
+   against the production trace.
+4. Kept the claim intentionally scoped: this is a value-parity bridge across
+   two accepted states with boundary resampling. The production boundary sampler
+   is still host/NumPy, so this is not yet a full nonlinear-loop VJP.
+
+Results obtained:
+
+1. `python -m ruff check tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+   passed.
+2. `python -m py_compile tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+   passed.
+3. `python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state -rx`
+   passed: 1 passed in 15.17 s.
+4. `python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py tests/test_free_boundary_coil_provider_forward.py -rx`
+   passed: 21 passed, 1 skipped in 61.84 s.
+
+Best next steps:
+
+1. Commit and push this two-step value-parity bridge, then watch CI.
+2. Next true phase-2 implementation target: a JAX-visible accepted-boundary
+   sampler for the VMEC state coefficients, so the second-step boundary
+   resampling can move from value parity to AD-vs-FD.
+3. Once the sampler is JAX-visible, promote two-step replay to a mixed
+   current/Fourier-geometry directional derivative check.
+
+Need from user:
+
+Nothing now.
+
 ### 2026-05-29 PR CI and residual-metric performance triage
 
 Steps taken:
