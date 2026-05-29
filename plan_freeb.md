@@ -233,6 +233,12 @@ Steps taken:
     projected-mode AD-vs-central-FD gates through the same reusable helper.
     This keeps phase-2 validation semantics identical for scalar controls and
     full `CoilFieldParams` pytrees.
+88. Triaged the post-merge py3.10 CI failure from the latest main performance
+    changes and patched the concrete regressions locally: traced implicit
+    residual callbacks no longer convert captured `state0` arrays on the host,
+    non-JIT-pure objective cotangent hooks fall back cleanly, short `ptau`
+    kernels no longer trace empty reductions, and R/Z preconditioner matrix
+    assembly no longer JITs `SimpleNamespace` containers as dynamic arguments.
 
 ### 2026-05-27 Free-boundary beta-scan bootstrap-current preconditioner
 

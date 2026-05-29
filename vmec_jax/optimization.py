@@ -3391,9 +3391,30 @@ class FixedBoundaryExactOptimizer:
                 def _objective_value_and_cotangent_helper(packed_state_arg):
                     return objective_cotangent_factory(packed_state_arg, self._layout)
 
-                helper_cache = {"objective_value_and_cotangent": _objective_value_and_cotangent_helper}
+                helper_cache = {
+                    "objective_value_and_cotangent": _objective_value_and_cotangent_helper,
+                    "jitted": True,
+                }
                 self._discrete_jacobian_helper_cache[helper_key] = helper_cache
-            cost, final_cotangent = helper_cache["objective_value_and_cotangent"](packed_final)
+            try:
+                cost, final_cotangent = helper_cache["objective_value_and_cotangent"](packed_final)
+            except Exception:
+                if not bool(helper_cache.get("jitted", False)):
+                    raise
+                # Some test/user objective hooks include host-side diagnostics
+                # (for example numpy assertions) and are therefore not JIT-pure.
+                # Keep the fast path for JAX-native hooks, but fall back to the
+                # original callable instead of making exact-gradient callbacks
+                # unusable for diagnostic wrappers.
+                helper_cache = {
+                    "objective_value_and_cotangent": lambda packed_state_arg: objective_cotangent_factory(
+                        packed_state_arg,
+                        self._layout,
+                    ),
+                    "jitted": False,
+                }
+                self._discrete_jacobian_helper_cache[helper_key] = helper_cache
+                cost, final_cotangent = helper_cache["objective_value_and_cotangent"](packed_final)
         else:
             residuals = self._residuals_fn(state)
             residuals = _jnp.asarray(residuals, dtype=_jnp.float64)
