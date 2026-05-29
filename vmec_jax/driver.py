@@ -746,6 +746,58 @@ def _copy_final_force_payload(result_i: SolveVmecResidualResult, source_i) -> So
     return result_i
 
 
+def _aggregate_stage_chunk_timing(results_i: list[SolveVmecResidualResult]) -> dict:
+    """Combine per-chunk timing dictionaries for one logical VMEC stage."""
+
+    timings: list[dict] = []
+    for result_i in results_i:
+        try:
+            timing_i = result_i.diagnostics.get("timing", {})
+        except Exception:
+            timing_i = {}
+        if isinstance(timing_i, dict) and timing_i:
+            timings.append(timing_i)
+    if not timings:
+        return {}
+
+    aggregate: dict[str, object] = dict(timings[-1])
+    sum_keys: set[str] = set()
+    for timing_i in timings:
+        for key, value in timing_i.items():
+            if key.endswith("_per_iter_s") or key.endswith("_first_s"):
+                continue
+            if key.endswith("_s") or key.endswith("_calls") or key == "iterations":
+                try:
+                    float(value)
+                except Exception:
+                    continue
+                sum_keys.add(str(key))
+
+    for key in sum_keys:
+        vals: list[float] = []
+        for timing_i in timings:
+            try:
+                vals.append(float(timing_i.get(key, 0.0)))
+            except Exception:
+                vals.append(0.0)
+        total = float(np.sum(vals))
+        if key.endswith("_calls") or key == "iterations":
+            aggregate[key] = int(round(total))
+        else:
+            aggregate[key] = total
+
+    iterations = max(int(aggregate.get("iterations", 0)), 1)
+    for key, value in list(aggregate.items()):
+        if key.endswith("_s") and not key.endswith("_per_iter_s") and not key.endswith("_first_s"):
+            aggregate[f"{key[:-2]}_per_iter_s"] = float(value) / float(iterations)
+    aggregate["chunk_count"] = int(len(timings))
+    aggregate["chunk_solve_total_s"] = np.asarray(
+        [float(t.get("solve_total_s", np.nan)) for t in timings],
+        dtype=float,
+    )
+    return aggregate
+
+
 def _merge_stage_chunk_results(
     results_i: list[SolveVmecResidualResult],
     *,
@@ -776,6 +828,9 @@ def _merge_stage_chunk_results(
         [int(r.n_iter) + 1 for r in results_i],
         dtype=int,
     )
+    timing = _aggregate_stage_chunk_timing(results_i)
+    if timing:
+        diag["timing"] = timing
     out = SolveVmecResidualResult(
         state=last.state,
         n_iter=int(sum(int(r.n_iter) + 1 for r in results_i) - 1),

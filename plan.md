@@ -1345,11 +1345,14 @@ Defer beyond the current cycle:
   explicit JAX GPU platform requests and `solver_device="gpu"` still enable the
   accelerator cache path before solve compilation.
 - 2026-05-29: Added per-stage multigrid wall-time diagnostics to the driver and
-  fixed-boundary profiler. The local finite-beta QH CPU profile now reports the
-  two stage walls (`~5.2 s`, `~20.9 s`) separately from final-stage in-loop
-  timing (`~11.9 s`). Disabling explicit JIT precompile regressed total wall
-  time (`~29.2 s`), so the remaining cold CPU target is compile/setup reuse and
-  shape-stable stage compilation rather than turning precompile off.
+  fixed-boundary profiler, then fixed chunked-stage accounting so accelerated
+  monitor chunks are summed as one logical stage. The local finite-beta QH CPU
+  profile now reports the two stage walls (`~5.1 s`, `~20.5 s`) separately
+  from the aggregated stage solver-loop timing (`~20.45 s` for the final
+  stage). Disabling explicit JIT precompile regressed total wall time
+  (`~29.2 s`), so the remaining cold CPU target is the compiled transform/
+  preconditioner work inside the VMEC iteration loop plus shape-stable reuse,
+  not a missing WOUT or driver-side staging cost.
 - 2026-05-17: Tightened the CLI fixed-boundary finish policy for explicit
   low-budget runs. If a caller supplies `max_iter`, all accelerated/parity
   finish attempts combined are capped at `2 * max_iter` and report

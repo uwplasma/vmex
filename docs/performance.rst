@@ -396,13 +396,15 @@ read as a mixed result rather than a broad VMEC2000 speedup claim:
 
 **26. Multigrid profiles expose per-stage wall time**
   ``profile_fixed_boundary.py`` now records multigrid stage wall time and
-  per-stage solver-loop timing in diagnostics.  This separates actual
-  iteration cost from cold JAX setup/compilation cost.  On the local finite-beta
-  QH case, the two CPU stages measured about ``5.2 s`` and ``20.9 s`` wall
-  time, while the final-stage in-loop solver timing was about ``11.9 s``.  A
+  per-stage solver-loop timing in diagnostics.  Chunked accelerated stages are
+  aggregated before reporting so stage wall time and VMEC-loop timing are
+  comparable.  On the local finite-beta QH case, the two CPU stages measured
+  about ``5.1 s`` and ``20.5 s`` wall time, while the aggregated final-stage
+  solver-loop timing was about ``20.45 s``.  A
   ``VMEC_JAX_JIT_PRECOMPILE=0`` probe was slower (``29.2 s`` total), so the
-  remaining cold-CPU target is compile/setup reuse rather than disabling
-  explicit precompile.
+  remaining cold-CPU target is compiled transform/preconditioner work inside
+  the VMEC iteration loop plus shape-stable reuse, not WOUT output or
+  driver-side staging overhead.
 
 May 2026 policy validation snapshot
 -----------------------------------
