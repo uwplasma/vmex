@@ -1386,156 +1386,131 @@ def _toy_coil_projected_mode_fixed_point_response(
     return solved["objective"]
 
 
+def _assert_scalar_directional_check(objective, *, eps, rtol, min_abs):
+    """Run the reusable AD-vs-FD gate for a scalar control parameter."""
+
+    from vmec_jax._compat import jnp
+
+    check = pytree_directional_derivative_check_jax(
+        objective,
+        jnp.asarray(0.0, dtype=float),
+        jnp.asarray(1.0, dtype=float),
+        eps=eps,
+    )
+    assert abs(float(check["exact_directional"])) > min_abs
+    np.testing.assert_allclose(check["exact_directional"], check["fd_directional"], rtol=rtol, atol=1.0e-10)
+
+
 def test_dense_vacuum_adjoint_chain_wrt_coil_current_matches_finite_difference():
     """Validate a direct-coil field feeding an implicit vacuum solve."""
 
     pytest.importorskip("jax")
-    from vmec_jax._compat import jax
 
     enable_x64(True)
-
-    exact = jax.grad(lambda scale: _toy_coil_vacuum_response(current_scale=scale))(0.0)
-    eps = 1.0e-4
-    fd = (
-        _toy_coil_vacuum_response(current_scale=eps)
-        - _toy_coil_vacuum_response(current_scale=-eps)
-    ) / (2.0 * eps)
-
-    assert abs(float(exact)) > 1.0e-8
-    np.testing.assert_allclose(exact, fd, rtol=2.0e-6, atol=1.0e-10)
+    _assert_scalar_directional_check(
+        lambda scale: _toy_coil_vacuum_response(current_scale=scale),
+        eps=1.0e-4,
+        rtol=2.0e-6,
+        min_abs=1.0e-8,
+    )
 
 
 def test_dense_vacuum_adjoint_chain_wrt_coil_geometry_matches_finite_difference():
     """Validate the same chain for a Fourier curve coefficient perturbation."""
 
     pytest.importorskip("jax")
-    from vmec_jax._compat import jax
 
     enable_x64(True)
-
-    exact = jax.grad(lambda shift: _toy_coil_vacuum_response(radius_shift=shift))(0.0)
-    eps = 1.0e-4
-    fd = (
-        _toy_coil_vacuum_response(radius_shift=eps)
-        - _toy_coil_vacuum_response(radius_shift=-eps)
-    ) / (2.0 * eps)
-
-    assert abs(float(exact)) > 1.0e-8
-    np.testing.assert_allclose(exact, fd, rtol=2.0e-6, atol=1.0e-10)
+    _assert_scalar_directional_check(
+        lambda shift: _toy_coil_vacuum_response(radius_shift=shift),
+        eps=1.0e-4,
+        rtol=2.0e-6,
+        min_abs=1.0e-8,
+    )
 
 
 def test_dense_nonlinear_adjoint_chain_wrt_coil_current_matches_finite_difference():
     """Validate direct-coil controls through a nonlinear implicit root."""
 
     pytest.importorskip("jax")
-    from vmec_jax._compat import jax
 
     enable_x64(True)
-
-    exact = jax.grad(lambda scale: _toy_coil_nonlinear_response(current_scale=scale))(0.0)
-    eps = 1.0e-4
-    fd = (
-        _toy_coil_nonlinear_response(current_scale=eps)
-        - _toy_coil_nonlinear_response(current_scale=-eps)
-    ) / (2.0 * eps)
-
-    assert abs(float(exact)) > 1.0e-8
-    np.testing.assert_allclose(exact, fd, rtol=5.0e-6, atol=1.0e-10)
+    _assert_scalar_directional_check(
+        lambda scale: _toy_coil_nonlinear_response(current_scale=scale),
+        eps=1.0e-4,
+        rtol=5.0e-6,
+        min_abs=1.0e-8,
+    )
 
 
 def test_dense_nonlinear_adjoint_chain_wrt_coil_geometry_matches_finite_difference():
     """Validate a coil Fourier perturbation through a nonlinear implicit root."""
 
     pytest.importorskip("jax")
-    from vmec_jax._compat import jax
 
     enable_x64(True)
-
-    exact = jax.grad(lambda shift: _toy_coil_nonlinear_response(radius_shift=shift))(0.0)
-    eps = 1.0e-4
-    fd = (
-        _toy_coil_nonlinear_response(radius_shift=eps)
-        - _toy_coil_nonlinear_response(radius_shift=-eps)
-    ) / (2.0 * eps)
-
-    assert abs(float(exact)) > 1.0e-8
-    np.testing.assert_allclose(exact, fd, rtol=5.0e-6, atol=1.0e-10)
+    _assert_scalar_directional_check(
+        lambda shift: _toy_coil_nonlinear_response(radius_shift=shift),
+        eps=1.0e-4,
+        rtol=5.0e-6,
+        min_abs=1.0e-8,
+    )
 
 
 def test_dense_fixed_point_direct_coil_loop_wrt_current_matches_finite_difference():
     """Validate a miniature complete free-boundary fixed-point coil loop."""
 
     pytest.importorskip("jax")
-    from vmec_jax._compat import jax
 
     enable_x64(True)
-
-    exact = jax.grad(lambda scale: _toy_coil_free_boundary_fixed_point_response(current_scale=scale))(0.0)
-    eps = 1.0e-4
-    fd = (
-        _toy_coil_free_boundary_fixed_point_response(current_scale=eps)
-        - _toy_coil_free_boundary_fixed_point_response(current_scale=-eps)
-    ) / (2.0 * eps)
-
-    assert abs(float(exact)) > 1.0e-9
-    np.testing.assert_allclose(exact, fd, rtol=8.0e-6, atol=1.0e-10)
+    _assert_scalar_directional_check(
+        lambda scale: _toy_coil_free_boundary_fixed_point_response(current_scale=scale),
+        eps=1.0e-4,
+        rtol=8.0e-6,
+        min_abs=1.0e-9,
+    )
 
 
 def test_dense_fixed_point_direct_coil_loop_wrt_geometry_matches_finite_difference():
     """Validate the fixed-point loop for one coil Fourier geometry coefficient."""
 
     pytest.importorskip("jax")
-    from vmec_jax._compat import jax
 
     enable_x64(True)
-
-    exact = jax.grad(lambda shift: _toy_coil_free_boundary_fixed_point_response(radius_shift=shift))(0.0)
-    eps = 1.0e-4
-    fd = (
-        _toy_coil_free_boundary_fixed_point_response(radius_shift=eps)
-        - _toy_coil_free_boundary_fixed_point_response(radius_shift=-eps)
-    ) / (2.0 * eps)
-
-    assert abs(float(exact)) > 1.0e-9
-    np.testing.assert_allclose(exact, fd, rtol=8.0e-6, atol=1.0e-10)
+    _assert_scalar_directional_check(
+        lambda shift: _toy_coil_free_boundary_fixed_point_response(radius_shift=shift),
+        eps=1.0e-4,
+        rtol=8.0e-6,
+        min_abs=1.0e-9,
+    )
 
 
 def test_dense_fixed_point_projected_mode_loop_wrt_current_matches_finite_difference():
     """Validate moving-boundary direct-coil fixed point through mode response."""
 
     pytest.importorskip("jax")
-    from vmec_jax._compat import jax
 
     enable_x64(True)
-
-    exact = jax.grad(lambda scale: _toy_coil_projected_mode_fixed_point_response(current_scale=scale))(0.0)
-    eps = 1.0e-4
-    fd = (
-        _toy_coil_projected_mode_fixed_point_response(current_scale=eps)
-        - _toy_coil_projected_mode_fixed_point_response(current_scale=-eps)
-    ) / (2.0 * eps)
-
-    assert abs(float(exact)) > 1.0e-9
-    np.testing.assert_allclose(exact, fd, rtol=1.0e-5, atol=1.0e-10)
+    _assert_scalar_directional_check(
+        lambda scale: _toy_coil_projected_mode_fixed_point_response(current_scale=scale),
+        eps=1.0e-4,
+        rtol=1.0e-5,
+        min_abs=1.0e-9,
+    )
 
 
 def test_dense_fixed_point_projected_mode_loop_wrt_geometry_matches_finite_difference():
     """Validate moving-boundary fixed point for one coil Fourier coefficient."""
 
     pytest.importorskip("jax")
-    from vmec_jax._compat import jax
 
     enable_x64(True)
-
-    exact = jax.grad(lambda shift: _toy_coil_projected_mode_fixed_point_response(radius_shift=shift))(0.0)
-    eps = 1.0e-4
-    fd = (
-        _toy_coil_projected_mode_fixed_point_response(radius_shift=eps)
-        - _toy_coil_projected_mode_fixed_point_response(radius_shift=-eps)
-    ) / (2.0 * eps)
-
-    assert abs(float(exact)) > 1.0e-9
-    np.testing.assert_allclose(exact, fd, rtol=1.0e-5, atol=1.0e-10)
+    _assert_scalar_directional_check(
+        lambda shift: _toy_coil_projected_mode_fixed_point_response(radius_shift=shift),
+        eps=1.0e-4,
+        rtol=1.0e-5,
+        min_abs=1.0e-9,
+    )
 
 
 def test_projected_mode_fixed_point_objective_exposes_components():

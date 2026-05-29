@@ -229,6 +229,10 @@ Steps taken:
     the reusable pytree AD-vs-FD helper, keeping the mixed current/geometry
     directional derivative as an optimizer-facing validation instead of
     test-local glue.
+87. Routed the scalar direct-coil vacuum, nonlinear-root, fixed-point, and
+    projected-mode AD-vs-central-FD gates through the same reusable helper.
+    This keeps phase-2 validation semantics identical for scalar controls and
+    full `CoilFieldParams` pytrees.
 
 ### 2026-05-27 Free-boundary beta-scan bootstrap-current preconditioner
 
