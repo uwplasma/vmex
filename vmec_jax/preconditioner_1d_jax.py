@@ -12,6 +12,7 @@ from typing import Any
 import os
 import functools
 from functools import partial
+from types import SimpleNamespace
 
 from ._compat import jax, jnp, jit, has_jax
 from .vmec_tomnsp import TomnspsRZL
@@ -76,6 +77,17 @@ def clear_preconditioner_jit_caches() -> None:
     """Drop local preconditioner executable caches to limit late-run retention."""
     _LAMBDA_PRECOND_JIT_CACHE.clear()
     _make_rz_preconditioner_apply_jit.cache_clear()
+
+
+def _contains_namespace_leaf(value: Any) -> bool:
+    """Return True for test/lightweight namespace trees that JAX cannot abstract."""
+    if isinstance(value, SimpleNamespace):
+        return True
+    if isinstance(value, dict):
+        return any(_contains_namespace_leaf(item) for item in value.values())
+    if isinstance(value, (tuple, list)):
+        return any(_contains_namespace_leaf(item) for item in value)
+    return False
 
 
 def _sqrt_profiles_from_ns(ns: int, *, dtype) -> tuple[Any, Any]:
@@ -301,6 +313,21 @@ def lambda_preconditioner_cached(
             return_debug=return_debug,
             r0scale=r0scale,
         )
+    if _contains_namespace_leaf(bc):
+        # Newer JAX releases reject SimpleNamespace as a dynamic argument before
+        # tracing. Production callers use registered data containers, while
+        # tests and small diagnostics use namespaces; keep those on the exact
+        # Python/JAX-array algebra path without caching a compiled executable.
+        return lambda_preconditioner(
+            bc=bc,
+            trig=trig,
+            s=s,
+            cfg=cfg,
+            damping_factor=damping_factor,
+            return_faclam=return_faclam,
+            return_debug=return_debug,
+            r0scale=r0scale,
+        )
 
     key = (
         int(cfg.mpol),
@@ -463,8 +490,7 @@ def _resolve_tridi_flags(*, use_precomputed: bool | None, use_lax_tridi: bool | 
     return bool(use_precomputed), bool(use_lax_tridi)
 
 
-@partial(jit, static_argnames=("cfg", "jmax_override", "use_precomputed", "use_lax_tridi"))
-def _assemble_rz_preconditioner_matrices_impl(
+def _assemble_rz_preconditioner_matrices_impl_unjitted(
     *,
     arm,
     ard,
@@ -636,6 +662,54 @@ def _assemble_rz_preconditioner_matrices_impl(
     return mats, jmin, int(ns_f)
 
 
+_assemble_rz_preconditioner_matrices_impl_jit = partial(
+    jit,
+    static_argnames=("cfg", "jmax_override", "use_precomputed", "use_lax_tridi"),
+)(_assemble_rz_preconditioner_matrices_impl_unjitted)
+
+
+def _assemble_rz_preconditioner_matrices_impl(
+    *,
+    arm,
+    ard,
+    brm,
+    brd,
+    azm,
+    azd,
+    bzm,
+    bzd,
+    cxd,
+    delta_s,
+    cfg,
+    jmax_override: int | None = None,
+    use_precomputed: bool | None = None,
+    use_lax_tridi: bool | None = None,
+) -> tuple[dict[str, Any], Any, int]:
+    """Assemble R/Z preconditioner matrices, JITing only hashable configs."""
+    try:
+        hash(cfg)
+    except TypeError:
+        assemble = _assemble_rz_preconditioner_matrices_impl_unjitted
+    else:
+        assemble = _assemble_rz_preconditioner_matrices_impl_jit
+    return assemble(
+        arm=arm,
+        ard=ard,
+        brm=brm,
+        brd=brd,
+        azm=azm,
+        azd=azd,
+        bzm=bzm,
+        bzd=bzd,
+        cxd=cxd,
+        delta_s=delta_s,
+        cfg=cfg,
+        jmax_override=jmax_override,
+        use_precomputed=use_precomputed,
+        use_lax_tridi=use_lax_tridi,
+    )
+
+
 def _rz_preconditioner_matrices_impl(
     *,
     bc,
@@ -698,16 +772,7 @@ def _rz_preconditioner_matrices_impl(
         delta_s=delta_s,
         ns_full=ns,
     )
-    assemble = _assemble_rz_preconditioner_matrices_impl
-    try:
-        hash(cfg)
-    except TypeError:
-        # Newer JAX releases reject unhashable static args before tracing.
-        # Production configs are hashable, but tests and lightweight callers
-        # may use SimpleNamespace. In that case, bypass only this JIT wrapper;
-        # all array algebra remains identical.
-        assemble = getattr(_assemble_rz_preconditioner_matrices_impl, "__wrapped__", assemble)
-    return assemble(
+    return _assemble_rz_preconditioner_matrices_impl(
         arm=arm,
         ard=ard,
         brm=brm,
