@@ -1431,6 +1431,9 @@ def test_run_fixed_boundary_cli_budgeted_multigrid_path(monkeypatch, tmp_path):
     assert np.asarray(diag["cli_accelerated_stage_ns"]).tolist() == [5, 9, 13]
     assert np.asarray(diag["cli_accelerated_stage_niter"]).tolist() == [27, 18, 100]
     assert np.asarray(diag["cli_accelerated_stage_modes"]).tolist() == ["accelerated", "accelerated", "accelerated"]
+    assert np.asarray(diag["cli_accelerated_stage_wall_s"]).shape == (3,)
+    assert np.all(np.asarray(diag["cli_accelerated_stage_wall_s"]) >= 0.0)
+    assert np.asarray(diag["cli_accelerated_stage_solve_total_s"]).shape == (3,)
     assert diag["cli_accelerated_final_stage_budget"] == 100
     assert diag["cli_fixed_boundary_initial_policy"] == "budgeted_multigrid"
     assert np.asarray(diag["cli_fixed_boundary_finish_budgets"]).tolist() == [100]
@@ -2030,6 +2033,9 @@ def test_run_fixed_boundary_cli_current_driven_nonaxis_uses_direct_multigrid(mon
         "accelerated",
         "accelerated",
     ]
+    assert np.asarray(diag["multigrid_stage_wall_s"]).shape == (3,)
+    assert np.all(np.asarray(diag["multigrid_stage_wall_s"]) >= 0.0)
+    assert np.asarray(diag["multigrid_stage_solve_total_s"]).shape == (3,)
 
 
 def test_run_fixed_boundary_cli_two_stage_current_driven_nonaxis_uses_multigrid(monkeypatch, tmp_path):

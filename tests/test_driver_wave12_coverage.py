@@ -220,6 +220,9 @@ def test_cli_staged_followup_records_policy_and_beats_single_grid(monkeypatch, t
     assert diag["cli_fixed_boundary_staged_followup_policy"] == "input_multigrid"
     np.testing.assert_array_equal(diag["cli_fixed_boundary_staged_followup_ns"], [3, 5])
     assert np.asarray(diag["cli_fixed_boundary_staged_followup_modes"]).tolist() == ["parity", "accelerated"]
+    assert np.asarray(diag["cli_fixed_boundary_staged_followup_wall_s"]).shape == (2,)
+    assert np.all(np.asarray(diag["cli_fixed_boundary_staged_followup_wall_s"]) >= 0.0)
+    assert np.asarray(diag["cli_fixed_boundary_staged_followup_solve_total_s"]).shape == (2,)
     assert diag["converged"] is True
 
 
