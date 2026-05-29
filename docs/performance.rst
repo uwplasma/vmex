@@ -2119,10 +2119,11 @@ import-time cache setup by setting both ``jax_compilation_cache_dir`` and the
 GPU XLA autotune cache option before first solve compilation.  A post-fix
 ``office`` check showed that this alignment is necessary for correct default
 configuration, but not sufficient to make fresh-process GPU solves reuse the
-compiled scan executable on this stack: repeated QH warm-start processes
-measured ``16.2 s`` and ``16.1 s``, while repeated finite-beta QH processes
-measured ``55.7 s`` and ``55.7 s``.  The dominant term remains
-``scan_device_dispatch_s`` (about ``12.5 s`` for QH warm start and ``36.6 s``
+compiled scan executable on this stack.  Re-running from the checked-out source
+tree with ``PYTHONPATH=$PWD`` gave repeated QH warm-start processes of
+``16.3 s`` and ``16.2 s``, and repeated finite-beta QH processes of
+``55.9 s`` and ``55.5 s``.  The dominant term remains
+``scan_device_dispatch_s`` (about ``12.5 s`` for QH warm start and ``41.9 s``
 for finite beta), so the next GPU lane is persistent executable reuse or
 reducing scan compile/dispatch cost rather than more driver-side cache toggles.
 

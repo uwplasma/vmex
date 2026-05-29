@@ -1348,11 +1348,12 @@ Defer beyond the current cycle:
   setting `jax_compilation_cache_dir` and the GPU XLA autotune cache option, so
   GPU users do not need environment variables to get the intended persistent
   cache behavior. A post-push `office` rerun showed this fixes configuration
-  parity but not fresh-process executable reuse on the current stack: repeated
-  QH warm-start GPU processes stayed at `16.2/16.1 s`, and repeated finite-beta
-  QH GPU processes stayed at `55.7/55.7 s`, dominated by
-  `scan_device_dispatch_s`. The next GPU blocker is persistent scan executable
-  reuse or reducing scan compile/dispatch cost, not additional cache toggles.
+  parity but not fresh-process executable reuse on the current stack. The
+  valid checked-out-source profile (`PYTHONPATH=$PWD`) kept repeated QH
+  warm-start GPU processes at `16.3/16.2 s` and finite-beta QH GPU processes at
+  `55.9/55.5 s`, dominated by `scan_device_dispatch_s`. The next GPU blocker is
+  persistent scan executable reuse or reducing scan compile/dispatch cost, not
+  additional cache toggles.
 - 2026-05-29: Added per-stage multigrid wall-time diagnostics to the driver and
   fixed-boundary profiler, then fixed chunked-stage accounting so accelerated
   monitor chunks are summed as one logical stage. Scan-stage `scan_total_s`
