@@ -12,12 +12,16 @@ from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
+import sys
 from typing import Any
 import time
 
 import numpy as np
 
 _PROCESS_START = time.perf_counter()
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 # Match vmec_jax's import-time defaults before this diagnostics tool imports
 # JAX directly.  Otherwise persistent-cache hits can emit repeated harmless
