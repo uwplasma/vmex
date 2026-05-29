@@ -248,6 +248,12 @@ Steps taken:
     conflicts by preserving the traced-callback dtype fix and diagnostic
     objective-cotangent fallback, then re-ran the focused post-merge regression
     checks.
+91. Fixed the remaining fast-test CI failure in
+    `lambda_preconditioner_cached`: host parity fixtures pass
+    `SimpleNamespace` boundary containers that are not JAX pytrees, so the
+    cache now falls back to the validated non-JIT lambda preconditioner for
+    non-array pytrees. The failing preconditioner tests and broader merged-tree
+    regression batch passed locally (`161 passed, 1 skipped`).
 
 ### 2026-05-27 Free-boundary beta-scan bootstrap-current preconditioner
 
