@@ -3293,7 +3293,15 @@ class FixedBoundaryExactOptimizer:
 
                 helper_cache = {"objective_value_and_cotangent": _objective_value_and_cotangent_helper}
                 self._discrete_jacobian_helper_cache[helper_key] = helper_cache
-            cost, final_cotangent = helper_cache["objective_value_and_cotangent"](packed_final)
+            try:
+                cost, final_cotangent = helper_cache["objective_value_and_cotangent"](packed_final)
+            except getattr(jax.errors, "TracerArrayConversionError", Exception):
+                # Custom/test hooks may contain host-side NumPy assertions or
+                # diagnostics. Keep the fast jitted helper for pure-JAX hooks,
+                # but fall back to the Python callable when newer JAX refuses
+                # host conversion during tracing.
+                helper_cache["objective_value_and_cotangent"] = objective_cotangent_factory
+                cost, final_cotangent = objective_cotangent_factory(packed_final, self._layout)
         else:
             residuals = self._residuals_fn(state)
             residuals = _jnp.asarray(residuals, dtype=_jnp.float64)

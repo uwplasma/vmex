@@ -175,6 +175,8 @@ def _ptau_minmax_from_k_jax(k: Any, *, s: Any, pshalf_from_s_jax: Any):
             + pzu_odd[:-1] * pr1_odd[:-1]
             + (pzu_even[1:] * pr1_odd[1:] + pzu_even[:-1] * pr1_odd[:-1]) / psh_safe
         )
+        if int(ptau.size) == 0:
+            return nan_val, nan_val
         return jnp.min(ptau), jnp.max(ptau)
 
     def _nan(_):

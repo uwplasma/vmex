@@ -1071,16 +1071,9 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
 
     implicit = implicit or ImplicitFixedBoundaryOptions()
     state0_c = _stop_gradient_tree(state0)
-    if state0_host is None:
-        state0_host = VMECState(
-            layout=state0_c.layout,
-            Rcos=np.asarray(jax.device_get(state0_c.Rcos)),
-            Rsin=np.asarray(jax.device_get(state0_c.Rsin)),
-            Zcos=np.asarray(jax.device_get(state0_c.Zcos)),
-            Zsin=np.asarray(jax.device_get(state0_c.Zsin)),
-            Lcos=np.asarray(jax.device_get(state0_c.Lcos)),
-            Lsin=np.asarray(jax.device_get(state0_c.Lsin)),
-        )
+    state_dtype = np.dtype(jnp.asarray(state0_c.Rcos).dtype)
+    if state0_host is not None:
+        state_dtype = np.asarray(state0_host.Rcos).dtype
     idx00 = _mode00_index(static.modes)
     signgs_i = int(signgs)
 
@@ -1331,7 +1324,7 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
             static,
             boundary_host,
             indata,
-            dtype=np.asarray(state0_host.Rcos).dtype,
+            dtype=state_dtype,
             vmec_project=True,
         )
         geom0 = eval_geom(state_init, static)
@@ -1363,7 +1356,7 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
             jit_forces="auto",
             use_scan=False,
         )
-        zero_m1 = _zero_m1_zforce_flag_from_result(res, dtype=state0_host.Rcos.dtype)
+        zero_m1 = _zero_m1_zforce_flag_from_result(res, dtype=state_dtype)
         return np.asarray(pack_state(res.state)), zero_m1
 
     def _is_traced(*xs):
