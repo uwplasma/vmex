@@ -626,10 +626,12 @@ update:
   verification on `office` reached a controlled timeout with durable partial
   checkpoints and metrics instead of the previous missing-`input.final` crash.
   Final seed-robust QI promotion and GPU-production artifacts remain open.
-  The current CI runtime target is to keep the same 95% required coverage gate
-  but run the fast-test matrix with six pytest workers and one separate CLI
-  smoke, building on the local 3:07 coverage trial instead of the previous
-  18:53 py3.11 CI lane.
+  The current CI runtime target is to keep the same 95% required coverage gate,
+  keep the CLI smoke isolated from the Python-version matrix, and run the
+  fast-test matrix with the last stable four-worker pytest-xdist fanout.
+  A six-worker candidate passed locally in 2:51 but was too memory-aggressive
+  for the hosted py3.11 CI runner, which cancelled the test process before
+  completion.
 
 Release-critical lanes requested in this push (continuation, exact
 accepted-point output, VMEC parity/physics gates, and docs/release hygiene) are
