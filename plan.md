@@ -501,10 +501,11 @@ update:
   mode-2 exact Jacobian dropped from about `42.0 s` to about `18.0 s`, with
   tape replay dropping from about `22.2 s` to about `5.3 s`. Production
   fixed-boundary auto policy now uses the VMEC-control non-scan loop on CPU and
-  GPU because May 2026 `office` profiles showed converged GPU non-scan solves
-  faster than scan across QH, QA, QI, and LASYM examples. The older fused
-  residual-projected replay experiment was rejected because it was neutral on
-  non-LASYM QH and slower on chunked LASYM CPU callbacks, but the current
+  scan on GPU/CUDA/ROCm for ordinary raw fixed-boundary solves; the older May
+  2026 GPU non-scan result was superseded after the scan-cache/preconditioner
+  path was re-profiled. The older fused residual-projected replay experiment
+  was rejected because it was neutral on non-LASYM QH and slower on chunked
+  LASYM CPU callbacks, but the current
   JVP-only/basepoint-carry projected replay path is now the GPU default for
   stellarator-symmetric callbacks with at least 24 columns after a bounded QH
   mode-2 profile showed a small win. The
@@ -1330,6 +1331,12 @@ Defer beyond the current cycle:
   `164.57 -> 140.69 s`, and QI `108.67 -> 50.78 s`. The public API/CLI auto
   policy and fixed-boundary profiler default now match this non-scan production
   policy; explicit fast/scan modes remain available for experiments.
+- 2026-05-29: Rechecked current `main` (`c45d353`) on `office` with JAX 0.6.2
+  and CUDA after the later scan-cache/preconditioner work. The raw QH
+  warm-start GPU profile now favors scan (`10.64 s`) over forced non-scan
+  (`15.59 s`), and finite-beta QH scan converged in `3.80 s`. This supersedes
+  the May 17 raw fixed-boundary GPU default evidence; CPU remains non-scan, and
+  exact optimization callbacks retain their separate replay/chunking policy.
 - 2026-05-17: Tightened the CLI fixed-boundary finish policy for explicit
   low-budget runs. If a caller supplies `max_iter`, all accelerated/parity
   finish attempts combined are capped at `2 * max_iter` and report
