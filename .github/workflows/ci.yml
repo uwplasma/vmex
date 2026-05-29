@@ -58,7 +58,7 @@ jobs:
         run: |
           python -m pip install -U pip
           python -m pip install .
-          python -m pip install pytest pytest-cov
+          python -m pip install pytest pytest-cov pytest-xdist
 
       - name: Console script smoke test
         env:
@@ -100,9 +100,9 @@ jobs:
           JAX_ENABLE_X64: "1"
         run: |
           if [ "${{ matrix.python-version }}" = "3.11" ]; then
-            pytest -q -m "not full and not vmec2000 and not simsopt" --cov=vmec_jax --cov-report=xml --cov-report=term:skip-covered --cov-fail-under=95
+            pytest -q -n 4 -m "not full and not vmec2000 and not simsopt" --cov=vmec_jax --cov-report=xml --cov-report=term:skip-covered --cov-fail-under=95
           else
-            pytest -q -m "not full and not vmec2000 and not simsopt"
+            pytest -q -n 4 -m "not full and not vmec2000 and not simsopt"
           fi
 
       - name: Upload coverage artifact
