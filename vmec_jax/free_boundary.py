@@ -3609,12 +3609,14 @@ def nestor_external_only_step(
         row_sum_zero = _as_int_env("VMEC_JAX_FREEB_VMEC_LIKE_ROW_SUM_ZERO", 1) != 0
         singular_diag_scale = _as_float_env("VMEC_JAX_FREEB_VMEC_LIKE_SINGULAR_DIAG_SCALE", 1.0)
         dense_solve_mode = os.getenv("VMEC_JAX_FREEB_DENSE_SOLVE_MODE", "mode").strip().lower()
+        refresh_operator_on_reuse = bool(reuse_step and not provider_allows_source_reuse)
         try:
             if (
                 not isinstance(cache, NestorVmecLikeCache)
                 or int(cache.ntheta) != int(ntheta)
                 or int(cache.nzeta) != int(nzeta)
                 or not reuse_step
+                or refresh_operator_on_reuse
             ):
                 t_phase = time.perf_counter()
                 cache = _build_vmec_like_cache(
@@ -3700,7 +3702,7 @@ def nestor_external_only_step(
                         )
                         rhs_mode_eff = rhs_mode_eff + np.asarray(bvec_mode_analytic, dtype=float)
                         bvec_time_s += max(0.0, time.perf_counter() - t_phase)
-                    if (not reuse_step) and experimental_fouri_matrix and (grpmn_nonsing is not None):
+                    if ((not reuse_step) or refresh_operator_on_reuse) and experimental_fouri_matrix and (grpmn_nonsing is not None):
                         grpmn_total = np.asarray(grpmn_nonsing, dtype=float)
                         if grpmn_analytic is not None:
                             grpmn_total = grpmn_total + np.asarray(grpmn_analytic, dtype=float)

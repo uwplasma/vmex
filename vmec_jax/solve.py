@@ -13497,6 +13497,7 @@ def solve_fixed_boundary_residual_iter(
                         else _adjoint_trace_array(freeb_bsqvac_half_current)
                     ),
                     "freeb_pres_scale": None if freeb_pres_scale is None else float(freeb_pres_scale),
+                    "freeb_plascur": float(freeb_plascur),
                     "constraint_rcon0": (
                         None if constraint_rcon0_current is None else _adjoint_trace_array(constraint_rcon0_current)
                     ),

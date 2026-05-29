@@ -1087,7 +1087,7 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
     sample = _sample_external_boundary_arrays(
         state=trace["state_pre"],
         static=init.static,
-        plascur=float(result.diagnostics["free_boundary"].get("plascur", 0.0)),
+        plascur=float(trace.get("freeb_plascur", 0.0)),
         external_field_provider_kind="direct_coils",
         external_field_provider_params=base_params,
     )

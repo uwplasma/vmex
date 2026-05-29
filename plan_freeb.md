@@ -2054,6 +2054,12 @@ Steps taken:
    replay gap is upstream in the coil/boundary-to-vacuum reconstruction. On
    the tiny active direct-coil case the JAX-recomputed `bsqvac` differs from
    the traced accepted `bsqvac` by about `4.1e-4` relative RMS.
+4. Added `freeb_plascur` to the accepted adjoint trace so future replays use
+   the per-step plasma-current value rather than a run-final diagnostic value.
+5. Changed direct/non-mgrid provider reuse to refresh geometry-dependent dense
+   NESTOR operators while leaving legacy mgrid reuse unchanged. This is the
+   correct default for direct coils because the sampled boundary geometry and
+   vacuum operator move with the accepted plasma state.
 
 Results:
 
@@ -2062,12 +2068,18 @@ Results:
 2. `python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree -rx`
    passed in the local environment.
 3. PR CI run `26642403449` passed all required jobs on `74dd0f73`.
+4. `python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py tests/test_free_boundary_coil_provider_forward.py -rx`
+   passed locally: 20 passed, 1 skipped.
+5. Resampling the same active trace state with the traced `freeb_plascur`
+   still leaves the `4.1e-4` relative `bsqvac` gap, so the next issue is not
+   plasma-current replay. It remains in the exact trace-state NESTOR/sample
+   reconstruction path.
 
 Next:
 
-1. Tighten the JAX NESTOR parity lane by comparing matching production
-   `scalpot` dumps against the JAX replay for the same trace state and
-   accepted step.
+1. Tighten the JAX NESTOR parity lane by recording enough per-step NESTOR
+   source/operator diagnostics in the adjoint trace to compare matching
+   production `scalpot` data against the JAX replay for the same trace state.
 2. Keep the strict accepted-state replay assertions as a regression guard while
    the upstream NESTOR parity gap is reduced.
 3. Continue GPU performance work only after the new test-only hardening commit
