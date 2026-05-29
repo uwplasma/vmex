@@ -394,6 +394,16 @@ read as a mixed result rather than a broad VMEC2000 speedup claim:
   conservative host preflight.  Set ``VMEC_JAX_SCAN_JIT_PREFLIGHT=0`` or ``1``
   to force either behavior during diagnostics.
 
+**26. Multigrid profiles expose per-stage wall time**
+  ``profile_fixed_boundary.py`` now records multigrid stage wall time and
+  per-stage solver-loop timing in diagnostics.  This separates actual
+  iteration cost from cold JAX setup/compilation cost.  On the local finite-beta
+  QH case, the two CPU stages measured about ``5.2 s`` and ``20.9 s`` wall
+  time, while the final-stage in-loop solver timing was about ``11.9 s``.  A
+  ``VMEC_JAX_JIT_PRECOMPILE=0`` probe was slower (``29.2 s`` total), so the
+  remaining cold-CPU target is compile/setup reuse rather than disabling
+  explicit precompile.
+
 May 2026 policy validation snapshot
 -----------------------------------
 

@@ -1344,6 +1344,12 @@ Defer beyond the current cycle:
   `CUDA_VISIBLE_DEVICES`/ROCm devices as accelerator intent at import time;
   explicit JAX GPU platform requests and `solver_device="gpu"` still enable the
   accelerator cache path before solve compilation.
+- 2026-05-29: Added per-stage multigrid wall-time diagnostics to the driver and
+  fixed-boundary profiler. The local finite-beta QH CPU profile now reports the
+  two stage walls (`~5.2 s`, `~20.9 s`) separately from final-stage in-loop
+  timing (`~11.9 s`). Disabling explicit JIT precompile regressed total wall
+  time (`~29.2 s`), so the remaining cold CPU target is compile/setup reuse and
+  shape-stable stage compilation rather than turning precompile off.
 - 2026-05-17: Tightened the CLI fixed-boundary finish policy for explicit
   low-budget runs. If a caller supplies `max_iter`, all accelerated/parity
   finish attempts combined are capped at `2 * max_iter` and report

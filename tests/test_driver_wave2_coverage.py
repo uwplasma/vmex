@@ -1368,6 +1368,9 @@ def test_accelerated_explicit_stage_monitor_switches_to_parity(monkeypatch, tmp_
     assert diag["accelerated_stage_effective_mode"] == "parity"
     np.testing.assert_array_equal(diag["accelerated_stage_probe_chunk_iters"], [200])
     assert np.asarray(diag["multigrid_stage_modes"]).tolist() == ["accelerated", "parity"]
+    assert np.asarray(diag["multigrid_stage_wall_s"]).shape == (2,)
+    assert np.all(np.asarray(diag["multigrid_stage_wall_s"]) >= 0.0)
+    assert np.asarray(diag["multigrid_stage_solve_total_s"]).shape == (2,)
     assert diag["converged"] is True
 
 
