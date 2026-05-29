@@ -2762,6 +2762,7 @@ def strict_update_one_step_from_state(
     preconditioner_use_lax_tridi: bool | None = None,
     freeb_bsqvac_half=None,
     freeb_pres_scale=None,
+    enforce_edge: bool = True,
 ):
     """Compose the exact QH one-step map from state through accepted update."""
     residual_out = raw_force_residual_from_state(
@@ -2826,6 +2827,7 @@ def strict_update_one_step_from_state(
         limit_update_rms=limit_update_rms,
         need_update_rms=need_update_rms,
         divide_by_scalxc_for_update=divide_by_scalxc_for_update,
+        enforce_edge=enforce_edge,
     )
     return {
         "residual": residual_out,

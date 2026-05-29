@@ -1203,6 +1203,70 @@ def vacuum_boundary_fields_from_cylindrical_jax(
     }
 
 
+def vacuum_boundary_fields_from_mode_coeffs_jax(
+    mode_coeffs: Any,
+    *,
+    basis: dict[str, Any],
+    bu_ext: Any,
+    bv_ext: Any,
+    g_uu: Any,
+    g_uv: Any,
+    g_vv: Any,
+) -> dict[str, Any]:
+    """JAX replay of VMEC vacuum channels from NESTOR mode coefficients.
+
+    This mirrors the production ``_vacuum_channels_from_sample_potvac`` bridge
+    but keeps the calculation transformable for accepted-update gradient tests.
+    ``mode_coeffs`` contains the sine potential coefficients followed by cosine
+    coefficients when ``basis["lasym"]`` is true.
+    """
+
+    pot = jnp.ravel(jnp.asarray(mode_coeffs))
+    mnpd = int(basis["mnpd"])
+    if int(pot.shape[0]) < mnpd:
+        raise ValueError("mode_coeffs_too_small")
+    potsin = pot[:mnpd]
+    if bool(basis["lasym"]) and int(pot.shape[0]) >= 2 * mnpd:
+        potcos = pot[mnpd : 2 * mnpd]
+    else:
+        potcos = jnp.zeros((mnpd,), dtype=pot.dtype)
+
+    xmpot = jnp.asarray(basis["xmpot"], dtype=pot.dtype)
+    n_raw = jnp.asarray(basis["n_raw"], dtype=pot.dtype)
+    nfp = jnp.asarray(float(int(basis["nfp"])), dtype=pot.dtype)
+    cos_phase = jnp.asarray(basis["cos_phase"], dtype=pot.dtype)
+    sin_phase = jnp.asarray(basis["sin_phase"], dtype=pot.dtype)
+
+    potu = cos_phase @ (xmpot * potsin)
+    potv = cos_phase @ ((-n_raw * nfp) * potsin)
+    if bool(basis["lasym"]):
+        potu = potu - (sin_phase @ (xmpot * potcos))
+        potv = potv - (sin_phase @ ((-n_raw * nfp) * potcos))
+
+    bu_ext = jnp.asarray(bu_ext)
+    bv_ext = jnp.asarray(bv_ext)
+    potu = jnp.reshape(potu, bu_ext.shape)
+    potv = jnp.reshape(potv, bv_ext.shape)
+    bu = bu_ext + potu
+    bv = bv_ext + potv
+    g_uu = jnp.asarray(g_uu, dtype=bu.dtype)
+    g_uv = jnp.asarray(g_uv, dtype=bu.dtype)
+    g_vv = jnp.asarray(g_vv, dtype=bu.dtype)
+    det = g_uu * g_vv - g_uv * g_uv
+    det_safe = jnp.where(jnp.abs(det) > 1.0e-30, det, jnp.sign(det + 1.0e-300) * 1.0e-30)
+    bsupu = (g_vv * bu - g_uv * bv) / det_safe
+    bsupv = (g_uu * bv - g_uv * bu) / det_safe
+    bsqvac = 0.5 * (bu * bsupu + bv * bsupv)
+    return {
+        "bu": bu,
+        "bv": bv,
+        "bsupu": bsupu,
+        "bsupv": bsupv,
+        "bsqvac": bsqvac,
+        "det_guv": det,
+    }
+
+
 def direct_coil_boundary_bnormal_rms_jax(
     params: Any,
     *,
