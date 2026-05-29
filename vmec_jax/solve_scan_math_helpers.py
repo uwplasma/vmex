@@ -6,7 +6,7 @@ from typing import Any, NamedTuple
 
 import numpy as np
 
-from ._compat import jax, jnp
+from ._compat import jnp
 
 
 class ScanTauDecision(NamedTuple):
@@ -152,6 +152,8 @@ def _ptau_minmax_from_k_jax(k: Any, *, s: Any, pshalf_from_s_jax: Any):
     )
     ns = jnp.asarray(pru_even).shape[0]
     nan_val = jnp.asarray(jnp.nan, dtype=pru_even.dtype)
+    if int(ns) < 2:
+        return nan_val, nan_val
 
     def _compute(_):
         pshalf = pshalf_from_s_jax(s, dtype=pru_even.dtype)
@@ -177,10 +179,7 @@ def _ptau_minmax_from_k_jax(k: Any, *, s: Any, pshalf_from_s_jax: Any):
         )
         return jnp.min(ptau), jnp.max(ptau)
 
-    def _nan(_):
-        return nan_val, nan_val
-
-    return jax.lax.cond(ns >= 2, _compute, _nan, operand=None)
+    return _compute(None)
 
 
 def _state_jacobian(
