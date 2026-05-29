@@ -622,6 +622,8 @@ def test_gpu_solver_device_enables_default_compilation_cache(
     assert os.environ.get("VMEC_JAX_COMPILATION_CACHE") is None
     assert cache_dirs == [str(tmp_path / "gpu-cache")]
     assert ("jax_enable_compilation_cache", True) in updates
+    assert ("jax_compilation_cache_dir", str(tmp_path / "gpu-cache")) in updates
+    assert ("jax_persistent_cache_enable_xla_caches", "xla_gpu_per_fusion_autotune_cache_dir") in updates
 
 
 def test_dynamic_scan_invalid_env_values_fall_back_and_keep_scan_when_histories_match(

@@ -547,6 +547,7 @@ def test_compilation_cache_setup_uses_configured_cache_dir(monkeypatch, tmp_path
     assert run.state is not None
     assert cache_calls == [str(cache_dir)]
     assert ("jax_enable_compilation_cache", True) in config_calls
+    assert ("jax_compilation_cache_dir", str(cache_dir)) in config_calls
     assert ("jax_persistent_cache_min_compile_time_secs", 0.25) in config_calls
     assert ("jax_persistent_cache_min_entry_size_bytes", 123) in config_calls
     assert ("jax_compilation_cache_max_size", 456) in config_calls
