@@ -49,6 +49,28 @@ def _cache_allowed() -> bool:
         return False
 
 
+def _jit_array_pytree_supported(value: Any) -> bool:
+    """Return whether ``value`` can be passed as a dynamic JAX argument.
+
+    Some test and host-control paths use ``types.SimpleNamespace`` containers
+    for VMEC parity data.  Those are intentionally not registered as pytrees,
+    so treating them as dynamic JIT arguments fails on newer JAX releases.
+    """
+
+    if not has_jax():
+        return False
+    try:
+        leaves = jax.tree_util.tree_leaves(value)
+    except Exception:
+        return False
+    try:
+        for leaf in leaves:
+            jnp.asarray(leaf)
+    except Exception:
+        return False
+    return True
+
+
 def _lambda_precond_cache_limit() -> int:
     raw = os.getenv("VMEC_JAX_PRECOND_CACHE_LIMIT", "16").strip()
     try:
@@ -290,7 +312,7 @@ def lambda_preconditioner_cached(
     if r0scale is None:
         r0scale = float(getattr(trig, "r0scale", 1.0)) if trig is not None else 1.0
     r0scale = float(r0scale)
-    if not has_jax() or (not _cache_allowed()):
+    if not has_jax() or (not _cache_allowed()) or (not _jit_array_pytree_supported(bc)):
         return lambda_preconditioner(
             bc=bc,
             trig=trig,
