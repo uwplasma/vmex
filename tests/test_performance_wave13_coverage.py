@@ -7,7 +7,9 @@ from vmec_jax.performance_hotspot_helpers import (
     exact_parameter_cache_key_fingerprint,
     explain_scan_cache_key_delta,
     replay_timing_breakdown,
+    scan_cache_miss_category_counts,
     scan_cache_key_delta_summary,
+    scan_cache_key_field_names,
 )
 from vmec_jax.solve_scan_planning_helpers import build_vmec2000_scan_cache_key
 
@@ -129,6 +131,21 @@ def test_scan_cache_key_delta_summary_groups_cache_miss_causes():
         "categories": (),
         "category_fields": {},
     }
+
+
+def test_scan_cache_miss_category_counts_identifies_nearest_cached_key():
+    base = _scan_cache_key(max_iter_tail=9, ftol=1.0e-12)
+    unrelated = ("scan_v1", ("static",), ("wout",), ("edge",), 3, 0.1, -1.0, 1.0, 0.5, 0.5, True, True)
+    requested = _scan_cache_key(max_iter_tail=15, ftol=1.0e-10)
+
+    assert scan_cache_key_field_names(base + (7,))[-1] == "seq_len"
+    assert scan_cache_key_field_names(unrelated)[0] == "schema"
+    assert scan_cache_miss_category_counts(requested, []) == {"cold_empty": 1}
+    assert scan_cache_miss_category_counts(requested, [unrelated]) == {"schema": 1}
+
+    counts = scan_cache_miss_category_counts(requested, [unrelated, base])
+
+    assert counts == {"iteration_budget": 1, "tolerance": 1}
 
 
 def test_replay_timing_breakdown_prefers_total_and_falls_back_to_split():

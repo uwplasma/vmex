@@ -2004,6 +2004,14 @@ class FixedBoundaryExactOptimizer:
                 continue
             self._profile_add_counter(f"{profile_prefix}_{suffix}", value)
         self._profile_solver_free_boundary_timing(diagnostics, profile_prefix=profile_prefix)
+        for key, value_raw in sorted(timing.items()):
+            if not (str(key).startswith("scan_runner_cache_miss_category_") and str(key).endswith("_count")):
+                continue
+            try:
+                value = int(value_raw)
+            except Exception:
+                continue
+            self._profile_add_counter(f"{profile_prefix}_{key}", value)
         if unattributed_name is not None:
             self._profile_add(unattributed_name, max(0.0, float(phase_wall_s) - solver_total))
         return solver_total
@@ -2903,13 +2911,15 @@ class FixedBoundaryExactOptimizer:
             except Exception:
                 backend_name = None
         if backend_name in ("gpu", "cuda", "rocm"):
-            # GPU exact replay is launch/transpose dominated.  The tested
-            # 24-DOF QH mode-2 path is fastest unchunked, while the 48-DOF
-            # QH mode-3 path is much faster with two 24-column replay chunks.
-            # Leave explicit env overrides in charge for larger profiling
-            # sweeps until a broader mode/LASYM matrix justifies another step.
+            # GPU exact replay is launch/transpose dominated.  Office A4000
+            # profiles on JAX 0.6.2 showed 8-column replay chunks reduce the
+            # QH mode-2 24-DOF cold/new-point callback wall time materially,
+            # while 48+ DOF cases still favor the older 24-column policy.
+            # Explicit environment overrides remain authoritative.
             if int(n_params) >= 48:
                 return 24
+            if int(n_params) >= 24:
+                return 8
             return None
         if backend_name == "tpu":
             return None
