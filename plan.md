@@ -1,10 +1,10 @@
 # VMEC-JAX Research-Grade Roadmap
 
-Last updated: 2026-05-29
+Last updated: 2026-05-30
 Primary branch: `main`
 Baseline release: `v0.0.14`
-Latest known green `main` CI: `d5fdbff`
-Current candidate: post-`v0.0.14` CI runtime/GPU scan-cache refresh plus free-boundary direct-coil PR #18 refresh
+Latest known green `main` CI: `228683e`
+Current candidate: post-`v0.0.14` scan-cache diagnostics/release-gate refresh plus free-boundary direct-coil PR #18 refresh
 
 This is the living execution plan for making `vmec_jax` accurate, fast,
 differentiable, documented, and usable by external researchers. Update it when
@@ -102,6 +102,14 @@ acceptance criteria or evidence changes.
   passed with `2376 passed, 20 skipped, 1 xfailed` and 95.21% coverage in 3:07,
   so the next candidates parallelize the required fast-test lanes and move the
   duplicate console-script smoke out of the Python-version matrix.
+  After the stable xdist fanout change through `228683e`, GitHub Actions passed
+  docs, build, CLI smoke, parity dry-run, physics smoke, and Python
+  3.10/3.11/3.12 fast tests. The local release gate then passed with
+  `2376 passed, 20 skipped, 110 deselected, 1 xfailed` and 95.24% coverage in
+  the primary pytest phase, plus physics smoke, wheel/sdist build, fast Sphinx,
+  and full Sphinx. Optional SIMSOPT validation passed with `8 passed`, the
+  bounded VMEC2000 executable gate passed with `10 passed, 9 skipped`, and the
+  nightly converged VMEC2000 matrix passed with `4 passed, 1 skipped, 1 xfailed`.
   The optional converged VMEC2000 parity gate remains opt-in with
   `VMEC2000_INTEGRATION=1`. `solve.py` still dominates the missing-line
   surface, so future coverage should come from physics-gated refactor seams
@@ -585,8 +593,11 @@ performance step is structural control-loop staging/fusion.
   replay/projection was slower than regular projected replay (`13.38 s` vs
   `12.66 s`), so fused projected replay is now opt-in. The next performance
   blockers are accepted-tape build, replay dispatch/compile-like overhead,
-  dense residual-projection callback construction, scan-trial timing/cache-key
-  evidence, and larger-mode accepted-point replay cost.
+  dense residual-projection callback construction, and larger-mode
+  accepted-point replay cost. Scan-cache miss analysis now has a pure,
+  tested category helper that labels raw key deltas as iteration-budget,
+  tolerance, scan-policy, stage-transition, fallback-policy, and related
+  causes for profiler summaries without depending on tuple offsets.
 - VMEC parity and physics gates: 99%. Required-tier bundled gates now cover
   `chipf`, stored `B`, input flux/profile propagation, finite-beta
   `pres/presf`, VMEC `iotas -> iotaf` smoothing, surface-averaged current
@@ -640,7 +651,8 @@ performance step is structural control-loop staging/fusion.
   solver/wout/free-boundary splits remain deferred behind parity gates.
 - Docs/release hygiene: release target is the next patch release after
   `v0.0.14`, with `vmec_jax --test`
-  quick-start tolerance tuning. The previous released baseline is `v0.0.13`,
+  quick-start tolerance tuning validated locally at `FTOL_ARRAY=1e-12`
+  (`2.52 s` on the bundled QH warm-start smoke). The previous released baseline is `v0.0.13`,
   with PyPI publication verified. Post-release `main` has local warning-clean Sphinx and a
   clean 95% CI-equivalent coverage pass through the May 27 staged-seed
   candidate, plus the May 28 staged-seed fallback coverage refresh
@@ -648,7 +660,7 @@ performance step is structural control-loop staging/fusion.
   1 xfailed`, 95.09%), plus the exact replay JVP instrumentation rerun at the
   same 95.09% coverage level and the `v0.0.14` release-candidate rerun
   (`2354 passed, 20 skipped, 110 deselected, 1 xfailed`, 95.09%). GitHub
-  Actions is green through `d5fdbff`,
+  Actions is green through `228683e`,
   carrying the QI staged-seed, explicit CLI docs updates, fallback
   materialization test, optional SIMSOPT Redl gate wiring, replay JVP
   instrumentation, Glasser `D_R` docs/examples, and newer-JAX preconditioner

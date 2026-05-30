@@ -1051,7 +1051,12 @@ When the child reports contain the detailed buckets, the wrapper also prints
 separate ``Trial scan timing``, ``Scan cache details``, and
 ``Projected replay / JVP details`` tables and embeds the same sections in the
 matrix JSON.  Use those sections to distinguish scan-cache misses from
-projected-replay residual tangent cost before changing solver kernels.
+projected-replay residual tangent cost before changing solver kernels.  The
+scan-cache diagnostic helpers also expose stable cache-miss categories
+(``iteration_budget``, ``tolerance``, ``scan_policy``,
+``stage_transition``, ``fallback_policy``, etc.) so profiler summaries can
+report why a trial solve missed the cached scan runner without relying on raw
+tuple offsets.
 Use ``--sync-replay-timing`` only for targeted cold-bucket diagnostics: it
 adds ``block_until_ready`` synchronization so dispatch and device-ready buckets
 are attributable, but that synchronization is not representative of production

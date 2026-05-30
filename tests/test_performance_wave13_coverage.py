@@ -7,6 +7,7 @@ from vmec_jax.performance_hotspot_helpers import (
     exact_parameter_cache_key_fingerprint,
     explain_scan_cache_key_delta,
     replay_timing_breakdown,
+    scan_cache_key_delta_summary,
 )
 from vmec_jax.solve_scan_planning_helpers import build_vmec2000_scan_cache_key
 
@@ -84,6 +85,50 @@ def test_scan_cache_key_delta_labels_behavioral_toggles():
     ]
     assert deltas[3].before is None
     assert deltas[3].after == 3.0
+
+
+def test_scan_cache_key_delta_summary_groups_cache_miss_causes():
+    base = _scan_cache_key()
+    changed = _scan_cache_key(
+        ftol=1.0e-10,
+        max_iter_tail=12,
+        scan_use_precomputed=True,
+        scan_fallback_iters=40,
+        stage_transition_scale=0.25,
+    )
+
+    summary = scan_cache_key_delta_summary(base, changed)
+
+    assert summary["changed"] is True
+    assert summary["n_changed"] == 5
+    assert summary["fields"] == (
+        "max_iter_tail",
+        "ftol",
+        "scan_use_precomputed",
+        "stage_transition_scale",
+        "scan_fallback_iters",
+    )
+    assert summary["categories"] == (
+        "iteration_budget",
+        "tolerance",
+        "scan_policy",
+        "stage_transition",
+        "fallback_policy",
+    )
+    assert summary["category_fields"]["iteration_budget"] == ("max_iter_tail",)
+    assert summary["category_fields"]["tolerance"] == ("ftol",)
+    assert summary["category_fields"]["scan_policy"] == ("scan_use_precomputed",)
+    assert summary["category_fields"]["stage_transition"] == ("stage_transition_scale",)
+    assert summary["category_fields"]["fallback_policy"] == ("scan_fallback_iters",)
+
+    unchanged = scan_cache_key_delta_summary(base, base)
+    assert unchanged == {
+        "changed": False,
+        "n_changed": 0,
+        "fields": (),
+        "categories": (),
+        "category_fields": {},
+    }
 
 
 def test_replay_timing_breakdown_prefers_total_and_falls_back_to_split():
