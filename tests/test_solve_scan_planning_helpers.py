@@ -108,6 +108,7 @@ def test_timing_report_math_excludes_dispatch_breakdown_from_leaf_total():
     stats["scan_runner_cache_build_s"] = 0.1
     stats["scan_postprocess_s"] = 2.0
     stats["scan_runner_cache_hit_count"] = 3
+    stats["scan_runner_cache_miss_category_iteration_budget_count"] = 2
 
     report = build_scan_timing_report(iterations=7, stats=stats, scan_total_s=5.9)
 
@@ -118,6 +119,7 @@ def test_timing_report_math_excludes_dispatch_breakdown_from_leaf_total():
     assert report["scan_device_ready_s"] == pytest.approx(0.75)
     assert report["scan_runner_cache_hit_count"] == 3
     assert report["scan_runner_cache_miss_count"] == 0
+    assert report["scan_runner_cache_miss_category_iteration_budget_count"] == 2
     assert report["scan_cold_cache_miss_s"] == pytest.approx(0.6)
     assert report["scan_cold_cache_miss_ready_s"] == pytest.approx(0.2)
     assert report["scan_cache_build_wrapper_s"] == pytest.approx(0.1)
