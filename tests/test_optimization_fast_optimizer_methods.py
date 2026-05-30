@@ -320,7 +320,7 @@ def test_gpu_projected_replay_policy_is_stellsym_mode2_plus_by_default(monkeypat
 
     opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=True))
     assert opt._projected_replay_residuals_enabled(48) is False
-    assert opt._lasym_replay_column_chunk(48) == 24
+    assert opt._lasym_replay_column_chunk(48) == 8
 
     opt._solver_device_name = "cpu"
     opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=False))

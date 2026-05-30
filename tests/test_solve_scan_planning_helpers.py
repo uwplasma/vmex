@@ -380,7 +380,7 @@ def test_scan_chunk_settings_match_quiet_and_printing_modes():
         backend_name="gpu",
         chunk_size_env="",
         spectral_mode_count=8,
-    ) == (256, False)
+    ) == (512, False)
     assert scan_chunk_settings(
         max_iter_scan=1500,
         nstep_screen=5,
@@ -389,7 +389,7 @@ def test_scan_chunk_settings_match_quiet_and_printing_modes():
         backend_name="gpu",
         chunk_size_env="",
         spectral_mode_count=50,
-    ) == (1500, True)
+    ) == (512, False)
 
 
 def test_scan_cache_key_is_stable_and_tracks_behavioral_toggles():
