@@ -56,6 +56,40 @@ class CacheKeyDelta:
     after: Any
 
 
+SCAN_CACHE_KEY_CATEGORIES: dict[str, str] = {
+    "schema": "schema",
+    "static_key": "geometry",
+    "wout_key": "geometry",
+    "edge_signature_key": "geometry",
+    "tomnsps_policy_key": "spectral_policy",
+    "max_iter_tail": "iteration_budget",
+    "preflight_iters": "iteration_budget",
+    "iter_offset0": "iteration_budget",
+    "step_size": "iteration_update",
+    "initial_flip_sign": "initial_state",
+    "lambda_update_scale": "iteration_update",
+    "ftol": "tolerance",
+    "nstep_screen": "iteration_budget",
+    "use_restart_triggers": "restart_policy",
+    "vmecpp_restart": "restart_policy",
+    "scan_use_precomputed": "scan_policy",
+    "scan_use_lax_tridi": "scan_policy",
+    "scan_use_restart_payload": "restart_policy",
+    "stage_prev_fsq": "stage_transition",
+    "stage_transition_factor": "stage_transition",
+    "stage_transition_scale": "stage_transition",
+    "jit_forces_scan": "execution_policy",
+    "state_only_scan": "execution_policy",
+    "scan_light": "execution_policy",
+    "scan_minimal": "execution_policy",
+    "scan_fallback_iters": "fallback_policy",
+    "scan_fallback_accept_frac": "fallback_policy",
+    "scan_fallback_fsq_factor": "fallback_policy",
+    "scan_fallback_badjac_limit": "fallback_policy",
+    "scan_fallback_fsq_abs": "fallback_policy",
+}
+
+
 def exact_parameter_cache_key(params: Any) -> bytes:
     """Return the exact-optimizer parameter cache key for a parameter vector."""
 
@@ -100,6 +134,34 @@ def explain_scan_cache_key_delta(
             )
         )
     return tuple(deltas)
+
+
+def scan_cache_key_delta_summary(
+    before_key: tuple[Any, ...],
+    after_key: tuple[Any, ...],
+    *,
+    field_names: tuple[str, ...] = SCAN_CACHE_KEY_FIELDS,
+    field_categories: Mapping[str, str] = SCAN_CACHE_KEY_CATEGORIES,
+) -> dict[str, Any]:
+    """Return stable scan-cache miss categories for two cache keys.
+
+    The scan cache key intentionally includes many low-level toggles.  This
+    summary groups raw tuple-field changes into cause categories that can be
+    persisted in profiler JSON without depending on tuple offsets.
+    """
+
+    deltas = explain_scan_cache_key_delta(before_key, after_key, field_names=field_names)
+    categories: dict[str, list[str]] = {}
+    for delta in deltas:
+        category = field_categories.get(delta.field, "unknown")
+        categories.setdefault(category, []).append(delta.field)
+    return {
+        "changed": bool(deltas),
+        "n_changed": len(deltas),
+        "fields": tuple(delta.field for delta in deltas),
+        "categories": tuple(categories),
+        "category_fields": {category: tuple(fields) for category, fields in categories.items()},
+    }
 
 
 def replay_timing_breakdown(
@@ -170,10 +232,12 @@ def _profile_count(profile: Mapping[str, Mapping[str, Any]], *names: str) -> int
 
 __all__ = [
     "CacheKeyDelta",
+    "SCAN_CACHE_KEY_CATEGORIES",
     "SCAN_CACHE_KEY_FIELDS",
     "accumulate_scan_device_ready_timing",
     "exact_parameter_cache_key",
     "exact_parameter_cache_key_fingerprint",
     "explain_scan_cache_key_delta",
     "replay_timing_breakdown",
+    "scan_cache_key_delta_summary",
 ]
