@@ -171,6 +171,9 @@ with::
 
   vmec_jax --plot examples/data/wout_cth_like_free_bdy_lasym_small.nc
 
+For ESSOS/direct-coil finite-beta scans and coil-only free-boundary examples,
+see :doc:`free_boundary_coil_optimization`.
+
 If you want to compare the conservative parity track against the optimized
 fixed-boundary CLI-style controller from Python, run::
 

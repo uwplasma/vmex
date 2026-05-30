@@ -1608,6 +1608,106 @@ def direct_coil_boundary_bsqvac_from_trace_jax(
     )
 
 
+def direct_coil_accepted_trace_replay_objective_jax(
+    params: Any,
+    initial_state: Any,
+    *,
+    static: Any,
+    traces: Any,
+    signgs: int,
+    max_steps: int | None = None,
+    sample_nzeta: int | None = None,
+    include_analytic: bool = True,
+    enforce_edge: bool = False,
+    state_weight: Any = 1.0,
+    force_weight: Any = 0.0,
+    bsqvac_weight: Any = 0.0,
+) -> dict[str, Any]:
+    """Replay fixed accepted free-boundary traces with differentiable coils.
+
+    This helper is the reusable bridge between accepted-boundary replay and a
+    future full nonlinear ``run_free_boundary`` custom adjoint.  A production
+    solve supplies accepted trace metadata: step controls, preconditioner
+    matrices, axis-additive fields, and NESTOR replay context.  This function
+    keeps those controls fixed, while recomputing at every replayed step
+
+    ``state -> boundary geometry -> direct-coil Biot-Savart -> JAX NESTOR
+    bsqvac -> strict VMEC update``.
+
+    The result is a small differentiable fixed-control nonlinear replay.  It is
+    appropriate for AD-vs-central-FD validation of accepted-output
+    sensitivities, but it intentionally does not claim gradients through the
+    adaptive host controller that selected the accepted production traces.
+    """
+
+    from .discrete_adjoint import strict_update_one_step_from_trace
+    from .state import pack_state
+
+    trace_seq = list(traces)
+    if max_steps is not None:
+        trace_seq = trace_seq[: int(max_steps)]
+    if not trace_seq:
+        raise ValueError("at least one accepted trace is required")
+
+    state = initial_state
+    objective_components: dict[str, Any] = {
+        "state": jnp.asarray(0.0),
+        "force": jnp.asarray(0.0),
+        "bsqvac": jnp.asarray(0.0),
+    }
+    steps: list[dict[str, Any]] = []
+    bsqvac_values: list[Any] = []
+    for trace in trace_seq:
+        geometry = free_boundary_boundary_geometry_jax(
+            state,
+            static,
+            sample_nzeta=sample_nzeta,
+        )
+        context = direct_coil_boundary_replay_context(static, geometry)
+        replay = direct_coil_boundary_bsqvac_from_trace_jax(
+            params,
+            geometry,
+            trace,
+            basis=context["basis"],
+            tables=context["tables"],
+            signgs=int(signgs),
+            nvper=int(context["nvper"]),
+            wint=jnp.asarray(context["wint"]),
+            include_analytic=bool(include_analytic),
+        )
+        step = strict_update_one_step_from_trace(
+            state,
+            static,
+            trace,
+            freeb_bsqvac_half=replay["bsqvac"],
+            enforce_edge=bool(enforce_edge),
+        )
+        state = step["step"]["state_post"]
+        steps.append(step)
+        bsqvac_values.append(replay["bsqvac"])
+        objective_components["force"] = objective_components["force"] + _tree_weighted_half_norm(
+            step["force"],
+            force_weight,
+        )
+        objective_components["bsqvac"] = objective_components["bsqvac"] + _weighted_half_norm(
+            replay["bsqvac"],
+            bsqvac_weight,
+        )
+
+    objective_components["state"] = _weighted_half_norm(
+        pack_state(state),
+        state_weight,
+    )
+    objective = sum(objective_components.values())
+    return {
+        "objective": objective,
+        "objective_components": objective_components,
+        "state": state,
+        "steps": steps,
+        "bsqvac": bsqvac_values,
+    }
+
+
 def direct_coil_projected_mode_fixed_point_jax(
     params: Any,
     initial_state: Any,
@@ -1796,9 +1896,81 @@ def direct_coil_projected_mode_fixed_point_objective_jax(
     }
 
 
+def direct_coil_projected_mode_fixed_point_directional_check_jax(
+    params: Any,
+    direction: Any,
+    initial_state: Any,
+    *,
+    eps: float = 1.0e-4,
+    **objective_kwargs: Any,
+) -> dict[str, Any]:
+    """Validate projected-mode fixed-point coil gradients by central FD.
+
+    This is the reusable phase-2/phase-3 validation rung for the direct-coil
+    free-boundary adjoint path.  It wraps
+    :func:`direct_coil_projected_mode_fixed_point_objective_jax`, computes the
+    exact JAX directional derivative with respect to the coil-parameter pytree,
+    and compares it with a central finite difference along ``direction``.
+
+    The helper intentionally targets the tiny JAX-visible projected-mode
+    fixed-point surrogate.  It exercises the important dependency chain
+
+    ``coil parameters -> Biot-Savart field -> moving boundary projection ->
+    dense vacuum solve -> fixed-point state -> scalar objective``
+
+    without overclaiming a production custom VJP for the full
+    :func:`vmec_jax.driver.run_free_boundary` control loop.  The returned
+    ``solved`` dictionary contains the same state, vacuum, response, and
+    objective-component diagnostics as
+    :func:`direct_coil_projected_mode_fixed_point_objective_jax`.
+    """
+
+    def objective(coil_params):
+        solved = direct_coil_projected_mode_fixed_point_objective_jax(
+            coil_params,
+            initial_state,
+            **objective_kwargs,
+        )
+        return solved["objective"]
+
+    check = pytree_directional_derivative_check_jax(
+        objective,
+        params,
+        direction,
+        eps=eps,
+    )
+    solved = direct_coil_projected_mode_fixed_point_objective_jax(
+        params,
+        initial_state,
+        **objective_kwargs,
+    )
+    return {
+        **check,
+        "solved": solved,
+        "objective_components": solved["objective_components"],
+    }
+
+
 def _weighted_half_norm(value: Any, weight: Any) -> Any:
     """Return ``0.5 * sum(weight * value**2)`` with scalar/array weights."""
 
     arr = jnp.asarray(value)
     w = jnp.asarray(weight, dtype=arr.dtype)
     return 0.5 * jnp.sum(w * arr * arr)
+
+
+def _tree_weighted_half_norm(values: Any, weight: Any) -> Any:
+    """Return the sum of weighted half-norms over numeric pytree leaves."""
+
+    leaves = tree_util.tree_leaves(values)
+    if not leaves:
+        return jnp.asarray(0.0)
+    total = jnp.asarray(0.0)
+    for leaf in leaves:
+        if leaf is None:
+            continue
+        try:
+            total = total + _weighted_half_norm(leaf, weight)
+        except TypeError:
+            continue
+    return total

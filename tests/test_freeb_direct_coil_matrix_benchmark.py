@@ -266,6 +266,41 @@ def test_child_specs_can_add_timing_light_direct_solve_row(tmp_path) -> None:
     assert matrix._script_for(label).name == "bench_freeb_direct_coil_solve.py"
 
 
+def test_child_specs_can_add_host_policy_ablation_rows(tmp_path) -> None:
+    specs = matrix._child_specs(quick=True, outdir=tmp_path, backend="gpu", include_policy_ablation=True)
+
+    labels = [label for label, _, _, _ in specs]
+    assert labels == [
+        "provider",
+        "direct_solve",
+        "direct_solve_jit_forces",
+        "direct_solve_jit_forces_no_residual_metrics",
+        "direct_solve_jit_forces_no_fsq1_norms",
+        "direct_solve_jit_forces_no_profile_setup",
+        "direct_solve_jit_forces_host_policies_off",
+        "gradient",
+    ]
+    ablations = {
+        label: (out, args, env)
+        for label, out, args, env in specs
+        if label.startswith("direct_solve_jit_forces_") and label != "direct_solve_jit_forces_timing_light"
+    }
+    assert ablations["direct_solve_jit_forces_no_residual_metrics"][2] == {
+        "VMEC_JAX_HOST_RESIDUAL_METRICS": "0"
+    }
+    assert ablations["direct_solve_jit_forces_no_fsq1_norms"][2] == {"VMEC_JAX_HOST_FSQ1_NORMS": "0"}
+    assert ablations["direct_solve_jit_forces_no_profile_setup"][2] == {"VMEC_JAX_HOST_PROFILE_SETUP": "0"}
+    assert ablations["direct_solve_jit_forces_host_policies_off"][2] == {
+        "VMEC_JAX_HOST_RESIDUAL_METRICS": "0",
+        "VMEC_JAX_HOST_FSQ1_NORMS": "0",
+        "VMEC_JAX_HOST_PROFILE_SETUP": "0",
+    }
+    for label, (out, args, _env) in ablations.items():
+        assert out.name.startswith("bench_freeb_direct_coil_solve_jit_forces_gpu_")
+        assert args == ["--max-iter", "2", "--warm-repeats", "1", "--jit-forces"]
+        assert matrix._script_for(label).name == "bench_freeb_direct_coil_solve.py"
+
+
 def test_run_child_applies_and_records_badjac_probe0_env(monkeypatch, tmp_path) -> None:
     captured: dict[str, object] = {}
 

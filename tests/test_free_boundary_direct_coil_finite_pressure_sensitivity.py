@@ -1377,6 +1377,7 @@ def test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state(
     from vmec_jax.discrete_adjoint import strict_update_accepted_step, strict_update_one_step_from_trace
     from vmec_jax.driver import run_free_boundary
     from vmec_jax.free_boundary_adjoint import (
+        direct_coil_accepted_trace_replay_objective_jax,
         direct_coil_boundary_bsqvac_from_trace_jax,
         direct_coil_boundary_replay_context,
         free_boundary_boundary_geometry_jax,
@@ -1516,7 +1517,6 @@ def test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state(
         atol=1.0e-11,
     )
 
-    first_geometry = free_boundary_boundary_geometry_jax(trace0["state_pre"], init.static)
     base_dofs = jnp.asarray(base_params.base_curve_dofs)
     base_currents = jnp.asarray(base_params.base_currents)
     direction = base_params.with_arrays(
@@ -1525,27 +1525,32 @@ def test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state(
     )
 
     def two_step_objective(params: CoilFieldParams):
-        first_bsqvac = bsqvac_from_trace(params, first_geometry, trace0)["bsqvac"]
-        first = strict_update_one_step_from_trace(
+        replay = direct_coil_accepted_trace_replay_objective_jax(
+            params,
             trace0["state_pre"],
-            init.static,
-            trace0,
-            freeb_bsqvac_half=first_bsqvac,
+            static=init.static,
+            traces=[trace0, trace1],
+            signgs=int(init.signgs),
+            state_weight=1.0,
+            bsqvac_weight=1.0e-12,
+            force_weight=0.0,
             enforce_edge=False,
         )
-        state1 = first["step"]["state_post"]
-        second_geometry = free_boundary_boundary_geometry_jax(state1, init.static)
-        second_bsqvac = bsqvac_from_trace(params, second_geometry, trace1)["bsqvac"]
-        second = strict_update_one_step_from_trace(
-            state1,
-            init.static,
-            trace1,
-            freeb_bsqvac_half=second_bsqvac,
-            enforce_edge=False,
-        )
-        state2 = jnp.asarray(pack_state(second["step"]["state_post"]))
-        force = jnp.asarray(second["force"]["frcc_u"])
-        return 0.5 * jnp.vdot(state2, state2) + 1.0e-3 * jnp.vdot(force, force)
+        return replay["objective"]
+
+    replay = direct_coil_accepted_trace_replay_objective_jax(
+        base_params,
+        trace0["state_pre"],
+        static=init.static,
+        traces=[trace0, trace1],
+        signgs=int(init.signgs),
+        state_weight=1.0,
+        bsqvac_weight=1.0e-12,
+        force_weight=0.0,
+        enforce_edge=False,
+    )
+    assert {"state", "bsqvac", "force"}.issubset(replay["objective_components"])
+    assert np.isfinite(float(replay["objective"]))
 
     check = pytree_directional_derivative_check_jax(two_step_objective, base_params, direction, eps=1.0e-3)
     exact = float(np.asarray(check["exact_directional"]))

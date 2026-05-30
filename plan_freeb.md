@@ -12,18 +12,75 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-05-30 after merging the latest `origin/main`, adding the
-two-step direct-coil accepted-replay bridge, and promoting the accepted-boundary
-geometry sampler to a JAX-visible helper. The current follow-up promotes the
-two-step replay to an AD-vs-central-FD gate through first accepted update, JAX
-geometry resampling, second direct-coil NESTOR replay, and second accepted
-update, then factors the replay plumbing and static NESTOR replay context into
-source helpers. PR #18 is open on
-`feature/freeb-essos-coil-single-stage`; the pre-merge push was fully green,
-including Codecov project coverage, and the refreshed post-main-merge branch is
-being revalidated. The optional ESSOS/direct-coil bootstrap gates remain
+Last updated: 2026-05-31 after refreshing PR #18 onto green `origin/main`
+commit `8c41c606` in merge commit `314d13dd`, adding reusable fixed-control
+direct-coil adjoint replay helpers, and adding benchmark-only CPU/GPU policy
+ablation rows. PR #18 is open on
+`feature/freeb-essos-coil-single-stage`; post-main-merge GitHub Actions run
+`26698107572` is still completing at the time of this update, with build/docs,
+parity dry-run, physics smoke, console smoke, and Python 3.10 fast tests
+already green. The optional ESSOS/direct-coil bootstrap gates remain
 local/manual because they require ESSOS assets and launch real free-boundary
-solves. Do not merge PR #18 until the post-merge checks are green.
+solves. Do not merge PR #18 until the post-merge checks and the follow-up
+helper commit checks are green.
+
+### 2026-05-31 Main refresh, reusable replay helpers, and policy ablation
+
+Steps taken:
+
+1. Merged `origin/main` (`8c41c606`) into the PR branch and resolved conflicts
+   in `docs/release_checklist.rst` and `plan.md`.
+2. Ran the full warning-clean Sphinx build after the merge.
+3. Added `direct_coil_projected_mode_fixed_point_directional_check_jax`, a
+   reusable AD-vs-central-FD checker around the projected-mode direct-coil
+   fixed-point validation surrogate.
+4. Added `direct_coil_accepted_trace_replay_objective_jax`, which replays fixed
+   accepted free-boundary traces through
+   `state -> JAX boundary geometry -> direct-coil Biot-Savart -> JAX NESTOR
+   bsqvac -> strict accepted update` while keeping production step controls
+   fixed.
+5. Refactored the stellsym/LASYM projected-mode tests and the two-step
+   accepted-boundary replay test to use the reusable helpers.
+6. Added `--include-policy-ablation` to
+   `tools/benchmarks/bench_freeb_direct_coil_matrix.py` for benchmark-only rows
+   that disable host residual metrics, host fsq1 norms, host profile setup, and
+   all three policies together.
+7. Updated README/quickstart/free-boundary docs wording to point users to the
+   direct-coil research-lane page and avoid overclaiming production full-loop
+   exact adjoints.
+
+Results obtained:
+
+1. `python -m sphinx -W --keep-going -b html docs tmp/freeb_docs_check_main_merge_20260531`
+   passed.
+2. `python -m pytest -q tests/test_solve_scan_chunking.py tests/test_solve_scan_planning_helpers.py tests/test_optimization_fast_optimizer_methods.py tests/test_optimization_helpers.py tests/test_optimization_wave2_coverage.py -rx`
+   passed: 173 passed, 1 skipped in 23.33 s.
+3. `python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py::test_projected_mode_fixed_point_objective_value_and_grad_wrt_coil_pytree tests/test_free_boundary_vacuum_adjoint.py::test_lasym_projected_mode_fixed_point_objective_ad_matches_central_fd_for_coil_pytree -rx`
+   passed: 2 passed in 21.80 s.
+4. `python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state -rx`
+   passed: 1 passed in 42.90 s.
+5. `python -m pytest -q tests/test_freeb_direct_coil_matrix_benchmark.py tests/test_solve_scan_chunking.py tests/test_solve_scan_planning_helpers.py -rx`
+   passed: 52 passed in 0.26 s.
+6. `python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state tests/test_free_boundary_coil_provider_forward.py -rx`
+   passed: 59 passed in 130.84 s.
+7. `python tools/benchmarks/bench_freeb_direct_coil_matrix.py --quick --include-policy-ablation --include-timing-light --include-badjac-probe0 --timeout-s 240 --out results/bench_freeb_direct_coil_matrix/policy_ablation_cpu_20260531.json`
+   completed all CPU rows.
+
+Best next steps:
+
+1. Run a final docs build and diff check for the follow-up helper commit.
+2. Commit and push the helper/benchmark/docs update.
+3. Wait for GitHub Actions on the new head.
+4. Run the same policy-ablation benchmark on `office` with `--include-gpu` to
+   quantify whether the remaining accelerator gap is host-control dispatch,
+   preconditioner/update launch overhead, or residual scalar synchronization.
+5. Keep the production full-loop exact adjoint xfail until a complete
+   `run_free_boundary` custom-VJP or fully JAX-visible nonlinear controller is
+   implemented and validated by full-solve finite differences.
+
+Need from user:
+
+Nothing now.
 
 ### 2026-05-30 Replay context helper follow-up
 

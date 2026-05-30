@@ -1,11 +1,12 @@
 # VMEC-JAX Research-Grade Roadmap
 
-Last updated: 2026-05-30
+Last updated: 2026-05-31
 Primary branch: `main`
 Baseline release: `v0.0.14`
-Latest known green `main` CI: `7033647`
-Current candidate: post-`v0.0.14` GPU scan/replay policy refresh plus
-free-boundary direct-coil PR #18 refresh
+Latest known green `main` CI: `8c41c606` (GitHub Actions run `26696656681`)
+Current candidate: free-boundary direct-coil PR #18 refreshed onto
+`8c41c606`, with validation-scale fixed-control direct-coil adjoint replay
+helpers and CPU policy-ablation benchmark evidence.
 
 This is the living execution plan for making `vmec_jax` accurate, fast,
 differentiable, documented, and usable by external researchers. Update it when
@@ -121,6 +122,9 @@ acceptance criteria or evidence changes.
   repository-size audit, fast Sphinx, and full Sphinx. GitHub Actions run
   `26696164006` passed build, docs, CLI smoke, parity dry-run, physics smoke,
   and Python 3.10/3.11/3.12 fast tests for the same commit.
+  Main subsequently advanced to `8c41c606` with green GitHub Actions run
+  `26696656681`; free-boundary PR #18 was refreshed onto that main commit in
+  merge commit `314d13dd`.
 - VMEC2000 converged-wout parity now has a fast bundled matrix gate across
   fixed/free, axisymmetric/non-axisymmetric, LASYM, and single/multigrid
   representatives. The executable-backed end-state gate remains opt-in:
@@ -672,8 +676,8 @@ performance step is structural control-loop staging/fusion.
   1 xfailed`, 95.09%), plus the exact replay JVP instrumentation rerun at the
   same 95.09% coverage level and the `v0.0.14` release-candidate rerun
   (`2354 passed, 20 skipped, 110 deselected, 1 xfailed`, 95.09%). GitHub
-  Actions is green through `7033647`,
-  carrying the QI staged-seed, explicit CLI docs updates, fallback
+  Actions is green through `8c41c606`, carrying the post-`v0.0.14` release
+  evidence refresh, QI staged-seed, explicit CLI docs updates, fallback
   materialization test, optional SIMSOPT Redl gate wiring, replay JVP
   instrumentation, Glasser `D_R` docs/examples, and newer-JAX preconditioner
   compatibility fixes.

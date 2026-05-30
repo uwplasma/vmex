@@ -22,6 +22,16 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUT = REPO_ROOT / "results" / "bench_freeb_direct_coil_matrix" / "summary.json"
 BADJAC_PROBE0_ENV = {"VMEC_JAX_BADJAC_INITIAL_STATE_PROBE_ITERS": "0"}
+POLICY_ABLATION_ENVS = {
+    "no_residual_metrics": {"VMEC_JAX_HOST_RESIDUAL_METRICS": "0"},
+    "no_fsq1_norms": {"VMEC_JAX_HOST_FSQ1_NORMS": "0"},
+    "no_profile_setup": {"VMEC_JAX_HOST_PROFILE_SETUP": "0"},
+    "host_policies_off": {
+        "VMEC_JAX_HOST_RESIDUAL_METRICS": "0",
+        "VMEC_JAX_HOST_FSQ1_NORMS": "0",
+        "VMEC_JAX_HOST_PROFILE_SETUP": "0",
+    },
+}
 ChildSpec = tuple[str, Path, list[str], dict[str, str]]
 
 
@@ -44,6 +54,15 @@ def _parser() -> argparse.ArgumentParser:
         help=(
             "Add direct-solve rows with VMEC_JAX_TIMING disabled. These rows measure production-like "
             "wall time without synchronization from detailed timing probes."
+        ),
+    )
+    p.add_argument(
+        "--include-policy-ablation",
+        action="store_true",
+        help=(
+            "Add direct-solve JIT-forces rows that disable host residual metrics, fsq1 norms, "
+            "profile setup, and all three together. This is benchmark-only evidence for "
+            "CPU/GPU control-path overhead and does not change solver defaults."
         ),
     )
     p.add_argument("--backend-note", default="", help="Optional note copied into the summary JSON.")
@@ -848,6 +867,25 @@ def _with_timing_light_rows(specs: list[ChildSpec]) -> list[ChildSpec]:
     return rows
 
 
+def _with_policy_ablation_rows(specs: list[ChildSpec]) -> list[ChildSpec]:
+    rows: list[ChildSpec] = []
+    for label, out, args, env_overrides in specs:
+        rows.append((label, out, args, env_overrides))
+        if label != "direct_solve_jit_forces":
+            continue
+        for ablation_label, ablation_env in POLICY_ABLATION_ENVS.items():
+            ablation_out = out.with_name(f"{out.stem}_{ablation_label}{out.suffix}")
+            rows.append(
+                (
+                    f"{label}_{ablation_label}",
+                    ablation_out,
+                    list(args),
+                    {**env_overrides, **ablation_env},
+                )
+            )
+    return rows
+
+
 def _child_specs(
     *,
     quick: bool,
@@ -855,6 +893,7 @@ def _child_specs(
     backend: str,
     include_badjac_probe0: bool = False,
     include_timing_light: bool = False,
+    include_policy_ablation: bool = False,
 ) -> list[ChildSpec]:
     suffix = f"_{backend}.json"
     if quick:
@@ -886,6 +925,8 @@ def _child_specs(
         ]
         if include_timing_light:
             specs = _with_timing_light_rows(specs)
+        if include_policy_ablation:
+            specs = _with_policy_ablation_rows(specs)
         return _with_badjac_probe0_rows(specs) if include_badjac_probe0 else specs
     specs = [
         (
@@ -915,6 +956,8 @@ def _child_specs(
     ]
     if include_timing_light:
         specs = _with_timing_light_rows(specs)
+    if include_policy_ablation:
+        specs = _with_policy_ablation_rows(specs)
     return _with_badjac_probe0_rows(specs) if include_badjac_probe0 else specs
 
 
@@ -1014,6 +1057,7 @@ def main(argv: list[str] | None = None) -> int:
         backend="cpu",
         include_badjac_probe0=bool(args.include_badjac_probe0),
         include_timing_light=bool(args.include_timing_light),
+        include_policy_ablation=bool(args.include_policy_ablation),
     ):
         rows.append(
             _run_child(
@@ -1035,6 +1079,7 @@ def main(argv: list[str] | None = None) -> int:
                 backend="gpu",
                 include_badjac_probe0=bool(args.include_badjac_probe0),
                 include_timing_light=bool(args.include_timing_light),
+                include_policy_ablation=bool(args.include_policy_ablation),
             ):
                 rows.append(
                     _run_child(
@@ -1069,6 +1114,7 @@ def main(argv: list[str] | None = None) -> int:
         "include_gpu": bool(args.include_gpu),
         "include_badjac_probe0": bool(args.include_badjac_probe0),
         "include_timing_light": bool(args.include_timing_light),
+        "include_policy_ablation": bool(args.include_policy_ablation),
         "backend_note": str(args.backend_note),
         "gpu_probe": gpu_probe,
         "output_dir": outdir,

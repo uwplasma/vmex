@@ -24,6 +24,7 @@ from vmec_jax.free_boundary_adjoint import (
     dense_vmec_nestor_mode_solve_jax,
     dense_vacuum_residual,
     dense_vacuum_solve_jax,
+    direct_coil_projected_mode_fixed_point_directional_check_jax,
     direct_coil_projected_mode_fixed_point_objective_jax,
     mode_matrix_from_grpmn_jax,
     mode_rhs_from_gsource_jax,
@@ -1633,28 +1634,6 @@ def test_projected_mode_fixed_point_objective_value_and_grad_wrt_coil_pytree():
             mode_to_state @ jnp.asarray(response["mode_coeffs"])
         )
 
-    def objective(params):
-        solved = direct_coil_projected_mode_fixed_point_objective_jax(
-            params,
-            jnp.asarray([0.0, 0.0], dtype=float),
-            boundary_from_state=boundary_from_state,
-            update_from_response=update_from_response,
-            mode_matrix=mode_matrix,
-            sin_basis=sin_basis,
-            xmpot=jnp.asarray([0, 1, 1]),
-            n_raw=jnp.asarray([0, 0, 1]),
-            imirr=jnp.asarray([1, 0, 3, 2]),
-            nuv3=4,
-            nuv_full=4,
-            max_iter=10,
-            state_weights=jnp.asarray([1.0, 0.7], dtype=float),
-            mode_weights=0.02,
-            rhs_mode_weights=0.01,
-            bnormal_weight=0.005,
-            fixed_point_residual_weight=10.0,
-        )
-        return solved["objective"]
-
     current_direction = coil_params.base_currents * 0.01
     dofs_direction = jnp.zeros_like(coil_params.base_curve_dofs)
     dofs_direction = dofs_direction.at[0, 0, 2].set(0.02)
@@ -1663,7 +1642,26 @@ def test_projected_mode_fixed_point_objective_value_and_grad_wrt_coil_pytree():
         base_curve_dofs=dofs_direction,
         base_currents=current_direction,
     )
-    check = pytree_directional_derivative_check_jax(objective, coil_params, direction, eps=1.0e-4)
+    check = direct_coil_projected_mode_fixed_point_directional_check_jax(
+        coil_params,
+        direction,
+        jnp.asarray([0.0, 0.0], dtype=float),
+        boundary_from_state=boundary_from_state,
+        update_from_response=update_from_response,
+        mode_matrix=mode_matrix,
+        sin_basis=sin_basis,
+        xmpot=jnp.asarray([0, 1, 1]),
+        n_raw=jnp.asarray([0, 0, 1]),
+        imirr=jnp.asarray([1, 0, 3, 2]),
+        nuv3=4,
+        nuv_full=4,
+        max_iter=10,
+        state_weights=jnp.asarray([1.0, 0.7], dtype=float),
+        mode_weights=0.02,
+        rhs_mode_weights=0.01,
+        bnormal_weight=0.005,
+        fixed_point_residual_weight=10.0,
+    )
     value = check["value"]
     grad_params = check["grad"]
 
@@ -1672,11 +1670,24 @@ def test_projected_mode_fixed_point_objective_value_and_grad_wrt_coil_pytree():
     assert np.all(np.isfinite(np.asarray(grad_params.base_curve_dofs)))
     assert float(jnp.linalg.norm(grad_params.base_currents)) > 1.0e-18
     assert float(jnp.linalg.norm(grad_params.base_curve_dofs)) > 1.0e-10
+    assert {"state", "mode", "fixed_point_residual"}.issubset(check["objective_components"])
+    np.testing.assert_allclose(check["value"], check["solved"]["objective"], rtol=0.0, atol=1.0e-14)
     assert float(check["abs_error"]) < 1.0e-8
     np.testing.assert_allclose(check["exact_directional"], check["fd_directional"], rtol=2.0e-5, atol=1.0e-10)
 
     with pytest.raises(ValueError, match="eps"):
-        pytree_directional_derivative_check_jax(objective, coil_params, direction, eps=0.0)
+        direct_coil_projected_mode_fixed_point_directional_check_jax(
+            coil_params,
+            direction,
+            jnp.asarray([0.0, 0.0], dtype=float),
+            boundary_from_state=boundary_from_state,
+            update_from_response=update_from_response,
+            mode_matrix=mode_matrix,
+            sin_basis=sin_basis,
+            xmpot=jnp.asarray([0, 1, 1]),
+            n_raw=jnp.asarray([0, 0, 1]),
+            eps=0.0,
+        )
 
 
 def test_lasym_projected_mode_fixed_point_objective_ad_matches_central_fd_for_coil_pytree():
@@ -1766,30 +1777,6 @@ def test_lasym_projected_mode_fixed_point_objective_ad_matches_central_fd_for_co
             mode_to_state @ jnp.asarray(response["mode_coeffs"])
         )
 
-    def objective(params):
-        solved = direct_coil_projected_mode_fixed_point_objective_jax(
-            params,
-            jnp.zeros(3, dtype=float),
-            boundary_from_state=boundary_from_state,
-            update_from_response=update_from_response,
-            mode_matrix=mode_matrix,
-            sin_basis=sin_basis,
-            cos_basis=cos_basis,
-            xmpot=jnp.asarray([0, 1]),
-            n_raw=jnp.asarray([0, 1]),
-            lasym=True,
-            nuv3=4,
-            nuv_full=4,
-            max_iter=12,
-            state_weights=jnp.asarray([1.0, 0.8, 1.1], dtype=float),
-            update_weights=0.03,
-            mode_weights=0.015,
-            rhs_mode_weights=0.008,
-            bnormal_weight=0.004,
-            fixed_point_residual_weight=8.0,
-        )
-        return solved["objective"]
-
     dofs_direction = jnp.zeros_like(coil_params.base_curve_dofs)
     dofs_direction = dofs_direction.at[0, 0, 2].set(0.018)
     dofs_direction = dofs_direction.at[0, 1, 1].set(-0.014)
@@ -1799,7 +1786,28 @@ def test_lasym_projected_mode_fixed_point_objective_ad_matches_central_fd_for_co
         base_currents=0.008 * coil_params.base_currents,
     )
 
-    check = pytree_directional_derivative_check_jax(objective, coil_params, direction, eps=1.0e-4)
+    check = direct_coil_projected_mode_fixed_point_directional_check_jax(
+        coil_params,
+        direction,
+        jnp.zeros(3, dtype=float),
+        boundary_from_state=boundary_from_state,
+        update_from_response=update_from_response,
+        mode_matrix=mode_matrix,
+        sin_basis=sin_basis,
+        cos_basis=cos_basis,
+        xmpot=jnp.asarray([0, 1]),
+        n_raw=jnp.asarray([0, 1]),
+        lasym=True,
+        nuv3=4,
+        nuv_full=4,
+        max_iter=12,
+        state_weights=jnp.asarray([1.0, 0.8, 1.1], dtype=float),
+        update_weights=0.03,
+        mode_weights=0.015,
+        rhs_mode_weights=0.008,
+        bnormal_weight=0.004,
+        fixed_point_residual_weight=8.0,
+    )
     assert np.isfinite(float(check["value"]))
     assert abs(float(check["exact_directional"])) > 1.0e-9
     np.testing.assert_allclose(check["exact_directional"], check["fd_directional"], rtol=2.5e-5, atol=1.0e-10)
