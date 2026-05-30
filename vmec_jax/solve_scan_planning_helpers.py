@@ -80,6 +80,11 @@ def build_scan_timing_report(
     """Build the public timing diagnostic report from timing accumulators."""
     normalized = {key: float(stats.get(key, 0.0)) for key in SCAN_TIMING_KEYS}
     counts = {key: int(stats.get(key, 0)) for key in SCAN_TIMING_COUNT_KEYS}
+    dynamic_counts = {
+        key: int(value)
+        for key, value in stats.items()
+        if str(key).startswith("scan_runner_cache_miss_category_") and str(key).endswith("_count")
+    }
     scan_leaf_total_s = sum(
         value
         for key, value in normalized.items()
@@ -91,6 +96,7 @@ def build_scan_timing_report(
         "scan_total_s": total,
         **normalized,
         **counts,
+        **dynamic_counts,
         "scan_cold_cache_miss_s": float(normalized["scan_runner_cache_miss_device_run_s"]),
         "scan_cold_cache_miss_ready_s": float(normalized["scan_runner_cache_miss_ready_s"]),
         "scan_cache_build_wrapper_s": float(normalized["scan_runner_cache_build_s"]),

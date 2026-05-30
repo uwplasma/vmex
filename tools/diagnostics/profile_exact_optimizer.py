@@ -1013,6 +1013,23 @@ def _install_profile_timing_supplements(opt) -> None:
                 add_counter(profile_name, value)
             else:
                 opt._profile_add(profile_name, float(value))
+        for key, raw_value in sorted(timing.items()):
+            if not (str(key).startswith("scan_runner_cache_miss_category_") and str(key).endswith("_count")):
+                continue
+            profile_name = f"{profile_prefix}_{key}"
+            if profile_name in before_counts:
+                after_count = int(getattr(opt, "_profile", {}).get(profile_name, {}).get("count", 0))
+                if after_count != before_counts[profile_name]:
+                    continue
+            try:
+                value = int(raw_value)
+            except Exception:
+                continue
+            add_counter = getattr(opt, "_profile_add_counter", None)
+            if callable(add_counter):
+                add_counter(profile_name, value)
+            else:
+                opt._profile_add(profile_name, float(value))
         return solver_total
 
     opt._profile_solver_timing = _profile_solver_timing_with_supplements

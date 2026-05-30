@@ -295,6 +295,7 @@ def test_optimizer_private_policy_error_branches(monkeypatch):
                 "scan_total_s": 2.0,
                 "scan_runner_cache_hit_count": 4,
                 "scan_runner_cache_miss_count": object(),
+                "scan_runner_cache_miss_category_tolerance_count": 2,
             }
         },
         profile_prefix="scan",
@@ -303,6 +304,7 @@ def test_optimizer_private_policy_error_branches(monkeypatch):
     )
     assert solver_total == pytest.approx(2.0)
     assert opt._profile["scan_scan_runner_cache_hit_count"]["wall_time_s"] == pytest.approx(4.0)
+    assert opt._profile["scan_scan_runner_cache_miss_category_tolerance_count"]["wall_time_s"] == pytest.approx(2.0)
     assert opt._profile["scan_unattributed_total"]["wall_time_s"] == pytest.approx(3.0)
 
 

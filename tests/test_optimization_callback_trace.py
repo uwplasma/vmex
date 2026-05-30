@@ -536,6 +536,7 @@ def test_profile_exact_supplements_scan_cache_status_timing_on_older_optimizer()
                 "scan_runner_cache_hit_count": 2,
                 "scan_runner_cache_miss_count": 1,
                 "scan_runner_cache_bypass_count": 0,
+                "scan_runner_cache_miss_category_iteration_budget_count": 1,
                 "scan_runner_cache_hit_device_run_s": 0.40,
                 "scan_runner_cache_hit_dispatch_s": 0.05,
                 "scan_runner_cache_hit_ready_s": 0.35,
@@ -553,6 +554,7 @@ def test_profile_exact_supplements_scan_cache_status_timing_on_older_optimizer()
     assert opt._profile["trial_solver_scan_runner_cache_build"]["wall_time_s"] == 0.30
     assert opt._profile["trial_solver_scan_runner_cache_hit_count"]["wall_time_s"] == 2
     assert opt._profile["trial_solver_scan_runner_cache_miss_count"]["wall_time_s"] == 1
+    assert opt._profile["trial_solver_scan_runner_cache_miss_category_iteration_budget_count"]["wall_time_s"] == 1
     assert opt._profile["trial_solver_scan_runner_cache_hit_ready"]["wall_time_s"] == 0.35
     assert opt._profile["trial_solver_scan_runner_cache_miss_ready"]["wall_time_s"] == 1.10
 

@@ -45,6 +45,23 @@ SCAN_CACHE_KEY_FIELDS: tuple[str, ...] = (
     "scan_fallback_fsq_abs",
 )
 
+SCAN_CACHE_KEY_FIELDS_WITH_SEQ_LEN: tuple[str, ...] = SCAN_CACHE_KEY_FIELDS + ("seq_len",)
+
+SCAN_FAST_CACHE_KEY_FIELDS: tuple[str, ...] = (
+    "schema",
+    "static_key",
+    "wout_key",
+    "edge_value_key",
+    "max_iter",
+    "step_size",
+    "initial_flip_sign",
+    "lambda_update_scale",
+    "precond_radial_alpha",
+    "precond_lambda_alpha",
+    "apply_m1_constraints",
+    "jit_forces",
+)
+
 
 @dataclass(frozen=True)
 class CacheKeyDelta:
@@ -87,6 +104,13 @@ SCAN_CACHE_KEY_CATEGORIES: dict[str, str] = {
     "scan_fallback_fsq_factor": "fallback_policy",
     "scan_fallback_badjac_limit": "fallback_policy",
     "scan_fallback_fsq_abs": "fallback_policy",
+    "seq_len": "iteration_budget",
+    "edge_value_key": "geometry",
+    "max_iter": "iteration_budget",
+    "precond_radial_alpha": "iteration_update",
+    "precond_lambda_alpha": "iteration_update",
+    "apply_m1_constraints": "spectral_policy",
+    "jit_forces": "execution_policy",
 }
 
 
@@ -164,6 +188,59 @@ def scan_cache_key_delta_summary(
     }
 
 
+def scan_cache_key_field_names(key: tuple[Any, ...]) -> tuple[str, ...]:
+    """Return the stable field-name schema for a scan runner cache key."""
+
+    schema = str(key[0]) if key else ""
+    if schema == "vmec2000_scan_v5":
+        if len(key) == len(SCAN_CACHE_KEY_FIELDS_WITH_SEQ_LEN):
+            return SCAN_CACHE_KEY_FIELDS_WITH_SEQ_LEN
+        return SCAN_CACHE_KEY_FIELDS
+    if schema == "scan_v1":
+        return SCAN_FAST_CACHE_KEY_FIELDS
+    return tuple(f"field_{index}" for index in range(len(key)))
+
+
+def scan_cache_miss_category_counts(
+    requested_key: tuple[Any, ...],
+    existing_keys: Any,
+    *,
+    field_categories: Mapping[str, str] = SCAN_CACHE_KEY_CATEGORIES,
+) -> dict[str, int]:
+    """Categorize why a scan runner lookup missed an existing cache.
+
+    The result is intentionally compact and safe for profiler JSON.  Empty
+    caches are reported as ``cold_empty``; otherwise the requested key is
+    compared to the closest compatible cached key and the changed fields are
+    grouped into stable cause categories.
+    """
+
+    keys = [tuple(key) for key in existing_keys]
+    if not keys:
+        return {"cold_empty": 1}
+
+    requested_schema = requested_key[0] if requested_key else None
+    compatible = [key for key in keys if key and key[0] == requested_schema and len(key) == len(requested_key)]
+    if not compatible:
+        return {"schema": 1}
+
+    field_names = scan_cache_key_field_names(requested_key)
+    summaries = [
+        scan_cache_key_delta_summary(
+            key,
+            requested_key,
+            field_names=field_names,
+            field_categories=field_categories,
+        )
+        for key in compatible
+    ]
+    best = min(summaries, key=lambda item: int(item.get("n_changed", 0)))
+    categories = tuple(best.get("categories", ()))
+    if not categories:
+        return {"unknown": 1}
+    return {str(category): 1 for category in categories}
+
+
 def replay_timing_breakdown(
     profile: Mapping[str, Mapping[str, Any]],
     *,
@@ -233,11 +310,15 @@ def _profile_count(profile: Mapping[str, Mapping[str, Any]], *names: str) -> int
 __all__ = [
     "CacheKeyDelta",
     "SCAN_CACHE_KEY_CATEGORIES",
+    "SCAN_CACHE_KEY_FIELDS_WITH_SEQ_LEN",
     "SCAN_CACHE_KEY_FIELDS",
+    "SCAN_FAST_CACHE_KEY_FIELDS",
     "accumulate_scan_device_ready_timing",
     "exact_parameter_cache_key",
     "exact_parameter_cache_key_fingerprint",
     "explain_scan_cache_key_delta",
     "replay_timing_breakdown",
+    "scan_cache_key_field_names",
+    "scan_cache_miss_category_counts",
     "scan_cache_key_delta_summary",
 ]

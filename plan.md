@@ -504,7 +504,7 @@ update:
   test now cover the previously failing missing-`input.final` transition. The
   remaining open cleanup is running and tuning the guarded mirror schedule
   across unrelated seeds and completing stronger multi-seed promotion evidence.
-- CPU/GPU performance: 97%. Backend-adaptive replay bucketing, scalar-gradient
+- CPU/GPU performance: 98%. Backend-adaptive replay bucketing, scalar-gradient
   tangent reuse, detailed timing, and GPU-only preconditioner-output fusion are
   in place. Hot-path algebra and CPU/GPU fusion gating are now covered by
   focused CPU-only regressions. The exact-Jacobian residual tangent helper now
@@ -536,13 +536,14 @@ update:
   dynamic replay payload staging recognizes accelerator backend names beyond
   the literal `gpu`. Projected accepted-point replay buckets now also feed the
   profiler budget checks and comparison summaries, so GPU/default replay work is
-  no longer under-attributed as legacy tape-only replay. The May 28 `office`
-  QH mode-2 GPU exact-Jacobian rerun at `b085c15` used one dynamic-basepoint
-  JVP replay over 24 columns with no chunking (`replay_wall=3.60 s`,
-  `residual_tangent_wall=2.32 s`, `tape_build_wall=4.36 s`, total callback
-  `12.01 s`), confirming that chunk selection is no longer the immediate
-  blocker for this case. A follow-up `office` profile with the new residual
-  projection dispatch/ready split used three perturbed QH mode-2 GPU exact
+  no longer under-attributed as legacy tape-only replay. The May 30 `office`
+  profile on RTX A4000/JAX 0.6.2 rechecked QH mode-2 GPU dense exact
+  Jacobians with perturbed accepted points. For an `inner_max_iter=160` budget,
+  8-column replay chunks were the best tested policy (`94.8 s` for two
+  callbacks) versus unchunked (`131.4 s`), chunk 4 (`131.9 s`), chunk 16
+  (`127.5 s`), and chunk 24 (`159.8 s`), so GPU 24-DOF replay now defaults to
+  8-column chunks. A follow-up `office` profile with the residual projection
+  dispatch/ready split used three perturbed QH mode-2 GPU exact
   Jacobian callbacks (`13.04 s`, `3.98 s`, `3.27 s`) and showed
   `jacobian_residual_tangents=2.263 s` split into `2.204 s` dispatch and
   `0.059 s` device-ready time. Without explicit sync timing, standard replay

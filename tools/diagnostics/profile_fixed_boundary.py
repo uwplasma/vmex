@@ -390,6 +390,11 @@ def _print_run_summary(summary: dict[str, Any]) -> None:
                         timing_bits.append(f"{key}={int(value)}")
                     else:
                         timing_bits.append(f"{key}={float(value):.6g}")
+        for key, value in sorted(timing.items()):
+            if not (str(key).startswith("scan_runner_cache_miss_category_") and str(key).endswith("_count")):
+                continue
+            if isinstance(value, (int, float)):
+                timing_bits.append(f"{key}={int(value)}")
         if timing_bits:
             print("[profile_fixed_boundary] timing " + " ".join(timing_bits), flush=True)
 

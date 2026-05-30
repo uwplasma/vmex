@@ -73,6 +73,7 @@ from .field import TWOPI, b2_from_bsup, bsup_from_geom, bsup_from_sqrtg_lambda
 from .fourier import eval_fourier_dtheta, eval_fourier_dzeta_phys
 from .geom import eval_geom
 from .grids import angle_steps
+from .performance_hotspot_helpers import scan_cache_miss_category_counts as _scan_cache_miss_category_counts
 from .solve_diagnostics_io import (
     _dump_freeb_axis_trace_record,
     _dump_freeb_control_trace_record,
@@ -254,6 +255,26 @@ def _jit_cache_put(cache: OrderedDict[tuple, Any], key: tuple, value, *, env_nam
     while len(cache) > limit:
         cache.popitem(last=False)
     return value
+
+
+def _record_scan_runner_cache_miss_categories(
+    stats: dict[str, float | int],
+    *,
+    requested_key: tuple,
+    existing_keys,
+) -> None:
+    """Record stable scan-runner miss causes into timing diagnostics."""
+
+    try:
+        counts = _scan_cache_miss_category_counts(tuple(requested_key), tuple(existing_keys))
+    except Exception:
+        counts = {"unknown": 1}
+    for category, count in counts.items():
+        safe_category = "".join(ch if ch.isalnum() else "_" for ch in str(category).strip().lower()).strip("_")
+        if not safe_category:
+            safe_category = "unknown"
+        key = f"scan_runner_cache_miss_category_{safe_category}_count"
+        stats[key] = int(stats.get(key, 0)) + int(count)
 
 
 def _strict_update_step_jit(
@@ -8773,6 +8794,11 @@ def solve_fixed_boundary_residual_iter(
                     scan_timing_stats["scan_runner_cache_miss_count"] = (
                         int(scan_timing_stats.get("scan_runner_cache_miss_count", 0)) + 1
                     )
+                    _record_scan_runner_cache_miss_categories(
+                        scan_timing_stats,
+                        requested_key=key,
+                        existing_keys=tuple(_SCAN_RUNNER_CACHE.keys()),
+                    )
                 cache_build_start = time.perf_counter() if scan_timing_enabled else None
                 runner = jit(_run_scan)
                 cached_runner = _jit_cache_put(
@@ -9494,6 +9520,11 @@ def solve_fixed_boundary_residual_iter(
                 if scan_timing_enabled and (not differentiating_scan):
                     scan_timing_stats["scan_runner_cache_miss_count"] = (
                         int(scan_timing_stats.get("scan_runner_cache_miss_count", 0)) + 1
+                    )
+                    _record_scan_runner_cache_miss_categories(
+                        scan_timing_stats,
+                        requested_key=scan_cache_key,
+                        existing_keys=tuple(_SCAN_RUNNER_CACHE.keys()),
                     )
                 cache_build_start = time.perf_counter() if scan_timing_enabled else None
                 _run_scan = jit(_run_scan)
