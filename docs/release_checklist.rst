@@ -144,9 +144,9 @@ Current repository release note
 -------------------------------
 
 The latest repository tag prepared from this checklist is
-`v0.0.13 <https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.13>`_, built
-from the matching release tag after the required CI gates pass.  Verify PyPI
-with a no-dependencies wheel download after publication.
+`v0.0.14 <https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.14>`_, built
+from the matching release tag after the required CI gates passed.  Verify PyPI
+with a no-dependencies wheel download after each publication.
 Package-index descriptions are immutable for already-published files, so any
 README or installation wording merged after the latest public tag will not
 appear on PyPI until the next release upload.
@@ -194,20 +194,23 @@ claiming a broader physics milestone:
 Latest local release-hygiene snapshot
 -------------------------------------
 
-The latest documented local rerun is ``outputs/rerun_20260525_123334``.  It is
+The latest documented local rerun evidence for the post-``v0.0.14`` candidate
+is the May 30 scan/replay policy refresh through commit ``7033647``.  It is
 not a release gate by itself, but it is the current evidence bundle to cite
 until a newer release-candidate run replaces it:
 
-- VMEC2000 stage-trace parity smoke: ``6`` selected cases, ``0`` failures.
-- VMEC2000 stage-trace parity full tier: ``1`` selected QH warm-start case,
-  ``0`` failures.
-- CPU/GPU fixed-boundary and exact-callback performance profiles were rerun for
-  QH warm start, QH finite beta, LASYM pressure, QH mode-2 exact callback, and
-  QI Boozer/residual isolation.
-- The profiler/reporting low-hanging fix from that rerun was metadata only:
-  GPU exact callbacks were already using effective JVP-only exact tapes with
-  basepoint carries, while the compact matrix summary had echoed only the
-  requested CLI flag.  Do not present this as a solver speedup.
+- Local CI-equivalent gate: ``2378 passed, 20 skipped, 110 deselected,
+  1 xfailed`` with ``95.22%`` coverage at the enforced ``95%`` gate, plus CLI
+  smoke, compile, repository-size audit, physics smoke, fast docs, and full
+  docs.
+- Repository size audit: ``23.59 MiB`` tracked, largest tracked file below
+  ``2 MiB``.
+- GitHub Actions run ``26696164006`` passed build, docs, CLI smoke, parity
+  dry-run, physics smoke, and Python 3.10/3.11/3.12 fast-test lanes for
+  ``7033647``.
+- Office GPU profiling refreshed the fixed-boundary scan and exact-callback
+  policies: long quiet accelerator scans use 512-iteration chunks, and
+  symmetric GPU dense exact replay uses 8-column chunks for 24+ DOF cases.
 
 Before tagging, replace this dated snapshot with fresh local/CI evidence from
 the exact release-candidate commit.
