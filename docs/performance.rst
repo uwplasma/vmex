@@ -627,11 +627,10 @@ active process backend.
      - ``1.48 s``
      - ``2.70 s``
 
-The mode-3 callbacks have 48 boundary parameters.  GPU replay uses
-24-column chunks for this size and enables projected replay for
-stellarator-symmetric callbacks.  That policy is case-dependent: it keeps QH
-mode-3 near the best standard replay profile and removes the QA mode-3
-regression where standard replay measured about ``37.5 s`` total.
+The mode-3 callbacks have 48 boundary parameters.  GPU replay now uses
+8-column chunks for this size and enables projected replay for
+stellarator-symmetric callbacks.  The 2026-05-30 ``office`` rerun supersedes
+the older 24-column policy for these shapes.
 
 .. list-table:: LASYM QH mode-2 perturbed exact dense-Jacobian callback, 2026-05-25
    :header-rows: 1
@@ -657,14 +656,13 @@ regression where standard replay measured about ``37.5 s`` total.
 
 LASYM doubles the active boundary families, so the mode-2 callback also reaches
 48 columns.  It should not use the symmetric mode-3 projected-replay heuristic:
-the measured LASYM projected path took ``51.1 s`` total, while disabling
-projected replay and keeping 24-column chunks reduced it to ``15.9 s``.  A
-no-chunk LASYM GPU comparison took ``34.5 s`` total with ``24.5 s`` in replay,
-so chunking remains the right default for this tested LASYM matrix.  Explicit
-environment overrides are still available for profiling, but the production
-automatic policy is now:
+the measured LASYM projected path took ``51.1 s`` total.  Chunking remains the
+right default for this tested LASYM matrix, and the current GPU chunk policy is
+the same 8-column policy used for stellarator-symmetric mode-2/mode-3
+callbacks.  Explicit environment overrides are still available for profiling,
+but the production automatic policy is now:
 
-- GPU callbacks with at least 48 columns use 24-column replay chunks.
+- GPU callbacks with at least 24 columns use 8-column replay chunks.
 - Projected replay is only auto-enabled for stellarator-symmetric callbacks
   with at least 24 columns.
 - LASYM uses the conservative chunked standard replay path unless explicitly
@@ -1232,8 +1230,10 @@ A 2026-05-30 ``office`` rerun on RTX A4000/JAX 0.6.2 rechecked QH
 and ``--inner-max-iter 160``.  The best tested GPU replay policy was an
 8-column chunk: two callbacks took ``94.8 s`` versus ``131.4 s`` unchunked,
 ``131.9 s`` with chunk 4, ``127.5 s`` with chunk 16, and ``159.8 s`` with
-chunk 24.  The default GPU replay policy therefore chunks 24-DOF callbacks at
-8 columns and keeps the older 24-column policy for 48+ DOF cases.  The
+chunk 24.  A bounded QH ``max_mode=3`` 48-DOF check with
+``--inner-max-iter 60`` then gave ``86.3 s`` for chunk 8 versus about
+``143 s`` for chunks 16 and 24.  The default GPU replay policy therefore chunks
+all 24+ DOF dense callbacks at 8 columns.  The
 remaining bottlenecks are accepted-tape build, replay dispatch/compile-like
 overhead, and dense residual-tangent projection.
 
@@ -2130,14 +2130,14 @@ tree with ``PYTHONPATH=$PWD`` gave repeated QH warm-start processes of
 for finite beta), so the next GPU lane is persistent executable reuse or
 reducing scan compile/dispatch cost rather than more driver-side cache toggles.
 The first compile/dispatch reduction that survived the finite-beta guardrail is
-an adaptive low-mode accelerator chunk: quiet GPU scans with at most 16 Fourier
-coefficients and more than 512 iterations use a fixed 256-iteration scan chunk,
-while higher-mode cases keep the full-length chunk.  On ``office`` this reduced
-the full input-NITER ``input.nfp4_QH_warm_start`` fresh GPU profile from
-``15.76 s`` to ``13.86 s`` with the same final residual
-(``1.109e-13``).  The finite-beta QH profile stayed on the full chunk because
-it has 50 modes; forcing smaller chunks regressed that case to
-``60--94 s`` versus the ``54.54 s`` patched full-chunk profile.
+an adaptive accelerator chunk: quiet GPU scans with more than 512 iterations use
+a fixed 512-iteration scan chunk, regardless of Fourier mode count.  On
+``office`` this is neutral for the low-mode ``input.nfp4_QH_warm_start`` case
+(``13.49 s`` default, ``13.43 s`` at 512, ``15.90 s`` for one full chunk) and
+material for the high-mode finite-beta QH case (``54.28 s`` default/full,
+``37.84 s`` at 256, ``23.48 s`` at 512, ``51.33 s`` at 1024), with unchanged
+final residuals.  That moves the finite-beta GPU path back to the same order as
+the local CPU timing while preserving the warmed scan-throughput advantage.
 
 The exact-optimizer profile has a different bottleneck from single fixed-boundary
 solves.  A 2026-05-24 bounded ``max_mode=3`` two-evaluation profile on the
@@ -2314,11 +2314,10 @@ Controls:
 - ``VMEC_JAX_DYNAMIC_SCAN_ITERS=<int>``: override the probe window
   (defaults to ``10`` on CPU, ``3`` on accelerators).
 
-For quiet accelerator scans, ``vmec-jax`` uses a backend- and mode-aware scan
-chunk.  Higher-mode runs use one full-length chunk to minimize host/device
-launch overhead.  Low-mode long-budget runs use fixed 256-iteration chunks to
-reduce fresh-process compile/dispatch latency while reusing the same compiled
-body inside the solve.
+For quiet accelerator scans, ``vmec-jax`` uses a backend-aware scan chunk.
+Short runs use one full-length chunk.  Long-budget runs use fixed
+512-iteration chunks to reduce fresh-process compile/dispatch latency while
+reusing the same compiled body inside the solve.
 
 Controls:
 

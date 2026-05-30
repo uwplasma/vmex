@@ -34,8 +34,8 @@ def test_scan_chunk_settings_accelerator_default(monkeypatch):
         lthreed=False,
     )
 
-    assert chunk_size == 783
-    assert cap_to_remaining is True
+    assert chunk_size == 512
+    assert cap_to_remaining is False
 
 
 def test_scan_chunk_settings_accelerator_low_mode_long_budget(monkeypatch):
@@ -50,7 +50,7 @@ def test_scan_chunk_settings_accelerator_low_mode_long_budget(monkeypatch):
         spectral_mode_count=8,
     )
 
-    assert chunk_size == 256
+    assert chunk_size == 512
     assert cap_to_remaining is False
 
 
@@ -65,10 +65,10 @@ def test_scan_chunk_settings_accelerator_3d_default(monkeypatch):
         lthreed=True,
     )
 
-    # Higher-mode GPU quiet runs use the full iteration budget as a single
-    # chunk to avoid Python host/device sync overhead.
-    assert chunk_size == 5000
-    assert cap_to_remaining is True
+    # Long quiet GPU runs use a fixed chunk to avoid one very large scan
+    # executable dominating cold/fresh-process runtime.
+    assert chunk_size == 512
+    assert cap_to_remaining is False
 
 
 def test_scan_chunk_settings_respects_override(monkeypatch):

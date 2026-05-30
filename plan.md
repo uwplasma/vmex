@@ -504,7 +504,7 @@ update:
   test now cover the previously failing missing-`input.final` transition. The
   remaining open cleanup is running and tuning the guarded mirror schedule
   across unrelated seeds and completing stronger multi-seed promotion evidence.
-- CPU/GPU performance: 98%. Backend-adaptive replay bucketing, scalar-gradient
+- CPU/GPU performance: 99%. Backend-adaptive replay bucketing, scalar-gradient
   tangent reuse, detailed timing, and GPU-only preconditioner-output fusion are
   in place. Hot-path algebra and CPU/GPU fusion gating are now covered by
   focused CPU-only regressions. The exact-Jacobian residual tangent helper now
@@ -513,9 +513,11 @@ update:
   CPU/GPU profiling wrapper now exposes optimizer method, trust-region solver,
   dynamic replay mode, and child stdout/stderr logs for production GPU matrix
   diagnosis. Symmetric GPU exact-Jacobian replay now defaults to 8-column
-  chunks for 24+ DOF cases, matching the best bounded `office` profile: QH
+  chunks for 24+ DOF cases, matching the best bounded `office` profiles: QH
   mode-2 exact Jacobian dropped from about `42.0 s` to about `18.0 s`, with
-  tape replay dropping from about `22.2 s` to about `5.3 s`. Production
+  tape replay dropping from about `22.2 s` to about `5.3 s`, and the later QH
+  mode-3 48-DOF check favored chunk 8 (`86.3 s`) over chunks 16/24 (about
+  `143 s`). Production
   fixed-boundary auto policy now uses the VMEC-control non-scan loop on CPU and
   scan on GPU/CUDA/ROCm for ordinary raw fixed-boundary solves; the older May
   2026 GPU non-scan result was superseded after the scan-cache/preconditioner
@@ -541,8 +543,10 @@ update:
   Jacobians with perturbed accepted points. For an `inner_max_iter=160` budget,
   8-column replay chunks were the best tested policy (`94.8 s` for two
   callbacks) versus unchunked (`131.4 s`), chunk 4 (`131.9 s`), chunk 16
-  (`127.5 s`), and chunk 24 (`159.8 s`), so GPU 24-DOF replay now defaults to
-  8-column chunks. A follow-up `office` profile with the residual projection
+  (`127.5 s`), and chunk 24 (`159.8 s`). A bounded QH mode-3 48-DOF callback
+  then measured `86.3 s` for chunk 8 versus about `143 s` for chunks 16 and
+  24, so GPU 24+ DOF replay now defaults to 8-column chunks. A follow-up
+  `office` profile with the residual projection
   dispatch/ready split used three perturbed QH mode-2 GPU exact
   Jacobian callbacks (`13.04 s`, `3.98 s`, `3.27 s`) and showed
   `jacobian_residual_tangents=2.263 s` split into `2.204 s` dispatch and
@@ -1381,15 +1385,15 @@ Defer beyond the current cycle:
   `55.9/55.5 s`, dominated by `scan_device_dispatch_s`. The next GPU blocker is
   persistent scan executable reuse or reducing scan compile/dispatch cost, not
   additional cache toggles.
-- 2026-05-29: Added the first scan compile/dispatch reduction after the cache
-  alignment result. Quiet accelerator scans with low spectral mode count
-  (`<=16` stored Fourier coefficients) and long budgets (`>512` iterations)
-  now use fixed 256-iteration scan chunks; higher-mode accelerator cases keep
-  one full-length chunk. On `office`, the full input-NITER
-  `input.nfp4_QH_warm_start` GPU profile improved from `15.76 s` to `13.86 s`
-  with identical final residual (`1.109e-13`). The finite-beta QH guardrail
-  stayed on the full chunk because it has 50 modes; forced small chunks
-  regressed it to `60--94 s` versus `54.54 s` for the patched full chunk.
+- 2026-05-30: Replaced the earlier low-mode-only GPU scan chunk heuristic with
+  a 512-iteration chunk for all quiet accelerator scans longer than 512
+  iterations.  On `office` (RTX A4000/JAX 0.6.2), this remained neutral for
+  `input.nfp4_QH_warm_start` (`13.49 s` default, `13.43 s` at 512, `15.90 s`
+  for one full chunk, final residual `1.109e-13`) and materially improved the
+  high-mode finite-beta QH guardrail (`54.28 s` default/full, `37.84 s` at 256,
+  `23.48 s` at 512, `51.33 s` at 1024, final residual `5.51e-13`).  The next
+  remaining GPU blocker is fresh-process executable reuse and exact
+  accepted-point tape build/replay, not fixed-boundary scan chunk selection.
 - 2026-05-29: Added per-stage multigrid wall-time diagnostics to the driver and
   fixed-boundary profiler, then fixed chunked-stage accounting so accelerated
   monitor chunks are summed as one logical stage. Scan-stage `scan_total_s`

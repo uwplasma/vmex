@@ -2321,11 +2321,11 @@ def test_gpu_replay_chunk_covers_symmetric_mode2(monkeypatch):
 
     assert opt._lasym_replay_column_chunk(23) is None
     assert opt._lasym_replay_column_chunk(24) == 8
-    assert opt._lasym_replay_column_chunk(96) == 24
+    assert opt._lasym_replay_column_chunk(96) == 8
 
     opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=False))
     assert opt._lasym_replay_column_chunk(24) == 8
-    assert opt._lasym_replay_column_chunk(48) == 24
+    assert opt._lasym_replay_column_chunk(48) == 8
 
 
 def test_lasym_replay_chunk_env_override(monkeypatch):
@@ -2345,7 +2345,7 @@ def test_lasym_replay_chunk_bad_env_falls_back_to_auto(monkeypatch):
     opt._solver_device_name = "gpu"
 
     assert opt._lasym_replay_column_chunk(24) == 8
-    assert opt._lasym_replay_column_chunk(48) == 24
+    assert opt._lasym_replay_column_chunk(48) == 8
 
     monkeypatch.setenv("VMEC_JAX_LASYM_REPLAY_COLUMN_CHUNK", "off")
     assert opt._lasym_replay_column_chunk(24) is None

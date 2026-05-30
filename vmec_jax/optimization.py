@@ -2812,12 +2812,10 @@ class FixedBoundaryExactOptimizer:
                 backend_name = None
         if backend_name in ("gpu", "cuda", "rocm"):
             # GPU exact replay is launch/transpose dominated.  Office A4000
-            # profiles on JAX 0.6.2 showed 8-column replay chunks reduce the
-            # QH mode-2 24-DOF cold/new-point callback wall time materially,
-            # while 48+ DOF cases still favor the older 24-column policy.
-            # Explicit environment overrides remain authoritative.
-            if int(n_params) >= 48:
-                return 24
+            # profiles on JAX 0.6.2 showed 8-column replay chunks reduce both
+            # QH mode-2 24-DOF and QH mode-3 48-DOF cold/new-point callback
+            # wall time materially. Explicit environment overrides remain
+            # authoritative.
             if int(n_params) >= 24:
                 return 8
             return None
