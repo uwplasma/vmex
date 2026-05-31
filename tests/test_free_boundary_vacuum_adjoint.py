@@ -24,6 +24,8 @@ from vmec_jax.free_boundary_adjoint import (
     dense_vmec_nestor_mode_solve_jax,
     dense_vacuum_residual,
     dense_vacuum_solve_jax,
+    jax_visible_nonlinear_controller_directional_check_jax,
+    jax_visible_nonlinear_controller_jax,
     direct_coil_projected_mode_fixed_point_directional_check_jax,
     direct_coil_projected_mode_fixed_point_objective_jax,
     mode_matrix_from_grpmn_jax,
@@ -231,6 +233,147 @@ def test_dense_fixed_point_implicit_adjoint_matches_finite_difference_for_rhs():
     fd = (objective(eps) - objective(-eps)) / (2.0 * eps)
 
     np.testing.assert_allclose(exact, fd, rtol=5.0e-8, atol=1.0e-10)
+
+
+def test_jax_visible_nonlinear_controller_matches_manual_scan_and_fd():
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jnp
+
+    enable_x64(True)
+    controls = {
+        "gain": jnp.asarray([0.21, 0.18, 0.16, 0.13], dtype=float),
+        "bias": jnp.asarray(
+            [
+                [0.010, -0.020],
+                [0.015, -0.012],
+                [-0.005, 0.018],
+                [0.008, 0.004],
+            ],
+            dtype=float,
+        ),
+    }
+    params = {
+        "matrix": jnp.asarray([[0.18, -0.05], [0.07, 0.14]], dtype=float),
+        "drive": jnp.asarray([0.30, -0.22], dtype=float),
+    }
+    direction = {
+        "matrix": jnp.asarray([[0.02, -0.01], [0.015, 0.005]], dtype=float),
+        "drive": jnp.asarray([0.04, -0.025], dtype=float),
+    }
+
+    def step(state, prm, control):
+        drive = prm["matrix"] @ state + prm["drive"] + control["bias"]
+        next_state = 0.72 * state + control["gain"] * jnp.tanh(drive)
+        return next_state, {"drive": drive, "norm": jnp.vdot(next_state, next_state)}
+
+    run = jax_visible_nonlinear_controller_jax(
+        step,
+        jnp.asarray([0.05, -0.03], dtype=float),
+        params,
+        controls,
+    )
+    state = jnp.asarray([0.05, -0.03], dtype=float)
+    norms = []
+    for k in range(4):
+        state, aux = step(
+            state,
+            params,
+            {"gain": controls["gain"][k], "bias": controls["bias"][k]},
+        )
+        norms.append(aux["norm"])
+    np.testing.assert_allclose(run["state"], state, rtol=1.0e-14, atol=1.0e-14)
+    np.testing.assert_allclose(run["history"]["norm"], jnp.asarray(norms), rtol=1.0e-14, atol=1.0e-14)
+
+    def objective_from_run(controller_run):
+        return 0.5 * jnp.vdot(controller_run["state"], controller_run["state"]) + 0.01 * jnp.sum(
+            controller_run["history"]["norm"]
+        )
+
+    check = jax_visible_nonlinear_controller_directional_check_jax(
+        step,
+        objective_from_run,
+        params,
+        direction,
+        jnp.asarray([0.05, -0.03], dtype=float),
+        controls,
+        eps=1.0e-5,
+    )
+    assert np.isfinite(float(check["value"]))
+    assert float(check["abs_error"]) < 1.0e-9
+    np.testing.assert_allclose(check["exact_directional"], check["fd_directional"], rtol=1.0e-6, atol=1.0e-10)
+
+
+def test_jax_visible_controller_direct_coil_gradient_matches_fd():
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jnp
+
+    enable_x64(True)
+    radius = 1.27
+    dofs = jnp.zeros((1, 3, 3), dtype=float)
+    dofs = dofs.at[0, 0, 2].set(radius)
+    dofs = dofs.at[0, 1, 1].set(radius)
+    coil_params = CoilFieldParams(
+        base_curve_dofs=dofs,
+        base_currents=jnp.asarray([4.8e6], dtype=float),
+        n_segments=32,
+        regularization_epsilon=1.0e-9,
+    )
+    dofs_direction = jnp.zeros_like(coil_params.base_curve_dofs)
+    dofs_direction = dofs_direction.at[0, 0, 2].set(0.012)
+    dofs_direction = dofs_direction.at[0, 1, 1].set(-0.010)
+    direction = coil_params.with_arrays(
+        base_curve_dofs=dofs_direction,
+        base_currents=0.006 * coil_params.base_currents,
+    )
+    controls = {
+        "gain": jnp.asarray([0.08, 0.06, 0.05], dtype=float),
+        "phase": jnp.asarray([0.10, 0.38, 0.71], dtype=float),
+    }
+
+    def step(state, params, control):
+        R = jnp.asarray(
+            [
+                [0.76 + 0.025 * state[0], 0.84 - 0.015 * state[1]],
+                [0.91 + 0.010 * state[1], 0.80 + 0.018 * state[0]],
+            ],
+            dtype=float,
+        )
+        Z = jnp.asarray(
+            [
+                [0.11 + 0.020 * state[1], -0.12 + 0.010 * state[0]],
+                [0.16 - 0.018 * state[0], -0.18 - 0.012 * state[1]],
+            ],
+            dtype=float,
+        )
+        phi = control["phase"] + jnp.asarray([[0.0, 0.17], [0.31, 0.49]], dtype=float)
+        br, bp, bz = sample_coil_field_cylindrical(params, R, Z, phi)
+        drive = jnp.asarray(
+            [
+                1.0e2 * jnp.mean(br + 0.15 * bp),
+                1.0e2 * jnp.mean(bz - 0.10 * br),
+            ],
+            dtype=float,
+        )
+        next_state = 0.68 * state + control["gain"] * jnp.tanh(drive)
+        return next_state, {"drive": drive, "bmean": jnp.mean(br * br + bp * bp + bz * bz)}
+
+    def objective_from_run(controller_run):
+        state = controller_run["state"]
+        return 0.5 * jnp.vdot(state, state) + 1.0e-3 * jnp.sum(controller_run["history"]["bmean"])
+
+    check = jax_visible_nonlinear_controller_directional_check_jax(
+        step,
+        objective_from_run,
+        coil_params,
+        direction,
+        jnp.asarray([0.01, -0.02], dtype=float),
+        controls,
+        eps=1.0e-4,
+        checkpoint_steps=True,
+    )
+    assert np.isfinite(float(check["value"]))
+    assert abs(float(check["exact_directional"])) > 1.0e-12
+    np.testing.assert_allclose(check["exact_directional"], check["fd_directional"], rtol=2.0e-5, atol=1.0e-10)
 
 
 def _mode_basis_for_rhs_tests(*, lasym: bool = False):

@@ -307,7 +307,13 @@ PHASE_TIMING_KEYS: tuple[tuple[str, str], ...] = (
     ("accepted_control_fsq1", "iteration_control_fsq1_s"),
     ("preconditioner", "preconditioner_s"),
     ("update", "update_s"),
+    ("update_state_ready", "update_state_ready_s"),
     ("finalize", "finalize_s"),
+    ("finalize_nestor_recompute", "finalize_nestor_recompute_s"),
+    ("finalize_residual_recompute", "finalize_residual_recompute_s"),
+    ("finalize_residual_device_get", "finalize_residual_device_get_s"),
+    ("finalize_diag_build", "finalize_diag_build_s"),
+    ("finalize_unattributed", "finalize_unattributed_s"),
 )
 
 

@@ -288,16 +288,23 @@ _SOLVER_TIMING_KEYS = (
     "precond_refresh_s",
     "update_s",
     "update_state_s",
+    "update_state_ready_s",
     "update_trace_build_s",
     "update_trace_finalize_s",
     "iteration_prepare_s",
     "iteration_residual_metrics_s",
     "iteration_post_update_s",
     "finalize_s",
+    "finalize_nestor_recompute_s",
+    "finalize_residual_recompute_s",
+    "finalize_residual_device_get_s",
+    "finalize_diag_build_s",
+    "finalize_unattributed_s",
     "compute_forces_per_iter_s",
     "preconditioner_per_iter_s",
     "update_per_iter_s",
     "update_state_per_iter_s",
+    "update_state_ready_per_iter_s",
     "update_trace_build_per_iter_s",
     "update_trace_finalize_per_iter_s",
 )
@@ -484,10 +491,23 @@ def _case_metrics(case: dict[str, Any]) -> dict[str, Any]:
         "warm_preconditioner_s": _finite_float(_nested_value(solver, ("warm", "preconditioner_s"))),
         "warm_precond_apply_s": _finite_float(_nested_value(solver, ("warm", "precond_apply_s"))),
         "warm_update_s": _finite_float(_nested_value(solver, ("warm", "update_s"))),
+        "warm_update_state_s": _finite_float(_nested_value(solver, ("warm", "update_state_s"))),
+        "warm_update_state_ready_s": _finite_float(_nested_value(solver, ("warm", "update_state_ready_s"))),
         "warm_iteration_residual_metrics_s": _finite_float(
             _nested_value(solver, ("warm", "iteration_residual_metrics_s"))
         ),
         "warm_finalize_s": _finite_float(_nested_value(solver, ("warm", "finalize_s"))),
+        "warm_finalize_nestor_recompute_s": _finite_float(
+            _nested_value(solver, ("warm", "finalize_nestor_recompute_s"))
+        ),
+        "warm_finalize_residual_recompute_s": _finite_float(
+            _nested_value(solver, ("warm", "finalize_residual_recompute_s"))
+        ),
+        "warm_finalize_residual_device_get_s": _finite_float(
+            _nested_value(solver, ("warm", "finalize_residual_device_get_s"))
+        ),
+        "warm_finalize_diag_build_s": _finite_float(_nested_value(solver, ("warm", "finalize_diag_build_s"))),
+        "warm_finalize_unattributed_s": _finite_float(_nested_value(solver, ("warm", "finalize_unattributed_s"))),
         "warm_compute_forces_per_iter_s": _finite_float(
             _nested_value(solver, ("warm", "compute_forces_per_iter_s"))
         ),
@@ -664,6 +684,14 @@ def _cpu_gpu_comparison(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                         cpu_metrics.get("warm_precond_apply_s"),
                     ),
                     "warm_update": _ratio(gpu_metrics.get("warm_update_s"), cpu_metrics.get("warm_update_s")),
+                    "warm_update_state": _ratio(
+                        gpu_metrics.get("warm_update_state_s"),
+                        cpu_metrics.get("warm_update_state_s"),
+                    ),
+                    "warm_update_state_ready": _ratio(
+                        gpu_metrics.get("warm_update_state_ready_s"),
+                        cpu_metrics.get("warm_update_state_ready_s"),
+                    ),
                     "warm_iteration_residual_metrics": _ratio(
                         gpu_metrics.get("warm_iteration_residual_metrics_s"),
                         cpu_metrics.get("warm_iteration_residual_metrics_s"),
@@ -671,6 +699,26 @@ def _cpu_gpu_comparison(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "warm_finalize": _ratio(
                         gpu_metrics.get("warm_finalize_s"),
                         cpu_metrics.get("warm_finalize_s"),
+                    ),
+                    "warm_finalize_nestor_recompute": _ratio(
+                        gpu_metrics.get("warm_finalize_nestor_recompute_s"),
+                        cpu_metrics.get("warm_finalize_nestor_recompute_s"),
+                    ),
+                    "warm_finalize_residual_recompute": _ratio(
+                        gpu_metrics.get("warm_finalize_residual_recompute_s"),
+                        cpu_metrics.get("warm_finalize_residual_recompute_s"),
+                    ),
+                    "warm_finalize_residual_device_get": _ratio(
+                        gpu_metrics.get("warm_finalize_residual_device_get_s"),
+                        cpu_metrics.get("warm_finalize_residual_device_get_s"),
+                    ),
+                    "warm_finalize_diag_build": _ratio(
+                        gpu_metrics.get("warm_finalize_diag_build_s"),
+                        cpu_metrics.get("warm_finalize_diag_build_s"),
+                    ),
+                    "warm_finalize_unattributed": _ratio(
+                        gpu_metrics.get("warm_finalize_unattributed_s"),
+                        cpu_metrics.get("warm_finalize_unattributed_s"),
                     ),
                     "active_nestor_warm_sample": _ratio(
                         gpu_metrics.get("active_nestor_warm_sample_s"),
@@ -730,8 +778,15 @@ _BOTTLENECK_RATIO_TO_METRIC = {
     "warm_preconditioner": "warm_preconditioner_s",
     "warm_precond_apply": "warm_precond_apply_s",
     "warm_update": "warm_update_s",
+    "warm_update_state": "warm_update_state_s",
+    "warm_update_state_ready": "warm_update_state_ready_s",
     "warm_iteration_residual_metrics": "warm_iteration_residual_metrics_s",
     "warm_finalize": "warm_finalize_s",
+    "warm_finalize_nestor_recompute": "warm_finalize_nestor_recompute_s",
+    "warm_finalize_residual_recompute": "warm_finalize_residual_recompute_s",
+    "warm_finalize_residual_device_get": "warm_finalize_residual_device_get_s",
+    "warm_finalize_diag_build": "warm_finalize_diag_build_s",
+    "warm_finalize_unattributed": "warm_finalize_unattributed_s",
     "active_nestor_warm_sample": "active_nestor_warm_sample_s",
     "active_nestor_warm_solve": "active_nestor_warm_solve_s",
     "final_recompute_sample": "final_recompute_sample_s",

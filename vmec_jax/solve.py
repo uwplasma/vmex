@@ -10431,8 +10431,13 @@ def solve_fixed_boundary_residual_iter(
         "precond_mode_scale": 0.0,
         "update": 0.0,
         "update_state": 0.0,
+        "update_state_ready": 0.0,
         "update_trace_build": 0.0,
         "update_trace_finalize": 0.0,
+        "finalize_nestor_recompute": 0.0,
+        "finalize_residual_recompute": 0.0,
+        "finalize_residual_device_get": 0.0,
+        "finalize_diag_build": 0.0,
         "precond_refresh": 0.0,
         "iterations": 0,
     }
@@ -14272,12 +14277,17 @@ def solve_fixed_boundary_residual_iter(
                         cache_prec_faclam = None
                         cache_prec_lam_debug = None
             if timing_enabled and t_state_update_start is not None:
+                t_state_update_dispatch_done = time.perf_counter()
                 try:
                     if has_jax():
                         jax.block_until_ready(state.Rcos)
                 except Exception:
                     pass
-                timing_stats["update_state"] += time.perf_counter() - float(t_state_update_start)
+                t_state_update_ready_done = time.perf_counter()
+                timing_stats["update_state_ready"] += (
+                    t_state_update_ready_done - float(t_state_update_dispatch_done)
+                )
+                timing_stats["update_state"] += t_state_update_ready_done - float(t_state_update_start)
             t_trace_finalize_start = time.perf_counter() if timing_enabled and adjoint_trace else None
             if adjoint_trace:
                 trace_entry.update(
@@ -14638,6 +14648,7 @@ def solve_fixed_boundary_residual_iter(
     final_nestor_solve_time_s = 0.0
     if bool(free_boundary_enabled and freeb_couple_edge) and not final_vacuum_stub:
         final_nestor_recompute_attempted = True
+        t_finalize_nestor_recompute_start = time.perf_counter() if timing_enabled else None
         try:
             nestor_final, _freeb_nestor_runtime_final = nestor_external_only_step(
                 state=state,
@@ -14670,7 +14681,13 @@ def solve_fixed_boundary_residual_iter(
         except Exception:
             final_nestor_recompute_failed = True
             final_bsqvac_half_current = freeb_bsqvac_half_current
+        finally:
+            if timing_enabled and t_finalize_nestor_recompute_start is not None:
+                timing_stats["finalize_nestor_recompute"] += (
+                    time.perf_counter() - float(t_finalize_nestor_recompute_start)
+                )
     if bool(free_boundary_enabled) and final_bsqvac_half_current is not None:
+        t_finalize_residual_recompute_start = time.perf_counter() if timing_enabled else None
         try:
             _, _, gcr2_final, gcz2_final, gcl2_final, _, _, norms_final = _compute_forces_iter(
                 state,
@@ -14690,16 +14707,26 @@ def solve_fixed_boundary_residual_iter(
                 gcz2_in=gcz2_final,
                 gcl2_in=gcl2_final,
             )
+            t_finalize_residual_get_start = time.perf_counter() if timing_enabled else None
             final_fsqr_report, final_fsqz_report, final_fsql_report = _device_get_floats(
                 fsqr_final,
                 fsqz_final,
                 fsql_final,
             )
+            if timing_enabled and t_finalize_residual_get_start is not None:
+                timing_stats["finalize_residual_device_get"] += (
+                    time.perf_counter() - float(t_finalize_residual_get_start)
+                )
             final_residual_recomputed = True
         except Exception:
             final_fsqr_report = float(fsqr_f)
             final_fsqz_report = float(fsqz_f)
             final_fsql_report = float(fsql_f)
+        finally:
+            if timing_enabled and t_finalize_residual_recompute_start is not None:
+                timing_stats["finalize_residual_recompute"] += (
+                    time.perf_counter() - float(t_finalize_residual_recompute_start)
+                )
     converged_strict_final, converged_total_final, _ = _residual_convergence_flags(
         fsqr=final_fsqr_report,
         fsqz=final_fsqz_report,
@@ -14707,6 +14734,7 @@ def solve_fixed_boundary_residual_iter(
         ftol=ftol,
         fsq_total_target=fsq_total_target,
     )
+    t_finalize_diag_build_start = time.perf_counter() if timing_enabled else None
     diag: Dict[str, Any] = {
         "ftol": ftol,
         "requested_ftol": float(ftol),
@@ -14813,6 +14841,8 @@ def solve_fixed_boundary_residual_iter(
         "freeb_nestor_trial_failed_history": np.asarray(freeb_nestor_trial_failed_history, dtype=int),
     }
     if timing_enabled:
+        if t_finalize_diag_build_start is not None:
+            timing_stats["finalize_diag_build"] += time.perf_counter() - float(t_finalize_diag_build_start)
         if t_iteration_loop_start is not None and t_finalize_start is not None:
             timing_stats["iteration_loop"] = float(t_finalize_start) - float(t_iteration_loop_start)
         if t_finalize_start is not None:

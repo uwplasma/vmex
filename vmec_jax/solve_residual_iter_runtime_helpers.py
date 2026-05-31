@@ -354,6 +354,17 @@ def _build_residual_iter_timing_report(
         - iteration_control_badjac_ptau_get
         - iteration_control_badjac_state_jacobian,
     )
+    finalize_nestor_recompute = float(timing_stats.get("finalize_nestor_recompute", 0.0))
+    finalize_residual_recompute = float(timing_stats.get("finalize_residual_recompute", 0.0))
+    finalize_residual_device_get = float(timing_stats.get("finalize_residual_device_get", 0.0))
+    finalize_diag_build = float(timing_stats.get("finalize_diag_build", 0.0))
+    finalize_unattributed = max(
+        0.0,
+        float(timing_stats["finalize"])
+        - finalize_nestor_recompute
+        - finalize_residual_recompute
+        - finalize_diag_build,
+    )
     timing_report: dict[str, float | int] = {
         "iterations": int(timing_stats["iterations"]),
         "solve_total_s": float(solve_total_s),
@@ -399,11 +410,17 @@ def _build_residual_iter_timing_report(
         "precond_refresh_s": float(timing_stats["precond_refresh"]),
         "update_s": float(timing_stats["update"]),
         "update_state_s": float(timing_stats["update_state"]),
+        "update_state_ready_s": float(timing_stats.get("update_state_ready", 0.0)),
         "update_trace_build_s": float(timing_stats["update_trace_build"]),
         "update_trace_finalize_s": float(timing_stats["update_trace_finalize"]),
         "iteration_post_update_s": float(timing_stats["iteration_post_update"]),
         "iteration_loop_unattributed_s": float(iteration_loop_unattributed),
         "finalize_s": float(timing_stats["finalize"]),
+        "finalize_nestor_recompute_s": finalize_nestor_recompute,
+        "finalize_residual_recompute_s": finalize_residual_recompute,
+        "finalize_residual_device_get_s": finalize_residual_device_get,
+        "finalize_diag_build_s": finalize_diag_build,
+        "finalize_unattributed_s": finalize_unattributed,
         "setup_per_iter_s": float(timing_stats["setup_total"]) / iters,
         "setup_static_grid_rebuild_per_iter_s": float(timing_stats.get("setup_static_grid_rebuild", 0.0)) / iters,
         "setup_freeb_policy_per_iter_s": float(timing_stats.get("setup_freeb_policy", 0.0)) / iters,
@@ -435,10 +452,16 @@ def _build_residual_iter_timing_report(
         "iteration_control_unattributed_per_iter_s": float(iteration_control_unattributed) / iters,
         "update_per_iter_s": float(timing_stats["update"]) / iters,
         "update_state_per_iter_s": float(timing_stats["update_state"]) / iters,
+        "update_state_ready_per_iter_s": float(timing_stats.get("update_state_ready", 0.0)) / iters,
         "update_trace_build_per_iter_s": float(timing_stats["update_trace_build"]) / iters,
         "update_trace_finalize_per_iter_s": float(timing_stats["update_trace_finalize"]) / iters,
         "iteration_post_update_per_iter_s": float(timing_stats["iteration_post_update"]) / iters,
         "iteration_loop_unattributed_per_iter_s": float(iteration_loop_unattributed) / iters,
+        "finalize_nestor_recompute_per_iter_s": finalize_nestor_recompute / iters,
+        "finalize_residual_recompute_per_iter_s": finalize_residual_recompute / iters,
+        "finalize_residual_device_get_per_iter_s": finalize_residual_device_get / iters,
+        "finalize_diag_build_per_iter_s": finalize_diag_build / iters,
+        "finalize_unattributed_per_iter_s": finalize_unattributed / iters,
     }
     if timing_detail_enabled:
         main_force = float(timing_stats.get("compute_forces_main", timing_stats["compute_forces"]))
@@ -500,6 +523,11 @@ def _format_residual_iter_timing_message(
             f"control_vmec={float(timing_report['iteration_control_vmec_time_s']):.3e}s "
             f"control_restart={float(timing_report['iteration_control_restart_s']):.3e}s "
             f"control_evolve={float(timing_report['iteration_control_evolve_s']):.3e}s "
+            f"update_ready={float(timing_report['update_state_ready_s']):.3e}s "
+            f"final_nestor={float(timing_report['finalize_nestor_recompute_s']):.3e}s "
+            f"final_resid={float(timing_report['finalize_residual_recompute_s']):.3e}s "
+            f"final_get={float(timing_report['finalize_residual_device_get_s']):.3e}s "
+            f"final_diag={float(timing_report['finalize_diag_build_s']):.3e}s "
         )
     return (
         "[vmec_jax timing] "

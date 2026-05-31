@@ -198,6 +198,107 @@ def dense_fixed_point_solve_jax(
     )
 
 
+def jax_visible_nonlinear_controller_jax(
+    step_fn: Any,
+    initial_state: Any,
+    params: Any,
+    controls: Any,
+    *,
+    checkpoint_steps: bool = False,
+) -> dict[str, Any]:
+    """Run a nonlinear controller loop entirely through JAX ``lax.scan``.
+
+    Parameters
+    ----------
+    step_fn:
+        Callable ``step_fn(state, params, control)``.  It must return either
+        ``next_state`` or ``(next_state, aux)``.  ``state``, ``params``,
+        ``controls``, and ``aux`` must be JAX pytrees.
+    initial_state:
+        Initial controller state pytree.
+    params:
+        Differentiable parameter pytree.  For the direct-coil free-boundary
+        lane this is typically ``CoilFieldParams``.
+    controls:
+        Pytree of per-step control arrays with a common leading dimension.
+        These are the JAX-visible analogue of accepted production step
+        controls: time-step factors, restart flags, preconditioner policy
+        scalars, or other fixed controller data.
+    checkpoint_steps:
+        If true, wrap each step in ``jax.checkpoint`` so long validation runs
+        can trade recomputation for lower reverse-mode memory.
+
+    Notes
+    -----
+    This is the phase-3 target abstraction for replacing host-controlled
+    fixed-control replay.  Unlike :func:`direct_coil_accepted_trace_replay_objective_jax`,
+    all loop-carried state and controls are visible to JAX, so gradients can
+    flow through the full unrolled controller.  It is still a validation/helper
+    primitive; the production ``run_free_boundary`` loop must be explicitly
+    refactored onto this structure before claiming full-solve exact adjoints.
+    """
+
+    if jax is None:  # pragma: no cover - JAX is required for scan controllers.
+        raise RuntimeError("JAX is required for JAX-visible nonlinear controllers.")
+
+    def _normalize_step(state, control):
+        out = step_fn(state, params, control)
+        if isinstance(out, tuple) and len(out) == 2:
+            next_state, aux = out
+        else:
+            next_state, aux = out, {}
+        return next_state, aux
+
+    scan_step = jax.checkpoint(_normalize_step) if bool(checkpoint_steps) else _normalize_step
+    final_state, history = jax.lax.scan(scan_step, initial_state, controls)
+    return {"state": final_state, "history": history}
+
+
+def jax_visible_nonlinear_controller_directional_check_jax(
+    step_fn: Any,
+    objective_from_run: Any,
+    params: Any,
+    direction: Any,
+    initial_state: Any,
+    controls: Any,
+    *,
+    eps: float = 1.0e-4,
+    checkpoint_steps: bool = False,
+) -> dict[str, Any]:
+    """AD-vs-FD check for a fully JAX-visible nonlinear controller.
+
+    The helper validates the controller contract before the production
+    free-boundary loop is moved onto it.  ``objective_from_run`` receives the
+    dictionary returned by :func:`jax_visible_nonlinear_controller_jax` and must
+    return a scalar objective.
+    """
+
+    def objective(controller_params):
+        run = jax_visible_nonlinear_controller_jax(
+            step_fn,
+            initial_state,
+            controller_params,
+            controls,
+            checkpoint_steps=checkpoint_steps,
+        )
+        return objective_from_run(run)
+
+    check = pytree_directional_derivative_check_jax(
+        objective,
+        params,
+        direction,
+        eps=eps,
+    )
+    run = jax_visible_nonlinear_controller_jax(
+        step_fn,
+        initial_state,
+        params,
+        controls,
+        checkpoint_steps=checkpoint_steps,
+    )
+    return {**check, "run": run}
+
+
 def pytree_directional_derivative_check_jax(
     objective_fn: Any,
     params: Any,

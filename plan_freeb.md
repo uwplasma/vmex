@@ -95,6 +95,34 @@ Need from user:
 
 Nothing now.
 
+### 2026-05-31 Full-loop adjoint primitive and GPU timing split
+
+Steps taken:
+
+1. Added `jax_visible_nonlinear_controller_jax`, a reusable `jax.lax.scan` controller primitive for the production full-loop adjoint refactor target.
+2. Added `jax_visible_nonlinear_controller_directional_check_jax` so controller-level AD-vs-central-FD gates can reuse the same pytree directional derivative checks as the direct-coil replay tests.
+3. Added tests for a nonlinear JAX-visible control loop and for a direct-coil moving-boundary controller whose objective is differentiated with respect to coil current and Fourier coefficients.
+4. Split residual-iteration timing into GPU-relevant sub-buckets: update-state ready/synchronization, final NESTOR recompute, final residual recompute, final scalar device-get, final diagnostics build, and final unattributed time.
+5. Propagated those timing buckets through solver diagnostics and the direct-coil benchmark matrix summaries.
+
+Results obtained:
+
+1. `python -m ruff check vmec_jax/free_boundary_adjoint.py tests/test_free_boundary_vacuum_adjoint.py vmec_jax/solve.py vmec_jax/solve_residual_iter_runtime_helpers.py tools/benchmarks/bench_freeb_direct_coil_matrix.py tools/benchmarks/bench_freeb_direct_coil_solve.py tests/test_solve_performance_instrumentation.py tests/test_freeb_direct_coil_matrix_benchmark.py` passed.
+2. `python -m py_compile ...` on the same files passed.
+3. `python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py::test_jax_visible_nonlinear_controller_matches_manual_scan_and_fd tests/test_free_boundary_vacuum_adjoint.py::test_jax_visible_controller_direct_coil_gradient_matches_fd tests/test_solve_performance_instrumentation.py::test_residual_iter_timing_report_exposes_force_eval_aliases tests/test_freeb_direct_coil_matrix_benchmark.py -rx` passed: 15 passed in 3.43 s.
+4. `python tools/benchmarks/bench_freeb_direct_coil_matrix.py --quick --include-badjac-probe0 --include-timing-light --timeout-s 240 --out /tmp/freeb_finalize_timing_cpu_20260531.json` completed all seven CPU rows. The warm direct-coil solve reported `solve_total_s=0.1184`, `finalize_s=0.00876`, with `finalize_nestor_recompute_s=0.00651`, `finalize_residual_recompute_s=0.00218`, and `update_state_ready_s=4.25e-6`, confirming the new buckets populate in a real solve.
+
+Best next steps:
+
+1. Run a quick CPU timing matrix to confirm the new buckets populate in real direct-coil solves.
+2. Push these changes and let CI validate the full fast matrix.
+3. Run the GPU timing matrix on `office` and use the new finalize/update-ready buckets to decide whether the next production optimization should target final residual synchronization, NESTOR recompute, or update-state dispatch.
+4. Continue the production full-loop exact-adjoint lane by moving one small free-boundary fixed-point/control update onto the JAX-visible controller abstraction and validating AD-vs-FD for one coil current and one Fourier coefficient.
+
+Need from user:
+
+Nothing now.
+
 ### 2026-05-30 Replay context helper follow-up
 
 Steps taken:

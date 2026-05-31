@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from tools.benchmarks import bench_freeb_direct_coil_matrix as matrix
 
 
@@ -63,9 +65,19 @@ def _direct_solve_payload() -> dict:
                         "compute_forces_s": 0.2,
                         "preconditioner_s": 0.15,
                         "update_s": 0.05,
+                        "update_state_s": 0.035,
+                        "update_state_ready_s": 0.012,
                         "compute_forces_per_iter_s": 0.1,
                         "preconditioner_per_iter_s": 0.075,
                         "update_per_iter_s": 0.025,
+                        "update_state_per_iter_s": 0.0175,
+                        "update_state_ready_per_iter_s": 0.006,
+                        "finalize_s": 0.02,
+                        "finalize_nestor_recompute_s": 0.004,
+                        "finalize_residual_recompute_s": 0.007,
+                        "finalize_residual_device_get_s": 0.002,
+                        "finalize_diag_build_s": 0.005,
+                        "finalize_unattributed_s": 0.004,
                     },
                     "active_nestor_timing_summary": {"active_steps": 1},
                     "trial_nestor_timing_summary": {"recorded_calls": 1},
@@ -150,6 +162,10 @@ def test_matrix_timing_snapshot_preserves_compact_nestor_details() -> None:
     assert rows[0]["solver"]["warm"]["iteration_loop_unattributed_s"] == 0.1
     assert rows[0]["solver"]["warm"]["iteration_control_s"] == 0.04
     assert rows[0]["solver"]["warm"]["compute_forces_per_iter_s"] == 0.1
+    assert rows[0]["solver"]["warm"]["update_state_ready_s"] == 0.012
+    assert rows[0]["solver"]["warm"]["finalize_nestor_recompute_s"] == 0.004
+    assert rows[0]["solver"]["warm"]["finalize_residual_device_get_s"] == 0.002
+    assert rows[0]["solver"]["warm"]["finalize_unattributed_s"] == 0.004
     phase_timing = rows[0]["phase_timing"]["warm"]
     assert phase_timing["solve_total_s"] == 0.7
     assert phase_timing["named_phase_fraction_of_solve"] == 0.61 / 0.7
@@ -370,8 +386,15 @@ def test_cpu_gpu_comparison_matches_completed_cases_and_reports_nestor_ratios() 
                     "preconditioner_s": warm_min + 0.2,
                     "precond_apply_s": warm_min + 0.375,
                     "update_s": warm_min + 0.3,
+                    "update_state_s": warm_min + 0.28,
+                    "update_state_ready_s": warm_min + 0.12,
                     "iteration_residual_metrics_s": warm_min + 0.125,
                     "finalize_s": warm_min + 0.25,
+                    "finalize_nestor_recompute_s": warm_min + 0.04,
+                    "finalize_residual_recompute_s": warm_min + 0.05,
+                    "finalize_residual_device_get_s": warm_min + 0.02,
+                    "finalize_diag_build_s": warm_min + 0.03,
+                    "finalize_unattributed_s": warm_min + 0.01,
                     "compute_forces_per_iter_s": warm_min + 0.01,
                     "preconditioner_per_iter_s": warm_min + 0.02,
                     "update_per_iter_s": warm_min + 0.03,
@@ -446,7 +469,11 @@ def test_cpu_gpu_comparison_matches_completed_cases_and_reports_nestor_ratios() 
     assert comparison["gpu"]["warm_finalize_s"] == 0.75
     assert comparison["cpu"]["warm_precond_apply_s"] == 2.375
     assert comparison["gpu"]["warm_precond_apply_s"] == 0.875
-    assert comparison["ratios_gpu_over_cpu"] == {
+    assert comparison["cpu"]["warm_update_state_ready_s"] == 2.12
+    assert comparison["gpu"]["warm_update_state_ready_s"] == 0.62
+    assert comparison["cpu"]["warm_finalize_residual_recompute_s"] == 2.05
+    assert comparison["gpu"]["warm_finalize_residual_recompute_s"] == 0.55
+    assert comparison["ratios_gpu_over_cpu"] == pytest.approx({
         "cold_or_compile": 0.5,
         "warm_min": 0.25,
         "warm_mean": 0.25,
@@ -479,14 +506,21 @@ def test_cpu_gpu_comparison_matches_completed_cases_and_reports_nestor_ratios() 
         "warm_preconditioner": 0.7 / 2.2,
         "warm_precond_apply": 0.875 / 2.375,
         "warm_update": 0.8 / 2.3,
+        "warm_update_state": 0.78 / 2.28,
+        "warm_update_state_ready": 0.62 / 2.12,
         "warm_iteration_residual_metrics": 0.625 / 2.125,
         "warm_finalize": 0.75 / 2.25,
+        "warm_finalize_nestor_recompute": 0.54 / 2.04,
+        "warm_finalize_residual_recompute": 0.55 / 2.05,
+        "warm_finalize_residual_device_get": 0.52 / 2.02,
+        "warm_finalize_diag_build": 0.53 / 2.03,
+        "warm_finalize_unattributed": 0.51 / 2.01,
         "active_nestor_warm_sample": 0.5,
         "active_nestor_warm_solve": 0.5,
         "final_recompute_sample": 0.5,
         "final_recompute_solve": 0.5,
         "final_external_field_sample": 0.5,
-    }
+    })
 
 
 def test_gpu_bottleneck_summary_ranks_warm_phase_overheads() -> None:

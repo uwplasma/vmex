@@ -25,6 +25,10 @@ def test_residual_iter_timing_report_exposes_force_eval_aliases() -> None:
         "iteration_residual_metrics": 0.2,
         "iteration_post_update": 0.05,
         "finalize": 0.03,
+        "finalize_nestor_recompute": 0.006,
+        "finalize_residual_recompute": 0.010,
+        "finalize_residual_device_get": 0.004,
+        "finalize_diag_build": 0.008,
         "compute_forces": 0.4,
         "compute_forces_first": 0.15,
         "compute_forces_rest": 0.25,
@@ -54,6 +58,7 @@ def test_residual_iter_timing_report_exposes_force_eval_aliases() -> None:
         "precond_mode_scale": 0.01,
         "update": 0.09,
         "update_state": 0.07,
+        "update_state_ready": 0.025,
         "update_trace_build": 0.0,
         "update_trace_finalize": 0.0,
         "precond_refresh": 0.04,
@@ -87,6 +92,13 @@ def test_residual_iter_timing_report_exposes_force_eval_aliases() -> None:
     assert report["iteration_control_badjac_state_jacobian_s"] == pytest.approx(0.02)
     assert report["iteration_control_badjac_unattributed_s"] == pytest.approx(0.03)
     assert report["iteration_control_unattributed_s"] == pytest.approx(0.02)
+    assert report["update_state_ready_s"] == pytest.approx(0.025)
+    assert report["update_state_ready_per_iter_s"] == pytest.approx(0.0125)
+    assert report["finalize_nestor_recompute_s"] == pytest.approx(0.006)
+    assert report["finalize_residual_recompute_s"] == pytest.approx(0.010)
+    assert report["finalize_residual_device_get_s"] == pytest.approx(0.004)
+    assert report["finalize_diag_build_s"] == pytest.approx(0.008)
+    assert report["finalize_unattributed_s"] == pytest.approx(0.006)
 
 
 def test_accelerated_scan_timing_is_opt_in_and_path_labeled(
