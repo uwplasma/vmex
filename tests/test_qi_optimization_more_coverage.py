@@ -428,6 +428,7 @@ def test_stage_modes_for_uses_limits_explicit_modes_and_default_repetition(
     monkeypatch.setattr(qio, "USE_MODE_CONTINUATION", True, raising=False)
     monkeypatch.setattr(qio, "CONTINUATION_NFEV", 2, raising=False)
     monkeypatch.setattr(qio, "STAGE_REPEATS", 3, raising=False)
+    monkeypatch.setattr(qio, "_DEFAULT_CONTEXT", None, raising=False)
     monkeypatch.setattr(qio.vj, "normalize_boundary_mode_limits", lambda mode: f"normalised:{mode}")
 
     def fake_qi_stage_modes(*, max_mode, use_mode_continuation, continuation_nfev, repeats, policy):

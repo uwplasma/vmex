@@ -1598,10 +1598,10 @@ class FixedBoundaryExactOptimizer:
         """Resolve optimizer method aliases and the opt-in automatic policy.
 
         ``method="auto"`` is intentionally conservative and device-preserving:
-        it only chooses the matrix-free trust-region path for the profiled QA,
-        stellarator-symmetric, high-mode CPU/default-backend lane where
-        cold-process and memory-pressure profiles motivated the option.  It does
-        not guarantee the fastest warm wall time for every QA run, and it never
+        it chooses the matrix-free trust-region path for profiled high-mode,
+        stellarator-symmetric QS/QI CPU/default-backend lanes where
+        cold-process and memory-pressure profiles motivated the option. It does
+        not guarantee the fastest warm wall time for every run, and it never
         moves work between CPU and GPU; explicit device choices are preserved.
         """
 
@@ -1623,8 +1623,19 @@ class FixedBoundaryExactOptimizer:
 
         helicity_m = None if self._helicity_m is None else int(self._helicity_m)
         helicity_n = None if self._helicity_n is None else int(self._helicity_n)
-        if self._objective_family == "qs" and helicity_m == 1 and helicity_n == 0 and self._spec_max_mode() >= 3:
-            return "scipy_matrix_free", 4 if scipy_lsmr_maxiter is None else scipy_lsmr_maxiter, "auto:qa-high-mode-matrix-free"
+        if self._spec_max_mode() >= 3 and self._objective_family in ("qs", "qi"):
+            lsmr_maxiter = 4 if scipy_lsmr_maxiter is None else scipy_lsmr_maxiter
+            if self._objective_family == "qi":
+                family = "qi"
+            elif helicity_m == 1 and helicity_n == 0:
+                family = "qa"
+            elif helicity_m == 0 and helicity_n not in (None, 0):
+                family = "qp"
+            elif helicity_m == 1 and helicity_n not in (None, 0):
+                family = "qh"
+            else:
+                family = "qs"
+            return "scipy_matrix_free", lsmr_maxiter, f"auto:{family}-high-mode-matrix-free"
 
         return "scipy", scipy_lsmr_maxiter, "auto:dense-default"
 
@@ -3928,6 +3939,7 @@ class FixedBoundaryExactOptimizer:
         scipy_lsmr_maxiter: int | None = None,
         lbfgs_step_bound: float | None = 0.01,
         scalar_step_bound: float | None = 0.01,
+        scalar_cost_only_trials: bool | None = None,
         trace_callbacks: bool | None = None,
     ) -> dict:
         """Run exact least-squares optimisation.
@@ -3940,9 +3952,9 @@ class FixedBoundaryExactOptimizer:
             Outer least-squares method. Supported values are ``"gauss_newton"``
             and ``"scipy"``. ``"auto"`` keeps the current device selection and
             resolves to a conservative device-preserving method for known cases:
-            currently matrix-free SciPy for high-mode, stellarator-symmetric QA
-            on CPU/default CPU, otherwise dense SciPy. This is an opt-in policy
-            and not a guarantee that every warm QA run is fastest.
+            currently matrix-free SciPy for high-mode, stellarator-symmetric
+            QS/QI on CPU/default CPU, otherwise dense SciPy. This is an opt-in
+            policy and not a guarantee that every warm run is fastest.
             ``"scipy"`` uses ``scipy.optimize.least_squares``
             with the exact residual and discrete-adjoint Jacobian callbacks,
             which is more robust on some QA/QH examples.
@@ -4000,6 +4012,13 @@ class FixedBoundaryExactOptimizer:
             Initial and maximum trust radius in scaled parameter space when
             ``method="scalar_trust"``. Set to ``None`` or a non-positive value
             to use a unit initial radius.
+        scalar_cost_only_trials:
+            When true with ``method="scalar_trust"``, evaluate trial points with
+            the lighter forward residual path before building a full exact
+            scalar-adjoint tape for accepted candidates.  This can reduce
+            accepted-point tape builds in rugged high-mode cases, at the cost
+            of additional forward solves. ``None`` preserves the legacy
+            environment/private-attribute controls for profiling scripts.
         trace_callbacks:
             When true, include a lightweight SciPy callback trace in the
             history dump.  This is intended for CPU/GPU profiling of repeated
@@ -4038,6 +4057,7 @@ class FixedBoundaryExactOptimizer:
         self._exact_history_rejected_count = 0
 
         params0_arr = np.asarray(params0, dtype=float)
+        scalar_cost_only_trials_used: bool | None = None
 
         # ── initial evaluation ──────────────────────────────────────────────
         res0 = self.residual_fun(params0_arr)
@@ -4169,12 +4189,16 @@ class FixedBoundaryExactOptimizer:
             max_lbfgs_pairs = 8
             armijo_c1 = 1.0e-4
             backtrack_factor = 0.1
-            cost_only_trial_flag = os.getenv("VMEC_JAX_OPT_SCALAR_COST_ONLY_TRIALS")
-            cost_only_trials = (
-                bool(getattr(self, "_scalar_trust_cost_only_trials", False))
-                if cost_only_trial_flag is None
-                else cost_only_trial_flag.strip().lower() in ("1", "true", "yes", "on")
-            )
+            if scalar_cost_only_trials is None:
+                cost_only_trial_flag = os.getenv("VMEC_JAX_OPT_SCALAR_COST_ONLY_TRIALS")
+                cost_only_trials = (
+                    bool(getattr(self, "_scalar_trust_cost_only_trials", False))
+                    if cost_only_trial_flag is None
+                    else cost_only_trial_flag.strip().lower() in ("1", "true", "yes", "on")
+                )
+            else:
+                cost_only_trials = bool(scalar_cost_only_trials)
+            scalar_cost_only_trials_used = bool(cost_only_trials)
 
             def _scalar_trust_direction(grad):
                 grad = np.asarray(grad, dtype=float)
@@ -4871,6 +4895,7 @@ class FixedBoundaryExactOptimizer:
             "scipy_lsmr_maxiter": (None if scipy_lsmr_maxiter is None else int(scipy_lsmr_maxiter)),
             "lbfgs_step_bound": (None if lbfgs_step_bound is None else float(lbfgs_step_bound)),
             "scalar_step_bound": (None if scalar_step_bound is None else float(scalar_step_bound)),
+            "scalar_cost_only_trials": scalar_cost_only_trials_used,
             "solver_device": self._solver_device_name or "default",
             "inner_max_iter": int(self._inner_max_iter),
             "inner_ftol": float(self._inner_ftol),

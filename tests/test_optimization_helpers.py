@@ -1284,7 +1284,6 @@ def test_scalar_trust_backtracking_does_not_permanently_collapse_radius(monkeypa
     opt._post_jacobian_clear = lambda *args, **kwargs: None
     opt._profile = {}
     opt._profile_dump = lambda: opt._profile
-    opt._scalar_trust_cost_only_trials = True
     opt._cached_exact_state = lambda _x: None
     opt._base_params_vector = lambda: np.zeros(1)
     opt._exact_cache_key = lambda x: tuple(np.asarray(x, dtype=float).round(12))
@@ -1318,6 +1317,7 @@ def test_scalar_trust_backtracking_does_not_permanently_collapse_radius(monkeypa
         method="scalar_trust",
         max_nfev=4,
         scalar_step_bound=1.0,
+        scalar_cost_only_trials=True,
         ftol=0.0,
         gtol=1e-12,
         verbose=0,
@@ -1326,6 +1326,7 @@ def test_scalar_trust_backtracking_does_not_permanently_collapse_radius(monkeypa
     assert objective_calls == [0.0, 0.1, 0.5]
     assert result["cost"] < 1.0e-12
     np.testing.assert_allclose(result["x"], np.asarray([0.5]), atol=1.0e-12, rtol=0.0)
+    assert result["_history_dump"]["scalar_cost_only_trials"] is True
     assert opt._profile["scalar_trust_backtracked_accept"]["count"] == 1
     assert opt._profile["scalar_trust_cost_only_trial"]["count"] >= 1
 

@@ -104,6 +104,8 @@ class QIOptimizationContext:
     qi_gate_smooth_max: float
     qi_options: object
     qi_weight: float
+    scalar_cost_only_trials: bool | None
+    scipy_lsmr_maxiter: int | None
     solver_device: str | None
     stage_modes: tuple
     stage_repeats: int
@@ -134,6 +136,8 @@ _CONTEXT_FIELDS = {
     "qi_gate_smooth_max": "QI_GATE_SMOOTH_MAX",
     "qi_options": "QI_OPTIONS",
     "qi_weight": "QI_WEIGHT",
+    "scalar_cost_only_trials": "SCALAR_COST_ONLY_TRIALS",
+    "scipy_lsmr_maxiter": "SCIPY_LSMR_MAXITER",
     "solver_device": "SOLVER_DEVICE",
     "stage_modes": "STAGE_MODES",
     "stage_repeats": "STAGE_REPEATS",
@@ -166,9 +170,11 @@ def qi_stage_modes(
     """Return the stage mode sequence for the QI example workflow.
 
     ``policy="lower"`` uses the same lower-mode continuation semantics as the
-    QA/QH/QP examples. ``policy="repeat"`` preserves the older QI behavior of
-    repeating the final mode, which can still be useful when the input is
-    already in the right basin.
+    QA/QH/QP examples. ``policy="lower-repeat"`` repeats each lower-mode rung,
+    which is useful for far circular seeds because each active spectral shell
+    gets cleanup passes before adding more degrees of freedom. ``policy="repeat"``
+    preserves the older QI behavior of repeating only the final mode, which can
+    still be useful when the input is already in the right basin.
     """
 
     policy_key = str(policy).strip().lower().replace("_", "-")
@@ -178,6 +184,11 @@ def qi_stage_modes(
             use_mode_continuation=use_mode_continuation,
             continuation_nfev=continuation_nfev,
         )
+    if policy_key in {"lower-repeat", "ladder-repeat", "repeat-lower", "rung-repeat"}:
+        if not (bool(use_mode_continuation) and int(max_mode) > 1 and int(continuation_nfev) > 0):
+            return [int(max_mode)]
+        repeats_i = max(1, int(repeats))
+        return [int(mode) for mode in range(1, int(max_mode) + 1) for _ in range(repeats_i)]
     if policy_key in {"repeat", "same", "same-mode", "same-mode-repeat"}:
         return vj.repeated_stage_modes(
             max_mode=max_mode,
@@ -185,7 +196,7 @@ def qi_stage_modes(
             continuation_nfev=continuation_nfev,
             repeats=repeats,
         )
-    raise ValueError("QI stage mode policy must be 'lower' or 'repeat'.")
+    raise ValueError("QI stage mode policy must be 'lower', 'lower-repeat', or 'repeat'.")
 
 
 def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = None) -> argparse.Namespace:
@@ -218,7 +229,9 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
     parser.add_argument("--reference-lambdas", type=_float_tuple)
     parser.add_argument("--accept-boundary-reference-baseline", action=argparse.BooleanOptionalAction)
     parser.add_argument("--stage-repeats", type=int)
-    parser.add_argument("--stage-mode-policy", choices=("lower", "repeat"))
+    parser.add_argument("--stage-mode-policy", choices=("lower", "lower-repeat", "repeat"))
+    parser.add_argument("--scipy-lsmr-maxiter", type=int)
+    parser.add_argument("--scalar-cost-only-trials", action=argparse.BooleanOptionalAction)
     parser.add_argument("--make-plots", action=argparse.BooleanOptionalAction)
     parser.add_argument("--jit-booz", action=argparse.BooleanOptionalAction)
     parser.add_argument("--qi-mboz", type=int)
@@ -282,6 +295,8 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
     set_if("BOUNDARY_REFERENCE_ACCEPT_AS_BASELINE", args.accept_boundary_reference_baseline)
     set_if("STAGE_REPEATS", None if args.stage_repeats is None else int(args.stage_repeats))
     set_if("STAGE_MODE_POLICY", args.stage_mode_policy)
+    set_if("SCIPY_LSMR_MAXITER", None if args.scipy_lsmr_maxiter is None else int(args.scipy_lsmr_maxiter))
+    set_if("SCALAR_COST_ONLY_TRIALS", args.scalar_cost_only_trials)
     set_if("MAKE_PLOTS", args.make_plots)
     set_if("JIT_BOOZ", args.jit_booz)
     qi_resolution_updates = {
@@ -391,6 +406,12 @@ def make_qi_optimization_context(
             return globals()[upper]
         raise KeyError(upper)
 
+    def get_optional(field: str, default=None):
+        try:
+            return get(field)
+        except KeyError:
+            return default
+
     return QIOptimizationContext(
         alpha=float(get("alpha")),
         continuation_nfev=int(get("continuation_nfev")),
@@ -410,6 +431,8 @@ def make_qi_optimization_context(
         qi_gate_smooth_max=float(get("qi_gate_smooth_max")),
         qi_options=get("qi_options"),
         qi_weight=float(get("qi_weight")),
+        scalar_cost_only_trials=get_optional("scalar_cost_only_trials", None),
+        scipy_lsmr_maxiter=get_optional("scipy_lsmr_maxiter", None),
         solver_device=get("solver_device"),
         stage_modes=tuple(get("stage_modes")),
         stage_repeats=int(get("stage_repeats")),
@@ -1486,6 +1509,8 @@ def run_qi_stage_policy(
             max_nfev=_ctx(ctx, "max_nfev"),
             label=f"QI optimization (max_mode={_ctx(ctx, 'max_mode')}, {'ESS' if _ctx(ctx, 'use_ess') else 'no ESS'})",
             save_final_outputs=False,
+            scipy_lsmr_maxiter=_ctx(ctx, "scipy_lsmr_maxiter"),
+            scalar_cost_only_trials=_ctx(ctx, "scalar_cost_only_trials"),
         )
         materialize_qi_stage_inputs(output_dir, result)
         write_qi_stage_checkpoint(
@@ -1530,6 +1555,8 @@ def run_qi_stage_policy(
             stage_modes=(_ctx(ctx, "max_mode"),),
             method="scipy_matrix_free",
             use_mode_continuation=False,
+            scipy_lsmr_maxiter=_ctx(ctx, "scipy_lsmr_maxiter"),
+            scalar_cost_only_trials=_ctx(ctx, "scalar_cost_only_trials"),
         )
         materialize_qi_stage_inputs(baseline_output_dir, accepted_result)
         write_qi_stage_checkpoint(
@@ -1589,6 +1616,8 @@ def run_qi_stage_policy(
             use_mode_continuation=bool(stage.get("use_mode_continuation", _ctx(ctx, "use_mode_continuation"))),
             scalar_step_bound=stage.get("scalar_step_bound"),
             lbfgs_step_bound=stage.get("lbfgs_step_bound"),
+            scipy_lsmr_maxiter=stage.get("scipy_lsmr_maxiter", _ctx(ctx, "scipy_lsmr_maxiter")),
+            scalar_cost_only_trials=stage.get("scalar_cost_only_trials", _ctx(ctx, "scalar_cost_only_trials")),
         )
         stage_final_input = materialize_qi_stage_inputs(stage_output_dir, stage_result)
         write_qi_stage_checkpoint(
