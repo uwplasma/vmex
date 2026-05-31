@@ -254,6 +254,70 @@ def jax_visible_nonlinear_controller_jax(
     return {"state": final_state, "history": history}
 
 
+def jax_visible_masked_nonlinear_controller_jax(
+    step_fn: Any,
+    converged_fn: Any,
+    initial_state: Any,
+    params: Any,
+    controls: Any,
+    *,
+    checkpoint_steps: bool = False,
+) -> dict[str, Any]:
+    """Run a fixed-length JAX controller with JAX-visible convergence masking.
+
+    This is the production refactor target for host-side VMEC control flow that
+    may converge before the configured iteration budget.  Reverse-mode AD
+    through ``lax.while_loop`` is not generally available for dynamic trip
+    counts, so the differentiable path uses a static-length ``lax.scan`` and
+    carries a scalar ``done`` flag.  Once ``done`` is true, subsequent scan
+    steps leave the state unchanged while still producing shape-stable history.
+
+    ``converged_fn(next_state, params, control, aux)`` must return a scalar
+    boolean JAX value.  ``aux`` is the optional metadata returned by ``step_fn``.
+    The returned history always contains ``active`` and ``done`` masks in
+    addition to the auxiliary step history.
+    """
+
+    if jax is None:  # pragma: no cover - JAX is required for scan controllers.
+        raise RuntimeError("JAX is required for JAX-visible nonlinear controllers.")
+
+    def _select_state(done, old_state, new_state):
+        return tree_util.tree_map(
+            lambda old, new: jnp.where(done, jnp.asarray(old), jnp.asarray(new)),
+            old_state,
+            new_state,
+        )
+
+    def _normalize_step(state, control):
+        out = step_fn(state, params, control)
+        if isinstance(out, tuple) and len(out) == 2:
+            next_state, aux = out
+        else:
+            next_state, aux = out, {}
+        return next_state, aux
+
+    step_eval = jax.checkpoint(_normalize_step) if bool(checkpoint_steps) else _normalize_step
+
+    def _scan_step(carry, control):
+        state, done = carry
+        proposed_state, aux = step_eval(state, control)
+        active = jnp.logical_not(done)
+        state_out = _select_state(done, state, proposed_state)
+        proposed_done = jnp.asarray(converged_fn(proposed_state, params, control, aux), dtype=bool)
+        done_out = jnp.logical_or(done, proposed_done)
+        aux_out = dict(aux) if isinstance(aux, dict) else {"aux": aux}
+        aux_out["active"] = active
+        aux_out["done"] = done_out
+        return (state_out, done_out), aux_out
+
+    (final_state, final_done), history = jax.lax.scan(
+        _scan_step,
+        (initial_state, jnp.asarray(False)),
+        controls,
+    )
+    return {"state": final_state, "done": final_done, "history": history}
+
+
 def jax_visible_nonlinear_controller_directional_check_jax(
     step_fn: Any,
     objective_from_run: Any,

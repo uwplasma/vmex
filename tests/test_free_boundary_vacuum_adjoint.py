@@ -24,6 +24,7 @@ from vmec_jax.free_boundary_adjoint import (
     dense_vmec_nestor_mode_solve_jax,
     dense_vacuum_residual,
     dense_vacuum_solve_jax,
+    jax_visible_masked_nonlinear_controller_jax,
     jax_visible_nonlinear_controller_directional_check_jax,
     jax_visible_nonlinear_controller_jax,
     direct_coil_projected_mode_fixed_point_directional_check_jax,
@@ -301,6 +302,76 @@ def test_jax_visible_nonlinear_controller_matches_manual_scan_and_fd():
     assert np.isfinite(float(check["value"]))
     assert float(check["abs_error"]) < 1.0e-9
     np.testing.assert_allclose(check["exact_directional"], check["fd_directional"], rtol=1.0e-6, atol=1.0e-10)
+
+
+def test_jax_visible_masked_controller_keeps_final_state_and_gradient_stable():
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jax, jnp
+
+    enable_x64(True)
+    controls = {
+        "gain": jnp.asarray([0.20, 0.30, 0.25, 0.80, 0.80], dtype=float),
+        "stop": jnp.asarray([False, False, True, False, False]),
+    }
+    params = {"target": jnp.asarray([0.85, -0.35], dtype=float)}
+    direction = {"target": jnp.asarray([0.03, -0.02], dtype=float)}
+    initial_state = jnp.asarray([0.0, 0.0], dtype=float)
+
+    def step(state, prm, control):
+        delta = prm["target"] - state
+        next_state = state + control["gain"] * delta
+        return next_state, {"err": jnp.linalg.norm(delta)}
+
+    def converged_fn(_next_state, _prm, control, _aux):
+        return control["stop"]
+
+    run = jax_visible_masked_nonlinear_controller_jax(
+        step,
+        converged_fn,
+        initial_state,
+        params,
+        controls,
+    )
+
+    manual = initial_state
+    active = []
+    done = False
+    for k in range(int(controls["gain"].shape[0])):
+        active.append(not done)
+        proposed, _aux = step(
+            manual,
+            params,
+            {"gain": controls["gain"][k], "stop": controls["stop"][k]},
+        )
+        if not done:
+            manual = proposed
+        done = done or bool(controls["stop"][k])
+
+    np.testing.assert_allclose(run["state"], manual, rtol=1.0e-14, atol=1.0e-14)
+    np.testing.assert_array_equal(np.asarray(run["history"]["active"]), np.asarray(active))
+    assert bool(run["done"]) is True
+
+    def objective(controller_params):
+        out = jax_visible_masked_nonlinear_controller_jax(
+            step,
+            converged_fn,
+            initial_state,
+            controller_params,
+            controls,
+            checkpoint_steps=True,
+        )
+        return 0.5 * jnp.vdot(out["state"], out["state"]) + 0.01 * jnp.sum(
+            jnp.asarray(out["history"]["active"], dtype=float) * out["history"]["err"]
+        )
+
+    exact = jnp.vdot(jax.grad(objective)(params)["target"], direction["target"])
+
+    def shifted(scale):
+        return {"target": params["target"] + scale * direction["target"]}
+
+    eps = 1.0e-5
+    fd = (objective(shifted(eps)) - objective(shifted(-eps))) / (2.0 * eps)
+    np.testing.assert_allclose(exact, fd, rtol=2.0e-6, atol=1.0e-10)
 
 
 def test_jax_visible_controller_direct_coil_gradient_matches_fd():
