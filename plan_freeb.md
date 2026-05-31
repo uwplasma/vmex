@@ -41,11 +41,14 @@ Steps taken:
    fixed.
 5. Refactored the stellsym/LASYM projected-mode tests and the two-step
    accepted-boundary replay test to use the reusable helpers.
-6. Added `--include-policy-ablation` to
+6. Added an accepted-boundary `bsqvac` replay gate with AD-vs-central-FD
+   sensitivity to the packed VMEC state.  This closes a missing derivative rung
+   for `state -> boundary geometry -> direct-coil NESTOR bsqvac`.
+7. Added `--include-policy-ablation` to
    `tools/benchmarks/bench_freeb_direct_coil_matrix.py` for benchmark-only rows
    that disable host residual metrics, host fsq1 norms, host profile setup, and
    all three policies together.
-7. Updated README/quickstart/free-boundary docs wording to point users to the
+8. Updated README/quickstart/free-boundary docs wording to point users to the
    direct-coil research-lane page and avoid overclaiming production full-loop
    exact adjoints.
 
@@ -63,9 +66,13 @@ Results obtained:
    passed: 52 passed in 0.26 s.
 6. `python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state tests/test_free_boundary_coil_provider_forward.py -rx`
    passed: 59 passed in 130.84 s.
-7. `python tools/benchmarks/bench_freeb_direct_coil_matrix.py --quick --include-policy-ablation --include-timing-light --include-badjac-probe0 --timeout-s 240 --out results/bench_freeb_direct_coil_matrix/policy_ablation_cpu_20260531.json`
+7. `python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_accepted_boundary_bsqvac_replay_grad_wrt_vmec_state_matches_fd -rx`
+   passed: 1 passed in 29.70 s.
+8. `python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_accepted_boundary_bsqvac_replay_grad_wrt_vmec_state_matches_fd tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state -rx`
+   passed: 3 passed in 66.44 s.
+9. `python tools/benchmarks/bench_freeb_direct_coil_matrix.py --quick --include-policy-ablation --include-timing-light --include-badjac-probe0 --timeout-s 240 --out results/bench_freeb_direct_coil_matrix/policy_ablation_cpu_20260531.json`
    completed all CPU rows.
-8. On `office`, `python3 tools/benchmarks/bench_freeb_direct_coil_matrix.py --quick --include-gpu --include-policy-ablation --include-timing-light --include-badjac-probe0 --timeout-s 300 --out /tmp/freeb_policy_ablation_after_f2ec6989/summary.json`
+10. On `office`, `python3 tools/benchmarks/bench_freeb_direct_coil_matrix.py --quick --include-gpu --include-policy-ablation --include-timing-light --include-badjac-probe0 --timeout-s 300 --out /tmp/freeb_policy_ablation_after_f2ec6989/summary.json`
    completed all CPU and GPU rows.  Tiny direct-solve GPU warm time remains
    slower than CPU: `10.48x` for non-JIT-force direct solve and `2.65-3.08x`
    for JIT-force policy-ablation rows.  The timing confirms the remaining GPU

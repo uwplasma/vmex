@@ -1357,6 +1357,118 @@ def test_jax_free_boundary_boundary_geometry_matches_host_sampler(
     assert float(jnp.linalg.norm(grad)) > 0.0
 
 
+def test_accepted_boundary_bsqvac_replay_grad_wrt_vmec_state_matches_fd(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Validate accepted-boundary replay sensitivity to the VMEC state.
+
+    Coil-parameter AD-vs-FD gates are not sufficient for the full
+    free-boundary adjoint ladder: the accepted plasma state also changes the
+    boundary on which the direct-coil field is sampled and projected.  This
+    test keeps one accepted production trace fixed, differentiates the JAX
+    ``state -> boundary geometry -> direct-coil NESTOR bsqvac`` replay with
+    respect to the packed VMEC state, and checks the directional derivative
+    against a central finite difference.
+    """
+
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jax, jnp
+    from vmec_jax.driver import run_free_boundary
+    from vmec_jax.free_boundary_adjoint import (
+        direct_coil_boundary_bsqvac_from_trace_jax,
+        direct_coil_boundary_replay_context,
+        free_boundary_boundary_geometry_jax,
+    )
+    from vmec_jax.solve import solve_fixed_boundary_residual_iter
+    from vmec_jax.state import pack_state, unpack_state
+
+    enable_x64(True)
+    for key, value in {
+        "VMEC_JAX_FREEB_NESTOR_MODE": "dense",
+        "VMEC_JAX_FREEB_DENSE_SOLVE_MODE": "mode",
+        "VMEC_JAX_FREEB_USE_GREENF_SOURCE": "1",
+        "VMEC_JAX_FREEB_EXPERIMENTAL_FOURI_MATRIX": "1",
+        "VMEC_JAX_FREEB_ADD_ANALYTIC_BVEC": "1",
+        "VMEC_JAX_FREEB_JAX_NESTOR_OPERATOR": "1",
+        "VMEC_JAX_FREEB_JAX_NESTOR_JIT_OPERATOR": "0",
+    }.items():
+        monkeypatch.setenv(key, value)
+
+    input_path = _write_tiny_direct_freeb_input(
+        tmp_path / "input.direct_state_bsqvac_ad_fd",
+        lasym=False,
+        niter=2,
+        mpol=3,
+        ntheta=6,
+    )
+    params = _circle_coil_params(current=3.0e7, n_segments=64)
+    init = run_free_boundary(
+        input_path,
+        use_initial_guess=True,
+        verbose=False,
+        external_field_provider_kind="direct_coils",
+        external_field_provider_params=params,
+    )
+    result = solve_fixed_boundary_residual_iter(
+        init.state,
+        init.static,
+        indata=init.indata,
+        signgs=init.signgs,
+        max_iter=2,
+        ftol=1.0e-8,
+        vmec2000_control=True,
+        auto_flip_force=False,
+        use_direct_fallback=True,
+        verbose=False,
+        verbose_vmec2000_table=False,
+        jit_forces=False,
+        use_scan=False,
+        host_update_assembly=False,
+        adjoint_trace=True,
+        adjoint_trace_mode="full",
+        external_field_provider_kind="direct_coils",
+        external_field_provider_params=params,
+        free_boundary_activate_fsq=1.0e99,
+    )
+    active_traces = [
+        trace for trace in result.diagnostics.get("adjoint_step_trace", []) if trace.get("freeb_nestor_trace") is not None
+    ]
+    assert active_traces
+    trace = active_traces[0]
+    flat0 = jnp.asarray(pack_state(trace["state_pre"]))
+
+    def objective(flat_state):
+        state = unpack_state(flat_state, trace["state_pre"].layout)
+        geometry = free_boundary_boundary_geometry_jax(state, init.static)
+        context = direct_coil_boundary_replay_context(init.static, geometry)
+        replay = direct_coil_boundary_bsqvac_from_trace_jax(
+            params,
+            geometry,
+            trace,
+            basis=context["basis"],
+            tables=context["tables"],
+            signgs=int(init.signgs),
+            nvper=context["nvper"],
+            wint=jnp.asarray(context["wint"]),
+            include_analytic=True,
+        )
+        bsqvac = jnp.asarray(replay["bsqvac"])
+        return 0.5 * jnp.vdot(bsqvac, bsqvac)
+
+    grad = jax.grad(objective)(flat0)
+    grad_norm = jnp.linalg.norm(grad)
+    assert float(grad_norm) > 1.0e-16
+    direction = grad / grad_norm
+    exact = jnp.vdot(grad, direction)
+    eps = 1.0e-4
+    fd = (objective(flat0 + eps * direction) - objective(flat0 - eps * direction)) / (2.0 * eps)
+    assert np.isfinite(float(exact))
+    assert np.isfinite(float(fd))
+    assert abs(float(exact)) > 1.0e-16
+    np.testing.assert_allclose(exact, fd, rtol=2.0e-4, atol=1.0e-10)
+
+
 def test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
