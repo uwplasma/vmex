@@ -32,6 +32,8 @@ dependencies = [
 ]
 
 [project.scripts]
+vmec = "vmec_jax.cli:main"
+vmec-jax = "vmec_jax.cli:main"
 vmec_jax = "vmec_jax.cli:main"
 xvmec_jax = "vmec_jax.cli:main"
 

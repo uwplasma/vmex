@@ -359,7 +359,7 @@ To audit a new input deck, first run VMEC once so the audit has a matching
 
 .. code-block:: bash
 
-   vmec_jax /path/to/input.my_seed
+   vmec /path/to/input.my_seed
    PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py \
      --quick \
      --case my_seed:qi:/path/to/input.my_seed:/path/to/wout_my_seed.nc \

@@ -4,7 +4,7 @@ This example is intended for users who want to drive `vmec_jax` from Python
 instead of the CLI while still understanding the difference between:
 
 - the conservative VMEC2000-like parity path, and
-- the optimized fixed-boundary CLI policy used by `vmec_jax input.name`.
+- the optimized fixed-boundary CLI policy used by `vmec input.name`.
 """
 
 from __future__ import annotations

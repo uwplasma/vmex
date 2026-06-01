@@ -10,7 +10,7 @@ Run the bundled CLI test
 
 The fastest first check after a PyPI install is::
 
-  vmec_jax --test
+  vmec --test
 
 This does not require a source checkout.  It copies the packaged
 ``input.nfp4_QH_warm_start`` into ``vmec_jax_test/``, runs the fixed-boundary
@@ -58,17 +58,18 @@ Run the full test suite (requires released netCDF assets)::
 CLI (VMEC2000-style executable)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Once installed (or when working from the repo), you can run vmec_jax like the
+Once installed (or when working from the repo), you can run ``vmec`` like the
 VMEC2000 executable by pointing it to a single ``input.*`` file::
 
-  vmec_jax examples/data/input.circular_tokamak
+  vmec examples/data/input.circular_tokamak
 
 Sanity check (verifies the console script is wired to the right interpreter)::
 
-  vmec_jax --help
+  vmec --help
 
-If the ``vmec_jax`` command is not found or raises ``ModuleNotFoundError``,
-install and run via the module entrypoint::
+The ``vmec_jax``, ``vmec-jax``, and ``xvmec_jax`` command names remain aliases
+for compatibility. If no console command is found or a command raises
+``ModuleNotFoundError``, install and run via the module entrypoint::
 
   python -m pip install -e .
   python -m vmec_jax examples/data/input.circular_tokamak
@@ -83,14 +84,14 @@ Boozer-coordinate CLI workflow
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The plain ``vmec-jax`` install includes ``booz_xform_jax``.  Use
-``vmec_jax --booz`` to run a Boozer transform after a VMEC solve, or directly
+``vmec --booz`` to run a Boozer transform after a VMEC solve, or directly
 from an existing ``wout_*.nc`` file.  The default transform resolution is
 ``mbooz = 32``, ``nbooz = 32``, with all VMEC surfaces included::
 
-  vmec_jax --booz input.nfp4_QH_warm_start
-  vmec_jax --booz --plot input.nfp4_QH_warm_start
-  vmec_jax --booz wout_nfp4_QH_warm_start.nc
-  vmec_jax --plot boozmn_nfp4_QH_warm_start.nc
+  vmec --booz input.nfp4_QH_warm_start
+  vmec --booz --plot input.nfp4_QH_warm_start
+  vmec --booz wout_nfp4_QH_warm_start.nc
+  vmec --plot boozmn_nfp4_QH_warm_start.nc
 
 ``--booz --plot`` writes the usual ``wout_*.nc``, runs ``booz_xform_jax``,
 writes ``boozmn_*.nc``, and then creates:
@@ -102,8 +103,8 @@ writes ``boozmn_*.nc``, and then creates:
 
 Override the transform resolution or selected surfaces from the CLI::
 
-  vmec_jax --booz wout_nfp4_QH_warm_start.nc --mbooz 48 --nbooz 48
-  vmec_jax --booz wout_nfp4_QH_warm_start.nc --booz-surfaces "0.25,0.5,1.0"
+  vmec --booz wout_nfp4_QH_warm_start.nc --mbooz 48 --nbooz 48
+  vmec --booz wout_nfp4_QH_warm_start.nc --booz-surfaces "0.25,0.5,1.0"
 
 Input decks can carry Boozer defaults in a separate namelist.  ``LBOOZ = F`` is
 the safe default used by the example inputs; passing ``--booz`` overrides it::
@@ -181,27 +182,36 @@ those knots. A compact pressure/iota spline example is included:
 
 .. code-block:: bash
 
-   vmec_jax examples/data/input.profile_splines --plot
+   vmec examples/data/input.profile_splines --plot
+
+Generate editable polynomial and spline pressure/current decks side by side
+with:
+
+.. code-block:: bash
+
+   python examples/profile_input_examples.py
+   vmec examples/outputs/profile_inputs/input.profile_polynomial_pressure_current
+   vmec examples/outputs/profile_inputs/input.profile_spline_pressure_current
 
 For a finite-beta current-spline example, use:
 
 .. code-block:: bash
 
-   vmec_jax examples/data/input.nfp4_QH_finite_beta
+   vmec examples/data/input.nfp4_QH_finite_beta
 
 Free-boundary CLI smoke test
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 For a small bundled free-boundary case, run::
 
-  vmec_jax examples/data/input.cth_like_free_bdy_lasym_small
+  vmec examples/data/input.cth_like_free_bdy_lasym_small
 
 This input references the tracked ``examples/data/mgrid_cth_like_lasym_small.nc``
 fixture, so it works in a fresh clone without downloading the large asset
 bundle. The resulting ``wout_cth_like_free_bdy_lasym_small.nc`` can be plotted
 with::
 
-  vmec_jax --plot examples/data/wout_cth_like_free_bdy_lasym_small.nc
+  vmec --plot examples/data/wout_cth_like_free_bdy_lasym_small.nc
 
 For ESSOS/direct-coil finite-beta scans and coil-only free-boundary examples,
 see :doc:`free_boundary_coil_optimization`.
