@@ -1485,10 +1485,11 @@ def test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state(
     """
 
     pytest.importorskip("jax")
-    from vmec_jax._compat import jax, jnp
+    from vmec_jax._compat import jnp
     from vmec_jax.discrete_adjoint import strict_update_accepted_step, strict_update_one_step_from_trace
     from vmec_jax.driver import run_free_boundary
     from vmec_jax.free_boundary_adjoint import (
+        direct_coil_accepted_trace_directional_check_jax,
         direct_coil_accepted_trace_replay_objective_jax,
         direct_coil_boundary_bsqvac_from_trace_jax,
         direct_coil_boundary_replay_context,
@@ -1643,20 +1644,6 @@ def test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state(
         base_currents=base_currents * 0.02,
     )
 
-    def two_step_objective(params: CoilFieldParams):
-        replay = direct_coil_accepted_trace_replay_objective_jax(
-            params,
-            trace0["state_pre"],
-            static=init.static,
-            traces=[trace0, trace1],
-            signgs=int(init.signgs),
-            state_weight=1.0,
-            bsqvac_weight=1.0e-12,
-            force_weight=0.0,
-            enforce_edge=False,
-        )
-        return replay["objective"]
-
     replay = direct_coil_accepted_trace_replay_objective_jax(
         base_params,
         trace0["state_pre"],
@@ -1671,35 +1658,23 @@ def test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state(
     assert {"state", "bsqvac", "force"}.issubset(replay["objective_components"])
     assert np.isfinite(float(replay["objective"]))
 
-    _value, grad_params = jax.value_and_grad(two_step_objective)(base_params)
-
-    def exact_directional(direction: CoilFieldParams):
-        return jnp.vdot(
-            jnp.asarray(grad_params.base_curve_dofs),
-            jnp.asarray(direction.base_curve_dofs),
-        ) + jnp.vdot(
-            jnp.asarray(grad_params.base_currents),
-            jnp.asarray(direction.base_currents),
-        )
-
-    def shifted_params(direction: CoilFieldParams, scale: float):
-        return base_params.with_arrays(
-            base_curve_dofs=base_dofs + float(scale) * jnp.asarray(direction.base_curve_dofs),
-            base_currents=base_currents + float(scale) * jnp.asarray(direction.base_currents),
-        )
-
     eps = 1.0e-3
     for direction in (current_direction, fourier_direction, mixed_direction):
-        exact = float(np.asarray(exact_directional(direction)))
-        fd = float(
-            np.asarray(
-                (
-                    two_step_objective(shifted_params(direction, eps))
-                    - two_step_objective(shifted_params(direction, -eps))
-                )
-                / (2.0 * eps)
-            )
+        check = direct_coil_accepted_trace_directional_check_jax(
+            base_params,
+            direction,
+            trace0["state_pre"],
+            static=init.static,
+            traces=[trace0, trace1],
+            signgs=int(init.signgs),
+            state_weight=1.0,
+            bsqvac_weight=1.0e-12,
+            force_weight=0.0,
+            enforce_edge=False,
+            eps=eps,
         )
+        exact = float(np.asarray(check["exact_directional"]))
+        fd = float(np.asarray(check["fd_directional"]))
         assert np.isfinite(exact)
         assert np.isfinite(fd)
         assert abs(exact) > 1.0e-16

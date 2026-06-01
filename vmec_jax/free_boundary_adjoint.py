@@ -1922,6 +1922,53 @@ def direct_coil_accepted_trace_replay_objective_jax(
     }
 
 
+def direct_coil_accepted_trace_directional_check_jax(
+    params: Any,
+    direction: Any,
+    initial_state: Any,
+    *,
+    eps: float = 1.0e-4,
+    **replay_kwargs: Any,
+) -> dict[str, Any]:
+    """Validate accepted-trace replay coil gradients by central FD.
+
+    This wraps :func:`direct_coil_accepted_trace_replay_objective_jax` with the
+    common AD-vs-central-FD contract used throughout the phase-2 free-boundary
+    adjoint ladder.  The differentiated path includes direct-coil sampling,
+    accepted-boundary geometry resampling, JAX NESTOR replay, and strict VMEC
+    accepted updates under fixed production trace controls.
+
+    The helper is production-adjacent but still intentionally scoped: the
+    adaptive host controller that created the accepted traces is fixed data, so
+    this is not yet a full custom VJP for :func:`vmec_jax.driver.run_free_boundary`.
+    """
+
+    def objective(coil_params):
+        replay = direct_coil_accepted_trace_replay_objective_jax(
+            coil_params,
+            initial_state,
+            **replay_kwargs,
+        )
+        return replay["objective"]
+
+    check = pytree_directional_derivative_check_jax(
+        objective,
+        params,
+        direction,
+        eps=eps,
+    )
+    replay = direct_coil_accepted_trace_replay_objective_jax(
+        params,
+        initial_state,
+        **replay_kwargs,
+    )
+    return {
+        **check,
+        "replay": replay,
+        "objective_components": replay["objective_components"],
+    }
+
+
 def direct_coil_projected_mode_fixed_point_jax(
     params: Any,
     initial_state: Any,

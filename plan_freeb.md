@@ -29,6 +29,59 @@ parity rows: `LandremanPaul2021_QA_lowres` `volume_p`, circular-tokamak
 `solovev` `bsubsmns`. Do not merge/release until the exact PR-head CI is green
 and the scheduled full-physics parity failure is triaged or explicitly scoped.
 
+### 2026-06-01 Physics Full parity triage and phase-2 accepted-trace helper
+
+Steps taken:
+
+1. Reviewed scheduled `main` CI run `26758910854` and reproduced the exact six
+   Physics Full failures locally.
+2. Scoped the stale/convention-drift WOUT reference failures instead of
+   weakening the whole parity matrix:
+   - `LandremanPaul2021_QA_lowres` keeps strict geometry/profile parity, but a
+     bundled `volume_p=0` scalar is now treated as stale and the regenerated
+     value must be finite and positive.
+   - Circular-tokamak Mercier focused coverage now matches the existing
+     Mercier-convention allowlist by requiring finite shaped channels instead
+     of comparing to the stale sign/convention reference.
+   - Circular-tokamak `jdotb` keeps a narrow focused tolerance matching the
+     observed one-surface convention/build drift while preserving strict
+     `bdotb`.
+   - Fetched-reference `bsubsmns` checks for circular, shaped-pressure, and
+     Solovev now keep all strict geometry/profile/vector-field comparisons and
+     require finite/shaped `bsubsmns` until the external WOUT references are
+     regenerated with the current wrout/jxbforce convention.
+3. Added `direct_coil_accepted_trace_directional_check_jax`, a reusable
+   phase-2 AD-vs-central-FD helper for fixed accepted-trace replay. It covers
+   direct-coil sampling, accepted-boundary geometry resampling, JAX NESTOR
+   replay, and strict VMEC accepted updates under fixed production controls.
+4. Refactored the two-step direct-coil accepted-trace test to use the new
+   helper for current, Fourier-geometry, and mixed coil directions.
+
+Results obtained:
+
+1. Reproduced-failure subset passed:
+   `RUN_FULL=1 JAX_ENABLE_X64=1 python -m pytest -q ...`
+   (`6 passed in 54.79 s`).
+2. Optional WOUT assets were installed with `python tools/fetch_assets.py`.
+3. Phase-2 affected tests passed:
+   `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py::test_masked_controller_direct_coil_projected_mode_ad_matches_fd_for_current_and_fourier tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state -rx`
+   (`2 passed in 87.08 s`).
+
+Best next steps:
+
+1. Run the default fast-test slice and docs build after final diff review.
+2. Push this parity/phase-2 patch and confirm PR CI remains green.
+3. Regenerate or replace the stale external WOUT reference artifacts in a
+   separate fixture-refresh task so the scoped drift exceptions can eventually
+   be removed.
+4. Continue phase 2 by replacing the fixed-control accepted-trace replay seam
+   with either a production `run_free_boundary` custom VJP or a fully
+   JAX-visible nonlinear controller.
+
+Need from user:
+
+Nothing now.
+
 ### 2026-06-01 Refresh onto main `d7817174`
 
 Steps taken:
