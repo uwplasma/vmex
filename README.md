@@ -104,6 +104,13 @@ boozmn = vj.run_booz_xform(wout_path, mbooz=32, nbooz=32)
 vj.plot_boozmn(boozmn, outdir="figures/")
 ```
 
+VMEC pressure, iota, and current profiles can use polynomial coefficients or
+tabulated `cubic_spline`, `akima_spline`, and `line_segment` auxiliary arrays:
+
+```bash
+vmec_jax examples/data/input.profile_splines --plot
+```
+
 For the bundled small free-boundary example, download both the input deck and
 its magnetic grid into the same folder:
 
@@ -128,17 +135,10 @@ python examples/free_boundary_direct_coils_forward.py \
 ```
 
 With ESSOS on `PYTHONPATH`, `examples/free_boundary_essos_coils_beta_scan.py`
-runs finite-pressure coil beta scans. The default pressure model is the
-SIMSOPT/Landreman-style `e*(ne*Te+ni*Ti)` polynomial profile used by the
-self-consistent bootstrap-current examples. Use `--resume-existing` to reuse
-completed `wout_*_beta_*.nc` pressure-continuation seeds.
-
-The DIII-D reference scan reaches final `ns=101`, `FTOL=1e-12`, and actual WOUT
-betas through 3.33%; the LP-QA direct-coil lane records phase-1
-forward-validation rows through 1.93%. The panels annotate LCFS RMS shifts and
-relative LCFS `|B|` changes against vacuum. Validation-scale direct-coil
-adjoint rungs are documented; production full-loop adjoints and promoted LP-QA
-generated-mgrid VMEC2000 WOUT parity remain open. See
+runs finite-pressure coil beta scans with the SIMSOPT/Landreman-style
+`e*(ne*Te+ni*Ti)` pressure profile. Use `--resume-existing` for completed
+pressure-continuation seeds. The DIII-D and LP-QA panels annotate LCFS shifts
+and LCFS `|B|` changes; adjoint limits and parity status are in
 `docs/free_boundary_coil_optimization.rst`.
 
 ![DIII-D finite-beta mgrid free-boundary scan](docs/_static/figures/freeb_diiid_mgrid_beta_ns101_panel.png)
@@ -199,14 +199,11 @@ provenance and artifact rules are in `docs/optimization.rst` and
 
 ## Performance, Validation, Release
 
-- Performance notes: `docs/performance.rst`; validation and VMEC2000 parity:
-  `docs/validation.rst`; coverage strategy: `docs/testing_strategy.rst`.
-- Release checklist and CI gates: `docs/release_checklist.rst`; latest local
-  and hosted release evidence is summarized there.
+- Performance notes: `docs/performance.rst`; validation, coverage, and release
+  gates: `docs/validation.rst`, `docs/testing_strategy.rst`, and
+  `docs/release_checklist.rst`.
 - Latest repository release tag:
   [`v0.0.14`](https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.14).
-- Before tagging, re-check green CI with
-  `gh run list --repo uwplasma/vmec_jax --branch main --workflow CI --limit 5`.
 
 ## CLI Reference
 

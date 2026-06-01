@@ -522,15 +522,25 @@ Profiles
 VMEC supports several profile parameterizations. ``vmec-jax`` currently
 implements:
 
-- ``power_series`` for pressure (``AM``), iota (``AI``), and current function (``AC``).
+- ``power_series`` for pressure (``AM``), iota (``AI``), and current
+  :math:`I'(s)` (``AC``),
+- ``power_series_i`` for current :math:`I(s)`,
+- ``two_power`` for pressure and current-density profiles,
+- ``cubic_spline``, ``akima_spline``, and ``line_segment`` for pressure and
+  iota tabulated by ``AM_AUX_S/F`` and ``AI_AUX_S/F``,
+- ``cubic_spline_i`` / ``cubic_spline_ip``, ``akima_spline_i`` /
+  ``akima_spline_ip``, and ``line_segment_i`` / ``line_segment_ip`` for current
+  tabulated by ``AC_AUX_S/F``.
 
-This is enough to validate many basic equilibria and match a subset of VMEC
-inputs.
+The cubic-spline and Akima endpoint conditions follow VMEC2000's
+``spline_cubic`` and ``spline_akima`` implementations: endpoint behavior is
+fixed by quadratic extrapolation from the first and last three knots. ``*_ip``
+current profiles prescribe :math:`I'(s)` and are integrated from the magnetic
+axis; ``*_i`` profiles prescribe enclosed current :math:`I(s)` directly.
 
 Future work:
 
 - pedestal logic parity (beyond the minimal clamp already implemented),
-- spline and tabulated profiles,
 - correct handling of the ``gamma != 0`` “mass profile” pathway (pressure derived
   from the volume profile).
 

@@ -1,0 +1,53 @@
+&INDATA
+  MGRID_FILE = 'NONE'
+  LOPTIM = F
+  DELT = 0.9
+  TCON0 = 2.0
+  NFP = 1
+  MPOL = 6
+  NTOR = 0
+  NTHETA = 16
+  NZETA = 8
+  NITER = 1200
+  FTOL = 1.0e-12
+  NS_ARRAY    =     9     17
+  NITER_ARRAY =   600   1200
+  FTOL_ARRAY  =  1e-10  1e-12
+  NSTEP = 200
+  GAMMA = 0.0
+  PHIEDGE = 67.86
+  CURTOR = 1.0
+  SPRES_PED = 1.0
+  NCURR = 0
+
+  ! Pressure profile in Pa from tabulated cubic-spline knots in normalized
+  ! toroidal flux s. VMEC multiplies by PRES_SCALE before converting to
+  ! internal mu0*Pa pressure units.
+  PMASS_TYPE = "cubic_spline"
+  AM_AUX_S = 0.0 0.25 0.50 0.75 1.0
+  AM_AUX_F = 1.0 0.92 0.70 0.35 0.0
+  PRES_SCALE = 1.0e4
+
+  ! Rotational-transform profile from cubic-spline knots. Set NCURR=1 and
+  ! replace this block with PCURR_TYPE/AC_AUX_S/AC_AUX_F to prescribe a
+  ! tabulated current profile instead.
+  PIOTA_TYPE = "cubic_spline"
+  AI_AUX_S = 0.0 0.25 0.50 0.75 1.0
+  AI_AUX_F = 1.05 0.98 0.90 0.80 0.70
+
+  AC = 0.0
+  RAXIS = 6.0
+  ZAXIS = 0.0
+
+  RBC(0,0) = 6.0     ZBS(0,0) = 0.0
+  RBC(0,1) = 2.1     ZBS(0,1) = 2.6
+  RBC(0,2) = 0.35    ZBS(0,2) = -0.25
+  RBC(0,3) = 0.08    ZBS(0,3) = 0.0
+/
+
+&BOOZ_XFORM_JAX
+  LBOOZ = F
+  MBOOZ = 32
+  NBOOZ = 32
+  BOOZ_SURFACES = 'all'
+/

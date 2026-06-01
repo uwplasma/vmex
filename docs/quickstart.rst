@@ -157,6 +157,38 @@ It creates a ``wout`` from ``examples/data/input.nfp4_QH_warm_start`` if one
 does not already exist, saves a round-trip copy, then prints scalar
 diagnostics, the iota profile, and simple surface-averaged ``|B|`` values.
 
+Spline pressure, iota, and current profiles
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+VMEC input decks can prescribe profiles as polynomial coefficients or as
+tabulated spline knots. ``vmec_jax`` supports the common VMEC forms:
+
+- ``PMASS_TYPE = "power_series"`` with ``AM`` coefficients, or
+  ``PMASS_TYPE = "cubic_spline"``, ``"akima_spline"``, or ``"line_segment"``
+  with ``AM_AUX_S`` and ``AM_AUX_F``.
+- ``PIOTA_TYPE = "power_series"`` with ``AI`` coefficients, or
+  ``PIOTA_TYPE = "cubic_spline"``, ``"akima_spline"``, or ``"line_segment"``
+  with ``AI_AUX_S`` and ``AI_AUX_F`` when ``NCURR = 0``.
+- ``PCURR_TYPE = "power_series"`` with ``AC`` coefficients for :math:`I'(s)`,
+  ``PCURR_TYPE = "power_series_i"`` with ``AC`` coefficients for :math:`I(s)`,
+  or ``PCURR_TYPE = "cubic_spline_ip"`` / ``"cubic_spline_i"`` (and matching
+  ``akima_spline`` or ``line_segment`` forms) with ``AC_AUX_S`` and ``AC_AUX_F`` when
+  ``NCURR = 1``.
+
+The ``*_AUX_S`` arrays are knot locations in normalized toroidal flux
+:math:`s \in [0,1]`; the matching ``*_AUX_F`` arrays are profile values at
+those knots. A compact pressure/iota spline example is included:
+
+.. code-block:: bash
+
+   vmec_jax examples/data/input.profile_splines --plot
+
+For a finite-beta current-spline example, use:
+
+.. code-block:: bash
+
+   vmec_jax examples/data/input.nfp4_QH_finite_beta
+
 Free-boundary CLI smoke test
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
