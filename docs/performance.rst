@@ -3357,6 +3357,23 @@ about ``10.48x`` CPU, and JIT-force policy-ablation rows remained
 target for controller/preconditioner/finalization staging, not as a GPU speedup
 claim for the direct-coil free-boundary row.
 
+The 2026-06-01 PR-head rerun at ``8a0ce5c2`` confirmed the bounded
+preconditioner reuse patch removes the duplicate refresh after a
+``bcovar``-seeded preconditioner build.  A fresh ``office`` clone completed all
+22 CPU/GPU quick rows and the timed direct rows reported
+``precond_refresh_seed_reuse_count=1``.  On CPU, the JIT-force direct solve
+reported ``warm_min=0.0677 s`` and ``solve_total=0.0567 s``.  On CUDA, the
+same row reported ``warm_min=0.183 s`` and ``solve_total=0.116 s``:
+JIT-force evaluation was faster than CPU (``0.88x``), finalization was
+essentially parity (``0.98x``), and the remaining warm GPU penalties were the
+seeded preconditioner refresh (``2.01x``), preconditioner apply (``18.8x``),
+accepted-control scalar work (``4.09x``), and residual-metric synchronization
+(``43.8x``).  The best policy-ablation row was
+``direct_solve_jit_forces_host_policies_off`` at ``2.43x`` CPU.  The next
+performance target is therefore not Biot-Savart or force assembly; it is
+structural staging/fusion of the preconditioner apply and residual/control
+scalar synchronization.
+
 Historical bundled example runtime/memory matrix (March 2026)
 -------------------------------------------------------------
 

@@ -1485,7 +1485,7 @@ def test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state(
     """
 
     pytest.importorskip("jax")
-    from vmec_jax._compat import jnp
+    from vmec_jax._compat import jax, jnp
     from vmec_jax.discrete_adjoint import strict_update_accepted_step, strict_update_one_step_from_trace
     from vmec_jax.driver import run_free_boundary
     from vmec_jax.free_boundary_adjoint import (
@@ -1493,7 +1493,6 @@ def test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state(
         direct_coil_boundary_bsqvac_from_trace_jax,
         direct_coil_boundary_replay_context,
         free_boundary_boundary_geometry_jax,
-        pytree_directional_derivative_check_jax,
     )
     from vmec_jax.solve import solve_fixed_boundary_residual_iter
     from vmec_jax.state import pack_state
@@ -1631,7 +1630,15 @@ def test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state(
 
     base_dofs = jnp.asarray(base_params.base_curve_dofs)
     base_currents = jnp.asarray(base_params.base_currents)
-    direction = base_params.with_arrays(
+    current_direction = base_params.with_arrays(
+        base_curve_dofs=jnp.zeros_like(base_dofs),
+        base_currents=base_currents * 0.02,
+    )
+    fourier_direction = base_params.with_arrays(
+        base_curve_dofs=jnp.zeros_like(base_dofs).at[0, 0, 2].set(1.0e-2),
+        base_currents=jnp.zeros_like(base_currents),
+    )
+    mixed_direction = base_params.with_arrays(
         base_curve_dofs=jnp.zeros_like(base_dofs).at[0, 0, 2].set(1.0e-2),
         base_currents=base_currents * 0.02,
     )
@@ -1664,14 +1671,40 @@ def test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state(
     assert {"state", "bsqvac", "force"}.issubset(replay["objective_components"])
     assert np.isfinite(float(replay["objective"]))
 
-    check = pytree_directional_derivative_check_jax(two_step_objective, base_params, direction, eps=1.0e-3)
-    exact = float(np.asarray(check["exact_directional"]))
-    fd = float(np.asarray(check["fd_directional"]))
-    assert np.isfinite(exact)
-    assert np.isfinite(fd)
-    assert abs(exact) > 1.0e-16
-    assert abs(fd) > 1.0e-16
-    np.testing.assert_allclose(exact, fd, rtol=5.0e-3, atol=1.0e-10)
+    _value, grad_params = jax.value_and_grad(two_step_objective)(base_params)
+
+    def exact_directional(direction: CoilFieldParams):
+        return jnp.vdot(
+            jnp.asarray(grad_params.base_curve_dofs),
+            jnp.asarray(direction.base_curve_dofs),
+        ) + jnp.vdot(
+            jnp.asarray(grad_params.base_currents),
+            jnp.asarray(direction.base_currents),
+        )
+
+    def shifted_params(direction: CoilFieldParams, scale: float):
+        return base_params.with_arrays(
+            base_curve_dofs=base_dofs + float(scale) * jnp.asarray(direction.base_curve_dofs),
+            base_currents=base_currents + float(scale) * jnp.asarray(direction.base_currents),
+        )
+
+    eps = 1.0e-3
+    for direction in (current_direction, fourier_direction, mixed_direction):
+        exact = float(np.asarray(exact_directional(direction)))
+        fd = float(
+            np.asarray(
+                (
+                    two_step_objective(shifted_params(direction, eps))
+                    - two_step_objective(shifted_params(direction, -eps))
+                )
+                / (2.0 * eps)
+            )
+        )
+        assert np.isfinite(exact)
+        assert np.isfinite(fd)
+        assert abs(exact) > 1.0e-16
+        assert abs(fd) > 1.0e-16
+        np.testing.assert_allclose(exact, fd, rtol=5.0e-3, atol=1.0e-10)
 
 
 @pytest.mark.parametrize("lasym", [False, True], ids=["stellsym", "lasym"])

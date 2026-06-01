@@ -13,20 +13,86 @@ Date opened: 2026-05-24
 ## Current Release Status
 
 Last updated: 2026-06-01 after merging `origin/main` commit `46be05f6` into the
-local `refresh/freeb-slim` branch in merge commit `b5082304` and refreshing
-docs/CI status. The exact local head is not pushed yet and has no GitHub Actions
-run; the local branch is ahead of
-`origin/feature/freeb-essos-coil-single-stage` by three commits. PR #18 is open
-on `feature/freeb-essos-coil-single-stage`; the latest pushed PR CI run
-`26705301456` for head `7aaa2c7b` is green across build/docs, parity dry-run,
-physics smoke, console smoke, Python 3.10/3.11/3.12 fast tests, and Codecov,
-with manual/nightly Physics Full skipped. The latest pushed `main` CI run for
-`46be05f6` was green, but the scheduled `main` run `26758910854` on
-2026-06-01 failed only in Physics Full (manual/nightly) WOUT parity rows:
-`LandremanPaul2021_QA_lowres` `volume_p`, circular-tokamak `DMerc`/`jdotb` and
-`bsubsmns`, shaped-tokamak-pressure `bsubsmns`, and `solovev` `bsubsmns`. Do
-not merge/release until the exact local head has CI after push and the scheduled
-full-physics parity failure is triaged or explicitly scoped.
+local `refresh/freeb-slim` branch, committing `8a0ce5c2`, and pushing it to
+`origin/feature/freeb-essos-coil-single-stage`. PR #18 is open on
+`feature/freeb-essos-coil-single-stage`; GitHub Actions run `26762863493` is
+running on the exact pushed head. At the time of this update, build/docs,
+console smoke, parity-manifest smoke, and docs-full have already passed, Physics
+Full is skipped as manual/nightly, and fast tests plus Physics Smoke are still
+in progress. The latest pushed `main` CI run for `46be05f6` was green, but the
+scheduled `main` run `26758910854` on 2026-06-01 failed only in Physics Full
+(manual/nightly) WOUT parity rows: `LandremanPaul2021_QA_lowres` `volume_p`,
+circular-tokamak `DMerc`/`jdotb` and `bsubsmns`,
+shaped-tokamak-pressure `bsubsmns`, and `solovev` `bsubsmns`. Do not
+merge/release until the exact PR-head CI is green and the scheduled full-physics
+parity failure is triaged or explicitly scoped.
+
+### 2026-06-01 PR-head preconditioner reuse and GPU rerun
+
+Steps taken:
+
+1. Incorporated `origin/main` into `refresh/freeb-slim` and pushed PR head
+   `8a0ce5c2`.
+2. Added a bounded non-scan VMEC2000-path performance improvement: when the
+   residual/control phase already seeds lambda/RZ preconditioner data during a
+   `bcovar` refresh, the later preconditioner phase reuses those matrices
+   instead of rebuilding them in the same iteration.
+3. Exposed timing counters for `precond_refresh_seed_s`,
+   `precond_refresh_calls`, `precond_reassemble_calls`,
+   `precond_cache_hit_count`, and `precond_refresh_seed_reuse_count`.
+4. Added benchmark summary extraction for those counters and tests covering
+   the new reuse/timing path.
+5. Ran a fresh `office` clone at `8a0ce5c2` with
+   `python3 tools/benchmarks/bench_freeb_direct_coil_matrix.py --quick --include-gpu --include-badjac-probe0 --include-timing-light --include-policy-ablation --timeout-s 600 --out /tmp/freeb_precond_seed_gpu_8a0ce5c2.json`.
+
+Results obtained:
+
+1. Local validation passed:
+   `python -m ruff check vmec_jax/free_boundary_adjoint.py vmec_jax/solve.py vmec_jax/solve_residual_iter_runtime_helpers.py tests/test_free_boundary_vacuum_adjoint.py tests/test_freeb_direct_coil_matrix_benchmark.py tests/test_solve_finish_cache_more_coverage.py tests/test_solve_performance_instrumentation.py tools/benchmarks/bench_freeb_direct_coil_matrix.py`.
+2. Local tests passed:
+   `python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py tests/test_solve_performance_instrumentation.py tests/test_freeb_direct_coil_matrix_benchmark.py -rx`
+   (`72 passed in 81.50 s`).
+3. Local optimization-main-merge tests passed:
+   `python -m pytest -q tests/test_optimization_wave2_coverage.py tests/test_optimization_fast_optimizer_methods.py tests/test_qi_optimization_public_helpers.py tests/test_optimization_workflow_unit.py -rx`
+   (`110 passed in 2.88 s`).
+4. Full docs build passed:
+   `python -m sphinx -W --keep-going -b html docs /tmp/vmec_jax_freeb_docs_check_20260601`.
+5. Office GPU matrix completed all 22 CPU/GPU rows.  The direct-solve rows now
+   report `precond_refresh_seed_reuse_count=1`, confirming the duplicate
+   same-iteration rebuild is gone.
+6. CPU JIT-force direct solve: `warm_min=0.0677 s`,
+   `solve_total=0.0567 s`, `preconditioner=0.0177 s`,
+   `precond_refresh_seed=0.0169 s`, `precond_apply=0.000515 s`.
+7. GPU JIT-force direct solve: `warm_min=0.183 s`,
+   `solve_total=0.116 s`, `preconditioner=0.0443 s`,
+   `precond_refresh_seed=0.0341 s`, `precond_apply=0.00969 s`.
+8. GPU/CPU JIT-force ratios: `warm_min=2.70x`, `solve_total=2.04x`,
+   `compute_forces=0.88x`, `preconditioner=2.51x`,
+   `precond_refresh_seed=2.01x`, `precond_apply=18.8x`,
+   `iteration_control=4.09x`, `iteration_residual_metrics=43.8x`,
+   and `finalize=0.98x`.
+9. The best policy-ablation row was
+   `direct_solve_jit_forces_host_policies_off` at `2.43x` CPU. This confirms
+   the remaining GPU blocker is structural dispatch/synchronization around
+   preconditioner apply and residual/control scalars, not Biot-Savart or force
+   assembly.
+
+Best next steps:
+
+1. Wait for GitHub Actions run `26762863493` on `8a0ce5c2` to finish.
+2. If CI is green, keep PR #18 merge-blocked only on the explicitly scoped
+   scheduled Physics Full parity failures and the production full-loop adjoint
+   limitation.
+3. For performance, target the remaining GPU structural costs:
+   preconditioner apply, accepted-control scalar synchronization, and
+   residual-metric synchronization.
+4. For phase 2, promote the current production-adjacent validation gates to a
+   complete `run_free_boundary` custom VJP or fully JAX-visible nonlinear
+   controller before making publication-level exact-adjoint claims.
+
+Need from user:
+
+Nothing now.
 
 ### 2026-06-01 Main-merge docs/CI hygiene
 
