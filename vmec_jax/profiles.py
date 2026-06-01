@@ -3,8 +3,8 @@
 This module implements the VMEC2000 profile logic used by the bundled examples:
 power-series, two-power, and tabulated spline profiles for pressure, iota, and
 toroidal current.  The spline boundary conditions follow STELLOPT/VMEC2000's
-``spline_cubic.f`` convention: endpoint derivatives are fixed by a quadratic
-fit to the first/last three knots.
+``spline_cubic.f`` and ``spline_akima.f`` conventions: endpoint derivatives are
+fixed by a quadratic fit to the first/last three knots.
 
 We intentionally keep this code:
 - dependency-light (NumPy for parsing, JAX-compatible math via ``vmec_jax._compat.jnp``)
@@ -361,15 +361,114 @@ def _line_segment_profile(x_knots, y_knots, x, *, integrate: bool):
     return prefix[idx] + partial
 
 
+def _akima_coefficients(x_knots, y_knots):
+    """Return VMEC/STELLOPT Akima Hermite coefficients for static knots."""
+    x_knots = jnp.asarray(x_knots)
+    y_knots = jnp.asarray(y_knots)
+    n = int(x_knots.shape[0])
+    if n < 4:
+        # VMEC stops for fewer than four active Akima knots.  Falling back to
+        # the cubic helper keeps eval_profiles useful for small diagnostic grids.
+        m = _cubic_second_derivatives(x_knots, y_knots)
+        h = x_knots[1:] - x_knots[:-1]
+        y0 = y_knots[:-1]
+        y1 = y_knots[1:]
+        m0 = m[:-1]
+        m1 = m[1:]
+        a = y0
+        b = (y1 - y0) / h - h * (2.0 * m0 + m1) / 6.0
+        c = m0 / 2.0
+        d = (m1 - m0) / (6.0 * h)
+        return a, b, c, d, h
+
+    xloc = jnp.zeros((n + 4,), dtype=x_knots.dtype)
+    yloc = jnp.zeros((n + 4,), dtype=y_knots.dtype)
+    xloc = xloc.at[2 : 2 + n].set(x_knots)
+    yloc = yloc.at[2 : 2 + n].set(y_knots)
+
+    xloc = xloc.at[0].set(2.0 * xloc[2] - xloc[4])
+    xloc = xloc.at[1].set(xloc[2] + xloc[3] - xloc[4])
+    xloc = xloc.at[n + 3].set(2.0 * xloc[n + 1] - xloc[n - 1])
+    xloc = xloc.at[n + 2].set(xloc[n + 1] + xloc[n] - xloc[n - 1])
+
+    m = jnp.zeros((n + 3,), dtype=y_knots.dtype)
+    slopes = (yloc[3 : 2 + n] - yloc[2 : 1 + n]) / (xloc[3 : 2 + n] - xloc[2 : 1 + n])
+    m = m.at[2 : n + 1].set(slopes)
+
+    cl = (m[3] - m[2]) / (xloc[4] - xloc[2])
+    bl = m[2] - cl * (xloc[3] - xloc[2])
+    cr = (m[n - 1] - m[n]) / (xloc[n + 1] - xloc[n - 1])
+    br = m[n - 1] - cr * (xloc[n] - xloc[n - 1])
+    yloc = yloc.at[1].set(yloc[2] + bl * (xloc[1] - xloc[2]) + cl * (xloc[1] - xloc[2]) ** 2)
+    yloc = yloc.at[0].set(yloc[2] + bl * (xloc[0] - xloc[2]) + cl * (xloc[0] - xloc[2]) ** 2)
+    yloc = yloc.at[n + 2].set(
+        yloc[n + 1] + br * (xloc[n + 2] - xloc[n + 1]) + cr * (xloc[n + 2] - xloc[n + 1]) ** 2
+    )
+    yloc = yloc.at[n + 3].set(
+        yloc[n + 1] + br * (xloc[n + 3] - xloc[n + 1]) + cr * (xloc[n + 3] - xloc[n + 1]) ** 2
+    )
+
+    m = m.at[0].set((yloc[1] - yloc[0]) / (xloc[1] - xloc[0]))
+    m = m.at[1].set((yloc[2] - yloc[1]) / (xloc[2] - xloc[1]))
+    m = m.at[n + 1].set((yloc[n + 2] - yloc[n + 1]) / (xloc[n + 2] - xloc[n + 1]))
+    m = m.at[n + 2].set((yloc[n + 3] - yloc[n + 2]) / (xloc[n + 3] - xloc[n + 2]))
+
+    dm = jnp.abs(m[1:] - m[:-1])
+    tangents = []
+    for idx in range(1, n + 1):
+        denom = dm[idx + 1] + dm[idx - 1]
+        left_slope = m[idx]
+        right_slope = m[idx + 1]
+        weighted = (dm[idx + 1] * left_slope + dm[idx - 1] * right_slope) / jnp.where(denom == 0.0, 1.0, denom)
+        tangents.append(jnp.where(denom == 0.0, 0.5 * (left_slope + right_slope), weighted))
+    t = jnp.asarray(tangents)
+
+    h = x_knots[1:] - x_knots[:-1]
+    interval_slope = (y_knots[1:] - y_knots[:-1]) / h
+    a = y_knots[:-1]
+    b = t[:-1]
+    c = (3.0 * interval_slope - t[1:] - 2.0 * t[:-1]) / h
+    d = (t[1:] + t[:-1] - 2.0 * interval_slope) / (h * h)
+    return a, b, c, d, h
+
+
+def _akima_spline_profile(x_knots, y_knots, x, *, integrate: bool):
+    """Evaluate or integrate VMEC's Akima spline through static knots."""
+    x_knots = jnp.asarray(x_knots)
+    y_knots = jnp.asarray(y_knots)
+    x = jnp.asarray(x)
+    n = int(x_knots.shape[0])
+    if n == 0:
+        return jnp.zeros_like(x)
+    if n == 1:
+        return y_knots[0] * x if integrate else jnp.broadcast_to(y_knots[0], x.shape)
+
+    x_clipped = jnp.clip(x, x_knots[0], x_knots[-1])
+    idx_hi = jnp.searchsorted(x_knots, x_clipped, side="right")
+    idx_hi = jnp.clip(idx_hi, 1, n - 1)
+    idx = idx_hi - 1
+    a, b, c, d, h = _akima_coefficients(x_knots, y_knots)
+    dx = x_clipped - x_knots[idx]
+    if not integrate:
+        return a[idx] + dx * (b[idx] + dx * (c[idx] + d[idx] * dx))
+
+    full_interval = a * h + 0.5 * b * h * h + (c / 3.0) * h**3 + 0.25 * d * h**4
+    prefix = jnp.concatenate([jnp.zeros((1,), dtype=full_interval.dtype), jnp.cumsum(full_interval)])
+    partial = dx * (a[idx] + dx * (0.5 * b[idx] + dx * ((c[idx] / 3.0) + 0.25 * d[idx] * dx)))
+    return prefix[idx] + partial
+
+
 def _spline_profile(profile_type: str, x_knots, y_knots, x, *, integrate: bool = False):
     """Evaluate a supported tabulated VMEC profile."""
     if profile_type == "cubic_spline":
         return _cubic_spline_profile(x_knots, y_knots, x, integrate=integrate)
+    if profile_type == "akima_spline":
+        return _akima_spline_profile(x_knots, y_knots, x, integrate=integrate)
     if profile_type == "line_segment":
         return _line_segment_profile(x_knots, y_knots, x, integrate=integrate)
     raise NotImplementedError(
         f"profile_type={profile_type!r} not implemented "
-        "(supported tabulated profiles: cubic_spline, line_segment)"
+        "(supported tabulated profiles: cubic_spline, akima_spline, line_segment)"
     )
 
 
@@ -536,14 +635,100 @@ def _line_segment_profile_np(x_knots, y_knots, x: np.ndarray, *, integrate: bool
     return np.asarray(prefix[idx] + partial)
 
 
+def _akima_coefficients_np(x_knots: np.ndarray, y_knots: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    n = int(x_knots.shape[0])
+    if n < 4:
+        m = _cubic_second_derivatives_np(x_knots, y_knots)
+        h = x_knots[1:] - x_knots[:-1]
+        y0 = y_knots[:-1]
+        y1 = y_knots[1:]
+        m0 = m[:-1]
+        m1 = m[1:]
+        a = y0
+        b = (y1 - y0) / h - h * (2.0 * m0 + m1) / 6.0
+        c = m0 / 2.0
+        d = (m1 - m0) / (6.0 * h)
+        return a, b, c, d, h
+
+    dtype = np.result_type(x_knots, y_knots, np.float64)
+    xloc = np.zeros((n + 4,), dtype=dtype)
+    yloc = np.zeros((n + 4,), dtype=dtype)
+    xloc[2 : 2 + n] = x_knots
+    yloc[2 : 2 + n] = y_knots
+
+    xloc[0] = 2.0 * xloc[2] - xloc[4]
+    xloc[1] = xloc[2] + xloc[3] - xloc[4]
+    xloc[n + 3] = 2.0 * xloc[n + 1] - xloc[n - 1]
+    xloc[n + 2] = xloc[n + 1] + xloc[n] - xloc[n - 1]
+
+    m = np.zeros((n + 3,), dtype=dtype)
+    m[2 : n + 1] = (yloc[3 : 2 + n] - yloc[2 : 1 + n]) / (xloc[3 : 2 + n] - xloc[2 : 1 + n])
+    cl = (m[3] - m[2]) / (xloc[4] - xloc[2])
+    bl = m[2] - cl * (xloc[3] - xloc[2])
+    cr = (m[n - 1] - m[n]) / (xloc[n + 1] - xloc[n - 1])
+    br = m[n - 1] - cr * (xloc[n] - xloc[n - 1])
+    yloc[1] = yloc[2] + bl * (xloc[1] - xloc[2]) + cl * (xloc[1] - xloc[2]) ** 2
+    yloc[0] = yloc[2] + bl * (xloc[0] - xloc[2]) + cl * (xloc[0] - xloc[2]) ** 2
+    yloc[n + 2] = yloc[n + 1] + br * (xloc[n + 2] - xloc[n + 1]) + cr * (xloc[n + 2] - xloc[n + 1]) ** 2
+    yloc[n + 3] = yloc[n + 1] + br * (xloc[n + 3] - xloc[n + 1]) + cr * (xloc[n + 3] - xloc[n + 1]) ** 2
+
+    m[0] = (yloc[1] - yloc[0]) / (xloc[1] - xloc[0])
+    m[1] = (yloc[2] - yloc[1]) / (xloc[2] - xloc[1])
+    m[n + 1] = (yloc[n + 2] - yloc[n + 1]) / (xloc[n + 2] - xloc[n + 1])
+    m[n + 2] = (yloc[n + 3] - yloc[n + 2]) / (xloc[n + 3] - xloc[n + 2])
+
+    dm = np.abs(m[1:] - m[:-1])
+    t = np.zeros((n,), dtype=dtype)
+    for idx in range(1, n + 1):
+        denom = dm[idx + 1] + dm[idx - 1]
+        left_slope = m[idx]
+        right_slope = m[idx + 1]
+        if denom == 0.0:
+            t[idx - 1] = 0.5 * (left_slope + right_slope)
+        else:
+            t[idx - 1] = (dm[idx + 1] * left_slope + dm[idx - 1] * right_slope) / denom
+
+    h = x_knots[1:] - x_knots[:-1]
+    interval_slope = (y_knots[1:] - y_knots[:-1]) / h
+    a = y_knots[:-1]
+    b = t[:-1]
+    c = (3.0 * interval_slope - t[1:] - 2.0 * t[:-1]) / h
+    d = (t[1:] + t[:-1] - 2.0 * interval_slope) / (h * h)
+    return a, b, c, d, h
+
+
+def _akima_spline_profile_np(x_knots, y_knots, x: np.ndarray, *, integrate: bool) -> np.ndarray:
+    x_knots = _profile_coeffs_np(x_knots)
+    y_knots = _profile_coeffs_np(y_knots)
+    n = int(x_knots.shape[0])
+    if n == 0:
+        return np.zeros_like(x)
+    if n == 1:
+        return y_knots[0] * x if integrate else np.broadcast_to(y_knots[0], x.shape)
+    x_clipped = np.clip(x, x_knots[0], x_knots[-1])
+    idx_hi = np.searchsorted(x_knots, x_clipped, side="right")
+    idx_hi = np.clip(idx_hi, 1, n - 1)
+    idx = idx_hi - 1
+    a, b, c, d, h = _akima_coefficients_np(x_knots, y_knots)
+    dx = x_clipped - x_knots[idx]
+    if not integrate:
+        return a[idx] + dx * (b[idx] + dx * (c[idx] + d[idx] * dx))
+    full_interval = a * h + 0.5 * b * h * h + (c / 3.0) * h**3 + 0.25 * d * h**4
+    prefix = np.concatenate([np.zeros((1,), dtype=full_interval.dtype), np.cumsum(full_interval)])
+    partial = dx * (a[idx] + dx * (0.5 * b[idx] + dx * ((c[idx] / 3.0) + 0.25 * d[idx] * dx)))
+    return np.asarray(prefix[idx] + partial)
+
+
 def _spline_profile_np(profile_type: str, x_knots, y_knots, x: np.ndarray, *, integrate: bool = False) -> np.ndarray:
     if profile_type == "cubic_spline":
         return _cubic_spline_profile_np(x_knots, y_knots, x, integrate=integrate)
+    if profile_type == "akima_spline":
+        return _akima_spline_profile_np(x_knots, y_knots, x, integrate=integrate)
     if profile_type == "line_segment":
         return _line_segment_profile_np(x_knots, y_knots, x, integrate=integrate)
     raise NotImplementedError(
         f"profile_type={profile_type!r} not implemented "
-        "(supported tabulated profiles: cubic_spline, line_segment)"
+        "(supported tabulated profiles: cubic_spline, akima_spline, line_segment)"
     )
 
 
@@ -576,7 +761,7 @@ def _eval_profiles_numpy(cfg: ProfileInputs, s_grid) -> Dict[str, Any]:
         p_pa = float(cfg.pres_scale) * _power_series_np(cfg.am, x)
     elif cfg.pmass_type == "two_power":
         p_pa = float(cfg.pres_scale) * _two_power_np(cfg.am, x)
-    elif cfg.pmass_type in ("cubic_spline", "line_segment"):
+    elif cfg.pmass_type in ("cubic_spline", "akima_spline", "line_segment"):
         if _profile_coeffs_np(cfg.am_aux_s).size == 0 or _profile_coeffs_np(cfg.am_aux_f).size == 0:
             p_pa = np.zeros_like(x)
         else:
@@ -590,7 +775,7 @@ def _eval_profiles_numpy(cfg: ProfileInputs, s_grid) -> Dict[str, Any]:
     else:
         raise NotImplementedError(
             f"pmass_type={cfg.pmass_type!r} not implemented "
-            "(supported: power_series, two_power, cubic_spline, line_segment)"
+            "(supported: power_series, two_power, cubic_spline, akima_spline, line_segment)"
         )
     if float(cfg.spres_ped) < 1.0:
         x_ped = min(abs(float(cfg.spres_ped) * float(cfg.bloat)), 1.0)
@@ -613,7 +798,7 @@ def _eval_profiles_numpy(cfg: ProfileInputs, s_grid) -> Dict[str, Any]:
     ai = _profile_coeffs_np(cfg.ai)
     if ai.size > 0:
         if cfg.piota_type != "power_series":
-            if cfg.piota_type in ("cubic_spline", "line_segment"):
+            if cfg.piota_type in ("cubic_spline", "akima_spline", "line_segment"):
                 if _profile_coeffs_np(cfg.ai_aux_s).size == 0 or _profile_coeffs_np(cfg.ai_aux_f).size == 0:
                     iota = np.zeros_like(x)
                 else:
@@ -627,7 +812,7 @@ def _eval_profiles_numpy(cfg: ProfileInputs, s_grid) -> Dict[str, Any]:
             else:
                 raise NotImplementedError(
                     f"piota_type={cfg.piota_type!r} not implemented "
-                    "(supported: power_series, cubic_spline, line_segment)"
+                    "(supported: power_series, cubic_spline, akima_spline, line_segment)"
                 )
         else:
             iota = _power_series_np(ai, x)
@@ -643,7 +828,7 @@ def _eval_profiles_numpy(cfg: ProfileInputs, s_grid) -> Dict[str, Any]:
             out["current"] = _pcurr_power_series_i_np(ac, x)
         elif cfg.pcurr_type == "two_power":
             out["current"] = _pcurr_two_power_ip_np(ac, x)
-        elif cfg.pcurr_type.endswith("_ip") and cfg.pcurr_type.rsplit("_", 1)[0] in ("cubic_spline", "line_segment"):
+        elif cfg.pcurr_type.endswith("_ip") and cfg.pcurr_type.rsplit("_", 1)[0] in ("cubic_spline", "akima_spline", "line_segment"):
             if _profile_coeffs_np(cfg.ac_aux_s).size == 0 or _profile_coeffs_np(cfg.ac_aux_f).size == 0:
                 out["current"] = np.zeros_like(x)
             else:
@@ -654,7 +839,7 @@ def _eval_profiles_numpy(cfg: ProfileInputs, s_grid) -> Dict[str, Any]:
                     x,
                     integrate=True,
                 )
-        elif cfg.pcurr_type.endswith("_i") and cfg.pcurr_type.rsplit("_", 1)[0] in ("cubic_spline", "line_segment"):
+        elif cfg.pcurr_type.endswith("_i") and cfg.pcurr_type.rsplit("_", 1)[0] in ("cubic_spline", "akima_spline", "line_segment"):
             if _profile_coeffs_np(cfg.ac_aux_s).size == 0 or _profile_coeffs_np(cfg.ac_aux_f).size == 0:
                 out["current"] = np.zeros_like(x)
             else:
@@ -669,7 +854,8 @@ def _eval_profiles_numpy(cfg: ProfileInputs, s_grid) -> Dict[str, Any]:
             raise NotImplementedError(
                 f"pcurr_type={cfg.pcurr_type!r} not implemented "
                 "(supported: power_series, power_series_i, two_power, "
-                "cubic_spline_i, cubic_spline_ip, line_segment_i, line_segment_ip)"
+                "cubic_spline_i, cubic_spline_ip, akima_spline_i, akima_spline_ip, "
+                "line_segment_i, line_segment_ip)"
             )
     return out
 
@@ -786,7 +972,7 @@ def eval_profiles(cfg: ProfileInputs | InData, s_grid) -> Dict[str, Any]:
         p_pa = cfg.pres_scale * _power_series(cfg.am, x)
     elif cfg.pmass_type == "two_power":
         p_pa = cfg.pres_scale * _two_power(cfg.am, x)
-    elif cfg.pmass_type in ("cubic_spline", "line_segment"):
+    elif cfg.pmass_type in ("cubic_spline", "akima_spline", "line_segment"):
         if _jnp_size_or_zero(cfg.am_aux_s) == 0 or _jnp_size_or_zero(cfg.am_aux_f) == 0:
             p_pa = jnp.zeros_like(x)
         else:
@@ -800,7 +986,7 @@ def eval_profiles(cfg: ProfileInputs | InData, s_grid) -> Dict[str, Any]:
     else:
         raise NotImplementedError(
             f"pmass_type={cfg.pmass_type!r} not implemented "
-            "(supported: power_series, two_power, cubic_spline, line_segment)"
+            "(supported: power_series, two_power, cubic_spline, akima_spline, line_segment)"
         )
     if cfg.spres_ped < 1.0:
         x_ped = jnp.minimum(jnp.abs(jnp.asarray(cfg.spres_ped) * cfg.bloat), 1.0)
@@ -824,7 +1010,7 @@ def eval_profiles(cfg: ProfileInputs | InData, s_grid) -> Dict[str, Any]:
     if cfg.ai is not None and int(jnp.size(cfg.ai)) > 0:
         if cfg.piota_type == "power_series":
             iota = _power_series(cfg.ai, x)
-        elif cfg.piota_type in ("cubic_spline", "line_segment"):
+        elif cfg.piota_type in ("cubic_spline", "akima_spline", "line_segment"):
             if _jnp_size_or_zero(cfg.ai_aux_s) == 0 or _jnp_size_or_zero(cfg.ai_aux_f) == 0:
                 iota = jnp.zeros_like(x)
             else:
@@ -838,7 +1024,7 @@ def eval_profiles(cfg: ProfileInputs | InData, s_grid) -> Dict[str, Any]:
         else:
             raise NotImplementedError(
                 f"piota_type={cfg.piota_type!r} not implemented "
-                "(supported: power_series, cubic_spline, line_segment)"
+                "(supported: power_series, cubic_spline, akima_spline, line_segment)"
             )
         if cfg.lrfp:
             iota = jnp.where(iota != 0, 1.0 / iota, jnp.asarray(np.inf, dtype=iota.dtype))
@@ -852,7 +1038,7 @@ def eval_profiles(cfg: ProfileInputs | InData, s_grid) -> Dict[str, Any]:
             out["current"] = _pcurr_power_series_i(cfg.ac, x)
         elif cfg.pcurr_type == "two_power":
             out["current"] = _pcurr_two_power_ip(cfg.ac, x)
-        elif cfg.pcurr_type.endswith("_ip") and cfg.pcurr_type.rsplit("_", 1)[0] in ("cubic_spline", "line_segment"):
+        elif cfg.pcurr_type.endswith("_ip") and cfg.pcurr_type.rsplit("_", 1)[0] in ("cubic_spline", "akima_spline", "line_segment"):
             if _jnp_size_or_zero(cfg.ac_aux_s) == 0 or _jnp_size_or_zero(cfg.ac_aux_f) == 0:
                 out["current"] = jnp.zeros_like(x)
             else:
@@ -863,7 +1049,7 @@ def eval_profiles(cfg: ProfileInputs | InData, s_grid) -> Dict[str, Any]:
                     x,
                     integrate=True,
                 )
-        elif cfg.pcurr_type.endswith("_i") and cfg.pcurr_type.rsplit("_", 1)[0] in ("cubic_spline", "line_segment"):
+        elif cfg.pcurr_type.endswith("_i") and cfg.pcurr_type.rsplit("_", 1)[0] in ("cubic_spline", "akima_spline", "line_segment"):
             if _jnp_size_or_zero(cfg.ac_aux_s) == 0 or _jnp_size_or_zero(cfg.ac_aux_f) == 0:
                 out["current"] = jnp.zeros_like(x)
             else:
@@ -878,7 +1064,8 @@ def eval_profiles(cfg: ProfileInputs | InData, s_grid) -> Dict[str, Any]:
             raise NotImplementedError(
                 f"pcurr_type={cfg.pcurr_type!r} not implemented "
                 "(supported: power_series, power_series_i, two_power, "
-                "cubic_spline_i, cubic_spline_ip, line_segment_i, line_segment_ip)"
+                "cubic_spline_i, cubic_spline_ip, akima_spline_i, akima_spline_ip, "
+                "line_segment_i, line_segment_ip)"
             )
 
     return out

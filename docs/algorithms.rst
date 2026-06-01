@@ -526,21 +526,20 @@ implements:
   :math:`I'(s)` (``AC``),
 - ``power_series_i`` for current :math:`I(s)`,
 - ``two_power`` for pressure and current-density profiles,
-- ``cubic_spline`` and ``line_segment`` for pressure and iota tabulated by
-  ``AM_AUX_S/F`` and ``AI_AUX_S/F``,
-- ``cubic_spline_i`` / ``cubic_spline_ip`` and
-  ``line_segment_i`` / ``line_segment_ip`` for current tabulated by
-  ``AC_AUX_S/F``.
+- ``cubic_spline``, ``akima_spline``, and ``line_segment`` for pressure and
+  iota tabulated by ``AM_AUX_S/F`` and ``AI_AUX_S/F``,
+- ``cubic_spline_i`` / ``cubic_spline_ip``, ``akima_spline_i`` /
+  ``akima_spline_ip``, and ``line_segment_i`` / ``line_segment_ip`` for current
+  tabulated by ``AC_AUX_S/F``.
 
-The cubic-spline endpoint conditions follow VMEC2000's ``spline_cubic``
-implementation: endpoint derivatives are fixed by quadratic fits to the first
-and last three knots.  ``*_ip`` current profiles prescribe :math:`I'(s)` and
-are integrated from the magnetic axis; ``*_i`` profiles prescribe enclosed
-current :math:`I(s)` directly.
+The cubic-spline and Akima endpoint conditions follow VMEC2000's
+``spline_cubic`` and ``spline_akima`` implementations: endpoint behavior is
+fixed by quadratic extrapolation from the first and last three knots. ``*_ip``
+current profiles prescribe :math:`I'(s)` and are integrated from the magnetic
+axis; ``*_i`` profiles prescribe enclosed current :math:`I(s)` directly.
 
 Future work:
 
-- ``akima_spline`` parity,
 - pedestal logic parity (beyond the minimal clamp already implemented),
 - correct handling of the ``gamma != 0`` “mass profile” pathway (pressure derived
   from the volume profile).

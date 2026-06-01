@@ -121,7 +121,8 @@ VMEC pressure, iota, and current profiles can be specified as polynomial
 coefficients or tabulated splines. The bundled spline-profile deck uses
 `PMASS_TYPE = "cubic_spline"` with `AM_AUX_S/F` and `PIOTA_TYPE = "cubic_spline"`
 with `AI_AUX_S/F`; finite-beta QH/QA decks use `PCURR_TYPE = "cubic_spline_ip"`
-with `AC_AUX_S/F`:
+with `AC_AUX_S/F`. The same auxiliary-array convention also supports
+`akima_spline` and `line_segment` profiles:
 
 ```bash
 vmec_jax examples/data/input.profile_splines --plot

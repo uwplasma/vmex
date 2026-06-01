@@ -164,15 +164,15 @@ VMEC input decks can prescribe profiles as polynomial coefficients or as
 tabulated spline knots. ``vmec_jax`` supports the common VMEC forms:
 
 - ``PMASS_TYPE = "power_series"`` with ``AM`` coefficients, or
-  ``PMASS_TYPE = "cubic_spline"`` / ``"line_segment"`` with ``AM_AUX_S`` and
-  ``AM_AUX_F``.
+  ``PMASS_TYPE = "cubic_spline"``, ``"akima_spline"``, or ``"line_segment"``
+  with ``AM_AUX_S`` and ``AM_AUX_F``.
 - ``PIOTA_TYPE = "power_series"`` with ``AI`` coefficients, or
-  ``PIOTA_TYPE = "cubic_spline"`` / ``"line_segment"`` with ``AI_AUX_S`` and
-  ``AI_AUX_F`` when ``NCURR = 0``.
+  ``PIOTA_TYPE = "cubic_spline"``, ``"akima_spline"``, or ``"line_segment"``
+  with ``AI_AUX_S`` and ``AI_AUX_F`` when ``NCURR = 0``.
 - ``PCURR_TYPE = "power_series"`` with ``AC`` coefficients for :math:`I'(s)`,
   ``PCURR_TYPE = "power_series_i"`` with ``AC`` coefficients for :math:`I(s)`,
   or ``PCURR_TYPE = "cubic_spline_ip"`` / ``"cubic_spline_i"`` (and matching
-  ``line_segment`` forms) with ``AC_AUX_S`` and ``AC_AUX_F`` when
+  ``akima_spline`` or ``line_segment`` forms) with ``AC_AUX_S`` and ``AC_AUX_F`` when
   ``NCURR = 1``.
 
 The ``*_AUX_S`` arrays are knot locations in normalized toroidal flux
