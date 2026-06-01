@@ -1616,19 +1616,19 @@ class FixedBoundaryExactOptimizer:
         if method_key not in ("auto", "adaptive") and not scalar_auto_requested:
             return method_key, scipy_lsmr_maxiter, None
 
-        backend = _optimizer_backend_name(getattr(self, "_solver_device_name", None))
-        if backend in ("gpu", "cuda", "rocm", "tpu", "metal"):
-            prefix = "auto_scalar" if scalar_auto_requested else "auto"
-            return "scipy", scipy_lsmr_maxiter, f"{prefix}:dense-preserves-{backend}"
         if self._has_stellarator_asymmetric_configuration():
             prefix = "auto_scalar" if scalar_auto_requested else "auto"
             return "scipy", scipy_lsmr_maxiter, f"{prefix}:dense-lasym"
 
+        backend = _optimizer_backend_name(getattr(self, "_solver_device_name", None))
         helicity_m = None if self._helicity_m is None else int(self._helicity_m)
         helicity_n = None if self._helicity_n is None else int(self._helicity_n)
         if self._spec_max_mode() >= 3 and self._objective_family in ("qs", "qi"):
             if scalar_auto_requested:
-                return "scalar_trust", scipy_lsmr_maxiter, "auto_scalar:high-mode-scalar-trust"
+                suffix = f"{backend}-" if backend in ("gpu", "cuda", "rocm", "tpu", "metal") else ""
+                return "scalar_trust", scipy_lsmr_maxiter, f"auto_scalar:{suffix}high-mode-scalar-trust"
+            if backend in ("gpu", "cuda", "rocm", "tpu", "metal"):
+                return "scipy", scipy_lsmr_maxiter, f"auto:dense-preserves-{backend}"
             lsmr_maxiter = 4 if scipy_lsmr_maxiter is None else scipy_lsmr_maxiter
             if self._objective_family == "qi":
                 family = "qi"
@@ -1642,6 +1642,9 @@ class FixedBoundaryExactOptimizer:
                 family = "qs"
             return "scipy_matrix_free", lsmr_maxiter, f"auto:{family}-high-mode-matrix-free"
 
+        if backend in ("gpu", "cuda", "rocm", "tpu", "metal"):
+            prefix = "auto_scalar" if scalar_auto_requested else "auto"
+            return "scipy", scipy_lsmr_maxiter, f"{prefix}:dense-preserves-{backend}"
         prefix = "auto_scalar" if scalar_auto_requested else "auto"
         return "scipy", scipy_lsmr_maxiter, f"{prefix}:dense-default"
 
@@ -2875,6 +2878,32 @@ class FixedBoundaryExactOptimizer:
         max_dofs = int(os.getenv("VMEC_JAX_OPT_LINEAR_OPERATOR_INITIAL_TANGENT_MAX_DOFS", "128"))
         return min_dofs <= int(n_params) <= max_dofs
 
+    def _scalar_gradient_initial_tangents_enabled(self, n_params: int) -> bool:
+        """Whether scalar-adjoint gradients should project cached initial tangents.
+
+        The reverse scalar-adjoint path needs one VMEC-tape VJP plus the
+        transpose of the initial-state map.  On GPU high-mode optimizations the
+        repeated initial VJP is a cold/warm callback hotspot.  The initial map is
+        affine for a fixed axis/flip branch, so precomputing its tangent columns
+        once per branch lets scalar gradients use a device-side dot product on
+        subsequent accepted points.  Keep this default narrow because CPU
+        single-gradient probes usually do not amortize the tangent build.
+        """
+
+        if int(n_params) <= 0:
+            return False
+        flag = os.getenv("VMEC_JAX_OPT_SCALAR_GRADIENT_INITIAL_TANGENTS")
+        if flag is not None:
+            return flag.strip().lower() not in ("", "0", "false", "no", "off")
+        backend = _optimizer_backend_name(getattr(self, "_solver_device_name", None))
+        if backend not in ("gpu", "cuda", "rocm", "tpu", "metal"):
+            return False
+        if self._has_stellarator_asymmetric_configuration():
+            return False
+        min_dofs = int(os.getenv("VMEC_JAX_OPT_SCALAR_GRADIENT_INITIAL_TANGENT_MIN_DOFS", "24"))
+        max_dofs = int(os.getenv("VMEC_JAX_OPT_SCALAR_GRADIENT_INITIAL_TANGENT_MAX_DOFS", "256"))
+        return min_dofs <= int(n_params) <= max_dofs
+
     def _projected_replay_residuals_enabled(self, n_params: int | None = None) -> bool:
         """Whether dense Jacobians should project replayed tangents without an intermediate sync."""
 
@@ -3401,6 +3430,19 @@ class FixedBoundaryExactOptimizer:
             initial_tangents = None
         if initial_tangents is not None:
             self._profile_add("gradient_initial_tangents_cache_hit", 0.0)
+            grad = _jnp.tensordot(
+                _jnp.asarray(initial_tangents, dtype=_jnp.float64),
+                _jnp.asarray(initial_cotangent, dtype=_jnp.float64),
+                axes=([1], [0]),
+            )
+            self._profile_add("gradient_initial_projection", time.perf_counter() - t_initial)
+        elif self._scalar_gradient_initial_tangents_enabled(int(params.size)):
+            self._profile_add("gradient_initial_tangents_precompute", 0.0)
+            initial_tangents = self._initial_tangent_columns(
+                params,
+                axis_override,
+                profile_prefix="gradient",
+            )
             grad = _jnp.tensordot(
                 _jnp.asarray(initial_tangents, dtype=_jnp.float64),
                 _jnp.asarray(initial_cotangent, dtype=_jnp.float64),
