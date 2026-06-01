@@ -117,6 +117,17 @@ boozmn = vj.run_booz_xform(wout_path, mbooz=32, nbooz=32)
 vj.plot_boozmn(boozmn, outdir="figures/")
 ```
 
+VMEC pressure, iota, and current profiles can be specified as polynomial
+coefficients or tabulated splines. The bundled spline-profile deck uses
+`PMASS_TYPE = "cubic_spline"` with `AM_AUX_S/F` and `PIOTA_TYPE = "cubic_spline"`
+with `AI_AUX_S/F`; finite-beta QH/QA decks use `PCURR_TYPE = "cubic_spline_ip"`
+with `AC_AUX_S/F`:
+
+```bash
+vmec_jax examples/data/input.profile_splines --plot
+vmec_jax examples/data/input.nfp4_QH_finite_beta
+```
+
 For the bundled small free-boundary example, download both the input deck and
 its magnetic grid into the same folder:
 

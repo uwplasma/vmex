@@ -5,6 +5,7 @@ import pytest
 
 from vmec_jax import profiles as profiles_mod
 from vmec_jax._compat import has_jax, jax, jnp
+from vmec_jax.config import load_config
 from vmec_jax.namelist import InData
 from vmec_jax.profiles import ProfileInputs, eval_profiles
 
@@ -107,6 +108,64 @@ def test_current_profile_spline_i_and_ip_follow_vmec_integral_convention():
     # current is exactly I(s)=s^2. cubic_spline_i stores I(s) directly.
     np.testing.assert_allclose(np.asarray(integrated["current"]), s * s, rtol=1.0e-12, atol=1.0e-12)
     np.testing.assert_allclose(np.asarray(direct["current"]), 2.0 * s, rtol=1.0e-12, atol=1.0e-12)
+
+
+def test_pressure_and_iota_cubic_spline_profiles_follow_vmec_knots():
+    knots = [0.0, 0.25, 0.5, 0.75, 1.0]
+    pressure_values = [1.0 + 2.0 * s + 3.0 * s * s for s in knots]
+    iota_values = [0.3 + 0.2 * s - 0.1 * s * s for s in knots]
+    indata = InData(
+        scalars={
+            "PMASS_TYPE": "cubic_spline",
+            "PIOTA_TYPE": "cubic_spline",
+            "PCURR_TYPE": "line_segment_ip",
+            "AM": [0.0],
+            "AI": [0.0],
+            "AC": [1.0],
+            "AM_AUX_S": knots,
+            "AM_AUX_F": pressure_values,
+            "AI_AUX_S": knots,
+            "AI_AUX_F": iota_values,
+            "AC_AUX_S": [0.0, 0.5, 1.0],
+            "AC_AUX_F": [2.0, 4.0, 2.0],
+            "PRES_SCALE": 5.0,
+            "BLOAT": 1.0,
+            "SPRES_PED": 1.0,
+            "LRFP": False,
+            "NCURR": 0,
+        },
+        indexed={},
+    )
+    s = np.asarray([0.0, 0.125, 0.375, 0.625, 0.875, 1.0])
+    prof = eval_profiles(indata, s)
+
+    np.testing.assert_allclose(
+        np.asarray(prof["pressure_pa"]),
+        5.0 * (1.0 + 2.0 * s + 3.0 * s * s),
+        rtol=1.0e-12,
+        atol=1.0e-12,
+    )
+    np.testing.assert_allclose(
+        np.asarray(prof["iota"]),
+        0.3 + 0.2 * s - 0.1 * s * s,
+        rtol=1.0e-12,
+        atol=1.0e-12,
+    )
+    # Piecewise-linear I'(s): 2+4s on [0,0.5], 6-4s on [0.5,1].
+    expected_current = np.where(s <= 0.5, 2.0 * s + 2.0 * s**2, 1.5 + 6.0 * (s - 0.5) - 2.0 * (s * s - 0.25))
+    np.testing.assert_allclose(np.asarray(prof["current"]), expected_current, rtol=1.0e-12, atol=1.0e-12)
+
+
+def test_bundled_profile_spline_input_evaluates_pressure_and_iota():
+    _cfg, indata = load_config("examples/data/input.profile_splines")
+    s = np.linspace(0.0, 1.0, 6)
+    prof = eval_profiles(indata, s)
+
+    assert str(indata.get("PMASS_TYPE")).strip('"').lower() == "cubic_spline"
+    assert str(indata.get("PIOTA_TYPE")).strip('"').lower() == "cubic_spline"
+    assert np.all(np.asarray(prof["pressure_pa"]) >= 0.0)
+    assert np.all(np.diff(np.asarray(prof["pressure_pa"])) <= 0.0)
+    np.testing.assert_allclose(np.asarray(prof["iota"])[[0, -1]], [1.05, 0.70], rtol=1.0e-12)
 
 
 def test_concrete_jax_profile_grid_uses_host_equivalent_path():
