@@ -1329,7 +1329,7 @@ primarily a sweep/rendering registry for archived docs rows such as
 ``nfp4_qh_warm_to_qi`` is an explicit non-passing stress fixture.
 
 If you want to rank a new seed before optimizing it, first create a matching
-wout with ``vmec_jax /path/to/input.my_seed`` and then run
+wout with ``vmec /path/to/input.my_seed`` and then run
 ``examples/optimization/audit_qi_seed_suitability.py --case
 label:qi:input_path:wout_path`` as described in :doc:`validation`.  Promote a
 QI result only if both the numerical metrics and the Boozer ``|B|``

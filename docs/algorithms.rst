@@ -537,6 +537,9 @@ The cubic-spline and Akima endpoint conditions follow VMEC2000's
 fixed by quadratic extrapolation from the first and last three knots. ``*_ip``
 current profiles prescribe :math:`I'(s)` and are integrated from the magnetic
 axis; ``*_i`` profiles prescribe enclosed current :math:`I(s)` directly.
+The runnable ``examples/profile_input_examples.py`` script writes both a
+polynomial pressure/current deck and a tabulated spline pressure/current deck,
+then prints the corresponding ``vmec`` commands.
 
 Future work:
 

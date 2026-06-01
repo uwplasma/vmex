@@ -2377,7 +2377,7 @@ Experimental accelerated mode
 non-parity performance track:
 
 - Python API: ``run_fixed_boundary(..., solver_mode="accelerated")``
-- CLI: ``vmec_jax input.name --solver-mode accelerated``
+- CLI: ``vmec input.name --solver-mode accelerated``
 
 Current behavior of this first slice:
 
@@ -3738,13 +3738,13 @@ CLI profiling (pre-iteration overhead)
 --------------------------------------
 
 To capture a JAX trace for the VMEC2000-style CLI path, set
-``VMEC_JAX_PROFILE_DIR`` before invoking ``vmec_jax``. By default the CLI also
+``VMEC_JAX_PROFILE_DIR`` before invoking ``vmec``. By default the CLI also
 emits a Perfetto-compatible trace (``perfetto_trace.json.gz``); disable that
 extra file by setting ``VMEC_JAX_PROFILE_PERFETTO=0``. The trace is written in
 TensorBoard/Chrome trace format::
 
   VMEC_JAX_PROFILE_DIR=/tmp/vmec_jax_trace \\
-    vmec_jax examples/data/input.ITERModel --max-iter 3 --no-multigrid --no-use-input-niter --quiet
+    vmec examples/data/input.ITERModel --max-iter 3 --no-multigrid --no-use-input-niter --quiet
 
 For tighter windows (e.g., pre-iteration or iter-1 only), set
 ``VMEC_JAX_PROFILE_WINDOW=pre`` (or ``iter1`` / ``iterN``) and optionally start
@@ -3753,7 +3753,7 @@ a profiler server for XProf inspection::
   VMEC_JAX_PROFILE_DIR=/tmp/vmec_jax_trace \\
   VMEC_JAX_PROFILE_WINDOW=pre \\
   VMEC_JAX_PROFILE_SERVER=1 VMEC_JAX_PROFILE_SERVER_PORT=9999 \\
-    vmec_jax examples/data/input.ITERModel --max-iter 3 --no-multigrid --quiet
+    vmec examples/data/input.ITERModel --max-iter 3 --no-multigrid --quiet
 
 With ``VMEC_JAX_PROFILE_SERVER=1`` you can also capture a tight window using
 ``python -m jax.collect_profile`` from another terminal (see the JAX profiling

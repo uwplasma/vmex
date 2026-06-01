@@ -152,6 +152,7 @@ def test_redl_geometry_and_mismatch_state_paths_are_composable(monkeypatch) -> N
     shape = (3, int(trig.ntheta3), 2)
     ones = np.ones(shape, dtype=float)
     wout_like = SimpleNamespace(iotas=np.asarray([0.0, 0.45, 0.5]))
+    pres = np.asarray([0.0, 0.5, 1.0])
     bc = SimpleNamespace(
         bsubu=0.2 * ones,
         bsubv=0.4 * ones,
@@ -159,16 +160,25 @@ def test_redl_geometry_and_mismatch_state_paths_are_composable(monkeypatch) -> N
         jac=SimpleNamespace(sqrtg=ones),
     )
 
-    monkeypatch.setattr(finite_beta, "_wout_like_for_state", lambda **_kwargs: (wout_like, np.zeros(3)))
+    monkeypatch.setattr(finite_beta, "_wout_like_for_state", lambda **_kwargs: (wout_like, pres))
     monkeypatch.setattr(finite_beta, "vmec_bcovar_half_mesh_from_wout", lambda **_kwargs: bc)
-    monkeypatch.setattr(
-        finite_beta,
-        "trapped_fraction_from_modb_sqrtg",
-        lambda **_kwargs: {
+
+    captured: dict[str, np.ndarray] = {}
+
+    def fake_trapped_fraction_from_modb_sqrtg(**kwargs):
+        captured["modB"] = np.asarray(kwargs["modB"], dtype=float)
+        captured["sqrtg"] = np.asarray(kwargs["sqrtg"], dtype=float)
+        captured["n_lambda"] = np.asarray(kwargs["n_lambda"], dtype=int)
+        return {
             "fsa_1overB": np.asarray([1.0, 1.1, 1.2]),
             "epsilon": np.asarray([0.1, 0.2, 0.3]),
             "f_t": np.asarray([0.4, 0.5, 0.6]),
-        },
+        }
+
+    monkeypatch.setattr(
+        finite_beta,
+        "trapped_fraction_from_modb_sqrtg",
+        fake_trapped_fraction_from_modb_sqrtg,
     )
 
     geom = finite_beta.redl_bootstrap_geometry_from_state(
@@ -182,6 +192,9 @@ def test_redl_geometry_and_mismatch_state_paths_are_composable(monkeypatch) -> N
     np.testing.assert_array_equal(np.asarray(geom["indices"]), [1, 2])
     np.testing.assert_allclose(np.asarray(geom["iota"]), [0.45, 0.5])
     assert geom["nfp"] == 2
+    np.testing.assert_allclose(captured["modB"], np.sqrt(2.0 * (bc.bsq - pres[:, None, None])))
+    np.testing.assert_allclose(captured["sqrtg"], ones)
+    assert int(captured["n_lambda"]) == 4
 
     monkeypatch.setattr(finite_beta, "redl_bootstrap_geometry_from_state", lambda **_kwargs: geom)
     monkeypatch.setattr(

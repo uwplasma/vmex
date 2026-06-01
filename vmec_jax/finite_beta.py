@@ -112,8 +112,11 @@ def redl_bootstrap_geometry_from_state(
         trig=trig,
     )
     wint = _vmec_wint_from_trig_jax(trig)
+    # VMEC's half-mesh ``bsq`` convention is |B|^2 / 2 + p, not |B|^2.
+    # Redl/Sauter trapped-particle geometry must use the physical |B|.
+    bmag2 = 2.0 * (jnp.asarray(bc.bsq, dtype=jnp.float64) - jnp.asarray(pres, dtype=jnp.float64)[:, None, None])
     trapped = trapped_fraction_from_modb_sqrtg(
-        modB=jnp.sqrt(jnp.maximum(jnp.asarray(bc.bsq, dtype=jnp.float64), 1.0e-300)),
+        modB=jnp.sqrt(jnp.maximum(bmag2, 1.0e-300)),
         sqrtg=bc.jac.sqrtg,
         n_lambda=int(n_lambda),
     )
