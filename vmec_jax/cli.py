@@ -103,13 +103,14 @@ def _parse_jit_forces(value: str):
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="vmec_jax",
+        prog="vmec",
         description=(
             "Run vmec_jax equilibrium solver or plot a wout file.\n\n"
-            "  vmec_jax --test          — run and plot the bundled quick-start case\n"
-            "  vmec_jax input.*           — run the solver\n"
-            "  vmec_jax --plot wout_*.nc  — generate diagnostic plots\n"
-            "  vmec_jax --booz wout_*.nc  — run booz_xform_jax and write boozmn_*.nc"
+            "  vmec --test          — run and plot the bundled quick-start case\n"
+            "  vmec input.*         — run the solver\n"
+            "  vmec --plot wout_*.nc  — generate diagnostic plots\n"
+            "  vmec --booz wout_*.nc  — run booz_xform_jax and write boozmn_*.nc\n\n"
+            "Compatibility aliases: vmec_jax, vmec-jax, xvmec_jax."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -316,15 +317,15 @@ def _run_bundled_test(args: argparse.Namespace, parser: argparse.ArgumentParser)
     )
     plot_dir = outdir / "figures"
 
-    print("vmec_jax bundled test")
-    print("---------------------")
+    print("vmec bundled test")
+    print("-----------------")
     print("This quick-start run uses the packaged fixed-boundary QH warm-start input.")
     print(f"1. Wrote the VMEC input file to: {input_path}")
     print(f"   The copied test input uses FTOL_ARRAY = {_TEST_FTOL:.0e} for a faster first run.")
-    print("2. Running vmec_jax to solve the equilibrium and write a WOUT file.")
+    print("2. Running vmec to solve the equilibrium and write a WOUT file.")
     print()
     print("Equivalent manual command:")
-    print(f"  vmec_jax {input_path} --output {wout_path}")
+    print(f"  vmec {input_path} --output {wout_path}")
     print()
 
     solver_argv = [str(input_path), "--output", str(wout_path)]
@@ -352,7 +353,7 @@ def _run_bundled_test(args: argparse.Namespace, parser: argparse.ArgumentParser)
     print(f"4. Plotting the WOUT file into: {plot_dir}")
     print()
     print("Equivalent manual plotting command:")
-    print(f"  vmec_jax --plot {wout_path} --outdir {plot_dir}")
+    print(f"  vmec --plot {wout_path} --outdir {plot_dir}")
     print()
 
     from .plotting import plot_wout

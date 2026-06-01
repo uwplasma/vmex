@@ -58,7 +58,7 @@ python tools/fetch_assets.py
 For a first run after `pip install vmec-jax`, use the bundled test case:
 
 ```bash
-vmec_jax --test
+vmec --test
 ```
 
 This copies the packaged `input.nfp4_QH_warm_start` into `vmec_jax_test/`,
@@ -67,28 +67,31 @@ runs the solver with `FTOL_ARRAY = 1e-12` for a faster first check, writes
 `vmec_jax_test/figures/`. The terminal output also prints the equivalent manual
 commands so new users can repeat each step themselves.
 
+The canonical installed executable is `vmec`. The aliases `vmec_jax`,
+`vmec-jax`, and `xvmec_jax` are kept for compatibility.
+
 To run the same workflow manually with an input downloaded from the repository:
 
 ```bash
 curl -L -O https://raw.githubusercontent.com/uwplasma/vmec_jax/main/examples/data/input.nfp4_QH_warm_start
-vmec_jax input.nfp4_QH_warm_start
+vmec input.nfp4_QH_warm_start
 ```
 
 Plot the `wout_*.nc` file produced by that run:
 
 ```bash
-vmec_jax --plot wout_nfp4_QH_warm_start.nc
-vmec_jax --plot wout_nfp4_QH_warm_start.nc --outdir figures/
+vmec --plot wout_nfp4_QH_warm_start.nc
+vmec --plot wout_nfp4_QH_warm_start.nc --outdir figures/
 ```
 
 Run Boozer coordinates with the bundled `booz_xform_jax` dependency. By default
-`vmec_jax --booz` uses `mbooz = 32`, `nbooz = 32`, and all VMEC surfaces:
+`vmec --booz` uses `mbooz = 32`, `nbooz = 32`, and all VMEC surfaces:
 
 ```bash
-vmec_jax --booz input.nfp4_QH_warm_start
-vmec_jax --booz --plot input.nfp4_QH_warm_start
-vmec_jax --booz wout_nfp4_QH_warm_start.nc
-vmec_jax --plot boozmn_nfp4_QH_warm_start.nc
+vmec --booz input.nfp4_QH_warm_start
+vmec --booz --plot input.nfp4_QH_warm_start
+vmec --booz wout_nfp4_QH_warm_start.nc
+vmec --plot boozmn_nfp4_QH_warm_start.nc
 ```
 
 `--booz --plot` writes the usual `wout_*.nc`, runs `booz_xform_jax`, writes
@@ -125,9 +128,14 @@ with `AC_AUX_S/F`. The same auxiliary-array convention also supports
 `akima_spline` and `line_segment` profiles:
 
 ```bash
-vmec_jax examples/data/input.profile_splines --plot
-vmec_jax examples/data/input.nfp4_QH_finite_beta
+python examples/profile_input_examples.py
+vmec examples/data/input.profile_splines --plot
+vmec examples/data/input.nfp4_QH_finite_beta
 ```
+
+`examples/profile_input_examples.py` writes editable polynomial and spline
+pressure/current decks under `examples/outputs/profile_inputs/` and prints the
+matching `vmec` commands.
 
 For the bundled small free-boundary example, download both the input deck and
 its magnetic grid into the same folder:
@@ -135,7 +143,7 @@ its magnetic grid into the same folder:
 ```bash
 curl -L -O https://raw.githubusercontent.com/uwplasma/vmec_jax/main/examples/data/input.cth_like_free_bdy_lasym_small
 curl -L -O https://raw.githubusercontent.com/uwplasma/vmec_jax/main/examples/data/mgrid_cth_like_lasym_small.nc
-vmec_jax input.cth_like_free_bdy_lasym_small
+vmec input.cth_like_free_bdy_lasym_small
 ```
 
 ## Backend Selection
@@ -146,9 +154,9 @@ use CPU. If GPU-enabled JAX is installed and selected, runs use the accelerator;
 
 ```bash
 python -c "import jax; print(jax.default_backend()); print(jax.devices())"
-JAX_PLATFORMS=cpu vmec_jax input.nfp4_QH_warm_start
-JAX_PLATFORM_NAME=gpu vmec_jax input.nfp4_QH_warm_start
-JAX_PLATFORMS=cuda vmec_jax input.nfp4_QH_warm_start
+JAX_PLATFORMS=cpu vmec input.nfp4_QH_warm_start
+JAX_PLATFORM_NAME=gpu vmec input.nfp4_QH_warm_start
+JAX_PLATFORMS=cuda vmec input.nfp4_QH_warm_start
 ```
 
 From Python, leave `solver_device` unset to inherit JAX's default backend, or
@@ -206,10 +214,10 @@ provenance and artifact rules are in `docs/optimization.rst` and
 ## CLI Reference
 
 ```text
-vmec_jax input.*           run the equilibrium solver and write wout_*.nc
-vmec_jax --plot wout.nc    generate VMEC diagnostic plots from a WOUT file
-vmec_jax --booz wout.nc    run booz_xform_jax and write boozmn_*.nc
-vmec_jax --plot boozmn.nc  generate Boozer contour and spectrum plots
-vmec_jax --parity input.*  force the conservative VMEC2000-style loop
-vmec_jax --help            show the full option list
+vmec input.*           run the equilibrium solver and write wout_*.nc
+vmec --plot wout.nc    generate VMEC diagnostic plots from a WOUT file
+vmec --booz wout.nc    run booz_xform_jax and write boozmn_*.nc
+vmec --plot boozmn.nc  generate Boozer contour and spectrum plots
+vmec --parity input.*  force the conservative VMEC2000-style loop
+vmec --help            show the full option list
 ```

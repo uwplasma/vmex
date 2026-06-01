@@ -43,6 +43,16 @@ def test_project_metadata_has_public_package_links() -> None:
     assert project["urls"]["Changelog"] == "https://github.com/uwplasma/vmec_jax/releases"
 
 
+def test_project_exposes_vmec_console_aliases() -> None:
+    data = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    scripts = data["project"]["scripts"]
+
+    assert scripts["vmec"] == "vmec_jax.cli:main"
+    assert scripts["vmec-jax"] == "vmec_jax.cli:main"
+    assert scripts["vmec_jax"] == "vmec_jax.cli:main"
+    assert scripts["xvmec_jax"] == "vmec_jax.cli:main"
+
+
 def test_plain_install_includes_plotting_and_qi_dependencies() -> None:
     data = tomllib.loads((ROOT / "pyproject.toml").read_text())
     project_dependencies = set(data["project"]["dependencies"])

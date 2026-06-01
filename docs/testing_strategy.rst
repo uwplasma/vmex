@@ -184,7 +184,7 @@ This command is opt-in; it is not installed as a Git hook and it does not run
 automatically on every push.  It mirrors the required hosted CI lanes that are
 safe to run on a normal developer machine:
 
-- CLI smoke via ``vmec_jax --help`` and a two-iteration
+- CLI smoke via ``vmec --help`` and a two-iteration
   ``input.circular_tokamak`` solve.
 - Python compile check for package, examples, tests, tools, and validation
   helpers.
