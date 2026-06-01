@@ -167,6 +167,65 @@ def _run_direct_solve(input_path: Path, params: CoilFieldParams):
     )
 
 
+def test_direct_coil_trace_fingerprint_detects_control_branch_changes() -> None:
+    from vmec_jax.free_boundary_adjoint import (
+        direct_coil_accepted_trace_fingerprint,
+        direct_coil_accepted_trace_fingerprint_delta,
+    )
+
+    trace0 = {
+        "dt_eff": np.asarray(0.5),
+        "fac": np.asarray(0.9),
+        "force_scale": np.asarray(1.0),
+        "max_update_rms_pre": np.asarray(0.25),
+        "limit_update_rms": np.asarray(1.0),
+        "flip_sign": False,
+        "divide_by_scalxc_for_update": True,
+        "freeb_bsqvac_half": np.ones((2, 3)),
+        "freeb_nestor_trace": {"gsource": np.ones(2), "bsqvac": np.ones(2)},
+        "state_pre": np.ones(4),
+        "state_post": np.ones(4) * 2.0,
+    }
+    trace1 = {
+        **trace0,
+        "dt_eff": np.asarray(0.25),
+        "freeb_bsqvac_half": np.ones((2, 3)) * 3.0,
+    }
+    fingerprint = direct_coil_accepted_trace_fingerprint([trace0, trace1])
+    assert fingerprint["n_steps"] == 2
+    assert fingerprint["n_freeb_steps"] == 2
+    assert np.array_equal(fingerprint["freeb_sizes"], np.asarray([6, 6]))
+
+    same = direct_coil_accepted_trace_fingerprint_delta([trace0, trace1], [trace0, trace1])
+    assert same["compatible"]
+
+    field_only_change = dict(trace0)
+    field_only_change["freeb_bsqvac_half"] = np.ones((2, 3)) * 99.0
+    same_branch = direct_coil_accepted_trace_fingerprint_delta(
+        [trace0, trace1],
+        [field_only_change, trace1],
+    )
+    assert same_branch["compatible"]
+
+    control_change = dict(trace0)
+    control_change["fac"] = np.asarray(0.7)
+    different_branch = direct_coil_accepted_trace_fingerprint_delta(
+        [trace0, trace1],
+        [control_change, trace1],
+    )
+    assert not different_branch["compatible"]
+    assert "scalars.fac" in different_branch["changed_fields"]
+
+    size_change = dict(trace0)
+    size_change["freeb_bsqvac_half"] = np.ones((3, 3))
+    different_shape = direct_coil_accepted_trace_fingerprint_delta(
+        [trace0, trace1],
+        [size_change, trace1],
+    )
+    assert not different_shape["compatible"]
+    assert "freeb_sizes" in different_shape["changed_fields"]
+
+
 def _relative_rms_delta(a, b) -> float:
     a_arr = np.asarray(a, dtype=float)
     b_arr = np.asarray(b, dtype=float)
@@ -195,6 +254,10 @@ def _active_free_boundary(run) -> bool:
 def _final_residuals(run) -> np.ndarray:
     diag = getattr(run.result, "diagnostics", {}) if run.result is not None else {}
     return np.asarray([diag.get("final_fsqr"), diag.get("final_fsqz"), diag.get("final_fsql")], dtype=float)
+
+
+def _trace_scalar_value(value: object) -> float:
+    return float(np.asarray(value).reshape(-1)[0])
 
 
 def _assert_full_solve_wout_sanity(run, wout_path: Path) -> None:
@@ -846,6 +909,152 @@ def test_jax_nestor_operator_complete_solve_fd_slopes_for_current_and_geometry(
     assert np.min(np.abs(slopes)) > 1.0e-16
 
 
+def test_direct_coil_fixed_trace_custom_vjp_matches_complete_solve_fd_on_same_branch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fixed-trace custom VJP matches complete-solve FD when the branch is unchanged.
+
+    This is the strongest default phase-2 gate short of a production
+    ``run_free_boundary`` custom VJP: run the same tiny forced-active
+    free-boundary solve at ``base`` and ``base +/- eps * direction``, require
+    the accepted-trace fingerprint to stay compatible, then compare the
+    fixed-trace custom-VJP directional derivative against the complete-solve
+    central finite difference of the final accepted state norm.
+    """
+
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jax, jnp
+    from vmec_jax.driver import run_free_boundary
+    from vmec_jax.free_boundary_adjoint import (
+        direct_coil_accepted_trace_fingerprint_delta,
+        direct_coil_fixed_trace_custom_vjp_objective_jax,
+    )
+    from vmec_jax.solve import solve_fixed_boundary_residual_iter
+    from vmec_jax.state import pack_state
+
+    enable_x64(True)
+    for key, value in {
+        "VMEC_JAX_FREEB_NESTOR_MODE": "dense",
+        "VMEC_JAX_FREEB_DENSE_SOLVE_MODE": "mode",
+        "VMEC_JAX_FREEB_USE_GREENF_SOURCE": "1",
+        "VMEC_JAX_FREEB_EXPERIMENTAL_FOURI_MATRIX": "1",
+        "VMEC_JAX_FREEB_ADD_ANALYTIC_BVEC": "1",
+        "VMEC_JAX_FREEB_JAX_NESTOR_OPERATOR": "1",
+        "VMEC_JAX_FREEB_JAX_NESTOR_JIT_OPERATOR": "0",
+    }.items():
+        monkeypatch.setenv(key, value)
+
+    input_path = _write_tiny_direct_freeb_input(
+        tmp_path / "input.direct_same_branch_custom_vjp",
+        lasym=False,
+        niter=2,
+        mpol=3,
+        ntheta=6,
+    )
+    base_params = _circle_coil_params(current=3.0e7, n_segments=64)
+    base_dofs = jnp.asarray(base_params.base_curve_dofs)
+    base_currents = jnp.asarray(base_params.base_currents)
+    direction = base_params.with_arrays(
+        base_curve_dofs=jnp.zeros_like(base_dofs).at[0, 0, 2].set(5.0e-3),
+        base_currents=base_currents * 0.02,
+    )
+
+    def params_for(scale: float) -> CoilFieldParams:
+        return base_params.with_arrays(
+            base_curve_dofs=base_dofs.at[0, 0, 2].add(5.0e-3 * float(scale)),
+            base_currents=base_currents * (1.0 + 0.02 * float(scale)),
+        )
+
+    def run_trace(params: CoilFieldParams):
+        init = run_free_boundary(
+            input_path,
+            use_initial_guess=True,
+            verbose=False,
+            external_field_provider_kind="direct_coils",
+            external_field_provider_params=params,
+        )
+        result = solve_fixed_boundary_residual_iter(
+            init.state,
+            init.static,
+            indata=init.indata,
+            signgs=init.signgs,
+            max_iter=2,
+            ftol=1.0e-8,
+            vmec2000_control=True,
+            auto_flip_force=False,
+            use_direct_fallback=True,
+            verbose=False,
+            verbose_vmec2000_table=False,
+            jit_forces=False,
+            use_scan=False,
+            host_update_assembly=False,
+            adjoint_trace=True,
+            adjoint_trace_mode="full",
+            external_field_provider_kind="direct_coils",
+            external_field_provider_params=params,
+            free_boundary_activate_fsq=1.0e99,
+        )
+        traces = [trace for trace in result.diagnostics.get("adjoint_step_trace", []) if trace.get("freeb_bsqvac_half") is not None]
+        assert traces
+        return init, result, traces
+
+    base_init, base_result, base_traces = run_trace(base_params)
+    eps = 1.0e-4
+    _plus_init, plus_result, plus_traces = run_trace(params_for(eps))
+    _minus_init, minus_result, minus_traces = run_trace(params_for(-eps))
+
+    plus_branch = direct_coil_accepted_trace_fingerprint_delta(
+        base_traces,
+        plus_traces,
+        rtol=1.0e-6,
+        atol=1.0e-9,
+    )
+    minus_branch = direct_coil_accepted_trace_fingerprint_delta(
+        base_traces,
+        minus_traces,
+        rtol=1.0e-6,
+        atol=1.0e-9,
+    )
+    assert plus_branch["compatible"], plus_branch["changed_fields"]
+    assert minus_branch["compatible"], minus_branch["changed_fields"]
+
+    def state_norm_objective(state) -> float:
+        packed = np.asarray(pack_state(state), dtype=float)
+        return float(0.5 * np.vdot(packed, packed))
+
+    complete_fd = (state_norm_objective(plus_result.state) - state_norm_objective(minus_result.state)) / (2.0 * eps)
+
+    def custom_objective(params: CoilFieldParams):
+        return direct_coil_fixed_trace_custom_vjp_objective_jax(
+            params,
+            base_traces[0]["state_pre"],
+            static=base_init.static,
+            traces=base_traces,
+            signgs=int(base_init.signgs),
+            state_weight=1.0,
+            bsqvac_weight=0.0,
+            force_weight=0.0,
+            enforce_edge=False,
+        )
+
+    grad = jax.grad(custom_objective)(base_params)
+    exact = sum(
+        jnp.vdot(grad_leaf, direction_leaf)
+        for grad_leaf, direction_leaf in zip(
+            jax.tree_util.tree_leaves(grad),
+            jax.tree_util.tree_leaves(direction),
+            strict=True,
+        )
+    )
+    base_complete = state_norm_objective(base_result.state)
+    base_fixed_trace = float(np.asarray(custom_objective(base_params)))
+    assert abs(base_fixed_trace - base_complete) < 2.0e-3
+    assert np.isfinite(float(np.asarray(exact)))
+    assert np.isfinite(float(complete_fd))
+    np.testing.assert_allclose(exact, complete_fd, rtol=1.0e-3, atol=1.0e-8)
+
+
 def test_jax_nestor_operator_accepted_solve_ad_matches_central_fd_for_current_and_geometry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1490,6 +1699,8 @@ def test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state(
     from vmec_jax.driver import run_free_boundary
     from vmec_jax.free_boundary_adjoint import (
         direct_coil_accepted_trace_directional_check_jax,
+        direct_coil_accepted_trace_fingerprint,
+        direct_coil_accepted_trace_fingerprint_delta,
         direct_coil_accepted_trace_replay_objective_jax,
         direct_coil_boundary_bsqvac_from_trace_jax,
         direct_coil_boundary_replay_context,
@@ -1552,6 +1763,20 @@ def test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state(
     active_traces = [trace for trace in traces if trace.get("freeb_bsqvac_half") is not None]
     assert len(active_traces) >= 2
     trace0, trace1 = active_traces[:2]
+    fingerprint = direct_coil_accepted_trace_fingerprint([trace0, trace1])
+    assert fingerprint["n_steps"] == 2
+    assert fingerprint["n_freeb_steps"] == 2
+    assert np.all(fingerprint["freeb_sizes"] > 0)
+    same_branch = direct_coil_accepted_trace_fingerprint_delta([trace0, trace1], [trace0, trace1])
+    assert same_branch["compatible"]
+    changed_trace0 = dict(trace0)
+    changed_trace0["dt_eff"] = _trace_scalar_value(trace0["dt_eff"]) * 1.05
+    changed_branch = direct_coil_accepted_trace_fingerprint_delta([trace0, trace1], [changed_trace0, trace1])
+    assert not changed_branch["compatible"]
+    assert "scalars.dt_eff" in changed_branch["changed_fields"]
+    truncated_branch = direct_coil_accepted_trace_fingerprint_delta([trace0, trace1], [trace0])
+    assert not truncated_branch["compatible"]
+    assert "n_steps" in truncated_branch["changed_fields"]
 
     first_step = strict_update_accepted_step(
         trace0["state_pre"],

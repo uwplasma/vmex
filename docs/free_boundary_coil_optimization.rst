@@ -41,10 +41,14 @@ implemented on JAX-visible dense or accepted-state problems, but the production
 until complete-solve AD-vs-finite-difference checks pass. The current
 post-merge evidence now includes reusable accepted-trace replay helpers,
 accepted-state ``bsqvac`` replay derivatives with respect to the VMEC state,
-and JAX-visible nonlinear-controller primitives with fixed-length masked
-``lax.scan`` control flow. These validate the intended full-loop adjoint
-contract, but they are still production-adjacent validation gates rather than a
-promoted custom VJP for the host-controlled ``run_free_boundary`` loop.
+JAX-visible nonlinear-controller primitives with fixed-length masked
+``lax.scan`` control flow, and a fixed-accepted-trace custom-VJP seam for
+direct-coil replay objectives.  The fixed-trace path is guarded by accepted
+trace fingerprints so finite-difference promotions can reject perturbations
+that changed the adaptive host-controller branch. These validate the intended
+full-loop adjoint contract, but they are still production-adjacent validation
+gates rather than a promoted custom VJP for the host-controlled
+``run_free_boundary`` loop.
 
 Adjoint Validation Roadmap
 --------------------------
@@ -209,11 +213,21 @@ matches central FD with respect to the packed VMEC state.  The two-step
 accepted-trace replay path is also exposed through
 ``direct_coil_accepted_trace_directional_check_jax`` and checks current,
 Fourier-geometry, and mixed coil directions after resampling the second
-boundary from the first replayed accepted state.  The remaining phase-2
-blocker is differentiating
-through the nonlinear ``run_free_boundary`` iteration loop itself, rather than
-through the dense toy nonlinear primitive, fixed-boundary operator, complete
-finite-response proxy, or final accepted-boundary replay. The combined
+boundary from the first replayed accepted state.  The scalar
+``direct_coil_fixed_trace_custom_vjp_objective_jax`` wrapper exposes this
+fixed accepted replay behind an explicit custom VJP, and
+``direct_coil_accepted_trace_fingerprint_delta`` records whether a
+finite-difference perturbation stayed on the same accepted-step/control branch.
+On the tiny forced-active default gate, the branch-compatible complete solve
+also compares this fixed-trace custom-VJP directional derivative against a
+central finite difference of the final accepted-state norm for a mixed coil
+current/Fourier direction.  This is the current promoted same-branch
+complete-solve validation, not yet a claim that arbitrary controller branch
+changes are differentiable.
+The remaining phase-2 blocker is differentiating through the nonlinear
+``run_free_boundary`` iteration loop itself, rather than through the dense toy
+nonlinear primitive, fixed-boundary operator, complete finite-response proxy,
+or final fixed accepted-boundary replay. The combined
 JAX operator is also threaded into the free-boundary driver behind the opt-in
 ``VMEC_JAX_FREEB_JAX_NESTOR_OPERATOR=1`` diagnostic flag for low-resolution
 validation. For stellarator-symmetric runs, the JAX path reconstructs the full

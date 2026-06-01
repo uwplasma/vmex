@@ -56,6 +56,17 @@ Steps taken:
    Its backward rule differentiates the frozen accepted trace replay with
    respect to coil parameters while explicitly excluding adaptive host-control
    decisions.
+9. Added `direct_coil_accepted_trace_fingerprint` and
+   `direct_coil_accepted_trace_fingerprint_delta`, which compare accepted-step
+   structure and fixed controller scalars before a fixed-trace derivative is
+   promoted against complete-solve finite differences.
+10. Added the first default same-branch complete-solve promotion gate:
+    `test_direct_coil_fixed_trace_custom_vjp_matches_complete_solve_fd_on_same_branch`.
+    It runs base and `base +/- eps` tiny forced-active direct-coil solves,
+    requires accepted-trace fingerprint compatibility, then compares the
+    fixed-trace custom-VJP directional derivative with the central finite
+    difference of the final accepted-state norm for a mixed current/Fourier
+    direction.
 
 Results obtained:
 
@@ -93,13 +104,23 @@ Results obtained:
 9. The two-step accepted replay test now also exercises the fixed-trace
    custom-VJP objective; the focused test passed again after the addition:
    `1 passed in 101.87 s`.
+10. The same two-step replay test now verifies that identical accepted traces
+    are fingerprint-compatible, scalar-control perturbations are detected, and
+    truncated traces are rejected before fixed-trace gradient promotion.
+11. The new fast synthetic fingerprint gate plus same-branch complete-solve
+    custom-VJP gate passed:
+    `JAX_ENABLE_X64=1 python -m pytest -q
+    tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_trace_fingerprint_detects_control_branch_changes
+    tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_fixed_trace_custom_vjp_matches_complete_solve_fd_on_same_branch -rx`
+    (`2 passed in 28.77 s`).
 
 Best next steps:
 
-1. Push the fixed-trace custom-VJP patch and confirm refreshed PR CI is green.
-2. Add a trace-fingerprint guard before any complete-solve custom-VJP
-   promotion. The local derivative blocks are validated, but the adaptive
-   production host loop still is not a promoted full-solve adjoint.
+1. Push the trace-fingerprint guard and confirm refreshed PR CI is green.
+2. Extend the same-branch complete-solve gate to LASYM and calibrated ESSOS
+   finite-pressure coils. The local derivative blocks and one tiny same-branch
+   complete solve are validated, but arbitrary adaptive production host-loop
+   branch changes still are not promoted as differentiable.
 
 Need from user:
 

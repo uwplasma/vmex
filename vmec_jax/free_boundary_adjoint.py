@@ -1922,6 +1922,181 @@ def direct_coil_accepted_trace_replay_objective_jax(
     }
 
 
+def _trace_scalar(trace: dict[str, Any], key: str, *, default: float = np.nan) -> float:
+    value = trace.get(key, default)
+    if value is None:
+        return float(default)
+    arr = np.asarray(value)
+    if arr.size == 0:
+        return float(default)
+    return float(arr.reshape(-1)[0])
+
+
+def _trace_bool(trace: dict[str, Any], key: str) -> int:
+    value = trace.get(key, False)
+    if value is None:
+        return 0
+    arr = np.asarray(value)
+    if arr.size == 0:
+        return 0
+    return int(bool(arr.reshape(-1)[0]))
+
+
+def _trace_pack_size(value: Any) -> int:
+    if value is None:
+        return 0
+    from .state import pack_state
+
+    try:
+        return int(np.asarray(pack_state(value)).size)
+    except Exception:
+        return int(np.asarray(value).size)
+
+
+def _trace_array_size(value: Any) -> int:
+    if value is None:
+        return 0
+    return int(np.asarray(value).size)
+
+
+def direct_coil_accepted_trace_fingerprint(
+    traces: Any,
+    *,
+    max_steps: int | None = None,
+) -> dict[str, Any]:
+    """Return a branch-control fingerprint for accepted free-boundary traces.
+
+    The fixed-trace direct-coil adjoint differentiates a frozen local model:
+    accepted controller choices, time-step scalars, limiter policy, and NESTOR
+    trace structure are fixed while coil fields are resampled.  This
+    fingerprint captures those *discrete/control* choices so a complete-solve
+    finite-difference check can reject perturbations that moved onto a
+    different adaptive branch before comparing derivatives.
+
+    Differentiable values that should vary with coil parameters, such as the
+    actual ``freeb_bsqvac_half`` entries, are intentionally not included except
+    for presence/size metadata.
+    """
+
+    trace_seq = list(traces)
+    if max_steps is not None:
+        trace_seq = trace_seq[: int(max_steps)]
+
+    scalar_keys = (
+        "dt_eff",
+        "fac",
+        "force_scale",
+        "max_update_rms_pre",
+        "limit_update_rms",
+    )
+    bool_keys = (
+        "flip_sign",
+        "divide_by_scalxc_for_update",
+    )
+    scalars = {
+        key: np.asarray([_trace_scalar(trace, key) for trace in trace_seq], dtype=float)
+        for key in scalar_keys
+    }
+    flags = {
+        key: np.asarray([_trace_bool(trace, key) for trace in trace_seq], dtype=int)
+        for key in bool_keys
+    }
+    freeb_sizes = np.asarray(
+        [_trace_array_size(trace.get("freeb_bsqvac_half")) for trace in trace_seq],
+        dtype=int,
+    )
+    nestor_sizes = np.asarray(
+        [
+            len(trace.get("freeb_nestor_trace", {}) or {})
+            if isinstance(trace.get("freeb_nestor_trace", {}), dict)
+            else 0
+            for trace in trace_seq
+        ],
+        dtype=int,
+    )
+    state_pre_sizes = np.asarray(
+        [_trace_pack_size(trace.get("state_pre")) for trace in trace_seq],
+        dtype=int,
+    )
+    state_post_sizes = np.asarray(
+        [_trace_pack_size(trace.get("state_post")) for trace in trace_seq],
+        dtype=int,
+    )
+    return {
+        "n_steps": int(len(trace_seq)),
+        "n_freeb_steps": int(np.count_nonzero(freeb_sizes)),
+        "scalars": scalars,
+        "flags": flags,
+        "freeb_sizes": freeb_sizes,
+        "nestor_trace_key_counts": nestor_sizes,
+        "state_pre_sizes": state_pre_sizes,
+        "state_post_sizes": state_post_sizes,
+    }
+
+
+def direct_coil_accepted_trace_fingerprint_delta(
+    reference: Any,
+    candidate: Any,
+    *,
+    rtol: float = 1.0e-10,
+    atol: float = 1.0e-12,
+    max_steps: int | None = None,
+) -> dict[str, Any]:
+    """Compare two accepted-trace fingerprints.
+
+    Returns a small diagnostic dictionary with ``compatible=True`` only when
+    the accepted-step structure and fixed controller scalars agree within the
+    requested tolerances.  This is a guard for fixed-trace AD-vs-FD promotion;
+    incompatibility means the perturbation exercised a different host-control
+    branch and should not be used to validate the frozen-trace derivative.
+    """
+
+    ref = direct_coil_accepted_trace_fingerprint(reference, max_steps=max_steps)
+    cand = direct_coil_accepted_trace_fingerprint(candidate, max_steps=max_steps)
+    changed: list[str] = []
+    max_abs = 0.0
+    max_rel = 0.0
+
+    for key in ("n_steps", "n_freeb_steps"):
+        if int(ref[key]) != int(cand[key]):
+            changed.append(key)
+
+    for group in ("flags",):
+        for key, ref_values in ref[group].items():
+            cand_values = cand[group].get(key, np.asarray([], dtype=ref_values.dtype))
+            if ref_values.shape != cand_values.shape or not np.array_equal(ref_values, cand_values):
+                changed.append(f"{group}.{key}")
+
+    for key in ("freeb_sizes", "nestor_trace_key_counts", "state_pre_sizes", "state_post_sizes"):
+        ref_values = np.asarray(ref[key])
+        cand_values = np.asarray(cand[key])
+        if ref_values.shape != cand_values.shape or not np.array_equal(ref_values, cand_values):
+            changed.append(key)
+
+    for key, ref_values in ref["scalars"].items():
+        cand_values = cand["scalars"].get(key, np.asarray([], dtype=float))
+        if ref_values.shape != cand_values.shape:
+            changed.append(f"scalars.{key}")
+            continue
+        abs_delta = np.abs(cand_values - ref_values)
+        finite = np.isfinite(abs_delta)
+        if np.any(finite):
+            max_abs = max(max_abs, float(np.max(abs_delta[finite])))
+            denom = np.maximum(np.abs(ref_values[finite]), float(atol))
+            max_rel = max(max_rel, float(np.max(abs_delta[finite] / denom)))
+        if not np.allclose(cand_values, ref_values, rtol=float(rtol), atol=float(atol), equal_nan=True):
+            changed.append(f"scalars.{key}")
+
+    return {
+        "compatible": len(changed) == 0,
+        "changed_fields": tuple(changed),
+        "max_abs_scalar_delta": float(max_abs),
+        "max_rel_scalar_delta": float(max_rel),
+        "reference": ref,
+        "candidate": cand,
+    }
+
+
 def direct_coil_fixed_trace_custom_vjp_objective_jax(
     params: Any,
     initial_state: Any,
