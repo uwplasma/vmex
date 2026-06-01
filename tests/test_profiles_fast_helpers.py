@@ -156,6 +156,72 @@ def test_pressure_and_iota_cubic_spline_profiles_follow_vmec_knots():
     np.testing.assert_allclose(np.asarray(prof["current"]), expected_current, rtol=1.0e-12, atol=1.0e-12)
 
 
+def test_akima_spline_profiles_cover_pressure_iota_and_current():
+    knots = [0.0, 0.25, 0.5, 0.75, 1.0]
+    indata = InData(
+        scalars={
+            "PMASS_TYPE": "akima_spline",
+            "PIOTA_TYPE": "akima_spline",
+            "PCURR_TYPE": "akima_spline_ip",
+            "AM": [0.0],
+            "AI": [0.0],
+            "AC": [1.0],
+            "AM_AUX_S": knots,
+            "AM_AUX_F": [1.0 + 2.0 * s for s in knots],
+            "AI_AUX_S": knots,
+            "AI_AUX_F": [0.3 + 0.1 * s for s in knots],
+            "AC_AUX_S": knots,
+            "AC_AUX_F": [2.0 * s for s in knots],
+            "PRES_SCALE": 3.0,
+            "BLOAT": 1.0,
+            "SPRES_PED": 1.0,
+            "LRFP": False,
+            "NCURR": 1,
+        },
+        indexed={},
+    )
+    s = np.asarray([0.0, 0.125, 0.375, 0.625, 0.875, 1.0])
+    prof = eval_profiles(indata, s)
+
+    np.testing.assert_allclose(np.asarray(prof["pressure_pa"]), 3.0 * (1.0 + 2.0 * s), rtol=1.0e-12, atol=1.0e-12)
+    np.testing.assert_allclose(np.asarray(prof["iota"]), 0.3 + 0.1 * s, rtol=1.0e-12, atol=1.0e-12)
+    np.testing.assert_allclose(np.asarray(prof["current"]), s * s, rtol=1.0e-12, atol=1.0e-12)
+
+
+def test_akima_spline_jax_and_numpy_paths_match_for_nonlinear_knots():
+    if not has_jax():
+        pytest.skip("JAX is required for concrete JAX array Akima profile coverage")
+
+    knots = [0.0, 0.2, 0.5, 0.8, 1.0]
+    indata = InData(
+        scalars={
+            "PMASS_TYPE": "akima_spline",
+            "PIOTA_TYPE": "akima_spline",
+            "PCURR_TYPE": "akima_spline_i",
+            "AM": [0.0],
+            "AI": [0.0],
+            "AC": [1.0],
+            "AM_AUX_S": knots,
+            "AM_AUX_F": [1.0, 0.7, 0.4, 0.2, 0.0],
+            "AI_AUX_S": knots,
+            "AI_AUX_F": [0.3, 0.34, 0.42, 0.48, 0.52],
+            "AC_AUX_S": knots,
+            "AC_AUX_F": [0.0, 0.02, 0.1, 0.18, 0.2],
+            "PRES_SCALE": 1.0,
+            "BLOAT": 1.0,
+            "SPRES_PED": 1.0,
+            "LRFP": False,
+            "NCURR": 1,
+        },
+        indexed={},
+    )
+    s = np.linspace(0.0, 1.0, 11)
+    prof_np = eval_profiles(indata, s)
+    prof_jax = eval_profiles(indata, jnp.asarray(s))
+    for key in ("pressure_pa", "pressure", "iota", "current"):
+        np.testing.assert_allclose(np.asarray(prof_jax[key]), np.asarray(prof_np[key]), rtol=1.0e-12, atol=1.0e-12)
+
+
 def test_bundled_profile_spline_input_evaluates_pressure_and_iota():
     _cfg, indata = load_config("examples/data/input.profile_splines")
     s = np.linspace(0.0, 1.0, 6)

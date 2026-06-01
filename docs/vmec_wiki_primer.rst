@@ -84,23 +84,26 @@ classic compact form is a low-order polynomial, but VMEC2000 also supports
 tabulated spline profiles through ``*_AUX_S`` and ``*_AUX_F`` arrays:
 
 - ``PMASS_TYPE`` selects the mass/pressure profile. ``power_series`` uses
-  ``AM`` coefficients; ``cubic_spline`` and ``line_segment`` use ``AM_AUX_S``
-  knot locations and ``AM_AUX_F`` values. With ``GAMMA=0`` this is interpreted
-  directly as pressure in Pa before VMEC's internal :math:`\mu_0` scaling.
+  ``AM`` coefficients; ``cubic_spline``, ``akima_spline``, and
+  ``line_segment`` use ``AM_AUX_S`` knot locations and ``AM_AUX_F`` values.
+  With ``GAMMA=0`` this is interpreted directly as pressure in Pa before
+  VMEC's internal :math:`\mu_0` scaling.
 - ``NCURR = 0`` selects an iota-driven equilibrium. ``PIOTA_TYPE`` then uses
   ``AI`` for ``power_series`` or ``AI_AUX_S`` / ``AI_AUX_F`` for tabulated
   spline forms.
 - ``NCURR = 1`` selects a current-driven equilibrium. ``PCURR_TYPE`` uses
   ``AC`` for ``power_series`` (:math:`I'(s)`) or ``power_series_i``
   (:math:`I(s)`). Tabulated current forms append ``_ip`` for :math:`I'(s)` or
-  ``_i`` for :math:`I(s)`, for example ``cubic_spline_ip`` with
+  ``_i`` for :math:`I(s)`, for example ``akima_spline_ip`` with
   ``AC_AUX_S`` / ``AC_AUX_F``.
 - ``BLOAT``, ``SPRES_PED``, and ``PRES_SCALE`` shape or scale the pressure
   profile after the selected parameterization is evaluated.
 
 The bundled ``examples/data/input.profile_splines`` deck demonstrates
 ``PMASS_TYPE = "cubic_spline"`` and ``PIOTA_TYPE = "cubic_spline"``. The
-finite-beta QH and QA examples demonstrate ``PCURR_TYPE = "cubic_spline_ip"``.
+finite-beta QH and QA examples demonstrate ``PCURR_TYPE = "cubic_spline_ip"``;
+the same syntax applies to ``akima_spline`` and ``line_segment`` current
+profiles.
 
 Magnetic axis and boundary
 ~~~~~~~~~~~~~~~~~~~~~~~~~~

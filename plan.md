@@ -3,8 +3,8 @@
 Last updated: 2026-06-01
 Primary branch: `main`
 Baseline release: `v0.0.14`
-Latest known green `main` CI: `46be05f`
-Current candidate: post-`v0.0.14` scalar-adjoint GPU production-policy refresh
+Latest known green `main` CI: `c589ea6`
+Current candidate: post-`v0.0.14` spline-profile parity and scalar-adjoint GPU production-policy refresh
 
 This is the living execution plan for making `vmec_jax` accurate, fast,
 differentiable, documented, and usable by external researchers. Update it when
@@ -29,6 +29,11 @@ acceptance criteria or evidence changes.
 - Smooth differentiable QI, mirror ratio, elongation, LgradB, aspect, iota, beta,
   volavgB, magnetic-well, DMerc, and JXBFORCE profile objectives exist in the
   workflow layer.
+- VMEC profile evaluation now covers polynomial pressure/iota/current profiles
+  plus VMEC-style cubic, Akima, and line-segment tabulated pressure, iota, and
+  current profiles. Cubic pressure/iota and current spline decks have been
+  cross-checked against VMEC2000, with required-tier helper and bundled-profile
+  tests covering the public parsing/evaluation path.
 - GPU execution works. Small/medium optimization cases are now much closer to
   CPU after the backend-adaptive replay-bucket fix and the post-`v0.0.8`
   dense-replay chunking profile. The profiler no longer hides a pre-profile
