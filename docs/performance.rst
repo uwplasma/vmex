@@ -1914,11 +1914,16 @@ production timings.  The trial residual path can be compared explicitly with
 
 For high-parameter-count scalar-objective probes, use
 ``method="auto_scalar"`` (alias ``"auto_adjoint"``).  This policy keeps the
-same device/LASYM safeguards as ``"auto"``, but selects the safeguarded
+same LASYM safeguards as ``"auto"``, but selects the safeguarded
 ``scalar_trust`` reverse-adjoint path for high-mode, stellarator-symmetric
-QS/QI CPU/default-backend cases and enables cost-only trial filtering unless
-the caller overrides ``scalar_cost_only_trials``.  This is the production
-entry point for testing scalar-adjoint optimization without relying on
+QS/QI CPU/default-backend cases.  As of the 2026-06-01 production-policy
+refresh, explicit GPU/CUDA/ROCm high-mode, stellarator-symmetric QS/QI
+``auto_scalar`` runs also use ``scalar_trust`` rather than falling back to
+dense SciPy.  Low-mode, LASYM, and ordinary ``method="auto"`` GPU runs stay on
+dense SciPy unless the caller explicitly chooses another method.  ``auto_scalar``
+also enables cost-only trial filtering unless the caller overrides
+``scalar_cost_only_trials``.  This is the production entry point for testing
+scalar-adjoint optimization without relying on
 ``VMEC_JAX_OPT_SCALAR_COST_ONLY_TRIALS``.
 
 A 2026-05-20 matrix-free cleanup removed one redundant initialization AD pass:
@@ -1937,6 +1942,29 @@ New profiles therefore separate
 ``linear_operator_initial_tangent_projection`` from the older
 ``linear_operator_initial_transpose`` bucket; if the transpose bucket is still
 large, the case has fallen back to the conservative no-precompute path.
+
+The same 2026-06-01 pass added a scalar-gradient initial-tangent projection
+path.  On GPU/CUDA/ROCm high-mode, stellarator-symmetric scalar-adjoint runs,
+``objective_and_gradient_fun`` now precomputes the affine initial-state tangent
+columns once per flip branch for 24--256 DOFs and projects the reverse tape
+cotangent through that block.  This targets repeated accepted-point scalar
+gradients where rebuilding the initial-state VJP was visible in profiles.  Tune
+or override with ``VMEC_JAX_OPT_SCALAR_GRADIENT_INITIAL_TANGENTS`` and
+``VMEC_JAX_OPT_SCALAR_GRADIENT_INITIAL_TANGENT_{MIN,MAX}_DOFS``.
+
+The validation profile for this change used the QA ``max_mode=3`` 48-DOF probe
+with two VMEC iterations per accepted/trial solve.  On the ``office`` GPU,
+``method="auto_scalar"`` selected ``scalar_trust`` and completed one cold
+callback in ``13.43 s``; the profile showed ``gradient_initial_tangents`` and
+``gradient_initial_projection`` rather than ``gradient_initial_vjp``.  A
+standalone two-repeat GPU scalar-gradient callback took ``12.22 s`` for the
+first point and ``0.03 s`` for a same-point repeat, with the second repeat using
+``gradient_initial_tangents_cache_hit``.  A matched dense SciPy GPU callback
+still took ``29.84 s`` for this one-callback diagnostic, dominated by
+``jacobian_projected_replay_total``; dense SciPy was ``2.22x`` slower than the
+new ``auto_scalar`` route.  These numbers are diagnostics for the
+small cold probe, not a production optimization benchmark, but they confirm the
+new route avoids dense-Jacobian fallback on eligible GPU scalar-adjoint runs.
 
 The follow-up patch tested JIT compilation of the repeated initial-state
 construction inside that accepted-point path.  ``FixedBoundaryExactOptimizer``

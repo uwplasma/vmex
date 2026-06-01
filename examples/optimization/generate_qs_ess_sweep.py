@@ -115,6 +115,8 @@ GPU_PRODUCTION_INNER_MAX_ITER = 180
 GPU_PRODUCTION_INNER_FTOL = 1e-9
 GPU_PRODUCTION_TRIAL_MAX_ITER = 180
 GPU_PRODUCTION_TRIAL_FTOL = 1e-9
+PRODUCTION_AUTO_SCALAR_MIN_MODE = 3
+PRODUCTION_AUTO_SCALAR_METHOD = "auto_scalar"
 
 
 @dataclass(frozen=True)
@@ -764,6 +766,31 @@ def _ess_alpha_for_case(problem_cfg: ProblemConfig, problem: str, max_mode: int,
     return float(problem_cfg.ess_alpha)
 
 
+def _sweep_backend_key(backend: str) -> str:
+    backend_name = str(backend).strip().lower()
+    if backend_name.startswith(("gpu", "cuda", "rocm")):
+        return "gpu"
+    if backend_name.startswith("cpu"):
+        return "cpu"
+    return backend_name
+
+
+def _use_production_auto_scalar_method(
+    problem_cfg: ProblemConfig,
+    *,
+    backend_key: str,
+    max_mode: int,
+    diagnostic_budgets: bool,
+) -> bool:
+    if bool(diagnostic_budgets):
+        return False
+    if backend_key not in {"cpu", "gpu"}:
+        return False
+    if int(max_mode) < PRODUCTION_AUTO_SCALAR_MIN_MODE:
+        return False
+    return str(problem_cfg.objective_kind) in {"qs", "qi"}
+
+
 def _effective_problem_config(
     problem_cfg: ProblemConfig,
     *,
@@ -777,7 +804,14 @@ def _effective_problem_config(
     ess_alpha_override: float | None = None,
 ) -> ProblemConfig:
     updates = {}
-    backend_key = "gpu" if str(backend).lower().startswith("gpu") else str(backend).lower()
+    backend_key = _sweep_backend_key(backend)
+    if _use_production_auto_scalar_method(
+        problem_cfg,
+        backend_key=backend_key,
+        max_mode=max_mode,
+        diagnostic_budgets=diagnostic_budgets,
+    ):
+        updates["method"] = PRODUCTION_AUTO_SCALAR_METHOD
     if (not diagnostic_budgets) and backend_key == "gpu":
         updates.update(
             inner_max_iter=(
@@ -1516,6 +1550,10 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
 
     n_iota_terms = int(problem_cfg.target_iota is not None) + int(problem_cfg.iota_abs_min is not None)
     stage_residuals_from_state._n_non_qs = 1 + n_iota_terms
+    stage_residuals_from_state._objective_family = str(problem_cfg.objective_kind)
+    if problem_cfg.objective_kind == "qs":
+        stage_residuals_from_state._helicity_m = int(problem_cfg.helicity_m)
+        stage_residuals_from_state._helicity_n = int(problem_cfg.helicity_n)
 
     def stage_field_total_from_state(state):
         qs = stage_qs_eval(state)

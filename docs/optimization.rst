@@ -1556,9 +1556,10 @@ the problem assembly in user code and standardizes only the repeated mechanics:
        optimizer, continuation, ESS, device, and artifact-writing controls, not
        hidden physics-target keyword arguments.
        ``method="auto"`` may route high-mode stellsym CPU/default QS/QI cases
-       to matrix-free LSMR; ``method="auto_scalar"``/``"auto_adjoint"`` routes
-       those same cases to the safeguarded scalar-adjoint trust path while
-       preserving dense SciPy for explicit GPU and LASYM runs.
+       to matrix-free LSMR while preserving dense SciPy for GPU runs;
+       ``method="auto_scalar"``/``"auto_adjoint"`` routes high-mode stellsym
+       CPU/GPU QS/QI cases to the safeguarded scalar-adjoint trust path, with
+       dense SciPy retained for LASYM and low-mode runs.
    * - ``FixedBoundaryOptimizationResult``
      - Return object with teaching accessors such as ``initial_optimizer``,
        ``final_optimizer``, ``initial_params``, ``final_params``,

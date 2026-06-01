@@ -1,12 +1,13 @@
 # VMEC-JAX Research-Grade Roadmap
 
-Last updated: 2026-05-31
+Last updated: 2026-06-01
 Primary branch: `main`
 Baseline release: `v0.0.14`
-Latest known green `main` CI: `8c41c606` (GitHub Actions run `26696656681`)
+Latest known green `main` CI: `46be05f`
 Current candidate: free-boundary direct-coil PR #18 refreshed onto
-`8c41c606`, with validation-scale fixed-control direct-coil adjoint replay
-helpers and CPU policy-ablation benchmark evidence.
+`d7817174`, with validation-scale direct-coil adjoint replay gates,
+preconditioner reuse timing evidence, and the post-`v0.0.14` scalar-adjoint GPU
+production-policy refresh from main.
 
 This is the living execution plan for making `vmec_jax` accurate, fast,
 differentiable, documented, and usable by external researchers. Update it when
@@ -122,9 +123,18 @@ acceptance criteria or evidence changes.
   repository-size audit, fast Sphinx, and full Sphinx. GitHub Actions run
   `26696164006` passed build, docs, CLI smoke, parity dry-run, physics smoke,
   and Python 3.10/3.11/3.12 fast tests for the same commit.
-  Main subsequently advanced to `8c41c606` with green GitHub Actions run
-  `26696656681`; free-boundary PR #18 was refreshed onto that main commit in
-  merge commit `314d13dd`.
+  After the 2026-05-31 accepted-point performance pass through `46be05f`, the
+  local release gate passed with `2381 passed, 20 skipped, 110 deselected,
+  1 xfailed` and 95.23% coverage, plus physics smoke, build, repository-size
+  audit, fast Sphinx, and full Sphinx. GitHub Actions run `26705376557` then
+  passed docs, build, CLI smoke, parity dry-run, physics smoke, and Python
+  3.10/3.11/3.12 fast tests. The current 2026-06-01 candidate promotes
+  `method="auto_scalar"` through the high-mode stellsym CPU/GPU production
+  sweep policy and adds GPU scalar-gradient initial-tangent projection so
+  eligible GPU scalar-adjoint runs no longer fall back to dense SciPy.
+  Main subsequently advanced to `d7817174`; free-boundary PR #18 has been
+  refreshed onto that main commit after the direct-coil replay-gradient and
+  preconditioner-reuse timing gates.
 - VMEC2000 converged-wout parity now has a fast bundled matrix gate across
   fixed/free, axisymmetric/non-axisymmetric, LASYM, and single/multigrid
   representatives. The executable-backed end-state gate remains opt-in:
