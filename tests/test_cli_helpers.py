@@ -49,6 +49,15 @@ def test_cli_jit_forces_parser_accepts_documented_values() -> None:
         cli._parse_jit_forces("maybe")
 
 
+def test_cli_help_uses_vmec_as_canonical_command() -> None:
+    parser = cli.build_parser()
+    help_text = parser.format_help()
+
+    assert help_text.startswith("usage: vmec")
+    assert "vmec --test" in help_text
+    assert "Compatibility aliases: vmec_jax, vmec-jax, xvmec_jax." in help_text
+
+
 def test_cli_wout_io_warmup_is_opt_in(monkeypatch) -> None:
     monkeypatch.delenv("VMEC_JAX_WOUT_IO_WARMUP", raising=False)
     assert cli._start_wout_io_warmup() is None

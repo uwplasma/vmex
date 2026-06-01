@@ -103,7 +103,9 @@ The bundled ``examples/data/input.profile_splines`` deck demonstrates
 ``PMASS_TYPE = "cubic_spline"`` and ``PIOTA_TYPE = "cubic_spline"``. The
 finite-beta QH and QA examples demonstrate ``PCURR_TYPE = "cubic_spline_ip"``;
 the same syntax applies to ``akima_spline`` and ``line_segment`` current
-profiles.
+profiles. To generate editable side-by-side pressure/current examples, run
+``python examples/profile_input_examples.py`` and inspect the polynomial and
+spline decks written under ``examples/outputs/profile_inputs``.
 
 Magnetic axis and boundary
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
