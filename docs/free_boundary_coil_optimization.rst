@@ -205,8 +205,12 @@ plus aspect/iota terms) and checks finite central-difference responses to both
 coil controls.  The accepted-state direct-coil normal-field metric also has a
 JAX replay gate whose current derivative matches central FD after freezing the
 accepted plasma boundary, and the accepted-state ``bsqvac`` replay path now
-matches central FD with respect to the packed VMEC state. The remaining
-phase-2 blocker is differentiating
+matches central FD with respect to the packed VMEC state.  The two-step
+accepted-trace replay path is also exposed through
+``direct_coil_accepted_trace_directional_check_jax`` and checks current,
+Fourier-geometry, and mixed coil directions after resampling the second
+boundary from the first replayed accepted state.  The remaining phase-2
+blocker is differentiating
 through the nonlinear ``run_free_boundary`` iteration loop itself, rather than
 through the dense toy nonlinear primitive, fixed-boundary operator, complete
 finite-response proxy, or final accepted-boundary replay. The combined
