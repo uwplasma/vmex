@@ -339,8 +339,10 @@ def test_lasym_replay_column_chunk_env_and_backend_branches(monkeypatch) -> None
     assert opt._lasym_replay_column_chunk(128) is None
 
     opt._solver_device_name = "gpu"
-    assert opt._lasym_replay_column_chunk(24) == 8
-    assert opt._lasym_replay_column_chunk(48) == 8
+    assert opt._lasym_replay_column_chunk(24) == 24
+    assert opt._lasym_replay_column_chunk(48) == 48
+    assert opt._lasym_replay_column_chunk(96) == 48
+    assert opt._lasym_replay_column_chunk(160) == 64
 
 
 def test_projected_replay_residuals_env_and_backend_branches(monkeypatch) -> None:

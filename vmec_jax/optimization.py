@@ -2831,14 +2831,21 @@ class FixedBoundaryExactOptimizer:
             except Exception:
                 backend_name = None
         if backend_name in ("gpu", "cuda", "rocm"):
-            # GPU exact replay is launch/transpose dominated.  Office A4000
-            # profiles on JAX 0.6.2 showed 8-column replay chunks reduce both
-            # QH mode-2 24-DOF and QH mode-3 48-DOF cold/new-point callback
-            # wall time materially. Explicit environment overrides remain
-            # authoritative.
-            if int(n_params) >= 24:
+            if int(n_params) < 24:
+                return None
+            if bool(getattr(self._static.cfg, "lasym", False)):
+                # LASYM doubles the boundary columns and remains more memory
+                # sensitive on GPU; keep the older conservative replay chunks.
                 return 8
-            return None
+            # Non-LASYM GPU projected replay is launch/transpose dominated.
+            # Fresh office RTX A4000/JAX 0.6.2 profiles in June 2026 showed
+            # larger chunks reduce cold and warm callback time for QH mode-2
+            # through mode-4 without increasing host materialization cost.
+            if int(n_params) <= 64:
+                return int(n_params)
+            if int(n_params) <= 128:
+                return max(24, int(n_params) // 2)
+            return 64
         if backend_name == "tpu":
             return None
         if not bool(getattr(self._static.cfg, "lasym", False)):
