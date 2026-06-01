@@ -68,7 +68,7 @@ QA_INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.nfp2_QA_om
 MODES = (1, 2, 3)
 PROBLEMS = ("qh", "qa")
 
-QH_METHOD = "scipy"  # Try also "auto", "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint", or "scalar_trust".
+QH_METHOD = "scipy"  # Try also "auto", "auto_scalar", "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint", or "scalar_trust".
 QA_METHOD = "scipy"  # Same optimizer choices as QH; keep both explicit for per-case tests.
 
 QH_MAX_NFEV = 25  # Outer least-squares budget for the final stage.

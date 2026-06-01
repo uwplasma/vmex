@@ -201,7 +201,7 @@ def test_fixed_boundary_exact_optimizer_init_preserves_gpu_trial_scan_policy(mon
     assert opt_forced_scan._exact_solver_kwargs["use_scan"] is False
 
 
-def test_auto_method_resolver_uses_matrix_free_only_for_profiled_qa_cpu_case(monkeypatch):
+def test_auto_method_resolver_uses_matrix_free_for_high_mode_stellsym_cpu_cases(monkeypatch):
     opt = _run_ready_optimizer()
 
     assert opt._resolve_optimizer_method("auto", None) == (
@@ -227,17 +227,46 @@ def test_auto_method_resolver_uses_matrix_free_only_for_profiled_qa_cpu_case(mon
     opt._solver_device_name = None
     opt._helicity_n = -1
     assert opt._resolve_optimizer_method("auto", 7) == (
-        "scipy",
+        "scipy_matrix_free",
         7,
-        "auto:dense-default",
+        "auto:qh-high-mode-matrix-free",
     )
 
+    opt._helicity_m = 0
+    opt._helicity_n = 1
+    assert opt._resolve_optimizer_method("auto", None) == (
+        "scipy_matrix_free",
+        4,
+        "auto:qp-high-mode-matrix-free",
+    )
+
+    opt._objective_family = "qi"
+    opt._helicity_m = None
+    opt._helicity_n = None
+    assert opt._resolve_optimizer_method("auto", None) == (
+        "scipy_matrix_free",
+        4,
+        "auto:qi-high-mode-matrix-free",
+    )
+    assert opt._resolve_optimizer_method("auto_scalar", None) == (
+        "scalar_trust",
+        None,
+        "auto_scalar:high-mode-scalar-trust",
+    )
+
+    opt._objective_family = "qs"
+    opt._helicity_m = 1
     opt._helicity_n = 0
     opt._specs = [BoundaryParamSpec("rs30", "rs", 0, 3, 0)]
     assert opt._resolve_optimizer_method("auto", None) == (
         "scipy",
         None,
         "auto:dense-lasym",
+    )
+    assert opt._resolve_optimizer_method("auto_adjoint", None) == (
+        "scipy",
+        None,
+        "auto_scalar:dense-lasym",
     )
 
     opt._specs = [BoundaryParamSpec("rc30", "rc", 0, 3, 0)]
@@ -254,6 +283,11 @@ def test_auto_method_resolver_uses_matrix_free_only_for_profiled_qa_cpu_case(mon
         "scipy",
         None,
         "auto:dense-default",
+    )
+    assert opt._resolve_optimizer_method("auto_scalar", None) == (
+        "scipy",
+        None,
+        "auto_scalar:dense-default",
     )
 
     opt._specs = [BoundaryParamSpec("rc20", "rc", 0, 2, 0)]

@@ -607,7 +607,7 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
    MIN_VMEC_MODE = MAX_MODE + 2
    SIMPLE_SEED_PERTURBATION = 1.0e-5
    MAX_NFEV = 70
-   METHOD = "scipy"            # also: "auto", "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint", "scalar_trust"
+   METHOD = "scipy"            # also: "auto", "auto_scalar", "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint", "scalar_trust"
    SCIPY_TR_SOLVER = "lsmr"    # also: "exact" for small dense trust-region solves
    SOLVER_DEVICE = None        # set to "cpu" or "gpu" to force one backend
    SAVE_STAGE_INPUTS = True    # keep per-stage input decks
@@ -790,8 +790,9 @@ optimization:
      - ``examples/optimization/QI_optimization.py``
      - ``AspectRatio``, ``AbsMeanIotaFloor``, ``QuasiIsodynamicResidual``,
        ``MirrorRatio``, and ``MaxElongation`` with lower-mode continuation and
-       ESS.  Same-mode repeat is available with ``STAGE_MODE_POLICY =
-       "repeat"``.
+       ESS.  The default ``STAGE_MODE_POLICY = "lower-repeat"`` repeats each
+       spectral rung for far circular seeds; ``"lower"`` is shorter, and
+       ``"repeat"`` repeats only the final mode for near-basin cleanup.
 
 .. code-block:: bash
 
@@ -882,10 +883,10 @@ boundaries.  QA/QH/QP
 continuation uses the repeated omnigenity-style policy ``[1, 1, 2, 2, 2]`` for
 ``max_mode=2`` and
 ``[1, 1, 2, 2, 2, 3, 3, 3]`` for ``max_mode=3``; higher modes follow the same
-repeated-stage pattern when continuation is enabled.  QI now uses the same
-lower-mode continuation by default; same-mode repeat remains available for
-near-basin cleanup via ``STAGE_MODE_POLICY = "repeat"`` or the corresponding
-CLI flag.  Mode-4 and mode-5 rows should be promoted only after matching
+repeated-stage pattern when continuation is enabled.  QI defaults to
+``STAGE_MODE_POLICY = "lower-repeat"`` for seed robustness; same-mode repeat
+remains available for near-basin cleanup via ``STAGE_MODE_POLICY = "repeat"``
+or the corresponding CLI flag.  Mode-4 and mode-5 rows should be promoted only after matching
 reviewed CSV/JSON rows and figures are regenerated.
 
 When the full matrix is regenerated, the objective panels contain the CPU/GPU
@@ -1554,6 +1555,10 @@ the problem assembly in user code and standardizes only the repeated mechanics:
      - Run the regular QS or QI least-squares driver.  It should receive
        optimizer, continuation, ESS, device, and artifact-writing controls, not
        hidden physics-target keyword arguments.
+       ``method="auto"`` may route high-mode stellsym CPU/default QS/QI cases
+       to matrix-free LSMR; ``method="auto_scalar"``/``"auto_adjoint"`` routes
+       those same cases to the safeguarded scalar-adjoint trust path while
+       preserving dense SciPy for explicit GPU and LASYM runs.
    * - ``FixedBoundaryOptimizationResult``
      - Return object with teaching accessors such as ``initial_optimizer``,
        ``final_optimizer``, ``initial_params``, ``final_params``,

@@ -50,9 +50,10 @@ REFERENCE_LAMBDAS = (0.995, 1.0, 1.005)
 BOUNDARY_REFERENCE_ACCEPT_AS_BASELINE = False  # True keeps the reference candidate as a safe fallback.
 
 # Optimizer parameters.
-METHOD = "scipy_matrix_free"  # Try "scipy", "gauss_newton", "lbfgs_adjoint", or "scalar_trust".
+METHOD = "scipy_matrix_free"  # Try "auto", "auto_scalar", "scipy", "gauss_newton", "lbfgs_adjoint", or "scalar_trust".
 SCIPY_TR_SOLVER = "lsmr"  # For METHOD="scipy": "lsmr" is memory-light; "exact" is dense.
-SCIPY_LSMR_MAXITER = None  # None lets SciPy choose; set an int to cap LSMR iterations.
+SCIPY_LSMR_MAXITER = 4  # Matrix-free cap; None lets SciPy choose more Jv/J.Tv products.
+SCALAR_COST_ONLY_TRIALS = None  # For METHOD="scalar_trust": True filters trials with forward solves.
 FTOL = 1.0e-5  # Relative cost-reduction tolerance for the outer optimizer.
 GTOL = 1.0e-5  # Gradient optimality tolerance for the outer optimizer.
 XTOL = 1.0e-6  # Step-size tolerance for the outer optimizer.
@@ -66,8 +67,8 @@ ALPHA = 1.2  # ESS high-mode scaling strength.
 USE_MODE_CONTINUATION = True
 CONTINUATION_NFEV = 20
 MAX_NFEV = 70
-STAGE_MODE_POLICY = "lower"  # "lower" stages 1..MAX_MODE; "repeat" repeats only MAX_MODE.
-STAGE_REPEATS = 3  # Used only for STAGE_MODE_POLICY="repeat".
+STAGE_MODE_POLICY = "lower-repeat"  # "lower", "lower-repeat", or "repeat" only MAX_MODE.
+STAGE_REPEATS = 2  # Used by "lower-repeat" and "repeat" policies.
 STAGE_MODES = vj.qi_stage_modes(
     max_mode=MAX_MODE,
     use_mode_continuation=USE_MODE_CONTINUATION,
@@ -78,7 +79,8 @@ STAGE_MODES = vj.qi_stage_modes(
 # Common alternatives:
 # STAGE_MODES = [1, 1, 2, 2, 3, 3]
 # MIRROR_RAMP_STAGES = ()
-# STAGE_MODE_POLICY = "repeat"
+# STAGE_MODE_POLICY = "lower"   # one pass at each mode
+# STAGE_MODE_POLICY = "repeat"  # repeat only MAX_MODE for already-good seeds
 # METHOD = "lbfgs_adjoint"
 # USE_REFERENCE_FAMILY_SEED = True
 # SOLVER_DEVICE = "gpu"
@@ -171,6 +173,8 @@ QI_CONTEXT = vj.make_qi_optimization_context(
     qi_gate_smooth_max=QI_GATE_SMOOTH_MAX,
     qi_options=QI_OPTIONS,
     qi_weight=QI_WEIGHT,
+    scalar_cost_only_trials=SCALAR_COST_ONLY_TRIALS,
+    scipy_lsmr_maxiter=SCIPY_LSMR_MAXITER,
     solver_device=SOLVER_DEVICE,
     stage_modes=STAGE_MODES,
     stage_repeats=STAGE_REPEATS,
@@ -312,6 +316,8 @@ def solve_qi_stage(
     use_mode_continuation=USE_MODE_CONTINUATION,
     scalar_step_bound=None,
     lbfgs_step_bound=None,
+    scipy_lsmr_maxiter=SCIPY_LSMR_MAXITER,
+    scalar_cost_only_trials=SCALAR_COST_ONLY_TRIALS,
     save_final_outputs=False,
 ):
     """Run one editable QI stage using the objective problem supplied above."""
@@ -343,9 +349,10 @@ def solve_qi_stage(
         trial_ftol=TRIAL_FTOL,
         solver_device=SOLVER_DEVICE,
         scipy_tr_solver=SCIPY_TR_SOLVER,
-        scipy_lsmr_maxiter=SCIPY_LSMR_MAXITER,
+        scipy_lsmr_maxiter=scipy_lsmr_maxiter,
         lbfgs_step_bound=lbfgs_step_bound,
         scalar_step_bound=scalar_step_bound,
+        scalar_cost_only_trials=scalar_cost_only_trials,
         save_stage_inputs=SAVE_STAGE_INPUTS,
         save_stage_wouts=SAVE_STAGE_WOUTS,
         save_final_outputs=save_final_outputs,

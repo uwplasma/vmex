@@ -1903,24 +1903,40 @@ fallbacks, and larger parameter-count cases, but it is not a global default
 because it is problem dependent.  Use ``method="auto"`` as an opt-in,
 device-preserving policy rather than as a promise of the fastest wall time for
 every case.  The current automatic policy may select matrix-free LSMR for
-high-mode, stellarator-symmetric QA on CPU/default CPU, where cold-process and
-memory-pressure profiles motivated the lane, but it keeps QH, LASYM cases, and
-explicit GPU runs on the dense SciPy path until case-specific matrix-free
-profiles show a benefit.  The retained benchmark table below is a useful
-counterexample: on that warm QA run, dense SciPy is still faster.  Validate the
-case you care about with the profiling commands before promoting production
-timings.  The trial residual path can be compared explicitly with
+high-mode, stellarator-symmetric QS/QI problems on CPU/default CPU, where
+cold-process and memory-pressure profiles motivated the lane.  It still keeps
+LASYM cases and explicit GPU runs on the dense SciPy path until case-specific
+matrix-free GPU profiles show a benefit.  The retained benchmark table below is
+a useful counterexample: on that warm QA run, dense SciPy is still faster.
+Validate the case you care about with the profiling commands before promoting
+production timings.  The trial residual path can be compared explicitly with
 ``profile_exact_optimizer.py --trial-scan auto|on|off``.
+
+For high-parameter-count scalar-objective probes, use
+``method="auto_scalar"`` (alias ``"auto_adjoint"``).  This policy keeps the
+same device/LASYM safeguards as ``"auto"``, but selects the safeguarded
+``scalar_trust`` reverse-adjoint path for high-mode, stellarator-symmetric
+QS/QI CPU/default-backend cases and enables cost-only trial filtering unless
+the caller overrides ``scalar_cost_only_trials``.  This is the production
+entry point for testing scalar-adjoint optimization without relying on
+``VMEC_JAX_OPT_SCALAR_COST_ONLY_TRIALS``.
 
 A 2026-05-20 matrix-free cleanup removed one redundant initialization AD pass:
 ``residual_linear_operator`` now obtains the frozen-axis initial-state
 transpose from the already-created ``jax.linearize`` object instead of tracing a
-second ``jax.vjp`` through the same initial-state graph.  A cold QA
-``max_mode=1`` CPU smoke with ``inner_max_iter=trial_max_iter=4`` reported
-``linear_operator_initial_transpose = 0.78 s`` and selected
-``exact_tape_build_solve_call`` as the next patch target, confirming that
-remaining first-call cost is in the accepted VMEC tape solve/replay path rather
-than duplicated initial-state autodiff.
+second ``jax.vjp`` through the same initial-state graph.  A later 2026-05-31
+production pass moved SIMSOPT-style tuple workflows onto the same packed-state
+cotangent hooks used by the older direct QS factories.  For larger
+stellarator-symmetric CPU/default matrix-free operators it can also precompute
+the small initial-state tangent block; by default this is limited to
+64--128 boundary DOFs because a 48-DOF QA microprobe showed the build cost can
+exceed the single ``J.Tv`` transpose it saves.  Override with
+``VMEC_JAX_OPT_LINEAR_OPERATOR_INITIAL_TANGENTS=1`` or tune
+``VMEC_JAX_OPT_LINEAR_OPERATOR_INITIAL_TANGENT_{MIN,MAX}_DOFS`` for profiling.
+New profiles therefore separate
+``linear_operator_initial_tangent_projection`` from the older
+``linear_operator_initial_transpose`` bucket; if the transpose bucket is still
+large, the case has fallen back to the conservative no-precompute path.
 
 The follow-up patch tested JIT compilation of the repeated initial-state
 construction inside that accepted-point path.  ``FixedBoundaryExactOptimizer``
@@ -2939,8 +2955,8 @@ projection:
    * - Scalar adjoint, opt-in cost-only trial filter
      - ``86.7 s`` total
      - objective ``0.717 -> 0.612`` with only 4 exact gradients, but
-       8 trial solves add ``17.6 s``; this remains diagnostic-only via
-       ``VMEC_JAX_OPT_SCALAR_COST_ONLY_TRIALS=1``
+       8 trial solves add ``17.6 s``; enable with
+       ``scalar_cost_only_trials=True`` for explicit profiling
    * - Matrix-free SciPy, ``lsmr_maxiter=2``, 4 residual callbacks
      - ``167.1 s`` total
      - objective ``0.717 -> 0.680``; repeated ``Jv``/``J.Tv`` products make
@@ -2961,8 +2977,12 @@ scale instead of permanently collapsing to the accepted microscopic step.  A
 cost-only trial filter was also tested, but it is not the default because this
 QH GPU case spends about ``2.2 s`` per trial solve and is slower overall despite
 halving exact-gradient builds.  It remains available for diagnostics with
-``VMEC_JAX_OPT_SCALAR_COST_ONLY_TRIALS=1``.  The path still needs problem-aware step
-proposal/globalization before it can replace dense SciPy least-squares for
+``scalar_cost_only_trials=True`` on ``FixedBoundaryExactOptimizer.run`` (or the
+same argument through ``least_squares_solve``).  The legacy environment variable
+``VMEC_JAX_OPT_SCALAR_COST_ONLY_TRIALS=1`` remains available for profiling
+scripts, and ``tools/diagnostics/profile_exact_optimizer.py`` exposes the same
+switch as ``--scalar-cost-only-trials``.  The path still needs problem-aware
+step proposal/globalization before it can replace dense SciPy least-squares for
 README-quality optimization results.
 
 Additional controller finding from March 2026:

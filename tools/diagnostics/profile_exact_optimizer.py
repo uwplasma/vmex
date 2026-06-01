@@ -70,6 +70,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--method",
         choices=(
             "auto",
+            "auto_scalar",
+            "auto_adjoint",
             "scipy",
             "scipy_matrix_free",
             "gauss_newton",
@@ -91,6 +93,12 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.01,
         help="Initial/max scaled-space trust radius for method=scalar_trust.",
+    )
+    p.add_argument(
+        "--scalar-cost-only-trials",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="For method=scalar_trust, filter trial points through forward residual solves before exact gradients.",
     )
     p.add_argument("--trace-outdir", type=str, default="")
     p.add_argument(
@@ -1389,6 +1397,7 @@ def main() -> int:
                 scipy_lsmr_maxiter=None if args.lsmr_maxiter <= 0 else int(args.lsmr_maxiter),
                 lbfgs_step_bound=float(args.lbfgs_step_bound),
                 scalar_step_bound=float(args.scalar_step_bound),
+                scalar_cost_only_trials=args.scalar_cost_only_trials,
                 trace_callbacks=args.trace_callbacks,
             )
             hist_repeat = _history_payload_with_aliases(dict(result["_history_dump"]))

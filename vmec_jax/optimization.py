@@ -1601,7 +1601,7 @@ class FixedBoundaryExactOptimizer:
         return max(max(abs(int(spec.m)), abs(int(spec.n))) for spec in self._specs)
 
     def _has_stellarator_asymmetric_parameter_specs(self) -> bool:
-        return any(str(spec.kind).lower() in ("rs", "zc") for spec in self._specs)
+        return any(str(spec.kind).lower() in ("rs", "zc") for spec in getattr(self, "_specs", ()))
 
     def _has_stellarator_asymmetric_configuration(self) -> bool:
         if self._has_stellarator_asymmetric_parameter_specs():
@@ -1618,10 +1618,10 @@ class FixedBoundaryExactOptimizer:
         """Resolve optimizer method aliases and the opt-in automatic policy.
 
         ``method="auto"`` is intentionally conservative and device-preserving:
-        it only chooses the matrix-free trust-region path for the profiled QA,
-        stellarator-symmetric, high-mode CPU/default-backend lane where
-        cold-process and memory-pressure profiles motivated the option.  It does
-        not guarantee the fastest warm wall time for every QA run, and it never
+        it chooses the matrix-free trust-region path for profiled high-mode,
+        stellarator-symmetric QS/QI CPU/default-backend lanes where
+        cold-process and memory-pressure profiles motivated the option. It does
+        not guarantee the fastest warm wall time for every run, and it never
         moves work between CPU and GPU; explicit device choices are preserved.
         """
 
@@ -1632,21 +1632,38 @@ class FixedBoundaryExactOptimizer:
             "trf": "scipy",
         }
         method_key = aliases.get(method_key, method_key)
-        if method_key not in ("auto", "adaptive"):
+        scalar_auto_requested = method_key in ("auto_scalar", "auto_adjoint", "adaptive_scalar", "adaptive_adjoint")
+        if method_key not in ("auto", "adaptive") and not scalar_auto_requested:
             return method_key, scipy_lsmr_maxiter, None
 
         backend = _optimizer_backend_name(getattr(self, "_solver_device_name", None))
         if backend in ("gpu", "cuda", "rocm", "tpu", "metal"):
-            return "scipy", scipy_lsmr_maxiter, f"auto:dense-preserves-{backend}"
+            prefix = "auto_scalar" if scalar_auto_requested else "auto"
+            return "scipy", scipy_lsmr_maxiter, f"{prefix}:dense-preserves-{backend}"
         if self._has_stellarator_asymmetric_configuration():
-            return "scipy", scipy_lsmr_maxiter, "auto:dense-lasym"
+            prefix = "auto_scalar" if scalar_auto_requested else "auto"
+            return "scipy", scipy_lsmr_maxiter, f"{prefix}:dense-lasym"
 
         helicity_m = None if self._helicity_m is None else int(self._helicity_m)
         helicity_n = None if self._helicity_n is None else int(self._helicity_n)
-        if self._objective_family == "qs" and helicity_m == 1 and helicity_n == 0 and self._spec_max_mode() >= 3:
-            return "scipy_matrix_free", 4 if scipy_lsmr_maxiter is None else scipy_lsmr_maxiter, "auto:qa-high-mode-matrix-free"
+        if self._spec_max_mode() >= 3 and self._objective_family in ("qs", "qi"):
+            if scalar_auto_requested:
+                return "scalar_trust", scipy_lsmr_maxiter, "auto_scalar:high-mode-scalar-trust"
+            lsmr_maxiter = 4 if scipy_lsmr_maxiter is None else scipy_lsmr_maxiter
+            if self._objective_family == "qi":
+                family = "qi"
+            elif helicity_m == 1 and helicity_n == 0:
+                family = "qa"
+            elif helicity_m == 0 and helicity_n not in (None, 0):
+                family = "qp"
+            elif helicity_m == 1 and helicity_n not in (None, 0):
+                family = "qh"
+            else:
+                family = "qs"
+            return "scipy_matrix_free", lsmr_maxiter, f"auto:{family}-high-mode-matrix-free"
 
-        return "scipy", scipy_lsmr_maxiter, "auto:dense-default"
+        prefix = "auto_scalar" if scalar_auto_requested else "auto"
+        return "scipy", scipy_lsmr_maxiter, f"{prefix}:dense-default"
 
     def _select_exact_path(self) -> str:
         """Choose the accepted-point differentiation path.
@@ -2929,6 +2946,35 @@ class FixedBoundaryExactOptimizer:
             return 4
         return None
 
+    def _precompute_linear_operator_initial_tangents_enabled(self, n_params: int) -> bool:
+        """Whether matrix-free operators should cache initial-state tangent columns.
+
+        Matrix-free least-squares avoids materializing the full residual
+        Jacobian, but every ``J.T @ w`` still needs the transpose of the frozen
+        initial-state map.  For stellarator-symmetric CPU/default high-mode
+        production runs this transpose was a repeat offender in accepted-point
+        profiles.  Precomputing the small ``n_params x state_size`` initial
+        tangent block once per accepted point lets both ``J @ v`` and
+        ``J.T @ w`` reuse fast tensor contractions while preserving the larger
+        matrix-free residual projection.  The default starts at 64 DOFs because
+        lower-DOF probes usually perform too few transpose products to amortize
+        the tangent-column build.
+        """
+
+        if int(n_params) <= 0:
+            return False
+        flag = os.getenv("VMEC_JAX_OPT_LINEAR_OPERATOR_INITIAL_TANGENTS")
+        if flag is not None:
+            return flag.strip().lower() not in ("", "0", "false", "no", "off")
+        backend = _optimizer_backend_name(getattr(self, "_solver_device_name", None))
+        if backend in ("gpu", "cuda", "rocm", "tpu", "metal"):
+            return False
+        if self._has_stellarator_asymmetric_configuration():
+            return False
+        min_dofs = int(os.getenv("VMEC_JAX_OPT_LINEAR_OPERATOR_INITIAL_TANGENT_MIN_DOFS", "64"))
+        max_dofs = int(os.getenv("VMEC_JAX_OPT_LINEAR_OPERATOR_INITIAL_TANGENT_MAX_DOFS", "128"))
+        return min_dofs <= int(n_params) <= max_dofs
+
     def _projected_replay_residuals_enabled(self, n_params: int | None = None) -> bool:
         """Whether dense Jacobians should project replayed tangents without an intermediate sync."""
 
@@ -3569,6 +3615,18 @@ class FixedBoundaryExactOptimizer:
             initial_linear = None
             initial_transpose = None
             self._profile_add("linear_operator_initial_tangents_cache_hit", 0.0)
+        elif self._precompute_linear_operator_initial_tangents_enabled(int(params.size)):
+            self._profile_add("linear_operator_initial_tangents_precompute", 0.0)
+            initial_tangent_columns = _jnp.asarray(
+                self._initial_tangent_columns(
+                    params,
+                    axis_override,
+                    profile_prefix="linear_operator",
+                ),
+                dtype=_jnp.float64,
+            )
+            initial_linear = None
+            initial_transpose = None
         else:
             from .init_guess import initial_guess_from_boundary as _ig
 
@@ -3692,9 +3750,13 @@ class FixedBoundaryExactOptimizer:
             # a second VJP through the same initialization graph.
             if initial_tangent_columns is not None:
                 grad = _jnp.tensordot(initial_tangent_columns, initial_cotangent, axes=([1], [0]))
+                self._profile_add(
+                    "linear_operator_initial_tangent_projection",
+                    time.perf_counter() - t_initial_transpose,
+                )
             else:
                 grad = initial_transpose(_jnp.asarray(initial_cotangent, dtype=_jnp.float64))[0]
-            self._profile_add("linear_operator_initial_transpose", time.perf_counter() - t_initial_transpose)
+                self._profile_add("linear_operator_initial_transpose", time.perf_counter() - t_initial_transpose)
             self._profile_add("linear_operator_rmatvec", time.perf_counter() - t_rmv)
             return np.asarray(grad, dtype=float)
 
@@ -4041,6 +4103,7 @@ class FixedBoundaryExactOptimizer:
         scipy_lsmr_maxiter: int | None = None,
         lbfgs_step_bound: float | None = 0.01,
         scalar_step_bound: float | None = 0.01,
+        scalar_cost_only_trials: bool | None = None,
         trace_callbacks: bool | None = None,
     ) -> dict:
         """Run exact least-squares optimisation.
@@ -4053,9 +4116,13 @@ class FixedBoundaryExactOptimizer:
             Outer least-squares method. Supported values are ``"gauss_newton"``
             and ``"scipy"``. ``"auto"`` keeps the current device selection and
             resolves to a conservative device-preserving method for known cases:
-            currently matrix-free SciPy for high-mode, stellarator-symmetric QA
-            on CPU/default CPU, otherwise dense SciPy. This is an opt-in policy
-            and not a guarantee that every warm QA run is fastest.
+            currently matrix-free SciPy for high-mode, stellarator-symmetric
+            QS/QI on CPU/default CPU, otherwise dense SciPy. This is an opt-in
+            policy and not a guarantee that every warm run is fastest.
+            ``"auto_scalar"``/``"auto_adjoint"`` keep the same safeguards but
+            choose ``"scalar_trust"`` for high-mode, stellarator-symmetric
+            QS/QI CPU/default-backend cases, enabling scalar-adjoint production
+            tests without environment variables.
             ``"scipy"`` uses ``scipy.optimize.least_squares``
             with the exact residual and discrete-adjoint Jacobian callbacks,
             which is more robust on some QA/QH examples.
@@ -4113,6 +4180,13 @@ class FixedBoundaryExactOptimizer:
             Initial and maximum trust radius in scaled parameter space when
             ``method="scalar_trust"``. Set to ``None`` or a non-positive value
             to use a unit initial radius.
+        scalar_cost_only_trials:
+            When true with ``method="scalar_trust"``, evaluate trial points with
+            the lighter forward residual path before building a full exact
+            scalar-adjoint tape for accepted candidates.  This can reduce
+            accepted-point tape builds in rugged high-mode cases, at the cost
+            of additional forward solves. ``None`` preserves the legacy
+            environment/private-attribute controls for profiling scripts.
         trace_callbacks:
             When true, include a lightweight SciPy callback trace in the
             history dump.  This is intended for CPU/GPU profiling of repeated
@@ -4151,6 +4225,7 @@ class FixedBoundaryExactOptimizer:
         self._exact_history_rejected_count = 0
 
         params0_arr = np.asarray(params0, dtype=float)
+        scalar_cost_only_trials_used: bool | None = None
 
         # ── initial evaluation ──────────────────────────────────────────────
         res0 = self.residual_fun(params0_arr)
@@ -4282,12 +4357,19 @@ class FixedBoundaryExactOptimizer:
             max_lbfgs_pairs = 8
             armijo_c1 = 1.0e-4
             backtrack_factor = 0.1
-            cost_only_trial_flag = os.getenv("VMEC_JAX_OPT_SCALAR_COST_ONLY_TRIALS")
-            cost_only_trials = (
-                bool(getattr(self, "_scalar_trust_cost_only_trials", False))
-                if cost_only_trial_flag is None
-                else cost_only_trial_flag.strip().lower() in ("1", "true", "yes", "on")
-            )
+            if scalar_cost_only_trials is None:
+                cost_only_trial_flag = os.getenv("VMEC_JAX_OPT_SCALAR_COST_ONLY_TRIALS")
+                if cost_only_trial_flag is None:
+                    cost_only_trials = (
+                        True
+                        if str(method_auto_reason or "").startswith("auto_scalar:")
+                        else bool(getattr(self, "_scalar_trust_cost_only_trials", False))
+                    )
+                else:
+                    cost_only_trials = cost_only_trial_flag.strip().lower() in ("1", "true", "yes", "on")
+            else:
+                cost_only_trials = bool(scalar_cost_only_trials)
+            scalar_cost_only_trials_used = bool(cost_only_trials)
 
             def _scalar_trust_direction(grad):
                 grad = np.asarray(grad, dtype=float)
@@ -4984,6 +5066,7 @@ class FixedBoundaryExactOptimizer:
             "scipy_lsmr_maxiter": (None if scipy_lsmr_maxiter is None else int(scipy_lsmr_maxiter)),
             "lbfgs_step_bound": (None if lbfgs_step_bound is None else float(lbfgs_step_bound)),
             "scalar_step_bound": (None if scalar_step_bound is None else float(scalar_step_bound)),
+            "scalar_cost_only_trials": scalar_cost_only_trials_used,
             "solver_device": self._solver_device_name or "default",
             "inner_max_iter": int(self._inner_max_iter),
             "inner_ftol": float(self._inner_ftol),

@@ -64,7 +64,7 @@ MAX_NFEV = 16
 CONTINUATION_NFEV = 16
 USE_MODE_CONTINUATION = True
 
-METHOD = "scipy"  # Try also "auto", "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint", or "scalar_trust".
+METHOD = "scipy"  # Try also "auto", "auto_scalar", "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint", or "scalar_trust".
 SCIPY_TR_SOLVER = "lsmr"  # For METHOD="scipy": "lsmr" is memory-light; "exact" is dense.
 SCIPY_LSMR_MAXITER = None  # None lets SciPy choose; set an int to cap LSMR iterations.
 FTOL = 1.0e-3  # Relative cost-reduction tolerance for the outer optimizer.

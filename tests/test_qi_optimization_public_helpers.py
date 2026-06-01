@@ -165,6 +165,49 @@ def test_qi_cli_override_loads_mirror_ramp_stages_json(tmp_path: Path) -> None:
     assert namespace["MIRROR_RAMP_STAGES"] == ({"name": "cleanup", "max_nfev": 5, "mirror_weight": 20.0},)
 
 
+def test_qi_lower_repeat_stage_policy_and_cli_controls() -> None:
+    modes = qio.qi_stage_modes(
+        max_mode=3,
+        use_mode_continuation=True,
+        continuation_nfev=2,
+        repeats=2,
+        policy="lower-repeat",
+    )
+    assert modes == [1, 1, 2, 2, 3, 3]
+
+    direct = qio.qi_stage_modes(
+        max_mode=3,
+        use_mode_continuation=False,
+        continuation_nfev=0,
+        repeats=4,
+        policy="lower-repeat",
+    )
+    assert direct == [3]
+
+    namespace = {
+        "MAX_MODE": 3,
+        "USE_MODE_CONTINUATION": True,
+        "CONTINUATION_NFEV": 2,
+        "STAGE_REPEATS": 1,
+        "STAGE_MODE_POLICY": "lower",
+    }
+    qio.apply_qi_example_cli_overrides(
+        namespace,
+        [
+            "--stage-mode-policy",
+            "lower-repeat",
+            "--stage-repeats",
+            "2",
+            "--scipy-lsmr-maxiter",
+            "5",
+            "--scalar-cost-only-trials",
+        ],
+    )
+    assert namespace["STAGE_MODES"] == [1, 1, 2, 2, 3, 3]
+    assert namespace["SCIPY_LSMR_MAXITER"] == 5
+    assert namespace["SCALAR_COST_ONLY_TRIALS"] is True
+
+
 def test_explicit_qi_context_overrides_legacy_globals(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     qi_options = _configure(tmp_path / "legacy")
     ctx = qio.make_qi_optimization_context(

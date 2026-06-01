@@ -40,6 +40,7 @@ def _bare_optimizer_for_state_ops() -> FixedBoundaryExactOptimizer:
     opt._indata = object()
     opt._signgs = -1
     opt._layout = StateLayout(ns=1, K=1, lasym=False)
+    opt._specs = []
     opt._profile = {}
     opt._exact_cache = {}
     opt._exact_state_cache = {}
@@ -783,6 +784,96 @@ def test_residual_linear_operator_products_use_tape_and_residual_transposes(monk
     op_with_helper = opt.residual_linear_operator(np.asarray([1.0, 2.0]))
     np.testing.assert_allclose(op_with_helper.rmatvec(np.asarray([2.0, 3.0])), [20.0, 60.0])
     assert opt._profile["linear_operator_initial_transpose"]["count"] == 2
+
+
+def test_residual_linear_operator_precomputes_initial_tangents_for_stellsym_cpu(monkeypatch) -> None:
+    pytest.importorskip("scipy.sparse.linalg")
+    import jax.numpy as jnp
+    import vmec_jax.discrete_adjoint as adjoint_module
+    import vmec_jax.init_guess as init_guess_module
+
+    opt = _bare_optimizer_for_state_ops()
+    opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=False))
+    opt._boundary_from_params = lambda params: params
+    opt._solve_exact_with_tape = lambda params, *, return_payload: (
+        _state_from_coeffs(r=params[0], rs=params[1]),
+        {"tape": "tape", "axis_override": {}},
+    )
+    opt._initial_tangent_cache_key = lambda params: ("affine", np.asarray(params, dtype=float).shape)
+    opt._precompute_linear_operator_initial_tangents_enabled = (
+        FixedBoundaryExactOptimizer._precompute_linear_operator_initial_tangents_enabled.__get__(
+            opt,
+            FixedBoundaryExactOptimizer,
+        )
+    )
+
+    def fake_initial_guess(_static, boundary, _indata, *, vmec_project, axis_override):
+        del vmec_project, axis_override
+        return _state_from_coeffs(r=boundary[0], rs=boundary[1])
+
+    def residuals_fn(state_arg):
+        r = state_arg.Rcos[0, 0]
+        rs = state_arg.Rsin[0, 0]
+        return jnp.asarray([r + rs, 2.0 * r - rs], dtype=jnp.float64)
+
+    monkeypatch.setenv("VMEC_JAX_OPT_LINEAR_OPERATOR_INITIAL_TANGENTS", "1")
+    monkeypatch.delenv("VMEC_JAX_OPT_LINEAR_OPERATOR_INITIAL_TANGENT_MAX_DOFS", raising=False)
+    monkeypatch.setattr(init_guess_module, "initial_guess_from_boundary", fake_initial_guess)
+    monkeypatch.setattr(adjoint_module, "checkpoint_tape_state_jvp", lambda **kwargs: kwargs["initial_tangent"])
+    monkeypatch.setattr(adjoint_module, "checkpoint_tape_state_vjp", lambda **kwargs: kwargs["final_cotangent"])
+    monkeypatch.setattr(adjoint_module, "checkpoint_tape_state_jvp_columns", lambda **kwargs: kwargs["initial_tangents"])
+
+    opt._residuals_fn = residuals_fn
+    op = opt.residual_linear_operator(np.asarray([1.0, 2.0]))
+
+    np.testing.assert_allclose(op.rmatvec(np.asarray([5.0, 7.0])), [19.0, -2.0])
+    assert opt._profile["linear_operator_initial_tangents_precompute"]["count"] == 1
+    assert opt._profile["linear_operator_initial_tangents_cache_miss"]["count"] == 1
+    assert "linear_operator_initial_transpose" not in opt._profile
+
+
+def test_workflow_residuals_attach_packed_state_cotangent_hooks() -> None:
+    pytest.importorskip("jax")
+    import jax
+    import jax.numpy as jnp
+    import vmec_jax.optimization_workflow as workflow
+    from vmec_jax.state import unpack_state
+
+    state = _state_from_coeffs(r=2.0, z=3.0)
+    packed = pack_state(state)
+
+    term = workflow.ObjectiveTerm(
+        "state_metric",
+        lambda _ctx, st: jnp.asarray([st.Rcos[0, 0] + 2.0 * st.Zcos[0, 0]], dtype=jnp.float64),
+        target=1.0,
+        weight=3.0,
+    )
+    combined = workflow.residuals_from_objectives([term], SimpleNamespace())
+
+    assert hasattr(combined, "_state_cotangent_from_packed")
+    assert hasattr(combined, "_state_objective_value_and_cotangent_from_packed")
+
+    cotangent = jnp.asarray([0.25], dtype=jnp.float64)
+    hook_cotangent = combined._state_cotangent_from_packed(packed, state.layout, cotangent)
+
+    def residuals_from_packed(packed_arg):
+        return combined(unpack_state(packed_arg, state.layout))
+
+    _, pullback = jax.vjp(residuals_from_packed, packed)
+    expected_cotangent = pullback(cotangent)[0]
+    np.testing.assert_allclose(np.asarray(hook_cotangent), np.asarray(expected_cotangent), rtol=1e-12, atol=1e-12)
+
+    value, objective_cotangent = combined._state_objective_value_and_cotangent_from_packed(packed, state.layout)
+    expected_value, expected_objective_cotangent = jax.value_and_grad(
+        lambda packed_arg: 0.5 * jnp.vdot(residuals_from_packed(packed_arg), residuals_from_packed(packed_arg))
+    )(packed)
+    assert float(value) == pytest.approx(float(expected_value))
+    np.testing.assert_allclose(
+        np.asarray(objective_cotangent),
+        np.asarray(expected_objective_cotangent),
+        rtol=1e-12,
+        atol=1e-12,
+    )
 
 
 def test_qh_and_qs_residual_cotangent_operator_factories(monkeypatch) -> None:

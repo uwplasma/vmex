@@ -608,6 +608,7 @@ def test_build_quasi_isodynamic_stage_wires_shared_field_residuals(monkeypatch) 
     residuals = captured["residuals_from_state"]("state")
     np.testing.assert_allclose(residuals, [3.0, 3.0, 4.0])
     assert captured["residuals_from_state"]._n_non_qs == 1
+    assert captured["residuals_from_state"]._objective_family == "qi"
     assert captured["residuals_from_state"]._qs_total_from_state("state") == 11.0
     assert captured["field_kwargs"]["state"] == "state"
     assert captured["field_kwargs"]["surfaces"] == [0.25, 0.75]

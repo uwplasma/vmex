@@ -830,6 +830,11 @@ class QuasisymmetryRatioResidual:
             target=0.0,
             weight=residual_weight,
             total=lambda ctx, state: float(residual_weight) ** 2 * self.total(ctx, state),
+            metadata={
+                "objective_family": "qs",
+                "helicity_m": self.helicity_m,
+                "helicity_n": self.helicity_n,
+            },
         )
 
 
@@ -1921,6 +1926,11 @@ def quasisymmetry_objective(
         target=0.0,
         weight=weight,
         total=lambda ctx, state: float(weight) ** 2 * _qs(ctx, state)["total"],
+        metadata={
+            "objective_family": "qs",
+            "helicity_m": int(helicity_m),
+            "helicity_n": int(helicity_n),
+        },
     )
 
 
@@ -2683,6 +2693,88 @@ def residuals_from_objectives(objectives: Sequence[ObjectiveTerm], ctx: StageCon
         if field_totals
         else lambda _state: 0.0
     )
+    family = next(
+        (
+            term.metadata.get("objective_family")
+            for term in bound_objectives
+            if term.metadata.get("objective_family")
+        ),
+        None,
+    )
+    if family is not None:
+        residuals_from_state._objective_family = str(family)
+    helicity_m = next(
+        (term.metadata.get("helicity_m") for term in bound_objectives if "helicity_m" in term.metadata),
+        None,
+    )
+    helicity_n = next(
+        (term.metadata.get("helicity_n") for term in bound_objectives if "helicity_n" in term.metadata),
+        None,
+    )
+    if helicity_m is not None:
+        residuals_from_state._helicity_m = int(helicity_m)
+    if helicity_n is not None:
+        residuals_from_state._helicity_n = int(helicity_n)
+    return _attach_packed_state_autodiff_hooks(residuals_from_state)
+
+
+def _attach_packed_state_autodiff_hooks(residuals_from_state: Callable) -> Callable:
+    """Attach generic packed-state VJP hooks to an objective residual callback.
+
+    The older direct QS residual factories expose custom hooks used by
+    ``FixedBoundaryExactOptimizer`` to avoid rebuilding a generic packed-state
+    residual VJP for every accepted point.  SIMSOPT-style tuple workflows are
+    more flexible, so use a generic hook here: it differentiates the already
+    assembled residual vector with respect to the packed VMEC state.  The
+    optimizer wraps these hooks in cached ``jax.jit`` helpers, so this keeps the
+    flexible tuple API while enabling the matrix-free and scalar-adjoint paths
+    to stay on the same fast accepted-point replay architecture.
+    """
+
+    def _residuals_from_packed(packed_state, layout):
+        from .state import unpack_state
+
+        state = unpack_state(packed_state, layout)
+        return jnp.asarray(residuals_from_state(state), dtype=jnp.float64).reshape(-1)
+
+    def state_cotangent_operator_from_packed(packed_state, layout):
+        from ._compat import jax, jnp as _jnp
+
+        packed_state = _jnp.asarray(packed_state, dtype=_jnp.float64)
+
+        def _packed_residuals(packed):
+            return _residuals_from_packed(packed, layout)
+
+        _, residual_vjp = jax.vjp(_packed_residuals, packed_state)
+
+        def _apply(residual_cotangent):
+            cotangent = _jnp.asarray(residual_cotangent, dtype=_jnp.float64).reshape(-1)
+            state_cotangent = residual_vjp(cotangent)[0]
+            return _jnp.nan_to_num(state_cotangent, nan=0.0, posinf=0.0, neginf=0.0)
+
+        return _apply
+
+    def state_cotangent_from_packed(packed_state, layout, residual_cotangent):
+        return state_cotangent_operator_from_packed(packed_state, layout)(residual_cotangent)
+
+    def state_objective_value_and_cotangent_from_packed(packed_state, layout):
+        from ._compat import jax, jnp as _jnp
+
+        packed_state = _jnp.asarray(packed_state, dtype=_jnp.float64)
+
+        def _objective(packed):
+            residuals = _residuals_from_packed(packed, layout)
+            return 0.5 * _jnp.vdot(residuals, residuals)
+
+        value, cotangent = jax.value_and_grad(_objective)(packed_state)
+        cotangent = _jnp.nan_to_num(cotangent, nan=0.0, posinf=0.0, neginf=0.0)
+        return value, cotangent
+
+    residuals_from_state._state_cotangent_from_packed = state_cotangent_from_packed
+    residuals_from_state._state_cotangent_operator_from_packed = state_cotangent_operator_from_packed
+    residuals_from_state._state_objective_value_and_cotangent_from_packed = (
+        state_objective_value_and_cotangent_from_packed
+    )
     return residuals_from_state
 
 
@@ -2720,6 +2812,7 @@ def run_fixed_boundary_objective_optimization(
     scipy_lsmr_maxiter: int | None = None,
     lbfgs_step_bound: float | None = None,
     scalar_step_bound: float | None = None,
+    scalar_cost_only_trials: bool | None = None,
     save_stage_inputs: bool = True,
     save_stage_wouts: bool = False,
     save_rerun_wouts: bool = False,
@@ -2809,6 +2902,7 @@ def run_fixed_boundary_objective_optimization(
             scipy_lsmr_maxiter=scipy_lsmr_maxiter,
             lbfgs_step_bound=lbfgs_step_bound,
             scalar_step_bound=scalar_step_bound,
+            scalar_cost_only_trials=scalar_cost_only_trials,
         )
         if iota_abs_min is not None:
             result["_history_dump"]["iota_abs_min"] = float(iota_abs_min)
@@ -3025,6 +3119,8 @@ def build_quasi_isodynamic_objective_stage(
         return float(sum(float(term.residual_and_total(ctx, state, field)[1]) for term in qi_objectives))
 
     residuals_from_state._qs_total_from_state = _qs_total_from_state
+    residuals_from_state._objective_family = "qi"
+    _attach_packed_state_autodiff_hooks(residuals_from_state)
 
     optimizer = FixedBoundaryExactOptimizer(
         static,
@@ -3106,6 +3202,7 @@ def run_quasi_isodynamic_objective_optimization(
     scipy_lsmr_maxiter: int | None = None,
     lbfgs_step_bound: float | None = None,
     scalar_step_bound: float | None = None,
+    scalar_cost_only_trials: bool | None = None,
     save_stage_inputs: bool = True,
     save_stage_wouts: bool = False,
     save_final_outputs: bool = True,
@@ -3218,6 +3315,7 @@ def run_quasi_isodynamic_objective_optimization(
             scipy_lsmr_maxiter=scipy_lsmr_maxiter,
             lbfgs_step_bound=lbfgs_step_bound,
             scalar_step_bound=scalar_step_bound,
+            scalar_cost_only_trials=scalar_cost_only_trials,
         )
         if iota_abs_min is not None:
             result["_history_dump"]["iota_abs_min"] = float(iota_abs_min)
@@ -3307,6 +3405,7 @@ def least_squares_solve(
     scipy_lsmr_maxiter: int | None = None,
     lbfgs_step_bound: float | None = None,
     scalar_step_bound: float | None = None,
+    scalar_cost_only_trials: bool | None = None,
     save_stage_inputs: bool = True,
     save_stage_wouts: bool = False,
     save_rerun_wouts: bool = False,
@@ -3392,6 +3491,7 @@ def least_squares_solve(
             scipy_lsmr_maxiter=scipy_lsmr_maxiter,
             lbfgs_step_bound=lbfgs_step_bound,
             scalar_step_bound=scalar_step_bound,
+            scalar_cost_only_trials=scalar_cost_only_trials,
             save_stage_inputs=save_stage_inputs,
             save_stage_wouts=save_stage_wouts,
             save_final_outputs=save_final_outputs,
@@ -3430,6 +3530,7 @@ def least_squares_solve(
         scipy_lsmr_maxiter=scipy_lsmr_maxiter,
         lbfgs_step_bound=lbfgs_step_bound,
         scalar_step_bound=scalar_step_bound,
+        scalar_cost_only_trials=scalar_cost_only_trials,
         save_stage_inputs=save_stage_inputs,
         save_stage_wouts=save_stage_wouts,
         save_rerun_wouts=save_rerun_wouts,

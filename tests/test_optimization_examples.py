@@ -1094,6 +1094,9 @@ def test_quasisymmetry_workflow_routing_jvp_and_vjp_match_finite_difference(monk
     assert problem.objective_terms[0].name == "qs"
     assert problem.objective_terms[0].total is not None
     assert combined._n_non_qs == 0
+    assert combined._objective_family == "qs"
+    assert combined._helicity_m == 1
+    assert combined._helicity_n == -4
 
     def routed_residuals(x):
         return combined(jnp.asarray(x, dtype=jnp.float64))
