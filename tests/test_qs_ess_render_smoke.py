@@ -349,6 +349,7 @@ def test_qs_ess_sweep_gpu_production_budgets_are_not_diagnostic_caps():
     )
 
     assert cfg.max_nfev == sweep.PROBLEM_CONFIGS["qh"].max_nfev
+    assert cfg.method == sweep.PROBLEM_CONFIGS["qh"].method
     assert cfg.inner_max_iter == min(sweep.PROBLEM_CONFIGS["qh"].inner_max_iter, sweep.GPU_PRODUCTION_INNER_MAX_ITER)
     assert cfg.inner_ftol == sweep.GPU_PRODUCTION_INNER_FTOL
     assert cfg.trial_max_iter == min(sweep.PROBLEM_CONFIGS["qh"].trial_max_iter, sweep.GPU_PRODUCTION_TRIAL_MAX_ITER)
@@ -365,6 +366,7 @@ def test_qs_ess_sweep_gpu_production_budgets_are_not_diagnostic_caps():
 
     assert cont_cfg.max_nfev == sweep.PROBLEM_CONFIGS["qa"].max_nfev
     assert cont_cfg.continuation_nfev == sweep.PROBLEM_CONFIGS["qa"].continuation_nfev
+    assert cont_cfg.method == sweep.PRODUCTION_AUTO_SCALAR_METHOD
     assert cont_cfg.inner_max_iter == min(
         sweep.PROBLEM_CONFIGS["qa"].inner_max_iter,
         sweep.GPU_PRODUCTION_INNER_MAX_ITER,
@@ -392,6 +394,7 @@ def test_qs_ess_sweep_gpu_production_budgets_are_not_diagnostic_caps():
     )
 
     assert direct_qh_ess_cfg.max_nfev == sweep.PROBLEM_CONFIGS["qh"].max_nfev
+    assert direct_qh_ess_cfg.method == sweep.PRODUCTION_AUTO_SCALAR_METHOD
 
     diag_cfg = sweep._effective_problem_config(
         sweep.PROBLEM_CONFIGS["qh"],
@@ -404,8 +407,75 @@ def test_qs_ess_sweep_gpu_production_budgets_are_not_diagnostic_caps():
     )
 
     assert diag_cfg.max_nfev == 4
+    assert diag_cfg.method == sweep.PROBLEM_CONFIGS["qh"].method
     assert diag_cfg.inner_max_iter == 40
     assert diag_cfg.trial_max_iter == 40
+
+
+def test_qs_ess_sweep_promotes_auto_scalar_for_production_high_mode_matrix():
+    sweep = _load_sweep_module()
+
+    for backend in ("cpu", "cpu_prod", "gpu", "gpu_prod"):
+        for problem in ("qa", "qh", "qp", "qi"):
+            cfg = sweep._effective_problem_config(
+                sweep.PROBLEM_CONFIGS[problem],
+                backend=backend,
+                policy="continuation",
+                problem=problem,
+                max_mode=sweep.PRODUCTION_AUTO_SCALAR_MIN_MODE,
+                use_ess=True,
+            )
+            assert cfg.method == sweep.PRODUCTION_AUTO_SCALAR_METHOD
+
+    low_mode_cfg = sweep._effective_problem_config(
+        sweep.PROBLEM_CONFIGS["qi"],
+        backend="cpu",
+        policy="direct",
+        problem="qi",
+        max_mode=sweep.PRODUCTION_AUTO_SCALAR_MIN_MODE - 1,
+        use_ess=True,
+    )
+    assert low_mode_cfg.method == sweep.PROBLEM_CONFIGS["qi"].method
+
+    diagnostic_cfg = sweep._effective_problem_config(
+        sweep.PROBLEM_CONFIGS["qi"],
+        backend="cpu",
+        policy="direct",
+        problem="qi",
+        max_mode=5,
+        use_ess=True,
+        diagnostic_budgets=True,
+    )
+    assert diagnostic_cfg.method == sweep.PROBLEM_CONFIGS["qi"].method
+
+
+def test_qs_ess_sweep_high_mode_stage_tags_residual_family_for_auto_scalar():
+    sweep = _load_sweep_module()
+    problem_cfg = sweep._effective_problem_config(
+        sweep.PROBLEM_CONFIGS["qa"],
+        backend="cpu",
+        policy="direct",
+        problem="qa",
+        max_mode=3,
+        use_ess=True,
+    )
+    cfg, indata = sweep._load_problem(problem_cfg, max_mode=3, stellarator_asymmetric=False)
+
+    specs, opt, _iota_fn, _boundary_input = sweep._build_stage(
+        problem_cfg,
+        cfg,
+        indata,
+        3,
+        solver_device="cpu",
+    )
+
+    assert max(max(abs(spec.m), abs(spec.n)) for spec in specs) == 3
+    assert getattr(opt, "_objective_family") == "qs"
+    assert getattr(opt, "_helicity_m") == sweep.PROBLEM_CONFIGS["qa"].helicity_m
+    assert getattr(opt, "_helicity_n") == sweep.PROBLEM_CONFIGS["qa"].helicity_n
+    method, _lsmr_maxiter, reason = opt._resolve_optimizer_method(problem_cfg.method, None)
+    assert method == "scalar_trust"
+    assert reason == "auto_scalar:high-mode-scalar-trust"
 
 
 def test_qs_ess_sweep_cli_overrides_take_precedence_over_default_budgets():

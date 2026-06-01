@@ -832,6 +832,57 @@ def test_residual_linear_operator_precomputes_initial_tangents_for_stellsym_cpu(
     assert "linear_operator_initial_transpose" not in opt._profile
 
 
+def test_scalar_gradient_precomputes_initial_tangents_for_gpu_scalar_path(monkeypatch) -> None:
+    import jax.numpy as jnp
+    import vmec_jax.discrete_adjoint as adjoint_module
+
+    opt = _bare_optimizer_for_state_ops()
+    opt._profile_async_phase = FixedBoundaryExactOptimizer._profile_async_phase.__get__(
+        opt,
+        FixedBoundaryExactOptimizer,
+    )
+    opt._initial_tangent_cache_key = lambda _params: ("affine", "branch")
+    opt._scalar_gradient_initial_tangents_enabled = lambda n_params: int(n_params) == 2
+
+    state = _state_from_coeffs(r=1.0, z=2.0)
+    packed_size = int(pack_state(state).size)
+    final_cotangent = jnp.arange(packed_size, dtype=jnp.float64)
+    initial_tangents = jnp.vstack(
+        [
+            jnp.ones(packed_size, dtype=jnp.float64),
+            jnp.arange(1, packed_size + 1, dtype=jnp.float64),
+        ]
+    )
+    expected_grad = np.asarray(jnp.tensordot(initial_tangents, final_cotangent, axes=([1], [0])), dtype=float)
+
+    def residuals_fn(_state):
+        return jnp.asarray([1.0], dtype=jnp.float64)
+
+    residuals_fn._state_objective_value_and_cotangent_from_packed = (
+        lambda _packed, _layout: (jnp.asarray(3.0, dtype=jnp.float64), final_cotangent)
+    )
+    opt._residuals_fn = residuals_fn
+    opt._solve_exact_with_tape = lambda _params, *, return_payload: (
+        state,
+        {"tape": "tape", "axis_override": {}},
+    )
+
+    monkeypatch.setattr(
+        adjoint_module,
+        "checkpoint_tape_state_vjp",
+        lambda **kwargs: kwargs["final_cotangent"],
+    )
+    opt._initial_tangent_columns = lambda _params, _axis_override, *, profile_prefix: initial_tangents
+
+    cost, grad = opt.objective_and_gradient_fun(np.asarray([0.1, 0.2]))
+
+    assert cost == pytest.approx(3.0)
+    np.testing.assert_allclose(grad, expected_grad)
+    assert opt._profile["gradient_initial_tangents_precompute"]["count"] == 1
+    assert opt._profile["gradient_initial_projection"]["count"] == 1
+    assert "gradient_initial_vjp" not in opt._profile
+
+
 def test_workflow_residuals_attach_packed_state_cotangent_hooks() -> None:
     pytest.importorskip("jax")
     import jax
