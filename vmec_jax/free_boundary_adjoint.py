@@ -2325,6 +2325,20 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     )
     scalar_controls = direct_coil_accepted_trace_scalar_controls_jax(trace_seq)
     array_controls = direct_coil_accepted_trace_array_controls_jax(trace_seq)
+    # These policy flags still feed Python bool/int dispatch in the strict
+    # update/preconditioner implementation. Keep them as branch-local static
+    # trace data until the full update path is JAX-visible.
+    step_scalar_controls = {
+        key: value
+        for key, value in scalar_controls.items()
+        if key
+        not in (
+            "limit_update_rms",
+            "divide_by_scalxc_for_update",
+            "preconditioner_use_precomputed_tridi",
+            "preconditioner_use_lax_tridi",
+        )
+    }
     preconditioner_controls = None
     preconditioner_controls_stacked = True
     try:
@@ -2336,7 +2350,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
         # trace payload for this rung while still scanning scalar/velocity
         # controls.
         preconditioner_controls_stacked = False
-    controls = {**controls, "step_scalars": scalar_controls, "step_arrays": array_controls}
+    controls = {**controls, "step_scalars": step_scalar_controls, "step_arrays": array_controls}
     if preconditioner_controls is not None:
         controls = {**controls, "step_preconditioner": preconditioner_controls}
 
@@ -2385,7 +2399,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
         return step["step"]["state_post"], {
             "force": _tree_weighted_half_norm(step["force"], force_weight),
             "bsqvac": bsqvac_objective,
-            "state_reset": jnp.asarray(bool(reset_to_trace_pre), dtype=bool),
+            "state_reset": reset_to_trace_pre,
         }
 
     def step_fn(state, coil_params, control):
