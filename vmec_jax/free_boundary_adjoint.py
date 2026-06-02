@@ -2152,6 +2152,24 @@ _ACCEPTED_TRACE_BOOL_CONTROL_KEYS = (
     "preconditioner_use_lax_tridi",
 )
 
+_ACCEPTED_TRACE_REQUIRED_ARRAY_CONTROL_KEYS = (
+    "vRcc_before",
+    "vRss_before",
+    "vZsc_before",
+    "vZcs_before",
+    "vLsc_before",
+    "vLcs_before",
+)
+
+_ACCEPTED_TRACE_OPTIONAL_ARRAY_CONTROL_KEYS = (
+    "vRsc_before",
+    "vRcs_before",
+    "vZcc_before",
+    "vZss_before",
+    "vLcc_before",
+    "vLss_before",
+)
+
 
 def _stack_trace_control_field(trace_seq: tuple[dict[str, Any], ...], key: str, *, dtype: Any | None = None) -> Any:
     if not trace_seq:
@@ -2186,6 +2204,32 @@ def direct_coil_accepted_trace_scalar_controls_jax(traces: Any) -> dict[str, Any
         payload[key] = _stack_trace_control_field(trace_seq, key)
     for key in _ACCEPTED_TRACE_BOOL_CONTROL_KEYS:
         payload[key] = _stack_trace_control_field(trace_seq, key, dtype=bool)
+    return payload
+
+
+def direct_coil_accepted_trace_array_controls_jax(traces: Any) -> dict[str, Any]:
+    """Return stacked array-valued update controls for accepted trace replay.
+
+    The accepted VMEC state update uses velocity-history arrays captured before
+    each accepted step.  These arrays are fixed host-control data, not outputs
+    of the direct-coil replay.  Stacking them here moves another payload class
+    into the JAX-visible scan while preserving the legacy trace fallback for
+    optional asymmetric channels.
+    """
+
+    trace_seq = tuple(traces)
+    if not trace_seq:
+        raise ValueError("at least one accepted trace is required")
+    payload: dict[str, Any] = {}
+    for key in _ACCEPTED_TRACE_REQUIRED_ARRAY_CONTROL_KEYS:
+        payload[key] = _stack_trace_control_field(trace_seq, key)
+    for key in _ACCEPTED_TRACE_OPTIONAL_ARRAY_CONTROL_KEYS:
+        values = [trace.get(key) for trace in trace_seq]
+        if all(value is None for value in values):
+            continue
+        if any(value is None for value in values):
+            raise ValueError(f"accepted trace optional array field {key!r} must be present for every step or none")
+        payload[key] = _stack_trace_control_field(trace_seq, key)
     return payload
 
 
@@ -2238,7 +2282,8 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
         done_mask=done_mask,
     )
     scalar_controls = direct_coil_accepted_trace_scalar_controls_jax(trace_seq)
-    controls = {**controls, "step_scalars": scalar_controls}
+    array_controls = direct_coil_accepted_trace_array_controls_jax(trace_seq)
+    controls = {**controls, "step_scalars": scalar_controls, "step_arrays": array_controls}
 
     def _branch_for_trace(trace: dict[str, Any], state: Any, coil_params: Any, control: dict[str, Any]):
         reset_to_trace_pre = jnp.asarray(control["reset_to_trace_pre"], dtype=bool)
@@ -2277,6 +2322,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
             static,
             trace,
             scalar_controls=control["step_scalars"],
+            array_controls=control["step_arrays"],
             freeb_bsqvac_half=freeb_bsqvac_half,
             enforce_edge=bool(enforce_edge),
         )
@@ -2342,6 +2388,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
         "history": run["history"],
         "controls": controls,
         "scalar_controls": scalar_controls,
+        "array_controls": array_controls,
         "state_reset_flags": tuple(bool(flag) for flag in np.asarray(controls["reset_to_trace_pre"], dtype=bool)),
     }
 
