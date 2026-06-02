@@ -267,6 +267,8 @@ def test_exact_optimizer_profile_parser_accepts_cache_budget_args() -> None:
             "--jvp-only-exact-tape",
             "--jvp-only-basepoint-carries",
             "--initial-metrics",
+            "--exact-jit-forces",
+            "off",
         ]
     )
 
@@ -288,6 +290,7 @@ def test_exact_optimizer_profile_parser_accepts_cache_budget_args() -> None:
     assert args.jvp_only_exact_tape is True
     assert args.jvp_only_basepoint_carries is True
     assert args.initial_metrics is True
+    assert args.exact_jit_forces == "off"
 
 
 def test_exact_optimizer_profile_skips_initial_metrics_by_default() -> None:
