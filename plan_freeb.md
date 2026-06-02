@@ -225,6 +225,37 @@ Need from user:
 
 Nothing now.
 
+### 2026-06-02 Broad local fast-suite validation
+
+Steps taken:
+
+1. After the scalar, velocity-history, preconditioner, and stacked-controller
+   AD-vs-FD replay commits were pushed, ran the default local fast suite with
+   x64 enabled and four workers.
+2. This validates that the accepted-replay refactor did not regress the wider
+   non-full, non-VMEC2000, non-SIMSOPT test matrix.
+
+Results obtained:
+
+1. `JAX_ENABLE_X64=1 python -m pytest -q -n 4 -m "not full and not vmec2000
+   and not simsopt" -rx` passed:
+   `2607 passed, 23 skipped, 2 xfailed, 80 warnings in 360.15 s`.
+2. The two expected xfails remain:
+   nonaxis getfsq scalar parity against VMEC2000 and the phase-2 Boozer/QS
+   full exact-gradient marker.
+
+Best next steps:
+
+1. Wait for GitHub to attach/check the PR-head CI for the latest pushed commits.
+2. Continue phase-2 production full-loop design from the stacked controller
+   primitive, now that the broad fast suite is green locally.
+3. Re-run optional VMEC2000 finite-pressure/direct-coil parity gates after the
+   replay refactor has green PR CI.
+
+Need from user:
+
+Nothing now.
+
 ### 2026-06-01 ESSOS finite-pressure example readiness and phase-2 status
 
 Steps taken:
