@@ -244,8 +244,10 @@ read as a mixed result rather than a broad VMEC2000 speedup claim:
 
 **14. Scan trial residuals**
   Relaxed trial residual solves in optimization loops use a backend-aware
-  policy: CPU stays on the VMEC-control non-scan path, while GPU/CUDA/ROCm/TPU
-  uses scan to reduce accelerator launch overhead.  Set
+  policy: CPU and current GPU/CUDA/ROCm exact-optimization runs stay on the
+  VMEC-control non-scan path because high-mode trial-solve profiles showed the
+  scan path paying too much cold compile/dispatch overhead.  TPU keeps the scan
+  default.  Set
   ``VMEC_JAX_OPT_TRIAL_SCAN=1`` or ``0`` for targeted diagnostics.
 
 **15. Fused accelerator update step**
@@ -929,12 +931,11 @@ spent ``6.76 s`` in the CPU scan block and ``11.68 s`` in the GPU scan block;
 the GPU device bucket was almost entirely dispatch/compile-like
 (``10.24 s`` dispatch, ``0.001 s`` ready).  Disabling scan reduced the trial
 profiles to ``4.46 s`` on CPU and ``6.76 s`` on GPU.  Later QH ``max_mode=2``
-profiles refined that policy: local CPU non-scan was faster and more reliable
-than scan, while the patched ``office`` RTX A4000 GPU default used scan buckets
-and measured ``6.57 s`` total for two repeats (``6.35 s`` cold, ``0.22 s``
-warm) with the same finite residual norm.  Earlier patched non-scan GPU trial
-callbacks were slower.  Trial callbacks therefore default to non-scan on CPU
-and scan on GPU/CUDA/ROCm/TPU; use
+profiles briefly favored a patched scan GPU default, but the 2026-06-02
+``office`` QH ``max_mode=4`` optimizer trace reversed that policy: forced
+non-scan trial solves reduced the short run from ``89.23 s`` to ``77.73 s`` and
+the trial solve itself from ``15.95 s`` to ``4.56 s``.  Trial callbacks
+therefore default to non-scan on CPU/GPU/CUDA/ROCm and scan only on TPU; use
 ``VMEC_JAX_OPT_TRIAL_SCAN=1`` or ``0`` to force either path.
 
 For historical raw ``LASYM=true`` ``input.basic_non_stellsym_pressure`` non-scan solves
@@ -1148,15 +1149,14 @@ are still useful for parity/profiling experiments but can be much slower than
 tape on production-like cold GPU callbacks.  Set
 ``VMEC_JAX_OPT_EXACT_PATH=tape`` or ``VMEC_JAX_OPT_EXACT_PATH=scan`` to force
 one accepted-point path for parity or profiling.  Relaxed trial residuals are
-backend-aware: CPU defaults to the VMEC-control non-scan loop, while
-GPU/CUDA/ROCm/TPU defaults to scan.  The May 2026 bounded QH mode-2 profiles
-measured local CPU non-scan trial callbacks at ``3.64 s`` total for two repeats
-with sane residuals; forced CPU scan was slower and produced less reliable
-finite-step diagnostics.  On ``office`` RTX A4000, the current patched GPU
-default used scan buckets and measured ``6.57 s`` total for two repeats
-(``6.35 s`` cold, ``0.22 s`` warm), beating the earlier patched non-scan GPU
-trial profile.  Set ``VMEC_JAX_OPT_TRIAL_SCAN=1`` or ``0`` to force either path
-for diagnostics.
+backend-aware: CPU/GPU/CUDA/ROCm default to the VMEC-control non-scan loop, and
+TPU defaults to scan.  May 2026 bounded QH mode-2 profiles measured local CPU
+non-scan trial callbacks at ``3.64 s`` total for two repeats with sane
+residuals; forced CPU scan was slower and produced less reliable finite-step
+diagnostics.  A 2026-06-02 ``office`` RTX A4000 QH mode-4 optimizer trace then
+showed the non-scan GPU trial path reducing the trial solve from ``15.95 s`` to
+``4.56 s``.  Set ``VMEC_JAX_OPT_TRIAL_SCAN=1`` or ``0`` to force either path for
+diagnostics.
 ``solver_device=None``, ``"auto"``, and ``"default"`` inherit JAX's active
 backend; pass ``solver_device="cpu"`` or ``"gpu"`` only when you want an explicit
 override.
@@ -3452,22 +3452,20 @@ In more detail:
    - reduced launch overhead in the scan path.
 
    The next large gains on GPU are therefore expected to come from the same
-   direction on the parity/free-boundary side: keeping more of the
-   force/residual/control pipeline on-device for longer stretches, and reducing
-   per-iteration host orchestration.
+   direction on the parity/free-boundary side and the accepted-point replay
+   path: keeping more of the force/residual/control pipeline on-device for
+   longer stretches, and reducing per-iteration host orchestration.
 
 Fused tridiagonal solver (scan only)
 ------------------------------------
 
 The scan preconditioner can use XLA's fused tridiagonal solver with
 pretransposed coefficients (``dl/d/du``).  Current bounded profiles show this
-is the fastest measured CPU scan path, while GPU optimization-trial callbacks
-still prefer the older scan path.  The default therefore follows the backend:
-CPU uses fused scan, GPU keeps the older scan path while using precomputed
-Thomas coefficients.  This GPU scan default was measured on ``office`` to reduce
-short scan device time by about 20-30% on the tested QA high-resolution and
-reactor-scale cases without changing the residual trajectory.  Keep the
-explicit env overrides for parity/perf bisection:
+is the fastest measured CPU scan path.  GPU exact-optimization trial callbacks
+now default to the non-scan loop; when scan is forced for GPU diagnostics, the
+older scan preconditioner with precomputed Thomas coefficients remains the
+measured faster scan variant.  Keep the explicit env overrides for
+parity/perf bisection:
 
 - ``VMEC_JAX_SCAN_PRECOND_LAXTRIDI=0``: force the older Thomas scan path.
 - ``VMEC_JAX_SCAN_PRECOND_LAXTRIDI=1``: explicitly request the fused scan path.

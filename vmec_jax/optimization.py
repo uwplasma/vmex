@@ -1712,12 +1712,11 @@ class FixedBoundaryExactOptimizer:
     def _use_scan_for_trial_solves(self) -> bool:
         """Return whether trial residual solves should use the scan loop.
 
-        Exact-optimizer trial residuals are short, trace-compatible VMEC solves
-        called repeatedly by SciPy's trust-region line search.  They do not need
-        an adjoint tape.  May 2026 callback profiles showed CPU scan can be
-        slower and less well behaved for QH mode-2 trial residuals, while the
-        current ``office`` GPU path is faster on scan for the same residual
-        norm.  Environment overrides always win.
+        Exact-optimizer trial residuals are short VMEC solves called repeatedly
+        by SciPy's trust-region line search.  They do not need an adjoint tape.
+        CPU and current ``office`` GPU/CUDA profiles showed the non-scan loop is
+        materially faster for high-mode QS trial points because scan pays a
+        large cold compile/dispatch cost.  Environment overrides always win.
         """
         forced = os.getenv("VMEC_JAX_OPT_TRIAL_SCAN", "").strip().lower()
         if forced in ("1", "true", "yes", "on", "scan"):
@@ -1732,7 +1731,7 @@ class FixedBoundaryExactOptimizer:
                 backend = str(_jax.default_backend()).strip().lower() if _jax is not None else "cpu"
             except Exception:
                 backend = "cpu"
-        return backend in ("gpu", "cuda", "tpu", "rocm")
+        return backend in ("tpu",)
 
     def _solver_device_context(self):
         if self._solver_device_name is None:

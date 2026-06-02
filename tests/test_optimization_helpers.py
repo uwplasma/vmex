@@ -1915,7 +1915,7 @@ def test_fixed_boundary_optimizer_trial_scan_default_and_env_override(monkeypatc
     assert opt._use_scan_for_trial_solves() is False
 
     opt._solver_device_name = "gpu"
-    assert opt._use_scan_for_trial_solves() is True
+    assert opt._use_scan_for_trial_solves() is False
 
     monkeypatch.setenv("VMEC_JAX_OPT_TRIAL_SCAN", "0")
     assert opt._use_scan_for_trial_solves() is False

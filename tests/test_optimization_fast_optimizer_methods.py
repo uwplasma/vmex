@@ -149,7 +149,7 @@ def test_fixed_boundary_exact_optimizer_init_can_be_unit_constructed(monkeypatch
     assert opt._trial_residual_cache_max == 8
 
 
-def test_fixed_boundary_exact_optimizer_init_preserves_gpu_trial_scan_policy(monkeypatch):
+def test_fixed_boundary_exact_optimizer_init_uses_profiled_gpu_trial_loop_policy(monkeypatch):
     state0 = SimpleNamespace(layout=SimpleNamespace(size=8))
     static = SimpleNamespace(s=np.asarray([0.0, 0.5, 1.0]), cfg=SimpleNamespace(lasym=False))
     indata = InData(scalars={"NITER": 12, "FTOL": 1.0e-12, "DELT": 0.2}, indexed={})
@@ -179,7 +179,7 @@ def test_fixed_boundary_exact_optimizer_init_preserves_gpu_trial_scan_policy(mon
     )
 
     assert opt_gpu._solver_device_name == "gpu"
-    assert opt_gpu._trial_solver_kwargs["use_scan"] is True
+    assert opt_gpu._trial_solver_kwargs["use_scan"] is False
     assert opt_gpu._trial_solver_kwargs["resume_state_mode"] == "none"
     assert opt_gpu._exact_solver_kwargs["use_scan"] is False
     assert opt_gpu._exact_solver_kwargs["preconditioner_use_precomputed_tridi"] is True
