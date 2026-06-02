@@ -2877,6 +2877,7 @@ def strict_update_one_step_from_trace(
     static,
     trace: dict[str, Any],
     *,
+    scalar_controls: dict[str, Any] | None = None,
     freeb_bsqvac_half: Any = _TRACE_OVERRIDE_UNSET,
     freeb_pres_scale: Any = _TRACE_OVERRIDE_UNSET,
     enforce_edge: bool = True,
@@ -2886,10 +2887,17 @@ def strict_update_one_step_from_trace(
     This source helper is intentionally thin: it maps the diagnostic trace
     schema produced by ``adjoint_trace=True`` onto
     :func:`strict_update_one_step_from_state` and allows callers to replace the
-    free-boundary ``bsqvac`` channel with a differentiable replay.  It keeps
-    phase-2 direct-coil validation tests from duplicating trace plumbing while
-    preserving the explicit accepted-step contract.
+    free-boundary ``bsqvac`` channel with a differentiable replay.  Optional
+    ``scalar_controls`` lets JAX-visible controller scans pass step-sliced
+    update controls without changing the default trace-dictionary contract.
+    It keeps phase-2 direct-coil validation tests from duplicating trace
+    plumbing while preserving the explicit accepted-step contract.
     """
+
+    def _control(key: str) -> Any:
+        if scalar_controls is not None and key in scalar_controls:
+            return scalar_controls[key]
+        return trace[key]
 
     bsqvac = trace.get("freeb_bsqvac_half", None) if freeb_bsqvac_half is _TRACE_OVERRIDE_UNSET else freeb_bsqvac_half
     pres_scale = trace.get("freeb_pres_scale", None) if freeb_pres_scale is _TRACE_OVERRIDE_UNSET else freeb_pres_scale
@@ -2908,12 +2916,12 @@ def strict_update_one_step_from_trace(
         jmax=trace["precond_jmax"],
         lam_prec=trace["lam_prec"],
         w_mode_mn=trace["w_mode_mn"],
-        lambda_update_scale=trace["lambda_update_scale"],
-        dt_eff=trace["dt_eff"],
-        b1=trace["b1"],
-        fac=trace["fac"],
-        force_scale=trace["force_scale"],
-        flip_sign=trace["flip_sign"],
+        lambda_update_scale=_control("lambda_update_scale"),
+        dt_eff=_control("dt_eff"),
+        b1=_control("b1"),
+        fac=_control("fac"),
+        force_scale=_control("force_scale"),
+        flip_sign=_control("flip_sign"),
         vRcc_before=trace["vRcc_before"],
         vRss_before=trace["vRss_before"],
         vZsc_before=trace["vZsc_before"],
@@ -2926,11 +2934,11 @@ def strict_update_one_step_from_trace(
         vZss_before=trace.get("vZss_before"),
         vLcc_before=trace.get("vLcc_before"),
         vLss_before=trace.get("vLss_before"),
-        max_update_rms=trace["max_update_rms_pre"],
-        limit_update_rms=trace["limit_update_rms"],
-        divide_by_scalxc_for_update=trace["divide_by_scalxc_for_update"],
-        preconditioner_use_precomputed_tridi=trace["preconditioner_use_precomputed_tridi"],
-        preconditioner_use_lax_tridi=trace["preconditioner_use_lax_tridi"],
+        max_update_rms=_control("max_update_rms_pre"),
+        limit_update_rms=_control("limit_update_rms"),
+        divide_by_scalxc_for_update=_control("divide_by_scalxc_for_update"),
+        preconditioner_use_precomputed_tridi=_control("preconditioner_use_precomputed_tridi"),
+        preconditioner_use_lax_tridi=_control("preconditioner_use_lax_tridi"),
         freeb_bsqvac_half=bsqvac,
         freeb_pres_scale=pres_scale,
         constraint_rcon0=trace.get("constraint_rcon0"),

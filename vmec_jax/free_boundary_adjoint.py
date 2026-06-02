@@ -2238,6 +2238,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
         done_mask=done_mask,
     )
     scalar_controls = direct_coil_accepted_trace_scalar_controls_jax(trace_seq)
+    controls = {**controls, "step_scalars": scalar_controls}
 
     def _branch_for_trace(trace: dict[str, Any], state: Any, coil_params: Any, control: dict[str, Any]):
         reset_to_trace_pre = jnp.asarray(control["reset_to_trace_pre"], dtype=bool)
@@ -2275,6 +2276,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
             state_in,
             static,
             trace,
+            scalar_controls=control["step_scalars"],
             freeb_bsqvac_half=freeb_bsqvac_half,
             enforce_edge=bool(enforce_edge),
         )

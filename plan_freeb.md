@@ -34,36 +34,40 @@ Steps taken:
    flags.
 2. Added strict shape validation for stacked scalar controls so branch/control
    drift is caught before fixed-trace replay derivatives are promoted.
-3. Exposed the stacked scalar payload in
-   `direct_coil_accepted_trace_controller_replay_objective_jax` while keeping
-   the production update path behavior-preserving through
-   `strict_update_one_step_from_trace`.
-4. Extended the synthetic accepted-trace fingerprint test to validate scalar
+3. Added an optional `scalar_controls` override to
+   `strict_update_one_step_from_trace` and routed scan-sliced scalar controls
+   through `direct_coil_accepted_trace_controller_replay_objective_jax`.
+4. Kept the production update path behavior-preserving: default trace replay
+   still reads trace dictionaries exactly as before, while controller replay
+   now supplies the one-to-one scalar/update controls from JAX scan payloads.
+5. Extended the synthetic accepted-trace fingerprint test to validate scalar
    payload values, boolean controls, and shape-mismatch detection.
 
 Results obtained:
 
 1. `python -m ruff check vmec_jax/free_boundary_adjoint.py
+   vmec_jax/discrete_adjoint.py
    tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
    passed.
 2. `python -m py_compile vmec_jax/free_boundary_adjoint.py
+   vmec_jax/discrete_adjoint.py
    tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
    passed.
 3. `JAX_ENABLE_X64=1 python -m pytest -q
    tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_trace_fingerprint_detects_control_branch_changes
-   -rx` passed: `1 passed in 0.27 s`.
+   -rx` passed: `1 passed in 0.26 s`.
 4. `JAX_ENABLE_X64=1 python -m pytest -q
    tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state
-   -rx -s` passed: `1 passed in 120.13 s`.
+   -rx -s` passed after scalar-control wiring:
+   `1 passed in 133.60 s`.
 5. `JAX_ENABLE_X64=1 python -m pytest -q
    tests/test_free_boundary_vacuum_adjoint.py -rx` passed:
    `57 passed in 79.15 s`.
 
 Best next steps:
 
-1. Replace per-step trace dictionary reads inside the controller replay with
-   the stacked scalar-control payload where each field maps one-to-one into
-   `strict_update_one_step_from_state`.
+1. Stack the next trace payload class: array-valued force/preconditioner
+   fields that currently still come from branch-specific trace dictionaries.
 2. Add the next complete-loop AD-vs-central-FD gate that uses the stacked
    controller/scalar payload for one coil current and one Fourier coefficient.
 3. Keep the production `run_free_boundary` gradient claim limited to validated
