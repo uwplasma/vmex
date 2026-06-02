@@ -532,6 +532,72 @@ Need from user:
 
 Nothing now.
 
+### 2026-06-02 JAX-visible update limiter/scalxc controls
+
+Steps taken:
+
+1. Converted `strict_update_velocity_limit` from Python `bool(...)` branching
+   to JAX boolean masking.  The raw update RMS is always computed, diagnostics
+   are masked when neither limiting nor reporting is requested, and clipping is
+   selected with `jnp.where`.
+2. Converted `strict_update_velocity_state_advance` so
+   `divide_by_scalxc_for_update` is also selected with `jnp.where` rather than
+   a Python `if`.
+3. Re-enabled `limit_update_rms` and `divide_by_scalxc_for_update` in
+   accepted-controller `step_scalars`; only the tridiagonal preconditioner
+   policy flags remain branch-local static trace data.
+4. Added a traced/JIT regression check to
+   `test_strict_update_velocity_limit_clips_and_vjp_identity` so update
+   limiting can no longer regress to Python-control booleans.
+5. Updated the free-boundary coil optimization docs to state the current
+   controller seam precisely: update/scalxc controls are JAX-visible, while
+   preconditioner policy is still static.
+
+Results obtained:
+
+1. Static checks passed:
+   `python -m ruff check vmec_jax/discrete_adjoint.py
+   vmec_jax/free_boundary_adjoint.py tests/test_discrete_adjoint_qh.py
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py
+   tools/diagnostics/direct_coil_same_branch_adjoint_report.py`.
+2. Bytecode checks passed for the modified source and tests:
+   `python -m py_compile vmec_jax/discrete_adjoint.py
+   vmec_jax/free_boundary_adjoint.py tests/test_discrete_adjoint_qh.py
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`.
+3. The traced limiter unit gate passed:
+   `JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_discrete_adjoint_qh.py::test_strict_update_velocity_limit_clips_and_vjp_identity
+   -rx`: `1 passed in 1.12 s`.
+4. The two-step accepted-controller replay gate passed:
+   `JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state
+   -rx -s`: `1 passed in 147.11 s`.
+5. The same-branch fixed-trace custom-VJP promotion gate passed:
+   `JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_fixed_trace_custom_vjp_matches_complete_solve_fd_on_same_branch
+   -rx -s`: `2 passed in 70.04 s`.
+6. The standalone same-branch JSON diagnostic passed in about `29 s`:
+   `JAX_ENABLE_X64=1 python tools/diagnostics/direct_coil_same_branch_adjoint_report.py
+   --out /tmp/vmec_jax_freeb_same_branch_adjoint_report.json
+   --workdir /tmp/vmec_jax_freeb_same_branch_adjoint_report_work`.
+   The report had `same_branch=true`, complete-solve FD
+   `0.07212187859151342`, fixed-trace exact derivative
+   `0.07212187859042393`, and absolute error `1.09e-12`.
+
+Best next steps:
+
+1. Run the full docs warning-as-error check and `git diff --check`.
+2. Commit and push the JAX-visible update/scalxc controller controls.
+3. Trigger a fresh PR-head CI run for the new commit.
+4. Continue phase 2 by attacking the last branch-local controller seam:
+   preconditioner policy.  The realistic next implementation is either a
+   JAX-visible preconditioner dispatch or static branch splitting before
+   assembling a production full-loop custom VJP.
+
+Need from user:
+
+Nothing now.
+
 ### 2026-06-01 ESSOS finite-pressure example readiness and phase-2 status
 
 Steps taken:

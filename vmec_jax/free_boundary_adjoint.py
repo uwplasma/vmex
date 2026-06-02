@@ -2325,16 +2325,14 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     )
     scalar_controls = direct_coil_accepted_trace_scalar_controls_jax(trace_seq)
     array_controls = direct_coil_accepted_trace_array_controls_jax(trace_seq)
-    # These policy flags still feed Python bool/int dispatch in the strict
-    # update/preconditioner implementation. Keep them as branch-local static
-    # trace data until the full update path is JAX-visible.
+    # These preconditioner policy flags still feed Python bool/int dispatch in
+    # the radial preconditioner implementation. Keep them as branch-local
+    # static trace data until the full preconditioner path is JAX-visible.
     step_scalar_controls = {
         key: value
         for key, value in scalar_controls.items()
         if key
         not in (
-            "limit_update_rms",
-            "divide_by_scalxc_for_update",
             "preconditioner_use_precomputed_tridi",
             "preconditioner_use_lax_tridi",
         )

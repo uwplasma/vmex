@@ -256,10 +256,13 @@ The default command is bounded and records the branch fingerprints,
 complete-solve central finite-difference slope, and fixed-trace custom-VJP
 slope.  Passing ``--include-controller-vjp`` also evaluates the stacked
 accepted-controller custom VJP, which is useful for deeper review but slower in
-cold processes.  The controller replay intentionally keeps Python-policy
-switches such as update limiting and preconditioner choice as branch-local
-static trace data until the full VMEC update/preconditioner loop is refactored
-onto JAX-visible control flow.
+cold processes.  The controller replay keeps only the tridiagonal
+preconditioner policy as branch-local static trace data.  Update limiting and
+``divide_by_scalxc_for_update`` are JAX-visible scan controls, so accepted
+controller payloads can include those switches without traced-Python-boolean
+failures.  The remaining controller refactor is to make the radial
+preconditioner policy itself JAX-visible or split traces by static
+preconditioner branch.
 The remaining phase-2 blocker is differentiating through the nonlinear
 ``run_free_boundary`` iteration loop itself, rather than through the dense toy
 nonlinear primitive, fixed-boundary operator, complete finite-response proxy,

@@ -2391,37 +2391,37 @@ def strict_update_velocity_limit(
     """Apply the strict-update velocity RMS limiter for one solver step."""
     dt_eff = jnp.asarray(dt_eff, dtype=jnp.asarray(vRcc).dtype)
     max_update_rms = jnp.asarray(max_update_rms, dtype=jnp.asarray(vRcc).dtype)
-    limit_update_rms = bool(limit_update_rms)
-    need_update_rms = bool(need_update_rms)
+    limit_update_rms = jnp.asarray(limit_update_rms, dtype=bool)
+    need_update_rms = jnp.asarray(need_update_rms, dtype=bool)
     base = jnp.asarray(vRcc)
-    if limit_update_rms or need_update_rms:
-        zeros = jnp.zeros_like(base)
-        pieces = [
-            base,
-            jnp.asarray(vRss),
-            jnp.asarray(vRsc) if vRsc is not None else zeros,
-            jnp.asarray(vRcs) if vRcs is not None else zeros,
-            jnp.asarray(vZsc),
-            jnp.asarray(vZcs),
-            jnp.asarray(vZcc) if vZcc is not None else zeros,
-            jnp.asarray(vZss) if vZss is not None else zeros,
-            jnp.asarray(vLsc),
-            jnp.asarray(vLcs),
-            jnp.asarray(vLcc) if vLcc is not None else zeros,
-            jnp.asarray(vLss) if vLss is not None else zeros,
-        ]
-        sq = sum((dt_eff * p) ** 2 for p in pieces)
-        update_rms = jnp.sqrt(jnp.mean(sq))
-    else:
-        update_rms = jnp.asarray(0.0, dtype=base.dtype)
-    if limit_update_rms:
-        scale = jnp.where(
-            jnp.isfinite(update_rms) & (update_rms > max_update_rms),
-            max_update_rms / jnp.maximum(update_rms, jnp.asarray(1.0e-30, dtype=update_rms.dtype)),
-            jnp.asarray(1.0, dtype=update_rms.dtype),
-        )
-    else:
-        scale = jnp.asarray(1.0, dtype=update_rms.dtype)
+    zeros = jnp.zeros_like(base)
+    pieces = [
+        base,
+        jnp.asarray(vRss),
+        jnp.asarray(vRsc) if vRsc is not None else zeros,
+        jnp.asarray(vRcs) if vRcs is not None else zeros,
+        jnp.asarray(vZsc),
+        jnp.asarray(vZcs),
+        jnp.asarray(vZcc) if vZcc is not None else zeros,
+        jnp.asarray(vZss) if vZss is not None else zeros,
+        jnp.asarray(vLsc),
+        jnp.asarray(vLcs),
+        jnp.asarray(vLcc) if vLcc is not None else zeros,
+        jnp.asarray(vLss) if vLss is not None else zeros,
+    ]
+    sq = sum((dt_eff * p) ** 2 for p in pieces)
+    raw_update_rms = jnp.sqrt(jnp.mean(sq))
+    report_update_rms = jnp.where(
+        jnp.logical_or(limit_update_rms, need_update_rms),
+        raw_update_rms,
+        jnp.asarray(0.0, dtype=raw_update_rms.dtype),
+    )
+    clipped_scale = jnp.where(
+        jnp.isfinite(raw_update_rms) & (raw_update_rms > max_update_rms),
+        max_update_rms / jnp.maximum(raw_update_rms, jnp.asarray(1.0e-30, dtype=raw_update_rms.dtype)),
+        jnp.asarray(1.0, dtype=raw_update_rms.dtype),
+    )
+    scale = jnp.where(limit_update_rms, clipped_scale, jnp.asarray(1.0, dtype=raw_update_rms.dtype))
 
     def _scale(x):
         return None if x is None else scale * jnp.asarray(x)
@@ -2439,9 +2439,9 @@ def strict_update_velocity_limit(
         "vZss": _scale(vZss),
         "vLcc": _scale(vLcc),
         "vLss": _scale(vLss),
-        "update_rms_preclip": update_rms,
+        "update_rms_preclip": report_update_rms,
         "update_rms_scale": scale,
-        "update_rms_postclip": scale * update_rms,
+        "update_rms_postclip": scale * report_update_rms,
     }
     return out
 
@@ -3140,8 +3140,7 @@ def strict_update_velocity_state_advance(
     dt_eff = jnp.asarray(dt_eff, dtype=jnp.asarray(state.Rcos).dtype)
     scalxc = vmec_scalxc_from_s(s=jnp.asarray(static.s), mpol=int(static.cfg.mpol)).astype(jnp.asarray(state.Rcos).dtype)
     scalxc = scalxc[:, :, None]
-    if not bool(divide_by_scalxc_for_update):
-        scalxc = jnp.ones_like(scalxc)
+    scalxc = jnp.where(jnp.asarray(divide_by_scalxc_for_update, dtype=bool), scalxc, jnp.ones_like(scalxc))
     maps = static.signed_maps if getattr(static, "signed_maps", None) is not None else signed_maps_from_modes(static.modes)
     ncoeff = int(static.modes.K)
     idx00 = _mode00_index(static.modes)

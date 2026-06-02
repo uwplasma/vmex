@@ -2042,8 +2042,8 @@ def test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state(
         np.asarray([_trace_scalar_value(trace0["dt_eff"]), _trace_scalar_value(trace1["dt_eff"])]),
     )
     assert "flip_sign" in controller_replay["controls"]["step_scalars"]
-    assert "limit_update_rms" not in controller_replay["controls"]["step_scalars"]
-    assert "divide_by_scalxc_for_update" not in controller_replay["controls"]["step_scalars"]
+    assert "limit_update_rms" in controller_replay["controls"]["step_scalars"]
+    assert "divide_by_scalxc_for_update" in controller_replay["controls"]["step_scalars"]
     assert "preconditioner_use_lax_tridi" not in controller_replay["controls"]["step_scalars"]
     assert "preconditioner_use_precomputed_tridi" not in controller_replay["controls"]["step_scalars"]
     np.testing.assert_allclose(
