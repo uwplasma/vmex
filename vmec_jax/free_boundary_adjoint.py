@@ -2325,13 +2325,20 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     )
     scalar_controls = direct_coil_accepted_trace_scalar_controls_jax(trace_seq)
     array_controls = direct_coil_accepted_trace_array_controls_jax(trace_seq)
-    preconditioner_controls = direct_coil_accepted_trace_preconditioner_controls_jax(trace_seq)
-    controls = {
-        **controls,
-        "step_scalars": scalar_controls,
-        "step_arrays": array_controls,
-        "step_preconditioner": preconditioner_controls,
-    }
+    preconditioner_controls = None
+    preconditioner_controls_stacked = True
+    try:
+        preconditioner_controls = direct_coil_accepted_trace_preconditioner_controls_jax(trace_seq)
+    except (KeyError, ValueError):
+        # Some production accepted traces change the active radial solve size
+        # across steps. Those preconditioner matrices cannot be represented as a
+        # single scan-stacked pytree without padding, so keep the branch-local
+        # trace payload for this rung while still scanning scalar/velocity
+        # controls.
+        preconditioner_controls_stacked = False
+    controls = {**controls, "step_scalars": scalar_controls, "step_arrays": array_controls}
+    if preconditioner_controls is not None:
+        controls = {**controls, "step_preconditioner": preconditioner_controls}
 
     def _branch_for_trace(trace: dict[str, Any], state: Any, coil_params: Any, control: dict[str, Any]):
         reset_to_trace_pre = jnp.asarray(control["reset_to_trace_pre"], dtype=bool)
@@ -2371,7 +2378,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
             trace,
             scalar_controls=control["step_scalars"],
             array_controls=control["step_arrays"],
-            preconditioner_controls=control["step_preconditioner"],
+            preconditioner_controls=control["step_preconditioner"] if "step_preconditioner" in control else None,
             freeb_bsqvac_half=freeb_bsqvac_half,
             enforce_edge=bool(enforce_edge),
         )
@@ -2439,6 +2446,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
         "scalar_controls": scalar_controls,
         "array_controls": array_controls,
         "preconditioner_controls": preconditioner_controls,
+        "preconditioner_controls_stacked": bool(preconditioner_controls_stacked),
         "state_reset_flags": tuple(bool(flag) for flag in np.asarray(controls["reset_to_trace_pre"], dtype=bool)),
     }
 
@@ -2662,6 +2670,56 @@ def direct_coil_fixed_trace_custom_vjp_objective_jax(
 
     def objective(coil_params):
         replay = direct_coil_accepted_trace_replay_objective_jax(
+            coil_params,
+            initial_state,
+            **replay_kwargs,
+        )
+        return replay["objective"]
+
+    @jax.custom_vjp
+    def _wrapped(coil_params):
+        return objective(coil_params)
+
+    def _wrapped_fwd(coil_params):
+        return objective(coil_params), coil_params
+
+    def _wrapped_bwd(coil_params, cotangent):
+        grad_params = jax.grad(objective)(coil_params)
+        scaled_grad = tree_util.tree_map(
+            lambda value: jnp.asarray(cotangent) * jnp.asarray(value),
+            grad_params,
+        )
+        return (scaled_grad,)
+
+    _wrapped.defvjp(_wrapped_fwd, _wrapped_bwd)
+    return _wrapped(params)
+
+
+def direct_coil_accepted_trace_controller_custom_vjp_objective_jax(
+    params: Any,
+    initial_state: Any,
+    **replay_kwargs: Any,
+) -> Any:
+    """Return a scalar stacked-controller replay objective with custom VJP.
+
+    This is the preferred phase-2 production-adjacent seam after the accepted
+    trace controls have been lifted into a JAX-visible scan.  The forward path
+    is :func:`direct_coil_accepted_trace_controller_replay_objective_jax`; the
+    backward rule differentiates the same frozen accepted-controller replay
+    with respect to coil parameters.  As with the older fixed-trace wrapper,
+    adaptive host-control choices must be fingerprint-gated before complete
+    solve finite differences are promoted.
+    """
+
+    if jax is None:  # pragma: no cover - JAX is required for custom VJP.
+        return direct_coil_accepted_trace_controller_replay_objective_jax(
+            params,
+            initial_state,
+            **replay_kwargs,
+        )["objective"]
+
+    def objective(coil_params):
+        replay = direct_coil_accepted_trace_controller_replay_objective_jax(
             coil_params,
             initial_state,
             **replay_kwargs,

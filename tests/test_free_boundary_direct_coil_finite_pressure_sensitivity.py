@@ -979,6 +979,7 @@ def test_direct_coil_fixed_trace_custom_vjp_matches_complete_solve_fd_on_same_br
     from vmec_jax._compat import jax, jnp
     from vmec_jax.driver import run_free_boundary
     from vmec_jax.free_boundary_adjoint import (
+        direct_coil_accepted_trace_controller_custom_vjp_objective_jax,
         direct_coil_accepted_trace_fingerprint_delta,
         direct_coil_fixed_trace_custom_vjp_objective_jax,
     )
@@ -1106,6 +1107,33 @@ def test_direct_coil_fixed_trace_custom_vjp_matches_complete_solve_fd_on_same_br
     assert np.isfinite(float(np.asarray(exact)))
     assert np.isfinite(float(complete_fd))
     np.testing.assert_allclose(exact, complete_fd, rtol=2.0e-3, atol=1.0e-8)
+
+    def controller_custom_objective(params: CoilFieldParams):
+        return direct_coil_accepted_trace_controller_custom_vjp_objective_jax(
+            params,
+            base_traces[0]["state_pre"],
+            static=base_init.static,
+            traces=base_traces,
+            signgs=int(base_init.signgs),
+            state_weight=1.0,
+            bsqvac_weight=0.0,
+            force_weight=0.0,
+            enforce_edge=False,
+        )
+
+    controller_grad = jax.grad(controller_custom_objective)(base_params)
+    controller_exact = sum(
+        jnp.vdot(grad_leaf, direction_leaf)
+        for grad_leaf, direction_leaf in zip(
+            jax.tree_util.tree_leaves(controller_grad),
+            jax.tree_util.tree_leaves(direction),
+            strict=True,
+        )
+    )
+    base_controller_trace = float(np.asarray(controller_custom_objective(base_params)))
+    assert abs(base_controller_trace - base_complete) < 2.0e-3
+    np.testing.assert_allclose(controller_exact, complete_fd, rtol=2.0e-3, atol=1.0e-8)
+    np.testing.assert_allclose(controller_exact, exact, rtol=2.0e-3, atol=1.0e-8)
 
 
 def test_jax_nestor_operator_accepted_solve_ad_matches_central_fd_for_current_and_geometry(
@@ -1983,6 +2011,7 @@ def test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state(
         np.asarray(controller_replay["controls"]["step_preconditioner"]["lam_prec"][0]),
         np.asarray(trace0["lam_prec"]),
     )
+    assert controller_replay["preconditioner_controls_stacked"]
     assert np.asarray(controller_replay["preconditioner_controls"]["w_mode_mn"]).shape[0] == 2
     np.testing.assert_array_equal(
         np.asarray(controller_replay["history"]["rejected"]),

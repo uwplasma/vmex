@@ -256,6 +256,60 @@ Need from user:
 
 Nothing now.
 
+### 2026-06-02 Stacked-controller custom-VJP seam
+
+Steps taken:
+
+1. Added `direct_coil_accepted_trace_controller_custom_vjp_objective_jax`, a
+   scalar custom-VJP wrapper around the stacked accepted-controller replay.
+2. Extended the same-branch complete-solve finite-difference gate so both the
+   older fixed-trace custom VJP and the new stacked-controller custom VJP are
+   compared against the same complete-solve central finite difference of the
+   final accepted-state norm.
+3. Found and fixed a production-trace edge case: some accepted traces change
+   preconditioner matrix shapes between steps. The controller replay now stacks
+   preconditioner payloads when shapes are compatible and falls back to
+   branch-local trace preconditioner data when they are not.
+4. Updated `docs/free_boundary_coil_optimization.rst` to identify the
+   stacked-controller custom VJP as the preferred phase-2 seam and to document
+   the preconditioner-shape fallback.
+
+Results obtained:
+
+1. `python -m ruff check vmec_jax/free_boundary_adjoint.py
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+   passed.
+2. `python -m py_compile vmec_jax/free_boundary_adjoint.py
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+   passed.
+3. `JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_fixed_trace_custom_vjp_matches_complete_solve_fd_on_same_branch
+   -rx -s` passed: `2 passed in 75.23 s`.
+4. `JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state
+   -rx -s` passed: `1 passed in 150.18 s`.
+5. `python -m sphinx -W --keep-going -b html docs
+   /tmp/vmec_jax_freeb_docs_check_controller_custom_vjp` passed.
+6. `JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_vacuum_adjoint.py
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_trace_fingerprint_detects_control_branch_changes
+   -rx` passed: `58 passed in 71.93 s`.
+
+Best next steps:
+
+1. Continue from this seam toward a production full-loop custom VJP: the next
+   blocker is differentiating or explicitly gating the adaptive host policy
+   that selected trace count, reset points, and branch-local preconditioner
+   sizes.
+2. Add a small public API note or export decision for the new custom-VJP
+   wrapper if maintainers want this helper to be user-facing rather than
+   validation-only.
+3. Re-run the broad fast slice after the next production-loop change.
+
+Need from user:
+
+Nothing now.
+
 ### 2026-06-01 ESSOS finite-pressure example readiness and phase-2 status
 
 Steps taken:

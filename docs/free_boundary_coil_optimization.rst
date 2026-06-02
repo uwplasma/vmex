@@ -218,16 +218,25 @@ replay also preserves inactive/setup accepted steps and VMEC host-control reset
 discontinuities, such as the free-boundary turn-on reset, instead of
 incorrectly chaining every ``state_post`` into the next ``state_pre``.  The
 scalar ``direct_coil_fixed_trace_custom_vjp_objective_jax`` wrapper exposes
-this fixed accepted replay behind an explicit custom VJP, and
+this fixed accepted replay behind an explicit custom VJP.  The newer
+``direct_coil_accepted_trace_controller_custom_vjp_objective_jax`` wrapper uses
+the same frozen accepted steps but carries accepted/rejected masks, scalar
+update controls, velocity histories, and preconditioner arrays through the
+JAX-visible accepted-controller replay.  This is the preferred phase-2 seam for
+production-adjacent validation.  When production traces change the active
+radial preconditioner size across accepted steps, the controller replay keeps
+those preconditioner matrices branch-local instead of padding them into the
+scan payload; scalar controls and velocity histories remain scan-stacked.
 ``direct_coil_accepted_trace_fingerprint_delta`` records whether a
 finite-difference perturbation stayed on the same accepted-step/control branch,
 including the same traced reset pattern.
 On the tiny forced-active default gate, the branch-compatible complete solve
-also compares this fixed-trace custom-VJP directional derivative against a
-central finite difference of the final accepted-state norm for a mixed coil
-current/Fourier direction, for both stellarator-symmetric and ``LASYM`` traces.
-This is the current promoted same-branch complete-solve validation, not yet a
-claim that arbitrary controller branch changes are differentiable.
+also compares both the fixed-trace custom-VJP directional derivative and the
+stacked-controller custom-VJP directional derivative against a central finite
+difference of the final accepted-state norm for a mixed coil current/Fourier
+direction, for both stellarator-symmetric and ``LASYM`` traces.  This is the
+current promoted same-branch complete-solve validation, not yet a claim that
+arbitrary controller branch changes are differentiable.
 The remaining phase-2 blocker is differentiating through the nonlinear
 ``run_free_boundary`` iteration loop itself, rather than through the dense toy
 nonlinear primitive, fixed-boundary operator, complete finite-response proxy,
