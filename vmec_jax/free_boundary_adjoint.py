@@ -1983,20 +1983,7 @@ def direct_coil_accepted_trace_replay_objective_jax(
         trace_seq = trace_seq[: int(max_steps)]
     if not trace_seq:
         raise ValueError("at least one accepted trace is required")
-
-    def _trace_state_reset_between(prev_trace: dict[str, Any], trace: dict[str, Any]) -> bool:
-        prev_post = prev_trace.get("state_post")
-        next_pre = trace.get("state_pre")
-        if prev_post is None or next_pre is None:
-            return False
-        try:
-            prev_packed = np.asarray(pack_state(prev_post), dtype=float)
-            next_packed = np.asarray(pack_state(next_pre), dtype=float)
-        except Exception:
-            return False
-        if prev_packed.shape != next_packed.shape:
-            return True
-        return not np.allclose(prev_packed, next_packed, rtol=1.0e-13, atol=1.0e-13)
+    reset_flags = _accepted_trace_reset_flags(trace_seq)
 
     state = initial_state
     objective_components: dict[str, Any] = {
@@ -2006,16 +1993,12 @@ def direct_coil_accepted_trace_replay_objective_jax(
     }
     steps: list[dict[str, Any]] = []
     bsqvac_values: list[Any] = []
-    reset_flags: list[bool] = []
-    previous_trace: dict[str, Any] | None = None
-    for trace in trace_seq:
-        reset_to_trace_pre = previous_trace is not None and _trace_state_reset_between(previous_trace, trace)
+    for trace, reset_to_trace_pre in zip(trace_seq, reset_flags, strict=True):
         if reset_to_trace_pre:
             # VMEC free-boundary turn-on/restart control can reset the working
             # state between accepted trace entries. Preserve that fixed host
             # control transition instead of incorrectly chaining state_post.
             state = trace["state_pre"]
-        reset_flags.append(bool(reset_to_trace_pre))
         has_active_freeb_replay = trace.get("freeb_bsqvac_half") is not None and trace.get("freeb_nestor_trace") is not None
         if has_active_freeb_replay:
             geometry = free_boundary_boundary_geometry_jax(
@@ -2062,7 +2045,6 @@ def direct_coil_accepted_trace_replay_objective_jax(
                 replay["bsqvac"],
                 bsqvac_weight,
             )
-        previous_trace = trace
 
     objective_components["state"] = _weighted_half_norm(
         pack_state(state),
@@ -2076,6 +2058,80 @@ def direct_coil_accepted_trace_replay_objective_jax(
         "steps": steps,
         "bsqvac": bsqvac_values,
         "state_reset_flags": tuple(reset_flags),
+    }
+
+
+def _accepted_trace_state_reset_between(prev_trace: dict[str, Any], trace: dict[str, Any]) -> bool:
+    from .state import pack_state
+
+    prev_post = prev_trace.get("state_post")
+    next_pre = trace.get("state_pre")
+    if prev_post is None or next_pre is None:
+        return False
+    try:
+        prev_packed = np.asarray(pack_state(prev_post), dtype=float)
+        next_packed = np.asarray(pack_state(next_pre), dtype=float)
+    except Exception:
+        return False
+    if prev_packed.shape != next_packed.shape:
+        return True
+    return not np.allclose(prev_packed, next_packed, rtol=1.0e-13, atol=1.0e-13)
+
+
+def _accepted_trace_reset_flags(trace_seq: Any) -> tuple[bool, ...]:
+    traces_tuple = tuple(trace_seq)
+    if not traces_tuple:
+        return ()
+    return (False,) + tuple(
+        _accepted_trace_state_reset_between(prev_trace, trace)
+        for prev_trace, trace in zip(traces_tuple[:-1], traces_tuple[1:], strict=False)
+    )
+
+
+def direct_coil_accepted_trace_controller_controls_jax(
+    traces: Any,
+    *,
+    accept_mask: Any | None = None,
+    done_mask: Any | None = None,
+) -> dict[str, Any]:
+    """Return stacked JAX-visible controls for fixed accepted trace replay.
+
+    The production trace payloads are still fixed Python data at this rung, but
+    control decisions that are naturally stackable are exposed as arrays:
+    ``step_index``, ``accept``, ``done``, ``reset_to_trace_pre``, and
+    ``has_active_freeb_replay``.  This is the intermediate payload shape that
+    the later full stacked replay can extend with update fields accepted by
+    ``strict_update_one_step_from_state``.
+    """
+
+    trace_seq = tuple(traces)
+    if not trace_seq:
+        raise ValueError("at least one accepted trace is required")
+    step_count = len(trace_seq)
+    if accept_mask is None:
+        accept_arr = jnp.ones(step_count, dtype=bool)
+    else:
+        if np.shape(accept_mask) != (step_count,):
+            raise ValueError("accept_mask must have shape (n_steps,)")
+        accept_arr = jnp.asarray(accept_mask, dtype=bool)
+    if done_mask is None:
+        done_arr = jnp.arange(step_count, dtype=jnp.int32) == jnp.asarray(step_count - 1, dtype=jnp.int32)
+    else:
+        if np.shape(done_mask) != (step_count,):
+            raise ValueError("done_mask must have shape (n_steps,)")
+        done_arr = jnp.asarray(done_mask, dtype=bool)
+    return {
+        "step_index": jnp.arange(step_count, dtype=jnp.int32),
+        "accept": accept_arr,
+        "done": done_arr,
+        "reset_to_trace_pre": jnp.asarray(_accepted_trace_reset_flags(trace_seq), dtype=bool),
+        "has_active_freeb_replay": jnp.asarray(
+            [
+                trace.get("freeb_bsqvac_half") is not None and trace.get("freeb_nestor_trace") is not None
+                for trace in trace_seq
+            ],
+            dtype=bool,
+        ),
     }
 
 
@@ -2122,45 +2178,20 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     if jax is None:  # pragma: no cover - dependency fallback.
         raise RuntimeError("JAX is required for controller replay.")
 
-    def _trace_state_reset_between(prev_trace: dict[str, Any], trace: dict[str, Any]) -> bool:
-        prev_post = prev_trace.get("state_post")
-        next_pre = trace.get("state_pre")
-        if prev_post is None or next_pre is None:
-            return False
-        try:
-            prev_packed = np.asarray(pack_state(prev_post), dtype=float)
-            next_packed = np.asarray(pack_state(next_pre), dtype=float)
-        except Exception:
-            return False
-        if prev_packed.shape != next_packed.shape:
-            return True
-        return not np.allclose(prev_packed, next_packed, rtol=1.0e-13, atol=1.0e-13)
-
-    reset_flags = (False,) + tuple(
-        _trace_state_reset_between(prev_trace, trace)
-        for prev_trace, trace in zip(trace_seq[:-1], trace_seq[1:], strict=False)
+    controls = direct_coil_accepted_trace_controller_controls_jax(
+        trace_seq,
+        accept_mask=accept_mask,
+        done_mask=done_mask,
     )
-    step_count = len(trace_seq)
-    if accept_mask is None:
-        accept_arr = jnp.ones(step_count, dtype=bool)
-    else:
-        if np.shape(accept_mask) != (step_count,):
-            raise ValueError("accept_mask must have shape (n_steps,)")
-        accept_arr = jnp.asarray(accept_mask, dtype=bool)
-    if done_mask is None:
-        done_arr = jnp.arange(step_count, dtype=jnp.int32) == jnp.asarray(step_count - 1, dtype=jnp.int32)
-    else:
-        if np.shape(done_mask) != (step_count,):
-            raise ValueError("done_mask must have shape (n_steps,)")
-        done_arr = jnp.asarray(done_mask, dtype=bool)
-    controls = {
-        "step_index": jnp.arange(step_count, dtype=jnp.int32),
-        "accept": accept_arr,
-        "done": done_arr,
-    }
 
-    def _branch_for_trace(trace: dict[str, Any], reset_to_trace_pre: bool, state: Any, coil_params: Any):
-        state_in = trace["state_pre"] if bool(reset_to_trace_pre) else state
+    def _branch_for_trace(trace: dict[str, Any], state: Any, coil_params: Any, control: dict[str, Any]):
+        reset_to_trace_pre = jnp.asarray(control["reset_to_trace_pre"], dtype=bool)
+        state_in = jax.lax.cond(
+            reset_to_trace_pre,
+            lambda _: trace["state_pre"],
+            lambda _: state,
+            operand=None,
+        )
         has_active_freeb_replay = trace.get("freeb_bsqvac_half") is not None and trace.get("freeb_nestor_trace") is not None
         if has_active_freeb_replay:
             geometry = free_boundary_boundary_geometry_jax(
@@ -2203,18 +2234,18 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
         do_propose = jnp.asarray(control["accept"], dtype=bool)
         branches = tuple(
             (
-                lambda operand, trace=trace, reset=reset: _branch_for_trace(
+                lambda operand, trace=trace: _branch_for_trace(
                     trace,
-                    reset,
                     operand[0],
                     operand[1],
+                    operand[2],
                 )
             )
-            for trace, reset in zip(trace_seq, reset_flags, strict=True)
+            for trace in trace_seq
         )
 
         def _propose(_unused):
-            return jax.lax.switch(step_index, branches, (state, coil_params))
+            return jax.lax.switch(step_index, branches, (state, coil_params, control))
 
         def _skip(_unused):
             return state, {
@@ -2252,7 +2283,8 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
         "objective_components": objective_components,
         "state": run["state"],
         "history": run["history"],
-        "state_reset_flags": tuple(bool(flag) for flag in reset_flags),
+        "controls": controls,
+        "state_reset_flags": tuple(bool(flag) for flag in np.asarray(controls["reset_to_trace_pre"], dtype=bool)),
     }
 
 
