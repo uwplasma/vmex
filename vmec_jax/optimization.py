@@ -2574,8 +2574,9 @@ class FixedBoundaryExactOptimizer:
             self._profile_add("exact_tape_build_jvp_only", tape_build_wall_s)
         self._profile_exact_tape_solver_timing(tape, tape_build_wall_s)
         t_unpack = time.perf_counter()
-        state = unpack_state(_jnp.asarray(tape.final_packed_state, dtype=_jnp.float64), self._layout)
-        payload = {"tape": tape, "axis_override": axis_override}
+        packed_final = _jnp.asarray(tape.final_packed_state, dtype=_jnp.float64)
+        state = unpack_state(packed_final, self._layout)
+        payload = {"tape": tape, "axis_override": axis_override, "packed_final": packed_final}
         self._exact_cache.clear()
         if not jvp_only:
             self._exact_cache[cache_key] = (state, payload)
@@ -2585,6 +2586,22 @@ class FixedBoundaryExactOptimizer:
         if jvp_only:
             self._profile_add("exact_solve_with_tape_jvp_only_total", time.perf_counter() - t_total)
         return (state, payload) if return_payload else state
+
+    def _packed_final_from_exact_payload(self, state, payload):
+        """Return the accepted packed state already carried by an exact tape payload."""
+
+        from ._compat import jnp as _jnp
+        from .state import pack_state
+
+        packed = None
+        if isinstance(payload, dict):
+            packed = payload.get("packed_final")
+            if packed is None:
+                tape = payload.get("tape")
+                packed = getattr(tape, "final_packed_state", None)
+        if packed is None:
+            packed = pack_state(state)
+        return _jnp.asarray(packed, dtype=_jnp.float64)
 
     # ── public residual / Jacobian interface ──────────────────────────────────
 
@@ -3081,10 +3098,10 @@ class FixedBoundaryExactOptimizer:
 
         from ._compat import jax, jnp as _jnp
         from .discrete_adjoint import checkpoint_tape_state_jvp_columns
-        from .state import pack_state, unpack_state
+        from .state import unpack_state
 
         state, payload = self._solve_exact_with_tape_for_jvp(params)
-        packed_final = _jnp.asarray(pack_state(state), dtype=_jnp.float64)
+        packed_final = self._packed_final_from_exact_payload(state, payload)
 
         def _residuals_from_packed(packed):
             return self._residuals_fn(unpack_state(packed, self._layout))
@@ -3357,7 +3374,7 @@ class FixedBoundaryExactOptimizer:
         state, payload = self._solve_exact_with_tape(params, return_payload=True)
         tape = payload["tape"]
         axis_override = payload["axis_override"]
-        packed_final = _jnp.asarray(pack_state(state), dtype=_jnp.float64)
+        packed_final = self._packed_final_from_exact_payload(state, payload)
 
         def _residuals_from_packed(packed):
             return self._residuals_fn(unpack_state(packed, self._layout))
@@ -3528,7 +3545,7 @@ class FixedBoundaryExactOptimizer:
         axis_override = {
             key: _jnp.asarray(value, dtype=params.dtype) for key, value in payload["axis_override"].items()
         }
-        packed_final = _jnp.asarray(pack_state(state), dtype=_jnp.float64)
+        packed_final = self._packed_final_from_exact_payload(state, payload)
 
         def _residuals_from_packed(packed):
             return self._residuals_fn(unpack_state(packed, self._layout))
