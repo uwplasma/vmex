@@ -177,6 +177,33 @@ Need from user:
 
 Nothing now, unless you have a known ESSOS coil/input pair that already reaches VMEC2000 active vacuum and writes a WOUT.
 
+### 2026-06-02 Accepted/rejected JAX-visible controller rung
+
+Steps taken:
+
+1. Added `jax_visible_accepted_nonlinear_controller_jax` to `vmec_jax/free_boundary_adjoint.py`.
+2. Added `jax_visible_accepted_nonlinear_controller_directional_check_jax` for coil-parameter pytree AD-vs-central-FD validation.
+3. Added a direct-coil projected-mode controller test with one deliberately rejected large proposal, accepted subsequent proposals, a convergence stop mask, and both current and Fourier-coefficient directional checks.
+4. Spawned a phase-2 adjoint subagent; it independently identified accepted/rejected static-scan control as the smallest truthful next rung beyond the existing masked-controller and fixed-trace replay tests.
+
+Results obtained:
+
+1. `python -m ruff check vmec_jax/free_boundary_adjoint.py tests/test_free_boundary_vacuum_adjoint.py` passed.
+2. `python -m py_compile vmec_jax/free_boundary_adjoint.py tests/test_free_boundary_vacuum_adjoint.py` passed.
+3. `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py::test_accepted_controller_direct_coil_projected_mode_ad_matches_fd_and_rejects_bad_step -rx` passed in 5.54 s.
+4. Focused phase-2 suite including accepted/rejected controller, masked direct-coil controller, LASYM projected fixed point, accepted NESTOR AD-vs-FD, and fixed-trace custom VJP versus same-branch complete-solve FD passed: 6 passed in 106.36 s.
+5. `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py -rx` passed: 57 passed in 74.87 s.
+
+Best next steps:
+
+1. Convert one production accepted-trace replay path to use the new accepted/rejected controller structure with fixed trace controls, then compare against the existing fixed-trace custom VJP.
+2. Start the production full-loop custom VJP design around `run_free_boundary` only after accepted/rejected trace replay is represented in a JAX-visible scan.
+3. Continue VMEC2000 active-vacuum fixture discovery separately; this controller rung does not change the generated-mgrid VMEC2000 blocker.
+
+Need from user:
+
+Nothing now.
+
 ### 2026-06-01 Reset-aware full accepted-trace replay
 
 Steps taken:

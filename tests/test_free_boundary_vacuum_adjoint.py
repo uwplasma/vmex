@@ -24,6 +24,8 @@ from vmec_jax.free_boundary_adjoint import (
     dense_vmec_nestor_mode_solve_jax,
     dense_vacuum_residual,
     dense_vacuum_solve_jax,
+    jax_visible_accepted_nonlinear_controller_directional_check_jax,
+    jax_visible_accepted_nonlinear_controller_jax,
     jax_visible_masked_nonlinear_controller_directional_check_jax,
     jax_visible_masked_nonlinear_controller_jax,
     jax_visible_nonlinear_controller_directional_check_jax,
@@ -622,6 +624,215 @@ def test_masked_controller_direct_coil_projected_mode_ad_matches_fd_for_current_
         np.asarray([True, True, True, True, False]),
     )
     assert bool(current_check["run"]["done"]) is True
+    for check in (current_check, fourier_check):
+        assert np.isfinite(float(check["value"]))
+        assert abs(float(check["exact_directional"])) > 1.0e-12
+        np.testing.assert_allclose(check["exact_directional"], check["fd_directional"], rtol=7.0e-5, atol=1.0e-10)
+
+
+def test_accepted_controller_direct_coil_projected_mode_ad_matches_fd_and_rejects_bad_step():
+    """Validate accepted/rejected JAX-visible control flow for direct coils.
+
+    This is a production-controller bridge: a deliberately large proposal is
+    rejected by a JAX-visible accept mask, later accepted steps continue from
+    the previous state, and the coil current/Fourier directional derivatives
+    still match central finite differences.  The test does not claim a VJP for
+    production ``run_free_boundary``; it validates the static-scan structure
+    that production accepted/rejected control should move toward.
+    """
+
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jnp, tree_util
+
+    enable_x64(True)
+    radius = 1.28
+    dofs = jnp.zeros((1, 3, 3), dtype=float)
+    dofs = dofs.at[0, 0, 2].set(radius)
+    dofs = dofs.at[0, 1, 1].set(radius)
+    coil_params = CoilFieldParams(
+        base_curve_dofs=dofs,
+        base_currents=jnp.asarray([4.4e6], dtype=float),
+        n_segments=32,
+        regularization_epsilon=1.0e-9,
+    )
+    controls = {
+        "gain": jnp.asarray([0.10, 4.0, 0.09, 0.08, 0.75], dtype=float),
+        "phase": jnp.asarray([0.04, 0.21, 0.40, 0.63, 0.88], dtype=float),
+        "bias": jnp.asarray(
+            [
+                [0.003, -0.002, 0.002],
+                [8.0, -7.0, 6.0],
+                [-0.002, 0.003, 0.001],
+                [0.002, 0.003, -0.002],
+                [0.70, -0.60, 0.50],
+            ],
+            dtype=float,
+        ),
+        "accept": jnp.asarray([True, False, True, True, True]),
+        "stop": jnp.asarray([False, False, False, True, False]),
+    }
+    sin_basis = jnp.asarray(
+        [
+            [0.00, 0.20, -0.27],
+            [0.34, -0.12, 0.46],
+            [-0.22, 0.55, 0.15],
+            [0.61, 0.25, -0.34],
+        ],
+        dtype=float,
+    )
+    mode_matrix = jnp.asarray(
+        [
+            [3.25, 0.12, -0.06],
+            [0.10, 2.95, 0.17],
+            [-0.04, 0.20, 3.15],
+        ],
+        dtype=float,
+    )
+    mode_to_state = jnp.asarray(
+        [
+            [0.09, -0.035, 0.025],
+            [-0.025, 0.075, 0.045],
+            [0.035, 0.018, -0.065],
+        ],
+        dtype=float,
+    )
+    phi_offsets = jnp.asarray([[0.00, 0.16], [0.33, 0.51]], dtype=float)
+    imirr = jnp.asarray([1, 0, 3, 2])
+    initial_state = jnp.asarray([0.012, -0.011, 0.010], dtype=float)
+
+    def boundary_from_state(state, control):
+        shape = jnp.asarray([[0.21, -0.15], [0.30, -0.20]], dtype=float)
+        return {
+            "R": jnp.asarray([[0.75, 0.83], [0.89, 0.78]], dtype=float)
+            + 0.024 * state[0]
+            + 0.012 * state[2] * shape,
+            "Z": jnp.asarray([[0.10, -0.12], [0.16, -0.17]], dtype=float)
+            + 0.022 * state[1]
+            - 0.009 * state[2] * shape,
+            "phi": control["phase"] + phi_offsets,
+            "Ru": jnp.asarray([[0.027, -0.036], [0.019, 0.046]], dtype=float) + 0.005 * state[2],
+            "Zu": jnp.asarray([[0.202, 0.216], [0.190, 0.209]], dtype=float) - 0.004 * state[2],
+            "Rv": jnp.asarray([[0.036, 0.011], [-0.027, 0.044]], dtype=float),
+            "Zv": jnp.asarray([[0.017, -0.028], [0.052, -0.012]], dtype=float),
+        }
+
+    def step(state, params, control):
+        boundary = boundary_from_state(state, control)
+        br, bp, bz = sample_coil_field_cylindrical(
+            params,
+            boundary["R"],
+            boundary["Z"],
+            boundary["phi"],
+        )
+        vac = vacuum_boundary_fields_from_cylindrical_jax(
+            br=br,
+            bp=bp,
+            bz=bz,
+            R=boundary["R"],
+            Ru=boundary["Ru"],
+            Zu=boundary["Zu"],
+            Rv=boundary["Rv"],
+            Zv=boundary["Zv"],
+        )
+        rhs_mode = mode_rhs_from_gsource_jax(
+            vac["bnormal"],
+            sin_basis=sin_basis,
+            xmpot=jnp.asarray([0, 1, 1]),
+            n_raw=jnp.asarray([0, 0, 1]),
+            onp=1.0,
+            lasym=False,
+            imirr=imirr,
+            nuv3=4,
+            nuv_full=4,
+        )
+        response = dense_mode_vacuum_solve_jax(mode_matrix, rhs_mode, sin_basis)
+        mode_coeffs = jnp.asarray(response["mode_coeffs"])
+        drive = mode_to_state @ mode_coeffs + control["bias"]
+        proposed = 0.62 * state + control["gain"] * jnp.tanh(drive)
+        return proposed, {
+            "mode_norm": jnp.vdot(mode_coeffs, mode_coeffs),
+            "bnormal_norm": jnp.vdot(vac["bnormal"], vac["bnormal"]),
+            "proposal_norm": jnp.linalg.norm(proposed - state),
+        }
+
+    def accept_fn(_state, _proposed_state, _params, control, _aux):
+        return control["accept"]
+
+    def converged_fn(_accepted_state, _params, control, _aux):
+        return control["stop"]
+
+    def objective_from_run(controller_run):
+        history = controller_run["history"]
+        accepted = jnp.asarray(history["accepted"], dtype=float)
+        state = controller_run["state"]
+        return (
+            0.5 * jnp.vdot(jnp.asarray([1.0, 0.9, 1.2], dtype=float) * state, state)
+            + 2.0e-4 * jnp.sum(accepted * history["mode_norm"])
+            + 4.0e-8 * jnp.sum(accepted * history["bnormal_norm"])
+        )
+
+    zero_dofs = jnp.zeros_like(coil_params.base_curve_dofs)
+    zero_currents = jnp.zeros_like(coil_params.base_currents)
+    current_direction = coil_params.with_arrays(
+        base_curve_dofs=zero_dofs,
+        base_currents=0.018 * coil_params.base_currents,
+    )
+    fourier_direction = coil_params.with_arrays(
+        base_curve_dofs=zero_dofs.at[0, 0, 2].set(0.016),
+        base_currents=zero_currents,
+    )
+
+    current_check = jax_visible_accepted_nonlinear_controller_directional_check_jax(
+        step,
+        accept_fn,
+        converged_fn,
+        objective_from_run,
+        coil_params,
+        current_direction,
+        initial_state,
+        controls,
+        eps=1.0e-3,
+        checkpoint_steps=True,
+    )
+    fourier_check = jax_visible_accepted_nonlinear_controller_directional_check_jax(
+        step,
+        accept_fn,
+        converged_fn,
+        objective_from_run,
+        coil_params,
+        fourier_direction,
+        initial_state,
+        controls,
+        eps=1.0e-3,
+        checkpoint_steps=True,
+    )
+
+    history = current_check["run"]["history"]
+    np.testing.assert_array_equal(np.asarray(history["active"]), np.asarray([True, True, True, True, False]))
+    np.testing.assert_array_equal(np.asarray(history["accepted"]), np.asarray([True, False, True, True, False]))
+    np.testing.assert_array_equal(np.asarray(history["rejected"]), np.asarray([False, True, False, False, False]))
+    assert bool(current_check["run"]["done"]) is True
+
+    changed_rejected_controls = {
+        **controls,
+        "gain": controls["gain"].at[1].set(25.0),
+        "bias": controls["bias"].at[1].set(jnp.asarray([-30.0, 25.0, -20.0], dtype=float)),
+    }
+    changed_rejected_run = jax_visible_accepted_nonlinear_controller_jax(
+        step,
+        accept_fn,
+        converged_fn,
+        initial_state,
+        coil_params,
+        changed_rejected_controls,
+        checkpoint_steps=True,
+    )
+    tree_util.tree_map(
+        lambda actual, expected: np.testing.assert_allclose(np.asarray(actual), np.asarray(expected), rtol=0.0, atol=0.0),
+        changed_rejected_run["state"],
+        current_check["run"]["state"],
+    )
+
     for check in (current_check, fourier_check):
         assert np.isfinite(float(check["value"]))
         assert abs(float(check["exact_directional"])) > 1.0e-12

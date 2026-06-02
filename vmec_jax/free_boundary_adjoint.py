@@ -318,6 +318,82 @@ def jax_visible_masked_nonlinear_controller_jax(
     return {"state": final_state, "done": final_done, "history": history}
 
 
+def jax_visible_accepted_nonlinear_controller_jax(
+    step_fn: Any,
+    accept_fn: Any,
+    converged_fn: Any,
+    initial_state: Any,
+    params: Any,
+    controls: Any,
+    *,
+    checkpoint_steps: bool = False,
+) -> dict[str, Any]:
+    """Run a JAX-visible fixed-length controller with accept/reject masks.
+
+    This is the next validation target after
+    :func:`jax_visible_masked_nonlinear_controller_jax`.  It models the
+    production VMEC free-boundary control pattern in which every configured
+    step proposes a new state, but only accepted proposals update the loop
+    carry.  Rejected proposals remain visible in auxiliary diagnostics while
+    the carried state is held fixed.
+
+    ``accept_fn(state, proposed_state, params, control, aux)`` and
+    ``converged_fn(accepted_state, params, control, aux)`` must return scalar
+    boolean JAX values.  The scan length remains static, so reverse-mode AD is
+    supported; dynamic production policies must be represented as differentiable
+    step functions plus fixed per-step control arrays.
+
+    This helper still does not claim a custom VJP for production
+    ``run_free_boundary``.  It provides the tested structure that production
+    accepted/rejected trace replay or a future fully JAX-visible nonlinear
+    controller should reduce to.
+    """
+
+    if jax is None:  # pragma: no cover - JAX is required for scan controllers.
+        raise RuntimeError("JAX is required for JAX-visible nonlinear controllers.")
+
+    def _select_state(flag, old_state, new_state):
+        return tree_util.tree_map(
+            lambda old, new: jnp.where(flag, jnp.asarray(new), jnp.asarray(old)),
+            old_state,
+            new_state,
+        )
+
+    def _normalize_step(state, control):
+        out = step_fn(state, params, control)
+        if isinstance(out, tuple) and len(out) == 2:
+            proposed_state, aux = out
+        else:
+            proposed_state, aux = out, {}
+        return proposed_state, aux
+
+    step_eval = jax.checkpoint(_normalize_step) if bool(checkpoint_steps) else _normalize_step
+
+    def _scan_step(carry, control):
+        state, done = carry
+        proposed_state, aux = step_eval(state, control)
+        active = jnp.logical_not(done)
+        accepted_proposal = jnp.asarray(accept_fn(state, proposed_state, params, control, aux), dtype=bool)
+        accepted = jnp.logical_and(active, accepted_proposal)
+        rejected = jnp.logical_and(active, jnp.logical_not(accepted_proposal))
+        state_after_accept = _select_state(accepted, state, proposed_state)
+        accepted_done = jnp.asarray(converged_fn(state_after_accept, params, control, aux), dtype=bool)
+        done_out = jnp.logical_or(done, jnp.logical_and(accepted, accepted_done))
+        aux_out = dict(aux) if isinstance(aux, dict) else {"aux": aux}
+        aux_out["active"] = active
+        aux_out["accepted"] = accepted
+        aux_out["rejected"] = rejected
+        aux_out["done"] = done_out
+        return (state_after_accept, done_out), aux_out
+
+    (final_state, final_done), history = jax.lax.scan(
+        _scan_step,
+        (initial_state, jnp.asarray(False)),
+        controls,
+    )
+    return {"state": final_state, "done": final_done, "history": history}
+
+
 def jax_visible_nonlinear_controller_directional_check_jax(
     step_fn: Any,
     objective_from_run: Any,
@@ -403,6 +479,51 @@ def jax_visible_masked_nonlinear_controller_directional_check_jax(
     )
     run = jax_visible_masked_nonlinear_controller_jax(
         step_fn,
+        converged_fn,
+        initial_state,
+        params,
+        controls,
+        checkpoint_steps=checkpoint_steps,
+    )
+    return {**check, "run": run}
+
+
+def jax_visible_accepted_nonlinear_controller_directional_check_jax(
+    step_fn: Any,
+    accept_fn: Any,
+    converged_fn: Any,
+    objective_from_run: Any,
+    params: Any,
+    direction: Any,
+    initial_state: Any,
+    controls: Any,
+    *,
+    eps: float = 1.0e-4,
+    checkpoint_steps: bool = False,
+) -> dict[str, Any]:
+    """AD-vs-FD check for accepted/rejected JAX-visible controllers."""
+
+    def objective(controller_params):
+        run = jax_visible_accepted_nonlinear_controller_jax(
+            step_fn,
+            accept_fn,
+            converged_fn,
+            initial_state,
+            controller_params,
+            controls,
+            checkpoint_steps=checkpoint_steps,
+        )
+        return objective_from_run(run)
+
+    check = pytree_directional_derivative_check_jax(
+        objective,
+        params,
+        direction,
+        eps=eps,
+    )
+    run = jax_visible_accepted_nonlinear_controller_jax(
+        step_fn,
+        accept_fn,
         converged_fn,
         initial_state,
         params,
