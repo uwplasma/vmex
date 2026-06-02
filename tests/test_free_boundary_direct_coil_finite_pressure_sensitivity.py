@@ -1919,6 +1919,33 @@ def test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state(
         rtol=5.0e-12,
         atol=5.0e-12,
     )
+    padded_controller_replay = direct_coil_accepted_trace_controller_replay_objective_jax(
+        base_params,
+        trace0["state_pre"],
+        static=init.static,
+        traces=[trace0, trace1, trace1],
+        signgs=int(init.signgs),
+        state_weight=1.0,
+        bsqvac_weight=1.0e-12,
+        force_weight=0.0,
+        enforce_edge=False,
+        accept_mask=np.asarray([True, True, False]),
+        done_mask=np.asarray([False, True, False]),
+    )
+    np.testing.assert_array_equal(
+        np.asarray(padded_controller_replay["history"]["active"]),
+        np.asarray([True, True, False]),
+    )
+    np.testing.assert_array_equal(
+        np.asarray(padded_controller_replay["history"]["accepted"]),
+        np.asarray([True, True, False]),
+    )
+    np.testing.assert_allclose(
+        np.asarray(padded_controller_replay["objective"]),
+        np.asarray(controller_replay["objective"]),
+        rtol=2.0e-12,
+        atol=1.0e-12,
+    )
 
     eps = 1.0e-3
     for direction in (current_direction, fourier_direction, mixed_direction):

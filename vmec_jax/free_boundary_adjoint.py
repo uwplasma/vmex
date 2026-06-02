@@ -2094,6 +2094,8 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     force_weight: Any = 0.0,
     bsqvac_weight: Any = 0.0,
     checkpoint_steps: bool = False,
+    accept_mask: Any | None = None,
+    done_mask: Any | None = None,
 ) -> dict[str, Any]:
     """Replay fixed production traces through a JAX-visible accept controller.
 
@@ -2139,10 +2141,22 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
         for prev_trace, trace in zip(trace_seq[:-1], trace_seq[1:], strict=False)
     )
     step_count = len(trace_seq)
+    if accept_mask is None:
+        accept_arr = jnp.ones(step_count, dtype=bool)
+    else:
+        if np.shape(accept_mask) != (step_count,):
+            raise ValueError("accept_mask must have shape (n_steps,)")
+        accept_arr = jnp.asarray(accept_mask, dtype=bool)
+    if done_mask is None:
+        done_arr = jnp.arange(step_count, dtype=jnp.int32) == jnp.asarray(step_count - 1, dtype=jnp.int32)
+    else:
+        if np.shape(done_mask) != (step_count,):
+            raise ValueError("done_mask must have shape (n_steps,)")
+        done_arr = jnp.asarray(done_mask, dtype=bool)
     controls = {
         "step_index": jnp.arange(step_count, dtype=jnp.int32),
-        "accept": jnp.ones(step_count, dtype=bool),
-        "done": jnp.arange(step_count, dtype=jnp.int32) == jnp.asarray(step_count - 1, dtype=jnp.int32),
+        "accept": accept_arr,
+        "done": done_arr,
     }
 
     def _branch_for_trace(trace: dict[str, Any], reset_to_trace_pre: bool, state: Any, coil_params: Any):

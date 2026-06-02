@@ -210,19 +210,21 @@ Steps taken:
 
 1. Added `direct_coil_accepted_trace_controller_replay_objective_jax` in `vmec_jax/free_boundary_adjoint.py`.
 2. The new helper replays fixed production accepted traces through `jax_visible_accepted_nonlinear_controller_jax` using a static tuple of production traces and a scanned `step_index`.
-3. Extended the two-step direct-coil production-trace test so it now compares:
+3. Added optional `accept_mask` and `done_mask` controls so padded or rejected trace slots can be represented without changing fixed trace payloads.
+4. Extended the two-step direct-coil production-trace test so it now compares:
    - legacy Python-loop accepted-trace replay value,
    - JAX-visible accepted-controller replay value,
+   - padded inactive trace-slot replay value,
    - controller replay final state,
    - existing fixed-trace custom-VJP directional derivative,
    - controller replay exact mixed coil current/Fourier directional derivative.
-4. Kept the claim scoped: trace selection remains fixed host data; the added validation proves production accepted-trace replay can be represented as a static JAX-visible accepted-control scan, not that production `run_free_boundary` has a full custom VJP.
+5. Kept the claim scoped: trace selection remains fixed host data; the added validation proves production accepted-trace replay can be represented as a static JAX-visible accepted-control scan, not that production `run_free_boundary` has a full custom VJP.
 
 Results obtained:
 
 1. `python -m ruff check vmec_jax/free_boundary_adjoint.py tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py` passed.
 2. `python -m py_compile vmec_jax/free_boundary_adjoint.py tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py tests/test_free_boundary_vacuum_adjoint.py` passed.
-3. `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state -rx -s` passed: 1 passed in 129.51 s.
+3. `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state -rx -s` passed: 1 passed in 132.14 s after adding the padded inactive trace-slot mask check.
 4. `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py -rx` passed: 57 passed in 75.70 s.
 
 Best next steps:
