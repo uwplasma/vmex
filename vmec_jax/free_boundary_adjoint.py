@@ -2135,6 +2135,60 @@ def direct_coil_accepted_trace_controller_controls_jax(
     }
 
 
+_ACCEPTED_TRACE_NUMERIC_CONTROL_KEYS = (
+    "dt_eff",
+    "b1",
+    "fac",
+    "force_scale",
+    "max_update_rms_pre",
+    "lambda_update_scale",
+)
+
+_ACCEPTED_TRACE_BOOL_CONTROL_KEYS = (
+    "flip_sign",
+    "limit_update_rms",
+    "divide_by_scalxc_for_update",
+    "preconditioner_use_precomputed_tridi",
+    "preconditioner_use_lax_tridi",
+)
+
+
+def _stack_trace_control_field(trace_seq: tuple[dict[str, Any], ...], key: str, *, dtype: Any | None = None) -> Any:
+    if not trace_seq:
+        raise ValueError("at least one accepted trace is required")
+    arrays = []
+    for index, trace in enumerate(trace_seq):
+        if key not in trace:
+            raise KeyError(f"accepted trace {index} is missing control field {key!r}")
+        arrays.append(jnp.asarray(trace[key], dtype=dtype))
+    shapes = {tuple(arr.shape) for arr in arrays}
+    if len(shapes) != 1:
+        raise ValueError(f"accepted trace control field {key!r} must have consistent shape")
+    return jnp.stack(arrays, axis=0)
+
+
+def direct_coil_accepted_trace_scalar_controls_jax(traces: Any) -> dict[str, Any]:
+    """Return stacked scalar/update controls consumed by accepted trace replay.
+
+    This is the next phase-2 payload after the accepted/rejected controller
+    masks: fixed host decisions and update scalars are represented as JAX
+    arrays with leading dimension ``n_steps``.  The current replay still calls
+    ``strict_update_one_step_from_trace`` for behavior parity; this payload is
+    the validated interface for replacing per-step trace dictionary reads with
+    a fully stacked state-update kernel.
+    """
+
+    trace_seq = tuple(traces)
+    if not trace_seq:
+        raise ValueError("at least one accepted trace is required")
+    payload: dict[str, Any] = {}
+    for key in _ACCEPTED_TRACE_NUMERIC_CONTROL_KEYS:
+        payload[key] = _stack_trace_control_field(trace_seq, key)
+    for key in _ACCEPTED_TRACE_BOOL_CONTROL_KEYS:
+        payload[key] = _stack_trace_control_field(trace_seq, key, dtype=bool)
+    return payload
+
+
 def direct_coil_accepted_trace_controller_replay_objective_jax(
     params: Any,
     initial_state: Any,
@@ -2183,6 +2237,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
         accept_mask=accept_mask,
         done_mask=done_mask,
     )
+    scalar_controls = direct_coil_accepted_trace_scalar_controls_jax(trace_seq)
 
     def _branch_for_trace(trace: dict[str, Any], state: Any, coil_params: Any, control: dict[str, Any]):
         reset_to_trace_pre = jnp.asarray(control["reset_to_trace_pre"], dtype=bool)
@@ -2284,6 +2339,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
         "state": run["state"],
         "history": run["history"],
         "controls": controls,
+        "scalar_controls": scalar_controls,
         "state_reset_flags": tuple(bool(flag) for flag in np.asarray(controls["reset_to_trace_pre"], dtype=bool)),
     }
 
