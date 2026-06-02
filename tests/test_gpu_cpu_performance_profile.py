@@ -226,6 +226,8 @@ def test_performance_matrix_fixed_command_uses_backend_solver_device(tmp_path):
     report = tmp_path / "report.json"
     trace = tmp_path / "trace"
 
+    assert tool.report_stem(args, "gpu") == "fixed_boundary_gpu_input_niter"
+
     command = tool.build_child_command(
         args=args,
         backend="gpu",
@@ -243,6 +245,22 @@ def test_performance_matrix_fixed_command_uses_backend_solver_device(tmp_path):
     assert "--no-auto-cli-policy" in command
     assert "--no-multigrid" in command
     assert "--vmec-timing-detail" in command
+
+
+def test_performance_matrix_fixed_report_stem_uses_iter_budget_by_default():
+    tool = _load_tool()
+    args = tool._build_parser().parse_args(
+        [
+            "--mode",
+            "fixed-boundary",
+            "--backend",
+            "cpu",
+            "--iters",
+            "9",
+        ]
+    )
+
+    assert tool.report_stem(args, "cpu") == "fixed_boundary_cpu_iters9"
 
 
 def test_performance_matrix_fixed_command_can_force_non_scan(tmp_path):

@@ -474,6 +474,54 @@ measured ``14.97 s`` because it includes startup/import/JIT.  Force-kernel
 tuning alone is no longer the first raw fixed-boundary GPU bottleneck for this
 case.
 
+2026-06-02 fixed-boundary and exact-callback checkpoint
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+After the fixed-boundary scan timing reporter was promoted, the same two
+fixed-boundary references were rerun from clean timing subprocesses.  The
+``--use-input-niter`` report stem now records ``input_niter`` instead of the
+default diagnostic ``iters20`` label, so these artifacts are easier to compare
+against VMEC2000 runs that use the input deck budgets.
+
+.. list-table:: Fixed-boundary solve-body timing, 2026-06-02
+   :header-rows: 1
+
+   * - Case
+     - Backend
+     - vmec_jax scan body
+     - VMEC2000 total computational time
+     - Notes
+   * - ``input.nfp4_QH_warm_start``
+     - CPU
+     - ``0.190 s``
+     - ``0.20 s``
+     - 450 iterations; warm scan body is VMEC2000-class
+   * - ``input.nfp4_QH_warm_start``
+     - GPU
+     - ``0.448 s``
+     - ``0.20 s``
+     - small warm solve remains GPU dispatch dominated
+   * - ``input.nfp4_QH_finite_beta``
+     - CPU
+     - ``3.957 s``
+     - ``3.32 s``
+     - 2459 iterations; close to VMEC2000, but still slower
+   * - ``input.nfp4_QH_finite_beta``
+     - GPU
+     - ``4.005 s``
+     - ``3.32 s``
+     - 2508 iterations; GPU dispatch/preconditioner launch overhead dominates
+
+The same checkpoint also reran the optimization-critical QH exact dense
+Jacobian path on the ``office`` RTX A4000.  The current default basepoint
+dynamic replay remains faster than ``VMEC_JAX_DYNAMIC_REPLAY_MODE=whole_scan``:
+mode-2 warm callbacks measured about ``3.47 s`` with basepoint replay versus
+``3.76 s`` with whole-scan replay, and mode-3 warm callbacks measured about
+``3.60 s`` versus ``3.80 s``.  The remaining warm GPU cost is therefore not a
+mode-selection issue.  The repeated hotspots are accepted tape-build solve
+dispatch, preconditioner apply, update-state dispatch, and projected
+replay/residual-projection dispatch.
+
 .. list-table:: LASYM fixed-boundary scan preflight, ``input.basic_non_stellsym_pressure``, 20 iterations
    :header-rows: 1
 

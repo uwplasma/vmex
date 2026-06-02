@@ -331,6 +331,8 @@ def solver_device_for_backend(backend: str) -> str:
 
 def report_stem(args: argparse.Namespace, backend: str) -> str:
     if args.mode == "fixed-boundary":
+        if bool(getattr(args, "use_input_niter", False)):
+            return f"fixed_boundary_{backend}_input_niter"
         return f"fixed_boundary_{backend}_iters{int(args.iters)}"
     if args.mode == "qi-boozer":
         jit = "jit" if bool(args.jit_booz) else "nojit"
