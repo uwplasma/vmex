@@ -4122,7 +4122,10 @@ class FixedBoundaryExactOptimizer:
             Optional maximum number of LSMR iterations for SciPy's iterative
             trust-region linear solve.  This is primarily useful for the
             matrix-free path, where every LSMR iteration costs one or more
-            exact ``Jv``/``J.Tv`` products.
+            exact ``Jv``/``J.Tv`` products.  For ``method="scipy_matrix_free"``,
+            ``None`` uses vmec_jax's bounded default of 4 to avoid unbounded
+            inner Krylov work; pass an explicit integer to tighten or relax
+            that cap.
         lbfgs_step_bound:
             Optional half-width of the L-BFGS-B trust box in scaled parameter
             space when ``method="lbfgs_adjoint"``. The scalar-adjoint path is
@@ -4602,6 +4605,8 @@ class FixedBoundaryExactOptimizer:
                 from scipy.optimize import least_squares as _scipy_least_squares
             except Exception as exc:  # pragma: no cover - optional dependency
                 raise ImportError("method='scipy_matrix_free' requires scipy.optimize.least_squares") from exc
+            if scipy_lsmr_maxiter is None:
+                scipy_lsmr_maxiter = 4
 
             scale = np.ones_like(params0_arr) if x_scale is None else np.asarray(x_scale, dtype=float)
             scale[scale == 0.0] = 1.0
