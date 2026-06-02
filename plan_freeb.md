@@ -350,6 +350,42 @@ Need from user:
 
 Nothing now.
 
+### 2026-06-02 JSON-safe fingerprint diagnostics
+
+Steps taken:
+
+1. Added `direct_coil_accepted_trace_fingerprint_delta_summary`, which wraps
+   the accepted-trace fingerprint delta and converts NumPy arrays, tuples,
+   NumPy scalars, and non-finite floats into strict-JSON-safe Python objects.
+2. Extended the focused fingerprint test to verify the summary can be written
+   with `json.dumps(..., allow_nan=False)`.
+3. Updated `docs/free_boundary_coil_optimization.rst` to point comparison
+   scripts and reviewer artifacts to the JSON-safe helper.
+
+Results obtained:
+
+1. `python -m ruff check vmec_jax/free_boundary_adjoint.py
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+   passed.
+2. `python -m py_compile vmec_jax/free_boundary_adjoint.py
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+   passed.
+3. `JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_trace_fingerprint_detects_control_branch_changes
+   -rx` passed: `1 passed in 0.51 s`.
+4. `python -m sphinx -W --keep-going -b html docs
+   /tmp/vmec_jax_freeb_docs_check_json_fingerprint` passed.
+
+Best next steps:
+
+1. Commit and push the JSON-safe fingerprint diagnostics helper.
+2. Use this helper from optional comparison/benchmark scripts when writing
+   same-branch promotion evidence.
+
+Need from user:
+
+Nothing now.
+
 ### 2026-06-01 ESSOS finite-pressure example readiness and phase-2 status
 
 Steps taken:

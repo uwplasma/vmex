@@ -232,6 +232,9 @@ finite-difference perturbation stayed on the same accepted-step/control branch,
 including the same traced reset pattern, scalar update controls, preconditioner
 policy flags, active preconditioner size, and preconditioner/mode-shape
 signatures.
+For scripts that need reviewer-facing evidence, the companion
+``direct_coil_accepted_trace_fingerprint_delta_summary`` helper converts the
+delta into a strict-JSON-safe payload.
 On the tiny forced-active default gate, the branch-compatible complete solve
 also compares both the fixed-trace custom-VJP directional derivative and the
 stacked-controller custom-VJP directional derivative against a central finite

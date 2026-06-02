@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 import os
 from pathlib import Path
 
@@ -170,6 +171,7 @@ def _run_direct_solve(input_path: Path, params: CoilFieldParams):
 def test_direct_coil_trace_fingerprint_detects_control_branch_changes() -> None:
     from vmec_jax.free_boundary_adjoint import (
         direct_coil_accepted_trace_array_controls_jax,
+        direct_coil_accepted_trace_fingerprint_delta_summary,
         direct_coil_accepted_trace_preconditioner_controls_jax,
         direct_coil_accepted_trace_scalar_controls_jax,
         direct_coil_accepted_trace_fingerprint,
@@ -249,6 +251,10 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes() -> None:
 
     same = direct_coil_accepted_trace_fingerprint_delta([trace0, trace1], [trace0, trace1])
     assert same["compatible"]
+    same_json = direct_coil_accepted_trace_fingerprint_delta_summary([trace0, trace1], [trace0, trace1])
+    json.dumps(same_json, allow_nan=False)
+    assert same_json["compatible"]
+    assert same_json["reference"]["precond_jmax"] == [2, 2]
 
     field_only_change = dict(trace0)
     field_only_change["freeb_bsqvac_half"] = np.ones((2, 3)) * 99.0

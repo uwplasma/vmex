@@ -2672,6 +2672,47 @@ def direct_coil_accepted_trace_fingerprint_delta(
     }
 
 
+def _json_safe_fingerprint_value(value: Any) -> Any:
+    if isinstance(value, np.ndarray):
+        return _json_safe_fingerprint_value(value.tolist())
+    if isinstance(value, np.generic):
+        return _json_safe_fingerprint_value(value.item())
+    if isinstance(value, dict):
+        return {str(key): _json_safe_fingerprint_value(val) for key, val in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_json_safe_fingerprint_value(item) for item in value]
+    if isinstance(value, float):
+        return value if np.isfinite(value) else None
+    return value
+
+
+def direct_coil_accepted_trace_fingerprint_delta_summary(
+    reference: Any,
+    candidate: Any,
+    *,
+    rtol: float = 1.0e-10,
+    atol: float = 1.0e-12,
+    max_steps: int | None = None,
+) -> dict[str, Any]:
+    """Return a strict-JSON-safe accepted-trace fingerprint delta summary.
+
+    The raw :func:`direct_coil_accepted_trace_fingerprint_delta` output keeps
+    NumPy arrays for in-process diagnostics.  Comparison scripts and reviewer
+    artifacts need a payload that can be written with
+    ``json.dumps(..., allow_nan=False)``; this helper converts arrays, tuples,
+    NumPy scalars, and non-finite values into JSON-safe Python objects.
+    """
+
+    delta = direct_coil_accepted_trace_fingerprint_delta(
+        reference,
+        candidate,
+        rtol=rtol,
+        atol=atol,
+        max_steps=max_steps,
+    )
+    return _json_safe_fingerprint_value(delta)
+
+
 def direct_coil_fixed_trace_custom_vjp_objective_jax(
     params: Any,
     initial_state: Any,
