@@ -383,6 +383,19 @@ def _classify_vmec2000_no_wout(vmec2000) -> dict[str, object]:
     return summary
 
 
+def _vmec2000_has_active_vacuum_evidence(vmec2000) -> bool:
+    """Return true when VMEC2000 trace rows show non-default vacuum balance."""
+
+    for stage in vmec2000.stages:
+        for row in stage.rows:
+            if row.delbsq is None or row.fedge is None:
+                continue
+            default_edge_balance = abs(float(row.delbsq) - 1.0) <= 1.0e-12 and abs(float(row.fedge)) <= 1.0e-14
+            if not default_edge_balance:
+                return True
+    return False
+
+
 def _write_vmec2000_no_wout_report(path: Path, vmec2000, *, classified_summary: dict[str, object] | None = None) -> None:
     threed_tail: list[str] = []
     if vmec2000.threed1_path is not None and vmec2000.threed1_path.exists():
@@ -532,6 +545,7 @@ def test_vmec2000_generated_mgrid_trace_smoke_records_iteration_rows(tmp_path: P
         underconverged = vmec2000["underconverged"]
         assert underconverged["classification"] in {
             "reached_niter_without_wout",
+            "vmec2000_vacuum_inactive_force_gate",
             "vmec2000_more_iter_exit",
             "vmec2000_runtime_error",
             "vmec2000_nonzero_exit",
@@ -541,6 +555,12 @@ def test_vmec2000_generated_mgrid_trace_smoke_records_iteration_rows(tmp_path: P
         assert np.isfinite(float(underconverged["delbsq_last"]))
         assert np.isfinite(float(underconverged["fedge_last"]))
         assert np.isfinite(float(underconverged["delbsq_over_ftolv"]))
+        if underconverged["classification"] == "vmec2000_vacuum_inactive_force_gate":
+            assert underconverged["vmec2000_vacuum_activation_blocked"] is True
+            assert underconverged["opened_mgrid"] is True
+            assert float(underconverged["physical_force_gate_last"]) > float(
+                underconverged["physical_force_gate_threshold"]
+            )
     else:
         assert payload["summary"]["vmec2000_wout_available"] is True
 
@@ -585,6 +605,7 @@ def test_vmec2000_generated_mgrid_free_boundary_matches_vmec_jax_and_direct_coil
         _write_vmec2000_no_wout_report(report_path, vmec2000, classified_summary=classified_summary)
         xfail_classifications = {
             "reached_niter_without_wout",
+            "vmec2000_vacuum_inactive_force_gate",
             "vmec2000_more_iter_exit",
             "vmec2000_requested_more_iterations",
             "unknown_no_wout",
@@ -603,6 +624,11 @@ def test_vmec2000_generated_mgrid_free_boundary_matches_vmec_jax_and_direct_coil
         pytest.fail(
             "VMEC2000 did not produce a WOUT for a non-promotable reason: "
             f"status={classified_summary.get('status')} reason={classified_summary.get('reason')}; report={report_path}"
+        )
+    if not _vmec2000_has_active_vacuum_evidence(vmec2000):
+        pytest.xfail(
+            "Generated ESSOS-mgrid VMEC2000 wrote a WOUT without active-vacuum "
+            "trace evidence; this is not promotable free-boundary parity evidence."
         )
     wout_vmec2000 = read_wout(wout_vmec2000_path)
 
