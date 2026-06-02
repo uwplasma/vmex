@@ -169,18 +169,23 @@ def _run_direct_solve(input_path: Path, params: CoilFieldParams):
 
 def test_direct_coil_trace_fingerprint_detects_control_branch_changes() -> None:
     from vmec_jax.free_boundary_adjoint import (
+        direct_coil_accepted_trace_scalar_controls_jax,
         direct_coil_accepted_trace_fingerprint,
         direct_coil_accepted_trace_fingerprint_delta,
     )
 
     trace0 = {
         "dt_eff": np.asarray(0.5),
+        "b1": np.asarray(0.125),
         "fac": np.asarray(0.9),
         "force_scale": np.asarray(1.0),
         "max_update_rms_pre": np.asarray(0.25),
+        "lambda_update_scale": np.asarray([1.0, 0.5]),
         "limit_update_rms": np.asarray(1.0),
         "flip_sign": False,
         "divide_by_scalxc_for_update": True,
+        "preconditioner_use_precomputed_tridi": False,
+        "preconditioner_use_lax_tridi": True,
         "freeb_bsqvac_half": np.ones((2, 3)),
         "freeb_nestor_trace": {"gsource": np.ones(2), "bsqvac": np.ones(2)},
         "state_pre": np.ones(4),
@@ -191,6 +196,17 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes() -> None:
         "dt_eff": np.asarray(0.25),
         "freeb_bsqvac_half": np.ones((2, 3)) * 3.0,
     }
+    scalar_controls = direct_coil_accepted_trace_scalar_controls_jax([trace0, trace1])
+    assert np.allclose(np.asarray(scalar_controls["dt_eff"]), np.asarray([0.5, 0.25]))
+    assert np.allclose(np.asarray(scalar_controls["lambda_update_scale"]), np.asarray([[1.0, 0.5], [1.0, 0.5]]))
+    assert np.array_equal(np.asarray(scalar_controls["flip_sign"]), np.asarray([False, False]))
+    assert np.array_equal(np.asarray(scalar_controls["preconditioner_use_lax_tridi"]), np.asarray([True, True]))
+
+    bad_scalar_shape = dict(trace1)
+    bad_scalar_shape["lambda_update_scale"] = np.asarray([1.0, 0.5, 0.25])
+    with pytest.raises(ValueError, match="lambda_update_scale"):
+        direct_coil_accepted_trace_scalar_controls_jax([trace0, bad_scalar_shape])
+
     fingerprint = direct_coil_accepted_trace_fingerprint([trace0, trace1])
     assert fingerprint["n_steps"] == 2
     assert fingerprint["n_freeb_steps"] == 2

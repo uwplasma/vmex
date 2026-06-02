@@ -12,15 +12,67 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-06-01 while pushing the ESSOS finite-pressure direct-coil
+Last updated: 2026-06-02 while pushing the ESSOS finite-pressure direct-coil
 examples and phase-2 replay lane toward PR readiness. PR #18 is open on
 `feature/freeb-essos-coil-single-stage`; local branch `refresh/freeb-slim`
 tracks it. PR-head CI was green at `277e7423`; the later LASYM replay commit
 `981c946b` exposed a symmetric-trace compatibility regression in Python 3.10
 and 3.12 fast tests. That regression is fixed and pushed as `870dd6e5`, and
-local follow-up validation now promotes reset-aware full accepted-trace replay.
+local follow-up validation now promotes reset-aware full accepted-trace replay
+plus stacked accepted/rejected and scalar-control payloads.
 Do not merge/release until the refreshed pushed head has green GitHub Actions
 and the phase-2 limitations below remain explicit in docs.
+
+### 2026-06-02 Accepted-trace scalar-control replay rung
+
+Steps taken:
+
+1. Added `direct_coil_accepted_trace_scalar_controls_jax`, which stacks the
+   scalar/update controls consumed by accepted trace replay:
+   `dt_eff`, `b1`, `fac`, `force_scale`, `max_update_rms_pre`,
+   `lambda_update_scale`, update limiter flags, and preconditioner policy
+   flags.
+2. Added strict shape validation for stacked scalar controls so branch/control
+   drift is caught before fixed-trace replay derivatives are promoted.
+3. Exposed the stacked scalar payload in
+   `direct_coil_accepted_trace_controller_replay_objective_jax` while keeping
+   the production update path behavior-preserving through
+   `strict_update_one_step_from_trace`.
+4. Extended the synthetic accepted-trace fingerprint test to validate scalar
+   payload values, boolean controls, and shape-mismatch detection.
+
+Results obtained:
+
+1. `python -m ruff check vmec_jax/free_boundary_adjoint.py
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+   passed.
+2. `python -m py_compile vmec_jax/free_boundary_adjoint.py
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+   passed.
+3. `JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_trace_fingerprint_detects_control_branch_changes
+   -rx` passed: `1 passed in 0.27 s`.
+4. `JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state
+   -rx -s` passed: `1 passed in 120.13 s`.
+5. `JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_vacuum_adjoint.py -rx` passed:
+   `57 passed in 79.15 s`.
+
+Best next steps:
+
+1. Replace per-step trace dictionary reads inside the controller replay with
+   the stacked scalar-control payload where each field maps one-to-one into
+   `strict_update_one_step_from_state`.
+2. Add the next complete-loop AD-vs-central-FD gate that uses the stacked
+   controller/scalar payload for one coil current and one Fourier coefficient.
+3. Keep the production `run_free_boundary` gradient claim limited to validated
+   replay rungs until the adaptive controller itself has a full custom VJP or
+   a fully JAX-visible nonlinear implementation.
+
+Need from user:
+
+Nothing now.
 
 ### 2026-06-01 ESSOS finite-pressure example readiness and phase-2 status
 
