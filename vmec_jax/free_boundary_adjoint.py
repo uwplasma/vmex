@@ -2488,6 +2488,16 @@ def _trace_array_size(value: Any) -> int:
     return int(np.asarray(value).size)
 
 
+def _trace_pytree_shape_signature(value: Any) -> tuple[tuple[int, ...], ...]:
+    if value is None:
+        return ()
+    try:
+        leaves = tree_util.tree_leaves(value)
+    except Exception:
+        leaves = [value]
+    return tuple(tuple(np.asarray(leaf).shape) for leaf in leaves)
+
+
 def direct_coil_accepted_trace_fingerprint(
     traces: Any,
     *,
@@ -2513,6 +2523,7 @@ def direct_coil_accepted_trace_fingerprint(
 
     scalar_keys = (
         "dt_eff",
+        "b1",
         "fac",
         "force_scale",
         "max_update_rms_pre",
@@ -2521,6 +2532,8 @@ def direct_coil_accepted_trace_fingerprint(
     bool_keys = (
         "flip_sign",
         "divide_by_scalxc_for_update",
+        "preconditioner_use_precomputed_tridi",
+        "preconditioner_use_lax_tridi",
     )
     scalars = {
         key: np.asarray([_trace_scalar(trace, key) for trace in trace_seq], dtype=float)
@@ -2551,6 +2564,10 @@ def direct_coil_accepted_trace_fingerprint(
         [_trace_pack_size(trace.get("state_post")) for trace in trace_seq],
         dtype=int,
     )
+    precond_jmax = np.asarray([int(trace.get("precond_jmax", -1)) for trace in trace_seq], dtype=int)
+    precond_mats_shapes = tuple(_trace_pytree_shape_signature(trace.get("precond_mats")) for trace in trace_seq)
+    lam_prec_shapes = tuple(tuple(np.asarray(trace.get("lam_prec", [])).shape) for trace in trace_seq)
+    w_mode_shapes = tuple(tuple(np.asarray(trace.get("w_mode_mn", [])).shape) for trace in trace_seq)
     reset_flags = []
     for prev_trace, trace in zip(trace_seq[:-1], trace_seq[1:], strict=False):
         try:
@@ -2573,6 +2590,10 @@ def direct_coil_accepted_trace_fingerprint(
         "nestor_trace_key_counts": nestor_sizes,
         "state_pre_sizes": state_pre_sizes,
         "state_post_sizes": state_post_sizes,
+        "precond_jmax": precond_jmax,
+        "precond_mats_shapes": precond_mats_shapes,
+        "lam_prec_shapes": lam_prec_shapes,
+        "w_mode_mn_shapes": w_mode_shapes,
         "state_reset_flags": np.asarray(reset_flags, dtype=int),
     }
 
@@ -2610,10 +2631,21 @@ def direct_coil_accepted_trace_fingerprint_delta(
             if ref_values.shape != cand_values.shape or not np.array_equal(ref_values, cand_values):
                 changed.append(f"{group}.{key}")
 
-    for key in ("freeb_sizes", "nestor_trace_key_counts", "state_pre_sizes", "state_post_sizes", "state_reset_flags"):
+    for key in (
+        "freeb_sizes",
+        "nestor_trace_key_counts",
+        "state_pre_sizes",
+        "state_post_sizes",
+        "precond_jmax",
+        "state_reset_flags",
+    ):
         ref_values = np.asarray(ref[key])
         cand_values = np.asarray(cand[key])
         if ref_values.shape != cand_values.shape or not np.array_equal(ref_values, cand_values):
+            changed.append(key)
+
+    for key in ("precond_mats_shapes", "lam_prec_shapes", "w_mode_mn_shapes"):
+        if ref[key] != cand[key]:
             changed.append(key)
 
     for key, ref_values in ref["scalars"].items():
