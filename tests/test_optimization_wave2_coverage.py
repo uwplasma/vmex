@@ -163,6 +163,40 @@ def test_jit_initial_state_env_and_clear_caches(monkeypatch) -> None:
     assert opt._last_jacobian_residual is None
 
 
+def test_packed_final_from_exact_payload_prefers_payload_and_falls_back() -> None:
+    import jax.numpy as jnp
+
+    opt = _bare_optimizer_for_state_ops()
+    state = _state_from_coeffs(r=1.0, rs=2.0, z=3.0, zs=4.0, l=5.0, ls=6.0)
+    packed_state = np.asarray(pack_state(state), dtype=float)
+
+    payload_packed = jnp.asarray(packed_state + 1.0, dtype=jnp.float64)
+    np.testing.assert_allclose(
+        FixedBoundaryExactOptimizer._packed_final_from_exact_payload(
+            opt,
+            state,
+            {"packed_final": payload_packed},
+        ),
+        payload_packed,
+    )
+
+    tape_packed = jnp.asarray(packed_state + 2.0, dtype=jnp.float64)
+    tape = SimpleNamespace(final_packed_state=tape_packed)
+    np.testing.assert_allclose(
+        FixedBoundaryExactOptimizer._packed_final_from_exact_payload(
+            opt,
+            state,
+            {"tape": tape},
+        ),
+        tape_packed,
+    )
+
+    np.testing.assert_allclose(
+        FixedBoundaryExactOptimizer._packed_final_from_exact_payload(opt, state, {}),
+        packed_state,
+    )
+
+
 def test_solver_device_context_and_trial_scan_env_branches(monkeypatch) -> None:
     import vmec_jax._compat as compat
 

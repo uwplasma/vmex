@@ -53,6 +53,79 @@ def test_numpy_profile_helpers_cover_degenerate_and_unparseable_inputs(monkeypat
         assert profiles_mod._can_use_numpy_profile_eval(jnp.asarray([0.0, 1.0])) is False
 
 
+def test_jax_and_numpy_tabulated_profile_helpers_match_for_line_segment_and_akima():
+    if not has_jax():
+        pytest.skip("JAX is required for differentiable tabulated profile coverage")
+
+    x = np.asarray([0.0, 0.1, 0.35, 0.7, 1.0])
+    line_knots = np.asarray([0.0, 0.4, 1.0])
+    line_values = np.asarray([1.0, 2.0, 0.5])
+    akima_knots = np.asarray([0.0, 0.15, 0.45, 0.8, 1.0])
+    akima_values = np.asarray([0.0, 0.4, 0.1, 0.8, 0.6])
+
+    for integrate in (False, True):
+        line_jax = profiles_mod._line_segment_profile(
+            jnp.asarray(line_knots),
+            jnp.asarray(line_values),
+            jnp.asarray(x),
+            integrate=integrate,
+        )
+        line_np = profiles_mod._line_segment_profile_np(
+            line_knots,
+            line_values,
+            x,
+            integrate=integrate,
+        )
+        np.testing.assert_allclose(np.asarray(line_jax), line_np, rtol=1.0e-12, atol=1.0e-12)
+
+        akima_jax = profiles_mod._akima_spline_profile(
+            jnp.asarray(akima_knots),
+            jnp.asarray(akima_values),
+            jnp.asarray(x),
+            integrate=integrate,
+        )
+        akima_np = profiles_mod._akima_spline_profile_np(
+            akima_knots,
+            akima_values,
+            x,
+            integrate=integrate,
+        )
+        np.testing.assert_allclose(np.asarray(akima_jax), akima_np, rtol=1.0e-12, atol=1.0e-12)
+
+    # Fewer than four Akima knots intentionally fall back to the cubic helper.
+    short_knots = np.asarray([0.0, 0.5, 1.0])
+    short_values = np.asarray([0.0, 1.0, 0.0])
+    np.testing.assert_allclose(
+        np.asarray(
+            profiles_mod._akima_spline_profile(
+                jnp.asarray(short_knots),
+                jnp.asarray(short_values),
+                jnp.asarray(x),
+                integrate=False,
+            )
+        ),
+        profiles_mod._akima_spline_profile_np(short_knots, short_values, x, integrate=False),
+        rtol=1.0e-12,
+        atol=1.0e-12,
+    )
+
+    np.testing.assert_allclose(
+        np.asarray(profiles_mod._line_segment_profile(jnp.asarray([]), jnp.asarray([]), jnp.asarray(x), integrate=False)),
+        np.zeros_like(x),
+    )
+    np.testing.assert_allclose(
+        np.asarray(
+            profiles_mod._line_segment_profile(
+                jnp.asarray([0.0]),
+                jnp.asarray([2.0]),
+                jnp.asarray(x),
+                integrate=True,
+            )
+        ),
+        2.0 * x,
+    )
+
+
 def test_two_power_and_empty_current_profile_branches():
     indata = InData(
         scalars={
