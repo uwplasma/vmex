@@ -53,3 +53,43 @@ def test_profile_input_example_writes_polynomial_and_spline_decks(tmp_path: Path
     out = capsys.readouterr().out
     assert "Run with: vmec " in out
     assert "pressure[Pa]" in out
+
+
+def test_profile_input_example_decks_evaluate_declared_pressure_and_current_values() -> None:
+    module = _load_example_module()
+    base = read_indata(module.BASE_INPUT)
+
+    polynomial = module.polynomial_pressure_current_indata(base)
+    s = np.asarray([0.0, 0.5, 1.0])
+    polynomial_profiles = eval_profiles(polynomial, s)
+    pressure_c0, pressure_c1, pressure_c2 = module.POLYNOMIAL_PRESSURE_AM
+    current_c0, current_c1 = module.POLYNOMIAL_CURRENT_AC
+
+    np.testing.assert_allclose(
+        np.asarray(polynomial_profiles["pressure_pa"]),
+        pressure_c0 + pressure_c1 * s + pressure_c2 * s * s,
+        rtol=1.0e-12,
+        atol=1.0e-12,
+    )
+    np.testing.assert_allclose(
+        np.asarray(polynomial_profiles["current"]),
+        current_c0 * s + current_c1 * s * s,
+        rtol=1.0e-12,
+        atol=1.0e-12,
+    )
+
+    spline = module.spline_pressure_current_indata(base)
+    knots = np.asarray(module.S_KNOTS)
+    spline_profiles = eval_profiles(spline, knots)
+    np.testing.assert_allclose(
+        np.asarray(spline_profiles["pressure_pa"]),
+        module.SPLINE_PRESSURE_VALUES,
+        rtol=1.0e-12,
+        atol=1.0e-12,
+    )
+    np.testing.assert_allclose(
+        np.asarray(spline_profiles["current"]),
+        module.SPLINE_CURRENT_VALUES,
+        rtol=1.0e-12,
+        atol=1.0e-12,
+    )

@@ -226,6 +226,45 @@ def test_cli_test_mode_forwards_optional_solver_flags(monkeypatch, tmp_path: Pat
     assert "use_scan" not in calls["kwargs"]
 
 
+def test_cli_test_mode_respects_explicit_output_path(monkeypatch, tmp_path: Path) -> None:
+    outdir = tmp_path / "demo"
+    output = tmp_path / "custom" / "wout_quickstart.nc"
+    indata = InData(scalars={"NITER": 1}, indexed={})
+    calls = {}
+
+    monkeypatch.setattr(cli, "read_indata", lambda _path: indata)
+    monkeypatch.setattr(cli, "default_non_autodiff_solver_policy", lambda _indata: ("default", True))
+    monkeypatch.setattr(cli, "_default_use_scan_for_backend", lambda _indata, _backend, _mode: False)
+
+    def fake_run_fixed_boundary(path: str, **kwargs):
+        calls["run_path"] = Path(path)
+        calls["run_kwargs"] = kwargs
+        return SimpleNamespace(state=SimpleNamespace(Rcos=0.0))
+
+    def fake_write_wout(path: Path, run, *, include_fsq: bool):
+        calls["wout_path"] = path
+        calls["include_fsq"] = include_fsq
+        path.write_text("wout")
+
+    def fake_plot_wout(path: Path, *, outdir: Path):
+        calls["plot_path"] = path
+        calls["plot_outdir"] = outdir
+
+    monkeypatch.setattr(cli, "run_fixed_boundary", fake_run_fixed_boundary)
+    monkeypatch.setattr(cli, "write_wout_from_fixed_boundary_run", fake_write_wout)
+    monkeypatch.setitem(sys.modules, "vmec_jax.plotting", SimpleNamespace(plot_wout=fake_plot_wout))
+
+    assert cli.main(["--test", "--outdir", str(outdir), "--output", str(output), "--quiet"]) == 0
+
+    assert calls["run_path"] == (outdir / "input.nfp4_QH_warm_start").resolve()
+    assert calls["wout_path"] == output.resolve()
+    assert calls["include_fsq"] is True
+    assert calls["plot_path"] == output.resolve()
+    assert calls["plot_outdir"] == (outdir / "figures").resolve()
+    assert output.read_text() == "wout"
+    assert not (outdir / "wout_nfp4_QH_warm_start.nc").exists()
+
+
 def test_cli_errors_for_missing_plot_or_input(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as no_input:
         cli.main([])
