@@ -2079,6 +2079,157 @@ def direct_coil_accepted_trace_replay_objective_jax(
     }
 
 
+def direct_coil_accepted_trace_controller_replay_objective_jax(
+    params: Any,
+    initial_state: Any,
+    *,
+    static: Any,
+    traces: Any,
+    signgs: int,
+    max_steps: int | None = None,
+    sample_nzeta: int | None = None,
+    include_analytic: bool = True,
+    enforce_edge: bool = False,
+    state_weight: Any = 1.0,
+    force_weight: Any = 0.0,
+    bsqvac_weight: Any = 0.0,
+    checkpoint_steps: bool = False,
+) -> dict[str, Any]:
+    """Replay fixed production traces through a JAX-visible accept controller.
+
+    This is the bridge between the legacy Python-loop
+    :func:`direct_coil_accepted_trace_replay_objective_jax` and a future full
+    nonlinear free-boundary controller.  The production traces remain fixed
+    data, but the replayed state, per-step accepted masks, and objective
+    history are carried through :func:`jax_visible_accepted_nonlinear_controller_jax`.
+
+    The helper intentionally keeps every trace accepted.  It does not
+    differentiate through the host policy that selected the traces; it validates
+    that a production accepted-trace replay can be represented as a static
+    JAX-visible accepted-control scan.
+    """
+
+    from .discrete_adjoint import strict_update_one_step_from_trace
+    from .state import pack_state
+
+    trace_seq = tuple(traces)
+    if max_steps is not None:
+        trace_seq = trace_seq[: int(max_steps)]
+    if not trace_seq:
+        raise ValueError("at least one accepted trace is required")
+    if jax is None:  # pragma: no cover - dependency fallback.
+        raise RuntimeError("JAX is required for controller replay.")
+
+    def _trace_state_reset_between(prev_trace: dict[str, Any], trace: dict[str, Any]) -> bool:
+        prev_post = prev_trace.get("state_post")
+        next_pre = trace.get("state_pre")
+        if prev_post is None or next_pre is None:
+            return False
+        try:
+            prev_packed = np.asarray(pack_state(prev_post), dtype=float)
+            next_packed = np.asarray(pack_state(next_pre), dtype=float)
+        except Exception:
+            return False
+        if prev_packed.shape != next_packed.shape:
+            return True
+        return not np.allclose(prev_packed, next_packed, rtol=1.0e-13, atol=1.0e-13)
+
+    reset_flags = (False,) + tuple(
+        _trace_state_reset_between(prev_trace, trace)
+        for prev_trace, trace in zip(trace_seq[:-1], trace_seq[1:], strict=False)
+    )
+    step_count = len(trace_seq)
+    controls = {
+        "step_index": jnp.arange(step_count, dtype=jnp.int32),
+        "accept": jnp.ones(step_count, dtype=bool),
+        "done": jnp.arange(step_count, dtype=jnp.int32) == jnp.asarray(step_count - 1, dtype=jnp.int32),
+    }
+
+    def _branch_for_trace(trace: dict[str, Any], reset_to_trace_pre: bool, state: Any, coil_params: Any):
+        state_in = trace["state_pre"] if bool(reset_to_trace_pre) else state
+        has_active_freeb_replay = trace.get("freeb_bsqvac_half") is not None and trace.get("freeb_nestor_trace") is not None
+        if has_active_freeb_replay:
+            geometry = free_boundary_boundary_geometry_jax(
+                state_in,
+                static,
+                sample_nzeta=sample_nzeta,
+            )
+            context = direct_coil_boundary_replay_context(static, geometry)
+            replay = direct_coil_boundary_bsqvac_from_trace_jax(
+                coil_params,
+                geometry,
+                trace,
+                basis=context["basis"],
+                tables=context["tables"],
+                signgs=int(signgs),
+                nvper=int(context["nvper"]),
+                wint=jnp.asarray(context["wint"]),
+                include_analytic=bool(include_analytic),
+            )
+            freeb_bsqvac_half = replay["bsqvac"]
+            bsqvac_objective = _weighted_half_norm(replay["bsqvac"], bsqvac_weight)
+        else:
+            freeb_bsqvac_half = trace.get("freeb_bsqvac_half", None)
+            bsqvac_objective = jnp.asarray(0.0)
+        step = strict_update_one_step_from_trace(
+            state_in,
+            static,
+            trace,
+            freeb_bsqvac_half=freeb_bsqvac_half,
+            enforce_edge=bool(enforce_edge),
+        )
+        return step["step"]["state_post"], {
+            "force": _tree_weighted_half_norm(step["force"], force_weight),
+            "bsqvac": bsqvac_objective,
+            "state_reset": jnp.asarray(bool(reset_to_trace_pre), dtype=bool),
+        }
+
+    def step_fn(state, coil_params, control):
+        step_index = jnp.asarray(control["step_index"], dtype=jnp.int32)
+        branches = tuple(
+            (
+                lambda operand, trace=trace, reset=reset: _branch_for_trace(
+                    trace,
+                    reset,
+                    operand[0],
+                    operand[1],
+                )
+            )
+            for trace, reset in zip(trace_seq, reset_flags, strict=True)
+        )
+        return jax.lax.switch(step_index, branches, (state, coil_params))
+
+    def accept_fn(_state, _proposed_state, _params, control, _aux):
+        return control["accept"]
+
+    def converged_fn(_accepted_state, _params, control, _aux):
+        return control["done"]
+
+    run = jax_visible_accepted_nonlinear_controller_jax(
+        step_fn,
+        accept_fn,
+        converged_fn,
+        initial_state,
+        params,
+        controls,
+        checkpoint_steps=checkpoint_steps,
+    )
+    accepted = jnp.asarray(run["history"]["accepted"], dtype=jnp.asarray(pack_state(run["state"])).dtype)
+    objective_components = {
+        "state": _weighted_half_norm(pack_state(run["state"]), state_weight),
+        "force": jnp.sum(accepted * jnp.asarray(run["history"]["force"])),
+        "bsqvac": jnp.sum(accepted * jnp.asarray(run["history"]["bsqvac"])),
+    }
+    objective = sum(objective_components.values())
+    return {
+        "objective": objective,
+        "objective_components": objective_components,
+        "state": run["state"],
+        "history": run["history"],
+        "state_reset_flags": tuple(bool(flag) for flag in reset_flags),
+    }
+
+
 def _trace_scalar(trace: dict[str, Any], key: str, *, default: float = np.nan) -> float:
     value = trace.get(key, default)
     if value is None:
