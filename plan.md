@@ -33,6 +33,10 @@ acceptance criteria or evidence changes.
 - Smooth differentiable QI, mirror ratio, elongation, LgradB, aspect, iota, beta,
   volavgB, magnetic-well, DMerc, and JXBFORCE profile objectives exist in the
   workflow layer.
+- New active gates for the next completion pass: (1) state-level AD-vs-central-FD
+  agreement for both `DMerc` and Glasser `D_R`, and (2) required CI runtime
+  reduction while preserving the py3.11 95% coverage gate plus physics,
+  numerics, algorithm, and parity coverage.
 - VMEC profile evaluation now covers polynomial pressure/iota/current profiles
   plus VMEC-style cubic, Akima, and line-segment tabulated pressure, iota, and
   current profiles. Cubic pressure/iota and current spline decks have been

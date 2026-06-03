@@ -28,6 +28,72 @@ docs: the branch has validated provider gradients and bounded complete-solve
 response gates, but not a production full nonlinear `run_free_boundary` exact
 adjoint claim.
 
+### 2026-06-03 DMerc/D_R derivative gate and CI runtime refactor
+
+Steps taken:
+
+1. Added the new plan goals requested by the user: compare state-level AD
+   against central finite differences for both `DMerc` and the Glasser
+   resistive-interchange `D_R`, and reduce required CI runtime without lowering
+   physics/numerics/parity coverage.
+2. Added a focused synthetic VMEC-state derivative gate for
+   `mercier_terms_from_state`: perturb one state coefficient, recompute the
+   full differentiable Mercier path, and compare JAX AD slopes with central
+   finite-difference slopes for `DMerc` and `D_R`.
+3. Refactored the CI matrix so optional release-asset WOUT fixtures are fetched
+   only on the Python 3.11 coverage lane. The Python 3.10/3.12 jobs still run
+   compatibility tests, but existing conftest guards skip WOUT-fixture parity
+   cases when those assets are intentionally absent. The full 95% coverage and
+   fixture-backed physics/parity gate remains on py3.11.
+
+Results obtained:
+
+1. `python -m ruff check tests/test_finite_beta_helpers_unit.py` passed.
+2. `JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_finite_beta_helpers_unit.py::test_mercier_terms_from_state_dmerc_and_d_r_ad_match_central_fd
+   -q` passed.
+3. The focused Mercier/Glasser set passed:
+   `JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_glasser_resistive_interchange.py
+   tests/test_finite_beta_helpers_unit.py::test_mercier_terms_from_state_is_differentiable
+   tests/test_finite_beta_helpers_unit.py::test_mercier_terms_from_state_dmerc_and_d_r_ad_match_central_fd
+   -q`.
+4. `.github/workflows/ci.yml` parses as valid YAML after the py3.11-only WOUT
+   fixture fetch condition.
+5. Current `main` CI run `26907515531` completed green before this follow-up
+   push. Its py3.11 coverage test phase still took about 34 minutes, so the
+   next CI-runtime step should collect durations and reduce the py3.11 coverage
+   lane itself, not only duplicate py3.10/py3.12 fixture work.
+
+Best next steps:
+
+1. Commit and push the derivative gate plus py3.11-only fixture-fetch CI
+   refactor.
+2. Watch the resulting GitHub Actions run to confirm the matrix still passes
+   and compare py3.10/py3.12 runtimes against the previous 19-minute and
+   30-minute jobs.
+3. If py3.11 remains slow, collect durations from the coverage lane and split
+   only proven slow duplicate tests into manual/nightly or fixture-backed
+   py3.11-only gates while preserving the 95% coverage threshold.
+
+Need from user:
+
+Nothing now.
+
+Completion percentages:
+
+- DMerc/D_R AD-vs-FD derivative validation: 95%.
+- CI runtime refactor with preserved coverage/physics gates: 55%.
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 96%.
+- VMEC parity and physics gates: 93%.
+- Single-stage coil-only optimization: 79%.
+- Robust coil perturbation optimization: 70%.
+- CPU/GPU performance: 83%.
+- Docs/release hygiene: 95%.
+- Overall free-boundary ESSOS lane: 98% for merged forward/replay work; not
+  100% until the production adaptive full-loop adjoint is validated.
+
 ### 2026-06-03 Reusable scalar custom-VJP versus complete-solve FD helper
 
 Steps taken:

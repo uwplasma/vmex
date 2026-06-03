@@ -69,6 +69,7 @@ jobs:
           python tools/diagnostics/repo_size_audit.py --top 20 --max-total-mib 50 --max-file-mib 2
 
       - name: Fetch optional WOUT fixtures
+        if: matrix.python-version == '3.11'
         run: |
           python tools/fetch_assets.py --bundle wout-fixtures
 
