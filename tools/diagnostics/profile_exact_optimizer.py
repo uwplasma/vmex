@@ -1033,6 +1033,14 @@ def _install_profile_timing_supplements(opt) -> None:
         ("scan_runner_cache_bypass_device_run_s", "scan_runner_cache_bypass_device_run"),
         ("scan_runner_cache_bypass_dispatch_s", "scan_runner_cache_bypass_dispatch"),
         ("scan_runner_cache_bypass_ready_s", "scan_runner_cache_bypass_ready"),
+        ("iteration_control_fsq1_precond_norm_s", "iteration_control_fsq1_precond_norm"),
+        ("iteration_control_fsq1_scalar_build_s", "iteration_control_fsq1_scalar_build"),
+        ("iteration_control_fsq1_payload_get_s", "iteration_control_fsq1_payload_get"),
+        ("iteration_control_fsq1_direct_get_s", "iteration_control_fsq1_direct_get"),
+        ("iteration_control_fsq1_unattributed_s", "iteration_control_fsq1_unattributed"),
+        ("iteration_control_badjac_ptau_get_s", "iteration_control_badjac_ptau_get"),
+        ("iteration_control_badjac_state_jacobian_s", "iteration_control_badjac_state_jacobian"),
+        ("iteration_control_badjac_unattributed_s", "iteration_control_badjac_unattributed"),
     )
     supplemental_counter_keys = (
         ("scan_runner_cache_hit_count", "scan_runner_cache_hit_count"),

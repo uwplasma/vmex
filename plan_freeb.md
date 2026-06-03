@@ -113,6 +113,30 @@ Need from user:
 
 Nothing now.
 
+### 2026-06-03 Performance diagnostics: accepted-control leaf timing
+
+Steps taken:
+
+1. Exposed accepted-control subphase timers from VMEC solver diagnostics through `FixedBoundaryExactOptimizer._profile_solver_timing`.
+2. Propagated those timers into `tools/diagnostics/profile_exact_optimizer.py` so older optimizer objects get the same supplemental timing buckets.
+3. Added accepted-control metrics, labels, bottleneck ranking, patch-target ranking, and sample-profile extraction in `tools/diagnostics/compare_profile_reports.py`.
+4. Added regression tests covering optimizer profile output, supplemental profiler output, aggregate report metrics, per-sample report metrics, bottleneck selection, and patch-target selection.
+
+Results obtained:
+
+1. `python -m ruff check vmec_jax/optimization.py tools/diagnostics/profile_exact_optimizer.py tools/diagnostics/compare_profile_reports.py tests/test_optimization_callback_trace.py tests/test_profile_report_compare.py` passed.
+2. `python -m pytest -q tests/test_optimization_callback_trace.py::test_exact_optimizer_profiles_trial_solver_timing_buckets tests/test_optimization_callback_trace.py::test_profile_exact_supplements_scan_cache_status_timing_on_older_optimizer tests/test_profile_report_compare.py -rx` passed: 26 passed in 0.22 s.
+
+Best next steps:
+
+1. Run the updated exact optimizer profiling command on GPU to identify whether accepted-control payload/direct gets or bad-Jacobian checks dominate cold callback cost.
+2. Use the new leaf timing to decide whether to stage/fuse control payload materialization, avoid scalar synchronization, or specialize scan-trial paths.
+3. Keep VMEC2000 generated-mgrid WOUT parity blocked until VMEC2000 enters active vacuum on a shared generated-mgrid fixture.
+
+Need from user:
+
+Nothing now.
+
 ### 2026-06-03 Pedagogic examples post-push validation
 
 Steps taken:

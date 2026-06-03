@@ -225,6 +225,49 @@ SCAN_DEVICE_RUN_PROFILE_NAMES = {
     "forward_exact_solver_scan_device_run",
 }
 
+ACCEPTED_CONTROL_PROFILE_PREFIXES = (
+    ("trial_solver", "trial solver"),
+    ("forward_exact_solver", "forward exact solver"),
+    ("exact_tape_solver", "exact tape solver"),
+)
+
+ACCEPTED_CONTROL_PROFILE_SUFFIXES = (
+    ("iteration_control", "iteration control"),
+    ("iteration_control_fsq1", "control fsq1"),
+    ("iteration_control_fsq1_precond_norm", "control fsq1 preconditioned norm"),
+    ("iteration_control_fsq1_scalar_build", "control fsq1 scalar build"),
+    ("iteration_control_fsq1_payload_get", "control fsq1 payload get"),
+    ("iteration_control_fsq1_direct_get", "control fsq1 direct get"),
+    ("iteration_control_fsq1_unattributed", "control fsq1 unattributed"),
+    ("iteration_control_badjac", "bad-Jacobian check"),
+    ("iteration_control_badjac_ptau_get", "bad-Jacobian ptau get"),
+    ("iteration_control_badjac_state_jacobian", "bad-Jacobian state Jacobian"),
+    ("iteration_control_badjac_unattributed", "bad-Jacobian unattributed"),
+    ("iteration_control_vmec_time", "VMEC timestep control"),
+    ("iteration_control_restart", "restart control"),
+    ("iteration_control_evolve", "evolve control"),
+    ("iteration_control_unattributed", "iteration control unattributed"),
+)
+
+ACCEPTED_CONTROL_PROFILE_METRIC_NAMES = {
+    f"{prefix}_{suffix}_s": (f"{prefix}_{suffix}",)
+    for prefix, _prefix_label in ACCEPTED_CONTROL_PROFILE_PREFIXES
+    for suffix, _suffix_label in ACCEPTED_CONTROL_PROFILE_SUFFIXES
+}
+EXACT_PROFILE_METRIC_NAMES.update(ACCEPTED_CONTROL_PROFILE_METRIC_NAMES)
+
+ACCEPTED_CONTROL_PROFILE_LABELS = {
+    f"{prefix}_{suffix}_s": f"{prefix_label} {suffix_label}"
+    for prefix, prefix_label in ACCEPTED_CONTROL_PROFILE_PREFIXES
+    for suffix, suffix_label in ACCEPTED_CONTROL_PROFILE_SUFFIXES
+}
+
+ACCEPTED_CONTROL_PROFILE_BOTTLENECKS = tuple(
+    (metric, ACCEPTED_CONTROL_PROFILE_LABELS[metric])
+    for metric in ACCEPTED_CONTROL_PROFILE_METRIC_NAMES
+    if not metric.endswith("_iteration_control_s")
+)
+
 METRIC_ORDER = (
     "total_runtime_s",
     "vmec_solve_s",
@@ -363,6 +406,7 @@ METRIC_ORDER = (
     "cache_entry_growth",
     "cache_entries_after",
 )
+METRIC_ORDER = (*METRIC_ORDER, *ACCEPTED_CONTROL_PROFILE_METRIC_NAMES)
 
 METRIC_LABELS = {
     "total_runtime_s": "total runtime",
@@ -504,6 +548,7 @@ METRIC_LABELS = {
     "cache_entry_growth": "cache entry growth",
     "cache_entries_after": "cache entries after",
 }
+METRIC_LABELS.update(ACCEPTED_CONTROL_PROFILE_LABELS)
 
 BOTTLENECK_METRICS = (
     ("qi_first_call_s", "QI/Boozer first call"),
@@ -603,6 +648,7 @@ BOTTLENECK_METRICS = (
     ("exact_tape_solver_iteration_post_update_s", "exact tape solver post-update"),
     ("exact_tape_solver_iteration_loop_unattributed_s", "exact tape solver loop unattributed"),
     ("exact_tape_solver_finalize_s", "exact tape solver finalization"),
+    *ACCEPTED_CONTROL_PROFILE_BOTTLENECKS,
     ("replay_scan_cache_build_s", "replay scan-cache build"),
     ("replay_time_s", "accepted-point replay"),
     ("compile_time_s", "compile/JIT"),
@@ -728,6 +774,11 @@ EXACT_OPTIMIZER_PATCH_TARGET_NAMES = {
     "exact_tape_solver_iteration_loop_unattributed",
     "exact_tape_solver_finalize",
 }
+EXACT_OPTIMIZER_PATCH_TARGET_NAMES.update(
+    profile_name
+    for names in ACCEPTED_CONTROL_PROFILE_METRIC_NAMES.values()
+    for profile_name in names
+)
 
 EXACT_TAPE_SOLVE_CALL_DETAIL_NAMES = {
     "exact_tape_solver_setup_axis_reset",
@@ -744,6 +795,9 @@ EXACT_TAPE_SOLVE_CALL_DETAIL_NAMES = {
     "exact_tape_solver_iteration_loop_unattributed",
     "exact_tape_solver_finalize",
 }
+EXACT_TAPE_SOLVE_CALL_DETAIL_NAMES.update(
+    f"exact_tape_solver_{suffix}" for suffix, _label in ACCEPTED_CONTROL_PROFILE_SUFFIXES
+)
 
 EXACT_OPTIMIZER_CONTAINER_PROFILE_NAMES = {
     "exact_solve_with_tape_total",
@@ -1444,6 +1498,7 @@ SAMPLE_PROFILE_METRICS = {
     "forward_exact_solver_scan_runner_cache_miss_count",
     "exact_tape_solver_scan_runner_cache_miss_count",
 }
+SAMPLE_PROFILE_METRICS.update(ACCEPTED_CONTROL_PROFILE_METRIC_NAMES)
 
 
 def _sample_profile_summaries(payload: dict[str, Any], *, top_profile: int) -> list[dict[str, Any]]:
@@ -1556,6 +1611,15 @@ def _exact_optimizer_patch_target(
         ):
             # Detailed preconditioner leaves identify refresh/apply/mode-scaling
             # costs more directly than the enclosing preconditioner timer.
+            continue
+        if name_s.endswith(("_iteration_control", "_iteration_control_fsq1", "_iteration_control_badjac")) and any(
+            float(profile[child].get("wall_time_s", 0.0)) > 0.0
+            for child in profile
+            if str(child).startswith(f"{name_s}_")
+        ):
+            # Accepted-control aggregates hide the actual host/device sync
+            # source. Prefer fsq1 payload/direct gets, scalar build, ptau
+            # checks, or VMEC timestep-control leaves when present.
             continue
         if name_s == "jacobian_initial_tangents" and any(
             float(profile[detail].get("wall_time_s", 0.0)) > 0.0
