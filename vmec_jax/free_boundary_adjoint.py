@@ -2720,7 +2720,10 @@ def direct_coil_accepted_trace_controller_directional_check_jax(
     :func:`direct_coil_accepted_trace_directional_check_jax`.  It validates the
     differentiated path that carries accepted/rejected masks plus stacked
     scalar, velocity-history, and preconditioner controls through
-    :func:`jax_visible_accepted_nonlinear_controller_jax`.
+    :func:`jax_visible_accepted_nonlinear_controller_jax`.  Passing
+    ``use_preconditioner_policy_segments=True`` in ``replay_kwargs`` validates
+    the segmented static-policy controller path used as the next staging/fusion
+    rung for longer accepted traces.
     """
 
     def objective(coil_params):
