@@ -7,6 +7,7 @@ import pytest
 
 from vmec_jax.solve import (
     _HLO_DUMPED_KEYS,
+    _dump_array,
     _dump_freeb_axis_trace_record,
     _dump_freeb_control_trace_record,
     _dump_time_control_trace_record,
@@ -53,6 +54,17 @@ def _static(*, ns=2, mpol=2, ntor=1, lasym=False, lthreed=True, ntheta=2, nzeta=
 
 def _arr(value, shape=(2, 2, 2)):
     return np.full(shape, float(value))
+
+
+def test_dump_array_preserves_payloads_and_uses_empty_float_for_missing():
+    missing = _dump_array(None)
+    assert missing.shape == (0,)
+    assert missing.dtype == np.dtype(float)
+
+    arr = np.asarray([[1, 2]], dtype=np.int32)
+    out = _dump_array(arr)
+    np.testing.assert_array_equal(out, arr)
+    assert out.dtype == arr.dtype
 
 
 def _frzl(*, shape=(2, 2, 2), include_asym=True):
