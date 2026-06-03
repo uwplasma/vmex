@@ -229,6 +229,30 @@ def _lambda_full_from_wout_half_mesh(
     return lam_full
 
 
+def _bcovar_from_force_payload_with_geometry(geom: dict[str, Any], k_force) -> Any:
+    """Attach VMEC force-kernel geometry channels and return the bcovar payload.
+
+    ``wout_minimal_from_fixed_boundary`` can reuse force kernels produced at the
+    final solve point or recompute them for output.  Both paths must populate
+    the same VMEC ``pr*/pz*`` geometry channels before the Mercier/JXBFORCE
+    reducers run, so keep that copy in one place.
+    """
+
+    geom["pr1_even"] = np.asarray(k_force.pr1_even, dtype=float)
+    geom["pr1_odd"] = np.asarray(k_force.pr1_odd, dtype=float)
+    geom["pz1_even"] = np.asarray(k_force.pz1_even, dtype=float)
+    geom["pz1_odd"] = np.asarray(k_force.pz1_odd, dtype=float)
+    geom["pru_even"] = np.asarray(k_force.pru_even, dtype=float)
+    geom["pru_odd"] = np.asarray(k_force.pru_odd, dtype=float)
+    geom["pzu_even"] = np.asarray(k_force.pzu_even, dtype=float)
+    geom["pzu_odd"] = np.asarray(k_force.pzu_odd, dtype=float)
+    geom["prv_even"] = np.asarray(k_force.prv_even, dtype=float)
+    geom["prv_odd"] = np.asarray(k_force.prv_odd, dtype=float)
+    geom["pzv_even"] = np.asarray(k_force.pzv_even, dtype=float)
+    geom["pzv_odd"] = np.asarray(k_force.pzv_odd, dtype=float)
+    return k_force.bc
+
+
 def _bss_should_undo_scalxc() -> bool:
     """Whether bss parity geometry should undo VMEC's odd-m scalxc scaling."""
     return os.getenv("VMEC_JAX_BSS_UNDO_SCALXC", "0") not in ("", "0")
@@ -5167,19 +5191,7 @@ def wout_minimal_from_fixed_boundary(
                 k_force = jax.device_get(k_force)
             except Exception:
                 pass
-        bc = k_force.bc
-        geom["pr1_even"] = np.asarray(k_force.pr1_even, dtype=float)
-        geom["pr1_odd"] = np.asarray(k_force.pr1_odd, dtype=float)
-        geom["pz1_even"] = np.asarray(k_force.pz1_even, dtype=float)
-        geom["pz1_odd"] = np.asarray(k_force.pz1_odd, dtype=float)
-        geom["pru_even"] = np.asarray(k_force.pru_even, dtype=float)
-        geom["pru_odd"] = np.asarray(k_force.pru_odd, dtype=float)
-        geom["pzu_even"] = np.asarray(k_force.pzu_even, dtype=float)
-        geom["pzu_odd"] = np.asarray(k_force.pzu_odd, dtype=float)
-        geom["prv_even"] = np.asarray(k_force.prv_even, dtype=float)
-        geom["prv_odd"] = np.asarray(k_force.prv_odd, dtype=float)
-        geom["pzv_even"] = np.asarray(k_force.pzv_even, dtype=float)
-        geom["pzv_odd"] = np.asarray(k_force.pzv_odd, dtype=float)
+        bc = _bcovar_from_force_payload_with_geometry(geom, k_force)
     elif wout_fast_bcovar:
         with _numpy_module_patch():
             bc = vmec_bcovar_half_mesh_from_wout(
@@ -5215,19 +5227,7 @@ def wout_minimal_from_fixed_boundary(
                 k_force = jax.device_get(k_force)
             except Exception:
                 pass
-        bc = k_force.bc
-        geom["pr1_even"] = np.asarray(k_force.pr1_even, dtype=float)
-        geom["pr1_odd"] = np.asarray(k_force.pr1_odd, dtype=float)
-        geom["pz1_even"] = np.asarray(k_force.pz1_even, dtype=float)
-        geom["pz1_odd"] = np.asarray(k_force.pz1_odd, dtype=float)
-        geom["pru_even"] = np.asarray(k_force.pru_even, dtype=float)
-        geom["pru_odd"] = np.asarray(k_force.pru_odd, dtype=float)
-        geom["pzu_even"] = np.asarray(k_force.pzu_even, dtype=float)
-        geom["pzu_odd"] = np.asarray(k_force.pzu_odd, dtype=float)
-        geom["prv_even"] = np.asarray(k_force.prv_even, dtype=float)
-        geom["prv_odd"] = np.asarray(k_force.prv_odd, dtype=float)
-        geom["pzv_even"] = np.asarray(k_force.pzv_even, dtype=float)
-        geom["pzv_odd"] = np.asarray(k_force.pzv_odd, dtype=float)
+        bc = _bcovar_from_force_payload_with_geometry(geom, k_force)
     if wout_timing_enabled:
         wout_timing["forces_bcovar_s"] = _time.perf_counter() - t0
 

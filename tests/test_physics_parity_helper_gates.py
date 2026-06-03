@@ -6,12 +6,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from vmec_jax._compat import enable_x64
+from vmec_jax._compat import enable_x64, jnp
 from vmec_jax.booz_input import booz_xform_inputs_from_state
 from vmec_jax.config import load_config
 from vmec_jax.finite_beta import finite_beta_scalars_from_state, magnetic_well_from_vp
 from vmec_jax.profiles import MU0, eval_profiles
 from vmec_jax.static import build_static
+from vmec_jax.state import zeros_state
 from vmec_jax.wout import read_wout, state_from_wout
 
 
@@ -300,6 +301,61 @@ def test_finite_beta_state_scalars_match_wout_energy_gate(
     )
     assert float(np.asarray(scalars["wp"])) > 0.0
     assert 0.0 < float(np.asarray(scalars["betatotal"])) < 1.0e-2
+
+
+def test_accepted_finite_beta_wout_scalar_jvp_matches_finite_difference() -> None:
+    """Finite-beta accepted-state scalars should have AD derivatives matching finite differences."""
+    jax = pytest.importorskip("jax")
+    pytest.importorskip("netCDF4")
+    enable_x64(True)
+
+    cfg, indata = load_config(str(_data_dir() / "input.shaped_tokamak_pressure"))
+    wout = read_wout(_data_dir() / "wout_shaped_tokamak_pressure.nc")
+    cfg = replace(
+        cfg,
+        ns=int(wout.ns),
+        mpol=int(wout.mpol),
+        ntor=int(wout.ntor),
+        nfp=int(wout.nfp),
+        lasym=bool(wout.lasym),
+        lthreed=bool(int(wout.ntor) > 0),
+        ntheta=2 * int(wout.mpol) + 6,
+        nzeta=1,
+    )
+    static = build_static(cfg)
+    state_np = state_from_wout(wout)
+    state = replace(
+        state_np,
+        Rcos=jnp.asarray(state_np.Rcos, dtype=jnp.float64),
+        Rsin=jnp.asarray(state_np.Rsin, dtype=jnp.float64),
+        Zcos=jnp.asarray(state_np.Zcos, dtype=jnp.float64),
+        Zsin=jnp.asarray(state_np.Zsin, dtype=jnp.float64),
+        Lcos=jnp.asarray(state_np.Lcos, dtype=jnp.float64),
+        Lsin=jnp.asarray(state_np.Lsin, dtype=jnp.float64),
+    )
+    tangent0 = zeros_state(state.layout, like=state.Rcos)
+    mode_idx = int(np.flatnonzero((np.asarray(static.modes.m) == 1) & (np.asarray(static.modes.n) == 0))[0])
+    tangent = replace(tangent0, Rcos=tangent0.Rcos.at[-1, mode_idx].set(1.0))
+
+    def scalar_vector(trial_state):
+        scalars = finite_beta_scalars_from_state(
+            state=trial_state,
+            static=static,
+            indata=indata,
+            signgs=int(wout.signgs),
+        )
+        return jnp.asarray([scalars["betatotal"], scalars["volavgB"], scalars["volume"]], dtype=jnp.float64)
+
+    def state_at(alpha):
+        return replace(state, Rcos=state.Rcos + alpha * tangent.Rcos)
+
+    value, tangent_ad = jax.jvp(scalar_vector, (state,), (tangent,))
+    eps = jnp.asarray(1.0e-5, dtype=jnp.float64)
+    tangent_fd = (scalar_vector(state_at(eps)) - scalar_vector(state_at(-eps))) / (2.0 * eps)
+
+    assert np.all(np.isfinite(np.asarray(value)))
+    np.testing.assert_allclose(np.asarray(tangent_ad), np.asarray(tangent_fd), rtol=5.0e-6, atol=1.0e-8)
+    assert np.linalg.norm(np.asarray(tangent_ad)) > 0.0
 
 
 def test_single_grid_lasym_finite_beta_force_balance_and_asymmetry_gate() -> None:
