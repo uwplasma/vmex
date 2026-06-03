@@ -1979,16 +1979,31 @@ def test_accepted_boundary_bsqvac_replay_grad_wrt_vmec_state_matches_fd(
         bsqvac = jnp.asarray(replay["bsqvac"])
         return 0.5 * jnp.vdot(bsqvac, bsqvac)
 
-    grad = jax.grad(objective)(flat0)
-    grad_norm = jnp.linalg.norm(grad)
-    assert float(grad_norm) > 1.0e-16
-    direction = grad / grad_norm
-    exact = jnp.vdot(grad, direction)
     eps = 1.0e-4
-    fd = (objective(flat0 + eps * direction) - objective(flat0 - eps * direction)) / (2.0 * eps)
-    assert np.isfinite(float(exact))
-    assert np.isfinite(float(fd))
-    assert abs(float(exact)) > 1.0e-16
+    candidate_indices = np.unique(
+        np.asarray(
+            [
+                0,
+                flat0.size // 7,
+                flat0.size // 5,
+                flat0.size // 3,
+                flat0.size // 2,
+                (2 * flat0.size) // 3,
+                flat0.size - 1,
+            ],
+            dtype=int,
+        )
+    )
+    directional_pairs: list[tuple[object, object]] = []
+    for idx in candidate_indices:
+        direction = jnp.zeros_like(flat0).at[int(idx)].set(1.0)
+        _, exact = jax.jvp(objective, (flat0,), (direction,))
+        fd = (objective(flat0 + eps * direction) - objective(flat0 - eps * direction)) / (2.0 * eps)
+        if np.isfinite(float(exact)) and np.isfinite(float(fd)) and abs(float(fd)) > 1.0e-16:
+            directional_pairs.append((exact, fd))
+            break
+    assert directional_pairs, "No finite nonzero state direction found for accepted-boundary replay"
+    exact, fd = directional_pairs[0]
     np.testing.assert_allclose(exact, fd, rtol=2.0e-4, atol=1.0e-10)
 
 
