@@ -497,6 +497,35 @@ def test_exact_run_history_payload_exposes_timing_aliases():
     json.dumps(exact_tool._json_safe(payload))
 
 
+def test_exact_run_history_metadata_helper_records_problem_context():
+    exact_tool = _load_exact_tool()
+    args = exact_tool._parse_args(
+        [
+            "--problem",
+            "qp",
+            "--max-mode",
+            "5",
+            "--method",
+            "scipy_matrix_free",
+            "--solver-device",
+            "gpu",
+        ]
+    )
+    payload = exact_tool._attach_optimizer_run_metadata(
+        {},
+        args=args,
+        specs_count=120,
+        solver_device_resolved="default",
+    )
+
+    assert payload["problem"] == "qp"
+    assert payload["max_mode"] == 5
+    assert payload["dofs"] == 120
+    assert payload["method"] == "scipy_matrix_free"
+    assert payload["solver_device_requested"] == "gpu"
+    assert payload["solver_device_resolved"] == "default"
+
+
 def test_exact_callback_summary_preserves_cold_tangent_replay_and_scan_trial_buckets():
     compare = _load_compare_tool()
     payload = {

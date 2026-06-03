@@ -494,6 +494,24 @@ def _history_payload_with_aliases(
     )
 
 
+def _attach_optimizer_run_metadata(
+    payload: dict[str, Any],
+    *,
+    args: argparse.Namespace,
+    specs_count: int,
+    solver_device_resolved: str,
+) -> dict[str, Any]:
+    """Attach stable run metadata to optimizer-history JSON payloads."""
+
+    payload.setdefault("problem", str(args.problem))
+    payload.setdefault("max_mode", int(args.max_mode))
+    payload.setdefault("dofs", int(specs_count))
+    payload.setdefault("method", str(args.method))
+    payload.setdefault("solver_device_requested", str(args.solver_device))
+    payload.setdefault("solver_device_resolved", str(solver_device_resolved))
+    return payload
+
+
 def _sum_timing_aliases(payloads: list[dict[str, Any]]) -> dict[str, float | int]:
     out: dict[str, float | int] = {}
     for payload in payloads:
@@ -1492,6 +1510,12 @@ def main() -> int:
                 trace_callbacks=args.trace_callbacks,
             )
             hist_repeat = _history_payload_with_aliases(dict(result["_history_dump"]))
+            _attach_optimizer_run_metadata(
+                hist_repeat,
+                args=args,
+                specs_count=len(specs),
+                solver_device_resolved=opt._solver_device_name or "default",
+            )
             hist_repeat["repeat"] = repeat
             hist_repeat["runtime"] = runtime_info
             histories.append(hist_repeat)
@@ -1505,6 +1529,12 @@ def main() -> int:
     if result is None:  # pragma: no cover - defensive
         raise RuntimeError("optimizer run did not produce a result")
     hist = _history_payload_with_aliases(dict(result["_history_dump"]), phase_timing=phase_timing)
+    _attach_optimizer_run_metadata(
+        hist,
+        args=args,
+        specs_count=len(specs),
+        solver_device_resolved=opt._solver_device_name or "default",
+    )
     hist["runtime"] = runtime_info
     print(
         f"\nFinal objective={hist['objective_final']:.6e} qs={hist['qs_final']:.6e} "

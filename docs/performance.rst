@@ -1327,6 +1327,17 @@ solver level: wall time dropped from the previous dense SciPy ``94.8 s`` trace
 to ``78.4 s`` while reaching the same final objective scale
 (``1.74024e-1``).  The remaining high-mode GPU buckets are chunked
 replay/projection, accepted exact-tape build, and relaxed trial solves.
+The same diagnostics now cover QP.  On ``office`` at commit ``80ccd51``, QP
+``max_mode=4`` with 80 boundary DOFs took ``63.8 s`` for one exact Jacobian
+callback, with ``31.9 s`` in
+``jacobian_chunked_projected_replay_projection_total`` and ``22.5 s`` in tape
+build.  A short QP ``max_mode=4`` optimizer run with ``max_nfev=3`` took
+``70.5 s`` for one accepted Jacobian plus two trial solves.  QP ``max_mode=5``
+with 120 boundary DOFs took ``68.2 s`` for one exact Jacobian, with ``36.2 s``
+in chunked projected replay/projection and ``22.8 s`` in tape build.  The
+mode-5 result confirms that the current chunked projection path scales
+reasonably with parameter count; the next production target remains reducing
+the replay/projection dispatch and cold accepted-tape build costs.
 
 A follow-up QH ``max_mode=2`` GPU profile on ``office`` with
 ``--inner-max-iter 80``, ``--trial-max-iter 40``,
