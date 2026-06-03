@@ -607,6 +607,11 @@ update, the v0.0.14 release, and the May 30 GPU scan/replay policy refresh:
   bundled synthetic mgrid currents are sign/magnitude matched to the plasma
   current so stock VMEC2000 reaches the vacuum solve instead of aborting with an
   `I_TOR` mismatch, with an optional executable smoke guarding that behavior.
+  On 2026-06-03 the executable-backed smoke manifest was rerun locally in
+  bounded batches against the local VMEC2000 executable: circular tokamak
+  (`8.82 s`), ITERModel (`9.33 s`), up-down LASYM (`11.20 s`),
+  QA lowres (`26.17 s`), basic non-stellarator-symmetric pressure (`12.68 s`),
+  and CTH-like free-boundary (`14.04 s`) all passed with `failed_cases=0`.
   Full fixed/free/LASYM/finite-beta converged-equilibrium parity is still open.
   The near-zero `bsubvmns` sine covariant-channel reference-state gap is now
   covered by a focused `up_down_asymmetric_tokamak` regression using VMEC's
