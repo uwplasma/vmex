@@ -83,6 +83,152 @@ def _pshalf_from_s(s_full: np.ndarray) -> np.ndarray:
     return np.sqrt(np.maximum(p, 0.0))
 
 
+def _lambda_half_mesh_weights(s: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Return VMEC Fortran-style ``sm``/``sp`` weights for lambda half-mesh maps."""
+
+    s_arr = np.asarray(s, dtype=float).reshape(-1)
+    ns = int(s_arr.shape[0])
+    if ns < 2:
+        return np.zeros((ns + 1,), dtype=float), np.zeros((ns + 1,), dtype=float)
+
+    hs = float(s_arr[1] - s_arr[0])
+    sqrts_f = np.zeros((ns + 1,), dtype=float)
+    shalf_f = np.zeros((ns + 1,), dtype=float)
+    for i in range(1, ns + 1):
+        sqrts_f[i] = np.sqrt(max(hs * float(i - 1), 0.0))
+        shalf_f[i] = np.sqrt(hs * abs(float(i) - 1.5))
+    sqrts_f[ns] = 1.0
+
+    sm_f = np.zeros((ns + 1,), dtype=float)
+    sp_f = np.zeros((ns + 1,), dtype=float)
+    for i in range(2, ns + 1):
+        sm_f[i] = shalf_f[i] / sqrts_f[i] if sqrts_f[i] != 0.0 else 0.0
+        if i < ns:
+            sp_f[i] = shalf_f[i + 1] / sqrts_f[i] if sqrts_f[i] != 0.0 else 0.0
+        else:
+            sp_f[i] = 1.0 / sqrts_f[i] if sqrts_f[i] != 0.0 else 0.0
+    sm_f[1] = 0.0
+    sp_f[0] = 0.0
+    sp_f[1] = sm_f[2] if ns >= 2 else 0.0
+    return sm_f, sp_f
+
+
+def _lambda_wout_from_full_mesh(
+    *,
+    lam_full: np.ndarray,
+    m_modes: np.ndarray,
+    s: np.ndarray,
+    phipf_internal: np.ndarray,
+    lamscale: float,
+) -> np.ndarray:
+    """Convert internal full-mesh lambda coefficients to VMEC ``wout`` convention.
+
+    VMEC writes lambda in old-style units, ``lambda/phipf*lamscale``, and then
+    stores a half-mesh interpolation whose even/odd poloidal-mode branches use
+    different ``sm``/``sp`` weights.  Keeping this as a pure helper makes the
+    write/read roundtrip independently testable against VMEC2000 conventions.
+    """
+
+    lam_full = np.asarray(lam_full, dtype=float)
+    s_arr = np.asarray(s, dtype=float).reshape(-1)
+    ns = int(s_arr.shape[0])
+    if lam_full.ndim != 2 or lam_full.shape[0] != ns:
+        raise ValueError("Expected lam_full with shape (ns, K)")
+    m_modes = np.asarray(m_modes, dtype=int)
+    if m_modes.ndim != 1 or m_modes.shape[0] != lam_full.shape[1]:
+        raise ValueError("Expected m_modes with shape (K,)")
+    phipf_internal = np.asarray(phipf_internal, dtype=float).reshape(-1)
+    if phipf_internal.shape != (ns,):
+        raise ValueError("Expected phipf_internal with shape (ns,)")
+
+    if lamscale == 0.0:
+        lam_ext = np.zeros_like(lam_full)
+    else:
+        phipf_safe = np.where(phipf_internal == 0.0, 1.0, phipf_internal)
+        lam_ext = lam_full * (float(lamscale) / phipf_safe[:, None])
+
+    if ns < 2:
+        return np.zeros_like(lam_ext)
+
+    sm_f, sp_f = _lambda_half_mesh_weights(s_arr)
+    lam_half = lam_ext.copy()
+    mask_m_le1 = m_modes <= 1
+    if np.any(mask_m_le1):
+        lam_half[0, mask_m_le1] = lam_half[1, mask_m_le1]
+
+    even_mask = (m_modes % 2) == 0
+    odd_mask = ~even_mask
+    for js_idx in range(ns - 1, 0, -1):
+        if np.any(even_mask):
+            lam_half[js_idx, even_mask] = 0.5 * (lam_half[js_idx, even_mask] + lam_half[js_idx - 1, even_mask])
+        if np.any(odd_mask):
+            sm_val = sm_f[js_idx + 1]
+            sp_val = sp_f[js_idx]
+            lam_half[js_idx, odd_mask] = 0.5 * (
+                sm_val * lam_half[js_idx, odd_mask] + sp_val * lam_half[js_idx - 1, odd_mask]
+            )
+
+    lam_half[0, :] = 0.0
+    return lam_half
+
+
+def _lambda_full_from_wout_half_mesh(
+    *,
+    lam_wout: np.ndarray,
+    m_modes: np.ndarray,
+    s: np.ndarray,
+    phipf_internal: np.ndarray,
+    lamscale: float,
+) -> np.ndarray:
+    """Recover internal full-mesh lambda coefficients from VMEC ``wout`` data."""
+
+    lam_wout = np.asarray(lam_wout, dtype=float)
+    s_arr = np.asarray(s, dtype=float).reshape(-1)
+    ns = int(s_arr.shape[0])
+    if lam_wout.ndim != 2 or lam_wout.shape[0] != ns:
+        raise ValueError("Expected lam_wout with shape (ns, K)")
+    m_modes = np.asarray(m_modes, dtype=int)
+    if m_modes.ndim != 1 or m_modes.shape[0] != lam_wout.shape[1]:
+        raise ValueError("Expected m_modes with shape (K,)")
+    phipf_internal = np.asarray(phipf_internal, dtype=float).reshape(-1)
+    if phipf_internal.shape != (ns,):
+        raise ValueError("Expected phipf with shape (ns,)")
+    if ns < 2:
+        return lam_wout.copy()
+
+    sm_f, sp_f = _lambda_half_mesh_weights(s_arr)
+    lam_full = np.zeros_like(lam_wout)
+    is_m0 = m_modes == 0
+    is_m1 = m_modes == 1
+    lam_full[0, is_m0] = lam_wout[1, is_m0]
+    denom_m1 = sm_f[2] + sp_f[1]
+    if denom_m1 != 0.0:
+        lam_full[0, is_m1] = 2.0 * lam_wout[1, is_m1] / denom_m1
+    lam_full[0, ~(is_m0 | is_m1)] = 0.0
+
+    for mval in range(0, int(np.max(m_modes)) + 1):
+        mask = m_modes == mval
+        if not np.any(mask):
+            continue
+        if (mval % 2) == 0:
+            for js in range(2, ns + 1):
+                lam_full[js - 1, mask] = 2.0 * lam_wout[js - 1, mask] - lam_full[js - 2, mask]
+        else:
+            for js in range(2, ns + 1):
+                denom = sm_f[js]
+                if denom == 0.0:
+                    lam_full[js - 1, mask] = 0.0
+                else:
+                    lam_full[js - 1, mask] = (
+                        2.0 * lam_wout[js - 1, mask] - sp_f[js - 1] * lam_full[js - 2, mask]
+                    ) / denom
+
+    lam_full = lam_full * phipf_internal[:, None]
+    if lamscale != 0.0:
+        lam_full = lam_full / float(lamscale)
+    return lam_full
+
+
 def _bss_should_undo_scalxc() -> bool:
     """Whether bss parity geometry should undo VMEC's odd-m scalxc scaling."""
     return os.getenv("VMEC_JAX_BSS_UNDO_SCALXC", "0") not in ("", "0")
@@ -5886,68 +6032,23 @@ def wout_minimal_from_fixed_boundary(
 
     lamscale = float(np.asarray(lamscale_from_phips(flux.phips, s)))
 
-    def _lambda_wout_from_full(*, lam_full: np.ndarray, m_modes: np.ndarray) -> np.ndarray:
-        lam_full = np.asarray(lam_full, dtype=float)
-        if lam_full.ndim != 2 or lam_full.shape[0] != ns:
-            raise ValueError("Expected lam_full with shape (ns, K)")
-        m_modes = np.asarray(m_modes, dtype=int)
-        if m_modes.ndim != 1 or m_modes.shape[0] != lam_full.shape[1]:
-            raise ValueError("Expected m_modes with shape (K,)")
-
-        if lamscale == 0.0:
-            lam_ext = np.zeros_like(lam_full)
-        else:
-            phipf_safe = np.where(phipf_internal == 0.0, 1.0, phipf_internal)
-            lam_ext = lam_full * (lamscale / phipf_safe[:, None])
-
-        if ns < 2:
-            return np.zeros_like(lam_ext)
-
-        hs = float(s[1] - s[0])
-        sqrts_f = np.zeros((ns + 1,), dtype=float)
-        shalf_f = np.zeros((ns + 1,), dtype=float)
-        for i in range(1, ns + 1):
-            sqrts_f[i] = np.sqrt(max(hs * float(i - 1), 0.0))
-            shalf_f[i] = np.sqrt(hs * abs(float(i) - 1.5))
-        sqrts_f[ns] = 1.0
-
-        sm_f = np.zeros((ns + 1,), dtype=float)
-        sp_f = np.zeros((ns + 1,), dtype=float)
-        for i in range(2, ns + 1):
-            sm_f[i] = shalf_f[i] / sqrts_f[i] if sqrts_f[i] != 0.0 else 0.0
-            if i < ns:
-                sp_f[i] = shalf_f[i + 1] / sqrts_f[i] if sqrts_f[i] != 0.0 else 0.0
-            else:
-                sp_f[i] = 1.0 / sqrts_f[i] if sqrts_f[i] != 0.0 else 0.0
-        sm_f[1] = 0.0
-        sp_f[0] = 0.0
-        sp_f[1] = sm_f[2] if ns >= 2 else 0.0
-
-        lam_half = lam_ext.copy()
-        mask_m_le1 = m_modes <= 1
-        if np.any(mask_m_le1):
-            lam_half[0, mask_m_le1] = lam_half[1, mask_m_le1]
-
-        even_mask = (m_modes % 2) == 0
-        odd_mask = ~even_mask
-        for js_idx in range(ns - 1, 0, -1):
-            if np.any(even_mask):
-                lam_half[js_idx, even_mask] = 0.5 * (lam_half[js_idx, even_mask] + lam_half[js_idx - 1, even_mask])
-            if np.any(odd_mask):
-                sm_val = sm_f[js_idx + 1]
-                sp_val = sp_f[js_idx]
-                lam_half[js_idx, odd_mask] = 0.5 * (
-                    sm_val * lam_half[js_idx, odd_mask] + sp_val * lam_half[js_idx - 1, odd_mask]
-                )
-
-        lam_half[0, :] = 0.0
-        return lam_half
-
     if wout_timing_enabled:
         wout_timing["jxbforce_mercier_s"] = _time.perf_counter() - t0
 
-    lmns = _lambda_wout_from_full(lam_full=lmns_internal, m_modes=np.asarray(main_modes.m, dtype=int))
-    lmnc = _lambda_wout_from_full(lam_full=lmnc_internal, m_modes=np.asarray(main_modes.m, dtype=int))
+    lmns = _lambda_wout_from_full_mesh(
+        lam_full=lmns_internal,
+        m_modes=np.asarray(main_modes.m, dtype=int),
+        s=s,
+        phipf_internal=phipf_internal,
+        lamscale=lamscale,
+    )
+    lmnc = _lambda_wout_from_full_mesh(
+        lam_full=lmnc_internal,
+        m_modes=np.asarray(main_modes.m, dtype=int),
+        s=s,
+        phipf_internal=phipf_internal,
+        lamscale=lamscale,
+    )
     if fsqt is None:
         fsqt_out = np.zeros((100,), dtype=float)
     else:
@@ -6167,95 +6268,18 @@ def state_from_wout(wout: WoutData) -> VMECState:
     #
     # This yields lambda coefficients that are consistent with VMEC's internal
     # `bcovar` formulas when used with our `lamscale` scaling.
-    def _lambda_full_from_wout(
-        *, lam_wout: np.ndarray, m_modes: np.ndarray, phipf: np.ndarray, lamscale: float
-    ) -> np.ndarray:
-        lam_wout = np.asarray(lam_wout, dtype=float)
-        if lam_wout.ndim != 2 or lam_wout.shape[0] != ns:
-            raise ValueError("Expected lam_wout with shape (ns, K)")
-        m_modes = np.asarray(m_modes, dtype=int)
-        if m_modes.ndim != 1 or m_modes.shape[0] != lam_wout.shape[1]:
-            raise ValueError("Expected m_modes with shape (K,)")
-        phipf = np.asarray(phipf, dtype=float)
-        if phipf.shape != (ns,):
-            raise ValueError("Expected phipf with shape (ns,)")
-        if ns < 2:
-            return lam_wout.copy()
-
-        hs = float(s[1] - s[0])
-        # Fortran-style 1-based arrays for sm/sp (profil1d.f).
-        sqrts_f = np.zeros((ns + 1,), dtype=float)
-        shalf_f = np.zeros((ns + 1,), dtype=float)
-        for i in range(1, ns + 1):
-            sqrts_f[i] = np.sqrt(max(hs * float(i - 1), 0.0))
-            shalf_f[i] = np.sqrt(hs * abs(float(i) - 1.5))
-        sqrts_f[ns] = 1.0  # avoid roundoff at boundary
-
-        sm_f = np.zeros((ns + 1,), dtype=float)
-        sp_f = np.zeros((ns + 1,), dtype=float)  # sp(0) exists in VMEC but is always 0
-        for i in range(2, ns + 1):
-            sm_f[i] = shalf_f[i] / sqrts_f[i] if sqrts_f[i] != 0.0 else 0.0
-            if i < ns:
-                sp_f[i] = shalf_f[i + 1] / sqrts_f[i] if sqrts_f[i] != 0.0 else 0.0
-            else:
-                sp_f[i] = 1.0 / sqrts_f[i] if sqrts_f[i] != 0.0 else 0.0
-        sm_f[1] = 0.0
-        sp_f[0] = 0.0
-        sp_f[1] = sm_f[2] if ns >= 2 else 0.0
-
-        lam_full = np.zeros_like(lam_wout)
-        # Axis initialization (load_xc_from_wout.f).
-        m = m_modes
-        is_m0 = m == 0
-        is_m1 = m == 1
-        lam_full[0, is_m0] = lam_wout[1, is_m0]
-        denom_m1 = sm_f[2] + sp_f[1]
-        if denom_m1 != 0.0:
-            lam_full[0, is_m1] = 2.0 * lam_wout[1, is_m1] / denom_m1
-        lam_full[0, ~(is_m0 | is_m1)] = 0.0
-
-        # Undo the half-mesh interpolation.
-        for mval in range(0, int(np.max(m_modes)) + 1):
-            mask = m_modes == mval
-            if not np.any(mask):
-                continue
-            if (mval % 2) == 0:
-                for js in range(2, ns + 1):
-                    lam_full[js - 1, mask] = 2.0 * lam_wout[js - 1, mask] - lam_full[js - 2, mask]
-            else:
-                for js in range(2, ns + 1):
-                    denom = sm_f[js]
-                    if denom == 0.0:
-                        lam_full[js - 1, mask] = 0.0
-                    else:
-                        lam_full[js - 1, mask] = (
-                            2.0 * lam_wout[js - 1, mask] - sp_f[js - 1] * lam_full[js - 2, mask]
-                        ) / denom
-
-        # Undo the old-style `phipf` division and `lamscale` multiply done in `wrout.f`.
-        #
-        # Important: VMEC's `wrout.f` writes (schematically)
-        #   lmns_wout(:,js) = (lmns1(:,js)/phipf(js)) * lamscale
-        # for **all** radial indices `js=1..ns` before interpolating onto the
-        # half mesh and finally setting `lmns(:,1)=0`. To recover internal full
-        # mesh lambda coefficients consistent with the fields stored in `wout`
-        # (notably `bsupu`), we must therefore multiply back by `phipf(js)` on
-        # *every* surface, including the axis surface.
-        lam_full = lam_full * phipf[:, None]
-        if lamscale != 0.0:
-            lam_full = lam_full / float(lamscale)
-        return lam_full
-
-    lmns_full = _lambda_full_from_wout(
+    lmns_full = _lambda_full_from_wout_half_mesh(
         lam_wout=np.asarray(wout.lmns),
         m_modes=np.asarray(wout.xm),
-        phipf=np.asarray(phipf_internal),
+        s=s,
+        phipf_internal=np.asarray(phipf_internal),
         lamscale=lamscale,
     )
-    lmnc_full = _lambda_full_from_wout(
+    lmnc_full = _lambda_full_from_wout_half_mesh(
         lam_wout=np.asarray(wout.lmnc),
         m_modes=np.asarray(wout.xm),
-        phipf=np.asarray(phipf_internal),
+        s=s,
+        phipf_internal=np.asarray(phipf_internal),
         lamscale=lamscale,
     )
 

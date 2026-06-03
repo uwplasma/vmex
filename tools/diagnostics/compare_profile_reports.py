@@ -74,6 +74,7 @@ EXACT_PROFILE_METRIC_NAMES = {
     "projected_replay_total_s": (
         "jacobian_projected_replay_total",
         "jacobian_fused_projected_replay_total",
+        "jacobian_chunked_projected_replay_projection_total",
     ),
     "projected_replay_dispatch_s": ("jacobian_projected_tape_replay_dispatch",),
     "accepted_replay_dispatch_s": (
@@ -197,6 +198,7 @@ ACCEPTED_REPLAY_PROFILE_NAMES = {
     "jacobian_tape_replay",
     "jacobian_projected_replay_total",
     "jacobian_fused_projected_replay_total",
+    "jacobian_chunked_projected_replay_projection_total",
     "gradient_tape_replay",
     "state_tangent_tape_replay",
     "b_cartesian_tangent_tape_replay",
@@ -619,6 +621,7 @@ EXACT_OPTIMIZER_PATCH_TARGET_NAMES = {
     "jacobian_projected_replay_residual_tangents",
     "jacobian_projected_replay_total",
     "jacobian_fused_projected_replay_total",
+    "jacobian_chunked_projected_replay_projection_total",
     "gradient_tape_replay",
     "state_tangent_tape_replay",
     "b_cartesian_tangent_tape_replay",
@@ -1505,7 +1508,12 @@ def _exact_optimizer_patch_target(
     for name, rec in profile.items():
         name_s = str(name)
         if name_s in EXACT_OPTIMIZER_CONTAINER_PROFILE_NAMES or (
-            name_s.endswith("_total") and name_s != "jacobian_fused_projected_replay_total"
+            name_s.endswith("_total")
+            and name_s
+            not in (
+                "jacobian_fused_projected_replay_total",
+                "jacobian_chunked_projected_replay_projection_total",
+            )
         ):
             continue
         if name_s == "exact_tape_build":

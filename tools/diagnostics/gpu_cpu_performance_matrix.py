@@ -152,7 +152,7 @@ def _build_parser() -> argparse.ArgumentParser:
     fixed.add_argument("--allow-multigrid", dest="single_grid", action="store_false")
 
     exact = parser.add_argument_group("exact-callback mode")
-    exact.add_argument("--problem", choices=("qa", "qh"), default="qh")
+    exact.add_argument("--problem", choices=("qa", "qh", "qp"), default="qh")
     exact.add_argument("--max-mode", type=int, default=2)
     exact.add_argument(
         "--callback",
@@ -167,7 +167,16 @@ def _build_parser() -> argparse.ArgumentParser:
     exact.add_argument("--trial-ftol", type=float, default=1.0e-10)
     exact.add_argument(
         "--method",
-        choices=("auto", "scipy", "scipy_matrix_free", "gauss_newton", "lbfgs_adjoint", "scalar_trust"),
+        choices=(
+            "auto",
+            "auto_scalar",
+            "auto_adjoint",
+            "scipy",
+            "scipy_matrix_free",
+            "gauss_newton",
+            "lbfgs_adjoint",
+            "scalar_trust",
+        ),
         default="scipy",
         help="Optimizer method for exact-callback --callback run profiling.",
     )

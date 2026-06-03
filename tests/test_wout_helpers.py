@@ -33,6 +33,9 @@ from vmec_jax.wout import (
     _jxbforce_filter_with_bsubs_derivs_loop,
     _jxbforce_getbsubs_coeffs_lasym_false,
     _jxbforce_getbsubs_coeffs_lasym_true,
+    _lambda_full_from_wout_half_mesh,
+    _lambda_half_mesh_weights,
+    _lambda_wout_from_full_mesh,
     _vmec_jxbforce_cos_coeffs,
     _vmec_jxbforce_sin_coeffs,
     _jxbforce_nyquist_limits,
@@ -140,6 +143,133 @@ def test_mesh_weight_and_safe_divide_helpers():
         _vmec_wint_from_trig_jax(
             SimpleNamespace(cosmui3=np.asarray([[1.0]]), mscale=np.asarray([]), cosnv=np.zeros((1, 1)))
         )
+
+
+def test_lambda_wout_half_mesh_roundtrip_covers_m_parity_branches():
+    s = np.linspace(0.0, 1.0, 5)
+    m_modes = np.asarray([0, 1, 2, 3], dtype=int)
+    phipf_internal = np.asarray([1.0, 1.2, 1.4, 1.7, 2.0])
+    lamscale = 2.5
+    lam_full = np.asarray(
+        [
+            [0.25 / 1.2, -0.125 / 1.2, 0.00, 0.00],
+            [0.25, -0.125, 0.12, -0.04],
+            [0.32, 0.02, 0.18, 0.03],
+            [0.45, 0.07, 0.24, 0.08],
+            [0.51, 0.11, 0.31, 0.13],
+        ],
+        dtype=float,
+    )
+
+    lam_wout = _lambda_wout_from_full_mesh(
+        lam_full=lam_full,
+        m_modes=m_modes,
+        s=s,
+        phipf_internal=phipf_internal,
+        lamscale=lamscale,
+    )
+
+    assert lam_wout.shape == lam_full.shape
+    np.testing.assert_allclose(lam_wout[0], 0.0)
+    recovered = _lambda_full_from_wout_half_mesh(
+        lam_wout=lam_wout,
+        m_modes=m_modes,
+        s=s,
+        phipf_internal=phipf_internal,
+        lamscale=lamscale,
+    )
+
+    # Modes m>1 have no recoverable axis lambda after VMEC's half-mesh write
+    # convention, but all physical half/full surfaces must roundtrip.
+    expected = lam_full.copy()
+    expected[0, m_modes > 1] = 0.0
+    np.testing.assert_allclose(recovered, expected, rtol=1.0e-13, atol=1.0e-13)
+
+
+def test_lambda_wout_half_mesh_validation_and_degenerate_scaling():
+    s = np.linspace(0.0, 1.0, 3)
+    lam = np.ones((3, 2))
+    m_modes = np.asarray([0, 1])
+    phipf_internal = np.asarray([0.0, 1.0, 2.0])
+
+    zero_scale = _lambda_wout_from_full_mesh(
+        lam_full=lam,
+        m_modes=m_modes,
+        s=s,
+        phipf_internal=phipf_internal,
+        lamscale=0.0,
+    )
+    np.testing.assert_allclose(zero_scale, 0.0)
+
+    with pytest.raises(ValueError, match="lam_full"):
+        _lambda_wout_from_full_mesh(
+            lam_full=np.ones((4, 2)),
+            m_modes=m_modes,
+            s=s,
+            phipf_internal=phipf_internal,
+            lamscale=1.0,
+        )
+    with pytest.raises(ValueError, match="m_modes"):
+        _lambda_wout_from_full_mesh(
+            lam_full=lam,
+            m_modes=np.asarray([0]),
+            s=s,
+            phipf_internal=phipf_internal,
+            lamscale=1.0,
+        )
+    with pytest.raises(ValueError, match="phipf"):
+        _lambda_wout_from_full_mesh(
+            lam_full=lam,
+            m_modes=m_modes,
+            s=s,
+            phipf_internal=np.ones(4),
+            lamscale=1.0,
+        )
+    with pytest.raises(ValueError, match="lam_wout"):
+        _lambda_full_from_wout_half_mesh(
+            lam_wout=np.ones((4, 2)),
+            m_modes=m_modes,
+            s=s,
+            phipf_internal=phipf_internal,
+            lamscale=1.0,
+        )
+    with pytest.raises(ValueError, match="m_modes"):
+        _lambda_full_from_wout_half_mesh(
+            lam_wout=lam,
+            m_modes=np.asarray([0]),
+            s=s,
+            phipf_internal=phipf_internal,
+            lamscale=1.0,
+        )
+    with pytest.raises(ValueError, match="phipf"):
+        _lambda_full_from_wout_half_mesh(
+            lam_wout=lam,
+            m_modes=m_modes,
+            s=s,
+            phipf_internal=np.ones(4),
+            lamscale=1.0,
+        )
+
+    single = _lambda_wout_from_full_mesh(
+        lam_full=np.asarray([[3.0, 4.0]]),
+        m_modes=m_modes,
+        s=np.asarray([0.0]),
+        phipf_internal=np.asarray([1.0]),
+        lamscale=1.0,
+    )
+    np.testing.assert_allclose(single, 0.0)
+    recovered_single = _lambda_full_from_wout_half_mesh(
+        lam_wout=np.asarray([[3.0, 4.0]]),
+        m_modes=m_modes,
+        s=np.asarray([0.0]),
+        phipf_internal=np.asarray([1.0]),
+        lamscale=1.0,
+    )
+    np.testing.assert_allclose(recovered_single, [[3.0, 4.0]])
+
+    sm_f, sp_f = _lambda_half_mesh_weights(np.asarray([0.0]))
+    np.testing.assert_allclose(sm_f, [0.0, 0.0])
+    np.testing.assert_allclose(sp_f, [0.0, 0.0])
 
 
 def test_bss_scalxc_undo_helpers(monkeypatch):

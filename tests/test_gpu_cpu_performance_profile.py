@@ -365,6 +365,63 @@ def test_performance_matrix_exact_command_can_request_memory_profile(tmp_path):
     assert command[command.index("--device-memory-profile-out") + 1] == str(memory)
 
 
+def test_performance_matrix_exact_command_supports_qp_problem(tmp_path):
+    tool = _load_tool()
+    args = tool._build_parser().parse_args(
+        [
+            "--mode",
+            "exact-callback",
+            "--backend",
+            "gpu",
+            "--problem",
+            "qp",
+            "--max-mode",
+            "4",
+            "--callback",
+            "jacobian",
+        ]
+    )
+
+    command = tool.build_child_command(
+        args=args,
+        backend="gpu",
+        report_path=tmp_path / "qp_gpu.json",
+        trace_dir=None,
+        memory_profile_path=None,
+    )
+
+    assert command[command.index("--problem") + 1] == "qp"
+    assert command[command.index("--solver-device") + 1] == "gpu"
+
+
+def test_performance_matrix_exact_command_supports_auto_scalar_method(tmp_path):
+    tool = _load_tool()
+    args = tool._build_parser().parse_args(
+        [
+            "--mode",
+            "exact-callback",
+            "--backend",
+            "gpu",
+            "--problem",
+            "qp",
+            "--callback",
+            "run",
+            "--method",
+            "auto_scalar",
+        ]
+    )
+
+    command = tool.build_child_command(
+        args=args,
+        backend="gpu",
+        report_path=tmp_path / "auto_scalar_gpu.json",
+        trace_dir=None,
+        memory_profile_path=None,
+    )
+
+    assert command[command.index("--method") + 1] == "auto_scalar"
+
+
 def test_exact_optimizer_profiler_trial_scan_flag_normalization(monkeypatch):
     exact_tool = _load_exact_tool()
 
@@ -376,6 +433,14 @@ def test_exact_optimizer_profiler_trial_scan_flag_normalization(monkeypatch):
     assert legacy.trial_scan == "on"
     assert legacy.method == "auto"
     assert explicit_off.trial_scan == "off"
+
+
+def test_exact_optimizer_profiler_accepts_qp_problem():
+    exact_tool = _load_exact_tool()
+
+    args = exact_tool._parse_args(["--problem", "qp", "--callback", "jacobian"])
+
+    assert args.problem == "qp"
 
 
 def test_exact_profiler_runtime_info_records_device_timing():
@@ -458,6 +523,50 @@ def test_exact_run_history_payload_exposes_timing_aliases():
     assert payload["timing"]["exact_tape_build"] == 1.5
     assert payload["timing"]["jacobian_tape_replay"] == 0.75
     json.dumps(exact_tool._json_safe(payload))
+
+
+def test_exact_run_payload_attaches_replay_scan_cache_diagnostics():
+    exact_tool = _load_exact_tool()
+    payload = {"profile": {}}
+    diagnostics = {
+        "replay_dynamic_basepoint_vjp_scan_cache_hit_count": 2,
+        "replay_dynamic_basepoint_vjp_scan_cache_build_s": 0.25,
+    }
+
+    returned = exact_tool._attach_replay_scan_cache_diagnostics(payload, diagnostics)
+
+    assert returned is payload
+    assert payload["replay_scan_cache_diagnostics"] == diagnostics
+    json.dumps(exact_tool._json_safe(payload))
+
+
+def test_exact_run_history_metadata_helper_records_problem_context():
+    exact_tool = _load_exact_tool()
+    args = exact_tool._parse_args(
+        [
+            "--problem",
+            "qp",
+            "--max-mode",
+            "5",
+            "--method",
+            "scipy_matrix_free",
+            "--solver-device",
+            "gpu",
+        ]
+    )
+    payload = exact_tool._attach_optimizer_run_metadata(
+        {},
+        args=args,
+        specs_count=120,
+        solver_device_resolved="default",
+    )
+
+    assert payload["problem"] == "qp"
+    assert payload["max_mode"] == 5
+    assert payload["dofs"] == 120
+    assert payload["method"] == "scipy_matrix_free"
+    assert payload["solver_device_requested"] == "gpu"
+    assert payload["solver_device_resolved"] == "default"
 
 
 def test_exact_callback_summary_preserves_cold_tangent_replay_and_scan_trial_buckets():

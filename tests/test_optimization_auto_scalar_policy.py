@@ -146,7 +146,7 @@ def _run_ready_scalar_optimizer() -> FixedBoundaryExactOptimizer:
 @pytest.mark.parametrize(
     ("method", "expected_reason", "expected_cost_only"),
     [
-        ("auto_scalar", "auto_scalar:high-mode-scalar-trust", True),
+        ("auto_scalar", "auto_scalar:high-mode-scalar-trust", False),
         ("scalar_trust", None, False),
     ],
 )

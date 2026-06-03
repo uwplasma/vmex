@@ -4480,11 +4480,7 @@ class FixedBoundaryExactOptimizer:
             if scalar_cost_only_trials is None:
                 cost_only_trial_flag = os.getenv("VMEC_JAX_OPT_SCALAR_COST_ONLY_TRIALS")
                 if cost_only_trial_flag is None:
-                    cost_only_trials = (
-                        True
-                        if str(method_auto_reason or "").startswith("auto_scalar:")
-                        else bool(getattr(self, "_scalar_trust_cost_only_trials", False))
-                    )
+                    cost_only_trials = bool(getattr(self, "_scalar_trust_cost_only_trials", False))
                 else:
                     cost_only_trials = cost_only_trial_flag.strip().lower() in ("1", "true", "yes", "on")
             else:

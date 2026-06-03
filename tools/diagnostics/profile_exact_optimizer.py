@@ -29,6 +29,7 @@ ACCEPTED_REPLAY_PROFILE_NAMES = (
     "jacobian_tape_replay",
     "jacobian_projected_replay_total",
     "jacobian_fused_projected_replay_total",
+    "jacobian_chunked_projected_replay_projection_total",
     "gradient_tape_replay",
     "state_tangent_tape_replay",
     "b_cartesian_tangent_tape_replay",
@@ -43,7 +44,7 @@ RESIDUAL_TANGENT_PROFILE_NAMES = (
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser()
-    p.add_argument("--problem", choices=("qa", "qh"), default="qa")
+    p.add_argument("--problem", choices=("qa", "qh", "qp"), default="qa")
     p.add_argument("--max-mode", type=int, default=1)
     p.add_argument("--max-nfev", type=int, default=3)
     p.add_argument("--inner-max-iter", type=int, default=0)
@@ -491,6 +492,35 @@ def _history_payload_with_aliases(
         phase_timing=phase_timing,
         profile=profile if isinstance(profile, dict) else None,
     )
+
+
+def _attach_replay_scan_cache_diagnostics(
+    payload: dict[str, Any],
+    diagnostics: dict[str, int | float],
+) -> dict[str, Any]:
+    """Attach replay-scan cache counters to optimizer run payloads."""
+
+    if diagnostics:
+        payload["replay_scan_cache_diagnostics"] = dict(diagnostics)
+    return payload
+
+
+def _attach_optimizer_run_metadata(
+    payload: dict[str, Any],
+    *,
+    args: argparse.Namespace,
+    specs_count: int,
+    solver_device_resolved: str,
+) -> dict[str, Any]:
+    """Attach stable run metadata to optimizer-history JSON payloads."""
+
+    payload.setdefault("problem", str(args.problem))
+    payload.setdefault("max_mode", int(args.max_mode))
+    payload.setdefault("dofs", int(specs_count))
+    payload.setdefault("method", str(args.method))
+    payload.setdefault("solver_device_requested", str(args.solver_device))
+    payload.setdefault("solver_device_resolved", str(solver_device_resolved))
+    return payload
 
 
 def _sum_timing_aliases(payloads: list[dict[str, Any]]) -> dict[str, float | int]:
@@ -1124,12 +1154,43 @@ def main() -> int:
     enable_x64(True)
 
     root = Path(__file__).resolve().parents[2]
-    input_file = root / "examples" / "data" / (
-        "input.nfp2_QA" if args.problem == "qa" else "input.nfp4_QH_warm_start"
-    )
-    helicity_n = 0 if args.problem == "qa" else -1
-    target_aspect = 6.0 if args.problem == "qa" else 7.0
-    target_iota = 0.41 if args.problem == "qa" else None
+    problem_defaults = {
+        "qa": {
+            "input": "input.nfp2_QA",
+            "helicity_m": 1,
+            "helicity_n": 0,
+            "target_aspect": 6.0,
+            "target_iota": 0.41,
+            "min_abs_iota": None,
+            "iota_weight": 1.0,
+        },
+        "qh": {
+            "input": "input.nfp4_QH_warm_start",
+            "helicity_m": 1,
+            "helicity_n": -1,
+            "target_aspect": 7.0,
+            "target_iota": None,
+            "min_abs_iota": None,
+            "iota_weight": 1.0,
+        },
+        "qp": {
+            "input": "input.nfp2_QI",
+            "helicity_m": 0,
+            "helicity_n": -1,
+            "target_aspect": 5.0,
+            "target_iota": None,
+            "min_abs_iota": 0.41,
+            # The QP example uses tuple weight=40000, i.e. residual scale=200.
+            "iota_weight": 200.0,
+        },
+    }
+    problem_cfg = problem_defaults[str(args.problem)]
+    input_file = root / "examples" / "data" / str(problem_cfg["input"])
+    helicity_m = int(problem_cfg["helicity_m"])
+    helicity_n = int(problem_cfg["helicity_n"])
+    target_aspect = float(problem_cfg["target_aspect"])
+    target_iota = problem_cfg["target_iota"]
+    min_abs_iota = problem_cfg["min_abs_iota"]
 
     cfg, indata = vj.load_config(str(input_file))
     indata = rebuild_indata_with_resolution(indata, mpol=args.mpol, ntor=args.ntor)
@@ -1158,13 +1219,14 @@ def main() -> int:
     residuals_fn = vj.make_qs_residuals_fn(
         static,
         indata,
-        helicity_m=1,
+        helicity_m=helicity_m,
         helicity_n=helicity_n,
         target_aspect=target_aspect,
         target_iota=target_iota,
+        min_abs_iota=min_abs_iota,
         surfaces=np.arange(0.0, 1.01, 0.1),
         aspect_weight=1.0,
-        iota_weight=1.0,
+        iota_weight=float(problem_cfg["iota_weight"]),
         qs_weight=1.0,
     )
     opt = vj.FixedBoundaryExactOptimizer(
@@ -1426,6 +1488,7 @@ def main() -> int:
 
     run_repeats = max(1, int(args.run_repeats))
     histories: list[dict[str, object]] = []
+    replay_scan_diagnostics_by_repeat: list[dict[str, Any]] = []
     result = None
     try:
         tr_solver = None if args.scipy_tr_solver == "none" else args.scipy_tr_solver
@@ -1458,7 +1521,16 @@ def main() -> int:
                 scalar_cost_only_trials=args.scalar_cost_only_trials,
                 trace_callbacks=args.trace_callbacks,
             )
+            replay_scan_diag = _replay_scan_cache_snapshot(reset=True)
+            replay_scan_diagnostics_by_repeat.append({"replay_scan_cache_diagnostics": replay_scan_diag})
             hist_repeat = _history_payload_with_aliases(dict(result["_history_dump"]))
+            _attach_replay_scan_cache_diagnostics(hist_repeat, replay_scan_diag)
+            _attach_optimizer_run_metadata(
+                hist_repeat,
+                args=args,
+                specs_count=len(specs),
+                solver_device_resolved=opt._solver_device_name or "default",
+            )
             hist_repeat["repeat"] = repeat
             hist_repeat["runtime"] = runtime_info
             histories.append(hist_repeat)
@@ -1472,6 +1544,16 @@ def main() -> int:
     if result is None:  # pragma: no cover - defensive
         raise RuntimeError("optimizer run did not produce a result")
     hist = _history_payload_with_aliases(dict(result["_history_dump"]), phase_timing=phase_timing)
+    _attach_replay_scan_cache_diagnostics(
+        hist,
+        _sum_replay_scan_cache_diagnostics(replay_scan_diagnostics_by_repeat),
+    )
+    _attach_optimizer_run_metadata(
+        hist,
+        args=args,
+        specs_count=len(specs),
+        solver_device_resolved=opt._solver_device_name or "default",
+    )
     hist["runtime"] = runtime_info
     print(
         f"\nFinal objective={hist['objective_final']:.6e} qs={hist['qs_final']:.6e} "

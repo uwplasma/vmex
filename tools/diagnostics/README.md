@@ -27,8 +27,9 @@ Common parity/validation scripts (moved from `examples/validation/`):
 Performance profiling:
 
 - `profile_exact_optimizer.py --callback jacobian --perturb-scale ...`
-  measures accepted-point optimizer callback phases, optimizer/global cache
-  growth, RSS growth, and JSON budget status for CPU/GPU production profiling.
+  measures accepted-point optimizer callback phases for QA/QH/QP fixed-boundary
+  quasisymmetry objectives, optimizer/global cache growth, RSS growth, and JSON
+  budget status for CPU/GPU production profiling.
   Initial aspect/QS metrics are skipped by default to avoid an unmeasured exact
   solve before the profile; add `--initial-metrics` for that sanity check. Use
   `--vmec-timing-detail` for targeted preconditioner subphase timing (`apply`

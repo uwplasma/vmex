@@ -1125,13 +1125,18 @@ Exact optimizer profiling
 -------------------------
 
 Use ``tools/diagnostics/profile_exact_optimizer.py`` to time the exact
-optimization callback stack:
+optimization callback stack for the QA, QH, and QP quasisymmetry objectives:
 
 .. code-block:: bash
 
    PYTHONPATH=. python tools/diagnostics/profile_exact_optimizer.py \
      --problem qa --max-mode 2 --max-nfev 2 \
      --trial-max-iter 300 --trial-ftol 1e-10
+
+Use ``--problem qp`` for the quasi-poloidal fixed-boundary profile preset.  QI
+uses Boozer-space residuals and promotion gates, so profile it with the
+dedicated ``tools/diagnostics/profile_qi_boozer_gpu.py`` path before launching
+full QI optimization sweeps.
 
 The callback profile reports separate timings for relaxed trial solves, exact
 tape construction, checkpoint-tape JVP replay, residual tangent projection, and
@@ -1316,7 +1321,33 @@ the previous ``~69--71 s`` range to ``61.5 s`` by default; an explicit opt-in
 probe of the same path measured ``60.1 s``.  The new timing bucket is
 ``jacobian_chunked_projected_replay_projection_total``.  Set
 ``VMEC_JAX_OPT_CHUNKED_PROJECTED_REPLAY_PROJECTION=0`` to restore the old
-full-tangent projection path for diagnostics.
+full-tangent projection path for diagnostics.  A short QH ``max_mode=4``
+optimizer run with ``max_nfev=3`` then confirmed the callback result at the
+solver level: wall time dropped from the previous dense SciPy ``94.8 s`` trace
+to ``78.4 s`` while reaching the same final objective scale
+(``1.74024e-1``).  The remaining high-mode GPU buckets are chunked
+replay/projection, accepted exact-tape build, and relaxed trial solves.
+The same diagnostics now cover QP.  On ``office`` at commit ``80ccd51``, QP
+``max_mode=4`` with 80 boundary DOFs took ``63.8 s`` for one exact Jacobian
+callback, with ``31.9 s`` in
+``jacobian_chunked_projected_replay_projection_total`` and ``22.5 s`` in tape
+build.  A short QP ``max_mode=4`` optimizer run with ``max_nfev=3`` took
+``70.5 s`` for one accepted Jacobian plus two trial solves.  QP ``max_mode=5``
+with 120 boundary DOFs took ``68.2 s`` for one exact Jacobian, with ``36.2 s``
+in chunked projected replay/projection and ``22.8 s`` in tape build.  The
+mode-5 result confirms that the current chunked projection path scales
+reasonably with parameter count; the next production target remains reducing
+the replay/projection dispatch and cold accepted-tape build costs.
+
+The same QP ``max_mode=4`` short optimizer was then profiled with
+``method="auto_scalar"``.  With cost-only scalar trial filtering enabled it took
+``90.6 s`` and reduced the objective to ``6.32``; with cost-only trials disabled
+it took ``78.1 s`` and reduced the objective to ``6.55``.  Both scalar-adjoint
+runs made more progress than the dense three-evaluation diagnostic, but the
+no-cost-only variant removed three extra forward trial solves with only a small
+objective penalty.  Therefore ``auto_scalar`` now leaves
+``scalar_cost_only_trials`` disabled by default and keeps it as an explicit
+globalization knob.
 
 A follow-up QH ``max_mode=2`` GPU profile on ``office`` with
 ``--inner-max-iter 80``, ``--trial-max-iter 40``,
@@ -2014,10 +2045,12 @@ refresh, explicit GPU/CUDA/ROCm high-mode, stellarator-symmetric QS/QI
 ``auto_scalar`` runs also use ``scalar_trust`` rather than falling back to
 dense SciPy.  Low-mode, LASYM, and ordinary ``method="auto"`` GPU runs stay on
 dense SciPy unless the caller explicitly chooses another method.  ``auto_scalar``
-also enables cost-only trial filtering unless the caller overrides
-``scalar_cost_only_trials``.  This is the production entry point for testing
-scalar-adjoint optimization without relying on
-``VMEC_JAX_OPT_SCALAR_COST_ONLY_TRIALS``.
+does not enable cost-only trial filtering by default, since QH and QP GPU
+profiles showed the extra forward trial solves can dominate short high-mode
+runs.  Enable that filter explicitly with ``scalar_cost_only_trials=True`` or
+``VMEC_JAX_OPT_SCALAR_COST_ONLY_TRIALS=1`` when a rugged case needs trial
+screening before exact gradient builds.  This is the production entry point for
+testing scalar-adjoint optimization without relying on environment variables.
 
 A 2026-05-20 matrix-free cleanup removed one redundant initialization AD pass:
 ``residual_linear_operator`` now obtains the frozen-axis initial-state

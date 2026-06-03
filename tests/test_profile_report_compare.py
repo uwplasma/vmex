@@ -105,6 +105,32 @@ def test_callback_report_summary_extracts_bottleneck_metrics() -> None:
     assert summary["top_profile"][0]["name"] == "exact_solve_with_tape_total"
 
 
+def test_callback_report_summary_counts_chunked_projected_replay_projection() -> None:
+    report = _callback_report(
+        total_wall_time_s=10.0,
+        samples=1,
+        rss_peak_mib=256,
+        replay_wall_time_s=0.1,
+        accepted_replays=1,
+        solve_count=2,
+        cache_entry_growth=0,
+        solver_device="gpu",
+    )
+    del report["profile"]["jacobian_tape_replay"]
+    report["profile"]["jacobian_chunked_projected_replay_projection_total"] = {
+        "count": 2,
+        "wall_time_s": 3.0,
+        "mean_wall_time_s": 1.5,
+    }
+
+    summary = compare_tool.summarize_payload(report, label="gpu")
+
+    assert summary["metrics"]["replay_time_s"] == 3.0
+    assert summary["metrics"]["projected_replay_total_s"] == 3.0
+    assert summary["metrics"]["accepted_point_replay_count"] == 2
+    assert summary["exact_optimizer_patch_target"]["name"] == "jacobian_chunked_projected_replay_projection_total"
+
+
 def test_callback_report_summary_infers_effective_gpu_jvp_metadata() -> None:
     payload = _callback_report(
         total_wall_time_s=8.0,
