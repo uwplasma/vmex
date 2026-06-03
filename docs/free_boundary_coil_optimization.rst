@@ -1497,10 +1497,14 @@ requirements.
 The optional VMEC2000 generated-``mgrid`` comparison is present but xfailed for
 now. VMEC2000 reads the generated grid and advances the trace locally, but the
 current generated-``mgrid`` free-boundary parity gap is not bounded tightly
-enough for a promoted gate. Dump-to-dump VMEC2000 comparisons require an
-instrumented executable that honors the ``VMEC_DUMP_*`` environment variables.
-That is a validation task, not a reason to regress the existing
-VMEC2000-parity ``mgrid`` fixtures.
+enough for a promoted gate. The comparator now handles both main and Nyquist
+WOUT mode bases for low-order geometry and magnetic-field arrays, so the
+remaining blocker is not array-shape handling: sign-flipped diagnostic runs can
+produce a VMEC2000 WOUT, but that WOUT still has underconverged/zero geometric
+scalars and fails the current iota/energy limits. Dump-to-dump VMEC2000
+comparisons require an instrumented executable that honors the ``VMEC_DUMP_*``
+environment variables. That is a validation task, not a reason to regress the
+existing VMEC2000-parity ``mgrid`` fixtures.
 
 Next Implementation Steps
 -------------------------

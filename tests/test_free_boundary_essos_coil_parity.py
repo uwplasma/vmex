@@ -4,6 +4,7 @@ from copy import deepcopy
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -192,12 +193,51 @@ def _low_order_mode_mask(wout, *, max_m: int = 2, max_abs_n: int = 2) -> np.ndar
     return (np.abs(xm) <= max_m) & (np.abs(n) <= max_abs_n)
 
 
+def _low_order_mode_mask_for_array(wout, array, *, max_m: int = 2, max_abs_n: int = 2) -> np.ndarray:
+    arr = np.asarray(array)
+    if arr.ndim == 0:
+        raise ValueError("mode arrays must have at least one dimension")
+    mode_count = int(arr.shape[-1])
+    main_xm = np.asarray(getattr(wout, "xm", []), dtype=int)
+    main_xn = np.asarray(getattr(wout, "xn", []), dtype=int)
+    nyq_xm = np.asarray(getattr(wout, "xm_nyq", []), dtype=int)
+    nyq_xn = np.asarray(getattr(wout, "xn_nyq", []), dtype=int)
+    if mode_count == int(main_xm.size):
+        xm, xn = main_xm, main_xn
+    elif mode_count == int(nyq_xm.size):
+        xm, xn = nyq_xm, nyq_xn
+    else:
+        raise ValueError(
+            f"cannot match array mode dimension {mode_count} to main "
+            f"({main_xm.size}) or Nyquist ({nyq_xm.size}) WOUT bases"
+        )
+    nfp = max(1, int(wout.nfp))
+    n = np.rint(xn / float(nfp)).astype(int)
+    return (np.abs(xm) <= max_m) & (np.abs(n) <= max_abs_n)
+
+
 def _finite_scalar(wout, name: str) -> float | None:
     if not hasattr(wout, name):
         return None
     value = float(getattr(wout, name))
     assert np.isfinite(value), f"{name}: non-finite scalar {value}"
     return value
+
+
+def test_low_order_mode_mask_matches_main_and_nyquist_wout_bases() -> None:
+    wout = SimpleNamespace(
+        nfp=2,
+        xm=np.asarray([0, 1, 2, 3]),
+        xn=np.asarray([0, -2, 4, 8]),
+        xm_nyq=np.asarray([0, 1, 2, 3, 1, 0]),
+        xn_nyq=np.asarray([0, -2, 4, 8, 10, 12]),
+    )
+
+    main_mask = _low_order_mode_mask_for_array(wout, np.zeros((3, 4)))
+    nyq_mask = _low_order_mode_mask_for_array(wout, np.zeros((3, 6)))
+
+    np.testing.assert_array_equal(main_mask, np.asarray([True, True, True, False]))
+    np.testing.assert_array_equal(nyq_mask, np.asarray([True, True, True, False, False, False]))
 
 
 def _assert_same_sign_and_scale(name: str, got: float, ref: float, *, max_ratio: float) -> None:
@@ -342,9 +382,9 @@ def _wout_gap_report(wout_jax, wout_vmec2000) -> dict[str, object]:
             )
 
     try:
-        low_order = _low_order_mode_mask(wout_vmec2000)
         for name in ("rmnc", "zmns", "lmns", "bmnc", "gmnc", "bsubumnc", "bsubvmnc", "bsupumnc", "bsupvmnc"):
             if hasattr(wout_jax, name) and hasattr(wout_vmec2000, name):
+                low_order = _low_order_mode_mask_for_array(wout_vmec2000, getattr(wout_vmec2000, name))
                 report["low_order_modes"][name] = _array_gap(
                     getattr(wout_jax, name),
                     getattr(wout_vmec2000, name),

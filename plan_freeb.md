@@ -151,6 +151,64 @@ Need from user:
 
 Nothing now.
 
+### 2026-06-03 VMEC2000 generated-mgrid low-order mode-basis comparator fix
+
+Steps taken:
+
+1. Re-ran the optional VMEC2000 generated-``mgrid`` trace-smoke gate locally
+   using the ESSOS mgrid-capable checkout and `/Users/rogeriojorge/bin/xvmec2000`.
+2. Re-ran the optional WOUT-level VMEC2000 generated-``mgrid`` parity gate and
+   confirmed it still xfails for the known bounded
+   `vmec2000_vacuum_inactive_force_gate` classification on the default sign.
+3. Ran the sign-flipped `--phiedge-scale -1` diagnostic with a shared short
+   multigrid schedule. VMEC2000 produced a WOUT, while vmec_jax direct-coil
+   versus generated-``mgrid`` still passed.
+4. Found and fixed a comparator shape bug: low-order masks for Nyquist arrays
+   such as ``bmnc``, ``bsub*``, and ``bsup*`` were incorrectly built from the
+   main ``xm/xn`` basis. The diagnostic and optional test helper now choose the
+   main or Nyquist basis according to each array's last dimension.
+5. Added a synthetic unit test covering both main and Nyquist low-order masks.
+
+Results obtained:
+
+1. Optional trace smoke passed:
+   `PYTHONPATH=/Users/rogeriojorge/local/ESSOS_mgrid_pr:$PYTHONPATH
+   VMEC2000_INTEGRATION=1 VMEC2000_EXEC=/Users/rogeriojorge/bin/xvmec2000
+   JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_essos_coil_parity.py::test_vmec2000_generated_mgrid_trace_smoke_records_iteration_rows
+   -rx -s`: `1 passed in 19.32 s`.
+2. Optional WOUT-level gate remains a bounded xfail:
+   `test_vmec2000_generated_mgrid_free_boundary_matches_vmec_jax_and_direct_coils`
+   -> `status=more_iter_exit classification=vmec2000_vacuum_inactive_force_gate`.
+3. Sign-flipped diagnostic completed with VMEC2000 WOUT output and no hard
+   errors. After the mask fix, the JSON has no `low_order_modes_error`; main
+   and Nyquist low-order entries are populated for ``rmnc``, ``zmns``,
+   ``bmnc``, ``bsub*``, and ``bsup*``.
+4. The remaining sign-flipped WOUT-level mismatch is physical/convergence
+   evidence, not comparator shape handling: low-order ``rmnc`` and ``zmns``
+   relative RMS gaps are about `0.041` and `0.066`, but VMEC2000 reports zero
+   geometry scalars and high `fsq_total≈24.67`, so aspect/beta/iota limits are
+   not promotable.
+5. `python -m ruff check
+   tools/diagnostics/compare_freeb_coils_mgrid_vmec2000.py
+   tests/test_free_boundary_essos_coil_parity.py` passed.
+6. `python -m pytest -q
+   tests/test_free_boundary_essos_coil_parity.py::test_low_order_mode_mask_matches_main_and_nyquist_wout_bases
+   -q` passed.
+
+Best next steps:
+
+1. Keep VMEC2000 generated-``mgrid`` WOUT parity optional/xfail until a
+   converged sign-consistent VMEC2000 WOUT with nonzero geometry scalars is
+   available.
+2. Next parity experiment should focus on the VMEC2000 schedule/sign/source
+   convention that reduces `fsq_total`, not on comparator array-shape handling.
+3. Continue phase-2 production adjoint work and GPU performance separately.
+
+Need from user:
+
+Nothing now.
+
 ### 2026-06-03 Preconditioner policy correctness and GPU lax-tridi probe
 
 Steps taken:

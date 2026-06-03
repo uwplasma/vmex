@@ -678,6 +678,44 @@ def _low_order_mode_mask(wout: Any, *, max_m: int = 2, max_abs_n: int = 2) -> np
     return (np.abs(xm) <= max_m) & (np.abs(n) <= max_abs_n)
 
 
+def _low_order_mode_mask_for_array(
+    wout: Any,
+    array: Any,
+    *,
+    max_m: int = 2,
+    max_abs_n: int = 2,
+) -> np.ndarray:
+    """Return a low-order mask matching an array's mode basis.
+
+    VMEC WOUT files store geometry/lambda arrays on the main ``xm/xn`` basis,
+    while magnetic-field arrays use the Nyquist ``xm_nyq/xn_nyq`` basis.  The
+    generated-mgrid VMEC2000 diagnostic compares both classes, so the mask must
+    be chosen from the array's own last dimension instead of reusing the main
+    mode mask for every field.
+    """
+
+    arr = np.asarray(array)
+    if arr.ndim == 0:
+        raise ValueError("mode arrays must have at least one dimension")
+    mode_count = int(arr.shape[-1])
+    main_xm = np.asarray(getattr(wout, "xm", []), dtype=int)
+    main_xn = np.asarray(getattr(wout, "xn", []), dtype=int)
+    nyq_xm = np.asarray(getattr(wout, "xm_nyq", []), dtype=int)
+    nyq_xn = np.asarray(getattr(wout, "xn_nyq", []), dtype=int)
+    if mode_count == int(main_xm.size):
+        xm, xn = main_xm, main_xn
+    elif mode_count == int(nyq_xm.size):
+        xm, xn = nyq_xm, nyq_xn
+    else:
+        raise ValueError(
+            f"cannot match array mode dimension {mode_count} to main "
+            f"({main_xm.size}) or Nyquist ({nyq_xm.size}) WOUT bases"
+        )
+    nfp = max(1, int(wout.nfp))
+    n = np.rint(xn / float(nfp)).astype(int)
+    return (np.abs(xm) <= max_m) & (np.abs(n) <= max_abs_n)
+
+
 def _jax_backend_comparison(got_wout: Any, ref_wout: Any, *, rtol: float, atol: float) -> dict[str, Any]:
     scalar_names = ("aspect", "wb", "wp")
     array_names = ("rmnc", "zmns", "lmns", "iotas", "iotaf")
@@ -779,16 +817,17 @@ def _vmec2000_wout_comparison(candidate_wout: Any, vmec2000_wout: Any, *, candid
             report["profiles"][name] = _array_gap(getattr(candidate_wout, name), getattr(vmec2000_wout, name), radial_skip=1)
 
     try:
-        low_order = _low_order_mode_mask(vmec2000_wout)
-        report["low_order_mode_count"] = int(np.count_nonzero(low_order))
         for name in ("rmnc", "zmns", "lmns", "bmnc", "gmnc", "bsubumnc", "bsubvmnc", "bsupumnc", "bsupvmnc"):
             if hasattr(candidate_wout, name) and hasattr(vmec2000_wout, name):
+                low_order = _low_order_mode_mask_for_array(vmec2000_wout, getattr(vmec2000_wout, name))
                 report["low_order_modes"][name] = _array_gap(
                     getattr(candidate_wout, name),
                     getattr(vmec2000_wout, name),
                     radial_skip=1,
                     mode_mask=low_order,
                 )
+        if "rmnc" in report["low_order_modes"]:
+            report["low_order_mode_count"] = int(report["low_order_modes"]["rmnc"].get("shape", [0, 0])[-1])
     except Exception as exc:
         report["low_order_modes_error"] = repr(exc)
 
