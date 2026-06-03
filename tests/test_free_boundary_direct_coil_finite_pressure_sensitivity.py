@@ -1040,11 +1040,13 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
     from vmec_jax.driver import run_free_boundary
     from vmec_jax.free_boundary_adjoint import (
         direct_coil_accepted_trace_controller_custom_vjp_objective_jax,
+        direct_coil_accepted_trace_controller_custom_vjp_scalar_jax,
         direct_coil_accepted_trace_fingerprint_delta,
         direct_coil_fixed_trace_custom_vjp_objective_jax,
     )
     from vmec_jax.solve import solve_fixed_boundary_residual_iter
     from vmec_jax.state import pack_state
+    from vmec_jax.wout import equilibrium_aspect_ratio_from_state
 
     def run_trace(params: CoilFieldParams):
         init = run_free_boundary(
@@ -1189,6 +1191,47 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
     assert abs(base_segmented_controller_trace - base_complete) < 2.0e-3
     np.testing.assert_allclose(segmented_controller_exact, complete_fd, rtol=2.0e-3, atol=1.0e-8)
     np.testing.assert_allclose(segmented_controller_exact, controller_exact, rtol=2.0e-3, atol=1.0e-8)
+
+    def aspect_objective_from_state(state) -> float:
+        return float(np.asarray(equilibrium_aspect_ratio_from_state(state=state, static=base_init.static)))
+
+    complete_aspect_fd = (
+        aspect_objective_from_state(plus_result.state) - aspect_objective_from_state(minus_result.state)
+    ) / (2.0 * eps)
+
+    def aspect_scalar_fn(replay):
+        return equilibrium_aspect_ratio_from_state(state=replay["state"], static=base_init.static)
+
+    def controller_custom_aspect(params: CoilFieldParams):
+        return direct_coil_accepted_trace_controller_custom_vjp_scalar_jax(
+            params,
+            base_traces[0]["state_pre"],
+            static=base_init.static,
+            traces=base_traces,
+            signgs=int(base_init.signgs),
+            scalar_fn=aspect_scalar_fn,
+            state_weight=0.0,
+            bsqvac_weight=0.0,
+            force_weight=0.0,
+            enforce_edge=False,
+            use_preconditioner_policy_segments=True,
+        )
+
+    aspect_grad = jax.grad(controller_custom_aspect)(base_params)
+    aspect_exact = sum(
+        jnp.vdot(grad_leaf, direction_leaf)
+        for grad_leaf, direction_leaf in zip(
+            jax.tree_util.tree_leaves(aspect_grad),
+            jax.tree_util.tree_leaves(direction),
+            strict=True,
+        )
+    )
+    base_replay_aspect = float(np.asarray(controller_custom_aspect(base_params)))
+    base_complete_aspect = aspect_objective_from_state(base_result.state)
+    assert abs(base_replay_aspect - base_complete_aspect) < 2.0e-3
+    assert np.isfinite(float(np.asarray(aspect_exact)))
+    assert np.isfinite(float(complete_aspect_fd))
+    np.testing.assert_allclose(aspect_exact, complete_aspect_fd, rtol=5.0e-3, atol=5.0e-8)
 
 
 def test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_fd(

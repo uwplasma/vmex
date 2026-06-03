@@ -2659,6 +2659,63 @@ def direct_coil_accepted_trace_controller_custom_vjp_objective_jax(
     return _wrapped(params)
 
 
+def direct_coil_accepted_trace_controller_custom_vjp_scalar_jax(
+    params: Any,
+    initial_state: Any,
+    *,
+    scalar_fn: Any,
+    **replay_kwargs: Any,
+) -> Any:
+    """Return a scalar of accepted-controller replay with a custom VJP seam.
+
+    ``scalar_fn`` is called with the replay dictionary returned by
+    :func:`direct_coil_accepted_trace_controller_replay_objective_jax`; it can
+    extract the replayed final state, objective history, or vacuum terms and
+    return any scalar JAX expression.  The backward rule differentiates the
+    same frozen accepted-controller replay with respect to coil parameters.
+
+    This is a branch-local production-adjacent helper.  It deliberately does
+    not differentiate the host policy that selected accepted/rejected steps,
+    reset points, limiters, activation cadence, or preconditioner dispatch.
+    Complete-solve promotion must therefore be guarded by accepted-trace
+    fingerprints before comparing against finite differences.
+    """
+
+    if jax is None:  # pragma: no cover - JAX is required for custom VJP.
+        replay = direct_coil_accepted_trace_controller_replay_objective_jax(
+            params,
+            initial_state,
+            **replay_kwargs,
+        )
+        return scalar_fn(replay)
+
+    def objective(coil_params):
+        replay = direct_coil_accepted_trace_controller_replay_objective_jax(
+            coil_params,
+            initial_state,
+            **replay_kwargs,
+        )
+        return scalar_fn(replay)
+
+    @jax.custom_vjp
+    def _wrapped(coil_params):
+        return objective(coil_params)
+
+    def _wrapped_fwd(coil_params):
+        return objective(coil_params), coil_params
+
+    def _wrapped_bwd(coil_params, cotangent):
+        grad_params = jax.grad(objective)(coil_params)
+        scaled_grad = tree_util.tree_map(
+            lambda value: jnp.asarray(cotangent) * jnp.asarray(value),
+            grad_params,
+        )
+        return (scaled_grad,)
+
+    _wrapped.defvjp(_wrapped_fwd, _wrapped_bwd)
+    return _wrapped(params)
+
+
 def direct_coil_accepted_trace_directional_check_jax(
     params: Any,
     direction: Any,

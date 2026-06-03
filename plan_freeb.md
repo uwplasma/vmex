@@ -28,6 +28,64 @@ docs: the branch has validated provider gradients and bounded complete-solve
 response gates, but not a production full nonlinear `run_free_boundary` exact
 adjoint claim.
 
+### 2026-06-03 Physical-scalar complete-solve same-branch AD-vs-FD gate
+
+Steps taken:
+
+1. Pulled fresh `origin/main` at PR #19 merge commit `992aae9d`.
+2. Added `direct_coil_accepted_trace_controller_custom_vjp_scalar_jax`, a
+   branch-local scalar custom-VJP seam around accepted-controller replay.
+3. Promoted the same-branch complete-solve helper so current-only,
+   Fourier-only, and mixed coil perturbations now compare not only packed-state
+   norm but also the VMEC final-state aspect ratio.
+4. Kept the claim fingerprint-gated and conservative: the new scalar path
+   differentiates a frozen accepted branch and segmented JAX-visible replay,
+   while the adaptive host policy that selected that branch remains outside the
+   production adjoint claim.
+
+Results obtained:
+
+1. `python -m ruff check vmec_jax/free_boundary_adjoint.py
+   vmec_jax/free_boundary_adjoint_controller.py
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+   passed.
+2. `JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_vacuum_adjoint.py -q` passed.
+3. `JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_external_fields_coils_jax.py tests/test_external_fields_mgrid_jax.py
+   tests/test_free_boundary_coil_provider_gradients.py -q` passed.
+4. Focused same-branch complete-solve gates passed for current-only,
+   Fourier-only, and mixed LASYM/stellsym perturbations: 4 passed.
+5. `JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py -q`
+   passed with the expected optional skip.
+
+Best next steps:
+
+1. Commit and push this physical-scalar gate on `main`.
+2. Promote the next full-loop seam by wrapping the complete solve in a
+   fingerprint-gated helper that returns value/trace/compatibility diagnostics
+   for one current and one Fourier coefficient without requiring test-local
+   boilerplate.
+3. Only after that helper is validated, extend the coil-only QS/QI optimization
+   example to opt into the exact same-branch gradient path.
+
+Need from user:
+
+Nothing now.
+
+Completion percentages:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 94%.
+- VMEC parity and physics gates: 92%.
+- Single-stage coil-only optimization: 75%.
+- Robust coil perturbation optimization: 70%.
+- CPU/GPU performance: 83%.
+- Docs/release hygiene: 95%.
+- Overall free-boundary ESSOS lane: 98% for merged forward/replay work; not
+  yet 100% until production adaptive full-loop adjoint is validated.
+
 ### 2026-06-03 Segmented controller custom-VJP complete-solve gate
 
 Steps taken:
