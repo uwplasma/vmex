@@ -2958,6 +2958,23 @@ class FixedBoundaryExactOptimizer:
         # for diagnostics until a broader matrix shows a reproducible win.
         return False
 
+    def _chunked_projected_replay_projection_enabled(self, column_chunk: int | None, n_params: int) -> bool:
+        """Whether to project residual tangents immediately after each replay chunk."""
+
+        if column_chunk is None:
+            return False
+        if int(n_params) <= int(column_chunk):
+            return False
+        flag = os.getenv("VMEC_JAX_OPT_CHUNKED_PROJECTED_REPLAY_PROJECTION", "").strip().lower()
+        if flag:
+            return flag in ("1", "true", "yes", "on")
+        backend = _optimizer_backend_name(getattr(self, "_solver_device_name", None))
+        if backend not in ("gpu", "cuda", "rocm"):
+            return False
+        if bool(getattr(getattr(self._static, "cfg", None), "lasym", False)):
+            return False
+        return True
+
     def _discrete_jacobian_residual_helper(self, params_size: int, residuals_from_packed, *, jax):
         """Return cached residual/Jacobian projection helper for packed tangents."""
 
@@ -3166,6 +3183,41 @@ class FixedBoundaryExactOptimizer:
             _residuals_from_packed,
             jax=jax,
         )
+        if self._chunked_projected_replay_projection_enabled(column_chunk, int(params.size)):
+            t_replay = time.perf_counter()
+            jac_blocks = []
+            residuals = None
+            for start in range(0, int(params.size), int(column_chunk)):
+                stop = min(start + int(column_chunk), int(params.size))
+                final_tangents_chunk = checkpoint_tape_state_jvp_columns(
+                    tape=payload["tape"],
+                    static=self._static,
+                    initial_tangents=initial_tangents[start:stop],
+                    rebuild_preconditioner=True,
+                    column_chunk=column_chunk,
+                    _allow_chunking=False,
+                )
+                residuals, jac_chunk = helper_cache["residual_tangent_jacobian"](
+                    packed_final,
+                    final_tangents_chunk,
+                )
+                jac_blocks.append(jac_chunk)
+            jac = _jnp.concatenate(jac_blocks, axis=1)
+            residuals, jac = self._profile_blocking_phase(
+                "jacobian_chunked_projected_replay_projection_total",
+                t_replay,
+                (residuals, jac),
+            )
+            self._last_jacobian_residual = np.asarray(residuals, dtype=float)
+            self._remember_exact_residual(exact_param_key, self._last_jacobian_residual)
+            t_host = time.perf_counter()
+            out = np.asarray(jac, dtype=float)
+            self._profile_add("jacobian_host_materialize", time.perf_counter() - t_host)
+            self._remember_exact_jacobian(exact_param_key, out, self._last_jacobian_residual)
+            self._last_jacobian_source = "exact_tape_chunked_projected_replay_projection"
+            self._profile_add("jacobian_total", time.perf_counter() - t_total)
+            return out
+
         t_replay = time.perf_counter()
         final_tangents = checkpoint_tape_state_jvp_columns(
             tape=payload["tape"],

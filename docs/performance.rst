@@ -1292,9 +1292,9 @@ non-LASYM replay chunks after the GPU trial-solve policy change.  With the
 same ``inner_max_iter=80`` exact-Jacobian callback budget, chunk 20 took
 ``69.4 s`` and no explicit chunking took ``71.0 s``.  Both were slower than the
 current bounded default policy for this case, so the production heuristic was
-left unchanged.  The actionable GPU target remains reducing projected replay
-dispatch and residual-tangent projection overhead, not shrinking the replay
-chunk size further.
+left unchanged.  The actionable GPU target was therefore reducing projected
+replay dispatch and residual-tangent projection overhead, not shrinking the
+replay chunk size further.
 
 The same mode-4 callback also ruled out two simple replay-mode promotions.
 Opting into the fused replay/projection helper with chunking disabled took
@@ -1304,6 +1304,19 @@ improve on the default bounded chunk policy.  Forcing
 ``50.0 s`` in projected replay.  Keep both modes as diagnostics rather than
 defaults for high-mode QH until a future implementation changes the underlying
 dispatch structure.
+
+The next source change kept the same bounded replay chunks but changed how
+chunked projected replay is assembled.  For accelerator non-LASYM callbacks
+where the parameter count exceeds the replay chunk size, ``vmec-jax`` now
+projects residual tangents immediately after each replay chunk and concatenates
+the resulting Jacobian blocks.  This avoids materializing one full
+``n_params x state_size`` tangent block before residual projection.  A QH
+``max_mode=4`` callback on ``office`` with ``inner_max_iter=80`` dropped from
+the previous ``~69--71 s`` range to ``61.5 s`` by default; an explicit opt-in
+probe of the same path measured ``60.1 s``.  The new timing bucket is
+``jacobian_chunked_projected_replay_projection_total``.  Set
+``VMEC_JAX_OPT_CHUNKED_PROJECTED_REPLAY_PROJECTION=0`` to restore the old
+full-tangent projection path for diagnostics.
 
 A follow-up QH ``max_mode=2`` GPU profile on ``office`` with
 ``--inner-max-iter 80``, ``--trial-max-iter 40``,

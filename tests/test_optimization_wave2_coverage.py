@@ -440,6 +440,30 @@ def test_fused_projected_replay_is_opt_in(monkeypatch) -> None:
     assert opt._fused_projected_replay_enabled() is False
 
 
+def test_chunked_projected_replay_projection_policy_branches(monkeypatch) -> None:
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=False))
+    opt._solver_device_name = "gpu"
+
+    monkeypatch.delenv("VMEC_JAX_OPT_CHUNKED_PROJECTED_REPLAY_PROJECTION", raising=False)
+    assert opt._chunked_projected_replay_projection_enabled(None, 80) is False
+    assert opt._chunked_projected_replay_projection_enabled(80, 80) is False
+    assert opt._chunked_projected_replay_projection_enabled(40, 80) is True
+
+    opt._solver_device_name = "cpu"
+    assert opt._chunked_projected_replay_projection_enabled(40, 80) is False
+
+    opt._solver_device_name = "gpu"
+    opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=True))
+    assert opt._chunked_projected_replay_projection_enabled(40, 80) is False
+
+    opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=False))
+    monkeypatch.setenv("VMEC_JAX_OPT_CHUNKED_PROJECTED_REPLAY_PROJECTION", "0")
+    assert opt._chunked_projected_replay_projection_enabled(40, 80) is False
+    monkeypatch.setenv("VMEC_JAX_OPT_CHUNKED_PROJECTED_REPLAY_PROJECTION", "yes")
+    assert opt._chunked_projected_replay_projection_enabled(40, 80) is True
+
+
 def test_projected_replay_jacobian_path_projects_without_intermediate_sync(monkeypatch) -> None:
     import jax.numpy as jnp
     import vmec_jax.discrete_adjoint as adjoint_module
@@ -632,6 +656,66 @@ def test_projected_replay_fused_path_respects_explicit_column_chunk(monkeypatch)
     assert opt._last_jacobian_source == "exact_tape_projected_replay"
     assert "jacobian_fused_projected_replay_total" not in opt._profile
     assert opt._profile["jacobian_projected_tape_replay_dispatch"]["count"] == 1
+
+
+def test_projected_replay_can_project_each_replay_chunk(monkeypatch) -> None:
+    import jax.numpy as jnp
+    import vmec_jax.discrete_adjoint as adjoint_module
+
+    monkeypatch.setenv("VMEC_JAX_OPT_CHUNKED_PROJECTED_REPLAY_PROJECTION", "1")
+    state = _state_from_coeffs(r=1.0, rs=2.0, z=3.0, zs=4.0, l=5.0, ls=6.0)
+    layout_size = int(state.layout.size)
+    tangents = jnp.asarray(
+        [
+            np.arange(layout_size, dtype=float) + 1.0,
+            np.arange(layout_size, dtype=float) + 10.0,
+            np.arange(layout_size, dtype=float) + 20.0,
+        ],
+        dtype=jnp.float64,
+    )
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._layout = state.layout
+    opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=False))
+    opt._profile = {}
+    opt._discrete_jacobian_helper_cache = {}
+    opt._solve_exact_with_tape_for_jvp = lambda _params: (
+        state,
+        {"tape": "tape", "axis_override": {"axis": "unused"}},
+    )
+    opt._initial_tangent_columns = lambda _params, _axis_override, *, profile_prefix: tangents
+    opt._lasym_replay_column_chunk = lambda _n_params: 2
+    opt._residuals_fn = lambda state_arg: pack_state(state_arg)[:2]
+    remembered = {}
+    opt._remember_exact_residual = lambda key, residual: remembered.update({"residual": (key, residual)})
+    opt._remember_exact_jacobian = lambda key, jac, residual: remembered.update({"jacobian": (key, jac, residual)})
+    calls = []
+
+    def fake_replay(**kwargs):
+        calls.append(
+            (
+                tuple(kwargs["initial_tangents"].shape),
+                kwargs.get("_allow_chunking"),
+                kwargs.get("column_chunk"),
+            )
+        )
+        return kwargs["initial_tangents"] + 5.0
+
+    monkeypatch.setattr(adjoint_module, "checkpoint_tape_state_jvp_columns", fake_replay)
+
+    jac = opt._jacobian_fun_projected_replay(
+        jnp.asarray([0.0, 0.0, 0.0], dtype=jnp.float64),
+        b"exact-key",
+        t_total=opt_module.time.perf_counter(),
+    )
+
+    np.testing.assert_allclose(jac, [[6.0, 15.0, 25.0], [7.0, 16.0, 26.0]])
+    np.testing.assert_allclose(opt._last_jacobian_residual, np.asarray(pack_state(state)[:2]))
+    assert opt._last_jacobian_source == "exact_tape_chunked_projected_replay_projection"
+    assert remembered["residual"][0] == b"exact-key"
+    assert remembered["jacobian"][0] == b"exact-key"
+    assert calls == [((2, layout_size), False, 2), ((1, layout_size), False, 2)]
+    assert opt._profile["jacobian_chunked_projected_replay_projection_total"]["count"] == 1
+    assert "jacobian_projected_tape_replay_dispatch" not in opt._profile
 
 
 def test_cached_exact_residual_none_and_lasym_backend_probe_failure(monkeypatch) -> None:
