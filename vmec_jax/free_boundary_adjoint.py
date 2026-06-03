@@ -327,6 +327,7 @@ def jax_visible_accepted_nonlinear_controller_jax(
     controls: Any,
     *,
     checkpoint_steps: bool = False,
+    initial_done: Any = False,
 ) -> dict[str, Any]:
     """Run a JAX-visible fixed-length controller with accept/reject masks.
 
@@ -335,7 +336,9 @@ def jax_visible_accepted_nonlinear_controller_jax(
     production VMEC free-boundary control pattern in which every configured
     step proposes a new state, but only accepted proposals update the loop
     carry.  Rejected proposals remain visible in auxiliary diagnostics while
-    the carried state is held fixed.
+    the carried state is held fixed.  ``initial_done`` lets callers split a
+    long controller into static-policy segments while preserving the completed
+    state across segment boundaries.
 
     ``accept_fn(state, proposed_state, params, control, aux)`` and
     ``converged_fn(accepted_state, params, control, aux)`` must return scalar
@@ -388,10 +391,81 @@ def jax_visible_accepted_nonlinear_controller_jax(
 
     (final_state, final_done), history = jax.lax.scan(
         _scan_step,
-        (initial_state, jnp.asarray(False)),
+        (initial_state, jnp.asarray(initial_done, dtype=bool)),
         controls,
     )
     return {"state": final_state, "done": final_done, "history": history}
+
+
+def jax_visible_segmented_accepted_nonlinear_controller_jax(
+    step_fns: Any,
+    accept_fn: Any,
+    converged_fn: Any,
+    initial_state: Any,
+    params: Any,
+    control_segments: Any,
+    *,
+    checkpoint_steps: bool = False,
+    initial_done: Any = False,
+) -> dict[str, Any]:
+    """Run accepted/rejected JAX-visible controllers over static segments.
+
+    Production VMEC traces can switch static implementation policy, for
+    example when the active radial preconditioner size changes.  Padding those
+    branch-local arrays into a single scan payload is expensive and can force
+    recompilation-heavy traces.  This helper keeps each segment as a separate
+    static subcontroller while preserving the differentiable loop carry,
+    accepted/rejected masks, and convergence state across segment boundaries.
+
+    ``control_segments`` is a non-empty sequence of per-segment control
+    pytrees.  ``step_fns`` may be a matching sequence of step functions or one
+    callable reused by every segment.  Segment boundaries are static Python
+    structure; each segment body remains a JAX ``lax.scan`` through
+    :func:`jax_visible_accepted_nonlinear_controller_jax`.
+    """
+
+    if jax is None:  # pragma: no cover - JAX is required for scan controllers.
+        raise RuntimeError("JAX is required for JAX-visible nonlinear controllers.")
+
+    segments = tuple(control_segments)
+    if not segments:
+        raise ValueError("control_segments must contain at least one segment")
+
+    if callable(step_fns):
+        step_fn_seq = (step_fns,) * len(segments)
+    else:
+        step_fn_seq = tuple(step_fns)
+        if len(step_fn_seq) != len(segments):
+            raise ValueError(
+                f"step_fns length {len(step_fn_seq)} does not match control_segments length {len(segments)}"
+            )
+
+    state = initial_state
+    done = jnp.asarray(initial_done, dtype=bool)
+    histories = []
+    for step_fn, controls in zip(step_fn_seq, segments, strict=True):
+        run = jax_visible_accepted_nonlinear_controller_jax(
+            step_fn,
+            accept_fn,
+            converged_fn,
+            state,
+            params,
+            controls,
+            checkpoint_steps=checkpoint_steps,
+            initial_done=done,
+        )
+        state = run["state"]
+        done = run["done"]
+        histories.append(run["history"])
+
+    if len(histories) == 1:
+        history = histories[0]
+    else:
+        history = tree_util.tree_map(
+            lambda *parts: jnp.concatenate([jnp.asarray(part) for part in parts], axis=0),
+            *histories,
+        )
+    return {"state": state, "done": done, "history": history, "n_segments": len(segments)}
 
 
 def jax_visible_nonlinear_controller_directional_check_jax(

@@ -30,6 +30,7 @@ from vmec_jax.free_boundary_adjoint import (
     jax_visible_masked_nonlinear_controller_jax,
     jax_visible_nonlinear_controller_directional_check_jax,
     jax_visible_nonlinear_controller_jax,
+    jax_visible_segmented_accepted_nonlinear_controller_jax,
     direct_coil_projected_mode_fixed_point_directional_check_jax,
     direct_coil_projected_mode_fixed_point_objective_jax,
     mode_matrix_from_grpmn_jax,
@@ -375,6 +376,151 @@ def test_jax_visible_masked_controller_keeps_final_state_and_gradient_stable():
     eps = 1.0e-5
     fd = (objective(shifted(eps)) - objective(shifted(-eps))) / (2.0 * eps)
     np.testing.assert_allclose(exact, fd, rtol=2.0e-6, atol=1.0e-10)
+
+
+def test_segmented_accepted_controller_matches_monolithic_scan_and_gradient():
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jax, jnp, tree_util
+
+    enable_x64(True)
+    controls = {
+        "gain": jnp.asarray([0.16, 2.4, 0.13, 0.11, 0.45], dtype=float),
+        "bias": jnp.asarray(
+            [
+                [0.010, -0.012],
+                [3.000, -2.700],
+                [-0.018, 0.014],
+                [0.012, 0.009],
+                [0.020, -0.015],
+            ],
+            dtype=float,
+        ),
+        "accept": jnp.asarray([True, False, True, True, True]),
+        "stop": jnp.asarray([False, False, False, True, False]),
+    }
+    control_segments = (
+        {key: value[:2] for key, value in controls.items()},
+        {key: value[2:] for key, value in controls.items()},
+    )
+    initial_state = jnp.asarray([0.06, -0.02], dtype=float)
+    params = {
+        "matrix": jnp.asarray([[0.22, -0.04], [0.08, 0.18]], dtype=float),
+        "drive": jnp.asarray([0.40, -0.31], dtype=float),
+    }
+    direction = {
+        "matrix": jnp.asarray([[0.015, -0.006], [0.010, 0.004]], dtype=float),
+        "drive": jnp.asarray([0.035, -0.020], dtype=float),
+    }
+
+    def step(state, prm, control):
+        drive = prm["matrix"] @ state + prm["drive"] + control["bias"]
+        proposed = 0.70 * state + control["gain"] * jnp.tanh(drive)
+        return proposed, {
+            "drive_norm": jnp.vdot(drive, drive),
+            "proposal_norm": jnp.linalg.norm(proposed - state),
+        }
+
+    def accept_fn(_state, _proposed_state, _params, control, _aux):
+        return control["accept"]
+
+    def converged_fn(_accepted_state, _params, control, _aux):
+        return control["stop"]
+
+    monolithic = jax_visible_accepted_nonlinear_controller_jax(
+        step,
+        accept_fn,
+        converged_fn,
+        initial_state,
+        params,
+        controls,
+        checkpoint_steps=True,
+    )
+    segmented = jax_visible_segmented_accepted_nonlinear_controller_jax(
+        step,
+        accept_fn,
+        converged_fn,
+        initial_state,
+        params,
+        control_segments,
+        checkpoint_steps=True,
+    )
+
+    tree_util.tree_map(
+        lambda actual, expected: np.testing.assert_allclose(
+            np.asarray(actual),
+            np.asarray(expected),
+            rtol=1.0e-14,
+            atol=1.0e-14,
+        ),
+        segmented["state"],
+        monolithic["state"],
+    )
+    assert bool(segmented["done"]) == bool(monolithic["done"])
+    assert segmented["n_segments"] == 2
+    for key in ("active", "accepted", "rejected", "done"):
+        np.testing.assert_array_equal(np.asarray(segmented["history"][key]), np.asarray(monolithic["history"][key]))
+    np.testing.assert_allclose(
+        segmented["history"]["drive_norm"],
+        monolithic["history"]["drive_norm"],
+        rtol=1.0e-14,
+        atol=1.0e-14,
+    )
+
+    def objective_from_run(run):
+        accepted = jnp.asarray(run["history"]["accepted"], dtype=float)
+        active = jnp.asarray(run["history"]["active"], dtype=float)
+        return (
+            0.5 * jnp.vdot(jnp.asarray([1.1, 0.8], dtype=float) * run["state"], run["state"])
+            + 0.02 * jnp.sum(accepted * run["history"]["proposal_norm"])
+            + 0.004 * jnp.sum(active * run["history"]["drive_norm"])
+        )
+
+    def monolithic_objective(controller_params):
+        return objective_from_run(
+            jax_visible_accepted_nonlinear_controller_jax(
+                step,
+                accept_fn,
+                converged_fn,
+                initial_state,
+                controller_params,
+                controls,
+                checkpoint_steps=True,
+            )
+        )
+
+    def segmented_objective(controller_params):
+        return objective_from_run(
+            jax_visible_segmented_accepted_nonlinear_controller_jax(
+                step,
+                accept_fn,
+                converged_fn,
+                initial_state,
+                controller_params,
+                control_segments,
+                checkpoint_steps=True,
+            )
+        )
+
+    monolithic_grad = jax.grad(monolithic_objective)(params)
+    segmented_grad = jax.grad(segmented_objective)(params)
+    monolithic_dir = tree_util.tree_reduce(
+        lambda acc, leaf: acc + leaf,
+        tree_util.tree_map(lambda grad_leaf, dir_leaf: jnp.vdot(grad_leaf, dir_leaf), monolithic_grad, direction),
+        0.0,
+    )
+    segmented_dir = tree_util.tree_reduce(
+        lambda acc, leaf: acc + leaf,
+        tree_util.tree_map(lambda grad_leaf, dir_leaf: jnp.vdot(grad_leaf, dir_leaf), segmented_grad, direction),
+        0.0,
+    )
+    np.testing.assert_allclose(segmented_objective(params), monolithic_objective(params), rtol=1.0e-14, atol=1.0e-14)
+    np.testing.assert_allclose(segmented_dir, monolithic_dir, rtol=1.0e-12, atol=1.0e-12)
+
+    eps = 1.0e-5
+    params_plus = tree_util.tree_map(lambda value, step_value: value + eps * step_value, params, direction)
+    params_minus = tree_util.tree_map(lambda value, step_value: value - eps * step_value, params, direction)
+    fd = (segmented_objective(params_plus) - segmented_objective(params_minus)) / (2.0 * eps)
+    np.testing.assert_allclose(segmented_dir, fd, rtol=1.0e-6, atol=1.0e-10)
 
 
 def test_jax_visible_controller_direct_coil_gradient_matches_fd():
