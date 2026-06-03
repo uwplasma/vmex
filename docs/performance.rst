@@ -1316,7 +1316,12 @@ the previous ``~69--71 s`` range to ``61.5 s`` by default; an explicit opt-in
 probe of the same path measured ``60.1 s``.  The new timing bucket is
 ``jacobian_chunked_projected_replay_projection_total``.  Set
 ``VMEC_JAX_OPT_CHUNKED_PROJECTED_REPLAY_PROJECTION=0`` to restore the old
-full-tangent projection path for diagnostics.
+full-tangent projection path for diagnostics.  A short QH ``max_mode=4``
+optimizer run with ``max_nfev=3`` then confirmed the callback result at the
+solver level: wall time dropped from the previous dense SciPy ``94.8 s`` trace
+to ``78.4 s`` while reaching the same final objective scale
+(``1.74024e-1``).  The remaining high-mode GPU buckets are chunked
+replay/projection, accepted exact-tape build, and relaxed trial solves.
 
 A follow-up QH ``max_mode=2`` GPU profile on ``office`` with
 ``--inner-max-iter 80``, ``--trial-max-iter 40``,
