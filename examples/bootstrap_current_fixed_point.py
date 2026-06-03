@@ -14,6 +14,7 @@ Run from the repository root:
 
 from __future__ import annotations
 
+import argparse
 from dataclasses import asdict
 import json
 from pathlib import Path
@@ -60,52 +61,112 @@ FINAL_WOUT = RESULTS_DIR / "wout_bootstrap_current_final.nc"
 HISTORY_JSON = RESULTS_DIR / "history.json"
 
 
-RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-
-base_indata = vj.read_indata(INPUT_PATH)
-profiles = vj.standard_finite_beta_profiles(BETA_PERCENT)
-indata = vj.with_pressure_profile(base_indata, profiles.pressure_pa, pres_scale=1.0)
-
-result = vj.bootstrap_current_fixed_point(
-    indata,
-    options=FIXED_POINT_OPTIONS,
-    ne_coeffs=profiles.ne_coeffs,
-    Te_coeffs=profiles.Te_coeffs,
-    Ti_coeffs=profiles.Ti_coeffs,
-    Zeff_coeffs=profiles.Zeff_coeffs,
-    run_kwargs=VMEC_RUN_KWARGS,
-)
-
-vj.write_indata(FINAL_INPUT, result.indata)
-if result.last_run is not None:
-    write_wout_from_fixed_boundary_run(FINAL_WOUT, result.last_run, include_fsq=True)
-
-history = [asdict(item) for item in result.history]
-HISTORY_JSON.write_text(
-    json.dumps(
-        {
-            "input": str(INPUT_PATH),
-            "final_input": str(FINAL_INPUT),
-            "final_wout": str(FINAL_WOUT),
-            "beta_percent": BETA_PERCENT,
-            "helicity_n": HELICITY_N,
-            "converged": result.converged,
-            "reason": result.reason,
-            "history": history,
-        },
-        indent=2,
+def make_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run a bounded VMEC/Redl fixed-point loop that updates the VMEC "
+            "current profile from bootstrap-current diagnostics."
+        )
     )
-    + "\n"
-)
+    parser.add_argument("--input", type=Path, default=INPUT_PATH)
+    parser.add_argument("--outdir", type=Path, default=RESULTS_DIR)
+    parser.add_argument("--beta-percent", type=float, default=BETA_PERCENT)
+    parser.add_argument("--helicity-n", type=int, default=HELICITY_N)
+    parser.add_argument("--max-fixed-point-iter", type=int, default=FIXED_POINT_OPTIONS.max_fixed_point_iter)
+    parser.add_argument("--vmec-max-iter", type=int, default=VMEC_RUN_KWARGS["max_iter"])
+    parser.add_argument(
+        "--solver-device",
+        choices=("cpu", "gpu"),
+        default=None,
+        help="Force VMEC solves to one backend. Omit to let JAX choose.",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="Print the selected configuration without running VMEC.")
+    return parser
 
-last = result.history[-1] if result.history else None
-print(f"Wrote final input: {FINAL_INPUT}")
-if result.last_run is not None:
-    print(f"Wrote final WOUT:  {FINAL_WOUT}")
-print(f"Wrote history:     {HISTORY_JSON}")
-print(f"Converged:         {result.converged} ({result.reason})")
-if last is not None:
-    print(f"Iterations:        {last.iteration}")
-    print(f"CURTOR:            {last.curtor:.6e}")
-    print(f"Mismatch norm:     {last.mismatch_norm:.6e}")
-    print(f"Current update:    {last.current_update_norm:.6e}")
+
+def main(argv: list[str] | None = None) -> int:
+    args = make_parser().parse_args(argv)
+    results_dir = args.outdir
+    final_input = results_dir / "input.bootstrap_current_final"
+    final_wout = results_dir / "wout_bootstrap_current_final.nc"
+    history_json = results_dir / "history.json"
+
+    fixed_point_options = vj.BootstrapCurrentOptions(
+        helicity_n=args.helicity_n,
+        surfaces=REDL_SURFACES,
+        n_current=N_CURRENT,
+        policy=FIXED_POINT_OPTIONS.policy,
+        damping=FIXED_POINT_OPTIONS.damping,
+        max_fixed_point_iter=args.max_fixed_point_iter,
+        mismatch_tol=FIXED_POINT_OPTIONS.mismatch_tol,
+        current_tol=FIXED_POINT_OPTIONS.current_tol,
+    )
+    vmec_run_kwargs = {
+        **VMEC_RUN_KWARGS,
+        "max_iter": args.vmec_max_iter,
+        "solver_device": args.solver_device,
+    }
+
+    if args.dry_run:
+        print(f"Input:              {args.input}")
+        print(f"Output directory:   {results_dir}")
+        print(f"Beta percent:       {args.beta_percent}")
+        print(f"Helicity N:         {args.helicity_n}")
+        print(f"Fixed-point options:{fixed_point_options}")
+        print(f"VMEC run kwargs:    {vmec_run_kwargs}")
+        return 0
+
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    base_indata = vj.read_indata(args.input)
+    profiles = vj.standard_finite_beta_profiles(args.beta_percent)
+    indata = vj.with_pressure_profile(base_indata, profiles.pressure_pa, pres_scale=1.0)
+
+    result = vj.bootstrap_current_fixed_point(
+        indata,
+        options=fixed_point_options,
+        ne_coeffs=profiles.ne_coeffs,
+        Te_coeffs=profiles.Te_coeffs,
+        Ti_coeffs=profiles.Ti_coeffs,
+        Zeff_coeffs=profiles.Zeff_coeffs,
+        run_kwargs=vmec_run_kwargs,
+    )
+
+    vj.write_indata(final_input, result.indata)
+    if result.last_run is not None:
+        write_wout_from_fixed_boundary_run(final_wout, result.last_run, include_fsq=True)
+
+    history = [asdict(item) for item in result.history]
+    history_json.write_text(
+        json.dumps(
+            {
+                "input": str(args.input),
+                "final_input": str(final_input),
+                "final_wout": str(final_wout),
+                "beta_percent": args.beta_percent,
+                "helicity_n": args.helicity_n,
+                "converged": result.converged,
+                "reason": result.reason,
+                "history": history,
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+
+    last = result.history[-1] if result.history else None
+    print(f"Wrote final input: {final_input}")
+    if result.last_run is not None:
+        print(f"Wrote final WOUT:  {final_wout}")
+    print(f"Wrote history:     {history_json}")
+    print(f"Converged:         {result.converged} ({result.reason})")
+    if last is not None:
+        print(f"Iterations:        {last.iteration}")
+        print(f"CURTOR:            {last.curtor:.6e}")
+        print(f"Mismatch norm:     {last.mismatch_norm:.6e}")
+        print(f"Current update:    {last.current_update_norm:.6e}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
