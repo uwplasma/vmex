@@ -167,7 +167,16 @@ def _build_parser() -> argparse.ArgumentParser:
     exact.add_argument("--trial-ftol", type=float, default=1.0e-10)
     exact.add_argument(
         "--method",
-        choices=("auto", "scipy", "scipy_matrix_free", "gauss_newton", "lbfgs_adjoint", "scalar_trust"),
+        choices=(
+            "auto",
+            "auto_scalar",
+            "auto_adjoint",
+            "scipy",
+            "scipy_matrix_free",
+            "gauss_newton",
+            "lbfgs_adjoint",
+            "scalar_trust",
+        ),
         default="scipy",
         help="Optimizer method for exact-callback --callback run profiling.",
     )
