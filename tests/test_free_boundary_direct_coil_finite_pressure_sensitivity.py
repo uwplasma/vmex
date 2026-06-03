@@ -173,6 +173,7 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes() -> None:
         direct_coil_accepted_trace_array_controls_jax,
         direct_coil_accepted_trace_fingerprint_delta_summary,
         direct_coil_accepted_trace_preconditioner_controls_jax,
+        direct_coil_accepted_trace_preconditioner_policy_segments,
         direct_coil_accepted_trace_scalar_controls_jax,
         direct_coil_accepted_trace_fingerprint,
         direct_coil_accepted_trace_fingerprint_delta,
@@ -238,6 +239,10 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes() -> None:
     preconditioner_controls = direct_coil_accepted_trace_preconditioner_controls_jax([trace0, trace1])
     assert np.asarray(preconditioner_controls["precond_mats"]["ar"]).shape == (2, 2, 3)
     np.testing.assert_allclose(np.asarray(preconditioner_controls["lam_prec"][0]), np.asarray([1.0, 2.0, 3.0]))
+    same_policy_segments = direct_coil_accepted_trace_preconditioner_policy_segments([trace0, trace1])
+    assert [(segment["start"], segment["stop"], segment["n_steps"]) for segment in same_policy_segments] == [(0, 2, 2)]
+    assert same_policy_segments[0]["signature"][1] == 1
+    assert same_policy_segments[0]["signature"][2] == 2
 
     bad_preconditioner_shape = dict(trace1)
     bad_preconditioner_shape["precond_mats"] = {"ar": np.ones((3, 3)), "br": z + 7.0}
@@ -284,6 +289,14 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes() -> None:
 
     preconditioner_policy_change = dict(trace0)
     preconditioner_policy_change["preconditioner_use_lax_tridi"] = False
+    policy_segments = direct_coil_accepted_trace_preconditioner_policy_segments(
+        [trace0, preconditioner_policy_change, trace1]
+    )
+    assert [(segment["start"], segment["stop"], segment["n_steps"]) for segment in policy_segments] == [
+        (0, 1, 1),
+        (1, 2, 1),
+        (2, 3, 1),
+    ]
     different_preconditioner_policy = direct_coil_accepted_trace_fingerprint_delta(
         [trace0, trace1],
         [preconditioner_policy_change, trace1],

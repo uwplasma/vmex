@@ -266,7 +266,11 @@ trace index; the preconditioner policy is therefore fixed for that step and is
 covered by the same-branch fingerprint.  The remaining controller refactor is
 to make the radial preconditioner policy itself JAX-visible, or to split the
 future production controller into static preconditioner-policy subcontrollers
-before claiming gradients through adaptive preconditioner-policy changes.
+before claiming gradients through adaptive preconditioner-policy changes.  The
+``direct_coil_accepted_trace_preconditioner_policy_segments`` helper exposes
+the consecutive trace ranges with identical static preconditioner policy,
+``precond_jmax``, and preconditioner/mode payload shapes; this is the tested
+data model for that subcontroller split.
 The remaining phase-2 blocker is differentiating through the nonlinear
 ``run_free_boundary`` iteration loop itself, rather than through the dense toy
 nonlinear primitive, fixed-boundary operator, complete finite-response proxy,

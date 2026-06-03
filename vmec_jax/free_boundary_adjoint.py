@@ -2249,6 +2249,87 @@ def direct_coil_accepted_trace_preconditioner_controls_jax(traces: Any) -> dict[
     }
 
 
+def _trace_preconditioner_policy_value(trace: dict[str, Any], key: str) -> int:
+    value = trace.get(key, None)
+    if value is None:
+        return -1
+    arr = np.asarray(value)
+    if arr.size == 0:
+        return -1
+    return 1 if bool(arr.reshape(-1)[0]) else 0
+
+
+def _trace_preconditioner_static_signature(trace: dict[str, Any]) -> tuple[Any, ...]:
+    """Return the static preconditioner branch signature for one trace.
+
+    The current radial preconditioner resolves Python/static XLA dispatch from
+    the precomputed-Thomas policy, the ``lax.tridiagonal_solve`` policy,
+    ``precond_jmax``, and matrix/mode payload shapes.  Accepted-trace replay
+    may differentiate through values inside those arrays, but not through a
+    change in this signature.
+    """
+
+    return (
+        _trace_preconditioner_policy_value(trace, "preconditioner_use_precomputed_tridi"),
+        _trace_preconditioner_policy_value(trace, "preconditioner_use_lax_tridi"),
+        int(trace.get("precond_jmax", -1)),
+        _trace_pytree_shape_signature(trace.get("precond_mats")),
+        tuple(np.asarray(trace.get("lam_prec", [])).shape),
+        tuple(np.asarray(trace.get("w_mode_mn", [])).shape),
+    )
+
+
+def direct_coil_accepted_trace_preconditioner_policy_segments(
+    traces: Any,
+    *,
+    max_steps: int | None = None,
+) -> list[dict[str, Any]]:
+    """Return consecutive static-preconditioner-policy segments.
+
+    This is the explicit phase-2 planning primitive for replacing one
+    per-accepted-step ``lax.switch`` branch with a smaller set of static
+    subcontrollers.  Each returned segment has a half-open ``[start, stop)``
+    step range whose traces share the same preconditioner policy, active
+    radial solve size, and preconditioner/mode payload shapes.  A future
+    production controller can use these ranges to keep the existing
+    preconditioner JIT-cache dispatch static while moving the surrounding
+    nonlinear controller into JAX-visible control flow.
+    """
+
+    trace_seq = tuple(traces)
+    if max_steps is not None:
+        trace_seq = trace_seq[: int(max_steps)]
+    if not trace_seq:
+        raise ValueError("at least one accepted trace is required")
+
+    segments: list[dict[str, Any]] = []
+    start = 0
+    current_signature = _trace_preconditioner_static_signature(trace_seq[0])
+    for index, trace in enumerate(trace_seq[1:], start=1):
+        signature = _trace_preconditioner_static_signature(trace)
+        if signature == current_signature:
+            continue
+        segments.append(
+            {
+                "start": start,
+                "stop": index,
+                "n_steps": index - start,
+                "signature": current_signature,
+            }
+        )
+        start = index
+        current_signature = signature
+    segments.append(
+        {
+            "start": start,
+            "stop": len(trace_seq),
+            "n_steps": len(trace_seq) - start,
+            "signature": current_signature,
+        }
+    )
+    return segments
+
+
 def direct_coil_accepted_trace_array_controls_jax(traces: Any) -> dict[str, Any]:
     """Return stacked array-valued update controls for accepted trace replay.
 

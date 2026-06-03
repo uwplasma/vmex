@@ -15,11 +15,11 @@ Date opened: 2026-05-24
 Last updated: 2026-06-02 while pushing the ESSOS finite-pressure direct-coil
 examples and phase-2 replay lane toward PR readiness. PR #18 is open on
 `feature/freeb-essos-coil-single-stage`; local branch `refresh/freeb-slim`
-tracks it. PR-head CI was green at `277e7423`; the later LASYM replay commit
-`981c946b` exposed a symmetric-trace compatibility regression in Python 3.10
-and 3.12 fast tests. That regression is fixed and pushed as `870dd6e5`, and
-local follow-up validation now promotes reset-aware full accepted-trace replay
-plus stacked accepted/rejected and scalar-control payloads.
+tracks it. PR-head CI is green at `c8a3978d`, including fast tests on Python
+3.10/3.11/3.12, docs, smoke, and the full physics job. Local follow-up
+validation now promotes reset-aware full accepted-trace replay plus stacked
+accepted/rejected, scalar-control, velocity-array, and preconditioner-payload
+interfaces.
 Do not merge/release until the refreshed pushed head has green GitHub Actions
 and the phase-2 limitations below remain explicit in docs.
 
@@ -527,6 +527,59 @@ Best next steps:
 3. Continue phase 2 by moving the remaining Python-control update and
    preconditioner switches toward a JAX-visible controller, which is the next
    step before a true full-loop custom VJP can be promoted.
+
+Need from user:
+
+Nothing now.
+
+### 2026-06-02 Preconditioner-policy segment primitive
+
+Steps taken:
+
+1. Added `direct_coil_accepted_trace_preconditioner_policy_segments`, which
+   returns consecutive accepted-trace ranges with identical static
+   preconditioner signatures.
+2. The signature includes the precomputed-Thomas policy, the
+   `lax.tridiagonal_solve` policy, `precond_jmax`, preconditioner-matrix
+   shape signature, `lam_prec` shape, and `w_mode_mn` shape.
+3. Added a focused regression in
+   `test_direct_coil_trace_fingerprint_detects_control_branch_changes` for
+   both the single-segment case and a policy-changing three-segment trace.
+4. Updated `docs/free_boundary_coil_optimization.rst` to name this helper as
+   the tested data model for future static preconditioner-policy
+   subcontrollers.
+
+Results obtained:
+
+1. PR-head CI at `c8a3978d` passed fully:
+   `https://github.com/uwplasma/vmec_jax/actions/runs/26852641999`.
+2. Static checks passed:
+   `python -m ruff check vmec_jax/free_boundary_adjoint.py
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+   and `python -m py_compile` on the same files.
+3. The focused fingerprint/segment test passed:
+   `JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_trace_fingerprint_detects_control_branch_changes
+   -rx`: `1 passed in 0.66 s`.
+4. Full docs passed with warnings as errors:
+   `python -m sphinx -W --keep-going -b html docs
+   /tmp/vmec_jax_freeb_docs_check_policy_segments`.
+5. The production-backed two-step controller replay gate passed:
+   `JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state
+   -rx -s`: `1 passed in 158.62 s`.
+6. The same-branch complete-solve custom-VJP gate passed:
+   `JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_fixed_trace_custom_vjp_matches_complete_solve_fd_on_same_branch
+   -rx -s`: `2 passed in 74.67 s`.
+
+Best next steps:
+
+1. Commit and push the segment primitive.
+2. Trigger and inspect PR-head CI for the new commit.
+3. Use these segments in the next implementation pass to replace
+   per-step replay branching with coarser static preconditioner-policy
+   subcontrollers.
 
 Need from user:
 
