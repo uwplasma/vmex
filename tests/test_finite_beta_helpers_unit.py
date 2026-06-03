@@ -492,6 +492,41 @@ def test_mercier_terms_from_state_is_differentiable(monkeypatch):
     assert abs(float(np.asarray(grad))) > 0.0
 
 
+def test_mercier_terms_from_state_dmerc_and_d_r_ad_match_central_fd(monkeypatch):
+    import jax
+
+    _state, static, shape = _make_fake_mercier_state_inputs()
+    _patch_fake_mercier_state_dependencies(monkeypatch, shape)
+
+    def terms_for_scale(scale):
+        zeros = jnp.zeros((4, 1), dtype=jnp.float64)
+        state = SimpleNamespace(
+            Rcos=jnp.asarray([[scale], [1.0], [1.0], [1.0]], dtype=jnp.float64),
+            Rsin=zeros,
+            Zcos=zeros,
+            Zsin=zeros,
+        )
+        return finite_beta.mercier_terms_from_state(
+            state=state,
+            static=static,
+            indata=object(),
+            signgs=1,
+        )
+
+    def objective(scale, key):
+        values = jnp.asarray(terms_for_scale(scale)[key], dtype=jnp.float64)
+        return jnp.sum(values[1:-1])
+
+    scale0 = jnp.asarray(1.0, dtype=jnp.float64)
+    eps = jnp.asarray(1.0e-5, dtype=jnp.float64)
+    for key in ("DMerc", "D_R"):
+        grad_ad = jax.grad(lambda scale: objective(scale, key))(scale0)
+        grad_fd = (objective(scale0 + eps, key) - objective(scale0 - eps, key)) / (2.0 * eps)
+        assert np.isfinite(float(np.asarray(grad_ad)))
+        assert np.isfinite(float(np.asarray(grad_fd)))
+        np.testing.assert_allclose(np.asarray(grad_ad), np.asarray(grad_fd), rtol=5.0e-6, atol=5.0e-8)
+
+
 def test_mercier_terms_from_state_composes_lasym_channels(monkeypatch):
     state, static, _shape = _make_fake_mercier_state_inputs()
     trig = vmec_trig_tables(ntheta=6, nzeta=3, nfp=1, mmax=0, nmax=0, lasym=True, cache=False)
