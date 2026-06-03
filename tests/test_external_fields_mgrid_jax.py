@@ -5,8 +5,10 @@ import pytest
 
 from vmec_jax._compat import enable_x64
 from vmec_jax.external_fields import (
+    CoilFieldParams,
     MGridFieldParams,
     interpolate_mgrid_bfield_jax,
+    sample_coil_field_cylindrical,
     sample_external_field_cylindrical,
     sample_mgrid_field_cylindrical,
 )
@@ -79,6 +81,51 @@ def _expected_affine(coeffs, component, extcur, r, z, phi):
     return np.sum(np.asarray(extcur)[:, None, None] * per_current, axis=0)
 
 
+def _off_axis_coil_params():
+    from vmec_jax._compat import jnp
+
+    dofs = jnp.zeros((1, 3, 3), dtype=float)
+    # A single off-axis circular filament.  The displacement makes the field
+    # vary with toroidal angle, so exact-node mgrid parity checks phi handling.
+    dofs = dofs.at[0, 0, 0].set(1.65)
+    dofs = dofs.at[0, 0, 2].set(0.22)
+    dofs = dofs.at[0, 1, 1].set(0.22)
+    dofs = dofs.at[0, 2, 0].set(0.08)
+    return CoilFieldParams(
+        base_curve_dofs=dofs,
+        base_currents=jnp.asarray([2.1e5]),
+        n_segments=96,
+        nfp=1,
+        stellsym=False,
+    )
+
+
+def _mgrid_from_direct_coil_nodes(coil_params):
+    from vmec_jax._compat import jnp
+
+    rmin, rmax = 0.72, 1.18
+    zmin, zmax = -0.24, 0.24
+    nfp = 1
+    kp, jz, ir = 7, 5, 6
+    r_grid = jnp.linspace(rmin, rmax, ir)
+    z_grid = jnp.linspace(zmin, zmax, jz)
+    phi_grid = jnp.arange(kp, dtype=float) * ((2.0 * jnp.pi / nfp) / kp)
+    phi_mesh, z_mesh, r_mesh = jnp.meshgrid(phi_grid, z_grid, r_grid, indexing="ij")
+    br, bphi, bz = sample_coil_field_cylindrical(coil_params, r_mesh, z_mesh, phi_mesh)
+    params = MGridFieldParams(
+        br=br[None, ...],
+        bphi=bphi[None, ...],
+        bz=bz[None, ...],
+        extcur=jnp.asarray([1.0]),
+        rmin=rmin,
+        rmax=rmax,
+        zmin=zmin,
+        zmax=zmax,
+        nfp=nfp,
+    )
+    return params, r_grid, z_grid, phi_grid
+
+
 def test_mgrid_jax_affine_values_match_exact_and_legacy_interpolator():
     enable_x64(True)
     params, coeffs = _affine_mgrid_params()
@@ -126,6 +173,49 @@ def test_mgrid_jax_affine_values_match_exact_and_legacy_interpolator():
     )
     for got, want in zip(actual, legacy, strict=True):
         np.testing.assert_allclose(got, want, rtol=2.0e-14, atol=1.0e-13)
+
+
+def test_mgrid_jax_generated_from_direct_coils_matches_biot_savart_at_grid_nodes():
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jnp
+
+    enable_x64(True)
+    coil_params = _off_axis_coil_params()
+    mgrid_params, r_grid, z_grid, phi_grid = _mgrid_from_direct_coil_nodes(coil_params)
+    r_idx = np.asarray([[0, 2, 5], [1, 3, 4]])
+    z_idx = np.asarray([[0, 2, 4], [1, 3, 2]])
+    phi_idx = np.asarray([[0, 1, 3], [6, 4, 2]])
+    R = jnp.asarray(np.asarray(r_grid)[r_idx])
+    Z = jnp.asarray(np.asarray(z_grid)[z_idx])
+    phi = jnp.asarray(np.asarray(phi_grid)[phi_idx])
+
+    direct = sample_coil_field_cylindrical(coil_params, R, Z, phi)
+    from_mgrid = sample_mgrid_field_cylindrical(mgrid_params, R, Z, phi)
+    from_wrapped_mgrid = sample_mgrid_field_cylindrical(mgrid_params, R, Z, phi + 2.0 * jnp.pi)
+
+    for got, got_wrapped, want in zip(from_mgrid, from_wrapped_mgrid, direct, strict=True):
+        np.testing.assert_allclose(np.asarray(got), np.asarray(want), rtol=2.0e-11, atol=2.0e-14)
+        np.testing.assert_allclose(np.asarray(got_wrapped), np.asarray(want), rtol=2.0e-11, atol=2.0e-14)
+
+
+def test_mgrid_jax_extcur_scales_generated_direct_coil_field_linearly():
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jnp
+
+    enable_x64(True)
+    coil_params = _off_axis_coil_params()
+    mgrid_params, r_grid, z_grid, phi_grid = _mgrid_from_direct_coil_nodes(coil_params)
+    scale = 2.75
+    scaled_mgrid = mgrid_params.with_arrays(extcur=jnp.asarray([scale]))
+    R = jnp.asarray([[float(r_grid[1]), float(r_grid[3])]])
+    Z = jnp.asarray([[float(z_grid[1]), float(z_grid[3])]])
+    phi = jnp.asarray([[float(phi_grid[2]), float(phi_grid[5])]])
+
+    direct = sample_coil_field_cylindrical(coil_params, R, Z, phi)
+    scaled = sample_mgrid_field_cylindrical(scaled_mgrid, R, Z, phi)
+
+    for got, want in zip(scaled, direct, strict=True):
+        np.testing.assert_allclose(np.asarray(got), scale * np.asarray(want), rtol=2.0e-11, atol=2.0e-14)
 
 
 def test_mgrid_jax_params_are_pytree_leaves_and_with_arrays_preserves_metadata():
