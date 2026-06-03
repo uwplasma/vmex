@@ -245,8 +245,11 @@ been switched to this segmented primitive by default, but
 opt-in ``use_preconditioner_policy_segments`` mode that slices the stacked
 trace controls by the reported static-policy segments and validates identical
 accepted-output behavior against the monolithic replay.  The production-backed
-test passes, but it remains a heavier compile path, so the default stays
-monolithic until segmented replay compile cost is reduced.
+test passes.  Segment mode now builds local trace-switch branches for each
+static segment instead of recompiling a global switch over all accepted traces,
+but the current one-segment gate remains dominated by strict-update replay
+compilation, so the default stays monolithic until segmented replay compile
+cost is reduced on real multi-policy traces.
 ``direct_coil_accepted_trace_fingerprint_delta`` records whether a
 finite-difference perturbation stayed on the same accepted-step/control branch,
 including the same traced reset pattern, scalar update controls, preconditioner

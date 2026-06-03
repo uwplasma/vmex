@@ -50,6 +50,9 @@ Steps taken:
 7. Added production-backed assertions that the opt-in segmented replay gives
    the same objective, final packed state, and accepted/rejected/done/reset
    histories as the existing monolithic controller replay.
+8. Refined the opt-in segmented replay implementation so each static segment
+   builds local trace-switch branches and local step indices instead of using a
+   global switch over every accepted trace in every segment.
 
 Results obtained:
 
@@ -65,6 +68,10 @@ Results obtained:
    -rx` passed: `1 passed in 141.83 s`. This validates behavior, but the
    added segmented replay remains a heavier compile path and should not become
    routine evidence until compile cost is reduced.
+5. After local-branch switch staging, the same focused production-backed test
+   passed in `142.33 s`. The one-segment fixture does not expose the intended
+   switch-width reduction; remaining cost is dominated by strict-update replay
+   compilation. A real multi-policy trace benchmark is still needed.
 
 Best next steps:
 
@@ -72,8 +79,11 @@ Best next steps:
    update.
 2. Keep the default production replay monolithic until segmented replay compile
    cost is reduced.
-3. Next phase-2 target: reduce segmented accepted replay compile cost and then
-   use the segmented path on real multi-policy traces as promotion evidence.
+3. Next phase-2 target: collect or synthesize a real multi-policy production
+   trace and benchmark segmented replay versus monolithic replay. If the
+   multi-policy gate is still dominated by strict-update compilation, target
+   the strict-update/preconditioner replay kernel rather than the segment
+   wrapper.
 
 Need from user:
 
