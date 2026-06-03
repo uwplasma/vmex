@@ -1203,6 +1203,48 @@ def test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_
     )
 
 
+def test_direct_coil_fourier_only_same_branch_custom_vjp_matches_complete_solve_fd(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fourier-coefficient custom VJP matches complete-solve FD on one branch."""
+
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jnp
+
+    enable_x64(True)
+    _set_same_branch_custom_vjp_env(monkeypatch)
+    input_path = _write_tiny_direct_freeb_input(
+        tmp_path / "input.direct_fourier_only_same_branch_custom_vjp",
+        lasym=False,
+        niter=2,
+        mpol=3,
+        ntheta=6,
+    )
+    base_params = _circle_coil_params(current=3.0e7, n_segments=64)
+    base_dofs = jnp.asarray(base_params.base_curve_dofs)
+    base_currents = jnp.asarray(base_params.base_currents)
+    dof_index = (0, 0, 2)
+    dof_step = 5.0e-3
+    direction = base_params.with_arrays(
+        base_curve_dofs=jnp.zeros_like(base_dofs).at[dof_index].set(dof_step),
+        base_currents=jnp.zeros_like(base_currents),
+    )
+
+    def params_for(scale: float) -> CoilFieldParams:
+        return base_params.with_arrays(
+            base_curve_dofs=base_dofs.at[dof_index].add(dof_step * float(scale)),
+            base_currents=base_currents,
+        )
+
+    _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
+        input_path=input_path,
+        base_params=base_params,
+        direction=direction,
+        params_for=params_for,
+    )
+
+
 @pytest.mark.parametrize("lasym", [False, True], ids=["stellsym", "lasym"])
 def test_direct_coil_fixed_trace_custom_vjp_matches_complete_solve_fd_on_same_branch(
     tmp_path: Path,

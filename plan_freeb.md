@@ -12,14 +12,17 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-06-03 while pushing the phase-2 accepted-controller
-segmentation lane toward PR readiness. PR #18 is open on
+Last updated: 2026-06-03 while pushing the phase-2 accepted-controller and
+free-boundary performance lanes toward PR readiness. PR #18 is open on
 `feature/freeb-essos-coil-single-stage`; local branch `refresh/freeb-slim`
-tracks it. PR-head CI is green at `8115cc6b`, including fast tests on Python
-3.10/3.11/3.12, docs, smoke, and the full physics job. Local follow-up
-validation now promotes reset-aware full accepted-trace replay plus stacked
-accepted/rejected, scalar-control, velocity-array, preconditioner-payload, and
-static-policy segment interfaces.
+tracks it. The previous pushed head `f9581997` had green GitHub Actions,
+including fast tests on Python 3.10/3.11/3.12, docs, smoke, and physics smoke.
+The current pushed head `d324ed9b` has a fresh CI run queued/in progress after
+the explicit tridiagonal-policy patch. Local follow-up validation now promotes
+reset-aware full accepted-trace replay plus stacked accepted/rejected,
+scalar-control, velocity-array, preconditioner-payload, static-policy segment
+interfaces, and separate current-only/Fourier-only same-branch complete-solve
+AD-vs-FD gates.
 Do not merge/release until the refreshed pushed head has green GitHub Actions
 and the phase-2 limitations below remain explicit in docs.
 
@@ -353,6 +356,47 @@ Additional validation after this commit:
    `0`. Segment mode is parity-correct, but this tiny synthetic trace does not
    show a first-call speedup; the blocker remains strict-update replay
    compilation/structure rather than segment partition correctness.
+
+### 2026-06-03 Fourier-only same-branch complete-solve AD-vs-FD gate
+
+Steps taken:
+
+1. Added a Fourier-coefficient-only variant of the same-branch direct-coil
+   complete-solve custom-VJP gate.
+2. Kept the current direction exactly zero and perturbed one coil Fourier
+   coefficient so this validates the pure coil-geometry control direction, not
+   the already-covered current-only or mixed directions.
+3. Updated the free-boundary coil-optimization and validation docs to state the
+   promoted same-branch gate set precisely: current-only, Fourier-only, and
+   mixed current/Fourier perturbations.
+
+Results obtained:
+
+1. `JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_fourier_only_same_branch_custom_vjp_matches_complete_solve_fd
+   -rx -s` passed: `1 passed in 34.74 s`.
+2. `JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_fd
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_fourier_only_same_branch_custom_vjp_matches_complete_solve_fd
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_fixed_trace_custom_vjp_matches_complete_solve_fd_on_same_branch
+   -rx` passed: `4 passed in 97.59 s`.
+3. `python -m ruff check
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py` passed.
+4. `python -m sphinx -W --keep-going -b html docs
+   /tmp/vmec_jax_freeb_docs_check_phase2_fourier` passed.
+
+Best next steps:
+
+1. Commit and push this phase-2 validation increment.
+2. Continue from same-branch complete-solve evidence toward a production
+   full-loop custom VJP only after the adaptive branch/controller seam is
+   represented in a JAX-visible or custom-adjoint primitive.
+3. Continue generated-mgrid VMEC2000 WOUT parity and performance profiling in
+   parallel, since neither blocks the new Fourier-only validation gate.
+
+Need from user:
+
+Nothing now.
 
 ### 2026-06-03 Robust-coil perturbation physics gates
 

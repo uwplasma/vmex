@@ -292,9 +292,10 @@ finite-difference perturbation stayed on the same accepted-step/control branch,
 including the same traced reset pattern, scalar update controls, preconditioner
 policy flags, active preconditioner size, and preconditioner/mode-shape
 signatures.
-The current required gate exercises this same-branch contract in two ways:
-a current-only perturbation validates the cleanest coil-control direction,
-while the existing stellsym/``LASYM`` gate validates a mixed current and
+The current required gate exercises this same-branch contract in three ways:
+a current-only perturbation validates the cleanest coil-control direction, a
+Fourier-coefficient-only perturbation validates a pure coil-geometry direction,
+and the existing stellsym/``LASYM`` gate validates a mixed current plus
 Fourier-geometry direction.  These tests compare the custom-VJP directional
 derivative to the central finite difference of complete tiny free-boundary
 solves after explicitly rejecting branch changes.  This is stronger than a
