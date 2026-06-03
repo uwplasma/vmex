@@ -47,6 +47,37 @@ def _find_lpqa_coils() -> Path:
 LPQA_COILS = _find_lpqa_coils()
 
 
+def test_generated_mgrid_diagnostic_boundary_domain_check_flags_outside_surface() -> None:
+    from tools.diagnostics.compare_freeb_coils_mgrid_vmec2000 import (
+        _boundary_domain_check,
+        _wout_boundary_extents,
+    )
+
+    wout = SimpleNamespace(
+        xm=np.asarray([0, 1]),
+        xn=np.asarray([0, 0]),
+        rmnc=np.asarray([[0.0, 0.0], [10.0, 2.0]]),
+        rmns=np.zeros((2, 2)),
+        zmns=np.asarray([[0.0, 0.0], [0.0, 3.0]]),
+        zmnc=np.zeros((2, 2)),
+        nfp=2,
+        lasym=False,
+    )
+
+    extents = _wout_boundary_extents(wout, ntheta=64, nphi=8)
+    assert extents["available"] is True
+    assert extents["rmin"] == pytest.approx(8.0)
+    assert extents["rmax"] == pytest.approx(12.0)
+    assert extents["zmin"] == pytest.approx(-3.0)
+    assert extents["zmax"] == pytest.approx(3.0)
+    assert _boundary_domain_check(extents, {"rmin": 7.0, "rmax": 13.0, "zmin": -4.0, "zmax": 4.0})[
+        "contained"
+    ] is True
+    outside = _boundary_domain_check(extents, {"rmin": 9.0, "rmax": 13.0, "zmin": -4.0, "zmax": 4.0})
+    assert outside["contained"] is False
+    assert outside["margins"]["rmin_margin"] == pytest.approx(-1.0)
+
+
 def _load_lpqa_essos_coils():
     essos_coils = pytest.importorskip("essos.coils")
     if not LPQA_COILS.exists():
