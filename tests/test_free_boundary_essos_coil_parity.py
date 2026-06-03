@@ -160,6 +160,14 @@ def _assert_same_wout_layout(got, ref) -> None:
     assert bool(got.lasym) == bool(ref.lasym)
     np.testing.assert_array_equal(np.asarray(got.xm, dtype=int), np.asarray(ref.xm, dtype=int))
     np.testing.assert_array_equal(np.asarray(got.xn, dtype=int), np.asarray(ref.xn, dtype=int))
+    got_xm_nyq = np.asarray(getattr(got, "xm_nyq", []), dtype=int)
+    ref_xm_nyq = np.asarray(getattr(ref, "xm_nyq", []), dtype=int)
+    got_xn_nyq = np.asarray(getattr(got, "xn_nyq", []), dtype=int)
+    ref_xn_nyq = np.asarray(getattr(ref, "xn_nyq", []), dtype=int)
+    if got_xm_nyq.size or ref_xm_nyq.size:
+        np.testing.assert_array_equal(got_xm_nyq, ref_xm_nyq)
+    if got_xn_nyq.size or ref_xn_nyq.size:
+        np.testing.assert_array_equal(got_xn_nyq, ref_xn_nyq)
 
 
 def _assert_vmec_jax_direct_matches_generated_mgrid_wout(wout_direct, wout_mgrid) -> None:
@@ -225,8 +233,14 @@ def _finite_scalar(wout, name: str) -> float | None:
 
 
 def test_low_order_mode_mask_matches_main_and_nyquist_wout_bases() -> None:
+    from tools.diagnostics.compare_freeb_coils_mgrid_vmec2000 import _same_layout as diagnostic_same_layout
+
     wout = SimpleNamespace(
+        ns=3,
+        mpol=3,
+        ntor=2,
         nfp=2,
+        lasym=False,
         xm=np.asarray([0, 1, 2, 3]),
         xn=np.asarray([0, -2, 4, 8]),
         xm_nyq=np.asarray([0, 1, 2, 3, 1, 0]),
@@ -238,6 +252,16 @@ def test_low_order_mode_mask_matches_main_and_nyquist_wout_bases() -> None:
 
     np.testing.assert_array_equal(main_mask, np.asarray([True, True, True, False]))
     np.testing.assert_array_equal(nyq_mask, np.asarray([True, True, True, False, False, False]))
+
+    same = SimpleNamespace(**vars(wout))
+    _assert_same_wout_layout(wout, same)
+    assert diagnostic_same_layout(wout, same)
+
+    mismatched_nyq = SimpleNamespace(**vars(wout))
+    mismatched_nyq.xn_nyq = np.asarray([0, -2, 4, 8, 10, 14])
+    with pytest.raises(AssertionError):
+        _assert_same_wout_layout(wout, mismatched_nyq)
+    assert not diagnostic_same_layout(wout, mismatched_nyq)
 
 
 def _assert_same_sign_and_scale(name: str, got: float, ref: float, *, max_ratio: float) -> None:
