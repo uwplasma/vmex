@@ -2633,9 +2633,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
             "state_reset": reset_to_trace_pre,
         }
 
-    def step_fn(state, coil_params, control):
-        step_index = jnp.asarray(control["step_index"], dtype=jnp.int32)
-        do_propose = jnp.asarray(control["accept"], dtype=bool)
+    def _make_step_fn(segment_traces: tuple[dict[str, Any], ...], *, index_offset: int = 0):
         branches = tuple(
             (
                 lambda operand, trace=trace: _branch_for_trace(
@@ -2645,20 +2643,26 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                     operand[2],
                 )
             )
-            for trace in trace_seq
+            for trace in segment_traces
         )
 
-        def _propose(_unused):
-            return jax.lax.switch(step_index, branches, (state, coil_params, control))
+        def _step_fn(state, coil_params, control):
+            step_index = jnp.asarray(control["step_index"], dtype=jnp.int32) - jnp.asarray(index_offset, dtype=jnp.int32)
+            do_propose = jnp.asarray(control["accept"], dtype=bool)
 
-        def _skip(_unused):
-            return state, {
-                "force": jnp.asarray(0.0),
-                "bsqvac": jnp.asarray(0.0),
-                "state_reset": jnp.asarray(False, dtype=bool),
-            }
+            def _propose(_unused):
+                return jax.lax.switch(step_index, branches, (state, coil_params, control))
 
-        return jax.lax.cond(do_propose, _propose, _skip, operand=None)
+            def _skip(_unused):
+                return state, {
+                    "force": jnp.asarray(0.0),
+                    "bsqvac": jnp.asarray(0.0),
+                    "state_reset": jnp.asarray(False, dtype=bool),
+                }
+
+            return jax.lax.cond(do_propose, _propose, _skip, operand=None)
+
+        return _step_fn
 
     def accept_fn(_state, _proposed_state, _params, control, _aux):
         return control["accept"]
@@ -2676,8 +2680,15 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
             )
             for segment in preconditioner_policy_segments
         )
+        step_fns = tuple(
+            _make_step_fn(
+                trace_seq[int(segment["start"]) : int(segment["stop"])],
+                index_offset=int(segment["start"]),
+            )
+            for segment in preconditioner_policy_segments
+        )
         run = jax_visible_segmented_accepted_nonlinear_controller_jax(
-            step_fn,
+            step_fns,
             accept_fn,
             converged_fn,
             initial_state,
@@ -2687,7 +2698,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
         )
     else:
         run = jax_visible_accepted_nonlinear_controller_jax(
-            step_fn,
+            _make_step_fn(trace_seq),
             accept_fn,
             converged_fn,
             initial_state,
