@@ -617,6 +617,10 @@ update, the v0.0.14 release, and the May 30 GPU scan/replay policy refresh:
   non-axisymmetric multigrid profiles and `DMerc`/`D_R`, and
   `basic_non_stellsym_pressure` passed in `1:48`, covering converged LASYM
   finite-pressure WOUT channels.
+  A full local optional converged-WOUT parity run
+  (`VMEC2000_INTEGRATION=1 VMEC2000_NIGHTLY=1`) then completed in `13:24` with
+  `4 passed, 1 skipped, 1 xfailed`, preserving the documented weak LASYM xfail
+  and the intentionally deferred optional free-boundary converged row.
   Full fixed/free/LASYM/finite-beta converged-equilibrium parity is still open.
   The near-zero `bsubvmns` sine covariant-channel reference-state gap is now
   covered by a focused `up_down_asymmetric_tokamak` regression using VMEC's
