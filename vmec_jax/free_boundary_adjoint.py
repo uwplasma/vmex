@@ -2513,6 +2513,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     checkpoint_steps: bool = False,
     accept_mask: Any | None = None,
     done_mask: Any | None = None,
+    use_preconditioner_policy_segments: bool = False,
 ) -> dict[str, Any]:
     """Replay fixed production traces through a JAX-visible accept controller.
 
@@ -2521,6 +2522,11 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     nonlinear free-boundary controller.  The production traces remain fixed
     data, but the replayed state, per-step accepted masks, and objective
     history are carried through :func:`jax_visible_accepted_nonlinear_controller_jax`.
+    If ``use_preconditioner_policy_segments`` is true, the same controls are
+    split into consecutive static-preconditioner-policy segments and run
+    through :func:`jax_visible_segmented_accepted_nonlinear_controller_jax`.
+    The segmented path is behavior-preserving and opt-in while production
+    preconditioner dispatch remains partially branch-local.
 
     The helper intentionally keeps every trace accepted.  It does not
     differentiate through the host policy that selected the traces; it validates
@@ -2660,15 +2666,35 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     def converged_fn(_accepted_state, _params, control, _aux):
         return control["done"]
 
-    run = jax_visible_accepted_nonlinear_controller_jax(
-        step_fn,
-        accept_fn,
-        converged_fn,
-        initial_state,
-        params,
-        controls,
-        checkpoint_steps=checkpoint_steps,
-    )
+    if use_preconditioner_policy_segments:
+        control_segments = tuple(
+            tree_util.tree_map(
+                lambda value, start=segment["start"], stop=segment["stop"]: jnp.asarray(value)[
+                    int(start) : int(stop)
+                ],
+                controls,
+            )
+            for segment in preconditioner_policy_segments
+        )
+        run = jax_visible_segmented_accepted_nonlinear_controller_jax(
+            step_fn,
+            accept_fn,
+            converged_fn,
+            initial_state,
+            params,
+            control_segments,
+            checkpoint_steps=checkpoint_steps,
+        )
+    else:
+        run = jax_visible_accepted_nonlinear_controller_jax(
+            step_fn,
+            accept_fn,
+            converged_fn,
+            initial_state,
+            params,
+            controls,
+            checkpoint_steps=checkpoint_steps,
+        )
     accepted = jnp.asarray(run["history"]["accepted"], dtype=jnp.asarray(pack_state(run["state"])).dtype)
     objective_components = {
         "state": _weighted_half_norm(pack_state(run["state"]), state_weight),
@@ -2689,6 +2715,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
         "preconditioner_policy_segments": preconditioner_policy_segments,
         "preconditioner_policy_n_segments": len(preconditioner_policy_segments),
         "preconditioner_policy_segment_summary": preconditioner_policy_segment_summary,
+        "used_preconditioner_policy_segments": bool(use_preconditioner_policy_segments),
         "state_reset_flags": tuple(bool(flag) for flag in np.asarray(controls["reset_to_trace_pre"], dtype=bool)),
     }
 

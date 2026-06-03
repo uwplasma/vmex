@@ -42,6 +42,14 @@ Steps taken:
 5. Updated `docs/free_boundary_coil_optimization.rst` to document that this is
    validated phase-2 structure for future production preconditioner-policy
    subcontrollers, not yet the default production replay path.
+6. Added opt-in `use_preconditioner_policy_segments` support to
+   `direct_coil_accepted_trace_controller_replay_objective_jax`. The option
+   slices the stacked accepted-trace controls by static preconditioner-policy
+   segments and runs the replay through
+   `jax_visible_segmented_accepted_nonlinear_controller_jax`.
+7. Added production-backed assertions that the opt-in segmented replay gives
+   the same objective, final packed state, and accepted/rejected/done/reset
+   histories as the existing monolithic controller replay.
 
 Results obtained:
 
@@ -52,15 +60,20 @@ Results obtained:
 3. `JAX_ENABLE_X64=1 python -m pytest -q
    tests/test_free_boundary_vacuum_adjoint.py::test_segmented_accepted_controller_matches_monolithic_scan_and_gradient
    -rx` passed: `1 passed in 1.60 s`.
+4. `JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state
+   -rx` passed: `1 passed in 141.83 s`. This validates behavior, but the
+   added segmented replay remains a heavier compile path and should not become
+   routine evidence until compile cost is reduced.
 
 Best next steps:
 
-1. Run the focused accepted-controller suite and docs build after this log
+1. Run docs, lint, diff checks, commit, and push this opt-in segmented replay
    update.
-2. If validation passes, commit and push the segmented controller primitive.
-3. Next phase-2 target: use the primitive in a production-trace replay variant
-   that groups accepted traces by static preconditioner policy, while keeping
-   existing branch/fingerprint checks as promotion gates.
+2. Keep the default production replay monolithic until segmented replay compile
+   cost is reduced.
+3. Next phase-2 target: reduce segmented accepted replay compile cost and then
+   use the segmented path on real multi-policy traces as promotion evidence.
 
 Need from user:
 

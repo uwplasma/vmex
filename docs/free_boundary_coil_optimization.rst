@@ -240,8 +240,13 @@ The reusable segmented accepted-controller primitive now validates the same
 split on a JAX-visible toy controller: segment boundaries are static Python
 structure, while each segment body is a differentiable ``lax.scan`` and the
 state/done carry is propagated across segments.  Production replay has not yet
-been switched to this segmented primitive, but the mathematical contract is now
-covered before the heavier VMEC trace integration.
+been switched to this segmented primitive by default, but
+``direct_coil_accepted_trace_controller_replay_objective_jax`` exposes an
+opt-in ``use_preconditioner_policy_segments`` mode that slices the stacked
+trace controls by the reported static-policy segments and validates identical
+accepted-output behavior against the monolithic replay.  The production-backed
+test passes, but it remains a heavier compile path, so the default stays
+monolithic until segmented replay compile cost is reduced.
 ``direct_coil_accepted_trace_fingerprint_delta`` records whether a
 finite-difference perturbation stayed on the same accepted-step/control branch,
 including the same traced reset pattern, scalar update controls, preconditioner

@@ -2092,6 +2092,36 @@ def test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state(
         )
         for segment in controller_replay["preconditioner_policy_segment_summary"]
     ] == [(0, 2, 2, 0, 2, 0)]
+    segmented_controller_replay = direct_coil_accepted_trace_controller_replay_objective_jax(
+        base_params,
+        trace0["state_pre"],
+        static=init.static,
+        traces=[trace0, trace1],
+        signgs=int(init.signgs),
+        state_weight=1.0,
+        bsqvac_weight=1.0e-12,
+        force_weight=0.0,
+        enforce_edge=False,
+        use_preconditioner_policy_segments=True,
+    )
+    assert segmented_controller_replay["used_preconditioner_policy_segments"]
+    np.testing.assert_allclose(
+        np.asarray(segmented_controller_replay["objective"]),
+        np.asarray(controller_replay["objective"]),
+        rtol=2.0e-12,
+        atol=1.0e-12,
+    )
+    np.testing.assert_allclose(
+        np.asarray(pack_state(segmented_controller_replay["state"])),
+        np.asarray(pack_state(controller_replay["state"])),
+        rtol=5.0e-12,
+        atol=5.0e-12,
+    )
+    for key in ("active", "accepted", "rejected", "done", "state_reset"):
+        np.testing.assert_array_equal(
+            np.asarray(segmented_controller_replay["history"][key]),
+            np.asarray(controller_replay["history"][key]),
+        )
     np.testing.assert_array_equal(
         np.asarray(controller_replay["history"]["rejected"]),
         np.asarray([False, False]),
