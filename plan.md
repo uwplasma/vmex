@@ -1,13 +1,14 @@
 # VMEC-JAX Research-Grade Roadmap
 
-Last updated: 2026-06-01
+Last updated: 2026-06-03
 Primary branch: `main`
 Baseline release: `v0.0.14`
-Latest known green `main` CI: `c589ea6`
-Current candidate: free-boundary direct-coil PR #18 refreshed onto `b02e9619`,
-including the main-branch spline-profile parity refresh, validation-scale
-direct-coil adjoint replay gates, preconditioner reuse timing evidence, and the
-post-`v0.0.14` scalar-adjoint GPU production-policy refresh from main.
+Latest known green `main` CI: `8c7ffcd`
+Current candidate: free-boundary direct-coil PR #18 refreshed onto
+`origin/main` at `63b73705`, retaining the post-`v0.0.14`
+release-hygiene/refactor refresh, the 95% required gate evidence from main, and
+the branch's direct-coil adjoint replay, generated-`mgrid` diagnostics, and
+preconditioner/performance evidence.
 
 This is the living execution plan for making `vmec_jax` accurate, fast,
 differentiable, documented, and usable by external researchers. Update it when
@@ -137,9 +138,15 @@ acceptance criteria or evidence changes.
   `method="auto_scalar"` through the high-mode stellsym CPU/GPU production
   sweep policy and adds GPU scalar-gradient initial-tangent projection so
   eligible GPU scalar-adjoint runs no longer fall back to dense SciPy.
-  Main subsequently advanced to `d7817174`; free-boundary PR #18 has been
-  refreshed onto that main commit after the direct-coil replay-gradient and
-  preconditioner-reuse timing gates.
+  On 2026-06-03, after the VMEC2000 optional evidence refresh and two small
+  test-backed refactor seams through `8c7ffcd`, the local required coverage
+  gate passed with `2423 passed, 20 skipped, 1 xfailed` and 95.16% coverage in
+  3:11 using four pytest-xdist workers. GitHub Actions run `26885868424` passed
+  build, full docs, CLI smoke, parity dry-run, physics smoke, and Python
+  3.10/3.11/3.12 fast tests for the same commit.
+  Free-boundary PR #18 has subsequently been refreshed onto `origin/main`
+  through `63b73705`; its last pre-merge-refresh head `4c8788f6` was
+  merge-clean and green before the generated-`mgrid` documentation update.
 - VMEC2000 converged-wout parity now has a fast bundled matrix gate across
   fixed/free, axisymmetric/non-axisymmetric, LASYM, and single/multigrid
   representatives. The executable-backed end-state gate remains opt-in:
@@ -659,6 +666,20 @@ performance step is structural control-loop staging/fusion.
   bundled synthetic mgrid currents are sign/magnitude matched to the plasma
   current so stock VMEC2000 reaches the vacuum solve instead of aborting with an
   `I_TOR` mismatch, with an optional executable smoke guarding that behavior.
+  On 2026-06-03 the executable-backed smoke manifest was rerun locally in
+  bounded batches against the local VMEC2000 executable: circular tokamak
+  (`8.82 s`), ITERModel (`9.33 s`), up-down LASYM (`11.20 s`),
+  QA lowres (`26.17 s`), basic non-stellarator-symmetric pressure (`12.68 s`),
+  and CTH-like free-boundary (`14.04 s`) all passed with `failed_cases=0`.
+  The same local VMEC2000 executable was then used for optional converged-WOUT
+  parity rows: `nfp4_QH_finite_beta` passed in `6:04`, covering finite-beta
+  non-axisymmetric multigrid profiles and `DMerc`/`D_R`, and
+  `basic_non_stellsym_pressure` passed in `1:48`, covering converged LASYM
+  finite-pressure WOUT channels.
+  A full local optional converged-WOUT parity run
+  (`VMEC2000_INTEGRATION=1 VMEC2000_NIGHTLY=1`) then completed in `13:24` with
+  `4 passed, 1 skipped, 1 xfailed`, preserving the documented weak LASYM xfail
+  and the intentionally deferred optional free-boundary converged row.
   Full fixed/free/LASYM/finite-beta converged-equilibrium parity is still open.
   The near-zero `bsubvmns` sine covariant-channel reference-state gap is now
   covered by a focused `up_down_asymmetric_tokamak` regression using VMEC's
@@ -666,7 +687,7 @@ performance step is structural control-loop staging/fusion.
   LASYM blocker is the solved-state lambda convergence gap on the `m=1,3,4`
   channels. `freeb_scalpot` remains an instrumented-VMEC2000 diagnostic because
   a stock executable does not emit the required dumps.
-- Refactor/API/examples: 99%. Examples are SIMSOPT-like and clearer, finite-beta
+- Refactor/API/examples: 99.4%. Examples are SIMSOPT-like and clearer, finite-beta
   examples expose structured stage/final summaries while preserving direct
   optimizer visibility and have focused adapter coverage. Objective tuple
   routing is now isolated behind a small assembly helper, reducing the next
@@ -685,7 +706,10 @@ performance step is structural control-loop staging/fusion.
   the bundled case catalog and staged seed-robust promotion/checkpoint
   mechanics live in `qi_optimization_cases.py` and
   `qi_optimization_support.py`. Large
-  solver/wout/free-boundary splits remain deferred behind parity gates.
+  solver/wout/free-boundary splits remain deferred behind parity gates. The
+  latest small seam centralized optional solve dump-array normalization behind
+  a direct helper test, keeping debug-dump behavior stable while reducing
+  duplicated local helper code in `solve.py`.
 - Docs/release hygiene: release target is the next patch release after
   `v0.0.14`, with `vmec_jax --test`
   quick-start tolerance tuning validated locally at `FTOL_ARRAY=1e-12`
@@ -697,8 +721,8 @@ performance step is structural control-loop staging/fusion.
   1 xfailed`, 95.09%), plus the exact replay JVP instrumentation rerun at the
   same 95.09% coverage level and the `v0.0.14` release-candidate rerun
   (`2354 passed, 20 skipped, 110 deselected, 1 xfailed`, 95.09%). GitHub
-  Actions is green through `8c41c606`, carrying the post-`v0.0.14` release
-  evidence refresh, QI staged-seed, explicit CLI docs updates, fallback
+  Actions is green through `8c7ffcd`,
+  carrying the QI staged-seed, explicit CLI docs updates, fallback
   materialization test, optional SIMSOPT Redl gate wiring, replay JVP
   instrumentation, Glasser `D_R` docs/examples, and newer-JAX preconditioner
   compatibility fixes.
@@ -710,10 +734,10 @@ performance step is structural control-loop staging/fusion.
   warnings, release docs use the 95% coverage gate, and package discovery is
   locked to the `vmec_jax` namespace. Released reference assets are ignored so
   local full-tier refreshes cannot accidentally bloat commits.
-  The latest green `main` CI run for `7033647` passed the build, docs, CLI,
+  The latest green `main` CI run for `8c7ffcd` passed the build, docs, CLI,
   parity-smoke, physics-smoke, and Python-version fast-test lanes, and the
-  local CI-equivalent pass reached 95.22% coverage with the size gate still at
-  23.59 MiB tracked.
+  local required coverage gate reached 95.16% coverage with `2423 passed,
+  20 skipped, 1 xfailed`.
   The documented custom QI seed audit command was validated end-to-end on
   `input.QI_stel_seed_3127`; a production-scale NFP3 GPU staged-seed
   verification on `office` reached a controlled timeout with durable partial
