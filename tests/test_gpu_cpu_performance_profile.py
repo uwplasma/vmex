@@ -365,6 +365,35 @@ def test_performance_matrix_exact_command_can_request_memory_profile(tmp_path):
     assert command[command.index("--device-memory-profile-out") + 1] == str(memory)
 
 
+def test_performance_matrix_exact_command_supports_qp_problem(tmp_path):
+    tool = _load_tool()
+    args = tool._build_parser().parse_args(
+        [
+            "--mode",
+            "exact-callback",
+            "--backend",
+            "gpu",
+            "--problem",
+            "qp",
+            "--max-mode",
+            "4",
+            "--callback",
+            "jacobian",
+        ]
+    )
+
+    command = tool.build_child_command(
+        args=args,
+        backend="gpu",
+        report_path=tmp_path / "qp_gpu.json",
+        trace_dir=None,
+        memory_profile_path=None,
+    )
+
+    assert command[command.index("--problem") + 1] == "qp"
+    assert command[command.index("--solver-device") + 1] == "gpu"
+
+
 def test_exact_optimizer_profiler_trial_scan_flag_normalization(monkeypatch):
     exact_tool = _load_exact_tool()
 
@@ -376,6 +405,14 @@ def test_exact_optimizer_profiler_trial_scan_flag_normalization(monkeypatch):
     assert legacy.trial_scan == "on"
     assert legacy.method == "auto"
     assert explicit_off.trial_scan == "off"
+
+
+def test_exact_optimizer_profiler_accepts_qp_problem():
+    exact_tool = _load_exact_tool()
+
+    args = exact_tool._parse_args(["--problem", "qp", "--callback", "jacobian"])
+
+    assert args.problem == "qp"
 
 
 def test_exact_profiler_runtime_info_records_device_timing():
