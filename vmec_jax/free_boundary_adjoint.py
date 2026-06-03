@@ -3022,6 +3022,7 @@ def direct_coil_accepted_trace_directional_check_jax(
     initial_state: Any,
     *,
     eps: float = 1.0e-4,
+    compute_fd: bool = True,
     **replay_kwargs: Any,
 ) -> dict[str, Any]:
     """Validate accepted-trace replay coil gradients by central FD.
@@ -3050,6 +3051,7 @@ def direct_coil_accepted_trace_directional_check_jax(
         params,
         direction,
         eps=eps,
+        compute_fd=compute_fd,
     )
     replay = direct_coil_accepted_trace_replay_objective_jax(
         params,
@@ -3069,6 +3071,7 @@ def direct_coil_accepted_trace_controller_directional_check_jax(
     initial_state: Any,
     *,
     eps: float = 1.0e-4,
+    compute_fd: bool = True,
     **replay_kwargs: Any,
 ) -> dict[str, Any]:
     """Validate stacked accepted-controller replay gradients by central FD.
@@ -3096,6 +3099,7 @@ def direct_coil_accepted_trace_controller_directional_check_jax(
         params,
         direction,
         eps=eps,
+        compute_fd=compute_fd,
     )
     replay = direct_coil_accepted_trace_controller_replay_objective_jax(
         params,

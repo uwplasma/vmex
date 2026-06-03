@@ -264,6 +264,63 @@ def test_pytree_directional_derivative_check_can_skip_finite_difference():
     assert bool(jnp.isnan(check["rel_error"]))
 
 
+def test_direct_coil_trace_directional_helpers_can_skip_finite_difference(monkeypatch):
+    """Cover high-level replay helper contracts without an expensive VMEC trace."""
+
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jnp
+    import vmec_jax.free_boundary_adjoint as freeb_adjoint
+
+    enable_x64(True)
+
+    def fake_replay(coil_params, initial_state, **kwargs):
+        del initial_state, kwargs
+        x = jnp.asarray(coil_params)
+        return {
+            "objective": jnp.sum(x * x) + 0.25 * x[0],
+            "objective_components": {"toy": jnp.sum(x * x)},
+        }
+
+    monkeypatch.setattr(
+        freeb_adjoint,
+        "direct_coil_accepted_trace_replay_objective_jax",
+        fake_replay,
+    )
+    monkeypatch.setattr(
+        freeb_adjoint,
+        "direct_coil_accepted_trace_controller_replay_objective_jax",
+        fake_replay,
+    )
+
+    params = jnp.asarray([1.0, -2.0, 0.5])
+    direction = jnp.asarray([0.25, 0.5, -0.75])
+
+    replay_check = freeb_adjoint.direct_coil_accepted_trace_directional_check_jax(
+        params,
+        direction,
+        initial_state=None,
+        eps=1.0e-5,
+    )
+    assert replay_check["objective_components"]["toy"] > 0.0
+    np.testing.assert_allclose(
+        np.asarray(replay_check["exact_directional"]),
+        np.asarray(replay_check["fd_directional"]),
+        rtol=1.0e-8,
+        atol=1.0e-10,
+    )
+
+    controller_check = freeb_adjoint.direct_coil_accepted_trace_controller_directional_check_jax(
+        params,
+        direction,
+        initial_state=None,
+        eps=1.0e-5,
+        compute_fd=False,
+    )
+    assert controller_check["objective_components"]["toy"] > 0.0
+    assert np.isfinite(float(np.asarray(controller_check["exact_directional"])))
+    assert np.isnan(float(np.asarray(controller_check["fd_directional"])))
+
+
 def test_jax_visible_nonlinear_controller_matches_manual_scan_and_fd():
     pytest.importorskip("jax")
     from vmec_jax._compat import jnp
