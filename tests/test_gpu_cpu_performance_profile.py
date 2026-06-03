@@ -394,6 +394,34 @@ def test_performance_matrix_exact_command_supports_qp_problem(tmp_path):
     assert command[command.index("--solver-device") + 1] == "gpu"
 
 
+def test_performance_matrix_exact_command_supports_auto_scalar_method(tmp_path):
+    tool = _load_tool()
+    args = tool._build_parser().parse_args(
+        [
+            "--mode",
+            "exact-callback",
+            "--backend",
+            "gpu",
+            "--problem",
+            "qp",
+            "--callback",
+            "run",
+            "--method",
+            "auto_scalar",
+        ]
+    )
+
+    command = tool.build_child_command(
+        args=args,
+        backend="gpu",
+        report_path=tmp_path / "auto_scalar_gpu.json",
+        trace_dir=None,
+        memory_profile_path=None,
+    )
+
+    assert command[command.index("--method") + 1] == "auto_scalar"
+
+
 def test_exact_optimizer_profiler_trial_scan_flag_normalization(monkeypatch):
     exact_tool = _load_exact_tool()
 
