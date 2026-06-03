@@ -132,12 +132,17 @@ Results obtained:
 5. The GPU profile completed within budget: two perturbed exact-Jacobian callbacks took 109.43 s total, with callback walls 69.78 s cold and 39.65 s warm.
 6. The accepted-control leaves showed `exact_tape_solver_iteration_control_fsq1_precond_norm_s=2.32 s`, `iteration_control_badjac_s=0.89 s`, and scalar payload/direct-get leaves below printed precision across both callbacks. This rules out FSQ1 payload materialization as the dominant GPU issue for this QH mode-2 exact profile.
 7. The normalized comparison report picked `exact_solve_with_tape_jvp_only_s=61.47 s` as the largest phase and `jacobian_projected_tape_replay_dispatch=44.22 s` as the largest actionable non-container patch target. Exact-tape preconditioner time was also large at 27.93 s.
+8. A matched `office` profile with `VMEC_JAX_OPT_PROJECTED_REPLAY_RESIDUALS=0` reduced the same two-callback QH mode-2 GPU run from 109.43 s to 92.22 s. The accepted replay dispatch bucket dropped from 44.22 s projected replay to 29.85 s standard replay.
+9. Based on that measured regression, the default projected-replay policy is now narrowed from 24+ dense Jacobian columns to 48+ columns for non-LASYM GPU/CUDA/ROCm. The environment override `VMEC_JAX_OPT_PROJECTED_REPLAY_RESIDUALS=1` still forces projected replay for diagnostics.
+10. `python -m ruff check vmec_jax/optimization.py tests/test_optimization_wave2_coverage.py tests/test_optimization_fast_optimizer_methods.py` passed.
+11. `python -m pytest -q tests/test_optimization_wave2_coverage.py tests/test_optimization_fast_optimizer_methods.py -rx` passed: 61 passed in 1.46 s.
 
 Best next steps:
 
 1. Do not spend the next GPU pass on FSQ1 payload/direct scalar gets for this profile; the new leaf timers show those are not the dominant cost.
-2. Target projected replay dispatch/fusion first, then exact-tape preconditioner staging and warm exact-solve preconditioner/update dispatch.
-3. Keep VMEC2000 generated-mgrid WOUT parity blocked until VMEC2000 enters active vacuum on a shared generated-mgrid fixture.
+2. Treat standard tape replay as the default for GPU mode-2 24-column exact Jacobians; use projected replay only for larger 48+ column cases unless future profiling shows a reliable mode-2 win.
+3. Target exact-tape preconditioner staging and warm exact-solve preconditioner/update dispatch next; projected replay dispatch remains a larger-mode optimization lane, not the mode-2 default.
+4. Keep VMEC2000 generated-mgrid WOUT parity blocked until VMEC2000 enters active vacuum on a shared generated-mgrid fixture.
 
 Need from user:
 
