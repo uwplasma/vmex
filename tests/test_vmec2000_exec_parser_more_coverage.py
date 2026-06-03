@@ -83,6 +83,48 @@ def test_parse_vmec2000_threed1_returns_empty_for_missing_stages(tmp_path: Path)
     assert threed1_fsq_total([]).shape == (0,)
 
 
+def test_parse_vmec2000_threed1_splits_packed_beta_and_avg_m_fields(tmp_path: Path) -> None:
+    threed1 = tmp_path / "threed1.packed"
+    threed1.write_text(
+        "\n".join(
+            [
+                "  NS =  7 NO. FOURIER MODES =  4 FTOLV =  1.0E-10 NITER =  13",
+                " ITER FSQR FSQZ FSQL fsqr1 fsqz1 fsql1 DELT0R R00 W BETA <M> DELBSQ FEDGE",
+                "  17 1.0E-1 2.0E-1 3.0E-1 4.0E-1 5.0E-1 6.0E-1 7.0E-1 8.0E-1 9.0E-1 1.001-3.53E+00 4.0E-4 5.0E-5",
+            ]
+        )
+    )
+
+    rows = flatten_threed1(_parse_vmec2000_threed1(threed1))
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.beta == pytest.approx(1.001)
+    assert row.avg_m == pytest.approx(-3.53)
+    assert row.delbsq == pytest.approx(4.0e-4)
+    assert row.fedge == pytest.approx(5.0e-5)
+
+
+def test_parse_vmec2000_threed1_preserves_missing_exponent_underflow_token(tmp_path: Path) -> None:
+    threed1 = tmp_path / "threed1.underflow"
+    threed1.write_text(
+        "\n".join(
+            [
+                "  NS =  7 NO. FOURIER MODES =  4 FTOLV =  1.0E-10 NITER =  13",
+                " ITER FSQR FSQZ FSQL fsqr1 fsqz1 fsql1 DELT0R R00 W BETA <M>",
+                "  2 1.0E-1 2.0E-1 3.0E-1 4.0E-1 5.0E-1 6.0E-1 7.0E-1 8.0E-1 1.0564215887228806-316 1.0E+0 2.0E+0",
+            ]
+        )
+    )
+
+    rows = flatten_threed1(_parse_vmec2000_threed1(threed1))
+
+    assert len(rows) == 1
+    assert rows[0].w == pytest.approx(1.0564215887228806e-316)
+    assert rows[0].beta == pytest.approx(1.0)
+    assert rows[0].avg_m == pytest.approx(2.0)
+
+
 def test_patch_indata_replaces_inserts_before_terminator_and_preserves_newline() -> None:
     text = "\n".join(
         [
