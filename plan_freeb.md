@@ -80,6 +80,17 @@ Results obtained:
    `zmns` relative RMS from about `0.236` to about `0.160`, but the
    direct-provider solve remains underconverged with `fsq_total≈3.59` while
    the generated-`mgrid` backend is much lower at `fsq_total≈0.15`.
+9. Added generated-`mgrid` boundary-domain diagnostics to the comparator JSON.
+   Each WOUT summary now records approximate LCFS `R/Z` extrema, and the
+   direct-vs-generated-`mgrid` comparison records whether each final surface is
+   contained inside the generated `mgrid` domain.
+10. A one-off same-boundary provider-sampling probe found the forced-active
+    long-run final surfaces leave the generated `mgrid` box and become
+    nonphysical: the generated-`mgrid` final boundary has `Rmin≈-0.14` for the
+    denser case, and the direct-provider final boundary has `Rmin≈-0.28`.
+    This explains why the long schedule is not useful parity evidence: both
+    providers have been driven into a regime where generated-`mgrid`
+    interpolation clips and direct Biot-Savart samples a non-toroidal surface.
 
 Best next steps:
 
@@ -90,8 +101,8 @@ Best next steps:
    diagnostic for direct-coil/generated-`mgrid` nonlinear divergence, not as a
    promotion gate.
 3. The next direct-provider parity target is nonlinear/free-boundary update
-   control and NESTOR sampling under active direct-coil fields, not simply
-   generated-`mgrid` interpolation resolution.
+   control that keeps the free-boundary surface inside a physical toroidal
+   basin; it is not simply generated-`mgrid` interpolation resolution.
 4. Poll CI on the pushed parser-hardening head and fix any required-job
    fallout before marking PR #18 ready.
 

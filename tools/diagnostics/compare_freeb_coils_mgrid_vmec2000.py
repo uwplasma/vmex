@@ -559,6 +559,69 @@ def _layout_summary(wout: Any) -> dict[str, Any]:
     }
 
 
+def _wout_boundary_extents(wout: Any, *, ntheta: int = 64, nphi: int = 64) -> dict[str, Any]:
+    """Return approximate LCFS R/Z extrema from WOUT boundary coefficients."""
+
+    xm = _as_float_array(getattr(wout, "xm", []))
+    xn = _as_float_array(getattr(wout, "xn", []))
+    rmnc = _as_float_array(getattr(wout, "rmnc", []))
+    zmns = _as_float_array(getattr(wout, "zmns", []))
+    if xm.size == 0 or xn.size == 0 or rmnc.ndim != 2 or zmns.ndim != 2:
+        return {"available": False}
+    if rmnc.shape[1] != xm.size or zmns.shape[1] != xm.size:
+        return {"available": False, "reason": "mode_shape_mismatch"}
+    theta = np.linspace(0.0, 2.0 * np.pi, int(ntheta), endpoint=False)
+    phi_period = 2.0 * np.pi / max(1, int(getattr(wout, "nfp", 1)))
+    phi = np.linspace(0.0, phi_period, int(nphi), endpoint=False)
+    phase = xm[:, None, None] * theta[None, :, None] - xn[:, None, None] * phi[None, None, :]
+    cos_phase = np.cos(phase)
+    sin_phase = np.sin(phase)
+    rmnc_edge = rmnc[-1]
+    zmns_edge = zmns[-1]
+    rmns = _as_float_array(getattr(wout, "rmns", np.zeros_like(rmnc)))
+    zmnc = _as_float_array(getattr(wout, "zmnc", np.zeros_like(zmns)))
+    if (not bool(getattr(wout, "lasym", False))) or rmns.shape != rmnc.shape:
+        rmns_edge = np.zeros_like(rmnc_edge)
+    else:
+        rmns_edge = rmns[-1]
+    if (not bool(getattr(wout, "lasym", False))) or zmnc.shape != zmns.shape:
+        zmnc_edge = np.zeros_like(zmns_edge)
+    else:
+        zmnc_edge = zmnc[-1]
+    r = np.einsum("m,mtz->tz", rmnc_edge, cos_phase) + np.einsum("m,mtz->tz", rmns_edge, sin_phase)
+    z = np.einsum("m,mtz->tz", zmnc_edge, cos_phase) + np.einsum("m,mtz->tz", zmns_edge, sin_phase)
+    return {
+        "available": True,
+        "ntheta": int(ntheta),
+        "nphi": int(nphi),
+        "rmin": float(np.min(r)),
+        "rmax": float(np.max(r)),
+        "zmin": float(np.min(z)),
+        "zmax": float(np.max(z)),
+    }
+
+
+def _boundary_domain_check(boundary_extents: dict[str, Any], mgrid_bounds: dict[str, Any]) -> dict[str, Any]:
+    """Classify whether a WOUT boundary stays inside generated-mgrid bounds."""
+
+    if not bool(boundary_extents.get("available", False)):
+        return {"available": False, "contained": None}
+    required = ("rmin", "rmax", "zmin", "zmax")
+    if any(key not in mgrid_bounds for key in required):
+        return {"available": False, "contained": None, "reason": "missing_mgrid_bounds"}
+    margins = {
+        "rmin_margin": float(boundary_extents["rmin"]) - float(mgrid_bounds["rmin"]),
+        "rmax_margin": float(mgrid_bounds["rmax"]) - float(boundary_extents["rmax"]),
+        "zmin_margin": float(boundary_extents["zmin"]) - float(mgrid_bounds["zmin"]),
+        "zmax_margin": float(mgrid_bounds["zmax"]) - float(boundary_extents["zmax"]),
+    }
+    return {
+        "available": True,
+        "contained": bool(all(value >= 0.0 for value in margins.values())),
+        "margins": margins,
+    }
+
+
 def _wout_summary(wout: Any) -> dict[str, Any]:
     scalar_names = (
         "aspect",
@@ -584,6 +647,7 @@ def _wout_summary(wout: Any) -> dict[str, Any]:
         "fsq_total": _fsq_total_from_wout(wout),
         "iotas_mean_no_axis": _safe_float(np.mean(iotas[1:])) if iotas.size > 1 else _safe_float(np.mean(iotas)),
         "iotaf_mean": _safe_float(np.mean(iotaf)) if iotaf.size else None,
+        "boundary_extents": _wout_boundary_extents(wout),
     }
 
 
@@ -1755,6 +1819,20 @@ def main(argv: list[str] | None = None) -> int:
         "both_active": bool(jax_mgrid_active and jax_direct_active),
         "activate_fsq": None if args.activate_fsq is None else float(args.activate_fsq),
     }
+    domain_checks = {
+        "vmec_jax_mgrid": _boundary_domain_check(
+            payload["backends"]["vmec_jax_mgrid"].get("wout", {}).get("boundary_extents", {}),
+            payload["mgrid_generation"],
+        ),
+        "vmec_jax_direct_coils": _boundary_domain_check(
+            payload["backends"]["vmec_jax_direct_coils"].get("wout", {}).get("boundary_extents", {}),
+            payload["mgrid_generation"],
+        ),
+    }
+    payload["comparisons"]["vmec_jax_direct_vs_generated_mgrid"]["boundary_vs_mgrid_domain"] = domain_checks
+    for backend, check in domain_checks.items():
+        if check.get("contained") is False:
+            warnings.append(f"{backend}_boundary_outside_generated_mgrid")
     if not (jax_mgrid_active and jax_direct_active):
         warnings.append("vmec_jax_free_boundary_inactive")
     if not bool(jax_comparison["passed"]):
