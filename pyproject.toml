@@ -64,6 +64,7 @@ markers = [
   "vmec2000: integration tests requiring a local VMEC2000 build (+ mpi4py/netCDF4)",
   "simsopt: optional integration tests comparing against SIMSOPT",
   "full: slower/full-physics tests; fetched-asset rows require tools/fetch_assets.py",
+  "py311_coverage_only: expensive physics/numerics gates run in the Python 3.11 coverage lane and are skipped in compatibility-only CI lanes",
 ]
 
 [tool.ruff]

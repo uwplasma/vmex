@@ -2277,6 +2277,7 @@ def test_dense_nonlinear_adjoint_chain_wrt_coil_current_matches_finite_differenc
     )
 
 
+@pytest.mark.py311_coverage_only
 def test_dense_nonlinear_adjoint_chain_wrt_coil_geometry_matches_finite_difference():
     """Validate a coil Fourier perturbation through a nonlinear implicit root."""
 
@@ -2291,6 +2292,7 @@ def test_dense_nonlinear_adjoint_chain_wrt_coil_geometry_matches_finite_differen
     )
 
 
+@pytest.mark.py311_coverage_only
 def test_dense_fixed_point_direct_coil_loop_wrt_current_matches_finite_difference():
     """Validate a miniature complete free-boundary fixed-point coil loop."""
 
@@ -2305,6 +2307,7 @@ def test_dense_fixed_point_direct_coil_loop_wrt_current_matches_finite_differenc
     )
 
 
+@pytest.mark.py311_coverage_only
 def test_dense_fixed_point_direct_coil_loop_wrt_geometry_matches_finite_difference():
     """Validate the fixed-point loop for one coil Fourier geometry coefficient."""
 
@@ -2319,6 +2322,7 @@ def test_dense_fixed_point_direct_coil_loop_wrt_geometry_matches_finite_differen
     )
 
 
+@pytest.mark.py311_coverage_only
 def test_dense_fixed_point_projected_mode_loop_wrt_current_matches_finite_difference():
     """Validate moving-boundary direct-coil fixed point through mode response."""
 
@@ -2333,6 +2337,7 @@ def test_dense_fixed_point_projected_mode_loop_wrt_current_matches_finite_differ
     )
 
 
+@pytest.mark.py311_coverage_only
 def test_dense_fixed_point_projected_mode_loop_wrt_geometry_matches_finite_difference():
     """Validate moving-boundary fixed point for one coil Fourier coefficient."""
 
@@ -2523,6 +2528,7 @@ def test_projected_mode_fixed_point_objective_value_and_grad_wrt_coil_pytree():
         )
 
 
+@pytest.mark.py311_coverage_only
 def test_lasym_projected_mode_fixed_point_objective_ad_matches_central_fd_for_coil_pytree():
     """Validate the asymmetric direct-coil fixed-point chain with central FD.
 

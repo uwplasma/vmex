@@ -103,6 +103,7 @@ def test_b_cartesian_from_state_jvp_matches_finite_difference():
     )
 
 
+@pytest.mark.py311_coverage_only
 def test_exact_optimizer_b_cartesian_tangent_columns_match_jacobian():
     pytest.importorskip("jax")
 
@@ -164,6 +165,7 @@ def test_exact_optimizer_b_cartesian_tangent_columns_match_jacobian():
     )
 
 
+@pytest.mark.py311_coverage_only
 def test_exact_optimizer_jacobian_matches_finite_difference_residual():
     pytest.importorskip("jax")
 
@@ -227,6 +229,7 @@ def test_exact_optimizer_jacobian_matches_finite_difference_residual():
     assert max_abs < 1.2e-2
 
 
+@pytest.mark.py311_coverage_only
 def test_exact_optimizer_scalar_objective_cotangent_matches_dense_jacobian():
     jax = pytest.importorskip("jax")
 

@@ -83,9 +83,16 @@ def pytest_collection_modifyitems(config, items):
     has_assets = _assets_available()
     has_wout_fixtures = _wout_fixtures_available()
     run_full = os.environ.get("RUN_FULL", "") == "1"
+    skip_py311_coverage_only = os.environ.get("VMEC_JAX_SKIP_PY311_COVERAGE_ONLY", "") == "1"
     if run_full and not has_assets:
         raise pytest.UsageError("RUN_FULL=1 but example assets are missing. Run tools/fetch_assets.py")
     for item in items:
+        if skip_py311_coverage_only and item.get_closest_marker("py311_coverage_only") is not None:
+            item.add_marker(
+                pytest.mark.skip(
+                    reason="Skipped in compatibility-only CI lanes; covered by the Python 3.11 coverage lane."
+                )
+            )
         if not has_wout_fixtures and Path(str(item.fspath)).name in _OPTIONAL_WOUT_FIXTURE_TEST_FILES:
             item.add_marker(
                 pytest.mark.skip(

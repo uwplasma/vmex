@@ -81,7 +81,7 @@ jobs:
             pytest -q -n 4 -m "not full and not vmec2000 and not simsopt" --durations=50 --cov=vmec_jax --cov-report=xml --cov-report=term:skip-covered --cov-fail-under=95
             python -c 'import sys, xml.etree.ElementTree as ET; threshold=0.95; rate=float(ET.parse("coverage.xml").getroot().attrib["line-rate"]); print(f"Exact line coverage: {100.0 * rate:.2f}%"); sys.exit(0 if rate + 1.0e-12 >= threshold else f"Exact line coverage {100.0 * rate:.2f}% is below {100.0 * threshold:.2f}%")'
           else
-            pytest -q -n 4 -m "not full and not vmec2000 and not simsopt" --durations=50
+            VMEC_JAX_SKIP_PY311_COVERAGE_ONLY=1 pytest -q -n 4 -m "not full and not vmec2000 and not simsopt" --durations=50
           fi
 
       - name: Upload coverage artifact

@@ -1100,6 +1100,7 @@ def test_dynamic_replay_scan_matches_primal_qh_full_inner(load_case_qh_warm_star
     assert final_state_linf < 1.0e-5
 
 
+@pytest.mark.py311_coverage_only
 def test_checkpoint_tape_state_jvp_columns_matches_single_column_circular(load_case_circular_tokamak):
     pytest.importorskip("jax")
 
