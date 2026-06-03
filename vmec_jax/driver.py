@@ -746,6 +746,17 @@ def _copy_final_force_payload(result_i: SolveVmecResidualResult, source_i) -> So
     return result_i
 
 
+def _cat_result_history(results_i: list[object], attr: str) -> np.ndarray:
+    """Concatenate an optional history array across VMEC stage/chunk results."""
+
+    parts = [
+        np.asarray(getattr(result_i, attr))
+        for result_i in results_i
+        if getattr(result_i, attr, None) is not None
+    ]
+    return np.concatenate(parts, axis=0) if parts else np.zeros((0,), dtype=float)
+
+
 def _timing_solve_total_s(timing_i: dict) -> float:
     """Return the generic solve wall time from non-scan or scan timing blocks."""
 
@@ -828,10 +839,6 @@ def _merge_stage_chunk_results(
             accelerated_stage_effective_mode=str(mode_i),
         )
 
-    def _cat_hist(attr: str) -> np.ndarray:
-        parts = [np.asarray(getattr(r, attr)) for r in results_i if getattr(r, attr) is not None]
-        return np.concatenate(parts, axis=0) if parts else np.zeros((0,), dtype=float)
-
     last = results_i[-1]
     diag = dict(last.diagnostics)
     for key in _STAGE_CHUNK_DIAG_KEYS:
@@ -852,12 +859,12 @@ def _merge_stage_chunk_results(
     out = SolveVmecResidualResult(
         state=last.state,
         n_iter=int(sum(int(r.n_iter) + 1 for r in results_i) - 1),
-        w_history=_cat_hist("w_history"),
-        fsqr2_history=_cat_hist("fsqr2_history"),
-        fsqz2_history=_cat_hist("fsqz2_history"),
-        fsql2_history=_cat_hist("fsql2_history"),
-        grad_rms_history=_cat_hist("grad_rms_history"),
-        step_history=_cat_hist("step_history"),
+        w_history=_cat_result_history(results_i, "w_history"),
+        fsqr2_history=_cat_result_history(results_i, "fsqr2_history"),
+        fsqz2_history=_cat_result_history(results_i, "fsqz2_history"),
+        fsql2_history=_cat_result_history(results_i, "fsql2_history"),
+        grad_rms_history=_cat_result_history(results_i, "grad_rms_history"),
+        step_history=_cat_result_history(results_i, "step_history"),
         diagnostics=diag,
     )
     return _copy_final_force_payload(out, last)
@@ -3630,11 +3637,6 @@ def run_fixed_boundary(
             ftol_last = float(ftol_i)
             step_size_last = float(step_size_val)
 
-        # Merge per-stage histories into one VMEC-style trace object.
-        def _cat(attr: str) -> np.ndarray:
-            parts = [np.asarray(getattr(r, attr)) for r in stage_results if getattr(r, attr) is not None]
-            return np.concatenate(parts, axis=0) if parts else np.zeros((0,), dtype=float)
-
         diag = dict(stage_results[-1].diagnostics)
         diag["solver_mode"] = str(solver_mode_eff)
         diag["accelerated_mode"] = bool(accelerated_mode)
@@ -3715,12 +3717,12 @@ def run_fixed_boundary(
         res = _copy_final_force_payload(SolveVmecResidualResult(
             state=state,
             n_iter=int(sum(int(r.n_iter) + 1 for r in stage_results) - 1),
-            w_history=_cat("w_history"),
-            fsqr2_history=_cat("fsqr2_history"),
-            fsqz2_history=_cat("fsqz2_history"),
-            fsql2_history=_cat("fsql2_history"),
-            grad_rms_history=_cat("grad_rms_history"),
-            step_history=_cat("step_history"),
+            w_history=_cat_result_history(stage_results, "w_history"),
+            fsqr2_history=_cat_result_history(stage_results, "fsqr2_history"),
+            fsqz2_history=_cat_result_history(stage_results, "fsqz2_history"),
+            fsql2_history=_cat_result_history(stage_results, "fsql2_history"),
+            grad_rms_history=_cat_result_history(stage_results, "grad_rms_history"),
+            step_history=_cat_result_history(stage_results, "step_history"),
             diagnostics=diag,
         ), stage_results[-1])
         # Optional scan corrector: run a single non-scan VMEC2000 step to

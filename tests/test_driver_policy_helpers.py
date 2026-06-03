@@ -257,6 +257,24 @@ def test_resume_state_sanitizers_drop_unsafe_payloads_and_clamp_step():
     assert driver._sanitize_resume_state_for_same_grid(None, step_size=0.1) is None
 
 
+def test_cat_result_history_concatenates_in_order_and_skips_missing_payloads():
+    results = [
+        SimpleNamespace(trace=np.asarray([1.0, 2.0])),
+        SimpleNamespace(trace=None),
+        SimpleNamespace(trace=np.asarray([3.0])),
+        SimpleNamespace(),
+    ]
+
+    np.testing.assert_allclose(driver._cat_result_history(results, "trace"), [1.0, 2.0, 3.0])
+
+
+def test_cat_result_history_returns_empty_float_array_when_no_parts_exist():
+    history = driver._cat_result_history([SimpleNamespace(trace=None), SimpleNamespace()], "trace")
+
+    assert history.shape == (0,)
+    assert history.dtype == np.dtype(float)
+
+
 def _stage_result(label, *, n_iter, w_history, diagnostics=None):
     zeros = np.zeros((0,), dtype=float)
     return driver.SolveVmecResidualResult(
