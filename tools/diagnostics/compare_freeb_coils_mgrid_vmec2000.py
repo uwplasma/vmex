@@ -97,6 +97,18 @@ def _parser() -> argparse.ArgumentParser:
         help="ESSOS checkout to put first on sys.path before importing essos.",
     )
     p.add_argument("--pressure-scale", type=float, default=DEFAULT_PRESSURE_SCALE)
+    p.add_argument(
+        "--phiedge-scale",
+        type=float,
+        default=1.0,
+        help="Scale the base input PHIEDGE. Use -1 to test the opposite VMEC vacuum sign convention.",
+    )
+    p.add_argument(
+        "--extcur-scale",
+        type=float,
+        default=1.0,
+        help="External-current scale written to EXTCUR for generated-mgrid VMEC inputs.",
+    )
     p.add_argument("--niter", type=int, default=2)
     p.add_argument("--ftol", type=float, default=1.0e-8)
     p.add_argument("--ns", type=int, default=12)
@@ -813,16 +825,18 @@ def _make_freeb_indata(base_indata: Any, *, mgrid_file: str, args: argparse.Name
     indata = deepcopy(base_indata)
     nzeta = _diagnostic_nzeta(args)
     ns_array, niter_array, ftol_array = _diagnostic_schedule(args)
+    phiedge = float(indata.scalars.get("PHIEDGE", 0.0)) * float(args.phiedge_scale)
     indata.scalars.update(
         {
             "LFREEB": True,
             "MGRID_FILE": str(mgrid_file),
-            "EXTCUR": [1.0],
+            "EXTCUR": [float(args.extcur_scale)],
             "NS_ARRAY": [int(value) for value in ns_array],
             "NITER_ARRAY": [int(value) for value in niter_array],
             "FTOL_ARRAY": [float(value) for value in ftol_array],
             "NITER": int(niter_array[-1]),
             "FTOL": float(ftol_array[-1]),
+            "PHIEDGE": phiedge,
             "MPOL": int(args.mpol),
             "NTOR": int(args.ntor),
             "NZETA": int(nzeta),
@@ -1424,6 +1438,8 @@ def _base_payload(args: argparse.Namespace, *, out: Path, workdir: Path) -> dict
         "base_input": args.input.expanduser().resolve(),
         "configuration": {
             "pressure_scale": float(args.pressure_scale),
+            "phiedge_scale": float(args.phiedge_scale),
+            "extcur_scale": float(args.extcur_scale),
             "niter": int(niter_array[-1]),
             "ftol": float(ftol_array[-1]),
             "ns": int(ns_array[-1]),

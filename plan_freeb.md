@@ -44,6 +44,9 @@ Steps taken:
 7. Patched the generated-`mgrid` diagnostic to derive mgrid bounds from the
    actual input boundary and to use RMS-based modal tolerances for
    direct-coil/generated-`mgrid` comparisons over nonlinear iteration traces.
+8. Added diagnostic `--phiedge-scale` and `--extcur-scale` controls so
+   sign-consistent VMEC2000 generated-`mgrid` experiments can be reproduced
+   without editing temporary input files by hand.
 
 Results obtained:
 
@@ -84,6 +87,14 @@ Results obtained:
    active vacuum path only when exactly one of `PHIEDGE` or `EXTCUR` is flipped,
    but those active runs are still underconverged for the current short LP-QA
    schedule and therefore cannot yet be promoted to a parity gate.
+8. Reproducible sign-flipped diagnostic:
+   `tools/diagnostics/compare_freeb_coils_mgrid_vmec2000.py --phiedge-scale -1
+   --ns-array 5,7 --niter-array 80,80 --ftol-array 1e-5,1e-5 ...` completed
+   with parseable VMEC2000 WOUT output and active-vacuum execution, but remains
+   non-promotable. VMEC2000 reported `fsq_total≈24.7`, zero geometry scalars
+   such as `aspect=0`, and the vmec_jax-vs-VMEC2000 iota RMS gap is about
+   `0.40`; low-order `R/Z` boundary RMS gaps were much smaller, about
+   `0.04` and `0.07`.
 
 Best next steps:
 
