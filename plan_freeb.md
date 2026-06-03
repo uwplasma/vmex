@@ -83,6 +83,27 @@ Additional validation after this commit:
 7. `python -m pytest -q
    tests/test_runtime_diagnostics.py::test_direct_coil_boundary_replay_report_selects_active_trace
    -rx` passed: `1 passed in 0.02 s`.
+8. Bounded optional diagnostic:
+   `JAX_ENABLE_X64=1 python
+   tools/diagnostics/direct_coil_boundary_replay_report.py --out
+   /tmp/vmec_jax_freeb_boundary_replay_report.json --workdir
+   /tmp/vmec_jax_freeb_boundary_replay --niter 2 --mpol 3 --ntheta 6
+   --n-segments 32 --warm-repeats 1 --no-fail-on-mismatch` passed.
+   Results: trace generation `9.50 s`, fixed-geometry first replay `2.39 s`,
+   geometry-plus-boundary first replay `7.04 s`, warm replay timings
+   `4.2e-05 s` and `2.6e-04 s`. This confirms the current diagnostic hotspot
+   is first-call compile/setup for tiny traces, not warm boundary replay math.
+9. Bounded optional segmented replay diagnostic:
+   `JAX_ENABLE_X64=1 python
+   tools/diagnostics/direct_coil_segmented_replay_report.py --out
+   /tmp/vmec_jax_freeb_segmented_replay_report.json --workdir
+   /tmp/vmec_jax_freeb_segmented_replay --niter 2 --mpol 3 --ntheta 6
+   --n-segments 32 --warm-repeats 1 --no-fail-on-mismatch` passed.
+   Results: trace generation `9.82 s`, monolithic first replay `9.40 s`,
+   segmented first replay `9.51 s`, objective delta `0`, state max abs delta
+   `0`. Segment mode is parity-correct, but this tiny synthetic trace does not
+   show a first-call speedup; the blocker remains strict-update replay
+   compilation/structure rather than segment partition correctness.
 
 ### 2026-06-03 Robust-coil perturbation physics gates
 
