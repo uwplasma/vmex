@@ -587,6 +587,37 @@ def _wout_summary(wout: Any) -> dict[str, Any]:
     }
 
 
+def _vmec2000_wout_promotion_quality(wout: Any) -> dict[str, Any]:
+    """Classify whether a VMEC2000 WOUT is usable as parity evidence.
+
+    Some generated-``mgrid`` sign probes can produce a parseable VMEC2000 WOUT
+    even though VMEC2000 has not formed a physically promotable equilibrium
+    record: geometry scalars such as aspect, major/minor radius, and volume may
+    be zero while low-order Fourier arrays are present.  That WOUT is useful
+    diagnostic evidence but must not be counted as external parity evidence.
+    """
+
+    geometry_names = ("aspect", "Aminor_p", "Rmajor_p", "volume_p")
+    geometry_scalars = {name: _safe_float(getattr(wout, name, None)) for name in geometry_names}
+    reasons: list[str] = []
+    bad_geometry = [
+        name
+        for name, value in geometry_scalars.items()
+        if value is None or (not np.isfinite(value)) or float(value) <= TINY
+    ]
+    if bad_geometry:
+        reasons.append("nonpositive_geometry_scalars")
+    fsq_total = _fsq_total_from_wout(wout)
+    if fsq_total is None or (not np.isfinite(float(fsq_total))):
+        reasons.append("nonfinite_fsq_total")
+    return {
+        "promotable": not reasons,
+        "reasons": reasons,
+        "geometry_scalars": geometry_scalars,
+        "fsq_total": fsq_total,
+    }
+
+
 def _scalar_gap(got_wout: Any, ref_wout: Any, name: str, *, rtol: float | None = None, atol: float | None = None) -> dict[str, Any]:
     if not (hasattr(got_wout, name) and hasattr(ref_wout, name)):
         return {"available": False}
@@ -1288,6 +1319,7 @@ def _read_vmec2000_wout_for_summary(summary: dict[str, Any], *, wout_path: Path)
         _mark_unreadable_vmec2000_wout(summary, wout_path=wout_path, error=exc)
         return None
     summary["wout"] = _wout_summary(wout)
+    summary["wout_promotion_quality"] = _vmec2000_wout_promotion_quality(wout)
     return wout
 
 
@@ -1770,6 +1802,9 @@ def main(argv: list[str] | None = None) -> int:
             hard_errors.append(warning)
 
     if wout_vmec2000 is not None:
+        wout_quality = dict(vmec2000_summary.get("wout_promotion_quality") or {})
+        if not bool(wout_quality.get("promotable", False)):
+            warnings.append("vmec2000_wout_nonpromotable")
         comp_mgrid = _vmec2000_wout_comparison(wout_mgrid, wout_vmec2000, candidate_backend="vmec_jax_generated_mgrid")
         comp_direct = _vmec2000_wout_comparison(wout_direct, wout_vmec2000, candidate_backend="vmec_jax_direct_coils")
         payload["comparisons"]["vmec_jax_mgrid_vs_vmec2000_mgrid"] = comp_mgrid
@@ -1787,6 +1822,9 @@ def main(argv: list[str] | None = None) -> int:
         "jax_direct_vs_mgrid_passed": bool(jax_comparison["passed"]),
         "vmec2000_status": vmec_status,
         "vmec2000_wout_available": wout_vmec2000 is not None,
+        "vmec2000_wout_promotable": bool(
+            dict(vmec2000_summary.get("wout_promotion_quality") or {}).get("promotable", False)
+        ),
         "hard_error_count": len(hard_errors),
         "warning_count": len(warnings),
     }

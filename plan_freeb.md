@@ -170,7 +170,10 @@ Steps taken:
 5. Hardened WOUT layout checks so Nyquist ``xm_nyq/xn_nyq`` bases are rejected
    when mismatched, rather than silently comparing magnetic-field arrays on
    incompatible mode bases.
-6. Added a synthetic unit test covering both main and Nyquist low-order masks
+6. Added `vmec2000_wout_promotion_quality` classification so a parseable WOUT
+   with zero/nonpositive geometry scalars is explicitly reported as available
+   but non-promotable external parity evidence.
+7. Added a synthetic unit test covering both main and Nyquist low-order masks
    and Nyquist-basis layout rejection.
 
 Results obtained:
@@ -193,10 +196,14 @@ Results obtained:
    relative RMS gaps are about `0.041` and `0.066`, but VMEC2000 reports zero
    geometry scalars and high `fsq_total≈24.67`, so aspect/beta/iota limits are
    not promotable.
-5. `python -m ruff check
+5. The real sign-flipped diagnostic now records
+   `vmec2000_wout_available=true`,
+   `vmec2000_wout_promotable=false`, and promotion-quality reason
+   `nonpositive_geometry_scalars`.
+6. `python -m ruff check
    tools/diagnostics/compare_freeb_coils_mgrid_vmec2000.py
    tests/test_free_boundary_essos_coil_parity.py` passed.
-6. `python -m pytest -q
+7. `python -m pytest -q
    tests/test_free_boundary_essos_coil_parity.py::test_low_order_mode_mask_matches_main_and_nyquist_wout_bases
    -q` passed after the Nyquist layout hardening.
 

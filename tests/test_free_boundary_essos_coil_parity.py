@@ -233,7 +233,10 @@ def _finite_scalar(wout, name: str) -> float | None:
 
 
 def test_low_order_mode_mask_matches_main_and_nyquist_wout_bases() -> None:
-    from tools.diagnostics.compare_freeb_coils_mgrid_vmec2000 import _same_layout as diagnostic_same_layout
+    from tools.diagnostics.compare_freeb_coils_mgrid_vmec2000 import (
+        _same_layout as diagnostic_same_layout,
+        _vmec2000_wout_promotion_quality,
+    )
 
     wout = SimpleNamespace(
         ns=3,
@@ -241,6 +244,13 @@ def test_low_order_mode_mask_matches_main_and_nyquist_wout_bases() -> None:
         ntor=2,
         nfp=2,
         lasym=False,
+        aspect=0.0,
+        Aminor_p=0.0,
+        Rmajor_p=0.0,
+        volume_p=0.0,
+        fsqr=11.0,
+        fsqz=13.0,
+        fsql=1.0e-3,
         xm=np.asarray([0, 1, 2, 3]),
         xn=np.asarray([0, -2, 4, 8]),
         xm_nyq=np.asarray([0, 1, 2, 3, 1, 0]),
@@ -262,6 +272,19 @@ def test_low_order_mode_mask_matches_main_and_nyquist_wout_bases() -> None:
     with pytest.raises(AssertionError):
         _assert_same_wout_layout(wout, mismatched_nyq)
     assert not diagnostic_same_layout(wout, mismatched_nyq)
+
+    nonpromotable = _vmec2000_wout_promotion_quality(wout)
+    assert nonpromotable["promotable"] is False
+    assert "nonpositive_geometry_scalars" in nonpromotable["reasons"]
+
+    promotable = SimpleNamespace(**vars(wout))
+    promotable.aspect = 5.0
+    promotable.Aminor_p = 1.0
+    promotable.Rmajor_p = 5.0
+    promotable.volume_p = 100.0
+    quality = _vmec2000_wout_promotion_quality(promotable)
+    assert quality["promotable"] is True
+    assert quality["reasons"] == []
 
 
 def _assert_same_sign_and_scale(name: str, got: float, ref: float, *, max_ratio: float) -> None:
