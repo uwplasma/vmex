@@ -137,6 +137,17 @@ def test_direct_coil_segmented_replay_report_synthetic_policy_helpers():
     assert mod._json_ready({"x": np.asarray([1.0]), "bad": float("nan")}) == {"x": [1.0], "bad": None}
 
 
+def test_direct_coil_strict_update_replay_report_helpers():
+    mod = _load_tool("direct_coil_strict_update_replay_report")
+    tree = {"a": np.asarray([[1.0, 2.0], [3.0, 4.0]]), "b": [np.asarray([5.0, 6.0])]}
+
+    first = mod._first_slice(tree)
+
+    np.testing.assert_allclose(np.asarray(first["a"]), np.asarray([1.0, 2.0]))
+    assert np.asarray(first["b"][0]).shape == ()
+    assert mod._json_ready({"x": np.asarray([1.0]), "bad": float("inf")}) == {"x": [1.0], "bad": None}
+
+
 def test_vmecpp_runtime_two_cases_runtime_updates():
     mod = _load_tool("readme_vmecpp_runtime_two_cases")
 

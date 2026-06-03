@@ -133,6 +133,15 @@ Results obtained:
    `20.091 s` versus segmented `20.776 s`. Segment-local controls were
    successfully stacked in both real policy segments, but the tiny trace still
    did not show a speedup.
+6. Added `tools/diagnostics/direct_coil_strict_update_replay_report.py` to
+   isolate one accepted strict VMEC force/preconditioner/update replay while
+   reusing stored `freeb_bsqvac_half`. On the same tiny four-step setup,
+   `JAX_ENABLE_X64=1 python tools/diagnostics/direct_coil_strict_update_replay_report.py
+   --out /tmp/vmec_jax_freeb_strict_update_replay_n4.json --workdir
+   /tmp/vmec_jax_freeb_strict_update_replay_n4_work --warm-repeats 2 --niter 4`
+   passed with exact trace-static/dynamic-control parity. First-call timing
+   was `0.446 s` trace-static and `0.536 s` dynamic controls; warm calls were
+   about `0.1 ms`.
 
 Best next steps:
 
@@ -143,8 +152,11 @@ Best next steps:
 3. The real two-segment run confirms segmentation is behavior-preserving but
    not the dominant speed lever at this trace size. Segment-local
    preconditioner controls are now a validated diagnostic hook, but not a
-   promoted default. Next performance work should target
-   strict-update/preconditioner replay compilation directly.
+   promoted default.
+4. The strict-update diagnostic shows the standalone force/preconditioner/update
+   map is not the whole `~21 s` cold replay cost. Next performance work should
+   isolate boundary-geometry, direct-coil/NESTOR replay, and full-controller
+   composition costs.
 
 Need from user:
 

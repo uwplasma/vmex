@@ -354,6 +354,24 @@ monolithic path: about ``21.01 s`` monolithic versus ``21.80 s`` segmented
 without segment-local controls, and about ``20.09 s`` monolithic versus
 ``20.78 s`` segmented with segment-local controls.  The option is therefore
 kept as a diagnostic hook, not as a promoted performance default.
+A narrower strict-update diagnostic isolates the accepted VMEC force,
+preconditioner, and update map by reusing stored ``freeb_bsqvac_half`` and
+excluding direct-coil boundary resampling:
+
+.. code-block:: bash
+
+   JAX_ENABLE_X64=1 python tools/diagnostics/direct_coil_strict_update_replay_report.py \
+     --out /tmp/vmec_jax_freeb_strict_update_replay_n4.json \
+     --workdir /tmp/vmec_jax_freeb_strict_update_replay_n4_work \
+     --niter 4
+
+On the same tiny four-step setup, this isolated path passed with exact parity
+between trace-static controls and dynamic scalar/array/preconditioner controls.
+The first JIT call was about ``0.446 s`` for trace-static controls and
+``0.536 s`` for dynamic controls, while warm calls were around ``0.1 ms``.
+This shows the standalone strict update is not the full ``~21 s`` cold replay
+cost; the next performance rung should isolate boundary-geometry,
+direct-coil/NESTOR replay, and full-controller composition costs.
 The remaining phase-2 blocker is differentiating through the nonlinear
 ``run_free_boundary`` iteration loop itself, rather than through the dense toy
 nonlinear primitive, fixed-boundary operator, complete finite-response proxy,
