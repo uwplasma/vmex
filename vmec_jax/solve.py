@@ -212,7 +212,7 @@ _rz_norm_np = _geometry_rz_norm_np
 
 
 def _resolve_preconditioner_tridi_policies(
-    *, use_precomputed: bool | None
+    *, use_precomputed: bool | None, use_lax_tridi: bool | None
 ) -> tuple[bool, bool]:
     env_precomputed = os.getenv("VMEC_JAX_TRIDI_PRECOMPUTE", "0").strip().lower() not in (
         "",
@@ -229,7 +229,7 @@ def _resolve_preconditioner_tridi_policies(
     )
     return (
         bool(env_precomputed) if use_precomputed is None else bool(use_precomputed),
-        bool(env_lax_tridi),
+        bool(env_lax_tridi) if use_lax_tridi is None else bool(use_lax_tridi),
     )
 
 
@@ -5556,6 +5556,7 @@ def solve_fixed_boundary_residual_iter(
         preconditioner_use_lax_tridi_policy,
     ) = _resolve_preconditioner_tridi_policies(
         use_precomputed=preconditioner_use_precomputed_tridi,
+        use_lax_tridi=preconditioner_use_lax_tridi,
     )
 
     def _adjoint_trace_array(value):

@@ -148,6 +148,53 @@ Need from user:
 
 Nothing now.
 
+### 2026-06-03 Preconditioner policy correctness and GPU lax-tridi probe
+
+Steps taken:
+
+1. Confirmed PR #18 CI is green at pushed head `f9581997`, with Python
+   3.10/3.11/3.12 fast tests, docs, build, physics smoke, console smoke, and
+   parity-manifest smoke all passing.
+2. Audited the exact-solver preconditioner tridiagonal policy path after the
+   office GPU profile showed preconditioner apply as the largest remaining
+   one-callback exact-tape subphase.
+3. Fixed `solve_fixed_boundary_residual_iter(...)` so explicit
+   `preconditioner_use_lax_tridi` reaches
+   `_resolve_preconditioner_tridi_policies(...)` instead of being ignored in
+   favor of `VMEC_JAX_TRIDI_SOLVE`.
+4. Added a unit test proving explicit precomputed/lax tridiagonal policy values
+   override the environment.
+5. Ran a fresh `office` GPU profile with `VMEC_JAX_TRIDI_SOLVE=force` to test
+   whether XLA/lax tridiagonal solve should become a GPU exact-tape default.
+
+Results obtained:
+
+1. `python -m ruff check vmec_jax/solve.py tests/test_solve_additional_helpers.py`
+   passed.
+2. `python -m pytest -q
+   tests/test_solve_additional_helpers.py::test_preconditioner_tridi_policy_explicit_lax_override_wins
+   tests/test_solve_additional_helpers.py::test_vmec2000_scan_options_env_overrides_preconditioner_and_restart_flags
+   -q` passed: 2 passed.
+3. `python -m pytest -q tests/test_solve_additional_helpers.py -q` passed:
+   73 tests.
+4. Forced lax tridiagonal solve is a regression for the QH mode-2 GPU exact
+   callback: one detailed callback took `161.90 s` versus `48.87 s` for the
+   default detailed profile. Preconditioner apply rose from about `10.89 s` to
+   `31.87 s`, and tape replay dispatch rose to `80.89 s`.
+
+Best next steps:
+
+1. Keep lax tridiagonal solve as an explicit diagnostics/benchmark option on
+   this QH mode-2 GPU exact path; do not promote it as the default.
+2. Target preconditioner apply by reducing dispatch count/fusing update payloads
+   on the default precomputed-Thomas path rather than switching primitives.
+3. Continue phase-2 nonlinear free-boundary adjoint validation after this narrow
+   policy correctness patch is committed and pushed.
+
+Need from user:
+
+Nothing now.
+
 ### 2026-06-03 Pedagogic examples post-push validation
 
 Steps taken:
