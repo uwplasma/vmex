@@ -137,6 +137,26 @@ def test_direct_coil_segmented_replay_report_synthetic_policy_helpers():
     assert mod._json_ready({"x": np.asarray([1.0]), "bad": float("nan")}) == {"x": [1.0], "bad": None}
 
 
+def test_freeb_replay_diagnostic_utils_json_ready_and_timed_call():
+    mod = _load_tool("freeb_replay_diagnostic_utils")
+
+    payload = mod.json_ready(
+        {
+            "array": np.asarray([1.0, 2.0]),
+            "scalar": np.float64(3.0),
+            "nan": float("nan"),
+            "nested": (np.asarray([4.0]),),
+        }
+    )
+
+    assert payload == {"array": [1.0, 2.0], "scalar": 3.0, "nan": None, "nested": [[4.0]]}
+    value, first, warm = mod.timed_call(lambda x: x + 1, 2, warm_repeats=1)
+    assert value == 3
+    assert first >= 0.0
+    assert len(warm) == 1
+    assert warm[0] >= 0.0
+
+
 def test_direct_coil_strict_update_replay_report_helpers():
     mod = _load_tool("direct_coil_strict_update_replay_report")
     tree = {"a": np.asarray([[1.0, 2.0], [3.0, 4.0]]), "b": [np.asarray([5.0, 6.0])]}

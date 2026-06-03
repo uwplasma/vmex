@@ -127,6 +127,75 @@ def test_circular_coil_on_axis_matches_analytic_biot_savart():
     np.testing.assert_allclose(field[0, 2], expected_bz, rtol=1.0e-13, atol=1.0e-18)
 
 
+def test_circular_loop_provider_on_axis_matches_analytic_field_profile():
+    enable_x64(True)
+    current = 4.25
+    radius = 0.85
+    params = _circle_params(current=current, radius=radius, n_segments=48)
+    R = np.zeros(5)
+    Z = np.asarray([-1.2, -0.4, 0.0, 0.35, 1.1])
+    phi = np.asarray([0.0, 0.3, 1.1, 2.0, 5.2])
+
+    br, bphi, bz = sample_coil_field_cylindrical(params, R, Z, phi)
+    expected_bz = 1.0e-7 * current * 2.0 * np.pi * radius**2 / (radius**2 + Z**2) ** 1.5
+
+    np.testing.assert_allclose(br, 0.0, atol=2.0e-18)
+    np.testing.assert_allclose(bphi, 0.0, atol=2.0e-18)
+    np.testing.assert_allclose(bz, expected_bz, rtol=1.0e-13, atol=1.0e-18)
+
+
+def test_biot_savart_field_is_linear_in_currents_and_superposes_coils():
+    from vmec_jax._compat import jnp
+
+    enable_x64(True)
+    dofs = jnp.zeros((2, 3, 3), dtype=float)
+    dofs = dofs.at[:, 0, 2].set(0.55)
+    dofs = dofs.at[:, 1, 1].set(0.55)
+    dofs = dofs.at[0, 2, 0].set(0.35)
+    dofs = dofs.at[1, 2, 0].set(-0.45)
+    params = CoilFieldParams(
+        base_curve_dofs=dofs,
+        base_currents=jnp.asarray([2.0, -1.25], dtype=float),
+        n_segments=96,
+    )
+    R = np.asarray([[0.20, 0.45], [0.30, 0.10]])
+    Z = np.asarray([[0.10, -0.20], [0.55, -0.60]])
+    phi = np.asarray([[0.0, 0.4], [1.1, 2.0]])
+
+    combined = sample_coil_field_cylindrical(params, R, Z, phi)
+    first_only = sample_coil_field_cylindrical(params.with_arrays(base_currents=jnp.asarray([2.0, 0.0])), R, Z, phi)
+    second_only = sample_coil_field_cylindrical(params.with_arrays(base_currents=jnp.asarray([0.0, -1.25])), R, Z, phi)
+    reversed_current = sample_coil_field_cylindrical(
+        params.with_arrays(base_currents=-params.base_currents),
+        R,
+        Z,
+        phi,
+    )
+
+    for actual, first, second, reversed_component in zip(combined, first_only, second_only, reversed_current, strict=True):
+        np.testing.assert_allclose(actual, first + second, rtol=1.0e-14, atol=1.0e-18)
+        np.testing.assert_allclose(reversed_component, -actual, rtol=1.0e-14, atol=1.0e-18)
+
+
+def test_circular_loop_field_has_axisymmetry_and_midplane_parity():
+    enable_x64(True)
+    params = _circle_params(current=3.0, radius=1.0, n_segments=384)
+    R = np.asarray([0.42, 0.42, 0.42, 0.42])
+    Z = np.asarray([0.55, 0.55, -0.55, -0.55])
+    phi_step = 2.0 * np.pi * 17.0 / params.n_segments
+    phi = np.asarray([0.0, phi_step, 0.0, phi_step])
+
+    br, bphi, bz = sample_coil_field_cylindrical(params, R, Z, phi)
+
+    np.testing.assert_allclose(bphi, 0.0, atol=1.0e-17)
+    np.testing.assert_allclose(br[0], br[1], rtol=1.0e-13, atol=1.0e-18)
+    np.testing.assert_allclose(br[2], br[3], rtol=1.0e-13, atol=1.0e-18)
+    np.testing.assert_allclose(bz[0], bz[1], rtol=1.0e-13, atol=1.0e-18)
+    np.testing.assert_allclose(bz[2], bz[3], rtol=1.0e-13, atol=1.0e-18)
+    np.testing.assert_allclose(br[0], -br[2], rtol=1.0e-13, atol=1.0e-18)
+    np.testing.assert_allclose(bz[0], bz[2], rtol=1.0e-13, atol=1.0e-18)
+
+
 def test_sample_coil_field_cylindrical_shapes_and_dispatch():
     enable_x64(True)
     params = _circle_params(current=2.0, radius=1.0, n_segments=96)
