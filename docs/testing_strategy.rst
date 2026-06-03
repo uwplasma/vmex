@@ -370,6 +370,16 @@ Core solve gates:
   free-boundary solve must differ in LCFS geometry and LCFS ``|B|``.  The
   optional VMEC2000 tier extends this to a DIII-D mgrid finite-beta response
   comparison against the external executable.
+- Direct-coil free-boundary provider tests must exercise the same physical
+  contracts as an ``mgrid`` backend.  Required fast tests now generate an
+  in-memory VMEC-layout ``mgrid`` by sampling the pure-JAX Biot-Savart coil
+  provider and then require the JAX ``mgrid`` interpolator to reproduce the
+  same field at grid nodes, including toroidal wrapping and external-current
+  scaling.
+- Robust-coil perturbation tests should protect geometry and field invariants,
+  not only random-number plumbing.  Required fast tests check that rigid
+  centerline translations/rotations preserve coil length and curvature, and
+  that current perturbations scale the direct Biot-Savart field linearly.
 
 VMEC2000 parity gates:
 
@@ -433,6 +443,15 @@ Differentiability gates:
 - JVP/VJP and discrete-adjoint callbacks are checked against finite differences
   on small deterministic cases, with tolerances appropriate to double
   precision.
+- For the free-boundary direct-coil lane, exact-gradient claims are staged.
+  Required tests validate provider derivatives, dense implicit vacuum chains,
+  JAX-visible controller primitives, and accepted-trace replay.  The strongest
+  default gate currently runs base/plus/minus complete tiny free-boundary
+  solves for a current-only perturbation, rejects finite-difference samples
+  that leave the accepted branch, and compares the fixed-trace/controller
+  custom-VJP directional derivative against the complete-solve central finite
+  difference.  This is a same-branch accepted-trace validation, not yet a
+  derivative of every adaptive host-controller branch.
 - Optimization objective gradients are nonzero for seeded active boundary
   modes that should move iota, aspect ratio, quasisymmetry, or QI residuals.
 - Exact callback replay must not retain unbounded host or XLA state across a
