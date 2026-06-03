@@ -1,10 +1,10 @@
 # VMEC-JAX Research-Grade Roadmap
 
-Last updated: 2026-06-01
+Last updated: 2026-06-03
 Primary branch: `main`
 Baseline release: `v0.0.14`
-Latest known green `main` CI: `c589ea6`
-Current candidate: post-`v0.0.14` spline-profile parity and scalar-adjoint GPU production-policy refresh
+Latest known green `main` CI: `8c7ffcd`
+Current candidate: post-`v0.0.14` release-hygiene/refactor refresh with the 95% required gate still green
 
 This is the living execution plan for making `vmec_jax` accurate, fast,
 differentiable, documented, and usable by external researchers. Update it when
@@ -134,6 +134,12 @@ acceptance criteria or evidence changes.
   `method="auto_scalar"` through the high-mode stellsym CPU/GPU production
   sweep policy and adds GPU scalar-gradient initial-tangent projection so
   eligible GPU scalar-adjoint runs no longer fall back to dense SciPy.
+  On 2026-06-03, after the VMEC2000 optional evidence refresh and two small
+  test-backed refactor seams through `8c7ffcd`, the local required coverage
+  gate passed with `2423 passed, 20 skipped, 1 xfailed` and 95.16% coverage in
+  3:11 using four pytest-xdist workers. GitHub Actions run `26885868424` passed
+  build, full docs, CLI smoke, parity dry-run, physics smoke, and Python
+  3.10/3.11/3.12 fast tests for the same commit.
 - VMEC2000 converged-wout parity now has a fast bundled matrix gate across
   fixed/free, axisymmetric/non-axisymmetric, LASYM, and single/multigrid
   representatives. The executable-backed end-state gate remains opt-in:
@@ -628,7 +634,7 @@ update, the v0.0.14 release, and the May 30 GPU scan/replay policy refresh:
   LASYM blocker is the solved-state lambda convergence gap on the `m=1,3,4`
   channels. `freeb_scalpot` remains an instrumented-VMEC2000 diagnostic because
   a stock executable does not emit the required dumps.
-- Refactor/API/examples: 99%. Examples are SIMSOPT-like and clearer, finite-beta
+- Refactor/API/examples: 99.4%. Examples are SIMSOPT-like and clearer, finite-beta
   examples expose structured stage/final summaries while preserving direct
   optimizer visibility and have focused adapter coverage. Objective tuple
   routing is now isolated behind a small assembly helper, reducing the next
@@ -647,7 +653,10 @@ update, the v0.0.14 release, and the May 30 GPU scan/replay policy refresh:
   the bundled case catalog and staged seed-robust promotion/checkpoint
   mechanics live in `qi_optimization_cases.py` and
   `qi_optimization_support.py`. Large
-  solver/wout/free-boundary splits remain deferred behind parity gates.
+  solver/wout/free-boundary splits remain deferred behind parity gates. The
+  latest small seam centralized optional solve dump-array normalization behind
+  a direct helper test, keeping debug-dump behavior stable while reducing
+  duplicated local helper code in `solve.py`.
 - Docs/release hygiene: release target is the next patch release after
   `v0.0.14`, with `vmec_jax --test`
   quick-start tolerance tuning validated locally at `FTOL_ARRAY=1e-12`
@@ -659,7 +668,7 @@ update, the v0.0.14 release, and the May 30 GPU scan/replay policy refresh:
   1 xfailed`, 95.09%), plus the exact replay JVP instrumentation rerun at the
   same 95.09% coverage level and the `v0.0.14` release-candidate rerun
   (`2354 passed, 20 skipped, 110 deselected, 1 xfailed`, 95.09%). GitHub
-  Actions is green through `7033647`,
+  Actions is green through `8c7ffcd`,
   carrying the QI staged-seed, explicit CLI docs updates, fallback
   materialization test, optional SIMSOPT Redl gate wiring, replay JVP
   instrumentation, Glasser `D_R` docs/examples, and newer-JAX preconditioner
@@ -672,10 +681,10 @@ update, the v0.0.14 release, and the May 30 GPU scan/replay policy refresh:
   warnings, release docs use the 95% coverage gate, and package discovery is
   locked to the `vmec_jax` namespace. Released reference assets are ignored so
   local full-tier refreshes cannot accidentally bloat commits.
-  The latest green `main` CI run for `7033647` passed the build, docs, CLI,
+  The latest green `main` CI run for `8c7ffcd` passed the build, docs, CLI,
   parity-smoke, physics-smoke, and Python-version fast-test lanes, and the
-  local CI-equivalent pass reached 95.22% coverage with the size gate still at
-  23.59 MiB tracked.
+  local required coverage gate reached 95.16% coverage with `2423 passed,
+  20 skipped, 1 xfailed`.
   The documented custom QI seed audit command was validated end-to-end on
   `input.QI_stel_seed_3127`; a production-scale NFP3 GPU staged-seed
   verification on `office` reached a controlled timeout with durable partial

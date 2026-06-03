@@ -195,22 +195,24 @@ Latest local release-hygiene snapshot
 -------------------------------------
 
 The latest documented local rerun evidence for the post-``v0.0.14`` candidate
-is the May 30 scan/replay policy refresh through commit ``7033647``.  It is
-not a release gate by itself, but it is the current evidence bundle to cite
-until a newer release-candidate run replaces it:
+is the June 3 release-hygiene/refactor refresh through commit ``8c7ffcd``.
+It is not a release tag by itself, but it is the current evidence bundle to
+cite until a newer release-candidate run replaces it:
 
-- Local CI-equivalent gate: ``2378 passed, 20 skipped, 110 deselected,
-  1 xfailed`` with ``95.22%`` coverage at the enforced ``95%`` gate, plus CLI
-  smoke, compile, repository-size audit, physics smoke, fast docs, and full
-  docs.
-- Repository size audit: ``23.59 MiB`` tracked, largest tracked file below
-  ``2 MiB``.
-- GitHub Actions run ``26696164006`` passed build, docs, CLI smoke, parity
-  dry-run, physics smoke, and Python 3.10/3.11/3.12 fast-test lanes for
-  ``7033647``.
-- Office GPU profiling refreshed the fixed-boundary scan and exact-callback
-  policies: long quiet accelerator scans use 512-iteration chunks, and
-  symmetric GPU dense exact replay uses 8-column chunks for 24+ DOF cases.
+- Local required coverage gate:
+  ``JAX_ENABLE_X64=1 pytest -q -n 4 -m 'not full and not vmec2000 and not simsopt'
+  --cov=vmec_jax --cov-report=xml --cov-report=term:skip-covered
+  --cov-fail-under=95`` passed with ``2423 passed, 20 skipped, 1 xfailed`` and
+  ``95.16%`` coverage at the enforced ``95%`` gate.
+- Focused solve/refactor checks passed:
+  ``ruff check vmec_jax/solve.py tests/test_solve_dump_helpers.py``,
+  ``JAX_ENABLE_X64=1 pytest -q tests/test_solve_dump_helpers.py``, and
+  ``JAX_ENABLE_X64=1 pytest -q tests/test_solve_dump_helpers.py
+  tests/test_solve_additional_helpers.py tests/test_solve_runtime.py``.
+- GitHub Actions run ``26885868424`` passed build, full docs, CLI smoke,
+  parity dry-run, physics smoke, and Python 3.10/3.11/3.12 fast-test lanes for
+  ``8c7ffcd``; the manual/nightly physics lane was skipped as expected.
 
-Before tagging, replace this dated snapshot with fresh local/CI evidence from
-the exact release-candidate commit.
+Before tagging, replace this snapshot with fresh local/CI evidence from the
+exact release-candidate commit if any additional source, test, or docs changes
+land after ``8c7ffcd``.
