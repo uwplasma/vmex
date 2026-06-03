@@ -525,6 +525,21 @@ def test_exact_run_history_payload_exposes_timing_aliases():
     json.dumps(exact_tool._json_safe(payload))
 
 
+def test_exact_run_payload_attaches_replay_scan_cache_diagnostics():
+    exact_tool = _load_exact_tool()
+    payload = {"profile": {}}
+    diagnostics = {
+        "replay_dynamic_basepoint_vjp_scan_cache_hit_count": 2,
+        "replay_dynamic_basepoint_vjp_scan_cache_build_s": 0.25,
+    }
+
+    returned = exact_tool._attach_replay_scan_cache_diagnostics(payload, diagnostics)
+
+    assert returned is payload
+    assert payload["replay_scan_cache_diagnostics"] == diagnostics
+    json.dumps(exact_tool._json_safe(payload))
+
+
 def test_exact_run_history_metadata_helper_records_problem_context():
     exact_tool = _load_exact_tool()
     args = exact_tool._parse_args(
