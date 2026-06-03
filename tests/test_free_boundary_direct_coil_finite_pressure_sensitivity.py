@@ -2065,6 +2065,7 @@ def test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state(
     )
     assert "limit_update_rms" in controller_replay["scalar_controls"]
     assert "preconditioner_use_lax_tridi" in controller_replay["scalar_controls"]
+    assert controller_replay["preconditioner_controls_segment_stacked"] == ()
     np.testing.assert_allclose(
         np.asarray(controller_replay["controls"]["step_arrays"]["vRcc_before"][0]),
         np.asarray(trace0["vRcc_before"]),
@@ -2105,6 +2106,7 @@ def test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state(
         use_preconditioner_policy_segments=True,
     )
     assert segmented_controller_replay["used_preconditioner_policy_segments"]
+    assert segmented_controller_replay["preconditioner_controls_segment_stacked"] == (True,)
     np.testing.assert_allclose(
         np.asarray(segmented_controller_replay["objective"]),
         np.asarray(controller_replay["objective"]),

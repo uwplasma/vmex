@@ -344,6 +344,16 @@ was still comparable: about ``21.19 s`` monolithic versus ``21.38 s``
 segmented.  This confirms the next optimization target is the strict-update
 and preconditioner replay compilation path itself, not just the controller
 segment wrapper.
+The same diagnostic also exposes an opt-in
+``--segment-local-preconditioner-controls`` mode.  This stacks preconditioner
+payloads independently inside each static-policy segment when global stacking
+is impossible.  On the same four-step no-synthetic trace, both the default
+segmented replay and the segment-local variant preserved objective and final
+state exactly.  The measured cold timings were still slightly slower than the
+monolithic path: about ``21.01 s`` monolithic versus ``21.80 s`` segmented
+without segment-local controls, and about ``20.09 s`` monolithic versus
+``20.78 s`` segmented with segment-local controls.  The option is therefore
+kept as a diagnostic hook, not as a promoted performance default.
 The remaining phase-2 blocker is differentiating through the nonlinear
 ``run_free_boundary`` iteration loop itself, rather than through the dense toy
 nonlinear primitive, fixed-boundary operator, complete finite-response proxy,

@@ -2514,6 +2514,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     accept_mask: Any | None = None,
     done_mask: Any | None = None,
     use_preconditioner_policy_segments: bool = False,
+    use_segment_preconditioner_controls: bool = False,
 ) -> dict[str, Any]:
     """Replay fixed production traces through a JAX-visible accept controller.
 
@@ -2527,6 +2528,11 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     through :func:`jax_visible_segmented_accepted_nonlinear_controller_jax`.
     The segmented path is behavior-preserving and opt-in while production
     preconditioner dispatch remains partially branch-local.
+    ``use_segment_preconditioner_controls`` is a narrower performance
+    diagnostic: when the full trace cannot stack preconditioner controls, it
+    tries stacking them independently inside each static segment.  It is kept
+    opt-in because current tiny production traces show parity but not a speed
+    win.
 
     The helper intentionally keeps every trace accepted.  It does not
     differentiate through the host policy that selected the traces; it validates
@@ -2670,16 +2676,34 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     def converged_fn(_accepted_state, _params, control, _aux):
         return control["done"]
 
+    segment_preconditioner_controls_stacked: tuple[bool, ...] = ()
     if use_preconditioner_policy_segments:
-        control_segments = tuple(
-            tree_util.tree_map(
-                lambda value, start=segment["start"], stop=segment["stop"]: jnp.asarray(value)[
-                    int(start) : int(stop)
-                ],
+        control_segments_list = []
+        segment_preconditioner_controls_stacked_list: list[bool] = []
+        for segment in preconditioner_policy_segments:
+            start = int(segment["start"])
+            stop = int(segment["stop"])
+            segment_controls = tree_util.tree_map(
+                lambda value, start=start, stop=stop: jnp.asarray(value)[start:stop],
                 controls,
             )
-            for segment in preconditioner_policy_segments
-        )
+            if preconditioner_controls is None and bool(use_segment_preconditioner_controls):
+                try:
+                    segment_preconditioner_controls = direct_coil_accepted_trace_preconditioner_controls_jax(
+                        trace_seq[start:stop]
+                    )
+                except (KeyError, ValueError):
+                    segment_preconditioner_controls_stacked_list.append(False)
+                else:
+                    segment_controls = {**segment_controls, "step_preconditioner": segment_preconditioner_controls}
+                    segment_preconditioner_controls_stacked_list.append(True)
+            elif preconditioner_controls is None:
+                segment_preconditioner_controls_stacked_list.append(False)
+            else:
+                segment_preconditioner_controls_stacked_list.append(True)
+            control_segments_list.append(segment_controls)
+        control_segments = tuple(control_segments_list)
+        segment_preconditioner_controls_stacked = tuple(segment_preconditioner_controls_stacked_list)
         step_fns = tuple(
             _make_step_fn(
                 trace_seq[int(segment["start"]) : int(segment["stop"])],
@@ -2726,6 +2750,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
         "preconditioner_policy_segments": preconditioner_policy_segments,
         "preconditioner_policy_n_segments": len(preconditioner_policy_segments),
         "preconditioner_policy_segment_summary": preconditioner_policy_segment_summary,
+        "preconditioner_controls_segment_stacked": segment_preconditioner_controls_stacked,
         "used_preconditioner_policy_segments": bool(use_preconditioner_policy_segments),
         "state_reset_flags": tuple(bool(flag) for flag in np.asarray(controls["reset_to_trace_pre"], dtype=bool)),
     }

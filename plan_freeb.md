@@ -125,6 +125,14 @@ Results obtained:
    three accepted steps had `precond_jmax=7` and active free-boundary replay.
    Objective and state deltas were exactly `0.0`; monolithic replay was
    `21.191 s`, segmented replay was `21.379 s`.
+5. Added opt-in segment-local preconditioner-control stacking for segmented
+   replay. This is disabled by default. The no-synthetic four-step diagnostic
+   passed with exact objective/state parity both ways:
+   default segmented replay had monolithic `21.013 s` versus segmented
+   `21.796 s`; `--segment-local-preconditioner-controls` had monolithic
+   `20.091 s` versus segmented `20.776 s`. Segment-local controls were
+   successfully stacked in both real policy segments, but the tiny trace still
+   did not show a speedup.
 
 Best next steps:
 
@@ -133,8 +141,10 @@ Best next steps:
    end-to-end locally for the synthetic two-step run and longer for the
    no-synthetic four-step run.
 3. The real two-segment run confirms segmentation is behavior-preserving but
-   not the dominant speed lever at this trace size. Next performance work
-   should target strict-update/preconditioner replay compilation directly.
+   not the dominant speed lever at this trace size. Segment-local
+   preconditioner controls are now a validated diagnostic hook, but not a
+   promoted default. Next performance work should target
+   strict-update/preconditioner replay compilation directly.
 
 Need from user:
 

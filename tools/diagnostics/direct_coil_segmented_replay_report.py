@@ -61,6 +61,15 @@ def _parser() -> argparse.ArgumentParser:
         default=True,
         help="Flip alternating preconditioner policy flags to create multiple static-policy segments.",
     )
+    p.add_argument(
+        "--segment-local-preconditioner-controls",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "When segmented replay is enabled and global preconditioner controls "
+            "cannot be stacked, try stacking controls independently inside each segment."
+        ),
+    )
     p.add_argument("--warm-repeats", type=int, default=1, help="Number of repeated replay timings per mode.")
     p.add_argument("--rtol", type=float, default=1.0e-10, help="Replay objective/state parity relative tolerance.")
     p.add_argument("--atol", type=float, default=1.0e-10, help="Replay objective/state parity absolute tolerance.")
@@ -116,6 +125,7 @@ def _timed_replay(
     traces: list[dict[str, Any]],
     signgs: int,
     use_segments: bool,
+    use_segment_preconditioner_controls: bool,
     repeats: int,
 ) -> tuple[dict[str, Any], list[float]]:
     from vmec_jax.free_boundary_adjoint import direct_coil_accepted_trace_controller_replay_objective_jax
@@ -135,6 +145,7 @@ def _timed_replay(
             force_weight=0.0,
             enforce_edge=False,
             use_preconditioner_policy_segments=bool(use_segments),
+            use_segment_preconditioner_controls=bool(use_segment_preconditioner_controls),
         )
         _block(replay["objective"])
         timings.append(time.perf_counter() - t0)
@@ -188,6 +199,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         traces=replay_traces,
         signgs=int(init.signgs),
         use_segments=False,
+        use_segment_preconditioner_controls=False,
         repeats=int(args.warm_repeats),
     )
     segmented, segmented_times = _timed_replay(
@@ -197,6 +209,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         traces=replay_traces,
         signgs=int(init.signgs),
         use_segments=True,
+        use_segment_preconditioner_controls=bool(args.segment_local_preconditioner_controls),
         repeats=int(args.warm_repeats),
     )
 
@@ -228,6 +241,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
                 "ntheta": int(args.ntheta),
                 "n_segments": int(args.n_segments),
                 "synthetic_multi_policy": bool(args.synthetic_multi_policy),
+                "segment_local_preconditioner_controls": bool(args.segment_local_preconditioner_controls),
                 "trace_generation_wall_s": float(trace_generation_wall_s),
                 "note": (
                     "Synthetic multi-policy mode flips static preconditioner policy "
@@ -239,6 +253,11 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
                 "n_traces": len(replay_traces),
                 "preconditioner_policy_n_segments": len(segment_summary),
                 "preconditioner_policy_segment_summary": segment_summary,
+                "monolithic_preconditioner_controls_stacked": bool(monolithic["preconditioner_controls_stacked"]),
+                "segmented_preconditioner_controls_stacked": bool(segmented["preconditioner_controls_stacked"]),
+                "segmented_preconditioner_controls_segment_stacked": tuple(
+                    bool(value) for value in segmented["preconditioner_controls_segment_stacked"]
+                ),
             },
             "timings": {
                 "monolithic_replay_s": monolithic_times,
