@@ -494,6 +494,17 @@ def _history_payload_with_aliases(
     )
 
 
+def _attach_replay_scan_cache_diagnostics(
+    payload: dict[str, Any],
+    diagnostics: dict[str, int | float],
+) -> dict[str, Any]:
+    """Attach replay-scan cache counters to optimizer run payloads."""
+
+    if diagnostics:
+        payload["replay_scan_cache_diagnostics"] = dict(diagnostics)
+    return payload
+
+
 def _attach_optimizer_run_metadata(
     payload: dict[str, Any],
     *,
@@ -1477,6 +1488,7 @@ def main() -> int:
 
     run_repeats = max(1, int(args.run_repeats))
     histories: list[dict[str, object]] = []
+    replay_scan_diagnostics_by_repeat: list[dict[str, Any]] = []
     result = None
     try:
         tr_solver = None if args.scipy_tr_solver == "none" else args.scipy_tr_solver
@@ -1509,7 +1521,10 @@ def main() -> int:
                 scalar_cost_only_trials=args.scalar_cost_only_trials,
                 trace_callbacks=args.trace_callbacks,
             )
+            replay_scan_diag = _replay_scan_cache_snapshot(reset=True)
+            replay_scan_diagnostics_by_repeat.append({"replay_scan_cache_diagnostics": replay_scan_diag})
             hist_repeat = _history_payload_with_aliases(dict(result["_history_dump"]))
+            _attach_replay_scan_cache_diagnostics(hist_repeat, replay_scan_diag)
             _attach_optimizer_run_metadata(
                 hist_repeat,
                 args=args,
@@ -1529,6 +1544,10 @@ def main() -> int:
     if result is None:  # pragma: no cover - defensive
         raise RuntimeError("optimizer run did not produce a result")
     hist = _history_payload_with_aliases(dict(result["_history_dump"]), phase_timing=phase_timing)
+    _attach_replay_scan_cache_diagnostics(
+        hist,
+        _sum_replay_scan_cache_diagnostics(replay_scan_diagnostics_by_repeat),
+    )
     _attach_optimizer_run_metadata(
         hist,
         args=args,
