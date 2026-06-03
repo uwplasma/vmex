@@ -76,6 +76,8 @@ def _trace(state: VMECState, *, scale: float = 1.0, precond_jmax: int = 1, statu
         "vLcs_before": z,
         "vLcc_before": z,
         "vLss_before": z,
+        "freeb_bsqvac_half": None,
+        "freeb_pres_scale": None,
     }
 
 
@@ -94,6 +96,78 @@ def _tape(*traces, **overrides):
     )
     defaults.update(overrides)
     return da.ResidualCheckpointTape(**defaults)
+
+
+def test_strict_update_one_step_threads_freeb_bsqvac_half_to_raw_residual(monkeypatch):
+    from vmec_jax._compat import jnp
+
+    state = _state()
+    static = SimpleNamespace(cfg=SimpleNamespace())
+    vac_edge = np.arange(4.0, dtype=float).reshape(2, 2)
+    z = jnp.zeros((1, 1), dtype=float)
+    captured = {}
+
+    def fake_raw_force_residual_from_state(state_arg, static_arg, **kwargs):
+        assert state_arg is state
+        assert static_arg is static
+        captured["freeb_bsqvac_half"] = kwargs.get("freeb_bsqvac_half")
+        captured["freeb_pres_scale"] = kwargs.get("freeb_pres_scale")
+        return {"k": SimpleNamespace(), "frzl": "raw-frzl"}
+
+    def fake_preconditioned_force_channels_from_raw_forces(**kwargs):
+        assert kwargs["frzl"] == "raw-frzl"
+        return {
+            "frcc_u": z,
+            "frss_u": z,
+            "fzsc_u": z,
+            "fzcs_u": z,
+            "flsc_u": z,
+            "flcs_u": z,
+        }
+
+    def fake_strict_update_accepted_step(state_arg, static_arg, **kwargs):
+        assert state_arg is state
+        assert static_arg is static
+        return {"state_post": state_arg}
+
+    monkeypatch.setattr(da, "raw_force_residual_from_state", fake_raw_force_residual_from_state)
+    monkeypatch.setattr(da, "preconditioned_force_channels_from_raw_forces", fake_preconditioned_force_channels_from_raw_forces)
+    monkeypatch.setattr(da, "strict_update_accepted_step", fake_strict_update_accepted_step)
+
+    out = da.strict_update_one_step_from_state(
+        state,
+        static,
+        wout_like="wout",
+        trig="trig",
+        apply_lforbal=False,
+        include_edge_residual=True,
+        apply_m1_constraints=True,
+        zero_m1=np.asarray(False),
+        mats="mats",
+        jmax=1,
+        lam_prec="lam",
+        w_mode_mn=np.asarray([1.0]),
+        lambda_update_scale=1.0,
+        dt_eff=1.0,
+        b1=1.0,
+        fac=1.0,
+        force_scale=1.0,
+        flip_sign=False,
+        vRcc_before=z,
+        vRss_before=z,
+        vZsc_before=z,
+        vZcs_before=z,
+        vLsc_before=z,
+        vLcs_before=z,
+        limit_update_rms=False,
+        need_update_rms=False,
+        freeb_bsqvac_half=vac_edge,
+        freeb_pres_scale=2.5,
+    )
+
+    np.testing.assert_allclose(np.asarray(captured["freeb_bsqvac_half"]), vac_edge)
+    assert captured["freeb_pres_scale"] == 2.5
+    assert out["step"]["state_post"] is state
 
 
 def test_empty_tape_jvp_vjp_and_column_replay_are_identity():

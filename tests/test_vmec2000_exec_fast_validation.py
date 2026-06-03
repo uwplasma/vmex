@@ -8,6 +8,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from vmec_jax.free_boundary_validation import free_boundary_response_metrics
+from vmec_jax.namelist import read_indata, write_indata
 from vmec_jax.vmec2000_exec import _patch_indata, find_vmec2000_exec, run_xvmec2000
 
 
@@ -58,6 +60,7 @@ VMEC2000_CONVERGED_WOUT_CASES = (
     ),
 )
 VMEC2000_FREEB_LASYM_TIMEOUT_S = 60.0
+VMEC2000_DIIID_BETA_TIMEOUT_S = 240.0
 
 
 def _vmec2000_exec_or_skip() -> Path:
@@ -73,6 +76,28 @@ def _vmec2000_exec_or_skip() -> Path:
 def _write_patched_input(src: Path, dst: Path, *, updates: dict[str, str]) -> Path:
     dst.parent.mkdir(parents=True, exist_ok=True)
     dst.write_text(_patch_indata(src.read_text(), updates=updates))
+    return dst
+
+
+def _write_diiid_beta_input(src: Path, dst: Path, *, pressure_scale: float, mgrid_name: str) -> Path:
+    indata = read_indata(src)
+    base_am = indata.scalars.get("AM", 0.0)
+    am_values = base_am if isinstance(base_am, list) else [base_am]
+    indata.scalars["AM"] = [float(value) * float(pressure_scale) for value in am_values]
+    indata.scalars.update(
+        {
+            "MGRID_FILE": mgrid_name,
+            "NS_ARRAY": [16, 32, 64],
+            "NITER_ARRAY": [1000, 2000, 4000],
+            "FTOL_ARRAY": [1.0e-8, 1.0e-10, 1.0e-11],
+            "NITER": 4000,
+            "FTOL": 1.0e-11,
+        }
+    )
+    # Keep the same file VMEC2000-compatible.  VMEC2000 reads staged NS from
+    # NS_ARRAY and rejects this DIII-D deck when a standalone NS is emitted.
+    indata.scalars.pop("NS", None)
+    write_indata(dst, indata)
     return dst
 
 
@@ -181,6 +206,70 @@ def test_vmec2000_free_boundary_lasym_true_reaches_vacuum_solve(tmp_path: Path) 
     assert result.stages[-1].rows[-1].it >= 100
     wout_path = result.workdir / "wout_cth_like_free_bdy_lasym_small.nc"
     assert wout_path.exists(), f"VMEC2000 did not produce {wout_path.name}"
+
+
+def test_vmec2000_diiid_finite_beta_free_boundary_response_matches_vmec_jax(tmp_path: Path) -> None:
+    """Optional executable-backed gate for high-beta DIII-D free-boundary response."""
+
+    exe = _vmec2000_exec_or_skip()
+    pytest.importorskip("netCDF4")
+
+    from vmec_jax.driver import run_free_boundary, write_wout_from_fixed_boundary_run
+    from vmec_jax.wout import read_wout
+
+    repo_root = Path(__file__).resolve().parents[1]
+    input_path = repo_root / "examples" / "data" / "input.DIII-D_lasym_false"
+    mgrid_path = repo_root / "examples" / "data" / "mgrid_d3d_ef.nc"
+    if not input_path.exists() or not mgrid_path.exists():
+        pytest.skip("DIII-D input or fetched mgrid_d3d_ef.nc asset is unavailable")
+
+    input_dir = tmp_path / "inputs"
+    input_dir.mkdir(parents=True)
+    shutil_target = input_dir / mgrid_path.name
+    shutil_target.write_bytes(mgrid_path.read_bytes())
+    vacuum_input = _write_diiid_beta_input(input_path, input_dir / "input.diiid_b0_mg64", pressure_scale=0.0, mgrid_name=mgrid_path.name)
+    beta_input = _write_diiid_beta_input(input_path, input_dir / "input.diiid_b180_mg64", pressure_scale=1.8, mgrid_name=mgrid_path.name)
+
+    vmec2000_wouts: list[Path] = []
+    vmec_jax_wouts: list[Path] = []
+    for input_case in (vacuum_input, beta_input):
+        vmec = run_xvmec2000(
+            input_case,
+            exec_path=exe,
+            workdir=tmp_path / "vmec2000" / input_case.name,
+            timeout_s=VMEC2000_DIIID_BETA_TIMEOUT_S,
+            keep_workdir=True,
+        )
+        case = input_case.name.removeprefix("input.")
+        wout_vmec = vmec.workdir / f"wout_{case}.nc"
+        assert wout_vmec.exists(), f"VMEC2000 did not produce {wout_vmec.name}"
+        vmec2000_wouts.append(wout_vmec)
+
+        run = run_free_boundary(
+            input_case,
+            solver="vmec2000_iter",
+            solver_mode="parity",
+            multigrid_use_input_niter=True,
+            verbose=False,
+            jit_forces=False,
+        )
+        wout_jax = tmp_path / f"wout_{case}_vmec_jax.nc"
+        write_wout_from_fixed_boundary_run(wout_jax, run, include_fsq=True)
+        vmec_jax_wouts.append(wout_jax)
+
+    vmec2000_response = free_boundary_response_metrics(vmec2000_wouts[0], vmec2000_wouts[1], ntheta=72, nphi=16)
+    vmec_jax_response = free_boundary_response_metrics(vmec_jax_wouts[0], vmec_jax_wouts[1], ntheta=72, nphi=16)
+    assert vmec2000_response.candidate_beta_percent > 1.0
+    assert vmec_jax_response.candidate_beta_percent > 1.0
+    assert vmec2000_response.lcfs_max_displacement > 0.05
+    assert vmec_jax_response.lcfs_max_displacement > 0.05
+
+    wref = read_wout(vmec2000_wouts[1])
+    wjax = read_wout(vmec_jax_wouts[1])
+    _assert_scalar_close("finite-beta aspect", wjax.aspect, wref.aspect, rtol=5.0e-4, atol=1.0e-6)
+    _assert_rel_rms("finite-beta rmnc", wjax.rmnc, wref.rmnc, limit=1.0e-3)
+    _assert_rel_rms("finite-beta zmns", wjax.zmns, wref.zmns, limit=1.0e-3)
+    _assert_rel_rms("finite-beta iotaf", wjax.iotaf, wref.iotaf, limit=1.0e-3, radial_skip=1)
 
 
 @pytest.mark.parametrize(

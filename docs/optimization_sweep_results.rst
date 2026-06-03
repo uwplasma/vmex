@@ -885,6 +885,18 @@ termination status, method, device, and wall time.  The scripts save
 ``input.initial``, ``input.final``, ``wout_initial.nc``, ``wout_final.nc``, and
 ``history.json`` for each run.
 
+The pressure/current-profile setup follows the SIMSOPT finite-beta bootstrap
+workflow.  At the top of each script, ``BETA_PERCENT`` defines a standard
+profile bundle through ``vj.standard_finite_beta_profiles``:
+``ne = ne0 * [1, 0, 0, 0, 0, -0.99]``,
+``Te = Te0 * [1, -0.99]``, ``ni=ne``, ``Ti=Te``, ``Zeff=1``, and
+``pressure_pa = e * (ne*Te + ni*Ti)``.  ``vj.with_pressure_profile`` writes
+the pressure into the VMEC deck, while the Redl bootstrap-current residual
+uses the same density/temperature coefficients.  This is the recommended path
+for tokamak, QA, QH, QP, QI, and LP-QA finite-beta runs because it avoids
+handwritten pressure scales that can drift away from the bootstrap-current
+profile.
+
 These examples deliberately remain one layer lower than
 ``least_squares_solve``.  The ordinary QA/QH/QP/QI scripts are the recommended
 objective-tuple API examples; finite-beta stage one keeps direct

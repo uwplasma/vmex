@@ -21,8 +21,8 @@ Target State
 - Current coverage target: keep the required ``95%`` actual line coverage gate
   green with meaningful fast and bounded-physics tests while preserving
   acceptable coverage runtime.  The current Python 3.11 required coverage gate
-  is ``95%`` after the latest local CI-equivalent ratchet reached ``95.10%`` on
-  commit ``1037744``.
+  is ``95%``; the latest post-main-merge local CI-equivalent ratchet on the
+  free-boundary PR branch reached ``95.00%``.
 - Nightly/manual coverage: larger VMEC2000, GPU, and full-resolution physics
   checks run outside the required PR gate.
 - Repository checkout size: keep the tracked source tree small enough that a
@@ -365,7 +365,21 @@ Core solve gates:
 - ``LASYM = T`` cases exercise both symmetric and asymmetric coefficient
   blocks and verify that asymmetric modes can change when active.
 - Free-boundary cases verify that the mgrid path and vacuum-field coupling are
-  used, not silently bypassed.
+  used, not silently bypassed.  The physics-smoke tier also includes a bounded
+  finite-pressure CTH-like response check: a zero-pressure and nonzero-pressure
+  free-boundary solve must differ in LCFS geometry and LCFS ``|B|``.  The
+  optional VMEC2000 tier extends this to a DIII-D mgrid finite-beta response
+  comparison against the external executable.
+- Direct-coil free-boundary provider tests must exercise the same physical
+  contracts as an ``mgrid`` backend.  Required fast tests now generate an
+  in-memory VMEC-layout ``mgrid`` by sampling the pure-JAX Biot-Savart coil
+  provider and then require the JAX ``mgrid`` interpolator to reproduce the
+  same field at grid nodes, including toroidal wrapping and external-current
+  scaling.
+- Robust-coil perturbation tests should protect geometry and field invariants,
+  not only random-number plumbing.  Required fast tests check that rigid
+  centerline translations/rotations preserve coil length and curvature, and
+  that current perturbations scale the direct Biot-Savart field linearly.
 
 VMEC2000 parity gates:
 
@@ -429,6 +443,15 @@ Differentiability gates:
 - JVP/VJP and discrete-adjoint callbacks are checked against finite differences
   on small deterministic cases, with tolerances appropriate to double
   precision.
+- For the free-boundary direct-coil lane, exact-gradient claims are staged.
+  Required tests validate provider derivatives, dense implicit vacuum chains,
+  JAX-visible controller primitives, and accepted-trace replay.  The strongest
+  default gate currently runs base/plus/minus complete tiny free-boundary
+  solves for a current-only perturbation, rejects finite-difference samples
+  that leave the accepted branch, and compares the fixed-trace/controller
+  custom-VJP directional derivative against the complete-solve central finite
+  difference.  This is a same-branch accepted-trace validation, not yet a
+  derivative of every adaptive host-controller branch.
 - Optimization objective gradients are nonzero for seeded active boundary
   modes that should move iota, aspect ratio, quasisymmetry, or QI residuals.
 - Exact callback replay must not retain unbounded host or XLA state across a
@@ -503,7 +526,7 @@ QI seed-robustness gates:
   manual/nightly validation until it is cheap enough to summarize as curated
   artifacts.
 
-Latest local optional evidence:
+Historical local optional evidence:
 
 - ``outputs/rerun_20260525_123334`` passed the VMEC2000 stage-trace smoke
   matrix (``6`` cases, ``0`` failures) and the selected full QH warm-start row

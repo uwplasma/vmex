@@ -274,10 +274,22 @@ def _maybe_print_nonscan_state_debug(
     return True
 
 
+_SETUP_PHASE_KEYS = (
+    "setup_static_grid_rebuild",
+    "setup_freeb_policy",
+    "setup_boundary_profiles",
+    "setup_cache_key_hash",
+    "setup_ptau_constants",
+    "setup_index_constants",
+    "setup_update_constants",
+)
+
+
 def _residual_iter_timing_setup_scalars(timing_stats: dict[str, float]) -> tuple[float, float, float]:
+    setup_phase_total = sum(float(timing_stats.get(key, 0.0)) for key in _SETUP_PHASE_KEYS)
     setup_unattributed = max(
         0.0,
-        float(timing_stats["setup_total"]) - float(timing_stats["setup_axis_reset"]),
+        float(timing_stats["setup_total"]) - float(timing_stats["setup_axis_reset"]) - setup_phase_total,
     )
     setup_axis_reset_unattributed = max(
         0.0,
@@ -288,6 +300,7 @@ def _residual_iter_timing_setup_scalars(timing_stats: dict[str, float]) -> tuple
         + float(timing_stats["compute_forces"])
         + float(timing_stats["iteration_residual_metrics"])
         + float(timing_stats["preconditioner"])
+        + float(timing_stats.get("iteration_control", 0.0))
         + float(timing_stats["update"])
         + float(timing_stats["iteration_post_update"])
     )
@@ -308,10 +321,61 @@ def _build_residual_iter_timing_report(
         _residual_iter_timing_setup_scalars(timing_stats)
     )
     iters = max(int(timing_stats["iterations"]), 1)
+    iteration_control_subtotal = (
+        float(timing_stats.get("iteration_control_fsq1", 0.0))
+        + float(timing_stats.get("iteration_control_badjac", 0.0))
+        + float(timing_stats.get("iteration_control_vmec_time", 0.0))
+        + float(timing_stats.get("iteration_control_restart", 0.0))
+        + float(timing_stats.get("iteration_control_evolve", 0.0))
+    )
+    iteration_control_unattributed = max(
+        0.0,
+        float(timing_stats.get("iteration_control", 0.0)) - iteration_control_subtotal,
+    )
+    iteration_control_fsq1_payload_get = float(timing_stats.get("iteration_control_fsq1_payload_get", 0.0))
+    iteration_control_fsq1_direct_get = float(timing_stats.get("iteration_control_fsq1_direct_get", 0.0))
+    iteration_control_fsq1_precond_norm = float(timing_stats.get("iteration_control_fsq1_precond_norm", 0.0))
+    iteration_control_fsq1_scalar_build = float(timing_stats.get("iteration_control_fsq1_scalar_build", 0.0))
+    iteration_control_fsq1_unattributed = max(
+        0.0,
+        float(timing_stats.get("iteration_control_fsq1", 0.0))
+        - iteration_control_fsq1_precond_norm
+        - iteration_control_fsq1_scalar_build
+        - iteration_control_fsq1_payload_get
+        - iteration_control_fsq1_direct_get,
+    )
+    iteration_control_badjac_ptau_get = float(timing_stats.get("iteration_control_badjac_ptau_get", 0.0))
+    iteration_control_badjac_state_jacobian = float(
+        timing_stats.get("iteration_control_badjac_state_jacobian", 0.0)
+    )
+    iteration_control_badjac_unattributed = max(
+        0.0,
+        float(timing_stats.get("iteration_control_badjac", 0.0))
+        - iteration_control_badjac_ptau_get
+        - iteration_control_badjac_state_jacobian,
+    )
+    finalize_nestor_recompute = float(timing_stats.get("finalize_nestor_recompute", 0.0))
+    finalize_residual_recompute = float(timing_stats.get("finalize_residual_recompute", 0.0))
+    finalize_residual_device_get = float(timing_stats.get("finalize_residual_device_get", 0.0))
+    finalize_diag_build = float(timing_stats.get("finalize_diag_build", 0.0))
+    finalize_unattributed = max(
+        0.0,
+        float(timing_stats["finalize"])
+        - finalize_nestor_recompute
+        - finalize_residual_recompute
+        - finalize_diag_build,
+    )
     timing_report: dict[str, float | int] = {
         "iterations": int(timing_stats["iterations"]),
         "solve_total_s": float(solve_total_s),
         "setup_total_s": float(timing_stats["setup_total"]),
+        "setup_static_grid_rebuild_s": float(timing_stats.get("setup_static_grid_rebuild", 0.0)),
+        "setup_freeb_policy_s": float(timing_stats.get("setup_freeb_policy", 0.0)),
+        "setup_boundary_profiles_s": float(timing_stats.get("setup_boundary_profiles", 0.0)),
+        "setup_cache_key_hash_s": float(timing_stats.get("setup_cache_key_hash", 0.0)),
+        "setup_ptau_constants_s": float(timing_stats.get("setup_ptau_constants", 0.0)),
+        "setup_index_constants_s": float(timing_stats.get("setup_index_constants", 0.0)),
+        "setup_update_constants_s": float(timing_stats.get("setup_update_constants", 0.0)),
         "setup_axis_reset_s": float(timing_stats["setup_axis_reset"]),
         "setup_axis_reset_compute_forces_s": float(timing_stats["setup_axis_reset_compute_forces"]),
         "setup_axis_reset_unattributed_s": float(setup_axis_reset_unattributed),
@@ -328,26 +392,81 @@ def _build_residual_iter_timing_report(
         "force_eval_calls": int(timing_stats["compute_forces_calls"]),
         "iteration_residual_metrics_s": float(timing_stats["iteration_residual_metrics"]),
         "preconditioner_s": float(timing_stats["preconditioner"]),
+        "iteration_control_s": float(timing_stats.get("iteration_control", 0.0)),
+        "iteration_control_fsq1_s": float(timing_stats.get("iteration_control_fsq1", 0.0)),
+        "iteration_control_fsq1_precond_norm_s": iteration_control_fsq1_precond_norm,
+        "iteration_control_fsq1_scalar_build_s": iteration_control_fsq1_scalar_build,
+        "iteration_control_fsq1_payload_get_s": iteration_control_fsq1_payload_get,
+        "iteration_control_fsq1_direct_get_s": iteration_control_fsq1_direct_get,
+        "iteration_control_fsq1_unattributed_s": iteration_control_fsq1_unattributed,
+        "iteration_control_badjac_s": float(timing_stats.get("iteration_control_badjac", 0.0)),
+        "iteration_control_badjac_ptau_get_s": iteration_control_badjac_ptau_get,
+        "iteration_control_badjac_state_jacobian_s": iteration_control_badjac_state_jacobian,
+        "iteration_control_badjac_unattributed_s": iteration_control_badjac_unattributed,
+        "iteration_control_vmec_time_s": float(timing_stats.get("iteration_control_vmec_time", 0.0)),
+        "iteration_control_restart_s": float(timing_stats.get("iteration_control_restart", 0.0)),
+        "iteration_control_evolve_s": float(timing_stats.get("iteration_control_evolve", 0.0)),
+        "iteration_control_unattributed_s": float(iteration_control_unattributed),
         "precond_refresh_s": float(timing_stats["precond_refresh"]),
+        "precond_refresh_seed_s": float(timing_stats.get("precond_refresh_seed", 0.0)),
+        "precond_refresh_calls": int(timing_stats.get("precond_refresh_calls", 0)),
+        "precond_reassemble_calls": int(timing_stats.get("precond_reassemble_calls", 0)),
+        "precond_cache_hit_count": int(timing_stats.get("precond_cache_hit_count", 0)),
+        "precond_refresh_seed_reuse_count": int(timing_stats.get("precond_refresh_seed_reuse_count", 0)),
         "update_s": float(timing_stats["update"]),
         "update_state_s": float(timing_stats["update_state"]),
+        "update_state_ready_s": float(timing_stats.get("update_state_ready", 0.0)),
         "update_trace_build_s": float(timing_stats["update_trace_build"]),
         "update_trace_finalize_s": float(timing_stats["update_trace_finalize"]),
         "iteration_post_update_s": float(timing_stats["iteration_post_update"]),
         "iteration_loop_unattributed_s": float(iteration_loop_unattributed),
         "finalize_s": float(timing_stats["finalize"]),
+        "finalize_nestor_recompute_s": finalize_nestor_recompute,
+        "finalize_residual_recompute_s": finalize_residual_recompute,
+        "finalize_residual_device_get_s": finalize_residual_device_get,
+        "finalize_diag_build_s": finalize_diag_build,
+        "finalize_unattributed_s": finalize_unattributed,
         "setup_per_iter_s": float(timing_stats["setup_total"]) / iters,
+        "setup_static_grid_rebuild_per_iter_s": float(timing_stats.get("setup_static_grid_rebuild", 0.0)) / iters,
+        "setup_freeb_policy_per_iter_s": float(timing_stats.get("setup_freeb_policy", 0.0)) / iters,
+        "setup_boundary_profiles_per_iter_s": float(timing_stats.get("setup_boundary_profiles", 0.0)) / iters,
+        "setup_cache_key_hash_per_iter_s": float(timing_stats.get("setup_cache_key_hash", 0.0)) / iters,
+        "setup_ptau_constants_per_iter_s": float(timing_stats.get("setup_ptau_constants", 0.0)) / iters,
+        "setup_index_constants_per_iter_s": float(timing_stats.get("setup_index_constants", 0.0)) / iters,
+        "setup_update_constants_per_iter_s": float(timing_stats.get("setup_update_constants", 0.0)) / iters,
         "iteration_prepare_per_iter_s": float(timing_stats["iteration_prepare"]) / iters,
         "compute_forces_per_iter_s": float(timing_stats["compute_forces"]) / iters,
         "force_eval_per_iter_s": float(timing_stats["compute_forces"]) / iters,
         "iteration_residual_metrics_per_iter_s": float(timing_stats["iteration_residual_metrics"]) / iters,
         "preconditioner_per_iter_s": float(timing_stats["preconditioner"]) / iters,
+        "iteration_control_per_iter_s": float(timing_stats.get("iteration_control", 0.0)) / iters,
+        "iteration_control_fsq1_per_iter_s": float(timing_stats.get("iteration_control_fsq1", 0.0)) / iters,
+        "iteration_control_fsq1_precond_norm_per_iter_s": iteration_control_fsq1_precond_norm / iters,
+        "iteration_control_fsq1_scalar_build_per_iter_s": iteration_control_fsq1_scalar_build / iters,
+        "iteration_control_fsq1_payload_get_per_iter_s": iteration_control_fsq1_payload_get / iters,
+        "iteration_control_fsq1_direct_get_per_iter_s": iteration_control_fsq1_direct_get / iters,
+        "iteration_control_fsq1_unattributed_per_iter_s": iteration_control_fsq1_unattributed / iters,
+        "iteration_control_badjac_per_iter_s": float(timing_stats.get("iteration_control_badjac", 0.0)) / iters,
+        "iteration_control_badjac_ptau_get_per_iter_s": iteration_control_badjac_ptau_get / iters,
+        "iteration_control_badjac_state_jacobian_per_iter_s": iteration_control_badjac_state_jacobian / iters,
+        "iteration_control_badjac_unattributed_per_iter_s": iteration_control_badjac_unattributed / iters,
+        "iteration_control_vmec_time_per_iter_s": float(timing_stats.get("iteration_control_vmec_time", 0.0))
+        / iters,
+        "iteration_control_restart_per_iter_s": float(timing_stats.get("iteration_control_restart", 0.0)) / iters,
+        "iteration_control_evolve_per_iter_s": float(timing_stats.get("iteration_control_evolve", 0.0)) / iters,
+        "iteration_control_unattributed_per_iter_s": float(iteration_control_unattributed) / iters,
         "update_per_iter_s": float(timing_stats["update"]) / iters,
         "update_state_per_iter_s": float(timing_stats["update_state"]) / iters,
+        "update_state_ready_per_iter_s": float(timing_stats.get("update_state_ready", 0.0)) / iters,
         "update_trace_build_per_iter_s": float(timing_stats["update_trace_build"]) / iters,
         "update_trace_finalize_per_iter_s": float(timing_stats["update_trace_finalize"]) / iters,
         "iteration_post_update_per_iter_s": float(timing_stats["iteration_post_update"]) / iters,
         "iteration_loop_unattributed_per_iter_s": float(iteration_loop_unattributed) / iters,
+        "finalize_nestor_recompute_per_iter_s": finalize_nestor_recompute / iters,
+        "finalize_residual_recompute_per_iter_s": finalize_residual_recompute / iters,
+        "finalize_residual_device_get_per_iter_s": finalize_residual_device_get / iters,
+        "finalize_diag_build_per_iter_s": finalize_diag_build / iters,
+        "finalize_unattributed_per_iter_s": finalize_unattributed / iters,
     }
     if timing_detail_enabled:
         main_force = float(timing_stats.get("compute_forces_main", timing_stats["compute_forces"]))
@@ -380,6 +499,7 @@ def _build_residual_iter_timing_report(
                 "force_eval_extra_per_iter_s": (all_force - main_force) / iters,
                 "precond_apply_per_iter_s": float(timing_stats["precond_apply"]) / iters,
                 "precond_mode_scale_per_iter_s": float(timing_stats["precond_mode_scale"]) / iters,
+                "precond_refresh_seed_per_iter_s": float(timing_stats.get("precond_refresh_seed", 0.0)) / iters,
             }
         )
     return timing_report
@@ -395,8 +515,26 @@ def _format_residual_iter_timing_message(
         detail_text = (
             f"force_main={float(timing_report['compute_forces_main_s']):.3e}s "
             f"force_extra={float(timing_report['force_eval_extra_s']):.3e}s "
+            f"precond_seed={float(timing_report['precond_refresh_seed_s']):.3e}s "
             f"precond_apply={float(timing_report['precond_apply_s']):.3e}s "
             f"precond_mode={float(timing_report['precond_mode_scale_s']):.3e}s "
+            f"control={float(timing_report['iteration_control_s']):.3e}s "
+            f"control_fsq1={float(timing_report['iteration_control_fsq1_s']):.3e}s "
+            f"control_fsq1_norm={float(timing_report['iteration_control_fsq1_precond_norm_s']):.3e}s "
+            f"control_fsq1_scalar={float(timing_report['iteration_control_fsq1_scalar_build_s']):.3e}s "
+            f"control_fsq1_payload={float(timing_report['iteration_control_fsq1_payload_get_s']):.3e}s "
+            f"control_fsq1_direct={float(timing_report['iteration_control_fsq1_direct_get_s']):.3e}s "
+            f"control_badjac={float(timing_report['iteration_control_badjac_s']):.3e}s "
+            f"control_badjac_ptau={float(timing_report['iteration_control_badjac_ptau_get_s']):.3e}s "
+            f"control_badjac_state={float(timing_report['iteration_control_badjac_state_jacobian_s']):.3e}s "
+            f"control_vmec={float(timing_report['iteration_control_vmec_time_s']):.3e}s "
+            f"control_restart={float(timing_report['iteration_control_restart_s']):.3e}s "
+            f"control_evolve={float(timing_report['iteration_control_evolve_s']):.3e}s "
+            f"update_ready={float(timing_report['update_state_ready_s']):.3e}s "
+            f"final_nestor={float(timing_report['finalize_nestor_recompute_s']):.3e}s "
+            f"final_resid={float(timing_report['finalize_residual_recompute_s']):.3e}s "
+            f"final_get={float(timing_report['finalize_residual_device_get_s']):.3e}s "
+            f"final_diag={float(timing_report['finalize_diag_build_s']):.3e}s "
         )
     return (
         "[vmec_jax timing] "

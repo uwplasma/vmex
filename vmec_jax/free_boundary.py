@@ -9,6 +9,7 @@ WP0 scope:
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import hashlib
 import os
 import re
 import time
@@ -31,6 +32,7 @@ _FREEB_HOST_PHASE_CACHE: dict[tuple[int, int, tuple[str, ...]], np.ndarray] = {}
 _FREEB_TRIG_CACHE: dict[tuple[int, int, int, int, int, bool], Any] = {}
 _FREEB_BOUNDARY_SETUP_CACHE: dict[tuple[int, int], Any] = {}
 _FREEB_WINT_CACHE: dict[tuple[int, int, int], np.ndarray] = {}
+_FREEB_JAX_NESTOR_OPERATOR_FN_CACHE: dict[tuple[Any, ...], Any] = {}
 
 
 def _freeb_host_phase_stack(*, modes: Any, trig: Any, derivs: tuple[str, ...]) -> np.ndarray:
@@ -243,6 +245,7 @@ class ExternalBoundarySample:
     zuu: np.ndarray | None = None
     zuv: np.ndarray | None = None
     zvv: np.ndarray | None = None
+    timing: dict[str, float] | None = None
 
 
 @dataclass(frozen=True)
@@ -352,6 +355,8 @@ class NestorSolveResult:
     solve_time_s: float
     sample_time_s: float
     model: str = "spectral_poisson_external_only"
+    diagnostics: dict[str, float | str | bool] | None = None
+    trace_arrays: dict[str, Any] | None = None
 
 
 def _dense_lu_factor(matrix: np.ndarray) -> Any | None:
@@ -486,14 +491,22 @@ def interpolate_mgrid_bfield(
     # - VMEC becoil path uses a zeta-grid index (no toroidal interpolation),
     # - generic path uses periodic toroidal interpolation in physical angle.
     if bool(use_vmec_kv):
-        if rr.ndim < 1:
+        if rr.ndim == 0:
             raise ValueError("use_vmec_kv=True requires array inputs with an explicit zeta axis")
         nzeta = int(rr.shape[-1]) if int(rr.shape[-1]) > 0 else kp
-        # VMEC becoil.f uses kv = 1 + mod(i-1,nv), then clamps with
-        # kv = min(kv, np0b). In 0-based indexing this is simply
-        # kv = min(k, kp-1): no toroidal interpolation and no rescaling.
-        k_idx = np.arange(nzeta, dtype=np.int64)
-        k_idx = np.minimum(k_idx, kp - 1)
+        if kp == 1:
+            k_idx = np.zeros(nzeta, dtype=np.int64)
+        else:
+            if nzeta < 1:
+                raise ValueError("use_vmec_kv=True requires at least one zeta plane")
+            if kp % nzeta != 0:
+                raise ValueError(
+                    "use_vmec_kv=True requires the number of mgrid zeta planes "
+                    "to be divisible by the VMEC zeta axis length; kp must be divisible by nzeta"
+                )
+            # VMEC becoil samples the mgrid planes corresponding to the VMEC
+            # zeta grid without toroidal interpolation.
+            k_idx = np.arange(nzeta, dtype=np.int64) * int(kp // nzeta)
         k0 = np.broadcast_to(k_idx.reshape((1,) * (rr.ndim - 1) + (nzeta,)), rr.shape).reshape(-1)
         k1 = k0
         wk = np.zeros_like(fr)
@@ -918,6 +931,101 @@ def vacuum_boundary_fields_from_cylindrical(
     )
 
 
+def sample_free_boundary_external_field(
+    *,
+    R: Any,
+    Z: Any,
+    Ru: Any,
+    Zu: Any,
+    Rv: Any,
+    Zv: Any,
+    phi: Any,
+    provider_kind: str,
+    provider_static: Any = None,
+    provider_params: Any = None,
+    axis_field: tuple[Any, Any, Any] | None = None,
+    axis_r: Any | None = None,
+    axis_z: Any | None = None,
+    label: str | None = None,
+) -> ExternalBoundarySample:
+    """Project a provider-sampled external field onto VMEC boundary channels.
+
+    This is the phase-1 provider bridge: it reuses the existing VMEC/NESTOR
+    boundary-channel data model while allowing the external field to come from
+    the provider API instead of a precomputed mgrid file.  The direct provider
+    itself remains JAX-differentiable; this compatibility bridge materializes
+    NumPy arrays because the current production free-boundary path is still
+    VMEC/NESTOR-style host code.
+    """
+
+    from .external_fields import sample_external_field_cylindrical
+
+    R_arr = np.asarray(R, dtype=float)
+    Z_arr = np.asarray(Z, dtype=float)
+    Ru_arr = np.asarray(Ru, dtype=float)
+    Zu_arr = np.asarray(Zu, dtype=float)
+    Rv_arr = np.asarray(Rv, dtype=float)
+    Zv_arr = np.asarray(Zv, dtype=float)
+    phi_arr = np.asarray(phi, dtype=float)
+    br_ext, bp_ext, bz_ext = sample_external_field_cylindrical(
+        provider_kind,
+        provider_static,
+        provider_params,
+        R_arr,
+        Z_arr,
+        phi_arr,
+    )
+    br_ext = np.asarray(br_ext, dtype=float)
+    bp_ext = np.asarray(bp_ext, dtype=float)
+    bz_ext = np.asarray(bz_ext, dtype=float)
+    if axis_field is None:
+        br_axis = np.zeros_like(br_ext)
+        bp_axis = np.zeros_like(bp_ext)
+        bz_axis = np.zeros_like(bz_ext)
+    else:
+        br_axis = np.asarray(axis_field[0], dtype=float)
+        bp_axis = np.asarray(axis_field[1], dtype=float)
+        bz_axis = np.asarray(axis_field[2], dtype=float)
+    br = br_ext + br_axis
+    bp = bp_ext + bp_axis
+    bz = bz_ext + bz_axis
+    vac = vacuum_boundary_fields_from_cylindrical(
+        br=br,
+        bp=bp,
+        bz=bz,
+        R=R_arr,
+        Ru=Ru_arr,
+        Zu=Zu_arr,
+        Rv=Rv_arr,
+        Zv=Zv_arr,
+    )
+    nzeta = int(R_arr.shape[-1]) if R_arr.ndim else 1
+    axis_r_arr = np.zeros(nzeta, dtype=float) if axis_r is None else np.asarray(axis_r, dtype=float)
+    axis_z_arr = np.zeros(nzeta, dtype=float) if axis_z is None else np.asarray(axis_z, dtype=float)
+    return ExternalBoundarySample(
+        mgrid_path=str(label or provider_kind),
+        R=R_arr,
+        Z=Z_arr,
+        Ru=Ru_arr,
+        Zu=Zu_arr,
+        Rv=Rv_arr,
+        Zv=Zv_arr,
+        phi=phi_arr,
+        br=br,
+        bp=bp,
+        bz=bz,
+        br_mgrid=br_ext,
+        bp_mgrid=bp_ext,
+        bz_mgrid=bz_ext,
+        br_axis=br_axis,
+        bp_axis=bp_axis,
+        bz_axis=bz_axis,
+        axis_r=axis_r_arr,
+        axis_z=axis_z_arr,
+        vac_ext=vac,
+    )
+
+
 def _sample_external_boundary_arrays(
     *,
     state: Any,
@@ -925,27 +1033,39 @@ def _sample_external_boundary_arrays(
     extcur: tuple[float, ...] | None = None,
     plascur: float = 0.0,
     axis_override: tuple[np.ndarray, np.ndarray] | None = None,
+    external_field_provider_kind: str | None = None,
+    external_field_provider_static: Any = None,
+    external_field_provider_params: Any = None,
 ) -> ExternalBoundarySample:
-    """Return full boundary arrays for external mgrid field sampling."""
+    """Return full boundary arrays for mgrid or direct-provider sampling."""
 
     from .vmec_parity import vmec_m1_internal_to_physical_signed_host
     from .vmec_realspace import (
         vmec_realspace_synthesis,
     )
+    timing: dict[str, float] = {}
+    t_total = time.perf_counter()
+    t_phase = t_total
+    provider_kind = "mgrid" if external_field_provider_kind is None else str(external_field_provider_kind).strip().lower()
+    use_mgrid_provider = provider_kind in ("", "mgrid", "legacy_mgrid")
     meta = getattr(static, "mgrid_metadata", None)
-    if meta is None:
-        raise ValueError("missing_mgrid_metadata")
-    mgrid_path = str(getattr(meta, "path", "")).strip()
-    if not mgrid_path:
-        raise ValueError("missing_mgrid_path")
+    mgrid = None
+    if use_mgrid_provider:
+        if meta is None:
+            raise ValueError("missing_mgrid_metadata")
+        mgrid_path = str(getattr(meta, "path", "")).strip()
+        if not mgrid_path:
+            raise ValueError("missing_mgrid_path")
 
-    mgrid = _MGRID_FIELD_CACHE.get(mgrid_path)
-    if mgrid is None:
-        loaded = load_mgrid(mgrid_path, load_fields=True)
-        if not isinstance(loaded, MGridData):  # pragma: no cover
-            raise TypeError("load_mgrid(load_fields=True) must return MGridData")
-        mgrid = loaded
-        _MGRID_FIELD_CACHE[mgrid_path] = mgrid
+        mgrid = _MGRID_FIELD_CACHE.get(mgrid_path)
+        if mgrid is None:
+            loaded = load_mgrid(mgrid_path, load_fields=True)
+            if not isinstance(loaded, MGridData):  # pragma: no cover
+                raise TypeError("load_mgrid(load_fields=True) must return MGridData")
+            mgrid = loaded
+            _MGRID_FIELD_CACHE[mgrid_path] = mgrid
+    else:
+        mgrid_path = f"provider:{provider_kind}"
     extcur_eff = tuple(extcur) if extcur is not None else tuple(getattr(static, "free_boundary_extcur", ()) or ())
 
     sample_nzeta = 1 if (not bool(getattr(static.cfg, "lthreed", True))) else int(static.cfg.nzeta)
@@ -957,6 +1077,8 @@ def _sample_external_boundary_arrays(
     )
     setup = _freeb_boundary_sample_setup(static=static, sample_nzeta=int(sample_nzeta))
     trig = setup.trig
+    timing["setup_time_s"] = max(0.0, time.perf_counter() - t_phase)
+    t_phase = time.perf_counter()
 
     # Apply VMEC m=1 internal->physical conversion before free-boundary
     # sampling. This matches the convert_sym/convert_asym path feeding NESTOR.
@@ -1022,18 +1144,37 @@ def _sample_external_boundary_arrays(
     Zuu = np.asarray(second_all[1, 0, 0])
     Zuv = np.asarray(second_all[1, 1, 0])
     Zvv = np.asarray(second_all[1, 2, 0])
+    timing["boundary_geometry_time_s"] = max(0.0, time.perf_counter() - t_phase)
+    t_phase = time.perf_counter()
 
     nzeta = int(R.shape[1])
     phi_grid = setup.phi_grid
 
-    br_mgrid, bp_mgrid, bz_mgrid = interpolate_mgrid_bfield(
-        mgrid,
-        r=R,
-        z=Z,
-        phi=phi_grid,
-        extcur=extcur_eff,
-        use_vmec_kv=True,
-    )
+    if use_mgrid_provider:
+        br_mgrid, bp_mgrid, bz_mgrid = interpolate_mgrid_bfield(
+            mgrid,
+            r=R,
+            z=Z,
+            phi=phi_grid,
+            extcur=extcur_eff,
+            use_vmec_kv=True,
+        )
+    else:
+        from .external_fields import sample_external_field_cylindrical
+
+        br_mgrid, bp_mgrid, bz_mgrid = sample_external_field_cylindrical(
+            provider_kind,
+            external_field_provider_static,
+            external_field_provider_params,
+            R,
+            Z,
+            phi_grid,
+        )
+        br_mgrid = np.asarray(br_mgrid, dtype=float)
+        bp_mgrid = np.asarray(bp_mgrid, dtype=float)
+        bz_mgrid = np.asarray(bz_mgrid, dtype=float)
+    timing["external_field_time_s"] = max(0.0, time.perf_counter() - t_phase)
+    t_phase = time.perf_counter()
     # VMEC funct3d sets:
     #   raxis_nestor(1:nzeta) = pr1(1:nzeta,1,0)
     #   zaxis_nestor(1:nzeta) = pz1(1:nzeta,1,0)
@@ -1181,6 +1322,8 @@ def _sample_external_boundary_arrays(
                 nfp=int(static.cfg.nfp),
                 plascur=float(plascur),
             )
+    timing["axis_field_time_s"] = max(0.0, time.perf_counter() - t_phase)
+    t_phase = time.perf_counter()
     br = np.asarray(br_mgrid, dtype=float) + np.asarray(br_axis, dtype=float)
     bp = np.asarray(bp_mgrid, dtype=float) + np.asarray(bp_axis, dtype=float)
     bz = np.asarray(bz_mgrid, dtype=float) + np.asarray(bz_axis, dtype=float)
@@ -1194,6 +1337,8 @@ def _sample_external_boundary_arrays(
         Rv=Rv,
         Zv=Zv,
     )
+    timing["projection_time_s"] = max(0.0, time.perf_counter() - t_phase)
+    timing["total_time_s"] = max(0.0, time.perf_counter() - t_total)
     return ExternalBoundarySample(
         mgrid_path=mgrid_path,
         R=R,
@@ -1225,6 +1370,7 @@ def _sample_external_boundary_arrays(
         zuu=Zuu,
         zuv=Zuv,
         zvv=Zvv,
+        timing=timing,
     )
 
 
@@ -1436,6 +1582,7 @@ def _build_vmec_like_cache(
     nf: int,
     lasym: bool,
     wint_vmec: np.ndarray | None = None,
+    factor_physical_matrix: bool = True,
 ) -> NestorVmecLikeCache:
     """Build a dense boundary-integral-like operator on the VMEC angular grid.
 
@@ -1523,7 +1670,7 @@ def _build_vmec_like_cache(
         rhs_scale=rhs_scale,
         mode_basis=mode_basis,
         mode_matrix=mode_matrix,
-        matrix_lu=_dense_lu_factor(matrix),
+        matrix_lu=_dense_lu_factor(matrix) if bool(factor_physical_matrix) else None,
         mode_matrix_lu=_dense_lu_factor(mode_matrix),
     )
 
@@ -2091,92 +2238,133 @@ def _vmec_nonsingular_terms_from_bexni(
     grpmn_nonsing = np.zeros((mnpd2, nuv3), dtype=float)
     mf1 = mf + 1
     ndim = 2 if lasym else 1
+    iuv_grid = (np.arange(int(nu_fourp), dtype=np.int64)[:, None] * int(nv)) + np.arange(int(nv), dtype=np.int64)[
+        None, :
+    ]
+    iuv_grid = np.asarray(iuv_grid, dtype=np.int64)
+    iref_grid = np.asarray(imirr_full[iuv_grid], dtype=np.int64)
+    cosv_modes = 0.5 * onp * np.asarray(cosv_tab[: nf + 1, :], dtype=float)
+    sinv_modes = 0.5 * onp * np.asarray(sinv_tab[: nf + 1, :], dtype=float)
+    m_idx = np.arange(mf + 1, dtype=np.int64)
+    n_idx = np.arange(nf + 1, dtype=np.int64)
+    idx_p_grid = m_idx[:, None] + (n_idx[None, :] + nf) * mf1
+    idx_m_grid = m_idx[:, None] + ((-n_idx[None, :]) + nf) * mf1
+    add_negative_n = (n_idx[None, :] != 0) & (m_idx[:, None] != 0)
+    idx_p_flat = idx_p_grid.reshape(-1)
+    idx_m_flat = idx_m_grid.reshape(-1)
+    negative_n_flat = np.asarray(add_negative_n.reshape(-1), dtype=bool)
+    sinm_sym = np.asarray(sinui[: mf + 1, :], dtype=float)
+    cosm_sym = -np.asarray(cosui[: mf + 1, :], dtype=float)
+    sinm_asym = np.asarray(cosui[: mf + 1, :], dtype=float) if lasym else None
+    cosm_asym = np.asarray(sinui[: mf + 1, :], dtype=float) if lasym else None
+
+    try:
+        ip_chunk = int(os.getenv("VMEC_JAX_FREEB_NONSINGULAR_IP_CHUNK", "64"))
+    except Exception:
+        ip_chunk = 64
+    ip_chunk = max(1, min(int(ip_chunk), int(nuv3)))
 
     gstore = np.zeros((nuv_full,), dtype=float)
-    for ip in range(nuv3):
-        xip = rcosuv[ip]
-        yip = rsinuv[ip]
-        ivoff = nuv_full - ip
-        iskip = ip // nv
+    idx_all_b = idx_all[None, :]
+    rcosuv_b = rcosuv[None, :]
+    rsinuv_b = rsinuv[None, :]
+    z_b = Z[None, :]
+    for ip0 in range(0, nuv3, ip_chunk):
+        ip1 = min(nuv3, ip0 + ip_chunk)
+        ip_idx = np.arange(ip0, ip1, dtype=np.int64)
+        n_chunk = int(ip_idx.size)
+
+        xip = rcosuv[ip_idx]
+        yip = rsinuv[ip_idx]
+        ivoff = nuv_full - ip_idx
+        iskip = ip_idx // nv
         iuoff = nuv_full - nv * iskip
-        gsave = rzb2[ip] + rzb2 - 2.0 * Z[ip] * Z
-        dsave = drv[ip] + Z * snz[ip]
-        delgr = np.zeros((nuv_full,), dtype=float)
-        delgrp = np.zeros((nuv_full,), dtype=float)
+        gsave = rzb2[ip_idx, None] + rzb2[None, :] - 2.0 * Z[ip_idx, None] * z_b
+        dsave = drv[ip_idx, None] + z_b * snz[ip_idx, None]
+        delgr = np.zeros((n_chunk, nuv_full), dtype=float)
+        delgrp = np.zeros((n_chunk, nuv_full), dtype=float)
+
         for kp in range(nvper):
             xper = xip * cosper[kp] - yip * sinper[kp]
             yper = yip * cosper[kp] + xip * sinper[kp]
-            sxsave = (snr[ip] * xper - snv[ip] * yper) / R[ip]
-            sysave = (snr[ip] * yper + snv[ip] * xper) / R[ip]
-            base = gsave - 2.0 * (xper * rcosuv + yper * rsinuv)
+            sxsave = (snr[ip_idx] * xper - snv[ip_idx] * yper) / R[ip_idx]
+            sysave = (snr[ip_idx] * yper + snv[ip_idx] * xper) / R[ip_idx]
+            base = gsave - 2.0 * (xper[:, None] * rcosuv_b + yper[:, None] * rsinuv_b)
+            deriv_num = rcosuv_b * sxsave[:, None] + rsinuv_b * sysave[:, None] + dsave
+
             if kp == 0 or nv == 1:
-                tidx_u = idx_all + iuoff
+                tidx_u = idx_all_b + iuoff[:, None]
                 ivoff_k = ivoff + (2 * nu * kp if nv == 1 else 0)
-                tidx_v = idx_all + ivoff_k
-                ga1 = tanu[tidx_u] * (guu_b[ip] * tanu[tidx_u] + guv_b[ip] * tanv[tidx_v]) + gvv_b[ip] * tanv[tidx_v] * tanv[tidx_v]
-                ga2 = tanu[tidx_u] * (auu[ip] * tanu[tidx_u] + auv[ip] * tanv[tidx_v]) + avv[ip] * tanv[tidx_v] * tanv[tidx_v]
+                tidx_v = idx_all_b + ivoff_k[:, None]
+                tanu_use = tanu[tidx_u]
+                tanv_use = tanv[tidx_v]
+                ga1 = tanu_use * (
+                    guu_b[ip_idx, None] * tanu_use + guv_b[ip_idx, None] * tanv_use
+                ) + gvv_b[ip_idx, None] * tanv_use * tanv_use
+                ga2 = tanu_use * (
+                    auu[ip_idx, None] * tanu_use + auv[ip_idx, None] * tanv_use
+                ) + avv[ip_idx, None] * tanv_use * tanv_use
                 ga2 = ga2 / ga1
                 ga1s = 1.0 / np.sqrt(ga1)
-                mask = (idx_all != ip) if kp == 0 else np.ones_like(idx_all, dtype=bool)
-                if np.any(mask):
-                    base_m = base[mask]
-                    ftemp_m = 1.0 / base_m
-                    htemp_m = np.sqrt(ftemp_m)
-                    deriv_m = ftemp_m * htemp_m * (
-                        rcosuv[mask] * sxsave + rsinuv[mask] * sysave + dsave[mask]
-                    )
-                    delgr[mask] += htemp_m - ga1s[mask]
-                    delgrp[mask] += deriv_m - ga2[mask] * ga1s[mask]
+                if kp == 0:
+                    mask = np.ones((n_chunk, nuv_full), dtype=bool)
+                    mask[np.arange(n_chunk, dtype=np.int64), ip_idx] = False
+                else:
+                    mask = np.ones((n_chunk, nuv_full), dtype=bool)
+                safe_base = np.where(mask, base, 1.0)
+                ftemp = 1.0 / safe_base
+                htemp = np.sqrt(ftemp)
+                deriv = ftemp * htemp * deriv_num
+                delgr += np.where(mask, htemp - ga1s, 0.0)
+                delgrp += np.where(mask, deriv - ga2 * ga1s, 0.0)
             else:
                 ftemp = 1.0 / base
                 htemp = np.sqrt(ftemp)
-                deriv = ftemp * htemp * (rcosuv * sxsave + rsinuv * sysave + dsave)
+                deriv = ftemp * htemp * deriv_num
                 delgr += htemp
                 delgrp += deriv
+
         # VMEC greenf.f: when nv==1, normalize both non-singular sums by nvper.
         if nv == 1 and nvper > 1:
             scale = 1.0 / float(nvper)
             delgr *= scale
             delgrp *= scale
-        gstore += bex[ip] * delgr
 
-        g1 = np.zeros((nu_fourp, nf + 1, ndim), dtype=float)
-        g2 = np.zeros((nu_fourp, nf + 1, ndim), dtype=float)
-        for n in range(0, nf + 1):
-            for kv_idx in range(nv):
-                cosn = 0.5 * onp * cosv_tab[n, kv_idx]
-                sinn = 0.5 * onp * sinv_tab[n, kv_idx]
-                iuv = kv_idx
-                for ku_idx in range(nu_fourp):
-                    iref = int(imirr_full[iuv])
-                    ka = delgrp[iuv] - delgrp[iref]
-                    g1[ku_idx, n, 0] += cosn * ka
-                    g2[ku_idx, n, 0] += sinn * ka
-                    if lasym:
-                        ks = delgrp[iuv] + delgrp[iref]
-                        g1[ku_idx, n, 1] += cosn * ks
-                        g2[ku_idx, n, 1] += sinn * ks
-                    iuv += nv
+        # Keep the gstore accumulation order explicit for close parity with the
+        # scalar Fortran-style formulation while still vectorizing the expensive
+        # kernel construction above.
+        for loc, ip in enumerate(ip_idx):
+            gstore += bex[int(ip)] * delgr[loc]
 
-        for m in range(0, mf + 1):
-            for ku_idx in range(nu_fourp):
-                for isym in range(ndim):
-                    if isym == 0:
-                        cosm = -cosui[m, ku_idx]
-                        sinm = sinui[m, ku_idx]
-                        row_off = 0
-                    else:
-                        sinm = cosui[m, ku_idx]
-                        cosm = sinui[m, ku_idx]
-                        row_off = mnpd
-                    for n in range(0, nf + 1):
-                        gcos = g1[ku_idx, n, isym] * sinm
-                        gsin = g2[ku_idx, n, isym] * cosm
-                        idx_p = m + (n + nf) * mf1
-                        grpmn_nonsing[row_off + idx_p, ip] += gcos + gsin
-                        if n != 0 and m != 0:
-                            idx_m = m + ((-n) + nf) * mf1
-                            grpmn_nonsing[row_off + idx_m, ip] += gcos - gsin
+        del_iuv = delgrp[:, iuv_grid]
+        del_ref = delgrp[:, iref_grid]
+        ka_grid = del_iuv - del_ref
+        g1_sym = np.einsum("cuv,fv->cuf", ka_grid, cosv_modes, optimize=True)
+        g2_sym = np.einsum("cuv,fv->cuf", ka_grid, sinv_modes, optimize=True)
+
+        for isym in range(ndim):
+            if isym == 0:
+                g1_use = g1_sym
+                g2_use = g2_sym
+                sinm_table = sinm_sym
+                cosm_table = cosm_sym
+                row_off = 0
+            else:
+                ks_grid = del_iuv + del_ref
+                g1_use = np.einsum("cuv,fv->cuf", ks_grid, cosv_modes, optimize=True)
+                g2_use = np.einsum("cuv,fv->cuf", ks_grid, sinv_modes, optimize=True)
+                sinm_table = sinm_asym
+                cosm_table = cosm_asym
+                row_off = mnpd
+
+            gcos = np.einsum("mu,cuf->cmf", sinm_table, g1_use, optimize=True)
+            gsin = np.einsum("mu,cuf->cmf", cosm_table, g2_use, optimize=True)
+            total_plus = (gcos + gsin).reshape(n_chunk, -1)
+            total_minus = (gcos - gsin).reshape(n_chunk, -1)
+            rows_plus = row_off + idx_p_flat
+            rows_minus = row_off + idx_m_flat[negative_n_flat]
+            grpmn_nonsing[np.ix_(rows_plus, ip_idx)] += total_plus.T
+            grpmn_nonsing[np.ix_(rows_minus, ip_idx)] += total_minus[:, negative_n_flat].T
 
     # Keep raw fourp accumulation scale; any legacy scale experiments are
     # handled upstream in diagnostics, not in the core assembly path.
@@ -2922,6 +3110,336 @@ def _freeb_use_greenf_source(ntor: int) -> bool:
     return greenf_env.strip().lower() not in ("", "0", "false", "no")
 
 
+def _env_truthy(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return bool(default)
+    return raw.strip().lower() not in ("", "0", "false", "no")
+
+
+_JAX_NESTOR_BASIS_KEYS = (
+    "lasym",
+    "mf",
+    "nf",
+    "mn0",
+    "mnpd",
+    "mnpd2",
+    "nu_full",
+    "nuv3",
+    "nuv_full",
+    "onp",
+    "cmns",
+    "cos_phase",
+    "cosmni",
+    "imirr",
+    "imirr_full",
+    "n_raw",
+    "sin_phase",
+    "sinmni",
+    "theta",
+    "wint",
+    "xmpot",
+    "zeta",
+)
+
+
+def _digest_array_for_cache(value: Any) -> tuple[tuple[int, ...], str, str]:
+    arr = np.ascontiguousarray(np.asarray(value))
+    digest = hashlib.blake2b(arr.view(np.uint8), digest_size=16).hexdigest()
+    return tuple(int(i) for i in arr.shape), str(arr.dtype), digest
+
+
+def _mapping_cache_signature(mapping: dict[str, Any], keys: tuple[str, ...] | None = None) -> tuple[Any, ...]:
+    selected = tuple(sorted(mapping)) if keys is None else tuple(key for key in keys if key in mapping)
+    signature: list[Any] = []
+    for key in selected:
+        value = mapping[key]
+        if isinstance(value, dict):
+            continue
+        signature.append((key, _digest_array_for_cache(value)))
+    return tuple(signature)
+
+
+def _compact_jax_nestor_basis(basis: dict[str, Any]) -> dict[str, Any]:
+    return {key: basis[key] for key in _JAX_NESTOR_BASIS_KEYS if key in basis}
+
+
+def _jax_nestor_operator_cache_key(
+    *,
+    basis: dict[str, Any],
+    tables: dict[str, Any],
+    signgs: int,
+    nvper: int,
+    include_analytic: bool,
+    symmetric: bool,
+    input_signature: tuple[Any, ...] = (),
+) -> tuple[Any, ...]:
+    return (
+        int(signgs),
+        int(nvper),
+        bool(include_analytic),
+        bool(symmetric),
+        tuple(input_signature),
+        _mapping_cache_signature(basis, _JAX_NESTOR_BASIS_KEYS),
+        _mapping_cache_signature(tables),
+    )
+
+
+def _jax_nestor_input_signature(args: tuple[Any, ...]) -> tuple[Any, ...]:
+    return tuple((tuple(int(i) for i in np.asarray(arg).shape), str(np.asarray(arg).dtype)) for arg in args)
+
+
+def _jitted_jax_nestor_operator(
+    *,
+    basis: dict[str, Any],
+    tables: dict[str, Any],
+    signgs: int,
+    nvper: int,
+    include_analytic: bool,
+    symmetric: bool = False,
+    example_args: tuple[Any, ...] = (),
+) -> tuple[Any | None, bool]:
+    """Return a cached compiled dense JAX NESTOR operator closure.
+
+    The closure bakes mode-basis and kernel-table arrays as static constants so
+    the active free-boundary update does not execute the JAX operator as many
+    small eager dispatches. This cache is intentionally used only by the opt-in
+    research path selected with ``VMEC_JAX_FREEB_JAX_NESTOR_OPERATOR=1``.
+    """
+
+    try:
+        from ._compat import jax as _jax
+        from .free_boundary_adjoint import dense_vmec_nestor_mode_solve_jax
+    except Exception:
+        return None, False
+    if _jax is None:
+        return None, False
+    if bool(getattr(_jax.config, "jax_disable_jit", False)):
+        return None, False
+
+    key = _jax_nestor_operator_cache_key(
+        basis=basis,
+        tables=tables,
+        signgs=int(signgs),
+        nvper=int(nvper),
+        include_analytic=bool(include_analytic),
+        symmetric=bool(symmetric),
+        input_signature=_jax_nestor_input_signature(tuple(example_args)),
+    )
+    cached = _FREEB_JAX_NESTOR_OPERATOR_FN_CACHE.get(key)
+    if cached is not None:
+        return cached, True
+
+    if len(_FREEB_JAX_NESTOR_OPERATOR_FN_CACHE) >= 32:
+        _FREEB_JAX_NESTOR_OPERATOR_FN_CACHE.clear()
+
+    basis_static = _compact_jax_nestor_basis(basis)
+    tables_static = {key: tables[key] for key in sorted(tables)}
+
+    def _compiled(
+        R: Any,
+        Z: Any,
+        Ru: Any,
+        Zu: Any,
+        Rv: Any,
+        Zv: Any,
+        ruu: Any,
+        ruv: Any,
+        rvv: Any,
+        zuu: Any,
+        zuv: Any,
+        zvv: Any,
+        bexni: Any,
+    ) -> dict[str, Any]:
+        return dense_vmec_nestor_mode_solve_jax(
+            R=R,
+            Z=Z,
+            Ru=Ru,
+            Zu=Zu,
+            Rv=Rv,
+            Zv=Zv,
+            ruu=ruu,
+            ruv=ruv,
+            rvv=rvv,
+            zuu=zuu,
+            zuv=zuv,
+            zvv=zvv,
+            bexni=bexni,
+            basis=basis_static,
+            tables=tables_static,
+            signgs=int(signgs),
+            nvper=int(nvper),
+            include_analytic=bool(include_analytic),
+            symmetric=bool(symmetric),
+        )
+
+    jitted = _jax.jit(_compiled)
+    compiled = jitted.lower(*example_args).compile() if example_args else jitted
+    _FREEB_JAX_NESTOR_OPERATOR_FN_CACHE[key] = compiled
+    return compiled, False
+
+
+def _jax_nestor_operator_guard(
+    *,
+    sample: ExternalBoundarySample,
+    basis: dict[str, Any] | None,
+) -> tuple[bool, str]:
+    """Return whether the experimental JAX VMEC/NESTOR operator can run safely.
+
+    The phase-1 JAX nonsingular Green operator reconstructs the full VMEC grid
+    internally for stellarator-symmetric reduced-grid samples.  This guard keeps
+    the opt-in path limited to shapes whose active-grid contract is explicit.
+    """
+
+    if basis is None:
+        return False, "missing_mode_basis"
+    try:
+        from ._compat import has_jax, x64_enabled
+
+        if not has_jax():
+            return False, "jax_unavailable"
+        if not x64_enabled():
+            return False, "jax_x64_disabled"
+    except Exception:
+        return False, "jax_unavailable"
+    if sample.R.ndim != 2:
+        return False, "sample_R_not_2d"
+    if int(sample.R.size) != int(basis.get("nuv3", sample.R.size)):
+        return False, "requires_active_vmec_grid_points"
+    if bool(basis.get("lasym", False)) and int(sample.R.size) != int(basis.get("nuv_full", sample.R.size)):
+        return False, "requires_lasym_full_vmec_grid_points"
+    if int(sample.R.shape[0]) > int(basis.get("nu_full", sample.R.shape[0])):
+        return False, "active_grid_exceeds_full_grid"
+    for name in ("Z", "Ru", "Zu", "Rv", "Zv"):
+        arr = np.asarray(getattr(sample, name), dtype=float)
+        if arr.shape != sample.R.shape:
+            return False, f"{name}_shape_mismatch"
+    for name in ("ruu", "ruv", "rvv", "zuu", "zuv", "zvv"):
+        arr = getattr(sample, name)
+        if arr is None:
+            return False, f"missing_{name}"
+        if np.asarray(arr).shape != sample.R.shape:
+            return False, f"{name}_shape_mismatch"
+    return True, "enabled"
+
+
+def _solve_vmec_like_mode_with_jax_nestor_operator(
+    *,
+    sample: ExternalBoundarySample,
+    basis: dict[str, Any],
+    bexni: np.ndarray,
+    signgs: int,
+    nvper: int,
+    include_analytic: bool,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, bool, bool]:
+    """Run the experimental dense JAX VMEC/NESTOR mode operator.
+
+    Returns ``(phi, potvac, rhs_mode, mode_matrix, grpmn_total, gsource)``.
+    This is intentionally an opt-in validation path; default production solves
+    still use the host-validated bridge.
+    """
+
+    from .free_boundary_adjoint import dense_vmec_nestor_mode_solve_jax
+
+    tables = _ensure_vmec_nonsingular_kernel_tables(
+        basis=basis,
+        nv=int(np.asarray(sample.R).shape[1]),
+        nvper=max(1, int(nvper)),
+    )
+    R = np.asarray(sample.R, dtype=float)
+    Z = np.asarray(sample.Z, dtype=float)
+    Ru = np.asarray(sample.Ru, dtype=float)
+    Zu = np.asarray(sample.Zu, dtype=float)
+    Rv = np.asarray(sample.Rv, dtype=float)
+    Zv = np.asarray(sample.Zv, dtype=float)
+    ruu = np.asarray(sample.ruu, dtype=float)
+    ruv = np.asarray(sample.ruv, dtype=float)
+    rvv = np.asarray(sample.rvv, dtype=float)
+    zuu = np.asarray(sample.zuu, dtype=float)
+    zuv = np.asarray(sample.zuv, dtype=float)
+    zvv = np.asarray(sample.zvv, dtype=float)
+    bexni_arr = np.asarray(bexni, dtype=float)
+    operator_args = (R, Z, Ru, Zu, Rv, Zv, ruu, ruv, rvv, zuu, zuv, zvv, bexni_arr)
+    compiled = None
+    cache_hit = False
+    if _env_truthy("VMEC_JAX_FREEB_JAX_NESTOR_JIT_OPERATOR", True):
+        compiled, cache_hit = _jitted_jax_nestor_operator(
+            basis=basis,
+            tables=tables,
+            signgs=int(signgs),
+            nvper=max(1, int(nvper)),
+            include_analytic=bool(include_analytic),
+            example_args=operator_args,
+        )
+    if compiled is None:
+        out = dense_vmec_nestor_mode_solve_jax(
+            R=R,
+            Z=Z,
+            Ru=Ru,
+            Zu=Zu,
+            Rv=Rv,
+            Zv=Zv,
+            ruu=ruu,
+            ruv=ruv,
+            rvv=rvv,
+            zuu=zuu,
+            zuv=zuv,
+            zvv=zvv,
+            bexni=bexni_arr,
+            basis=basis,
+            tables=tables,
+            signgs=int(signgs),
+            nvper=max(1, int(nvper)),
+            include_analytic=bool(include_analytic),
+        )
+        jit_used = False
+    else:
+        out = compiled(*operator_args)
+        jit_used = True
+    potvac = np.asarray(out["mode_coeffs"], dtype=float)
+    rhs_mode = np.asarray(out["rhs_mode"], dtype=float)
+    mode_matrix = np.asarray(out["mode_matrix"], dtype=float)
+    grpmn = np.asarray(out["grpmn"], dtype=float)
+    gsource_nonsing = np.asarray(out["gsource_nonsing"], dtype=float)
+    mnpd2 = int(basis["mnpd2"])
+    if mode_matrix.shape != (mnpd2, mnpd2):
+        raise ValueError("jax_nestor_mode_matrix_shape")
+    if rhs_mode.shape != (mnpd2,) or potvac.shape != (mnpd2,):
+        raise ValueError("jax_nestor_mode_vector_shape")
+    for name, arr in (
+        ("rhs_mode", rhs_mode),
+        ("mode_matrix", mode_matrix),
+        ("mode_coeffs", potvac),
+        ("grpmn", grpmn),
+        ("gsource_nonsing", gsource_nonsing),
+    ):
+        if not np.isfinite(arr).all():
+            raise ValueError(f"jax_nestor_nonfinite_{name}")
+    residual = mode_matrix @ potvac - rhs_mode
+    residual_tol = 1.0e-8 * (1.0 + float(np.linalg.norm(rhs_mode)))
+    if float(np.linalg.norm(residual)) > residual_tol:
+        raise ValueError("jax_nestor_linear_residual")
+    mnpd = int(basis["mnpd"])
+    sin_phase = np.asarray(basis["sin_phase"], dtype=float)
+    cos_phase = np.asarray(basis["cos_phase"], dtype=float)
+    if bool(basis["lasym"]) and potvac.size >= 2 * mnpd:
+        phi_flat = sin_phase @ potvac[:mnpd] + cos_phase @ potvac[mnpd : 2 * mnpd]
+    else:
+        phi_flat = sin_phase @ potvac[:mnpd]
+    phi = np.asarray(phi_flat, dtype=float).reshape(np.asarray(sample.R).shape)
+    phi = phi - float(np.mean(phi))
+    return (
+        phi,
+        potvac,
+        rhs_mode,
+        mode_matrix,
+        grpmn,
+        gsource_nonsing,
+        jit_used,
+        cache_hit,
+    )
+
+
 def nestor_external_only_step(
     *,
     state: Any,
@@ -2933,6 +3451,10 @@ def nestor_external_only_step(
     extcur: tuple[float, ...] | None = None,
     plascur: float = 0.0,
     axis_override: tuple[np.ndarray, np.ndarray] | None = None,
+    external_field_provider_kind: str | None = None,
+    external_field_provider_static: Any = None,
+    external_field_provider_params: Any = None,
+    collect_trace_arrays: bool = False,
 ) -> tuple[NestorSolveResult, NestorRuntimeState]:
     """Simplified NESTOR-style update/reuse with ivacskip-compatible behavior.
 
@@ -3011,10 +3533,19 @@ def nestor_external_only_step(
         extcur=extcur,
         plascur=float(plascur),
         axis_override=axis_override,
+        external_field_provider_kind=external_field_provider_kind,
+        external_field_provider_static=external_field_provider_static,
+        external_field_provider_params=external_field_provider_params,
     )
     sample_time = max(0.0, time.perf_counter() - t0)
     ntheta, nzeta = sample.R.shape
     selected_mode, mode_reason = _select_nestor_mode(ntheta=ntheta, nzeta=nzeta)
+    provider_kind = "mgrid" if external_field_provider_kind is None else str(external_field_provider_kind).strip().lower()
+    provider_allows_source_reuse = provider_kind in ("", "mgrid", "legacy_mgrid")
+    if isinstance(external_field_provider_static, dict) and bool(
+        external_field_provider_static.get("allow_source_reuse", False)
+    ):
+        provider_allows_source_reuse = True
 
     if ivacskip is not None:
         reuse_step = (int(ivacskip) != 0 and runtime is not None)
@@ -3026,7 +3557,8 @@ def nestor_external_only_step(
     wint_vmec = _vmec_boundary_wint(static=static, ntheta=int(ntheta), nzeta=int(nzeta))
     gsource_bexni = -np.asarray(sample.vac_ext.bnormal, dtype=float) * np.asarray(wint_vmec, dtype=float) * ((2.0 * np.pi) ** 2)
     gsource_vmec = np.asarray(gsource_bexni, dtype=float)
-    if reuse_step and runtime_gsource_cached is not None:
+    source_reused = bool(reuse_step and provider_allows_source_reuse and runtime_gsource_cached is not None)
+    if source_reused:
         gsource_vmec = np.asarray(runtime_gsource_cached, dtype=float)
     if rhs_mode in ("unit", "unit_normal", "bnormal_unit"):
         rhs = -np.asarray(sample.vac_ext.bnormal_unit, dtype=float)
@@ -3059,6 +3591,17 @@ def nestor_external_only_step(
     amatrix_mode_pre = None
     amatrix_mode_from_grpmn = None
     matrix_override_applied = False
+    jax_nestor_operator_applied = False
+    jax_nestor_operator_reason = "disabled"
+    jax_nestor_operator_time_s = 0.0
+    jax_nestor_operator_jitted = False
+    jax_nestor_operator_cache_hit = False
+    cache_build_time_s = 0.0
+    source_time_s = 0.0
+    bvec_time_s = 0.0
+    matrix_time_s = 0.0
+    linear_solve_time_s = 0.0
+    vacuum_channels_time_s = 0.0
 
     if _is_dense_mode(mode_for_step):
         alpha = _as_float_env("VMEC_JAX_FREEB_VMEC_LIKE_ALPHA", 1.0)
@@ -3068,13 +3611,16 @@ def nestor_external_only_step(
         row_sum_zero = _as_int_env("VMEC_JAX_FREEB_VMEC_LIKE_ROW_SUM_ZERO", 1) != 0
         singular_diag_scale = _as_float_env("VMEC_JAX_FREEB_VMEC_LIKE_SINGULAR_DIAG_SCALE", 1.0)
         dense_solve_mode = os.getenv("VMEC_JAX_FREEB_DENSE_SOLVE_MODE", "mode").strip().lower()
+        refresh_operator_on_reuse = bool(reuse_step and not provider_allows_source_reuse)
         try:
             if (
                 not isinstance(cache, NestorVmecLikeCache)
                 or int(cache.ntheta) != int(ntheta)
                 or int(cache.nzeta) != int(nzeta)
                 or not reuse_step
+                or refresh_operator_on_reuse
             ):
+                t_phase = time.perf_counter()
                 cache = _build_vmec_like_cache(
                     sample,
                     alpha=alpha,
@@ -3088,7 +3634,9 @@ def nestor_external_only_step(
                     nf=max(0, int(getattr(static.cfg, "ntor", 0))),
                     lasym=bool(getattr(static.cfg, "lasym", False)),
                     wint_vmec=np.asarray(wint_vmec, dtype=float),
+                    factor_physical_matrix=dense_solve_mode not in ("mode", "vmec_mode", "fouri_mode"),
                 )
+                cache_build_time_s += max(0.0, time.perf_counter() - t_phase)
             use_greenf_source = _freeb_use_greenf_source(int(getattr(static.cfg, "ntor", 0)))
             # Default to Fortran-equivalent matrix assembly from grpmn (fouri
             # path). Can be disabled via VMEC_JAX_FREEB_EXPERIMENTAL_FOURI_MATRIX=0
@@ -3099,10 +3647,12 @@ def nestor_external_only_step(
                 "false",
                 "no",
             )
-            if use_greenf_source and (not reuse_step) and cache.mode_basis is not None:
+            refresh_source_on_reuse = bool(reuse_step and not provider_allows_source_reuse)
+            if use_greenf_source and ((not reuse_step) or refresh_source_on_reuse) and cache.mode_basis is not None:
                 nzeta_surf = int(np.asarray(sample.R).shape[1])
                 nvper_greenf = 64 if nzeta_surf == 1 else max(1, int(getattr(static.cfg, "nfp", 1)))
                 try:
+                    t_phase = time.perf_counter()
                     if experimental_fouri_matrix:
                         gsource_vmec, grpmn_nonsing = _vmec_nonsingular_terms_from_bexni(
                             sample=sample,
@@ -3120,19 +3670,23 @@ def nestor_external_only_step(
                             nvper=nvper_greenf,
                         )
                         grpmn_nonsing = None
+                    source_time_s += max(0.0, time.perf_counter() - t_phase)
                 except Exception:
                     gsource_vmec = np.asarray(gsource_bexni, dtype=float)
                     grpmn_nonsing = None
             if dense_solve_mode in ("mode", "vmec_mode", "fouri_mode"):
                 rhs_mode_eff = None
+                jax_operator_solved = False
                 if cache.mode_basis is not None:
-                    if reuse_step and runtime_bvec_nonsing_cached is not None:
+                    if reuse_step and provider_allows_source_reuse and runtime_bvec_nonsing_cached is not None:
                         bvec_mode_nonsing = np.asarray(runtime_bvec_nonsing_cached, dtype=float)
                     else:
+                        t_phase = time.perf_counter()
                         bvec_mode_nonsing = _vmec_bvec_from_gsource(
                             gsource=np.asarray(gsource_vmec, dtype=float),
                             basis=cache.mode_basis,
                         )
+                        bvec_time_s += max(0.0, time.perf_counter() - t_phase)
                     rhs_mode_eff = np.asarray(bvec_mode_nonsing, dtype=float)
                     add_analytic = os.getenv("VMEC_JAX_FREEB_ADD_ANALYTIC_BVEC", "1").strip().lower() not in (
                         "",
@@ -3141,6 +3695,7 @@ def nestor_external_only_step(
                         "no",
                     )
                     if add_analytic:
+                        t_phase = time.perf_counter()
                         bvec_mode_analytic, grpmn_analytic = _vmec_analytic_terms_from_geometry(
                             sample=sample,
                             basis=cache.mode_basis,
@@ -3148,7 +3703,8 @@ def nestor_external_only_step(
                             signgs=int(getattr(static, "signgs", -1)),
                         )
                         rhs_mode_eff = rhs_mode_eff + np.asarray(bvec_mode_analytic, dtype=float)
-                    if (not reuse_step) and experimental_fouri_matrix and (grpmn_nonsing is not None):
+                        bvec_time_s += max(0.0, time.perf_counter() - t_phase)
+                    if ((not reuse_step) or refresh_operator_on_reuse) and experimental_fouri_matrix and (grpmn_nonsing is not None):
                         grpmn_total = np.asarray(grpmn_nonsing, dtype=float)
                         if grpmn_analytic is not None:
                             grpmn_total = grpmn_total + np.asarray(grpmn_analytic, dtype=float)
@@ -3156,6 +3712,7 @@ def nestor_external_only_step(
                             amatrix_mode_pre = (
                                 None if cache.mode_matrix is None else np.asarray(cache.mode_matrix, dtype=float)
                             )
+                            t_phase = time.perf_counter()
                             amatrix_mode_from_grpmn = _vmec_mode_matrix_from_grpmn(
                                 grpmn=grpmn_total,
                                 basis=cache.mode_basis,
@@ -3165,30 +3722,96 @@ def nestor_external_only_step(
                                 mode_matrix=np.asarray(amatrix_mode_from_grpmn, dtype=float),
                                 mode_matrix_lu=_dense_lu_factor(np.asarray(amatrix_mode_from_grpmn, dtype=float)),
                             )
+                            matrix_time_s += max(0.0, time.perf_counter() - t_phase)
                             matrix_override_applied = True
                         except Exception:
                             pass
-                phi, potvac, bvec_mode = _solve_vmec_like_mode_from_gsource(
-                    cache=cache,
-                    gsource=np.asarray(gsource_vmec, dtype=float),
-                    rhs_mode=rhs_mode_eff,
-                )
+                    if _env_truthy("VMEC_JAX_FREEB_JAX_NESTOR_OPERATOR", False):
+                        jax_nestor_operator_reason = "requested"
+                        if not (use_greenf_source and experimental_fouri_matrix):
+                            jax_nestor_operator_reason = "requires_greenf_fouri_matrix"
+                        elif reuse_step and provider_allows_source_reuse:
+                            jax_nestor_operator_reason = "skip_cached_reuse_step"
+                        else:
+                            ok, reason = _jax_nestor_operator_guard(sample=sample, basis=cache.mode_basis)
+                            jax_nestor_operator_reason = reason
+                            if ok:
+                                try:
+                                    t_phase = time.perf_counter()
+                                    (
+                                        phi,
+                                        potvac,
+                                        rhs_mode_eff,
+                                        amatrix_mode_from_grpmn,
+                                        grpmn_total,
+                                        gsource_vmec,
+                                        jax_operator_jitted,
+                                        jax_operator_cache_hit,
+                                    ) = _solve_vmec_like_mode_with_jax_nestor_operator(
+                                        sample=sample,
+                                        basis=cache.mode_basis,
+                                        bexni=np.asarray(gsource_bexni, dtype=float),
+                                        signgs=int(getattr(static, "signgs", -1)),
+                                        nvper=nvper_greenf,
+                                        include_analytic=add_analytic,
+                                    )
+                                    jax_nestor_operator_time_s += max(0.0, time.perf_counter() - t_phase)
+                                    bvec_mode = np.asarray(rhs_mode_eff, dtype=float)
+                                    amatrix_mode_pre = (
+                                        None if cache.mode_matrix is None else np.asarray(cache.mode_matrix, dtype=float)
+                                    )
+                                    cache = replace(
+                                        cache,
+                                        mode_matrix=np.asarray(amatrix_mode_from_grpmn, dtype=float),
+                                        mode_matrix_lu=_dense_lu_factor(np.asarray(amatrix_mode_from_grpmn, dtype=float)),
+                                    )
+                                    matrix_override_applied = True
+                                    jax_nestor_operator_applied = True
+                                    jax_nestor_operator_jitted = bool(jax_operator_jitted)
+                                    jax_nestor_operator_cache_hit = bool(jax_operator_cache_hit)
+                                    jax_nestor_operator_reason = "applied"
+                                    jax_operator_solved = True
+                                except Exception as exc:
+                                    detail = str(exc).strip() or type(exc).__name__
+                                    jax_nestor_operator_reason = f"failed:{detail}"
+                if not jax_operator_solved:
+                    t_phase = time.perf_counter()
+                    phi, potvac, bvec_mode = _solve_vmec_like_mode_from_gsource(
+                        cache=cache,
+                        gsource=np.asarray(gsource_vmec, dtype=float),
+                        rhs_mode=rhs_mode_eff,
+                    )
+                    linear_solve_time_s += max(0.0, time.perf_counter() - t_phase)
                 if cache.mode_basis is not None:
+                    t_phase = time.perf_counter()
                     vac_total = _vacuum_channels_from_sample_potvac(
                         sample=sample,
                         basis=cache.mode_basis,
                         potvac=np.asarray(potvac, dtype=float),
                     )
+                    vacuum_channels_time_s += max(0.0, time.perf_counter() - t_phase)
                 else:
+                    t_phase = time.perf_counter()
                     vac_total = _vacuum_channels_from_sample_phi(sample, phi)
+                    vacuum_channels_time_s += max(0.0, time.perf_counter() - t_phase)
             else:
+                t_phase = time.perf_counter()
                 phi = _solve_vmec_like_dense(rhs, cache)
+                linear_solve_time_s += max(0.0, time.perf_counter() - t_phase)
+                t_phase = time.perf_counter()
                 vac_total = _vacuum_channels_from_sample_phi(sample, phi)
+                vacuum_channels_time_s += max(0.0, time.perf_counter() - t_phase)
             used_mode = mode_for_step
         except Exception:
+            t_phase = time.perf_counter()
             cache = _build_poisson_cache(ntheta=ntheta, nzeta=nzeta)
+            cache_build_time_s += max(0.0, time.perf_counter() - t_phase)
+            t_phase = time.perf_counter()
             phi = _solve_periodic_poisson_fft(rhs, cache)
+            linear_solve_time_s += max(0.0, time.perf_counter() - t_phase)
+            t_phase = time.perf_counter()
             vac_total = _vacuum_channels_from_sample_phi(sample, phi)
+            vacuum_channels_time_s += max(0.0, time.perf_counter() - t_phase)
             used_mode = "spectral_poisson_external_only_fallback:dense_failed"
     else:
         if (
@@ -3196,13 +3819,142 @@ def nestor_external_only_step(
             or int(cache.ntheta) != int(ntheta)
             or int(cache.nzeta) != int(nzeta)
         ):
+            t_phase = time.perf_counter()
             cache = _build_poisson_cache(ntheta=ntheta, nzeta=nzeta)
+            cache_build_time_s += max(0.0, time.perf_counter() - t_phase)
+        t_phase = time.perf_counter()
         phi = _solve_periodic_poisson_fft(rhs, cache)
+        linear_solve_time_s += max(0.0, time.perf_counter() - t_phase)
+        t_phase = time.perf_counter()
         vac_total = _vacuum_channels_from_sample_phi(sample, phi)
+        vacuum_channels_time_s += max(0.0, time.perf_counter() - t_phase)
         used_mode = mode_for_step
 
     bsqvac = np.asarray(vac_total.bsqvac)
     solve_time = max(0.0, time.perf_counter() - ts)
+
+    def _rms(arr: Any) -> float:
+        vals = np.asarray(arr, dtype=float)
+        return float(np.sqrt(np.mean(vals * vals))) if vals.size else 0.0
+
+    diagnostics: dict[str, Any] = {
+        "provider_kind": provider_kind,
+        "provider_allows_source_reuse": bool(provider_allows_source_reuse),
+        "reused": bool(reuse_step),
+        "source_reused": bool(source_reused),
+        "rhs_mode": str(rhs_mode),
+        "mode": str(used_mode),
+        "sample_time_s": float(sample_time),
+        "solve_time_s": float(solve_time),
+        "cache_build_time_s": float(cache_build_time_s),
+        "source_time_s": float(source_time_s),
+        "bvec_time_s": float(bvec_time_s),
+        "matrix_time_s": float(matrix_time_s),
+        "linear_solve_time_s": float(linear_solve_time_s),
+        "vacuum_channels_time_s": float(vacuum_channels_time_s),
+        "matrix_override_applied": bool(matrix_override_applied),
+        "jax_nestor_operator_applied": bool(jax_nestor_operator_applied),
+        "jax_nestor_operator_reason": str(jax_nestor_operator_reason),
+        "jax_nestor_operator_time_s": float(jax_nestor_operator_time_s),
+        "jax_nestor_operator_jitted": bool(jax_nestor_operator_jitted),
+        "jax_nestor_operator_cache_hit": bool(jax_nestor_operator_cache_hit),
+        "sample_ntheta": int(ntheta),
+        "sample_nzeta": int(nzeta),
+        "sample_points": int(ntheta * nzeta),
+        "br_rms": _rms(sample.br),
+        "bp_rms": _rms(sample.bp),
+        "bz_rms": _rms(sample.bz),
+        "bnormal_rms": _rms(sample.vac_ext.bnormal),
+        "bnormal_unit_rms": _rms(sample.vac_ext.bnormal_unit),
+        "rhs_rms": _rms(rhs),
+        "gsource_rms": _rms(gsource_vmec),
+        "bsqvac_rms": _rms(bsqvac),
+        "bsqvac_mean": float(np.mean(np.asarray(bsqvac, dtype=float))) if np.asarray(bsqvac).size else 0.0,
+    }
+    if isinstance(external_field_provider_static, dict):
+        diagnostics["provider_coil_geometry_cached"] = bool("coil_geometry" in external_field_provider_static)
+        diagnostics["provider_jit_sampler"] = bool(external_field_provider_static.get("jit_sampler", False))
+        diagnostics["provider_cache_scope"] = str(external_field_provider_static.get("cache_scope", ""))
+        diagnostics["provider_regularization_epsilon"] = float(
+            external_field_provider_static.get(
+                "regularization_epsilon",
+                getattr(external_field_provider_params, "regularization_epsilon", 0.0),
+            )
+        )
+        chunk_size_diag = external_field_provider_static.get(
+            "chunk_size",
+            getattr(external_field_provider_params, "chunk_size", None),
+        )
+        diagnostics["provider_chunk_size"] = None if chunk_size_diag is None else int(chunk_size_diag)
+        geometry = external_field_provider_static.get("coil_geometry")
+        if isinstance(geometry, tuple) and len(geometry) >= 1:
+            shape = tuple(int(dim) for dim in getattr(geometry[0], "shape", ())[:2])
+            if len(shape) >= 1:
+                diagnostics["provider_coil_count"] = int(shape[0])
+            if len(shape) >= 2:
+                diagnostics["provider_segments_per_coil"] = int(shape[1])
+    if isinstance(getattr(sample, "timing", None), dict):
+        for key, value in sample.timing.items():
+            try:
+                diagnostics[f"sample_{key}"] = float(value)
+            except Exception:
+                pass
+    if bvec_mode is not None:
+        diagnostics["bvec_mode_rms"] = _rms(bvec_mode)
+    if bvec_mode_nonsing is not None:
+        diagnostics["bvec_mode_nonsing_rms"] = _rms(bvec_mode_nonsing)
+    if bvec_mode_analytic is not None:
+        diagnostics["bvec_mode_analytic_rms"] = _rms(bvec_mode_analytic)
+    if isinstance(cache, NestorVmecLikeCache):
+        diagnostics["physical_matrix_lu_built"] = bool(cache.matrix_lu is not None)
+        diagnostics["mode_matrix_lu_built"] = bool(cache.mode_matrix_lu is not None)
+
+    trace_arrays = None
+    if bool(collect_trace_arrays):
+        trace_arrays = {
+            "R": np.asarray(sample.R, dtype=float),
+            "Z": np.asarray(sample.Z, dtype=float),
+            "phi": np.asarray(sample.phi, dtype=float),
+            "Ru": np.asarray(sample.Ru, dtype=float),
+            "Zu": np.asarray(sample.Zu, dtype=float),
+            "Rv": np.asarray(sample.Rv, dtype=float),
+            "Zv": np.asarray(sample.Zv, dtype=float),
+            "br": np.asarray(sample.br, dtype=float),
+            "bp": np.asarray(sample.bp, dtype=float),
+            "bz": np.asarray(sample.bz, dtype=float),
+            "br_mgrid": np.asarray(sample.br_mgrid, dtype=float),
+            "bp_mgrid": np.asarray(sample.bp_mgrid, dtype=float),
+            "bz_mgrid": np.asarray(sample.bz_mgrid, dtype=float),
+            "br_axis": np.asarray(sample.br_axis, dtype=float),
+            "bp_axis": np.asarray(sample.bp_axis, dtype=float),
+            "bz_axis": np.asarray(sample.bz_axis, dtype=float),
+            "bu_ext": np.asarray(sample.vac_ext.bu, dtype=float),
+            "bv_ext": np.asarray(sample.vac_ext.bv, dtype=float),
+            "bnormal": np.asarray(sample.vac_ext.bnormal, dtype=float),
+            "g_uu": np.asarray(sample.vac_ext.g_uu, dtype=float),
+            "g_uv": np.asarray(sample.vac_ext.g_uv, dtype=float),
+            "g_vv": np.asarray(sample.vac_ext.g_vv, dtype=float),
+            "bsqvac": np.asarray(vac_total.bsqvac, dtype=float),
+            "gsource_vmec": np.asarray(gsource_vmec, dtype=float),
+        }
+        if potvac is not None:
+            trace_arrays["potvac"] = np.asarray(potvac, dtype=float)
+        if bvec_mode is not None:
+            trace_arrays["bvec_mode"] = np.asarray(bvec_mode, dtype=float)
+        if bvec_mode_nonsing is not None:
+            trace_arrays["bvec_mode_nonsing"] = np.asarray(bvec_mode_nonsing, dtype=float)
+        if bvec_mode_analytic is not None:
+            trace_arrays["bvec_mode_analytic"] = np.asarray(bvec_mode_analytic, dtype=float)
+        if grpmn_nonsing is not None:
+            trace_arrays["grpmn_nonsing"] = np.asarray(grpmn_nonsing, dtype=float)
+        if grpmn_analytic is not None:
+            trace_arrays["grpmn_analytic"] = np.asarray(grpmn_analytic, dtype=float)
+        if grpmn_total is not None:
+            trace_arrays["grpmn_total"] = np.asarray(grpmn_total, dtype=float)
+        if amatrix_mode_from_grpmn is not None:
+            trace_arrays["mode_matrix"] = np.asarray(amatrix_mode_from_grpmn, dtype=float)
+        elif isinstance(cache, NestorVmecLikeCache) and cache.mode_matrix is not None:
+            trace_arrays["mode_matrix"] = np.asarray(cache.mode_matrix, dtype=float)
 
     res = NestorSolveResult(
         vac_total=vac_total,
@@ -3211,6 +3963,8 @@ def nestor_external_only_step(
         solve_time_s=solve_time,
         sample_time_s=sample_time,
         model=used_mode,
+        diagnostics=diagnostics,
+        trace_arrays=trace_arrays,
     )
     source_sym_cached = runtime_source_sym_cached
     bvec_nonsing_cached = runtime_bvec_nonsing_cached
@@ -3218,9 +3972,9 @@ def nestor_external_only_step(
     source_cache_iter = runtime_source_cache_iter
     if isinstance(cache, NestorVmecLikeCache) and (cache.mode_basis is not None):
         basis = cache.mode_basis
-        if (not reuse_step) or (gsource_cached is None):
+        if (not reuse_step) or (not provider_allows_source_reuse) or (gsource_cached is None):
             gsource_cached = np.asarray(gsource_vmec, dtype=float)
-        if (not reuse_step) or (source_sym_cached is None):
+        if (not reuse_step) or (not provider_allows_source_reuse) or (source_sym_cached is None):
             try:
                 source_sym_cached = _vmec_source_from_gsource(
                     gsource=np.asarray(gsource_cached, dtype=float),
@@ -3228,7 +3982,7 @@ def nestor_external_only_step(
                 )
             except Exception:
                 source_sym_cached = runtime_source_sym_cached
-        if (not reuse_step) or (bvec_nonsing_cached is None):
+        if (not reuse_step) or (not provider_allows_source_reuse) or (bvec_nonsing_cached is None):
             if bvec_mode_nonsing is not None:
                 bvec_nonsing_cached = np.asarray(bvec_mode_nonsing, dtype=float)
             else:

@@ -39,6 +39,7 @@ vmec-jax documentation
       piecewise_omnigenous_plan
       simsopt_comparison
       jxbforce_mercier
+      bootstrap_current_fixed_point
 
    .. toctree::
       :maxdepth: 2
@@ -49,6 +50,7 @@ vmec-jax documentation
       release_checklist
       optional_validation_plan
       free_boundary_plan
+      free_boundary_coil_optimization
       performance
 
    .. toctree::

@@ -287,10 +287,10 @@ def flux_profiles_from_indata(indata: InData, s, *, signgs: int) -> FluxProfiles
 def flux_profiles_from_indata_host_default(indata: InData, s, *, signgs: int) -> FluxProfiles | None:
     """Return NumPy flux profiles for the common non-RFP default-APHI path.
 
-    This helper is intentionally narrow: it avoids eager XLA compilation in
-    CLI/driver finalization for input-only profiles, while leaving all
-    non-default APHI, RFP, and explicit-iota cases on the differentiable JAX
-    implementation above.
+    This helper is intentionally narrow: it avoids eager XLA dispatch in
+    CLI/driver setup for concrete, input-only profiles, while leaving all
+    non-default APHI and RFP cases on the differentiable JAX implementation
+    above.  Explicit iota profiles are handled only on concrete host grids.
     """
     aphi = _as_float_list(indata.get("APHI", []))
     if not aphi:
@@ -299,15 +299,16 @@ def flux_profiles_from_indata_host_default(indata: InData, s, *, signgs: int) ->
         return None
     if len(aphi) != 1 or float(aphi[0]) != 1.0:
         return None
-    if _has_nonzero_profile_coeffs(indata.get("AI", [])):
-        return None
-
     s_np = np.asarray(s, dtype=float)
     if s_np.ndim != 1:
         return None
     torflux_edge = float(signgs) * float(indata.get_float("PHIEDGE", 1.0)) / float(TWOPI)
     phipf = np.full_like(s_np, torflux_edge, dtype=float)
-    chipf = np.zeros_like(s_np, dtype=float)
+    if _has_nonzero_profile_coeffs(indata.get("AI", [])):
+        prof = eval_profiles(indata, s_np)
+        chipf = torflux_edge * np.asarray(prof.get("iota", np.zeros_like(s_np)), dtype=float)
+    else:
+        chipf = np.zeros_like(s_np, dtype=float)
     if int(s_np.shape[0]) < 2:
         s_half = s_np
     else:

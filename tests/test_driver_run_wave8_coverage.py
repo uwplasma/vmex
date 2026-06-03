@@ -214,6 +214,46 @@ def test_run_fixed_boundary_selects_default_accelerated_policy_and_explicit_pari
     assert calls["solve_residual_iter"][-1][2]["host_update_assembly"] is False
 
 
+def test_direct_coil_free_boundary_exposes_limited_updates(monkeypatch, tmp_path: Path) -> None:
+    cfg = _cfg(lfreeb=True)
+    indata = _indata(LFREEB=True, MGRID_FILE="DIRECT_COILS")
+    calls = _install_fast_run_fakes(monkeypatch, cfg=cfg, indata=indata)
+
+    driver.run_free_boundary(
+        tmp_path / "input.direct",
+        solver_mode="parity",
+        max_iter=2,
+        verbose=False,
+        grid=object(),
+        jit_forces=False,
+        jit_precompile=False,
+        external_field_provider_kind="direct_coils",
+        external_field_provider_static={"coil_geometry": object()},
+        external_field_provider_params=object(),
+        _auto_cli_fixed_boundary_mode=False,
+    )
+
+    assert calls["solve_residual_iter"][-1][2]["limit_update_rms"] is False
+    assert calls["solve_residual_iter"][-1][2]["preconditioner_use_lax_tridi"] is None
+
+    driver.run_free_boundary(
+        tmp_path / "input.direct",
+        solver_mode="parity",
+        max_iter=2,
+        verbose=False,
+        grid=object(),
+        jit_forces=False,
+        jit_precompile=False,
+        external_field_provider_kind="direct_coils",
+        external_field_provider_static={"coil_geometry": object()},
+        external_field_provider_params=object(),
+        limit_update_rms=True,
+        _auto_cli_fixed_boundary_mode=False,
+    )
+
+    assert calls["solve_residual_iter"][-1][2]["limit_update_rms"] is True
+
+
 def test_run_free_boundary_rejects_fixed_input_and_delegates_free_input(monkeypatch, tmp_path: Path) -> None:
     input_path = tmp_path / "input.case"
     input_path.write_text("&INDATA\n/\n")

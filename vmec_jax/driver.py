@@ -12,7 +12,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 import os
 import time
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 from .boundary import boundary_from_indata
@@ -363,6 +363,7 @@ def _default_preconditioner_use_precomputed_tridi(
     backend: str,
     performance_mode: bool,
     use_scan: bool,
+    direct_external_provider: bool = False,
 ) -> bool | None:
     """Choose the R/Z preconditioner tridiagonal-solver policy for public runs.
 
@@ -379,12 +380,14 @@ def _default_preconditioner_use_precomputed_tridi(
     if os.getenv("VMEC_JAX_TRIDI_PRECOMPUTE") is not None:
         return None
     backend_l = str(backend).strip().lower()
-    if backend_l not in ("gpu", "cuda", "rocm", "tpu"):
-        return None
     if not bool(performance_mode):
         return None
     if bool(use_scan):
+        return True if backend_l in ("gpu", "cuda", "rocm", "tpu") else None
+    if backend_l == "cpu" and bool(getattr(cfg, "lfreeb", False)) and bool(direct_external_provider):
         return True
+    if backend_l not in ("gpu", "cuda", "rocm", "tpu"):
+        return None
     if bool(getattr(cfg, "lasym", False)):
         return True
     try:
@@ -394,6 +397,31 @@ def _default_preconditioner_use_precomputed_tridi(
     except Exception:
         signed_mode_count = 0
     return True if signed_mode_count >= 32 else None
+
+
+def _default_preconditioner_use_lax_tridi(
+    *,
+    cfg,
+    backend: str,
+    performance_mode: bool,
+    use_scan: bool,
+    direct_external_provider: bool = False,
+) -> bool | None:
+    """Choose the CPU R/Z preconditioner tridiagonal-solve primitive.
+
+    ``None`` delegates to the lower-level environment default.  May 2026
+    profiling showed that XLA's batched ``lax.linalg.tridiagonal_solve`` can
+    lower CPU free-boundary preconditioner-apply cost, but LP-QA direct-coil
+    parity diagnostics showed that the automatic direct-provider lax path can
+    produce a nonphysical first R/Z update.  Keep the safe Thomas path as the
+    default until the lax tridiagonal primitive has free-boundary parity gates.
+    Users and benchmarks can still force it with ``VMEC_JAX_TRIDI_SOLVE``.
+    """
+
+    if os.getenv("VMEC_JAX_TRIDI_SOLVE") is not None:
+        return None
+    del backend, cfg, direct_external_provider, use_scan, performance_mode
+    return None
 
 
 def _result_final_residuals(result) -> tuple[float, float, float] | None:
@@ -492,7 +520,7 @@ def _allocate_integer_budget(*, total: int, weights: list[int]) -> list[int]:
         order = sorted(range(len(raw)), key=lambda idx: (raw[idx] - float(out[idx])), reverse=True)
         for idx in order[:remaining]:
             out[idx] += 1
-    elif remaining < 0:
+    elif remaining < 0:  # pragma: no cover - floors of nonnegative shares cannot overspend.
         order = sorted(range(len(raw)), key=lambda idx: (raw[idx] - float(out[idx])))
         for idx in order[: abs(remaining)]:
             if out[idx] > 0:
@@ -1240,10 +1268,8 @@ def wout_from_fixed_boundary_run(
     """Build a minimal VMEC-style ``WoutData`` from a fixed-boundary run.
 
     This is the in-memory counterpart to :func:`write_wout_from_fixed_boundary_run`.
-    The fast bcovar path is the default for production runs. Runs created with
-    ``solver_mode="parity"`` use the legacy force-kernel output path unless
-    ``fast_bcovar`` is explicitly provided, preserving VMEC2000 WOUT parity for
-    validation gates.
+    The fast bcovar path is the default; set ``fast_bcovar=False`` to force the
+    legacy force-kernel output path for debugging.
     """
     from .wout import wout_minimal_from_fixed_boundary
 
@@ -1444,6 +1470,11 @@ def run_fixed_boundary(
     restart_solver_state: dict | None = None,
     cli_fixed_boundary_mode: bool = False,
     solver_device: str | None = None,
+    external_field_provider_kind: str | None = None,
+    external_field_provider_static: Any = None,
+    external_field_provider_params: Any = None,
+    free_boundary_activate_fsq: float | None = None,
+    limit_update_rms: bool | None = None,
     _auto_cli_fixed_boundary_mode: bool = True,
     _solver_device_context_active: bool = False,
 ):
@@ -2219,6 +2250,14 @@ def run_fixed_boundary(
                 backend=policy_backend,
                 performance_mode=bool(performance_mode_i),
                 use_scan=bool(use_scan_i),
+                direct_external_provider=bool(direct_external_provider),
+            )
+            preconditioner_use_lax_tridi_i = _default_preconditioner_use_lax_tridi(
+                cfg=static_i.cfg,
+                backend=policy_backend,
+                performance_mode=bool(performance_mode_i),
+                use_scan=bool(use_scan_i),
+                direct_external_provider=bool(direct_external_provider),
             )
             if step_size is _STEP_SIZE_SENTINEL or step_size is None:
                 step_size_finish = float(indata.get_float("DELT", 5e-3))
@@ -2268,6 +2307,7 @@ def run_fixed_boundary(
                 fsq_total_target=finish_fsq_total_target,
                 host_update_assembly=host_update_assembly_i,
                 preconditioner_use_precomputed_tridi=preconditioner_use_precomputed_tridi_i,
+                preconditioner_use_lax_tridi=preconditioner_use_lax_tridi_i,
                 return_final_force_payload=True,
                 jit_forces=_resolve_finish_jit_forces(static_i, int(budget_i)),
             )
@@ -2637,7 +2677,52 @@ def run_fixed_boundary(
 
     fb_strict_env = os.getenv("VMEC_JAX_FREEB_STRICT", "1").strip().lower()
     fb_strict = fb_strict_env not in ("", "0", "false", "no")
-    fb_meta, fb_extcur = _free_boundary_static_inputs(cfg, load_fields=False, strict=fb_strict)
+    direct_external_provider = external_field_provider_kind is not None and str(external_field_provider_kind).strip().lower() not in (
+        "",
+        "mgrid",
+        "legacy_mgrid",
+    )
+    external_field_provider_static_eff = external_field_provider_static
+    provider_kind_eff = "" if external_field_provider_kind is None else str(external_field_provider_kind).strip().lower()
+    if (
+        direct_external_provider
+        and provider_kind_eff in ("direct_coils", "coils", "coil")
+        and external_field_provider_params is not None
+        and (
+            external_field_provider_static_eff is None
+            or (
+                isinstance(external_field_provider_static_eff, dict)
+                and "coil_geometry" not in external_field_provider_static_eff
+            )
+        )
+        and os.getenv("VMEC_JAX_FREEB_DISABLE_COIL_GEOMETRY_CACHE", "").strip().lower()
+        not in ("1", "true", "yes", "on")
+    ):
+        try:
+            from .external_fields import build_coil_field_geometry
+
+            jit_sampler_env = os.getenv("VMEC_JAX_FREEB_JIT_COIL_SAMPLER", "1").strip().lower()
+            static_base = (
+                {}
+                if external_field_provider_static_eff is None
+                else dict(external_field_provider_static_eff)
+            )
+            external_field_provider_static_eff = {
+                **static_base,
+                "coil_geometry": build_coil_field_geometry(external_field_provider_params),
+                "regularization_epsilon": getattr(external_field_provider_params, "regularization_epsilon", 0.0),
+                "chunk_size": getattr(external_field_provider_params, "chunk_size", None),
+                "cache_scope": "host_forward_only",
+                "jit_sampler": jit_sampler_env not in ("", "0", "false", "no"),
+            }
+        except Exception:
+            # Preserve the original uncached direct-provider path if a custom
+            # provider-like object is not compatible with the coil helper.
+            external_field_provider_static_eff = external_field_provider_static
+    if not bool(direct_external_provider):
+        fb_meta, fb_extcur = _free_boundary_static_inputs(cfg, load_fields=False, strict=fb_strict)
+    else:
+        fb_meta, fb_extcur = None, None
 
     # Build the initial state on either the final grid (single-grid solvers and
     # use_initial_guess) or on the first multigrid stage for VMEC-style solves.
@@ -3240,7 +3325,16 @@ def run_fixed_boundary(
                 backend=policy_backend,
                 performance_mode=bool(performance_mode),
                 use_scan=bool(scan_mode),
+                direct_external_provider=bool(direct_external_provider),
             )
+            stage_preconditioner_use_lax_tridi = _default_preconditioner_use_lax_tridi(
+                cfg=cfg_i,
+                backend=policy_backend,
+                performance_mode=bool(performance_mode),
+                use_scan=bool(scan_mode),
+                direct_external_provider=bool(direct_external_provider),
+            )
+            stage_limit_update_rms = False if limit_update_rms is None else bool(limit_update_rms)
             solve_kwargs = dict(
                 indata=indata,
                 signgs=signgs,
@@ -3259,6 +3353,7 @@ def run_fixed_boundary(
                 vmec2000_control=vmec2000_ctrl,
                 strict_update=True,
                 backtracking=False,
+                limit_update_rms=stage_limit_update_rms,
                 reference_mode=False,
                 use_restart_triggers=True if use_restart_triggers is None else bool(use_restart_triggers),
                 vmecpp_restart=bool(vmecpp_restart),
@@ -3278,6 +3373,11 @@ def run_fixed_boundary(
                 fsq_total_target=stage_fsq_total_target,
                 host_update_assembly=stage_host_update_assembly,
                 preconditioner_use_precomputed_tridi=stage_preconditioner_use_precomputed_tridi,
+                preconditioner_use_lax_tridi=stage_preconditioner_use_lax_tridi,
+                external_field_provider_kind=external_field_provider_kind,
+                external_field_provider_static=external_field_provider_static_eff,
+                external_field_provider_params=external_field_provider_params,
+                free_boundary_activate_fsq=free_boundary_activate_fsq,
                 return_final_force_payload=True,
             )
             dynamic_scan_default = "1" if bool(cfg.lasym) else "0"
@@ -3931,7 +4031,7 @@ def run_free_boundary(input_path: str | Path, **kwargs):
     **kwargs:
         Forwarded directly to :func:`run_fixed_boundary`. Common options include
         ``max_iter``, ``verbose``, ``use_initial_guess``, ``vmec_project``,
-        ``solver_mode``, and ``jit_forces``.
+        ``solver_mode``, ``jit_forces``, and ``limit_update_rms``.
 
     Returns
     -------

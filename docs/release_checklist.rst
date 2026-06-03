@@ -191,8 +191,8 @@ claiming a broader physics milestone:
   wout is available.  Treat trial-solve landscape/basin scans as triage only;
   use exact-solve diagnostics before promotion claims.
 
-Latest local release-hygiene snapshot
--------------------------------------
+Historical local release-hygiene snapshot
+-----------------------------------------
 
 The latest documented local rerun evidence for the post-``v0.0.14`` candidate
 is the June 3 release-hygiene/refactor refresh through commit ``8c7ffcd``.

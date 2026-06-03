@@ -352,6 +352,40 @@ def test_merge_stage_chunk_results_marks_single_chunk_without_concatenation():
     assert merged.diagnostics["accelerated_stage_effective_mode"] == "parity"
 
 
+def test_direct_free_boundary_lax_tridi_default_stays_delegated(monkeypatch):
+    cfg = SimpleNamespace(lfreeb=True)
+
+    monkeypatch.delenv("VMEC_JAX_TRIDI_SOLVE", raising=False)
+    assert (
+        driver._default_preconditioner_use_lax_tridi(
+            cfg=cfg,
+            backend="cpu",
+            performance_mode=True,
+            use_scan=False,
+            direct_external_provider=True,
+        )
+        is None
+    )
+
+    monkeypatch.setenv("VMEC_JAX_TRIDI_SOLVE", "1")
+    assert (
+        driver._default_preconditioner_use_lax_tridi(
+            cfg=cfg,
+            backend="gpu",
+            performance_mode=True,
+            use_scan=True,
+            direct_external_provider=True,
+        )
+        is None
+    )
+
+
+def test_copy_final_force_payload_handles_unsettable_result_object():
+    source = SimpleNamespace(_final_force_payload={"payload": 1})
+
+    assert driver._copy_final_force_payload(3, source) == 3
+
+
 def test_stage_switch_reason_from_progress_reports_only_actionable_misses():
     assert (
         driver._stage_switch_reason_from_progress(

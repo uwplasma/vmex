@@ -450,6 +450,20 @@ def test_exact_optimizer_profiles_trial_solver_timing_buckets() -> None:
                 "preconditioner_s": 0.30,
                 "update_s": 0.10,
                 "update_state_s": 0.04,
+                "iteration_control_s": 0.07,
+                "iteration_control_fsq1_s": 0.05,
+                "iteration_control_fsq1_precond_norm_s": 0.011,
+                "iteration_control_fsq1_scalar_build_s": 0.012,
+                "iteration_control_fsq1_payload_get_s": 0.013,
+                "iteration_control_fsq1_direct_get_s": 0.014,
+                "iteration_control_fsq1_unattributed_s": 0.015,
+                "iteration_control_badjac_s": 0.04,
+                "iteration_control_badjac_ptau_get_s": 0.016,
+                "iteration_control_badjac_state_jacobian_s": 0.017,
+                "iteration_control_badjac_unattributed_s": 0.018,
+                "iteration_control_vmec_time_s": 0.021,
+                "iteration_control_restart_s": 0.022,
+                "iteration_control_evolve_s": 0.023,
             }
         },
         profile_prefix="trial_solver",
@@ -462,6 +476,20 @@ def test_exact_optimizer_profiles_trial_solver_timing_buckets() -> None:
     assert profile["trial_solver_preconditioner"]["wall_time_s"] == 0.30
     assert profile["trial_solver_update"]["wall_time_s"] == 0.10
     assert profile["trial_solver_update_state"]["wall_time_s"] == 0.04
+    assert profile["trial_solver_iteration_control"]["wall_time_s"] == 0.07
+    assert profile["trial_solver_iteration_control_fsq1"]["wall_time_s"] == 0.05
+    assert profile["trial_solver_iteration_control_fsq1_precond_norm"]["wall_time_s"] == 0.011
+    assert profile["trial_solver_iteration_control_fsq1_scalar_build"]["wall_time_s"] == 0.012
+    assert profile["trial_solver_iteration_control_fsq1_payload_get"]["wall_time_s"] == 0.013
+    assert profile["trial_solver_iteration_control_fsq1_direct_get"]["wall_time_s"] == 0.014
+    assert profile["trial_solver_iteration_control_fsq1_unattributed"]["wall_time_s"] == 0.015
+    assert profile["trial_solver_iteration_control_badjac"]["wall_time_s"] == 0.04
+    assert profile["trial_solver_iteration_control_badjac_ptau_get"]["wall_time_s"] == 0.016
+    assert profile["trial_solver_iteration_control_badjac_state_jacobian"]["wall_time_s"] == 0.017
+    assert profile["trial_solver_iteration_control_badjac_unattributed"]["wall_time_s"] == 0.018
+    assert profile["trial_solver_iteration_control_vmec_time"]["wall_time_s"] == 0.021
+    assert profile["trial_solver_iteration_control_restart"]["wall_time_s"] == 0.022
+    assert profile["trial_solver_iteration_control_evolve"]["wall_time_s"] == 0.023
     assert profile["solve_forward_trial_unattributed"]["wall_time_s"] == pytest.approx(0.15)
 
 
@@ -584,6 +612,8 @@ def test_profile_exact_supplements_scan_cache_status_timing_on_older_optimizer()
                 "scan_runner_cache_miss_device_run_s": 1.20,
                 "scan_runner_cache_miss_dispatch_s": 0.10,
                 "scan_runner_cache_miss_ready_s": 1.10,
+                "iteration_control_fsq1_payload_get_s": 0.06,
+                "iteration_control_badjac_state_jacobian_s": 0.07,
             }
         },
         profile_prefix="trial_solver",
@@ -598,6 +628,8 @@ def test_profile_exact_supplements_scan_cache_status_timing_on_older_optimizer()
     assert opt._profile["trial_solver_scan_runner_cache_miss_category_iteration_budget_count"]["wall_time_s"] == 1
     assert opt._profile["trial_solver_scan_runner_cache_hit_ready"]["wall_time_s"] == 0.35
     assert opt._profile["trial_solver_scan_runner_cache_miss_ready"]["wall_time_s"] == 1.10
+    assert opt._profile["trial_solver_iteration_control_fsq1_payload_get"]["wall_time_s"] == 0.06
+    assert opt._profile["trial_solver_iteration_control_badjac_state_jacobian"]["wall_time_s"] == 0.07
 
 
 def test_exact_optimizer_callback_report_schema_and_budget_status() -> None:

@@ -10,7 +10,8 @@
 [![PyPI downloads](https://img.shields.io/pypi/dm/vmec-jax)](https://pypi.org/project/vmec-jax/)
 
 End-to-end differentiable JAX implementation of **VMEC2000** for fixed-boundary
-and free-boundary ideal-MHD equilibria.
+workflows, with free-boundary support and direct-coil research paths. Full
+free-boundary solve adjoints remain in development.
 
 ## Install
 
@@ -20,12 +21,8 @@ From PyPI:
 pip install vmec-jax
 ```
 
-PyPI and conda-forge can lag the repository tags. If you need an exact release,
-check the package-index version before installing or pinning it.
-
-The plain package includes plotting support (`matplotlib`) and the
-differentiable Boozer transform dependency (`booz_xform_jax`) used by the QI
-examples, so there is no separate plotting or QI extra to install.
+The plain package includes plotting support (`matplotlib`) and the differentiable
+Boozer transform dependency (`booz_xform_jax`), so no separate extra is needed.
 
 From conda-forge:
 
@@ -42,16 +39,8 @@ cd vmec_jax
 pip install -e .
 ```
 
-The repository intentionally keeps generated WOUT fixtures and large optional
-validation assets out of git.  A source clone contains the VMEC input decks and
-small magnetic grids needed for ordinary examples; run the inputs to generate
-new `wout_*.nc` files.  If you need the full released WOUT/reference bundle for
-CI-style validation or docs regeneration, download it with:
-
-```bash
-python tools/fetch_assets.py --list
-python tools/fetch_assets.py
-```
+Generated WOUT fixtures and large optional validation assets stay out of git;
+use `python tools/fetch_assets.py --list` to inspect released reference bundles.
 
 ## Quick Start
 
@@ -92,18 +81,8 @@ vmec --booz wout_nfp4_QH_warm_start.nc
 vmec --plot boozmn_nfp4_QH_warm_start.nc
 ```
 
-`--booz --plot` writes the usual `wout_*.nc`, runs `booz_xform_jax`, writes
-`boozmn_*.nc`, and creates Boozer-coordinate `|B|` contour and spectrum plots.
-Input decks can also carry opt-in Boozer defaults without changing the VMEC solve:
-
-```fortran
-&BOOZ_XFORM_JAX
-  LBOOZ = F
-  MBOOZ = 32
-  NBOOZ = 32
-  BOOZ_SURFACES = 'all'
-/
-```
+`--booz --plot` writes the usual WOUT, Boozer `boozmn_*.nc`, and
+Boozer-coordinate `|B|` contour and spectrum plots.
 
 Use the Python API:
 
@@ -142,6 +121,31 @@ curl -L -O https://raw.githubusercontent.com/uwplasma/vmec_jax/main/examples/dat
 vmec input.cth_like_free_bdy_lasym_small
 ```
 
+### Direct-Coil Free-Boundary Research Lane
+
+The direct-coil free-boundary research lane adds a JAX-native external-field
+provider so free-boundary solves can sample differentiable Biot-Savart coils
+directly, while the existing `mgrid` path remains the VMEC2000-compatibility
+backend. Generated WOUTs and magnetic grids stay out of git; only compressed
+summary panels are committed.
+
+```bash
+python examples/free_boundary_direct_coils_forward.py \
+  --max-iter 4 \
+  --outdir results/free_boundary_direct_coils_forward
+```
+
+With ESSOS on `PYTHONPATH`, `examples/free_boundary_essos_coils_beta_scan.py`
+runs finite-pressure coil beta scans with the SIMSOPT/Landreman-style
+`e*(ne*Te+ni*Ti)` pressure profile. Use `--resume-existing` for completed
+pressure-continuation seeds. The DIII-D and LP-QA panels annotate LCFS shifts
+and LCFS `|B|` changes; adjoint limits and parity status are in
+`docs/free_boundary_coil_optimization.rst`.
+
+![DIII-D finite-beta mgrid free-boundary scan](docs/_static/figures/freeb_diiid_mgrid_beta_ns101_panel.png)
+
+![LP-QA direct-coil finite-beta free-boundary scan](docs/_static/figures/freeb_lpqa_direct_coil_beta_ns101_panel.png)
+
 ## Backend Selection
 
 `vmec_jax` follows the selected JAX backend. If CPU-only JAX is installed, runs
@@ -161,19 +165,13 @@ pass `solver_device="cpu"` / `solver_device="gpu"` explicitly.
 ## Optimization Examples
 
 Editable optimization examples live in `examples/optimization/`. Start with
-`examples/optimization/README.md` for workflow anatomy, then use
-`docs/optimization.rst` for the full method guide,
-`docs/optimization_sweep_results.rst` for generated sweep tables/figures, and
-`docs/piecewise_omnigenous_plan.rst` for the pwO planning and acceptance gates.
+`examples/optimization/README.md`, then use `docs/optimization.rst`,
+`docs/optimization_sweep_results.rst`, and `docs/piecewise_omnigenous_plan.rst`.
 
-The current README snapshot uses compact figures, not a numeric table. The
-first panel shows QA NFP2/3, QH NFP3/4, and QP NFP2/3 common-minimal-seed
-GPU runs with aspect target 5, continuation, ESS, and `max_mode=5`. The second
-panel shows the current QI NFP1/2/3/4 reviewed snapshot: each row keeps the
-user-facing input deck visible, while case-gated reference-family steps are
-explicit deterministic basin proposals rather than claims that every NFP row is
-already solved from the same common-minimal seed. Full numeric tables, caveats,
-LASYM panels, and artifact-promotion rules live in the docs.
+The compact panels show QA/QH/QP common-minimal-seed runs and the current QI NFP1/2/3/4 reviewed snapshot. QI uses case-gated reference-family steps rather than claims that every NFP row is solved from the same seed. Full numeric tables, caveats, LASYM panels,
+artifact-promotion rules live in the docs, alongside historical `readme_best_optimization_qa.png`,
+`readme_best_optimization_qh.png`, `readme_best_optimization_qp.png`, and
+`readme_best_optimization_qi.png` panels live in the docs.
 
 ![Common minimal-seed QA/QH/QP states](docs/_static/figures/minimal_seed_showcase_state_panel.png)
 ![QI optimization from NFP seeds](docs/_static/figures/readme_qi_optimization_cases.png)
@@ -191,21 +189,19 @@ PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py --publ
 ```
 Run individual editable examples with `python examples/optimization/QA_optimization.py`,
 `QH_optimization.py`, `QP_optimization.py`, `QI_optimization.py`, or
-`QI_optimization_seed.py` for seed-3127 QI. Full provenance is in
-`docs/optimization.rst` and `docs/optimization_sweep_results.rst`. Historical panels remain documented as
+`QI_optimization_seed.py` for seed-3127 QI. Full provenance and artifact rules
+are in `docs/optimization.rst` and `docs/optimization_sweep_results.rst`.
+Historical panels remain documented as
 `readme_best_optimization_qa.png`, `readme_best_optimization_qh.png`,
 `readme_best_optimization_qp.png`, and `readme_best_optimization_qi.png`.
 
 ## Performance, Validation, Release
 
-- Performance notes: `docs/performance.rst`; validation and VMEC2000 parity:
-  `docs/validation.rst`; coverage strategy: `docs/testing_strategy.rst`.
-- Release checklist and CI gates: `docs/release_checklist.rst`; latest local
-  and hosted release evidence is summarized there.
+- Performance notes: `docs/performance.rst`; validation, coverage, and release
+  gates: `docs/validation.rst`, `docs/testing_strategy.rst`, and
+  `docs/release_checklist.rst`.
 - Latest repository release tag:
   [`v0.0.14`](https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.14).
-- Before tagging, re-check green CI with
-  `gh run list --repo uwplasma/vmec_jax --branch main --workflow CI --limit 5`.
 
 ## CLI Reference
 

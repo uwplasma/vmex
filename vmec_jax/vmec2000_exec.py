@@ -27,6 +27,10 @@ class Vmec2000Threed1Row:
     delt0r: float | None = None
     r00: float | None = None
     w: float | None = None
+    beta: float | None = None
+    avg_m: float | None = None
+    delbsq: float | None = None
+    fedge: float | None = None
 
 
 @dataclass(frozen=True)
@@ -41,6 +45,7 @@ class Vmec2000Threed1Stage:
 class Vmec2000ExecResult:
     workdir: Path
     input_path: Path
+    returncode: int
     stdout: str
     stderr: str
     runtime_s: float
@@ -51,6 +56,50 @@ class Vmec2000ExecResult:
 _RE_STAGE = re.compile(
     r"^\s*NS\s*=\s*(\d+)\s+NO\.\s+FOURIER\s+MODES\s*=\s*(\d+)\s+FTOLV\s*=\s*([0-9.DdEe+-]+)\s+NITER\s*=\s*([+-]?\d+)"
 )
+_RE_MGRID_FILE = re.compile(r"^\s*MGRID_FILE\s*=\s*['\"]?([^'\",\s]+)['\"]?", flags=re.IGNORECASE | re.MULTILINE)
+_RE_FORTRAN_FLOAT = re.compile(
+    r"^\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))(?:[DdEe]([+-]?\d+)|([+-]\d+))?\s*$"
+)
+_RE_STANDARD_FLOAT_FIELD = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[DdEe][+-]?\d+)?")
+
+
+def _parse_fortran_float(tok: str) -> float:
+    """Parse VMEC/Fortran floats, including omitted-exp underflow tokens.
+
+    VMEC2000 diagnostic files occasionally contain values such as
+    ``1.0564215887228806-316`` where the exponent marker is omitted.  Treat
+    those as a single number.  Adjacent packed table fields such as
+    ``1.001-3.53E+00`` are handled by :func:`_split_vmec2000_numeric_fields`.
+    """
+
+    match = _RE_FORTRAN_FLOAT.match(str(tok))
+    if match is not None:
+        mant = match.group(1)
+        exp = match.group(2) if match.group(2) is not None else match.group(3)
+        if exp is None:
+            return float(mant)
+        return float(f"{mant}E{exp}")
+    return float(str(tok).strip().replace("D", "E").replace("d", "E"))
+
+
+def _split_vmec2000_numeric_fields(line: str) -> list[str]:
+    """Return numeric table fields from a VMEC2000 fixed-width/packed row.
+
+    The normal `threed1.*` rows are whitespace separated.  For some free-boundary
+    runs, adjacent fixed-width columns can touch, e.g. ``1.001-3.53E+00``.  First
+    preserve tokens that are valid Fortran floats, including missing exponent
+    markers, then split only tokens that cannot represent a single value.
+    """
+
+    fields: list[str] = []
+    for tok in line.split():
+        try:
+            _parse_fortran_float(tok)
+        except ValueError:
+            fields.extend(match.group(0) for match in _RE_STANDARD_FLOAT_FIELD.finditer(tok))
+        else:
+            fields.append(tok)
+    return fields
 
 
 def _parse_vmec2000_threed1(path: Path) -> list[Vmec2000Threed1Stage]:
@@ -70,15 +119,12 @@ def _parse_vmec2000_threed1(path: Path) -> list[Vmec2000Threed1Stage]:
         rows = []
         in_table = False
 
-    def _f(tok: str) -> float:
-        return float(tok.replace("D", "E").replace("d", "E"))
-
     for line in text.splitlines():
         m = _RE_STAGE.match(line)
         if m:
             _flush()
             ns = int(m.group(1))
-            ftolv = float(m.group(3).replace("D", "E").replace("d", "E"))
+            ftolv = _parse_fortran_float(m.group(3))
             niter = int(m.group(4))
             if niter < 0:
                 current = None
@@ -99,21 +145,25 @@ def _parse_vmec2000_threed1(path: Path) -> list[Vmec2000Threed1Stage]:
             in_table = False
             continue
 
-        toks = line.split()
+        toks = _split_vmec2000_numeric_fields(line)
         if len(toks) < 8 or (not toks[0].isdigit()):
             continue
         it = int(toks[0])
         r = Vmec2000Threed1Row(
             it=it,
-            fsqr=_f(toks[1]),
-            fsqz=_f(toks[2]),
-            fsql=_f(toks[3]),
-            fsqr1=_f(toks[4]),
-            fsqz1=_f(toks[5]),
-            fsql1=_f(toks[6]),
-            delt0r=_f(toks[7]) if len(toks) > 7 else None,
-            r00=_f(toks[8]) if len(toks) > 8 else None,
-            w=_f(toks[9]) if len(toks) > 9 else None,
+            fsqr=_parse_fortran_float(toks[1]),
+            fsqz=_parse_fortran_float(toks[2]),
+            fsql=_parse_fortran_float(toks[3]),
+            fsqr1=_parse_fortran_float(toks[4]),
+            fsqz1=_parse_fortran_float(toks[5]),
+            fsql1=_parse_fortran_float(toks[6]),
+            delt0r=_parse_fortran_float(toks[7]) if len(toks) > 7 else None,
+            r00=_parse_fortran_float(toks[8]) if len(toks) > 8 else None,
+            w=_parse_fortran_float(toks[9]) if len(toks) > 9 else None,
+            beta=_parse_fortran_float(toks[10]) if len(toks) > 10 else None,
+            avg_m=_parse_fortran_float(toks[11]) if len(toks) > 11 else None,
+            delbsq=_parse_fortran_float(toks[12]) if len(toks) > 12 else None,
+            fedge=_parse_fortran_float(toks[13]) if len(toks) > 13 else None,
         )
         rows.append(r)
 
@@ -222,6 +272,19 @@ def _find_threed1_file(workdir: Path, *, case: str) -> Path | None:
     return matches[0] if matches else None
 
 
+def _relative_mgrid_file(text: str) -> str | None:
+    """Return a relative VMEC ``MGRID_FILE`` reference from a namelist, if present."""
+    match = _RE_MGRID_FILE.search(text)
+    if match is None:
+        return None
+    value = match.group(1).strip()
+    if not value or value.upper() in {"NONE", "DIRECT_COILS"}:
+        return None
+    if Path(value).is_absolute():
+        return None
+    return value
+
+
 def run_xvmec2000(
     input_path: Path,
     *,
@@ -253,6 +316,13 @@ def run_xvmec2000(
         if indata_updates:
             patched = _patch_indata(dest.read_text(), updates={k.upper(): str(v) for k, v in indata_updates.items()})
             dest.write_text(patched)
+        mgrid_name = _relative_mgrid_file(dest.read_text())
+        if mgrid_name is not None:
+            source = input_path.parent / mgrid_name
+            target = workdir_path / mgrid_name
+            if source.exists() and source.resolve() != target.resolve():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, target)
 
         cmd = [str(exec_path), dest.name]
         t0 = time.perf_counter()
@@ -274,6 +344,7 @@ def run_xvmec2000(
         result = Vmec2000ExecResult(
             workdir=workdir_path,
             input_path=dest,
+            returncode=int(getattr(proc, "returncode", 0)),
             stdout=proc.stdout,
             stderr=proc.stderr,
             runtime_s=float(runtime_s),

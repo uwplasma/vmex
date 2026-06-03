@@ -14,6 +14,7 @@ We intentionally keep this code:
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Dict
 
@@ -23,6 +24,300 @@ from ._compat import jnp
 from .namelist import InData
 
 MU0 = 4e-7 * np.pi  # N/A^2
+ELEMENTARY_CHARGE = 1.602176634e-19
+
+
+try:  # Keep the module importable in documentation mock contexts.
+    import jax
+except Exception:  # pragma: no cover - exercised only when JAX is unavailable.
+    jax = None
+
+
+def _register_pytree(cls):
+    if jax is None:
+        return cls
+    return jax.tree_util.register_pytree_node_class(cls)
+
+
+def _polyder_coeffs(coeffs):
+    """Return ascending-order derivative coefficients."""
+
+    coeffs = jnp.ravel(jnp.asarray(coeffs))
+    if int(coeffs.shape[0]) <= 1:
+        return jnp.zeros((1,), dtype=coeffs.dtype)
+    powers = jnp.arange(1, int(coeffs.shape[0]), dtype=coeffs.dtype)
+    return coeffs[1:] * powers
+
+
+class Profile:
+    """Small JAX-compatible radial-profile base class.
+
+    The API mirrors the subset of ``simsopt.mhd.profiles`` used in
+    finite-beta stage-one studies: profiles are callable, ``f(s)`` returns the
+    value on normalized toroidal flux, and ``dfds(s)`` returns the radial
+    derivative.  The implementations below are pytrees so coefficients can be
+    used in differentiable closures.
+    """
+
+    def __call__(self, s):
+        return self.f(s)
+
+    def f(self, s):  # pragma: no cover - abstract helper.
+        raise NotImplementedError
+
+    def dfds(self, s):  # pragma: no cover - abstract helper.
+        raise NotImplementedError
+
+
+@_register_pytree
+@dataclass(frozen=True)
+class ProfilePolynomial(Profile):
+    """Polynomial radial profile using SIMSOPT's ascending coefficients.
+
+    ``coeffs[0]`` is the constant term, ``coeffs[1]`` is the coefficient of
+    ``s``, etc.  This is the convention used by SIMSOPT
+    ``ProfilePolynomial`` and by the Redl bootstrap-current fit.
+    """
+
+    coeffs: Any
+
+    def tree_flatten(self):
+        return (jnp.asarray(self.coeffs),), None
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        del aux_data
+        return cls(children[0])
+
+    def f(self, s):
+        return _power_series(self.coeffs, s)
+
+    def dfds(self, s):
+        return _power_series(_polyder_coeffs(self.coeffs), s)
+
+
+@_register_pytree
+@dataclass(frozen=True)
+class ProfileScaled(Profile):
+    """Scale another radial profile by a scalar factor."""
+
+    base: Profile
+    scalefac: Any
+
+    def tree_flatten(self):
+        return (self.base, jnp.asarray(self.scalefac)), None
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        del aux_data
+        base, scalefac = children
+        return cls(base, scalefac)
+
+    def f(self, s):
+        return jnp.asarray(self.scalefac) * self.base.f(s)
+
+    def dfds(self, s):
+        return jnp.asarray(self.scalefac) * self.base.dfds(s)
+
+
+@_register_pytree
+@dataclass(frozen=True)
+class ProfilePressure(Profile):
+    r"""Pressure-like profile from density/temperature pairs.
+
+    For input profiles :math:`f_j(s)`, this class evaluates
+
+    .. math::
+
+        p(s) = \sum_j f_{2j}(s) f_{2j+1}(s).
+
+    This matches SIMSOPT ``ProfilePressure`` and supports any even number of
+    density/temperature-like profile objects.
+    """
+
+    profiles: tuple[Profile, ...]
+
+    def __init__(self, *profiles: Profile):
+        if len(profiles) == 0:
+            raise ValueError("ProfilePressure requires at least one density/temperature pair")
+        if len(profiles) % 2:
+            raise ValueError("ProfilePressure requires an even number of input profiles")
+        object.__setattr__(self, "profiles", tuple(profiles))
+
+    def tree_flatten(self):
+        return self.profiles, None
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        del aux_data
+        return cls(*children)
+
+    def f(self, s):
+        s = jnp.asarray(s)
+        total = jnp.zeros_like(s, dtype=jnp.result_type(s, jnp.float64))
+        for idx in range(0, len(self.profiles), 2):
+            total = total + self.profiles[idx].f(s) * self.profiles[idx + 1].f(s)
+        return total
+
+    def dfds(self, s):
+        s = jnp.asarray(s)
+        total = jnp.zeros_like(s, dtype=jnp.result_type(s, jnp.float64))
+        for idx in range(0, len(self.profiles), 2):
+            left = self.profiles[idx]
+            right = self.profiles[idx + 1]
+            total = total + left.dfds(s) * right.f(s) + left.f(s) * right.dfds(s)
+        return total
+
+
+@dataclass(frozen=True)
+class StandardFiniteBetaProfiles:
+    """Density, temperature, and pressure profiles for finite-beta studies."""
+
+    beta_percent: Any
+    ne: ProfilePolynomial
+    Te: ProfilePolynomial
+    ni: ProfilePolynomial
+    Ti: ProfilePolynomial
+    Zeff: ProfilePolynomial
+    pressure: ProfilePressure
+    pressure_pa: ProfileScaled
+
+    @property
+    def ne_coeffs(self):
+        return self.ne.coeffs
+
+    @property
+    def Te_coeffs(self):
+        return self.Te.coeffs
+
+    @property
+    def Ti_coeffs(self):
+        return self.Ti.coeffs
+
+    @property
+    def Zeff_coeffs(self):
+        return self.Zeff.coeffs
+
+
+def standard_finite_beta_profiles(
+    beta_percent: Any,
+    *,
+    ne0_reference: float = 3.0e20,
+    Te0_reference_eV: float = 15.0e3,
+    beta_reference_fraction: float = 0.05,
+    density_shape=(1.0, 0.0, 0.0, 0.0, 0.0, -0.99),
+    temperature_shape=(1.0, -0.99),
+    zeff: float = 1.0,
+) -> StandardFiniteBetaProfiles:
+    """Return the standard finite-beta profile bundle used in stage-one runs.
+
+    The core density/temperature scaling follows the
+    ``single_stage_optimization_finite_beta`` workflow and Landreman et al.
+    self-consistent bootstrap-current studies:
+
+    ``ne0 = 3e20 * (beta_fraction / 0.05)**(1/3)`` and
+    ``Te0 = 15 keV * (beta_fraction / 0.05)**(2/3)``.
+
+    Density is in ``m^-3``, temperatures are in ``eV``, and ``pressure_pa`` is
+    ``e * (ne*Te + ni*Ti)`` in Pascals.
+    """
+
+    beta_fraction = jnp.asarray(beta_percent, dtype=jnp.float64) / 100.0
+    scale = jnp.maximum(beta_fraction / float(beta_reference_fraction), 0.0)
+    ne0 = float(ne0_reference) * scale ** (1.0 / 3.0)
+    Te0 = float(Te0_reference_eV) * scale ** (2.0 / 3.0)
+    ne = ProfilePolynomial(ne0 * jnp.asarray(density_shape, dtype=jnp.float64))
+    Te = ProfilePolynomial(Te0 * jnp.asarray(temperature_shape, dtype=jnp.float64))
+    ni = ne
+    Ti = Te
+    Zeff = ProfilePolynomial(jnp.asarray([float(zeff)], dtype=jnp.float64))
+    pressure = ProfilePressure(ne, Te, ni, Ti)
+    pressure_pa = ProfileScaled(pressure, ELEMENTARY_CHARGE)
+    return StandardFiniteBetaProfiles(
+        beta_percent=beta_percent,
+        ne=ne,
+        Te=Te,
+        ni=ni,
+        Ti=Ti,
+        Zeff=Zeff,
+        pressure=pressure,
+        pressure_pa=pressure_pa,
+    )
+
+
+def standard_pressure_profile(beta_percent: Any) -> ProfileScaled:
+    """Return only the standard finite-beta pressure profile in Pascals."""
+
+    return standard_finite_beta_profiles(beta_percent).pressure_pa
+
+
+def profile_to_power_series_coeffs(profile: Profile) -> np.ndarray:
+    """Return concrete ascending polynomial coefficients for simple profiles.
+
+    This helper is for writing VMEC ``AM`` arrays.  It supports the polynomial,
+    scaled-polynomial, and pressure-of-polynomial profiles used by the
+    finite-beta examples.  Differentiable profile evaluation should use
+    ``profile.f(s)`` directly.
+    """
+
+    if isinstance(profile, ProfilePolynomial):
+        return np.asarray(profile.coeffs, dtype=np.float64).reshape(-1)
+    if isinstance(profile, ProfileScaled):
+        return float(np.asarray(profile.scalefac, dtype=np.float64)) * profile_to_power_series_coeffs(profile.base)
+    if isinstance(profile, ProfilePressure):
+        total = np.zeros((1,), dtype=np.float64)
+        for idx in range(0, len(profile.profiles), 2):
+            left = profile_to_power_series_coeffs(profile.profiles[idx])
+            right = profile_to_power_series_coeffs(profile.profiles[idx + 1])
+            product = np.polynomial.polynomial.polymul(left, right)
+            if product.size > total.size:
+                total = np.pad(total, (0, product.size - total.size))
+            total[: product.size] += product
+        return total
+    raise TypeError(f"unsupported profile type for power-series conversion: {type(profile).__name__}")
+
+
+def pressure_profile_to_vmec_am(
+    pressure_pa_profile: Profile,
+    *,
+    pres_scale: float = 1.0,
+    trim_tol: float = 0.0,
+) -> tuple[list[float], float]:
+    """Convert a pressure profile in Pascals to VMEC ``AM``/``PRES_SCALE``.
+
+    VMEC input pressure is ``PRES_SCALE * power_series(AM, s)`` in Pascals.
+    ``vmec_jax`` then converts to internal ``mu0*Pa`` units during profile
+    evaluation.
+    """
+
+    if float(pres_scale) == 0.0:
+        raise ValueError("pres_scale must be nonzero")
+    coeffs = profile_to_power_series_coeffs(pressure_pa_profile) / float(pres_scale)
+    if float(trim_tol) > 0.0:
+        while coeffs.size > 1 and abs(float(coeffs[-1])) <= float(trim_tol):
+            coeffs = coeffs[:-1]
+    return [float(x) for x in coeffs], float(pres_scale)
+
+
+def with_pressure_profile(
+    indata: InData,
+    pressure_pa_profile: Profile,
+    *,
+    pres_scale: float = 1.0,
+    trim_tol: float = 0.0,
+) -> InData:
+    """Return a copy of ``indata`` with a polynomial pressure profile applied."""
+
+    am, scale = pressure_profile_to_vmec_am(
+        pressure_pa_profile,
+        pres_scale=pres_scale,
+        trim_tol=trim_tol,
+    )
+    out = deepcopy(indata)
+    out.scalars["PMASS_TYPE"] = "power_series"
+    out.scalars["AM"] = am
+    out.scalars["PRES_SCALE"] = scale
+    return out
 
 
 def _is_traced_array(x: Any) -> bool:

@@ -89,6 +89,30 @@ from .booz_input import booz_xform_inputs_from_state
 from .wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
 from .state import VMECState, pack_state, unpack_state
 from .static import VMECStatic, build_static
+from .free_boundary import (
+    FreeBoundaryRuntimeState,
+    MGridMetadata,
+    MGridData,
+    PreparedMGrid,
+    VacuumBoundaryFields,
+    ExternalBoundarySample,
+    NestorPoissonCache,
+    NestorVmecLikeCache,
+    NestorRuntimeState,
+    NestorSolveResult,
+    boundary_metric_from_rz,
+    covariant_boundary_field_from_cylindrical,
+    contravariant_boundary_field_from_covariant,
+    vacuum_boundary_fields_from_cylindrical,
+    sample_free_boundary_external_field as sample_free_boundary_external_field,
+    sample_external_vacuum_diagnostics,
+    nestor_external_only_step,
+    initial_free_boundary_state,
+    interpolate_mgrid_bfield,
+    load_mgrid,
+    prepare_mgrid_for_config,
+    validate_free_boundary_config,
+)
 from .init_guess import extract_axis_override_from_state, initial_guess_from_boundary
 from .optimization import (
     BoundaryParamSpec,
@@ -112,7 +136,22 @@ from .optimization import (
 )
 from .coords import Coords, eval_coords
 from .geom import Geom, eval_geom
-from .profiles import ProfileInputs, profiles_from_indata, eval_profiles
+from .profiles import (
+    ELEMENTARY_CHARGE,
+    Profile,
+    ProfileInputs,
+    ProfilePolynomial,
+    ProfilePressure,
+    ProfileScaled,
+    StandardFiniteBetaProfiles,
+    eval_profiles,
+    pressure_profile_to_vmec_am,
+    profile_to_power_series_coeffs,
+    profiles_from_indata,
+    standard_finite_beta_profiles,
+    standard_pressure_profile,
+    with_pressure_profile,
+)
 from .finite_beta import (
     FiniteBetaTargets,
     finite_beta_global_residuals_from_state,
@@ -139,6 +178,21 @@ from .finite_beta import (
     redl_bootstrap_mismatch_from_profiles,
     redl_bootstrap_mismatch_from_state,
     trapped_fraction_from_modb_sqrtg,
+)
+from .bootstrap_current import (
+    BootstrapCurrentIteration,
+    BootstrapCurrentOptions,
+    BootstrapCurrentResult,
+    apply_current_profile_to_indata,
+    bootstrap_current_fixed_point,
+    bootstrap_current_update_to_indata,
+    damp_current_profile,
+    dpsi_ds_from_vmec_phiedge,
+    integrate_current_derivative,
+    redl_current_derivative_update,
+    redl_current_integrating_factor_update,
+    redl_current_rhs,
+    vmec_current_profile_from_bootstrap_update,
 )
 from .mercier import glasser_resistive_interchange_from_mercier_terms
 from .integrals import dvds_from_sqrtg, cumtrapz_s, volume_from_sqrtg
@@ -187,6 +241,7 @@ _LAZY_ATTRS = {
     "covariant_boundary_field_from_cylindrical": ".free_boundary",
     "contravariant_boundary_field_from_covariant": ".free_boundary",
     "vacuum_boundary_fields_from_cylindrical": ".free_boundary",
+    "sample_free_boundary_external_field": ".free_boundary",
     "sample_external_vacuum_diagnostics": ".free_boundary",
     "nestor_external_only_step": ".free_boundary",
     "initial_free_boundary_state": ".free_boundary",
@@ -497,6 +552,7 @@ __all__ = [
     "covariant_boundary_field_from_cylindrical",
     "contravariant_boundary_field_from_covariant",
     "vacuum_boundary_fields_from_cylindrical",
+    "sample_free_boundary_external_field",
     "sample_external_vacuum_diagnostics",
     "nestor_external_only_step",
     "initial_free_boundary_state",
@@ -590,9 +646,20 @@ __all__ = [
     "eval_coords",
     "Geom",
     "eval_geom",
+    "ELEMENTARY_CHARGE",
+    "Profile",
     "ProfileInputs",
+    "ProfilePolynomial",
+    "ProfilePressure",
+    "ProfileScaled",
+    "StandardFiniteBetaProfiles",
     "profiles_from_indata",
     "eval_profiles",
+    "pressure_profile_to_vmec_am",
+    "profile_to_power_series_coeffs",
+    "standard_finite_beta_profiles",
+    "standard_pressure_profile",
+    "with_pressure_profile",
     "FiniteBetaTargets",
     "finite_beta_global_residuals_from_state",
     "finite_beta_scalars_from_state",
@@ -619,6 +686,19 @@ __all__ = [
     "redl_bootstrap_mismatch_from_profiles",
     "redl_bootstrap_mismatch_from_state",
     "trapped_fraction_from_modb_sqrtg",
+    "BootstrapCurrentIteration",
+    "BootstrapCurrentOptions",
+    "BootstrapCurrentResult",
+    "apply_current_profile_to_indata",
+    "bootstrap_current_fixed_point",
+    "bootstrap_current_update_to_indata",
+    "damp_current_profile",
+    "dpsi_ds_from_vmec_phiedge",
+    "integrate_current_derivative",
+    "redl_current_derivative_update",
+    "redl_current_integrating_factor_update",
+    "redl_current_rhs",
+    "vmec_current_profile_from_bootstrap_update",
     "dvds_from_sqrtg",
     "cumtrapz_s",
     "volume_from_sqrtg",
