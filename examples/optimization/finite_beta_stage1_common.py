@@ -162,6 +162,25 @@ def pressure_profile(indata, static):
     return jnp.asarray(prof.get("pressure", jnp.zeros_like(jnp.asarray(static.s))))
 
 
+def finite_beta_profile_bundle(beta_percent: float):
+    """Standard density/temperature/pressure profiles for finite-beta examples.
+
+    This is the vmec_jax counterpart of the SIMSOPT stage-one setup used in
+    ``single_stage_optimization_finite_beta``: density and temperature are
+    polynomial profiles, pressure is ``e * (ne*Te + ni*Ti)``, and the same
+    coefficients are passed to the Redl bootstrap-current residual.
+    """
+
+    return vj.standard_finite_beta_profiles(float(beta_percent))
+
+
+def apply_finite_beta_pressure_profile(indata, *, beta_percent: float):
+    """Return ``indata`` with the standard finite-beta pressure profile."""
+
+    bundle = finite_beta_profile_bundle(beta_percent)
+    return vj.with_pressure_profile(indata, bundle.pressure_pa, pres_scale=1.0)
+
+
 def mean_abs_iota(state, *, static, indata, signgs: int):
     """Mean absolute full-mesh rotational transform, excluding the axis."""
 

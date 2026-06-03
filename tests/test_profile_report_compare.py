@@ -327,6 +327,55 @@ def test_profile_summary_extracts_solve_call_internal_buckets() -> None:
     assert summary["exact_optimizer_patch_target"]["name"] == "exact_tape_solver_iteration_loop_unattributed"
 
 
+def test_profile_summary_extracts_accepted_control_leaf_buckets() -> None:
+    report = _callback_report(
+        total_wall_time_s=20.0,
+        samples=2,
+        rss_peak_mib=256,
+        replay_wall_time_s=0.2,
+        accepted_replays=2,
+        solve_count=3,
+        cache_entry_growth=4,
+        solver_device="gpu",
+    )
+    report["profile"]["trial_solver_iteration_control"] = {"count": 1, "wall_time_s": 1.2}
+    report["profile"]["trial_solver_iteration_control_fsq1"] = {"count": 1, "wall_time_s": 0.8}
+    report["profile"]["trial_solver_iteration_control_fsq1_payload_get"] = {
+        "count": 1,
+        "wall_time_s": 0.6,
+    }
+    report["profile"]["forward_exact_solver_iteration_control_badjac_state_jacobian"] = {
+        "count": 1,
+        "wall_time_s": 0.7,
+    }
+    report["profile"]["exact_tape_solver_iteration_control_vmec_time"] = {
+        "count": 1,
+        "wall_time_s": 4.0,
+    }
+    report["samples"][0]["profile_delta"] = {
+        "exact_tape_solver_iteration_control_fsq1_payload_get": {
+            "count": 1,
+            "wall_time_s": 0.5,
+        },
+    }
+
+    summary = compare_tool.summarize_payload(report, label="gpu")
+
+    assert summary["metrics"]["trial_solver_iteration_control_s"] == 1.2
+    assert summary["metrics"]["trial_solver_iteration_control_fsq1_s"] == 0.8
+    assert summary["metrics"]["trial_solver_iteration_control_fsq1_payload_get_s"] == 0.6
+    assert summary["metrics"]["forward_exact_solver_iteration_control_badjac_state_jacobian_s"] == 0.7
+    assert summary["metrics"]["exact_tape_solver_iteration_control_vmec_time_s"] == 4.0
+    assert summary["bottleneck_hint"]["metric"] == "exact_tape_solver_iteration_control_vmec_time_s"
+    assert summary["exact_optimizer_patch_target"]["name"] == "exact_tape_solver_iteration_control_vmec_time"
+    assert summary["sample_profile_summaries"][0]["metrics"][
+        "exact_tape_solver_iteration_control_fsq1_payload_get_s"
+    ] == 0.5
+    comparison = compare_tool.build_comparison([summary, summary], baseline="gpu")
+    text = compare_tool.format_text(comparison)
+    assert "exact tape solver VMEC timestep control" in text
+
+
 def test_profile_summary_extracts_direct_tape_build_leaf_buckets() -> None:
     report = _callback_report(
         total_wall_time_s=20.0,

@@ -27,6 +27,7 @@ try:
         finite_beta_stage1_result,
         finite_beta_stage_budget,
         finite_beta_stage_modes,
+        apply_finite_beta_pressure_profile,
         mean_abs_iota,
         pressure_profile,
         print_final_summary,
@@ -38,6 +39,7 @@ except ModuleNotFoundError:
         finite_beta_stage1_result,
         finite_beta_stage_budget,
         finite_beta_stage_modes,
+        apply_finite_beta_pressure_profile,
         mean_abs_iota,
         pressure_profile,
         print_final_summary,
@@ -81,7 +83,9 @@ MIN_IOTA = 1.04
 MIN_AVERAGE_IOTA = 1.06
 MAX_IOTA = 1.9
 TARGET_VOLAVGB = 5.86461221551616
-TARGET_BETA = 0.025
+BETA_PERCENT = 2.5
+TARGET_BETA = BETA_PERCENT / 100.0
+STANDARD_PROFILES = vj.standard_finite_beta_profiles(BETA_PERCENT)
 
 ASPECT_WEIGHT = 1.0e3
 IOTA_WEIGHT = 1.0e5
@@ -91,8 +95,8 @@ BETA_WEIGHT = 1.0e1
 FIELD_WEIGHT = 2.0e5
 BOOTSTRAP_WEIGHT = 0.0  # Set >0 to add the Redl bootstrap-current mismatch.
 BOOTSTRAP_SURFACES = (0.25, 0.50, 0.75)
-NE_COEFFS = [3.0e20, 0.0, 0.0, 0.0, 0.0, -2.97e20]  # m^-3, polynomial in s.
-TE_COEFFS = [15.0e3, -14.85e3]  # eV; Ti defaults to Te in the residual below.
+NE_COEFFS = vj.profile_to_power_series_coeffs(STANDARD_PROFILES.ne).tolist()  # m^-3, polynomial in s.
+TE_COEFFS = vj.profile_to_power_series_coeffs(STANDARD_PROFILES.Te).tolist()  # eV; Ti defaults to Te.
 
 # Boozer/QI residual resolution. These defaults are diagnostic-friendly for a
 # first run; increase them for final research-quality QI refinements.
@@ -116,6 +120,7 @@ PLOT = True
 print(f"Loading {INPUT_FILE.name} ...")
 base_cfg, indata = vj.load_config(str(INPUT_FILE))
 indata = rebuild_indata_with_resolution(indata, mpol=VMEC_MPOL, ntor=VMEC_NTOR)
+indata = apply_finite_beta_pressure_profile(indata, beta_percent=BETA_PERCENT)
 base_cfg = config_from_indata(indata)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 stage_modes = finite_beta_stage_modes(

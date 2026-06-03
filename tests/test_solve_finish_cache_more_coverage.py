@@ -287,6 +287,61 @@ def _python_scan(fn, carry, xs, reverse=False):
     return carry, hist
 
 
+def test_nonscan_reuses_preconditioner_seed_from_same_bcovar_refresh(monkeypatch) -> None:
+    pytest.importorskip("jax")
+    _quiet_solve_env(monkeypatch)
+    _install_scan_fakes(monkeypatch)
+
+    import vmec_jax.preconditioner_1d_jax as precond_mod
+
+    calls = {"lambda": 0, "mats": 0}
+
+    def fake_lambda_preconditioner_cached(**_kwargs):
+        calls["lambda"] += 1
+        return jnp.ones((3, 2, 1))
+
+    def fake_rz_preconditioner_matrices(**_kwargs):
+        calls["mats"] += 1
+        mats = {
+            "dr": jnp.ones((2, 2, 1)),
+            "dz": jnp.ones((2, 2, 1)),
+        }
+        return mats, 0, 2
+
+    monkeypatch.setattr(precond_mod, "lambda_preconditioner_cached", fake_lambda_preconditioner_cached)
+    monkeypatch.setattr(precond_mod, "rz_preconditioner_matrices", fake_rz_preconditioner_matrices)
+    monkeypatch.setattr(precond_mod, "rz_preconditioner_apply_jit", lambda **kwargs: kwargs["frzl_in"])
+    monkeypatch.setattr(precond_mod, "rz_preconditioner_apply_numpy", lambda **kwargs: kwargs["frzl_in"])
+    monkeypatch.setattr(solve, "_scan_math_ptau_minmax_from_k_host", lambda _k, **_kwargs: (0.1, 0.2))
+    monkeypatch.setenv("VMEC_JAX_TIMING", "1")
+
+    result = solve.solve_fixed_boundary_residual_iter(
+        _state(),
+        _static(),
+        indata=_FakeInData(lmove_axis=False),
+        signgs=1,
+        max_iter=1,
+        step_size=0.1,
+        vmec2000_control=True,
+        strict_update=True,
+        backtracking=False,
+        use_scan=False,
+        jit_forces=False,
+        auto_flip_force=False,
+        limit_dt_from_force=False,
+        limit_update_rms=False,
+        verbose=False,
+        verbose_vmec2000_table=False,
+    )
+
+    assert calls == {"lambda": 1, "mats": 1}
+    timing = result.diagnostics["timing"]
+    assert timing["precond_refresh_calls"] == 1
+    assert timing["precond_cache_hit_count"] == 1
+    assert timing["precond_refresh_seed_reuse_count"] == 1
+    assert timing["precond_refresh_seed_s"] >= 0.0
+
+
 def test_vmec2000_state_only_scan_runner_cache_reports_miss_then_hit_and_replays_resume_cache(monkeypatch) -> None:
     pytest.importorskip("jax")
     _quiet_solve_env(monkeypatch)

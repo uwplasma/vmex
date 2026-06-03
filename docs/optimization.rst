@@ -1040,6 +1040,17 @@ volume-averaged field proxy, and total beta.  QA and QH then add the usual
 quasisymmetry residual; QI adds the smooth Boozer-space quasi-isodynamic
 residual through ``booz_xform_jax``.
 
+The scripts now build pressure and bootstrap-current profile data from the same
+standard SIMSOPT-style profile bundle.  ``vj.standard_finite_beta_profiles``
+creates polynomial density and temperature profiles
+``ne = ne0 * [1, 0, 0, 0, 0, -0.99]`` and
+``Te = Te0 * [1, -0.99]`` with the Landreman finite-beta scaling, then forms
+``pressure_pa = e * (ne*Te + ni*Ti)``.  ``vj.with_pressure_profile`` writes
+that pressure into the VMEC input deck, and the same ``ne``/``Te`` coefficients
+feed ``vj.RedlBootstrapMismatch`` when ``BOOTSTRAP_WEIGHT`` is enabled.  This
+keeps the pressure profile and self-consistent bootstrap-current residual on a
+single differentiable source of truth.
+
 Unlike the public QA/QH/QP/QI teaching scripts above, these finite-beta stage-one
 examples call ``FixedBoundaryExactOptimizer`` directly rather than
 ``least_squares_solve``.  That is intentional: each continuation stage builds
@@ -1093,8 +1104,10 @@ The Redl bootstrap-current mismatch is available as
 
 .. code-block:: python
 
-   ne_coeffs = [3.0e20, 0.0, 0.0, 0.0, 0.0, -2.97e20]  # m^-3
-   te_coeffs = [15.0e3, -14.85e3]                      # eV
+   profiles = vj.standard_finite_beta_profiles(BETA_PERCENT)
+   indata = vj.with_pressure_profile(indata, profiles.pressure_pa)
+   ne_coeffs = vj.profile_to_power_series_coeffs(profiles.ne).tolist()
+   te_coeffs = vj.profile_to_power_series_coeffs(profiles.Te).tolist()
    redl = vj.RedlBootstrapMismatch(
        helicity_n=HELICITY_N,
        ne_coeffs=ne_coeffs,
@@ -1111,6 +1124,9 @@ full-mesh surfaces using fixed quadrature for the trapped-particle fraction.
 This keeps the term differentiable and usable in the discrete-adjoint
 least-squares workflow; final validation against a Boozer-space Redl geometry
 choice should still be part of any publication-quality finite-beta study.
+The deterministic plan for converting a Redl ``<J.B>`` profile into a VMEC
+``PCURR_TYPE = "cubic_spline_ip"`` current profile without optimizing shape or
+coil variables is documented in :doc:`bootstrap_current_fixed_point`.
 
 The full multi-page artifact inventory, including legacy aliases, CSV/JSON
 summary downloads, and exact reproduction commands for each standalone example,

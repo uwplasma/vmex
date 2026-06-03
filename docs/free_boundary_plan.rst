@@ -15,7 +15,8 @@ Implementation status snapshot (March 2026)
 
 This page records the free-boundary implementation plan and historical
 milestone status.  Use :doc:`validation` and :doc:`quickstart` for the current
-supported free-boundary workflow.
+supported free-boundary workflow, and :doc:`free_boundary_coil_optimization`
+for the direct-coil research lane.
 
 WP0 is implemented:
 

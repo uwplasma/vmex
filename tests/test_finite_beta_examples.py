@@ -65,6 +65,18 @@ def test_finite_beta_examples_wire_top_level_solver_controls() -> None:
         assert "solver_device=SOLVER_DEVICE" in text
 
 
+def test_finite_beta_examples_share_standard_pressure_and_bootstrap_profiles() -> None:
+    for script in FINITE_BETA_SCRIPTS:
+        text = script.read_text()
+
+        assert "BETA_PERCENT = 2.5" in text
+        assert "STANDARD_PROFILES = vj.standard_finite_beta_profiles(BETA_PERCENT)" in text
+        assert "vj.profile_to_power_series_coeffs(STANDARD_PROFILES.ne)" in text
+        assert "vj.profile_to_power_series_coeffs(STANDARD_PROFILES.Te)" in text
+        assert "apply_finite_beta_pressure_profile(indata, beta_percent=BETA_PERCENT)" in text
+        assert "redl_bootstrap_mismatch_from_state" in text
+
+
 def test_qi_finite_beta_example_uses_diagnostic_default_grid() -> None:
     values = _literal_assignments(EXAMPLE_DIR / "qi_optimization_finite_beta.py")
 

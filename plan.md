@@ -4,7 +4,11 @@ Last updated: 2026-06-03
 Primary branch: `main`
 Baseline release: `v0.0.14`
 Latest known green `main` CI: `8c7ffcd`
-Current candidate: post-`v0.0.14` release-hygiene/refactor refresh with the 95% required gate still green
+Current candidate: free-boundary direct-coil PR #18 refreshed onto
+`origin/main` at `63b73705`, retaining the post-`v0.0.14`
+release-hygiene/refactor refresh, the 95% required gate evidence from main, and
+the branch's direct-coil adjoint replay, generated-`mgrid` diagnostics, and
+preconditioner/performance evidence.
 
 This is the living execution plan for making `vmec_jax` accurate, fast,
 differentiable, documented, and usable by external researchers. Update it when
@@ -140,6 +144,9 @@ acceptance criteria or evidence changes.
   3:11 using four pytest-xdist workers. GitHub Actions run `26885868424` passed
   build, full docs, CLI smoke, parity dry-run, physics smoke, and Python
   3.10/3.11/3.12 fast tests for the same commit.
+  Free-boundary PR #18 has subsequently been refreshed onto `origin/main`
+  through `63b73705`; its last pre-merge-refresh head `4c8788f6` was
+  merge-clean and green before the generated-`mgrid` documentation update.
 - VMEC2000 converged-wout parity now has a fast bundled matrix gate across
   fixed/free, axisymmetric/non-axisymmetric, LASYM, and single/multigrid
   representatives. The executable-backed end-state gate remains opt-in:
@@ -191,6 +198,19 @@ acceptance criteria or evidence changes.
 - The first staged solver/wout refactor has centralized LCFS R/Z residual edge
   masking, extracted residual-implicit packing/zero-m1 helper seams, and
   removed duplicated bss scalxc undo logic behind direct unit tests.
+- Free-boundary direct-coil performance now has accelerator-forward host scalar
+  policies for non-traced solves. On `office`, the tiny direct-coil
+  `--jit-forces` row measured `0.0528 s` warm on CPU and `0.1857 s` warm on
+  CUDA with detailed timing disabled; accepted-control `fsq1` dropped from
+  about `12.9 ms` to `1.85 ms` in detailed timing. The remaining GPU targets
+  are residual scalar synchronization, setup/profile staging, and preconditioner
+  dispatch/application fusion. The May 31 policy-ablation benchmark completed
+  CPU and GPU quick rows from PR head `f2ec6989`; GPU warm time on the tiny
+  direct-coil solve remains slower than CPU (`10.48x` without JIT-forces and
+  roughly `2.65-3.08x` for JIT-force ablation rows), so the next performance
+  lane is structural control-loop staging/fusion, preconditioner/update
+  dispatch, finalization/setup synchronization, and cold exact tape/forward
+  cost rather than a single host-policy flag.
 
 ## Milestone 1: QI Truth And Robustness
 
@@ -477,6 +497,39 @@ release, the QI optimization driver split, and the May 22 helper/refactor
 coverage wave, the v0.0.13 release, the QI workflow checkpointing push, QI
 resolution-override coverage, and the May 27 minimal-seed helicity-perturbation
 update, the v0.0.14 release, and the May 30 GPU scan/replay policy refresh:
+
+Free-boundary branch addendum, 2026-05-28: PR #18
+(`feature/freeb-essos-coil-single-stage`) has merged latest `origin/main`,
+validated interrupted stage-level beta-scan checkpoints, added
+accepted-boundary direct-coil replay AD-vs-FD coverage, and fixed the direct
+coil benchmark matrix GPU detector so mixed-platform launches such as
+`JAX_PLATFORMS=cpu,cuda` still record concrete CUDA rows.  The latest `office`
+quick CPU/CUDA direct-coil matrix shows the tiny `--jit-forces` direct solve is
+still CPU-favorable (`0.0525 s` CPU warm versus `0.2346 s` CUDA warm), but
+CUDA force assembly is already comparable/slightly faster.  Remaining GPU work
+for the free-boundary branch is setup/precompute reuse and scalar/control plus
+preconditioner dispatch amortization, not Biot-Savart sampling or the dense
+NESTOR solve.  The branch now has measurement-only setup sub-buckets in solver
+diagnostics and benchmark summaries so the next cache patch can target the
+dominant setup phase rather than the broad `setup_total_s` container.  The
+first CUDA probe with that split measured warm setup at `40.4 ms`, dominated by
+boundary/profile construction and update constants.  Accelerator host-forward
+setup now reuses the existing NumPy row-enforcement path for the initial state
+when not tracing, with an explicit `VMEC_JAX_HOST_SETUP_ENFORCE` override; the
+first CUDA check improved the tiny direct-coil warm solve from `0.180 s` to
+`0.169 s`.  The host flux-profile setup path now also handles concrete
+default-`APHI` iota profiles.  A follow-up `office` matrix at head `8eb2a342`
+reported CPU warm `0.0521 s` and CUDA warm `0.2318 s` for the tiny
+`--jit-forces` row, with force assembly still near parity; the next GPU lane is
+therefore setup/control/preconditioner staging or caching, not further
+Biot-Savart kernel work.  A subsequent host-profile setup policy
+(`VMEC_JAX_HOST_PROFILE_SETUP=auto`) improved the same tiny CUDA row to
+`0.1625 s` warm versus `0.0552 s` CPU, with CUDA setup/profile down to
+`5.6 ms`; remaining GPU work is now residual scalar materialization,
+accepted-control `fsq1`, and preconditioner dispatch.  Follow-up tests of
+`VMEC_JAX_HOST_UPDATE_ON_ACCELERATOR=1`, bad-Jacobian probe bypass, and
+timing-light rows did not justify a default policy change; the next
+performance step is structural control-loop staging/fusion.
 
 - Continuation correctness: 100%. Source fix is implemented and covered by
   synthetic repeated-stage tests, a real boundary-projection stage test, and

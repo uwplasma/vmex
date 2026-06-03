@@ -1924,6 +1924,11 @@ def run_qi_prefine_probe(plan: dict[str, Any], *, workflow: Any | None = None) -
         phimin=qi_phimin,
         jit_booz=qi_jit_booz,
     )
+    qi_surfaces = tuple(float(surface) for surface in getattr(qi_options, "surfaces", qi_options_raw["surfaces"]))
+    qi_mboz = int(getattr(qi_options, "mboz", qi_options_raw["mboz"]))
+    qi_nboz = int(getattr(qi_options, "nboz", qi_options_raw["nboz"]))
+    qi_phimin = float(getattr(qi_options, "phimin", qi_options_raw["phimin"]))
+    qi_jit_booz = bool(getattr(qi_options, "jit_booz", False))
     objective_tuples = []
     qi = workflow.QuasiIsodynamicResidual(qi_options)
     objective_tuples.append((qi.J, 0.0, float(qi_options_raw["weight"])))

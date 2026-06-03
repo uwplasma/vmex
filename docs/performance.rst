@@ -195,13 +195,13 @@ read as a mixed result rather than a broad VMEC2000 speedup claim:
   accepted steps and Jacobian builds.  This roughly halves the per-iteration
   wall time in optimisation loops.
 
-**8. Discrete-adjoint Jacobian (exact, not finite differences)**
+**8. Discrete-adjoint Jacobian (solver-consistent, not finite differences)**
   For optimisation, the Jacobian is computed via discrete-adjoint replay
   (``build_residual_checkpoint_tape_direct`` + ``checkpoint_tape_state_jvp_columns``).
-  This gives a machine-precision Jacobian without finite differences.  The
-  cost scales with the number of boundary degrees of freedom because all
-  parameter tangent columns must be propagated through the converged VMEC
-  iteration tape.
+  This gives a Jacobian consistent with the converged VMEC iteration tape
+  without finite differences.  The cost scales with the number of boundary
+  degrees of freedom because all parameter tangent columns must be propagated
+  through the tape.
 
 **9. Cached quasisymmetry angular grids**
   QS optimisation callbacks reuse the same angular quadrature grid and
@@ -2198,9 +2198,10 @@ and ``purely_toroidal_field`` (``0.42x``).  ``NuhrenbergZille_1988_QHS`` timed
 out in both policies and remains a stress fixture rather than a promotion row.
 
 The same 2026-05-24 matrix on ``office`` with ``JAX_PLATFORMS=cuda,cpu`` showed
-the opposite policy conclusion for CUDA: 33 rows had valid warm speedups, 32 of
-those were faster with ``accelerated``, the median warm speedup was ``2.06x``,
-and the geometric-mean warm speedup was ``3.38x``.  Only
+the opposite policy conclusion for CUDA: 33 rows had valid warm
+accelerated-vs-default speedups within CUDA, 32 of those were faster with
+``accelerated``, the median warm speedup was ``2.06x``, and the geometric-mean
+warm speedup was ``3.38x``.  Only
 ``LandremanPaul2021_QA_lowres`` was slower (``0.33x``), and
 ``NuhrenbergZille_1988_QHS`` again timed out.  Representative CUDA wins were
 ``li383_low_res`` (``12.6x``), ``nfp1_QI`` (``11.9x``), minimal-seed NFP
@@ -2690,7 +2691,7 @@ Results are in ``outputs/bench_accel_20260413/summary.json``.
 
 **11 of 16 cases** are faster in warm accelerated mode than VMEC2000.
 The 5 slower cases (QA/QH reactor-scale and cth_like) are the main
-Phase 2 targets.
+remaining fixed-boundary performance targets.
 
 Note: cold (first-run) times include XLA compilation and are
 5–30x the warm times. Cold compilation is a one-time cost per
@@ -3324,6 +3325,221 @@ If profiling free-boundary solver-only cost, disable sampling diagnostics:
 .. code-block:: bash
 
   export VMEC_JAX_FREEB_SAMPLE_EXTERNAL=0
+
+Direct-coil CPU/GPU micro-benchmark snapshot
+--------------------------------------------
+
+The direct-coil benchmark matrix isolates the new coil-provider free-boundary
+path from the broader example matrix:
+
+.. code-block:: bash
+
+  python tools/benchmarks/bench_freeb_direct_coil_matrix.py \
+    --quick --include-gpu \
+    --out /tmp/freeb_matrix_office_gpu_followup/summary.json
+
+On the 2026-05-28 ``office`` CPU/CUDA rerun, the matrix used concrete-platform
+probing so CUDA rows were recorded even under ``JAX_PLATFORMS=cpu,cuda``.  The
+best bounded direct-solve row was ``direct_solve_jit_forces``.  The warm solve
+was still CPU-favorable (``0.0525 s`` CPU versus ``0.2346 s`` CUDA,
+``4.46x`` GPU/CPU), but the detailed timers show that the remaining GPU cost is
+no longer the direct Biot-Savart field sample or the dense NESTOR solve:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Timing bucket
+     - CPU
+     - CUDA
+     - CUDA/CPU
+   * - setup
+     - ``9.31 ms``
+     - ``53.81 ms``
+     - ``5.78x``
+   * - residual metrics
+     - ``0.76 ms``
+     - ``29.26 ms``
+     - ``38.32x``
+   * - accepted-control fsq1
+     - ``0.15 ms``
+     - ``14.17 ms``
+     - ``97.06x``
+   * - preconditioner apply
+     - ``1.09 ms``
+     - ``12.65 ms``
+     - ``11.55x``
+   * - force evaluation
+     - ``9.21 ms``
+     - ``8.55 ms``
+     - ``0.93x``
+   * - finalize
+     - ``10.67 ms``
+     - ``11.05 ms``
+     - ``1.04x``
+
+The next GPU optimization target is therefore accepted-control and
+preconditioner/update dispatch amortization plus reusable setup/precompute
+state, not Biot-Savart sampling or the final dense vacuum solve.  Scalar-defer
+is deliberately not the default yet because the residual scalars still drive
+VMEC control flow, history, and free-boundary acceptance logic.
+
+The follow-up instrumentation splits ``setup_total_s`` into static-grid
+rebuild, free-boundary policy, boundary/profile construction, cache-key hashing,
+``ptau`` constants, mode-index constants, and update constants.  Use those keys
+in ``warm_solver_timing.timing`` or in the matrix ``cpu_gpu_comparison`` block
+before implementing the next setup cache; the split is intentionally
+measurement-only and does not change solver numerics.
+
+When ``VMEC_JAX_TIMING=1`` is enabled, the direct-coil solve benchmark also
+emits a normalized ``phase_timing_comparison`` block.  It ranks the warm setup,
+force-evaluation, residual-metric, accepted-control ``fsq1``, preconditioner,
+update, and finalize buckets and reports cold-to-warm improvement for each
+bucket.  This is the preferred quick triage view for structural control-loop
+staging and preconditioner/residual-scalar dispatch work because it is stable
+even when the raw timing dictionary grows new sub-buckets.
+
+When both CPU and GPU rows are present, the matrix summary also writes
+``gpu_bottleneck_summary``.  This is a short, sorted list of warm phases for
+which GPU is slower than CPU, including the GPU/CPU ratio and absolute
+``gpu_minus_cpu_s``.  Use this field as the first-pass triage table before
+opening detailed XLA or Perfetto traces.
+
+The first CUDA probe after adding that split reported a warm ``setup_total_s``
+of ``40.4 ms`` on the tiny direct-coil case.  The dominant setup sub-buckets
+were boundary/profile construction (``18.6 ms``), update constants
+(``12.3 ms``), and unattributed setup (``5.9 ms``).  Cold setup was dominated
+by compilation-adjacent boundary/profile and axis-reset work, so cold-start
+analysis should be kept separate from warm accepted-point optimization timing.
+Accelerator host-forward runs now use the existing NumPy row-enforcement setup
+path for the initial state when ``VMEC_JAX_HOST_SETUP_ENFORCE=auto``.  This
+avoids tiny eager device dispatches in setup without changing traced
+differentiable solves; set the variable to ``0`` to disable the policy or ``1``
+to force it in non-traced profiling runs.  On the follow-up office CUDA probe,
+warm time improved from ``0.180 s`` to ``0.169 s`` and
+``setup_update_constants_s`` dropped from ``12.3 ms`` to ``4.7 ms``.  The
+remaining warm GPU targets are boundary/profile setup, residual scalar
+materialization, accepted-control ``fsq1``, and preconditioner dispatch.
+
+The next pushed patch extends the host flux-profile fast path to concrete
+default-``APHI`` iota profiles, so the non-traced setup path no longer falls
+back to small eager JAX profile work for common ``AI`` inputs.  A local CPU
+quick benchmark at that head reported the tiny direct-coil ``--jit-forces``
+warm solve at about ``0.026 s`` with ``setup_boundary_profiles_s≈1.5 ms``.
+The matched ``office`` CPU/CUDA matrix still showed the GPU row as
+CPU-favorable (``0.0521 s`` CPU versus ``0.2318 s`` CUDA), with force assembly
+near parity (``9.11 ms`` CPU versus ``9.68 ms`` CUDA).  This confirms the next
+larger performance patch should cache or stage the non-traced setup/control
+payload rather than continuing to optimize the direct coil field kernel.
+
+The follow-up host-profile setup policy adds
+``VMEC_JAX_HOST_PROFILE_SETUP=auto`` (``0`` disables, ``1`` forces) so
+non-traced accelerator setup can also use the host profile path.  On the same
+office quick matrix the tiny ``--jit-forces`` direct-coil row improved to
+``0.0552 s`` warm on CPU and ``0.1625 s`` warm on CUDA (``2.95x`` GPU/CPU).
+The GPU setup/profile bucket dropped to ``5.6 ms`` and force assembly stayed
+slightly faster than CPU (``8.28 ms`` CUDA versus ``9.98 ms`` CPU).  The
+remaining named GPU buckets are residual scalar materialization
+(``18.6 ms``), accepted-control ``fsq1`` (``12.8 ms``), and preconditioner
+dispatch (``10.8 ms``).
+
+The next promoted accelerator-forward policy stages the preconditioned
+``fsq1`` norm reductions on the host for non-traced accelerator solves:
+``VMEC_JAX_HOST_FSQ1_NORMS=auto`` (``0`` disables, ``1`` forces).  The policy
+is disabled for traced/AD solves, so exact-gradient paths keep the JAX-native
+reduction.  A matched ``office`` rerun with
+``VMEC_JAX_HOST_RESIDUAL_METRICS=auto`` also enabled reported the tiny
+``--jit-forces`` row at ``0.0516 s`` warm on CPU and ``0.1637 s`` warm on CUDA
+(``3.17x`` GPU/CPU).  The accepted-control ``fsq1`` bucket dropped from about
+``12.9 ms`` to ``1.85 ms`` on CUDA, with the ``fsq1`` preconditioned-norm
+sub-bucket dropping to ``1.81 ms``.  The remaining named CUDA buckets are now
+residual scalar synchronization (``20.0 ms``), setup/profile work
+(``22.6 ms``), and preconditioner dispatch/application (``10.6 ms`` /
+``9.4 ms``).  This moves the next real performance target away from the
+accepted-control ``fsq1`` path and toward residual metric staging plus
+preconditioner dispatch fusion.
+
+The production-like timing-light row, which disables detailed timing
+synchronization, moved in the same direction: the tiny ``--jit-forces`` direct
+coil row measured ``0.0528 s`` warm on CPU and ``0.1857 s`` warm on CUDA
+(``3.52x`` GPU/CPU).  This confirms the policy is not merely improving a
+diagnostic bucket, but the tiny case is still launch/synchronization dominated.
+Do not claim GPU speedup for this row; use it as the regression target for the
+next residual/preconditioner dispatch fusion pass.
+
+A 2026-05-28 fresh-clone ``office`` rerun with the normalized
+``phase_timing_comparison`` confirmed the same target after the latest merge:
+CPU warm time was ``0.0424 s`` and CUDA warm time was ``0.1466 s`` for the tiny
+direct-coil ``--jit-forces`` row.  The CPU named phases were setup
+(``14.5 ms``), force evaluation (``4.90 ms``), residual metrics
+(``0.64 ms``), and preconditioner (``0.55 ms``).  The CUDA named phases were
+residual metrics (``23.8 ms``), preconditioner (``20.5 ms``), setup
+(``20.2 ms``), and force evaluation (``10.0 ms``).  This keeps the next
+structural performance lane focused on residual scalar synchronization,
+preconditioner dispatch/application fusion, and reusable setup context; the
+direct-coil field kernel itself is not the limiting bucket for this case.
+
+A follow-up same-head ``office`` matrix on PR head ``599668a`` added the
+``--include-timing-light`` row to separate production-like wall time from
+timing synchronization.  The tiny direct-coil ``--jit-forces`` row measured
+``0.0569 s`` warm on CPU and ``0.1898 s`` warm on CUDA with detailed timing
+enabled.  The timing-light row measured ``0.0719 s`` warm on CPU and
+``0.1462 s`` warm on CUDA.  The detailed CUDA buckets again showed force
+evaluation near CPU parity (``10.7 ms`` versus ``10.4 ms``) while residual
+metrics (``20.1 ms``), preconditioner dispatch/application (``15.7 ms``), and
+setup (``29.1 ms``) dominate.  The performance lane is therefore still
+structural control-loop staging and preconditioner/residual-scalar fusion, not
+Biot-Savart evaluation.
+
+Two opt-in policies were checked and are deliberately not promoted.  Allowing
+the host-update path on accelerators with ``VMEC_JAX_HOST_UPDATE_ON_ACCELERATOR=1``
+made the tiny CUDA row slower in this matrix, and setting
+``VMEC_JAX_BADJAC_INITIAL_STATE_PROBE_ITERS=0`` did not produce a robust
+speedup after the accepted-control payload fusion.  ``--include-timing-light``
+rows also showed that production-like wall time remains GPU-slower, so the
+remaining work is structural: stage or fuse the VMEC-control residual scalar
+materialization, accepted-control ``fsq1``, and preconditioner dispatch.
+
+The 2026-05-31 post-merge timing split added correctness-critical finalize
+sub-buckets to the same benchmark matrix. A local CPU quick run with
+``--include-badjac-probe0 --include-timing-light`` reported a warm direct-coil
+``solve_total_s=0.1184`` and ``finalize_s=0.00876``; finalize split into
+``finalize_nestor_recompute_s=0.00651``,
+``finalize_residual_recompute_s=0.00218``, and
+``update_state_ready_s=4.25e-6``. A fresh ``office`` CPU/CUDA clone at
+``bc00ff4`` completed all 22 ``--include-gpu --include-policy-ablation`` rows.
+The default CUDA direct solve remained GPU-slower (``9.42x`` CPU), dominated by
+non-JIT force evaluation (``0.602 s``), preconditioner work (``0.369 s``),
+setup/axis reset (``0.334 s``), and final residual recompute (``0.296 s``).
+With JIT forces enabled, force evaluation became faster than CPU (``0.82x``),
+but the warm row was still ``2.48x`` CPU because preconditioner refresh/apply
+(``0.0438 s``, ``2.55x`` CPU) and residual/control/finalization dispatch
+remained exposed.
+
+The policy-ablation rerun after the direct-coil replay-helper commits reached
+the same conclusion. All CPU/GPU rows completed, but disabling host residual
+metrics, host ``fsq1`` norms, host profile setup, or all three together did not
+produce a single promoted GPU fix. The tiny non-JIT-force direct solve remained
+about ``10.48x`` CPU, and JIT-force policy-ablation rows remained
+``2.65x``--``3.08x`` CPU. Treat the current benchmark evidence as a regression
+target for controller/preconditioner/finalization staging, not as a GPU speedup
+claim for the direct-coil free-boundary row.
+
+The 2026-06-01 PR-head rerun at ``8a0ce5c2`` confirmed the bounded
+preconditioner reuse patch removes the duplicate refresh after a
+``bcovar``-seeded preconditioner build.  A fresh ``office`` clone completed all
+22 CPU/GPU quick rows and the timed direct rows reported
+``precond_refresh_seed_reuse_count=1``.  On CPU, the JIT-force direct solve
+reported ``warm_min=0.0677 s`` and ``solve_total=0.0567 s``.  On CUDA, the
+same row reported ``warm_min=0.183 s`` and ``solve_total=0.116 s``:
+JIT-force evaluation was faster than CPU (``0.88x``), finalization was
+essentially parity (``0.98x``), and the remaining warm GPU penalties were the
+seeded preconditioner refresh (``2.01x``), preconditioner apply (``18.8x``),
+accepted-control scalar work (``4.09x``), and residual-metric synchronization
+(``43.8x``).  The best policy-ablation row was
+``direct_solve_jit_forces_host_policies_off`` at ``2.43x`` CPU.  The next
+performance target is therefore not Biot-Savart or force assembly; it is
+structural staging/fusion of the preconditioner apply and residual/control
+scalar synchronization.
 
 Historical bundled example runtime/memory matrix (March 2026)
 -------------------------------------------------------------

@@ -53,6 +53,8 @@ _REPLAY_STEP_TRACE_KEYS = (
     "vLcc_before",
     "vLss_before",
     "max_update_rms_pre",
+    "freeb_bsqvac_half",
+    "freeb_pres_scale",
 )
 
 _REPLAY_STEP_TRACE_STATIC_KEYS = (
@@ -125,6 +127,7 @@ _DIRECT_TAPE_TIMING_KEYS = (
     "tape_dynamic_payload_build_s",
     "tape_trace_stack_s",
 )
+_TRACE_OVERRIDE_UNSET = object()
 
 
 def _scan_cache_limit() -> int:
@@ -965,6 +968,8 @@ def checkpoint_tape_state_vjp(
                 limit_update_rms=trace["limit_update_rms"],
                 need_update_rms=False,
                 divide_by_scalxc_for_update=trace["divide_by_scalxc_for_update"],
+                freeb_bsqvac_half=trace.get("freeb_bsqvac_half", None),
+                freeb_pres_scale=trace.get("freeb_pres_scale", None),
             )
             return pack_state(out["step"]["state_post"])
 
@@ -1035,6 +1040,8 @@ def checkpoint_tape_state_jvp(
                 limit_update_rms=trace["limit_update_rms"],
                 need_update_rms=False,
                 divide_by_scalxc_for_update=trace["divide_by_scalxc_for_update"],
+                freeb_bsqvac_half=trace.get("freeb_bsqvac_half", None),
+                freeb_pres_scale=trace.get("freeb_pres_scale", None),
             )
             return pack_state(out["step"]["state_post"])
 
@@ -1083,6 +1090,8 @@ def _packed_replay_step_from_trace(
             if preconditioner_use_lax_tridi is None
             else preconditioner_use_lax_tridi
         ),
+        freeb_bsqvac_half=trace.get("freeb_bsqvac_half", None),
+        freeb_pres_scale=trace.get("freeb_pres_scale", None),
         lambda_update_scale=trace["lambda_update_scale"],
         dt_eff=trace["dt_eff"],
         b1=trace["b1"],
@@ -1137,7 +1146,28 @@ def _static_flags_from_replay_step_traces(step_traces: tuple[dict[str, Any], ...
 def _stack_replay_step_traces(step_traces: tuple[dict[str, Any], ...]):
     from ._compat import jax
 
-    filtered = tuple({key: trace[key] for key in _REPLAY_STEP_TRACE_KEYS} for trace in step_traces)
+    optional_keys = ("freeb_bsqvac_half", "freeb_pres_scale")
+    optional_present: dict[str, list[bool]] = {
+        key: [trace.get(key, None) is not None for trace in step_traces]
+        for key in optional_keys
+    }
+    active_optional_keys = set()
+    for key, present in optional_present.items():
+        if all(present):
+            active_optional_keys.add(key)
+        elif any(present):
+            raise ValueError(
+                f"Replay requires optional trace key {key} to be present "
+                "on every active trace or none."
+            )
+    filtered = tuple(
+        {
+            key: trace[key]
+            for key in _REPLAY_STEP_TRACE_KEYS
+            if key not in optional_keys or key in active_optional_keys
+        }
+        for trace in step_traces
+    )
     use_device_stack = _backend_is_accelerator(jax.default_backend())
     jax_array_type = getattr(jax, "Array", ())
 
@@ -1218,6 +1248,14 @@ def _build_dynamic_replay_payload(
         "zero_m1",
         *_DYNAMIC_REPLAY_SCALAR_TRACE_KEYS,
     ]
+    for freeb_key in ("freeb_bsqvac_half", "freeb_pres_scale"):
+        freeb_present = [trace.get(freeb_key, None) is not None for trace in step_traces]
+        if all(freeb_present):
+            varying_keys.append(freeb_key)
+        elif any(freeb_present):
+            raise ValueError(
+                f"Dynamic replay requires {freeb_key} to be present on every active trace or none."
+            )
     for key in constant_candidates:
         first = step_traces[0][key]
         if all(_replay_values_equal(trace[key], first) for trace in step_traces[1:]):
@@ -1288,6 +1326,10 @@ def _dynamic_replay_supported(
         return False
     if tape.step_trace_static_flags is not None and tape.step_trace_static_flags.get("precond_jmax") is None:
         return False
+    for freeb_key in ("freeb_bsqvac_half", "freeb_pres_scale"):
+        freeb_present = [trace.get(freeb_key, None) is not None for trace in tape.step_traces]
+        if any(freeb_present) and not all(freeb_present):
+            return False
     return all(_dynamic_replay_trace_supported(trace) for trace in tape.step_traces)
 
 
@@ -1481,6 +1523,8 @@ def _packed_dynamic_replay_step_from_carry(
         include_edge_residual=static_flags["include_edge_residual"],
         apply_m1_constraints=static_flags["apply_m1_constraints"],
         zero_m1=trace["zero_m1"],
+        freeb_bsqvac_half=trace.get("freeb_bsqvac_half", None) if isinstance(trace, dict) else None,
+        freeb_pres_scale=trace.get("freeb_pres_scale", None) if isinstance(trace, dict) else static_flags.get("freeb_pres_scale", None),
     )
     tridi_policy = (
         _trace_preconditioner_use_precomputed_tridi(trace, static_flags)
@@ -1577,12 +1621,12 @@ def _packed_dynamic_replay_step_from_carry(
         vZss_before=vZss_before,
         vLcc_before=vLcc_before,
         vLss_before=vLss_before,
-        frsc_u=force_out["frsc_u"],
-        frcs_u=force_out["frcs_u"],
-        fzcc_u=force_out["fzcc_u"],
-        fzss_u=force_out["fzss_u"],
-        flcc_u=force_out["flcc_u"],
-        flss_u=force_out["flss_u"],
+        frsc_u=force_out.get("frsc_u"),
+        frcs_u=force_out.get("frcs_u"),
+        fzcc_u=force_out.get("fzcc_u"),
+        fzss_u=force_out.get("fzss_u"),
+        flcc_u=force_out.get("flcc_u"),
+        flss_u=force_out.get("flss_u"),
         max_update_rms=max_update_rms_pre,
         limit_update_rms=static_flags["limit_update_rms"],
         need_update_rms=False,
@@ -2347,37 +2391,37 @@ def strict_update_velocity_limit(
     """Apply the strict-update velocity RMS limiter for one solver step."""
     dt_eff = jnp.asarray(dt_eff, dtype=jnp.asarray(vRcc).dtype)
     max_update_rms = jnp.asarray(max_update_rms, dtype=jnp.asarray(vRcc).dtype)
-    limit_update_rms = bool(limit_update_rms)
-    need_update_rms = bool(need_update_rms)
+    limit_update_rms = jnp.asarray(limit_update_rms, dtype=bool)
+    need_update_rms = jnp.asarray(need_update_rms, dtype=bool)
     base = jnp.asarray(vRcc)
-    if limit_update_rms or need_update_rms:
-        zeros = jnp.zeros_like(base)
-        pieces = [
-            base,
-            jnp.asarray(vRss),
-            jnp.asarray(vRsc) if vRsc is not None else zeros,
-            jnp.asarray(vRcs) if vRcs is not None else zeros,
-            jnp.asarray(vZsc),
-            jnp.asarray(vZcs),
-            jnp.asarray(vZcc) if vZcc is not None else zeros,
-            jnp.asarray(vZss) if vZss is not None else zeros,
-            jnp.asarray(vLsc),
-            jnp.asarray(vLcs),
-            jnp.asarray(vLcc) if vLcc is not None else zeros,
-            jnp.asarray(vLss) if vLss is not None else zeros,
-        ]
-        sq = sum((dt_eff * p) ** 2 for p in pieces)
-        update_rms = jnp.sqrt(jnp.mean(sq))
-    else:
-        update_rms = jnp.asarray(0.0, dtype=base.dtype)
-    if limit_update_rms:
-        scale = jnp.where(
-            jnp.isfinite(update_rms) & (update_rms > max_update_rms),
-            max_update_rms / jnp.maximum(update_rms, jnp.asarray(1.0e-30, dtype=update_rms.dtype)),
-            jnp.asarray(1.0, dtype=update_rms.dtype),
-        )
-    else:
-        scale = jnp.asarray(1.0, dtype=update_rms.dtype)
+    zeros = jnp.zeros_like(base)
+    pieces = [
+        base,
+        jnp.asarray(vRss),
+        jnp.asarray(vRsc) if vRsc is not None else zeros,
+        jnp.asarray(vRcs) if vRcs is not None else zeros,
+        jnp.asarray(vZsc),
+        jnp.asarray(vZcs),
+        jnp.asarray(vZcc) if vZcc is not None else zeros,
+        jnp.asarray(vZss) if vZss is not None else zeros,
+        jnp.asarray(vLsc),
+        jnp.asarray(vLcs),
+        jnp.asarray(vLcc) if vLcc is not None else zeros,
+        jnp.asarray(vLss) if vLss is not None else zeros,
+    ]
+    sq = sum((dt_eff * p) ** 2 for p in pieces)
+    raw_update_rms = jnp.sqrt(jnp.mean(sq))
+    report_update_rms = jnp.where(
+        jnp.logical_or(limit_update_rms, need_update_rms),
+        raw_update_rms,
+        jnp.asarray(0.0, dtype=raw_update_rms.dtype),
+    )
+    clipped_scale = jnp.where(
+        jnp.isfinite(raw_update_rms) & (raw_update_rms > max_update_rms),
+        max_update_rms / jnp.maximum(raw_update_rms, jnp.asarray(1.0e-30, dtype=raw_update_rms.dtype)),
+        jnp.asarray(1.0, dtype=raw_update_rms.dtype),
+    )
+    scale = jnp.where(limit_update_rms, clipped_scale, jnp.asarray(1.0, dtype=raw_update_rms.dtype))
 
     def _scale(x):
         return None if x is None else scale * jnp.asarray(x)
@@ -2395,9 +2439,9 @@ def strict_update_velocity_limit(
         "vZss": _scale(vZss),
         "vLcc": _scale(vLcc),
         "vLss": _scale(vLss),
-        "update_rms_preclip": update_rms,
+        "update_rms_preclip": report_update_rms,
         "update_rms_scale": scale,
-        "update_rms_postclip": scale * update_rms,
+        "update_rms_postclip": scale * report_update_rms,
     }
     return out
 
@@ -2688,6 +2732,7 @@ def strict_update_one_step_from_state(
     state_pre,
     static,
     *,
+    force_state_pre=None,
     wout_like,
     trig,
     apply_lforbal: bool,
@@ -2710,6 +2755,12 @@ def strict_update_one_step_from_state(
     vZcs_before,
     vLsc_before,
     vLcs_before,
+    vRsc_before=None,
+    vRcs_before=None,
+    vZcc_before=None,
+    vZss_before=None,
+    vLcc_before=None,
+    vLss_before=None,
     max_update_rms=5.0e-3,
     limit_update_rms: bool = True,
     need_update_rms: bool = True,
@@ -2717,10 +2768,21 @@ def strict_update_one_step_from_state(
     preconditioner_jmax_override: int | None = None,
     preconditioner_use_precomputed_tridi: bool | None = None,
     preconditioner_use_lax_tridi: bool | None = None,
+    freeb_bsqvac_half=None,
+    freeb_pres_scale=None,
+    constraint_tcon0=None,
+    constraint_tcon=None,
+    constraint_precond_diag=None,
+    constraint_precond_active=None,
+    constraint_tcon_active=None,
+    constraint_rcon0=None,
+    constraint_zcon0=None,
+    enforce_edge: bool = True,
 ):
     """Compose the exact QH one-step map from state through accepted update."""
+    residual_state = state_pre if force_state_pre is None else force_state_pre
     residual_out = raw_force_residual_from_state(
-        state_pre,
+        residual_state,
         static,
         wout_like=wout_like,
         trig=trig,
@@ -2728,6 +2790,15 @@ def strict_update_one_step_from_state(
         include_edge_residual=include_edge_residual,
         apply_m1_constraints=apply_m1_constraints,
         zero_m1=zero_m1,
+        freeb_bsqvac_half=freeb_bsqvac_half,
+        freeb_pres_scale=freeb_pres_scale,
+        constraint_tcon0=constraint_tcon0,
+        constraint_tcon=constraint_tcon,
+        constraint_precond_diag=constraint_precond_diag,
+        constraint_precond_active=constraint_precond_active,
+        constraint_tcon_active=constraint_tcon_active,
+        constraint_rcon0=constraint_rcon0,
+        constraint_zcon0=constraint_zcon0,
     )
     preconditioner_out = None
     if mats is None or jmax is None or lam_prec is None or w_mode_mn is None:
@@ -2769,16 +2840,29 @@ def strict_update_one_step_from_state(
         vZcs_before=vZcs_before,
         vLsc_before=vLsc_before,
         vLcs_before=vLcs_before,
+        vRsc_before=vRsc_before,
+        vRcs_before=vRcs_before,
+        vZcc_before=vZcc_before,
+        vZss_before=vZss_before,
+        vLcc_before=vLcc_before,
+        vLss_before=vLss_before,
         frcc_u=force_out["frcc_u"],
         frss_u=force_out["frss_u"],
         fzsc_u=force_out["fzsc_u"],
         fzcs_u=force_out["fzcs_u"],
         flsc_u=force_out["flsc_u"],
         flcs_u=force_out["flcs_u"],
+        frsc_u=force_out.get("frsc_u"),
+        frcs_u=force_out.get("frcs_u"),
+        fzcc_u=force_out.get("fzcc_u"),
+        fzss_u=force_out.get("fzss_u"),
+        flcc_u=force_out.get("flcc_u"),
+        flss_u=force_out.get("flss_u"),
         max_update_rms=max_update_rms,
         limit_update_rms=limit_update_rms,
         need_update_rms=need_update_rms,
         divide_by_scalxc_for_update=divide_by_scalxc_for_update,
+        enforce_edge=enforce_edge,
     )
     return {
         "residual": residual_out,
@@ -2786,6 +2870,101 @@ def strict_update_one_step_from_state(
         "force": force_out,
         "step": step_out,
     }
+
+
+def strict_update_one_step_from_trace(
+    state_pre,
+    static,
+    trace: dict[str, Any],
+    *,
+    scalar_controls: dict[str, Any] | None = None,
+    array_controls: dict[str, Any] | None = None,
+    preconditioner_controls: dict[str, Any] | None = None,
+    freeb_bsqvac_half: Any = _TRACE_OVERRIDE_UNSET,
+    freeb_pres_scale: Any = _TRACE_OVERRIDE_UNSET,
+    enforce_edge: bool = True,
+) -> dict[str, Any]:
+    """Replay one strict residual step using fields captured in a trace dict.
+
+    This source helper is intentionally thin: it maps the diagnostic trace
+    schema produced by ``adjoint_trace=True`` onto
+    :func:`strict_update_one_step_from_state` and allows callers to replace the
+    free-boundary ``bsqvac`` channel with a differentiable replay.  Optional
+    ``scalar_controls``, ``array_controls``, and ``preconditioner_controls``
+    let JAX-visible controller scans pass step-sliced update controls without
+    changing the default trace-dictionary contract.  It keeps phase-2
+    direct-coil validation tests from duplicating trace plumbing while
+    preserving the explicit accepted-step contract.
+    """
+
+    def _control(key: str) -> Any:
+        if scalar_controls is not None and key in scalar_controls:
+            return scalar_controls[key]
+        if array_controls is not None and key in array_controls:
+            return array_controls[key]
+        return trace[key]
+
+    def _optional_control(key: str) -> Any:
+        if array_controls is not None and key in array_controls:
+            return array_controls[key]
+        return trace.get(key)
+
+    def _preconditioner_control(key: str) -> Any:
+        if preconditioner_controls is not None and key in preconditioner_controls:
+            return preconditioner_controls[key]
+        return trace[key]
+
+    bsqvac = trace.get("freeb_bsqvac_half", None) if freeb_bsqvac_half is _TRACE_OVERRIDE_UNSET else freeb_bsqvac_half
+    pres_scale = trace.get("freeb_pres_scale", None) if freeb_pres_scale is _TRACE_OVERRIDE_UNSET else freeb_pres_scale
+    force_state_pre = trace.get("force_state_pre", None)
+    return strict_update_one_step_from_state(
+        state_pre,
+        static,
+        force_state_pre=force_state_pre,
+        wout_like=trace["wout_like"],
+        trig=trace["trig"],
+        apply_lforbal=trace["apply_lforbal"],
+        include_edge_residual=trace["include_edge_residual"],
+        apply_m1_constraints=trace["apply_m1_constraints"],
+        zero_m1=trace["zero_m1"],
+        mats=_preconditioner_control("precond_mats"),
+        jmax=trace["precond_jmax"],
+        lam_prec=_preconditioner_control("lam_prec"),
+        w_mode_mn=_preconditioner_control("w_mode_mn"),
+        lambda_update_scale=_control("lambda_update_scale"),
+        dt_eff=_control("dt_eff"),
+        b1=_control("b1"),
+        fac=_control("fac"),
+        force_scale=_control("force_scale"),
+        flip_sign=_control("flip_sign"),
+        vRcc_before=_control("vRcc_before"),
+        vRss_before=_control("vRss_before"),
+        vZsc_before=_control("vZsc_before"),
+        vZcs_before=_control("vZcs_before"),
+        vLsc_before=_control("vLsc_before"),
+        vLcs_before=_control("vLcs_before"),
+        vRsc_before=_optional_control("vRsc_before"),
+        vRcs_before=_optional_control("vRcs_before"),
+        vZcc_before=_optional_control("vZcc_before"),
+        vZss_before=_optional_control("vZss_before"),
+        vLcc_before=_optional_control("vLcc_before"),
+        vLss_before=_optional_control("vLss_before"),
+        max_update_rms=_control("max_update_rms_pre"),
+        limit_update_rms=_control("limit_update_rms"),
+        divide_by_scalxc_for_update=_control("divide_by_scalxc_for_update"),
+        preconditioner_use_precomputed_tridi=_control("preconditioner_use_precomputed_tridi"),
+        preconditioner_use_lax_tridi=_control("preconditioner_use_lax_tridi"),
+        freeb_bsqvac_half=bsqvac,
+        freeb_pres_scale=pres_scale,
+        constraint_rcon0=trace.get("constraint_rcon0"),
+        constraint_zcon0=trace.get("constraint_zcon0"),
+        constraint_tcon0=trace.get("constraint_tcon0"),
+        constraint_precond_diag=trace.get("constraint_precond_diag"),
+        constraint_tcon=trace.get("constraint_tcon"),
+        constraint_precond_active=trace.get("constraint_precond_active"),
+        constraint_tcon_active=trace.get("constraint_tcon_active"),
+        enforce_edge=bool(enforce_edge),
+    )
 
 
 def strict_update_accepted_step(
@@ -2825,8 +3004,13 @@ def strict_update_accepted_step(
     limit_update_rms: bool = True,
     need_update_rms: bool = True,
     divide_by_scalxc_for_update: bool = False,
+    enforce_edge: bool = True,
 ):
-    """Compose the accepted strict-update velocity and state-advance blocks."""
+    """Compose the accepted strict-update velocity and state-advance blocks.
+
+    ``enforce_edge`` preserves the historical fixed-boundary default.  Free
+    boundary callers pass ``False`` so the fused update does not pin the LCFS.
+    """
     velocity_raw = strict_update_velocity_block(
         b1=b1,
         fac=fac,
@@ -2896,6 +3080,7 @@ def strict_update_accepted_step(
         edge_Zcos=jnp.asarray(state_pre.Zcos)[-1, :],
         edge_Zsin=jnp.asarray(state_pre.Zsin)[-1, :],
         divide_by_scalxc_for_update=divide_by_scalxc_for_update,
+        enforce_edge=enforce_edge,
     )
     return {
         "state_post": state_post,
@@ -2939,6 +3124,7 @@ def strict_update_velocity_state_advance(
     vLcc=None,
     vLss=None,
     divide_by_scalxc_for_update: bool = False,
+    enforce_edge: bool = True,
 ):
     """Apply the strict-update state-advance block from VMEC residual iteration.
 
@@ -2954,8 +3140,7 @@ def strict_update_velocity_state_advance(
     dt_eff = jnp.asarray(dt_eff, dtype=jnp.asarray(state.Rcos).dtype)
     scalxc = vmec_scalxc_from_s(s=jnp.asarray(static.s), mpol=int(static.cfg.mpol)).astype(jnp.asarray(state.Rcos).dtype)
     scalxc = scalxc[:, :, None]
-    if not bool(divide_by_scalxc_for_update):
-        scalxc = jnp.ones_like(scalxc)
+    scalxc = jnp.where(jnp.asarray(divide_by_scalxc_for_update, dtype=bool), scalxc, jnp.ones_like(scalxc))
     maps = static.signed_maps if getattr(static, "signed_maps", None) is not None else signed_maps_from_modes(static.modes)
     ncoeff = int(static.modes.K)
     idx00 = _mode00_index(static.modes)
@@ -2998,7 +3183,7 @@ def strict_update_velocity_state_advance(
         edge_Rsin=edge_Rsin,
         edge_Zcos=edge_Zcos,
         edge_Zsin=edge_Zsin,
-        enforce_edge=True,
+        enforce_edge=enforce_edge,
         enforce_lambda_axis=True,
         idx00=idx00,
     )
@@ -3019,6 +3204,7 @@ __all__ = [
     "replay_scan_cache_diagnostics",
     "replay_residual_checkpoint_step",
     "strict_update_accepted_step",
+    "strict_update_one_step_from_trace",
     "strict_update_one_step_from_state",
     "strict_update_velocity_limit",
     "strict_update_velocity_block",

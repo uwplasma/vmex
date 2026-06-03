@@ -1,0 +1,5 @@
+label,path,actual_beta_percent,aspect,mean_iota,fsq_total,lcfs_rms_displacement_vs_first,lcfs_max_displacement_vs_first,lcfs_b_rel_rms_delta_vs_first,axis_R_shift_vs_first,axis_Z_shift_vs_first,ns,mpol,ntor,nfp
+nominal 0% actual 0.00%,/private/tmp/lpqa_direct_pressure_ns101_refine/wout_direct_beta_0.000.nc,0,6.0106554,0.41976618,1.7457012e-12,0,0,0,0,0,101,5,5,2
+nominal 0.5% actual 0.72%,/private/tmp/lpqa_direct_pressure_ns101_refine/wout_direct_beta_0.500.nc,0.7240534,6.0631075,0.41162372,6.2207204e-12,0.015487233,0.022887925,0.010448496,0.025739892,0,101,5,5,2
+nominal 1% actual 1.51%,/private/tmp/lpqa_direct_pressure_ns101_refine/wout_direct_beta_1.000.nc,1.5077221,6.1276746,0.38558551,5.5158577e-12,0.034163388,0.048123421,0.02277679,0.059549383,0,101,5,5,2
+nominal 1.25% actual 1.93%,/private/tmp/lpqa_direct_pressure_ns101_refine/wout_direct_beta_1.250.nc,1.9321213,6.1680948,0.35858559,2.9693252e-12,0.045287659,0.065217618,0.029971052,0.082583471,0,101,5,5,2

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -12,6 +13,7 @@ from vmec_jax.init_guess import initial_guess_from_boundary
 from vmec_jax.solve import (
     _enforce_field_rows,
     _enforce_fixed_boundary_and_axis,
+    _preconditioner_apply_payload_fused,
     _preconditioner_output_payload_jit,
     _preconditioner_output_scaling_jit,
     _replace_mode_slice,
@@ -257,6 +259,68 @@ def test_preconditioner_output_payload_jit_matches_scaling_and_fsq1_reference():
     np.testing.assert_allclose(np.asarray(diag[5]), gcl2_full * delta_s)
 
 
+def test_preconditioner_apply_payload_fused_can_return_ptau_control_payload():
+    pytest.importorskip("jax")
+
+    shape = (3, 2, 1)
+    base = np.arange(np.prod(shape), dtype=float).reshape(shape) / 10.0 + 1.0
+    frzl = TomnspsRZL(
+        frcc=base,
+        frss=None,
+        fzsc=base + 0.25,
+        fzcs=None,
+        flsc=base + 0.5,
+        flcs=None,
+        frsc=None,
+        frcs=None,
+        fzcc=None,
+        fzss=None,
+        flcc=None,
+        flss=None,
+    )
+    mats = {
+        "ar": np.zeros(shape),
+        "br": np.zeros(shape),
+        "dr": np.ones(shape),
+        "az": np.zeros(shape),
+        "bz": np.zeros(shape),
+        "dz": np.ones(shape),
+    }
+    pbase = np.arange(np.prod(shape), dtype=float).reshape(shape) / 7.0 + 0.3
+    ptau_arrays = tuple(pbase + offset for offset in (0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7))
+    pshalf = np.asarray([0.0, 0.5, 1.0])
+    ohs = np.asarray(2.0)
+
+    pre, upd, diag, control = _preconditioner_apply_payload_fused(
+        frzl_in=frzl,
+        mats=mats,
+        jmax=shape[0],
+        cfg=SimpleNamespace(lthreed=False, lasym=False),
+        lam_prec=np.ones(shape),
+        w_mode_mn=np.ones(shape[1:]),
+        lambda_update_scale_j=np.asarray(1.0),
+        f_norm1=np.asarray(1.5),
+        delta_s=np.asarray(0.25),
+        s=np.linspace(0.0, 1.0, shape[0]),
+        use_precomputed=False,
+        use_lax_tridi=False,
+        apply_lambda_update_scale=False,
+        vmec2000_control=True,
+        lconm1=True,
+        include_control_ptau=True,
+        control_ptau_arrays=ptau_arrays,
+        control_ptau_pshalf=pshalf,
+        control_ptau_ohs=ohs,
+    )
+
+    expected_ptau = solve_module._ptau_compute_jit(*ptau_arrays, pshalf, ohs)
+    np.testing.assert_allclose(np.asarray(control[0]), np.asarray(diag[6]))
+    np.testing.assert_allclose(np.asarray(control[1]), np.asarray(expected_ptau[0]))
+    np.testing.assert_allclose(np.asarray(control[2]), np.asarray(expected_ptau[1]))
+    assert pre[0].shape == shape
+    assert upd[0].shape == shape
+
+
 def test_preconditioner_output_scaling_gate_is_gpu_only_without_gpu(monkeypatch):
     pytest.importorskip("jax")
 
@@ -303,14 +367,14 @@ def test_preconditioner_output_scaling_gate_is_gpu_only_without_gpu(monkeypatch)
     cpu_res = solve_module.solve_fixed_boundary_residual_iter(state0, static, **solve_kwargs)
 
     calls = []
-    original_scaler = _preconditioner_output_scaling_jit
+    original_apply = _preconditioner_apply_payload_fused
 
-    def count_fused(*, apply_lambda_update_scale):
-        calls.append(bool(apply_lambda_update_scale))
-        return original_scaler(apply_lambda_update_scale=apply_lambda_update_scale)
+    def count_fused_apply(*args, **kwargs):
+        calls.append(bool(kwargs["apply_lambda_update_scale"]))
+        return original_apply(*args, **kwargs)
 
     monkeypatch.setattr(solve_module.jax, "default_backend", lambda: "gpu")
-    monkeypatch.setattr(solve_module, "_preconditioner_output_scaling_jit", count_fused)
+    monkeypatch.setattr(solve_module, "_preconditioner_apply_payload_fused", count_fused_apply)
     gpu_res = solve_module.solve_fixed_boundary_residual_iter(state0, static, **solve_kwargs)
 
     assert calls == [True]

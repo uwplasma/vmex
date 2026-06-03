@@ -54,6 +54,7 @@ from vmec_jax.solve import (
     _resolve_grad_tol,
     _resolve_lbfgs_curvature_tol,
     _resolve_lm_damping,
+    _resolve_preconditioner_tridi_policies,
     _s_half_from_full_mesh_s,
     _scale_mode_slice,
     _scale_mode_slice_np,
@@ -198,6 +199,24 @@ def test_vmec2000_scan_options_env_overrides_preconditioner_and_restart_flags():
     assert opts.abort_scan_on_badjac
     assert opts.chunked_print
     assert not opts.print_in_scan
+
+
+def test_preconditioner_tridi_policy_explicit_lax_override_wins(monkeypatch):
+    monkeypatch.setenv("VMEC_JAX_TRIDI_PRECOMPUTE", "1")
+    monkeypatch.setenv("VMEC_JAX_TRIDI_SOLVE", "force")
+
+    assert _resolve_preconditioner_tridi_policies(
+        use_precomputed=None,
+        use_lax_tridi=None,
+    ) == (True, True)
+    assert _resolve_preconditioner_tridi_policies(
+        use_precomputed=False,
+        use_lax_tridi=False,
+    ) == (False, False)
+    assert _resolve_preconditioner_tridi_policies(
+        use_precomputed=True,
+        use_lax_tridi=False,
+    ) == (True, False)
 
 
 def test_vmec2000_scan_options_restart_payload_explicit_env_wins():

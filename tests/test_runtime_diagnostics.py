@@ -108,6 +108,83 @@ def test_runtime_compare_exports_vmec2000_vmec_jax_and_vmecpp_rows(tmp_path):
     assert record["vmecpp_speedup_vs_vmec2000"] == 8.0
 
 
+def test_direct_coil_segmented_replay_report_synthetic_policy_helpers():
+    mod = _load_tool("direct_coil_segmented_replay_report")
+    traces = [
+        {
+            "preconditioner_use_lax_tridi": True,
+            "preconditioner_use_precomputed_tridi": False,
+            "value": np.asarray([1.0, 2.0]),
+        },
+        {
+            "preconditioner_use_lax_tridi": True,
+            "preconditioner_use_precomputed_tridi": False,
+            "value": np.asarray([3.0, 4.0]),
+        },
+        {
+            "preconditioner_use_lax_tridi": True,
+            "preconditioner_use_precomputed_tridi": False,
+            "value": np.asarray([5.0, 6.0]),
+        },
+    ]
+
+    changed = mod._with_synthetic_policy_segments(traces)
+
+    assert changed[0]["preconditioner_use_lax_tridi"] is True
+    assert changed[1]["preconditioner_use_lax_tridi"] is False
+    assert changed[2]["preconditioner_use_lax_tridi"] is True
+    assert traces[1]["preconditioner_use_lax_tridi"] is True
+    assert mod._json_ready({"x": np.asarray([1.0]), "bad": float("nan")}) == {"x": [1.0], "bad": None}
+
+
+def test_freeb_replay_diagnostic_utils_json_ready_and_timed_call():
+    mod = _load_tool("freeb_replay_diagnostic_utils")
+
+    payload = mod.json_ready(
+        {
+            "array": np.asarray([1.0, 2.0]),
+            "scalar": np.float64(3.0),
+            "nan": float("nan"),
+            "nested": (np.asarray([4.0]),),
+        }
+    )
+
+    assert payload == {"array": [1.0, 2.0], "scalar": 3.0, "nan": None, "nested": [[4.0]]}
+    value, first, warm = mod.timed_call(lambda x: x + 1, 2, warm_repeats=1)
+    assert value == 3
+    assert first >= 0.0
+    assert len(warm) == 1
+    assert warm[0] >= 0.0
+
+
+def test_direct_coil_strict_update_replay_report_helpers():
+    mod = _load_tool("direct_coil_strict_update_replay_report")
+    tree = {"a": np.asarray([[1.0, 2.0], [3.0, 4.0]]), "b": [np.asarray([5.0, 6.0])]}
+
+    first = mod._first_slice(tree)
+
+    np.testing.assert_allclose(np.asarray(first["a"]), np.asarray([1.0, 2.0]))
+    assert np.asarray(first["b"][0]).shape == ()
+    assert mod._json_ready({"x": np.asarray([1.0]), "bad": float("inf")}) == {"x": [1.0], "bad": None}
+
+
+def test_direct_coil_boundary_replay_report_selects_active_trace():
+    mod = _load_tool("direct_coil_boundary_replay_report")
+    traces = [
+        {"freeb_bsqvac_half": None, "freeb_nestor_trace": None},
+        {"freeb_bsqvac_half": np.asarray([1.0]), "freeb_nestor_trace": {"br_axis": 0.0}},
+        {"freeb_bsqvac_half": np.asarray([2.0]), "freeb_nestor_trace": {"br_axis": 1.0}},
+    ]
+
+    index, trace = mod._select_active_trace(traces, -1)
+
+    assert index == 2
+    assert trace["freeb_nestor_trace"]["br_axis"] == 1.0
+    index, trace = mod._select_active_trace(traces, 0)
+    assert index == 2
+    assert mod._json_ready({"x": np.asarray([1.0]), "bad": float("-inf")}) == {"x": [1.0], "bad": None}
+
+
 def test_vmecpp_runtime_two_cases_runtime_updates():
     mod = _load_tool("readme_vmecpp_runtime_two_cases")
 
