@@ -142,6 +142,14 @@ Results obtained:
    passed with exact trace-static/dynamic-control parity. First-call timing
    was `0.446 s` trace-static and `0.536 s` dynamic controls; warm calls were
    about `0.1 ms`.
+7. Added `tools/diagnostics/direct_coil_boundary_replay_report.py` to isolate
+   direct-coil/NESTOR boundary replay. On the same tiny active trace,
+   `JAX_ENABLE_X64=1 python tools/diagnostics/direct_coil_boundary_replay_report.py
+   --out /tmp/vmec_jax_freeb_boundary_replay_n4.json --workdir
+   /tmp/vmec_jax_freeb_boundary_replay_n4_work --warm-repeats 2 --niter 4`
+   passed with fixed-geometry/full-geometry objective delta `8.7e-11`.
+   Fixed-geometry boundary replay compiled in `2.132 s`; geometry plus
+   boundary replay compiled in `5.852 s`; warm calls were below `0.3 ms`.
 
 Best next steps:
 
@@ -154,9 +162,13 @@ Best next steps:
    preconditioner controls are now a validated diagnostic hook, but not a
    promoted default.
 4. The strict-update diagnostic shows the standalone force/preconditioner/update
-   map is not the whole `~21 s` cold replay cost. Next performance work should
-   isolate boundary-geometry, direct-coil/NESTOR replay, and full-controller
-   composition costs.
+   map is not the whole `~21 s` cold replay cost.
+5. Boundary replay isolation shows geometry plus direct-coil/NESTOR replay is
+   several seconds cold and sub-millisecond warm. The remaining gap to full
+   controller replay is likely repeated composition of several boundary replay
+   branches inside `lax.switch`/accepted-controller scans. Next performance work
+   should cache or stage those boundary replay branches by shape/policy, then
+   remeasure the full controller.
 
 Need from user:
 

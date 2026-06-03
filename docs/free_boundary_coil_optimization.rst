@@ -372,6 +372,22 @@ The first JIT call was about ``0.446 s`` for trace-static controls and
 This shows the standalone strict update is not the full ``~21 s`` cold replay
 cost; the next performance rung should isolate boundary-geometry,
 direct-coil/NESTOR replay, and full-controller composition costs.
+A second isolation diagnostic times exactly that boundary-vacuum part:
+
+.. code-block:: bash
+
+   JAX_ENABLE_X64=1 python tools/diagnostics/direct_coil_boundary_replay_report.py \
+     --out /tmp/vmec_jax_freeb_boundary_replay_n4.json \
+     --workdir /tmp/vmec_jax_freeb_boundary_replay_n4_work \
+     --niter 4
+
+On the same tiny active trace, fixed-geometry direct-coil/NESTOR replay took
+about ``2.13 s`` for the first JIT call, while accepted-boundary geometry
+synthesis plus direct-coil/NESTOR replay took about ``5.85 s``.  Both variants
+matched to ``~9e-11`` in objective value, and warm calls were below
+``0.3 ms``.  The remaining cold full-controller replay overhead is therefore
+controller composition across steps and repeated boundary replay compilation,
+not the standalone strict update.
 The remaining phase-2 blocker is differentiating through the nonlinear
 ``run_free_boundary`` iteration loop itself, rather than through the dense toy
 nonlinear primitive, fixed-boundary operator, complete finite-response proxy,

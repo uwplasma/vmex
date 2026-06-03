@@ -148,6 +148,23 @@ def test_direct_coil_strict_update_replay_report_helpers():
     assert mod._json_ready({"x": np.asarray([1.0]), "bad": float("inf")}) == {"x": [1.0], "bad": None}
 
 
+def test_direct_coil_boundary_replay_report_selects_active_trace():
+    mod = _load_tool("direct_coil_boundary_replay_report")
+    traces = [
+        {"freeb_bsqvac_half": None, "freeb_nestor_trace": None},
+        {"freeb_bsqvac_half": np.asarray([1.0]), "freeb_nestor_trace": {"br_axis": 0.0}},
+        {"freeb_bsqvac_half": np.asarray([2.0]), "freeb_nestor_trace": {"br_axis": 1.0}},
+    ]
+
+    index, trace = mod._select_active_trace(traces, -1)
+
+    assert index == 2
+    assert trace["freeb_nestor_trace"]["br_axis"] == 1.0
+    index, trace = mod._select_active_trace(traces, 0)
+    assert index == 2
+    assert mod._json_ready({"x": np.asarray([1.0]), "bad": float("-inf")}) == {"x": [1.0], "bad": None}
+
+
 def test_vmecpp_runtime_two_cases_runtime_updates():
     mod = _load_tool("readme_vmecpp_runtime_two_cases")
 
