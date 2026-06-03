@@ -64,6 +64,9 @@ the exact policy matrix and selected best-case provenance.
    * - QI
      - ``examples/optimization/QI_optimization.py``
      - Minimal NFP=2 deck by default with Boozer-space QI, mirror, elongation, QI ceiling, ESS, and lower-mode continuation.  Optional target-helicity/reference-family proposals are deterministic basin searches, not hidden initial conditions.
+   * - QI seed 3127
+     - ``examples/optimization/QI_optimization_seed.py``
+     - Compact reproducibility preset for the reviewed NFP=3 seed-3127 row.  It delegates to ``QI_optimization.py`` after writing the boundary-reference preconditioner controls.
 
 When using sweep commands, keep backend selection and report labeling separate.
 ``--backend-label`` only names output directories and table rows; it does not
@@ -212,6 +215,7 @@ reference path in ``QI_optimization.py`` before running the standalone script:
    PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py --quick --prefine-probes plan --prefine-manifest results/qi_seed_audit/prefine_manifest.json --prefine-output-dir results/qi_seed_audit/prefine_probes
    PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_seed_robustness.py
    PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_optimization.py
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_optimization_seed.py
 
 The second audit command uses the far-seed QI gate convention from
 ``QI_optimization.py``: legacy QI below ``2e-3`` and smooth differentiable QI
@@ -1307,6 +1311,17 @@ generated ``input.simple_seed`` is written under ``OUTPUT_DIR``.  This matters
 for reviewed seeds such as ``input.QI_stel_seed_3127``: keep
 ``USE_SIMPLE_SEED = False`` when you want to audit and optimize the actual
 scientific seed rather than a three-coefficient toy boundary.
+
+The compact ``QI_optimization_seed.py`` preset is the reproducible NFP=3
+seed-3127 path used for the docs/README row. It leaves the raw
+``input.QI_stel_seed_3127`` as the initial artifact, scans the same-NFP
+``input.nfp3_QI_fixed_resolution_final`` reference family with
+``REFERENCE_LAMBDAS = (0.998, 1.0, 1.002, 1.004, 1.006, 1.008, 1.01)``, keeps
+the preconditioner scan cheap with ``BOUNDARY_REFERENCE_MAX_ITER = 80``, then
+replays the selected accepted baseline with ``INNER_MAX_ITER = 450`` so final
+QI/mirror/iota diagnostics are not taken from an underconverged candidate.
+Use it directly when you want to reproduce the reviewed seed-3127 row without
+editing the larger QI driver.
 
 For far seeds, use the visible seed helpers before the local optimizer:
 

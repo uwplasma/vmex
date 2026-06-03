@@ -285,7 +285,7 @@ PROBLEM_CONFIGS = {
         input_file=DATA_DIR / "input.nfp2_QA_omnigenity",
         method="scipy",  # Try also "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint", or "scalar_trust".
         scipy_tr_solver="lsmr",  # For method="scipy": "lsmr" is memory-light; "exact" is dense.
-        scipy_lsmr_maxiter=None,  # None lets SciPy choose; set an int to cap LSMR work per step.
+        scipy_lsmr_maxiter=None,  # For scipy_matrix_free, None uses vmec_jax's bounded cap of 4.
         max_nfev=70,  # Outer least-squares budget for the final stage.
         continuation_nfev=70,  # Per-stage budget when mode continuation is enabled.
         ftol=1e-4,  # Relative cost-reduction tolerance for the outer optimizer.
@@ -311,7 +311,7 @@ PROBLEM_CONFIGS = {
         input_file=DATA_DIR / "input.nfp4_QH_warm_start",
         method="scipy",  # Try also "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint", or "scalar_trust".
         scipy_tr_solver="lsmr",  # For method="scipy": "lsmr" is memory-light; "exact" is dense.
-        scipy_lsmr_maxiter=None,  # None lets SciPy choose; set an int to cap LSMR work per step.
+        scipy_lsmr_maxiter=None,  # For scipy_matrix_free, None uses vmec_jax's bounded cap of 4.
         max_nfev=70,  # Outer least-squares budget for the final stage.
         continuation_nfev=70,  # Per-stage budget when mode continuation is enabled.
         ftol=1e-4,  # Relative cost-reduction tolerance for the outer optimizer.
@@ -338,7 +338,7 @@ PROBLEM_CONFIGS = {
         input_file=DATA_DIR / "input.nfp2_QI",
         method="scipy",  # Try also "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint", or "scalar_trust".
         scipy_tr_solver="lsmr",  # For method="scipy": "lsmr" is memory-light; "exact" is dense.
-        scipy_lsmr_maxiter=None,  # None lets SciPy choose; set an int to cap LSMR work per step.
+        scipy_lsmr_maxiter=None,  # For scipy_matrix_free, None uses vmec_jax's bounded cap of 4.
         max_nfev=70,  # Outer least-squares budget for the final stage.
         continuation_nfev=70,  # Per-stage budget when mode continuation is enabled.
         ftol=1e-4,  # Relative cost-reduction tolerance for the outer optimizer.
@@ -366,7 +366,7 @@ PROBLEM_CONFIGS = {
         input_file=DATA_DIR / "input.minimal_seed_nfp2",
         method="scipy_matrix_free",  # Try also "scipy", "gauss_newton", "lbfgs_adjoint", or "scalar_trust".
         scipy_tr_solver="lsmr",  # For method="scipy": "lsmr" is memory-light; "exact" is dense.
-        scipy_lsmr_maxiter=None,  # None lets SciPy choose; set an int to cap LSMR work per step.
+        scipy_lsmr_maxiter=None,  # For scipy_matrix_free, None uses vmec_jax's bounded cap of 4.
         max_nfev=70,  # Outer least-squares budget for the final stage.
         continuation_nfev=70,  # Per-stage budget when mode continuation is enabled.
         ftol=1e-4,  # Relative cost-reduction tolerance for the outer optimizer.

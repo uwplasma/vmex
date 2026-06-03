@@ -52,7 +52,7 @@ BOUNDARY_REFERENCE_ACCEPT_AS_BASELINE = False  # True keeps the reference candid
 # Optimizer parameters.
 METHOD = "scipy_matrix_free"  # Try "auto", "auto_scalar", "scipy", "gauss_newton", "lbfgs_adjoint", or "scalar_trust".
 SCIPY_TR_SOLVER = "lsmr"  # For METHOD="scipy": "lsmr" is memory-light; "exact" is dense.
-SCIPY_LSMR_MAXITER = 4  # Matrix-free cap; None lets SciPy choose more Jv/J.Tv products.
+SCIPY_LSMR_MAXITER = 4  # Matrix-free Jv/J.Tv cap; None uses vmec_jax's bounded cap of 4.
 SCALAR_COST_ONLY_TRIALS = None  # For METHOD="scalar_trust": True filters trials with forward solves.
 FTOL = 1.0e-5  # Relative cost-reduction tolerance for the outer optimizer.
 GTOL = 1.0e-5  # Gradient optimality tolerance for the outer optimizer.

@@ -94,8 +94,8 @@ def test_matrix_report_surfaces_cold_exact_callback_buckets(capsys):
     assert "replay_ready_s" in output
     assert "callbacks" in output
     assert "replays" in output
-    assert "Trial scan timing:" in output
-    assert "trial_scan_s" in output
+    assert "Scan timing:" in output
+    assert "scan_s" in output
     assert "run_setup_s" in output
     assert "Scan cache details:" in output
     assert "trial_hits" in output

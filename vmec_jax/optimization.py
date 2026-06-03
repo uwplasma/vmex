@@ -1703,10 +1703,10 @@ class FixedBoundaryExactOptimizer:
 
         This is deliberately scoped to accepted-point exact solves. May 2026
         office RTX A4000 profiles show it reduces dense-Jacobian tape cost for
-        small-DOF tapes, while larger parameter spaces can lose more in replay
-        payload cost than they gain in preconditioner cost. ``None`` preserves
-        the solver's legacy environment-controlled default for CPU/default
-        backends.
+        mode-2 and mode-3 stellarator-symmetric tapes (24 and 48 DOFs), while
+        larger parameter spaces can lose more in replay payload cost than they
+        gain in preconditioner cost. ``None`` preserves the solver's legacy
+        environment-controlled default for CPU/default backends.
         """
 
         forced = os.getenv("VMEC_JAX_OPT_EXACT_TRIDI_PRECOMPUTE", "").strip().lower()
@@ -1725,9 +1725,9 @@ class FixedBoundaryExactOptimizer:
         if backend not in ("gpu", "cuda", "tpu", "rocm"):
             return None
         try:
-            max_dofs = int(os.getenv("VMEC_JAX_OPT_EXACT_TRIDI_PRECOMPUTE_MAX_DOFS", "12"))
+            max_dofs = int(os.getenv("VMEC_JAX_OPT_EXACT_TRIDI_PRECOMPUTE_MAX_DOFS", "48"))
         except ValueError:
-            max_dofs = 12
+            max_dofs = 48
         if max_dofs < 0:
             return False
         return True if len(self._specs) <= max_dofs else None
@@ -1735,12 +1735,11 @@ class FixedBoundaryExactOptimizer:
     def _use_scan_for_trial_solves(self) -> bool:
         """Return whether trial residual solves should use the scan loop.
 
-        Exact-optimizer trial residuals are short, trace-compatible VMEC solves
-        called repeatedly by SciPy's trust-region line search.  They do not need
-        an adjoint tape.  May 2026 callback profiles showed CPU scan can be
-        slower and less well behaved for QH mode-2 trial residuals, while the
-        current ``office`` GPU path is faster on scan for the same residual
-        norm.  Environment overrides always win.
+        Exact-optimizer trial residuals are short VMEC solves called repeatedly
+        by SciPy's trust-region line search.  They do not need an adjoint tape.
+        CPU and current ``office`` GPU/CUDA profiles showed the non-scan loop is
+        materially faster for high-mode QS trial points because scan pays a
+        large cold compile/dispatch cost.  Environment overrides always win.
         """
         forced = os.getenv("VMEC_JAX_OPT_TRIAL_SCAN", "").strip().lower()
         if forced in ("1", "true", "yes", "on", "scan"):
@@ -1755,7 +1754,7 @@ class FixedBoundaryExactOptimizer:
                 backend = str(_jax.default_backend()).strip().lower() if _jax is not None else "cpu"
             except Exception:
                 backend = "cpu"
-        return backend in ("gpu", "cuda", "tpu", "rocm")
+        return backend in ("tpu",)
 
     def _exact_tape_backend_name(self) -> str:
         """Return the backend name used for exact-tape optimization policy."""
@@ -2677,8 +2676,9 @@ class FixedBoundaryExactOptimizer:
             self._profile_add("exact_tape_build_jvp_only", tape_build_wall_s)
         self._profile_exact_tape_solver_timing(tape, tape_build_wall_s)
         t_unpack = time.perf_counter()
-        state = unpack_state(_jnp.asarray(tape.final_packed_state, dtype=_jnp.float64), self._layout)
-        payload = {"tape": tape, "axis_override": axis_override}
+        packed_final = _jnp.asarray(tape.final_packed_state, dtype=_jnp.float64)
+        state = unpack_state(packed_final, self._layout)
+        payload = {"tape": tape, "axis_override": axis_override, "packed_final": packed_final}
         self._exact_cache.clear()
         if not jvp_only:
             self._exact_cache[cache_key] = (state, payload)
@@ -2688,6 +2688,22 @@ class FixedBoundaryExactOptimizer:
         if jvp_only:
             self._profile_add("exact_solve_with_tape_jvp_only_total", time.perf_counter() - t_total)
         return (state, payload) if return_payload else state
+
+    def _packed_final_from_exact_payload(self, state, payload):
+        """Return the accepted packed state already carried by an exact tape payload."""
+
+        from ._compat import jnp as _jnp
+        from .state import pack_state
+
+        packed = None
+        if isinstance(payload, dict):
+            packed = payload.get("packed_final")
+            if packed is None:
+                tape = payload.get("tape")
+                packed = getattr(tape, "final_packed_state", None)
+        if packed is None:
+            packed = pack_state(state)
+        return _jnp.asarray(packed, dtype=_jnp.float64)
 
     # ── public residual / Jacobian interface ──────────────────────────────────
 
@@ -2931,14 +2947,21 @@ class FixedBoundaryExactOptimizer:
             except Exception:
                 backend_name = None
         if backend_name in ("gpu", "cuda", "rocm"):
-            # GPU exact replay is launch/transpose dominated.  Office A4000
-            # profiles on JAX 0.6.2 showed 8-column replay chunks reduce both
-            # QH mode-2 24-DOF and QH mode-3 48-DOF cold/new-point callback
-            # wall time materially. Explicit environment overrides remain
-            # authoritative.
-            if int(n_params) >= 24:
+            if int(n_params) < 24:
+                return None
+            if bool(getattr(self._static.cfg, "lasym", False)):
+                # LASYM doubles the boundary columns and remains more memory
+                # sensitive on GPU; keep the older conservative replay chunks.
                 return 8
-            return None
+            # Non-LASYM GPU projected replay is launch/transpose dominated.
+            # Fresh office RTX A4000/JAX 0.6.2 profiles in June 2026 showed
+            # larger chunks reduce cold and warm callback time for QH mode-2
+            # through mode-4 without increasing host materialization cost.
+            if int(n_params) <= 64:
+                return int(n_params)
+            if int(n_params) <= 128:
+                return max(24, int(n_params) // 2)
+            return 64
         if backend_name == "tpu":
             return None
         if not bool(getattr(self._static.cfg, "lasym", False)):
@@ -3034,6 +3057,23 @@ class FixedBoundaryExactOptimizer:
         # is slower than the regular projected replay path. Keep fusion opt-in
         # for diagnostics until a broader matrix shows a reproducible win.
         return False
+
+    def _chunked_projected_replay_projection_enabled(self, column_chunk: int | None, n_params: int) -> bool:
+        """Whether to project residual tangents immediately after each replay chunk."""
+
+        if column_chunk is None:
+            return False
+        if int(n_params) <= int(column_chunk):
+            return False
+        flag = os.getenv("VMEC_JAX_OPT_CHUNKED_PROJECTED_REPLAY_PROJECTION", "").strip().lower()
+        if flag:
+            return flag in ("1", "true", "yes", "on")
+        backend = _optimizer_backend_name(getattr(self, "_solver_device_name", None))
+        if backend not in ("gpu", "cuda", "rocm"):
+            return False
+        if bool(getattr(getattr(self._static, "cfg", None), "lasym", False)):
+            return False
+        return True
 
     def _discrete_jacobian_residual_helper(self, params_size: int, residuals_from_packed, *, jax):
         """Return cached residual/Jacobian projection helper for packed tangents."""
@@ -3174,10 +3214,10 @@ class FixedBoundaryExactOptimizer:
 
         from ._compat import jax, jnp as _jnp
         from .discrete_adjoint import checkpoint_tape_state_jvp_columns
-        from .state import pack_state, unpack_state
+        from .state import unpack_state
 
         state, payload = self._solve_exact_with_tape_for_jvp(params)
-        packed_final = _jnp.asarray(pack_state(state), dtype=_jnp.float64)
+        packed_final = self._packed_final_from_exact_payload(state, payload)
 
         def _residuals_from_packed(packed):
             return self._residuals_fn(unpack_state(packed, self._layout))
@@ -3243,6 +3283,41 @@ class FixedBoundaryExactOptimizer:
             _residuals_from_packed,
             jax=jax,
         )
+        if self._chunked_projected_replay_projection_enabled(column_chunk, int(params.size)):
+            t_replay = time.perf_counter()
+            jac_blocks = []
+            residuals = None
+            for start in range(0, int(params.size), int(column_chunk)):
+                stop = min(start + int(column_chunk), int(params.size))
+                final_tangents_chunk = checkpoint_tape_state_jvp_columns(
+                    tape=payload["tape"],
+                    static=self._static,
+                    initial_tangents=initial_tangents[start:stop],
+                    rebuild_preconditioner=True,
+                    column_chunk=column_chunk,
+                    _allow_chunking=False,
+                )
+                residuals, jac_chunk = helper_cache["residual_tangent_jacobian"](
+                    packed_final,
+                    final_tangents_chunk,
+                )
+                jac_blocks.append(jac_chunk)
+            jac = _jnp.concatenate(jac_blocks, axis=1)
+            residuals, jac = self._profile_blocking_phase(
+                "jacobian_chunked_projected_replay_projection_total",
+                t_replay,
+                (residuals, jac),
+            )
+            self._last_jacobian_residual = np.asarray(residuals, dtype=float)
+            self._remember_exact_residual(exact_param_key, self._last_jacobian_residual)
+            t_host = time.perf_counter()
+            out = np.asarray(jac, dtype=float)
+            self._profile_add("jacobian_host_materialize", time.perf_counter() - t_host)
+            self._remember_exact_jacobian(exact_param_key, out, self._last_jacobian_residual)
+            self._last_jacobian_source = "exact_tape_chunked_projected_replay_projection"
+            self._profile_add("jacobian_total", time.perf_counter() - t_total)
+            return out
+
         t_replay = time.perf_counter()
         final_tangents = checkpoint_tape_state_jvp_columns(
             tape=payload["tape"],
@@ -3450,7 +3525,7 @@ class FixedBoundaryExactOptimizer:
         state, payload = self._solve_exact_with_tape(params, return_payload=True)
         tape = payload["tape"]
         axis_override = payload["axis_override"]
-        packed_final = _jnp.asarray(pack_state(state), dtype=_jnp.float64)
+        packed_final = self._packed_final_from_exact_payload(state, payload)
 
         def _residuals_from_packed(packed):
             return self._residuals_fn(unpack_state(packed, self._layout))
@@ -3634,7 +3709,7 @@ class FixedBoundaryExactOptimizer:
         axis_override = {
             key: _jnp.asarray(value, dtype=params.dtype) for key, value in payload["axis_override"].items()
         }
-        packed_final = _jnp.asarray(pack_state(state), dtype=_jnp.float64)
+        packed_final = self._packed_final_from_exact_payload(state, payload)
 
         def _residuals_from_packed(packed):
             return self._residuals_fn(unpack_state(packed, self._layout))
@@ -4211,7 +4286,10 @@ class FixedBoundaryExactOptimizer:
             Optional maximum number of LSMR iterations for SciPy's iterative
             trust-region linear solve.  This is primarily useful for the
             matrix-free path, where every LSMR iteration costs one or more
-            exact ``Jv``/``J.Tv`` products.
+            exact ``Jv``/``J.Tv`` products.  For ``method="scipy_matrix_free"``,
+            ``None`` uses vmec_jax's bounded default of 4 to avoid unbounded
+            inner Krylov work; pass an explicit integer to tighten or relax
+            that cap.
         lbfgs_step_bound:
             Optional half-width of the L-BFGS-B trust box in scaled parameter
             space when ``method="lbfgs_adjoint"``. The scalar-adjoint path is
@@ -4691,6 +4769,8 @@ class FixedBoundaryExactOptimizer:
                 from scipy.optimize import least_squares as _scipy_least_squares
             except Exception as exc:  # pragma: no cover - optional dependency
                 raise ImportError("method='scipy_matrix_free' requires scipy.optimize.least_squares") from exc
+            if scipy_lsmr_maxiter is None:
+                scipy_lsmr_maxiter = 4
 
             scale = np.ones_like(params0_arr) if x_scale is None else np.asarray(x_scale, dtype=float)
             scale[scale == 0.0] = 1.0

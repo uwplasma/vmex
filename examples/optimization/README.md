@@ -203,6 +203,7 @@ remain available for custom inspection.
 - `QH_optimization.py`: recommended quasi-helical fixed-boundary optimization.
 - `QP_optimization.py`: quasi-poloidal fixed-boundary optimization from the public NFP=2 minimal seed, with an explicit optimization-time QI-family preseed when enabled.
 - `QI_optimization.py`: recommended quasi-isodynamic optimization from `input.minimal_seed_nfp2` by default, with Boozer-space QI metrics, mirror-ratio and elongation penalties, repeated lower-mode continuation, and ESS. Edit `INPUT_FILE`, `OUTPUT_DIR`, seed helpers, objective weights, and optimizer controls at the top of the script, then run it directly. Use `STAGE_MODE_POLICY = "lower"` for a shorter one-pass ladder, or `"repeat"` only when the input is already in a good QI basin and same-mode cleanup is desired.
+- `QI_optimization_seed.py`: compact preset that reproduces the reviewed NFP=3 `input.QI_stel_seed_3127` README row by scanning the same-NFP QI reference family, accepting the gated boundary-reference baseline, and delegating to `QI_optimization.py` with explicit controls.
 - `qa_optimization_finite_beta.py`, `qh_optimization_finite_beta.py`, and `qi_optimization_finite_beta.py`:
   finite-beta stage-1 examples with pressure/current-profile terms. These intentionally use
   `FixedBoundaryExactOptimizer` directly because each continuation stage builds custom
@@ -337,6 +338,16 @@ single `nfp` value or edit the top-level `INPUT_FILE`, `OUTPUT_DIR`, and
 optional `REFERENCE_INPUT_FILE` values in `QI_optimization.py`.  The archived
 `readme_qi_optimization_cases.png` panel is rendered from reviewed output
 bundles under `docs/_static/qi_readme_cases`.
+For the reviewed NFP=3 seed-3127 row specifically, run:
+
+```bash
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_optimization_seed.py
+```
+
+That preset keeps the raw `input.QI_stel_seed_3127` initial condition, scans
+`input.nfp3_QI_fixed_resolution_final` with the archived lambda grid, uses a
+cheap `max_iter=80` preconditioner scan, and replays the selected accepted
+baseline with `INNER_MAX_ITER=450` before writing final diagnostics and plots.
 
 The constrained-QI sweep is the compact bundled-seed matrix, not the staged
 far-seed runner.  If its summary reports a stale QI target aspect, rerun the

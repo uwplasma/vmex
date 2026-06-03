@@ -18,6 +18,7 @@ PRIMARY_OPTIMIZATION_SCRIPTS = (
     ROOT / "examples" / "optimization" / "QP_optimization.py",
     ROOT / "examples" / "optimization" / "QI_optimization.py",
 )
+QI_SEED_OPTIMIZATION_SCRIPT = ROOT / "examples" / "optimization" / "QI_optimization_seed.py"
 FORBIDDEN_SOLVE_PHYSICS_KWARGS = {
     "target_aspect",
     "target_iota",
@@ -307,6 +308,59 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "qi_mirror_ratio_max" in text
     assert 'saved_paths["initial_wout"]' in text
     assert 'saved_paths["history"]' in text
+
+
+def test_qi_seed3127_example_exposes_reviewed_readme_preset(tmp_path: Path) -> None:
+    text = QI_SEED_OPTIMIZATION_SCRIPT.read_text()
+    spec = importlib.util.spec_from_file_location("qi_optimization_seed_for_test", QI_SEED_OPTIMIZATION_SCRIPT)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    config = module.boundary_reference_config()
+    json_path = tmp_path / "boundary_reference.json"
+    command = module.build_qi_optimization_command(json_path)
+    command_text = " ".join(command)
+
+    assert "os.environ" not in text
+    assert 'INPUT_FILE = DATA_DIR / "input.QI_stel_seed_3127"' in text
+    assert 'REFERENCE_INPUT_FILE = DATA_DIR / "input.nfp3_QI_fixed_resolution_final"' in text
+    assert module.MAX_MODE == 4
+    assert module.MIN_VMEC_MODE == 6
+    assert module.TARGET_ASPECT == pytest.approx(4.0)
+    assert module.MAX_NFEV == 1
+    assert module.SCIPY_LSMR_MAXITER == 4
+    assert module.BOUNDARY_REFERENCE_MAX_ITER == 80
+    assert module.INNER_MAX_ITER == 450
+    assert module.TRIAL_MAX_ITER == 450
+    assert module.USE_MODE_CONTINUATION is False
+    assert module.USE_ESS is True
+    assert module.MAKE_PLOTS is True
+
+    assert config["reference_input"] == "examples/data/input.nfp3_QI_fixed_resolution_final"
+    assert config["lambdas"] == [0.998, 1.0, 1.002, 1.004, 1.006, 1.008, 1.01]
+    assert config["max_iter"] == 80
+    assert config["target_aspect"] == pytest.approx(4.0)
+    assert config["smooth_qi_max"] == pytest.approx(5.0e-3)
+    assert config["legacy_qi_max"] == pytest.approx(2.0e-3)
+    assert config["prefer_non_endpoint"] is True
+    assert config["accept_as_baseline"] is True
+
+    assert "examples/optimization/QI_optimization.py" in command_text
+    assert "--input-file examples/data/input.QI_stel_seed_3127" in command_text
+    assert "--reference-input examples/data/input.nfp3_QI_fixed_resolution_final" in command_text
+    assert f"--boundary-reference-json {json_path}" in command_text
+    assert "--no-use-simple-seed" in command
+    assert "--no-use-target-helicity-seed" in command
+    assert "--use-reference-family-seed" in command
+    assert "--accept-boundary-reference-baseline" in command
+    assert "--no-use-mode-continuation" in command
+    assert "--method scipy_matrix_free" in command_text
+    assert "--scipy-lsmr-maxiter 4" in command_text
+    assert "--inner-max-iter 450" in command_text
+    assert "--trial-max-iter 450" in command_text
+    assert "--make-plots" in command
 
 
 def test_qi_case_resolver_respects_editable_default_and_env(monkeypatch) -> None:

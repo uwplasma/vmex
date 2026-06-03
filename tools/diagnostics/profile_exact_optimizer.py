@@ -51,6 +51,15 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--trial-max-iter", type=int, default=300)
     p.add_argument("--trial-ftol", type=float, default=1e-10)
     p.add_argument("--solver-device", choices=("auto", "cpu", "gpu", "default"), default="auto")
+    p.add_argument(
+        "--exact-jit-forces",
+        choices=("auto", "on", "off"),
+        default="auto",
+        help=(
+            "Override jit_forces for accepted-point exact/tape solves. "
+            "This is diagnostics-only; auto preserves optimizer defaults."
+        ),
+    )
     p.add_argument("--mpol", type=int, default=5)
     p.add_argument("--ntor", type=int, default=5)
     p.add_argument(
@@ -872,6 +881,8 @@ def _build_callback_payload(
     total_wall_s: float,
     phase_timing: dict[str, float] | None = None,
     runtime: dict[str, object] | None = None,
+    trace_outdir: str | None = None,
+    device_memory_profile_out: str | None = None,
 ) -> dict[str, Any]:
     growth = _cache_growth(cache_before, cache_after)
     budget_status = _evaluate_budgets(
@@ -903,6 +914,8 @@ def _build_callback_payload(
         "solver_device_requested": args.solver_device,
         "solver_device_resolved": solver_device_resolved,
         "runtime": _runtime_info() if runtime is None else runtime,
+        "trace_outdir": trace_outdir,
+        "device_memory_profile_out": device_memory_profile_out,
         "total_wall_time_s": float(total_wall_s),
         "rss_before_bytes": rss_before_bytes,
         "rss_after_bytes": rss_after_bytes,
@@ -922,6 +935,34 @@ def _build_callback_payload(
         phase_timing=phase_timing,
         profile=profile,
     )
+
+
+def _start_profiler_trace(jax_module: Any, trace_outdir: str | None) -> str | None:
+    """Start a JAX profiler trace and return the resolved output directory."""
+    if not trace_outdir:
+        return None
+    trace_out = Path(trace_outdir).expanduser().resolve()
+    trace_out.mkdir(parents=True, exist_ok=True)
+    jax_module.profiler.start_trace(str(trace_out))
+    return str(trace_out)
+
+
+def _stop_profiler_trace(jax_module: Any, trace_outdir: str | None) -> None:
+    if not trace_outdir:
+        return
+    jax_module.profiler.stop_trace()
+    print(f"Trace written to {trace_outdir}")
+
+
+def _save_device_memory_profile(jax_module: Any, output_path: str | None) -> str | None:
+    """Save a JAX device-memory profile and return the resolved path."""
+    if not output_path:
+        return None
+    mem_out = Path(output_path).expanduser().resolve()
+    mem_out.parent.mkdir(parents=True, exist_ok=True)
+    jax_module.profiler.save_device_memory_profile(str(mem_out))
+    print(f"Device memory profile written to {mem_out}")
+    return str(mem_out)
 
 
 def _clear_optimizer_point_caches(opt) -> None:
@@ -1139,6 +1180,10 @@ def main() -> int:
         trial_ftol=args.trial_ftol,
         solver_device=args.solver_device,
     )
+    if args.exact_jit_forces == "on":
+        opt._exact_solver_kwargs["jit_forces"] = True
+    elif args.exact_jit_forces == "off":
+        opt._exact_solver_kwargs["jit_forces"] = False
     _install_profile_timing_supplements(opt)
     if args.trial_scan == "on":
         opt._trial_solver_kwargs["use_scan"] = True
@@ -1173,75 +1218,86 @@ def main() -> int:
         cache_before = _cache_snapshot(opt)
         rss_before = _current_rss_bytes()
         total_t0 = time.perf_counter()
-        for repeat in range(repeats):
-            if repeat > 0 and args.clear_between_repeats:
-                _clear_optimizer_point_caches(opt)
-            if perturb_scale > 0.0:
-                params = params0 + perturb_scale * rng.standard_normal(params0.shape)
-            else:
-                params = params0
-            profile_before = opt._profile_dump()
-            repeat_cache_before = _cache_snapshot(opt)
-            replay_scan_before = _replay_scan_cache_snapshot(reset=True)
-            repeat_rss_before = _current_rss_bytes()
-            t0 = time.perf_counter()
-            if args.callback == "trial":
-                value = opt.forward_residual_fun(params)
-                metric = float(np.linalg.norm(value))
-                shape = list(np.asarray(value).shape)
-                extra: dict[str, Any] = {}
-            elif args.callback in ("exact", "accepted"):
-                value = opt.residual_fun(params)
-                metric = float(np.linalg.norm(value))
-                shape = list(np.asarray(value).shape)
-                extra = {}
-            elif args.callback == "jacobian":
-                value = opt.jacobian_fun(params)
-                metric = float(np.linalg.norm(value))
-                shape = list(np.asarray(value).shape)
-                extra = {}
-            elif args.callback == "gradient":
-                cost, grad = opt.objective_and_gradient_fun(params)
-                metric = float(np.linalg.norm(grad))
-                shape = [int(np.asarray(grad).size)]
-                extra = {"cost": float(cost)}
-            elif args.callback == "linear":
-                op = opt.residual_linear_operator(params)
-                direction = np.ones(len(specs), dtype=float)
-                cotangent = np.ones(op.shape[0], dtype=float)
-                jv = op.matvec(direction)
-                jtw = op.rmatvec(cotangent)
-                metric = float(np.linalg.norm(jv) + np.linalg.norm(jtw))
-                shape = [int(op.shape[0]), int(op.shape[1])]
-                extra = {}
-            else:  # pragma: no cover - guarded by argparse
-                raise ValueError(args.callback)
-            wall_time_s = time.perf_counter() - t0
-            profile_after = opt._profile_dump()
-            replay_scan_after = _replay_scan_cache_snapshot(reset=True)
-            repeat_cache_after = _cache_snapshot(opt)
-            repeat_rss_after = _current_rss_bytes()
-            repeat_growth = _cache_growth(repeat_cache_before, repeat_cache_after)
-            sample = {
-                "repeat": repeat,
-                "wall_time_s": wall_time_s,
-                "metric_norm": metric,
-                "param_step_norm": float(np.linalg.norm(params - params0)),
-                "shape": shape,
-                "profile_delta": _profile_delta(profile_before, profile_after),
-                "replay_scan_cache_diagnostics": _replay_scan_cache_delta(replay_scan_before, replay_scan_after),
-                "cache_before": repeat_cache_before,
-                "cache_after": repeat_cache_after,
-                "cache_growth": repeat_growth,
-                "rss_before_bytes": repeat_rss_before,
-                "rss_after_bytes": repeat_rss_after,
-            }
-            sample.update(extra)
-            samples.append(sample)
+        trace_outdir = _start_profiler_trace(jax, args.trace_outdir)
+        try:
+            for repeat in range(repeats):
+                if repeat > 0 and args.clear_between_repeats:
+                    _clear_optimizer_point_caches(opt)
+                if perturb_scale > 0.0:
+                    params = params0 + perturb_scale * rng.standard_normal(params0.shape)
+                else:
+                    params = params0
+                profile_before = opt._profile_dump()
+                repeat_cache_before = _cache_snapshot(opt)
+                replay_scan_before = _replay_scan_cache_snapshot(reset=True)
+                repeat_rss_before = _current_rss_bytes()
+                t0 = time.perf_counter()
+                if args.callback == "trial":
+                    value = opt.forward_residual_fun(params)
+                    metric = float(np.linalg.norm(value))
+                    shape = list(np.asarray(value).shape)
+                    extra: dict[str, Any] = {}
+                elif args.callback in ("exact", "accepted"):
+                    value = opt.residual_fun(params)
+                    metric = float(np.linalg.norm(value))
+                    shape = list(np.asarray(value).shape)
+                    extra = {}
+                elif args.callback == "jacobian":
+                    value = opt.jacobian_fun(params)
+                    metric = float(np.linalg.norm(value))
+                    shape = list(np.asarray(value).shape)
+                    extra = {}
+                elif args.callback == "gradient":
+                    cost, grad = opt.objective_and_gradient_fun(params)
+                    metric = float(np.linalg.norm(grad))
+                    shape = [int(np.asarray(grad).size)]
+                    extra = {"cost": float(cost)}
+                elif args.callback == "linear":
+                    op = opt.residual_linear_operator(params)
+                    direction = np.ones(len(specs), dtype=float)
+                    cotangent = np.ones(op.shape[0], dtype=float)
+                    jv = op.matvec(direction)
+                    jtw = op.rmatvec(cotangent)
+                    metric = float(np.linalg.norm(jv) + np.linalg.norm(jtw))
+                    shape = [int(op.shape[0]), int(op.shape[1])]
+                    extra = {}
+                else:  # pragma: no cover - guarded by argparse
+                    raise ValueError(args.callback)
+                wall_time_s = time.perf_counter() - t0
+                profile_after = opt._profile_dump()
+                replay_scan_after = _replay_scan_cache_snapshot(reset=True)
+                repeat_cache_after = _cache_snapshot(opt)
+                repeat_rss_after = _current_rss_bytes()
+                repeat_growth = _cache_growth(repeat_cache_before, repeat_cache_after)
+                sample = {
+                    "repeat": repeat,
+                    "wall_time_s": wall_time_s,
+                    "metric_norm": metric,
+                    "param_step_norm": float(np.linalg.norm(params - params0)),
+                    "shape": shape,
+                    "profile_delta": _profile_delta(profile_before, profile_after),
+                    "replay_scan_cache_diagnostics": _replay_scan_cache_delta(
+                        replay_scan_before,
+                        replay_scan_after,
+                    ),
+                    "cache_before": repeat_cache_before,
+                    "cache_after": repeat_cache_after,
+                    "cache_growth": repeat_growth,
+                    "rss_before_bytes": repeat_rss_before,
+                    "rss_after_bytes": repeat_rss_after,
+                }
+                sample.update(extra)
+                samples.append(sample)
+        finally:
+            _stop_profiler_trace(jax, trace_outdir)
         profile = opt._profile_dump()
         total_wall_s = time.perf_counter() - total_t0
         cache_after = _cache_snapshot(opt)
         rss_after = _current_rss_bytes()
+        device_memory_profile_out = _save_device_memory_profile(
+            jax,
+            args.device_memory_profile_out,
+        )
         callback_payload = _build_callback_payload(
             args=args,
             specs_count=len(specs),
@@ -1255,6 +1311,8 @@ def main() -> int:
             total_wall_s=total_wall_s,
             phase_timing=phase_timing,
             runtime=runtime_info,
+            trace_outdir=trace_outdir,
+            device_memory_profile_out=device_memory_profile_out,
         )
         effective_callback = callback_payload["callback"]
         print(f"\nCallback={effective_callback} repeats={repeats}")

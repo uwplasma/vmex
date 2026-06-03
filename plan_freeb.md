@@ -585,6 +585,48 @@ Need from user:
 
 Nothing now.
 
+### 2026-06-03 Main-branch merge validation
+
+Steps taken:
+
+1. Fetched `origin/main` at `4d47850d` and merged it into the
+   free-boundary branch.
+2. Resolved the only content conflict in `README.md` by preserving the
+   branch's artifact-rule wording while adding main's
+   `QI_optimization_seed.py` reproduction note and historical-panel
+   references.
+3. Kept the broad optimization/performance/test updates from main, including
+   the new `examples/optimization/QI_optimization_seed.py` file.
+
+Results obtained:
+
+1. Repository-wide merge checks passed:
+   `git diff --check`, `python -m ruff check .`, and
+   `python -m compileall -q vmec_jax examples/optimization tools/diagnostics
+   tests`.
+2. Full docs passed with warnings as errors after the merge:
+   `python -m sphinx -W --keep-going -b html docs
+   /tmp/vmec_jax_freeb_docs_check_main_merge`.
+3. Focused segment test passed:
+   `JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_trace_fingerprint_detects_control_branch_changes
+   -rx`: `1 passed in 0.31 s`.
+4. Production-backed two-step controller replay passed after the merge:
+   `JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_two_step_replay_resamples_boundary_from_replayed_state
+   -rx -s`: `1 passed in 162.13 s`.
+
+Best next steps:
+
+1. Commit and push the merge.
+2. Inspect the new PR-head CI run.
+3. Continue phase 2 by turning reported preconditioner-policy segments into a
+   coarser static-subcontroller prototype.
+
+Need from user:
+
+Nothing now.
+
 ### 2026-06-03 Accepted replay segment diagnostics
 
 Steps taken:

@@ -207,13 +207,28 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
     older environment-variable control path.
     """
 
-    parser = argparse.ArgumentParser(add_help=False)
+    parser = argparse.ArgumentParser(add_help=True)
     parser.add_argument("--input-file", type=Path)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--max-mode", type=int)
     parser.add_argument("--min-vmec-mode", type=int)
     parser.add_argument("--max-nfev", type=int)
     parser.add_argument("--continuation-nfev", type=int)
+    parser.add_argument(
+        "--method",
+        choices=(
+            "auto",
+            "auto_scalar",
+            "gauss_newton",
+            "scipy",
+            "scipy_matrix_free",
+            "lbfgs_adjoint",
+            "scalar_trust",
+        ),
+    )
+    parser.add_argument("--ftol", type=float)
+    parser.add_argument("--gtol", type=float)
+    parser.add_argument("--xtol", type=float)
     parser.add_argument("--inner-max-iter", type=int)
     parser.add_argument("--inner-ftol", type=float)
     parser.add_argument("--trial-max-iter", type=int)
@@ -275,6 +290,10 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
     )
     set_if("MAX_NFEV", None if args.max_nfev is None else int(args.max_nfev))
     set_if("CONTINUATION_NFEV", None if args.continuation_nfev is None else int(args.continuation_nfev))
+    set_if("METHOD", args.method)
+    set_if("FTOL", None if args.ftol is None else float(args.ftol))
+    set_if("GTOL", None if args.gtol is None else float(args.gtol))
+    set_if("XTOL", None if args.xtol is None else float(args.xtol))
     set_if("INNER_MAX_ITER", None if args.inner_max_iter is None else int(args.inner_max_iter))
     set_if("INNER_FTOL", None if args.inner_ftol is None else float(args.inner_ftol))
     set_if("TRIAL_MAX_ITER", None if args.trial_max_iter is None else int(args.trial_max_iter))

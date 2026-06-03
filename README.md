@@ -188,8 +188,12 @@ PYTHONPATH=. JAX_PLATFORMS=cuda python3 examples/optimization/generate_minimal_s
 PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py --publication-matrix
 ```
 Run individual editable examples with `python examples/optimization/QA_optimization.py`,
-`QH_optimization.py`, `QP_optimization.py`, or `QI_optimization.py`; full
-provenance and artifact rules are in the optimization docs.
+`QH_optimization.py`, `QP_optimization.py`, `QI_optimization.py`, or
+`QI_optimization_seed.py` for seed-3127 QI. Full provenance and artifact rules
+are in `docs/optimization.rst` and `docs/optimization_sweep_results.rst`.
+Historical panels remain documented as
+`readme_best_optimization_qa.png`, `readme_best_optimization_qh.png`,
+`readme_best_optimization_qp.png`, and `readme_best_optimization_qi.png`.
 
 ## Performance, Validation, Release
 

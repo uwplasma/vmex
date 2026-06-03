@@ -846,6 +846,35 @@ def test_fixed_boundary_report_summary_extracts_solver_phase_timing() -> None:
     assert summary["bottleneck_hint"]["metric"] == "vmec_compute_forces_s"
 
 
+def test_fixed_boundary_report_summary_extracts_accelerated_scan_timing() -> None:
+    payload = {
+        "input": "examples/data/input.nfp4_QH_warm_start",
+        "wall_time_sec": 3.5,
+        "jax_default_backend": "gpu",
+        "args": {"solver_device": "gpu", "use_scan": True},
+        "diagnostics": {
+            "timing": {
+                "iterations": 120,
+                "scan_total_s": 3.0,
+                "scan_device_run_s": 2.0,
+                "scan_device_dispatch_s": 1.8,
+                "scan_device_ready_s": 0.2,
+                "scan_host_materialize_s": 0.1,
+            }
+        },
+    }
+
+    summary = compare_tool.summarize_payload(payload, label="gpu")
+    metrics = summary["metrics"]
+
+    assert metrics["vmec_solve_s"] == 3.0
+    assert metrics["vmec_scan_total_s"] == 3.0
+    assert metrics["vmec_scan_device_run_s"] == 2.0
+    assert metrics["vmec_scan_device_dispatch_s"] == 1.8
+    assert metrics["vmec_scan_device_ready_s"] == 0.2
+    assert metrics["vmec_scan_host_materialize_s"] == 0.1
+
+
 def test_summary_bottleneck_hint_uses_qi_phase_when_largest() -> None:
     payload = {
         "report_kind": "qi_boozer_profile",

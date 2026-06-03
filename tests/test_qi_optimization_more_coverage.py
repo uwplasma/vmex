@@ -95,6 +95,14 @@ def test_qi_example_cli_overrides_update_namespace_and_stage_modes(tmp_path: Pat
             "60",
             "--continuation-nfev",
             "11",
+            "--method",
+            "scipy_matrix_free",
+            "--ftol",
+            "1e-5",
+            "--gtol",
+            "2e-5",
+            "--xtol",
+            "3e-6",
             "--inner-max-iter",
             "550",
             "--inner-ftol",
@@ -168,6 +176,10 @@ def test_qi_example_cli_overrides_update_namespace_and_stage_modes(tmp_path: Pat
     assert namespace["MIN_VMEC_MODE"] == 9
     assert namespace["MAX_NFEV"] == 60
     assert namespace["CONTINUATION_NFEV"] == 11
+    assert namespace["METHOD"] == "scipy_matrix_free"
+    assert namespace["FTOL"] == pytest.approx(1.0e-5)
+    assert namespace["GTOL"] == pytest.approx(2.0e-5)
+    assert namespace["XTOL"] == pytest.approx(3.0e-6)
     assert namespace["INNER_MAX_ITER"] == 550
     assert namespace["INNER_FTOL"] == pytest.approx(1.0e-10)
     assert namespace["TRIAL_MAX_ITER"] == 450

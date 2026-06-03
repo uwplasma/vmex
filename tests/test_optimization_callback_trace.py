@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 import os
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -266,6 +267,8 @@ def test_exact_optimizer_profile_parser_accepts_cache_budget_args() -> None:
             "--jvp-only-exact-tape",
             "--jvp-only-basepoint-carries",
             "--initial-metrics",
+            "--exact-jit-forces",
+            "off",
         ]
     )
 
@@ -287,6 +290,7 @@ def test_exact_optimizer_profile_parser_accepts_cache_budget_args() -> None:
     assert args.jvp_only_exact_tape is True
     assert args.jvp_only_basepoint_carries is True
     assert args.initial_metrics is True
+    assert args.exact_jit_forces == "off"
 
 
 def test_exact_optimizer_profile_skips_initial_metrics_by_default() -> None:
@@ -295,6 +299,43 @@ def test_exact_optimizer_profile_skips_initial_metrics_by_default() -> None:
     assert args.initial_metrics is False
     assert args.jvp_only_exact_tape is None
     assert args.jvp_only_basepoint_carries is None
+
+
+def test_exact_optimizer_callback_profiler_helpers_record_trace_and_memory(tmp_path) -> None:
+    class FakeProfiler:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str | None]] = []
+
+        def start_trace(self, path: str) -> None:
+            self.calls.append(("start", path))
+
+        def stop_trace(self) -> None:
+            self.calls.append(("stop", None))
+
+        def save_device_memory_profile(self, path: str) -> None:
+            self.calls.append(("memory", path))
+            Path(path).write_bytes(b"fake-profile")
+
+    fake_jax = SimpleNamespace(profiler=FakeProfiler())
+    trace_dir = tmp_path / "trace"
+    memory_file = tmp_path / "memory.prof"
+
+    resolved_trace = exact_profile_tool._start_profiler_trace(fake_jax, str(trace_dir))
+    exact_profile_tool._stop_profiler_trace(fake_jax, resolved_trace)
+    resolved_memory = exact_profile_tool._save_device_memory_profile(fake_jax, str(memory_file))
+
+    assert resolved_trace == str(trace_dir.resolve())
+    assert resolved_memory == str(memory_file.resolve())
+    assert trace_dir.is_dir()
+    assert memory_file.read_bytes() == b"fake-profile"
+    assert fake_jax.profiler.calls == [
+        ("start", str(trace_dir.resolve())),
+        ("stop", None),
+        ("memory", str(memory_file.resolve())),
+    ]
+    assert exact_profile_tool._start_profiler_trace(fake_jax, None) is None
+    exact_profile_tool._stop_profiler_trace(fake_jax, None)
+    assert exact_profile_tool._save_device_memory_profile(fake_jax, None) is None
 
 
 def test_exact_optimizer_profile_gradient_alias_preserves_check_gradient() -> None:
@@ -625,11 +666,15 @@ def test_exact_optimizer_callback_report_schema_and_budget_status() -> None:
         rss_after_bytes=103 * 1024 * 1024,
         total_wall_s=1.25,
         runtime={"default_backend": "cpu"},
+        trace_outdir="/tmp/vmec_jax_trace",
+        device_memory_profile_out="/tmp/vmec_jax_memory.prof",
     )
 
     assert report["schema_version"] == 2
     assert report["report_kind"] == "exact_optimizer_callback_profile"
     assert report["callback"] == "exact"
+    assert report["trace_outdir"] == "/tmp/vmec_jax_trace"
+    assert report["device_memory_profile_out"] == "/tmp/vmec_jax_memory.prof"
     assert report["jvp_only_exact_tape_requested"] is False
     assert report["jvp_only_basepoint_carries_requested"] is False
     assert report["jvp_only_exact_tape"] is False

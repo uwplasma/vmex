@@ -331,6 +331,8 @@ def solver_device_for_backend(backend: str) -> str:
 
 def report_stem(args: argparse.Namespace, backend: str) -> str:
     if args.mode == "fixed-boundary":
+        if bool(getattr(args, "use_input_niter", False)):
+            return f"fixed_boundary_{backend}_input_niter"
         return f"fixed_boundary_{backend}_iters{int(args.iters)}"
     if args.mode == "qi-boozer":
         jit = "jit" if bool(args.jit_booz) else "nojit"
@@ -615,7 +617,11 @@ def _matrix_scan_cache_summary(summary: dict[str, Any] | None) -> dict[str, Any]
     trial_scan = _summary_section(summary, "trial_scan_summary")
     return {
         "trial": {
-            "total_s": _first_present(_metric(summary, "trial_solver_scan_total_s"), trial_scan.get("total_s")),
+            "total_s": _first_present(
+                _metric(summary, "trial_solver_scan_total_s"),
+                _metric(summary, "vmec_scan_total_s"),
+                trial_scan.get("total_s"),
+            ),
             "setup_s": _first_present(_metric(summary, "trial_solver_scan_setup_s"), trial_scan.get("setup_s")),
             "run_setup_s": _first_present(
                 _metric(summary, "trial_solver_scan_run_setup_s"),
@@ -626,19 +632,25 @@ def _matrix_scan_cache_summary(summary: dict[str, Any] | None) -> dict[str, Any]
                 trial_scan.get("preflight_s"),
             ),
             "device_run_s": _first_present(
-                _metric(summary, "trial_solver_scan_device_run_s"),
+                _first_present(
+                    _metric(summary, "trial_solver_scan_device_run_s"),
+                    _metric(summary, "vmec_scan_device_run_s"),
+                ),
                 trial_scan.get("device_run_s"),
             ),
             "device_dispatch_s": _first_present(
                 _metric(summary, "trial_solver_scan_device_dispatch_s"),
+                _metric(summary, "vmec_scan_device_dispatch_s"),
                 trial_scan.get("device_dispatch_s"),
             ),
             "device_ready_s": _first_present(
                 _metric(summary, "trial_solver_scan_device_ready_s"),
+                _metric(summary, "vmec_scan_device_ready_s"),
                 trial_scan.get("device_ready_s"),
             ),
             "host_materialize_s": _first_present(
                 _metric(summary, "trial_solver_scan_host_materialize_s"),
+                _metric(summary, "vmec_scan_host_materialize_s"),
                 trial_scan.get("host_materialize_s"),
             ),
             "postprocess_s": _first_present(
@@ -855,7 +867,10 @@ def print_report(payload: dict[str, Any]) -> None:
                 _metric(summary, "accepted_replay_ready_s"),
                 _metric(summary, "initial_tangents_s"),
                 _metric(summary, "residual_tangents_s"),
-                _metric(summary, "trial_solver_scan_device_run_s"),
+                _first_present(
+                    _metric(summary, "trial_solver_scan_device_run_s"),
+                    _metric(summary, "vmec_scan_device_run_s"),
+                ),
                 _metric(summary, "callback_count"),
                 _metric(summary, "accepted_point_replay_count"),
                 _metric(summary, "contamination_warning_count"),
@@ -935,7 +950,7 @@ def print_report(payload: dict[str, Any]) -> None:
         "replay_ready_s",
         "init_tangent_s",
         "resid_tangent_s",
-        "trial_scan_device_s",
+        "scan_device_s",
         "callbacks",
         "replays",
         "warnings",
@@ -943,10 +958,10 @@ def print_report(payload: dict[str, Any]) -> None:
     )
     _print_table(headers, rows)
     _print_optional_table(
-        "Trial scan timing:",
+        "Scan timing:",
         (
             "backend",
-            "trial_scan_s",
+            "scan_s",
             "setup_s",
             "run_setup_s",
             "preflight_s",

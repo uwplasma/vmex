@@ -1714,9 +1714,14 @@ def summarize_payload(
         cache_time = _profile_time(profile, "cache_time_s")
 
     rss_peak = _rss_peak_bytes(payload)
+    vmec_scan_total_s = _vmec_timing_metric(payload, "scan_total_s")
     metrics = {
         "total_runtime_s": _total_runtime(payload),
-        "vmec_solve_s": _wall_time_metric(payload, "vmec_solve"),
+        "vmec_solve_s": _first_present(
+            _wall_time_metric(payload, "vmec_solve"),
+            _vmec_timing_metric(payload, "solve_total_s"),
+            vmec_scan_total_s,
+        ),
         "vmec_compute_forces_s": _vmec_timing_metric(payload, "compute_forces_s"),
         "vmec_preconditioner_s": _vmec_timing_metric(payload, "preconditioner_s"),
         "vmec_precond_refresh_s": _vmec_timing_metric(payload, "precond_refresh_s"),
@@ -1724,6 +1729,11 @@ def summarize_payload(
         "vmec_precond_mode_scale_s": _vmec_timing_metric(payload, "precond_mode_scale_s"),
         "vmec_update_s": _vmec_timing_metric(payload, "update_s"),
         "vmec_update_state_s": _vmec_timing_metric(payload, "update_state_s"),
+        "vmec_scan_total_s": vmec_scan_total_s,
+        "vmec_scan_device_run_s": _vmec_timing_metric(payload, "scan_device_run_s"),
+        "vmec_scan_device_dispatch_s": _vmec_timing_metric(payload, "scan_device_dispatch_s"),
+        "vmec_scan_device_ready_s": _vmec_timing_metric(payload, "scan_device_ready_s"),
+        "vmec_scan_host_materialize_s": _vmec_timing_metric(payload, "scan_host_materialize_s"),
         "qi_first_call_s": _first_present(
             _wall_time_metric(payload, "qi_first_call"),
             _wall_time_metric(payload, "qi_first"),
