@@ -1703,3 +1703,13 @@ Defer beyond the current cycle:
   retained promotion trace, not weaken the DMerc/`D_R` derivative gate.
   Completion: CI runtime/refactor `90%`; DMerc/`D_R` derivative validation
   `98%`; VMEC parity and physics gates `95%`; docs/release hygiene `96%`.
+- 2026-06-03: Started the second-stage py3.11 runtime refactor. The
+  current-only direct-coil same-branch custom-VJP test now uses the one
+  accepted branch described by its assertion and leaves segmented-controller
+  and aspect-scalar checks to their dedicated gates. The core current-only
+  fixed-trace/controller custom-VJP vs complete-solve central-FD assertion
+  remains active. Focused validation passed; the full
+  `tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py` module
+  passed with `23 passed, 1 skipped`, and that gate measured `36.13 s` in the
+  module run. Completion: CI runtime/refactor `91%`; DMerc/`D_R` derivative
+  validation `98%`; VMEC parity and physics gates `95%`.

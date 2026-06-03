@@ -1247,7 +1247,7 @@ def test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_
     input_path = _write_tiny_direct_freeb_input(
         tmp_path / "input.direct_current_only_same_branch_custom_vjp",
         lasym=False,
-        niter=2,
+        niter=1,
         mpol=3,
         ntheta=4,
     )
@@ -1270,6 +1270,8 @@ def test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_
         base_params=base_params,
         direction=direction,
         params_for=params_for,
+        check_segmented_controller=False,
+        check_aspect_scalar=False,
     )
 
 

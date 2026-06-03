@@ -6496,6 +6496,52 @@ Completion:
 - CI runtime refactor with preserved coverage/physics gates: 90%.
 - Docs/release hygiene: 96%.
 
+### 2026-06-03 Current-only same-branch gate de-duplication
+
+Steps taken:
+
+1. Reproduced the four largest py3.11 bottleneck tests locally as a focused
+   group.
+2. Tested synthetic-grid and column-count reductions; reverted the variants
+   that were neutral or slower.
+3. Kept the measured useful change: the current-only direct-coil same-branch
+   custom-VJP gate now runs the one accepted branch claimed by the test and
+   disables duplicate segmented-controller/aspect-scalar subchecks that are
+   covered by dedicated gates.
+
+Results obtained:
+
+1. Ruff passed for the edited direct-coil test module.
+2. Focused current-only gate passed and measured about `40 s`.
+3. Full direct-coil finite-pressure sensitivity module passed:
+   `23 passed, 1 skipped`; the current-only gate measured `36.13 s` in the
+   module run.
+4. The core current-only fixed-trace/controller custom-VJP vs complete-solve
+   central-FD assertion remains active.
+
+Best next steps:
+
+1. Push this de-duplication and watch CI.
+2. Continue with the next py3.11 bottlenecks: exact B Cartesian tangent columns,
+   QH checkpoint JVP columns, and scalar-objective cotangent.
+3. Preserve the DMerc/Glasser `D_R` AD-vs-central-FD gate unchanged.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 96%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 98%.
+- VMEC parity and physics gates: 95%.
+- Single-stage coil-only optimization: 79%.
+- Robust coil perturbation optimization: 70%.
+- CPU/GPU performance: 84%.
+- CI runtime refactor with preserved coverage/physics gates: 91%.
+- Docs/release hygiene: 96%.
+
 ### 2026-05-24 Provider slice 1
 
 Steps taken:
