@@ -192,6 +192,21 @@ def test_same_branch_report_writer_uses_source_helper(tmp_path, monkeypatch):
                 "minus": 0.9,
                 "central_fd_directional": 1000.0,
             },
+            "objective_values": {
+                "objective": {
+                    "base": 1.0,
+                    "plus": 1.1,
+                    "minus": 0.9,
+                    "central_fd_directional": 1000.0,
+                },
+                "aspect": {
+                    "base": 6.0,
+                    "plus": 6.1,
+                    "minus": 5.9,
+                    "central_fd_directional": 1000.0,
+                },
+            },
+            "primary_objective": "objective",
         }
 
     import vmec_jax.free_boundary_adjoint as freeb_adj
@@ -214,6 +229,8 @@ def test_same_branch_report_writer_uses_source_helper(tmp_path, monkeypatch):
     report = json.loads(path.read_text())
     assert report["branch_compatibility"]["same_branch"] is True
     assert report["values"]["central_fd_directional"] == pytest.approx(1000.0)
+    assert set(report["objective_values"]) == {"objective", "aspect"}
+    assert report["primary_objective"] == "objective"
     assert [record["kind"] for record in report["direction_variables"]] == ["current", "fourier_dof"]
 
 

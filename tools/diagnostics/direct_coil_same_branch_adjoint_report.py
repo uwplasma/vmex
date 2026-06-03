@@ -294,11 +294,25 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     previous_env = _configure_validation_nestor_path()
     try:
         t0 = time.perf_counter()
+        def complete_objectives(payload: dict[str, Any]) -> dict[str, float]:
+            aspect = float(
+                np.asarray(
+                    equilibrium_aspect_ratio_from_state(
+                        state=payload["result"].state,
+                        static=payload["init"].static,
+                    )
+                )
+            )
+            return {
+                "state_norm": _state_norm_objective(payload["result"].state),
+                "aspect": aspect,
+            }
+
         complete_report = direct_coil_same_branch_complete_solve_fd_report(
             input_path,
             base_params,
             params_for=params_for,
-            objective_fn=lambda payload: _state_norm_objective(payload["result"].state),
+            objective_fn=complete_objectives,
             eps=float(args.eps),
             solve_kwargs=_solve_kwargs_from_args(args),
             fingerprint_rtol=float(args.fingerprint_rtol),
@@ -483,6 +497,8 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
                 "minus": float(minus_complete),
                 "central_fd_directional": float(complete_fd),
             },
+            "complete_solve_objective_values": complete_report["objective_values"],
+            "complete_solve_primary_objective": complete_report["primary_objective"],
             "complete_solve_aspect": {
                 "base": float(base_aspect),
                 "plus": float(plus_aspect),

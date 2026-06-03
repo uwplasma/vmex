@@ -28,6 +28,79 @@ docs: the branch has validated provider gradients and bounded complete-solve
 response gates, but not a production full nonlinear `run_free_boundary` exact
 adjoint claim.
 
+### 2026-06-03 Multi-scalar same-branch validation artifacts on main
+
+Steps taken:
+
+1. Confirmed `gh pr list --state open` returned no open PRs; there was nothing
+   pending to merge before continuing on `main`.
+2. Extended `direct_coil_same_branch_complete_solve_fd_report` so one
+   base/plus/minus complete-solve sweep can report either a scalar objective or
+   a mapping of scalar diagnostics. The legacy `values` block remains the
+   primary scalar for backward compatibility, and the new `objective_values`
+   block records every scalar returned by the caller.
+3. Updated the standalone same-branch diagnostic tool to record both state-norm
+   and aspect-ratio complete-solve central-FD values from the same branch
+   compatible perturbations.
+4. Updated the coil-only QS example `--write-same-branch-report` artifact to
+   include objective, residual proxy, aspect, mean iota, and B-normal RMS
+   central-FD diagnostics.
+5. Added tests for the new multi-scalar report contract in both the source
+   same-branch gate and the coil-optimization example hook.
+
+Results obtained:
+
+1. `python -m ruff check vmec_jax/free_boundary_adjoint.py
+   tools/diagnostics/direct_coil_same_branch_adjoint_report.py
+   examples/optimization/free_boundary_QS_coil_optimization.py
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py
+   tests/test_free_boundary_qs_coil_optimization_smoke.py` passed.
+2. `python -m pytest -q tests/test_free_boundary_qs_coil_optimization_smoke.py
+   -q` passed: 8 passed, 1 expected xfail.
+3. `JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_fd
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_fourier_only_same_branch_custom_vjp_matches_complete_solve_fd
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_fixed_trace_custom_vjp_matches_complete_solve_fd_on_same_branch
+   -q` passed: 4 passed.
+4. `JAX_ENABLE_X64=1 python
+   tools/diagnostics/direct_coil_same_branch_adjoint_report.py --out
+   /tmp/vmec_jax_freeb_multi_scalar_report.json --workdir
+   /tmp/vmec_jax_freeb_multi_scalar_report_work` passed and wrote a report
+   with `state_norm` and `aspect` slopes.
+5. `python examples/optimization/free_boundary_QS_coil_optimization.py
+   --smoke --provider circle --max-evals 1 --max-iter 1
+   --write-same-branch-report --outdir
+   /tmp/vmec_jax_freeb_qs_coil_multi_report` passed and wrote a report with
+   objective, residual proxy, aspect, mean iota, and B-normal RMS slope blocks.
+
+Best next steps:
+
+1. Commit and push the multi-scalar report artifact changes.
+2. Let the refreshed `main` CI complete and fix any failures before opening or
+   merging additional work.
+3. Continue the production full-loop adjoint seam: either promote a
+   fingerprint-gated full `run_free_boundary` custom VJP for branch-compatible
+   complete solves, or move the remaining adaptive controller policies into a
+   fully JAX-visible segmented controller.
+4. Keep documentation claims conservative until a complete adaptive full-loop
+   AD-vs-central-FD gate passes for current and Fourier perturbations.
+
+Need from user:
+
+Nothing now.
+
+Completion percentages:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 95%.
+- VMEC parity and physics gates: 92%.
+- Single-stage coil-only optimization: 79%.
+- Robust coil perturbation optimization: 70%.
+- CPU/GPU performance: 83%.
+- Docs/release hygiene: 95%.
+- Overall free-boundary ESSOS lane: 98% for merged forward/replay work; not
+  100% until the production adaptive full-loop adjoint is validated.
+
 ### 2026-06-03 Coil-only example same-branch report hook
 
 Steps taken:

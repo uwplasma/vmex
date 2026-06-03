@@ -541,7 +541,7 @@ def write_same_branch_validation_report(
             dof_step=float(args.dof_step),
         )
 
-    def objective_fn(payload: dict[str, Any]) -> float:
+    def objective_fn(payload: dict[str, Any]) -> dict[str, float]:
         run_like = SimpleNamespace(
             result=payload["result"],
             state=payload["result"].state,
@@ -557,12 +557,21 @@ def write_same_branch_validation_report(
             target_aspect=float(args.target_aspect),
             target_iota=float(args.target_iota),
         )
-        return objective_from_summary(
+        total = objective_from_summary(
             summary,
             residual_weight=float(args.residual_weight),
             aspect_weight=float(args.aspect_weight),
             iota_weight=float(args.iota_weight),
         )
+        return {
+            "objective": total,
+            "residual_proxy": float(summary.get("residual_proxy") or 0.0),
+            "aspect": float(summary["aspect"]) if summary.get("aspect") is not None else np.nan,
+            "mean_iota": float(summary["mean_iota"]) if summary.get("mean_iota") is not None else np.nan,
+            "bnormal_rms": float(summary["free_boundary_bnormal_rms"])
+            if summary.get("free_boundary_bnormal_rms") is not None
+            else np.nan,
+        }
 
     report = direct_coil_same_branch_complete_solve_fd_report(
         input_path,
@@ -617,6 +626,8 @@ def write_same_branch_validation_report(
             "minus_max_rel_scalar_delta": float(report["branch_compatibility"]["minus"]["max_rel_scalar_delta"]),
         },
         "values": report["values"],
+        "objective_values": report["objective_values"],
+        "primary_objective": report["primary_objective"],
     }
     path = outdir / "same_branch_complete_solve_report.json"
     write_json(path, compact_report)

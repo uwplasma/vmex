@@ -8,6 +8,7 @@ in the backward pass rather than differentiating through an iterative solver.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
@@ -2630,6 +2631,26 @@ def direct_coil_complete_solve_trace(
     }
 
 
+def _complete_solve_objective_values(value: Any) -> dict[str, float]:
+    """Normalize one scalar or a mapping of scalar diagnostics."""
+
+    if isinstance(value, Mapping):
+        if not value:
+            raise ValueError("objective_fn returned an empty mapping")
+        values: dict[str, float] = {}
+        for key, item in value.items():
+            arr = np.asarray(item, dtype=float)
+            if arr.size != 1:
+                raise ValueError(f"objective_fn mapping entry {key!r} must be scalar")
+            values[str(key)] = float(arr.reshape(-1)[0])
+        return values
+
+    arr = np.asarray(value, dtype=float)
+    if arr.size != 1:
+        raise ValueError("objective_fn must return a scalar or a mapping of scalars")
+    return {"objective": float(arr.reshape(-1)[0])}
+
+
 def direct_coil_same_branch_complete_solve_fd_report(
     input_path: Any,
     base_params: Any,
@@ -2647,9 +2668,12 @@ def direct_coil_same_branch_complete_solve_fd_report(
 
     ``params_for(scale)`` must return the coil parameters for ``base + scale *
     direction``.  ``objective_fn(payload)`` receives each payload returned by
-    :func:`direct_coil_complete_solve_trace` and returns a scalar value.  The
-    result contains raw base/plus/minus payloads, branch fingerprint deltas,
-    scalar values, and the central finite-difference slope.
+    :func:`direct_coil_complete_solve_trace` and returns either one scalar or a
+    mapping of scalar diagnostics.  The result contains raw base/plus/minus
+    payloads, branch fingerprint deltas, scalar values, and central
+    finite-difference slopes.  For backward compatibility, ``values`` reports
+    the primary scalar.  ``objective_values`` reports every scalar returned by
+    ``objective_fn``.
 
     This helper is deliberately a validation seam rather than a production
     adjoint: it rejects branch changes using accepted-trace fingerprints and
@@ -2692,10 +2716,21 @@ def direct_coil_same_branch_complete_solve_fd_report(
         rtol=float(fingerprint_rtol),
         atol=float(fingerprint_atol),
     )
-    base_value = float(np.asarray(objective_fn(base), dtype=float))
-    plus_value = float(np.asarray(objective_fn(plus), dtype=float))
-    minus_value = float(np.asarray(objective_fn(minus), dtype=float))
-    central_fd = (plus_value - minus_value) / (2.0 * eps_f)
+    base_values = _complete_solve_objective_values(objective_fn(base))
+    plus_values = _complete_solve_objective_values(objective_fn(plus))
+    minus_values = _complete_solve_objective_values(objective_fn(minus))
+    if base_values.keys() != plus_values.keys() or base_values.keys() != minus_values.keys():
+        raise ValueError("objective_fn returned different scalar keys for base/plus/minus solves")
+    primary_key = "objective" if "objective" in base_values else next(iter(base_values))
+    objective_values = {
+        key: {
+            "base": float(base_values[key]),
+            "plus": float(plus_values[key]),
+            "minus": float(minus_values[key]),
+            "central_fd_directional": float((plus_values[key] - minus_values[key]) / (2.0 * eps_f)),
+        }
+        for key in base_values
+    }
     return {
         "base": base,
         "plus": plus,
@@ -2705,12 +2740,9 @@ def direct_coil_same_branch_complete_solve_fd_report(
             "plus": plus_branch,
             "minus": minus_branch,
         },
-        "values": {
-            "base": base_value,
-            "plus": plus_value,
-            "minus": minus_value,
-            "central_fd_directional": float(central_fd),
-        },
+        "primary_objective": primary_key,
+        "values": objective_values[primary_key],
+        "objective_values": objective_values,
     }
 
 

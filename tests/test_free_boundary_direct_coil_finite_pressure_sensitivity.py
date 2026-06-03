@@ -1055,7 +1055,17 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
         input_path,
         base_params,
         params_for=params_for,
-        objective_fn=lambda payload: state_norm_objective(payload["result"].state),
+        objective_fn=lambda payload: {
+            "objective": state_norm_objective(payload["result"].state),
+            "aspect": float(
+                np.asarray(
+                    equilibrium_aspect_ratio_from_state(
+                        state=payload["result"].state,
+                        static=payload["init"].static,
+                    )
+                )
+            ),
+        },
         eps=eps,
         solve_kwargs={
             "max_iter": 2,
@@ -1086,6 +1096,8 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
     assert plus_branch["compatible"], plus_branch["changed_fields"]
     assert minus_branch["compatible"], minus_branch["changed_fields"]
 
+    assert complete_report["primary_objective"] == "objective"
+    assert set(complete_report["objective_values"]) == {"objective", "aspect"}
     complete_fd = float(complete_report["values"]["central_fd_directional"])
 
     def custom_objective(params: CoilFieldParams):
@@ -1178,6 +1190,12 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
     complete_aspect_fd = (
         aspect_objective_from_state(plus_result.state) - aspect_objective_from_state(minus_result.state)
     ) / (2.0 * eps)
+    np.testing.assert_allclose(
+        complete_report["objective_values"]["aspect"]["central_fd_directional"],
+        complete_aspect_fd,
+        rtol=1.0e-12,
+        atol=1.0e-12,
+    )
 
     def aspect_scalar_fn(replay):
         return equilibrium_aspect_ratio_from_state(state=replay["state"], static=base_init.static)
