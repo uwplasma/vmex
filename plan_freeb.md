@@ -126,11 +126,17 @@ Results obtained:
 
 1. `python -m ruff check vmec_jax/optimization.py tools/diagnostics/profile_exact_optimizer.py tools/diagnostics/compare_profile_reports.py tests/test_optimization_callback_trace.py tests/test_profile_report_compare.py` passed.
 2. `python -m pytest -q tests/test_optimization_callback_trace.py::test_exact_optimizer_profiles_trial_solver_timing_buckets tests/test_optimization_callback_trace.py::test_profile_exact_supplements_scan_cache_status_timing_on_older_optimizer tests/test_profile_report_compare.py -rx` passed: 26 passed in 0.22 s.
+3. `python -m pytest -q tests/test_optimization_callback_trace.py tests/test_profile_report_compare.py -rx` passed locally after commit: 45 passed in 0.20 s.
+4. A fresh temporary `office` clone at commit `41e661e7` ran
+   `JAX_ENABLE_X64=1 JAX_PLATFORMS=cuda,cpu python3 tools/diagnostics/profile_exact_optimizer.py --problem qh --max-mode 2 --callback jacobian --repeats 2 --perturb-scale 1e-4 --solver-device gpu --vmec-timing --sync-replay-timing --budget-action warn --budget-total-wall-s 120 --budget-repeat-wall-s 90 --budget-cache-entry-growth 16 --json-out /tmp/vmec_jax_freeb_profile_41e661e7_out/qh_m2_gpu_jacobian.json`.
+5. The GPU profile completed within budget: two perturbed exact-Jacobian callbacks took 109.43 s total, with callback walls 69.78 s cold and 39.65 s warm.
+6. The accepted-control leaves showed `exact_tape_solver_iteration_control_fsq1_precond_norm_s=2.32 s`, `iteration_control_badjac_s=0.89 s`, and scalar payload/direct-get leaves below printed precision across both callbacks. This rules out FSQ1 payload materialization as the dominant GPU issue for this QH mode-2 exact profile.
+7. The normalized comparison report picked `exact_solve_with_tape_jvp_only_s=61.47 s` as the largest phase and `jacobian_projected_tape_replay_dispatch=44.22 s` as the largest actionable non-container patch target. Exact-tape preconditioner time was also large at 27.93 s.
 
 Best next steps:
 
-1. Run the updated exact optimizer profiling command on GPU to identify whether accepted-control payload/direct gets or bad-Jacobian checks dominate cold callback cost.
-2. Use the new leaf timing to decide whether to stage/fuse control payload materialization, avoid scalar synchronization, or specialize scan-trial paths.
+1. Do not spend the next GPU pass on FSQ1 payload/direct scalar gets for this profile; the new leaf timers show those are not the dominant cost.
+2. Target projected replay dispatch/fusion first, then exact-tape preconditioner staging and warm exact-solve preconditioner/update dispatch.
 3. Keep VMEC2000 generated-mgrid WOUT parity blocked until VMEC2000 enters active vacuum on a shared generated-mgrid fixture.
 
 Need from user:
