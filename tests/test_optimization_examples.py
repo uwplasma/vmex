@@ -2158,3 +2158,50 @@ def test_jxbforce_and_current_objective_gradients_match_finite_difference(monkey
         ad_grad = float(jax.grad(fn)(jnp.asarray(1.3, dtype=jnp.float64)))
         fd_grad = centered_fd(fn, 1.3)
         np.testing.assert_allclose(ad_grad, fd_grad, rtol=1e-6, atol=1e-8)
+
+
+def test_dmerc_and_glasser_objective_gradients_match_finite_difference(monkeypatch) -> None:
+    pytest.importorskip("jax")
+
+    from vmec_jax._compat import jnp
+    import vmec_jax.optimization_workflow as workflow
+    from vmec_jax.optimization_workflow import DMerc, GlasserResistiveInterchange
+
+    def fake_mercier_terms_from_state(*, state, **_kwargs):
+        x = jnp.asarray(state, dtype=jnp.float64)
+        return {
+            "DMerc": jnp.asarray(
+                [0.0, 0.03 + 0.02 * x**2, -0.04 + 0.03 * x**2, 0.0],
+                dtype=jnp.float64,
+            ),
+            "D_R": jnp.asarray(
+                [0.0, 0.02 + 0.01 * x**2, -0.03 + 0.02 * x**2, 0.0],
+                dtype=jnp.float64,
+            ),
+            "H": jnp.asarray(
+                [0.0, 0.03 + 0.01 * x, 0.05 + 0.02 * x, 0.0],
+                dtype=jnp.float64,
+            ),
+            "shear": jnp.asarray(
+                [0.0, 0.30 + 0.02 * x, -0.40 + 0.01 * x, 0.0],
+                dtype=jnp.float64,
+            ),
+        }
+
+    monkeypatch.setattr(workflow, "mercier_terms_from_state", fake_mercier_terms_from_state)
+    ctx = SimpleNamespace(static=SimpleNamespace(s=np.asarray([0.0, 0.25, 0.75, 1.0])), indata=None, signgs=1)
+
+    def centered_fd(fn, x0, eps=1.0e-6):
+        return (float(fn(x0 + eps)) - float(fn(x0 - eps))) / (2.0 * eps)
+
+    import jax
+
+    for objective in (
+        DMerc(minimum=0.02, softness=0.05),
+        GlasserResistiveInterchange(maximum=0.04, softness=0.05),
+        GlasserResistiveInterchange(maximum=0.04, softness=0.05, shear_epsilon=0.02),
+    ):
+        fn = lambda x, objective=objective: jnp.sum(objective.J(ctx, jnp.asarray(x, dtype=jnp.float64)))
+        ad_grad = float(jax.grad(fn)(jnp.asarray(1.1, dtype=jnp.float64)))
+        fd_grad = centered_fd(fn, 1.1)
+        np.testing.assert_allclose(ad_grad, fd_grad, rtol=1e-6, atol=1e-8)

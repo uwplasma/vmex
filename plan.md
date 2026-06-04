@@ -1787,3 +1787,17 @@ Defer beyond the current cycle:
   AD-vs-FD gate. Completion: CI runtime/refactor `95%`; DMerc/`D_R` derivative
   validation `99%`; VMEC parity and physics gates `95%`; full nonlinear
   free-boundary adjoint `96%`; docs/release hygiene `96%`.
+- 2026-06-04: GitHub Actions run `26951750258` for `c1ba4af` passed after the
+  three-way py3.11 split. Key runtimes: py3.10 `4:15`, py3.12 `5:50`, physics
+  smoke `4:54`, slow py3.11 coverage `5:30`, exact py3.11 coverage `8:34`,
+  core py3.11 coverage `9:30`, and combined coverage `31 s`; the split kept
+  the strict coverage gate green while reducing compatibility wait time. Added
+  a fast wrapper-level AD-vs-central-FD gate for optimization-facing
+  `DMerc().J` and `GlasserResistiveInterchange().J`, including the
+  `shear_epsilon` branch that recomputes `D_R` from `DMerc`, `H`, and shear.
+  Focused validation passed: ruff clean and the new test passed in `1.25 s`.
+  Best next step: push this physics-gate strengthening and then target the
+  complete-loop free-boundary physical-scalar custom-VJP/FD validation seam.
+  Completion: CI runtime/refactor `96%`; DMerc/`D_R` derivative validation
+  `100%`; VMEC parity and physics gates `96%`; full nonlinear free-boundary
+  adjoint `96%`; docs/release hygiene `96%`.

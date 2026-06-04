@@ -105,6 +105,48 @@ Completion percentages:
 - CI runtime refactor with preserved coverage/physics gates: 97%.
 - Docs/release hygiene: 96%.
 
+### 2026-06-04 CI green and DMerc/Glasser wrapper AD-vs-FD gate
+
+Steps taken:
+
+1. Confirmed GitHub Actions run `26951750258` for `c1ba4af` is green after the
+   three-way py3.11 coverage split.
+2. Added a fast optimization-facing AD-vs-central-FD test for `DMerc().J` and
+   `GlasserResistiveInterchange().J`, including the `shear_epsilon` branch that
+   recomputes `D_R` from `DMerc`, `H`, and magnetic shear.
+
+Results obtained:
+
+1. CI runtimes after the split: py3.10 `4:15`, py3.12 `5:50`, physics smoke
+   `4:54`, slow py3.11 coverage `5:30`, exact py3.11 coverage `8:34`, core
+   py3.11 coverage `9:30`, combined coverage `31 s`.
+2. Focused validation for the new physics gate passed: ruff clean and the new
+   AD-vs-FD test passed in `1.25 s`.
+
+Best next steps:
+
+1. Push the wrapper-level DMerc/Glasser derivative gate.
+2. Promote the next complete-loop direct-coil free-boundary physical-scalar
+   custom-VJP vs complete-solve central-FD validation.
+3. Continue exact-adjoint runtime reduction by sharing accepted traces and
+   reducing cold tape/replay setup.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 96%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 100%.
+- VMEC parity and physics gates: 96%.
+- Single-stage coil-only optimization: 79%.
+- Robust coil perturbation optimization: 70%.
+- CPU/GPU performance: 84%.
+- CI runtime refactor with preserved coverage/physics gates: 96%.
+- Docs/release hygiene: 96%.
+
 ### 2026-06-03 DMerc/D_R derivative gate and CI runtime refactor
 
 Steps taken:
