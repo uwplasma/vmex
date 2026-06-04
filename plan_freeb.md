@@ -90,6 +90,47 @@ Completion:
 - Docs/release hygiene: 96%.
 - Overall free-boundary single-stage plan: 94.7%.
 
+### 2026-06-04 Exact shard asset-fetch trim
+
+Steps taken:
+
+1. Audited the split py3.11 exact coverage buckets after the stacked
+   physical-scalar gate promotion.
+2. Confirmed the exact bucket tests construct their own tiny direct-coil
+   inputs/WOUTs and do not require the optional downloaded WOUT fixture bundle.
+3. Removed the `wout-fixtures` fetch from the exact matrix job only. The core
+   and slow physics coverage shards keep their fixture fetches.
+
+Results obtained:
+
+1. No physics/numerics/parity tests were removed.
+2. This avoids three repeated fixture-download steps per required CI run while
+   preserving the exact same exact-adjoint coverage buckets.
+
+Best next steps:
+
+1. Validate workflow syntax and exact-bucket collection locally.
+2. Commit and push if validation passes.
+3. Watch the new CI run; if green, consider splitting the slow physics shard
+   only if wall time remains dominated by that job.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.95%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 100%.
+- VMEC parity and physics gates: 96%.
+- Single-stage coil-only optimization: 82%.
+- Robust coil perturbation optimization: 70%.
+- CPU/GPU performance: 86%.
+- CI runtime refactor with preserved coverage/physics gates: 99.8%.
+- Docs/release hygiene: 96%.
+- Overall free-boundary single-stage plan: 94.8%.
+
 ### 2026-06-04 Exact coverage matrix split
 
 Steps taken:

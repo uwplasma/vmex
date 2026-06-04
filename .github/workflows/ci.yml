@@ -142,10 +142,6 @@ jobs:
           python -m pip install .
           python -m pip install pytest pytest-cov pytest-xdist
 
-      - name: Fetch optional WOUT fixtures
-        run: |
-          python tools/fetch_assets.py --bundle wout-fixtures
-
       - name: Run exact coverage tests
         env:
           JAX_ENABLE_X64: "1"
