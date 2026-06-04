@@ -77,6 +77,84 @@ Need from user:
 
 Nothing now.
 
+### 2026-06-04 Stacked replay NESTOR-axis correction
+
+Steps taken:
+
+1. Confirmed pushed commit `d8f91ab` completed GitHub Actions successfully,
+   including docs, build, py3.10, py3.12, physics smoke, slow physics,
+   py3.11 exact shards, and the combined 95% coverage gate.
+2. Extended the coil-only free-boundary example's opt-in
+   `--write-same-branch-report` vector block to include accepted
+   `Bnormal` RMS alongside aspect ratio and LCFS boundary moment.
+3. Ran the real circle smoke/report in `/tmp` and confirmed the accepted
+   `Bnormal` RMS branch-local directional derivative matched complete-solve
+   central finite differences to `3.9e-19` absolute error.
+4. Found, via subagent inspection, a correctness bug in the stacked
+   accepted-controller replay: per-step NESTOR axis controls were stacked but
+   `_branch_from_stacked_controls` reused the representative trace axis data.
+5. Fixed `_branch_from_stacked_controls` to mirror the per-trace branch:
+   when stacked `freeb_nestor_axes` are present, it calls
+   `direct_coil_boundary_bsqvac_jax` with per-step `br_axis`, `bp_axis`, and
+   `bz_axis`; otherwise it keeps the existing trace fallback.
+6. Added a no-extra-complete-solve regression to the accepted-update replay
+   test. It duplicates one accepted trace, perturbs only the second step's
+   NESTOR axes, verifies the two steps remain in one static step-policy
+   segment, and checks legacy per-trace replay equals stacked replay for
+   objective, final state, `bsqvac_rms`, and `bnormal_rms`.
+7. Confirmed the XLA algebraic-simplifier warning is report-only and tied to
+   stacked replay compilation, especially dynamic accepted-controller branch
+   controls, dynamic constraint activity controls, and multi-basis vector
+   pullbacks. This remains a performance lane, not a correctness blocker.
+
+Results obtained:
+
+1. `python -m ruff check vmec_jax/free_boundary_adjoint.py
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py
+   examples/optimization/free_boundary_QS_coil_optimization.py` passed.
+2. `JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_qs_coil_optimization_smoke.py --durations=10`
+   passed: `8 passed, 1 xfailed in 2.90 s`.
+3. The real circle same-branch report passed and wrote
+   `/tmp/vmec_jax_freeb_qs_bnormal_report/same_branch_complete_solve_report.json`.
+4. The accepted-update replay gate passed with the new dynamic-axis regression:
+   `1 passed in 39.57 s`.
+5. The current-only same-branch complete-solve custom-VJP gate passed:
+   `1 passed in 46.09 s`.
+
+Best next steps:
+
+1. Commit and push the stacked-axis correctness fix plus the stronger
+   same-branch report.
+2. Watch CI for the new commit.
+3. Reduce the report-only replay compile warning without weakening evidence:
+   first target all-accepted no-rejection segments and static constraint
+   activity, then consider a directional-only vector-report path for example
+   diagnostics.
+4. Promote production branch-local scalar/vector validation to the
+   Fourier-only same-branch gate only if it reuses the existing complete-solve
+   triplet and does not increase exact-shard runtime materially.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.997% for branch-local
+  production-forward scalar/vector gradients; full adaptive branch
+  differentiation remains intentionally unclaimed.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 100%.
+- VMEC parity and physics gates: 96%.
+- Single-stage coil-only optimization: 86%.
+- Robust coil perturbation optimization: 70%.
+- CPU/GPU performance: 86.5%, with report-only stacked replay compile
+  warnings identified and scoped.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 96.5%.
+- Overall free-boundary/single-stage plan: 96.9%.
+
 ### 2026-06-04 Branch-local vector production seam
 
 Steps taken:

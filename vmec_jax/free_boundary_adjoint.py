@@ -2738,17 +2738,45 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                 sample_nzeta=sample_nzeta,
             )
             context = direct_coil_boundary_replay_context(static, geometry)
-            replay = direct_coil_boundary_bsqvac_from_trace_jax(
-                coil_params,
-                geometry,
-                trace,
-                basis=context["basis"],
-                tables=context["tables"],
-                signgs=int(signgs),
-                nvper=int(context["nvper"]),
-                wint=jnp.asarray(context["wint"]),
-                include_analytic=bool(include_analytic),
-            )
+            nestor_axes = _step_control(control, "freeb_nestor_axes")
+            if nestor_axes is None:
+                replay = direct_coil_boundary_bsqvac_from_trace_jax(
+                    coil_params,
+                    geometry,
+                    trace,
+                    basis=context["basis"],
+                    tables=context["tables"],
+                    signgs=int(signgs),
+                    nvper=int(context["nvper"]),
+                    wint=jnp.asarray(context["wint"]),
+                    include_analytic=bool(include_analytic),
+                )
+            else:
+                replay = direct_coil_boundary_bsqvac_jax(
+                    coil_params,
+                    R=geometry["R"],
+                    Z=geometry["Z"],
+                    phi=geometry["phi"],
+                    Ru=geometry["Ru"],
+                    Zu=geometry["Zu"],
+                    Rv=geometry["Rv"],
+                    Zv=geometry["Zv"],
+                    ruu=geometry["ruu"],
+                    ruv=geometry["ruv"],
+                    rvv=geometry["rvv"],
+                    zuu=geometry["zuu"],
+                    zuv=geometry["zuv"],
+                    zvv=geometry["zvv"],
+                    basis=context["basis"],
+                    tables=context["tables"],
+                    signgs=int(signgs),
+                    nvper=int(context["nvper"]),
+                    br_add=jnp.asarray(nestor_axes["br_axis"]),
+                    bp_add=jnp.asarray(nestor_axes["bp_axis"]),
+                    bz_add=jnp.asarray(nestor_axes["bz_axis"]),
+                    wint=jnp.asarray(context["wint"]),
+                    include_analytic=bool(include_analytic),
+                )
             freeb_bsqvac_half = replay["bsqvac"]
             bsqvac_objective = _weighted_half_norm(replay["bsqvac"], bsqvac_weight)
             bsqvac_rms = jnp.sqrt(jnp.mean(jnp.square(jnp.asarray(replay["bsqvac"]))))

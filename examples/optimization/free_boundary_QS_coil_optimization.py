@@ -596,6 +596,26 @@ def write_same_branch_validation_report(
         z = jnp.asarray(geometry["Z"])
         return jnp.mean((r - 1.0) * (r - 1.0) + z * z)
 
+    def accepted_bnormal_rms_from_payload(payload: dict[str, Any]) -> float:
+        values = [
+            float(np.sqrt(np.mean(np.square(np.asarray(trace["freeb_nestor_trace"]["bnormal"], dtype=float)))))
+            for trace in payload["traces"]
+            if trace.get("freeb_bsqvac_half") is not None
+            and isinstance(trace.get("freeb_nestor_trace"), dict)
+            and trace["freeb_nestor_trace"].get("bnormal") is not None
+        ]
+        if not values:
+            return 0.0
+        return float(np.mean(values))
+
+    def accepted_bnormal_rms_from_replay(replay: dict[str, Any]) -> Any:
+        bnormal = jnp.asarray(replay["history"]["bnormal_rms"])
+        accepted = jnp.asarray(replay["history"]["accepted"], dtype=bnormal.dtype)
+        active = jnp.asarray(replay["controls"]["has_active_freeb_replay"], dtype=bnormal.dtype)
+        weights = accepted * active
+        denom = jnp.maximum(jnp.sum(weights), jnp.asarray(1.0, dtype=bnormal.dtype))
+        return jnp.sum(weights * bnormal) / denom
+
     def params_for(scale: float) -> CoilFieldParams:
         return apply_coil_variables(
             base_params,
@@ -633,6 +653,7 @@ def write_same_branch_validation_report(
             "aspect": float(summary["aspect"]) if summary.get("aspect") is not None else np.nan,
             "lcfs_boundary_moment": float(np.asarray(lcfs_boundary_moment(payload["result"].state, payload["init"].static))),
             "mean_iota": float(summary["mean_iota"]) if summary.get("mean_iota") is not None else np.nan,
+            "accepted_bnormal_rms": accepted_bnormal_rms_from_payload(payload),
             "bnormal_rms": float(summary["free_boundary_bnormal_rms"])
             if summary.get("free_boundary_bnormal_rms") is not None
             else np.nan,
@@ -698,8 +719,13 @@ def write_same_branch_validation_report(
         "available": False,
         "scope": "fixed accepted branch only; does not differentiate adaptive host branch selection",
     }
-    if "base" in report and "aspect" in report["objective_values"] and "lcfs_boundary_moment" in report["objective_values"]:
-        scalar_keys = ("aspect", "lcfs_boundary_moment")
+    if (
+        "base" in report
+        and "aspect" in report["objective_values"]
+        and "lcfs_boundary_moment" in report["objective_values"]
+        and "accepted_bnormal_rms" in report["objective_values"]
+    ):
+        scalar_keys = ("aspect", "lcfs_boundary_moment", "accepted_bnormal_rms")
         vector = direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
             params=base_params,
             complete_payload=report["base"],
@@ -716,6 +742,7 @@ def write_same_branch_validation_report(
                 "lcfs_boundary_moment": float(
                     np.asarray(lcfs_boundary_moment(payload["result"].state, payload["init"].static))
                 ),
+                "accepted_bnormal_rms": accepted_bnormal_rms_from_payload(payload),
             },
             replay_scalar_fns={
                 "aspect": lambda replay, payload: equilibrium_aspect_ratio_from_state(
@@ -726,6 +753,7 @@ def write_same_branch_validation_report(
                     replay["state"],
                     payload["init"].static,
                 ),
+                "accepted_bnormal_rms": lambda replay, _payload: accepted_bnormal_rms_from_replay(replay),
             },
             replay_kwargs={"use_stacked_step_controls": True},
         )

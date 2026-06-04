@@ -2934,6 +2934,80 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
             np.asarray(stacked_controller_replay["history"][key]),
             np.asarray(controller_replay["history"][key]),
         )
+
+    axis_reference_trace = deepcopy(trace0)
+    axis_changed_trace = deepcopy(trace0)
+    axis_changed_nestor = deepcopy(trace0["freeb_nestor_trace"])
+    axis_changed_nestor["br_axis"] = np.asarray(axis_changed_nestor["br_axis"], dtype=float) + 2.0e-4
+    axis_changed_nestor["bp_axis"] = np.asarray(axis_changed_nestor["bp_axis"], dtype=float) - 1.0e-4
+    axis_changed_nestor["bz_axis"] = np.asarray(axis_changed_nestor["bz_axis"], dtype=float) + 3.0e-4
+    axis_changed_trace["freeb_nestor_trace"] = axis_changed_nestor
+    assert [
+        (segment["start"], segment["stop"], segment["n_steps"])
+        for segment in direct_coil_accepted_trace_step_policy_segments([axis_reference_trace, axis_changed_trace])
+    ] == [(0, 2, 2)]
+    axis_reference_replay = direct_coil_accepted_trace_controller_replay_objective_jax(
+        base_params,
+        axis_reference_trace["state_pre"],
+        static=init.static,
+        traces=[axis_reference_trace, axis_reference_trace],
+        signgs=int(init.signgs),
+        state_weight=1.0,
+        bsqvac_weight=1.0e-12,
+        force_weight=0.0,
+        enforce_edge=False,
+    )
+    axis_changed_controller_replay = direct_coil_accepted_trace_controller_replay_objective_jax(
+        base_params,
+        axis_reference_trace["state_pre"],
+        static=init.static,
+        traces=[axis_reference_trace, axis_changed_trace],
+        signgs=int(init.signgs),
+        state_weight=1.0,
+        bsqvac_weight=1.0e-12,
+        force_weight=0.0,
+        enforce_edge=False,
+    )
+    axis_changed_stacked_replay = direct_coil_accepted_trace_controller_replay_objective_jax(
+        base_params,
+        axis_reference_trace["state_pre"],
+        static=init.static,
+        traces=[axis_reference_trace, axis_changed_trace],
+        signgs=int(init.signgs),
+        state_weight=1.0,
+        bsqvac_weight=1.0e-12,
+        force_weight=0.0,
+        enforce_edge=False,
+        use_stacked_step_controls=True,
+    )
+    assert axis_changed_stacked_replay["used_stacked_step_controls"]
+    assert axis_changed_stacked_replay["step_policy_n_segments"] == 1
+    assert abs(
+        float(
+            np.asarray(axis_changed_controller_replay["history"]["bsqvac_rms"][-1])
+            - np.asarray(axis_reference_replay["history"]["bsqvac_rms"][-1])
+        )
+    ) > 1.0e-9
+    for key in ("bsqvac_rms", "bnormal_rms"):
+        np.testing.assert_allclose(
+            np.asarray(axis_changed_stacked_replay["history"][key]),
+            np.asarray(axis_changed_controller_replay["history"][key]),
+            rtol=5.0e-12,
+            atol=5.0e-12,
+        )
+    np.testing.assert_allclose(
+        np.asarray(axis_changed_stacked_replay["objective"]),
+        np.asarray(axis_changed_controller_replay["objective"]),
+        rtol=5.0e-12,
+        atol=5.0e-12,
+    )
+    np.testing.assert_allclose(
+        np.asarray(pack_state(axis_changed_stacked_replay["state"])),
+        np.asarray(pack_state(axis_changed_controller_replay["state"])),
+        rtol=5.0e-12,
+        atol=5.0e-12,
+    )
+
     static_changed_trace = dict(trace1)
     static_changed_trace["include_edge_residual"] = not bool(trace1["include_edge_residual"])
     assert [
