@@ -2157,9 +2157,11 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
             )
             freeb_bsqvac_half = replay["bsqvac"]
             bsqvac_objective = _weighted_half_norm(replay["bsqvac"], bsqvac_weight)
+            bsqvac_rms = jnp.sqrt(jnp.mean(jnp.square(jnp.asarray(replay["bsqvac"]))))
         else:
             freeb_bsqvac_half = trace.get("freeb_bsqvac_half", None)
             bsqvac_objective = jnp.asarray(0.0)
+            bsqvac_rms = jnp.asarray(0.0)
         step = strict_update_one_step_from_trace(
             state_in,
             static,
@@ -2173,6 +2175,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
         return step["step"]["state_post"], {
             "force": _tree_weighted_half_norm(step["force"], force_weight),
             "bsqvac": bsqvac_objective,
+            "bsqvac_rms": bsqvac_rms,
             "state_reset": reset_to_trace_pre,
         }
 
@@ -2200,6 +2203,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                 return state, {
                     "force": jnp.asarray(0.0),
                     "bsqvac": jnp.asarray(0.0),
+                    "bsqvac_rms": jnp.asarray(0.0),
                     "state_reset": jnp.asarray(False, dtype=bool),
                 }
 
@@ -2716,6 +2720,9 @@ def direct_coil_same_branch_complete_solve_fd_report(
         rtol=float(fingerprint_rtol),
         atol=float(fingerprint_atol),
     )
+    base_fingerprint = direct_coil_accepted_trace_fingerprint(base["traces"])
+    plus_fingerprint = direct_coil_accepted_trace_fingerprint(plus["traces"])
+    minus_fingerprint = direct_coil_accepted_trace_fingerprint(minus["traces"])
     base_values = _complete_solve_objective_values(objective_fn(base))
     plus_values = _complete_solve_objective_values(objective_fn(plus))
     minus_values = _complete_solve_objective_values(objective_fn(minus))
@@ -2739,6 +2746,9 @@ def direct_coil_same_branch_complete_solve_fd_report(
             "same_branch": bool(plus_branch["compatible"] and minus_branch["compatible"]),
             "plus": plus_branch,
             "minus": minus_branch,
+            "base_fingerprint": base_fingerprint,
+            "plus_fingerprint": plus_fingerprint,
+            "minus_fingerprint": minus_fingerprint,
         },
         "primary_objective": primary_key,
         "values": objective_values[primary_key],

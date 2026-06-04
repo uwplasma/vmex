@@ -12,14 +12,14 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-06-04 on `main` after commit `a6a696a`, `test: share
-free-boundary replay gradient trace`, passed GitHub Actions run `26957173529`.
+Last updated: 2026-06-04 on `main` after commit `59dc031`, `test: share full
+free-boundary replay trace`, passed GitHub Actions run `26959058947`.
 The latest green main splits required py3.11 coverage into core, slow-physics,
 and exact shards while keeping a combined 95% coverage threshold, preserves the
 `DMerc`/Glasser `D_R` AD-vs-central-FD gate, promotes same-branch complete-loop
 aspect-ratio and LCFS boundary-moment physical-scalar free-boundary custom-VJP
-gates, shares one accepted replay trace across coil-pytree and VMEC-state
-gradient checks, and keeps production adaptive
+gates, shares one accepted replay trace across coil-pytree, VMEC-state, and
+two-step controller replay checks, and keeps production adaptive
 `run_free_boundary` full-loop claims conservative. It also uses
 Node-24-compatible v7 artifact actions and `codecov/codecov-action@v6`.
 The phase-2 evidence includes reset-aware full accepted-trace replay, stacked
@@ -30,6 +30,61 @@ complete-solve gate, explicit tridiagonal-policy coverage, VMEC2000
 generated-`mgrid` WOUT-quality classification, and direct/generated
 boundary-domain checks. The code still does not claim a production full
 adaptive nonlinear `run_free_boundary` exact adjoint.
+
+### 2026-06-04 Accepted vacuum-response scalar seam
+
+Steps taken:
+
+1. Added raw per-step `bsqvac_rms` history to the JAX-visible accepted
+   direct-coil controller replay.
+2. Extended `direct_coil_same_branch_complete_solve_fd_report` to return
+   base/plus/minus accepted-trace fingerprints, not only compatibility deltas.
+3. Promoted accepted vacuum-response RMS as another physical scalar in the
+   current-only same-branch complete-solve gate.  The scalar is computed from
+   complete-solve accepted traces for base/plus/minus finite differences and
+   from the frozen accepted-controller replay for the custom-VJP slope.
+4. Strengthened the same-branch helper to assert explicit compatible
+   branch fingerprints: same step count, active free-boundary cadence, and
+   matching `freeb_bsqvac_half` size metadata.
+
+Results obtained:
+
+1. Ruff passed for `vmec_jax/free_boundary_adjoint.py` and
+   `tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`.
+2. The promoted current-only same-branch physical-scalar gate passed:
+   `1 passed in 38.44 s` before fingerprint tightening, and in the combined
+   focused rerun `2 passed in 60.21 s`.
+3. The accepted replay/controller trace-sharing test still passed after adding
+   `bsqvac_rms` to controller history.
+4. Generic segmented accepted-controller tests passed:
+   `2 passed in 1.53 s`.
+
+Best next steps:
+
+1. Push this seam promotion and watch CI.
+2. Promote one more complete-loop physical scalar only if it can reuse an
+   existing complete-solve branch payload; avoid adding another cold exact
+   free-boundary solve to CI.
+3. Continue the adaptive full-loop seam by making branch fingerprints and
+   controller masks first-class outputs of any production `run_free_boundary`
+   custom-VJP wrapper.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 98.5%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 100%.
+- VMEC parity and physics gates: 96%.
+- Single-stage coil-only optimization: 82%.
+- Robust coil perturbation optimization: 70%.
+- CPU/GPU performance: 86%.
+- CI runtime refactor with preserved coverage/physics gates: 98%.
+- Docs/release hygiene: 96%.
+- Overall free-boundary single-stage plan: 92.5%.
 
 ### 2026-06-04 Full accepted replay trace sharing
 

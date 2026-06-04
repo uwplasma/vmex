@@ -1011,6 +1011,7 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
     check_segmented_controller: bool = True,
     check_aspect_scalar: bool = True,
     check_boundary_moment_scalar: bool = False,
+    check_accepted_bsqvac_rms_scalar: bool = False,
 ) -> None:
     pytest.importorskip("jax")
     from vmec_jax._compat import jax, jnp
@@ -1034,6 +1035,26 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
         Z = jnp.asarray(geometry["Z"])
         return jnp.mean((R - 1.0) * (R - 1.0) + Z * Z)
 
+    def accepted_bsqvac_rms_from_payload(payload) -> float:
+        values = [
+            float(np.sqrt(np.mean(np.square(np.asarray(trace["freeb_bsqvac_half"], dtype=float)))))
+            for trace in payload["traces"]
+            if trace.get("freeb_bsqvac_half") is not None
+        ]
+        if not values:
+            return 0.0
+        return float(np.mean(values))
+
+    def accepted_bsqvac_rms_from_replay(replay) -> object:
+        accepted = jnp.asarray(replay["history"]["accepted"], dtype=jnp.asarray(replay["history"]["bsqvac_rms"]).dtype)
+        active = jnp.asarray(
+            replay["controls"]["has_active_freeb_replay"],
+            dtype=jnp.asarray(replay["history"]["bsqvac_rms"]).dtype,
+        )
+        weights = accepted * active
+        denom = jnp.maximum(jnp.sum(weights), jnp.asarray(1.0, dtype=weights.dtype))
+        return jnp.sum(weights * jnp.asarray(replay["history"]["bsqvac_rms"])) / denom
+
     eps = 1.0e-4
     complete_report = direct_coil_same_branch_complete_solve_fd_report(
         input_path,
@@ -1050,6 +1071,7 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
                 )
             ),
             "lcfs_boundary_moment": float(np.asarray(lcfs_boundary_moment(payload["result"].state, payload["init"].static))),
+            "accepted_bsqvac_rms": accepted_bsqvac_rms_from_payload(payload),
         },
         eps=eps,
         solve_kwargs={
@@ -1078,11 +1100,26 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
     minus_result = complete_report["minus"]["result"]
     plus_branch = complete_report["branch_compatibility"]["plus"]
     minus_branch = complete_report["branch_compatibility"]["minus"]
+    base_fingerprint = complete_report["branch_compatibility"]["base_fingerprint"]
+    plus_fingerprint = complete_report["branch_compatibility"]["plus_fingerprint"]
+    minus_fingerprint = complete_report["branch_compatibility"]["minus_fingerprint"]
+    assert complete_report["branch_compatibility"]["same_branch"] is True
     assert plus_branch["compatible"], plus_branch["changed_fields"]
     assert minus_branch["compatible"], minus_branch["changed_fields"]
+    assert base_fingerprint["n_steps"] == plus_fingerprint["n_steps"] == minus_fingerprint["n_steps"]
+    assert base_fingerprint["n_freeb_steps"] > 0
+    assert plus_fingerprint["n_freeb_steps"] == base_fingerprint["n_freeb_steps"]
+    assert minus_fingerprint["n_freeb_steps"] == base_fingerprint["n_freeb_steps"]
+    np.testing.assert_array_equal(plus_fingerprint["freeb_sizes"], base_fingerprint["freeb_sizes"])
+    np.testing.assert_array_equal(minus_fingerprint["freeb_sizes"], base_fingerprint["freeb_sizes"])
 
     assert complete_report["primary_objective"] == "objective"
-    assert set(complete_report["objective_values"]) == {"objective", "aspect", "lcfs_boundary_moment"}
+    assert set(complete_report["objective_values"]) == {
+        "objective",
+        "aspect",
+        "lcfs_boundary_moment",
+        "accepted_bsqvac_rms",
+    }
     complete_fd = float(complete_report["values"]["central_fd_directional"])
 
     def custom_objective(params: CoilFieldParams):
@@ -1229,6 +1266,21 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
         assert moment_report["passed"], moment_report
         assert moment_report["same_branch"] is True
         assert moment_report["base_abs_delta"] < 2.0e-3
+    if check_accepted_bsqvac_rms_scalar:
+        bsqvac_report = direct_coil_same_branch_controller_scalar_custom_vjp_report(
+            complete_report,
+            base_params,
+            direction,
+            scalar_key="accepted_bsqvac_rms",
+            replay_scalar_fn=lambda replay, _payload: accepted_bsqvac_rms_from_replay(replay),
+            eps=eps,
+            rtol=1.0e-2,
+            atol=1.0e-8,
+            compute_frozen_fd=False,
+        )
+        assert bsqvac_report["passed"], bsqvac_report
+        assert bsqvac_report["same_branch"] is True
+        assert bsqvac_report["base_abs_delta"] < 2.0e-3
 
 
 @pytest.mark.py311_coverage_only
@@ -1273,6 +1325,7 @@ def test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_
         check_segmented_controller=False,
         check_aspect_scalar=True,
         check_boundary_moment_scalar=True,
+        check_accepted_bsqvac_rms_scalar=True,
     )
 
 
