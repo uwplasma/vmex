@@ -2269,6 +2269,33 @@ def _accepted_trace_effective_controller_masks(controls: Mapping[str, Any]) -> d
     }
 
 
+def _accepted_trace_segment_is_unconditionally_accepted(
+    masks: Mapping[str, Any],
+    *,
+    start: int,
+    stop: int,
+) -> bool:
+    """Return whether a controller segment can skip accept/reject conditionals."""
+
+    active = np.asarray(masks["active"], dtype=bool)[int(start) : int(stop)]
+    accepted = np.asarray(masks["accepted"], dtype=bool)[int(start) : int(stop)]
+    rejected = np.asarray(masks["rejected"], dtype=bool)[int(start) : int(stop)]
+    done = np.asarray(masks["done"], dtype=bool)[int(start) : int(stop)]
+    if active.size == 0:
+        return False
+    if not bool(np.all(active)):
+        return False
+    if not bool(np.all(accepted)):
+        return False
+    if bool(np.any(rejected)):
+        return False
+    # A final done marker is allowed. Any earlier done marker would make later
+    # scan entries inactive in the ordinary controller, so it must not fast-path.
+    if done.size > 1 and bool(np.any(done[:-1])):
+        return False
+    return True
+
+
 def direct_coil_accepted_trace_branch_metadata(
     traces: Any,
     *,
@@ -2539,6 +2566,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     use_preconditioner_policy_segments: bool = False,
     use_segment_preconditioner_controls: bool = False,
     use_stacked_step_controls: bool = False,
+    use_accepted_only_fast_path: bool = True,
 ) -> dict[str, Any]:
     """Replay fixed production traces through a JAX-visible accept controller.
 
@@ -2560,6 +2588,10 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     ``use_stacked_step_controls`` is the next rung: it segments by the full
     static step-policy signature and calls ``strict_update_one_step_from_state``
     directly with stacked state/update/constraint controls.
+    ``use_accepted_only_fast_path`` removes the per-step accept/reject proposal
+    conditional only for segments whose effective controller masks prove that
+    every slot is active and accepted. Rejected, inactive, or post-convergence
+    padded slots automatically use the ordinary controller path.
 
     The helper intentionally keeps every trace accepted.  It does not
     differentiate through the host policy that selected the traces; it validates
@@ -2583,6 +2615,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
         accept_mask=accept_mask,
         done_mask=done_mask,
     )
+    effective_masks = _accepted_trace_effective_controller_masks(controls)
     preconditioner_policy_segments = direct_coil_accepted_trace_preconditioner_policy_segments(trace_seq)
     preconditioner_policy_segment_summary = direct_coil_accepted_trace_preconditioner_policy_segment_summary(
         trace_seq,
@@ -2863,11 +2896,14 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
         *,
         index_offset: int = 0,
         stacked_step_controls: bool = False,
+        accepted_only: bool = False,
     ):
         if bool(stacked_step_controls):
             representative_trace = segment_traces[0]
 
             def _step_fn(state, coil_params, control):
+                if bool(accepted_only):
+                    return _branch_from_stacked_controls(representative_trace, state, coil_params, control)
                 do_propose = jnp.asarray(control["accept"], dtype=bool)
 
                 def _propose(_unused):
@@ -2900,6 +2936,8 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
 
         def _step_fn(state, coil_params, control):
             step_index = jnp.asarray(control["step_index"], dtype=jnp.int32) - jnp.asarray(index_offset, dtype=jnp.int32)
+            if bool(accepted_only):
+                return jax.lax.switch(step_index, branches, (state, coil_params, control))
             do_propose = jnp.asarray(control["accept"], dtype=bool)
 
             def _propose(_unused):
@@ -2925,9 +2963,11 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
         return control["done"]
 
     segment_preconditioner_controls_stacked: tuple[bool, ...] = ()
+    accepted_only_fast_path_segments: tuple[bool, ...] = ()
     if use_stacked_step_controls:
         control_segments_list = []
         segment_preconditioner_controls_stacked_list = []
+        accepted_only_fast_path_segments_list = []
         for segment in step_policy_segments:
             start = int(segment["start"])
             stop = int(segment["stop"])
@@ -2944,16 +2984,22 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                     raise ValueError("stacked step replay requires stackable preconditioner controls per segment") from exc
                 segment_controls = {**segment_controls, "step_preconditioner": segment_preconditioner_controls}
             segment_preconditioner_controls_stacked_list.append(True)
+            accepted_only_fast_path_segments_list.append(
+                bool(use_accepted_only_fast_path)
+                and _accepted_trace_segment_is_unconditionally_accepted(effective_masks, start=start, stop=stop)
+            )
             control_segments_list.append(segment_controls)
         control_segments = tuple(control_segments_list)
         segment_preconditioner_controls_stacked = tuple(segment_preconditioner_controls_stacked_list)
+        accepted_only_fast_path_segments = tuple(accepted_only_fast_path_segments_list)
         step_fns = tuple(
             _make_step_fn(
                 trace_seq[int(segment["start"]) : int(segment["stop"])],
                 index_offset=int(segment["start"]),
                 stacked_step_controls=True,
+                accepted_only=bool(accepted_only_fast_path_segments[index]),
             )
-            for segment in step_policy_segments
+            for index, segment in enumerate(step_policy_segments)
         )
         run = jax_visible_segmented_accepted_nonlinear_controller_jax(
             step_fns,
@@ -2967,6 +3013,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     elif use_preconditioner_policy_segments:
         control_segments_list = []
         segment_preconditioner_controls_stacked_list: list[bool] = []
+        accepted_only_fast_path_segments_list = []
         for segment in preconditioner_policy_segments:
             start = int(segment["start"])
             stop = int(segment["stop"])
@@ -2988,15 +3035,21 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                 segment_preconditioner_controls_stacked_list.append(False)
             else:
                 segment_preconditioner_controls_stacked_list.append(True)
+            accepted_only_fast_path_segments_list.append(
+                bool(use_accepted_only_fast_path)
+                and _accepted_trace_segment_is_unconditionally_accepted(effective_masks, start=start, stop=stop)
+            )
             control_segments_list.append(segment_controls)
         control_segments = tuple(control_segments_list)
         segment_preconditioner_controls_stacked = tuple(segment_preconditioner_controls_stacked_list)
+        accepted_only_fast_path_segments = tuple(accepted_only_fast_path_segments_list)
         step_fns = tuple(
             _make_step_fn(
                 trace_seq[int(segment["start"]) : int(segment["stop"])],
                 index_offset=int(segment["start"]),
+                accepted_only=bool(accepted_only_fast_path_segments[index]),
             )
-            for segment in preconditioner_policy_segments
+            for index, segment in enumerate(preconditioner_policy_segments)
         )
         run = jax_visible_segmented_accepted_nonlinear_controller_jax(
             step_fns,
@@ -3008,8 +3061,12 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
             checkpoint_steps=checkpoint_steps,
         )
     else:
+        accepted_only_fast_path_segments = (
+            bool(use_accepted_only_fast_path)
+            and _accepted_trace_segment_is_unconditionally_accepted(effective_masks, start=0, stop=len(trace_seq)),
+        )
         run = jax_visible_accepted_nonlinear_controller_jax(
-            _make_step_fn(trace_seq),
+            _make_step_fn(trace_seq, accepted_only=accepted_only_fast_path_segments[0]),
             accept_fn,
             converged_fn,
             initial_state,
@@ -3044,6 +3101,8 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
         "preconditioner_controls_segment_stacked": segment_preconditioner_controls_stacked,
         "used_preconditioner_policy_segments": bool(use_preconditioner_policy_segments),
         "used_stacked_step_controls": bool(use_stacked_step_controls),
+        "used_accepted_only_fast_path": bool(any(accepted_only_fast_path_segments)),
+        "accepted_only_fast_path_segments": accepted_only_fast_path_segments,
         "state_reset_flags": tuple(bool(flag) for flag in np.asarray(controls["reset_to_trace_pre"], dtype=bool)),
     }
 
@@ -3898,6 +3957,7 @@ def direct_coil_same_branch_controller_scalars_custom_vjp_report(
         "replay_option_flags": {
             "use_preconditioner_policy_segments": bool(replay_options.get("use_preconditioner_policy_segments", False)),
             "use_stacked_step_controls": bool(replay_options.get("use_stacked_step_controls", False)),
+            "use_accepted_only_fast_path": bool(replay_options.get("use_accepted_only_fast_path", True)),
         },
         "values": values,
         "jacobian": jacobian,
@@ -4212,6 +4272,7 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
                 replay_options.get("use_preconditioner_policy_segments", False)
             ),
             "use_stacked_step_controls": bool(replay_options.get("use_stacked_step_controls", False)),
+            "use_accepted_only_fast_path": bool(replay_options.get("use_accepted_only_fast_path", True)),
         },
     }
 
@@ -4351,6 +4412,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
                 replay_options.get("use_preconditioner_policy_segments", False)
             ),
             "use_stacked_step_controls": bool(replay_options.get("use_stacked_step_controls", False)),
+            "use_accepted_only_fast_path": bool(replay_options.get("use_accepted_only_fast_path", True)),
         },
     }
 
