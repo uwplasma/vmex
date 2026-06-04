@@ -1786,6 +1786,7 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
         )
         assert scalars_report["passed"], scalars_report
         assert scalars_report["replay_option_flags"]["use_stacked_step_controls"] is True
+        assert scalars_report["replay_option_flags"]["use_accepted_only_fast_path"] is True
         physical_scalar_gate = direct_coil_same_branch_physical_scalar_gate_report(
             complete_report,
             scalars_report,
@@ -1868,6 +1869,7 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
             assert production_branch_local["differentiates_fixed_accepted_branch"] is True
             assert production_branch_local["trace_replay_diagnostics"]["differentiates_adaptive_controller"] is False
             assert production_branch_local["replay_option_flags"]["use_stacked_step_controls"] is True
+            assert production_branch_local["replay_option_flags"]["use_accepted_only_fast_path"] is True
             assert production_branch_local["base_abs_delta"] < 2.0e-3
             np.testing.assert_allclose(
                 production_branch_exact,
@@ -1907,6 +1909,7 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
             assert production_branch_local_scalars["scalar_keys"] == tuple(vector_scalar_keys)
             assert production_branch_local_scalars["trace_replay_diagnostics"]["differentiates_adaptive_controller"] is False
             assert production_branch_local_scalars["replay_option_flags"]["use_stacked_step_controls"] is True
+            assert production_branch_local_scalars["replay_option_flags"]["use_accepted_only_fast_path"] is True
             assert production_branch_local_scalars["base_abs_delta"]["aspect"] < 2.0e-3
             assert production_branch_local_scalars["max_base_abs_delta"] < 2.0e-3
             np.testing.assert_allclose(
