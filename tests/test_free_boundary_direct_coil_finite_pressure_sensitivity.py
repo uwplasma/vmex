@@ -1900,7 +1900,7 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
         mpol=3,
         ntheta=4,
     )
-    base_params = _circle_coil_params(current=3.0e7, n_segments=24)
+    base_params = _circle_coil_params(current=3.0e7, n_segments=16)
     init = run_free_boundary(
         input_path,
         use_initial_guess=True,

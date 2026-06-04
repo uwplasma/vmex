@@ -48,6 +48,10 @@ Steps taken:
    stellsym current-only, stellsym Fourier-only, and LASYM mixed-direction
    gates, so the physical/algorithmic coverage is unchanged while one complete
    base/plus/minus solve triplet is eliminated.
+5. Reduced the tiny accepted-update replay test coil discretization from 24 to
+   16 segments.  The test still validates the same accepted trace, mixed
+   current/geometry coil-pytree AD-vs-central-FD slope, strict update replay,
+   controller replay, segmented controller replay, and padded inactive branch.
 
 Results obtained:
 
@@ -59,12 +63,19 @@ Results obtained:
    `Exact line coverage: 95.00%`.
 4. The local py3.11 exact coverage shard passed after the duplicate-removal
    patch: `18 passed in 131.79 s`.
+5. The accepted-update replay hotspot passed after the segment reduction:
+   `1 passed in 33.30 s`; the prior exact-shard timing for that item was
+   `55.15 s`.
+6. The local py3.11 exact coverage shard passed with both runtime patches:
+   `18 passed in 125.78 s`.
 
 Best next steps:
 
-1. Commit and push the exact-shard duplicate-removal patch, then watch CI.
+1. Commit and push the accepted-update replay segment-reduction patch, then
+   watch CI.
 2. Reduce the next exact-shard hotspot by sharing or further consolidating the
-   accepted-update replay and boundary-field dense Jacobian/cotangent gates.
+   boundary-field dense Jacobian/cotangent gate and the remaining current/Fourier
+   same-branch custom-VJP complete-solve gates.
 3. Add the next branch-local physical scalar only if it advances the production
    full-loop adjoint seam; avoid adding more replay scalars that only duplicate
    current coverage.
