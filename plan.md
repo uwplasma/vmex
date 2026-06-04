@@ -5,7 +5,7 @@ Primary branch: `main`
 Baseline release: `v0.0.14`
 Latest known green `main` CI: `6e9472b` (GitHub Actions run `26926678454`)
 Current candidate: local `main` after updating CI/release artifact actions to
-the Node-24-compatible v6 artifact actions. The latest green main split py3.11
+the Node-24-compatible v7 artifact actions. The latest green main split py3.11
 coverage into core and exact shards, retained the 95% combined coverage gate,
 kept the `DMerc`/Glasser `D_R` AD-vs-central-FD derivative gate, and preserved
 the exact boundary-field tangent, scalar cotangent, and finite-difference
@@ -86,6 +86,11 @@ acceptance criteria or evidence changes.
   py3.11 lane on `4817053` took `18:30`, so the required py3.11 critical path
   is now roughly `11:45` while preserving the same coverage and exact physics
   gates.
+- GitHub Actions run `26927279102` for artifact-action commit `6e5151c` passed
+  all required jobs, including artifact upload/download and combined coverage:
+  exact shard `7:46`, core shard `12:02`, combined coverage gate `0:34`.
+  Because v6 artifact actions still emitted a Node-20 deprecation annotation,
+  the current candidate advances artifact actions one more step to v7.
 - VMEC profile evaluation now covers polynomial pressure/iota/current profiles
   plus VMEC-style cubic, Akima, and line-segment tabulated pressure, iota, and
   current profiles. Cubic pressure/iota and current spline decks have been

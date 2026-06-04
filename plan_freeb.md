@@ -12,9 +12,9 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-06-04 on `main` after the split-CI commit `6e9472b` passed
-GitHub Actions run `26926678454`. The current local candidate updates
-CI/release artifact actions to the Node-24-compatible v6 artifact actions. The
+Last updated: 2026-06-04 on `main` after artifact-action commit `6e5151c`
+passed GitHub Actions run `26927279102`. The current local candidate updates
+CI/release artifact actions to the Node-24-compatible v7 artifact actions. The
 latest green main splits required py3.11 coverage into core and exact shards
 while keeping a combined 95% coverage threshold, preserves the `DMerc`/Glasser
 `D_R` AD-vs-central-FD gate, and keeps full-loop free-boundary claims
@@ -67,10 +67,15 @@ Results obtained:
    `11:16`, and the combined coverage gate finished in `0:29` with exact line
    coverage at the required 95% threshold. The previous monolithic py3.11
    coverage lane on `4817053` took `18:30`.
+6. GitHub Actions run `26927279102` for artifact-action commit `6e5151c` passed
+   all required jobs, including the changed upload/download coverage-artifact
+   path: exact shard `7:46`, core shard `12:02`, combined coverage gate `0:34`.
+   v6 artifact actions still emitted a Node-20 deprecation annotation, so the
+   current candidate advances artifact actions one more step to v7.
 
 Best next steps:
 
-1. Commit and push the artifact-action v6 hygiene patch, then watch the new
+1. Commit and push the artifact-action v7 hygiene patch, then watch the new
    GitHub Actions run far enough to confirm artifact upload/download still
    works on the split coverage jobs and the release workflow syntax remains
    valid.
