@@ -929,11 +929,11 @@ def test_direct_coil_complete_solve_proxy_objective_fd_response_for_current_and_
 
 
 @pytest.mark.py311_coverage_only
-def test_jax_nestor_operator_complete_solve_fd_slopes_for_current_and_geometry(
+def test_jax_nestor_operator_complete_solve_fd_slope_for_mixed_coil_direction(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Opt-in JAX NESTOR complete solves should have finite FD response to coil variables."""
+    """Opt-in JAX NESTOR complete solves should respond to mixed coil variables."""
 
     enable_x64(True)
     from vmec_jax._compat import jnp
@@ -970,28 +970,22 @@ def test_jax_nestor_operator_complete_solve_fd_slopes_for_current_and_geometry(
         return float(nestor["bnormal_rms"])
 
     eps = 0.25
-    current_forward = base_params.with_arrays(
-        base_currents=jnp.asarray(base_params.base_currents) * (1.0 + 0.02 * eps)
-    )
-    current_backward = base_params.with_arrays(
-        base_currents=jnp.asarray(base_params.base_currents) * (1.0 - 0.02 * eps)
-    )
-    geometry_forward = base_params.with_arrays(
-        base_curve_dofs=jnp.asarray(base_params.base_curve_dofs).at[0, 0, 2].add(1.0e-2 * eps)
-    )
-    geometry_backward = base_params.with_arrays(
-        base_curve_dofs=jnp.asarray(base_params.base_curve_dofs).at[0, 0, 2].add(-1.0e-2 * eps)
-    )
+    base_currents = jnp.asarray(base_params.base_currents)
+    base_dofs = jnp.asarray(base_params.base_curve_dofs)
+
+    def params_for(scale: float) -> CoilFieldParams:
+        return base_params.with_arrays(
+            base_currents=base_currents * (1.0 + 0.02 * float(scale)),
+            base_curve_dofs=base_dofs.at[0, 0, 2].add(1.0e-2 * float(scale)),
+        )
 
     # This is still an outer solve finite-response guard.  The driver path
     # materializes host NumPy state/diagnostics between iterations, so it should
     # not be treated as full-loop AD validation.
-    current_slope = (metric(current_forward) - metric(current_backward)) / (2.0 * eps)
-    geometry_slope = (metric(geometry_forward) - metric(geometry_backward)) / (2.0 * eps)
+    mixed_slope = (metric(params_for(eps)) - metric(params_for(-eps))) / (2.0 * eps)
 
-    slopes = np.asarray([current_slope, geometry_slope], dtype=float)
-    assert np.all(np.isfinite(slopes))
-    assert np.min(np.abs(slopes)) > 1.0e-16
+    assert np.isfinite(float(mixed_slope))
+    assert abs(float(mixed_slope)) > 1.0e-16
 
 
 def _set_same_branch_custom_vjp_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1016,11 +1010,13 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
     check_controller: bool = True,
     check_segmented_controller: bool = True,
     check_aspect_scalar: bool = True,
+    check_boundary_moment_scalar: bool = False,
 ) -> None:
     pytest.importorskip("jax")
     from vmec_jax._compat import jax, jnp
     from vmec_jax.free_boundary_adjoint import (
         direct_coil_accepted_trace_controller_custom_vjp_objective_jax,
+        free_boundary_boundary_geometry_jax,
         direct_coil_same_branch_controller_scalar_custom_vjp_report,
         direct_coil_same_branch_complete_solve_fd_report,
         direct_coil_fixed_trace_custom_vjp_objective_jax,
@@ -1031,6 +1027,12 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
     def state_norm_objective(state) -> float:
         packed = np.asarray(pack_state(state), dtype=float)
         return float(0.5 * np.vdot(packed, packed))
+
+    def lcfs_boundary_moment(state, static):
+        geometry = free_boundary_boundary_geometry_jax(state, static)
+        R = jnp.asarray(geometry["R"])
+        Z = jnp.asarray(geometry["Z"])
+        return jnp.mean((R - 1.0) * (R - 1.0) + Z * Z)
 
     eps = 1.0e-4
     complete_report = direct_coil_same_branch_complete_solve_fd_report(
@@ -1047,6 +1049,7 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
                     )
                 )
             ),
+            "lcfs_boundary_moment": float(np.asarray(lcfs_boundary_moment(payload["result"].state, payload["init"].static))),
         },
         eps=eps,
         solve_kwargs={
@@ -1079,7 +1082,7 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
     assert minus_branch["compatible"], minus_branch["changed_fields"]
 
     assert complete_report["primary_objective"] == "objective"
-    assert set(complete_report["objective_values"]) == {"objective", "aspect"}
+    assert set(complete_report["objective_values"]) == {"objective", "aspect", "lcfs_boundary_moment"}
     complete_fd = float(complete_report["values"]["central_fd_directional"])
 
     def custom_objective(params: CoilFieldParams):
@@ -1208,6 +1211,24 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
             rtol=1.0e-12,
             atol=1.0e-12,
         )
+    if check_boundary_moment_scalar:
+        moment_report = direct_coil_same_branch_controller_scalar_custom_vjp_report(
+            complete_report,
+            base_params,
+            direction,
+            scalar_key="lcfs_boundary_moment",
+            replay_scalar_fn=lambda replay, payload: lcfs_boundary_moment(
+                replay["state"],
+                payload["init"].static,
+            ),
+            eps=eps,
+            rtol=5.0e-3,
+            atol=5.0e-8,
+            compute_frozen_fd=False,
+        )
+        assert moment_report["passed"], moment_report
+        assert moment_report["same_branch"] is True
+        assert moment_report["base_abs_delta"] < 2.0e-3
 
 
 @pytest.mark.py311_coverage_only
@@ -1251,6 +1272,7 @@ def test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_
         check_controller=False,
         check_segmented_controller=False,
         check_aspect_scalar=True,
+        check_boundary_moment_scalar=True,
     )
 
 

@@ -81,6 +81,64 @@ Completion:
 - CI runtime refactor with preserved coverage/physics gates: 97%.
 - Docs/release hygiene: 96%.
 
+### 2026-06-04 Same-branch LCFS geometry scalar promotion
+
+Steps taken:
+
+1. Consolidated the complete-solve JAX NESTOR finite-response guard from
+   separate current-only and Fourier-geometry plus/minus solve pairs into one
+   mixed current+geometry direction. Current-only and Fourier-only
+   AD-vs-complete-FD gates remain covered separately, so this guard now checks
+   finite complete-solve sensitivity without duplicating complete solves.
+2. Added an LCFS boundary geometry moment scalar to the existing
+   same-branch complete-solve report by evaluating
+   `free_boundary_boundary_geometry_jax` on the accepted final state.
+3. Promoted that LCFS geometry moment through
+   `direct_coil_same_branch_controller_scalar_custom_vjp_report` on the
+   current-only tiny direct-coil same-branch gate, reusing the same
+   base/plus/minus complete-solve triplet already used for the state norm and
+   aspect-ratio scalar.
+
+Results obtained:
+
+1. Ruff passed on `tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+   and `tests/test_boundary_field.py`.
+2. Focused validation passed:
+   `test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_fd`
+   and
+   `test_jax_nestor_operator_complete_solve_fd_slope_for_mixed_coil_direction`
+   both passed in `48.21 s`.
+3. The current-only same-branch gate now validates three complete-loop
+   quantities on the same branch: final state norm, aspect ratio, and LCFS
+   boundary geometry moment. This remains a conservative same-branch custom-VJP
+   validation, not a production adaptive `run_free_boundary` exact-adjoint
+   claim.
+
+Best next steps:
+
+1. Commit and push the LCFS geometry scalar promotion, then watch CI.
+2. Continue exact-shard runtime work by sharing one forced-active accepted trace
+   payload across accepted-update replay, VMEC-state replay, and two-step replay
+   tests.
+3. Start the production full-loop seam design only after the current
+   fingerprint-gated same-branch scalar gates stay green in CI.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 98%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 100%.
+- VMEC parity and physics gates: 96%.
+- Single-stage coil-only optimization: 81%.
+- Robust coil perturbation optimization: 70%.
+- CPU/GPU performance: 84%.
+- CI runtime refactor with preserved coverage/physics gates: 98%.
+- Docs/release hygiene: 96%.
+
 ### 2026-06-04 CI split and exact-gate triage
 
 Steps taken:
