@@ -168,7 +168,9 @@ def _run_direct_solve(input_path: Path, params: CoilFieldParams):
     )
 
 
+@pytest.mark.py311_coverage_only
 def test_direct_coil_trace_fingerprint_detects_control_branch_changes() -> None:
+    from vmec_jax._compat import jnp
     from vmec_jax.free_boundary_adjoint import (
         direct_coil_accepted_trace_array_controls_jax,
         direct_coil_accepted_trace_branch_metadata,
@@ -319,6 +321,38 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes() -> None:
     bad_synthetic_gate = direct_coil_same_branch_replay_gate_report(bad_synthetic_report)
     assert not bad_synthetic_gate["passed"]
     assert any("adaptive-controller" in error for error in bad_synthetic_gate["errors"])
+
+    from vmec_jax.free_boundary_adjoint import (
+        _pytree_batched_directional_vdot_jax,
+        direct_coil_same_branch_controller_scalars_custom_vjp_report,
+    )
+
+    jacobian_tree = {
+        "a": jnp.asarray([[1.0, 2.0], [3.0, 4.0]]),
+        "b": jnp.asarray([[0.5], [-1.0]]),
+    }
+    direction_tree = {"a": jnp.asarray([10.0, -2.0]), "b": jnp.asarray([4.0])}
+    contracted = _pytree_batched_directional_vdot_jax(jacobian_tree, direction_tree, 2)
+    np.testing.assert_allclose(np.asarray(contracted), np.asarray([8.0, 18.0]))
+    np.testing.assert_allclose(
+        np.asarray(_pytree_batched_directional_vdot_jax({}, {}, 3)),
+        np.zeros(3),
+    )
+
+    with pytest.raises(ValueError, match="replay_scalar_fns"):
+        direct_coil_same_branch_controller_scalars_custom_vjp_report(
+            {"objective_values": {}},
+            base_params={},
+            direction={},
+            replay_scalar_fns={},
+        )
+    with pytest.raises(KeyError, match="not present"):
+        direct_coil_same_branch_controller_scalars_custom_vjp_report(
+            {"objective_values": {"known": {"base": 0.0, "central_fd_directional": 0.0}}},
+            base_params={},
+            direction={},
+            replay_scalar_fns={"missing": lambda _replay, _payload: 0.0},
+        )
 
     bad_preconditioner_shape = dict(trace1)
     bad_preconditioner_shape["precond_mats"] = {"ar": np.ones((3, 3)), "br": z + 7.0}

@@ -152,6 +152,48 @@ Completion:
 - Docs/release hygiene: 96%.
 - Overall free-boundary single-stage plan: 93.6%.
 
+### 2026-06-04 Coverage gate repair after scalar replay patch
+
+Steps taken:
+
+1. Watched CI for `c0aee2b`; all test shards passed, including the py3.11
+   exact shard, but the combined coverage gate failed at exact line coverage
+   `94.97%`, below the required `95.00%`.
+2. Added a fast `py311_coverage_only` coverage-buffer check inside the existing
+   direct-coil trace fingerprint test.  It covers the new vector-output pytree
+   directional contraction and the batched scalar report's input validation
+   branches without adding another VMEC solve.
+
+Results obtained:
+
+1. Ruff passed for the touched test and free-boundary adjoint source.
+2. The focused fast coverage-buffer test passed: `1 passed in 0.63 s`.
+3. The local py3.11 exact coverage shard passed with the new marker included:
+   `19 passed in 2:04`.
+
+Best next steps:
+
+1. Commit and push the coverage-buffer repair, then watch CI again.
+2. If CI is green, continue with production full-loop seam work rather than
+   adding more coverage-only changes.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.4%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 100%.
+- VMEC parity and physics gates: 96%.
+- Single-stage coil-only optimization: 82%.
+- Robust coil perturbation optimization: 70%.
+- CPU/GPU performance: 86%.
+- CI runtime refactor with preserved coverage/physics gates: 99%.
+- Docs/release hygiene: 96%.
+- Overall free-boundary single-stage plan: 93.7%.
+
 Completion:
 
 - Direct-coil/free-boundary phase 1: 100%.
