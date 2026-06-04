@@ -235,6 +235,8 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes() -> None:
     bad_scalar_shape["lambda_update_scale"] = np.asarray([1.0, 0.5, 0.25])
     with pytest.raises(ValueError, match="lambda_update_scale"):
         direct_coil_accepted_trace_scalar_controls_jax([trace0, bad_scalar_shape])
+    with pytest.raises(ValueError, match="accepted trace"):
+        direct_coil_accepted_trace_scalar_controls_jax([])
 
     array_controls = direct_coil_accepted_trace_array_controls_jax([trace0, trace1])
     assert np.asarray(array_controls["vRcc_before"]).shape == (2, 2, 3)
@@ -256,9 +258,13 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes() -> None:
     assert [(segment["start"], segment["stop"], segment["n_steps"]) for segment in same_policy_segments] == [(0, 2, 2)]
     assert same_policy_segments[0]["signature"][1] == 1
     assert same_policy_segments[0]["signature"][2] == 2
+    with pytest.raises(ValueError, match="accepted trace"):
+        direct_coil_accepted_trace_preconditioner_controls_jax([])
 
     with pytest.raises(KeyError, match="br_axis"):
         direct_coil_accepted_trace_step_controls_jax([trace0, trace1])
+    with pytest.raises(ValueError, match="accepted trace"):
+        direct_coil_accepted_trace_step_controls_jax([])
     mixed_force_trace = {**trace0, "force_state_pre": {"r": np.ones(2)}}
     mixed_step_controls = direct_coil_accepted_trace_step_controls_jax(
         [mixed_force_trace, trace1],
@@ -266,6 +272,12 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes() -> None:
     )
     assert "state_pre" in mixed_step_controls
     assert "force_state_pre" not in mixed_step_controls
+    bad_optional_shape = {**trace1, "force_state_pre": {"r": np.ones(3)}}
+    with pytest.raises(ValueError, match="force_state_pre"):
+        direct_coil_accepted_trace_step_controls_jax(
+            [mixed_force_trace, bad_optional_shape],
+            include_nestor_axes=False,
+        )
     both_optional_trace0 = {
         **trace0,
         "force_state_pre": {"r": np.ones(2)},
@@ -380,6 +392,39 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes() -> None:
     bad_synthetic_gate = direct_coil_same_branch_replay_gate_report(bad_synthetic_report)
     assert not bad_synthetic_gate["passed"]
     assert any("adaptive-controller" in error for error in bad_synthetic_gate["errors"])
+    mismatch_synthetic_report = deepcopy(synthetic_report)
+    mismatch_synthetic_report["branch_compatibility"].pop("base_fingerprint")
+    mismatch_synthetic_report["trace_replay_diagnostics"]["plus"] = {
+        "differentiates_adaptive_controller": False,
+        "n_steps": 99,
+        "branch_fingerprint": {"n_steps": 98, "n_freeb_steps": 97, "freeb_sizes": np.asarray([99])},
+        "masks": {
+            "active": np.asarray([True]),
+            "accepted": np.asarray([False]),
+            "rejected": np.asarray([True]),
+            "done": np.asarray([False]),
+            "has_active_freeb_replay": np.asarray([False]),
+        },
+        "replay_diagnostics": {
+            "scalar_controls_stackable": False,
+            "array_controls_stackable": False,
+            "preconditioner_policy_n_segments": 0,
+        },
+    }
+    mismatch_synthetic_report["trace_replay_diagnostics"]["minus"] = "missing"
+    mismatch_gate = direct_coil_same_branch_replay_gate_report(mismatch_synthetic_report)
+    assert not mismatch_gate["passed"]
+    assert any("base: missing branch fingerprint" in error for error in mismatch_gate["errors"])
+    assert any("plus: n_steps mismatch" in error for error in mismatch_gate["errors"])
+    assert any("plus: fingerprint n_steps mismatch" in error for error in mismatch_gate["errors"])
+    assert any("plus: fingerprint n_freeb_steps mismatch" in error for error in mismatch_gate["errors"])
+    assert any("plus: freeb_sizes mismatch" in error for error in mismatch_gate["errors"])
+    assert any("plus: mask 'active' has shape" in error for error in mismatch_gate["errors"])
+    assert any("plus: no accepted active free-boundary replay slots" in error for error in mismatch_gate["errors"])
+    assert any("plus: scalar controls are not stackable" in error for error in mismatch_gate["errors"])
+    assert any("plus: array controls are not stackable" in error for error in mismatch_gate["errors"])
+    assert any("plus: no preconditioner policy segments" in error for error in mismatch_gate["errors"])
+    assert any("minus: missing replay diagnostics" in error for error in mismatch_gate["errors"])
 
     from vmec_jax.free_boundary_adjoint import (
         _pytree_batched_directional_vdot_jax,

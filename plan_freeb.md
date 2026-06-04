@@ -140,15 +140,22 @@ Steps taken:
 2. Found the failure was exact line coverage `94.96%`, below the strict `95%`
    threshold, not a physics/numerics test failure.
 3. Added fast synthetic coverage for the new stacked accepted-step control
-   paths: missing NESTOR axis failure, mixed optional controls, fully stacked
-   optional controls, NESTOR axis stacking, static step-policy segmentation, and
-   step-policy summary masks.
+   paths: missing NESTOR axis failure, mixed optional controls, optional-shape
+   failures, fully stacked optional controls, NESTOR axis stacking, static
+   step-policy segmentation, and step-policy summary masks.
+4. Added synthetic replay-gate mismatch coverage for missing branch
+   fingerprints, state/free-boundary-size mismatches, mask-shape mismatches,
+   inactive free-boundary slots, non-stackable controls, and missing replay
+   diagnostics.
 
 Results obtained:
 
 1. Ruff passed for
    `tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`.
-2. Focused synthetic exact-gate test passed in `0.92 s`.
+2. Focused synthetic exact-gate test passed in `0.70 s` without coverage and
+   `5.99 s` with local JSON coverage enabled.
+3. The focused test alone covers `585` statements in
+   `vmec_jax/free_boundary_adjoint.py`.
 
 Best next steps:
 
