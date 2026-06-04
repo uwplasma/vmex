@@ -29,6 +29,7 @@ from .free_boundary_adjoint_controller import (
 __all__ = [
     "direct_coil_accepted_trace_branch_metadata",
     "direct_coil_accepted_trace_controller_custom_vjp_scalars_jax",
+    "direct_coil_same_branch_physical_scalar_gate_report",
     "direct_coil_same_branch_replay_gate_report",
     "direct_coil_same_branch_controller_scalars_custom_vjp_report",
     "free_boundary_adjoint_trace_replay_diagnostics",
@@ -3356,6 +3357,84 @@ def direct_coil_same_branch_controller_scalars_custom_vjp_report(
         "frozen_trace_fd_directionals": frozen_fd_directionals,
         "scalar_reports": scalar_reports,
     }
+
+
+def direct_coil_same_branch_physical_scalar_gate_report(
+    complete_report: Mapping[str, Any],
+    scalars_report: Mapping[str, Any],
+    *,
+    scalar_keys: tuple[str, ...] | list[str] | None = None,
+    json_safe: bool = False,
+) -> dict[str, Any]:
+    """Return a reviewer-facing same-branch physical-scalar promotion gate.
+
+    This helper composes the complete-solve central-FD report with the
+    branch-local accepted-controller custom-VJP scalar report.  Passing this
+    gate means the named physical scalars agree with complete-solve central
+    finite differences *under an unchanged accepted-trace fingerprint*.  It is
+    intentionally explicit that this is not yet differentiation through an
+    arbitrary adaptive host-controller branch change.
+    """
+
+    replay_gate = direct_coil_same_branch_replay_gate_report(complete_report)
+    scalar_reports = scalars_report.get("scalar_reports", {})
+    if scalar_keys is None:
+        scalar_keys = tuple(str(key) for key in scalars_report.get("scalar_keys", tuple(scalar_reports)))
+    else:
+        scalar_keys = tuple(str(key) for key in scalar_keys)
+
+    errors: list[str] = []
+    if not bool(replay_gate.get("passed", False)):
+        errors.append("same-branch replay gate failed")
+    if bool(replay_gate.get("differentiates_adaptive_controller", True)):
+        errors.append("replay gate unexpectedly claims adaptive-controller differentiation")
+    if not bool(scalars_report.get("same_branch", False)):
+        errors.append("scalar report is not same-branch")
+
+    objective_values = complete_report.get("objective_values", {})
+    scalar_summaries: dict[str, dict[str, float | bool]] = {}
+    for key in scalar_keys:
+        scalar_report = scalar_reports.get(key)
+        if not isinstance(scalar_report, Mapping):
+            errors.append(f"{key}: missing scalar report")
+            continue
+        if key not in objective_values:
+            errors.append(f"{key}: missing complete-solve objective values")
+            continue
+        if not bool(scalar_report.get("passed", False)):
+            errors.append(f"{key}: scalar AD-vs-FD report failed")
+        if not bool(scalar_report.get("same_branch", False)):
+            errors.append(f"{key}: scalar report is not same-branch")
+        complete_fd = float(objective_values[key]["central_fd_directional"])
+        exact = float(np.asarray(scalar_report.get("exact_directional"), dtype=float))
+        base_abs_delta = float(scalar_report.get("base_abs_delta", np.nan))
+        if not np.isfinite(complete_fd):
+            errors.append(f"{key}: non-finite complete-solve FD slope")
+        if not np.isfinite(exact):
+            errors.append(f"{key}: non-finite custom-VJP slope")
+        scalar_summaries[key] = {
+            "passed": bool(scalar_report.get("passed", False)),
+            "complete_fd_directional": complete_fd,
+            "exact_directional": exact,
+            "abs_error": float(scalar_report.get("abs_error", np.nan)),
+            "rel_error": float(scalar_report.get("rel_error", np.nan)),
+            "base_abs_delta": base_abs_delta,
+        }
+
+    branch = complete_report.get("branch_compatibility", {})
+    result = {
+        "contract": "same-branch complete-solve physical-scalar AD-vs-FD gate",
+        "passed": len(errors) == 0,
+        "same_branch": bool(branch.get("same_branch", False)),
+        "differentiates_adaptive_controller": False,
+        "scalar_keys": scalar_keys,
+        "replay_gate": replay_gate,
+        "errors": tuple(errors),
+        "scalars": scalar_summaries,
+    }
+    if json_safe:
+        return _json_safe_fingerprint_value(result)
+    return result
 
 
 def direct_coil_fixed_trace_custom_vjp_objective_jax(
