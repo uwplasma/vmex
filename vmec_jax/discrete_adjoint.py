@@ -468,6 +468,108 @@ def _array_from_diag(diagnostics: dict[str, Any], key: str, *, dtype=None) -> np
     return arr
 
 
+_FINGERPRINT_TRACE_KEYS = (
+    "branch",
+    "step_status",
+    "restart_reason",
+    "pre_restart_reason",
+    "restart_path",
+    "include_edge_residual",
+    "apply_m1_constraints",
+    "vmec2000_control",
+    "limit_dt_from_force",
+    "zero_m1",
+    "precond_jmax",
+    "preconditioner_use_precomputed_tridi",
+    "preconditioner_use_lax_tridi",
+    "freeb_plascur",
+    "freeb_plascur_for_bsqvac",
+)
+
+_FINGERPRINT_DIAGNOSTIC_KEYS = (
+    "step_status_history",
+    "restart_reason_history",
+    "pre_restart_reason_history",
+    "restart_path_history",
+    "include_edge_history",
+    "zero_m1_history",
+    "state_advanced_history",
+    "freeb_ivac_history",
+    "freeb_ivacskip_history",
+    "freeb_full_update_history",
+    "freeb_nestor_reused_history",
+    "freeb_nestor_source_reused_history",
+    "freeb_nestor_provider_allows_source_reuse_history",
+    "freeb_nestor_trial_reused_history",
+    "freeb_nestor_trial_failed_history",
+)
+
+
+def _fingerprint_scalar(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, (str, bytes)):
+        return value.decode() if isinstance(value, bytes) else value
+    if isinstance(value, (int, np.integer)):
+        return int(value)
+    if isinstance(value, (float, np.floating)):
+        return float(value)
+    arr = np.asarray(value)
+    if arr.ndim == 0:
+        return _fingerprint_scalar(arr.item())
+    if arr.dtype.kind in ("b",):
+        return tuple(bool(x) for x in arr.reshape(-1).tolist())
+    if arr.dtype.kind in ("i", "u"):
+        return tuple(int(x) for x in arr.reshape(-1).tolist())
+    if arr.dtype.kind in ("f",):
+        return tuple(float(x) for x in arr.reshape(-1).tolist())
+    return tuple(_fingerprint_scalar(x) for x in arr.reshape(-1).tolist())
+
+
+def residual_branch_fingerprint(result_or_diagnostics: Any) -> tuple[tuple[str, Any], ...]:
+    """Return categorical solver-control data for same-branch FD checks.
+
+    The fingerprint intentionally includes controller decisions, restart paths,
+    trace branches, free-boundary cadence/reuse flags, and preconditioner policy,
+    but not residual magnitudes, wall times, or floating-point state values.  It
+    is meant to guard local derivative comparisons: matching fingerprints support
+    a same-branch AD-vs-FD claim; differing fingerprints mean the comparison is
+    across an adaptive branch switch and should be skipped or treated separately.
+    """
+
+    diagnostics = getattr(result_or_diagnostics, "diagnostics", result_or_diagnostics)
+    if not isinstance(diagnostics, dict):
+        raise TypeError("result_or_diagnostics must be a diagnostics dict or an object with diagnostics")
+
+    pieces: list[tuple[str, Any]] = []
+    for key in _FINGERPRINT_DIAGNOSTIC_KEYS:
+        if key in diagnostics:
+            pieces.append((key, _fingerprint_scalar(diagnostics.get(key))))
+
+    freeb = diagnostics.get("free_boundary")
+    if isinstance(freeb, dict):
+        for key in ("enabled", "nvacskip", "nvskip0", "ivac", "ivacskip", "couple_edge", "provider_kind"):
+            if key in freeb:
+                pieces.append((f"free_boundary.{key}", _fingerprint_scalar(freeb.get(key))))
+
+    traces = diagnostics.get("adjoint_step_trace", ())
+    trace_fingerprints = []
+    for trace in tuple(traces or ()):
+        if not isinstance(trace, dict):
+            continue
+        trace_fingerprints.append(
+            tuple(
+                (key, _fingerprint_scalar(trace.get(key)))
+                for key in _FINGERPRINT_TRACE_KEYS
+                if key in trace
+            )
+        )
+    pieces.append(("adjoint_step_trace", tuple(trace_fingerprints)))
+    return tuple(pieces)
+
+
 def residual_iteration_trace_from_result(result) -> ResidualIterationTrace:
     """Extract a compact, typed residual-iteration trace from a solver result."""
     diagnostics = getattr(result, "diagnostics", None)
@@ -3203,6 +3305,7 @@ __all__ = [
     "raw_force_residual_from_state",
     "replay_scan_cache_diagnostics",
     "replay_residual_checkpoint_step",
+    "residual_branch_fingerprint",
     "strict_update_accepted_step",
     "strict_update_one_step_from_trace",
     "strict_update_one_step_from_state",

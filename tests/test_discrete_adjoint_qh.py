@@ -70,6 +70,49 @@ def test_replay_tridi_policy_helpers_and_static_flags():
         da._static_flags_from_replay_step_traces((base_trace, bad_lax))
 
 
+def test_residual_branch_fingerprint_tracks_control_not_residual_values():
+    from vmec_jax.discrete_adjoint import residual_branch_fingerprint
+
+    base = {
+        "step_status_history": np.asarray(["momentum", "momentum"], dtype=object),
+        "restart_reason_history": np.asarray(["none", "none"], dtype=object),
+        "pre_restart_reason_history": np.asarray(["none", "none"], dtype=object),
+        "restart_path_history": np.asarray(["momentum_accept", "momentum_accept"], dtype=object),
+        "include_edge_history": np.asarray([0, 0], dtype=int),
+        "zero_m1_history": np.asarray([1, 1], dtype=int),
+        "w_curr_history": np.asarray([1.0, 0.25], dtype=float),
+        "freeb_ivac_history": np.asarray([0, 1], dtype=int),
+        "freeb_ivacskip_history": np.asarray([0, 1], dtype=int),
+        "freeb_full_update_history": np.asarray([1, 0], dtype=int),
+        "freeb_nestor_reused_history": np.asarray([0, 1], dtype=int),
+        "free_boundary": {"enabled": True, "nvacskip": 2, "provider_kind": "direct_coils"},
+        "adjoint_step_trace": [
+            {
+                "branch": "strict_update",
+                "step_status": "momentum",
+                "restart_reason": "none",
+                "pre_restart_reason": "none",
+                "restart_path": "momentum_accept",
+                "include_edge_residual": False,
+                "apply_m1_constraints": True,
+                "zero_m1": np.asarray([1, 0, 1], dtype=int),
+                "precond_jmax": 3,
+                "freeb_plascur": 1.25,
+                "freeb_bsqvac_half": np.asarray([100.0, 200.0], dtype=float),
+            }
+        ],
+    }
+
+    changed_numeric = dict(base)
+    changed_numeric["w_curr_history"] = np.asarray([3.0, 2.0], dtype=float)
+    changed_numeric["adjoint_step_trace"] = [dict(base["adjoint_step_trace"][0], freeb_bsqvac_half=np.asarray([1.0]))]
+    assert residual_branch_fingerprint(base) == residual_branch_fingerprint(changed_numeric)
+
+    changed_branch = dict(base)
+    changed_branch["freeb_full_update_history"] = np.asarray([1, 1], dtype=int)
+    assert residual_branch_fingerprint(base) != residual_branch_fingerprint(changed_branch)
+
+
 def test_qh_warm_start_fixture_loads_expected_case(load_case_qh_warm_start):
     _cfg, _indata, static, boundary, _state0 = load_case_qh_warm_start
 
