@@ -102,7 +102,7 @@ def _cache_machine_fingerprint() -> str:
                         seen.add(key)
     except Exception:
         pass
-    if len(parts) <= 3:
+    if not any(str(part).strip() for part in parts[:3]):
         try:
             parts.append(platform.node())
         except Exception:

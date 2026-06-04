@@ -513,6 +513,7 @@ def _assert_scalar_objective_hook_matches_residual_vector(residuals_fn, state):
     assert np.all(np.isfinite(cotangent))
 
 
+@pytest.mark.py311_slow_coverage
 def test_qh_residual_factory_scalar_objective_hook_matches_residual_vector(
     load_case_qh_warm_start,
 ):
@@ -531,6 +532,7 @@ def test_qh_residual_factory_scalar_objective_hook_matches_residual_vector(
     _assert_scalar_objective_hook_matches_residual_vector(residuals_fn, state)
 
 
+@pytest.mark.py311_slow_coverage
 def test_qs_residual_factory_scalar_objective_hook_sanitizes_iota_cotangent(
     load_case_qh_warm_start,
 ):
@@ -551,6 +553,7 @@ def test_qs_residual_factory_scalar_objective_hook_sanitizes_iota_cotangent(
     _assert_scalar_objective_hook_matches_residual_vector(residuals_fn, state)
 
 
+@pytest.mark.py311_slow_coverage
 def test_qs_residual_factory_scalar_objective_hook_handles_iota_floor(
     load_case_qh_warm_start,
 ):

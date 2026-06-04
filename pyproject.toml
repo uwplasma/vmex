@@ -65,6 +65,7 @@ markers = [
   "simsopt: optional integration tests comparing against SIMSOPT",
   "full: slower/full-physics tests; fetched-asset rows require tools/fetch_assets.py",
   "py311_coverage_only: expensive physics/numerics gates run in the Python 3.11 coverage lane and are skipped in compatibility-only CI lanes",
+  "py311_slow_coverage: expensive physics/numerics gates split into a separate Python 3.11 coverage shard and skipped in core/compatibility CI lanes",
 ]
 
 [tool.ruff]

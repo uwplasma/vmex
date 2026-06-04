@@ -1623,6 +1623,7 @@ def test_replay_residual_checkpoint_step_matches_second_direct_step_qh(load_case
     )
 
 
+@pytest.mark.py311_slow_coverage
 def test_strict_update_velocity_state_advance_reconstructs_first_qh_step(load_case_qh_warm_start):
     pytest.importorskip("jax")
 
@@ -2461,6 +2462,7 @@ def test_preconditioned_force_channels_from_raw_forces_reconstructs_first_qh_ste
     assert np.asarray(out["flsc_u"]) == pytest.approx(np.asarray(trace["flsc_u"]), rel=0.0, abs=1.0e-12)
 
 
+@pytest.mark.py311_slow_coverage
 def test_preconditioned_force_channels_from_raw_forces_vjp_identity_qh(load_case_qh_warm_start):
     pytest.importorskip("jax")
 
@@ -2807,6 +2809,7 @@ def test_strict_update_one_step_from_state_reconstructs_first_qh_step(load_case_
     assert rebuilt_diff < 2.0e-5
 
 
+@pytest.mark.py311_slow_coverage
 def test_strict_update_one_step_from_state_vjp_identity_qh(load_case_qh_warm_start):
     pytest.importorskip("jax")
 

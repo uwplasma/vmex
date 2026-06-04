@@ -98,6 +98,7 @@ def test_qi_diagnostic_scalar_helpers_cover_unavailable_and_subset_branches() ->
     assert _failure_message("iota", 0.1, 0.4, upper=False) == "iota=0.1 is below target 0.4"
 
 
+@pytest.mark.py311_slow_coverage
 def test_qi_diagnostics_from_boozer_output_records_core_metrics():
     pytest.importorskip("jax")
 
@@ -541,6 +542,7 @@ def test_qi_diagnostics_from_state_requires_surfaces_and_records_component_error
         )
 
 
+@pytest.mark.py311_slow_coverage
 def test_qi_diagnostics_from_bundled_solved_qi_seed_records_state_metrics():
     pytest.importorskip("jax")
     pytest.importorskip("netCDF4")
@@ -986,6 +988,7 @@ def test_qi_cleanup_candidate_reports_missing_mirror_inputs_without_rejecting_qi
     assert missing_reference["qi_cleanup_rejection_reasons"] == ["reference mirror ratio is unavailable"]
 
 
+@pytest.mark.py311_slow_coverage
 def test_qi_seed_ranking_tracks_legacy_goodman_order_on_synthetic_modes():
     pytest.importorskip("jax")
 

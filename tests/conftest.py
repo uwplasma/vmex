@@ -87,7 +87,10 @@ def pytest_collection_modifyitems(config, items):
     if run_full and not has_assets:
         raise pytest.UsageError("RUN_FULL=1 but example assets are missing. Run tools/fetch_assets.py")
     for item in items:
-        if skip_py311_coverage_only and item.get_closest_marker("py311_coverage_only") is not None:
+        if skip_py311_coverage_only and (
+            item.get_closest_marker("py311_coverage_only") is not None
+            or item.get_closest_marker("py311_slow_coverage") is not None
+        ):
             item.add_marker(
                 pytest.mark.skip(
                     reason="Skipped in compatibility-only CI lanes; covered by the Python 3.11 coverage lane."

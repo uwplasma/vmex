@@ -1593,6 +1593,7 @@ def test_jax_vmec_analytic_mode_solve_chain_gradients_match_finite_difference(la
     np.testing.assert_allclose(exact_geometry, fd_geometry, rtol=2.0e-6, atol=1.0e-10)
 
 
+@pytest.mark.py311_slow_coverage
 def test_jax_vmec_combined_analytic_nonsingular_solve_chain_gradients_match_finite_difference():
     pytest.importorskip("jax")
     from vmec_jax._compat import jax, jnp
@@ -1749,6 +1750,7 @@ def test_dense_vmec_nestor_mode_solve_matches_host_reduced_symmetric_grid():
     np.testing.assert_allclose(actual["phi_flat"], expected["phi_flat"], rtol=1.0e-12, atol=1.0e-12)
 
 
+@pytest.mark.py311_slow_coverage
 def test_dense_vmec_nestor_mode_solve_gradients_match_finite_difference():
     pytest.importorskip("jax")
     from vmec_jax._compat import jax, jnp
@@ -2412,6 +2414,7 @@ def test_dense_fixed_point_projected_mode_loop_wrt_geometry_matches_finite_diffe
     )
 
 
+@pytest.mark.py311_slow_coverage
 def test_projected_mode_fixed_point_objective_exposes_components():
     """Check the scalar objective wrapper returns usable diagnostics."""
 
@@ -2479,6 +2482,7 @@ def test_projected_mode_fixed_point_objective_exposes_components():
     assert float(solved["objective"]) >= float(solved["objective_components"]["state"])
 
 
+@pytest.mark.py311_slow_coverage
 def test_projected_mode_fixed_point_objective_value_and_grad_wrt_coil_pytree():
     """Validate the optimizer-facing scalar objective has coil pytree gradients."""
 

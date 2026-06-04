@@ -233,6 +233,7 @@ def test_run_fixed_boundary_initial_guess():
     assert wout.ns == run.cfg.ns
 
 
+@pytest.mark.py311_slow_coverage
 def test_run_fixed_boundary_returns_current_driven_flux_profiles():
     root = Path(__file__).resolve().parents[1]
     input_path = root / "examples/data/input.basic_non_stellsym_pressure"
@@ -306,6 +307,7 @@ def test_final_flux_profiles_from_state_supports_traced_lsin():
     assert np.isfinite(grad)
 
 
+@pytest.mark.py311_slow_coverage
 def test_host_update_assembly_matches_jax_update_path():
     root = Path(__file__).resolve().parents[1]
     input_path = root / "examples/data/input.LandremanPaul2021_QA_lowres"
@@ -362,6 +364,7 @@ def test_host_update_assembly_matches_jax_update_path():
     np.testing.assert_allclose(np.asarray(res_host.w_history), np.asarray(res_jax.w_history), rtol=1e-12, atol=1e-12)
 
 
+@pytest.mark.py311_slow_coverage
 def test_host_update_assembly_matches_jax_update_path_lasym():
     root = Path(__file__).resolve().parents[1]
     input_path = root / "examples/data/input.basic_non_stellsym_pressure"
@@ -1826,6 +1829,7 @@ def test_run_fixed_boundary_cli_single_grid_requires_strict_ftol(monkeypatch, tm
     assert float(diag["final_fsql"]) <= 1.0e-14
 
 
+@pytest.mark.py311_slow_coverage
 def test_run_fixed_boundary_accelerated_mode_defaults_to_single_grid():
     # When solver_mode is explicitly set to "accelerated" (not via CLI auto-
     # detection), the accelerated path uses the single-grid shortcut regardless
@@ -2145,6 +2149,7 @@ def test_run_fixed_boundary_cli_three_stage_lasym_current_driven_nonaxis_uses_mu
     assert np.asarray(diag["multigrid_stage_modes"]).tolist() == ["parity", "parity", "parity"]
 
 
+@pytest.mark.py311_slow_coverage
 def test_vmec2000_iter_histories_materialize_numeric_arrays():
     root = Path(__file__).resolve().parents[1]
     input_path = root / "examples/data/input.circular_tokamak"

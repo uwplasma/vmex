@@ -54,6 +54,7 @@ def test_glasser_finite_beta_example_can_reuse_existing_wout(monkeypatch, tmp_pa
     assert mod.load_or_run_wout() is expected
 
 
+@pytest.mark.py311_slow_coverage
 def test_finite_beta_qa_glasser_profile_physics_gate(tmp_path: Path, monkeypatch) -> None:
     """Run the finite-beta QA deck and lock down the promoted D_R profile."""
 

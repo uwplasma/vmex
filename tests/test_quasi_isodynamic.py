@@ -34,6 +34,7 @@ def test_qi_boozer_mode_residual_is_zero_for_alpha_independent_wells():
     assert np.asarray(out["residuals1d"]).shape == (2 * 9 * 7 + 33 * 9,)
 
 
+@pytest.mark.py311_slow_coverage
 def test_qi_residual_from_boozer_output_handles_surface_weights_and_sine_modes():
     pytest.importorskip("jax")
 
@@ -284,6 +285,7 @@ def test_qi_residual_from_state_accepts_precomputed_boozer_grid_and_scalar_surfa
     assert np.isfinite(float(np.asarray(out["total"])))
 
 
+@pytest.mark.py311_slow_coverage
 def test_qi_boozer_mode_residual_can_include_legacy_bounce_endpoints():
     pytest.importorskip("jax")
 
@@ -328,6 +330,7 @@ def test_qi_boozer_mode_residual_can_include_legacy_bounce_endpoints():
     assert dense["shuffle_profile_nphi_out"] == 49
 
 
+@pytest.mark.py311_slow_coverage
 def test_qi_weighted_shuffle_profile_residual_is_finite_and_differentiable():
     pytest.importorskip("jax")
 
@@ -572,6 +575,7 @@ def test_qi_boozer_mode_residual_has_finite_saturated_sigmoid_adjoint():
     assert np.all(np.isfinite(np.asarray(grad)))
 
 
+@pytest.mark.py311_slow_coverage
 def test_qi_boozer_output_wrapper_matches_mode_residual_regression():
     pytest.importorskip("jax")
 
@@ -711,6 +715,7 @@ def test_qi_boozer_mode_residual_validates_shapes_and_resolution():
         quasi_isodynamic_residual_from_boozer_modes(**{**base, "nphi": 3})
 
 
+@pytest.mark.py311_slow_coverage
 def test_qi_state_residual_smoke(load_case_qh_warm_start):
     pytest.importorskip("jax")
     pytest.importorskip("booz_xform_jax")

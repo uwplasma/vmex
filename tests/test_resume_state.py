@@ -1,8 +1,10 @@
 import numpy as np
+import pytest
 
 import vmec_jax.api as vj
 
 
+@pytest.mark.py311_slow_coverage
 def test_resume_state_matches_continuous():
     input_path = "examples/data/input.circular_tokamak"
     max_iter = 4

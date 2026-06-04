@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import builtins
+import importlib.util
 import pathlib
 import platform
 import sys
@@ -195,6 +196,10 @@ def test_default_compilation_cache_dir_handles_home_failure_and_rocm(monkeypatch
         monkeypatch.delenv(key, raising=False)
 
     monkeypatch.setattr(pathlib.Path, "home", classmethod(lambda cls: (_ for _ in ()).throw(OSError("home missing"))))
+    monkeypatch.setenv("VMEC_JAX_COMPILATION_CACHE", "1")
+    assert compat._default_compilation_cache_dir() is None
+    monkeypatch.delenv("VMEC_JAX_COMPILATION_CACHE")
+
     monkeypatch.setenv("HIP_VISIBLE_DEVICES", "0")
     assert compat._default_compilation_cache_dir() is None
 
@@ -297,6 +302,33 @@ def test_try_import_jax_falls_back_when_import_is_mocked(monkeypatch) -> None:
         return x + 2
 
     assert jit(fn)(3) == 5
+
+
+def test_module_import_installs_tree_util_fallback_when_jax_is_unavailable(monkeypatch) -> None:
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "jax" or name.startswith("jax."):
+            raise ImportError("jax unavailable")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    module_name = "_vmec_jax_compat_nojax_test"
+    spec = importlib.util.spec_from_file_location(module_name, pathlib.Path(compat.__file__))
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+        assert module.jax is None
+
+        @module.tree_util.register_pytree_node_class
+        class _SyntheticTree:
+            pass
+
+        assert _SyntheticTree.__name__ == "_SyntheticTree"
+    finally:
+        sys.modules.pop(module_name, None)
 
 
 def test_try_import_jax_sets_cache_env_and_ignores_config_update_failures(monkeypatch) -> None:
