@@ -8,6 +8,7 @@ in the backward pass rather than differentiating through an iterative solver.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping
 from typing import Any
 
@@ -29,6 +30,8 @@ from .free_boundary_adjoint_controller import (
 __all__ = [
     "direct_coil_accepted_trace_branch_metadata",
     "direct_coil_accepted_trace_controller_custom_vjp_scalars_jax",
+    "direct_coil_accepted_trace_step_controls_jax",
+    "direct_coil_accepted_trace_step_policy_segments",
     "direct_coil_same_branch_physical_scalar_gate_report",
     "direct_coil_same_branch_replay_gate_report",
     "direct_coil_same_branch_controller_scalars_custom_vjp_report",
@@ -1825,6 +1828,23 @@ def _stack_trace_pytree_field(trace_seq: tuple[dict[str, Any], ...], key: str) -
     return tree_util.tree_map(_stack_leaf, *values)
 
 
+def _stack_optional_trace_pytree_field(trace_seq: tuple[dict[str, Any], ...], key: str) -> Any | None:
+    values = [trace.get(key) for trace in trace_seq]
+    if all(value is None for value in values):
+        return None
+    if any(value is None for value in values):
+        raise ValueError(f"accepted trace optional field {key!r} must be present for every step or none")
+
+    def _stack_leaf(*leaves):
+        arrays = [jnp.asarray(leaf) for leaf in leaves]
+        shapes = {tuple(arr.shape) for arr in arrays}
+        if len(shapes) != 1:
+            raise ValueError(f"accepted trace optional field {key!r} must have consistent leaf shapes")
+        return jnp.stack(arrays, axis=0)
+
+    return tree_util.tree_map(_stack_leaf, *values)
+
+
 def direct_coil_accepted_trace_scalar_controls_jax(traces: Any) -> dict[str, Any]:
     """Return stacked scalar/update controls consumed by accepted trace replay.
 
@@ -1894,6 +1914,208 @@ def _trace_preconditioner_static_signature(trace: dict[str, Any]) -> tuple[Any, 
         tuple(np.asarray(trace.get("lam_prec", [])).shape),
         tuple(np.asarray(trace.get("w_mode_mn", [])).shape),
     )
+
+
+def _trace_static_value_shape_signature(value: Any) -> tuple[Any, ...]:
+    """Return a compact signature for static trace payload structure/value."""
+
+    if value is None:
+        return ()
+    try:
+        leaves = tree_util.tree_leaves(value)
+    except Exception:
+        leaves = [value]
+    signature = []
+    for leaf in leaves:
+        arr = np.asarray(leaf)
+        if arr.dtype == object:
+            digest = hashlib.sha256(repr(arr.tolist()).encode("utf-8")).hexdigest()
+        else:
+            digest = hashlib.sha256(np.ascontiguousarray(arr).tobytes()).hexdigest()
+        signature.append((tuple(arr.shape), str(arr.dtype), digest))
+    return tuple(signature)
+
+
+def _trace_optional_presence_signature(trace: dict[str, Any], keys: tuple[str, ...]) -> tuple[int, ...]:
+    return tuple(0 if trace.get(key) is None else 1 for key in keys)
+
+
+_ACCEPTED_TRACE_OPTIONAL_STEP_PYTREE_CONTROL_KEYS = (
+    "force_state_pre",
+    "freeb_pres_scale",
+    "constraint_rcon0",
+    "constraint_zcon0",
+    "constraint_tcon0",
+    "constraint_precond_diag",
+    "constraint_tcon",
+    "constraint_precond_active",
+    "constraint_tcon_active",
+)
+
+_ACCEPTED_TRACE_NESTOR_AXIS_KEYS = ("br_axis", "bp_axis", "bz_axis")
+
+
+def _stack_trace_nestor_axis_controls(trace_seq: tuple[dict[str, Any], ...]) -> dict[str, Any] | None:
+    active_nestor = [
+        trace.get("freeb_nestor_trace")
+        if trace.get("freeb_bsqvac_half") is not None and isinstance(trace.get("freeb_nestor_trace"), dict)
+        else None
+        for trace in trace_seq
+    ]
+    if all(nestor_trace is None for nestor_trace in active_nestor):
+        return None
+    payload = {}
+    for key in _ACCEPTED_TRACE_NESTOR_AXIS_KEYS:
+        template = None
+        for nestor_trace in active_nestor:
+            if nestor_trace is not None:
+                if key not in nestor_trace:
+                    raise KeyError(f"active NESTOR trace is missing axis field {key!r}")
+                template = jnp.asarray(nestor_trace[key])
+                break
+        if template is None:
+            continue
+        values = []
+        for nestor_trace in active_nestor:
+            if nestor_trace is None:
+                values.append(jnp.zeros_like(template))
+                continue
+            value = jnp.asarray(nestor_trace[key])
+            if tuple(value.shape) != tuple(template.shape):
+                raise ValueError(f"NESTOR axis field {key!r} must have consistent shape for stacked replay")
+            values.append(value)
+        payload[key] = jnp.stack(values, axis=0)
+    return payload
+
+
+def _trace_step_policy_static_signature(trace: dict[str, Any]) -> tuple[Any, ...]:
+    """Return the static-dispatch signature for one accepted replay step.
+
+    This signature is stricter than the preconditioner-only segmentation.  It
+    separates steps whenever a field consumed through Python/static dispatch or
+    a non-stacked optional payload changes shape or presence.  Values inside
+    stacked JAX arrays remain differentiable/dynamic controls.
+    """
+
+    has_active_freeb_replay = trace.get("freeb_bsqvac_half") is not None and trace.get("freeb_nestor_trace") is not None
+    return (
+        _trace_preconditioner_static_signature(trace),
+        int(bool(trace.get("apply_lforbal", False))),
+        int(bool(trace.get("include_edge_residual", False))),
+        int(bool(trace.get("apply_m1_constraints", False))),
+        int(bool(has_active_freeb_replay)),
+        _trace_static_value_shape_signature(trace.get("wout_like")),
+        _trace_static_value_shape_signature(trace.get("trig")),
+        _trace_static_value_shape_signature(trace.get("zero_m1")),
+        _trace_optional_presence_signature(trace, _ACCEPTED_TRACE_OPTIONAL_STEP_PYTREE_CONTROL_KEYS),
+        tuple(
+            _trace_static_value_shape_signature(trace.get(key))
+            for key in _ACCEPTED_TRACE_OPTIONAL_STEP_PYTREE_CONTROL_KEYS
+            if trace.get(key) is not None
+        ),
+    )
+
+
+def direct_coil_accepted_trace_step_policy_segments(
+    traces: Any,
+    *,
+    max_steps: int | None = None,
+) -> list[dict[str, Any]]:
+    """Return consecutive static step-policy segments for stacked replay.
+
+    These segments are the safe opt-in seam for moving accepted production
+    traces from per-step ``trace`` dictionaries toward stacked JAX controls.
+    A segment may call ``strict_update_one_step_from_state`` directly because
+    all Python/static dispatch fields have the same signature inside it.
+    """
+
+    trace_seq = tuple(traces)
+    if max_steps is not None:
+        trace_seq = trace_seq[: int(max_steps)]
+    if not trace_seq:
+        raise ValueError("at least one accepted trace is required")
+
+    segments: list[dict[str, Any]] = []
+    start = 0
+    current_signature = _trace_step_policy_static_signature(trace_seq[0])
+    for index, trace in enumerate(trace_seq[1:], start=1):
+        signature = _trace_step_policy_static_signature(trace)
+        if signature == current_signature:
+            continue
+        segments.append(
+            {
+                "start": start,
+                "stop": index,
+                "n_steps": index - start,
+                "signature": current_signature,
+            }
+        )
+        start = index
+        current_signature = signature
+    segments.append(
+        {
+            "start": start,
+            "stop": len(trace_seq),
+            "n_steps": len(trace_seq) - start,
+            "signature": current_signature,
+        }
+    )
+    return segments
+
+
+def direct_coil_accepted_trace_step_policy_segment_summary(
+    traces: Any,
+    *,
+    accept_mask: Any | None = None,
+    done_mask: Any | None = None,
+    max_steps: int | None = None,
+) -> list[dict[str, Any]]:
+    """Return JSON-safe diagnostics for stacked step-policy segments."""
+
+    trace_seq = tuple(traces)
+    if max_steps is not None:
+        trace_seq = trace_seq[: int(max_steps)]
+    if not trace_seq:
+        raise ValueError("at least one accepted trace is required")
+
+    n_steps = len(trace_seq)
+    if accept_mask is not None:
+        accept_mask = np.asarray(accept_mask, dtype=bool)[:n_steps]
+    if done_mask is not None:
+        done_mask = np.asarray(done_mask, dtype=bool)[:n_steps]
+    controls = direct_coil_accepted_trace_controller_controls_jax(
+        trace_seq,
+        accept_mask=accept_mask,
+        done_mask=done_mask,
+    )
+    accepted = np.asarray(controls["accept"], dtype=bool)
+    done = np.asarray(controls["done"], dtype=bool)
+    reset = np.asarray(controls["reset_to_trace_pre"], dtype=bool)
+    freeb = np.asarray(controls["has_active_freeb_replay"], dtype=bool)
+
+    summaries: list[dict[str, Any]] = []
+    for index, segment in enumerate(direct_coil_accepted_trace_step_policy_segments(trace_seq)):
+        start = int(segment["start"])
+        stop = int(segment["stop"])
+        segment_accept = accepted[start:stop]
+        segment_done = done[start:stop]
+        segment_reset = reset[start:stop]
+        segment_freeb = freeb[start:stop]
+        summaries.append(
+            {
+                "index": int(index),
+                "start": start,
+                "stop": stop,
+                "n_steps": int(stop - start),
+                "accepted_steps": int(np.count_nonzero(segment_accept)),
+                "rejected_steps": int(segment_accept.size - np.count_nonzero(segment_accept)),
+                "done_markers": int(np.count_nonzero(segment_done)),
+                "state_resets": int(np.count_nonzero(segment_reset)),
+                "free_boundary_replay_steps": int(np.count_nonzero(segment_freeb)),
+                "signature_repr": repr(segment["signature"]),
+            }
+        )
+    return summaries
 
 
 def direct_coil_accepted_trace_preconditioner_policy_segments(
@@ -2251,6 +2473,49 @@ def direct_coil_accepted_trace_array_controls_jax(traces: Any) -> dict[str, Any]
     return payload
 
 
+def direct_coil_accepted_trace_step_controls_jax(
+    traces: Any,
+    *,
+    include_state_pre: bool = True,
+    include_force_state_pre: bool = True,
+    include_nestor_axes: bool = True,
+    include_constraints: bool = True,
+) -> dict[str, Any]:
+    """Return stacked state/constraint controls for direct accepted replay.
+
+    The controls in this payload are sliced by ``lax.scan`` and passed directly
+    to ``strict_update_one_step_from_state``.  This removes one layer of
+    per-step trace dictionary indirection while keeping all host branch
+    decisions fixed and fingerprint-gated.
+    """
+
+    trace_seq = tuple(traces)
+    if not trace_seq:
+        raise ValueError("at least one accepted trace is required")
+    payload: dict[str, Any] = {}
+    if bool(include_state_pre):
+        payload["state_pre"] = _stack_trace_pytree_field(trace_seq, "state_pre")
+    if bool(include_force_state_pre):
+        force_state_pre = _stack_optional_trace_pytree_field(trace_seq, "force_state_pre")
+        if force_state_pre is not None:
+            payload["force_state_pre"] = force_state_pre
+    if bool(include_nestor_axes):
+        nestor_axes = _stack_trace_nestor_axis_controls(trace_seq)
+        if nestor_axes is not None:
+            payload["freeb_nestor_axes"] = nestor_axes
+    freeb_pres_scale = _stack_optional_trace_pytree_field(trace_seq, "freeb_pres_scale")
+    if freeb_pres_scale is not None:
+        payload["freeb_pres_scale"] = freeb_pres_scale
+    if bool(include_constraints):
+        for key in _ACCEPTED_TRACE_OPTIONAL_STEP_PYTREE_CONTROL_KEYS:
+            if key in ("force_state_pre", "freeb_pres_scale"):
+                continue
+            value = _stack_optional_trace_pytree_field(trace_seq, key)
+            if value is not None:
+                payload[key] = value
+    return payload
+
+
 def direct_coil_accepted_trace_controller_replay_objective_jax(
     params: Any,
     initial_state: Any,
@@ -2270,6 +2535,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     done_mask: Any | None = None,
     use_preconditioner_policy_segments: bool = False,
     use_segment_preconditioner_controls: bool = False,
+    use_stacked_step_controls: bool = False,
 ) -> dict[str, Any]:
     """Replay fixed production traces through a JAX-visible accept controller.
 
@@ -2288,6 +2554,9 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     tries stacking them independently inside each static segment.  It is kept
     opt-in because current tiny production traces show parity but not a speed
     win.
+    ``use_stacked_step_controls`` is the next rung: it segments by the full
+    static step-policy signature and calls ``strict_update_one_step_from_state``
+    directly with stacked state/update/constraint controls.
 
     The helper intentionally keeps every trace accepted.  It does not
     differentiate through the host policy that selected the traces; it validates
@@ -2295,7 +2564,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     JAX-visible accepted-control scan.
     """
 
-    from .discrete_adjoint import strict_update_one_step_from_trace
+    from .discrete_adjoint import strict_update_one_step_from_state, strict_update_one_step_from_trace
     from .state import pack_state
 
     trace_seq = tuple(traces)
@@ -2319,6 +2588,13 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     )
     scalar_controls = direct_coil_accepted_trace_scalar_controls_jax(trace_seq)
     array_controls = direct_coil_accepted_trace_array_controls_jax(trace_seq)
+    step_controls = direct_coil_accepted_trace_step_controls_jax(trace_seq) if bool(use_stacked_step_controls) else None
+    step_policy_segments = direct_coil_accepted_trace_step_policy_segments(trace_seq)
+    step_policy_segment_summary = direct_coil_accepted_trace_step_policy_segment_summary(
+        trace_seq,
+        accept_mask=accept_mask,
+        done_mask=done_mask,
+    )
     # These preconditioner policy flags still feed Python bool/int dispatch in
     # the radial preconditioner implementation. Keep them as branch-local
     # static trace data until the full preconditioner path is JAX-visible.
@@ -2345,12 +2621,109 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     controls = {**controls, "step_scalars": step_scalar_controls, "step_arrays": array_controls}
     if preconditioner_controls is not None:
         controls = {**controls, "step_preconditioner": preconditioner_controls}
+    if step_controls is not None:
+        controls = {**controls, "step_controls": step_controls}
+
+    def _step_control(control: Mapping[str, Any], key: str) -> Any:
+        return control["step_controls"][key] if key in control.get("step_controls", {}) else None
 
     def _branch_for_trace(trace: dict[str, Any], state: Any, coil_params: Any, control: dict[str, Any]):
         reset_to_trace_pre = jnp.asarray(control["reset_to_trace_pre"], dtype=bool)
         state_in = jax.lax.cond(
             reset_to_trace_pre,
             lambda _: trace["state_pre"],
+            lambda _: state,
+            operand=None,
+        )
+        has_active_freeb_replay = trace.get("freeb_bsqvac_half") is not None and trace.get("freeb_nestor_trace") is not None
+        if has_active_freeb_replay:
+            geometry = free_boundary_boundary_geometry_jax(
+                state_in,
+                static,
+                sample_nzeta=sample_nzeta,
+            )
+            context = direct_coil_boundary_replay_context(static, geometry)
+            nestor_axes = _step_control(control, "freeb_nestor_axes")
+            if nestor_axes is None:
+                replay = direct_coil_boundary_bsqvac_from_trace_jax(
+                    coil_params,
+                    geometry,
+                    trace,
+                    basis=context["basis"],
+                    tables=context["tables"],
+                    signgs=int(signgs),
+                    nvper=int(context["nvper"]),
+                    wint=jnp.asarray(context["wint"]),
+                    include_analytic=bool(include_analytic),
+                )
+            else:
+                replay = direct_coil_boundary_bsqvac_jax(
+                    coil_params,
+                    R=geometry["R"],
+                    Z=geometry["Z"],
+                    phi=geometry["phi"],
+                    Ru=geometry["Ru"],
+                    Zu=geometry["Zu"],
+                    Rv=geometry["Rv"],
+                    Zv=geometry["Zv"],
+                    ruu=geometry["ruu"],
+                    ruv=geometry["ruv"],
+                    rvv=geometry["rvv"],
+                    zuu=geometry["zuu"],
+                    zuv=geometry["zuv"],
+                    zvv=geometry["zvv"],
+                    basis=context["basis"],
+                    tables=context["tables"],
+                    signgs=int(signgs),
+                    nvper=int(context["nvper"]),
+                    br_add=jnp.asarray(nestor_axes["br_axis"]),
+                    bp_add=jnp.asarray(nestor_axes["bp_axis"]),
+                    bz_add=jnp.asarray(nestor_axes["bz_axis"]),
+                    wint=jnp.asarray(context["wint"]),
+                    include_analytic=bool(include_analytic),
+                )
+            freeb_bsqvac_half = replay["bsqvac"]
+            bsqvac_objective = _weighted_half_norm(replay["bsqvac"], bsqvac_weight)
+            bsqvac_rms = jnp.sqrt(jnp.mean(jnp.square(jnp.asarray(replay["bsqvac"]))))
+            bnormal_rms = jnp.sqrt(jnp.mean(jnp.square(jnp.asarray(replay["vac"]["bnormal"]))))
+        else:
+            freeb_bsqvac_half = trace.get("freeb_bsqvac_half", None)
+            bsqvac_objective = jnp.asarray(0.0)
+            bsqvac_rms = jnp.asarray(0.0)
+            bnormal_rms = jnp.asarray(0.0)
+        step = strict_update_one_step_from_trace(
+            state_in,
+            static,
+            trace,
+            scalar_controls=control["step_scalars"],
+            array_controls=control["step_arrays"],
+            preconditioner_controls=control["step_preconditioner"] if "step_preconditioner" in control else None,
+            freeb_bsqvac_half=freeb_bsqvac_half,
+            enforce_edge=bool(enforce_edge),
+        )
+        return step["step"]["state_post"], {
+            "force": _tree_weighted_half_norm(step["force"], force_weight),
+            "bsqvac": bsqvac_objective,
+            "bsqvac_rms": bsqvac_rms,
+            "bnormal_rms": bnormal_rms,
+            "state_reset": reset_to_trace_pre,
+        }
+
+    def _branch_from_stacked_controls(
+        trace: dict[str, Any],
+        state: Any,
+        coil_params: Any,
+        control: dict[str, Any],
+    ):
+        if "step_preconditioner" not in control:
+            raise ValueError("stacked step replay requires stackable preconditioner controls")
+        reset_to_trace_pre = jnp.asarray(control["reset_to_trace_pre"], dtype=bool)
+        stacked_state_pre = _step_control(control, "state_pre")
+        if stacked_state_pre is None:
+            raise ValueError("stacked step replay requires state_pre controls")
+        state_in = jax.lax.cond(
+            reset_to_trace_pre,
+            lambda _: stacked_state_pre,
             lambda _: state,
             operand=None,
         )
@@ -2382,14 +2755,68 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
             bsqvac_objective = jnp.asarray(0.0)
             bsqvac_rms = jnp.asarray(0.0)
             bnormal_rms = jnp.asarray(0.0)
-        step = strict_update_one_step_from_trace(
+        preconditioner_use_precomputed_tridi = trace.get("preconditioner_use_precomputed_tridi")
+        preconditioner_use_lax_tridi = trace.get("preconditioner_use_lax_tridi")
+        step_step_controls = control["step_controls"]
+        step = strict_update_one_step_from_state(
             state_in,
             static,
-            trace,
-            scalar_controls=control["step_scalars"],
-            array_controls=control["step_arrays"],
-            preconditioner_controls=control["step_preconditioner"] if "step_preconditioner" in control else None,
+            force_state_pre=step_step_controls.get("force_state_pre"),
+            wout_like=trace["wout_like"],
+            trig=trace["trig"],
+            apply_lforbal=bool(trace["apply_lforbal"]),
+            include_edge_residual=bool(trace["include_edge_residual"]),
+            apply_m1_constraints=bool(trace["apply_m1_constraints"]),
+            zero_m1=trace["zero_m1"],
+            mats=control["step_preconditioner"]["precond_mats"],
+            jmax=int(trace["precond_jmax"]),
+            lam_prec=control["step_preconditioner"]["lam_prec"],
+            w_mode_mn=control["step_preconditioner"]["w_mode_mn"],
+            lambda_update_scale=control["step_scalars"]["lambda_update_scale"],
+            dt_eff=control["step_scalars"]["dt_eff"],
+            b1=control["step_scalars"]["b1"],
+            fac=control["step_scalars"]["fac"],
+            force_scale=control["step_scalars"]["force_scale"],
+            flip_sign=control["step_scalars"]["flip_sign"],
+            vRcc_before=control["step_arrays"]["vRcc_before"],
+            vRss_before=control["step_arrays"]["vRss_before"],
+            vZsc_before=control["step_arrays"]["vZsc_before"],
+            vZcs_before=control["step_arrays"]["vZcs_before"],
+            vLsc_before=control["step_arrays"]["vLsc_before"],
+            vLcs_before=control["step_arrays"]["vLcs_before"],
+            vRsc_before=control["step_arrays"].get("vRsc_before"),
+            vRcs_before=control["step_arrays"].get("vRcs_before"),
+            vZcc_before=control["step_arrays"].get("vZcc_before"),
+            vZss_before=control["step_arrays"].get("vZss_before"),
+            vLcc_before=control["step_arrays"].get("vLcc_before"),
+            vLss_before=control["step_arrays"].get("vLss_before"),
+            max_update_rms=control["step_scalars"]["max_update_rms_pre"],
+            limit_update_rms=control["step_scalars"]["limit_update_rms"],
+            divide_by_scalxc_for_update=control["step_scalars"]["divide_by_scalxc_for_update"],
+            preconditioner_use_precomputed_tridi=(
+                None if preconditioner_use_precomputed_tridi is None else bool(preconditioner_use_precomputed_tridi)
+            ),
+            preconditioner_use_lax_tridi=(
+                None if preconditioner_use_lax_tridi is None else bool(preconditioner_use_lax_tridi)
+            ),
             freeb_bsqvac_half=freeb_bsqvac_half,
+            freeb_pres_scale=step_step_controls.get("freeb_pres_scale", trace.get("freeb_pres_scale", None)),
+            constraint_rcon0=step_step_controls.get("constraint_rcon0", trace.get("constraint_rcon0")),
+            constraint_zcon0=step_step_controls.get("constraint_zcon0", trace.get("constraint_zcon0")),
+            constraint_tcon0=step_step_controls.get("constraint_tcon0", trace.get("constraint_tcon0")),
+            constraint_precond_diag=step_step_controls.get(
+                "constraint_precond_diag",
+                trace.get("constraint_precond_diag"),
+            ),
+            constraint_tcon=step_step_controls.get("constraint_tcon", trace.get("constraint_tcon")),
+            constraint_precond_active=step_step_controls.get(
+                "constraint_precond_active",
+                trace.get("constraint_precond_active"),
+            ),
+            constraint_tcon_active=step_step_controls.get(
+                "constraint_tcon_active",
+                trace.get("constraint_tcon_active"),
+            ),
             enforce_edge=bool(enforce_edge),
         )
         return step["step"]["state_post"], {
@@ -2400,7 +2827,34 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
             "state_reset": reset_to_trace_pre,
         }
 
-    def _make_step_fn(segment_traces: tuple[dict[str, Any], ...], *, index_offset: int = 0):
+    def _make_step_fn(
+        segment_traces: tuple[dict[str, Any], ...],
+        *,
+        index_offset: int = 0,
+        stacked_step_controls: bool = False,
+    ):
+        if bool(stacked_step_controls):
+            representative_trace = segment_traces[0]
+
+            def _step_fn(state, coil_params, control):
+                do_propose = jnp.asarray(control["accept"], dtype=bool)
+
+                def _propose(_unused):
+                    return _branch_from_stacked_controls(representative_trace, state, coil_params, control)
+
+                def _skip(_unused):
+                    return state, {
+                        "force": jnp.asarray(0.0),
+                        "bsqvac": jnp.asarray(0.0),
+                        "bsqvac_rms": jnp.asarray(0.0),
+                        "bnormal_rms": jnp.asarray(0.0),
+                        "state_reset": jnp.asarray(False, dtype=bool),
+                    }
+
+                return jax.lax.cond(do_propose, _propose, _skip, operand=None)
+
+            return _step_fn
+
         branches = tuple(
             (
                 lambda operand, trace=trace: _branch_for_trace(
@@ -2440,7 +2894,46 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
         return control["done"]
 
     segment_preconditioner_controls_stacked: tuple[bool, ...] = ()
-    if use_preconditioner_policy_segments:
+    if use_stacked_step_controls:
+        control_segments_list = []
+        segment_preconditioner_controls_stacked_list = []
+        for segment in step_policy_segments:
+            start = int(segment["start"])
+            stop = int(segment["stop"])
+            segment_controls = tree_util.tree_map(
+                lambda value, start=start, stop=stop: jnp.asarray(value)[start:stop],
+                controls,
+            )
+            if preconditioner_controls is None:
+                try:
+                    segment_preconditioner_controls = direct_coil_accepted_trace_preconditioner_controls_jax(
+                        trace_seq[start:stop]
+                    )
+                except (KeyError, ValueError) as exc:
+                    raise ValueError("stacked step replay requires stackable preconditioner controls per segment") from exc
+                segment_controls = {**segment_controls, "step_preconditioner": segment_preconditioner_controls}
+            segment_preconditioner_controls_stacked_list.append(True)
+            control_segments_list.append(segment_controls)
+        control_segments = tuple(control_segments_list)
+        segment_preconditioner_controls_stacked = tuple(segment_preconditioner_controls_stacked_list)
+        step_fns = tuple(
+            _make_step_fn(
+                trace_seq[int(segment["start"]) : int(segment["stop"])],
+                index_offset=int(segment["start"]),
+                stacked_step_controls=True,
+            )
+            for segment in step_policy_segments
+        )
+        run = jax_visible_segmented_accepted_nonlinear_controller_jax(
+            step_fns,
+            accept_fn,
+            converged_fn,
+            initial_state,
+            params,
+            control_segments,
+            checkpoint_steps=checkpoint_steps,
+        )
+    elif use_preconditioner_policy_segments:
         control_segments_list = []
         segment_preconditioner_controls_stacked_list: list[bool] = []
         for segment in preconditioner_policy_segments:
@@ -2508,13 +3001,18 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
         "controls": controls,
         "scalar_controls": scalar_controls,
         "array_controls": array_controls,
+        "step_controls": step_controls,
         "preconditioner_controls": preconditioner_controls,
         "preconditioner_controls_stacked": bool(preconditioner_controls_stacked),
         "preconditioner_policy_segments": preconditioner_policy_segments,
         "preconditioner_policy_n_segments": len(preconditioner_policy_segments),
         "preconditioner_policy_segment_summary": preconditioner_policy_segment_summary,
+        "step_policy_segments": step_policy_segments,
+        "step_policy_n_segments": len(step_policy_segments),
+        "step_policy_segment_summary": step_policy_segment_summary,
         "preconditioner_controls_segment_stacked": segment_preconditioner_controls_stacked,
         "used_preconditioner_policy_segments": bool(use_preconditioner_policy_segments),
+        "used_stacked_step_controls": bool(use_stacked_step_controls),
         "state_reset_flags": tuple(bool(flag) for flag in np.asarray(controls["reset_to_trace_pre"], dtype=bool)),
     }
 
