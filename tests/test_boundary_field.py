@@ -104,12 +104,13 @@ def test_b_cartesian_from_state_jvp_matches_finite_difference():
 
 
 @pytest.mark.py311_coverage_only
-def test_exact_optimizer_b_cartesian_tangent_columns_match_jacobian():
-    pytest.importorskip("jax")
+def test_exact_optimizer_b_cartesian_tangents_and_scalar_cotangent_match_dense_jacobian():
+    jax = pytest.importorskip("jax")
 
     from vmec_jax._compat import jnp
     from vmec_jax.boundary import boundary_from_indata
     from vmec_jax.optimization import FixedBoundaryExactOptimizer, boundary_param_specs
+    from vmec_jax.state import unpack_state
 
     enable_x64(True)
 
@@ -137,6 +138,19 @@ def test_exact_optimizer_b_cartesian_tangent_columns_match_jacobian():
         )
         return jnp.ravel(field)
 
+    def objective_value_and_cotangent_from_packed(packed_state, layout):
+        packed_state = jnp.asarray(packed_state, dtype=jnp.float64)
+
+        def objective(packed):
+            residuals = residuals_fn(unpack_state(packed, layout))
+            return 0.5 * jnp.vdot(residuals, residuals)
+
+        return jax.value_and_grad(objective)(packed_state)
+
+    residuals_fn._state_objective_value_and_cotangent_from_packed = (
+        objective_value_and_cotangent_from_packed
+    )
+
     exact_opt = FixedBoundaryExactOptimizer(
         static,
         indata,
@@ -149,12 +163,20 @@ def test_exact_optimizer_b_cartesian_tangent_columns_match_jacobian():
     field, tangents = exact_opt.b_cartesian_tangent_columns_fun(params, field_static)
     residuals = exact_opt.residual_fun(params)
     jacobian = exact_opt.jacobian_fun(params)
+    cost, gradient = exact_opt.objective_and_gradient_fun(params)
 
     np.testing.assert_allclose(
         field.reshape(-1),
         residuals,
         rtol=1.0e-12,
         atol=1.0e-12,
+    )
+    assert cost == pytest.approx(0.5 * float(np.dot(residuals, residuals)), rel=1.0e-12)
+    np.testing.assert_allclose(
+        gradient,
+        jacobian.T @ residuals,
+        rtol=1.0e-10,
+        atol=1.0e-10,
     )
     tangent_jacobian = tangents.reshape((-1, len(specs)))
     np.testing.assert_allclose(
@@ -228,72 +250,3 @@ def test_exact_optimizer_jacobian_matches_finite_difference_residual():
     assert rel_norm < 2.0e-3
     assert max_abs < 1.2e-2
 
-
-@pytest.mark.py311_coverage_only
-def test_exact_optimizer_scalar_objective_cotangent_matches_dense_jacobian():
-    jax = pytest.importorskip("jax")
-
-    from vmec_jax._compat import jnp
-    from vmec_jax.boundary import boundary_from_indata
-    from vmec_jax.optimization import FixedBoundaryExactOptimizer, boundary_param_specs
-    from vmec_jax.state import unpack_state
-
-    enable_x64(True)
-
-    input_path, _wout_path = example_paths("circular_tokamak")
-    cfg, indata = load_config(str(input_path))
-    static = build_static(cfg)
-    field_static = _small_static(cfg, ntheta=4, nzeta=2)
-    boundary = boundary_from_indata(indata, static.modes)
-    specs = boundary_param_specs(
-        boundary,
-        static.modes,
-        max_mode=1,
-        min_coeff=0.0,
-        include=("rc", "zs"),
-        fix=("rc00",),
-    )[:2]
-    params = np.zeros(len(specs))
-
-    def residuals_fn(state):
-        field = b_cartesian_from_state(
-            state,
-            field_static,
-            indata=indata,
-            signgs=exact_opt._signgs,
-        )
-        return jnp.ravel(field)
-
-    def objective_value_and_cotangent_from_packed(packed_state, layout):
-        packed_state = jnp.asarray(packed_state, dtype=jnp.float64)
-
-        def objective(packed):
-            residuals = residuals_fn(unpack_state(packed, layout))
-            return 0.5 * jnp.vdot(residuals, residuals)
-
-        return jax.value_and_grad(objective)(packed_state)
-
-    residuals_fn._state_objective_value_and_cotangent_from_packed = (
-        objective_value_and_cotangent_from_packed
-    )
-
-    exact_opt = FixedBoundaryExactOptimizer(
-        static,
-        indata,
-        boundary,
-        specs,
-        residuals_fn,
-        inner_max_iter=2,
-        inner_ftol=1.0e-5,
-    )
-    cost, gradient = exact_opt.objective_and_gradient_fun(params)
-    residuals = exact_opt.residual_fun(params)
-    jacobian = exact_opt.jacobian_fun(params)
-
-    assert cost == pytest.approx(0.5 * float(np.dot(residuals, residuals)), rel=1.0e-12)
-    np.testing.assert_allclose(
-        gradient,
-        jacobian.T @ residuals,
-        rtol=1.0e-10,
-        atol=1.0e-10,
-    )
