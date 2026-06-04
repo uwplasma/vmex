@@ -78,8 +78,7 @@ def tcon_from_tcon0_heuristic(*, tcon0: float, s, trig: VmecTrigTables, lasym: b
     if ns < 2:
         return jnp.zeros_like(s, dtype=jnp.asarray(trig.cosmu).dtype)
 
-    tcon0 = float(tcon0)
-    tcon0 = min(abs(tcon0), 1.0)
+    tcon0 = jnp.minimum(jnp.abs(jnp.asarray(tcon0, dtype=jnp.asarray(trig.cosmu).dtype)), 1.0)
     hs = jnp.asarray(s[1] - s[0], dtype=jnp.asarray(trig.cosmu).dtype)
     r0scale = float(trig.r0scale)
 
@@ -268,8 +267,7 @@ def tcon_from_cached_precondn_diag(
     arnorm = jnp.where(arnorm != 0, arnorm, jnp.ones_like(arnorm))
     aznorm = jnp.where(aznorm != 0, aznorm, jnp.ones_like(aznorm))
 
-    tcon0 = float(tcon0)
-    tcon0 = min(abs(tcon0), 1.0)
+    tcon0 = jnp.minimum(jnp.abs(jnp.asarray(tcon0, dtype=jnp.asarray(trig.cosmu).dtype)), 1.0)
     ns_f = float(ns)
     tcon_mul = tcon0 * (1.0 + ns_f * (1.0 / 60.0 + ns_f / (200.0 * 120.0)))
     tcon_mul = tcon_mul / ((4.0 * (float(trig.r0scale) ** 2)) ** 2)
@@ -277,7 +275,7 @@ def tcon_from_cached_precondn_diag(
     # VMEC sets `tcon(:) = tcon0` before overwriting interior surfaces with the
     # preconditioner-based scale. The axis value is not used by the constraint
     # operator, but matching it is helpful for parity dumps.
-    tcon0_clamped = min(abs(float(tcon0)), 1.0)
+    tcon0_clamped = jnp.minimum(jnp.abs(jnp.asarray(tcon0, dtype=jnp.asarray(trig.cosmu).dtype)), 1.0)
     tcon = jnp.zeros((ns,), dtype=jnp.asarray(trig.cosmu).dtype)
     tcon = tcon.at[0].set(jnp.asarray(tcon0_clamped, dtype=tcon.dtype))
     if ns >= 3:
@@ -391,7 +389,7 @@ def tcon_from_precondn_axisym(
     aznorm = jnp.where(aznorm != 0.0, aznorm, jnp.ones_like(aznorm))
 
     # bcovar.f scaling for tcon_mul (with clamped tcon0).
-    tcon0 = min(abs(float(tcon0)), 1.0)
+    tcon0 = jnp.minimum(jnp.abs(jnp.asarray(tcon0, dtype=dtype)), 1.0)
     ns_f = float(ns)
     tcon_mul = tcon0 * (1.0 + ns_f * (1.0 / 60.0 + ns_f / (200.0 * 120.0)))
     tcon_mul = tcon_mul / ((4.0 * (float(trig.r0scale) ** 2)) ** 2)

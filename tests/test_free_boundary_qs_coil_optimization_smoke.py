@@ -124,6 +124,7 @@ def test_circle_variable_manifest_and_apply_are_coil_only():
 
 def test_same_branch_direction_selects_current_and_fourier_variables():
     module = _load_example_module()
+    base_params, _metadata = module.make_circle_provider(current_scale=1.0)
 
     direction = module.same_branch_direction_from_variables(
         [
@@ -134,6 +135,20 @@ def test_same_branch_direction_selects_current_and_fourier_variables():
     )
 
     np.testing.assert_array_equal(direction, np.asarray([1.0, 1.0, 0.0]))
+    tangent = module.coil_param_direction_from_variables(
+        base_params,
+        direction,
+        [
+            ("current", (0,)),
+            ("fourier_dof", (0, 0, 2)),
+            ("fourier_dof", (0, 1, 1)),
+        ],
+        current_step=0.02,
+        dof_step=1.0e-3,
+    )
+    np.testing.assert_allclose(np.asarray(tangent.base_currents), np.asarray([0.04]))
+    assert float(np.asarray(tangent.base_curve_dofs)[0, 0, 2]) == pytest.approx(1.0e-3)
+    assert float(np.asarray(tangent.base_curve_dofs)[0, 1, 1]) == pytest.approx(0.0)
 
 
 def test_same_branch_report_writer_uses_source_helper(tmp_path, monkeypatch):
@@ -231,6 +246,8 @@ def test_same_branch_report_writer_uses_source_helper(tmp_path, monkeypatch):
     assert report["values"]["central_fd_directional"] == pytest.approx(1000.0)
     assert set(report["objective_values"]) == {"objective", "aspect"}
     assert report["primary_objective"] == "objective"
+    assert report["branch_local_vector_jacobian"]["available"] is False
+    assert "adaptive host branch" in report["branch_local_vector_jacobian"]["scope"]
     assert [record["kind"] for record in report["direction_variables"]] == ["current", "fourier_dof"]
 
 

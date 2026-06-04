@@ -434,7 +434,7 @@ def _constraint_kernels_from_state(
     if use_dynamic:
         if jax is None:
             raise RuntimeError("Dynamic constraint overrides require JAX.")
-        tcon0_val = 0.0 if constraint_tcon0 is None else float(constraint_tcon0)
+        tcon0_val = jnp.asarray(0.0 if constraint_tcon0 is None else constraint_tcon0, dtype=dtype)
         precond_override = precond_diag_override
         if precond_override is None:
             precond_override = (
@@ -509,7 +509,7 @@ def _constraint_kernels_from_state(
             # blocks (ns4=25). Between refreshes, `tcon` is reused verbatim. Parity
             # drivers may therefore pass `tcon_override` on non-refresh iterations.
             tcon = tcon_from_cached_precondn_diag(
-                tcon0=float(constraint_tcon0),
+                tcon0=jnp.asarray(0.0 if constraint_tcon0 is None else constraint_tcon0, dtype=dtype),
                 trig=trig,
                 s=s,
                 lasym=bool(wout.lasym),
@@ -521,7 +521,7 @@ def _constraint_kernels_from_state(
             # Fallback to a conservative constant profile if ill-conditioned.
             finite = jnp.all(jnp.isfinite(tcon))
             tcon_heur = tcon_from_tcon0_heuristic(
-                tcon0=float(constraint_tcon0),
+                tcon0=jnp.asarray(0.0 if constraint_tcon0 is None else constraint_tcon0, dtype=dtype),
                 s=s,
                 trig=trig,
                 lasym=bool(wout.lasym),
