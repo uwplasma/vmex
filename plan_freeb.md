@@ -77,6 +77,70 @@ Need from user:
 
 Nothing now.
 
+### 2026-06-04 Branch-local vector production seam
+
+Steps taken:
+
+1. Confirmed CI run `26979028268` for commit `f91a3c3` completed
+   successfully, including the split py3.11 core coverage buckets, exact
+   coverage shards, docs, build, py3.10, py3.12, physics smoke, slow physics,
+   and the combined coverage gate.
+2. Added
+   `direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax`.
+3. Kept the production-forward contract explicit: values come from an actual
+   direct-coil complete solve payload, while the Jacobian comes from the saved
+   fixed accepted-branch controller replay.
+4. Added vector seam error-path tests for empty scalar maps, missing production
+   inputs, missing accepted traces, inactive free-boundary traces, and missing
+   initialization payloads.
+5. Extended the current-only complete-solve AD-vs-FD gate to validate aspect
+   and accepted `Bnormal` RMS through one vector-valued replay seam.
+6. Added an explicit row-stacked Jacobian directional contraction assertion so
+   the vector contract is tested directly, not only through per-key gradients.
+
+Results obtained:
+
+1. Ruff passed on `vmec_jax/free_boundary_adjoint.py` and
+   `tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`.
+2. The pushed CI run `26979028268` is green.
+3. The synthetic branch/fingerprint diagnostics and current-only complete-solve
+   gate passed locally before the row-stacked assertion:
+   `2 passed in 46.48 s`.
+4. The current-only, Fourier-only, and LASYM same-branch gates passed locally:
+   `3 passed in 91.08 s`.
+5. The updated current-only gate with the explicit row-stacked vector-Jacobian
+   assertion passed locally: `1 passed in 47.24 s`.
+
+Best next steps:
+
+1. Commit and push the vector production seam after the updated current-only
+   gate passes.
+2. Promote the vector seam into the coil-only optimization example as the
+   default multi-scalar branch-local gradient interface.
+3. Continue the adaptive full-loop seam only after branch-fingerprint-gated
+   production-forward vector gradients are stable in CI.
+4. Keep claims conservative: this differentiates a fixed accepted branch, not
+   adaptive host branch selection.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.995% for branch-local
+  production-forward scalar/vector gradients; full adaptive branch
+  differentiation remains intentionally unclaimed.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 100%.
+- VMEC parity and physics gates: 96%.
+- Single-stage coil-only optimization: 84%.
+- Robust coil perturbation optimization: 70%.
+- CPU/GPU performance: 86%.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 96%.
+- Overall free-boundary/single-stage plan: 96.5%.
+
 Completion:
 
 - Direct-coil/free-boundary phase 1: 100%.
