@@ -3,14 +3,14 @@
 Last updated: 2026-06-04
 Primary branch: `main`
 Baseline release: `v0.0.14`
-Latest known green `main` CI: `4817053` (GitHub Actions run `26924803010`)
-Current candidate: local `main` after the py3.11 coverage split, duplicate
-plot-render cleanup, and a small current-only direct-coil same-branch
-de-duplication. The patch retains the 95% required coverage gate, the
-`DMerc`/Glasser `D_R` AD-vs-central-FD derivative gate, and the exact
-boundary-field tangent, scalar cotangent, and finite-difference gates. The
-split-coverage local proof combines core and exact py3.11 raw coverage at
-`95.12%`.
+Latest known green `main` CI: `6e9472b` (GitHub Actions run `26926678454`)
+Current candidate: local `main` after updating CI/release artifact actions to
+the Node-24-compatible v6 artifact actions. The latest green main split py3.11
+coverage into core and exact shards, retained the 95% combined coverage gate,
+kept the `DMerc`/Glasser `D_R` AD-vs-central-FD derivative gate, and preserved
+the exact boundary-field tangent, scalar cotangent, and finite-difference
+gates. The split-coverage local proof combines core and exact py3.11 raw
+coverage at `95.12%`.
 
 This is the living execution plan for making `vmec_jax` accurate, fast,
 differentiable, documented, and usable by external researchers. Update it when
@@ -79,6 +79,13 @@ acceptance criteria or evidence changes.
   rendering test in `tests/test_plotting_unit.py` remains. The current-only
   same-branch direct-coil gate now avoids the duplicate controller check; the
   standalone fixed-trace current AD-vs-complete-FD assertion remains.
+- GitHub Actions run `26926678454` for the split-CI commit `6e9472b` passed all
+  required jobs. The py3.11 exact shard ran in `8:29`, the py3.11 core coverage
+  shard ran in `11:16`, and the combined coverage gate finished in `0:29` with
+  exact line coverage at the required 95% threshold. The previous monolithic
+  py3.11 lane on `4817053` took `18:30`, so the required py3.11 critical path
+  is now roughly `11:45` while preserving the same coverage and exact physics
+  gates.
 - VMEC profile evaluation now covers polynomial pressure/iota/current profiles
   plus VMEC-style cubic, Akima, and line-segment tabulated pressure, iota, and
   current profiles. Cubic pressure/iota and current spline decks have been

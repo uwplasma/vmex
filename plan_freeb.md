@@ -12,11 +12,13 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-06-04 on `main` after the coverage-buffer commit
-`4817053` passed GitHub Actions run `26924803010`. The current local candidate
-splits required py3.11 coverage into core and exact shards while keeping a
-combined 95% coverage threshold, preserves the `DMerc`/Glasser `D_R`
-AD-vs-central-FD gate, and keeps full-loop free-boundary claims conservative.
+Last updated: 2026-06-04 on `main` after the split-CI commit `6e9472b` passed
+GitHub Actions run `26926678454`. The current local candidate updates
+CI/release artifact actions to the Node-24-compatible v6 artifact actions. The
+latest green main splits required py3.11 coverage into core and exact shards
+while keeping a combined 95% coverage threshold, preserves the `DMerc`/Glasser
+`D_R` AD-vs-central-FD gate, and keeps full-loop free-boundary claims
+conservative.
 The phase-2 evidence includes reset-aware full accepted-trace replay, stacked
 accepted/rejected controller segment gates, current-only/Fourier-only
 same-branch complete-solve AD-vs-FD gates, segmented controller custom-VJP
@@ -60,17 +62,22 @@ Results obtained:
 3. Focused current-only direct-coil plus segmented-controller checks passed:
    `2 passed in 38.50 s`.
 4. The exact-only coverage shard passed with coverage in `2:12`.
+5. GitHub Actions run `26926678454` for `6e9472b` passed all required jobs. The
+   py3.11 exact shard ran in `8:29`, the py3.11 core coverage shard ran in
+   `11:16`, and the combined coverage gate finished in `0:29` with exact line
+   coverage at the required 95% threshold. The previous monolithic py3.11
+   coverage lane on `4817053` took `18:30`.
 
 Best next steps:
 
-1. Let the full local monolithic coverage gate finish, then commit and push the
-   CI split and test de-duplication patch.
-2. Watch the new GitHub Actions run to verify the combined coverage job uploads
-   one `coverage.xml` and reports at least 95% exact line coverage.
-3. Next runtime reductions should share one accepted direct-coil trace across
+1. Commit and push the artifact-action v6 hygiene patch, then watch the new
+   GitHub Actions run far enough to confirm artifact upload/download still
+   works on the split coverage jobs and the release workflow syntax remains
+   valid.
+2. Next runtime reductions should share one accepted direct-coil trace across
    replay/state/two-step tests and combine the boundary-field tangent/scalar
    optimizer setup, rather than weakening physics gates.
-4. Promote the physical-scalar controller custom-VJP complete-solve FD gate only
+3. Promote the physical-scalar controller custom-VJP complete-solve FD gate only
    after the exact-gate sharing work keeps required CI stable.
 
 Need from user:
@@ -86,7 +93,7 @@ Completion percentages:
 - Single-stage coil-only optimization: 79%.
 - Robust coil perturbation optimization: 70%.
 - CPU/GPU performance: 84%.
-- CI runtime refactor with preserved coverage/physics gates: 96%.
+- CI runtime refactor with preserved coverage/physics gates: 97%.
 - Docs/release hygiene: 96%.
 
 ### 2026-06-03 DMerc/D_R derivative gate and CI runtime refactor

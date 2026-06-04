@@ -114,7 +114,7 @@ jobs:
           cp .coverage coverage.py311-core
 
       - name: Upload core coverage artifact
-        uses: actions/upload-artifact@v5.0.0
+        uses: actions/upload-artifact@v6.0.0
         with:
           name: coverage-py311-core
           path: coverage.py311-core
@@ -150,7 +150,7 @@ jobs:
           cp .coverage coverage.py311-exact
 
       - name: Upload exact coverage artifact
-        uses: actions/upload-artifact@v5.0.0
+        uses: actions/upload-artifact@v6.0.0
         with:
           name: coverage-py311-exact
           path: coverage.py311-exact
@@ -175,7 +175,7 @@ jobs:
           python -m pip install "coverage[toml]"
 
       - name: Download coverage artifacts
-        uses: actions/download-artifact@v5.0.0
+        uses: actions/download-artifact@v6.0.0
         with:
           pattern: coverage-py311-*
           path: coverage-artifacts
@@ -188,7 +188,7 @@ jobs:
           python -c 'import sys, xml.etree.ElementTree as ET; threshold=0.95; rate=float(ET.parse("coverage.xml").getroot().attrib["line-rate"]); print(f"Exact line coverage: {100.0 * rate:.2f}%"); sys.exit(0 if rate + 1.0e-12 >= threshold else f"Exact line coverage {100.0 * rate:.2f}% is below {100.0 * threshold:.2f}%")'
 
       - name: Upload coverage artifact
-        uses: actions/upload-artifact@v5.0.0
+        uses: actions/upload-artifact@v6.0.0
         with:
           name: coverage-py311
           path: coverage.xml
