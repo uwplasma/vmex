@@ -301,6 +301,12 @@ derivative to the central finite difference of complete tiny free-boundary
 solves after explicitly rejecting branch changes.  This is stronger than a
 fixed-boundary replay test, but it remains a same-branch accepted-trace
 validation rather than a general derivative of the adaptive host loop.
+The current-only gate also promotes physical scalars from the same complete
+base/plus/minus solve triplet: final aspect ratio, accepted ``Bnormal`` RMS,
+and accepted ``Bsqvac`` RMS.  The last two scalars exercise active
+free-boundary vacuum forcing seen by the accepted update, while still requiring
+identical accepted-trace and residual-controller fingerprints before comparing
+AD against central finite differences.
 For scripts that need reviewer-facing evidence, the companion
 ``direct_coil_accepted_trace_fingerprint_delta_summary`` helper converts the
 delta into a strict-JSON-safe payload.
@@ -323,7 +329,10 @@ generated data to the repository:
 
 The default command is bounded and records the branch fingerprints,
 complete-solve central finite-difference slope, and fixed-trace custom-VJP
-slope.  Passing ``--include-controller-vjp`` also evaluates the stacked
+slope.  The required CI gate is stricter than this default diagnostic: it also
+checks same-branch physical scalar slopes for aspect ratio plus accepted
+``Bnormal``/``Bsqvac`` RMS on the current-only representative.  Passing
+``--include-controller-vjp`` also evaluates the stacked
 accepted-controller custom VJP, which is useful for deeper review but slower in
 cold processes.  The JSON report includes
 ``accepted_trace_controls.preconditioner_policy_segment_summary`` so reviewers
