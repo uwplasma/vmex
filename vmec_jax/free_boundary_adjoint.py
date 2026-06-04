@@ -27,6 +27,8 @@ from .free_boundary_adjoint_controller import (
 )
 
 __all__ = [
+    "direct_coil_accepted_trace_branch_metadata",
+    "free_boundary_adjoint_trace_replay_diagnostics",
     "jax_visible_accepted_nonlinear_controller_directional_check_jax",
     "jax_visible_accepted_nonlinear_controller_jax",
     "jax_visible_masked_nonlinear_controller_directional_check_jax",
@@ -2007,6 +2009,218 @@ def direct_coil_accepted_trace_preconditioner_policy_segment_summary(
     return summaries
 
 
+def _accepted_trace_effective_controller_masks(controls: Mapping[str, Any]) -> dict[str, Any]:
+    """Return effective accepted/rejected/done masks for controller controls."""
+
+    accept_control = np.asarray(controls["accept"], dtype=bool)
+    done_control = np.asarray(controls["done"], dtype=bool)
+    active_values = []
+    accepted_values = []
+    rejected_values = []
+    done_values = []
+    done = False
+    for accept_i, done_i in zip(accept_control, done_control, strict=True):
+        active = not done
+        accepted = bool(active and accept_i)
+        rejected = bool(active and not accept_i)
+        done = bool(done or (accepted and done_i))
+        active_values.append(active)
+        accepted_values.append(accepted)
+        rejected_values.append(rejected)
+        done_values.append(done)
+    return {
+        "accept_control": jnp.asarray(accept_control, dtype=bool),
+        "done_control": jnp.asarray(done_control, dtype=bool),
+        "active": jnp.asarray(active_values, dtype=bool),
+        "accepted": jnp.asarray(accepted_values, dtype=bool),
+        "rejected": jnp.asarray(rejected_values, dtype=bool),
+        "done": jnp.asarray(done_values, dtype=bool),
+        "reset_to_trace_pre": jnp.asarray(controls["reset_to_trace_pre"], dtype=bool),
+        "has_active_freeb_replay": jnp.asarray(controls["has_active_freeb_replay"], dtype=bool),
+    }
+
+
+def direct_coil_accepted_trace_branch_metadata(
+    traces: Any,
+    *,
+    accept_mask: Any | None = None,
+    done_mask: Any | None = None,
+    max_steps: int | None = None,
+    json_safe: bool = False,
+) -> dict[str, Any]:
+    """Return branch metadata for a fixed accepted free-boundary trace.
+
+    This is the production-facing phase-2 seam between the host adaptive
+    free-boundary controller and any fixed-branch custom-VJP wrapper.  It
+    packages the branch-control fingerprint, accepted/done/reset masks, active
+    direct-coil replay cadence, and static preconditioner segments in one
+    payload so derivative gates can fail explicitly when a finite-difference
+    perturbation follows a different branch.
+    """
+
+    trace_seq = tuple(traces)
+    if max_steps is not None:
+        trace_seq = trace_seq[: int(max_steps)]
+    if not trace_seq:
+        raise ValueError("at least one accepted trace is required")
+
+    n_steps = len(trace_seq)
+    if accept_mask is not None:
+        accept_mask = np.asarray(accept_mask, dtype=bool)[:n_steps]
+    if done_mask is not None:
+        done_mask = np.asarray(done_mask, dtype=bool)[:n_steps]
+
+    controls = direct_coil_accepted_trace_controller_controls_jax(
+        trace_seq,
+        accept_mask=accept_mask,
+        done_mask=done_mask,
+    )
+    masks = _accepted_trace_effective_controller_masks(controls)
+    freeb = jnp.asarray(controls["has_active_freeb_replay"], dtype=bool)
+    active_freeb = jnp.logical_and(jnp.asarray(masks["accepted"], dtype=bool), freeb)
+    metadata = {
+        "n_steps": int(n_steps),
+        "n_free_boundary_replay_steps": int(np.count_nonzero(np.asarray(active_freeb, dtype=bool))),
+        "fingerprint": direct_coil_accepted_trace_fingerprint(trace_seq),
+        "controller_controls": controls,
+        "masks": masks,
+        "accepted_mask": jnp.asarray(masks["accepted"], dtype=bool),
+        "rejected_mask": jnp.asarray(masks["rejected"], dtype=bool),
+        "done_mask": jnp.asarray(masks["done"], dtype=bool),
+        "reset_to_trace_pre": jnp.asarray(masks["reset_to_trace_pre"], dtype=bool),
+        "has_active_freeb_replay": freeb,
+        "active_free_boundary_mask": active_freeb,
+        "preconditioner_policy_segments": direct_coil_accepted_trace_preconditioner_policy_segments(trace_seq),
+        "preconditioner_policy_segment_summary": direct_coil_accepted_trace_preconditioner_policy_segment_summary(
+            trace_seq,
+            accept_mask=accept_mask,
+            done_mask=done_mask,
+        ),
+    }
+    if json_safe:
+        return _json_safe_fingerprint_value(metadata)
+    return metadata
+
+
+def _extract_adjoint_step_trace(source: Any) -> tuple[Any, ...]:
+    if isinstance(source, Mapping):
+        if "adjoint_step_trace" in source:
+            return tuple(source["adjoint_step_trace"])
+        if "diagnostics" in source and isinstance(source["diagnostics"], Mapping):
+            diagnostics = source["diagnostics"]
+            if "adjoint_step_trace" in diagnostics:
+                return tuple(diagnostics["adjoint_step_trace"])
+    diagnostics = getattr(source, "diagnostics", None)
+    if isinstance(diagnostics, Mapping) and "adjoint_step_trace" in diagnostics:
+        return tuple(diagnostics["adjoint_step_trace"])
+    result = getattr(source, "result", None)
+    result_diagnostics = getattr(result, "diagnostics", None)
+    if isinstance(result_diagnostics, Mapping) and "adjoint_step_trace" in result_diagnostics:
+        return tuple(result_diagnostics["adjoint_step_trace"])
+    if isinstance(source, (str, bytes)):
+        raise RuntimeError(
+            "No adjoint_step_trace found. Run the residual solver with "
+            "adjoint_trace=True and adjoint_trace_mode='full'."
+        )
+    try:
+        traces = tuple(source)
+    except TypeError as exc:
+        raise RuntimeError(
+            "No adjoint_step_trace found. Run the residual solver with "
+            "adjoint_trace=True and adjoint_trace_mode='full'."
+        ) from exc
+    if traces and all(isinstance(trace, Mapping) for trace in traces):
+        return traces
+    raise RuntimeError(
+        "No adjoint_step_trace found. Run the residual solver with "
+        "adjoint_trace=True and adjoint_trace_mode='full'."
+    )
+
+
+def _stackability_probe(name: str, fn: Any, traces: tuple[Any, ...]) -> tuple[bool, str | None]:
+    try:
+        fn(traces)
+    except Exception as exc:
+        return False, f"{name}: {exc}"
+    return True, None
+
+
+def free_boundary_adjoint_trace_replay_diagnostics(
+    source: Any,
+    *,
+    accept_mask: Any | None = None,
+    done_mask: Any | None = None,
+    max_steps: int | None = None,
+    json_safe: bool = False,
+) -> dict[str, Any]:
+    """Return diagnostics for fixed accepted-trace free-boundary replay.
+
+    The returned contract is intentionally conservative: it describes a fixed
+    accepted-branch replay payload and explicitly does *not* claim that the
+    adaptive host controller is differentiated.  Callers should use it to gate
+    complete-solve finite-difference comparisons before invoking any
+    branch-local custom VJP.
+    """
+
+    traces = _extract_adjoint_step_trace(source)
+    if max_steps is not None:
+        traces = traces[: int(max_steps)]
+    if not traces:
+        raise RuntimeError(
+            "adjoint_step_trace is empty. Run the residual solver with "
+            "adjoint_trace=True and adjoint_trace_mode='full'."
+        )
+    metadata = direct_coil_accepted_trace_branch_metadata(
+        traces,
+        accept_mask=accept_mask,
+        done_mask=done_mask,
+        max_steps=max_steps,
+        json_safe=False,
+    )
+    scalar_ok, scalar_error = _stackability_probe(
+        "scalar_controls",
+        direct_coil_accepted_trace_scalar_controls_jax,
+        traces,
+    )
+    array_ok, array_error = _stackability_probe(
+        "array_controls",
+        direct_coil_accepted_trace_array_controls_jax,
+        traces,
+    )
+    preconditioner_ok, preconditioner_error = _stackability_probe(
+        "preconditioner_controls",
+        direct_coil_accepted_trace_preconditioner_controls_jax,
+        traces,
+    )
+    errors = {
+        key: value
+        for key, value in {
+            "scalar_controls": scalar_error,
+            "array_controls": array_error,
+            "preconditioner_controls": preconditioner_error,
+        }.items()
+        if value is not None
+    }
+    diagnostics = {
+        "contract": "fixed accepted-trace replay diagnostics only",
+        "differentiates_adaptive_controller": False,
+        "n_steps": metadata["n_steps"],
+        "branch_fingerprint": metadata["fingerprint"],
+        "masks": metadata["masks"],
+        "replay_diagnostics": {
+            "preconditioner_policy_n_segments": len(metadata["preconditioner_policy_segments"]),
+            "preconditioner_policy_segment_summary": metadata["preconditioner_policy_segment_summary"],
+            "scalar_controls_stackable": bool(scalar_ok),
+            "array_controls_stackable": bool(array_ok),
+            "preconditioner_controls_stackable": bool(preconditioner_ok),
+            "errors": errors,
+        },
+    }
+    if json_safe:
+        return _json_safe_fingerprint_value(diagnostics)
+    return diagnostics
+
+
 def direct_coil_accepted_trace_array_controls_jax(traces: Any) -> dict[str, Any]:
     """Return stacked array-valued update controls for accepted trace replay.
 
@@ -2529,6 +2743,11 @@ def _json_safe_fingerprint_value(value: Any) -> Any:
         return [_json_safe_fingerprint_value(item) for item in value]
     if isinstance(value, float):
         return value if np.isfinite(value) else None
+    if hasattr(value, "tolist") and not isinstance(value, (str, bytes)):
+        try:
+            return _json_safe_fingerprint_value(value.tolist())
+        except Exception:
+            pass
     return value
 
 
