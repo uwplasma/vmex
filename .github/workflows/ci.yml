@@ -120,7 +120,7 @@ jobs:
           path: coverage.py311-core
 
   test-py311-exact:
-    name: Fast Tests (py3.11 exact coverage: ${{ matrix.bucket }})
+    name: "Fast Tests (py3.11 exact coverage: ${{ matrix.bucket }})"
     runs-on: ubuntu-latest
     timeout-minutes: 35
     strategy:

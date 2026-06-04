@@ -52,6 +52,8 @@ Steps taken:
 3. Updated the combined py3.11 coverage job to consume all
    `coverage-py311-exact-*` artifacts alongside the existing core and
    slow-physics coverage artifacts.
+4. Fixed the first pushed matrix attempt: GitHub rejected the workflow before
+   scheduling jobs because the exact-job name contained an unquoted colon.
 
 Results obtained:
 
@@ -61,6 +63,7 @@ Results obtained:
    with `--cov=vmec_jax`; only CI scheduling and artifact names changed.
 3. This targets the current wall-time bottleneck identified from CI: the
    accepted-update and direct-coil same-branch tests dominate the exact shard.
+4. Local PyYAML parsing now validates the corrected workflow syntax.
 
 Best next steps:
 
