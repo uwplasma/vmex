@@ -1701,7 +1701,7 @@ def test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_
         check_aspect_scalar=True,
         check_boundary_moment_scalar=False,
         check_accepted_bnormal_rms_scalar=True,
-        check_accepted_bsqvac_rms_scalar=False,
+        check_accepted_bsqvac_rms_scalar=True,
     )
 
 

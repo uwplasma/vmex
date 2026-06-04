@@ -13,16 +13,16 @@ Date opened: 2026-05-24
 ## Current Release Status
 
 Last updated: 2026-06-04 on `main` with the current residual-fingerprinted
-physical-scalar gate working tree. The latest fully green pushed main is commit `69d5523`,
-`test: reduce free-boundary accepted replay cost`, passed GitHub Actions run
-`26970556579`. Commit `2f08d67`, `test: add residual branch fingerprint gate
-helper`, passed every test/build/docs shard in run `26971168043` but failed
-only the combined coverage gate at exact line coverage `94.99%`, just below
-the strict `95.00%` threshold. The current patches add a reusable same-branch
-complete-solve physical-scalar AD-vs-central-FD gate, attach the residual
-controller branch fingerprint to the complete-solve FD report, and add cheap
-synthetic branch coverage to restore coverage margin while preserving
-conservative adaptive-controller claims.
+physical-scalar gate working tree. The latest fully green pushed main is commit
+`eed9a0b`, `test: fingerprint free-boundary complete-solve branch`, which passed
+GitHub Actions run `26972223905`, including the combined 95% coverage gate.
+Commit `2f08d67`, `test: add residual branch fingerprint gate helper`, passed
+every test/build/docs shard in run `26971168043` but failed only the combined
+coverage gate at exact line coverage `94.99%`, just below the strict `95.00%`
+threshold. The current local patch promotes accepted `Bsqvac` RMS as an
+additional same-branch complete-solve physical scalar in the existing batched
+current-only custom-VJP gate while preserving conservative adaptive-controller
+claims.
 
 The latest green main splits required py3.11 coverage into core, slow-physics,
 and exact shards while keeping a combined 95% coverage threshold, preserves the
@@ -117,6 +117,58 @@ Completion:
 - CI runtime refactor with preserved coverage/physics gates: 99.4%.
 - Docs/release hygiene: 96%.
 - Overall free-boundary single-stage plan: 94.0%.
+
+### 2026-06-04 Accepted vacuum-pressure scalar promotion
+
+Steps taken:
+
+1. Reviewed the now-green CI run `26972223905` for commit `eed9a0b`; all test,
+   physics, docs, build, compatibility, and combined coverage jobs passed.
+2. Used the same-branch complete-solve report and existing batched
+   custom-VJP scalar helper to promote accepted `Bsqvac` RMS in the current-only
+   direct-coil gate. This adds an active vacuum-pressure scalar that feeds the
+   free-boundary update without adding another base/plus/minus complete-solve
+   finite-difference triplet.
+3. Left the same conservative branch contract in place: the comparison is valid
+   only when accepted-trace fingerprints and residual-controller fingerprints
+   agree across base/plus/minus solves.
+
+Results obtained:
+
+1. Focused current-only gate passed:
+   `1 passed in 40.19 s`.
+2. The affected current-only/Fourier-only/LASYM complete-solve promotion subset
+   passed:
+   `3 passed in 77.81 s`.
+3. Ruff passed for the touched test file.
+
+Best next steps:
+
+1. Commit and push the `accepted_bsqvac_rms` promotion.
+2. Keep exact-shard runtime reductions targeted at duplicate solve triplets or
+   duplicate trace setup; avoid weakening same-branch complete-solve promotion
+   gates without timing and AD-vs-FD evidence.
+3. Begin the production full-loop seam design: either a fingerprint-gated
+   custom VJP around the adaptive host loop or a JAX-visible nonlinear
+   controller, but keep claims limited until complete-loop AD-vs-central-FD
+   passes for physical scalars under stable branch fingerprints.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.8%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 100%.
+- VMEC parity and physics gates: 96%.
+- Single-stage coil-only optimization: 82%.
+- Robust coil perturbation optimization: 70%.
+- CPU/GPU performance: 86%.
+- CI runtime refactor with preserved coverage/physics gates: 99.5%.
+- Docs/release hygiene: 96%.
+- Overall free-boundary single-stage plan: 94.2%.
 
 ### 2026-06-04 CI-green replay coverage and exact-shard duplicate removal
 
