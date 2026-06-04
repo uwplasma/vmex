@@ -50,6 +50,11 @@ Steps taken:
    and preconditioner replay controls.
 4. Added a zero-extra-solve current-only physics assertion: under same-branch
    positive current scaling, accepted vacuum-response RMS must increase.
+5. Integrated replay diagnostics directly into
+   `direct_coil_same_branch_complete_solve_fd_report` for base/plus/minus
+   complete-solve traces, so the same report now carries branch fingerprints,
+   masks, preconditioner segment summaries, and stackability diagnostics for
+   future branch-local custom-VJP wrappers.
 
 Results obtained:
 
@@ -62,12 +67,16 @@ Results obtained:
    `1 passed in 39.50 s`.
 4. The combined focused rerun passed:
    `2 passed in 39.23 s`.
+5. The report-level diagnostics integration passed the current-only
+   same-branch gate:
+   `1 passed in 38.64 s`.
 
 Best next steps:
 
 1. Commit and push this diagnostics seam and watch CI.
-2. Use `free_boundary_adjoint_trace_replay_diagnostics` as the branch-gating
-   payload for the next production full-loop adjoint wrapper prototype.
+2. Use `trace_replay_diagnostics` from the same-branch complete-solve report
+   as the branch-gating payload for the next production full-loop adjoint
+   wrapper prototype.
 3. Continue exact-shard runtime reduction by reusing existing same-branch
    complete-solve payloads for any additional physical scalar assertions.
 

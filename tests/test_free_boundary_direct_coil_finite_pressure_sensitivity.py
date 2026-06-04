@@ -1165,6 +1165,35 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
     assert minus_fingerprint["n_freeb_steps"] == base_fingerprint["n_freeb_steps"]
     np.testing.assert_array_equal(plus_fingerprint["freeb_sizes"], base_fingerprint["freeb_sizes"])
     np.testing.assert_array_equal(minus_fingerprint["freeb_sizes"], base_fingerprint["freeb_sizes"])
+    expected_fingerprints = {
+        "base": base_fingerprint,
+        "plus": plus_fingerprint,
+        "minus": minus_fingerprint,
+    }
+    trace_replay_diagnostics = complete_report["trace_replay_diagnostics"]
+    assert set(trace_replay_diagnostics) == set(expected_fingerprints)
+    for label, replay_diagnostics in trace_replay_diagnostics.items():
+        fingerprint = expected_fingerprints[label]
+        assert replay_diagnostics["contract"] == "fixed accepted-trace replay diagnostics only"
+        assert replay_diagnostics["differentiates_adaptive_controller"] is False
+        assert replay_diagnostics["n_steps"] == fingerprint["n_steps"]
+        assert replay_diagnostics["branch_fingerprint"]["n_steps"] == fingerprint["n_steps"]
+        assert replay_diagnostics["branch_fingerprint"]["n_freeb_steps"] == fingerprint["n_freeb_steps"]
+        np.testing.assert_array_equal(replay_diagnostics["branch_fingerprint"]["freeb_sizes"], fingerprint["freeb_sizes"])
+        for mask_key in ("active", "accepted", "rejected", "done", "has_active_freeb_replay"):
+            assert np.asarray(replay_diagnostics["masks"][mask_key], dtype=bool).shape == (fingerprint["n_steps"],)
+        assert bool(np.any(np.asarray(replay_diagnostics["masks"]["accepted"], dtype=bool)))
+        assert bool(np.any(np.asarray(replay_diagnostics["masks"]["has_active_freeb_replay"], dtype=bool)))
+        replay_payload = replay_diagnostics["replay_diagnostics"]
+        assert replay_payload["scalar_controls_stackable"] is True
+        assert replay_payload["array_controls_stackable"] is True
+        assert replay_payload["preconditioner_policy_n_segments"] >= 1
+        assert sum(
+            segment["free_boundary_replay_steps"]
+            for segment in replay_payload["preconditioner_policy_segment_summary"]
+        ) == fingerprint["n_freeb_steps"]
+        if not replay_payload["preconditioner_controls_stackable"]:
+            assert "preconditioner_controls" in replay_payload["errors"]
 
     assert complete_report["primary_objective"] == "objective"
     assert set(complete_report["objective_values"]) == {

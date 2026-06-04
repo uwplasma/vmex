@@ -2942,6 +2942,11 @@ def direct_coil_same_branch_complete_solve_fd_report(
     base_fingerprint = direct_coil_accepted_trace_fingerprint(base["traces"])
     plus_fingerprint = direct_coil_accepted_trace_fingerprint(plus["traces"])
     minus_fingerprint = direct_coil_accepted_trace_fingerprint(minus["traces"])
+    trace_replay_diagnostics = {
+        "base": free_boundary_adjoint_trace_replay_diagnostics(base["traces"]),
+        "plus": free_boundary_adjoint_trace_replay_diagnostics(plus["traces"]),
+        "minus": free_boundary_adjoint_trace_replay_diagnostics(minus["traces"]),
+    }
     base_values = _complete_solve_objective_values(objective_fn(base))
     plus_values = _complete_solve_objective_values(objective_fn(plus))
     minus_values = _complete_solve_objective_values(objective_fn(minus))
@@ -2969,6 +2974,7 @@ def direct_coil_same_branch_complete_solve_fd_report(
             "plus_fingerprint": plus_fingerprint,
             "minus_fingerprint": minus_fingerprint,
         },
+        "trace_replay_diagnostics": trace_replay_diagnostics,
         "primary_objective": primary_key,
         "values": objective_values[primary_key],
         "objective_values": objective_values,
