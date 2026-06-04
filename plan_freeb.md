@@ -12,14 +12,15 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-06-04 on `main` with the current stacked accepted-step
-replay working tree. The latest fully green pushed main is commit `272e8dd`,
+Last updated: 2026-06-04 on `main` with the current exact-coverage matrix
+working tree. The latest fully green pushed main is commit `272e8dd`,
 `test: require free-boundary branch subcondition gates`, which passed GitHub
 Actions run `26973402880`, including docs, build, smoke, exact, slow-physics,
-core py3.11 coverage, and the combined 95% coverage gate. The current local
-patch adds an opt-in stacked step-control replay rung that calls
-`strict_update_one_step_from_state` through value-sensitive static-policy
-segments while preserving conservative adaptive-controller claims.
+core py3.11 coverage, and the combined 95% coverage gate. Commit `ba9d031`,
+`test: add stacked free-boundary replay seam`, has been pushed and is waiting
+on CI. The current local patch splits the exact coverage shard into three
+coverage-artifact buckets without dropping any py3.11 exact physics/numerics
+gate.
 
 The latest green main splits required py3.11 coverage into core, slow-physics,
 and exact shards while keeping a combined 95% coverage threshold, preserves the
@@ -38,6 +39,53 @@ same-branch gates, explicit tridiagonal-policy coverage, VMEC2000
 generated-`mgrid` WOUT-quality classification, and direct/generated
 boundary-domain checks. The code still does not claim a production full
 adaptive nonlinear `run_free_boundary` exact adjoint.
+
+### 2026-06-04 Exact coverage matrix split
+
+Steps taken:
+
+1. Split the py3.11 exact coverage CI job into three matrix buckets:
+   `accepted-update`, `same-branch`, and `remaining`.
+2. Kept the exact same 18-test promotion set: one accepted-update
+   production-trace AD/FD gate, three complete-solve same-branch custom-VJP
+   gates, and fourteen remaining exact/free-boundary/QH checkpoint gates.
+3. Updated the combined py3.11 coverage job to consume all
+   `coverage-py311-exact-*` artifacts alongside the existing core and
+   slow-physics coverage artifacts.
+
+Results obtained:
+
+1. Local collect-only validation confirmed the bucket counts are `1 + 3 + 14`
+   tests, matching the previous 18-test exact shard.
+2. The split preserves coverage semantics because every exact test still runs
+   with `--cov=vmec_jax`; only CI scheduling and artifact names changed.
+3. This targets the current wall-time bottleneck identified from CI: the
+   accepted-update and direct-coil same-branch tests dominate the exact shard.
+
+Best next steps:
+
+1. Commit and push the exact coverage matrix split.
+2. Watch the new GitHub Actions run to verify artifact download/glob handling
+   in the combined coverage gate.
+3. If the matrix split is green, continue technical work on same-branch
+   physical scalar promotion through the new stacked replay seam.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 100%.
+- VMEC parity and physics gates: 96%.
+- Single-stage coil-only optimization: 82%.
+- Robust coil perturbation optimization: 70%.
+- CPU/GPU performance: 86%.
+- CI runtime refactor with preserved coverage/physics gates: 99.7%.
+- Docs/release hygiene: 96%.
+- Overall free-boundary single-stage plan: 94.6%.
 
 ### 2026-06-04 Stacked accepted-step replay seam
 

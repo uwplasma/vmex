@@ -120,9 +120,13 @@ jobs:
           path: coverage.py311-core
 
   test-py311-exact:
-    name: Fast Tests (py3.11 exact coverage)
+    name: Fast Tests (py3.11 exact coverage: ${{ matrix.bucket }})
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        bucket: [accepted-update, same-branch, remaining]
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -146,14 +150,37 @@ jobs:
         env:
           JAX_ENABLE_X64: "1"
         run: |
-          pytest -q -n 4 -m "py311_coverage_only and not full and not vmec2000 and not simsopt" --durations=50 --cov=vmec_jax --cov-report=
-          cp .coverage coverage.py311-exact
+          case "${{ matrix.bucket }}" in
+            accepted-update)
+              pytest -q -n 1 \
+                tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree \
+                --durations=50 --cov=vmec_jax --cov-report=
+              ;;
+            same-branch)
+              pytest -q -n 3 \
+                tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_fd \
+                tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_fourier_only_same_branch_custom_vjp_matches_complete_solve_fd \
+                tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_lasym_fixed_trace_custom_vjp_matches_complete_solve_fd_on_same_branch \
+                --durations=50 --cov=vmec_jax --cov-report=
+              ;;
+            remaining)
+              pytest -q -n 4 \
+                -m "py311_coverage_only and not full and not vmec2000 and not simsopt" \
+                -k "not test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree and not test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_fd and not test_direct_coil_fourier_only_same_branch_custom_vjp_matches_complete_solve_fd and not test_direct_coil_lasym_fixed_trace_custom_vjp_matches_complete_solve_fd_on_same_branch" \
+                --durations=50 --cov=vmec_jax --cov-report=
+              ;;
+            *)
+              echo "unknown exact coverage bucket: ${{ matrix.bucket }}" >&2
+              exit 2
+              ;;
+          esac
+          cp .coverage coverage.py311-exact-${{ matrix.bucket }}
 
       - name: Upload exact coverage artifact
         uses: actions/upload-artifact@v7.0.0
         with:
-          name: coverage-py311-exact
-          path: coverage.py311-exact
+          name: coverage-py311-exact-${{ matrix.bucket }}
+          path: coverage.py311-exact-${{ matrix.bucket }}
 
   test-py311-slow:
     name: Fast Tests (py3.11 slow physics coverage)
@@ -218,7 +245,7 @@ jobs:
 
       - name: Combine and enforce coverage
         run: |
-          coverage combine coverage-artifacts/coverage-py311-core/coverage.py311-core coverage-artifacts/coverage-py311-exact/coverage.py311-exact coverage-artifacts/coverage-py311-slow/coverage.py311-slow
+          coverage combine coverage-artifacts/coverage-py311-core/coverage.py311-core coverage-artifacts/coverage-py311-exact-*/coverage.py311-exact-* coverage-artifacts/coverage-py311-slow/coverage.py311-slow
           coverage xml
           coverage report --skip-covered
           python -c 'import sys, xml.etree.ElementTree as ET; threshold=0.95; rate=float(ET.parse("coverage.xml").getroot().attrib["line-rate"]); print(f"Exact line coverage: {100.0 * rate:.2f}%"); sys.exit(0 if rate + 1.0e-12 >= threshold else f"Exact line coverage {100.0 * rate:.2f}% is below {100.0 * threshold:.2f}%")'
