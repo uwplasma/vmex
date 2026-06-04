@@ -126,6 +126,72 @@ def test_jax_and_numpy_tabulated_profile_helpers_match_for_line_segment_and_akim
     )
 
 
+def test_tabulated_profile_degenerate_and_unknown_branches_are_explicit():
+    x = np.asarray([0.0, 0.5, 1.0])
+
+    np.testing.assert_allclose(
+        profiles_mod._line_segment_profile_np([], [], x, integrate=False),
+        np.zeros_like(x),
+    )
+    np.testing.assert_allclose(
+        profiles_mod._line_segment_profile_np([0.0], [3.0], x, integrate=False),
+        np.full_like(x, 3.0),
+    )
+    np.testing.assert_allclose(
+        profiles_mod._line_segment_profile_np([0.0], [3.0], x, integrate=True),
+        3.0 * x,
+    )
+    np.testing.assert_allclose(
+        profiles_mod._akima_spline_profile_np([], [], x, integrate=True),
+        np.zeros_like(x),
+    )
+    np.testing.assert_allclose(
+        profiles_mod._akima_spline_profile_np([0.0], [4.0], x, integrate=False),
+        np.full_like(x, 4.0),
+    )
+    np.testing.assert_allclose(
+        profiles_mod._akima_spline_profile_np([0.0], [4.0], x, integrate=True),
+        4.0 * x,
+    )
+    assert profiles_mod._vmec_cubic_endpoint_derivatives_np(np.asarray([0.0]), np.asarray([1.0])) == (0.0, 0.0)
+    assert profiles_mod._vmec_cubic_endpoint_derivatives_np(np.asarray([0.0, 2.0]), np.asarray([1.0, 5.0])) == (
+        2.0,
+        2.0,
+    )
+    with pytest.raises(NotImplementedError, match="profile_type"):
+        profiles_mod._spline_profile_np("not_a_vmec_profile", [], [], x, integrate=False)
+
+    if has_jax():
+        np.testing.assert_allclose(
+            np.asarray(profiles_mod._akima_spline_profile(jnp.asarray([]), jnp.asarray([]), jnp.asarray(x), integrate=True)),
+            np.zeros_like(x),
+        )
+        np.testing.assert_allclose(
+            np.asarray(
+                profiles_mod._akima_spline_profile(
+                    jnp.asarray([0.0]),
+                    jnp.asarray([5.0]),
+                    jnp.asarray(x),
+                    integrate=False,
+                )
+            ),
+            np.full_like(x, 5.0),
+        )
+        np.testing.assert_allclose(
+            np.asarray(
+                profiles_mod._akima_spline_profile(
+                    jnp.asarray([0.0]),
+                    jnp.asarray([5.0]),
+                    jnp.asarray(x),
+                    integrate=True,
+                )
+            ),
+            5.0 * x,
+        )
+        with pytest.raises(NotImplementedError, match="profile_type"):
+            profiles_mod._spline_profile("not_a_vmec_profile", jnp.asarray([]), jnp.asarray([]), jnp.asarray(x))
+
+
 def test_two_power_and_empty_current_profile_branches():
     indata = InData(
         scalars={

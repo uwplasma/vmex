@@ -97,6 +97,25 @@ def test_build_static_can_disable_vmec_phase_cache(monkeypatch) -> None:
     assert out.tomnsps_masks_edge is not None
 
 
+def test_build_static_phase_cache_failure_keeps_trig_tables(monkeypatch) -> None:
+    original_concatenate = static_mod.np.concatenate
+
+    def fail_concatenate(*_args, **_kwargs):
+        raise RuntimeError("synthetic phase-cache failure")
+
+    monkeypatch.setattr(static_mod.np, "concatenate", fail_concatenate)
+
+    out = static_mod.build_static(_cfg(ns=3, ntor=1))
+
+    monkeypatch.setattr(static_mod.np, "concatenate", original_concatenate)
+    assert out.trig_vmec is not None
+    assert getattr(out.trig_vmec, "phase_stack", None) is None
+    assert getattr(out.trig_vmec, "phase_dtheta_stack", None) is None
+    assert getattr(out.trig_vmec, "phase_dzeta_stack", None) is None
+    assert out.tomnsps_masks is not None
+    assert out.tomnsps_masks_edge is not None
+
+
 def test_build_static_populates_vmec_phase_cache_by_default(monkeypatch) -> None:
     monkeypatch.delenv("VMEC_JAX_CACHE_VMEC_PHASE", raising=False)
 

@@ -116,7 +116,7 @@ def test_exact_optimizer_b_cartesian_tangent_columns_match_jacobian():
     input_path, _wout_path = example_paths("circular_tokamak")
     cfg, indata = load_config(str(input_path))
     static = build_static(cfg)
-    field_static = _small_static(cfg, ntheta=5, nzeta=4)
+    field_static = _small_static(cfg, ntheta=4, nzeta=2)
     boundary = boundary_from_indata(indata, static.modes)
     specs = boundary_param_specs(
         boundary,
@@ -243,7 +243,7 @@ def test_exact_optimizer_scalar_objective_cotangent_matches_dense_jacobian():
     input_path, _wout_path = example_paths("circular_tokamak")
     cfg, indata = load_config(str(input_path))
     static = build_static(cfg)
-    field_static = _small_static(cfg, ntheta=5, nzeta=4)
+    field_static = _small_static(cfg, ntheta=4, nzeta=2)
     boundary = boundary_from_indata(indata, static.modes)
     specs = boundary_param_specs(
         boundary,

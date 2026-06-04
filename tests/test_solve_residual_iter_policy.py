@@ -125,6 +125,17 @@ def test_numpy_preconditioner_apply_policy_uses_short_or_spectral_cpu_host_path(
     assert parsed_defaults.max_iter_cutoff == 240
     assert parsed_defaults.min_mode_count == 16
 
+    invalid_mode_shape = numpy_preconditioner_apply_policy(
+        host_update_assembly=True,
+        max_iter=3000,
+        mpol=object(),
+        ntor=object(),
+        max_iter_env="240",
+        min_mode_count_env="16",
+    )
+    assert not invalid_mode_shape.enabled
+    assert invalid_mode_shape.mode_count == 0
+
 
 @pytest.mark.parametrize(
     ("value", "env_value", "expected"),
