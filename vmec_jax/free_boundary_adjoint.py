@@ -32,6 +32,7 @@ __all__ = [
     "direct_coil_accepted_trace_controller_custom_vjp_scalars_jax",
     "direct_coil_accepted_trace_step_controls_jax",
     "direct_coil_accepted_trace_step_policy_segments",
+    "direct_coil_adaptive_full_loop_same_branch_gate_report",
     "direct_coil_same_branch_physical_scalar_gate_report",
     "direct_coil_same_branch_replay_gate_report",
     "direct_coil_same_branch_controller_scalars_custom_vjp_report",
@@ -3957,6 +3958,116 @@ def direct_coil_same_branch_physical_scalar_gate_report(
         "replay_gate": replay_gate,
         "errors": tuple(errors),
         "scalars": scalar_summaries,
+    }
+    if json_safe:
+        return _json_safe_fingerprint_value(result)
+    return result
+
+
+def _accepted_step_policy_signature_for_complete_payload(payload: Mapping[str, Any]) -> tuple[Any, ...]:
+    traces = tuple(payload.get("traces", ()))
+    if not traces:
+        return ()
+    return tuple(
+        (
+            int(segment["start"]),
+            int(segment["stop"]),
+            int(segment["n_steps"]),
+            segment["signature"],
+        )
+        for segment in direct_coil_accepted_trace_step_policy_segments(traces)
+    )
+
+
+def _accepted_step_policy_summary_for_complete_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    traces = tuple(payload.get("traces", ()))
+    if not traces:
+        return {"n_segments": 0, "segments": ()}
+    segments = direct_coil_accepted_trace_step_policy_segments(traces)
+    return {
+        "n_segments": len(segments),
+        "segments": tuple(
+            {
+                "start": int(segment["start"]),
+                "stop": int(segment["stop"]),
+                "n_steps": int(segment["n_steps"]),
+            }
+            for segment in segments
+        ),
+    }
+
+
+def direct_coil_adaptive_full_loop_same_branch_gate_report(
+    complete_report: Mapping[str, Any],
+    scalars_report: Mapping[str, Any],
+    *,
+    scalar_keys: tuple[str, ...] | list[str] | None = None,
+    require_stacked_step_controls: bool = True,
+    json_safe: bool = False,
+) -> dict[str, Any]:
+    """Report whether complete-loop FD is compatible with stacked replay AD.
+
+    This is deliberately a report-only production seam.  It validates that the
+    complete host-loop finite-difference triplet stayed on the same adaptive
+    branch and that the frozen accepted-branch stacked replay custom VJP
+    matches physical scalar finite differences.  It is *not* a custom VJP for
+    :func:`vmec_jax.driver.run_free_boundary` and must keep the adaptive
+    controller-differentiation flags false.
+    """
+
+    physical_gate = direct_coil_same_branch_physical_scalar_gate_report(
+        complete_report,
+        scalars_report,
+        scalar_keys=scalar_keys,
+        json_safe=False,
+    )
+    branch = complete_report.get("branch_compatibility", {})
+    errors = [f"physical scalar gate: {error}" for error in physical_gate.get("errors", ())]
+    replay_option_flags = scalars_report.get("replay_option_flags", {})
+    used_stacked_step_controls = bool(replay_option_flags.get("use_stacked_step_controls", False))
+    if bool(require_stacked_step_controls) and not used_stacked_step_controls:
+        errors.append("stacked step-control replay was not used")
+
+    labels = ("base", "plus", "minus")
+    step_policy_signatures: dict[str, tuple[Any, ...]] = {}
+    step_policy_summaries: dict[str, dict[str, Any]] = {}
+    for label in labels:
+        payload = complete_report.get(label)
+        if not isinstance(payload, Mapping):
+            errors.append(f"{label}: missing complete-solve payload")
+            step_policy_signatures[label] = ()
+            step_policy_summaries[label] = {"n_segments": 0, "segments": ()}
+            continue
+        signature = _accepted_step_policy_signature_for_complete_payload(payload)
+        if not signature:
+            errors.append(f"{label}: no accepted step-policy segments")
+        step_policy_signatures[label] = signature
+        step_policy_summaries[label] = _accepted_step_policy_summary_for_complete_payload(payload)
+
+    same_stacked_step_policy_branch = (
+        bool(step_policy_signatures.get("base"))
+        and step_policy_signatures.get("base") == step_policy_signatures.get("plus")
+        and step_policy_signatures.get("base") == step_policy_signatures.get("minus")
+    )
+    if not same_stacked_step_policy_branch:
+        errors.append("stacked step-policy branch changed")
+
+    result = {
+        "contract": "same-branch adaptive full-loop seam report",
+        "passed": len(errors) == 0,
+        "differentiates_adaptive_controller": False,
+        "differentiates_run_free_boundary": False,
+        "same_branch": bool(branch.get("same_branch", False)),
+        "same_accepted_trace_branch": bool(branch.get("same_accepted_trace_branch", branch.get("same_branch", False))),
+        "same_residual_branch": bool(branch.get("same_residual_branch", branch.get("same_branch", False))),
+        "same_stacked_step_policy_branch": bool(same_stacked_step_policy_branch),
+        "requires_stacked_step_controls": bool(require_stacked_step_controls),
+        "used_stacked_step_controls": used_stacked_step_controls,
+        "replay_option_flags": replay_option_flags,
+        "scalar_keys": physical_gate.get("scalar_keys", ()),
+        "physical_scalar_gate": physical_gate,
+        "step_policy_segments": step_policy_summaries,
+        "errors": tuple(errors),
     }
     if json_safe:
         return _json_safe_fingerprint_value(result)
