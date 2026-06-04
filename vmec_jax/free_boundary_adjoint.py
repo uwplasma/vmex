@@ -1833,7 +1833,7 @@ def _stack_optional_trace_pytree_field(trace_seq: tuple[dict[str, Any], ...], ke
     if all(value is None for value in values):
         return None
     if any(value is None for value in values):
-        raise ValueError(f"accepted trace optional field {key!r} must be present for every step or none")
+        return None
 
     def _stack_leaf(*leaves):
         arrays = [jnp.asarray(leaf) for leaf in leaves]
@@ -3864,6 +3864,10 @@ def direct_coil_same_branch_controller_scalars_custom_vjp_report(
         "passed": bool(all(passed_values)),
         "same_branch": same_branch,
         "replay_gate": replay_gate,
+        "replay_option_flags": {
+            "use_preconditioner_policy_segments": bool(replay_options.get("use_preconditioner_policy_segments", False)),
+            "use_stacked_step_controls": bool(replay_options.get("use_stacked_step_controls", False)),
+        },
         "values": values,
         "jacobian": jacobian,
         "exact_directionals": exact_directionals,
