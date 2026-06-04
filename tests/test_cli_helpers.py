@@ -265,14 +265,91 @@ def test_cli_test_mode_respects_explicit_output_path(monkeypatch, tmp_path: Path
     assert not (outdir / "wout_nfp4_QH_warm_start.nc").exists()
 
 
+def test_cli_set_test_input_ftol_inserts_after_niter_when_missing(tmp_path: Path) -> None:
+    input_path = tmp_path / "input.case"
+    input_path.write_text("&INDATA\n  NITER_ARRAY = 10 20\n/\n")
+
+    cli._set_test_input_ftol(input_path, ftol=1.0e-11)
+
+    text = input_path.read_text()
+    assert "NITER_ARRAY = 10 20" in text
+    assert "FTOL_ARRAY  = 1e-11" in text
+
+
+@pytest.mark.parametrize(
+    ("flag", "expected_solver_mode", "expected_performance"),
+    [
+        ("--parity", "parity", False),
+        ("--fast", "default", True),
+    ],
+)
+def test_cli_test_mode_forwards_parity_and_fast_flags(
+    monkeypatch,
+    tmp_path: Path,
+    flag: str,
+    expected_solver_mode: str,
+    expected_performance: bool,
+) -> None:
+    outdir = tmp_path / "demo"
+    indata = InData(scalars={"NITER": 1}, indexed={})
+    calls = {}
+
+    monkeypatch.setattr(cli, "read_indata", lambda _path: indata)
+
+    def fake_run_fixed_boundary(path: str, **kwargs):
+        calls["path"] = Path(path)
+        calls["kwargs"] = kwargs
+        return SimpleNamespace(state=SimpleNamespace(Rcos=0.0))
+
+    monkeypatch.setattr(cli, "run_fixed_boundary", fake_run_fixed_boundary)
+    monkeypatch.setattr(cli, "write_wout_from_fixed_boundary_run", lambda path, run, *, include_fsq: path.write_text("wout"))
+    monkeypatch.setitem(sys.modules, "vmec_jax.plotting", SimpleNamespace(plot_wout=lambda path, *, outdir: None))
+
+    assert cli.main(["--test", "--outdir", str(outdir), flag, "--quiet"]) == 0
+
+    assert calls["path"] == (outdir / "input.nfp4_QH_warm_start").resolve()
+    assert calls["kwargs"]["solver_mode"] == expected_solver_mode
+    assert calls["kwargs"]["performance_mode"] is expected_performance
+
+
+def test_cli_test_mode_propagates_solver_failure(monkeypatch, tmp_path: Path) -> None:
+    parser = cli.build_parser()
+    args = parser.parse_args(["--test", "--outdir", str(tmp_path)])
+
+    monkeypatch.setattr(cli, "_copy_test_input", lambda outdir: outdir / "input.nfp4_QH_warm_start")
+    monkeypatch.setattr(cli, "main", lambda _argv: 17)
+
+    assert cli._run_bundled_test(args, parser) == 17
+
+
 def test_cli_errors_for_missing_plot_or_input(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as no_input:
         cli.main([])
     assert no_input.value.code == 2
 
+    with pytest.raises(SystemExit) as missing_auto_plot_target:
+        cli.main(["--plot"])
+    assert missing_auto_plot_target.value.code == 2
+
     with pytest.raises(SystemExit) as missing_plot:
         cli.main(["--plot", str(tmp_path / "missing.nc")])
     assert missing_plot.value.code == 2
+
+    existing_wout = tmp_path / "wout_case.nc"
+    existing_wout.write_text("wout")
+    with pytest.raises(SystemExit) as duplicate_plot_target:
+        cli.main([str(existing_wout), "--plot", str(existing_wout)])
+    assert duplicate_plot_target.value.code == 2
+
+    with pytest.raises(SystemExit) as wout_needs_action:
+        cli.main([str(existing_wout)])
+    assert wout_needs_action.value.code == 2
+
+    boozmn = tmp_path / "boozmn_case.nc"
+    boozmn.write_text("booz")
+    with pytest.raises(SystemExit) as boozmn_needs_plot:
+        cli.main([str(boozmn)])
+    assert boozmn_needs_plot.value.code == 2
 
     with pytest.raises(SystemExit) as test_with_input:
         cli.main(["--test", str(tmp_path / "input.case")])

@@ -140,8 +140,10 @@ def test_scan_cache_miss_category_counts_identifies_nearest_cached_key():
 
     assert scan_cache_key_field_names(base + (7,))[-1] == "seq_len"
     assert scan_cache_key_field_names(unrelated)[0] == "schema"
+    assert scan_cache_key_field_names(("custom_schema", "a", "b")) == ("field_0", "field_1", "field_2")
     assert scan_cache_miss_category_counts(requested, []) == {"cold_empty": 1}
     assert scan_cache_miss_category_counts(requested, [unrelated]) == {"schema": 1}
+    assert scan_cache_miss_category_counts(base, [base]) == {"unknown": 1}
 
     counts = scan_cache_miss_category_counts(requested, [unrelated, base])
 

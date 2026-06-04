@@ -11,6 +11,7 @@ from vmec_jax.solve_residual_iter_config import (
     resolve_debug_print_config,
     resolve_dump_history_config,
     resolve_nstep_screen,
+    should_probe_bad_jacobian_state,
 )
 
 
@@ -59,6 +60,17 @@ def test_bad_jacobian_invalid_relative_tolerance_falls_back_to_zero():
 
     assert cfg.ptau_tol == pytest.approx(2.5e-6)
     assert cfg.ptau_tol_rel == 0.0
+
+
+def test_bad_jacobian_invalid_initial_probe_iters_uses_default_and_clamps_negative():
+    invalid = parse_bad_jacobian_config({"VMEC_JAX_BADJAC_INITIAL_STATE_PROBE_ITERS": "not-an-int"})
+    assert invalid.initial_state_probe_iters == 2
+
+    negative = parse_bad_jacobian_config({"VMEC_JAX_BADJAC_INITIAL_STATE_PROBE_ITERS": "-5"})
+    assert negative.initial_state_probe_iters == 0
+
+    assert should_probe_bad_jacobian_state(state_probe=True, initial_state_probe_iters=2, iter_idx=2)
+    assert not should_probe_bad_jacobian_state(state_probe=True, initial_state_probe_iters=2, iter_idx=3)
 
 
 def test_heavy_dump_flags_disable_jit_and_force_full_history():

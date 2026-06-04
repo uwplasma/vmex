@@ -24,6 +24,16 @@ def test_s_half_from_static_matches_vmec_half_mesh_convention():
     np.testing.assert_allclose(np.asarray(finite_beta._s_half_from_static(single)), [0.0])
 
 
+def test_glasser_resistive_term_requires_current_or_hamiltonian_input():
+    from vmec_jax.mercier import glasser_resistive_interchange_from_mercier_terms
+
+    with pytest.raises(ValueError, match="Either H, Dcurr"):
+        glasser_resistive_interchange_from_mercier_terms(
+            DMerc=jnp.asarray([0.1, 0.2]),
+            shear=jnp.asarray([0.3, 0.4]),
+        )
+
+
 def test_wout_like_for_state_builds_profile_and_flux_fields(monkeypatch):
     modes = ModeTable(m=np.array([0, 1]), n=np.array([0, 0]))
     static = SimpleNamespace(
@@ -427,6 +437,7 @@ def _patch_fake_mercier_state_dependencies(monkeypatch, shape):
 
 def test_mercier_terms_from_state_composes_stellarator_symmetric_channels(monkeypatch):
     state, static, shape = _make_fake_mercier_state_inputs()
+    static.trig_vmec = None
     _patch_fake_mercier_state_dependencies(monkeypatch, shape)
 
     terms = finite_beta.mercier_terms_from_state(

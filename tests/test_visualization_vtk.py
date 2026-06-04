@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 import pytest
 
@@ -141,7 +143,13 @@ def test_export_vtk_surface_fieldline_and_volume_with_synthetic_kernels(monkeypa
     input_path.write_text("&INDATA\n/\n")
     wout_path.write_text("placeholder")
 
-    cfg = type("Cfg", (), {"ntheta": 2, "nzeta": 3, "nfp": 1})()
+    @dataclass(frozen=True)
+    class Cfg:
+        ntheta: int = 2
+        nzeta: int = 3
+        nfp: int = 1
+
+    cfg = Cfg()
     static_holder = {}
 
     def fake_build_static(cfg_arg, *, grid):
@@ -162,30 +170,37 @@ def test_export_vtk_surface_fieldline_and_volume_with_synthetic_kernels(monkeypa
         },
     )()
     state = object()
-    geom = type(
-        "Geom",
-        (),
-        {
-            "R": np.ones((2, 2, 3)),
-            "Z": np.zeros((2, 2, 3)),
-        },
-    )()
-    bsupu = np.ones((2, 2, 3)) * 0.2
-    bsupv = np.ones((2, 2, 3)) * 0.3
-    bcart = np.zeros((2, 2, 3, 3))
-    bcart[..., 0] = 1.0
-    bcart[..., 1] = 2.0
-    bcart[..., 2] = 3.0
+    def fake_eval_geom(_state, static):
+        shape = (2, int(static.grid.ntheta), int(static.grid.nzeta))
+        return type(
+            "Geom",
+            (),
+            {
+                "R": np.ones(shape),
+                "Z": np.zeros(shape),
+            },
+        )()
+
+    def fake_bsup_from_geom(geom_arg, *_args, **_kwargs):
+        shape = np.asarray(geom_arg.R).shape
+        return np.ones(shape) * 0.2, np.ones(shape) * 0.3
+
+    def fake_bcart_from_bsup(geom_arg, *_args, **_kwargs):
+        bcart = np.zeros(np.asarray(geom_arg.R).shape + (3,))
+        bcart[..., 0] = 1.0
+        bcart[..., 1] = 2.0
+        bcart[..., 2] = 3.0
+        return bcart
 
     monkeypatch.setattr(config_module, "load_config", lambda _path: (cfg, object()))
     monkeypatch.setattr(static_module, "build_static", fake_build_static)
     monkeypatch.setattr(wout_module, "read_wout", lambda _path: wout)
     monkeypatch.setattr(wout_module, "state_from_wout", lambda _wout: state)
-    monkeypatch.setattr(geom_module, "eval_geom", lambda _state, _static: geom)
+    monkeypatch.setattr(geom_module, "eval_geom", fake_eval_geom)
     monkeypatch.setattr(field_module, "lamscale_from_phips", lambda _phips, _s: 1.0)
-    monkeypatch.setattr(field_module, "bsup_from_geom", lambda *_args, **_kwargs: (bsupu, bsupv))
-    monkeypatch.setattr(field_module, "b2_from_bsup", lambda *_args, **_kwargs: np.ones((2, 2, 3)) * 4.0)
-    monkeypatch.setattr(field_module, "b_cartesian_from_bsup", lambda *_args, **_kwargs: bcart)
+    monkeypatch.setattr(field_module, "bsup_from_geom", fake_bsup_from_geom)
+    monkeypatch.setattr(field_module, "b2_from_bsup", lambda geom_arg, *_args, **_kwargs: np.ones(np.asarray(geom_arg.R).shape) * 4.0)
+    monkeypatch.setattr(field_module, "b_cartesian_from_bsup", fake_bcart_from_bsup)
     monkeypatch.setattr(
         fieldlines_module,
         "trace_fieldline_on_surface",
@@ -213,6 +228,16 @@ def test_export_vtk_surface_fieldline_and_volume_with_synthetic_kernels(monkeypa
     assert 'Name="Bmag"' in paths["fieldline"].read_text()
     assert 'WholeExtent="0 1 0 1 0 2"' in paths["volume"].read_text()
     assert static_holder["static"].grid.theta.shape[0] == 2
+
+    hi_res_paths = export_vtk_surface_and_fieldline(
+        input_path=input_path,
+        wout_path=wout_path,
+        outdir=tmp_path / "vtk_hi_res",
+        hi_res=True,
+    )
+    assert set(hi_res_paths) == {"surface", "fieldline"}
+    assert static_holder["static"].grid.theta.shape[0] == 128
+    assert static_holder["static"].grid.zeta.shape[0] == 128
 
     with pytest.raises(ValueError, match="out of range"):
         export_vtk_surface_and_fieldline(

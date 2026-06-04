@@ -71,6 +71,21 @@ def test_build_static_signed_maps_failure_keeps_mode_arrays(monkeypatch) -> None
     assert out.lambda_axis_copy_mask.shape == out.m_np.shape
 
 
+def test_build_static_signed_maps_skip_missing_positive_modes(monkeypatch) -> None:
+    def sparse_signed_maps(_modes):
+        idx_pos = np.asarray([[0, -1], [1, 2]], dtype=np.int32)
+        idx_neg = np.asarray([[0, -1], [1, -1]], dtype=np.int32)
+        return SimpleNamespace(idx_pos=idx_pos, idx_neg=idx_neg)
+
+    monkeypatch.setattr("vmec_jax.vmec_parity.signed_maps_from_modes", sparse_signed_maps)
+
+    out = static_mod.build_static(_cfg(ns=4, ntor=1))
+
+    assert out.signed_maps is not None
+    assert (0, 1) not in set(zip(np.asarray(out.mn_idx_m), np.asarray(out.mn_idx_n)))
+    assert (0, 0) in set(zip(np.asarray(out.mn_idx_m), np.asarray(out.mn_idx_n)))
+
+
 def test_build_static_can_disable_vmec_phase_cache(monkeypatch) -> None:
     monkeypatch.setenv("VMEC_JAX_CACHE_VMEC_PHASE", "0")
 

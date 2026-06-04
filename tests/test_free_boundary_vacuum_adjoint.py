@@ -459,6 +459,66 @@ def test_jax_visible_masked_controller_keeps_final_state_and_gradient_stable():
     np.testing.assert_allclose(exact, fd, rtol=2.0e-6, atol=1.0e-10)
 
 
+def test_jax_visible_controller_plain_step_outputs_and_segment_validation():
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jnp
+    from vmec_jax.free_boundary_adjoint_controller import _pytree_vdot_jax
+
+    enable_x64(True)
+
+    def step_plain(state, params, control):
+        return state + params["scale"] * control
+
+    params = {"scale": jnp.asarray(0.5)}
+    controls = jnp.asarray([1.0, 2.0, 3.0])
+
+    run = jax_visible_nonlinear_controller_jax(step_plain, jnp.asarray(0.0), params, controls)
+    np.testing.assert_allclose(np.asarray(run["state"]), 3.0)
+
+    masked = jax_visible_masked_nonlinear_controller_jax(
+        step_plain,
+        lambda state, _params, _control, _aux: state > 1.0,
+        jnp.asarray(0.0),
+        params,
+        controls,
+    )
+    np.testing.assert_allclose(np.asarray(masked["state"]), 1.5)
+    np.testing.assert_array_equal(np.asarray(masked["history"]["active"]), [True, True, False])
+
+    accepted = jax_visible_accepted_nonlinear_controller_jax(
+        step_plain,
+        lambda _state, proposed, _params, _control, _aux: proposed < 2.0,
+        lambda state, _params, _control, _aux: state > 1.0,
+        jnp.asarray(0.0),
+        params,
+        controls,
+    )
+    np.testing.assert_allclose(np.asarray(accepted["state"]), 1.5)
+    np.testing.assert_array_equal(np.asarray(accepted["history"]["accepted"]), [True, True, False])
+
+    with pytest.raises(ValueError, match="at least one segment"):
+        jax_visible_segmented_accepted_nonlinear_controller_jax(
+            step_plain,
+            lambda *_args: True,
+            lambda *_args: False,
+            jnp.asarray(0.0),
+            params,
+            (),
+        )
+
+    with pytest.raises(ValueError, match="step_fns length"):
+        jax_visible_segmented_accepted_nonlinear_controller_jax(
+            (step_plain,),
+            lambda *_args: True,
+            lambda *_args: False,
+            jnp.asarray(0.0),
+            params,
+            (controls[:1], controls[1:]),
+        )
+
+    np.testing.assert_allclose(np.asarray(_pytree_vdot_jax({}, {})), 0.0)
+
+
 def test_segmented_accepted_controller_matches_monolithic_scan_and_gradient():
     pytest.importorskip("jax")
     from vmec_jax._compat import jax, jnp, tree_util
