@@ -178,6 +178,7 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes() -> None:
         direct_coil_accepted_trace_scalar_controls_jax,
         direct_coil_accepted_trace_fingerprint,
         direct_coil_accepted_trace_fingerprint_delta,
+        direct_coil_same_branch_replay_gate_report,
         free_boundary_adjoint_trace_replay_diagnostics,
     )
 
@@ -296,6 +297,28 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes() -> None:
     assert padded_json["masks"]["done"] == [False, True, True]
     with pytest.raises(RuntimeError, match="adjoint_trace=True"):
         free_boundary_adjoint_trace_replay_diagnostics({"diagnostics": {}})
+    synthetic_fingerprint = direct_coil_accepted_trace_fingerprint([trace0, trace1])
+    synthetic_report = {
+        "branch_compatibility": {
+            "same_branch": True,
+            "base_fingerprint": synthetic_fingerprint,
+            "plus_fingerprint": synthetic_fingerprint,
+            "minus_fingerprint": synthetic_fingerprint,
+        },
+        "trace_replay_diagnostics": {
+            "base": free_boundary_adjoint_trace_replay_diagnostics([trace0, trace1]),
+            "plus": free_boundary_adjoint_trace_replay_diagnostics([trace0, trace1]),
+            "minus": free_boundary_adjoint_trace_replay_diagnostics([trace0, trace1]),
+        },
+    }
+    synthetic_gate = direct_coil_same_branch_replay_gate_report(synthetic_report)
+    assert synthetic_gate["passed"], synthetic_gate
+    json.dumps(direct_coil_same_branch_replay_gate_report(synthetic_report, json_safe=True), allow_nan=False)
+    bad_synthetic_report = deepcopy(synthetic_report)
+    bad_synthetic_report["trace_replay_diagnostics"]["plus"]["differentiates_adaptive_controller"] = True
+    bad_synthetic_gate = direct_coil_same_branch_replay_gate_report(bad_synthetic_report)
+    assert not bad_synthetic_gate["passed"]
+    assert any("adaptive-controller" in error for error in bad_synthetic_gate["errors"])
 
     bad_preconditioner_shape = dict(trace1)
     bad_preconditioner_shape["precond_mats"] = {"ar": np.ones((3, 3)), "br": z + 7.0}
@@ -1073,6 +1096,7 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
         free_boundary_boundary_geometry_jax,
         direct_coil_same_branch_controller_scalar_custom_vjp_report,
         direct_coil_same_branch_complete_solve_fd_report,
+        direct_coil_same_branch_replay_gate_report,
         direct_coil_fixed_trace_custom_vjp_objective_jax,
     )
     from vmec_jax.state import pack_state
@@ -1194,6 +1218,12 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
         ) == fingerprint["n_freeb_steps"]
         if not replay_payload["preconditioner_controls_stackable"]:
             assert "preconditioner_controls" in replay_payload["errors"]
+    replay_gate = direct_coil_same_branch_replay_gate_report(complete_report)
+    assert replay_gate["passed"], replay_gate
+    assert replay_gate["contract"] == "same-branch accepted-trace replay gate"
+    assert replay_gate["same_branch"] is True
+    assert replay_gate["differentiates_adaptive_controller"] is False
+    json.dumps(direct_coil_same_branch_replay_gate_report(complete_report, json_safe=True), allow_nan=False)
 
     assert complete_report["primary_objective"] == "objective"
     assert set(complete_report["objective_values"]) == {
@@ -1323,6 +1353,7 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
         )
         assert aspect_report["passed"], aspect_report
         assert aspect_report["same_branch"] is True
+        assert aspect_report["replay_gate"]["passed"] is True
         assert aspect_report["base_abs_delta"] < 2.0e-3
         np.testing.assert_allclose(
             aspect_report["complete_fd_directional"],
@@ -1347,6 +1378,7 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
         )
         assert moment_report["passed"], moment_report
         assert moment_report["same_branch"] is True
+        assert moment_report["replay_gate"]["passed"] is True
         assert moment_report["base_abs_delta"] < 2.0e-3
     if check_accepted_bsqvac_rms_scalar:
         bsqvac_values = complete_report["objective_values"]["accepted_bsqvac_rms"]
@@ -1366,6 +1398,7 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
         )
         assert bsqvac_report["passed"], bsqvac_report
         assert bsqvac_report["same_branch"] is True
+        assert bsqvac_report["replay_gate"]["passed"] is True
         assert bsqvac_report["base_abs_delta"] < 2.0e-3
 
 

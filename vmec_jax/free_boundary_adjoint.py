@@ -28,6 +28,7 @@ from .free_boundary_adjoint_controller import (
 
 __all__ = [
     "direct_coil_accepted_trace_branch_metadata",
+    "direct_coil_same_branch_replay_gate_report",
     "free_boundary_adjoint_trace_replay_diagnostics",
     "jax_visible_accepted_nonlinear_controller_directional_check_jax",
     "jax_visible_accepted_nonlinear_controller_jax",
@@ -2981,6 +2982,99 @@ def direct_coil_same_branch_complete_solve_fd_report(
     }
 
 
+def direct_coil_same_branch_replay_gate_report(
+    complete_report: Mapping[str, Any],
+    *,
+    require_active_free_boundary: bool = True,
+    require_scalar_controls_stackable: bool = True,
+    require_array_controls_stackable: bool = True,
+    json_safe: bool = False,
+) -> dict[str, Any]:
+    """Return the branch gate for promoting a fixed-trace replay derivative.
+
+    The gate consumes the output of
+    :func:`direct_coil_same_branch_complete_solve_fd_report` and checks only
+    discrete/control-flow compatibility: same accepted branch, matching replay
+    fingerprints, active direct-coil free-boundary replay when requested, and
+    stackable controller payloads.  Passing this gate means a branch-local
+    custom VJP can be compared against complete-solve finite differences; it
+    still does not differentiate the adaptive host controller.
+    """
+
+    errors: list[str] = []
+    branch = complete_report.get("branch_compatibility", {})
+    same_branch = bool(branch.get("same_branch", False))
+    if not same_branch:
+        errors.append("branch_compatibility.same_branch is false")
+
+    trace_diags = complete_report.get("trace_replay_diagnostics", {})
+    expected_labels = ("base", "plus", "minus")
+    if set(trace_diags) != set(expected_labels):
+        errors.append("trace_replay_diagnostics must contain base, plus, and minus")
+
+    for label in expected_labels:
+        diag = trace_diags.get(label)
+        fingerprint = branch.get(f"{label}_fingerprint")
+        if not isinstance(diag, Mapping):
+            errors.append(f"{label}: missing replay diagnostics")
+            continue
+        if not isinstance(fingerprint, Mapping):
+            errors.append(f"{label}: missing branch fingerprint")
+            continue
+        if bool(diag.get("differentiates_adaptive_controller", True)):
+            errors.append(f"{label}: diagnostics unexpectedly claim adaptive-controller differentiation")
+        diag_fingerprint = diag.get("branch_fingerprint", {})
+        if int(diag.get("n_steps", -1)) != int(fingerprint.get("n_steps", -2)):
+            errors.append(f"{label}: n_steps mismatch")
+        if int(diag_fingerprint.get("n_steps", -1)) != int(fingerprint.get("n_steps", -2)):
+            errors.append(f"{label}: fingerprint n_steps mismatch")
+        if int(diag_fingerprint.get("n_freeb_steps", -1)) != int(fingerprint.get("n_freeb_steps", -2)):
+            errors.append(f"{label}: fingerprint n_freeb_steps mismatch")
+        try:
+            if not np.array_equal(
+                np.asarray(diag_fingerprint.get("freeb_sizes")),
+                np.asarray(fingerprint.get("freeb_sizes")),
+            ):
+                errors.append(f"{label}: freeb_sizes mismatch")
+        except Exception:
+            errors.append(f"{label}: freeb_sizes comparison failed")
+
+        masks = diag.get("masks", {})
+        n_steps = int(fingerprint.get("n_steps", -1))
+        for mask_key in ("active", "accepted", "rejected", "done", "has_active_freeb_replay"):
+            mask = np.asarray(masks.get(mask_key, []), dtype=bool)
+            if mask.shape != (n_steps,):
+                errors.append(f"{label}: mask {mask_key!r} has shape {mask.shape}, expected {(n_steps,)}")
+        if require_active_free_boundary:
+            if int(fingerprint.get("n_freeb_steps", 0)) <= 0:
+                errors.append(f"{label}: no active free-boundary replay steps in fingerprint")
+            active_freeb = np.logical_and(
+                np.asarray(masks.get("accepted", []), dtype=bool),
+                np.asarray(masks.get("has_active_freeb_replay", []), dtype=bool),
+            )
+            if not bool(np.any(active_freeb)):
+                errors.append(f"{label}: no accepted active free-boundary replay slots")
+
+        replay_diag = diag.get("replay_diagnostics", {})
+        if require_scalar_controls_stackable and not bool(replay_diag.get("scalar_controls_stackable", False)):
+            errors.append(f"{label}: scalar controls are not stackable")
+        if require_array_controls_stackable and not bool(replay_diag.get("array_controls_stackable", False)):
+            errors.append(f"{label}: array controls are not stackable")
+        if int(replay_diag.get("preconditioner_policy_n_segments", 0)) < 1:
+            errors.append(f"{label}: no preconditioner policy segments")
+
+    gate = {
+        "contract": "same-branch accepted-trace replay gate",
+        "passed": len(errors) == 0,
+        "differentiates_adaptive_controller": False,
+        "same_branch": same_branch,
+        "errors": tuple(errors),
+    }
+    if json_safe:
+        return _json_safe_fingerprint_value(gate)
+    return gate
+
+
 def direct_coil_same_branch_controller_scalar_custom_vjp_report(
     complete_report: dict[str, Any],
     base_params: Any,
@@ -3021,6 +3115,7 @@ def direct_coil_same_branch_controller_scalar_custom_vjp_report(
     if key not in objective_values:
         raise KeyError(f"scalar_key {key!r} not present in complete_report['objective_values']")
 
+    replay_gate = direct_coil_same_branch_replay_gate_report(complete_report)
     branch = complete_report.get("branch_compatibility", {})
     same_branch = bool(branch.get("same_branch", False))
     base = complete_report["base"]
@@ -3065,7 +3160,7 @@ def direct_coil_same_branch_controller_scalar_custom_vjp_report(
     rel_error = abs_error / max(1.0, abs(complete_fd))
     base_abs_delta = abs(value - complete_base)
     passed = bool(
-        same_branch
+        replay_gate["passed"]
         and np.isfinite(exact)
         and np.isfinite(complete_fd)
         and abs_error <= float(atol) + float(rtol) * abs(complete_fd)
@@ -3075,6 +3170,7 @@ def direct_coil_same_branch_controller_scalar_custom_vjp_report(
         "scalar_key": key,
         "passed": passed,
         "same_branch": same_branch,
+        "replay_gate": replay_gate,
         "value": check["value"],
         "grad": check["grad"],
         "exact_directional": check["exact_directional"],

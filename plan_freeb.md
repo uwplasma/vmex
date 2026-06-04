@@ -55,6 +55,11 @@ Steps taken:
    complete-solve traces, so the same report now carries branch fingerprints,
    masks, preconditioner segment summaries, and stackability diagnostics for
    future branch-local custom-VJP wrappers.
+6. Added `direct_coil_same_branch_replay_gate_report`, the production-facing
+   branch gate that consumes a same-branch complete-solve FD report and checks
+   the replay diagnostics before branch-local custom-VJP slopes are trusted.
+   The gate explicitly reports `differentiates_adaptive_controller=False` and
+   is now included in scalar custom-VJP reports.
 
 Results obtained:
 
@@ -70,13 +75,15 @@ Results obtained:
 5. The report-level diagnostics integration passed the current-only
    same-branch gate:
    `1 passed in 38.64 s`.
+6. The replay-gate integration passed the same current-only same-branch
+   complete-solve/custom-VJP gate:
+   `1 passed in 40.22 s`.
 
 Best next steps:
 
-1. Commit and push this diagnostics seam and watch CI.
-2. Use `trace_replay_diagnostics` from the same-branch complete-solve report
-   as the branch-gating payload for the next production full-loop adjoint
-   wrapper prototype.
+1. Commit and push this replay-gate seam and watch CI.
+2. Use `direct_coil_same_branch_replay_gate_report` as the required
+   precondition in the next production full-loop adjoint wrapper prototype.
 3. Continue exact-shard runtime reduction by reusing existing same-branch
    complete-solve payloads for any additional physical scalar assertions.
 
@@ -87,7 +94,7 @@ Nothing now.
 Completion:
 
 - Direct-coil/free-boundary phase 1: 100%.
-- Full nonlinear free-boundary adjoint phase 2: 99%.
+- Full nonlinear free-boundary adjoint phase 2: 99.2%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 100%.
 - VMEC parity and physics gates: 96%.
 - Single-stage coil-only optimization: 82%.
@@ -95,7 +102,7 @@ Completion:
 - CPU/GPU performance: 86%.
 - CI runtime refactor with preserved coverage/physics gates: 98.5%.
 - Docs/release hygiene: 96%.
-- Overall free-boundary single-stage plan: 93%.
+- Overall free-boundary single-stage plan: 93.3%.
 
 ### 2026-06-04 Accepted vacuum-response scalar seam
 
