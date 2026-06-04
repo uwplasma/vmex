@@ -28,7 +28,9 @@ from .free_boundary_adjoint_controller import (
 
 __all__ = [
     "direct_coil_accepted_trace_branch_metadata",
+    "direct_coil_accepted_trace_controller_custom_vjp_scalars_jax",
     "direct_coil_same_branch_replay_gate_report",
+    "direct_coil_same_branch_controller_scalars_custom_vjp_report",
     "free_boundary_adjoint_trace_replay_diagnostics",
     "jax_visible_accepted_nonlinear_controller_directional_check_jax",
     "jax_visible_accepted_nonlinear_controller_jax",
@@ -2373,10 +2375,12 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
             freeb_bsqvac_half = replay["bsqvac"]
             bsqvac_objective = _weighted_half_norm(replay["bsqvac"], bsqvac_weight)
             bsqvac_rms = jnp.sqrt(jnp.mean(jnp.square(jnp.asarray(replay["bsqvac"]))))
+            bnormal_rms = jnp.sqrt(jnp.mean(jnp.square(jnp.asarray(replay["vac"]["bnormal"]))))
         else:
             freeb_bsqvac_half = trace.get("freeb_bsqvac_half", None)
             bsqvac_objective = jnp.asarray(0.0)
             bsqvac_rms = jnp.asarray(0.0)
+            bnormal_rms = jnp.asarray(0.0)
         step = strict_update_one_step_from_trace(
             state_in,
             static,
@@ -2391,6 +2395,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
             "force": _tree_weighted_half_norm(step["force"], force_weight),
             "bsqvac": bsqvac_objective,
             "bsqvac_rms": bsqvac_rms,
+            "bnormal_rms": bnormal_rms,
             "state_reset": reset_to_trace_pre,
         }
 
@@ -2419,6 +2424,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                     "force": jnp.asarray(0.0),
                     "bsqvac": jnp.asarray(0.0),
                     "bsqvac_rms": jnp.asarray(0.0),
+                    "bnormal_rms": jnp.asarray(0.0),
                     "state_reset": jnp.asarray(False, dtype=bool),
                 }
 
@@ -3185,6 +3191,173 @@ def direct_coil_same_branch_controller_scalar_custom_vjp_report(
     }
 
 
+def _pytree_batched_directional_vdot_jax(jacobian_tree: Any, direction: Any, n_outputs: int) -> Any:
+    """Contract a vector-output pytree Jacobian with one pytree direction."""
+
+    leaves = tree_util.tree_leaves(
+        tree_util.tree_map(
+            lambda jac_leaf, direction_leaf: jnp.sum(
+                jnp.reshape(jnp.asarray(jac_leaf), (int(n_outputs), -1))
+                * jnp.reshape(jnp.asarray(direction_leaf), (1, -1)),
+                axis=1,
+            ),
+            jacobian_tree,
+            direction,
+        )
+    )
+    if not leaves:
+        return jnp.zeros((int(n_outputs),), dtype=float)
+    total = leaves[0]
+    for leaf in leaves[1:]:
+        total = total + leaf
+    return total
+
+
+def direct_coil_same_branch_controller_scalars_custom_vjp_report(
+    complete_report: dict[str, Any],
+    base_params: Any,
+    direction: Any,
+    *,
+    replay_scalar_fns: Mapping[str, Any],
+    eps: float = 1.0e-4,
+    replay_kwargs: dict[str, Any] | None = None,
+    rtol: float | Mapping[str, float] = 5.0e-3,
+    atol: float | Mapping[str, float] = 1.0e-8,
+    base_value_atol: float | Mapping[str, float] = 2.0e-3,
+    compute_frozen_fd: bool = False,
+) -> dict[str, Any]:
+    """Batch same-branch custom-VJP reports for several replay scalars.
+
+    This helper preserves the same branch-local contract as
+    :func:`direct_coil_same_branch_controller_scalar_custom_vjp_report`, but
+    groups multiple scalar pullbacks through one vector-valued custom-VJP seam.
+    It is intended for expensive promotion tests that compare several physical
+    outputs against the same complete-solve finite-difference report.
+    """
+
+    if jax is None:  # pragma: no cover - JAX is required for custom VJP.
+        raise RuntimeError("JAX is required for same-branch custom-VJP reports.")
+
+    keys = tuple(str(key) for key in replay_scalar_fns)
+    if not keys:
+        raise ValueError("replay_scalar_fns must contain at least one scalar")
+    objective_values = complete_report.get("objective_values", {})
+    for key in keys:
+        if key not in objective_values:
+            raise KeyError(f"scalar_key {key!r} not present in complete_report['objective_values']")
+
+    def _option_for(option: float | Mapping[str, float], key: str) -> float:
+        if isinstance(option, Mapping):
+            return float(option[key])
+        return float(option)
+
+    replay_gate = direct_coil_same_branch_replay_gate_report(complete_report)
+    branch = complete_report.get("branch_compatibility", {})
+    same_branch = bool(branch.get("same_branch", False))
+    base = complete_report["base"]
+    traces = tuple(base["traces"])
+    if not traces:
+        raise ValueError("complete_report base payload contains no accepted traces")
+    replay_options: dict[str, Any] = {
+        "static": base["init"].static,
+        "traces": traces,
+        "signgs": int(base["init"].signgs),
+        "state_weight": 0.0,
+        "bsqvac_weight": 0.0,
+        "force_weight": 0.0,
+        "enforce_edge": False,
+        "use_preconditioner_policy_segments": True,
+    }
+    if replay_kwargs:
+        replay_options.update(replay_kwargs)
+
+    scalar_fns = tuple(
+        (lambda replay, fn=fn: fn(replay, base))
+        for fn in replay_scalar_fns.values()
+    )
+
+    def _controller_scalars(coil_params):
+        return direct_coil_accepted_trace_controller_custom_vjp_scalars_jax(
+            coil_params,
+            traces[0]["state_pre"],
+            scalar_fns=scalar_fns,
+            **replay_options,
+        )
+
+    def _shifted(scale):
+        return tree_util.tree_map(
+            lambda value, delta: jnp.asarray(value) + float(scale) * jnp.asarray(delta),
+            base_params,
+            direction,
+        )
+
+    values, pullback = jax.vjp(_controller_scalars, base_params)
+    basis = jnp.eye(len(keys), dtype=jnp.asarray(values).dtype)
+    basis_gradients = tuple(pullback(basis[index])[0] for index in range(len(keys)))
+    jacobian = tree_util.tree_map(
+        lambda *parts: jnp.stack([jnp.asarray(part) for part in parts], axis=0),
+        *basis_gradients,
+    )
+    exact_directionals = _pytree_batched_directional_vdot_jax(jacobian, direction, len(keys))
+    if bool(compute_frozen_fd):
+        step = float(eps)
+        if not step > 0.0:
+            raise ValueError("eps must be positive.")
+        frozen_fd_directionals = (
+            _controller_scalars(_shifted(step)) - _controller_scalars(_shifted(-step))
+        ) / (2.0 * step)
+    else:
+        frozen_fd_directionals = jnp.full_like(exact_directionals, jnp.nan)
+
+    scalar_reports: dict[str, dict[str, Any]] = {}
+    passed_values: list[bool] = []
+    for index, key in enumerate(keys):
+        value = float(np.asarray(values[index], dtype=float))
+        exact = float(np.asarray(exact_directionals[index], dtype=float))
+        frozen_fd = float(np.asarray(frozen_fd_directionals[index], dtype=float))
+        complete_values = objective_values[key]
+        complete_base = float(complete_values["base"])
+        complete_fd = float(complete_values["central_fd_directional"])
+        abs_error = abs(exact - complete_fd)
+        rel_error = abs_error / max(1.0, abs(complete_fd))
+        base_abs_delta = abs(value - complete_base)
+        key_passed = bool(
+            replay_gate["passed"]
+            and np.isfinite(exact)
+            and np.isfinite(complete_fd)
+            and abs_error <= _option_for(atol, key) + _option_for(rtol, key) * abs(complete_fd)
+            and base_abs_delta <= _option_for(base_value_atol, key)
+        )
+        passed_values.append(key_passed)
+        scalar_reports[key] = {
+            "scalar_key": key,
+            "passed": key_passed,
+            "same_branch": same_branch,
+            "replay_gate": replay_gate,
+            "value": values[index],
+            "exact_directional": exact_directionals[index],
+            "frozen_trace_fd_directional": frozen_fd_directionals[index],
+            "complete_fd_directional": complete_fd,
+            "abs_error": abs_error,
+            "rel_error": rel_error,
+            "base_value": value,
+            "complete_base_value": complete_base,
+            "base_abs_delta": base_abs_delta,
+            "complete_values": complete_values,
+        }
+    return {
+        "scalar_keys": keys,
+        "passed": bool(all(passed_values)),
+        "same_branch": same_branch,
+        "replay_gate": replay_gate,
+        "values": values,
+        "jacobian": jacobian,
+        "exact_directionals": exact_directionals,
+        "frozen_trace_fd_directionals": frozen_fd_directionals,
+        "scalar_reports": scalar_reports,
+    }
+
+
 def direct_coil_fixed_trace_custom_vjp_objective_jax(
     params: Any,
     initial_state: Any,
@@ -3342,6 +3515,56 @@ def direct_coil_accepted_trace_controller_custom_vjp_scalar_jax(
             grad_params,
         )
         return (scaled_grad,)
+
+    _wrapped.defvjp(_wrapped_fwd, _wrapped_bwd)
+    return _wrapped(params)
+
+
+def direct_coil_accepted_trace_controller_custom_vjp_scalars_jax(
+    params: Any,
+    initial_state: Any,
+    *,
+    scalar_fns: Any,
+    **replay_kwargs: Any,
+) -> Any:
+    """Return several accepted-controller replay scalars with one custom VJP.
+
+    The output is a one-dimensional JAX array whose entries are the scalars
+    returned by ``scalar_fns``.  The backward rule differentiates the same
+    frozen accepted-controller replay and supports vector cotangents, so tests
+    can validate several physical scalar pullbacks against one complete-solve
+    finite-difference branch report.
+    """
+
+    scalar_fn_seq = tuple(scalar_fns)
+    if not scalar_fn_seq:
+        raise ValueError("scalar_fns must contain at least one scalar function")
+    if jax is None:  # pragma: no cover - JAX is required for custom VJP.
+        replay = direct_coil_accepted_trace_controller_replay_objective_jax(
+            params,
+            initial_state,
+            **replay_kwargs,
+        )
+        return jnp.asarray([fn(replay) for fn in scalar_fn_seq])
+
+    def objective(coil_params):
+        replay = direct_coil_accepted_trace_controller_replay_objective_jax(
+            coil_params,
+            initial_state,
+            **replay_kwargs,
+        )
+        return jnp.asarray([fn(replay) for fn in scalar_fn_seq])
+
+    @jax.custom_vjp
+    def _wrapped(coil_params):
+        return objective(coil_params)
+
+    def _wrapped_fwd(coil_params):
+        return objective(coil_params), coil_params
+
+    def _wrapped_bwd(coil_params, cotangent):
+        _, pullback = jax.vjp(objective, coil_params)
+        return pullback(jnp.asarray(cotangent))
 
     _wrapped.defvjp(_wrapped_fwd, _wrapped_bwd)
     return _wrapped(params)
