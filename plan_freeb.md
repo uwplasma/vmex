@@ -7990,6 +7990,67 @@ Completion:
 - CI runtime refactor with preserved coverage/physics gates: 95%.
 - Docs/release hygiene: 96%.
 
+### 2026-06-04 Production-forward branch-local scalar seam
+
+Steps taken:
+
+1. Added `direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax`
+   in `free_boundary_adjoint.py`.
+2. Kept the contract deliberately narrow: the scalar value comes from an
+   actual direct-coil free-boundary solve payload, while the gradient comes
+   from the saved accepted branch replayed through the stacked
+   accepted-controller custom-VJP path.
+3. Added a complete-loop current-only promotion assertion comparing the helper's
+   aspect-ratio directional derivative against the existing complete-solve
+   central finite-difference report.
+4. Added fast synthetic error-path checks for missing inputs, missing params,
+   empty traces, inactive free-boundary traces, and missing initialization
+   payloads.
+5. Fixed a CI-only `tomnsps_rzl` fused FFT axisymmetric bug where `nscale` was
+   not truncated to `ntor + 1` before reshape when the trig table was built for
+   a larger `nmax`.
+
+Results obtained:
+
+1. Ruff passed on `free_boundary_adjoint.py`, `vmec_tomnsp.py`, and the touched
+   tests.
+2. The synthetic free-boundary seam diagnostics and tomnsp fused-FFT regression
+   passed: `2 passed in 1.77 s`.
+3. The current-only production-forward branch-local scalar gate passed locally:
+   `1 passed in 41.29 s`.
+4. The current-only, Fourier-only, and LASYM same-branch exact gates passed
+   locally after the helper was added: `3 passed in 90.35 s`.
+5. The full local py3.11 core `rest` bucket passed after the tomnsp fix:
+   `622 passed, 2 skipped in 46.14 s`.
+
+Best next steps:
+
+1. Commit and push the production-forward branch-local scalar seam plus tomnsp
+   CI fix.
+2. Watch the new CI run; the previous split run had all buckets green except
+   the now-fixed `rest` bucket.
+3. Extend the scalar helper to a vector-valued wrapper only after CI is green,
+   reusing the same branch-local claims and complete-loop FD gates.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99% for branch-local
+  production-forward scalar gradients; full adaptive branch differentiation is
+  still intentionally not claimed.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 100%.
+- VMEC parity and physics gates: 96%.
+- Single-stage coil-only optimization: 83%.
+- Robust coil perturbation optimization: 70%.
+- CPU/GPU performance: 86%.
+- CI runtime refactor with preserved coverage/physics gates: 99.95%, pending
+  one rerun after the tomnsp fix.
+- Docs/release hygiene: 96%.
+
 ### 2026-06-04 Adaptive seam coverage and py3.11 core split
 
 Steps taken:

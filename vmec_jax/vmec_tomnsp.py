@@ -1087,7 +1087,7 @@ def tomnsps_rzl(
             fft = jnp.fft.rfft(w_stack, axis=-1)
             coeff = fft[..., : (ntor + 1)]
             real_dtype = jnp.asarray(w1).dtype
-            nscale = jnp.asarray(nscale, dtype=real_dtype)
+            nscale = jnp.asarray(nscale[: (int(ntor) + 1)], dtype=real_dtype)
             nshape = (1,) * (coeff.ndim - 1) + (int(ntor) + 1,)
             coeff_real = jnp.real(coeff) * nscale.reshape(nshape)
             coeff_imag = -jnp.imag(coeff) * nscale.reshape(nshape)

@@ -430,6 +430,7 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes() -> None:
         _pytree_batched_directional_vdot_jax,
         direct_coil_accepted_trace_controller_custom_vjp_scalars_jax,
         direct_coil_adaptive_full_loop_same_branch_gate_report,
+        direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax,
         direct_coil_same_branch_physical_scalar_gate_report,
         direct_coil_same_branch_controller_scalar_custom_vjp_report,
         direct_coil_same_branch_controller_scalars_custom_vjp_report,
@@ -563,6 +564,39 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes() -> None:
     assert any("base: no accepted step-policy segments" in error for error in bad_adaptive_gate["errors"])
     assert any("minus: missing complete-solve payload" in error for error in bad_adaptive_gate["errors"])
     assert any("physical scalar gate:" in error for error in bad_adaptive_gate["errors"])
+
+    with pytest.raises(ValueError, match="input_path and params"):
+        direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
+            scalar_fn=lambda payload: {"objective": 0.0},
+            replay_scalar_fn=lambda replay, payload: 0.0,
+        )
+    with pytest.raises(ValueError, match="params must be supplied"):
+        direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
+            complete_payload={"traces": (), "init": object()},
+            scalar_fn=lambda payload: {"objective": 0.0},
+            replay_scalar_fn=lambda replay, payload: 0.0,
+        )
+    with pytest.raises(ValueError, match="no accepted traces"):
+        direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
+            params={},
+            complete_payload={"traces": (), "init": object()},
+            scalar_fn=lambda payload: {"objective": 0.0},
+            replay_scalar_fn=lambda replay, payload: 0.0,
+        )
+    with pytest.raises(RuntimeError, match="no active free-boundary trace"):
+        direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
+            params={},
+            complete_payload={"traces": ({"freeb_bsqvac_half": None},), "init": object()},
+            scalar_fn=lambda payload: {"objective": 0.0},
+            replay_scalar_fn=lambda replay, payload: 0.0,
+        )
+    with pytest.raises(ValueError, match="initialization result"):
+        direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
+            params={},
+            complete_payload={"traces": ({"freeb_bsqvac_half": np.ones(1)},)},
+            scalar_fn=lambda payload: {"objective": 0.0},
+            replay_scalar_fn=lambda replay, payload: 0.0,
+        )
 
     jacobian_tree = {
         "a": jnp.asarray([[1.0, 2.0], [3.0, 4.0]]),
@@ -1384,12 +1418,14 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
     check_boundary_moment_scalar: bool = False,
     check_accepted_bnormal_rms_scalar: bool = False,
     check_accepted_bsqvac_rms_scalar: bool = False,
+    check_production_branch_local_scalar: bool = False,
 ) -> None:
     pytest.importorskip("jax")
     from vmec_jax._compat import jax, jnp
     from vmec_jax.free_boundary_adjoint import (
         direct_coil_accepted_trace_controller_custom_vjp_objective_jax,
         direct_coil_adaptive_full_loop_same_branch_gate_report,
+        direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax,
         free_boundary_boundary_geometry_jax,
         direct_coil_same_branch_physical_scalar_gate_report,
         direct_coil_same_branch_controller_scalar_custom_vjp_report,
@@ -1756,6 +1792,41 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
             rtol=1.0e-12,
             atol=1.0e-12,
         )
+        if check_production_branch_local_scalar:
+            production_branch_local = direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
+                params=base_params,
+                complete_payload=complete_report["base"],
+                scalar_key="aspect",
+                scalar_fn=lambda payload: {
+                    "aspect": aspect_objective_from_state(payload["result"].state),
+                },
+                replay_scalar_fn=lambda replay, payload: equilibrium_aspect_ratio_from_state(
+                    state=replay["state"],
+                    static=payload["init"].static,
+                ),
+                replay_kwargs={"use_stacked_step_controls": True},
+            )
+            production_branch_exact = sum(
+                jnp.vdot(grad_leaf, direction_leaf)
+                for grad_leaf, direction_leaf in zip(
+                    jax.tree_util.tree_leaves(production_branch_local["grad"]),
+                    jax.tree_util.tree_leaves(direction),
+                    strict=True,
+                )
+            )
+            assert production_branch_local["uses_production_forward"] is True
+            assert production_branch_local["differentiates_adaptive_controller"] is False
+            assert production_branch_local["differentiates_run_free_boundary"] is False
+            assert production_branch_local["differentiates_fixed_accepted_branch"] is True
+            assert production_branch_local["trace_replay_diagnostics"]["differentiates_adaptive_controller"] is False
+            assert production_branch_local["replay_option_flags"]["use_stacked_step_controls"] is True
+            assert production_branch_local["base_abs_delta"] < 2.0e-3
+            np.testing.assert_allclose(
+                production_branch_exact,
+                complete_aspect_fd,
+                rtol=5.0e-3,
+                atol=5.0e-8,
+            )
         if check_boundary_moment_scalar:
             moment_report = scalars_report["scalar_reports"]["lcfs_boundary_moment"]
             assert moment_report["passed"], moment_report
@@ -1887,6 +1958,7 @@ def test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_
         check_boundary_moment_scalar=False,
         check_accepted_bnormal_rms_scalar=True,
         check_accepted_bsqvac_rms_scalar=True,
+        check_production_branch_local_scalar=True,
     )
 
 

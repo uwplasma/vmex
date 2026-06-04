@@ -33,6 +33,7 @@ __all__ = [
     "direct_coil_accepted_trace_step_controls_jax",
     "direct_coil_accepted_trace_step_policy_segments",
     "direct_coil_adaptive_full_loop_same_branch_gate_report",
+    "direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax",
     "direct_coil_same_branch_physical_scalar_gate_report",
     "direct_coil_same_branch_replay_gate_report",
     "direct_coil_same_branch_controller_scalars_custom_vjp_report",
@@ -4072,6 +4073,118 @@ def direct_coil_adaptive_full_loop_same_branch_gate_report(
     if json_safe:
         return _json_safe_fingerprint_value(result)
     return result
+
+
+def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
+    input_path: Any | None = None,
+    params: Any | None = None,
+    *,
+    scalar_fn: Any,
+    replay_scalar_fn: Any,
+    scalar_key: str | None = None,
+    complete_payload: Mapping[str, Any] | None = None,
+    init_kwargs: dict[str, Any] | None = None,
+    solve_kwargs: dict[str, Any] | None = None,
+    replay_kwargs: dict[str, Any] | None = None,
+    require_active_trace: bool = True,
+) -> dict[str, Any]:
+    """Return a production-forward branch-local scalar value and gradient.
+
+    The forward value is evaluated from an actual direct-coil free-boundary
+    solve payload, either supplied as ``complete_payload`` or obtained by
+    calling :func:`direct_coil_complete_solve_trace`.  The gradient is computed
+    by replaying the saved accepted branch through the stacked accepted
+    controller custom-VJP path.  This is the narrow production seam currently
+    validated by complete-loop finite differences: it differentiates direct
+    coils through a *fixed accepted branch*, not arbitrary adaptive host
+    controller branch changes.
+
+    ``scalar_fn(payload)`` must return the production scalar from the complete
+    solve payload.  ``replay_scalar_fn(replay, payload)`` must return the same
+    scalar from the JAX-visible replay dictionary.
+    """
+
+    if jax is None:  # pragma: no cover - JAX is required for this helper.
+        raise RuntimeError("JAX is required for branch-local scalar gradients.")
+
+    if complete_payload is None:
+        if input_path is None or params is None:
+            raise ValueError("input_path and params are required when complete_payload is not supplied")
+        payload = direct_coil_complete_solve_trace(
+            input_path,
+            params,
+            init_kwargs=init_kwargs,
+            solve_kwargs=solve_kwargs,
+            require_active_trace=require_active_trace,
+        )
+    else:
+        payload = dict(complete_payload)
+        if params is None:
+            params = payload.get("params")
+        if params is None:
+            raise ValueError("params must be supplied when complete_payload does not contain params")
+
+    traces = tuple(payload.get("traces", ()))
+    if not traces:
+        raise ValueError("complete payload contains no accepted traces")
+    active_trace = any(trace.get("freeb_bsqvac_half") is not None for trace in traces)
+    if bool(require_active_trace) and not active_trace:
+        raise RuntimeError("complete payload contains no active free-boundary trace")
+    init = payload.get("init")
+    if init is None:
+        raise ValueError("complete payload is missing the initialization result")
+
+    values = _complete_solve_objective_values(scalar_fn(payload))
+    key = str(scalar_key or ("objective" if "objective" in values else next(iter(values))))
+    if key not in values:
+        raise KeyError(f"scalar_key {key!r} not returned by scalar_fn")
+
+    replay_options: dict[str, Any] = {
+        "static": init.static,
+        "traces": traces,
+        "signgs": int(init.signgs),
+        "state_weight": 0.0,
+        "bsqvac_weight": 0.0,
+        "force_weight": 0.0,
+        "enforce_edge": False,
+        "use_preconditioner_policy_segments": True,
+        "use_stacked_step_controls": True,
+    }
+    if replay_kwargs:
+        replay_options.update(replay_kwargs)
+
+    def _replay_scalar(coil_params):
+        return direct_coil_accepted_trace_controller_custom_vjp_scalar_jax(
+            coil_params,
+            traces[0]["state_pre"],
+            scalar_fn=lambda replay: replay_scalar_fn(replay, payload),
+            **replay_options,
+        )
+
+    grad = jax.grad(_replay_scalar)(params)
+    replay_value = _replay_scalar(params)
+    diagnostics = free_boundary_adjoint_trace_replay_diagnostics(traces)
+    return {
+        "contract": "production-forward branch-local run_free_boundary scalar value/gradient",
+        "uses_production_forward": True,
+        "differentiates_adaptive_controller": False,
+        "differentiates_run_free_boundary": False,
+        "differentiates_fixed_accepted_branch": True,
+        "scalar_key": key,
+        "value": float(values[key]),
+        "all_values": values,
+        "replay_value": replay_value,
+        "base_abs_delta": abs(float(np.asarray(replay_value, dtype=float)) - float(values[key])),
+        "grad": grad,
+        "payload": payload,
+        "trace_replay_diagnostics": diagnostics,
+        "replay_option_flags": {
+            "use_preconditioner_policy_segments": bool(
+                replay_options.get("use_preconditioner_policy_segments", False)
+            ),
+            "use_stacked_step_controls": bool(replay_options.get("use_stacked_step_controls", False)),
+        },
+    }
 
 
 def direct_coil_fixed_trace_custom_vjp_objective_jax(
