@@ -1272,7 +1272,7 @@ def test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_
         params_for=params_for,
         check_controller=False,
         check_segmented_controller=False,
-        check_aspect_scalar=False,
+        check_aspect_scalar=True,
     )
 
 

@@ -147,6 +147,58 @@ Completion:
 - CI runtime refactor with preserved coverage/physics gates: 96%.
 - Docs/release hygiene: 96%.
 
+### 2026-06-04 Complete-loop physical-scalar free-boundary promotion
+
+Steps taken:
+
+1. Reviewed the single-stage free-boundary phase plan and the existing
+   direct-coil same-branch complete-solve/custom-VJP validation ladder.
+2. Confirmed the helper already computes a complete-solve central-FD slope for
+   final equilibrium aspect ratio, but all representative tests had disabled
+   the controller scalar check.
+3. Enabled the aspect-ratio physical-scalar custom-VJP comparison for the
+   current-only same-branch direct-coil complete-solve gate. This reuses the
+   existing base/plus/minus complete solve report and validates the
+   segmented-controller scalar custom-VJP against complete-solve central FD
+   under accepted-trace fingerprint compatibility.
+
+Results obtained:
+
+1. `python -m ruff check tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+   passed.
+2. Focused gate passed:
+   `JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_fd
+   --durations=10 --disable-warnings`
+   reported `1 passed`; the test took `36.68 s`.
+
+Best next steps:
+
+1. Commit and push this physical-scalar promotion and watch CI.
+2. Keep the claim conservative: this validates a same-branch complete-loop
+   physical scalar against central FD, not arbitrary adaptive branch changes.
+3. Next phase-2 work should add a second physical scalar, preferably
+   `bnormal_rms` or boundary displacement, only if it can reuse the same
+   complete-report without adding another solve triplet.
+4. Continue exact-gate runtime reduction by sharing accepted traces across
+   direct-coil replay/state/two-step tests.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 97%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 100%.
+- VMEC parity and physics gates: 96%.
+- Single-stage coil-only optimization: 80%.
+- Robust coil perturbation optimization: 70%.
+- CPU/GPU performance: 84%.
+- CI runtime refactor with preserved coverage/physics gates: 96%.
+- Docs/release hygiene: 96%.
+
 ### 2026-06-03 DMerc/D_R derivative gate and CI runtime refactor
 
 Steps taken:
