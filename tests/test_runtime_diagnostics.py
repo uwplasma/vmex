@@ -108,7 +108,7 @@ def test_runtime_compare_exports_vmec2000_vmec_jax_and_vmecpp_rows(tmp_path):
     assert record["vmecpp_speedup_vs_vmec2000"] == 8.0
 
 
-def test_direct_coil_segmented_replay_report_synthetic_policy_helpers():
+def test_direct_coil_segmented_replay_report_synthetic_policy_helpers(monkeypatch):
     mod = _load_tool("direct_coil_segmented_replay_report")
     traces = [
         {
@@ -135,6 +135,43 @@ def test_direct_coil_segmented_replay_report_synthetic_policy_helpers():
     assert changed[2]["preconditioner_use_lax_tridi"] is True
     assert traces[1]["preconditioner_use_lax_tridi"] is True
     assert mod._json_ready({"x": np.asarray([1.0]), "bad": float("nan")}) == {"x": [1.0], "bad": None}
+
+    from vmec_jax import free_boundary_adjoint
+
+    calls = []
+
+    def fake_controller_replay(*_args, **kwargs):
+        calls.append(kwargs)
+        return {
+            "objective": np.asarray(1.0),
+            "state": np.asarray([0.0]),
+            "preconditioner_controls_stacked": False,
+            "preconditioner_controls_segment_stacked": (),
+            "used_accepted_only_fast_path": bool(kwargs["use_accepted_only_fast_path"]),
+            "accepted_only_fast_path_segments": (bool(kwargs["use_accepted_only_fast_path"]),),
+        }
+
+    monkeypatch.setattr(
+        free_boundary_adjoint,
+        "direct_coil_accepted_trace_controller_replay_objective_jax",
+        fake_controller_replay,
+    )
+    replay, timings = mod._timed_replay(
+        params=object(),
+        initial_state=object(),
+        static=object(),
+        traces=[],
+        signgs=1,
+        use_segments=True,
+        use_segment_preconditioner_controls=False,
+        use_accepted_only_fast_path=False,
+        repeats=1,
+    )
+
+    assert replay["used_accepted_only_fast_path"] is False
+    assert len(timings) == 1
+    assert calls[0]["use_preconditioner_policy_segments"] is True
+    assert calls[0]["use_accepted_only_fast_path"] is False
 
 
 def test_freeb_replay_diagnostic_utils_json_ready_and_timed_call():
