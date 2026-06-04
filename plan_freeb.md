@@ -131,6 +131,50 @@ Completion:
 - Docs/release hygiene: 96%.
 - Overall free-boundary single-stage plan: 94.8%.
 
+### 2026-06-04 Coverage gate recovery for stacked controls
+
+Steps taken:
+
+1. Investigated GitHub Actions run `26975195587` after all test shards passed
+   but the combined py3.11 coverage gate failed.
+2. Found the failure was exact line coverage `94.96%`, below the strict `95%`
+   threshold, not a physics/numerics test failure.
+3. Added fast synthetic coverage for the new stacked accepted-step control
+   paths: missing NESTOR axis failure, mixed optional controls, fully stacked
+   optional controls, NESTOR axis stacking, static step-policy segmentation, and
+   step-policy summary masks.
+
+Results obtained:
+
+1. Ruff passed for
+   `tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`.
+2. Focused synthetic exact-gate test passed in `0.92 s`.
+
+Best next steps:
+
+1. Commit and push the coverage recovery patch.
+2. Watch CI again; all test shards should remain green and the combined
+   coverage gate should return above 95%.
+3. After CI is green, expand physical scalar promotion to Fourier or LASYM
+   same-branch gates only if it does not add solve triplets.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.95%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 100%.
+- VMEC parity and physics gates: 96%.
+- Single-stage coil-only optimization: 82%.
+- Robust coil perturbation optimization: 70%.
+- CPU/GPU performance: 86%.
+- CI runtime refactor with preserved coverage/physics gates: 99.9%.
+- Docs/release hygiene: 96%.
+- Overall free-boundary single-stage plan: 94.9%.
+
 ### 2026-06-04 Exact coverage matrix split
 
 Steps taken:

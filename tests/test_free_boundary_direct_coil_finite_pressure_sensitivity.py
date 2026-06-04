@@ -178,6 +178,9 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes() -> None:
         direct_coil_accepted_trace_preconditioner_controls_jax,
         direct_coil_accepted_trace_preconditioner_policy_segments,
         direct_coil_accepted_trace_scalar_controls_jax,
+        direct_coil_accepted_trace_step_controls_jax,
+        direct_coil_accepted_trace_step_policy_segment_summary,
+        direct_coil_accepted_trace_step_policy_segments,
         direct_coil_accepted_trace_fingerprint,
         direct_coil_accepted_trace_fingerprint_delta,
         direct_coil_same_branch_replay_gate_report,
@@ -253,6 +256,60 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes() -> None:
     assert [(segment["start"], segment["stop"], segment["n_steps"]) for segment in same_policy_segments] == [(0, 2, 2)]
     assert same_policy_segments[0]["signature"][1] == 1
     assert same_policy_segments[0]["signature"][2] == 2
+
+    with pytest.raises(KeyError, match="br_axis"):
+        direct_coil_accepted_trace_step_controls_jax([trace0, trace1])
+    mixed_force_trace = {**trace0, "force_state_pre": {"r": np.ones(2)}}
+    mixed_step_controls = direct_coil_accepted_trace_step_controls_jax(
+        [mixed_force_trace, trace1],
+        include_nestor_axes=False,
+    )
+    assert "state_pre" in mixed_step_controls
+    assert "force_state_pre" not in mixed_step_controls
+    both_optional_trace0 = {
+        **trace0,
+        "force_state_pre": {"r": np.ones(2)},
+        "freeb_pres_scale": np.asarray([1.0, 2.0]),
+        "constraint_rcon0": np.asarray([0.0, 1.0]),
+    }
+    both_optional_trace1 = {
+        **trace1,
+        "force_state_pre": {"r": np.ones(2) * 3.0},
+        "freeb_pres_scale": np.asarray([3.0, 4.0]),
+        "constraint_rcon0": np.asarray([2.0, 3.0]),
+    }
+    optional_step_controls = direct_coil_accepted_trace_step_controls_jax(
+        [both_optional_trace0, both_optional_trace1],
+        include_nestor_axes=False,
+    )
+    assert np.asarray(optional_step_controls["force_state_pre"]["r"]).shape == (2, 2)
+    np.testing.assert_allclose(np.asarray(optional_step_controls["freeb_pres_scale"][1]), np.asarray([3.0, 4.0]))
+    np.testing.assert_allclose(np.asarray(optional_step_controls["constraint_rcon0"][0]), np.asarray([0.0, 1.0]))
+    axis_trace0 = deepcopy(trace0)
+    axis_trace1 = deepcopy(trace1)
+    for trace, offset in ((axis_trace0, 0.0), (axis_trace1, 10.0)):
+        trace["freeb_nestor_trace"] = {
+            **trace["freeb_nestor_trace"],
+            "br_axis": np.ones((2, 3)) + offset,
+            "bp_axis": np.ones((2, 3)) * 2.0 + offset,
+            "bz_axis": np.ones((2, 3)) * 3.0 + offset,
+        }
+    axis_controls = direct_coil_accepted_trace_step_controls_jax([axis_trace0, axis_trace1])
+    assert np.asarray(axis_controls["freeb_nestor_axes"]["br_axis"]).shape == (2, 2, 3)
+    np.testing.assert_allclose(np.asarray(axis_controls["freeb_nestor_axes"]["bz_axis"][1]), np.ones((2, 3)) * 13.0)
+    changed_static_trace = {**axis_trace1, "include_edge_residual": True}
+    step_policy_segments = direct_coil_accepted_trace_step_policy_segments([axis_trace0, changed_static_trace])
+    assert [(segment["start"], segment["stop"], segment["n_steps"]) for segment in step_policy_segments] == [
+        (0, 1, 1),
+        (1, 2, 1),
+    ]
+    step_policy_summary = direct_coil_accepted_trace_step_policy_segment_summary(
+        [axis_trace0, changed_static_trace],
+        accept_mask=np.asarray([True, False]),
+        done_mask=np.asarray([False, False]),
+    )
+    assert step_policy_summary[0]["accepted_steps"] == 1
+    assert step_policy_summary[1]["rejected_steps"] == 1
 
     branch_metadata = direct_coil_accepted_trace_branch_metadata([trace0, trace1])
     assert branch_metadata["n_steps"] == 2
