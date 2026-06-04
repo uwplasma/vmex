@@ -1648,21 +1648,16 @@ def test_direct_coil_fourier_only_same_branch_custom_vjp_matches_complete_solve_
     )
 
 
-@pytest.mark.parametrize("lasym", [False, True], ids=["stellsym", "lasym"])
 @pytest.mark.py311_coverage_only
-def test_direct_coil_fixed_trace_custom_vjp_matches_complete_solve_fd_on_same_branch(
+def test_direct_coil_lasym_fixed_trace_custom_vjp_matches_complete_solve_fd_on_same_branch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    lasym: bool,
 ) -> None:
-    """Fixed-trace custom VJP matches complete-solve FD when the branch is unchanged.
+    """LASYM fixed-trace custom VJP matches complete-solve FD on one branch.
 
-    This is the strongest default phase-2 gate short of a production
-    ``run_free_boundary`` custom VJP: run the same tiny forced-active
-    free-boundary solve at ``base`` and ``base +/- eps * direction``, require
-    the accepted-trace fingerprint to stay compatible, then compare the
-    fixed-trace custom-VJP directional derivative against the complete-solve
-    central finite difference of the final accepted state norm.
+    Current-only and Fourier-only stellsym controls are covered by the
+    preceding same-branch gates.  This retained mixed-direction case keeps the
+    asymmetric branch represented without duplicating the stellsym solve triplet.
     """
 
     pytest.importorskip("jax")
@@ -1672,7 +1667,7 @@ def test_direct_coil_fixed_trace_custom_vjp_matches_complete_solve_fd_on_same_br
     _set_same_branch_custom_vjp_env(monkeypatch)
     input_path = _write_tiny_direct_freeb_input(
         tmp_path / "input.direct_same_branch_custom_vjp",
-        lasym=lasym,
+        lasym=True,
         niter=2,
         mpol=3,
         ntheta=4,

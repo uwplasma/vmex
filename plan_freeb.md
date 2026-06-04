@@ -12,15 +12,16 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-06-04 on `main` after commit `59dc031`, `test: share full
-free-boundary replay trace`, passed GitHub Actions run `26959058947`.
+Last updated: 2026-06-04 on `main` after commit `3cd7a62`, `test: cover
+free-boundary replay error paths`, passed GitHub Actions run `26969293221`.
 The latest green main splits required py3.11 coverage into core, slow-physics,
-and exact shards while keeping a combined 95% coverage threshold, preserves the
-`DMerc`/Glasser `D_R` AD-vs-central-FD gate, promotes same-branch complete-loop
-aspect-ratio and LCFS boundary-moment physical-scalar free-boundary custom-VJP
-gates, shares one accepted replay trace across coil-pytree, VMEC-state, and
-two-step controller replay checks, and keeps production adaptive
-`run_free_boundary` full-loop claims conservative. It also uses
+and exact shards while keeping a combined 95% coverage threshold (`Exact line
+coverage: 95.00%`), preserves the `DMerc`/Glasser `D_R` AD-vs-central-FD gate,
+promotes same-branch complete-loop aspect-ratio, LCFS boundary-moment, accepted
+`Bnormal` RMS, and accepted `Bsqvac` RMS physical-scalar free-boundary
+custom-VJP gates, shares one accepted replay trace across coil-pytree,
+VMEC-state, and two-step controller replay checks, and keeps production
+adaptive `run_free_boundary` full-loop claims conservative. It also uses
 Node-24-compatible v7 artifact actions and `codecov/codecov-action@v6`.
 The phase-2 evidence includes reset-aware full accepted-trace replay, stacked
 accepted/rejected controller segment gates, current-only/Fourier-only
@@ -30,6 +31,64 @@ complete-solve gate, explicit tridiagonal-policy coverage, VMEC2000
 generated-`mgrid` WOUT-quality classification, and direct/generated
 boundary-domain checks. The code still does not claim a production full
 adaptive nonlinear `run_free_boundary` exact adjoint.
+
+### 2026-06-04 CI-green replay coverage and exact-shard duplicate removal
+
+Steps taken:
+
+1. Watched GitHub Actions run `26969293221` for commit `3cd7a62` to completion.
+2. Confirmed all required lanes passed: py3.10, py3.12, py3.11 core coverage,
+   py3.11 exact coverage, py3.11 slow physics coverage, docs, build, console
+   smoke, physics smoke, parity manifest smoke, and combined coverage.
+3. Confirmed the combined coverage gate reports exact line coverage at the
+   strict threshold, with `free_boundary_adjoint.py` improved to 157 missed
+   lines.
+4. Removed the duplicate stellsym parameter from the mixed fixed-trace
+   same-branch complete-solve custom-VJP test.  The exact shard still retains
+   stellsym current-only, stellsym Fourier-only, and LASYM mixed-direction
+   gates, so the physical/algorithmic coverage is unchanged while one complete
+   base/plus/minus solve triplet is eliminated.
+
+Results obtained:
+
+1. `python -m ruff check tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+   passed.
+2. The retained LASYM mixed fixed-trace gate passed locally:
+   `1 passed in 38.29 s`.
+3. CI run `26969293221` passed with combined coverage gate green:
+   `Exact line coverage: 95.00%`.
+4. The local py3.11 exact coverage shard passed after the duplicate-removal
+   patch: `18 passed in 131.79 s`.
+
+Best next steps:
+
+1. Commit and push the exact-shard duplicate-removal patch, then watch CI.
+2. Reduce the next exact-shard hotspot by sharing or further consolidating the
+   accepted-update replay and boundary-field dense Jacobian/cotangent gates.
+3. Add the next branch-local physical scalar only if it advances the production
+   full-loop adjoint seam; avoid adding more replay scalars that only duplicate
+   current coverage.
+4. Start the production adaptive-loop seam design: a fingerprint-gated wrapper
+   around actual `run_free_boundary` or a fully JAX-visible nonlinear controller,
+   with no claim beyond fixed accepted-branch compatibility until central-FD
+   gates pass.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.5%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 100%.
+- VMEC parity and physics gates: 96%.
+- Single-stage coil-only optimization: 82%.
+- Robust coil perturbation optimization: 70%.
+- CPU/GPU performance: 86%.
+- CI runtime refactor with preserved coverage/physics gates: 99.3%.
+- Docs/release hygiene: 96%.
+- Overall free-boundary single-stage plan: 93.8%.
 
 ### 2026-06-04 Fixed accepted-trace replay diagnostics seam
 
