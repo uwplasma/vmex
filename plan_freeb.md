@@ -10925,3 +10925,72 @@ Completion:
 - CI runtime refactor with preserved coverage/physics gates: 100% on latest
   green baseline; latest CI is pending.
 - Docs/release hygiene: 98.8%.
+
+### 2026-06-05 Coverage Gate Recovery For Free-Boundary Phase 2
+
+Steps taken:
+
+1. Investigated the failing combined py3.11 coverage gate after the lean trace
+   and directional-JVP performance commits.
+2. Added an asset-free synthetic WOUT-like validation test for
+   ``free_boundary_validation`` so finite-beta response metrics can be covered
+   without fetching optional WOUT fixtures in the exact coverage shard.
+3. Downloaded the CI coverage artifacts, recombined them locally with path
+   mapping, and identified the remaining shortfall as uncovered helper branches
+   in ``free_boundary_adjoint.py`` rather than validation metrics.
+4. Added asset-free ``py311_coverage_only`` tests for branch-local adjoint
+   helper paths: timing synchronization fallbacks, named-scope fallbacks, the
+   finite-difference Jacobian fallback, trace stackability errors, static
+   trace signatures, trace extraction fallbacks, and accepted-segment fast-path
+   guards.
+5. Re-ran the full exact-remaining coverage selector locally with the same CI
+   marker expression.
+6. Estimated the combined coverage by replacing the old exact-remaining
+   artifact with the new local artifact before pushing.
+7. Pushed commits ``f546c9c`` and ``e0db274`` to ``main``.
+
+Results obtained:
+
+1. Focused checks passed:
+   ``python -m ruff check tests/test_free_boundary_validation_unit.py``,
+   ``python -m ruff check tests/test_free_boundary_adjoint_helpers_unit.py``,
+   both new unit files directly, and the focused py3.11 coverage selector.
+2. The full exact-remaining selector passed locally with
+   ``21 passed in 71.25 s``; the new helper tests add only sub-second runtime
+   compared with the existing exact-adjoint validation tests.
+3. The local combined-coverage estimate increased to exact line coverage
+   ``95.04%`` with total misses reduced from ``2148`` to ``2117``.
+4. GitHub Actions run ``27043196381`` for commit ``e0db274`` completed
+   successfully.  The strict 95% coverage gate is green again.
+
+Best next steps:
+
+1. Return to the phase-2 production seam: add the next complete-loop
+   AD-vs-central-FD gate for a physical scalar under an explicit branch
+   fingerprint, without claiming differentiation through branch changes.
+2. Continue reducing cold branch-local replay/JVP graph construction.  The
+   JVP path removes full-Jacobian materialization for vector reports, but the
+   first replay/JVP graph build is still the dominant cost.
+3. Extend the coil-only optimization example only through the same-branch
+   validated path until the adaptive host-controller seam is promoted.
+4. Keep CI runtime stable by adding only asset-free/unit coverage tests unless
+   a new physics gate requires full fixtures.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9998% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.6%.
+- Single-stage coil-only optimization: 92.7%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 96.0%; directional-JVP reports reduce vector diagnostic
+  cost, but cold replay/JVP graph construction remains the blocker.
+- CI runtime refactor with preserved coverage/physics gates: 100%; latest full
+  CI is green with strict 95% line coverage.
+- Docs/release hygiene: 98.9%.
