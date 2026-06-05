@@ -809,30 +809,56 @@ def write_same_branch_validation_report(
     }
     if mode not in {"none", "scalar", "vector"}:
         raise ValueError("--same-branch-report-mode must be one of none, scalar, vector")
-    if mode == "scalar" and "base" in report and "qs_total" in report["objective_values"]:
+    scalar_value_fns = {
+        "aspect": lambda payload: float(
+            np.asarray(
+                equilibrium_aspect_ratio_from_state(
+                    state=payload["result"].state,
+                    static=payload["init"].static,
+                )
+            )
+        ),
+        "qs_total": lambda payload: float(
+            np.asarray(
+                qs_total_from_state(
+                    payload["result"].state,
+                    payload["init"].static,
+                    payload["init"].indata,
+                    payload["init"].signgs,
+                )
+            )
+        ),
+        "lcfs_boundary_moment": lambda payload: float(
+            np.asarray(lcfs_boundary_moment(payload["result"].state, payload["init"].static))
+        ),
+        "accepted_bnormal_rms": accepted_bnormal_rms_from_payload,
+    }
+    scalar_replay_fns = {
+        "aspect": lambda replay, payload: equilibrium_aspect_ratio_from_state(
+            state=replay["state"],
+            static=payload["init"].static,
+        ),
+        "qs_total": lambda replay, payload: qs_total_from_state(
+            replay["state"],
+            payload["init"].static,
+            payload["init"].indata,
+            payload["init"].signgs,
+        ),
+        "lcfs_boundary_moment": lambda replay, payload: lcfs_boundary_moment(
+            replay["state"],
+            payload["init"].static,
+        ),
+        "accepted_bnormal_rms": lambda replay, _payload: accepted_bnormal_rms_from_replay(replay),
+    }
+    scalar_key = str(getattr(args, "same_branch_report_scalar_key", "qs_total"))
+    if mode == "scalar" and "base" in report and scalar_key in report["objective_values"]:
         t0 = time.perf_counter()
         scalar = direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
             params=base_params,
             complete_payload=report["base"],
-            scalar_key="qs_total",
-            scalar_fn=lambda payload: {
-                "qs_total": float(
-                    np.asarray(
-                        qs_total_from_state(
-                            payload["result"].state,
-                            payload["init"].static,
-                            payload["init"].indata,
-                            payload["init"].signgs,
-                        )
-                    )
-                )
-            },
-            replay_scalar_fn=lambda replay, payload: qs_total_from_state(
-                replay["state"],
-                payload["init"].static,
-                payload["init"].indata,
-                payload["init"].signgs,
-            ),
+            scalar_key=scalar_key,
+            scalar_fn=lambda payload: {scalar_key: scalar_value_fns[scalar_key](payload)},
+            replay_scalar_fn=lambda replay, payload: scalar_replay_fns[scalar_key](replay, payload),
             replay_kwargs={"use_stacked_step_controls": True},
         )
         timings["branch_local_scalar_wall_s"] = float(time.perf_counter() - t0)
@@ -851,8 +877,8 @@ def write_same_branch_validation_report(
             "replay_value": float(np.asarray(scalar["replay_value"], dtype=float)),
             "base_abs_delta": float(scalar["base_abs_delta"]),
             "exact_directional": float(exact_directional),
-            "complete_fd_directional": float(report["objective_values"]["qs_total"]["central_fd_directional"]),
-            "abs_error": float(abs(exact_directional - report["objective_values"]["qs_total"]["central_fd_directional"])),
+            "complete_fd_directional": float(report["objective_values"][scalar_key]["central_fd_directional"]),
+            "abs_error": float(abs(exact_directional - report["objective_values"][scalar_key]["central_fd_directional"])),
         }
     if (
         mode == "vector"
@@ -1284,6 +1310,16 @@ def build_parser() -> argparse.ArgumentParser:
             "complete-solve FD diagnostics and is the default. 'scalar' validates one "
             "branch-local qs_total gradient. 'vector' also builds the more expensive "
             "multi-scalar Jacobian."
+        ),
+    )
+    parser.add_argument(
+        "--same-branch-report-scalar-key",
+        choices=("aspect", "qs_total", "lcfs_boundary_moment", "accepted_bnormal_rms"),
+        default="qs_total",
+        help=(
+            "Physical scalar validated by --same-branch-report-mode scalar. "
+            "Use 'aspect' for a cheaper branch-local replay timing probe, or "
+            "'qs_total' for the QS-relevant scalar."
         ),
     )
     parser.add_argument(

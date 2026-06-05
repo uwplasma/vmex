@@ -10060,3 +10060,60 @@ Completion:
 - CI runtime refactor with preserved coverage/physics gates: 100% on latest
   green baseline.
 - Docs/release hygiene: 98.4%.
+
+### 2026-06-05 Configurable Single-Stage Scalar Gate
+
+Steps taken:
+
+1. Added ``--same-branch-report-scalar-key`` to
+   ``examples/optimization/free_boundary_QS_coil_optimization.py``.
+2. Supported scalar keys are ``aspect``, ``qs_total``,
+   ``lcfs_boundary_moment``, and ``accepted_bnormal_rms``.
+3. Kept the default scalar key as ``qs_total`` for backward compatibility and
+   QS-specific validation.
+4. Updated tests to verify scalar-key routing through the ``aspect`` path.
+5. Updated docs to explain that ``aspect`` is useful as a cheaper
+   physical-scalar timing probe while ``qs_total`` remains the QS-relevant
+   validation scalar.
+6. Re-ran the bounded circle-provider same-branch scalar smoke with
+   ``--same-branch-report-scalar-key aspect``.
+
+Results obtained:
+
+1. Ruff passed for the example and test files.
+2. Focused smoke tests passed with ``12 passed, 1 xfailed``.
+3. Full Sphinx ``-W`` docs build passed.
+4. The aspect-scalar report stayed on the same branch with replay/base delta
+   ``2.66e-15`` and directional-slope absolute error ``1.45e-11``.
+5. Aspect scalar timing improved branch-local scalar replay from ``41.00 s`` to
+   ``33.50 s`` on the same tiny circle-provider smoke, but the same XLA
+   algebraic-simplifier warning appeared. Scalar selection helps, but the
+   underlying controller replay/tape compile remains the limiting path.
+
+Best next steps:
+
+1. Keep ``qs_total`` as the default scientific scalar, but use ``aspect`` for
+   fast timing probes when QS-specific replay is not required.
+2. Target replay/tape construction itself next; scalar selection alone does not
+   solve the compile/runtime issue.
+3. Use the timing fields to separate complete-solve cost from branch-local
+   scalar/Jacobian replay cost in future CPU/GPU comparisons.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9998% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.5%.
+- Single-stage coil-only optimization: 91.4%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 93.2%; scalar-key selection gives a modest timing lever
+  but branch-local replay compile remains the blocker.
+- CI runtime refactor with preserved coverage/physics gates: 100% on latest
+  green baseline, current CI pending.
+- Docs/release hygiene: 98.5%.

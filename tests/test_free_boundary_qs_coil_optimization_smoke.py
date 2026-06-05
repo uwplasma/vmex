@@ -299,6 +299,7 @@ def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path
         iota_weight=1.0,
         same_branch_report_eps=1.0e-4,
         same_branch_report_mode="scalar",
+        same_branch_report_scalar_key="aspect",
         same_branch_report_max_iter=3,
         vmec_max_iter=2,
         ftol=1.0e-8,
@@ -318,6 +319,7 @@ def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path
             "objective_values": {
                 "objective": {"base": 1.0, "plus": 1.1, "minus": 0.9, "central_fd_directional": 1000.0},
                 "qs_total": {"base": 0.4, "plus": 0.42, "minus": 0.38, "central_fd_directional": 0.4},
+                "aspect": {"base": 6.0, "plus": 6.07, "minus": 5.93, "central_fd_directional": 0.7},
             },
             "primary_objective": "objective",
         }
@@ -332,16 +334,17 @@ def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path
     )
     grad = jax.tree_util.tree_map(lambda leaf: jnp.ones_like(jnp.asarray(leaf)), direction_params)
 
-    def fake_branch_local_scalar(*_args, **_kwargs):
+    def fake_branch_local_scalar(*_args, **kwargs):
+        assert kwargs["scalar_key"] == "aspect"
         return {
             "uses_production_forward": True,
             "differentiates_adaptive_controller": False,
             "differentiates_run_free_boundary": False,
             "differentiates_fixed_accepted_branch": True,
-            "scalar_key": "qs_total",
+            "scalar_key": "aspect",
             "replay_option_flags": {"use_stacked_step_controls": True},
-            "value": 0.4,
-            "replay_value": jnp.asarray(0.4),
+            "value": 6.0,
+            "replay_value": jnp.asarray(6.0),
             "base_abs_delta": 0.0,
             "grad": grad,
         }
@@ -371,9 +374,9 @@ def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path
     assert scalar["differentiates_adaptive_controller"] is False
     assert scalar["differentiates_run_free_boundary"] is False
     assert scalar["differentiates_fixed_accepted_branch"] is True
-    assert scalar["scalar_key"] == "qs_total"
+    assert scalar["scalar_key"] == "aspect"
     assert scalar["exact_directional"] == pytest.approx(expected_directional)
-    assert scalar["complete_fd_directional"] == pytest.approx(0.4)
+    assert scalar["complete_fd_directional"] == pytest.approx(0.7)
     assert report["branch_local_vector_jacobian"]["available"] is False
     assert report["timings"]["complete_solve_fd_wall_s"] >= 0.0
     assert report["timings"]["branch_local_scalar_wall_s"] >= 0.0

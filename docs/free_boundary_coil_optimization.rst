@@ -699,6 +699,9 @@ finite-difference only and avoids the cold branch-local replay compilation.
 Use ``--same-branch-report-mode scalar`` to additionally validate one
 fixed-accepted-branch ``qs_total`` gradient, or ``vector`` to build the
 more expensive multi-scalar branch-local Jacobian for reviewer diagnostics.
+The scalar can be changed with ``--same-branch-report-scalar-key``.  Use
+``aspect`` for a cheaper physical-scalar timing probe and ``qs_total`` for the
+QS-relevant scalar.
 The resulting ``same_branch_complete_solve_report.json`` includes a
 ``timings`` block.  ``complete_solve_fd_wall_s`` measures the complete
 base/plus/minus finite-difference solves, while
