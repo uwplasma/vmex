@@ -327,6 +327,7 @@ def test_child_specs_can_add_host_policy_ablation_rows(tmp_path) -> None:
         "provider",
         "direct_solve",
         "direct_solve_jit_forces",
+        "direct_solve_jit_forces_host_residual_metrics",
         "direct_solve_jit_forces_no_residual_metrics",
         "direct_solve_jit_forces_no_fsq1_norms",
         "direct_solve_jit_forces_no_profile_setup",
@@ -339,6 +340,9 @@ def test_child_specs_can_add_host_policy_ablation_rows(tmp_path) -> None:
         label: (out, args, env)
         for label, out, args, env in specs
         if label.startswith("direct_solve_jit_forces_") and label != "direct_solve_jit_forces_timing_light"
+    }
+    assert ablations["direct_solve_jit_forces_host_residual_metrics"][2] == {
+        "VMEC_JAX_HOST_RESIDUAL_METRICS": "1"
     }
     assert ablations["direct_solve_jit_forces_no_residual_metrics"][2] == {
         "VMEC_JAX_HOST_RESIDUAL_METRICS": "0"
