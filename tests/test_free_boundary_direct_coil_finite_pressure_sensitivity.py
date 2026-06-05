@@ -171,7 +171,7 @@ def _run_direct_solve(input_path: Path, params: CoilFieldParams):
 
 @pytest.mark.py311_coverage_only
 def test_direct_coil_trace_fingerprint_detects_control_branch_changes() -> None:
-    from vmec_jax._compat import jnp
+    from vmec_jax._compat import jax, jnp
     from vmec_jax.free_boundary_adjoint import (
         direct_coil_accepted_trace_array_controls_jax,
         direct_coil_accepted_trace_branch_metadata,
@@ -498,6 +498,10 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes() -> None:
         direct_coil_same_branch_physical_scalar_gate_report,
         direct_coil_same_branch_controller_scalar_custom_vjp_report,
         direct_coil_same_branch_controller_scalars_custom_vjp_report,
+        _accepted_step_policy_signature_for_complete_payload,
+        _accepted_step_policy_summary_for_complete_payload,
+        _pytree_pullback_basis_jax,
+        _pytree_unstack_leading_axis_jax,
     )
 
     physical_synthetic_report = deepcopy(synthetic_report)
@@ -742,6 +746,31 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes() -> None:
         np.asarray(_pytree_batched_directional_vdot_jax({}, {}, 3)),
         np.zeros(3),
     )
+    step_signature_empty = _accepted_step_policy_signature_for_complete_payload({})
+    assert step_signature_empty == ()
+    step_summary_empty = _accepted_step_policy_summary_for_complete_payload({})
+    assert step_summary_empty == {"n_segments": 0, "segments": ()}
+    step_signature = _accepted_step_policy_signature_for_complete_payload(
+        {"traces": (axis_trace0, changed_static_trace)}
+    )
+    assert len(step_signature) == 2
+    assert step_signature[0][0:3] == (0, 1, 1)
+    step_summary = _accepted_step_policy_summary_for_complete_payload(
+        {"traces": (axis_trace0, changed_static_trace)}
+    )
+    assert step_summary["n_segments"] == 2
+    assert step_summary["segments"][1] == {"start": 1, "stop": 2, "n_steps": 1}
+
+    def vector_objective(params):
+        x = params["x"]
+        return jnp.asarray([x * x, 3.0 * x])
+
+    _, toy_pullback = jax.vjp(vector_objective, {"x": jnp.asarray(2.0)})
+    batched_pullback = _pytree_pullback_basis_jax(toy_pullback, jnp.eye(2))
+    np.testing.assert_allclose(np.asarray(batched_pullback["x"]), np.asarray([4.0, 3.0]))
+    unstacked_pullback = _pytree_unstack_leading_axis_jax(batched_pullback, 2)
+    np.testing.assert_allclose(np.asarray(unstacked_pullback[0]["x"]), np.asarray(4.0))
+    np.testing.assert_allclose(np.asarray(unstacked_pullback[1]["x"]), np.asarray(3.0))
 
     with pytest.raises(ValueError, match="replay_scalar_fns"):
         direct_coil_same_branch_controller_scalars_custom_vjp_report(

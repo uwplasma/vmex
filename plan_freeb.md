@@ -10475,6 +10475,9 @@ Results obtained:
 6. The patch removes avoidable Python pullback loops, but the dominant cost is
    still XLA/JAX graph construction for replay VJP/pullback, not device
    readiness.
+7. Added lightweight synthetic coverage for the complete-payload step-policy
+   helpers and the batched pullback/unstack helpers.  The exact-remaining
+   coverage shard passed with ``14 passed in 68.27 s`` after this addition.
 
 Best next steps:
 
