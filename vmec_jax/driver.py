@@ -3287,7 +3287,11 @@ def run_fixed_boundary(
             stage_prev_fsq = prev_stage_fsq if bool(stage_transition_heuristic) else None
             stage_light_history = (
                 True
-                if (bool(performance_mode) and (not bool(verbose)) and (not bool(cfg.lfreeb)))
+                if (
+                    bool(performance_mode)
+                    and (not bool(verbose))
+                    and ((not bool(cfg.lfreeb)) or bool(direct_external_provider))
+                )
                 else None
             )
             stage_resume_state_mode = "minimal" if stage_accelerated_mode else None

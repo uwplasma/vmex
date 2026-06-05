@@ -495,16 +495,18 @@ single-stage coil optimizer:
   sampling or NESTOR ``bsqvac`` construction. The safe default now keeps the
   Thomas R/Z solve for direct free-boundary runs unless users force the lax
   path explicitly for diagnostics.
-- The fast validation lane also includes tiny accepted-state
-  finite-difference slope-stability checks for direct-coil current and one
-  direct-coil Fourier geometry coefficient.
-- Accepted-boundary direct-coil replay is AD-vs-FD checked for one current
-  perturbation. This holds the accepted VMEC boundary fixed and validates the
-  JAX-visible final-output layer, not the full nonlinear iteration-loop
-  derivative.
-- The phase-2 full-loop refactor target has a JAX-visible masked nonlinear
-  controller primitive with AD-vs-FD direct-coil gradient coverage, plus an
-  accepted-state ``bsqvac`` replay gate with VMEC-state derivatives. This
+- The fast validation lane now includes same-branch complete-solve
+  AD-vs-central-FD gates for direct-coil current, direct-coil Fourier geometry,
+  and mixed stellsym/``LASYM`` directions. These gates compare fixed
+  accepted-trace/controller custom-VJP derivatives against complete-solve
+  finite differences only after rejecting accepted-branch fingerprint changes.
+- Branch-local production-forward replay gates now cover aspect ratio plus
+  accepted ``Bnormal`` and ``Bsqvac`` RMS physical scalars, with scalar/vector
+  coverage for current and Fourier geometry representatives. This validates a
+  fixed accepted branch, not arbitrary adaptive host-controller branch changes.
+- The phase-2 full-loop refactor target has JAX-visible masked and segmented
+  nonlinear-controller primitives with AD-vs-FD direct-coil gradient coverage,
+  plus accepted-state replay gates for coil and VMEC-state derivatives. This
   validates the replacement contract for the host loop but does not promote a
   default production ``run_free_boundary`` exact adjoint.
 - The active NESTOR sensitivity checks validate the provider/coupling layer:
@@ -1253,6 +1255,17 @@ The same benchmark pass tested existing opt-in knobs and did not promote them:
 the current accepted-control fusion.  Timing-light rows confirmed that timing
 instrumentation is not the dominant remaining wall-time source.
 
+The June 2026 follow-up matrix kept the same conclusion. The production
+``jit_forces=True`` row remains the large win: on the tiny direct-coil
+free-boundary case the no-JIT CUDA warm solve was about ``13.3x`` slower than
+CPU, while the JIT-force row reduced that to about ``2.7x``. Host-policy
+ablations did not beat the production JIT row on CPU or CUDA, so they remain
+diagnostic controls. Quiet performance-mode direct-provider free-boundary runs
+now enable ``light_history`` by default, which suppresses broad per-iteration
+histories without changing the solver branch, NESTOR coupling, or convergence
+logic. The next real performance seam remains first-call force/tape
+construction plus GPU preconditioner/setup/finalize launch overhead.
+
 The direct-solve child JSON includes active and trial NESTOR timing summaries:
 sample time, scalar-potential solve time, reuse counts, failed trial counts,
 and the final recompute sampler/solver timings. The matrix runner also enables
@@ -1549,10 +1562,14 @@ evidence. The default gates are CI-safe and cover:
 - reusable pytree directional-derivative checks for optimizer-facing
   direct-coil objectives, so current and Fourier-geometry controls are checked
   together instead of only by bespoke scalar tests.
-- a guarded, opt-in low-resolution complete-solve finite-difference smoke for
-  one coil current and one Fourier geometry coefficient; this checks finite
-  nonzero outer-loop response, not a production AD-vs-finite-difference
-  full-solve adjoint.
+- same-branch complete-solve AD-vs-central-finite-difference custom-VJP gates
+  for one coil current, one Fourier geometry coefficient, and a mixed
+  stellsym/``LASYM`` direction, with branch-fingerprint checks that reject
+  adaptive controller changes.
+- branch-local production-forward scalar/vector replay gates for aspect ratio
+  plus accepted ``Bnormal`` and ``Bsqvac`` RMS physical scalars. These validate
+  fixed accepted-branch replay, not a general derivative of adaptive
+  ``run_free_boundary`` branch selection.
 
 Optional evidence includes ESSOS-backed full finite-pressure response tests,
 VMEC2000 executable comparisons, and ``RUN_FULL=1`` complete-solve finite

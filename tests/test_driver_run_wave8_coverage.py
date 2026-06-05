@@ -254,6 +254,48 @@ def test_direct_coil_free_boundary_exposes_limited_updates(monkeypatch, tmp_path
     assert calls["solve_residual_iter"][-1][2]["limit_update_rms"] is True
 
 
+def test_direct_coil_free_boundary_quiet_performance_path_uses_light_history(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    cfg = _cfg(lfreeb=True)
+    indata = _indata(LFREEB=True, MGRID_FILE="DIRECT_COILS")
+    calls = _install_fast_run_fakes(monkeypatch, cfg=cfg, indata=indata)
+    monkeypatch.setattr(driver, "_default_non_autodiff_solver_policy_for_backend", lambda _indata, _backend: ("default", True))
+    monkeypatch.setattr(driver, "_default_use_scan_for_backend", lambda _indata, _backend, _solver_mode: False)
+
+    driver.run_free_boundary(
+        tmp_path / "input.direct",
+        max_iter=2,
+        verbose=False,
+        grid=object(),
+        jit_forces=False,
+        jit_precompile=False,
+        external_field_provider_kind="direct_coils",
+        external_field_provider_static={"coil_geometry": object()},
+        external_field_provider_params=object(),
+        _auto_cli_fixed_boundary_mode=False,
+    )
+
+    assert calls["solve_residual_iter"][-1][2]["light_history"] is True
+
+    cfg_mgrid = _cfg(lfreeb=True)
+    indata_mgrid = _indata(LFREEB=True, MGRID_FILE=cfg_mgrid.mgrid_file)
+    mgrid_calls = _install_fast_run_fakes(monkeypatch, cfg=cfg_mgrid, indata=indata_mgrid)
+
+    driver.run_free_boundary(
+        tmp_path / "input.mgrid",
+        max_iter=2,
+        verbose=False,
+        grid=object(),
+        jit_forces=False,
+        jit_precompile=False,
+        _auto_cli_fixed_boundary_mode=False,
+    )
+
+    assert mgrid_calls["solve_residual_iter"][-1][2]["light_history"] is None
+
+
 def test_run_free_boundary_rejects_fixed_input_and_delegates_free_input(monkeypatch, tmp_path: Path) -> None:
     input_path = tmp_path / "input.case"
     input_path.write_text("&INDATA\n/\n")

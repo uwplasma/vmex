@@ -12,12 +12,13 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-06-04 on `main` with the fused full-trace and stacked
-replay-diagnostic patch. The latest fully green pushed main is commit
-`bf2a57f`, `test: update replay diagnostic helper call`, which passed GitHub
-Actions run `26993152393`, including docs, build, console smoke, physics
-smoke, py3.10, py3.12, slow-physics coverage, exact free-boundary coverage
-shards, core py3.11 coverage shards, and the combined 95% coverage gate.
+Last updated: 2026-06-05 on `main` with the direct-coil/generated-`mgrid`
+boundary-projection parity gate and raw direct-solve CPU/GPU performance
+triage. The latest fully green pushed main is commit `e3c1382`,
+`docs: update free-boundary status after ci`, which passed GitHub Actions run
+`26993402840`, including docs, build, console smoke, physics smoke, py3.10,
+py3.12, slow-physics coverage, exact free-boundary coverage shards, core
+py3.11 coverage shards, and the combined 95% coverage gate.
 
 The latest green main splits required py3.11 coverage into core, slow-physics,
 and exact shards while keeping a combined 95% coverage threshold, preserves the
@@ -36,6 +37,89 @@ same-branch gates, explicit tridiagonal-policy coverage, VMEC2000
 generated-`mgrid` WOUT-quality classification, and direct/generated
 boundary-domain checks. The code still does not claim a production full
 adaptive nonlinear `run_free_boundary` exact adjoint.
+
+### 2026-06-05 Boundary-projection parity and raw solve performance triage
+
+Steps taken:
+
+1. Spawned parallel subagents for adaptive full-loop adjoint seam auditing,
+   VMEC/direct-coil/`mgrid` parity gates, docs hygiene, and CPU/GPU
+   performance analysis.
+2. Added a no-solve boundary-projection parity gate in
+   `tests/test_free_boundary_coil_provider_forward.py`. The new test builds a
+   generated JAX `MGridFieldParams` from the same off-axis direct coils and
+   compares direct-coil and generated-`mgrid` projected free-boundary channels
+   at exact `mgrid` nodes.
+3. Confirmed the suggested `accepted_bnormal_rms` same-branch complete-loop
+   gate is already represented in the current main exact shard via the
+   current-only same-branch custom-VJP test and physical scalar gate; no
+   duplicate expensive solve triplet was added.
+4. Ran a bounded local CPU direct-coil benchmark matrix with timing-light,
+   policy-ablation, and stacked accepted-replay diagnostics.
+5. Ran the same quick CPU/GPU matrix on `office`.
+6. Added the quiet direct-provider free-boundary `light_history` policy: in
+   performance mode with `verbose=False`, direct-coil free-boundary solves now
+   suppress broad per-iteration histories while legacy `mgrid` free-boundary
+   runs keep the previous policy.
+
+Results obtained:
+
+1. The new direct-coil/generated-`mgrid` boundary-projection gate passed with
+   the existing raw `mgrid` node-parity test: `2 passed in 2.54 s`.
+2. The full provider-forward file passed: `6 passed in 6.64 s`.
+3. The focused provider/`mgrid`/gradient shard passed:
+   `19 passed in 13.18 s`.
+4. Sphinx built cleanly with `python -m sphinx -b html -q docs docs/_build/html`.
+5. `ruff` passed on the touched provider-forward test, and `git diff --check`
+   passed.
+6. Local CPU benchmark evidence:
+   - no-JIT warm direct solve: `0.0861 s`;
+   - production `jit_forces=True` warm direct solve: `0.0358 s`;
+   - no residual-metrics ablation: `0.0339 s`;
+   - all host policies off: `0.0409 s`.
+   This keeps `jit_forces=True` as the meaningful production default and does
+   not justify a broad host-policy default change on CPU.
+7. Final `office` CPU/GPU benchmark evidence:
+   - no-JIT GPU warm direct solve: `1.98 s`;
+   - `jit_forces=True` GPU warm direct solve: `0.183 s`;
+   - no residual-metrics ablation: `0.256 s`;
+   - no FSQ1-norms ablation: `0.192 s`;
+   - timing-light row: `0.205 s` GPU versus `0.0691 s` CPU.
+   This confirms the current production `jit_forces=True` path is the large
+   GPU win, while host-policy ablations are not yet safe production defaults.
+8. After enabling `light_history`, a direct real-run probe reported
+   `diagnostics["light_history"] is True` and broad update/step histories were
+   empty. Local CPU direct-solve warm min was `0.0364 s`; the `office` CUDA
+   direct-solve warm min was `0.180 s`, matching the previous best JIT row.
+
+Best next steps:
+
+1. Commit and push the no-solve boundary-projection parity gate, direct
+   free-boundary `light_history` policy, and plan/docs status refresh.
+2. Continue CPU/GPU performance on raw direct solves at the next real seam:
+   first-call exact tape/force construction and GPU preconditioner/update
+   launch overhead, not host diagnostics that benchmark as noisy or slower.
+3. Keep production full adaptive-loop adjoint claims conservative; promote
+   only branch-fingerprint-gated same-branch physical scalar/vector gates.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.998% for branch-local
+  production-forward current/Fourier scalar and vector gradients; full
+  adaptive branch differentiation remains intentionally unclaimed.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 100%.
+- VMEC parity and physics gates: 96.5%.
+- Single-stage coil-only optimization: 86.5%.
+- Robust coil perturbation optimization: 70%.
+- CPU/GPU performance: 89.5%.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 96.7%.
+- Overall free-boundary/single-stage plan: 97.5%.
 
 ### 2026-06-04 Fused full-trace and stacked replay GPU diagnostic
 
@@ -87,12 +171,12 @@ Results obtained:
 
 Best next steps:
 
-1. Commit and push this fused full-trace and stacked replay diagnostic patch.
-2. Watch CI until docs, exact free-boundary shards, and combined coverage pass.
-3. Continue CPU/GPU performance on raw direct solves rather than replay:
+1. Treat `e3c1382` / GitHub Actions run `26993402840` as the current green
+   baseline for free-boundary docs and release-claim wording.
+2. Continue CPU/GPU performance on raw direct solves rather than replay:
    target GPU force-eval dispatch, preconditioner refresh/reuse, setup
    constants, and final residual recompute.
-4. Keep production full adaptive-loop adjoint claims conservative; the current
+3. Keep production full adaptive-loop adjoint claims conservative; the current
    improvement is accepted-trace replay performance and validation robustness.
 
 Need from user:

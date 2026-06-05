@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from vmec_jax._compat import enable_x64
-from vmec_jax.external_fields import CoilFieldParams, sample_coil_field_cylindrical
+from vmec_jax.external_fields import CoilFieldParams, MGridFieldParams, sample_coil_field_cylindrical
 from vmec_jax.free_boundary import ExternalBoundarySample, sample_free_boundary_external_field
 from vmec_jax.namelist import read_indata, write_indata
 
@@ -27,6 +27,55 @@ def _circle_coil_params() -> CoilFieldParams:
         base_curve_dofs=dofs,
         base_currents=jnp.asarray([2.0]),
         n_segments=96,
+    )
+
+
+def _off_axis_coil_params() -> CoilFieldParams:
+    from vmec_jax._compat import jnp
+
+    dofs = jnp.zeros((1, 3, 3), dtype=float)
+    # Off-axis displacement makes the field toroidally varying, so this checks
+    # that the mgrid and direct-coil provider paths use the same phi convention.
+    dofs = dofs.at[0, 0, 0].set(1.65)
+    dofs = dofs.at[0, 0, 2].set(0.22)
+    dofs = dofs.at[0, 1, 1].set(0.22)
+    dofs = dofs.at[0, 2, 0].set(0.08)
+    return CoilFieldParams(
+        base_curve_dofs=dofs,
+        base_currents=jnp.asarray([2.1e5]),
+        n_segments=96,
+        nfp=1,
+        stellsym=False,
+    )
+
+
+def _mgrid_from_direct_coil_nodes(coil_params: CoilFieldParams):
+    from vmec_jax._compat import jnp
+
+    rmin, rmax = 0.72, 1.18
+    zmin, zmax = -0.24, 0.24
+    nfp = 1
+    kp, jz, ir = 7, 5, 6
+    r_grid = jnp.linspace(rmin, rmax, ir)
+    z_grid = jnp.linspace(zmin, zmax, jz)
+    phi_grid = jnp.arange(kp, dtype=float) * ((2.0 * jnp.pi / nfp) / kp)
+    phi_mesh, z_mesh, r_mesh = jnp.meshgrid(phi_grid, z_grid, r_grid, indexing="ij")
+    br, bphi, bz = sample_coil_field_cylindrical(coil_params, r_mesh, z_mesh, phi_mesh)
+    return (
+        MGridFieldParams(
+            br=br[None, ...],
+            bphi=bphi[None, ...],
+            bz=bz[None, ...],
+            extcur=jnp.asarray([1.0]),
+            rmin=rmin,
+            rmax=rmax,
+            zmin=zmin,
+            zmax=zmax,
+            nfp=nfp,
+        ),
+        r_grid,
+        z_grid,
+        phi_grid,
     )
 
 
@@ -74,6 +123,66 @@ def test_sample_free_boundary_external_field_from_direct_coils_matches_provider_
     assert sample.vac_ext.bv.shape == R.shape
     assert sample.vac_ext.bnormal.shape == R.shape
     assert np.all(np.isfinite(sample.vac_ext.bsqvac))
+
+
+def test_generated_mgrid_boundary_projection_matches_direct_coil_provider_at_nodes():
+    enable_x64(True)
+    from vmec_jax._compat import jnp
+
+    coil_params = _off_axis_coil_params()
+    mgrid_params, r_grid, z_grid, phi_grid = _mgrid_from_direct_coil_nodes(coil_params)
+    r_idx = np.asarray([[0, 2, 5], [1, 3, 4]])
+    z_idx = np.asarray([[0, 2, 4], [1, 3, 2]])
+    phi_idx = np.asarray([[0, 1, 3], [6, 4, 2]])
+    R = jnp.asarray(np.asarray(r_grid)[r_idx])
+    Z = jnp.asarray(np.asarray(z_grid)[z_idx])
+    phi = jnp.asarray(np.asarray(phi_grid)[phi_idx])
+    Ru = jnp.asarray([[0.03, -0.02, 0.01], [0.04, -0.01, 0.02]])
+    Zu = jnp.asarray([[0.11, 0.09, 0.07], [0.08, 0.06, 0.10]])
+    Rv = jnp.asarray([[0.02, 0.01, -0.03], [0.01, -0.02, 0.04]])
+    Zv = jnp.asarray([[0.04, -0.03, 0.02], [-0.01, 0.02, 0.03]])
+
+    direct = sample_free_boundary_external_field(
+        R=R,
+        Z=Z,
+        Ru=Ru,
+        Zu=Zu,
+        Rv=Rv,
+        Zv=Zv,
+        phi=phi,
+        provider_kind="direct_coils",
+        provider_params=coil_params,
+        label="direct_node_projection",
+    )
+    generated_mgrid = sample_free_boundary_external_field(
+        R=R,
+        Z=Z,
+        Ru=Ru,
+        Zu=Zu,
+        Rv=Rv,
+        Zv=Zv,
+        phi=phi,
+        provider_kind="mgrid",
+        provider_params=mgrid_params,
+        label="generated_mgrid_node_projection",
+    )
+
+    for name in ("br", "bp", "bz", "br_mgrid", "bp_mgrid", "bz_mgrid"):
+        np.testing.assert_allclose(
+            np.asarray(getattr(generated_mgrid, name)),
+            np.asarray(getattr(direct, name)),
+            rtol=2.0e-11,
+            atol=2.0e-14,
+            err_msg=f"generated mgrid projection changed {name}",
+        )
+    for name in ("bnormal", "bnormal_unit", "bu", "bv", "bsqvac"):
+        np.testing.assert_allclose(
+            np.asarray(getattr(generated_mgrid.vac_ext, name)),
+            np.asarray(getattr(direct.vac_ext, name)),
+            rtol=2.0e-11,
+            atol=2.0e-14,
+            err_msg=f"generated mgrid projection changed vac_ext.{name}",
+        )
 
 
 def test_sample_free_boundary_external_field_adds_axis_field_separately():
