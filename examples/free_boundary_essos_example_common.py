@@ -28,7 +28,7 @@ from vmec_jax.namelist import InData, write_indata
 from vmec_jax.wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state, read_wout
 
 
-DEFAULT_INPUT = REPO_ROOT / "examples" / "data" / "input.LandremanPaul2021_QA_reactorScale_lowres"
+DEFAULT_INPUT = REPO_ROOT / "examples" / "data" / "input.LandremanPaul2021_QA_lowres"
 DEFAULT_COILS_JSON_NAME = "ESSOS_biot_savart_LandremanPaulQA.json"
 DEFAULT_PRESSURE_SCALE = 34.46233666638
 
