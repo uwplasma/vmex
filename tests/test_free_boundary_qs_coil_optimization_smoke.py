@@ -267,6 +267,9 @@ def test_same_branch_report_writer_uses_source_helper(tmp_path, monkeypatch):
     assert report["branch_local_vector_jacobian"]["available"] is False
     assert "adaptive host branch" in report["branch_local_vector_jacobian"]["scope"]
     assert [record["kind"] for record in report["direction_variables"]] == ["current", "fourier_dof"]
+    assert report["timings"]["complete_solve_fd_wall_s"] >= 0.0
+    assert "branch_local_scalar_wall_s" not in report["timings"]
+    assert "branch_local_vector_wall_s" not in report["timings"]
 
 
 def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path, monkeypatch):
@@ -372,6 +375,9 @@ def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path
     assert scalar["exact_directional"] == pytest.approx(expected_directional)
     assert scalar["complete_fd_directional"] == pytest.approx(0.4)
     assert report["branch_local_vector_jacobian"]["available"] is False
+    assert report["timings"]["complete_solve_fd_wall_s"] >= 0.0
+    assert report["timings"]["branch_local_scalar_wall_s"] >= 0.0
+    assert "branch_local_vector_wall_s" not in report["timings"]
 
 
 def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path, monkeypatch):
@@ -510,6 +516,9 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
     assert vector["max_base_abs_delta"] == pytest.approx(0.0)
     assert vector["scalars"]["aspect"]["complete_fd_directional"] == pytest.approx(0.1)
     assert vector["scalars"]["qs_total"]["complete_fd_directional"] == pytest.approx(0.4)
+    assert report["timings"]["complete_solve_fd_wall_s"] >= 0.0
+    assert report["timings"]["branch_local_vector_wall_s"] >= 0.0
+    assert "branch_local_scalar_wall_s" not in report["timings"]
 
 
 def test_circle_dry_run_writes_configuration_without_solves(tmp_path, monkeypatch):
