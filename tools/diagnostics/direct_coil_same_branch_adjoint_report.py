@@ -371,6 +371,14 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         "force_weight": 0.0,
         "enforce_edge": False,
     }
+    controller_replay_kwargs = {
+        **replay_kwargs,
+        # The promoted same-branch gates use stacked step controls.  Keeping
+        # this diagnostic on the same path avoids the global per-step
+        # trace-switch closure that makes optional controller reports much more
+        # expensive in cold processes.
+        "use_stacked_step_controls": True,
+    }
 
     def fixed_objective(params):
         return direct_coil_fixed_trace_custom_vjp_objective_jax(
@@ -426,7 +434,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             direction,
             replay_scalar_fns=replay_scalar_fns,
             eps=float(args.eps),
-            replay_kwargs=replay_kwargs,
+            replay_kwargs=controller_replay_kwargs,
             rtol=rtol_by_key,
             atol=atol_by_key,
             base_value_atol=base_value_atol_by_key,

@@ -9779,3 +9779,62 @@ Completion:
 - CI runtime refactor with preserved coverage/physics gates: 100% on latest
   green baseline, current head pending CI.
 - Docs/release hygiene: 98.3%.
+
+### 2026-06-05 Same-Branch Optional Controller Diagnostic Probe
+
+Steps taken:
+
+1. Reviewed the dirty diagnostic change left from the previous run in
+   `tools/diagnostics/direct_coil_same_branch_adjoint_report.py`.
+2. Aligned the optional controller/aspect scalar VJP diagnostic path with the
+   promoted stacked step-control replay path used by the same-branch physics
+   gates and production branch-local scalar Jacobian helper.
+3. Re-ran Ruff, the default same-branch diagnostic, and focused runtime/free
+   boundary smoke tests.
+4. Kept the earlier failed optional run as the performance finding: even with
+   stacked step controls, the combined optional controller/aspect VJP report did
+   not finish within a bounded cold-process probe and had to be killed.
+
+Results obtained:
+
+1. `python -m ruff check tools/diagnostics/direct_coil_same_branch_adjoint_report.py tests/test_runtime_diagnostics.py`
+   passed.
+2. The default tiny same-branch diagnostic wrote
+   `/tmp/vmec_jax_same_branch_default_after_stacked.json` and reported
+   `status=passed`.
+3. `JAX_ENABLE_X64=1 python -m pytest -q tests/test_runtime_diagnostics.py tests/test_free_boundary_qs_coil_optimization_smoke.py -q`
+   passed with `19 passed, 1 xfailed`.
+4. The stacked-control alignment is a consistency cleanup, not a solved
+   performance lane. The remaining blocker is the cold first VJP/tape build in
+   optional controller scalar replay, not the diagnostic option flags alone.
+
+Best next steps:
+
+1. Keep optional same-branch controller/aspect VJP reports opt-in.
+2. Target the lower-level
+   `direct_coil_accepted_trace_controller_custom_vjp_scalars_jax` first-call
+   trace/compile path instead of adding more diagnostic wrappers.
+3. Add a minimal timing shard around controller replay stages so the next
+   performance run separates complete-solve time, fixed-trace VJP time, and
+   controller scalar VJP compile/replay time.
+4. Only promote optional controller/aspect VJP reports as routine artifacts once
+   the cold path is bounded in a fresh process.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9998% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.4%.
+- Single-stage coil-only optimization: 90.7%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 92.1%; optional controller scalar VJP cold compile is
+  the next blocker.
+- CI runtime refactor with preserved coverage/physics gates: 100% on latest
+  green baseline.
+- Docs/release hygiene: 98.3%.
