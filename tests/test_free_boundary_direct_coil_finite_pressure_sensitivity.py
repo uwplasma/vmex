@@ -2086,6 +2086,10 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
             assert production_branch_local["trace_replay_diagnostics"]["differentiates_adaptive_controller"] is False
             assert production_branch_local["replay_option_flags"]["use_stacked_step_controls"] is True
             assert production_branch_local["replay_option_flags"]["use_accepted_only_fast_path"] is True
+            assert production_branch_local["replay_graph_metadata"]["differentiates_adaptive_controller"] is False
+            assert production_branch_local["replay_graph_metadata"]["n_steps"] >= 1
+            assert production_branch_local["replay_graph_metadata"]["active_free_boundary_replay_steps"] >= 1
+            assert production_branch_local["replay_graph_metadata"]["step_policy_n_segments"] >= 1
             assert production_branch_local["timings"]["production_scalar_eval_wall_s"] >= 0.0
             assert production_branch_local["timings"]["replay_value_and_grad_dispatch_s"] >= 0.0
             assert production_branch_local["timings"]["replay_value_and_grad_ready_s"] >= 0.0
@@ -2162,6 +2166,10 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
             assert production_branch_local_scalars["trace_replay_diagnostics"]["differentiates_adaptive_controller"] is False
             assert production_branch_local_scalars["replay_option_flags"]["use_stacked_step_controls"] is True
             assert production_branch_local_scalars["replay_option_flags"]["use_accepted_only_fast_path"] is True
+            assert production_branch_local_scalars["replay_graph_metadata"]["differentiates_adaptive_controller"] is False
+            assert production_branch_local_scalars["replay_graph_metadata"]["n_steps"] >= 1
+            assert production_branch_local_scalars["replay_graph_metadata"]["active_free_boundary_replay_steps"] >= 1
+            assert production_branch_local_scalars["replay_graph_metadata"]["step_policy_n_segments"] >= 1
             assert production_branch_local_scalars["timings"]["production_scalar_eval_wall_s"] >= 0.0
             assert production_branch_local_scalars["timings"]["replay_vjp_wall_s"] >= 0.0
             assert production_branch_local_scalars["timings"]["replay_pullbacks_wall_s"] >= 0.0

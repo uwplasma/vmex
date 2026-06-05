@@ -883,6 +883,7 @@ def write_same_branch_validation_report(
             "replay_ad_mode": str(scalar["replay_ad_mode"]),
             "scalar_key": str(scalar["scalar_key"]),
             "replay_option_flags": scalar["replay_option_flags"],
+            "replay_graph_metadata": scalar.get("replay_graph_metadata", {}),
             "value": float(scalar["value"]),
             "replay_value": float(np.asarray(scalar["replay_value"], dtype=float)),
             "base_abs_delta": float(scalar["base_abs_delta"]),
@@ -964,6 +965,7 @@ def write_same_branch_validation_report(
             "replay_ad_mode": str(vector["replay_ad_mode"]),
             "scalar_keys": list(scalar_keys),
             "replay_option_flags": vector["replay_option_flags"],
+            "replay_graph_metadata": vector.get("replay_graph_metadata", {}),
             "max_base_abs_delta": float(vector["max_base_abs_delta"]),
             "timings": vector_timings,
             "scalars": {

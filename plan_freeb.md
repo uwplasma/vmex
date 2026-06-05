@@ -9539,6 +9539,82 @@ Completion:
   green baseline.
 - Docs/release hygiene: 98.5%.
 
+### 2026-06-05 Replay Graph Metadata and XLA Scope Instrumentation
+
+Steps taken:
+
+1. Added JAX named scopes around direct-coil sampling, boundary-field
+   projection, dense NESTOR mode solve, mode-field reconstruction, boundary
+   geometry, replay-context construction, and strict VMEC update calls in the
+   accepted-branch replay path.
+2. Added ``direct_coil_accepted_trace_replay_graph_metadata`` to summarize the
+   replay graph being differentiated: step counts, accepted/rejected/done
+   counts, active free-boundary replay cadence, policy segmentation, inferred
+   boundary shapes, VMEC mode metadata, and replay options.
+3. Kept the metadata compact by stripping exact static branch signatures from
+   timing JSON; full signatures remain available from the existing branch
+   fingerprint diagnostics.
+4. Threaded the replay graph metadata through scalar and vector branch-local
+   helper returns and through
+   ``examples/optimization/free_boundary_QS_coil_optimization.py`` report JSON.
+5. Added mocked report tests and real tiny direct-coil production gate asserts
+   so scalar/vector branch-local reports must expose the metadata.
+
+Results obtained:
+
+1. ``ruff`` passed for the changed source, example, and tests.
+2. ``JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_qs_coil_optimization_smoke.py -q`` passed with
+   ``12 passed, 1 xfailed``.
+3. ``JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_fd
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_fourier_only_same_branch_custom_vjp_matches_complete_solve_fd
+   -q`` passed.
+4. A real circle-provider scalar same-branch report for ``aspect`` stayed on
+   the same branch with replay/base delta ``2.66e-15`` and directional-slope
+   absolute error ``1.45e-11``.
+5. The same report now records compact graph metadata: ``n_steps=2``,
+   ``active_free_boundary_replay_steps=1``, ``step_policy_n_segments=2``,
+   inferred boundary shape ``[7, 4]``, ``nfp=2``, ``mpol=3``, ``ntor=2``,
+   and ``nvper=2``.
+6. Replay wall time for that report was ``26.54 s``. Device-ready time remains
+   negligible; the remaining bottleneck is still graph tracing/dispatch and
+   the known XLA algebraic-simplifier loop warning, now with named scopes to
+   localize it in profiler traces.
+
+Best next steps:
+
+1. Use the new named scopes with a JAX/XLA profiler trace to identify whether
+   the simplifier loop is dominated by boundary geometry, coil sampling,
+   dense NESTOR solve, or strict-update replay.
+2. Hoist shape-only replay context construction out of per-step traced replay
+   where branch metadata proves a segment has stable ``ntheta``/``nzeta`` and
+   static VMEC mode metadata.
+3. After context hoisting, rerun scalar/vector same-branch reports on CPU and
+   GPU and compare graph metadata-normalized timings.
+4. Continue toward the adaptive full-loop seam only after this fixed-branch
+   replay graph cost is reduced enough to make production coil-only
+   optimization practical.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9998% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.5%.
+- Single-stage coil-only optimization: 91.8%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 94.3%; replay graph profiling is now instrumented, but
+  graph tracing/dispatch remains the blocker.
+- CI runtime refactor with preserved coverage/physics gates: 100% on latest
+  green baseline.
+- Docs/release hygiene: 98.8%.
+
 ### 2026-06-05 Direct Accepted-Branch AD Timing Path
 
 Steps taken:
