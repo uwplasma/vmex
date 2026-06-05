@@ -206,6 +206,53 @@ Completion:
 - Docs/release hygiene: 97.2%.
 - Overall free-boundary/single-stage plan: 98.2%.
 
+### 2026-06-05 Single-stage example branch-local vector report coverage
+
+Steps taken:
+
+1. Added a fast positive regression for
+   `examples/optimization/free_boundary_QS_coil_optimization.py`.
+2. The test stubs the complete same-branch solve report and the production
+   branch-local vector helper, then verifies the example writes
+   `branch_local_vector_jacobian.available=true` with scalar keys, replay flags,
+   fixed-branch differentiation flags, replay/base deltas, and complete-FD
+   comparison fields.
+3. Kept the full coil-to-Boozer/QS exact-gradient marker xfailed because that
+   remains a deliberate phase-3 promotion target, not an example-reporting
+   regression.
+
+Results obtained:
+
+1. Ruff passed for `tests/test_free_boundary_qs_coil_optimization_smoke.py`.
+2. The full free-boundary QS coil optimization smoke file passed:
+   `9 passed, 1 xfailed in 2.83 s`.
+
+Best next steps:
+
+1. Commit and push this example-reporting coverage.
+2. Watch the latest CI run after the push.
+3. Continue single-stage coil-only work by replacing the cheap proxy with a
+   Boozer/QS objective only after complete-loop branch-local gradients are
+   promoted through a full objective path.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9997%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 100%.
+- VMEC parity and physics gates: 97.2%.
+- Single-stage coil-only optimization: 87.0%.
+- Robust coil perturbation optimization: 70%.
+- CPU/GPU performance: 92.0%.
+- CI runtime refactor with preserved coverage/physics gates: 100% on the latest
+  pushed baseline.
+- Docs/release hygiene: 97.2%.
+- Overall free-boundary/single-stage plan: 98.25%.
+
 ### 2026-06-05 Direct-coil tridiagonal policy ablations
 
 Steps taken:

@@ -251,6 +251,124 @@ def test_same_branch_report_writer_uses_source_helper(tmp_path, monkeypatch):
     assert [record["kind"] for record in report["direction_variables"]] == ["current", "fourier_dof"]
 
 
+def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path, monkeypatch):
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jax, jnp
+
+    module = _load_example_module()
+    base_params, _metadata = module.make_circle_provider(current_scale=1.0)
+    _x0, variables = module.select_coil_variables(
+        base_params,
+        max_current_vars=1,
+        max_fourier_vars=1,
+    )
+    args = SimpleNamespace(
+        current_step=0.02,
+        dof_step=1.0e-3,
+        target_aspect=6.0,
+        target_iota=0.4,
+        residual_weight=1.0,
+        aspect_weight=1.0e-2,
+        iota_weight=1.0,
+        same_branch_report_eps=1.0e-4,
+        same_branch_report_max_iter=3,
+        vmec_max_iter=2,
+        ftol=1.0e-8,
+        jit_forces=False,
+        activate_fsq=1.0e99,
+    )
+
+    def fake_report(*_args, **_kwargs):
+        return {
+            "base": {"traces": ("synthetic-trace",)},
+            "branch_compatibility": {
+                "same_branch": True,
+                "plus": {"changed_fields": (), "max_abs_scalar_delta": 0.0, "max_rel_scalar_delta": 0.0},
+                "minus": {"changed_fields": (), "max_abs_scalar_delta": 0.0, "max_rel_scalar_delta": 0.0},
+            },
+            "values": {"base": 1.0, "plus": 1.1, "minus": 0.9, "central_fd_directional": 1000.0},
+            "objective_values": {
+                "objective": {"base": 1.0, "plus": 1.1, "minus": 0.9, "central_fd_directional": 1000.0},
+                "aspect": {"base": 6.0, "plus": 6.1, "minus": 5.9, "central_fd_directional": 0.1},
+                "lcfs_boundary_moment": {
+                    "base": 0.2,
+                    "plus": 0.21,
+                    "minus": 0.19,
+                    "central_fd_directional": 0.2,
+                },
+                "accepted_bnormal_rms": {
+                    "base": 0.3,
+                    "plus": 0.31,
+                    "minus": 0.29,
+                    "central_fd_directional": 0.3,
+                },
+            },
+            "primary_objective": "objective",
+        }
+
+    direction_x = module.same_branch_direction_from_variables(variables)
+    direction_params = module.coil_param_direction_from_variables(
+        base_params,
+        direction_x,
+        variables,
+        current_step=args.current_step,
+        dof_step=args.dof_step,
+    )
+    output_count = 3
+    jacobian = jax.tree_util.tree_map(
+        lambda leaf: jnp.zeros((output_count,) + jnp.asarray(leaf).shape),
+        direction_params,
+    )
+
+    def fake_branch_local_vector(*_args, **_kwargs):
+        return {
+            "uses_production_forward": True,
+            "differentiates_adaptive_controller": False,
+            "differentiates_run_free_boundary": False,
+            "differentiates_fixed_accepted_branch": True,
+            "scalar_keys": ("aspect", "lcfs_boundary_moment", "accepted_bnormal_rms"),
+            "replay_option_flags": {"use_stacked_step_controls": True},
+            "max_base_abs_delta": 0.0,
+            "values": {"aspect": 6.0, "lcfs_boundary_moment": 0.2, "accepted_bnormal_rms": 0.3},
+            "replay_value_map": {
+                "aspect": jnp.asarray(6.0),
+                "lcfs_boundary_moment": jnp.asarray(0.2),
+                "accepted_bnormal_rms": jnp.asarray(0.3),
+            },
+            "base_abs_delta": {"aspect": 0.0, "lcfs_boundary_moment": 0.0, "accepted_bnormal_rms": 0.0},
+            "jacobian": jacobian,
+        }
+
+    import vmec_jax.free_boundary_adjoint as freeb_adj
+
+    monkeypatch.setattr(freeb_adj, "direct_coil_same_branch_complete_solve_fd_report", fake_report)
+    monkeypatch.setattr(
+        freeb_adj,
+        "direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax",
+        fake_branch_local_vector,
+    )
+
+    path = module.write_same_branch_validation_report(
+        input_path=tmp_path / "input.direct",
+        base_params=base_params,
+        variables=variables,
+        args=args,
+        outdir=tmp_path,
+    )
+
+    report = json.loads(path.read_text())
+    vector = report["branch_local_vector_jacobian"]
+    assert vector["available"] is True
+    assert vector["uses_production_forward"] is True
+    assert vector["differentiates_adaptive_controller"] is False
+    assert vector["differentiates_run_free_boundary"] is False
+    assert vector["differentiates_fixed_accepted_branch"] is True
+    assert vector["scalar_keys"] == ["aspect", "lcfs_boundary_moment", "accepted_bnormal_rms"]
+    assert vector["replay_option_flags"]["use_stacked_step_controls"] is True
+    assert vector["max_base_abs_delta"] == pytest.approx(0.0)
+    assert vector["scalars"]["aspect"]["complete_fd_directional"] == pytest.approx(0.1)
+
+
 def test_circle_dry_run_writes_configuration_without_solves(tmp_path, monkeypatch):
     module = _load_example_module()
 
