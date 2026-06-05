@@ -9291,3 +9291,55 @@ Completion:
 - CI runtime refactor with preserved coverage/physics gates: 100% on latest
   green baseline, current head repair locally validated and pending CI.
 - Docs/release hygiene: 98.0% after README line-budget repair.
+
+### 2026-06-05 Complete-Loop QS Physical Scalar Gate Promotion
+
+Steps taken:
+
+1. Confirmed CI run `27021157692` for `8b2800f` passed all jobs, including
+   docs, build, py3.10, py3.12, physics smoke, exact shards, and the combined
+   coverage gate.
+2. Captured the combined coverage result: exact line coverage is `95.04%`.
+3. Added an optional `qs_total` physical scalar to the shared direct-coil
+   same-branch complete-solve helper.
+4. Enabled the `qs_total` gate on the current-only production-forward
+   branch-local exact test, using the same complete-solve FD triplet and
+   stacked accepted-controller replay as the aspect/Bnormal/Bsqvac gates.
+
+Results obtained:
+
+1. The current-only complete-loop same-branch custom-VJP gate with `qs_total`
+   passed locally in `73.36 s`.
+2. The gate now validates a VMEC-state quasisymmetry scalar against
+   complete-solve central finite differences under an unchanged accepted-trace
+   and residual-controller fingerprint.
+3. The contract remains conservative: this is a same-branch/fixed accepted
+   branch production-forward gate and still does not claim arbitrary adaptive
+   host-controller differentiation.
+
+Best next steps:
+
+1. Run the focused same-branch exact group with the promoted `qs_total` scalar.
+2. Commit and push the promotion if the focused group passes.
+3. Move from validation gates to the single-stage direct-coil QS example:
+   ensure the ESSOS provider path produces a clear no-mgrid optimization report
+   with branch-local validation metadata when requested.
+4. Continue the adaptive full-loop seam design only after the exact gate stays
+   green in CI.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9998% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.3%.
+- Single-stage coil-only optimization: 89.0%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 92.0%.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 98.0%.
