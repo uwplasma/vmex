@@ -668,8 +668,8 @@ history summaries.  Staged scans additionally write
 
 This single-stage free-boundary coil-optimization smoke is dependency-light
 because it uses the synthetic circular direct-coil provider.  It writes
-``input.direct_coil_phase1_smoke``, ``history.json``, ``summary.json``, and
-``wout_best_direct_coil_phase1.nc``.  The optimizer vector contains only coil
+``input.direct_coil_qs``, ``history.json``, ``summary.json``, and
+``wout_best_direct_coil_qs.nc``.  The optimizer vector contains only coil
 current and selected coil Fourier degrees of freedom; the plasma boundary is
 recomputed by the free-boundary solve at each objective evaluation.  The
 current deterministic objective contains accepted-state VMEC residual,

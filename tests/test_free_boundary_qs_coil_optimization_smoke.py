@@ -431,8 +431,8 @@ def test_circle_dry_run_writes_configuration_without_solves(tmp_path, monkeypatc
 
     assert exit_code == 0
     assert not (tmp_path / "history.json").exists()
-    assert not (tmp_path / "wout_best_direct_coil_phase1.nc").exists()
-    assert (tmp_path / "input.direct_coil_phase1_smoke").read_text() == "&INDATA\n/\n"
+    assert not (tmp_path / "wout_best_direct_coil_qs.nc").exists()
+    assert (tmp_path / "input.direct_coil_qs").read_text() == "&INDATA\n/\n"
 
     summary = json.loads((tmp_path / "summary.json").read_text())
     assert "optimizer" not in summary
@@ -570,4 +570,4 @@ def test_deterministic_circle_smoke_records_qs_terms(tmp_path, monkeypatch):
     assert summary["optimized_variables"][0]["unit_x_delta"] == pytest.approx(0.04)
     assert summary["objective_model"]["qs_weight"] == pytest.approx(4.0)
     assert summary["objective_model"]["helicity_n"] == -1
-    assert (tmp_path / "wout_best_direct_coil_phase1.nc").read_text() == "include_fsq=True\n"
+    assert (tmp_path / "wout_best_direct_coil_qs.nc").read_text() == "include_fsq=True\n"

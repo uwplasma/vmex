@@ -859,7 +859,7 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
     outdir.mkdir(parents=True, exist_ok=True)
     input_path = make_free_boundary_indata(
         args.input,
-        outdir / "input.direct_coil_phase1_smoke",
+        outdir / "input.direct_coil_qs",
         vmec_max_iter=int(args.vmec_max_iter),
         ftol=float(args.ftol),
         ns=int(args.ns),
@@ -932,7 +932,7 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
             "input": input_path,
             "outdir": outdir,
             "history_json": outdir / "history.json",
-            "best_wout": outdir / "wout_best_direct_coil_phase1.nc",
+            "best_wout": outdir / "wout_best_direct_coil_qs.nc",
         }
         write_json(outdir / "summary.json", summary)
         print(f"Dry run: wrote {outdir / 'summary.json'} without running VMEC or the optimizer.")
@@ -989,7 +989,7 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
             }
             if best is None or objective < float(best["summary"]["objective"]):
                 best = entry
-                write_wout_from_fixed_boundary_run(outdir / "wout_best_direct_coil_phase1.nc", run, include_fsq=True)
+                write_wout_from_fixed_boundary_run(outdir / "wout_best_direct_coil_qs.nc", run, include_fsq=True)
             print(
                 f"eval={eval_id:03d} objective={objective:.6e} "
                 f"residual={provisional['residual_proxy']:.3e} qs={provisional['qs_total']} "
@@ -1056,7 +1056,7 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
         },
         "best": best,
         "history_json": outdir / "history.json",
-        "best_wout": outdir / "wout_best_direct_coil_phase1.nc",
+        "best_wout": outdir / "wout_best_direct_coil_qs.nc",
     }
     if bool(args.write_same_branch_report):
         report_path = write_same_branch_validation_report(
@@ -1075,7 +1075,7 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--smoke", action="store_true", help="Use tiny defaults for a fast phase-1 smoke.")
+    parser.add_argument("--smoke", action="store_true", help="Use tiny defaults for a fast direct-coil QS smoke.")
     parser.add_argument(
         "--dry-run",
         action="store_true",
