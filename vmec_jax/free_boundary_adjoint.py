@@ -35,6 +35,7 @@ __all__ = [
     "direct_coil_accepted_trace_replay_graph_metadata",
     "direct_coil_accepted_trace_step_controls_jax",
     "direct_coil_accepted_trace_step_policy_segments",
+    "direct_coil_boundary_replay_context_for_shape",
     "direct_coil_adaptive_full_loop_same_branch_gate_report",
     "direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax",
     "direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax",
@@ -1389,11 +1390,13 @@ def free_boundary_boundary_geometry_jax(
     }
 
 
-def direct_coil_boundary_replay_context(
+def direct_coil_boundary_replay_context_for_shape(
     static: Any,
-    geometry: dict[str, Any],
+    *,
+    ntheta: int,
+    nzeta: int,
 ) -> dict[str, Any]:
-    """Build static NESTOR replay data for an accepted boundary geometry.
+    """Build shape/static NESTOR replay data for accepted-boundary replay.
 
     The returned mapping contains the VMEC quadrature weights, mode basis,
     nonsingular-kernel tables, and `nvper` value needed by
@@ -1409,8 +1412,8 @@ def direct_coil_boundary_replay_context(
         _vmec_boundary_wint,
     )
 
-    R = geometry["R"]
-    ntheta, nzeta = (int(v) for v in R.shape)
+    ntheta = int(ntheta)
+    nzeta = int(nzeta)
     wint = _vmec_boundary_wint(static=static, ntheta=ntheta, nzeta=nzeta)
     basis = _build_vmec_mode_basis(
         ntheta=ntheta,
@@ -1431,6 +1434,41 @@ def direct_coil_boundary_replay_context(
         "ntheta": ntheta,
         "nzeta": nzeta,
     }
+
+
+def direct_coil_boundary_replay_context(
+    static: Any,
+    geometry: dict[str, Any],
+) -> dict[str, Any]:
+    """Build static NESTOR replay data for an accepted boundary geometry."""
+
+    R = geometry["R"]
+    ntheta, nzeta = (int(v) for v in R.shape)
+    return direct_coil_boundary_replay_context_for_shape(
+        static,
+        ntheta=ntheta,
+        nzeta=nzeta,
+    )
+
+
+def _direct_coil_trace_boundary_shape(trace: Mapping[str, Any]) -> tuple[int, int] | None:
+    """Infer the active NESTOR boundary grid shape from accepted trace data."""
+
+    nestor_trace = trace.get("freeb_nestor_trace")
+    if isinstance(nestor_trace, Mapping):
+        for key in ("br_axis", "bp_axis", "bz_axis"):
+            axis = nestor_trace.get(key)
+            if axis is None:
+                continue
+            shape = tuple(int(value) for value in np.shape(axis))
+            if len(shape) == 2:
+                return shape
+    bsqvac = trace.get("freeb_bsqvac_half")
+    if bsqvac is not None:
+        shape = tuple(int(value) for value in np.shape(bsqvac))
+        if len(shape) == 2:
+            return shape
+    return None
 
 
 def direct_coil_boundary_bsqvac_jax(
@@ -1642,6 +1680,20 @@ def direct_coil_accepted_trace_replay_objective_jax(
         "force": jnp.asarray(0.0),
         "bsqvac": jnp.asarray(0.0),
     }
+    context_cache: dict[tuple[int, int], dict[str, Any]] = {}
+
+    def _precomputed_context_for_trace(trace: Mapping[str, Any]) -> dict[str, Any] | None:
+        shape = _direct_coil_trace_boundary_shape(trace)
+        if shape is None:
+            return None
+        if shape not in context_cache:
+            context_cache[shape] = direct_coil_boundary_replay_context_for_shape(
+                static,
+                ntheta=shape[0],
+                nzeta=shape[1],
+            )
+        return context_cache[shape]
+
     steps: list[dict[str, Any]] = []
     bsqvac_values: list[Any] = []
     for trace, reset_to_trace_pre in zip(trace_seq, reset_flags, strict=True):
@@ -1658,8 +1710,13 @@ def direct_coil_accepted_trace_replay_objective_jax(
                     static,
                     sample_nzeta=sample_nzeta,
                 )
-            with _jax_named_scope("vmec_jax.free_boundary.replay_context"):
-                context = direct_coil_boundary_replay_context(static, geometry)
+            context = _precomputed_context_for_trace(trace)
+            if context is None or tuple(int(v) for v in geometry["R"].shape) != (
+                int(context["ntheta"]),
+                int(context["nzeta"]),
+            ):
+                with _jax_named_scope("vmec_jax.free_boundary.replay_context"):
+                    context = direct_coil_boundary_replay_context(static, geometry)
             with _jax_named_scope("vmec_jax.free_boundary.direct_coil_bsqvac_replay"):
                 replay = direct_coil_boundary_bsqvac_from_trace_jax(
                     params,
@@ -2835,10 +2892,30 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     if step_controls is not None:
         controls = {**controls, "step_controls": step_controls}
 
+    context_cache: dict[tuple[int, int], dict[str, Any]] = {}
+
+    def _precomputed_context_for_trace(trace: Mapping[str, Any]) -> dict[str, Any] | None:
+        shape = _direct_coil_trace_boundary_shape(trace)
+        if shape is None:
+            return None
+        if shape not in context_cache:
+            context_cache[shape] = direct_coil_boundary_replay_context_for_shape(
+                static,
+                ntheta=shape[0],
+                nzeta=shape[1],
+            )
+        return context_cache[shape]
+
     def _step_control(control: Mapping[str, Any], key: str) -> Any:
         return control["step_controls"][key] if key in control.get("step_controls", {}) else None
 
-    def _branch_for_trace(trace: dict[str, Any], state: Any, coil_params: Any, control: dict[str, Any]):
+    def _branch_for_trace(
+        trace: dict[str, Any],
+        state: Any,
+        coil_params: Any,
+        control: dict[str, Any],
+        replay_context: dict[str, Any] | None,
+    ):
         reset_to_trace_pre = jnp.asarray(control["reset_to_trace_pre"], dtype=bool)
         state_in = jax.lax.cond(
             reset_to_trace_pre,
@@ -2854,8 +2931,13 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                     static,
                     sample_nzeta=sample_nzeta,
                 )
-            with _jax_named_scope("vmec_jax.free_boundary.replay_context"):
-                context = direct_coil_boundary_replay_context(static, geometry)
+            context = replay_context
+            if context is None or tuple(int(v) for v in geometry["R"].shape) != (
+                int(context["ntheta"]),
+                int(context["nzeta"]),
+            ):
+                with _jax_named_scope("vmec_jax.free_boundary.replay_context"):
+                    context = direct_coil_boundary_replay_context(static, geometry)
             nestor_axes = _step_control(control, "freeb_nestor_axes")
             if nestor_axes is None:
                 with _jax_named_scope("vmec_jax.free_boundary.direct_coil_bsqvac_replay"):
@@ -2930,6 +3012,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
         state: Any,
         coil_params: Any,
         control: dict[str, Any],
+        replay_context: dict[str, Any] | None,
     ):
         if "step_preconditioner" not in control:
             raise ValueError("stacked step replay requires stackable preconditioner controls")
@@ -2951,8 +3034,13 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                     static,
                     sample_nzeta=sample_nzeta,
                 )
-            with _jax_named_scope("vmec_jax.free_boundary.replay_context"):
-                context = direct_coil_boundary_replay_context(static, geometry)
+            context = replay_context
+            if context is None or tuple(int(v) for v in geometry["R"].shape) != (
+                int(context["ntheta"]),
+                int(context["nzeta"]),
+            ):
+                with _jax_named_scope("vmec_jax.free_boundary.replay_context"):
+                    context = direct_coil_boundary_replay_context(static, geometry)
             nestor_axes = _step_control(control, "freeb_nestor_axes")
             if nestor_axes is None:
                 with _jax_named_scope("vmec_jax.free_boundary.direct_coil_bsqvac_replay"):
@@ -3085,14 +3173,27 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     ):
         if bool(stacked_step_controls):
             representative_trace = segment_traces[0]
+            representative_context = _precomputed_context_for_trace(representative_trace)
 
             def _step_fn(state, coil_params, control):
                 if bool(accepted_only):
-                    return _branch_from_stacked_controls(representative_trace, state, coil_params, control)
+                    return _branch_from_stacked_controls(
+                        representative_trace,
+                        state,
+                        coil_params,
+                        control,
+                        representative_context,
+                    )
                 do_propose = jnp.asarray(control["accept"], dtype=bool)
 
                 def _propose(_unused):
-                    return _branch_from_stacked_controls(representative_trace, state, coil_params, control)
+                    return _branch_from_stacked_controls(
+                        representative_trace,
+                        state,
+                        coil_params,
+                        control,
+                        representative_context,
+                    )
 
                 def _skip(_unused):
                     return state, {
@@ -3109,11 +3210,12 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
 
         branches = tuple(
             (
-                lambda operand, trace=trace: _branch_for_trace(
+                lambda operand, trace=trace, replay_context=_precomputed_context_for_trace(trace): _branch_for_trace(
                     trace,
                     operand[0],
                     operand[1],
                     operand[2],
+                    replay_context,
                 )
             )
             for trace in segment_traces
