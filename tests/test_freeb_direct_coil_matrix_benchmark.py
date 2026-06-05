@@ -330,6 +330,8 @@ def test_child_specs_can_add_host_policy_ablation_rows(tmp_path) -> None:
         "direct_solve_jit_forces_no_residual_metrics",
         "direct_solve_jit_forces_no_fsq1_norms",
         "direct_solve_jit_forces_no_profile_setup",
+        "direct_solve_jit_forces_tridi_precompute",
+        "direct_solve_jit_forces_tridi_lax",
         "direct_solve_jit_forces_host_policies_off",
         "gradient",
     ]
@@ -343,6 +345,8 @@ def test_child_specs_can_add_host_policy_ablation_rows(tmp_path) -> None:
     }
     assert ablations["direct_solve_jit_forces_no_fsq1_norms"][2] == {"VMEC_JAX_HOST_FSQ1_NORMS": "0"}
     assert ablations["direct_solve_jit_forces_no_profile_setup"][2] == {"VMEC_JAX_HOST_PROFILE_SETUP": "0"}
+    assert ablations["direct_solve_jit_forces_tridi_precompute"][2] == {"VMEC_JAX_TRIDI_PRECOMPUTE": "1"}
+    assert ablations["direct_solve_jit_forces_tridi_lax"][2] == {"VMEC_JAX_TRIDI_SOLVE": "1"}
     assert ablations["direct_solve_jit_forces_host_policies_off"][2] == {
         "VMEC_JAX_HOST_RESIDUAL_METRICS": "0",
         "VMEC_JAX_HOST_FSQ1_NORMS": "0",
