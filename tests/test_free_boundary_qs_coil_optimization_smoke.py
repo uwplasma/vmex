@@ -457,6 +457,9 @@ def test_circle_dry_run_writes_configuration_without_solves(tmp_path, monkeypatc
     assert any("full-loop" in limitation for limitation in summary["single_stage_limitations"])
     assert summary["provider"]["provider"] == "circle"
     assert summary["baseline_coils"]["n_base_coils"] == 1
+    assert summary["vmec_config"]["external_field_provider_kind"] == "direct_coils"
+    assert summary["vmec_config"]["mgrid_file"] == "DIRECT_COILS"
+    assert summary["vmec_config"]["uses_generated_mgrid"] is False
     assert summary["vmec_config"]["vmec_max_iter"] == 2
     assert summary["vmec_config"]["jit_forces"] is True
     assert [record["kind"] for record in summary["optimized_variables"]] == ["current", "fourier_dof"]
@@ -570,6 +573,9 @@ def test_essos_dry_run_writes_direct_coil_configuration_without_mgrid(tmp_path, 
     assert summary["baseline_coils"]["n_base_coils"] == 1
     assert summary["vmec_config"]["generated_input"].endswith("input.direct_coil_qs")
     assert summary["vmec_config"]["generated_input"] == str(generated_input)
+    assert summary["vmec_config"]["external_field_provider_kind"] == "direct_coils"
+    assert summary["vmec_config"]["mgrid_file"] == "DIRECT_COILS"
+    assert summary["vmec_config"]["uses_generated_mgrid"] is False
     assert "generated_mgrid" not in summary["vmec_config"]
     assert [record["kind"] for record in summary["optimized_variables"]] == ["current", "fourier_dof"]
     assert all(record["kind"] != "boundary" for record in summary["optimized_variables"])
