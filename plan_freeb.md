@@ -14,13 +14,15 @@ Date opened: 2026-05-24
 
 Last updated: 2026-06-05 on `main` with branch-local vector gates,
 `DMerc`/Glasser `D_R` gradient checks, CI runtime trimming, direct-coil
-benchmark policy ablations, Fourier-geometry accepted-vacuum scalar gates, and
-the accelerator residual-metric default change. The latest fully green pushed
-main is `d541550`, `perf: keep accelerator residual metrics on device`, which
-passed GitHub Actions run `27014825015`, including docs, build, console smoke,
+benchmark policy ablations, Fourier-geometry accepted-vacuum scalar gates,
+VMEC-state `qs_total` same-branch complete-loop validation, and ESSOS
+direct-coil no-`mgrid` dry-run validation. The latest fully green pushed main
+is `b769e35`, `Validate direct-coil QS scalar same-branch gate`, which passed
+GitHub Actions run `27021796983`, including docs, build, console smoke,
 physics smoke, py3.10, py3.12, slow-physics coverage, exact free-boundary
 coverage shards, core py3.11 coverage shards, and the combined 95% coverage
-gate.
+gate. The current pushed head is `b78a610`, `Record direct-coil backend in QS
+summary`, with GitHub Actions run `27022275051` pending.
 
 The latest green main splits required py3.11 coverage into core, slow-physics,
 and exact shards while keeping a combined 95% coverage threshold, preserves the
@@ -33,10 +35,11 @@ Node-24-compatible v7 artifact actions and `codecov/codecov-action@v6`.
 The phase-2 evidence includes reset-aware full accepted-trace replay, stacked
 accepted/rejected controller segment gates, current-only/Fourier-only
 same-branch complete-solve AD-vs-FD gates, segmented controller custom-VJP
-complete-solve AD-vs-FD gates, an aspect-ratio physical-scalar same-branch
-complete-solve gate, accepted `Bnormal` and `Bsqvac` RMS physical-scalar
-same-branch gates, explicit tridiagonal-policy coverage, VMEC2000
-generated-`mgrid` WOUT-quality classification, and direct/generated
+complete-solve AD-vs-FD gates, aspect-ratio and VMEC-state `qs_total`
+physical-scalar same-branch complete-solve gates, accepted `Bnormal` and
+`Bsqvac` RMS physical-scalar same-branch gates, explicit tridiagonal-policy
+coverage, VMEC2000 generated-`mgrid` WOUT-quality classification, and
+direct/generated
 boundary-domain checks. The code still does not claim a production full
 adaptive nonlinear `run_free_boundary` exact adjoint.
 
@@ -9373,13 +9376,18 @@ Results obtained:
    circle and optional ESSOS provider configuration lanes.
 4. The dry-run summaries now make the no-mgrid direct-coil backend explicit for
    downstream scripts and reviewer artifacts.
+5. The real local ESSOS dry-run path also worked with
+   `/Users/rogeriojorge/local/ESSOS_mgrid_pr`: it wrote
+   `/tmp/vmec_jax_direct_coil_qs_essos_dry_run/summary.json` with
+   `provider=essos`, `external_field_provider_kind=direct_coils`,
+   `mgrid_file=DIRECT_COILS`, `uses_generated_mgrid=false`, and only
+   current/Fourier coil optimization variables.
 
 Best next steps:
 
-1. Run Sphinx and `git diff --check` for the docs/test update.
-2. Commit and push the ESSOS dry-run validation update after focused checks
-   pass.
-3. Watch the current `b769e35` and follow-up CI runs to completion.
+1. Run Sphinx and `git diff --check` for the status wording update.
+2. Commit and push the status/docs refresh after focused checks pass.
+3. Watch the current `b78a610` CI run and the follow-up run to completion.
 4. Promote the next milestone only after CI is green: Boozer-space QS
    objective validation or a still-explicit same-branch production full-loop
    seam, without overclaiming adaptive host-branch differentiation.

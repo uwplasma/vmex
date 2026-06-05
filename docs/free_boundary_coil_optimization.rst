@@ -58,7 +58,8 @@ under ``results/free_boundary_essos_mgrid_forward/`` and
 
 Boozer/QS diagnostics are the intended promotion target for this lane, but the
 current implementation keeps the single-stage optimization example on a cheap
-VMEC-residual/aspect/iota proxy until complete full-loop gradient checks pass.
+VMEC residual plus VMEC-state ``qs_total``, aspect, and mean-iota proxy until
+complete Boozer/QS full-loop gradient checks pass.
 
 Reviewer-facing validation plots for this lane are committed only as compressed
 summary panels. Generated WOUTs, magnetic grids, PDFs, and full-resolution raw
@@ -228,7 +229,8 @@ The reviewer-facing status of this ladder is:
    * - 8
      - Open
      - The phase-1 coil-only optimization example currently uses a cheap
-       residual/aspect/iota proxy instead of Boozer/QS gradients.
+       VMEC residual plus VMEC-state ``qs_total``, aspect, and mean-iota proxy
+       instead of Boozer/QS gradients.
      - Add Boozer/QS diagnostics to the complete-solve objective and validate
        coil-current and coil-geometry gradients against finite differences.
 
@@ -513,9 +515,10 @@ single-stage coil optimizer:
   accepted-trace/controller custom-VJP derivatives against complete-solve
   finite differences only after rejecting accepted-branch fingerprint changes.
 - Branch-local production-forward replay gates now cover aspect ratio plus
-  accepted ``Bnormal`` and ``Bsqvac`` RMS physical scalars, with scalar/vector
-  coverage for current and Fourier geometry representatives. This validates a
-  fixed accepted branch, not arbitrary adaptive host-controller branch changes.
+  VMEC-state ``qs_total`` plus accepted ``Bnormal`` and ``Bsqvac`` RMS
+  physical scalars, with scalar/vector coverage for current and Fourier
+  geometry representatives. This validates a fixed accepted branch, not
+  arbitrary adaptive host-controller branch changes.
 - The phase-2 full-loop refactor target has JAX-visible masked and segmented
   nonlinear-controller primitives with AD-vs-FD direct-coil gradient coverage,
   plus accepted-state replay gates for coil and VMEC-state derivatives. This
@@ -526,8 +529,8 @@ single-stage coil optimizer:
   ``bsqvac`` scales quadratically. They do not yet validate a full accepted
   equilibrium derivative.
 - The phase-1 optimization example is coil-only, but it still uses a cheap
-  VMEC residual/aspect/iota proxy. Boozer/QS objectives and production
-  full-solve adjoints are next-step work.
+  VMEC residual plus VMEC-state ``qs_total``, aspect, and mean-iota proxy.
+  Boozer/QS objectives and production full-solve adjoints are next-step work.
 - The experimental JAX NESTOR driver path is opt-in and guarded. It validates
   both LASYM full-grid and stellarator-symmetric reduced-grid samples, but the
   host bridge remains the default production path until complete-solve adjoints
