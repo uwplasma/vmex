@@ -9498,15 +9498,26 @@ Results obtained:
    branch-local replay value agreement at `5.99e-15` and directional error
    `1.46e-11`, but still took about one minute and emitted XLA warnings. This
    remains a deeper opt-in validation path, not a default artifact.
+8. CI run `27023816456` for commit `01b0b15` completed successfully,
+   including docs, physics smoke, exact shards, and the combined coverage gate.
+9. The real ESSOS direct-coil coil-only QS smoke with default
+   `--write-same-branch-report` finished in `14.76 s` with no XLA warning
+   output, confirmed `provider=essos`, `external_field_provider_kind=direct_coils`,
+   `mgrid_file=DIRECT_COILS`, `uses_generated_mgrid=false`, and wrote a
+   branch-compatible same-branch report with mode `none`.
+10. The bounded ESSOS objective value was `1.3736419364591923`, with
+    `qs_total=0.821897583971626`, aspect `6.007369766853995`, and mean iota
+    `0.25929877760776726`. The report's complete-solve FD objective slope was
+    `0.26459703834635917`.
 
 Best next steps:
 
-1. Run the focused docs build and a bounded free-boundary exact shard before
-   committing this report-mode change.
-2. Commit and push the report-mode change, then watch CI.
-3. Continue the phase-2 production-adjacent seam by reducing cold branch-local
+1. Commit and push this plan update.
+2. Continue the phase-2 production-adjacent seam by reducing cold branch-local
    replay compilation cost, but keep production claims conservative until the
    adaptive full-loop branch seam is promoted.
+3. Start the next single-stage optimization increment only after preserving the
+   current green CI baseline.
 
 Need from user:
 
