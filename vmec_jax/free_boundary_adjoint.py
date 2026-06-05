@@ -3874,6 +3874,16 @@ def direct_coil_same_branch_controller_scalars_custom_vjp_report(
     }
     if replay_kwargs:
         replay_options.update(replay_kwargs)
+    replay_traces = tuple(replay_options.get("traces", traces))
+    if not replay_traces:
+        raise ValueError("replay traces must contain at least one accepted trace")
+    replay_branch_metadata = direct_coil_accepted_trace_branch_metadata(
+        replay_traces,
+        accept_mask=replay_options.get("accept_mask"),
+        done_mask=replay_options.get("done_mask"),
+        max_steps=replay_options.get("max_steps"),
+        json_safe=False,
+    )
 
     scalar_fns = tuple(
         (lambda replay, fn=fn: fn(replay, base))
@@ -3883,7 +3893,7 @@ def direct_coil_same_branch_controller_scalars_custom_vjp_report(
     def _controller_scalars(coil_params):
         return direct_coil_accepted_trace_controller_custom_vjp_scalars_jax(
             coil_params,
-            traces[0]["state_pre"],
+            replay_traces[0]["state_pre"],
             scalar_fns=scalar_fns,
             **replay_options,
         )
@@ -3959,6 +3969,7 @@ def direct_coil_same_branch_controller_scalars_custom_vjp_report(
             "use_stacked_step_controls": bool(replay_options.get("use_stacked_step_controls", False)),
             "use_accepted_only_fast_path": bool(replay_options.get("use_accepted_only_fast_path", True)),
         },
+        "replay_branch_metadata": replay_branch_metadata,
         "values": values,
         "jacobian": jacobian,
         "exact_directionals": exact_directionals,
@@ -4093,6 +4104,7 @@ def direct_coil_adaptive_full_loop_same_branch_gate_report(
     *,
     scalar_keys: tuple[str, ...] | list[str] | None = None,
     require_stacked_step_controls: bool = True,
+    require_fixed_rejected_controller_slot: bool = False,
     json_safe: bool = False,
 ) -> dict[str, Any]:
     """Report whether complete-loop FD is compatible with stacked replay AD.
@@ -4117,6 +4129,18 @@ def direct_coil_adaptive_full_loop_same_branch_gate_report(
     used_stacked_step_controls = bool(replay_option_flags.get("use_stacked_step_controls", False))
     if bool(require_stacked_step_controls) and not used_stacked_step_controls:
         errors.append("stacked step-control replay was not used")
+    replay_branch_metadata = scalars_report.get("replay_branch_metadata", {})
+    fixed_rejected_controller_slots = 0
+    if isinstance(replay_branch_metadata, Mapping):
+        rejected_mask = replay_branch_metadata.get("rejected_mask")
+        if rejected_mask is not None:
+            fixed_rejected_controller_slots = int(np.count_nonzero(np.asarray(rejected_mask, dtype=bool)))
+    fixed_rejected_controller_slot_present = fixed_rejected_controller_slots > 0
+    if bool(require_fixed_rejected_controller_slot):
+        if not fixed_rejected_controller_slot_present:
+            errors.append("fixed rejected controller slot was not replayed")
+        if bool(replay_option_flags.get("use_accepted_only_fast_path", True)):
+            errors.append("accepted-only fast path was used for a rejected-slot replay gate")
 
     labels = ("base", "plus", "minus")
     step_policy_signatures: dict[str, tuple[Any, ...]] = {}
@@ -4153,7 +4177,11 @@ def direct_coil_adaptive_full_loop_same_branch_gate_report(
         "same_stacked_step_policy_branch": bool(same_stacked_step_policy_branch),
         "requires_stacked_step_controls": bool(require_stacked_step_controls),
         "used_stacked_step_controls": used_stacked_step_controls,
+        "requires_fixed_rejected_controller_slot": bool(require_fixed_rejected_controller_slot),
+        "fixed_rejected_controller_slot_present": bool(fixed_rejected_controller_slot_present),
+        "fixed_rejected_controller_slots": int(fixed_rejected_controller_slots),
         "replay_option_flags": replay_option_flags,
+        "replay_branch_metadata": replay_branch_metadata,
         "scalar_keys": physical_gate.get("scalar_keys", ()),
         "physical_scalar_gate": physical_gate,
         "step_policy_segments": step_policy_summaries,
