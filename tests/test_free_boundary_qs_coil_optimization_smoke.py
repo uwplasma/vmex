@@ -405,7 +405,7 @@ def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path
 
 def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path, monkeypatch):
     pytest.importorskip("jax")
-    from vmec_jax._compat import jax, jnp
+    from vmec_jax._compat import jnp
 
     module = _load_example_module()
     base_params, _metadata = module.make_circle_provider(current_scale=1.0)
@@ -474,21 +474,18 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
         current_step=args.current_step,
         dof_step=args.dof_step,
     )
-    output_count = 4
-    jacobian = jax.tree_util.tree_map(
-        lambda leaf: jnp.zeros((output_count,) + jnp.asarray(leaf).shape),
-        direction_params,
-    )
-
     def fake_branch_local_vector(*_args, **kwargs):
         assert kwargs["replay_ad_mode"] == "direct"
         assert kwargs["include_trace_replay_diagnostics"] is False
+        assert kwargs["direction_params"] is not None
+        assert kwargs["direction_params"].n_segments == direction_params.n_segments
         return {
             "uses_production_forward": True,
             "differentiates_adaptive_controller": False,
             "differentiates_run_free_boundary": False,
             "differentiates_fixed_accepted_branch": True,
             "replay_ad_mode": "direct",
+            "derivative_mode": "directional_jvp",
             "scalar_keys": ("aspect", "qs_total", "lcfs_boundary_moment", "accepted_bnormal_rms"),
             "replay_option_flags": {"use_stacked_step_controls": True},
             "replay_graph_metadata": {
@@ -515,11 +512,18 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
                 "lcfs_boundary_moment": 0.0,
                 "accepted_bnormal_rms": 0.0,
             },
-            "jacobian": jacobian,
+            "jacobian": None,
+            "directional_derivatives": {
+                "aspect": jnp.asarray(0.1),
+                "qs_total": jnp.asarray(0.4),
+                "lcfs_boundary_moment": jnp.asarray(0.2),
+                "accepted_bnormal_rms": jnp.asarray(0.3),
+            },
             "timings": {
                 "production_scalar_eval_wall_s": 0.01,
-                "replay_vjp_wall_s": 0.02,
-                "replay_pullbacks_wall_s": 0.03,
+                "replay_jvp_wall_s": 0.02,
+                "replay_vjp_wall_s": 0.0,
+                "replay_pullbacks_wall_s": 0.0,
                 "jacobian_stack_ready_s": 0.004,
                 "total_wall_s": 0.06,
             },
@@ -550,6 +554,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
     assert vector["differentiates_run_free_boundary"] is False
     assert vector["differentiates_fixed_accepted_branch"] is True
     assert vector["replay_ad_mode"] == "direct"
+    assert vector["derivative_mode"] == "directional_jvp"
     assert vector["scalar_keys"] == ["aspect", "qs_total", "lcfs_boundary_moment", "accepted_bnormal_rms"]
     assert vector["replay_option_flags"]["use_stacked_step_controls"] is True
     assert vector["replay_graph_metadata"]["active_free_boundary_replay_steps"] == 2
@@ -558,8 +563,9 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
     assert vector["scalars"]["qs_total"]["complete_fd_directional"] == pytest.approx(0.4)
     assert report["timings"]["complete_solve_fd_wall_s"] >= 0.0
     assert report["timings"]["branch_local_vector_wall_s"] >= 0.0
-    assert vector["timings"]["replay_pullbacks_wall_s"] == pytest.approx(0.03)
-    assert report["timings"]["branch_local_vector_replay_pullbacks_wall_s"] == pytest.approx(0.03)
+    assert vector["timings"]["replay_jvp_wall_s"] == pytest.approx(0.02)
+    assert report["timings"]["branch_local_vector_replay_jvp_wall_s"] == pytest.approx(0.02)
+    assert report["timings"]["branch_local_vector_replay_pullbacks_wall_s"] == pytest.approx(0.0)
     assert "branch_local_scalar_wall_s" not in report["timings"]
 
 

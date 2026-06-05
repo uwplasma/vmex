@@ -4692,6 +4692,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
     input_path: Any | None = None,
     params: Any | None = None,
     *,
+    direction_params: Any | None = None,
     scalar_fn: Any,
     replay_scalar_fns: Mapping[str, Any],
     scalar_keys: tuple[str, ...] | list[str] | None = None,
@@ -4713,6 +4714,12 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
     a vector-output custom-VJP seam.  The contract is intentionally narrow: it
     differentiates direct-coil parameters through the saved accepted branch and
     does not differentiate adaptive host-controller branch changes.
+
+    If ``direction_params`` is supplied, the helper computes only the
+    directional derivatives ``J @ direction_params`` using ``jax.jvp`` instead
+    of materializing the full Jacobian.  This is the fast path for production
+    validation reports that compare against one complete-solve central
+    finite-difference direction.
 
     ``scalar_fn(payload)`` must return a mapping of production scalar values.
     Callers that already have the production base values can pass
@@ -4810,6 +4817,8 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
     ad_mode = str(replay_ad_mode).strip().lower()
     if ad_mode not in {"direct", "custom_vjp"}:
         raise ValueError("replay_ad_mode must be 'direct' or 'custom_vjp'")
+    if direction_params is not None and ad_mode != "direct":
+        raise ValueError("direction_params directional mode requires replay_ad_mode='direct'")
 
     def _replay_scalars_direct(coil_params):
         replay = direct_coil_accepted_trace_controller_replay_objective_jax(
@@ -4829,34 +4838,61 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
 
     _replay_scalars = _replay_scalars_direct if ad_mode == "direct" else _replay_scalars_custom_vjp
 
-    t0 = time.perf_counter()
-    replay_values, pullback = jax.vjp(_replay_scalars, params)
-    timings["replay_vjp_dispatch_s"] = float(time.perf_counter() - t0)
-    t0 = time.perf_counter()
-    replay_values = _block_until_ready_for_timing(replay_values)
-    timings["replay_vjp_ready_s"] = float(time.perf_counter() - t0)
-    basis = jnp.eye(len(keys), dtype=jnp.asarray(replay_values).dtype)
-    t0 = time.perf_counter()
-    jacobian = _pytree_pullback_basis_jax(pullback, basis)
-    timings["replay_pullbacks_dispatch_s"] = float(time.perf_counter() - t0)
-    t0 = time.perf_counter()
-    jacobian = _block_until_ready_for_timing(jacobian)
-    timings["replay_pullbacks_ready_s"] = float(time.perf_counter() - t0)
-    timings["replay_vjp_wall_s"] = timings["replay_vjp_dispatch_s"] + timings["replay_vjp_ready_s"]
-    timings["replay_pullbacks_wall_s"] = (
-        timings["replay_pullbacks_dispatch_s"] + timings["replay_pullbacks_ready_s"]
-    )
-    # Pullback readiness already materialized the full Jacobian pytree.
-    # Keep the timing key for report compatibility without re-walking it.
-    timings["jacobian_stack_ready_s"] = 0.0
-    basis_gradients = _pytree_unstack_leading_axis_jax(jacobian, len(keys))
-    gradients = {key: basis_gradients[index] for index, key in enumerate(keys)}
+    derivative_mode = "full_jacobian_vjp"
+    jacobian = None
+    gradients: dict[str, Any] = {}
+    directional_values = None
+    if direction_params is not None:
+        derivative_mode = "directional_jvp"
+        t0 = time.perf_counter()
+        replay_values, directional_values = jax.jvp(
+            _replay_scalars,
+            (params,),
+            (direction_params,),
+        )
+        timings["replay_jvp_dispatch_s"] = float(time.perf_counter() - t0)
+        t0 = time.perf_counter()
+        replay_values, directional_values = _block_until_ready_for_timing((replay_values, directional_values))
+        timings["replay_jvp_ready_s"] = float(time.perf_counter() - t0)
+        timings["replay_jvp_wall_s"] = timings["replay_jvp_dispatch_s"] + timings["replay_jvp_ready_s"]
+        # Compatibility timing keys: no full VJP/Jacobian was built.
+        timings["replay_vjp_wall_s"] = 0.0
+        timings["replay_pullbacks_wall_s"] = 0.0
+        timings["jacobian_stack_ready_s"] = 0.0
+    else:
+        t0 = time.perf_counter()
+        replay_values, pullback = jax.vjp(_replay_scalars, params)
+        timings["replay_vjp_dispatch_s"] = float(time.perf_counter() - t0)
+        t0 = time.perf_counter()
+        replay_values = _block_until_ready_for_timing(replay_values)
+        timings["replay_vjp_ready_s"] = float(time.perf_counter() - t0)
+        basis = jnp.eye(len(keys), dtype=jnp.asarray(replay_values).dtype)
+        t0 = time.perf_counter()
+        jacobian = _pytree_pullback_basis_jax(pullback, basis)
+        timings["replay_pullbacks_dispatch_s"] = float(time.perf_counter() - t0)
+        t0 = time.perf_counter()
+        jacobian = _block_until_ready_for_timing(jacobian)
+        timings["replay_pullbacks_ready_s"] = float(time.perf_counter() - t0)
+        timings["replay_vjp_wall_s"] = timings["replay_vjp_dispatch_s"] + timings["replay_vjp_ready_s"]
+        timings["replay_pullbacks_wall_s"] = (
+            timings["replay_pullbacks_dispatch_s"] + timings["replay_pullbacks_ready_s"]
+        )
+        # Pullback readiness already materialized the full Jacobian pytree.
+        # Keep the timing key for report compatibility without re-walking it.
+        timings["jacobian_stack_ready_s"] = 0.0
+        basis_gradients = _pytree_unstack_leading_axis_jax(jacobian, len(keys))
+        gradients = {key: basis_gradients[index] for index, key in enumerate(keys)}
     values = {key: float(all_values[key]) for key in keys}
     replay_value_map = {key: replay_values[index] for index, key in enumerate(keys)}
     base_abs_delta = {
         key: abs(float(np.asarray(replay_values[index], dtype=float)) - float(values[key]))
         for index, key in enumerate(keys)
     }
+    directional_derivatives = (
+        None
+        if directional_values is None
+        else {key: directional_values[index] for index, key in enumerate(keys)}
+    )
     t0 = time.perf_counter()
     if bool(include_trace_replay_diagnostics):
         diagnostics = free_boundary_adjoint_trace_replay_diagnostics(traces)
@@ -4876,6 +4912,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
         "differentiates_run_free_boundary": False,
         "differentiates_fixed_accepted_branch": True,
         "replay_ad_mode": ad_mode,
+        "derivative_mode": derivative_mode,
         "scalar_keys": keys,
         "values": values,
         "all_values": all_values,
@@ -4886,6 +4923,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
         "max_base_abs_delta": max(base_abs_delta.values()) if base_abs_delta else 0.0,
         "jacobian": jacobian,
         "grads": gradients,
+        "directional_derivatives": directional_derivatives,
         "payload": payload,
         "timings": timings,
         "trace_replay_diagnostics": diagnostics,
