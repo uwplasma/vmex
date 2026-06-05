@@ -312,6 +312,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
             "objective_values": {
                 "objective": {"base": 1.0, "plus": 1.1, "minus": 0.9, "central_fd_directional": 1000.0},
                 "aspect": {"base": 6.0, "plus": 6.1, "minus": 5.9, "central_fd_directional": 0.1},
+                "qs_total": {"base": 0.4, "plus": 0.42, "minus": 0.38, "central_fd_directional": 0.4},
                 "lcfs_boundary_moment": {
                     "base": 0.2,
                     "plus": 0.21,
@@ -336,7 +337,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
         current_step=args.current_step,
         dof_step=args.dof_step,
     )
-    output_count = 3
+    output_count = 4
     jacobian = jax.tree_util.tree_map(
         lambda leaf: jnp.zeros((output_count,) + jnp.asarray(leaf).shape),
         direction_params,
@@ -348,16 +349,27 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
             "differentiates_adaptive_controller": False,
             "differentiates_run_free_boundary": False,
             "differentiates_fixed_accepted_branch": True,
-            "scalar_keys": ("aspect", "lcfs_boundary_moment", "accepted_bnormal_rms"),
+            "scalar_keys": ("aspect", "qs_total", "lcfs_boundary_moment", "accepted_bnormal_rms"),
             "replay_option_flags": {"use_stacked_step_controls": True},
             "max_base_abs_delta": 0.0,
-            "values": {"aspect": 6.0, "lcfs_boundary_moment": 0.2, "accepted_bnormal_rms": 0.3},
+            "values": {
+                "aspect": 6.0,
+                "qs_total": 0.4,
+                "lcfs_boundary_moment": 0.2,
+                "accepted_bnormal_rms": 0.3,
+            },
             "replay_value_map": {
                 "aspect": jnp.asarray(6.0),
+                "qs_total": jnp.asarray(0.4),
                 "lcfs_boundary_moment": jnp.asarray(0.2),
                 "accepted_bnormal_rms": jnp.asarray(0.3),
             },
-            "base_abs_delta": {"aspect": 0.0, "lcfs_boundary_moment": 0.0, "accepted_bnormal_rms": 0.0},
+            "base_abs_delta": {
+                "aspect": 0.0,
+                "qs_total": 0.0,
+                "lcfs_boundary_moment": 0.0,
+                "accepted_bnormal_rms": 0.0,
+            },
             "jacobian": jacobian,
         }
 
@@ -385,10 +397,11 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
     assert vector["differentiates_adaptive_controller"] is False
     assert vector["differentiates_run_free_boundary"] is False
     assert vector["differentiates_fixed_accepted_branch"] is True
-    assert vector["scalar_keys"] == ["aspect", "lcfs_boundary_moment", "accepted_bnormal_rms"]
+    assert vector["scalar_keys"] == ["aspect", "qs_total", "lcfs_boundary_moment", "accepted_bnormal_rms"]
     assert vector["replay_option_flags"]["use_stacked_step_controls"] is True
     assert vector["max_base_abs_delta"] == pytest.approx(0.0)
     assert vector["scalars"]["aspect"]["complete_fd_directional"] == pytest.approx(0.1)
+    assert vector["scalars"]["qs_total"]["complete_fd_directional"] == pytest.approx(0.4)
 
 
 def test_circle_dry_run_writes_configuration_without_solves(tmp_path, monkeypatch):

@@ -123,11 +123,8 @@ vmec input.cth_like_free_bdy_lasym_small
 
 ### Direct-Coil Free-Boundary Research Lane
 
-The direct-coil free-boundary research lane adds a JAX-native external-field
-provider so free-boundary solves can sample differentiable Biot-Savart coils
-directly, while the existing `mgrid` path remains the VMEC2000-compatibility
-backend. Generated WOUTs and magnetic grids stay out of git; only compressed
-summary panels are committed.
+The direct-coil free-boundary lane samples differentiable Biot-Savart coils
+directly while keeping the existing `mgrid` path for VMEC2000 compatibility.
 
 ```bash
 python examples/free_boundary_direct_coils_forward.py \
@@ -135,42 +132,8 @@ python examples/free_boundary_direct_coils_forward.py \
   --outdir results/free_boundary_direct_coils_forward
 ```
 
-With ESSOS coils, the direct path uses `MGRID_FILE='DIRECT_COILS'` and never
-writes or reads an `mgrid`:
-
-```bash
-export ESSOS_ROOT=/path/to/ESSOS_mgrid_pr
-export ESSOS_INPUT_DIR=$ESSOS_ROOT/examples/input_files
-PYTHONPATH=.:$ESSOS_ROOT:$PYTHONPATH \
-  python examples/free_boundary_essos_direct_forward.py \
-  --max-iter 10 \
-  --outdir results/free_boundary_essos_direct_forward
-```
-
-For a deterministic single-stage coil-only QS validation run, optimize direct
-coil currents/Fourier coefficients while the plasma boundary is recomputed by
-`run_free_boundary` at every objective evaluation:
-
-```bash
-python examples/optimization/free_boundary_QS_coil_optimization.py \
-  --smoke \
-  --provider circle \
-  --helicity-m 1 \
-  --helicity-n 0 \
-  --max-evals 1 \
-  --outdir results/free_boundary_QS_coil_optimization_circle_smoke
-```
-
-Use `--provider essos` in the same script, with `ESSOS_ROOT` and
-`ESSOS_INPUT_DIR` set as above, to optimize the ESSOS coil currents/Fourier
-coefficients directly without generating an `mgrid`.
-
-With ESSOS on `PYTHONPATH`, `examples/free_boundary_essos_coils_beta_scan.py`
-runs finite-pressure coil beta scans with the SIMSOPT/Landreman-style
-`e*(ne*Te+ni*Ti)` pressure profile. Use `--resume-existing` for completed
-pressure-continuation seeds. The DIII-D and LP-QA panels annotate LCFS shifts
-and LCFS `|B|` changes; adjoint limits and parity status are in
-`docs/free_boundary_coil_optimization.rst`.
+ESSOS direct-coil, generated-mgrid, finite-beta scan, and coil-only QS
+optimization commands are documented in `docs/free_boundary_coil_optimization.rst`.
 
 ![DIII-D finite-beta mgrid free-boundary scan](docs/_static/figures/freeb_diiid_mgrid_beta_ns101_panel.png)
 
