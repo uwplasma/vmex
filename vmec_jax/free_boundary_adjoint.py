@@ -4104,6 +4104,39 @@ def _pytree_batched_directional_vdot_jax(jacobian_tree: Any, direction: Any, n_o
     return total
 
 
+def _pytree_pullback_basis_jax(pullback: Any, basis: Any) -> Any:
+    """Apply a VJP pullback to all basis cotangents with one batched transform.
+
+    ``jax.vjp`` returns a pullback that accepts one output cotangent.  Several
+    free-boundary validation paths need one gradient per scalar output.  Calling
+    the pullback in a Python loop is correct but introduces avoidable host
+    overhead and can inflate dispatch timing.  ``vmap`` batches the cotangents
+    while preserving a leading scalar-output axis on every gradient leaf.
+
+    Some unusual pytrees/backend combinations may not be vmappable; in that
+    case fall back to the previous loop so this remains a performance
+    improvement, not a semantic requirement.
+    """
+
+    try:
+        return jax.vmap(lambda cotangent: pullback(cotangent)[0])(basis)
+    except Exception:  # pragma: no cover - defensive fallback for exotic pytrees.
+        basis_gradients = tuple(pullback(basis[index])[0] for index in range(int(basis.shape[0])))
+        return tree_util.tree_map(
+            lambda *parts: jnp.stack([jnp.asarray(part) for part in parts], axis=0),
+            *basis_gradients,
+        )
+
+
+def _pytree_unstack_leading_axis_jax(pytree: Any, n_outputs: int) -> tuple[Any, ...]:
+    """Return one pytree per leading output axis from a batched pytree."""
+
+    return tuple(
+        tree_util.tree_map(lambda leaf, index=index: jnp.asarray(leaf)[index], pytree)
+        for index in range(int(n_outputs))
+    )
+
+
 def direct_coil_same_branch_controller_scalars_custom_vjp_report(
     complete_report: dict[str, Any],
     base_params: Any,
@@ -4194,11 +4227,7 @@ def direct_coil_same_branch_controller_scalars_custom_vjp_report(
 
     values, pullback = jax.vjp(_controller_scalars, base_params)
     basis = jnp.eye(len(keys), dtype=jnp.asarray(values).dtype)
-    basis_gradients = tuple(pullback(basis[index])[0] for index in range(len(keys)))
-    jacobian = tree_util.tree_map(
-        lambda *parts: jnp.stack([jnp.asarray(part) for part in parts], axis=0),
-        *basis_gradients,
-    )
+    jacobian = _pytree_pullback_basis_jax(pullback, basis)
     exact_directionals = _pytree_batched_directional_vdot_jax(jacobian, direction, len(keys))
     if bool(compute_frozen_fd):
         step = float(eps)
@@ -4784,22 +4813,19 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
     timings["replay_vjp_ready_s"] = float(time.perf_counter() - t0)
     basis = jnp.eye(len(keys), dtype=jnp.asarray(replay_values).dtype)
     t0 = time.perf_counter()
-    basis_gradients = tuple(pullback(basis[index])[0] for index in range(len(keys)))
+    jacobian = _pytree_pullback_basis_jax(pullback, basis)
     timings["replay_pullbacks_dispatch_s"] = float(time.perf_counter() - t0)
     t0 = time.perf_counter()
-    basis_gradients = _block_until_ready_for_timing(basis_gradients)
+    jacobian = _block_until_ready_for_timing(jacobian)
     timings["replay_pullbacks_ready_s"] = float(time.perf_counter() - t0)
     timings["replay_vjp_wall_s"] = timings["replay_vjp_dispatch_s"] + timings["replay_vjp_ready_s"]
     timings["replay_pullbacks_wall_s"] = (
         timings["replay_pullbacks_dispatch_s"] + timings["replay_pullbacks_ready_s"]
     )
-    jacobian = tree_util.tree_map(
-        lambda *parts: jnp.stack([jnp.asarray(part) for part in parts], axis=0),
-        *basis_gradients,
-    )
     t0 = time.perf_counter()
     jacobian = _block_until_ready_for_timing(jacobian)
     timings["jacobian_stack_ready_s"] = float(time.perf_counter() - t0)
+    basis_gradients = _pytree_unstack_leading_axis_jax(jacobian, len(keys))
     gradients = {key: basis_gradients[index] for index, key in enumerate(keys)}
     values = {key: float(all_values[key]) for key in keys}
     replay_value_map = {key: replay_values[index] for index, key in enumerate(keys)}

@@ -10447,3 +10447,58 @@ Completion:
 - CI runtime refactor with preserved coverage/physics gates: 100% on latest
   green baseline; coverage-fix CI is pending.
 - Docs/release hygiene: 98.8%.
+
+### 2026-06-05 Batched Vector Pullbacks For Branch-Local Replay
+
+Steps taken:
+
+1. Replaced per-scalar Python VJP pullback loops with a batched cotangent
+   pullback helper for vector-valued same-branch replay reports.
+2. Applied the helper to both the same-branch controller scalar report path and
+   the production branch-local scalars/Jacobian helper.
+3. Kept a defensive fallback to the previous per-scalar loop for non-vmappable
+   pytrees/backends.
+4. Re-ran the two production same-branch tests, the exact same-branch coverage
+   shard, and a one-evaluation circle-provider vector report smoke.
+
+Results obtained:
+
+1. Ruff passed for ``vmec_jax/free_boundary_adjoint.py`` and the finite-pressure
+   sensitivity test file.
+2. Current-only and Fourier-only production same-branch tests passed.
+3. The exact same-branch coverage shard passed with ``3 passed in 83.37 s``.
+4. The vector smoke stayed on the same branch and validated ``aspect``,
+   ``qs_total``, ``lcfs_boundary_moment``, and ``accepted_bnormal_rms``.
+5. Vector report timings were: complete-solve FD ``6.72 s``, branch-local
+   vector replay ``36.85 s``, replay VJP setup ``17.21 s``, and batched
+   pullback ``19.40 s``.
+6. The patch removes avoidable Python pullback loops, but the dominant cost is
+   still XLA/JAX graph construction for replay VJP/pullback, not device
+   readiness.
+
+Best next steps:
+
+1. Confirm CI after pushing this performance patch.
+2. Target the replay graph size itself: fewer traced branches, less trace data
+   flowing through the VJP closure, or a smaller physical-scalar replay path.
+3. Keep using vector reports as opt-in diagnostics until branch-local replay is
+   materially faster.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9998% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.5%.
+- Single-stage coil-only optimization: 91.9%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 94.8%; per-scalar pullback host loops are removed, but
+  replay graph construction remains the main cost.
+- CI runtime refactor with preserved coverage/physics gates: 100% on latest
+  green baseline; latest CI is pending.
+- Docs/release hygiene: 98.8%.
