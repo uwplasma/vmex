@@ -9615,6 +9615,62 @@ Completion:
   green baseline.
 - Docs/release hygiene: 98.8%.
 
+### 2026-06-05 Local JAX Profiler Trace for Same-Branch Replay
+
+Steps taken:
+
+1. Captured a local JAX profiler trace around the circle-provider scalar
+   same-branch report using ``jax.profiler.start_trace``.
+2. Saved artifacts under ``/tmp/vmec_jax_freeb_replay_trace`` and verified
+   that both ``xplane.pb`` and Chrome ``trace.json.gz`` files were emitted.
+3. Inspected the Chrome trace for the new named scopes and for host-side
+   ``vmec``/``free_boundary``/``jax`` event names.
+
+Results obtained:
+
+1. The run stayed on the same branch with replay/base delta ``2.66e-15`` and
+   directional-slope absolute error ``1.45e-11``.
+2. The scalar replay wall time in the profiled run was ``30.80 s`` with
+   dispatch ``30.80 s`` and ready/synchronization ``0.00024 s``.
+3. The profiler emitted a ``4.97 MB`` Chrome trace and an ``xplane.pb`` file.
+4. The Chrome trace did not surface the JAX named-scope strings on this local
+   CPU path. It was dominated by host/Python tracing activity, with top-level
+   ``main``/``optimize_coils`` around ``46.7 s`` and the initial forward
+   free-boundary solve around ``1.9 s``.
+5. This confirms the remaining bottleneck is not device kernel execution; the
+   useful next profiling target is narrower timing/tracing inside the
+   branch-local replay graph construction and strict-update/NESTOR algebra.
+
+Best next steps:
+
+1. Add narrower internal timing around replay scalar construction, direct
+   ``jax.value_and_grad`` setup, strict-update tracing, and NESTOR replay
+   rather than relying on broad process-level profiler traces.
+2. Compare direct eager AD against an explicitly jitted replay value/gradient
+   for repeated same-shape calls to test whether optimization callbacks can
+   amortize replay graph construction.
+3. If JIT amortizes, add an opt-in replay-JIT cache for production optimization
+   callbacks while keeping the non-JIT path as the validation baseline.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9998% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.5%.
+- Single-stage coil-only optimization: 91.8%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 94.5%; broad profiler traces confirmed host-side replay
+  graph cost but did not expose enough scoped detail.
+- CI runtime refactor with preserved coverage/physics gates: 100% on latest
+  green baseline.
+- Docs/release hygiene: 98.8%.
+
 ### 2026-06-05 Shape-Static Replay Context Hoist
 
 Steps taken:
