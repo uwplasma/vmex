@@ -403,12 +403,10 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         )
 
     t0 = time.perf_counter()
-    fixed_value = float(np.asarray(fixed_objective(base_params)))
-    timings["fixed_trace_value_wall_s"] = float(time.perf_counter() - t0)
-    t0 = time.perf_counter()
-    fixed_grad = jax.grad(fixed_objective)(base_params)
+    fixed_value_jax, fixed_grad = jax.value_and_grad(fixed_objective)(base_params)
+    fixed_value = float(np.asarray(fixed_value_jax))
     fixed_exact = float(np.asarray(_directional_dot(fixed_grad, direction)))
-    timings["fixed_trace_grad_wall_s"] = float(time.perf_counter() - t0)
+    timings["fixed_trace_value_and_grad_wall_s"] = float(time.perf_counter() - t0)
 
     fixed_report = _slope_report(exact=fixed_exact, fd=complete_fd, rtol=float(args.rtol), atol=float(args.atol))
     base_value_report = {

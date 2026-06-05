@@ -9898,3 +9898,55 @@ Completion:
 - CI runtime refactor with preserved coverage/physics gates: 100% on latest
   green baseline, current CI in progress.
 - Docs/release hygiene: 98.3%.
+
+### 2026-06-05 Fused Fixed-Trace Diagnostic Value/Gradient
+
+Steps taken:
+
+1. Replaced the same-branch diagnostic's separate fixed-trace value replay and
+   fixed-trace gradient replay with one `jax.value_and_grad` call.
+2. Re-ran Ruff, the default timed diagnostic, and the focused runtime/free
+   boundary smoke tests.
+
+Results obtained:
+
+1. Ruff passed for
+   `tools/diagnostics/direct_coil_same_branch_adjoint_report.py`.
+2. The fused default diagnostic wrote
+   `/tmp/vmec_jax_same_branch_fused_timing_report.json` and passed.
+3. Focused tests passed with `19 passed, 1 xfailed`.
+4. The tiny default report improved from `32.92 s` to `27.67 s` in the local
+   cold-process comparison. Complete-solve FD took `14.03 s`; the fused
+   fixed-trace value+gradient stage took `13.63 s`.
+5. This removes one redundant fixed-trace replay and gives a concrete default
+   diagnostic speedup, but it does not yet solve the deeper first-gradient tape
+   build cost.
+
+Best next steps:
+
+1. Apply the same value/gradient fusion pattern only where call sites currently
+   compute a branch-local value and gradient separately.
+2. For deeper gains, inspect the replay custom-VJP backward path and reduce the
+   size of the trace pytree captured by `jax.grad(objective)`.
+3. Revisit the optional controller/aspect VJP report once fixed-trace
+   value+gradient replay has a lower cold compile cost.
+4. Watch the latest CI after pushing this timing/performance update.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9998% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.4%.
+- Single-stage coil-only optimization: 90.8%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 92.6%; default same-branch diagnostic cost reduced by
+  removing one redundant fixed-trace replay.
+- CI runtime refactor with preserved coverage/physics gates: 100% on latest
+  green baseline, current CI in progress.
+- Docs/release hygiene: 98.3%.
