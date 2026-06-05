@@ -453,8 +453,15 @@ def _finite_float_or_zero(value: Any) -> float:
 
 def _normalize_adjoint_trace_mode(adjoint_trace_mode: str) -> str:
     mode = str(adjoint_trace_mode).strip().lower() or "full"
-    if mode not in ("full", "dynamic"):
-        raise ValueError("adjoint_trace_mode must be one of {'full', 'dynamic'}")
+    aliases = {
+        "branch_local": "branch",
+        "branch-local": "branch",
+        "lean": "branch",
+        "compact": "branch",
+    }
+    mode = aliases.get(mode, mode)
+    if mode not in ("full", "dynamic", "branch"):
+        raise ValueError("adjoint_trace_mode must be one of {'full', 'dynamic', 'branch'}")
     return mode
 
 

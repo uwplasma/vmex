@@ -61,6 +61,23 @@ def test_resume_state_modes_and_payloads(monkeypatch):
         dio._normalize_resume_state_mode("invalid")
 
 
+def test_adjoint_trace_mode_aliases_and_materialization():
+    assert dio._normalize_adjoint_trace_mode("") == "full"
+    assert dio._normalize_adjoint_trace_mode("full") == "full"
+    assert dio._normalize_adjoint_trace_mode("dynamic") == "dynamic"
+    assert dio._normalize_adjoint_trace_mode("branch") == "branch"
+    assert dio._normalize_adjoint_trace_mode("branch_local") == "branch"
+    assert dio._normalize_adjoint_trace_mode("lean") == "branch"
+    assert dio._normalize_adjoint_trace_mode("compact") == "branch"
+
+    value = np.asarray([1.0, 2.0])
+    assert dio._materialize_adjoint_trace_array(value, mode="dynamic") is value
+    np.testing.assert_allclose(dio._materialize_adjoint_trace_array(value, mode="branch"), value)
+
+    with pytest.raises(ValueError, match="adjoint_trace_mode"):
+        dio._normalize_adjoint_trace_mode("invalid")
+
+
 def test_print_cadence_and_formatters_preserve_legacy_text():
     assert dio._vmec2000_cadence_selected(iter_idx=1, max_iter=10, nstep_screen=99)
     assert dio._vmec2000_cadence_selected(iter_idx=10, max_iter=10, nstep_screen=99)
