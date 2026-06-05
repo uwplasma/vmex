@@ -122,6 +122,35 @@ def _direct_solve_payload() -> dict:
                         "mode_matrix_lu_built": True,
                     },
                 },
+                "final_recompute_guard": {
+                    "contract": "benchmark-only final recompute guard",
+                    "safe_to_skip_final_recompute": False,
+                    "cache_validation_required": True,
+                    "final_nestor_recompute_attempted": True,
+                    "final_nestor_recompute_failed": False,
+                    "final_residual_recomputed_on_accepted_state": True,
+                    "residuals": {
+                        "final": {"fsqr": 1.0e-8, "fsqz": 2.0e-8, "fsql": 3.0e-8},
+                        "pre_update": {"fsqr": 1.1e-8, "fsqz": 2.2e-8, "fsql": 3.3e-8},
+                        "abs_delta": {"fsqr": 1.0e-9, "fsqz": 2.0e-9, "fsql": 3.0e-9},
+                        "max_abs_delta": 3.0e-9,
+                        "changed_from_pre_update": True,
+                    },
+                    "vacuum_metric_delta": {
+                        "final_bnormal_rms": 0.04,
+                        "last_active_bnormal_rms": 0.05,
+                        "bnormal_abs_delta": 0.01,
+                        "final_bsqvac_rms": 0.06,
+                        "last_active_bsqvac_rms": 0.08,
+                        "bsqvac_abs_delta": 0.02,
+                    },
+                    "measured_cost_s": {
+                        "finalize_nestor_recompute": 0.004,
+                        "finalize_residual_recompute": 0.007,
+                        "finalize_residual_device_get": 0.002,
+                        "total": 0.013,
+                    },
+                },
             }
         ]
     }
@@ -181,6 +210,10 @@ def test_matrix_timing_snapshot_preserves_compact_nestor_details() -> None:
     assert nestor["trial"]["improvement"]["sample_time_s"]["speedup"] == 2.0
     assert nestor["final_recompute"]["attempted"] is True
     assert nestor["final_recompute"]["sample_time_s"] == 0.012
+    assert nestor["final_recompute_guard"]["contract"] == "benchmark-only final recompute guard"
+    assert nestor["final_recompute_guard"]["safe_to_skip_final_recompute"] is False
+    assert nestor["final_recompute_guard"]["residuals"]["max_abs_delta"] == 3.0e-9
+    assert rows[0]["final_recompute_guard"]["measured_cost_s"]["total"] == 0.013
     assert nestor["final_diagnostics"]["sample_points"] == 600
     assert nestor["final_diagnostics"]["sample_phase_time_s"]["setup"] == 0.001
     assert nestor["final_diagnostics"]["sample_phase_time_s"]["external_field"] == 0.003
