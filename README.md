@@ -161,6 +161,10 @@ python examples/optimization/free_boundary_QS_coil_optimization.py \
   --outdir results/free_boundary_QS_coil_optimization_circle_smoke
 ```
 
+Use `--provider essos` in the same script, with `ESSOS_ROOT` and
+`ESSOS_INPUT_DIR` set as above, to optimize the ESSOS coil currents/Fourier
+coefficients directly without generating an `mgrid`.
+
 With ESSOS on `PYTHONPATH`, `examples/free_boundary_essos_coils_beta_scan.py`
 runs finite-pressure coil beta scans with the SIMSOPT/Landreman-style
 `e*(ne*Te+ni*Ti)` pressure profile. Use `--resume-existing` for completed
