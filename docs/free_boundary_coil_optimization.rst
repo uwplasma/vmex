@@ -609,7 +609,7 @@ The three PR-review workflows are:
 
    PYTHONPATH=.:$ESSOS_ROOT:$PYTHONPATH \
      python examples/free_boundary_essos_direct_forward.py \
-     --input examples/data/input.LandremanPaul2021_QA_reactorScale_lowres \
+     --input examples/data/input.LandremanPaul2021_QA_lowres \
      --max-iter 10 \
      --ns 7 \
      --mpol 3 \
@@ -625,6 +625,14 @@ This ESSOS direct-coil forward run writes
 free-boundary/NESTOR coupling diagnostics.  Use the beta-scan command below
 when you need the standardized finite-beta pressure profile and the
 generated-``mgrid`` comparison row.
+
+The generated input deck contains ``MGRID_FILE='DIRECT_COILS'`` as a provider
+tag for the Python direct-coil examples.  It is not a standalone magnetic-grid
+filename: replaying that generated input through the public ``vmec`` CLI alone
+will not reconstruct the ESSOS coils unless a direct-coil provider object is
+also supplied by Python.  Use the example command above, or use the generated
+``mgrid`` compatibility example when you need an input deck that can be replayed
+without Python coil parameters.
 
 .. code-block:: bash
 
@@ -724,7 +732,8 @@ low-resolution finite-pressure free-boundary forward validation run without writ
 Use ``--dry-run`` on the same command to validate the ESSOS coil conversion,
 the generated VMEC input deck, and the direct provider wiring without running
 VMEC.  The generated input explicitly uses ``MGRID_FILE='DIRECT_COILS'`` and
-the JSON summary records ``mgrid: null``.
+the JSON summary records ``mgrid: null``.  As above, ``DIRECT_COILS`` is a
+Python-provider tag, not a filesystem ``mgrid`` file.
 
 Run the matched beta scan from the repository root. Until the ESSOS
 ``to_mgrid`` PR is merged and released, put the ESSOS branch checkout on

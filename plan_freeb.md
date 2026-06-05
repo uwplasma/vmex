@@ -9539,6 +9539,83 @@ Completion:
   green baseline.
 - Docs/release hygiene: 98.5%.
 
+### 2026-06-05 ESSOS Direct-Coil Example Scale and Diagnostics Cleanup
+
+Steps taken:
+
+1. Rechecked the current pushed head `f0693d1`; GitHub Actions completed green,
+   including the combined coverage gate.
+2. Verified the real ESSOS direct-coil forward dry-run with local
+   `/Users/rogeriojorge/local/ESSOS_mgrid_pr`; it wrote a direct-coil input
+   and summary with no generated `mgrid`.
+3. Verified the real one-evaluation ESSOS direct-coil coil-only QS example; it
+   ran with `external_field_provider_kind=direct_coils`, wrote history/summary
+   under `/tmp`, and did not create an `mgrid`.
+4. Fixed the pedagogic ESSOS direct/mgrid example default input from the
+   reactor-scale LP-QA input to the unit-scale LP-QA input, matching the ESSOS
+   LP-QA coil JSON.
+5. Added docs explaining that `MGRID_FILE='DIRECT_COILS'` is a Python provider
+   tag and cannot be replayed by the public `vmec` CLI without supplying direct
+   coil provider parameters.
+6. Added focused tests for the unit-scale direct example default and for an
+   ESSOS-provider non-dry-run coil-only optimization command shape that writes
+   no `mgrid` and optimizes only coil variables.
+7. Consolidated the optional same-branch diagnostic script so the aspect scalar
+   and controller state-norm optional custom-VJP checks share the batched
+   controller-scalar report path when both are requested.
+
+Results obtained:
+
+1. ESSOS direct-coil forward dry-run completed in about 1.8 s and wrote
+   `/tmp/vmec_jax_essos_direct_coils_forward_verify/summary.json` with
+   `dry_run=true`, `external_field_provider_kind=direct_coils`, and
+   `uses_generated_mgrid=false`.
+2. ESSOS one-evaluation coil-only QS example completed in about 9.4 s.  The
+   recorded one-evaluation objective was `1.3736419364591923`, with
+   `qs_total=0.821897583971626`, aspect `6.007369766853995`, and mean iota
+   `0.25929877760776726`.
+3. Focused Ruff passed for the changed example/test files.
+4. Focused pytest passed:
+   `14 passed, 1 xfailed in 1.83 s` and then `14 passed, 1 xfailed in 2.15 s`.
+5. Full Sphinx docs build with warnings as errors passed.
+6. The default same-branch diagnostic report passed and wrote
+   `/tmp/vmec_jax_same_branch_default_report.json`.
+7. The optional diagnostic with both `--include-controller-vjp` and
+   `--include-aspect-scalar-vjp` still hit a slow `jit_scan` compile and was
+   stopped after several minutes.  The consolidation is useful cleanup, but the
+   cold controller replay compile path remains the next performance blocker.
+
+Best next steps:
+
+1. Commit and push the example/docs/test/diagnostic cleanup.
+2. Watch CI to completion.
+3. Keep robust/stochastic coils deferred per current scope.
+4. Continue the phase-2 performance lane by reducing cold accepted-controller
+   replay compilation itself; the optional diagnostic now avoids duplicated
+   scalar setup, but the core `jit_scan` compile remains expensive.
+5. If more user-facing work is prioritized, add CLI direct-coil provider flags
+   or keep explicitly documenting that direct-coil generated inputs are Python
+   example artifacts rather than standalone CLI decks.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99985% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.5%.
+- Single-stage coil-only optimization: 91.5%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 92.7%; optional diagnostics still expose slow cold
+  accepted-controller replay compilation.
+- CI runtime refactor with preserved coverage/physics gates: 100% on latest
+  green baseline, new example/docs cleanup pending.
+- Docs/release hygiene: 98.6%.
+
 ### 2026-06-05 Branch-Local Scalar Replay Value/Gradient Fusion
 
 Steps taken:

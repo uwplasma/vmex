@@ -806,3 +806,122 @@ def test_deterministic_circle_smoke_records_qs_terms(tmp_path, monkeypatch):
     assert summary["objective_model"]["qs_weight"] == pytest.approx(4.0)
     assert summary["objective_model"]["helicity_n"] == -1
     assert (tmp_path / "wout_best_direct_coil_qs.nc").read_text() == "include_fsq=True\n"
+
+
+def test_essos_provider_non_dry_run_uses_direct_coils_without_mgrid(tmp_path, monkeypatch):
+    module = _load_example_module()
+    synthetic_params, _metadata = module.make_circle_provider(current_scale=1.0)
+    calls = []
+
+    def fake_load_essos_provider(coils_json, *, chunk_size, current_scale):
+        assert coils_json is None
+        assert chunk_size == 128
+        assert current_scale == pytest.approx(1.0)
+        return synthetic_params, {
+            "provider": "essos",
+            "coils_json": "/synthetic/ESSOS_biot_savart_LandremanPaulQA.json",
+            "n_base_coils": 1,
+            "n_segments": int(synthetic_params.n_segments),
+            "nfp": int(synthetic_params.nfp),
+            "stellsym": bool(synthetic_params.stellsym),
+            "current_scale_multiplier": 1.0,
+        }
+
+    def fake_make_free_boundary_indata(_input_path, output_path, **_kwargs):
+        output_path.write_text("&INDATA\n  LFREEB = T\n  MGRID_FILE = 'DIRECT_COILS'\n/\n")
+        return output_path
+
+    def fake_run_direct_free_boundary(input_path, params, *, vmec_max_iter, activate_fsq, jit_forces=True):
+        calls.append(
+            {
+                "input_path": input_path,
+                "params": params,
+                "vmec_max_iter": int(vmec_max_iter),
+                "activate_fsq": float(activate_fsq),
+                "jit_forces": bool(jit_forces),
+            }
+        )
+        return SimpleNamespace(), 0.02
+
+    def fake_summarize_run(
+        _run,
+        params,
+        *,
+        objective,
+        wall_s,
+        target_aspect,
+        target_iota,
+        helicity_m,
+        helicity_n,
+        qs_surfaces,
+        qs_ntheta,
+        qs_nphi,
+    ):
+        current = float(np.asarray(params.base_currents)[0])
+        return {
+            "objective": objective,
+            "wall_s": wall_s,
+            "vmec_n_iter": 1,
+            "fsqr": current,
+            "fsqz": 0.0,
+            "fsql": 0.0,
+            "residual_proxy": current,
+            "qs_total": 0.125,
+            "qs_helicity_m": helicity_m,
+            "qs_helicity_n": helicity_n,
+            "qs_surfaces": qs_surfaces,
+            "qs_ntheta": qs_ntheta,
+            "qs_nphi": qs_nphi,
+            "aspect": target_aspect,
+            "target_aspect": target_aspect,
+            "mean_iota": target_iota,
+            "target_iota": target_iota,
+            "coil_current_norm": abs(current),
+            "mean_coil_length": 1.0,
+            "vmec_history": {"w": [], "fsqr2": [], "fsqz2": [], "fsql2": []},
+        }
+
+    def fake_write_wout(path, _run, *, include_fsq):
+        path.write_text(f"include_fsq={include_fsq}\n")
+
+    monkeypatch.setattr(module, "load_essos_provider", fake_load_essos_provider)
+    monkeypatch.setattr(module, "make_free_boundary_indata", fake_make_free_boundary_indata)
+    monkeypatch.setattr(module, "run_direct_free_boundary", fake_run_direct_free_boundary)
+    monkeypatch.setattr(module, "summarize_run", fake_summarize_run)
+    monkeypatch.setattr(module, "write_wout_from_fixed_boundary_run", fake_write_wout)
+
+    exit_code = module.main(
+        [
+            "--smoke",
+            "--provider",
+            "essos",
+            "--chunk-size",
+            "128",
+            "--max-evals",
+            "1",
+            "--max-iter",
+            "1",
+            "--outdir",
+            str(tmp_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert len(calls) == 1
+    assert calls[0]["input_path"] == tmp_path / "input.direct_coil_qs"
+    assert calls[0]["params"].n_segments == synthetic_params.n_segments
+    assert (tmp_path / "input.direct_coil_qs").read_text().count("DIRECT_COILS") == 1
+    assert not any(tmp_path.glob("mgrid*"))
+
+    history = json.loads((tmp_path / "history.json").read_text())
+    summary = json.loads((tmp_path / "summary.json").read_text())
+    assert len(history) == 1
+    assert summary["dry_run"] is False
+    assert summary["provider"]["provider"] == "essos"
+    assert summary["vmec_config"]["external_field_provider_kind"] == "direct_coils"
+    assert summary["vmec_config"]["mgrid_file"] == "DIRECT_COILS"
+    assert summary["vmec_config"]["uses_generated_mgrid"] is False
+    assert "generated_mgrid" not in summary["vmec_config"]
+    assert all(record["kind"] in {"current", "fourier_dof"} for record in summary["optimized_variables"])
+    assert all(record["kind"] != "boundary" for record in summary["optimized_variables"])
+    assert (tmp_path / "wout_best_direct_coil_qs.nc").read_text() == "include_fsq=True\n"

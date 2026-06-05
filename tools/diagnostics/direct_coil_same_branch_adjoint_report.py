@@ -266,12 +266,12 @@ def _run_trace(input_path: Path, params: Any, *, args: argparse.Namespace):
 def build_report(args: argparse.Namespace) -> dict[str, Any]:
     from vmec_jax._compat import enable_x64, jax, jnp
     from vmec_jax.free_boundary_adjoint import (
-        direct_coil_accepted_trace_controller_custom_vjp_objective_jax,
         direct_coil_accepted_trace_preconditioner_policy_segment_summary,
         direct_coil_same_branch_complete_solve_fd_report,
-        direct_coil_same_branch_controller_scalar_custom_vjp_report,
+        direct_coil_same_branch_controller_scalars_custom_vjp_report,
         direct_coil_fixed_trace_custom_vjp_objective_jax,
     )
+    from vmec_jax.state import pack_state
     from vmec_jax.wout import equilibrium_aspect_ratio_from_state
 
     if jax is None:
@@ -396,23 +396,45 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         }
     )
     aspect_report: dict[str, Any] = {"status": "skipped", "reason": "pass --include-aspect-scalar-vjp"}
-    if bool(args.include_aspect_scalar_vjp):
-        aspect_helper_report = direct_coil_same_branch_controller_scalar_custom_vjp_report(
+    controller_report: dict[str, Any] = {"status": "skipped", "reason": "pass --include-controller-vjp"}
+    fixed_controller_agree: dict[str, Any] = {"status": "skipped", "reason": "pass --include-controller-vjp"}
+    controller_scalar_reports = None
+    if bool(args.include_aspect_scalar_vjp) or bool(args.include_controller_vjp):
+        replay_scalar_fns: dict[str, Any] = {}
+        rtol_by_key: dict[str, float] = {}
+        atol_by_key: dict[str, float] = {}
+        base_value_atol_by_key: dict[str, float] = {}
+        if bool(args.include_controller_vjp):
+            replay_scalar_fns["state_norm"] = lambda replay, _base: 0.5 * jnp.vdot(
+                pack_state(replay["state"]),
+                pack_state(replay["state"]),
+            )
+            rtol_by_key["state_norm"] = float(args.rtol)
+            atol_by_key["state_norm"] = float(args.atol)
+            base_value_atol_by_key["state_norm"] = 2.0e-3
+        if bool(args.include_aspect_scalar_vjp):
+            replay_scalar_fns["aspect"] = lambda replay, base: equilibrium_aspect_ratio_from_state(
+                state=replay["state"],
+                static=base["init"].static,
+            )
+            rtol_by_key["aspect"] = float(args.aspect_rtol)
+            atol_by_key["aspect"] = float(args.aspect_atol)
+            base_value_atol_by_key["aspect"] = 2.0e-3
+        controller_scalar_reports = direct_coil_same_branch_controller_scalars_custom_vjp_report(
             complete_report,
             base_params,
             direction,
-            replay_scalar_fn=lambda replay, base: equilibrium_aspect_ratio_from_state(
-                state=replay["state"],
-                static=base["init"].static,
-            ),
-            scalar_key="aspect",
+            replay_scalar_fns=replay_scalar_fns,
             eps=float(args.eps),
             replay_kwargs=replay_kwargs,
-            rtol=float(args.aspect_rtol),
-            atol=float(args.aspect_atol),
-            base_value_atol=2.0e-3,
+            rtol=rtol_by_key,
+            atol=atol_by_key,
+            base_value_atol=base_value_atol_by_key,
             compute_frozen_fd=False,
         )
+    if bool(args.include_aspect_scalar_vjp):
+        assert controller_scalar_reports is not None
+        aspect_helper_report = controller_scalar_reports["scalar_reports"]["aspect"]
         aspect_value = float(np.asarray(aspect_helper_report["base_value"], dtype=float))
         aspect_report = _slope_report(
             exact=float(np.asarray(aspect_helper_report["exact_directional"], dtype=float)),
@@ -429,22 +451,14 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
                 "controller_trace_aspect_abs_delta": float(abs(aspect_value - base_aspect)),
             }
         )
-    controller_report: dict[str, Any] = {"status": "skipped", "reason": "pass --include-controller-vjp"}
-    fixed_controller_agree: dict[str, Any] = {"status": "skipped", "reason": "pass --include-controller-vjp"}
     if bool(args.include_controller_vjp):
-        def controller_objective(params):
-            return direct_coil_accepted_trace_controller_custom_vjp_objective_jax(
-                params,
-                base_traces[0]["state_pre"],
-                **replay_kwargs,
-            )
-
-        controller_value = float(np.asarray(controller_objective(base_params)))
-        controller_grad = jax.grad(controller_objective)(base_params)
-        controller_exact = float(np.asarray(_directional_dot(controller_grad, direction)))
+        assert controller_scalar_reports is not None
+        state_norm_report = controller_scalar_reports["scalar_reports"]["state_norm"]
+        controller_value = float(np.asarray(state_norm_report["base_value"], dtype=float))
+        controller_exact = float(np.asarray(state_norm_report["exact_directional"], dtype=float))
         controller_report = _slope_report(
             exact=controller_exact,
-            fd=complete_fd,
+            fd=float(state_norm_report["complete_fd_directional"]),
             rtol=float(args.rtol),
             atol=float(args.atol),
         )

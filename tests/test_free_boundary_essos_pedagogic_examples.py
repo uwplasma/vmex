@@ -90,6 +90,7 @@ def test_pedagogic_essos_direct_example_dry_run(monkeypatch, tmp_path: Path) -> 
     rc = module.main(["--dry-run", "--outdir", str(tmp_path), "--max-iter", "1", "--chunk-size", "64"])
 
     assert rc == 0
+    assert module.DEFAULT_INPUT.name == "input.LandremanPaul2021_QA_lowres"
     input_text = (tmp_path / "input.lpqa_direct_coils").read_text()
     assert "LFREEB = .TRUE." in input_text
     assert "MGRID_FILE = 'DIRECT_COILS'" in input_text
