@@ -9838,3 +9838,63 @@ Completion:
 - CI runtime refactor with preserved coverage/physics gates: 100% on latest
   green baseline.
 - Docs/release hygiene: 98.3%.
+
+### 2026-06-05 Same-Branch Diagnostic Timing Shards
+
+Steps taken:
+
+1. Added explicit synchronized timing fields to
+   `tools/diagnostics/direct_coil_same_branch_adjoint_report.py`.
+2. Split the diagnostic timing into complete-solve finite differences,
+   fixed-trace value replay, fixed-trace gradient/tape build, optional
+   controller-scalar VJP replay, and total report build time.
+3. Re-ran the default tiny same-branch diagnostic and runtime diagnostic tests.
+4. Checked the queued GitHub Actions run for the previous commit; docs/build
+   jobs were already green and the coverage/test shards were still in progress.
+
+Results obtained:
+
+1. Ruff passed for the diagnostic file.
+2. `JAX_ENABLE_X64=1 python -m pytest -q tests/test_runtime_diagnostics.py -q`
+   passed with `7 passed`.
+3. The default diagnostic wrote `/tmp/vmec_jax_same_branch_timing_report.json`
+   and passed.
+4. The timing report for `niter=2`, `mpol=3`, `ntheta=6`,
+   `n_segments=24` gave:
+   complete-solve FD `16.10 s`, fixed-trace value `1.46 s`,
+   fixed-trace gradient `15.35 s`, and total build `32.92 s`.
+5. The default-report hotspot is now measurable: the fixed-trace gradient cold
+   tape build is comparable to the three-solve complete FD cost. The optional
+   controller scalar VJP remains slower and still needs a separate bounded
+   probe after this lower-level tape path is reduced.
+
+Best next steps:
+
+1. Reduce fixed-trace gradient tape build first, because it affects even the
+   default report and branch-local production scalar gradients.
+2. Inspect the custom-VJP replay closure for static payload capture and large
+   trace pytrees; move repeatable static preprocessing out of the differentiated
+   function where possible.
+3. After the fixed-trace tape build is reduced, re-run the optional
+   controller/aspect scalar VJP report with the same timing shards.
+4. Continue watching CI for the pushed diagnostic alignment commit before
+   stacking more changes.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9998% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.4%.
+- Single-stage coil-only optimization: 90.7%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 92.3%; fixed-trace gradient tape build is now measured
+  as the default-report hotspot.
+- CI runtime refactor with preserved coverage/physics gates: 100% on latest
+  green baseline, current CI in progress.
+- Docs/release hygiene: 98.3%.

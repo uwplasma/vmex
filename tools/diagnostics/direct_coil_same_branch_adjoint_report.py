@@ -203,6 +203,18 @@ def _json_ready(value: Any) -> Any:
     return value
 
 
+def _block_until_ready(value: Any) -> Any:
+    """Synchronize JAX values in nested diagnostic payloads before timing."""
+
+    if hasattr(value, "block_until_ready"):
+        return value.block_until_ready()
+    if isinstance(value, dict):
+        return {key: _block_until_ready(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return type(value)(_block_until_ready(item) for item in value)
+    return value
+
+
 def _slope_report(*, exact: float, fd: float, rtol: float, atol: float) -> dict[str, Any]:
     abs_error = abs(float(exact) - float(fd))
     denom = max(1.0, abs(float(fd)))
@@ -307,6 +319,8 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         )
 
     previous_env = _configure_validation_nestor_path()
+    build_t0 = time.perf_counter()
+    timings: dict[str, float] = {}
     try:
         t0 = time.perf_counter()
         def complete_objectives(payload: dict[str, Any]) -> dict[str, float]:
@@ -334,6 +348,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             fingerprint_atol=float(args.fingerprint_atol),
         )
         wall_s = time.perf_counter() - t0
+        timings["complete_solve_fd_wall_s"] = float(wall_s)
     finally:
         _restore_env(previous_env)
 
@@ -387,9 +402,13 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             **replay_kwargs,
         )
 
+    t0 = time.perf_counter()
     fixed_value = float(np.asarray(fixed_objective(base_params)))
+    timings["fixed_trace_value_wall_s"] = float(time.perf_counter() - t0)
+    t0 = time.perf_counter()
     fixed_grad = jax.grad(fixed_objective)(base_params)
     fixed_exact = float(np.asarray(_directional_dot(fixed_grad, direction)))
+    timings["fixed_trace_grad_wall_s"] = float(time.perf_counter() - t0)
 
     fixed_report = _slope_report(exact=fixed_exact, fd=complete_fd, rtol=float(args.rtol), atol=float(args.atol))
     base_value_report = {
@@ -428,6 +447,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             rtol_by_key["aspect"] = float(args.aspect_rtol)
             atol_by_key["aspect"] = float(args.aspect_atol)
             base_value_atol_by_key["aspect"] = 2.0e-3
+        t0 = time.perf_counter()
         controller_scalar_reports = direct_coil_same_branch_controller_scalars_custom_vjp_report(
             complete_report,
             base_params,
@@ -440,6 +460,14 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             base_value_atol=base_value_atol_by_key,
             compute_frozen_fd=False,
         )
+        _block_until_ready(
+            {
+                "values": controller_scalar_reports["values"],
+                "exact_directionals": controller_scalar_reports["exact_directionals"],
+                "jacobian": controller_scalar_reports["jacobian"],
+            }
+        )
+        timings["controller_scalar_vjp_wall_s"] = float(time.perf_counter() - t0)
     if bool(args.include_aspect_scalar_vjp):
         assert controller_scalar_reports is not None
         aspect_helper_report = controller_scalar_reports["scalar_reports"]["aspect"]
@@ -482,6 +510,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
                 "controller_trace_abs_delta": float(abs(controller_value - base_complete)),
             }
         )
+    timings["build_report_wall_s"] = float(time.perf_counter() - build_t0)
     passed = bool(
         same_branch
         and fixed_report["passed"]
@@ -515,6 +544,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
                 "workdir": str(workdir),
                 "input": str(input_path),
                 "wall_s": float(wall_s),
+                "timings": timings,
                 "include_controller_vjp": bool(args.include_controller_vjp),
                 "include_aspect_scalar_vjp": bool(args.include_aspect_scalar_vjp),
                 "note": (
