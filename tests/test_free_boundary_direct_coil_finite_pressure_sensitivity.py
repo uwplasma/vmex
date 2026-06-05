@@ -179,6 +179,7 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes() -> None:
         direct_coil_accepted_trace_fingerprint_delta_summary,
         direct_coil_accepted_trace_preconditioner_controls_jax,
         direct_coil_accepted_trace_preconditioner_policy_segments,
+        direct_coil_accepted_trace_replay_graph_metadata,
         direct_coil_accepted_trace_scalar_controls_jax,
         direct_coil_accepted_trace_step_controls_jax,
         direct_coil_accepted_trace_step_policy_segment_summary,
@@ -189,6 +190,7 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes() -> None:
         free_boundary_adjoint_trace_replay_diagnostics,
         _accepted_trace_effective_controller_masks,
         _accepted_trace_segment_is_unconditionally_accepted,
+        _direct_coil_trace_boundary_shape,
     )
 
     z = np.arange(6.0).reshape(2, 3)
@@ -334,6 +336,53 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes() -> None:
     mixed_segment_masks = _accepted_trace_effective_controller_masks(mixed_segment_controls)
     assert _accepted_trace_segment_is_unconditionally_accepted(mixed_segment_masks, start=0, stop=1)
     assert not _accepted_trace_segment_is_unconditionally_accepted(mixed_segment_masks, start=1, stop=2)
+    assert _direct_coil_trace_boundary_shape(axis_trace0) == (2, 3)
+    bsqvac_only_trace = deepcopy(trace0)
+    bsqvac_only_trace["freeb_nestor_trace"] = {}
+    assert _direct_coil_trace_boundary_shape(bsqvac_only_trace) == (2, 3)
+    no_shape_trace = deepcopy(trace0)
+    no_shape_trace["freeb_bsqvac_half"] = None
+    no_shape_trace["freeb_nestor_trace"] = {}
+    assert _direct_coil_trace_boundary_shape(no_shape_trace) is None
+    replay_graph = direct_coil_accepted_trace_replay_graph_metadata(
+        [axis_trace0, changed_static_trace],
+        static=SimpleNamespace(cfg=SimpleNamespace(nfp=3, mpol=4, ntor=2, lasym=True)),
+        accept_mask=np.asarray([True, False]),
+        done_mask=np.asarray([False, False]),
+        sample_nzeta=3,
+        include_analytic=False,
+        use_stacked_step_controls=False,
+        use_accepted_only_fast_path=False,
+        json_safe=True,
+    )
+    assert replay_graph["contract"] == "fixed accepted-branch replay graph metadata"
+    assert replay_graph["n_steps"] == 2
+    assert replay_graph["accepted_steps"] == 1
+    assert replay_graph["rejected_steps"] == 1
+    assert replay_graph["done_markers"] == 0
+    assert replay_graph["state_resets"] == 0
+    assert replay_graph["free_boundary_trace_steps"] == 2
+    assert replay_graph["active_free_boundary_replay_steps"] == 1
+    assert replay_graph["step_policy_n_segments"] == 2
+    assert replay_graph["preconditioner_policy_n_segments"] == 1
+    assert replay_graph["boundary_shapes"] == [[2, 3]]
+    assert replay_graph["bsqvac_half_shapes"] == [[2, 3]]
+    assert replay_graph["nestor_axis_shapes"] == [[2, 3]]
+    assert replay_graph["inferred_boundary_shape"] == [2, 3]
+    assert replay_graph["sample_nzeta"] == 3
+    assert replay_graph["nfp"] == 3
+    assert replay_graph["mpol"] == 4
+    assert replay_graph["ntor"] == 2
+    assert replay_graph["lasym"] is True
+    assert replay_graph["nvper"] == 3
+    assert replay_graph["include_analytic"] is False
+    assert replay_graph["use_stacked_step_controls"] is False
+    assert replay_graph["use_accepted_only_fast_path"] is False
+    assert "signature_repr" not in replay_graph["step_policy_segment_summary"][0]
+    assert "signature_repr" not in replay_graph["preconditioner_policy_segment_summary"][0]
+    json.dumps(replay_graph, allow_nan=False)
+    with pytest.raises(ValueError, match="accepted trace"):
+        direct_coil_accepted_trace_replay_graph_metadata([])
 
     branch_metadata = direct_coil_accepted_trace_branch_metadata([trace0, trace1])
     assert branch_metadata["n_steps"] == 2
