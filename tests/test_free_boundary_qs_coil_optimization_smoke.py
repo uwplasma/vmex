@@ -178,6 +178,7 @@ def test_same_branch_report_writer_uses_source_helper(tmp_path, monkeypatch):
         aspect_weight=1.0e-2,
         iota_weight=1.0,
         same_branch_report_eps=1.0e-4,
+        same_branch_report_mode="none",
         same_branch_report_max_iter=3,
         vmec_max_iter=2,
         ftol=1.0e-8,
@@ -262,9 +263,115 @@ def test_same_branch_report_writer_uses_source_helper(tmp_path, monkeypatch):
     assert report["values"]["central_fd_directional"] == pytest.approx(1000.0)
     assert set(report["objective_values"]) == {"objective", "qs_total", "aspect"}
     assert report["primary_objective"] == "objective"
+    assert report["branch_local_scalar_gradient"]["available"] is False
     assert report["branch_local_vector_jacobian"]["available"] is False
     assert "adaptive host branch" in report["branch_local_vector_jacobian"]["scope"]
     assert [record["kind"] for record in report["direction_variables"]] == ["current", "fourier_dof"]
+
+
+def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path, monkeypatch):
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jax, jnp
+
+    module = _load_example_module()
+    base_params, _metadata = module.make_circle_provider(current_scale=1.0)
+    _x0, variables = module.select_coil_variables(
+        base_params,
+        max_current_vars=1,
+        max_fourier_vars=1,
+    )
+    args = SimpleNamespace(
+        current_step=0.02,
+        dof_step=1.0e-3,
+        target_aspect=6.0,
+        target_iota=0.4,
+        helicity_m=1,
+        helicity_n=0,
+        qs_surfaces="0.25,0.5",
+        qs_ntheta=15,
+        qs_nphi=16,
+        residual_weight=1.0,
+        qs_weight=2.0,
+        aspect_weight=1.0e-2,
+        iota_weight=1.0,
+        same_branch_report_eps=1.0e-4,
+        same_branch_report_mode="scalar",
+        same_branch_report_max_iter=3,
+        vmec_max_iter=2,
+        ftol=1.0e-8,
+        jit_forces=False,
+        activate_fsq=1.0e99,
+    )
+
+    def fake_report(*_args, **_kwargs):
+        return {
+            "base": {"traces": ("synthetic-trace",)},
+            "branch_compatibility": {
+                "same_branch": True,
+                "plus": {"changed_fields": (), "max_abs_scalar_delta": 0.0, "max_rel_scalar_delta": 0.0},
+                "minus": {"changed_fields": (), "max_abs_scalar_delta": 0.0, "max_rel_scalar_delta": 0.0},
+            },
+            "values": {"base": 1.0, "plus": 1.1, "minus": 0.9, "central_fd_directional": 1000.0},
+            "objective_values": {
+                "objective": {"base": 1.0, "plus": 1.1, "minus": 0.9, "central_fd_directional": 1000.0},
+                "qs_total": {"base": 0.4, "plus": 0.42, "minus": 0.38, "central_fd_directional": 0.4},
+            },
+            "primary_objective": "objective",
+        }
+
+    direction_x = module.same_branch_direction_from_variables(variables)
+    direction_params = module.coil_param_direction_from_variables(
+        base_params,
+        direction_x,
+        variables,
+        current_step=args.current_step,
+        dof_step=args.dof_step,
+    )
+    grad = jax.tree_util.tree_map(lambda leaf: jnp.ones_like(jnp.asarray(leaf)), direction_params)
+
+    def fake_branch_local_scalar(*_args, **_kwargs):
+        return {
+            "uses_production_forward": True,
+            "differentiates_adaptive_controller": False,
+            "differentiates_run_free_boundary": False,
+            "differentiates_fixed_accepted_branch": True,
+            "scalar_key": "qs_total",
+            "replay_option_flags": {"use_stacked_step_controls": True},
+            "value": 0.4,
+            "replay_value": jnp.asarray(0.4),
+            "base_abs_delta": 0.0,
+            "grad": grad,
+        }
+
+    import vmec_jax.free_boundary_adjoint as freeb_adj
+
+    monkeypatch.setattr(freeb_adj, "direct_coil_same_branch_complete_solve_fd_report", fake_report)
+    monkeypatch.setattr(
+        freeb_adj,
+        "direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax",
+        fake_branch_local_scalar,
+    )
+
+    path = module.write_same_branch_validation_report(
+        input_path=tmp_path / "input.direct",
+        base_params=base_params,
+        variables=variables,
+        args=args,
+        outdir=tmp_path,
+    )
+
+    report = json.loads(path.read_text())
+    scalar = report["branch_local_scalar_gradient"]
+    expected_directional = module._pytree_directional_vdot(grad, direction_params)
+    assert scalar["available"] is True
+    assert scalar["uses_production_forward"] is True
+    assert scalar["differentiates_adaptive_controller"] is False
+    assert scalar["differentiates_run_free_boundary"] is False
+    assert scalar["differentiates_fixed_accepted_branch"] is True
+    assert scalar["scalar_key"] == "qs_total"
+    assert scalar["exact_directional"] == pytest.approx(expected_directional)
+    assert scalar["complete_fd_directional"] == pytest.approx(0.4)
+    assert report["branch_local_vector_jacobian"]["available"] is False
 
 
 def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path, monkeypatch):
@@ -293,6 +400,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
         aspect_weight=1.0e-2,
         iota_weight=1.0,
         same_branch_report_eps=1.0e-4,
+        same_branch_report_mode="vector",
         same_branch_report_max_iter=3,
         vmec_max_iter=2,
         ftol=1.0e-8,
