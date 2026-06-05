@@ -4515,6 +4515,7 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
     scalar_fn: Any,
     replay_scalar_fn: Any,
     scalar_key: str | None = None,
+    production_values: Mapping[str, Any] | None = None,
     complete_payload: Mapping[str, Any] | None = None,
     init_kwargs: dict[str, Any] | None = None,
     solve_kwargs: dict[str, Any] | None = None,
@@ -4534,8 +4535,11 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
     controller branch changes.
 
     ``scalar_fn(payload)`` must return the production scalar from the complete
-    solve payload.  ``replay_scalar_fn(replay, payload)`` must return the same
-    scalar from the JAX-visible replay dictionary.
+    solve payload.  Callers that already evaluated the production scalar, for
+    example through :func:`direct_coil_same_branch_complete_solve_fd_report`,
+    can pass ``production_values`` to avoid recomputing it.  The
+    ``replay_scalar_fn(replay, payload)`` must return the same scalar from the
+    JAX-visible replay dictionary.
     """
 
     if jax is None:  # pragma: no cover - JAX is required for this helper.
@@ -4575,8 +4579,11 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
         raise ValueError("complete payload is missing the initialization result")
 
     t0 = time.perf_counter()
-    values = _complete_solve_objective_values(scalar_fn(payload))
+    values = _complete_solve_objective_values(
+        scalar_fn(payload) if production_values is None else production_values
+    )
     timings["production_scalar_eval_wall_s"] = float(time.perf_counter() - t0)
+    production_values_source = "scalar_fn" if production_values is None else "precomputed"
     key = str(scalar_key or ("objective" if "objective" in values else next(iter(values))))
     if key not in values:
         raise KeyError(f"scalar_key {key!r} not returned by scalar_fn")
@@ -4653,6 +4660,7 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
         "scalar_key": key,
         "value": float(values[key]),
         "all_values": values,
+        "production_values_source": production_values_source,
         "replay_value": replay_value,
         "base_abs_delta": abs(float(np.asarray(replay_value, dtype=float)) - float(values[key])),
         "grad": grad,
@@ -4678,6 +4686,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
     scalar_fn: Any,
     replay_scalar_fns: Mapping[str, Any],
     scalar_keys: tuple[str, ...] | list[str] | None = None,
+    production_values: Mapping[str, Any] | None = None,
     complete_payload: Mapping[str, Any] | None = None,
     init_kwargs: dict[str, Any] | None = None,
     solve_kwargs: dict[str, Any] | None = None,
@@ -4696,6 +4705,8 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
     does not differentiate adaptive host-controller branch changes.
 
     ``scalar_fn(payload)`` must return a mapping of production scalar values.
+    Callers that already have the production base values can pass
+    ``production_values`` to avoid recomputing them from ``scalar_fn``.
     ``replay_scalar_fns`` maps the same scalar keys to callables of the form
     ``fn(replay, payload)`` that evaluate those scalars from the JAX-visible
     accepted-controller replay.
@@ -4740,8 +4751,11 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
         raise ValueError("complete payload is missing the initialization result")
 
     t0 = time.perf_counter()
-    all_values = _complete_solve_objective_values(scalar_fn(payload))
+    all_values = _complete_solve_objective_values(
+        scalar_fn(payload) if production_values is None else production_values
+    )
     timings["production_scalar_eval_wall_s"] = float(time.perf_counter() - t0)
+    production_values_source = "scalar_fn" if production_values is None else "precomputed"
     keys = tuple(str(key) for key in (scalar_keys if scalar_keys is not None else tuple(replay_scalar_fns)))
     if not keys:
         raise ValueError("scalar_keys must contain at least one scalar")
@@ -4822,9 +4836,9 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
     timings["replay_pullbacks_wall_s"] = (
         timings["replay_pullbacks_dispatch_s"] + timings["replay_pullbacks_ready_s"]
     )
-    t0 = time.perf_counter()
-    jacobian = _block_until_ready_for_timing(jacobian)
-    timings["jacobian_stack_ready_s"] = float(time.perf_counter() - t0)
+    # Pullback readiness already materialized the full Jacobian pytree.
+    # Keep the timing key for report compatibility without re-walking it.
+    timings["jacobian_stack_ready_s"] = 0.0
     basis_gradients = _pytree_unstack_leading_axis_jax(jacobian, len(keys))
     gradients = {key: basis_gradients[index] for index, key in enumerate(keys)}
     values = {key: float(all_values[key]) for key in keys}
@@ -4847,6 +4861,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
         "scalar_keys": keys,
         "values": values,
         "all_values": all_values,
+        "production_values_source": production_values_source,
         "replay_values": replay_values,
         "replay_value_map": replay_value_map,
         "base_abs_delta": base_abs_delta,

@@ -44,13 +44,14 @@ Results obtained:
 
 Best next steps:
 
-1. Commit and push the coverage recovery patch.
-2. Watch the next CI run; the expected result is all green, with the combined
-   coverage gate clearing `95.00%`.
-3. Once CI is green, return to the phase-2/phase-3 technical lane: continue
+1. Return to the phase-2/phase-3 technical lane: continue
    accepted-point tape-build reduction and promote the next explicitly
    fingerprinted complete-loop scalar gate without claiming adaptive branch
    differentiation.
+2. Continue exact-shard runtime reduction by sharing trace setup across
+   remaining same-branch physical-scalar gates.
+3. Keep CI green while making those changes; the current green baseline is
+   run `27039430048` on commit `3644104`.
 
 Need from user:
 
@@ -67,10 +68,86 @@ Completion:
 - Single-stage coil-only optimization: 91.9%.
 - Robust coil perturbation optimization: deferred by current scope, 70%.
 - CPU/GPU performance: 94.8%.
-- CI runtime refactor with preserved coverage/physics gates: 99.9% until the
-  latest coverage recovery push is green.
+- CI runtime refactor with preserved coverage/physics gates: 100%; run
+  `27039430048` passed all shards including the combined coverage gate.
 - Docs/release hygiene: 98.8%.
 - Overall free-boundary/single-stage plan: 98.6%.
+
+### 2026-06-05 Reuse complete-report base values in branch-local reports
+
+Steps taken:
+
+1. Added an opt-in `production_values` argument to the scalar and vector
+   production-forward branch-local helpers in
+   `vmec_jax/free_boundary_adjoint.py`.
+2. When a caller already has base values from
+   `direct_coil_same_branch_complete_solve_fd_report`, the helper now
+   normalizes those values directly instead of re-evaluating
+   `scalar_fn(payload)` from the accepted complete-solve payload.
+3. Updated `examples/optimization/free_boundary_QS_coil_optimization.py` to
+   pass complete-report base values into the optional same-branch scalar/vector
+   report paths.
+4. Updated the promoted current-only and Fourier-only complete-solve
+   same-branch tests to exercise the precomputed-values path and assert
+   `production_values_source == "precomputed"`.
+5. Removed a duplicate branch-local vector Jacobian readiness walk. The
+   pullback readiness block already materializes the Jacobian pytree, so the
+   report keeps `jacobian_stack_ready_s` for compatibility but no longer
+   re-walks the same data.
+6. Spawned two read-only subagents for the next technical lanes. The
+   performance audit ranked lean trace mode and replay/VJP construction
+   caching as the next large changes, and identified the duplicate readiness
+   walk as a safe immediate cleanup. The validation audit recommended the next
+   promotion gate be an optional Boozer-space field-quality scalar
+   same-branch AD-vs-complete-FD test, while keeping adaptive branch
+   differentiation explicitly unclaimed.
+
+Results obtained:
+
+1. Ruff passed for the touched source, example, and test files.
+2. The current-only and Fourier-only exact same-branch tests passed locally.
+3. The deterministic free-boundary QS optimization smoke example completed
+   with `--write-same-branch-report --same-branch-report-mode vector`; the
+   generated JSON reported `same_branch=true`, `vector_available=true`,
+   `production_values_source=precomputed`, and
+   `max_base_abs_delta=7.77e-15`.
+4. The example smoke test file passed: `13` tests selected with one expected
+   xfail.
+5. The three promoted exact same-branch tests passed locally with coverage:
+   `3 passed in 83.34 s`.
+
+Best next steps:
+
+1. Commit/push this low-risk runtime reduction after the final focused bundle.
+2. Add the next validation gate as an optional slow/exact test: a
+   Boozer-space field-quality scalar, likely `quasi_isodynamic` total on a
+   tiny grid via `booz_xform_jax`, comparing same-branch AD against
+   complete-solve central FD under explicit branch fingerprints.
+3. Continue performance work on the remaining dominant cost: JAX/XLA replay
+   graph construction for branch-local vector VJP/pullbacks, not repeated
+   production scalar extraction.
+4. Keep the larger lean-trace/cache changes gated behind full-vs-lean replay
+   parity and branch-fingerprint tests.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9998% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 100%.
+- VMEC parity and physics gates: 97.5%.
+- Single-stage coil-only optimization: 92.1%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 95.0%; repeated branch-local base scalar extraction is
+  removed when complete-report base values are available.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 98.8%.
+- Overall free-boundary/single-stage plan: 98.65%.
 
 Last updated: 2026-06-05 on `main` with branch-local vector gates,
 `DMerc`/Glasser `D_R` gradient checks, CI runtime trimming, direct-coil

@@ -814,6 +814,11 @@ def write_same_branch_validation_report(
         raise ValueError("--same-branch-report-mode must be one of none, scalar, vector")
     if ad_mode not in {"direct", "custom_vjp"}:
         raise ValueError("--same-branch-report-ad-mode must be one of direct, custom_vjp")
+    report_base_values = {
+        str(key): float(values["base"])
+        for key, values in report["objective_values"].items()
+        if isinstance(values, dict) and "base" in values
+    }
     scalar_value_fns = {
         "aspect": lambda payload: float(
             np.asarray(
@@ -862,6 +867,7 @@ def write_same_branch_validation_report(
             params=base_params,
             complete_payload=report["base"],
             scalar_key=scalar_key,
+            production_values={scalar_key: report_base_values[scalar_key]},
             scalar_fn=lambda payload: {scalar_key: scalar_value_fns[scalar_key](payload)},
             replay_scalar_fn=lambda replay, payload: scalar_replay_fns[scalar_key](replay, payload),
             replay_kwargs={"use_stacked_step_controls": True},
@@ -882,6 +888,7 @@ def write_same_branch_validation_report(
             "differentiates_fixed_accepted_branch": bool(scalar["differentiates_fixed_accepted_branch"]),
             "replay_ad_mode": str(scalar["replay_ad_mode"]),
             "scalar_key": str(scalar["scalar_key"]),
+            "production_values_source": str(scalar.get("production_values_source", "unknown")),
             "replay_option_flags": scalar["replay_option_flags"],
             "replay_graph_metadata": scalar.get("replay_graph_metadata", {}),
             "value": float(scalar["value"]),
@@ -906,6 +913,7 @@ def write_same_branch_validation_report(
             params=base_params,
             complete_payload=report["base"],
             scalar_keys=scalar_keys,
+            production_values={key: report_base_values[key] for key in scalar_keys},
             scalar_fn=lambda payload: {
                 "aspect": float(
                     np.asarray(
@@ -964,6 +972,7 @@ def write_same_branch_validation_report(
             "differentiates_fixed_accepted_branch": bool(vector["differentiates_fixed_accepted_branch"]),
             "replay_ad_mode": str(vector["replay_ad_mode"]),
             "scalar_keys": list(scalar_keys),
+            "production_values_source": str(vector.get("production_values_source", "unknown")),
             "replay_option_flags": vector["replay_option_flags"],
             "replay_graph_metadata": vector.get("replay_graph_metadata", {}),
             "max_base_abs_delta": float(vector["max_base_abs_delta"]),

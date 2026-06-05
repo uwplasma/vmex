@@ -2163,10 +2163,15 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
             atol=1.0e-12,
         )
         if check_production_branch_local_scalar:
+            complete_base_values = {
+                key: values["base"]
+                for key, values in complete_report["objective_values"].items()
+            }
             production_branch_local = direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
                 params=base_params,
                 complete_payload=complete_report["base"],
                 scalar_key="aspect",
+                production_values={"aspect": complete_base_values["aspect"]},
                 scalar_fn=lambda payload: {
                     "aspect": aspect_objective_from_state(payload["result"].state),
                 },
@@ -2188,6 +2193,7 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
             assert production_branch_local["differentiates_adaptive_controller"] is False
             assert production_branch_local["differentiates_run_free_boundary"] is False
             assert production_branch_local["differentiates_fixed_accepted_branch"] is True
+            assert production_branch_local["production_values_source"] == "precomputed"
             assert production_branch_local["trace_replay_diagnostics"]["differentiates_adaptive_controller"] is False
             assert production_branch_local["replay_option_flags"]["use_stacked_step_controls"] is True
             assert production_branch_local["replay_option_flags"]["use_accepted_only_fast_path"] is True
@@ -2247,6 +2253,7 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
                     params=base_params,
                     complete_payload=complete_report["base"],
                     scalar_keys=tuple(vector_scalar_keys),
+                    production_values={key: complete_base_values[key] for key in vector_scalar_keys},
                     scalar_fn=lambda payload: {
                         "aspect": aspect_objective_from_state(payload["result"].state),
                         "lcfs_boundary_moment": lcfs_boundary_moment(payload["result"].state, payload["init"].static),
@@ -2267,6 +2274,7 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
             assert production_branch_local_scalars["differentiates_adaptive_controller"] is False
             assert production_branch_local_scalars["differentiates_run_free_boundary"] is False
             assert production_branch_local_scalars["differentiates_fixed_accepted_branch"] is True
+            assert production_branch_local_scalars["production_values_source"] == "precomputed"
             assert production_branch_local_scalars["scalar_keys"] == tuple(vector_scalar_keys)
             assert production_branch_local_scalars["trace_replay_diagnostics"]["differentiates_adaptive_controller"] is False
             assert production_branch_local_scalars["replay_option_flags"]["use_stacked_step_controls"] is True
