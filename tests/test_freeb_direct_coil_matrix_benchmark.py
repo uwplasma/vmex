@@ -127,6 +127,39 @@ def _direct_solve_payload() -> dict:
     }
 
 
+def _segmented_replay_payload() -> dict:
+    return {
+        "status": "passed",
+        "passed": True,
+        "metadata": {
+            "diagnostic": "direct_coil_segmented_replay_report",
+            "trace_generation_wall_s": 12.5,
+        },
+        "trace_summary": {
+            "n_traces": 2,
+            "preconditioner_policy_n_segments": 2,
+            "monolithic_used_accepted_only_fast_path": True,
+            "segmented_used_accepted_only_fast_path": True,
+            "monolithic_fallback_used_accepted_only_fast_path": False,
+            "segmented_fallback_used_accepted_only_fast_path": False,
+        },
+        "timings": {
+            "monolithic_first_s": 8.0,
+            "segmented_first_s": 9.0,
+            "monolithic_fallback_first_s": 10.0,
+            "segmented_fallback_first_s": 12.0,
+            "accepted_only_monolithic_speedup_first": 1.25,
+            "accepted_only_segmented_speedup_first": 4.0 / 3.0,
+        },
+        "parity": {
+            "monolithic_fast_fallback_objective_delta": 0.0,
+            "segmented_fast_fallback_objective_delta": 0.0,
+            "monolithic_fast_fallback_state_delta": 0.0,
+            "segmented_fast_fallback_state_delta": 0.0,
+        },
+    }
+
+
 def test_matrix_timing_snapshot_preserves_compact_nestor_details() -> None:
     rows = matrix._timing_snapshot(_direct_solve_payload(), include_nestor=True)
 
@@ -317,6 +350,35 @@ def test_child_specs_can_add_host_policy_ablation_rows(tmp_path) -> None:
         assert matrix._script_for(label).name == "bench_freeb_direct_coil_solve.py"
 
 
+def test_child_specs_can_add_segmented_replay_diagnostic_row(tmp_path) -> None:
+    specs = matrix._child_specs(quick=True, outdir=tmp_path, backend="gpu", include_replay_diagnostics=True)
+
+    labels = [label for label, _, _, _ in specs]
+    assert labels == [
+        "provider",
+        "direct_solve",
+        "direct_solve_jit_forces",
+        "gradient",
+        "segmented_replay",
+    ]
+    label, out, args, env = specs[-1]
+    assert label == "segmented_replay"
+    assert out.name == "direct_coil_segmented_replay_report_gpu.json"
+    assert args == [
+        "--niter",
+        "2",
+        "--mpol",
+        "3",
+        "--ntheta",
+        "6",
+        "--warm-repeats",
+        "1",
+        "--no-synthetic-multi-policy",
+    ]
+    assert env == {}
+    assert matrix._script_for(label).name == "direct_coil_segmented_replay_report.py"
+
+
 def test_run_child_applies_and_records_badjac_probe0_env(monkeypatch, tmp_path) -> None:
     captured: dict[str, object] = {}
 
@@ -345,6 +407,42 @@ def test_run_child_applies_and_records_badjac_probe0_env(monkeypatch, tmp_path) 
     assert row["env_overrides"] == matrix.BADJAC_PROBE0_ENV
     assert row["badjac_initial_state_probe_iters"] == "0"
     assert row["status"] == "completed"
+
+
+def test_run_child_records_segmented_replay_diagnostic_snapshot(monkeypatch, tmp_path) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured.update(kwargs)
+        return SimpleNamespace(returncode=0, stdout="child ok\n", stderr="")
+
+    monkeypatch.setattr(matrix.subprocess, "run", fake_run)
+    monkeypatch.setattr(matrix, "_load_json", lambda path: _segmented_replay_payload())
+
+    row = matrix._run_child(
+        "segmented_replay",
+        tmp_path / "out.json",
+        ["--niter", "2"],
+        backend="cpu",
+        timeout_s=1.0,
+    )
+
+    assert row["status"] == "completed"
+    assert row["case_counts"] == {"completed": 0, "skipped": 0, "failed": 0}
+    assert row["timings"] == []
+    replay = row["replay_diagnostics"]
+    assert replay["diagnostic"] == "direct_coil_segmented_replay_report"
+    assert replay["passed"] is True
+    assert replay["trace_generation_wall_s"] == 12.5
+    assert replay["n_traces"] == 2
+    assert replay["monolithic_used_accepted_only_fast_path"] is True
+    assert replay["segmented_fallback_used_accepted_only_fast_path"] is False
+    assert replay["monolithic_first_s"] == 8.0
+    assert replay["segmented_fallback_first_s"] == 12.0
+    assert replay["accepted_only_monolithic_speedup_first"] == 1.25
+    assert replay["segmented_fast_fallback_state_delta"] == 0.0
+    assert matrix._script_for("segmented_replay").name in captured["cmd"][1]
 
 
 def test_cpu_gpu_comparison_matches_completed_cases_and_reports_nestor_ratios() -> None:

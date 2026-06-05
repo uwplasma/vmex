@@ -12,12 +12,12 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
-Last updated: 2026-06-04 on `main` with the current replay-diagnostic
-fast-path timing patch. The latest fully green pushed main is commit
-`fe92381`, `docs: update free-boundary plan status`, which passed GitHub
-Actions run `26985348171`, including docs, build, console smoke, physics
-smoke, py3.10, py3.12, slow-physics coverage, exact free-boundary coverage
-shards, core py3.11 coverage shards, and the combined 95% coverage gate.
+Last updated: 2026-06-04 on `main` with the current matrix replay-diagnostic
+row patch. The latest fully green pushed main is commit `da15112`,
+`diagnostics: time accepted replay fast path`, which passed GitHub Actions run
+`26986003210`, including docs, build, console smoke, physics smoke, py3.10,
+py3.12, slow-physics coverage, exact free-boundary coverage shards, core
+py3.11 coverage shards, and the combined 95% coverage gate.
 
 The latest green main splits required py3.11 coverage into core, slow-physics,
 and exact shards while keeping a combined 95% coverage threshold, preserves the
@@ -252,6 +252,63 @@ Completion:
 - CI runtime refactor with preserved coverage/physics gates: 100%.
 - Docs/release hygiene: 96.5%.
 - Overall free-boundary/single-stage plan: 97.2%.
+
+### 2026-06-04 Matrix replay-diagnostic benchmark row
+
+Steps taken:
+
+1. Added `--include-replay-diagnostics` to
+   `tools/benchmarks/bench_freeb_direct_coil_matrix.py`.
+2. Added an opt-in `segmented_replay` child row that runs
+   `tools/diagnostics/direct_coil_segmented_replay_report.py` with tiny
+   bounded settings and no synthetic policy flips.
+3. Added compact summary extraction for accepted-only fast-path/fallback
+   replay timing, trace-generation timing, per-segment fast-path flags, and
+   fast-vs-fallback parity deltas.
+4. Added synthetic unit coverage for row construction, script routing, child
+   summary extraction, and forwarded replay diagnostics.
+
+Results obtained:
+
+1. `python -m ruff check tools/benchmarks/bench_freeb_direct_coil_matrix.py tests/test_freeb_direct_coil_matrix_benchmark.py`
+   passed.
+2. `python -m pytest -q tests/test_freeb_direct_coil_matrix_benchmark.py`
+   passed: `14 passed in 0.06 s`.
+3. CPU quick matrix with `--include-replay-diagnostics` passed:
+   `cpu segmented_replay: completed (passed)`.
+4. The matrix replay row recorded `trace_generation_wall_s=9.3756`,
+   `monolithic_first_s=8.5785`, `segmented_first_s=8.7746`,
+   `accepted_only_monolithic_speedup_first=1.0461`,
+   `accepted_only_segmented_speedup_first=1.0675`, and zero
+   fast/fallback objective and state deltas.
+
+Best next steps:
+
+1. Commit and push the matrix replay-diagnostic row, then watch CI.
+2. Run the same matrix row on `office` with `--include-gpu` so CPU/GPU replay
+   overhead is measured separately from trace setup.
+3. If GPU replay remains slower, target accepted-controller replay compilation
+   and dispatch rather than direct-coil field sampling or final dense NESTOR
+   solve.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.998% for branch-local
+  production-forward current/Fourier scalar and vector gradients; full
+  adaptive branch differentiation remains intentionally unclaimed.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 100%.
+- VMEC parity and physics gates: 96%.
+- Single-stage coil-only optimization: 86.5%.
+- Robust coil perturbation optimization: 70%.
+- CPU/GPU performance: 88%.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 96.5%.
+- Overall free-boundary/single-stage plan: 97.3%.
 
 ### 2026-06-04 Stacked replay NESTOR-axis correction
 

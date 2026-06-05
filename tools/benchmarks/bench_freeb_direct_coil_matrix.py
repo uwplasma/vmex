@@ -65,6 +65,14 @@ def _parser() -> argparse.ArgumentParser:
             "CPU/GPU control-path overhead and does not change solver defaults."
         ),
     )
+    p.add_argument(
+        "--include-replay-diagnostics",
+        action="store_true",
+        help=(
+            "Add an optional segmented accepted-replay diagnostic row. This separates complete-solve "
+            "trace generation from accepted-branch fast-path/fallback replay timing."
+        ),
+    )
     p.add_argument("--backend-note", default="", help="Optional note copied into the summary JSON.")
     p.add_argument("--timeout-s", type=float, default=240.0, help="Per-child benchmark timeout.")
     return p
@@ -398,6 +406,50 @@ def _timing_snapshot(payload: dict[str, Any] | None, *, include_nestor: bool = F
                 row["phase_timing"] = phase_timing
         rows.append(row)
     return rows
+
+
+def _compact_replay_diagnostic_snapshot(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Return accepted-replay fast-path timing/parity details from diagnostics."""
+
+    if not payload:
+        return None
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    timings = payload.get("timings") if isinstance(payload.get("timings"), dict) else {}
+    parity = payload.get("parity") if isinstance(payload.get("parity"), dict) else {}
+    trace_summary = payload.get("trace_summary") if isinstance(payload.get("trace_summary"), dict) else {}
+    if not timings and not parity and not trace_summary:
+        return None
+    return {
+        "diagnostic": metadata.get("diagnostic"),
+        "passed": bool(payload.get("passed", False)),
+        "trace_generation_wall_s": _finite_float(metadata.get("trace_generation_wall_s")),
+        "n_traces": trace_summary.get("n_traces"),
+        "preconditioner_policy_n_segments": trace_summary.get("preconditioner_policy_n_segments"),
+        "monolithic_used_accepted_only_fast_path": trace_summary.get("monolithic_used_accepted_only_fast_path"),
+        "segmented_used_accepted_only_fast_path": trace_summary.get("segmented_used_accepted_only_fast_path"),
+        "monolithic_fallback_used_accepted_only_fast_path": trace_summary.get(
+            "monolithic_fallback_used_accepted_only_fast_path"
+        ),
+        "segmented_fallback_used_accepted_only_fast_path": trace_summary.get(
+            "segmented_fallback_used_accepted_only_fast_path"
+        ),
+        "monolithic_first_s": _finite_float(timings.get("monolithic_first_s")),
+        "segmented_first_s": _finite_float(timings.get("segmented_first_s")),
+        "monolithic_fallback_first_s": _finite_float(timings.get("monolithic_fallback_first_s")),
+        "segmented_fallback_first_s": _finite_float(timings.get("segmented_fallback_first_s")),
+        "accepted_only_monolithic_speedup_first": _finite_float(
+            timings.get("accepted_only_monolithic_speedup_first")
+        ),
+        "accepted_only_segmented_speedup_first": _finite_float(timings.get("accepted_only_segmented_speedup_first")),
+        "monolithic_fast_fallback_objective_delta": _finite_float(
+            parity.get("monolithic_fast_fallback_objective_delta")
+        ),
+        "segmented_fast_fallback_objective_delta": _finite_float(
+            parity.get("segmented_fast_fallback_objective_delta")
+        ),
+        "monolithic_fast_fallback_state_delta": _finite_float(parity.get("monolithic_fast_fallback_state_delta")),
+        "segmented_fast_fallback_state_delta": _finite_float(parity.get("segmented_fast_fallback_state_delta")),
+    }
 
 
 def _finite_float(value: Any) -> float | None:
@@ -972,6 +1024,7 @@ def _child_specs(
     include_badjac_probe0: bool = False,
     include_timing_light: bool = False,
     include_policy_ablation: bool = False,
+    include_replay_diagnostics: bool = False,
 ) -> list[ChildSpec]:
     suffix = f"_{backend}.json"
     if quick:
@@ -1001,6 +1054,15 @@ def _child_specs(
                 {},
             ),
         ]
+        if include_replay_diagnostics:
+            specs.append(
+                (
+                    "segmented_replay",
+                    outdir / f"direct_coil_segmented_replay_report{suffix}",
+                    ["--niter", "2", "--mpol", "3", "--ntheta", "6", "--warm-repeats", "1", "--no-synthetic-multi-policy"],
+                    {},
+                )
+            )
         if include_timing_light:
             specs = _with_timing_light_rows(specs)
         if include_policy_ablation:
@@ -1032,6 +1094,15 @@ def _child_specs(
             {},
         ),
     ]
+    if include_replay_diagnostics:
+        specs.append(
+            (
+                "segmented_replay",
+                outdir / f"direct_coil_segmented_replay_report{suffix}",
+                ["--niter", "2", "--mpol", "3", "--ntheta", "6", "--warm-repeats", "1", "--no-synthetic-multi-policy"],
+                {},
+            )
+        )
     if include_timing_light:
         specs = _with_timing_light_rows(specs)
     if include_policy_ablation:
@@ -1042,6 +1113,8 @@ def _child_specs(
 def _script_for(label: str) -> Path:
     if label.startswith("direct_solve"):
         return REPO_ROOT / "tools" / "benchmarks" / "bench_freeb_direct_coil_solve.py"
+    if label == "segmented_replay":
+        return REPO_ROOT / "tools" / "diagnostics" / "direct_coil_segmented_replay_report.py"
     return {
         "provider": REPO_ROOT / "tools" / "benchmarks" / "bench_external_field_providers.py",
         "gradient": REPO_ROOT / "tools" / "benchmarks" / "bench_freeb_coil_gradient.py",
@@ -1102,6 +1175,7 @@ def _run_child(
             "child_backend": None if payload is None else payload.get("backend"),
             "case_counts": _case_counts(payload),
             "timings": _timing_snapshot(payload, include_nestor=label.startswith("direct_solve")),
+            "replay_diagnostics": _compact_replay_diagnostic_snapshot(payload) if label == "segmented_replay" else None,
         }
     except subprocess.TimeoutExpired as exc:
         return {
@@ -1136,6 +1210,7 @@ def main(argv: list[str] | None = None) -> int:
         include_badjac_probe0=bool(args.include_badjac_probe0),
         include_timing_light=bool(args.include_timing_light),
         include_policy_ablation=bool(args.include_policy_ablation),
+        include_replay_diagnostics=bool(args.include_replay_diagnostics),
     ):
         rows.append(
             _run_child(
@@ -1158,6 +1233,7 @@ def main(argv: list[str] | None = None) -> int:
                 include_badjac_probe0=bool(args.include_badjac_probe0),
                 include_timing_light=bool(args.include_timing_light),
                 include_policy_ablation=bool(args.include_policy_ablation),
+                include_replay_diagnostics=bool(args.include_replay_diagnostics),
             ):
                 rows.append(
                     _run_child(
@@ -1193,6 +1269,7 @@ def main(argv: list[str] | None = None) -> int:
         "include_badjac_probe0": bool(args.include_badjac_probe0),
         "include_timing_light": bool(args.include_timing_light),
         "include_policy_ablation": bool(args.include_policy_ablation),
+        "include_replay_diagnostics": bool(args.include_replay_diagnostics),
         "backend_note": str(args.backend_note),
         "gpu_probe": gpu_probe,
         "output_dir": outdir,
