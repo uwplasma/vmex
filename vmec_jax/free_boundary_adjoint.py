@@ -4278,8 +4278,7 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
             **replay_options,
         )
 
-    grad = jax.grad(_replay_scalar)(params)
-    replay_value = _replay_scalar(params)
+    replay_value, grad = jax.value_and_grad(_replay_scalar)(params)
     diagnostics = free_boundary_adjoint_trace_replay_diagnostics(traces)
     return {
         "contract": "production-forward branch-local run_free_boundary scalar value/gradient",

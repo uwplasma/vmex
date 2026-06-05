@@ -9539,6 +9539,63 @@ Completion:
   green baseline.
 - Docs/release hygiene: 98.5%.
 
+### 2026-06-05 Branch-Local Scalar Replay Value/Gradient Fusion
+
+Steps taken:
+
+1. Replaced the branch-local scalar helper's separate `jax.grad` plus replay
+   value call with one `jax.value_and_grad` call.
+2. Kept the custom-VJP replay contract unchanged: it still differentiates only
+   the fixed accepted branch and does not claim adaptive host-controller
+   differentiation.
+3. Ran a focused promoted current-only same-branch custom-VJP test and the
+   single-stage QS smoke tests.
+4. Re-ran the explicit scalar report mode on the bounded synthetic
+   direct-coil QS smoke to measure the effect.
+
+Results obtained:
+
+1. `python -m ruff check vmec_jax/free_boundary_adjoint.py
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py` passed.
+2. `JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_fd
+   -q --durations=10` passed; the test took `75.51 s`.
+3. `python -m pytest -q tests/test_free_boundary_qs_coil_optimization_smoke.py
+   --durations=10` passed: `11 passed, 1 xfailed in 1.26 s`.
+4. The explicit scalar report mode still validates `qs_total` with replay value
+   agreement `5.99e-15` and directional error `1.46e-11`.
+5. The explicit scalar report wall time dropped from roughly one minute to
+   about `47 s`, and the XLA simplifier warning count dropped from three to
+   two in this cold-process smoke. The remaining warning is still an open
+   compile-path issue.
+
+Best next steps:
+
+1. Commit and push the scalar replay fusion.
+2. Watch CI for this core-adjoint change.
+3. Continue reducing the explicit scalar/vector replay compile path, likely by
+   specializing or caching controller replay setup rather than changing the
+   validated same-branch contract.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99985% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.4%.
+- Single-stage coil-only optimization: 91.0%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 92.6%; explicit scalar replay is slightly cheaper but
+  still has cold XLA compile warnings.
+- CI runtime refactor with preserved coverage/physics gates: 100% on latest
+  green baseline, new core-adjoint commit pending.
+- Docs/release hygiene: 98.5%.
+
 ### 2026-06-05 Finite-Beta ESSOS Direct-Coil Dry-Run Support
 
 Steps taken:
