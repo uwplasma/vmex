@@ -27,6 +27,10 @@ from .free_boundary_adjoint_controller import (
     jax_visible_nonlinear_controller_directional_check_jax,
     jax_visible_nonlinear_controller_jax,
     jax_visible_segmented_accepted_nonlinear_controller_jax,
+    jax_visible_segmented_state_only_accepted_nonlinear_controller_jax,
+    jax_visible_state_only_accepted_nonlinear_controller_jax,
+    jax_visible_state_only_accepted_only_nonlinear_controller_jax,
+    jax_visible_unrolled_state_only_accepted_only_nonlinear_controller_jax,
     jax_visible_unrolled_accepted_only_nonlinear_controller_jax,
     pytree_directional_derivative_check_jax,
 )
@@ -54,6 +58,10 @@ __all__ = [
     "jax_visible_nonlinear_controller_directional_check_jax",
     "jax_visible_nonlinear_controller_jax",
     "jax_visible_segmented_accepted_nonlinear_controller_jax",
+    "jax_visible_segmented_state_only_accepted_nonlinear_controller_jax",
+    "jax_visible_state_only_accepted_nonlinear_controller_jax",
+    "jax_visible_state_only_accepted_only_nonlinear_controller_jax",
+    "jax_visible_unrolled_state_only_accepted_only_nonlinear_controller_jax",
     "jax_visible_unrolled_accepted_only_nonlinear_controller_jax",
     "pytree_directional_derivative_check_jax",
 ]
@@ -3495,7 +3503,12 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
             )
             for index, segment in enumerate(step_policy_segments)
         )
-        run = jax_visible_segmented_accepted_nonlinear_controller_jax(
+        segmented_runner = (
+            jax_visible_segmented_state_only_accepted_nonlinear_controller_jax
+            if bool(state_only_replay)
+            else jax_visible_segmented_accepted_nonlinear_controller_jax
+        )
+        run = segmented_runner(
             step_fns,
             accept_fn,
             converged_fn,
@@ -3535,7 +3548,12 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
             )
             for index, segment in enumerate(preconditioner_policy_segments)
         )
-        run = jax_visible_segmented_accepted_nonlinear_controller_jax(
+        segmented_runner = (
+            jax_visible_segmented_state_only_accepted_nonlinear_controller_jax
+            if bool(state_only_replay)
+            else jax_visible_segmented_accepted_nonlinear_controller_jax
+        )
+        run = segmented_runner(
             step_fns,
             accept_fn,
             converged_fn,
@@ -3556,11 +3574,18 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
             use_unrolled = int(unroll_accepted_only_segments_below) > 0 and len(trace_seq) <= int(
                 unroll_accepted_only_segments_below
             )
-            accepted_only_runner = (
-                jax_visible_unrolled_accepted_only_nonlinear_controller_jax
-                if use_unrolled
-                else jax_visible_accepted_only_nonlinear_controller_jax
-            )
+            if bool(state_only_replay):
+                accepted_only_runner = (
+                    jax_visible_unrolled_state_only_accepted_only_nonlinear_controller_jax
+                    if use_unrolled
+                    else jax_visible_state_only_accepted_only_nonlinear_controller_jax
+                )
+            else:
+                accepted_only_runner = (
+                    jax_visible_unrolled_accepted_only_nonlinear_controller_jax
+                    if use_unrolled
+                    else jax_visible_accepted_only_nonlinear_controller_jax
+                )
             run = accepted_only_runner(
                 step_fn,
                 converged_fn,
@@ -3570,7 +3595,12 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                 checkpoint_steps=checkpoint_steps,
             )
         else:
-            run = jax_visible_accepted_nonlinear_controller_jax(
+            accepted_runner = (
+                jax_visible_state_only_accepted_nonlinear_controller_jax
+                if bool(state_only_replay)
+                else jax_visible_accepted_nonlinear_controller_jax
+            )
+            run = accepted_runner(
                 step_fn,
                 accept_fn,
                 converged_fn,
