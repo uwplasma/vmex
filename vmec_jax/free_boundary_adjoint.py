@@ -566,32 +566,45 @@ def vmec_nonsingular_terms_from_bexni_jax(
         raise ValueError("bexni must contain at least basis['nuv3'] entries")
     bex = bex[:nuv3]
 
-    imirr_full = jnp.asarray(basis["imirr_full"], dtype=jnp.int32)
-    idx_u = jnp.arange(nu_fourp, dtype=jnp.int32)
-    idx_v = jnp.arange(nv, dtype=jnp.int32)
-    iuv_grid = idx_u[:, None] * int(nv) + idx_v[None, :]
-    iref_grid = imirr_full[iuv_grid]
-    cosv_modes = 0.5 * onp * cosv_tab[: nf + 1, :]
-    sinv_modes = 0.5 * onp * sinv_tab[: nf + 1, :]
-    mf1 = int(mf + 1)
-    idx_p_rows: list[int] = []
-    idx_m_rows: list[int] = []
-    negative_positions: list[int] = []
-    flat_pos = 0
-    for m in range(mf + 1):
-        for n in range(nf + 1):
-            idx_p_rows.append(int(m + (n + nf) * mf1))
-            if n != 0 and m != 0:
-                idx_m_rows.append(int(m + ((-n) + nf) * mf1))
-                negative_positions.append(int(flat_pos))
-            flat_pos += 1
-    idx_p_flat = jnp.asarray(idx_p_rows, dtype=jnp.int32)
-    idx_m_negative = jnp.asarray(idx_m_rows, dtype=jnp.int32)
-    negative_positions_arr = jnp.asarray(negative_positions, dtype=jnp.int32)
-    sinm_sym = sinui[: mf + 1, :]
-    cosm_sym = -cosui[: mf + 1, :]
-    sinm_asym = cosui[: mf + 1, :]
-    cosm_asym = sinui[: mf + 1, :]
+    if "iuv_grid" in tables:
+        iuv_grid = jnp.asarray(tables["iuv_grid"], dtype=jnp.int32)
+        iref_grid = jnp.asarray(tables["iref_grid"], dtype=jnp.int32)
+        cosv_modes = jnp.asarray(tables["cosv_modes"])
+        sinv_modes = jnp.asarray(tables["sinv_modes"])
+        idx_p_flat = jnp.asarray(tables["idx_p_flat"], dtype=jnp.int32)
+        idx_m_negative = jnp.asarray(tables["idx_m_negative"], dtype=jnp.int32)
+        negative_positions_arr = jnp.asarray(tables["negative_positions"], dtype=jnp.int32)
+        sinm_sym = jnp.asarray(tables["sinm_sym"])
+        cosm_sym = jnp.asarray(tables["cosm_sym"])
+        sinm_asym = jnp.asarray(tables["sinm_asym"])
+        cosm_asym = jnp.asarray(tables["cosm_asym"])
+    else:
+        imirr_full = jnp.asarray(basis["imirr_full"], dtype=jnp.int32)
+        idx_u = jnp.arange(nu_fourp, dtype=jnp.int32)
+        idx_v = jnp.arange(nv, dtype=jnp.int32)
+        iuv_grid = idx_u[:, None] * int(nv) + idx_v[None, :]
+        iref_grid = imirr_full[iuv_grid]
+        cosv_modes = 0.5 * onp * cosv_tab[: nf + 1, :]
+        sinv_modes = 0.5 * onp * sinv_tab[: nf + 1, :]
+        mf1 = int(mf + 1)
+        idx_p_rows: list[int] = []
+        idx_m_rows: list[int] = []
+        negative_positions: list[int] = []
+        flat_pos = 0
+        for m in range(mf + 1):
+            for n in range(nf + 1):
+                idx_p_rows.append(int(m + (n + nf) * mf1))
+                if n != 0 and m != 0:
+                    idx_m_rows.append(int(m + ((-n) + nf) * mf1))
+                    negative_positions.append(int(flat_pos))
+                flat_pos += 1
+        idx_p_flat = jnp.asarray(idx_p_rows, dtype=jnp.int32)
+        idx_m_negative = jnp.asarray(idx_m_rows, dtype=jnp.int32)
+        negative_positions_arr = jnp.asarray(negative_positions, dtype=jnp.int32)
+        sinm_sym = sinui[: mf + 1, :]
+        cosm_sym = -cosui[: mf + 1, :]
+        sinm_asym = cosui[: mf + 1, :]
+        cosm_asym = sinui[: mf + 1, :]
 
     gstore = jnp.zeros((nuv_full,), dtype=Rf.dtype)
     grpmn = jnp.zeros((mnpd2, nuv3), dtype=Rf.dtype)
@@ -1420,6 +1433,64 @@ def free_boundary_boundary_geometry_jax(
     }
 
 
+def _with_jax_nonsingular_replay_tables(
+    *,
+    basis: dict[str, Any],
+    tables: dict[str, Any],
+    nv: int,
+) -> dict[str, Any]:
+    """Add JAX NESTOR replay tables that depend only on static grid data."""
+
+    if "iuv_grid" in tables:
+        return tables
+
+    mf = int(basis["mf"])
+    nf = int(basis["nf"])
+    onp = float(basis["onp"])
+    cosv_tab = np.asarray(tables["cosv_tab"], dtype=float)
+    sinv_tab = np.asarray(tables["sinv_tab"], dtype=float)
+    cosui = np.asarray(tables["cosui"], dtype=float)
+    sinui = np.asarray(tables["sinui"], dtype=float)
+    nu_fourp = int(cosui.shape[1])
+    if nu_fourp <= 0:
+        raise ValueError("invalid nonsingular table shape")
+
+    iuv_grid = (np.arange(nu_fourp, dtype=np.int32)[:, None] * int(nv)) + np.arange(int(nv), dtype=np.int32)[
+        None, :
+    ]
+    imirr_full = np.asarray(basis["imirr_full"], dtype=np.int32)
+    mf1 = int(mf + 1)
+    idx_p_rows: list[int] = []
+    idx_m_rows: list[int] = []
+    negative_positions: list[int] = []
+    flat_pos = 0
+    for m in range(mf + 1):
+        for n in range(nf + 1):
+            idx_p_rows.append(int(m + (n + nf) * mf1))
+            if n != 0 and m != 0:
+                idx_m_rows.append(int(m + ((-n) + nf) * mf1))
+                negative_positions.append(int(flat_pos))
+            flat_pos += 1
+
+    enriched = dict(tables)
+    enriched.update(
+        {
+            "iuv_grid": np.asarray(iuv_grid, dtype=np.int32),
+            "iref_grid": np.asarray(imirr_full[iuv_grid], dtype=np.int32),
+            "cosv_modes": 0.5 * onp * np.asarray(cosv_tab[: nf + 1, :], dtype=float),
+            "sinv_modes": 0.5 * onp * np.asarray(sinv_tab[: nf + 1, :], dtype=float),
+            "idx_p_flat": np.asarray(idx_p_rows, dtype=np.int32),
+            "idx_m_negative": np.asarray(idx_m_rows, dtype=np.int32),
+            "negative_positions": np.asarray(negative_positions, dtype=np.int32),
+            "sinm_sym": np.asarray(sinui[: mf + 1, :], dtype=float),
+            "cosm_sym": -np.asarray(cosui[: mf + 1, :], dtype=float),
+            "sinm_asym": np.asarray(cosui[: mf + 1, :], dtype=float),
+            "cosm_asym": np.asarray(sinui[: mf + 1, :], dtype=float),
+        }
+    )
+    return enriched
+
+
 def direct_coil_boundary_replay_context_for_shape(
     static: Any,
     *,
@@ -1456,6 +1527,7 @@ def direct_coil_boundary_replay_context_for_shape(
     )
     nvper = 64 if nzeta == 1 else max(1, int(static.cfg.nfp))
     tables = _ensure_vmec_nonsingular_kernel_tables(basis=basis, nv=nzeta, nvper=nvper)
+    tables = _with_jax_nonsingular_replay_tables(basis=basis, tables=tables, nv=nzeta)
     return {
         "basis": basis,
         "tables": tables,
