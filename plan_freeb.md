@@ -12316,3 +12316,71 @@ Completion:
 - CI runtime refactor with preserved coverage/physics gates: 99.9% pending the
   rerun of the exact combined coverage gate after this repair.
 - Docs/release hygiene: 99.5%.
+
+### 2026-06-06 Static NESTOR Replay Table Hoist
+
+Steps taken:
+
+1. Confirmed the previous pushed coverage repair reached a fully green GitHub
+   Actions run: ``27076521344`` on commit ``90bfdc0``, with exact combined line
+   coverage at ``95.00%``.
+2. Hoisted the static index/trigonometric tables used by
+   ``vmec_nonsingular_terms_from_bexni_jax`` into the
+   ``direct_coil_boundary_replay_context_for_shape`` setup path, while keeping
+   the original in-function table-construction fallback for callers that pass
+   legacy table dictionaries.
+3. Timed the promoted branch-local vector report with the same smoke direct-coil
+   QS example used for phase-2 same-branch evidence.
+
+Results obtained:
+
+1. ``python -m ruff check vmec_jax/free_boundary_adjoint.py
+   tests/test_free_boundary_vacuum_adjoint.py
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py``
+   passed.
+2. ``JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_vacuum_adjoint.py -q`` passed with ``63`` tests.
+3. ``JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree
+   -q`` passed.
+4. The CI-equivalent ``py311_coverage_only`` shard passed locally with
+   ``24 passed in 70.45 s``.
+5. The CI-equivalent same-branch exact shard passed locally with
+   ``3 passed in 82.07 s``.
+6. Branch-local vector timing for ``aspect,accepted_bnormal_rms`` was
+   ``7.54 s`` total wall time with AD-vs-FD errors of about ``1e-11`` for
+   aspect and ``1e-19`` for accepted ``Bnormal`` RMS, compared with the previous
+   ``~7.73 s`` reference.
+7. The state-only production vector path ``aspect,qs_total`` was ``9.90 s``,
+   compared with the previous ``~10.18 s`` reference, with AD-vs-FD errors near
+   ``1e-11``.
+
+Best next steps:
+
+1. Commit and push the static-table hoist, then watch the full CI run because
+   the coverage gate remains exactly at the ``95%`` boundary.
+2. Continue performance work on replay/JVP graph width, but only keep patches
+   with measured branch-local report gains and unchanged same-branch AD-vs-FD
+   evidence.
+3. Keep adaptive full-loop adjoint claims explicitly fingerprint-gated and
+   unclaimed until a true branch-changing adaptive controller derivative is
+   validated.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99995% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.9%.
+- Single-stage coil-only optimization: 97.3%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 98.8%; static replay setup is marginally faster, but
+  cold replay/JVP graph construction remains the main blocker.
+- CI runtime refactor with preserved coverage/physics gates: 100% locally for
+  the affected exact shards; full post-push CI still required.
+- Docs/release hygiene: 99.5%.
