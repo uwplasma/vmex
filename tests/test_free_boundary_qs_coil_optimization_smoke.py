@@ -442,6 +442,7 @@ def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path
         assert kwargs["include_trace_replay_diagnostics"] is False
         assert kwargs["include_payload"] is False
         assert kwargs["include_replay_graph_metadata"] is False
+        assert kwargs["replay_kwargs"]["state_only_replay"] is True
         return {
             "uses_production_forward": True,
             "differentiates_adaptive_controller": False,
@@ -451,7 +452,7 @@ def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path
             "scalar_key": "aspect",
             "includes_payload": False,
             "includes_replay_graph_metadata": False,
-            "replay_option_flags": {"use_stacked_step_controls": True},
+            "replay_option_flags": {"use_stacked_step_controls": True, "state_only_replay": True},
             "replay_graph_metadata": {
                 "omitted": True,
                 "differentiates_adaptive_controller": False,
@@ -497,8 +498,10 @@ def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path
     assert scalar["differentiates_fixed_accepted_branch"] is True
     assert scalar["replay_ad_mode"] == "direct"
     assert scalar["scalar_key"] == "aspect"
+    assert scalar["state_only_replay"] is True
     assert scalar["includes_payload"] is False
     assert scalar["includes_replay_graph_metadata"] is False
+    assert scalar["replay_option_flags"]["state_only_replay"] is True
     assert scalar["replay_graph_metadata"]["omitted"] is True
     assert scalar["exact_directional"] == pytest.approx(expected_directional)
     assert scalar["complete_fd_directional"] == pytest.approx(0.7)
@@ -587,6 +590,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
         assert kwargs["include_trace_replay_diagnostics"] is False
         assert kwargs["include_payload"] is False
         assert kwargs["include_replay_graph_metadata"] is False
+        assert kwargs["replay_kwargs"]["state_only_replay"] is True
         assert kwargs["direction_params"] is not None
         assert kwargs["direction_params"].n_segments == direction_params.n_segments
         assert kwargs["scalar_keys"] == ("aspect", "qs_total")
@@ -600,7 +604,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
             "scalar_keys": ("aspect", "qs_total"),
             "includes_payload": False,
             "includes_replay_graph_metadata": False,
-            "replay_option_flags": {"use_stacked_step_controls": True},
+            "replay_option_flags": {"use_stacked_step_controls": True, "state_only_replay": True},
             "replay_graph_metadata": {
                 "omitted": True,
                 "differentiates_adaptive_controller": False,
@@ -660,7 +664,9 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
     assert vector["replay_ad_mode"] == "direct"
     assert vector["derivative_mode"] == "directional_jvp"
     assert vector["scalar_keys"] == ["aspect", "qs_total"]
+    assert vector["state_only_replay"] is True
     assert vector["replay_option_flags"]["use_stacked_step_controls"] is True
+    assert vector["replay_option_flags"]["state_only_replay"] is True
     assert vector["includes_payload"] is False
     assert vector["includes_replay_graph_metadata"] is False
     assert vector["replay_graph_metadata"]["omitted"] is True

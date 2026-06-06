@@ -12,6 +12,75 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
+### 2026-06-06 State-Only Branch-Local Replay For Final-State Reports
+
+Steps taken:
+
+1. Confirmed commit ``347f4e8`` completed GitHub Actions successfully,
+   including ``py3.10``, ``py3.12``, docs, exact free-boundary shards, and the
+   combined coverage gate.
+2. Added an opt-in ``state_only_replay`` flag to
+   ``direct_coil_accepted_trace_controller_replay_objective_jax``.  The flag
+   still replays direct-coil vacuum fields and accepted VMEC state updates, but
+   skips per-step force, Bnormal RMS, and Bsqvac RMS history arrays that are
+   not needed by final-state scalar reports.
+3. Wired the direct-coil QS coil-only example's same-branch scalar/vector
+   reports to enable ``state_only_replay`` automatically when every requested
+   scalar is final-state-only: ``state_norm``, ``aspect``, ``qs_total``, or
+   ``lcfs_boundary_moment``.
+4. Kept ``accepted_bnormal_rms`` on the full-history replay path because it
+   explicitly depends on accepted-step vacuum RMS history.
+5. Added tests that compare state-only replay state and directional JVPs
+   against the existing full replay, and tests that the example report records
+   compact replay provenance.
+
+Results obtained:
+
+1. ``python -m ruff check`` passed for the touched source, example, and test
+   files.
+2. The focused same-branch report writer scalar/vector tests passed.
+3. The accepted-update replay AD-vs-FD test passed with the new state-only
+   replay equivalence/JVP assertions.
+4. The current-only complete-solve same-branch FD gate passed, including
+   history-dependent accepted Bnormal/Bsqvac RMS checks.
+5. The example smoke command with ``--write-same-branch-report
+   --same-branch-report-mode vector --same-branch-report-vector-keys
+   aspect,qs_total`` completed and wrote ``state_only_replay=true`` in the
+   branch-local vector report.  The branch-local vector JVP wall time was about
+   ``10.07 s`` on the local machine; the remaining dominant cost is still cold
+   JAX replay/JVP graph construction.
+
+Best next steps:
+
+1. Run Sphinx and the exact focused shard, then commit/push this replay
+   performance update.
+2. Continue reducing cold branch-local replay/JVP graph construction, now
+   focused on the strict accepted-state update and NESTOR replay graph rather
+   than report plumbing, trace diagnostics, or accepted-history arrays.
+3. Keep the adaptive full-loop exact-adjoint claim conservative; this patch
+   only accelerates fixed accepted-branch reports and does not differentiate
+   adaptive host branch selection.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99992% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.9%.
+- Single-stage coil-only optimization: 96.2%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 97.5%; final-state branch-local reports now avoid
+  accepted-history replay arrays, but cold replay/JVP graph construction
+  remains the next blocker.
+- CI runtime refactor with preserved coverage/physics gates: 100%; commit
+  ``347f4e8`` is green.
+- Docs/release hygiene: 99.5%.
+
 ### 2026-06-06 Proposal Evidence Final-Best Bookkeeping
 
 Steps taken:

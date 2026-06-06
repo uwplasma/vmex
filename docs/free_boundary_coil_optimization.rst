@@ -713,6 +713,13 @@ vacuum-RMS, and QS postprocessing.  Use
 finite-difference artifact and want to avoid cold branch-local replay
 compilation.  Use ``--same-branch-report-mode scalar`` to validate one
 fixed-accepted-branch ``qs_total`` gradient.
+Final-state-only scalar sets, currently ``state_norm``, ``aspect``,
+``qs_total``, and ``lcfs_boundary_moment``, automatically use the compact
+``state_only_replay`` path.  That path still evaluates the direct-coil vacuum
+field and VMEC accepted-state update, but it does not materialize accepted-step
+force/Bnormal/Bsqvac RMS history arrays.  History-dependent metrics such as
+``accepted_bnormal_rms`` deliberately keep the full replay-history path and
+therefore remain more expensive.
 The scalar can be changed with ``--same-branch-report-scalar-key``.  Use
 ``state_norm`` for a non-physics replay-graph timing probe, ``aspect`` for a
 cheap physical scalar, and ``qs_total`` for the QS-relevant scalar.  The
@@ -736,7 +743,8 @@ base/plus/minus finite-difference solves, while
 fixed-accepted-branch replay derivative.  On the current tiny circle-provider
 smoke, the forward objective evaluation is about two seconds, the complete
 finite-difference report is several seconds, and the first cold branch-local
-scalar replay can still take tens of seconds.  That is why derivative-detail
+scalar replay can still take seconds to tens of seconds depending on whether
+the selected scalars need replay history.  That is why derivative-detail
 reports remain opt-in performance diagnostics rather than default example
 output.  When scalar or vector detail is requested, the corresponding
 ``branch_local_*`` block also includes nested timing fields such as

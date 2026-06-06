@@ -3000,6 +3000,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     use_accepted_only_fast_path: bool = True,
     replay_plan: Mapping[str, Any] | None = None,
     include_replay_aux: bool = True,
+    state_only_replay: bool = False,
     jit_preconditioner_apply: bool = True,
     unroll_accepted_only_segments_below: int = 0,
 ) -> dict[str, Any]:
@@ -3027,6 +3028,10 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     conditional only for segments whose effective controller masks prove that
     every slot is active and accepted. Rejected, inactive, or post-convergence
     padded slots automatically use the ordinary controller path.
+    ``state_only_replay`` is a narrower production-report fast path: it still
+    replays the direct-coil vacuum field and VMEC state update, but it omits
+    per-step force/vacuum objective history needed only by history-dependent
+    scalars such as accepted Bnormal/Bsqvac RMS.
 
     The helper intentionally keeps every trace accepted.  It does not
     differentiate through the host policy that selected the traces; it validates
@@ -3162,9 +3167,14 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                         include_analytic=bool(include_analytic),
                     )
             freeb_bsqvac_half = replay["bsqvac"]
-            bsqvac_objective = _weighted_half_norm(replay["bsqvac"], bsqvac_weight)
-            bsqvac_rms = jnp.sqrt(jnp.mean(jnp.square(jnp.asarray(replay["bsqvac"]))))
-            bnormal_rms = jnp.sqrt(jnp.mean(jnp.square(jnp.asarray(replay["vac"]["bnormal"]))))
+            if bool(state_only_replay):
+                bsqvac_objective = jnp.asarray(0.0)
+                bsqvac_rms = jnp.asarray(0.0)
+                bnormal_rms = jnp.asarray(0.0)
+            else:
+                bsqvac_objective = _weighted_half_norm(replay["bsqvac"], bsqvac_weight)
+                bsqvac_rms = jnp.sqrt(jnp.mean(jnp.square(jnp.asarray(replay["bsqvac"]))))
+                bnormal_rms = jnp.sqrt(jnp.mean(jnp.square(jnp.asarray(replay["vac"]["bnormal"]))))
         else:
             freeb_bsqvac_half = trace.get("freeb_bsqvac_half", None)
             bsqvac_objective = jnp.asarray(0.0)
@@ -3182,6 +3192,10 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                 enforce_edge=bool(enforce_edge),
                 jit_preconditioner_apply=bool(jit_preconditioner_apply),
             )
+        if bool(state_only_replay):
+            return step["step"]["state_post"], {
+                "state_reset": reset_to_trace_pre,
+            }
         return step["step"]["state_post"], {
             "force": _tree_weighted_half_norm(step["force"], force_weight),
             "bsqvac": bsqvac_objective,
@@ -3266,9 +3280,14 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                         include_analytic=bool(include_analytic),
                     )
             freeb_bsqvac_half = replay["bsqvac"]
-            bsqvac_objective = _weighted_half_norm(replay["bsqvac"], bsqvac_weight)
-            bsqvac_rms = jnp.sqrt(jnp.mean(jnp.square(jnp.asarray(replay["bsqvac"]))))
-            bnormal_rms = jnp.sqrt(jnp.mean(jnp.square(jnp.asarray(replay["vac"]["bnormal"]))))
+            if bool(state_only_replay):
+                bsqvac_objective = jnp.asarray(0.0)
+                bsqvac_rms = jnp.asarray(0.0)
+                bnormal_rms = jnp.asarray(0.0)
+            else:
+                bsqvac_objective = _weighted_half_norm(replay["bsqvac"], bsqvac_weight)
+                bsqvac_rms = jnp.sqrt(jnp.mean(jnp.square(jnp.asarray(replay["bsqvac"]))))
+                bnormal_rms = jnp.sqrt(jnp.mean(jnp.square(jnp.asarray(replay["vac"]["bnormal"]))))
         else:
             freeb_bsqvac_half = trace.get("freeb_bsqvac_half", None)
             bsqvac_objective = jnp.asarray(0.0)
@@ -3340,6 +3359,10 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                 enforce_edge=bool(enforce_edge),
                 jit_preconditioner_apply=bool(jit_preconditioner_apply),
             )
+        if bool(state_only_replay):
+            return step["step"]["state_post"], {
+                "state_reset": reset_to_trace_pre,
+            }
         return step["step"]["state_post"], {
             "force": _tree_weighted_half_norm(step["force"], force_weight),
             "bsqvac": bsqvac_objective,
@@ -3380,13 +3403,18 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                     )
 
                 def _skip(_unused):
-                    return state, {
-                        "force": jnp.asarray(0.0),
-                        "bsqvac": jnp.asarray(0.0),
-                        "bsqvac_rms": jnp.asarray(0.0),
-                        "bnormal_rms": jnp.asarray(0.0),
-                        "state_reset": jnp.asarray(False, dtype=bool),
-                    }
+                    if bool(state_only_replay):
+                        return state, {"state_reset": jnp.asarray(False, dtype=bool)}
+                    return (
+                        state,
+                        {
+                            "force": jnp.asarray(0.0),
+                            "bsqvac": jnp.asarray(0.0),
+                            "bsqvac_rms": jnp.asarray(0.0),
+                            "bnormal_rms": jnp.asarray(0.0),
+                            "state_reset": jnp.asarray(False, dtype=bool),
+                        },
+                    )
 
                 return jax.lax.cond(do_propose, _propose, _skip, operand=None)
 
@@ -3415,13 +3443,18 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                 return jax.lax.switch(step_index, branches, (state, coil_params, control))
 
             def _skip(_unused):
-                return state, {
-                    "force": jnp.asarray(0.0),
-                    "bsqvac": jnp.asarray(0.0),
-                    "bsqvac_rms": jnp.asarray(0.0),
-                    "bnormal_rms": jnp.asarray(0.0),
-                    "state_reset": jnp.asarray(False, dtype=bool),
-                }
+                if bool(state_only_replay):
+                    return state, {"state_reset": jnp.asarray(False, dtype=bool)}
+                return (
+                    state,
+                    {
+                        "force": jnp.asarray(0.0),
+                        "bsqvac": jnp.asarray(0.0),
+                        "bsqvac_rms": jnp.asarray(0.0),
+                        "bnormal_rms": jnp.asarray(0.0),
+                        "state_reset": jnp.asarray(False, dtype=bool),
+                    },
+                )
 
             return jax.lax.cond(do_propose, _propose, _skip, operand=None)
 
@@ -3546,18 +3579,26 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                 controls,
                 checkpoint_steps=checkpoint_steps,
             )
-    accepted = jnp.asarray(run["history"]["accepted"], dtype=jnp.asarray(pack_state(run["state"])).dtype)
-    objective_components = {
-        "state": _weighted_half_norm(pack_state(run["state"]), state_weight),
-        "force": jnp.sum(accepted * jnp.asarray(run["history"]["force"])),
-        "bsqvac": jnp.sum(accepted * jnp.asarray(run["history"]["bsqvac"])),
-    }
+    if bool(state_only_replay):
+        objective_components = {
+            "state": _weighted_half_norm(pack_state(run["state"]), state_weight),
+            "force": jnp.asarray(0.0),
+            "bsqvac": jnp.asarray(0.0),
+        }
+    else:
+        accepted = jnp.asarray(run["history"]["accepted"], dtype=jnp.asarray(pack_state(run["state"])).dtype)
+        objective_components = {
+            "state": _weighted_half_norm(pack_state(run["state"]), state_weight),
+            "force": jnp.sum(accepted * jnp.asarray(run["history"]["force"])),
+            "bsqvac": jnp.sum(accepted * jnp.asarray(run["history"]["bsqvac"])),
+        }
     objective = sum(objective_components.values())
     result = {
         "objective": objective,
         "objective_components": objective_components,
         "state": run["state"],
         "history": run["history"],
+        "used_state_only_replay": bool(state_only_replay),
     }
     if not bool(include_replay_aux):
         return {
@@ -4929,6 +4970,7 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
             "use_accepted_only_fast_path": bool(replay_options.get("use_accepted_only_fast_path", True)),
             "use_replay_plan": bool(replay_plan_for_scalars is not None),
             "include_replay_aux": bool(replay_options.get("include_replay_aux", True)),
+            "state_only_replay": bool(replay_options.get("state_only_replay", False)),
             "jit_preconditioner_apply": bool(replay_options.get("jit_preconditioner_apply", True)),
             "unroll_accepted_only_segments_below": int(
                 replay_options.get("unroll_accepted_only_segments_below", 0)
@@ -5233,6 +5275,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
             "use_accepted_only_fast_path": bool(replay_options.get("use_accepted_only_fast_path", True)),
             "use_replay_plan": bool(replay_plan_for_scalars is not None),
             "include_replay_aux": bool(replay_options.get("include_replay_aux", True)),
+            "state_only_replay": bool(replay_options.get("state_only_replay", False)),
             "jit_preconditioner_apply": bool(replay_options.get("jit_preconditioner_apply", True)),
             "unroll_accepted_only_segments_below": int(
                 replay_options.get("unroll_accepted_only_segments_below", 0)

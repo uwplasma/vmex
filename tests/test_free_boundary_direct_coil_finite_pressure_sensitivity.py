@@ -3605,6 +3605,77 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
         rtol=2.0e-12,
         atol=1.0e-12,
     )
+    stacked_state_only_replay = direct_coil_accepted_trace_controller_replay_objective_jax(
+        base_params,
+        trace0["state_pre"],
+        static=init.static,
+        traces=[trace0, trace1],
+        signgs=int(init.signgs),
+        state_weight=0.0,
+        bsqvac_weight=0.0,
+        force_weight=0.0,
+        enforce_edge=False,
+        use_stacked_step_controls=True,
+        replay_plan=stacked_plan,
+        state_only_replay=True,
+    )
+    assert stacked_state_only_replay["used_stacked_step_controls"]
+    assert stacked_state_only_replay["used_state_only_replay"] is True
+    assert "force" not in stacked_state_only_replay["history"]
+    assert "bsqvac" not in stacked_state_only_replay["history"]
+    assert "bnormal_rms" not in stacked_state_only_replay["history"]
+    assert "bsqvac_rms" not in stacked_state_only_replay["history"]
+    for key in ("active", "accepted", "rejected", "done", "state_reset"):
+        np.testing.assert_array_equal(
+            np.asarray(stacked_state_only_replay["history"][key]),
+            np.asarray(stacked_controller_replay["history"][key]),
+        )
+    np.testing.assert_allclose(
+        np.asarray(pack_state(stacked_state_only_replay["state"])),
+        np.asarray(pack_state(stacked_controller_replay["state"])),
+        rtol=5.0e-12,
+        atol=5.0e-12,
+    )
+
+    def full_replay_state_norm(params: CoilFieldParams):
+        replay = direct_coil_accepted_trace_controller_replay_objective_jax(
+            params,
+            trace0["state_pre"],
+            static=init.static,
+            traces=[trace0, trace1],
+            signgs=int(init.signgs),
+            state_weight=0.0,
+            bsqvac_weight=0.0,
+            force_weight=0.0,
+            enforce_edge=False,
+            use_stacked_step_controls=True,
+            replay_plan=stacked_plan,
+            include_replay_aux=False,
+        )
+        return jnp.linalg.norm(pack_state(replay["state"]))
+
+    def state_only_replay_state_norm(params: CoilFieldParams):
+        replay = direct_coil_accepted_trace_controller_replay_objective_jax(
+            params,
+            trace0["state_pre"],
+            static=init.static,
+            traces=[trace0, trace1],
+            signgs=int(init.signgs),
+            state_weight=0.0,
+            bsqvac_weight=0.0,
+            force_weight=0.0,
+            enforce_edge=False,
+            use_stacked_step_controls=True,
+            replay_plan=stacked_plan,
+            include_replay_aux=False,
+            state_only_replay=True,
+        )
+        return jnp.linalg.norm(pack_state(replay["state"]))
+
+    full_value, full_jvp = jax.jvp(full_replay_state_norm, (base_params,), (direction,))
+    state_only_value, state_only_jvp = jax.jvp(state_only_replay_state_norm, (base_params,), (direction,))
+    np.testing.assert_allclose(state_only_value, full_value, rtol=5.0e-12, atol=5.0e-12)
+    np.testing.assert_allclose(state_only_jvp, full_jvp, rtol=5.0e-12, atol=5.0e-12)
     np.testing.assert_allclose(
         np.asarray(pack_state(stacked_controller_replay["state"])),
         np.asarray(pack_state(controller_replay["state"])),

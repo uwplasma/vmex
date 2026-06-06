@@ -85,6 +85,12 @@ SUPPORTED_SAME_BRANCH_VECTOR_KEYS = (
     "lcfs_boundary_moment",
     "accepted_bnormal_rms",
 )
+STATE_ONLY_SAME_BRANCH_KEYS = (
+    "state_norm",
+    "aspect",
+    "qs_total",
+    "lcfs_boundary_moment",
+)
 SINGLE_STAGE_LIMITATIONS = [
     "The QS term is a VMEC-state quasisymmetry-ratio residual, not a Boozer-space exact-adjoint objective.",
     "Production full-loop direct-coil free-boundary adjoints are not promoted yet.",
@@ -1012,6 +1018,8 @@ def write_same_branch_validation_report(
         "accepted_bnormal_rms": lambda replay, _payload: accepted_bnormal_rms_from_replay(replay),
     }
     scalar_key = str(getattr(args, "same_branch_report_scalar_key", "qs_total"))
+    scalar_uses_state_only_replay = scalar_key in STATE_ONLY_SAME_BRANCH_KEYS
+    vector_uses_state_only_replay = all(key in STATE_ONLY_SAME_BRANCH_KEYS for key in vector_keys)
     replay_kwargs = {
         "use_stacked_step_controls": True,
         "use_accepted_only_fast_path": True,
@@ -1027,7 +1035,7 @@ def write_same_branch_validation_report(
             replay_payload=replay_payload,
             scalar_fn=lambda payload: {scalar_key: scalar_value_fns[scalar_key](payload)},
             replay_scalar_fn=lambda replay, payload: scalar_replay_fns[scalar_key](replay, payload),
-            replay_kwargs=replay_kwargs,
+            replay_kwargs={**replay_kwargs, "state_only_replay": scalar_uses_state_only_replay},
             replay_ad_mode=ad_mode,
             include_trace_replay_diagnostics=False,
             include_payload=False,
@@ -1052,6 +1060,7 @@ def write_same_branch_validation_report(
             "replay_payload_source": str(scalar.get("replay_payload_source", "unknown")),
             "includes_payload": bool(scalar.get("includes_payload", True)),
             "includes_replay_graph_metadata": bool(scalar.get("includes_replay_graph_metadata", True)),
+            "state_only_replay": bool(scalar_uses_state_only_replay),
             "replay_option_flags": scalar["replay_option_flags"],
             "replay_graph_metadata": scalar.get("replay_graph_metadata", {}),
             "value": float(scalar["value"]),
@@ -1118,7 +1127,7 @@ def write_same_branch_validation_report(
                 ),
                 "accepted_bnormal_rms": lambda replay, _payload: accepted_bnormal_rms_from_replay(replay),
             },
-            replay_kwargs=replay_kwargs,
+            replay_kwargs={**replay_kwargs, "state_only_replay": vector_uses_state_only_replay},
             replay_ad_mode=ad_mode,
             include_trace_replay_diagnostics=False,
             include_payload=False,
@@ -1149,6 +1158,7 @@ def write_same_branch_validation_report(
             "replay_payload_source": str(vector.get("replay_payload_source", "unknown")),
             "includes_payload": bool(vector.get("includes_payload", True)),
             "includes_replay_graph_metadata": bool(vector.get("includes_replay_graph_metadata", True)),
+            "state_only_replay": bool(vector_uses_state_only_replay),
             "replay_option_flags": vector["replay_option_flags"],
             "replay_graph_metadata": vector.get("replay_graph_metadata", {}),
             "max_base_abs_delta": float(vector["max_base_abs_delta"]),
@@ -1639,7 +1649,10 @@ def build_parser() -> argparse.ArgumentParser:
             f"Supported: {', '.join(SUPPORTED_SAME_BRANCH_VECTOR_KEYS)}. "
             "Use state_norm as a non-physics replay-graph timing probe. "
             "Use all supported keys for broader validation, or the default smaller "
-            "aspect,qs_total set for lower cold JVP graph cost."
+            "aspect,qs_total set for lower cold JVP graph cost. Final-state-only "
+            f"keys ({', '.join(STATE_ONLY_SAME_BRANCH_KEYS)}) use a compact replay "
+            "that omits accepted-history RMS arrays; accepted_bnormal_rms keeps "
+            "the full-history path."
         ),
     )
     parser.add_argument(
