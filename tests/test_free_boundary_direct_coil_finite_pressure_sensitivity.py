@@ -770,6 +770,7 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatc
             "quadratic": lambda replay, payload: replay["quadratic"],
         },
         include_trace_replay_diagnostics=False,
+        include_replay_graph_metadata=False,
     )
     assert synthetic_jvp_report["derivative_mode"] == "directional_jvp"
     assert synthetic_jvp_report["jacobian"] is None
@@ -777,7 +778,9 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatc
     assert synthetic_jvp_report["production_values_source"] == "precomputed"
     assert synthetic_jvp_report["trace_replay_diagnostics"]["omitted"] is True
     assert synthetic_jvp_report["replay_option_flags"]["replay_ad_mode"] == "direct"
-    assert synthetic_jvp_report["replay_graph_metadata"]["active_free_boundary_replay_steps"] == 1
+    assert synthetic_jvp_report["includes_replay_graph_metadata"] is False
+    assert synthetic_jvp_report["replay_graph_metadata"]["omitted"] is True
+    assert synthetic_jvp_report["replay_graph_metadata"]["differentiates_adaptive_controller"] is False
     np.testing.assert_allclose(
         np.asarray(synthetic_jvp_report["replay_values"]),
         np.asarray([4.0, 4.0]),

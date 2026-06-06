@@ -4524,6 +4524,7 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
     replay_ad_mode: str = "direct",
     include_trace_replay_diagnostics: bool = True,
     include_payload: bool = True,
+    include_replay_graph_metadata: bool = True,
     require_active_trace: bool = True,
 ) -> dict[str, Any]:
     """Return a production-forward branch-local scalar value and gradient.
@@ -4547,6 +4548,8 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
     solve payload during cold replay/JVP graph construction.  Set
     ``include_payload=False`` for production reports that only need scalar
     values/derivatives and should not retain the full complete-solve payload.
+    Set ``include_replay_graph_metadata=False`` when a compact production
+    report does not need structural replay metadata.
     """
 
     if jax is None:  # pragma: no cover - JAX is required for this helper.
@@ -4611,18 +4614,26 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
     replay_payload_for_scalars = payload if replay_payload is None else replay_payload
     replay_payload_source = "complete_payload" if replay_payload is None else "user"
 
-    graph_metadata = direct_coil_accepted_trace_replay_graph_metadata(
-        traces,
-        static=init.static,
-        accept_mask=replay_options.get("accept_mask"),
-        done_mask=replay_options.get("done_mask"),
-        max_steps=replay_options.get("max_steps"),
-        sample_nzeta=replay_options.get("sample_nzeta"),
-        include_analytic=bool(replay_options.get("include_analytic", True)),
-        use_stacked_step_controls=bool(replay_options.get("use_stacked_step_controls", False)),
-        use_accepted_only_fast_path=bool(replay_options.get("use_accepted_only_fast_path", True)),
-        json_safe=True,
-    )
+    if bool(include_replay_graph_metadata):
+        graph_metadata = direct_coil_accepted_trace_replay_graph_metadata(
+            traces,
+            static=init.static,
+            accept_mask=replay_options.get("accept_mask"),
+            done_mask=replay_options.get("done_mask"),
+            max_steps=replay_options.get("max_steps"),
+            sample_nzeta=replay_options.get("sample_nzeta"),
+            include_analytic=bool(replay_options.get("include_analytic", True)),
+            use_stacked_step_controls=bool(replay_options.get("use_stacked_step_controls", False)),
+            use_accepted_only_fast_path=bool(replay_options.get("use_accepted_only_fast_path", True)),
+            json_safe=True,
+        )
+    else:
+        graph_metadata = {
+            "contract": "fixed accepted-branch replay graph metadata",
+            "omitted": True,
+            "reason": "include_replay_graph_metadata=False",
+            "differentiates_adaptive_controller": False,
+        }
 
     ad_mode = str(replay_ad_mode).strip().lower()
     if ad_mode not in {"direct", "custom_vjp"}:
@@ -4684,6 +4695,7 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
         "grad": grad,
         "payload": payload if bool(include_payload) else None,
         "includes_payload": bool(include_payload),
+        "includes_replay_graph_metadata": bool(include_replay_graph_metadata),
         "timings": timings,
         "trace_replay_diagnostics": diagnostics,
         "replay_graph_metadata": graph_metadata,
@@ -4715,6 +4727,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
     replay_ad_mode: str = "direct",
     include_trace_replay_diagnostics: bool = True,
     include_payload: bool = True,
+    include_replay_graph_metadata: bool = True,
     require_active_trace: bool = True,
 ) -> dict[str, Any]:
     """Return production-forward branch-local values and a scalar Jacobian.
@@ -4743,6 +4756,8 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
     complete-solve payload during cold replay/JVP graph construction.  Set
     ``include_payload=False`` for production reports that only need scalar
     values/derivatives and should not retain the full complete-solve payload.
+    Set ``include_replay_graph_metadata=False`` when a compact production
+    report does not need structural replay metadata.
     """
 
     if jax is None:  # pragma: no cover - JAX is required for this helper.
@@ -4814,18 +4829,26 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
     replay_payload_for_scalars = payload if replay_payload is None else replay_payload
     replay_payload_source = "complete_payload" if replay_payload is None else "user"
 
-    graph_metadata = direct_coil_accepted_trace_replay_graph_metadata(
-        traces,
-        static=init.static,
-        accept_mask=replay_options.get("accept_mask"),
-        done_mask=replay_options.get("done_mask"),
-        max_steps=replay_options.get("max_steps"),
-        sample_nzeta=replay_options.get("sample_nzeta"),
-        include_analytic=bool(replay_options.get("include_analytic", True)),
-        use_stacked_step_controls=bool(replay_options.get("use_stacked_step_controls", False)),
-        use_accepted_only_fast_path=bool(replay_options.get("use_accepted_only_fast_path", True)),
-        json_safe=True,
-    )
+    if bool(include_replay_graph_metadata):
+        graph_metadata = direct_coil_accepted_trace_replay_graph_metadata(
+            traces,
+            static=init.static,
+            accept_mask=replay_options.get("accept_mask"),
+            done_mask=replay_options.get("done_mask"),
+            max_steps=replay_options.get("max_steps"),
+            sample_nzeta=replay_options.get("sample_nzeta"),
+            include_analytic=bool(replay_options.get("include_analytic", True)),
+            use_stacked_step_controls=bool(replay_options.get("use_stacked_step_controls", False)),
+            use_accepted_only_fast_path=bool(replay_options.get("use_accepted_only_fast_path", True)),
+            json_safe=True,
+        )
+    else:
+        graph_metadata = {
+            "contract": "fixed accepted-branch replay graph metadata",
+            "omitted": True,
+            "reason": "include_replay_graph_metadata=False",
+            "differentiates_adaptive_controller": False,
+        }
 
     scalar_fn_seq = tuple(
         (lambda replay, key=key: replay_scalar_fns[key](replay, replay_payload_for_scalars)) for key in keys
@@ -4944,6 +4967,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
         "directional_derivatives": directional_derivatives,
         "payload": payload if bool(include_payload) else None,
         "includes_payload": bool(include_payload),
+        "includes_replay_graph_metadata": bool(include_replay_graph_metadata),
         "timings": timings,
         "trace_replay_diagnostics": diagnostics,
         "replay_graph_metadata": graph_metadata,
