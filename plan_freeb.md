@@ -12,6 +12,67 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
+### 2026-06-06 State-Only Coverage Recovery and Zero-Weight Replay Trim
+
+Steps taken:
+
+1. Polled GitHub Actions run ``27052348868`` for commit ``8465d13``.  All
+   physics, exact, docs, py3.10, and py3.12 jobs passed, but the combined
+   coverage gate failed at exact line coverage ``94.90%``.
+2. Added focused controller tests for the new state-only accepted,
+   accepted-only, unrolled accepted-only, and segmented accepted-controller
+   runners.  The tests compare final state/done status against the existing
+   history-producing controllers and include rejected-slot and static segment
+   validation paths.
+3. Added a final-state-only gradient equivalence check for segmented
+   state-only controllers so the compact replay path is covered as a numerical
+   derivative path, not just a forward-state branch.
+4. Removed an avoidable graph-build cost in
+   ``direct_coil_accepted_trace_controller_replay_objective_jax``: when the
+   state objective weight is a host-known zero, the replay now returns a scalar
+   zero instead of packing the full VMEC state to form a zero-weight norm.
+
+Results obtained:
+
+1. ``python -m ruff check`` passed for the touched source/test files.
+2. Focused state-only controller tests passed.
+3. The accepted-update replay AD-vs-FD test passed.
+4. The free-boundary QS coil-only smoke report with state-only vector replay
+   still passed.  ``branch_local_vector_replay_jvp_dispatch_s`` improved
+   slightly from about ``9.80 s`` to about ``9.76 s`` on the local machine.
+   This confirms the remaining blocker is strict accepted-state/NESTOR replay
+   graph construction, not report packing or history materialization.
+
+Best next steps:
+
+1. Commit and push the coverage recovery plus zero-weight graph trim, then
+   verify the combined coverage gate is green again.
+2. Continue the performance lane at the strict update/NESTOR replay level:
+   reduce graph construction for the accepted-state update and direct-coil
+   boundary field replay used by branch-local JVP reports.
+3. Keep the phase-2 claim limited to fixed same-branch scalar/vector gates;
+   adaptive branch selection remains explicitly unclaimed.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99993% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.9%.
+- Single-stage coil-only optimization: 96.3%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 97.6%; final-state reports avoid history arrays and
+  zero-weight state packing, but strict update/NESTOR replay graph build is
+  still dominant.
+- CI runtime refactor with preserved coverage/physics gates: 100% by design;
+  latest pushed commit needs rerun after this coverage recovery.
+- Docs/release hygiene: 99.5%.
+
 ### 2026-06-06 State-Only Branch-Local Replay For Final-State Reports
 
 Steps taken:

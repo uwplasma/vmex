@@ -3609,16 +3609,21 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                 controls,
                 checkpoint_steps=checkpoint_steps,
             )
+    state_objective = (
+        jnp.asarray(0.0)
+        if _static_weight_is_zero(state_weight)
+        else _weighted_half_norm(pack_state(run["state"]), state_weight)
+    )
     if bool(state_only_replay):
         objective_components = {
-            "state": _weighted_half_norm(pack_state(run["state"]), state_weight),
+            "state": state_objective,
             "force": jnp.asarray(0.0),
             "bsqvac": jnp.asarray(0.0),
         }
     else:
-        accepted = jnp.asarray(run["history"]["accepted"], dtype=jnp.asarray(pack_state(run["state"])).dtype)
+        accepted = jnp.asarray(run["history"]["accepted"], dtype=jnp.asarray(state_objective).dtype)
         objective_components = {
-            "state": _weighted_half_norm(pack_state(run["state"]), state_weight),
+            "state": state_objective,
             "force": jnp.sum(accepted * jnp.asarray(run["history"]["force"])),
             "bsqvac": jnp.sum(accepted * jnp.asarray(run["history"]["bsqvac"])),
         }
@@ -5873,6 +5878,21 @@ def _weighted_half_norm(value: Any, weight: Any) -> Any:
     arr = jnp.asarray(value)
     w = jnp.asarray(weight, dtype=arr.dtype)
     return 0.5 * jnp.sum(w * arr * arr)
+
+
+def _static_weight_is_zero(weight: Any) -> bool:
+    """Return true only for host-known scalar/array weights that are exactly zero."""
+
+    try:
+        arr = np.asarray(weight)
+    except Exception:
+        return False
+    if arr.size == 0:
+        return False
+    try:
+        return bool(np.all(arr == 0.0))
+    except Exception:
+        return False
 
 
 def _tree_weighted_half_norm(values: Any, weight: Any) -> Any:
