@@ -146,6 +146,72 @@ Completion:
   green baseline; coverage recovery CI for ``823f3b0`` is pending.
 - Docs/release hygiene: 98.9%.
 
+### 2026-06-06 Branch-Local Replay Plan and Compact Report Return
+
+Steps taken:
+
+1. Added ``direct_coil_accepted_trace_controller_replay_plan`` to prebuild
+   fixed accepted-branch replay controls, effective masks, policy segments,
+   accepted-only segment flags, and boundary replay contexts outside
+   ``jax.jvp``/``jax.vjp`` transforms.
+2. Made ``direct_coil_accepted_trace_controller_replay_objective_jax`` accept
+   an optional replay plan while preserving the existing default path.
+3. Wired branch-local scalar and vector production helpers to build and pass a
+   replay plan by default, and recorded ``replay_plan_build_wall_s`` plus
+   ``use_replay_plan`` in reports.
+4. Added a compact replay return mode for branch-local scalar reports that
+   omits full constant control/segment payloads while retaining the minimal
+   ``has_active_freeb_replay`` mask required by accepted vacuum RMS scalars.
+5. Added a regression assertion that the plan-aware stacked replay matches the
+   ordinary stacked accepted-controller replay.
+
+Results obtained:
+
+1. ``python -m ruff check`` passed for the touched source and tests.
+2. The focused controller tests passed.
+3. ``test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree``
+   passed locally with the new replay-plan assertion.
+4. The full exact same-branch shard passed locally with ``3 passed in
+   83.06 s`` after the compact-return fix.
+5. ``python -m sphinx -b html -q docs docs/_build/html`` passed locally.
+6. GitHub Actions for the previous ``main`` commit ``c74cf35`` completed
+   successfully.
+7. A bounded aspect-only branch-local report still showed cold
+   ``replay_jvp_dispatch_s`` of about ``12.37 s`` with
+   ``replay_plan_build_wall_s`` around ``0.20 s``.  This confirms that trace
+   control setup and report payloads are not the remaining blocker; cold graph
+   construction in the replayed update/NESTOR path is.
+
+Best next steps:
+
+1. Target the replay update graph itself: profile
+   ``strict_update_one_step_from_state`` and direct-coil/NESTOR boundary replay
+   separately under the same accepted trace.
+2. Add a branch-local timing mode that can report ``state``-only, vacuum-only,
+   and QS-only replay scalars so the next optimization lands on the dominant
+   graph region instead of more report plumbing.
+3. Once the lower replay graph is understood, wire coil-only QS optimization
+   to consume branch-local directional derivatives as an optimization mode, not
+   only as an optional validation artifact.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99989% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.9%.
+- Single-stage coil-only optimization: 93.9%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 96.6%; replay-control setup is hoisted, but cold
+  update/NESTOR replay graph construction remains the main blocker.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 99.1%.
+
 ### 2026-06-05 Compact Branch-Local Production Reports
 
 Steps taken:

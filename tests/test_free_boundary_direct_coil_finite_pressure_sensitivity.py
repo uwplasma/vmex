@@ -2924,6 +2924,7 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
     from vmec_jax.free_boundary import _sample_external_boundary_arrays
     from vmec_jax.free_boundary_adjoint import (
         direct_coil_accepted_trace_controller_replay_objective_jax,
+        direct_coil_accepted_trace_controller_replay_plan,
         direct_coil_accepted_trace_fingerprint,
         direct_coil_accepted_trace_fingerprint_delta,
         direct_coil_accepted_trace_step_controls_jax,
@@ -3574,6 +3575,33 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
     np.testing.assert_allclose(
         np.asarray(stacked_controller_replay["objective"]),
         np.asarray(controller_replay["objective"]),
+        rtol=2.0e-12,
+        atol=1.0e-12,
+    )
+    stacked_plan = direct_coil_accepted_trace_controller_replay_plan(
+        [trace0, trace1],
+        static=init.static,
+        use_stacked_step_controls=True,
+    )
+    assert stacked_plan["segment_source"] == "step_policy"
+    assert stacked_plan["accepted_only_fast_path_segments"] == (True,) * len(step_segments)
+    stacked_plan_replay = direct_coil_accepted_trace_controller_replay_objective_jax(
+        base_params,
+        trace0["state_pre"],
+        static=init.static,
+        traces=[trace0, trace1],
+        signgs=int(init.signgs),
+        state_weight=1.0,
+        bsqvac_weight=1.0e-12,
+        force_weight=0.0,
+        enforce_edge=False,
+        use_stacked_step_controls=True,
+        replay_plan=stacked_plan,
+    )
+    assert stacked_plan_replay["used_stacked_step_controls"]
+    np.testing.assert_allclose(
+        np.asarray(stacked_plan_replay["objective"]),
+        np.asarray(stacked_controller_replay["objective"]),
         rtol=2.0e-12,
         atol=1.0e-12,
     )
