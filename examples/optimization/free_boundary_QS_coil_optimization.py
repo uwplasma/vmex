@@ -79,6 +79,7 @@ DEFAULT_ESSOS_COIL_JSON = "ESSOS_biot_savart_LandremanPaulQA.json"
 DEFAULT_FREE_BOUNDARY_PHIEDGE = -0.025
 DEFAULT_SAME_BRANCH_VECTOR_KEYS = ("aspect", "qs_total")
 SUPPORTED_SAME_BRANCH_VECTOR_KEYS = (
+    "state_norm",
     "aspect",
     "qs_total",
     "lcfs_boundary_moment",
@@ -666,6 +667,7 @@ def write_same_branch_validation_report(
         direct_coil_same_branch_complete_solve_fd_report,
         free_boundary_boundary_geometry_jax,
     )
+    from vmec_jax.state import pack_state
 
     direction_x = same_branch_direction_from_variables(variables)
     direction_params = coil_param_direction_from_variables(
@@ -756,6 +758,7 @@ def write_same_branch_validation_report(
         )
         return {
             "objective": total,
+            "state_norm": float(np.linalg.norm(np.asarray(pack_state(payload["result"].state), dtype=float))),
             "residual_proxy": float(summary.get("residual_proxy") or 0.0),
             "qs_total": float(summary["qs_total"]) if summary.get("qs_total") is not None else np.nan,
             "aspect": float(summary["aspect"]) if summary.get("aspect") is not None else np.nan,
@@ -858,6 +861,7 @@ def write_same_branch_validation_report(
     }
     replay_payload = {"init": report["base"]["init"]} if isinstance(report.get("base"), dict) and "init" in report["base"] else None
     scalar_value_fns = {
+        "state_norm": lambda payload: float(np.linalg.norm(np.asarray(pack_state(payload["result"].state), dtype=float))),
         "aspect": lambda payload: float(
             np.asarray(
                 equilibrium_aspect_ratio_from_state(
@@ -882,6 +886,7 @@ def write_same_branch_validation_report(
         "accepted_bnormal_rms": accepted_bnormal_rms_from_payload,
     }
     scalar_replay_fns = {
+        "state_norm": lambda replay, _payload: jnp.linalg.norm(pack_state(replay["state"])),
         "aspect": lambda replay, payload: equilibrium_aspect_ratio_from_state(
             state=replay["state"],
             static=payload["init"].static,
@@ -958,6 +963,7 @@ def write_same_branch_validation_report(
             production_values={key: report_base_values[key] for key in scalar_keys},
             replay_payload=replay_payload,
             scalar_fn=lambda payload: {
+                "state_norm": float(np.linalg.norm(np.asarray(pack_state(payload["result"].state), dtype=float))),
                 "aspect": float(
                     np.asarray(
                         equilibrium_aspect_ratio_from_state(
@@ -982,6 +988,7 @@ def write_same_branch_validation_report(
                 "accepted_bnormal_rms": accepted_bnormal_rms_from_payload(payload),
             },
             replay_scalar_fns={
+                "state_norm": lambda replay, _payload: jnp.linalg.norm(pack_state(replay["state"])),
                 "aspect": lambda replay, payload: equilibrium_aspect_ratio_from_state(
                     state=replay["state"],
                     static=payload["init"].static,
@@ -1418,12 +1425,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--same-branch-report-scalar-key",
-        choices=("aspect", "qs_total", "lcfs_boundary_moment", "accepted_bnormal_rms"),
+        choices=("state_norm", "aspect", "qs_total", "lcfs_boundary_moment", "accepted_bnormal_rms"),
         default="qs_total",
         help=(
             "Physical scalar validated by --same-branch-report-mode scalar. "
-            "Use 'aspect' for a cheaper branch-local replay timing probe, or "
-            "'qs_total' for the QS-relevant scalar."
+            "Use 'state_norm' as a non-physics replay-graph timing probe, "
+            "'aspect' for a cheap physical scalar, or 'qs_total' for the QS-relevant scalar."
         ),
     )
     parser.add_argument(
@@ -1432,6 +1439,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Comma/space-separated physical scalars for --same-branch-report-mode vector. "
             f"Supported: {', '.join(SUPPORTED_SAME_BRANCH_VECTOR_KEYS)}. "
+            "Use state_norm as a non-physics replay-graph timing probe. "
             "Use all supported keys for broader validation, or the default smaller "
             "aspect,qs_total set for lower cold JVP graph cost."
         ),

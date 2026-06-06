@@ -212,6 +212,57 @@ Completion:
 - CI runtime refactor with preserved coverage/physics gates: 100%.
 - Docs/release hygiene: 99.1%.
 
+### 2026-06-06 Branch-Local Scalar Timing Split
+
+Steps taken:
+
+1. Added ``state_norm`` as an explicit non-physics same-branch report scalar
+   for timing the accepted-state replay graph without aspect, QS, boundary
+   moment, or vacuum-RMS postprocessing.
+2. Re-ran bounded circle-provider same-branch reports for ``state_norm``,
+   ``aspect``, ``accepted_bnormal_rms``, and ``qs_total`` with the replay-plan
+   and compact-return path.
+3. Documented ``state_norm`` as a profiling probe rather than a promoted
+   physical scalar.
+
+Results obtained:
+
+1. ``state_norm`` cold ``replay_jvp_dispatch_s`` was about ``11.76 s``.
+2. ``aspect`` cold ``replay_jvp_dispatch_s`` was about ``12.37 s``.
+3. ``accepted_bnormal_rms`` cold ``replay_jvp_dispatch_s`` was about
+   ``14.57 s``.
+4. ``qs_total`` cold ``replay_jvp_dispatch_s`` was about ``17.58 s``.
+5. Every run still triggered the same XLA algebraic-simplifier warning, so the
+   shared lower bound is accepted-state update replay graph construction; QS
+   adds a separate postprocessing cost, but it is not the first blocker.
+
+Best next steps:
+
+1. Profile ``strict_update_one_step_from_state`` inside the stacked replay and
+   look for graph patterns that trigger the XLA algebraic-simplifier loop.
+2. Add a narrower state-replay-only primitive if the full replay return/update
+   graph is structurally too large for cold JVP reports.
+3. Keep branch-local production reports opt-in until cold replay dispatch is
+   below the complete-solve finite-difference wall time.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99989% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.9%.
+- Single-stage coil-only optimization: 94.0%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 96.7%; the update replay graph is now isolated as the
+  cold branch-local derivative blocker.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 99.2%.
+
 ### 2026-06-05 Compact Branch-Local Production Reports
 
 Steps taken:

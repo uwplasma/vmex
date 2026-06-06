@@ -703,13 +703,17 @@ scalars using a directional JVP without materializing the full Jacobian.  The
 default vector scalar set is the lower-cost ``aspect,qs_total`` pair; pass
 ``--same-branch-report-vector-keys aspect,qs_total,lcfs_boundary_moment,accepted_bnormal_rms``
 when you want the broader physical-scalar artifact.  Use
+``--same-branch-report-vector-keys state_norm`` only as a non-physics timing
+probe for the accepted-state replay graph, since it omits boundary-geometry,
+vacuum-RMS, and QS postprocessing.  Use
 ``--same-branch-report-mode none`` when you only want the complete-solve
 finite-difference artifact and want to avoid cold branch-local replay
 compilation.  Use ``--same-branch-report-mode scalar`` to validate one
 fixed-accepted-branch ``qs_total`` gradient.
 The scalar can be changed with ``--same-branch-report-scalar-key``.  Use
-``aspect`` for a cheaper physical-scalar timing probe and ``qs_total`` for the
-QS-relevant scalar.  The derivative report defaults to
+``state_norm`` for a non-physics replay-graph timing probe, ``aspect`` for a
+cheap physical scalar, and ``qs_total`` for the QS-relevant scalar.  The
+derivative report defaults to
 ``--same-branch-report-ad-mode direct``, which differentiates the fixed
 accepted-branch replay directly.  Use
 ``--same-branch-report-ad-mode custom_vjp`` only when explicitly auditing the
