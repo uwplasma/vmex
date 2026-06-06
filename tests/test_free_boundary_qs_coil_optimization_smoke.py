@@ -155,6 +155,44 @@ def test_same_branch_direction_selects_current_and_fourier_variables():
     assert float(np.asarray(tangent.base_curve_dofs)[0, 1, 1]) == pytest.approx(0.0)
 
 
+def test_same_branch_report_anchor_uses_best_or_initial_coil_point():
+    module = _load_example_module()
+    base_params, _metadata = module.make_circle_provider(current_scale=1.0)
+    _x0, variables = module.select_coil_variables(
+        base_params,
+        max_current_vars=1,
+        max_fourier_vars=1,
+    )
+    args = SimpleNamespace(
+        current_step=0.1,
+        dof_step=0.5,
+        same_branch_report_anchor="best",
+    )
+
+    best_params, anchor = module.same_branch_report_anchor_params(
+        base_params,
+        {"x": np.asarray([1.0, -2.0])},
+        variables,
+        args,
+    )
+    assert anchor == "best"
+    assert float(np.asarray(best_params.base_currents)[0]) == pytest.approx(2.2)
+    assert float(np.asarray(best_params.base_curve_dofs)[variables[1][1]]) == pytest.approx(0.4)
+
+    args.same_branch_report_anchor = "initial"
+    initial_params, anchor = module.same_branch_report_anchor_params(base_params, {"x": np.asarray([1.0, -2.0])}, variables, args)
+    assert anchor == "initial"
+    assert float(np.asarray(initial_params.base_currents)[0]) == pytest.approx(float(np.asarray(base_params.base_currents)[0]))
+    assert float(np.asarray(initial_params.base_curve_dofs)[variables[1][1]]) == pytest.approx(
+        float(np.asarray(base_params.base_curve_dofs)[variables[1][1]])
+    )
+
+    args.same_branch_report_anchor = "best"
+    fallback_params, anchor = module.same_branch_report_anchor_params(base_params, None, variables, args)
+    assert anchor == "initial_no_best_available"
+    assert float(np.asarray(fallback_params.base_currents)[0]) == pytest.approx(float(np.asarray(base_params.base_currents)[0]))
+
+
 def test_same_branch_report_writer_uses_source_helper(tmp_path, monkeypatch):
     module = _load_example_module()
     base_params, _metadata = module.make_circle_provider(current_scale=1.0)

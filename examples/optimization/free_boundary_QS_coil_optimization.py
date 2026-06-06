@@ -652,6 +652,33 @@ def _pytree_directional_vdot(gradient: Any, direction: Any) -> float:
     return float(np.asarray(total, dtype=float))
 
 
+def same_branch_report_anchor_params(
+    base_params: CoilFieldParams,
+    best: dict[str, Any] | None,
+    variables: list[tuple[str, tuple[int, ...]]],
+    args: argparse.Namespace,
+) -> tuple[CoilFieldParams, str]:
+    """Return the coil point used by the opt-in branch-local derivative report."""
+
+    anchor = str(getattr(args, "same_branch_report_anchor", "best")).strip().lower()
+    if anchor not in {"initial", "best"}:
+        raise ValueError("--same-branch-report-anchor must be one of initial, best")
+    if anchor == "initial":
+        return base_params, "initial"
+    if best is None or "x" not in best:
+        return base_params, "initial_no_best_available"
+    return (
+        apply_coil_variables(
+            base_params,
+            np.asarray(best["x"], dtype=float),
+            variables,
+            current_step=float(args.current_step),
+            dof_step=float(args.dof_step),
+        ),
+        "best",
+    )
+
+
 def write_same_branch_validation_report(
     *,
     input_path: Path,
@@ -659,6 +686,7 @@ def write_same_branch_validation_report(
     variables: list[tuple[str, tuple[int, ...]]],
     args: argparse.Namespace,
     outdir: Path,
+    report_anchor: str = "initial",
 ) -> Path:
     """Write an optional same-branch complete-solve FD report for this example."""
     from vmec_jax.free_boundary_adjoint import (
@@ -800,6 +828,7 @@ def write_same_branch_validation_report(
         "phase": "phase-2-same-branch-complete-solve-fd",
         "scope": "coil-only proxy-objective validation; not arbitrary adaptive-branch differentiation",
         "input": str(input_path),
+        "report_anchor": str(report_anchor),
         "eps": float(args.same_branch_report_eps),
         "direction_x": direction_x.tolist(),
         "direction_variables": [
@@ -1169,6 +1198,7 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
         ),
         "eps": float(args.same_branch_report_eps),
         "max_iter": int(args.same_branch_report_max_iter or args.vmec_max_iter),
+        "anchor": str(getattr(args, "same_branch_report_anchor", "best")),
     }
     history: list[dict[str, Any]] = []
     best: dict[str, Any] | None = None
@@ -1317,14 +1347,22 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
         "best_wout": outdir / "wout_best_direct_coil_qs.nc",
     }
     if bool(args.write_same_branch_report):
+        report_params, report_anchor = same_branch_report_anchor_params(
+            base_params,
+            best,
+            variables,
+            args,
+        )
         report_path = write_same_branch_validation_report(
             input_path=input_path,
-            base_params=base_params,
+            base_params=report_params,
             variables=variables,
             args=args,
             outdir=outdir,
+            report_anchor=report_anchor,
         )
         summary["same_branch_complete_solve_report"] = report_path
+        summary["same_branch_complete_solve_report_anchor"] = report_anchor
     write_json(outdir / "summary.json", summary)
     print(f"Wrote {outdir / 'history.json'}")
     print(f"Wrote {outdir / 'summary.json'}")
@@ -1414,6 +1452,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--write-same-branch-report",
         action="store_true",
         help="After the optimization, write an opt-in same-branch complete-solve FD validation report.",
+    )
+    parser.add_argument(
+        "--same-branch-report-anchor",
+        choices=("best", "initial"),
+        default="best",
+        help=(
+            "Coil point for --write-same-branch-report. The default validates "
+            "the best optimized coil point; 'initial' preserves the older "
+            "initial-coil diagnostic."
+        ),
     )
     parser.add_argument("--same-branch-report-eps", type=float, default=1.0e-4)
     parser.add_argument(

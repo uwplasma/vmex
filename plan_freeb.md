@@ -12,6 +12,55 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
+### 2026-06-06 Best-Point Branch-Local QS Report Anchor
+
+Steps taken:
+
+1. Reviewed the direct-coil QS coil-only optimization example and confirmed
+   that the optimizer still uses the conservative Powell complete-solve path,
+   while the validated branch-local vector/JVP report is an opt-in derivative
+   artifact.
+2. Changed the opt-in same-branch report default anchor from the initial coil
+   seed to the best accepted coil point from the optimization.
+3. Added ``--same-branch-report-anchor initial`` as an explicit escape hatch
+   for reproducing the older initial-coil diagnostic.
+4. Added a unit test for best/initial/fallback report-anchor selection and
+   updated the free-boundary optimization docs.
+
+Results obtained:
+
+1. The example now consumes the validated branch-local vector/JVP path at the
+   optimized coil point by default, which is the relevant production report
+   for coil-only QS optimization runs.
+2. The implementation remains conservative: it does not use branch-local JVPs
+   as optimizer steps and does not claim derivatives through adaptive
+   accepted/rejected host-branch changes.
+
+Best next steps:
+
+1. Run the smoke/unit/docs validation for the example change.
+2. If clean, commit and push the example/report-anchor patch.
+3. Continue toward a true branch-compatible gradient optimization mode only
+   after per-accepted-point branch fingerprints are enforced inside the
+   optimizer loop.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99990% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.9%.
+- Single-stage coil-only optimization: 95.0%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 97.2%.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 99.3%.
+
 ### 2026-06-05 Coverage gate recovery for branch-local replay helpers
 
 Steps taken:

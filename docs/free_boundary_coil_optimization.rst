@@ -700,6 +700,9 @@ is the validated production-report path for this lane: it evaluates production
 values from a complete direct-coil free-boundary solve, replays the saved fixed
 accepted branch in JAX, and reports ``J @ direction`` for several physical
 scalars using a directional JVP without materializing the full Jacobian.  The
+report is anchored at the best optimized coil point by default; pass
+``--same-branch-report-anchor initial`` to reproduce the older initial-coil
+diagnostic.  The
 default vector scalar set is the lower-cost ``aspect,qs_total`` pair; pass
 ``--same-branch-report-vector-keys aspect,qs_total,lcfs_boundary_moment,accepted_bnormal_rms``
 when you want the broader physical-scalar artifact.  Use
@@ -1207,6 +1210,10 @@ run, append ``--write-same-branch-report``:
      --helicity-n 0 \
      --write-same-branch-report \
      --outdir results/free_boundary_QS_coil_optimization_circle_same_branch
+
+The same-branch report in this command validates the best accepted coil point
+from the smoke optimization.  Add ``--same-branch-report-anchor initial`` if
+you want the diagnostic at the original coil seed instead.
 
 For the ESSOS Landreman-Paul QA coils, put ESSOS on ``PYTHONPATH`` and use:
 
