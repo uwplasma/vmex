@@ -4523,6 +4523,7 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
     replay_kwargs: dict[str, Any] | None = None,
     replay_ad_mode: str = "direct",
     include_trace_replay_diagnostics: bool = True,
+    include_payload: bool = True,
     require_active_trace: bool = True,
 ) -> dict[str, Any]:
     """Return a production-forward branch-local scalar value and gradient.
@@ -4543,7 +4544,9 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
     ``replay_scalar_fn(replay, payload)`` must return the same scalar from the
     JAX-visible replay dictionary.  ``replay_payload`` can be supplied to pass a
     slim context into that function, avoiding closure capture of a full complete
-    solve payload during cold replay/JVP graph construction.
+    solve payload during cold replay/JVP graph construction.  Set
+    ``include_payload=False`` for production reports that only need scalar
+    values/derivatives and should not retain the full complete-solve payload.
     """
 
     if jax is None:  # pragma: no cover - JAX is required for this helper.
@@ -4679,7 +4682,8 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
         "replay_value": replay_value,
         "base_abs_delta": abs(float(np.asarray(replay_value, dtype=float)) - float(values[key])),
         "grad": grad,
-        "payload": payload,
+        "payload": payload if bool(include_payload) else None,
+        "includes_payload": bool(include_payload),
         "timings": timings,
         "trace_replay_diagnostics": diagnostics,
         "replay_graph_metadata": graph_metadata,
@@ -4710,6 +4714,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
     replay_kwargs: dict[str, Any] | None = None,
     replay_ad_mode: str = "direct",
     include_trace_replay_diagnostics: bool = True,
+    include_payload: bool = True,
     require_active_trace: bool = True,
 ) -> dict[str, Any]:
     """Return production-forward branch-local values and a scalar Jacobian.
@@ -4735,7 +4740,9 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
     ``fn(replay, payload)`` that evaluate those scalars from the JAX-visible
     accepted-controller replay.  ``replay_payload`` can be supplied to pass a
     slim context into those functions, avoiding closure capture of a full
-    complete-solve payload during cold replay/JVP graph construction.
+    complete-solve payload during cold replay/JVP graph construction.  Set
+    ``include_payload=False`` for production reports that only need scalar
+    values/derivatives and should not retain the full complete-solve payload.
     """
 
     if jax is None:  # pragma: no cover - JAX is required for this helper.
@@ -4935,7 +4942,8 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
         "jacobian": jacobian,
         "grads": gradients,
         "directional_derivatives": directional_derivatives,
-        "payload": payload,
+        "payload": payload if bool(include_payload) else None,
+        "includes_payload": bool(include_payload),
         "timings": timings,
         "trace_replay_diagnostics": diagnostics,
         "replay_graph_metadata": graph_metadata,
