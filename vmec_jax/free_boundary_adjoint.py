@@ -609,12 +609,14 @@ def vmec_nonsingular_terms_from_bexni_jax(
     gstore = jnp.zeros((nuv_full,), dtype=Rf.dtype)
     grpmn = jnp.zeros((mnpd2, nuv3), dtype=Rf.dtype)
 
-    for ip in range(nuv3):
+    def _ip_body(carry: tuple[Any, Any], ip: Any) -> tuple[tuple[Any, Any], None]:
+        gstore_acc, grpmn_acc = carry
+        ip = jnp.asarray(ip, dtype=jnp.int32)
         xip = rcosuv[ip]
         yip = rsinuv[ip]
-        ivoff = int(nuv_full - ip)
-        iskip = int(ip // max(1, nv))
-        iuoff = int(nuv_full - nv * iskip)
+        ivoff = jnp.asarray(nuv_full, dtype=jnp.int32) - ip
+        iskip = ip // jnp.asarray(max(1, nv), dtype=jnp.int32)
+        iuoff = jnp.asarray(nuv_full, dtype=jnp.int32) - jnp.asarray(nv, dtype=jnp.int32) * iskip
         gsave = rzb2[ip] + rzb2 - 2.0 * Zf[ip] * Zf
         dsave = drv[ip] + Zf * snz[ip]
         delgr = jnp.zeros((nuv_full,), dtype=Rf.dtype)
@@ -630,7 +632,7 @@ def vmec_nonsingular_terms_from_bexni_jax(
 
             if kp == 0 or nv == 1:
                 tidx_u = idx_all + iuoff
-                ivoff_k = ivoff + (2 * nu * kp if nv == 1 else 0)
+                ivoff_k = ivoff + jnp.asarray(2 * nu * kp if nv == 1 else 0, dtype=jnp.int32)
                 tidx_v = idx_all + ivoff_k
                 tanu_use = tanu[tidx_u]
                 tanv_use = tanv[tidx_v]
@@ -656,7 +658,7 @@ def vmec_nonsingular_terms_from_bexni_jax(
             delgr = delgr * scale
             delgrp = delgrp * scale
 
-        gstore = gstore + bex[ip] * delgr
+        gstore_next = gstore_acc + bex[ip] * delgr
         del_iuv = delgrp[iuv_grid]
         del_ref = delgrp[iref_grid]
         ka_grid = del_iuv - del_ref
@@ -667,8 +669,10 @@ def vmec_nonsingular_terms_from_bexni_jax(
         gsin = jnp.einsum("mu,uf->mf", cosm_sym, g2_sym)
         total_plus = jnp.reshape(gcos + gsin, (-1,))
         total_minus = jnp.reshape(gcos - gsin, (-1,))
-        grpmn = grpmn.at[idx_p_flat, ip].add(total_plus)
-        grpmn = grpmn.at[idx_m_negative, ip].add(total_minus[negative_positions_arr])
+        cols_p = jnp.full_like(idx_p_flat, ip)
+        cols_m = jnp.full_like(idx_m_negative, ip)
+        grpmn_next = grpmn_acc.at[(idx_p_flat, cols_p)].add(total_plus)
+        grpmn_next = grpmn_next.at[(idx_m_negative, cols_m)].add(total_minus[negative_positions_arr])
 
         if lasym:
             ks_grid = del_iuv + del_ref
@@ -679,8 +683,22 @@ def vmec_nonsingular_terms_from_bexni_jax(
             total_plus_asym = jnp.reshape(gcos_asym + gsin_asym, (-1,))
             total_minus_asym = jnp.reshape(gcos_asym - gsin_asym, (-1,))
             row_off = int(mnpd)
-            grpmn = grpmn.at[row_off + idx_p_flat, ip].add(total_plus_asym)
-            grpmn = grpmn.at[row_off + idx_m_negative, ip].add(total_minus_asym[negative_positions_arr])
+            grpmn_next = grpmn_next.at[(row_off + idx_p_flat, cols_p)].add(total_plus_asym)
+            grpmn_next = grpmn_next.at[(row_off + idx_m_negative, cols_m)].add(
+                total_minus_asym[negative_positions_arr]
+            )
+
+        return (gstore_next, grpmn_next), None
+
+    if bool(tables.get("use_ip_scan", True)):
+        (gstore, grpmn), _ = jax.lax.scan(
+            _ip_body,
+            (gstore, grpmn),
+            jnp.arange(nuv3, dtype=jnp.int32),
+        )
+    else:
+        for ip in range(nuv3):
+            (gstore, grpmn), _ = _ip_body((gstore, grpmn), jnp.asarray(ip, dtype=jnp.int32))
 
     return gstore, grpmn
 

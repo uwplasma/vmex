@@ -1810,6 +1810,44 @@ def test_jax_vmec_nonsingular_green_terms_match_numpy_reference():
     np.testing.assert_allclose(actual_grpmn, expected_grpmn, rtol=2.0e-12, atol=2.0e-12)
 
 
+def test_jax_vmec_nonsingular_green_scan_matches_unrolled_loop():
+    enable_x64(True)
+    basis, sample = _nonsingular_boundary_sample()
+    tables = _ensure_vmec_nonsingular_kernel_tables(basis=basis, nv=sample.R.shape[1], nvper=2)
+    bexni = np.linspace(-0.18, 0.24, int(basis["nuv3"]), dtype=float)
+
+    kwargs = dict(
+        R=sample.R,
+        Z=sample.Z,
+        Ru=sample.Ru,
+        Zu=sample.Zu,
+        Rv=sample.Rv,
+        Zv=sample.Zv,
+        ruu=sample.ruu,
+        ruv=sample.ruv,
+        rvv=sample.rvv,
+        zuu=sample.zuu,
+        zuv=sample.zuv,
+        zvv=sample.zvv,
+        bexni=bexni,
+        basis=basis,
+        signgs=1,
+        nvper=2,
+    )
+
+    scan_gsource, scan_grpmn = vmec_nonsingular_terms_from_bexni_jax(
+        **kwargs,
+        tables=tables,
+    )
+    loop_gsource, loop_grpmn = vmec_nonsingular_terms_from_bexni_jax(
+        **kwargs,
+        tables={**tables, "use_ip_scan": False},
+    )
+
+    np.testing.assert_allclose(scan_gsource, loop_gsource, rtol=1.0e-13, atol=1.0e-13)
+    np.testing.assert_allclose(scan_grpmn, loop_grpmn, rtol=1.0e-13, atol=1.0e-13)
+
+
 def test_jax_vmec_nonsingular_green_solve_chain_gradients_match_finite_difference():
     pytest.importorskip("jax")
     from vmec_jax._compat import jax, jnp
