@@ -10994,3 +10994,61 @@ Completion:
 - CI runtime refactor with preserved coverage/physics gates: 100%; latest full
   CI is green with strict 95% line coverage.
 - Docs/release hygiene: 98.9%.
+
+### 2026-06-06 Axis-R Same-Branch Physical Scalar Gate
+
+Steps taken:
+
+1. Reviewed the existing same-branch complete-solve FD validation helper for
+   direct-coil free-boundary adjoints.
+2. Avoided ``mean_iota`` for the tiny direct-coil gate because the fixture uses
+   ``NCURR=0``, so iota is prescribed by the input profile and would not provide
+   a meaningful coil-sensitivity scalar.
+3. Added ``axis_R`` as a solved-state physical scalar, evaluated from the
+   ``m=0,n=0`` ``Rcos`` coefficient on the magnetic axis/inner surface.
+4. Included ``axis_R`` in the complete-solve base/plus/minus objective values,
+   same-branch controller scalar replay, physical-scalar gate report, and
+   production branch-local vector/JVP report.
+5. Enabled ``axis_R`` in the current-only same-branch gate so the new scalar
+   reuses the existing complete-solve triplet instead of adding another slow
+   test.
+6. Pushed commit ``0875f77``.
+
+Results obtained:
+
+1. ``python -m ruff check`` passed for the touched same-branch test file.
+2. The focused current-only complete-solve FD gate passed locally.
+3. The full exact same-branch shard passed locally with ``3 passed in 86.05 s``.
+4. GitHub Actions run ``27047398251`` completed successfully.
+5. The strict combined py3.11 coverage gate remained green at exact line
+   coverage ``95.04%``.
+
+Best next steps:
+
+1. Reduce cold replay/JVP graph construction for branch-local production
+   reports.  The physical scalar set is now broader, but first-call replay build
+   is still the main runtime blocker.
+2. Add a complete-loop physical-scalar gate that exercises an accepted/rejected
+   controller slot through the same-branch seam, while preserving the explicit
+   "adaptive branch changes are not differentiated" limitation.
+3. Start wiring the coil-only QS example to consume the validated branch-local
+   vector report instead of a dense/high-overhead exact path.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99985% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.7%.
+- Single-stage coil-only optimization: 92.9%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 96.0%; scalar coverage improved, but cold replay/JVP
+  graph construction remains the blocker.
+- CI runtime refactor with preserved coverage/physics gates: 100%; latest full
+  CI is green with strict 95% line coverage.
+- Docs/release hygiene: 98.9%.
