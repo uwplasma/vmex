@@ -12,6 +12,77 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
+### 2026-06-06 Vacuum-Field vs NESTOR Replay Cost Split
+
+Steps taken:
+
+1. Added ``freeze_vacuum_field`` to branch-local accepted-controller replay as
+   an intermediate diagnostic option.  It reuses accepted trace
+   vacuum-projection arrays but still runs JAX dense NESTOR/source assembly,
+   mode reconstruction, and the strict VMEC accepted-state update.
+2. Exposed the option in the coil-only QS example as
+   ``--same-branch-report-freeze-vacuum-field`` and marked it diagnostic only.
+3. Updated replay option flags and same-branch report config so timing
+   artifacts record both ``freeze_vacuum_field`` and ``freeze_freeb_bsqvac``.
+4. Added a zero-tangential-field diagnostic fallback for compact traces that
+   retain normal-field and metric arrays but not tangential external-field
+   projection arrays.  This keeps the diagnostic timing path available without
+   promoting it as a physics derivative.
+5. Ran compact direct-coil QS vector reports for three levels: full
+   branch-local field replay, frozen vacuum-field projection, and frozen
+   ``bsqvac``.
+
+Results obtained:
+
+1. ``python -m ruff check`` passed for the touched free-boundary source,
+   example, and smoke tests.
+2. The focused same-branch vector report writer test passed locally.
+3. The deeper current-only same-branch finite-pressure gate passed locally.
+4. Current full field replay timing:
+   ``replay_plan_build_wall_s = 0.195 s``, ``replay_jvp_dispatch_s =
+   9.780 s``, branch-local vector ``total_wall_s = 9.975 s``.
+5. Frozen vacuum-field projection timing:
+   ``replay_plan_build_wall_s = 0.198 s``, ``replay_jvp_dispatch_s =
+   4.831 s``, branch-local vector ``total_wall_s = 5.029 s``.
+6. Frozen ``bsqvac`` timing:
+   ``replay_plan_build_wall_s = 0.195 s``, ``replay_jvp_dispatch_s =
+   2.035 s``, branch-local vector ``total_wall_s = 2.231 s``.
+7. The cold branch-local JVP cost on this fixture is now split approximately
+   as follows: ``4.95 s`` for Biot-Savart sampling plus boundary projection,
+   ``2.80 s`` for dense NESTOR/source/mode reconstruction, and ``2.04 s`` for
+   strict VMEC accepted-state update plus scalar replay.
+
+Best next steps:
+
+1. Keep both freeze options diagnostic-only; neither should be used for
+   promoted validation or optimization because both remove part of the
+   differentiable coil-field path.
+2. Target direct-coil boundary sampling/projection first.  It is the largest
+   measured field-replay component and likely benefits from prebuilt coil
+   geometry/JVP structure or chunked/custom-transpose Biot-Savart kernels.
+3. Target dense NESTOR/source assembly second.  The remaining ``~2.8 s`` split
+   points to ``vmec_nonsingular_terms_from_bexni_jax`` and mode-matrix assembly
+   after coil sampling/projection is improved.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99994% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.9%.
+- Single-stage coil-only optimization: 97.0%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 98.5%; the dominant cold exact-callback cost is now
+  split into direct-coil sampling/projection, dense NESTOR, and strict update
+  components.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 99.5%.
+
 ### 2026-06-06 Frozen-Bsqvac Replay Cost Split
 
 Steps taken:

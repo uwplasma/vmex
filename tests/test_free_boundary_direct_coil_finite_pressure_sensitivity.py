@@ -3628,6 +3628,40 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
         rtol=5.0e-12,
         atol=5.0e-12,
     )
+    frozen_vacuum_field_replay = direct_coil_accepted_trace_controller_replay_objective_jax(
+        base_params,
+        trace0["state_pre"],
+        static=init.static,
+        traces=[trace0, trace1],
+        signgs=int(init.signgs),
+        state_weight=0.0,
+        bsqvac_weight=0.0,
+        force_weight=0.0,
+        enforce_edge=False,
+        use_stacked_step_controls=True,
+        replay_plan=stacked_plan,
+        state_only_replay=True,
+        freeze_vacuum_field=True,
+    )
+    frozen_bsqvac_replay = direct_coil_accepted_trace_controller_replay_objective_jax(
+        base_params,
+        trace0["state_pre"],
+        static=init.static,
+        traces=[trace0, trace1],
+        signgs=int(init.signgs),
+        state_weight=0.0,
+        bsqvac_weight=0.0,
+        force_weight=0.0,
+        enforce_edge=False,
+        use_stacked_step_controls=True,
+        replay_plan=stacked_plan,
+        state_only_replay=True,
+        freeze_freeb_bsqvac=True,
+    )
+    assert frozen_vacuum_field_replay["used_state_only_replay"] is True
+    assert frozen_bsqvac_replay["used_state_only_replay"] is True
+    assert np.isfinite(float(jnp.linalg.norm(pack_state(frozen_vacuum_field_replay["state"]))))
+    assert np.isfinite(float(jnp.linalg.norm(pack_state(frozen_bsqvac_replay["state"]))))
 
     def full_replay_state_norm(params: CoilFieldParams):
         replay = direct_coil_accepted_trace_controller_replay_objective_jax(

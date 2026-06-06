@@ -1501,6 +1501,33 @@ def _direct_coil_trace_boundary_shape(trace: Mapping[str, Any]) -> tuple[int, in
     return None
 
 
+def _direct_coil_trace_vacuum_field_override(trace: Mapping[str, Any]) -> dict[str, Any]:
+    """Return accepted vacuum-projection arrays from a production NESTOR trace."""
+
+    nestor_trace = trace.get("freeb_nestor_trace", trace)
+    if not isinstance(nestor_trace, Mapping):
+        raise ValueError("trace must be a NESTOR trace or contain 'freeb_nestor_trace'")
+    required_key_map = {
+        "bnormal": ("bnormal",),
+        "g_uu": ("g_uu",),
+        "g_uv": ("g_uv",),
+        "g_vv": ("g_vv",),
+    }
+    missing = tuple(
+        source_keys[0] for source_keys in required_key_map.values() if not any(key in nestor_trace for key in source_keys)
+    )
+    if missing:
+        raise ValueError(f"trace is missing vacuum-field override arrays: {missing}")
+    out = {
+        target_key: jnp.asarray(next(nestor_trace[source_key] for source_key in source_keys if source_key in nestor_trace))
+        for target_key, source_keys in required_key_map.items()
+    }
+    zero_tangent = jnp.zeros_like(out["bnormal"])
+    out["bu"] = jnp.asarray(nestor_trace["bexu_ext"]) if "bexu_ext" in nestor_trace else jnp.asarray(nestor_trace.get("bu", zero_tangent))
+    out["bv"] = jnp.asarray(nestor_trace["bexv_ext"]) if "bexv_ext" in nestor_trace else jnp.asarray(nestor_trace.get("bv", zero_tangent))
+    return out
+
+
 def direct_coil_boundary_bsqvac_jax(
     params: Any,
     *,
@@ -1527,6 +1554,7 @@ def direct_coil_boundary_bsqvac_jax(
     wint: Any | None = None,
     include_analytic: bool = True,
     include_diagnostics: bool = True,
+    vac_override: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Replay accepted-boundary direct-coil ``bsqvac`` through JAX NESTOR.
 
@@ -1544,28 +1572,38 @@ def direct_coil_boundary_bsqvac_jax(
     from .external_fields import sample_coil_field_cylindrical
 
     R_j = jnp.asarray(R)
-    with _jax_named_scope("vmec_jax.free_boundary.direct_coil_sample"):
-        br, bp, bz = sample_coil_field_cylindrical(
-            params,
-            R_j,
-            jnp.asarray(Z),
-            jnp.asarray(phi),
-        )
-        br = br + jnp.asarray(br_add, dtype=br.dtype)
-        bp = bp + jnp.asarray(bp_add, dtype=bp.dtype)
-        bz = bz + jnp.asarray(bz_add, dtype=bz.dtype)
-    with _jax_named_scope("vmec_jax.free_boundary.vacuum_boundary_projection"):
-        vac = vacuum_boundary_fields_from_cylindrical_jax(
-            br=br,
-            bp=bp,
-            bz=bz,
-            R=R_j,
-            Ru=Ru,
-            Zu=Zu,
-            Rv=Rv,
-            Zv=Zv,
-            include_bnormal_unit=False,
-        )
+    if vac_override is None:
+        with _jax_named_scope("vmec_jax.free_boundary.direct_coil_sample"):
+            br, bp, bz = sample_coil_field_cylindrical(
+                params,
+                R_j,
+                jnp.asarray(Z),
+                jnp.asarray(phi),
+            )
+            br = br + jnp.asarray(br_add, dtype=br.dtype)
+            bp = bp + jnp.asarray(bp_add, dtype=bp.dtype)
+            bz = bz + jnp.asarray(bz_add, dtype=bz.dtype)
+        with _jax_named_scope("vmec_jax.free_boundary.vacuum_boundary_projection"):
+            vac = vacuum_boundary_fields_from_cylindrical_jax(
+                br=br,
+                bp=bp,
+                bz=bz,
+                R=R_j,
+                Ru=Ru,
+                Zu=Zu,
+                Rv=Rv,
+                Zv=Zv,
+                include_bnormal_unit=False,
+            )
+    else:
+        vac = {
+            "bu": jnp.asarray(vac_override["bu"]),
+            "bv": jnp.asarray(vac_override["bv"]),
+            "bnormal": jnp.asarray(vac_override["bnormal"]),
+            "g_uu": jnp.asarray(vac_override["g_uu"]),
+            "g_uv": jnp.asarray(vac_override["g_uv"]),
+            "g_vv": jnp.asarray(vac_override["g_vv"]),
+        }
     if wint is None:
         wint_j = jnp.ones_like(R_j)
     else:
@@ -1629,6 +1667,7 @@ def direct_coil_boundary_bsqvac_from_trace_jax(
     wint: Any,
     include_analytic: bool = True,
     include_diagnostics: bool = True,
+    freeze_vacuum_field: bool = False,
 ) -> dict[str, Any]:
     """Replay direct-coil ``bsqvac`` on accepted geometry using trace metadata.
 
@@ -1644,6 +1683,7 @@ def direct_coil_boundary_bsqvac_from_trace_jax(
     if not isinstance(nestor_trace, dict):
         raise ValueError("trace must be a NESTOR trace or contain 'freeb_nestor_trace'")
 
+    vac_override = _direct_coil_trace_vacuum_field_override(trace) if bool(freeze_vacuum_field) else None
     return direct_coil_boundary_bsqvac_jax(
         params,
         R=geometry["R"],
@@ -1669,6 +1709,7 @@ def direct_coil_boundary_bsqvac_from_trace_jax(
         wint=jnp.asarray(wint),
         include_analytic=bool(include_analytic),
         include_diagnostics=bool(include_diagnostics),
+        vac_override=vac_override,
     )
 
 
@@ -3036,6 +3077,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     replay_plan: Mapping[str, Any] | None = None,
     include_replay_aux: bool = True,
     state_only_replay: bool = False,
+    freeze_vacuum_field: bool = False,
     freeze_freeb_bsqvac: bool = False,
     jit_preconditioner_apply: bool = True,
     unroll_accepted_only_segments_below: int = 0,
@@ -3074,6 +3116,11 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     update in the graph while intentionally removing coil sensitivity through
     the external-field replay, so it must not be used as a promoted derivative
     or optimization path.
+    ``freeze_vacuum_field`` is an intermediate diagnostic split: it reuses the
+    accepted trace's normal/tangential vacuum-field projection arrays but still
+    runs the JAX dense NESTOR mode solve and field reconstruction.  This
+    separates Biot-Savart/projection graph cost from NESTOR/source assembly
+    graph cost, and is also not a promoted derivative path.
 
     The helper intentionally keeps every trace accepted.  It does not
     differentiate through the host policy that selected the traces; it validates
@@ -3184,6 +3231,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                             wint=jnp.asarray(context["wint"]),
                             include_analytic=bool(include_analytic),
                             include_diagnostics=not bool(state_only_replay),
+                            freeze_vacuum_field=bool(freeze_vacuum_field),
                         )
                 else:
                     with _jax_named_scope("vmec_jax.free_boundary.direct_coil_bsqvac_replay"):
@@ -3212,6 +3260,11 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                             wint=jnp.asarray(context["wint"]),
                             include_analytic=bool(include_analytic),
                             include_diagnostics=not bool(state_only_replay),
+                            vac_override=(
+                                _direct_coil_trace_vacuum_field_override(trace)
+                                if bool(freeze_vacuum_field)
+                                else None
+                            ),
                         )
                 freeb_bsqvac_half = replay["bsqvac"]
             if bool(state_only_replay):
@@ -3306,6 +3359,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                             wint=jnp.asarray(context["wint"]),
                             include_analytic=bool(include_analytic),
                             include_diagnostics=not bool(state_only_replay),
+                            freeze_vacuum_field=bool(freeze_vacuum_field),
                         )
                 else:
                     with _jax_named_scope("vmec_jax.free_boundary.direct_coil_bsqvac_replay"):
@@ -3334,6 +3388,11 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                             wint=jnp.asarray(context["wint"]),
                             include_analytic=bool(include_analytic),
                             include_diagnostics=not bool(state_only_replay),
+                            vac_override=(
+                                _direct_coil_trace_vacuum_field_override(trace)
+                                if bool(freeze_vacuum_field)
+                                else None
+                            ),
                         )
                 freeb_bsqvac_half = replay["bsqvac"]
             if bool(state_only_replay):
@@ -4608,6 +4667,7 @@ def direct_coil_same_branch_controller_scalars_custom_vjp_report(
             "use_stacked_step_controls": bool(replay_options.get("use_stacked_step_controls", False)),
             "use_accepted_only_fast_path": bool(replay_options.get("use_accepted_only_fast_path", True)),
             "include_analytic": bool(replay_options.get("include_analytic", True)),
+            "freeze_vacuum_field": bool(replay_options.get("freeze_vacuum_field", False)),
             "freeze_freeb_bsqvac": bool(replay_options.get("freeze_freeb_bsqvac", False)),
         },
         "replay_branch_metadata": replay_branch_metadata,
@@ -5060,6 +5120,7 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
             "use_replay_plan": bool(replay_plan_for_scalars is not None),
             "include_replay_aux": bool(replay_options.get("include_replay_aux", True)),
             "include_analytic": bool(replay_options.get("include_analytic", True)),
+            "freeze_vacuum_field": bool(replay_options.get("freeze_vacuum_field", False)),
             "freeze_freeb_bsqvac": bool(replay_options.get("freeze_freeb_bsqvac", False)),
             "state_only_replay": bool(replay_options.get("state_only_replay", False)),
             "jit_preconditioner_apply": bool(replay_options.get("jit_preconditioner_apply", True)),
@@ -5367,6 +5428,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
             "use_replay_plan": bool(replay_plan_for_scalars is not None),
             "include_replay_aux": bool(replay_options.get("include_replay_aux", True)),
             "include_analytic": bool(replay_options.get("include_analytic", True)),
+            "freeze_vacuum_field": bool(replay_options.get("freeze_vacuum_field", False)),
             "freeze_freeb_bsqvac": bool(replay_options.get("freeze_freeb_bsqvac", False)),
             "state_only_replay": bool(replay_options.get("state_only_replay", False)),
             "jit_preconditioner_apply": bool(replay_options.get("jit_preconditioner_apply", True)),
