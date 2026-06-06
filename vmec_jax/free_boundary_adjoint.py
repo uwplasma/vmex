@@ -4516,6 +4516,7 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
     replay_scalar_fn: Any,
     scalar_key: str | None = None,
     production_values: Mapping[str, Any] | None = None,
+    replay_payload: Mapping[str, Any] | None = None,
     complete_payload: Mapping[str, Any] | None = None,
     init_kwargs: dict[str, Any] | None = None,
     solve_kwargs: dict[str, Any] | None = None,
@@ -4540,7 +4541,9 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
     example through :func:`direct_coil_same_branch_complete_solve_fd_report`,
     can pass ``production_values`` to avoid recomputing it.  The
     ``replay_scalar_fn(replay, payload)`` must return the same scalar from the
-    JAX-visible replay dictionary.
+    JAX-visible replay dictionary.  ``replay_payload`` can be supplied to pass a
+    slim context into that function, avoiding closure capture of a full complete
+    solve payload during cold replay/JVP graph construction.
     """
 
     if jax is None:  # pragma: no cover - JAX is required for this helper.
@@ -4602,6 +4605,8 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
     }
     if replay_kwargs:
         replay_options.update(replay_kwargs)
+    replay_payload_for_scalars = payload if replay_payload is None else replay_payload
+    replay_payload_source = "complete_payload" if replay_payload is None else "user"
 
     graph_metadata = direct_coil_accepted_trace_replay_graph_metadata(
         traces,
@@ -4626,13 +4631,13 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
             traces[0]["state_pre"],
             **replay_options,
         )
-        return replay_scalar_fn(replay, payload)
+        return replay_scalar_fn(replay, replay_payload_for_scalars)
 
     def _replay_scalar_custom_vjp(coil_params):
         return direct_coil_accepted_trace_controller_custom_vjp_scalar_jax(
             coil_params,
             traces[0]["state_pre"],
-            scalar_fn=lambda replay: replay_scalar_fn(replay, payload),
+            scalar_fn=lambda replay: replay_scalar_fn(replay, replay_payload_for_scalars),
             **replay_options,
         )
 
@@ -4670,6 +4675,7 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
         "value": float(values[key]),
         "all_values": values,
         "production_values_source": production_values_source,
+        "replay_payload_source": replay_payload_source,
         "replay_value": replay_value,
         "base_abs_delta": abs(float(np.asarray(replay_value, dtype=float)) - float(values[key])),
         "grad": grad,
@@ -4697,6 +4703,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
     replay_scalar_fns: Mapping[str, Any],
     scalar_keys: tuple[str, ...] | list[str] | None = None,
     production_values: Mapping[str, Any] | None = None,
+    replay_payload: Mapping[str, Any] | None = None,
     complete_payload: Mapping[str, Any] | None = None,
     init_kwargs: dict[str, Any] | None = None,
     solve_kwargs: dict[str, Any] | None = None,
@@ -4726,7 +4733,9 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
     ``production_values`` to avoid recomputing them from ``scalar_fn``.
     ``replay_scalar_fns`` maps the same scalar keys to callables of the form
     ``fn(replay, payload)`` that evaluate those scalars from the JAX-visible
-    accepted-controller replay.
+    accepted-controller replay.  ``replay_payload`` can be supplied to pass a
+    slim context into those functions, avoiding closure capture of a full
+    complete-solve payload during cold replay/JVP graph construction.
     """
 
     if jax is None:  # pragma: no cover - JAX is required for this helper.
@@ -4795,6 +4804,8 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
     }
     if replay_kwargs:
         replay_options.update(replay_kwargs)
+    replay_payload_for_scalars = payload if replay_payload is None else replay_payload
+    replay_payload_source = "complete_payload" if replay_payload is None else "user"
 
     graph_metadata = direct_coil_accepted_trace_replay_graph_metadata(
         traces,
@@ -4810,8 +4821,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
     )
 
     scalar_fn_seq = tuple(
-        (lambda replay, key=key: replay_scalar_fns[key](replay, payload))
-        for key in keys
+        (lambda replay, key=key: replay_scalar_fns[key](replay, replay_payload_for_scalars)) for key in keys
     )
 
     ad_mode = str(replay_ad_mode).strip().lower()
@@ -4917,6 +4927,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
         "values": values,
         "all_values": all_values,
         "production_values_source": production_values_source,
+        "replay_payload_source": replay_payload_source,
         "replay_values": replay_values,
         "replay_value_map": replay_value_map,
         "base_abs_delta": base_abs_delta,
