@@ -443,6 +443,7 @@ def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path
         assert kwargs["include_payload"] is False
         assert kwargs["include_replay_graph_metadata"] is False
         assert kwargs["replay_kwargs"]["state_only_replay"] is True
+        assert kwargs["replay_kwargs"]["include_analytic"] is True
         return {
             "uses_production_forward": True,
             "differentiates_adaptive_controller": False,
@@ -542,6 +543,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
         same_branch_report_mode="vector",
         same_branch_report_vector_keys="aspect,qs_total",
         same_branch_report_max_iter=3,
+        same_branch_report_disable_analytic=True,
         vmec_max_iter=2,
         ftol=1.0e-8,
         jit_forces=False,
@@ -591,6 +593,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
         assert kwargs["include_payload"] is False
         assert kwargs["include_replay_graph_metadata"] is False
         assert kwargs["replay_kwargs"]["state_only_replay"] is True
+        assert kwargs["replay_kwargs"]["include_analytic"] is False
         assert kwargs["direction_params"] is not None
         assert kwargs["direction_params"].n_segments == direction_params.n_segments
         assert kwargs["scalar_keys"] == ("aspect", "qs_total")

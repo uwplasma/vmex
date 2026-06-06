@@ -4586,6 +4586,7 @@ def direct_coil_same_branch_controller_scalars_custom_vjp_report(
             "use_preconditioner_policy_segments": bool(replay_options.get("use_preconditioner_policy_segments", False)),
             "use_stacked_step_controls": bool(replay_options.get("use_stacked_step_controls", False)),
             "use_accepted_only_fast_path": bool(replay_options.get("use_accepted_only_fast_path", True)),
+            "include_analytic": bool(replay_options.get("include_analytic", True)),
         },
         "replay_branch_metadata": replay_branch_metadata,
         "values": values,
@@ -5036,6 +5037,7 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
             "use_accepted_only_fast_path": bool(replay_options.get("use_accepted_only_fast_path", True)),
             "use_replay_plan": bool(replay_plan_for_scalars is not None),
             "include_replay_aux": bool(replay_options.get("include_replay_aux", True)),
+            "include_analytic": bool(replay_options.get("include_analytic", True)),
             "state_only_replay": bool(replay_options.get("state_only_replay", False)),
             "jit_preconditioner_apply": bool(replay_options.get("jit_preconditioner_apply", True)),
             "unroll_accepted_only_segments_below": int(
@@ -5341,6 +5343,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
             "use_accepted_only_fast_path": bool(replay_options.get("use_accepted_only_fast_path", True)),
             "use_replay_plan": bool(replay_plan_for_scalars is not None),
             "include_replay_aux": bool(replay_options.get("include_replay_aux", True)),
+            "include_analytic": bool(replay_options.get("include_analytic", True)),
             "state_only_replay": bool(replay_options.get("state_only_replay", False)),
             "jit_preconditioner_apply": bool(replay_options.get("jit_preconditioner_apply", True)),
             "unroll_accepted_only_segments_below": int(
