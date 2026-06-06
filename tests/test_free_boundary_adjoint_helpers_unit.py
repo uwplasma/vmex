@@ -255,3 +255,116 @@ def test_direct_coil_trace_shape_and_frozen_vacuum_wrapper(monkeypatch: pytest.M
             nvper=1,
             wint=grid,
         )
+
+
+@pytest.mark.py311_coverage_only
+def test_accepted_trace_control_metadata_and_stack_contracts() -> None:
+    """Cover fixed-branch controller metadata without a VMEC solve."""
+
+    def trace(step: int, *, active_freeb: bool = False, precond_jmax: int = 2) -> dict[str, object]:
+        scalar = np.asarray(1.0 + step)
+        vector = np.asarray([1.0 + step, 2.0 + step])
+        payload: dict[str, object] = {
+            "dt_eff": scalar,
+            "b1": scalar,
+            "fac": scalar,
+            "force_scale": scalar,
+            "max_update_rms_pre": scalar,
+            "lambda_update_scale": scalar,
+            "flip_sign": np.asarray(False),
+            "limit_update_rms": np.asarray(True),
+            "divide_by_scalxc_for_update": np.asarray(False),
+            "preconditioner_use_precomputed_tridi": np.asarray(precond_jmax > 0),
+            "preconditioner_use_lax_tridi": np.asarray(False),
+            "precond_jmax": precond_jmax,
+            "precond_mats": {"main": vector},
+            "lam_prec": vector,
+            "w_mode_mn": vector,
+            "state_pre": {"x": vector},
+            "force_state_pre": {"x": 0.5 * vector},
+            "freeb_pres_scale": np.asarray([0.25 + step]),
+            "constraint_tcon": np.asarray([0.0 + step]),
+            "wout_like": {"tag": np.asarray([step])},
+            "trig": {"tag": np.asarray([step])},
+            "zero_m1": np.asarray([False]),
+        }
+        for key in fba._ACCEPTED_TRACE_REQUIRED_ARRAY_CONTROL_KEYS:
+            payload[key] = vector
+        for key in fba._ACCEPTED_TRACE_OPTIONAL_ARRAY_CONTROL_KEYS:
+            payload[key] = vector
+        if active_freeb:
+            axis = np.ones((2, 2)) * (1.0 + step)
+            payload["freeb_bsqvac_half"] = axis
+            payload["freeb_nestor_trace"] = {
+                "br_axis": axis,
+                "bp_axis": 2.0 * axis,
+                "bz_axis": 3.0 * axis,
+            }
+        return payload
+
+    traces = (trace(0, active_freeb=True), trace(1, active_freeb=False))
+
+    with pytest.raises(ValueError, match="accept_mask"):
+        fba.direct_coil_accepted_trace_controller_controls_jax(traces, accept_mask=np.asarray([True]))
+    with pytest.raises(ValueError, match="done_mask"):
+        fba.direct_coil_accepted_trace_controller_controls_jax(traces, done_mask=np.asarray([False]))
+
+    controls = fba.direct_coil_accepted_trace_controller_controls_jax(
+        traces,
+        accept_mask=np.asarray([True, False]),
+        done_mask=np.asarray([False, True]),
+    )
+    masks = fba._accepted_trace_effective_controller_masks(controls)
+    assert np.asarray(masks["accepted"]).tolist() == [True, False]
+    assert np.asarray(masks["rejected"]).tolist() == [False, True]
+
+    scalar_controls = fba.direct_coil_accepted_trace_scalar_controls_jax(traces)
+    array_controls = fba.direct_coil_accepted_trace_array_controls_jax(traces)
+    preconditioner_controls = fba.direct_coil_accepted_trace_preconditioner_controls_jax(traces)
+    step_controls = fba.direct_coil_accepted_trace_step_controls_jax(traces)
+    assert scalar_controls["dt_eff"].shape == (2,)
+    assert array_controls["vRcc_before"].shape == (2, 2)
+    assert preconditioner_controls["precond_mats"]["main"].shape == (2, 2)
+    assert step_controls["freeb_nestor_axes"]["br_axis"].shape == (2, 2, 2)
+    assert step_controls["force_state_pre"]["x"].shape == (2, 2)
+
+    missing_optional = (trace(0), trace(1))
+    assert fba._stack_optional_trace_pytree_field(missing_optional, "freeb_pres_scale") is not None
+    partial_optional = (trace(0), {**trace(1), "freeb_pres_scale": None})
+    assert fba._stack_optional_trace_pytree_field(partial_optional, "freeb_pres_scale") is None
+    inconsistent_optional = (trace(0), {**trace(1), "freeb_pres_scale": np.ones(2)})
+    with pytest.raises(ValueError, match="optional field"):
+        fba._stack_optional_trace_pytree_field(inconsistent_optional, "freeb_pres_scale")
+
+    assert fba._stack_trace_nestor_axis_controls(missing_optional) is None
+    bad_axis = (trace(0, active_freeb=True), trace(1, active_freeb=True))
+    bad_axis[1]["freeb_nestor_trace"] = {"br_axis": np.ones((3, 2)), "bp_axis": np.ones((2, 2)), "bz_axis": np.ones((2, 2))}
+    with pytest.raises(ValueError, match="NESTOR axis field"):
+        fba._stack_trace_nestor_axis_controls(bad_axis)
+
+    metadata = fba.direct_coil_accepted_trace_branch_metadata(
+        traces,
+        accept_mask=np.asarray([True, False]),
+        done_mask=np.asarray([False, True]),
+        json_safe=True,
+    )
+    assert metadata["n_steps"] == 2
+    assert metadata["n_free_boundary_replay_steps"] == 1
+    graph = fba.direct_coil_accepted_trace_replay_graph_metadata(
+        traces,
+        accept_mask=np.asarray([True, False]),
+        done_mask=np.asarray([False, True]),
+        json_safe=True,
+    )
+    assert graph["active_free_boundary_replay_steps"] == 1
+    assert graph["inferred_boundary_shape"] == [2, 2]
+
+    plan = fba.direct_coil_accepted_trace_controller_replay_plan(
+        missing_optional,
+        static=SimpleNamespace(),
+        use_preconditioner_policy_segments=True,
+        use_segment_preconditioner_controls=True,
+        use_stacked_step_controls=False,
+    )
+    assert plan["segment_source"] == "preconditioner_policy"
+    assert plan["preconditioner_controls_stacked"]

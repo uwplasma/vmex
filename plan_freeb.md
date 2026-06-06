@@ -12263,3 +12263,56 @@ Completion:
 - CI runtime refactor with preserved coverage/physics gates: 100%; latest full
   CI is green with strict 95% line coverage.
 - Docs/release hygiene: 98.9%.
+
+### 2026-06-06 Accepted-Trace Metadata Coverage Gate Repair
+
+Steps taken:
+
+1. Watched GitHub Actions run ``27076280334`` for commit ``de06579``.
+2. Confirmed all physics, docs, smoke, exact replay, py3.10, and py3.12 shards
+   passed; the only failure was the combined py3.11 coverage gate.
+3. Inspected the coverage-gate log: the exact XML line rate was ``94.99%``
+   against the strict ``95.00%`` gate.
+4. Added an asset-free, VMEC-solve-free py3.11 coverage test for the fixed
+   accepted-branch controller seam, covering accepted/rejected masks, stacked
+   scalar/array/preconditioner controls, optional pytree controls,
+   NESTOR-axis stackability, branch metadata, graph metadata, and replay-plan
+   preconditioner segmentation.
+
+Results obtained:
+
+1. ``python -m ruff check tests/test_free_boundary_adjoint_helpers_unit.py``
+   passed.
+2. ``JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_adjoint_helpers_unit.py -q`` passed with
+   ``6 passed``.
+3. The CI-equivalent py3.11 coverage-only shard passed locally:
+   ``24 passed in 70.94 s``.
+
+Best next steps:
+
+1. Commit and push the targeted coverage repair, then confirm the full GitHub
+   Actions run clears the exact combined coverage gate.
+2. Resume low-risk performance work only after CI is green: the next candidate
+   remains static nonsingular-table hoisting inside the JAX NESTOR replay
+   context, guarded by the existing AD-vs-FD gates and timing reports.
+3. Keep adaptive full-loop derivative claims conservative; only fixed
+   same-branch accepted-controller replay is currently validated.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99995% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.9%.
+- Single-stage coil-only optimization: 97.2%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 98.7%.
+- CI runtime refactor with preserved coverage/physics gates: 99.9% pending the
+  rerun of the exact combined coverage gate after this repair.
+- Docs/release hygiene: 99.5%.
