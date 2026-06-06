@@ -2641,9 +2641,10 @@ def preconditioned_force_channels_from_raw_forces(
     lambda_update_scale=1.0,
     use_precomputed: bool | None = None,
     use_lax_tridi: bool | None = None,
+    jit_preconditioner_apply: bool = True,
 ):
     """Apply the radial preconditioner, lambda scaling, and mode scaling."""
-    from .preconditioner_1d_jax import rz_preconditioner_apply_jit
+    from .preconditioner_1d_jax import rz_preconditioner_apply, rz_preconditioner_apply_jit
     from .solve import _scale_mode_slice, _vmec_scale_m1_factors_from_mats
 
     frzl_rhs = frzl
@@ -2673,7 +2674,8 @@ def preconditioned_force_channels_from_raw_forces(
                 flss=getattr(frzl, "flss", None),
             )
 
-    frzl_rz = rz_preconditioner_apply_jit(
+    apply_preconditioner = rz_preconditioner_apply_jit if bool(jit_preconditioner_apply) else rz_preconditioner_apply
+    frzl_rz = apply_preconditioner(
         frzl_in=frzl_rhs,
         mats=mats,
         jmax=int(jmax),
@@ -2870,6 +2872,7 @@ def strict_update_one_step_from_state(
     preconditioner_jmax_override: int | None = None,
     preconditioner_use_precomputed_tridi: bool | None = None,
     preconditioner_use_lax_tridi: bool | None = None,
+    jit_preconditioner_apply: bool = True,
     freeb_bsqvac_half=None,
     freeb_pres_scale=None,
     constraint_tcon0=None,
@@ -2927,6 +2930,7 @@ def strict_update_one_step_from_state(
         lambda_update_scale=lambda_update_scale,
         use_precomputed=preconditioner_use_precomputed_tridi,
         use_lax_tridi=preconditioner_use_lax_tridi,
+        jit_preconditioner_apply=jit_preconditioner_apply,
     )
     step_out = strict_update_accepted_step(
         state_pre,
@@ -2985,6 +2989,7 @@ def strict_update_one_step_from_trace(
     freeb_bsqvac_half: Any = _TRACE_OVERRIDE_UNSET,
     freeb_pres_scale: Any = _TRACE_OVERRIDE_UNSET,
     enforce_edge: bool = True,
+    jit_preconditioner_apply: bool = True,
 ) -> dict[str, Any]:
     """Replay one strict residual step using fields captured in a trace dict.
 
@@ -3056,6 +3061,7 @@ def strict_update_one_step_from_trace(
         divide_by_scalxc_for_update=_control("divide_by_scalxc_for_update"),
         preconditioner_use_precomputed_tridi=_control("preconditioner_use_precomputed_tridi"),
         preconditioner_use_lax_tridi=_control("preconditioner_use_lax_tridi"),
+        jit_preconditioner_apply=jit_preconditioner_apply,
         freeb_bsqvac_half=bsqvac,
         freeb_pres_scale=pres_scale,
         constraint_rcon0=trace.get("constraint_rcon0"),

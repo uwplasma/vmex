@@ -904,6 +904,11 @@ def write_same_branch_validation_report(
         "accepted_bnormal_rms": lambda replay, _payload: accepted_bnormal_rms_from_replay(replay),
     }
     scalar_key = str(getattr(args, "same_branch_report_scalar_key", "qs_total"))
+    replay_kwargs = {
+        "use_stacked_step_controls": True,
+        "use_accepted_only_fast_path": True,
+        "jit_preconditioner_apply": not bool(getattr(args, "same_branch_report_disable_jit_preconditioner", False)),
+    }
     if same_branch and mode == "scalar" and "base" in report and scalar_key in report["objective_values"]:
         t0 = time.perf_counter()
         scalar = direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
@@ -914,7 +919,7 @@ def write_same_branch_validation_report(
             replay_payload=replay_payload,
             scalar_fn=lambda payload: {scalar_key: scalar_value_fns[scalar_key](payload)},
             replay_scalar_fn=lambda replay, payload: scalar_replay_fns[scalar_key](replay, payload),
-            replay_kwargs={"use_stacked_step_controls": True, "use_accepted_only_fast_path": True},
+            replay_kwargs=replay_kwargs,
             replay_ad_mode=ad_mode,
             include_trace_replay_diagnostics=False,
             include_payload=False,
@@ -1005,7 +1010,7 @@ def write_same_branch_validation_report(
                 ),
                 "accepted_bnormal_rms": lambda replay, _payload: accepted_bnormal_rms_from_replay(replay),
             },
-            replay_kwargs={"use_stacked_step_controls": True, "use_accepted_only_fast_path": True},
+            replay_kwargs=replay_kwargs,
             replay_ad_mode=ad_mode,
             include_trace_replay_diagnostics=False,
             include_payload=False,
@@ -1452,6 +1457,14 @@ def build_parser() -> argparse.ArgumentParser:
             "Accepted-branch AD path for scalar/vector derivative reports. "
             "'direct' differentiates the fixed replay directly and is faster; "
             "'custom_vjp' exercises the explicit custom-VJP wrapper."
+        ),
+    )
+    parser.add_argument(
+        "--same-branch-report-disable-jit-preconditioner",
+        action="store_true",
+        help=(
+            "Diagnostic only: use the non-JIT radial preconditioner apply inside "
+            "branch-local accepted replay to isolate cold JVP graph construction."
         ),
     )
     parser.add_argument(

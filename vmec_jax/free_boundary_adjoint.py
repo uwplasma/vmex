@@ -2998,6 +2998,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     use_accepted_only_fast_path: bool = True,
     replay_plan: Mapping[str, Any] | None = None,
     include_replay_aux: bool = True,
+    jit_preconditioner_apply: bool = True,
 ) -> dict[str, Any]:
     """Replay fixed production traces through a JAX-visible accept controller.
 
@@ -3176,6 +3177,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                 preconditioner_controls=control["step_preconditioner"] if "step_preconditioner" in control else None,
                 freeb_bsqvac_half=freeb_bsqvac_half,
                 enforce_edge=bool(enforce_edge),
+                jit_preconditioner_apply=bool(jit_preconditioner_apply),
             )
         return step["step"]["state_post"], {
             "force": _tree_weighted_half_norm(step["force"], force_weight),
@@ -3333,6 +3335,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                     trace.get("constraint_tcon_active"),
                 ),
                 enforce_edge=bool(enforce_edge),
+                jit_preconditioner_apply=bool(jit_preconditioner_apply),
             )
         return step["step"]["state_post"], {
             "force": _tree_weighted_half_norm(step["force"], force_weight),
@@ -4912,6 +4915,7 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
             "use_accepted_only_fast_path": bool(replay_options.get("use_accepted_only_fast_path", True)),
             "use_replay_plan": bool(replay_plan_for_scalars is not None),
             "include_replay_aux": bool(replay_options.get("include_replay_aux", True)),
+            "jit_preconditioner_apply": bool(replay_options.get("jit_preconditioner_apply", True)),
             "replay_ad_mode": ad_mode,
         },
     }
@@ -5212,6 +5216,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
             "use_accepted_only_fast_path": bool(replay_options.get("use_accepted_only_fast_path", True)),
             "use_replay_plan": bool(replay_plan_for_scalars is not None),
             "include_replay_aux": bool(replay_options.get("include_replay_aux", True)),
+            "jit_preconditioner_apply": bool(replay_options.get("jit_preconditioner_apply", True)),
             "replay_ad_mode": ad_mode,
         },
     }

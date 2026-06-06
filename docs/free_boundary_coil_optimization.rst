@@ -719,6 +719,10 @@ accepted-branch replay directly.  Use
 ``--same-branch-report-ad-mode custom_vjp`` only when explicitly auditing the
 custom-VJP seam; that path falls back to the more expensive full-Jacobian VJP
 diagnostic.
+``--same-branch-report-disable-jit-preconditioner`` is another diagnostic
+switch: it replaces the cached JIT radial-preconditioner apply inside the
+fixed replay with the non-JIT array implementation.  It is not a default
+production setting; use it only to isolate cold graph-construction costs.
 The resulting ``same_branch_complete_solve_report.json`` includes a
 ``timings`` block.  ``complete_solve_fd_wall_s`` measures the complete
 base/plus/minus finite-difference solves, while

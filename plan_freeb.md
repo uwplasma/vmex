@@ -263,6 +263,55 @@ Completion:
 - CI runtime refactor with preserved coverage/physics gates: 100%.
 - Docs/release hygiene: 99.2%.
 
+### 2026-06-06 Preconditioner-JIT Replay Diagnostic
+
+Steps taken:
+
+1. Added a diagnostic ``jit_preconditioner_apply`` switch to
+   ``strict_update_one_step_from_state`` and the branch-local accepted replay
+   path, defaulting to the existing JIT-cached preconditioner apply.
+2. Exposed the diagnostic in the coil-only QS example as
+   ``--same-branch-report-disable-jit-preconditioner``.
+3. Re-ran the bounded ``state_norm`` same-branch report with and without the
+   JIT preconditioner apply.
+
+Results obtained:
+
+1. The default ``state_norm`` dispatch was about ``11.76 s``.
+2. The non-JIT preconditioner diagnostic dispatch was about ``11.69 s``.
+3. Both runs triggered the same XLA algebraic-simplifier warning.  Therefore
+   the cached radial-preconditioner JIT is not the dominant cold branch-local
+   replay blocker.
+
+Best next steps:
+
+1. Profile raw force residual assembly and the accepted velocity/state update
+   separately; the issue is below the report/scalar/preconditioner-dispatch
+   layers.
+2. Consider a narrower replay primitive for branch-local reports that returns
+   only final state sensitivities and avoids constructing unused residual
+   output dictionaries.
+3. Keep ``--same-branch-report-disable-jit-preconditioner`` as a diagnostic
+   flag only.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99989% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.9%.
+- Single-stage coil-only optimization: 94.0%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 96.75%; preconditioner JIT dispatch is ruled out as the
+  main cold replay blocker.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 99.2%.
+
 ### 2026-06-05 Compact Branch-Local Production Reports
 
 Steps taken:
