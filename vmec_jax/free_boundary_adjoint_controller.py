@@ -142,6 +142,66 @@ def jax_visible_accepted_nonlinear_controller_jax(
     return {"state": final_state, "done": final_done, "history": history}
 
 
+def jax_visible_accepted_only_nonlinear_controller_jax(
+    step_fn: Any,
+    converged_fn: Any,
+    initial_state: Any,
+    params: Any,
+    controls: Any,
+    *,
+    checkpoint_steps: bool = False,
+    initial_done: Any = False,
+) -> dict[str, Any]:
+    """Run a bounded JAX-visible segment whose proposals are all accepted.
+
+    The caller must bound ``controls`` to a segment that is active for every
+    slot, with at most a final convergence marker.  This keeps the accepted-only
+    replay free of accept/reject state selection while still emitting the
+    controller history masks consumed by replay objectives.
+    """
+
+    if jax is None:  # pragma: no cover - JAX is required for scan controllers.
+        raise RuntimeError("JAX is required for JAX-visible nonlinear controllers.")
+
+    def _normalize_step(state, control):
+        out = step_fn(state, params, control)
+        if isinstance(out, tuple) and len(out) == 2:
+            proposed_state, aux = out
+        else:
+            proposed_state, aux = out, {}
+        return proposed_state, aux
+
+    step_eval = jax.checkpoint(_normalize_step) if bool(checkpoint_steps) else _normalize_step
+
+    def _select_state(flag, old_state, new_state):
+        return tree_util.tree_map(
+            lambda old, new: jnp.where(flag, jnp.asarray(new), jnp.asarray(old)),
+            old_state,
+            new_state,
+        )
+
+    def _scan_step(carry, control):
+        state, done = carry
+        proposed_state, aux = step_eval(state, control)
+        active = jnp.logical_not(done)
+        state_out = _select_state(active, state, proposed_state)
+        accepted_done = jnp.asarray(converged_fn(proposed_state, params, control, aux), dtype=bool)
+        done_out = jnp.logical_or(done, jnp.logical_and(active, accepted_done))
+        aux_out = dict(aux) if isinstance(aux, dict) else {"aux": aux}
+        aux_out["active"] = active
+        aux_out["accepted"] = active
+        aux_out["rejected"] = jnp.zeros_like(active, dtype=bool)
+        aux_out["done"] = done_out
+        return (state_out, done_out), aux_out
+
+    (final_state, final_done), history = jax.lax.scan(
+        _scan_step,
+        (initial_state, jnp.asarray(initial_done, dtype=bool)),
+        controls,
+    )
+    return {"state": final_state, "done": final_done, "history": history}
+
+
 def jax_visible_segmented_accepted_nonlinear_controller_jax(
     step_fns: Any,
     accept_fn: Any,
@@ -152,6 +212,7 @@ def jax_visible_segmented_accepted_nonlinear_controller_jax(
     *,
     checkpoint_steps: bool = False,
     initial_done: Any = False,
+    accepted_only_segments: Any | None = None,
 ) -> dict[str, Any]:
     """Run accepted/rejected JAX-visible controllers over static segments."""
 
@@ -171,20 +232,41 @@ def jax_visible_segmented_accepted_nonlinear_controller_jax(
                 f"step_fns length {len(step_fn_seq)} does not match control_segments length {len(segments)}"
             )
 
+    if accepted_only_segments is None:
+        accepted_only_segment_seq = (False,) * len(segments)
+    else:
+        accepted_only_segment_seq = tuple(bool(flag) for flag in accepted_only_segments)
+        if len(accepted_only_segment_seq) != len(segments):
+            raise ValueError(
+                "accepted_only_segments length "
+                f"{len(accepted_only_segment_seq)} does not match control_segments length {len(segments)}"
+            )
+
     state = initial_state
     done = jnp.asarray(initial_done, dtype=bool)
     histories = []
-    for step_fn, controls in zip(step_fn_seq, segments, strict=True):
-        run = jax_visible_accepted_nonlinear_controller_jax(
-            step_fn,
-            accept_fn,
-            converged_fn,
-            state,
-            params,
-            controls,
-            checkpoint_steps=checkpoint_steps,
-            initial_done=done,
-        )
+    for step_fn, controls, accepted_only in zip(step_fn_seq, segments, accepted_only_segment_seq, strict=True):
+        if bool(accepted_only):
+            run = jax_visible_accepted_only_nonlinear_controller_jax(
+                step_fn,
+                converged_fn,
+                state,
+                params,
+                controls,
+                checkpoint_steps=checkpoint_steps,
+                initial_done=done,
+            )
+        else:
+            run = jax_visible_accepted_nonlinear_controller_jax(
+                step_fn,
+                accept_fn,
+                converged_fn,
+                state,
+                params,
+                controls,
+                checkpoint_steps=checkpoint_steps,
+                initial_done=done,
+            )
         state = run["state"]
         done = run["done"]
         histories.append(run["history"])
@@ -393,6 +475,7 @@ def _pytree_vdot_jax(lhs: Any, rhs: Any) -> Any:
 
 
 __all__ = [
+    "jax_visible_accepted_only_nonlinear_controller_jax",
     "jax_visible_accepted_nonlinear_controller_directional_check_jax",
     "jax_visible_accepted_nonlinear_controller_jax",
     "jax_visible_masked_nonlinear_controller_directional_check_jax",
