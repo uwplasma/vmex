@@ -1142,6 +1142,7 @@ def vacuum_boundary_fields_from_cylindrical_jax(
     Rv: Any,
     Zv: Any,
     det_floor: float = 1.0e-30,
+    include_bnormal_unit: bool = True,
 ) -> dict[str, Any]:
     """JAX version of the VMEC boundary-field projection scaffold.
 
@@ -1181,22 +1182,23 @@ def vacuum_boundary_fields_from_cylindrical_jax(
     n_phi = Zu_arr * Rv_arr - Ru_arr * Zv_arr
     n_z = R_arr * Ru_arr
     bnormal = br_arr * n_r + bp_arr * n_phi + bz_arr * n_z
-    n_norm = jnp.sqrt(n_r * n_r + n_phi * n_phi + n_z * n_z)
-    bnormal_unit = bnormal / jnp.where(n_norm > 0.0, n_norm, 1.0)
 
-    return {
+    result = {
         "bu": bu,
         "bv": bv,
         "bsupu": bsupu,
         "bsupv": bsupv,
         "bsqvac": bsqvac,
         "bnormal": bnormal,
-        "bnormal_unit": bnormal_unit,
         "g_uu": g_uu,
         "g_uv": g_uv,
         "g_vv": g_vv,
         "det_guv": det,
     }
+    if bool(include_bnormal_unit):
+        n_norm = jnp.sqrt(n_r * n_r + n_phi * n_phi + n_z * n_z)
+        result["bnormal_unit"] = bnormal / jnp.where(n_norm > 0.0, n_norm, 1.0)
+    return result
 
 
 def vacuum_boundary_fields_from_mode_coeffs_jax(
@@ -1546,6 +1548,7 @@ def direct_coil_boundary_bsqvac_jax(
             Zu=Zu,
             Rv=Rv,
             Zv=Zv,
+            include_bnormal_unit=False,
         )
     if wint is None:
         wint_j = jnp.ones_like(R_j)

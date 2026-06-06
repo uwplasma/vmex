@@ -31,6 +31,10 @@ Steps taken:
    ``direct_coil_accepted_trace_controller_replay_objective_jax``: when the
    state objective weight is a host-known zero, the replay now returns a scalar
    zero instead of packing the full VMEC state to form a zero-weight norm.
+5. Added an opt-out flag for ``bnormal_unit`` construction in
+   ``vacuum_boundary_fields_from_cylindrical_jax`` and disabled that unit-normal
+   square-root/division work in direct-coil ``bsqvac`` replay, where the NESTOR
+   RHS only needs unnormalized ``bnormal``.
 
 Results obtained:
 
@@ -38,10 +42,12 @@ Results obtained:
 2. Focused state-only controller tests passed.
 3. The accepted-update replay AD-vs-FD test passed.
 4. The free-boundary QS coil-only smoke report with state-only vector replay
-   still passed.  ``branch_local_vector_replay_jvp_dispatch_s`` improved
-   slightly from about ``9.80 s`` to about ``9.76 s`` on the local machine.
-   This confirms the remaining blocker is strict accepted-state/NESTOR replay
-   graph construction, not report packing or history materialization.
+   still passed.  ``branch_local_vector_replay_jvp_dispatch_s`` improved from
+   about ``9.80 s`` to ``9.76 s`` after skipping zero-weight state packing, then
+   to about ``9.59 s`` after skipping unit-normal construction in direct-coil
+   ``bsqvac`` replay.  This confirms the remaining blocker is strict
+   accepted-state/NESTOR replay graph construction, not report packing or
+   history materialization.
 
 Best next steps:
 
@@ -67,8 +73,8 @@ Completion:
 - Single-stage coil-only optimization: 96.3%.
 - Robust coil perturbation optimization: deferred by current scope, 70%.
 - CPU/GPU performance: 97.6%; final-state reports avoid history arrays and
-  zero-weight state packing, but strict update/NESTOR replay graph build is
-  still dominant.
+  zero-weight state packing and skip unused unit-normal work in direct-coil
+  replay, but strict update/NESTOR replay graph build is still dominant.
 - CI runtime refactor with preserved coverage/physics gates: 100% by design;
   latest pushed commit needs rerun after this coverage recovery.
 - Docs/release hygiene: 99.5%.
