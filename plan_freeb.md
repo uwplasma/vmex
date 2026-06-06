@@ -12,6 +12,71 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
+### 2026-06-06 Frozen-Bsqvac Replay Cost Split
+
+Steps taken:
+
+1. Added ``freeze_freeb_bsqvac`` to the branch-local accepted-controller
+   replay as a diagnostic-only option.  It reuses the accepted trace's
+   ``bsqvac`` array and skips differentiable direct-coil/NESTOR vacuum
+   recomputation while still running the strict VMEC accepted-state update.
+2. Exposed the option in the coil-only QS example as
+   ``--same-branch-report-freeze-bsqvac`` and marked it diagnostic only.
+3. Added ``diagnostic_freeze_bsqvac`` to the example summary config and
+   ``freeze_freeb_bsqvac`` to replay option flags in scalar/vector/gate
+   reports.
+4. Covered default ``False`` and explicit ``True`` wiring in the same-branch
+   report writer smoke tests.
+5. Ran the compact direct-coil QS same-branch vector report with
+   ``aspect,qs_total`` for the default branch-local replay and for the frozen
+   ``bsqvac`` diagnostic replay.
+
+Results obtained:
+
+1. ``python -m ruff check`` passed for the touched free-boundary source,
+   example, and smoke tests.
+2. The focused same-branch scalar/vector example tests passed locally.
+3. The deeper current-only same-branch finite-pressure gate passed locally.
+4. Current default branch-local vector report timing:
+   ``replay_plan_build_wall_s = 0.200 s``, ``replay_jvp_dispatch_s =
+   9.751 s``, and branch-local vector ``total_wall_s = 9.951 s``.
+5. Frozen ``bsqvac`` diagnostic timing:
+   ``replay_plan_build_wall_s = 0.204 s``, ``replay_jvp_dispatch_s =
+   1.991 s``, and branch-local vector ``total_wall_s = 2.196 s``.
+6. The differentiable direct-coil/NESTOR field replay therefore accounts for
+   about ``7.76 s`` of the cold branch-local JVP dispatch on this fixture.
+   The strict VMEC accepted-state update plus scalar path is now measured at
+   about ``2 s``.  This is a much clearer next target than the analytic-only
+   split.
+
+Best next steps:
+
+1. Keep ``--same-branch-report-freeze-bsqvac`` diagnostic-only; it removes
+   coil sensitivity through the external-field replay and must not be used for
+   promoted derivatives or optimization.
+2. Target differentiable direct-coil/NESTOR field replay next, especially
+   ``vmec_nonsingular_terms_from_bexni_jax`` and dense mode-source assembly.
+3. Add a narrower cost split inside field replay, e.g. nonsingular-only vs
+   direct-coil boundary sampling, before rewriting large source kernels.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99994% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.9%.
+- Single-stage coil-only optimization: 96.9%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 98.3%; the dominant cold exact-callback cost is now
+  identified as differentiable direct-coil/NESTOR field replay.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 99.5%.
+
 ### 2026-06-06 Analytic NESTOR Replay Cost Split
 
 Steps taken:

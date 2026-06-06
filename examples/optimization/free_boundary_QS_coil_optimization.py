@@ -1046,6 +1046,7 @@ def write_same_branch_validation_report(
         "use_accepted_only_fast_path": True,
         "jit_preconditioner_apply": not bool(getattr(args, "same_branch_report_disable_jit_preconditioner", False)),
         "include_analytic": not bool(getattr(args, "same_branch_report_disable_analytic", False)),
+        "freeze_freeb_bsqvac": bool(getattr(args, "same_branch_report_freeze_bsqvac", False)),
     }
     if same_branch and mode == "scalar" and "base" in report and scalar_key in report["objective_values"]:
         t0 = time.perf_counter()
@@ -1311,6 +1312,7 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
         "max_iter": int(args.same_branch_report_max_iter or args.vmec_max_iter),
         "anchor": str(getattr(args, "same_branch_report_anchor", "best")),
         "diagnostic_disable_analytic": bool(getattr(args, "same_branch_report_disable_analytic", False)),
+        "diagnostic_freeze_bsqvac": bool(getattr(args, "same_branch_report_freeze_bsqvac", False)),
     }
     same_branch_derivative_proposal_config = {
         "enabled": bool(args.same_branch_derivative_proposal),
@@ -1703,6 +1705,15 @@ def build_parser() -> argparse.ArgumentParser:
             "Diagnostic only: omit analytic NESTOR terms from branch-local accepted replay "
             "to isolate graph construction cost. This changes the replay operator and is "
             "not a promoted physics-validation path."
+        ),
+    )
+    parser.add_argument(
+        "--same-branch-report-freeze-bsqvac",
+        action="store_true",
+        help=(
+            "Diagnostic only: reuse accepted-trace bsqvac instead of differentiably recomputing "
+            "the direct-coil/NESTOR vacuum response. This isolates strict VMEC update graph cost "
+            "and is not a promoted physics-validation path."
         ),
     )
     parser.add_argument(

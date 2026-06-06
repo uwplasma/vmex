@@ -3036,6 +3036,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     replay_plan: Mapping[str, Any] | None = None,
     include_replay_aux: bool = True,
     state_only_replay: bool = False,
+    freeze_freeb_bsqvac: bool = False,
     jit_preconditioner_apply: bool = True,
     unroll_accepted_only_segments_below: int = 0,
 ) -> dict[str, Any]:
@@ -3067,6 +3068,12 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     replays the direct-coil vacuum field and VMEC state update, but it omits
     per-step force/vacuum objective history needed only by history-dependent
     scalars such as accepted Bnormal/Bsqvac RMS.
+    ``freeze_freeb_bsqvac`` is a diagnostic-only cost split: it reuses the
+    accepted trace's ``bsqvac`` array instead of differentiably recomputing the
+    direct-coil/NESTOR vacuum response.  This keeps the strict VMEC accepted
+    update in the graph while intentionally removing coil sensitivity through
+    the external-field replay, so it must not be used as a promoted derivative
+    or optimization path.
 
     The helper intentionally keeps every trace accepted.  It does not
     differentiate through the host policy that selected the traces; it validates
@@ -3147,66 +3154,73 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
         )
         has_active_freeb_replay = trace.get("freeb_bsqvac_half") is not None and trace.get("freeb_nestor_trace") is not None
         if has_active_freeb_replay:
-            with _jax_named_scope("vmec_jax.free_boundary.boundary_geometry"):
-                geometry = free_boundary_boundary_geometry_jax(
-                    state_in,
-                    static,
-                    sample_nzeta=sample_nzeta,
-                )
-            context = replay_context
-            if context is None or tuple(int(v) for v in geometry["R"].shape) != (
-                int(context["ntheta"]),
-                int(context["nzeta"]),
-            ):
-                with _jax_named_scope("vmec_jax.free_boundary.replay_context"):
-                    context = direct_coil_boundary_replay_context(static, geometry)
-            nestor_axes = _step_control(control, "freeb_nestor_axes")
-            if nestor_axes is None:
-                with _jax_named_scope("vmec_jax.free_boundary.direct_coil_bsqvac_replay"):
-                    replay = direct_coil_boundary_bsqvac_from_trace_jax(
-                        coil_params,
-                        geometry,
-                        trace,
-                        basis=context["basis"],
-                        tables=context["tables"],
-                        signgs=int(signgs),
-                        nvper=int(context["nvper"]),
-                        wint=jnp.asarray(context["wint"]),
-                        include_analytic=bool(include_analytic),
-                        include_diagnostics=not bool(state_only_replay),
-                    )
+            if bool(freeze_freeb_bsqvac):
+                freeb_bsqvac_half = jnp.asarray(trace["freeb_bsqvac_half"])
             else:
-                with _jax_named_scope("vmec_jax.free_boundary.direct_coil_bsqvac_replay"):
-                    replay = direct_coil_boundary_bsqvac_jax(
-                        coil_params,
-                        R=geometry["R"],
-                        Z=geometry["Z"],
-                        phi=geometry["phi"],
-                        Ru=geometry["Ru"],
-                        Zu=geometry["Zu"],
-                        Rv=geometry["Rv"],
-                        Zv=geometry["Zv"],
-                        ruu=geometry["ruu"],
-                        ruv=geometry["ruv"],
-                        rvv=geometry["rvv"],
-                        zuu=geometry["zuu"],
-                        zuv=geometry["zuv"],
-                        zvv=geometry["zvv"],
-                        basis=context["basis"],
-                        tables=context["tables"],
-                        signgs=int(signgs),
-                        nvper=int(context["nvper"]),
-                        br_add=jnp.asarray(nestor_axes["br_axis"]),
-                        bp_add=jnp.asarray(nestor_axes["bp_axis"]),
-                        bz_add=jnp.asarray(nestor_axes["bz_axis"]),
-                        wint=jnp.asarray(context["wint"]),
-                        include_analytic=bool(include_analytic),
-                        include_diagnostics=not bool(state_only_replay),
+                with _jax_named_scope("vmec_jax.free_boundary.boundary_geometry"):
+                    geometry = free_boundary_boundary_geometry_jax(
+                        state_in,
+                        static,
+                        sample_nzeta=sample_nzeta,
                     )
-            freeb_bsqvac_half = replay["bsqvac"]
+                context = replay_context
+                if context is None or tuple(int(v) for v in geometry["R"].shape) != (
+                    int(context["ntheta"]),
+                    int(context["nzeta"]),
+                ):
+                    with _jax_named_scope("vmec_jax.free_boundary.replay_context"):
+                        context = direct_coil_boundary_replay_context(static, geometry)
+                nestor_axes = _step_control(control, "freeb_nestor_axes")
+                if nestor_axes is None:
+                    with _jax_named_scope("vmec_jax.free_boundary.direct_coil_bsqvac_replay"):
+                        replay = direct_coil_boundary_bsqvac_from_trace_jax(
+                            coil_params,
+                            geometry,
+                            trace,
+                            basis=context["basis"],
+                            tables=context["tables"],
+                            signgs=int(signgs),
+                            nvper=int(context["nvper"]),
+                            wint=jnp.asarray(context["wint"]),
+                            include_analytic=bool(include_analytic),
+                            include_diagnostics=not bool(state_only_replay),
+                        )
+                else:
+                    with _jax_named_scope("vmec_jax.free_boundary.direct_coil_bsqvac_replay"):
+                        replay = direct_coil_boundary_bsqvac_jax(
+                            coil_params,
+                            R=geometry["R"],
+                            Z=geometry["Z"],
+                            phi=geometry["phi"],
+                            Ru=geometry["Ru"],
+                            Zu=geometry["Zu"],
+                            Rv=geometry["Rv"],
+                            Zv=geometry["Zv"],
+                            ruu=geometry["ruu"],
+                            ruv=geometry["ruv"],
+                            rvv=geometry["rvv"],
+                            zuu=geometry["zuu"],
+                            zuv=geometry["zuv"],
+                            zvv=geometry["zvv"],
+                            basis=context["basis"],
+                            tables=context["tables"],
+                            signgs=int(signgs),
+                            nvper=int(context["nvper"]),
+                            br_add=jnp.asarray(nestor_axes["br_axis"]),
+                            bp_add=jnp.asarray(nestor_axes["bp_axis"]),
+                            bz_add=jnp.asarray(nestor_axes["bz_axis"]),
+                            wint=jnp.asarray(context["wint"]),
+                            include_analytic=bool(include_analytic),
+                            include_diagnostics=not bool(state_only_replay),
+                        )
+                freeb_bsqvac_half = replay["bsqvac"]
             if bool(state_only_replay):
                 bsqvac_objective = jnp.asarray(0.0)
                 bsqvac_rms = jnp.asarray(0.0)
+                bnormal_rms = jnp.asarray(0.0)
+            elif bool(freeze_freeb_bsqvac):
+                bsqvac_objective = _weighted_half_norm(freeb_bsqvac_half, bsqvac_weight)
+                bsqvac_rms = jnp.sqrt(jnp.mean(jnp.square(jnp.asarray(freeb_bsqvac_half))))
                 bnormal_rms = jnp.asarray(0.0)
             else:
                 bsqvac_objective = _weighted_half_norm(replay["bsqvac"], bsqvac_weight)
@@ -3262,66 +3276,73 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
         )
         has_active_freeb_replay = trace.get("freeb_bsqvac_half") is not None and trace.get("freeb_nestor_trace") is not None
         if has_active_freeb_replay:
-            with _jax_named_scope("vmec_jax.free_boundary.boundary_geometry"):
-                geometry = free_boundary_boundary_geometry_jax(
-                    state_in,
-                    static,
-                    sample_nzeta=sample_nzeta,
-                )
-            context = replay_context
-            if context is None or tuple(int(v) for v in geometry["R"].shape) != (
-                int(context["ntheta"]),
-                int(context["nzeta"]),
-            ):
-                with _jax_named_scope("vmec_jax.free_boundary.replay_context"):
-                    context = direct_coil_boundary_replay_context(static, geometry)
-            nestor_axes = _step_control(control, "freeb_nestor_axes")
-            if nestor_axes is None:
-                with _jax_named_scope("vmec_jax.free_boundary.direct_coil_bsqvac_replay"):
-                    replay = direct_coil_boundary_bsqvac_from_trace_jax(
-                        coil_params,
-                        geometry,
-                        trace,
-                        basis=context["basis"],
-                        tables=context["tables"],
-                        signgs=int(signgs),
-                        nvper=int(context["nvper"]),
-                        wint=jnp.asarray(context["wint"]),
-                        include_analytic=bool(include_analytic),
-                        include_diagnostics=not bool(state_only_replay),
-                    )
+            if bool(freeze_freeb_bsqvac):
+                freeb_bsqvac_half = jnp.asarray(trace["freeb_bsqvac_half"])
             else:
-                with _jax_named_scope("vmec_jax.free_boundary.direct_coil_bsqvac_replay"):
-                    replay = direct_coil_boundary_bsqvac_jax(
-                        coil_params,
-                        R=geometry["R"],
-                        Z=geometry["Z"],
-                        phi=geometry["phi"],
-                        Ru=geometry["Ru"],
-                        Zu=geometry["Zu"],
-                        Rv=geometry["Rv"],
-                        Zv=geometry["Zv"],
-                        ruu=geometry["ruu"],
-                        ruv=geometry["ruv"],
-                        rvv=geometry["rvv"],
-                        zuu=geometry["zuu"],
-                        zuv=geometry["zuv"],
-                        zvv=geometry["zvv"],
-                        basis=context["basis"],
-                        tables=context["tables"],
-                        signgs=int(signgs),
-                        nvper=int(context["nvper"]),
-                        br_add=jnp.asarray(nestor_axes["br_axis"]),
-                        bp_add=jnp.asarray(nestor_axes["bp_axis"]),
-                        bz_add=jnp.asarray(nestor_axes["bz_axis"]),
-                        wint=jnp.asarray(context["wint"]),
-                        include_analytic=bool(include_analytic),
-                        include_diagnostics=not bool(state_only_replay),
+                with _jax_named_scope("vmec_jax.free_boundary.boundary_geometry"):
+                    geometry = free_boundary_boundary_geometry_jax(
+                        state_in,
+                        static,
+                        sample_nzeta=sample_nzeta,
                     )
-            freeb_bsqvac_half = replay["bsqvac"]
+                context = replay_context
+                if context is None or tuple(int(v) for v in geometry["R"].shape) != (
+                    int(context["ntheta"]),
+                    int(context["nzeta"]),
+                ):
+                    with _jax_named_scope("vmec_jax.free_boundary.replay_context"):
+                        context = direct_coil_boundary_replay_context(static, geometry)
+                nestor_axes = _step_control(control, "freeb_nestor_axes")
+                if nestor_axes is None:
+                    with _jax_named_scope("vmec_jax.free_boundary.direct_coil_bsqvac_replay"):
+                        replay = direct_coil_boundary_bsqvac_from_trace_jax(
+                            coil_params,
+                            geometry,
+                            trace,
+                            basis=context["basis"],
+                            tables=context["tables"],
+                            signgs=int(signgs),
+                            nvper=int(context["nvper"]),
+                            wint=jnp.asarray(context["wint"]),
+                            include_analytic=bool(include_analytic),
+                            include_diagnostics=not bool(state_only_replay),
+                        )
+                else:
+                    with _jax_named_scope("vmec_jax.free_boundary.direct_coil_bsqvac_replay"):
+                        replay = direct_coil_boundary_bsqvac_jax(
+                            coil_params,
+                            R=geometry["R"],
+                            Z=geometry["Z"],
+                            phi=geometry["phi"],
+                            Ru=geometry["Ru"],
+                            Zu=geometry["Zu"],
+                            Rv=geometry["Rv"],
+                            Zv=geometry["Zv"],
+                            ruu=geometry["ruu"],
+                            ruv=geometry["ruv"],
+                            rvv=geometry["rvv"],
+                            zuu=geometry["zuu"],
+                            zuv=geometry["zuv"],
+                            zvv=geometry["zvv"],
+                            basis=context["basis"],
+                            tables=context["tables"],
+                            signgs=int(signgs),
+                            nvper=int(context["nvper"]),
+                            br_add=jnp.asarray(nestor_axes["br_axis"]),
+                            bp_add=jnp.asarray(nestor_axes["bp_axis"]),
+                            bz_add=jnp.asarray(nestor_axes["bz_axis"]),
+                            wint=jnp.asarray(context["wint"]),
+                            include_analytic=bool(include_analytic),
+                            include_diagnostics=not bool(state_only_replay),
+                        )
+                freeb_bsqvac_half = replay["bsqvac"]
             if bool(state_only_replay):
                 bsqvac_objective = jnp.asarray(0.0)
                 bsqvac_rms = jnp.asarray(0.0)
+                bnormal_rms = jnp.asarray(0.0)
+            elif bool(freeze_freeb_bsqvac):
+                bsqvac_objective = _weighted_half_norm(freeb_bsqvac_half, bsqvac_weight)
+                bsqvac_rms = jnp.sqrt(jnp.mean(jnp.square(jnp.asarray(freeb_bsqvac_half))))
                 bnormal_rms = jnp.asarray(0.0)
             else:
                 bsqvac_objective = _weighted_half_norm(replay["bsqvac"], bsqvac_weight)
@@ -4587,6 +4608,7 @@ def direct_coil_same_branch_controller_scalars_custom_vjp_report(
             "use_stacked_step_controls": bool(replay_options.get("use_stacked_step_controls", False)),
             "use_accepted_only_fast_path": bool(replay_options.get("use_accepted_only_fast_path", True)),
             "include_analytic": bool(replay_options.get("include_analytic", True)),
+            "freeze_freeb_bsqvac": bool(replay_options.get("freeze_freeb_bsqvac", False)),
         },
         "replay_branch_metadata": replay_branch_metadata,
         "values": values,
@@ -5038,6 +5060,7 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
             "use_replay_plan": bool(replay_plan_for_scalars is not None),
             "include_replay_aux": bool(replay_options.get("include_replay_aux", True)),
             "include_analytic": bool(replay_options.get("include_analytic", True)),
+            "freeze_freeb_bsqvac": bool(replay_options.get("freeze_freeb_bsqvac", False)),
             "state_only_replay": bool(replay_options.get("state_only_replay", False)),
             "jit_preconditioner_apply": bool(replay_options.get("jit_preconditioner_apply", True)),
             "unroll_accepted_only_segments_below": int(
@@ -5344,6 +5367,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
             "use_replay_plan": bool(replay_plan_for_scalars is not None),
             "include_replay_aux": bool(replay_options.get("include_replay_aux", True)),
             "include_analytic": bool(replay_options.get("include_analytic", True)),
+            "freeze_freeb_bsqvac": bool(replay_options.get("freeze_freeb_bsqvac", False)),
             "state_only_replay": bool(replay_options.get("state_only_replay", False)),
             "jit_preconditioner_apply": bool(replay_options.get("jit_preconditioner_apply", True)),
             "unroll_accepted_only_segments_below": int(
