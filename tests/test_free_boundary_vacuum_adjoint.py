@@ -32,7 +32,11 @@ from vmec_jax.free_boundary_adjoint import (
     jax_visible_nonlinear_controller_directional_check_jax,
     jax_visible_nonlinear_controller_jax,
     jax_visible_segmented_accepted_nonlinear_controller_jax,
+    jax_visible_segmented_state_only_accepted_nonlinear_controller_jax,
+    jax_visible_state_only_accepted_nonlinear_controller_jax,
+    jax_visible_state_only_accepted_only_nonlinear_controller_jax,
     jax_visible_unrolled_accepted_only_nonlinear_controller_jax,
+    jax_visible_unrolled_state_only_accepted_only_nonlinear_controller_jax,
     direct_coil_projected_mode_fixed_point_directional_check_jax,
     direct_coil_projected_mode_fixed_point_objective_jax,
     mode_matrix_from_grpmn_jax,
@@ -498,6 +502,18 @@ def test_jax_visible_controller_plain_step_outputs_and_segment_validation():
     np.testing.assert_allclose(np.asarray(accepted["state"]), 1.5)
     np.testing.assert_array_equal(np.asarray(accepted["history"]["accepted"]), [True, True, False])
 
+    state_only_accepted = jax_visible_state_only_accepted_nonlinear_controller_jax(
+        step_plain,
+        lambda _state, proposed, _params, _control, _aux: proposed < 2.0,
+        lambda state, _params, _control, _aux: state > 1.0,
+        jnp.asarray(0.0),
+        params,
+        controls,
+    )
+    np.testing.assert_allclose(np.asarray(state_only_accepted["state"]), np.asarray(accepted["state"]))
+    assert bool(state_only_accepted["done"]) == bool(accepted["done"])
+    assert state_only_accepted["history"] == {}
+
     accepted_only = jax_visible_accepted_only_nonlinear_controller_jax(
         step_plain,
         lambda state, _params, _control, _aux: state > 1.0,
@@ -525,6 +541,31 @@ def test_jax_visible_controller_plain_step_outputs_and_segment_validation():
             np.asarray(accepted_only["history"][key]),
         )
 
+    state_only_accepted_only = jax_visible_state_only_accepted_only_nonlinear_controller_jax(
+        step_plain,
+        lambda state, _params, _control, _aux: state > 1.0,
+        jnp.asarray(0.0),
+        params,
+        controls[:2],
+    )
+    np.testing.assert_allclose(np.asarray(state_only_accepted_only["state"]), np.asarray(accepted_only["state"]))
+    assert bool(state_only_accepted_only["done"]) == bool(accepted_only["done"])
+    assert state_only_accepted_only["history"] == {}
+
+    unrolled_state_only_accepted_only = jax_visible_unrolled_state_only_accepted_only_nonlinear_controller_jax(
+        step_plain,
+        lambda state, _params, _control, _aux: state > 1.0,
+        jnp.asarray(0.0),
+        params,
+        controls[:2],
+    )
+    np.testing.assert_allclose(
+        np.asarray(unrolled_state_only_accepted_only["state"]),
+        np.asarray(accepted_only["state"]),
+    )
+    assert bool(unrolled_state_only_accepted_only["done"]) == bool(accepted_only["done"])
+    assert unrolled_state_only_accepted_only["history"] == {}
+
     accepted_only_initial_done = jax_visible_accepted_only_nonlinear_controller_jax(
         step_plain,
         lambda state, _params, _control, _aux: state > 1.0,
@@ -551,6 +592,43 @@ def test_jax_visible_controller_plain_step_outputs_and_segment_validation():
     np.testing.assert_array_equal(np.asarray(unrolled_accepted_only_initial_done["history"]["active"]), [False])
     np.testing.assert_array_equal(np.asarray(unrolled_accepted_only_initial_done["history"]["done"]), [True])
 
+    state_only_accepted_initial_done = jax_visible_state_only_accepted_nonlinear_controller_jax(
+        step_plain,
+        lambda *_args: True,
+        lambda *_args: False,
+        jnp.asarray(0.0),
+        params,
+        controls[:1],
+        initial_done=True,
+    )
+    np.testing.assert_allclose(np.asarray(state_only_accepted_initial_done["state"]), 0.0)
+    assert bool(state_only_accepted_initial_done["done"]) is True
+    assert state_only_accepted_initial_done["history"] == {}
+
+    state_only_accepted_only_initial_done = jax_visible_state_only_accepted_only_nonlinear_controller_jax(
+        step_plain,
+        lambda state, _params, _control, _aux: state > 1.0,
+        jnp.asarray(0.0),
+        params,
+        controls[:1],
+        initial_done=True,
+    )
+    np.testing.assert_allclose(np.asarray(state_only_accepted_only_initial_done["state"]), 0.0)
+    assert bool(state_only_accepted_only_initial_done["done"]) is True
+    assert state_only_accepted_only_initial_done["history"] == {}
+
+    unrolled_state_only_initial_done = jax_visible_unrolled_state_only_accepted_only_nonlinear_controller_jax(
+        step_plain,
+        lambda state, _params, _control, _aux: state > 1.0,
+        jnp.asarray(0.0),
+        params,
+        controls[:1],
+        initial_done=True,
+    )
+    np.testing.assert_allclose(np.asarray(unrolled_state_only_initial_done["state"]), 0.0)
+    assert bool(unrolled_state_only_initial_done["done"]) is True
+    assert unrolled_state_only_initial_done["history"] == {}
+
     with pytest.raises(ValueError, match="at least one segment"):
         jax_visible_segmented_accepted_nonlinear_controller_jax(
             step_plain,
@@ -573,6 +651,37 @@ def test_jax_visible_controller_plain_step_outputs_and_segment_validation():
 
     with pytest.raises(ValueError, match="accepted_only_segments length"):
         jax_visible_segmented_accepted_nonlinear_controller_jax(
+            (step_plain, step_plain),
+            lambda *_args: True,
+            lambda *_args: False,
+            jnp.asarray(0.0),
+            params,
+            (controls[:1], controls[1:]),
+            accepted_only_segments=(True,),
+        )
+
+    with pytest.raises(ValueError, match="at least one segment"):
+        jax_visible_segmented_state_only_accepted_nonlinear_controller_jax(
+            step_plain,
+            lambda *_args: True,
+            lambda *_args: False,
+            jnp.asarray(0.0),
+            params,
+            (),
+        )
+
+    with pytest.raises(ValueError, match="step_fns length"):
+        jax_visible_segmented_state_only_accepted_nonlinear_controller_jax(
+            (step_plain,),
+            lambda *_args: True,
+            lambda *_args: False,
+            jnp.asarray(0.0),
+            params,
+            (controls[:1], controls[1:]),
+        )
+
+    with pytest.raises(ValueError, match="accepted_only_segments length"):
+        jax_visible_segmented_state_only_accepted_nonlinear_controller_jax(
             (step_plain, step_plain),
             lambda *_args: True,
             lambda *_args: False,
@@ -749,6 +858,55 @@ def test_segmented_accepted_controller_matches_monolithic_scan_and_gradient():
         atol=1.0e-14,
     )
 
+    state_only_segmented = jax_visible_segmented_state_only_accepted_nonlinear_controller_jax(
+        step,
+        accept_fn,
+        converged_fn,
+        initial_state,
+        params,
+        control_segments,
+        checkpoint_steps=True,
+    )
+    state_only_fast_segmented = jax_visible_segmented_state_only_accepted_nonlinear_controller_jax(
+        step,
+        guarded_accept_fn,
+        converged_fn,
+        initial_state,
+        params,
+        fast_control_segments,
+        checkpoint_steps=True,
+        accepted_only_segments=(True, False, True, False),
+    )
+    state_only_unrolled_fast_segmented = jax_visible_segmented_state_only_accepted_nonlinear_controller_jax(
+        step,
+        guarded_accept_fn,
+        converged_fn,
+        initial_state,
+        params,
+        fast_control_segments,
+        checkpoint_steps=True,
+        accepted_only_segments=(True, False, True, False),
+        unroll_accepted_only_segments_below=2,
+    )
+    for state_only_run in (
+        state_only_segmented,
+        state_only_fast_segmented,
+        state_only_unrolled_fast_segmented,
+    ):
+        tree_util.tree_map(
+            lambda actual, expected: np.testing.assert_allclose(
+                np.asarray(actual),
+                np.asarray(expected),
+                rtol=1.0e-14,
+                atol=1.0e-14,
+            ),
+            state_only_run["state"],
+            monolithic["state"],
+        )
+        assert bool(state_only_run["done"]) == bool(monolithic["done"])
+        assert state_only_run["history"] == {}
+        assert state_only_run["n_segments"] in (2, 4)
+
     def objective_from_run(run):
         accepted = jnp.asarray(run["history"]["accepted"], dtype=float)
         active = jnp.asarray(run["history"]["active"], dtype=float)
@@ -798,9 +956,42 @@ def test_segmented_accepted_controller_matches_monolithic_scan_and_gradient():
             )
         )
 
+    def state_only_objective_from_run(run):
+        return 0.5 * jnp.vdot(jnp.asarray([1.1, 0.8], dtype=float) * run["state"], run["state"])
+
+    def state_only_segmented_objective(controller_params):
+        return state_only_objective_from_run(
+            jax_visible_segmented_state_only_accepted_nonlinear_controller_jax(
+                step,
+                accept_fn,
+                converged_fn,
+                initial_state,
+                controller_params,
+                control_segments,
+                checkpoint_steps=True,
+            )
+        )
+
+    def state_only_fast_segmented_objective(controller_params):
+        return state_only_objective_from_run(
+            jax_visible_segmented_state_only_accepted_nonlinear_controller_jax(
+                step,
+                guarded_accept_fn,
+                converged_fn,
+                initial_state,
+                controller_params,
+                fast_control_segments,
+                checkpoint_steps=True,
+                accepted_only_segments=(True, False, True, False),
+                unroll_accepted_only_segments_below=2,
+            )
+        )
+
     monolithic_grad = jax.grad(monolithic_objective)(params)
     segmented_grad = jax.grad(segmented_objective)(params)
     fast_segmented_grad = jax.grad(fast_segmented_objective)(params)
+    state_only_segmented_grad = jax.grad(state_only_segmented_objective)(params)
+    state_only_fast_segmented_grad = jax.grad(state_only_fast_segmented_objective)(params)
     monolithic_dir = tree_util.tree_reduce(
         lambda acc, leaf: acc + leaf,
         tree_util.tree_map(lambda grad_leaf, dir_leaf: jnp.vdot(grad_leaf, dir_leaf), monolithic_grad, direction),
@@ -816,6 +1007,24 @@ def test_segmented_accepted_controller_matches_monolithic_scan_and_gradient():
         tree_util.tree_map(lambda grad_leaf, dir_leaf: jnp.vdot(grad_leaf, dir_leaf), fast_segmented_grad, direction),
         0.0,
     )
+    state_only_segmented_dir = tree_util.tree_reduce(
+        lambda acc, leaf: acc + leaf,
+        tree_util.tree_map(
+            lambda grad_leaf, dir_leaf: jnp.vdot(grad_leaf, dir_leaf),
+            state_only_segmented_grad,
+            direction,
+        ),
+        0.0,
+    )
+    state_only_fast_segmented_dir = tree_util.tree_reduce(
+        lambda acc, leaf: acc + leaf,
+        tree_util.tree_map(
+            lambda grad_leaf, dir_leaf: jnp.vdot(grad_leaf, dir_leaf),
+            state_only_fast_segmented_grad,
+            direction,
+        ),
+        0.0,
+    )
     np.testing.assert_allclose(segmented_objective(params), monolithic_objective(params), rtol=1.0e-14, atol=1.0e-14)
     np.testing.assert_allclose(
         fast_segmented_objective(params),
@@ -823,8 +1032,15 @@ def test_segmented_accepted_controller_matches_monolithic_scan_and_gradient():
         rtol=1.0e-14,
         atol=1.0e-14,
     )
+    np.testing.assert_allclose(
+        state_only_fast_segmented_objective(params),
+        state_only_segmented_objective(params),
+        rtol=1.0e-14,
+        atol=1.0e-14,
+    )
     np.testing.assert_allclose(segmented_dir, monolithic_dir, rtol=1.0e-12, atol=1.0e-12)
     np.testing.assert_allclose(fast_segmented_dir, monolithic_dir, rtol=1.0e-12, atol=1.0e-12)
+    np.testing.assert_allclose(state_only_fast_segmented_dir, state_only_segmented_dir, rtol=1.0e-12, atol=1.0e-12)
 
     eps = 1.0e-5
     params_plus = tree_util.tree_map(lambda value, step_value: value + eps * step_value, params, direction)
