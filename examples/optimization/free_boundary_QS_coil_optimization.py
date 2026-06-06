@@ -1045,6 +1045,7 @@ def write_same_branch_validation_report(
         "use_stacked_step_controls": True,
         "use_accepted_only_fast_path": True,
         "jit_preconditioner_apply": not bool(getattr(args, "same_branch_report_disable_jit_preconditioner", False)),
+        "include_analytic": not bool(getattr(args, "same_branch_report_disable_analytic", False)),
     }
     if same_branch and mode == "scalar" and "base" in report and scalar_key in report["objective_values"]:
         t0 = time.perf_counter()
@@ -1309,6 +1310,7 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
         "eps": float(args.same_branch_report_eps),
         "max_iter": int(args.same_branch_report_max_iter or args.vmec_max_iter),
         "anchor": str(getattr(args, "same_branch_report_anchor", "best")),
+        "diagnostic_disable_analytic": bool(getattr(args, "same_branch_report_disable_analytic", False)),
     }
     same_branch_derivative_proposal_config = {
         "enabled": bool(args.same_branch_derivative_proposal),
@@ -1692,6 +1694,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Diagnostic only: use the non-JIT radial preconditioner apply inside "
             "branch-local accepted replay to isolate cold JVP graph construction."
+        ),
+    )
+    parser.add_argument(
+        "--same-branch-report-disable-analytic",
+        action="store_true",
+        help=(
+            "Diagnostic only: omit analytic NESTOR terms from branch-local accepted replay "
+            "to isolate graph construction cost. This changes the replay operator and is "
+            "not a promoted physics-validation path."
         ),
     )
     parser.add_argument(

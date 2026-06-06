@@ -12,6 +12,70 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
+### 2026-06-06 Analytic NESTOR Replay Cost Split
+
+Steps taken:
+
+1. Added an opt-in diagnostic flag to the direct-coil QS example:
+   ``--same-branch-report-disable-analytic``.  The flag passes
+   ``include_analytic=False`` into branch-local accepted replay and is marked
+   diagnostic only because it changes the NESTOR replay operator.
+2. Added ``diagnostic_disable_analytic`` to the example summary config and
+   added ``include_analytic`` to scalar/vector/gate replay option flags so
+   timing artifacts are self-describing.
+3. Covered the new wiring in the same-branch scalar/vector report writer
+   smoke tests.
+4. Re-ran the compact direct-coil QS same-branch report with identical
+   ``aspect,qs_total`` vector scalars, once with analytic terms enabled and
+   once with analytic terms disabled.
+
+Results obtained:
+
+1. ``python -m ruff check`` passed for the touched free-boundary source,
+   example, and smoke tests.
+2. The focused same-branch scalar/vector example tests passed locally.
+3. The deeper current-only same-branch finite-pressure gate passed locally.
+4. With analytic terms enabled, the compact report recorded
+   ``replay_plan_build_wall_s = 0.231 s``, ``replay_jvp_dispatch_s =
+   10.143 s``, and branch-local vector ``total_wall_s = 10.374 s``.
+5. With analytic terms disabled, the same report recorded
+   ``replay_plan_build_wall_s = 0.201 s``, ``replay_jvp_dispatch_s =
+   9.295 s``, and branch-local vector ``total_wall_s = 9.497 s``.
+6. The analytic terms therefore account for about ``0.85 s`` of the cold
+   branch-local vector/JVP dispatch on this tiny fixture, roughly ``8%`` of
+   the measured JVP dispatch.  The dominant lower bound is still the strict
+   accepted replay/update graph, including nonsingular/source/update assembly,
+   not the analytic NESTOR term alone.
+
+Best next steps:
+
+1. Keep ``--same-branch-report-disable-analytic`` as a diagnostic cost-split
+   switch only; do not use it for promoted validation or optimization.
+2. Target the larger replay/update graph next: inspect
+   ``vmec_nonsingular_terms_from_bexni_jax`` and the accepted-state update
+   path for graph-size reductions that preserve exact branch-local physics.
+3. Add a second diagnostic split for state-update-only vs NESTOR-source replay
+   before attempting another source rewrite, to avoid optimizing a small
+   subpath.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99994% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.9%.
+- Single-stage coil-only optimization: 96.8%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 98.1%; the analytic cost split narrowed the next
+  performance target to strict replay/update graph construction.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 99.5%.
+
 ### 2026-06-06 QS Scalar JVP Cache for Branch-Local Reports
 
 Steps taken:
