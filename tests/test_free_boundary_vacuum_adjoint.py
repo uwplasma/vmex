@@ -32,6 +32,7 @@ from vmec_jax.free_boundary_adjoint import (
     jax_visible_nonlinear_controller_directional_check_jax,
     jax_visible_nonlinear_controller_jax,
     jax_visible_segmented_accepted_nonlinear_controller_jax,
+    jax_visible_unrolled_accepted_only_nonlinear_controller_jax,
     direct_coil_projected_mode_fixed_point_directional_check_jax,
     direct_coil_projected_mode_fixed_point_objective_jax,
     mode_matrix_from_grpmn_jax,
@@ -510,6 +511,20 @@ def test_jax_visible_controller_plain_step_outputs_and_segment_validation():
     np.testing.assert_array_equal(np.asarray(accepted_only["history"]["rejected"]), [False, False])
     np.testing.assert_array_equal(np.asarray(accepted_only["history"]["done"]), [False, True])
 
+    unrolled_accepted_only = jax_visible_unrolled_accepted_only_nonlinear_controller_jax(
+        step_plain,
+        lambda state, _params, _control, _aux: state > 1.0,
+        jnp.asarray(0.0),
+        params,
+        controls[:2],
+    )
+    np.testing.assert_allclose(np.asarray(unrolled_accepted_only["state"]), np.asarray(accepted_only["state"]))
+    for key in ("active", "accepted", "rejected", "done"):
+        np.testing.assert_array_equal(
+            np.asarray(unrolled_accepted_only["history"][key]),
+            np.asarray(accepted_only["history"][key]),
+        )
+
     accepted_only_initial_done = jax_visible_accepted_only_nonlinear_controller_jax(
         step_plain,
         lambda state, _params, _control, _aux: state > 1.0,
@@ -523,6 +538,18 @@ def test_jax_visible_controller_plain_step_outputs_and_segment_validation():
     np.testing.assert_array_equal(np.asarray(accepted_only_initial_done["history"]["accepted"]), [False])
     np.testing.assert_array_equal(np.asarray(accepted_only_initial_done["history"]["rejected"]), [False])
     np.testing.assert_array_equal(np.asarray(accepted_only_initial_done["history"]["done"]), [True])
+
+    unrolled_accepted_only_initial_done = jax_visible_unrolled_accepted_only_nonlinear_controller_jax(
+        step_plain,
+        lambda state, _params, _control, _aux: state > 1.0,
+        jnp.asarray(0.0),
+        params,
+        controls[:1],
+        initial_done=True,
+    )
+    np.testing.assert_allclose(np.asarray(unrolled_accepted_only_initial_done["state"]), 0.0)
+    np.testing.assert_array_equal(np.asarray(unrolled_accepted_only_initial_done["history"]["active"]), [False])
+    np.testing.assert_array_equal(np.asarray(unrolled_accepted_only_initial_done["history"]["done"]), [True])
 
     with pytest.raises(ValueError, match="at least one segment"):
         jax_visible_segmented_accepted_nonlinear_controller_jax(
@@ -645,6 +672,17 @@ def test_segmented_accepted_controller_matches_monolithic_scan_and_gradient():
         checkpoint_steps=True,
         accepted_only_segments=(True, False, True, False),
     )
+    unrolled_fast_segmented = jax_visible_segmented_accepted_nonlinear_controller_jax(
+        step,
+        guarded_accept_fn,
+        converged_fn,
+        initial_state,
+        params,
+        fast_control_segments,
+        checkpoint_steps=True,
+        accepted_only_segments=(True, False, True, False),
+        unroll_accepted_only_segments_below=2,
+    )
 
     tree_util.tree_map(
         lambda actual, expected: np.testing.assert_allclose(
@@ -666,14 +704,30 @@ def test_segmented_accepted_controller_matches_monolithic_scan_and_gradient():
         fast_segmented["state"],
         monolithic["state"],
     )
+    tree_util.tree_map(
+        lambda actual, expected: np.testing.assert_allclose(
+            np.asarray(actual),
+            np.asarray(expected),
+            rtol=1.0e-14,
+            atol=1.0e-14,
+        ),
+        unrolled_fast_segmented["state"],
+        monolithic["state"],
+    )
     assert bool(segmented["done"]) == bool(monolithic["done"])
     assert bool(fast_segmented["done"]) == bool(monolithic["done"])
+    assert bool(unrolled_fast_segmented["done"]) == bool(monolithic["done"])
     assert segmented["n_segments"] == 2
     assert fast_segmented["n_segments"] == 4
+    assert unrolled_fast_segmented["n_segments"] == 4
     for key in ("active", "accepted", "rejected", "done"):
         np.testing.assert_array_equal(np.asarray(segmented["history"][key]), np.asarray(monolithic["history"][key]))
         np.testing.assert_array_equal(
             np.asarray(fast_segmented["history"][key]),
+            np.asarray(monolithic["history"][key]),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(unrolled_fast_segmented["history"][key]),
             np.asarray(monolithic["history"][key]),
         )
     np.testing.assert_allclose(
@@ -684,6 +738,12 @@ def test_segmented_accepted_controller_matches_monolithic_scan_and_gradient():
     )
     np.testing.assert_allclose(
         fast_segmented["history"]["drive_norm"],
+        monolithic["history"]["drive_norm"],
+        rtol=1.0e-14,
+        atol=1.0e-14,
+    )
+    np.testing.assert_allclose(
+        unrolled_fast_segmented["history"]["drive_norm"],
         monolithic["history"]["drive_norm"],
         rtol=1.0e-14,
         atol=1.0e-14,

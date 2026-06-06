@@ -27,6 +27,7 @@ from .free_boundary_adjoint_controller import (
     jax_visible_nonlinear_controller_directional_check_jax,
     jax_visible_nonlinear_controller_jax,
     jax_visible_segmented_accepted_nonlinear_controller_jax,
+    jax_visible_unrolled_accepted_only_nonlinear_controller_jax,
     pytree_directional_derivative_check_jax,
 )
 
@@ -53,6 +54,7 @@ __all__ = [
     "jax_visible_nonlinear_controller_directional_check_jax",
     "jax_visible_nonlinear_controller_jax",
     "jax_visible_segmented_accepted_nonlinear_controller_jax",
+    "jax_visible_unrolled_accepted_only_nonlinear_controller_jax",
     "pytree_directional_derivative_check_jax",
 ]
 
@@ -2999,6 +3001,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     replay_plan: Mapping[str, Any] | None = None,
     include_replay_aux: bool = True,
     jit_preconditioner_apply: bool = True,
+    unroll_accepted_only_segments_below: int = 0,
 ) -> dict[str, Any]:
     """Replay fixed production traces through a JAX-visible accept controller.
 
@@ -3468,6 +3471,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
             control_segments,
             checkpoint_steps=checkpoint_steps,
             accepted_only_segments=accepted_only_fast_path_segments,
+            unroll_accepted_only_segments_below=int(unroll_accepted_only_segments_below),
         )
     elif use_preconditioner_policy_segments:
         if replay_plan.get("segment_source") != "preconditioner_policy" or bool(
@@ -3507,6 +3511,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
             control_segments,
             checkpoint_steps=checkpoint_steps,
             accepted_only_segments=accepted_only_fast_path_segments,
+            unroll_accepted_only_segments_below=int(unroll_accepted_only_segments_below),
         )
     else:
         accepted_only_fast_path_segments = (
@@ -3515,7 +3520,15 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
         )
         step_fn = _make_step_fn(trace_seq, accepted_only=accepted_only_fast_path_segments[0])
         if accepted_only_fast_path_segments[0]:
-            run = jax_visible_accepted_only_nonlinear_controller_jax(
+            use_unrolled = int(unroll_accepted_only_segments_below) > 0 and len(trace_seq) <= int(
+                unroll_accepted_only_segments_below
+            )
+            accepted_only_runner = (
+                jax_visible_unrolled_accepted_only_nonlinear_controller_jax
+                if use_unrolled
+                else jax_visible_accepted_only_nonlinear_controller_jax
+            )
+            run = accepted_only_runner(
                 step_fn,
                 converged_fn,
                 initial_state,
@@ -4739,6 +4752,10 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
     if jax is None:  # pragma: no cover - JAX is required for this helper.
         raise RuntimeError("JAX is required for branch-local scalar gradients.")
 
+    ad_mode = str(replay_ad_mode).strip().lower()
+    if ad_mode not in {"direct", "custom_vjp"}:
+        raise ValueError("replay_ad_mode must be 'direct' or 'custom_vjp'")
+
     timings: dict[str, float] = {}
     total_start = time.perf_counter()
     if complete_payload is None:
@@ -4793,6 +4810,7 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
         "use_preconditioner_policy_segments": True,
         "use_stacked_step_controls": True,
         "include_replay_aux": False,
+        "unroll_accepted_only_segments_below": 8,
     }
     if replay_kwargs:
         replay_options.update(replay_kwargs)
@@ -4840,10 +4858,6 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
             "reason": "include_replay_graph_metadata=False",
             "differentiates_adaptive_controller": False,
         }
-
-    ad_mode = str(replay_ad_mode).strip().lower()
-    if ad_mode not in {"direct", "custom_vjp"}:
-        raise ValueError("replay_ad_mode must be 'direct' or 'custom_vjp'")
 
     def _replay_scalar_direct(coil_params):
         replay = direct_coil_accepted_trace_controller_replay_objective_jax(
@@ -4916,6 +4930,9 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
             "use_replay_plan": bool(replay_plan_for_scalars is not None),
             "include_replay_aux": bool(replay_options.get("include_replay_aux", True)),
             "jit_preconditioner_apply": bool(replay_options.get("jit_preconditioner_apply", True)),
+            "unroll_accepted_only_segments_below": int(
+                replay_options.get("unroll_accepted_only_segments_below", 0)
+            ),
             "replay_ad_mode": ad_mode,
         },
     }
@@ -4977,6 +4994,11 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
         raise RuntimeError("JAX is required for branch-local scalar gradients.")
     if not replay_scalar_fns:
         raise ValueError("replay_scalar_fns must contain at least one scalar")
+    ad_mode = str(replay_ad_mode).strip().lower()
+    if ad_mode not in {"direct", "custom_vjp"}:
+        raise ValueError("replay_ad_mode must be 'direct' or 'custom_vjp'")
+    if direction_params is not None and ad_mode != "direct":
+        raise ValueError("direction_params directional mode requires replay_ad_mode='direct'")
 
     timings: dict[str, float] = {}
     total_start = time.perf_counter()
@@ -5037,6 +5059,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
         "use_preconditioner_policy_segments": True,
         "use_stacked_step_controls": True,
         "include_replay_aux": False,
+        "unroll_accepted_only_segments_below": 8,
     }
     if replay_kwargs:
         replay_options.update(replay_kwargs)
@@ -5088,12 +5111,6 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
     scalar_fn_seq = tuple(
         (lambda replay, key=key: replay_scalar_fns[key](replay, replay_payload_for_scalars)) for key in keys
     )
-
-    ad_mode = str(replay_ad_mode).strip().lower()
-    if ad_mode not in {"direct", "custom_vjp"}:
-        raise ValueError("replay_ad_mode must be 'direct' or 'custom_vjp'")
-    if direction_params is not None and ad_mode != "direct":
-        raise ValueError("direction_params directional mode requires replay_ad_mode='direct'")
 
     def _replay_scalars_direct(coil_params):
         replay = direct_coil_accepted_trace_controller_replay_objective_jax(
@@ -5217,6 +5234,9 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
             "use_replay_plan": bool(replay_plan_for_scalars is not None),
             "include_replay_aux": bool(replay_options.get("include_replay_aux", True)),
             "jit_preconditioner_apply": bool(replay_options.get("jit_preconditioner_apply", True)),
+            "unroll_accepted_only_segments_below": int(
+                replay_options.get("unroll_accepted_only_segments_below", 0)
+            ),
             "replay_ad_mode": ad_mode,
         },
     }
