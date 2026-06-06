@@ -694,18 +694,21 @@ The QS residual is evaluated from the accepted VMEC state, not from a promoted
 coil-to-Boozer exact adjoint through adaptive branch selection.
 
 For a local same-branch validation artifact, add
-``--write-same-branch-report``.  The default report mode is complete-solve
-finite-difference only and avoids the cold branch-local replay compilation.
-Use ``--same-branch-report-mode scalar`` to additionally validate one
-fixed-accepted-branch ``qs_total`` gradient, or ``vector`` to validate several
-physical-scalar directional derivatives against the same complete-solve
-central finite-difference direction.
+``--write-same-branch-report``.  The example now defaults that opt-in report to
+``--same-branch-report-mode vector --same-branch-report-ad-mode direct``, which
+is the validated production-report path for this lane: it evaluates production
+values from a complete direct-coil free-boundary solve, replays the saved fixed
+accepted branch in JAX, and reports ``J @ direction`` for several physical
+scalars using a directional JVP without materializing the full Jacobian.  Use
+``--same-branch-report-mode none`` when you only want the complete-solve
+finite-difference artifact and want to avoid cold branch-local replay
+compilation.  Use ``--same-branch-report-mode scalar`` to validate one
+fixed-accepted-branch ``qs_total`` gradient.
 The scalar can be changed with ``--same-branch-report-scalar-key``.  Use
 ``aspect`` for a cheaper physical-scalar timing probe and ``qs_total`` for the
 QS-relevant scalar.  The derivative report defaults to
 ``--same-branch-report-ad-mode direct``, which differentiates the fixed
-accepted-branch replay directly.  In ``vector`` mode this direct path uses a
-JVP and reports ``J @ direction`` without materializing the full Jacobian.  Use
+accepted-branch replay directly.  Use
 ``--same-branch-report-ad-mode custom_vjp`` only when explicitly auditing the
 custom-VJP seam; that path falls back to the more expensive full-Jacobian VJP
 diagnostic.
@@ -725,6 +728,11 @@ output.  When scalar or vector detail is requested, the corresponding
 ``replay_pullbacks_wall_s``.  These fields synchronize JAX arrays before
 recording device-ready timings, so they are suitable for distinguishing Python
 dispatch, XLA compilation, and CPU/GPU execution costs in local profiling.
+The report also writes ``same_branch_report_config`` in ``summary.json`` so the
+artifact remains self-describing.  Its derivative contract is fixed accepted
+branch only; it does not differentiate adaptive host branch selection, rejected
+step selection, resets, or branch changes unless the explicit fingerprint
+remains compatible.
 
 Run the dependency-light direct-coil forward example from the repository root.
 This path constructs a synthetic circular ``CoilFieldParams`` object directly in
@@ -1167,6 +1175,22 @@ For a bounded validation run, use the synthetic circular coil provider:
      --beta 1.0 \
      --activate-fsq 1e99 \
      --outdir results/free_boundary_QS_coil_optimization_circle_smoke
+
+To include the validated branch-local vector/JVP report for the same bounded
+run, append ``--write-same-branch-report``:
+
+.. code-block:: bash
+
+   python examples/optimization/free_boundary_QS_coil_optimization.py \
+     --smoke \
+     --provider circle \
+     --max-evals 1 \
+     --max-iter 1 \
+     --vmec-max-iter 2 \
+     --helicity-m 1 \
+     --helicity-n 0 \
+     --write-same-branch-report \
+     --outdir results/free_boundary_QS_coil_optimization_circle_same_branch
 
 For the ESSOS Landreman-Paul QA coils, put ESSOS on ``PYTHONPATH`` and use:
 

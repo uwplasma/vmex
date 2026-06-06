@@ -2249,6 +2249,7 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
                 complete_payload=complete_report["base"],
                 scalar_key="aspect",
                 production_values={"aspect": complete_base_values["aspect"]},
+                replay_payload={"init": complete_report["base"]["init"]},
                 scalar_fn=lambda payload: {
                     "aspect": aspect_objective_from_state(payload["result"].state),
                 },
@@ -2271,6 +2272,7 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
             assert production_branch_local["differentiates_run_free_boundary"] is False
             assert production_branch_local["differentiates_fixed_accepted_branch"] is True
             assert production_branch_local["production_values_source"] == "precomputed"
+            assert production_branch_local["replay_payload_source"] == "user"
             assert production_branch_local["trace_replay_diagnostics"]["differentiates_adaptive_controller"] is False
             assert production_branch_local["replay_option_flags"]["use_stacked_step_controls"] is True
             assert production_branch_local["replay_option_flags"]["use_accepted_only_fast_path"] is True
@@ -2340,6 +2342,7 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
                     complete_payload=complete_report["base"],
                     scalar_keys=tuple(vector_scalar_keys),
                     production_values={key: complete_base_values[key] for key in vector_scalar_keys},
+                    replay_payload={"init": complete_report["base"]["init"]},
                     scalar_fn=lambda payload: {
                         "aspect": aspect_objective_from_state(payload["result"].state),
                         "axis_R": axis_R_from_state(payload["result"].state, payload["init"].static),
@@ -2363,6 +2366,7 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
             assert production_branch_local_scalars["differentiates_fixed_accepted_branch"] is True
             assert production_branch_local_scalars["derivative_mode"] == "directional_jvp"
             assert production_branch_local_scalars["production_values_source"] == "precomputed"
+            assert production_branch_local_scalars["replay_payload_source"] == "user"
             assert production_branch_local_scalars["scalar_keys"] == tuple(vector_scalar_keys)
             assert production_branch_local_scalars["trace_replay_diagnostics"]["differentiates_adaptive_controller"] is False
             assert production_branch_local_scalars["replay_option_flags"]["use_stacked_step_controls"] is True

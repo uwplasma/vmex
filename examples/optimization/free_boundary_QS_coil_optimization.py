@@ -23,6 +23,11 @@ Run a minimal smoke from the repository root:
 
     python examples/optimization/free_boundary_QS_coil_optimization.py --smoke --provider circle
 
+Add a same-branch derivative artifact using the validated branch-local vector
+JVP report:
+
+    python examples/optimization/free_boundary_QS_coil_optimization.py --smoke --provider circle --write-same-branch-report
+
 Preview the generated input, selected coil variables, objective weights, and
 baseline coil diagnostics without running VMEC:
 
@@ -819,6 +824,7 @@ def write_same_branch_validation_report(
         for key, values in report["objective_values"].items()
         if isinstance(values, dict) and "base" in values
     }
+    replay_payload = {"init": report["base"]["init"]} if isinstance(report.get("base"), dict) and "init" in report["base"] else None
     scalar_value_fns = {
         "aspect": lambda payload: float(
             np.asarray(
@@ -868,9 +874,10 @@ def write_same_branch_validation_report(
             complete_payload=report["base"],
             scalar_key=scalar_key,
             production_values={scalar_key: report_base_values[scalar_key]},
+            replay_payload=replay_payload,
             scalar_fn=lambda payload: {scalar_key: scalar_value_fns[scalar_key](payload)},
             replay_scalar_fn=lambda replay, payload: scalar_replay_fns[scalar_key](replay, payload),
-            replay_kwargs={"use_stacked_step_controls": True},
+            replay_kwargs={"use_stacked_step_controls": True, "use_accepted_only_fast_path": True},
             replay_ad_mode=ad_mode,
             include_trace_replay_diagnostics=False,
         )
@@ -890,6 +897,7 @@ def write_same_branch_validation_report(
             "replay_ad_mode": str(scalar["replay_ad_mode"]),
             "scalar_key": str(scalar["scalar_key"]),
             "production_values_source": str(scalar.get("production_values_source", "unknown")),
+            "replay_payload_source": str(scalar.get("replay_payload_source", "unknown")),
             "replay_option_flags": scalar["replay_option_flags"],
             "replay_graph_metadata": scalar.get("replay_graph_metadata", {}),
             "value": float(scalar["value"]),
@@ -916,6 +924,7 @@ def write_same_branch_validation_report(
             complete_payload=report["base"],
             scalar_keys=scalar_keys,
             production_values={key: report_base_values[key] for key in scalar_keys},
+            replay_payload=replay_payload,
             scalar_fn=lambda payload: {
                 "aspect": float(
                     np.asarray(
@@ -957,7 +966,7 @@ def write_same_branch_validation_report(
                 ),
                 "accepted_bnormal_rms": lambda replay, _payload: accepted_bnormal_rms_from_replay(replay),
             },
-            replay_kwargs={"use_stacked_step_controls": True},
+            replay_kwargs={"use_stacked_step_controls": True, "use_accepted_only_fast_path": True},
             replay_ad_mode=ad_mode,
             include_trace_replay_diagnostics=False,
         )
@@ -983,6 +992,7 @@ def write_same_branch_validation_report(
             "derivative_mode": str(vector.get("derivative_mode", "full_jacobian_vjp")),
             "scalar_keys": list(scalar_keys),
             "production_values_source": str(vector.get("production_values_source", "unknown")),
+            "replay_payload_source": str(vector.get("replay_payload_source", "unknown")),
             "replay_option_flags": vector["replay_option_flags"],
             "replay_graph_metadata": vector.get("replay_graph_metadata", {}),
             "max_base_abs_delta": float(vector["max_base_abs_delta"]),
@@ -1095,6 +1105,22 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
         "xtol": float(args.xtol),
         "ftol": float(args.optimizer_ftol),
     }
+    same_branch_report_config = {
+        "enabled": bool(args.write_same_branch_report),
+        "mode": str(args.same_branch_report_mode),
+        "ad_mode": str(args.same_branch_report_ad_mode),
+        "default_derivative_detail": (
+            "direct vector JVP for several physical scalars"
+            if str(args.same_branch_report_mode) == "vector" and str(args.same_branch_report_ad_mode) == "direct"
+            else "user-selected report mode"
+        ),
+        "contract": (
+            "production-forward values plus fixed accepted-branch replay derivatives; "
+            "does not differentiate adaptive host branch selection"
+        ),
+        "eps": float(args.same_branch_report_eps),
+        "max_iter": int(args.same_branch_report_max_iter or args.vmec_max_iter),
+    }
     history: list[dict[str, Any]] = []
     best: dict[str, Any] | None = None
     if bool(args.dry_run):
@@ -1110,6 +1136,7 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
             "baseline_coils": coil_diagnostics(base_params),
             "vmec_config": vmec_config,
             "optimizer_config": optimizer_config,
+            "same_branch_report_config": same_branch_report_config,
             "input": input_path,
             "outdir": outdir,
             "history_json": outdir / "history.json",
@@ -1224,6 +1251,7 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
         "baseline_coils": coil_diagnostics(base_params),
         "vmec_config": vmec_config,
         "optimizer_config": optimizer_config,
+        "same_branch_report_config": same_branch_report_config,
         "input": input_path,
         "outdir": outdir,
         "optimizer": {
@@ -1342,13 +1370,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--same-branch-report-mode",
         choices=("scalar", "vector", "none"),
-        default="none",
+        default="vector",
         help=(
-            "Derivative detail for --write-same-branch-report. 'none' writes only "
-            "complete-solve FD diagnostics and is the default. 'scalar' validates one "
-            "branch-local physical-scalar gradient. 'vector' validates several "
-            "physical scalars; in direct mode it reports JVP directional derivatives, "
-            "while custom_vjp mode builds the more expensive full Jacobian."
+            "Derivative detail for --write-same-branch-report. 'vector' is the default "
+            "validated production-report path: in direct mode it reports JVP "
+            "directional derivatives for several physical scalars without materializing "
+            "the full Jacobian. 'scalar' validates one branch-local physical-scalar "
+            "gradient. 'none' writes only complete-solve FD diagnostics."
         ),
     )
     parser.add_argument(
