@@ -19,6 +19,7 @@ import numpy as np
 from vmec_jax._compat import jax, jnp, tree_util
 
 from .free_boundary_adjoint_controller import (
+    jax_visible_accepted_only_nonlinear_controller_jax,
     jax_visible_accepted_nonlinear_controller_directional_check_jax,
     jax_visible_accepted_nonlinear_controller_jax,
     jax_visible_masked_nonlinear_controller_directional_check_jax,
@@ -43,6 +44,7 @@ __all__ = [
     "direct_coil_same_branch_replay_gate_report",
     "direct_coil_same_branch_controller_scalars_custom_vjp_report",
     "free_boundary_adjoint_trace_replay_diagnostics",
+    "jax_visible_accepted_only_nonlinear_controller_jax",
     "jax_visible_accepted_nonlinear_controller_directional_check_jax",
     "jax_visible_accepted_nonlinear_controller_jax",
     "jax_visible_masked_nonlinear_controller_directional_check_jax",
@@ -3296,6 +3298,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
             params,
             control_segments,
             checkpoint_steps=checkpoint_steps,
+            accepted_only_segments=accepted_only_fast_path_segments,
         )
     elif use_preconditioner_policy_segments:
         control_segments_list = []
@@ -3346,21 +3349,33 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
             params,
             control_segments,
             checkpoint_steps=checkpoint_steps,
+            accepted_only_segments=accepted_only_fast_path_segments,
         )
     else:
         accepted_only_fast_path_segments = (
             bool(use_accepted_only_fast_path)
             and _accepted_trace_segment_is_unconditionally_accepted(effective_masks, start=0, stop=len(trace_seq)),
         )
-        run = jax_visible_accepted_nonlinear_controller_jax(
-            _make_step_fn(trace_seq, accepted_only=accepted_only_fast_path_segments[0]),
-            accept_fn,
-            converged_fn,
-            initial_state,
-            params,
-            controls,
-            checkpoint_steps=checkpoint_steps,
-        )
+        step_fn = _make_step_fn(trace_seq, accepted_only=accepted_only_fast_path_segments[0])
+        if accepted_only_fast_path_segments[0]:
+            run = jax_visible_accepted_only_nonlinear_controller_jax(
+                step_fn,
+                converged_fn,
+                initial_state,
+                params,
+                controls,
+                checkpoint_steps=checkpoint_steps,
+            )
+        else:
+            run = jax_visible_accepted_nonlinear_controller_jax(
+                step_fn,
+                accept_fn,
+                converged_fn,
+                initial_state,
+                params,
+                controls,
+                checkpoint_steps=checkpoint_steps,
+            )
     accepted = jnp.asarray(run["history"]["accepted"], dtype=jnp.asarray(pack_state(run["state"])).dtype)
     objective_components = {
         "state": _weighted_half_norm(pack_state(run["state"]), state_weight),

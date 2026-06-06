@@ -11130,6 +11130,68 @@ Completion:
 - CI runtime refactor with preserved coverage/physics gates: 100%.
 - Docs/release hygiene: 99.1%.
 
+### 2026-06-06 Accepted-Only Segment Replay Specialization
+
+Steps taken:
+
+1. Added a JAX-visible accepted-only nonlinear-controller helper for bounded
+   segments where every proposal is active/accepted and there is at most a
+   final convergence marker.
+2. Wired ``direct_coil_accepted_trace_controller_replay_objective_jax`` so
+   existing ``accepted_only_fast_path_segments`` use the accepted-only helper,
+   while rejected-slot or padded segments keep the original accepted/rejected
+   controller path.
+3. Added toy controller tests covering accepted-only history fields, segment
+   validation, mixed accepted-only/general segments, objective equality, and
+   gradient equality against the monolithic accepted/rejected controller.
+4. Re-ran direct-coil accepted-update AD-vs-FD and the full exact same-branch
+   shard to check that the fast path does not change replay derivatives.
+
+Results obtained:
+
+1. ``python -m ruff check`` passed for the touched controller/source/tests.
+2. Focused controller tests passed locally.
+3. ``test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree``
+   passed locally.
+4. The full exact same-branch shard passed locally with ``3 passed in
+   83.68 s``.
+5. The compact coil-only QS same-branch report still showed cold
+   ``replay_jvp_dispatch_s`` of about ``16.4 s``.  Therefore the accepted-only
+   controller specialization is a correctness-preserving graph simplification,
+   but it does not solve the dominant cold compile cost on the tiny report
+   fixture.  The remaining hotspot is still replay graph construction inside
+   the VMEC/free-boundary update itself.
+
+Best next steps:
+
+1. Build an explicit replay-plan object that hoists trace-derived controls,
+   boundary replay contexts, segment summaries, and static policy data outside
+   the function being transformed by ``jax.jvp``/``jax.vjp``.
+2. Profile the replay update body with and without QS scalars to determine
+   whether NESTOR/free-boundary geometry replay or quasisymmetry residual graph
+   construction dominates the remaining ``replay_jvp_dispatch_s`` cost.
+3. Only after replay-plan profiling, wire the coil-only optimizer to use
+   branch-local derivatives as an optimization path instead of a diagnostic
+   report path.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99988% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.9%.
+- Single-stage coil-only optimization: 93.8%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 96.5%; accepted-only segment simplification is in
+  place, but cold replay graph construction remains the main blocker.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 99.1%.
+
 ### 2026-06-06 Axis-R Same-Branch Physical Scalar Gate
 
 Steps taken:
