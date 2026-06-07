@@ -126,6 +126,24 @@ def test_circle_variable_manifest_and_apply_are_coil_only():
     assert perturbed.stellsym == base_params.stellsym
 
 
+def test_circle_provider_honors_chunk_size_and_smoke_default():
+    module = _load_example_module()
+    params, metadata = module.make_circle_provider(current_scale=1.0, chunk_size=32)
+
+    assert params.chunk_size == 32
+    assert metadata["chunk_size"] == 32
+
+    args = module.apply_smoke_defaults(
+        module.build_parser().parse_args(["--smoke", "--provider", "circle"])
+    )
+    assert args.chunk_size is None
+
+    explicit = module.apply_smoke_defaults(
+        module.build_parser().parse_args(["--smoke", "--provider", "circle", "--chunk-size", "0"])
+    )
+    assert explicit.chunk_size is None
+
+
 def test_same_branch_direction_selects_current_and_fourier_variables():
     module = _load_example_module()
     base_params, _metadata = module.make_circle_provider(current_scale=1.0)
