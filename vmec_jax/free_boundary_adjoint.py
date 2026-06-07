@@ -5438,13 +5438,21 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
     }
     if replay_kwargs:
         replay_options.update(replay_kwargs)
+    replay_traces_for_scalars = tuple(replay_options.get("traces", traces))
+    replay_branch_metadata = direct_coil_accepted_trace_branch_metadata(
+        replay_traces_for_scalars,
+        accept_mask=replay_options.get("accept_mask"),
+        done_mask=replay_options.get("done_mask"),
+        max_steps=replay_options.get("max_steps"),
+        json_safe=True,
+    )
     replay_payload_for_scalars = payload if replay_payload is None else replay_payload
     replay_payload_source = "complete_payload" if replay_payload is None else "user"
     replay_plan_for_scalars = replay_plan
     if replay_plan_for_scalars is None and bool(use_replay_plan):
         t0 = time.perf_counter()
         replay_plan_for_scalars = direct_coil_accepted_trace_controller_replay_plan(
-            traces,
+            replay_traces_for_scalars,
             static=init.static,
             accept_mask=replay_options.get("accept_mask"),
             done_mask=replay_options.get("done_mask"),
@@ -5464,7 +5472,7 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
 
     if bool(include_replay_graph_metadata):
         graph_metadata = direct_coil_accepted_trace_replay_graph_metadata(
-            traces,
+            replay_traces_for_scalars,
             static=init.static,
             accept_mask=replay_options.get("accept_mask"),
             done_mask=replay_options.get("done_mask"),
@@ -5486,7 +5494,7 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
     def _replay_scalar_direct(coil_params):
         replay = direct_coil_accepted_trace_controller_replay_objective_jax(
             coil_params,
-            traces[0]["state_pre"],
+            replay_traces_for_scalars[0]["state_pre"],
             replay_plan=replay_plan_for_scalars,
             **replay_options,
         )
@@ -5495,7 +5503,7 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
     def _replay_scalar_custom_vjp(coil_params):
         return direct_coil_accepted_trace_controller_custom_vjp_scalar_jax(
             coil_params,
-            traces[0]["state_pre"],
+            replay_traces_for_scalars[0]["state_pre"],
             scalar_fn=lambda replay: replay_scalar_fn(replay, replay_payload_for_scalars),
             replay_plan=replay_plan_for_scalars,
             **replay_options,
@@ -5545,6 +5553,7 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
         "timings": timings,
         "trace_replay_diagnostics": diagnostics,
         "replay_graph_metadata": graph_metadata,
+        "replay_branch_metadata": replay_branch_metadata,
         "replay_option_flags": {
             "use_preconditioner_policy_segments": bool(
                 replay_options.get("use_preconditioner_policy_segments", False)
@@ -5706,13 +5715,21 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
     }
     if replay_kwargs:
         replay_options.update(replay_kwargs)
+    replay_traces_for_scalars = tuple(replay_options.get("traces", traces))
+    replay_branch_metadata = direct_coil_accepted_trace_branch_metadata(
+        replay_traces_for_scalars,
+        accept_mask=replay_options.get("accept_mask"),
+        done_mask=replay_options.get("done_mask"),
+        max_steps=replay_options.get("max_steps"),
+        json_safe=True,
+    )
     replay_payload_for_scalars = payload if replay_payload is None else replay_payload
     replay_payload_source = "complete_payload" if replay_payload is None else "user"
     replay_plan_for_scalars = replay_plan
     if replay_plan_for_scalars is None and bool(use_replay_plan):
         t0 = time.perf_counter()
         replay_plan_for_scalars = direct_coil_accepted_trace_controller_replay_plan(
-            traces,
+            replay_traces_for_scalars,
             static=init.static,
             accept_mask=replay_options.get("accept_mask"),
             done_mask=replay_options.get("done_mask"),
@@ -5732,7 +5749,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
 
     if bool(include_replay_graph_metadata):
         graph_metadata = direct_coil_accepted_trace_replay_graph_metadata(
-            traces,
+            replay_traces_for_scalars,
             static=init.static,
             accept_mask=replay_options.get("accept_mask"),
             done_mask=replay_options.get("done_mask"),
@@ -5758,7 +5775,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
     def _replay_scalars_direct(coil_params):
         replay = direct_coil_accepted_trace_controller_replay_objective_jax(
             coil_params,
-            traces[0]["state_pre"],
+            replay_traces_for_scalars[0]["state_pre"],
             replay_plan=replay_plan_for_scalars,
             **replay_options,
         )
@@ -5767,7 +5784,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
     def _replay_scalars_custom_vjp(coil_params):
         return direct_coil_accepted_trace_controller_custom_vjp_scalars_jax(
             coil_params,
-            traces[0]["state_pre"],
+            replay_traces_for_scalars[0]["state_pre"],
             scalar_fns=scalar_fn_seq,
             replay_plan=replay_plan_for_scalars,
             **replay_options,
@@ -5818,7 +5835,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
             def _replay_scalars_current_only(base_currents):
                 replay = direct_coil_accepted_trace_controller_replay_objective_jax(
                     params.with_arrays(base_currents=base_currents),
-                    traces[0]["state_pre"],
+                    replay_traces_for_scalars[0]["state_pre"],
                     replay_plan=replay_plan_for_scalars,
                     coil_geometry=_fixed_geometry_for_currents(base_currents),
                     **replay_options,
@@ -5920,6 +5937,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
         "timings": timings,
         "trace_replay_diagnostics": diagnostics,
         "replay_graph_metadata": graph_metadata,
+        "replay_branch_metadata": replay_branch_metadata,
         "replay_option_flags": {
             "use_preconditioner_policy_segments": bool(
                 replay_options.get("use_preconditioner_policy_segments", False)

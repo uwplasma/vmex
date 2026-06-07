@@ -275,6 +275,65 @@ def test_same_branch_derivative_proposal_rejects_adaptive_claims():
     assert "adaptive-controller" in proposal["reason"]
 
 
+def test_nestor_profile_policy_requires_size_and_speedup_thresholds():
+    module = _load_example_module()
+
+    low_modes = module.nestor_profile_policy_from_results(
+        [
+            {"available": True, "nestor_solve_mode": "dense", "wall_s": 10.0},
+            {
+                "available": True,
+                "nestor_solve_mode": "matrix_free",
+                "nestor_operator_solver": "gmres",
+                "wall_s": 5.0,
+            },
+        ],
+        mode_count=32,
+        min_mode_count=96,
+        min_speedup=1.15,
+    )
+    assert low_modes["promote_matrix_free"] is False
+    assert "below threshold" in low_modes["reason"]
+
+    slow_matrix_free = module.nestor_profile_policy_from_results(
+        [
+            {"available": True, "nestor_solve_mode": "dense", "wall_s": 10.0},
+            {
+                "available": True,
+                "nestor_solve_mode": "matrix_free",
+                "nestor_operator_solver": "bicgstab",
+                "wall_s": 9.5,
+            },
+        ],
+        mode_count=144,
+        min_mode_count=96,
+        min_speedup=1.15,
+    )
+    assert slow_matrix_free["promote_matrix_free"] is False
+    assert "speedup" in slow_matrix_free["reason"]
+
+    promoted = module.nestor_profile_policy_from_results(
+        [
+            {"available": True, "nestor_solve_mode": "dense", "wall_s": 10.0},
+            {
+                "available": True,
+                "nestor_solve_mode": "matrix_free",
+                "nestor_operator_solver": "gmres",
+                "wall_s": 6.0,
+            },
+        ],
+        mode_count=144,
+        min_mode_count=96,
+        min_speedup=1.15,
+    )
+    assert promoted["promote_matrix_free"] is True
+    assert promoted["matrix_free_best_solver"] == "gmres"
+
+    assert module.parse_profile_matrix_free_solvers("gmres,bicgstab") == ("gmres", "bicgstab")
+    with pytest.raises(ValueError, match="unsupported"):
+        module.parse_profile_matrix_free_solvers("cg")
+
+
 def test_same_branch_report_writer_uses_source_helper(tmp_path, monkeypatch):
     module = _load_example_module()
     base_params, _metadata = module.make_circle_provider(current_scale=1.0)
@@ -751,6 +810,183 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
     assert report["timings"]["branch_local_vector_replay_jvp_wall_s"] == pytest.approx(0.02)
     assert report["timings"]["branch_local_vector_replay_pullbacks_wall_s"] == pytest.approx(0.0)
     assert "branch_local_scalar_wall_s" not in report["timings"]
+
+
+def test_same_branch_report_profiles_nestor_and_rejected_slot(tmp_path, monkeypatch):
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jnp
+
+    module = _load_example_module()
+    base_params, _metadata = module.make_circle_provider(current_scale=1.0)
+    _x0, variables = module.select_coil_variables(
+        base_params,
+        max_current_vars=1,
+        max_fourier_vars=1,
+    )
+    args = SimpleNamespace(
+        current_step=0.02,
+        dof_step=1.0e-3,
+        target_aspect=6.0,
+        target_iota=0.4,
+        helicity_m=1,
+        helicity_n=0,
+        qs_surfaces="0.25,0.5",
+        qs_ntheta=15,
+        qs_nphi=16,
+        residual_weight=1.0,
+        qs_weight=2.0,
+        aspect_weight=1.0e-2,
+        iota_weight=1.0,
+        same_branch_report_eps=1.0e-4,
+        same_branch_report_mode="vector",
+        same_branch_report_vector_keys="aspect,qs_total",
+        same_branch_report_max_iter=3,
+        same_branch_report_disable_analytic=False,
+        same_branch_report_freeze_vacuum_field=False,
+        same_branch_report_freeze_bsqvac=False,
+        same_branch_report_nestor_solve_mode="dense",
+        same_branch_report_nestor_operator_solver="gmres",
+        same_branch_report_nestor_operator_tol=1.0e-11,
+        same_branch_report_nestor_operator_atol=1.0e-13,
+        same_branch_report_nestor_operator_maxiter=None,
+        same_branch_report_nestor_operator_restart=None,
+        same_branch_report_profile_nestor="dense-vs-matrix-free",
+        same_branch_report_profile_matrix_free_solvers="gmres,bicgstab",
+        same_branch_report_profile_min_mode_count=96,
+        same_branch_report_profile_min_speedup=1.15,
+        same_branch_report_rejected_slot_gate=True,
+        vmec_max_iter=2,
+        ftol=1.0e-8,
+        jit_forces=False,
+        activate_fsq=1.0e99,
+    )
+
+    trace = {"state_pre": np.zeros(3), "freeb_bsqvac_half": np.ones(2)}
+    init = SimpleNamespace(static=SimpleNamespace(modes=SimpleNamespace(m=np.arange(144))))
+
+    def fake_report(*_args, **_kwargs):
+        return {
+            "base": {"traces": [trace], "init": init},
+            "branch_compatibility": {
+                "same_branch": True,
+                "plus": {"changed_fields": (), "max_abs_scalar_delta": 0.0, "max_rel_scalar_delta": 0.0},
+                "minus": {"changed_fields": (), "max_abs_scalar_delta": 0.0, "max_rel_scalar_delta": 0.0},
+            },
+            "values": {"base": 1.0, "plus": 1.1, "minus": 0.9, "central_fd_directional": 1000.0},
+            "objective_values": {
+                "objective": {"base": 1.0, "plus": 1.1, "minus": 0.9, "central_fd_directional": 1000.0},
+                "aspect": {"base": 6.0, "plus": 6.1, "minus": 5.9, "central_fd_directional": 0.1},
+                "qs_total": {"base": 0.4, "plus": 0.42, "minus": 0.38, "central_fd_directional": 0.4},
+            },
+            "primary_objective": "objective",
+        }
+
+    calls: list[dict[str, object]] = []
+
+    def fake_branch_local_vector(*_args, **kwargs):
+        replay_kwargs = dict(kwargs["replay_kwargs"])
+        calls.append(replay_kwargs)
+        accept_mask = replay_kwargs.get("accept_mask")
+        if accept_mask is None:
+            accepted_mask = [True]
+            rejected_mask = [False]
+        else:
+            accepted_mask = [bool(item) for item in np.asarray(accept_mask, dtype=bool)]
+            rejected_mask = [not item for item in accepted_mask]
+        return {
+            "uses_production_forward": True,
+            "differentiates_adaptive_controller": False,
+            "differentiates_run_free_boundary": False,
+            "differentiates_fixed_accepted_branch": True,
+            "replay_ad_mode": "direct",
+            "derivative_mode": "directional_jvp",
+            "scalar_keys": ("aspect", "qs_total"),
+            "includes_payload": False,
+            "includes_replay_graph_metadata": bool(kwargs["include_replay_graph_metadata"]),
+            "replay_option_flags": {
+                "use_stacked_step_controls": bool(replay_kwargs["use_stacked_step_controls"]),
+                "use_accepted_only_fast_path": bool(replay_kwargs["use_accepted_only_fast_path"]),
+                "state_only_replay": bool(replay_kwargs["state_only_replay"]),
+                "include_mode_diagnostics": False,
+                "nestor_solve_mode": str(replay_kwargs["nestor_solve_mode"]),
+                "nestor_operator_solver": str(replay_kwargs["nestor_operator_solver"]),
+                "nestor_operator_tol": float(replay_kwargs["nestor_operator_tol"]),
+                "nestor_operator_atol": float(replay_kwargs["nestor_operator_atol"]),
+                "nestor_operator_maxiter": replay_kwargs["nestor_operator_maxiter"],
+                "nestor_operator_restart": replay_kwargs["nestor_operator_restart"],
+            },
+            "replay_graph_metadata": {"omitted": not bool(kwargs["include_replay_graph_metadata"])},
+            "replay_branch_metadata": {
+                "n_steps": len(accepted_mask),
+                "n_free_boundary_replay_steps": int(np.count_nonzero(accepted_mask)),
+                "accepted_mask": accepted_mask,
+                "rejected_mask": rejected_mask,
+            },
+            "max_base_abs_delta": 0.0,
+            "values": {
+                "aspect": 6.0,
+                "qs_total": 0.4,
+            },
+            "replay_value_map": {
+                "aspect": jnp.asarray(6.0),
+                "qs_total": jnp.asarray(0.4),
+            },
+            "base_abs_delta": {
+                "aspect": 0.0,
+                "qs_total": 0.0,
+            },
+            "jacobian": None,
+            "directional_derivatives": {
+                "aspect": jnp.asarray(0.1),
+                "qs_total": jnp.asarray(0.4),
+            },
+            "timings": {
+                "production_scalar_eval_wall_s": 0.01,
+                "replay_jvp_wall_s": 0.02,
+                "replay_vjp_wall_s": 0.0,
+                "replay_pullbacks_wall_s": 0.0,
+                "jacobian_stack_ready_s": 0.0,
+                "total_wall_s": 0.03,
+            },
+        }
+
+    import vmec_jax.free_boundary_adjoint as freeb_adj
+
+    monkeypatch.setattr(freeb_adj, "direct_coil_same_branch_complete_solve_fd_report", fake_report)
+    monkeypatch.setattr(
+        freeb_adj,
+        "direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax",
+        fake_branch_local_vector,
+    )
+
+    path = module.write_same_branch_validation_report(
+        input_path=tmp_path / "input.direct",
+        base_params=base_params,
+        variables=variables,
+        args=args,
+        outdir=tmp_path,
+    )
+
+    report = json.loads(path.read_text())
+    assert report["mode_count"] == 144
+    assert len(calls) == 5
+    assert calls[0]["nestor_solve_mode"] == "dense"
+    assert calls[1]["use_accepted_only_fast_path"] is False
+    assert [bool(item) for item in np.asarray(calls[1]["accept_mask"], dtype=bool)] == [True, False]
+    profiled = {(call["nestor_solve_mode"], call["nestor_operator_solver"]) for call in calls[2:]}
+    assert profiled == {("dense", "gmres"), ("matrix_free", "gmres"), ("matrix_free", "bicgstab")}
+
+    rejected_gate = report["accepted_rejected_controller_slot_gate"]
+    assert rejected_gate["available"] is True
+    assert rejected_gate["fixed_rejected_controller_slot_present"] is True
+    assert rejected_gate["fixed_rejected_controller_slots"] == 1
+    assert rejected_gate["replay_option_flags"]["use_accepted_only_fast_path"] is False
+
+    profile = report["nestor_replay_profile"]
+    assert profile["enabled"] is True
+    assert len(profile["results"]) == 3
+    assert {item["nestor_solve_mode"] for item in profile["results"]} == {"dense", "matrix_free"}
+    assert profile["policy"]["mode_count"] == 144
 
 
 def test_circle_dry_run_writes_configuration_without_solves(tmp_path, monkeypatch):
