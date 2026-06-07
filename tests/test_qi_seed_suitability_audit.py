@@ -524,29 +524,85 @@ def test_prefine_probe_manifest_preserves_near_qi_before_aux_cleanup(tmp_path):
 
     near = manifest["plans"][0]
     far = manifest["plans"][1]
-    assert near["prefine_policy"]["name"] == "near_qi_preservation"
+    assert near["prefine_policy"]["name"] == "near_qi_diagnostic_baseline"
     assert near["prefine_policy"]["near_qi"] is True
+    assert near["prefine_policy"]["run_optimization"] is False
     assert near["prefine_policy"]["project_input_boundary_to_max_mode"] is False
+    assert near["optimization"]["run_optimization"] is False
+    assert near["optimization"]["stage_modes"] == []
+    assert near["optimization"]["total_nfev_cap"] == 0
     assert near["optimization"]["project_input_boundary_to_max_mode"] is False
     assert "smooth_qi_below_preservation_threshold" in near["prefine_policy"]["reasons"]
     assert near["qi_options"]["qi_ceiling_weight"] == mod.DEFAULT_PREFINE_NEAR_QI_CEILING_WEIGHT
     assert near["qi_options"]["qi_ceiling_max"] == pytest.approx(1.25e-3)
-    assert near["optimization"]["objective"] == "qi_only_prefine_probe"
+    assert near["optimization"]["objective"] == "near_qi_diagnostic_baseline"
     assert near["qi_options"]["mirror_weight"] == 0.0
     assert near["qi_options"]["elongation_weight"] == 0.0
     assert "--prefine-mirror-weight 0.0" in near["run_command"]
     assert "--prefine-elongation-weight 0.0" in near["run_command"]
     assert "--prefine-qi-ceiling-weight 500.0" in near["run_command"]
-    assert "--no-prefine-preserve-near-qi" in near["run_command"]
+    assert "--prefine-preserve-near-qi" in near["run_command"]
     assert "--no-prefine-project-input-boundary-to-max-mode" in near["run_command"]
 
     assert far["prefine_policy"]["name"] == "constrained_recovery"
     assert far["prefine_policy"]["near_qi"] is False
+    assert far["prefine_policy"]["run_optimization"] is True
     assert far["prefine_policy"]["project_input_boundary_to_max_mode"] is True
+    assert far["optimization"]["run_optimization"] is True
     assert far["optimization"]["project_input_boundary_to_max_mode"] is True
     assert far["qi_options"]["qi_ceiling_weight"] == 100.0
     assert far["qi_options"]["mirror_weight"] == 2.0
     assert far["qi_options"]["elongation_weight"] == 0.5
+
+
+def test_run_qi_prefine_probe_skips_optimizer_for_near_qi_baseline(tmp_path):
+    mod = _load_module()
+    report = {
+        "cases": [
+            {
+                "suitability_rank": 1,
+                "label": "already_qi",
+                "family": "qi",
+                "input": "/tmp/input_qi",
+                "wout": "/tmp/wout_qi.nc",
+                "qi_smooth_total": 1.0e-3,
+                "qi_legacy_total": 8.0e-4,
+                "qi_mirror_ratio_max": 0.19,
+                "qi_max_elongation": 6.0,
+                "aspect": 5.1,
+                "mean_iota": -0.43,
+            },
+        ]
+    }
+    manifest = mod.build_qi_prefine_probe_manifest(
+        report,
+        config=mod.QIPrefineProbeConfig(
+            output_dir=tmp_path / "probes",
+            mirror_weight=2.0,
+            elongation_weight=0.5,
+        ),
+        manifest_path=tmp_path / "manifest.json",
+        dry_run=False,
+        reviewed=True,
+    )
+
+    class ExplodingWorkflow:
+        def __getattr__(self, name):
+            raise AssertionError(f"optimizer workflow should not be used for baseline: {name}")
+
+    completed = mod.run_qi_prefine_probe(manifest["plans"][0], workflow=ExplodingWorkflow())
+    summary = mod.summarize_qi_prefine_probe_manifest({"dry_run": False, "plans": [completed]})
+
+    assert completed["status"] == "completed"
+    assert completed["result"]["diagnostic_baseline"] is True
+    assert completed["result"]["nfev"] == 0
+    assert completed["result"]["objective_initial"] == pytest.approx(1.0e-3)
+    assert completed["result"]["objective_final"] == pytest.approx(1.0e-3)
+    assert completed["result"]["objective_diagnostics"]["initial"]["qi_smooth_total"] == pytest.approx(1.0e-3)
+    assert summary["accepted_candidate"]["label"] == "already_qi"
+    assert summary["accepted_candidate"]["acceptance"]["decision"] == "accepted_stable_low_objective"
+    assert summary["acceptance"]["accepted"] is True
+    assert summary["recommendation"]["action"] == "keep_audited_near_qi_seed"
 
 
 def test_prefine_probe_manifest_adds_family_representatives_after_top_n(tmp_path):
@@ -1087,6 +1143,50 @@ def test_prefine_probe_summary_accepts_stable_low_objective_seed():
     assert summary["recommendation"]["action"] == "promote_best_candidate"
 
 
+def test_prefine_probe_summary_rejects_stable_low_qi_worsening():
+    mod = _load_module()
+    manifest = {
+        "dry_run": False,
+        "selection": {"planned_rows": 1},
+        "plans": [
+            {
+                "status": "completed",
+                "label": "stable_low_but_worse_qi",
+                "family": "qi",
+                "audit_rank": 1,
+                "audit_metrics": {
+                    "qi_smooth_total": 1.0e-3,
+                    "qi_legacy_total": 8.0e-4,
+                },
+                "result": {
+                    "objective_initial": 1.0e-2,
+                    "objective_final": 1.0e-2,
+                    "requested_stage_modes": [1],
+                    "completed_stage_modes": [1],
+                    "history": [{"objective": 1.0e-2}, {"objective": 1.0e-2}],
+                    "final_diagnostics": {
+                        "qi_smooth_total": 2.0e-3,
+                        "qi_legacy_total": 1.6e-3,
+                    },
+                },
+            },
+        ],
+    }
+
+    summary = mod.summarize_qi_prefine_probe_manifest(manifest)
+    row = summary["plan_summaries"][0]
+
+    assert row["qi_worsened"] is True
+    assert row["acceptance"]["accepted"] is False
+    assert row["acceptance"]["decision"] == "needs_review"
+    assert "smooth/legacy QI worsened" in row["acceptance"]["reasons"][0]
+    assert summary["accepted_candidate"] is None
+    assert summary["acceptance"]["accepted"] is False
+    assert summary["qi_worsened_count"] == 1
+    assert summary["scalar_improved_qi_worsened_count"] == 0
+    assert summary["recommendation"]["action"] == "review_qi_worsening"
+
+
 def test_prefine_result_summary_ranks_and_flags_regressions():
     mod = _load_module()
     manifest = {
@@ -1210,6 +1310,7 @@ def test_prefine_summary_decomposes_objective_and_flags_qi_worsening():
     assert diagnostics["flags"]["worsened_qi_terms"] == ["smooth_qi", "legacy_qi"]
     assert row["acceptance"]["accepted"] is False
     assert "smooth/legacy QI worsened" in row["acceptance"]["reasons"][0]
+    assert summary["qi_worsened_count"] == 1
     assert summary["scalar_improved_qi_worsened_count"] == 1
     assert summary["scalar_improved_qi_worsened"][0]["label"] == "scalar_better_qi_worse"
     assert summary["acceptance"]["accepted"] is False
