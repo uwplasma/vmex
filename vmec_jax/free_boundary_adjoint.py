@@ -1655,6 +1655,7 @@ def direct_coil_boundary_bsqvac_jax(
     include_diagnostics: bool = True,
     include_mode_diagnostics: bool = True,
     vac_override: Mapping[str, Any] | None = None,
+    coil_geometry: Any | None = None,
 ) -> dict[str, Any]:
     """Replay accepted-boundary direct-coil ``bsqvac`` through JAX NESTOR.
 
@@ -1669,17 +1670,27 @@ def direct_coil_boundary_bsqvac_jax(
     outer host-controlled nonlinear VMEC iteration loop.
     """
 
-    from .external_fields import sample_coil_field_cylindrical
+    from .external_fields import sample_coil_field_cylindrical, sample_coil_field_cylindrical_from_geometry
 
     R_j = jnp.asarray(R)
     if vac_override is None:
         with _jax_named_scope("vmec_jax.free_boundary.direct_coil_sample"):
-            br, bp, bz = sample_coil_field_cylindrical(
-                params,
-                R_j,
-                jnp.asarray(Z),
-                jnp.asarray(phi),
-            )
+            if coil_geometry is None:
+                br, bp, bz = sample_coil_field_cylindrical(
+                    params,
+                    R_j,
+                    jnp.asarray(Z),
+                    jnp.asarray(phi),
+                )
+            else:
+                br, bp, bz = sample_coil_field_cylindrical_from_geometry(
+                    coil_geometry,
+                    R_j,
+                    jnp.asarray(Z),
+                    jnp.asarray(phi),
+                    regularization_epsilon=float(getattr(params, "regularization_epsilon", 0.0)),
+                    chunk_size=getattr(params, "chunk_size", None),
+                )
             br = br + jnp.asarray(br_add, dtype=br.dtype)
             bp = bp + jnp.asarray(bp_add, dtype=bp.dtype)
             bz = bz + jnp.asarray(bz_add, dtype=bz.dtype)
@@ -1770,6 +1781,7 @@ def direct_coil_boundary_bsqvac_from_trace_jax(
     include_diagnostics: bool = True,
     include_mode_diagnostics: bool = True,
     freeze_vacuum_field: bool = False,
+    coil_geometry: Any | None = None,
 ) -> dict[str, Any]:
     """Replay direct-coil ``bsqvac`` on accepted geometry using trace metadata.
 
@@ -1813,6 +1825,7 @@ def direct_coil_boundary_bsqvac_from_trace_jax(
         include_diagnostics=bool(include_diagnostics),
         include_mode_diagnostics=bool(include_mode_diagnostics),
         vac_override=vac_override,
+        coil_geometry=coil_geometry,
     )
 
 
@@ -1830,6 +1843,7 @@ def direct_coil_accepted_trace_replay_objective_jax(
     state_weight: Any = 1.0,
     force_weight: Any = 0.0,
     bsqvac_weight: Any = 0.0,
+    coil_geometry: Any | None = None,
 ) -> dict[str, Any]:
     """Replay fixed accepted free-boundary traces with differentiable coils.
 
@@ -1912,6 +1926,7 @@ def direct_coil_accepted_trace_replay_objective_jax(
                     nvper=int(context["nvper"]),
                     wint=jnp.asarray(context["wint"]),
                     include_analytic=bool(include_analytic),
+                    coil_geometry=coil_geometry,
                 )
             freeb_bsqvac_half = replay["bsqvac"]
         else:
@@ -3185,6 +3200,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     include_mode_diagnostics: bool = False,
     jit_preconditioner_apply: bool = True,
     unroll_accepted_only_segments_below: int = 0,
+    coil_geometry: Any | None = None,
 ) -> dict[str, Any]:
     """Replay fixed production traces through a JAX-visible accept controller.
 
@@ -3341,6 +3357,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                             include_diagnostics=not bool(state_only_replay),
                             include_mode_diagnostics=bool(include_mode_diagnostics),
                             freeze_vacuum_field=bool(freeze_vacuum_field),
+                            coil_geometry=coil_geometry,
                         )
                 else:
                     with _jax_named_scope("vmec_jax.free_boundary.direct_coil_bsqvac_replay"):
@@ -3375,6 +3392,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                                 if bool(freeze_vacuum_field)
                                 else None
                             ),
+                            coil_geometry=coil_geometry,
                         )
                 freeb_bsqvac_half = replay["bsqvac"]
             if bool(state_only_replay):
@@ -3471,6 +3489,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                             include_diagnostics=not bool(state_only_replay),
                             include_mode_diagnostics=bool(include_mode_diagnostics),
                             freeze_vacuum_field=bool(freeze_vacuum_field),
+                            coil_geometry=coil_geometry,
                         )
                 else:
                     with _jax_named_scope("vmec_jax.free_boundary.direct_coil_bsqvac_replay"):
@@ -3505,6 +3524,7 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                                 if bool(freeze_vacuum_field)
                                 else None
                             ),
+                            coil_geometry=coil_geometry,
                         )
                 freeb_bsqvac_half = replay["bsqvac"]
             if bool(state_only_replay):
@@ -5445,6 +5465,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
     gradients: dict[str, Any] = {}
     directional_values = None
     directional_fast_path = "none"
+    directional_uses_fixed_coil_geometry = False
     if direction_params is not None:
         derivative_mode = "directional_jvp"
         current_only_direction = False
@@ -5466,9 +5487,28 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
 
         if current_only_direction and current_base_leaf is not None and current_direction_leaf is not None:
             directional_fast_path = "current_only"
+            directional_uses_fixed_coil_geometry = True
+            from .external_fields import build_coil_field_geometry, apply_stellarator_symmetry_to_currents
+
+            fixed_gamma, fixed_gamma_dash, _fixed_currents = build_coil_field_geometry(params)
+
+            def _fixed_geometry_for_currents(base_currents):
+                expanded_currents = params.current_scale * apply_stellarator_symmetry_to_currents(
+                    base_currents,
+                    nfp=params.nfp,
+                    stellsym=params.stellsym,
+                )
+                return fixed_gamma, fixed_gamma_dash, expanded_currents
 
             def _replay_scalars_current_only(base_currents):
-                return _replay_scalars_direct(params.with_arrays(base_currents=base_currents))
+                replay = direct_coil_accepted_trace_controller_replay_objective_jax(
+                    params.with_arrays(base_currents=base_currents),
+                    traces[0]["state_pre"],
+                    replay_plan=replay_plan_for_scalars,
+                    coil_geometry=_fixed_geometry_for_currents(base_currents),
+                    **replay_options,
+                )
+                return jnp.asarray([fn(replay) for fn in scalar_fn_seq])
 
             jvp_primal = (current_base_leaf,)
             jvp_tangent = (current_direction_leaf,)
@@ -5584,6 +5624,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
             ),
             "replay_ad_mode": ad_mode,
             "directional_jvp_fast_path": directional_fast_path,
+            "directional_uses_fixed_coil_geometry": directional_uses_fixed_coil_geometry,
         },
     }
 

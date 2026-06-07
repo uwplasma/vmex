@@ -12,6 +12,72 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
+### 2026-06-06 Current-Only Fixed-Geometry Replay Path
+
+Steps taken:
+
+1. Confirmed GitHub Actions run ``27078238248`` for the compact projection
+   patch completed successfully, including docs, physics smoke, exact coverage
+   shards, and the combined coverage gate.
+2. Added an optional ``coil_geometry`` replay argument through
+   ``direct_coil_boundary_bsqvac_jax``,
+   ``direct_coil_boundary_bsqvac_from_trace_jax``,
+   ``direct_coil_accepted_trace_replay_objective_jax``, and
+   ``direct_coil_accepted_trace_controller_replay_objective_jax``.
+3. Specialized the branch-local current-only directional JVP path to prebuild
+   fixed ``gamma`` and ``gamma_dash`` once from the base coil geometry and trace
+   only the expanded current leaf through Biot-Savart/NESTOR replay.  Mixed
+   current/Fourier and Fourier-only directions remain on the full
+   ``CoilFieldParams`` path.
+4. Extended the solve-free current-only synthetic test to assert that fixed
+   coil geometry is actually passed into replay.
+
+Results obtained:
+
+1. ``python -m ruff check vmec_jax/free_boundary_adjoint.py
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py``
+   passed locally.
+2. The synthetic fast-path test passed locally and records
+   ``directional_uses_fixed_coil_geometry=True`` only for current-only
+   directions.
+3. The promoted current-only and Fourier-only same-branch complete-solve
+   AD-vs-central-FD gates both passed locally.
+4. Same-branch report writer/proposal smoke tests and direct-coil external
+   field tests passed locally.
+5. Current-only circle-provider compact report timing for
+   ``aspect,accepted_bnormal_rms`` improved from the previous ``6.22 s`` JVP
+   dispatch to ``5.48 s`` with fixed geometry.  This is a meaningful reduction
+   in graph construction for current-only reports, while the remaining
+   bottleneck is still direct-coil field sampling plus dense NESTOR/source
+   assembly.
+
+Best next steps:
+
+1. Commit and push the fixed-geometry current-only patch, then watch CI.
+2. Continue reducing the direct-coil/NESTOR cost for mixed current/Fourier
+   directions.  The next target is a reduced-output or matrix-free
+   NESTOR/source response, not more controller plumbing.
+3. After the phase-2 branch-local performance lane is stable, wire the
+   coil-only QS optimization example to prefer current-only projected reports
+   when only current controls are active.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99996% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.9%.
+- Single-stage coil-only optimization: 97.7%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 99.2%.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 99.5%.
+
 ### 2026-06-06 Compact Boundary Projection for Direct-Coil Replay
 
 Steps taken:

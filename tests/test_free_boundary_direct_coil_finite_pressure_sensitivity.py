@@ -743,7 +743,10 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatc
 
     import vmec_jax.free_boundary_adjoint as freeb_adj
 
+    replay_options_seen: list[dict[str, object]] = []
+
     def fake_direct_coil_replay(coil_params, _state_pre, **_replay_options):
+        replay_options_seen.append(dict(_replay_options))
         if isinstance(coil_params, CoilFieldParams):
             x = coil_params.base_currents[0]
         else:
@@ -782,6 +785,7 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatc
     assert synthetic_jvp_report["trace_replay_diagnostics"]["omitted"] is True
     assert synthetic_jvp_report["replay_option_flags"]["replay_ad_mode"] == "direct"
     assert synthetic_jvp_report["replay_option_flags"]["directional_jvp_fast_path"] == "none"
+    assert synthetic_jvp_report["replay_option_flags"]["directional_uses_fixed_coil_geometry"] is False
     assert synthetic_jvp_report["includes_replay_graph_metadata"] is False
     assert synthetic_jvp_report["replay_graph_metadata"]["omitted"] is True
     assert synthetic_jvp_report["replay_graph_metadata"]["differentiates_adaptive_controller"] is False
@@ -822,6 +826,8 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatc
     )
     assert current_only_report["derivative_mode"] == "directional_jvp"
     assert current_only_report["replay_option_flags"]["directional_jvp_fast_path"] == "current_only"
+    assert current_only_report["replay_option_flags"]["directional_uses_fixed_coil_geometry"] is True
+    assert replay_options_seen[-1]["coil_geometry"] is not None
     np.testing.assert_allclose(
         np.asarray(current_only_report["replay_values"]),
         np.asarray([6.0, 9.0]),
