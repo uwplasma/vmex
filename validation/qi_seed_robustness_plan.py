@@ -110,6 +110,7 @@ QI_SEED_ROBUSTNESS_PROMOTION_GATES = [
         "pass_criteria": [
             "Dry-run plans select top-ranked rows plus one best-ranked representative per available seed family.",
             "Default objectives include smooth QI, a QI ceiling, all-surface mirror ratio, and elongation; QI-only ablations use explicit zero-weight flags.",
+            "Already-low-QI seeds are labeled with a near-QI preservation policy that removes auxiliary mirror/elongation cleanup from the bounded first pass.",
             "Each plan records exact run commands, stage modes, ESS controls, Boozer/QI resolution, phimin policy, and hard nfev caps before any run mode.",
         ],
         "artifact_paths": ["results/qi_seed_audit/prefine_manifest.json"],

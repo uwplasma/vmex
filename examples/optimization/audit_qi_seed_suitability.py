@@ -60,6 +60,9 @@ DEFAULT_MAX_MIRROR_RATIO = 0.21
 DEFAULT_MAX_ELONGATION = 8.0
 DEFAULT_PREFINE_MIRROR_WEIGHT = 2.0
 DEFAULT_PREFINE_ELONGATION_WEIGHT = 0.5
+DEFAULT_PREFINE_NEAR_QI_AUX_WEIGHT_SCALE = 0.0
+DEFAULT_PREFINE_NEAR_QI_CEILING_WEIGHT = 500.0
+DEFAULT_PREFINE_NEAR_QI_GUARD_FACTOR = 1.25
 DEFAULT_SURFACES = (0.1, 0.35, 0.6, 0.85)
 DEFAULT_PREFINE_SURFACES = (0.35, 0.65)
 SEED_FAMILY_ORDER = ("qi", "qp", "qh", "qa", "simple")
@@ -126,6 +129,12 @@ class QIPrefineProbeConfig:
     qi_ceiling_weight: float = 100.0
     qi_ceiling_max: float = 2.0e-3
     qi_ceiling_smooth_penalty: float = 2.0e-3
+    preserve_near_qi: bool = True
+    near_qi_smooth_max: float = 2.0e-3
+    near_qi_legacy_max: float = 2.0e-3
+    near_qi_aux_weight_scale: float = DEFAULT_PREFINE_NEAR_QI_AUX_WEIGHT_SCALE
+    near_qi_ceiling_weight: float = DEFAULT_PREFINE_NEAR_QI_CEILING_WEIGHT
+    near_qi_ceiling_guard_factor: float = DEFAULT_PREFINE_NEAR_QI_GUARD_FACTOR
     mirror_weight: float = DEFAULT_PREFINE_MIRROR_WEIGHT
     mirror_threshold: float = DEFAULT_MAX_MIRROR_RATIO
     mirror_ntheta: int = 32
@@ -668,6 +677,16 @@ def _validate_prefine_probe_config(config: QIPrefineProbeConfig) -> None:
         raise ValueError("prefine mirror_weight must be non-negative")
     if config.elongation_weight < 0.0:
         raise ValueError("prefine elongation_weight must be non-negative")
+    if config.near_qi_smooth_max <= 0.0:
+        raise ValueError("prefine near_qi_smooth_max must be positive")
+    if config.near_qi_legacy_max <= 0.0:
+        raise ValueError("prefine near_qi_legacy_max must be positive")
+    if config.near_qi_aux_weight_scale < 0.0 or config.near_qi_aux_weight_scale > 1.0:
+        raise ValueError("prefine near_qi_aux_weight_scale must be in [0, 1]")
+    if config.near_qi_ceiling_weight < config.qi_ceiling_weight:
+        raise ValueError("prefine near_qi_ceiling_weight must be >= prefine qi_ceiling_weight")
+    if config.near_qi_ceiling_guard_factor < 1.0:
+        raise ValueError("prefine near_qi_ceiling_guard_factor must be >= 1")
     if config.mirror_threshold <= 0.0:
         raise ValueError("prefine mirror_threshold must be positive")
     if config.elongation_threshold <= 0.0:
@@ -764,7 +783,77 @@ def _prefine_endpoint_alignment(audit_report: dict[str, Any], config: QIPrefineP
     }
 
 
-def _prefine_run_command(record: dict[str, Any], config: QIPrefineProbeConfig, manifest_path: Path) -> str:
+def _prefine_qi_preservation_policy(record: dict[str, Any], config: QIPrefineProbeConfig) -> dict[str, Any]:
+    """Return per-seed objective weights for bounded QI prefine probes."""
+
+    smooth_qi = _finite_float(record.get("qi_smooth_total"))
+    legacy_qi = _finite_float(record.get("qi_legacy_total"))
+    near_by_smooth = smooth_qi is not None and smooth_qi <= float(config.near_qi_smooth_max)
+    near_by_legacy = legacy_qi is not None and legacy_qi <= float(config.near_qi_legacy_max)
+    near_qi = bool(config.preserve_near_qi and (near_by_smooth or near_by_legacy))
+
+    qi_ceiling_weight = float(config.qi_ceiling_weight)
+    qi_ceiling_max = float(config.qi_ceiling_max)
+    qi_ceiling_smooth_penalty = float(config.qi_ceiling_smooth_penalty)
+    mirror_weight = float(config.mirror_weight)
+    elongation_weight = float(config.elongation_weight)
+    policy = "constrained_recovery"
+    reasons: list[str] = []
+
+    if near_qi:
+        policy = "near_qi_preservation"
+        reasons.extend(
+            reason
+            for reason, enabled in (
+                ("smooth_qi_below_preservation_threshold", near_by_smooth),
+                ("legacy_qi_below_preservation_threshold", near_by_legacy),
+            )
+            if enabled
+        )
+        guard_candidates = [
+            value * float(config.near_qi_ceiling_guard_factor)
+            for value in (smooth_qi, legacy_qi)
+            if value is not None and value > 0.0
+        ]
+        if guard_candidates:
+            qi_ceiling_max = min(qi_ceiling_max, max(guard_candidates))
+            qi_ceiling_smooth_penalty = min(qi_ceiling_smooth_penalty, qi_ceiling_max)
+        qi_ceiling_weight = max(qi_ceiling_weight, float(config.near_qi_ceiling_weight))
+        mirror_weight *= float(config.near_qi_aux_weight_scale)
+        elongation_weight *= float(config.near_qi_aux_weight_scale)
+    else:
+        reasons.append("qi_above_preservation_threshold_or_policy_disabled")
+
+    return {
+        "name": policy,
+        "preserve_near_qi": bool(config.preserve_near_qi),
+        "near_qi": near_qi,
+        "reasons": reasons,
+        "thresholds": {
+            "smooth_qi_max": float(config.near_qi_smooth_max),
+            "legacy_qi_max": float(config.near_qi_legacy_max),
+            "aux_weight_scale": float(config.near_qi_aux_weight_scale),
+            "ceiling_guard_factor": float(config.near_qi_ceiling_guard_factor),
+        },
+        "initial_qi": {
+            "smooth_qi": smooth_qi,
+            "legacy_qi": legacy_qi,
+        },
+        "qi_ceiling_weight": qi_ceiling_weight,
+        "qi_ceiling_max": qi_ceiling_max,
+        "qi_ceiling_smooth_penalty": qi_ceiling_smooth_penalty,
+        "mirror_weight": mirror_weight,
+        "elongation_weight": elongation_weight,
+    }
+
+
+def _prefine_run_command(
+    record: dict[str, Any],
+    config: QIPrefineProbeConfig,
+    manifest_path: Path,
+    *,
+    policy: dict[str, Any],
+) -> str:
     case = f"{record['label']}:{record['family']}:{record['input']}:{record['wout']}"
     selected_phimin, _phimin_source = _prefine_phimin_for_record(record, config)
     command = [
@@ -811,8 +900,14 @@ def _prefine_run_command(record: dict[str, Any], config: QIPrefineProbeConfig, m
         str(config.n_bounce),
         "--prefine-phimin",
         str(selected_phimin),
+        "--prefine-qi-ceiling-weight",
+        str(policy["qi_ceiling_weight"]),
+        "--prefine-qi-ceiling-max",
+        str(policy["qi_ceiling_max"]),
+        "--prefine-qi-ceiling-smooth-penalty",
+        str(policy["qi_ceiling_smooth_penalty"]),
         "--prefine-mirror-weight",
-        str(config.mirror_weight),
+        str(policy["mirror_weight"]),
         "--prefine-mirror-threshold",
         str(config.mirror_threshold),
         "--prefine-mirror-ntheta",
@@ -822,7 +917,7 @@ def _prefine_run_command(record: dict[str, Any], config: QIPrefineProbeConfig, m
         "--prefine-mirror-surface-index",
         _surface_index_label(config.mirror_surface_index),
         "--prefine-elongation-weight",
-        str(config.elongation_weight),
+        str(policy["elongation_weight"]),
         "--prefine-elongation-threshold",
         str(config.elongation_threshold),
         "--prefine-elongation-ntheta",
@@ -837,6 +932,7 @@ def _prefine_run_command(record: dict[str, Any], config: QIPrefineProbeConfig, m
         str(config.ess_alpha),
     ]
     command.append("--prefine-use-ess" if bool(config.use_ess) else "--no-prefine-use-ess")
+    command.append("--no-prefine-preserve-near-qi")
     if config.scipy_lsmr_maxiter is not None:
         command.extend(["--prefine-scipy-lsmr-maxiter", str(config.scipy_lsmr_maxiter)])
     command.append(
@@ -922,6 +1018,7 @@ def build_qi_prefine_probe_manifest(
         probe_dir = config.output_dir / f"{index:02d}_{_safe_label(label)}"
         selected_phimin, phimin_source = _prefine_phimin_for_record(record, config)
         stage_plan = _prefine_stage_plan(config, probe_dir=probe_dir)
+        prefine_policy = _prefine_qi_preservation_policy(record, config)
         plan = {
             "status": "planned" if dry_run else "pending",
             "review": {
@@ -968,9 +1065,11 @@ def build_qi_prefine_probe_manifest(
             "optimization": {
                 "objective": (
                     "qi_constrained_prefine_probe"
-                    if float(config.mirror_weight) > 0.0 or float(config.elongation_weight) > 0.0
+                    if float(prefine_policy["mirror_weight"]) > 0.0
+                    or float(prefine_policy["elongation_weight"]) > 0.0
                     else "qi_only_prefine_probe"
                 ),
+                "prefine_policy": prefine_policy["name"],
                 "max_nfev": int(config.max_nfev),
                 "continuation_nfev": int(config.continuation_nfev),
                 "max_mode": int(config.max_mode),
@@ -1004,20 +1103,21 @@ def build_qi_prefine_probe_manifest(
                 "phimin": selected_phimin,
                 "phimin_source": phimin_source,
                 "weight": float(config.qi_weight),
-                "qi_ceiling_weight": float(config.qi_ceiling_weight),
-                "qi_ceiling_max": float(config.qi_ceiling_max),
-                "qi_ceiling_smooth_penalty": float(config.qi_ceiling_smooth_penalty),
-                "mirror_weight": float(config.mirror_weight),
+                "qi_ceiling_weight": float(prefine_policy["qi_ceiling_weight"]),
+                "qi_ceiling_max": float(prefine_policy["qi_ceiling_max"]),
+                "qi_ceiling_smooth_penalty": float(prefine_policy["qi_ceiling_smooth_penalty"]),
+                "mirror_weight": float(prefine_policy["mirror_weight"]),
                 "mirror_threshold": float(config.mirror_threshold),
                 "mirror_ntheta": int(config.mirror_ntheta),
                 "mirror_nphi": int(config.mirror_nphi),
                 "mirror_surface_index": config.mirror_surface_index,
                 "mirror_surface_mode": _surface_index_label(config.mirror_surface_index),
-                "elongation_weight": float(config.elongation_weight),
+                "elongation_weight": float(prefine_policy["elongation_weight"]),
                 "elongation_threshold": float(config.elongation_threshold),
                 "elongation_ntheta": int(config.elongation_ntheta),
                 "elongation_nphi": int(config.elongation_nphi),
             },
+            "prefine_policy": prefine_policy,
             "would_write": [
                 str(probe_dir / "input.initial"),
                 str(probe_dir / "input.final"),
@@ -1026,7 +1126,7 @@ def build_qi_prefine_probe_manifest(
                 str(probe_dir / "history.json"),
             ],
             "would_write_stage_dirs": [str(probe_dir / f"stage_{stage['index']:02d}_mode{stage['mode']:02d}") for stage in stage_plan],
-            "run_command": _prefine_run_command(record, config, manifest_path),
+            "run_command": _prefine_run_command(record, config, manifest_path, policy=prefine_policy),
         }
         plans.append(plan)
 
@@ -2415,6 +2515,33 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prefine-qi-ceiling-max", type=float, default=2.0e-3)
     parser.add_argument("--prefine-qi-ceiling-smooth-penalty", type=float, default=2.0e-3)
     parser.add_argument(
+        "--prefine-preserve-near-qi",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "For already-low-QI seeds, tighten the QI ceiling and downweight "
+            "mirror/elongation cleanup so auxiliary terms do not pull the seed "
+            "out of the QI basin."
+        ),
+    )
+    parser.add_argument("--prefine-near-qi-smooth-max", type=float, default=2.0e-3)
+    parser.add_argument("--prefine-near-qi-legacy-max", type=float, default=2.0e-3)
+    parser.add_argument(
+        "--prefine-near-qi-aux-weight-scale",
+        type=float,
+        default=DEFAULT_PREFINE_NEAR_QI_AUX_WEIGHT_SCALE,
+    )
+    parser.add_argument(
+        "--prefine-near-qi-ceiling-weight",
+        type=float,
+        default=DEFAULT_PREFINE_NEAR_QI_CEILING_WEIGHT,
+    )
+    parser.add_argument(
+        "--prefine-near-qi-ceiling-guard-factor",
+        type=float,
+        default=DEFAULT_PREFINE_NEAR_QI_GUARD_FACTOR,
+    )
+    parser.add_argument(
         "--prefine-mirror-weight",
         type=float,
         default=DEFAULT_PREFINE_MIRROR_WEIGHT,
@@ -2546,6 +2673,12 @@ def main(argv: list[str] | None = None) -> int:
             qi_ceiling_weight=args.prefine_qi_ceiling_weight,
             qi_ceiling_max=args.prefine_qi_ceiling_max,
             qi_ceiling_smooth_penalty=args.prefine_qi_ceiling_smooth_penalty,
+            preserve_near_qi=args.prefine_preserve_near_qi,
+            near_qi_smooth_max=args.prefine_near_qi_smooth_max,
+            near_qi_legacy_max=args.prefine_near_qi_legacy_max,
+            near_qi_aux_weight_scale=args.prefine_near_qi_aux_weight_scale,
+            near_qi_ceiling_weight=args.prefine_near_qi_ceiling_weight,
+            near_qi_ceiling_guard_factor=args.prefine_near_qi_ceiling_guard_factor,
             mirror_weight=args.prefine_mirror_weight,
             mirror_threshold=args.prefine_mirror_threshold,
             mirror_ntheta=args.prefine_mirror_ntheta,

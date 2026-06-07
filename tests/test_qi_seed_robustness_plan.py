@@ -240,6 +240,7 @@ def test_plan_records_qi_seed_robustness_promotion_gates():
     manifest_criteria = " ".join(gates["reviewed-constrained-prefine-manifest"]["pass_criteria"])
     assert "all-surface mirror ratio" in manifest_criteria
     assert "QI-only ablations use explicit zero-weight flags" in manifest_criteria
+    assert "near-QI preservation policy" in manifest_criteria
 
     diagnostics_criteria = " ".join(gates["independent-final-diagnostics"]["pass_criteria"])
     for metric in ("smooth QI", "legacy QI", "abs(mean iota)", "mirror ratio", "elongation", "aspect"):

@@ -218,6 +218,67 @@ Completion:
 - Docs/release hygiene: 100%.
 - QI seed robustness: 92%.
 
+### 2026-06-07 Near-QI Preservation Prefine Policy
+
+Steps taken:
+
+1. Added a per-seed QI prefine policy in
+   ``examples/optimization/audit_qi_seed_suitability.py``.  Seeds already below
+   the smooth or legacy QI thresholds now get ``near_qi_preservation`` instead
+   of the far-seed ``constrained_recovery`` policy.
+2. The near-QI policy strengthens the QI ceiling and sets mirror/elongation
+   cleanup weights to zero for the bounded first pass.  Generated one-case
+   commands carry the effective weights and disable a second policy application
+   with ``--no-prefine-preserve-near-qi``.
+3. Added focused tests for the near-QI policy and updated the optional
+   validation plan so robust-QI promotion requires this preservation labeling.
+4. Generated a real dry-run manifest and then ran a bounded top-two reviewed
+   probe for the near-QI QP/QI rows.
+
+Results obtained:
+
+1. The real dry-run manifest labels ``qp_from_omnigenity_nfp2_qi`` and
+   ``qi_omnigenity_nfp3`` as ``near_qi_preservation``.  It labels QH, QA, and
+   simple representatives as ``constrained_recovery``.
+2. The near-QI QI-only top-two run completed both probes.  It removed
+   mirror/elongation terms from the first pass, but independent final
+   diagnostics still worsened:
+   ``qp_from_omnigenity_nfp2_qi`` smooth QI ``1.30e-3 -> 2.52e-2`` and mirror
+   ``0.260 -> 0.662``; ``qi_omnigenity_nfp3`` smooth QI
+   ``1.68e-3 -> 7.07e-2`` and mirror ``0.288 -> 0.553``.
+3. The audit correctly kept both near-QI probes in ``needs_review`` and did not
+   promote them.  This isolates the remaining near-QI failure to the bounded
+   low-mode continuation/truncation path rather than auxiliary mirror or
+   elongation weights.
+
+Best next steps:
+
+1. For near-QI seeds, avoid low-mode prefine truncation.  Add either a
+   no-prefine baseline/skip policy or a full-existing-mode cleanup path that
+   preserves the seed boundary modes before any local optimization.
+2. Keep far-seed constrained recovery unchanged; it improves QI metrics for QH,
+   QA, and simple representatives and remains useful as a screening stage.
+3. Only claim seed-robust QI after independent diagnostics and Boozer contours
+   pass, not after optimizer scalar cost decreases.
+
+Need from user:
+
+Nothing.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999998%; adaptive branch
+  differentiation remains unclaimed.
+- VMEC parity and physics gates: 99.35%.
+- Single-stage coil-only optimization: 100.0%.
+- CPU/GPU performance: 99.6%.
+- CI/runtime/coverage hygiene: 100% locally; latest plan-only pushed CI is
+  pending final result.
+- Docs/release hygiene: 100%.
+- QI seed robustness: 93%; false-promotion prevention is stronger, and the next
+  specific blocker is near-QI low-mode truncation.
+
 ### 2026-06-07 Bounded VMEC2000 W7-X Generated-Mgrid WOUT Fixture
 
 Steps taken:

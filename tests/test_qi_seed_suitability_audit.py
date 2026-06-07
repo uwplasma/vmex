@@ -483,6 +483,67 @@ def test_prefine_probe_manifest_selects_top_rows_and_stays_dry(tmp_path):
         )
 
 
+def test_prefine_probe_manifest_preserves_near_qi_before_aux_cleanup(tmp_path):
+    mod = _load_module()
+    report = {
+        "cases": [
+            {
+                "suitability_rank": 1,
+                "label": "near_qi",
+                "family": "qi",
+                "input": "/tmp/input_near_qi",
+                "wout": "/tmp/wout_near_qi.nc",
+                "qi_smooth_total": 1.0e-3,
+                "qi_legacy_total": 5.0e-4,
+            },
+            {
+                "suitability_rank": 2,
+                "label": "far_qi",
+                "family": "qh",
+                "input": "/tmp/input_far",
+                "wout": "/tmp/wout_far.nc",
+                "qi_smooth_total": 0.2,
+                "qi_legacy_total": 0.3,
+            },
+        ]
+    }
+    config = mod.QIPrefineProbeConfig(
+        top_n=2,
+        include_family_representatives=False,
+        output_dir=tmp_path / "probes",
+        mirror_weight=2.0,
+        elongation_weight=0.5,
+    )
+
+    manifest = mod.build_qi_prefine_probe_manifest(
+        report,
+        config=config,
+        manifest_path=tmp_path / "manifest.json",
+        dry_run=True,
+    )
+
+    near = manifest["plans"][0]
+    far = manifest["plans"][1]
+    assert near["prefine_policy"]["name"] == "near_qi_preservation"
+    assert near["prefine_policy"]["near_qi"] is True
+    assert "smooth_qi_below_preservation_threshold" in near["prefine_policy"]["reasons"]
+    assert near["qi_options"]["qi_ceiling_weight"] == mod.DEFAULT_PREFINE_NEAR_QI_CEILING_WEIGHT
+    assert near["qi_options"]["qi_ceiling_max"] == pytest.approx(1.25e-3)
+    assert near["optimization"]["objective"] == "qi_only_prefine_probe"
+    assert near["qi_options"]["mirror_weight"] == 0.0
+    assert near["qi_options"]["elongation_weight"] == 0.0
+    assert "--prefine-mirror-weight 0.0" in near["run_command"]
+    assert "--prefine-elongation-weight 0.0" in near["run_command"]
+    assert "--prefine-qi-ceiling-weight 500.0" in near["run_command"]
+    assert "--no-prefine-preserve-near-qi" in near["run_command"]
+
+    assert far["prefine_policy"]["name"] == "constrained_recovery"
+    assert far["prefine_policy"]["near_qi"] is False
+    assert far["qi_options"]["qi_ceiling_weight"] == 100.0
+    assert far["qi_options"]["mirror_weight"] == 2.0
+    assert far["qi_options"]["elongation_weight"] == 0.5
+
+
 def test_prefine_probe_manifest_adds_family_representatives_after_top_n(tmp_path):
     mod = _load_module()
     report = {
