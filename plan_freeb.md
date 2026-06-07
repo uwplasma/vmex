@@ -12,6 +12,89 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
+### 2026-06-07 Bounded VMEC2000 W7-X Generated-Mgrid WOUT Fixture
+
+Steps taken:
+
+1. Rechecked ``main`` at commit ``50e190e`` with a clean working tree before
+   this fixture work.
+2. Reviewed the existing free-boundary generated-``mgrid`` diagnostics and the
+   previous LP-QA VMEC2000 WOUT-promotion blocker: VMEC2000 could read the
+   generated ``mgrid`` but did not produce finite positive geometry WOUT
+   evidence for that diagnostic.
+3. Checked the SIMSOPT free-boundary W7-X example and the STELLOPT/VMEC
+   documentation guidance for generated ``mgrid`` runs: set ``LFREEB=T``,
+   point ``MGRID_FILE`` at the generated table, match ``NZETA`` to the
+   ``mgrid`` toroidal planes, and set ``EXTCUR`` to scale the generated field
+   group.
+4. Reproduced the documented SIMSOPT W7-X generated-``mgrid`` path with raw
+   ``~/bin/xvmec2000`` in ``/tmp``.  The deck used the SIMSOPT
+   ``input.W7-X_standard_configuration`` boundary, generated
+   ``mgrid.w7x.nc`` from ``simsopt.configs.get_data("w7x")``, and ran a
+   two-stage low-resolution free-boundary schedule.
+5. Added ``tools/diagnostics/vmec2000_generated_mgrid_w7x_fixture.py``.  The
+   script regenerates the W7-X ``mgrid`` at runtime, patches the VMEC input,
+   runs raw VMEC2000, and promotes the row only when active vacuum evidence,
+   a parseable WOUT, finite residuals, and finite positive geometry scalars
+   are all present.
+6. Added a fast unit test for the W7-X free-boundary input patch and an
+   optional ``VMEC2000_INTEGRATION=1`` executable-backed W7-X fixture test.
+7. Updated ``docs/free_boundary_coil_optimization.rst``,
+   ``docs/free_boundary_plan.rst``, and ``docs/validation.rst`` so users can
+   reproduce the fixture without committing generated ``mgrid`` or WOUT files.
+
+Results obtained:
+
+1. Raw VMEC2000 reached active vacuum coupling for the generated W7-X mgrid:
+   ``VACUUM PRESSURE TURNED ON AT 67 ITERATIONS``.
+2. VMEC2000 exited normally and wrote a finite WOUT with
+   ``ier_flag=0``, ``fsqr=9.64e-11``, ``fsqz=3.32e-11``,
+   ``fsql=3.82e-11``, and ``fsq_total=1.68e-10``.
+3. Geometry scalars were finite and positive:
+   ``aspect=10.7523``, ``volume_p=28.6020``, ``Rmajor_p=5.5126``,
+   and ``Aminor_p=0.51269``.
+4. The generated ``mgrid`` was approximately ``2.4 MB`` and the WOUT was
+   approximately ``0.5 MB`` in ``/tmp``; neither is committed to git.
+5. Focused validation passed:
+   ``python -m ruff check`` on the new diagnostic and touched test,
+   four fast generated-``mgrid`` diagnostic unit tests, the new optional W7-X
+   VMEC2000 fixture gate, and the standalone diagnostic with ``--strict``.
+
+Best next steps:
+
+1. Keep the older LP-QA generated-``mgrid`` row as the direct-coil vs
+   generated-``mgrid`` vmec_jax provider parity diagnostic, but stop using it
+   as the VMEC2000 WOUT-promotion target.
+2. Use the W7-X fixture as the bounded optional VMEC2000 generated-``mgrid``
+   WOUT-level promotion gate in local/nightly validation.
+3. Continue the single-stage free-boundary lane by comparing vmec_jax
+   generated-``mgrid`` and direct-coil paths against this bounded W7-X
+   VMEC2000 promotion row, while keeping binary generated assets out of git.
+4. Resume the remaining broader roadmap lanes only after this fixture is
+   committed and CI remains green.
+
+Need from user:
+
+Nothing. The W7-X generated-``mgrid`` VMEC2000 fixture is now self-generating
+from SIMSOPT plus raw VMEC2000 and does not require a checked-in binary asset.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999996% for fixed
+  same-branch scalar/vector gates and accepted/rejected slot evidence;
+  arbitrary adaptive branch differentiation remains explicitly unclaimed.
+- VMEC parity and physics gates: 99.2% after adding a bounded VMEC2000
+  generated-``mgrid`` WOUT-promotion fixture.
+- Single-stage coil-only optimization: 100.0% for the conservative
+  complete-solve-accepted, branch-local-derivative lane.
+- Robust/stochastic coil perturbation optimization: deferred by current scope.
+- CPU/GPU performance: 99.6%.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 100% for this generated-``mgrid`` fixture update.
+- Remaining non-free-boundary blocker before returning to the broader roadmap:
+  QI seed robustness.
+
 ### 2026-06-07 Single-Stage Direct-Coil Optimization Finalization
 
 Steps taken:

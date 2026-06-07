@@ -66,6 +66,42 @@ magnetic-grid bounds, and direct-coil provider wiring.  By default, outputs go
 under ``results/free_boundary_essos_mgrid_forward/`` and
 ``results/free_boundary_essos_direct_forward/``.
 
+VMEC2000 generated-mgrid promotion fixture
+------------------------------------------
+
+The direct-coil lane keeps VMEC2000 compatibility anchored through the
+generated-``mgrid`` workflow: coils are sampled onto a cylindrical field table,
+``LFREEB=T`` is set in the VMEC input deck, ``NZETA`` is matched to the
+``mgrid`` toroidal plane count, and ``EXTCUR`` scales the generated field
+group.  The optional WOUT-level promotion fixture uses the documented SIMSOPT
+W7-X free-boundary example because it is bounded and reaches active vacuum
+coupling with raw VMEC2000.
+
+Run it locally with SIMSOPT and VMEC2000 available:
+
+.. code-block:: bash
+
+   VMEC2000_EXEC=~/bin/xvmec2000 \
+   python tools/diagnostics/vmec2000_generated_mgrid_w7x_fixture.py \
+     --workdir /tmp/vmec_jax_w7x_generated_mgrid_fixture \
+     --out results/vmec2000_w7x_generated_mgrid_fixture.json \
+     --strict
+
+The diagnostic regenerates ``mgrid.w7x.nc`` at runtime from
+``simsopt.configs.get_data("w7x")``, patches
+``input.W7-X_standard_configuration`` into a two-stage free-boundary deck, and
+runs ``xvmec2000`` directly.  It promotes the row only if VMEC2000 reaches
+active vacuum coupling, writes a parseable WOUT, the final residual sum is
+finite and below the configured limit, and ``aspect``, ``volume_p``,
+``Rmajor_p``, and ``Aminor_p`` are all finite and positive.
+
+On the local 2026-06-07 check with ``~/bin/xvmec2000``, the fixture reached
+active vacuum at iteration 67, wrote a finite WOUT, and produced
+``fsq_total = 1.68e-10``, ``aspect = 10.75``, ``volume_p = 28.60``,
+``Rmajor_p = 5.51``, and ``Aminor_p = 0.513``.  The generated ``mgrid`` and
+WOUT stay under the selected work directory and are intentionally not committed
+to git.
+
 Boozer/QS diagnostics are the intended promotion target for this lane, but the
 current implementation keeps the single-stage optimization example on a cheap
 VMEC residual plus VMEC-state ``qs_total``, aspect, and mean-iota proxy until

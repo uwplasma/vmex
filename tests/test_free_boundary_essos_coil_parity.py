@@ -96,6 +96,32 @@ def test_vmec2000_sign_probe_updates_flip_phiedge_and_extcur(tmp_path: Path) -> 
     assert [float(value.strip()) for value in combined["EXTCUR"].split(",")] == pytest.approx([-1.0])
 
 
+def test_w7x_generated_mgrid_fixture_input_patch_sets_vmec2000_free_boundary_controls(tmp_path: Path) -> None:
+    from tools.diagnostics.vmec2000_generated_mgrid_w7x_fixture import write_w7x_generated_mgrid_input
+
+    input_path = write_w7x_generated_mgrid_input(
+        tmp_path / "input.w7x_generated_mgrid_freeb",
+        source_input=LPQA_INPUT,
+        mgrid_file="mgrid.w7x.nc",
+        nphi=24,
+        mpol=6,
+        ntor=6,
+        ns_array=(13, 25),
+        ftol_array=(1.0e-7, 1.0e-10),
+        niter_array=(15000, 15000),
+    )
+    indata = read_indata(input_path)
+
+    assert indata.scalars["LFREEB"] is True
+    assert indata.scalars["MGRID_FILE"] == "mgrid.w7x.nc"
+    assert float(indata.scalars["EXTCUR"]) == pytest.approx(1.0)
+    assert int(indata.scalars["NZETA"]) == 24
+    assert int(indata.scalars["MPOL"]) == 6
+    assert int(indata.scalars["NTOR"]) == 6
+    assert indata.scalars["NS_ARRAY"] == [13, 25]
+    assert indata.scalars["NITER_ARRAY"] == [15000, 15000]
+
+
 def test_vmec2000_unreadable_error_wout_classifies_phiedge_wrong_sign(tmp_path: Path) -> None:
     from tools.diagnostics.compare_freeb_coils_mgrid_vmec2000 import _mark_unreadable_vmec2000_wout
 
@@ -796,3 +822,43 @@ def test_vmec2000_generated_mgrid_free_boundary_matches_vmec_jax_and_direct_coil
     )
     _assert_vmec2000_generated_mgrid_wout_matches_vmec_jax(wout_mgrid, wout_vmec2000)
     _assert_fsq_total_same_scale(wout_mgrid, wout_vmec2000)
+
+
+@pytest.mark.vmec2000
+def test_vmec2000_w7x_generated_mgrid_fixture_reaches_active_vacuum_and_finite_wout(tmp_path: Path) -> None:
+    """Optional bounded VMEC2000 WOUT-level generated-mgrid promotion gate.
+
+    The LP-QA direct-coil/generated-mgrid comparator above intentionally remains
+    the three-way vmec_jax provider parity gate.  This W7-X gate is narrower:
+    it proves that a documented SIMSOPT-generated mgrid can drive raw VMEC2000
+    to active vacuum coupling and finite positive WOUT geometry in a bounded
+    runtime, without checking in the generated mgrid or WOUT.
+    """
+
+    if os.environ.get("VMEC2000_INTEGRATION", "0") != "1":
+        pytest.skip("Set VMEC2000_INTEGRATION=1 to run VMEC2000 executable parity tests")
+    pytest.importorskip("simsopt")
+    exe = find_vmec2000_exec()
+    if exe is None:
+        pytest.skip("xvmec2000 executable not found")
+
+    from tools.diagnostics.vmec2000_generated_mgrid_w7x_fixture import (
+        run_w7x_generated_mgrid_vmec2000_fixture,
+    )
+
+    report = run_w7x_generated_mgrid_vmec2000_fixture(
+        workdir=tmp_path / "w7x_generated_mgrid_fixture",
+        vmec2000_exec=exe,
+        timeout_s=240.0,
+    )
+
+    assert report["promoted"] is True
+    vmec2000 = report["vmec2000"]
+    assert vmec2000["returncode"] == 0
+    assert vmec2000["active_vacuum"]["active"] is True
+    quality = vmec2000["wout_quality"]
+    assert quality["promotable"] is True
+    assert quality["geometry_positive"] is True
+    assert quality["fsq_total"] < 1.0e-8
+    assert quality["geometry"]["aspect"] > 0.0
+    assert quality["geometry"]["volume_p"] > 0.0

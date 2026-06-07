@@ -628,6 +628,38 @@ iterations and verifies VMEC2000 reaches the vacuum solve without an
    VMEC2000_INTEGRATION=1 \
    pytest -q tests/test_vmec2000_exec_fast_validation.py::test_vmec2000_free_boundary_lasym_true_reaches_vacuum_solve
 
+For WOUT-level generated-``mgrid`` free-boundary promotion, use the bounded
+W7-X fixture instead of the older LP-QA generated-``mgrid`` diagnostic.  The
+LP-QA row remains useful for direct-coil-vs-generated-``mgrid`` vmec_jax
+provider parity, but it is not a VMEC2000 WOUT-promotion case.  The W7-X
+fixture follows the documented SIMSOPT free-boundary workflow: generate
+``mgrid.w7x.nc`` from ``simsopt.configs.get_data("w7x")``, set
+``LFREEB=T``, set ``NZETA`` to the generated toroidal plane count, set
+``EXTCUR=1.0``, and run raw VMEC2000:
+
+.. code-block:: bash
+
+   VMEC2000_EXEC=~/bin/xvmec2000 \
+   python tools/diagnostics/vmec2000_generated_mgrid_w7x_fixture.py \
+     --workdir /tmp/vmec_jax_w7x_generated_mgrid_fixture \
+     --out results/vmec2000_w7x_generated_mgrid_fixture.json \
+     --strict
+
+The corresponding optional pytest gate is:
+
+.. code-block:: bash
+
+   VMEC2000_EXEC=~/bin/xvmec2000 \
+   VMEC2000_INTEGRATION=1 \
+   pytest -q tests/test_free_boundary_essos_coil_parity.py::test_vmec2000_w7x_generated_mgrid_fixture_reaches_active_vacuum_and_finite_wout
+
+The promotion criteria are intentionally stricter than "VMEC2000 returned":
+active vacuum evidence must be present, a parseable WOUT must be written,
+``fsqr + fsqz + fsql`` must be finite and below the configured bound, and the
+geometry scalars ``aspect``, ``volume_p``, ``Rmajor_p``, and ``Aminor_p`` must
+be finite and positive.  The generated ``mgrid`` and WOUT remain in the local
+work directory and are not git fixtures.
+
 For a short CLI comparison against the executable:
 
 .. code-block:: bash
