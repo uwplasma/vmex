@@ -74,7 +74,7 @@ Completion:
 - Robust coil perturbation optimization: deferred by current scope, 70%.
 - CPU/GPU performance: 99.0%.
 - CI runtime refactor with preserved coverage/physics gates: 100% after green
-  run ``27077581652``; pending CI for this patch.
+  runs ``27077581652`` and ``27077844351``.
 - Docs/release hygiene: 99.5%.
 
 ### 2026-06-06 Branch-Local Replay Graph Width Reduction
