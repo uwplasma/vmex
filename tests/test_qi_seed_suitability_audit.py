@@ -526,6 +526,8 @@ def test_prefine_probe_manifest_preserves_near_qi_before_aux_cleanup(tmp_path):
     far = manifest["plans"][1]
     assert near["prefine_policy"]["name"] == "near_qi_preservation"
     assert near["prefine_policy"]["near_qi"] is True
+    assert near["prefine_policy"]["project_input_boundary_to_max_mode"] is False
+    assert near["optimization"]["project_input_boundary_to_max_mode"] is False
     assert "smooth_qi_below_preservation_threshold" in near["prefine_policy"]["reasons"]
     assert near["qi_options"]["qi_ceiling_weight"] == mod.DEFAULT_PREFINE_NEAR_QI_CEILING_WEIGHT
     assert near["qi_options"]["qi_ceiling_max"] == pytest.approx(1.25e-3)
@@ -536,9 +538,12 @@ def test_prefine_probe_manifest_preserves_near_qi_before_aux_cleanup(tmp_path):
     assert "--prefine-elongation-weight 0.0" in near["run_command"]
     assert "--prefine-qi-ceiling-weight 500.0" in near["run_command"]
     assert "--no-prefine-preserve-near-qi" in near["run_command"]
+    assert "--no-prefine-project-input-boundary-to-max-mode" in near["run_command"]
 
     assert far["prefine_policy"]["name"] == "constrained_recovery"
     assert far["prefine_policy"]["near_qi"] is False
+    assert far["prefine_policy"]["project_input_boundary_to_max_mode"] is True
+    assert far["optimization"]["project_input_boundary_to_max_mode"] is True
     assert far["qi_options"]["qi_ceiling_weight"] == 100.0
     assert far["qi_options"]["mirror_weight"] == 2.0
     assert far["qi_options"]["elongation_weight"] == 0.5
@@ -866,6 +871,7 @@ def test_run_qi_prefine_probe_can_dispatch_constrained_qi_terms(tmp_path):
     assert calls["elongation"]["threshold"] == 8.0
     assert calls["elongation"]["ntheta"] == 14
     assert calls["elongation"]["nphi"] == 6
+    assert calls["from_input"]["project_input_boundary_to_max_mode"] is True
 
 
 def test_qi_cleanup_candidate_promotion_requires_qi_gate_and_mirror_improvement():
