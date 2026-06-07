@@ -81,6 +81,7 @@ DEFAULT_SAME_BRANCH_VECTOR_KEYS = ("aspect", "qs_total")
 SUPPORTED_SAME_BRANCH_VECTOR_KEYS = (
     "state_norm",
     "aspect",
+    "mean_iota",
     "qs_total",
     "lcfs_boundary_moment",
     "accepted_bnormal_rms",
@@ -91,6 +92,7 @@ SAME_BRANCH_VECTOR_KEY_ALIASES = {
 STATE_ONLY_SAME_BRANCH_KEYS = (
     "state_norm",
     "aspect",
+    "mean_iota",
     "qs_total",
     "lcfs_boundary_moment",
 )
@@ -906,6 +908,16 @@ def write_same_branch_validation_report(
         z = jnp.asarray(geometry["Z"])
         return jnp.mean((r - 1.0) * (r - 1.0) + z * z)
 
+    def mean_iota_from_state(state: Any, static: Any, indata: Any, signgs: int) -> Any:
+        _chips, iotas, _iotaf = equilibrium_iota_profiles_from_state(
+            state=state,
+            static=static,
+            indata=indata,
+            signgs=int(signgs),
+        )
+        iota_arr = jnp.asarray(iotas)
+        return jnp.mean(iota_arr[1:] if iota_arr.size > 1 else iota_arr)
+
     def accepted_bnormal_rms_from_payload(payload: dict[str, Any]) -> float:
         values = [
             float(np.sqrt(np.mean(np.square(np.asarray(trace["freeb_nestor_trace"]["bnormal"], dtype=float)))))
@@ -984,8 +996,8 @@ def write_same_branch_validation_report(
             "residual_proxy": float(summary.get("residual_proxy") or 0.0),
             "qs_total": float(summary["qs_total"]) if summary.get("qs_total") is not None else np.nan,
             "aspect": float(summary["aspect"]) if summary.get("aspect") is not None else np.nan,
-            "lcfs_boundary_moment": float(np.asarray(lcfs_boundary_moment(payload["result"].state, payload["init"].static))),
             "mean_iota": float(summary["mean_iota"]) if summary.get("mean_iota") is not None else np.nan,
+            "lcfs_boundary_moment": float(np.asarray(lcfs_boundary_moment(payload["result"].state, payload["init"].static))),
             "accepted_bnormal_rms": accepted_bnormal_rms_from_payload(payload),
             "bnormal_rms": float(summary["free_boundary_bnormal_rms"])
             if summary.get("free_boundary_bnormal_rms") is not None
@@ -1093,6 +1105,16 @@ def write_same_branch_validation_report(
                 )
             )
         ),
+        "mean_iota": lambda payload: float(
+            np.asarray(
+                mean_iota_from_state(
+                    payload["result"].state,
+                    payload["init"].static,
+                    payload["init"].indata,
+                    payload["init"].signgs,
+                )
+            )
+        ),
         "qs_total": lambda payload: float(
             np.asarray(
                 qs_total_from_state(
@@ -1113,6 +1135,12 @@ def write_same_branch_validation_report(
         "aspect": lambda replay, payload: equilibrium_aspect_ratio_from_state(
             state=replay["state"],
             static=payload["init"].static,
+        ),
+        "mean_iota": lambda replay, payload: mean_iota_from_state(
+            replay["state"],
+            payload["init"].static,
+            payload["init"].indata,
+            payload["init"].signgs,
         ),
         "qs_total": lambda replay, payload: qs_total_from_state(
             replay["state"],
@@ -1932,7 +1960,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--same-branch-report-scalar-key",
-        choices=("state_norm", "aspect", "qs_total", "lcfs_boundary_moment", "accepted_bnormal_rms"),
+        choices=("state_norm", "aspect", "mean_iota", "qs_total", "lcfs_boundary_moment", "accepted_bnormal_rms"),
         default="qs_total",
         help=(
             "Physical scalar validated by --same-branch-report-mode scalar. "

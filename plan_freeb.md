@@ -133,6 +133,58 @@ Completion:
   differentiation remains explicitly unclaimed.
 - Docs/release hygiene: 99.75%.
 
+### 2026-06-07 Mean-Iota Same-Branch Physical-Scalar Gate
+
+Steps taken:
+
+1. Added ``mean_iota`` to the coil-only QS example's same-branch scalar/vector
+   report registry.
+2. Implemented replay-side ``mean_iota`` from
+   ``equilibrium_iota_profiles_from_state`` so it is evaluated from the replay
+   VMEC state, not copied from the production summary.
+3. Marked ``mean_iota`` as a state-only replay scalar so it can use the compact
+   branch-local JVP path when users do not request accepted-history metrics.
+4. Extended the mocked same-branch vector smoke test to cover
+   ``aspect``, ``qs_total``, and ``mean_iota`` together.
+5. Ran real circle-provider QS smoke reports with ``mean_iota`` included both
+   with and without the heavier accepted-history ``bnormal_rms`` alias.
+
+Results obtained:
+
+1. ``ruff`` passed for the QS optimization example and smoke test.
+2. Focused smoke tests passed locally.
+3. The real same-branch vector/JVP report with
+   ``qs_total,aspect,mean_iota,bnormal_rms`` passed and retained the fixed
+   accepted/rejected controller-slot gate with one rejected slot.
+4. ``mean_iota`` complete-solve central-FD directional derivative and
+   branch-local exact directional derivative agreed to about ``2e-13`` absolute
+   error on the smoke fixture.
+5. The compact ``qs_total,aspect,mean_iota`` report recorded
+   ``state_only_replay=True`` and the same ``mean_iota`` AD-vs-FD agreement,
+   so rotational-transform validation does not force accepted-history replay.
+
+Best next steps:
+
+1. Continue expanding physical-scalar gates only when they add distinct
+   physics content; current state-only gates now cover aspect, QS, boundary
+   moment, and mean iota, while accepted-history gates cover Bnormal/Bsqvac.
+2. Keep working on the production adaptive seam conservatively: same-branch
+   fingerprint-gated AD-vs-FD is promoted; arbitrary adaptive host branch
+   differentiation remains unclaimed.
+3. Watch the final CI run for this patch series.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Full nonlinear free-boundary adjoint phase 2: 99.999995% for fixed
+  same-branch scalar/vector gates and explicit accepted/rejected slot evidence;
+  arbitrary adaptive branch differentiation remains explicitly unclaimed.
+- Single-stage coil-only optimization: 98.35%.
+- Docs/release hygiene: 99.75%.
+
 ### 2026-06-07 Generated-Mgrid Parity and High-Mode Replay Cap
 
 Steps taken:

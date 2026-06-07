@@ -647,7 +647,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
         iota_weight=1.0,
         same_branch_report_eps=1.0e-4,
         same_branch_report_mode="vector",
-        same_branch_report_vector_keys="aspect,qs_total",
+        same_branch_report_vector_keys="aspect,qs_total,mean_iota",
         same_branch_report_max_iter=3,
         same_branch_report_disable_analytic=True,
         same_branch_report_freeze_vacuum_field=True,
@@ -676,6 +676,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
             "objective_values": {
                 "objective": {"base": 1.0, "plus": 1.1, "minus": 0.9, "central_fd_directional": 1000.0},
                 "aspect": {"base": 6.0, "plus": 6.1, "minus": 5.9, "central_fd_directional": 0.1},
+                "mean_iota": {"base": 0.4, "plus": 0.41, "minus": 0.39, "central_fd_directional": 0.2},
                 "qs_total": {"base": 0.4, "plus": 0.42, "minus": 0.38, "central_fd_directional": 0.4},
                 "lcfs_boundary_moment": {
                     "base": 0.2,
@@ -719,7 +720,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
         assert kwargs["replay_kwargs"]["freeze_freeb_bsqvac"] is True
         assert kwargs["direction_params"] is not None
         assert kwargs["direction_params"].n_segments == direction_params.n_segments
-        assert kwargs["scalar_keys"] == ("aspect", "qs_total")
+        assert kwargs["scalar_keys"] == ("aspect", "qs_total", "mean_iota")
         return {
             "uses_production_forward": True,
             "differentiates_adaptive_controller": False,
@@ -727,7 +728,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
             "differentiates_fixed_accepted_branch": True,
             "replay_ad_mode": "direct",
             "derivative_mode": "directional_jvp",
-            "scalar_keys": ("aspect", "qs_total"),
+            "scalar_keys": ("aspect", "qs_total", "mean_iota"),
             "includes_payload": False,
             "includes_replay_graph_metadata": False,
             "replay_option_flags": {
@@ -749,19 +750,23 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
             "values": {
                 "aspect": 6.0,
                 "qs_total": 0.4,
+                "mean_iota": 0.4,
             },
             "replay_value_map": {
                 "aspect": jnp.asarray(6.0),
                 "qs_total": jnp.asarray(0.4),
+                "mean_iota": jnp.asarray(0.4),
             },
             "base_abs_delta": {
                 "aspect": 0.0,
                 "qs_total": 0.0,
+                "mean_iota": 0.0,
             },
             "jacobian": None,
             "directional_derivatives": {
                 "aspect": jnp.asarray(0.1),
                 "qs_total": jnp.asarray(0.4),
+                "mean_iota": jnp.asarray(0.2),
             },
             "timings": {
                 "production_scalar_eval_wall_s": 0.01,
@@ -799,7 +804,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
     assert vector["differentiates_fixed_accepted_branch"] is True
     assert vector["replay_ad_mode"] == "direct"
     assert vector["derivative_mode"] == "directional_jvp"
-    assert vector["scalar_keys"] == ["aspect", "qs_total"]
+    assert vector["scalar_keys"] == ["aspect", "qs_total", "mean_iota"]
     assert vector["state_only_replay"] is True
     assert vector["replay_option_flags"]["use_stacked_step_controls"] is True
     assert vector["replay_option_flags"]["state_only_replay"] is True
@@ -812,6 +817,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
     assert vector["max_base_abs_delta"] == pytest.approx(0.0)
     assert vector["scalars"]["aspect"]["complete_fd_directional"] == pytest.approx(0.1)
     assert vector["scalars"]["qs_total"]["complete_fd_directional"] == pytest.approx(0.4)
+    assert vector["scalars"]["mean_iota"]["complete_fd_directional"] == pytest.approx(0.2)
     assert report["timings"]["complete_solve_fd_wall_s"] >= 0.0
     assert report["timings"]["branch_local_vector_wall_s"] >= 0.0
     assert vector["timings"]["replay_jvp_wall_s"] == pytest.approx(0.02)
