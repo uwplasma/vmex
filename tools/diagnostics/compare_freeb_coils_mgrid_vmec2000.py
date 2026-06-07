@@ -183,6 +183,14 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--vmec2000-sign-probes",
+        action="store_true",
+        help=(
+            "With --vmec2000-promotion-probes, also run PHIEDGE/EXTCUR sign-convention "
+            "probes. These are diagnostic-only and are not part of the default CI gate."
+        ),
+    )
+    p.add_argument(
         "--vmec2000-probe-ftols",
         type=str,
         default="1e-2",
@@ -1432,6 +1440,64 @@ def _vmec2000_probe_updates(args: argparse.Namespace) -> list[dict[str, Any]]:
     return probes
 
 
+def _as_namelist_float_list(value: Any) -> list[float]:
+    if value is None:
+        return []
+    if isinstance(value, np.ndarray):
+        return [float(item) for item in value.reshape(-1)]
+    if isinstance(value, (list, tuple)):
+        return [float(item) for item in value]
+    return [float(value)]
+
+
+def _vmec2000_sign_probe_updates(mgrid_input: Path) -> list[dict[str, Any]]:
+    """Return VMEC2000 PHIEDGE/EXTCUR sign-convention probe patches.
+
+    VMEC2000's generated-mgrid free-boundary vacuum path is sensitive to the
+    sign convention shared by ``PHIEDGE`` and ``EXTCUR``.  These probes are
+    deliberately diagnostic-only: they make the previously manual sign flips
+    reproducible without changing the default promotion gate.
+    """
+
+    from vmec_jax.namelist import read_indata
+
+    indata = read_indata(mgrid_input)
+    phiedge = _safe_float(indata.scalars.get("PHIEDGE", None))
+    extcur_values = _as_namelist_float_list(indata.scalars.get("EXTCUR", None))
+    has_phiedge = phiedge is not None and abs(float(phiedge)) > 0.0
+    has_extcur = bool(extcur_values) and any(abs(float(value)) > 0.0 for value in extcur_values)
+
+    probes: list[dict[str, Any]] = []
+    if has_phiedge:
+        probes.append(
+            {
+                "label": "flip_phiedge_sign",
+                "source": "sign_convention",
+                "updates": {"PHIEDGE": _format_namelist_float(-float(phiedge))},
+            }
+        )
+    if has_extcur:
+        probes.append(
+            {
+                "label": "flip_extcur_sign",
+                "source": "sign_convention",
+                "updates": {"EXTCUR": _format_namelist_array([-float(value) for value in extcur_values])},
+            }
+        )
+    if has_phiedge and has_extcur:
+        probes.append(
+            {
+                "label": "flip_phiedge_extcur_signs",
+                "source": "sign_convention",
+                "updates": {
+                    "PHIEDGE": _format_namelist_float(-float(phiedge)),
+                    "EXTCUR": _format_namelist_array([-float(value) for value in extcur_values]),
+                },
+            }
+        )
+    return probes
+
+
 def _run_vmec2000_promotion_probes(
     *,
     mgrid_input: Path,
@@ -1454,7 +1520,21 @@ def _run_vmec2000_promotion_probes(
         ]
 
     records: list[dict[str, Any]] = []
-    for probe in _vmec2000_probe_updates(args):
+    probes = _vmec2000_probe_updates(args)
+    if bool(args.vmec2000_sign_probes):
+        try:
+            probes.extend(_vmec2000_sign_probe_updates(mgrid_input))
+        except Exception as exc:
+            records.append(
+                {
+                    "label": "sign_convention_probes",
+                    "status": "skipped",
+                    "reason": "sign_probe_input_read_failed",
+                    "error": repr(exc),
+                }
+            )
+
+    for probe in probes:
         label = str(probe["label"])
         probe_workdir = workdir / label
         probe_workdir.mkdir(parents=True, exist_ok=True)
@@ -1482,6 +1562,7 @@ def _run_vmec2000_promotion_probes(
             continue
         summary = _vmec2000_summary(result)
         summary["label"] = label
+        summary["probe_source"] = str(probe.get("source", "promotion"))
         summary["updates"] = probe["updates"]
         summary["exec_path"] = exec_path
         wout_path = _vmec2000_wout_path(result)
@@ -1601,6 +1682,8 @@ def _base_payload(args: argparse.Namespace, *, out: Path, workdir: Path) -> dict
             "active_free_boundary_requested": args.activate_fsq is not None,
             "vmec2000_niter": None if args.vmec2000_niter is None else int(args.vmec2000_niter),
             "mixed_vmec2000_schedule_non_promotable": args.vmec2000_niter is not None,
+            "vmec2000_promotion_probes": bool(args.vmec2000_promotion_probes),
+            "vmec2000_sign_probes": bool(args.vmec2000_sign_probes),
             "jax_rtol": float(args.jax_rtol),
             "jax_atol": float(args.jax_atol),
         },

@@ -12,6 +12,77 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
+### 2026-06-07 VMEC2000 Sign-Probe Promotion Diagnostics
+
+Steps taken:
+
+1. Rechecked ``main`` at commit ``3ec4ead``; the working tree was clean before
+   this diagnostic patch and there were no open GitHub PRs to merge.
+2. Created a fresh clone in
+   ``/Users/rogeriojorge/local/tests/vmec_jax_freeb_clean``, installed it in a
+   new virtual environment, and ran the installed ``vmec --test`` path.
+3. Ran the optional generated-mgrid VMEC2000 diagnostic against
+   ``/Users/rogeriojorge/local/ESSOS_mgrid_pr`` and ``~/bin/xvmec2000`` using
+   the short bounded LP-QA multigrid schedule.
+4. Added opt-in ``--vmec2000-sign-probes`` support to
+   ``tools/diagnostics/compare_freeb_coils_mgrid_vmec2000.py``.  The new probes
+   read the generated VMEC input and run ``PHIEDGE``, ``EXTCUR``, and combined
+   sign flips as bounded VMEC2000-only diagnostics.
+5. Added fast unit coverage for sign-probe patch generation so normal CI does
+   not need to execute extra VMEC2000 jobs.
+
+Results obtained:
+
+1. The clean installed ``vmec --test`` run converged the bundled
+   ``input.nfp4_QH_warm_start`` case with ``FTOL_ARRAY=1e-12`` and produced
+   the expected input, WOUT, and plot artifacts.
+2. vmec_jax direct-coil and ESSOS-generated-mgrid free-boundary backends still
+   match on the bounded LP-QA diagnostic.  The refreshed report recorded
+   ``vmec_jax_direct_vs_generated_mgrid.passed = true``.
+3. The default VMEC2000 generated-mgrid row remains
+   ``wout_unreadable`` with reason ``vmec2000_phiedge_wrong_sign``.
+4. The automatic sign probes reproduce the manual diagnosis:
+   ``flip_phiedge_sign`` and ``flip_extcur_sign`` let VMEC2000 write WOUT
+   files, but those WOUTs are non-promotable because geometry scalars are zero
+   and the residual remains large.  The combined sign flip returns to the
+   wrong-sign unreadable-WOUT path.
+5. ``ruff`` passed for the diagnostic and affected parity test.  The focused
+   sign-probe tests passed.  The core free-boundary validation shards passed:
+   vacuum adjoint, direct-coil finite-pressure sensitivity, external coil
+   fields, mgrid interpolation, and coil-provider gradients.
+
+Best next steps:
+
+1. Keep the VMEC2000 WOUT-level generated-mgrid row as a promotion blocker
+   until a bounded physical fixture produces finite positive geometry scalars.
+2. Use ``--vmec2000-sign-probes`` for local diagnosis only; do not add it to
+   default CI because it intentionally executes extra VMEC2000 jobs.
+3. Continue the phase-2 full-loop seam by adding the next complete-loop
+   AD-vs-central-FD physical-scalar gate under an explicit branch fingerprint.
+4. Continue bounded VMEC2000/mgrid/direct-coil parity with a better physical
+   fixture rather than forcing the current LP-QA generated-mgrid case into a
+   nonphysical WOUT.
+
+Need from user:
+
+Nothing now. A better external VMEC2000 free-boundary promotion fixture with
+bounded surfaces and finite geometry scalars would accelerate the parity lane.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999% for fixed
+  same-branch scalar/vector gates, fingerprint-gated adaptive seam reports,
+  and accepted/rejected replay-slot evidence; arbitrary adaptive branch
+  differentiation remains explicitly unclaimed.
+- VMEC parity and physics gates: 98.4%.
+- Single-stage coil-only optimization: 98.2%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 99.6%.
+- CI runtime refactor with preserved coverage/physics gates: 100%; this patch
+  adds only fast default-CI coverage.
+- Docs/release hygiene: 99.7%.
+
 ### 2026-06-07 Generated-Mgrid Parity and High-Mode Replay Cap
 
 Steps taken:
