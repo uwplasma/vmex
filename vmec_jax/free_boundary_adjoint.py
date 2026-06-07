@@ -3443,6 +3443,12 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     freeze_vacuum_field: bool = False,
     freeze_freeb_bsqvac: bool = False,
     include_mode_diagnostics: bool = False,
+    nestor_solve_mode: str = "dense",
+    nestor_operator_solver: str = "gmres",
+    nestor_operator_tol: float = 1.0e-11,
+    nestor_operator_atol: float = 1.0e-13,
+    nestor_operator_maxiter: int | None = None,
+    nestor_operator_restart: int | None = None,
     jit_preconditioner_apply: bool = True,
     unroll_accepted_only_segments_below: int = 0,
     coil_geometry: Any | None = None,
@@ -3490,6 +3496,10 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     ``phi_flat`` and residual vectors.  Accepted-controller replay only needs
     ``bsqvac`` and optionally boundary RMS diagnostics, so branch-local reports
     default this to false to avoid building unused dense-solve outputs.
+    ``nestor_solve_mode`` and the ``nestor_operator_*`` options expose the
+    opt-in matrix-free NESTOR/source response inside fixed accepted-branch
+    replay.  Dense remains the default; matrix-free replay is a validated
+    performance/research seam until size-triggered promotion is justified.
 
     The helper intentionally keeps every trace accepted.  It does not
     differentiate through the host policy that selected the traces; it validates
@@ -3602,6 +3612,12 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                             include_diagnostics=not bool(state_only_replay),
                             include_mode_diagnostics=bool(include_mode_diagnostics),
                             freeze_vacuum_field=bool(freeze_vacuum_field),
+                            nestor_solve_mode=str(nestor_solve_mode),
+                            nestor_operator_solver=str(nestor_operator_solver),
+                            nestor_operator_tol=float(nestor_operator_tol),
+                            nestor_operator_atol=float(nestor_operator_atol),
+                            nestor_operator_maxiter=nestor_operator_maxiter,
+                            nestor_operator_restart=nestor_operator_restart,
                             coil_geometry=coil_geometry,
                         )
                 else:
@@ -3638,6 +3654,12 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                                 else None
                             ),
                             coil_geometry=coil_geometry,
+                            nestor_solve_mode=str(nestor_solve_mode),
+                            nestor_operator_solver=str(nestor_operator_solver),
+                            nestor_operator_tol=float(nestor_operator_tol),
+                            nestor_operator_atol=float(nestor_operator_atol),
+                            nestor_operator_maxiter=nestor_operator_maxiter,
+                            nestor_operator_restart=nestor_operator_restart,
                         )
                 freeb_bsqvac_half = replay["bsqvac"]
             if bool(state_only_replay):
@@ -3734,6 +3756,12 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                             include_diagnostics=not bool(state_only_replay),
                             include_mode_diagnostics=bool(include_mode_diagnostics),
                             freeze_vacuum_field=bool(freeze_vacuum_field),
+                            nestor_solve_mode=str(nestor_solve_mode),
+                            nestor_operator_solver=str(nestor_operator_solver),
+                            nestor_operator_tol=float(nestor_operator_tol),
+                            nestor_operator_atol=float(nestor_operator_atol),
+                            nestor_operator_maxiter=nestor_operator_maxiter,
+                            nestor_operator_restart=nestor_operator_restart,
                             coil_geometry=coil_geometry,
                         )
                 else:
@@ -3770,6 +3798,12 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                                 else None
                             ),
                             coil_geometry=coil_geometry,
+                            nestor_solve_mode=str(nestor_solve_mode),
+                            nestor_operator_solver=str(nestor_operator_solver),
+                            nestor_operator_tol=float(nestor_operator_tol),
+                            nestor_operator_atol=float(nestor_operator_atol),
+                            nestor_operator_maxiter=nestor_operator_maxiter,
+                            nestor_operator_restart=nestor_operator_restart,
                         )
                 freeb_bsqvac_half = replay["bsqvac"]
             if bool(state_only_replay):
@@ -5521,6 +5555,20 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
             "include_replay_aux": bool(replay_options.get("include_replay_aux", True)),
             "include_analytic": bool(replay_options.get("include_analytic", True)),
             "include_mode_diagnostics": bool(replay_options.get("include_mode_diagnostics", False)),
+            "nestor_solve_mode": str(replay_options.get("nestor_solve_mode", "dense")),
+            "nestor_operator_solver": str(replay_options.get("nestor_operator_solver", "gmres")),
+            "nestor_operator_tol": float(replay_options.get("nestor_operator_tol", 1.0e-11)),
+            "nestor_operator_atol": float(replay_options.get("nestor_operator_atol", 1.0e-13)),
+            "nestor_operator_maxiter": (
+                None
+                if replay_options.get("nestor_operator_maxiter") is None
+                else int(replay_options.get("nestor_operator_maxiter"))
+            ),
+            "nestor_operator_restart": (
+                None
+                if replay_options.get("nestor_operator_restart") is None
+                else int(replay_options.get("nestor_operator_restart"))
+            ),
             "freeze_vacuum_field": bool(replay_options.get("freeze_vacuum_field", False)),
             "freeze_freeb_bsqvac": bool(replay_options.get("freeze_freeb_bsqvac", False)),
             "state_only_replay": bool(replay_options.get("state_only_replay", False)),
@@ -5882,6 +5930,20 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
             "include_replay_aux": bool(replay_options.get("include_replay_aux", True)),
             "include_analytic": bool(replay_options.get("include_analytic", True)),
             "include_mode_diagnostics": bool(replay_options.get("include_mode_diagnostics", False)),
+            "nestor_solve_mode": str(replay_options.get("nestor_solve_mode", "dense")),
+            "nestor_operator_solver": str(replay_options.get("nestor_operator_solver", "gmres")),
+            "nestor_operator_tol": float(replay_options.get("nestor_operator_tol", 1.0e-11)),
+            "nestor_operator_atol": float(replay_options.get("nestor_operator_atol", 1.0e-13)),
+            "nestor_operator_maxiter": (
+                None
+                if replay_options.get("nestor_operator_maxiter") is None
+                else int(replay_options.get("nestor_operator_maxiter"))
+            ),
+            "nestor_operator_restart": (
+                None
+                if replay_options.get("nestor_operator_restart") is None
+                else int(replay_options.get("nestor_operator_restart"))
+            ),
             "freeze_vacuum_field": bool(replay_options.get("freeze_vacuum_field", False)),
             "freeze_freeb_bsqvac": bool(replay_options.get("freeze_freeb_bsqvac", False)),
             "state_only_replay": bool(replay_options.get("state_only_replay", False)),

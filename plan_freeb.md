@@ -12,6 +12,71 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
+### 2026-06-06 Matrix-Free Replay Controls for Branch-Local Reports
+
+Steps taken:
+
+1. Confirmed GitHub Actions run ``27079913312`` for commit ``d01cf6a``
+   completed successfully, including the combined py3.11 coverage gate.
+2. Threaded the opt-in matrix-free NESTOR/source response controls through
+   fixed accepted-branch direct-coil replay:
+   ``nestor_solve_mode``, ``nestor_operator_solver``,
+   ``nestor_operator_tol``, ``nestor_operator_atol``,
+   ``nestor_operator_maxiter``, and ``nestor_operator_restart``.
+3. Exposed the same controls in
+   ``examples/optimization/free_boundary_QS_coil_optimization.py`` for
+   ``--write-same-branch-report``.  The default remains ``dense``; the
+   matrix-free/Krylov path is explicitly opt-in for profiling and validation.
+4. Added smoke-test assertions that the example forwards dense defaults and
+   matrix-free/BiCGSTAB settings into branch-local replay and records them in
+   report metadata.
+
+Results obtained:
+
+1. ``python -m ruff check vmec_jax/free_boundary_adjoint.py
+   examples/optimization/free_boundary_QS_coil_optimization.py
+   tests/test_free_boundary_qs_coil_optimization_smoke.py`` passed locally.
+2. The focused same-branch report scalar/vector wiring tests passed locally.
+3. The focused matrix-free vacuum-adjoint validation test passed locally.
+4. The production-adjacent current-only complete-solve same-branch AD-vs-FD
+   gate passed locally after the replay-control patch in about ``61`` seconds.
+5. A real ``free_boundary_QS_coil_optimization.py --smoke --provider circle``
+   same-branch vector report with
+   ``--same-branch-report-nestor-solve-mode matrix_free`` and
+   ``--same-branch-report-nestor-operator-solver bicgstab`` passed.  The report
+   recorded ``matrix_free``/``bicgstab`` and branch-local vector wall time was
+   about ``9.33`` seconds on the smoke fixture.
+
+Best next steps:
+
+1. Commit and push the replay-control patch.
+2. Watch CI for the pushed commit.  The previous code CI is already green; this
+   patch should preserve the 95% coverage gate because it adds covered wiring.
+3. Run compact dense-versus-matrix-free same-branch report timings on the
+   direct-coil QS example and decide whether matrix-free remains opt-in or
+   becomes a size-triggered policy.
+4. Continue the adaptive full-loop seam conservatively: add more
+   fingerprint-gated same-branch physical-scalar gates with accepted/rejected
+   slots, but do not claim arbitrary adaptive branch differentiation.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99998% for fixed
+  same-branch scalar/vector gates and fingerprint-gated adaptive seam reports;
+  adaptive branch differentiation remains explicitly unclaimed.
+- VMEC parity and physics gates: 98.0%.
+- Single-stage coil-only optimization: 97.9%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 99.4%.
+- CI runtime refactor with preserved coverage/physics gates: 100%; latest
+  matrix-free coverage run ``27079913312`` is green.
+- Docs/release hygiene: 99.5%.
+
 ### 2026-06-06 Matrix-Free LASYM Coverage Gate Follow-Up
 
 Steps taken:
@@ -35,15 +100,16 @@ Results obtained:
 4. The production-adjacent current-only complete-solve same-branch custom-VJP
    gate passed locally in about ``61`` seconds, including the fixed
    rejected-controller-slot replay gate.
+5. GitHub Actions run ``27079913312`` for commit ``d01cf6a`` passed, including
+   the combined py3.11 coverage gate.
 
 Best next steps:
 
-1. Commit and push the focused LASYM branch coverage patch.
-2. Watch the new combined CI coverage gate.  If it still fails, inspect the
-   exact XML/report and add one more targeted branch test only.
-3. Once CI is green, profile matrix-free versus dense NESTOR response on the
+1. Profile matrix-free versus dense NESTOR response on the
    branch-local direct-coil reports and decide whether matrix-free should stay
    opt-in or become a size-triggered policy.
+2. Continue fingerprint-gated same-branch physical-scalar gates with explicit
+   accepted/rejected controller-slot evidence.
 
 Need from user:
 
@@ -59,8 +125,8 @@ Completion:
 - Single-stage coil-only optimization: 97.8%.
 - Robust coil perturbation optimization: deferred by current scope, 70%.
 - CPU/GPU performance: 99.3%.
-- CI runtime refactor with preserved coverage/physics gates: 100% locally,
-  pending the pushed combined gate.
+- CI runtime refactor with preserved coverage/physics gates: 100%; GitHub
+  Actions run ``27079913312`` is green.
 - Docs/release hygiene: 99.5%.
 
 ### 2026-06-06 Matrix-Free Coverage Gate Hardening

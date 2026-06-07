@@ -463,6 +463,12 @@ def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path
         assert kwargs["replay_kwargs"]["state_only_replay"] is True
         assert kwargs["replay_kwargs"]["include_analytic"] is True
         assert kwargs["replay_kwargs"]["include_mode_diagnostics"] is False
+        assert kwargs["replay_kwargs"]["nestor_solve_mode"] == "dense"
+        assert kwargs["replay_kwargs"]["nestor_operator_solver"] == "gmres"
+        assert kwargs["replay_kwargs"]["nestor_operator_tol"] == pytest.approx(1.0e-11)
+        assert kwargs["replay_kwargs"]["nestor_operator_atol"] == pytest.approx(1.0e-13)
+        assert kwargs["replay_kwargs"]["nestor_operator_maxiter"] is None
+        assert kwargs["replay_kwargs"]["nestor_operator_restart"] is None
         assert kwargs["replay_kwargs"]["freeze_vacuum_field"] is False
         assert kwargs["replay_kwargs"]["freeze_freeb_bsqvac"] is False
         return {
@@ -478,6 +484,12 @@ def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path
                 "use_stacked_step_controls": True,
                 "state_only_replay": True,
                 "include_mode_diagnostics": False,
+                "nestor_solve_mode": "dense",
+                "nestor_operator_solver": "gmres",
+                "nestor_operator_tol": 1.0e-11,
+                "nestor_operator_atol": 1.0e-13,
+                "nestor_operator_maxiter": None,
+                "nestor_operator_restart": None,
             },
             "replay_graph_metadata": {
                 "omitted": True,
@@ -528,6 +540,8 @@ def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path
     assert scalar["includes_payload"] is False
     assert scalar["includes_replay_graph_metadata"] is False
     assert scalar["replay_option_flags"]["state_only_replay"] is True
+    assert scalar["replay_option_flags"]["nestor_solve_mode"] == "dense"
+    assert scalar["replay_option_flags"]["nestor_operator_solver"] == "gmres"
     assert scalar["replay_graph_metadata"]["omitted"] is True
     assert scalar["exact_directional"] == pytest.approx(expected_directional)
     assert scalar["complete_fd_directional"] == pytest.approx(0.7)
@@ -571,6 +585,12 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
         same_branch_report_disable_analytic=True,
         same_branch_report_freeze_vacuum_field=True,
         same_branch_report_freeze_bsqvac=True,
+        same_branch_report_nestor_solve_mode="matrix_free",
+        same_branch_report_nestor_operator_solver="bicgstab",
+        same_branch_report_nestor_operator_tol=2.0e-9,
+        same_branch_report_nestor_operator_atol=3.0e-12,
+        same_branch_report_nestor_operator_maxiter=17,
+        same_branch_report_nestor_operator_restart=5,
         vmec_max_iter=2,
         ftol=1.0e-8,
         jit_forces=False,
@@ -622,6 +642,12 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
         assert kwargs["replay_kwargs"]["state_only_replay"] is True
         assert kwargs["replay_kwargs"]["include_analytic"] is False
         assert kwargs["replay_kwargs"]["include_mode_diagnostics"] is False
+        assert kwargs["replay_kwargs"]["nestor_solve_mode"] == "matrix_free"
+        assert kwargs["replay_kwargs"]["nestor_operator_solver"] == "bicgstab"
+        assert kwargs["replay_kwargs"]["nestor_operator_tol"] == pytest.approx(2.0e-9)
+        assert kwargs["replay_kwargs"]["nestor_operator_atol"] == pytest.approx(3.0e-12)
+        assert kwargs["replay_kwargs"]["nestor_operator_maxiter"] == 17
+        assert kwargs["replay_kwargs"]["nestor_operator_restart"] == 5
         assert kwargs["replay_kwargs"]["freeze_vacuum_field"] is True
         assert kwargs["replay_kwargs"]["freeze_freeb_bsqvac"] is True
         assert kwargs["direction_params"] is not None
@@ -641,6 +667,12 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
                 "use_stacked_step_controls": True,
                 "state_only_replay": True,
                 "include_mode_diagnostics": False,
+                "nestor_solve_mode": "matrix_free",
+                "nestor_operator_solver": "bicgstab",
+                "nestor_operator_tol": 2.0e-9,
+                "nestor_operator_atol": 3.0e-12,
+                "nestor_operator_maxiter": 17,
+                "nestor_operator_restart": 5,
             },
             "replay_graph_metadata": {
                 "omitted": True,
@@ -704,6 +736,9 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
     assert vector["state_only_replay"] is True
     assert vector["replay_option_flags"]["use_stacked_step_controls"] is True
     assert vector["replay_option_flags"]["state_only_replay"] is True
+    assert vector["replay_option_flags"]["nestor_solve_mode"] == "matrix_free"
+    assert vector["replay_option_flags"]["nestor_operator_solver"] == "bicgstab"
+    assert vector["replay_option_flags"]["nestor_operator_maxiter"] == 17
     assert vector["includes_payload"] is False
     assert vector["includes_replay_graph_metadata"] is False
     assert vector["replay_graph_metadata"]["omitted"] is True

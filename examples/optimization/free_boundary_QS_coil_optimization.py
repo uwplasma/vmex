@@ -1052,6 +1052,12 @@ def write_same_branch_validation_report(
         "jit_preconditioner_apply": not bool(getattr(args, "same_branch_report_disable_jit_preconditioner", False)),
         "include_analytic": not bool(getattr(args, "same_branch_report_disable_analytic", False)),
         "include_mode_diagnostics": False,
+        "nestor_solve_mode": str(getattr(args, "same_branch_report_nestor_solve_mode", "dense")),
+        "nestor_operator_solver": str(getattr(args, "same_branch_report_nestor_operator_solver", "gmres")),
+        "nestor_operator_tol": float(getattr(args, "same_branch_report_nestor_operator_tol", 1.0e-11)),
+        "nestor_operator_atol": float(getattr(args, "same_branch_report_nestor_operator_atol", 1.0e-13)),
+        "nestor_operator_maxiter": getattr(args, "same_branch_report_nestor_operator_maxiter", None),
+        "nestor_operator_restart": getattr(args, "same_branch_report_nestor_operator_restart", None),
         "freeze_vacuum_field": bool(getattr(args, "same_branch_report_freeze_vacuum_field", False)),
         "freeze_freeb_bsqvac": bool(getattr(args, "same_branch_report_freeze_bsqvac", False)),
     }
@@ -1324,6 +1330,12 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
         "diagnostic_disable_analytic": bool(getattr(args, "same_branch_report_disable_analytic", False)),
         "diagnostic_freeze_vacuum_field": bool(getattr(args, "same_branch_report_freeze_vacuum_field", False)),
         "diagnostic_freeze_bsqvac": bool(getattr(args, "same_branch_report_freeze_bsqvac", False)),
+        "nestor_solve_mode": str(getattr(args, "same_branch_report_nestor_solve_mode", "dense")),
+        "nestor_operator_solver": str(getattr(args, "same_branch_report_nestor_operator_solver", "gmres")),
+        "nestor_operator_tol": float(getattr(args, "same_branch_report_nestor_operator_tol", 1.0e-11)),
+        "nestor_operator_atol": float(getattr(args, "same_branch_report_nestor_operator_atol", 1.0e-13)),
+        "nestor_operator_maxiter": getattr(args, "same_branch_report_nestor_operator_maxiter", None),
+        "nestor_operator_restart": getattr(args, "same_branch_report_nestor_operator_restart", None),
     }
     same_branch_derivative_proposal_config = {
         "enabled": bool(args.same_branch_derivative_proposal),
@@ -1743,6 +1755,46 @@ def build_parser() -> argparse.ArgumentParser:
             "running JAX NESTOR/source assembly. This isolates Biot-Savart/projection graph cost "
             "from NESTOR graph cost and is not a promoted physics-validation path."
         ),
+    )
+    parser.add_argument(
+        "--same-branch-report-nestor-solve-mode",
+        choices=("dense", "matrix_free", "operator", "operator_gmres", "gmres", "bicgstab"),
+        default="dense",
+        help=(
+            "NESTOR/source solve used inside the fixed accepted-branch replay. "
+            "The default dense path is the promoted validation path; matrix_free/gmres/bicgstab "
+            "exercise the opt-in matrix-free response seam for profiling."
+        ),
+    )
+    parser.add_argument(
+        "--same-branch-report-nestor-operator-solver",
+        choices=("gmres", "bicgstab"),
+        default="gmres",
+        help="Krylov solver for --same-branch-report-nestor-solve-mode matrix_free/operator.",
+    )
+    parser.add_argument(
+        "--same-branch-report-nestor-operator-tol",
+        type=float,
+        default=1.0e-11,
+        help="Relative tolerance for the matrix-free NESTOR/source Krylov solve.",
+    )
+    parser.add_argument(
+        "--same-branch-report-nestor-operator-atol",
+        type=float,
+        default=1.0e-13,
+        help="Absolute tolerance for the matrix-free NESTOR/source Krylov solve.",
+    )
+    parser.add_argument(
+        "--same-branch-report-nestor-operator-maxiter",
+        type=int,
+        default=None,
+        help="Optional maximum Krylov iterations for the matrix-free NESTOR/source solve.",
+    )
+    parser.add_argument(
+        "--same-branch-report-nestor-operator-restart",
+        type=int,
+        default=None,
+        help="Optional GMRES restart length for the matrix-free NESTOR/source solve.",
     )
     parser.add_argument(
         "--same-branch-report-max-iter",
