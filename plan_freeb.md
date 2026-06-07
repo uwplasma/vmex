@@ -12,6 +12,71 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
+### 2026-06-06 Current-Only Branch-Local JVP Specialization
+
+Steps taken:
+
+1. Confirmed GitHub Actions run ``27077581652`` for the previous
+   direct-coil chunking commit was fully green, including docs, wheel/sdist,
+   py3.10/py3.12 fast tests, exact coverage shards, slow physics coverage,
+   physics smoke, and the strict combined coverage gate.
+2. Added a conservative current-only specialization to
+   ``direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax``.
+   When ``direction_params`` is a ``CoilFieldParams`` tangent with zero
+   Fourier-geometry components, the directional JVP is traced over only the
+   current leaf.  Mixed current/Fourier and Fourier-only directions keep the
+   existing full-pytree directional path.
+3. Recorded the specialization in same-branch report metadata as
+   ``replay_option_flags["directional_jvp_fast_path"]`` without changing the
+   public ``derivative_mode`` contract.
+4. Added a solve-free synthetic test that verifies the current-only path
+   returns the correct vector directional derivatives and marks the fast path.
+
+Results obtained:
+
+1. ``python -m ruff check vmec_jax/free_boundary_adjoint.py
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py``
+   passed locally.
+2. The edited synthetic helper test passed locally.
+3. The example same-branch vector report/proposal tests passed locally.
+4. The direct-coil external-field test file passed locally.
+5. The promoted current-only and Fourier-only same-branch exact AD-vs-FD gates
+   passed locally.
+6. Real circle-provider smoke timing for ``aspect,accepted_bnormal_rms``:
+   current-only direction used ``directional_jvp_fast_path=current_only`` and
+   took ``6.18 s`` in branch-local JVP; the default mixed current/Fourier
+   direction stayed on ``none`` and took ``6.50 s`` on the same machine.  This
+   is a modest graph-width reduction, not a full solution to the direct-coil
+   vacuum/NESTOR cost.
+
+Best next steps:
+
+1. Commit and push the current-only specialization, then watch CI.
+2. Continue with the real remaining performance blocker: direct-coil vacuum
+   sampling/projection and dense NESTOR/source assembly in cold branch-local
+   JVPs.
+3. Prototype a source-only vacuum projection path so accepted-controller replay
+   can avoid reconstructing unused tangential/mode diagnostics when only state
+   or boundary RMS scalars are requested.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99995% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.9%.
+- Single-stage coil-only optimization: 97.5%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 99.0%.
+- CI runtime refactor with preserved coverage/physics gates: 100% after green
+  run ``27077581652``; pending CI for this patch.
+- Docs/release hygiene: 99.5%.
+
 ### 2026-06-06 Branch-Local Replay Graph Width Reduction
 
 Steps taken:

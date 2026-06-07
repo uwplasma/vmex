@@ -5434,13 +5434,45 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
     jacobian = None
     gradients: dict[str, Any] = {}
     directional_values = None
+    directional_fast_path = "none"
     if direction_params is not None:
         derivative_mode = "directional_jvp"
+        current_only_direction = False
+        current_direction_leaf = None
+        current_base_leaf = None
+        try:
+            from .external_fields import CoilFieldParams
+
+            if isinstance(params, CoilFieldParams) and isinstance(direction_params, CoilFieldParams):
+                direction_dofs = np.asarray(direction_params.base_curve_dofs, dtype=float)
+                current_only_direction = not np.any(direction_dofs)
+                if current_only_direction:
+                    current_base_leaf = jnp.asarray(params.base_currents)
+                    current_direction_leaf = jnp.asarray(direction_params.base_currents)
+        except Exception:
+            current_only_direction = False
+            current_direction_leaf = None
+            current_base_leaf = None
+
+        if current_only_direction and current_base_leaf is not None and current_direction_leaf is not None:
+            directional_fast_path = "current_only"
+
+            def _replay_scalars_current_only(base_currents):
+                return _replay_scalars_direct(params.with_arrays(base_currents=base_currents))
+
+            jvp_primal = (current_base_leaf,)
+            jvp_tangent = (current_direction_leaf,)
+            jvp_fn = _replay_scalars_current_only
+        else:
+            jvp_primal = (params,)
+            jvp_tangent = (direction_params,)
+            jvp_fn = _replay_scalars
+
         t0 = time.perf_counter()
         replay_values, directional_values = jax.jvp(
-            _replay_scalars,
-            (params,),
-            (direction_params,),
+            jvp_fn,
+            jvp_primal,
+            jvp_tangent,
         )
         timings["replay_jvp_dispatch_s"] = float(time.perf_counter() - t0)
         t0 = time.perf_counter()
@@ -5541,6 +5573,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
                 replay_options.get("unroll_accepted_only_segments_below", 0)
             ),
             "replay_ad_mode": ad_mode,
+            "directional_jvp_fast_path": directional_fast_path,
         },
     }
 
