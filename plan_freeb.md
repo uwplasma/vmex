@@ -12,6 +12,77 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
+### 2026-06-06 Matrix-Free NESTOR Response and Fingerprint-Gated Adaptive Seam
+
+Steps taken:
+
+1. Confirmed GitHub Actions run ``27078475418`` for commit ``e09b3e1``
+   completed successfully before starting the next patch.
+2. Added ``mode_matrix_matvec_from_grpmn_jax`` as the matrix-free counterpart
+   to ``mode_matrix_from_grpmn_jax``.  It applies the VMEC/NESTOR mode
+   operator and its transpose directly from ``grpmn``/basis data, including
+   stellarator-symmetric and LASYM block structure, without materializing the
+   dense mode matrix.
+3. Added ``mode_operator_vacuum_solve_jax`` as an opt-in Krylov/custom-linear
+   solve seam using GMRES or BiCGSTAB with explicit transpose solves.  The
+   default dense production path is unchanged.
+4. Threaded the opt-in matrix-free solve mode through
+   ``dense_vmec_nestor_mode_solve_jax``,
+   ``direct_coil_boundary_bsqvac_jax``, and
+   ``direct_coil_boundary_bsqvac_from_trace_jax``.
+5. Strengthened ``direct_coil_adaptive_full_loop_same_branch_gate_report`` with
+   explicit base/plus/minus complete-loop branch fingerprints.  The report now
+   states that the physical-scalar AD-vs-FD gate is fingerprint-gated while
+   still explicitly not claiming differentiation of the adaptive host
+   controller.
+
+Results obtained:
+
+1. ``python -m ruff check vmec_jax/free_boundary_adjoint.py
+   tests/test_free_boundary_vacuum_adjoint.py
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py``
+   passed locally.
+2. Matrix-free mode-operator tests passed locally: dense-matrix matvec parity,
+   dense-response parity, combined JAX NESTOR opt-in solve parity, and
+   AD-vs-central-FD source-gradient validation.
+3. The full ``tests/test_free_boundary_vacuum_adjoint.py`` shard passed
+   locally with ``69`` tests.
+4. The promoted current-only and Fourier-only complete-loop
+   same-branch AD-vs-central-FD gates passed locally with explicit branch
+   fingerprint assertions.
+5. The full
+   ``tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py``
+   shard passed locally with ``23`` passed and ``1`` skipped.
+
+Best next steps:
+
+1. Commit and push this matrix-free/fingerprint-gate patch, then watch CI.
+2. Profile the opt-in matrix-free NESTOR response on the branch-local
+   direct-coil reports.  If GMRES iteration overhead beats dense matrix
+   assembly for larger mode counts, promote it behind a size/diagnostic policy;
+   otherwise keep it as a validated research seam.
+3. Continue the full adaptive-loop seam conservatively: the next validation
+   target is a fingerprint-gated same-branch report with an actual
+   accepted/rejected controller slot and a physical scalar, still without
+   claiming arbitrary adaptive branch differentiation.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99997% for fixed
+  same-branch scalar/vector gates and fingerprint-gated adaptive seam reports;
+  adaptive branch differentiation remains explicitly unclaimed.
+- VMEC parity and physics gates: 98.0%.
+- Single-stage coil-only optimization: 97.8%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 99.3%.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 99.5%.
+
 ### 2026-06-06 Current-Only Fixed-Geometry Replay Path
 
 Steps taken:

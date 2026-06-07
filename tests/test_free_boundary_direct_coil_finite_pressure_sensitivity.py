@@ -2192,9 +2192,19 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
         assert adaptive_full_loop_gate["contract"] == "same-branch adaptive full-loop seam report"
         assert adaptive_full_loop_gate["differentiates_adaptive_controller"] is False
         assert adaptive_full_loop_gate["differentiates_run_free_boundary"] is False
+        assert adaptive_full_loop_gate["fingerprint_gated"] is True
         assert adaptive_full_loop_gate["same_branch"] is True
         assert adaptive_full_loop_gate["same_accepted_trace_branch"] is True
         assert adaptive_full_loop_gate["same_residual_branch"] is True
+        assert adaptive_full_loop_gate["same_full_loop_branch_fingerprint"] is True
+        assert adaptive_full_loop_gate["same_residual_branch_fingerprint"] is True
+        assert set(adaptive_full_loop_gate["branch_fingerprints"]) == {"base", "plus", "minus"}
+        assert set(adaptive_full_loop_gate["residual_branch_fingerprints"]) == {"base", "plus", "minus"}
+        assert adaptive_full_loop_gate["branch_fingerprints"]["base"]["n_steps"] == base_fingerprint["n_steps"]
+        assert (
+            adaptive_full_loop_gate["branch_fingerprints"]["base"]["n_freeb_steps"]
+            == base_fingerprint["n_freeb_steps"]
+        )
         assert adaptive_full_loop_gate["same_stacked_step_policy_branch"] is True
         assert adaptive_full_loop_gate["used_stacked_step_controls"] is True
         assert adaptive_full_loop_gate["requires_fixed_rejected_controller_slot"] is False
@@ -3956,6 +3966,7 @@ def test_direct_coil_vacuum_field_override_replay_contract(monkeypatch: pytest.M
                 "include_analytic": kwargs["include_analytic"],
                 "include_phi_flat": kwargs["include_phi_flat"],
                 "include_residual": kwargs["include_residual"],
+                "solve_mode": kwargs["solve_mode"],
             }
         )
         return {"mode_coeffs": 0.0 * kwargs["bexni"]}
@@ -4007,6 +4018,7 @@ def test_direct_coil_vacuum_field_override_replay_contract(monkeypatch: pytest.M
     assert calls[-1]["include_analytic"] is False
     assert calls[-1]["include_phi_flat"] is True
     assert calls[-1]["include_residual"] is True
+    assert calls[-1]["solve_mode"] == "dense"
     np.testing.assert_allclose(np.asarray(out["bsqvac"]), np.asarray(override["bu"] + 2.0 * override["bv"] + 6.0))
     assert {"channels", "mode_solution", "vac", "bexni"}.issubset(out)
 
@@ -4032,10 +4044,12 @@ def test_direct_coil_vacuum_field_override_replay_contract(monkeypatch: pytest.M
         include_diagnostics=False,
         include_mode_diagnostics=False,
         vac_override=zero_tangent_override,
+        nestor_solve_mode="matrix_free",
     )
     assert set(out_no_diag) == {"bsqvac"}
     assert calls[-1]["include_phi_flat"] is False
     assert calls[-1]["include_residual"] is False
+    assert calls[-1]["solve_mode"] == "matrix_free"
 
 
 @pytest.mark.parametrize("lasym", [False, True], ids=["stellsym", "lasym"])
