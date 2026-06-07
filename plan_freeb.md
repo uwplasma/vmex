@@ -24,6 +24,10 @@ Steps taken:
    options, and explicit matrix-free validation errors.
 3. Kept production behavior unchanged: dense mode solves remain the default,
    and the matrix-free NESTOR/source response remains opt-in.
+4. After commit ``711f916`` improved combined coverage from ``94.97%`` to
+   ``94.99%`` but still missed the exact ``95.00%`` gate, added coverage for
+   the combined JAX NESTOR ``solve_mode="bicgstab"`` alias and invalid
+   ``solve_mode`` validation branch.
 
 Results obtained:
 
@@ -34,6 +38,8 @@ Results obtained:
 2. The new targeted matrix-free coverage test passed locally.
 3. The vacuum-adjoint py3.11 slow-coverage selection passed locally with
    ``9`` passed and ``61`` deselected in about ``33`` seconds.
+4. The extended combined JAX NESTOR matrix-free response test passed locally,
+   including the BiCGSTAB alias and invalid-mode validation branch.
 
 Best next steps:
 
