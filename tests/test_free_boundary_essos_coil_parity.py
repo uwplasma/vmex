@@ -96,6 +96,27 @@ def test_vmec2000_sign_probe_updates_flip_phiedge_and_extcur(tmp_path: Path) -> 
     assert [float(value.strip()) for value in combined["EXTCUR"].split(",")] == pytest.approx([-1.0])
 
 
+def test_vmec2000_unreadable_error_wout_classifies_phiedge_wrong_sign(tmp_path: Path) -> None:
+    from tools.diagnostics.compare_freeb_coils_mgrid_vmec2000 import _mark_unreadable_vmec2000_wout
+
+    wout_path = tmp_path / "wout_lpqa_mgrid.nc"
+    wout_path.write_bytes(b"not a complete vmec wout")
+    summary = {
+        "stdout_tail": [
+            "  ITER    FSQR      FSQZ      FSQL    RAX(v=0)    DELT        WMHD      DEL-BSQ",
+            " PHIEDGE HAS WRONG SIGN IN VACUUM SUBROUTINE",
+        ],
+    }
+
+    _mark_unreadable_vmec2000_wout(summary, wout_path=wout_path, error=KeyError("xm"))
+
+    assert summary["status"] == "wout_unreadable"
+    assert summary["reason"] == "vmec2000_phiedge_wrong_sign"
+    assert "wrong sign" in summary["help"]
+    assert summary["wout_file"]["exists"] is True
+    assert summary["wout_file"]["size_bytes"] > 0
+
+
 def _load_lpqa_essos_coils():
     essos_coils = pytest.importorskip("essos.coils")
     if not LPQA_COILS.exists():

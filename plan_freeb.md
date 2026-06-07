@@ -12,6 +12,76 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
+### 2026-06-07 VMEC2000 Generated-Mgrid WOUT Promotion Rerun
+
+Steps taken:
+
+1. Rechecked ``main`` at commit ``de416d7`` with a clean working tree before
+   this test-only diagnostic patch.
+2. Re-ran the optional generated-mgrid VMEC2000 trace-smoke gate with
+   ``/Users/rogeriojorge/local/ESSOS_mgrid_pr`` on ``PYTHONPATH`` and
+   ``~/bin/xvmec2000``.
+3. Reused the generated trace-smoke VMEC input and mgrid in ``/tmp`` to run
+   VMEC2000-only iteration-budget probes without repeating vmec_jax solves.
+4. Swept the default sign convention at ``NITER_ARRAY = [50, 50]`` through
+   ``[2000, 2000]`` and swept ``PHIEDGE``/``EXTCUR`` sign variants at
+   ``NITER_ARRAY = [200, 200]`` through ``[2000, 2000]``.
+5. Added fast synthetic coverage for the diagnostic path that classifies a
+   VMEC2000 unreadable error WOUT with
+   ``PHIEDGE HAS WRONG SIGN IN VACUUM SUBROUTINE`` as
+   ``status=wout_unreadable`` and ``reason=vmec2000_phiedge_wrong_sign``.
+
+Results obtained:
+
+1. The optional trace-smoke gate still passes and records
+   ``vmec2000_status=more_iter_exit`` with
+   ``classification=vmec2000_vacuum_inactive_force_gate``.
+2. The optional WOUT-level generated-mgrid parity row still xfails cleanly with
+   the same bounded inactive-vacuum promotion blocker.
+3. With the default sign convention, longer VMEC2000-only runs eventually
+   enter the vacuum path but abort with the PHIEDGE wrong-sign message and
+   write an unreadable error WOUT without mode tables.
+4. ``flip_phiedge_sign`` and ``flip_extcur_sign`` avoid the immediate wrong
+   sign abort, but the resulting WOUTs are not promotion evidence: aspect,
+   major radius, minor radius, and volume remain zero and residuals remain
+   large.  The combined sign flip returns to the wrong-sign error-WOUT path.
+5. Focused validation passed:
+   ``python -m ruff check tests/test_free_boundary_essos_coil_parity.py
+   tools/diagnostics/compare_freeb_coils_mgrid_vmec2000.py``;
+   three focused synthetic diagnostic tests passed; the optional VMEC2000
+   trace smoke passed; and the optional WOUT-level row remained a controlled
+   xfail.
+
+Best next steps:
+
+1. Keep the VMEC2000 generated-mgrid WOUT-level row optional and xfailed until
+   a bounded physical fixture produces finite positive geometry scalars and
+   active-vacuum WOUT evidence.
+2. Do not relax the WOUT-promotion quality gate to accept VMEC2000 error WOUTs
+   or zero-geometry WOUTs; those are diagnostics, not parity evidence.
+3. Search for a better external VMEC2000 free-boundary fixture only after the
+   phase-2 same-branch/full-loop adjoint gates remain green, because the
+   current vmec_jax direct-coil/generated-mgrid parity path is already passing.
+
+Need from user:
+
+Nothing now. A known VMEC2000 generated-mgrid free-boundary case that writes a
+bounded, finite-geometry WOUT would let us promote this optional parity row
+faster.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999996% for fixed
+  same-branch scalar/vector gates and accepted/rejected slot evidence; arbitrary
+  adaptive branch differentiation remains explicitly unclaimed.
+- VMEC parity and physics gates: 98.8%.
+- Single-stage coil-only optimization: 98.7%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 99.6%.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 99.8%.
+
 ### 2026-06-07 VMEC2000 Sign-Probe Promotion Diagnostics
 
 Steps taken:
