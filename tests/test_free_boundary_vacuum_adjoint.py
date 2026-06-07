@@ -2367,6 +2367,60 @@ def test_dense_vmec_nestor_mode_solve_can_use_matrix_free_response() -> None:
     np.testing.assert_allclose(matrix_free["mode_coeffs"], dense["mode_coeffs"], rtol=2.0e-11, atol=2.0e-11)
     np.testing.assert_allclose(matrix_free["phi_flat"], dense["phi_flat"], rtol=2.0e-11, atol=2.0e-11)
 
+    bicgstab = dense_vmec_nestor_mode_solve_jax(
+        R=sample.R,
+        Z=sample.Z,
+        Ru=sample.Ru,
+        Zu=sample.Zu,
+        Rv=sample.Rv,
+        Zv=sample.Zv,
+        ruu=sample.ruu,
+        ruv=sample.ruv,
+        rvv=sample.rvv,
+        zuu=sample.zuu,
+        zuv=sample.zuv,
+        zvv=sample.zvv,
+        bexni=bex,
+        basis=basis,
+        tables=tables,
+        signgs=1,
+        nvper=2,
+        solve_mode="bicgstab",
+        operator_tol=1.0e-13,
+        operator_atol=1.0e-15,
+        operator_maxiter=64,
+        include_phi_flat=False,
+        include_residual=False,
+    )
+
+    assert bicgstab["solve_mode"] == "matrix_free_bicgstab"
+    assert bicgstab["mode_matrix"] is None
+    assert "phi_flat" not in bicgstab
+    assert "residual" not in bicgstab
+    np.testing.assert_allclose(bicgstab["mode_coeffs"], dense["mode_coeffs"], rtol=2.0e-11, atol=2.0e-11)
+
+    with pytest.raises(ValueError, match="solve_mode"):
+        dense_vmec_nestor_mode_solve_jax(
+            R=sample.R,
+            Z=sample.Z,
+            Ru=sample.Ru,
+            Zu=sample.Zu,
+            Rv=sample.Rv,
+            Zv=sample.Zv,
+            ruu=sample.ruu,
+            ruv=sample.ruv,
+            rvv=sample.rvv,
+            zuu=sample.zuu,
+            zuv=sample.zuv,
+            zvv=sample.zvv,
+            bexni=bex,
+            basis=basis,
+            tables=tables,
+            signgs=1,
+            nvper=2,
+            solve_mode="unknown",
+        )
+
 
 @pytest.mark.py311_slow_coverage
 def test_matrix_free_mode_operator_alternate_solvers_and_validation_paths() -> None:
