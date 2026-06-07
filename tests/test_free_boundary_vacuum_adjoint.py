@@ -2519,6 +2519,36 @@ def test_matrix_free_mode_operator_alternate_solvers_and_validation_paths() -> N
             n_raw=n_raw,
             lasym=False,
         )
+    with pytest.raises(ValueError, match="invalid_grpmn_shape_lasym"):
+        mode_matrix_matvec_from_grpmn_jax(
+            jnp.ones(2 * sin_basis.shape[1]),
+            grpmn,
+            sin_basis=sin_basis,
+            xmpot=xmpot,
+            n_raw=n_raw,
+            lasym=True,
+            cos_basis=sin_basis,
+        )
+    grpmn_lasym = jnp.zeros((2 * sin_basis.shape[1], sin_basis.shape[0]), dtype=float)
+    with pytest.raises(ValueError, match="cos_basis is required"):
+        mode_matrix_matvec_from_grpmn_jax(
+            jnp.ones(2 * sin_basis.shape[1]),
+            grpmn_lasym,
+            sin_basis=sin_basis,
+            xmpot=xmpot,
+            n_raw=n_raw,
+            lasym=True,
+        )
+    with pytest.raises(ValueError, match="cos_basis must match"):
+        mode_matrix_matvec_from_grpmn_jax(
+            jnp.ones(2 * sin_basis.shape[1]),
+            grpmn_lasym,
+            sin_basis=sin_basis,
+            xmpot=xmpot,
+            n_raw=n_raw,
+            lasym=True,
+            cos_basis=sin_basis[:, :2],
+        )
     with pytest.raises(ValueError, match="vector size"):
         mode_matrix_matvec_from_grpmn_jax(
             jnp.ones(4),

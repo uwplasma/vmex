@@ -12,6 +12,57 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
+### 2026-06-06 Matrix-Free LASYM Coverage Gate Follow-Up
+
+Steps taken:
+
+1. Watched GitHub Actions run ``27079729117`` for commit ``aa52068``.
+   All functional shards passed, including docs, build, physics smoke,
+   py3.10, py3.12, core coverage, exact coverage, and slow physics coverage.
+2. The combined py3.11 coverage gate still failed at exact ``94.99%`` line
+   coverage against the ``95.00%`` threshold.
+3. Added a focused slow-coverage branch check for the matrix-free LASYM
+   validation paths: undersized LASYM ``grpmn``, missing ``cos_basis``, and
+   mismatched ``cos_basis``.
+
+Results obtained:
+
+1. ``python -m ruff check tests/test_free_boundary_vacuum_adjoint.py`` passed
+   locally.
+2. The targeted matrix-free validation test passed locally.
+3. The CI-equivalent vacuum-adjoint slow-coverage selection passed locally with
+   ``9`` passed and ``61`` deselected in about ``34`` seconds.
+4. The production-adjacent current-only complete-solve same-branch custom-VJP
+   gate passed locally in about ``61`` seconds, including the fixed
+   rejected-controller-slot replay gate.
+
+Best next steps:
+
+1. Commit and push the focused LASYM branch coverage patch.
+2. Watch the new combined CI coverage gate.  If it still fails, inspect the
+   exact XML/report and add one more targeted branch test only.
+3. Once CI is green, profile matrix-free versus dense NESTOR response on the
+   branch-local direct-coil reports and decide whether matrix-free should stay
+   opt-in or become a size-triggered policy.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99997% for fixed
+  same-branch scalar/vector gates and fingerprint-gated adaptive seam reports;
+  adaptive branch differentiation remains explicitly unclaimed.
+- VMEC parity and physics gates: 98.0%.
+- Single-stage coil-only optimization: 97.8%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 99.3%.
+- CI runtime refactor with preserved coverage/physics gates: 100% locally,
+  pending the pushed combined gate.
+- Docs/release hygiene: 99.5%.
+
 ### 2026-06-06 Matrix-Free Coverage Gate Hardening
 
 Steps taken:
