@@ -19,6 +19,12 @@ Run from the repository root:
 
 Use ``--dry-run`` to write the input/summary and validate the coil conversion
 without running VMEC.
+
+Important: ``MGRID_FILE='DIRECT_COILS'`` is a vmec_jax Python-provider tag.
+The generated input is pedagogic and needs this script, or an equivalent
+``run_free_boundary(..., external_field_provider_params=coil_params)`` call,
+to supply the direct coils.  Use ``free_boundary_essos_mgrid_forward.py`` when
+you need a generated-``mgrid`` compatibility artifact.
 """
 
 from __future__ import annotations
@@ -130,6 +136,7 @@ def main(argv: list[str] | None = None) -> int:
     summary["coils_json"] = str(args.coils_json) if args.coils_json is not None else "ESSOS Landreman-Paul QA default"
     summary_path.write_text(json.dumps(summary, indent=2, default=json_default) + "\n")
 
+    print("Flow: direct ESSOS coils -> CoilFieldParams -> vmec_jax direct Biot-Savart; no mgrid is written.")
     print(f"Wrote input: {input_path}")
     print(f"Wrote summary: {summary_path}")
     if wout_path is not None:

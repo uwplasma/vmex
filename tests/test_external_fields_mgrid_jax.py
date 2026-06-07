@@ -13,7 +13,13 @@ from vmec_jax.external_fields import (
     sample_mgrid_field_cylindrical,
 )
 from vmec_jax.external_fields.base import broadcast_cylindrical_coordinates
-from vmec_jax.free_boundary import MGridData, MGridMetadata, interpolate_mgrid_bfield
+from vmec_jax.free_boundary import (
+    MGridData,
+    MGridMetadata,
+    interpolate_mgrid_bfield,
+    sample_free_boundary_external_field,
+    vacuum_boundary_fields_from_cylindrical,
+)
 
 
 def _affine_mgrid_params():
@@ -173,6 +179,90 @@ def test_mgrid_jax_affine_values_match_exact_and_legacy_interpolator():
     )
     for got, want in zip(actual, legacy, strict=True):
         np.testing.assert_allclose(got, want, rtol=2.0e-14, atol=1.0e-13)
+
+
+def test_mgrid_provider_boundary_projection_matches_jax_and_legacy_interpolation_off_grid():
+    enable_x64(True)
+    from vmec_jax._compat import jnp
+
+    params, _coeffs = _affine_mgrid_params()
+    R = jnp.asarray([[1.12, 1.44, 1.81], [1.29, 1.58, 1.92]])
+    Z = jnp.asarray([[-0.52, -0.21, 0.31], [-0.37, 0.05, 0.43]])
+    phi = jnp.asarray([[0.21, 0.54, 1.02], [0.32, 0.73, 1.15]])
+    Ru = jnp.asarray([[0.08, -0.03, 0.04], [0.07, -0.02, 0.05]])
+    Zu = jnp.asarray([[0.10, 0.11, 0.09], [0.08, 0.12, 0.10]])
+    Rv = jnp.asarray([[0.02, 0.01, -0.02], [0.03, -0.01, 0.02]])
+    Zv = jnp.asarray([[0.03, -0.02, 0.01], [-0.01, 0.02, 0.04]])
+
+    sample = sample_free_boundary_external_field(
+        R=R,
+        Z=Z,
+        Ru=Ru,
+        Zu=Zu,
+        Rv=Rv,
+        Zv=Zv,
+        phi=phi,
+        provider_kind="mgrid",
+        provider_params=params,
+        label="affine_mgrid_off_grid",
+    )
+    expected = sample_mgrid_field_cylindrical(params, R, Z, phi)
+    legacy = interpolate_mgrid_bfield(
+        MGridData(
+            metadata=MGridMetadata(
+                path="synthetic",
+                ir=int(params.br.shape[3]),
+                jz=int(params.br.shape[2]),
+                kp=int(params.br.shape[1]),
+                nfp=params.nfp,
+                nextcur=int(params.br.shape[0]),
+                rmin=params.rmin,
+                rmax=params.rmax,
+                zmin=params.zmin,
+                zmax=params.zmax,
+                mgrid_mode="S",
+                coil_groups=(),
+                raw_coil_cur=(),
+            ),
+            br=np.asarray(params.br),
+            bp=np.asarray(params.bphi),
+            bz=np.asarray(params.bz),
+        ),
+        r=np.asarray(R),
+        z=np.asarray(Z),
+        phi=np.asarray(phi),
+        extcur=tuple(np.asarray(params.extcur)),
+    )
+    expected_vac = vacuum_boundary_fields_from_cylindrical(
+        br=np.asarray(expected[0]),
+        bp=np.asarray(expected[1]),
+        bz=np.asarray(expected[2]),
+        R=np.asarray(R),
+        Ru=np.asarray(Ru),
+        Zu=np.asarray(Zu),
+        Rv=np.asarray(Rv),
+        Zv=np.asarray(Zv),
+    )
+
+    assert sample.mgrid_path == "affine_mgrid_off_grid"
+    for name, got, want, legacy_want in zip(
+        ("br", "bp", "bz"),
+        (sample.br, sample.bp, sample.bz),
+        expected,
+        legacy,
+        strict=True,
+    ):
+        np.testing.assert_allclose(np.asarray(got), np.asarray(want), rtol=2.0e-14, atol=1.0e-13)
+        np.testing.assert_allclose(np.asarray(got), np.asarray(legacy_want), rtol=2.0e-14, atol=1.0e-13)
+        np.testing.assert_allclose(np.asarray(getattr(sample, f"{name}_mgrid")), np.asarray(want), rtol=0.0, atol=0.0)
+    for name in ("bnormal", "bnormal_unit", "bu", "bv", "bsqvac"):
+        np.testing.assert_allclose(
+            np.asarray(getattr(sample.vac_ext, name)),
+            np.asarray(getattr(expected_vac, name)),
+            rtol=2.0e-14,
+            atol=1.0e-13,
+            err_msg=f"mgrid provider projection changed vac_ext.{name}",
+        )
 
 
 def test_mgrid_jax_generated_from_direct_coils_matches_biot_savart_at_grid_nodes():

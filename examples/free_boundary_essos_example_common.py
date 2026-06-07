@@ -33,6 +33,47 @@ DEFAULT_COILS_JSON_NAME = "ESSOS_biot_savart_LandremanPaulQA.json"
 DEFAULT_PRESSURE_SCALE = 34.46233666638
 
 
+def free_boundary_workflow_metadata(*, direct_coils: bool) -> dict[str, Any]:
+    """Return user-facing metadata that distinguishes the two example flows."""
+
+    if direct_coils:
+        return {
+            "flow": "direct_essos_coils_no_mgrid",
+            "field_backend": "direct_coils",
+            "workflow_steps": [
+                "load ESSOS coils",
+                "convert coils to CoilFieldParams",
+                "write VMEC input with MGRID_FILE='DIRECT_COILS'",
+                "run vmec_jax with direct JAX Biot-Savart sampling",
+            ],
+            "python_provider_required": True,
+            "uses_mgrid_file": False,
+            "mgrid_compatibility_example": str(REPO_ROOT / "examples" / "free_boundary_essos_mgrid_forward.py"),
+            "vmec_input_replay": (
+                "MGRID_FILE='DIRECT_COILS' is a vmec_jax Python-provider tag. "
+                "Replay this input through this example or run_free_boundary with CoilFieldParams, "
+                "not as a bare mgrid/VMEC2000 input."
+            ),
+        }
+    return {
+        "flow": "essos_generated_mgrid_compatibility",
+        "field_backend": "mgrid",
+        "workflow_steps": [
+            "load ESSOS coils",
+            "sample coils onto a VMEC-compatible mgrid NetCDF",
+            "write VMEC input that references the generated mgrid",
+            "run vmec_jax with the mgrid compatibility backend",
+        ],
+        "python_provider_required": False,
+        "uses_mgrid_file": True,
+        "direct_coil_example": str(REPO_ROOT / "examples" / "free_boundary_essos_direct_forward.py"),
+        "vmec_input_replay": (
+            "The generated input is replayable by mgrid-compatible tooling when the referenced "
+            "mgrid NetCDF is available at the MGRID_FILE path."
+        ),
+    }
+
+
 def json_default(value: Any) -> Any:
     if isinstance(value, Path):
         return str(value)
@@ -219,14 +260,18 @@ def summarize_free_boundary_run(
 ) -> dict[str, Any]:
     """Return a compact summary for examples and tests."""
 
+    direct_coils = coil_params is not None and mgrid_path is None
+    workflow = free_boundary_workflow_metadata(direct_coils=direct_coils)
     summary: dict[str, Any] = {
         "backend": str(backend),
+        "flow": workflow["flow"],
+        "workflow": workflow,
         "dry_run": bool(dry_run),
         "input": input_path,
         "wout": wout_path,
         "mgrid": mgrid_path,
-        "external_field_provider_kind": "direct_coils" if coil_params is not None and mgrid_path is None else "mgrid",
-        "mgrid_file": "DIRECT_COILS" if coil_params is not None and mgrid_path is None else mgrid_path,
+        "external_field_provider_kind": "direct_coils" if direct_coils else "mgrid",
+        "mgrid_file": "DIRECT_COILS" if direct_coils else mgrid_path,
         "uses_generated_mgrid": mgrid_path is not None,
         "wall_s": float(wall_s),
         "surface_dofs_optimized": False,

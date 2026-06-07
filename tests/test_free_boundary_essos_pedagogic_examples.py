@@ -72,6 +72,11 @@ def test_pedagogic_essos_mgrid_example_dry_run(monkeypatch, tmp_path: Path) -> N
 
     summary = json.loads((tmp_path / "summary.json").read_text())
     assert summary["backend"] == "mgrid"
+    assert summary["flow"] == "essos_generated_mgrid_compatibility"
+    assert summary["workflow"]["field_backend"] == "mgrid"
+    assert summary["workflow"]["python_provider_required"] is False
+    assert summary["workflow"]["uses_mgrid_file"] is True
+    assert summary["workflow"]["direct_coil_example"].endswith("free_boundary_essos_direct_forward.py")
     assert summary["dry_run"] is True
     assert summary["surface_dofs_optimized"] is False
     assert Path(summary["mgrid"]).name == "mgrid_lpqa_from_essos.nc"
@@ -98,6 +103,12 @@ def test_pedagogic_essos_direct_example_dry_run(monkeypatch, tmp_path: Path) -> 
 
     summary = json.loads((tmp_path / "summary.json").read_text())
     assert summary["backend"] == "direct_essos_coils"
+    assert summary["flow"] == "direct_essos_coils_no_mgrid"
+    assert summary["workflow"]["field_backend"] == "direct_coils"
+    assert summary["workflow"]["python_provider_required"] is True
+    assert summary["workflow"]["uses_mgrid_file"] is False
+    assert summary["workflow"]["mgrid_compatibility_example"].endswith("free_boundary_essos_mgrid_forward.py")
+    assert "Python-provider tag" in summary["workflow"]["vmec_input_replay"]
     assert summary["dry_run"] is True
     assert summary["surface_dofs_optimized"] is False
     assert summary["mgrid"] is None
@@ -106,3 +117,4 @@ def test_pedagogic_essos_direct_example_dry_run(monkeypatch, tmp_path: Path) -> 
     assert summary["uses_generated_mgrid"] is False
     assert np.isfinite(float(summary["coil_current_norm"]))
     assert np.isfinite(float(summary["coil_length_mean"]))
+    assert not list(tmp_path.glob("mgrid*"))

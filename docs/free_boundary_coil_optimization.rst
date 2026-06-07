@@ -1,13 +1,16 @@
 Free-Boundary Coil Optimization
 ===============================
 
-This page documents the research lane toward true single-stage
-free-boundary optimization with differentiable coils. The existing VMEC-compatible
-``mgrid`` path remains the VMEC2000-compatibility backend; generated-``mgrid``
-WOUT parity is optional/non-promoted unless explicitly stated. The new
-direct-coil path evaluates the external field from coil Fourier coefficients
-and currents in JAX, so the coil parameters can become the independent
-optimization variables.
+This page documents the finalized single-stage free-boundary coil optimization
+research lane. The existing VMEC-compatible ``mgrid`` path remains the
+VMEC2000-compatibility backend; generated-``mgrid`` WOUT parity is
+optional/non-promoted unless explicitly stated. The direct-coil path evaluates
+the external field from coil Fourier coefficients and currents in JAX, so the
+coil parameters can be the independent optimization variables. Objective
+acceptance is still decided by complete free-boundary solves. Derivative
+reports and derivative-assisted proposals are same-branch, fingerprint-gated,
+branch-local evidence only; production differentiation through adaptive
+accepted/rejected host-controller branch changes is not claimed.
 
 Architecture
 ------------
@@ -21,6 +24,13 @@ The intended single-stage loop is:
       -> vmec_jax free-boundary equilibrium
       -> wout/proxy diagnostics
       -> coil-only objective update
+
+The "single-stage" claim means the optimizer changes coil dofs directly while
+the plasma boundary is recomputed by the free-boundary solve at each objective
+evaluation. It does not mean that the production adaptive host loop has a
+general exact adjoint. Complete solves remain the acceptance authority; replay
+derivatives are valid only for the recorded accepted branch when the explicit
+branch fingerprint is unchanged.
 
 Pedagogic forward examples
 --------------------------
@@ -71,19 +81,17 @@ Phase 1 in this lane includes JAX-native coil-field sampling, an ESSOS coil
 adapter, generated-``mgrid`` compatibility, and forward free-boundary solves
 from direct coils. Phase 2 targets the production custom adjoint through the
 full free-boundary vacuum/NESTOR solve. Several phase-2 validation rungs are
-already implemented on JAX-visible dense or accepted-state problems, but the
-production ``run_free_boundary`` nonlinear-loop adjoint is not claimed as
-publication-ready until complete-solve AD-vs-finite-difference checks pass. The current
-post-merge evidence now includes reusable accepted-trace replay helpers,
-accepted-state ``bsqvac`` replay derivatives with respect to the VMEC state,
-JAX-visible nonlinear-controller primitives with fixed-length masked
-``lax.scan`` control flow, and a fixed-accepted-trace custom-VJP seam for
-direct-coil replay objectives.  The fixed-trace path is guarded by accepted
-trace fingerprints so finite-difference promotions can reject perturbations
-that changed the adaptive host-controller branch. These validate the intended
-full-loop adjoint contract, but they are still production-adjacent validation
-gates rather than a promoted custom VJP for the host-controlled
-``run_free_boundary`` loop.
+already implemented on JAX-visible dense, accepted-state, or accepted-trace
+problems, but the production ``run_free_boundary`` adaptive nonlinear-loop
+adjoint is not claimed. The current post-merge evidence includes reusable
+accepted-trace replay helpers, accepted-state ``bsqvac`` replay derivatives
+with respect to the VMEC state, JAX-visible nonlinear-controller primitives
+with fixed-length masked ``lax.scan`` control flow, and a fixed-accepted-trace
+custom-VJP seam for direct-coil replay objectives.  These paths compare
+branch-local derivatives to complete-solve central finite differences only
+when accepted-trace fingerprints show the perturbation stayed on the same
+adaptive branch. If the fingerprint changes, the derivative comparison is
+rejected and the complete solve remains the only acceptance authority.
 
 Adjoint Validation Roadmap
 --------------------------
@@ -161,7 +169,9 @@ The validation ladder is:
 
 7. Full direct-coil free-boundary solve: low-resolution physical scalar
    objectives, first with one coil current and then with one Fourier
-   coefficient, bounded against finite differences of complete solves.  The
+   coefficient, bounded against finite differences of complete solves.  These
+   complete base/plus/minus solves are the acceptance authority; the replay
+   derivative is compared only after the branch fingerprint is unchanged.  The
    promoted same-branch current representative includes a VMEC-state
    quasisymmetry-ratio scalar, ``qs_total``, in addition to aspect ratio and
    accepted-vacuum scalars.
@@ -223,9 +233,11 @@ The reviewer-facing status of this ladder is:
        differences on unchanged accepted branches for a current-only direction
        and for mixed current/Fourier-geometry directions.
      - The remaining production milestone is the general adaptive
-       host-controller branch seam: accepted/rejected step selection, resets,
-       activation cadence, and limiter branch changes remain unclaimed unless
-       the explicit branch fingerprint is unchanged.
+       host-controller branch seam. Accepted/rejected step selection, resets,
+       activation cadence, and limiter branch changes remain unclaimed; a
+       replay derivative is promoted only for the recorded branch when the
+       explicit fingerprint is unchanged, and complete solves remain the
+       acceptance authority.
    * - 8
      - Open
      - The phase-1 coil-only optimization example currently uses a cheap
@@ -235,9 +247,9 @@ The reviewer-facing status of this ladder is:
        coil-current and coil-geometry gradients against finite differences.
 
 In short, rungs 1--6 validate the mathematical and operator pieces needed for a
-production adjoint, rung 7 validates finite-response and accepted-state replay
-but not the host-controlled nonlinear iteration derivative, and rung 8 remains
-the publication-level coil-to-QS gradient target.
+production adjoint, rung 7 validates complete-solve finite response plus
+same-branch accepted-trace replay but not adaptive branch differentiation, and
+rung 8 remains the publication-level coil-to-QS gradient target.
 
 The first six AD-vs-FD rungs are implemented as fast tests today, and the
 fixed-boundary dense mode-space NESTOR rung is promoted for both
@@ -496,7 +508,9 @@ single-stage coil optimizer:
 
 - ``mgrid`` remains the VMEC2000-compatible parity backend.
 - Direct coils are supported as a JAX external-field provider for forward
-  free-boundary solves, including nonzero pressure profiles.
+  free-boundary solves, including nonzero pressure profiles. The direct-coil
+  Biot-Savart field is differentiable with respect to currents, Fourier curve
+  coefficients, and evaluation coordinates.
 - The finite-pressure evidence includes active-coupling provider validation
   and an LP-QA stellarator pressure-continuation lane. Generated-``mgrid`` and
   direct-coil providers from the same ESSOS LP-QA coil set converge to actual
@@ -513,7 +527,9 @@ single-stage coil optimizer:
   AD-vs-central-FD gates for direct-coil current, direct-coil Fourier geometry,
   and mixed stellsym/``LASYM`` directions. These gates compare fixed
   accepted-trace/controller custom-VJP derivatives against complete-solve
-  finite differences only after rejecting accepted-branch fingerprint changes.
+  finite differences only after rejecting accepted-branch fingerprint changes;
+  complete solves, not replay derivatives, are the optimization acceptance
+  authority.
 - Branch-local production-forward replay gates now cover aspect ratio plus
   VMEC-state ``qs_total`` plus accepted ``Bnormal`` and ``Bsqvac`` RMS
   physical scalars, with scalar/vector coverage for current and Fourier
@@ -530,7 +546,8 @@ single-stage coil optimizer:
   equilibrium derivative.
 - The phase-1 optimization example is coil-only, but it still uses a cheap
   VMEC residual plus VMEC-state ``qs_total``, aspect, and mean-iota proxy.
-  Boozer/QS objectives and production full-solve adjoints are next-step work.
+  Boozer/QS objectives and production adaptive-branch adjoints are next-step
+  work.
 - The experimental JAX NESTOR driver path is opt-in and guarded. It validates
   both LASYM full-grid and stellarator-symmetric reduced-grid samples, but the
   host bridge remains the default production path until complete-solve adjoints
@@ -539,8 +556,9 @@ single-stage coil optimizer:
 In short: direct-coil finite-pressure plumbing is present and validation-tested;
 high-resolution finite-beta ``mgrid`` validation exists for DIII-D; the LP-QA
 stellarator direct-coil forward lane has strict WOUT evidence through actual
-beta 1.93%; publication-grade gradients through the full
-free-boundary/NESTOR nonlinear loop and VMEC2000-bounded generated-``mgrid``
+beta 1.93%; branch-local derivatives are same-branch/fingerprint-gated against
+complete solves; publication-grade gradients through adaptive
+free-boundary/NESTOR branch selection and VMEC2000-bounded generated-``mgrid``
 trace parity are not claimed yet.
 
 Low-Resolution Beta Scan
@@ -1160,7 +1178,10 @@ The initial single-stage optimization example is a bounded validation example.
 It optimizes only coil currents and selected coil Fourier coefficients. The
 VMEC plasma boundary coefficients are never included in the optimization
 vector; the plasma surface is recomputed by a direct-coil free-boundary solve
-at every objective evaluation.
+at every objective evaluation. This is the finalized conservative lane:
+complete solves accept or reject objective points, while same-branch reports
+and proposals can only provide branch-local derivative evidence under an
+unchanged accepted-trace fingerprint.
 
 The default deterministic objective is:
 
@@ -1269,8 +1290,9 @@ accepted/rejected controller-slot gate on a larger low-resolution report, run:
      --outdir results/free_boundary_QS_coil_optimization_circle_nestor_profile
 
 The profile is intentionally branch-local: complete solves provide the
-base/plus/minus finite-difference authority, while dense and matrix-free replay
-only compare the fixed accepted branch under the same fingerprint.
+base/plus/minus finite-difference and objective-acceptance authority, while
+dense and matrix-free replay only compare the fixed accepted branch under the
+same fingerprint.
 
 An additional opt-in bridge toward derivative-assisted coil optimization is
 available with ``--same-branch-derivative-proposal``.  This mode still does
@@ -1281,7 +1303,7 @@ choose one one-dimensional trial step in coil-parameter space.  The proposed
 trial is then evaluated by the ordinary complete free-boundary solve, and only
 that complete-solve objective can accept it.  This keeps the branch-local
 derivative path as a proposal mechanism while the production solve remains the
-acceptance authority:
+acceptance authority.
 
 The same-branch report is generated before the optional proposal is evaluated.
 If the complete solve accepts that derivative-assisted trial, ``summary.json``
@@ -1317,12 +1339,13 @@ For the ESSOS Landreman-Paul QA coils, put ESSOS on ``PYTHONPATH`` and use:
      --helicity-n 0 \
      --outdir results/free_boundary_QS_coil_optimization_essos_smoke
 
-The promoted complete-loop gate now covers a VMEC-state ``qs_total`` scalar on
-the same fixed accepted branch as the aspect and accepted-vacuum scalars.  The
-next scientific promotion step is replacing that VMEC-state proxy in this
-example with a Boozer-space QS objective and validating the same complete-loop
-gradients through the full Boozer/QS diagnostic path.  The adaptive host branch
-selection itself remains outside the promoted derivative claim.
+The promoted same-branch complete-solve gate now covers a VMEC-state
+``qs_total`` scalar on the same fixed accepted branch as the aspect and
+accepted-vacuum scalars.  The next scientific promotion step is replacing that
+VMEC-state proxy in this example with a Boozer-space QS objective and
+validating the same fingerprint-gated complete-solve comparisons through the
+full Boozer/QS diagnostic path.  The adaptive host branch selection itself
+remains outside the promoted derivative claim.
 
 Each accepted objective evaluation records a weighted objective-term breakdown
 for the residual, QS, aspect-ratio, and mean-iota terms.
@@ -1738,14 +1761,16 @@ evidence. The default gates are CI-safe and cover:
 - same-branch complete-solve AD-vs-central-finite-difference custom-VJP gates
   for one coil current, one Fourier geometry coefficient, and a mixed
   stellsym/``LASYM`` direction, with branch-fingerprint checks that reject
-  adaptive controller changes.
+  adaptive controller changes and leave complete solves as the comparison
+  authority.
 - branch-local production-forward scalar/vector replay gates. Both the
   current-only and Fourier-geometry representatives cover aspect ratio plus
   accepted ``Bnormal`` and ``Bsqvac`` RMS scalars; the current-only
   representative also covers VMEC-state ``qs_total``, and the
   Fourier-geometry representative also covers an LCFS boundary moment. These
   validate fixed accepted-branch replay, not a general derivative of adaptive
-  ``run_free_boundary`` branch selection.
+  ``run_free_boundary`` branch selection; complete-solve base/plus/minus
+  evaluations remain the authority for promoted finite-difference comparisons.
 
 Optional evidence includes ESSOS-backed full finite-pressure response tests,
 VMEC2000 executable comparisons, and ``RUN_FULL=1`` complete-solve finite
@@ -1779,9 +1804,9 @@ Next Implementation Steps
   trace discrepancy is bounded.
 - Replace the dense validation vacuum-adjoint primitive with the production
   matrix-free/custom-linear-solve NESTOR operator.
-- Promote the accepted-boundary replay gate to a complete-loop free-boundary
-  gradient once the host NumPy state bridge is removed or wrapped by a
-  validated custom adjoint, then add Boozer/QS gradient checks.
+- Promote beyond same-branch replay only after the adaptive host-controller
+  branch seam is made differentiable or is replaced by a validated
+  JAX-visible/custom-adjoint controller, then add Boozer/QS gradient checks.
 - Run larger CPU/GPU benchmark matrices before making broad accelerator claims;
   keep the JSON summaries and documentation plots refreshed from those runs.
 

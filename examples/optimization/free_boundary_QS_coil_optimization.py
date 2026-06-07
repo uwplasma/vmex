@@ -107,6 +107,32 @@ class SkipExample(RuntimeError):
     """Raised when optional external assets needed by the example are absent."""
 
 
+def direct_coil_optimization_workflow_metadata() -> dict[str, Any]:
+    """Return the pedagogic workflow contract recorded in summary artifacts."""
+
+    return {
+        "flow": "single_stage_direct_coil_no_mgrid",
+        "field_backend": "direct_coils",
+        "workflow_steps": [
+            "load or synthesize direct coils",
+            "select coil-current and coil-Fourier optimization variables",
+            "write VMEC input with MGRID_FILE='DIRECT_COILS'",
+            "run complete free-boundary solves with direct JAX Biot-Savart sampling",
+            "score VMEC residual, VMEC-state QS residual, aspect, and mean-iota terms",
+        ],
+        "optimized_dofs": "coil currents and selected coil Fourier coefficients only",
+        "plasma_boundary_optimized": False,
+        "python_provider_required": True,
+        "uses_mgrid_file": False,
+        "mgrid_compatibility_example": str(REPO_ROOT / "examples" / "free_boundary_essos_mgrid_forward.py"),
+        "vmec_input_replay": (
+            "MGRID_FILE='DIRECT_COILS' is a vmec_jax Python-provider tag. "
+            "Run this optimization script, or call run_free_boundary with CoilFieldParams, "
+            "so the solver receives the direct-coil provider."
+        ),
+    }
+
+
 def _json_default(value: Any) -> Any:
     if isinstance(value, Path):
         return str(value)
@@ -1510,6 +1536,7 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
 
     outdir = args.outdir.resolve()
     outdir.mkdir(parents=True, exist_ok=True)
+    workflow = direct_coil_optimization_workflow_metadata()
     input_path = make_free_boundary_indata(
         args.input,
         outdir / "input.direct_coil_qs",
@@ -1550,6 +1577,10 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
         "external_field_provider_kind": "direct_coils",
         "mgrid_file": "DIRECT_COILS",
         "uses_generated_mgrid": False,
+        "python_provider_required": True,
+        "uses_mgrid_file": False,
+        "vmec_input_replay": workflow["vmec_input_replay"],
+        "mgrid_compatibility_example": workflow["mgrid_compatibility_example"],
         "vmec_max_iter": int(args.vmec_max_iter),
         "ftol": float(args.ftol),
         "ns": int(args.ns),
@@ -1623,6 +1654,8 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
     if bool(args.dry_run):
         summary = {
             "phase": "single-stage-direct-coil-validation",
+            "flow": workflow["flow"],
+            "workflow": workflow,
             "scope": "deterministic coil-only direct-coil free-boundary QS optimization example",
             "dry_run": True,
             "plasma_boundary_optimized": False,
@@ -1641,6 +1674,7 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
             "best_wout": outdir / "wout_best_direct_coil_qs.nc",
         }
         write_json(outdir / "summary.json", summary)
+        print("Flow: single-stage direct-coil/no-mgrid optimization; only coil variables are selected.")
         print(f"Dry run: wrote {outdir / 'summary.json'} without running VMEC or the optimizer.")
         return summary
 
@@ -1739,6 +1773,8 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
 
     summary = {
         "phase": "single-stage-direct-coil-validation",
+        "flow": workflow["flow"],
+        "workflow": workflow,
         "scope": "deterministic coil-only direct-coil free-boundary QS optimization example",
         "dry_run": False,
         "plasma_boundary_optimized": False,
@@ -1838,6 +1874,7 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
         }
     summary["best"] = best
     write_json(outdir / "summary.json", summary)
+    print("Flow: single-stage direct-coil/no-mgrid optimization; every trial used a complete free-boundary solve.")
     print(f"Wrote {outdir / 'history.json'}")
     print(f"Wrote {outdir / 'summary.json'}")
     return summary

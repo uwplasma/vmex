@@ -489,12 +489,17 @@ Current parity status
   current high-resolution finite-beta WOUT-panel evidence: DIII-D
   VMEC2000-compatible ``mgrid`` rows through actual beta 3.33% at ``ns=101`` and
   a strict LP-QA direct-coil stellarator forward lane through actual beta 1.93%.
+  The ``mgrid`` path remains the VMEC2000-compatible backend, while the
+  direct-coil path provides a differentiable Biot-Savart external-field
+  provider for coil currents and Fourier curve coefficients.
   The same page records the current phase-2 adjoint evidence: accepted-trace
   replay gates for current-only, Fourier-only, and mixed coil-control
   perturbations, accepted-state ``bsqvac`` derivatives with respect to the VMEC
   state, and JAX-visible masked nonlinear-controller AD-vs-FD checks. These are
-  validation primitives for the full-loop refactor, not a promoted production
-  ``run_free_boundary`` exact-adjoint claim.
+  same-branch, branch-fingerprint-gated validation primitives compared against
+  complete-solve finite differences; complete solves remain the acceptance
+  authority. They do not promote production differentiation through adaptive
+  accepted/rejected ``run_free_boundary`` branch changes.
   See :doc:`free_boundary_coil_optimization` for the artifact links,
   reproduction commands, and phase-2 adjoint limitations.
 

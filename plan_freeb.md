@@ -12,6 +12,103 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
+### 2026-06-07 Single-Stage Direct-Coil Optimization Finalization
+
+Steps taken:
+
+1. Rechecked ``main`` at commit ``e8ab935`` and confirmed the latest pushed CI
+   run was green, including the coverage gate, full docs, physics smoke, and
+   exact-coverage shards.
+2. Added explicit workflow metadata to the pedagogic ESSOS direct-coil,
+   generated-``mgrid``, and single-stage coil-only QS optimization examples.
+   The summaries now distinguish ``direct_essos_coils_no_mgrid``,
+   ``essos_generated_mgrid_compatibility``, and
+   ``single_stage_direct_coil_no_mgrid``.
+3. Strengthened direct-coil and ``mgrid`` provider tests:
+   cached direct-coil geometry must match uncached direct-coil sampling,
+   ``provider_kind='coils'`` must remain an alias for direct coils, and
+   off-grid JAX ``mgrid`` interpolation/projection must match the legacy
+   interpolation path.
+4. Strengthened same-branch report tests so the branch-local scalar/vector
+   derivative evidence records its fixed accepted-branch scope, production
+   forward source, replay value agreement, and complete-solve
+   finite-difference comparison.
+5. Ran the bounded single-stage direct-coil QS example with a complete
+   objective evaluation and an opt-in vector same-branch report for
+   ``aspect`` and ``accepted_bnormal_rms``.
+6. Ran real ESSOS dry-runs for the direct/no-``mgrid`` example, generated
+   ``mgrid`` compatibility example, and ESSOS-provider single-stage
+   optimization example.
+7. Ran the ESSOS generated-``mgrid`` comparator with and without VMEC2000 on
+   the bounded LP-QA smoke case, keeping generated outputs under ``/tmp``.
+
+Results obtained:
+
+1. Focused validation passed:
+   ``python -m ruff check`` on all touched examples/tests;
+   ``git diff --check``;
+   the free-boundary ESSOS/provider/optimization pytest subset passed with
+   expected optional ESSOS skips and the known VMEC2000 xfail.
+2. The bounded single-stage direct-coil QS example completed one full
+   free-boundary objective evaluation and wrote ``history.json``,
+   ``summary.json``, and ``same_branch_complete_solve_report.json``.  The
+   compact report had ``branch_compatibility.same_branch=true`` and
+   ``branch_local_vector_jacobian.available=true`` for the requested physical
+   scalars.
+3. The ESSOS direct/no-``mgrid`` and generated-``mgrid`` examples both wrote
+   summaries with explicit field-backend metadata.  The direct example records
+   that ``MGRID_FILE='DIRECT_COILS'`` is a Python-provider tag, while the
+   generated-``mgrid`` example records that it is the VMEC2000-compatible
+   field-table path.
+4. vmec_jax direct-coil and generated-``mgrid`` backends passed the bounded
+   LP-QA comparator.  The inactive short-trace row matched exactly and stayed
+   inside the generated ``mgrid`` domain.
+5. The forced-active diagnostic made both vmec_jax backends active and they
+   still agreed numerically, but the surface left the coarse generated
+   ``mgrid`` domain and became nonphysical.  This remains diagnostic evidence,
+   not promotion evidence.
+6. The optional VMEC2000 generated-``mgrid`` leg opened the generated ``mgrid``
+   and reproduced the known ``vmec2000_vacuum_inactive_force_gate`` short-trace
+   status.  It did not produce a promotable WOUT, so the VMEC2000 WOUT-level
+   generated-``mgrid`` row remains optional/non-promoted.
+
+Best next steps:
+
+1. Freeze this single-stage direct-coil optimization lane as complete for the
+   current release: examples, metadata, same-branch evidence, and
+   direct/generated-``mgrid`` comparisons are in place.
+2. Keep complete free-boundary solves as the optimization acceptance authority.
+   Same-branch reports and derivative proposals remain branch-local,
+   fingerprint-gated evidence only; production adaptive branch differentiation
+   is still explicitly unclaimed.
+3. Resume the non-free-boundary QI seed-robustness lane after this commit.
+4. Promote VMEC2000 generated-``mgrid`` WOUT parity only when a bounded
+   physical external fixture reaches active vacuum coupling and finite positive
+   geometry scalars.
+
+Need from user:
+
+Nothing for this lane. A known VMEC2000 free-boundary generated-``mgrid``
+fixture that produces a bounded, finite-geometry WOUT would help promote the
+remaining optional VMEC2000 row, but it is not blocking the single-stage
+direct-coil lane.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999996% for fixed
+  same-branch scalar/vector gates and accepted/rejected slot evidence;
+  arbitrary adaptive branch differentiation remains explicitly unclaimed.
+- VMEC parity and physics gates: 98.9%.
+- Single-stage coil-only optimization: 100.0% for the conservative
+  complete-solve-accepted, branch-local-derivative lane.
+- Robust/stochastic coil perturbation optimization: deferred by current scope.
+- CPU/GPU performance: 99.6%.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 99.9%.
+- Remaining non-free-boundary blocker before returning to the broader roadmap:
+  QI seed robustness.
+
 ### 2026-06-07 VMEC2000 Generated-Mgrid WOUT Promotion Rerun
 
 Steps taken:
