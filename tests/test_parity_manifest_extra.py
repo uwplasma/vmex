@@ -114,6 +114,7 @@ def test_free_boundary_lasym_manifest_requires_local_mgrid_and_iter_gates() -> N
     iter_list = [int(value) for value in case.get("iter_list", [])]
     assert iter_list == [80, 100]
     assert int(case.get("max_iter", 0)) >= max(iter_list)
+    assert float(case.get("activate_fsq", 0.0)) == 1.0e99
     assert float(case.get("max_runtime_s", 0.0)) <= 45.0
     assert float(case.get("max_total_runtime_s", 0.0)) <= 95.0
 

@@ -6,6 +6,7 @@ import numpy as np
 
 from tools.diagnostics.vmec2000_exec_freeb_scalpot_compare import (
     _gc_metric_block,
+    _missing_vmec_dumps_payload,
     _parse_bextern_dump,
     _parse_fouri_dump,
     _parse_gc_dump,
@@ -201,3 +202,31 @@ def test_parse_fortran_float_handles_missing_exponent_marker() -> None:
     np.testing.assert_allclose(_parse_fortran_float("1.0D+03"), 1.0e3, rtol=0.0, atol=0.0)
     np.testing.assert_allclose(_parse_fortran_float("1.0564215887228806-316"), 1.0564215887228806e-316, rtol=0.0, atol=0.0)
     np.testing.assert_allclose(_parse_fortran_float("-2.5+02"), -2.5e2, rtol=0.0, atol=0.0)
+
+
+def test_missing_vmec_dumps_payload_records_inventory_and_activation(tmp_path: Path) -> None:
+    vmec_dump_dir = tmp_path / "vmec_dumps"
+    jax_dump_dir = tmp_path / "jax_dumps"
+    vmec_dump_dir.mkdir()
+    jax_dump_dir.mkdir()
+    (vmec_dump_dir / "stdout.txt").write_text("stock VMEC output", encoding="utf-8")
+    (jax_dump_dir / "scalpot_jax_iter80.npz").write_bytes(b"placeholder")
+
+    got = _missing_vmec_dumps_payload(
+        workdir=tmp_path,
+        vmec_dump_dir=vmec_dump_dir,
+        jax_dump_dir=jax_dump_dir,
+        input_path=tmp_path / "input.case",
+        vmec_exec=Path("/opt/vmec/xvmec2000"),
+        iter_idx=80,
+        max_iter=120,
+        activate_fsq=1.0e99,
+        missing=["scalpot", "vacuum"],
+    )
+
+    assert got["error"] == "missing_vmec_dumps"
+    assert got["missing_required_dumps"] == ["scalpot", "vacuum"]
+    assert got["jax_free_boundary_activate_fsq"] == 1.0e99
+    assert got["requested_vmec_dump_env"]["VMEC_DUMP_ITER"] == "80"
+    assert got["vmec_dump_inventory"] == ["stdout.txt"]
+    assert got["jax_dump_inventory"] == ["scalpot_jax_iter80.npz"]

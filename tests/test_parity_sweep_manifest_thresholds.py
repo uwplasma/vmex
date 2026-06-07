@@ -294,7 +294,7 @@ def test_free_boundary_scalpot_command_contract_is_iter_specific(tmp_path: Path)
 
     json_path = tmp_path / "summary_iter80.json"
     cmd = _build_freeb_scalpot_cmd(
-        {"input": "examples/data/input.cth_like_free_bdy_small"},
+        {"input": "examples/data/input.cth_like_free_bdy_small", "activate_fsq": 1.0e99},
         vmec_exec=Path("/opt/vmec/xvmec2000"),
         iter_idx=80,
         max_iter=100,
@@ -306,6 +306,7 @@ def test_free_boundary_scalpot_command_contract_is_iter_specific(tmp_path: Path)
     assert "--vmec-exec" in cmd and cmd[cmd.index("--vmec-exec") + 1] == "/opt/vmec/xvmec2000"
     assert "--iter" in cmd and cmd[cmd.index("--iter") + 1] == "80"
     assert "--max-iter" in cmd and cmd[cmd.index("--max-iter") + 1] == "100"
+    assert "--activate-fsq" in cmd and cmd[cmd.index("--activate-fsq") + 1] == "1e+99"
     assert "--workdir" in cmd and Path(cmd[cmd.index("--workdir") + 1]) == tmp_path / "freeb"
     assert "--json" in cmd and Path(cmd[cmd.index("--json") + 1]) == json_path
 

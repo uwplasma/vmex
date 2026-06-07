@@ -79,6 +79,7 @@ def test_optional_validation_lasym_freeb_example_matches_manifest_case() -> None
     assert bool(case["lfreeb"]) is True
     assert bool(case["lasym"]) is True
     assert bool(case["axisymmetric"]) is False
+    assert float(case["activate_fsq"]) == 1.0e99
     assert set(case["runtime_thresholds_s_by_iter"]) == {"80", "100"}
     assert set(case["metric_thresholds_rel_scaled_by_iter"]) == {"80", "100"}
 
