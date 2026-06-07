@@ -199,6 +199,68 @@ Completion:
 - CI/runtime/coverage hygiene: 100%.
 - Docs/release hygiene: 99.8%.
 
+### 2026-06-07 Default Physical-Vector CI and NESTOR Profile
+
+Steps taken:
+
+1. Confirmed commit ``68fa14b`` reached a fully green GitHub Actions run,
+   ``27084313328``.  The run passed docs, py3.10, py3.12, all py3.11
+   exact/core/slow coverage shards, physics smoke, console-script smoke, build,
+   dry-run parity manifest, and the combined coverage gate.
+2. Ran the free-boundary QS coil smoke example with the new default
+   same-branch vector keys, the accepted/rejected controller-slot gate, and
+   dense-vs-matrix-free NESTOR replay profiling enabled.
+3. Parsed the emitted same-branch report to verify the production report
+   schema, physical-scalar AD-vs-central-FD errors, rejected-slot provenance,
+   and matrix-free promotion policy.
+
+Results obtained:
+
+1. The default vector report validated ``aspect``, ``qs_total``, ``mean_iota``,
+   and ``lcfs_boundary_moment`` with absolute AD-vs-central-FD errors of
+   approximately ``1.45e-11``, ``1.46e-11``, ``1.95e-13``, and ``1.46e-14``.
+2. The fixed accepted/rejected controller-slot report was available, included
+   one fixed rejected slot, and had ``max_base_abs_delta`` of about
+   ``6.0e-15``.
+3. For the tiny 13-mode smoke case, dense NESTOR replay remained faster than
+   matrix-free replay: dense ``gmres`` was ``1.15 s``, matrix-free ``gmres``
+   was ``1.80 s``, and matrix-free ``bicgstab`` was ``1.28 s``.  The recorded
+   policy correctly did not promote matrix-free because the mode count is below
+   the ``96``-mode threshold and the best matrix-free timing was slower than
+   dense.
+
+Best next steps:
+
+1. Keep the default example report on the promoted physical-scalar vector
+   contract and continue using complete VMEC solves as acceptance authority for
+   coil optimization.
+2. Do not promote matrix-free NESTOR for low-mode smoke cases.  Continue
+   profiling only on larger bounded free-boundary cases where the mode count is
+   high enough to plausibly amortize Krylov/operator overhead.
+3. The next correctness milestone remains a true adaptive-branch derivative
+   seam.  Until that passes a fingerprint-gated complete-loop AD-vs-FD gate,
+   all reports must continue to state that they differentiate fixed
+   same-branch replay, not arbitrary adaptive host branch selection.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999996% for fixed
+  same-branch scalar/vector gates and explicit accepted/rejected slot evidence;
+  arbitrary adaptive branch differentiation remains explicitly unclaimed.
+- VMEC parity and physics gates: 98.6%; strict instrumented VMEC2000 dump
+  parity remains blocked locally by unavailable instrumentation.
+- Single-stage coil-only optimization: 98.7%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 99.6%; matrix-free NESTOR remains opt-in/profiled and
+  unpromoted for low-mode reports.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 99.8%.
+
 ### 2026-06-07 Free-Boundary QS Example Default Vector Report
 
 Steps taken:
