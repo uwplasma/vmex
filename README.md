@@ -10,8 +10,9 @@
 [![PyPI downloads](https://img.shields.io/pypi/dm/vmec-jax)](https://pypi.org/project/vmec-jax/)
 
 End-to-end differentiable JAX implementation of **VMEC2000** for fixed-boundary
-workflows, with free-boundary support and direct-coil research paths. Full
-free-boundary solve adjoints remain in development.
+workflows, with free-boundary support, VMEC2000-compatible `mgrid` workflows,
+and direct-coil research paths. Full adaptive free-boundary solve adjoints
+remain in development.
 
 ## Install
 
@@ -125,10 +126,13 @@ vmec input.cth_like_free_bdy_lasym_small
 
 The direct-coil free-boundary lane samples differentiable Biot-Savart coils
 directly while keeping the existing `mgrid` path for VMEC2000 compatibility.
-Current coil-only optimization examples validate fixed accepted-branch
-derivatives and cheap VMEC-state QS/aspect/iota proxies; they do not yet claim
-full adaptive coil-to-Boozer differentiation through every host-controller
-branch.
+The finalized single-stage optimization lane recomputes a complete direct-coil
+free-boundary solve for each accepted objective point. Current coil-only
+examples validate cheap VMEC-state QS/aspect/iota proxies and same-branch,
+fingerprint-gated branch-local derivatives; complete solves remain the
+acceptance authority. They do not claim production differentiation through
+adaptive accepted/rejected host-controller branch changes or full
+coil-to-Boozer adjoints.
 
 ```bash
 python examples/free_boundary_direct_coils_forward.py \

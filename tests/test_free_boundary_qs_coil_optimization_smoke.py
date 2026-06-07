@@ -605,6 +605,8 @@ def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path
     scalar = report["branch_local_scalar_gradient"]
     expected_directional = module._pytree_directional_vdot(grad, direction_params)
     assert scalar["available"] is True
+    assert "fixed accepted branch only" in scalar["scope"]
+    assert scalar["mode"] == "scalar"
     assert scalar["uses_production_forward"] is True
     assert scalar["differentiates_adaptive_controller"] is False
     assert scalar["differentiates_run_free_boundary"] is False
@@ -618,8 +620,12 @@ def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path
     assert scalar["replay_option_flags"]["nestor_solve_mode"] == "dense"
     assert scalar["replay_option_flags"]["nestor_operator_solver"] == "gmres"
     assert scalar["replay_graph_metadata"]["omitted"] is True
+    assert scalar["value"] == pytest.approx(6.0)
+    assert scalar["replay_value"] == pytest.approx(6.0)
+    assert scalar["base_abs_delta"] == pytest.approx(0.0)
     assert scalar["exact_directional"] == pytest.approx(expected_directional)
     assert scalar["complete_fd_directional"] == pytest.approx(0.7)
+    assert scalar["abs_error"] == pytest.approx(abs(float(expected_directional) - 0.7))
     assert report["branch_local_vector_jacobian"]["available"] is False
     assert report["timings"]["complete_solve_fd_wall_s"] >= 0.0
     assert report["timings"]["branch_local_scalar_wall_s"] >= 0.0
@@ -810,6 +816,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
     report = json.loads(path.read_text())
     vector = report["branch_local_vector_jacobian"]
     assert vector["available"] is True
+    assert "fixed accepted branch only" in vector["scope"]
     assert vector["uses_production_forward"] is True
     assert vector["differentiates_adaptive_controller"] is False
     assert vector["differentiates_run_free_boundary"] is False
@@ -827,10 +834,18 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
     assert vector["includes_replay_graph_metadata"] is False
     assert vector["replay_graph_metadata"]["omitted"] is True
     assert vector["max_base_abs_delta"] == pytest.approx(0.0)
-    assert vector["scalars"]["aspect"]["complete_fd_directional"] == pytest.approx(0.1)
-    assert vector["scalars"]["qs_total"]["complete_fd_directional"] == pytest.approx(0.4)
-    assert vector["scalars"]["mean_iota"]["complete_fd_directional"] == pytest.approx(0.2)
-    assert vector["scalars"]["lcfs_boundary_moment"]["complete_fd_directional"] == pytest.approx(0.2)
+    expected_directionals = {
+        "aspect": 0.1,
+        "qs_total": 0.4,
+        "mean_iota": 0.2,
+        "lcfs_boundary_moment": 0.2,
+    }
+    for key, expected_directional in expected_directionals.items():
+        scalar_evidence = vector["scalars"][key]
+        assert scalar_evidence["exact_directional"] == pytest.approx(expected_directional)
+        assert scalar_evidence["complete_fd_directional"] == pytest.approx(expected_directional)
+        assert scalar_evidence["abs_error"] == pytest.approx(0.0)
+        assert scalar_evidence["base_abs_delta"] == pytest.approx(0.0)
     assert report["timings"]["complete_solve_fd_wall_s"] >= 0.0
     assert report["timings"]["branch_local_vector_wall_s"] >= 0.0
     assert vector["timings"]["replay_jvp_wall_s"] == pytest.approx(0.02)
@@ -1214,6 +1229,11 @@ def test_circle_dry_run_writes_configuration_without_solves(tmp_path, monkeypatc
     summary = json.loads((tmp_path / "summary.json").read_text())
     assert "optimizer" not in summary
     assert "best" not in summary
+    assert summary["flow"] == "single_stage_direct_coil_no_mgrid"
+    assert summary["workflow"]["field_backend"] == "direct_coils"
+    assert summary["workflow"]["python_provider_required"] is True
+    assert summary["workflow"]["uses_mgrid_file"] is False
+    assert summary["workflow"]["plasma_boundary_optimized"] is False
     assert summary["scope"] == "deterministic coil-only direct-coil free-boundary QS optimization example"
     assert summary["dry_run"] is True
     assert summary["plasma_boundary_optimized"] is False
@@ -1224,6 +1244,9 @@ def test_circle_dry_run_writes_configuration_without_solves(tmp_path, monkeypatc
     assert summary["vmec_config"]["external_field_provider_kind"] == "direct_coils"
     assert summary["vmec_config"]["mgrid_file"] == "DIRECT_COILS"
     assert summary["vmec_config"]["uses_generated_mgrid"] is False
+    assert summary["vmec_config"]["python_provider_required"] is True
+    assert summary["vmec_config"]["uses_mgrid_file"] is False
+    assert "Python-provider tag" in summary["vmec_config"]["vmec_input_replay"]
     assert summary["vmec_config"]["vmec_max_iter"] == 2
     assert summary["vmec_config"]["jit_forces"] is True
     assert [record["kind"] for record in summary["optimized_variables"]] == ["current", "fourier_dof"]
@@ -1243,8 +1266,22 @@ def test_essos_provider_skip_returns_code_77_without_solves(tmp_path, monkeypatc
     def fail_make_free_boundary_indata(*_args, **_kwargs):
         raise AssertionError("ESSOS skip must happen before input generation")
 
+    def fail_run_direct_free_boundary(*_args, **_kwargs):
+        raise AssertionError("ESSOS skip must happen before free-boundary solves")
+
+    def fail_minimize(*_args, **_kwargs):
+        raise AssertionError("ESSOS skip must happen before optimizer import/use")
+
+    def fail_write_wout(*_args, **_kwargs):
+        raise AssertionError("ESSOS skip must happen before WOUT writes")
+
     monkeypatch.setattr(module, "load_essos_provider", fake_load_essos_provider)
     monkeypatch.setattr(module, "make_free_boundary_indata", fail_make_free_boundary_indata)
+    monkeypatch.setattr(module, "run_direct_free_boundary", fail_run_direct_free_boundary)
+    monkeypatch.setattr(module, "write_wout_from_fixed_boundary_run", fail_write_wout)
+    fake_scipy_optimize = ModuleType("scipy.optimize")
+    fake_scipy_optimize.minimize = fail_minimize
+    monkeypatch.setitem(sys.modules, "scipy.optimize", fake_scipy_optimize)
 
     exit_code = module.main(
         [
@@ -1261,6 +1298,9 @@ def test_essos_provider_skip_returns_code_77_without_solves(tmp_path, monkeypatc
     assert exit_code == module.SKIP_EXIT_CODE
     assert "SKIP: synthetic missing ESSOS assets" in captured.err
     assert not (tmp_path / "summary.json").exists()
+    assert not (tmp_path / "input.direct_coil_qs").exists()
+    assert not (tmp_path / "history.json").exists()
+    assert not (tmp_path / "wout_best_direct_coil_qs.nc").exists()
 
 
 def test_essos_dry_run_writes_direct_coil_configuration_without_mgrid(tmp_path, monkeypatch):
@@ -1332,6 +1372,8 @@ def test_essos_dry_run_writes_direct_coil_configuration_without_mgrid(tmp_path, 
     summary = json.loads((tmp_path / "summary.json").read_text())
     assert summary["dry_run"] is True
     assert summary["plasma_boundary_optimized"] is False
+    assert summary["flow"] == "single_stage_direct_coil_no_mgrid"
+    assert summary["workflow"]["mgrid_compatibility_example"].endswith("free_boundary_essos_mgrid_forward.py")
     assert summary["provider"]["provider"] == "essos"
     assert summary["provider"]["coils_json"].endswith("ESSOS_biot_savart_LandremanPaulQA.json")
     assert summary["baseline_coils"]["n_base_coils"] == 1
@@ -1340,6 +1382,9 @@ def test_essos_dry_run_writes_direct_coil_configuration_without_mgrid(tmp_path, 
     assert summary["vmec_config"]["external_field_provider_kind"] == "direct_coils"
     assert summary["vmec_config"]["mgrid_file"] == "DIRECT_COILS"
     assert summary["vmec_config"]["uses_generated_mgrid"] is False
+    assert summary["vmec_config"]["python_provider_required"] is True
+    assert summary["vmec_config"]["uses_mgrid_file"] is False
+    assert summary["vmec_config"]["mgrid_compatibility_example"].endswith("free_boundary_essos_mgrid_forward.py")
     assert "generated_mgrid" not in summary["vmec_config"]
     assert [record["kind"] for record in summary["optimized_variables"]] == ["current", "fourier_dof"]
     assert all(record["kind"] != "boundary" for record in summary["optimized_variables"])
@@ -1456,6 +1501,8 @@ def test_deterministic_circle_smoke_records_qs_terms(tmp_path, monkeypatch):
     assert history[0]["summary"]["objective_terms"]["quasisymmetry"]["contribution"] == pytest.approx(1.0)
     assert history[0]["summary"]["objective_terms"]["total"] == pytest.approx(3.0)
     assert summary["dry_run"] is False
+    assert summary["flow"] == "single_stage_direct_coil_no_mgrid"
+    assert summary["workflow"]["optimized_dofs"] == "coil currents and selected coil Fourier coefficients only"
     assert summary["scope"] == "deterministic coil-only direct-coil free-boundary QS optimization example"
     assert summary["baseline_coils"]["n_base_coils"] == 1
     assert summary["optimized_variables"][0]["unit_x_delta"] == pytest.approx(0.04)
@@ -1698,9 +1745,12 @@ def test_essos_provider_non_dry_run_uses_direct_coils_without_mgrid(tmp_path, mo
     assert len(history) == 1
     assert summary["dry_run"] is False
     assert summary["provider"]["provider"] == "essos"
+    assert summary["flow"] == "single_stage_direct_coil_no_mgrid"
+    assert summary["workflow"]["uses_mgrid_file"] is False
     assert summary["vmec_config"]["external_field_provider_kind"] == "direct_coils"
     assert summary["vmec_config"]["mgrid_file"] == "DIRECT_COILS"
     assert summary["vmec_config"]["uses_generated_mgrid"] is False
+    assert summary["vmec_config"]["python_provider_required"] is True
     assert "generated_mgrid" not in summary["vmec_config"]
     assert all(record["kind"] in {"current", "fourier_dof"} for record in summary["optimized_variables"])
     assert all(record["kind"] != "boundary" for record in summary["optimized_variables"])

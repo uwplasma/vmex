@@ -18,6 +18,16 @@ milestone status.  Use :doc:`validation` and :doc:`quickstart` for the current
 supported free-boundary workflow, and :doc:`free_boundary_coil_optimization`
 for the direct-coil research lane.
 
+The finalized direct-coil single-stage lane is deliberately narrower than the
+VMEC2000-parity ``mgrid`` path documented here.  The ``mgrid`` backend remains
+the compatibility and parity route.  The direct-coil provider evaluates a
+differentiable Biot-Savart field from coil currents and Fourier curve
+coefficients, while the optimizer accepts or rejects objective points using
+complete free-boundary solves.  Same-branch derivative reports are
+branch-local and fingerprint-gated against complete-solve finite differences;
+production differentiation through adaptive accepted/rejected branch changes is
+not claimed.
+
 WP0 is implemented:
 
 - typed free-boundary input config parsed from ``&INDATA``:

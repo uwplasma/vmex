@@ -16,6 +16,10 @@ Run from the repository root:
     PYTHONPATH=.:$ESSOS_ROOT:$PYTHONPATH python examples/free_boundary_essos_mgrid_forward.py --max-iter 10
 
 Use ``--dry-run`` to write the input/mgrid/summary without running VMEC.
+
+This is the compatibility lane: coil differentiation is not carried through
+the generated field table, but the resulting input references an ordinary
+``mgrid`` NetCDF file rather than the direct-coil Python-provider tag.
 """
 
 from __future__ import annotations
@@ -148,6 +152,7 @@ def main(argv: list[str] | None = None) -> int:
     summary["coils_json"] = str(args.coils_json) if args.coils_json is not None else "ESSOS Landreman-Paul QA default"
     summary_path.write_text(json.dumps(summary, indent=2, default=json_default) + "\n")
 
+    print("Flow: ESSOS coils -> generated mgrid NetCDF -> vmec_jax mgrid compatibility backend.")
     print(f"Wrote input: {input_path}")
     print(f"Wrote summary: {summary_path}")
     if wout_path is not None:

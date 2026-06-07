@@ -7,7 +7,12 @@ import numpy as np
 import pytest
 
 from vmec_jax._compat import enable_x64
-from vmec_jax.external_fields import CoilFieldParams, MGridFieldParams, sample_coil_field_cylindrical
+from vmec_jax.external_fields import (
+    CoilFieldParams,
+    MGridFieldParams,
+    build_coil_field_geometry,
+    sample_coil_field_cylindrical,
+)
 from vmec_jax.free_boundary import ExternalBoundarySample, sample_free_boundary_external_field
 from vmec_jax.namelist import read_indata, write_indata
 
@@ -183,6 +188,87 @@ def test_generated_mgrid_boundary_projection_matches_direct_coil_provider_at_nod
             atol=2.0e-14,
             err_msg=f"generated mgrid projection changed vac_ext.{name}",
         )
+
+
+def test_direct_coil_provider_cached_geometry_and_alias_match_uncached_projection():
+    enable_x64(True)
+    from vmec_jax._compat import jnp
+
+    params = _off_axis_coil_params()
+    R, Z, Ru, Zu, Rv, Zv, phi = _simple_boundary(ntheta=5, nzeta=4)
+    R = jnp.asarray(R + 0.25)
+    Z = jnp.asarray(Z)
+    Ru = jnp.asarray(Ru)
+    Zu = jnp.asarray(Zu)
+    Rv = jnp.asarray(Rv + 0.01)
+    Zv = jnp.asarray(Zv)
+    phi = jnp.asarray(phi + 0.13)
+
+    uncached = sample_free_boundary_external_field(
+        R=R,
+        Z=Z,
+        Ru=Ru,
+        Zu=Zu,
+        Rv=Rv,
+        Zv=Zv,
+        phi=phi,
+        provider_kind="direct_coils",
+        provider_params=params,
+        label="uncached_direct",
+    )
+    cached = sample_free_boundary_external_field(
+        R=R,
+        Z=Z,
+        Ru=Ru,
+        Zu=Zu,
+        Rv=Rv,
+        Zv=Zv,
+        phi=phi,
+        provider_kind="direct_coils",
+        provider_static={
+            "coil_geometry": build_coil_field_geometry(params),
+            "regularization_epsilon": params.regularization_epsilon,
+            "chunk_size": params.chunk_size,
+            "cache_scope": "test_host_forward_only",
+            "jit_sampler": False,
+        },
+        provider_params=params,
+        label="cached_direct",
+    )
+    alias = sample_free_boundary_external_field(
+        R=R,
+        Z=Z,
+        Ru=Ru,
+        Zu=Zu,
+        Rv=Rv,
+        Zv=Zv,
+        phi=phi,
+        provider_kind="coils",
+        provider_params=params,
+        label="alias_direct",
+    )
+
+    expected = sample_coil_field_cylindrical(params, R, Z, phi)
+    assert cached.mgrid_path == "cached_direct"
+    for name, want in zip(("br", "bp", "bz"), expected, strict=True):
+        np.testing.assert_allclose(np.asarray(getattr(uncached, name)), np.asarray(want), rtol=2.0e-13, atol=2.0e-14)
+    for got_sample in (cached, alias):
+        for name in ("br", "bp", "bz", "br_mgrid", "bp_mgrid", "bz_mgrid"):
+            np.testing.assert_allclose(
+                np.asarray(getattr(got_sample, name)),
+                np.asarray(getattr(uncached, name)),
+                rtol=2.0e-13,
+                atol=2.0e-14,
+                err_msg=f"{got_sample.mgrid_path} changed direct-coil provider {name}",
+            )
+        for name in ("bnormal", "bnormal_unit", "bu", "bv", "bsqvac"):
+            np.testing.assert_allclose(
+                np.asarray(getattr(got_sample.vac_ext, name)),
+                np.asarray(getattr(uncached.vac_ext, name)),
+                rtol=2.0e-13,
+                atol=2.0e-14,
+                err_msg=f"{got_sample.mgrid_path} changed direct-coil projection vac_ext.{name}",
+            )
 
 
 def test_sample_free_boundary_external_field_adds_axis_field_separately():
