@@ -438,6 +438,195 @@ def mode_matrix_from_grpmn_jax(
     return jnp.concatenate([top, bottom], axis=0)
 
 
+def mode_matrix_matvec_from_grpmn_jax(
+    vector: Any,
+    grpmn: Any,
+    *,
+    sin_basis: Any,
+    xmpot: Any,
+    n_raw: Any,
+    lasym: bool,
+    cos_basis: Any | None = None,
+    mn0: int = 0,
+    transpose: bool = False,
+) -> Any:
+    """Apply the VMEC/NESTOR mode operator without materializing it.
+
+    This is the matrix-free counterpart to
+    :func:`mode_matrix_from_grpmn_jax`.  It still consumes the JAX source
+    response samples ``grpmn`` but avoids assembling the dense mode matrix
+    before a Krylov solve.  The helper is intentionally opt-in and is used as a
+    validation seam toward a future fully matrix-free NESTOR/source response.
+    """
+
+    g = jnp.asarray(grpmn)
+    sin = jnp.asarray(sin_basis)
+    x = jnp.asarray(vector)
+    if g.ndim != 2:
+        raise ValueError("grpmn must be a 2D array")
+    if sin.ndim != 2:
+        raise ValueError("sin_basis must be a 2D array")
+    mnpd = int(sin.shape[1])
+    if g.shape[0] < mnpd:
+        raise ValueError("invalid_grpmn_shape")
+    if x.shape[0] != (2 * mnpd if bool(lasym) else mnpd):
+        raise ValueError("vector size does not match mode operator")
+
+    xmpot_arr = jnp.asarray(xmpot)
+    n_raw_arr = jnp.asarray(n_raw)
+    skip_col = jnp.logical_and(xmpot_arr == 0, n_raw_arr < 0)
+    pi3 = float(4.0 * (jnp.pi**3))
+    gsin = g[:mnpd, :]
+
+    if not bool(lasym):
+        if bool(transpose):
+            projected = sin.T @ (gsin.T @ x)
+            return jnp.where(skip_col, 0.0, projected) + pi3 * x
+        return gsin @ (sin @ jnp.where(skip_col, 0.0, x)) + pi3 * x
+
+    if g.shape[0] < 2 * mnpd:
+        raise ValueError("invalid_grpmn_shape_lasym")
+    if cos_basis is None:
+        raise ValueError("cos_basis is required for LASYM mode matrix application")
+    cos = jnp.asarray(cos_basis)
+    if cos.shape != sin.shape:
+        raise ValueError("cos_basis must match sin_basis shape")
+
+    gcos = g[mnpd : 2 * mnpd, :]
+    xs = x[:mnpd]
+    xc = x[mnpd:]
+    if bool(transpose):
+        grid = gsin.T @ xs + gcos.T @ xc
+        ys = jnp.where(skip_col, 0.0, sin.T @ grid) + pi3 * xs
+        yc = jnp.where(skip_col, 0.0, cos.T @ grid) + pi3 * xc
+    else:
+        grid = sin @ jnp.where(skip_col, 0.0, xs) + cos @ jnp.where(skip_col, 0.0, xc)
+        ys = gsin @ grid + pi3 * xs
+        yc = gcos @ grid + pi3 * xc
+    if 0 <= int(mn0) < mnpd:
+        yc = yc.at[int(mn0)].add(pi3 * xc[int(mn0)])
+    return jnp.concatenate([ys, yc], axis=0)
+
+
+def mode_operator_vacuum_solve_jax(
+    grpmn: Any,
+    rhs_mode: Any,
+    *,
+    sin_basis: Any,
+    xmpot: Any,
+    n_raw: Any,
+    lasym: bool,
+    cos_basis: Any | None = None,
+    mn0: int = 0,
+    include_phi_flat: bool = True,
+    include_residual: bool = True,
+    solver: str = "gmres",
+    tol: float = 1.0e-11,
+    atol: float = 1.0e-13,
+    maxiter: int | None = None,
+    restart: int | None = None,
+) -> dict[str, Any]:
+    """Solve the mode response through a matrix-free mode operator.
+
+    The default production path still uses the dense mode matrix.  This helper
+    is an opt-in validation/optimization seam for the low-resolution JAX
+    NESTOR lane: forward and transpose solves apply
+    :func:`mode_matrix_matvec_from_grpmn_jax` directly, so no dense mode matrix
+    is assembled for the solve or residual.
+    """
+
+    rhs = jnp.asarray(rhs_mode)
+    sin = jnp.asarray(sin_basis)
+    if rhs.ndim != 1:
+        raise ValueError("matrix-free mode solve requires a 1D rhs_mode")
+    if sin.ndim != 2:
+        raise ValueError("sin_basis must be a 2D array")
+    grpmn_arr = jnp.asarray(grpmn)
+    solver_name = str(solver).strip().lower()
+    if solver_name not in ("gmres", "bicgstab"):
+        raise ValueError("solver must be 'gmres' or 'bicgstab'")
+
+    def _matvec(vec):
+        return mode_matrix_matvec_from_grpmn_jax(
+            vec,
+            grpmn_arr,
+            sin_basis=sin,
+            cos_basis=cos_basis,
+            xmpot=xmpot,
+            n_raw=n_raw,
+            lasym=bool(lasym),
+            mn0=int(mn0),
+            transpose=False,
+        )
+
+    def _transpose_matvec(vec):
+        return mode_matrix_matvec_from_grpmn_jax(
+            vec,
+            grpmn_arr,
+            sin_basis=sin,
+            cos_basis=cos_basis,
+            xmpot=xmpot,
+            n_raw=n_raw,
+            lasym=bool(lasym),
+            mn0=int(mn0),
+            transpose=True,
+        )
+
+    def _iterative_solve(matvec, vector):
+        from jax.scipy.sparse.linalg import bicgstab, gmres
+
+        if solver_name == "gmres":
+            kwargs = {"tol": float(tol), "atol": float(atol), "maxiter": maxiter}
+            if restart is not None:
+                kwargs["restart"] = int(restart)
+            return gmres(matvec, vector, **kwargs)[0]
+        return bicgstab(matvec, vector, tol=float(tol), atol=float(atol), maxiter=maxiter)[0]
+
+    if jax is None:  # pragma: no cover - dependency fallback.
+        matrix = mode_matrix_from_grpmn_jax(
+            grpmn_arr,
+            sin_basis=sin,
+            cos_basis=cos_basis,
+            xmpot=xmpot,
+            n_raw=n_raw,
+            lasym=bool(lasym),
+            mn0=int(mn0),
+        )
+        coeffs = jnp.linalg.solve(matrix, rhs)
+    else:
+        coeffs = jax.lax.custom_linear_solve(
+            _matvec,
+            rhs,
+            lambda matvec, vector: _iterative_solve(matvec, vector),
+            transpose_solve=lambda _matvec_unused, vector: _iterative_solve(_transpose_matvec, vector),
+            symmetric=False,
+        )
+
+    if cos_basis is None:
+        if coeffs.shape[0] != sin.shape[1]:
+            raise ValueError("rhs size must match sin_basis columns")
+        phi_flat = sin @ coeffs if bool(include_phi_flat) else None
+    else:
+        cos = jnp.asarray(cos_basis)
+        if cos.shape != sin.shape:
+            raise ValueError("cos_basis must match sin_basis shape")
+        nmodes = int(sin.shape[1])
+        if coeffs.shape[0] != 2 * nmodes:
+            raise ValueError("doubled rhs size must be 2 * sin_basis columns")
+        phi_flat = sin @ coeffs[:nmodes] + cos @ coeffs[nmodes:] if bool(include_phi_flat) else None
+
+    out = {
+        "mode_coeffs": coeffs,
+        "solve_mode": f"matrix_free_{solver_name}",
+        "mode_matrix_materialized": False,
+    }
+    if bool(include_phi_flat):
+        out["phi_flat"] = phi_flat
+    if bool(include_residual):
+        out["residual"] = _matvec(coeffs) - rhs
+    return out
+
+
 def vmec_nonsingular_terms_from_bexni_jax(
     *,
     R: Any,
@@ -1071,6 +1260,12 @@ def dense_vmec_nestor_mode_solve_jax(
     symmetric: bool = False,
     include_phi_flat: bool = True,
     include_residual: bool = True,
+    solve_mode: str = "dense",
+    operator_solver: str = "gmres",
+    operator_tol: float = 1.0e-11,
+    operator_atol: float = 1.0e-13,
+    operator_maxiter: int | None = None,
+    operator_restart: int | None = None,
 ) -> dict[str, Any]:
     """Assemble and solve the dense JAX VMEC/NESTOR mode operator.
 
@@ -1150,24 +1345,50 @@ def dense_vmec_nestor_mode_solve_jax(
         rhs = rhs + bvec_analytic
         grpmn = grpmn + grpmn_analytic
 
-    mode_matrix = mode_matrix_from_grpmn_jax(
-        grpmn,
-        sin_basis=basis["sinmni"],
-        cos_basis=basis["cosmni"],
-        xmpot=basis["xmpot"],
-        n_raw=basis["n_raw"],
-        lasym=bool(basis["lasym"]),
-        mn0=int(basis["mn0"]),
-    )
-    solved = dense_mode_vacuum_solve_jax(
-        mode_matrix,
-        rhs,
-        basis["sinmni"],
-        basis["cosmni"] if bool(basis["lasym"]) else None,
-        symmetric=symmetric,
-        include_phi_flat=bool(include_phi_flat),
-        include_residual=bool(include_residual),
-    )
+    solve_mode_name = str(solve_mode).strip().lower()
+    if solve_mode_name in ("dense", "matrix", "mode_matrix"):
+        mode_matrix = mode_matrix_from_grpmn_jax(
+            grpmn,
+            sin_basis=basis["sinmni"],
+            cos_basis=basis["cosmni"],
+            xmpot=basis["xmpot"],
+            n_raw=basis["n_raw"],
+            lasym=bool(basis["lasym"]),
+            mn0=int(basis["mn0"]),
+        )
+        solved = dense_mode_vacuum_solve_jax(
+            mode_matrix,
+            rhs,
+            basis["sinmni"],
+            basis["cosmni"] if bool(basis["lasym"]) else None,
+            symmetric=symmetric,
+            include_phi_flat=bool(include_phi_flat),
+            include_residual=bool(include_residual),
+        )
+        solved["solve_mode"] = "dense"
+        solved["mode_matrix_materialized"] = True
+    elif solve_mode_name in ("matrix_free", "operator", "operator_gmres", "gmres", "bicgstab"):
+        solver_name = "bicgstab" if solve_mode_name == "bicgstab" else str(operator_solver).strip().lower()
+        mode_matrix = None
+        solved = mode_operator_vacuum_solve_jax(
+            grpmn,
+            rhs,
+            sin_basis=basis["sinmni"],
+            cos_basis=basis["cosmni"] if bool(basis["lasym"]) else None,
+            xmpot=basis["xmpot"],
+            n_raw=basis["n_raw"],
+            lasym=bool(basis["lasym"]),
+            mn0=int(basis["mn0"]),
+            include_phi_flat=bool(include_phi_flat),
+            include_residual=bool(include_residual),
+            solver=solver_name,
+            tol=float(operator_tol),
+            atol=float(operator_atol),
+            maxiter=operator_maxiter,
+            restart=operator_restart,
+        )
+    else:
+        raise ValueError("solve_mode must be 'dense' or 'matrix_free'")
     return {
         **solved,
         "rhs_mode": rhs,
@@ -1656,6 +1877,12 @@ def direct_coil_boundary_bsqvac_jax(
     include_mode_diagnostics: bool = True,
     vac_override: Mapping[str, Any] | None = None,
     coil_geometry: Any | None = None,
+    nestor_solve_mode: str = "dense",
+    nestor_operator_solver: str = "gmres",
+    nestor_operator_tol: float = 1.0e-11,
+    nestor_operator_atol: float = 1.0e-13,
+    nestor_operator_maxiter: int | None = None,
+    nestor_operator_restart: int | None = None,
 ) -> dict[str, Any]:
     """Replay accepted-boundary direct-coil ``bsqvac`` through JAX NESTOR.
 
@@ -1743,6 +1970,12 @@ def direct_coil_boundary_bsqvac_jax(
             include_analytic=bool(include_analytic),
             include_phi_flat=bool(include_mode_diagnostics),
             include_residual=bool(include_mode_diagnostics),
+            solve_mode=str(nestor_solve_mode),
+            operator_solver=str(nestor_operator_solver),
+            operator_tol=float(nestor_operator_tol),
+            operator_atol=float(nestor_operator_atol),
+            operator_maxiter=nestor_operator_maxiter,
+            operator_restart=nestor_operator_restart,
         )
     with _jax_named_scope("vmec_jax.free_boundary.mode_field_reconstruction"):
         channels = vacuum_boundary_fields_from_mode_coeffs_jax(
@@ -1782,6 +2015,12 @@ def direct_coil_boundary_bsqvac_from_trace_jax(
     include_mode_diagnostics: bool = True,
     freeze_vacuum_field: bool = False,
     coil_geometry: Any | None = None,
+    nestor_solve_mode: str = "dense",
+    nestor_operator_solver: str = "gmres",
+    nestor_operator_tol: float = 1.0e-11,
+    nestor_operator_atol: float = 1.0e-13,
+    nestor_operator_maxiter: int | None = None,
+    nestor_operator_restart: int | None = None,
 ) -> dict[str, Any]:
     """Replay direct-coil ``bsqvac`` on accepted geometry using trace metadata.
 
@@ -1826,6 +2065,12 @@ def direct_coil_boundary_bsqvac_from_trace_jax(
         include_mode_diagnostics=bool(include_mode_diagnostics),
         vac_override=vac_override,
         coil_geometry=coil_geometry,
+        nestor_solve_mode=nestor_solve_mode,
+        nestor_operator_solver=nestor_operator_solver,
+        nestor_operator_tol=nestor_operator_tol,
+        nestor_operator_atol=nestor_operator_atol,
+        nestor_operator_maxiter=nestor_operator_maxiter,
+        nestor_operator_restart=nestor_operator_restart,
     )
 
 
@@ -4958,7 +5203,24 @@ def direct_coil_adaptive_full_loop_same_branch_gate_report(
         json_safe=False,
     )
     branch = complete_report.get("branch_compatibility", {})
+    branch_fingerprints = {
+        "base": branch.get("base_fingerprint", {}),
+        "plus": branch.get("plus_fingerprint", {}),
+        "minus": branch.get("minus_fingerprint", {}),
+    }
+    residual_branch_fingerprints = {
+        "base": branch.get("base_residual_fingerprint", {}),
+        "plus": branch.get("plus_residual_fingerprint", {}),
+        "minus": branch.get("minus_residual_fingerprint", {}),
+    }
+    same_full_loop_branch_fingerprint = bool(branch.get("same_branch", False)) and all(
+        isinstance(branch_fingerprints[label], Mapping) and bool(branch_fingerprints[label])
+        for label in ("base", "plus", "minus")
+    )
+    same_residual_branch_fingerprint = bool(branch.get("same_residual_branch", False))
     errors = [f"physical scalar gate: {error}" for error in physical_gate.get("errors", ())]
+    if not same_full_loop_branch_fingerprint:
+        errors.append("complete-loop branch fingerprints are missing or changed")
     replay_option_flags = scalars_report.get("replay_option_flags", {})
     used_stacked_step_controls = bool(replay_option_flags.get("use_stacked_step_controls", False))
     if bool(require_stacked_step_controls) and not used_stacked_step_controls:
@@ -5005,9 +5267,14 @@ def direct_coil_adaptive_full_loop_same_branch_gate_report(
         "passed": len(errors) == 0,
         "differentiates_adaptive_controller": False,
         "differentiates_run_free_boundary": False,
+        "fingerprint_gated": True,
         "same_branch": bool(branch.get("same_branch", False)),
         "same_accepted_trace_branch": bool(branch.get("same_accepted_trace_branch", branch.get("same_branch", False))),
         "same_residual_branch": bool(branch.get("same_residual_branch", branch.get("same_branch", False))),
+        "same_full_loop_branch_fingerprint": bool(same_full_loop_branch_fingerprint),
+        "same_residual_branch_fingerprint": bool(same_residual_branch_fingerprint),
+        "branch_fingerprints": branch_fingerprints,
+        "residual_branch_fingerprints": residual_branch_fingerprints,
         "same_stacked_step_policy_branch": bool(same_stacked_step_policy_branch),
         "requires_stacked_step_controls": bool(require_stacked_step_controls),
         "used_stacked_step_controls": used_stacked_step_controls,

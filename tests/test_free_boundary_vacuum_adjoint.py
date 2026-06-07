@@ -39,7 +39,9 @@ from vmec_jax.free_boundary_adjoint import (
     jax_visible_unrolled_state_only_accepted_only_nonlinear_controller_jax,
     direct_coil_projected_mode_fixed_point_directional_check_jax,
     direct_coil_projected_mode_fixed_point_objective_jax,
+    mode_matrix_matvec_from_grpmn_jax,
     mode_matrix_from_grpmn_jax,
+    mode_operator_vacuum_solve_jax,
     mode_rhs_from_gsource_jax,
     pytree_directional_derivative_check_jax,
     vacuum_boundary_fields_from_cylindrical_jax,
@@ -2171,6 +2173,196 @@ def test_dense_vmec_nestor_mode_solve_matches_host_reduced_symmetric_grid():
     np.testing.assert_allclose(actual["mode_matrix"], matrix, rtol=1.0e-12, atol=1.0e-12)
     np.testing.assert_allclose(actual["mode_coeffs"], expected["mode_coeffs"], rtol=1.0e-12, atol=1.0e-12)
     np.testing.assert_allclose(actual["phi_flat"], expected["phi_flat"], rtol=1.0e-12, atol=1.0e-12)
+
+
+@pytest.mark.parametrize("lasym", [False, True], ids=["stellsym", "lasym"])
+def test_mode_matrix_matvec_matches_dense_mode_matrix(lasym: bool) -> None:
+    """Matrix-free VMEC/NESTOR mode application must match dense assembly."""
+
+    enable_x64(True)
+    basis, sample = _nonsingular_boundary_sample(lasym=lasym)
+    bex = np.linspace(-0.11, 0.29, int(basis["nuv3"]), dtype=float)
+    tables = _ensure_vmec_nonsingular_kernel_tables(basis=basis, nv=sample.R.shape[1], nvper=2)
+    response = dense_vmec_nestor_mode_solve_jax(
+        R=sample.R,
+        Z=sample.Z,
+        Ru=sample.Ru,
+        Zu=sample.Zu,
+        Rv=sample.Rv,
+        Zv=sample.Zv,
+        ruu=sample.ruu,
+        ruv=sample.ruv,
+        rvv=sample.rvv,
+        zuu=sample.zuu,
+        zuv=sample.zuv,
+        zvv=sample.zvv,
+        bexni=bex,
+        basis=basis,
+        tables=tables,
+        signgs=1,
+        nvper=2,
+        include_analytic=False,
+        include_phi_flat=False,
+        include_residual=False,
+    )
+    grpmn = response["grpmn"]
+    matrix = mode_matrix_from_grpmn_jax(
+        grpmn,
+        sin_basis=basis["sinmni"],
+        cos_basis=basis["cosmni"] if bool(basis["lasym"]) else None,
+        xmpot=basis["xmpot"],
+        n_raw=basis["n_raw"],
+        lasym=bool(basis["lasym"]),
+        mn0=int(basis["mn0"]),
+    )
+    size = int(matrix.shape[0])
+    vector = np.sin(0.31 + np.arange(size, dtype=float))
+
+    actual = mode_matrix_matvec_from_grpmn_jax(
+        vector,
+        grpmn,
+        sin_basis=basis["sinmni"],
+        cos_basis=basis["cosmni"] if bool(basis["lasym"]) else None,
+        xmpot=basis["xmpot"],
+        n_raw=basis["n_raw"],
+        lasym=bool(basis["lasym"]),
+        mn0=int(basis["mn0"]),
+    )
+    actual_t = mode_matrix_matvec_from_grpmn_jax(
+        vector,
+        grpmn,
+        sin_basis=basis["sinmni"],
+        cos_basis=basis["cosmni"] if bool(basis["lasym"]) else None,
+        xmpot=basis["xmpot"],
+        n_raw=basis["n_raw"],
+        lasym=bool(basis["lasym"]),
+        mn0=int(basis["mn0"]),
+        transpose=True,
+    )
+
+    np.testing.assert_allclose(actual, matrix @ vector, rtol=1.0e-12, atol=1.0e-12)
+    np.testing.assert_allclose(actual_t, matrix.T @ vector, rtol=1.0e-12, atol=1.0e-12)
+
+
+def test_matrix_free_mode_operator_solve_matches_dense_response_and_gradients() -> None:
+    """GMRES mode response matches dense solve and AD-vs-FD source gradients."""
+
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jax, jnp
+
+    enable_x64(True)
+    basis, sample = _nonsingular_boundary_sample(lasym=True)
+    bex = jnp.asarray(np.linspace(-0.11, 0.29, int(basis["nuv3"]), dtype=float))
+    direction = jnp.asarray(np.cos(0.19 + np.arange(int(basis["nuv3"]), dtype=float)))
+    gsource, grpmn = _jax_nonsingular_terms(sample, basis, bex)
+    rhs = _mode_rhs_from_basis(gsource, basis)
+    matrix = _mode_matrix_from_basis(grpmn, basis)
+    dense = dense_mode_vacuum_solve_jax(matrix, rhs, basis["sinmni"], basis["cosmni"])
+    matrix_free = mode_operator_vacuum_solve_jax(
+        grpmn,
+        rhs,
+        sin_basis=basis["sinmni"],
+        cos_basis=basis["cosmni"],
+        xmpot=basis["xmpot"],
+        n_raw=basis["n_raw"],
+        lasym=True,
+        mn0=int(basis["mn0"]),
+        tol=1.0e-13,
+        atol=1.0e-15,
+        maxiter=64,
+    )
+
+    assert matrix_free["solve_mode"] == "matrix_free_gmres"
+    assert matrix_free["mode_matrix_materialized"] is False
+    np.testing.assert_allclose(matrix_free["mode_coeffs"], dense["mode_coeffs"], rtol=2.0e-11, atol=2.0e-11)
+    np.testing.assert_allclose(matrix_free["phi_flat"], dense["phi_flat"], rtol=2.0e-11, atol=2.0e-11)
+    np.testing.assert_allclose(matrix_free["residual"], np.zeros_like(np.asarray(rhs)), atol=2.0e-10)
+
+    weights = jnp.asarray(np.sin(0.23 + np.arange(int(basis["nuv3"]), dtype=float)))
+
+    def objective(scale):
+        source = bex + scale * direction
+        src, gmat = _jax_nonsingular_terms(sample, basis, source)
+        rhs_scaled = _mode_rhs_from_basis(src, basis)
+        out = mode_operator_vacuum_solve_jax(
+            gmat,
+            rhs_scaled,
+            sin_basis=basis["sinmni"],
+            cos_basis=basis["cosmni"],
+            xmpot=basis["xmpot"],
+            n_raw=basis["n_raw"],
+            lasym=True,
+            mn0=int(basis["mn0"]),
+            include_phi_flat=True,
+            include_residual=False,
+            tol=1.0e-13,
+            atol=1.0e-15,
+            maxiter=64,
+        )
+        return jnp.vdot(weights, out["phi_flat"])
+
+    exact = jax.grad(objective)(0.0)
+    eps = 1.0e-6
+    fd = (objective(eps) - objective(-eps)) / (2.0 * eps)
+    np.testing.assert_allclose(exact, fd, rtol=5.0e-6, atol=1.0e-10)
+
+
+def test_dense_vmec_nestor_mode_solve_can_use_matrix_free_response() -> None:
+    """The combined JAX NESTOR solve can opt into matrix-free mode response."""
+
+    enable_x64(True)
+    basis, sample = _nonsingular_boundary_sample(lasym=False)
+    bex = np.linspace(-0.11, 0.29, int(basis["nuv3"]), dtype=float)
+    tables = _ensure_vmec_nonsingular_kernel_tables(basis=basis, nv=sample.R.shape[1], nvper=2)
+    dense = dense_vmec_nestor_mode_solve_jax(
+        R=sample.R,
+        Z=sample.Z,
+        Ru=sample.Ru,
+        Zu=sample.Zu,
+        Rv=sample.Rv,
+        Zv=sample.Zv,
+        ruu=sample.ruu,
+        ruv=sample.ruv,
+        rvv=sample.rvv,
+        zuu=sample.zuu,
+        zuv=sample.zuv,
+        zvv=sample.zvv,
+        bexni=bex,
+        basis=basis,
+        tables=tables,
+        signgs=1,
+        nvper=2,
+    )
+    matrix_free = dense_vmec_nestor_mode_solve_jax(
+        R=sample.R,
+        Z=sample.Z,
+        Ru=sample.Ru,
+        Zu=sample.Zu,
+        Rv=sample.Rv,
+        Zv=sample.Zv,
+        ruu=sample.ruu,
+        ruv=sample.ruv,
+        rvv=sample.rvv,
+        zuu=sample.zuu,
+        zuv=sample.zuv,
+        zvv=sample.zvv,
+        bexni=bex,
+        basis=basis,
+        tables=tables,
+        signgs=1,
+        nvper=2,
+        solve_mode="matrix_free",
+        operator_tol=1.0e-13,
+        operator_atol=1.0e-15,
+        operator_maxiter=64,
+    )
+
+    assert matrix_free["solve_mode"] == "matrix_free_gmres"
+    assert matrix_free["mode_matrix"] is None
+    assert matrix_free["mode_matrix_materialized"] is False
+    np.testing.assert_allclose(matrix_free["rhs_mode"], dense["rhs_mode"], rtol=1.0e-12, atol=1.0e-12)
+    np.testing.assert_allclose(matrix_free["mode_coeffs"], dense["mode_coeffs"], rtol=2.0e-11, atol=2.0e-11)
+    np.testing.assert_allclose(matrix_free["phi_flat"], dense["phi_flat"], rtol=2.0e-11, atol=2.0e-11)
 
 
 @pytest.mark.py311_slow_coverage
