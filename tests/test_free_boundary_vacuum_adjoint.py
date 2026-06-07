@@ -2176,6 +2176,7 @@ def test_dense_vmec_nestor_mode_solve_matches_host_reduced_symmetric_grid():
 
 
 @pytest.mark.parametrize("lasym", [False, True], ids=["stellsym", "lasym"])
+@pytest.mark.py311_slow_coverage
 def test_mode_matrix_matvec_matches_dense_mode_matrix(lasym: bool) -> None:
     """Matrix-free VMEC/NESTOR mode application must match dense assembly."""
 
@@ -2244,6 +2245,7 @@ def test_mode_matrix_matvec_matches_dense_mode_matrix(lasym: bool) -> None:
     np.testing.assert_allclose(actual_t, matrix.T @ vector, rtol=1.0e-12, atol=1.0e-12)
 
 
+@pytest.mark.py311_slow_coverage
 def test_matrix_free_mode_operator_solve_matches_dense_response_and_gradients() -> None:
     """GMRES mode response matches dense solve and AD-vs-FD source gradients."""
 
@@ -2307,6 +2309,7 @@ def test_matrix_free_mode_operator_solve_matches_dense_response_and_gradients() 
     np.testing.assert_allclose(exact, fd, rtol=5.0e-6, atol=1.0e-10)
 
 
+@pytest.mark.py311_slow_coverage
 def test_dense_vmec_nestor_mode_solve_can_use_matrix_free_response() -> None:
     """The combined JAX NESTOR solve can opt into matrix-free mode response."""
 
