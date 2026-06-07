@@ -378,12 +378,15 @@ full sweep, add a dry-run prefine manifest:
 
 .. code-block:: bash
 
-   PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py --quick --prefine-probes plan --prefine-manifest results/qi_seed_audit/prefine_manifest.json
+   PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py --quick --prefine-probes plan --prefine-manifest results/qi_seed_audit/prefine_manifest.json --prefine-mirror-weight 2.0 --prefine-elongation-weight 0.5 --prefine-mirror-surface-index all
 
 The manifest records top-ranked seeds plus one best-ranked representative from
-each available seed family, hard-capped QI-only prefine settings, expected
-output files, and exact commands for running one tiny probe at a time.  The
-default probe is now a bounded repeated-stage continuation,
+each available seed family, hard-capped constrained-QI prefine settings,
+expected output files, and exact commands for running one tiny probe at a time.
+The default prefine objective includes smooth QI, a QI ceiling, all-surface
+mirror ratio, and elongation terms; set ``--prefine-mirror-weight 0`` and
+``--prefine-elongation-weight 0`` only for a QI-only ablation.  The default
+probe is a bounded repeated-stage continuation,
 ``--prefine-stage-modes 1,1,2,2,3``, with explicit per-stage and total
 ``nfev`` caps recorded in the manifest.  Each plan also records the selected
 ``phimin`` value, its source, the endpoint mode, and the QI options used by the

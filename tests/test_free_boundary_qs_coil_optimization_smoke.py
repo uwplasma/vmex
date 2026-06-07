@@ -1022,6 +1022,10 @@ def test_same_branch_report_profiles_nestor_and_rejected_slot(tmp_path, monkeypa
 
     rejected_gate = report["accepted_rejected_controller_slot_gate"]
     assert rejected_gate["available"] is True
+    assert rejected_gate["same_branch"] is True
+    assert rejected_gate["differentiates_adaptive_controller"] is False
+    assert rejected_gate["differentiates_run_free_boundary"] is False
+    assert rejected_gate["same_stacked_step_policy_branch"] is True
     assert rejected_gate["fixed_rejected_controller_slot_present"] is True
     assert rejected_gate["fixed_rejected_controller_slots"] == 1
     assert rejected_gate["replay_option_flags"]["use_accepted_only_fast_path"] is False

@@ -415,7 +415,13 @@ def test_prefine_probe_manifest_selects_top_rows_and_stays_dry(tmp_path):
     assert "--prefine-reviewed" in manifest["plans"][0]["run_command"]
     assert "--prefine-use-ess" in manifest["plans"][0]["run_command"]
     assert "--prefine-ess-alpha 1.2" in manifest["plans"][0]["run_command"]
+    assert f"--prefine-mirror-weight {mod.DEFAULT_PREFINE_MIRROR_WEIGHT}" in manifest["plans"][0]["run_command"]
+    assert (
+        f"--prefine-elongation-weight {mod.DEFAULT_PREFINE_ELONGATION_WEIGHT}"
+        in manifest["plans"][0]["run_command"]
+    )
     assert "--prefine-mirror-surface-index all" in manifest["plans"][0]["run_command"]
+    assert manifest["plans"][0]["optimization"]["objective"] == "qi_constrained_prefine_probe"
     assert manifest["plans"][0]["optimization"]["max_nfev"] <= mod.MAX_PREFINE_MAX_NFEV
     assert manifest["plans"][0]["optimization"]["use_ess"] is True
     assert manifest["plans"][0]["optimization"]["ess_alpha"] == 1.2
@@ -426,6 +432,9 @@ def test_prefine_probe_manifest_selects_top_rows_and_stays_dry(tmp_path):
     assert manifest["plans"][0]["qi_options"]["include_bounce_endpoints"] is True
     assert manifest["plans"][0]["qi_options"]["endpoint_mode"] == "include_bounce_endpoints"
     assert manifest["plans"][0]["qi_options"]["phimin"] == 0.5
+    assert manifest["plans"][0]["qi_options"]["qi_ceiling_weight"] == 100.0
+    assert manifest["plans"][0]["qi_options"]["mirror_weight"] == mod.DEFAULT_PREFINE_MIRROR_WEIGHT
+    assert manifest["plans"][0]["qi_options"]["elongation_weight"] == mod.DEFAULT_PREFINE_ELONGATION_WEIGHT
     assert manifest["plans"][0]["qi_options"]["mirror_surface_index"] is None
     assert manifest["plans"][0]["qi_options"]["mirror_surface_mode"] == "all"
     assert manifest["plans"][0]["phimin"] == {
@@ -580,7 +589,11 @@ def test_run_qi_prefine_probe_dispatches_tiny_qi_solve(tmp_path):
     }
     manifest = mod.build_qi_prefine_probe_manifest(
         report,
-        config=mod.QIPrefineProbeConfig(output_dir=tmp_path / "probes"),
+        config=mod.QIPrefineProbeConfig(
+            output_dir=tmp_path / "probes",
+            mirror_weight=0.0,
+            elongation_weight=0.0,
+        ),
         manifest_path=tmp_path / "manifest.json",
         dry_run=False,
     )
@@ -658,6 +671,7 @@ def test_run_qi_prefine_probe_dispatches_tiny_qi_solve(tmp_path):
     assert completed["result"]["history_summary"]["objective_regression_count"] == 0
     assert completed["result"]["objective_diagnostics"]["final"]["qi_residual"] == 0.2
     assert completed["result"]["nfev"] == 3
+    assert len(calls["tuples"]) == 1
     assert calls["qi_options"]["nphi"] == 31
     assert calls["qi_options"]["include_bounce_endpoints"] is True
     assert calls["from_input"]["max_mode"] == 3

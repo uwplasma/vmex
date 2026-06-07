@@ -128,13 +128,19 @@ Before running even tiny optimizer probes, write a dry-run manifest:
    PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py \
      --quick \
      --prefine-probes plan \
-     --prefine-manifest results/qi_seed_audit/prefine_manifest.json
+     --prefine-manifest results/qi_seed_audit/prefine_manifest.json \
+     --prefine-mirror-weight 2.0 \
+     --prefine-elongation-weight 0.5 \
+     --prefine-mirror-surface-index all
 
 This manifest is the review artifact.  It lists selected rows, hard caps,
 expected output files, exact commands, selected ``phimin`` values, endpoint
 mode, and the repeated-stage prefine plan.  The default prefine plan is capped
 at ``--prefine-stage-modes 1,1,2,2,3`` with per-stage and total ``nfev`` caps
-recorded for each selected seed.  Constrained mirror cleanup uses
+recorded for each selected seed.  The default prefine objective includes
+smooth QI, a QI ceiling, all-surface mirror ratio, and elongation terms; use
+``--prefine-mirror-weight 0 --prefine-elongation-weight 0`` only for an
+explicit QI-only ablation.  Constrained mirror cleanup uses
 ``--prefine-mirror-surface-index all`` by default so the acceptance gate cannot
 pass by improving only one Boozer surface.  Only after review should a local
 operator use ``--prefine-probes run --prefine-reviewed``.

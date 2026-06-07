@@ -84,6 +84,7 @@ def test_optional_parity_commands_are_concrete_and_bounded():
         "vmec2000-converged-wout-smoke",
         "vmec2000-stage-trace-smoke",
         "vmec2000-cli-five-iter",
+        "vmec2000-w7x-generated-mgrid-wout",
         "bundled-wout-two-case-smoke",
     } <= set(commands)
 
@@ -120,6 +121,13 @@ def test_optional_parity_commands_are_concrete_and_bounded():
     vmec_cli = commands["vmec2000-cli-five-iter"]
     assert "VMEC2000_CLI_NITER=5" in vmec_cli["command"]
     assert any("five iterations" in bound for bound in vmec_cli["bounded_by"])
+
+    vmec_w7x = commands["vmec2000-w7x-generated-mgrid-wout"]
+    assert "VMEC2000_INTEGRATION=1" in vmec_w7x["command"]
+    assert "::test_vmec2000_w7x_generated_mgrid_fixture_reaches_active_vacuum_and_finite_wout" in vmec_w7x["command"]
+    assert any("W7-X mgrid" in bound for bound in vmec_w7x["bounded_by"])
+    assert any("finite positive geometry WOUTs" in bound for bound in vmec_w7x["bounded_by"])
+    assert any("outside the git repository" in item for item in vmec_w7x["validates"])
 
 
 def test_optional_vmec2000_commands_preserve_timeout_and_iteration_bounds():

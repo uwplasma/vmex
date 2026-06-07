@@ -329,7 +329,7 @@ To review the tiny QI-prefine probes before executing them:
 
 .. code-block:: bash
 
-   PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py --quick --prefine-probes plan --prefine-manifest results/qi_seed_audit/prefine_manifest.json --prefine-output-dir results/qi_seed_audit/prefine_probes
+   PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py --quick --prefine-probes plan --prefine-manifest results/qi_seed_audit/prefine_manifest.json --prefine-output-dir results/qi_seed_audit/prefine_probes --prefine-mirror-weight 2.0 --prefine-elongation-weight 0.5 --prefine-mirror-surface-index all
 
 The dry-run manifest is the intended bridge between seed audit and full
 seed-robust QI sweeps.  It is bounded by design and should be inspected before
