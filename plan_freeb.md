@@ -261,6 +261,60 @@ Completion:
 - CI/runtime/coverage hygiene: 100%.
 - Docs/release hygiene: 99.8%.
 
+### 2026-06-07 Current ESSOS/VMEC2000 Generated-Mgrid Parity Rerun
+
+Steps taken:
+
+1. Rechecked local ESSOS checkouts.  ``/Users/rogeriojorge/local/ESSOS`` is an
+   older dirty checkout without ``Coils.to_mgrid``; the
+   ``/Users/rogeriojorge/local/ESSOS_mgrid_pr`` checkout is on
+   ``feature/mgrid-from-coils`` and has ``Coils.to_mgrid`` plus
+   ``essos.mgrid.coils_to_mgrid``.
+2. Ran the optional ESSOS/VMEC2000 generated-mgrid parity gates with
+   ``PYTHONPATH=/Users/rogeriojorge/local/ESSOS_mgrid_pr`` and
+   ``VMEC2000_INTEGRATION=1``.
+
+Results obtained:
+
+1. ``test_vmec2000_generated_mgrid_trace_smoke_records_iteration_rows`` passed.
+   The diagnostic report still records the known
+   ``vmec2000_vacuum_inactive_force_gate`` warning.
+2. ``test_vmec2000_generated_mgrid_free_boundary_matches_vmec_jax_and_direct_coils``
+   remains an expected failure.  VMEC2000 did not write a WOUT and the
+   generated report classified the blocker as
+   ``status=more_iter_exit``/``classification=vmec2000_vacuum_inactive_force_gate``.
+3. The local optional parity command completed as ``1 passed, 1 xfailed`` in
+   about ``38`` seconds.
+
+Best next steps:
+
+1. Keep the generated-mgrid trace smoke as the current promoted local
+   VMEC2000/ESSOS gate.
+2. Do not promote WOUT-level generated-mgrid VMEC2000 parity until the inactive
+   vacuum-force gate is resolved or an instrumented VMEC2000 path identifies a
+   bounded physical fixture that writes WOUT cleanly.
+3. Prefer the ``ESSOS_mgrid_pr`` checkout for local optional ESSOS tests; the
+   older ``ESSOS`` checkout should not be used for generated-mgrid gates.
+
+Need from user:
+
+Nothing now, unless there is a preferred instrumented VMEC2000 binary for the
+strict scalpot/vacuum comparator.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999996% for fixed
+  same-branch scalar/vector gates and explicit accepted/rejected slot evidence;
+  arbitrary adaptive branch differentiation remains explicitly unclaimed.
+- VMEC parity and physics gates: 98.7%; trace-level generated-mgrid parity is
+  current, WOUT-level VMEC2000 generated-mgrid promotion remains xfailed.
+- Single-stage coil-only optimization: 98.7%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 99.6%.
+- CI/runtime/coverage hygiene: 100% pending the plan-only push CI completion.
+- Docs/release hygiene: 99.8%.
+
 ### 2026-06-07 Free-Boundary QS Example Default Vector Report
 
 Steps taken:
