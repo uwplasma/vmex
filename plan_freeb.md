@@ -12,6 +12,57 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
+### 2026-06-06 Matrix-Free Coverage Gate Hardening
+
+Steps taken:
+
+1. Inspected GitHub Actions run ``27079363142`` for commit ``f2f4cd8``.
+   All test/build/docs shards passed, but the combined py3.11 coverage gate
+   failed at ``94.97%`` exact line coverage against the ``95.00%`` threshold.
+2. Added a cheap matrix-free operator coverage test for the alternate
+   BiCGSTAB Krylov branch, restarted GMRES, no-``phi_flat``/no-residual output
+   options, and explicit matrix-free validation errors.
+3. Kept production behavior unchanged: dense mode solves remain the default,
+   and the matrix-free NESTOR/source response remains opt-in.
+
+Results obtained:
+
+1. ``python -m ruff check vmec_jax/free_boundary_adjoint.py
+   tests/test_free_boundary_vacuum_adjoint.py
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py``
+   passed locally.
+2. The new targeted matrix-free coverage test passed locally.
+3. The vacuum-adjoint py3.11 slow-coverage selection passed locally with
+   ``9`` passed and ``61`` deselected in about ``33`` seconds.
+
+Best next steps:
+
+1. Commit and push the coverage hardening patch, then watch the combined CI
+   coverage gate for the new run.
+2. If the gate still fails, inspect the new combined XML/report and add only
+   targeted branch tests for still-uncovered matrix-free/free-boundary seams.
+3. After CI is green, resume the next technical milestone: a same-branch gate
+   that includes an accepted/rejected controller slot and wires the coil-only
+   QS example to the validated branch-local vector/JVP path.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99997% for fixed
+  same-branch scalar/vector gates and fingerprint-gated adaptive seam reports;
+  adaptive branch differentiation remains explicitly unclaimed.
+- VMEC parity and physics gates: 98.0%.
+- Single-stage coil-only optimization: 97.8%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 99.3%.
+- CI runtime refactor with preserved coverage/physics gates: 100% locally,
+  pending the pushed combined gate.
+- Docs/release hygiene: 99.5%.
+
 ### 2026-06-06 Matrix-Free NESTOR Response and Fingerprint-Gated Adaptive Seam
 
 Steps taken:

@@ -2369,6 +2369,142 @@ def test_dense_vmec_nestor_mode_solve_can_use_matrix_free_response() -> None:
 
 
 @pytest.mark.py311_slow_coverage
+def test_matrix_free_mode_operator_alternate_solvers_and_validation_paths() -> None:
+    """Exercise cheap matrix-free Krylov branches and explicit validation errors."""
+
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jnp
+
+    enable_x64(True)
+    sin_basis = jnp.asarray(
+        [
+            [0.0, 0.2, -0.1],
+            [0.4, -0.3, 0.5],
+            [-0.2, 0.6, 0.1],
+            [0.7, 0.1, -0.4],
+        ],
+        dtype=float,
+    )
+    xmpot = jnp.asarray([0, 1, 2])
+    n_raw = jnp.asarray([0, 0, 1])
+    grpmn = jnp.zeros((3, 4), dtype=float)
+    rhs = jnp.asarray([1.0, -0.5, 0.25], dtype=float)
+    expected_coeffs = rhs / float(4.0 * np.pi**3)
+
+    restarted_gmres = mode_operator_vacuum_solve_jax(
+        grpmn,
+        rhs,
+        sin_basis=sin_basis,
+        xmpot=xmpot,
+        n_raw=n_raw,
+        lasym=False,
+        solver="gmres",
+        tol=1.0e-13,
+        atol=1.0e-15,
+        maxiter=8,
+        restart=2,
+    )
+    bicgstab = mode_operator_vacuum_solve_jax(
+        grpmn,
+        rhs,
+        sin_basis=sin_basis,
+        xmpot=xmpot,
+        n_raw=n_raw,
+        lasym=False,
+        solver="bicgstab",
+        tol=1.0e-13,
+        atol=1.0e-15,
+        maxiter=8,
+        include_phi_flat=False,
+        include_residual=False,
+    )
+
+    assert restarted_gmres["solve_mode"] == "matrix_free_gmres"
+    assert bicgstab["solve_mode"] == "matrix_free_bicgstab"
+    assert "phi_flat" not in bicgstab
+    assert "residual" not in bicgstab
+    np.testing.assert_allclose(restarted_gmres["mode_coeffs"], expected_coeffs, rtol=1.0e-13, atol=1.0e-13)
+    np.testing.assert_allclose(restarted_gmres["phi_flat"], sin_basis @ expected_coeffs, rtol=1.0e-13, atol=1.0e-13)
+    np.testing.assert_allclose(restarted_gmres["residual"], np.zeros_like(np.asarray(rhs)), atol=1.0e-13)
+    np.testing.assert_allclose(bicgstab["mode_coeffs"], expected_coeffs, rtol=1.0e-13, atol=1.0e-13)
+
+    with pytest.raises(ValueError, match="solver must be"):
+        mode_operator_vacuum_solve_jax(
+            grpmn,
+            rhs,
+            sin_basis=sin_basis,
+            xmpot=xmpot,
+            n_raw=n_raw,
+            lasym=False,
+            solver="cg",
+        )
+    with pytest.raises(ValueError, match="1D rhs_mode"):
+        mode_operator_vacuum_solve_jax(
+            grpmn,
+            rhs[:, None],
+            sin_basis=sin_basis,
+            xmpot=xmpot,
+            n_raw=n_raw,
+            lasym=False,
+        )
+    with pytest.raises(ValueError, match="sin_basis must be a 2D array"):
+        mode_operator_vacuum_solve_jax(
+            grpmn,
+            rhs,
+            sin_basis=sin_basis[:, 0],
+            xmpot=xmpot,
+            n_raw=n_raw,
+            lasym=False,
+        )
+    with pytest.raises(ValueError, match="grpmn must be a 2D array"):
+        mode_matrix_matvec_from_grpmn_jax(
+            rhs,
+            jnp.zeros(4),
+            sin_basis=sin_basis,
+            xmpot=xmpot,
+            n_raw=n_raw,
+            lasym=False,
+        )
+    with pytest.raises(ValueError, match="vector size"):
+        mode_matrix_matvec_from_grpmn_jax(
+            jnp.ones(4),
+            grpmn,
+            sin_basis=sin_basis,
+            xmpot=xmpot,
+            n_raw=n_raw,
+            lasym=False,
+        )
+    with pytest.raises(ValueError, match="invalid_grpmn_shape"):
+        mode_matrix_matvec_from_grpmn_jax(
+            rhs,
+            jnp.zeros((2, 4)),
+            sin_basis=sin_basis,
+            xmpot=xmpot,
+            n_raw=n_raw,
+            lasym=False,
+        )
+    with pytest.raises(ValueError, match="cos_basis is required"):
+        mode_matrix_matvec_from_grpmn_jax(
+            jnp.ones(6),
+            jnp.zeros((6, 4)),
+            sin_basis=sin_basis,
+            xmpot=xmpot,
+            n_raw=n_raw,
+            lasym=True,
+        )
+    with pytest.raises(ValueError, match="cos_basis must match"):
+        mode_matrix_matvec_from_grpmn_jax(
+            jnp.ones(6),
+            jnp.zeros((6, 4)),
+            sin_basis=sin_basis,
+            cos_basis=sin_basis[:, :2],
+            xmpot=xmpot,
+            n_raw=n_raw,
+            lasym=True,
+        )
+
+
+@pytest.mark.py311_slow_coverage
 def test_dense_vmec_nestor_mode_solve_gradients_match_finite_difference():
     pytest.importorskip("jax")
     from vmec_jax._compat import jax, jnp
