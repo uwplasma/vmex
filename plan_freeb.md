@@ -13741,3 +13741,70 @@ Completion:
   direct-coil/NESTOR JVP graph cost.
 - CI runtime refactor with preserved coverage/physics gates: 100%.
 - Docs/release hygiene: 99.5%.
+
+### 2026-06-07 Office GPU Persistent-Cache Probe for Branch-Local Reports
+
+Steps taken:
+
+1. Confirmed commit ``549a553`` reached a fully green GitHub Actions run,
+   including docs, console smoke, all fast/coverage shards, physics smoke, and
+   the combined coverage gate.
+2. Created a fresh shallow clone on ``office`` at
+   ``/home/rjorge/local/tests/vmec_jax_main_perf_20260607`` and installed
+   ``vmec_jax`` plus ``jax[cuda12]`` into a disposable virtual environment.
+3. Verified JAX sees the RTX A4000 GPUs on ``office``.  Both GPUs were already
+   busy at roughly 12 GB used and 100% utilization, so all timings are
+   diagnostic rather than clean promotion benchmarks.
+4. Ran the bounded circle-provider free-boundary QS smoke with the
+   same-branch vector report on GPU 0, using constrained JAX allocation.
+5. Repeated the same fresh-process GPU report with an explicit JAX persistent
+   compilation cache, then repeated once more using vmec_jax's default
+   machine-scoped cache path without explicit cache environment variables.
+
+Results obtained:
+
+1. GPU import succeeded with ``jax 0.6.2`` and devices
+   ``CudaDevice(id=0), CudaDevice(id=1)``.
+2. The uncached first GPU run had first-evaluation wall time about ``37.6 s``,
+   complete-solve FD report time ``11.48 s``, and branch-local vector JVP wall
+   time ``21.29 s``.
+3. With a warmed explicit cache directory, the repeated fresh-process run
+   dropped to first-evaluation wall time ``8.40 s``, complete-solve FD report
+   time ``4.67 s``, and branch-local vector JVP wall time ``6.34 s``.
+4. With vmec_jax's default cache policy and no explicit cache directory, the
+   repeated fresh-process run remained fast: first-evaluation wall time
+   ``8.54 s``, complete-solve FD report time ``5.10 s``, and branch-local
+   vector JVP wall time ``6.15 s``.
+5. Matrix-free replay remained slower than dense on GPU for the tiny 13-mode
+   diagnostic: dense ``2.65 s``, best matrix-free ``3.06 s``.  The promotion
+   policy correctly rejected matrix-free with speedup ``0.867`` below the
+   ``1.1`` threshold.
+
+Best next steps:
+
+1. Keep the existing vmec_jax persistent-cache policy; no source patch is
+   needed for this result.
+2. For clean GPU benchmarks, rerun the same report when ``office`` GPUs are
+   idle, because the current numbers were collected under full GPU load.
+3. Continue the performance lane by reducing the uncached first-call
+   trace/JVP graph cost.  Persistent cache helps repeated fresh processes, but
+   the first-ever compile remains expensive.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99995% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.9%.
+- Single-stage coil-only optimization: 97.4%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 99.1%; repeat cold-process GPU timing is much improved
+  by the existing persistent cache, but first-ever compile/JVP graph cost
+  remains the blocker.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 99.5%.
