@@ -3210,6 +3210,39 @@ def test_jax_boundary_projection_matches_numpy_reference():
         np.testing.assert_allclose(actual[key], getattr(expected, key), rtol=1.0e-13, atol=1.0e-13)
 
 
+def test_jax_boundary_projection_can_skip_contravariant_channels():
+    enable_x64(True)
+    br, bp, bz, R, Ru, Zu, Rv, Zv = _boundary_projection_inputs()
+
+    full = vacuum_boundary_fields_from_cylindrical_jax(
+        br=br,
+        bp=bp,
+        bz=bz,
+        R=R,
+        Ru=Ru,
+        Zu=Zu,
+        Rv=Rv,
+        Zv=Zv,
+        include_bnormal_unit=False,
+    )
+    compact = vacuum_boundary_fields_from_cylindrical_jax(
+        br=br,
+        bp=bp,
+        bz=bz,
+        R=R,
+        Ru=Ru,
+        Zu=Zu,
+        Rv=Rv,
+        Zv=Zv,
+        include_bnormal_unit=False,
+        include_contravariant=False,
+    )
+
+    assert set(compact) == {"bu", "bv", "bnormal", "g_uu", "g_uv", "g_vv", "det_guv"}
+    for key in compact:
+        np.testing.assert_allclose(compact[key], full[key], rtol=1.0e-13, atol=1.0e-13)
+
+
 def test_jax_boundary_projection_gradient_wrt_field_matches_finite_difference():
     pytest.importorskip("jax")
     from vmec_jax._compat import jax, jnp

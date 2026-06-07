@@ -1189,6 +1189,7 @@ def vacuum_boundary_fields_from_cylindrical_jax(
     Zv: Any,
     det_floor: float = 1.0e-30,
     include_bnormal_unit: bool = True,
+    include_contravariant: bool = True,
 ) -> dict[str, Any]:
     """JAX version of the VMEC boundary-field projection scaffold.
 
@@ -1196,7 +1197,10 @@ def vacuum_boundary_fields_from_cylindrical_jax(
     derivative tests.  It intentionally returns a plain dict rather than the
     NumPy dataclass used by the production bridge, so it can be transformed by
     ``jax.grad``/``jax.jacfwd`` while the full NESTOR path is still being
-    ported.
+    ported.  Set ``include_contravariant=False`` when the caller only needs
+    the covariant boundary channels and normal field before a later mode-space
+    reconstruction; the public default keeps the full VMEC-compatible channel
+    set.
     """
 
     br_arr = jnp.asarray(br)
@@ -1212,18 +1216,9 @@ def vacuum_boundary_fields_from_cylindrical_jax(
     g_uv = Ru_arr * Rv_arr + Zu_arr * Zv_arr
     g_vv = R_arr * R_arr + Rv_arr * Rv_arr + Zv_arr * Zv_arr
     det = g_uu * g_vv - g_uv * g_uv
-    det_safe = jnp.where(
-        jnp.abs(det) >= float(det_floor),
-        det,
-        jnp.sign(det + 1.0e-300) * float(det_floor),
-    )
 
     bu = br_arr * Ru_arr + bz_arr * Zu_arr
     bv = br_arr * Rv_arr + bp_arr * R_arr + bz_arr * Zv_arr
-    bsupu = (g_vv * bu - g_uv * bv) / det_safe
-    bsupv = (g_uu * bv - g_uv * bu) / det_safe
-    bsqvac = 0.5 * (bu * bsupu + bv * bsupv)
-
     n_r = -R_arr * Zu_arr
     n_phi = Zu_arr * Rv_arr - Ru_arr * Zv_arr
     n_z = R_arr * Ru_arr
@@ -1232,15 +1227,28 @@ def vacuum_boundary_fields_from_cylindrical_jax(
     result = {
         "bu": bu,
         "bv": bv,
-        "bsupu": bsupu,
-        "bsupv": bsupv,
-        "bsqvac": bsqvac,
         "bnormal": bnormal,
         "g_uu": g_uu,
         "g_uv": g_uv,
         "g_vv": g_vv,
         "det_guv": det,
     }
+    if bool(include_contravariant):
+        det_safe = jnp.where(
+            jnp.abs(det) >= float(det_floor),
+            det,
+            jnp.sign(det + 1.0e-300) * float(det_floor),
+        )
+        bsupu = (g_vv * bu - g_uv * bv) / det_safe
+        bsupv = (g_uu * bv - g_uv * bu) / det_safe
+        bsqvac = 0.5 * (bu * bsupu + bv * bsupv)
+        result.update(
+            {
+                "bsupu": bsupu,
+                "bsupv": bsupv,
+                "bsqvac": bsqvac,
+            }
+        )
     if bool(include_bnormal_unit):
         n_norm = jnp.sqrt(n_r * n_r + n_phi * n_phi + n_z * n_z)
         result["bnormal_unit"] = bnormal / jnp.where(n_norm > 0.0, n_norm, 1.0)
@@ -1355,6 +1363,7 @@ def direct_coil_boundary_bnormal_rms_jax(
         Zu=Zu,
         Rv=Rv,
         Zv=Zv,
+        include_contravariant=False,
     )
     bnormal = jnp.ravel(jnp.asarray(vac["bnormal"]))
     return jnp.sqrt(jnp.mean(bnormal * bnormal))
@@ -1685,6 +1694,7 @@ def direct_coil_boundary_bsqvac_jax(
                 Rv=Rv,
                 Zv=Zv,
                 include_bnormal_unit=False,
+                include_contravariant=False,
             )
     else:
         vac = {

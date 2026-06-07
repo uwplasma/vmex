@@ -12,6 +12,70 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
+### 2026-06-06 Compact Boundary Projection for Direct-Coil Replay
+
+Steps taken:
+
+1. Confirmed GitHub Actions run ``27077994916`` for the current-only JVP
+   specialization completed successfully on ``main``.
+2. Added ``include_contravariant`` to
+   ``vacuum_boundary_fields_from_cylindrical_jax``.  The public default keeps
+   the full VMEC-compatible projection output, while direct-coil replay can now
+   request only ``bu``, ``bv``, ``bnormal``, and metric tensors before NESTOR
+   mode-space reconstruction.
+3. Switched ``direct_coil_boundary_bsqvac_jax`` and
+   ``direct_coil_boundary_bnormal_rms_jax`` to the compact projection path.
+   The final ``bsqvac`` used in accepted-controller replay is still
+   reconstructed from the dense NESTOR mode solution, so this is a graph-width
+   reduction rather than a physics approximation.
+4. Added a solve-free regression test that checks the compact projection
+   returns the same retained fields as the full projection and omits only the
+   unused contravariant channels.
+
+Results obtained:
+
+1. ``python -m ruff check vmec_jax/free_boundary_adjoint.py
+   tests/test_free_boundary_vacuum_adjoint.py`` passed locally.
+2. The new compact-projection test and the public NumPy-parity projection test
+   passed locally.
+3. The promoted NESTOR gradient/scan tests passed locally.
+4. The promoted current-only and Fourier-only same-branch complete-solve
+   AD-vs-central-FD gates passed locally.
+5. The full ``tests/test_free_boundary_vacuum_adjoint.py`` file passed locally
+   with ``65`` tests.
+6. Circle-provider compact report timing for ``aspect,accepted_bnormal_rms``:
+   mixed current/Fourier branch-local vector JVP dispatch was ``6.51 s`` and
+   current-only fast-path dispatch was ``6.22 s``.  The retained bottleneck is
+   still Biot-Savart plus dense NESTOR/source assembly, not the skipped
+   contravariant projection.
+
+Best next steps:
+
+1. Commit and push the compact projection patch, then watch CI.
+2. Target the remaining cold replay/JVP cost inside direct-coil vacuum
+   sampling and dense NESTOR/source assembly.  The next candidate is a
+   current-only direct-coil field response path that avoids tracing Fourier
+   curve geometry when the direction has zero geometry tangent.
+3. Keep adaptive full-loop differentiation unclaimed until a fingerprint-gated
+   complete adaptive branch AD-vs-FD gate passes.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99996% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.9%.
+- Single-stage coil-only optimization: 97.6%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 99.1%.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 99.5%.
+
 ### 2026-06-06 Current-Only Branch-Local JVP Specialization
 
 Steps taken:
