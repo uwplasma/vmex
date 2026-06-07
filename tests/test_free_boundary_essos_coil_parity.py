@@ -78,6 +78,24 @@ def test_generated_mgrid_diagnostic_boundary_domain_check_flags_outside_surface(
     assert outside["margins"]["rmin_margin"] == pytest.approx(-1.0)
 
 
+def test_vmec2000_sign_probe_updates_flip_phiedge_and_extcur(tmp_path: Path) -> None:
+    from tools.diagnostics.compare_freeb_coils_mgrid_vmec2000 import _vmec2000_sign_probe_updates
+
+    mgrid_input = _write_freeb_input(tmp_path / "input.lpqa_mgrid", mgrid_file="mgrid_lpqa_from_essos.nc")
+
+    probes = _vmec2000_sign_probe_updates(mgrid_input)
+    by_label = {str(probe["label"]): probe for probe in probes}
+
+    assert set(by_label) == {"flip_phiedge_sign", "flip_extcur_sign", "flip_phiedge_extcur_signs"}
+    assert {probe["source"] for probe in probes} == {"sign_convention"}
+    assert float(by_label["flip_phiedge_sign"]["updates"]["PHIEDGE"]) == pytest.approx(-FREE_BOUNDARY_PHIEDGE)
+    extcur_update = by_label["flip_extcur_sign"]["updates"]["EXTCUR"]
+    assert [float(value.strip()) for value in extcur_update.split(",")] == pytest.approx([-1.0])
+    combined = by_label["flip_phiedge_extcur_signs"]["updates"]
+    assert float(combined["PHIEDGE"]) == pytest.approx(-FREE_BOUNDARY_PHIEDGE)
+    assert [float(value.strip()) for value in combined["EXTCUR"].split(",")] == pytest.approx([-1.0])
+
+
 def _load_lpqa_essos_coils():
     essos_coils = pytest.importorskip("essos.coils")
     if not LPQA_COILS.exists():
