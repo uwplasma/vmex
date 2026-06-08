@@ -815,6 +815,7 @@ def same_branch_derivative_proposal_from_report(
         "available": True,
         "scope": "fixed accepted-branch directional proposal; complete solve decides acceptance",
         "differentiates_adaptive_controller": False,
+        "differentiates_fixed_accepted_branch": True,
         "complete_solve_acceptance_authority": True,
         "directional_derivative": float(directional),
         "contributions": contributions,
@@ -1900,6 +1901,12 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
                     None if previous_best is None else float(previous_best["summary"]["objective"])
                 )
                 proposal["accepted_by_complete_solve"] = bool(best is trial_entry)
+                proposal["rejected_by_complete_solve"] = not bool(proposal["accepted_by_complete_solve"])
+                proposal["acceptance_decision_source"] = "complete_solve_objective"
+                proposal["best_eval_before_trial"] = (
+                    None if previous_best is None else int(previous_best.get("eval", -1))
+                )
+                proposal["best_eval_after_trial"] = None if best is None else int(best.get("eval", -1))
                 final_best_changed_after_report = bool(best is trial_entry)
                 summary["same_branch_complete_solve_report_final_best_status"] = {
                     "report_generated_before_derivative_proposal": True,

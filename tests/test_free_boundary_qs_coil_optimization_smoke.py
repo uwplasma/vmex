@@ -269,7 +269,9 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
 
     assert proposal["available"] is True
     assert proposal["differentiates_adaptive_controller"] is False
+    assert proposal["differentiates_fixed_accepted_branch"] is True
     assert proposal["complete_solve_acceptance_authority"] is True
+    assert "complete solve decides acceptance" in proposal["scope"]
     assert proposal["directional_derivative"] == pytest.approx(9.0)
     assert proposal["contributions"]["qs_total"]["contribution"] == pytest.approx(6.0)
     assert proposal["contributions"]["aspect"]["contribution"] == pytest.approx(2.0)
@@ -1691,12 +1693,144 @@ def test_derivative_proposal_summary_marks_report_stale_when_trial_is_accepted(t
     proposal = summary["same_branch_derivative_proposal"]
     assert proposal["available"] is True
     assert proposal["accepted_by_complete_solve"] is True
+    assert proposal["rejected_by_complete_solve"] is False
+    assert proposal["acceptance_decision_source"] == "complete_solve_objective"
+    assert proposal["best_eval_before_trial"] == 0
+    assert proposal["best_eval_after_trial"] == 1
     assert proposal["trial_objective"] < proposal["previous_best_objective"]
     assert summary["best"]["eval"] == 1
     report_status = summary["same_branch_complete_solve_report_final_best_status"]
     assert report_status["report_generated_before_derivative_proposal"] is True
     assert report_status["final_best_changed_after_report"] is True
     assert report_status["report_matches_final_best"] is False
+
+
+def test_derivative_proposal_summary_records_rejected_trial_as_complete_solve_rejection(tmp_path, monkeypatch):
+    module = _load_example_module()
+    calls = []
+
+    def fake_make_free_boundary_indata(_input_path, output_path, **_kwargs):
+        output_path.write_text("&INDATA\n/\n")
+        return output_path
+
+    def fake_run_direct_free_boundary(_input_path, params, *, vmec_max_iter, activate_fsq, jit_forces=True):
+        calls.append(
+            {
+                "current": float(np.asarray(params.base_currents)[0]),
+                "vmec_max_iter": int(vmec_max_iter),
+                "activate_fsq": float(activate_fsq),
+                "jit_forces": bool(jit_forces),
+            }
+        )
+        return SimpleNamespace(), 0.01
+
+    def fake_summarize_run(
+        _run,
+        params,
+        *,
+        objective,
+        wall_s,
+        target_aspect,
+        target_iota,
+        helicity_m,
+        helicity_n,
+        qs_surfaces,
+        qs_ntheta,
+        qs_nphi,
+    ):
+        current = float(np.asarray(params.base_currents)[0])
+        return {
+            "objective": objective,
+            "wall_s": wall_s,
+            "vmec_n_iter": 1,
+            "fsqr": current,
+            "fsqz": 0.0,
+            "fsql": 0.0,
+            "residual_proxy": 4.0 - current,
+            "qs_total": 0.25,
+            "qs_helicity_m": helicity_m,
+            "qs_helicity_n": helicity_n,
+            "qs_surfaces": qs_surfaces,
+            "qs_ntheta": qs_ntheta,
+            "qs_nphi": qs_nphi,
+            "aspect": target_aspect,
+            "target_aspect": target_aspect,
+            "mean_iota": target_iota,
+            "target_iota": target_iota,
+            "coil_current_norm": abs(current),
+            "mean_coil_length": 1.0,
+            "vmec_history": {"w": [], "fsqr2": [], "fsqz2": [], "fsql2": []},
+        }
+
+    def fake_write_wout(path, _run, *, include_fsq):
+        path.write_text(f"include_fsq={include_fsq}\n")
+
+    def fake_write_same_branch_validation_report(**kwargs):
+        path = Path(kwargs["outdir"]) / "same_branch_complete_solve_report.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "direction_x": [1.0, 0.0],
+                    "branch_local_vector_jacobian": {
+                        "available": True,
+                        "differentiates_adaptive_controller": False,
+                        "differentiates_fixed_accepted_branch": True,
+                        "scalars": {
+                            "qs_total": {"value": 0.25, "exact_directional": 1.0},
+                            "aspect": {"value": 6.0, "exact_directional": 0.0},
+                        },
+                    },
+                }
+            )
+            + "\n"
+        )
+        return path
+
+    monkeypatch.setattr(module, "make_free_boundary_indata", fake_make_free_boundary_indata)
+    monkeypatch.setattr(module, "run_direct_free_boundary", fake_run_direct_free_boundary)
+    monkeypatch.setattr(module, "summarize_run", fake_summarize_run)
+    monkeypatch.setattr(module, "write_wout_from_fixed_boundary_run", fake_write_wout)
+    monkeypatch.setattr(module, "write_same_branch_validation_report", fake_write_same_branch_validation_report)
+
+    exit_code = module.main(
+        [
+            "--smoke",
+            "--provider",
+            "circle",
+            "--max-evals",
+            "1",
+            "--max-iter",
+            "1",
+            "--qs-weight",
+            "4.0",
+            "--write-same-branch-report",
+            "--same-branch-derivative-proposal",
+            "--same-branch-proposal-step",
+            "1.0",
+            "--outdir",
+            str(tmp_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert len(calls) == 2
+    assert calls[0]["current"] == pytest.approx(2.0)
+    assert calls[1]["current"] == pytest.approx(1.96)
+
+    summary = json.loads((tmp_path / "summary.json").read_text())
+    proposal = summary["same_branch_derivative_proposal"]
+    assert proposal["available"] is True
+    assert proposal["accepted_by_complete_solve"] is False
+    assert proposal["rejected_by_complete_solve"] is True
+    assert proposal["acceptance_decision_source"] == "complete_solve_objective"
+    assert proposal["trial_objective"] > proposal["previous_best_objective"]
+    assert proposal["best_eval_before_trial"] == 0
+    assert proposal["best_eval_after_trial"] == 0
+    assert summary["best"]["eval"] == 0
+    report_status = summary["same_branch_complete_solve_report_final_best_status"]
+    assert report_status["report_generated_before_derivative_proposal"] is True
+    assert report_status["final_best_changed_after_report"] is False
+    assert report_status["report_matches_final_best"] is True
 
 
 def test_essos_provider_non_dry_run_uses_direct_coils_without_mgrid(tmp_path, monkeypatch):

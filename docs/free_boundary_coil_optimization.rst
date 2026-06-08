@@ -1374,7 +1374,10 @@ The proposal block records ``objective_terms_used`` and
 ``objective_terms_omitted``.  For example, the VMEC residual proxy is normally
 omitted from the branch-local JVP proposal because the residual term is still
 validated by the complete free-boundary solve that evaluates the proposed
-point.
+point.  After the trial solve, the same block records
+``acceptance_decision_source = 'complete_solve_objective'`` together with
+``accepted_by_complete_solve`` and ``rejected_by_complete_solve`` so the JSON
+artifact makes clear that branch-local derivatives only propose a step.
 
 The same-branch report is generated before the optional proposal is evaluated.
 If the complete solve accepts that derivative-assisted trial, ``summary.json``

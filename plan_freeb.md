@@ -15550,3 +15550,51 @@ Completion:
 - CPU/GPU performance: 99.3%.
 - CI runtime refactor with preserved coverage/physics gates: 100%.
 - Docs/release hygiene: 99.9%.
+
+### 2026-06-08 Coil QS Derivative-Proposal Acceptance Contract
+
+Steps taken:
+
+1. Tightened ``same_branch_derivative_proposal_from_report`` so successful
+   proposals explicitly record ``differentiates_fixed_accepted_branch=True``.
+2. Added complete-solve acceptance/rejection fields to the derivative proposal
+   after the trial point is evaluated:
+   ``acceptance_decision_source``, ``accepted_by_complete_solve``,
+   ``rejected_by_complete_solve``, ``best_eval_before_trial`` and
+   ``best_eval_after_trial``.
+3. Added a rejected-trial smoke regression in the coil-only QS example tests.
+4. Updated docs so users know the branch-local derivative proposes only one
+   candidate step, while the ordinary complete free-boundary solve accepts or
+   rejects it.
+
+Results obtained:
+
+1. Phase 3 now has explicit JSON provenance for both accepted and rejected
+   derivative-assisted trial points, removing ambiguity about acceptance
+   authority.
+2. The coil-only example remains scientifically conservative: no SciPy
+   Jacobian is promoted and no arbitrary adaptive branch-selection derivative
+   is claimed.
+
+Best next steps:
+
+1. Run focused QS smoke tests, ruff and docs.
+2. Commit and push the phase-3 proposal-contract patch if clean.
+3. Continue bounded VMEC2000/mgrid/direct-coil parity after the latest CI run
+   reports green or any failures are fixed.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999% for
+  fingerprint-gated same-branch accepted/rejected slots.
+- VMEC parity and physics gates: 98.2%.
+- Single-stage coil-only optimization: 98.4%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 99.3%.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 99.9%.
