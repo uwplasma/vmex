@@ -1314,14 +1314,19 @@ Results obtained:
 3. The final LCFS contours were much cleaner than the pure local far-seed QH
    probe, but still visibly wavy and did not pass the strict smooth-QI
    ``2e-3`` promotion threshold.
+4. A follow-up local cleanup with ``max_nfev=8`` reduced the mirror-ramp total
+   cost and mirror ratio to ``0.297``, but worsened smooth QI to
+   ``4.011e-3``.  The stage-promotion policy correctly kept the reference
+   baseline result rather than accepting the lower-engineering/higher-QI
+   candidate.
 
 Best next steps:
 
 1. Keep the reference/global proposal layer as the current reliable far-seed
    QI route.
 2. Add a stronger local cleanup after the selected reference basin, with
-   enough iterations to reduce smooth QI below ``2e-3`` while keeping mirror
-   below ``0.35``.
+   tighter QI preservation than the current mirror-ramp stage.  More local
+   evaluations alone improved mirror but moved out of the QI basin.
 3. Do not promote pure local far-seed QI recovery until Boozer contour closure
    and the smooth/legacy gates both pass.
 
