@@ -1397,10 +1397,9 @@ def write_same_branch_validation_report(
             if not base_traces:
                 rejected_slot_gate["reason"] = "base complete-solve payload has no traces"
             else:
-                padded_traces = base_traces + (deepcopy(base_traces[-1]),)
-                accept_mask = np.ones(len(padded_traces), dtype=bool)
-                accept_mask[-1] = False
-                done_mask = np.zeros(len(padded_traces), dtype=bool)
+                rejected_trace = deepcopy(base_traces[-1])
+                rejected_trace["step_status"] = "rejected"
+                padded_traces = base_traces + (rejected_trace,)
                 t0 = time.perf_counter()
                 rejected_vector = _run_branch_local_vector(
                     vector_keys,
@@ -1408,8 +1407,6 @@ def write_same_branch_validation_report(
                         **replay_kwargs,
                         "state_only_replay": vector_uses_state_only_replay,
                         "traces": padded_traces,
-                        "accept_mask": accept_mask,
-                        "done_mask": done_mask,
                         "use_accepted_only_fast_path": False,
                     },
                     include_replay_graph_metadata=False,

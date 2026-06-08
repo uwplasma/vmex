@@ -804,13 +804,16 @@ profile loop has a matching ``--same-branch-report-profile-max-mode-count
 resource pressure on small machines.  Set those options to ``0`` only on a
 larger-memory profiling machine when deliberately exploring higher mode
 counts.  Use
-``--same-branch-report-rejected-slot-gate`` to add an explicit fixed
-accepted/rejected controller-slot replay artifact.  This proves the stacked
-controller replay can carry a rejected slot under the same branch fingerprint;
-it still does not differentiate the adaptive host policy that decides which
-steps are accepted or rejected.  The scalar, vector, and rejected-slot JSON
-blocks expose a compact ``controller_slot_summary`` with ``accepted_slots``,
-``rejected_slots``, ``done_markers``, and
+``--same-branch-report-rejected-slot-gate`` to add a fixed
+accepted/rejected controller-slot replay artifact.  The example synthesizes a
+diagnostic trace with ``step_status='rejected'`` and lets the replay code
+derive the rejected slot from trace status, matching the production-status
+path.  This proves the stacked controller replay can carry a rejected slot
+under the same branch fingerprint; it still does not differentiate the
+adaptive host policy that decides which steps are accepted or rejected.  The
+scalar, vector, and rejected-slot JSON blocks expose a compact
+``controller_slot_summary`` with ``accepted_slots``, ``rejected_slots``,
+``done_markers``, and
 ``accepted_free_boundary_slots``.  Use this top-level summary when reviewing
 artifacts; it is intentionally redundant with the lower-level masks so users
 do not need to inspect nested JAX arrays to confirm whether the fixed replay

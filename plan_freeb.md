@@ -15350,3 +15350,55 @@ Completion:
   construction from JVP execution.
 - CI runtime refactor with preserved coverage/physics gates: 100%.
 - Docs/release hygiene: 99.8%.
+
+### 2026-06-08 Status-Derived Rejected-Slot Example Gate
+
+Steps taken:
+
+1. Ran the direct-coil QS smoke example with the vector same-branch report,
+   rejected-slot gate, and dense-vs-matrix-free NESTOR profiling enabled.
+2. Confirmed the generated report records ``controller_slot_summary`` for the
+   main vector branch and the accepted/rejected diagnostic slot, plus
+   ``replay_graph_metadata_wall_s`` timings.
+3. Changed the example rejected-slot diagnostic to duplicate the final trace
+   with ``step_status='rejected'`` instead of passing a hand-built
+   ``accept_mask``.
+4. Updated smoke tests and docs so the example now exercises the same
+   status-derived replay-mask path as production traces.
+
+Results obtained:
+
+1. ``/tmp/vmec_jax_freeb_same_branch_profile/same_branch_complete_solve_report.json``
+   showed the main vector branch with two accepted slots and no rejected slots.
+2. The accepted/rejected diagnostic block showed three controller slots with
+   one fixed rejected slot and ``differentiates_adaptive_controller=False``.
+3. ``replay_graph_metadata_wall_s`` was negligible compared with
+   ``replay_jvp_wall_s`` in the smoke run, so the remaining branch-local
+   performance target is JVP/replay construction and execution, not metadata
+   assembly.
+
+Best next steps:
+
+1. Run the updated smoke-report tests and docs build, then push this example
+   provenance improvement.
+2. Continue phase 3 derivative proposals with complete solves as acceptance
+   authority; do not promote arbitrary adaptive branch differentiation.
+3. Check the CI run for ``1782cf3`` and the follow-up push, fixing failures
+   before any release work.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99998% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed outside fingerprinted slots.
+- VMEC parity and physics gates: 98.1%.
+- Single-stage coil-only optimization: 97.9%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 99.3%.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 99.8%.
