@@ -263,8 +263,10 @@ def qi_mirror_objective_for_stage(
 
     ``mirror_backend="vmec"`` keeps the fast VMEC-grid mirror penalty used by
     broad exploratory stages. ``mirror_backend="boozer"`` evaluates mirror
-    ratio in Boozer coordinates through the shared QI field, matching the final
-    audit metric and avoiding a late-stage coordinate mismatch.
+    ratio in Boozer coordinates through the shared QI field.
+    ``mirror_backend="boozer_scalar"`` evaluates a separate scalar Boozer
+    mirror objective, allowing final cleanup to use audit-grade ``mboz/nboz``
+    without increasing the whole QI residual resolution.
     """
 
     stage = {} if stage is None else stage
@@ -280,9 +282,16 @@ def qi_mirror_objective_for_stage(
     )
     if backend in {"boozer", "booz", "boozer-qi", "qi"}:
         return vj.MirrorRatio(**kwargs, qi_options=qi_options)
+    if backend in {"boozer-scalar", "boozer_scalar", "booz-scalar", "booz_scalar"}:
+        return vj.MirrorRatio(
+            **kwargs,
+            mboz=int(stage.get("mirror_mboz", stage.get("mboz", 18))),
+            nboz=int(stage.get("mirror_nboz", stage.get("nboz", 18))),
+            jit_booz=bool(stage.get("mirror_jit_booz", True)),
+        )
     if backend in {"vmec", "realspace", "real-space"}:
         return vj.VMECMirrorRatio(**kwargs)
-    raise ValueError("QI mirror_backend must be 'vmec' or 'boozer'.")
+    raise ValueError("QI mirror_backend must be 'vmec', 'boozer', or 'boozer_scalar'.")
 
 
 def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = None) -> argparse.Namespace:

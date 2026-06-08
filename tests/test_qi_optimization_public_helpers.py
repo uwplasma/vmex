@@ -204,6 +204,17 @@ def test_qi_mirror_objective_for_stage_can_use_vmec_or_boozer_backend() -> None:
     assert boozer.requires_qi_field
     assert boozer.surface_index == -1
 
+    scalar = qio.qi_mirror_objective_for_stage(
+        {"mirror_backend": "boozer_scalar", "mirror_mboz": 18, "mirror_nboz": 17},
+        qi_options=options,
+        threshold=0.35,
+        surfaces=options.surfaces,
+        surface_index=None,
+    )
+    assert isinstance(scalar, vj.MirrorRatio)
+    assert not scalar.requires_qi_field
+    assert (scalar.mboz, scalar.nboz) == (18, 17)
+
 
 def test_qi_cli_override_loads_mirror_ramp_stages_json(tmp_path: Path) -> None:
     stages_path = tmp_path / "stages.json"
