@@ -1356,7 +1356,17 @@ def run_boundary_reference_preconditioner(input_file, output_dir, config, *, ctx
         non_endpoint = [record for record in candidate_pool if abs(float(record["lambda"]) - 1.0) > 1.0e-12]
         if non_endpoint:
             candidate_pool = non_endpoint
-    selected = min(candidate_pool, key=lambda record: float(record["score"]))
+    if bool(config.get("prefer_lowest_qi_candidate", False)):
+        selected = min(
+            candidate_pool,
+            key=lambda record: (
+                _finite_or_inf(record.get("smooth_qi")),
+                _finite_or_inf(record.get("legacy_qi")),
+                float(record["score"]),
+            ),
+        )
+    else:
+        selected = min(candidate_pool, key=lambda record: float(record["score"]))
     selected["selected"] = True
     (pre_dir / "summary.json").write_text(json.dumps(records, indent=2, sort_keys=True) + "\n")
     print("  selected:       ", selected["input"])
