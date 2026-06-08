@@ -15498,3 +15498,55 @@ Completion:
 - CPU/GPU performance: 99.3%.
 - CI runtime refactor with preserved coverage/physics gates: 100%.
 - Docs/release hygiene: 99.85%.
+
+### 2026-06-08 Status-Derived Adaptive Seam Rejected-Slot Gate
+
+Steps taken:
+
+1. Extended ``direct_coil_adaptive_full_loop_same_branch_gate_report`` with
+   ``require_status_derived_rejected_controller_slot``.
+2. The adaptive seam now reports whether a fixed rejected controller slot came
+   from trace ``step_status`` provenance rather than only from an explicit
+   caller-supplied ``accept_mask``.
+3. Updated the production finite-pressure same-branch rejected-slot validation
+   to append a trace with ``step_status='rejected'`` and let replay derive the
+   rejected mask.
+4. Added assertions that the stricter gate passes only when
+   ``status_acceptance_source == 'trace_step_status'`` and the status-derived
+   accept mask contains a rejected slot.
+5. Updated the free-boundary coil optimization docs to describe this stricter
+   provenance gate.
+
+Results obtained:
+
+1. The phase-2 adaptive seam remains conservative and fingerprint-gated: it
+   validates same-branch accepted/rejected controller slots against
+   complete-solve finite differences, but still does not claim arbitrary host
+   branch-selection derivatives.
+2. The rejected-slot promotion evidence is now closer to production behavior,
+   since the fixed rejected slot is derived from trace status rather than a
+   hand-built mask.
+
+Best next steps:
+
+1. Run focused ruff and direct-coil finite-pressure tests.
+2. If clean, commit and push this phase-2 gate improvement.
+3. Continue with phase-3 coil-only QS optimization only after the stricter
+   phase-2 gate is green locally and in CI.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999% for
+  fingerprint-gated same-branch accepted/rejected slots; arbitrary adaptive
+  branch differentiation remains explicitly unclaimed.
+- VMEC parity and physics gates: 98.2%.
+- Single-stage coil-only optimization: 98.0%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 99.3%.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 99.9%.

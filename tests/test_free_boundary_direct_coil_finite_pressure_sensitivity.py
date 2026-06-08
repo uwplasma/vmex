@@ -624,6 +624,13 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatc
     assert not missing_rejected_slot_gate["passed"]
     assert any("fixed rejected controller slot" in error for error in missing_rejected_slot_gate["errors"])
     assert any("accepted-only fast path" in error for error in missing_rejected_slot_gate["errors"])
+    missing_status_rejected_slot_gate = direct_coil_adaptive_full_loop_same_branch_gate_report(
+        physical_synthetic_report,
+        physical_scalars_report,
+        require_status_derived_rejected_controller_slot=True,
+    )
+    assert not missing_status_rejected_slot_gate["passed"]
+    assert any("trace step_status" in error for error in missing_status_rejected_slot_gate["errors"])
     unstacked_allowed_scalars_report = deepcopy(physical_scalars_report)
     unstacked_allowed_scalars_report["replay_option_flags"] = {"use_stacked_step_controls": False}
     unstacked_allowed_gate = direct_coil_adaptive_full_loop_same_branch_gate_report(
@@ -2298,10 +2305,9 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
             allow_nan=False,
         )
         if check_fixed_rejected_controller_mask_gate:
-            padded_traces = tuple(base_traces) + (deepcopy(base_traces[-1]),)
-            accept_mask = np.ones(len(padded_traces), dtype=bool)
-            accept_mask[-1] = False
-            done_mask = np.zeros(len(padded_traces), dtype=bool)
+            rejected_trace = deepcopy(base_traces[-1])
+            rejected_trace["step_status"] = "rejected"
+            padded_traces = tuple(base_traces) + (rejected_trace,)
             rejected_slot_scalars_report = direct_coil_same_branch_controller_scalars_custom_vjp_report(
                 complete_report,
                 base_params,
@@ -2309,8 +2315,6 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
                 replay_scalar_fns=replay_scalar_fns,
                 replay_kwargs={
                     "traces": padded_traces,
-                    "accept_mask": accept_mask,
-                    "done_mask": done_mask,
                     "use_stacked_step_controls": True,
                     "use_accepted_only_fast_path": False,
                 },
@@ -2332,11 +2336,15 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
             assert int(np.count_nonzero(np.asarray(rejected_metadata["accepted_mask"], dtype=bool))) == len(base_traces)
             assert int(rejected_metadata["n_steps"]) == len(padded_traces)
             assert int(rejected_metadata["n_free_boundary_replay_steps"]) == expected_active_freeb_steps
+            assert rejected_metadata["status_acceptance_source"] == "trace_step_status"
+            assert tuple(rejected_metadata["status_masks"]["step_status"])[-1] == "rejected"
+            assert bool(np.asarray(rejected_metadata["status_masks"]["accept_mask"], dtype=bool)[-1]) is False
             rejected_slot_gate = direct_coil_adaptive_full_loop_same_branch_gate_report(
                 complete_report,
                 rejected_slot_scalars_report,
                 scalar_keys=tuple(replay_scalar_fns),
                 require_fixed_rejected_controller_slot=True,
+                require_status_derived_rejected_controller_slot=True,
             )
             assert rejected_slot_gate["passed"], rejected_slot_gate
             assert rejected_slot_gate["same_branch"] is True
@@ -2344,7 +2352,10 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
             assert rejected_slot_gate["differentiates_run_free_boundary"] is False
             assert rejected_slot_gate["same_stacked_step_policy_branch"] is True
             assert rejected_slot_gate["requires_fixed_rejected_controller_slot"] is True
+            assert rejected_slot_gate["requires_status_derived_rejected_controller_slot"] is True
             assert rejected_slot_gate["fixed_rejected_controller_slot_present"] is True
+            assert rejected_slot_gate["status_derived_rejected_controller_slot_present"] is True
+            assert rejected_slot_gate["status_acceptance_source"] == "trace_step_status"
             assert rejected_slot_gate["fixed_rejected_controller_slots"] == 1
             assert rejected_slot_gate["controller_slot_summary"]["accepted_slots"] == len(base_traces)
             assert rejected_slot_gate["controller_slot_summary"]["rejected_slots"] == 1
@@ -2357,6 +2368,7 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
                     rejected_slot_scalars_report,
                     scalar_keys=tuple(replay_scalar_fns),
                     require_fixed_rejected_controller_slot=True,
+                    require_status_derived_rejected_controller_slot=True,
                     json_safe=True,
                 ),
                 allow_nan=False,

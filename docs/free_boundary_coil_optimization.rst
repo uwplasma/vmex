@@ -822,7 +822,11 @@ When production traces contain ``step_status`` values such as ``rejected`` or
 ``restart_bad_progress``, the report derives the fixed replay ``accept_mask``
 from those statuses unless the caller supplied an explicit mask.  The
 ``status_masks`` and ``status_acceptance_source`` fields record that
-provenance.
+provenance.  The stricter adaptive-seam validation gate can require both a
+fixed rejected controller slot and ``status_acceptance_source =
+'trace_step_status'``; this is the promoted diagnostic because it exercises the
+same trace-status route used by production rejected/restarted steps rather
+than a hand-built mask.
 For directional vector reports, also inspect ``directional_jvp_fast_path`` and
 ``directional_uses_fixed_coil_geometry``.  A ``current_only`` fast path means
 the JVP reused the coil curve geometry and differentiated only the currents,
