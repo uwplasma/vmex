@@ -1223,6 +1223,87 @@ Completion:
   matrix-free coverage run ``27079913312`` is green.
 - Docs/release hygiene: 99.5%.
 
+### 2026-06-08 Seed-3127 QI-First Constrained Cleanup Probe
+
+Steps taken:
+
+1. Repaired the current CI break from commit ``cae4656`` by keeping
+   ``examples/optimization/QI_optimization.py`` under the 500-line example
+   readability guard.  The failing CI job was a script-length guard, not a
+   numerical failure.
+2. Added stage-local mirror smoothing controls to ``QI_optimization.py`` so
+   guarded cleanup stages can use the same nonsmoothed Boozer mirror residual
+   as the independent promotion diagnostics.
+3. Replaced the seed-3127 public cleanup policy with repeated full-mode
+   ``scipy_matrix_free`` QI-refinement stages using a larger LSMR subproblem
+   budget, followed by nonsmoothed mirror-preserving cleanup stages.
+4. Ran focused tests and lint:
+   ``tests/test_qi_optimization_public_helpers.py::test_boundary_reference_preconditioner_can_prefer_lowest_qi_candidate``,
+   ``tests/test_optimization_examples.py::test_qi_seed3127_example_exposes_reviewed_readme_preset``,
+   ``tests/test_qi_case_resolution.py::test_resolve_qi_case_external_reference_overrides_policy_controls``,
+   ``tests/test_optimization_examples.py::test_qi_example_uses_qi_problem_api``,
+   ``tests/test_optimization_examples.py::test_qi_example_keeps_mirror_cleanup_guarded_by_qi_ceiling``,
+   and ruff on the touched files.
+5. Ran seed-3127 diagnostic probes in ``/tmp`` without writing tracked results.
+
+Results obtained:
+
+1. The QI-first reference-family selector chose ``lambda=1.008`` as expected.
+   The accepted replay baseline had smooth QI ``2.991207e-03``, legacy QI
+   ``3.853817e-04``, mirror ratio ``0.312747``, max elongation ``3.92404``,
+   mean iota ``-1.05784``, and aspect ``3.47761``.
+2. A scalar-trust QI cleanup improved smooth QI to ``2.635671e-03`` while
+   keeping mirror ratio ``0.346210``.  It remained above the strict
+   ``2e-3`` smooth-QI target.
+3. A stricter matrix-free QI-only refinement from the balanced ``lambda=1.000``
+   branch reached smooth QI ``2.227120e-03`` with mirror ratio ``0.342564``.
+   A repeat same-mode refinement crossed the strict QI target with smooth QI
+   ``1.945972e-03`` and legacy QI ``2.770511e-04``, but mirror rose to
+   ``0.367943``.
+4. The old smoothed mirror cleanup objective did not rank the same direction
+   as the independent Boozer mirror diagnostic: increasing mirror weight with
+   the smoothed surrogate worsened the diagnostic mirror ratio to ``0.454147``.
+5. Nonsmoothed mirror cleanup fixed that mismatch and produced the best
+   measured combined branch so far: smooth QI ``1.789527e-03``, legacy QI
+   ``3.138201e-04``, mirror ratio ``0.358332``, max elongation ``3.81366``,
+   mean iota ``-1.06144``, and aspect ``3.56780``.  This satisfies the strict
+   QI target but still misses the ``0.35`` mirror target by about ``0.008``.
+
+Best next steps:
+
+1. Keep the nonsmoothed mirror residual for hard cleanup stages; the smoothed
+   surrogate is useful for soft optimization but should not be used for final
+   mirror-promotion claims.
+2. Add a true augmented-Lagrangian wrapper for the mirror gate, using the
+   nonsmoothed residual, so the final branch can target mirror ``<=0.35``
+   without giving back the smooth-QI ``<2e-3`` result.
+3. Re-run the full seed-3127 public script after the augmented-Lagrangian stage
+   is added, then regenerate the Boozer contour review plot only if both strict
+   QI and mirror pass.
+4. Keep far-seed QI completion conservative: current evidence demonstrates
+   strict-QI recovery and near-mirror cleanup, but not a fully passed
+   mirror-gated far-seed policy yet.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99995% for fixed
+  same-branch scalar/vector gates; adaptive branch differentiation remains
+  explicitly unclaimed.
+- VMEC parity and physics gates: 97.9%.
+- Single-stage coil-only optimization: 97.4%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- Seed-robust QI: 95.2%; seed-3127 now has a measured strict-QI branch below
+  ``2e-3`` and a near-mirror cleanup branch, but mirror ``<=0.35`` is still
+  open.
+- CPU/GPU performance: 99.1%.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 99.5%.
+
 ### 2026-06-07 QI-First Boundary-Reference Selection
 
 Steps taken:

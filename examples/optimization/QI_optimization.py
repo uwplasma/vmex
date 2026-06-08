@@ -30,9 +30,8 @@ INPUT_FILE = DATA_DIR / "input.minimal_seed_nfp2"
 # INPUT_FILE = DATA_DIR / "input.minimal_seed_nfp1"
 # INPUT_FILE = DATA_DIR / "input.minimal_seed_nfp3"
 # INPUT_FILE = DATA_DIR / "input.minimal_seed_nfp4"
-# Use ``--reference-input`` or set REFERENCE_INPUT_FILE below if you want a
-# deterministic same-NFP QI-family proposal before local cleanup; the raw input
-# and initial plots remain the minimal seed.
+# Use ``--reference-input`` for a same-NFP QI-family proposal before local
+# cleanup; raw initial plots remain from the user-selected seed.
 OUTPUT_DIR = Path("results/qi_opt/ess/minimal_nfp2_qi")
 MAX_MODE = 5
 MIN_VMEC_MODE = max(6, MAX_MODE + 3)
@@ -115,7 +114,6 @@ QI_CLEANUP_CEILING_SMOOTH_PENALTY = QI_CEILING_SMOOTH_PENALTY
 JIT_BOOZ = True
 OPT_QI_RESOLUTION = {"mboz": 18, "nboz": 18, "nphi": 151, "nalpha": 31, "n_bounce": 51}
 AUDIT_QI_RESOLUTION = dict(OPT_QI_RESOLUTION)
-
 
 vj.apply_qi_example_cli_overrides(globals())
 
@@ -264,8 +262,8 @@ def make_qi_problem(stage=None):
         ntheta=96,
         nphi=96,
         surface_index=_stage_value(stage, "mirror_surface_index", MIRROR_SURFACE_INDEX),
-        smooth_extrema=2.0e-2,
-        smooth_penalty=2.0e-2,
+        smooth_extrema=float(_stage_value(stage, "mirror_smooth_extrema", 2.0e-2)),
+        smooth_penalty=float(_stage_value(stage, "mirror_smooth_penalty", 2.0e-2)),
     )
     elongation = vj.MaxElongation(
         threshold=float(_stage_value(stage, "max_elongation", MAX_ELONGATION)),
