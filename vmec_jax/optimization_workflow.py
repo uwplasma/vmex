@@ -3127,13 +3127,15 @@ def build_quasi_isodynamic_objective_stage(
             surface_indices=surface_indices,
         )
 
-    def residuals_from_state(state, *, ctx=ctx):
+    bound_scalar_objectives = tuple(term.bind(ctx) for term in scalar_objectives)
+
+    def residuals_from_state(state, *, ctx=ctx, scalar_objectives=bound_scalar_objectives):
         field = field_eval(state)
         scalar_parts = [term.residual(ctx, state) for term in scalar_objectives]
         qi_parts = [term.residual_and_total(ctx, state, field)[0] for term in qi_objectives]
         return jnp.concatenate([*scalar_parts, *qi_parts])
 
-    residuals_from_state._n_non_qs = len(scalar_objectives)
+    residuals_from_state._n_non_qs = len(bound_scalar_objectives)
     def _qs_total_from_state(state, *, ctx=ctx):
         field = field_eval(state)
         return float(sum(float(term.residual_and_total(ctx, state, field)[1]) for term in qi_objectives))
