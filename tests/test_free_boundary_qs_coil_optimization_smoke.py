@@ -953,10 +953,19 @@ def test_same_branch_report_profiles_nestor_and_rejected_slot(tmp_path, monkeypa
         replay_kwargs = dict(kwargs["replay_kwargs"])
         calls.append(replay_kwargs)
         accept_mask = replay_kwargs.get("accept_mask")
+        traces = tuple(replay_kwargs.get("traces", (trace,)))
         if accept_mask is None:
-            accepted_mask = [True]
-            rejected_mask = [False]
+            statuses = [
+                str(item.get("step_status", "accepted")).strip().lower() or "accepted"
+                for item in traces
+            ]
+            accepted_mask = [status != "rejected" and not status.startswith("restart_") for status in statuses]
+            rejected_mask = [not item for item in accepted_mask]
         else:
+            statuses = [
+                str(item.get("step_status", "accepted")).strip().lower() or "accepted"
+                for item in traces
+            ]
             accepted_mask = [bool(item) for item in np.asarray(accept_mask, dtype=bool)]
             rejected_mask = [not item for item in accepted_mask]
         return {
@@ -987,6 +996,12 @@ def test_same_branch_report_profiles_nestor_and_rejected_slot(tmp_path, monkeypa
             "replay_branch_metadata": {
                 "n_steps": len(accepted_mask),
                 "n_free_boundary_replay_steps": int(np.count_nonzero(accepted_mask)),
+                "status_masks": {
+                    "step_status": statuses,
+                    "accept_mask": accepted_mask,
+                    "status_acceptance_source": "trace_step_status",
+                },
+                "status_acceptance_source": "trace_step_status",
                 "accepted_mask": accepted_mask,
                 "rejected_mask": rejected_mask,
             },
@@ -1040,7 +1055,8 @@ def test_same_branch_report_profiles_nestor_and_rejected_slot(tmp_path, monkeypa
     assert len(calls) == 5
     assert calls[0]["nestor_solve_mode"] == "dense"
     assert calls[1]["use_accepted_only_fast_path"] is False
-    assert [bool(item) for item in np.asarray(calls[1]["accept_mask"], dtype=bool)] == [True, False]
+    assert "accept_mask" not in calls[1]
+    assert [item.get("step_status", "accepted") for item in calls[1]["traces"]] == ["accepted", "rejected"]
     profiled = {(call["nestor_solve_mode"], call["nestor_operator_solver"]) for call in calls[2:]}
     assert profiled == {("dense", "gmres"), ("matrix_free", "gmres"), ("matrix_free", "bicgstab")}
 
@@ -1057,6 +1073,8 @@ def test_same_branch_report_profiles_nestor_and_rejected_slot(tmp_path, monkeypa
     assert rejected_gate["controller_slot_summary"]["accepted_slots"] == 1
     assert rejected_gate["controller_slot_summary"]["rejected_slots"] == 1
     assert rejected_gate["replay_option_flags"]["use_accepted_only_fast_path"] is False
+    assert rejected_gate["replay_branch_metadata"]["status_acceptance_source"] == "trace_step_status"
+    assert rejected_gate["replay_branch_metadata"]["status_masks"]["step_status"] == ["accepted", "rejected"]
 
     profile = report["nestor_replay_profile"]
     assert profile["enabled"] is True
