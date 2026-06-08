@@ -5330,6 +5330,7 @@ def direct_coil_adaptive_full_loop_same_branch_gate_report(
     scalar_keys: tuple[str, ...] | list[str] | None = None,
     require_stacked_step_controls: bool = True,
     require_fixed_rejected_controller_slot: bool = False,
+    require_status_derived_rejected_controller_slot: bool = False,
     json_safe: bool = False,
 ) -> dict[str, Any]:
     """Report whether complete-loop FD is compatible with stacked replay AD.
@@ -5379,11 +5380,33 @@ def direct_coil_adaptive_full_loop_same_branch_gate_report(
     )
     fixed_rejected_controller_slots = int(controller_slot_summary.get("rejected_slots", 0))
     fixed_rejected_controller_slot_present = fixed_rejected_controller_slots > 0
+    status_masks = (
+        replay_branch_metadata.get("status_masks", {})
+        if isinstance(replay_branch_metadata, Mapping)
+        else {}
+    )
+    status_acceptance_source = (
+        replay_branch_metadata.get("status_acceptance_source")
+        if isinstance(replay_branch_metadata, Mapping)
+        else None
+    )
+    status_derived_rejected_controller_slot_present = bool(
+        status_acceptance_source == "trace_step_status"
+        and isinstance(status_masks, Mapping)
+        and np.any(
+            np.logical_not(
+                np.asarray(status_masks.get("accept_mask", ()), dtype=bool)
+            )
+        )
+    )
     if bool(require_fixed_rejected_controller_slot):
         if not fixed_rejected_controller_slot_present:
             errors.append("fixed rejected controller slot was not replayed")
         if bool(replay_option_flags.get("use_accepted_only_fast_path", True)):
             errors.append("accepted-only fast path was used for a rejected-slot replay gate")
+    if bool(require_status_derived_rejected_controller_slot):
+        if not status_derived_rejected_controller_slot_present:
+            errors.append("rejected controller slot was not derived from trace step_status")
 
     labels = ("base", "plus", "minus")
     step_policy_signatures: dict[str, tuple[Any, ...]] = {}
@@ -5432,8 +5455,15 @@ def direct_coil_adaptive_full_loop_same_branch_gate_report(
         "requires_stacked_step_controls": bool(require_stacked_step_controls),
         "used_stacked_step_controls": used_stacked_step_controls,
         "requires_fixed_rejected_controller_slot": bool(require_fixed_rejected_controller_slot),
+        "requires_status_derived_rejected_controller_slot": bool(
+            require_status_derived_rejected_controller_slot
+        ),
         "fixed_rejected_controller_slot_present": bool(fixed_rejected_controller_slot_present),
         "fixed_rejected_controller_slots": int(fixed_rejected_controller_slots),
+        "status_derived_rejected_controller_slot_present": bool(
+            status_derived_rejected_controller_slot_present
+        ),
+        "status_acceptance_source": status_acceptance_source,
         "controller_slot_summary": controller_slot_summary,
         "replay_option_flags": replay_option_flags,
         "replay_branch_metadata": replay_branch_metadata,
