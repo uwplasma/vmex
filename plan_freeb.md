@@ -15235,3 +15235,54 @@ Completion:
   surfaced in production reports.
 - CI runtime refactor with preserved coverage/physics gates: 100%.
 - Docs/release hygiene: 99.7%.
+
+### 2026-06-08 Coil QS Report Objective-Contract Cleanup
+
+Steps taken:
+
+1. Extended ``same_branch_derivative_proposal_from_report`` so a
+   branch-local vector report contributes the weighted ``mean_iota`` objective
+   term when ``mean_iota`` derivative evidence is available.
+2. Fixed stale CLI and docs text for the default branch-local vector scalar
+   set.  The default is now documented as
+   ``aspect,qs_total,mean_iota,lcfs_boundary_moment``.
+3. Added smoke coverage that dry-run summaries record the default
+   same-branch report mode, AD mode, and vector keys.
+
+Results obtained:
+
+1. The optional derivative-assisted coil proposal now matches the objective
+   terms used by the complete-solve optimizer path for QS, aspect, and iota.
+2. ``python -m ruff check
+   examples/optimization/free_boundary_QS_coil_optimization.py
+   tests/test_free_boundary_qs_coil_optimization_smoke.py`` passed.
+3. ``JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_qs_coil_optimization_smoke.py::test_same_branch_derivative_proposal_uses_gated_directional_report
+   tests/test_free_boundary_qs_coil_optimization_smoke.py::test_circle_dry_run_writes_configuration_without_solves
+   -q`` passed.
+4. ``python -m sphinx -q -W -b html docs docs/_build/html`` passed.
+
+Best next steps:
+
+1. Close the rejected-controller-slot provenance gap by deriving replay masks
+   from production trace ``step_status`` when no explicit mask is supplied.
+2. Add a focused status-derived rejected-slot test so the adaptive seam does
+   not rely only on manually injected masks.
+3. Check the latest CI run and fix failures before further pushes.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99996% for fixed
+  same-branch scalar/vector gates; production ``step_status`` mask provenance
+  is the next small validation gap.
+- VMEC parity and physics gates: 98.0%.
+- Single-stage coil-only optimization: 97.8%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 99.2%.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 99.7%.

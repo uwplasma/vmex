@@ -771,6 +771,20 @@ def same_branch_derivative_proposal_from_report(
         }
         directional += contribution
 
+    if "mean_iota" in scalars:
+        scalar = scalars["mean_iota"]
+        value = float(scalar["value"])
+        deriv = float(scalar["exact_directional"])
+        target = float(objective_model.get("target_iota", value))
+        contribution = 2.0 * float(objective_model.get("iota_weight", 0.0)) * (value - target) * deriv
+        contributions["mean_iota"] = {
+            "value": value,
+            "target": target,
+            "exact_directional": deriv,
+            "contribution": contribution,
+        }
+        directional += contribution
+
     if not contributions:
         return {"available": False, "reason": "no report scalars map to the objective terms"}
     if not np.isfinite(directional):
@@ -2046,8 +2060,8 @@ def build_parser() -> argparse.ArgumentParser:
             f"Supported: {', '.join(SUPPORTED_SAME_BRANCH_VECTOR_KEYS)}. "
             "Alias: bnormal_rms -> accepted_bnormal_rms. "
             "Use state_norm as a non-physics replay-graph timing probe. "
-            "Use all supported keys for broader validation, or the default smaller "
-            "aspect,qs_total set for lower cold JVP graph cost. Final-state-only "
+            "Use all supported keys for broader validation; the default is "
+            f"{','.join(DEFAULT_SAME_BRANCH_VECTOR_KEYS)}. Final-state-only "
             f"keys ({', '.join(STATE_ONLY_SAME_BRANCH_KEYS)}) use a compact replay "
             "that omits accepted-history RMS arrays; accepted_bnormal_rms keeps "
             "the full-history path."

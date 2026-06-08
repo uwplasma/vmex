@@ -756,10 +756,11 @@ accepted branch in JAX, and reports ``J @ direction`` for several physical
 scalars using a directional JVP without materializing the full Jacobian.  The
 report is anchored at the best optimized coil point by default; pass
 ``--same-branch-report-anchor initial`` to reproduce the older initial-coil
-diagnostic.  The
-default vector scalar set is the lower-cost ``aspect,qs_total`` pair; pass
-``--same-branch-report-vector-keys aspect,qs_total,lcfs_boundary_moment,accepted_bnormal_rms``
-when you want the broader physical-scalar artifact.  Use
+diagnostic.  The default vector scalar set is
+``aspect,qs_total,mean_iota,lcfs_boundary_moment``; pass
+``--same-branch-report-vector-keys aspect,qs_total`` for the lower-cost pair or
+``--same-branch-report-vector-keys aspect,qs_total,mean_iota,lcfs_boundary_moment,accepted_bnormal_rms``
+when you want to include the accepted-history vacuum RMS scalar.  Use
 ``--same-branch-report-vector-keys state_norm`` only as a non-physics timing
 probe for the accepted-state replay graph, since it omits boundary-geometry,
 vacuum-RMS, and QS postprocessing.  Use
