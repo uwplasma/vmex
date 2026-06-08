@@ -728,6 +728,7 @@ def same_branch_derivative_proposal_from_report(
     best: dict[str, Any] | None,
     *,
     step_size: float,
+    max_base_abs_delta: float = 2.0e-3,
 ) -> dict[str, Any]:
     """Return one conservative derivative-assisted proposal from a report.
 
@@ -741,15 +742,68 @@ def same_branch_derivative_proposal_from_report(
     vector = report.get("branch_local_vector_jacobian", {})
     if not bool(vector.get("available", False)):
         return {"available": False, "reason": str(vector.get("reason", "branch-local vector report unavailable"))}
+    same_branch = bool(report.get("branch_compatibility", {}).get("same_branch", vector.get("same_branch", False)))
+    if not same_branch:
+        return {"available": False, "reason": "complete-solve finite-difference branch fingerprint is not unchanged"}
+    if not bool(vector.get("uses_production_forward", False)):
+        return {"available": False, "reason": "branch-local vector report did not use production-forward scalar values"}
     if bool(vector.get("differentiates_adaptive_controller", True)):
         return {"available": False, "reason": "branch-local vector report claims adaptive-controller differentiation"}
+    if bool(vector.get("differentiates_run_free_boundary", True)):
+        return {"available": False, "reason": "branch-local vector report claims run_free_boundary differentiation"}
     if not bool(vector.get("differentiates_fixed_accepted_branch", False)):
         return {"available": False, "reason": "branch-local vector report does not differentiate a fixed accepted branch"}
+    replay_ad_mode = str(vector.get("replay_ad_mode", "")).strip().lower()
+    if replay_ad_mode != "direct":
+        return {"available": False, "reason": "branch-local proposal requires direct JVP replay_ad_mode"}
+    derivative_mode = str(vector.get("derivative_mode", "")).strip().lower()
+    if derivative_mode != "directional_jvp":
+        return {"available": False, "reason": "branch-local proposal requires directional_jvp derivative_mode"}
+    report_base_delta = float(vector.get("max_base_abs_delta", np.inf))
+    if not np.isfinite(report_base_delta):
+        return {"available": False, "reason": "branch-local vector report has non-finite replay base delta"}
+    if report_base_delta > float(max_base_abs_delta):
+        return {
+            "available": False,
+            "reason": (
+                f"branch-local replay base delta {report_base_delta:.3e} exceeds proposal cap "
+                f"{float(max_base_abs_delta):.3e}"
+            ),
+        }
+    vector_gate = report.get("branch_local_vector_gate")
+    if isinstance(vector_gate, dict) and bool(vector_gate.get("available", False)):
+        if not bool(vector_gate.get("passed", False)):
+            return {"available": False, "reason": "branch-local vector gate did not pass"}
+        physical_gate = vector_gate.get("physical_scalar_gate", {})
+        if isinstance(physical_gate, dict) and not bool(physical_gate.get("passed", False)):
+            return {"available": False, "reason": "branch-local physical-scalar gate did not pass"}
 
     scalars = vector.get("scalars", {})
     contributions: dict[str, dict[str, float]] = {}
     omitted_terms: dict[str, dict[str, Any]] = {}
     directional = 0.0
+
+    def _validated_scalar(key: str, weight: float) -> dict[str, Any] | None:
+        if float(weight) == 0.0:
+            return None
+        scalar = scalars.get(key)
+        if scalar is None:
+            omitted_terms[key] = {
+                "weight": float(weight),
+                "reason": "not included in branch-local vector/JVP report",
+            }
+            return None
+        value = float(scalar.get("value", np.nan))
+        deriv = float(scalar.get("exact_directional", np.nan))
+        base_delta = float(scalar.get("base_abs_delta", 0.0))
+        if not (np.isfinite(value) and np.isfinite(deriv) and np.isfinite(base_delta)):
+            raise ValueError(f"non-finite branch-local scalar evidence for {key}")
+        if base_delta > float(max_base_abs_delta):
+            raise ValueError(
+                f"branch-local scalar {key} base delta {base_delta:.3e} exceeds proposal cap "
+                f"{float(max_base_abs_delta):.3e}"
+            )
+        return {"value": value, "exact_directional": deriv, "base_abs_delta": base_delta}
 
     if float(objective_model.get("residual_weight", 0.0)) != 0.0:
         omitted_terms["residual_proxy"] = {
@@ -760,37 +814,47 @@ def same_branch_derivative_proposal_from_report(
             ),
         }
 
-    if "qs_total" in scalars:
-        scalar = scalars["qs_total"]
-        deriv = float(scalar["exact_directional"])
+    try:
+        qs_scalar = _validated_scalar("qs_total", float(objective_model.get("qs_weight", 0.0)))
+        aspect_scalar = _validated_scalar("aspect", float(objective_model.get("aspect_weight", 0.0)))
+        iota_scalar = _validated_scalar("mean_iota", float(objective_model.get("iota_weight", 0.0)))
+    except ValueError as exc:
+        return {"available": False, "reason": str(exc)}
+
+    if qs_scalar is not None:
+        deriv = float(qs_scalar["exact_directional"])
         contribution = float(objective_model.get("qs_weight", 0.0)) * deriv
-        contributions["qs_total"] = {"exact_directional": deriv, "contribution": contribution}
+        contributions["qs_total"] = {
+            "exact_directional": deriv,
+            "base_abs_delta": float(qs_scalar["base_abs_delta"]),
+            "contribution": contribution,
+        }
         directional += contribution
 
-    if "aspect" in scalars:
-        scalar = scalars["aspect"]
-        value = float(scalar["value"])
-        deriv = float(scalar["exact_directional"])
+    if aspect_scalar is not None:
+        value = float(aspect_scalar["value"])
+        deriv = float(aspect_scalar["exact_directional"])
         target = float(objective_model.get("target_aspect", value))
         contribution = 2.0 * float(objective_model.get("aspect_weight", 0.0)) * (value - target) * deriv
         contributions["aspect"] = {
             "value": value,
             "target": target,
             "exact_directional": deriv,
+            "base_abs_delta": float(aspect_scalar["base_abs_delta"]),
             "contribution": contribution,
         }
         directional += contribution
 
-    if "mean_iota" in scalars:
-        scalar = scalars["mean_iota"]
-        value = float(scalar["value"])
-        deriv = float(scalar["exact_directional"])
+    if iota_scalar is not None:
+        value = float(iota_scalar["value"])
+        deriv = float(iota_scalar["exact_directional"])
         target = float(objective_model.get("target_iota", value))
         contribution = 2.0 * float(objective_model.get("iota_weight", 0.0)) * (value - target) * deriv
         contributions["mean_iota"] = {
             "value": value,
             "target": target,
             "exact_directional": deriv,
+            "base_abs_delta": float(iota_scalar["base_abs_delta"]),
             "contribution": contribution,
         }
         directional += contribution
@@ -814,9 +878,16 @@ def same_branch_derivative_proposal_from_report(
     return {
         "available": True,
         "scope": "fixed accepted-branch directional proposal; complete solve decides acceptance",
+        "same_branch": True,
+        "uses_production_forward": True,
+        "replay_ad_mode": replay_ad_mode,
+        "derivative_mode": derivative_mode,
         "differentiates_adaptive_controller": False,
+        "differentiates_run_free_boundary": False,
         "differentiates_fixed_accepted_branch": True,
         "complete_solve_acceptance_authority": True,
+        "max_base_abs_delta": report_base_delta,
+        "max_base_abs_delta_allowed": float(max_base_abs_delta),
         "directional_derivative": float(directional),
         "contributions": contributions,
         "objective_terms_used": sorted(contributions),
@@ -920,8 +991,10 @@ def write_same_branch_validation_report(
     """Write an optional same-branch complete-solve FD report for this example."""
     from vmec_jax.free_boundary_adjoint import (
         direct_coil_accepted_trace_controller_slot_summary,
+        direct_coil_branch_local_scalars_report_from_complete_fd,
         direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax,
         direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax,
+        direct_coil_same_branch_physical_scalar_gate_report,
         direct_coil_same_branch_complete_solve_fd_report,
         free_boundary_boundary_geometry_jax,
     )
@@ -1139,6 +1212,12 @@ def write_same_branch_validation_report(
         "same_branch": same_branch,
         "scalar_keys": list(vector_keys),
         "reason": "not requested" if mode != "vector" else "branch fingerprint is not same-branch compatible",
+    }
+    branch_local_vector_gate: dict[str, Any] = {
+        "available": False,
+        "passed": False,
+        "scope": "same-branch production-forward vector/JVP physical-scalar gate",
+        "reason": "requires an available branch-local vector report",
     }
     if mode not in {"none", "scalar", "vector"}:
         raise ValueError("--same-branch-report-mode must be one of none, scalar, vector")
@@ -1393,6 +1472,62 @@ def write_same_branch_validation_report(
         for key, value in vector_timings.items():
             timings[f"branch_local_vector_{key}"] = value
         branch_local_vector = _summarize_vector_result(vector, scalar_keys)
+        production_rtol = {
+            key: (
+                2.0e-2
+                if key == "qs_total"
+                else 1.0e-2
+                if key == "accepted_bnormal_rms"
+                else 5.0e-3
+            )
+            for key in scalar_keys
+        }
+        try:
+            scalars_report = direct_coil_branch_local_scalars_report_from_complete_fd(
+                report,
+                vector,
+                scalar_keys=scalar_keys,
+                rtol=production_rtol,
+                atol={key: 5.0e-8 for key in scalar_keys},
+                base_value_atol={key: 2.0e-3 for key in scalar_keys},
+            )
+            physical_gate = direct_coil_same_branch_physical_scalar_gate_report(
+                report,
+                scalars_report,
+                scalar_keys=scalar_keys,
+            )
+            branch_local_vector_gate = {
+                "available": True,
+                "passed": bool(physical_gate.get("passed", False)),
+                "scope": "same-branch production-forward vector/JVP physical-scalar gate",
+                "differentiates_adaptive_controller": False,
+                "differentiates_run_free_boundary": False,
+                "differentiates_fixed_accepted_branch": bool(
+                    scalars_report.get("differentiates_fixed_accepted_branch", False)
+                ),
+                "scalar_report": direct_coil_branch_local_scalars_report_from_complete_fd(
+                    report,
+                    vector,
+                    scalar_keys=scalar_keys,
+                    rtol=production_rtol,
+                    atol={key: 5.0e-8 for key in scalar_keys},
+                    base_value_atol={key: 2.0e-3 for key in scalar_keys},
+                    json_safe=True,
+                ),
+                "physical_scalar_gate": direct_coil_same_branch_physical_scalar_gate_report(
+                    report,
+                    scalars_report,
+                    scalar_keys=scalar_keys,
+                    json_safe=True,
+                ),
+            }
+        except Exception as exc:  # pragma: no cover - report artifacts should not abort the example.
+            branch_local_vector_gate = {
+                "available": False,
+                "passed": False,
+                "scope": "same-branch production-forward vector/JVP physical-scalar gate",
+                "reason": f"{type(exc).__name__}: {exc}",
+            }
     rejected_slot_gate: dict[str, Any] = {
         "available": False,
         "requested": bool(getattr(args, "same_branch_report_rejected_slot_gate", False)),
@@ -1555,6 +1690,7 @@ def write_same_branch_validation_report(
             )
     compact_report["branch_local_scalar_gradient"] = branch_local_scalar
     compact_report["branch_local_vector_jacobian"] = branch_local_vector
+    compact_report["branch_local_vector_gate"] = branch_local_vector_gate
     compact_report["accepted_rejected_controller_slot_gate"] = rejected_slot_gate
     compact_report["nestor_replay_profile"] = nestor_profile
     compact_report["timings"] = timings
@@ -1705,6 +1841,7 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
             "normal complete-solve objective evaluation"
         ),
         "step_size": float(args.same_branch_proposal_step),
+        "max_base_abs_delta": float(args.same_branch_proposal_max_base_delta),
         "differentiates_adaptive_controller": False,
     }
     history: list[dict[str, Any]] = []
@@ -1890,6 +2027,7 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
                 objective_model,
                 best,
                 step_size=float(args.same_branch_proposal_step),
+                max_base_abs_delta=float(args.same_branch_proposal_max_base_delta),
             )
             if proposal.get("available"):
                 previous_best = best
@@ -2244,6 +2382,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.05,
         help="Optimizer-coordinate step length for --same-branch-derivative-proposal.",
+    )
+    parser.add_argument(
+        "--same-branch-proposal-max-base-delta",
+        type=float,
+        default=2.0e-3,
+        help=(
+            "Maximum allowed production-vs-replay base scalar mismatch for "
+            "--same-branch-derivative-proposal. Larger mismatches mark the "
+            "branch-local derivative evidence stale and skip the proposal."
+        ),
     )
     return parser
 

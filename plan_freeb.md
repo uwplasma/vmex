@@ -15650,3 +15650,50 @@ Completion:
 - CPU/GPU performance: 99.3%.
 - CI runtime refactor with preserved coverage/physics gates: 100%.
 - Docs/release hygiene: 99.9%.
+
+### 2026-06-08 Coil QS Proposal Uses Production Vector Gate
+
+Steps taken:
+
+1. Extended the coil-only QS example's same-branch report writer to emit a
+   ``branch_local_vector_gate`` JSON block.
+2. The block is built from the production-forward vector/JVP scalar report and
+   the same physical-scalar gate used by the phase-2 validation helpers.
+3. Updated ``same_branch_derivative_proposal_from_report`` so an available but
+   failed vector gate blocks the derivative-assisted proposal before any trial
+   point is formed.
+4. Added smoke regressions for the new gate payload and for rejecting failed
+   gate evidence.
+5. Updated docs to state that the derivative path only proposes a candidate;
+   complete free-boundary solves remain the acceptance authority.
+
+Results obtained:
+
+1. Phase 3 is now tied directly to the promoted production-forward
+   branch-local vector/JVP gate instead of only checking a few hand-read flags.
+2. The example still avoids claiming a SciPy Jacobian or differentiating
+   adaptive host branch selection.
+
+Best next steps:
+
+1. Run the full QS coil optimization smoke file and docs build.
+2. Commit and push if clean.
+3. Check CI for the adapter/proposal commits, then continue bounded
+   VMEC2000/mgrid/direct-coil parity expansion only with physical finite
+   positive WOUT fixtures.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999995% for
+  production-forward same-branch vector/JVP physical/adaptive gates.
+- VMEC parity and physics gates: 98.3%.
+- Single-stage coil-only optimization: 98.8%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 99.3%.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 99.95%.

@@ -23,6 +23,49 @@ def _load_example_module():
     return module
 
 
+def _same_branch_replay_gate_stub() -> dict[str, object]:
+    fingerprint = {
+        "n_steps": 1,
+        "n_freeb_steps": 1,
+        "freeb_sizes": [2],
+    }
+    trace_diag = {
+        "differentiates_adaptive_controller": False,
+        "n_steps": 1,
+        "branch_fingerprint": fingerprint,
+        "masks": {
+            "active": [True],
+            "accepted": [True],
+            "rejected": [False],
+            "done": [True],
+            "has_active_freeb_replay": [True],
+        },
+        "replay_diagnostics": {
+            "scalar_controls_stackable": True,
+            "array_controls_stackable": True,
+            "preconditioner_policy_n_segments": 1,
+        },
+    }
+    return {
+        "branch": {
+            "same_branch": True,
+            "same_accepted_trace_branch": True,
+            "same_residual_branch": True,
+            "base_fingerprint": fingerprint,
+            "plus_fingerprint": fingerprint,
+            "minus_fingerprint": fingerprint,
+            "base_residual_fingerprint": {"n_iter": 1, "final_fsq_total_bucket": "small"},
+            "plus_residual_fingerprint": {"n_iter": 1, "final_fsq_total_bucket": "small"},
+            "minus_residual_fingerprint": {"n_iter": 1, "final_fsq_total_bucket": "small"},
+        },
+        "trace_replay_diagnostics": {
+            "base": trace_diag,
+            "plus": trace_diag,
+            "minus": trace_diag,
+        },
+    }
+
+
 def test_objective_terms_report_weighted_proxy_components():
     module = _load_example_module()
 
@@ -189,6 +232,78 @@ def test_same_branch_vector_key_parser_defaults_to_promoted_state_scalars():
     assert keys == ("aspect", "qs_total", "mean_iota", "lcfs_boundary_moment")
 
 
+def test_branch_local_scalar_report_adapter_records_gate_evidence():
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jnp
+    from vmec_jax.free_boundary_adjoint import (
+        direct_coil_branch_local_scalars_report_from_complete_fd,
+        direct_coil_same_branch_physical_scalar_gate_report,
+    )
+
+    gate = _same_branch_replay_gate_stub()
+    complete_report = {
+        "branch_compatibility": gate["branch"],
+        "trace_replay_diagnostics": gate["trace_replay_diagnostics"],
+        "objective_values": {
+            "aspect": {"base": 6.0, "plus": 6.1, "minus": 5.9, "central_fd_directional": 0.2},
+            "qs_total": {"base": 0.4, "plus": 0.42, "minus": 0.38, "central_fd_directional": 0.1},
+        },
+    }
+    branch_local = {
+        "uses_production_forward": True,
+        "differentiates_adaptive_controller": False,
+        "differentiates_run_free_boundary": False,
+        "differentiates_fixed_accepted_branch": True,
+        "derivative_mode": "directional_jvp",
+        "replay_ad_mode": "direct",
+        "scalar_keys": ("aspect", "qs_total"),
+        "values": {"aspect": 6.0, "qs_total": 0.4},
+        "replay_value_map": {"aspect": jnp.asarray(6.0), "qs_total": jnp.asarray(0.4)},
+        "base_abs_delta": {"aspect": 0.0, "qs_total": 0.0},
+        "directional_derivatives": {"aspect": jnp.asarray(0.2), "qs_total": jnp.asarray(0.1)},
+        "replay_option_flags": {"use_stacked_step_controls": True, "use_accepted_only_fast_path": True},
+        "replay_branch_metadata": {
+            "n_steps": 1,
+            "accepted_mask": [True],
+            "rejected_mask": [False],
+            "done_mask": [True],
+        },
+        "controller_slot_summary": {"accepted_slots": 1, "rejected_slots": 0},
+    }
+
+    report = direct_coil_branch_local_scalars_report_from_complete_fd(
+        complete_report,
+        branch_local,
+        json_safe=True,
+    )
+
+    assert report["passed"] is True
+    assert report["uses_production_forward"] is True
+    assert report["differentiates_adaptive_controller"] is False
+    assert report["differentiates_run_free_boundary"] is False
+    assert report["scalar_reports"]["aspect"]["abs_error"] == pytest.approx(0.0)
+    physical_gate = direct_coil_same_branch_physical_scalar_gate_report(
+        complete_report,
+        report,
+        scalar_keys=("aspect", "qs_total"),
+        json_safe=True,
+    )
+    assert physical_gate["passed"] is True
+    assert physical_gate["same_branch"] is True
+
+    failed_report = direct_coil_branch_local_scalars_report_from_complete_fd(
+        complete_report,
+        {
+            **branch_local,
+            "uses_production_forward": False,
+            "directional_derivatives": {"aspect": jnp.asarray(10.0), "qs_total": jnp.asarray(0.1)},
+        },
+    )
+    assert failed_report["passed"] is False
+    assert "branch-local report did not use production forward values" in failed_report["errors"]
+    assert failed_report["scalar_reports"]["aspect"]["passed"] is False
+
+
 def test_same_branch_report_anchor_uses_best_or_initial_coil_point():
     module = _load_example_module()
     base_params, _metadata = module.make_circle_provider(current_scale=1.0)
@@ -230,23 +345,32 @@ def test_same_branch_report_anchor_uses_best_or_initial_coil_point():
 def test_same_branch_derivative_proposal_uses_gated_directional_report():
     module = _load_example_module()
     report = {
+        "branch_compatibility": {"same_branch": True},
         "direction_x": [1.0, 0.0, -1.0],
         "branch_local_vector_jacobian": {
             "available": True,
+            "uses_production_forward": True,
             "differentiates_adaptive_controller": False,
+            "differentiates_run_free_boundary": False,
             "differentiates_fixed_accepted_branch": True,
+            "replay_ad_mode": "direct",
+            "derivative_mode": "directional_jvp",
+            "max_base_abs_delta": 0.0,
             "scalars": {
                 "qs_total": {
                     "value": 0.2,
                     "exact_directional": 3.0,
+                    "base_abs_delta": 0.0,
                 },
                 "aspect": {
                     "value": 5.5,
                     "exact_directional": -4.0,
+                    "base_abs_delta": 0.0,
                 },
                 "mean_iota": {
                     "value": 0.35,
                     "exact_directional": -1.0,
+                    "base_abs_delta": 0.0,
                 },
             },
         },
@@ -268,9 +392,16 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
     )
 
     assert proposal["available"] is True
+    assert proposal["same_branch"] is True
+    assert proposal["uses_production_forward"] is True
+    assert proposal["replay_ad_mode"] == "direct"
+    assert proposal["derivative_mode"] == "directional_jvp"
     assert proposal["differentiates_adaptive_controller"] is False
+    assert proposal["differentiates_run_free_boundary"] is False
     assert proposal["differentiates_fixed_accepted_branch"] is True
     assert proposal["complete_solve_acceptance_authority"] is True
+    assert proposal["max_base_abs_delta"] == pytest.approx(0.0)
+    assert proposal["max_base_abs_delta_allowed"] == pytest.approx(2.0e-3)
     assert "complete solve decides acceptance" in proposal["scope"]
     assert proposal["directional_derivative"] == pytest.approx(9.0)
     assert proposal["contributions"]["qs_total"]["contribution"] == pytest.approx(6.0)
@@ -290,11 +421,17 @@ def test_same_branch_derivative_proposal_rejects_adaptive_claims():
     proposal = module.same_branch_derivative_proposal_from_report(
         {
             "direction_x": [1.0],
+            "branch_compatibility": {"same_branch": True},
             "branch_local_vector_jacobian": {
                 "available": True,
+                "uses_production_forward": True,
                 "differentiates_adaptive_controller": True,
+                "differentiates_run_free_boundary": False,
                 "differentiates_fixed_accepted_branch": True,
-                "scalars": {"qs_total": {"value": 0.2, "exact_directional": 1.0}},
+                "replay_ad_mode": "direct",
+                "derivative_mode": "directional_jvp",
+                "max_base_abs_delta": 0.0,
+                "scalars": {"qs_total": {"value": 0.2, "exact_directional": 1.0, "base_abs_delta": 0.0}},
             },
         },
         {"qs_weight": 1.0},
@@ -304,6 +441,99 @@ def test_same_branch_derivative_proposal_rejects_adaptive_claims():
 
     assert proposal["available"] is False
     assert "adaptive-controller" in proposal["reason"]
+
+
+def test_same_branch_derivative_proposal_rejects_failed_vector_gate():
+    module = _load_example_module()
+
+    proposal = module.same_branch_derivative_proposal_from_report(
+        {
+            "direction_x": [1.0],
+            "branch_compatibility": {"same_branch": True},
+            "branch_local_vector_gate": {
+                "available": True,
+                "passed": False,
+                "physical_scalar_gate": {"passed": False},
+            },
+            "branch_local_vector_jacobian": {
+                "available": True,
+                "uses_production_forward": True,
+                "differentiates_adaptive_controller": False,
+                "differentiates_run_free_boundary": False,
+                "differentiates_fixed_accepted_branch": True,
+                "replay_ad_mode": "direct",
+                "derivative_mode": "directional_jvp",
+                "max_base_abs_delta": 0.0,
+                "scalars": {"qs_total": {"value": 0.2, "exact_directional": 1.0, "base_abs_delta": 0.0}},
+            },
+        },
+        {"qs_weight": 1.0},
+        {"x": [0.0]},
+        step_size=0.1,
+    )
+
+    assert proposal["available"] is False
+    assert "vector gate" in proposal["reason"]
+
+
+def test_same_branch_derivative_proposal_requires_direct_jvp_and_fresh_replay():
+    module = _load_example_module()
+    base_report = {
+        "branch_compatibility": {"same_branch": True},
+        "direction_x": [1.0],
+        "branch_local_vector_jacobian": {
+            "available": True,
+            "uses_production_forward": True,
+            "differentiates_adaptive_controller": False,
+            "differentiates_run_free_boundary": False,
+            "differentiates_fixed_accepted_branch": True,
+            "replay_ad_mode": "direct",
+            "derivative_mode": "directional_jvp",
+            "max_base_abs_delta": 0.0,
+            "scalars": {"qs_total": {"value": 0.2, "exact_directional": 1.0, "base_abs_delta": 0.0}},
+        },
+    }
+    objective_model = {
+        "residual_weight": 0.0,
+        "qs_weight": 1.0,
+        "aspect_weight": 0.0,
+        "iota_weight": 0.0,
+    }
+    best = {"x": [0.0]}
+
+    custom_vjp_report = json.loads(json.dumps(base_report))
+    custom_vjp_report["branch_local_vector_jacobian"]["replay_ad_mode"] = "custom_vjp"
+    proposal = module.same_branch_derivative_proposal_from_report(
+        custom_vjp_report,
+        objective_model,
+        best,
+        step_size=0.1,
+    )
+    assert proposal["available"] is False
+    assert "direct JVP" in proposal["reason"]
+
+    stale_report = json.loads(json.dumps(base_report))
+    stale_report["branch_local_vector_jacobian"]["max_base_abs_delta"] = 1.0e-2
+    proposal = module.same_branch_derivative_proposal_from_report(
+        stale_report,
+        objective_model,
+        best,
+        step_size=0.1,
+        max_base_abs_delta=1.0e-3,
+    )
+    assert proposal["available"] is False
+    assert "exceeds proposal cap" in proposal["reason"]
+
+    changed_branch_report = json.loads(json.dumps(base_report))
+    changed_branch_report["branch_compatibility"]["same_branch"] = False
+    proposal = module.same_branch_derivative_proposal_from_report(
+        changed_branch_report,
+        objective_model,
+        best,
+        step_size=0.1,
+    )
+    assert proposal["available"] is False
+    assert "branch fingerprint" in proposal["reason"]
 
 
 def test_nestor_profile_policy_requires_size_and_speedup_thresholds():
@@ -518,13 +748,16 @@ def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path
     )
 
     def fake_report(*_args, **_kwargs):
+        gate = _same_branch_replay_gate_stub()
         return {
             "base": {"traces": ("synthetic-trace",)},
             "branch_compatibility": {
+                **gate["branch"],
                 "same_branch": True,
                 "plus": {"changed_fields": (), "max_abs_scalar_delta": 0.0, "max_rel_scalar_delta": 0.0},
                 "minus": {"changed_fields": (), "max_abs_scalar_delta": 0.0, "max_rel_scalar_delta": 0.0},
             },
+            "trace_replay_diagnostics": gate["trace_replay_diagnostics"],
             "values": {"base": 1.0, "plus": 1.1, "minus": 0.9, "central_fd_directional": 1000.0},
             "objective_values": {
                 "objective": {"base": 1.0, "plus": 1.1, "minus": 0.9, "central_fd_directional": 1000.0},
@@ -694,13 +927,16 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
     )
 
     def fake_report(*_args, **_kwargs):
+        gate = _same_branch_replay_gate_stub()
         return {
             "base": {"traces": ("synthetic-trace",)},
             "branch_compatibility": {
+                **gate["branch"],
                 "same_branch": True,
                 "plus": {"changed_fields": (), "max_abs_scalar_delta": 0.0, "max_rel_scalar_delta": 0.0},
                 "minus": {"changed_fields": (), "max_abs_scalar_delta": 0.0, "max_rel_scalar_delta": 0.0},
             },
+            "trace_replay_diagnostics": gate["trace_replay_diagnostics"],
             "values": {"base": 1.0, "plus": 1.1, "minus": 0.9, "central_fd_directional": 1000.0},
             "objective_values": {
                 "objective": {"base": 1.0, "plus": 1.1, "minus": 0.9, "central_fd_directional": 1000.0},
@@ -881,6 +1117,15 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
     assert report["timings"]["branch_local_vector_replay_jvp_wall_s"] == pytest.approx(0.02)
     assert report["timings"]["branch_local_vector_replay_pullbacks_wall_s"] == pytest.approx(0.0)
     assert "branch_local_scalar_wall_s" not in report["timings"]
+    vector_gate = report["branch_local_vector_gate"]
+    assert vector_gate["available"] is True
+    assert vector_gate["passed"] is True
+    assert vector_gate["differentiates_adaptive_controller"] is False
+    assert vector_gate["differentiates_run_free_boundary"] is False
+    assert vector_gate["differentiates_fixed_accepted_branch"] is True
+    assert vector_gate["scalar_report"]["passed"] is True
+    assert vector_gate["physical_scalar_gate"]["passed"] is True
+    assert vector_gate["physical_scalar_gate"]["same_branch"] is True
 
 
 def test_same_branch_report_profiles_nestor_and_rejected_slot(tmp_path, monkeypatch):
@@ -938,13 +1183,16 @@ def test_same_branch_report_profiles_nestor_and_rejected_slot(tmp_path, monkeypa
     init = SimpleNamespace(static=SimpleNamespace(modes=SimpleNamespace(m=np.arange(144))))
 
     def fake_report(*_args, **_kwargs):
+        gate = _same_branch_replay_gate_stub()
         return {
             "base": {"traces": [trace], "init": init},
             "branch_compatibility": {
+                **gate["branch"],
                 "same_branch": True,
                 "plus": {"changed_fields": (), "max_abs_scalar_delta": 0.0, "max_rel_scalar_delta": 0.0},
                 "minus": {"changed_fields": (), "max_abs_scalar_delta": 0.0, "max_rel_scalar_delta": 0.0},
             },
+            "trace_replay_diagnostics": gate["trace_replay_diagnostics"],
             "values": {"base": 1.0, "plus": 1.1, "minus": 0.9, "central_fd_directional": 1000.0},
             "objective_values": {
                 "objective": {"base": 1.0, "plus": 1.1, "minus": 0.9, "central_fd_directional": 1000.0},
@@ -1643,13 +1891,19 @@ def test_derivative_proposal_summary_marks_report_stale_when_trial_is_accepted(t
             json.dumps(
                 {
                     "direction_x": [1.0, 0.0],
+                    "branch_compatibility": {"same_branch": True},
                     "branch_local_vector_jacobian": {
                         "available": True,
+                        "uses_production_forward": True,
                         "differentiates_adaptive_controller": False,
+                        "differentiates_run_free_boundary": False,
                         "differentiates_fixed_accepted_branch": True,
+                        "replay_ad_mode": "direct",
+                        "derivative_mode": "directional_jvp",
+                        "max_base_abs_delta": 0.0,
                         "scalars": {
-                            "qs_total": {"value": 0.25, "exact_directional": 1.0},
-                            "aspect": {"value": 6.0, "exact_directional": 0.0},
+                            "qs_total": {"value": 0.25, "exact_directional": 1.0, "base_abs_delta": 0.0},
+                            "aspect": {"value": 6.0, "exact_directional": 0.0, "base_abs_delta": 0.0},
                         },
                     },
                 }
@@ -1771,13 +2025,19 @@ def test_derivative_proposal_summary_records_rejected_trial_as_complete_solve_re
             json.dumps(
                 {
                     "direction_x": [1.0, 0.0],
+                    "branch_compatibility": {"same_branch": True},
                     "branch_local_vector_jacobian": {
                         "available": True,
+                        "uses_production_forward": True,
                         "differentiates_adaptive_controller": False,
+                        "differentiates_run_free_boundary": False,
                         "differentiates_fixed_accepted_branch": True,
+                        "replay_ad_mode": "direct",
+                        "derivative_mode": "directional_jvp",
+                        "max_base_abs_delta": 0.0,
                         "scalars": {
-                            "qs_total": {"value": 0.25, "exact_directional": 1.0},
-                            "aspect": {"value": 6.0, "exact_directional": 0.0},
+                            "qs_total": {"value": 0.25, "exact_directional": 1.0, "base_abs_delta": 0.0},
+                            "aspect": {"value": 6.0, "exact_directional": 0.0, "base_abs_delta": 0.0},
                         },
                     },
                 }

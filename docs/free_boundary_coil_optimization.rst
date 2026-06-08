@@ -842,6 +842,11 @@ the explicit flags
 ``differentiates_adaptive_controller=False`` and
 ``differentiates_run_free_boundary=False`` while checking complete-solve
 central finite differences under the unchanged branch fingerprint.
+The coil-only QS example writes the compact result as
+``branch_local_vector_gate`` in ``same_branch_complete_solve_report.json``.
+When ``--same-branch-derivative-proposal`` is enabled, an available but failed
+gate blocks the derivative-assisted trial; the complete free-boundary solve
+still remains the only acceptance authority for any proposed point.
 Short accepted-only branch-local segments are unrolled automatically in this
 report path, which avoids the pathological cold ``lax.scan`` graph that the
 tiny smoke trace used to trigger.
@@ -1381,6 +1386,13 @@ trial is then evaluated by the ordinary complete free-boundary solve, and only
 that complete-solve objective can accept it.  This keeps the branch-local
 derivative path as a proposal mechanism while the production solve remains the
 acceptance authority.
+The proposal path is deliberately strict: it requires an unchanged complete
+solve branch fingerprint, production-forward scalar values, ``direct``
+``directional_jvp`` replay, a fixed accepted-branch derivative claim, and
+production-versus-replay base scalar agreement below
+``--same-branch-proposal-max-base-delta``.  Reports generated in
+``custom_vjp`` mode remain validation artifacts, but are not used to form the
+one-step proposal.
 The proposal block records ``objective_terms_used`` and
 ``objective_terms_omitted``.  For example, the VMEC residual proxy is normally
 omitted from the branch-local JVP proposal because the residual term is still
@@ -1862,19 +1874,20 @@ VMEC2000 executable comparisons, and ``RUN_FULL=1`` complete-solve finite
 response checks. These are review and nightly lanes rather than default CI
 requirements.
 
-The optional VMEC2000 generated-``mgrid`` comparison is present but xfailed for
-now. VMEC2000 reads the generated grid and advances the trace locally, but the
-current generated-``mgrid`` free-boundary parity gap is not bounded tightly
-enough for a promoted gate. The comparator now handles both main and Nyquist
-WOUT mode bases for low-order geometry and magnetic-field arrays, so the
-remaining blocker is not array-shape handling: sign-flipped diagnostic runs can
-produce a VMEC2000 WOUT, but that WOUT still has underconverged/zero geometric
-scalars and fails the current iota/energy limits. The diagnostic reports this
-explicitly as ``vmec2000_wout_available=true`` but
-``vmec2000_wout_promotable=false`` with reason
-``nonpositive_geometry_scalars``. Dump-to-dump VMEC2000 comparisons require an
-instrumented executable that honors the ``VMEC_DUMP_*`` environment variables.
-That is a validation task, not a reason to regress the existing
+The W7-X generated-``mgrid`` VMEC2000 fixture above is the current promoted
+WOUT-level external parity row.  The separate ESSOS LP-QA three-way comparison
+is still non-promoted/xfailed at VMEC2000 WOUT level. VMEC2000 reads the
+generated grid and advances the trace locally, but the current LP-QA
+generated-``mgrid`` free-boundary parity gap is not bounded tightly enough for a
+promoted gate. The comparator now handles both main and Nyquist WOUT mode bases
+for low-order geometry and magnetic-field arrays, so the remaining blocker is
+not array-shape handling: sign-flipped diagnostic runs can produce a VMEC2000
+WOUT, but that WOUT still has underconverged/zero geometric scalars and fails
+the current iota/energy limits. The diagnostic reports this explicitly as
+``vmec2000_wout_available=true`` but ``vmec2000_wout_promotable=false`` with
+reason ``nonpositive_geometry_scalars``. Dump-to-dump VMEC2000 comparisons
+require an instrumented executable that honors the ``VMEC_DUMP_*`` environment
+variables. That is a validation task, not a reason to regress the existing
 VMEC2000-parity ``mgrid`` fixtures.
 
 Next Implementation Steps
