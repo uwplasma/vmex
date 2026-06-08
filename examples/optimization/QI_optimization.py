@@ -256,15 +256,9 @@ def make_qi_problem(stage=None):
         smooth_penalty=float(_stage_value(stage, "qi_ceiling_smooth_penalty", QI_CEILING_SMOOTH_PENALTY)),
         qi_options=QI_OPTIONS,
     )
-    mirror = vj.VMECMirrorRatio(
-        threshold=float(_stage_value(stage, "mirror_threshold", MAX_MIRROR_RATIO)),
-        surfaces=QI_OPTIONS.surfaces,
-        ntheta=96,
-        nphi=96,
-        surface_index=_stage_value(stage, "mirror_surface_index", MIRROR_SURFACE_INDEX),
-        smooth_extrema=float(_stage_value(stage, "mirror_smooth_extrema", 2.0e-2)),
-        smooth_penalty=float(_stage_value(stage, "mirror_smooth_penalty", 2.0e-2)),
-    )
+    mirror = vj.qi_mirror_objective_for_stage(
+        stage, qi_options=QI_OPTIONS, threshold=MAX_MIRROR_RATIO,
+        surfaces=QI_OPTIONS.surfaces, surface_index=MIRROR_SURFACE_INDEX)
     elongation = vj.MaxElongation(
         threshold=float(_stage_value(stage, "max_elongation", MAX_ELONGATION)),
         ntheta=48,

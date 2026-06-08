@@ -62,6 +62,7 @@ __all__ = [
     "make_qi_optimization_context",
     "materialize_qi_stage_inputs",
     "promotion_score",
+    "qi_mirror_objective_for_stage",
     "qi_engineering_constraint_tuples",
     "qi_diagnostics_for_result",
     "qi_diagnostics_for_run",
@@ -246,6 +247,42 @@ def qi_engineering_constraint_tuples(
     if elongation_weight > 0.0 or float(stage.get("al_elongation_weight", 0.0)) > 0.0:
         out.append(_al_tuple(elongation, "elongation", elongation_weight))
     return out
+
+
+def qi_mirror_objective_for_stage(
+    stage,
+    *,
+    qi_options,
+    threshold: float,
+    surfaces,
+    surface_index,
+    ntheta: int = 96,
+    nphi: int = 96,
+):
+    """Return the mirror objective requested by one QI optimization stage.
+
+    ``mirror_backend="vmec"`` keeps the fast VMEC-grid mirror penalty used by
+    broad exploratory stages. ``mirror_backend="boozer"`` evaluates mirror
+    ratio in Boozer coordinates through the shared QI field, matching the final
+    audit metric and avoiding a late-stage coordinate mismatch.
+    """
+
+    stage = {} if stage is None else stage
+    backend = str(stage.get("mirror_backend", stage.get("mirror_coordinate", "vmec"))).strip().lower()
+    kwargs = dict(
+        threshold=float(stage.get("mirror_threshold", threshold)),
+        surfaces=surfaces,
+        ntheta=int(stage.get("mirror_ntheta", ntheta)),
+        nphi=int(stage.get("mirror_nphi", nphi)),
+        surface_index=stage.get("mirror_surface_index", surface_index),
+        smooth_extrema=float(stage.get("mirror_smooth_extrema", 2.0e-2)),
+        smooth_penalty=float(stage.get("mirror_smooth_penalty", 2.0e-2)),
+    )
+    if backend in {"boozer", "booz", "boozer-qi", "qi"}:
+        return vj.MirrorRatio(**kwargs, qi_options=qi_options)
+    if backend in {"vmec", "realspace", "real-space"}:
+        return vj.VMECMirrorRatio(**kwargs)
+    raise ValueError("QI mirror_backend must be 'vmec' or 'boozer'.")
 
 
 def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = None) -> argparse.Namespace:

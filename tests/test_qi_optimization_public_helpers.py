@@ -181,6 +181,30 @@ def test_qi_engineering_constraint_tuples_support_augmented_lagrangian() -> None
     assert [term[2] for term in al_terms] == [4.0, 5.0]
 
 
+def test_qi_mirror_objective_for_stage_can_use_vmec_or_boozer_backend() -> None:
+    options = vj.QuasiIsodynamicOptions(surfaces=(0.5, 1.0), mboz=5, nboz=5)
+
+    fast = qio.qi_mirror_objective_for_stage(
+        None,
+        qi_options=options,
+        threshold=0.35,
+        surfaces=options.surfaces,
+        surface_index=None,
+    )
+    assert isinstance(fast, vj.VMECMirrorRatio)
+
+    boozer = qio.qi_mirror_objective_for_stage(
+        {"mirror_backend": "boozer", "mirror_surface_index": -1},
+        qi_options=options,
+        threshold=0.35,
+        surfaces=options.surfaces,
+        surface_index=None,
+    )
+    assert isinstance(boozer, vj.MirrorRatio)
+    assert boozer.requires_qi_field
+    assert boozer.surface_index == -1
+
+
 def test_qi_cli_override_loads_mirror_ramp_stages_json(tmp_path: Path) -> None:
     stages_path = tmp_path / "stages.json"
     stages_path.write_text('[{"name": "cleanup", "max_nfev": 5, "mirror_weight": 20.0}]')

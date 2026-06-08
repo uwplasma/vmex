@@ -249,7 +249,7 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "QuasiIsodynamicOptions(" in text
     assert "QuasiIsodynamicResidual(QI_OPTIONS)" in text
     assert "QuasiIsodynamicResidualCeiling(" in text
-    assert "VMECMirrorRatio(" in text
+    assert "qi_mirror_objective_for_stage(" in text
     assert "MaxElongation(" in text
     assert "objective_tuples = [" in text
     assert "LeastSquaresProblem.from_tuples(" in text
@@ -408,8 +408,8 @@ def test_qi_example_keeps_mirror_cleanup_guarded_by_qi_ceiling() -> None:
     assert '"require_engineering_gate": True' in cases_text
     assert "qi_ceiling = vj.QuasiIsodynamicResidualCeiling(" in text
     assert "qi_options=QI_OPTIONS" in text
-    assert "mirror = vj.VMECMirrorRatio(" in text
-    assert 'surface_index=_stage_value(stage, "mirror_surface_index", MIRROR_SURFACE_INDEX)' in text
+    assert "mirror = vj.qi_mirror_objective_for_stage(" in text
+    assert "surface_index=MIRROR_SURFACE_INDEX" in text
     assert "def make_qi_problem(stage=None):" in text
     assert "stage_promotes_candidate(" in support_text
     assert "require_engineering_gate=bool(stage.get(\"require_engineering_gate\", False))" in support_text
@@ -419,7 +419,7 @@ def test_qi_example_keeps_mirror_cleanup_guarded_by_qi_ceiling() -> None:
     assert "vj.qi_engineering_constraint_tuples(" in text
     assert "AugmentedLagrangianConstraint(" in support_text
     assert text.index("qi_ceiling = vj.QuasiIsodynamicResidualCeiling(") < text.index(
-        "mirror = vj.VMECMirrorRatio("
+        "mirror = vj.qi_mirror_objective_for_stage("
     )
     assert text.index("QI_CEILING_WEIGHT > 0.0") > text.index("objective_tuples = [")
 
