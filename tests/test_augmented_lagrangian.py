@@ -67,6 +67,33 @@ class _StateSignedViolation:
         )
 
 
+class _PreparedStateSignedViolation:
+    name = "prepared_signed_x"
+
+    def to_constraint_term(self):
+        def _prepare(ctx):
+            offset = float(ctx.offset)
+
+            def _residual(_ctx, state):
+                return jnp.asarray([state.x + offset], dtype=jnp.float64)
+
+            return workflow.ObjectiveTerm(
+                self.name,
+                _residual,
+                target=0.0,
+                weight=1.0,
+                metadata={"prepared": True},
+            )
+
+        return workflow.ObjectiveTerm(
+            self.name,
+            lambda _ctx, _state: (_ for _ in ()).throw(RuntimeError("unprepared constraint was used")),
+            target=0.0,
+            weight=1.0,
+            prepare=_prepare,
+        )
+
+
 class _QIFieldPositiveViolation:
     name = "qi_positive_violation"
     requires_qi_field = True
@@ -150,6 +177,20 @@ def test_augmented_lagrangian_signed_state_and_qi_fallback_paths() -> None:
     )
     np.testing.assert_allclose(np.asarray(residual), [1.5])
     assert float(total) == pytest.approx(2.25)
+
+
+def test_augmented_lagrangian_preserves_prepared_scalar_constraint() -> None:
+    term = workflow.AugmentedLagrangianConstraint(
+        _PreparedStateSignedViolation(),
+        multiplier=0.0,
+        penalty=4.0,
+        softness=0.0,
+    ).to_objective_term(target=0.0, residual_weight=1.0)
+
+    bound = term.bind(SimpleNamespace(offset=0.2))
+    residual = bound.residual(SimpleNamespace(offset=99.0), SimpleNamespace(x=0.3))
+    np.testing.assert_allclose(np.asarray(residual), [1.0])
+    assert bound.metadata["prepared"] is True
 
 
 def test_augmented_lagrangian_multiplier_update_is_projected_and_can_grow_penalty() -> None:

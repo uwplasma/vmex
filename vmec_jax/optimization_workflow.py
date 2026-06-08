@@ -660,21 +660,41 @@ class AugmentedLagrangianConstraint:
             raise ValueError("Wrapped augmented-Lagrangian objective must expose to_objective_term().")
         name = self.name or f"al_{base.name}"
 
-        def _evaluate(ctx, state, base=base):
-            return self._projected_residual(base.residual(ctx, state)) * float(residual_weight)
+        def _make_term(base_term):
+            def _evaluate(ctx, state, base_term=base_term):
+                return self._projected_residual(base_term.residual(ctx, state)) * float(residual_weight)
 
-        def _total(ctx, state):
-            residual = _evaluate(ctx, state)
-            return jnp.sum(residual * residual)
+            def _total(ctx, state):
+                residual = _evaluate(ctx, state)
+                return jnp.sum(residual * residual)
+
+            return ObjectiveTerm(
+                name,
+                _evaluate,
+                target=0.0,
+                weight=1.0,
+                total=_total,
+                track_iota=base_term.track_iota,
+                metadata=dict(base_term.metadata),
+            )
+
+        if base.prepare is None:
+            return _make_term(base)
+
+        def _prepare(ctx):
+            return _make_term(base.prepare(ctx))
 
         return ObjectiveTerm(
             name,
-            _evaluate,
+            lambda ctx, state: self._projected_residual(base.residual(ctx, state)) * float(residual_weight),
             target=0.0,
             weight=1.0,
-            total=_total,
+            total=lambda ctx, state: jnp.sum(
+                (self._projected_residual(base.residual(ctx, state)) * float(residual_weight)) ** 2
+            ),
             track_iota=base.track_iota,
             metadata=dict(base.metadata),
+            prepare=_prepare,
         )
 
     def to_qi_term(self, residual_weight: float) -> QIObjectiveTerm:
