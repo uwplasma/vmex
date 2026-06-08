@@ -244,6 +244,10 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
                     "value": 5.5,
                     "exact_directional": -4.0,
                 },
+                "mean_iota": {
+                    "value": 0.35,
+                    "exact_directional": -1.0,
+                },
             },
         },
     }
@@ -251,6 +255,8 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
         "qs_weight": 2.0,
         "aspect_weight": 0.5,
         "target_aspect": 6.0,
+        "iota_weight": 10.0,
+        "target_iota": 0.4,
     }
 
     proposal = module.same_branch_derivative_proposal_from_report(
@@ -262,9 +268,11 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
 
     assert proposal["available"] is True
     assert proposal["differentiates_adaptive_controller"] is False
-    assert proposal["directional_derivative"] == pytest.approx(8.0)
+    assert proposal["directional_derivative"] == pytest.approx(9.0)
     assert proposal["contributions"]["qs_total"]["contribution"] == pytest.approx(6.0)
     assert proposal["contributions"]["aspect"]["contribution"] == pytest.approx(2.0)
+    assert proposal["contributions"]["mean_iota"]["contribution"] == pytest.approx(1.0)
+    assert proposal["contributions"]["mean_iota"]["target"] == pytest.approx(0.4)
     assert proposal["alpha"] == pytest.approx(-0.25)
     np.testing.assert_allclose(proposal["trial_x"], [-0.15, 0.2, 0.55])
 
@@ -1279,6 +1287,15 @@ def test_circle_dry_run_writes_configuration_without_solves(tmp_path, monkeypatc
     assert summary["objective_model"]["target_aspect"] == pytest.approx(6.0)
     assert summary["objective_model"]["helicity_n"] == -1
     assert summary["objective_model"]["qs_surfaces"] == [0.3, 0.7]
+    assert summary["same_branch_report_config"]["enabled"] is False
+    assert summary["same_branch_report_config"]["mode"] == "vector"
+    assert summary["same_branch_report_config"]["ad_mode"] == "direct"
+    assert summary["same_branch_report_config"]["vector_keys"] == [
+        "aspect",
+        "qs_total",
+        "mean_iota",
+        "lcfs_boundary_moment",
+    ]
 
 
 def test_essos_provider_skip_returns_code_77_without_solves(tmp_path, monkeypatch, capsys):
