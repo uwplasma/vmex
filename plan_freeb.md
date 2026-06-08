@@ -15402,3 +15402,56 @@ Completion:
 - CPU/GPU performance: 99.3%.
 - CI runtime refactor with preserved coverage/physics gates: 100%.
 - Docs/release hygiene: 99.8%.
+
+### 2026-06-08 Free-Boundary Local Shard Validation After Status Gate
+
+Steps taken:
+
+1. Re-ran the broader local free-boundary validation shards after pushing the
+   status-derived rejected-slot report changes.
+2. Ran the external coil field, JAX mgrid, coil-provider gradient, and
+   coil-only QS optimization smoke shards.
+3. Ran the vacuum-adjoint shard.
+4. Ran the full direct-coil finite-pressure sensitivity shard.
+5. Checked the latest GitHub Actions run for the pushed main branch.
+
+Results obtained:
+
+1. ``JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_external_fields_coils_jax.py
+   tests/test_external_fields_mgrid_jax.py
+   tests/test_free_boundary_coil_provider_gradients.py
+   tests/test_free_boundary_qs_coil_optimization_smoke.py -q`` passed.
+2. ``JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_vacuum_adjoint.py -q`` passed.
+3. ``JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py -q``
+   passed with one expected skip.
+4. The GitHub Actions run for ``1f8aaa6`` was still in progress during the
+   local validation window; no remote failure had appeared yet.
+
+Best next steps:
+
+1. Wait for CI on ``1f8aaa6`` and fix any failing shard immediately.
+2. Continue only small, well-scoped phase-3 improvements until CI is green:
+   the next candidate is making the coil-only derivative proposal expose more
+   explicit objective-term provenance while keeping complete solves as
+   acceptance authority.
+3. Keep arbitrary adaptive branch differentiation unclaimed until a true
+   fingerprint-gated adaptive branch AD-vs-central-FD gate exists.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99998%.
+- VMEC parity and physics gates: 98.2%.
+- Single-stage coil-only optimization: 97.9%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 99.3%.
+- CI runtime refactor with preserved coverage/physics gates: 100%; current
+  remote run still pending.
+- Docs/release hygiene: 99.8%.
