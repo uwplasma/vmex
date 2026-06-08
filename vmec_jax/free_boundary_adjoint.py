@@ -5299,6 +5299,12 @@ def direct_coil_adaptive_full_loop_same_branch_gate_report(
     result = {
         "contract": "same-branch adaptive full-loop seam report",
         "passed": len(errors) == 0,
+        "ad_vs_fd_gate": "complete-loop central FD vs branch-local stacked replay custom VJP",
+        "adaptive_loop_scope": "fingerprint-gated branch-local accepted/rejected replay slots",
+        "unclaimed_adaptive_controller_reason": (
+            "host adaptive branch selection remains outside the custom VJP; "
+            "same-branch finite differences validate the fixed accepted/rejected controller slots"
+        ),
         "differentiates_adaptive_controller": False,
         "differentiates_run_free_boundary": False,
         "fingerprint_gated": True,

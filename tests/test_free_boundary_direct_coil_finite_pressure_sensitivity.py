@@ -555,6 +555,8 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatc
     )
     assert adaptive_gate["passed"], adaptive_gate
     assert adaptive_gate["contract"] == "same-branch adaptive full-loop seam report"
+    assert adaptive_gate["ad_vs_fd_gate"] == "complete-loop central FD vs branch-local stacked replay custom VJP"
+    assert adaptive_gate["adaptive_loop_scope"] == "fingerprint-gated branch-local accepted/rejected replay slots"
     assert adaptive_gate["differentiates_adaptive_controller"] is False
     assert adaptive_gate["differentiates_run_free_boundary"] is False
     assert adaptive_gate["same_stacked_step_policy_branch"] is True
@@ -2190,6 +2192,14 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
         )
         assert adaptive_full_loop_gate["passed"], adaptive_full_loop_gate
         assert adaptive_full_loop_gate["contract"] == "same-branch adaptive full-loop seam report"
+        assert (
+            adaptive_full_loop_gate["ad_vs_fd_gate"]
+            == "complete-loop central FD vs branch-local stacked replay custom VJP"
+        )
+        assert (
+            adaptive_full_loop_gate["adaptive_loop_scope"]
+            == "fingerprint-gated branch-local accepted/rejected replay slots"
+        )
         assert adaptive_full_loop_gate["differentiates_adaptive_controller"] is False
         assert adaptive_full_loop_gate["differentiates_run_free_boundary"] is False
         assert adaptive_full_loop_gate["fingerprint_gated"] is True

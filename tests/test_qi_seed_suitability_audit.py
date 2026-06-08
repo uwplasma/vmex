@@ -555,6 +555,60 @@ def test_prefine_probe_manifest_preserves_near_qi_before_aux_cleanup(tmp_path):
     assert far["qi_options"]["elongation_weight"] == 0.5
 
 
+def test_prefine_probe_manifest_can_stage_qi_basin_before_cleanup(tmp_path):
+    mod = _load_module()
+    report = {
+        "cases": [
+            {
+                "suitability_rank": 1,
+                "label": "far_seed",
+                "family": "qh",
+                "input": "/tmp/input_far",
+                "wout": "/tmp/wout_far.nc",
+                "qi_smooth_total": 0.2,
+                "qi_legacy_total": 0.3,
+            },
+        ]
+    }
+    config = mod.QIPrefineProbeConfig(
+        top_n=1,
+        include_family_representatives=False,
+        output_dir=tmp_path / "probes",
+        basin_first=True,
+        mirror_weight=2.0,
+        elongation_weight=0.5,
+        qi_ceiling_weight=100.0,
+    )
+
+    manifest = mod.build_qi_prefine_probe_manifest(
+        report,
+        config=config,
+        manifest_path=tmp_path / "manifest.json",
+        dry_run=True,
+    )
+
+    plan = manifest["plans"][0]
+    assert plan["prefine_policy"]["name"] == "qi_basin_recovery"
+    assert plan["optimization"]["objective"] == "qi_basin_recovery_prefine_probe"
+    assert plan["optimization"]["run_optimization"] is True
+    assert plan["qi_options"]["qi_ceiling_weight"] == 0.0
+    assert plan["qi_options"]["mirror_weight"] == 0.0
+    assert plan["qi_options"]["elongation_weight"] == 0.0
+    assert plan["prefine_policy"]["deferred_cleanup"] == {
+        "mirror_weight": 2.0,
+        "elongation_weight": 0.5,
+        "qi_ceiling_weight": 100.0,
+        "mirror_threshold": mod.DEFAULT_MAX_MIRROR_RATIO,
+        "elongation_threshold": mod.DEFAULT_MAX_ELONGATION,
+        "run_after_basin_recovery": True,
+    }
+    assert "basin_first_disables_auxiliary_cleanup" in plan["prefine_policy"]["reasons"]
+    assert "--prefine-basin-first" in plan["run_command"]
+    assert "--prefine-mirror-weight 0.0" in plan["run_command"]
+    assert "--prefine-elongation-weight 0.0" in plan["run_command"]
+    assert "--prefine-qi-ceiling-weight 0.0" in plan["run_command"]
+
+
 def test_run_qi_prefine_probe_skips_optimizer_for_near_qi_baseline(tmp_path):
     mod = _load_module()
     report = {

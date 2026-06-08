@@ -135,6 +135,7 @@ class QIPrefineProbeConfig:
     near_qi_aux_weight_scale: float = DEFAULT_PREFINE_NEAR_QI_AUX_WEIGHT_SCALE
     near_qi_ceiling_weight: float = DEFAULT_PREFINE_NEAR_QI_CEILING_WEIGHT
     near_qi_ceiling_guard_factor: float = DEFAULT_PREFINE_NEAR_QI_GUARD_FACTOR
+    basin_first: bool = False
     project_input_boundary_to_max_mode: bool = True
     mirror_weight: float = DEFAULT_PREFINE_MIRROR_WEIGHT
     mirror_threshold: float = DEFAULT_MAX_MIRROR_RATIO
@@ -824,6 +825,12 @@ def _prefine_qi_preservation_policy(record: dict[str, Any], config: QIPrefinePro
         mirror_weight *= float(config.near_qi_aux_weight_scale)
         elongation_weight *= float(config.near_qi_aux_weight_scale)
         project_input_boundary_to_max_mode = False
+    elif bool(config.basin_first):
+        policy = "qi_basin_recovery"
+        reasons.append("basin_first_disables_auxiliary_cleanup")
+        qi_ceiling_weight = 0.0
+        mirror_weight = 0.0
+        elongation_weight = 0.0
     else:
         reasons.append("qi_above_preservation_threshold_or_policy_disabled")
 
@@ -848,6 +855,14 @@ def _prefine_qi_preservation_policy(record: dict[str, Any], config: QIPrefinePro
         "mirror_weight": mirror_weight,
         "elongation_weight": elongation_weight,
         "project_input_boundary_to_max_mode": project_input_boundary_to_max_mode,
+        "deferred_cleanup": {
+            "mirror_weight": float(config.mirror_weight),
+            "elongation_weight": float(config.elongation_weight),
+            "qi_ceiling_weight": float(config.qi_ceiling_weight),
+            "mirror_threshold": float(config.mirror_threshold),
+            "elongation_threshold": float(config.elongation_threshold),
+            "run_after_basin_recovery": bool(policy == "qi_basin_recovery"),
+        },
         "run_optimization": not near_qi,
     }
 
@@ -938,6 +953,7 @@ def _prefine_run_command(
     ]
     command.append("--prefine-use-ess" if bool(config.use_ess) else "--no-prefine-use-ess")
     command.append("--prefine-preserve-near-qi" if bool(config.preserve_near_qi) else "--no-prefine-preserve-near-qi")
+    command.append("--prefine-basin-first" if bool(config.basin_first) else "--no-prefine-basin-first")
     command.extend(["--prefine-near-qi-smooth-max", str(config.near_qi_smooth_max)])
     command.extend(["--prefine-near-qi-legacy-max", str(config.near_qi_legacy_max)])
     command.extend(["--prefine-near-qi-aux-weight-scale", str(config.near_qi_aux_weight_scale)])
@@ -1086,6 +1102,9 @@ def build_qi_prefine_probe_manifest(
                 "objective": (
                     "near_qi_diagnostic_baseline"
                     if not run_optimization
+                    else
+                    "qi_basin_recovery_prefine_probe"
+                    if prefine_policy["name"] == "qi_basin_recovery"
                     else
                     "qi_constrained_prefine_probe"
                     if float(prefine_policy["mirror_weight"]) > 0.0
@@ -2664,6 +2683,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=DEFAULT_PREFINE_NEAR_QI_GUARD_FACTOR,
     )
     parser.add_argument(
+        "--prefine-basin-first",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "For far seeds, run a QI-only basin-recovery probe first. "
+            "Mirror/elongation cleanup weights are recorded as deferred cleanup "
+            "metadata and should be applied by rerunning from the recovered input.final."
+        ),
+    )
+    parser.add_argument(
         "--prefine-mirror-weight",
         type=float,
         default=DEFAULT_PREFINE_MIRROR_WEIGHT,
@@ -2802,6 +2831,7 @@ def main(argv: list[str] | None = None) -> int:
             near_qi_aux_weight_scale=args.prefine_near_qi_aux_weight_scale,
             near_qi_ceiling_weight=args.prefine_near_qi_ceiling_weight,
             near_qi_ceiling_guard_factor=args.prefine_near_qi_ceiling_guard_factor,
+            basin_first=args.prefine_basin_first,
             mirror_weight=args.prefine_mirror_weight,
             mirror_threshold=args.prefine_mirror_threshold,
             mirror_ntheta=args.prefine_mirror_ntheta,

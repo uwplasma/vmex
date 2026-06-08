@@ -1223,6 +1223,76 @@ Completion:
   matrix-free coverage run ``27079913312`` is green.
 - Docs/release hygiene: 99.5%.
 
+### 2026-06-07 QI Basin-First Probe and Adaptive Free-Boundary Gate Scope
+
+Steps taken:
+
+1. Added an explicit ``--prefine-basin-first`` option to
+   ``examples/optimization/audit_qi_seed_suitability.py``.  For far seeds this
+   records the requested mirror/elongation cleanup weights as deferred cleanup
+   metadata, but runs the first probe as a QI-only basin-recovery optimization.
+2. Added regression coverage that the prefine manifest labels basin recovery
+   as ``qi_basin_recovery_prefine_probe``, zeroes auxiliary cleanup weights for
+   the first stage, and emits a replayable command with
+   ``--prefine-basin-first``.
+3. Ran a bounded basin-first QH far-seed probe from
+   ``examples/data/input.nfp4_QH_warm_start`` with stages
+   ``1,1,2,2,3``, ``max_nfev=5``, and ``inner/trial_max_iter=40``.
+4. Ran a second bounded cleanup probe from the basin output with mirror and
+   elongation penalties enabled.
+5. Added explicit scope metadata to
+   ``direct_coil_adaptive_full_loop_same_branch_gate_report`` so the report
+   names the current validated gate as complete-loop central FD versus
+   branch-local stacked replay custom VJP over fingerprint-gated
+   accepted/rejected replay slots.
+6. Re-ran focused QI and direct-coil same-branch AD-vs-FD tests.
+
+Results obtained:
+
+1. Basin-first QH probe improved smooth QI from ``1.86446e-1`` to
+   ``6.30853e-3`` and legacy QI from ``4.93223e-1`` to ``4.73644e-3`` in
+   about ``50.8 s``.  Mean iota was ``-0.46277`` and aspect was ``6.707``.
+2. The basin-first Boozer contours were not cleanly QI on the LCFS and mirror
+   ratio worsened from ``0.237`` to ``0.527``.  This is negative promotion
+   evidence: scalar QI recovery alone is not sufficient for this far seed.
+3. The cleanup probe reduced mirror ratio to ``0.481`` but worsened smooth QI
+   to ``1.03411e-2`` and elongation to ``6.784``.  The LCFS contours still
+   showed closed islands rather than clean omnigenous closure.
+4. Focused tests passed:
+   ``tests/test_qi_seed_suitability_audit.py`` and the current-only/Fourier-only
+   direct-coil same-branch custom-VJP vs complete-solve central-FD gates.
+
+Best next steps:
+
+1. For seed-robust QI, insert a stronger global/basin proposal layer before
+   the local basin-first stage.  The current capped local QI-only step can move
+   far seeds but does not produce clean Boozer contour closure.
+2. Only apply mirror/elongation cleanup after visual and scalar QI gates are
+   already satisfied; otherwise cleanup trades away QI quality.
+3. For free boundary, keep adaptive host-controller differentiation
+   conservative.  The current passing gate is fingerprint-gated same-branch
+   complete-loop FD versus branch-local AD through accepted/rejected replay
+   slots, not a full custom VJP for adaptive branch selection.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99996% for fixed
+  same-branch scalar/vector gates with explicit accepted/rejected slot scope;
+  adaptive branch selection remains unclaimed.
+- VMEC parity and physics gates: 97.9%.
+- Single-stage coil-only optimization: 97.4%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 99.1%.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 99.5%.
+- Seed-robust QI: 95.6%; stronger basin/global search remains the blocker for
+  clean far-seed Boozer contour closure.
+
 ### 2026-06-06 Matrix-Free LASYM Coverage Gate Follow-Up
 
 Steps taken:
