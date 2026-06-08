@@ -276,21 +276,21 @@ def make_qi_problem(stage=None):
         (aspect.J, TARGET_ASPECT, float(_stage_value(stage, "aspect_weight", ASPECT_WEIGHT))),
         (iota_floor.J, 0.0, float(_stage_value(stage, "iota_floor_weight", IOTA_FLOOR_WEIGHT))),
         (qi.J, 0.0, float(_stage_value(stage, "qi_weight", QI_WEIGHT))),
-        (mirror.J, 0.0, float(_stage_value(stage, "mirror_weight", MIRROR_WEIGHT))),
-        (elongation.J, 0.0, float(_stage_value(stage, "elongation_weight", ELONGATION_WEIGHT))),
         # Optional:
         # (qi_ceiling.J, 0.0, QI_CEILING_WEIGHT),
         # (vj.LgradB(threshold=0.30, smooth_penalty=1.0e-3).J, 0.0, 0.001),
         # (vj.MagneticWell(minimum=0.0).J, 0.0, 1.0),
         # (vj.DMerc(minimum=0.0, softness=1.0e-3).J, 0.0, DMERC_WEIGHT),
     ]
+    objective_tuples += vj.qi_engineering_constraint_tuples(
+        mirror, elongation, stage, float(_stage_value(stage, "mirror_weight", MIRROR_WEIGHT)),
+        float(_stage_value(stage, "elongation_weight", ELONGATION_WEIGHT)))
     qi_ceiling_weight = float(_stage_value(stage, "qi_ceiling_weight", QI_CEILING_WEIGHT))
     if stage is None and QI_CEILING_WEIGHT > 0.0:
         objective_tuples.append((qi_ceiling.J, 0.0, QI_CEILING_WEIGHT))
     elif qi_ceiling_weight > 0.0:
         objective_tuples.append((qi_ceiling.J, 0.0, qi_ceiling_weight))
     return vj.LeastSquaresProblem.from_tuples(objective_tuples)
-
 
 problem = make_qi_problem()
 

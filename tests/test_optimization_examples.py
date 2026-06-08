@@ -416,7 +416,8 @@ def test_qi_example_keeps_mirror_cleanup_guarded_by_qi_ceiling() -> None:
     assert "_stage_value(stage, \"qi_ceiling_weight\", QI_CEILING_WEIGHT)" in text
     assert "reference=reference_diagnostics" in support_text
     assert "objective_tuples.append((qi_ceiling.J, 0.0, QI_CEILING_WEIGHT))" in text
-    assert '(mirror.J, 0.0, float(_stage_value(stage, "mirror_weight", MIRROR_WEIGHT)))' in text
+    assert "vj.qi_engineering_constraint_tuples(" in text
+    assert "AugmentedLagrangianConstraint(" in support_text
     assert text.index("qi_ceiling = vj.QuasiIsodynamicResidualCeiling(") < text.index(
         "mirror = vj.VMECMirrorRatio("
     )

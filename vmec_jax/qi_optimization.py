@@ -62,6 +62,7 @@ __all__ = [
     "make_qi_optimization_context",
     "materialize_qi_stage_inputs",
     "promotion_score",
+    "qi_engineering_constraint_tuples",
     "qi_diagnostics_for_result",
     "qi_diagnostics_for_run",
     "qi_stage_modes",
@@ -197,6 +198,54 @@ def qi_stage_modes(
             repeats=repeats,
         )
     raise ValueError("QI stage mode policy must be 'lower', 'lower-repeat', or 'repeat'.")
+
+
+def qi_engineering_constraint_tuples(
+    mirror,
+    elongation,
+    stage,
+    mirror_weight: float,
+    elongation_weight: float,
+) -> list[tuple]:
+    """Return mirror/elongation objective tuples for one QI stage.
+
+    Ordinary stages use the raw upper-bound penalties.  Stages with
+    ``use_augmented_lagrangian_constraints=True`` wrap the signed mirror and
+    elongation constraints using :class:`vmec_jax.AugmentedLagrangianConstraint`,
+    which keeps the driver script compact while exposing the same
+    SIMSOPT-style tuple workflow to users.
+    """
+
+    stage = {} if stage is None else stage
+    mirror_weight = float(mirror_weight)
+    elongation_weight = float(elongation_weight)
+    if not bool(stage.get("use_augmented_lagrangian_constraints", False)):
+        return [
+            (mirror.J, 0.0, mirror_weight),
+            (elongation.J, 0.0, elongation_weight),
+        ]
+
+    softness = float(stage.get("al_constraint_softness", 0.0))
+
+    def _al_tuple(objective, prefix: str, default_weight: float):
+        multiplier = float(stage.get(f"al_{prefix}_multiplier", 0.0))
+        penalty = float(stage.get(f"al_{prefix}_penalty", 1.0))
+        weight = float(stage.get(f"al_{prefix}_weight", default_weight if default_weight > 0.0 else 1.0))
+        wrapped = vj.AugmentedLagrangianConstraint(
+            objective,
+            multiplier=multiplier,
+            penalty=penalty,
+            softness=softness,
+            name=f"al_{prefix}",
+        )
+        return (wrapped.J, 0.0, weight)
+
+    out = []
+    if mirror_weight > 0.0 or float(stage.get("al_mirror_weight", 0.0)) > 0.0:
+        out.append(_al_tuple(mirror, "mirror", mirror_weight))
+    if elongation_weight > 0.0 or float(stage.get("al_elongation_weight", 0.0)) > 0.0:
+        out.append(_al_tuple(elongation, "elongation", elongation_weight))
+    return out
 
 
 def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = None) -> argparse.Namespace:

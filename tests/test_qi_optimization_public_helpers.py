@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+import vmec_jax as vj
 import vmec_jax.qi_optimization as qio
 from vmec_jax.namelist import InData
 
@@ -147,6 +148,37 @@ def test_qi_helper_scalar_parsers_and_scores(tmp_path: Path) -> None:
         abs_iota_min=0.4,
         target_aspect=5.0,
     )
+
+
+def test_qi_engineering_constraint_tuples_support_augmented_lagrangian() -> None:
+    mirror = vj.VMECMirrorRatio(threshold=0.35, surfaces=(1.0,))
+    elongation = vj.MaxElongation(threshold=8.0)
+
+    regular = qio.qi_engineering_constraint_tuples(mirror, elongation, None, 2.0, 3.0)
+    assert [term[0].__self__ for term in regular] == [mirror, elongation]
+    assert [term[2] for term in regular] == [2.0, 3.0]
+
+    al_terms = qio.qi_engineering_constraint_tuples(
+        mirror,
+        elongation,
+        {
+            "use_augmented_lagrangian_constraints": True,
+            "al_mirror_multiplier": 0.1,
+            "al_mirror_penalty": 25.0,
+            "al_mirror_weight": 4.0,
+            "al_elongation_multiplier": 0.2,
+            "al_elongation_penalty": 9.0,
+            "al_elongation_weight": 5.0,
+            "al_constraint_softness": 1.0e-3,
+        },
+        0.0,
+        0.0,
+    )
+    owners = [term[0].__self__ for term in al_terms]
+    assert [owner.name for owner in owners] == ["al_mirror", "al_elongation"]
+    assert [owner.penalty for owner in owners] == [25.0, 9.0]
+    assert [owner.multiplier for owner in owners] == [0.1, 0.2]
+    assert [term[2] for term in al_terms] == [4.0, 5.0]
 
 
 def test_qi_cli_override_loads_mirror_ramp_stages_json(tmp_path: Path) -> None:
