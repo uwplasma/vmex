@@ -1293,6 +1293,47 @@ Completion:
 - Seed-robust QI: 95.6%; stronger basin/global search remains the blocker for
   clean far-seed Boozer contour closure.
 
+### 2026-06-07 Seed-3127 Reference-Family QI Recheck
+
+Steps taken:
+
+1. Re-ran the compact ``QI_optimization_seed.py`` preset into
+   ``/tmp/vmec_jax_qi_seed3127_recheck`` so repository result files remained
+   untouched.
+2. Verified the same-NFP reference-family scan still selects a near-QI basin
+   before local cleanup.
+3. Rendered the initial/final LCFS ``|B|`` Boozer contour comparison.
+
+Results obtained:
+
+1. The reference scan selected ``lambda=0.998`` with QI ``1.0069e-3``,
+   mirror ratio ``0.3040``, mean iota ``-1.0396``, and aspect ``3.541``.
+2. The final independent diagnostics were smooth QI ``3.0012e-3``, legacy QI
+   ``3.5340e-4``, mirror ratio ``0.3005``, max elongation ``4.0017``, mean
+   iota ``-1.0600``, and aspect ``3.541``.
+3. The final LCFS contours were much cleaner than the pure local far-seed QH
+   probe, but still visibly wavy and did not pass the strict smooth-QI
+   ``2e-3`` promotion threshold.
+
+Best next steps:
+
+1. Keep the reference/global proposal layer as the current reliable far-seed
+   QI route.
+2. Add a stronger local cleanup after the selected reference basin, with
+   enough iterations to reduce smooth QI below ``2e-3`` while keeping mirror
+   below ``0.35``.
+3. Do not promote pure local far-seed QI recovery until Boozer contour closure
+   and the smooth/legacy gates both pass.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Seed-robust QI: 95.8%; reference-family far-seed recovery works as the
+  reliable lane, but strict smooth-QI cleanup remains open.
+
 ### 2026-06-06 Matrix-Free LASYM Coverage Gate Follow-Up
 
 Steps taken:
