@@ -624,6 +624,39 @@ def test_same_branch_derivative_proposal_rejects_failed_vector_gate():
     assert "vector gate" in proposal["reason"]
 
 
+def test_same_branch_derivative_proposal_rejects_failed_rejected_slot_gate():
+    module = _load_example_module()
+
+    proposal = module.same_branch_derivative_proposal_from_report(
+        {
+            "direction_x": [1.0],
+            "branch_compatibility": {"same_branch": True},
+            "accepted_rejected_controller_slot_gate": {
+                "requested": True,
+                "available": True,
+                "passed": False,
+            },
+            "branch_local_vector_jacobian": {
+                "available": True,
+                "uses_production_forward": True,
+                "differentiates_adaptive_controller": False,
+                "differentiates_run_free_boundary": False,
+                "differentiates_fixed_accepted_branch": True,
+                "replay_ad_mode": "direct",
+                "derivative_mode": "directional_jvp",
+                "max_base_abs_delta": 0.0,
+                "scalars": {"qs_total": {"value": 0.2, "exact_directional": 1.0, "base_abs_delta": 0.0}},
+            },
+        },
+        {"qs_weight": 1.0},
+        {"x": [0.0]},
+        step_size=0.1,
+    )
+
+    assert proposal["available"] is False
+    assert "accepted/rejected controller-slot gate" in proposal["reason"]
+
+
 def test_same_branch_derivative_proposal_requires_direct_jvp_and_fresh_replay():
     module = _load_example_module()
     base_report = {
@@ -1465,6 +1498,7 @@ def test_same_branch_report_profiles_nestor_and_rejected_slot(tmp_path, monkeypa
 
     rejected_gate = report["accepted_rejected_controller_slot_gate"]
     assert rejected_gate["available"] is True
+    assert rejected_gate["passed"] is True
     assert rejected_gate["same_branch"] is True
     assert rejected_gate["differentiates_adaptive_controller"] is False
     assert rejected_gate["differentiates_run_free_boundary"] is False
