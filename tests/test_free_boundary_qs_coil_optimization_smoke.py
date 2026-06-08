@@ -755,6 +755,8 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
                 "nestor_operator_atol": 3.0e-12,
                 "nestor_operator_maxiter": 17,
                 "nestor_operator_restart": 5,
+                "directional_jvp_fast_path": "current_only",
+                "directional_uses_fixed_coil_geometry": True,
             },
             "replay_graph_metadata": {
                 "omitted": True,
@@ -831,6 +833,8 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
     assert vector["differentiates_fixed_accepted_branch"] is True
     assert vector["replay_ad_mode"] == "direct"
     assert vector["derivative_mode"] == "directional_jvp"
+    assert vector["directional_jvp_fast_path"] == "current_only"
+    assert vector["directional_uses_fixed_coil_geometry"] is True
     assert vector["scalar_keys"] == ["aspect", "qs_total", "mean_iota", "lcfs_boundary_moment"]
     assert vector["state_only_replay"] is True
     assert vector["replay_option_flags"]["use_stacked_step_controls"] is True
@@ -968,6 +972,8 @@ def test_same_branch_report_profiles_nestor_and_rejected_slot(tmp_path, monkeypa
                 "nestor_operator_atol": float(replay_kwargs["nestor_operator_atol"]),
                 "nestor_operator_maxiter": replay_kwargs["nestor_operator_maxiter"],
                 "nestor_operator_restart": replay_kwargs["nestor_operator_restart"],
+                "directional_jvp_fast_path": "current_only",
+                "directional_uses_fixed_coil_geometry": True,
             },
             "replay_graph_metadata": {"omitted": not bool(kwargs["include_replay_graph_metadata"])},
             "replay_branch_metadata": {
@@ -1038,6 +1044,8 @@ def test_same_branch_report_profiles_nestor_and_rejected_slot(tmp_path, monkeypa
     assert rejected_gate["same_stacked_step_policy_branch"] is True
     assert rejected_gate["fixed_rejected_controller_slot_present"] is True
     assert rejected_gate["fixed_rejected_controller_slots"] == 1
+    assert rejected_gate["directional_jvp_fast_path"] == "current_only"
+    assert rejected_gate["directional_uses_fixed_coil_geometry"] is True
     assert rejected_gate["controller_slot_summary"]["accepted_slots"] == 1
     assert rejected_gate["controller_slot_summary"]["rejected_slots"] == 1
     assert rejected_gate["replay_option_flags"]["use_accepted_only_fast_path"] is False

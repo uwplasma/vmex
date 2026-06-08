@@ -1234,7 +1234,7 @@ def write_same_branch_validation_report(
             replay_ad_mode=ad_mode,
             include_trace_replay_diagnostics=False,
             include_payload=False,
-        include_replay_graph_metadata=include_replay_graph_metadata,
+            include_replay_graph_metadata=include_replay_graph_metadata,
         )
 
     def _controller_slot_summary_from_result(result: dict[str, Any]) -> dict[str, Any]:
@@ -1269,6 +1269,12 @@ def write_same_branch_validation_report(
             "includes_payload": bool(vector.get("includes_payload", True)),
             "includes_replay_graph_metadata": bool(vector.get("includes_replay_graph_metadata", True)),
             "state_only_replay": bool(all(key in STATE_ONLY_SAME_BRANCH_KEYS for key in scalar_keys)),
+            "directional_jvp_fast_path": str(
+                vector.get("replay_option_flags", {}).get("directional_jvp_fast_path", "none")
+            ),
+            "directional_uses_fixed_coil_geometry": bool(
+                vector.get("replay_option_flags", {}).get("directional_uses_fixed_coil_geometry", False)
+            ),
             "replay_option_flags": vector["replay_option_flags"],
             "replay_graph_metadata": vector.get("replay_graph_metadata", {}),
             "replay_branch_metadata": vector.get("replay_branch_metadata", {}),
@@ -1415,6 +1421,12 @@ def write_same_branch_validation_report(
                     "scalar_keys": list(vector_keys),
                     "fixed_rejected_controller_slot_present": bool(np.any(rejected_mask)),
                     "fixed_rejected_controller_slots": int(np.count_nonzero(rejected_mask)),
+                    "directional_jvp_fast_path": str(
+                        rejected_summary.get("directional_jvp_fast_path", "none")
+                    ),
+                    "directional_uses_fixed_coil_geometry": bool(
+                        rejected_summary.get("directional_uses_fixed_coil_geometry", False)
+                    ),
                     "controller_slot_summary": rejected_controller_slot_summary,
                     "replay_option_flags": rejected_summary["replay_option_flags"],
                     "replay_branch_metadata": rejected_metadata,

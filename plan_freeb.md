@@ -15177,3 +15177,61 @@ Completion:
 - CPU/GPU performance: 99.1%.
 - CI runtime refactor with preserved coverage/physics gates: 100%.
 - Docs/release hygiene: 99.6%.
+
+### 2026-06-08 Branch-Local JVP Fast-Path Report Evidence
+
+Steps taken:
+
+1. Audited the coil-only QS same-branch report path after the controller-slot
+   summary commits.
+2. Preserved the branch-local directional-JVP fast-path flags in the compact
+   JSON summaries emitted by
+   ``examples/optimization/free_boundary_QS_coil_optimization.py``.
+3. Added smoke assertions that vector reports and fixed rejected-slot reports
+   expose ``directional_jvp_fast_path`` and
+   ``directional_uses_fixed_coil_geometry``.
+4. Documented how to inspect those fields in
+   ``same_branch_complete_solve_report.json``.
+
+Results obtained:
+
+1. Current-only branch-local vector/JVP reports now explicitly show whether
+   the low-overhead fixed-coil-geometry path was used.
+2. The report remains conservative: complete solves are still the acceptance
+   authority, and the branch-local JVP still differentiates only the fixed
+   accepted/rejected branch selected by the fingerprinted host solve.
+3. ``python -m ruff check
+   examples/optimization/free_boundary_QS_coil_optimization.py
+   tests/test_free_boundary_qs_coil_optimization_smoke.py`` passed.
+4. ``JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_qs_coil_optimization_smoke.py::test_same_branch_report_writer_records_branch_local_vector_jacobian
+   tests/test_free_boundary_qs_coil_optimization_smoke.py::test_same_branch_report_profiles_nestor_and_rejected_slot
+   -q`` passed.
+5. ``python -m sphinx -q -W -b html docs docs/_build/html`` passed.
+
+Best next steps:
+
+1. Fix the stale default-vector-key wording in the example CLI help and docs.
+2. Extend ``same_branch_derivative_proposal_from_report`` so the optional
+   derivative proposal accounts for ``mean_iota`` when the report provides it,
+   or explicitly marks it unavailable.
+3. Check the latest GitHub Actions run and fix any failure before the next
+   source push.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99996% for fixed
+  same-branch scalar/vector gates; arbitrary adaptive branch differentiation
+  remains explicitly unclaimed.
+- VMEC parity and physics gates: 98.0%.
+- Single-stage coil-only optimization: 97.7%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 99.2%; current-only JVP fast-path evidence is now
+  surfaced in production reports.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 99.7%.

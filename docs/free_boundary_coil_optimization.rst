@@ -814,6 +814,10 @@ blocks expose a compact ``controller_slot_summary`` with ``accepted_slots``,
 artifacts; it is intentionally redundant with the lower-level masks so users
 do not need to inspect nested JAX arrays to confirm whether the fixed replay
 included an accepted-only branch or an explicit rejected controller slot.
+For directional vector reports, also inspect ``directional_jvp_fast_path`` and
+``directional_uses_fixed_coil_geometry``.  A ``current_only`` fast path means
+the JVP reused the coil curve geometry and differentiated only the currents,
+which is the intended low-overhead path for current-only proposal evidence.
 Short accepted-only branch-local segments are unrolled automatically in this
 report path, which avoids the pathological cold ``lax.scan`` graph that the
 tiny smoke trace used to trigger.
@@ -1339,6 +1343,8 @@ same fingerprint.  In the resulting
 ``branch_local_vector_jacobian.controller_slot_summary`` and
 ``accepted_rejected_controller_slot_gate.controller_slot_summary`` to confirm
 how many controller slots were accepted or rejected in the replayed branch.
+The vector blocks also report ``directional_jvp_fast_path`` so current-only
+profiling runs can confirm that fixed coil geometry was reused.
 
 An additional opt-in bridge toward derivative-assisted coil optimization is
 available with ``--same-branch-derivative-proposal``.  This mode still does
