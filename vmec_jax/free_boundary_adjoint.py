@@ -37,6 +37,7 @@ from .free_boundary_adjoint_controller import (
 
 __all__ = [
     "direct_coil_accepted_trace_branch_metadata",
+    "direct_coil_accepted_trace_controller_slot_summary",
     "direct_coil_accepted_trace_controller_custom_vjp_scalars_jax",
     "direct_coil_accepted_trace_controller_replay_plan",
     "direct_coil_accepted_trace_replay_graph_metadata",
@@ -2891,6 +2892,52 @@ def direct_coil_accepted_trace_branch_metadata(
     return metadata
 
 
+def direct_coil_accepted_trace_controller_slot_summary(metadata: Mapping[str, Any]) -> dict[str, int | bool]:
+    """Return compact accepted/rejected/done slot counts from branch metadata.
+
+    Promotion reports should not force callers to inspect nested JAX masks to
+    answer basic questions like whether a fixed rejected-controller slot was
+    replayed.  This helper accepts both raw and JSON-safe branch metadata and
+    returns plain Python scalars suitable for CI artifacts and optimization
+    reports.
+    """
+
+    masks = metadata.get("masks", {}) if isinstance(metadata, Mapping) else {}
+
+    def _mask(name: str, fallback: str | None = None) -> np.ndarray:
+        value = None
+        if isinstance(masks, Mapping):
+            value = masks.get(name)
+        if value is None and fallback is not None and isinstance(metadata, Mapping):
+            value = metadata.get(fallback)
+        if value is None:
+            return np.asarray([], dtype=bool)
+        return np.asarray(value, dtype=bool).reshape(-1)
+
+    accepted = _mask("accepted", "accepted_mask")
+    rejected = _mask("rejected", "rejected_mask")
+    done = _mask("done", "done_mask")
+    active = _mask("active")
+    active_freeb = _mask("has_active_freeb_replay", "has_active_freeb_replay")
+    accepted_freeb = _mask("active_free_boundary", "active_free_boundary_mask")
+    if accepted_freeb.size == 0 and accepted.size and active_freeb.size == accepted.size:
+        accepted_freeb = np.logical_and(accepted, active_freeb)
+
+    n_steps = int(metadata.get("n_steps", max(accepted.size, rejected.size, done.size, active.size)))
+    n_freeb = int(metadata.get("n_free_boundary_replay_steps", np.count_nonzero(accepted_freeb)))
+    rejected_slots = int(np.count_nonzero(rejected))
+    return {
+        "n_steps": n_steps,
+        "active_slots": int(np.count_nonzero(active)) if active.size else n_steps,
+        "accepted_slots": int(np.count_nonzero(accepted)),
+        "rejected_slots": rejected_slots,
+        "done_markers": int(np.count_nonzero(done)),
+        "active_free_boundary_slots": int(np.count_nonzero(active_freeb)),
+        "accepted_free_boundary_slots": int(n_freeb),
+        "fixed_rejected_controller_slot_present": bool(rejected_slots > 0),
+    }
+
+
 def _unique_shape_list(shapes: list[tuple[int, ...]]) -> list[list[int]]:
     seen: set[tuple[int, ...]] = set()
     unique: list[list[int]] = []
@@ -4997,6 +5044,7 @@ def direct_coil_same_branch_controller_scalars_custom_vjp_report(
         max_steps=replay_options.get("max_steps"),
         json_safe=False,
     )
+    controller_slot_summary = direct_coil_accepted_trace_controller_slot_summary(replay_branch_metadata)
 
     scalar_fns = tuple(
         (lambda replay, fn=fn: fn(replay, base))
@@ -5083,6 +5131,7 @@ def direct_coil_same_branch_controller_scalars_custom_vjp_report(
             "freeze_freeb_bsqvac": bool(replay_options.get("freeze_freeb_bsqvac", False)),
         },
         "replay_branch_metadata": replay_branch_metadata,
+        "controller_slot_summary": controller_slot_summary,
         "values": values,
         "jacobian": jacobian,
         "exact_directionals": exact_directionals,
@@ -5125,6 +5174,12 @@ def direct_coil_same_branch_physical_scalar_gate_report(
 
     objective_values = complete_report.get("objective_values", {})
     branch = complete_report.get("branch_compatibility", {})
+    replay_branch_metadata = scalars_report.get("replay_branch_metadata", {})
+    controller_slot_summary = (
+        direct_coil_accepted_trace_controller_slot_summary(replay_branch_metadata)
+        if isinstance(replay_branch_metadata, Mapping)
+        else {}
+    )
     same_accepted_trace_branch = bool(branch.get("same_accepted_trace_branch", branch.get("same_branch", False)))
     same_residual_branch = bool(branch.get("same_residual_branch", branch.get("same_branch", False)))
     if not same_accepted_trace_branch:
@@ -5169,6 +5224,7 @@ def direct_coil_same_branch_physical_scalar_gate_report(
         "same_residual_branch": same_residual_branch,
         "differentiates_adaptive_controller": False,
         "scalar_keys": scalar_keys,
+        "controller_slot_summary": controller_slot_summary,
         "replay_gate": replay_gate,
         "errors": tuple(errors),
         "scalars": scalar_summaries,
@@ -5260,11 +5316,12 @@ def direct_coil_adaptive_full_loop_same_branch_gate_report(
     if bool(require_stacked_step_controls) and not used_stacked_step_controls:
         errors.append("stacked step-control replay was not used")
     replay_branch_metadata = scalars_report.get("replay_branch_metadata", {})
-    fixed_rejected_controller_slots = 0
-    if isinstance(replay_branch_metadata, Mapping):
-        rejected_mask = replay_branch_metadata.get("rejected_mask")
-        if rejected_mask is not None:
-            fixed_rejected_controller_slots = int(np.count_nonzero(np.asarray(rejected_mask, dtype=bool)))
+    controller_slot_summary = (
+        direct_coil_accepted_trace_controller_slot_summary(replay_branch_metadata)
+        if isinstance(replay_branch_metadata, Mapping)
+        else {}
+    )
+    fixed_rejected_controller_slots = int(controller_slot_summary.get("rejected_slots", 0))
     fixed_rejected_controller_slot_present = fixed_rejected_controller_slots > 0
     if bool(require_fixed_rejected_controller_slot):
         if not fixed_rejected_controller_slot_present:
@@ -5321,6 +5378,7 @@ def direct_coil_adaptive_full_loop_same_branch_gate_report(
         "requires_fixed_rejected_controller_slot": bool(require_fixed_rejected_controller_slot),
         "fixed_rejected_controller_slot_present": bool(fixed_rejected_controller_slot_present),
         "fixed_rejected_controller_slots": int(fixed_rejected_controller_slots),
+        "controller_slot_summary": controller_slot_summary,
         "replay_option_flags": replay_option_flags,
         "replay_branch_metadata": replay_branch_metadata,
         "scalar_keys": physical_gate.get("scalar_keys", ()),
@@ -5452,6 +5510,7 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
         max_steps=replay_options.get("max_steps"),
         json_safe=True,
     )
+    controller_slot_summary = direct_coil_accepted_trace_controller_slot_summary(replay_branch_metadata)
     replay_payload_for_scalars = payload if replay_payload is None else replay_payload
     replay_payload_source = "complete_payload" if replay_payload is None else "user"
     replay_plan_for_scalars = replay_plan
@@ -5560,6 +5619,7 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
         "trace_replay_diagnostics": diagnostics,
         "replay_graph_metadata": graph_metadata,
         "replay_branch_metadata": replay_branch_metadata,
+        "controller_slot_summary": controller_slot_summary,
         "replay_option_flags": {
             "use_preconditioner_policy_segments": bool(
                 replay_options.get("use_preconditioner_policy_segments", False)
@@ -5729,6 +5789,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
         max_steps=replay_options.get("max_steps"),
         json_safe=True,
     )
+    controller_slot_summary = direct_coil_accepted_trace_controller_slot_summary(replay_branch_metadata)
     replay_payload_for_scalars = payload if replay_payload is None else replay_payload
     replay_payload_source = "complete_payload" if replay_payload is None else "user"
     replay_plan_for_scalars = replay_plan
@@ -5944,6 +6005,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
         "trace_replay_diagnostics": diagnostics,
         "replay_graph_metadata": graph_metadata,
         "replay_branch_metadata": replay_branch_metadata,
+        "controller_slot_summary": controller_slot_summary,
         "replay_option_flags": {
             "use_preconditioner_policy_segments": bool(
                 replay_options.get("use_preconditioner_policy_segments", False)
