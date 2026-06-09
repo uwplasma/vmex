@@ -177,6 +177,30 @@ def test_initial_state_from_params_uses_frozen_axis_override(monkeypatch) -> Non
     ]
 
 
+def test_initial_state_from_params_jit_helper_success_with_sync(monkeypatch) -> None:
+    import jax.numpy as jnp
+
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._layout = StateLayout(ns=1, K=1, lasym=False)
+    opt._use_jit_initial_state = lambda: True
+    state = _state_from_coeffs(r=7.0, z=2.0, l=0.5)
+    packed = jnp.asarray(pack_state(state), dtype=jnp.float64)
+    calls = {"helper": 0}
+
+    def helper(params):
+        calls["helper"] += 1
+        np.testing.assert_allclose(np.asarray(params), [1.5])
+        return packed
+
+    opt._initial_state_packed_helper = helper
+    monkeypatch.setenv("VMEC_JAX_OPT_SYNC_INITIAL_STATE", "1")
+
+    out = FixedBoundaryExactOptimizer._initial_state_from_params_jit(opt, np.asarray([1.5]))
+
+    assert calls == {"helper": 1}
+    np.testing.assert_allclose(np.asarray(pack_state(out)), np.asarray(packed))
+
+
 def test_jit_initial_state_env_and_clear_caches(monkeypatch) -> None:
     opt = _bare_optimizer_for_state_ops()
     opt._initial_state_packed_helper = object()
