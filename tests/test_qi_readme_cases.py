@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 import importlib.util
-import json
 from pathlib import Path
 import sys
 
@@ -212,21 +211,16 @@ def test_readme_renderer_cases_use_only_minimal_public_seeds() -> None:
     assert all("input.QI_stel_seed_3127" not in str(case.input_file) for case in mod.CASES)
 
 
-def test_nfp3_case_catalog_uses_current_aspect5_policy_metadata() -> None:
+def test_nfp3_case_catalog_uses_current_minimal_aspect5_policy_metadata() -> None:
     cases_mod = _load_cases_module()
-    artifact_dir = ROOT / "docs" / "_static" / "qi_readme_cases" / "nfp3_seed3127"
-    history = json.loads((artifact_dir / "history.json").read_text())
-    diagnostics = json.loads(
-        (artifact_dir / "diagnostics.json").read_text()
-    )
 
     case = cases_mod.QI_CASES["nfp3_qi"]
 
-    assert history["target_aspect"] == pytest.approx(cases_mod.SEED3127_REVIEWED_TARGET_ASPECT)
-    assert diagnostics["target_aspect"] == pytest.approx(cases_mod.SEED3127_REVIEWED_TARGET_ASPECT)
+    assert case["input_file"].name == "input.minimal_seed_nfp3"
     assert case["target_aspect"] == pytest.approx(cases_mod.SEED3127_REVIEWED_TARGET_ASPECT)
     assert case["target_aspect"] == pytest.approx(cases_mod.DEFAULT_QI_TARGET_ASPECT)
     assert "minimal_nfp3_to_qi_reference" in str(case["output_dir"])
+    assert "seed_3127" not in str(case["output_dir"])
 
 
 def test_real_nfp4_raw_initial_wout_matches_minimal_seed_and_final_differs() -> None:
