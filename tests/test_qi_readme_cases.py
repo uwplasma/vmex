@@ -228,6 +228,8 @@ def test_real_nfp4_raw_initial_wout_matches_minimal_seed_and_final_differs() -> 
 
     nfp4 = next(case for case in mod.CASES if case.label == "NFP=4 minimal seed to QI")
     final_wout = nfp4.output_dir / "wout_final.nc"
+    if not (nfp4.initial_wout.exists() and final_wout.exists()):
+        pytest.skip("NFP=4 QI WOUT artifacts are fetched/generated assets, not tracked source files")
 
     assert nfp4.initial_wout.read_bytes() != final_wout.read_bytes()
     assert mod._boundary_mismatches(nfp4.input_file, nfp4.initial_wout) == []
