@@ -16364,3 +16364,51 @@ Completion:
   sensitivity.
 - CI runtime refactor with preserved coverage/physics gates: 100%.
 - Docs/release hygiene: 99.95%; blocked on a passing four-row QI panel.
+
+### 2026-06-09 QI Optimizer JVP-vs-FD Diagnostic Tool
+
+Steps taken:
+
+1. Added ``tools/diagnostics/qi_optimizer_jvp_fd_compare.py``.  The tool builds
+   the same QI objective stage used by production ``QI_optimization.py`` and
+   compares one exact optimizer ``Jv`` against central finite differences for a
+   selected boundary coefficient direction.
+2. Ran local syntax, help, and Ruff checks for the new tool.
+3. Synced the tool to the clean ``office`` worktree and ran it on the selected
+   NFP2 candidate from the previous minimal-seed batch:
+   ``docs/_static/qi_readme_cases/nfp2_minimal/boundary_reference_preconditioner/lambda_0p990/input.interpolated``.
+4. Compared the same ``rc(m=1,n=0)`` direction on GPU and CPU to rule out a
+   backend-specific replay issue.
+
+Results obtained:
+
+1. GPU exact optimizer JVP vs central FD for NFP2 ``rc10``:
+   ``relative_diff_norm = 0.8749``, ``cosine_similarity = 0.4851``,
+   ``jvp_norm = 7.182``, ``fd_norm = 14.010``.
+2. CPU reproduced the same mismatch:
+   ``relative_diff_norm = 0.8749``, ``cosine_similarity = 0.4851``.
+3. This confirms the NFP2 cleanup stall is not because the QI landscape is flat
+   and not because of GPU alone.  The shared exact optimizer QI JVP path is not
+   matching central finite differences for the selected boundary direction.
+
+Best next steps:
+
+1. Use the new diagnostic to isolate whether the mismatch enters at
+   ``checkpoint_tape_state_jvp``/packed-state replay or at
+   ``quasi_isodynamic_residual_from_state`` differentiation from packed state.
+2. Add a focused regression test once the mismatch is fixed, preferably on a
+   tiny low-resolution QI fixture to avoid increasing CI runtime materially.
+3. After the JVP gate passes, rerun the NFP2 and NFP1 minimal-seed QI cleanup
+   stages; do not restore the README QI panel before those staged artifacts
+   pass the unchanged renderer gates.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- QI optimizer/JVP correctness for minimal-seed cleanup: 82%; diagnostic tool
+  exists and reproduces the mismatch on CPU/GPU, implementation fix still open.
+- QI minimal-seed README artifact regeneration: unchanged at 50%
+  artifact-complete, 0% promoted.
