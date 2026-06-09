@@ -501,6 +501,7 @@ def test_build_quasi_isodynamic_stage_wires_shared_field_residuals(monkeypatch) 
             trial_ftol,
             solver_device,
             exact_path=None,
+            freeze_initial_axis=False,
         ):
             captured.update(
                 {
@@ -516,6 +517,7 @@ def test_build_quasi_isodynamic_stage_wires_shared_field_residuals(monkeypatch) 
                     "trial_ftol": trial_ftol,
                     "solver_device": solver_device,
                     "exact_path": exact_path,
+                    "freeze_initial_axis": freeze_initial_axis,
                 }
             )
 
@@ -602,6 +604,7 @@ def test_build_quasi_isodynamic_stage_wires_shared_field_residuals(monkeypatch) 
     assert captured["boundary_input"] == "boundary_input:extended:indata-m2"
     assert captured["inner_max_iter"] == 3
     assert captured["solver_device"] == "cpu"
+    assert captured["freeze_initial_axis"] is True
     assert captured["booz_kwargs"]["nfp"] == 2
     assert captured["booz_kwargs"]["mboz"] == 4
 
