@@ -16495,3 +16495,67 @@ Completion:
   branch sensitivity remains open.
 - QI minimal-seed README artifact regeneration: unchanged at 50%
   artifact-complete, 0% promoted.
+
+### 2026-06-09 QI Initial-Axis Branch Isolation
+
+Steps taken:
+
+1. Added ``tools/diagnostics/initial_guess_jvp_fd_compare.py`` to compare
+   ``initial_guess_from_boundary`` JVPs against central finite differences
+   before any VMEC residual iteration.  The diagnostic reports whole packed
+   state mismatch, per-block mismatch for ``Rcos/Rsin/Zcos/Zsin/Lcos/Lsin``,
+   and VMEC ``rtest/ztest/lflip`` branch indicators.
+2. Ran the new diagnostic on the simple NFP2 minimal seed and the production
+   NFP2 QI candidate from the previous minimal-seed batch.
+3. Added an opt-in ``freeze_initial_axis`` path to
+   ``FixedBoundaryExactOptimizer`` so stages can reuse the base-point
+   magnetic-axis initialization branch when the input deck does not provide
+   explicit axis coefficients.
+4. Kept generic fixed-boundary objective stages on the default unfrozen VMEC
+   path, and left the QI staged builder opt-in to frozen axes because that is
+   the branch diagnosed in the NFP2 candidate.
+5. Added focused unit coverage for the frozen-axis fallback initial-state
+   path.
+
+Results obtained:
+
+1. On the simple NFP2 minimal seed, ``initial_guess_from_boundary`` JVP and
+   FD agree to roundoff for inferred and base-axis variants.
+2. On the production NFP2 QI candidate with the inferred axis, the initial
+   state map is nonsmooth:
+   ``relative_diff_norm = 1.002`` and cosine ``-0.065`` for
+   ``rc(m=1,n=0)`` at ``eps=1e-4``.  The largest discrepancy is in ``Zsin``,
+   where the FD norm is about ``115.7`` while the local JVP is zero.
+3. Freezing the base axis fixes the initialization-only comparison for the
+   same candidate: projected and unprojected initial-state comparisons both
+   agree to about ``1e-11`` relative error.
+4. A full accepted-state QI diagnostic with the frozen-axis stage still does
+   not match complete-solve finite differences:
+   exact-vs-FD ``relative_diff_norm = 1.002``, cosine ``0.077``, and packed
+   final-state ``state_relative_diff_norm = 0.997`` for the same NFP2
+   candidate.  Therefore the remaining mismatch is in a finite-iteration
+   solver/controller/replay branch or in the complete-solve stencil, not only
+   in initial-axis inference.
+
+Best next steps:
+
+1. Keep ``freeze_initial_axis`` as an explicit branch-stability tool and QI
+   staged-builder default, but do not claim it solves the full QI accepted
+   solve derivative mismatch.
+2. Add a per-iteration state FD diagnostic under frozen axes to locate where
+   the complete-solve branch first diverges from the replay tangent.
+3. For README-quality QI recovery, continue using finite-step/global proposal
+   and branch-stable local cleanup until the accepted-state finite-difference
+   gate passes.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- QI optimizer/JVP correctness for minimal-seed cleanup: 88%; initial-axis
+  nonsmoothness is isolated and guarded, but final accepted-state branch
+  mismatch remains open.
+- QI minimal-seed README artifact regeneration: unchanged at 50%
+  artifact-complete, 0% promoted.

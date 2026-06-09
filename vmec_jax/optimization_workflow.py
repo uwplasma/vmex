@@ -2629,6 +2629,7 @@ def build_fixed_boundary_objective_stage(
     trial_ftol: float = 1.0e-9,
     solver_device: str | None = None,
     exact_path: str | None = None,
+    freeze_initial_axis: bool = False,
 ) -> FixedBoundaryObjectiveStage:
     """Build one VMEC/JAX optimization stage from an objective list."""
 
@@ -2686,6 +2687,7 @@ def build_fixed_boundary_objective_stage(
         trial_ftol=trial_ftol,
         solver_device=solver_device,
         exact_path=exact_path,
+        freeze_initial_axis=freeze_initial_axis,
     )
     return FixedBoundaryObjectiveStage(
         mode=int(stage_mode),
@@ -3023,6 +3025,7 @@ def build_quasi_isodynamic_objective_stage(
     trial_ftol: float = 1.0e-9,
     solver_device: str | None = None,
     exact_path: str | None = None,
+    freeze_initial_axis: bool = True,
 ) -> FixedBoundaryObjectiveStage:
     """Build one QI stage while sharing one Boozer transform across QI terms."""
 
@@ -3157,6 +3160,7 @@ def build_quasi_isodynamic_objective_stage(
         trial_ftol=trial_ftol,
         solver_device=solver_device,
         exact_path=exact_path,
+        freeze_initial_axis=freeze_initial_axis,
     )
     return FixedBoundaryObjectiveStage(
         mode=int(stage_mode),

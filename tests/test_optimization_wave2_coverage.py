@@ -139,6 +139,44 @@ def test_initial_state_from_params_falls_back_when_jit_disabled(monkeypatch) -> 
     assert opt._profile["initial"]["count"] == 1
 
 
+def test_initial_state_from_params_uses_frozen_axis_override(monkeypatch) -> None:
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._initial_state_cache = OrderedDict()
+    opt._initial_state_cache_max = 4
+    opt._profile = {}
+    opt._static = object()
+    opt._indata = object()
+    opt._initial_axis_override = {"raxis_cc": np.asarray([1.0, 0.1])}
+    opt._exact_cache_key = lambda params: np.asarray(params, dtype=float).reshape(-1).tobytes()
+    opt._profile_add = FixedBoundaryExactOptimizer._profile_add.__get__(opt, FixedBoundaryExactOptimizer)
+    opt._remember_initial_state = FixedBoundaryExactOptimizer._remember_initial_state.__get__(
+        opt,
+        FixedBoundaryExactOptimizer,
+    )
+    opt._initial_state_from_params_jit = lambda _params: None
+    opt._boundary_from_params = lambda params: ("boundary", tuple(np.asarray(params, dtype=float)))
+    state = _state_from_coeffs(r=4.0)
+    seen = []
+
+    def fake_initial_guess(static, boundary, indata, *, vmec_project, axis_override):
+        seen.append((static, boundary, indata, vmec_project, axis_override))
+        return state
+
+    monkeypatch.setattr(opt_module, "initial_guess_from_boundary", fake_initial_guess)
+
+    params = np.asarray([5.0])
+    assert FixedBoundaryExactOptimizer._initial_state_from_params(opt, params, profile_name="initial") is state
+    assert seen == [
+        (
+            opt._static,
+            ("boundary", (5.0,)),
+            opt._indata,
+            True,
+            opt._initial_axis_override,
+        )
+    ]
+
+
 def test_jit_initial_state_env_and_clear_caches(monkeypatch) -> None:
     opt = _bare_optimizer_for_state_ops()
     opt._initial_state_packed_helper = object()

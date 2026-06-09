@@ -1357,6 +1357,11 @@ class FixedBoundaryExactOptimizer:
         ``"tape"`` for the low-cold-cost discrete-adjoint tape path, or
         ``"scan"`` for the high-compile-cost scan-differentiated path that can
         be faster for long GPU runs after compilation is amortized.
+    freeze_initial_axis:
+        Reuse the initial magnetic-axis branch from the optimizer base point in
+        residual and exact-replay callbacks.  This is useful for optimization
+        stages whose input deck omits explicit axis coefficients because VMEC's
+        inferred-axis search contains nonsmooth extrema/branch choices.
 
     Example
     -------
@@ -1394,6 +1399,7 @@ class FixedBoundaryExactOptimizer:
         trial_ftol: float | None = None,
         solver_device: str | None = None,
         exact_path: str | None = None,
+        freeze_initial_axis: bool = False,
     ) -> None:
         self._solver_device_name = self._resolve_solver_device(solver_device)
         self._exact_path_request = self._resolve_exact_path_request(exact_path)
@@ -1410,6 +1416,7 @@ class FixedBoundaryExactOptimizer:
         self._boundary_input = boundary_input
         self._specs = list(specs)
         self._residuals_fn = residuals_fn
+        self._freeze_initial_axis = bool(freeze_initial_axis)
         self._residuals_eval_fn = self._make_residuals_eval_fn(residuals_fn)
         self._n_qs: int | None = getattr(residuals_fn, "_n_qs", None)
         self._n_non_qs: int = int(getattr(residuals_fn, "_n_non_qs", 1))
@@ -1426,6 +1433,12 @@ class FixedBoundaryExactOptimizer:
         geom0 = eval_geom(state0, static)
         self._signgs = int(signgs_from_sqrtg(np.asarray(geom0.sqrtg), axis_index=1))
         self._flux = flux_profiles_from_indata(indata, static.s, signgs=self._signgs)
+        if self._freeze_initial_axis:
+            from .init_guess import extract_axis_override_from_state
+
+            self._initial_axis_override = extract_axis_override_from_state(state0, static)
+        else:
+            self._initial_axis_override = None
 
         self._layout = state0.layout
 
@@ -2218,7 +2231,22 @@ class FixedBoundaryExactOptimizer:
         state0 = self._initial_state_from_params_jit(params)
         if state0 is None:
             boundary_now = self._boundary_from_params(params)
-            state0 = initial_guess_from_boundary(self._static, boundary_now, self._indata, vmec_project=True)
+            axis_override = getattr(self, "_initial_axis_override", None)
+            if axis_override is None:
+                state0 = initial_guess_from_boundary(
+                    self._static,
+                    boundary_now,
+                    self._indata,
+                    vmec_project=True,
+                )
+            else:
+                state0 = initial_guess_from_boundary(
+                    self._static,
+                    boundary_now,
+                    self._indata,
+                    vmec_project=True,
+                    axis_override=axis_override,
+                )
         self._remember_initial_state(params, state0)
         self._profile_add(profile_name, time.perf_counter() - t_guess)
         return state0
@@ -2251,12 +2279,22 @@ class FixedBoundaryExactOptimizer:
             @jax.jit
             def _packed_initial_state(p):
                 bdy = self._boundary_from_params(p)
-                state = _ig(
-                    self._static,
-                    bdy,
-                    self._indata,
-                    vmec_project=True,
-                )
+                axis_override = getattr(self, "_initial_axis_override", None)
+                if axis_override is None:
+                    state = _ig(
+                        self._static,
+                        bdy,
+                        self._indata,
+                        vmec_project=True,
+                    )
+                else:
+                    state = _ig(
+                        self._static,
+                        bdy,
+                        self._indata,
+                        vmec_project=True,
+                        axis_override=axis_override,
+                    )
                 return _jnp.asarray(pack_state(state), dtype=_jnp.float64)
 
             helper = _packed_initial_state
@@ -2587,7 +2625,22 @@ class FixedBoundaryExactOptimizer:
 
         def _scan_state_from_params(p):
             boundary_now = self._boundary_from_params(p)
-            state0 = initial_guess_from_boundary(self._static, boundary_now, self._indata, vmec_project=True)
+            axis_override = getattr(self, "_initial_axis_override", None)
+            if axis_override is None:
+                state0 = initial_guess_from_boundary(
+                    self._static,
+                    boundary_now,
+                    self._indata,
+                    vmec_project=True,
+                )
+            else:
+                state0 = initial_guess_from_boundary(
+                    self._static,
+                    boundary_now,
+                    self._indata,
+                    vmec_project=True,
+                    axis_override=axis_override,
+                )
             result = solve_fixed_boundary_residual_iter(
                 state0,
                 self._static,
@@ -2662,7 +2715,11 @@ class FixedBoundaryExactOptimizer:
 
         t_total = time.perf_counter()
         state0 = self._initial_state_from_params(params, profile_name="initial_guess_exact")
-        axis_override = extract_axis_override_from_state(state0, self._static)
+        axis_override = (
+            getattr(self, "_initial_axis_override", None)
+            if getattr(self, "_initial_axis_override", None) is not None
+            else extract_axis_override_from_state(state0, self._static)
+        )
         t_tape = time.perf_counter()
         tape = build_residual_checkpoint_tape_direct(
             state0,
