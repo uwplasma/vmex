@@ -33,6 +33,10 @@ Steps taken:
 6. Updated release-hygiene and QI renderer tests to enforce the minimal-seed
    public QI policy and prevent a silent fallback to ``input.QI_stel_seed_3127``
    in README renderer cases.
+7. Removed stale tracked QI artifact histories for the previous NFP=1
+   non-minimal, NFP=2 target-helicity, and NFP=3 seed-3127 README rows, while
+   keeping only the reviewed ``nfp4_minimal`` row until new NFP=1/2/3
+   minimal-seed artifacts are generated.
 
 Results obtained:
 
@@ -50,6 +54,9 @@ Results obtained:
    same-branch AD-vs-central-FD gates in
    ``tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py``, and
    the two focused coil-QS derivative-proposal smoke tests.
+5. The checked-in QI docs artifact tree now cannot silently reuse removed
+   mixed-seed rows; ``render_qi_readme_cases.py`` will fail until reviewed
+   ``nfp1_minimal``, ``nfp2_minimal``, and ``nfp3_minimal`` outputs exist.
 
 Best next steps:
 
