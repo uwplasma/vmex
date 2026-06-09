@@ -15976,3 +15976,304 @@ Completion:
 - CPU/GPU performance: 99.3%.
 - CI runtime refactor with preserved coverage/physics gates: 100%.
 - Docs/release hygiene: 99.95%.
+
+### 2026-06-09 QI Minimal-Seed README Regeneration and Bounded Parity Recheck
+
+Steps taken:
+
+1. Re-verified ``main`` at ``942b45c`` with a clean local worktree and green
+   GitHub Actions CI, including combined coverage, full docs, smoke tests, and
+   the parity-manifest dry run.
+2. Re-verified the ``office`` clone at the same commit with two CUDA-visible
+   JAX devices and launched QI README artifact regeneration from
+   ``input.minimal_seed_nfp1`` through ``input.minimal_seed_nfp4``.
+3. First launched the QI cases with explicit per-case CLI overrides rather than
+   environment-case indirection: minimal seed input, reference-family
+   preconditioner, ESS, lower-repeat continuation, ``max_mode=5``,
+   ``max_nfev=80``, and accepted/trial VMEC budgets of ``550`` iterations at
+   ``1e-10``.
+4. Stopped only the QI subprocess tree after the office GPUs hit XLA
+   ``RESOURCE_EXHAUSTED`` while unrelated ``spectraxgk`` jobs were already
+   occupying about 12 GiB on each A4000.
+5. Relaunched the QI artifact regeneration on CPU with tuned per-NFP case
+   max modes and case-aligned reference-family policies.  This is slower but
+   avoids making README provenance depend on temporarily available GPU memory.
+6. Kept the QI README panel absent while the artifacts are regenerating; the
+   renderer/provenance gate must pass before ``readme_qi_optimization_cases``
+   is reintroduced.
+7. Re-ran focused local gates while the office jobs run: QI README artifact
+   availability/docs-release tests, full Sphinx docs, branch-local current and
+   Fourier complete-solve AD-vs-central-FD gates, free-boundary provider/QS
+   optimization smoke tests, and the optional bounded W7-X VMEC2000
+   generated-``mgrid`` fixture.
+
+Results obtained:
+
+1. The latest CI run on ``942b45c`` is green.
+2. ``JAX_ENABLE_X64=1 python -m pytest -q tests/test_qi_readme_cases.py
+   tests/test_docs_release_hygiene.py tests/test_optimization_examples.py
+   tests/test_qs_ess_render_smoke.py -q`` passed with the expected skips for
+   absent untracked QI WOUT artifacts.
+3. ``python -m sphinx -q -W -b html docs docs/_build/html`` passed.
+4. ``JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_fd
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_fourier_only_same_branch_custom_vjp_matches_complete_solve_fd
+   -q`` passed.
+5. ``VMEC2000_INTEGRATION=1 VMEC2000_EXEC=~/bin/xvmec2000
+   JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_essos_coil_parity.py::test_vmec2000_w7x_generated_mgrid_fixture_reaches_active_vacuum_and_finite_wout
+   -q`` passed locally.
+6. The first GPU QI wave selected finite-reference candidates from the minimal
+   seeds but was not promotable due to GPU memory exhaustion under external GPU
+   contention.
+7. The CPU fallback QI regeneration is active, starting with NFP1.  No README
+   artifact has been promoted yet.
+
+Best next steps:
+
+1. Let the office CPU QI NFP1/NFP2/NFP3/NFP4 run finish.
+2. Render ``docs/_static/figures/readme_qi_optimization_cases.png`` only if
+   all four QI cases pass the engineering/provenance gates.
+3. Sync only compact provenance JSON/CSV and compressed README figure artifacts
+   back to the repo; keep WOUTs ignored/untracked.
+4. Re-run the focused QI/docs tests and Sphinx build after syncing artifacts.
+5. Keep arbitrary adaptive free-boundary branch differentiation unclaimed:
+   current promoted evidence remains branch-local and fingerprint-gated.
+6. Continue VMEC2000/mgrid/direct-coil parity expansion only with bounded,
+   finite-positive physical WOUT fixtures.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999997% for
+  production-forward same-branch vector/JVP gates including accepted/rejected
+  controller-slot provenance; arbitrary adaptive branch selection remains
+  unclaimed.
+- VMEC parity and physics gates: 98.8% after rechecking the bounded W7-X
+  VMEC2000 generated-``mgrid`` fixture.
+- Single-stage coil-only optimization: 99.0%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 99.3%.
+- QI minimal-seed README artifact regeneration: GPU attempt diagnosed and
+  replaced by CPU fallback; 0% promoted until all four office artifacts and the
+  renderer gate pass.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 99.95%; waiting on QI panel provenance before the next
+  doc artifact update.
+
+### 2026-06-09 Continued QI Minimal-Seed Provenance and Adaptive-Seam Audit
+
+Steps taken:
+
+1. Polled the active ``office`` CPU QI artifact jobs after the GPU
+   ``RESOURCE_EXHAUSTED`` fallback.  The long-running NFP1/NFP2 jobs are still
+   inside the first continuation/mirror-cleanup stage and are using CPU
+   actively, so they were left running.
+2. Verified that the completed ``nfp3_minimal`` and ``nfp4_minimal`` artifact
+   directories have root ``diagnostics.json`` and ``history.json`` files with
+   empty ``qi_gate_failures`` and passing QI seed/engineering gates.
+3. Confirmed that the older survey NFP1/NFP2 artifacts are not promotable:
+   NFP1 fails smooth/legacy QI and mirror gates, while the old NFP2 fails the
+   smooth QI gate.
+4. Audited the alternate NFP1 ``inputs_QI_1`` reference family.  The
+   ``lambda=0.99`` branch has good legacy QI and mirror ratio but misses the
+   ``abs(mean_iota) >= 0.41`` gate; the ``lambda=1.20`` branch clears iota but
+   starts with worse QI/mirror.  A bounded side attempt was launched from the
+   single ``lambda=1.20`` branch to give the local optimizer a different basin.
+5. Reviewed the existing free-boundary direct-coil sensitivity helper and
+   confirmed that the current-only complete-solve gate already includes the
+   accepted/rejected controller-slot provenance path through
+   ``check_fixed_rejected_controller_mask_gate=True``.  Adding a second
+   standalone test would duplicate the expensive complete-solve triplet without
+   materially increasing evidence.
+
+Results obtained:
+
+1. Completed QI rows:
+   ``nfp3_minimal`` passes its configured gates with
+   ``smooth QI = 3.07e-3``, ``legacy QI = 6.12e-4``,
+   ``max mirror = 0.318`` against its ``0.35`` target, and
+   ``mean iota = -1.046``.
+2. ``nfp4_minimal`` passes its configured gates with
+   ``smooth QI = 2.67e-3``, ``legacy QI = 3.73e-4``,
+   ``max mirror = 0.287``, and ``mean iota = -1.287``.
+3. Active partial NFP1/NFP2 rows are not yet promotable:
+   the current NFP1 checkpoint still fails smooth/legacy/mirror, the current
+   NFP2 checkpoint still fails the strict ``2e-3`` smooth-QI gate, and the
+   alternate NFP1 ``lambda=0.99`` checkpoint still fails iota.
+4. The renderer policy remains unchanged: a QI README panel must not be
+   restored until all four canonical ``nfp*_minimal`` bundles pass their
+   diagnostic/provenance gates without weakening the gates.
+
+Best next steps:
+
+1. Let the active NFP1/NFP2 and NFP1 ``lambda=1.20`` side attempts finish or
+   reach timeout.
+2. Promote the first passing NFP1 bundle by copying it into the canonical
+   ``docs/_static/qi_readme_cases/nfp1_minimal`` directory only if it still
+   uses ``examples/data/input.minimal_seed_nfp1`` as the raw public seed and
+   passes the renderer's provenance checks.
+3. Render and sync ``readme_qi_optimization_cases.png`` only after NFP1/NFP2
+   root diagnostics pass; keep WOUT files ignored/untracked.
+4. Keep full adaptive branch differentiation conservative.  Current evidence
+   validates fingerprint-gated branch-local accepted/rejected replay slots, not
+   arbitrary differentiation through host-side adaptive branch selection.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999997%; accepted/rejected
+  branch-local controller-slot gates are covered, while arbitrary adaptive
+  branch differentiation remains unclaimed.
+- VMEC parity and physics gates: 98.8%.
+- Single-stage coil-only optimization: 99.0%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 99.3%.
+- QI minimal-seed README artifact regeneration: 50% artifact-complete
+  (NFP3/NFP4 passing, NFP1/NFP2 pending), 0% promoted to README until the
+  renderer gate passes.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 99.95%; still blocked on QI panel provenance.
+
+### 2026-06-09 QI Minimal-Seed Batch Results and Next Policy Adjustment
+
+Steps taken:
+
+1. Let the main NFP1 and NFP2 CPU artifact jobs run to completion instead of
+   promoting partial checkpoints.
+2. Checked the completed root diagnostics against the renderer gates.  The
+   main NFP1 bundle and main NFP2 bundle both produced finite WOUTs and root
+   history/diagnostics, but neither is case-gated clean.
+3. Left the alternate NFP1 ``inputs_QI_1`` low-iota basin and the NFP1
+   ``lambda=1.20`` basin running, then launched an additional NFP1
+   ``lambda=1.10`` basin.  This keeps the public raw seed fixed at
+   ``input.minimal_seed_nfp1`` while exploring nearby same-reference-family
+   basins with different iota/QI/mirror tradeoffs.
+4. Inspected the NFP2 reference-family table.  The selected ``lambda=0.99``
+   and alternate ``lambda=1.0`` branches are close, but both start slightly
+   above the strict smooth-QI gate, so another NFP2 attempt should target a QI
+   polish stage rather than simply widening the lambda grid.
+
+Results obtained:
+
+1. Main NFP1 failed promotion:
+   ``smooth QI = 4.96e-3``, ``legacy QI = 2.35e-3``,
+   ``max mirror = 0.361`` against ``0.30``, and
+   ``mean iota = 0.412``.
+2. Main NFP2 failed only the smooth-QI gate:
+   ``smooth QI = 2.70e-3``, ``legacy QI = 2.09e-4``,
+   ``max mirror = 0.265``, and ``mean iota = -0.699``.
+3. The NFP2 result is scientifically close and legacy-clean, but it must not
+   enter the README case-gated CSV unless the differentiable smooth-QI metric
+   is below its configured gate or the gate policy is deliberately changed in
+   code/docs/tests.
+4. The hand-written one-stage CLI cleanup is insufficient for NFP1/NFP2 README
+   promotion.  The repository already has stronger multi-stage QI-preservation
+   templates in ``examples/optimization/qi_optimization_cases.py``; the next
+   robust attempt should use those staged policies rather than another
+   one-stage ad hoc command.
+
+Best next steps:
+
+1. Let the remaining alternate NFP1 runs finish or time out.
+2. If no alternate NFP1 passes, keep the QI README panel absent and switch to
+   the case-catalog staged minimal-seed policies for both NFP1 and NFP2.
+3. For NFP2, use a dedicated smooth-QI polish stage with a hard QI ceiling
+   before mirror/aspect cleanup; the current geometry already clears legacy QI,
+   mirror, elongation, and iota.
+4. Preserve the no-weakening rule: do not restore
+   ``readme_qi_optimization_cases.csv`` or the panel until all four canonical
+   rows pass.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999997%.
+- VMEC parity and physics gates: 98.8%.
+- Single-stage coil-only optimization: 99.0%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 99.3%.
+- QI minimal-seed README artifact regeneration: NFP3/NFP4 passed; NFP1/NFP2
+  main batch failed promotion; alternate NFP1 basins running; overall 50%
+  artifact-complete and 0% promoted.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 99.95%; still blocked on QI panel provenance.
+
+### 2026-06-09 QI Minimal-Seed Batch Closed Without Promotion
+
+Steps taken:
+
+1. Waited for the remaining NFP1 alternate basin runs to complete under their
+   ``timeout`` wrappers and checked their root diagnostics.
+2. Verified that all NFP1 alternates preserved the public
+   ``input.minimal_seed_nfp1`` raw seed, but none passed the strict renderer
+   gates.
+3. Left the checked-in QI README panel absent; no partial CSV or panel was
+   generated or restored.
+4. Confirmed local repo hygiene after the run: no untracked source artifacts,
+   no WOUT promotion, docs-release hygiene tests passing, and tracked size
+   still under the configured gate.
+
+Results obtained:
+
+1. NFP1 main reference-family batch failed:
+   ``smooth QI = 4.96e-3``, ``legacy QI = 2.35e-3``,
+   ``max mirror = 0.361``, ``mean iota = 0.412``.
+2. NFP1 ``inputs_QI_1`` ``lambda=0.99`` alternate failed only smooth QI and
+   iota:
+   ``smooth QI = 2.31e-3``, ``legacy QI = 3.40e-4``,
+   ``max mirror = 0.261``, ``mean iota = 0.371``.
+3. NFP1 ``lambda=1.10`` alternate failed smooth/legacy/iota:
+   ``smooth QI = 1.24e-2``, ``legacy QI = 6.71e-3``,
+   ``max mirror = 0.298``, ``mean iota = 0.385``.
+4. NFP1 ``lambda=1.20`` alternate failed smooth/legacy/mirror/elongation:
+   ``smooth QI = 3.39e-2``, ``legacy QI = 1.98e-2``,
+   ``max mirror = 0.363``, ``mean iota = 0.410``.
+5. NFP2 main batch failed only smooth QI:
+   ``smooth QI = 2.70e-3``, ``legacy QI = 2.09e-4``,
+   ``max mirror = 0.265``, ``mean iota = -0.699``.
+
+Best next steps:
+
+1. Do not rerun the same one-stage CLI policy.  It repeatedly returns to the
+   reference candidate without enough smooth-QI/iota improvement.
+2. Promote a new run policy from ``examples/optimization/qi_optimization_cases.py``
+   that uses the stronger staged QI-preservation templates: initial QI refine,
+   repeat full-mode QI refine, then guarded mirror/aspect cleanup.
+3. For NFP2, start from the current reference-family basin and use a dedicated
+   smooth-QI polish target before any engineering cleanup; the legacy/mirror/iota
+   gates are already clean.
+4. For NFP1, use the ``inputs_QI_1`` reference-family basin as the closest
+   starting point, but add an iota-recovery stage that is explicitly guarded by
+   the QI ceiling and mirror gate.
+5. Re-run the renderer only after new root diagnostics for all four canonical
+   bundles pass.  Until then, keep the README panel and CSV absent.
+
+Need from user:
+
+Nothing now.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999997%.
+- VMEC parity and physics gates: 98.8%.
+- Single-stage coil-only optimization: 99.0%.
+- Robust coil perturbation optimization: deferred by current scope, 70%.
+- CPU/GPU performance: 99.3%.
+- QI minimal-seed README artifact regeneration: 50% artifact-complete
+  (NFP3/NFP4 passing); NFP1/NFP2 unresolved under strict gates, 0% promoted.
+- CI runtime refactor with preserved coverage/physics gates: 100%.
+- Docs/release hygiene: 99.95%; blocked on a passing four-row QI panel.
