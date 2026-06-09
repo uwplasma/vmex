@@ -51,6 +51,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--nalpha", type=int, default=13)
     parser.add_argument("--n-bounce", type=int, default=17)
     parser.add_argument("--surfaces", type=str, default="0.1,0.28,0.46,0.64,0.82,1.0")
+    parser.add_argument(
+        "--dense-jacobian",
+        action="store_true",
+        help="Also materialize the dense exact Jacobian and compare the selected column.",
+    )
     return parser.parse_args()
 
 
@@ -196,6 +201,22 @@ def main() -> None:
         "solver_device": solver_device or "default",
         "exact_path": exact_path or "auto",
     }
+    if bool(args.dense_jacobian):
+        jac = np.asarray(stage.optimizer.jacobian_fun(params0), dtype=float)
+        dense_col = jac[:, idx]
+        dense_diff = dense_col - fd
+        dense_norm = float(np.linalg.norm(dense_col))
+        dense_diff_norm = float(np.linalg.norm(dense_diff))
+        dense_dot = float(np.vdot(dense_col, fd))
+        report["dense_jacobian"] = {
+            "shape": [int(jac.shape[0]), int(jac.shape[1])],
+            "column_norm": dense_norm,
+            "diff_norm": dense_diff_norm,
+            "relative_diff_norm": dense_diff_norm / max(dense_norm, fd_norm, np.finfo(float).eps),
+            "max_abs_diff": float(np.max(np.abs(dense_diff))) if dense_diff.size else 0.0,
+            "cosine_similarity": dense_dot / max(dense_norm * fd_norm, np.finfo(float).eps),
+            "matrix_free_column_diff_norm": float(np.linalg.norm(dense_col - jvp)),
+        }
     text = json.dumps(report, indent=2, sort_keys=True)
     print(text)
     if args.output_json is not None:

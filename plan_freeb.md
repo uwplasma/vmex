@@ -16390,12 +16390,22 @@ Results obtained:
 3. This confirms the NFP2 cleanup stall is not because the QI landscape is flat
    and not because of GPU alone.  The shared exact optimizer QI JVP path is not
    matching central finite differences for the selected boundary direction.
+4. A dense-Jacobian extension of the diagnostic showed the dense column and
+   matrix-free ``Jv`` agree to ``1.5e-12`` in norm, so the bug is not specific
+   to ``residual_linear_operator``.
+5. Epsilon sensitivity checks still showed poor agreement:
+   ``eps=1e-3`` gave ``relative_diff_norm = 0.548`` and
+   ``cosine_similarity = 0.849``; ``eps=5e-3`` gave
+   ``relative_diff_norm = 0.721`` and ``cosine_similarity = 0.695``.  The
+   mismatch is therefore not a single small-epsilon finite-difference artifact.
 
 Best next steps:
 
 1. Use the new diagnostic to isolate whether the mismatch enters at
-   ``checkpoint_tape_state_jvp``/packed-state replay or at
-   ``quasi_isodynamic_residual_from_state`` differentiation from packed state.
+   parameter-to-initial-state tangent construction, checkpoint/scan state
+   replay, or ``quasi_isodynamic_residual_from_state`` differentiation from
+   packed state.  Dense and matrix-free Jacobian products already agree, so the
+   next comparison should be state-level JVP versus complete-solve state FD.
 2. Add a focused regression test once the mismatch is fixed, preferably on a
    tiny low-resolution QI fixture to avoid increasing CI runtime materially.
 3. After the JVP gate passes, rerun the NFP2 and NFP1 minimal-seed QI cleanup
