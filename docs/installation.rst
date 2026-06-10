@@ -37,6 +37,33 @@ backend import fails, run::
 
 and include that report when asking for help.
 
+Troubleshooting mixed Python environments
+-----------------------------------------
+
+If an editable/source install fails with an error like::
+
+  ImportError: Cannot import `packaging.licenses`.
+  Setuptools>=77.0.0 requires "packaging>=24.2" to work properly.
+
+do not start by uninstalling global ``setuptools`` or ``packaging`` packages.
+That usually makes a Homebrew/system Python environment more inconsistent.  The
+safe beginner path is to create a fresh environment and install from inside it::
+
+  python -m venv .venv
+  source .venv/bin/activate
+  python -m pip install -U pip setuptools wheel packaging
+  python -m pip install vmec-jax
+  vmec --doctor
+  vmec --test
+
+For a source checkout, replace the package install line with::
+
+  python -m pip install -e .
+
+The important checks are that ``python -m pip --version`` points inside the same
+environment as ``python -c "import sys; print(sys.executable)"`` and that
+``vmec --doctor`` does not report a user-site/Homebrew prefix mix.
+
 GPU-enabled JAX is intentionally not forced by ``vmec-jax`` because the correct
 wheel depends on platform, CUDA/ROCm version, and driver support.  Install the
 CPU package above first, or install/upgrade JAX for your accelerator using the
