@@ -106,6 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="vmec",
         description=(
             "Run vmec_jax equilibrium solver or plot a wout file.\n\n"
+            "  vmec --doctor        — print installation and JAX backend diagnostics\n"
             "  vmec --test          — run and plot the bundled quick-start case\n"
             "  vmec input.*         — run the solver\n"
             "  vmec --plot wout_*.nc  — generate diagnostic plots\n"
@@ -159,6 +160,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--jit-booz",
         action="store_true",
         help="JIT the booz_xform_jax transform. Accurate but can add compile time for one-off CLI runs.",
+    )
+    p.add_argument(
+        "--doctor",
+        action="store_true",
+        help="Print installation, Python, pip, package, and JAX backend diagnostics.",
     )
     p.add_argument(
         "--test",
@@ -368,6 +374,13 @@ def _run_bundled_test(args: argparse.Namespace, parser: argparse.ArgumentParser)
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if bool(args.doctor):
+        if args.input is not None:
+            parser.error("--doctor does not take an input path")
+        from .doctor import main as doctor_main
+
+        return doctor_main()
 
     if bool(args.test):
         return _run_bundled_test(args, parser)

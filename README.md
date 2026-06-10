@@ -19,11 +19,16 @@ remain in development.
 From PyPI:
 
 ```bash
-pip install vmec-jax
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip setuptools wheel packaging
+python -m pip install vmec-jax
 ```
 
 The plain package includes plotting support (`matplotlib`) and the differentiable
 Boozer transform dependency (`booz_xform_jax`), so no separate extra is needed.
+Use `python -m pip` from the active environment rather than a bare `pip`; this
+avoids mixing Homebrew/system Python packages with user-site packages.
 
 From conda-forge:
 
@@ -37,7 +42,8 @@ Developer install from source:
 ```bash
 git clone https://github.com/uwplasma/vmec_jax
 cd vmec_jax
-pip install -e .
+python -m pip install -U pip setuptools wheel packaging
+python -m pip install -e .
 ```
 
 Generated WOUT fixtures and large optional validation assets stay out of git;
@@ -48,13 +54,15 @@ use `python tools/fetch_assets.py --list` to inspect released reference bundles.
 For a first run after `pip install vmec-jax`, use the bundled test case:
 
 ```bash
+vmec --doctor
 vmec --test
 ```
 
-This copies the packaged `input.nfp4_QH_warm_start` into `vmec_jax_test/`,
-runs the solver with `FTOL_ARRAY = 1e-12`, writes
-`wout_nfp4_QH_warm_start.nc`, plots into `vmec_jax_test/figures/`, and prints
-the equivalent manual commands.
+`vmec --doctor` prints Python, pip, package, and JAX backend diagnostics. Then
+`vmec --test` copies the packaged `input.nfp4_QH_warm_start` into
+`vmec_jax_test/`, runs the solver with `FTOL_ARRAY = 1e-12`, writes
+`wout_nfp4_QH_warm_start.nc`, plots into `vmec_jax_test/figures/`, and prints the
+equivalent manual commands.
 
 The canonical installed executable is `vmec`; `vmec_jax`, `vmec-jax`, and `xvmec_jax` remain compatibility aliases.
 
@@ -152,6 +160,8 @@ optimization commands are documented in `docs/free_boundary_coil_optimization.rs
 `vmec_jax` follows the selected JAX backend. If CPU-only JAX is installed, runs
 use CPU. If GPU-enabled JAX is installed and selected, runs use the accelerator;
 `vmec_jax` does not silently force those runs back to CPU.
+Install or upgrade GPU-enabled JAX using the official JAX installation matrix:
+https://docs.jax.dev/en/latest/installation.html
 
 ```bash
 python -c "import jax; print(jax.default_backend()); print(jax.devices())"

@@ -58,9 +58,19 @@ def test_plain_install_includes_plotting_and_qi_dependencies() -> None:
     project_dependencies = set(data["project"]["dependencies"])
     optional_dependencies = data.get("project", {}).get("optional-dependencies", {})
 
-    assert "matplotlib" in project_dependencies
+    assert "matplotlib>=3.8" in project_dependencies
     assert "booz_xform_jax>=0.1.1" in project_dependencies
+    assert "packaging>=24.2" in project_dependencies
+    assert "numpy>=1.26,<3" in project_dependencies
     assert "plots" not in optional_dependencies
     assert "plot" not in optional_dependencies
     assert "qi" not in optional_dependencies
     assert "booz" not in optional_dependencies
+
+
+def test_build_system_declares_setuptools_license_validation_dependency() -> None:
+    data = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    build_requires = set(data["build-system"]["requires"])
+
+    assert "setuptools>=77" in build_requires
+    assert "packaging>=24.2" in build_requires

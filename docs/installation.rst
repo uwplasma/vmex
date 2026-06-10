@@ -16,6 +16,9 @@ From PyPI
 
 ``vmec-jax`` is available on `PyPI <https://pypi.org/project/vmec-jax/>`_::
 
+  python -m venv .venv
+  source .venv/bin/activate
+  python -m pip install -U pip setuptools wheel packaging
   python -m pip install vmec-jax
 
 PyPI can lag repository tags.  Check the package-index version before pinning or
@@ -24,6 +27,21 @@ advertising an exact release.
 The plain install includes plotting support and the differentiable
 ``booz_xform_jax`` dependency used by the QI optimization examples.  There is
 no separate plotting or QI extra.
+
+Use ``python -m pip`` from the active environment rather than a bare ``pip``.
+This prevents the common failure mode where Homebrew/system Python packages,
+user-site packages, and the active interpreter are mixed.  If an install or
+backend import fails, run::
+
+  vmec --doctor
+
+and include that report when asking for help.
+
+GPU-enabled JAX is intentionally not forced by ``vmec-jax`` because the correct
+wheel depends on platform, CUDA/ROCm version, and driver support.  Install the
+CPU package above first, or install/upgrade JAX for your accelerator using the
+official JAX installation matrix:
+https://docs.jax.dev/en/latest/installation.html.
 
 From conda-forge
 ----------------
@@ -47,7 +65,7 @@ From source
 
 From the repo root (non-editable install)::
 
-  python -m pip install -U pip
+  python -m pip install -U pip setuptools wheel packaging
   python -m pip install .
 
 VMEC relies heavily on float64. JAX defaults to float32 unless x64 is enabled.
@@ -57,6 +75,7 @@ We recommend setting::
 
 Editable install (recommended for development)::
 
+  python -m pip install -U pip setuptools wheel packaging
   python -m pip install -e .
 
 Optional validation assets

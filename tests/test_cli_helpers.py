@@ -54,8 +54,29 @@ def test_cli_help_uses_vmec_as_canonical_command() -> None:
     help_text = parser.format_help()
 
     assert help_text.startswith("usage: vmec")
+    assert "vmec --doctor" in help_text
     assert "vmec --test" in help_text
     assert "Compatibility aliases: vmec_jax, vmec-jax, xvmec_jax." in help_text
+
+
+def test_cli_doctor_dispatches_without_solver(monkeypatch, capsys) -> None:
+    calls = []
+
+    def fake_doctor_main() -> int:
+        calls.append("doctor")
+        print("doctor report")
+        return 0
+
+    monkeypatch.setitem(sys.modules, "vmec_jax.doctor", SimpleNamespace(main=fake_doctor_main))
+
+    assert cli.main(["--doctor"]) == 0
+    assert calls == ["doctor"]
+    assert "doctor report" in capsys.readouterr().out
+
+
+def test_cli_doctor_rejects_input_path(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit):
+        cli.main(["--doctor", str(tmp_path / "input.case")])
 
 
 def test_cli_wout_io_warmup_is_opt_in(monkeypatch) -> None:

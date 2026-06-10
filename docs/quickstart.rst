@@ -3,16 +3,22 @@ Quickstart
 
 Install directly from PyPI::
 
-  pip install vmec-jax
+  python -m venv .venv
+  source .venv/bin/activate
+  python -m pip install -U pip setuptools wheel packaging
+  python -m pip install vmec-jax
 
 Run the bundled CLI test
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 The fastest first check after a PyPI install is::
 
+  vmec --doctor
   vmec --test
 
-This does not require a source checkout.  It copies the packaged
+``vmec --doctor`` prints the active Python executable, pip location, package
+versions, and JAX backend.  ``vmec --test`` does not require a source checkout.
+It copies the packaged
 ``input.nfp4_QH_warm_start`` into ``vmec_jax_test/``, runs the fixed-boundary
 solver with ``FTOL_ARRAY = 1e-12`` for a faster first check, writes
 ``wout_nfp4_QH_warm_start.nc``, plots the WOUT file into
@@ -39,6 +45,7 @@ and VMEC2000-style per-iteration **screen** output (FSQR/FSQZ/FSQL, RAX, DELT, W
 
   python -m venv .venv
   source .venv/bin/activate
+  python -m pip install -U pip setuptools wheel packaging
   python -m pip install -e .
   python examples/showcase_axisym_input_to_wout.py --suite
 
