@@ -211,7 +211,7 @@ def test_readme_renderer_cases_use_only_minimal_public_seeds() -> None:
     assert all("input.QI_stel_seed_3127" not in str(case.input_file) for case in mod.CASES)
 
 
-def test_nfp3_case_catalog_uses_current_minimal_aspect5_policy_metadata() -> None:
+def test_nfp3_case_catalog_uses_current_minimal_aspect6_policy_metadata() -> None:
     cases_mod = _load_cases_module()
 
     case = cases_mod.QI_CASES["nfp3_qi"]

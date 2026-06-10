@@ -414,7 +414,7 @@ def test_minimal_seed_showcase_dispatches_qi_to_staged_runner(tmp_path: Path, mo
     assert config.reference_lambdas[-1] == pytest.approx(1.005)
     assert config.max_nfev == 4
     assert config.continuation_nfev == 3
-    assert config.target_aspect == pytest.approx(5.0)
+    assert config.target_aspect == pytest.approx(generator.QI_SHOWCASE_TARGET_ASPECT)
     assert config.inner_max_iter == 11
     assert config.trial_ftol == pytest.approx(2.0e-8)
     assert generator.sweep.PROBLEM_CONFIGS == original_configs

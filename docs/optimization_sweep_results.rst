@@ -33,8 +33,8 @@ The split between README and docs is deliberate:
 
 - ``README.md`` shows the current reviewed NFP coverage compactly with figures
   only: the aspect-5, ``max_mode=5`` common-minimal QA/QH/QP GPU state panel
-  plus the case-gated QI NFP=1/2/3/4 state panel.  Numeric rows live below.
-  The README does not claim missing uniform aspect-5 common-minimal QI rows.
+  plus the case-gated aspect-6 QI NFP=1/2/3/4 state panel.  Numeric rows live below.
+  The README does not claim missing uniform aspect-6 common-minimal QI rows.
 - This page is the intended publication home for complete sweeps.  A complete
   publication should represent every CPU/GPU, continuation/direct, ESS on/off,
   QI preseed/no-preseed, ``max_mode=1..5`` reviewed row through downloadable
@@ -278,11 +278,11 @@ the checked-in snapshot.  Do not cite a full ``max_mode>=4`` CPU/GPU matrix unti
 the corresponding CSV/JSON rows and publication figures are present under
 ``docs/_static/figures``.
 
-The historical compact figure renderer filters QI rows against the same
-aspect-5 target as QA/QH/QP.  The standalone ``QI_optimization.py``
+The historical compact figure renderer filtered QI rows against the older
+aspect-5 target.  The current minimal-seed QI README lane uses aspect 6; other
 case-coverage lanes may still use case-specific aspect targets when mirror
-ratio or far-seed basin capture is the experiment; those rows are documented
-separately and are not mixed into the README figure snapshot.
+ratio or far-seed basin capture is the experiment, and those rows are documented
+separately.
 
 The constrained QI study has one extra axis: whether the QI solve starts from a
 same-mode QP preseed.  The production CLI default is ``--qi-qp-preseed off``;
@@ -421,7 +421,7 @@ as historical aspect-6/mode-3 comparison artifacts.  The active README no
 longer uses them as the primary optimization evidence; it uses the refreshed
 common-minimal QA/QH/QP state panel and the reviewed QI NFP case panel.
 When replacing these historical panels, select rows from the reviewed matrix
-and filter against the common aspect-5 target.  The selected QI row should be
+and filter QI rows against the current aspect-6 target.  The selected QI row should be
 chosen with the legacy branch diagnostic, mirror-ratio, elongation, iota, and
 aspect-ratio gates used as promotion evidence rather than as exact equality
 constraints; small numerical slack is expected when independent Boozer
@@ -703,7 +703,7 @@ The checked-in target-6 constrained-QI artifact is an archived partial status
 snapshot, not the promoted QI result.  At the moment it contains the bounded
 partial continuation row annotated from ``stage_checkpoint.json`` before full
 QI diagnostics were available.  It is a status artifact and must not be
-promoted as current aspect-5 evidence.  The README best QI row should be
+promoted as current aspect-6 evidence.  The README best QI row should be
 replaced only after the full constrained CPU/GPU matrix is rerun and passes the
 same QI, mirror, elongation, iota, and aspect gates.
 

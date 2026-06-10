@@ -76,7 +76,7 @@ def test_qi_staged_runner_builds_external_input_cli_and_environment(tmp_path: Pa
     assert "--continuation-nfev" in args and "4" in args
     assert "--inner-max-iter" in args and "21" in args
     assert "--trial-ftol" in args and "2e-08" in args
-    assert "--target-aspect" in args and "5.0" in args
+    assert "--target-aspect" in args and "6.0" in args
     assert "--target-abs-iota-min" in args and "0.41" in args
     assert "--max-mirror-ratio" in args and "0.3" in args
     assert "--max-elongation" in args and "8.2" in args
@@ -103,6 +103,7 @@ def test_qi_staged_runner_builds_external_input_cli_and_environment(tmp_path: Pa
     reference = json.loads(reference_path.read_text())
     assert reference["reference_input"].endswith("input.nfp2_QI")
     assert reference["max_mode"] == 3
+    assert reference["target_aspect"] == pytest.approx(6.0)
     assert reference["lambdas"] == pytest.approx([0.99, 0.995, 1.0, 1.005, 1.01])
     assert reference["accept_as_baseline"] is True
 
