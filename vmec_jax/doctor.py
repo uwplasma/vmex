@@ -109,8 +109,10 @@ def collect_report() -> DoctorReport:
     warnings: list[str] = []
     if versions["setuptools"] == "not installed":
         warnings.append("setuptools is not installed; source/editable installs need it.")
-    if not _version_at_least(versions["packaging"], "24.2"):
-        warnings.append("packaging>=24.2 is required by setuptools>=77 license validation.")
+    if versions["packaging"] == "not installed":
+        warnings.append("packaging is not installed; source/editable installs may need it.")
+    elif not _version_at_least(versions["packaging"], "24.2"):
+        warnings.append("packaging may be too old for current setuptools license validation.")
     if versions["pip"] == "not installed":
         warnings.append("pip is not installed in this interpreter.")
     if user_site_on_path and not in_virtualenv and conda_prefix is None:
@@ -187,9 +189,8 @@ def format_report(report: DoctorReport) -> str:
             [
                 "",
                 "Recommended clean install:",
-                "  python -m venv .venv",
-                "  source .venv/bin/activate",
-                "  python -m pip install -U pip setuptools wheel packaging",
+                "  pip install vmec-jax",
+                "  # If pip targets a different Python, use:",
                 "  python -m pip install vmec-jax",
             ]
         )

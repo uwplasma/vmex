@@ -4486,7 +4486,7 @@ def read_wout(path: str | Path) -> WoutData:
     try:
         import netCDF4  # type: ignore
     except Exception as e:  # pragma: no cover
-        raise ImportError("netCDF4 is required to read wout files (pip install -e .[netcdf])") from e
+        raise ImportError("netCDF4 is required to read wout files (pip install vmec-jax)") from e
 
     with netCDF4.Dataset(path) as ds:
         ns, mpol, ntor, nfp, lasym, signgs = _read_wout_scalar_metadata(ds.variables, path=path)
@@ -4696,7 +4696,7 @@ def write_wout(path: str | Path, wout: WoutData, *, overwrite: bool = False) -> 
     try:
         import netCDF4  # type: ignore
     except Exception as e:  # pragma: no cover
-        raise ImportError("netCDF4 is required to write wout files (pip install -e .[netcdf])") from e
+        raise ImportError("netCDF4 is required to write wout files (pip install vmec-jax)") from e
 
     # Dimensions.
     ns = int(wout.ns)

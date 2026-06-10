@@ -260,7 +260,7 @@ extra regularization term.  The extra terms are imported from
 users can change weights or add terms such as magnetic-well depth by appending
 another residual block in the same section.  QI examples use
 ``booz_xform_jax``, which is installed by the plain ``vmec-jax`` package and by
-``python -m pip install .`` from a source checkout.
+``pip install .`` from a source checkout.
 
 Sweep Reproduction
 ------------------

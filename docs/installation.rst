@@ -16,10 +16,7 @@ From PyPI
 
 ``vmec-jax`` is available on `PyPI <https://pypi.org/project/vmec-jax/>`_::
 
-  python -m venv .venv
-  source .venv/bin/activate
-  python -m pip install -U pip setuptools wheel packaging
-  python -m pip install vmec-jax
+  pip install vmec-jax
 
 PyPI can lag repository tags.  Check the package-index version before pinning or
 advertising an exact release.
@@ -28,10 +25,10 @@ The plain install includes plotting support and the differentiable
 ``booz_xform_jax`` dependency used by the QI optimization examples.  There is
 no separate plotting or QI extra.
 
-Use ``python -m pip`` from the active environment rather than a bare ``pip``.
-This prevents the common failure mode where Homebrew/system Python packages,
-user-site packages, and the active interpreter are mixed.  If an install or
-backend import fails, run::
+For most users, bare ``pip`` is the shortest install path.  If it does not
+install into the Python you intend to use, check that ``pip --version`` and
+``python -m pip --version`` agree; if they do not, retry with
+``python -m pip install vmec-jax``.  If an install or backend import fails, run::
 
   vmec --doctor
 
@@ -43,25 +40,21 @@ Troubleshooting mixed Python environments
 If an editable/source install fails with an error like::
 
   ImportError: Cannot import `packaging.licenses`.
-  Setuptools>=77.0.0 requires "packaging>=24.2" to work properly.
 
 do not start by uninstalling global ``setuptools`` or ``packaging`` packages.
-That usually makes a Homebrew/system Python environment more inconsistent.  The
-safe beginner path is to create a fresh environment and install from inside it::
+That usually makes a Homebrew/system Python environment more inconsistent.  First
+check that ``pip --version`` and ``python -m pip --version`` point to the same
+Python.  Then try::
 
-  python -m venv .venv
-  source .venv/bin/activate
-  python -m pip install -U pip setuptools wheel packaging
   python -m pip install vmec-jax
   vmec --doctor
   vmec --test
 
 For a source checkout, replace the package install line with::
 
-  python -m pip install -e .
+  pip install -e .
 
-The important checks are that ``python -m pip --version`` points inside the same
-environment as ``python -c "import sys; print(sys.executable)"`` and that
+The important checks are that ``pip`` agrees with ``python -m pip`` and that
 ``vmec --doctor`` does not report a user-site/Homebrew prefix mix.
 
 GPU-enabled JAX is intentionally not forced by ``vmec-jax`` because the correct
@@ -92,8 +85,7 @@ From source
 
 From the repo root (non-editable install)::
 
-  python -m pip install -U pip setuptools wheel packaging
-  python -m pip install .
+  pip install .
 
 VMEC relies heavily on float64. JAX defaults to float32 unless x64 is enabled.
 We recommend setting::
@@ -102,8 +94,7 @@ We recommend setting::
 
 Editable install (recommended for development)::
 
-  python -m pip install -U pip setuptools wheel packaging
-  python -m pip install -e .
+  pip install -e .
 
 Optional validation assets
 --------------------------
@@ -126,7 +117,7 @@ Build docs locally
 
 Install doc dependencies::
 
-  python -m pip install ".[docs]"
+  pip install ".[docs]"
 
 Then build docs::
 
