@@ -25,12 +25,9 @@ python -m pip install -U pip setuptools wheel packaging
 python -m pip install vmec-jax
 ```
 
-The plain package includes plotting support (`matplotlib`) and the differentiable
-Boozer transform dependency (`booz_xform_jax`), so no separate extra is needed.
-Use `python -m pip` from the active environment rather than a bare `pip`; this
-avoids mixing Homebrew/system Python packages with user-site packages.
-
-From conda-forge:
+The plain package includes plotting support and `booz_xform_jax`; no separate
+extra is needed. Prefer `python -m pip` from the active environment over bare
+`pip` to avoid mixing Homebrew/system and user-site packages.
 
 ```bash
 pixi add vmec-jax
@@ -46,8 +43,8 @@ python -m pip install -U pip setuptools wheel packaging
 python -m pip install -e .
 ```
 
-Generated WOUT fixtures and large optional validation assets stay out of git;
-use `python tools/fetch_assets.py --list` to inspect released reference bundles.
+Large optional validation assets stay out of git; inspect released bundles with
+`python tools/fetch_assets.py --list`.
 
 ## Quick Start
 
@@ -58,13 +55,10 @@ vmec --doctor
 vmec --test
 ```
 
-`vmec --doctor` prints Python, pip, package, and JAX backend diagnostics. Then
-`vmec --test` copies the packaged `input.nfp4_QH_warm_start` into
-`vmec_jax_test/`, runs the solver with `FTOL_ARRAY = 1e-12`, writes
-`wout_nfp4_QH_warm_start.nc`, plots into `vmec_jax_test/figures/`, and prints the
-equivalent manual commands.
-
-The canonical installed executable is `vmec`; `vmec_jax`, `vmec-jax`, and `xvmec_jax` remain compatibility aliases.
+`vmec --doctor` prints Python, pip, package, and JAX backend diagnostics.
+`vmec --test` copies `input.nfp4_QH_warm_start`, runs with `FTOL_ARRAY = 1e-12`,
+writes WOUT and plots under `vmec_jax_test/`, and prints equivalent manual
+commands. The canonical executable is `vmec`; old aliases remain supported.
 
 To run the same workflow manually with an input downloaded from the repository:
 
@@ -73,15 +67,13 @@ curl -L -O https://raw.githubusercontent.com/uwplasma/vmec_jax/main/examples/dat
 vmec input.nfp4_QH_warm_start
 ```
 
-Plot the `wout_*.nc` file produced by that run:
-
 ```bash
 vmec --plot wout_nfp4_QH_warm_start.nc
 vmec --plot wout_nfp4_QH_warm_start.nc --outdir figures/
 ```
 
-Run Boozer coordinates with the bundled `booz_xform_jax` dependency. By default
-`vmec --booz` uses `mbooz = 32`, `nbooz = 32`, and all VMEC surfaces:
+Run Boozer coordinates with bundled `booz_xform_jax`; by default `--booz` uses
+`mbooz = 32`, `nbooz = 32`, and all VMEC surfaces:
 
 ```bash
 vmec --booz input.nfp4_QH_warm_start
@@ -89,9 +81,6 @@ vmec --booz --plot input.nfp4_QH_warm_start
 vmec --booz wout_nfp4_QH_warm_start.nc
 vmec --plot boozmn_nfp4_QH_warm_start.nc
 ```
-
-`--booz --plot` writes the usual WOUT, Boozer `boozmn_*.nc`, and
-Boozer-coordinate `|B|` contour and spectrum plots.
 
 Use the Python API:
 
