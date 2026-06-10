@@ -1393,8 +1393,22 @@ def _build_dynamic_replay_payload(
         "zero_m1",
         *_DYNAMIC_REPLAY_SCALAR_TRACE_KEYS,
     ]
+    forced_varying_optional_keys = {
+        "constraint_precond_active",
+        "constraint_tcon_active",
+    }
+    for key in forced_varying_optional_keys:
+        present = [trace.get(key, None) is not None for trace in step_traces]
+        if all(present):
+            varying_keys.append(key)
+        elif any(present):
+            raise ValueError(
+                f"Dynamic replay requires {key} to be present on every active trace or none."
+            )
     for optional_key in _OPTIONAL_REPLAY_STEP_TRACE_KEYS:
         optional_present = [trace.get(optional_key, None) is not None for trace in step_traces]
+        if optional_key in forced_varying_optional_keys:
+            continue
         if optional_key in constant_candidates:
             continue
         if all(optional_present):
@@ -1404,6 +1418,8 @@ def _build_dynamic_replay_payload(
                 f"Dynamic replay requires {optional_key} to be present on every active trace or none."
             )
     for key in constant_candidates:
+        if key in forced_varying_optional_keys:
+            continue
         present = [trace.get(key, None) is not None for trace in step_traces]
         if not any(present):
             continue
@@ -2135,8 +2151,8 @@ def _checkpoint_tape_dynamic_basepoint_scan_runner(*, static, stacked, stacked_b
         return cached
     build_start = time.perf_counter() if diagnostics_enabled else None
 
-    def _step_scan(carry_tangents, inputs):
-        carry_base, trace = inputs
+    def _step_scan(pair, trace):
+        carry_base, carry_tangents = pair
         active = jnp.asarray(trace["active"], dtype=bool) if "active" in trace else jnp.asarray(True, dtype=bool)
 
         def _step(carry):
@@ -2156,19 +2172,21 @@ def _checkpoint_tape_dynamic_basepoint_scan_runner(*, static, stacked, stacked_b
                 ),
             )
 
-        def _advance(carry_tangents_in):
-            # Linearize once at the current base carry, then apply the linear map
-            # to all tangent columns. The previous vmap(jvp(...)) formulation
-            # repeated the primal linearization work per column and was much
-            # heavier on converged QA runs.
-            _, linear_step = jax.linearize(_step, carry_base)
-            return jax.vmap(linear_step)(carry_tangents_in)
+        def _advance(pair_in):
+            # Propagate the base carry inside the scan instead of linearizing at
+            # the saved host carry for each step.  Saved carries can differ from
+            # replayed carries in auxiliary cache slots, while the accepted-state
+            # tangent must follow the replayed branch exactly.
+            carry_base_in, carry_tangents_in = pair_in
+            carry_base_out, linear_step = jax.linearize(_step, carry_base_in)
+            return carry_base_out, jax.vmap(linear_step)(carry_tangents_in)
 
-        step_tangents = jax.lax.cond(active, _advance, lambda carry_tangents_in: carry_tangents_in, carry_tangents)
-        return step_tangents, None
+        pair = jax.lax.cond(active, _advance, lambda pair_in: pair_in, pair)
+        return pair, None
 
     def _scan_from_carry(carry_tangents0, stacked_base_carries_in, stacked_traces_in):
-        carry_tangents, _ = jax.lax.scan(_step_scan, carry_tangents0, (stacked_base_carries_in, stacked_traces_in))
+        carry0 = jax.tree_util.tree_map(lambda x: x[0], stacked_base_carries_in)
+        (_carry_base, carry_tangents), _ = jax.lax.scan(_step_scan, (carry0, carry_tangents0), stacked_traces_in)
         return carry_tangents
 
     @jax.jit

@@ -16850,3 +16850,83 @@ Completion:
   promoted.
 - QI optimizer/JVP correctness for minimal-seed cleanup: 97%; stepwise replay
   JVP diagnostics are now available for the next localization pass.
+
+### 2026-06-10 Dynamic Basepoint Replay Constraint-Cache Fix
+
+Steps taken:
+
+1. Reproduced the remaining production QI tangent mismatch on ``office`` with
+   the five-step minimal-seed QI diagnostic.
+2. Added compact tape/path diagnostics to
+   ``tools/diagnostics/qi_optimizer_jvp_fd_compare.py`` so reports include
+   replay path counters, JVP-only tape payload flags, stacked trace keys, static
+   constraint summaries, compact primal replay checks, and optimizer profile
+   counters.
+3. Localized the production mismatch to the compact ``dynamic_basepoint`` replay
+   payload: full host traces replayed primals to machine precision and matched
+   central FD, but compact stacked traces diverged at step 2.
+4. Found the concrete payload bug: ``constraint_precond_active`` and
+   ``constraint_tcon_active`` were hoisted as static ``False`` even though later
+   steps activate the constraint cache. This zeroed the constraint cache in the
+   compact replay path.
+5. Forced those active flags to remain per-step dynamic stacked keys whenever
+   present, and changed the basepoint replay scan to propagate the primal carry
+   inside ``lax.scan`` before applying the linearized tangent map.
+6. Added a regression test that verifies changing constraint-active flags remain
+   stacked dynamic inputs.
+
+Results obtained:
+
+1. Remote CUDA diagnostic before the fix:
+   production state-tangent relative errors were ``5.96e-9`` at 1 step,
+   ``2.60e-3`` at 2 steps, and ``3.12e-2`` at 5 steps, while direct stepwise
+   replay stayed at ``~8e-9``.
+2. After forcing the active flags dynamic, compact stacked replay primals match
+   full host traces to ``~1e-14`` through 5 steps.
+3. Production state-tangent relative errors now match the direct stepwise
+   central-FD gate: ``5.96e-9`` at 1 step, ``7.80e-9`` at 2 steps, and
+   ``8.09e-9`` at 5 steps.
+4. Local checks passed:
+   ``ruff``/``py_compile`` on touched files and
+   ``tests/test_discrete_adjoint_chunking.py tests/test_discrete_adjoint_wave6_coverage.py tests/test_discrete_adjoint_qh.py``.
+
+Best next steps:
+
+1. Commit and push this replay fix, then monitor GitHub Actions.
+2. Promote this QI same-branch accepted-state tangent gate into a persistent
+   validation artifact after CI is green.
+3. Resume QI minimal-seed README artifact regeneration now that the production
+   state tangent path matches FD for the tested branch.
+4. Keep arbitrary adaptive host-branch differentiation unclaimed until the
+   fingerprint-gated adaptive-branch AD-vs-FD gate exists.
+
+Need from user:
+
+Install-policy decisions remain:
+
+1. Keep dependency lower bounds only, or publish a stricter lock/constraints
+   file for reproducible research installs.
+2. Add official conda/pixi beginner environment files, or keep PyPI/venv as the
+   primary documented path with conda-forge as an alternative.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999998%; branch-local
+  production replay state tangents now pass the five-step same-branch QI
+  central-FD gate, while arbitrary adaptive host-branch differentiation remains
+  conservative/unclaimed.
+- VMEC parity and physics gates: 98.9%.
+- Single-stage coil-only optimization: 99.0%.
+- Robust coil perturbation optimization: deferred, 70%.
+- CPU/GPU performance: 99.4%; compact dynamic basepoint replay is now both
+  correct for the tested cache-changing branch and still uses the fast stacked
+  path.
+- CI/runtime/coverage hygiene: 100% locally for touched shards; awaiting
+  GitHub Actions for the pushed commits.
+- Docs/release hygiene: 99.97%; install docs are hardened, QI artifact
+  promotion remains blocked until refreshed with the corrected tangent path.
+- QI minimal-seed README artifact regeneration: 50% artifact-complete, 0%
+  promoted.
+- QI optimizer/JVP correctness for minimal-seed cleanup: 99%; the prior
+  multi-step accepted-state tangent blocker is fixed for the tested branch.

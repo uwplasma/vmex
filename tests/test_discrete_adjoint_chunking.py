@@ -249,6 +249,38 @@ def test_dynamic_replay_payload_passes_scalar_controls_as_trace_inputs(monkeypat
     assert not bool(np.asarray(stacked["active"])[-1])
 
 
+def test_dynamic_replay_payload_keeps_constraint_active_flags_dynamic(monkeypatch):
+    monkeypatch.setenv("VMEC_JAX_DYNAMIC_REPLAY_BUCKET", "2")
+    diag = (np.asarray([1.0]), np.asarray([2.0]))
+    traces = (
+        _fake_supported_dynamic_trace(
+            constraint_tcon0=2.0,
+            constraint_precond_diag=diag,
+            constraint_tcon=np.asarray([0.0]),
+            constraint_precond_active=np.asarray(False),
+            constraint_tcon_active=np.asarray(False),
+        ),
+        _fake_supported_dynamic_trace(
+            constraint_tcon0=2.0,
+            constraint_precond_diag=diag,
+            constraint_tcon=np.asarray([3.0]),
+            constraint_precond_active=np.asarray(True),
+            constraint_tcon_active=np.asarray(True),
+        ),
+    )
+    static_flags = da._static_flags_from_replay_step_traces(traces)
+
+    stacked, dynamic_flags, _initial_carry, _base_carries = da._build_dynamic_replay_payload(
+        traces,
+        static_flags,
+    )
+
+    for key in ("constraint_precond_active", "constraint_tcon_active"):
+        assert key in stacked
+        assert key not in dynamic_flags
+        np.testing.assert_array_equal(np.asarray(stacked[key]), np.asarray([False, True]))
+
+
 def test_dynamic_replay_payload_signature_reuses_scalar_value_changes(monkeypatch):
     monkeypatch.setenv("VMEC_JAX_DYNAMIC_REPLAY_BUCKET", "4")
     traces_a = (_fake_dynamic_trace(lambda_update_scale=0.5),)

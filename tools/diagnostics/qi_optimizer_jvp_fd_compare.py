@@ -143,6 +143,67 @@ def _packed_block_report(layout, lhs, rhs) -> dict[str, dict[str, float]]:
     return report
 
 
+def _tape_payload_report(tape) -> dict[str, object]:
+    """Summarize an exact replay tape without serializing large arrays."""
+
+    step_traces = tuple(getattr(tape, "step_traces", ()) or ())
+    first_keys = sorted(step_traces[0].keys()) if step_traces else []
+    explicit_cache_controls = any(
+        ("constraint_cache_update" in trace) or ("precond_cache_update" in trace)
+        for trace in step_traces
+    )
+    stacked_step_traces = getattr(tape, "stacked_step_traces", None)
+    static_flags = getattr(tape, "step_trace_static_flags", None)
+    dynamic_base_carries_stacked = getattr(tape, "dynamic_base_carries_stacked", None)
+    dynamic_initial_carry = getattr(tape, "dynamic_initial_carry", None)
+    diagnostics = dict(getattr(tape, "diagnostics", {}) or {})
+    timing = diagnostics.get("timing", {})
+    if isinstance(timing, dict):
+        diagnostics["timing"] = {
+            str(key): float(value)
+            for key, value in timing.items()
+            if str(key).startswith("tape_") or str(key).startswith("solve_")
+        }
+    return {
+        "jvp_only": bool(getattr(tape, "jvp_only", False)),
+        "step_trace_count": int(len(step_traces)),
+        "first_step_trace_keys": first_keys,
+        "stacked_step_trace_keys": sorted(stacked_step_traces.keys()) if isinstance(stacked_step_traces, dict) else [],
+        "step_trace_static_flag_keys": sorted(static_flags.keys()) if isinstance(static_flags, dict) else [],
+        "constraint_static_flag_summary": {
+            str(key): {
+                "shape": list(np.shape(value)),
+                "norm": float(np.linalg.norm(np.asarray(value, dtype=float))),
+            }
+            for key, value in (static_flags.items() if isinstance(static_flags, dict) else ())
+            if str(key).startswith("constraint_")
+        },
+        "has_explicit_cache_controls": bool(explicit_cache_controls),
+        "has_stacked_step_traces": stacked_step_traces is not None,
+        "has_dynamic_base_carries_stacked": dynamic_base_carries_stacked is not None,
+        "has_dynamic_initial_carry": dynamic_initial_carry is not None,
+        "dynamic_initial_carry_len": int(len(dynamic_initial_carry or ())),
+        "compact_diagnostics": diagnostics,
+    }
+
+
+def _optimizer_profile_report(optimizer, *, prefix: str = "") -> dict[str, object]:
+    """Return exact-tape/JVP profile entries relevant to this diagnostic."""
+
+    profile = optimizer._profile_dump()
+    if not prefix:
+        return profile
+    return {
+        key: value
+        for key, value in profile.items()
+        if key.startswith(prefix)
+        or "jvp" in key
+        or "replay" in key
+        or "tape" in key
+        or "jacobian" in key
+    }
+
+
 def _trace_control_fd_report(base_traces, plus_traces, minus_traces, eps: float) -> list[dict[str, object]]:
     """Return per-step central-FD diagnostics for recorded controller controls."""
 
@@ -499,6 +560,64 @@ def _dynamic_replay_base_report(base_traces, static) -> list[dict[str, object]]:
     return report
 
 
+def _dynamic_stacked_replay_base_report(tape, base_traces, static) -> list[dict[str, object]]:
+    """Compare compact stacked dynamic replay primals against recorded traces."""
+
+    from vmec_jax.discrete_adjoint import (
+        _packed_dynamic_replay_step_from_carry,
+        _trace_preconditioner_use_lax_tridi,
+        _trace_preconditioner_use_precomputed_tridi,
+    )
+    from vmec_jax.state import pack_state
+
+    stacked = getattr(tape, "stacked_step_traces", None)
+    static_flags = getattr(tape, "step_trace_static_flags", None)
+    carry = getattr(tape, "dynamic_initial_carry", None)
+    if stacked is None or static_flags is None or carry is None:
+        return []
+    n_steps = min(len(base_traces), int(next(iter(stacked.values())).shape[0]))
+    report: list[dict[str, object]] = []
+    for idx in range(n_steps):
+        trace = {key: value[idx] for key, value in stacked.items()}
+        active = bool(np.asarray(trace.get("active", True)))
+        if active:
+            carry = _packed_dynamic_replay_step_from_carry(
+                carry,
+                trace,
+                static=static,
+                static_flags=static_flags,
+                preconditioner_jmax_override=int(static_flags["precond_jmax"]),
+                preconditioner_use_precomputed_tridi=_trace_preconditioner_use_precomputed_tridi(
+                    trace,
+                    static_flags,
+                ),
+                preconditioner_use_lax_tridi=_trace_preconditioner_use_lax_tridi(
+                    trace,
+                    static_flags,
+                ),
+            )
+        recorded_state = np.asarray(pack_state(base_traces[idx]["state_post"]), dtype=float)
+        replay_state = np.asarray(carry[0], dtype=float)
+        diff = replay_state - recorded_state
+        replay_norm = float(np.linalg.norm(replay_state))
+        recorded_norm = float(np.linalg.norm(recorded_state))
+        diff_norm = float(np.linalg.norm(diff))
+        report.append(
+            {
+                "step": int(idx + 1),
+                "active": active,
+                "state_post": {
+                    "replay_norm": replay_norm,
+                    "recorded_norm": recorded_norm,
+                    "diff_norm": diff_norm,
+                    "relative_diff_norm": diff_norm / max(replay_norm, recorded_norm, np.finfo(float).eps),
+                    "max_abs_diff": float(np.max(np.abs(diff))) if diff.size else 0.0,
+                },
+            }
+        )
+    return report
+
+
 def _dynamic_replay_jvp_trace_report(
     base_traces,
     plus_traces,
@@ -762,11 +881,14 @@ def main() -> None:
         }
     if bool(args.state_fd) or bool(args.dynamic_axis_tangent):
         from vmec_jax._compat import jax, jnp
-        from vmec_jax.discrete_adjoint import checkpoint_tape_state_jvp
+        from vmec_jax.discrete_adjoint import checkpoint_tape_state_jvp, replay_scan_cache_diagnostics
         from vmec_jax.init_guess import initial_guess_from_boundary
         from vmec_jax.state import pack_state, unpack_state
 
+        replay_scan_cache_diagnostics(reset=True)
         state0, state_tangents = stage.optimizer.state_tangent_columns_fun(params0)
+        state_tangent_replay_report = replay_scan_cache_diagnostics(reset=True)
+        _state_exact, state_payload = stage.optimizer._solve_exact_with_tape_for_jvp(params0)
         packed0 = jnp.asarray(pack_state(state0), dtype=jnp.float64)
         state_jvp = jnp.asarray(state_tangents[idx], dtype=jnp.float64)
 
@@ -789,6 +911,9 @@ def main() -> None:
             "state_jvp_norm": float(np.linalg.norm(state_jvp_np)),
             "residual_jvp_from_state_jvp_norm": float(np.linalg.norm(jvp_from_state_jvp)),
             "residual_state_jvp_vs_matrix_free_norm": float(np.linalg.norm(jvp_from_state_jvp - jvp)),
+            "state_tangent_replay_diagnostics": state_tangent_replay_report,
+            "state_tangent_tape": _tape_payload_report(state_payload["tape"]),
+            "optimizer_profile_after_state_tangent": _optimizer_profile_report(stage.optimizer, prefix="state_tangent"),
         }
         if bool(args.state_fd):
             state_plus = stage.optimizer._solve_forward(params0 + eps * direction, trial=False)
@@ -906,7 +1031,7 @@ def main() -> None:
     state_fd_iters = _int_list(args.state_fd_iters)
     if state_fd_iters:
         from vmec_jax._compat import jnp
-        from vmec_jax.discrete_adjoint import residual_branch_fingerprint
+        from vmec_jax.discrete_adjoint import replay_scan_cache_diagnostics, residual_branch_fingerprint
         from vmec_jax.solve import solve_fixed_boundary_residual_iter
         from vmec_jax.state import pack_state
 
@@ -934,7 +1059,9 @@ def main() -> None:
             iter_direction = np.zeros_like(iter_params0)
             iter_idx = _spec_index(iter_stage.specs, kind=str(args.kind), m=int(args.m), n=int(args.n))
             iter_direction[iter_idx] = 1.0
+            replay_scan_cache_diagnostics(reset=True)
             iter_state, iter_tangents = iter_stage.optimizer.state_tangent_columns_fun(iter_params0)
+            iter_state_tangent_replay_report = replay_scan_cache_diagnostics(reset=True)
             iter_state_jvp = np.asarray(iter_tangents[iter_idx], dtype=float)
             _iter_exact_state, iter_payload = iter_stage.optimizer._solve_exact_with_tape_for_jvp(iter_params0)
             iter_initial_tangents = iter_stage.optimizer._initial_tangent_columns(
@@ -1065,6 +1192,12 @@ def main() -> None:
                         iter_state_jvp,
                         iter_fd,
                     ),
+                    "state_tangent_replay_diagnostics": iter_state_tangent_replay_report,
+                    "state_tangent_tape": _tape_payload_report(iter_payload["tape"]),
+                    "optimizer_profile_after_state_tangent": _optimizer_profile_report(
+                        iter_stage.optimizer,
+                        prefix="state_tangent",
+                    ),
                     "trace_control_fd": _trace_control_fd_report(
                         base_traces,
                         plus_traces,
@@ -1072,6 +1205,11 @@ def main() -> None:
                         eps,
                     ),
                     "dynamic_replay_base": _dynamic_replay_base_report(
+                        base_traces,
+                        iter_stage.optimizer._static,
+                    ),
+                    "dynamic_stacked_replay_base": _dynamic_stacked_replay_base_report(
+                        iter_payload["tape"],
                         base_traces,
                         iter_stage.optimizer._static,
                     ),
