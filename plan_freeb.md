@@ -16994,3 +16994,47 @@ Completion:
   CI confirmation.
 - QI minimal-seed README artifact regeneration: 50% artifact-complete, 0%
   promoted.
+
+### 2026-06-10 Remote QI Minimal-Seed Artifact Audit
+
+Steps taken:
+
+1. Checked ``ssh office`` and confirmed it is reachable with idle GPUs.
+2. Inspected the existing remote workspace
+   ``/home/rjorge/local/tests/vmec_jax_qi_minimal`` before syncing any
+   artifacts back into ``main``.
+3. Read the diagnostics for the current NFP=1/2/3/4 minimal-seed QI artifact
+   candidates.
+
+Results obtained:
+
+1. The remote workspace contains untracked NFP=1/2/3 minimal artifacts and dirty
+   NFP=4 artifacts, but they are not promotion-ready.
+2. Current final diagnostics are:
+   NFP=1 ``qi_smooth_total=4.96e-3``, aspect ``3.70``, mean iota ``0.412``;
+   NFP=2 ``2.70e-3``, aspect ``3.52``, mean iota ``-0.699``;
+   NFP=3 ``3.07e-3``, aspect ``3.54``, mean iota ``-1.046``;
+   NFP=4 ``2.67e-3``, aspect ``6.01``, mean iota ``-1.287``.
+3. These rows do not satisfy the current public README policy of aspect near
+   6 and QI residual below the tighter promotion threshold, so they were not
+   copied into the local repository.
+
+Best next steps:
+
+1. Re-run QI minimal-seed NFP=1/2/3/4 with an explicit aspect-6 preserving
+   cleanup schedule before reintroducing the README QI panel.
+2. Keep the existing remote artifacts as diagnostics only unless a later audit
+   marks them promotion-grade.
+3. Continue CI monitoring for ``52158a8`` before launching long remote jobs
+   from ``main``.
+
+Need from user:
+
+No immediate action. If the README policy should allow aspect ``~3.5`` for some
+QI rows, that is a physics/communication decision; current plan keeps aspect 6.
+
+Completion:
+
+- QI minimal-seed README artifact regeneration: 50% artifact-complete, 0%
+  promoted; remote diagnostics exist but fail current promotion gates.
+- Docs/release hygiene: 99.98%; no stale QI artifact was promoted.
