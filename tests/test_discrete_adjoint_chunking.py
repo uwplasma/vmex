@@ -1243,10 +1243,12 @@ def test_dynamic_initial_carry_zero_fills_missing_asymmetric_velocities():
 
     carry = da._dynamic_replay_initial_carry(trace)
 
-    assert len(carry) == 15
+    assert len(carry) == 20
     for idx in (5, 6, 9, 10, 13, 14):
         np.testing.assert_allclose(np.asarray(carry[idx]), 0.0)
         assert np.asarray(carry[idx]).shape == np.asarray(carry[3]).shape
+    for idx in range(15, 20):
+        np.testing.assert_allclose(np.asarray(carry[idx]), 0.0)
 
 
 def test_dynamic_safe_dt_from_force_arrays_limits_only_finite_nonzero_forces():

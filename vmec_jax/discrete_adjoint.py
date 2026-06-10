@@ -1243,6 +1243,7 @@ def _looks_array_like(value) -> bool:
 
 
 def _static_flags_from_replay_step_traces(step_traces: tuple[dict[str, Any], ...]):
+    step_traces = tuple(_trace_with_replay_defaults(trace) for trace in step_traces)
     static_flags = {key: step_traces[0][key] for key in _REPLAY_STEP_TRACE_STATIC_KEYS}
     for trace in step_traces[1:]:
         for key, value in static_flags.items():
@@ -1267,9 +1268,19 @@ def _static_flags_from_replay_step_traces(step_traces: tuple[dict[str, Any], ...
     return static_flags
 
 
+def _trace_with_replay_defaults(trace: dict[str, Any]) -> dict[str, Any]:
+    """Return a trace with backward-compatible defaults for replay controls."""
+    out = dict(trace)
+    constraint_update = out.get("constraint_cache_update", False)
+    out.setdefault("constraint_cache_update", constraint_update)
+    out.setdefault("precond_cache_update", constraint_update)
+    return out
+
+
 def _stack_replay_step_traces(step_traces: tuple[dict[str, Any], ...]):
     from ._compat import jax
 
+    step_traces = tuple(_trace_with_replay_defaults(trace) for trace in step_traces)
     optional_keys = _OPTIONAL_REPLAY_STEP_TRACE_KEYS
     optional_present: dict[str, list[bool]] = {
         key: [trace.get(key, None) is not None for trace in step_traces]
@@ -1340,6 +1351,7 @@ def _build_dynamic_replay_payload(
 ):
     from ._compat import jax
 
+    step_traces = tuple(_trace_with_replay_defaults(trace) for trace in step_traces)
     use_device_stack = _backend_is_accelerator(jax.default_backend())
     jax_array_type = getattr(jax, "Array", ())
 
@@ -1504,6 +1516,7 @@ def _restart_carry_tangents(carry_tangents):
 
 
 def _dynamic_replay_initial_carry(trace):
+    trace = _trace_with_replay_defaults(trace)
     packed_state = jnp.asarray(pack_state(trace["state_pre"]))
     dtype = packed_state.dtype
 
@@ -1512,6 +1525,18 @@ def _dynamic_replay_initial_carry(trace):
         if value is None:
             return jnp.zeros_like(jnp.asarray(trace["vRcc_before"], dtype=dtype))
         return jnp.asarray(value, dtype=dtype)
+
+    def _lam_prec_from_trace():
+        value = trace.get("lam_prec", None)
+        if value is None:
+            return jnp.zeros_like(_arr("vLsc_before"))
+        return jnp.asarray(value, dtype=dtype)
+
+    def _precond_mats_from_trace():
+        value = trace.get("precond_mats", None)
+        if value is None:
+            return jnp.zeros_like(_lam_prec_from_trace())
+        return jax.tree_util.tree_map(lambda x: jnp.asarray(x, dtype=dtype), value)
 
     return (
         packed_state,
@@ -1530,8 +1555,8 @@ def _dynamic_replay_initial_carry(trace):
         _arr("vLcc_before"),
         _arr("vLss_before"),
         *_constraint_cache_from_trace(trace, dtype=dtype),
-        jnp.asarray(trace["lam_prec"], dtype=dtype),
-        jax.tree_util.tree_map(lambda x: jnp.asarray(x, dtype=dtype), trace["precond_mats"]),
+        _lam_prec_from_trace(),
+        _precond_mats_from_trace(),
     )
 
 
@@ -1666,6 +1691,8 @@ def _packed_dynamic_replay_step_from_carry(
     preconditioner_use_precomputed_tridi: bool | None = None,
     preconditioner_use_lax_tridi: bool | None = None,
 ):
+    if len(carry) != 20:
+        raise ValueError("dynamic replay requires a stored VMEC layout and complete replay carry")
     (
         packed_state,
         inv_tau,
