@@ -19,15 +19,12 @@ remain in development.
 From PyPI:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -U pip setuptools wheel packaging
-python -m pip install vmec-jax
+pip install vmec-jax
 ```
 
 The plain package includes plotting support and `booz_xform_jax`; no separate
-extra is needed. Prefer `python -m pip` from the active environment over bare
-`pip` to avoid mixing Homebrew/system and user-site packages.
+extra is needed. If bare `pip` does not install into the Python you intend to
+use, retry with `python -m pip install vmec-jax`.
 
 ```bash
 pixi add vmec-jax
@@ -39,8 +36,7 @@ Developer install from source:
 ```bash
 git clone https://github.com/uwplasma/vmec_jax
 cd vmec_jax
-python -m pip install -U pip setuptools wheel packaging
-python -m pip install -e .
+pip install -e .
 ```
 
 Large optional validation assets stay out of git; inspect released bundles with

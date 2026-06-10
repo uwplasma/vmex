@@ -3,10 +3,11 @@ Quickstart
 
 Install directly from PyPI::
 
-  python -m venv .venv
-  source .venv/bin/activate
-  python -m pip install -U pip setuptools wheel packaging
-  python -m pip install vmec-jax
+  pip install vmec-jax
+
+If bare ``pip`` does not install into the Python you intend to use, check that
+``pip --version`` and ``python -m pip --version`` agree; if they do not, retry
+with ``python -m pip install vmec-jax``.
 
 Run the bundled CLI test
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -43,15 +44,12 @@ with the tracked ``mgrid_cth_like_lasym_small.nc`` file in ``examples/data``.
 By default the showcase uses a parity-first single-grid run (``--single-ns 13``)
 and VMEC2000-style per-iteration **screen** output (FSQR/FSQZ/FSQL, RAX, DELT, WMHD)::
 
-  python -m venv .venv
-  source .venv/bin/activate
-  python -m pip install -U pip setuptools wheel packaging
-  python -m pip install -e .
+  pip install -e .
   python examples/showcase_axisym_input_to_wout.py --suite
 
 If you want a release-style non-editable install instead::
 
-  python -m pip install .
+  pip install .
 
 Run the test suite::
 
@@ -78,7 +76,7 @@ The ``vmec_jax``, ``vmec-jax``, and ``xvmec_jax`` command names remain aliases
 for compatibility. If no console command is found or a command raises
 ``ModuleNotFoundError``, install and run via the module entrypoint::
 
-  python -m pip install -e .
+  pip install -e .
   python -m vmec_jax examples/data/input.circular_tokamak
 
 This writes ``wout_circular_tokamak.nc`` next to the input file and prints the

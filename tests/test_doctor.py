@@ -74,15 +74,15 @@ def test_doctor_format_report_shows_recommended_clean_install_for_warnings() -> 
         },
         jax_backend=None,
         jax_devices=(),
-        warnings=("packaging>=24.2 is required by setuptools>=77 license validation.",),
+        warnings=("packaging may be too old for current setuptools license validation.",),
     )
 
     text = format_report(report)
 
     assert "Warnings:" in text
-    assert "packaging>=24.2" in text
+    assert "packaging may be too old" in text
     assert "Recommended clean install:" in text
-    assert "python -m pip install -U pip setuptools wheel packaging" in text
+    assert "pip install vmec-jax" in text
 
 
 def test_doctor_package_version_and_version_helpers_cover_error_paths(monkeypatch) -> None:
@@ -168,7 +168,7 @@ def test_doctor_collect_report_detects_mixed_prefix_and_missing_packages(monkeyp
     assert report.user_site_on_path is True
     assert report.jax_backend is None
     assert any("setuptools is not installed" in warning for warning in report.warnings)
-    assert any("packaging>=24.2" in warning for warning in report.warnings)
+    assert any("packaging may be too old" in warning for warning in report.warnings)
     assert any("pip is not installed" in warning for warning in report.warnings)
     assert any("user-site packages are on sys.path" in warning for warning in report.warnings)
     assert any("pip appears to come from a different prefix" in warning for warning in report.warnings)

@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=77", "wheel", "packaging>=24.2"]
+requires = ["setuptools", "wheel", "packaging"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -22,14 +22,14 @@ classifiers = [
 ]
 
 dependencies = [
-  "numpy>=1.26,<3",
-  "jax>=0.6",
-  "jaxlib>=0.6",
-  "scipy>=1.11",
-  "netCDF4>=1.6",
-  "matplotlib>=3.8",
-  "packaging>=24.2",
-  "booz_xform_jax>=0.1.1",
+  "numpy",
+  "jax",
+  "jaxlib",
+  "scipy",
+  "netCDF4",
+  "matplotlib",
+  "packaging",
+  "booz_xform_jax",
   "tomli; python_version < '3.11'",
 ]
 
