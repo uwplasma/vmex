@@ -452,6 +452,68 @@ def test_qi_staged_runner_preserves_zero_checkpoint_metrics(tmp_path: Path) -> N
     assert metrics["qi_legacy_total"] == pytest.approx(0.0)
 
 
+def test_qi_staged_runner_prefers_completed_stage_over_newer_pending_checkpoint(tmp_path: Path) -> None:
+    runner = _load_runner()
+    out = tmp_path / "out"
+    stage1 = out / "mirror_ramp_01_matrix_free_mirror030_aspect0p35"
+    stage2 = out / "mirror_ramp_02_matrix_free_mirror030_aspect0p75"
+    stage1.mkdir(parents=True)
+    stage2.mkdir(parents=True)
+    completed_checkpoint = {
+        "schema_version": 1,
+        "partial": True,
+        "role": "mirror_ramp",
+        "history": {
+            "objective_final": 1.989388186622862,
+            "qs_final": 1.8673006069830484,
+            "aspect_final": 6.399384783437412,
+            "iota_final": -0.5006416479486586,
+            "nfev": 70,
+            "total_wall_time_s": 2822.126,
+        },
+        "diagnostics": {
+            "qi_seed_gate_passed": True,
+            "qi_engineering_gate_passed": False,
+            "qi_smooth_total": 1.618419772147587e-3,
+            "qi_legacy_total": 3.36274252862054e-4,
+            "qi_mirror_ratio_max": 0.37172890836617173,
+            "qi_max_elongation": 5.053531473933429,
+            "aspect": 6.399384783437412,
+            "mean_iota": -0.5006416479486586,
+        },
+    }
+    pending_checkpoint = {
+        "schema_version": 1,
+        "partial": True,
+        "role": "mirror_ramp_pending",
+        "history": {},
+        "diagnostics": {
+            "qi_seed_gate_passed": False,
+            "qi_engineering_gate_passed": False,
+            "qi_smooth_total": 5.276621385462071e-3,
+            "qi_legacy_total": 2.908884974702892e-3,
+            "qi_mirror_ratio_max": 0.24068553823044567,
+            "qi_max_elongation": 4.496529798672295,
+            "aspect": 8.001941358966262,
+            "mean_iota": -0.44727522386008184,
+        },
+        "promotion": {"stage_pending": True},
+    }
+    (stage1 / "qi_stage_checkpoint.json").write_text(json.dumps(completed_checkpoint))
+    (stage2 / "qi_stage_checkpoint.json").write_text(json.dumps(pending_checkpoint))
+    (out / "stage_checkpoint.json").write_text(json.dumps(pending_checkpoint))
+
+    metrics = runner._stage_checkpoint_partial_metrics(out)
+
+    assert metrics["objective_final"] == pytest.approx(1.989388186622862)
+    assert metrics["qs_final"] == pytest.approx(1.8673006069830484)
+    assert metrics["aspect_final"] == pytest.approx(6.399384783437412)
+    assert metrics["iota_final"] == pytest.approx(-0.5006416479486586)
+    assert metrics["qi_legacy_total"] == pytest.approx(3.36274252862054e-4)
+    assert metrics["qi_mirror_ratio_max"] == pytest.approx(0.37172890836617173)
+    assert metrics["qi_max_elongation"] == pytest.approx(5.053531473933429)
+
+
 def test_qi_staged_runner_falls_back_from_invalid_root_checkpoint(tmp_path: Path) -> None:
     runner = _load_runner()
     out = tmp_path / "out"

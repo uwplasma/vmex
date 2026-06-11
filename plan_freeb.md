@@ -17768,6 +17768,64 @@ Completion:
 - Docs/release hygiene: 100%.
 - QI minimal-seed README artifacts: 67% artifact-complete, 0% promoted.
 
+### 2026-06-11 QI Timeout Checkpoint Selection
+
+Steps taken:
+
+1. Reviewed the NFP=2 office timeout artifacts.  The run completed a useful
+   first mirror-ramp stage, then timed out after writing a newer pending second
+   stage checkpoint.  The staged runner reported the pending checkpoint because
+   it selected by modification time.
+2. Changed ``examples/optimization/qi_staged_runner.py`` so
+   ``_stage_checkpoint_record`` ranks checkpoints by usefulness instead of
+   timestamp: completed stage history, exact diagnostics, and passed seed or
+   engineering gates are preferred over pending/pre-diagnostic checkpoints.
+3. Added a regression test with a completed stage-1 checkpoint and newer
+   pending stage-2/root checkpoints to ensure timeout summaries preserve the
+   completed stage metrics.
+
+Results obtained:
+
+1. Focused lint passed:
+   ``python -m ruff check examples/optimization/qi_staged_runner.py tests/test_qi_staged_runner.py``.
+2. Focused QI staged-runner tests passed:
+   ``JAX_ENABLE_X64=1 python -m pytest -q tests/test_qi_staged_runner.py -q``
+   with 11 passing tests.
+3. Local CI ``optimization-qi`` bucket passed:
+   ``JAX_ENABLE_X64=1 python -m pytest -q $(python tools/diagnostics/ci_core_bucket_args.py optimization-qi) -q``.
+
+Best next steps:
+
+1. Commit and push the QI checkpoint-selection fix.
+2. Re-annotate or regenerate the NFP=2 timeout case if we want dashboards to
+   display the completed stage-1 partial metrics instead of the later pending
+   stage.  This does not promote the case, because mirror remains above the
+   final engineering gate.
+3. Continue the QI minimal-seed lane from a completed working seed rather than
+   a pending stage snapshot.
+4. Keep free-boundary adaptive differentiation claims conservative until a true
+   fingerprint-gated adaptive-branch AD-vs-FD gate exists.
+
+Need from user:
+
+No immediate action.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999999%; arbitrary adaptive
+  branch differentiation remains unclaimed.
+- VMEC parity and physics gates: 99.2%.
+- Single-stage coil-only optimization: 99.5%.
+- Robust coil perturbation optimization: deferred, 70%.
+- CPU/GPU performance: 99.5%; QI high-mode exact tape build remains the main
+  expensive path in the timeout profile.
+- CI/runtime/coverage hygiene: 100% locally for the QI bucket and green on
+  GitHub for the previous main commit.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 75% artifact-complete, 0% promoted; NFP=2
+  has useful partial stage evidence but is still not a final README candidate.
+
 ### 2026-06-11 Branch-Local Gate Contract and QI Test Runtime Fix
 
 Steps taken:

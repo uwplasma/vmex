@@ -472,8 +472,62 @@ def _boundary_reference_partial_metrics(output_dir: Path) -> dict[str, Any]:
     }
 
 
+def _stage_checkpoint_score(path: Path, record: dict[str, Any]) -> tuple[Any, ...]:
+    """Rank QI stage checkpoints by diagnostic usefulness.
+
+    Timeout handling should preserve the best completed stage evidence, not the
+    newest file.  A later stage writes a pending checkpoint before its solve
+    starts, and long runs can time out with that pending checkpoint copied to
+    the root.  Prefer checkpoints with an actual completed stage history and
+    exact diagnostics; use modification time only as a final tie-breaker.
+    """
+
+    history = record.get("history")
+    diagnostics = record.get("diagnostics")
+    promotion = record.get("promotion")
+    history = history if isinstance(history, dict) else {}
+    diagnostics = diagnostics if isinstance(diagnostics, dict) else {}
+    promotion = promotion if isinstance(promotion, dict) else {}
+    role = str(record.get("role", ""))
+
+    has_history_result = any(
+        _finite_float(history.get(key)) is not None
+        for key in ("objective_final", "qs_final", "aspect_final", "iota_final", "total_wall_time_s")
+    ) or _finite_int(history.get("nfev")) is not None
+    has_exact_diagnostics = any(
+        _finite_float(diagnostics.get(key)) is not None
+        for key in (
+            "qi_smooth_total",
+            "qi_legacy_total",
+            "qi_mirror_ratio_max",
+            "qi_max_elongation",
+        )
+    )
+    pending = role.endswith("_pending") or bool(promotion.get("stage_pending", False))
+    pre_diagnostics = role.endswith("_pre_diagnostics") or bool(promotion.get("diagnostics_pending", False))
+    passed_gate = bool(diagnostics.get("qi_engineering_gate_passed", False)) or bool(
+        diagnostics.get("qi_seed_gate_passed", False)
+    )
+    smooth_qi = _first_finite_float(history.get("qs_final"), diagnostics.get("qi_smooth_total"))
+    legacy_qi = _finite_float(diagnostics.get("qi_legacy_total"))
+    mirror = _finite_float(diagnostics.get("qi_mirror_ratio_max"))
+    mtime = path.stat().st_mtime
+
+    return (
+        int(has_history_result),
+        int(has_exact_diagnostics),
+        int(passed_gate),
+        -int(pre_diagnostics),
+        -int(pending),
+        -float("inf") if smooth_qi is None else -float(smooth_qi),
+        -float("inf") if legacy_qi is None else -float(legacy_qi),
+        -float("inf") if mirror is None else -float(mirror),
+        float(mtime),
+    )
+
+
 def _stage_checkpoint_record(output_dir: Path) -> dict[str, Any]:
-    """Return the latest QI stage checkpoint record, if available."""
+    """Return the most useful QI stage checkpoint record, if available."""
 
     output_dir = Path(output_dir)
     root_checkpoint = output_dir / "stage_checkpoint.json"
@@ -486,11 +540,13 @@ def _stage_checkpoint_record(output_dir: Path) -> dict[str, Any]:
         )
         if path.exists()
     }
-    candidates = sorted(candidates, key=lambda path: path.stat().st_mtime, reverse=True)
+    ranked_candidates: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
     for path in candidates:
         record = _read_json(path)
         if record:
-            return record
+            ranked_candidates.append((_stage_checkpoint_score(path, record), record))
+    if ranked_candidates:
+        return max(ranked_candidates, key=lambda item: item[0])[1]
     return {}
 
 
