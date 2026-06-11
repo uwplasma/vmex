@@ -17346,3 +17346,68 @@ Completion:
   README rows are still blocked on successful NFP1/2/3 cleanup artifacts.
 - CI/runtime/coverage hygiene: 100% on the previous commit and focused local
   tests for this change; pending CI after push.
+
+### 2026-06-10 QI Broad-Reference GPU Diagnostics
+
+Steps taken:
+
+1. Confirmed CI success for ``3c0591a`` and ``690ec15``.
+2. Stopped stale same-commit diagnostics that were superseded by the explicit
+   ``--qi-reference-lambdas`` option.
+3. Launched clean ``office`` GPU diagnostics from ``690ec15``:
+   ``qi_nfp2,qi_nfp3`` with broad reference lambdas
+   ``0.5,0.6,0.7,0.8,0.9,0.95,1,1.05``.
+4. Launched a separate NFP=2 ``--qi-method auto_scalar`` diagnostic to test
+   whether scalar cleanup avoids the GPU matrix-free Jacobian failure.
+
+Results obtained:
+
+1. Broad NFP=2 reference scan selected ``lambda=1.0``: aspect ``8.00``,
+   mean iota ``-0.447``, smooth QI ``5.28e-3``, legacy QI ``2.91e-3``,
+   mirror ``0.241``, elongation ``4.50``.  Lower-lambda candidates were closer
+   to aspect 6 but had poor QI and insufficient transform.
+2. The broad NFP=2 matrix-free cleanup failed before any accepted movement:
+   ``array must not contain infs or NaNs``.  Final partial result remained
+   aspect ``8.00`` with legacy QI ``2.90e-3`` and failed the smooth/legacy QI
+   gates.
+3. Broad NFP=3 selected the QI-like low-aspect reference and then failed in the
+   same matrix-free cleanup path with flat history.  Aspect remained ``3.53``
+   rather than moving toward the aspect-6 target.
+4. The profile confirms the relevant performance hotspot for these QI cleanup
+   rows: one NFP=2 exact tape build took about ``20 s`` and the matrix-free
+   linear-operator setup/VJP path took about ``36 s`` before the failed solve.
+5. The ``auto_scalar`` NFP=2 diagnostic is still running on ``office`` under
+   ``/home/rjorge/local/tests/vmec_jax_qi_broad_690ec15_auto_scalar``.
+
+Best next steps:
+
+1. Harvest the ``auto_scalar`` NFP=2 result.  If it accepts aspect/QI-improving
+   steps, switch QI GPU cleanup policy to scalar-first followed by matrix-free
+   refinement.  If it remains flat or times out, keep NFP2/NFP3 README QI rows
+   blocked and target scalar trust step construction/performance.
+2. Add a regression gate for the observed failure mode: QI matrix-free cleanup
+   must return a clean non-promoting failure with partial metrics instead of
+   crashing or silently promoting stale artifacts.
+3. Keep QI minimal-seed README artifacts unpromoted until NFP1/2/3 pass the
+   current aspect/iota/QI/mirror/elongation provenance gates.
+
+Need from user:
+
+No immediate action.  A future policy decision may be needed if aspect 6 is
+non-negotiable for QI NFP2/NFP3 but the known good QI basins remain at aspect
+about 8 and 3.5 respectively.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999998%.
+- VMEC parity and physics gates: 99.0%.
+- Single-stage coil-only optimization: 99.0%.
+- Robust coil perturbation optimization: deferred, 70%.
+- CPU/GPU performance: 99.4% overall, but QI high-mode cleanup exposes a
+  remaining accepted-point tape/JVP/VJP hotspot.
+- CI/runtime/coverage hygiene: 100%; CI is green through ``690ec15``.
+- Docs/release hygiene: 100% for install/docs hygiene; QI README artifact docs
+  remain intentionally blocked.
+- QI minimal-seed README artifacts: 60% artifact-complete, 0% promoted.  NFP=4
+  has previous passing evidence; NFP=1/2/3 remain blocked by cleanup behavior.
