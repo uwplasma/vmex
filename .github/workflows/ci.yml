@@ -72,7 +72,22 @@ jobs:
         env:
           JAX_ENABLE_X64: "1"
         run: |
-          VMEC_JAX_SKIP_PY311_COVERAGE_ONLY=1 pytest -q -n 4 -m "not full and not vmec2000 and not simsopt" --durations=50
+          while true; do sleep 60; echo "::notice::compatibility pytest still running at $(date -u +%H:%M:%S)"; done &
+          heartbeat_pid=$!
+          trap 'kill "$heartbeat_pid" 2>/dev/null || true' EXIT
+          VMEC_JAX_SKIP_PY311_COVERAGE_ONLY=1 pytest -q -n 2 -m "not full and not vmec2000 and not simsopt" \
+            tests/test_compat.py \
+            tests/test_packaging_metadata.py \
+            tests/test_cli_helpers.py \
+            tests/test_doctor.py \
+            tests/test_namelist.py \
+            tests/test_config_edges.py \
+            tests/test_boundary_eval.py \
+            tests/test_quasisymmetry.py \
+            tests/test_quasi_isodynamic.py \
+            tests/test_external_fields_coils_jax.py \
+            tests/test_external_fields_mgrid_jax.py \
+            --durations=50
 
   test-py311-core:
     name: "Fast Tests (py3.11 core coverage: ${{ matrix.bucket }})"
@@ -81,7 +96,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        bucket: [driver-solve-discrete, optimization-qi-freeb, wout-booz-plot-profiles, rest]
+        bucket: [driver-solve-discrete, optimization-qi, freeb-external, wout-booz-plot-profiles, rest]
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -115,6 +130,9 @@ jobs:
           JAX_ENABLE_X64: "1"
           VMEC_JAX_SKIP_PY311_COVERAGE_ONLY: "1"
         run: |
+          while true; do sleep 60; echo "::notice::core coverage pytest still running at $(date -u +%H:%M:%S)"; done &
+          heartbeat_pid=$!
+          trap 'kill "$heartbeat_pid" 2>/dev/null || true' EXIT
           python tools/diagnostics/ci_core_bucket_args.py "${{ matrix.bucket }}" > /tmp/py311-core-args.txt
           xargs pytest -q -n 4 -m "not full and not vmec2000 and not simsopt" --durations=50 --cov=vmec_jax --cov-report= < /tmp/py311-core-args.txt
           cp .coverage coverage.py311-core-${{ matrix.bucket }}
