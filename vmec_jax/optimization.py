@@ -58,6 +58,8 @@ _EXACT_TAPE_BUILD_TIMING_PROFILE_NAMES = (
     ("tape_trace_stack_s", "exact_tape_build_trace_stack"),
 )
 
+_MATRIX_FREE_NONFINITE_RESIDUAL_PENALTY = 1.0e12
+
 
 def _linear_operator_vector_arg(value, *, size: int, name: str) -> np.ndarray:
     arr = np.asarray(value, dtype=float).reshape(-1)
@@ -80,6 +82,52 @@ def _linear_operator_matrix_arg(value, *, rows: int, name: str) -> np.ndarray:
     if int(arr.shape[0]) != rows:
         raise ValueError(f"{name} expected {rows} rows, got {int(arr.shape[0])}.")
     return arr
+
+
+def _finite_linear_operator_output(
+    value,
+    *,
+    profile_add: Callable[[str, float], None] | None = None,
+    profile_name: str,
+) -> np.ndarray:
+    """Return finite linear-operator output, zeroing invalid tangent products.
+
+    Matrix-free trust-region methods may probe directions that pass through
+    singular VMEC/QI states.  The accepted state is still valid, so those
+    invalid tangent products should not abort the optimizer.  Zeroing invalid
+    products is conservative for the local linear model, and residual callbacks
+    separately assign bad trial states a large finite residual so the trust
+    region rejects them.
+    """
+
+    arr = np.asarray(value, dtype=float)
+    if np.all(np.isfinite(arr)):
+        return arr
+    if profile_add is not None:
+        profile_add(profile_name, 0.0)
+    return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+
+
+def _finite_residual_vector(
+    value,
+    *,
+    profile_add: Callable[[str, float], None] | None = None,
+    profile_name: str,
+    expected_size: int | None = None,
+    penalty: float = _MATRIX_FREE_NONFINITE_RESIDUAL_PENALTY,
+) -> np.ndarray:
+    """Return a finite residual vector, replacing invalid entries by a penalty."""
+
+    arr = np.asarray(value, dtype=float).reshape(-1)
+    if expected_size is not None and int(arr.size) != int(expected_size):
+        if profile_add is not None:
+            profile_add(profile_name, 0.0)
+        return np.full(int(expected_size), float(penalty), dtype=float)
+    if np.all(np.isfinite(arr)):
+        return arr
+    if profile_add is not None:
+        profile_add(profile_name, 0.0)
+    return np.nan_to_num(arr, nan=float(penalty), posinf=float(penalty), neginf=-float(penalty))
 
 
 def _skip_exhausted_gauss_newton_jacobian() -> bool:
@@ -1632,8 +1680,10 @@ class FixedBoundaryExactOptimizer:
 
         ``method="auto"`` is intentionally conservative and device-preserving:
         it chooses the matrix-free trust-region path for profiled high-mode,
-        stellarator-symmetric QS/QI CPU/default-backend lanes where
-        cold-process and memory-pressure profiles motivated the option. It does
+        stellarator-symmetric QS CPU/default-backend lanes where cold-process
+        and memory-pressure profiles motivated the option. QI currently stays
+        on dense SciPy unless matrix-free is requested explicitly because QI
+        Boozer/bounce residual JVPs can be non-finite in cleanup stages. It does
         not guarantee the fastest warm wall time for every run, and it never
         moves work between CPU and GPU; explicit device choices are preserved.
         """
@@ -1662,10 +1712,10 @@ class FixedBoundaryExactOptimizer:
                 return "scalar_trust", scipy_lsmr_maxiter, f"auto_scalar:{suffix}high-mode-scalar-trust"
             if backend in ("gpu", "cuda", "rocm", "tpu", "metal"):
                 return "scipy", scipy_lsmr_maxiter, f"auto:dense-preserves-{backend}"
-            lsmr_maxiter = 4 if scipy_lsmr_maxiter is None else scipy_lsmr_maxiter
             if self._objective_family == "qi":
-                family = "qi"
-            elif helicity_m == 1 and helicity_n == 0:
+                return "scipy", scipy_lsmr_maxiter, "auto:qi-dense-default"
+            lsmr_maxiter = 4 if scipy_lsmr_maxiter is None else scipy_lsmr_maxiter
+            if helicity_m == 1 and helicity_n == 0:
                 family = "qa"
             elif helicity_m == 0 and helicity_n not in (None, 0):
                 family = "qp"
@@ -3895,7 +3945,11 @@ class FixedBoundaryExactOptimizer:
             )
             out = residual_linear(final_tangent)
             self._profile_add("linear_operator_matvec", time.perf_counter() - t_mv)
-            return np.asarray(out, dtype=float)
+            return _finite_linear_operator_output(
+                out,
+                profile_add=self._profile_add,
+                profile_name="linear_operator_nonfinite_matvec",
+            )
 
         def _matmat(directions):
             t_mm = time.perf_counter()
@@ -3918,7 +3972,11 @@ class FixedBoundaryExactOptimizer:
             )
             out_columns = jax.vmap(residual_linear)(final_tangents)
             self._profile_add("linear_operator_matmat", time.perf_counter() - t_mm)
-            return np.asarray(out_columns, dtype=float).T
+            return _finite_linear_operator_output(
+                np.asarray(out_columns, dtype=float).T,
+                profile_add=self._profile_add,
+                profile_name="linear_operator_nonfinite_matmat",
+            )
 
         def _rmatvec(cotangent):
             t_rmv = time.perf_counter()
@@ -3961,7 +4019,11 @@ class FixedBoundaryExactOptimizer:
                 grad = initial_transpose(_jnp.asarray(initial_cotangent, dtype=_jnp.float64))[0]
                 self._profile_add("linear_operator_initial_transpose", time.perf_counter() - t_initial_transpose)
             self._profile_add("linear_operator_rmatvec", time.perf_counter() - t_rmv)
-            return np.asarray(grad, dtype=float)
+            return _finite_linear_operator_output(
+                grad,
+                profile_add=self._profile_add,
+                profile_name="linear_operator_nonfinite_rmatvec",
+            )
 
         self._profile_add("linear_operator_total", time.perf_counter() - t_total)
         return LinearOperator(
@@ -4859,6 +4921,7 @@ class FixedBoundaryExactOptimizer:
             base_params = self._base_params_vector()
             y0 = (params0_arr + base_params) / scale
             last_history_key = [self._exact_cache_key(params0_arr)]
+            matrix_free_residual_size = [None]
 
             def _record_history_from_cached_state(x):
                 key = self._exact_cache_key(x)
@@ -4887,11 +4950,22 @@ class FixedBoundaryExactOptimizer:
                 x = np.asarray(y, dtype=float) * scale - base_params
                 cached_residual = self._cached_exact_residual(x)
                 if cached_residual is not None:
-                    return cached_residual
-                cached_state = self._cached_exact_state(x)
-                if cached_state is not None:
-                    return self._evaluate_residuals_from_state(cached_state)
-                return self.forward_residual_fun(x)
+                    raw_residual = cached_residual
+                else:
+                    cached_state = self._cached_exact_state(x)
+                    if cached_state is not None:
+                        raw_residual = self._evaluate_residuals_from_state(cached_state)
+                    else:
+                        raw_residual = self.forward_residual_fun(x)
+                residual = _finite_residual_vector(
+                    raw_residual,
+                    profile_add=self._profile_add,
+                    profile_name="matrix_free_nonfinite_residual",
+                    expected_size=matrix_free_residual_size[0],
+                )
+                if matrix_free_residual_size[0] is None:
+                    matrix_free_residual_size[0] = int(residual.size)
+                return residual
 
             def _jacobian_y(y):
                 x = np.asarray(y, dtype=float) * scale - base_params
@@ -4900,15 +4974,27 @@ class FixedBoundaryExactOptimizer:
 
                 def _matvec(v):
                     v_arr = _linear_operator_vector_arg(v, size=int(scale.size), name="scaled matvec direction")
-                    return op_x.matvec(v_arr * scale)
+                    return _finite_linear_operator_output(
+                        op_x.matvec(v_arr * scale),
+                        profile_add=self._profile_add,
+                        profile_name="matrix_free_nonfinite_matvec",
+                    )
 
                 def _matmat(v):
                     v_arr = _linear_operator_matrix_arg(v, rows=int(scale.size), name="scaled matmat directions")
-                    return op_x.matmat(v_arr * scale[:, None])
+                    return _finite_linear_operator_output(
+                        op_x.matmat(v_arr * scale[:, None]),
+                        profile_add=self._profile_add,
+                        profile_name="matrix_free_nonfinite_matmat",
+                    )
 
                 def _rmatvec(w):
                     w_arr = _linear_operator_vector_arg(w, size=int(op_x.shape[0]), name="scaled rmatvec cotangent")
-                    return op_x.rmatvec(w_arr) * scale
+                    return _finite_linear_operator_output(
+                        op_x.rmatvec(w_arr) * scale,
+                        profile_add=self._profile_add,
+                        profile_name="matrix_free_nonfinite_rmatvec",
+                    )
 
                 try:
                     from scipy.sparse.linalg import LinearOperator

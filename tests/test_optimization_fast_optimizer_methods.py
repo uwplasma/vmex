@@ -244,9 +244,9 @@ def test_auto_method_resolver_uses_matrix_free_for_high_mode_stellsym_cpu_cases(
     opt._helicity_m = None
     opt._helicity_n = None
     assert opt._resolve_optimizer_method("auto", None) == (
-        "scipy_matrix_free",
-        4,
-        "auto:qi-high-mode-matrix-free",
+        "scipy",
+        None,
+        "auto:qi-dense-default",
     )
     assert opt._resolve_optimizer_method("auto_scalar", None) == (
         "scalar_trust",
@@ -873,6 +873,71 @@ def test_run_scipy_matrix_free_scales_multi_parameter_linear_operator(monkeypatc
 
     np.testing.assert_allclose(result["x"], [0.0, 0.0])
     assert result["_history_dump"]["method"] == "scipy_matrix_free"
+
+
+def test_run_scipy_matrix_free_sanitizes_nonfinite_trial_residuals_and_products(monkeypatch):
+    pytest.importorskip("scipy.optimize")
+    import scipy.optimize
+
+    class FakeOperator:
+        shape = (2, 1)
+
+        def matvec(self, vector):
+            assert np.all(np.isfinite(vector))
+            return np.asarray([np.nan, np.inf], dtype=float)
+
+        def matmat(self, matrix):
+            assert np.all(np.isfinite(matrix))
+            return np.asarray([[np.nan], [-np.inf]], dtype=float)
+
+        def rmatvec(self, vector):
+            assert np.all(np.isfinite(vector))
+            return np.asarray([np.nan], dtype=float)
+
+    def fake_least_squares(residuals, y0, *, jac, **kwargs):
+        np.testing.assert_allclose(residuals(y0), [1.0, 2.0])
+        bad_trial = residuals(y0 + 1.0)
+        assert bad_trial.shape == (2,)
+        assert np.all(np.isfinite(bad_trial))
+        assert np.max(np.abs(bad_trial)) >= 1.0e11
+        op = jac(y0)
+        np.testing.assert_allclose(op.matvec(np.asarray([3.0])), [0.0, 0.0])
+        np.testing.assert_allclose(op.matmat(np.asarray([[3.0]])), [[0.0], [0.0]])
+        np.testing.assert_allclose(op.rmatvec(np.asarray([1.0, 2.0])), [0.0])
+        return SimpleNamespace(
+            x=np.asarray(y0, dtype=float),
+            cost=0.5,
+            nfev=2,
+            njev=1,
+            success=True,
+            status=1,
+            message="matrix-free finite guard ok",
+        )
+
+    monkeypatch.setattr(scipy.optimize, "least_squares", fake_least_squares)
+    opt = _run_ready_optimizer(residual=np.asarray([1.0, 2.0]))
+
+    def cached_residual(x=None, *, cache_key=None):
+        if cache_key is not None:
+            return np.asarray([1.0, 2.0], dtype=float)
+        return np.asarray([1.0, 2.0], dtype=float) if np.allclose(np.asarray(x, dtype=float), [0.0]) else None
+
+    opt._cached_exact_residual = cached_residual
+    opt.forward_residual_fun = lambda _x: np.asarray([np.nan, np.inf], dtype=float)
+    opt.residual_linear_operator = lambda _x: FakeOperator()
+
+    result = opt.run(
+        np.asarray([0.0]),
+        method="scipy_matrix_free",
+        x_scale=np.asarray([2.0]),
+        verbose=0,
+    )
+
+    assert result["success"] is True
+    assert opt._profile["matrix_free_nonfinite_residual"]["count"] == 1
+    assert opt._profile["matrix_free_nonfinite_matvec"]["count"] == 1
+    assert opt._profile["matrix_free_nonfinite_matmat"]["count"] == 1
+    assert opt._profile["matrix_free_nonfinite_rmatvec"]["count"] == 1
 
 
 def test_run_scipy_residual_callback_prefers_cache_policies_before_trial_solve(monkeypatch):
