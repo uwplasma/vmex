@@ -562,6 +562,20 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
     assert proposal["alpha"] == pytest.approx(-0.25)
     np.testing.assert_allclose(proposal["trial_x"], [-0.15, 0.2, 0.55])
 
+    proposals = module.same_branch_derivative_proposals_from_report(
+        report,
+        objective_model,
+        {"x": [0.1, 0.2, 0.3]},
+        step_sizes=[0.125, 0.25, 0.5],
+        max_trials=2,
+    )
+    assert len(proposals) == 2
+    assert [item["trial_index"] for item in proposals] == [0, 1]
+    assert [item["n_requested_trials"] for item in proposals] == [2, 2]
+    assert [item["step_size"] for item in proposals] == [pytest.approx(0.125), pytest.approx(0.25)]
+    np.testing.assert_allclose(proposals[0]["trial_x"], [-0.025, 0.2, 0.425])
+    np.testing.assert_allclose(proposals[1]["trial_x"], [-0.15, 0.2, 0.55])
+
 
 def test_same_branch_derivative_proposal_rejects_adaptive_claims():
     module = _load_example_module()
@@ -2253,17 +2267,18 @@ def test_derivative_proposal_summary_records_rejected_trial_as_complete_solve_re
             "4.0",
             "--write-same-branch-report",
             "--same-branch-derivative-proposal",
-            "--same-branch-proposal-step",
-            "1.0",
+            "--same-branch-proposal-steps",
+            "0.1,1.0",
             "--outdir",
             str(tmp_path),
         ]
     )
 
     assert exit_code == 0
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert calls[0]["current"] == pytest.approx(2.0)
-    assert calls[1]["current"] == pytest.approx(1.96)
+    assert calls[1]["current"] == pytest.approx(1.996)
+    assert calls[2]["current"] == pytest.approx(1.96)
 
     summary = json.loads((tmp_path / "summary.json").read_text())
     proposal = summary["same_branch_derivative_proposal"]
@@ -2274,6 +2289,11 @@ def test_derivative_proposal_summary_records_rejected_trial_as_complete_solve_re
     assert proposal["trial_objective"] > proposal["previous_best_objective"]
     assert proposal["best_eval_before_trial"] == 0
     assert proposal["best_eval_after_trial"] == 0
+    proposals = summary["same_branch_derivative_proposals"]
+    assert len(proposals) == 2
+    assert [item["step_size"] for item in proposals] == [pytest.approx(0.1), pytest.approx(1.0)]
+    assert [item["accepted_by_complete_solve"] for item in proposals] == [False, False]
+    assert [item["trial_eval"] for item in proposals] == [1, 2]
     assert summary["best"]["eval"] == 0
     report_status = summary["same_branch_complete_solve_report_final_best_status"]
     assert report_status["report_generated_before_derivative_proposal"] is True
