@@ -661,8 +661,14 @@ def _minimal_or_circular_qi_case(
             # still run and can promote better candidates, but a failed cleanup
             # must not replace a lower-QI reference candidate with a worse
             # final state.
-            "prefer_aspect_candidates": False,
-            "prefer_lowest_qi_candidate": True,
+            # Minimal/circular seeds can use wide same-family reference scans
+            # during README regeneration.  Do not rank those candidates only by
+            # QI: a slightly lower-QI endpoint can move too far from the target
+            # aspect and force local cleanup to trade away mirror ratio/iota.
+            # The default score already includes QI, constraints, mirror, and
+            # aspect, so prefer the bounded-aspect candidate pool and score.
+            "prefer_aspect_candidates": True,
+            "prefer_lowest_qi_candidate": False,
             "accept_as_baseline": True,
         }
     )

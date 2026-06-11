@@ -108,8 +108,8 @@ def test_qi_staged_runner_builds_external_input_cli_and_environment(tmp_path: Pa
     assert reference["max_mode"] == 3
     assert reference["target_aspect"] == pytest.approx(6.0)
     assert reference["lambdas"] == pytest.approx([0.99, 0.995, 1.0, 1.005, 1.01])
-    assert reference["prefer_aspect_candidates"] is False
-    assert reference["prefer_lowest_qi_candidate"] is True
+    assert reference["prefer_aspect_candidates"] is True
+    assert reference["prefer_lowest_qi_candidate"] is False
     assert reference["accept_as_baseline"] is True
 
 

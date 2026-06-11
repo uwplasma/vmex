@@ -17768,6 +17768,63 @@ Completion:
 - Docs/release hygiene: 100%.
 - QI minimal-seed README artifacts: 67% artifact-complete, 0% promoted.
 
+### 2026-06-11 QI Minimal-Seed Reference Selection Guard
+
+Steps taken:
+
+1. Inspected the running office ``qi_nfp2`` aspect-ramp diagnostic from commit
+   ``31ab5ef``.  That run used a broad explicit reference-lambda override and
+   the old minimal-seed policy selected the lowest-QI endpoint at
+   ``lambda=1.05``.  The first two cleanup stages preserved low QI but drove
+   mirror ratio and iota away from the promotion gates, so the artifact remains
+   non-promotable.
+2. Changed the minimal/circular QI catalog reference policy to prefer the
+   bounded aspect-aware candidate pool and the combined score instead of
+   ranking only by the lowest QI metric.  This keeps QI in the score, but
+   prevents a slightly lower-QI reference from starting too far from the target
+   aspect and forcing cleanup to sacrifice mirror ratio or iota.
+3. Added catalog-level and staged-runner regression checks so the README QI
+   minimal-seed cases keep ``prefer_aspect_candidates=True`` and
+   ``prefer_lowest_qi_candidate=False``.
+
+Results obtained:
+
+1. Focused lint passed:
+   ``python -m ruff check examples/optimization/qi_optimization_cases.py tests/test_qi_staged_runner.py tests/test_qi_case_resolution.py tests/test_minimal_seed_showcase.py``.
+2. Focused QI policy tests passed:
+   ``python -m pytest -q tests/test_qi_staged_runner.py tests/test_qi_case_resolution.py tests/test_minimal_seed_showcase.py tests/test_qi_optimization_more_coverage.py -q``
+   with 54 tests passing.
+3. The stale office run is still active under the old commit/policy, with an
+   empty log file and low CPU use.  It should be stopped and replaced from the
+   new commit before any NFP2 README artifact decision.
+
+Best next steps:
+
+1. Commit/push the policy guard and monitor CI.
+2. Stop the stale office NFP2 run, then launch a replacement from the new
+   commit.  The replacement should intentionally keep the broad lambda override
+   once to validate that the aspect-aware selection chooses the safer reference
+   candidate before the expensive cleanup stages.
+3. Promote no QI README artifact until the replacement produces finite
+   provenance, clean Boozer contour closure, acceptable mirror/iota/aspect, and
+   stored history.
+
+Need from user:
+
+No immediate action.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999998%.
+- VMEC parity and physics gates: 99.1%.
+- Single-stage coil-only optimization: 99.3%.
+- Robust coil perturbation optimization: deferred, 70%.
+- CPU/GPU performance: 99.47%.
+- CI/runtime/coverage hygiene: 100% locally for the focused QI policy shard.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 69% artifact-complete, 0% promoted.
+
 ### 2026-06-11 Bounded Same-Branch Proposal Set
 
 Steps taken:
