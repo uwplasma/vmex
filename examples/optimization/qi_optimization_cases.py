@@ -685,6 +685,16 @@ def _minimal_or_circular_qi_case(
                 # stage policy case-specific, but make aspect localization
                 # explicit for the common aspect-6 showcase lane.
                 "aspect_weight": max(float(stage.get("aspect_weight", 0.0)), 4.0),
+                # The aspect-localization stage must still be QI-preserving.
+                # Otherwise scalar cleanup can lower aspect while destroying
+                # the Boozer-contour metric, which is not a promotable QI
+                # optimization path.
+                "qi_weight": max(float(stage.get("qi_weight", 0.0)), 250.0),
+                "qi_ceiling_max": min(
+                    float(stage.get("qi_ceiling_max", base.get("qi_gate_smooth_max", 2.0e-3))),
+                    float(base.get("qi_gate_smooth_max", 2.0e-3)),
+                ),
+                "qi_ceiling_weight": max(float(stage.get("qi_ceiling_weight", 0.0)), 7500.0),
                 # Showcase and staged-runner --max-nfev should be the local
                 # optimizer budget for these reference-seeded cases, not only a
                 # ceiling over legacy one-evaluation audit stages.

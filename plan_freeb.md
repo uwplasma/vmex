@@ -17411,3 +17411,51 @@ Completion:
   remain intentionally blocked.
 - QI minimal-seed README artifacts: 60% artifact-complete, 0% promoted.  NFP=4
   has previous passing evidence; NFP=1/2/3 remain blocked by cleanup behavior.
+
+### 2026-06-10 QI Scalar Cleanup Diagnostic and Policy Fix
+
+Steps taken:
+
+1. Harvested the ``auto_scalar`` NFP=2 broad-reference GPU diagnostic.
+2. Compared scalar cleanup against the matrix-free failure mode.
+3. Patched ``_minimal_or_circular_qi_case`` so minimal/circular QI cleanup
+   stages cannot become aspect-dominated: they now enforce ``qi_weight >= 250``,
+   a tight ``qi_ceiling_max`` no looser than the case smooth-QI gate, and
+   ``qi_ceiling_weight >= 7500`` while retaining the explicit aspect-6 pull.
+4. Added a focused regression test that asserts staged minimal-seed QI configs
+   include the aspect pull and QI-preserving ceiling terms.
+
+Results obtained:
+
+1. ``auto_scalar`` avoided the matrix-free NaN failure and accepted steps, but
+   the current NFP=2 policy was aspect-dominated: aspect moved from ``8.00`` to
+   ``7.26`` while smooth QI degraded to ``1.36e-2``, legacy QI to ``2.20e-2``,
+   mirror to ``0.336``, and iota dropped just below the ``0.41`` floor.  The
+   candidate was correctly rejected.
+2. The scalar diagnostic confirms the next production policy must be
+   QI-preserving before it is aspect-correcting; otherwise it finds a lower
+   aspect non-QI state.
+3. Local lint passed:
+   ``python -m ruff check examples/optimization/qi_optimization_cases.py tests/test_minimal_seed_showcase.py``.
+4. Focused tests passed:
+   ``python -m pytest -q tests/test_minimal_seed_showcase.py tests/test_qi_staged_runner.py -q``.
+
+Best next steps:
+
+1. Commit/push the QI-preserving cleanup-policy fix.
+2. Re-run NFP=2 ``auto_scalar`` broad-reference diagnostics from the patched
+   commit.  Success criterion is not immediate README promotion; first check
+   that aspect moves without increasing smooth/legacy QI above the baseline.
+3. If patched scalar cleanup preserves QI but stalls above aspect 6, add a
+   staged aspect ramp rather than one large aspect pull.
+
+Need from user:
+
+No immediate action.
+
+Completion:
+
+- QI minimal-seed README artifacts: 62% artifact-complete, 0% promoted.  We
+  now have a concrete policy fix to test, but NFP1/2/3 artifacts remain blocked.
+- CPU/GPU performance: 99.4% overall; scalar cleanup exposes repeated exact
+  tape builds as the next runtime target.
