@@ -567,7 +567,12 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatc
         },
     }
     physical_scalars_report = {
+        "passed": True,
         "same_branch": True,
+        "uses_production_forward": True,
+        "differentiates_adaptive_controller": False,
+        "differentiates_run_free_boundary": False,
+        "differentiates_fixed_accepted_branch": True,
         "replay_option_flags": {"use_stacked_step_controls": True},
         "replay_branch_metadata": branch_metadata,
         "scalar_keys": ("aspect", "accepted_bnormal_rms"),

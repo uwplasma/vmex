@@ -17845,6 +17845,63 @@ Completion:
 - Docs/release hygiene: 100%.
 - QI minimal-seed README artifacts: 75% artifact-complete, 0% promoted.
 
+### 2026-06-11 Exact-Shard Synthetic Gate Fixture Fix
+
+Steps taken:
+
+1. Monitored GitHub Actions run ``27350054778`` after commit ``42f1651``.
+   The ``optimization-qi`` shard passed, confirming the staged-runner mock fix
+   restored that bucket to fast unit-test behavior.
+2. The exact ``remaining`` shard failed in
+   ``test_direct_coil_trace_fingerprint_detects_control_branch_changes``.
+   The failure was a synthetic fixture mismatch: its per-scalar reports were
+   passing, but the top-level branch-local scalar report lacked the explicit
+   ``passed`` and differentiation-scope fields now required by the physical
+   gate.
+3. Updated that fixture to match real adapter output by adding top-level
+   ``passed=True``, production-forward metadata, and fixed accepted-branch
+   differentiation scope.
+
+Results obtained:
+
+1. Focused lint passed:
+   ``python -m ruff check vmec_jax/free_boundary_adjoint.py tests/test_free_boundary_qs_coil_optimization_smoke.py tests/test_qi_staged_runner.py tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py``.
+2. The exact CI failure reproducer passed locally:
+   ``JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_trace_fingerprint_detects_control_branch_changes -q``.
+3. The full local exact ``remaining`` shard passed:
+   ``JAX_ENABLE_X64=1 python -m pytest -q -n 4 -m "py311_coverage_only and not full and not vmec2000 and not simsopt" -k "not test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree and not test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_fd and not test_direct_coil_fourier_only_same_branch_custom_vjp_matches_complete_solve_fd and not test_direct_coil_lasym_fixed_trace_custom_vjp_matches_complete_solve_fd_on_same_branch" --durations=50 tests --cov=vmec_jax --cov-report=``
+   with ``24 passed`` in ``82.32 s``.
+4. The office NFP=2 QI artifact run remains active and has not produced a new
+   stage checkpoint since the first non-promotable mirror-ramp diagnostic.
+
+Best next steps:
+
+1. Commit/push the exact-shard fixture fix and monitor the replacement CI run.
+2. Keep monitoring the office NFP=2 QI run until it finishes or reaches its
+   subprocess timeout.  Do not promote README QI artifacts from this run unless
+   root diagnostics pass strict gates.
+3. If NFP=2 stalls until timeout, use its partial stage checkpoint as evidence
+   and either reduce the cleanup budget or tune the final strict NFP=2 cleanup
+   policy before rerunning.
+
+Need from user:
+
+No immediate action.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999999%.
+- VMEC parity and physics gates: 99.2%.
+- Single-stage coil-only optimization: 99.5%.
+- Robust coil perturbation optimization: deferred, 70%.
+- CPU/GPU performance: 99.5%; exact remaining shard passes locally in 82 s and
+  the QI shard passes remotely after the staged-runner mock fix.
+- CI/runtime/coverage hygiene: 100% locally for touched shards; replacement CI
+  pending.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 75% artifact-complete, 0% promoted.
+
 ### 2026-06-11 CI Runtime Shard Split and Heartbeat
 
 Steps taken:
