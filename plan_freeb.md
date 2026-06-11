@@ -17517,3 +17517,71 @@ Completion:
 - Docs/release hygiene: 100% for current docs; QI README artifacts remain
   intentionally blocked.
 - QI minimal-seed README artifacts: 64% artifact-complete, 0% promoted.
+
+### 2026-06-11 Opt-In Boozer/QS Same-Branch Scalar
+
+Steps taken:
+
+1. Reviewed the phase-2/phase-3 free-boundary handoff and the current
+   same-branch coil-only QS validation seam.
+2. Confirmed with the free-boundary subagent that the promoted gates still pass
+   as ``2 passed, 1 xfailed`` and that the strict xfail remains the full
+   adaptive coil -> free-boundary -> Boozer/QS exact-gradient marker.
+3. Added ``quasisymmetry_boozer_mode_residual_from_boozer_output``: a
+   differentiable Boozer-coefficient QS metric that penalizes ``|B|`` modes not
+   satisfying the requested helicity.
+4. Exposed an opt-in ``boozer_qs_total`` key in
+   ``free_boundary_QS_coil_optimization.py`` same-branch reports.  The default
+   report keys remain unchanged, so ``booz_xform_jax`` is not called unless a
+   user explicitly requests ``boozer_qs_total``.
+5. Updated the free-boundary docs with the exact opt-in command and the
+   limitation: this validates Boozer/QS only under an unchanged accepted-branch
+   fingerprint, not arbitrary adaptive host branch differentiation.
+6. Reviewed the performance subagent result.  It identified no correctness
+   blocker; the useful next performance increments are instrumentation around
+   matrix-free callbacks, scalar trust/backtracking, and surfacing replay JVP
+   counters in normal optimization history.
+
+Results obtained:
+
+1. The Boozer/QS helper is exported as
+   ``vmec_jax.quasisymmetry_boozer_mode_residual_from_boozer_output``.
+2. Focused lint passed:
+   ``python -m ruff check vmec_jax/__init__.py vmec_jax/quasisymmetry.py examples/optimization/free_boundary_QS_coil_optimization.py tests/test_quasisymmetry.py tests/test_free_boundary_qs_coil_optimization_smoke.py``.
+3. Focused tests passed:
+   ``JAX_ENABLE_X64=1 python -m pytest -q tests/test_quasisymmetry.py tests/test_free_boundary_qs_coil_optimization_smoke.py -q``
+   with one optional skip, 47 passing tests, and one expected xfail.
+4. CI for ``92cb2a2`` passed in GitHub Actions.  The clean office NFP=2
+   lowest-QI reference diagnostic is still running and is not yet promotion
+   evidence.
+
+Best next steps:
+
+1. Commit/push the opt-in Boozer/QS same-branch scalar.
+2. Harvest the running NFP=2 GPU diagnostic and decide whether the lowest-QI
+   reference policy is enough or whether an explicit aspect-ramp cleanup is
+   needed.
+3. Add the smallest promoted Boozer/QS same-branch complete-solve gate only as
+   an opt-in/nightly path unless its runtime is acceptable for CI.
+4. Continue bounded VMEC2000/mgrid/direct-coil parity only with finite-positive
+   physical fixtures.
+
+Need from user:
+
+No immediate action.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999998%; branch-local
+  Boozer/QS scalar is available, adaptive branch differentiation remains
+  unclaimed.
+- VMEC parity and physics gates: 99.0%.
+- Single-stage coil-only optimization: 99.1% with opt-in Boozer/QS report
+  support.
+- Robust coil perturbation optimization: deferred, 70%.
+- CPU/GPU performance: 99.4%; next increments are timing visibility and
+  matrix-free/scalar-trust callback tuning.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 64% artifact-complete, 0% promoted.

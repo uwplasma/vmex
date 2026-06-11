@@ -221,6 +221,7 @@ from .solve import (
 from .residuals import ForceResiduals, force_residuals_from_state
 from .quasisymmetry import (
     quasisymmetry_diagnostics_from_state,
+    quasisymmetry_boozer_mode_residual_from_boozer_output,
     quasisymmetry_ratio_residual_from_state,
     quasisymmetry_ratio_residual_from_wout,
 )
@@ -759,6 +760,7 @@ __all__ = [
     "ForceResiduals",
     "force_residuals_from_state",
     "quasisymmetry_diagnostics_from_state",
+    "quasisymmetry_boozer_mode_residual_from_boozer_output",
     "quasisymmetry_ratio_residual_from_state",
     "quasisymmetry_ratio_residual_from_wout",
     "max_elongation_penalty_from_state",

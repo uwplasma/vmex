@@ -68,7 +68,12 @@ from vmec_jax.external_fields import CoilFieldParams, from_essos_coils
 from vmec_jax.external_fields.coils_jax import coil_current_norm, coil_lengths
 from vmec_jax.namelist import read_indata, write_indata
 from vmec_jax.profiles import pressure_profile_to_vmec_am, standard_finite_beta_profiles
-from vmec_jax.quasisymmetry import quasisymmetry_angle_cache_from_static, quasisymmetry_ratio_residual_from_state
+from vmec_jax.quasi_isodynamic import boozer_output_from_state
+from vmec_jax.quasisymmetry import (
+    quasisymmetry_angle_cache_from_static,
+    quasisymmetry_boozer_mode_residual_from_boozer_output,
+    quasisymmetry_ratio_residual_from_state,
+)
 from vmec_jax.wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
 
 
@@ -83,6 +88,7 @@ SUPPORTED_SAME_BRANCH_VECTOR_KEYS = (
     "aspect",
     "mean_iota",
     "qs_total",
+    "boozer_qs_total",
     "lcfs_boundary_moment",
     "accepted_bnormal_rms",
 )
@@ -94,6 +100,7 @@ STATE_ONLY_SAME_BRANCH_KEYS = (
     "aspect",
     "mean_iota",
     "qs_total",
+    "boozer_qs_total",
     "lcfs_boundary_moment",
 )
 SINGLE_STAGE_LIMITATIONS = [
@@ -1044,6 +1051,17 @@ def write_same_branch_validation_report(
             )
         return qs_angle_cache_by_key[key]
 
+    mode = str(getattr(args, "same_branch_report_mode", "none")).strip().lower()
+    ad_mode = str(getattr(args, "same_branch_report_ad_mode", "direct")).strip().lower()
+    if mode not in {"none", "scalar", "vector"}:
+        raise ValueError("--same-branch-report-mode must be one of none, scalar, vector")
+    if ad_mode not in {"direct", "custom_vjp"}:
+        raise ValueError("--same-branch-report-ad-mode must be one of direct, custom_vjp")
+    vector_keys = parse_same_branch_vector_keys(getattr(args, "same_branch_report_vector_keys", None))
+    scalar_key = str(getattr(args, "same_branch_report_scalar_key", "qs_total"))
+    requested_report_keys = {scalar_key} if mode == "scalar" else set(vector_keys) if mode == "vector" else set()
+    needs_boozer_qs = "boozer_qs_total" in requested_report_keys
+
     def lcfs_boundary_moment(state: Any, static: Any) -> Any:
         geometry = free_boundary_boundary_geometry_jax(state, static)
         r = jnp.asarray(geometry["R"])
@@ -1095,6 +1113,26 @@ def write_same_branch_validation_report(
         )
         return qs["total"]
 
+    def boozer_qs_total_from_state(state: Any, static: Any, indata: Any, signgs: int) -> Any:
+        field = boozer_output_from_state(
+            state=state,
+            static=static,
+            indata=indata,
+            signgs=int(signgs),
+            surfaces=qs_surfaces,
+            mboz=int(getattr(args, "same_branch_boozer_mboz", 8)),
+            nboz=int(getattr(args, "same_branch_boozer_nboz", 8)),
+            jit_booz=False,
+        )
+        qs = quasisymmetry_boozer_mode_residual_from_boozer_output(
+            field["booz"],
+            helicity_m=int(args.helicity_m),
+            helicity_n=int(args.helicity_n),
+            nfp=int(field["nfp"]),
+            normalize=bool(getattr(args, "same_branch_boozer_normalize", True)),
+        )
+        return qs["total"]
+
     def params_for(scale: float) -> CoilFieldParams:
         return apply_coil_variables(
             base_params,
@@ -1132,7 +1170,7 @@ def write_same_branch_validation_report(
             aspect_weight=float(args.aspect_weight),
             iota_weight=float(args.iota_weight),
         )
-        return {
+        values = {
             "objective": total,
             "state_norm": float(np.linalg.norm(np.asarray(pack_state(payload["result"].state), dtype=float))),
             "residual_proxy": float(summary.get("residual_proxy") or 0.0),
@@ -1145,6 +1183,18 @@ def write_same_branch_validation_report(
             if summary.get("free_boundary_bnormal_rms") is not None
             else np.nan,
         }
+        if needs_boozer_qs:
+            values["boozer_qs_total"] = float(
+                np.asarray(
+                    boozer_qs_total_from_state(
+                        payload["result"].state,
+                        payload["init"].static,
+                        payload["init"].indata,
+                        payload["init"].signgs,
+                    )
+                )
+            )
+        return values
 
     timings: dict[str, float] = {}
     t0 = time.perf_counter()
@@ -1206,10 +1256,7 @@ def write_same_branch_validation_report(
         "objective_values": report["objective_values"],
         "primary_objective": report["primary_objective"],
     }
-    mode = str(getattr(args, "same_branch_report_mode", "none")).strip().lower()
-    ad_mode = str(getattr(args, "same_branch_report_ad_mode", "direct")).strip().lower()
     same_branch = bool(report["branch_compatibility"]["same_branch"])
-    vector_keys = parse_same_branch_vector_keys(getattr(args, "same_branch_report_vector_keys", None))
     branch_local_scalar: dict[str, Any] = {
         "available": False,
         "scope": "fixed accepted branch only; does not differentiate adaptive host branch selection",
@@ -1233,10 +1280,6 @@ def write_same_branch_validation_report(
         "scope": "same-branch production-forward vector/JVP physical-scalar gate",
         "reason": "requires an available branch-local vector report",
     }
-    if mode not in {"none", "scalar", "vector"}:
-        raise ValueError("--same-branch-report-mode must be one of none, scalar, vector")
-    if ad_mode not in {"direct", "custom_vjp"}:
-        raise ValueError("--same-branch-report-ad-mode must be one of direct, custom_vjp")
     report_base_values = {
         str(key): float(values["base"])
         for key, values in report["objective_values"].items()
@@ -1273,6 +1316,16 @@ def write_same_branch_validation_report(
                 )
             )
         ),
+        "boozer_qs_total": lambda payload: float(
+            np.asarray(
+                boozer_qs_total_from_state(
+                    payload["result"].state,
+                    payload["init"].static,
+                    payload["init"].indata,
+                    payload["init"].signgs,
+                )
+            )
+        ),
         "lcfs_boundary_moment": lambda payload: float(
             np.asarray(lcfs_boundary_moment(payload["result"].state, payload["init"].static))
         ),
@@ -1296,13 +1349,18 @@ def write_same_branch_validation_report(
             payload["init"].indata,
             payload["init"].signgs,
         ),
+        "boozer_qs_total": lambda replay, payload: boozer_qs_total_from_state(
+            replay["state"],
+            payload["init"].static,
+            payload["init"].indata,
+            payload["init"].signgs,
+        ),
         "lcfs_boundary_moment": lambda replay, payload: lcfs_boundary_moment(
             replay["state"],
             payload["init"].static,
         ),
         "accepted_bnormal_rms": lambda replay, _payload: accepted_bnormal_rms_from_replay(replay),
     }
-    scalar_key = str(getattr(args, "same_branch_report_scalar_key", "qs_total"))
     scalar_uses_state_only_replay = scalar_key in STATE_ONLY_SAME_BRANCH_KEYS
     vector_uses_state_only_replay = all(key in STATE_ONLY_SAME_BRANCH_KEYS for key in vector_keys)
     replay_kwargs = {
@@ -1349,7 +1407,7 @@ def write_same_branch_validation_report(
             scalar_keys=scalar_keys,
             production_values={key: report_base_values[key] for key in scalar_keys},
             replay_payload=replay_payload,
-            scalar_fn=lambda payload: {key: scalar_value_fns[key](payload) for key in SUPPORTED_SAME_BRANCH_VECTOR_KEYS},
+            scalar_fn=lambda payload: {key: scalar_value_fns[key](payload) for key in scalar_keys},
             replay_scalar_fns=scalar_replay_fns,
             replay_kwargs=replay_kwargs_for_call,
             replay_ad_mode=ad_mode,
@@ -2191,6 +2249,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--qs-ntheta", type=int, default=31, help="Angular theta grid for the QS residual.")
     parser.add_argument("--qs-nphi", type=int, default=32, help="Angular phi grid for the QS residual.")
+    parser.add_argument(
+        "--same-branch-boozer-mboz",
+        type=int,
+        default=8,
+        help="Boozer poloidal resolution for opt-in same-branch boozer_qs_total validation.",
+    )
+    parser.add_argument(
+        "--same-branch-boozer-nboz",
+        type=int,
+        default=8,
+        help="Boozer toroidal resolution for opt-in same-branch boozer_qs_total validation.",
+    )
+    parser.add_argument(
+        "--same-branch-boozer-normalize",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Normalize the opt-in boozer_qs_total by total Boozer |B| spectral power.",
+    )
     parser.add_argument("--residual-weight", type=float, default=1.0)
     parser.add_argument("--qs-weight", type=float, default=1.0)
     parser.add_argument("--aspect-weight", type=float, default=1.0e-2)
@@ -2226,12 +2302,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--same-branch-report-scalar-key",
-        choices=("state_norm", "aspect", "mean_iota", "qs_total", "lcfs_boundary_moment", "accepted_bnormal_rms"),
+        choices=SUPPORTED_SAME_BRANCH_VECTOR_KEYS,
         default="qs_total",
         help=(
             "Physical scalar validated by --same-branch-report-mode scalar. "
             "Use 'state_norm' as a non-physics replay-graph timing probe, "
-            "'aspect' for a cheap physical scalar, or 'qs_total' for the QS-relevant scalar."
+            "'aspect' for a cheap physical scalar, 'qs_total' for the VMEC-state "
+            "QS scalar, or 'boozer_qs_total' for the opt-in Boozer-space QS scalar."
         ),
     )
     parser.add_argument(

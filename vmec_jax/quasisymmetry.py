@@ -87,6 +87,99 @@ def quasisymmetry_angle_cache(
     )
 
 
+def _boozer_array(booz: dict, key: str):
+    value = booz.get(key)
+    if value is None:
+        return None
+    return _as_jax_array(value, dtype=np.float64)
+
+
+def quasisymmetry_boozer_mode_residual_from_boozer_output(
+    booz: dict,
+    *,
+    helicity_m: int = 1,
+    helicity_n: int = 0,
+    nfp: int | None = None,
+    weights: Iterable[float] | None = None,
+    normalize: bool = True,
+    include_b00: bool = False,
+) -> dict[str, object]:
+    """Return a differentiable Boozer-coefficient quasisymmetry metric.
+
+    A Boozer ``|B|`` spectrum is quasisymmetric when only modes satisfying
+    ``helicity_m * n - helicity_n * nfp * m == 0`` remain.  This helper
+    penalizes the complementary modes in ``bmnc_b`` and, when present, the
+    asymmetric ``bmns_b`` spectrum.  The result is intentionally lightweight:
+    it is suitable for validation gates and optimization diagnostics that need
+    the Boozer-space content without constructing a full field-line residual.
+    """
+
+    _require_jax()
+    bmnc = _boozer_array(booz, "bmnc_b")
+    if bmnc is None:
+        raise KeyError("Boozer output must contain bmnc_b")
+    if bmnc.ndim != 2:
+        raise ValueError(f"bmnc_b must have shape (nsurf, mnmax), got {bmnc.shape}")
+    xm = _boozer_array(booz, "ixm_b")
+    xn = _boozer_array(booz, "ixn_b")
+    if xm is None or xn is None:
+        raise KeyError("Boozer output must contain ixm_b and ixn_b")
+    xm = jnp.asarray(xm, dtype=jnp.float64).reshape((-1,))
+    xn = jnp.asarray(xn, dtype=jnp.float64).reshape((-1,))
+    if int(xm.shape[0]) != int(bmnc.shape[1]) or int(xn.shape[0]) != int(bmnc.shape[1]):
+        raise ValueError("Boozer mode arrays must match the second dimension of bmnc_b")
+
+    if nfp is None:
+        nfp_values = _boozer_array(booz, "nfp_b")
+        nfp = 1 if nfp_values is None or int(jnp.size(nfp_values)) == 0 else int(np.asarray(nfp_values).reshape(-1)[0])
+    nn = int(helicity_n) * int(nfp)
+    target = (int(helicity_m) * xn - nn * xm) == 0
+    if not include_b00:
+        target = jnp.logical_or(target, jnp.logical_and(xm == 0, xn == 0))
+    non_qs = jnp.logical_not(target)
+
+    weights_arr = _as_weight_array(weights, int(bmnc.shape[0]))
+    weights_arr = weights_arr.reshape((-1, 1))
+    cos_residual = bmnc * non_qs[None, :]
+    numerator = jnp.sum(weights_arr * cos_residual * cos_residual)
+    denominator = jnp.sum(weights_arr * bmnc * bmnc)
+
+    bmns = _boozer_array(booz, "bmns_b")
+    if bmns is not None:
+        if bmns.shape != bmnc.shape:
+            raise ValueError(f"bmns_b must match bmnc_b shape {bmnc.shape}, got {bmns.shape}")
+        sin_residual = bmns * non_qs[None, :]
+        numerator = numerator + jnp.sum(weights_arr * sin_residual * sin_residual)
+        denominator = denominator + jnp.sum(weights_arr * bmns * bmns)
+
+    total = numerator
+    if normalize:
+        eps = jnp.asarray(jnp.finfo(bmnc.dtype).tiny, dtype=bmnc.dtype)
+        total = numerator / jnp.maximum(denominator, eps)
+
+    profile = jnp.sum(cos_residual * cos_residual, axis=1)
+    if bmns is not None:
+        profile = profile + jnp.sum((bmns * non_qs[None, :]) ** 2, axis=1)
+    if normalize:
+        profile_denom = jnp.sum(bmnc * bmnc, axis=1)
+        if bmns is not None:
+            profile_denom = profile_denom + jnp.sum(bmns * bmns, axis=1)
+        profile = profile / jnp.maximum(profile_denom, jnp.asarray(jnp.finfo(bmnc.dtype).tiny, dtype=bmnc.dtype))
+
+    return {
+        "total": total,
+        "profile": profile,
+        "residual_bmnc": cos_residual,
+        "target_mask": target,
+        "non_qs_mask": non_qs,
+        "weights": weights_arr.reshape((-1,)),
+        "helicity_m": jnp.asarray(int(helicity_m)),
+        "helicity_n": jnp.asarray(int(helicity_n)),
+        "nfp": jnp.asarray(int(nfp)),
+        "normalized": bool(normalize),
+    }
+
+
 def quasisymmetry_angle_cache_from_static(
     static,
     *,

@@ -1444,13 +1444,29 @@ For the ESSOS Landreman-Paul QA coils, put ESSOS on ``PYTHONPATH`` and use:
      --helicity-n 0 \
      --outdir results/free_boundary_QS_coil_optimization_essos_smoke
 
-The promoted same-branch complete-solve gate now covers a VMEC-state
-``qs_total`` scalar on the same fixed accepted branch as the aspect and
-accepted-vacuum scalars.  The next scientific promotion step is replacing that
-VMEC-state proxy in this example with a Boozer-space QS objective and
-validating the same fingerprint-gated complete-solve comparisons through the
-full Boozer/QS diagnostic path.  The adaptive host branch selection itself
-remains outside the promoted derivative claim.
+The promoted same-branch complete-solve gate covers a VMEC-state ``qs_total``
+scalar on the same fixed accepted branch as the aspect and accepted-vacuum
+scalars.  For review/nightly diagnostics, the same report can also include an
+opt-in Boozer-space coefficient metric:
+
+.. code-block:: bash
+
+   python examples/optimization/free_boundary_QS_coil_optimization.py \
+     --smoke \
+     --provider circle \
+     --write-same-branch-report \
+     --same-branch-report-mode vector \
+     --same-branch-report-vector-keys aspect,qs_total,boozer_qs_total \
+     --same-branch-boozer-mboz 8 \
+     --same-branch-boozer-nboz 8 \
+     --outdir results/free_boundary_QS_coil_optimization_circle_boozer_qs
+
+The ``boozer_qs_total`` scalar penalizes Boozer ``|B|`` modes that do not
+satisfy the requested QS helicity.  It is intentionally opt-in because it runs
+``booz_xform_jax`` during the complete-solve finite-difference report and the
+fixed accepted-branch replay.  Passing this report validates a Boozer/QS scalar
+only under an unchanged accepted-branch fingerprint; the adaptive host branch
+selection itself remains outside the promoted derivative claim.
 
 Each accepted objective evaluation records a weighted objective-term breakdown
 for the residual, QS, aspect-ratio, and mean-iota terms.

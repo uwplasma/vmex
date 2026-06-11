@@ -133,6 +133,41 @@ def test_quasisymmetry_surface_and_weight_helpers():
         _interp_half_grid(np.zeros((0,)), [0.5], np.zeros((0,)))
 
 
+def test_boozer_mode_quasisymmetry_residual_masks_non_qs_modes():
+    pytest.importorskip("jax")
+
+    from vmec_jax.quasisymmetry import quasisymmetry_boozer_mode_residual_from_boozer_output
+
+    booz = {
+        "bmnc_b": np.asarray([[2.0, 0.3, 0.4]]),
+        "bmns_b": np.asarray([[0.0, 0.1, 0.2]]),
+        "ixm_b": np.asarray([0, 1, 1]),
+        "ixn_b": np.asarray([0, 0, 2]),
+        "nfp_b": np.asarray([2]),
+    }
+
+    qa = quasisymmetry_boozer_mode_residual_from_boozer_output(
+        booz,
+        helicity_m=1,
+        helicity_n=0,
+    )
+    expected_denominator = 2.0**2 + 0.3**2 + 0.4**2 + 0.1**2 + 0.2**2
+    np.testing.assert_allclose(np.asarray(qa["total"]), (0.4**2 + 0.2**2) / expected_denominator)
+    np.testing.assert_array_equal(np.asarray(qa["non_qs_mask"]), [False, False, True])
+
+    qh = quasisymmetry_boozer_mode_residual_from_boozer_output(
+        booz,
+        helicity_m=1,
+        helicity_n=1,
+        normalize=False,
+    )
+    np.testing.assert_allclose(np.asarray(qh["total"]), 0.3**2 + 0.1**2)
+    np.testing.assert_array_equal(np.asarray(qh["non_qs_mask"]), [False, True, False])
+
+    with pytest.raises(ValueError, match="Boozer mode arrays"):
+        quasisymmetry_boozer_mode_residual_from_boozer_output({**booz, "ixn_b": np.asarray([0, 1])})
+
+
 def test_quasisymmetry_coefficient_shape_helpers():
     pytest.importorskip("jax")
 

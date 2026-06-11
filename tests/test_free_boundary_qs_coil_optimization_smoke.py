@@ -219,9 +219,9 @@ def test_same_branch_direction_selects_current_and_fourier_variables():
 def test_same_branch_vector_key_parser_accepts_bnormal_alias():
     module = _load_example_module()
 
-    keys = module.parse_same_branch_vector_keys("qs_total,bnormal_rms")
+    keys = module.parse_same_branch_vector_keys("qs_total,boozer_qs_total,bnormal_rms")
 
-    assert keys == ("qs_total", "accepted_bnormal_rms")
+    assert keys == ("qs_total", "boozer_qs_total", "accepted_bnormal_rms")
 
 
 def test_same_branch_vector_key_parser_defaults_to_promoted_state_scalars():
