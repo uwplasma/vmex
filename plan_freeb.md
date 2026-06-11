@@ -17845,6 +17845,57 @@ Completion:
 - Docs/release hygiene: 100%.
 - QI minimal-seed README artifacts: 75% artifact-complete, 0% promoted.
 
+### 2026-06-11 Replacement CI Green After Gate Fixes
+
+Steps taken:
+
+1. Monitored replacement GitHub Actions run ``27350617153`` for commit
+   ``b00e391``.
+2. Confirmed the previously problematic shards completed successfully:
+   ``optimization-qi`` passed after the staged-runner mock fix, and
+   ``exact remaining`` passed after the synthetic branch-local report fixture
+   was updated.
+3. Rechecked the office NFP=2 minimal-seed QI run.  The process remains active
+   in the first ``auto_scalar`` cleanup stage, but root diagnostics and
+   promotion logs are still absent and the last checkpoint remains the
+   non-promotable mirror-ramp pending checkpoint.
+
+Results obtained:
+
+1. GitHub Actions run ``27350617153`` completed successfully.  All normal CI
+   jobs passed; ``Physics Full`` remained skipped as expected.
+2. Coverage gate passed on the combined py3.11 coverage artifacts.
+3. Remote QI NFP=2 still has no promotable artifact.  It is compute-active but
+   has not written a new checkpoint since the first cleanup-stage diagnostic.
+
+Best next steps:
+
+1. Let the office NFP=2 QI run reach timeout or finish naturally unless it
+   starts producing invalid artifacts.  Its current evidence does not support
+   README promotion.
+2. If the run times out with only the current checkpoint, treat NFP=2 as still
+   blocked by high-mode cleanup cost/policy and run a narrower final-stage
+   diagnostic before any README promotion.
+3. Continue phase-2/free-boundary work only with conservative branch-local
+   claims until an actual arbitrary adaptive-branch AD-vs-FD gate exists.
+
+Need from user:
+
+No immediate action.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999999%.
+- VMEC parity and physics gates: 99.2%.
+- Single-stage coil-only optimization: 99.5%.
+- Robust coil perturbation optimization: deferred, 70%.
+- CPU/GPU performance: 99.5%.
+- CI/runtime/coverage hygiene: 100%; latest main CI and coverage gate are
+  green.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 75% artifact-complete, 0% promoted.
+
 ### 2026-06-11 Exact-Shard Synthetic Gate Fixture Fix
 
 Steps taken:
