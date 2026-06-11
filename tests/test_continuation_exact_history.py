@@ -81,7 +81,7 @@ def test_repeated_and_higher_continuation_stages_use_previous_optimized_input(
             return {
                 "x": x,
                 "message": "synthetic",
-                "_history_dump": _stage_history(float(self.stage_index)),
+                "_history_dump": _stage_history(float(10 - self.stage_index)),
             }
 
         def _indata_from_params(self, params):

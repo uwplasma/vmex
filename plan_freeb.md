@@ -19081,3 +19081,56 @@ Completion:
 - CI/runtime/coverage hygiene: 100%; ``a7c51a8`` CI is running.
 - Docs/release hygiene: 100%.
 - QI minimal-seed README artifacts: 81% artifact-complete, 0% promoted.
+
+### 2026-06-11 CI Continuation Fixture Fix and CLI Smoke
+
+Steps taken:
+
+1. Investigated failed GitHub Actions run ``27360329080`` for ``8bb91e2``.
+2. Found the failure was isolated to
+   ``tests/test_continuation_exact_history.py::test_repeated_and_higher_continuation_stages_use_previous_optimized_input``.
+3. The synthetic fixture used increasing objective values by stage index, so
+   the new repeated-stage non-worsening guard correctly rejected the second
+   mode-1 stage.  That contradicted the test's purpose, which is to verify
+   accepted-stage handoff.
+4. Updated the fixture to use decreasing synthetic objectives, preserving the
+   accepted-handoff assertion while the separate guard unit test continues to
+   cover rejection.
+5. Ran the public quick-start smoke:
+   ``vmec --test --outdir /Users/rogeriojorge/local/tests/vmec_cli_test_smoke_8bb91e2 --quiet``.
+6. Ran CLI/Boozer input tests and the full QI helper/checkpoint shard locally.
+
+Results obtained:
+
+1. Failed CI test now passes locally with the guard test: ``3`` tests.
+2. Full ``tests/test_continuation_exact_history.py`` passes locally: ``8`` tests.
+3. ``vmec --test`` produced the bundled QH input, WOUT, and four plots in the
+   scratch output directory.
+4. CLI/Boozer input shard passed: ``41`` tests.
+5. QI helper/checkpoint shard passed: ``45`` tests.
+
+Best next steps:
+
+1. Commit and push the CI fixture fix so GitHub Actions reruns on main.
+2. Keep monitoring the active office QI NFP2 single-pass run; stage 2 remains
+   compute-active and should be parsed when its history appears.
+3. If stage 2 remains too slow or weak, stop the single-pass attempt and switch
+   to a lower-budget repeated-ladder comparison using the non-worsening guard.
+
+Need from user:
+
+No immediate action.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999999%; arbitrary adaptive
+  branch differentiation remains unclaimed.
+- VMEC parity and physics gates: 99.3%.
+- Single-stage coil-only optimization: 99.5%.
+- Robust coil perturbation optimization: deferred, 70%.
+- CPU/GPU performance: 99.6%.
+- CI/runtime/coverage hygiene: 100% locally after the fixture fix; awaiting
+  rerun after push.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 81% artifact-complete, 0% promoted.
