@@ -269,9 +269,9 @@ def test_qi_staged_runner_preserves_partial_reference_metrics_on_timeout(tmp_pat
     )
 
     def _timeout(*args, **kwargs):
-        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout"))
+        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout_s"))
 
-    monkeypatch.setattr(runner.subprocess, "run", _timeout)
+    monkeypatch.setattr(runner, "_run_qi_subprocess", _timeout)
     config = runner.QIStagedCaseConfig(
         name="qi_nfp2",
         input_file=ROOT / "examples" / "data" / "input.minimal_seed_nfp2",
@@ -295,6 +295,46 @@ def test_qi_staged_runner_preserves_partial_reference_metrics_on_timeout(tmp_pat
     assert result.qi_max_elongation == pytest.approx(6.4)
     assert result.iota_final == pytest.approx(0.47)
     assert result.aspect_final == pytest.approx(9.8)
+
+
+def test_qi_staged_subprocess_timeout_terminates_process_group(tmp_path: Path, monkeypatch) -> None:
+    runner = _load_runner()
+    events = []
+
+    class FakePopen:
+        pid = 1234
+
+        def __init__(self, *args, **kwargs):
+            self.returncode = None
+            events.append(("popen", bool(kwargs.get("start_new_session"))))
+
+        def wait(self, timeout=None):
+            events.append(("wait", timeout))
+            if timeout == 0.25:
+                raise subprocess.TimeoutExpired(cmd=("fake",), timeout=timeout)
+            self.returncode = -15
+            return self.returncode
+
+        def poll(self):
+            return self.returncode
+
+    monkeypatch.setattr(runner.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(runner.os, "getpgid", lambda pid: 4321)
+    monkeypatch.setattr(runner.os, "killpg", lambda pgid, sig: events.append(("killpg", pgid, sig)))
+
+    with (tmp_path / "stdout.log").open("w") as stdout, (tmp_path / "stderr.log").open("w") as stderr:
+        with pytest.raises(subprocess.TimeoutExpired):
+            runner._run_qi_subprocess(
+                ["--synthetic"],
+                env={},
+                stdout=stdout,
+                stderr=stderr,
+                timeout_s=0.25,
+            )
+
+    assert ("popen", True) in events
+    assert ("killpg", 4321, runner.signal.SIGTERM) in events
+    assert ("killpg", 4321, runner.signal.SIGKILL) not in events
 
 
 def test_qi_staged_runner_prefers_stage_checkpoint_metrics_on_timeout(tmp_path: Path, monkeypatch) -> None:
@@ -351,9 +391,9 @@ def test_qi_staged_runner_prefers_stage_checkpoint_metrics_on_timeout(tmp_path: 
     )
 
     def _timeout(*args, **kwargs):
-        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout"))
+        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout_s"))
 
-    monkeypatch.setattr(runner.subprocess, "run", _timeout)
+    monkeypatch.setattr(runner, "_run_qi_subprocess", _timeout)
     config = runner.QIStagedCaseConfig(
         name="qi_nfp2",
         input_file=ROOT / "examples" / "data" / "input.minimal_seed_nfp2",
@@ -471,9 +511,9 @@ def test_qi_staged_runner_sparse_stage_checkpoint_keeps_boundary_metrics(tmp_pat
     )
 
     def _timeout(*args, **kwargs):
-        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout"))
+        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout_s"))
 
-    monkeypatch.setattr(runner.subprocess, "run", _timeout)
+    monkeypatch.setattr(runner, "_run_qi_subprocess", _timeout)
     config = runner.QIStagedCaseConfig(
         name="qi_nfp2",
         input_file=ROOT / "examples" / "data" / "input.minimal_seed_nfp2",
