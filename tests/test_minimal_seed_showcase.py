@@ -428,6 +428,56 @@ def test_minimal_seed_showcase_dispatches_qi_to_staged_runner(tmp_path: Path, mo
     assert generator.sweep.PROBLEM_CONFIGS == original_configs
 
 
+def test_minimal_seed_showcase_qi_reference_lambda_override(tmp_path: Path, monkeypatch) -> None:
+    generator = _load_module("generate_minimal_seed_showcase_qi_lambdas", "generate_minimal_seed_showcase.py")
+    budget = generator.MinimalSeedBudget(
+        max_nfev=2,
+        continuation_nfev=1,
+        inner_max_iter=5,
+        inner_ftol=1.0e-8,
+        trial_max_iter=5,
+        trial_ftol=1.0e-8,
+    )
+    captured = {}
+
+    def _fake_staged_runner(config):
+        captured["config"] = config
+        return generator.sweep.CaseResult(
+            backend=config.backend_label,
+            problem="qi",
+            max_mode=config.max_mode,
+            use_ess=config.use_ess,
+            success=True,
+            crashed=False,
+            message="synthetic staged result",
+            policy=config.policy,
+            output_dir=str(config.output_dir),
+        )
+
+    monkeypatch.setattr(generator.qi_staged_runner, "run_qi_staged_case", _fake_staged_runner)
+
+    assert generator._parse_qi_reference_lambdas(None) == generator.qi_staged_runner.DEFAULT_REFERENCE_LAMBDAS
+    assert generator._parse_qi_reference_lambdas("none") is None
+    assert generator._parse_qi_reference_lambdas("0.6, 0.8, 1.0") == pytest.approx((0.6, 0.8, 1.0))
+
+    generator._run_showcase_case(
+        generator.SHOWCASE_CASES["qi_nfp3"],
+        tmp_path / "case",
+        backend_label="gpu",
+        solver_device="gpu",
+        worker_jax_platforms="cuda",
+        policy="continuation",
+        max_mode=5,
+        use_ess=True,
+        budget=budget,
+        qi_reference_lambdas=(0.6, 0.8, 1.0),
+    )
+
+    config = captured["config"]
+    assert config.reference_lambdas == pytest.approx((0.6, 0.8, 1.0))
+    assert config.worker_jax_platforms == "cuda"
+
+
 def test_minimal_seed_showcase_writes_target_helicity_seed_input(tmp_path: Path) -> None:
     generator = _load_module("generate_minimal_seed_showcase_seed", "generate_minimal_seed_showcase.py")
     case = generator.SHOWCASE_CASES["qa_nfp2"]
