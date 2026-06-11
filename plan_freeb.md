@@ -19082,6 +19082,64 @@ Completion:
 - Docs/release hygiene: 100%.
 - QI minimal-seed README artifacts: 81% artifact-complete, 0% promoted.
 
+### 2026-06-11 QI Minimal-Seed NFP2 Single-Pass Triage
+
+Steps taken:
+
+1. Let the NFP2 minimal-seed single-pass office CPU run proceed through mode 1.
+2. Stopped the full-resolution single-pass run after ``24.5`` minutes because
+   it remained compute-active in the mode-2 stage and had produced only the
+   stage-1 history.
+3. Launched a reduced mode-2 diagnostic from the completed stage-1 boundary,
+   using ``max_mode=2``, ``max_nfev=3``, no continuation, reduced Boozer
+   resolution ``mboz=nboz=10``, and no plot generation.
+4. Confirmed the latest GitHub Actions run for ``e77c432`` passed.
+
+Results obtained:
+
+1. Full stage 1 from the NFP2 minimal seed completed in ``469.32 s`` with
+   ``method=scipy`` and ``method_auto_reason=auto:dense-default``.  It reduced
+   objective ``3.3156e4 -> 7.1970e2`` and moved mean iota to ``-0.5972``.
+2. The full-resolution mode-2 stage was too expensive for the current
+   promotion lane: no stage-2 checkpoint after ``24.5`` minutes total runtime.
+3. Reduced mode-2 diagnostic completed in ``76.94 s`` and reduced objective
+   ``786.59 -> 676.11``.  It kept engineering metrics acceptable
+   (mirror ``0.2856``, max elongation ``6.03``, mean iota ``-0.6560``), but QI
+   remained far from promotion (smooth QI ``0.2857``, legacy QI ``1.651``).
+4. This identifies the next bottleneck clearly: NFP2 minimal-seed QI needs a
+   better basin/proposal or cheaper mode-2 exact/QI callbacks before
+   README-quality promotion, not simply more high-resolution single-pass
+   iterations.
+
+Best next steps:
+
+1. Do not promote the NFP2 QI single-pass artifact.
+2. Compare two bounded alternatives next: repeated lower ladder with the
+   non-worsening guard, and a basin/reference proposal that preserves raw-seed
+   provenance but avoids spending the entire budget in poor mode-2 local
+   cleanup.
+3. Target QI exact callback performance at mode 2: lower-cost Boozer/QI
+   screening for trial points, then full-resolution diagnostics only for
+   accepted candidates.
+
+Need from user:
+
+No immediate action.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999999%; arbitrary adaptive
+  branch differentiation remains unclaimed.
+- VMEC parity and physics gates: 99.3%.
+- Single-stage coil-only optimization: 99.5%.
+- Robust coil perturbation optimization: deferred, 70%.
+- CPU/GPU performance: 99.6%.
+- CI/runtime/coverage hygiene: 100%; latest CI is green.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 82% artifact-complete, 0% promoted; NFP2
+  raw-seed escape is validated, but precise-QI promotion remains open.
+
 ### 2026-06-11 CI Continuation Fixture Fix and CLI Smoke
 
 Steps taken:
