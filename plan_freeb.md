@@ -17768,6 +17768,83 @@ Completion:
 - Docs/release hygiene: 100%.
 - QI minimal-seed README artifacts: 67% artifact-complete, 0% promoted.
 
+### 2026-06-11 Branch-Local Gate Contract and QI Test Runtime Fix
+
+Steps taken:
+
+1. Audited the same-branch/free-boundary validation gates after the sidecar
+   free-boundary review.  The existing scalar adapter records top-level
+   contract failures, but the downstream physical/adaptive gates only checked
+   per-scalar reports.
+2. Added top-level scalar-report checks to
+   ``direct_coil_same_branch_physical_scalar_gate_report``.  A branch-local
+   report now fails promotion if it did not pass, claims adaptive-controller
+   differentiation, claims ``run_free_boundary`` differentiation, or does not
+   advertise fixed accepted-branch differentiation.
+3. Added a synthetic regression test proving that passing per-scalar slopes
+   cannot mask invalid top-level derivative claims.
+4. While running QI policy checks, found a CI/runtime regression: one
+   ``qi_staged_runner`` artifact-conversion test still mocked
+   ``subprocess.run`` even though the staged runner now uses ``Popen`` to own
+   the process group.  The test launched a real ``QI_optimization.py`` run.
+5. Patched the test to mock ``_run_qi_subprocess`` directly, matching the
+   timeout/checkpoint tests and avoiding any real optimization in this unit
+   shard.
+
+Results obtained:
+
+1. Focused lint passed:
+   ``python -m ruff check vmec_jax/free_boundary_adjoint.py tests/test_free_boundary_qs_coil_optimization_smoke.py tests/test_qi_staged_runner.py``.
+2. Focused branch-local gate tests passed:
+   ``JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_qs_coil_optimization_smoke.py::test_physical_and_adaptive_gates_reject_branch_local_top_level_ad_claim tests/test_free_boundary_qs_coil_optimization_smoke.py::test_branch_local_scalar_report_adapter_records_failure_modes tests/test_free_boundary_qs_coil_optimization_smoke.py::test_branch_mismatch_blocks_scalar_adaptive_and_proposal_promotion -q``.
+3. Full free-boundary QS optimization smoke shard passed:
+   ``JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_qs_coil_optimization_smoke.py -q``
+   with one expected xfail.
+4. Focused QI staged-runner tests passed, and the full staged-runner file now
+   passes quickly:
+   ``JAX_ENABLE_X64=1 python -m pytest -q tests/test_qi_staged_runner.py -q``.
+5. The accidental local heavy QI subprocess was stopped after confirming the
+   stale mock was the cause.  This should materially reduce the next GitHub
+   ``optimization-qi`` shard runtime.
+6. The office NFP=2 QI run remains active.  It selected the aspect-aware
+   reference at ``lambda=1.000`` with aspect ``8.00194``, mean iota
+   ``-0.4473``, mirror ``0.2407``, and legacy QI ``2.91e-3``.  The first
+   cleanup-stage diagnostics are not promotable yet (smooth QI ``5.28e-3`` and
+   legacy QI ``2.91e-3``).
+
+Best next steps:
+
+1. Commit and push the branch-local gate and QI staged-runner runtime fixes.
+2. Monitor the replacement CI run to confirm the ``optimization-qi`` shard no
+   longer launches a full QI optimization from the unit test.
+3. Let the office NFP=2 QI run finish or time out.  Promote no README QI
+   artifacts unless root ``diagnostics.json`` passes both QI seed and
+   engineering gates.
+4. If NFP=2 fails strict promotion, tune only the final NFP=2 minimal/circular
+   QI cleanup policy; do not relax renderer/provenance gates or accept
+   working-seed-only artifacts as final.
+
+Need from user:
+
+No immediate action.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999999%; the new gate closes
+  a top-level same-branch overclaim path, while arbitrary adaptive branch
+  differentiation remains unclaimed.
+- VMEC parity and physics gates: 99.15%.
+- Single-stage coil-only optimization: 99.5%.
+- Robust coil perturbation optimization: deferred, 70%.
+- CPU/GPU performance: 99.5%; QI unit shards no longer accidentally launch a
+  real optimization, and NFP=2 high-mode cleanup remains the live expensive
+  artifact lane.
+- CI/runtime/coverage hygiene: 100% locally for touched shards; replacement CI
+  needed to confirm the remote ``optimization-qi`` runtime fix.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 75% artifact-complete, 0% promoted.
+
 ### 2026-06-11 CI Runtime Shard Split and Heartbeat
 
 Steps taken:

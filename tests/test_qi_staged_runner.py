@@ -199,9 +199,9 @@ def test_qi_staged_runner_converts_artifacts_to_case_result(tmp_path: Path, monk
 
     def _fake_run(*args, **kwargs):
         calls.append((args, kwargs))
-        return subprocess.CompletedProcess(args=args[0], returncode=0)
+        return 0
 
-    monkeypatch.setattr(runner.subprocess, "run", _fake_run)
+    monkeypatch.setattr(runner, "_run_qi_subprocess", _fake_run)
     config = runner.QIStagedCaseConfig(
         name="qi_nfp2",
         input_file=ROOT / "examples" / "data" / "input.minimal_seed_nfp2",
