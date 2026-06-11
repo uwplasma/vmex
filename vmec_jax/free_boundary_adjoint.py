@@ -5368,6 +5368,16 @@ def direct_coil_same_branch_physical_scalar_gate_report(
         errors.append("same-branch replay gate failed")
     if bool(replay_gate.get("differentiates_adaptive_controller", True)):
         errors.append("replay gate unexpectedly claims adaptive-controller differentiation")
+    if not bool(scalars_report.get("passed", False)):
+        errors.append("branch-local scalar report did not pass")
+    if bool(scalars_report.get("differentiates_adaptive_controller", False)):
+        errors.append("branch-local scalar report unexpectedly claims adaptive-controller differentiation")
+    if bool(scalars_report.get("differentiates_run_free_boundary", False)):
+        errors.append("branch-local scalar report unexpectedly claims run_free_boundary differentiation")
+    if "differentiates_fixed_accepted_branch" in scalars_report and not bool(
+        scalars_report.get("differentiates_fixed_accepted_branch", False)
+    ):
+        errors.append("branch-local scalar report does not differentiate the fixed accepted branch")
     if not bool(scalars_report.get("same_branch", False)):
         errors.append("scalar report is not same-branch")
 

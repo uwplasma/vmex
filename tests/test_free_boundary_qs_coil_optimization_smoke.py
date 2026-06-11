@@ -552,6 +552,83 @@ def test_branch_mismatch_blocks_scalar_adaptive_and_proposal_promotion():
     assert "branch fingerprint" in proposal["reason"]
 
 
+def test_physical_and_adaptive_gates_reject_branch_local_top_level_ad_claim():
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jnp
+    from vmec_jax.free_boundary_adjoint import (
+        direct_coil_adaptive_full_loop_same_branch_gate_report,
+        direct_coil_branch_local_scalars_report_from_complete_fd,
+        direct_coil_same_branch_physical_scalar_gate_report,
+    )
+
+    gate = _same_branch_replay_gate_stub()
+    complete_report = {
+        "branch_compatibility": gate["branch"],
+        "trace_replay_diagnostics": gate["trace_replay_diagnostics"],
+        "objective_values": {
+            "aspect": {"base": 6.0, "plus": 6.1, "minus": 5.9, "central_fd_directional": 0.2},
+        },
+    }
+    branch_local = {
+        "uses_production_forward": True,
+        "differentiates_adaptive_controller": False,
+        "differentiates_run_free_boundary": False,
+        "differentiates_fixed_accepted_branch": True,
+        "derivative_mode": "directional_jvp",
+        "replay_ad_mode": "direct",
+        "scalar_keys": ("aspect",),
+        "values": {"aspect": jnp.asarray(6.0)},
+        "replay_value_map": {"aspect": jnp.asarray(6.0)},
+        "base_abs_delta": {"aspect": 0.0},
+        "directional_derivatives": {"aspect": jnp.asarray(0.2)},
+        "replay_option_flags": {"use_stacked_step_controls": True, "use_accepted_only_fast_path": True},
+        "replay_branch_metadata": {"accepted_mask": [True], "rejected_mask": [False]},
+        "controller_slot_summary": {"accepted_slots": 1, "rejected_slots": 0},
+    }
+    scalar_report = direct_coil_branch_local_scalars_report_from_complete_fd(
+        complete_report,
+        branch_local,
+        scalar_keys=("aspect",),
+    )
+    assert scalar_report["passed"] is True
+    assert scalar_report["scalar_reports"]["aspect"]["passed"] is True
+
+    top_level_bad_report = {
+        **scalar_report,
+        "passed": False,
+        "differentiates_adaptive_controller": True,
+        "differentiates_run_free_boundary": True,
+        "differentiates_fixed_accepted_branch": False,
+        "errors": ("synthetic top-level contract failure",),
+    }
+    physical_gate = direct_coil_same_branch_physical_scalar_gate_report(
+        complete_report,
+        top_level_bad_report,
+        scalar_keys=("aspect",),
+    )
+    adaptive_gate = direct_coil_adaptive_full_loop_same_branch_gate_report(
+        complete_report,
+        top_level_bad_report,
+        scalar_keys=("aspect",),
+        require_stacked_step_controls=True,
+    )
+
+    assert physical_gate["scalars"]["aspect"]["passed"] is True
+    assert physical_gate["passed"] is False
+    assert "branch-local scalar report did not pass" in physical_gate["errors"]
+    assert (
+        "branch-local scalar report unexpectedly claims adaptive-controller differentiation"
+        in physical_gate["errors"]
+    )
+    assert "branch-local scalar report unexpectedly claims run_free_boundary differentiation" in physical_gate["errors"]
+    assert "branch-local scalar report does not differentiate the fixed accepted branch" in physical_gate["errors"]
+    assert adaptive_gate["passed"] is False
+    assert (
+        "physical scalar gate: branch-local scalar report unexpectedly claims adaptive-controller differentiation"
+        in adaptive_gate["errors"]
+    )
+
+
 def test_same_branch_report_anchor_uses_best_or_initial_coil_point():
     module = _load_example_module()
     base_params, _metadata = module.make_circle_provider(current_scale=1.0)
