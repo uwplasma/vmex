@@ -18637,3 +18637,87 @@ Completion:
 - Docs/release hygiene: 100%.
 - QI minimal-seed README artifacts: 75% artifact-complete, 0% promoted; NFP2
   still requires an uncontended cleanup rerun from the verified working seed.
+
+### 2026-06-11 NFP2 QI CPU/GPU Cleanup Diagnostics
+
+Steps taken:
+
+1. Confirmed GitHub Actions run ``27354587673`` passed for ``7fd9b1e``.
+2. Copied the verified NFP2 QI stage-1 working seed from the office artifact to
+   a local scratch directory outside the repository:
+   ``/Users/rogeriojorge/local/tests/vmec_jax_qi_cpu_diag_7fd9b1e``.
+3. Relaunched the full-resolution office GPU cleanup from the same working seed
+   under initially idle GPU conditions.
+4. Ran a local CPU reduced-resolution QI diagnostic with
+   ``mboz=nboz=10``, ``nphi=81``, ``nalpha=17``, ``n_bounce=31``,
+   ``max_nfev=2``.
+5. Ran the same reduced-resolution diagnostic on office GPU 1 for CPU/GPU
+   timing comparison.
+6. Ran a local CPU mirror-weight cleanup with ``mirror_weight=80`` and
+   ``max_nfev=12`` from the working seed.
+7. Chained a second local CPU cleanup from the mirror-weight-80 output with
+   ``mirror_weight=200`` and ``max_nfev=20``.
+8. Tested ``scipy_matrix_free`` from the mirror-weight-80 output as an
+   alternate optimizer path.
+9. Stopped the full-resolution office GPU run after about 10 minutes in the
+   first callback with only pending checkpoints.
+
+Results obtained:
+
+1. Reduced-resolution local CPU, ``max_nfev=2``:
+   wall time ``42.34 s``, smooth QI ``1.648e-3``, legacy QI ``3.381e-4``,
+   mirror ``0.37278``, elongation ``5.054``, aspect ``6.399``, mean iota
+   ``-0.501``.  This reproduces the stage-1 working-seed state and fails only
+   the mirror gate.
+2. Reduced-resolution office GPU, same settings:
+   wall time ``229.02 s`` with matching physics metrics.  For this cold
+   high-mode QI callback, GPU is about ``5.4x`` slower than local CPU.
+3. CPU mirror cleanup, ``mirror_weight=80``, ``max_nfev=12``:
+   wall time ``113.42 s``, mirror improved to ``0.35160``, elongation
+   ``4.977``, aspect ``6.348``, mean iota ``-0.494``, smooth QI
+   ``1.712e-3``, legacy QI ``3.49e-4``.  Still fails mirror.
+4. CPU chained mirror cleanup, ``mirror_weight=200``, ``max_nfev=20``:
+   wall time ``106.65 s``, mirror only improved marginally to ``0.34904`` and
+   QI slightly degraded to smooth ``1.726e-3``.  Stronger penalty alone is
+   insufficient.
+5. ``scipy_matrix_free`` from the mirror-weight-80 seed failed immediately with
+   ``array must not contain infs or NaNs`` and returned the original accepted
+   point.  This is a separate robustness issue in the QI matrix-free
+   residual/JVP path.
+6. Full-resolution GPU first callback remained too expensive to be useful for
+   this diagnostic, so it was stopped before consuming the 45-minute timeout.
+
+Best next steps:
+
+1. Keep the NFP2 working seed as valid partial evidence but do not promote it:
+   QI, aspect, iota, and elongation are good, mirror remains too high.
+2. For QI seed robustness, try a different cleanup formulation rather than
+   larger mirror weight alone: augmented-Lagrangian or constrained scalar trust
+   with a hard QI-preservation term and explicit mirror-ratio merit function.
+3. Fix the ``scipy_matrix_free`` NaN path before using it for production QI
+   cleanup.  The failure likely occurs in a trial residual/JVP and should be
+   converted into a rejected trial or finite penalty, not a failed optimizer.
+4. For performance, treat GPU QI exact callbacks as not production-ready for
+   this path.  Local CPU currently wins on cold high-mode QI cleanup; GPU work
+   should target JIT/tape reuse and lower host/device compile overhead before
+   more full-resolution sweeps.
+
+Need from user:
+
+No immediate action.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999999%; arbitrary adaptive
+  branch differentiation remains unclaimed.
+- VMEC parity and physics gates: 99.2%.
+- Single-stage coil-only optimization: 99.5%.
+- Robust coil perturbation optimization: deferred, 70%.
+- CPU/GPU performance: 99.55%; this diagnostic clearly identifies the QI GPU
+  cold exact callback as worse than CPU and narrows the remaining optimization
+  target.
+- CI/runtime/coverage hygiene: 100%; latest GitHub Actions run is green.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 76% artifact-complete, 0% promoted; NFP2
+  has a verified good-QI working seed but still lacks a mirror-passing final.
