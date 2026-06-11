@@ -637,6 +637,7 @@ def _minimal_or_circular_qi_case(
     max_mode: int,
     min_vmec_mode: int,
     reference_lambdas=(0.995, 1.0, 1.005),
+    aspect_ramp_weights: tuple[float, ...] | None = None,
 ):
     """Build a deterministic torus-like-seed QI case from a reviewed policy."""
 
@@ -667,6 +668,7 @@ def _minimal_or_circular_qi_case(
     )
     local_stages = []
     for stage in base.get("mirror_ramp_stages", ()):
+        ramp_weights = (None,) if aspect_ramp_weights is None else tuple(float(value) for value in aspect_ramp_weights)
         stage_nfev = max(
             int(stage.get("max_nfev", base.get("max_nfev", MINIMAL_QI_LOCAL_STAGE_MIN_NFEV))),
             int(base.get("max_nfev", MINIMAL_QI_LOCAL_STAGE_MIN_NFEV)),
@@ -677,30 +679,47 @@ def _minimal_or_circular_qi_case(
             if ("stage_modes" in stage or "stage_mode_limits" in stage)
             else {"stage_modes": (int(max_mode),), "use_mode_continuation": False}
         )
-        local_stages.append(
-            {
-                **stage,
-                "max_nfev": stage_nfev,
-                **direct_mode_override,
-                # Minimal/circular seeds first select the lowest-QI reference.
-                # Aspect localization must therefore be gentle: a large aspect
-                # pull can move toward A=6 while destroying the QI/iota/mirror
-                # gates.  Use QI and iota as hard guards, not post-hoc filters.
-                "aspect_weight": max(float(stage.get("aspect_weight", 0.0)), 0.75),
-                "iota_floor_weight": max(float(stage.get("iota_floor_weight", 0.0)), 50.0**2),
-                "qi_weight": max(float(stage.get("qi_weight", 0.0)), 1000.0),
-                "qi_ceiling_max": min(
-                    float(stage.get("qi_ceiling_max", base.get("qi_gate_smooth_max", 2.0e-3))),
-                    float(base.get("qi_gate_smooth_max", 2.0e-3)),
-                ),
-                "qi_ceiling_weight": max(float(stage.get("qi_ceiling_weight", 0.0)), 50000.0),
-                # Showcase and staged-runner --max-nfev should be the local
-                # optimizer budget for these reference-seeded cases, not only a
-                # ceiling over legacy one-evaluation audit stages.
-                "use_showcase_max_nfev": True,
-                "use_showcase_max_mode": True,
-            }
-        )
+        for ramp_index, aspect_weight in enumerate(ramp_weights, start=1):
+            stage_name = str(stage.get("name", "cleanup"))
+            if aspect_weight is not None:
+                stage_name = f"{stage_name}_aspect{str(aspect_weight).replace('.', 'p')}"
+            local_stages.append(
+                {
+                    **stage,
+                    "name": stage_name,
+                    "max_nfev": stage_nfev,
+                    **direct_mode_override,
+                    # Minimal/circular seeds first select the lowest-QI reference.
+                    # Aspect localization must therefore be gentle and staged: a
+                    # large aspect pull can move toward A=6 while destroying the
+                    # QI/iota/mirror gates.  Use QI and iota as hard guards, not
+                    # post-hoc filters, and only promote intermediate aspect
+                    # moves when exact diagnostics remain QI-safe.
+                    "aspect_weight": (
+                        max(float(stage.get("aspect_weight", 0.0)), 0.75)
+                        if aspect_weight is None
+                        else float(aspect_weight)
+                    ),
+                    "iota_floor_weight": max(float(stage.get("iota_floor_weight", 0.0)), 50.0**2),
+                    "qi_weight": max(float(stage.get("qi_weight", 0.0)), 1000.0),
+                    "qi_ceiling_max": min(
+                        float(stage.get("qi_ceiling_max", base.get("qi_gate_smooth_max", 2.0e-3))),
+                        float(base.get("qi_gate_smooth_max", 2.0e-3)),
+                    ),
+                    "qi_ceiling_weight": max(float(stage.get("qi_ceiling_weight", 0.0)), 50000.0),
+                    "accept_if_qi_safe_aspect_improves": aspect_weight is not None and ramp_index < len(ramp_weights),
+                    "aspect_improvement_min": 5.0e-3,
+                    "qi_safe_smooth_relax": 1.0,
+                    "qi_safe_legacy_relax": 1.0,
+                    "qi_safe_mirror_relax": 1.0,
+                    "qi_safe_elongation_relax": 1.0,
+                    # Showcase and staged-runner --max-nfev should be the local
+                    # optimizer budget for these reference-seeded cases, not only a
+                    # ceiling over legacy one-evaluation audit stages.
+                    "use_showcase_max_nfev": True,
+                    "use_showcase_max_mode": True,
+                }
+            )
     return {
         **base,
         "case_goal": case_goal,
@@ -735,6 +754,7 @@ QI_CASES.update(
             max_mode=3,
             min_vmec_mode=6,
             reference_lambdas=(0.99, 0.995, 1.0, 1.005, 1.01),
+            aspect_ramp_weights=(0.35, 0.75, 1.5),
         ),
         "minimal_nfp3_qi": _minimal_or_circular_qi_case(
             base_case="qi_stel_seed_3127",

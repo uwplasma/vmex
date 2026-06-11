@@ -17697,3 +17697,73 @@ Completion:
   awaiting the pushed fix.
 - Docs/release hygiene: 100%.
 - QI minimal-seed README artifacts: 65% artifact-complete, 0% promoted.
+
+### 2026-06-11 NFP=2 QI Aspect-Ramp Promotion Rule
+
+Steps taken:
+
+1. Monitored the replacement CI for ``0b7f279``; the run completed
+   successfully.
+2. Harvested the office NFP=2 GPU diagnostic for the gentler single-stage
+   aspect cleanup from ``19a3975``.
+3. Used the QI-policy audit result to confirm that ``minimal_nfp2_qi`` still
+   had only one local cleanup stage and no true aspect-localization ramp.
+4. Added a narrow ``accept_if_qi_safe_aspect_improves`` promotion rule in
+   ``stage_promotes_candidate``.  The rule can only promote an intermediate
+   candidate when exact diagnostics show aspect-relative-error improvement and
+   smooth QI, legacy QI, iota, mirror, and elongation remain within explicit
+   QI-safe limits.
+5. Expanded only the NFP=2 minimal/circular QI policy into a three-stage
+   aspect ramp with weights ``0.35, 0.75, 1.5``.  The first two stages may use
+   the new QI-safe aspect promotion rule; the final stage still requires the
+   normal promotion gate.
+6. Added regression tests for the NFP=2 ramp policy and both accepted/rejected
+   branches of the new promotion rule.
+
+Results obtained:
+
+1. GitHub Actions run ``27343639016`` passed for ``0b7f279``.
+2. The single-stage office diagnostic improved aspect from ``8.373`` to
+   ``7.027`` and improved smooth/legacy QI to ``1.724e-3``/``3.100e-4``, but
+   it damaged mirror ratio to ``0.440`` and mean iota to ``|iota|=0.404``.
+   The candidate was correctly rejected, and the current baseline remained the
+   safer reference-family state: aspect ``8.373``, smooth QI ``3.714e-3``,
+   legacy QI ``2.087e-3``, mirror ``0.247``, and ``|iota|=0.488``.
+3. Focused lint passed:
+   ``python -m ruff check vmec_jax/qi_optimization.py examples/optimization/qi_optimization_cases.py tests/test_qi_case_resolution.py tests/test_minimal_seed_showcase.py tests/test_qi_optimization_more_coverage.py``.
+4. Focused QI tests passed:
+   ``python -m pytest -q tests/test_qi_case_resolution.py tests/test_minimal_seed_showcase.py tests/test_qi_optimization_more_coverage.py -q``
+   with 45 passing tests.
+5. Broader QI promotion/checkpoint shard passed:
+   ``python -m pytest -q tests/test_qi_basin_promote.py tests/test_qi_stage_checkpoint.py tests/test_qi_optimization_context_more_coverage.py tests/test_qi_optimization_public_helpers.py tests/test_qi_staged_runner.py -q``
+   with 58 passing tests.
+
+Best next steps:
+
+1. Commit/push the NFP=2 aspect-ramp promotion patch.
+2. Re-run the NFP=2 minimal-seed GPU diagnostic from the new commit.  A
+   promotable path should either satisfy the full gates or advance only through
+   QI-safe aspect improvements that do not reproduce the mirror/iota regression
+   seen in the single-stage diagnostic.
+3. Keep the README QI panel unpromoted until the NFP1/2/3/4 minimal-seed
+   artifacts have exact diagnostics and provenance gates.
+4. After the QI artifact lane is updated, apply the free-boundary audit's
+   lower-risk runtime improvement: reuse/label duplicate branch-local vector
+   JVP profile reports rather than broadening adaptive differentiation claims.
+
+Need from user:
+
+No immediate action.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999998%.
+- VMEC parity and physics gates: 99.0%.
+- Single-stage coil-only optimization: 99.1%.
+- Robust coil perturbation optimization: deferred, 70%.
+- CPU/GPU performance: 99.4%; NFP=2 QI exact tape build remains a visible
+  hotspot, but correctness gating is the active blocker.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 67% artifact-complete, 0% promoted.

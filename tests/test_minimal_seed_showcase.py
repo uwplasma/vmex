@@ -419,11 +419,12 @@ def test_minimal_seed_showcase_dispatches_qi_to_staged_runner(tmp_path: Path, mo
     assert config.reference_accept_as_baseline is True
     assert config.reference_lambdas[:4] == pytest.approx((0.0, 0.1, 0.25, 0.5))
     assert config.reference_lambdas[-1] == pytest.approx(1.005)
-    assert config.mirror_ramp_stages[0]["aspect_weight"] == pytest.approx(0.75)
-    assert config.mirror_ramp_stages[0]["iota_floor_weight"] >= 50.0**2
-    assert config.mirror_ramp_stages[0]["qi_weight"] >= 1000.0
-    assert config.mirror_ramp_stages[0]["qi_ceiling_weight"] >= 50000.0
-    assert config.mirror_ramp_stages[0]["qi_ceiling_max"] <= 2.0e-3
+    assert [stage["aspect_weight"] for stage in config.mirror_ramp_stages] == pytest.approx([0.35, 0.75, 1.5])
+    assert [stage["accept_if_qi_safe_aspect_improves"] for stage in config.mirror_ramp_stages] == [True, True, False]
+    assert all(stage["iota_floor_weight"] >= 50.0**2 for stage in config.mirror_ramp_stages)
+    assert all(stage["qi_weight"] >= 1000.0 for stage in config.mirror_ramp_stages)
+    assert all(stage["qi_ceiling_weight"] >= 50000.0 for stage in config.mirror_ramp_stages)
+    assert all(stage["qi_ceiling_max"] <= 2.0e-3 for stage in config.mirror_ramp_stages)
     assert config.max_nfev == 4
     assert config.continuation_nfev == 3
     assert config.method == "scipy"

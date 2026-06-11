@@ -76,7 +76,12 @@ def test_minimal_and_circular_qi_cases_require_reference_seeded_local_stage() ->
         assert all(int(stage["max_nfev"]) >= mod.MINIMAL_QI_LOCAL_STAGE_MIN_NFEV for stage in stages)
         assert all(stage["use_showcase_max_nfev"] is True for stage in stages)
         assert all(stage["use_showcase_max_mode"] is True for stage in stages)
-        assert all(float(stage["aspect_weight"]) == pytest.approx(0.75) for stage in stages)
+        if case_name == "minimal_nfp2_qi":
+            assert [float(stage["aspect_weight"]) for stage in stages] == pytest.approx([0.35, 0.75, 1.5])
+            assert [bool(stage["accept_if_qi_safe_aspect_improves"]) for stage in stages] == [True, True, False]
+        else:
+            assert all(float(stage["aspect_weight"]) == pytest.approx(0.75) for stage in stages)
+            assert all(bool(stage["accept_if_qi_safe_aspect_improves"]) is False for stage in stages)
         assert all(float(stage["iota_floor_weight"]) >= 50.0**2 for stage in stages)
         assert all(float(stage["qi_weight"]) >= 1000.0 for stage in stages)
         assert all(float(stage["qi_ceiling_weight"]) >= 50000.0 for stage in stages)
