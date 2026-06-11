@@ -18520,3 +18520,64 @@ Completion:
 - Docs/release hygiene: 100%.
 - QI minimal-seed README artifacts: 75% artifact-complete, 0% promoted; NFP=2
   has useful partial stage evidence but is still not a final README candidate.
+
+### 2026-06-11 Green CI and NFP2 Working-Seed Cleanup Launch
+
+Steps taken:
+
+1. Monitored GitHub Actions for ``3253173`` after the QI checkpoint-selection
+   fix and chronological plan cleanup.
+2. Updated a clean office checkout
+   ``/home/rjorge/local/tests/vmec_jax_main_perf_20260607`` to ``3253173``.
+3. Confirmed the previous NFP2 timeout artifact has the intended completed
+   working seed at
+   ``mirror_ramp_01_matrix_free_mirror030_aspect0p35/input.final`` with
+   smooth QI ``1.618e-3``, legacy QI ``3.36e-4``, aspect ``6.399``, mean iota
+   ``-0.501``, elongation ``5.05``, and mirror ``0.372``.
+4. Launched a bounded office GPU cleanup from that completed stage-1 seed into
+   ``/home/rjorge/local/tests/vmec_jax_qi_nfp2_stage1_cleanup_3253173`` using
+   ``MAX_MODE=5``, one direct stage, ``max_nfev=25``, target aspect ``6``,
+   mirror target ``0.30``, and no simple/reference/target-helicity reseeding.
+
+Results obtained:
+
+1. GitHub Actions run ``27353494412`` completed successfully for ``3253173``.
+   Docs, build, py3.10/3.12, all py3.11 coverage shards, physics smoke, and
+   the combined coverage gate passed.
+2. The remote cleanup started from the intended working seed:
+   initial aspect ``6.399385`` and initial field objective ``3.988088e-1``.
+3. After roughly five minutes, the run was still inside the first exact
+   auto-scalar callback/tape path and had not emitted completed stage metrics.
+   This reinforces that high-mode QI cleanup is currently limited by cold
+   exact tape/build/replay cost, not by checkpoint bookkeeping.
+
+Best next steps:
+
+1. Let the office cleanup finish or reach its 45-minute timeout, then harvest
+   diagnostics.  Promote nothing unless it satisfies QI, aspect/iota, mirror,
+   and elongation gates.
+2. If the 25-evaluation cleanup times out before useful accepted metrics,
+   retry a smaller diagnostic with lower Boozer/QI optimization resolution or a
+   scalar-cost-only trial filter to isolate whether the bottleneck is the
+   Boozer/QI objective or the VMEC exact tape.
+3. Continue free-boundary phase-2/phase-3 conservatively: branch-local gates
+   are green, but arbitrary adaptive-branch differentiation remains unclaimed.
+
+Need from user:
+
+No immediate action.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999999%; arbitrary adaptive
+  branch differentiation remains unclaimed.
+- VMEC parity and physics gates: 99.2%.
+- Single-stage coil-only optimization: 99.5%.
+- Robust coil perturbation optimization: deferred, 70%.
+- CPU/GPU performance: 99.5% overall; the remaining practical hotspot is
+  high-mode QI exact callback/tape cost on GPU.
+- CI/runtime/coverage hygiene: 100%; latest GitHub Actions run is green.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 75% artifact-complete, 0% promoted; NFP2
+  cleanup is running from a verified working seed.
