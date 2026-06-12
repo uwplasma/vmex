@@ -115,10 +115,10 @@ def test_nfp2_balanced_qi_case_exposes_reviewed_mode5_mirror035_polish() -> None
     assert case["min_vmec_mode"] == 8
     assert case["mirror_threshold"] == pytest.approx(mod.DEFAULT_QI_MIRROR_RATIO)
     assert "balanced_mirror035" in str(case["output_dir"])
+    assert case["boundary_reference_preconditioner"]["lambdas"] == pytest.approx((0.97, 0.98, 0.99))
     assert [stage["name"] for stage in stages] == [
-        "final_balance_qi_mirror035",
-        "mirror_polish_after_qi_gate035",
-        "aspect_recovery_after_qi_gate035",
+        "aspect_first_qi_mirror035",
+        "guarded_tighten_qi_mirror035",
     ]
     assert all(
         stage["stage_mode_limits"] == ({"mode": 5, "max_m": 5, "max_n": 5, "label": "m05_n05"},)
@@ -132,12 +132,12 @@ def test_nfp2_balanced_qi_case_exposes_reviewed_mode5_mirror035_polish() -> None
     )
     assert stages[0]["accept_if_qi_improves"] is True
     assert stages[0]["promote_as_working_seed_only"] is True
-    assert stages[1]["accept_if_qi_improves"] is True
-    assert stages[1]["promote_as_working_seed_only"] is True
-    assert "accept_if_qi_improves" not in stages[2]
-    assert "promote_as_working_seed_only" not in stages[2]
-    assert stages[2]["aspect_weight"] == pytest.approx(0.85)
-    assert stages[2]["scalar_step_bound"] == pytest.approx(3.0e-2)
+    assert "accept_if_qi_improves" not in stages[1]
+    assert "promote_as_working_seed_only" not in stages[1]
+    assert stages[0]["aspect_weight"] == pytest.approx(0.75)
+    assert stages[0]["scalar_step_bound"] == pytest.approx(5.0e-2)
+    assert stages[1]["aspect_weight"] == pytest.approx(3.0)
+    assert stages[1]["scalar_step_bound"] == pytest.approx(2.5e-2)
 
 
 def test_nfp2_balanced_mirror032_alias_points_to_current_mirror035_policy() -> None:
@@ -148,9 +148,8 @@ def test_nfp2_balanced_mirror032_alias_points_to_current_mirror035_policy() -> N
     assert "mirror<=0.35" in case["case_goal"]
     assert "balanced_mirror035" in str(case["output_dir"])
     assert [stage["name"] for stage in case["mirror_ramp_stages"]] == [
-        "final_balance_qi_mirror035",
-        "mirror_polish_after_qi_gate035",
-        "aspect_recovery_after_qi_gate035",
+        "aspect_first_qi_mirror035",
+        "guarded_tighten_qi_mirror035",
     ]
 
 

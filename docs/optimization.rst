@@ -267,11 +267,12 @@ The reviewed high-budget NFP=2 polish path is registered as
 ``minimal_nfp2_qi_balanced_mirror035`` in
 ``examples/optimization/qi_optimization_cases.py``.  It starts from the same
 minimal NFP=2 seed/reference-family lane, then jumps directly to a mode-5
-scalar-trust augmented-Lagrangian cleanup chain: QI/mirror balance, mirror
-polish, and aspect recovery.  This path avoids the older expensive mode-3
-aspect ramp while preserving smooth and legacy QI gates below ``2e-3`` and the
-public mirror-ratio cap ``0.35``.  Use this preset when reproducing the best
-balanced NFP=2 QI example; use ``minimal_nfp2_qi`` for faster exploratory runs.
+scalar-trust augmented-Lagrangian cleanup chain: an aspect-first QI/mirror
+stage followed by a guarded QI tightening stage.  This path avoids the older
+expensive mode-3 aspect ramp while preserving smooth and legacy QI gates below
+``2e-3`` and the public mirror-ratio cap ``0.35``.  Use this preset when
+reproducing the best balanced NFP=2 QI example; use ``minimal_nfp2_qi`` for
+faster exploratory runs.
 Regenerate the QI rows and then render the figure/CSV with:
 
 .. code-block:: bash

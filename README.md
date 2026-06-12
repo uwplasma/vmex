@@ -195,9 +195,10 @@ Run individual editable examples with `python examples/optimization/QA_optimizat
 case, not as a README promotion row. For the reviewed high-budget NFP=2 QI
 polish path, use the `minimal_nfp2_qi_balanced_mirror035` preset in
 `examples/optimization/qi_optimization_cases.py`; it jumps from the selected
-reference-family candidate into mode-5 QI/mirror polish and aspect-recovery
-stages, avoiding the older expensive mode-3 aspect ramp. Full provenance and artifact
-rules are in `docs/optimization.rst` and `docs/optimization_sweep_results.rst`.
+reference-family candidate into mode-5 aspect-first QI/mirror polish and a
+guarded QI tightening stage, avoiding the older expensive mode-3 aspect ramp.
+Full provenance and artifact rules are in `docs/optimization.rst` and
+`docs/optimization_sweep_results.rst`.
 
 ## Performance, Validation, Release
 

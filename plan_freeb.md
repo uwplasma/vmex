@@ -496,6 +496,89 @@ Completion:
 - CI/runtime/coverage hygiene: 100%.
 - Docs/release hygiene: 100%.
 
+### 2026-06-12 Balanced NFP2 Aspect-First Guarded QI Polish
+
+Steps taken:
+
+1. Polled the previous ``office`` full preset run from commit ``8faf865`` and
+   confirmed the original direct mode-5 branch reached good QI/mirror/iota but
+   failed only aspect: smooth QI about ``1.99e-3``, legacy QI about
+   ``4.36e-4``, mirror about ``0.343``, and aspect about ``8.30``.
+2. Ran lower-reference-lambda variants on ``office`` using the same
+   ``minimal_nfp2_qi_balanced_mirror035`` policy.  The ``lambda=0.99`` branch
+   was the best lower-aspect start; its first QI cleanup reached smooth QI
+   ``2.06e-3``, legacy QI ``5.53e-4``, mirror ``0.333``, and aspect ``8.20``.
+3. Ran aspect-first mode-5 AL variants from the ``lambda=0.99`` branch with
+   first-stage aspect weights ``0.35``, ``0.75``, ``1.25``, and ``2.0``.
+   The ``0.75`` and ``2.0`` first-stage branches kept aspect inside the gate
+   but needed a second QI tightening pass.
+4. Ran guarded tightening variants from the first-stage states.  The passing
+   branch was ``aw075_g3``: start from the ``aspect_weight=0.75`` first-stage
+   state, then use a guarded QI tighten stage with ``aspect_weight=3.0``.
+5. Encoded that branch in ``minimal_nfp2_qi_balanced_mirror035``:
+   the reference scan is narrowed to ``(0.97, 0.98, 0.99)``, then the preset
+   runs ``aspect_first_qi_mirror035`` followed by
+   ``guarded_tighten_qi_mirror035``.
+6. Updated renderer labels, README/docs wording, and focused tests for the new
+   two-stage aspect-first/guarded-tighten policy.
+7. Re-ran focused validation locally.
+
+Results obtained:
+
+1. The promoted ``aw075_g3`` office diagnostic passes the existing engineering
+   gates without relaxing aspect: smooth QI ``1.607074833e-3``, legacy QI
+   ``2.352156922e-4``, mirror ratio ``0.347714748``, aspect ``8.005514``,
+   and mean iota ``-0.446072``.
+2. Stronger aspect-guard variants from the ``aw200`` first-stage state did not
+   improve the gate balance: ``aw200_g6`` passed QI/mirror but missed aspect
+   at ``8.123``; ``aw200_g8`` passed QI/aspect but missed mirror at ``0.357``;
+   ``aw200_g12`` pulled aspect to ``6.65`` but missed smooth QI and mirror.
+3. Focused tests passed:
+   ``python -m pytest -q tests/test_qi_case_resolution.py
+   tests/test_qi_staged_runner.py tests/test_qi_readme_cases.py
+   tests/test_optimization_examples.py tests/test_qi_optimization_more_coverage.py
+   tests/test_qi_optimization_public_helpers.py -q`` completed with
+   ``132 passed, 2 skipped``.
+4. Ruff passed on the edited QI case catalog, renderer, and tests.
+5. The latest pushed GitHub Actions CI run for ``a79b71e`` is green.
+6. Local free-boundary exact validation passed:
+   ``tests/test_free_boundary_vacuum_adjoint.py``,
+   ``tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py``,
+   and ``tests/test_free_boundary_qs_coil_optimization_smoke.py``.
+7. Direct-coil/mgrid/ESSOS parity tests passed locally with
+   ``39 passed, 4 skipped``.  The optional VMEC2000 LASYM gate passed
+   standalone with the configurable timeout, but the broader optional VMEC2000
+   batch was interrupted after exceeding a practical local wait.
+
+Best next steps:
+
+1. Commit and push the encoded aspect-first/guarded-tighten balanced preset.
+2. Run the full ``minimal_nfp2_qi_balanced_mirror035`` preset from the public
+   minimal seed on ``office`` using the committed code to verify the catalog
+   reproduces ``aw075_g3`` end-to-end.
+3. Only after the full committed preset passes, refresh
+   ``readme_qi_optimization_cases.png`` and the QI CSV/provenance artifacts.
+4. Keep arbitrary adaptive free-boundary branch differentiation conservative:
+   current tests validate branch-local/fingerprint-gated paths, not arbitrary
+   host adaptive branch selection.
+
+Need from user:
+
+No immediate action.
+
+Completion:
+
+- QI minimal-seed README artifacts: 94% artifact-ready, 0% re-promoted until
+  the committed full preset rerun and provenance check pass.
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999998%; adaptive host
+  branch differentiation remains unclaimed.
+- VMEC parity and physics gates: 99.4%.
+- Single-stage coil-only optimization: 99.0%.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 100%.
+
 ### 2026-06-12 QI-Improvement Working-Seed Handoff
 
 Steps taken:
