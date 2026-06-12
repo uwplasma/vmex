@@ -2587,18 +2587,20 @@ def interpolate_indata_boundary(
     lam: float,
     *,
     keys: Sequence[str] = ("RBC", "ZBS", "RBS", "ZBC"),
+    scalar_keys: Sequence[str] = (),
     max_mode: int | None = None,
     require_same_nfp: bool = True,
     preserve_seed_scalars: Sequence[str] = ("NFP", "LASYM"),
 ):
-    """Interpolate selected VMEC boundary Fourier coefficients.
+    """Interpolate selected VMEC boundary Fourier coefficients and scalars.
 
     This helper implements a deterministic global-to-local preconditioner for
     far-seed QI optimization.  ``lam=0`` preserves the seed boundary for the
-    selected keys, while ``lam=1`` uses the reference boundary.  Scalar VMEC
-    metadata remains seed-owned for entries in ``preserve_seed_scalars`` so a
-    reference family can be used without accidentally changing the user's
-    field-period count or symmetry flag.
+    selected keys, while ``lam=1`` uses the reference boundary.  Optional
+    ``scalar_keys`` are interpolated by the same rule.  Scalar VMEC metadata
+    remains seed-owned for entries in ``preserve_seed_scalars`` so a reference
+    family can be used without accidentally changing the user's field-period
+    count or symmetry flag.
 
     If ``max_mode`` is given, selected boundary coefficient dictionaries are
     projected to modes with ``abs(m) <= max_mode`` and ``abs(n) <= max_mode``.
@@ -2623,6 +2625,34 @@ def interpolate_indata_boundary(
         out.scalars["MPOL"] = max(int(seed_indata.get_int("MPOL", 0)), int(reference_indata.get_int("MPOL", 0)))
     if "NTOR" in seed_indata.scalars or "NTOR" in reference_indata.scalars:
         out.scalars["NTOR"] = max(int(seed_indata.get_int("NTOR", 0)), int(reference_indata.get_int("NTOR", 0)))
+
+    def _interpolate_scalar_value(seed_value, reference_value, key: str):
+        if isinstance(seed_value, bool) or isinstance(reference_value, bool):
+            raise TypeError(f"Cannot interpolate boolean VMEC scalar {key!r}.")
+        if isinstance(seed_value, (int, float)) and isinstance(reference_value, (int, float)):
+            return (1.0 - lam) * float(seed_value) + lam * float(reference_value)
+        if isinstance(seed_value, (list, tuple)) and isinstance(reference_value, (list, tuple)):
+            if len(seed_value) != len(reference_value):
+                raise ValueError(
+                    f"Cannot interpolate VMEC scalar list {key!r} with lengths "
+                    f"{len(seed_value)} and {len(reference_value)}."
+                )
+            return [
+                _interpolate_scalar_value(seed_item, reference_item, key)
+                for seed_item, reference_item in zip(seed_value, reference_value, strict=True)
+            ]
+        raise TypeError(
+            f"Cannot interpolate VMEC scalar {key!r} with values "
+            f"{seed_value!r} and {reference_value!r}."
+        )
+
+    preserved = {str(key).upper() for key in preserve_seed_scalars}
+    for key in tuple(str(item).upper() for item in scalar_keys):
+        if key in preserved:
+            raise ValueError(f"Cannot interpolate preserved seed scalar {key!r}.")
+        if key not in seed_indata.scalars or key not in reference_indata.scalars:
+            continue
+        out.scalars[key] = _interpolate_scalar_value(seed_indata.scalars[key], reference_indata.scalars[key], key)
 
     max_mode_i = None if max_mode is None else int(max_mode)
     for key in tuple(item.upper() for item in keys):

@@ -650,6 +650,11 @@ def _minimal_or_circular_qi_case(
             "reference_input": reference_input,
             "lambdas": tuple(float(value) for value in reference_lambdas),
             "keys": ("RBC", "ZBS", "RBS", "ZBC"),
+            # Boundary-only interpolation can miss the solved reference basin
+            # for minimal torus seeds because the VMEC toroidal-flux scalar is
+            # seed-owned by default.  Opt into PHIEDGE interpolation for this
+            # reference-family QI lane while still preserving NFP/LASYM.
+            "scalar_keys": ("PHIEDGE",),
             "max_mode": int(max_mode),
             "target_aspect": float(base.get("target_aspect", DEFAULT_QI_TARGET_ASPECT)),
             "abs_iota_min": float(base.get("target_abs_iota_min", 0.41)),

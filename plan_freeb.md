@@ -20386,6 +20386,81 @@ Completion:
 - Docs/release hygiene: 100%.
 - QI minimal-seed README artifacts: unchanged at 90% infrastructure-ready,
   0% re-promoted.
+
+### 2026-06-12 Scalar-Aware QI Reference Preconditioning Probe
+
+Steps taken:
+
+1. Investigated the NFP=1 minimal-seed QI failure artifacts with a sidecar
+   audit.  The audit found that the reference preconditioner interpolated only
+   boundary Fourier coefficients while preserving seed scalars such as
+   ``PHIEDGE``.
+2. Added opt-in ``scalar_keys`` support to
+   ``interpolate_indata_boundary`` and passed it through the QI
+   boundary-reference preconditioner.
+3. Enabled ``PHIEDGE`` interpolation for the minimal/circular QI
+   reference-family policy builder while still preserving ``NFP`` and
+   ``LASYM``.
+4. Added focused unit tests for scalar interpolation and preserved-scalar
+   rejection.
+5. Ran two bounded CPU probes for NFP=1:
+   a scalar-aware default lambda smoke and a scalar-aware over-lambda scan
+   with ``1.0,1.01,1.02,1.04,1.06,1.08,1.10``.
+6. Inspected the completed office NFP=2 mode-5 run before promotion.
+
+Results obtained:
+
+1. Focused lint and tests passed:
+   ``ruff`` on edited files, four interpolation helper tests, and the QI
+   case/staged-runner/README-case shard.
+2. Scalar-aware ``PHIEDGE`` interpolation is a useful infrastructure fix but
+   does not by itself solve NFP=1.  The default scalar-aware scan selected
+   ``lambda=1.01`` with smooth QI about ``8.70e-3`` and legacy QI about
+   ``5.83e-3``.
+3. Wider scalar-aware NFP=1 lambdas also failed the QI gate.  The best
+   over-lambda result was around ``lambda=1.04`` with legacy QI about
+   ``5.51e-3``; larger lambdas worsened smooth/legacy QI and increased aspect.
+4. The office NFP=2 mode-5 run found a strong intermediate QI state but did
+   not promote it: smooth QI about ``1.58e-3``, legacy QI about ``2.18e-4``,
+   mirror about ``0.343``, elongation about ``4.97``, and mean iota about
+   ``-0.461`` passed the QI/mirror/elongation/iota gates, but aspect about
+   ``8.21`` failed the aspect gate.  The final promoted root artifact therefore
+   fell back to a worse-QI baseline and remains non-promotable.
+
+Best next steps:
+
+1. Keep scalar-aware reference preconditioning, because it is the correct
+   mechanism for reference-family QI seeds with different toroidal flux.
+2. For NFP=2, configure the good-QI/high-aspect cleanup as an intermediate
+   working seed and add a final QI-safe aspect-localization stage; do not
+   promote the current NFP=2 artifact as-is.
+3. For NFP=1, do not keep widening the same boundary-reference lambda family.
+   The next useful policy needs a different basin mechanism or QI objective
+   schedule, since boundary/reference extrapolation stalls above the legacy
+   QI gate.
+4. Let the current office NFP=3/NFP=4 matrix continue for evidence, but keep
+   README QI artifacts unpromoted until every row passes provenance and
+   physics gates.
+
+Need from user:
+
+No immediate action.  The next technical choice is whether to spend more time
+on a new NFP=1 basin strategy now or finish the easier NFP=2 aspect-cleanup
+policy first; I will take the NFP=2 policy fix first unless redirected.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999998%.
+- VMEC parity and physics gates: 99.55%.
+- Single-stage coil-only optimization: 99.0%.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100%; latest pushed CI is green.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 91% infrastructure/artifact-ready,
+  0% promoted; NFP=1 still misses QI gates, NFP=2 has a good-QI candidate but
+  needs aspect-safe promotion/cleanup, NFP=3/4 are still pending in the office
+  policy matrix.
 - VMEC parity and physics gates: 99.0%.
 - Single-stage coil-only optimization: 99.0%.
 - CPU/GPU performance: 99.4%.

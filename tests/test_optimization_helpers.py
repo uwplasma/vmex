@@ -2677,7 +2677,7 @@ def test_fixed_boundary_optimizer_save_wout_reuses_state_cache(monkeypatch, tmp_
 
 def test_interpolate_indata_boundary_blends_selected_coefficients_and_projects_modes():
     seed = InData(
-        scalars={"NFP": 3, "MPOL": 3, "NTOR": 3, "LASYM": False},
+        scalars={"NFP": 3, "MPOL": 3, "NTOR": 3, "LASYM": False, "PHIEDGE": 0.08},
         indexed={
             "RBC": {(0, 0): 1.0, (1, 0): 0.2, (3, 0): 9.0},
             "ZBS": {(1, 0): 0.1},
@@ -2686,7 +2686,7 @@ def test_interpolate_indata_boundary_blends_selected_coefficients_and_projects_m
         source_path=None,
     )
     reference = InData(
-        scalars={"NFP": 3, "MPOL": 6, "NTOR": 6, "LASYM": True},
+        scalars={"NFP": 3, "MPOL": 6, "NTOR": 6, "LASYM": True, "PHIEDGE": 0.04},
         indexed={
             "RBC": {(0, 0): 2.0, (1, 0): 0.4, (2, 0): 0.6, (3, 0): 8.0},
             "ZBS": {(1, 0): 0.3, (2, 1): -0.5},
@@ -2700,6 +2700,7 @@ def test_interpolate_indata_boundary_blends_selected_coefficients_and_projects_m
     assert out.scalars["LASYM"] is False
     assert out.scalars["MPOL"] == 6
     assert out.scalars["NTOR"] == 6
+    assert out.scalars["PHIEDGE"] == pytest.approx(0.08)
     assert out.indexed["RBC"][(0, 0)] == pytest.approx(1.25)
     assert out.indexed["RBC"][(1, 0)] == pytest.approx(0.25)
     assert out.indexed["RBC"][(2, 0)] == pytest.approx(0.15)
@@ -2707,6 +2708,36 @@ def test_interpolate_indata_boundary_blends_selected_coefficients_and_projects_m
     assert out.indexed["ZBS"][(1, 0)] == pytest.approx(0.15)
     assert out.indexed["ZBS"][(2, 1)] == pytest.approx(-0.125)
     assert out.indexed["AC"] == {(0,): 1.0}
+
+
+def test_interpolate_indata_boundary_can_blend_selected_scalars():
+    seed = InData(
+        scalars={"NFP": 3, "MPOL": 3, "NTOR": 3, "LASYM": False, "PHIEDGE": 0.08},
+        indexed={"RBC": {(0, 0): 1.0}},
+        source_path=None,
+    )
+    reference = InData(
+        scalars={"NFP": 3, "MPOL": 6, "NTOR": 6, "LASYM": True, "PHIEDGE": 0.04},
+        indexed={"RBC": {(0, 0): 2.0}},
+        source_path=None,
+    )
+
+    out = interpolate_indata_boundary(seed, reference, 0.25, scalar_keys=("PHIEDGE",))
+
+    assert out.scalars["NFP"] == 3
+    assert out.scalars["LASYM"] is False
+    assert out.scalars["MPOL"] == 6
+    assert out.scalars["NTOR"] == 6
+    assert out.scalars["PHIEDGE"] == pytest.approx(0.07)
+    assert out.indexed["RBC"][(0, 0)] == pytest.approx(1.25)
+
+
+def test_interpolate_indata_boundary_rejects_preserved_scalar_interpolation():
+    seed = InData(scalars={"NFP": 2, "LASYM": False}, indexed={}, source_path=None)
+    reference = InData(scalars={"NFP": 2, "LASYM": True}, indexed={}, source_path=None)
+
+    with pytest.raises(ValueError, match="preserved seed scalar"):
+        interpolate_indata_boundary(seed, reference, 0.5, scalar_keys=("LASYM",))
 
 
 def test_interpolate_indata_boundary_rejects_nfp_mismatch():

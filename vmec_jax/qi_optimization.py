@@ -1379,6 +1379,7 @@ def run_boundary_reference_preconditioner(input_file, output_dir, config, *, ctx
     seed = vj.read_indata(input_file)
     reference = vj.read_indata(reference_input)
     keys = tuple(str(key).upper() for key in config.get("keys", ("RBC", "ZBS", "RBS", "ZBC")))
+    scalar_keys = tuple(str(key).upper() for key in config.get("scalar_keys", ()))
     lambdas = tuple(float(value) for value in config.get("lambdas", (0.99, 0.995, 1.0)))
     max_mode = int(config.get("max_mode", _ctx(ctx, "max_mode")))
     records = []
@@ -1396,6 +1397,7 @@ def run_boundary_reference_preconditioner(input_file, output_dir, config, *, ctx
                 reference,
                 lam,
                 keys=keys,
+                scalar_keys=scalar_keys,
                 max_mode=max_mode,
             )
             candidate = vj.rebuild_for_optimization_resolution(
