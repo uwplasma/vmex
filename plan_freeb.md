@@ -20819,3 +20819,80 @@ Completion:
 - CI/runtime/coverage hygiene: 100%; latest CI still has a few shards running.
 - QI minimal-seed README artifacts: 93% infrastructure/artifact-ready,
   0% promoted.
+
+### 2026-06-12 Coil-Only QS Example and QI Artifact Relaunch
+
+Steps taken:
+
+1. Audited ``examples/optimization/free_boundary_QS_coil_optimization.py``.
+   The public example already uses
+   ``direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax``
+   in the opt-in same-branch report/proposal lane.  It keeps the complete
+   direct-coil free-boundary solve as the only acceptance authority for
+   derivative-assisted trial points.
+2. Ran the synthetic direct-coil smoke with the branch-local vector/JVP report
+   and derivative proposal enabled, writing outputs only under ``/tmp``:
+   ``--smoke --provider circle --write-same-branch-report
+   --same-branch-report-mode vector --same-branch-derivative-proposal``.
+3. Reran the same smoke with ``--same-branch-report-rejected-slot-gate``.
+4. Ran focused unit tests for the public example's report writer and proposal
+   bookkeeping:
+   ``test_same_branch_report_writer_records_branch_local_vector_jacobian``,
+   ``test_same_branch_derivative_proposal_requires_direct_jvp_and_fresh_replay``,
+   ``test_derivative_proposal_summary_marks_report_stale_when_trial_is_accepted``,
+   and
+   ``test_derivative_proposal_summary_records_rejected_trial_as_complete_solve_rejection``.
+5. Audited QI README artifacts.  NFP1, NFP2, and NFP3 curated artifact bundles
+   are missing; NFP4 has tracked metadata but not source-complete WOUT files in
+   the checkout, so no QI README panel should be promoted.
+6. Created a fresh shallow ``office`` checkout at
+   ``/home/rjorge/local/tests/vmec_jax_main_bb03076`` to avoid touching the
+   dirty historical feature checkout.
+7. Launched a split GPU QI minimal-seed artifact attempt under
+   ``/home/rjorge/local/tests/qi_minimal_seed_readme_bb03076``:
+   NFP1/NFP2 on GPU0 and NFP3/NFP4 on GPU1 with continuation, ESS,
+   ``max_mode=5``, ``max_nfev=70``, and the current high-accuracy VMEC inner
+   budgets.
+
+Results obtained:
+
+1. The public coil-only QS example produced a same-branch report with
+   ``branch_local_vector_jacobian.available=True``,
+   ``derivative_mode='directional_jvp'``, ``replay_ad_mode='direct'``,
+   ``uses_production_forward=True``, and
+   ``differentiates_run_free_boundary=False``.
+2. The vector physical-scalar gate passed.  With the rejected-slot option, the
+   accepted/rejected controller-slot gate also passed and recorded one fixed
+   rejected controller slot.
+3. The derivative proposal was evaluated by a normal complete solve and
+   recorded ``acceptance_decision_source='complete_solve_objective'``.
+4. The focused public-example tests passed.  One stale test node was attempted
+   and failed collection; the correct current tests passed.
+5. The QI artifact jobs are active on ``office`` and have started writing
+   first-case reference-preconditioner outputs.  They are not promotion
+   evidence until final diagnostics pass.
+
+Best next steps:
+
+1. Let the remote QI NFP1/2/3/4 jobs finish, then copy only compact diagnostics
+   and provenance back for review.  Promote no README panel until all rows pass
+   independent QI/iota/mirror/aspect diagnostics.
+2. Keep monitoring the ``bb03076`` CI run.
+3. If the QI runs fail or stall, keep the artifacts blocked and record the
+   failure mode rather than tuning blindly.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Single-stage coil-only optimization: 99.2%; the public example is validated
+  in smoke mode with branch-local vector/JVP proposals and complete-solve
+  acceptance.
+- Full nonlinear free-boundary adjoint phase 2: 99.999998%; no arbitrary
+  adaptive host-branch differentiation is claimed.
+- QI minimal-seed README artifacts: 93% infrastructure/artifact-ready,
+  0% promoted; full NFP1/2/3/4 rerun is active on ``office``.
+- CI/runtime/coverage hygiene: 100%; latest CI still running after the plan
+  update.
