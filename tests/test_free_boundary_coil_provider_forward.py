@@ -190,6 +190,92 @@ def test_generated_mgrid_boundary_projection_matches_direct_coil_provider_at_nod
         )
 
 
+def test_generated_mgrid_boundary_projection_tracks_direct_coil_provider_off_grid():
+    enable_x64(True)
+    from vmec_jax._compat import jnp
+
+    dofs = jnp.zeros((1, 3, 3), dtype=float)
+    # Keep the coil well outside the sampled boundary. The generated mgrid path
+    # is trilinear, so this gate checks interpolation convention and bounded
+    # projection error instead of exact node equality.
+    dofs = dofs.at[0, 0, 0].set(3.0)
+    dofs = dofs.at[0, 0, 2].set(0.18)
+    dofs = dofs.at[0, 1, 1].set(0.18)
+    dofs = dofs.at[0, 2, 0].set(0.08)
+    coil_params = CoilFieldParams(
+        base_curve_dofs=dofs,
+        base_currents=jnp.asarray([2.1e5]),
+        n_segments=96,
+        nfp=1,
+        stellsym=False,
+    )
+
+    rmin, rmax = 0.72, 1.18
+    zmin, zmax = -0.24, 0.24
+    kp, jz, ir = 24, 13, 14
+    r_grid = jnp.linspace(rmin, rmax, ir)
+    z_grid = jnp.linspace(zmin, zmax, jz)
+    phi_grid = jnp.arange(kp, dtype=float) * (2.0 * jnp.pi / kp)
+    phi_mesh, z_mesh, r_mesh = jnp.meshgrid(phi_grid, z_grid, r_grid, indexing="ij")
+    br, bphi, bz = sample_coil_field_cylindrical(coil_params, r_mesh, z_mesh, phi_mesh)
+    mgrid_params = MGridFieldParams(
+        br=br[None, ...],
+        bphi=bphi[None, ...],
+        bz=bz[None, ...],
+        extcur=jnp.asarray([1.0]),
+        rmin=rmin,
+        rmax=rmax,
+        zmin=zmin,
+        zmax=zmax,
+        nfp=1,
+    )
+
+    R = jnp.asarray([[0.76, 0.93, 1.11], [0.81, 1.02, 1.15]])
+    Z = jnp.asarray([[-0.19, -0.07, 0.17], [-0.12, 0.04, 0.21]])
+    phi = jnp.asarray([[0.17, 1.05, 2.41], [3.18, 4.02, 5.36]])
+    Ru = jnp.asarray([[0.03, -0.02, 0.01], [0.04, -0.01, 0.02]])
+    Zu = jnp.asarray([[0.11, 0.09, 0.07], [0.08, 0.06, 0.10]])
+    Rv = jnp.asarray([[0.02, 0.01, -0.03], [0.01, -0.02, 0.04]])
+    Zv = jnp.asarray([[0.04, -0.03, 0.02], [-0.01, 0.02, 0.03]])
+
+    direct = sample_free_boundary_external_field(
+        R=R,
+        Z=Z,
+        Ru=Ru,
+        Zu=Zu,
+        Rv=Rv,
+        Zv=Zv,
+        phi=phi,
+        provider_kind="direct_coils",
+        provider_params=coil_params,
+        label="direct_off_grid_projection",
+    )
+    generated_mgrid = sample_free_boundary_external_field(
+        R=R,
+        Z=Z,
+        Ru=Ru,
+        Zu=Zu,
+        Rv=Rv,
+        Zv=Zv,
+        phi=phi,
+        provider_kind="mgrid",
+        provider_params=mgrid_params,
+        label="generated_mgrid_off_grid_projection",
+    )
+
+    def assert_max_rel(name, got, want, limit=5.0e-2):
+        got_arr = np.asarray(got, dtype=float)
+        want_arr = np.asarray(want, dtype=float)
+        denom = max(float(np.max(np.abs(want_arr))), 1.0e-30)
+        rel = float(np.max(np.abs(got_arr - want_arr))) / denom
+        assert rel < limit, f"{name}: max_rel={rel:.3e} >= {limit:.3e}"
+
+    for name in ("br", "bp", "bz", "br_mgrid", "bp_mgrid", "bz_mgrid"):
+        assert_max_rel(name, getattr(generated_mgrid, name), getattr(direct, name))
+    for name in ("bnormal", "bnormal_unit", "bu", "bv", "bsqvac"):
+        assert_max_rel(f"vac_ext.{name}", getattr(generated_mgrid.vac_ext, name), getattr(direct.vac_ext, name))
+
+
 def test_direct_coil_provider_cached_geometry_and_alias_match_uncached_projection():
     enable_x64(True)
     from vmec_jax._compat import jnp
