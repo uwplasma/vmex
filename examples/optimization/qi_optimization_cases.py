@@ -860,7 +860,7 @@ _NFP2_BALANCED_STAGES = (
         "require_seed_gate": False,
         "require_engineering_gate": True,
         "require_mirror_improvement": False,
-        "accept_if_rank_improves": True,
+        "accept_if_qi_improves": True,
         "promote_as_working_seed_only": True,
     },
     {

@@ -126,9 +126,9 @@ def test_nfp2_balanced_qi_case_exposes_reviewed_mode5_mirror035_polish() -> None
         stage["promotion_mirror_threshold"] == pytest.approx(mod.DEFAULT_QI_MIRROR_RATIO)
         for stage in stages
     )
-    assert stages[0]["accept_if_rank_improves"] is True
+    assert stages[0]["accept_if_qi_improves"] is True
     assert stages[0]["promote_as_working_seed_only"] is True
-    assert "accept_if_rank_improves" not in stages[1]
+    assert "accept_if_qi_improves" not in stages[1]
     assert "promote_as_working_seed_only" not in stages[1]
 
 

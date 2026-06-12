@@ -711,6 +711,39 @@ def test_stage_promotes_candidate_accepts_relaxed_intermediate_mirror_aspect_imp
     assert "aspect relative error improved" in out["qi_aspect_promotion_reason"]
 
 
+def test_stage_promotes_candidate_accepts_qi_improving_working_seed_without_aspect_gain() -> None:
+    stage = {
+        "accept_if_qi_improves": True,
+        "promotion_mirror_threshold": 0.35,
+        "target_abs_iota_min": 0.41,
+        "max_elongation": 10.0,
+    }
+    promotion = {
+        "qi_cleanup_promoted": False,
+        "qi_cleanup_rejection_reasons": ["QI engineering gate failed (smooth_qi, aspect)"],
+        "aspect_relative_error": 0.3818,
+        "mean_iota": -0.464,
+        "qi_smooth_total": 2.021e-3,
+        "qi_legacy_total": 4.70e-4,
+        "qi_mirror_ratio_max": 0.343,
+        "qi_max_elongation": 5.13,
+    }
+    reference = {
+        "aspect_relative_error": 0.3453,
+        "mean_iota": -0.455,
+        "qi_smooth_total": 4.358e-3,
+        "qi_legacy_total": 2.304e-3,
+        "qi_mirror_ratio_max": 0.241,
+        "qi_max_elongation": 4.62,
+    }
+
+    out = qio.stage_promotes_candidate(stage, promotion, reference)
+
+    assert out["qi_cleanup_promoted"] is True
+    assert out["qi_cleanup_rejection_reasons"] == []
+    assert "smooth QI improved" in out["qi_improvement_promotion_reason"]
+
+
 def test_stage_promotes_candidate_rejects_qi_degrading_aspect_improvement() -> None:
     stage = {
         "accept_if_qi_safe_aspect_improves": True,
