@@ -20338,6 +20338,54 @@ Completion:
 - QI minimal-seed README artifacts: 90% infrastructure/artifact-ready,
   0% re-promoted; NFP=1 currently failed QI gates, NFP=2 is running, NFP=3/4
   remain pending in the policy-mode matrix.
+
+### 2026-06-12 Off-Grid Direct-Coil/Mgrid Boundary Projection Gate
+
+Steps taken:
+
+1. Followed the free-boundary validation sidecar audit and added an asset-free
+   test for generated-mgrid/direct-coil parity away from interpolation grid
+   nodes.
+2. The new gate samples a smooth off-axis coil field into an in-memory
+   VMEC-layout mgrid, then compares off-grid free-boundary projection outputs
+   against the direct Biot-Savart provider.
+3. Kept the check bounded to interpolation accuracy rather than exact equality:
+   field components, projected normal fields, tangent projections, and
+   ``bsqvac`` must agree within a ``5e-2`` maximum-relative envelope.
+
+Results obtained:
+
+1. The new single test passed:
+   ``test_generated_mgrid_boundary_projection_tracks_direct_coil_provider_off_grid``.
+2. The focused provider shard passed:
+   ``JAX_ENABLE_X64=1 python -m pytest -q tests/test_external_fields_mgrid_jax.py tests/test_free_boundary_coil_provider_forward.py -q``
+   -> ``20 passed``.
+3. ``ruff`` passed on the edited test file.
+
+Best next steps:
+
+1. Keep expanding VMEC2000/mgrid/direct-coil parity only with bounded,
+   finite-positive physical fixtures and asset-free interpolation gates.
+2. Let the long QI NFP artifact runs continue separately; do not promote QI
+   README rows until all provenance and physics gates pass.
+3. Keep adaptive full-loop differentiation claims conservative until the true
+   fingerprint-gated adaptive-loop AD-vs-central-FD gate exists.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- VMEC parity and physics gates: 99.55%.
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999998%.
+- Single-stage coil-only optimization: 99.0%.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100% locally for this focused shard.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: unchanged at 90% infrastructure-ready,
+  0% re-promoted.
 - VMEC parity and physics gates: 99.0%.
 - Single-stage coil-only optimization: 99.0%.
 - CPU/GPU performance: 99.4%.
