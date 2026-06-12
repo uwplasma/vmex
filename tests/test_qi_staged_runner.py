@@ -141,6 +141,29 @@ def test_qi_staged_runner_passes_policy_qi_gates_and_audit_resolution(tmp_path: 
     assert lambdas == pytest.approx((0.99, 0.995, 1.0, 1.005, 1.008, 1.01))
 
 
+def test_qi_staged_runner_uses_policy_stages_when_no_manual_stage_override(tmp_path: Path) -> None:
+    runner = _load_runner()
+    config = runner.QIStagedCaseConfig(
+        name="qi_nfp2_balanced",
+        input_file=ROOT / "examples" / "data" / "input.minimal_seed_nfp2",
+        output_dir=tmp_path / "out",
+        max_mode=5,
+        policy_case="minimal_nfp2_qi_balanced_mirror032",
+        make_plots=False,
+    )
+
+    args = runner._build_qi_staged_args(config)
+
+    assert "--max-nfev" in args and args[args.index("--max-nfev") + 1] == "70"
+    assert args[args.index("--max-mirror-ratio") + 1] == "0.32"
+    stages_path = Path(args[args.index("--mirror-ramp-stages-json") + 1])
+    stages = json.loads(stages_path.read_text())
+    assert stages[-2]["name"] == "final_balance_qi_mirror032"
+    assert stages[-1]["name"] == "mirror_polish_after_qi_gate032"
+    assert stages[-2]["promotion_mirror_threshold"] == pytest.approx(0.32)
+    assert stages[-1]["promotion_mirror_threshold"] == pytest.approx(0.32)
+
+
 def test_qi_staged_runner_can_disable_reference_lambda_override(tmp_path: Path) -> None:
     runner = _load_runner()
     config = runner.QIStagedCaseConfig(

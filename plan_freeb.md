@@ -19602,3 +19602,43 @@ Completion:
 - QI minimal-seed README artifacts: 86% artifact-complete, 0% re-promoted
   after the gate change; the balanced NFP=2 preset is encoded, but artifacts
   still need an end-to-end rerun/provenance refresh before README promotion.
+
+### 2026-06-11 QI Staged-Runner Policy Preset Wiring
+
+Steps taken:
+
+1. Smoke-tested ``QIStagedCaseConfig(policy_case="minimal_nfp2_qi_balanced_mirror032")``.
+2. Found that ``qi_staged_runner`` only serialized ``mirror_ramp_stages`` when
+   the caller passed them manually, so a policy-case-only run did not actually
+   execute the catalog stages.
+3. Updated ``qi_staged_runner`` so explicit caller stages still win, but the
+   selected policy case supplies ``mirror_ramp_stages`` and ``max_nfev`` when
+   those fields are omitted.
+4. Added a regression test covering the balanced NFP2 policy-case path.
+
+Results obtained:
+
+1. The balanced preset now writes ``mirror_ramp_stages.json`` automatically,
+   propagates ``--max-nfev 70``, and propagates ``--max-mirror-ratio 0.32``.
+2. The focused QI/example shard passed after the fix:
+   ``130 passed, 2 skipped``.
+3. Ruff passed on all edited Python files.
+
+Best next steps:
+
+1. Run the balanced NFP2 preset end-to-end when compute is available:
+   build a ``QIStagedCaseConfig`` with
+   ``policy_case="minimal_nfp2_qi_balanced_mirror032"`` or call the minimal
+   showcase runner with that policy case.
+2. If the reproduced diagnostics match the targeted scan, refresh the QI README
+   panel and docs CSV from the reviewed artifacts.
+
+Need from user:
+
+No immediate action.
+
+Completion:
+
+- QI minimal-seed README artifacts: 87% artifact-complete, 0% re-promoted
+  after the gate change; the best NFP2 preset is now executable through the
+  staged-runner plumbing.

@@ -307,8 +307,11 @@ def _build_qi_staged_args(config: QIStagedCaseConfig) -> list[str]:
         args.append("--no-use-reference-family-seed")
     if config.solver_device is not None:
         args.extend(["--solver-device", str(config.solver_device)])
-    if config.max_nfev is not None:
-        args.extend(["--max-nfev", str(int(config.max_nfev))])
+    max_nfev = config.max_nfev
+    if max_nfev is None:
+        max_nfev = _policy_case(config).get("max_nfev")
+    if max_nfev is not None:
+        args.extend(["--max-nfev", str(int(max_nfev))])
     if config.continuation_nfev is not None:
         args.extend(["--continuation-nfev", str(int(config.continuation_nfev))])
     if config.inner_max_iter is not None:
@@ -364,10 +367,15 @@ def _build_qi_staged_args(config: QIStagedCaseConfig) -> list[str]:
     for flag, value in qi_resolution_args.items():
         if value is not None:
             args.extend([flag, str(int(value))])
-    if config.mirror_ramp_stages is not None:
+    mirror_ramp_stages_config = config.mirror_ramp_stages
+    if mirror_ramp_stages_config is None:
+        policy_stages = _policy_case(config).get("mirror_ramp_stages")
+        if policy_stages is not None:
+            mirror_ramp_stages_config = tuple(policy_stages)
+    if mirror_ramp_stages_config is not None:
         stages_path = Path(config.output_dir).expanduser() / "mirror_ramp_stages.json"
         stages_path.parent.mkdir(parents=True, exist_ok=True)
-        mirror_ramp_stages = [dict(stage) for stage in config.mirror_ramp_stages]
+        mirror_ramp_stages = [dict(stage) for stage in mirror_ramp_stages_config]
         if config.method is not None:
             # Stage JSON is authoritative inside QI_optimization.py, so patch it
             # along with --method to make showcase reruns reproducible.
