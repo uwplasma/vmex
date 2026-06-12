@@ -275,6 +275,18 @@ def test_generated_mgrid_boundary_projection_tracks_direct_coil_provider_off_gri
     for name in ("bnormal", "bnormal_unit", "bu", "bv", "bsqvac"):
         assert_max_rel(f"vac_ext.{name}", getattr(generated_mgrid.vac_ext, name), getattr(direct.vac_ext, name))
 
+    for sample in (direct, generated_mgrid):
+        field_norm = 0.0
+        for name in ("br", "bp", "bz"):
+            arr = np.asarray(getattr(sample, name), dtype=float)
+            assert np.isfinite(arr).all()
+            field_norm = max(field_norm, float(np.max(np.abs(arr))))
+        assert field_norm > 0.0
+        assert np.isfinite(np.asarray(sample.vac_ext.bsqvac, dtype=float)).all()
+        assert float(np.max(np.asarray(sample.vac_ext.bsqvac, dtype=float))) > 0.0
+        assert np.isfinite(np.asarray(sample.vac_ext.det_guv, dtype=float)).all()
+        assert float(np.min(np.asarray(sample.vac_ext.det_guv, dtype=float))) > 0.0
+
 
 def test_direct_coil_provider_cached_geometry_and_alias_match_uncached_projection():
     enable_x64(True)

@@ -287,6 +287,11 @@ def _assert_vmec_jax_direct_matches_generated_mgrid_wout(wout_direct, wout_mgrid
             err_msg=f"direct-coil and generated-mgrid vmec_jax WOUT mismatch for {name}",
         )
     assert np.isfinite(float(wout_direct.wp))
+    for wout in (wout_direct, wout_mgrid):
+        for name in ("aspect", "Aminor_p", "Rmajor_p", "volume_p", "wb", "wp"):
+            value = float(getattr(wout, name))
+            assert np.isfinite(value), f"{name} is not finite"
+            assert value > 0.0, f"{name} is not positive"
 
 
 def _low_order_mode_mask(wout, *, max_m: int = 2, max_abs_n: int = 2) -> np.ndarray:
