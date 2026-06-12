@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import argparse
 from dataclasses import dataclass
+from dataclasses import replace
 import json
 from pathlib import Path
 import shlex
@@ -45,6 +47,7 @@ class MinimalSeedQIExample:
     target_abs_iota_min: float = 0.41
     max_mirror_ratio: float = 0.35
     max_elongation: float = 10.0
+    solver_device: str | None = None
     make_plots: bool = True
     dry_run: bool = False
 
@@ -179,7 +182,67 @@ def build_qi_optimization_command(
         "--use-ess",
         _bool_flag("make-plots", example.make_plots),
     ]
+    if example.solver_device not in (None, "", "none", "default"):
+        command.extend(["--solver-device", str(example.solver_device)])
     return command
+
+
+def example_from_cli(default: MinimalSeedQIExample, argv: list[str] | None = None) -> MinimalSeedQIExample:
+    """Apply lightweight command-line overrides to an example preset."""
+
+    parser = argparse.ArgumentParser(
+        description=(
+            f"Run the NFP={default.nfp} minimal-seed QI example. "
+            "The defaults are ordinary top-level variables in the script; "
+            "these flags are only convenience overrides."
+        )
+    )
+    parser.add_argument("--input-file", type=Path, default=default.input_file)
+    parser.add_argument("--reference-input", type=Path, default=default.reference_input)
+    parser.add_argument("--output-dir", type=Path, default=default.output_dir)
+    parser.add_argument("--max-mode", type=int, default=default.max_mode)
+    parser.add_argument("--min-vmec-mode", type=int, default=default.min_vmec_mode)
+    parser.add_argument("--method", type=str, default=default.method)
+    parser.add_argument("--max-nfev", type=int, default=default.max_nfev)
+    parser.add_argument("--continuation-nfev", type=int, default=default.continuation_nfev)
+    parser.add_argument("--inner-max-iter", type=int, default=default.inner_max_iter)
+    parser.add_argument("--inner-ftol", type=float, default=default.inner_ftol)
+    parser.add_argument("--trial-max-iter", type=int, default=default.trial_max_iter)
+    parser.add_argument("--trial-ftol", type=float, default=default.trial_ftol)
+    parser.add_argument("--ess-alpha", type=float, default=default.ess_alpha)
+    parser.add_argument("--target-aspect", type=float, default=default.target_aspect)
+    parser.add_argument("--target-abs-iota-min", type=float, default=default.target_abs_iota_min)
+    parser.add_argument("--max-mirror-ratio", type=float, default=default.max_mirror_ratio)
+    parser.add_argument("--max-elongation", type=float, default=default.max_elongation)
+    parser.add_argument("--solver-device", choices=("cpu", "gpu", "none", "default"), default=default.solver_device)
+    parser.add_argument("--make-plots", action=argparse.BooleanOptionalAction, default=default.make_plots)
+    parser.add_argument("--dry-run", action=argparse.BooleanOptionalAction, default=default.dry_run)
+    args = parser.parse_args(argv)
+
+    solver_device = None if args.solver_device in (None, "none", "default") else str(args.solver_device)
+    return replace(
+        default,
+        input_file=args.input_file,
+        reference_input=args.reference_input,
+        output_dir=args.output_dir,
+        max_mode=args.max_mode,
+        min_vmec_mode=args.min_vmec_mode,
+        method=args.method,
+        max_nfev=args.max_nfev,
+        continuation_nfev=args.continuation_nfev,
+        inner_max_iter=args.inner_max_iter,
+        inner_ftol=args.inner_ftol,
+        trial_max_iter=args.trial_max_iter,
+        trial_ftol=args.trial_ftol,
+        ess_alpha=args.ess_alpha,
+        target_aspect=args.target_aspect,
+        target_abs_iota_min=args.target_abs_iota_min,
+        max_mirror_ratio=args.max_mirror_ratio,
+        max_elongation=args.max_elongation,
+        solver_device=solver_device,
+        make_plots=args.make_plots,
+        dry_run=args.dry_run,
+    )
 
 
 def run_minimal_seed_qi_example(example: MinimalSeedQIExample) -> int:

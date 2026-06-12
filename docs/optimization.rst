@@ -146,8 +146,9 @@ existing successful ``showcase_case.json`` rows are reused, which can leave old
 rows on disk; the renderer skips known-stale rows by default and
 ``--include-stale`` should be reserved for debugging.  The current
 common-minimal QI dispatch uses policy-case names ``minimal_nfp1_qi``,
-``minimal_nfp2_qi``, ``minimal_nfp3_qi``, and ``minimal_nfp4_qi``; the public
-aliases ``nfp1_qi`` through ``nfp4_qi`` now point to those same minimal-seed
+``minimal_nfp2_qi_balanced_mirror035``, ``minimal_nfp3_qi``, and
+``minimal_nfp4_qi``; the public aliases ``nfp1_qi`` through ``nfp4_qi`` point
+to those minimal-seed
 cases.  Any older QI showcase rows under
 ``.../qi_nfp*/continuation/qp_preseed/...`` or explicitly named far-seed cases
 such as ``qi_stel_seed_3127`` predate this dispatch and should not be treated
@@ -157,9 +158,9 @@ as current common-minimal staged-QI evidence.  Any QA/QP showcase rows without
 The saved objective and state panels below are compact status artifacts for the
 current common-minimal QA/QH/QP mode-5 rows.  The companion CSV/table in
 :doc:`optimization_sweep_results` includes QA NFP=2/3, QH NFP=3/4, and QP
-NFP=2/3.  Stress artifacts that terminate away from the aspect-5 target are not
-part of the public README/docs matrix.
-Current non-stale ``minimal_nfp1_qi``/``minimal_nfp2_qi``/
+NFP=2/3.  Stress artifacts that terminate away from their configured aspect
+target are not part of the public README/docs matrix.
+Current non-stale ``minimal_nfp1_qi``/``minimal_nfp2_qi_balanced_mirror035``/
 ``minimal_nfp3_qi``/``minimal_nfp4_qi`` outputs are still missing from the
 common-minimal summary; do not infer QI common-seed success from the separate
 case-gated QI coverage panel.
@@ -223,7 +224,8 @@ below ``5e-3``.
 
 The explicit target-aspect and output-dir overrides above reproduce the
 case-specific rows currently embedded in the docs QI coverage figure.  Omit
-those overrides only when regenerating the current uniform aspect-5 policy.
+those overrides only when regenerating the current public policy: aspect 5 for
+QA/QH/QP and aspect 6 for QI.
 
 The docs QI coverage figure is rendered from existing reviewed
 ``QI_optimization.py`` outputs.  These rows are archived mixed-target case
@@ -804,7 +806,7 @@ Those scripts write ``input.initial``, ``input.final``, ``wout_initial.nc``,
 checked-in README QA/QH/QP rows are archived lower-mode rows from reviewed
 ``qs_ess_sweep`` outputs; the archived README QI row is selected from a
 standalone ``QI_optimization.py`` lane until
-the current aspect-5 constrained-QI sweep has complete passing rows.  Compact
+the current aspect-6 constrained-QI sweep has complete passing rows.  Compact
 panels include the source-initial LCFS, final LCFS, objective history, and
 initial/final Boozer :math:`|B|` line contours.
 

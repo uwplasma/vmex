@@ -12,6 +12,7 @@ from qi_minimal_seed_example_common import (
     DATA_DIR,
     MinimalSeedQIExample,
     build_qi_optimization_command,
+    example_from_cli,
     run_minimal_seed_qi_example,
 )
 
@@ -34,4 +35,4 @@ BUILD_QI_OPTIMIZATION_COMMAND = build_qi_optimization_command
 
 
 if __name__ == "__main__":
-    raise SystemExit(run_minimal_seed_qi_example(EXAMPLE))
+    raise SystemExit(run_minimal_seed_qi_example(example_from_cli(EXAMPLE)))

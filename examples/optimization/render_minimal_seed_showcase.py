@@ -277,7 +277,7 @@ def publication_records(
     include_stale: bool = False,
     include_stress: bool = False,
 ) -> list[ShowcaseRecord]:
-    """Return the current aspect-5/mode-5 README promotion matrix records."""
+    """Return the current mode-5 README promotion matrix records."""
 
     case_order = PUBLICATION_CASE_ORDER + (PUBLICATION_STRESS_CASE_ORDER if include_stress else ())
     selected: list[ShowcaseRecord] = []
@@ -740,7 +740,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--publication-matrix",
         action="store_true",
-        help="Render only successful current aspect-5/mode-5 README promotion rows.",
+        help="Render only successful current mode-5 README promotion rows.",
     )
     parser.add_argument(
         "--include-stress",

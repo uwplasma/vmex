@@ -372,9 +372,9 @@ Render the historical compact best-row panels from the best stellarator-symmetri
    PYTHONPATH=. python examples/optimization/render_readme_best_optimizations.py
 
 The default per-case timeout is 1800 seconds.  The current README science
-configs use NFP=4 for QH, aspect target 5 for QA/QH/QP/QI, signed iota
-0.42 for QA, and high-priority ``abs(mean_iota) >= 0.41`` constraints for
-QH/QP/QI.
+configs use NFP=4 for QH, aspect target 5 for QA/QH/QP, aspect target 6 for
+public QI rows, signed iota 0.42 for QA, and high-priority
+``abs(mean_iota) >= 0.41`` constraints for QH/QP/QI.
 They use ``inner_max_iter = trial_max_iter = 120`` and
 ``ftol = trial_ftol = 1e-9``; GPU production sweeps cap those values at 180
 if a future problem config requests a larger replay budget.  Add
@@ -477,7 +477,7 @@ the final acceptance diagnostic.
 
 To refresh the exact rows used by this panel, run the source optimizations with
 explicit command-line overrides before rendering.  The example below regenerates
-the current uniform aspect-5 minimal-seed policy for NFP=1/2/3/4.  Named
+the current QI aspect-6 minimal-seed policy for NFP=1/2/3/4.  Named
 far-seed cases such as ``qi_stel_seed_3127`` remain explicit diagnostics.  If
 any raw artifact is replaced during a refresh, the replacement must pass the
 renderer boundary match before the panel is published.
@@ -617,7 +617,8 @@ follows:
      - Current aspect-5, ``max_mode=5`` common-minimal completion gate pass.
 
 Current non-stale common-minimal QI outputs for ``minimal_nfp1_qi``,
-``minimal_nfp2_qi``, ``minimal_nfp3_qi``, and ``minimal_nfp4_qi`` are not
+``minimal_nfp2_qi_balanced_mirror035``, ``minimal_nfp3_qi``, and
+``minimal_nfp4_qi`` are not
 present in the checked-in summary.  Do not infer a successful QI
 minimal-seed reproduction from the older ``qi_circular_nfp1`` partial row or
 from the separate QI NFP coverage panel above.  The NFP coverage panel uses
@@ -625,7 +626,8 @@ reviewed case-gated QI inputs and, for NFP=4, a minimal seed plus a same-NFP
 finite-beta QI reference-family basin-capture step; it is not the same artifact
 as the common-minimal showcase.
 
-Regenerate the current aspect-5 common-minimal showcase with:
+Regenerate the current common-minimal showcase, using aspect 5 for QA/QH/QP and
+aspect 6 for public QI rows, with:
 
 .. code-block:: bash
 

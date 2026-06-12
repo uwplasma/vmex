@@ -4,6 +4,7 @@ import ast
 from dataclasses import replace
 import importlib.util
 from pathlib import Path
+import subprocess
 import sys
 from types import ModuleType, SimpleNamespace
 
@@ -418,6 +419,38 @@ def test_qi_minimal_seed_nfp_examples_expose_public_presets(tmp_path: Path) -> N
         assert f"--reference-input examples/data/{expected_reference[nfp]}" in command_text
         assert "--max-mode 5" in command_text
         assert "--target-aspect 6" in command_text
+
+
+def test_qi_minimal_seed_nfp_examples_help_and_dry_run_do_not_solve(tmp_path: Path) -> None:
+    for nfp, script in QI_MINIMAL_NFP_SCRIPTS.items():
+        help_run = subprocess.run(
+            [sys.executable, str(script), "--help"],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        assert f"NFP={nfp} minimal-seed QI example" in help_run.stdout
+        assert "Running NFP=" not in help_run.stdout
+
+        dry_run = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--dry-run",
+                "--no-make-plots",
+                "--output-dir",
+                str(tmp_path / f"nfp{nfp}"),
+            ],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        assert f"Running NFP={nfp} minimal-seed QI optimization." in dry_run.stdout
+        assert "--no-make-plots" in dry_run.stdout
+        assert "PROCESSING INPUT" not in dry_run.stdout
+        assert not (tmp_path / f"nfp{nfp}" / "wout_final.nc").exists()
 
 
 def test_qi_case_resolver_respects_editable_default_and_env(monkeypatch) -> None:

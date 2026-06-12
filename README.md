@@ -195,9 +195,10 @@ QI NFP-specific presets are `QI_optimization_nfp1.py`,
 `QI_optimization_nfp2.py`, `QI_optimization_nfp3.py`, and
 `QI_optimization_nfp4.py`; these all start from `input.minimal_seed_nfp*` and
 delegate to the same editable QI driver with explicit controls. The NFP=2
-README row uses `minimal_nfp2_qi_balanced_mirror035`. Full provenance and
-artifact rules are in `docs/optimization.rst` and
-`docs/optimization_sweep_results.rst`.
+README row uses `minimal_nfp2_qi_balanced_mirror035`. The `QI_optimization_seed.py`
+seed-3127 preset is retained as a diagnostic stress case, not as a README
+promotion row. Full provenance and artifact-promotion rules live in the docs,
+especially `docs/optimization.rst` and `docs/optimization_sweep_results.rst`.
 
 ## Performance, Validation, Release
 
