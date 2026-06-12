@@ -96,6 +96,52 @@ Completion:
 - CPU/GPU performance: 99.4%.
 - CI/runtime/coverage hygiene: 100%.
 - Docs/release hygiene: 100%.
+
+### 2026-06-12 Low-Cost Finite-Positive Free-Boundary Parity Gates
+
+Steps taken:
+
+1. Added finite/nonzero field sanity checks to the off-grid generated-mgrid
+   versus direct-coil provider gate.  The new assertions reuse the already
+   sampled field and vacuum geometry arrays.
+2. Added finite-positive WOUT scalar checks to the ESSOS direct-coil versus
+   generated-mgrid free-boundary parity helper.  The checks reuse the existing
+   vmec_jax direct and mgrid solves and cover ``aspect``, ``Aminor_p``,
+   ``Rmajor_p``, ``volume_p``, ``wb``, and ``wp``.
+
+Results obtained:
+
+1. ``python -m ruff check tests/test_free_boundary_coil_provider_forward.py
+   tests/test_free_boundary_essos_coil_parity.py`` passed.
+2. ``JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_coil_provider_forward.py::test_generated_mgrid_boundary_projection_tracks_direct_coil_provider_off_grid -q``
+   passed.
+3. The ESSOS parity test skipped cleanly in the local environment because the
+   optional ESSOS package/assets are not present; no default CI runtime was
+   increased.
+
+Best next steps:
+
+1. Keep VMEC2000/mgrid/direct-coil promotion limited to bounded,
+   finite-positive physical WOUT fixtures.
+2. If ESSOS is present on an integration host, run the patched ESSOS parity row
+   there before citing the stricter WOUT-scalar gate.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- VMEC parity and physics gates: 99.6%.
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999998%.
+- Single-stage coil-only optimization: 99.0%.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 92% infrastructure/artifact-ready,
+  0% promoted.
 - QI minimal-seed README artifacts: 70% policy-ready, active office run in
   progress, still 0% promoted until all NFP rows pass provenance and physics
   gates.
