@@ -20270,6 +20270,74 @@ Completion:
   the mirror035 policy change until the full office artifact finishes.
 - Direct-coil/free-boundary phase 1: 100%.
 - Full nonlinear free-boundary adjoint phase 2: 99.999998%.
+
+### 2026-06-12 QI Policy Matrix Monitoring and CPU NFP1 Retry
+
+Steps taken:
+
+1. Confirmed the latest pushed ``main`` commit
+   ``ae762be`` completed GitHub Actions successfully.
+2. Polled the ``office`` policy-mode QI README artifact run under
+   ``/home/rjorge/local/tests/qi_readme_matrix_45025a0_policy_modes``.
+3. Kept the active GPU run alive: GPU0 is running the NFP=2
+   ``minimal_nfp2_qi_balanced_mirror035`` mode-5 case, while GPU1 is occupied
+   by an unrelated long-running process.
+4. Reviewed the completed NFP=1 mode-3 policy result and launched a bounded
+   local CPU retry with ``max_mode=4`` under
+   ``/Users/rogeriojorge/local/tests/qi_readme_nfp1_cpu_mode4_ae762be``.
+5. Re-ran lightweight local validation shards while the long QI runs proceed:
+   ``tests/test_minimal_seed_showcase.py``, ``tests/test_qi_readme_cases.py``,
+   ``tests/test_optimization_examples.py``, the free-boundary branch-local
+   guard tests, and the bundled WOUT/parity physics gates.
+
+Results obtained:
+
+1. CI is green for the latest pushed ``main`` commit.
+2. The current NFP=1 README artifact candidate is not promotable:
+   ``success=False``, smooth QI about ``8.61e-2``, legacy QI about
+   ``5.43e-3``, mirror about ``0.282``, elongation about ``4.13``, aspect
+   about ``7.04``, and mean iota about ``0.468``.  The failure is a QI
+   residual failure, not an engineering/mirror failure.
+3. The NFP=2 mode-5 GPU run is still active and has not yet produced a root
+   ``case_result.json`` for promotion review.
+4. Focused local validation passed:
+   the QI showcase/example shard, free-boundary branch-local guard shard, and
+   bundled WOUT/parity physics-gate shard are green.
+
+Best next steps:
+
+1. Let the active NFP=2 GPU run finish, then inspect ``case_result.json``,
+   ``diagnostics.json``, ``history.json``, and provenance before deciding
+   whether NFP=2 is README-promotable.
+2. Let the local CPU NFP=1 mode-4 retry run long enough to determine whether
+   higher active-space cleanup fixes the QI residual.  If it still fails,
+   promote no NFP=1 README row and tune the policy instead of weakening the
+   QI gate.
+3. Continue NFP=3/NFP=4 after the current GPU policy run reaches them; use CPU
+   only for bounded sidecar diagnostics when GPUs are occupied.
+4. Continue bounded VMEC2000/direct-coil/mgrid parity only with finite-positive
+   physical WOUT fixtures.
+5. Keep adaptive full-loop differentiation claims conservative until a true
+   fingerprint-gated adaptive-loop AD-vs-central-FD gate is promoted.
+
+Need from user:
+
+No immediate action.  I will not promote or commit QI README artifacts unless
+all NFP rows have passing provenance and physics gates.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999998%; arbitrary adaptive
+  host-controller branch differentiation remains unclaimed.
+- VMEC parity and physics gates: 99.5%.
+- Single-stage coil-only optimization: 99.0%.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 90% infrastructure/artifact-ready,
+  0% re-promoted; NFP=1 currently failed QI gates, NFP=2 is running, NFP=3/4
+  remain pending in the policy-mode matrix.
 - VMEC parity and physics gates: 99.0%.
 - Single-stage coil-only optimization: 99.0%.
 - CPU/GPU performance: 99.4%.
