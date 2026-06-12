@@ -1979,8 +1979,7 @@ def run_qi_stage_policy(
             promotion["qi_working_seed_promoted"] = True
             promotion["qi_cleanup_promoted"] = False
             promotion["qi_cleanup_rejection_reasons"] = [
-                "intermediate working seed only; final promotion still requires "
-                f"mirror <= {stage_promotion_mirror_threshold:.6g}"
+                "intermediate working seed only; final promotion still requires the full QI engineering gate"
             ]
         write_qi_stage_checkpoint(
             stage_output_dir,
