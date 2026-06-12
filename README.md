@@ -193,20 +193,17 @@ Run individual editable examples with `python examples/optimization/QA_optimizat
 `QH_optimization.py`, `QP_optimization.py`, or `QI_optimization.py`. The
 `QI_optimization_seed.py` seed-3127 preset is retained as a diagnostic stress
 case, not as a README promotion row. For the reviewed high-budget NFP=2 QI
-polish path, use the `minimal_nfp2_qi_balanced_mirror035` preset in
-`examples/optimization/qi_optimization_cases.py`; it jumps from the selected
-reference-family candidate into mode-5 aspect-first QI/mirror polish and a
-guarded QI tightening stage, avoiding the older expensive mode-3 aspect ramp.
-Full provenance and artifact rules are in `docs/optimization.rst` and
-`docs/optimization_sweep_results.rst`.
+polish path, use `minimal_nfp2_qi_balanced_mirror035`; it jumps from the
+selected reference-family candidate into mode-5 aspect-first QI/mirror polish
+and guarded QI tightening. Full provenance and artifact rules are in
+`docs/optimization.rst` and `docs/optimization_sweep_results.rst`.
 
 ## Performance, Validation, Release
 
 - Performance notes: `docs/performance.rst`; validation, coverage, and release
   gates: `docs/validation.rst`, `docs/testing_strategy.rst`, and
   `docs/release_checklist.rst`.
-- Latest repository release tag:
-  [`v0.0.14`](https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.14).
+- Latest repository release tag: [`v0.0.14`](https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.14).
 
 ## CLI Reference
 
