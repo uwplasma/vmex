@@ -104,27 +104,41 @@ def test_minimal_and_circular_qi_cases_require_reference_seeded_local_stage() ->
             assert all(stage["use_mode_continuation"] is False for stage in stages)
 
 
-def test_nfp2_balanced_qi_case_exposes_reviewed_mode5_mirror032_polish() -> None:
-    mod = _load_cases_module("qi_optimization_cases_balanced_mirror032_test")
+def test_nfp2_balanced_qi_case_exposes_reviewed_mode5_mirror035_polish() -> None:
+    mod = _load_cases_module("qi_optimization_cases_balanced_mirror035_test")
 
-    case = mod.QI_CASES["minimal_nfp2_qi_balanced_mirror032"]
+    case = mod.QI_CASES["minimal_nfp2_qi_balanced_mirror035"]
     stages = case["mirror_ramp_stages"]
 
     assert case["input_file"].name == "input.minimal_seed_nfp2"
     assert case["max_mode"] == 5
     assert case["min_vmec_mode"] == 8
     assert case["mirror_threshold"] == pytest.approx(mod.DEFAULT_QI_MIRROR_RATIO)
-    assert "balanced_mirror032" in str(case["output_dir"])
-    assert stages[-2]["name"] == "final_balance_qi_mirror032"
-    assert stages[-1]["name"] == "mirror_polish_after_qi_gate032"
-    assert stages[-2]["stage_mode_limits"] == ({"mode": 5, "max_m": 5, "max_n": 5, "label": "m05_n05"},)
-    assert stages[-1]["stage_mode_limits"] == ({"mode": 5, "max_m": 5, "max_n": 5, "label": "m05_n05"},)
-    assert stages[-2]["use_augmented_lagrangian_constraints"] is True
-    assert stages[-1]["use_augmented_lagrangian_constraints"] is True
-    assert stages[-2]["require_engineering_gate"] is True
-    assert stages[-1]["require_engineering_gate"] is True
-    assert stages[-2]["promotion_mirror_threshold"] == pytest.approx(mod.DEFAULT_QI_MIRROR_RATIO)
-    assert stages[-1]["promotion_mirror_threshold"] == pytest.approx(mod.DEFAULT_QI_MIRROR_RATIO)
+    assert "balanced_mirror035" in str(case["output_dir"])
+    assert [stage["name"] for stage in stages] == [
+        "final_balance_qi_mirror035",
+        "mirror_polish_after_qi_gate035",
+    ]
+    assert all(stage["stage_mode_limits"] == ({"mode": 5, "max_m": 5, "max_n": 5, "label": "m05_n05"},) for stage in stages)
+    assert all(stage["use_augmented_lagrangian_constraints"] is True for stage in stages)
+    assert all(stage["require_engineering_gate"] is True for stage in stages)
+    assert all(
+        stage["promotion_mirror_threshold"] == pytest.approx(mod.DEFAULT_QI_MIRROR_RATIO)
+        for stage in stages
+    )
+
+
+def test_nfp2_balanced_mirror032_alias_points_to_current_mirror035_policy() -> None:
+    mod = _load_cases_module("qi_optimization_cases_balanced_mirror032_alias_test")
+
+    case = mod.QI_CASES["minimal_nfp2_qi_balanced_mirror032"]
+
+    assert "mirror<=0.35" in case["case_goal"]
+    assert "balanced_mirror035" in str(case["output_dir"])
+    assert [stage["name"] for stage in case["mirror_ramp_stages"]] == [
+        "final_balance_qi_mirror035",
+        "mirror_polish_after_qi_gate035",
+    ]
 
 
 def test_resolve_qi_case_external_input_uses_far_seed_policy_without_reference(monkeypatch, tmp_path: Path) -> None:

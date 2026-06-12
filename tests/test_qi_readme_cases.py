@@ -91,7 +91,7 @@ def _passing_diagnostics(*, nfp: int = 2) -> dict:
         "qi_legacy_total": 1.5e-3,
         "qi_legacy_gate": 2.0e-3,
         "qi_mirror_ratio_max": 0.24,
-        "qi_mirror_ratio_target": 0.32,
+        "qi_mirror_ratio_target": 0.35,
         "qi_max_elongation": 6.5,
         "qi_elongation_target": 8.2,
         "aspect": 9.8,
