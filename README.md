@@ -180,7 +180,7 @@ Reproduce the minimal-seed optimization rows with:
 
 ```bash
 PYTHONPATH=. JAX_PLATFORMS=cuda python3 examples/optimization/generate_minimal_seed_showcase.py \
-  --cases qa_nfp2,qa_nfp3,qh_nfp3,qh_nfp4,qp_nfp2,qp_nfp3,qi_nfp1,qi_nfp2,qi_nfp3,qi_nfp4 \
+  --cases qa_nfp2,qa_nfp3,qh_nfp3,qh_nfp4,qp_nfp2,qp_nfp3 \
   --backend-label gpu \
   --solver-device gpu --worker-jax-platforms cuda --policy continuation --max-mode 5 --ess on \
   --max-nfev 70 --continuation-nfev 20 --inner-max-iter 550 --inner-ftol 1e-10 \
@@ -191,14 +191,12 @@ PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 
 Run individual editable examples with `python examples/optimization/QA_optimization.py`,
 `QH_optimization.py`, `QP_optimization.py`, or `QI_optimization.py`. The public
-QI NFP-specific presets are `QI_optimization_nfp1.py`,
-`QI_optimization_nfp2.py`, `QI_optimization_nfp3.py`, and
-`QI_optimization_nfp4.py`; these all start from `input.minimal_seed_nfp*` and
-delegate to the same editable QI driver with explicit controls. The NFP=2
-README row uses `minimal_nfp2_qi_balanced_mirror035`. The `QI_optimization_seed.py`
-seed-3127 preset is retained as a diagnostic stress case, not as a README
-promotion row. Full provenance and artifact-promotion rules live in the docs,
-especially `docs/optimization.rst` and `docs/optimization_sweep_results.rst`.
+QI presets are `QI_optimization_nfp1.py` through `QI_optimization_nfp4.py`;
+they start from `input.minimal_seed_nfp*` and use policy modes rather than
+forcing every QI row to `max_mode=5`. The NFP=2 row uses
+`minimal_nfp2_qi_balanced_mirror035`. The seed-3127 preset is retained as a diagnostic stress case, not a README promotion row.
+Full provenance and artifact-promotion rules live in `docs/optimization.rst`
+and `docs/optimization_sweep_results.rst`.
 
 ## Performance, Validation, Release
 
