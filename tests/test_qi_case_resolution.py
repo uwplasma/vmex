@@ -119,6 +119,7 @@ def test_nfp2_balanced_qi_case_exposes_reviewed_mode5_mirror035_polish() -> None
     assert [stage["name"] for stage in stages] == [
         "aspect_first_qi_mirror035",
         "guarded_tighten_qi_mirror035",
+        "aspect_localize_after_qi_gate035",
     ]
     assert all(
         stage["stage_mode_limits"] == ({"mode": 5, "max_m": 5, "max_n": 5, "label": "m05_n05"},)
@@ -132,12 +133,16 @@ def test_nfp2_balanced_qi_case_exposes_reviewed_mode5_mirror035_polish() -> None
     )
     assert stages[0]["accept_if_qi_improves"] is True
     assert stages[0]["promote_as_working_seed_only"] is True
-    assert "accept_if_qi_improves" not in stages[1]
-    assert "promote_as_working_seed_only" not in stages[1]
+    assert stages[1]["accept_if_qi_improves"] is True
+    assert stages[1]["promote_as_working_seed_only"] is True
+    assert stages[2]["accept_if_qi_safe_aspect_improves"] is True
+    assert "promote_as_working_seed_only" not in stages[2]
     assert stages[0]["aspect_weight"] == pytest.approx(0.75)
     assert stages[0]["scalar_step_bound"] == pytest.approx(5.0e-2)
     assert stages[1]["aspect_weight"] == pytest.approx(3.0)
     assert stages[1]["scalar_step_bound"] == pytest.approx(2.5e-2)
+    assert stages[2]["aspect_weight"] == pytest.approx(8.0)
+    assert stages[2]["scalar_step_bound"] == pytest.approx(1.5e-2)
 
 
 def test_nfp2_balanced_mirror032_alias_points_to_current_mirror035_policy() -> None:
@@ -150,6 +155,7 @@ def test_nfp2_balanced_mirror032_alias_points_to_current_mirror035_policy() -> N
     assert [stage["name"] for stage in case["mirror_ramp_stages"]] == [
         "aspect_first_qi_mirror035",
         "guarded_tighten_qi_mirror035",
+        "aspect_localize_after_qi_gate035",
     ]
 
 

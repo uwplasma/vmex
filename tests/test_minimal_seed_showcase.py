@@ -421,10 +421,15 @@ def test_minimal_seed_showcase_dispatches_qi_to_staged_runner(tmp_path: Path, mo
     assert [stage["name"] for stage in config.mirror_ramp_stages] == [
         "aspect_first_qi_mirror035",
         "guarded_tighten_qi_mirror035",
+        "aspect_localize_after_qi_gate035",
     ]
-    assert [stage["aspect_weight"] for stage in config.mirror_ramp_stages] == pytest.approx([0.75, 3.0])
-    assert [stage["method"] for stage in config.mirror_ramp_stages] == ["scalar_trust", "scalar_trust"]
-    assert [stage["stage_mode_limits"][0]["mode"] for stage in config.mirror_ramp_stages] == [5, 5]
+    assert [stage["aspect_weight"] for stage in config.mirror_ramp_stages] == pytest.approx([0.75, 3.0, 8.0])
+    assert [stage["method"] for stage in config.mirror_ramp_stages] == [
+        "scalar_trust",
+        "scalar_trust",
+        "scalar_trust",
+    ]
+    assert [stage["stage_mode_limits"][0]["mode"] for stage in config.mirror_ramp_stages] == [5, 5, 5]
     assert all(stage["iota_floor_weight"] >= 125.0**2 for stage in config.mirror_ramp_stages)
     assert all(stage["qi_weight"] >= 11000.0 for stage in config.mirror_ramp_stages)
     assert all(stage["qi_ceiling_weight"] >= 14000.0 for stage in config.mirror_ramp_stages)
