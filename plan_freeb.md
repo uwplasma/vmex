@@ -448,6 +448,72 @@ Completion:
 - CI/runtime/coverage hygiene: 100% locally; latest pushed CI is pending final
   result.
 - Docs/release hygiene: 100%.
+
+### 2026-06-12 Mirror035 Validation and Office Run Launch
+
+Steps taken:
+
+1. Pushed ``51e795e Relax balanced QI mirror gate`` to ``main``.
+2. Confirmed GitHub Actions CI for ``51e795e`` completed successfully.
+3. Launched the full ``minimal_nfp2_qi_balanced_mirror035`` preset on
+   ``office`` from a fresh shallow clone, using CUDA device 0 and output root
+   ``~/local/tests/qi_balanced_mirror035_51e795e``.
+4. Re-ran promoted local free-boundary/direct-coil/mgrid validation gates:
+   ruff on free-boundary/parity files, the full promoted JAX free-boundary test
+   set, the focused same-branch custom-VJP complete-solve FD tests, accepted /
+   rejected controller-slot tests, and the optional ESSOS direct-coil versus
+   generated-mgrid backend parity test with ``ESSOS_mgrid_pr`` on
+   ``PYTHONPATH``.
+5. Started optional VMEC2000 bounded parity gates in parallel through a worker.
+
+Results obtained:
+
+1. CI for ``51e795e`` is green.
+2. Ruff passed on the free-boundary/direct-coil/mgrid/parity files.
+3. Promoted JAX free-boundary/direct-coil/mgrid suite passed:
+   ``164 passed, 1 skipped, 1 xfailed`` in ``5:36``.
+4. Focused same-branch custom-VJP checks passed:
+   ``4 passed`` in ``3:03``.
+5. Accepted/rejected controller and branch-fingerprint tests passed:
+   ``3 passed``.
+6. Optional ESSOS direct-coil/generated-mgrid backend parity passed:
+   ``1 passed`` in ``16.6`` s when using
+   ``/Users/rogeriojorge/local/ESSOS_mgrid_pr``.
+7. The ``office`` QI job is alive and has entered
+   ``final_balance_qi_mirror035``.  The reference-family baseline selected
+   ``lambda=1.01`` with smooth QI ``4.36e-3``, legacy QI ``2.30e-3``, mirror
+   ``0.2408``, elongation ``4.62``, mean iota ``-0.455``, and aspect ``8.07``.
+   This passes mirror under the new ``0.35`` gate, but still needs the
+   mode-5 AL stage to reduce QI below the promotion gate.
+
+Best next steps:
+
+1. Let the ``office`` mode-5 AL run finish or reach a clear checkpointed
+   failure; if it passes, sync artifacts and refresh README/docs QI panels.
+2. Collect the optional VMEC2000 bounded parity worker result and record whether
+   the W7-X generated-mgrid fixture remains the promoted WOUT-level external
+   parity lane.
+3. If the direct mode-5 polish stalls without new iteration/checkpoint output,
+   restart the same preset with scalar-trust instrumentation or a shorter
+   stage budget to expose callback-level progress.
+
+Need from user:
+
+No immediate action.
+
+Completion:
+
+- QI minimal-seed README artifacts: 90% artifact-ready, 0% re-promoted after
+  the mirror035 policy change while the office artifact is still running.
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999998% for same-branch /
+  fingerprint-gated gates; arbitrary adaptive branch differentiation remains
+  unclaimed.
+- VMEC parity and physics gates: 99.1%, pending optional VMEC2000 worker result.
+- Single-stage coil-only optimization: 99.0%.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 100%.
 - QI seed robustness: 92%.
 
 ### 2026-06-07 Near-QI Preservation Prefine Policy
