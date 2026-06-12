@@ -401,7 +401,7 @@ def test_minimal_seed_showcase_dispatches_qi_to_staged_runner(tmp_path: Path, mo
         solver_device="cpu",
         worker_jax_platforms="cpu",
         policy="continuation",
-        max_mode=3,
+        max_mode=5,
         use_ess=True,
         budget=budget,
         input_file=tmp_path / "input.target_helicity_seed",
@@ -412,22 +412,22 @@ def test_minimal_seed_showcase_dispatches_qi_to_staged_runner(tmp_path: Path, mo
     assert result.problem == "qi"
     assert config.name == "qi_nfp2"
     assert config.input_file == tmp_path / "input.target_helicity_seed"
-    assert config.max_mode == 3
+    assert config.max_mode == 5
     assert config.policy == "continuation"
-    assert config.policy_case == "minimal_nfp2_qi"
+    assert config.policy_case == "minimal_nfp2_qi_balanced_mirror035"
     assert config.reference_input.name == "input.nfp2_QI"
     assert config.reference_accept_as_baseline is True
-    assert config.reference_lambdas[:4] == pytest.approx((0.0, 0.1, 0.25, 0.5))
-    assert config.reference_lambdas[-1] == pytest.approx(1.005)
-    assert [stage["aspect_weight"] for stage in config.mirror_ramp_stages] == pytest.approx([0.35, 0.75, 1.5])
-    assert [stage["accept_if_qi_safe_aspect_improves"] for stage in config.mirror_ramp_stages] == [True, True, False]
-    assert [stage["promote_as_working_seed_only"] for stage in config.mirror_ramp_stages] == [True, True, False]
-    assert [stage["qi_safe_mirror_relax"] for stage in config.mirror_ramp_stages] == pytest.approx(
-        [4.0 / 3.0, 4.0 / 3.0, 1.0]
-    )
-    assert all(stage["iota_floor_weight"] >= 50.0**2 for stage in config.mirror_ramp_stages)
-    assert all(stage["qi_weight"] >= 1000.0 for stage in config.mirror_ramp_stages)
-    assert all(stage["qi_ceiling_weight"] >= 50000.0 for stage in config.mirror_ramp_stages)
+    assert generator.qi_staged_runner._reference_lambdas(config) == pytest.approx((0.97, 0.98, 0.99))
+    assert [stage["name"] for stage in config.mirror_ramp_stages] == [
+        "aspect_first_qi_mirror035",
+        "guarded_tighten_qi_mirror035",
+    ]
+    assert [stage["aspect_weight"] for stage in config.mirror_ramp_stages] == pytest.approx([0.75, 3.0])
+    assert [stage["method"] for stage in config.mirror_ramp_stages] == ["scalar_trust", "scalar_trust"]
+    assert [stage["stage_mode_limits"][0]["mode"] for stage in config.mirror_ramp_stages] == [5, 5]
+    assert all(stage["iota_floor_weight"] >= 125.0**2 for stage in config.mirror_ramp_stages)
+    assert all(stage["qi_weight"] >= 11000.0 for stage in config.mirror_ramp_stages)
+    assert all(stage["qi_ceiling_weight"] >= 14000.0 for stage in config.mirror_ramp_stages)
     assert all(stage["qi_ceiling_max"] <= 2.0e-3 for stage in config.mirror_ramp_stages)
     assert config.max_nfev == 4
     assert config.continuation_nfev == 3
