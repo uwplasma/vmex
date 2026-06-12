@@ -103,6 +103,66 @@ def test_glasser_d_r_gradients_wrt_mercier_inputs_match_central_finite_differenc
     np.testing.assert_allclose(np.asarray(grad_ad), np.asarray(grad_fd), rtol=5.0e-8, atol=5.0e-10)
 
 
+@pytest.mark.parametrize(
+    "objective",
+    [
+        "DMerc",
+        "GlasserResistiveInterchange",
+    ],
+)
+def test_public_dmerc_and_glasser_objective_gradients_match_central_finite_difference(
+    objective,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Public Mercier stability wrappers should preserve AD/FD consistency."""
+
+    jax = pytest.importorskip("jax")
+
+    def fake_mercier_terms_from_state(**kwargs):
+        state = jnp.asarray(kwargs["state"], dtype=jnp.float64)
+        dmerc = jnp.asarray([0.0, 0.03, -0.04, 0.01, 0.0], dtype=jnp.float64) + state * jnp.asarray(
+            [0.0, 0.20, -0.10, 0.05, 0.0],
+            dtype=jnp.float64,
+        )
+        shear = jnp.asarray([0.0, 0.35, -0.45, 0.60, 0.0], dtype=jnp.float64) + state * jnp.asarray(
+            [0.0, 0.04, -0.03, 0.02, 0.0],
+            dtype=jnp.float64,
+        )
+        h_term = jnp.asarray([0.0, 0.020, -0.030, 0.015, 0.0], dtype=jnp.float64) + state * jnp.asarray(
+            [0.0, -0.01, 0.02, 0.03, 0.0],
+            dtype=jnp.float64,
+        )
+        return {
+            "DMerc": dmerc,
+            "D_R": vj.glasser_resistive_interchange_from_mercier_terms(
+                DMerc=dmerc,
+                shear=shear,
+                H=h_term,
+                shear_epsilon=2.0e-2,
+            )["D_R"],
+            "H": h_term,
+            "shear": shear,
+        }
+
+    monkeypatch.setattr(workflow, "mercier_terms_from_state", fake_mercier_terms_from_state)
+    ctx = SimpleNamespace(static="static", indata="indata", signgs=1)
+    if objective == "DMerc":
+        term = vj.DMerc(minimum=0.0, softness=0.15)
+    else:
+        term = vj.GlasserResistiveInterchange(maximum=0.0, softness=0.15, shear_epsilon=2.0e-2)
+
+    def scalar_objective(alpha):
+        return jnp.sum(term.J(ctx, alpha))
+
+    alpha0 = jnp.asarray(0.07, dtype=jnp.float64)
+    grad_ad = jax.grad(scalar_objective)(alpha0)
+    eps = jnp.asarray(1.0e-5, dtype=jnp.float64)
+    grad_fd = (scalar_objective(alpha0 + eps) - scalar_objective(alpha0 - eps)) / (2.0 * eps)
+
+    assert np.isfinite(float(np.asarray(grad_ad)))
+    np.testing.assert_allclose(np.asarray(grad_ad), np.asarray(grad_fd), rtol=5.0e-8, atol=5.0e-10)
+
+
 def test_mercier_profile_integrals_prefer_jdotb_bdotb_H_reconstruction_over_dcurr_fallback():
     data = dict(
         s=np.linspace(0.0, 1.0, 5),
