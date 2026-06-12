@@ -296,6 +296,56 @@ def test_qi_example_cli_loads_anisotropic_stage_mode_limits(tmp_path: Path) -> N
     assert namespace["STAGE_MODES"] == namespace["STAGE_MODE_LIMITS"]
 
 
+def test_qi_private_parsers_reject_bad_stage_mode_limits(tmp_path: Path) -> None:
+    assert qio._float_tuple("") == ()
+
+    bad_json = tmp_path / "bad_stage_limits.json"
+    bad_json.write_text("{not json")
+    with pytest.raises(ValueError, match="Invalid stage mode limits JSON"):
+        qio._json_stage_mode_limits(bad_json)
+
+    not_a_list = tmp_path / "not_a_list.json"
+    not_a_list.write_text(json.dumps({"mode": 3}))
+    with pytest.raises(ValueError, match="must contain a list"):
+        qio._json_stage_mode_limits(not_a_list)
+
+
+def test_qi_cli_rejects_bad_boundary_and_mirror_stage_json(tmp_path: Path) -> None:
+    namespace = {"MAX_MODE": 2, "USE_MODE_CONTINUATION": True, "CONTINUATION_NFEV": 2}
+
+    bad_boundary = tmp_path / "bad_boundary.json"
+    bad_boundary.write_text("[1, 2, 3]")
+    with pytest.raises(ValueError, match="boundary-reference-json must contain a JSON object"):
+        qio.apply_qi_example_cli_overrides(namespace.copy(), ["--boundary-reference-json", str(bad_boundary)])
+
+    bad_stages = tmp_path / "bad_stages.json"
+    bad_stages.write_text(json.dumps({"name": "cleanup"}))
+    with pytest.raises(ValueError, match="mirror-ramp-stages-json must contain a JSON list"):
+        qio.apply_qi_example_cli_overrides(namespace.copy(), ["--mirror-ramp-stages-json", str(bad_stages)])
+
+
+def test_boundary_reference_checkpoint_diagnostics_selects_records(tmp_path: Path) -> None:
+    active = tmp_path / "input.active"
+    summary_dir = tmp_path / "boundary_reference_preconditioner"
+    summary_dir.mkdir()
+    (summary_dir / "summary.json").write_text(
+        json.dumps(
+            [
+                "ignored",
+                {"input": str(active), "lambda": 0.9, "mirror_ratio": 0.4},
+                {"selected": True, "input": str(tmp_path / "input.selected"), "wout": "wout.nc", "lambda": 1.0},
+            ]
+        )
+    )
+
+    diagnostics = qio._boundary_reference_checkpoint_diagnostics(tmp_path, active)
+
+    assert diagnostics["source"] == "boundary_reference_preconditioner"
+    assert diagnostics["boundary_reference_input_path"].endswith("input.selected")
+    assert diagnostics["boundary_reference_wout_path"] == "wout.nc"
+    assert diagnostics["lambda"] == 1.0
+
+
 def test_qi_example_cli_real_stage_mode_policies() -> None:
     base = {
         "MAX_MODE": 3,
