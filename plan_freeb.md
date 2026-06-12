@@ -20769,3 +20769,53 @@ Completion:
 - CPU/GPU performance: 99.4%; this experiment re-confirms high-mode QI
   scalar-trust cold derivative construction is still too expensive for broad
   public cleanup sweeps.
+
+### 2026-06-12 Focused Free-Boundary Branch-Local Validation
+
+Steps taken:
+
+1. Checked the post-``8483a2e`` CI run.  The docs, build, console-script,
+   repository-size, Python 3.10, Python 3.12, and several Python 3.11 coverage
+   shards were green while the remaining Python 3.11 shards continued running.
+2. Reran the local free-boundary fingerprint gate:
+   ``test_direct_coil_trace_fingerprint_detects_control_branch_changes``.
+3. Reran the promoted same-branch custom-VJP complete-solve FD gates for both
+   current-only and Fourier-only coil perturbations.
+4. Reran the lean branch-trace gate that verifies branch traces keep replay
+   controls while omitting raw force payloads.
+
+Results obtained:
+
+1. All local focused gates passed.
+2. The current-only gate exercises QS, aspect/axis, accepted Bnormal and
+   Bsqvac scalars, production branch-local vector/JVP, and a fixed rejected
+   controller-slot mask.  This keeps the adaptive-loop claim conservative:
+   the validated path is fingerprint-gated and branch-local, not an arbitrary
+   derivative through host-side adaptive branch selection.
+3. The Fourier-only gate covers the other direct-coil control family with the
+   same complete-solve central-FD comparison.
+
+Best next steps:
+
+1. Keep monitoring the remaining CI shards for ``8483a2e``.
+2. Audit the coil-only QS optimization example and wire it more directly to the
+   validated branch-local vector/JVP path if it still uses only dense SciPy
+   complete-solve callbacks.
+3. Keep QI README promotion blocked until NFP1/2/3/4 minimal-seed artifacts
+   pass independent provenance and physics diagnostics.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Full nonlinear free-boundary adjoint phase 2: 99.999998%; same-branch
+  accepted/rejected replay, physical scalars, and vector/JVP gates are
+  validated, while arbitrary adaptive branch differentiation remains unclaimed.
+- Single-stage coil-only optimization: 99.0%; next item is using this validated
+  branch-local derivative lane in the public coil-only example.
+- VMEC parity and physics gates: 99.65%.
+- CI/runtime/coverage hygiene: 100%; latest CI still has a few shards running.
+- QI minimal-seed README artifacts: 93% infrastructure/artifact-ready,
+  0% promoted.
