@@ -48,7 +48,7 @@ def test_qi_staged_runner_builds_external_input_cli_and_environment(tmp_path: Pa
         method="scipy",
         target_aspect=5.0,
         target_abs_iota_min=0.41,
-        max_mirror_ratio=0.3,
+        max_mirror_ratio=0.32,
         max_elongation=10.0,
         qi_mboz=10,
         qi_nboz=11,
@@ -80,7 +80,7 @@ def test_qi_staged_runner_builds_external_input_cli_and_environment(tmp_path: Pa
     assert "--trial-ftol" in args and "2e-08" in args
     assert "--target-aspect" in args and "6.0" in args
     assert "--target-abs-iota-min" in args and "0.41" in args
-    assert "--max-mirror-ratio" in args and "0.3" in args
+    assert "--max-mirror-ratio" in args and "0.32" in args
     assert "--max-elongation" in args and "8.2" in args
     assert "--qi-ceiling-max" in args and "0.02" in args
     assert "--qi-ceiling-smooth-penalty" in args and "0.002" in args
@@ -188,7 +188,7 @@ def test_qi_staged_runner_converts_artifacts_to_case_result(tmp_path: Path, monk
           "qi_smooth_total": 1.0e-3,
           "qi_legacy_total": 1.5e-3,
           "qi_mirror_ratio_max": 0.28,
-          "qi_mirror_ratio_target": 0.30,
+          "qi_mirror_ratio_target": 0.32,
           "qi_max_elongation": 6.5,
           "qi_elongation_target": 8.2
         }
@@ -380,7 +380,7 @@ def test_qi_staged_runner_prefers_stage_checkpoint_metrics_on_timeout(tmp_path: 
             "qi_smooth_total": 1.9e-3,
             "qi_legacy_total": 1.2e-3,
             "qi_mirror_ratio_max": 0.27,
-            "qi_mirror_ratio_target": 0.30,
+            "qi_mirror_ratio_target": 0.32,
             "qi_max_elongation": 6.2,
             "qi_elongation_target": 8.2,
             "mean_iota": 0.52,
@@ -455,8 +455,8 @@ def test_qi_staged_runner_preserves_zero_checkpoint_metrics(tmp_path: Path) -> N
 def test_qi_staged_runner_prefers_completed_stage_over_newer_pending_checkpoint(tmp_path: Path) -> None:
     runner = _load_runner()
     out = tmp_path / "out"
-    stage1 = out / "mirror_ramp_01_matrix_free_mirror030_aspect0p35"
-    stage2 = out / "mirror_ramp_02_matrix_free_mirror030_aspect0p75"
+    stage1 = out / "mirror_ramp_01_matrix_free_mirror032_aspect0p35"
+    stage2 = out / "mirror_ramp_02_matrix_free_mirror032_aspect0p75"
     stage1.mkdir(parents=True)
     stage2.mkdir(parents=True)
     completed_checkpoint = {
