@@ -142,6 +142,67 @@ Completion:
 - Docs/release hygiene: 100%.
 - QI minimal-seed README artifacts: 92% infrastructure/artifact-ready,
   0% promoted.
+
+### 2026-06-12 NFP1 QI-First Probe and Remote Matrix Monitoring
+
+Steps taken:
+
+1. Ran local CPU NFP=1 probes from the same minimal target-helicity seed and
+   scalar-aware same-NFP reference family, without committing any policy change.
+2. Tested a QI-first matrix-free mode-4 stage with mirror and elongation
+   disabled, then interrupted it after it became dominated by expensive JVP
+   products.
+3. Tested a QI-first scalar-trust anisotropic stage with ``m<=2,n<=5`` followed
+   by a planned full mode-5 tightening stage, then interrupted it after the
+   first checkpoint showed no gate-level improvement.
+4. Confirmed the updated NFP=2 three-stage policy is running on ``office`` CPU
+   from commit ``534eca1`` while the older GPU policy matrix is still running
+   the NFP=3 row.
+
+Results obtained:
+
+1. The NFP=1 reference family remains mirror-safe but outside the QI basin:
+   representative selected branch metrics are smooth QI about ``8.4e-3``,
+   legacy QI about ``5.6e-3``, mirror about ``0.29``, aspect about ``7.08``,
+   and mean iota about ``0.48``.
+2. The matrix-free QI-first stage reduced the internal optimizer cost
+   (``13.96`` to ``5.11`` by nfev 7) but was too expensive for an immediate
+   public preset and did not yet produce an exact-diagnostic QI gate pass.
+3. The scalar-trust anisotropic stage did not improve the exact checkpoint
+   beyond the selected reference candidate before it was interrupted.
+4. NFP=1 should remain unpromoted.  The next useful NFP=1 step is a different
+   basin mechanism or objective schedule, not more reference-lambda widening
+   and not immediate mirror cleanup.
+
+Best next steps:
+
+1. Let the NFP=2 three-stage CPU run finish or reach a checkpoint; promote the
+   policy only if it passes exact smooth/legacy QI, mirror, elongation, iota,
+   and aspect provenance gates.
+2. Let the old NFP=3/NFP=4 GPU evidence run finish unless it clearly stalls;
+   keep those artifacts unpromoted until provenance passes.
+3. For NFP=1, try a new basin approach only after NFP=2/3/4 evidence is known:
+   candidates include a lower-resolution global proposal scan before exact
+   cleanup, a different same-NFP reference family, or a constrained
+   homotopy/continuation in the QI diagnostic itself.
+
+Need from user:
+
+No action needed.  GPUs are busy, so current additional QI evidence is running
+on CPU.
+
+Completion:
+
+- QI minimal-seed README artifacts: 92% infrastructure/artifact-ready,
+  0% promoted; NFP=1 remains the primary blocker, NFP=2 policy rerun is active,
+  NFP=3/4 evidence remains pending.
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999998%.
+- VMEC parity and physics gates: 99.6%.
+- Single-stage coil-only optimization: 99.0%.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100%; latest pushed CI is green.
+- Docs/release hygiene: 100%.
 - QI minimal-seed README artifacts: 70% policy-ready, active office run in
   progress, still 0% promoted until all NFP rows pass provenance and physics
   gates.
