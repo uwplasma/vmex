@@ -19308,6 +19308,77 @@ Completion:
   promoted; current searches have identified bridge and low-mirror basins but
   no single candidate satisfies both QI and mirror gates yet.
 
+### 2026-06-11 QI Scan Worker Results and Near-Gate Candidate
+
+Steps taken:
+
+1. Collected completed basin/preconditioner worker output under
+   ``/Users/rogeriojorge/local/tests/qi_scan_basin_20260611_210744``.
+2. Collected completed AL/constrained cleanup worker output under
+   ``/Users/rogeriojorge/local/tests/qi_scan_al_cleanup_20260611_210832``.
+3. Ran a targeted bridge sequence from the best AL/LCFS branch:
+   ``al_lcfs_scalar_off_a08_w160`` -> ``al_lcfs_bridge_followup_w320`` ->
+   ``al_lcfs_bridge_qi_polish_keep_mirror`` ->
+   ``al_lcfs_bridge_final_balance`` ->
+   ``al_lcfs_bridge_mirror_polish_after_qi_gate``.
+
+Results obtained:
+
+1. The basin/preconditioner worker confirmed the two-basin structure:
+   direct minimal-seed/reference-off runs passed QI and iota but failed mirror
+   (smooth QI ``1.906e-3``, legacy ``7.726e-4``, mirror ``0.3616``,
+   ``|iota|=0.4289``), while reference-accepted runs passed mirror
+   (``≈0.2407``) but failed QI (smooth ``≈6.06e-3``).
+2. The AL cleanup worker completed 20 bounded cases with no timeouts and no
+   stderr.  The best QI-gated mirror cleanup was
+   ``al_lcfs_guard_scalar_on_a12_w080``: smooth QI ``1.965e-3``,
+   legacy QI ``4.793e-4``, mirror ``0.3396``, elongation ``5.056``,
+   ``iota=-0.4916``, and aspect ``6.389``.
+3. The best raw-mirror AL cleanup reached mirror ``0.2407`` but failed QI
+   (smooth QI ``6.545e-3``, legacy QI ``2.624e-3``), so mirror alone is not a
+   sufficient promotion criterion.
+4. Targeted bridge follow-up ``al_lcfs_bridge_followup_w320`` achieved mirror
+   ``0.2821`` with legacy QI ``1.31e-3`` and good iota/aspect, but smooth QI
+   remained ``3.18e-3``.
+5. QI polish improved smooth QI to ``2.33e-3`` but mirror rose to ``0.3078``.
+6. Final balance crossed the QI gate (smooth ``1.553e-3``,
+   legacy ``5.44e-4``) but mirror rose to ``0.3178``.
+7. Final mirror polish preserved QI (smooth ``1.617e-3``,
+   legacy ``5.58e-4``) but mirror stayed slightly above target at ``0.3120``.
+
+Best next steps:
+
+1. Treat ``mirror≈0.31`` with QI gate passed as the current best balanced
+   candidate, but do not promote it as strict ``mirror<=0.30`` evidence.
+2. The next algorithmic improvement should be a true constrained/filtered step
+   acceptance rule: accept trial steps only if QI remains below the gate and
+   mirror decreases, rather than relying on weighted least-squares alone.
+3. Add a branch-local candidate selector that can combine the QI-good/mirror
+   high and mirror-good/QI-high branches and run alternating constrained
+   polish stages with explicit non-worsening gates.
+4. Keep direct high-mode cleanup rejected for this seed unless branch
+   fingerprints and physical-scalar guards are active.
+
+Need from user:
+
+No immediate action.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999999%; arbitrary adaptive
+  branch differentiation remains unclaimed.
+- VMEC parity and physics gates: 99.3%.
+- Single-stage coil-only optimization: 99.5%.
+- Robust coil perturbation optimization: deferred, 70%.
+- CPU/GPU performance: 99.6%.
+- CI/runtime/coverage hygiene: 100%; latest main CI is green at ``b1fc6e9``
+  and running on the plan checkpoint ``6740964``.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 88% infrastructure/artifact-complete, 0%
+  promoted for strict gates; best balanced local candidate now satisfies QI but
+  misses the mirror target by about ``0.012``.
+
 ### 2026-06-11 QI Minimal-Seed NFP2 Single-Pass Triage
 
 Steps taken:
