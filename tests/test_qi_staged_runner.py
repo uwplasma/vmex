@@ -161,9 +161,13 @@ def test_qi_staged_runner_uses_policy_stages_when_no_manual_stage_override(tmp_p
     assert [stage["name"] for stage in stages] == [
         "final_balance_qi_mirror035",
         "mirror_polish_after_qi_gate035",
+        "aspect_recovery_after_qi_gate035",
     ]
     assert stages[0]["promotion_mirror_threshold"] == pytest.approx(0.35)
     assert stages[1]["promotion_mirror_threshold"] == pytest.approx(0.35)
+    assert stages[2]["promotion_mirror_threshold"] == pytest.approx(0.35)
+    assert stages[2]["aspect_weight"] == pytest.approx(0.85)
+    assert stages[2]["scalar_step_bound"] == pytest.approx(3.0e-2)
 
 
 def test_qi_staged_runner_can_disable_reference_lambda_override(tmp_path: Path) -> None:

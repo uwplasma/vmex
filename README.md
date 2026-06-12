@@ -194,7 +194,9 @@ Run individual editable examples with `python examples/optimization/QA_optimizat
 `QI_optimization_seed.py` seed-3127 preset is retained as a diagnostic stress
 case, not as a README promotion row. For the reviewed high-budget NFP=2 QI
 polish path, use the `minimal_nfp2_qi_balanced_mirror035` preset in
-`examples/optimization/qi_optimization_cases.py`. Full provenance and artifact
+`examples/optimization/qi_optimization_cases.py`; it jumps from the selected
+reference-family candidate into mode-5 QI/mirror polish and aspect-recovery
+stages, avoiding the older expensive mode-3 aspect ramp. Full provenance and artifact
 rules are in `docs/optimization.rst` and `docs/optimization_sweep_results.rst`.
 
 ## Performance, Validation, Release
