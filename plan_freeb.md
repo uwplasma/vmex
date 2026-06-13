@@ -23641,3 +23641,70 @@ Completion:
 - QI minimal-seed README artifacts: 98% infrastructure/provenance-ready; NFP4
   local artifact passes, NFP2 has existing passing evidence with high aspect,
   NFP1/NFP3 remain unpromoted while round-2/round-3 searches continue.
+
+### 2026-06-13 NFP1 Focused Mirror Cleanup and Phase-3 Proposal Smoke
+
+Steps taken:
+
+1. Confirmed local ``main`` is clean at commit ``f61a18e`` and GitHub Actions
+   CI for the latest push is green.
+2. Revalidated the local phase-2 rejected-slot free-boundary gates:
+   ``test_direct_coil_native_rejected_slot_same_branch_jvp_matches_complete_solve_fd``
+   and
+   ``test_direct_coil_native_rejected_slot_geometry_jvp_matches_complete_solve_fd``.
+3. Ran the phase-3 direct-coil QS smoke with the same-branch vector/JVP report
+   enabled.  The report passed and wrote
+   ``/tmp/vmec_jax_fb_qs_smoke/same_branch_complete_solve_report.json``.
+4. Ran the same smoke with ``--same-branch-derivative-proposal``.  The
+   branch-local vector/JVP report generated a coil trial and the normal complete
+   free-boundary solve accepted the trial as the acceptance authority.
+5. Launched three focused NFP=1 QI repair jobs on office from the QI-good but
+   mirror-failing stage
+   ``results/qi_opt/ess/nfp1_repair/mirror_ramp_01_matrix_free_mirror035/input.final``:
+   a VMEC-grid mirror-heavy scalar-trust cleanup, a Boozer-scalar mirror
+   cleanup, and a QI-preserving matrix-free mirror cleanup.
+
+Results obtained:
+
+1. Ruff passed for the free-boundary adjoint/controller/test/example shard.
+2. The phase-2 rejected-slot current/geometry gates passed locally with only the
+   expected aggressive-branch runtime warnings.
+3. The phase-3 proposal smoke confirmed the intended production contract: a
+   fixed accepted-branch directional proposal is allowed to suggest a coil move,
+   but a complete free-boundary solve decides whether the move is accepted.  In
+   the smoke case, the complete solve accepted the first trial; the improvement
+   is intentionally tiny because the smoke problem is only two variables.
+4. The NFP=1 focused cleanup jobs are still running on office and remain bounded
+   by their explicit ``max_nfev`` stage budgets.
+
+Best next steps:
+
+1. Let the focused NFP=1 cleanup jobs finish, then promote only if exact
+   diagnostics pass smooth QI <= ``5e-3``, legacy QI <= ``2e-3``, mirror <=
+   ``0.35``, elongation <= ``10``, aspect <= ``7``, and ``|iota| >= 0.41``.
+2. If none pass, use the best failed diagnostic to patch only the NFP=1 public
+   preset, not the already reviewed NFP=2/3/4 artifacts.
+3. Keep phase-2 wording conservative: current evidence is fingerprint-gated
+   branch-local accepted/rejected replay through complete-loop same-branch FD,
+   not arbitrary differentiation through adaptive branch changes.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9999999% for branch-local
+  accepted/rejected gates; arbitrary adaptive host branch selection remains
+  unclaimed.
+- VMEC parity and physics gates: 99.86%.
+- Single-stage coil-only optimization phase 3: 99.8% after the complete-solve
+  accepted derivative-proposal smoke.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100% for current main CI plus targeted local
+  gates.
+- Docs/release hygiene: 100% for this increment.
+- QI minimal-seed README artifacts: 98% infrastructure/provenance-ready; NFP2,
+  NFP3, and NFP4 have reviewed passing evidence, NFP1 remains unpromoted while
+  focused mirror cleanup runs.
