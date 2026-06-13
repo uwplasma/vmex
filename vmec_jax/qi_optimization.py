@@ -20,6 +20,8 @@ from vmec_jax.namelist import InData
 from vmec_jax.optimization import boundary_param_names, create_x_scale
 from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, annotate_qi_seed_suitability
 
+QI_ENGINEERING_ASPECT_MAX = 7.0
+
 
 def _load_basin_prefilter_tools():
     """Load repo-local diagnostic helpers only when the optional prefilter runs.
@@ -1071,6 +1073,7 @@ def qi_diagnostics_for_result(
             smooth_qi_max=smooth_qi_max,
             legacy_qi_max=legacy_qi_max,
             target_aspect=_ctx(ctx, "target_aspect"),
+            aspect_max=QI_ENGINEERING_ASPECT_MAX,
             abs_iota_min=_ctx(ctx, "target_abs_iota_min"),
             mirror_ratio_max=mirror_threshold,
             max_elongation=_ctx(ctx, "max_elongation"),
@@ -1138,6 +1141,7 @@ def qi_diagnostics_for_run(
             smooth_qi_max=float(smooth_qi_max),
             legacy_qi_max=float(legacy_qi_max),
             target_aspect=float(target_aspect),
+            aspect_max=QI_ENGINEERING_ASPECT_MAX,
             abs_iota_min=float(abs_iota_min),
             mirror_ratio_max=float(mirror_threshold),
             max_elongation=float(max_elongation),
@@ -1958,6 +1962,7 @@ def run_qi_stage_policy(
                 smooth_qi_max=stage_smooth_qi_max,
                 legacy_qi_max=stage_legacy_qi_max,
                 target_aspect=_ctx(ctx, "target_aspect"),
+                aspect_max=QI_ENGINEERING_ASPECT_MAX,
                 abs_iota_min=_ctx(ctx, "target_abs_iota_min"),
                 mirror_ratio_max=stage_promotion_mirror_threshold,
                 max_elongation=_ctx(ctx, "max_elongation"),

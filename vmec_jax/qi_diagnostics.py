@@ -97,6 +97,7 @@ class QISeedSuitabilityTargets:
     legacy_qi_max: float | None = 2.0e-3
     target_aspect: float | None = 5.0
     aspect_relative_tolerance: float = 0.35
+    aspect_max: float | None = None
     abs_iota_min: float | None = 0.41
     mirror_ratio_max: float | None = 0.21
     max_elongation: float | None = 8.0
@@ -521,6 +522,7 @@ def annotate_qi_seed_suitability(
     smooth_target = targets.smooth_qi_max
     legacy_target = targets.legacy_qi_max
     aspect_target = _target_from_record(out, "target_aspect", targets.target_aspect)
+    aspect_max = _target_from_record(out, "aspect_max", targets.aspect_max)
     iota_target = _target_from_record(out, "abs_iota_min", targets.abs_iota_min)
     mirror_target = _target_from_record(out, "qi_mirror_ratio_target", targets.mirror_ratio_max)
     elongation_target = _target_from_record(out, "qi_elongation_target", targets.max_elongation)
@@ -530,6 +532,7 @@ def annotate_qi_seed_suitability(
         if aspect is None or aspect_target is None or aspect_target == 0.0
         else abs(aspect - aspect_target) / abs(aspect_target)
     )
+    aspect_upper_excess = _gate_excess(aspect, aspect_max, upper=True)
     iota_shortfall = _gate_excess(mean_iota, iota_target, upper=False)
     smooth_excess = _gate_excess(smooth, smooth_target, upper=True)
     legacy_excess = _gate_excess(legacy, legacy_target, upper=True)
@@ -560,7 +563,13 @@ def annotate_qi_seed_suitability(
             _failure_message("legacy QI", legacy, legacy_target, upper=True),
         )
     aspect_ok = True
-    if aspect_target is not None:
+    if aspect_max is not None:
+        aspect_ok = require_gate(
+            "aspect",
+            aspect is not None and aspect_upper_excess == 0.0,
+            _failure_message("aspect", aspect, aspect_max, upper=True),
+        )
+    elif aspect_target is not None:
         aspect_ok = require_gate(
             "aspect",
             aspect_relative_error is not None and aspect_relative_error <= targets.aspect_relative_tolerance,
@@ -606,7 +615,9 @@ def annotate_qi_seed_suitability(
         0.0 if smooth_target is None else _normalized_excess(smooth_excess, smooth_target),
         0.0 if legacy_target is None else _normalized_excess(legacy_excess, legacy_target),
         0.0
-        if aspect_target is None
+        if aspect_target is None and aspect_max is None
+        else _normalized_excess(aspect_upper_excess, aspect_max)
+        if aspect_max is not None
         else None
         if aspect_relative_error is None
         else max(0.0, aspect_relative_error - targets.aspect_relative_tolerance),
@@ -620,6 +631,7 @@ def annotate_qi_seed_suitability(
     out.update(
         {
             "target_aspect": aspect_target,
+            "aspect_max": aspect_max,
             "abs_iota_min": iota_target,
             "qi_smooth_gate": smooth_target,
             "qi_legacy_gate": legacy_target,
@@ -627,6 +639,7 @@ def annotate_qi_seed_suitability(
             "qi_elongation_target": elongation_target,
             "abs_mean_iota": None if mean_iota is None else abs(mean_iota),
             "aspect_relative_error": None if aspect_relative_error is None else float(aspect_relative_error),
+            "aspect_upper_excess": aspect_upper_excess,
             "iota_shortfall": iota_shortfall,
             "qi_smooth_excess": smooth_excess,
             "qi_legacy_excess": legacy_excess,
