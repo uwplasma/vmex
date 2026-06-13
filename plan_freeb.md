@@ -21251,6 +21251,56 @@ Completion:
 - QI minimal-seed README artifacts: 96% infrastructure/provenance-ready,
   0% promoted under strict four-row policy.
 
+### 2026-06-13: final QI recovery batch outcome
+
+Steps taken:
+
+1. Polled the NFP4 scalar-trust polish through final diagnostics.
+2. Terminated the NFP4 scalar-trust process after it had written final inputs,
+   WOUTs, history, and diagnostics, because the useful outputs were complete and
+   the process remained alive after the final report.
+3. Released both remote GPUs.
+
+Results obtained:
+
+1. CI run for ``b1e4e39`` completed successfully.
+2. NFP4 scalar-trust did not improve the close mode8 candidate:
+   smooth QI ``2.4395205993306473e-3``, legacy QI
+   ``3.22596027503922e-4``, mirror ``0.2970085965254901``,
+   max elongation ``4.104350686490263``, aspect ``6.000006736769671``,
+   mean iota ``-1.2884031826219944``.
+3. The best NFP4 evidence remains close, physically clean, and engineering
+   acceptable, but it does not satisfy the strict ``2e-3`` smooth-QI README gate.
+4. NFP1 and NFP3 lanes are also not promotable under the current policy.
+
+Best next steps:
+
+1. Stop QI README promotion under the strict four-row policy unless the user
+   explicitly relaxes the smooth-QI gate or accepts deferring some NFP rows.
+2. Keep the current best QI artifacts as evidence in the plan, not README
+   promotion artifacts.
+3. Return focus to the free-boundary/single-stage lanes or a new QI basin
+   formulation rather than repeating the same local high-mode polishing policy.
+
+Need from user:
+
+Decision needed only if the README QI policy should change: keep strict
+``smooth QI <= 2e-3`` and defer NFP rows, or relax/promote close NFP4 evidence.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9999995% for fixed
+  branch-local accepted/rejected gates; adaptive host branch selection remains
+  unclaimed.
+- VMEC parity and physics gates: 99.8%.
+- Single-stage coil-only optimization: 99.4%.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100% with ``b1e4e39`` CI green.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 96% infrastructure/provenance-ready,
+  0% promoted under strict four-row policy.
+
 ### 2026-06-13: stopped unproductive NFP1 mode7 recovery
 
 Steps taken:
