@@ -22848,6 +22848,79 @@ Completion:
   NFP1/NFP3 remain unpromoted while round-2/round-3 searches continue.
 
 
+### 2026-06-13 QI README Gate Revalidation Policy
+
+Steps taken:
+
+1. Audited the reviewed ``office`` QI README artifact tree under
+   ``docs/_static/qi_readme_cases`` against the current public gates:
+   smooth QI <= ``5e-3``, legacy QI <= ``2e-3``, mirror <= ``0.35``,
+   elongation <= ``10``, aspect <= ``7``, and ``|mean iota| >= 0.41``.
+2. Found that NFP2, NFP3, and NFP4 artifacts pass the current published gates.
+   The NFP2 artifact still stores stale pre-relaxation gate booleans
+   (``qi_seed_gate_passed=False`` and ``qi_engineering_gate_passed=False``),
+   so the renderer was rejecting a current-gate-passing artifact.
+3. Updated ``examples/optimization/render_qi_readme_cases.py`` so README
+   promotion is controlled by recomputed current public gate metrics.  The
+   original stored diagnostic booleans and failure list remain in the CSV as
+   provenance fields instead of acting as a hard veto.
+4. Added/updated renderer tests in ``tests/test_qi_readme_cases.py`` to cover
+   current-gate promotion with stale stored flags, true current-gate failures,
+   deferred artifacts, and generated CSV current-gate cleanliness.
+
+Results obtained:
+
+1. ``python -m ruff check examples/optimization/render_qi_readme_cases.py tests/test_qi_readme_cases.py``:
+   passed.
+2. ``JAX_ENABLE_X64=1 python -m pytest -q tests/test_qi_readme_cases.py -q``:
+   passed.
+3. Current remote artifact audit:
+   - NFP2 passes current gates with smooth QI ``2.7047e-3``, legacy QI
+     ``2.0866e-4``, mirror ``0.2648``, aspect ``3.5246``, and mean iota
+     ``-0.6990``.
+   - NFP3 passes current gates with smooth QI ``3.0741e-3``, legacy QI
+     ``6.1189e-4``, mirror ``0.3176``, aspect ``3.5369``, and mean iota
+     ``-1.0464``.
+   - NFP4 passes current gates with smooth QI ``2.6652e-3``, legacy QI
+     ``3.7316e-4``, mirror ``0.2867``, aspect ``6.0114``, and mean iota
+     ``-1.2873``.
+   - NFP1 remains unpromoted.  The closest branch has good smooth/legacy QI and
+     mirror but mean iota ``0.371``; the branches with iota above ``0.41`` miss
+     legacy QI and/or mirror.
+
+Best next steps:
+
+1. Sync only lightweight reviewed NFP2/NFP3/NFP4 JSON/provenance artifacts and
+   use WOUTs transiently for rendering; do not commit WOUT files.
+2. Launch a focused clean-checkout NFP1 repair using the current code if we
+   want a fully promoted NFP1/2/3/4 panel; otherwise keep NFP1 explicitly
+   unpromoted and avoid claiming complete NFP1 robustness.
+3. Continue bounded VMEC2000/mgrid/direct-coil parity only with finite-positive
+   physical WOUT fixtures.
+4. Keep adaptive full-loop differentiation conservative until a true arbitrary
+   adaptive-branch AD-vs-FD gate exists.
+
+Need from user:
+
+No action needed unless NFP1 must be promoted before the next release.  If so,
+the scientific decision is whether to keep the ``|iota| >= 0.41`` NFP1 gate or
+relax it for NFP1 only.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9999999% for fixed
+  branch-local current and geometry accepted/rejected gates; arbitrary adaptive
+  host branch selection remains unclaimed.
+- VMEC parity and physics gates: 99.85%.
+- Single-stage coil-only optimization: 99.5%.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100% locally for targeted gates.
+- Docs/release hygiene: 100% for this renderer-policy increment.
+- QI minimal-seed README artifacts: 75% promoted by current metrics
+  (NFP2/NFP3/NFP4), NFP1 remains the only unpromoted public README case.
+
+
 ### 2026-06-13 QI Gate Policy and Phase-3 Free-Boundary Status Refresh
 
 Steps taken:

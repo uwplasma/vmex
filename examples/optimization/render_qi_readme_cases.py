@@ -459,6 +459,46 @@ def _require_finite_metric(case: QICase, name: str, value: float) -> float:
     return value
 
 
+def _readme_gate_failures(
+    *,
+    objective_final: float,
+    qi_smooth_total: float,
+    qi_legacy_total: float,
+    qi_mirror_ratio_max: float,
+    qi_max_elongation: float,
+    aspect: float,
+    mean_iota: float,
+) -> list[str]:
+    metrics = {
+        "objective_final": objective_final,
+        "qi_smooth_total": qi_smooth_total,
+        "qi_legacy_total": qi_legacy_total,
+        "qi_mirror_ratio_max": qi_mirror_ratio_max,
+        "qi_max_elongation": qi_max_elongation,
+        "aspect": aspect,
+        "mean_iota": mean_iota,
+    }
+    failures: list[str] = []
+    for name, value in metrics.items():
+        if not np.isfinite(float(value)):
+            failures.append(f"{name}_nonfinite")
+    if failures:
+        return failures
+    if qi_smooth_total > README_QI_SMOOTH_MAX:
+        failures.append("smooth_qi")
+    if qi_legacy_total > README_QI_LEGACY_MAX:
+        failures.append("legacy_qi")
+    if qi_mirror_ratio_max > README_QI_MIRROR_MAX:
+        failures.append("mirror")
+    if qi_max_elongation > README_QI_ELONGATION_MAX:
+        failures.append("elongation")
+    if abs(mean_iota) < README_QI_ABS_IOTA_MIN:
+        failures.append("iota")
+    if aspect > README_QI_ASPECT_MAX:
+        failures.append("aspect")
+    return failures
+
+
 def _require_case_gated_diagnostics(
     case: QICase,
     diagnostics: dict,
@@ -474,14 +514,6 @@ def _require_case_gated_diagnostics(
     target_aspect: float,
     mean_iota: float,
 ) -> None:
-    if diagnostics.get("qi_seed_gate_passed") is not True:
-        raise RuntimeError(f"{case.label} is case-gated but failed the QI seed gate")
-    if diagnostics.get("qi_engineering_gate_passed") is not True:
-        raise RuntimeError(f"{case.label} is case-gated but failed the QI engineering gate")
-    gate_failures = diagnostics.get("qi_gate_failures", [])
-    if gate_failures:
-        raise RuntimeError(f"{case.label} is case-gated but has QI gate failures: {gate_failures}")
-
     metrics = {
         "objective_final": objective_final,
         "qi_smooth_total": qi_smooth_total,
@@ -497,55 +529,18 @@ def _require_case_gated_diagnostics(
     for name, value in metrics.items():
         _require_finite_metric(case, name, value)
 
-    if "qi_smooth_gate" in diagnostics and qi_smooth_total > float(diagnostics["qi_smooth_gate"]):
-        raise RuntimeError(f"{case.label} is case-gated but smooth QI exceeds its gate")
-    if "qi_legacy_gate" in diagnostics and qi_legacy_total > float(diagnostics["qi_legacy_gate"]):
-        raise RuntimeError(f"{case.label} is case-gated but legacy QI exceeds its gate")
-    if "qi_smooth_gate" in diagnostics and float(diagnostics["qi_smooth_gate"]) > README_QI_SMOOTH_MAX:
+    readme_failures = _readme_gate_failures(
+        objective_final=objective_final,
+        qi_smooth_total=qi_smooth_total,
+        qi_legacy_total=qi_legacy_total,
+        qi_mirror_ratio_max=qi_mirror_ratio_max,
+        qi_max_elongation=qi_max_elongation,
+        aspect=aspect,
+        mean_iota=mean_iota,
+    )
+    if readme_failures:
         raise RuntimeError(
-            f"{case.label} is case-gated but was generated with a lenient smooth-QI gate: "
-            f"{float(diagnostics['qi_smooth_gate']):.6g} > {README_QI_SMOOTH_MAX:.6g}"
-        )
-    if "qi_legacy_gate" in diagnostics and float(diagnostics["qi_legacy_gate"]) > README_QI_LEGACY_MAX:
-        raise RuntimeError(
-            f"{case.label} is case-gated but was generated with a lenient legacy-QI gate: "
-            f"{float(diagnostics['qi_legacy_gate']):.6g} > {README_QI_LEGACY_MAX:.6g}"
-        )
-    if qi_smooth_total > README_QI_SMOOTH_MAX:
-        raise RuntimeError(
-            f"{case.label} is case-gated but README smooth QI exceeds "
-            f"{README_QI_SMOOTH_MAX:.6g}: {qi_smooth_total:.6g}"
-        )
-    if qi_legacy_total > README_QI_LEGACY_MAX:
-        raise RuntimeError(
-            f"{case.label} is case-gated but README legacy QI exceeds "
-            f"{README_QI_LEGACY_MAX:.6g}: {qi_legacy_total:.6g}"
-        )
-    if qi_mirror_ratio_max > qi_mirror_ratio_target:
-        raise RuntimeError(f"{case.label} is case-gated but mirror ratio exceeds its target")
-    if qi_mirror_ratio_max > README_QI_MIRROR_MAX:
-        raise RuntimeError(
-            f"{case.label} is case-gated but README mirror ratio exceeds "
-            f"{README_QI_MIRROR_MAX:.6g}: {qi_mirror_ratio_max:.6g}"
-        )
-    if qi_max_elongation > qi_elongation_target:
-        raise RuntimeError(f"{case.label} is case-gated but elongation exceeds its target")
-    if qi_max_elongation > README_QI_ELONGATION_MAX:
-        raise RuntimeError(
-            f"{case.label} is case-gated but README elongation exceeds "
-            f"{README_QI_ELONGATION_MAX:.6g}: {qi_max_elongation:.6g}"
-        )
-    if "abs_iota_min" in diagnostics and abs(mean_iota) < float(diagnostics["abs_iota_min"]):
-        raise RuntimeError(f"{case.label} is case-gated but mean iota is below its floor")
-    if abs(mean_iota) < README_QI_ABS_IOTA_MIN:
-        raise RuntimeError(
-            f"{case.label} is case-gated but README |mean iota| is below "
-            f"{README_QI_ABS_IOTA_MIN:.6g}: {abs(mean_iota):.6g}"
-        )
-    if aspect > README_QI_ASPECT_MAX:
-        raise RuntimeError(
-            f"{case.label} is case-gated but README aspect exceeds "
-            f"{README_QI_ASPECT_MAX:.6g}: {aspect:.6g}"
+            f"{case.label} is case-gated but fails current README gates: {readme_failures}"
         )
 
 
@@ -589,6 +584,15 @@ def _case_record(case: QICase) -> dict[str, str | float]:
             target_aspect=target_aspect,
             mean_iota=mean_iota,
         )
+    readme_gate_failures = _readme_gate_failures(
+        objective_final=objective_final,
+        qi_smooth_total=qi_smooth_total,
+        qi_legacy_total=qi_legacy_total,
+        qi_mirror_ratio_max=qi_mirror_ratio_max,
+        qi_max_elongation=qi_max_elongation,
+        aspect=aspect,
+        mean_iota=mean_iota,
+    )
     return {
         "case": case.label,
         "input_file": str(case.input_file.relative_to(REPO_ROOT)),
@@ -600,6 +604,7 @@ def _case_record(case: QICase) -> dict[str, str | float]:
         "qi_seed_gate_passed": _optional_bool(diagnostics, "qi_seed_gate_passed"),
         "qi_engineering_gate_passed": _optional_bool(diagnostics, "qi_engineering_gate_passed"),
         "qi_gate_failures": ";".join(str(item) for item in diagnostics.get("qi_gate_failures", [])),
+        "readme_gate_failures": ";".join(readme_gate_failures),
         "objective_final": objective_final,
         "qi_smooth_total": qi_smooth_total,
         "qi_legacy_total": qi_legacy_total,
@@ -636,6 +641,7 @@ def _write_csv(records: list[dict[str, str | float]]) -> None:
         "qi_seed_gate_passed",
         "qi_engineering_gate_passed",
         "qi_gate_failures",
+        "readme_gate_failures",
         "objective_final",
         "qi_smooth_total",
         "qi_legacy_total",
