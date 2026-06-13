@@ -50,8 +50,16 @@ def test_nfp3_qi_catalog_matches_reviewed_seed3127_target_aspect(monkeypatch) ->
 
     assert run_case == "nfp3_qi"
     assert case["target_aspect"] == pytest.approx(mod.SEED3127_REVIEWED_TARGET_ASPECT)
+    assert case["qi_gate_smooth_max"] == pytest.approx(mod.DEFAULT_QI_SMOOTH_GATE)
     assert case["boundary_reference_preconditioner"]["target_aspect"] == pytest.approx(
         mod.SEED3127_REVIEWED_TARGET_ASPECT
+    )
+    assert case["boundary_reference_preconditioner"]["smooth_qi_max"] == pytest.approx(
+        mod.DEFAULT_QI_SMOOTH_GATE
+    )
+    assert all(
+        float(stage["qi_ceiling_max"]) <= mod.DEFAULT_QI_SMOOTH_GATE + 1.0e-15
+        for stage in case["mirror_ramp_stages"]
     )
     assert "minimal_nfp3" in str(case["output_dir"])
 
