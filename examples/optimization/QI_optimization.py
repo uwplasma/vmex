@@ -31,7 +31,6 @@ INPUT_FILE = DATA_DIR / "input.minimal_seed_nfp2"
 # INPUT_FILE = DATA_DIR / "input.minimal_seed_nfp3"
 # INPUT_FILE = DATA_DIR / "input.minimal_seed_nfp4"
 # Use ``--reference-input`` for a same-NFP QI-family proposal before local
-# cleanup; raw initial plots remain from the user-selected seed.
 OUTPUT_DIR = Path("results/qi_opt/ess/minimal_nfp2_qi")
 MAX_MODE = 5
 MIN_VMEC_MODE = max(6, MAX_MODE + 3)
@@ -101,7 +100,7 @@ IOTA_FLOOR_WEIGHT = 200.0**2
 QI_WEIGHT = 10.0
 MIRROR_WEIGHT = 20.0
 ELONGATION_WEIGHT = 10.0
-QI_GATE_SMOOTH_MAX = 3.0e-3
+QI_GATE_SMOOTH_MAX = 5.0e-3
 QI_GATE_LEGACY_MAX = 2.0e-3
 QI_CEILING_MAX = QI_GATE_SMOOTH_MAX
 QI_CEILING_WEIGHT = 0.0  # Base solve stays QI-first; cleanup stages add the hard guard.
