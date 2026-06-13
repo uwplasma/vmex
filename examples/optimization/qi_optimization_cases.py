@@ -642,10 +642,17 @@ def _minimal_or_circular_qi_case(
     min_vmec_mode: int,
     reference_lambdas=(0.995, 1.0, 1.005),
     aspect_ramp_weights: tuple[float, ...] | None = None,
+    qi_gate_smooth_max: float | None = None,
 ):
     """Build a deterministic torus-like-seed QI case from a reviewed policy."""
 
     base = QI_CASES[base_case]
+    smooth_qi_max = float(
+        base.get("qi_gate_smooth_max", DEFAULT_QI_SMOOTH_GATE)
+        if qi_gate_smooth_max is None
+        else qi_gate_smooth_max
+    )
+    legacy_qi_max = float(base.get("qi_gate_legacy_max", DEFAULT_QI_LEGACY_GATE))
     boundary_reference = dict(base.get("boundary_reference_preconditioner", {}))
     boundary_reference.update(
         {
@@ -663,8 +670,8 @@ def _minimal_or_circular_qi_case(
             "abs_iota_min": float(base.get("target_abs_iota_min", 0.41)),
             "max_mirror_ratio": float(base.get("mirror_threshold", 0.35)),
             "max_elongation": float(base.get("max_elongation", 8.2)),
-            "smooth_qi_max": float(base.get("qi_gate_smooth_max", DEFAULT_QI_SMOOTH_GATE)),
-            "legacy_qi_max": float(base.get("qi_gate_legacy_max", DEFAULT_QI_LEGACY_GATE)),
+            "smooth_qi_max": smooth_qi_max,
+            "legacy_qi_max": legacy_qi_max,
             # The reference scan is a deterministic proposal generator and a
             # safe fallback for circular/minimal seeds.  Local cleanup stages
             # still run and can promote better candidates, but a failed cleanup
@@ -718,8 +725,8 @@ def _minimal_or_circular_qi_case(
                     "iota_floor_weight": max(float(stage.get("iota_floor_weight", 0.0)), 50.0**2),
                     "qi_weight": max(float(stage.get("qi_weight", 0.0)), 1000.0),
                     "qi_ceiling_max": min(
-                        float(stage.get("qi_ceiling_max", base.get("qi_gate_smooth_max", DEFAULT_QI_SMOOTH_GATE))),
-                        float(base.get("qi_gate_smooth_max", DEFAULT_QI_SMOOTH_GATE)),
+                        float(stage.get("qi_ceiling_max", smooth_qi_max)),
+                        smooth_qi_max,
                     ),
                     "qi_ceiling_weight": max(float(stage.get("qi_ceiling_weight", 0.0)), 50000.0),
                     "accept_if_qi_safe_aspect_improves": aspect_weight is not None and ramp_index < len(ramp_weights),
@@ -747,6 +754,8 @@ def _minimal_or_circular_qi_case(
         "output_dir": output_dir,
         "max_mode": int(max_mode),
         "min_vmec_mode": int(min_vmec_mode),
+        "qi_gate_smooth_max": smooth_qi_max,
+        "qi_gate_legacy_max": legacy_qi_max,
         "target_helicity_seed_terms": TARGET_HELICITY_SEED_TERMS,
         "boundary_reference_preconditioner": boundary_reference,
         "mirror_ramp_stages": tuple(local_stages),
@@ -785,6 +794,7 @@ QI_CASES.update(
             max_mode=4,
             min_vmec_mode=6,
             reference_lambdas=(0.99, 0.995, 1.0, 1.005, 1.008, 1.01),
+            qi_gate_smooth_max=DEFAULT_QI_SMOOTH_GATE,
         ),
         "minimal_nfp4_qi": _minimal_or_circular_qi_case(
             base_case="nfp4_qi",

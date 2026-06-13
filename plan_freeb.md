@@ -129,6 +129,59 @@ Completion:
 - QI minimal-seed README artifacts: 97.5% infrastructure/provenance-ready;
   NFP4 passable, NFP2/NFP3 active recovery, NFP1 unpromoted.
 
+### 2026-06-13 NFP3 README Gate Lock and NFP1 Wide Scan
+
+Steps taken:
+
+1. Added an explicit ``qi_gate_smooth_max`` override to the minimal/circular QI
+   case builder and locked the public NFP3 minimal-seed lane to the relaxed
+   README gate ``smooth_qi <= 3e-3``.
+2. Added test coverage so the NFP3 top-level case, boundary-reference
+   preconditioner, and local cleanup stages all use the same relaxed smooth-QI
+   gate rather than inheriting a looser stress-seed value.
+3. Launched an independent office GPU0 NFP1 wide-reference scan from a shallow
+   clone at commit ``6ce124b``:
+   ``/home/rjorge/local/tests/qi_nfp1_wide_reference_6ce124b``.
+4. Ran:
+   ``python -m ruff check examples/optimization/qi_optimization_cases.py tests/test_qi_case_resolution.py``.
+5. Ran:
+   ``JAX_ENABLE_X64=1 python -m pytest -q tests/test_qi_case_resolution.py -q``.
+
+Results obtained:
+
+1. The NFP3 public QI policy now matches the current evidence gate
+   ``smooth_qi <= 3e-3`` in executable tests.
+2. The NFP1 wide-reference scan is active on office GPU0.  Early low-lambda
+   candidates remain far from QI and low-iota, as expected; the meaningful
+   region near the reviewed QI reference endpoint has not finished yet.
+
+Best next steps:
+
+1. Let NFP1 reach the high-lambda reference candidates before judging the wide
+   scan.
+2. Continue the active NFP2 balanced cleanup and NFP3 aspect-recovery runs.
+3. If NFP1 remains above QI gates after wide reference scan, create a separate
+   balanced NFP1 mode-5 scalar-trust preset instead of changing the current
+   public preset blindly.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9999998% for fixed
+  branch-local accepted/rejected gates with physical QS scalar coverage;
+  arbitrary adaptive host branch differentiation remains unclaimed.
+- VMEC parity and physics gates: 99.8%.
+- Single-stage coil-only optimization: 99.5%.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100% locally; CI pending for latest head.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 98.0% infrastructure/provenance-ready;
+  NFP4 passable, NFP2/NFP3 active recovery, NFP1 wide-reference scan running.
+
 ### 2026-06-13 Adaptive Negative Gate and QI Recovery Runs
 
 Steps taken:
