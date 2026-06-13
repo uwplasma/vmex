@@ -12,6 +12,75 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
+### 2026-06-13 Strict QI Reference Audit Launch
+
+Steps taken:
+
+1. Confirmed GitHub Actions run ``27471281639`` for ``947e6fd`` completed
+   successfully.
+2. Stopped the duplicated serial relaxed-gate NFP1/NFP2/NFP3 GPU launcher after
+   the NFP1 worker spent more than twenty minutes in the first matrix-free
+   cleanup stage without producing new accepted diagnostics.
+3. Left the split GPU1 NFP2/NFP3 relaxed-gate worker running.
+4. Launched a CPU strict same-NFP reference interpolation audit at
+   ``/home/rjorge/local/tests/qi_strict_reference_audit_947e6fd`` for NFP1,
+   NFP2, and NFP3.
+5. Launched a non-duplicative NFP1 ``scalar_trust`` method-swap run on GPU0 at
+   ``/home/rjorge/local/tests/qi_nfp1_scalar_trust_947e6fd``.
+
+Results obtained:
+
+1. The CPU audit emits CUDA-plugin discovery errors from the CUDA-enabled JAX
+   install, but the scans continue correctly under ``JAX_PLATFORMS=cpu``.
+2. NFP2 strict interpolation has completed enough to rule out a direct
+   reference-only promotion.  Best current point is ``lambda=1.01`` with
+   smooth QI ``4.34e-3``, legacy QI ``2.32e-3``, mirror ``0.241``,
+   aspect ``8.07``, and mean iota ``-0.455``.
+3. NFP3 strict interpolation confirms the main blocker is aspect, not QI:
+   ``lambda=0.995`` gives smooth QI ``2.95e-3``, legacy QI ``3.01e-4``,
+   mirror ``0.298``, but aspect ``3.53``.
+4. NFP1 strict interpolation remains above the QI gates in the scanned
+   reference family so far; the best current endpoint trend is still near
+   smooth QI ``8.95e-3`` and legacy QI ``5.67e-3``.
+5. The NFP1 ``scalar_trust`` run has completed its narrow reference scan and
+   selected the same non-promotable branch as the matrix-free run
+   (smooth QI ``8.71e-3``, legacy QI ``5.48e-3``, mirror ``0.282``,
+   aspect ``7.04``) before entering cleanup.
+
+Best next steps:
+
+1. Let the NFP1 ``scalar_trust`` cleanup and GPU1 NFP2 cleanup finish or time
+   out before updating public presets.
+2. If NFP1 remains above the QI gate, stop treating the narrow
+   ``0.99``-``1.01`` same-NFP reference family as sufficient; use a QI-first
+   basin transfer from the archived low-QI/high-mirror branch and then apply a
+   mirror-preserving cleanup.
+3. For NFP2, use the archived aspect ``6.4`` / smooth-QI ``1.6e-3`` branch as
+   the next working seed, because direct interpolation from the current
+   reference family moves in the wrong aspect direction.
+4. For NFP3, run an aspect-raising recovery from the already-QI branch; the
+   strict reference audit shows smooth and legacy QI are not the limiting
+   constraints.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9999995% for fixed
+  branch-local accepted/rejected gates; adaptive host branch selection remains
+  unclaimed.
+- VMEC parity and physics gates: 99.8%.
+- Single-stage coil-only optimization: 99.4%.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 97.5% infrastructure/provenance-ready;
+  NFP4 is passable, NFP3 is QI-passable but aspect-blocked, NFP1/NFP2 remain
+  unpromoted.
+
 ### 2026-06-13 Relaxed-Gate QI Follow-Up Poll
 
 Steps taken:
