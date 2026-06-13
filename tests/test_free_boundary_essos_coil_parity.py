@@ -278,7 +278,7 @@ def _assert_vmec_jax_direct_matches_generated_mgrid_wout(wout_direct, wout_mgrid
     for name in ("iotas", "iotaf"):
         assert np.isfinite(np.asarray(getattr(wout_direct, name), dtype=float)).all()
         assert np.isfinite(np.asarray(getattr(wout_mgrid, name), dtype=float)).all()
-    for name in ("aspect", "wb", "wp"):
+    for name in ("aspect", "Aminor_p", "Rmajor_p", "volume_p", "wb", "wp"):
         np.testing.assert_allclose(
             getattr(wout_direct, name),
             getattr(wout_mgrid, name),

@@ -22689,3 +22689,93 @@ Completion:
 - QI minimal-seed README artifacts: 98% infrastructure/provenance-ready; NFP4
   local artifact passes, NFP2 has existing passing evidence with high aspect,
   NFP1/NFP3 are running new reference-family searches and remain unpromoted.
+
+
+### 2026-06-13 QI Round-3 Reference-Family Search and WOUT Geometry Parity Gate
+
+Steps taken:
+
+1. Confirmed the latest ``main`` commit ``439d5f3`` is green in GitHub Actions
+   run ``27474114572`` and that there are no open pull requests.
+2. Polled the round-2 QI reference-family jobs on ``office``.  The NFP3
+   ``wide_ref_aspect`` and ``toroidal_aspect`` jobs completed cleanly but did
+   not pass QI/aspect/mirror gates.  The NFP1 ``lowiota_lift`` job had already
+   completed and remains blocked only by the iota gate.  The NFP1
+   ``standard_qi_relock`` job is still running.
+3. Launched a new non-duplicate round-3 QI reference-family batch on ``office``
+   under ``/home/rjorge/local/tests/qi_round3_reference_family_9a69dca``:
+
+   - ``nfp3_r00lift`` uses a temporary NFP3 QI reference deck with the QI
+     reference shape preserved but ``RBC(0,0)`` increased to ``1.70``.  This
+     tests an aspect-lifted same-NFP QI reference family instead of another
+     interpolation back toward the circular seed.
+   - ``nfp1_blend025`` and ``nfp1_blend050`` use temporary same-NFP references
+     that blend the low-QI/low-iota NFP1 basin toward the standard high-iota
+     NFP1 reference.  This explicitly tests a bridge between the two observed
+     NFP1 failure basins.
+
+4. Added a no-extra-solve parity check to the direct-coil/generated-mgrid WOUT
+   comparator: ``Aminor_p``, ``Rmajor_p``, and ``volume_p`` now allclose with
+   the same ``2e-3`` envelope as ``aspect``, ``wb``, and ``wp``.
+
+Results obtained:
+
+1. Local validation for the parity edit:
+
+   - ``python -m ruff check tests/test_free_boundary_essos_coil_parity.py``:
+     passed.
+   - ``JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_essos_coil_parity.py -q``:
+     clean optional skips locally because ESSOS is not installed.
+
+2. Round-2 NFP3 final evidence:
+
+   - ``nfp3_wide_ref_aspect`` selected smooth QI ``1.258e-1``, legacy QI
+     ``8.916e-2``, mirror ``0.336``, aspect ``3.851``, and mean iota
+     ``-0.766``.  It fails smooth-QI, legacy-QI, and aspect gates.
+   - ``nfp3_toroidal_aspect`` selected smooth QI ``1.256e-1``, legacy QI
+     ``8.917e-2``, mirror ``0.336``, aspect ``3.851``, and mean iota
+     ``-0.766``.  It fails smooth-QI, legacy-QI, and aspect gates.
+
+3. Early round-3 preconditioner evidence:
+
+   - ``nfp3_r00lift`` reaches aspect ``5.89`` to ``6.11`` and nonzero iota, so
+     the major-radius-lifted reference fixes the aspect blocker, but early
+     smooth/legacy QI are still high (``6.1e-2`` to ``1.1e-1``) and mirror is
+     near the cap.
+   - ``nfp1_blend025`` and ``nfp1_blend050`` have good mirror but early
+     smooth/legacy QI and iota still fail; local stage diagnostics are pending.
+
+Best next steps:
+
+1. Let round-3 local stages finish and promote only if exact diagnostics pass
+   the smooth-QI ``3e-3``, legacy-QI ``2e-3``, mirror, elongation, iota, and
+   aspect gates with raw minimal-seed provenance.
+2. If ``nfp3_r00lift`` fails only QI after reaching aspect, try an aspect-shell
+   QI homotopy from its best high-aspect candidate with a staged QI ceiling
+   ramp.  If it fails mirror too, the next reference family needs both lifted
+   major radius and lower mirror before local cleanup.
+3. If NFP1 blend jobs fail, stop single-line local repair and construct a
+   two-basin bridge scan over more blend ratios before doing expensive local
+   optimization.
+4. Keep README QI promotion blocked until NFP1/2/3/4 all have local
+   provenance-gated artifacts.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9999998% for fixed
+  branch-local accepted/rejected gates; arbitrary adaptive host branch
+  selection remains unclaimed.
+- VMEC parity and physics gates: 99.85% after extending WOUT geometry scalar
+  parity without extra solves.
+- Single-stage coil-only optimization: 99.5%.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 98% infrastructure/provenance-ready; NFP4
+  local artifact passes, NFP2 has existing passing evidence with high aspect,
+  NFP1/NFP3 remain unpromoted while round-2/round-3 searches continue.
