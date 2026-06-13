@@ -133,7 +133,9 @@ def test_nfp2_balanced_qi_case_exposes_reviewed_mode5_mirror035_polish() -> None
     )
     assert stages[0]["accept_if_qi_improves"] is True
     assert stages[0]["promote_as_working_seed_only"] is True
-    assert stages[0]["qi_safe_mirror_relax"] == pytest.approx(1.02)
+    # This is only a working-seed relaxation: the final public engineering
+    # gate remains mirror <= DEFAULT_QI_MIRROR_RATIO.
+    assert stages[0]["qi_safe_mirror_relax"] == pytest.approx(1.05)
     assert stages[1]["accept_if_qi_improves"] is True
     assert stages[1]["promote_as_working_seed_only"] is True
     assert stages[1]["qi_safe_mirror_relax"] == pytest.approx(1.0)
