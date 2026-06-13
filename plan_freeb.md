@@ -21251,6 +21251,55 @@ Completion:
 - QI minimal-seed README artifacts: 96% infrastructure/provenance-ready,
   0% promoted under strict four-row policy.
 
+### 2026-06-12: CI green, QI jobs still running
+
+Steps taken:
+
+1. Polled GitHub Actions for commit ``fc2bb56``.
+2. Polled the active remote QI jobs after another bounded interval:
+   NFP1 QI-only/Boozer re-entry, NFP3 minimal/no-reference replacement, and
+   NFP4 mode-7 QI-dominant polish.
+3. Inspected stdout tails to verify that the runs are active rather than
+   stalled before starting nonlinear work.
+
+Results obtained:
+
+1. GitHub Actions run ``27453183551`` for ``fc2bb56`` completed successfully.
+2. NFP1 remains active in the QI-only mode-5 stage.  It has shown optimizer
+   progress in stdout (cost decreased from about ``1.50e2`` to ``7.98e1``), but
+   no post-stage exact diagnostics have been written yet.
+3. NFP3 replacement remains active in the first minimal-seed continuation stage;
+   no post-stage exact diagnostics have been written yet.
+4. NFP4 mode-7 QI-dominant polish remains active in its first stage; no
+   post-stage exact diagnostics have been written yet.
+
+Best next steps:
+
+1. Continue polling these three remote runs; do not launch duplicate jobs until
+   exact diagnostics show failure or clear stagnation.
+2. If NFP1/NFP3/NFP4 fail the strict smooth-QI gate, decide whether to relax the
+   README criterion, change the objective basin, or defer that NFP row rather
+   than overclaiming.
+3. Keep the local branch clean while remote jobs run.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9999995% for fixed
+  branch-local accepted/rejected gates; adaptive host branch selection remains
+  unclaimed.
+- VMEC parity and physics gates: 99.8%.
+- Single-stage coil-only optimization: 99.4%.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100% with ``fc2bb56`` CI green.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 96% infrastructure/provenance-ready,
+  0% promoted under strict four-row policy.
+
 ### 2026-06-12: replaced failed NFP3 aspect-basin run
 
 Steps taken:
