@@ -21251,6 +21251,60 @@ Completion:
 - QI minimal-seed README artifacts: 96% infrastructure/provenance-ready,
   0% promoted under strict four-row policy.
 
+### 2026-06-12: QI follow-up polling and NFP4 mode-7 polish launch
+
+Steps taken:
+
+1. Confirmed GitHub Actions run ``27452703921`` for commit ``aaaebd0``
+   completed successfully.
+2. Continued polling the active ``office`` QI jobs.  NFP1 and NFP3 remain in
+   their first nonlinear stages with no exact post-stage promotion diagnostics
+   yet.
+3. Collected the completed NFP4 mode-6 micro-polish diagnostics from
+   ``/home/rjorge/local/tests/qi_nfp4_mode6_micro_polish_c4c57da``.
+4. Because the mode-6 polish still missed the strict smooth-QI README gate, I
+   launched a QI-dominant NFP4 mode-7 polish on GPU1:
+   ``/home/rjorge/local/tests/qi_nfp4_mode7_qi_polish_c4c57da``.
+
+Results obtained:
+
+1. NFP4 mode-6 polish preserved the engineering metrics but did not pass strict
+   smooth QI:
+   smooth QI ``2.5299758386025314e-3``, legacy QI
+   ``3.722987840091193e-4``, mirror ``0.29570756353537453``,
+   elongation ``4.091368740311902``, aspect ``5.996274003657364``,
+   mean iota ``-1.285827896553491``.
+2. The new NFP4 mode-7 polish uses an anisotropic ``max_m=3, max_n=7`` active
+   boundary and keeps mirror/aspect penalties light so the solve can prioritize
+   reducing the smooth-QI residual below ``2e-3``.
+
+Best next steps:
+
+1. Continue polling NFP1/NFP3/NFP4 mode-7 until exact diagnostics are written.
+2. If NFP1/NFP3 first stages do not improve after their current budgets, avoid
+   further duplicate continuation and switch to a different basin/proposal
+   mechanism.
+3. Promote no README QI row until the raw minimal-seed provenance and strict
+   diagnostics are both present.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9999995% for fixed
+  branch-local accepted/rejected gates; adaptive host branch selection remains
+  unclaimed.
+- VMEC parity and physics gates: 99.8%.
+- Single-stage coil-only optimization: 99.4%.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100% with ``aaaebd0`` CI green.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 96% infrastructure/provenance-ready,
+  0% promoted under strict four-row policy.
+
 ### 2026-06-12: launched replacement QI minimal-seed recovery jobs
 
 Steps taken:
