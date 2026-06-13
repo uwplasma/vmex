@@ -21251,6 +21251,51 @@ Completion:
 - QI minimal-seed README artifacts: 96% infrastructure/provenance-ready,
   0% promoted under strict four-row policy.
 
+### 2026-06-13: stopped unproductive NFP1 mode7 recovery
+
+Steps taken:
+
+1. Inspected stdout for the active NFP1 mode6/7 recovery and the NFP4
+   scalar-trust polish.
+2. Terminated the NFP1 recovery job at
+   ``/home/rjorge/local/tests/qi_nfp1_mode67_qi_mirror_recovery_c4c57da``.
+
+Results obtained:
+
+1. NFP1 mode6 had already failed to improve enough:
+   smooth QI ``4.120684802749499e-3``, legacy QI
+   ``2.3210835915911093e-3``, mirror ``0.3760842704328926``.
+2. NFP1 mode7 remained at iteration 0 for roughly an hour with extremely large
+   reported optimality and no post-stage diagnostics.  This was not a good use
+   of GPU time, so GPU0 was released.
+3. NFP4 scalar-trust remains active on GPU1.
+
+Best next steps:
+
+1. Poll NFP4 scalar-trust until exact diagnostics are written.
+2. Do not rerun NFP1 with the same basin; the current evidence says this
+   path is not promotable under the strict QI/mirror gate.
+3. If NFP4 scalar-trust fails, record NFP4 as close-but-not-promotable unless
+   the README gate is intentionally relaxed.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9999995% for fixed
+  branch-local accepted/rejected gates; adaptive host branch selection remains
+  unclaimed.
+- VMEC parity and physics gates: 99.8%.
+- Single-stage coil-only optimization: 99.4%.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100% with ``b1e4e39`` CI green.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 96% infrastructure/provenance-ready,
+  0% promoted under strict four-row policy.
+
 ### 2026-06-13: NFP4 matrix-free polish stalled, scalar-trust probe launched
 
 Steps taken:
