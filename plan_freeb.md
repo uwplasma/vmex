@@ -22967,6 +22967,63 @@ Completion:
   (NFP2/NFP3/NFP4), with NFP1 repair in progress.
 
 
+### 2026-06-13 CI Green And NFP1 Repair Partial
+
+Steps taken:
+
+1. Confirmed GitHub Actions CI run ``27479105774`` for commit ``035c1f9``
+   completed successfully.
+2. Ran the two local phase-2 rejected-slot free-boundary gates:
+   ``test_direct_coil_native_rejected_slot_same_branch_jvp_matches_complete_solve_fd``
+   and
+   ``test_direct_coil_native_rejected_slot_geometry_jvp_matches_complete_solve_fd``.
+3. Polled the clean ``office`` NFP1 repair run.  The boundary-reference scan
+   selected the ``lambda=1.010`` candidate and entered the continuation/local
+   cleanup path.
+
+Results obtained:
+
+1. CI is green for the current pushed main head ``035c1f9``.
+2. The local branch-local current/geometry accepted-rejected AD-vs-FD gates
+   passed.  They still emit the known forced free-boundary rejected-slot runtime
+   warnings, which are expected for this diagnostic branch.
+3. NFP1 partial diagnostics are still not promotable:
+   - boundary-reference baseline: smooth QI ``8.6649e-3``, legacy QI
+     ``5.5455e-3``, mirror ``0.2839``, aspect ``7.0380``, mean iota
+     ``0.4686``;
+   - first mirror-ramp checkpoint: smooth QI ``8.7556e-3``, legacy QI
+     ``5.5536e-3``, mirror ``0.2834``, aspect ``7.0380``, mean iota
+     ``0.4678``.
+4. The NFP1 run remains active; no final root ``diagnostics.json`` exists yet.
+
+Best next steps:
+
+1. Let the current NFP1 run complete unless it exceeds the acceptable wall-time
+   budget.
+2. If it still fails, try a narrower aspect-safe local repair from the
+   ``lambda=0.990`` or ``lambda=0.995`` reference candidate, since those already
+   satisfy aspect < 7 but miss the QI gate by a smaller targeted amount than a
+   completely unrelated seed.
+3. Render/promote the QI README NFP1/2/3/4 panel only after NFP1 passes the same
+   current public gate; otherwise keep NFP1 listed as open and do not overclaim.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9999999%.
+- VMEC parity and physics gates: 99.85%.
+- Single-stage coil-only optimization: 99.5%.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 75% promoted by current metrics
+  (NFP2/NFP3/NFP4); NFP1 remains active but unpromoted.
+
+
 ### 2026-06-13 QI Gate Policy and Phase-3 Free-Boundary Status Refresh
 
 Steps taken:
