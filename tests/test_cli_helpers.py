@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import os
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -120,7 +121,7 @@ def test_cli_wout_io_warmup_swallows_import_and_thread_start_failures(monkeypatc
             raise RuntimeError("threading unavailable")
 
     monkeypatch.setattr(importlib, "import_module", lambda name: object())
-    monkeypatch.setattr("threading.Thread", BrokenThread)
+    monkeypatch.setattr(threading, "Thread", BrokenThread)
 
     assert cli._start_wout_io_warmup() is None
 
