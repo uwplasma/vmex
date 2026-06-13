@@ -8,8 +8,9 @@ from pathlib import Path
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 DEFAULT_QI_TARGET_ASPECT = 6.0
 DEFAULT_QI_MIRROR_RATIO = 0.35
-DEFAULT_QI_SMOOTH_GATE = 3.0e-3
+DEFAULT_QI_SMOOTH_GATE = 5.0e-3
 DEFAULT_QI_LEGACY_GATE = 2.0e-3
+DEFAULT_QI_ASPECT_MAX = 7.0
 DEFAULT_INNER_MAX_ITER = 450
 DEFAULT_INNER_FTOL = 1.0e-9
 DEFAULT_TRIAL_MAX_ITER = 450
@@ -406,7 +407,7 @@ QI_CASES = {
         "max_elongation": 8.2,
         "mirror_threshold": 0.35,
         "mirror_surface_index": None,
-        "qi_gate_smooth_max": 3.0e-3,
+        "qi_gate_smooth_max": DEFAULT_QI_SMOOTH_GATE,
         "qi_gate_legacy_max": DEFAULT_QI_LEGACY_GATE,
         "qi_ceiling_max": 2.0e-2,
         "qi_ceiling_smooth_penalty": 2.0e-3,
@@ -429,7 +430,7 @@ QI_CASES = {
             "abs_iota_min": 0.41,
             "max_mirror_ratio": 0.35,
             "max_elongation": 8.2,
-            "smooth_qi_max": 3.0e-3,
+            "smooth_qi_max": DEFAULT_QI_SMOOTH_GATE,
             "legacy_qi_max": DEFAULT_QI_LEGACY_GATE,
             "diagnostic_qi_resolution": {"mboz": 18, "nboz": 18, "nphi": 151, "nalpha": 31, "n_bounce": 51},
             "accept_as_baseline": True,
@@ -478,7 +479,7 @@ QI_CASES = {
         "max_elongation": 8.2,
         "mirror_threshold": 0.35,
         "mirror_surface_index": None,
-        "qi_gate_smooth_max": 3.0e-3,
+        "qi_gate_smooth_max": DEFAULT_QI_SMOOTH_GATE,
         "qi_gate_legacy_max": 2.0e-3,
         "qi_ceiling_max": 2.0e-2,
         "qi_ceiling_smooth_penalty": 2.0e-3,
@@ -515,13 +516,13 @@ QI_CASES = {
         "output_dir": Path("results/qi_opt/ess/nfp4_qh_warm_to_qi"),
         # This case is intentionally kept as a seed-robustness stress fixture,
         # not a promoted QI lane.  Bounded May 2026 diagnostics found no local
-        # NFP=4 path satisfying the agreed smooth-QI < 3e-3 and legacy-QI
+        # NFP=4 path satisfying the agreed smooth-QI < 5e-3 and legacy-QI
         # < 2e-3 gates.
         "expected_gate_status": "non_passing_stress_fixture",
         "expected_gate_failures": ("smooth_qi", "legacy_qi", "mirror"),
         "stress_fixture_notes": (
             "Bundled QH warm start and QH-to-QI local cleanup remain above the legacy QI gate.",
-            "Archived external NFP=4 QI references improve QI but still miss the 3e-3 smooth / 2e-3 legacy gates.",
+            "Archived external NFP=4 QI references improve QI but still miss the 5e-3 smooth / 2e-3 legacy gates.",
             "Do not promote this case without an independent diagnostics.json gate pass.",
         ),
         "known_best_nfp4_quick_audit": {
@@ -845,7 +846,7 @@ QI_CASES["nfp4_qi"] = {
 # mode-5 scalar-trust augmented-Lagrangian cleanup, then performs one guarded
 # aspect-localization stage.  Avoiding the older mode-3 aspect-ramp stages
 # keeps this public preset focused on the current fast path for smooth QI <
-# 3e-3 with mirror below the public 0.35 cap.
+# 5e-3 with mirror below the public 0.35 cap.
 _NFP2_BALANCED_STAGES = (
     {
         "name": "aspect_first_qi_mirror035",

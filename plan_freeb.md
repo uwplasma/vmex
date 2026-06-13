@@ -22781,6 +22781,89 @@ Completion:
   NFP1/NFP3 remain unpromoted while round-2/round-3 searches continue.
 
 
+### 2026-06-13 QI Gate Policy and Phase-3 Free-Boundary Status Refresh
+
+Steps taken:
+
+1. Updated the public QI evidence policy requested by the user: the smooth-QI
+   gate is now ``5e-3`` and the aspect-ratio promotion gate is now a hard
+   upper bound ``aspect <= 7`` instead of a relative error around the
+   aspect-6 target.
+2. Added ``aspect_max`` support to ``vmec_jax.qi_diagnostics`` so the
+   aspect-bound gate is explicit in diagnostic records rather than hidden in
+   renderer logic.
+3. Threaded ``aspect_max=7`` through the QI optimization diagnostics,
+   stage-promotion checks, and the standalone ``QI_optimization.py`` final
+   diagnostics.
+4. Updated the README QI renderer and QI policy tests to use ``smooth QI <=
+   5e-3`` plus ``aspect <= 7``.
+5. Rechecked the latest GitHub Actions run for commit ``dac724e``; all
+   required CI shards are green, with only the manual/nightly physics-full job
+   skipped as expected.
+
+Results obtained:
+
+1. A representative NFP3-style record with smooth QI ``3.05e-3``, legacy QI
+   ``3.44e-4``, mirror ``0.299``, aspect ``3.53``, and mean iota ``-1.055``
+   now passes the engineering gate with no failures under the new policy.
+2. ``python -m ruff check`` on the changed QI diagnostics, optimization
+   policy, renderer, example, and tests passed.
+3. ``JAX_ENABLE_X64=1 python -m pytest -q tests/test_qi_case_resolution.py
+   tests/test_qi_readme_cases.py
+   tests/test_qi_diagnostics.py::test_qi_seed_suitability_annotation_reports_gate_failures
+   tests/test_qi_diagnostics.py::test_qi_cleanup_candidate_promotes_only_seed_gate_safe_mirror_improvements -q``
+   passed.
+4. ``JAX_ENABLE_X64=1 python -m pytest -q tests/test_qi_staged_runner.py
+   tests/test_qi_optimization_context_more_coverage.py
+   tests/test_qi_optimization_public_helpers.py -q`` passed.
+5. ``JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py -q``
+   passed (``26 passed, 1 skipped``), with only the expected warnings from
+   the deliberately forced rejected/restart free-boundary slots.
+6. ``JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_qa_finite_beta_coil_optimization_smoke.py
+   tests/test_free_boundary_qs_coil_optimization_smoke.py
+   tests/test_cli_helpers.py::test_cli_wout_io_warmup_swallows_import_and_thread_start_failures -q``
+   passed (``33 passed, 1 xfailed``).
+
+Best next steps:
+
+1. Commit and push the gate-policy update.
+2. Regenerate/promote the QI README NFP rows only from artifacts whose
+   diagnostics are written under the new ``5e-3``/``aspect <= 7`` policy.
+3. Continue phase 2 conservatively: current evidence validates
+   fingerprint-gated same-branch adaptive accepted/rejected slots, not
+   arbitrary branch-changing host-controller differentiation.
+4. For phase 3, keep the finite-beta QA direct-coil optimization example as
+   the active completion path: complete solves remain the acceptance
+   authority, while branch-local vector/JVP reports provide derivative
+   proposals.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999998%; accepted,
+  rejected/restart, current, geometry, and mixed same-branch gates are
+  validated, while arbitrary adaptive host branch-selection differentiation
+  remains unclaimed.
+- VMEC parity and physics gates: 99.86%.
+- Single-stage coil-only optimization phase 3: 99.75%; the finite-beta QA
+  direct-coil example and derivative-proposal path are present and validated
+  on bounded smoke/non-smoke runs, with publication-scale coil optimization
+  still intentionally gated by complete solves.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 100% for the current free-boundary/QI policy state.
+- QI minimal-seed README artifacts: 98.5% infrastructure/provenance-ready;
+  NFP3-style evidence with smooth QI ``3.05e-3`` now passes the updated policy,
+  but README promotion still requires regenerated artifacts carrying the new
+  gate metadata.
+
+
 ### 2026-06-13 Finite-Beta QA Proposal Diagnostic And CI Compatibility Fix
 
 Steps taken:

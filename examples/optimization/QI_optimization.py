@@ -439,6 +439,7 @@ diagnostics = vj.annotate_qi_seed_suitability(
         smooth_qi_max=QI_GATE_SMOOTH_MAX,
         legacy_qi_max=QI_GATE_LEGACY_MAX,
         target_aspect=TARGET_ASPECT,
+        aspect_max=7.0,
         abs_iota_min=TARGET_ABS_IOTA_MIN,
         mirror_ratio_max=MAX_MIRROR_RATIO,
         max_elongation=MAX_ELONGATION,

@@ -27,12 +27,12 @@ ARTIFACT_DIR = REPO_ROOT / "docs" / "_static" / "qi_readme_cases"
 OUT_PNG = FIGURE_DIR / "readme_qi_optimization_cases.png"
 OUT_CSV = FIGURE_DIR / "readme_qi_optimization_cases.csv"
 
-README_QI_SMOOTH_MAX = 3.0e-3
+README_QI_SMOOTH_MAX = 5.0e-3
 README_QI_LEGACY_MAX = 2.0e-3
 README_QI_MIRROR_MAX = 0.35
 README_QI_ELONGATION_MAX = 10.0
 README_QI_ABS_IOTA_MIN = 0.41
-README_QI_ASPECT_REL_TOL = 0.35
+README_QI_ASPECT_MAX = 7.0
 
 
 @dataclass(frozen=True)
@@ -542,10 +542,10 @@ def _require_case_gated_diagnostics(
             f"{case.label} is case-gated but README |mean iota| is below "
             f"{README_QI_ABS_IOTA_MIN:.6g}: {abs(mean_iota):.6g}"
         )
-    if abs(aspect - target_aspect) / abs(target_aspect) > README_QI_ASPECT_REL_TOL:
+    if aspect > README_QI_ASPECT_MAX:
         raise RuntimeError(
-            f"{case.label} is case-gated but README aspect relative error exceeds "
-            f"{README_QI_ASPECT_REL_TOL:.6g}: {abs(aspect - target_aspect) / abs(target_aspect):.6g}"
+            f"{case.label} is case-gated but README aspect exceeds "
+            f"{README_QI_ASPECT_MAX:.6g}: {aspect:.6g}"
         )
 
 
@@ -768,7 +768,7 @@ def _plot_reference_transition(ax, case: QICase) -> None:
     ax.semilogy(x, legacy, color="#756bb1", linewidth=1.2, marker="o", markersize=2.4, label="legacy QI")
     ax2 = ax.twinx()
     ax2.plot(x, mirror, color="#d95f02", linewidth=1.1, marker="s", markersize=2.4, label="mirror")
-    ax.axhline(float(diagnostics.get("qi_smooth_gate", 3.0e-3)), color="#1f4e79", linewidth=0.7, linestyle=":")
+    ax.axhline(float(diagnostics.get("qi_smooth_gate", README_QI_SMOOTH_MAX)), color="#1f4e79", linewidth=0.7, linestyle=":")
     ax.axhline(float(diagnostics.get("qi_legacy_gate", 2.0e-3)), color="#756bb1", linewidth=0.7, linestyle=":")
     ax2.axhline(float(diagnostics["qi_mirror_ratio_target"]), color="#d95f02", linewidth=0.7, linestyle=":")
     ax.set_xticks(x)

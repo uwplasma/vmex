@@ -213,7 +213,7 @@ def test_resolve_qi_case_external_reference_overrides_policy_controls(monkeypatc
     assert boundary_reference["max_mode"] == 2
     assert boundary_reference["target_aspect"] == pytest.approx(mod.DEFAULT_QI_TARGET_ASPECT)
     assert boundary_reference["max_mirror_ratio"] == pytest.approx(0.35)
-    assert boundary_reference["smooth_qi_max"] == pytest.approx(3.0e-3)
+    assert boundary_reference["smooth_qi_max"] == pytest.approx(mod.DEFAULT_QI_SMOOTH_GATE)
     assert boundary_reference["legacy_qi_max"] == pytest.approx(2.0e-3)
     assert boundary_reference["max_iter"] == 7
     assert boundary_reference["lambdas"] == (0.99, 1.0, 1.01)

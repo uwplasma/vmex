@@ -87,15 +87,15 @@ def _synthetic_case(mod, tmp_path: Path, label: str, *, nfp: int, validation_sta
 def _passing_diagnostics(*, nfp: int = 2) -> dict:
     return {
         "qi_smooth_total": 1.0e-3,
-        "qi_smooth_gate": 3.0e-3,
+        "qi_smooth_gate": 5.0e-3,
         "qi_legacy_total": 1.5e-3,
         "qi_legacy_gate": 2.0e-3,
         "qi_mirror_ratio_max": 0.24,
         "qi_mirror_ratio_target": 0.35,
         "qi_max_elongation": 6.5,
         "qi_elongation_target": 8.2,
-        "aspect": 9.8,
-        "target_aspect": 10.0,
+        "aspect": 6.8,
+        "target_aspect": 6.0,
         "mean_iota": 0.47,
         "abs_iota_min": 0.41,
         "qi_nfp": nfp,
@@ -310,7 +310,7 @@ def test_qi_case_catalog_defines_nfp4_minimal_seed_candidate() -> None:
     assert case["input_file"].name == "input.minimal_seed_nfp4"
     assert case["target_aspect"] == cases_mod.DEFAULT_QI_TARGET_ASPECT
     assert case["mirror_threshold"] == pytest.approx(0.35)
-    assert case["qi_gate_smooth_max"] == pytest.approx(3.0e-3)
+    assert case["qi_gate_smooth_max"] == pytest.approx(cases_mod.DEFAULT_QI_SMOOTH_GATE)
     assert case["qi_gate_legacy_max"] == pytest.approx(2.0e-3)
     assert "minimal_nfp4_to_qi_reference" in str(case["output_dir"])
     assert case["boundary_reference_preconditioner"]["reference_input"].name == "input.nfp4_QI_finite_beta"
