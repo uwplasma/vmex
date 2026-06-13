@@ -467,6 +467,8 @@ class _LeastSquaresProblemAssembly:
         tuple_weight = float(weight)
         if not math.isfinite(tuple_weight) or tuple_weight < 0.0:
             raise ValueError("Least-squares tuple weights must be finite and non-negative.")
+        if tuple_weight == 0.0:
+            return
         residual_weight = math.sqrt(tuple_weight)
         owner = getattr(fn, "__self__", None)
         if getattr(owner, "requires_qi_field", False):

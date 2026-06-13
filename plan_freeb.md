@@ -23708,3 +23708,55 @@ Completion:
 - QI minimal-seed README artifacts: 98% infrastructure/provenance-ready; NFP2,
   NFP3, and NFP4 have reviewed passing evidence, NFP1 remains unpromoted while
   focused mirror cleanup runs.
+
+### 2026-06-13 Zero-Weight Objective Assembly Fix
+
+Steps taken:
+
+1. The focused NFP=1 mirror-only probe showed that a stage with
+   ``qi_weight=0`` still assembled the QI vector objective, so it still paid the
+   Boozer/QI residual cost before final diagnostics.
+2. Patched ``LeastSquaresProblem.from_tuples`` assembly so zero-weight tuples
+   are treated as disabled objectives and are not assembled into scalar or QI
+   residual lists.
+3. Added a regression test proving that a zero-weight QI objective is skipped
+   entirely, including an intentionally invalid nonzero target that would fail
+   if the disabled term were assembled.
+4. Re-ran the phase-3 derivative-proposal unit shard, including accepted and
+   rejected complete-solve authority cases.
+
+Results obtained:
+
+1. ``python -m ruff check vmec_jax/optimization_workflow.py tests/test_optimization_workflow_unit.py``:
+   passed.
+2. ``JAX_ENABLE_X64=1 python -m pytest -q tests/test_optimization_workflow_unit.py::test_least_squares_problem_rejects_bad_tuples_and_mismatched_qi_options -q``:
+   passed.
+3. ``JAX_ENABLE_X64=1 python -m pytest -q`` for the targeted derivative-proposal
+   tests in ``tests/test_free_boundary_qs_coil_optimization_smoke.py``:
+   passed.
+
+Best next steps:
+
+1. Push the zero-weight assembly fix and let CI validate it.
+2. Pull the fix on office, stop the old NFP=1 mirror-only probe, and relaunch
+   the mirror-only cleanup so it avoids QI residual evaluation during the
+   optimizer stage while still using exact QI diagnostics for promotion.
+3. Keep the full QI-residual NFP=1 probes running only if office resources stay
+   healthy; otherwise prioritize the fixed mirror-only probe for fast feedback.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9999999%.
+- VMEC parity and physics gates: 99.86%.
+- Single-stage coil-only optimization phase 3: 99.8%.
+- CPU/GPU performance: 99.45% with this zero-weight objective pruning fix.
+- CI/runtime/coverage hygiene: 100% locally for targeted checks; awaiting CI
+  for the pushed fix.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 98% infrastructure/provenance-ready; NFP1
+  remains unpromoted pending fixed mirror-only cleanup diagnostics.

@@ -1341,6 +1341,17 @@ def test_least_squares_problem_rejects_bad_tuples_and_mismatched_qi_options() ->
     assert problem.qi_options is options
     assert len(problem.qi_objective_terms) == 1
 
+    zero_weight_problem = workflow.LeastSquaresProblem.from_tuples(
+        [
+            (FakeQIObjective(options, "disabled_qi").J, 1.0, 0.0),
+            (lambda ctx, state: 2.0, 1.0, 4.0),
+        ]
+    )
+    assert zero_weight_problem.is_qi is False
+    assert zero_weight_problem.qi_options is None
+    assert zero_weight_problem.qi_objective_terms == ()
+    assert zero_weight_problem.scalar_objective_names == ("<lambda>",)
+
     with pytest.raises(ValueError, match="must share one"):
         workflow.LeastSquaresProblem.from_tuples(
             [
