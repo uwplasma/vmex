@@ -12,6 +12,76 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
+### 2026-06-13 Adaptive Negative Gate and QI Recovery Runs
+
+Steps taken:
+
+1. Confirmed GitHub Actions run ``27471527586`` for ``d7e42dc`` completed
+   successfully, including docs, coverage, physics smoke, and the exact
+   free-boundary shards.
+2. Added and locally validated a negative adaptive-branch fingerprint check to
+   the native rejected-slot same-branch test.  The positive gate still validates
+   branch-local accepted/rejected slots against complete-solve central finite
+   differences, while the negative check now verifies that a changed plus-branch
+   fingerprint prevents promotion.
+3. Ran:
+   ``python -m ruff check tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py vmec_jax/free_boundary_adjoint.py``.
+4. Ran:
+   ``JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_native_rejected_slot_same_branch_jvp_matches_complete_solve_fd -q``.
+5. Pushed commit ``c65b8db``; CI run ``27471820451`` is queued.
+6. Re-polled the active office QI jobs.  NFP2 found a low-QI branch with smooth
+   QI ``1.53e-3`` and legacy QI ``2.08e-4``, but the first cleanup stage missed
+   final promotion due to mirror ``0.3599`` and aspect ``8.19``.  The NFP2
+   worker remains active in the next guarded cleanup stage.
+7. Launched a direct CPU NFP3 aspect-recovery experiment at
+   ``/home/rjorge/local/tests/qi_nfp3_direct_aspect_recovery_947e6fd`` with
+   explicit mode-6 scalar-trust stages.  This targets the known NFP3 failure
+   mode: relaxed smooth/legacy QI and mirror pass, but aspect remains too low.
+
+Results obtained:
+
+1. The new negative branch-fingerprint test passed locally.  It hardens the
+   exact-adjoint seam by making the non-claim explicit in executable form:
+   changed adaptive fingerprints are rejected rather than differentiated.
+2. The active QI evidence is now:
+   NFP1 still non-promotable around smooth QI ``8.7e-3`` and legacy QI
+   ``5.5e-3``; NFP2 has a promising low-QI branch but still needs mirror/aspect
+   cleanup; NFP3 has a targeted aspect-recovery run in progress.
+
+Best next steps:
+
+1. Let the NFP2 and NFP3 runs produce final checkpoints before changing public
+   presets or README artifacts.
+2. If NFP2 fails only by mirror/aspect, relaunch from its low-QI branch with a
+   narrower mirror/aspect cleanup rather than restarting from the reference
+   baseline.
+3. If NFP3 aspect recovery fails, use a mode-6/anisotropic aspect ramp with
+   looser working-seed promotion but strict final smooth/legacy gates.
+4. For NFP1, stop spending GPU time on the narrow same-NFP reference family if
+   the current scalar-trust run remains above QI gates; switch to a broader
+   QI-first basin-transfer policy.
+5. Keep the phase-2 free-boundary claim conservative: fingerprint-gated
+   branch-local complete-solve AD-vs-central-FD is validated; arbitrary adaptive
+   host branch differentiation remains unclaimed.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9999997% for fixed
+  branch-local accepted/rejected gates; adaptive host branch selection remains
+  unclaimed.
+- VMEC parity and physics gates: 99.8%.
+- Single-stage coil-only optimization: 99.4%.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100% locally, pending the ``c65b8db`` CI run.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 97.5% infrastructure/provenance-ready;
+  NFP4 passable, NFP2/NFP3 under active recovery, NFP1 unpromoted.
+
 ### 2026-06-13 Strict QI Reference Audit Launch
 
 Steps taken:
