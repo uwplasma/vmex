@@ -46,13 +46,22 @@ Results obtained:
    smooth QI ``2.44e-3``, legacy QI ``3.23e-4``, mirror ratio ``0.297``,
    aspect ``6.00001``, and nonzero transform now passes the documented QI
    metric policy.
+5. The first CI run for ``6277fe1`` exposed two obsolete
+   ``tests/test_qi_seed_suitability_audit.py`` assertions that still expected
+   the old ``2e-3`` smooth/prefine ceiling.  Updated those assertions and
+   pushed ``174360c``.
+6. Audited available ``office`` QI artifacts.  NFP=4 has current-policy
+   passing evidence from the minimal-seed lane (for example smooth QI
+   ``2.60e-3``, legacy QI ``3.66e-4``, mirror ``0.288``, aspect ``6.01``).
+   Existing NFP=1/NFP=2/NFP=3 artifacts are still not README-promotable under
+   the current aspect/mirror/QI policy.
 
 Best next steps:
 
 1. Rerender/promote README QI NFP1/2/3/4 artifacts only after each row has
    raw ``input.minimal_seed_nfp*`` provenance and passes the updated
    ``3e-3`` smooth / ``2e-3`` legacy gates plus mirror/elongation/iota/aspect.
-2. Keep NFP1 and NFP3 unpromoted until their QI and engineering gates pass
+2. Keep NFP1, NFP2, and NFP3 unpromoted until their QI and engineering gates pass
    under the same policy.
 3. Continue bounded VMEC2000/direct-coil/mgrid parity only with finite-positive
    physical WOUT fixtures.
@@ -75,7 +84,7 @@ Completion:
 - CI/runtime/coverage hygiene: 100%.
 - Docs/release hygiene: 100%.
 - QI minimal-seed README artifacts: 97% infrastructure/provenance-ready,
-  NFP4 evidence now policy-passable; NFP1/NFP3 still not promoted.
+  NFP4 evidence now policy-passable; NFP1/NFP2/NFP3 still not promoted.
 
 ### 2026-06-12 QI Public NFP Preset Wiring and Focused Checks
 
