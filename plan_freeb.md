@@ -22781,6 +22781,66 @@ Completion:
   NFP1/NFP3 remain unpromoted while round-2/round-3 searches continue.
 
 
+### 2026-06-13 Mixed Current/Geometry State-Only Branch Gate
+
+Steps taken:
+
+1. Added a production-style mixed current/geometry validation gate in
+   ``tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py``.
+   The new test perturbs coil current and one Fourier geometry coefficient
+   together and compares branch-local JVPs against complete-solve central FD.
+2. Kept the branch claim narrow and explicit: the test requires identical
+   ``("momentum", "momentum", "restart_bad_jacobian")`` fingerprints,
+   accept mask ``[1, 1, 0]``, done mask ``[0, 0, 1]``, branch-trace mode, and
+   state-only replay.
+3. Checked only physical/state-output scalar diagnostics used by the
+   coil-only QS production reporting path: aspect, QS total, and LCFS boundary
+   moment.
+
+Results obtained:
+
+1. ``python -m ruff check tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py``:
+   passed.
+2. ``JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_native_rejected_slot_mixed_state_only_branch_trace_jvp_matches_complete_solve_fd -q``:
+   passed.  The known aggressive-branch RuntimeWarnings from intentionally
+   triggering a rejected/restart slot remain expected.
+3. The previous CI run for ``c95d192`` completed green, including docs, build,
+   coverage shards, physics smoke, and combined coverage/Codecov.
+
+Best next steps:
+
+1. Push this new gate and let CI validate the exact shard again.
+2. Keep the differentiation claim conservative: this is a fingerprint-gated
+   branch-local accepted/rejected-slot validation, not arbitrary adaptive host
+   branch differentiation.
+3. Continue QI minimal-seed follow-up searches.  Current NFP1 diagnostics split
+   into a low-QI/low-iota basin and a high-iota/high-QI basin; current NFP3
+   diagnostics split into a low-QI/low-aspect basin and a high-aspect/high-QI
+   basin.  The next meaningful searches are NFP1 low-QI iota lift and NFP3
+   R00-shell QI-ceiling homotopy, not another broad duplicate sweep.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999995% for fixed
+  branch-local current, geometry, and mixed current/geometry accepted/rejected
+  gates; arbitrary adaptive host branch selection remains unclaimed.
+- VMEC parity and physics gates: 99.85%.
+- Single-stage coil-only optimization: 99.6%.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100% on the previous CI run; awaiting the new
+  pushed mixed-gate CI run.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 98% infrastructure/provenance-ready; NFP4
+  local artifact passes, NFP2 has existing passing evidence with high aspect,
+  NFP1/NFP3 remain unpromoted while round-2/round-3 and targeted follow-up
+  searches continue.
+
+
 ### 2026-06-13 Geometry-Only Rejected-Slot Adaptive Gate
 
 Steps taken:

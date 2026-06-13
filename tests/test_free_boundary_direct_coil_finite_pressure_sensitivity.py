@@ -3235,6 +3235,181 @@ def test_direct_coil_native_rejected_slot_geometry_jvp_matches_complete_solve_fd
 
 
 @pytest.mark.py311_coverage_only
+def test_direct_coil_native_rejected_slot_mixed_state_only_branch_trace_jvp_matches_complete_solve_fd(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Production-style mixed current/geometry JVP matches FD on one branch."""
+
+    pytest.importorskip("jax")
+    from vmec_jax._compat import jnp
+    from vmec_jax.free_boundary_adjoint import (
+        direct_coil_adaptive_full_loop_same_branch_gate_report,
+        direct_coil_branch_local_scalars_report_from_complete_fd,
+        direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax,
+        direct_coil_same_branch_complete_solve_fd_report,
+        free_boundary_boundary_geometry_jax,
+    )
+    from vmec_jax.quasisymmetry import quasisymmetry_ratio_residual_from_state
+    from vmec_jax.wout import equilibrium_aspect_ratio_from_state
+
+    enable_x64(True)
+    _set_same_branch_custom_vjp_env(monkeypatch)
+    input_path = _write_tiny_direct_freeb_input(
+        tmp_path / "input.direct_native_rejected_slot_mixed_state_only",
+        lasym=False,
+        niter=3,
+        mpol=3,
+        ntheta=4,
+    )
+    base_params = _circle_coil_params(current=3.0e8, n_segments=24)
+    base_dofs = jnp.asarray(base_params.base_curve_dofs)
+    base_currents = jnp.asarray(base_params.base_currents)
+    dof_index = (0, 0, 2)
+    dof_step = 1.0e-3
+    current_fraction = 0.002
+    direction = base_params.with_arrays(
+        base_curve_dofs=jnp.zeros_like(base_dofs).at[dof_index].set(dof_step),
+        base_currents=base_currents * current_fraction,
+    )
+
+    def params_for(scale: float) -> CoilFieldParams:
+        return base_params.with_arrays(
+            base_curve_dofs=base_dofs.at[dof_index].add(dof_step * float(scale)),
+            base_currents=base_currents * (1.0 + current_fraction * float(scale)),
+        )
+
+    def lcfs_boundary_moment(state, static):
+        geometry = free_boundary_boundary_geometry_jax(state, static)
+        R = jnp.asarray(geometry["R"])
+        Z = jnp.asarray(geometry["Z"])
+        return jnp.mean((R - 1.0) * (R - 1.0) + Z * Z)
+
+    def qs_total(state, payload):
+        qs = quasisymmetry_ratio_residual_from_state(
+            state=state,
+            static=payload["init"].static,
+            indata=payload["init"].indata,
+            signgs=int(payload["init"].signgs),
+            surfaces=[0.5],
+            helicity_m=1,
+            helicity_n=0,
+            ntheta=7,
+            nphi=8,
+        )
+        return qs["total"]
+
+    def scalar_map(payload):
+        state = payload["result"].state
+        return {
+            "aspect": equilibrium_aspect_ratio_from_state(
+                state=state,
+                static=payload["init"].static,
+            ),
+            "qs_total": qs_total(state, payload),
+            "lcfs_boundary_moment": lcfs_boundary_moment(state, payload["init"].static),
+        }
+
+    solve_kwargs = {
+        "max_iter": 3,
+        "step_size": 0.9,
+        "ftol": 1.0e-12,
+        "use_restart_triggers": True,
+        "vmecpp_restart": True,
+        "free_boundary_activate_fsq": 1.0e99,
+        "adjoint_trace_mode": "branch",
+    }
+    complete_report = direct_coil_same_branch_complete_solve_fd_report(
+        input_path,
+        base_params,
+        params_for=params_for,
+        objective_fn=scalar_map,
+        eps=0.25,
+        solve_kwargs=solve_kwargs,
+        fingerprint_rtol=1.0e-6,
+        fingerprint_atol=1.0e-9,
+    )
+    branch = complete_report["branch_compatibility"]
+    assert branch["same_branch"], branch
+    for label in ("base", "plus", "minus"):
+        fingerprint = branch[f"{label}_fingerprint"]
+        assert fingerprint["step_status"] == ("momentum", "momentum", "restart_bad_jacobian")
+        np.testing.assert_array_equal(np.asarray(fingerprint["accept_mask"], dtype=int), [1, 1, 0])
+        np.testing.assert_array_equal(np.asarray(fingerprint["done_mask"], dtype=int), [0, 0, 1])
+
+    production_values = {
+        key: values["base"]
+        for key, values in complete_report["objective_values"].items()
+    }
+    replay_scalar_fns = {
+        "aspect": lambda replay, payload: equilibrium_aspect_ratio_from_state(
+            state=replay["state"],
+            static=payload["init"].static,
+        ),
+        "qs_total": lambda replay, payload: qs_total(replay["state"], payload),
+        "lcfs_boundary_moment": lambda replay, payload: lcfs_boundary_moment(
+            replay["state"],
+            payload["init"].static,
+        ),
+    }
+    branch_local = direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
+        params=base_params,
+        direction_params=direction,
+        complete_payload=complete_report["base"],
+        scalar_keys=("aspect", "qs_total", "lcfs_boundary_moment"),
+        production_values=production_values,
+        replay_payload={"init": complete_report["base"]["init"]},
+        scalar_fn=scalar_map,
+        replay_scalar_fns=replay_scalar_fns,
+        replay_kwargs={
+            "use_stacked_step_controls": True,
+            "use_accepted_only_fast_path": False,
+            "state_only_replay": True,
+        },
+        include_payload=False,
+        include_replay_graph_metadata=False,
+    )
+    assert branch_local["uses_production_forward"] is True
+    assert branch_local["derivative_mode"] == "directional_jvp"
+    assert branch_local["replay_option_flags"]["state_only_replay"] is True
+    assert branch_local["replay_option_flags"]["directional_jvp_fast_path"] == "none"
+    assert branch_local["replay_option_flags"]["directional_uses_fixed_coil_geometry"] is False
+    assert branch_local["differentiates_adaptive_controller"] is False
+    assert branch_local["differentiates_run_free_boundary"] is False
+    assert branch_local["differentiates_fixed_accepted_branch"] is True
+    assert branch_local["controller_slot_summary"]["rejected_slots"] == 1
+    assert branch_local["replay_branch_metadata"]["status_acceptance_source"] == "trace_step_status"
+    np.testing.assert_array_equal(
+        np.asarray(branch_local["replay_branch_metadata"]["status_masks"]["accept_mask"], dtype=bool),
+        [True, True, False],
+    )
+
+    scalars_report = direct_coil_branch_local_scalars_report_from_complete_fd(
+        complete_report,
+        branch_local,
+        scalar_keys=("aspect", "qs_total", "lcfs_boundary_moment"),
+        rtol={"aspect": 5.0e-3, "qs_total": 2.0e-2, "lcfs_boundary_moment": 5.0e-3},
+        atol={"aspect": 5.0e-8, "qs_total": 1.0e-8, "lcfs_boundary_moment": 5.0e-8},
+        base_value_atol={"aspect": 2.0e-3, "qs_total": 2.0e-3, "lcfs_boundary_moment": 2.0e-3},
+    )
+    assert scalars_report["passed"], scalars_report
+    adaptive_gate = direct_coil_adaptive_full_loop_same_branch_gate_report(
+        complete_report,
+        scalars_report,
+        scalar_keys=("aspect", "qs_total", "lcfs_boundary_moment"),
+        require_fixed_rejected_controller_slot=True,
+        require_status_derived_rejected_controller_slot=True,
+    )
+    assert adaptive_gate["passed"], adaptive_gate
+    assert adaptive_gate["fingerprint_gated"] is True
+    assert adaptive_gate["same_branch"] is True
+    assert adaptive_gate["fixed_rejected_controller_slot_present"] is True
+    assert adaptive_gate["status_derived_rejected_controller_slot_present"] is True
+    assert adaptive_gate["differentiates_adaptive_controller"] is False
+    assert adaptive_gate["differentiates_run_free_boundary"] is False
+
+
+@pytest.mark.py311_coverage_only
 def test_direct_coil_branch_trace_mode_keeps_replay_controls_without_raw_force_payload(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
