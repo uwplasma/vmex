@@ -33,8 +33,8 @@ def test_qa_finite_beta_wrapper_defaults_to_direct_coil_complete_solve_contract(
     assert args.pressure_profile == "standard"
     assert args.helicity_m == 1
     assert args.helicity_n == 0
-    assert args.circle_current == pytest.approx(3.0e7)
-    assert args.circle_radius == pytest.approx(14.0)
+    assert args.circle_current == pytest.approx(1.0e7)
+    assert args.circle_radius == pytest.approx(10.0)
     assert args.max_current_vars == 1
     assert args.max_fourier_vars == 2
     assert args.max_evals == 2
@@ -72,7 +72,7 @@ def test_qa_finite_beta_wrapper_dry_run_smoke_writes_summary(tmp_path: Path) -> 
     assert summary["vmec_config"]["beta_percent"] == pytest.approx(2.5)
     assert summary["vmec_config"]["pressure_profile"] == "standard"
     assert summary["provider"]["provider"] == "circle"
-    assert summary["provider"]["radius"] == pytest.approx(14.0)
+    assert summary["provider"]["radius"] == pytest.approx(10.0)
     assert summary["finite_beta_qa_example"]["complete_solve_acceptance_authority"] is True
     assert summary["finite_beta_qa_example"]["helicity_n"] == 0
     assert (tmp_path / "input.direct_coil_qs").exists()
