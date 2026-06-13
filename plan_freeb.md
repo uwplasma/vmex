@@ -22614,3 +22614,78 @@ Completion:
 - CI/runtime/coverage hygiene: 100% with ``3650e54`` CI green.
 - Docs/release hygiene: 100%.
 - QI minimal-seed README artifacts: 98% infrastructure/provenance-ready; NFP4 local artifact passes, NFP2 has existing passing evidence with high aspect but the latest targeted cleanup failed, NFP1/NFP3 remain active blockers.
+
+
+### 2026-06-13 QI Round-2 Minimal-Seed Reference Search
+
+Steps taken:
+
+1. Confirmed GitHub Actions run ``27473791123`` for commit ``9ea2cb0``
+   completed successfully.  This included docs, repository-size audit, console
+   smoke, exact free-boundary coverage shards, slow physics coverage, physics
+   smoke, and the combined coverage gate.
+2. Confirmed that the previous ``office`` NFP1, NFP2, and NFP3 QI repair jobs
+   are no longer running.
+3. Reviewed the current QI artifact inventory.  Only the local
+   ``docs/_static/qi_readme_cases/nfp4_minimal`` bundle is promotable locally.
+   NFP2 has an existing relaxed-gate candidate with raw minimal-seed
+   provenance but high aspect; the latest targeted mirror/aspect cleanup failed.
+   NFP1 and NFP3 remain the blockers for a four-row README panel.
+4. Launched four non-duplicate QI searches on ``office`` under
+   ``/home/rjorge/local/tests/qi_round2_minimal_refs_9a69dca``:
+
+   - ``nfp1_lowiota_lift``: starts from ``input.minimal_seed_nfp1`` and uses the
+     earlier good-QI/good-mirror/low-iota NFP1 candidate as the same-NFP
+     reference, then applies mode-6/mode-7 scalar-trust aspect/iota/QI cleanup.
+   - ``nfp1_standard_qi_relock``: starts from ``input.minimal_seed_nfp1`` and
+     uses ``examples/data/input.nfp1_QI`` as the reference, then tries
+     high-mode QI relocking while preserving mirror/aspect/iota.
+   - ``nfp3_wide_ref_aspect``: starts from ``input.minimal_seed_nfp3`` and
+     scans a wide interpolation to ``input.nfp3_QI_fixed_resolution_final``,
+     then tries mode-5/mode-6 aspect/QI balancing.
+   - ``nfp3_toroidal_aspect``: starts from ``input.minimal_seed_nfp3`` and
+     applies an anisotropic high-toroidal-mode aspect-lift stage before a
+     square-mode QI relock.
+
+Results obtained:
+
+1. CI is green for ``9ea2cb0``.
+2. The round-2 QI jobs started cleanly.  Early logs show only the known
+   Matplotlib ``Axes3D`` warning from the remote Python installation; no
+   exceptions or exit codes have appeared yet.
+3. The failed NFP2 cleanup branch is not being repeated.  The failed NFP3
+   endpoint scaling branch is not being repeated.  The failed NFP1
+   one-constraint local repairs are not being repeated.
+
+Best next steps:
+
+1. Poll the four round-2 QI jobs until exact diagnostics or timeout files are
+   available.
+2. Promote a QI README row only if it has raw ``input.minimal_seed_nfp*``
+   provenance and passes the relaxed smooth-QI ``3e-3``, legacy-QI ``2e-3``,
+   mirror, elongation, iota, and aspect gates.
+3. If the round-2 NFP1/NFP3 searches fail, stop local one-family tweaks and
+   either look for a new same-NFP reference family or keep the README QI panel
+   blocked rather than promoting weak evidence.
+4. Keep free-boundary phase-2 claims conservative: current evidence remains
+   branch-local/fingerprint-gated for accepted/rejected slots, not arbitrary
+   host adaptive-branch differentiation.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9999998% for fixed
+  branch-local accepted/rejected gates; arbitrary adaptive host branch
+  selection remains unclaimed.
+- VMEC parity and physics gates: 99.8%.
+- Single-stage coil-only optimization: 99.5%.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 98% infrastructure/provenance-ready; NFP4
+  local artifact passes, NFP2 has existing passing evidence with high aspect,
+  NFP1/NFP3 are running new reference-family searches and remain unpromoted.
