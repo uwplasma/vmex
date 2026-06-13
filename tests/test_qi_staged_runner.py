@@ -131,7 +131,9 @@ def test_qi_staged_runner_passes_policy_qi_gates_and_audit_resolution(tmp_path: 
 
     assert args[args.index("--max-mirror-ratio") + 1] == "0.35"
     assert args[args.index("--max-elongation") + 1] == "8.2"
-    assert args[args.index("--qi-gate-smooth-max") + 1] == "0.005"
+    assert float(args[args.index("--qi-gate-smooth-max") + 1]) == pytest.approx(
+        runner.QI_CASES["minimal_nfp3_qi"]["qi_gate_smooth_max"]
+    )
     assert args[args.index("--qi-gate-legacy-max") + 1] == "0.002"
     assert args[args.index("--qi-mboz") + 1] == "5"
     assert args[args.index("--qi-nphi") + 1] == "31"
