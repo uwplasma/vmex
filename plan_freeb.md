@@ -21251,6 +21251,63 @@ Completion:
 - QI minimal-seed README artifacts: 96% infrastructure/provenance-ready,
   0% promoted under strict four-row policy.
 
+### 2026-06-13: NFP4 matrix-free polish stalled, scalar-trust probe launched
+
+Steps taken:
+
+1. Polled GitHub Actions for commit ``e66a59d`` and the active QI jobs on
+   ``office``.
+2. Collected final diagnostics for the NFP3 hybrid high-mode seed run and the
+   NFP4 mode8 matrix-free polish.
+3. Confirmed NFP1 remains active in its mode7 strict relock stage.
+4. Launched a new NFP4 scalar-trust polish:
+   ``/home/rjorge/local/tests/qi_nfp4_mode8_scalar_trust_polish_c4c57da``.
+
+Results obtained:
+
+1. CI run ``27468833506`` for ``e66a59d`` completed successfully.
+2. NFP4 mode8 matrix-free polish stalled immediately:
+   ``xtol`` after 12 function evaluations, zero cost reduction, smooth QI
+   ``2.439520599351482e-3``, legacy QI ``3.225960274751482e-4``, mirror
+   ``0.29700859652939976``, aspect ``6.000006736759464``, mean iota
+   ``-1.2884031826231006``.
+3. NFP3 hybrid high-mode seed failed badly:
+   smooth QI ``0.26391325104874136`` in stage 1 and ``0.29993322309839604`` in
+   stage 2, mirror ``1.0``, aspect ``45.32566222230188``.
+4. NFP1 mode6 did not improve enough:
+   smooth QI ``4.120684802749499e-3``, legacy QI
+   ``2.3210835915911093e-3``, mirror ``0.3760842704328926``, aspect
+   ``7.044654282159851``.  The mode7 stage is still running.
+5. The new NFP4 scalar-trust run is intentionally different from the stalled
+   matrix-free run: it uses forward-cost scalar-trust probes with full
+   ``max_m=max_n=8`` active modes and tight step bounds.
+
+Best next steps:
+
+1. Poll NFP1 mode7 and NFP4 scalar-trust until final diagnostics are written.
+2. If NFP4 scalar-trust cannot reduce smooth QI below ``2e-3``, stop spending
+   time on NFP4 README promotion unless the gate is explicitly relaxed.
+3. Treat NFP3 minimal-seed QI as blocked for the current policies; further work
+   requires a new basin construction, not more repetitions of the same stages.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9999995% for fixed
+  branch-local accepted/rejected gates; adaptive host branch selection remains
+  unclaimed.
+- VMEC parity and physics gates: 99.8%.
+- Single-stage coil-only optimization: 99.4%.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100% with ``e66a59d`` CI green.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 96% infrastructure/provenance-ready,
+  0% promoted under strict four-row policy.
+
 ### 2026-06-13: CI green for QI recovery launch checkpoint
 
 Steps taken:
