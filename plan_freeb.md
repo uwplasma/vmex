@@ -22841,6 +22841,64 @@ Completion:
   searches continue.
 
 
+### 2026-06-13 README QI Artifact Gate Hardening
+
+Steps taken:
+
+1. Audited remote NFP3 QI search diagnostics and found stage/preconditioner
+   records that legitimately report ``qi_engineering_gate_passed=True`` under
+   deliberately lenient stage gates such as ``qi_smooth_gate=5.0e-2``.  These
+   are useful search diagnostics but are not publication/README promotion
+   evidence.
+2. Hardened ``examples/optimization/render_qi_readme_cases.py`` so README QI
+   promotion enforces fixed publication gates independent of each artifact's
+   embedded gate fields: smooth QI ``<=3.0e-3``, legacy QI ``<=2.0e-3``,
+   mirror ratio ``<=0.35``, max elongation ``<=10``, ``|mean iota|>=0.41``,
+   and aspect relative error ``<=0.35``.
+3. Added a regression test that rejects a synthetic artifact with
+   ``qi_engineering_gate_passed=True`` but lenient stage gates and QI residuals
+   above README limits.
+
+Results obtained:
+
+1. ``python -m ruff check examples/optimization/render_qi_readme_cases.py tests/test_qi_readme_cases.py``:
+   passed.
+2. ``python -m pytest -q tests/test_qi_readme_cases.py -q``: passed, with
+   expected skips for generated/fetched artifacts that are not tracked source
+   files.
+3. GitHub Actions run ``27475121771`` for the mixed current/geometry branch
+   replay commit completed green.
+
+Best next steps:
+
+1. Push this renderer hardening and let CI validate the broader test matrix.
+2. Continue the running remote QI minimal-seed searches.  Do not copy/promote
+   NFP1/NFP3/NFP2 artifacts unless their final/root diagnostics satisfy the
+   fixed README gates above and the renderer accepts raw-input provenance.
+3. If the current NFP1/NFP3 searches remain non-promotable, use their
+   diagnostics to narrow the next run rather than launching another broad
+   duplicate sweep.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999995% for fixed
+  branch-local current, geometry, and mixed current/geometry accepted/rejected
+  gates; arbitrary adaptive host branch selection remains unclaimed.
+- VMEC parity and physics gates: 99.85%.
+- Single-stage coil-only optimization: 99.6%.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100% for the latest completed CI run.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 98% infrastructure/provenance-ready with
+  stronger promotion guardrails; NFP4 local artifact passes strict gates,
+  NFP1/NFP3 remain unpromoted while targeted follow-up searches run.
+
+
 ### 2026-06-13 Geometry-Only Rejected-Slot Adaptive Gate
 
 Steps taken:

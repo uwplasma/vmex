@@ -27,6 +27,13 @@ ARTIFACT_DIR = REPO_ROOT / "docs" / "_static" / "qi_readme_cases"
 OUT_PNG = FIGURE_DIR / "readme_qi_optimization_cases.png"
 OUT_CSV = FIGURE_DIR / "readme_qi_optimization_cases.csv"
 
+README_QI_SMOOTH_MAX = 3.0e-3
+README_QI_LEGACY_MAX = 2.0e-3
+README_QI_MIRROR_MAX = 0.35
+README_QI_ELONGATION_MAX = 10.0
+README_QI_ABS_IOTA_MIN = 0.41
+README_QI_ASPECT_REL_TOL = 0.35
+
 
 @dataclass(frozen=True)
 class QICase:
@@ -494,12 +501,52 @@ def _require_case_gated_diagnostics(
         raise RuntimeError(f"{case.label} is case-gated but smooth QI exceeds its gate")
     if "qi_legacy_gate" in diagnostics and qi_legacy_total > float(diagnostics["qi_legacy_gate"]):
         raise RuntimeError(f"{case.label} is case-gated but legacy QI exceeds its gate")
+    if "qi_smooth_gate" in diagnostics and float(diagnostics["qi_smooth_gate"]) > README_QI_SMOOTH_MAX:
+        raise RuntimeError(
+            f"{case.label} is case-gated but was generated with a lenient smooth-QI gate: "
+            f"{float(diagnostics['qi_smooth_gate']):.6g} > {README_QI_SMOOTH_MAX:.6g}"
+        )
+    if "qi_legacy_gate" in diagnostics and float(diagnostics["qi_legacy_gate"]) > README_QI_LEGACY_MAX:
+        raise RuntimeError(
+            f"{case.label} is case-gated but was generated with a lenient legacy-QI gate: "
+            f"{float(diagnostics['qi_legacy_gate']):.6g} > {README_QI_LEGACY_MAX:.6g}"
+        )
+    if qi_smooth_total > README_QI_SMOOTH_MAX:
+        raise RuntimeError(
+            f"{case.label} is case-gated but README smooth QI exceeds "
+            f"{README_QI_SMOOTH_MAX:.6g}: {qi_smooth_total:.6g}"
+        )
+    if qi_legacy_total > README_QI_LEGACY_MAX:
+        raise RuntimeError(
+            f"{case.label} is case-gated but README legacy QI exceeds "
+            f"{README_QI_LEGACY_MAX:.6g}: {qi_legacy_total:.6g}"
+        )
     if qi_mirror_ratio_max > qi_mirror_ratio_target:
         raise RuntimeError(f"{case.label} is case-gated but mirror ratio exceeds its target")
+    if qi_mirror_ratio_max > README_QI_MIRROR_MAX:
+        raise RuntimeError(
+            f"{case.label} is case-gated but README mirror ratio exceeds "
+            f"{README_QI_MIRROR_MAX:.6g}: {qi_mirror_ratio_max:.6g}"
+        )
     if qi_max_elongation > qi_elongation_target:
         raise RuntimeError(f"{case.label} is case-gated but elongation exceeds its target")
+    if qi_max_elongation > README_QI_ELONGATION_MAX:
+        raise RuntimeError(
+            f"{case.label} is case-gated but README elongation exceeds "
+            f"{README_QI_ELONGATION_MAX:.6g}: {qi_max_elongation:.6g}"
+        )
     if "abs_iota_min" in diagnostics and abs(mean_iota) < float(diagnostics["abs_iota_min"]):
         raise RuntimeError(f"{case.label} is case-gated but mean iota is below its floor")
+    if abs(mean_iota) < README_QI_ABS_IOTA_MIN:
+        raise RuntimeError(
+            f"{case.label} is case-gated but README |mean iota| is below "
+            f"{README_QI_ABS_IOTA_MIN:.6g}: {abs(mean_iota):.6g}"
+        )
+    if abs(aspect - target_aspect) / abs(target_aspect) > README_QI_ASPECT_REL_TOL:
+        raise RuntimeError(
+            f"{case.label} is case-gated but README aspect relative error exceeds "
+            f"{README_QI_ASPECT_REL_TOL:.6g}: {abs(aspect - target_aspect) / abs(target_aspect):.6g}"
+        )
 
 
 def _case_record(case: QICase) -> dict[str, str | float]:

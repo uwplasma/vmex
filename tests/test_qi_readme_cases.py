@@ -390,6 +390,36 @@ def test_readme_renderer_rejects_case_gated_case_with_gate_failures(monkeypatch,
         mod._case_record(_synthetic_case(mod, tmp_path, "NFP=2 bundled QI", nfp=2))
 
 
+def test_readme_renderer_rejects_lenient_stage_gate_artifact(monkeypatch, tmp_path: Path) -> None:
+    mod = _load_module()
+    monkeypatch.setattr(mod, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(mod, "_history_summary", lambda _case: (10.0, 1, 1))
+    monkeypatch.setattr(mod, "_preconditioner_summary", lambda _case: (0, None, None, None))
+    _patch_matching_wout(monkeypatch, mod)
+
+    def fake_load_json(path: Path):
+        if path.name == "history.json":
+            return {"objective_final": 1.0, "total_wall_time_s": 10.0}
+        diagnostics = _passing_diagnostics()
+        diagnostics.update(
+            {
+                "qi_smooth_total": 1.8e-2,
+                "qi_smooth_gate": 5.0e-2,
+                "qi_legacy_total": 1.0e-2,
+                "qi_legacy_gate": 2.0e-2,
+                "qi_engineering_gate_passed": True,
+                "qi_seed_gate_passed": True,
+                "qi_gate_failures": [],
+            }
+        )
+        return diagnostics
+
+    monkeypatch.setattr(mod, "_load_json", fake_load_json)
+
+    with pytest.raises(RuntimeError, match="lenient smooth-QI gate"):
+        mod._case_record(_synthetic_case(mod, tmp_path, "NFP=3 minimal seed to QI", nfp=3))
+
+
 def test_readme_renderer_rejects_case_gated_case_with_nonfinite_metric(monkeypatch, tmp_path: Path) -> None:
     mod = _load_module()
     monkeypatch.setattr(mod, "REPO_ROOT", tmp_path)
