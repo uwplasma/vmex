@@ -104,7 +104,7 @@ def test_constraint_status_flags_seed_quality():
             "mean_iota": -0.45,
             "qi_mirror_ratio_max": 0.18,
             "qi_max_elongation": 7.5,
-            "qi_smooth_total": 3.0e-3,
+            "qi_smooth_total": 4.0e-3,
             "qi_legacy_total": 4.0e-3,
         },
         targets,
@@ -889,7 +889,7 @@ def test_run_qi_prefine_probe_can_dispatch_constrained_qi_terms(tmp_path):
     plan = manifest["plans"][0]
     assert plan["optimization"]["objective"] == "qi_constrained_prefine_probe"
     assert plan["qi_options"]["qi_ceiling_weight"] == 100.0
-    assert plan["qi_options"]["qi_ceiling_max"] == 2.0e-3
+    assert plan["qi_options"]["qi_ceiling_max"] == 3.0e-3
     assert plan["qi_options"]["mirror_weight"] == 2.0
     assert plan["qi_options"]["elongation_weight"] == 0.5
 
@@ -971,7 +971,7 @@ def test_run_qi_prefine_probe_can_dispatch_constrained_qi_terms(tmp_path):
     assert completed["status"] == "completed"
     assert len(calls["tuples"]) == 4
     assert [entry[2] for entry in calls["tuples"]] == [1.0, 100.0, 2.0, 0.5]
-    assert calls["qi_ceiling"]["maximum"] == 2.0e-3
+    assert calls["qi_ceiling"]["maximum"] == 3.0e-3
     assert calls["qi_ceiling"]["smooth_penalty"] == 2.0e-3
     assert calls["mirror"]["threshold"] == 0.21
     assert calls["mirror"]["ntheta"] == 12
