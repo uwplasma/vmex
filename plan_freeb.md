@@ -21182,3 +21182,71 @@ Completion:
 - Full nonlinear free-boundary adjoint phase 2: 99.999999% for fixed
   branch-local gates; arbitrary adaptive host branch differentiation remains
   unclaimed.
+
+### 2026-06-12 Coverage-Fix CI and Phase-3 Smoke Validation
+
+Steps taken:
+
+1. Rechecked GitHub Actions run ``27452057017`` for commit ``407554a`` after
+   adding empty-trace branch-fingerprint coverage.
+2. Ran the user-facing direct-coil coil-only QS smoke workflow with the
+   production same-branch report enabled:
+   ``JAX_ENABLE_X64=1 python examples/optimization/free_boundary_QS_coil_optimization.py
+   --smoke --provider circle --outdir /tmp/vmec_jax_freeb_qs_smoke_407554a
+   --write-same-branch-report --same-branch-report-mode vector
+   --same-branch-report-rejected-slot-gate --same-branch-derivative-proposal
+   --same-branch-proposal-steps 0.02,0.01 --same-branch-proposal-max-trials 2``.
+3. Parsed the temporary ``same_branch_complete_solve_report.json`` and
+   ``summary.json`` artifacts rather than adding generated outputs to the repo.
+
+Results obtained:
+
+1. GitHub Actions run ``27452057017`` completed successfully.  The previous
+   coverage-only failure at ``94.99%`` is resolved.
+2. The smoke workflow completed four complete free-boundary objective
+   evaluations and wrote compact temporary artifacts only under
+   ``/tmp/vmec_jax_freeb_qs_smoke_407554a``.
+3. The same-branch vector/JVP physical-scalar gate passed for
+   ``aspect``, ``qs_total``, ``mean_iota``, and ``lcfs_boundary_moment``.
+4. The fixed accepted/rejected controller-slot gate passed.  The report
+   contains one status-derived rejected slot, uses stacked step controls, and
+   explicitly records that it does not differentiate adaptive host branch
+   selection or ``run_free_boundary``.
+5. The derivative-assisted proposal was generated from branch-local evidence
+   and accepted only after a complete solve.  This validates the phase-3
+   contract that complete solves remain the acceptance authority.
+6. Performance remains open: on this cold tiny smoke the complete-solve FD
+   triplet took about ``6.0 s``, branch-local vector/JVP took about ``9.4 s``,
+   and the fixed rejected-slot replay took about ``7.2 s``.
+
+Best next steps:
+
+1. Keep the phase-2 claim conservative: fixed branch-local accepted/rejected
+   replay is validated; arbitrary adaptive host branch differentiation is still
+   unclaimed.
+2. Keep phase 3 focused on using branch-local vector/JVP only for proposals,
+   with complete solves as acceptance authority.
+3. Let the remote QI minimal-seed NFP1/NFP2/NFP3/NFP4 jobs finish or time out,
+   then promote no README panel unless all selected rows are provenance-complete
+   and gate-passing.
+4. Use the smoke timings to guide the next performance pass: cold branch-local
+   vector/JVP construction is still slower than complete-solve FD at this
+   validation scale.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999999% for fixed
+  branch-local accepted/rejected gates; adaptive host branch selection remains
+  unclaimed.
+- VMEC parity and physics gates: 99.75%.
+- Single-stage coil-only optimization: 99.35%.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 96% infrastructure/provenance-ready,
+  0% promoted under strict four-row policy.
