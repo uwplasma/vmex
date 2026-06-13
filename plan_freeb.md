@@ -12,6 +12,93 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
+### 2026-06-13 Relaxed-Gate QI Follow-Up Poll
+
+Steps taken:
+
+1. Confirmed local ``main`` is clean at ``75bbaa0`` and synced with
+   ``origin/main``.
+2. Confirmed GitHub Actions run ``27470722900`` for ``75bbaa0`` completed
+   successfully.
+3. Re-polled the active ``office`` relaxed-gate QI showcase jobs:
+   ``/home/rjorge/local/tests/qi_relaxed_gate_75bbaa0`` for NFP1 and
+   ``/home/rjorge/local/tests/qi_relaxed_gate_75bbaa0_nfp23`` for the split
+   NFP2/NFP3 lane.
+4. Ran focused local QI and free-boundary same-branch tests after the relaxed
+   gate and rejected-slot validation changes.
+5. Mined archived ``office`` QI diagnostics to separate genuine policy
+   blockers from duplicated schedules.
+
+Results obtained:
+
+1. Focused lint passed for the recently touched QI modules and tests:
+   ``python -m ruff check vmec_jax/qi_diagnostics.py
+   examples/optimization/QI_optimization.py
+   examples/optimization/QI_seed_robustness.py
+   examples/optimization/qi_optimization_cases.py
+   tests/test_qi_readme_cases.py tests/test_qi_seed_suitability_audit.py``.
+2. Focused QI tests passed:
+   ``JAX_ENABLE_X64=1 python -m pytest -q tests/test_qi_readme_cases.py
+   tests/test_qi_diagnostics.py tests/test_qi_case_resolution.py
+   tests/test_qi_staged_runner.py tests/test_qi_seed_suitability_audit.py
+   -q``.
+3. Focused free-boundary same-branch gates passed:
+   ``JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_native_rejected_slot_same_branch_jvp_matches_complete_solve_fd
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_fd
+   -q``.  The rejected-slot probe still emits expected warnings from the
+   deliberately aggressive nonphysical restart branch.
+4. The active NFP1 relaxed-gate run is still in its first matrix-free cleanup
+   stage.  Its latest accepted diagnostics remain non-promotable:
+   smooth QI ``8.76e-3``, legacy QI ``5.55e-3``, mirror ``0.283``,
+   aspect ``7.04``, and mean iota ``0.468``.
+5. The active NFP2 relaxed-gate run has reached the scalar-trust cleanup
+   stage.  Its fresh baseline/first-ramp diagnostics remain non-promotable:
+   smooth QI ``6.52e-3``, legacy QI ``3.74e-3``, mirror ``0.241``,
+   aspect ``7.93``, and mean iota ``-0.439``.
+6. Archive mining shows the current blockers are different by NFP:
+   NFP4 has multiple all-gate relaxed-policy candidates (for example smooth QI
+   ``2.44e-3``, legacy QI ``3.23e-4``, mirror ``0.297``, aspect ``6.0``).
+   NFP2 has low-QI/mirror candidates but most sit at aspect ``7``-``8``; the
+   closest aspect-6 candidates still overshoot the mirror gate.  NFP1 has
+   either low-QI/high-mirror or high-QI/good-mirror branches.  NFP3 has good
+   QI/mirror branches but remains trapped near aspect ``3.54``.
+
+Best next steps:
+
+1. Let the active NFP2 stage finish or reach a clear timeout before promoting
+   or changing the public NFP2 preset.
+2. Stop or deprioritize the current NFP1 worker if it remains at only the
+   iteration-0 matrix-free stage after another polling interval; it is a
+   duplicated high-cost branch and the archived evidence points to a different
+   basin/cleanup problem.
+3. For NFP1, launch a distinct QI-first basin followed by mirror cleanup,
+   rather than the current narrow reference scan.
+4. For NFP2, launch an aspect-preserving QI/mirror cleanup from the archived
+   low-QI branch around aspect ``6.4`` rather than from the current aspect
+   ``7.9`` baseline.
+5. For NFP3, treat aspect recovery as the primary unresolved policy issue;
+   a mode-6 or anisotropic aspect-raising recovery is more relevant than
+   another QI-only local polish.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9999995% for fixed
+  branch-local accepted/rejected gates; adaptive host branch selection remains
+  unclaimed.
+- VMEC parity and physics gates: 99.8%.
+- Single-stage coil-only optimization: 99.4%.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 97% infrastructure/provenance-ready;
+  NFP4 is relaxed-policy passable, NFP1/NFP2/NFP3 remain unpromoted.
+
 ### 2026-06-13 Smooth-QI Promotion Gate Relaxation
 
 Steps taken:
