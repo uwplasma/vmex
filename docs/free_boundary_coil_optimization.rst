@@ -1460,6 +1460,20 @@ to form a safe derivative proposal.
      --max-evals 2 \
      --outdir results/free_boundary_QA_finite_beta_coil_optimization_smoke
 
+   python examples/optimization/free_boundary_QA_finite_beta_coil_optimization.py \
+     --provider circle \
+     --max-evals 5 \
+     --max-iter 3 \
+     --vmec-max-iter 2 \
+     --ns 12 \
+     --mpol 3 \
+     --ntor 2 \
+     --nzeta 4 \
+     --write-same-branch-report \
+     --same-branch-report-mode vector \
+     --same-branch-derivative-proposal \
+     --outdir results/free_boundary_QA_finite_beta_coil_optimization_report
+
 The wrapper records the same ``history.json`` and ``summary.json`` schema as
 ``free_boundary_QS_coil_optimization.py`` and adds a
 ``finite_beta_qa_example`` metadata block.  Optional same-branch derivative

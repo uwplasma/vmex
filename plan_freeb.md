@@ -22847,6 +22847,25 @@ Results obtained:
 10. ``python examples/optimization/free_boundary_QA_finite_beta_coil_optimization.py
     --smoke --dry-run`` now records the stable default branch
     ``current=1.0e7, radius=10``.
+11. A 5-evaluation low-resolution non-smoke finite-beta QA run on the stable
+    branch completed with complete-solve acceptance authority:
+    ``python examples/optimization/free_boundary_QA_finite_beta_coil_optimization.py
+    --provider circle --max-evals 5 --max-iter 3 --vmec-max-iter 2 --ns 12
+    --mpol 3 --ntor 2 --nzeta 4 --no-jit-forces --write-same-branch-report
+    --same-branch-report-mode vector --same-branch-derivative-proposal``.
+    The objective decreased from ``1.155242e-1`` to ``1.144562e-1`` over six
+    complete-solve evaluations including the derivative-proposal trial; QS
+    decreased from ``9.97e-3`` to ``9.78e-3``.  The best point had
+    ``aspect=4.2406``, ``mean_iota=0.4297``, and Bnormal RMS ``4.62``.
+12. In that 5-evaluation run, the same-branch vector/JVP report passed for all
+    requested physical scalars at the best pre-proposal point: aspect, QS,
+    mean-iota, and LCFS boundary moment all had AD-vs-central-FD errors
+    below ``2e-10``.  The derivative proposal was accepted by the normal
+    complete solve and became the final best point.
+13. The still-running NFP3 QI aspect-lift job on ``office`` is not currently
+    promotable: the latest strict stage has smooth/legacy QI
+    ``3.05e-3/3.44e-4`` with mirror ``0.299`` and iota ``-1.055``, but aspect
+    is only ``3.53`` and the strict gate fails ``smooth_qi`` and ``aspect``.
 
 Best next steps:
 
@@ -22855,10 +22874,10 @@ Best next steps:
 2. Keep the finite-beta QA single-stage example claims narrow until a milder
    physically useful setup gives a passed branch-local QS vector gate.  Complete
    solves remain the acceptance authority.
-3. Use the sane finite-beta QA branch for the next non-smoke phase-3 run:
-   slightly more VMEC iterations and 3--5 optimizer evaluations, with complete
-   solves deciding acceptance and the branch-local vector/JVP report used only
-   for proposal evidence.
+3. Promote the stable finite-beta QA branch from a validation smoke to a
+   pedagogic example result: keep complete solves as acceptance authority,
+   preserve the branch-local vector/JVP report as proposal evidence, and avoid
+   claiming adaptive branch-selection differentiation.
 4. Leave the still-running NFP3 QI aspect-lift job on ``office`` running and do
    not promote NFP1/NFP3 README QI artifacts until their strict provenance gates
    pass.
@@ -22875,9 +22894,10 @@ Completion:
   complete-loop rejected-slot same-branch gates; arbitrary adaptive host branch
   selection remains unclaimed.
 - VMEC parity and physics gates: 99.86%.
-- Single-stage coil-only optimization phase 3: 99.78%; the finite-beta QA
+- Single-stage coil-only optimization phase 3: 99.85%; the finite-beta QA
   wrapper now defaults to a stable direct-coil branch, and the same-branch
-  vector/JVP proposal path has one complete-solve accepted trial on that branch.
+  vector/JVP proposal path has one complete-solve accepted trial on that branch
+  plus a 5-evaluation validation-scale run with a passed physical-scalar gate.
 - CPU/GPU performance: 99.4%.
 - CI/runtime/coverage hygiene: 100% locally after the compatibility fix;
   replacement GitHub Actions run pending.
