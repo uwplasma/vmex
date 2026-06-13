@@ -21251,6 +21251,60 @@ Completion:
 - QI minimal-seed README artifacts: 96% infrastructure/provenance-ready,
   0% promoted under strict four-row policy.
 
+### 2026-06-13: free-boundary validation rerun after QI batch
+
+Steps taken:
+
+1. Ran the targeted free-boundary lint and validation shard locally after the
+   QI recovery batch:
+   ``python -m ruff check vmec_jax/free_boundary_adjoint.py
+   vmec_jax/free_boundary_adjoint_controller.py
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py
+   tests/test_free_boundary_qs_coil_optimization_smoke.py``.
+2. Ran:
+   ``JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_vacuum_adjoint.py
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py
+   tests/test_free_boundary_qs_coil_optimization_smoke.py -q``.
+3. Polled GitHub Actions for commit ``bd13417``.
+
+Results obtained:
+
+1. Ruff passed.
+2. The targeted free-boundary pytest shard passed to 100%.  The warnings are
+   the expected runtime warnings from the deliberately aggressive native
+   rejected-slot branch probe.
+3. GitHub Actions run ``27470179403`` for ``bd13417`` completed successfully.
+
+Best next steps:
+
+1. Keep the QI strict README gate decision separate from free-boundary
+   correctness; the QI batch did not produce promotable strict artifacts.
+2. For free-boundary, the next technical step remains a true arbitrary adaptive
+   host-branch AD-vs-FD gate.  Current evidence is strong for
+   fingerprint-gated branch-local accepted/rejected branches, but claims should
+   remain conservative.
+3. For phase 3, continue using complete solves as the acceptance authority while
+   branch-local vector/JVP proposals are used only as proposal machinery.
+
+Need from user:
+
+No action needed unless the QI README smooth-QI gate should be relaxed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9999995% for fixed
+  branch-local accepted/rejected gates; adaptive host branch selection remains
+  unclaimed.
+- VMEC parity and physics gates: 99.8%.
+- Single-stage coil-only optimization: 99.4%.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100% with ``bd13417`` CI green.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 96% infrastructure/provenance-ready,
+  0% promoted under strict four-row policy.
+
 ### 2026-06-13: final QI recovery batch outcome
 
 Steps taken:
