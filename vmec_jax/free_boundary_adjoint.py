@@ -5520,6 +5520,7 @@ def direct_coil_adaptive_full_loop_same_branch_gate_report(
     *,
     scalar_keys: tuple[str, ...] | list[str] | None = None,
     require_stacked_step_controls: bool = True,
+    require_complete_loop_rejected_controller_slot: bool = False,
     require_fixed_rejected_controller_slot: bool = False,
     require_status_derived_rejected_controller_slot: bool = False,
     json_safe: bool = False,
@@ -5599,6 +5600,25 @@ def direct_coil_adaptive_full_loop_same_branch_gate_report(
         if not status_derived_rejected_controller_slot_present:
             errors.append("rejected controller slot was not derived from trace step_status")
 
+    def _fingerprint_has_rejected_controller_slot(fingerprint: Mapping[str, Any]) -> bool:
+        if not isinstance(fingerprint, Mapping):
+            return False
+        accept_mask = np.asarray(fingerprint.get("accept_mask", ()), dtype=int)
+        if accept_mask.size and np.any(accept_mask == 0):
+            return True
+        step_status = tuple(str(status) for status in fingerprint.get("step_status", ()))
+        return any(
+            status.startswith("restart_") or status == "rejected"
+            for status in step_status
+        )
+
+    complete_loop_rejected_slot_present = all(
+        _fingerprint_has_rejected_controller_slot(branch_fingerprints[label])
+        for label in ("base", "plus", "minus")
+    )
+    if bool(require_complete_loop_rejected_controller_slot) and not complete_loop_rejected_slot_present:
+        errors.append("complete-loop branch fingerprints do not contain a native rejected/restart controller slot")
+
     labels = ("base", "plus", "minus")
     step_policy_signatures: dict[str, tuple[tuple[int, int, int], ...]] = {}
     step_policy_summaries: dict[str, dict[str, Any]] = {}
@@ -5645,6 +5665,10 @@ def direct_coil_adaptive_full_loop_same_branch_gate_report(
         "same_stacked_step_policy_branch": bool(same_stacked_step_policy_branch),
         "requires_stacked_step_controls": bool(require_stacked_step_controls),
         "used_stacked_step_controls": used_stacked_step_controls,
+        "requires_complete_loop_rejected_controller_slot": bool(
+            require_complete_loop_rejected_controller_slot
+        ),
+        "complete_loop_rejected_controller_slot_present": bool(complete_loop_rejected_slot_present),
         "requires_fixed_rejected_controller_slot": bool(require_fixed_rejected_controller_slot),
         "requires_status_derived_rejected_controller_slot": bool(
             require_status_derived_rejected_controller_slot

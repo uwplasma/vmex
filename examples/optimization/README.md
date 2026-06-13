@@ -218,6 +218,15 @@ remain available for custom inspection.
 - `QA_optimization.py`: recommended quasi-axisymmetric fixed-boundary optimization.
 - `QH_optimization.py`: recommended quasi-helical fixed-boundary optimization.
 - `QP_optimization.py`: quasi-poloidal fixed-boundary optimization from the public NFP=2 minimal seed, with an explicit optimization-time QI-family preseed when enabled.
+- `free_boundary_QS_coil_optimization.py`: direct-coil, no-mgrid, single-stage free-boundary coil-only QS validation example. Optional same-branch reports use validated branch-local vector/JVP derivatives only as diagnostics or proposal evidence; complete free-boundary solves remain the acceptance authority.
+- `free_boundary_QA_finite_beta_coil_optimization.py`: QA finite-beta wrapper around the direct-coil single-stage workflow. It uses `examples/data/input.nfp2_QA_finite_beta`, a standard pressure profile, QA helicity, and synthetic direct coils by default for a dependency-light smoke run.
+
+Run the finite-beta QA single-stage smoke with:
+
+```bash
+python examples/optimization/free_boundary_QA_finite_beta_coil_optimization.py --smoke --dry-run
+python examples/optimization/free_boundary_QA_finite_beta_coil_optimization.py --smoke --max-evals 2
+```
 - `QI_optimization.py`: recommended quasi-isodynamic optimization from `input.minimal_seed_nfp2` by default, with Boozer-space QI metrics, mirror-ratio and elongation penalties, repeated lower-mode continuation, and ESS. Edit `INPUT_FILE`, `OUTPUT_DIR`, seed helpers, objective weights, and optimizer controls at the top of the script, then run it directly. Use `STAGE_MODE_POLICY = "lower-repeat"` with `STAGE_REPEATS = 1` for a shorter one-pass ladder, `STAGE_MODE_POLICY = "lower"` for the legacy QA/QH/QP repeated ladder, or `"repeat"` only when the input is already in a good QI basin and same-mode cleanup is desired.
 - `QI_optimization_seed.py`: diagnostic far-seed preset for NFP=3 `input.QI_stel_seed_3127`; README QI promotion rows use `input.minimal_seed_nfp*` decks instead.
 - `qi_optimization_cases.py`: reproducible staged presets for sweeps and docs. Use `minimal_nfp2_qi_balanced_mirror035` when you want the reviewed high-budget NFP=2 mode-5 QI/mirror/aspect polish path with smooth QI below `3e-3`, legacy QI below `2e-3`, and mirror ratio below `0.35`.

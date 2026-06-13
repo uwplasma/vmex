@@ -629,6 +629,15 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatc
     assert not missing_rejected_slot_gate["passed"]
     assert any("fixed rejected controller slot" in error for error in missing_rejected_slot_gate["errors"])
     assert any("accepted-only fast path" in error for error in missing_rejected_slot_gate["errors"])
+    missing_complete_loop_rejected_slot_gate = direct_coil_adaptive_full_loop_same_branch_gate_report(
+        physical_synthetic_report,
+        physical_scalars_report,
+        require_complete_loop_rejected_controller_slot=True,
+    )
+    assert not missing_complete_loop_rejected_slot_gate["passed"]
+    assert missing_complete_loop_rejected_slot_gate["requires_complete_loop_rejected_controller_slot"] is True
+    assert missing_complete_loop_rejected_slot_gate["complete_loop_rejected_controller_slot_present"] is False
+    assert any("complete-loop branch fingerprints" in error for error in missing_complete_loop_rejected_slot_gate["errors"])
     missing_status_rejected_slot_gate = direct_coil_adaptive_full_loop_same_branch_gate_report(
         physical_synthetic_report,
         physical_scalars_report,
@@ -3027,12 +3036,14 @@ def test_direct_coil_native_rejected_slot_same_branch_jvp_matches_complete_solve
         complete_report,
         scalars_report,
         scalar_keys=("aspect", "state_norm", "qs_total"),
+        require_complete_loop_rejected_controller_slot=True,
         require_fixed_rejected_controller_slot=True,
         require_status_derived_rejected_controller_slot=True,
     )
     assert adaptive_gate["passed"], adaptive_gate
     assert adaptive_gate["fingerprint_gated"] is True
     assert adaptive_gate["same_branch"] is True
+    assert adaptive_gate["complete_loop_rejected_controller_slot_present"] is True
     assert adaptive_gate["fixed_rejected_controller_slot_present"] is True
     assert adaptive_gate["status_derived_rejected_controller_slot_present"] is True
     assert adaptive_gate["differentiates_adaptive_controller"] is False
@@ -3052,6 +3063,7 @@ def test_direct_coil_native_rejected_slot_same_branch_jvp_matches_complete_solve
         changed_branch_report,
         scalars_report,
         scalar_keys=("aspect", "state_norm", "qs_total"),
+        require_complete_loop_rejected_controller_slot=True,
         require_fixed_rejected_controller_slot=True,
         require_status_derived_rejected_controller_slot=True,
     )
@@ -3222,12 +3234,14 @@ def test_direct_coil_native_rejected_slot_geometry_jvp_matches_complete_solve_fd
         complete_report,
         scalars_report,
         scalar_keys=("aspect", "state_norm", "qs_total"),
+        require_complete_loop_rejected_controller_slot=True,
         require_fixed_rejected_controller_slot=True,
         require_status_derived_rejected_controller_slot=True,
     )
     assert adaptive_gate["passed"], adaptive_gate
     assert adaptive_gate["fingerprint_gated"] is True
     assert adaptive_gate["same_branch"] is True
+    assert adaptive_gate["complete_loop_rejected_controller_slot_present"] is True
     assert adaptive_gate["fixed_rejected_controller_slot_present"] is True
     assert adaptive_gate["status_derived_rejected_controller_slot_present"] is True
     assert adaptive_gate["differentiates_adaptive_controller"] is False
@@ -3397,12 +3411,14 @@ def test_direct_coil_native_rejected_slot_mixed_state_only_branch_trace_jvp_matc
         complete_report,
         scalars_report,
         scalar_keys=("aspect", "qs_total", "lcfs_boundary_moment"),
+        require_complete_loop_rejected_controller_slot=True,
         require_fixed_rejected_controller_slot=True,
         require_status_derived_rejected_controller_slot=True,
     )
     assert adaptive_gate["passed"], adaptive_gate
     assert adaptive_gate["fingerprint_gated"] is True
     assert adaptive_gate["same_branch"] is True
+    assert adaptive_gate["complete_loop_rejected_controller_slot_present"] is True
     assert adaptive_gate["fixed_rejected_controller_slot_present"] is True
     assert adaptive_gate["status_derived_rejected_controller_slot_present"] is True
     assert adaptive_gate["differentiates_adaptive_controller"] is False

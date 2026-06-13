@@ -1430,6 +1430,36 @@ the promoted vector/JVP artifact, the accepted/rejected slot gate is checked
 before a proposal is formed, and the ordinary complete free-boundary solve is
 still the only authority for accepting or rejecting the proposed coil point.
 
+QA finite-beta direct-coil wrapper
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``examples/optimization/free_boundary_QA_finite_beta_coil_optimization.py``
+is a small phase-3 wrapper around the same direct-coil optimizer.  It selects
+``examples/data/input.nfp2_QA_finite_beta``, a standard finite-beta pressure
+profile, QA helicity ``(m,n)=(1,0)``, and a synthetic direct circular coil by
+default.  This keeps the example dependency-light while exercising the same
+single-stage free-boundary path: coil variables are optimized, the VMEC
+boundary is not in the optimization vector, and complete free-boundary solves
+are still the acceptance authority.
+
+.. code-block:: bash
+
+   python examples/optimization/free_boundary_QA_finite_beta_coil_optimization.py \
+     --smoke \
+     --dry-run \
+     --outdir results/free_boundary_QA_finite_beta_coil_optimization_preview
+
+   python examples/optimization/free_boundary_QA_finite_beta_coil_optimization.py \
+     --smoke \
+     --max-evals 2 \
+     --outdir results/free_boundary_QA_finite_beta_coil_optimization_smoke
+
+The wrapper records the same ``history.json`` and ``summary.json`` schema as
+``free_boundary_QS_coil_optimization.py`` and adds a
+``finite_beta_qa_example`` metadata block.  Optional same-branch derivative
+reports remain diagnostics or proposal evidence only; they do not claim exact
+gradients through arbitrary adaptive host branch selection.
+
 For the ESSOS Landreman-Paul QA coils, put ESSOS on ``PYTHONPATH`` and use:
 
 .. code-block:: bash

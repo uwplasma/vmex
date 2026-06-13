@@ -23025,6 +23025,100 @@ Completion:
   relocks run.
 
 
+### 2026-06-13 Native Rejected-Slot Adaptive Gate And QA Finite-Beta Single-Stage Example
+
+Steps taken:
+
+1. Polled the remote QI narrow relocks under
+   ``qi_next_narrow_9c02091`` and the older follow-up runs under
+   ``qi_followup_9c02091``.
+2. Tightened ``direct_coil_adaptive_full_loop_same_branch_gate_report`` with a
+   new opt-in ``require_complete_loop_rejected_controller_slot`` flag.  This
+   distinguishes a native rejected/restart slot in the complete base/plus/minus
+   host-loop fingerprints from a rejected slot that only appears in a padded
+   replay trace.
+3. Enabled the new native-complete-loop rejected-slot requirement in the
+   current-only, geometry-only, and mixed current/geometry rejected-slot
+   AD-vs-central-FD gates.
+4. Added ``examples/optimization/free_boundary_QA_finite_beta_coil_optimization.py``.
+   The script is a concise QA finite-beta wrapper around the direct-coil
+   single-stage workflow.  It uses ``input.nfp2_QA_finite_beta``, QA helicity,
+   a standard pressure profile, and synthetic direct coils by default.
+5. Parameterized the synthetic circle direct-coil provider in
+   ``free_boundary_QS_coil_optimization.py`` so examples can choose current,
+   radius, segment count, NFP, and stellarator symmetry without editing source
+   internals.
+6. Added smoke/default tests for the new finite-beta QA wrapper and documented
+   the example in ``examples/optimization/README.md`` and
+   ``docs/free_boundary_coil_optimization.rst``.
+
+Results obtained:
+
+1. The completed QI narrow relocks were not promotable:
+   ``nfp1_std_l1025_m8_qi_relock`` ended near smooth/legacy QI
+   ``7.97e-3/4.84e-3`` with mirror ``0.293`` and aspect ``7.10``; it still
+   fails smooth/legacy QI.  ``nfp3_r001p25_l102_m8_qi_relock`` ended near
+   smooth/legacy QI ``1.67e-2/9.02e-3`` with mirror ``0.340`` and aspect
+   ``4.45``; it also fails smooth/legacy QI.  The older NFP1 low-QI branch has
+   good QI but fails iota and mirror, so it is not promotion evidence.
+2. ``python -m ruff check`` on the touched free-boundary adjoint, example, and
+   test files passed.
+3. ``JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_native_rejected_slot_same_branch_jvp_matches_complete_solve_fd
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_native_rejected_slot_geometry_jvp_matches_complete_solve_fd
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_native_rejected_slot_mixed_state_only_branch_trace_jvp_matches_complete_solve_fd -q``
+   passed.  These tests now prove that the complete base/plus/minus host-loop
+   fingerprints contain the native ``("momentum", "momentum",
+   "restart_bad_jacobian")`` rejected/restart slot with accept mask
+   ``[1, 1, 0]`` under an unchanged branch fingerprint.
+4. ``JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_qa_finite_beta_coil_optimization_smoke.py
+   tests/test_free_boundary_qs_coil_optimization_smoke.py -q`` passed
+   (``32 passed, 1 xfailed`` at the time of the run).
+5. ``python examples/optimization/free_boundary_QA_finite_beta_coil_optimization.py
+   --smoke --max-evals 1 --max-iter 1 --outdir
+   /tmp/vmec_jax_qa_fb_freeb_smoke_main --no-jit-forces`` completed one full
+   direct-coil free-boundary finite-beta evaluation and wrote
+   ``history.json``/``summary.json``.  The resulting objective is only a smoke
+   validation of the workflow, not a polished optimized stellarator.
+
+Best next steps:
+
+1. Commit and push this phase-2/phase-3 increment, then let CI validate it.
+2. Keep the phase-2 claim conservative: the new gate validates a
+   fingerprint-gated same-branch native rejected/restart host-loop slot and
+   fixed accepted/rejected replay derivatives.  It still does not claim
+   arbitrary adaptive host branch-selection differentiation.
+3. For phase 3, next run the new finite-beta QA wrapper with an actual
+   same-branch derivative proposal enabled and compare the complete-solve
+   accepted/rejected proposal result against the derivative evidence.
+4. For QI, do not promote the README NFP1/NFP3 artifacts from the latest
+   mode-8 relocks.  Wait for the two still-running older follow-up jobs to
+   finish, but do not launch another broad sweep without a new hypothesis.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999998% for
+  fingerprint-gated current, geometry, mixed current/geometry, and native
+  complete-loop rejected-slot same-branch gates; arbitrary adaptive host branch
+  selection remains unclaimed.
+- VMEC parity and physics gates: 99.86%.
+- Single-stage coil-only optimization phase 3: 99.7% with a finite-beta QA
+  direct-coil example now present; next step is a non-smoke derivative-proposal
+  run with complete-solve acceptance.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100% locally for targeted checks; awaiting CI
+  for the pushed commit.
+- Docs/release hygiene: 100% for this increment.
+- QI minimal-seed README artifacts: 98% infrastructure/provenance-ready and
+  strict-gated; NFP4 passes, NFP1/NFP3 remain unpromoted.
+
+
 ### 2026-06-13 Geometry-Only Rejected-Slot Adaptive Gate
 
 Steps taken:

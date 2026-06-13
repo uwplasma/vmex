@@ -207,19 +207,35 @@ def load_essos_provider(coils_json: Path | None, *, chunk_size: int, current_sca
     return params, metadata
 
 
-def make_circle_provider(*, current_scale: float, chunk_size: int | None = None) -> tuple[CoilFieldParams, dict[str, Any]]:
+def make_circle_provider(
+    *,
+    current_scale: float,
+    chunk_size: int | None = None,
+    current: float = 2.0,
+    radius: float = 1.4,
+    n_segments: int = 96,
+    nfp: int = 1,
+    stellsym: bool = False,
+) -> tuple[CoilFieldParams, dict[str, Any]]:
     dofs = jnp.zeros((1, 3, 3), dtype=float)
-    dofs = dofs.at[0, 0, 2].set(1.4)
-    dofs = dofs.at[0, 1, 1].set(1.4)
+    dofs = dofs.at[0, 0, 2].set(float(radius))
+    dofs = dofs.at[0, 1, 1].set(float(radius))
     params = CoilFieldParams(
         base_curve_dofs=dofs,
-        base_currents=jnp.asarray([2.0]),
-        n_segments=96,
+        base_currents=jnp.asarray([float(current)]),
+        n_segments=int(n_segments),
+        nfp=int(nfp),
+        stellsym=bool(stellsym),
         current_scale=float(current_scale),
         chunk_size=None if chunk_size is None else int(chunk_size),
     )
     return params, {
         "provider": "circle",
+        "current": float(current),
+        "radius": float(radius),
+        "n_segments": int(n_segments),
+        "nfp": int(nfp),
+        "stellsym": bool(stellsym),
         "current_scale_multiplier": float(current_scale),
         "chunk_size": None if chunk_size is None else int(chunk_size),
     }
@@ -1865,6 +1881,11 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
         base_params, provider_metadata = make_circle_provider(
             current_scale=float(args.current_scale),
             chunk_size=None if args.chunk_size is None else int(args.chunk_size),
+            current=float(args.circle_current),
+            radius=float(args.circle_radius),
+            n_segments=int(args.circle_n_segments),
+            nfp=int(args.circle_nfp),
+            stellsym=bool(args.circle_stellsym),
         )
     else:
         raise ValueError(f"unknown provider {args.provider!r}")
@@ -2277,6 +2298,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--provider", choices=("essos", "circle"), default="essos")
     parser.add_argument("--coils-json", type=Path, default=None)
     parser.add_argument("--current-scale", type=float, default=1.0)
+    parser.add_argument("--circle-current", type=float, default=2.0, help="Base current for the synthetic circle provider.")
+    parser.add_argument("--circle-radius", type=float, default=1.4, help="Major radius of the synthetic circle provider.")
+    parser.add_argument("--circle-n-segments", type=int, default=96, help="Quadrature segments for the synthetic circle provider.")
+    parser.add_argument("--circle-nfp", type=int, default=1, help="Field periods for synthetic circle symmetry expansion.")
+    parser.add_argument(
+        "--circle-stellsym",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Apply stellarator symmetry to the synthetic circle provider.",
+    )
     parser.add_argument(
         "--chunk-size",
         type=int,
