@@ -22967,6 +22967,64 @@ Completion:
   strict-gated; NFP4 passes, NFP1/NFP3 remain unpromoted.
 
 
+### 2026-06-13 Narrow Mode-8 QI Relocks
+
+Steps taken:
+
+1. Reviewed the completed QI strategy sidecar recommendation.  The next useful
+   NFP1 run is a high-iota ``lambda=1.025`` mode-8 QI relock, not another
+   low-iota branch.  The next useful NFP3 run is a single R00=1.25,
+   ``lambda=1.02`` mode-8 QI relock, not more R00 shell breadth.
+2. Stopped stale broad remote jobs that had already shown non-promotable
+   diagnostics and were consuming CPU/GPU: the older NFP3 R00 broad search and
+   the older NFP1 low-iota lift.  Kept the active targeted follow-ups.
+3. Launched the two narrow mode-8 relocks under
+   ``/home/rjorge/local/tests/qi_next_narrow_9c02091``:
+   ``nfp1_std_l1025_m8_qi_relock`` and
+   ``nfp3_r001p25_l102_m8_qi_relock``.
+
+Results obtained:
+
+1. Both new mode-8 relocks started cleanly.
+2. The older ``qi_followup_9c02091/nfp3_lowqi_aspect_lift`` failed because it
+   used a diagnostics JSON instead of a VMEC input; the corrected
+   ``nfp3_lowqi_aspect_lift_from_interp`` run is still active.
+3. ``qi_followup_9c02091/nfp3_r00_1p25_strict_qi`` was terminated during stale
+   job cleanup, so it is not promotion evidence.  The replacement mode-8 NFP3
+   relock has clean provenance.
+
+Best next steps:
+
+1. Poll ``qi_next_narrow_9c02091`` and ``qi_followup_9c02091`` diagnostics.
+   Promote only if the final/root diagnostics satisfy the renderer's fixed
+   README gates.
+2. Stop policy: do not launch more NFP3 R00 shells unless the mode-8 NFP3
+   relock at least halves both smooth and legacy QI while keeping mirror
+   ``<=0.35``.
+3. For NFP1, do not spend the next run on the low-iota branch unless the
+   high-iota relock fails to reduce smooth QI below roughly ``4e-3``.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999995% for fixed
+  branch-local current, geometry, and mixed current/geometry accepted/rejected
+  gates; arbitrary adaptive host branch selection remains unclaimed.
+- VMEC parity and physics gates: 99.85%.
+- Single-stage coil-only optimization: 99.6%.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100% for completed CI runs; ``1b01da1`` CI is
+  in progress.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 98% infrastructure/provenance-ready and
+  strict-gated; NFP4 passes, NFP1/NFP3 remain unpromoted while the mode-8
+  relocks run.
+
+
 ### 2026-06-13 Geometry-Only Rejected-Slot Adaptive Gate
 
 Steps taken:
