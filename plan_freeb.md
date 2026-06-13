@@ -22921,6 +22921,52 @@ Completion:
   (NFP2/NFP3/NFP4), NFP1 remains the only unpromoted public README case.
 
 
+### 2026-06-13 QI NFP2/NFP3 Provenance Sync
+
+Steps taken:
+
+1. Synced only lightweight JSON provenance for the reviewed NFP2 and NFP3
+   minimal-seed QI artifacts into ``docs/_static/qi_readme_cases``.
+2. Kept WOUT/input/output solver artifacts out of git; the tracked bundle is
+   about ``72K`` total after adding NFP2/NFP3 JSON.
+3. Normalized remote absolute paths in the NFP3 preconditioner summary to
+   repository-relative artifact paths.
+
+Results obtained:
+
+1. NFP2 tracked metrics pass the current README gate:
+   smooth QI ``2.7047e-3``, legacy QI ``2.0866e-4``, mirror ``0.2648``,
+   aspect ``3.5246``, mean iota ``-0.6990``, elongation ``7.3433``.
+2. NFP3 tracked metrics pass the current README gate:
+   smooth QI ``3.0741e-3``, legacy QI ``6.1189e-4``, mirror ``0.3176``,
+   aspect ``3.5369``, mean iota ``-1.0464``, elongation ``3.9617``.
+3. NFP1 is still running in a clean ``office`` checkout
+   ``/home/rjorge/local/tests/vmec_jax_qi_nfp1_repair_bbb9582``.
+
+Best next steps:
+
+1. Poll the NFP1 repair.  If it passes the current public gates, sync its small
+   JSON provenance and render the four-row QI README panel with transient WOUTs.
+2. If NFP1 still fails, keep the README panel unpromoted or render only the
+   passing NFP2/NFP3/NFP4 evidence in docs while explicitly marking NFP1 open.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9999999%.
+- VMEC parity and physics gates: 99.85%.
+- Single-stage coil-only optimization: 99.5%.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100% locally; CI for ``bbb9582`` is in progress.
+- Docs/release hygiene: 100% for the lightweight artifact sync.
+- QI minimal-seed README artifacts: 75% promoted by current metrics
+  (NFP2/NFP3/NFP4), with NFP1 repair in progress.
+
+
 ### 2026-06-13 QI Gate Policy and Phase-3 Free-Boundary Status Refresh
 
 Steps taken:

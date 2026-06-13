@@ -1,0 +1,200 @@
+[
+  {
+    "aspect": 3.9737892464624984,
+    "aspect_relative_error": 0.20524215070750032,
+    "elongation": 3.002457023063862,
+    "failure_reasons": [
+      "smooth QI=0.615691 exceeds target 0.002",
+      "legacy QI=0.461953 exceeds target 0.002",
+      "abs(mean iota)=0.377596 is below target 0.41",
+      "mirror ratio=0.301245 exceeds target 0.3"
+    ],
+    "input": "docs/_static/qi_readme_cases/nfp2_minimal/boundary_reference_preconditioner/lambda_0p500/input.interpolated",
+    "lambda": 0.5,
+    "legacy_qi": 0.4619530008215418,
+    "mean_iota": -0.377595549233846,
+    "mirror": 0.3012451168516311,
+    "qi_engineering_gate_passed": false,
+    "qi_seed_gate_passed": false,
+    "score": 36887.02586934436,
+    "selected": false,
+    "smooth_qi": 0.6156906700703126,
+    "wout": "docs/_static/qi_readme_cases/nfp2_minimal/boundary_reference_preconditioner/lambda_0p500/wout_interpolated.nc"
+  },
+  {
+    "aspect": 3.764757643170716,
+    "aspect_relative_error": 0.24704847136585678,
+    "elongation": 4.326559237244902,
+    "failure_reasons": [
+      "smooth QI=0.216788 exceeds target 0.002",
+      "legacy QI=0.15845 exceeds target 0.002"
+    ],
+    "input": "docs/_static/qi_readme_cases/nfp2_minimal/boundary_reference_preconditioner/lambda_0p700/input.interpolated",
+    "lambda": 0.7,
+    "legacy_qi": 0.15844990639881362,
+    "mean_iota": -0.5384187071875465,
+    "mirror": 0.27128806039889536,
+    "qi_engineering_gate_passed": false,
+    "qi_seed_gate_passed": false,
+    "score": 4539.718909193774,
+    "selected": false,
+    "smooth_qi": 0.21678841385685296,
+    "wout": "docs/_static/qi_readme_cases/nfp2_minimal/boundary_reference_preconditioner/lambda_0p700/wout_interpolated.nc"
+  },
+  {
+    "aspect": 3.6352896255548792,
+    "aspect_relative_error": 0.27294207488902417,
+    "elongation": 5.675703593891837,
+    "failure_reasons": [
+      "smooth QI=0.043981 exceeds target 0.002",
+      "legacy QI=0.0280169 exceeds target 0.002"
+    ],
+    "input": "docs/_static/qi_readme_cases/nfp2_minimal/boundary_reference_preconditioner/lambda_0p850/input.interpolated",
+    "lambda": 0.85,
+    "legacy_qi": 0.028016867519415622,
+    "mean_iota": -0.632651508072296,
+    "mirror": 0.25193350719725616,
+    "qi_engineering_gate_passed": false,
+    "qi_seed_gate_passed": false,
+    "score": 279.35298508741363,
+    "selected": false,
+    "smooth_qi": 0.04398096308172808,
+    "wout": "docs/_static/qi_readme_cases/nfp2_minimal/boundary_reference_preconditioner/lambda_0p850/wout_interpolated.nc"
+  },
+  {
+    "aspect": 3.5950670356170926,
+    "aspect_relative_error": 0.28098659287658145,
+    "elongation": 6.218327392525757,
+    "failure_reasons": [
+      "smooth QI=0.0182688 exceeds target 0.002",
+      "legacy QI=0.0102532 exceeds target 0.002"
+    ],
+    "input": "docs/_static/qi_readme_cases/nfp2_minimal/boundary_reference_preconditioner/lambda_0p900/input.interpolated",
+    "lambda": 0.9,
+    "legacy_qi": 0.010253159544909895,
+    "mean_iota": -0.6593285839110222,
+    "mirror": 0.24968050850248608,
+    "qi_engineering_gate_passed": false,
+    "qi_seed_gate_passed": false,
+    "score": 147.8549773007316,
+    "selected": false,
+    "smooth_qi": 0.01826880625163477,
+    "wout": "docs/_static/qi_readme_cases/nfp2_minimal/boundary_reference_preconditioner/lambda_0p900/wout_interpolated.nc"
+  },
+  {
+    "aspect": 3.5556926593085345,
+    "aspect_relative_error": 0.2888614681382931,
+    "elongation": 6.817807341332079,
+    "failure_reasons": [
+      "smooth QI=0.00581403 exceeds target 0.002",
+      "legacy QI=0.00216093 exceeds target 0.002"
+    ],
+    "input": "docs/_static/qi_readme_cases/nfp2_minimal/boundary_reference_preconditioner/lambda_0p950/input.interpolated",
+    "lambda": 0.95,
+    "legacy_qi": 0.0021609295726780766,
+    "mean_iota": -0.6837776339072134,
+    "mirror": 0.25589536645849775,
+    "qi_engineering_gate_passed": false,
+    "qi_seed_gate_passed": false,
+    "score": 128.1428650078923,
+    "selected": false,
+    "smooth_qi": 0.005814028311224449,
+    "wout": "docs/_static/qi_readme_cases/nfp2_minimal/boundary_reference_preconditioner/lambda_0p950/wout_interpolated.nc"
+  },
+  {
+    "aspect": 3.524562721638444,
+    "aspect_relative_error": 0.2950874556723112,
+    "elongation": 7.3432514304223675,
+    "failure_reasons": [
+      "smooth QI=0.00266303 exceeds target 0.002"
+    ],
+    "input": "docs/_static/qi_readme_cases/nfp2_minimal/boundary_reference_preconditioner/lambda_0p990/input.interpolated",
+    "lambda": 0.99,
+    "legacy_qi": 0.0001802343115677388,
+    "mean_iota": -0.7018900644965378,
+    "mirror": 0.2648540581100582,
+    "qi_engineering_gate_passed": false,
+    "qi_seed_gate_passed": false,
+    "score": 127.41015396968974,
+    "selected": true,
+    "smooth_qi": 0.0026630326726982713,
+    "wout": "docs/_static/qi_readme_cases/nfp2_minimal/boundary_reference_preconditioner/lambda_0p990/wout_interpolated.nc"
+  },
+  {
+    "aspect": 3.5168076537195656,
+    "aspect_relative_error": 0.2966384692560869,
+    "elongation": 7.481504259947975,
+    "failure_reasons": [
+      "smooth QI=0.00251248 exceeds target 0.002"
+    ],
+    "input": "docs/_static/qi_readme_cases/nfp2_minimal/boundary_reference_preconditioner/lambda_1p000/input.interpolated",
+    "lambda": 1.0,
+    "legacy_qi": 9.817676774254901e-05,
+    "mean_iota": -0.7062980893537133,
+    "mirror": 0.26772167134246444,
+    "qi_engineering_gate_passed": false,
+    "qi_seed_gate_passed": false,
+    "score": 127.43766434192312,
+    "selected": false,
+    "smooth_qi": 0.0025124800405746006,
+    "wout": "docs/_static/qi_readme_cases/nfp2_minimal/boundary_reference_preconditioner/lambda_1p000/wout_interpolated.nc"
+  },
+  {
+    "aspect": 3.509057778553928,
+    "aspect_relative_error": 0.2981884442892144,
+    "elongation": 7.6226440704388505,
+    "failure_reasons": [
+      "smooth QI=0.00255372 exceeds target 0.002"
+    ],
+    "input": "docs/_static/qi_readme_cases/nfp2_minimal/boundary_reference_preconditioner/lambda_1p010/input.interpolated",
+    "lambda": 1.01,
+    "legacy_qi": 0.0001496909898092518,
+    "mean_iota": -0.7105686338252809,
+    "mirror": 0.27227458905083163,
+    "qi_engineering_gate_passed": false,
+    "qi_seed_gate_passed": false,
+    "score": 127.47930004382185,
+    "selected": false,
+    "smooth_qi": 0.002553718786741609,
+    "wout": "docs/_static/qi_readme_cases/nfp2_minimal/boundary_reference_preconditioner/lambda_1p010/wout_interpolated.nc"
+  },
+  {
+    "aspect": 3.4935619639830104,
+    "aspect_relative_error": 0.3012876072033979,
+    "elongation": 7.913850174154241,
+    "failure_reasons": [
+      "smooth QI=0.00307568 exceeds target 0.002"
+    ],
+    "input": "docs/_static/qi_readme_cases/nfp2_minimal/boundary_reference_preconditioner/lambda_1p030/input.interpolated",
+    "lambda": 1.03,
+    "legacy_qi": 0.0006325983223883481,
+    "mean_iota": -0.7189215638064723,
+    "mirror": 0.28437702321489844,
+    "qi_engineering_gate_passed": false,
+    "qi_seed_gate_passed": false,
+    "score": 127.61106052314065,
+    "selected": false,
+    "smooth_qi": 0.003075682422123165,
+    "wout": "docs/_static/qi_readme_cases/nfp2_minimal/boundary_reference_preconditioner/lambda_1p030/wout_interpolated.nc"
+  },
+  {
+    "aspect": 3.4780518318241627,
+    "aspect_relative_error": 0.30438963363516747,
+    "elongation": 8.217404177354132,
+    "failure_reasons": [
+      "smooth QI=0.00409268 exceeds target 0.002",
+      "max elongation=8.2174 exceeds target 8.2"
+    ],
+    "input": "docs/_static/qi_readme_cases/nfp2_minimal/boundary_reference_preconditioner/lambda_1p050/input.interpolated",
+    "lambda": 1.05,
+    "legacy_qi": 0.0014979593052213318,
+    "mean_iota": -0.7269564618990333,
+    "mirror": 0.29777326162819856,
+    "qi_engineering_gate_passed": false,
+    "qi_seed_gate_passed": false,
+    "score": 127.89201848098112,
+    "selected": false,
+    "smooth_qi": 0.00409268492438303,
+    "wout": "docs/_static/qi_readme_cases/nfp2_minimal/boundary_reference_preconditioner/lambda_1p050/wout_interpolated.nc"
+  }
+]
