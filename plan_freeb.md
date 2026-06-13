@@ -22779,3 +22779,63 @@ Completion:
 - QI minimal-seed README artifacts: 98% infrastructure/provenance-ready; NFP4
   local artifact passes, NFP2 has existing passing evidence with high aspect,
   NFP1/NFP3 remain unpromoted while round-2/round-3 searches continue.
+
+
+### 2026-06-13 Geometry-Only Rejected-Slot Adaptive Gate
+
+Steps taken:
+
+1. Added a geometry-only sibling to the native rejected-slot same-branch gate in
+   ``tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py``.
+   The new test perturbs one Fourier coil-geometry coefficient
+   ``base_curve_dofs[0, 0, 2]`` and keeps coil currents fixed.
+2. Kept the claim deliberately branch-local: the test requires identical
+   base/plus/minus adaptive fingerprints with step status
+   ``("momentum", "momentum", "restart_bad_jacobian")``, accept mask
+   ``[1, 1, 0]``, and done mask ``[0, 0, 1]``.  It also verifies the
+   status-derived rejected controller slot is present.
+3. Verified that the branch-local JVP path is truly geometry-sensitive:
+   ``derivative_mode == "directional_jvp"``, ``directional_jvp_fast_path ==
+   "none"``, and ``directional_uses_fixed_coil_geometry is False``.
+
+Results obtained:
+
+1. ``python -m ruff check tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py``:
+   passed.
+2. ``JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_native_rejected_slot_geometry_jvp_matches_complete_solve_fd -q``:
+   passed in the local CPU environment.
+3. ``JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_native_rejected_slot_same_branch_jvp_matches_complete_solve_fd -q``:
+   passed, confirming the existing current-only rejected-slot gate remains
+   intact.
+4. Both tests show the known aggressive free-boundary branch runtime warnings
+   from intentionally forcing a restart/rejected slot; these warnings do not
+   indicate gate failure.
+
+Best next steps:
+
+1. Let CI validate this new shard on GitHub Actions.
+2. Keep the production claim conservative: this promotes a fingerprint-gated
+   same-branch geometry/current AD-vs-central-FD gate through accepted/rejected
+   slots, not arbitrary adaptive host-branch differentiation.
+3. Continue QI round-3 polling.  Promote README QI artifacts only from exact
+   diagnostics that pass the full engineering gate.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9999999% for fixed
+  branch-local current and geometry accepted/rejected gates; arbitrary adaptive
+  host branch selection remains unclaimed.
+- VMEC parity and physics gates: 99.85%.
+- Single-stage coil-only optimization: 99.5%.
+- CPU/GPU performance: 99.4%.
+- CI/runtime/coverage hygiene: 100% locally for targeted gates; awaiting CI for
+  the pushed commits.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 98% infrastructure/provenance-ready; NFP4
+  local artifact passes, NFP2 has existing passing evidence with high aspect,
+  NFP1/NFP3 remain unpromoted while round-2/round-3 searches continue.
