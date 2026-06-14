@@ -826,16 +826,27 @@ Steps taken:
     outside the solver monolith while preserving the private `solve.py` alias.
 24. Kept backward-compatible private aliases in `solve.py` so existing tests and
     internal imports continue to work.
+25. Began the broader file-structure refactor outside `solve.py` by extracting
+    backend-aware driver policy, convergence, staged-budget, and resume-state
+    helpers into `vmec_jax/driver_policy_helpers.py`.  `driver.py` keeps the
+    historical private names as compatibility aliases/wrappers, including the
+    local `default_non_autodiff_solver_policy` wrapper so backend monkeypatches
+    still work.
 
 Results obtained:
 
 1. Draft PR #20 CI passed before the follow-up extraction.
 2. `solve.py` decreased from roughly 15438 to 12898 lines locally.
-3. The extracted helpers are pure and synthetic-testable, making them a safe
+3. `driver.py` decreased from 4064 to 3523 lines while preserving existing CLI
+   and test import paths.
+4. The extracted helpers are pure and synthetic-testable, making them a safe
    pattern for the next solver-kernel split.
-4. Focused Ruff, pytest, source-health, and fast docs checks passed for the
+5. Focused Ruff, pytest, source-health, and fast docs checks passed for the
    extracted helper modules, result containers, and force-kernel PyTree
    container.
+6. Driver-policy focused tests passed after the extraction: 76 driver-policy
+   tests, 17 driver wave tests, 15 driver run/wave12 tests, and 37 CLI/non-solve
+   tests.
 
 Best next steps:
 
@@ -844,7 +855,10 @@ Best next steps:
    `solve.py`: residual-loop controller-state bookkeeping, scan/restart scalar
    policy adapters, host/device update payload assembly, and diagnostic dump
    file formatting are the next low-risk candidates.
-3. Add compatibility tests for every extracted private alias before ratcheting
+3. Continue broader refactors in parallel with `driver.py`, `optimization.py`,
+   and `wout.py` by extracting pure policy/formatting/data-container seams
+   before moving any physics kernels.
+4. Add compatibility tests for every extracted private alias before ratcheting
    any source-health threshold.
 
 User decisions needed:
@@ -855,6 +869,7 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 23%.
+- Differentiability/refactor implementation: 25%.
 - Source-health instrumentation: 100%.
 - Solver monolith reduction: 20% of the large-file extraction work.
+- Driver workflow decomposition: 14%.

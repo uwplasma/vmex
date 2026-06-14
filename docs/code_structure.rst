@@ -57,6 +57,9 @@ Top-level package layout (selected):
 - ``vmec_jax/solve.py``: fixed-boundary solvers + VMEC2000 iteration loop
 - ``vmec_jax/driver.py``: CLI-facing fixed/free-boundary drivers, output
   policies, staged solve dispatch, and wout writing
+- ``vmec_jax/driver_policy_helpers.py``: backend-aware driver policy,
+  residual-convergence, staged-budget, and resume-state helper functions kept
+  outside the CLI-facing workflow while preserving driver compatibility aliases
 - ``vmec_jax/free_boundary.py``: mgrid loading, NESTOR-like vacuum coupling,
   and free-boundary runtime state helpers
 - ``vmec_jax/optimization.py``: exact fixed-boundary optimizer, boundary DOF
