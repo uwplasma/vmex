@@ -2,8 +2,36 @@
 
 from __future__ import annotations
 
+import os
+
+import numpy as np
+
 from ._compat import jax, jnp
 from .state import VMECState
+
+
+def resolve_preconditioner_tridi_policies(
+    *, use_precomputed: bool | None, use_lax_tridi: bool | None
+) -> tuple[bool, bool]:
+    """Resolve preconditioner tridiagonal solver policy from explicit flags/env."""
+
+    env_precomputed = os.getenv("VMEC_JAX_TRIDI_PRECOMPUTE", "0").strip().lower() not in (
+        "",
+        "0",
+        "false",
+        "no",
+    )
+    env_lax_tridi = os.getenv("VMEC_JAX_TRIDI_SOLVE", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "lax",
+        "force",
+    )
+    return (
+        bool(env_precomputed) if use_precomputed is None else bool(use_precomputed),
+        bool(env_lax_tridi) if use_lax_tridi is None else bool(use_lax_tridi),
+    )
 
 
 def radial_tridi_smooth_dirichlet(
@@ -145,3 +173,77 @@ def apply_preconditioner(
         else:
             raise ValueError(f"Unknown preconditioner kind={k!r}")
     return g
+
+
+def metric_surface_precond_scales_jax(*, guu, r12, bsubu, bsubv, w_ang):
+    """Approximate radial/lambda preconditioner scales with tracer-safe ops."""
+
+    w3 = jnp.asarray(w_ang, dtype=jnp.asarray(guu).dtype)[None, :, :]
+    rz_denom = jnp.sum((guu * (r12 * r12)) * w3, axis=(1, 2))
+    rz_scale = jnp.where(rz_denom > 0.0, 1.0 / jnp.sqrt(jnp.maximum(rz_denom, 1e-300)), 1.0)
+    l_denom = jnp.sum(((bsubu * bsubu) + (bsubv * bsubv)) * w3, axis=(1, 2))
+    l_scale = jnp.where(l_denom > 0.0, 1.0 / jnp.sqrt(jnp.maximum(l_denom, 1e-300)), 1.0)
+    return jnp.clip(rz_scale, 1e-4, 1e2), jnp.clip(l_scale, 1e-4, 1e2)
+
+
+def metric_surface_precond_scales_np(*, guu, r12, bsubu, bsubv, w_ang) -> tuple[np.ndarray, np.ndarray]:
+    """Host NumPy variant of the first-step metric preconditioner scales."""
+
+    guu_arr = np.asarray(guu)
+    r12_arr = np.asarray(r12)
+    bsubu_arr = np.asarray(bsubu)
+    bsubv_arr = np.asarray(bsubv)
+    w3 = np.asarray(w_ang, dtype=guu_arr.dtype)[None, :, :]
+    rz_denom = np.sum((guu_arr * (r12_arr * r12_arr)) * w3, axis=(1, 2))
+    rz_scale = np.where(rz_denom > 0.0, 1.0 / np.sqrt(np.maximum(rz_denom, 1e-300)), 1.0)
+    l_denom = np.sum(((bsubu_arr * bsubu_arr) + (bsubv_arr * bsubv_arr)) * w3, axis=(1, 2))
+    l_scale = np.where(l_denom > 0.0, 1.0 / np.sqrt(np.maximum(l_denom, 1e-300)), 1.0)
+    return np.clip(rz_scale, 1e-4, 1e2), np.clip(l_scale, 1e-4, 1e2)
+
+
+def pshalf_from_s_np(s_arr) -> np.ndarray:
+    """Return VMEC-style half-mesh square-root radial coordinate from full mesh."""
+
+    s_arr = np.asarray(s_arr, dtype=float)
+    if s_arr.size < 2:
+        return np.sqrt(np.maximum(s_arr, 0.0))
+    sh = 0.5 * (s_arr[1:] + s_arr[:-1])
+    p = np.concatenate([sh[:1], sh], axis=0)
+    return np.sqrt(np.maximum(p, 0.0))
+
+
+def pshalf_from_s_jax(s_arr, dtype):
+    """JAX variant of :func:`pshalf_from_s_np`."""
+
+    s_arr = jnp.asarray(s_arr, dtype=dtype)
+    if int(s_arr.size) < 2:
+        return jnp.sqrt(jnp.maximum(s_arr, jnp.asarray(0.0, dtype=dtype)))
+    sh = 0.5 * (s_arr[1:] + s_arr[:-1])
+    p = jnp.concatenate([sh[:1], sh], axis=0)
+    return jnp.sqrt(jnp.maximum(p, jnp.asarray(0.0, dtype=dtype)))
+
+
+def sm_sp_from_s_np(s_arr) -> tuple[np.ndarray, np.ndarray]:
+    """Return VMEC radial finite-difference scale factors on the full mesh."""
+
+    s_arr = np.asarray(s_arr, dtype=float)
+    ns = int(s_arr.shape[0])
+    if ns < 2:
+        z = np.zeros((ns + 1,), dtype=float)
+        return z, z
+    hs = s_arr[1] - s_arr[0]
+    i = np.arange(ns + 1, dtype=float)
+    psqrts = np.where(i >= 1, np.sqrt(np.maximum(hs * (i - 1.0), 0.0)), 0.0)
+    psqrts[-1] = 1.0
+    pshalf = np.where(i >= 1, np.sqrt(np.maximum(hs * np.abs(i - 1.5), 0.0)), 0.0)
+    sm = np.zeros((ns + 1,), dtype=float)
+    sp = np.zeros((ns + 1,), dtype=float)
+    idx = np.arange(2, ns + 1)
+    sm[idx] = np.where(psqrts[idx] != 0, pshalf[idx] / psqrts[idx], 0.0)
+    sm[1] = 0.0
+    idx2 = np.arange(2, ns)
+    sp[idx2] = np.where(psqrts[idx2] != 0, pshalf[idx2 + 1] / psqrts[idx2], 0.0)
+    sp[ns] = np.where(psqrts[ns] != 0, 1.0 / psqrts[ns], 0.0)
+    sp[0] = 0.0
+    sp[1] = sm[2] if ns >= 2 else 0.0
+    return sm, sp

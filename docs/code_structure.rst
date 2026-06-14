@@ -27,7 +27,8 @@ Top-level package layout (selected):
 - ``vmec_jax/solve_gradient_helpers.py``: state gradient-descent updates and
   feasible-gradient projections for fixed-boundary/axis/lambda constraints
 - ``vmec_jax/solve_preconditioner_helpers.py``: fixed-boundary mode-diagonal
-  and radial Dirichlet smoothing preconditioner kernels
+  and radial Dirichlet smoothing preconditioner kernels, tridiagonal policy
+  resolution, metric preconditioner scales, and radial mesh scale factors
 - ``vmec_jax/solve_jit_cache_helpers.py``: environment-controlled JIT-cache
   limits, structural cache keys, LRU helpers, and scan-cache miss diagnostics
 - ``vmec_jax/solve.py``: fixed-boundary solvers + VMEC2000 iteration loop
