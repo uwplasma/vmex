@@ -32,6 +32,9 @@ Top-level package layout (selected):
   VMEC ``m=1`` preconditioner scaling helpers
 - ``vmec_jax/solve_jit_cache_helpers.py``: environment-controlled JIT-cache
   limits, structural cache keys, LRU helpers, and scan-cache miss diagnostics
+- ``vmec_jax/solve_preconditioner_payload_helpers.py``: cached strict-update,
+  preconditioner-output, fused preconditioner-apply, accepted-control, and
+  ``ptau`` JIT payload helpers used by the residual-iteration hot path
 - ``vmec_jax/solve_hlo_dump_helpers.py``: optional JAX HLO lowering dump
   helpers for solver-kernel diagnostics
 - ``vmec_jax/solve_axis_reset_helpers.py``: initial magnetic-axis reset

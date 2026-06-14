@@ -860,6 +860,12 @@ Steps taken:
     free-boundary external-field diagnostic attachment.  `solve.py` retains the
     local `_attach_freeb_diag` wrapper so existing solve-exit call sites stay
     unchanged while the branch logic now has direct unit coverage.
+32. Performed a larger residual-loop hot-path extraction from `solve.py`:
+    cached strict-update, preconditioner-output, fused preconditioner-apply,
+    accepted-control, and `ptau` JIT payload helpers now live in
+    `vmec_jax/solve_preconditioner_payload_helpers.py`.  `solve.py` retains
+    private wrappers and shared cache aliases so existing tests, monkeypatches,
+    and downstream private imports keep the same behavior.
 
 Results obtained:
 
@@ -896,6 +902,14 @@ Results obtained:
     diagnostic extraction: 20 unit tests passed, plus 3 representative
     free-boundary diagnostics tests passed with only pre-existing synthetic
     residual warnings.
+13. Preconditioner payload extraction focused checks passed: Ruff clean for
+    `solve.py`, the new helper, and focused tests; 53 hot-path/preconditioner
+    tests passed, covering strict-update cache behavior, preconditioner-output
+    scaling, fused payload diagnostics, `ptau` control payloads, and
+    preconditioner diagnostics.
+14. `solve.py` decreased further from 12870 to 12189 lines.  The new
+    `solve_preconditioner_payload_helpers.py` is 841 lines and provides a
+    focused seam for future accelerator preconditioner/timing work.
 
 Best next steps:
 
@@ -903,7 +917,9 @@ Best next steps:
 2. Continue Wave 1/Wave 2 by extracting small pure solver helpers from
    `solve.py`: residual-loop controller-state bookkeeping, scan/restart scalar
    policy adapters, host/device update payload assembly, and diagnostic dump
-   file formatting are the next low-risk candidates.
+   file formatting are the next low-risk candidates.  The next larger
+   candidate is a scan-runner/cache adapter split, but only after focused tests
+   are identified for existing monkeypatch seams.
 3. Continue broader refactors in parallel with `driver.py`, `optimization.py`,
    and `wout.py` by extracting pure policy/formatting/data-container seams
    before moving any physics kernels.
@@ -918,7 +934,7 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 31%.
+- Differentiability/refactor implementation: 36%.
 - Source-health instrumentation: 100%.
-- Solver monolith reduction: 21% of the large-file extraction work.
+- Solver monolith reduction: 29% of the large-file extraction work.
 - Driver workflow decomposition: 34%.
