@@ -50,6 +50,9 @@ Top-level package layout (selected):
 - ``vmec_jax/solve_fixed_boundary_lbfgs_optimizer.py``: fixed-boundary
   L-BFGS optimizer loop used by the public
   ``solve.solve_fixed_boundary_lbfgs`` wrapper
+- ``vmec_jax/solve_residual_force_context.py``: shared VMEC flux/profile,
+  force-kernel ``wout``-like context, trig-table, and fixed-edge setup used by
+  residual-objective L-BFGS and Gauss-Newton optimizers
 - ``vmec_jax/solve_hlo_dump_helpers.py``: optional JAX HLO lowering dump
   helpers for solver-kernel diagnostics
 - ``vmec_jax/solve_axis_reset_helpers.py``: initial magnetic-axis reset

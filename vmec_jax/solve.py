@@ -86,6 +86,7 @@ from . import solve_lambda_optimizer as _lambda_optimizer_helpers
 from . import solve_fixed_boundary_energy_helpers as _fixed_boundary_energy_helpers
 from . import solve_fixed_boundary_gd_optimizer as _fixed_boundary_gd_helpers
 from . import solve_fixed_boundary_lbfgs_optimizer as _fixed_boundary_lbfgs_helpers
+from . import solve_residual_force_context as _residual_force_context_helpers
 from .solve_diagnostics_io import (
     _dump_freeb_axis_trace_record,
     _dump_freeb_control_trace_record,
@@ -830,92 +831,41 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
     bt_factor = opts.bt_factor
 
     idx00 = _mode00_index(static.modes)
-    signgs = int(signgs)
+    residual_context = _residual_force_context_helpers.prepare_residual_force_context(
+        state0,
+        static,
+        indata=indata,
+        signgs=signgs,
+        idx00=idx00,
+        include_constraint_force=bool(include_constraint_force),
+        mode00_index_func=_mode00_index,
+        half_mesh_from_full_mesh_func=_half_mesh_from_full_mesh,
+        mass_half_mesh_from_indata_func=_mass_half_mesh_from_indata,
+        pressure_half_mesh_from_indata_func=_pressure_half_mesh_from_indata,
+        icurv_full_mesh_from_indata_func=_icurv_full_mesh_from_indata,
+        vmec_force_flux_profiles_func=_vmec_force_flux_profiles,
+        wout_like_cls=_WoutLikeVmecForces,
+        jnp_module=jnp,
+    )
+    idx00 = residual_context.idx00
+    signgs = residual_context.signgs
+    s = residual_context.s
+    wout_like = residual_context.wout_like
+    trig = residual_context.trig
+    constraint_tcon0 = residual_context.constraint_tcon0
+    apply_lforbal = residual_context.apply_lforbal
+    ftol_target = residual_context.ftol_target
+    edge_Rcos = residual_context.edge_Rcos
+    edge_Rsin = residual_context.edge_Rsin
+    edge_Zcos = residual_context.edge_Zcos
+    edge_Zsin = residual_context.edge_Zsin
+    mask_pack = residual_context.mask_pack
 
-    from .energy import flux_profiles_from_indata
     from .vmec_forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
     from .vmec_residue import (
         vmec_force_norms_from_bcovar_dynamic,
     )
-    from .vmec_tomnsp import vmec_trig_tables
-
-    s = jnp.asarray(static.s)
-
-    flux = flux_profiles_from_indata(indata, s, signgs=signgs)
-    chipf_wout = jnp.asarray(flux.chipf)
-
-    phips = jnp.asarray(flux.phips)
-    if phips.shape[0] >= 1:
-        phips = phips.at[0].set(0.0)
-
-    # VMEC mass profile uses the boundary r00 coefficient and phips scaling.
-    from .boundary import boundary_from_indata
-
-    boundary = boundary_from_indata(indata, static.modes)
-    r00 = float(np.asarray(boundary.R_cos)[int(idx00)]) if int(idx00) >= 0 else float(np.asarray(boundary.R_cos)[0])
-    gamma = float(indata.get_float("GAMMA", 0.0))
-    lrfp = bool(indata.get_bool("LRFP", False))
-    chips = _half_mesh_from_full_mesh(chipf_wout) if lrfp else None
-    mass = _mass_half_mesh_from_indata(
-        indata=indata,
-        s_full=s,
-        phips=phips,
-        r00=r00,
-        gamma=gamma,
-        lrfp=lrfp,
-        chips=chips,
-    )
-
-    pres = _pressure_half_mesh_from_indata(indata=indata, s_full=s)
-    ncurr = int(indata.get_int("NCURR", 0))
-    icurv = _icurv_full_mesh_from_indata(indata=indata, s_full=s, signgs=signgs)
-    phipf_internal, chipf_internal, chips_eff = _vmec_force_flux_profiles(
-        phipf=jnp.asarray(flux.phipf),
-        chipf=chipf_wout,
-        signgs=signgs,
-        flux_is_internal=True,
-    )
-
-    wout_like = _WoutLikeVmecForces(
-        nfp=int(static.cfg.nfp),
-        mpol=int(static.cfg.mpol),
-        ntor=int(static.cfg.ntor),
-        lasym=bool(static.cfg.lasym),
-        signgs=signgs,
-        phipf=jnp.asarray(flux.phipf),
-        phips=phips,
-        chipf=chipf_wout,
-        pres=pres,
-        mass=mass,
-        gamma=gamma,
-        ncurr=ncurr,
-        lcurrent=True,
-        icurv=icurv,
-        phipf_internal=phipf_internal,
-        chipf_internal=chipf_internal,
-        chips_eff=chips_eff,
-    )
-    trig = getattr(static, "trig_vmec", None)
-    if trig is None:
-        trig = vmec_trig_tables(
-            ntheta=int(static.cfg.ntheta),
-            nzeta=int(static.cfg.nzeta),
-            nfp=int(wout_like.nfp),
-            mmax=int(wout_like.mpol) - 1,
-            nmax=int(wout_like.ntor),
-            lasym=bool(wout_like.lasym),
-            dtype=jnp.asarray(state0.Rcos).dtype,
-        )
     objective_scale_f = float(objective_scale) if objective_scale is not None else None
-    ftol_target = max(0.0, float(indata.get_float("FTOL", 0.0)))
-
-    constraint_tcon0: float | None = None
-    if bool(include_constraint_force):
-        # VMEC2000 default is `TCON0=1` (readin.f).
-        constraint_tcon0 = float(indata.get_float("TCON0", 1.0))
-    apply_lforbal = bool(indata.get_bool("LFORBAL", False)) if indata is not None else False
-    apply_lforbal = bool(indata.get_bool("LFORBAL", False)) if indata is not None else False
-    mask_pack = getattr(static, "tomnsps_masks", None)
 
     def _fsq2_terms_and_jacmin(state: VMECState, zero_m1_zforce: Any):
         k = vmec_forces_rz_from_wout(
@@ -1306,101 +1256,47 @@ def solve_fixed_boundary_gn_vmec_residual(
     bt_factor = opts.bt_factor
     objective_scale = opts.objective_scale
 
-    constraint_tcon0: float | None = None
-    if bool(include_constraint_force):
-        constraint_tcon0 = float(indata.get_float("TCON0", 1.0))
-    apply_lforbal = bool(indata.get_bool("LFORBAL", False)) if indata is not None else False
-    apply_lforbal = bool(indata.get_bool("LFORBAL", False)) if indata is not None else False
-    apply_lforbal = bool(indata.get_bool("LFORBAL", False)) if indata is not None else False
-    apply_lforbal = bool(indata.get_bool("LFORBAL", False)) if indata is not None else False
-
-    signgs = int(signgs)
     idx00 = _mode00_index(static.modes)
-    ftol_target = max(0.0, float(indata.get_float("FTOL", 0.0)))
+    residual_context = _residual_force_context_helpers.prepare_residual_force_context(
+        state0,
+        static,
+        indata=indata,
+        signgs=signgs,
+        idx00=idx00,
+        include_constraint_force=bool(include_constraint_force),
+        mode00_index_func=_mode00_index,
+        half_mesh_from_full_mesh_func=_half_mesh_from_full_mesh,
+        mass_half_mesh_from_indata_func=_mass_half_mesh_from_indata,
+        pressure_half_mesh_from_indata_func=_pressure_half_mesh_from_indata,
+        icurv_full_mesh_from_indata_func=_icurv_full_mesh_from_indata,
+        vmec_force_flux_profiles_func=_vmec_force_flux_profiles,
+        wout_like_cls=_WoutLikeVmecForces,
+        jnp_module=jnp,
+    )
+    idx00 = residual_context.idx00
+    signgs = residual_context.signgs
+    s = residual_context.s
+    wout_like = residual_context.wout_like
+    trig = residual_context.trig
+    constraint_tcon0 = residual_context.constraint_tcon0
+    apply_lforbal = residual_context.apply_lforbal
+    ftol_target = residual_context.ftol_target
+    edge_Rcos = residual_context.edge_Rcos
+    edge_Rsin = residual_context.edge_Rsin
+    edge_Zcos = residual_context.edge_Zcos
+    edge_Zsin = residual_context.edge_Zsin
+    mask_pack = residual_context.mask_pack
     zero_m1_fsqz_thresh_eff = float(ftol_target) if zero_m1_fsqz_thresh is None else float(zero_m1_fsqz_thresh)
 
-    from .energy import flux_profiles_from_indata
     from .vmec_forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
     from .vmec_residue import (
         vmec_force_norms_from_bcovar_dynamic,
     )
-    from .vmec_tomnsp import vmec_trig_tables
 
     try:
         from jax.scipy.sparse.linalg import cg  # type: ignore
     except Exception as e:  # pragma: no cover
         raise ImportError("solve_fixed_boundary_gn_vmec_residual requires jax.scipy.sparse.linalg.cg") from e
-
-    s = jnp.asarray(static.s)
-    flux = flux_profiles_from_indata(indata, s, signgs=signgs)
-    chipf_wout = jnp.asarray(flux.chipf)
-
-    phips = jnp.asarray(flux.phips)
-    if phips.shape[0] >= 1:
-        phips = phips.at[0].set(0.0)
-
-    from .boundary import boundary_from_indata
-
-    boundary = boundary_from_indata(indata, static.modes)
-    r00 = float(np.asarray(boundary.R_cos)[int(idx00)]) if int(idx00) >= 0 else float(np.asarray(boundary.R_cos)[0])
-    gamma = float(indata.get_float("GAMMA", 0.0))
-    lrfp = bool(indata.get_bool("LRFP", False))
-    chips = _half_mesh_from_full_mesh(chipf_wout) if lrfp else None
-    mass = _mass_half_mesh_from_indata(
-        indata=indata,
-        s_full=s,
-        phips=phips,
-        r00=r00,
-        gamma=gamma,
-        lrfp=lrfp,
-        chips=chips,
-    )
-
-    pres = _pressure_half_mesh_from_indata(indata=indata, s_full=s)
-    ncurr = int(indata.get_int("NCURR", 0))
-    icurv = _icurv_full_mesh_from_indata(indata=indata, s_full=s, signgs=signgs)
-    phipf_internal, chipf_internal, chips_eff = _vmec_force_flux_profiles(
-        phipf=jnp.asarray(flux.phipf),
-        chipf=chipf_wout,
-        signgs=signgs,
-        flux_is_internal=True,
-    )
-
-    wout_like = _WoutLikeVmecForces(
-        nfp=int(static.cfg.nfp),
-        mpol=int(static.cfg.mpol),
-        ntor=int(static.cfg.ntor),
-        lasym=bool(static.cfg.lasym),
-        signgs=signgs,
-        phipf=jnp.asarray(flux.phipf),
-        phips=phips,
-        chipf=chipf_wout,
-        pres=pres,
-        mass=mass,
-        gamma=gamma,
-        ncurr=ncurr,
-        lcurrent=True,
-        icurv=icurv,
-        phipf_internal=phipf_internal,
-        chipf_internal=chipf_internal,
-        chips_eff=chips_eff,
-    )
-    trig = getattr(static, "trig_vmec", None)
-    if trig is None:
-        trig = vmec_trig_tables(
-            ntheta=int(static.cfg.ntheta),
-            nzeta=int(static.cfg.nzeta),
-            nfp=int(wout_like.nfp),
-            mmax=int(wout_like.mpol) - 1,
-            nmax=int(wout_like.ntor),
-            lasym=bool(wout_like.lasym),
-            dtype=jnp.asarray(state0.Rcos).dtype,
-        )
-
-    edge_Rcos = jnp.asarray(state0.Rcos)[-1, :]
-    edge_Rsin = jnp.asarray(state0.Rsin)[-1, :]
-    edge_Zcos = jnp.asarray(state0.Zcos)[-1, :]
-    edge_Zsin = jnp.asarray(state0.Zsin)[-1, :]
 
     def _project_step(d: VMECState) -> VMECState:
         return _mask_grad_for_constraints(d, static, idx00=idx00, mask_lambda_axis=True)
@@ -1416,8 +1312,6 @@ def solve_fixed_boundary_gn_vmec_residual(
             enforce_lambda_axis=True,
             idx00=idx00,
         )
-
-    mask_pack = getattr(static, "tomnsps_masks", None)
 
     def _residual_blocks(state: VMECState, zero_m1_zforce: Any):
         k = vmec_forces_rz_from_wout(
