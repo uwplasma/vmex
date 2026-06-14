@@ -1035,6 +1035,13 @@ Results obtained:
     across the other extracted optimizer implementations, enough to recover the
     previous combined gate failure at 94.89% without lowering the 95% threshold
     or adding expensive solves.
+26. Free-boundary trace-metadata extraction moved dependency-light
+    accepted-trace shape, segment-summary, and JSON-safe fingerprint helpers
+    into `free_boundary_adjoint_trace_metadata.py` while keeping the historical
+    private aliases in `free_boundary_adjoint.py`.  This is intentionally a
+    small branch-local diagnostics seam: it reduces the large adjoint module
+    without touching NESTOR kernels, replay objectives, or adaptive host branch
+    claims.
 
 Best next steps:
 
@@ -1067,9 +1074,9 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 50%.
+- Differentiability/refactor implementation: 51%.
 - Source-health instrumentation: 100%.
 - Solver monolith reduction: 45% of the large-file extraction work.
-- Free-boundary adjoint monolith reduction: 8%.
+- Free-boundary adjoint monolith reduction: 9%.
 - Driver workflow decomposition: 34%.
 - WOUT diagnostic decomposition: 3%.
