@@ -88,6 +88,14 @@ def test_free_boundary_adjoint_trace_stackability_error_paths() -> None:
         }
     )
     assert json_safe == {"array": [1.0, None], "scalar": 2.0, "bad": None, "3": [4]}
+
+    class BadToList:
+        def tolist(self):
+            raise RuntimeError("synthetic conversion failure")
+
+    bad_to_list = BadToList()
+    assert trace_metadata.json_safe_fingerprint_value(bad_to_list) is bad_to_list
+    assert trace_metadata.json_safe_fingerprint_value(b"bytes") == b"bytes"
     slot_summary = trace_metadata.direct_coil_accepted_trace_controller_slot_summary(
         {
             "n_steps": 3,
