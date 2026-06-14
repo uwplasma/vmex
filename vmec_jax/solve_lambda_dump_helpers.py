@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ._compat import jnp
 from ._solve_runtime import _parse_iter_list
 from .solve_force_dump_helpers import gc_from_frzl
 
@@ -203,3 +204,77 @@ def maybe_dump_lam_gcl(
         lthreed=bool(static.cfg.lthreed),
         lasym=bool(static.cfg.lasym),
     )
+
+
+def maybe_dump_lulv(*, bc, static, iter_idx: int, state=None, trig=None) -> None:
+    """Optionally dump lambda derivative fields and odd-m synthesis pieces."""
+
+    env = os.getenv("VMEC_JAX_DUMP_LULV", "")
+    if not env or env == "0":
+        return
+    iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_ITER", ""))
+    if iters is not None and int(iter_idx) not in iters:
+        return
+    outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
+    outdir.mkdir(parents=True, exist_ok=True)
+    ns = int(static.cfg.ns)
+    path = outdir / f"lulv_ns{ns}_iter{int(iter_idx)}.npz"
+    data = {
+        "lu0_full": np.asarray(getattr(bc, "lu0_full")),
+        "lu1_full": np.asarray(getattr(bc, "lu1_full")),
+        "lv0_full": np.asarray(getattr(bc, "lv0_full")),
+        "lv1_full": np.asarray(getattr(bc, "lv1_full")),
+    }
+    if state is not None:
+        data["Lcos"] = np.asarray(state.Lcos)
+        data["Lsin"] = np.asarray(state.Lsin)
+        data["m_modes"] = np.asarray(static.modes.m, dtype=int)
+        data["n_modes"] = np.asarray(static.modes.n, dtype=int)
+        if trig is not None:
+            # Debug lambda odd-m synthesis inputs (physical odd pieces).
+            from .vmec_realspace import vmec_realspace_synthesis_dtheta, vmec_realspace_synthesis_dzeta_phys
+
+            m_modes = np.asarray(static.modes.m, dtype=int)
+            mask_m1 = (m_modes == 1).astype(np.asarray(state.Lsin).dtype)
+            mask_odd_rest = ((m_modes % 2 == 1) & (m_modes != 1)).astype(np.asarray(state.Lsin).dtype)
+            lu_m1 = vmec_realspace_synthesis_dtheta(
+                coeff_cos=jnp.asarray(state.Lcos) * mask_m1,
+                coeff_sin=jnp.asarray(state.Lsin) * mask_m1,
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=True,
+                apply_scalxc=True,
+                s=static.s,
+            )
+            lu_rest = vmec_realspace_synthesis_dtheta(
+                coeff_cos=jnp.asarray(state.Lcos) * mask_odd_rest,
+                coeff_sin=jnp.asarray(state.Lsin) * mask_odd_rest,
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=True,
+                apply_scalxc=True,
+                s=static.s,
+            )
+            lv_m1 = vmec_realspace_synthesis_dzeta_phys(
+                coeff_cos=jnp.asarray(state.Lcos) * mask_m1,
+                coeff_sin=jnp.asarray(state.Lsin) * mask_m1,
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=True,
+                apply_scalxc=True,
+                s=static.s,
+            )
+            lv_rest = vmec_realspace_synthesis_dzeta_phys(
+                coeff_cos=jnp.asarray(state.Lcos) * mask_odd_rest,
+                coeff_sin=jnp.asarray(state.Lsin) * mask_odd_rest,
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=True,
+                apply_scalxc=True,
+                s=static.s,
+            )
+            data["lu_phys_m1"] = np.asarray(lu_m1)
+            data["lu_phys_rest"] = np.asarray(lu_rest)
+            data["lv_phys_m1"] = np.asarray(lv_m1)
+            data["lv_phys_rest"] = np.asarray(lv_rest)
+    np.savez(path, **data)

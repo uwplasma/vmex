@@ -802,21 +802,23 @@ Steps taken:
     optional force-channel GC debug dump array adapters and legacy GC layout
     mapping now live in `vmec_jax/solve_force_dump_helpers.py`.
 17. Performed the fourteenth low-risk extraction from `vmec_jax/solve.py`:
-    optional lambda residual, lambda-preconditioner, and radial-preconditioner
-    debug dump helpers now live in `vmec_jax/solve_lambda_dump_helpers.py`.
+    optional lambda residual, lambda-preconditioner, lambda-derivative, and
+    radial-preconditioner debug dump helpers now live in
+    `vmec_jax/solve_lambda_dump_helpers.py`.
 18. Performed the fifteenth low-risk extraction from `vmec_jax/solve.py`:
     optional JAX HLO lowering debug dump helpers now live in
     `vmec_jax/solve_hlo_dump_helpers.py`.
 19. Performed the sixteenth low-risk extraction from `vmec_jax/solve.py`:
-    optional covariant-field debug dumps for scaled full-mesh and half-mesh
-    `B_u/B_v` diagnostics now live in `vmec_jax/solve_bsub_dump_helpers.py`.
+    optional covariant-field debug dumps for scaled full-mesh, half-mesh, and
+    radial `B_s` reconstruction diagnostics now live in
+    `vmec_jax/solve_bsub_dump_helpers.py`.
 20. Kept backward-compatible private aliases in `solve.py` so existing tests and
     internal imports continue to work.
 
 Results obtained:
 
 1. Draft PR #20 CI passed before the follow-up extraction.
-2. `solve.py` decreased from roughly 15438 to 13668 lines.
+2. `solve.py` decreased from roughly 15438 to 13468 lines.
 3. The extracted helpers are pure and synthetic-testable, making them a safe
    pattern for the next solver-kernel split.
 4. Focused Ruff, pytest, source-health, and fast docs checks passed for the
@@ -840,6 +842,6 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 19%.
+- Differentiability/refactor implementation: 21%.
 - Source-health instrumentation: 100%.
-- Solver monolith reduction: 16% of the large-file extraction work.
+- Solver monolith reduction: 18% of the large-file extraction work.
