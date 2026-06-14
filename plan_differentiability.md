@@ -1047,6 +1047,14 @@ Results obtained:
     addition to the existing Glasser algebra and public objective-wrapper
     gradient gates.  The focused Glasser/Mercier shard passed with 12 tests,
     Ruff was clean, and the fast docs build passed.
+28. The GitHub py3.11 combined coverage gate failed at 94.98% after all real
+    test/docs/build jobs passed.  The repair adds cheap unit coverage for the
+    extracted scan-cache miss-category diagnostics and the strict JSON
+    conversion fallback in the free-boundary trace metadata helper.  Local
+    focused checks passed: Ruff clean, both modified test files passed, and the
+    fast docs build passed.  A local coverage invocation was not usable because
+    the developer machine mixed Python/pytest plugin environments before test
+    collection; the clean GitHub runner remains the coverage authority.
 
 Best next steps:
 
@@ -1079,7 +1087,7 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 52%.
+- Differentiability/refactor implementation: 53%.
 - Source-health instrumentation: 100%.
 - Solver monolith reduction: 45% of the large-file extraction work.
 - Free-boundary adjoint monolith reduction: 9%.
