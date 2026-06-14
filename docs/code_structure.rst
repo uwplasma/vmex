@@ -34,6 +34,8 @@ Top-level package layout (selected):
 The ``examples/`` folder contains user-facing scripts and curated parity demos.
 Developer-only diagnostics and research utilities live under ``tools/``:
 
+- ``tools/diagnostics/source_health.py``: report largest Python source files
+  and optionally fail above a line-count threshold for staged refactor ratchets.
 - ``tools/diagnostics/vmec2000_exec_stage_trace_compare.py``: per-iteration
   VMEC2000 vs vmec_jax parity comparator.
 - ``tools/diagnostics/qh_vmec_vs_vmecjax.py``: QH comparison figures.
@@ -42,3 +44,19 @@ Developer-only diagnostics and research utilities live under ``tools/``:
 For most scripts, prefer ``import vmec_jax as vj`` or ``import vmec_jax.api as
 vj``.  Import lower-level modules directly only when developing kernels,
 validation tools, or tests that need implementation-specific behavior.
+
+Refactoring direction
+---------------------
+
+The current code intentionally preserves VMEC2000 semantics, but several
+translation-era modules are now too large for long-term research development.
+Use ``plan_differentiability.md`` as the source of truth for the staged
+refactor.  Before starting a large extraction, run:
+
+.. code-block:: bash
+
+   python tools/diagnostics/source_health.py --top 30
+
+The diagnostic is report-only by default.  A future refactor PR can ratchet it
+with ``--fail-lines`` once a target module has been split and the compatibility
+tests are green.
