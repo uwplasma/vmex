@@ -884,6 +884,11 @@ Steps taken:
     helper that preserves historical `solve.py` monkeypatch seams
     (`eval_geom`, `bsup_from_geom`, `b2_from_bsup`, `angle_steps`, and
     pressure-shape validation).
+36. Extracted the fixed-boundary gradient-descent optimizer loop into
+    `vmec_jax/solve_fixed_boundary_gd_optimizer.py`.  `solve.py` now keeps the
+    public wrapper and injects all historical private aliases for validation,
+    energy setup, constraints, preconditioning, state updates, tolerance
+    resolution, and JAX modules.
 
 Results obtained:
 
@@ -941,6 +946,10 @@ Results obtained:
     tests passed; the broader solver optimizer subset passed with 157 tests.
     `solve.py` decreased from 11706 to 11652 lines while eliminating duplicated
     objective/evaluator setup across GD and L-BFGS.
+18. Fixed-boundary GD loop extraction checks passed: compile and Ruff clean for
+    `solve.py` and the new GD helper; 10 focused GD tests passed; the broader
+    solver optimizer subset passed with 160 tests and 1 expected skip.
+    `solve.py` decreased from 11652 to 11473 lines.
 
 Best next steps:
 
@@ -951,9 +960,9 @@ Best next steps:
    file formatting are the next low-risk candidates.  The next larger
    candidate is a scan-runner/cache adapter split, but only after focused tests
    are identified for existing monkeypatch seams.
-   The next fixed-boundary optimizer candidate is moving the GD/L-BFGS loop
-   bodies themselves behind wrapper functions after adding compatibility tests
-   for private gradient/preconditioner monkeypatch hooks.
+   The next fixed-boundary optimizer candidate is moving the L-BFGS loop body
+   behind a wrapper function using the same dependency-injection pattern as the
+   GD extraction.
 3. Continue broader refactors in parallel with `driver.py`, `optimization.py`,
    and `wout.py` by extracting pure policy/formatting/data-container seams
    before moving any physics kernels.
@@ -968,7 +977,7 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 41%.
+- Differentiability/refactor implementation: 43%.
 - Source-health instrumentation: 100%.
-- Solver monolith reduction: 36% of the large-file extraction work.
+- Solver monolith reduction: 38% of the large-file extraction work.
 - Driver workflow decomposition: 34%.

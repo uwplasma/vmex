@@ -84,6 +84,7 @@ from . import solve_hlo_dump_helpers as _hlo_dump_helpers
 from . import solve_first_step_diagnostics as _first_step_diagnostics_helpers
 from . import solve_lambda_optimizer as _lambda_optimizer_helpers
 from . import solve_fixed_boundary_energy_helpers as _fixed_boundary_energy_helpers
+from . import solve_fixed_boundary_gd_optimizer as _fixed_boundary_gd_helpers
 from .solve_diagnostics_io import (
     _dump_freeb_axis_trace_record,
     _dump_freeb_control_trace_record,
@@ -629,21 +630,7 @@ def solve_fixed_boundary_gd(
     ``wp = ∫ p dV /(2π)^2``.
     A soft penalty enforces a consistent Jacobian sign away from the axis.
     """
-    if not has_jax():
-        raise ImportError("solve_fixed_boundary_gd requires JAX (jax + jaxlib)")
-
-    opts = validate_fixed_boundary_gd_options(
-        max_iter=max_iter,
-        max_backtracks=max_backtracks,
-        bt_factor=bt_factor,
-        gamma=gamma,
-    )
-    max_iter = opts.max_iter
-    max_backtracks = opts.max_backtracks
-    bt_factor = opts.bt_factor
-    gamma = opts.gamma
-
-    energy = _fixed_boundary_energy_helpers.prepare_fixed_boundary_energy_context(
+    return _fixed_boundary_gd_helpers.solve_fixed_boundary_gd_impl(
         state0,
         static,
         phipf=phipf,
@@ -657,7 +644,29 @@ def solve_fixed_boundary_gd(
         pressure=pressure,
         gamma=gamma,
         jacobian_penalty=jacobian_penalty,
+        max_iter=max_iter,
+        step_size=step_size,
+        scale_rz=scale_rz,
+        scale_l=scale_l,
+        grad_tol=grad_tol,
+        max_backtracks=max_backtracks,
+        bt_factor=bt_factor,
         jit_grad=jit_grad,
+        preconditioner=preconditioner,
+        precond_exponent=precond_exponent,
+        precond_radial_alpha=precond_radial_alpha,
+        differentiable=differentiable,
+        stop_grad_in_update=stop_grad_in_update,
+        verbose=verbose,
+        has_jax_func=has_jax,
+        validate_options_func=validate_fixed_boundary_gd_options,
+        prepare_energy_context_func=_fixed_boundary_energy_helpers.prepare_fixed_boundary_energy_context,
+        enforce_fixed_boundary_and_axis_func=_enforce_fixed_boundary_and_axis,
+        mask_grad_for_constraints_func=_mask_grad_for_constraints,
+        apply_preconditioner_func=_apply_preconditioner,
+        update_state_gd_func=_update_state_gd,
+        grad_rms_state_func=_grad_rms_state,
+        resolve_grad_tol_func=_resolve_grad_tol,
         mode00_index_func=_mode00_index,
         eval_geom_func=eval_geom,
         bsup_from_geom_func=bsup_from_geom,
@@ -667,194 +676,6 @@ def solve_fixed_boundary_gd(
         jax_module=jax,
         jnp_module=jnp,
         jit_func=jit,
-    )
-    idx00 = energy.idx00
-    signgs = energy.signgs
-    gamma = energy.gamma
-    edge_Rcos = energy.edge_Rcos
-    edge_Rsin = energy.edge_Rsin
-    edge_Zcos = energy.edge_Zcos
-    edge_Zsin = energy.edge_Zsin
-    obj_and_grad = energy.objective_and_grad
-    _objective = energy.objective
-    w_terms = energy.w_terms
-
-    # Start from a constraint-satisfying state.
-    state = _enforce_fixed_boundary_and_axis(
-        state0,
-        static,
-        edge_Rcos=edge_Rcos,
-        edge_Rsin=edge_Rsin,
-        edge_Zcos=edge_Zcos,
-        edge_Zsin=edge_Zsin,
-        enforce_lambda_axis=False,
-        idx00=idx00,
-    )
-
-    grad_tol_eff: float | None = None
-
-    if differentiable:
-        wb_history = []
-        wp_history = []
-        w_history = []
-        grad_rms_history = []
-        step_history = []
-
-        def _grad_rms_jax(grad_state: VMECState):
-            g = (
-                jnp.asarray(grad_state.Rcos) ** 2
-                + jnp.asarray(grad_state.Rsin) ** 2
-                + jnp.asarray(grad_state.Zcos) ** 2
-                + jnp.asarray(grad_state.Zsin) ** 2
-                + jnp.asarray(grad_state.Lcos) ** 2
-                + jnp.asarray(grad_state.Lsin) ** 2
-            )
-            return jnp.sqrt(jnp.mean(g))
-
-        for _ in range(max_iter):
-            wb_t, wp_t, w_t = w_terms(state)
-            w_history.append(w_t)
-            wb_history.append(wb_t)
-            wp_history.append(wp_t)
-
-            obj_t, grad_t = obj_and_grad(state)
-            grad_t = _mask_grad_for_constraints(grad_t, static, idx00=idx00)
-            grad_t = _apply_preconditioner(
-                grad_t,
-                static,
-                kind=preconditioner,
-                exponent=precond_exponent,
-                radial_alpha=precond_radial_alpha,
-            )
-            if stop_grad_in_update:
-                grad_t = jax.lax.stop_gradient(grad_t)
-            grad_rms_history.append(_grad_rms_jax(grad_t))
-            step_history.append(jnp.asarray(step_size, dtype=jnp.asarray(state.Rcos).dtype))
-
-            state = _update_state_gd(state, grad_t, step=step_size, scale_rz=scale_rz, scale_l=scale_l)
-            state = _enforce_fixed_boundary_and_axis(
-                state,
-                static,
-                edge_Rcos=edge_Rcos,
-                edge_Rsin=edge_Rsin,
-                edge_Zcos=edge_Zcos,
-                edge_Zsin=edge_Zsin,
-                idx00=idx00,
-            )
-    else:
-        wb0, wp0, w0 = w_terms(state)
-        wb0 = float(np.asarray(wb0))
-        wp0 = float(np.asarray(wp0))
-        w0 = float(np.asarray(w0))
-        wb_history = [wb0]
-        wp_history = [wp0]
-        grad_rms_history = []
-        step_history = []
-
-        obj0, grad0 = obj_and_grad(state)
-        obj0 = float(np.asarray(obj0))
-        w_history = [obj0]
-
-        for it in range(max_iter):
-            grad0m = _mask_grad_for_constraints(grad0, static, idx00=idx00)
-            grad_raw = grad0m
-            grad0m = _apply_preconditioner(
-                grad0m,
-                static,
-                kind=preconditioner,
-                exponent=precond_exponent,
-                radial_alpha=precond_radial_alpha,
-            )
-            grad_rms = _grad_rms_state(grad0m)
-            grad_rms_history.append(grad_rms)
-            if grad_tol_eff is None:
-                grad_tol_eff = _resolve_grad_tol(grad_tol, grad_rms0=grad_rms, dtype=np.asarray(state.Rcos).dtype)
-
-            if verbose:
-                print(f"[solve_fixed_boundary_gd] iter={it:03d} w={w_history[-1]:.8e} grad_rms={grad_rms:.3e}")
-
-            if grad_rms < float(grad_tol_eff):
-                break
-
-            step = float(step_size)
-            accepted = False
-
-            def _try_line_search(grad_step):
-                step_local = float(step_size)
-                for bt in range(max_backtracks + 1):
-                    if bt > 0:
-                        step_local *= bt_factor
-                    trial = _update_state_gd(state, grad_step, step=step_local, scale_rz=scale_rz, scale_l=scale_l)
-                    trial = _enforce_fixed_boundary_and_axis(
-                        trial,
-                        static,
-                        edge_Rcos=edge_Rcos,
-                        edge_Rsin=edge_Rsin,
-                        edge_Zcos=edge_Zcos,
-                        edge_Zsin=edge_Zsin,
-                        idx00=idx00,
-                    )
-                    obj_t = _objective(trial)
-                    obj_t = float(np.asarray(obj_t))
-                    if np.isfinite(obj_t) and obj_t < w_history[-1]:
-                        return True, trial, obj_t, step_local
-                return False, None, None, step_local
-
-            accepted, trial, obj_t, step = _try_line_search(grad0m)
-            if not accepted and preconditioner != "none":
-                accepted, trial, obj_t, step = _try_line_search(grad_raw)
-                if accepted and verbose:
-                    print("[solve_fixed_boundary_gd] fallback to unpreconditioned gradient")
-
-            step_history.append(step)
-
-            if not accepted:
-                if verbose:
-                    print("[solve_fixed_boundary_gd] line search failed to improve objective; stopping")
-                break
-
-            state = trial
-            obj0 = obj_t
-
-            wb_t, wp_t, _w_t = w_terms(state)
-            w_history.append(obj0)
-            wb_history.append(float(np.asarray(wb_t)))
-            wp_history.append(float(np.asarray(wp_t)))
-
-            obj0, grad0 = obj_and_grad(state)
-
-    diag: Dict[str, Any] = {
-        "idx00": idx00,
-        "signgs": signgs,
-        "gamma": gamma,
-        "jacobian_penalty": float(jacobian_penalty),
-        "scale_rz": float(scale_rz),
-        "scale_l": float(scale_l),
-        "preconditioner": str(preconditioner),
-        "precond_exponent": float(precond_exponent),
-        "precond_radial_alpha": float(precond_radial_alpha),
-        "grad_tol": None if grad_tol_eff is None else float(grad_tol_eff),
-    }
-    if differentiable:
-        return SolveFixedBoundaryResult(
-            state=state,
-            n_iter=len(w_history),
-            w_history=jnp.asarray(w_history),
-            wb_history=jnp.asarray(wb_history),
-            wp_history=jnp.asarray(wp_history),
-            grad_rms_history=jnp.asarray(grad_rms_history),
-            step_history=jnp.asarray(step_history),
-            diagnostics=diag,
-        )
-    return SolveFixedBoundaryResult(
-        state=state,
-        n_iter=len(w_history) - 1,
-        w_history=np.asarray(w_history, dtype=float),
-        wb_history=np.asarray(wb_history, dtype=float),
-        wp_history=np.asarray(wp_history, dtype=float),
-        grad_rms_history=np.asarray(grad_rms_history, dtype=float),
-        step_history=np.asarray(step_history, dtype=float),
-        diagnostics=diag,
     )
 
 
