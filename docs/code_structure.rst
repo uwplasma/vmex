@@ -21,6 +21,9 @@ Top-level package layout (selected):
   residual iteration hot path
 - ``vmec_jax/solve_tolerance_helpers.py``: dtype-aware gradient, conjugate
   gradient, and Levenberg-Marquardt tolerance policies
+- ``vmec_jax/solve_constraint_helpers.py``: fixed-boundary edge constraints,
+  magnetic-axis regularity, lambda-gauge projection, and related NumPy/JAX
+  coefficient-slice helpers
 - ``vmec_jax/solve.py``: fixed-boundary solvers + VMEC2000 iteration loop
 - ``vmec_jax/driver.py``: CLI-facing fixed/free-boundary drivers, output
   policies, staged solve dispatch, and wout writing
