@@ -66,6 +66,9 @@ Top-level package layout (selected):
 - ``vmec_jax/driver_flux_helpers.py``: post-solve current-driven
   flux/profile reconciliation helpers, with ``driver.py`` retaining a small
   wrapper for historical monkeypatch hooks
+- ``vmec_jax/driver_output_helpers.py``: VMEC-style residual scalar
+  reconstruction and fixed-boundary ``wout`` construction helpers, with
+  ``driver.py`` retaining wrappers for downstream monkeypatch compatibility
 - ``vmec_jax/free_boundary.py``: mgrid loading, NESTOR-like vacuum coupling,
   and free-boundary runtime state helpers
 - ``vmec_jax/optimization.py``: exact fixed-boundary optimizer, boundary DOF

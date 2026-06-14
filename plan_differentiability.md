@@ -841,12 +841,17 @@ Steps taken:
     `vmec_jax/driver_flux_helpers.py`, leaving a small `driver.py` wrapper to
     preserve historical monkeypatch hooks for `boundary_from_indata` and
     `_iotaf_from_iotas`.
+28. Extracted VMEC-style residual scalar reconstruction and fixed-boundary
+    `wout` construction into `vmec_jax/driver_output_helpers.py`.  `driver.py`
+    retains wrappers for `residual_scalars_from_state`,
+    `wout_from_fixed_boundary_run`, and `write_wout_from_fixed_boundary_run`
+    so downstream monkeypatches and public import paths remain compatible.
 
 Results obtained:
 
 1. Draft PR #20 CI passed before the follow-up extraction.
 2. `solve.py` decreased from roughly 15438 to 12898 lines locally.
-3. `driver.py` decreased from 4064 to 3125 lines while preserving existing CLI
+3. `driver.py` decreased from 4064 to 2984 lines while preserving existing CLI
    and test import paths.
 4. The extracted helpers are pure and synthetic-testable, making them a safe
    pattern for the next solver-kernel split.
@@ -862,6 +867,10 @@ Results obtained:
 8. Driver flux focused tests passed after restoring compatibility hooks: 62
    passed and 1 skipped across fast-reconstruction, traced-Lsin,
    driver-wave2, and quasisymmetry tests.
+9. Driver-output focused tests passed after the fourth driver extraction: 232
+   tests across driver wave, policy, CLI, fixed-boundary reconstruction, wout,
+   helper-edge, and quasisymmetry coverage, with one expected skip and only
+   pre-existing synthetic `wout.py` warnings.
 
 Best next steps:
 
@@ -884,7 +893,7 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 27%.
+- Differentiability/refactor implementation: 28%.
 - Source-health instrumentation: 100%.
 - Solver monolith reduction: 20% of the large-file extraction work.
-- Driver workflow decomposition: 27%.
+- Driver workflow decomposition: 32%.
