@@ -26,6 +26,7 @@ from . import driver_io_helpers as _driver_io_helpers
 from . import driver_output_helpers as _driver_output_helpers
 from . import driver_policy_helpers as _driver_policy_helpers
 from . import driver_result_helpers as _driver_result_helpers
+from . import driver_solve_helpers as _driver_solve_helpers
 from .solve import (
     SolveVmecResidualResult,
     solve_fixed_boundary_gd,
@@ -234,25 +235,24 @@ def solve_fixed_boundary_from_boundary(
     This helper wraps `initial_guess_from_boundary` and `solve_fixed_boundary_gd`
     so optimization scripts can call a single function.
     """
-    st_guess = initial_guess_from_boundary(static, boundary, indata, vmec_project=vmec_project)
-    res = solve_fixed_boundary_gd(
-        st_guess,
-        static,
-        phipf=flux.phipf,
-        chipf=flux.chipf,
-        signgs=signgs,
-        lamscale=flux.lamscale,
+    return _driver_solve_helpers.solve_fixed_boundary_from_boundary(
+        boundary=boundary,
+        static=static,
+        indata=indata,
+        flux=flux,
         pressure=pressure,
-        gamma=float(indata.get_float("GAMMA", 0.0)),
-        max_iter=int(max_iter),
-        step_size=float(step_size),
-        jacobian_penalty=float(jacobian_penalty),
-        jit_grad=bool(jit_grad),
-        differentiable=bool(differentiable),
-        stop_grad_in_update=bool(stop_grad_in_update),
-        verbose=bool(verbose),
+        signgs=signgs,
+        max_iter=max_iter,
+        step_size=step_size,
+        jacobian_penalty=jacobian_penalty,
+        jit_grad=jit_grad,
+        differentiable=differentiable,
+        stop_grad_in_update=stop_grad_in_update,
+        verbose=verbose,
+        vmec_project=vmec_project,
+        initial_guess_from_boundary_func=initial_guess_from_boundary,
+        solve_fixed_boundary_gd_func=solve_fixed_boundary_gd,
     )
-    return res.state
 
 
 def wout_from_fixed_boundary_run(

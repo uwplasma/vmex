@@ -63,6 +63,9 @@ Top-level package layout (selected):
 - ``vmec_jax/driver_result_helpers.py``: staged/chunked solver-result merging,
   timing aggregation, final-force payload propagation, and VMEC history
   comparison helpers shared by driver tests and runtime finish policy
+- ``vmec_jax/driver_solve_helpers.py``: lightweight fixed-boundary solve entry
+  helpers used by optimization scripts, with ``driver.py`` injecting the
+  historical initial-guess and solver callables
 - ``vmec_jax/driver_flux_helpers.py``: post-solve current-driven
   flux/profile reconciliation helpers, with ``driver.py`` retaining a small
   wrapper for historical monkeypatch hooks

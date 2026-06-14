@@ -851,6 +851,11 @@ Steps taken:
     injects `__file__`, `load_config`, `_free_boundary_static_inputs`,
     `build_static`, `read_wout`, and `state_from_wout` so existing tests and
     downstream monkeypatches retain the same behavior.
+30. Extracted the lightweight boundary-to-fixed-boundary-solve convenience path
+    into `vmec_jax/driver_solve_helpers.py`.  `driver.py` keeps the public
+    wrapper and injects `initial_guess_from_boundary` and
+    `solve_fixed_boundary_gd`, preserving the existing solver-wiring test and
+    optimization-script API.
 
 Results obtained:
 
@@ -880,6 +885,9 @@ Results obtained:
     across driver/API, example loading, CLI, quasisymmetry, and wout coverage,
     with two expected skips and only pre-existing synthetic residual/wout
     warnings.
+11. Driver solve-helper focused tests passed after the sixth driver extraction:
+    3 tests covering solver-input wiring and initial-guess fixed-boundary
+    driver paths.
 
 Best next steps:
 
@@ -902,7 +910,7 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 29%.
+- Differentiability/refactor implementation: 30%.
 - Source-health instrumentation: 100%.
 - Solver monolith reduction: 20% of the large-file extraction work.
-- Driver workflow decomposition: 33%.
+- Driver workflow decomposition: 34%.
