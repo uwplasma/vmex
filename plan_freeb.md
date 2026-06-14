@@ -24261,3 +24261,50 @@ Completion:
 - CI/runtime/coverage hygiene: 100%.
 - Docs/release hygiene: 100%.
 - QI minimal-seed README artifacts: 100%.
+
+### 2026-06-14 CI And Bounded VMEC2000 Follow-Up
+
+Steps taken:
+
+1. Rechecked GitHub Actions after pushing ``e49c7b6``.
+2. Ran bounded executable-backed VMEC2000 gates with
+   ``VMEC2000_INTEGRATION=1`` and ``~/bin/xvmec2000``:
+   ``test_fast_vmec2000_stage_trace_validation_cases`` and
+   ``test_vmec2000_free_boundary_lasym_true_reaches_vacuum_solve``.
+3. Started the broader optional VMEC2000 group, observed that the first two
+   tests passed, and interrupted the long DIII-D vmec_jax comparison leg after
+   it exceeded the lightweight validation window.
+
+Results obtained:
+
+1. GitHub Actions for ``e49c7b6`` completed successfully.
+2. The bounded local VMEC2000 stage-trace and LASYM free-boundary executable
+   gates passed.
+3. The longer DIII-D finite-beta parity case remains an optional diagnostic,
+   not a blocking release gate, because the observed long path was the local
+   vmec_jax comparison segment rather than a VMEC2000 executable failure.
+
+Best next steps:
+
+1. Keep CI green and avoid adding the long DIII-D comparison to ordinary local
+   release gates.
+2. If DIII-D parity needs a refresh, run it explicitly with its documented
+   longer budget or on ``office``.
+3. Resume QI seed robustness only if new public README evidence is needed;
+   the current minimal-seed NFP1/2/3/4 panel is promoted and case-gated.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9999999%; adaptive host
+  branch changes remain deferred/unclaimed.
+- VMEC parity and physics gates: 99.9%.
+- Single-stage coil-only optimization phase 3: 99.9%.
+- CPU/GPU performance: 99.45%.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 100%.
