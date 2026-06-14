@@ -38,6 +38,9 @@ Top-level package layout (selected):
 - ``vmec_jax/solve_first_step_diagnostics.py``: first-step VMEC residual,
   preconditioner, force-channel, and update diagnostic assembly used by the
   public ``solve.first_step_diagnostics`` wrapper
+- ``vmec_jax/solve_lambda_optimizer.py``: lambda-only fixed-geometry magnetic
+  energy optimizer used by the public ``solve.solve_lambda_gd`` wrapper while
+  preserving historical solve-module monkeypatch hooks
 - ``vmec_jax/solve_hlo_dump_helpers.py``: optional JAX HLO lowering dump
   helpers for solver-kernel diagnostics
 - ``vmec_jax/solve_axis_reset_helpers.py``: initial magnetic-axis reset
