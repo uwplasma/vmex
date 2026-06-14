@@ -22,6 +22,7 @@ from .init_guess import initial_guess_from_boundary
 from .multigrid import interp_vmec_state
 from .profiles import eval_profiles
 from . import driver_flux_helpers as _driver_flux_helpers
+from . import driver_io_helpers as _driver_io_helpers
 from . import driver_output_helpers as _driver_output_helpers
 from . import driver_policy_helpers as _driver_policy_helpers
 from . import driver_result_helpers as _driver_result_helpers
@@ -291,15 +292,7 @@ def write_wout_from_fixed_boundary_run(
 
 def example_paths(case: str, *, root: str | Path | None = None) -> tuple[Path, Optional[Path]]:
     """Return (input_path, wout_path) for a bundled example case."""
-    root = Path(root) if root is not None else Path(__file__).resolve().parents[1]
-    data_dir = root / "examples" / "data"
-    input_path = data_dir / f"input.{case}"
-    wout_path = data_dir / f"wout_{case}_reference.nc"
-    if not wout_path.exists():
-        wout_path = data_dir / f"wout_{case}.nc"
-    if not wout_path.exists():
-        wout_path = None
-    return input_path, wout_path
+    return _driver_io_helpers.example_paths(case, root=root, package_file=__file__)
 
 
 def load_example(
@@ -310,45 +303,34 @@ def load_example(
     grid=None,
 ) -> ExampleData:
     """Load a bundled example case (config + static + optional wout/state)."""
-    input_path, wout_path = example_paths(case, root=root)
-    cfg, indata = load_config(str(input_path))
-    fb_meta, fb_extcur = _free_boundary_static_inputs(cfg, load_fields=False, strict=False)
-    static = build_static(cfg, grid=grid, mgrid_metadata=fb_meta, free_boundary_extcur=fb_extcur)
-    if with_wout and wout_path is not None:
-        wout = read_wout(wout_path)
-        state = state_from_wout(wout)
-    else:
-        wout = None
-        state = None
-    return ExampleData(
-        input_path=input_path,
-        wout_path=wout_path,
-        cfg=cfg,
-        indata=indata,
-        static=static,
-        wout=wout,
-        state=state,
+    return _driver_io_helpers.load_example(
+        case,
+        root=root,
+        with_wout=with_wout,
+        grid=grid,
+        example_data_type=ExampleData,
+        example_paths_func=example_paths,
+        load_config_func=load_config,
+        free_boundary_static_inputs_func=_free_boundary_static_inputs,
+        build_static_func=build_static,
+        read_wout_func=read_wout,
+        state_from_wout_func=state_from_wout,
     )
 
 
 def load_input(path: str | Path):
     """Convenience wrapper around `load_config`."""
-    return load_config(str(path))
+    return _driver_io_helpers.load_input(path, load_config_func=load_config)
 
 
 def load_wout(path: str | Path) -> WoutData:
     """Convenience wrapper around `read_wout`."""
-    return read_wout(path)
+    return _driver_io_helpers.load_wout(path, read_wout_func=read_wout)
 
 
 def save_npz(path: str | Path, **arrays) -> Path:
     """Save arrays into a NumPy `.npz` file and return the path."""
-    import numpy as np
-
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez(path, **arrays)
-    return path
+    return _driver_io_helpers.save_npz(path, **arrays)
 
 
 _STEP_SIZE_SENTINEL = object()
