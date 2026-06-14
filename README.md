@@ -16,8 +16,6 @@ remain in development.
 
 ## Install
 
-From PyPI:
-
 ```bash
 pip install vmec-jax
 ```

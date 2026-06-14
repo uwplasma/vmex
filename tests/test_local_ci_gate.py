@@ -25,6 +25,7 @@ def test_local_ci_gate_documents_required_local_lanes() -> None:
         "not full and not vmec2000 and not simsopt",
         "--cov-fail-under={COVERAGE_FAIL_UNDER}",
         "tools/diagnostics/repo_size_audit.py",
+        "test_free_boundary_pressure_scale_changes_bundled_lcfs_and_field",
         '"--max-total-mib"',
         '"50"',
         '"--max-file-mib"',

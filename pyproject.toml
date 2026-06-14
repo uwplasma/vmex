@@ -51,7 +51,17 @@ docs = [
   "sphinx",
   "furo",
 ]
-dev = ["pytest", "pytest-cov", "ruff", "mypy", "types-setuptools"]
+dev = [
+  "build",
+  "furo",
+  "mypy",
+  "pytest",
+  "pytest-cov",
+  "pytest-xdist",
+  "ruff",
+  "sphinx",
+  "types-setuptools",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
