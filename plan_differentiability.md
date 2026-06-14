@@ -889,6 +889,11 @@ Steps taken:
     public wrapper and injects all historical private aliases for validation,
     energy setup, constraints, preconditioning, state updates, tolerance
     resolution, and JAX modules.
+37. Extracted the fixed-boundary L-BFGS optimizer loop into
+    `vmec_jax/solve_fixed_boundary_lbfgs_optimizer.py`.  The public
+    `solve.solve_fixed_boundary_lbfgs` wrapper now injects validation, energy
+    setup, constraints, preconditioning, gradient norm/tolerance, L-BFGS
+    two-loop/descent/curvature helpers, state pack/unpack, and JAX modules.
 
 Results obtained:
 
@@ -950,6 +955,10 @@ Results obtained:
     `solve.py` and the new GD helper; 10 focused GD tests passed; the broader
     solver optimizer subset passed with 160 tests and 1 expected skip.
     `solve.py` decreased from 11652 to 11473 lines.
+19. Fixed-boundary L-BFGS loop extraction checks passed: compile and Ruff clean
+    for `solve.py` and the new L-BFGS helper; 7 focused L-BFGS tests passed;
+    the broader solver optimizer subset passed with 160 tests and 1 expected
+    skip.  `solve.py` decreased from 11473 to 11320 lines.
 
 Best next steps:
 
@@ -960,9 +969,10 @@ Best next steps:
    file formatting are the next low-risk candidates.  The next larger
    candidate is a scan-runner/cache adapter split, but only after focused tests
    are identified for existing monkeypatch seams.
-   The next fixed-boundary optimizer candidate is moving the L-BFGS loop body
-   behind a wrapper function using the same dependency-injection pattern as the
-   GD extraction.
+   The next fixed-boundary optimizer candidates are the residual-objective
+   L-BFGS/Gauss-Newton wrappers, but those touch more VMEC-force physics seams
+   and should be split after adding narrower compatibility tests for profile,
+   force-kernel, and sparse-CG monkeypatch hooks.
 3. Continue broader refactors in parallel with `driver.py`, `optimization.py`,
    and `wout.py` by extracting pure policy/formatting/data-container seams
    before moving any physics kernels.
@@ -977,7 +987,7 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 43%.
+- Differentiability/refactor implementation: 45%.
 - Source-health instrumentation: 100%.
-- Solver monolith reduction: 38% of the large-file extraction work.
+- Solver monolith reduction: 40% of the large-file extraction work.
 - Driver workflow decomposition: 34%.

@@ -85,6 +85,7 @@ from . import solve_first_step_diagnostics as _first_step_diagnostics_helpers
 from . import solve_lambda_optimizer as _lambda_optimizer_helpers
 from . import solve_fixed_boundary_energy_helpers as _fixed_boundary_energy_helpers
 from . import solve_fixed_boundary_gd_optimizer as _fixed_boundary_gd_helpers
+from . import solve_fixed_boundary_lbfgs_optimizer as _fixed_boundary_lbfgs_helpers
 from .solve_diagnostics_io import (
     _dump_freeb_axis_trace_record,
     _dump_freeb_control_trace_record,
@@ -717,23 +718,7 @@ def solve_fixed_boundary_lbfgs(
     - simple axis regularity,
     - lambda gauge (0,0)=0.
     """
-    if not has_jax():
-        raise ImportError("solve_fixed_boundary_lbfgs requires JAX (jax + jaxlib)")
-
-    opts = validate_fixed_boundary_lbfgs_options(
-        history_size=history_size,
-        max_iter=max_iter,
-        max_backtracks=max_backtracks,
-        bt_factor=bt_factor,
-        gamma=gamma,
-    )
-    history_size = opts.history_size
-    max_iter = opts.max_iter
-    max_backtracks = opts.max_backtracks
-    bt_factor = opts.bt_factor
-    gamma = opts.gamma
-
-    energy = _fixed_boundary_energy_helpers.prepare_fixed_boundary_energy_context(
+    return _fixed_boundary_lbfgs_helpers.solve_fixed_boundary_lbfgs_impl(
         state0,
         static,
         phipf=phipf,
@@ -746,176 +731,38 @@ def solve_fixed_boundary_lbfgs(
         edge_Zsin=edge_Zsin,
         pressure=pressure,
         gamma=gamma,
-        jacobian_penalty=0.0,
+        history_size=history_size,
+        max_iter=max_iter,
+        step_size=step_size,
+        grad_tol=grad_tol,
+        max_backtracks=max_backtracks,
+        bt_factor=bt_factor,
         jit_grad=jit_grad,
+        preconditioner=preconditioner,
+        precond_exponent=precond_exponent,
+        precond_radial_alpha=precond_radial_alpha,
+        verbose=verbose,
+        has_jax_func=has_jax,
+        validate_options_func=validate_fixed_boundary_lbfgs_options,
+        prepare_energy_context_func=_fixed_boundary_energy_helpers.prepare_fixed_boundary_energy_context,
+        enforce_fixed_boundary_and_axis_func=_enforce_fixed_boundary_and_axis,
+        mask_grad_for_constraints_func=_mask_grad_for_constraints,
+        apply_preconditioner_func=_apply_preconditioner,
+        grad_rms_state_func=_grad_rms_state,
+        resolve_grad_tol_func=_resolve_grad_tol,
+        lbfgs_two_loop_direction_func=_lbfgs_two_loop_direction,
+        ensure_descent_direction_func=_ensure_descent_direction,
+        resolve_lbfgs_curvature_tol_func=_resolve_lbfgs_curvature_tol,
+        pack_state_func=pack_state,
+        unpack_state_func=unpack_state,
         mode00_index_func=_mode00_index,
         eval_geom_func=eval_geom,
         bsup_from_geom_func=bsup_from_geom,
         b2_from_bsup_func=b2_from_bsup,
         angle_steps_func=angle_steps,
         validate_pressure_shape_func=validate_pressure_shape,
-        jax_module=jax,
         jnp_module=jnp,
         jit_func=jit,
-    )
-    idx00 = energy.idx00
-    signgs = energy.signgs
-    gamma = energy.gamma
-    edge_Rcos = energy.edge_Rcos
-    edge_Rsin = energy.edge_Rsin
-    edge_Zcos = energy.edge_Zcos
-    edge_Zsin = energy.edge_Zsin
-    w_and_grad = energy.objective_and_grad
-    w_terms = energy.w_terms_and_jacmin
-
-    # Start from a constraint-satisfying state.
-    state = _enforce_fixed_boundary_and_axis(
-        state0,
-        static,
-        edge_Rcos=edge_Rcos,
-        edge_Rsin=edge_Rsin,
-        edge_Zcos=edge_Zcos,
-        edge_Zsin=edge_Zsin,
-        enforce_lambda_axis=False,
-        idx00=idx00,
-    )
-
-    wb0, wp0, w0, jacmin0 = w_terms(state)
-    w0 = float(np.asarray(w0))
-    wb0 = float(np.asarray(wb0))
-    wp0 = float(np.asarray(wp0))
-    jacmin0 = float(np.asarray(jacmin0))
-    if not np.isfinite(w0) or jacmin0 <= 0.0:
-        raise ValueError("Initial state has invalid Jacobian sign or non-finite energy")
-
-    w_history = [w0]
-    wb_history = [wb0]
-    wp_history = [wp0]
-    grad_rms_history = []
-    step_history = []
-
-    w_val, grad = w_and_grad(state)
-    grad = _mask_grad_for_constraints(grad, static, idx00=idx00, mask_lambda_axis=False)
-    grad = _apply_preconditioner(
-        grad,
-        static,
-        kind=preconditioner,
-        exponent=precond_exponent,
-        radial_alpha=precond_radial_alpha,
-    )
-
-    x = pack_state(state)
-    g_flat = pack_state(grad)
-
-    s_hist: list[Any] = []
-    y_hist: list[Any] = []
-
-    step0 = float(step_size)
-    grad_tol_eff: float | None = None
-
-    for it in range(max_iter):
-        grad_rms = _grad_rms_state(grad)
-        grad_rms_history.append(grad_rms)
-        if grad_tol_eff is None:
-            grad_tol_eff = _resolve_grad_tol(grad_tol, grad_rms0=grad_rms, dtype=np.asarray(state.Rcos).dtype)
-
-        if verbose:
-            print(f"[solve_fixed_boundary_lbfgs] iter={it:03d} w={w_history[-1]:.8e} grad_rms={grad_rms:.3e}")
-
-        if grad_rms < float(grad_tol_eff):
-            break
-
-        p_flat = _lbfgs_two_loop_direction(g_flat, s_hist, y_hist)
-        p_flat, _gtp, _fallback_to_descent = _ensure_descent_direction(g_flat, p_flat)
-
-        accepted = False
-        step = step0
-
-        x_old = x
-        g_old = g_flat
-
-        for bt in range(max_backtracks + 1):
-            if bt > 0:
-                step *= bt_factor
-            x_try = x_old + jnp.asarray(step, dtype=x_old.dtype) * p_flat
-            st_try = unpack_state(x_try, state.layout)
-            st_try = _enforce_fixed_boundary_and_axis(
-                st_try,
-                static,
-                edge_Rcos=edge_Rcos,
-                edge_Rsin=edge_Rsin,
-                edge_Zcos=edge_Zcos,
-                edge_Zsin=edge_Zsin,
-                enforce_lambda_axis=False,
-                idx00=idx00,
-            )
-
-            wb_t, wp_t, w_t, jacmin_t = w_terms(st_try)
-            w_tf = float(np.asarray(w_t))
-            jacmin_tf = float(np.asarray(jacmin_t))
-            if np.isfinite(w_tf) and jacmin_tf > 0.0 and w_tf < w_history[-1]:
-                state = st_try
-                x = pack_state(state)
-                accepted = True
-                break
-
-        step_history.append(step)
-
-        if not accepted:
-            if verbose:
-                print("[solve_fixed_boundary_lbfgs] line search failed; stopping")
-            break
-
-        # New value/grad at accepted state.
-        wb_t, wp_t, w_t, _jacmin_t = w_terms(state)
-        w_history.append(float(np.asarray(w_t)))
-        wb_history.append(float(np.asarray(wb_t)))
-        wp_history.append(float(np.asarray(wp_t)))
-
-        w_val, grad_new = w_and_grad(state)
-        grad_new = _mask_grad_for_constraints(grad_new, static, idx00=idx00)
-        grad_new = _apply_preconditioner(
-            grad_new,
-            static,
-            kind=preconditioner,
-            exponent=precond_exponent,
-            radial_alpha=precond_radial_alpha,
-        )
-        g_flat_new = pack_state(grad_new)
-
-        s_k = x - x_old
-        y_k = g_flat_new - g_old
-        ys = float(np.asarray(jnp.dot(y_k, s_k)))
-        if np.isfinite(ys) and ys > _resolve_lbfgs_curvature_tol(s_k, y_k):
-            s_hist.append(s_k)
-            y_hist.append(y_k)
-            if len(s_hist) > history_size:
-                s_hist.pop(0)
-                y_hist.pop(0)
-
-        grad = grad_new
-        g_flat = g_flat_new
-        step0 = float(step)
-
-    diag: Dict[str, Any] = {
-        "idx00": idx00,
-        "signgs": signgs,
-        "gamma": gamma,
-        "history_size": int(history_size),
-        "preconditioner": str(preconditioner),
-        "precond_exponent": float(precond_exponent),
-        "precond_radial_alpha": float(precond_radial_alpha),
-        "grad_tol": None if grad_tol_eff is None else float(grad_tol_eff),
-    }
-    return SolveFixedBoundaryResult(
-        state=state,
-        n_iter=len(w_history) - 1,
-        w_history=np.asarray(w_history, dtype=float),
-        wb_history=np.asarray(wb_history, dtype=float),
-        wp_history=np.asarray(wp_history, dtype=float),
-        grad_rms_history=np.asarray(grad_rms_history, dtype=float),
-        step_history=np.asarray(step_history, dtype=float),
-        diagnostics=diag,
     )
 
 
