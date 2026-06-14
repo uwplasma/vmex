@@ -66,6 +66,9 @@ Top-level package layout (selected):
 - ``vmec_jax/driver_flux_helpers.py``: post-solve current-driven
   flux/profile reconciliation helpers, with ``driver.py`` retaining a small
   wrapper for historical monkeypatch hooks
+- ``vmec_jax/driver_io_helpers.py``: bundled example path resolution,
+  lightweight input/wout loaders, and NumPy archive writing helpers, with
+  ``driver.py`` injecting historical monkeypatch hooks
 - ``vmec_jax/driver_output_helpers.py``: VMEC-style residual scalar
   reconstruction and fixed-boundary ``wout`` construction helpers, with
   ``driver.py`` retaining wrappers for downstream monkeypatch compatibility

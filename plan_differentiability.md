@@ -846,12 +846,17 @@ Steps taken:
     retains wrappers for `residual_scalars_from_state`,
     `wout_from_fixed_boundary_run`, and `write_wout_from_fixed_boundary_run`
     so downstream monkeypatches and public import paths remain compatible.
+29. Extracted bundled example path resolution, lightweight input/wout loading,
+    and NumPy archive writing into `vmec_jax/driver_io_helpers.py`.  `driver.py`
+    injects `__file__`, `load_config`, `_free_boundary_static_inputs`,
+    `build_static`, `read_wout`, and `state_from_wout` so existing tests and
+    downstream monkeypatches retain the same behavior.
 
 Results obtained:
 
 1. Draft PR #20 CI passed before the follow-up extraction.
 2. `solve.py` decreased from roughly 15438 to 12898 lines locally.
-3. `driver.py` decreased from 4064 to 2984 lines while preserving existing CLI
+3. `driver.py` decreased from 4064 to 2966 lines while preserving existing CLI
    and test import paths.
 4. The extracted helpers are pure and synthetic-testable, making them a safe
    pattern for the next solver-kernel split.
@@ -871,6 +876,10 @@ Results obtained:
    tests across driver wave, policy, CLI, fixed-boundary reconstruction, wout,
    helper-edge, and quasisymmetry coverage, with one expected skip and only
    pre-existing synthetic `wout.py` warnings.
+10. Driver-IO focused tests passed after the fifth driver extraction: 305 tests
+    across driver/API, example loading, CLI, quasisymmetry, and wout coverage,
+    with two expected skips and only pre-existing synthetic residual/wout
+    warnings.
 
 Best next steps:
 
@@ -893,7 +902,7 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 28%.
+- Differentiability/refactor implementation: 29%.
 - Source-health instrumentation: 100%.
 - Solver monolith reduction: 20% of the large-file extraction work.
-- Driver workflow decomposition: 32%.
+- Driver workflow decomposition: 33%.
