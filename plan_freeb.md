@@ -24262,6 +24262,52 @@ Completion:
 - Docs/release hygiene: 100%.
 - QI minimal-seed README artifacts: 100%.
 
+### 2026-06-14 Final CI Confirmation For QI Panel Promotion
+
+Steps taken:
+
+1. Watched GitHub Actions run ``27484436553`` for commit ``29a513c`` through
+   completion.
+2. Verified the full required CI matrix after the README QI minimal-seed panel
+   promotion and VMEC2000 follow-up notes.
+
+Results obtained:
+
+1. The run completed successfully.
+2. Console script smoke, physics smoke, Python 3.10/3.12 fast tests, docs,
+   parity manifest smoke, all Python 3.11 core/exact coverage shards, slow
+   physics coverage, and the combined coverage gate all passed.
+3. The manual/nightly physics job remained intentionally skipped and is not a
+   required release gate.
+
+Best next steps:
+
+1. Keep the adaptive full-loop branch derivative claim conservative: current
+   production evidence is fixed/fingerprint-gated branch-local replay and
+   complete-solve finite-difference validation, not arbitrary host adaptive
+   branch differentiation.
+2. Run optional long VMEC2000/DIII-D parity refreshes only with explicit longer
+   budget, preferably on ``office``.
+3. Avoid adding WOUT or generated optimization outputs to git; keep promoted
+   README/docs artifacts limited to compressed figures, CSV summaries, and
+   lightweight provenance JSON.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9999999%; adaptive host
+  branch changes remain deferred/unclaimed.
+- VMEC parity and physics gates: 99.9%.
+- Single-stage coil-only optimization phase 3: 99.9%.
+- CPU/GPU performance: 99.45%.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 100%.
+
 ### 2026-06-14 CI And Bounded VMEC2000 Follow-Up
 
 Steps taken:
