@@ -789,13 +789,16 @@ Steps taken:
 12. Performed the ninth low-risk extraction from `vmec_jax/solve.py`:
     VMEC2000-style scan resume-state initialization and carry-field restoration
     now live in `vmec_jax/solve_scan_resume_helpers.py`.
-13. Kept backward-compatible private aliases in `solve.py` so existing tests and
+13. Performed the tenth low-risk extraction from `vmec_jax/solve.py`:
+    free-boundary cadence, turn-on, constraint-baseline, and velocity-block
+    control helpers now live in `vmec_jax/solve_free_boundary_control_helpers.py`.
+14. Kept backward-compatible private aliases in `solve.py` so existing tests and
    internal imports continue to work.
 
 Results obtained:
 
 1. Draft PR #20 CI passed before the follow-up extraction.
-2. `solve.py` decreased from roughly 15438 to 14355 lines.
+2. `solve.py` decreased from roughly 15438 to about 14225 lines.
 3. The extracted helpers are pure and synthetic-testable, making them a safe
    pattern for the next solver-kernel split.
 4. Focused Ruff, pytest, source-health, and fast docs checks passed for the
@@ -819,6 +822,6 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 12%.
+- Differentiability/refactor implementation: 13%.
 - Source-health instrumentation: 100%.
-- Solver monolith reduction: 9% of the large-file extraction work.
+- Solver monolith reduction: 10% of the large-file extraction work.

@@ -33,6 +33,8 @@ Top-level package layout (selected):
   limits, structural cache keys, LRU helpers, and scan-cache miss diagnostics
 - ``vmec_jax/solve_axis_reset_helpers.py``: initial magnetic-axis reset
   control decisions, axis-state merging, and optional axis coefficient dumps
+- ``vmec_jax/solve_free_boundary_control_helpers.py``: free-boundary cadence,
+  turn-on, constraint-baseline, and velocity-block control helpers
 - ``vmec_jax/solve_scan_resume_helpers.py``: VMEC2000-style scan resume-state
   initialization and carry-field restoration
 - ``vmec_jax/solve.py``: fixed-boundary solvers + VMEC2000 iteration loop

@@ -45,7 +45,7 @@ PHYSICS_SMOKE_TESTS = (
         "[fixed_nonaxis_lasym_single_basic_non_stellsym_pressure]"
     ),
     "tests/test_driver_api.py::test_run_free_boundary_smoke_on_bundled_small_case",
-    "tests/test_qs_ess_render_smoke.py",
+    "tests/test_free_boundary_beta_response_validation.py::test_free_boundary_pressure_scale_changes_bundled_lcfs_and_field",
 )
 
 

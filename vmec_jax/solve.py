@@ -190,6 +190,15 @@ from .solve_axis_reset_helpers import (
     merge_axis_reset_state as _merge_axis_reset_state,
     write_axis_reset_dump as _write_axis_reset_dump,
 )
+from .solve_free_boundary_control_helpers import (
+    free_boundary_iter_controls as _free_boundary_iter_controls,
+    free_boundary_iter_controls_vmec as _free_boundary_iter_controls_vmec,
+    free_boundary_prev_rz_fsq_next as _free_boundary_prev_rz_fsq_next,
+    free_boundary_should_damp_constraint_baseline as _free_boundary_should_damp_constraint_baseline,
+    free_boundary_turnon_resets_iter1_immediately as _free_boundary_turnon_resets_iter1_immediately,
+    scale_velocity_blocks as _scale_velocity_blocks,
+    zero_velocity_blocks_like as _zero_velocity_blocks_like,
+)
 from .solve_scan_resume_helpers import (
     ScanResumeInitialFields as _ScanResumeInitialFields,  # noqa: F401 - re-exported for existing internal tests/importers.
     initialize_scan_resume_state as _initialize_scan_resume_state,
@@ -1235,127 +1244,6 @@ class _ScanCarry(NamedTuple):
     edge_Rsin: Any
     edge_Zcos: Any
     edge_Zsin: Any
-
-
-def _free_boundary_iter_controls(iter2: int, iter1: int, nvacskip: int) -> tuple[int, int]:
-    """Simple free-boundary cadence helper (legacy/diagnostics path).
-
-    Returns `(ivac, ivacskip)` from integer iteration counters using the
-    reduced two-state model:
-    - `ivacskip = mod(iter2 - iter1, nvacskip)`
-    - `ivac = 1` for full vacuum update (`ivacskip==0`), else `2`.
-    """
-
-    nv = max(1, int(nvacskip))
-    ivs = int((int(iter2) - int(iter1)) % nv)
-    ivac = 1 if ivs == 0 else 2
-    return ivac, ivs
-
-
-def _free_boundary_iter_controls_vmec(
-    *,
-    iter2: int,
-    iter1: int,
-    ivac: int,
-    nvacskip: int,
-    nvskip0: int,
-    fsq_rz_prev: float,
-    activate_fsq: float | None = None,
-) -> tuple[int, int, int]:
-    """VMEC2000-style `ivac/ivacskip/nvacskip` update (funct3d, ictrl_prec2d=0).
-
-    Mirrors funct3d.f free-boundary cadence (ictrl_prec2d=0):
-    - `ivac` advances only when `(fsqr+fsqz) <= threshold`,
-    - `ivac<=2` forces full vacuum updates (`ivacskip=0`),
-    - `nvacskip` is adapted on full updates.
-    """
-
-    i2 = int(iter2)
-    i1 = int(iter1)
-    iv = int(ivac)
-    nv = max(1, int(nvacskip))
-    nv0 = max(1, int(nvskip0))
-    fs = float(fsq_rz_prev)
-    if not np.isfinite(fs) or fs < 0.0:
-        fs = 1.0
-
-    if activate_fsq is None:
-        activate_threshold = float(os.getenv("VMEC_JAX_FREEB_ACTIVATE_FSQ", "1.0e-3") or 1.0e-3)
-    else:
-        activate_threshold = float(activate_fsq)
-    # VMEC funct3d:
-    #   IF (iter2 > 1 .AND. fsqr+fsqz <= 1e-3) ivac = ivac + 1
-    # Keep this literal behavior for cadence parity.
-    if i2 > 1 and fs <= activate_threshold:
-        iv += 1
-
-    if iv < 0:
-        return iv, 0, nv
-
-    ivs = int((i2 - i1) % nv)
-    if iv <= 2:
-        ivs = 0
-
-    # Extend NVACSKIP as equilibrium converges, only on full update.
-    if ivs == 0:
-        nv_est = int(1.0 / max(1.0e-1, 1.0e11 * fs))
-        nv = max(nv0, max(1, nv_est))
-
-    return iv, ivs, nv
-
-
-def _free_boundary_prev_rz_fsq_next(
-    *,
-    prev_fsq_before: float,
-    fsq_rz_curr: float,
-    turnon_restart: bool,
-    preserve_turnon_restart: bool,
-) -> float:
-    """Optionally carry the pre-turn-on residual into the next cadence step."""
-    if bool(turnon_restart) and bool(preserve_turnon_restart):
-        return float(prev_fsq_before)
-    return float(fsq_rz_curr)
-
-
-def _free_boundary_should_damp_constraint_baseline(*, freeb_ivac: int, freeb_turnon_iter: bool, lthreed: bool) -> bool:
-    """Mirror VMEC turn-on behavior for persistent `rcon0/zcon0` baselines.
-
-    The first vacuum-coupled iteration should preserve the pre-turn-on
-    constraint baseline on the 3D path. Axisymmetric turn-on keeps the
-    original VMEC-aligned immediate damping behavior.
-    """
-    if not bool(lthreed):
-        return int(freeb_ivac) >= 0
-    return int(freeb_ivac) >= 0 and (not bool(freeb_turnon_iter))
-
-
-def _free_boundary_turnon_resets_iter1_immediately(*, lthreed: bool, lasym: bool) -> bool:
-    """Return whether turn-on should immediately reset `iter1` for cadence."""
-    return (not bool(lthreed)) or (not bool(lasym))
-
-
-def _zero_velocity_blocks_like(*blocks):
-    """Return zeroed velocity blocks with each input block's shape and dtype."""
-
-    out = []
-    for block in blocks:
-        if _tree_has_tracer(block):
-            out.append(jnp.zeros_like(block))
-            continue
-        try:
-            if jax is not None and isinstance(block, jax.Array):
-                out.append(jnp.zeros_like(block))
-                continue
-        except Exception:
-            pass
-        out.append(np.zeros_like(np.asarray(block)))
-    return tuple(out)
-
-
-def _scale_velocity_blocks(scale: float, *blocks):
-    """Scale velocity blocks uniformly while preserving JAX array semantics."""
-
-    return tuple(float(scale) * block for block in blocks)
 
 
 def _sample_free_boundary_external_field(*, state: VMECState, static) -> dict[str, Any]:
