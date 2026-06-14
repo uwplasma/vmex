@@ -7,6 +7,7 @@ import pytest
 
 import vmec_jax.free_boundary_adjoint as fba
 import vmec_jax.free_boundary_adjoint_trace_controls as trace_controls
+import vmec_jax.free_boundary_adjoint_trace_metadata as trace_metadata
 from vmec_jax._compat import jnp
 
 
@@ -67,6 +68,22 @@ def test_free_boundary_adjoint_trace_stackability_error_paths() -> None:
         fba.direct_coil_accepted_trace_controller_controls_jax
         is trace_controls.direct_coil_accepted_trace_controller_controls_jax
     )
+    assert fba._unique_shape_list is trace_metadata.unique_shape_list
+    assert fba._compact_segment_summaries is trace_metadata.compact_segment_summaries
+    assert fba._json_safe_fingerprint_value is trace_metadata.json_safe_fingerprint_value
+    assert trace_metadata.unique_shape_list([(2, 3), (2, 3), (1,)]) == [[2, 3], [1]]
+    assert trace_metadata.compact_segment_summaries(
+        [{"count": 1, "signature_repr": "large"}, {"count": 2, "tag": "kept"}]
+    ) == [{"count": 1}, {"count": 2, "tag": "kept"}]
+    json_safe = trace_metadata.json_safe_fingerprint_value(
+        {
+            "array": np.asarray([1.0, np.inf]),
+            "scalar": np.float64(2.0),
+            "bad": float("nan"),
+            3: (np.asarray(4),),
+        }
+    )
+    assert json_safe == {"array": [1.0, None], "scalar": 2.0, "bad": None, "3": [4]}
     assert fba._accepted_trace_reset_flags([]) == ()
     assert fba._accepted_trace_reset_flags([{}, {}]) == (False, False)
 

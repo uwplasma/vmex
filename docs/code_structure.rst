@@ -111,6 +111,10 @@ Top-level package layout (selected):
 - ``vmec_jax/free_boundary_adjoint_trace_controls.py``: accepted-trace
   reset/status/controller-mask helpers used by fingerprint-gated
   free-boundary adjoint replay reports
+- ``vmec_jax/free_boundary_adjoint_trace_metadata.py``: accepted-trace
+  replay-graph shape compaction, segment-summary trimming, and strict
+  JSON-safe fingerprint conversion helpers used by branch-local adjoint
+  diagnostics
 - ``vmec_jax/optimization.py``: exact fixed-boundary optimizer, boundary DOF
   maps, accepted-point replay, and discrete-adjoint Jacobian plumbing
 - ``vmec_jax/optimization_workflow.py``: user-facing optimization problem

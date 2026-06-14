@@ -39,6 +39,11 @@ from .free_boundary_adjoint_trace_controls import (
     direct_coil_accepted_trace_controller_controls_jax,
     direct_coil_accepted_trace_status_masks,
 )
+from .free_boundary_adjoint_trace_metadata import (
+    _compact_segment_summaries,
+    _json_safe_fingerprint_value,
+    _unique_shape_list,
+)
 
 __all__ = [
     "direct_coil_accepted_trace_branch_metadata",
@@ -2875,28 +2880,6 @@ def direct_coil_accepted_trace_controller_slot_summary(metadata: Mapping[str, An
     }
 
 
-def _unique_shape_list(shapes: list[tuple[int, ...]]) -> list[list[int]]:
-    seen: set[tuple[int, ...]] = set()
-    unique: list[list[int]] = []
-    for shape in shapes:
-        if shape in seen:
-            continue
-        seen.add(shape)
-        unique.append([int(value) for value in shape])
-    return unique
-
-
-def _compact_segment_summaries(summaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Drop exact static signatures from timing metadata.
-
-    The full signatures remain available through fingerprint diagnostics.  The
-    replay graph timing payload only needs counts and ranges; keeping hashes of
-    every static array makes JSON reports noisy and unnecessarily large.
-    """
-
-    return [{key: value for key, value in summary.items() if key != "signature_repr"} for summary in summaries]
-
-
 def direct_coil_accepted_trace_replay_graph_metadata(
     traces: Any,
     *,
@@ -4406,25 +4389,6 @@ def direct_coil_accepted_trace_fingerprint_delta(
         "reference": ref,
         "candidate": cand,
     }
-
-
-def _json_safe_fingerprint_value(value: Any) -> Any:
-    if isinstance(value, np.ndarray):
-        return _json_safe_fingerprint_value(value.tolist())
-    if isinstance(value, np.generic):
-        return _json_safe_fingerprint_value(value.item())
-    if isinstance(value, dict):
-        return {str(key): _json_safe_fingerprint_value(val) for key, val in value.items()}
-    if isinstance(value, (tuple, list)):
-        return [_json_safe_fingerprint_value(item) for item in value]
-    if isinstance(value, float):
-        return value if np.isfinite(value) else None
-    if hasattr(value, "tolist") and not isinstance(value, (str, bytes)):
-        try:
-            return _json_safe_fingerprint_value(value.tolist())
-        except Exception:
-            pass
-    return value
 
 
 def direct_coil_accepted_trace_fingerprint_delta_summary(
