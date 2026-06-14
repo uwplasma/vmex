@@ -24107,3 +24107,51 @@ Completion:
 - QI minimal-seed README artifacts: 99.0% infrastructure/provenance-ready;
   NFP1 now has passing QI/mirror/iota/elongation evidence and misses only
   aspect by about ``1.4%``.
+
+### 2026-06-14 NFP1 Aspect Cleanup Diagnostics
+
+Steps taken:
+
+1. Let the aspect cleanup from the Boozer-mirror candidate finish its
+   ``max_nfev=10`` budget.
+2. Inspected high-resolution exact diagnostics.
+3. Stopped the completed run before post-run comparison plotting.
+4. Launched a final short Boozer-mirror touch-up from the aspect-good candidate.
+
+Results obtained:
+
+1. Aspect cleanup fixed the aspect gate and preserved QI/iota/elongation:
+   ``aspect=6.0712``, ``smooth_qi=2.4946e-3``,
+   ``legacy_qi=1.0553e-3``, ``mean_iota=0.4838``,
+   ``max_elongation=4.3126``.
+2. The cleanup missed only the mirror gate by a small margin:
+   ``mirror=0.3553`` against the public threshold ``0.35``.
+3. Active run:
+   ``results/qi_opt/ess/nfp1_final_mirror_touchup``. It starts from the
+   aspect-good candidate, uses a short ``max_nfev=8`` Boozer-scalar mirror
+   cleanup, and keeps QI ceiling/aspect/iota/elongation guards active.
+
+Best next steps:
+
+1. Let the final mirror touch-up finish and inspect exact diagnostics.
+2. If it passes, sync JSON provenance and regenerate the NFP=1/2/3/4 QI README
+   panel.
+3. If it misses only mirror by less than about ``0.01``, retain the candidate
+   as docs evidence but do not promote it to README until a stricter pass is
+   obtained.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.9999999%.
+- VMEC parity and physics gates: 99.87%.
+- Single-stage coil-only optimization phase 3: 99.85%.
+- CPU/GPU performance: 99.45%.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 99.2% infrastructure/provenance-ready;
+  NFP1 is within one small mirror touch-up of promotion.
