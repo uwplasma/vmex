@@ -746,7 +746,7 @@ For future updates, append entries with:
 6. User decisions needed.
 7. Completion percentages by lane.
 
-## 2026-06-14 Umbrella PR and First Solver Helper Extraction
+## 2026-06-14 Umbrella PR and Solver Helper Extractions
 
 Commit: `6e8a335` plus follow-up extraction on
 `codex/differentiability-refactor-plan`.
@@ -766,13 +766,17 @@ Steps taken:
 5. Performed the second low-risk extraction from `vmec_jax/solve.py`:
    dtype-aware gradient, conjugate-gradient, and Levenberg-Marquardt tolerance
    policy now live in `vmec_jax/solve_tolerance_helpers.py`.
-6. Kept backward-compatible private aliases in `solve.py` so existing tests and
+6. Performed the third low-risk extraction from `vmec_jax/solve.py`:
+   fixed-boundary edge constraints, magnetic-axis regularity, lambda-gauge
+   projection, and NumPy/JAX coefficient-slice helpers now live in
+   `vmec_jax/solve_constraint_helpers.py`.
+7. Kept backward-compatible private aliases in `solve.py` so existing tests and
    internal imports continue to work.
 
 Results obtained:
 
 1. Draft PR #20 CI passed before the follow-up extraction.
-2. `solve.py` decreased from roughly 15438 to 15298 lines.
+2. `solve.py` decreased from roughly 15438 to 14993 lines.
 3. The extracted helpers are pure and synthetic-testable, making them a safe
    pattern for the next solver-kernel split.
 4. Focused Ruff, pytest, source-health, and fast docs checks passed for the
@@ -782,8 +786,9 @@ Best next steps:
 
 1. Keep all refactor work on PR #20 until the full plan is finalized.
 2. Continue Wave 1/Wave 2 by extracting small pure solver helpers from
-   `solve.py`: dtype/tolerance resolution, gradient masking, and fixed-boundary
-   constraint row operations are the next low-risk candidates.
+   `solve.py`: gradient masking, gradient-descent state updates,
+   preconditioner application payloads, and residual-loop controller-state
+   bookkeeping are the next low-risk candidates.
 3. Add compatibility tests for every extracted private alias before ratcheting
    any source-health threshold.
 
@@ -795,6 +800,6 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 5%.
+- Differentiability/refactor implementation: 6%.
 - Source-health instrumentation: 100%.
-- Solver monolith reduction: 2% of the large-file extraction work.
+- Solver monolith reduction: 3% of the large-file extraction work.
