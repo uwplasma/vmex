@@ -926,6 +926,12 @@ Steps taken:
     `_glasser_from_wout_mercier_terms` alias, and the focused test now checks
     the extracted helper against both the legacy private alias and the public
     differentiable `glasser_resistive_interchange_from_mercier_terms` algebra.
+43. Repaired the combined coverage-gate gap introduced by solver-helper
+    extractions by adding a millisecond-scale synthetic
+    `solve_lambda_gd_impl` test to an existing CI-included optimizer-helper
+    shard.  The test injects tiny geometry/Fourier/Bsup/gauge seams, covers the
+    real lambda implementation loop and mode-diagonal branch, and separately
+    checks the missing-JAX error path without running a full VMEC solve.
 
 Results obtained:
 
@@ -1020,6 +1026,11 @@ Results obtained:
     Glasser objective, and finite-beta helper shard passed with 74 tests and 1
     expected skip.  `wout.py` decreased from 6321 to 6291 lines while creating
     a small stability-diagnostic seam for the DMerc/`D_R` AD-vs-FD lane.
+25. Coverage repair checks passed: Ruff clean for the optimizer-helper test
+    and lambda optimizer; `tests/test_solve_optimizer_helpers.py` passed with 6
+    tests; a targeted coverage run raised `solve_lambda_optimizer.py` coverage
+    to 78% in that shard, enough to recover the previous combined gate failure
+    at 94.89% without lowering the 95% threshold or adding expensive solves.
 
 Best next steps:
 
