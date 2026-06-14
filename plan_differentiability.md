@@ -914,6 +914,12 @@ Steps taken:
     tolerance/damping helpers, state pack/unpack, and JAX modules while the
     implementation owns the VJP/JVP normal-equations solve, late sparse-CG
     lookup, damping retries, fallback descent, and result diagnostics.
+41. Started the free-boundary adjoint monolith split by extracting accepted
+    trace reset/status/controller-mask helpers into
+    `vmec_jax/free_boundary_adjoint_trace_controls.py`.  The public names stay
+    re-exported from `free_boundary_adjoint.py`, while trace replay/fingerprint
+    plans continue to live in the original module until their dependencies are
+    narrowed further.
 
 Results obtained:
 
@@ -997,6 +1003,12 @@ Results obtained:
     optimizer subset passed with 160 tests and 2 expected skips.  `solve.py`
     decreased from 10888 to 10596 lines while preserving the late
     `jax.scipy.sparse.linalg.cg` lookup used by monkeypatch tests.
+23. Free-boundary trace-control extraction checks passed: compile and Ruff
+    clean for `free_boundary_adjoint.py` and the new helper; the focused
+    accepted-trace/fingerprint/replay-plan shard passed with 6 tests and 27
+    deselected tests; the coil-optimization same-branch smoke passed with 14
+    tests and 17 deselected tests.  `free_boundary_adjoint.py` decreased from
+    6941 to 6823 lines.
 
 Best next steps:
 
@@ -1013,8 +1025,8 @@ Best next steps:
    policy adapters.  Avoid moving the full adaptive loop until branch
    fingerprint gates are narrowed further.
 3. Continue broader refactors in parallel with `driver.py`, `optimization.py`,
-   and `wout.py` by extracting pure policy/formatting/data-container seams
-   before moving any physics kernels.
+   `free_boundary_adjoint.py`, and `wout.py` by extracting pure
+   policy/formatting/data-container seams before moving any physics kernels.
 4. Add compatibility tests for every extracted private alias before ratcheting
    any source-health threshold.
 
@@ -1026,7 +1038,8 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 48%.
+- Differentiability/refactor implementation: 49%.
 - Source-health instrumentation: 100%.
 - Solver monolith reduction: 45% of the large-file extraction work.
+- Free-boundary adjoint monolith reduction: 8%.
 - Driver workflow decomposition: 34%.
