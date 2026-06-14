@@ -20,7 +20,7 @@ from contextlib import nullcontext
 import time
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, NamedTuple
+from typing import Any, Dict, Tuple, NamedTuple
 
 import numpy as np
 
@@ -163,6 +163,10 @@ from .solve_constraint_helpers import (
     scale_mode_slice_np as _scale_mode_slice_np,
     zero_coeff_column as _zero_coeff_column,  # noqa: F401 - re-exported for existing internal tests/importers.
     zero_coeff_column_np as _zero_coeff_column_np,  # noqa: F401 - re-exported for existing internal tests/importers.
+)
+from .solve_gradient_helpers import (
+    mask_grad_for_constraints as _mask_grad_for_constraints,
+    update_state_gd as _update_state_gd,
 )
 from .solve_residual_objective_helpers import (
     assemble_residual_objective_terms as _assemble_residual_objective_terms,
@@ -3070,71 +3074,6 @@ def _maybe_dump_xc(
         ntor=int(static.cfg.ntor),
         lthreed=bool(static.cfg.lthreed),
         lasym=bool(static.cfg.lasym),
-    )
-
-
-def _update_state_gd(state: VMECState, grad: VMECState, *, step: float, scale_rz: float, scale_l: float) -> VMECState:
-    step = jnp.asarray(step, dtype=jnp.asarray(state.Rcos).dtype)
-    scale_rz = jnp.asarray(scale_rz, dtype=step.dtype)
-    scale_l = jnp.asarray(scale_l, dtype=step.dtype)
-    return VMECState(
-        layout=state.layout,
-        Rcos=jnp.asarray(state.Rcos) - step * scale_rz * jnp.asarray(grad.Rcos),
-        Rsin=jnp.asarray(state.Rsin) - step * scale_rz * jnp.asarray(grad.Rsin),
-        Zcos=jnp.asarray(state.Zcos) - step * scale_rz * jnp.asarray(grad.Zcos),
-        Zsin=jnp.asarray(state.Zsin) - step * scale_rz * jnp.asarray(grad.Zsin),
-        Lcos=jnp.asarray(state.Lcos) - step * scale_l * jnp.asarray(grad.Lcos),
-        Lsin=jnp.asarray(state.Lsin) - step * scale_l * jnp.asarray(grad.Lsin),
-    )
-
-
-def _mask_grad_for_constraints(
-    grad: VMECState,
-    static,
-    *,
-    idx00: Optional[int],
-    mask_lambda_axis: bool = True,
-) -> VMECState:
-    """Project gradients onto the feasible set implied by our constraints."""
-    gRcos = jnp.asarray(grad.Rcos)
-    gRsin = jnp.asarray(grad.Rsin)
-    gZcos = jnp.asarray(grad.Zcos)
-    gZsin = jnp.asarray(grad.Zsin)
-    gLcos = jnp.asarray(grad.Lcos)
-    gLsin = jnp.asarray(grad.Lsin)
-
-    # Fixed-boundary: don't update the edge surface for R/Z.
-    gRcos = gRcos.at[-1, :].set(0.0)
-    gRsin = gRsin.at[-1, :].set(0.0)
-    gZcos = gZcos.at[-1, :].set(0.0)
-    gZsin = gZsin.at[-1, :].set(0.0)
-
-    # Axis regularity: don't update m>0 coefficients at s=0 for R/Z.
-    m = jnp.asarray(static.modes.m)
-    mask_m0 = (m == 0).astype(gRcos.dtype)
-    gRcos = gRcos.at[0, :].set(gRcos[0, :] * mask_m0)
-    gRsin = gRsin.at[0, :].set(gRsin[0, :] * mask_m0)
-    gZcos = gZcos.at[0, :].set(gZcos[0, :] * mask_m0)
-    gZsin = gZsin.at[0, :].set(gZsin[0, :] * mask_m0)
-
-    # Lambda: optionally fix the axis row.
-    if bool(mask_lambda_axis):
-        gLcos = gLcos.at[0, :].set(0.0)
-        gLsin = gLsin.at[0, :].set(0.0)
-
-    # Lambda gauge: (m,n)=(0,0) stays 0 everywhere.
-    if idx00 is not None:
-        gLcos = gLcos.at[:, idx00].set(0.0)
-        gLsin = gLsin.at[:, idx00].set(0.0)
-
-    return VMECState(
-        layout=grad.layout,
-        Rcos=gRcos,
-        Rsin=gRsin,
-        Zcos=gZcos,
-        Zsin=gZsin,
-        Lcos=gLcos,
-        Lsin=gLsin,
     )
 
 

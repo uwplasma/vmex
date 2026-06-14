@@ -770,13 +770,16 @@ Steps taken:
    fixed-boundary edge constraints, magnetic-axis regularity, lambda-gauge
    projection, and NumPy/JAX coefficient-slice helpers now live in
    `vmec_jax/solve_constraint_helpers.py`.
-7. Kept backward-compatible private aliases in `solve.py` so existing tests and
+7. Performed the fourth low-risk extraction from `vmec_jax/solve.py`:
+   gradient-descent state updates and feasible-gradient projection now live in
+   `vmec_jax/solve_gradient_helpers.py`.
+8. Kept backward-compatible private aliases in `solve.py` so existing tests and
    internal imports continue to work.
 
 Results obtained:
 
 1. Draft PR #20 CI passed before the follow-up extraction.
-2. `solve.py` decreased from roughly 15438 to 14993 lines.
+2. `solve.py` decreased from roughly 15438 to 14932 lines.
 3. The extracted helpers are pure and synthetic-testable, making them a safe
    pattern for the next solver-kernel split.
 4. Focused Ruff, pytest, source-health, and fast docs checks passed for the
@@ -786,9 +789,9 @@ Best next steps:
 
 1. Keep all refactor work on PR #20 until the full plan is finalized.
 2. Continue Wave 1/Wave 2 by extracting small pure solver helpers from
-   `solve.py`: gradient masking, gradient-descent state updates,
-   preconditioner application payloads, and residual-loop controller-state
-   bookkeeping are the next low-risk candidates.
+   `solve.py`: preconditioner application payloads, residual-loop
+   controller-state bookkeeping, and scan/restart scalar policy adapters are
+   the next low-risk candidates.
 3. Add compatibility tests for every extracted private alias before ratcheting
    any source-health threshold.
 
@@ -800,6 +803,6 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 6%.
+- Differentiability/refactor implementation: 7%.
 - Source-health instrumentation: 100%.
-- Solver monolith reduction: 3% of the large-file extraction work.
+- Solver monolith reduction: 4% of the large-file extraction work.

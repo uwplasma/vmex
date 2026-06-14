@@ -24,6 +24,8 @@ Top-level package layout (selected):
 - ``vmec_jax/solve_constraint_helpers.py``: fixed-boundary edge constraints,
   magnetic-axis regularity, lambda-gauge projection, and related NumPy/JAX
   coefficient-slice helpers
+- ``vmec_jax/solve_gradient_helpers.py``: state gradient-descent updates and
+  feasible-gradient projections for fixed-boundary/axis/lambda constraints
 - ``vmec_jax/solve.py``: fixed-boundary solvers + VMEC2000 iteration loop
 - ``vmec_jax/driver.py``: CLI-facing fixed/free-boundary drivers, output
   policies, staged solve dispatch, and wout writing
