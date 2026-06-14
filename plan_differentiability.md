@@ -907,6 +907,13 @@ Steps taken:
     constraints, preconditioner, L-BFGS helpers, tolerance helpers, state
     pack/unpack, and JAX modules while the implementation owns the objective
     closures, line search, best-finite-step fallback, and result diagnostics.
+40. Extracted the fixed-boundary VMEC-style residual Gauss-Newton optimizer
+    loop into `vmec_jax/solve_fixed_boundary_residual_gn_optimizer.py`.  The
+    public `solve.solve_fixed_boundary_gn_vmec_residual` wrapper now injects
+    the residual-force context, residual vector assembly, constraints,
+    tolerance/damping helpers, state pack/unpack, and JAX modules while the
+    implementation owns the VJP/JVP normal-equations solve, late sparse-CG
+    lookup, damping retries, fallback descent, and result diagnostics.
 
 Results obtained:
 
@@ -984,6 +991,12 @@ Results obtained:
     optimizer subset passed with 160 tests and 1 expected skip; the optional
     end-to-end residual GN test skipped in this environment.  `solve.py`
     decreased from 11214 to 10888 lines.
+22. Residual Gauss-Newton loop extraction checks passed: compile and Ruff clean
+    for `solve.py`, the residual context helper, and both residual optimizer
+    helpers; 138 focused GN/residual/branch tests passed; the broader solver
+    optimizer subset passed with 160 tests and 2 expected skips.  `solve.py`
+    decreased from 10888 to 10596 lines while preserving the late
+    `jax.scipy.sparse.linalg.cg` lookup used by monkeypatch tests.
 
 Best next steps:
 
@@ -994,9 +1007,11 @@ Best next steps:
    file formatting are the next low-risk candidates.  The next larger
    candidate is a scan-runner/cache adapter split, but only after focused tests
    are identified for existing monkeypatch seams.
-   The next fixed-boundary optimizer candidate is the residual-objective
-   Gauss-Newton loop, but it owns sparse-CG/JVP seams and should move only with
-   focused GN tests and compatibility checks for `jax.scipy.sparse.linalg.cg`.
+   With lambda, fixed-boundary energy GD/L-BFGS, and residual-objective
+   L-BFGS/Gauss-Newton split out, the next `solve.py` candidates are the
+   residual-iteration controller-state bookkeeping and scan/restart scalar
+   policy adapters.  Avoid moving the full adaptive loop until branch
+   fingerprint gates are narrowed further.
 3. Continue broader refactors in parallel with `driver.py`, `optimization.py`,
    and `wout.py` by extracting pure policy/formatting/data-container seams
    before moving any physics kernels.
@@ -1011,7 +1026,7 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 47%.
+- Differentiability/refactor implementation: 48%.
 - Source-health instrumentation: 100%.
-- Solver monolith reduction: 43% of the large-file extraction work.
+- Solver monolith reduction: 45% of the large-file extraction work.
 - Driver workflow decomposition: 34%.
