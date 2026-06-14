@@ -900,6 +900,13 @@ Steps taken:
     flux/profile construction, VMEC-force `wout`-like payloads, trig tables,
     fixed-edge coefficients, convergence tolerance, and TOMNSP masks while
     preserving the historical `solve.py` monkeypatch seams for profile helpers.
+39. Extracted the fixed-boundary VMEC-style residual L-BFGS optimizer loop into
+    `vmec_jax/solve_fixed_boundary_residual_lbfgs_optimizer.py`.  The public
+    `solve.solve_fixed_boundary_lbfgs_vmec_residual` wrapper now injects the
+    residual-force context, profile aliases, residual-objective assembler,
+    constraints, preconditioner, L-BFGS helpers, tolerance helpers, state
+    pack/unpack, and JAX modules while the implementation owns the objective
+    closures, line search, best-finite-step fallback, and result diagnostics.
 
 Results obtained:
 
@@ -971,6 +978,12 @@ Results obtained:
     tests and 1 expected skip.  `solve.py` decreased from 11320 to 11214 lines
     while eliminating duplicated residual flux/profile/trig setup across
     residual-objective L-BFGS and Gauss-Newton.
+21. Residual L-BFGS loop extraction checks passed: compile and Ruff clean for
+    `solve.py`, `solve_residual_force_context.py`, and the new residual L-BFGS
+    helper; 101 focused residual/branch/helper tests passed; the broader solver
+    optimizer subset passed with 160 tests and 1 expected skip; the optional
+    end-to-end residual GN test skipped in this environment.  `solve.py`
+    decreased from 11214 to 10888 lines.
 
 Best next steps:
 
@@ -982,9 +995,8 @@ Best next steps:
    candidate is a scan-runner/cache adapter split, but only after focused tests
    are identified for existing monkeypatch seams.
    The next fixed-boundary optimizer candidate is the residual-objective
-   L-BFGS loop, now that the shared residual-force context is extracted.  Split
-   it with the same public-wrapper/dependency-injection pattern before moving
-   the Gauss-Newton loop, since Gauss-Newton also owns sparse-CG/JVP seams.
+   Gauss-Newton loop, but it owns sparse-CG/JVP seams and should move only with
+   focused GN tests and compatibility checks for `jax.scipy.sparse.linalg.cg`.
 3. Continue broader refactors in parallel with `driver.py`, `optimization.py`,
    and `wout.py` by extracting pure policy/formatting/data-container seams
    before moving any physics kernels.
@@ -999,7 +1011,7 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 46%.
+- Differentiability/refactor implementation: 47%.
 - Source-health instrumentation: 100%.
-- Solver monolith reduction: 41% of the large-file extraction work.
+- Solver monolith reduction: 43% of the large-file extraction work.
 - Driver workflow decomposition: 34%.
