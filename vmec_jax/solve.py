@@ -74,7 +74,13 @@ from .field import TWOPI, b2_from_bsup, bsup_from_geom, bsup_from_sqrtg_lambda
 from .fourier import eval_fourier_dtheta, eval_fourier_dzeta_phys
 from .geom import eval_geom
 from .grids import angle_steps
-from .performance_hotspot_helpers import scan_cache_miss_category_counts as _scan_cache_miss_category_counts
+from .solve_jit_cache_helpers import (
+    jit_cache_get as _jit_cache_get,
+    jit_cache_limit as _jit_cache_limit,  # noqa: F401 - re-exported for existing internal tests/importers.
+    jit_cache_put as _jit_cache_put,
+    record_scan_runner_cache_miss_categories as _record_scan_runner_cache_miss_categories,
+    strict_update_static_cache_key as _strict_update_static_cache_key,
+)
 from .solve_diagnostics_io import (
     _dump_freeb_axis_trace_record,
     _dump_freeb_control_trace_record,
@@ -268,80 +274,6 @@ def _resolve_preconditioner_tridi_policies(
         bool(env_precomputed) if use_precomputed is None else bool(use_precomputed),
         bool(env_lax_tridi) if use_lax_tridi is None else bool(use_lax_tridi),
     )
-
-
-def _jit_cache_limit(env_name: str, default: int) -> int:
-    """Return a non-negative JIT-cache size limit from an environment variable."""
-
-    raw = os.getenv(env_name, str(default)).strip()
-    try:
-        return max(0, int(raw))
-    except ValueError:
-        return max(0, int(default))
-
-
-def _jit_cache_get(cache: OrderedDict[tuple, Any], key: tuple):
-    cached = cache.get(key)
-    if cached is not None:
-        cache.move_to_end(key)
-    return cached
-
-
-def _jit_cache_put(cache: OrderedDict[tuple, Any], key: tuple, value, *, env_name: str, default: int):
-    limit = _jit_cache_limit(env_name, default)
-    if limit == 0:
-        return value
-    cache[key] = value
-    cache.move_to_end(key)
-    while len(cache) > limit:
-        cache.popitem(last=False)
-    return value
-
-def _strict_update_static_cache_key(static) -> tuple[Any, ...]:
-    """Return a structural cache key for strict-update kernels.
-
-    The strict-update kernel only depends on VMEC mode/radial layout metadata,
-    not on the Python object identity of ``static``.  Keying on ``id(static)``
-    caused accepted-point exact optimizer solves to compile/cache a new GPU
-    update kernel for each otherwise-identical callback.
-    """
-
-    cfg = static.cfg
-    modes = getattr(static, "modes", None)
-    s = getattr(static, "s", None)
-    s_shape = tuple(getattr(s, "shape", ()))
-    s_dtype = str(getattr(s, "dtype", ""))
-    return (
-        int(getattr(cfg, "ns", 0)),
-        int(getattr(cfg, "mpol", 0)),
-        int(getattr(cfg, "ntor", 0)),
-        int(getattr(cfg, "nfp", 0)),
-        bool(getattr(cfg, "lasym", False)),
-        bool(getattr(cfg, "lthreed", False)),
-        int(getattr(modes, "K", 0)) if modes is not None else 0,
-        s_shape,
-        s_dtype,
-    )
-
-
-def _record_scan_runner_cache_miss_categories(
-    stats: dict[str, float | int],
-    *,
-    requested_key: tuple,
-    existing_keys,
-) -> None:
-    """Record stable scan-runner miss causes into timing diagnostics."""
-
-    try:
-        counts = _scan_cache_miss_category_counts(tuple(requested_key), tuple(existing_keys))
-    except Exception:
-        counts = {"unknown": 1}
-    for category, count in counts.items():
-        safe_category = "".join(ch if ch.isalnum() else "_" for ch in str(category).strip().lower()).strip("_")
-        if not safe_category:
-            safe_category = "unknown"
-        key = f"scan_runner_cache_miss_category_{safe_category}_count"
-        stats[key] = int(stats.get(key, 0)) + int(count)
 
 
 def _strict_update_step_jit(
