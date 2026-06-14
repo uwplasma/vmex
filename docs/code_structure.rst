@@ -26,6 +26,8 @@ Top-level package layout (selected):
   coefficient-slice helpers
 - ``vmec_jax/solve_gradient_helpers.py``: state gradient-descent updates and
   feasible-gradient projections for fixed-boundary/axis/lambda constraints
+- ``vmec_jax/solve_preconditioner_helpers.py``: fixed-boundary mode-diagonal
+  and radial Dirichlet smoothing preconditioner kernels
 - ``vmec_jax/solve.py``: fixed-boundary solvers + VMEC2000 iteration loop
 - ``vmec_jax/driver.py``: CLI-facing fixed/free-boundary drivers, output
   policies, staged solve dispatch, and wout writing
