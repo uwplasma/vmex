@@ -39,6 +39,7 @@ from vmec_jax.wout import (
     _vmec_jxbforce_cos_coeffs,
     _vmec_jxbforce_sin_coeffs,
     _jxbforce_nyquist_limits,
+    _glasser_from_wout_mercier_terms,
     _nc_scalar,
     _pshalf_from_s,
     _safe_divide,
@@ -57,6 +58,8 @@ from vmec_jax.wout import (
     _vmec_wrout_nyquist_synthesis,
     assert_main_modes_match_wout,
 )
+from vmec_jax.mercier import glasser_resistive_interchange_from_mercier_terms
+from vmec_jax.wout_diagnostics import glasser_from_wout_mercier_terms
 from vmec_jax.vmec_tomnsp import vmec_trig_tables
 
 
@@ -143,6 +146,51 @@ def test_mesh_weight_and_safe_divide_helpers():
         _vmec_wint_from_trig_jax(
             SimpleNamespace(cosmui3=np.asarray([[1.0]]), mscale=np.asarray([]), cosnv=np.zeros((1, 1)))
         )
+
+
+def test_wout_glasser_fallback_matches_current_term_reconstruction_and_private_alias():
+    dmerc = np.asarray([0.0, 0.12, -0.03, 0.07, 0.0], dtype=float)
+    dshear = np.asarray([0.0, 0.04, 0.00, 0.09, 0.0], dtype=float)
+    dcurr = np.asarray([0.0, -0.05, 0.20, 0.03, 0.0], dtype=float)
+
+    d_r, h_term, correction, valid = glasser_from_wout_mercier_terms(
+        DMerc=dmerc,
+        Dshear=dshear,
+        Dcurr=dcurr,
+    )
+    alias = _glasser_from_wout_mercier_terms(DMerc=dmerc, Dshear=dshear, Dcurr=dcurr)
+
+    shear2 = np.maximum(4.0 * dshear, 0.0)
+    expected_h = -dcurr
+    expected_valid = shear2 > 0.0
+    expected_correction = np.zeros_like(dmerc)
+    expected_correction[expected_valid] = (
+        (expected_h[expected_valid] - 0.5 * shear2[expected_valid]) ** 2 / shear2[expected_valid]
+    )
+    expected_d_r = np.zeros_like(dmerc)
+    expected_d_r[expected_valid] = -dmerc[expected_valid] + expected_correction[expected_valid]
+
+    np.testing.assert_allclose(d_r, expected_d_r, rtol=1.0e-13, atol=1.0e-13)
+    np.testing.assert_allclose(h_term, expected_h, rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(correction, expected_correction, rtol=1.0e-13, atol=1.0e-13)
+    np.testing.assert_array_equal(valid, expected_valid)
+    for actual, expected in zip(alias, (d_r, h_term, correction, valid), strict=True):
+        np.testing.assert_array_equal(actual, expected)
+
+    public_terms = glasser_resistive_interchange_from_mercier_terms(
+        DMerc=dmerc,
+        shear=np.sqrt(shear2),
+        H=expected_h,
+    )
+    np.testing.assert_allclose(np.asarray(public_terms["D_R"]), d_r, rtol=1.0e-13, atol=1.0e-13)
+    np.testing.assert_allclose(np.asarray(public_terms["H"]), h_term, rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(
+        np.asarray(public_terms["glasser_correction"]),
+        correction,
+        rtol=1.0e-13,
+        atol=1.0e-13,
+    )
+    np.testing.assert_array_equal(np.asarray(public_terms["glasser_shear_valid"]), valid)
 
 
 def test_lambda_wout_half_mesh_roundtrip_covers_m_parity_branches():

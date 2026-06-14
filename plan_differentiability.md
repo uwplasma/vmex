@@ -920,6 +920,12 @@ Steps taken:
     re-exported from `free_boundary_adjoint.py`, while trace replay/fingerprint
     plans continue to live in the original module until their dependencies are
     narrowed further.
+42. Started the WOUT diagnostics split by extracting the persisted
+    Mercier-to-Glasser fallback reconstruction into
+    `vmec_jax/wout_diagnostics.py`.  `wout.py` retains the historical private
+    `_glasser_from_wout_mercier_terms` alias, and the focused test now checks
+    the extracted helper against both the legacy private alias and the public
+    differentiable `glasser_resistive_interchange_from_mercier_terms` algebra.
 
 Results obtained:
 
@@ -1009,6 +1015,11 @@ Results obtained:
     deselected tests; the coil-optimization same-branch smoke passed with 14
     tests and 17 deselected tests.  `free_boundary_adjoint.py` decreased from
     6941 to 6823 lines.
+24. WOUT diagnostic fallback extraction checks passed: compile and Ruff clean
+    for `wout.py`, `wout_diagnostics.py`, and the focused test; the WOUT helper,
+    Glasser objective, and finite-beta helper shard passed with 74 tests and 1
+    expected skip.  `wout.py` decreased from 6321 to 6291 lines while creating
+    a small stability-diagnostic seam for the DMerc/`D_R` AD-vs-FD lane.
 
 Best next steps:
 
@@ -1029,6 +1040,9 @@ Best next steps:
    policy/formatting/data-container seams before moving any physics kernels.
 4. Add compatibility tests for every extracted private alias before ratcheting
    any source-health threshold.
+5. For the DMerc/`D_R` lane, build on the new `wout_diagnostics.py` seam plus
+   the existing public differentiable Mercier algebra tests before touching the
+   larger JXBFORCE/Mercier geometry-reduction block in `wout.py`.
 
 User decisions needed:
 
@@ -1038,8 +1052,9 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 49%.
+- Differentiability/refactor implementation: 50%.
 - Source-health instrumentation: 100%.
 - Solver monolith reduction: 45% of the large-file extraction work.
 - Free-boundary adjoint monolith reduction: 8%.
 - Driver workflow decomposition: 34%.
+- WOUT diagnostic decomposition: 3%.

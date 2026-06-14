@@ -41,6 +41,7 @@ from .wout_io import (
     write_int_variable,
     write_nyquist_fourier_fields,
 )
+from .wout_diagnostics import glasser_from_wout_mercier_terms as _glasser_from_wout_mercier_terms
 from .vmec_tomnsp import vmec_trig_tables
 
 
@@ -3559,37 +3560,6 @@ def _compute_mercier(
         np.asarray(jdotb, dtype=float),
         np.asarray(bdotb, dtype=float),
         np.asarray(bdotgradv, dtype=float),
-    )
-
-
-def _glasser_from_wout_mercier_terms(
-    *,
-    DMerc: np.ndarray,
-    Dshear: np.ndarray,
-    Dcurr: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Return Glasser profiles from persisted VMEC Mercier components.
-
-    Wout files do not store the full Mercier surface integrals needed to
-    reconstruct the preferred state-level ``H`` expression.  For persistence
-    and old-file fallback we use the equivalent current-term reconstruction
-    ``H = -Dcurr`` and ``S^2 = 4*Dshear``.
-    """
-
-    dmerc = np.asarray(DMerc, dtype=float)
-    dshear = np.asarray(Dshear, dtype=float)
-    dcurr = np.asarray(Dcurr, dtype=float)
-    shear2 = np.maximum(4.0 * dshear, 0.0)
-    h_term = -dcurr
-    valid = shear2 > 0.0
-    denom = np.where(valid, shear2, 1.0)
-    correction = np.where(valid, (h_term - 0.5 * shear2) ** 2 / denom, 0.0)
-    d_r = np.where(valid, -dmerc + correction, 0.0)
-    return (
-        np.asarray(d_r, dtype=float),
-        np.asarray(h_term, dtype=float),
-        np.asarray(correction, dtype=float),
-        np.asarray(valid, dtype=bool),
     )
 
 
