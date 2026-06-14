@@ -821,17 +821,21 @@ Steps taken:
 22. Performed the nineteenth low-risk extraction from `vmec_jax/solve.py`:
     solver result dataclasses and the residual-loop scan carry container now
     live in `vmec_jax/solve_result_types.py`.
-23. Kept backward-compatible private aliases in `solve.py` so existing tests and
+23. Extended `vmec_jax/solve_result_types.py` with a twentieth low-risk
+    extraction: the `wout`-like VMEC force-kernel PyTree container now lives
+    outside the solver monolith while preserving the private `solve.py` alias.
+24. Kept backward-compatible private aliases in `solve.py` so existing tests and
     internal imports continue to work.
 
 Results obtained:
 
 1. Draft PR #20 CI passed before the follow-up extraction.
-2. `solve.py` decreased from roughly 15438 to 12983 lines locally.
+2. `solve.py` decreased from roughly 15438 to 12898 lines locally.
 3. The extracted helpers are pure and synthetic-testable, making them a safe
    pattern for the next solver-kernel split.
 4. Focused Ruff, pytest, source-health, and fast docs checks passed for the
-   extracted helper modules and result containers.
+   extracted helper modules, result containers, and force-kernel PyTree
+   container.
 
 Best next steps:
 

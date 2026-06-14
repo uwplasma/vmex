@@ -15,7 +15,6 @@ implementation uses gradient descent with a simple backtracking line search.
 from __future__ import annotations
 
 from collections import OrderedDict
-from dataclasses import dataclass
 from contextlib import nullcontext
 import time
 import os
@@ -194,6 +193,7 @@ from .solve_result_types import (
     SolveFixedBoundaryResult,
     SolveLambdaResult,
     SolveVmecResidualResult,
+    WoutLikeVmecForces as _WoutLikeVmecForces,
 )
 from .solve_axis_reset_helpers import (
     InitialAxisResetDecision as _InitialAxisResetDecision,  # noqa: F401 - re-exported for existing internal tests/importers.
@@ -1970,91 +1970,6 @@ def solve_fixed_boundary_lbfgs(
         step_history=np.asarray(step_history, dtype=float),
         diagnostics=diag,
     )
-
-
-@jax.tree_util.register_pytree_node_class
-@dataclass(frozen=True)
-class _WoutLikeVmecForces:
-    """Minimal `wout`-like container for VMEC force/residual kernels."""
-
-    nfp: int
-    mpol: int
-    ntor: int
-    lasym: bool
-    signgs: int
-
-    phipf: Any  # (ns,)
-    phips: Any  # (ns,)
-    chipf: Any  # (ns,)  (VMEC `wout` half-mesh averaged convention)
-    pres: Any  # (ns,)  (half mesh, VMEC internal units mu0*Pa)
-    mass: Any | None = None  # (ns,) mass profile on half mesh (VMEC internal units)
-    gamma: float | None = None
-    ncurr: int = 0
-    lcurrent: bool = True
-    icurv: Any | None = None  # (ns,) integrated toroidal current profile
-    flux_is_internal: bool = True
-    phipf_internal: Any | None = None
-    chipf_internal: Any | None = None
-    chips_eff: Any | None = None
-
-    def tree_flatten(self):
-        children = (
-            self.phipf,
-            self.phips,
-            self.chipf,
-            self.pres,
-            self.mass,
-            self.icurv,
-            self.phipf_internal,
-            self.chipf_internal,
-            self.chips_eff,
-        )
-        aux = (
-            int(self.nfp),
-            int(self.mpol),
-            int(self.ntor),
-            bool(self.lasym),
-            int(self.signgs),
-            None if self.gamma is None else float(self.gamma),
-            int(self.ncurr),
-            bool(self.lcurrent),
-            bool(self.flux_is_internal),
-        )
-        return children, aux
-
-    @classmethod
-    def tree_unflatten(cls, aux_data, children):
-        (
-            nfp,
-            mpol,
-            ntor,
-            lasym,
-            signgs,
-            gamma,
-            ncurr,
-            lcurrent,
-            flux_is_internal,
-        ) = aux_data
-        return cls(
-            nfp=int(nfp),
-            mpol=int(mpol),
-            ntor=int(ntor),
-            lasym=bool(lasym),
-            signgs=int(signgs),
-            gamma=gamma,
-            ncurr=int(ncurr),
-            lcurrent=bool(lcurrent),
-            flux_is_internal=bool(flux_is_internal),
-            phipf=children[0],
-            phips=children[1],
-            chipf=children[2],
-            pres=children[3],
-            mass=children[4],
-            icurv=children[5],
-            phipf_internal=children[6],
-            chipf_internal=children[7],
-            chips_eff=children[8],
-        )
 
 
 def solve_fixed_boundary_lbfgs_vmec_residual(

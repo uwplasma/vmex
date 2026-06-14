@@ -49,8 +49,9 @@ Top-level package layout (selected):
   dump helpers
 - ``vmec_jax/solve_metric_dump_helpers.py``: optional metric,
   preconditioner-input, and VMEC internal state-vector debug dump helpers
-- ``vmec_jax/solve_result_types.py``: solver result dataclasses and scan carry
-  containers shared by solve, driver, and tests
+- ``vmec_jax/solve_result_types.py``: solver result dataclasses, scan carry
+  containers, and ``wout``-like force-kernel PyTree containers shared by solve,
+  driver, implicit differentiation, and tests
 - ``vmec_jax/solve_scan_resume_helpers.py``: VMEC2000-style scan resume-state
   initialization and carry-field restoration
 - ``vmec_jax/solve.py``: fixed-boundary solvers + VMEC2000 iteration loop
