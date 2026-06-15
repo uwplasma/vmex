@@ -330,6 +330,33 @@ _SETUP_PHASE_KEYS = (
 )
 
 
+def _initial_setup_phase_timings() -> dict[str, float]:
+    """Return zeroed setup-phase timing buckets used by the residual loop."""
+
+    return {key: 0.0 for key in _SETUP_PHASE_KEYS}
+
+
+def _setup_timer_start(*, timing_enabled: bool, perf_counter: Callable[[], float]) -> float | None:
+    """Return a setup timer start value only when timing is enabled."""
+
+    return perf_counter() if bool(timing_enabled) else None
+
+
+def _record_setup_timing(
+    timings: dict[str, float],
+    key: str,
+    start: float | None,
+    *,
+    perf_counter: Callable[[], float],
+) -> bool:
+    """Accumulate one setup timing bucket if ``start`` is active."""
+
+    if start is None:
+        return False
+    timings[key] = float(timings.get(key, 0.0)) + (perf_counter() - float(start))
+    return True
+
+
 def _residual_iter_timing_setup_scalars(timing_stats: dict[str, float]) -> tuple[float, float, float]:
     setup_phase_total = sum(float(timing_stats.get(key, 0.0)) for key in _SETUP_PHASE_KEYS)
     setup_unattributed = max(

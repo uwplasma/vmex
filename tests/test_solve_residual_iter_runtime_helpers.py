@@ -9,16 +9,19 @@ from vmec_jax.solve_residual_iter_runtime_helpers import (
     _device_get_floats,
     _format_ptau_dump_row,
     _format_residual_iter_timing_message,
+    _initial_setup_phase_timings,
     _maybe_dump_ptau,
     _maybe_print_nonscan_state_debug,
     _nonscan_state_debug_payload,
     _ptau_dump_enabled,
     _record_compute_force_timing,
+    _record_setup_timing,
     _scan_block_until_ready,
     _scan_device_run_ready,
     _scan_print_uses_debug_callback,
     _scan_print_uses_debug_print,
     _scan_print_uses_io_callback,
+    _setup_timer_start,
     _vmec_freeb_plascur_from_bcovar,
 )
 
@@ -60,6 +63,27 @@ def test_device_get_floats_batches_scalar_materialization():
 
     assert _device_get_floats(np.asarray(1.25), 2.5, jax_module=FakeJax) == (1.25, 2.5)
     assert len(FakeJax.calls) == 1
+
+
+def test_setup_timing_helpers_initialize_and_accumulate():
+    timings = _initial_setup_phase_timings()
+    assert set(timings) == {
+        "setup_static_grid_rebuild",
+        "setup_freeb_policy",
+        "setup_boundary_profiles",
+        "setup_cache_key_hash",
+        "setup_ptau_constants",
+        "setup_index_constants",
+        "setup_update_constants",
+    }
+    assert all(value == 0.0 for value in timings.values())
+    assert _setup_timer_start(timing_enabled=False, perf_counter=lambda: 10.0) is None
+    assert _setup_timer_start(timing_enabled=True, perf_counter=lambda: 10.0) == 10.0
+    assert not _record_setup_timing(timings, "setup_freeb_policy", None, perf_counter=lambda: 12.0)
+    assert _record_setup_timing(timings, "setup_freeb_policy", 10.0, perf_counter=lambda: 12.5)
+    assert timings["setup_freeb_policy"] == 2.5
+    assert _record_setup_timing(timings, "setup_freeb_policy", 20.0, perf_counter=lambda: 21.0)
+    assert timings["setup_freeb_policy"] == 3.5
 
 
 def test_ptau_dump_enabled_requires_env_and_directory():
