@@ -1171,15 +1171,6 @@ def solve_fixed_boundary_residual_iter(
     if stage_transition_factor <= 0.0 or stage_transition_scale <= 0.0:
         stage_prev_fsq = None
 
-    def _converged_residuals_host(*, fsqr: float, fsqz: float, fsql: float) -> bool:
-        return _residual_convergence_flags(
-            fsqr=fsqr,
-            fsqz=fsqz,
-            fsql=fsql,
-            ftol=ftol,
-            fsq_total_target=fsq_total_target,
-        )[2]
-
     if use_scan and vmec2000_control and auto_flip_force:
         auto_flip_force = False
     jit_forces = bool(jit_forces)
@@ -7104,7 +7095,13 @@ def solve_fixed_boundary_residual_iter(
             # Defer convergence exit until after preconditioned diagnostics are
             # computed for this iteration, so fsqr1/fsqz1/fsql1 histories and
             # VMEC-style tables remain length-aligned.
-            converged_physical = _converged_residuals_host(fsqr=fsqr_f, fsqz=fsqz_f, fsql=fsql_f)
+            converged_physical = _residual_convergence_flags(
+                fsqr=fsqr_f,
+                fsqz=fsqz_f,
+                fsql=fsql_f,
+                ftol=ftol,
+                fsq_total_target=fsq_total_target,
+            )[2]
             accepted_control_ptau_payload: tuple[Any, Any, Any] | None = None
             fuse_accepted_control_ptau = (
                 bool(free_boundary_enabled)

@@ -1175,6 +1175,12 @@ Results obtained:
     as a compatibility re-export for existing tests/importers.  Focused checks
     passed for Ruff, compileall, and the ptau/radial helper branches.  `solve.py`
     decreased to 10412 lines.
+44. Removed the single-use host convergence closure in the residual loop.  The
+    physical convergence check now calls the already-tested
+    `_residual_convergence_flags` runtime helper directly, keeping strict/total
+    threshold policy in one place while leaving scan and VMEC2000 table behavior
+    unchanged.  Focused convergence/runtime tests and compileall passed.
+    `solve.py` decreased to 10409 lines.
 
 Best next steps:
 
