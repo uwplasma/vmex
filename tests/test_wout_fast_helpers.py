@@ -8,6 +8,7 @@ import pytest
 
 from vmec_jax.namelist import InData
 import vmec_jax.wout as wout_module
+from vmec_jax import wout_diagnostics
 from vmec_jax.wout import (
     MU0,
     _apply_bsubv_equif_correction,
@@ -23,6 +24,7 @@ from vmec_jax.wout import (
     _compute_ctor_from_buco,
     _icurv_full_mesh_from_indata,
     _jxbforce_nyquist_limits,
+    _lambda_half_mesh_weights,
     _nc_scalar,
     _pshalf_from_s,
     _read_wout_scalar_metadata,
@@ -61,6 +63,16 @@ def test_safe_divide_uses_unit_denominator_for_exact_zeros() -> None:
     num = np.asarray([2.0, 4.0, 6.0])
     den = np.asarray([1.0, 0.0, -2.0])
     np.testing.assert_allclose(_safe_divide(num, den), [2.0, 4.0, -3.0])
+    np.testing.assert_allclose(wout_diagnostics.safe_divide(num, den), [2.0, 4.0, -3.0])
+
+
+def test_wout_diagnostics_mesh_helpers_match_vmec_aliases() -> None:
+    s = np.asarray([0.0, 0.25, 1.0])
+    np.testing.assert_allclose(wout_diagnostics.pshalf_from_s(s), _pshalf_from_s(s))
+    sm, sp = wout_diagnostics.lambda_half_mesh_weights(s)
+    sm_alias, sp_alias = _lambda_half_mesh_weights(s)
+    np.testing.assert_allclose(sm, sm_alias)
+    np.testing.assert_allclose(sp, sp_alias)
 
 
 def test_wint_nyquist_and_scalxc_helper_edges(monkeypatch) -> None:

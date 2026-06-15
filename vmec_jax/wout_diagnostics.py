@@ -10,6 +10,54 @@ from __future__ import annotations
 import numpy as np
 
 
+def pshalf_from_s(s_full: np.ndarray) -> np.ndarray:
+    """Return VMEC half-mesh ``sqrt(s)`` values used in parity formulas."""
+
+    s_arr = np.asarray(s_full, dtype=float)
+    if s_arr.shape[0] < 2:
+        return np.sqrt(np.maximum(s_arr, 0.0))
+    sh = 0.5 * (s_arr[1:] + s_arr[:-1])
+    p = np.concatenate([sh[:1], sh], axis=0)
+    return np.sqrt(np.maximum(p, 0.0))
+
+
+def lambda_half_mesh_weights(s: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Return VMEC Fortran-style ``sm``/``sp`` weights for lambda half-mesh maps."""
+
+    s_arr = np.asarray(s, dtype=float).reshape(-1)
+    ns = int(s_arr.shape[0])
+    if ns < 2:
+        return np.zeros((ns + 1,), dtype=float), np.zeros((ns + 1,), dtype=float)
+
+    hs = float(s_arr[1] - s_arr[0])
+    sqrts_f = np.zeros((ns + 1,), dtype=float)
+    shalf_f = np.zeros((ns + 1,), dtype=float)
+    for i in range(1, ns + 1):
+        sqrts_f[i] = np.sqrt(max(hs * float(i - 1), 0.0))
+        shalf_f[i] = np.sqrt(hs * abs(float(i) - 1.5))
+    sqrts_f[ns] = 1.0
+
+    sm_f = np.zeros((ns + 1,), dtype=float)
+    sp_f = np.zeros((ns + 1,), dtype=float)
+    for i in range(2, ns + 1):
+        sm_f[i] = shalf_f[i] / sqrts_f[i] if sqrts_f[i] != 0.0 else 0.0
+        if i < ns:
+            sp_f[i] = shalf_f[i + 1] / sqrts_f[i] if sqrts_f[i] != 0.0 else 0.0
+        else:
+            sp_f[i] = 1.0 / sqrts_f[i] if sqrts_f[i] != 0.0 else 0.0
+    sm_f[1] = 0.0
+    sp_f[0] = 0.0
+    sp_f[1] = sm_f[2] if ns >= 2 else 0.0
+    return sm_f, sp_f
+
+
+def safe_divide(num: np.ndarray, den: np.ndarray) -> np.ndarray:
+    """Divide with VMEC's zero-denominator convention for diagnostic scalars."""
+
+    den_safe = np.where(np.abs(den) > 0.0, den, 1.0)
+    return num / den_safe
+
+
 def glasser_from_wout_mercier_terms(
     *,
     DMerc: np.ndarray,
@@ -41,4 +89,9 @@ def glasser_from_wout_mercier_terms(
     )
 
 
-__all__ = ["glasser_from_wout_mercier_terms"]
+__all__ = [
+    "glasser_from_wout_mercier_terms",
+    "lambda_half_mesh_weights",
+    "pshalf_from_s",
+    "safe_divide",
+]
