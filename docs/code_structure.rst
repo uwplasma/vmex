@@ -97,6 +97,9 @@ Top-level package layout (selected):
 - ``vmec_jax/solve_residual_iter_force_cache_helpers.py``: structural force
   JIT cache keys and callable selection while preserving solver-owned cache
   objects
+- ``vmec_jax/solve_residual_iter_force_payload_helpers.py``:
+  residual-iteration force-payload edge masking, Z-force NaN preservation, and
+  VMEC scalar force-norm assembly seams
 - ``vmec_jax/solve.py``: fixed-boundary solvers + VMEC2000 iteration loop
 - ``vmec_jax/driver.py``: CLI-facing fixed/free-boundary drivers, output
   policies, staged solve dispatch, and wout writing
