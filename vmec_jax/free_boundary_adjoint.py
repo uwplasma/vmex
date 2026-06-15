@@ -33,6 +33,11 @@ from .free_boundary_adjoint_controller import (
     jax_visible_unrolled_accepted_only_nonlinear_controller_jax,
     pytree_directional_derivative_check_jax,
 )
+from .free_boundary_adjoint_objective_helpers import (
+    static_weight_is_zero as _static_weight_is_zero,
+    tree_weighted_half_norm as _tree_weighted_half_norm,
+    weighted_half_norm as _weighted_half_norm,
+)
 from .free_boundary_adjoint_trace_controls import (
     _accepted_trace_reset_flags,
     accepted_trace_effective_controller_masks as _accepted_trace_effective_controller_masks,
@@ -5881,42 +5886,3 @@ def direct_coil_projected_mode_fixed_point_directional_check_jax(
         "objective_components": solved["objective_components"],
     }
 
-
-def _weighted_half_norm(value: Any, weight: Any) -> Any:
-    """Return ``0.5 * sum(weight * value**2)`` with scalar/array weights."""
-
-    arr = jnp.asarray(value)
-    w = jnp.asarray(weight, dtype=arr.dtype)
-    return 0.5 * jnp.sum(w * arr * arr)
-
-
-def _static_weight_is_zero(weight: Any) -> bool:
-    """Return true only for host-known scalar/array weights that are exactly zero."""
-
-    try:
-        arr = np.asarray(weight)
-    except Exception:
-        return False
-    if arr.size == 0:
-        return False
-    try:
-        return bool(np.all(arr == 0.0))
-    except Exception:
-        return False
-
-
-def _tree_weighted_half_norm(values: Any, weight: Any) -> Any:
-    """Return the sum of weighted half-norms over numeric pytree leaves."""
-
-    leaves = tree_util.tree_leaves(values)
-    if not leaves:
-        return jnp.asarray(0.0)
-    total = jnp.asarray(0.0)
-    for leaf in leaves:
-        if leaf is None:
-            continue
-        try:
-            total = total + _weighted_half_norm(leaf, weight)
-        except TypeError:
-            continue
-    return total

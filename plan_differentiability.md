@@ -1250,6 +1250,14 @@ Results obtained:
     alias, with unit coverage for scalar objectives, mapping objectives,
     non-scalar error paths, and empty mappings.  Focused helper tests, Ruff,
     and compileall passed.  `free_boundary_adjoint.py` decreased to 5922 lines.
+56. Extracted generic weighted objective algebra into
+    `free_boundary_adjoint_objective_helpers.py`.  Branch-local scalar reports
+    and projected-mode objectives now import weighted half-norm, static
+    zero-weight detection, and pytree half-norm accumulation through private
+    compatibility aliases.  Helper tests cover alias stability, scalar/array
+    weights, empty pytrees, and host-known zero-weight edge cases.  Focused
+    helper tests, Ruff, and compileall passed.  `free_boundary_adjoint.py`
+    decreased to 5888 lines.
 
 Best next steps:
 
@@ -1277,9 +1285,9 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 73%.
+- Differentiability/refactor implementation: 74%.
 - Source-health instrumentation: 100%.
 - Solver monolith reduction: 57% of the large-file extraction work.
-- Free-boundary adjoint monolith reduction: 23%.
+- Free-boundary adjoint monolith reduction: 24%.
 - Driver workflow decomposition: 34%.
 - WOUT diagnostic decomposition: 4%.

@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 import vmec_jax.free_boundary_adjoint as fba
+import vmec_jax.free_boundary_adjoint_objective_helpers as objective_helpers
 import vmec_jax.free_boundary_adjoint_replay_plan_helpers as replay_plan_helpers
 import vmec_jax.free_boundary_adjoint_runtime_helpers as runtime_helpers
 import vmec_jax.free_boundary_adjoint_trace_controls as trace_controls
@@ -153,6 +154,9 @@ def test_free_boundary_adjoint_trace_stackability_error_paths() -> None:
     assert fba._extract_adjoint_step_trace is replay_plan_helpers.extract_adjoint_step_trace
     assert fba._slice_replay_controls is replay_plan_helpers.slice_replay_controls
     assert fba._stackability_probe is replay_plan_helpers.stackability_probe
+    assert fba._weighted_half_norm is objective_helpers.weighted_half_norm
+    assert fba._static_weight_is_zero is objective_helpers.static_weight_is_zero
+    assert fba._tree_weighted_half_norm is objective_helpers.tree_weighted_half_norm
     assert (
         fba._accepted_step_policy_signature_for_complete_payload
         is replay_plan_helpers.accepted_step_policy_signature_for_complete_payload
@@ -245,6 +249,24 @@ def test_free_boundary_adjoint_trace_stackability_error_paths() -> None:
         replay_plan_helpers.complete_solve_objective_values({"a": np.asarray([1.0, 2.0])})
     with pytest.raises(ValueError, match="scalar or a mapping"):
         replay_plan_helpers.complete_solve_objective_values(np.asarray([1.0, 2.0]))
+    np.testing.assert_allclose(
+        np.asarray(objective_helpers.weighted_half_norm(np.asarray([1.0, 2.0]), 2.0)),
+        5.0,
+    )
+    np.testing.assert_allclose(
+        np.asarray(objective_helpers.tree_weighted_half_norm({"a": np.asarray([1.0, 2.0]), "b": np.asarray([3.0])}, 1.0)),
+        7.0,
+    )
+    np.testing.assert_allclose(np.asarray(objective_helpers.tree_weighted_half_norm({}, 1.0)), 0.0)
+    assert objective_helpers.static_weight_is_zero(np.zeros(2))
+    assert not objective_helpers.static_weight_is_zero(np.asarray([0.0, 1.0]))
+    assert not objective_helpers.static_weight_is_zero(np.asarray([]))
+
+    class BadArray:
+        def __array__(self, _dtype=None):
+            raise TypeError("synthetic bad array")
+
+    assert not objective_helpers.static_weight_is_zero(BadArray())
     assert fba._accepted_trace_reset_flags([]) == ()
     assert fba._accepted_trace_reset_flags([{}, {}]) == (False, False)
     trace0 = {
