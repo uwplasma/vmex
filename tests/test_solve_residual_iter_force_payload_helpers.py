@@ -7,7 +7,9 @@ import numpy as np
 from vmec_jax.solve_residual_iter_force_payload_helpers import (
     ResidualForceMetricPayload,
     force_z_channel_square_sums,
+    maybe_debug_force_z_channel_square_sums,
     metric_force_payload_after_edge_policy,
+    residual_force_payload_after_m1_scalxc_with_scan_debug,
     residual_force_gcx2_after_edge_policy,
     residual_force_z_nan_guard,
     resolve_residual_force_mask_pack,
@@ -65,6 +67,86 @@ def test_force_z_channel_square_sums_handles_asymmetric_and_symmetric_only_paylo
     )
     _, fzcs2_symmetric = force_z_channel_square_sums(symmetric)
     assert float(np.asarray(fzcs2_symmetric)) == 0.0
+
+
+def test_maybe_debug_force_z_channel_square_sums_uses_injected_debug_printer() -> None:
+    calls = []
+
+    class DebugPrinter:
+        @staticmethod
+        def print(message, **kwargs):
+            calls.append((message, kwargs))
+
+    frzl = _frzl()
+    maybe_debug_force_z_channel_square_sums(
+        frzl,
+        enabled=False,
+        message="ignored {fzsc} {fzcs}",
+        debug_module=DebugPrinter(),
+    )
+    assert calls == []
+
+    maybe_debug_force_z_channel_square_sums(
+        frzl,
+        enabled=True,
+        message="debug {fzsc} {fzcs}",
+        debug_module=DebugPrinter(),
+    )
+    assert calls[0][0] == "debug {fzsc} {fzcs}"
+    np.testing.assert_allclose(np.asarray(calls[0][1]["fzsc"]), np.sum(frzl.fzsc * frzl.fzsc))
+    np.testing.assert_allclose(np.asarray(calls[0][1]["fzcs"]), np.sum(frzl.fzcs * frzl.fzcs))
+
+
+def test_residual_force_payload_after_m1_scalxc_debug_wrapper_selects_fast_and_debug_paths() -> None:
+    frzl = _frzl()
+    final_calls = []
+
+    def final_func(payload, **kwargs):
+        final_calls.append(kwargs)
+        return payload
+
+    got = residual_force_payload_after_m1_scalxc_with_scan_debug(
+        frzl,
+        s=np.asarray([0.0, 0.5, 1.0]),
+        apply_m1_constraints=True,
+        lconm1=True,
+        zero_m1=True,
+        scan_debug_force_enabled=False,
+        final_func=final_func,
+    )
+    assert got is frzl
+    assert final_calls[0]["apply_m1_constraints"] is True
+
+    debug_calls = []
+
+    class DebugPrinter:
+        @staticmethod
+        def print(message, **kwargs):
+            debug_calls.append((message, kwargs))
+
+    after_m1 = _frzl()
+    after_zero = _frzl()
+    after_scalxc = _frzl()
+
+    def stages_func(_payload, **_kwargs):
+        return SimpleNamespace(after_m1=after_m1, after_zero_m1=after_zero, after_scalxc=after_scalxc)
+
+    got = residual_force_payload_after_m1_scalxc_with_scan_debug(
+        frzl,
+        s=np.asarray([0.0, 0.5, 1.0]),
+        apply_m1_constraints=True,
+        lconm1=True,
+        zero_m1=True,
+        scan_debug_force_enabled=True,
+        debug_module=DebugPrinter(),
+        stages_func=stages_func,
+    )
+    assert got is after_scalxc
+    assert [call[0] for call in debug_calls] == [
+        "[scan-debug-m1] fzsc2={fzsc:.6e} fzcs2={fzcs:.6e}",
+        "[scan-debug-zero] fzsc2={fzsc:.6e} fzcs2={fzcs:.6e}",
+        "[scan-debug-scalxc] fzsc2={fzsc:.6e} fzcs2={fzcs:.6e}",
+    ]
 
 
 def test_resolve_residual_force_mask_pack_defaults_to_metric_edge_policy() -> None:

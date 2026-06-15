@@ -79,7 +79,9 @@ from .solve_residual_iter_force_cache_helpers import (
     select_compute_forces_callable as _select_compute_forces_callable,
 )
 from .solve_residual_iter_force_payload_helpers import (
-    force_z_channel_square_sums as _force_z_channel_square_sums,
+    force_z_channel_square_sums as _force_z_channel_square_sums,  # noqa: F401 - compatibility alias for tests/internal users.
+    maybe_debug_force_z_channel_square_sums as _maybe_debug_force_z_channel_square_sums,
+    residual_force_payload_after_m1_scalxc_with_scan_debug as _residual_force_payload_after_m1_scalxc_with_scan_debug,
     residual_force_gcx2_after_edge_policy as _residual_force_gcx2_after_edge_policy,
     resolve_residual_force_mask_pack as _resolve_residual_force_mask_pack,
 )
@@ -172,8 +174,8 @@ from .solve_force_payload_helpers import (
     ForceBlocks as _ForceBlocks,
     normalize_force_blocks as _normalize_force_blocks,  # noqa: F401 - re-exported for internal tests/importers.
     preconditioner_output_blocks_np as _preconditioner_output_blocks_np,
-    residual_force_payload_after_m1_scalxc as _residual_force_payload_after_m1_scalxc,
-    residual_force_payload_m1_scalxc_stages as _residual_force_payload_m1_scalxc_stages,
+    residual_force_payload_after_m1_scalxc as _residual_force_payload_after_m1_scalxc,  # noqa: F401 - compatibility alias for tests/internal users.
+    residual_force_payload_m1_scalxc_stages as _residual_force_payload_m1_scalxc_stages,  # noqa: F401 - compatibility alias for tests/internal users.
     zero_edge_rz_force_block as _zero_edge_rz_force_block,  # noqa: F401 - re-exported for internal tests/importers.
     zero_edge_rz_force_blocks as _zero_edge_rz_force_blocks,
 )
@@ -1988,18 +1990,12 @@ def solve_fixed_boundary_residual_iter(
             include_edge=bool(include_edge_residual),
             masks=mask_pack,
         )
-        if os.getenv("VMEC_JAX_SCAN_DEBUG_FORCE", "") not in ("", "0"):
-            try:
-                from jax import debug as _jax_debug  # type: ignore
-            except Exception:
-                _jax_debug = None  # type: ignore
-            if _jax_debug is not None:
-                fzsc2_raw, fzcs2_raw = _force_z_channel_square_sums(frzl)
-                _jax_debug.print(
-                    "[scan-debug-raw] fzsc2_raw={fzsc:.6e} fzcs2_raw={fzcs:.6e}",
-                    fzsc=fzsc2_raw,
-                    fzcs=fzcs2_raw,
-                )
+        scan_debug_force_enabled = os.getenv("VMEC_JAX_SCAN_DEBUG_FORCE", "") not in ("", "0")
+        _maybe_debug_force_z_channel_square_sums(
+            frzl,
+            enabled=bool(scan_debug_force_enabled),
+            message="[scan-debug-raw] fzsc2_raw={fzsc:.6e} fzcs2_raw={fzcs:.6e}",
+        )
         if os.getenv("VMEC_JAX_DUMP_HLO_FORCE_TOMNSPS", "").strip().lower() not in ("", "0", "false", "no"):
             try:
 
@@ -2036,59 +2032,14 @@ def solve_fixed_boundary_residual_iter(
                 pass
         if iter_idx is not None:
             _maybe_dump_tomnsps(frzl=frzl, static=static, iter_idx=int(iter_idx), label="raw")
-        scan_debug_force_enabled = os.getenv("VMEC_JAX_SCAN_DEBUG_FORCE", "") not in ("", "0")
-        if scan_debug_force_enabled:
-            force_stages = _residual_force_payload_m1_scalxc_stages(
-                frzl,
-                s=s,
-                apply_m1_constraints=bool(apply_m1_constraints),
-                lconm1=bool(getattr(static.cfg, "lconm1", True)),
-                zero_m1=zero_m1,
-            )
-            if bool(apply_m1_constraints):
-                try:
-                    from jax import debug as _jax_debug  # type: ignore
-                except Exception:
-                    _jax_debug = None  # type: ignore
-                if _jax_debug is not None:
-                    fzsc2_c, fzcs2_c = _force_z_channel_square_sums(force_stages.after_m1)
-                    _jax_debug.print(
-                        "[scan-debug-m1] fzsc2={fzsc:.6e} fzcs2={fzcs:.6e}",
-                        fzsc=fzsc2_c,
-                        fzcs=fzcs2_c,
-                    )
-            try:
-                from jax import debug as _jax_debug  # type: ignore
-            except Exception:
-                _jax_debug = None  # type: ignore
-            if _jax_debug is not None:
-                fzsc2_z, fzcs2_z = _force_z_channel_square_sums(force_stages.after_zero_m1)
-                _jax_debug.print(
-                    "[scan-debug-zero] fzsc2={fzsc:.6e} fzcs2={fzcs:.6e}",
-                    fzsc=fzsc2_z,
-                    fzcs=fzcs2_z,
-                )
-            frzl = force_stages.after_scalxc
-        else:
-            frzl = _residual_force_payload_after_m1_scalxc(
-                frzl,
-                s=s,
-                apply_m1_constraints=bool(apply_m1_constraints),
-                lconm1=bool(getattr(static.cfg, "lconm1", True)),
-                zero_m1=zero_m1,
-            )
-        if scan_debug_force_enabled:
-            try:
-                from jax import debug as _jax_debug  # type: ignore
-            except Exception:
-                _jax_debug = None  # type: ignore
-            if _jax_debug is not None:
-                fzsc2_s, fzcs2_s = _force_z_channel_square_sums(frzl)
-                _jax_debug.print(
-                    "[scan-debug-scalxc] fzsc2={fzsc:.6e} fzcs2={fzcs:.6e}",
-                    fzsc=fzsc2_s,
-                    fzcs=fzcs2_s,
-                )
+        frzl = _residual_force_payload_after_m1_scalxc_with_scan_debug(
+            frzl,
+            s=s,
+            apply_m1_constraints=bool(apply_m1_constraints),
+            lconm1=bool(getattr(static.cfg, "lconm1", True)),
+            zero_m1=zero_m1,
+            scan_debug_force_enabled=bool(scan_debug_force_enabled),
+        )
         if iter_idx is not None:
             _maybe_dump_gc(frzl=frzl, static=static, iter_idx=int(iter_idx), label="raw")
 

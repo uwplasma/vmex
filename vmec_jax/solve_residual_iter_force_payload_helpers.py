@@ -5,14 +5,20 @@ from __future__ import annotations
 from typing import Any, Callable, NamedTuple
 
 from ._compat import jnp
-from .solve_force_payload_helpers import zero_edge_rz_force_blocks
+from .solve_force_payload_helpers import (
+    residual_force_payload_after_m1_scalxc,
+    residual_force_payload_m1_scalxc_stages,
+    zero_edge_rz_force_blocks,
+)
 from .vmec_residue import vmec_gcx2_from_tomnsps
 from .vmec_tomnsp import TomnspsRZL
 
 __all__ = [
     "ResidualForceMetricPayload",
     "force_z_channel_square_sums",
+    "maybe_debug_force_z_channel_square_sums",
     "metric_force_payload_after_edge_policy",
+    "residual_force_payload_after_m1_scalxc_with_scan_debug",
     "residual_force_gcx2_after_edge_policy",
     "residual_force_z_nan_guard",
     "resolve_residual_force_mask_pack",
@@ -37,6 +43,85 @@ def force_z_channel_square_sums(frzl: TomnspsRZL) -> tuple[Any, Any]:
         return fzsc2, jnp.asarray(0.0, dtype=fzsc.dtype)
     fzcs = jnp.asarray(frzl.fzcs)
     return fzsc2, jnp.sum(fzcs * fzcs)
+
+
+def _debug_module_or_none() -> Any | None:
+    try:
+        from jax import debug as jax_debug  # type: ignore
+
+        return jax_debug
+    except Exception:
+        return None
+
+
+def maybe_debug_force_z_channel_square_sums(
+    frzl: TomnspsRZL,
+    *,
+    enabled: bool,
+    message: str,
+    debug_module: Any | None = None,
+) -> None:
+    """Print Z-force channel square sums through ``jax.debug`` when enabled."""
+
+    if not bool(enabled):
+        return
+    debug = _debug_module_or_none() if debug_module is None else debug_module
+    if debug is None:
+        return
+    fzsc2, fzcs2 = force_z_channel_square_sums(frzl)
+    debug.print(message, fzsc=fzsc2, fzcs=fzcs2)
+
+
+def residual_force_payload_after_m1_scalxc_with_scan_debug(
+    frzl: TomnspsRZL,
+    *,
+    s: Any,
+    apply_m1_constraints: bool,
+    lconm1: bool,
+    zero_m1: Any,
+    scan_debug_force_enabled: bool,
+    debug_module: Any | None = None,
+    stages_func: Callable[..., Any] = residual_force_payload_m1_scalxc_stages,
+    final_func: Callable[..., TomnspsRZL] = residual_force_payload_after_m1_scalxc,
+) -> TomnspsRZL:
+    """Apply M1/zero/scalxc force-payload policy with optional scan diagnostics."""
+
+    if not bool(scan_debug_force_enabled):
+        return final_func(
+            frzl,
+            s=s,
+            apply_m1_constraints=bool(apply_m1_constraints),
+            lconm1=bool(lconm1),
+            zero_m1=zero_m1,
+        )
+
+    force_stages = stages_func(
+        frzl,
+        s=s,
+        apply_m1_constraints=bool(apply_m1_constraints),
+        lconm1=bool(lconm1),
+        zero_m1=zero_m1,
+    )
+    if bool(apply_m1_constraints):
+        maybe_debug_force_z_channel_square_sums(
+            force_stages.after_m1,
+            enabled=True,
+            message="[scan-debug-m1] fzsc2={fzsc:.6e} fzcs2={fzcs:.6e}",
+            debug_module=debug_module,
+        )
+    maybe_debug_force_z_channel_square_sums(
+        force_stages.after_zero_m1,
+        enabled=True,
+        message="[scan-debug-zero] fzsc2={fzsc:.6e} fzcs2={fzcs:.6e}",
+        debug_module=debug_module,
+    )
+    maybe_debug_force_z_channel_square_sums(
+        force_stages.after_scalxc,
+        enabled=True,
+        message="[scan-debug-scalxc] fzsc2={fzsc:.6e} fzcs2={fzcs:.6e}",
+        debug_module=debug_module,
+    )
+    return force_stages.after_scalxc
 
 
 def resolve_residual_force_mask_pack(

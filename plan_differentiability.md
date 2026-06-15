@@ -1266,6 +1266,15 @@ Results obtained:
     contractions, and unstacking behavior; the existing branch-fingerprint test
     still covers VJP pullback usage.  Focused helper tests, Ruff, and
     compileall passed.  `free_boundary_adjoint.py` decreased to 5837 lines.
+58. Extracted residual-iteration force debug/stage policy into
+    `solve_residual_iter_force_payload_helpers.py`.  The main solver loop now
+    delegates scan-debug Z-force square-sum printing plus M1/zero/scalxc staged
+    payload selection to a focused helper, while the residual kernels, edge
+    masking, and scalar norm reductions remain in their existing parity-tested
+    paths.  Unit tests cover injected debug printers, disabled-debug fast path,
+    staged debug path, and the existing non-scan debug solve regression still
+    passes.  Focused solver/helper tests, Ruff, and compileall passed.
+    `solve.py` decreased to 10308 lines.
 
 Best next steps:
 
@@ -1293,9 +1302,9 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 75%.
+- Differentiability/refactor implementation: 76%.
 - Source-health instrumentation: 100%.
-- Solver monolith reduction: 57% of the large-file extraction work.
+- Solver monolith reduction: 58% of the large-file extraction work.
 - Free-boundary adjoint monolith reduction: 25%.
 - Driver workflow decomposition: 34%.
 - WOUT diagnostic decomposition: 4%.
