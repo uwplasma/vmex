@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from contextlib import nullcontext
+from functools import partial
 import time
 import os
 from pathlib import Path
@@ -56,6 +57,7 @@ from .solve_residual_iter_runtime_helpers import (
     _converged_residuals_scan_fast as _runtime_converged_residuals_scan_fast,
     _maybe_dump_ptau as _runtime_maybe_dump_ptau,
     _maybe_print_nonscan_state_debug,
+    _record_compute_force_timing as _runtime_record_compute_force_timing,
     _scan_block_until_ready,
     _scan_device_run_ready as _runtime_scan_device_run_ready,
     _scan_print_uses_debug_callback,
@@ -5773,28 +5775,13 @@ def solve_fixed_boundary_residual_iter(
         "iterations": 0,
     }
 
-    def _record_compute_force_timing(label: str, start: float | None, ready_value: Any) -> None:
-        if not bool(timing_enabled) or start is None:
-            return
-        try:
-            if has_jax():
-                jax.block_until_ready(ready_value)
-        except Exception:
-            pass
-        compute_dt = time.perf_counter() - float(start)
-        if label == "main":
-            timing_stats["compute_forces"] += compute_dt
-            if int(timing_stats["compute_forces_calls"]) == 0:
-                timing_stats["compute_forces_first"] += compute_dt
-            else:
-                timing_stats["compute_forces_rest"] += compute_dt
-            timing_stats["compute_forces_calls"] = int(timing_stats["compute_forces_calls"]) + 1
-        key = f"compute_forces_{label}"
-        calls_key = f"{key}_calls"
-        if key in timing_stats:
-            timing_stats[key] += compute_dt
-        if calls_key in timing_stats:
-            timing_stats[calls_key] = int(timing_stats[calls_key]) + 1
+    _record_compute_force_timing = partial(
+        _runtime_record_compute_force_timing,
+        timing_enabled=bool(timing_enabled),
+        timing_stats=timing_stats,
+        perf_counter=time.perf_counter,
+        block_until_ready=jax.block_until_ready if has_jax() else None,
+    )
 
     w_history = []
     fsqr2_history = []

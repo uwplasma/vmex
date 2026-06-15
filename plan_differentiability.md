@@ -1197,6 +1197,13 @@ Results obtained:
     the scan-local wrapper remains untouched because it is inside the staged
     scan controller.  Focused axis-reset helper tests, Ruff, and compileall
     passed.  `solve.py` decreased to 10370 lines.
+48. Extracted residual-loop compute-force timing bookkeeping into
+    `solve_residual_iter_runtime_helpers.py`.  The solver now keeps a small
+    `partial` binding for the active timing dictionary and optional JAX device
+    synchronization, while the first/rest/labeled counter updates are covered
+    independently by runtime-helper tests, including disabled timing and
+    synchronization-failure paths.  Focused runtime/hotpath tests, Ruff, and
+    compileall passed.  `solve.py` decreased to 10357 lines.
 
 Best next steps:
 
@@ -1224,9 +1231,9 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 65%.
+- Differentiability/refactor implementation: 66%.
 - Source-health instrumentation: 100%.
-- Solver monolith reduction: 56% of the large-file extraction work.
+- Solver monolith reduction: 57% of the large-file extraction work.
 - Free-boundary adjoint monolith reduction: 13%.
 - Driver workflow decomposition: 34%.
 - WOUT diagnostic decomposition: 4%.

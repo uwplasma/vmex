@@ -12,6 +12,7 @@ from vmec_jax.solve_residual_iter_runtime_helpers import (
     _maybe_print_nonscan_state_debug,
     _nonscan_state_debug_payload,
     _ptau_dump_enabled,
+    _record_compute_force_timing,
     _scan_block_until_ready,
     _scan_device_run_ready,
     _scan_print_uses_debug_callback,
@@ -191,6 +192,85 @@ def test_scan_device_run_ready_records_only_when_enabled():
             "cache_status": None,
         }
     ]
+
+
+def test_record_compute_force_timing_updates_main_and_labeled_counters():
+    times = iter([2.5, 5.0, 7.0])
+    stats = {
+        "compute_forces": 0.0,
+        "compute_forces_first": 0.0,
+        "compute_forces_rest": 0.0,
+        "compute_forces_calls": 0,
+        "compute_forces_trial": 0.0,
+        "compute_forces_trial_calls": 0,
+    }
+    ready = []
+
+    assert not _record_compute_force_timing(
+        "main",
+        None,
+        "skip",
+        timing_enabled=True,
+        timing_stats=stats,
+        perf_counter=lambda: next(times),
+        block_until_ready=lambda value: ready.append(value),
+    )
+    assert stats["compute_forces_calls"] == 0
+
+    assert _record_compute_force_timing(
+        "main",
+        1.0,
+        "first",
+        timing_enabled=True,
+        timing_stats=stats,
+        perf_counter=lambda: next(times),
+        block_until_ready=lambda value: ready.append(value),
+    )
+    assert stats["compute_forces"] == pytest.approx(1.5)
+    assert stats["compute_forces_first"] == pytest.approx(1.5)
+    assert stats["compute_forces_rest"] == pytest.approx(0.0)
+    assert stats["compute_forces_calls"] == 1
+    assert ready == ["first"]
+
+    assert _record_compute_force_timing(
+        "main",
+        4.0,
+        "second",
+        timing_enabled=True,
+        timing_stats=stats,
+        perf_counter=lambda: next(times),
+        block_until_ready=lambda value: ready.append(value),
+    )
+    assert stats["compute_forces"] == pytest.approx(2.5)
+    assert stats["compute_forces_first"] == pytest.approx(1.5)
+    assert stats["compute_forces_rest"] == pytest.approx(1.0)
+    assert stats["compute_forces_calls"] == 2
+
+    assert _record_compute_force_timing(
+        "trial",
+        6.25,
+        "trial",
+        timing_enabled=True,
+        timing_stats=stats,
+        perf_counter=lambda: next(times),
+        block_until_ready=lambda value: (_ for _ in ()).throw(RuntimeError("sync failed")),
+    )
+    assert stats["compute_forces_trial"] == pytest.approx(0.75)
+    assert stats["compute_forces_trial_calls"] == 1
+
+
+def test_record_compute_force_timing_disabled_is_noop():
+    stats = {"compute_forces": 0.0, "compute_forces_calls": 0}
+    assert not _record_compute_force_timing(
+        "main",
+        1.0,
+        "value",
+        timing_enabled=False,
+        timing_stats=stats,
+        perf_counter=lambda: 2.0,
+        block_until_ready=None,
+    )
+    assert stats == {"compute_forces": 0.0, "compute_forces_calls": 0}
 
 
 def test_converged_residuals_scan_fast_supports_strict_and_total_target():

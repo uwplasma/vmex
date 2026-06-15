@@ -130,6 +130,42 @@ def _scan_device_run_ready(
     return value
 
 
+def _record_compute_force_timing(
+    label: str,
+    start: float | None,
+    ready_value: Any,
+    *,
+    timing_enabled: bool,
+    timing_stats: dict[str, float | int],
+    perf_counter: Callable[[], float],
+    block_until_ready: Callable[[Any], Any] | None,
+) -> bool:
+    """Record force-evaluation timing counters after optional device sync."""
+
+    if not bool(timing_enabled) or start is None:
+        return False
+    try:
+        if block_until_ready is not None:
+            block_until_ready(ready_value)
+    except Exception:
+        pass
+    compute_dt = perf_counter() - float(start)
+    if label == "main":
+        timing_stats["compute_forces"] += compute_dt
+        if int(timing_stats["compute_forces_calls"]) == 0:
+            timing_stats["compute_forces_first"] += compute_dt
+        else:
+            timing_stats["compute_forces_rest"] += compute_dt
+        timing_stats["compute_forces_calls"] = int(timing_stats["compute_forces_calls"]) + 1
+    key = f"compute_forces_{label}"
+    calls_key = f"{key}_calls"
+    if key in timing_stats:
+        timing_stats[key] += compute_dt
+    if calls_key in timing_stats:
+        timing_stats[calls_key] = int(timing_stats[calls_key]) + 1
+    return True
+
+
 def _converged_residuals_scan_fast(
     fsqr: Any,
     fsqz: Any,
