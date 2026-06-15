@@ -78,6 +78,7 @@ from .solve_residual_iter_force_cache_helpers import (
 )
 from .solve_residual_iter_force_payload_helpers import (
     residual_force_gcx2_after_edge_policy as _residual_force_gcx2_after_edge_policy,
+    resolve_residual_force_mask_pack as _resolve_residual_force_mask_pack,
 )
 from .solve_residual_iter_update_helpers import (
     ResidualVelocityBlocks as _ResidualVelocityBlocks,
@@ -2001,10 +2002,11 @@ def solve_fixed_boundary_residual_iter(
             _maybe_dump_gmetric(bc=k.bc, static=static, iter_idx=int(iter_idx))
         if iter_idx is not None:
             _maybe_dump_force_kernels(k=k, static=static, iter_idx=int(iter_idx), label="raw")
-        include_edge_residual = bool(include_edge if include_edge_residual is None else include_edge_residual)
-        mask_pack = None
-        if getattr(static, "tomnsps_masks", None) is not None:
-            mask_pack = static.tomnsps_masks_edge if bool(include_edge_residual) else static.tomnsps_masks
+        include_edge_residual, mask_pack = _resolve_residual_force_mask_pack(
+            static,
+            include_edge=bool(include_edge),
+            include_edge_residual=include_edge_residual,
+        )
         frzl = vmec_residual_internal_from_kernels(
             k,
             cfg_ntheta=int(static.cfg.ntheta),

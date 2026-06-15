@@ -1130,6 +1130,12 @@ Results obtained:
     free-boundary parity, and all debug/HLO dump branches remain at the solver
     call site.  Focused checks passed: Ruff clean and the new helper tests
     passed with 5 tests.
+37. Extended the force-payload seam to resolve `include_edge_residual` and the
+    TOMNSP mask-pack choice before residual assembly.  This keeps the actual
+    TOMNSP transform and debug/HLO dump branches in `solve.py` while making the
+    edge-residual control policy independently testable.  Focused checks
+    passed: Ruff clean; force-payload, generic force-payload, and hotpath
+    subsets passed with 25 tests.
 
 Best next steps:
 
