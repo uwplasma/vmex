@@ -6,8 +6,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-import vmec_jax.free_boundary_validation as validation
-from vmec_jax.free_boundary_validation import (
+import vmec_jax.solvers.free_boundary.validation as validation
+from vmec_jax.solvers.free_boundary.validation import (
     free_boundary_response_metrics,
     wout_beta_percent,
     wout_fsq_total,

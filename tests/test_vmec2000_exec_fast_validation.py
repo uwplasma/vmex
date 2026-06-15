@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from vmec_jax.free_boundary_validation import free_boundary_response_metrics
+from vmec_jax.solvers.free_boundary.validation import free_boundary_response_metrics
 from vmec_jax.namelist import read_indata, write_indata
 from vmec_jax.vmec2000_exec import _patch_indata, find_vmec2000_exec, run_xvmec2000
 

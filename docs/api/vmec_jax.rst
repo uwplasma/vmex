@@ -26,7 +26,7 @@ Submodules
    vmec_jax.fieldlines
    vmec_jax.finite_beta
    vmec_jax.fourier
-   vmec_jax.free_boundary_validation
+   vmec_jax.solvers.free_boundary.validation
    vmec_jax.free_boundary_adjoint
    vmec_jax.free_boundary_adjoint_controller
    vmec_jax.geom

@@ -2554,3 +2554,60 @@ Completion:
 - Free-boundary adjoint monolith reduction: 58%.
 - Driver workflow decomposition: 72%.
 - WOUT diagnostic/profile decomposition: 72%.
+
+## 2026-06-15 Free-Boundary Validation Package Move
+
+Commit: free-boundary validation namespace cleanup on
+`codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved finite-beta free-boundary response validation metrics from
+   `vmec_jax.free_boundary_validation` to
+   `vmec_jax.solvers.free_boundary.validation`.
+2. Updated free-boundary validation tests, VMEC2000 executable validation test
+   imports, and API docs to use the new solver-package path.
+3. Removed the stale untracked autosummary stub for the old module path.
+4. Ratcheted the root-helper source-health CI gate from 3 to 2 files.
+
+Results obtained:
+
+- Root helper-prefix files dropped from 3 to 2.
+- The only remaining root helper-prefix files are now the public
+  `free_boundary_adjoint.py` and `free_boundary_adjoint_controller.py` facades.
+- Focused free-boundary validation tests still pass.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solvers/free_boundary/validation.py tests/test_free_boundary_validation_unit.py tests/test_free_boundary_beta_response_validation.py tests/test_vmec2000_exec_fast_validation.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_validation_unit.py tests/test_free_boundary_beta_response_validation.py -q`
+- `python tools/diagnostics/source_health.py --max-root-helper-prefix-files 2`
+- `SPHINX_FAST=1 python -m sphinx -T -b html docs docs/_build/html_fast`
+
+Best next steps:
+
+1. Commit and push this free-boundary validation package move.
+2. Treat the root namespace-sprawl lane as effectively complete; do not move the
+   two public free-boundary adjoint facade modules until a deliberate public API
+   migration exists.
+3. Start the next implementation tranche on function-level simplification:
+   extract the VMEC2000 scan runner subroutines from `solve.py` into
+   `vmec_jax.solvers.fixed_boundary.scan` behind existing tests.
+4. Continue preserving the broad driver/solve-discrete CI shard as the main
+   safety gate for solver refactors.
+
+User decisions needed:
+
+No immediate decision. PR #20 remains draft and all refactor work stays on this
+branch until the full plan is complete.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 96%.
+- Differentiability/refactor implementation: 99.0%.
+- Solver monolith reduction: 85%.
+- Free-boundary adjoint monolith reduction: 58%.
+- Driver workflow decomposition: 72%.
+- WOUT diagnostic/profile decomposition: 72%.

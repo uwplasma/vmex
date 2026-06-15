@@ -16,8 +16,8 @@ from typing import Any
 
 import numpy as np
 
-from .plotting import bmag_from_wout_physical, surface_rz_from_wout_physical
-from .wout import read_wout
+from ...plotting import bmag_from_wout_physical, surface_rz_from_wout_physical
+from ...wout import read_wout
 
 
 @dataclass(frozen=True)
