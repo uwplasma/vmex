@@ -108,7 +108,7 @@ from .solve_jit_cache_helpers import (
     record_scan_runner_cache_miss_categories as _record_scan_runner_cache_miss_categories,
 )
 from .solvers.fixed_boundary.diagnostics import hlo as _hlo_dump_helpers
-from . import solve_first_step_diagnostics as _first_step_diagnostics_helpers
+from .solvers.fixed_boundary.diagnostics import first_step as _first_step_diagnostics_helpers
 from .solvers.fixed_boundary.optimization import energy as _fixed_boundary_energy_helpers
 from .solvers.fixed_boundary.optimization import gd as _fixed_boundary_gd_helpers
 from .solvers.fixed_boundary.optimization import lambda_gd as _lambda_optimizer_helpers
@@ -246,7 +246,7 @@ from .solve_result_types import (
     SolveVmecResidualResult,
     WoutLikeVmecForces as _WoutLikeVmecForces,
 )
-from .solve_axis_reset_helpers import (
+from .solvers.fixed_boundary.diagnostics.axis_reset import (
     InitialAxisResetDecision as _InitialAxisResetDecision,  # noqa: F401 - re-exported for existing internal tests/importers.
     initial_axis_reset_decision as _initial_axis_reset_decision,
     merge_axis_reset_state as _merge_axis_reset_state,

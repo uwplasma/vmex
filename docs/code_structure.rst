@@ -40,7 +40,7 @@ Top-level package layout (selected):
   cached strict-update,
   preconditioner-output, fused preconditioner-apply, accepted-control, and
   ``ptau`` JIT payload helpers used by the residual-iteration hot path
-- ``vmec_jax/solve_first_step_diagnostics.py``: first-step VMEC residual,
+- ``vmec_jax/solvers/fixed_boundary/diagnostics/first_step.py``: first-step VMEC residual,
   preconditioner, force-channel, and update diagnostic assembly used by the
   public ``solve.first_step_diagnostics`` wrapper
 - ``vmec_jax/solvers/fixed_boundary/optimization/lambda_gd.py``: lambda-only fixed-geometry magnetic
@@ -66,7 +66,7 @@ Top-level package layout (selected):
   by the public ``solve.solve_fixed_boundary_gn_vmec_residual`` wrapper
 - ``vmec_jax/solvers/fixed_boundary/diagnostics/hlo.py``: optional JAX HLO lowering dump
   helpers for solver-kernel diagnostics
-- ``vmec_jax/solve_axis_reset_helpers.py``: initial magnetic-axis reset
+- ``vmec_jax/solvers/fixed_boundary/diagnostics/axis_reset.py``: initial magnetic-axis reset
   control decisions, axis-state merging, and optional axis coefficient dumps
 - ``vmec_jax/solvers/fixed_boundary/residual/update.py``:
   residual-iteration

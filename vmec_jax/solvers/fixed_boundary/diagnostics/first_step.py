@@ -6,9 +6,9 @@ from typing import Any, Callable, Dict
 
 import numpy as np
 
-from ._compat import jnp
-from .state import VMECState
-from .vmec_tomnsp import TomnspsRZL
+from ...._compat import jnp
+from ....state import VMECState
+from ....vmec_tomnsp import TomnspsRZL
 
 
 def first_step_diagnostics_impl(
@@ -46,43 +46,43 @@ def first_step_diagnostics_impl(
     """
 
     if has_jax_func is None:
-        from ._compat import has_jax as has_jax_func
+        from ...._compat import has_jax as has_jax_func
 
     if not has_jax_func():
         raise ImportError("first_step_diagnostics requires JAX (jax + jaxlib)")
 
     if mode00_index_func is None:
-        from .solvers.fixed_boundary.optimization.constraints import mode00_index as mode00_index_func
+        from ..optimization.constraints import mode00_index as mode00_index_func
     if half_mesh_from_full_mesh_func is None:
-        from .solve_profile_helpers import _half_mesh_from_full_mesh as half_mesh_from_full_mesh_func
+        from ....solve_profile_helpers import _half_mesh_from_full_mesh as half_mesh_from_full_mesh_func
     if mass_half_mesh_from_indata_func is None:
-        from .solve_profile_helpers import _mass_half_mesh_from_indata as mass_half_mesh_from_indata_func
+        from ....solve_profile_helpers import _mass_half_mesh_from_indata as mass_half_mesh_from_indata_func
     if pressure_half_mesh_from_indata_func is None:
-        from .solve_profile_helpers import _pressure_half_mesh_from_indata as pressure_half_mesh_from_indata_func
+        from ....solve_profile_helpers import _pressure_half_mesh_from_indata as pressure_half_mesh_from_indata_func
     if icurv_full_mesh_from_indata_func is None:
-        from .solve_profile_helpers import _icurv_full_mesh_from_indata as icurv_full_mesh_from_indata_func
+        from ....solve_profile_helpers import _icurv_full_mesh_from_indata as icurv_full_mesh_from_indata_func
     if vmec_force_flux_profiles_func is None:
-        from .solve_profile_helpers import _vmec_force_flux_profiles as vmec_force_flux_profiles_func
+        from ....solve_profile_helpers import _vmec_force_flux_profiles as vmec_force_flux_profiles_func
     if zero_edge_rz_force_blocks_func is None:
-        from .solvers.fixed_boundary.residual.payload_blocks import (
+        from ..residual.payload_blocks import (
             zero_edge_rz_force_blocks as zero_edge_rz_force_blocks_func,
         )
     if radial_tridi_smooth_dirichlet_func is None:
-        from .solvers.fixed_boundary.preconditioning.operators import (
+        from ..preconditioning.operators import (
             radial_tridi_smooth_dirichlet as radial_tridi_smooth_dirichlet_func,
         )
     if metric_surface_precond_scales_np_func is None:
-        from .solvers.fixed_boundary.preconditioning.operators import (
+        from ..preconditioning.operators import (
             metric_surface_precond_scales_np as metric_surface_precond_scales_np_func,
         )
-    from .solvers.fixed_boundary.preconditioning.operators import metric_surface_precond_from_bcovar_np
+    from ..preconditioning.operators import metric_surface_precond_from_bcovar_np
     if wout_like_vmec_forces_cls is None:
-        from .solve_result_types import WoutLikeVmecForces as wout_like_vmec_forces_cls
+        from ....solve_result_types import WoutLikeVmecForces as wout_like_vmec_forces_cls
 
-    from .energy import flux_profiles_from_indata
-    from .static import build_static
-    from .vmec_forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
-    from .vmec_residue import (
+    from ....energy import flux_profiles_from_indata
+    from ....static import build_static
+    from ....vmec_forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
+    from ....vmec_residue import (
         vmec_apply_m1_constraints,
         vmec_apply_scalxc_to_tomnsps,
         vmec_force_norms_from_bcovar_dynamic,
@@ -92,7 +92,7 @@ def first_step_diagnostics_impl(
         vmec_wint_from_trig,
         vmec_zero_m1_zforce,
     )
-    from .vmec_tomnsp import vmec_angle_grid, vmec_trig_tables
+    from ....vmec_tomnsp import vmec_angle_grid, vmec_trig_tables
 
     signgs = int(signgs)
     cfg = static.cfg
@@ -109,7 +109,7 @@ def first_step_diagnostics_impl(
     phips = jnp.asarray(flux.phips)
     if phips.shape[0] >= 1:
         phips = phips.at[0].set(0.0)
-    from .boundary import boundary_from_indata
+    from ....boundary import boundary_from_indata
 
     boundary = boundary_from_indata(indata, static_vmec.modes)
     idx00 = mode00_index_func(static_vmec.modes)
@@ -190,7 +190,7 @@ def first_step_diagnostics_impl(
         )
 
     def _lambda_preconditioner(bc, *, return_faclam: bool = False):
-        from .preconditioner_1d_jax import lambda_preconditioner
+        from ....preconditioner_1d_jax import lambda_preconditioner
 
         return lambda_preconditioner(
             bc=bc,
@@ -201,7 +201,7 @@ def first_step_diagnostics_impl(
         )
 
     def _rz_preconditioner(frzl_in: TomnspsRZL, bc, k):
-        from .preconditioner_1d_jax import rz_preconditioner
+        from ....preconditioner_1d_jax import rz_preconditioner
 
         return rz_preconditioner(
             frzl_in=frzl_in,

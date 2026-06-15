@@ -8,8 +8,8 @@ from typing import NamedTuple
 
 import numpy as np
 
-from ._compat import jnp
-from .state import VMECState
+from ...._compat import jnp
+from ....state import VMECState
 
 
 class InitialAxisResetDecision(NamedTuple):

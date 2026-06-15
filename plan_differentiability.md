@@ -1829,6 +1829,60 @@ Completion:
 - Driver workflow decomposition: 35%.
 - WOUT diagnostic/profile decomposition: 22%.
 
+## 2026-06-15 Axis Reset and First-Step Diagnostics Package Move
+
+Commit: axis reset and first-step diagnostics package tranche on
+`codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved initial-axis reset decision/merge/dump helpers into
+   `vmec_jax.solvers.fixed_boundary.diagnostics.axis_reset`.
+2. Moved the synthetic first-step residual diagnostic implementation into
+   `vmec_jax.solvers.fixed_boundary.diagnostics.first_step`.
+3. Updated the solver facade and code-structure docs to use the diagnostics
+   package paths.
+4. Converted the moved diagnostic implementation imports to root-relative and
+   sibling-domain package imports.
+5. Ratcheted the root-helper source-health CI gate from 31 to 29 files.
+
+Results obtained:
+
+- Two more solver diagnostic helper files left the root package.
+- Root-level `vmec_jax/*.py` files dropped to 95.
+- Root helper-prefix files dropped to 29.
+- The fixed-boundary diagnostics package now owns first-step diagnostics,
+  axis-reset diagnostics, optional dump helpers, and trace-output formatting.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solve.py vmec_jax/solvers/fixed_boundary/diagnostics`
+- `python -m pytest -q tests/test_solve_axis_helpers_more_coverage.py tests/test_solve_more_coverage.py tests/test_solve_debug_dump_wave10_coverage.py tests/test_solve_additional_helpers.py::test_first_step_diagnostics_synthetic_default_and_axisymmetric_paths tests/test_solve_branch_coverage.py::test_radial_mesh_and_axis_reset_helpers_cover_small_mesh_edges -q`
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 20 --max-root-helper-prefix-files 29`
+
+Best next steps:
+
+1. Run the broader `driver-solve-discrete` shard after this move.
+2. If green, commit and push this diagnostics follow-up tranche.
+3. Continue package consolidation with either free-boundary helper families or
+   the remaining fixed-boundary profile/options/result helper group, keeping
+   behavior changes separate.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 38%.
+- Differentiability/refactor implementation: 96.4%.
+- Solver monolith reduction: 80.5%.
+- Free-boundary adjoint monolith reduction: 30%.
+- Driver workflow decomposition: 35%.
+- WOUT diagnostic/profile decomposition: 22%.
+
 ## 2026-06-15 Fixed-Boundary Diagnostics Package Move
 
 Commit: fixed-boundary diagnostics package tranche on
