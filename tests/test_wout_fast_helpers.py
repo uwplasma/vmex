@@ -9,6 +9,7 @@ import pytest
 from vmec_jax.namelist import InData
 import vmec_jax.wout as wout_module
 from vmec_jax import wout_diagnostics
+from vmec_jax import wout_parity_helpers
 from vmec_jax.wout import (
     MU0,
     _apply_bsubv_equif_correction,
@@ -87,13 +88,21 @@ def test_wint_nyquist_and_scalxc_helper_edges(monkeypatch) -> None:
 
     s = np.asarray([0.0, 0.25, 1.0])
     np.testing.assert_allclose(_bss_scalxc_undo_factor(s).ravel(), [0.5, 0.5, 1.0])
+    np.testing.assert_allclose(wout_parity_helpers.bss_scalxc_undo_factor(s).ravel(), [0.5, 0.5, 1.0])
     arr = np.ones((3, 1, 1))
     monkeypatch.delenv("VMEC_JAX_BSS_UNDO_SCALXC", raising=False)
     assert _bss_should_undo_scalxc() is False
+    assert wout_parity_helpers.bss_should_undo_scalxc() is False
     assert _undo_bss_scalxc_if_enabled(s, arr)[0] is arr
+    assert wout_parity_helpers.undo_bss_scalxc_if_enabled(s, arr)[0] is arr
     monkeypatch.setenv("VMEC_JAX_BSS_UNDO_SCALXC", "1")
     assert _bss_should_undo_scalxc() is True
+    assert wout_parity_helpers.bss_should_undo_scalxc() is True
     np.testing.assert_allclose(_undo_bss_scalxc_if_enabled(s, arr)[0].ravel(), [0.5, 0.5, 1.0])
+    np.testing.assert_allclose(
+        wout_parity_helpers.undo_bss_scalxc_if_enabled(s, arr)[0].ravel(),
+        [0.5, 0.5, 1.0],
+    )
 
 
 def test_current_profile_full_mesh_uses_vmec_half_mesh_normalization() -> None:

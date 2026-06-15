@@ -45,10 +45,14 @@ from .wout_diagnostics import glasser_from_wout_mercier_terms as _glasser_from_w
 from .wout_diagnostics import lambda_half_mesh_weights as _lambda_half_mesh_weights
 from .wout_diagnostics import pshalf_from_s as _pshalf_from_s
 from .wout_diagnostics import safe_divide as _safe_divide
+from . import wout_parity_helpers as _wout_parity_helpers
 from .vmec_tomnsp import vmec_trig_tables
 
 
 MU0 = 4e-7 * np.pi  # N/A^2
+_bss_scalxc_undo_factor = _wout_parity_helpers.bss_scalxc_undo_factor
+_bss_should_undo_scalxc = _wout_parity_helpers.bss_should_undo_scalxc
+_undo_bss_scalxc_if_enabled = _wout_parity_helpers.undo_bss_scalxc_if_enabled
 
 
 def _vmec_wint_from_trig(trig) -> np.ndarray:
@@ -216,30 +220,6 @@ def _bcovar_from_force_payload_with_geometry(geom: dict[str, Any], k_force) -> A
     geom["pzv_even"] = np.asarray(k_force.pzv_even, dtype=float)
     geom["pzv_odd"] = np.asarray(k_force.pzv_odd, dtype=float)
     return k_force.bc
-
-
-def _bss_should_undo_scalxc() -> bool:
-    """Whether bss parity geometry should undo VMEC's odd-m scalxc scaling."""
-    return os.getenv("VMEC_JAX_BSS_UNDO_SCALXC", "0") not in ("", "0")
-
-
-def _bss_scalxc_undo_factor(s: np.ndarray) -> np.ndarray:
-    """Return the VMEC inverse scalxc factor for bss odd-parity geometry."""
-    s_arr = np.asarray(s, dtype=float)
-    sqrts = np.sqrt(np.maximum(s_arr, 0.0))
-    if s_arr.shape[0] >= 1:
-        sqrts = sqrts.copy()
-        sqrts[-1] = 1.0
-    sq2 = sqrts[1] if s_arr.shape[0] >= 2 else 1.0
-    return np.maximum(sqrts, sq2)[:, None, None]
-
-
-def _undo_bss_scalxc_if_enabled(s: np.ndarray, *arrays: np.ndarray) -> tuple[np.ndarray, ...]:
-    """Undo odd-m scalxc for bss parity arrays when the compatibility flag is set."""
-    if not _bss_should_undo_scalxc():
-        return tuple(arrays)
-    factor = _bss_scalxc_undo_factor(s)
-    return tuple(np.asarray(arr, dtype=float) * factor for arr in arrays)
 
 
 def _jxbforce_nyquist_limits(trig) -> tuple[int, int]:

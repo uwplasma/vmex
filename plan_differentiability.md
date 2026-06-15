@@ -1309,6 +1309,12 @@ Results obtained:
     downstream tests and internal call sites.  Direct diagnostics tests,
     existing WOUT helper coverage, Ruff, and compileall passed.  `wout.py`
     decreased to 6250 lines.
+64. Moved BSS parity scalxc compatibility policy into
+    `wout_parity_helpers.py`.  Environment-controlled odd-m scalxc undo
+    detection, factor construction, and array scaling now have a focused
+    module while `wout.py` keeps the private compatibility aliases used by
+    existing tests and call sites.  Focused WOUT helper/env tests, Ruff, and
+    compileall passed.  `wout.py` decreased to 6230 lines.
 
 Best next steps:
 
@@ -1336,9 +1342,9 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 81%.
+- Differentiability/refactor implementation: 82%.
 - Source-health instrumentation: 100%.
 - Solver monolith reduction: 60% of the large-file extraction work.
 - Free-boundary adjoint monolith reduction: 26%.
 - Driver workflow decomposition: 35%.
-- WOUT diagnostic decomposition: 5%.
+- WOUT diagnostic decomposition: 6%.
