@@ -109,13 +109,13 @@ from .solve_jit_cache_helpers import (
 )
 from . import solve_hlo_dump_helpers as _hlo_dump_helpers
 from . import solve_first_step_diagnostics as _first_step_diagnostics_helpers
-from . import solve_lambda_optimizer as _lambda_optimizer_helpers
-from . import solve_fixed_boundary_energy_helpers as _fixed_boundary_energy_helpers
-from . import solve_fixed_boundary_gd_optimizer as _fixed_boundary_gd_helpers
-from . import solve_fixed_boundary_lbfgs_optimizer as _fixed_boundary_lbfgs_helpers
+from .solvers.fixed_boundary.optimization import energy as _fixed_boundary_energy_helpers
+from .solvers.fixed_boundary.optimization import gd as _fixed_boundary_gd_helpers
+from .solvers.fixed_boundary.optimization import lambda_gd as _lambda_optimizer_helpers
+from .solvers.fixed_boundary.optimization import lbfgs as _fixed_boundary_lbfgs_helpers
 from . import solve_residual_force_context as _residual_force_context_helpers
-from . import solve_fixed_boundary_residual_lbfgs_optimizer as _residual_lbfgs_helpers
-from . import solve_fixed_boundary_residual_gn_optimizer as _residual_gn_helpers
+from .solvers.fixed_boundary.optimization import residual_gn as _residual_gn_helpers
+from .solvers.fixed_boundary.optimization import residual_lbfgs as _residual_lbfgs_helpers
 from .solve_diagnostics_io import (
     _dump_freeb_axis_trace_record,
     _dump_freeb_control_trace_record,
@@ -195,14 +195,14 @@ from .solve_force_norm_helpers import (
     safe_dt_from_force_blocks as _safe_dt_from_force_blocks,
 )
 from .solvers.fixed_boundary.preconditioning import payload as _precond_payload_helpers
-from .solve_tolerance_helpers import (
+from .solvers.fixed_boundary.optimization.tolerances import (
     dtype_eps as _dtype_eps,  # noqa: F401 - re-exported for existing internal tests/importers.
     dtype_tiny as _dtype_tiny,
     resolve_cg_tol as _resolve_cg_tol,
     resolve_grad_tol as _resolve_grad_tol,
     resolve_lm_damping as _resolve_lm_damping,
 )
-from .solve_constraint_helpers import (
+from .solvers.fixed_boundary.optimization.constraints import (
     apply_vmec_lambda_axis_rules_to_state as _apply_vmec_lambda_axis_rules_to_state,
     axis_m0_mask as _axis_m0_mask,  # noqa: F401 - re-exported for existing internal tests/importers.
     enforce_field_rows as _enforce_field_rows,  # noqa: F401 - re-exported for existing internal tests/importers.
@@ -219,7 +219,7 @@ from .solve_constraint_helpers import (
     zero_coeff_column as _zero_coeff_column,  # noqa: F401 - re-exported for existing internal tests/importers.
     zero_coeff_column_np as _zero_coeff_column_np,  # noqa: F401 - re-exported for existing internal tests/importers.
 )
-from .solve_gradient_helpers import (
+from .solvers.fixed_boundary.optimization.gradient import (
     mask_grad_for_constraints as _mask_grad_for_constraints,
     update_state_gd as _update_state_gd,
 )

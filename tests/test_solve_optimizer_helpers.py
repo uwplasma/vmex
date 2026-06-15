@@ -5,15 +5,19 @@ import pytest
 
 from vmec_jax._compat import jnp
 from vmec_jax.solve import _resolve_lbfgs_curvature_tol
-from vmec_jax.solve_fixed_boundary_gd_optimizer import solve_fixed_boundary_gd_impl
-from vmec_jax.solve_fixed_boundary_lbfgs_optimizer import solve_fixed_boundary_lbfgs_impl
-from vmec_jax.solve_fixed_boundary_residual_gn_optimizer import solve_fixed_boundary_gn_vmec_residual_impl
-from vmec_jax.solve_fixed_boundary_residual_lbfgs_optimizer import solve_fixed_boundary_lbfgs_vmec_residual_impl
-from vmec_jax.solve_lambda_optimizer import solve_lambda_gd_impl
 from vmec_jax.solve_optimizer_helpers import (
     ensure_descent_direction,
     lbfgs_curvature_tolerance,
     lbfgs_two_loop_direction,
+)
+from vmec_jax.solvers.fixed_boundary.optimization.gd import solve_fixed_boundary_gd_impl
+from vmec_jax.solvers.fixed_boundary.optimization.lambda_gd import solve_lambda_gd_impl
+from vmec_jax.solvers.fixed_boundary.optimization.lbfgs import solve_fixed_boundary_lbfgs_impl
+from vmec_jax.solvers.fixed_boundary.optimization.residual_gn import (
+    solve_fixed_boundary_gn_vmec_residual_impl,
+)
+from vmec_jax.solvers.fixed_boundary.optimization.residual_lbfgs import (
+    solve_fixed_boundary_lbfgs_vmec_residual_impl,
 )
 from vmec_jax.state import StateLayout, VMECState
 

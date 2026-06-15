@@ -2013,3 +2013,69 @@ Completion:
 - Free-boundary adjoint monolith reduction: 30%.
 - Driver workflow decomposition: 35%.
 - WOUT diagnostic/profile decomposition: 22%.
+
+## 2026-06-15 Fixed-Boundary Optimization Package Move
+
+Commit: fixed-boundary optimization package tranche on
+`codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Created `vmec_jax.solvers.fixed_boundary.optimization` as the domain
+   package for fixed-boundary magnetic-energy and residual-objective
+   optimizers.
+2. Moved the lambda-only optimizer, fixed-boundary energy context, GD/L-BFGS
+   magnetic-energy optimizers, residual L-BFGS/Gauss-Newton optimizers,
+   constraint projection helpers, gradient-update helpers, and tolerance
+   policy helpers out of the root `vmec_jax` namespace.
+3. Updated `vmec_jax.solve` to preserve the historical private aliases used by
+   tests and downstream monkeypatch seams while importing implementations from
+   the fixed-boundary optimization package.
+4. Updated residual-force setup, first-step diagnostics, preconditioning
+   operators, tests, and code-structure docs to use the package paths.
+5. Ratcheted the root-helper source-health CI gate from 50 to 41 files.
+
+Results obtained:
+
+- Root helper-prefix files dropped from 50 to 41 without changing solver
+  behavior.
+- The fixed-boundary scan, residual-iteration, preconditioning, and optimizer
+  helper families now live under one coherent solver domain namespace.
+- `solve.py` remains the public/facade compatibility layer, but its
+  fixed-boundary optimizer dependencies no longer add root-package helper
+  sprawl.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solve.py vmec_jax/solve_first_step_diagnostics.py vmec_jax/solve_residual_force_context.py vmec_jax/solvers/fixed_boundary/optimization vmec_jax/solvers/fixed_boundary/preconditioning tests/test_solve_optimizer_helpers.py`
+- `python -m pytest -q tests/test_solve_optimizer_helpers.py tests/test_solve_residual_iter_helpers_wave8_coverage.py tests/test_solve_gd_wave10_coverage.py tests/test_solve_lbfgs_wave8_coverage.py tests/test_solve_residual_optimizer_wave8_coverage.py tests/test_step9_implicit_fixed_boundary.py -q`
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 20 --max-root-helper-prefix-files 41`
+- `python tools/diagnostics/ci_core_bucket_args.py driver-solve-discrete > /tmp/vmec_jax-driver-solve-discrete.txt && JAX_ENABLE_X64=1 VMEC_JAX_SKIP_PY311_COVERAGE_ONLY=1 xargs pytest -q -n 4 -m "not full and not vmec2000 and not simsopt" --durations=30 --cov=vmec_jax --cov-report= < /tmp/vmec_jax-driver-solve-discrete.txt`
+
+Best next steps:
+
+1. Commit and push this fixed-boundary optimization package move.
+2. Continue solver simplification by extracting the large nested scan helper
+   inside `solve_fixed_boundary_residual_iter` into the existing
+   `vmec_jax.solvers.fixed_boundary.scan` package.
+3. Start the next package consolidation tranche around driver workflow helpers
+   or free-boundary adjoint trace helpers; keep behavior changes separate from
+   namespace moves.
+4. Preserve VMEC parity and physics gates while using source-health function
+   metrics to target the largest remaining routines.
+
+User decisions needed:
+
+No immediate decision. PR #20 remains draft and all refactor work stays on this
+branch until the full plan is complete.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 23%.
+- Differentiability/refactor implementation: 95.5%.
+- Solver monolith reduction: 78%.
+- Free-boundary adjoint monolith reduction: 30%.
+- Driver workflow decomposition: 35%.
+- WOUT diagnostic/profile decomposition: 22%.

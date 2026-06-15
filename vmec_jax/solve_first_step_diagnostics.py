@@ -52,7 +52,7 @@ def first_step_diagnostics_impl(
         raise ImportError("first_step_diagnostics requires JAX (jax + jaxlib)")
 
     if mode00_index_func is None:
-        from .solve_constraint_helpers import mode00_index as mode00_index_func
+        from .solvers.fixed_boundary.optimization.constraints import mode00_index as mode00_index_func
     if half_mesh_from_full_mesh_func is None:
         from .solve_profile_helpers import _half_mesh_from_full_mesh as half_mesh_from_full_mesh_func
     if mass_half_mesh_from_indata_func is None:

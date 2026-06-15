@@ -22,12 +22,12 @@ Top-level package layout (selected):
 - ``vmec_jax/solve_force_payload_helpers.py``: residual-force payload
   containers, edge masking, staged VMEC ``m=1``/zero/scalxc transforms, and
   preconditioner-output block assembly
-- ``vmec_jax/solve_tolerance_helpers.py``: dtype-aware gradient, conjugate
+- ``vmec_jax/solvers/fixed_boundary/optimization/tolerances.py``: dtype-aware gradient, conjugate
   gradient, and Levenberg-Marquardt tolerance policies
-- ``vmec_jax/solve_constraint_helpers.py``: fixed-boundary edge constraints,
+- ``vmec_jax/solvers/fixed_boundary/optimization/constraints.py``: fixed-boundary edge constraints,
   magnetic-axis regularity, lambda-gauge projection, and related NumPy/JAX
   coefficient-slice helpers
-- ``vmec_jax/solve_gradient_helpers.py``: state gradient-descent updates and
+- ``vmec_jax/solvers/fixed_boundary/optimization/gradient.py``: state gradient-descent updates and
   feasible-gradient projections for fixed-boundary/axis/lambda constraints
 - ``vmec_jax/solvers/fixed_boundary/preconditioning/operators.py``:
   fixed-boundary mode-diagonal
@@ -43,25 +43,25 @@ Top-level package layout (selected):
 - ``vmec_jax/solve_first_step_diagnostics.py``: first-step VMEC residual,
   preconditioner, force-channel, and update diagnostic assembly used by the
   public ``solve.first_step_diagnostics`` wrapper
-- ``vmec_jax/solve_lambda_optimizer.py``: lambda-only fixed-geometry magnetic
+- ``vmec_jax/solvers/fixed_boundary/optimization/lambda_gd.py``: lambda-only fixed-geometry magnetic
   energy optimizer used by the public ``solve.solve_lambda_gd`` wrapper while
   preserving historical solve-module monkeypatch hooks
-- ``vmec_jax/solve_fixed_boundary_energy_helpers.py``: shared fixed-boundary
+- ``vmec_jax/solvers/fixed_boundary/optimization/energy.py``: shared fixed-boundary
   magnetic-energy context/evaluator setup for GD and L-BFGS optimizers, with
   solve-module dependency injection for historical monkeypatch compatibility
-- ``vmec_jax/solve_fixed_boundary_gd_optimizer.py``: fixed-boundary
+- ``vmec_jax/solvers/fixed_boundary/optimization/gd.py``: fixed-boundary
   gradient-descent optimizer loop used by the public
   ``solve.solve_fixed_boundary_gd`` wrapper
-- ``vmec_jax/solve_fixed_boundary_lbfgs_optimizer.py``: fixed-boundary
+- ``vmec_jax/solvers/fixed_boundary/optimization/lbfgs.py``: fixed-boundary
   L-BFGS optimizer loop used by the public
   ``solve.solve_fixed_boundary_lbfgs`` wrapper
 - ``vmec_jax/solve_residual_force_context.py``: shared VMEC flux/profile,
   force-kernel ``wout``-like context, trig-table, and fixed-edge setup used by
   residual-objective L-BFGS and Gauss-Newton optimizers
-- ``vmec_jax/solve_fixed_boundary_residual_lbfgs_optimizer.py``:
+- ``vmec_jax/solvers/fixed_boundary/optimization/residual_lbfgs.py``:
   fixed-boundary VMEC-style force-residual L-BFGS optimizer loop used by the
   public ``solve.solve_fixed_boundary_lbfgs_vmec_residual`` wrapper
-- ``vmec_jax/solve_fixed_boundary_residual_gn_optimizer.py``:
+- ``vmec_jax/solvers/fixed_boundary/optimization/residual_gn.py``:
   fixed-boundary VMEC-style force-residual Gauss-Newton/CG optimizer loop used
   by the public ``solve.solve_fixed_boundary_gn_vmec_residual`` wrapper
 - ``vmec_jax/solve_hlo_dump_helpers.py``: optional JAX HLO lowering dump
