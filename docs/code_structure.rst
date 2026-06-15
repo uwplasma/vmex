@@ -85,6 +85,9 @@ Top-level package layout (selected):
   runtime seams for scan readiness, optional debug printing, timing reports,
   resume-state summaries, and free-boundary external-field diagnostic
   attachment
+- ``vmec_jax/solve_residual_iter_mode_transform_helpers.py``: host DGEMM
+  projection matrices, NumPy ``scalxc`` setup, and mode-diagonal weights used
+  by the residual-iteration host update path
 - ``vmec_jax/solve.py``: fixed-boundary solvers + VMEC2000 iteration loop
 - ``vmec_jax/driver.py``: CLI-facing fixed/free-boundary drivers, output
   policies, staged solve dispatch, and wout writing

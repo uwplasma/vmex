@@ -141,6 +141,14 @@ from .solve_residual_iter_geometry_helpers import (
     _mn_sin_to_signed_physical_batch as _geometry_mn_sin_to_signed_physical_batch,
     _rz_norm_np as _geometry_rz_norm_np,
 )
+from .solve_residual_iter_mode_transform_helpers import (
+    build_mode_transform_host_projection as _build_mode_transform_host_projection,
+    mn_cos_to_signed_host_projected as _mn_cos_to_signed_host_projected,
+    mn_sin_to_signed_host_projected as _mn_sin_to_signed_host_projected,
+    mode_diag_weights_mn as _mode_diag_weights_mn_helper,
+    mode_diag_weights_mn_np as _mode_diag_weights_mn_np_helper,
+    vmec_scalxc_from_s_np as _vmec_scalxc_from_s_np_helper,
+)
 from .solve_force_payload_helpers import (
     ForceBlocks as _ForceBlocks,
     normalize_force_blocks as _normalize_force_blocks,  # noqa: F401 - re-exported for internal tests/importers.
@@ -2625,73 +2633,9 @@ def solve_fixed_boundary_residual_iter(
     )
     idx_pos = np.asarray(signed_maps.idx_pos, dtype=np.int32)
     idx_neg = np.asarray(signed_maps.idx_neg, dtype=np.int32)
-    idx_pos_flat_np = np.asarray(signed_maps.idx_pos_flat, dtype=np.int32)
-    idx_neg_flat_np = np.asarray(signed_maps.idx_neg_flat, dtype=np.int32)
-    mask_pos_flat_np = np.asarray(signed_maps.mask_pos_flat)
-    mask_neg_flat_np = np.asarray(signed_maps.mask_neg_flat)
-    idx_pos_safe_np = np.asarray(signed_maps.idx_pos_safe_flat, dtype=np.int32)
-    idx_neg_safe_np = np.asarray(signed_maps.idx_neg_safe_flat, dtype=np.int32)
     # Precompute projection matrix for _mn_*_to_signed_host: replaces np.add.at
     # with DGEMM (vals_all @ _proj_mn_signed), 9× faster per call.
-    _idx_all_np = np.concatenate([idx_pos_safe_np, idx_neg_safe_np], axis=0)
-    _m0_mask_np = np.asarray(signed_maps.m0_mask, dtype=bool)
-    _n0_mask_np = np.asarray(signed_maps.n0_mask, dtype=bool)
-    _mask_neg_bool_np = np.asarray(signed_maps.mask_neg, dtype=bool)
-    _mask_pos_flat_f64 = np.asarray(signed_maps.mask_pos_flat, dtype=np.float64)
-    _mask_neg_flat_f64 = np.asarray(signed_maps.mask_neg_flat, dtype=np.float64)
-    if ncoeff > 0:
-        _n_flat_mn = len(_idx_all_np)
-        _proj_mn_signed = np.zeros((_n_flat_mn, ncoeff), dtype=np.float64)
-        for _j in range(_n_flat_mn):
-            _ix = int(_idx_all_np[_j])
-            if 0 <= _ix < ncoeff:
-                _proj_mn_signed[_j, _ix] = 1.0
-        # Precompute combined projection matrices for 2-DGEMM host transforms.
-        # A_cos/B_cos: map (cc_flat, ss_flat) → result in one pass, no np.where/concat.
-        _n_half = _n_flat_mn // 2  # = mpol * nrange
-        # m0_mask has shape (mpol, 1), n0_mask has shape (1, nrange).
-        # | broadcasts to (mpol, nrange); individual reshape would give wrong size.
-        _mn_bcast_shape = np.broadcast_shapes(_m0_mask_np.shape, _n0_mask_np.shape)
-        _m0n0_flat_1d = (_m0_mask_np | _n0_mask_np).reshape(-1)
-        _n0_flat_1d = np.broadcast_to(_n0_mask_np, _mn_bcast_shape).reshape(-1)
-        _m0_flat_1d = np.broadcast_to(_m0_mask_np, _mn_bcast_shape).reshape(-1)
-        _has_neg_flat = _mask_neg_flat_f64 > 0.0
-        _mask_no_neg_flat = ~_has_neg_flat & ~_n0_flat_1d
-        # cos: pos = 0.5*(cc+ss) unless m0|n0 → pos = cc
-        _cc_pos_fac = np.where(_m0n0_flat_1d, 1.0, 0.5) * _mask_pos_flat_f64
-        _ss_pos_fac = np.where(_m0n0_flat_1d, 0.0, 0.5) * _mask_pos_flat_f64
-        _proj_pos = _proj_mn_signed[:_n_half]
-        _proj_neg = _proj_mn_signed[_n_half:]
-        _A_cos = _cc_pos_fac[:, None] * _proj_pos + 0.5 * _mask_neg_flat_f64[:, None] * _proj_neg
-        _B_cos = _ss_pos_fac[:, None] * _proj_pos + (-0.5) * _mask_neg_flat_f64[:, None] * _proj_neg
-        # sin: pos depends on n0/mask_no_neg/m0 category
-        _sc_pos_fac = (
-            np.where(
-                _n0_flat_1d,
-                1.0,
-                np.where(_mask_no_neg_flat & _m0_flat_1d, 0.0, np.where(_mask_no_neg_flat & ~_m0_flat_1d, 1.0, 0.5)),
-            )
-            * _mask_pos_flat_f64
-        )
-        _cs_pos_fac = (
-            np.where(
-                _n0_flat_1d,
-                0.0,
-                np.where(_mask_no_neg_flat & _m0_flat_1d, -1.0, np.where(_mask_no_neg_flat & ~_m0_flat_1d, 0.0, -0.5)),
-            )
-            * _mask_pos_flat_f64
-        )
-        _A_sin = _sc_pos_fac[:, None] * _proj_pos + 0.5 * _mask_neg_flat_f64[:, None] * _proj_neg
-        _B_sin = _cs_pos_fac[:, None] * _proj_pos + 0.5 * _mask_neg_flat_f64[:, None] * _proj_neg
-        # Stacked matrices for single-DGEMM path: [cc, ss] @ _AB_cos
-        # avoids 2 smaller DGEMMs which have worse BLAS efficiency than 1 large one.
-        _AB_cos = np.vstack([_A_cos, _B_cos])  # (2*n_half, ncoeff)
-        _AB_sin = np.vstack([_A_sin, _B_sin])  # (2*n_half, ncoeff)
-    else:
-        _proj_mn_signed = None
-        _A_cos = _B_cos = _A_sin = _B_sin = None
-        _AB_cos = _AB_sin = None
-        _n_half = 0
+    _host_mode_projection = _build_mode_transform_host_projection(signed_maps, ncoeff=ncoeff)
 
     if getattr(static, "mn_idx_m", None) is not None:
         m_idx_np = np.asarray(static.mn_idx_m, dtype=np.int32)
@@ -2857,24 +2801,11 @@ def solve_fixed_boundary_residual_iter(
         else jnp.asarray(state0.Rcos).dtype
     )
 
-    def _vmec_scalxc_from_s_np(s_in, *, mpol: int, dtype) -> np.ndarray:
-        """NumPy VMEC scalxc for the non-differentiated CPU host-update path."""
-        s_np = np.asarray(s_in, dtype=dtype)
-        ns_local = int(s_np.shape[0])
-        mpol_local = int(mpol)
-        if ns_local == 0 or mpol_local <= 0:
-            return np.zeros((ns_local, max(mpol_local, 0)), dtype=dtype)
-        sqrts = np.sqrt(np.maximum(s_np, 0.0)).astype(dtype, copy=False)
-        sqrts = np.array(sqrts, dtype=dtype, copy=True)
-        sqrts[-1] = np.asarray(1.0, dtype=dtype)
-        sq2 = sqrts[1] if ns_local >= 2 else np.asarray(1.0, dtype=dtype)
-        scal_odd = 1.0 / np.maximum(sqrts, sq2)
-        is_odd = (np.arange(mpol_local) % 2) == 1
-        return np.where(is_odd[None, :], scal_odd[:, None], np.ones((ns_local, mpol_local), dtype=dtype))
-
     if bool(host_update_assembly) and (not _tree_has_tracer(s)):
         if bool(divide_by_scalxc_for_update):
-            scalxc_mn_np = _vmec_scalxc_from_s_np(s, mpol=int(static.cfg.mpol), dtype=_state0_dtype)[:, :, None]
+            scalxc_mn_np = _vmec_scalxc_from_s_np_helper(s, mpol=int(static.cfg.mpol), dtype=_state0_dtype)[
+                :, :, None
+            ]
         else:
             scalxc_mn_np = np.ones((int(np.asarray(s).shape[0]), int(static.cfg.mpol), 1), dtype=_state0_dtype)
         # Keep a JAX value available for scan/exact helper closures, but avoid
@@ -2895,26 +2826,12 @@ def solve_fixed_boundary_residual_iter(
     def _mn_cos_to_signed_host(cc, ss):
         # Single-DGEMM path: [cc, ss] @ _AB_cos (= vstack([A_cos, B_cos]))
         # Eliminates 3 np.where + old element-wise ops; keeps k=2*n_half for BLAS efficiency.
-        cc_np = np.asarray(cc, dtype=float)
-        ns = int(cc_np.shape[0])
-        if ncoeff == 0:
-            return np.zeros((ns, ncoeff), dtype=cc_np.dtype)
-        if ss is None:
-            return cc_np.reshape(ns, -1) @ _A_cos
-        cc_ss = np.concatenate([cc_np.reshape(ns, -1), np.asarray(ss, dtype=float).reshape(ns, -1)], axis=1)
-        return cc_ss @ _AB_cos
+        return _mn_cos_to_signed_host_projected(cc, ss, _host_mode_projection)
 
     def _mn_sin_to_signed_host(sc, cs):
         # Single-DGEMM path: [sc, cs] @ _AB_sin (= vstack([A_sin, B_sin]))
         # Eliminates 3 np.where + old element-wise ops; keeps k=2*n_half for BLAS efficiency.
-        sc_np = np.asarray(sc, dtype=float)
-        ns = int(sc_np.shape[0])
-        if ncoeff == 0:
-            return np.zeros((ns, ncoeff), dtype=sc_np.dtype)
-        if cs is None:
-            return sc_np.reshape(ns, -1) @ _A_sin
-        sc_cs = np.concatenate([sc_np.reshape(ns, -1), np.asarray(cs, dtype=float).reshape(ns, -1)], axis=1)
-        return sc_cs @ _AB_sin
+        return _mn_sin_to_signed_host_projected(sc, cs, _host_mode_projection)
 
     def _mn_cos_to_signed_physical(cc, ss):
         if host_update_assembly:
@@ -3012,27 +2929,26 @@ def solve_fixed_boundary_residual_iter(
             rz_norm = rz_norm + jnp.sum(zcc[sl] * zcc[sl]) + jnp.sum(zss[sl] * zss[sl])
         return rz_norm
 
-    def _mode_diag_weights_mn(dtype):
-        m = jnp.arange(mpol, dtype=jnp.float64)
-        n = jnp.arange(nrange, dtype=jnp.float64) * nfp
-        k2 = (m[:, None] * m[:, None]) + (n[None, :] * n[None, :])
-        w = (1.0 + k2) ** (-float(mode_diag_exponent))
-        return w.astype(dtype)
-
-    def _mode_diag_weights_mn_np(dtype):
-        m = np.arange(mpol, dtype=float)
-        n = np.arange(nrange, dtype=float) * float(nfp)
-        k2 = (m[:, None] * m[:, None]) + (n[None, :] * n[None, :])
-        return ((1.0 + k2) ** (-float(mode_diag_exponent))).astype(dtype)
-
     # Precompute per-iteration constants once.
     if bool(host_update_assembly) and (not _tree_has_tracer(state0.Rcos)):
-        w_mode_mn_np = _mode_diag_weights_mn_np(_state0_dtype)
+        w_mode_mn_np = _mode_diag_weights_mn_np_helper(
+            mpol=mpol,
+            nrange=nrange,
+            nfp=nfp,
+            mode_diag_exponent=mode_diag_exponent,
+            dtype=_state0_dtype,
+        )
         # JAX value is still needed by scan/exact helper closures, but the raw
         # CPU host-update path consumes the NumPy copy directly.
         w_mode_mn = jnp.asarray(w_mode_mn_np)
     else:
-        w_mode_mn = _mode_diag_weights_mn(jnp.asarray(state0.Rcos).dtype)
+        w_mode_mn = _mode_diag_weights_mn_helper(
+            mpol=mpol,
+            nrange=nrange,
+            nfp=nfp,
+            mode_diag_exponent=mode_diag_exponent,
+            dtype=jnp.asarray(state0.Rcos).dtype,
+        )
         # NumPy copy for host-path mode-diagonal step (avoids 36 JAX dispatches/iter).
         w_mode_mn_np = (
             np.asarray(w_mode_mn) if bool(host_update_assembly) and (not _tree_has_tracer(w_mode_mn)) else None

@@ -1075,15 +1075,25 @@ Results obtained:
     mode-diagonal weights.  This should return a small context object and be
     validated with host-vs-JAX transform parity plus existing hot-path/cache
     tests before touching the force pipeline or adaptive scan loop.
+31. Residual-iteration mode-transform extraction moved host DGEMM projection
+    matrix setup, projected host `mn -> signed` transforms, NumPy `scalxc`
+    setup, and mode-diagonal weight helpers into
+    `solve_residual_iter_mode_transform_helpers.py`.  The focused test compares
+    projected host transforms against the existing `vmec_parity` host
+    transforms, covers zero-coefficient and `None`-partner cases, and covers
+    the NumPy/JAX weight/scalxc helper parity.  Local focused checks passed:
+    Ruff clean; the new helper shard passed with 3 tests and 100% local line
+    coverage; existing geometry, VMEC parity host, hotpath, and cache subsets
+    passed with 29 tests.  `solve.py` decreased from 10596 to 10512 lines.
 
 Best next steps:
 
 1. Keep all refactor work on PR #20 until the full plan is finalized.
-2. Continue Wave 1/Wave 2 by extracting the residual-iteration mode-transform
-   context from `solve.py` before moving the force pipeline or adaptive scan
-   loop.  Keep cache-object ownership and monkeypatch seams stable, and add
-   host-vs-JAX signed-transform parity tests instead of widening default CI to
-   expensive VMEC solves.
+2. Continue Wave 1/Wave 2 with the residual-iteration force-pipeline adapter
+   only after a narrow cache-object ownership test is in place.  Keep the
+   adaptive scan loop and branch-control policy in `solve.py` until the
+   fingerprinted free-boundary gates and solver hotpath tests can isolate that
+   risk.
 3. Continue broader refactors in parallel with `driver.py`, `optimization.py`,
    `free_boundary_adjoint.py`, and `wout.py` by extracting pure
    policy/formatting/data-container seams before moving any physics kernels.
@@ -1101,9 +1111,9 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 55%.
+- Differentiability/refactor implementation: 56%.
 - Source-health instrumentation: 100%.
-- Solver monolith reduction: 45% of the large-file extraction work.
+- Solver monolith reduction: 47% of the large-file extraction work.
 - Free-boundary adjoint monolith reduction: 13%.
 - Driver workflow decomposition: 34%.
 - WOUT diagnostic decomposition: 4%.
