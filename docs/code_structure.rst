@@ -19,6 +19,9 @@ Top-level package layout (selected):
 - ``vmec_jax/solve_force_norm_helpers.py``: force-block weighting, lambda
   residual norms, and stability-guard timestep helpers extracted from the
   residual iteration hot path
+- ``vmec_jax/solve_force_payload_helpers.py``: residual-force payload
+  containers, edge masking, staged VMEC ``m=1``/zero/scalxc transforms, and
+  preconditioner-output block assembly
 - ``vmec_jax/solve_tolerance_helpers.py``: dtype-aware gradient, conjugate
   gradient, and Levenberg-Marquardt tolerance policies
 - ``vmec_jax/solve_constraint_helpers.py``: fixed-boundary edge constraints,

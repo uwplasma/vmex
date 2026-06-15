@@ -7,9 +7,11 @@ import numpy as np
 import vmec_jax.solve as solve
 from vmec_jax.solve_force_payload_helpers import (
     ForceBlocks,
+    ResidualForcePayloadStages,
     normalize_force_blocks,
     preconditioner_output_blocks_np,
     residual_force_payload_after_m1_scalxc,
+    residual_force_payload_m1_scalxc_stages,
     zero_edge_rz_force_block,
     zero_edge_rz_force_blocks,
 )
@@ -43,6 +45,7 @@ def test_solve_reexports_payload_helpers() -> None:
     assert solve._zero_edge_rz_force_block is zero_edge_rz_force_block
     assert solve._zero_edge_rz_force_blocks is zero_edge_rz_force_blocks
     assert solve._preconditioner_output_blocks_np is preconditioner_output_blocks_np
+    assert solve._residual_force_payload_m1_scalxc_stages is residual_force_payload_m1_scalxc_stages
 
 
 def test_residual_force_payload_applies_m1_zeroing_and_scalxc_in_order() -> None:
@@ -68,6 +71,44 @@ def test_residual_force_payload_applies_m1_zeroing_and_scalxc_in_order() -> None
 
     np.testing.assert_allclose(np.asarray(got.frss)[:, 0, :], frzl.frss[:, 0, :])
     np.testing.assert_allclose(np.asarray(got.fzcs)[:, 2, :], frzl.fzcs[:, 2, :])
+
+
+def test_residual_force_payload_stages_expose_intermediate_debug_payloads() -> None:
+    frzl = _blocks()
+    s = np.asarray([0.0, 0.25, 1.0])
+
+    stages = residual_force_payload_m1_scalxc_stages(
+        frzl,
+        s=s,
+        apply_m1_constraints=True,
+        lconm1=True,
+        zero_m1=True,
+    )
+
+    assert isinstance(stages, ResidualForcePayloadStages)
+    osqrt2 = 1.0 / np.sqrt(2.0)
+    scalxc = np.asarray([2.0, 2.0, 1.0])[:, None]
+    np.testing.assert_allclose(
+        np.asarray(stages.after_m1.frss)[:, 1, :],
+        (frzl.frss[:, 1, :] + frzl.fzcs[:, 1, :]) * osqrt2,
+    )
+    np.testing.assert_allclose(
+        np.asarray(stages.after_m1.fzcs)[:, 1, :],
+        (frzl.frss[:, 1, :] - frzl.fzcs[:, 1, :]) * osqrt2,
+    )
+    np.testing.assert_allclose(np.asarray(stages.after_zero_m1.fzcs)[:, 1, :], 0.0)
+    np.testing.assert_allclose(
+        np.asarray(stages.after_scalxc.frss)[:, 1, :],
+        (frzl.frss[:, 1, :] + frzl.fzcs[:, 1, :]) * osqrt2 * scalxc,
+    )
+    final_payload = residual_force_payload_after_m1_scalxc(
+        frzl,
+        s=s,
+        apply_m1_constraints=True,
+        lconm1=True,
+        zero_m1=True,
+    )
+    np.testing.assert_allclose(np.asarray(stages.after_scalxc.frss), np.asarray(final_payload.frss))
 
 
 def test_residual_force_payload_can_skip_m1_transform_but_still_applies_scalxc() -> None:
