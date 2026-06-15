@@ -2,10 +2,68 @@
 
 from __future__ import annotations
 
+from typing import Any, NamedTuple
+
 import numpy as np
 
 from ._compat import has_jax, jax, jnp
 from .wout_diagnostics import lambda_half_mesh_weights
+
+
+class CurrentProfileMetadata(NamedTuple):
+    """VMECPlot2-compatible current/profile metadata persisted in WOUT files."""
+
+    ac: np.ndarray
+    ac_aux_s: np.ndarray
+    ac_aux_f: np.ndarray
+    pcurr_type: str
+    piota_type: str
+
+
+def wout_current_profile_metadata_from_indata(
+    indata: Any,
+    *,
+    ndfmax: int = 101,
+    min_ac_size: int = 21,
+) -> CurrentProfileMetadata:
+    """Return WOUT current-profile metadata from a VMEC input deck.
+
+    VMECPlot2 expects a fixed-size polynomial ``AC`` profile plus auxiliary
+    spline arrays even when the input deck does not provide spline data.  This
+    helper centralizes those defaults so the WOUT builder does not open-code
+    profile metadata normalization.
+    """
+
+    pcurr_type = indata.get("PCURR_TYPE", None)
+    if pcurr_type is None:
+        pcurr_type = "power_series"
+    piota_type = indata.get("PIOTA_TYPE", None)
+    if piota_type is None:
+        piota_type = "power_series"
+
+    ac_raw = indata.get("AC", [])
+    if isinstance(ac_raw, (int, float, np.floating)):
+        ac_vals = [float(ac_raw)]
+    elif isinstance(ac_raw, list):
+        ac_vals = [float(v) for v in ac_raw]
+    else:
+        ac_vals = []
+
+    n_preset = max(int(min_ac_size), len(ac_vals) if ac_vals else 1)
+    ac = np.zeros((n_preset,), dtype=float)
+    for i, v in enumerate(ac_vals):
+        if i >= n_preset:
+            break
+        ac[i] = v
+
+    aux_size = int(ndfmax)
+    return CurrentProfileMetadata(
+        ac=ac,
+        ac_aux_s=-np.ones((aux_size,), dtype=float),
+        ac_aux_f=np.zeros((aux_size,), dtype=float),
+        pcurr_type=str(pcurr_type),
+        piota_type=str(piota_type),
+    )
 
 
 def lambda_wout_from_full_mesh(
@@ -203,9 +261,11 @@ def wout_phi_profile_from_variables(variables, *, ns: int, phipf: np.ndarray) ->
 
 
 __all__ = [
+    "CurrentProfileMetadata",
     "chipf_from_chips",
     "icurv_full_mesh_from_indata",
     "lambda_full_from_wout_half_mesh",
     "lambda_wout_from_full_mesh",
+    "wout_current_profile_metadata_from_indata",
     "wout_phi_profile_from_variables",
 ]

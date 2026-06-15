@@ -58,9 +58,11 @@ from vmec_jax.wout import (
     _vmec_wrout_nyquist_synthesis,
     assert_main_modes_match_wout,
     _glasser_profiles_from_wout_data,
+    _wout_current_profile_metadata_from_indata,
 )
 from vmec_jax.mercier import glasser_resistive_interchange_from_mercier_terms
 from vmec_jax import wout_flux_helpers
+from vmec_jax.wout_flux_helpers import wout_current_profile_metadata_from_indata
 from vmec_jax.wout_diagnostics import (
     glasser_from_wout_mercier_terms,
     glasser_profiles_from_wout_data,
@@ -249,6 +251,41 @@ def test_wout_glasser_profile_writer_bundle_uses_data_or_zero_defaults():
     np.testing.assert_allclose(defaults.H, np.zeros(4))
     np.testing.assert_allclose(defaults.correction, np.zeros(4))
     np.testing.assert_array_equal(defaults.shear_valid, np.zeros(4, dtype=bool))
+
+
+def test_wout_current_profile_metadata_from_indata_preserves_vmecplot_defaults():
+    defaults = wout_current_profile_metadata_from_indata(InData(scalars={}, indexed={}))
+    np.testing.assert_allclose(defaults.ac, np.zeros(21))
+    np.testing.assert_allclose(defaults.ac_aux_s, -np.ones(101))
+    np.testing.assert_allclose(defaults.ac_aux_f, np.zeros(101))
+    assert defaults.pcurr_type == "power_series"
+    assert defaults.piota_type == "power_series"
+
+    scalar_ac = wout_current_profile_metadata_from_indata(InData(scalars={"AC": 2.5}, indexed={}))
+    assert scalar_ac.ac.shape == (21,)
+    assert scalar_ac.ac[0] == pytest.approx(2.5)
+    np.testing.assert_allclose(scalar_ac.ac[1:], 0.0)
+
+    long_ac_values = [float(i) for i in range(25)]
+    custom = InData(
+        scalars={
+            "AC": long_ac_values,
+            "PCURR_TYPE": "cubic_spline_i",
+            "PIOTA_TYPE": "akima_spline",
+        },
+        indexed={},
+    )
+    metadata = wout_current_profile_metadata_from_indata(custom, ndfmax=5)
+    alias = _wout_current_profile_metadata_from_indata(custom, ndfmax=5)
+
+    assert metadata.ac.shape == (25,)
+    np.testing.assert_allclose(metadata.ac, long_ac_values)
+    np.testing.assert_allclose(metadata.ac_aux_s, -np.ones(5))
+    np.testing.assert_allclose(metadata.ac_aux_f, np.zeros(5))
+    assert metadata.pcurr_type == "cubic_spline_i"
+    assert metadata.piota_type == "akima_spline"
+    for actual, expected in zip(alias, metadata, strict=True):
+        np.testing.assert_array_equal(actual, expected)
 
 
 def test_lambda_wout_half_mesh_roundtrip_covers_m_parity_branches():

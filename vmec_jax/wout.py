@@ -63,6 +63,7 @@ _lambda_half_mesh_weights = _wout_diagnostics.lambda_half_mesh_weights
 _lambda_wout_from_full_mesh = _wout_flux_helpers.lambda_wout_from_full_mesh
 _pshalf_from_s = _wout_diagnostics.pshalf_from_s
 _safe_divide = _wout_diagnostics.safe_divide
+_wout_current_profile_metadata_from_indata = _wout_flux_helpers.wout_current_profile_metadata_from_indata
 _wout_phi_profile_from_variables = _wout_flux_helpers.wout_phi_profile_from_variables
 _read_wout_scalar_metadata = read_wout_scalar_metadata
 _bss_scalxc_undo_factor = _wout_parity_helpers.bss_scalxc_undo_factor
@@ -5442,34 +5443,13 @@ def wout_minimal_from_fixed_boundary(
         if wout_timing_enabled:
             wout_timing["equif_s"] = _time.perf_counter() - t_equif
 
-    # Current profile metadata for vmecPlot2.
-    pcurr_type = indata.get("PCURR_TYPE", None)
-    if pcurr_type is None:
-        pcurr_type = "power_series"
-    pcurr_type = str(pcurr_type)
-
-    piota_type = indata.get("PIOTA_TYPE", None)
-    if piota_type is None:
-        piota_type = "power_series"
-    piota_type = str(piota_type)
-
-    ac_raw = indata.get("AC", [])
-    if isinstance(ac_raw, (int, float, np.floating)):
-        ac_vals = [float(ac_raw)]
-    elif isinstance(ac_raw, list):
-        ac_vals = [float(v) for v in ac_raw]
-    else:
-        ac_vals = []
-    n_preset = max(21, len(ac_vals) if ac_vals else 1)
-    ac = np.zeros((n_preset,), dtype=float)
-    for i, v in enumerate(ac_vals):
-        if i >= n_preset:
-            break
-        ac[i] = v
-
-    ndfmax = 101
-    ac_aux_s = -np.ones((ndfmax,), dtype=float)
-    ac_aux_f = np.zeros((ndfmax,), dtype=float)
+    # Current profile metadata for VMECPlot2.
+    current_metadata = _wout_current_profile_metadata_from_indata(indata)
+    ac = current_metadata.ac
+    ac_aux_s = current_metadata.ac_aux_s
+    ac_aux_f = current_metadata.ac_aux_f
+    pcurr_type = current_metadata.pcurr_type
+    piota_type = current_metadata.piota_type
 
     betapol = 0.0
     betator = 0.0

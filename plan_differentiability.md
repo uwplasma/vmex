@@ -1473,6 +1473,14 @@ Results obtained:
     to `wout_diagnostics.py`, preserving the writer's I/O role while keeping
     diagnostics defaults unit-testable.  Focused Glasser materialization tests,
     the full WOUT helper suite, Ruff, and compileall passed locally.
+83. Moved VMECPlot2 current-profile metadata normalization into
+    `wout_flux_helpers.py` as `wout_current_profile_metadata_from_indata`.
+    The WOUT builder now delegates `AC`, `ac_aux_s`, `ac_aux_f`,
+    `pcurr_type`, and `piota_type` defaults to a pure helper while preserving
+    the 21-slot polynomial and 101-slot auxiliary-array conventions.  Direct
+    helper tests cover empty decks, scalar `AC`, long `AC` lists, profile type
+    strings, and the private compatibility alias; WOUT helper, roundtrip, and
+    VMECPlot2 compatibility tests passed along with Ruff and compileall.
 
 Best next steps:
 
@@ -1504,4 +1512,4 @@ Completion:
 - Solver monolith reduction: 71% of the large-file extraction work.
 - Free-boundary adjoint monolith reduction: 30%.
 - Driver workflow decomposition: 35%.
-- WOUT diagnostic decomposition: 20%.
+- WOUT diagnostic/profile decomposition: 22%.
