@@ -23,10 +23,12 @@ future solver:
   manufactured-solution source helpers;
 - an experimental fixed-boundary axisymmetric projected-gradient solve path
   with pressure-continuation trace diagnostics;
+- mirror-native ``mout_*.nc`` read/write helpers, plot-data extraction, PNG
+  writing, ``.npz``/CSV export helpers, and ``vmec --plot mout_*.nc`` dispatch;
 - focused tests for node ordering, polynomial exactness, interpolation, filtering,
   theta orthogonality, analytic axisymmetric geometry, field identities, and
-  analytic energy, gradient checks, Hessian symmetry, and MMS stationarity.
+  analytic energy, gradient checks, Hessian symmetry, MMS stationarity, I/O
+  roundtrip, and plotting numerical content.
 
-Later phases add mirror native ``mout`` output, plotting, WHAM-inspired
-validation, nonaxisymmetric boundaries, mirror straight-field-line diagnostics,
-and optimization workflows.
+Later phases add WHAM-inspired validation, nonaxisymmetric boundaries, mirror
+straight-field-line diagnostics, and optimization workflows.

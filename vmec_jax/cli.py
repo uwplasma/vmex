@@ -52,11 +52,33 @@ def _is_boozmn_path(path: Path) -> bool:
     return path.name.lower().startswith("boozmn_") and path.suffix.lower() == ".nc"
 
 
+def _is_mout_path(path: Path) -> bool:
+    if path.suffix.lower() != ".nc":
+        return False
+    if path.name.lower().startswith("mout_"):
+        return True
+    try:
+        from .mirror import is_mirror_output
+
+        return is_mirror_output(path)
+    except Exception:
+        return False
+
+
 def _plot_wout_file(wout_path: Path, outdir: Path) -> None:
     from .plotting import plot_wout
 
     print(f"Plotting VMEC WOUT {wout_path.name} → {outdir}/")
     plot_wout(wout_path, outdir=outdir)
+
+
+def _plot_mout_file(mout_path: Path, outdir: Path) -> None:
+    from .mirror.plotting.export import plot_mirror_output
+
+    print(f"Plotting mirror MOUT {mout_path.name} → {outdir}/")
+    paths = plot_mirror_output(mout_path, outdir=outdir)
+    for path in paths.values():
+        print(f"  Saved {path}")
 
 
 def _plot_boozmn_file(boozmn_path: Path, outdir: Path) -> None:
@@ -110,6 +132,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  vmec --test          — run and plot the bundled quick-start case\n"
             "  vmec input.*         — run the solver\n"
             "  vmec --plot wout_*.nc  — generate diagnostic plots\n"
+            "  vmec --plot mout_*.nc  — generate mirror diagnostic plots\n"
             "  vmec --booz wout_*.nc  — run booz_xform_jax and write boozmn_*.nc\n\n"
             "Compatibility aliases: vmec_jax, vmec-jax, xvmec_jax."
         ),
@@ -134,6 +157,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Generate plots. With a wout_*.nc file, plot WOUT diagnostics. "
+            "With a mout_*.nc file, plot mirror diagnostics. "
             "With a boozmn_*.nc file, plot Boozer diagnostics. With an input.* "
             "file, solve first and then plot the generated WOUT. If PATH is "
             "omitted, the positional input path is used."
@@ -407,6 +431,12 @@ def main(argv: list[str] | None = None) -> int:
         if not plot_requested:
             parser.error("boozmn_*.nc inputs are plot-only; use --plot boozmn_*.nc")
         _plot_boozmn_file(input_path, plot_outdir)
+        return 0
+
+    if _is_mout_path(input_path):
+        if not plot_requested:
+            parser.error("mout_*.nc inputs are plot-only; use --plot mout_*.nc")
+        _plot_mout_file(input_path, plot_outdir)
         return 0
 
     if _is_wout_path(input_path):
