@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from .wout_schema import _nc_scalar
+from .wout_schema import _bool_from_nc, _nc_scalar
 
 
 # VMEC Nyquist Fourier fields are stored with (radius, mn_mode_nyq) dimensions.
@@ -59,6 +59,23 @@ def read_optional_int_scalar(variables: Any, name: str, default: int | float) ->
     if name not in variables:
         return int(default)
     return int(_nc_scalar(variables[name][:], default, as_int=True))
+
+
+def read_wout_scalar_metadata(variables: Any, *, path: Path) -> tuple[int, int, int, int, bool, int]:
+    """Extract and validate scalar metadata required before reading WOUT arrays."""
+
+    ns = int(_nc_scalar(variables["ns"][:], 0.0, as_int=True))
+    mpol = int(_nc_scalar(variables["mpol"][:], 0.0, as_int=True))
+    ntor = int(_nc_scalar(variables["ntor"][:], 0.0, as_int=True))
+    nfp = int(_nc_scalar(variables["nfp"][:], 0.0, as_int=True))
+
+    lasym_var = variables.get("lasym__logical__")
+    lasym = _bool_from_nc(lasym_var[:] if lasym_var is not None else 0)
+    signgs_var = variables.get("signgs")
+    signgs = int(_nc_scalar(signgs_var[:] if signgs_var is not None else 1.0, 1.0, as_int=True))
+    if ns <= 0 or mpol <= 0 or ntor < 0 or nfp <= 0:
+        raise ValueError(f"Incomplete or masked wout scalar metadata in {path}")
+    return ns, mpol, ntor, nfp, lasym, signgs
 
 
 def read_type_field(variables: Any, name: str) -> str:

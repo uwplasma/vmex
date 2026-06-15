@@ -59,6 +59,7 @@ from vmec_jax.wout import (
     assert_main_modes_match_wout,
 )
 from vmec_jax.mercier import glasser_resistive_interchange_from_mercier_terms
+from vmec_jax import wout_flux_helpers
 from vmec_jax.wout_diagnostics import glasser_from_wout_mercier_terms
 from vmec_jax.vmec_tomnsp import vmec_trig_tables
 
@@ -216,6 +217,16 @@ def test_lambda_wout_half_mesh_roundtrip_covers_m_parity_branches():
         phipf_internal=phipf_internal,
         lamscale=lamscale,
     )
+    np.testing.assert_allclose(
+        wout_flux_helpers.lambda_wout_from_full_mesh(
+            lam_full=lam_full,
+            m_modes=m_modes,
+            s=s,
+            phipf_internal=phipf_internal,
+            lamscale=lamscale,
+        ),
+        lam_wout,
+    )
 
     assert lam_wout.shape == lam_full.shape
     np.testing.assert_allclose(lam_wout[0], 0.0)
@@ -225,6 +236,16 @@ def test_lambda_wout_half_mesh_roundtrip_covers_m_parity_branches():
         s=s,
         phipf_internal=phipf_internal,
         lamscale=lamscale,
+    )
+    np.testing.assert_allclose(
+        wout_flux_helpers.lambda_full_from_wout_half_mesh(
+            lam_wout=lam_wout,
+            m_modes=m_modes,
+            s=s,
+            phipf_internal=phipf_internal,
+            lamscale=lamscale,
+        ),
+        recovered,
     )
 
     # Modes m>1 have no recoverable axis lambda after VMEC's half-mesh write

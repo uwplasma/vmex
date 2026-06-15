@@ -1336,6 +1336,16 @@ Results obtained:
     private `_compute_ctor_from_buco` alias for compatibility.  Focused WOUT,
     non-solve, and implicit-driver helper tests, Ruff, and compileall passed.
     `wout.py` decreased to 6124 lines.
+68. Extracted a larger WOUT flux-convention tranche into
+    `wout_flux_helpers.py` and `wout_io.py`.  VMEC lambda full/half mesh
+    roundtrips, `chipf` half-mesh flux derivatives, input-deck current profile
+    reconstruction, toroidal-flux profile synthesis, and scalar metadata
+    validation now live outside the monolithic WOUT reader/writer.  `wout.py`
+    keeps private compatibility aliases so downstream monkeypatch-heavy tests
+    and internal call sites are unchanged.  Direct helper coverage was added
+    for the new module APIs; focused WOUT, vmecPlot2, bundled current-profile,
+    driver reconstruction, and finite-beta helper tests passed along with Ruff
+    and compileall.  `wout.py` decreased to 5920 lines.
 
 Best next steps:
 
@@ -1363,9 +1373,9 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 85%.
+- Differentiability/refactor implementation: 87%.
 - Source-health instrumentation: 100%.
 - Solver monolith reduction: 60% of the large-file extraction work.
 - Free-boundary adjoint monolith reduction: 26%.
 - Driver workflow decomposition: 35%.
-- WOUT diagnostic decomposition: 11%.
+- WOUT diagnostic decomposition: 16%.

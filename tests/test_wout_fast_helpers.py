@@ -9,6 +9,8 @@ import pytest
 from vmec_jax.namelist import InData
 import vmec_jax.wout as wout_module
 from vmec_jax import wout_diagnostics
+from vmec_jax import wout_flux_helpers
+from vmec_jax import wout_io
 from vmec_jax import wout_parity_helpers
 from vmec_jax.wout import (
     MU0,
@@ -57,6 +59,7 @@ def test_wout_half_mesh_and_flux_derivative_conventions() -> None:
 
     chips = np.asarray([0.0, 1.0, 4.0, 9.0])
     np.testing.assert_allclose(_chipf_from_chips(chips), [-0.5, 2.5, 6.5, 11.5])
+    np.testing.assert_allclose(wout_flux_helpers.chipf_from_chips(chips), _chipf_from_chips(chips))
     np.testing.assert_allclose(_chipf_from_chips(np.asarray([2.0, 5.0])), [5.0, 6.5])
 
 
@@ -118,9 +121,11 @@ def test_current_profile_full_mesh_uses_vmec_half_mesh_normalization() -> None:
     )
 
     icurv = _icurv_full_mesh_from_indata(indata=indata, s_full=s_full, signgs=-1)
+    icurv_direct = wout_flux_helpers.icurv_full_mesh_from_indata(indata=indata, s_full=s_full, signgs=-1)
     expected_scale = -MU0 * 10.0 / (2.0 * np.pi) / 2.0
     # I(s_half)=2*s_half and VMEC explicitly zeroes the axis value.
     np.testing.assert_allclose(np.asarray(icurv), expected_scale * np.asarray([0.0, 0.25, 1.25]))
+    np.testing.assert_allclose(np.asarray(icurv_direct), np.asarray(icurv))
 
     no_current = InData(scalars={"NCURR": 0, "CURTOR": 10.0, "AC": [2.0]}, indexed={})
     np.testing.assert_allclose(np.asarray(_icurv_full_mesh_from_indata(indata=no_current, s_full=s_full, signgs=1)), 0.0)
@@ -491,10 +496,12 @@ def test_read_wout_scalar_metadata_defaults_and_validation() -> None:
     }
 
     assert _read_wout_scalar_metadata(variables, path=Path("wout_minimal.nc")) == (3, 2, 0, 1, False, 1)
+    assert wout_io.read_wout_scalar_metadata(variables, path=Path("wout_minimal.nc")) == (3, 2, 0, 1, False, 1)
 
     variables["lasym__logical__"] = _FakeNcVar(np.asarray([1]))
     variables["signgs"] = _FakeNcVar(np.asarray([-1]))
     assert _read_wout_scalar_metadata(variables, path=Path("wout_asym.nc")) == (3, 2, 0, 1, True, -1)
+    assert wout_io.read_wout_scalar_metadata(variables, path=Path("wout_asym.nc")) == (3, 2, 0, 1, True, -1)
 
     bad = {**variables, "ns": _FakeNcVar(np.asarray([0]))}
     with pytest.raises(ValueError, match="Incomplete or masked wout scalar metadata"):
@@ -507,10 +514,18 @@ def test_wout_phi_profile_uses_explicit_field_or_half_mesh_fallback() -> None:
         _wout_phi_profile_from_variables(explicit, ns=3, phipf=np.asarray([2.0, 4.0, 6.0])),
         [0.0, 0.25, 1.0],
     )
+    np.testing.assert_allclose(
+        wout_flux_helpers.wout_phi_profile_from_variables(explicit, ns=3, phipf=np.asarray([2.0, 4.0, 6.0])),
+        [0.0, 0.25, 1.0],
+    )
 
     phipf = np.asarray([2.0, 4.0, 6.0])
     np.testing.assert_allclose(
         _wout_phi_profile_from_variables({}, ns=3, phipf=phipf),
+        [0.0, 2.0, 5.0],
+    )
+    np.testing.assert_allclose(
+        wout_flux_helpers.wout_phi_profile_from_variables({}, ns=3, phipf=phipf),
         [0.0, 2.0, 5.0],
     )
     np.testing.assert_allclose(_wout_phi_profile_from_variables({}, ns=1, phipf=np.asarray([2.0])), [0.0])
