@@ -430,6 +430,49 @@ def test_precompile_only_jit_precompile_exercises_force_cache_and_lower(monkeypa
     assert len(solve._COMPUTE_FORCES_CACHE) == 1
 
 
+def test_precompile_only_compute_force_cache_is_owned_and_limited(monkeypatch) -> None:
+    pytest.importorskip("jax")
+    _quiet_solve_env(monkeypatch)
+    _install_scan_fakes(monkeypatch)
+    monkeypatch.setenv("VMEC_JAX_COMPUTE_FORCES_CACHE_SIZE", "1")
+    solve._COMPUTE_FORCES_CACHE.clear()
+    compiled = []
+
+    class FakeJit:
+        def __init__(self, fn):
+            self.fn = fn
+
+        def __call__(self, *args, **kwargs):
+            return self.fn(*args, **kwargs)
+
+        def lower(self, *args, **kwargs):
+            self.fn(*args, **kwargs)
+            return SimpleNamespace(compile=lambda: "compiled")
+
+    def fake_jit(fn, *args, **kwargs):
+        del args, kwargs
+        wrapped = FakeJit(fn)
+        compiled.append(wrapped)
+        return wrapped
+
+    static_a = _static()
+    static_b = _static()
+    static_b.cfg.nfp = 2
+    monkeypatch.setattr(solve, "jit", fake_jit)
+
+    _run_precompile_only(static_a, jit_forces=True, jit_precompile=True, host_update_assembly=False)
+    first_key = next(iter(solve._COMPUTE_FORCES_CACHE))
+    _run_precompile_only(static_b, jit_forces=True, jit_precompile=True, host_update_assembly=False)
+    second_key = next(iter(solve._COMPUTE_FORCES_CACHE))
+    _run_precompile_only(static_a, jit_forces=True, jit_precompile=True, host_update_assembly=False)
+    third_key = next(iter(solve._COMPUTE_FORCES_CACHE))
+
+    assert first_key != second_key
+    assert third_key == first_key
+    assert len(solve._COMPUTE_FORCES_CACHE) == 1
+    assert len(compiled) == 3
+
+
 def test_precompile_only_jit_precompile_swallows_compile_failure(monkeypatch) -> None:
     pytest.importorskip("jax")
     _quiet_solve_env(monkeypatch)
