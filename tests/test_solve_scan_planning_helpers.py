@@ -18,6 +18,10 @@ from vmec_jax.solvers.fixed_boundary.scan.planning import (
     scan_timing_enabled,
     validate_vmec2000_scan_guards,
 )
+from vmec_jax.solvers.fixed_boundary.scan.runtime import (
+    resolve_scan_runtime_hooks,
+    scan_trace_context_or_null,
+)
 
 
 def _scan_options(**overrides):
@@ -124,6 +128,50 @@ def test_timing_report_math_excludes_dispatch_breakdown_from_leaf_total():
     assert report["scan_cold_cache_miss_ready_s"] == pytest.approx(0.2)
     assert report["scan_cache_build_wrapper_s"] == pytest.approx(0.1)
     assert build_scan_timing_report(iterations=7, stats=stats, scan_total_s=3.0)["scan_unattributed_s"] == 0.0
+
+
+def test_scan_runtime_hooks_disable_optional_callbacks_for_quiet_defaults():
+    hooks = resolve_scan_runtime_hooks(
+        dump_timecontrol_env="0",
+        dump_dir_env="",
+        print_in_scan=False,
+        scan_print_mode="not-a-mode",
+        scan_trace=False,
+    )
+
+    assert not hooks.dump_timecontrol_scan
+    assert hooks.timecontrol_callback is None
+    assert hooks.timecontrol_path is None
+    assert hooks.io_callback is None
+    assert not hooks.print_in_scan
+    assert hooks.scan_print_mode == "debug_print"
+    assert not hooks.scan_trace
+    with scan_trace_context_or_null(hooks, "scan/test") as value:
+        assert value is None
+
+
+def test_scan_runtime_hooks_disable_timecontrol_without_dump_dir(tmp_path):
+    hooks = resolve_scan_runtime_hooks(
+        dump_timecontrol_env="1",
+        dump_dir_env="",
+        print_in_scan=False,
+        scan_print_mode="debug_print",
+        scan_trace=False,
+    )
+
+    assert not hooks.dump_timecontrol_scan
+    assert hooks.timecontrol_path is None
+
+    hooks_with_path = resolve_scan_runtime_hooks(
+        dump_timecontrol_env="1",
+        dump_dir_env=str(tmp_path),
+        print_in_scan=False,
+        scan_print_mode="debug_print",
+        scan_trace=False,
+    )
+    if hooks_with_path.timecontrol_callback is not None:
+        assert hooks_with_path.dump_timecontrol_scan
+        assert hooks_with_path.timecontrol_path == tmp_path / "time_control_trace.log"
 
 
 def test_run_flags_disable_fallback_for_state_only_and_chunking_for_traced_scan():
