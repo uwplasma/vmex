@@ -718,8 +718,8 @@ def _build_patches() -> list[tuple[Any, list[tuple[str, Any]]]]:
     import vmec_jax.init_guess as _init_guess
     import vmec_jax.multigrid as _multigrid
     import vmec_jax.solve as _solve
-    import vmec_jax.solve_force_payload_helpers as _solve_force_payload_helpers
     import vmec_jax.solve_profile_helpers as _solve_profile_helpers
+    import vmec_jax.solvers.fixed_boundary.residual.payload_blocks as _residual_payload_blocks
 
     patches = [
         (_energy, [
@@ -742,7 +742,7 @@ def _build_patches() -> list[tuple[Any, list[tuple[str, Any]]]]:
             ("jnp", _NP_MODULE),
             ("jax", _JAX_SHIM),
         ]),
-        (_solve_force_payload_helpers, [
+        (_residual_payload_blocks, [
             ("jnp", _NP_MODULE),
         ]),
         (_solve_profile_helpers, [

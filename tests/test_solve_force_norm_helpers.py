@@ -5,8 +5,11 @@ from types import SimpleNamespace
 import numpy as np
 
 from vmec_jax._compat import jnp
-from vmec_jax.solve_force_norm_helpers import mode_weight_force_blocks_jax, residual_fsq_from_norms
-from vmec_jax.solve_force_payload_helpers import ForceBlocks
+from vmec_jax.solvers.fixed_boundary.residual.force_norms import (
+    mode_weight_force_blocks_jax,
+    residual_fsq_from_norms,
+)
+from vmec_jax.solvers.fixed_boundary.residual.payload_blocks import ForceBlocks
 
 
 def test_residual_fsq_from_norms_matches_vmec_scalar_products() -> None:

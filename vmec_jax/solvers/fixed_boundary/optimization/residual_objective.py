@@ -6,13 +6,13 @@ from typing import Any, NamedTuple
 
 import numpy as np
 
-from ._compat import jnp
-from .vmec_residue import (
+from ...._compat import jnp
+from ....vmec_residue import (
     vmec_apply_m1_constraints,
     vmec_apply_scalxc_to_tomnsps,
     vmec_zero_m1_zforce,
 )
-from .vmec_tomnsp import TomnspsRZL
+from ....vmec_tomnsp import TomnspsRZL
 
 
 R_RESIDUAL_BLOCKS = ("frcc", "frss", "frsc", "frcs")
@@ -202,4 +202,3 @@ def residual_objective_vector(
         scale = scale_l if group == "l" else scale_rz
         parts.append(jnp.ravel(scale * jnp.asarray(block)))
     return jnp.concatenate(parts, axis=0)
-

@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from ._compat import jnp
-from .solve_force_payload_helpers import ForceBlocks
+from ...._compat import jnp
+from .payload_blocks import ForceBlocks
 
 
 def mode_weight_force_blocks_np(

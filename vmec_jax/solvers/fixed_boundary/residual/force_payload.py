@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable, NamedTuple
 
 from ...._compat import jnp
-from ....solve_force_payload_helpers import (
+from .payload_blocks import (
     residual_force_payload_after_m1_scalxc,
     residual_force_payload_m1_scalxc_stages,
     zero_edge_rz_force_blocks,

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 
 import vmec_jax.solve as solve
-from vmec_jax.solve_force_payload_helpers import (
+from vmec_jax.solvers.fixed_boundary.residual.payload_blocks import (
     ForceBlocks,
     ResidualForcePayloadStages,
     normalize_force_blocks,

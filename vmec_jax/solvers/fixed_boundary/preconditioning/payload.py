@@ -6,7 +6,6 @@ from collections import OrderedDict
 from typing import Any, Callable
 
 from ...._compat import has_jax, jax, jit, jnp
-from ....solve_force_norm_helpers import lambda_preconditioned_full_norm
 from ....solve_jit_cache_helpers import (
     jit_cache_get,
     jit_cache_put,
@@ -14,6 +13,7 @@ from ....solve_jit_cache_helpers import (
 )
 from ....vmec_residue import vmec_gcx2_from_tomnsps
 from ....vmec_tomnsp import TomnspsRZL
+from ..residual.force_norms import lambda_preconditioned_full_norm
 
 
 STRICT_UPDATE_STEP_JIT_CACHE: OrderedDict[tuple, Any] = OrderedDict()

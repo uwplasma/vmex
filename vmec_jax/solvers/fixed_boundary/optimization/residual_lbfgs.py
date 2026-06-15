@@ -78,13 +78,13 @@ def solve_fixed_boundary_lbfgs_vmec_residual_impl(
     if validate_options_func is None:
         from ....solve_options import validate_residual_lbfgs_options as validate_options_func
     if prepare_residual_force_context_func is None:
-        from ....solve_residual_force_context import (
+        from .residual_context import (
             prepare_residual_force_context as prepare_residual_force_context_func,
         )
     if mode00_index_func is None:
         from .constraints import mode00_index as mode00_index_func
     if assemble_residual_objective_terms_func is None:
-        from ....solve_residual_objective_helpers import (
+        from .residual_objective import (
             assemble_residual_objective_terms as assemble_residual_objective_terms_func,
         )
     if enforce_fixed_boundary_and_axis_func is None:

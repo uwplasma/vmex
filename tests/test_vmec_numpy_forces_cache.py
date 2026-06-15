@@ -4,7 +4,7 @@ import numpy as np
 
 import vmec_jax._compat as compat
 import vmec_jax.solve as solve_mod
-import vmec_jax.solve_force_payload_helpers as payload_helpers_mod
+import vmec_jax.solvers.fixed_boundary.residual.payload_blocks as payload_helpers_mod
 import vmec_jax.vmec_forces as vf
 from vmec_jax.vmec_numpy_forces import (
     _NP_STACK_CACHE,

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from vmec_jax._compat import jnp
-from vmec_jax.solve_residual_objective_helpers import (
+from vmec_jax.solvers.fixed_boundary.optimization.residual_objective import (
     assemble_residual_objective_terms,
     prepare_residual_objective_blocks,
     residual_objective_vector,
@@ -117,4 +117,3 @@ def test_residual_objective_vector_stacks_optional_blocks_in_gn_order():
         np.asarray(vec),
         np.asarray([12.0, 24.0, 6.0, 48.0, 60.0, 12.0, 84.0, 96.0, 18.0, 120.0, 132.0, 24.0]),
     )
-

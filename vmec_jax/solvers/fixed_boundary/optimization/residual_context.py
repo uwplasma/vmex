@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-from ._compat import jnp
+from ...._compat import jnp
 
 
 @dataclass(frozen=True)
@@ -56,23 +56,23 @@ def prepare_residual_force_context(
     if jnp_module is None:
         jnp_module = jnp
     if mode00_index_func is None:
-        from .solvers.fixed_boundary.optimization.constraints import mode00_index as mode00_index_func
+        from .constraints import mode00_index as mode00_index_func
     if half_mesh_from_full_mesh_func is None:
-        from .solve_profile_helpers import _half_mesh_from_full_mesh as half_mesh_from_full_mesh_func
+        from ....solve_profile_helpers import _half_mesh_from_full_mesh as half_mesh_from_full_mesh_func
     if mass_half_mesh_from_indata_func is None:
-        from .solve_profile_helpers import _mass_half_mesh_from_indata as mass_half_mesh_from_indata_func
+        from ....solve_profile_helpers import _mass_half_mesh_from_indata as mass_half_mesh_from_indata_func
     if pressure_half_mesh_from_indata_func is None:
-        from .solve_profile_helpers import _pressure_half_mesh_from_indata as pressure_half_mesh_from_indata_func
+        from ....solve_profile_helpers import _pressure_half_mesh_from_indata as pressure_half_mesh_from_indata_func
     if icurv_full_mesh_from_indata_func is None:
-        from .solve_profile_helpers import _icurv_full_mesh_from_indata as icurv_full_mesh_from_indata_func
+        from ....solve_profile_helpers import _icurv_full_mesh_from_indata as icurv_full_mesh_from_indata_func
     if vmec_force_flux_profiles_func is None:
-        from .solve_profile_helpers import _vmec_force_flux_profiles as vmec_force_flux_profiles_func
+        from ....solve_profile_helpers import _vmec_force_flux_profiles as vmec_force_flux_profiles_func
     if wout_like_cls is None:
-        from .solve_result_types import WoutLikeVmecForces as wout_like_cls
+        from ....solve_result_types import WoutLikeVmecForces as wout_like_cls
 
-    from .boundary import boundary_from_indata
-    from .energy import flux_profiles_from_indata
-    from .vmec_tomnsp import vmec_trig_tables
+    from ....boundary import boundary_from_indata
+    from ....energy import flux_profiles_from_indata
+    from ....vmec_tomnsp import vmec_trig_tables
 
     signgs = int(signgs)
     idx00 = int(idx00 if idx00 is not None else mode00_index_func(static.modes))

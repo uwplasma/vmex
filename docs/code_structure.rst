@@ -16,10 +16,10 @@ Top-level package layout (selected):
 - ``vmec_jax/vmec_tomnsp.py``: VMEC ``fixaray`` tables + DFT tomnsps kernels
 - ``vmec_jax/vmec_bcovar.py``: bcovar/metric assembly and half-mesh pipeline
 - ``vmec_jax/preconditioner_1d.py``: VMEC-style preconditioner operators
-- ``vmec_jax/solve_force_norm_helpers.py``: force-block weighting, lambda
+- ``vmec_jax/solvers/fixed_boundary/residual/force_norms.py``: force-block weighting, lambda
   residual norms, VMEC residual ``FSQ`` scalar assembly, and stability-guard
   timestep helpers extracted from the residual iteration hot path
-- ``vmec_jax/solve_force_payload_helpers.py``: residual-force payload
+- ``vmec_jax/solvers/fixed_boundary/residual/payload_blocks.py``: residual-force payload
   containers, edge masking, staged VMEC ``m=1``/zero/scalxc transforms, and
   preconditioner-output block assembly
 - ``vmec_jax/solvers/fixed_boundary/optimization/tolerances.py``: dtype-aware gradient, conjugate
@@ -55,7 +55,7 @@ Top-level package layout (selected):
 - ``vmec_jax/solvers/fixed_boundary/optimization/lbfgs.py``: fixed-boundary
   L-BFGS optimizer loop used by the public
   ``solve.solve_fixed_boundary_lbfgs`` wrapper
-- ``vmec_jax/solve_residual_force_context.py``: shared VMEC flux/profile,
+- ``vmec_jax/solvers/fixed_boundary/optimization/residual_context.py``: shared VMEC flux/profile,
   force-kernel ``wout``-like context, trig-table, and fixed-edge setup used by
   residual-objective L-BFGS and Gauss-Newton optimizers
 - ``vmec_jax/solvers/fixed_boundary/optimization/residual_lbfgs.py``:

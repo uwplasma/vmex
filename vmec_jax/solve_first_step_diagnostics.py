@@ -64,7 +64,9 @@ def first_step_diagnostics_impl(
     if vmec_force_flux_profiles_func is None:
         from .solve_profile_helpers import _vmec_force_flux_profiles as vmec_force_flux_profiles_func
     if zero_edge_rz_force_blocks_func is None:
-        from .solve_force_payload_helpers import zero_edge_rz_force_blocks as zero_edge_rz_force_blocks_func
+        from .solvers.fixed_boundary.residual.payload_blocks import (
+            zero_edge_rz_force_blocks as zero_edge_rz_force_blocks_func,
+        )
     if radial_tridi_smooth_dirichlet_func is None:
         from .solvers.fixed_boundary.preconditioning.operators import (
             radial_tridi_smooth_dirichlet as radial_tridi_smooth_dirichlet_func,

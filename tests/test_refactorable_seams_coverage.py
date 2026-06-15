@@ -12,7 +12,10 @@ import vmec_jax.nyquist as nyquist_mod
 import vmec_jax.profiles as profiles_mod
 from vmec_jax.geom import Geom
 from vmec_jax.performance_hotspot_helpers import replay_timing_breakdown
-from vmec_jax.solve_residual_objective_helpers import _sum_square_blocks, zero_edge_rz_force_block
+from vmec_jax.solvers.fixed_boundary.optimization.residual_objective import (
+    _sum_square_blocks,
+    zero_edge_rz_force_block,
+)
 
 
 def _duplicate_register(_cls):
