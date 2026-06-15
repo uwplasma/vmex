@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from vmec_jax.solve_residual_iter_policy import host_restart_decision, scan_fallback_decision
+from vmec_jax.solvers.fixed_boundary.residual.policy import host_restart_decision, scan_fallback_decision
 
 
 class RaisingDiagnostics:

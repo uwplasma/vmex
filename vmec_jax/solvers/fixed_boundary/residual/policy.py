@@ -13,7 +13,7 @@ from typing import Any, Mapping, NamedTuple
 
 import numpy as np
 
-from . import _solve_runtime
+from .... import _solve_runtime
 
 
 class HostUpdateAssemblyPolicy(NamedTuple):

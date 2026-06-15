@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from vmec_jax.solve_residual_iter_runtime_helpers import (
+from vmec_jax.solvers.fixed_boundary.residual.runtime import (
     _attach_free_boundary_external_field_diag,
     _build_residual_iter_timing_report,
     _build_resume_state_base,

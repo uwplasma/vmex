@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any, NamedTuple
 
-from ....solve_residual_iter_policy import Vmec2000ScanOptions
+from ..residual.policy import Vmec2000ScanOptions
 
 
 SCAN_TIMING_KEYS: tuple[str, ...] = (

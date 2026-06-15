@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from vmec_jax.solve_residual_iter_policy import (
+from vmec_jax.solvers.fixed_boundary.residual.policy import (
     host_restart_decision,
     host_update_assembly_policy,
     numpy_preconditioner_apply_policy,

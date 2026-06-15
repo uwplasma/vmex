@@ -7,8 +7,8 @@ import time
 
 import numpy as np
 
-from .solve_diagnostics_io import _pack_resume_state_record
-from .solve_residual_iter_runtime_helpers import (
+from ....solve_diagnostics_io import _pack_resume_state_record
+from .runtime import (
     _build_residual_iter_timing_report,
     _build_resume_state_base,
     _format_residual_iter_timing_message,

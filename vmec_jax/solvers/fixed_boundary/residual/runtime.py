@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-from ._compat import jax as _jax
+from ...._compat import jax as _jax
 
 
 def _device_get_floats(*vals: Any, jax_module: Any | None = None) -> tuple[float, ...]:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from vmec_jax.solve_residual_iter_config import (
+from vmec_jax.solvers.fixed_boundary.residual.config import (
     HEAVY_DUMP_ENVS,
     bad_jacobian_tau_tolerance,
     legacy_dump_enabled,

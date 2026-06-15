@@ -6,8 +6,8 @@ from typing import Any, NamedTuple
 
 import numpy as np
 
-from ._compat import jax, jnp
-from ._solve_runtime import _tree_has_tracer
+from ...._compat import jax, jnp
+from ...._solve_runtime import _tree_has_tracer
 
 
 class ResidualVelocityBlocks(NamedTuple):

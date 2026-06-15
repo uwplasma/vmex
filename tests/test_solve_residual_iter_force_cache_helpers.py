@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import OrderedDict
 
 from vmec_jax.solve_jit_cache_helpers import jit_cache_get, jit_cache_put
-from vmec_jax.solve_residual_iter_force_cache_helpers import (
+from vmec_jax.solvers.fixed_boundary.residual.force_cache import (
     compute_forces_jit_cache_key,
     select_compute_forces_callable,
 )

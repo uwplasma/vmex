@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from typing import Any, Callable, NamedTuple
 
-from ._compat import jnp
-from .solve_force_payload_helpers import (
+from ...._compat import jnp
+from ....solve_force_payload_helpers import (
     residual_force_payload_after_m1_scalxc,
     residual_force_payload_m1_scalxc_stages,
     zero_edge_rz_force_blocks,
 )
-from .vmec_residue import vmec_gcx2_from_tomnsps
-from .vmec_tomnsp import TomnspsRZL
+from ....vmec_residue import vmec_gcx2_from_tomnsps
+from ....vmec_tomnsp import TomnspsRZL
 
 __all__ = [
     "ResidualForceMetricPayload",
@@ -260,7 +260,7 @@ def residual_force_payload_from_kernels(
         include_edge_residual=include_edge_residual,
     )
     if residual_func is None:
-        from .vmec_forces import vmec_residual_internal_from_kernels as residual_func
+        from ....vmec_forces import vmec_residual_internal_from_kernels as residual_func
 
     frzl_raw = residual_func(
         kernels,

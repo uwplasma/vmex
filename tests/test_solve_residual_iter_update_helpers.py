@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from vmec_jax.solve_residual_iter_update_helpers import (
+from vmec_jax.solvers.fixed_boundary.residual.update import (
     ResidualVelocityBlocks,
     host_momentum_update_np,
     scale_velocity_blocks,

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from vmec_jax.solve_residual_iter_setup_helpers import (
+from vmec_jax.solvers.fixed_boundary.residual.setup import (
     grid_matches_vmec_static_grid,
     resolve_free_boundary_setup_policy,
 )

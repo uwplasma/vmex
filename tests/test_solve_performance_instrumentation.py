@@ -5,7 +5,7 @@ import pytest
 
 import vmec_jax.energy as energy_mod
 import vmec_jax.solve as solve
-from vmec_jax.solve_residual_iter_runtime_helpers import _build_residual_iter_timing_report
+from vmec_jax.solvers.fixed_boundary.residual.runtime import _build_residual_iter_timing_report
 
 
 def test_residual_iter_timing_report_exposes_force_eval_aliases() -> None:

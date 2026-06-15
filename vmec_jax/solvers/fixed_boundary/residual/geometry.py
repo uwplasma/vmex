@@ -6,7 +6,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-from ._compat import jnp
+from ...._compat import jnp
 
 
 def _m1_internal_to_physical_pair(rss, zcs, *, use_m1_pair_convert: bool):

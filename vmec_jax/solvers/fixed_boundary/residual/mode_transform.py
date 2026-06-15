@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from ._compat import jnp
+from ...._compat import jnp
 
 __all__ = [
     "ModeTransformHostProjection",

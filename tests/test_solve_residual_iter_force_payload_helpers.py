@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from vmec_jax.solve_residual_iter_force_payload_helpers import (
+from vmec_jax.solvers.fixed_boundary.residual.force_payload import (
     ResidualForceMetricPayload,
     ResidualForcePayloadResult,
     force_z_channel_square_sums,

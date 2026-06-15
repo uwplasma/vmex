@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from vmec_jax.solve_residual_iter_finalize_helpers import (
+from vmec_jax.solvers.fixed_boundary.residual.finalize import (
     attach_residual_iter_timing_diagnostics,
     build_residual_iter_resume_state_payload,
     finalize_residual_iter_result,

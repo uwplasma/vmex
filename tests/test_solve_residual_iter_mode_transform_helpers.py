@@ -4,7 +4,7 @@ import numpy as np
 
 from vmec_jax._compat import jnp
 from vmec_jax.modes import vmec_mode_table
-from vmec_jax.solve_residual_iter_mode_transform_helpers import (
+from vmec_jax.solvers.fixed_boundary.residual.mode_transform import (
     build_mode_transform_host_projection,
     mn_cos_to_signed_host_projected,
     mn_sin_to_signed_host_projected,

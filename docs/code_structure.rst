@@ -66,7 +66,8 @@ Top-level package layout (selected):
   helpers for solver-kernel diagnostics
 - ``vmec_jax/solve_axis_reset_helpers.py``: initial magnetic-axis reset
   control decisions, axis-state merging, and optional axis coefficient dumps
-- ``vmec_jax/solve_residual_iter_update_helpers.py``: residual-iteration
+- ``vmec_jax/solvers/fixed_boundary/residual/update.py``:
+  residual-iteration
   velocity-block containers, host momentum update, and generic velocity
   zeroing/scaling helpers
 - ``vmec_jax/solve_free_boundary_control_helpers.py``: free-boundary cadence,
@@ -85,25 +86,27 @@ Top-level package layout (selected):
 - ``vmec_jax/solve_result_types.py``: solver result dataclasses, scan carry
   containers, and ``wout``-like force-kernel PyTree containers shared by solve,
   driver, implicit differentiation, and tests
-- ``vmec_jax/solve_scan_resume_helpers.py``: VMEC2000-style scan resume-state
-  initialization and carry-field restoration
-- ``vmec_jax/solve_residual_iter_runtime_helpers.py``: residual-iteration
+- ``vmec_jax/solvers/fixed_boundary/scan/resume.py``: VMEC2000-style scan
+  resume-state initialization and carry-field restoration
+- ``vmec_jax/solvers/fixed_boundary/residual/runtime.py``:
+  residual-iteration
   runtime seams for scan readiness, optional debug printing, timing reports,
   resume-state summaries, and free-boundary external-field diagnostic
   attachment
-- ``vmec_jax/solve_residual_iter_mode_transform_helpers.py``: host DGEMM
+- ``vmec_jax/solvers/fixed_boundary/residual/mode_transform.py``: host DGEMM
   projection matrices, NumPy ``scalxc`` setup, and mode-diagonal weights used
   by the residual-iteration host update path
-- ``vmec_jax/solve_residual_iter_setup_helpers.py``: VMEC-grid reuse checks,
+- ``vmec_jax/solvers/fixed_boundary/residual/setup.py``:
+  VMEC-grid reuse checks,
   free-boundary provider policy, scan-disablement, and CPU/GPU strict-update
   setup decisions for residual iteration
-- ``vmec_jax/solve_residual_iter_finalize_helpers.py``: final timing
+- ``vmec_jax/solvers/fixed_boundary/residual/finalize.py``: final timing
   diagnostics, resume-state payload packing, and residual-iteration result
   assembly
-- ``vmec_jax/solve_residual_iter_force_cache_helpers.py``: structural force
+- ``vmec_jax/solvers/fixed_boundary/residual/force_cache.py``: structural force
   JIT cache keys and callable selection while preserving solver-owned cache
   objects
-- ``vmec_jax/solve_residual_iter_force_payload_helpers.py``:
+- ``vmec_jax/solvers/fixed_boundary/residual/force_payload.py``:
   residual-iteration force-payload mask-pack selection, edge masking, Z-force
   square-sum diagnostics, NaN preservation, and VMEC scalar force-norm
   assembly seams
