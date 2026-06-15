@@ -7,6 +7,8 @@ be tested and reused without importing the full WOUT synthesis path.
 
 from __future__ import annotations
 
+from typing import Any, NamedTuple
+
 import numpy as np
 
 _MU0 = 4e-7 * np.pi
@@ -205,11 +207,59 @@ def glasser_from_wout_mercier_terms(
     )
 
 
+class GlasserProfileArrays(NamedTuple):
+    """Persisted or fallback Glasser profiles read from a WOUT variable map."""
+
+    D_R: np.ndarray
+    H: np.ndarray
+    correction: np.ndarray
+    shear_valid: np.ndarray
+
+
+def _read_profile_variable(variables: dict[str, Any], name: str, fallback: np.ndarray, *, dtype=float) -> np.ndarray:
+    value = variables.get(name)
+    if value is None:
+        return np.asarray(fallback, dtype=dtype)
+    return np.asarray(value[:], dtype=dtype)
+
+
+def glasser_profiles_from_wout_variables(
+    variables: dict[str, Any],
+    *,
+    DMerc: np.ndarray,
+    Dshear: np.ndarray,
+    Dcurr: np.ndarray,
+) -> GlasserProfileArrays:
+    """Read Glasser profiles from WOUT variables, falling back to Mercier terms.
+
+    New vmec_jax WOUT files persist ``D_R``, ``HGlasser``,
+    ``GlasserCorrection`` and ``GlasserShearValid``.  Older VMEC/VMEC++
+    files do not, so this helper reconstructs the fallback from the persisted
+    Mercier components and then lets any explicit variables override it.
+    """
+
+    fallback_D_R, fallback_H, fallback_correction, fallback_valid = glasser_from_wout_mercier_terms(
+        DMerc=DMerc,
+        Dshear=Dshear,
+        Dcurr=Dcurr,
+    )
+    h_variable = variables.get("HGlasser", variables.get("H"))
+    h_profile = np.asarray(fallback_H if h_variable is None else h_variable[:], dtype=float)
+    return GlasserProfileArrays(
+        D_R=_read_profile_variable(variables, "D_R", fallback_D_R),
+        H=h_profile,
+        correction=_read_profile_variable(variables, "GlasserCorrection", fallback_correction),
+        shear_valid=_read_profile_variable(variables, "GlasserShearValid", fallback_valid, dtype=bool),
+    )
+
+
 __all__ = [
+    "GlasserProfileArrays",
     "compute_aspectratio",
     "compute_ctor_from_buco",
     "compute_eqfor_beta",
     "compute_eqfor_betaxis",
+    "glasser_profiles_from_wout_variables",
     "glasser_from_wout_mercier_terms",
     "lambda_half_mesh_weights",
     "pshalf_from_s",

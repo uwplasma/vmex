@@ -60,7 +60,7 @@ from vmec_jax.wout import (
 )
 from vmec_jax.mercier import glasser_resistive_interchange_from_mercier_terms
 from vmec_jax import wout_flux_helpers
-from vmec_jax.wout_diagnostics import glasser_from_wout_mercier_terms
+from vmec_jax.wout_diagnostics import glasser_from_wout_mercier_terms, glasser_profiles_from_wout_variables
 from vmec_jax.vmec_tomnsp import vmec_trig_tables
 
 
@@ -192,6 +192,34 @@ def test_wout_glasser_fallback_matches_current_term_reconstruction_and_private_a
         atol=1.0e-13,
     )
     np.testing.assert_array_equal(np.asarray(public_terms["glasser_shear_valid"]), valid)
+
+
+def test_wout_glasser_profile_reader_uses_persisted_or_fallback_variables():
+    dmerc = np.asarray([0.0, 0.12, -0.03, 0.07, 0.0], dtype=float)
+    dshear = np.asarray([0.0, 0.04, 0.00, 0.09, 0.0], dtype=float)
+    dcurr = np.asarray([0.0, -0.05, 0.20, 0.03, 0.0], dtype=float)
+    fallback = glasser_from_wout_mercier_terms(DMerc=dmerc, Dshear=dshear, Dcurr=dcurr)
+
+    missing = glasser_profiles_from_wout_variables({}, DMerc=dmerc, Dshear=dshear, Dcurr=dcurr)
+    np.testing.assert_allclose(missing.D_R, fallback[0])
+    np.testing.assert_allclose(missing.H, fallback[1])
+    np.testing.assert_allclose(missing.correction, fallback[2])
+    np.testing.assert_array_equal(missing.shear_valid, fallback[3])
+
+    variables = {
+        "D_R": np.asarray([1, 2, 3, 4, 5], dtype=float),
+        "HGlasser": np.asarray([2, 3, 4, 5, 6], dtype=float),
+        "GlasserCorrection": np.asarray([3, 4, 5, 6, 7], dtype=float),
+        "GlasserShearValid": np.asarray([1, 0, 1, 0, 1], dtype=float),
+    }
+    persisted = glasser_profiles_from_wout_variables(variables, DMerc=dmerc, Dshear=dshear, Dcurr=dcurr)
+    np.testing.assert_allclose(persisted.D_R, variables["D_R"])
+    np.testing.assert_allclose(persisted.H, variables["HGlasser"])
+    np.testing.assert_allclose(persisted.correction, variables["GlasserCorrection"])
+    np.testing.assert_array_equal(persisted.shear_valid, np.asarray([True, False, True, False, True]))
+
+    legacy_h = glasser_profiles_from_wout_variables({"H": np.arange(5.0)}, DMerc=dmerc, Dshear=dshear, Dcurr=dcurr)
+    np.testing.assert_allclose(legacy_h.H, np.arange(5.0))
 
 
 def test_lambda_wout_half_mesh_roundtrip_covers_m_parity_branches():

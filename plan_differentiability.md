@@ -1450,6 +1450,14 @@ Results obtained:
     preservation.  Focused scan-output/resume tests and the full
     `driver-solve-discrete` shard passed locally (`911 passed, 30 skipped`)
     along with Ruff.  `solve.py` decreased to 10123 lines.
+80. Moved WOUT Glasser profile read/fallback logic into `wout_diagnostics.py`
+    as `glasser_profiles_from_wout_variables` returning named
+    `GlasserProfileArrays`.  The WOUT reader now delegates persisted
+    `D_R`/`HGlasser`/`GlasserCorrection`/`GlasserShearValid` selection and old
+    file fallback reconstruction to the diagnostics seam instead of
+    open-coding it in `wout.py`.  Direct tests cover missing variables,
+    persisted variables, and legacy `H` naming; the full WOUT helper suite and
+    finite-beta Glasser materialization gate passed along with Ruff.
 
 Best next steps:
 

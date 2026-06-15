@@ -55,6 +55,7 @@ _compute_ctor_from_buco = _wout_diagnostics.compute_ctor_from_buco
 _compute_eqfor_beta = _wout_diagnostics.compute_eqfor_beta
 _compute_eqfor_betaxis = _wout_diagnostics.compute_eqfor_betaxis
 _glasser_from_wout_mercier_terms = _wout_diagnostics.glasser_from_wout_mercier_terms
+_glasser_profiles_from_wout_variables = _wout_diagnostics.glasser_profiles_from_wout_variables
 _icurv_full_mesh_from_indata = _wout_flux_helpers.icurv_full_mesh_from_indata
 _lambda_full_from_wout_half_mesh = _wout_flux_helpers.lambda_full_from_wout_half_mesh
 _lambda_half_mesh_weights = _wout_diagnostics.lambda_half_mesh_weights
@@ -4168,15 +4169,16 @@ def read_wout(path: str | Path) -> WoutData:
         jdotb = np.asarray(ds.variables.get("jdotb", np.zeros((ns,), dtype=float))[:])
         bdotb = np.asarray(ds.variables.get("bdotb", np.zeros((ns,), dtype=float))[:])
         bdotgradv = np.asarray(ds.variables.get("bdotgradv", np.zeros((ns,), dtype=float))[:])
-        fallback_D_R, fallback_H, fallback_glasser_correction, fallback_glasser_valid = _glasser_from_wout_mercier_terms(
+        glasser_profiles = _glasser_profiles_from_wout_variables(
+            ds.variables,
             DMerc=DMerc,
             Dshear=Dshear,
             Dcurr=Dcurr,
         )
-        D_R = np.asarray(ds.variables.get("D_R", fallback_D_R)[:])
-        H_glasser = np.asarray(ds.variables.get("HGlasser", ds.variables.get("H", fallback_H))[:])
-        glasser_correction = np.asarray(ds.variables.get("GlasserCorrection", fallback_glasser_correction)[:])
-        glasser_shear_valid = np.asarray(ds.variables.get("GlasserShearValid", fallback_glasser_valid)[:], dtype=bool)
+        D_R = glasser_profiles.D_R
+        H_glasser = glasser_profiles.H
+        glasser_correction = glasser_profiles.correction
+        glasser_shear_valid = glasser_profiles.shear_valid
 
         ac = np.asarray(ds.variables.get("ac", np.zeros((0,), dtype=float))[:])
         ac_aux_s = np.asarray(ds.variables.get("ac_aux_s", -np.ones((101,), dtype=float))[:])
