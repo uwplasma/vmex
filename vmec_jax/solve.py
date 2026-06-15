@@ -230,6 +230,7 @@ from .solve_preconditioner_helpers import (
     pshalf_from_s_jax as _pshalf_from_s_jax,
     pshalf_from_s_np as _pshalf_from_s_np,
     radial_tridi_smooth_dirichlet as _radial_tridi_smooth_dirichlet,
+    resolve_preconditioner_cache_decision as _resolve_preconditioner_cache_decision,
     resolve_preconditioner_tridi_policies as _resolve_preconditioner_tridi_policies,
     scale_m1_precond_rhs_from_mats as _scale_m1_precond_rhs_from_mats,
     sm_sp_from_s_np as _sm_sp_from_s_np,  # noqa: F401 - re-exported for existing internal tests/importers.
@@ -6991,34 +6992,22 @@ def solve_fixed_boundary_residual_iter(
                 precond_traced = _tree_has_tracer(k)
                 need_lam_prec = _env_dump_lam not in ("", "0")
                 need_lamcal = _env_dump_lamcal not in ("", "0")
-                need_prec_reassemble = (
-                    (not precond_traced)
-                    and (cache_prec_rz_jmax is not None)
-                    and (int(cache_prec_rz_jmax) != int(precond_expected_jmax))
-                    and _can_reassemble_precond_mats(cache_prec_rz_mats)
+                precond_cache_decision = _resolve_preconditioner_cache_decision(
+                    precond_traced=bool(precond_traced),
+                    vmec2000_cache_valid=bool(vmec2000_cache_valid),
+                    need_bcovar_update=bool(need_bcovar_update),
+                    precond_cache_seeded_from_bcovar_update=bool(precond_cache_seeded_from_bcovar_update),
+                    need_lam_prec=bool(need_lam_prec),
+                    need_lamcal=bool(need_lamcal),
+                    cache_prec_lam_prec=cache_prec_lam_prec,
+                    cache_prec_rz_mats=cache_prec_rz_mats,
+                    cache_prec_rz_jmax=cache_prec_rz_jmax,
+                    precond_expected_jmax=int(precond_expected_jmax),
+                    can_reassemble_func=_can_reassemble_precond_mats,
                 )
-                can_reuse_bcovar_seeded_precond = (
-                    bool(precond_cache_seeded_from_bcovar_update)
-                    and (not precond_traced)
-                    and (not bool(need_lam_prec))
-                    and (not bool(need_lamcal))
-                    and (cache_prec_lam_prec is not None)
-                    and (cache_prec_rz_mats is not None)
-                    and (cache_prec_rz_jmax is not None)
-                )
-                need_prec_refresh = (
-                    precond_traced
-                    or (not bool(vmec2000_cache_valid))
-                    or (cache_prec_lam_prec is None)
-                    or (cache_prec_rz_mats is None)
-                    or (cache_prec_rz_jmax is None)
-                    or (bool(need_bcovar_update) and (not bool(can_reuse_bcovar_seeded_precond)))
-                    or (
-                        (cache_prec_rz_jmax is not None)
-                        and (int(cache_prec_rz_jmax) != int(precond_expected_jmax))
-                        and (not bool(need_prec_reassemble))
-                    )
-                )
+                need_prec_reassemble = precond_cache_decision.need_prec_reassemble
+                can_reuse_bcovar_seeded_precond = precond_cache_decision.can_reuse_bcovar_seeded_precond
+                need_prec_refresh = precond_cache_decision.need_prec_refresh
                 if need_prec_refresh:
                     preconditioner_cache_update_trace = True
                     if timing_enabled:
@@ -7259,34 +7248,22 @@ def solve_fixed_boundary_residual_iter(
                 precond_traced = _tree_has_tracer(k)
                 need_lam_prec = _env_dump_lam not in ("", "0")
                 need_lamcal = _env_dump_lamcal not in ("", "0")
-                need_prec_reassemble = (
-                    (not precond_traced)
-                    and (cache_prec_rz_jmax is not None)
-                    and (int(cache_prec_rz_jmax) != int(precond_expected_jmax))
-                    and _can_reassemble_precond_mats(cache_prec_rz_mats)
+                precond_cache_decision = _resolve_preconditioner_cache_decision(
+                    precond_traced=bool(precond_traced),
+                    vmec2000_cache_valid=bool(vmec2000_cache_valid),
+                    need_bcovar_update=bool(need_bcovar_update),
+                    precond_cache_seeded_from_bcovar_update=bool(precond_cache_seeded_from_bcovar_update),
+                    need_lam_prec=bool(need_lam_prec),
+                    need_lamcal=bool(need_lamcal),
+                    cache_prec_lam_prec=cache_prec_lam_prec,
+                    cache_prec_rz_mats=cache_prec_rz_mats,
+                    cache_prec_rz_jmax=cache_prec_rz_jmax,
+                    precond_expected_jmax=int(precond_expected_jmax),
+                    can_reassemble_func=_can_reassemble_precond_mats,
                 )
-                can_reuse_bcovar_seeded_precond = (
-                    bool(precond_cache_seeded_from_bcovar_update)
-                    and (not precond_traced)
-                    and (not bool(need_lam_prec))
-                    and (not bool(need_lamcal))
-                    and (cache_prec_lam_prec is not None)
-                    and (cache_prec_rz_mats is not None)
-                    and (cache_prec_rz_jmax is not None)
-                )
-                need_prec_refresh = (
-                    precond_traced
-                    or (not bool(vmec2000_cache_valid))
-                    or (cache_prec_lam_prec is None)
-                    or (cache_prec_rz_mats is None)
-                    or (cache_prec_rz_jmax is None)
-                    or (bool(need_bcovar_update) and (not bool(can_reuse_bcovar_seeded_precond)))
-                    or (
-                        (cache_prec_rz_jmax is not None)
-                        and (int(cache_prec_rz_jmax) != int(precond_expected_jmax))
-                        and (not bool(need_prec_reassemble))
-                    )
-                )
+                need_prec_reassemble = precond_cache_decision.need_prec_reassemble
+                can_reuse_bcovar_seeded_precond = precond_cache_decision.can_reuse_bcovar_seeded_precond
+                need_prec_refresh = precond_cache_decision.need_prec_refresh
                 if need_prec_refresh:
                     preconditioner_cache_update_trace = True
                     if timing_enabled:
