@@ -14,6 +14,7 @@ __all__ = [
     "metric_force_payload_after_edge_policy",
     "residual_force_gcx2_after_edge_policy",
     "residual_force_z_nan_guard",
+    "resolve_residual_force_mask_pack",
 ]
 
 
@@ -24,6 +25,25 @@ class ResidualForceMetricPayload(NamedTuple):
     gcr2: Any
     gcz2: Any
     gcl2: Any
+
+
+def resolve_residual_force_mask_pack(
+    static: Any,
+    *,
+    include_edge: bool,
+    include_edge_residual: bool | None,
+) -> tuple[bool, Any | None]:
+    """Resolve residual-edge policy and the matching precomputed TOMNSP mask."""
+
+    include_edge_residual_resolved = bool(include_edge if include_edge_residual is None else include_edge_residual)
+    mask_pack = None
+    if getattr(static, "tomnsps_masks", None) is not None:
+        mask_pack = (
+            getattr(static, "tomnsps_masks_edge")
+            if bool(include_edge_residual_resolved)
+            else getattr(static, "tomnsps_masks")
+        )
+    return include_edge_residual_resolved, mask_pack
 
 
 def metric_force_payload_after_edge_policy(

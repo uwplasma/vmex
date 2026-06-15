@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 
 from vmec_jax.solve_residual_iter_force_payload_helpers import (
@@ -7,6 +9,7 @@ from vmec_jax.solve_residual_iter_force_payload_helpers import (
     metric_force_payload_after_edge_policy,
     residual_force_gcx2_after_edge_policy,
     residual_force_z_nan_guard,
+    resolve_residual_force_mask_pack,
 )
 from vmec_jax.vmec_tomnsp import TomnspsRZL
 
@@ -35,6 +38,50 @@ def _frzl(*, edge_z_nan: bool = False) -> TomnspsRZL:
         flcc=block(100.0),
         flss=block(110.0),
     )
+
+
+def test_resolve_residual_force_mask_pack_defaults_to_metric_edge_policy() -> None:
+    static = SimpleNamespace(tomnsps_masks="interior", tomnsps_masks_edge="edge")
+
+    include_edge_residual, mask = resolve_residual_force_mask_pack(
+        static,
+        include_edge=True,
+        include_edge_residual=None,
+    )
+    assert include_edge_residual is True
+    assert mask == "edge"
+
+    include_edge_residual, mask = resolve_residual_force_mask_pack(
+        static,
+        include_edge=False,
+        include_edge_residual=None,
+    )
+    assert include_edge_residual is False
+    assert mask == "interior"
+
+
+def test_resolve_residual_force_mask_pack_honors_explicit_residual_edge_policy() -> None:
+    static = SimpleNamespace(tomnsps_masks="interior", tomnsps_masks_edge="edge")
+
+    include_edge_residual, mask = resolve_residual_force_mask_pack(
+        static,
+        include_edge=False,
+        include_edge_residual=True,
+    )
+
+    assert include_edge_residual is True
+    assert mask == "edge"
+
+
+def test_resolve_residual_force_mask_pack_handles_missing_precomputed_masks() -> None:
+    include_edge_residual, mask = resolve_residual_force_mask_pack(
+        SimpleNamespace(),
+        include_edge=True,
+        include_edge_residual=False,
+    )
+
+    assert include_edge_residual is False
+    assert mask is None
 
 
 def test_metric_force_payload_after_edge_policy_keeps_full_payload_when_requested() -> None:
