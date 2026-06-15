@@ -1356,16 +1356,27 @@ Results obtained:
     constants used by tests/internal callers.  Focused free-boundary helper
     and direct-coil finite-pressure sensitivity tests passed along with Ruff
     and compileall.  `free_boundary_adjoint.py` decreased to 5687 lines.
+70. Moved residual force payload construction from the residual-iteration
+    hot loop into `solve_residual_iter_force_payload_helpers.py`.  Raw TOMNSP
+    assembly, residual edge-mask selection, scan debug prints, optional HLO
+    TOMNSP dumps, M1/zero/scalxc postprocessing, and metric edge-policy scalar
+    norms are now handled by a typed helper result with dependency injection
+    for focused tests.  `_compute_forces` still owns the force-kernel call,
+    physical dumps, preconditioner scales, and solver update authority, so the
+    numerical branch remains unchanged.  Direct helper tests now cover callback
+    routing, explicit edge-residual masks, HLO wrapper reuse, and no-callback
+    fast path.  Focused force-payload tests plus actual residual-iteration
+    host/JAX parity and QH trace extraction tests passed along with Ruff and
+    compileall.  `solve.py` decreased to 10266 lines.
 
 Best next steps:
 
 1. Keep all refactor work on PR #20 until the full plan is finalized.
-2. Continue Wave 1/Wave 2 by extracting pure force-payload postprocessing
-   helpers (mask selection, M1/scalxc application, edge masking, and scalar
-   norm assembly) only after each piece is backed by focused parity tests.
-   Keep `_COMPUTE_FORCES_CACHE`, `_compute_forces_impl`, and the adaptive scan
-   loop in `solve.py` until the smaller helpers prove stable under the
-   existing hotpath/cache tests.
+2. Continue Wave 1/Wave 2 by extracting the next solver pure seams around
+   force payload cache normalization and residual-iteration checkpoint payload
+   assembly.  Keep `_COMPUTE_FORCES_CACHE`, `_compute_forces_impl`, and the
+   adaptive scan loop in `solve.py` until the smaller helpers prove stable
+   under the existing hotpath/cache tests.
 3. Continue broader refactors in parallel with `driver.py`, `optimization.py`,
    `free_boundary_adjoint.py`, and `wout.py` by extracting pure
    policy/formatting/data-container seams before moving any physics kernels.
@@ -1383,9 +1394,9 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 88%.
+- Differentiability/refactor implementation: 89%.
 - Source-health instrumentation: 100%.
-- Solver monolith reduction: 60% of the large-file extraction work.
+- Solver monolith reduction: 63% of the large-file extraction work.
 - Free-boundary adjoint monolith reduction: 30%.
 - Driver workflow decomposition: 35%.
 - WOUT diagnostic decomposition: 16%.

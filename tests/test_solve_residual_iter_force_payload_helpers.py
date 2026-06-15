@@ -6,10 +6,12 @@ import numpy as np
 
 from vmec_jax.solve_residual_iter_force_payload_helpers import (
     ResidualForceMetricPayload,
+    ResidualForcePayloadResult,
     force_z_channel_square_sums,
     maybe_debug_force_z_channel_square_sums,
     metric_force_payload_after_edge_policy,
     residual_force_payload_after_m1_scalxc_with_scan_debug,
+    residual_force_payload_from_kernels,
     residual_force_gcx2_after_edge_policy,
     residual_force_z_nan_guard,
     resolve_residual_force_mask_pack,
@@ -260,3 +262,114 @@ def test_residual_force_gcx2_after_edge_policy_applies_edge_and_nan_guard() -> N
     np.testing.assert_allclose(np.asarray(finite.gcr2), expected_r)
     np.testing.assert_allclose(np.asarray(finite.gcz2), expected_z)
     np.testing.assert_allclose(np.asarray(finite.gcl2), expected_l)
+
+
+def test_residual_force_payload_from_kernels_routes_masks_callbacks_and_hlo_dump() -> None:
+    frzl = _frzl()
+    static = SimpleNamespace(cfg=SimpleNamespace(ntheta=8, nzeta=6), tomnsps_masks="interior", tomnsps_masks_edge="edge")
+    residual_calls = []
+    postprocess_calls = []
+    metric_calls = []
+    raw_callbacks = []
+    gc_callbacks = []
+    hlo_calls = []
+
+    def residual_func(kernels, **kwargs):
+        residual_calls.append((kernels, kwargs))
+        return frzl
+
+    def postprocess_func(payload, **kwargs):
+        postprocess_calls.append((payload, kwargs))
+        return payload
+
+    def metric_func(payload, **kwargs):
+        metric_calls.append((payload, kwargs))
+        return ResidualForceMetricPayload(frzl_metric=payload, gcr2=1.0, gcz2=2.0, gcl2=3.0)
+
+    def hlo_dump_func(**kwargs):
+        hlo_calls.append(kwargs)
+        # Exercise the nested HLO residual function with the same fake kernels.
+        kwargs["fn"](*kwargs["args"])
+
+    got = residual_force_payload_from_kernels(
+        kernels="kernels",
+        static=static,
+        wout="wout",
+        trig="trig",
+        apply_lforbal=True,
+        include_edge=False,
+        include_edge_residual=True,
+        apply_m1_constraints=True,
+        lconm1=False,
+        zero_m1="zero",
+        s=np.asarray([0.0, 0.5, 1.0]),
+        scan_debug_force_enabled=False,
+        dump_hlo_force_tomnsps=True,
+        hlo_dump_func=hlo_dump_func,
+        raw_tomnsps_callback=raw_callbacks.append,
+        gc_callback=gc_callbacks.append,
+        residual_func=residual_func,
+        postprocess_func=postprocess_func,
+        metric_func=metric_func,
+    )
+
+    assert isinstance(got, ResidualForcePayloadResult)
+    assert got.include_edge_residual is True
+    assert got.mask_pack == "edge"
+    assert got.frzl_raw is frzl
+    assert got.frzl_full is frzl
+    assert got.metric_payload.gcr2 == 1.0
+    assert raw_callbacks == [frzl]
+    assert gc_callbacks == [frzl]
+    assert len(hlo_calls) == 1
+    assert residual_calls[0][1]["cfg_ntheta"] == 8
+    assert residual_calls[0][1]["cfg_nzeta"] == 6
+    assert residual_calls[0][1]["include_edge"] is True
+    assert residual_calls[0][1]["masks"] == "edge"
+    assert residual_calls[1][1]["include_edge"] is True
+    assert postprocess_calls[0][1]["apply_m1_constraints"] is True
+    assert postprocess_calls[0][1]["lconm1"] is False
+    assert postprocess_calls[0][1]["zero_m1"] == "zero"
+    assert metric_calls[0][1]["include_edge"] is False
+    assert metric_calls[0][1]["lconm1"] is False
+
+
+def test_residual_force_payload_from_kernels_skips_optional_callbacks() -> None:
+    frzl = _frzl()
+    static = SimpleNamespace(cfg=SimpleNamespace(ntheta=8, nzeta=6))
+    residual_calls = []
+
+    def residual_func(kernels, **kwargs):
+        residual_calls.append((kernels, kwargs))
+        return frzl
+
+    got = residual_force_payload_from_kernels(
+        kernels="kernels",
+        static=static,
+        wout=None,
+        trig=None,
+        apply_lforbal=False,
+        include_edge=True,
+        include_edge_residual=None,
+        apply_m1_constraints=False,
+        lconm1=True,
+        zero_m1=False,
+        s=np.asarray([0.0, 0.5, 1.0]),
+        scan_debug_force_enabled=False,
+        dump_hlo_force_tomnsps=False,
+        residual_func=residual_func,
+        postprocess_func=lambda payload, **_kwargs: payload,
+        metric_func=lambda payload, **_kwargs: ResidualForceMetricPayload(
+            frzl_metric=payload,
+            gcr2=0.0,
+            gcz2=0.0,
+            gcl2=0.0,
+        ),
+    )
+
+    assert got.include_edge_residual is True
+    assert got.mask_pack is None
+    assert len(residual_calls) == 1
+    assert residual_calls[0][0] == "kernels"
+    assert residual_calls[0][1]["include_edge"] is True
+    assert residual_calls[0][1]["masks"] is None

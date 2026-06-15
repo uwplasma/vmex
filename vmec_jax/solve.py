@@ -84,10 +84,11 @@ from .solve_residual_iter_force_cache_helpers import (
 )
 from .solve_residual_iter_force_payload_helpers import (
     force_z_channel_square_sums as _force_z_channel_square_sums,  # noqa: F401 - compatibility alias for tests/internal users.
-    maybe_debug_force_z_channel_square_sums as _maybe_debug_force_z_channel_square_sums,
-    residual_force_payload_after_m1_scalxc_with_scan_debug as _residual_force_payload_after_m1_scalxc_with_scan_debug,
-    residual_force_gcx2_after_edge_policy as _residual_force_gcx2_after_edge_policy,
-    resolve_residual_force_mask_pack as _resolve_residual_force_mask_pack,
+    maybe_debug_force_z_channel_square_sums as _maybe_debug_force_z_channel_square_sums,  # noqa: F401 - compatibility alias for tests/internal users.
+    residual_force_payload_after_m1_scalxc_with_scan_debug as _residual_force_payload_after_m1_scalxc_with_scan_debug,  # noqa: F401 - compatibility alias for tests/internal users.
+    residual_force_gcx2_after_edge_policy as _residual_force_gcx2_after_edge_policy,  # noqa: F401 - compatibility alias for tests/internal users.
+    residual_force_payload_from_kernels as _residual_force_payload_from_kernels,
+    resolve_residual_force_mask_pack as _resolve_residual_force_mask_pack,  # noqa: F401 - compatibility alias for tests/internal users.
 )
 from .solve_residual_iter_update_helpers import (
     ResidualVelocityBlocks as _ResidualVelocityBlocks,
@@ -1958,81 +1959,55 @@ def solve_fixed_boundary_residual_iter(
             _maybe_dump_gmetric(bc=k.bc, static=static, iter_idx=int(iter_idx))
         if iter_idx is not None:
             _maybe_dump_force_kernels(k=k, static=static, iter_idx=int(iter_idx), label="raw")
-        include_edge_residual, mask_pack = _resolve_residual_force_mask_pack(
-            static,
-            include_edge=bool(include_edge),
-            include_edge_residual=include_edge_residual,
+        scan_debug_force_enabled = os.getenv("VMEC_JAX_SCAN_DEBUG_FORCE", "") not in ("", "0")
+        dump_hlo_force_tomnsps = os.getenv("VMEC_JAX_DUMP_HLO_FORCE_TOMNSPS", "").strip().lower() not in (
+            "",
+            "0",
+            "false",
+            "no",
         )
-        frzl = vmec_residual_internal_from_kernels(
-            k,
-            cfg_ntheta=int(static.cfg.ntheta),
-            cfg_nzeta=int(static.cfg.nzeta),
+
+        def _dump_force_tomnsps_hlo(*, label, fn, args, kwargs):
+            _maybe_dump_hlo_kernel(
+                label=label,
+                fn=fn,
+                args=args,
+                kwargs=kwargs,
+                static=static,
+                wout_like=wout_like,
+                force=True,
+            )
+
+        raw_tomnsps_callback = (
+            (lambda frzl: _maybe_dump_tomnsps(frzl=frzl, static=static, iter_idx=int(iter_idx), label="raw"))
+            if iter_idx is not None
+            else None
+        )
+        gc_callback = (
+            (lambda frzl: _maybe_dump_gc(frzl=frzl, static=static, iter_idx=int(iter_idx), label="raw"))
+            if iter_idx is not None
+            else None
+        )
+        force_payload = _residual_force_payload_from_kernels(
+            kernels=k,
+            static=static,
             wout=wout_like,
             trig=trig,
             apply_lforbal=apply_lforbal,
-            include_edge=bool(include_edge_residual),
-            masks=mask_pack,
-        )
-        scan_debug_force_enabled = os.getenv("VMEC_JAX_SCAN_DEBUG_FORCE", "") not in ("", "0")
-        _maybe_debug_force_z_channel_square_sums(
-            frzl,
-            enabled=bool(scan_debug_force_enabled),
-            message="[scan-debug-raw] fzsc2_raw={fzsc:.6e} fzcs2_raw={fzcs:.6e}",
-        )
-        if os.getenv("VMEC_JAX_DUMP_HLO_FORCE_TOMNSPS", "").strip().lower() not in ("", "0", "false", "no"):
-            try:
-
-                def _tomnsps_only(k_in):
-                    frzl_hlo = vmec_residual_internal_from_kernels(
-                        k_in,
-                        cfg_ntheta=int(static.cfg.ntheta),
-                        cfg_nzeta=int(static.cfg.nzeta),
-                        wout=wout_like,
-                        trig=trig,
-                        apply_lforbal=apply_lforbal,
-                        include_edge=bool(include_edge_residual),
-                        masks=mask_pack,
-                    )
-                    return (
-                        frzl_hlo.frcc,
-                        frzl_hlo.frss,
-                        frzl_hlo.fzsc,
-                        frzl_hlo.fzcs,
-                        frzl_hlo.flsc,
-                        frzl_hlo.flcs,
-                    )
-
-                _maybe_dump_hlo_kernel(
-                    label="tomnsps",
-                    fn=_tomnsps_only,
-                    args=(k,),
-                    kwargs={},
-                    static=static,
-                    wout_like=wout_like,
-                    force=True,
-                )
-            except Exception:
-                pass
-        if iter_idx is not None:
-            _maybe_dump_tomnsps(frzl=frzl, static=static, iter_idx=int(iter_idx), label="raw")
-        frzl = _residual_force_payload_after_m1_scalxc_with_scan_debug(
-            frzl,
-            s=s,
+            include_edge=bool(include_edge),
+            include_edge_residual=include_edge_residual,
             apply_m1_constraints=bool(apply_m1_constraints),
             lconm1=bool(getattr(static.cfg, "lconm1", True)),
             zero_m1=zero_m1,
-            scan_debug_force_enabled=bool(scan_debug_force_enabled),
-        )
-        if iter_idx is not None:
-            _maybe_dump_gc(frzl=frzl, static=static, iter_idx=int(iter_idx), label="raw")
-
-        frzl_full = frzl
-        metric_payload = _residual_force_gcx2_after_edge_policy(
-            frzl_full,
-            include_edge=bool(include_edge),
-            lconm1=bool(getattr(static.cfg, "lconm1", True)),
             s=s,
+            scan_debug_force_enabled=bool(scan_debug_force_enabled),
+            dump_hlo_force_tomnsps=bool(dump_hlo_force_tomnsps),
+            hlo_dump_func=_dump_force_tomnsps_hlo,
+            raw_tomnsps_callback=raw_tomnsps_callback,
+            gc_callback=gc_callback,
         )
+        frzl_full = force_payload.frzl_full
+        metric_payload = force_payload.metric_payload
         gcr2, gcz2, gcl2 = metric_payload.gcr2, metric_payload.gcz2, metric_payload.gcl2
         if iter_idx is not None:
             _maybe_dump_gcx2(

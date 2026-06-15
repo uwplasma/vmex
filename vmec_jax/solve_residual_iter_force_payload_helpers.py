@@ -10,14 +10,17 @@ from .solve_force_payload_helpers import (
     residual_force_payload_m1_scalxc_stages,
     zero_edge_rz_force_blocks,
 )
+from .vmec_forces import vmec_residual_internal_from_kernels
 from .vmec_residue import vmec_gcx2_from_tomnsps
 from .vmec_tomnsp import TomnspsRZL
 
 __all__ = [
     "ResidualForceMetricPayload",
+    "ResidualForcePayloadResult",
     "force_z_channel_square_sums",
     "maybe_debug_force_z_channel_square_sums",
     "metric_force_payload_after_edge_policy",
+    "residual_force_payload_from_kernels",
     "residual_force_payload_after_m1_scalxc_with_scan_debug",
     "residual_force_gcx2_after_edge_policy",
     "residual_force_z_nan_guard",
@@ -32,6 +35,16 @@ class ResidualForceMetricPayload(NamedTuple):
     gcr2: Any
     gcz2: Any
     gcl2: Any
+
+
+class ResidualForcePayloadResult(NamedTuple):
+    """Raw/full residual force payloads and VMEC scalar metric payload."""
+
+    include_edge_residual: bool
+    mask_pack: Any | None
+    frzl_raw: TomnspsRZL
+    frzl_full: TomnspsRZL
+    metric_payload: ResidualForceMetricPayload
 
 
 def force_z_channel_square_sums(frzl: TomnspsRZL) -> tuple[Any, Any]:
@@ -208,4 +221,110 @@ def residual_force_gcx2_after_edge_policy(
         gcr2=gcr2,
         gcz2=gcz2 + residual_force_z_nan_guard(frzl),
         gcl2=gcl2,
+    )
+
+
+def residual_force_payload_from_kernels(
+    *,
+    kernels: Any,
+    static: Any,
+    wout: Any,
+    trig: Any,
+    apply_lforbal: bool,
+    include_edge: bool,
+    include_edge_residual: bool | None,
+    apply_m1_constraints: bool,
+    lconm1: bool,
+    zero_m1: Any,
+    s: Any,
+    scan_debug_force_enabled: bool,
+    dump_hlo_force_tomnsps: bool = False,
+    hlo_dump_func: Callable[..., None] | None = None,
+    raw_tomnsps_callback: Callable[[TomnspsRZL], None] | None = None,
+    gc_callback: Callable[[TomnspsRZL], None] | None = None,
+    residual_func: Callable[..., TomnspsRZL] = vmec_residual_internal_from_kernels,
+    postprocess_func: Callable[..., TomnspsRZL] = residual_force_payload_after_m1_scalxc_with_scan_debug,
+    metric_func: Callable[..., ResidualForceMetricPayload] = residual_force_gcx2_after_edge_policy,
+) -> ResidualForcePayloadResult:
+    """Build residual force payloads from force kernels.
+
+    This seam keeps the iteration loop focused on solver state updates while the
+    TOMNSP force conventions stay in a separately tested module.  It preserves
+    the VMEC ordering used in the original loop: resolve edge masks, assemble raw
+    residuals, emit optional scan/HLO diagnostics, apply M1/zero/scalxc rules,
+    then form metric force scalars with the selected edge policy.
+    """
+
+    include_edge_residual_resolved, mask_pack = resolve_residual_force_mask_pack(
+        static,
+        include_edge=bool(include_edge),
+        include_edge_residual=include_edge_residual,
+    )
+    frzl_raw = residual_func(
+        kernels,
+        cfg_ntheta=int(static.cfg.ntheta),
+        cfg_nzeta=int(static.cfg.nzeta),
+        wout=wout,
+        trig=trig,
+        apply_lforbal=apply_lforbal,
+        include_edge=bool(include_edge_residual_resolved),
+        masks=mask_pack,
+    )
+    maybe_debug_force_z_channel_square_sums(
+        frzl_raw,
+        enabled=bool(scan_debug_force_enabled),
+        message="[scan-debug-raw] fzsc2_raw={fzsc:.6e} fzcs2_raw={fzcs:.6e}",
+    )
+    if bool(dump_hlo_force_tomnsps) and hlo_dump_func is not None:
+        try:
+
+            def _tomnsps_only(k_in):
+                frzl_hlo = residual_func(
+                    k_in,
+                    cfg_ntheta=int(static.cfg.ntheta),
+                    cfg_nzeta=int(static.cfg.nzeta),
+                    wout=wout,
+                    trig=trig,
+                    apply_lforbal=apply_lforbal,
+                    include_edge=bool(include_edge_residual_resolved),
+                    masks=mask_pack,
+                )
+                return (
+                    frzl_hlo.frcc,
+                    frzl_hlo.frss,
+                    frzl_hlo.fzsc,
+                    frzl_hlo.fzcs,
+                    frzl_hlo.flsc,
+                    frzl_hlo.flcs,
+                )
+
+            hlo_dump_func(label="tomnsps", fn=_tomnsps_only, args=(kernels,), kwargs={})
+        except Exception:
+            pass
+    if raw_tomnsps_callback is not None:
+        raw_tomnsps_callback(frzl_raw)
+
+    frzl_full = postprocess_func(
+        frzl_raw,
+        s=s,
+        apply_m1_constraints=bool(apply_m1_constraints),
+        lconm1=bool(lconm1),
+        zero_m1=zero_m1,
+        scan_debug_force_enabled=bool(scan_debug_force_enabled),
+    )
+    if gc_callback is not None:
+        gc_callback(frzl_full)
+
+    metric_payload = metric_func(
+        frzl_full,
+        include_edge=bool(include_edge),
+        lconm1=bool(lconm1),
+        s=s,
+    )
+    return ResidualForcePayloadResult(
+        include_edge_residual=include_edge_residual_resolved,
+        mask_pack=mask_pack,
+        frzl_raw=frzl_raw,
+        frzl_full=frzl_full,
+        metric_payload=metric_payload,
     )
