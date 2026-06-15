@@ -24508,3 +24508,57 @@ Completion:
 - CI/runtime/coverage hygiene: 100%.
 - Docs/release hygiene: 100%.
 - QI minimal-seed README artifacts: 100%.
+
+### 2026-06-14 Finite-Beta Same-Branch Free-Boundary Scalar Gate
+
+Steps taken:
+
+1. Added a branch-local direct-coil free-boundary gate for the finite-beta
+   physical scalar ``betatotal``.
+2. Reused the tiny finite-pressure direct-coil fixture and the existing native
+   accepted/rejected host-controller branch pattern:
+   ``("momentum", "momentum", "restart_bad_jacobian")`` with accept mask
+   ``[1, 1, 0]``.
+3. Compared the fixed accepted-branch JVP against a complete-solve central
+   finite difference only after the full accepted-trace fingerprint stayed
+   unchanged.
+4. Added a changed-fingerprint negative assertion so the gate refuses
+   promotion when the adaptive branch changes.
+
+Results obtained:
+
+1. ``JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_native_rejected_slot_betatotal_jvp_matches_complete_solve_fd
+   --durations=20 -q`` passed.
+2. Runtime was about 30.3 s locally.
+3. The promoted claim remains conservative: the gate differentiates the fixed
+   accepted branch under an unchanged fingerprint and explicitly reports
+   ``differentiates_adaptive_controller=False`` and
+   ``differentiates_run_free_boundary=False``.
+
+Best next steps:
+
+1. Keep arbitrary adaptive host-branch differentiation deferred to
+   ``plan_differentiability.md``.
+2. If another finite-beta free-boundary scalar is needed, prefer adding it to
+   this same test pattern rather than creating a separate expensive solve.
+3. Continue bounded VMEC2000/mgrid/direct-coil parity only with finite-positive
+   physical WOUT fixtures.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999995%; finite-beta
+  physical scalar branch-local evidence is now included, adaptive host branch
+  changes remain deferred/unclaimed.
+- VMEC parity and physics gates: 99.9%.
+- Single-stage coil-only optimization phase 3: 99.9%.
+- CPU/GPU performance: 99.45%.
+- CI/runtime/coverage hygiene: 100% locally for this new exact gate; awaiting
+  GitHub CI for the latest branch head.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 100%.
