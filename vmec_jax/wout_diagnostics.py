@@ -253,12 +253,31 @@ def glasser_profiles_from_wout_variables(
     )
 
 
+def glasser_profiles_from_wout_data(wout: Any, ns: int) -> GlasserProfileArrays:
+    """Return Glasser profiles ready for WOUT persistence.
+
+    ``Wout`` objects produced by older code paths may not yet carry the newer
+    Glasser arrays.  Centralizing the defaults here keeps the writer focused on
+    NetCDF materialization and ensures missing profiles are persisted with
+    predictable zero-valued arrays of the correct length.
+    """
+
+    shape = (int(ns),)
+    return GlasserProfileArrays(
+        D_R=np.asarray(getattr(wout, "D_R", np.zeros(shape, dtype=float)), dtype=float),
+        H=np.asarray(getattr(wout, "H", np.zeros(shape, dtype=float)), dtype=float),
+        correction=np.asarray(getattr(wout, "glasser_correction", np.zeros(shape, dtype=float)), dtype=float),
+        shear_valid=np.asarray(getattr(wout, "glasser_shear_valid", np.zeros(shape, dtype=bool)), dtype=bool),
+    )
+
+
 __all__ = [
     "GlasserProfileArrays",
     "compute_aspectratio",
     "compute_ctor_from_buco",
     "compute_eqfor_beta",
     "compute_eqfor_betaxis",
+    "glasser_profiles_from_wout_data",
     "glasser_profiles_from_wout_variables",
     "glasser_from_wout_mercier_terms",
     "lambda_half_mesh_weights",

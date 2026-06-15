@@ -1466,6 +1466,13 @@ Results obtained:
     coverage test, Ruff, compileall, and the full `driver-solve-discrete` shard
     passed locally (`912 passed, 30 skipped`).  `solve.py` decreased to
     10119 lines.
+82. Added the write-side companion to the WOUT Glasser profile reader:
+    `glasser_profiles_from_wout_data` now bundles `D_R`, `HGlasser`,
+    `GlasserCorrection`, and `GlasserShearValid` arrays with explicit defaults
+    before NetCDF materialization.  The WOUT writer delegates profile selection
+    to `wout_diagnostics.py`, preserving the writer's I/O role while keeping
+    diagnostics defaults unit-testable.  Focused Glasser materialization tests,
+    the full WOUT helper suite, Ruff, and compileall passed locally.
 
 Best next steps:
 
@@ -1492,9 +1499,9 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 93%.
+- Differentiability/refactor implementation: 94%.
 - Source-health instrumentation: 100%.
 - Solver monolith reduction: 71% of the large-file extraction work.
 - Free-boundary adjoint monolith reduction: 30%.
 - Driver workflow decomposition: 35%.
-- WOUT diagnostic decomposition: 18%.
+- WOUT diagnostic decomposition: 20%.

@@ -57,10 +57,15 @@ from vmec_jax.wout import (
     _vmec_wrout_nyquist_sin_coeffs_loop,
     _vmec_wrout_nyquist_synthesis,
     assert_main_modes_match_wout,
+    _glasser_profiles_from_wout_data,
 )
 from vmec_jax.mercier import glasser_resistive_interchange_from_mercier_terms
 from vmec_jax import wout_flux_helpers
-from vmec_jax.wout_diagnostics import glasser_from_wout_mercier_terms, glasser_profiles_from_wout_variables
+from vmec_jax.wout_diagnostics import (
+    glasser_from_wout_mercier_terms,
+    glasser_profiles_from_wout_data,
+    glasser_profiles_from_wout_variables,
+)
 from vmec_jax.vmec_tomnsp import vmec_trig_tables
 
 
@@ -220,6 +225,30 @@ def test_wout_glasser_profile_reader_uses_persisted_or_fallback_variables():
 
     legacy_h = glasser_profiles_from_wout_variables({"H": np.arange(5.0)}, DMerc=dmerc, Dshear=dshear, Dcurr=dcurr)
     np.testing.assert_allclose(legacy_h.H, np.arange(5.0))
+
+
+def test_wout_glasser_profile_writer_bundle_uses_data_or_zero_defaults():
+    wout = SimpleNamespace(
+        D_R=np.asarray([0.0, 1.0, 2.0]),
+        H=np.asarray([3.0, 4.0, 5.0]),
+        glasser_correction=np.asarray([6.0, 7.0, 8.0]),
+        glasser_shear_valid=np.asarray([True, False, True]),
+    )
+    profiles = glasser_profiles_from_wout_data(wout, 3)
+    alias = _glasser_profiles_from_wout_data(wout, 3)
+
+    np.testing.assert_allclose(profiles.D_R, [0.0, 1.0, 2.0])
+    np.testing.assert_allclose(profiles.H, [3.0, 4.0, 5.0])
+    np.testing.assert_allclose(profiles.correction, [6.0, 7.0, 8.0])
+    np.testing.assert_array_equal(profiles.shear_valid, [True, False, True])
+    for actual, expected in zip(alias, profiles, strict=True):
+        np.testing.assert_array_equal(actual, expected)
+
+    defaults = glasser_profiles_from_wout_data(SimpleNamespace(), 4)
+    np.testing.assert_allclose(defaults.D_R, np.zeros(4))
+    np.testing.assert_allclose(defaults.H, np.zeros(4))
+    np.testing.assert_allclose(defaults.correction, np.zeros(4))
+    np.testing.assert_array_equal(defaults.shear_valid, np.zeros(4, dtype=bool))
 
 
 def test_lambda_wout_half_mesh_roundtrip_covers_m_parity_branches():

@@ -55,6 +55,7 @@ _compute_ctor_from_buco = _wout_diagnostics.compute_ctor_from_buco
 _compute_eqfor_beta = _wout_diagnostics.compute_eqfor_beta
 _compute_eqfor_betaxis = _wout_diagnostics.compute_eqfor_betaxis
 _glasser_from_wout_mercier_terms = _wout_diagnostics.glasser_from_wout_mercier_terms
+_glasser_profiles_from_wout_data = _wout_diagnostics.glasser_profiles_from_wout_data
 _glasser_profiles_from_wout_variables = _wout_diagnostics.glasser_profiles_from_wout_variables
 _icurv_full_mesh_from_indata = _wout_flux_helpers.icurv_full_mesh_from_indata
 _lambda_full_from_wout_half_mesh = _wout_flux_helpers.lambda_full_from_wout_half_mesh
@@ -4431,20 +4432,11 @@ def write_wout(path: str | Path, wout: WoutData, *, overwrite: bool = False) -> 
         write_float_variable(ds, "DWell", ("radius",), np.asarray(getattr(wout, "Dwell", np.zeros((ns,), dtype=float))))
         write_float_variable(ds, "DCurr", ("radius",), np.asarray(getattr(wout, "Dcurr", np.zeros((ns,), dtype=float))))
         write_float_variable(ds, "DGeod", ("radius",), np.asarray(getattr(wout, "Dgeod", np.zeros((ns,), dtype=float))))
-        write_float_variable(ds, "D_R", ("radius",), np.asarray(getattr(wout, "D_R", np.zeros((ns,), dtype=float))))
-        write_float_variable(ds, "HGlasser", ("radius",), np.asarray(getattr(wout, "H", np.zeros((ns,), dtype=float))))
-        write_float_variable(
-            ds,
-            "GlasserCorrection",
-            ("radius",),
-            np.asarray(getattr(wout, "glasser_correction", np.zeros((ns,), dtype=float))),
-        )
-        write_float_variable(
-            ds,
-            "GlasserShearValid",
-            ("radius",),
-            np.asarray(getattr(wout, "glasser_shear_valid", np.zeros((ns,), dtype=bool)), dtype=float),
-        )
+        glasser_profiles = _glasser_profiles_from_wout_data(wout, ns)
+        write_float_variable(ds, "D_R", ("radius",), glasser_profiles.D_R)
+        write_float_variable(ds, "HGlasser", ("radius",), glasser_profiles.H)
+        write_float_variable(ds, "GlasserCorrection", ("radius",), glasser_profiles.correction)
+        write_float_variable(ds, "GlasserShearValid", ("radius",), np.asarray(glasser_profiles.shear_valid, dtype=float))
 
         # Iteration trace (optional).
         write_float_variable(ds, "fsqt", ("nstore_seq",), np.asarray(wout.fsqt))
