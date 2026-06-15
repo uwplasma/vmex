@@ -205,116 +205,10 @@ compatibility, and validated derivative behavior.
 
 ## Target Package Architecture
 
-The refactored package should expose stable public modules and keep large
-implementation modules split by responsibility.  The target layout is:
-
-.. code-block:: text
-
-   vmec_jax/
-     api.py                     stable public import surface
-     config/                    parsed INDATA, profiles, grids, run options
-     state/                     PyTree equilibrium, force, and output states
-     kernels/
-       geometry.py              real-space geometry and metric kernels
-       fourier.py               Fourier transforms, mode maps, Nyquist tables
-       fields.py                covariant/contravariant B, J, pressure terms
-       forces.py                fixed-boundary and finite-beta force blocks
-       residuals.py             residual assembly and norms
-     solvers/
-       fixed_boundary.py        fixed-boundary solve orchestration
-       free_boundary.py         free-boundary solve orchestration
-       controller.py            accepted/rejected/update policy data classes
-       scan.py                  JAX-visible fixed-budget traces
-       implicit.py              root/JVP/VJP/linear-solve derivative seams
-       outputs.py               accepted-state, rerun, WOUT, and checkpoints
-     free_boundary/
-       providers.py             mgrid/direct-coil/ESSOS provider protocol
-       nestor.py                source/NESTOR operators
-       adjoint.py               branch-local reports and custom VJP seams
-       fingerprints.py          adaptive branch metadata and promotion checks
-     objectives/
-       quasisymmetry.py
-       quasi_isodynamic.py
-       finite_beta.py
-       stability.py             DMerc, Glasser D_R, magnetic well, jdotB
-       coils.py
-       least_squares.py         objective tuple/object assembly
-     optimization/
-       boundary.py              boundary DOF spaces and continuation policies
-       coils.py                 coil DOF spaces and proposal/acceptance loops
-       callbacks.py             exact/scalar/matrix-free callback policies
-       result.py                history, provenance, saved artifacts
-       scipy_backend.py
-       jaxopt_backend.py        optional
-       optax_backend.py         optional
-     io/
-       namelist.py
-       wout.py
-       booz.py
-       assets.py
-     plotting/
-       geometry.py
-       boozer.py
-       optimization.py
-       stability.py
-     diagnostics/
-       parity.py
-       performance.py
-       source_health.py
-
-The existing module names should remain available through compatibility
-re-exports until the next major release.  Tests should import from the new
-module paths when validating new functionality and from old paths when
-checking backward compatibility.
-
-## 2026-06-15 Architecture Correction: Stop Flat Helper Proliferation
-
-The first implementation pass made useful progress reducing the largest
-modules, but it also created too many top-level files with origin-based names
-such as `solve_*`, `driver_*`, `free_boundary_*`, and `wout_*`.  That defeats
-one of the core goals: a codebase that is easy for researchers to understand,
-extend, and test.
-
-Effective immediately, the refactor should stop adding new top-level helper
-modules unless they are temporary compatibility shims.  New implementation code
-should move into domain packages with short, stable names and clear ownership.
-
-Current source-health snapshot on PR #20 after the latest extractions:
-
-.. code-block:: text
-
-   vmec_jax Python files under maxdepth=2: 140
-   vmec_jax/solve.py:                 10119 lines
-   vmec_jax/wout.py:                   5894 lines
-   vmec_jax/free_boundary_adjoint.py:   5687 lines
-   vmec_jax/optimization.py:           5441 lines
-   vmec_jax/free_boundary.py:          4271 lines
-   vmec_jax/optimization_workflow.py:  4249 lines
-   vmec_jax/driver.py:                 2953 lines
-
-Problem diagnosis:
-
-1. Flat files named after the old monolith (`solve_*`) document extraction
-   history, not scientific meaning.
-2. Discoverability is poor: a contributor must know the old file name before
-   finding the new helper.
-3. The number of root modules is becoming its own maintenance burden.
-4. Tests increasingly import private aliases from compatibility modules instead
-   of domain APIs.
-
-Architecture principle:
-
-- Public APIs remain small and stable: `vmec_jax.run_fixed_boundary`,
-  `vmec_jax.run_free_boundary`, objective functions, WOUT/Boozer readers, and
-  optimization entry points.
-- Internal implementation is organized by scientific/numerical responsibility,
-  not by the old source file.
-- Compatibility shims are allowed, but they should be thin, documented, and
-  marked for removal after one major release.
-- New tests should target the domain package first and only use old private
-  aliases for explicit backward-compatibility checks.
-
-Revised package map:
+The refactored package should expose a small public API and keep implementation
+modules organized by scientific/numerical responsibility.  This is the
+canonical target layout for PR #20 and supersedes the older flat
+`solve_*`/`driver_*`/`free_boundary_*` helper-file direction.
 
 .. code-block:: text
 
@@ -366,10 +260,10 @@ Revised package map:
      objectives/
        quasisymmetry.py
        quasi_isodynamic.py
-       finite_beta.py
-       stability.py               DMerc, Glasser D_R, well, jdotB
+       finite_beta.py             beta, pressure/current, well, bootstrap hooks
+       stability.py               DMerc, Glasser D_R, Mercier/well gates
        coils.py
-       least_squares.py
+       least_squares.py           objective tuple/object assembly
 
      optimization/
        boundary.py                boundary DOF spaces and continuation
@@ -404,6 +298,122 @@ Revised package map:
      performance/
        profiling.py
        source_health.py
+
+The existing module names should remain available through compatibility
+re-exports until the next major release.  Tests should import from the new
+module paths when validating new functionality and from old paths when
+checking backward compatibility.
+
+Domain-name decisions:
+
+1. `core` owns low-level VMEC data model objects and mesh/profile conventions.
+2. `kernels` owns pure numerical kernels that can be JIT/vmap/grad transformed.
+3. `solvers` owns controller state, nonlinear iteration, branch fingerprints,
+   and derivative policies.
+4. `objectives` owns differentiable scalar/vector metrics used in optimization.
+5. `optimization` owns user-facing problem assembly and optimizer backends.
+6. `io`, `plotting`, `validation`, and `performance` are side-effect and
+   workflow packages; they should not be imported from hot kernels.
+
+Research-grade architecture scorecard:
+
+Every substantial refactor must improve or preserve all of the following:
+
+1. Simpler public use.
+   A beginner should still be able to run `vmec --test`, `vmec input.*`,
+   `run_fixed_boundary`, `run_free_boundary`, and the QA/QH/QP/QI examples
+   without learning internal package structure.
+2. Clear contributor path.
+   A new kernel goes in `kernels/`; a new objective goes in `objectives/`; a
+   new solve policy goes in `solvers/`; a new validation fixture goes in
+   `validation/`; a new plot goes in `plotting/`.
+3. No hidden performance tax.
+   Moving code into packages must not add dynamic dispatch, object allocation,
+   import-time optional dependencies, or Python callbacks inside JIT/scanned hot
+   paths.  Compatibility shims must stay outside hot loops.
+4. Accuracy first.
+   Refactors must preserve VMEC2000/VMEC++ parity, finite-positive WOUT
+   geometry, force-residual convergence, Boozer/QS/QI diagnostics, DMerc,
+   Glasser `D_R`, pressure/current profile behavior, and rerun reproducibility.
+5. Differentiability is explicit and validated.
+   Every derivative path must identify its seam: pure kernel, implicit root,
+   branch-local same-fingerprint replay, scalar-adjoint, matrix-free, or
+   experimental adaptive-branch derivative.  Promotion requires AD-vs-central-FD
+   agreement on physical scalars.
+6. Performance evidence survives refactor.
+   Cold/warm CPU and GPU timings, exact callback timings, matrix-free/scalar
+   derivative timings, and optimization wall times must be tracked before and
+   after large moves.
+7. Documentation follows the domain model.
+   User docs should show public workflows; developer docs should explain the
+   package map and where to add new physics, solvers, objectives, providers,
+   validation gates, and examples.
+
+Acceptance metrics for the refactor:
+
+- Root-level implementation files under `vmec_jax/*.py`: fewer than 35.
+- No new root-level helper-prefix files without explicit plan exemption.
+- Largest implementation module target: under 1500 lines; hard warning above
+  2000 lines.
+- Full local release gate and GitHub CI stay green.
+- Coverage and physics/parity gates do not regress.
+- Public import/runtime smoke tests pass from both source checkout and installed
+  wheel.
+- Representative fixed-boundary, free-boundary, direct-coil, finite-beta,
+  QS/QI, DMerc/`D_R`, and Boozer workflows retain documented outputs.
+
+## 2026-06-15 Architecture Correction: Stop Flat Helper Proliferation
+
+The first implementation pass made useful progress reducing the largest
+modules, but it also created too many top-level files with origin-based names
+such as `solve_*`, `driver_*`, `free_boundary_*`, and `wout_*`.  That defeats
+one of the core goals: a codebase that is easy for researchers to understand,
+extend, and test.
+
+Effective immediately, the refactor should stop adding new top-level helper
+modules unless they are temporary compatibility shims.  New implementation code
+should move into domain packages with short, stable names and clear ownership.
+
+Current source-health snapshot on PR #20 after the latest extractions:
+
+.. code-block:: text
+
+   vmec_jax Python files under maxdepth=2: 140
+   vmec_jax/solve.py:                 10119 lines
+   vmec_jax/wout.py:                   5894 lines
+   vmec_jax/free_boundary_adjoint.py:   5687 lines
+   vmec_jax/optimization.py:           5441 lines
+   vmec_jax/free_boundary.py:          4271 lines
+   vmec_jax/optimization_workflow.py:  4249 lines
+   vmec_jax/driver.py:                 2953 lines
+
+Problem diagnosis:
+
+1. Flat files named after the old monolith (`solve_*`) document extraction
+   history, not scientific meaning.
+2. Discoverability is poor: a contributor must know the old file name before
+   finding the new helper.
+3. The number of root modules is becoming its own maintenance burden.
+4. Tests increasingly import private aliases from compatibility modules instead
+   of domain APIs.
+
+Architecture principle:
+
+- Public APIs remain small and stable: `vmec_jax.run_fixed_boundary`,
+  `vmec_jax.run_free_boundary`, objective functions, WOUT/Boozer readers, and
+  optimization entry points.
+- Internal implementation is organized by scientific/numerical responsibility,
+  not by the old source file.
+- Compatibility shims are allowed, but they should be thin, documented, and
+  marked for removal after one major release.
+- New tests should target the domain package first and only use old private
+  aliases for explicit backward-compatibility checks.
+
+Canonical package map:
+
+The single source of truth is the `Target Package Architecture` section above.
+Do not add a second package map in later planning sections; update the target
+architecture directly when names or boundaries change.
 
 Naming rules:
 
