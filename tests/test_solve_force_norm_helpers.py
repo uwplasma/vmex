@@ -5,7 +5,8 @@ from types import SimpleNamespace
 import numpy as np
 
 from vmec_jax._compat import jnp
-from vmec_jax.solve_force_norm_helpers import residual_fsq_from_norms
+from vmec_jax.solve_force_norm_helpers import mode_weight_force_blocks_jax, residual_fsq_from_norms
+from vmec_jax.solve_force_payload_helpers import ForceBlocks
 
 
 def test_residual_fsq_from_norms_matches_vmec_scalar_products() -> None:
@@ -47,5 +48,40 @@ def test_residual_fsq_from_norms_preserves_jax_array_inputs_and_solve_alias() ->
 
     for actual, expected in zip(got, (3.0, 5.0, 28.0)):
         np.testing.assert_allclose(np.asarray(actual), expected)
+    for actual, expected in zip(alias, got):
+        np.testing.assert_allclose(np.asarray(actual), np.asarray(expected))
+
+
+def test_mode_weight_force_blocks_jax_scales_all_channels_and_zero_fills_optional_blocks() -> None:
+    import vmec_jax.solve as solve
+
+    base = np.arange(8.0).reshape(2, 2, 2) + 1.0
+    weights = np.asarray([[1.0, 2.0], [3.0, 4.0]])
+    blocks = ForceBlocks(
+        frcc=base,
+        frss=None,
+        fzsc=base + 10.0,
+        fzcs=None,
+        flsc=base + 20.0,
+        flcs=base + 30.0,
+        frsc=base + 40.0,
+        frcs=base + 50.0,
+        fzcc=base + 60.0,
+        fzss=base + 70.0,
+        flcc=base + 80.0,
+        flss=base + 90.0,
+    )
+
+    got = mode_weight_force_blocks_jax(blocks, w_mode_mn=weights)
+    alias = solve._mode_weight_force_blocks_jax(blocks, w_mode_mn=weights)
+
+    expected_weight = weights[None, :, :]
+    np.testing.assert_allclose(np.asarray(got.frcc), base * expected_weight)
+    np.testing.assert_allclose(np.asarray(got.frss), np.zeros_like(base))
+    np.testing.assert_allclose(np.asarray(got.fzsc), (base + 10.0) * expected_weight)
+    np.testing.assert_allclose(np.asarray(got.fzcs), np.zeros_like(base))
+    np.testing.assert_allclose(np.asarray(got.flcs), (base + 30.0) * expected_weight)
+    np.testing.assert_allclose(np.asarray(got.frsc), (base + 40.0) * expected_weight)
+    np.testing.assert_allclose(np.asarray(got.flss), (base + 90.0) * expected_weight)
     for actual, expected in zip(alias, got):
         np.testing.assert_allclose(np.asarray(actual), np.asarray(expected))

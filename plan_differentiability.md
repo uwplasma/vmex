@@ -1390,15 +1390,24 @@ Results obtained:
     actual residual-iteration host/JAX parity plus QH trace extraction tests
     passed along with Ruff and compileall.  `solve.py` decreased to
     10186 lines.
+73. Moved non-fused device mode-weight force update scaling into
+    `solve_force_norm_helpers.py`.  The device path now mirrors the existing
+    host NumPy helper with a tested JAX helper that applies Fourier-mode
+    weights and zero-fills missing optional sine/cosine channels.  The solver
+    still applies the post-branch lambda update scale so host/device parity
+    semantics remain unchanged.  Direct helper tests cover optional-channel
+    zero fill and the compatibility alias from `solve.py`; actual
+    residual-iteration host/JAX parity plus QH trace extraction tests passed
+    along with Ruff and compileall.  `solve.py` decreased to 10181 lines.
 
 Best next steps:
 
 1. Keep all refactor work on PR #20 until the full plan is finalized.
 2. Continue Wave 1/Wave 2 by extracting the next solver pure seams around
-   residual-iteration checkpoint payload assembly and mode-update payload
-   formatting.  Keep `_COMPUTE_FORCES_CACHE`, `_compute_forces_impl`, and the
-   adaptive scan loop in `solve.py` until the smaller helpers prove stable
-   under the existing hotpath/cache tests.
+   residual-iteration checkpoint payload assembly, accepted-step trace fields,
+   and late-stage finish/fallback formatting.  Keep `_COMPUTE_FORCES_CACHE`,
+   `_compute_forces_impl`, and the adaptive scan loop in `solve.py` until the
+   smaller helpers prove stable under the existing hotpath/cache tests.
 3. Continue broader refactors in parallel with `driver.py`, `optimization.py`,
    `free_boundary_adjoint.py`, and `wout.py` by extracting pure
    policy/formatting/data-container seams before moving any physics kernels.
@@ -1416,9 +1425,9 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 91%.
+- Differentiability/refactor implementation: 92%.
 - Source-health instrumentation: 100%.
-- Solver monolith reduction: 68% of the large-file extraction work.
+- Solver monolith reduction: 69% of the large-file extraction work.
 - Free-boundary adjoint monolith reduction: 30%.
 - Driver workflow decomposition: 35%.
 - WOUT diagnostic decomposition: 16%.

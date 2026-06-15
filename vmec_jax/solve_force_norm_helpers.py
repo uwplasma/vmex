@@ -46,6 +46,34 @@ def mode_weight_force_blocks_np(
     )
 
 
+def mode_weight_force_blocks_jax(
+    blocks: ForceBlocks,
+    *,
+    w_mode_mn,
+) -> ForceBlocks:
+    """Scale preconditioned device force blocks by Fourier-mode weights."""
+
+    weight = jnp.asarray(w_mode_mn)[None, :, :]
+
+    def _optional_scale(a, like):
+        return (a if a is not None else jnp.zeros_like(like)) * weight
+
+    return ForceBlocks(
+        frcc=jnp.asarray(blocks.frcc) * weight,
+        frss=_optional_scale(blocks.frss, blocks.frcc),
+        fzsc=jnp.asarray(blocks.fzsc) * weight,
+        fzcs=_optional_scale(blocks.fzcs, blocks.fzsc),
+        flsc=jnp.asarray(blocks.flsc) * weight,
+        flcs=_optional_scale(blocks.flcs, blocks.flsc),
+        frsc=jnp.asarray(blocks.frsc) * weight,
+        frcs=jnp.asarray(blocks.frcs) * weight,
+        fzcc=jnp.asarray(blocks.fzcc) * weight,
+        fzss=jnp.asarray(blocks.fzss) * weight,
+        flcc=jnp.asarray(blocks.flcc) * weight,
+        flss=jnp.asarray(blocks.flss) * weight,
+    )
+
+
 def lambda_preconditioned_full_norm(frzl_pre, *, use_jax: bool):
     """Return VMEC2000 full-mesh lambda preconditioned residual norm."""
 

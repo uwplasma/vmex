@@ -188,6 +188,7 @@ from .solve_force_payload_helpers import (
 )
 from .solve_force_norm_helpers import (
     lambda_preconditioned_full_norm as _lambda_preconditioned_full_norm,
+    mode_weight_force_blocks_jax as _mode_weight_force_blocks_jax,
     mode_weight_force_blocks_np as _mode_weight_force_blocks_np,
     residual_fsq_from_norms as _residual_fsq_from_norms,
     safe_dt_from_force_blocks as _safe_dt_from_force_blocks,
@@ -7578,18 +7579,12 @@ def solve_fixed_boundary_residual_iter(
                     )
                 )
             else:
-                frcc_u = frcc * w_mode_mn[None, :, :]
-                frss_u = (frss if frss is not None else jnp.zeros_like(frcc_u)) * w_mode_mn[None, :, :]
-                fzsc_u = fzsc * w_mode_mn[None, :, :]
-                fzcs_u = (fzcs if fzcs is not None else jnp.zeros_like(fzsc_u)) * w_mode_mn[None, :, :]
-                flsc_u = flsc * w_mode_mn[None, :, :]
-                flcs_u = (flcs if flcs is not None else jnp.zeros_like(flsc_u)) * w_mode_mn[None, :, :]
-                frsc_u = frsc * w_mode_mn[None, :, :]
-                frcs_u = frcs * w_mode_mn[None, :, :]
-                fzcc_u = fzcc * w_mode_mn[None, :, :]
-                fzss_u = fzss * w_mode_mn[None, :, :]
-                flcc_u = flcc * w_mode_mn[None, :, :]
-                flss_u = flss * w_mode_mn[None, :, :]
+                (frcc_u, frss_u, fzsc_u, fzcs_u, flsc_u, flcs_u, frsc_u, frcs_u, fzcc_u, fzss_u, flcc_u, flss_u) = (
+                    _mode_weight_force_blocks_jax(
+                        _ForceBlocks(frcc, frss, fzsc, fzcs, flsc, flcs, frsc, frcs, fzcc, fzss, flcc, flss),
+                        w_mode_mn=w_mode_mn,
+                    )
+                )
             if timing_detail_enabled and t_precond_mode_start is not None:
                 try:
                     if has_jax():
