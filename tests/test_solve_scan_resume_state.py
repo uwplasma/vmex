@@ -3,6 +3,7 @@ import pytest
 
 from vmec_jax._compat import has_jax, jnp
 from vmec_jax.solve import _initialize_scan_resume_state
+from vmec_jax.solve_scan_resume_helpers import build_traced_scan_resume_state
 
 
 pytestmark = pytest.mark.skipif(not has_jax(), reason="scan resume-state helper requires JAX arrays")
@@ -42,6 +43,41 @@ def _scalar(value):
 
 def _int_scalar(value):
     return int(np.asarray(value))
+
+
+def test_build_traced_scan_resume_state_keeps_arrays_and_advances_iter_offset():
+    shape = (1, 1, 1)
+    carry = type(
+        "Carry",
+        (),
+        {
+            "time_step": jnp.asarray(0.25),
+            "inv_tau": jnp.asarray([0.1, 0.2]),
+            "fsq_prev": jnp.asarray(1.0),
+            "fsq0_prev": jnp.asarray(2.0),
+            "flip_sign": jnp.asarray(-1.0),
+            "iter1": jnp.asarray(3, dtype=jnp.int32),
+            "iter_offset": jnp.asarray(4, dtype=jnp.int32),
+            "res0": jnp.asarray(5.0),
+            "res1": jnp.asarray(6.0),
+            "ijacob": jnp.asarray(7, dtype=jnp.int32),
+            "bad_resets": jnp.asarray(8, dtype=jnp.int32),
+            "bad_growth": jnp.asarray(9, dtype=jnp.int32),
+            "fsqz_prev": jnp.asarray(10.0),
+            "state_checkpoint": {"state": "checkpoint"},
+            "cache_valid": jnp.asarray(True),
+            "force_bcovar_update": jnp.asarray(False),
+            **{name: jnp.full(shape, float(i + 1)) for i, name in enumerate(_VELOCITY_NAMES)},
+        },
+    )()
+
+    payload = build_traced_scan_resume_state(carry, max_iter=6)
+
+    assert _int_scalar(payload["iter_offset"]) == 10
+    assert payload["state_checkpoint"] == {"state": "checkpoint"}
+    assert bool(np.asarray(payload["vmec2000_cache_valid"]))
+    assert not bool(np.asarray(payload["force_bcovar_update"]))
+    np.testing.assert_allclose(np.asarray(payload["vLss"]), np.full(shape, 12.0))
 
 
 def test_initialize_scan_resume_state_accepts_valid_resume_state():

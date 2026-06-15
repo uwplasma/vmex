@@ -1433,6 +1433,14 @@ Results obtained:
     `logaddexp` algebra.  Focused optimization workflow tests, the new wrapper
     AD/FD test, and the full finite-beta helper unit suite passed along with
     Ruff.
+78. Moved traced VMEC2000 scan resume-state packaging into
+    `solve_scan_resume_helpers.py` as `build_traced_scan_resume_state`.  The
+    helper keeps differentiable carry values as arrays and advances
+    `iter_offset` without forcing host conversion, so traced scan diagnostics
+    are documented and tested outside the solver monolith.  Direct resume-state
+    tests, representative accelerated-scan tests, and the full
+    `driver-solve-discrete` shard passed locally (`909 passed, 30 skipped`)
+    along with Ruff.  `solve.py` decreased to 10138 lines.
 
 Best next steps:
 

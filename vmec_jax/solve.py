@@ -289,6 +289,7 @@ from .solve_metric_dump_helpers import (
 )
 from .solve_scan_resume_helpers import (
     ScanResumeInitialFields as _ScanResumeInitialFields,  # noqa: F401 - re-exported for existing internal tests/importers.
+    build_traced_scan_resume_state as _build_traced_scan_resume_state,
     initialize_scan_resume_state as _initialize_scan_resume_state,
 )
 from .solve_residual_objective_helpers import (
@@ -5066,36 +5067,7 @@ def solve_fixed_boundary_residual_iter(
         if _tree_has_tracer(hist) or _tree_has_tracer(carry_final.state):
             hist_dtype = jnp.asarray(state0.Rcos).dtype
             empty = jnp.zeros((0,), dtype=hist_dtype)
-            traced_resume_state = {
-                "time_step": carry_final.time_step,
-                "inv_tau": carry_final.inv_tau,
-                "fsq_prev": carry_final.fsq_prev,
-                "fsq0_prev": carry_final.fsq0_prev,
-                "flip_sign": carry_final.flip_sign,
-                "iter1": carry_final.iter1,
-                "iter_offset": carry_final.iter_offset + jnp.asarray(int(max_iter), dtype=jnp.int32),
-                "res0": carry_final.res0,
-                "res1": carry_final.res1,
-                "ijacob": carry_final.ijacob,
-                "bad_resets": carry_final.bad_resets,
-                "bad_growth_streak": carry_final.bad_growth,
-                "fsqz_prev": carry_final.fsqz_prev,
-                "state_checkpoint": carry_final.state_checkpoint,
-                "vRcc": carry_final.vRcc,
-                "vRss": carry_final.vRss,
-                "vZsc": carry_final.vZsc,
-                "vZcs": carry_final.vZcs,
-                "vLsc": carry_final.vLsc,
-                "vLcs": carry_final.vLcs,
-                "vRsc": carry_final.vRsc,
-                "vRcs": carry_final.vRcs,
-                "vZcc": carry_final.vZcc,
-                "vZss": carry_final.vZss,
-                "vLcc": carry_final.vLcc,
-                "vLss": carry_final.vLss,
-                "vmec2000_cache_valid": carry_final.cache_valid,
-                "force_bcovar_update": carry_final.force_bcovar_update,
-            }
+            traced_resume_state = _build_traced_scan_resume_state(carry_final, max_iter=int(max_iter))
             return _attach_freeb_diag(
                 SolveVmecResidualResult(
                     state=carry_final.state,

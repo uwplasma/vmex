@@ -189,3 +189,42 @@ def initialize_scan_resume_state(
         w_mhd_prev=w_mhd_prev0,
         state_checkpoint=state_checkpoint0,
     )
+
+
+def build_traced_scan_resume_state(carry_final: Any, *, max_iter: int) -> dict[str, Any]:
+    """Return the differentiable resume payload for a traced scan result.
+
+    This mirrors the full host resume payload but keeps all values as JAX
+    arrays so callers can stage or differentiate scan solves without forcing
+    host conversion.
+    """
+    return {
+        "time_step": carry_final.time_step,
+        "inv_tau": carry_final.inv_tau,
+        "fsq_prev": carry_final.fsq_prev,
+        "fsq0_prev": carry_final.fsq0_prev,
+        "flip_sign": carry_final.flip_sign,
+        "iter1": carry_final.iter1,
+        "iter_offset": carry_final.iter_offset + jnp.asarray(int(max_iter), dtype=jnp.int32),
+        "res0": carry_final.res0,
+        "res1": carry_final.res1,
+        "ijacob": carry_final.ijacob,
+        "bad_resets": carry_final.bad_resets,
+        "bad_growth_streak": carry_final.bad_growth,
+        "fsqz_prev": carry_final.fsqz_prev,
+        "state_checkpoint": carry_final.state_checkpoint,
+        "vRcc": carry_final.vRcc,
+        "vRss": carry_final.vRss,
+        "vZsc": carry_final.vZsc,
+        "vZcs": carry_final.vZcs,
+        "vLsc": carry_final.vLsc,
+        "vLcs": carry_final.vLcs,
+        "vRsc": carry_final.vRsc,
+        "vRcs": carry_final.vRcs,
+        "vZcc": carry_final.vZcc,
+        "vZss": carry_final.vZss,
+        "vLcc": carry_final.vLcc,
+        "vLss": carry_final.vLss,
+        "vmec2000_cache_valid": carry_final.cache_valid,
+        "force_bcovar_update": carry_final.force_bcovar_update,
+    }
