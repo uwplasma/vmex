@@ -35,6 +35,7 @@ vmec-jax documentation
       equations
       vmec_wiki_primer
       algorithms
+      mirror/index
       discrete_adjoint
       piecewise_omnigenous_plan
       simsopt_comparison

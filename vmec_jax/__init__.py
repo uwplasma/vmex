@@ -228,6 +228,7 @@ from .quasisymmetry import (
 
 _LAZY_ATTRS = {
     "api": ".api",
+    "mirror": ".mirror",
     "FreeBoundaryRuntimeState": ".free_boundary",
     "MGridMetadata": ".free_boundary",
     "MGridData": ".free_boundary",
@@ -424,7 +425,7 @@ def __getattr__(name: str):
     if module_name is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     module = _import_module(module_name, __name__)
-    if name == "api":
+    if name in {"api", "mirror"}:
         value = module
     else:
         value = getattr(module, name)
@@ -437,6 +438,7 @@ def __dir__():
 
 __all__ = [
     "api",
+    "mirror",
     "read_indata",
     "write_indata",
     "InData",

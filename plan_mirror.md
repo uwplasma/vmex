@@ -1,0 +1,2592 @@
+# Plan: fixed-boundary mirror equilibria in `vmec_jax` using Chebyshev--Gauss--Lobatto axial discretization
+
+Status: planning document for a new `vmec_jax` mirror-geometry research lane.
+
+Last updated: 2026-06-15.
+
+Primary target repository: <https://github.com/uwplasma/vmec_jax>
+
+Primary refactor context: PR #20, "[codex] Research-grade differentiability refactor umbrella", <https://github.com/uwplasma/vmec_jax/pull/20>.
+
+Primary external design targets: VMEC, DESC, GVEC-style variational ideal-MHD equilibrium solves, not Grad--Shafranov or Green's-function equilibrium solves.
+
+---
+
+## 0. Executive summary
+
+We want `vmec_jax` to solve ideal-MHD equilibria for **mirror geometries**: straight-axis, open-ended magnetic configurations whose flux surfaces are nested open flux tubes rather than closed toroidal surfaces. The first implementation should be **fixed boundary**, scalar finite-beta, differentiable, and compatible with future optimization and mirror-Boozer-like diagnostics. Free boundary and anisotropic pressure come later.
+
+The recommended first production implementation is:
+
+\[
+(s,\theta,\xi),\qquad s\in[0,1],\quad \theta\in[0,2\pi),\quad \xi\in[-1,1],
+\]
+
+with:
+
+- `s`: VMEC-like flux-surface label, initially a finite-difference or nodal radial grid.
+- `theta`: periodic azimuthal angle around the straight mirror axis, represented with Fourier modes.
+- `xi`: nonperiodic axial coordinate, represented at Chebyshev--Gauss--Lobatto nodes.
+- fixed side boundary `s = 1`, prescribed by `r_b(theta, xi)` or later by `X_b(theta, xi), Y_b(theta, xi), Z_b(theta, xi)`.
+- open end planes `xi = -1` and `xi = +1`, not periodically identified.
+- a VMEC-like divergence-free contravariant magnetic-field representation with `B^s = 0` and a stream function `lambda`.
+- variational minimization or residual solve of the ideal-MHD energy functional.
+
+The first useful solver should be the narrowest robust case:
+
+```text
+straight-axis mirror
+axisymmetric or weakly 3D fixed side boundary
+Fourier(theta) x Chebyshev-Lobatto(xi)
+VMEC-like radial finite-difference grid
+scalar p(s)
+Psi'(s) prescribed
+I'(s) optional, initially zero
+lambda carried in state, initially allowed to be zero for simple axisymmetric cases
+mout_*.nc mirror-native output
+vmec --plot mout_*.nc works
+mirror-specific Boozer-like straight-field-line transform later
+```
+
+The implementation should not fake a torus with a huge aspect ratio, should not use Fourier modes in the axial coordinate, and should not replace VMEC with Grad--Shafranov or Green's functions. Axisymmetric Grad--Shafranov and Pleiades results may still be used as optional validation comparisons.
+
+---
+
+## 1. Scope and non-goals
+
+### 1.1 In scope for the fixed-boundary phase
+
+1. A new mirror backend that follows the `vmec_jax` research-grade refactor principles from PR #20.
+2. Chebyshev--Gauss--Lobatto nodes and differentiation/quadrature in the axial coordinate.
+3. Fourier modes in `theta`, with efficient transforms and derivative matrices.
+4. Axisymmetric fixed-boundary mirror equilibria as the first working path.
+5. Nonaxisymmetric fixed-boundary surfaces after the axisymmetric solver is reliable.
+6. Scalar finite-beta pressure profiles `p(s)`.
+7. VMEC-like divergence-free contravariant field representation.
+8. Variational energy, residuals, and JAX gradients.
+9. Real numerical tests, manufactured-solution tests, physics tests, code-parity tests, convergence tests, and benchmarks.
+10. Mirror-native I/O, plotting, examples, and documentation.
+11. Mirror optimization objectives that call the fixed-boundary mirror solver.
+12. A mirror-specific straight-field-line / Boozer-like transform.
+
+### 1.2 Deferred until fixed boundary is stable
+
+1. Free-boundary mirror equilibria.
+2. Vacuum-region PDE/spectral potential solve for free boundary.
+3. External coil optimization coupled to a mirror free-boundary solve.
+4. Anisotropic pressure closure and kinetic-coupled closures.
+5. Full 3D transverse geometry with arbitrary non-circular axis or generalized Frenet frame.
+6. Production B-spline or spectral-element axial basis.
+7. Open-field-line loss models, sheath/end-plate physics, or kinetic distribution evolution.
+
+### 1.3 Explicit non-goals
+
+1. Do not implement the primary mirror equilibrium solver as Grad--Shafranov.
+2. Do not implement the primary mirror equilibrium solver using Green's functions.
+3. Do not make the mirror a closed torus by imposing artificial axial periodicity.
+4. Do not store mirror results in classic toroidal `wout_*.nc` files without a mirror-native schema.
+5. Do not make toroidal `booz_xform_jax` consume mirror files as fake VMEC WOUT files.
+
+---
+
+## 2. Source and literature anchors
+
+This section lists the sources that should be cited in code comments, tests, documentation, and PR descriptions where relevant. Some are direct implementation anchors; others are validation or design context.
+
+### 2.1 `vmec_jax` source and PR #20 anchors
+
+- Repository: <https://github.com/uwplasma/vmec_jax>
+- Current attached source inspected locally from `vmec_jax-main(1).zip`.
+- PR #20: <https://github.com/uwplasma/vmec_jax/pull/20>
+- PR #20 title: `[codex] Research-grade differentiability refactor umbrella`.
+- PR #20 branch: `codex/differentiability-refactor-plan`.
+- PR #20 head SHA at inspection: `f6bee2dae1b0b0aee55a1f5fa93e9b7ae671c896`.
+- PR #20 base: `main`, base SHA at inspection: `807255b2d29c2c733234004024faa6bcad9df8c1`.
+- PR #20 was open, draft, mergeable, with 114 commits and 126 changed files at inspection.
+- PR #20 key architectural instruction: expose a small public API, keep implementation organized by scientific/numerical responsibility, stop adding flat root-level helper modules, keep compatibility shims thin, and make tests target domain packages.
+
+Important PR #20 documents and implications:
+
+- `plan_differentiability.md` states that long-term `vmec_jax` should keep VMEC-compatible fixed/free-boundary physics while exposing validated derivatives for equilibrium, optimization, finite-beta metrics, Boozer objectives, and stability objectives.
+- `plan_differentiability.md` defines a target package architecture with `api.py`, `cli.py`, `core/`, `kernels/`, `solvers/`, `objectives/`, `optimization/`, `io/`, `plotting/`, `validation/`, and `performance/`.
+- The plan explicitly says the new domain package architecture supersedes older flat `solve_*`, `driver_*`, and `free_boundary_*` helper-file proliferation.
+- The plan gives naming rules: avoid new root-level `solve_*`, `driver_*`, `free_boundary_*`, and `wout_*` modules; avoid vague `_helpers`, `_utils`, `_misc`, `_common`; use nouns that describe scientific domain objects.
+- It defines line-count and cognitive-load budgets: new functions usually under 80 lines, files usually under 800 lines, warning above 1500 lines, hard gate above 2000 lines once migration is active.
+- It defines validation gates: numerical identities, AD-vs-central-FD, external parity, physics gates, artifact reproducibility, and performance gates.
+
+The mirror implementation should follow these rules even if developed on `main` before or outside the PR #20 branch.
+
+### 2.2 VMEC theory and implementation anchors
+
+- VMEC/STELLOPT documentation: <https://princetonuniversity.github.io/STELLOPT/VMEC.html>
+- VMEC uses a variational method to minimize total energy and assumes Fourier expansion in poloidal and toroidal coordinates.
+- VMEC seeks ideal-MHD force balance in a toroidal domain:
+  \[
+  -\mathbf j\times\mathbf B + \nabla p = 0,\qquad
+  \nabla\times\mathbf B = \mu_0\mathbf j,\qquad
+  \nabla\cdot\mathbf B = 0.
+  \]
+- VMEC writes the energy as:
+  \[
+  W=\int\left(\frac{|\mathbf B|^2}{2\mu_0}+\frac{p}{\gamma-1}\right)d^3x.
+  \]
+- VMEC enforces flux conservation and `div B = 0` through a contravariant magnetic-field representation and a field-line-straightening stream function `lambda`.
+- VMEC fixed boundary prescribes Fourier amplitudes at the outer flux surface. Free boundary incorporates vacuum fields and a vacuum scalar potential.
+
+Mirror `vmec_jax` should keep the VMEC variational/divergence-free structure but replace toroidal topology with open-ended mirror topology.
+
+### 2.3 DESC documentation and source anchors
+
+- DESC docs: <https://desc-docs.readthedocs.io/en/stable/>
+- DESC basis/grid docs: <https://desc-docs.readthedocs.io/en/stable/notebooks/basis_grid.html>
+- DESC source: <https://github.com/PlasmaControl/DESC>
+- DESC current `desc/basis.py` source anchor: <https://github.com/PlasmaControl/DESC/blob/master/desc/basis.py>
+- DESC `basis.py` exports `ChebyshevDoubleFourierBasis` and `ChebyshevPolynomial`.
+- DESC `ChebyshevDoubleFourierBasis` is a tensor product of Chebyshev polynomials and two Fourier series. It is useful as a transform implementation reference, but it is not directly the mirror basis because mirror geometry needs Chebyshev in axial `xi`, Fourier in azimuthal `theta`, and no periodic toroidal coordinate.
+- DESC `ChebyshevDoubleFourierBasis.evaluate` evaluates the product of Chebyshev, poloidal Fourier, and toroidal Fourier factors and supports derivatives.
+- DESC docs state that Fourier-Zernike basis represents toroidal equilibrium positions and stream function, and that Zernike polynomials are useful because they automatically satisfy magnetic-axis regularity.
+- DESC docs mention Chebyshev-Gauss-Lobatto node patterns in concentric grids.
+
+DESC active/recent development threads relevant to this plan:
+
+1. PR #2012: <https://github.com/PlasmaControl/DESC/pull/2012>
+   - Title: `Fourier-Chebyshev Fit to B for particle tracing`.
+   - Branch: `yge/particle-fit`.
+   - Head SHA at inspection: `7b21b40f10d95b97a5f7bbad5eca95aeee195912`.
+   - Status at inspection: open draft.
+   - Adds a `FourierChebyshevField` with `init`, `build`, `fit`, and `evaluate` methods compatible with optimization.
+   - Explicit TODO: examine spectral convergence and consider a spline version.
+   - Lesson for `vmec_jax`: use build/fit/evaluate separation, cache transforms, keep field interpolation compatible with optimization, and test spectral convergence.
+
+2. PR #2194: <https://github.com/PlasmaControl/DESC/pull/2194>
+   - Title: `correct CGL nodes in OmnigenousField.change_resolution`.
+   - Branch: `dd/omni_bugfix`.
+   - Head SHA: `1c616e13c8672a2facf692863853537b1aa8afde`.
+   - Merge commit SHA: `6b3978fc63151e16956a33dc76cdcc0b25538879`.
+   - Status at inspection: merged.
+   - Body says Chebyshev-Gauss-Lobatto nodes used for resolution change were incorrect, affecting interpolation accuracy.
+   - Lesson for `vmec_jax`: CGL nodes, ordering, interpolation, and resolution-change tests must be correctness-critical tests, not smoke tests.
+
+3. PR #1508: <https://github.com/PlasmaControl/DESC/pull/1508>
+   - Title: `Poloidal FFT Implementation`.
+   - Branch: `rg/poloidal_fft`.
+   - Head SHA at inspection: `c74b6b6af04a04591f2937af77d6044fb430c61f`.
+   - Status at inspection: open draft.
+   - Body says initial implementation works for Fourier, DoubleFourier, and FourierChebyshev basis, but not Zernike yet.
+   - Lesson for `vmec_jax`: separable FFT/matrix transforms are preferable to dense full-node-by-mode matrices; Zernike coupling complicates transforms, so start with a simpler VMEC-like radial grid and Fourier-Chebyshev tensor product.
+
+4. PR #1893: <https://github.com/PlasmaControl/DESC/pull/1893>
+   - Title: `A variational principle based ideal MHD stability solver and optimizer`.
+   - Status at inspection: open.
+   - Body emphasizes discretizing an energy principle and maintaining symmetric generalized eigenvalue structure.
+   - Lesson for `vmec_jax`: because the mirror solver is variational, tests should include gradient checks and Hessian symmetry checks.
+
+### 2.4 GVEC anchors
+
+- GVEC docs: <https://gvec.readthedocs.io/latest/>
+- GVEC source mirror: <https://github.com/gvec-group/gvec>
+- GVEC is an open-source flexible 3D ideal-MHD equilibrium solver inspired by VMEC.
+- GVEC uses radial B-splines of arbitrary polynomial degree and Fourier series in poloidal/toroidal directions.
+- GVEC supports flexible mappings not restricted to standard cylindrical coordinates.
+- Lesson for `vmec_jax`: Chebyshev-Lobatto is a good first axial basis, but the mirror backend should keep an axial-basis abstraction that can later support multi-domain Chebyshev, B-splines, or spectral elements.
+
+### 2.5 WHAM, Pleiades, and mirror-physics anchors
+
+- WHAM physics basis article: <https://www.cambridge.org/core/journals/journal-of-plasma-physics/article/physics-basis-for-the-wisconsin-hts-axisymmetric-mirror-wham/35CCAE07989A73709B38C15F38A5CDBE>
+- DOI: <https://doi.org/10.1017/S0022377823000806>
+- WHAM paper notes that WHAM is a high-field axisymmetric mirror platform and that finite-beta anisotropic ion distributions are part of equilibrium modelling.
+- WHAM paper states that the 17 T, 2 kA steady-state, 5.5 cm warm-bore HTS mirror magnets are centered at `z = +/- 98 cm`.
+- WHAM paper discusses mirror ratio, expansion ratio, finite-beta diamagnetism, and high-beta anisotropic equilibrium modelling.
+- Pleiades docs: <https://pleiades.readthedocs.io/en/latest/>
+- Pleiades computes axisymmetric magnetic fields and includes an MHD equilibrium solver used to generate magnetic mirror equilibria and GENRAY/CQL3D inputs for WHAM.
+- Pleiades is not the target equilibrium algorithm here, but it is a useful optional comparison code for vacuum fields, geometry, and axisymmetric mirror equilibria.
+- Uploaded `coil_model_WHAM-2.txt` script:
+  - Uses `magpylib` to build a two-coil WHAM-like mirror field.
+  - Uses 8 axial layers and 310 radial windings.
+  - Uses coil-pack centers at `z = +/- 0.98 m`.
+  - Uses `I_coil = 2000 * 17.0 / 17.51 A`.
+  - Computes `|B|` contours on an `(r,z)` grid and on-axis `B_z(z)`.
+  - Cites the IEEE Transactions on Applied Superconductivity paper: `Design of High Field HTS Coils for Magnetic Mirror`, Radovinsky et al., 2023.
+
+Additional mirror-related paper anchor:
+
+- `Nonlinear anisotropic equilibrium reconstruction in axisymmetric magnetic mirrors`, arXiv:2509.17288, <https://arxiv.org/abs/2509.17288>
+- The abstract states that the work extends nonlinear equilibrium reconstruction to high-beta anisotropic-pressure plasmas and applies it to WHAM.
+- Lesson for future phases: design pressure APIs now so anisotropic closures can be added later without rewriting geometry and field kernels.
+
+### 2.6 Numerics and validation anchors
+
+- VMEC++ numerics paper: <https://arxiv.org/abs/2502.04374>
+  - Useful for modern VMEC implementation practices, parity philosophy, restart behavior, and Python-friendly APIs.
+- Clenshaw--Curtis quadrature: <https://en.wikipedia.org/wiki/Clenshaw%E2%80%93Curtis_quadrature>
+  - Useful reference for Chebyshev-related quadrature; code should cite a primary numerical analysis reference in docs if possible.
+- Trefethen, `Spectral Methods in MATLAB`, for Chebyshev-Lobatto derivative matrices and spectral convergence tests.
+- Boyd, `Chebyshev and Fourier Spectral Methods`, for Chebyshev filtering, aliasing, and endpoint behavior.
+- Roache, `Verification and Validation in Computational Science and Engineering`, for method-of-manufactured-solutions methodology.
+
+---
+
+## 3. How this fits into the PR #20 architecture
+
+The mirror implementation should not add new root-level `vmec_jax/mirror_*.py`, `solve_mirror_*`, or `driver_mirror_*` files. It should be a domain package with a small public surface and cohesive implementation modules.
+
+### 3.1 Recommended mirror package tree
+
+Use a new `vmec_jax/mirror/` package that mirrors the PR #20 domain architecture internally:
+
+```text
+vmec_jax/
+  mirror/
+    __init__.py                 small public mirror namespace
+    api.py                      user-facing mirror workflows and compatibility surface
+
+    core/
+      __init__.py
+      config.py                 MirrorConfig, MirrorSolveOptions, enums, units
+      state.py                  MirrorStateAxisym, MirrorState3D, PyTree registration
+      grids.py                  MirrorGrid, radial/theta/xi nodes, weights, masks
+      basis.py                  ThetaFourierBasis, AxialBasis protocol, transform cache
+      profiles.py               ScalarMirrorPressure, flux/current/twist profiles
+      boundary.py               MirrorBoundary, parameterizations, constraints
+      runtime.py                dtype/JIT/runtime settings, optional dependency flags
+
+    kernels/
+      __init__.py
+      chebyshev.py              CGL nodes, D matrices, Clenshaw-Curtis weights
+      fourier.py                theta FFT/evaluation/derivatives, real-mode conventions
+      geometry.py               embeddings, metrics, Jacobian, volume, shape checks
+      fields.py                 B contravariant/covariant/cartesian kernels
+      energy.py                 magnetic/pressure energy densities and totals
+      forces.py                 variational gradients/force blocks and projections
+      residuals.py              residual assembly, norms, physical scalar diagnostics
+      constraints.py            axis/boundary/lambda gauge constraints
+      manufactured.py           MMS source-term and exact-solution helpers
+      filtering.py              Chebyshev/Fourier spectral filters and mode spectra
+
+    solvers/
+      __init__.py
+      fixed_boundary/
+        __init__.py
+        api.py                  run_mirror_fixed_boundary
+        continuation.py         pressure/resolution/stage continuation
+        nonlinear.py            residual/energy solve orchestration
+        optimizers.py           LBFGS/GN/GD adapters, optional JAXopt adapter
+        checkpoints.py          restart payloads, deterministic artifacts
+        diagnostics.py          trace rows, residual histories, shape guards
+
+      free_boundary/
+        __init__.py
+        api.py                  future run_mirror_free_boundary
+        domains.py              plasma/vacuum/wall domain maps
+        vacuum_potential.py     future PDE/spectral scalar-potential solve
+        interfaces.py           plasma-vacuum continuity residuals
+        wall.py                 conducting wall geometry and boundary conditions
+        diagnostics.py          future Bnormal/pressure/interface diagnostics
+
+      differentiation/
+        __init__.py
+        policies.py             exact/implicit/scalar-adjoint policy objects
+        implicit.py             root/JVP/VJP helpers for fixed-boundary solve
+        finite_difference.py    central-FD validation helpers
+        linear_solvers.py       matrix-free CG/dense fallback for small tests
+
+    objectives/
+      __init__.py
+      mirror_ratio.py           target mirror ratio and well-depth objectives
+      bfield.py                 B-profile objectives, Bmax/Bmin, smoothness
+      boundary.py               boundary smoothness, wall clearance, symmetry
+      constraints.py            min-Jacobian, radius positivity, endpoint guards
+      least_squares.py          objective tuple/object assembly
+
+    optimization/
+      __init__.py
+      boundary.py               boundary DOF spaces and transforms
+      workflow.py               Simsopt-like optimization assembly
+      callbacks.py              derivative policies and accepted-solve callbacks
+      result.py                 histories, artifacts, plotting hooks
+      backends/
+        __init__.py
+        scipy.py                required backend through scipy.optimize
+        jaxopt.py               optional backend; lazy import
+        optax.py                optional backend; lazy import
+
+    io/
+      __init__.py
+      mout.py                   mirror-native netCDF read/write
+      schema.py                 mout variable definitions, units, versioning
+      input.py                  mirror input parsing/writing, YAML/TOML/namelist bridge
+      assets.py                 fixture metadata and example asset helpers
+
+    plotting/
+      __init__.py
+      geometry.py               r-z surfaces, 3D surfaces, wall/boundary plots
+      bfield.py                 |B| maps, mirror ratio, spectra
+      diagnostics.py            residual, Jacobian, energy histories
+      boozer.py                 mirror-Boozer-like spectra and field-line plots
+      export.py                 VTK/VTU/NPZ data export
+
+    boozer/
+      __init__.py
+      transform.py              mirror straight-field-line transform
+      spectra.py                |B| Fourier-Chebyshev spectra on mirror coordinates
+      fieldlines.py             open-field-line integration diagnostics
+      io.py                     mbmn_*.nc mirror-Boozer output
+
+    validation/
+      __init__.py
+      analytic.py               cylinder/flared-tube analytic checks
+      wham.py                   WHAM coil fixture metadata and optional magpylib checks
+      desc_parity.py            Fourier-Chebyshev transform parity with DESC
+      gvec_parity.py            optional GVEC-style mapping checks
+      pleiades_parity.py        optional Pleiades/axisymmetric comparison hooks
+      convergence.py            resolution convergence utilities
+      manufactured.py           MMS test-case definitions
+
+    performance/
+      __init__.py
+      profiling.py              cold/warm/JIT timings and memory helpers
+      transform_benchmarks.py   transform scaling and allocation benchmarks
+```
+
+This structure gives mirror work a clear home while respecting PR #20's rule that new code should not proliferate flat root-level helper modules. If PR #20 lands first and the top-level `core/`, `kernels/`, etc. packages are in place, generic pieces such as Chebyshev utilities may later move to `vmec_jax/kernels/orthogonal.py` or `vmec_jax/core/grids.py`, but the first mirror implementation should keep topology-specific code under `vmec_jax/mirror/`.
+
+### 3.2 Public API additions
+
+Expose only the minimal stable API at first:
+
+```python
+import vmec_jax as vj
+
+cfg = vj.mirror.MirrorConfig(...)
+result = vj.mirror.run_mirror_fixed_boundary(cfg)
+vj.mirror.write_mout(result, "mout_case.nc")
+vj.mirror.plot_mirror_output("mout_case.nc")
+```
+
+Add to `vmec_jax/api.py` only after the API is stable:
+
+```python
+from .mirror.api import (
+    MirrorConfig,
+    MirrorBoundary,
+    MirrorFixedBoundaryResult,
+    run_mirror_fixed_boundary,
+    load_mirror_output,
+    write_mirror_output,
+    plot_mirror_output,
+)
+```
+
+Avoid putting all mirror internals into `vmec_jax/__init__.py` immediately. The top-level import should remain lightweight and not import optional plotting, `magpylib`, or heavy validation packages.
+
+### 3.3 CLI additions
+
+Extend the existing `vmec` CLI by dispatching on input/output type:
+
+```bash
+vmec mirror examples/mirror/input.fixed_flared.toml
+vmec --plot mout_fixed_flared.nc
+vmec --mirror-booz mout_fixed_flared.nc
+vmec mirror-optimize examples/mirror/target_ratio.toml
+```
+
+Do not add a second executable unless needed. Existing scripts `vmec`, `vmec-jax`, `vmec_jax`, `xvmec_jax` already point to `vmec_jax.cli:main`.
+
+---
+
+## 4. Mathematical formulation
+
+### 4.1 Coordinates
+
+Use mirror flux coordinates:
+
+\[
+(s,\theta,\xi),\qquad s\in[0,1],\quad \theta\in[0,2\pi),\quad \xi\in[-1,1].
+\]
+
+The coordinate `xi` maps to physical axial coordinate `z` through a monotone map:
+
+\[
+z=z(\xi),\qquad z_\xi > 0.
+\]
+
+For the first implementation use a linear map:
+
+\[
+z(\xi)=z_0+L\xi.
+\]
+
+Later allow smooth maps that cluster physical resolution near mirror throats or expanders.
+
+### 4.2 Axisymmetric straight-axis embedding
+
+First implementation:
+
+\[
+\mathbf x(s,\theta,\xi)=r(s,\xi)\cos\theta\,\hat{\mathbf x}
++r(s,\xi)\sin\theta\,\hat{\mathbf y}+z(\xi)\hat{\mathbf z}.
+\]
+
+Axis regularity is enforced by:
+
+\[
+r(s,\xi)=\rho\,a(s,\xi),\qquad \rho=\sqrt{s}.
+\]
+
+Boundary:
+
+\[
+r(1,\xi)=r_b(\xi),\qquad r(0,\xi)=0.
+\]
+
+Coordinate basis vectors:
+
+\[
+\mathbf e_s=r_s\hat{\mathbf e}_r,
+\]
+
+\[
+\mathbf e_\theta=r\hat{\mathbf e}_\theta,
+\]
+
+\[
+\mathbf e_\xi=r_\xi\hat{\mathbf e}_r+z_\xi\hat{\mathbf e}_z.
+\]
+
+Metric entries:
+
+\[
+g_{ss}=r_s^2,
+\qquad g_{s\theta}=0,
+\qquad g_{s\xi}=r_s r_\xi,
+\]
+
+\[
+g_{\theta\theta}=r^2,
+\qquad g_{\theta\xi}=0,
+\qquad g_{\xi\xi}=r_\xi^2+z_\xi^2.
+\]
+
+Jacobian:
+
+\[
+J=\sqrt{g}=\mathbf e_s\cdot(\mathbf e_\theta\times\mathbf e_\xi)=r r_s z_\xi.
+\]
+
+For `r = a sqrt(s)` and `z = L xi`,
+
+\[
+J=\frac{a^2 L}{2}.
+\]
+
+### 4.3 3D straight-axis embedding
+
+After axisymmetric cases work, allow:
+
+\[
+r(s,\theta,\xi)=\rho\,a(s,\theta,\xi)
+\]
+
+or full transverse coordinates:
+
+\[
+\mathbf x(s,\theta,\xi)=X(s,\theta,\xi)\hat{\mathbf x}
++Y(s,\theta,\xi)\hat{\mathbf y}
++Z(s,\theta,\xi)\hat{\mathbf z}.
+\]
+
+The `r(s,theta,xi)` representation is simpler and should come first. The full `X,Y,Z` representation is more general and should be designed but not required for the fixed-boundary MVP.
+
+### 4.4 Divergence-free contravariant magnetic field
+
+Use the mirror analogue of VMEC's contravariant form:
+
+\[
+B^s=0,
+\]
+
+\[
+J B^\theta=I'(s)-\partial_\xi\lambda,
+\]
+
+\[
+J B^\xi=\Psi'(s)+\partial_\theta\lambda.
+\]
+
+Then:
+
+\[
+\nabla\cdot\mathbf B
+=\frac{1}{J}\left[\partial_\theta(JB^\theta)+\partial_\xi(JB^\xi)\right]
+=\frac{1}{J}\left[-\lambda_{\xi\theta}+\lambda_{\theta\xi}\right]=0.
+\]
+
+`Psi'(s)` is the axial flux derivative. `I'(s)` is an optional twist/current-like flux function. `lambda` is the mirror version of the VMEC field-line-straightening stream function.
+
+For the first axisymmetric MVP, allow:
+
+\[
+I'(s)=0,\qquad \lambda=0.
+\]
+
+But include `lambda` in state from the start so twisted and nonaxisymmetric cases do not require a redesign.
+
+### 4.5 Magnetic energy
+
+The magnetic energy is:
+
+\[
+W_B=\int \frac{B^2}{2\mu_0} J\,ds\,d\theta\,d\xi.
+\]
+
+With `B^s = 0`,
+
+\[
+B^2 = g_{\theta\theta}(B^\theta)^2
++2g_{\theta\xi}B^\theta B^\xi
++g_{\xi\xi}(B^\xi)^2.
+\]
+
+In axisymmetry with `lambda=0`, `I'=0`:
+
+\[
+B^\xi=\frac{\Psi'(s)}{J},
+\]
+
+\[
+B^2=(B^\xi)^2(r_\xi^2+z_\xi^2).
+\]
+
+### 4.6 Pressure energy
+
+Start with prescribed scalar pressure:
+
+\[
+p=p(s).
+\]
+
+Use:
+
+\[
+W_p=\int \frac{p(s)}{\gamma-1} J\,ds\,d\theta\,d\xi.
+\]
+
+Later add the VMEC mass-conserving pressure model:
+
+\[
+p(s)=\frac{M(s)}{\left[\int\int J\,d\theta\,d\xi\right]^\gamma}.
+\]
+
+### 4.7 Total energy and residuals
+
+Fixed boundary solves:
+
+\[
+W = W_B+W_p.
+\]
+
+The solved state should satisfy stationarity under admissible variations:
+
+\[
+\frac{\delta W}{\delta a}=0,
+\qquad
+\frac{\delta W}{\delta\lambda}=0,
+\]
+
+with side boundary, axis regularity, end constraints, and lambda gauge imposed by projection.
+
+Use JAX AD initially to form gradients for correctness. Later add analytic force kernels for performance and VMEC-style parity.
+
+### 4.8 Lambda gauge
+
+Since adding a flux function to `lambda` does not change the magnetic field,
+
+\[
+\lambda\rightarrow\lambda+c(s),
+\]
+
+a gauge must be fixed. For each `s`, remove the surface average:
+
+\[
+\langle \lambda\rangle_{\theta,\xi}=0.
+\]
+
+In coefficient storage this means the `(m=0,k=0)` lambda mode is removed or constrained to zero. In nodal storage, project after each update.
+
+### 4.9 Boundary and end-plane conditions
+
+Fixed side boundary:
+
+\[
+r(1,\theta,\xi)=r_b(\theta,\xi).
+\]
+
+Axis:
+
+\[
+r(0,\theta,\xi)=0,
+\]
+
+with `r = sqrt(s) a` and later `rho^{|m|}` regularity for nonaxisymmetric modes.
+
+End planes are open field-line cuts, not periodic boundaries. For the first MVP choose a conservative fixed-end policy:
+
+\[
+r(s,\theta,-1)=\sqrt{s}\,r_b(\theta,-1),
+\]
+
+\[
+r(s,\theta,+1)=\sqrt{s}\,r_b(\theta,+1).
+\]
+
+After the solver is stable, add natural variational end conditions as an option. The end policy must be explicit in `MirrorConfig` and in docs.
+
+---
+
+## 5. Discretization
+
+### 5.1 Radial grid
+
+Use the existing VMEC-like finite radial grid at first. Recommended initial storage:
+
+```python
+s_full = linspace(0, 1, ns)
+s_half = 0.5 * (s_full[:-1] + s_full[1:])
+rho_full = sqrt(s_full)
+```
+
+For axis regularity, store `a(s,xi)` and evaluate `r = sqrt(s) * a`. Avoid evaluating singular `r_s` at `s=0` directly; use analytic or one-sided regular formulas at the axis.
+
+Later options:
+
+1. radial B-splines inspired by GVEC;
+2. Zernike-like disk basis in `(rho, theta)` inspired by DESC;
+3. finite-element radial elements for free boundary.
+
+### 5.2 Azimuthal Fourier grid
+
+Use a uniform periodic grid:
+
+\[
+\theta_j=\frac{2\pi j}{N_\theta},\qquad j=0,\ldots,N_\theta-1.
+\]
+
+Use real Fourier modes:
+
+\[
+f(s,\theta,\xi)=f_0(s,\xi)+\sum_{m=1}^{M}\left[f^c_m(s,\xi)\cos(m\theta)+f^s_m(s,\xi)\sin(m\theta)\right].
+\]
+
+For the first axisymmetric solver, set `mpol = 0`, but implement the Fourier basis early enough that tests cover `m > 0` derivatives and transforms.
+
+### 5.3 Chebyshev--Gauss--Lobatto axial nodes
+
+Use:
+
+\[
+\xi_j=\cos\left(\frac{\pi j}{N_\xi}\right),\qquad j=0,\ldots,N_\xi.
+\]
+
+Public ordering should be increasing physical order:
+
+\[
+-1=\xi_0<\xi_1<\cdots<\xi_{N_\xi}=1.
+\]
+
+If an internal cosine ordering is used, store a permutation and test it. This is important because DESC PR #2194 found a CGL-node bug in a resolution-change path.
+
+### 5.4 Chebyshev derivative matrix
+
+For nodes in canonical cosine ordering `x_j = cos(pi*j/N)`, the standard first-derivative matrix is:
+
+\[
+D_{ij}=\frac{c_i}{c_j}\frac{(-1)^{i+j}}{x_i-x_j},\qquad i\ne j,
+\]
+
+with
+
+\[
+c_0=c_N=2,\qquad c_j=1 \; \text{otherwise},
+\]
+
+and diagonal entries set so rows sum to zero:
+
+\[
+D_{ii}=-\sum_{j\ne i}D_{ij}.
+\]
+
+If nodes are reordered into increasing physical order, reorder `D` consistently:
+
+```python
+D_inc = P @ D_cos @ P.T
+```
+
+where `P` maps cosine ordering to increasing ordering.
+
+Second derivative may be computed as:
+
+```python
+D2_xi = D_xi @ D_xi
+```
+
+for tests and diagnostics, while production code should use first derivatives as much as possible.
+
+### 5.5 Clenshaw--Curtis weights
+
+Use Clenshaw--Curtis weights on `[-1,1]` for `xi`. Implement in pure NumPy/JAX with deterministic tests. Store weights in the public node ordering.
+
+Volume quadrature:
+
+\[
+\int fJ\,ds\,d\theta\,d\xi\approx
+\sum_{i,j,k} f_{ijk}J_{ijk} w^s_i w^\theta_j w^\xi_k.
+\]
+
+### 5.6 Nodal first, coefficient-space later
+
+For the first fixed-boundary implementation, store `a(s,theta,xi)` and `lambda(s,theta,xi)` nodally in `xi`. This makes fixed endpoint constraints, boundary constraints, plotting, and continuation simpler.
+
+Add coefficient-space transforms later for:
+
+1. spectral filtering;
+2. mode spectra and convergence diagnostics;
+3. compressed output;
+4. efficient interpolation to field-line or Boozer-like grids;
+5. parity with DESC's Fourier-Chebyshev development.
+
+### 5.7 Dealiasing and filtering
+
+Nonlinear energy terms involve products of geometry and field quantities. For `theta`, support oversampled collocation:
+
+\[
+N_\theta \ge 2M+1
+\]
+
+for exact representation of linear terms, and optionally `3/2` oversampling for nonlinear products.
+
+For `xi`, include an exponential Chebyshev filter for optional stabilization:
+
+\[
+\sigma_k=\exp[-\alpha(k/N)^p].
+\]
+
+Filtering should be disabled by default in correctness tests and enabled only as an explicit solver option. Tests should verify that filters reduce high-mode energy without changing low modes.
+
+---
+
+## 6. Solver design
+
+### 6.1 First state object
+
+Axisymmetric nodal state:
+
+```python
+@dataclass(frozen=True)
+class MirrorStateAxisym:
+    a: Array       # shape (ns, nxi), r = sqrt(s) * a
+    lam: Array     # shape (ns, nxi), initially zero; gauge-projected
+```
+
+3D nodal state after axisymmetry:
+
+```python
+@dataclass(frozen=True)
+class MirrorState3D:
+    a: Array       # shape (ns, ntheta, nxi)
+    lam: Array     # shape (ns, ntheta, nxi)
+```
+
+Later coefficient state:
+
+```python
+@dataclass(frozen=True)
+class MirrorStateSpectral:
+    a_cos: Array   # shape (ns, m_modes, k_modes)
+    a_sin: Array
+    lam_cos: Array
+    lam_sin: Array
+```
+
+All state objects must be JAX PyTrees.
+
+### 6.2 Static object
+
+```python
+@dataclass(frozen=True)
+class MirrorStatic:
+    grid: MirrorGrid
+    theta_basis: ThetaFourierBasis
+    axial_basis: ChebyshevLobattoBasis
+    radial_ops: RadialOperators
+    constraints: MirrorConstraintMasks
+    dtype: Any
+```
+
+Static objects should own precomputed matrices and masks and should not be differentiated with respect to by default.
+
+### 6.3 Fixed-boundary algorithm
+
+Stage 1: build input and static data.
+
+1. Parse `MirrorConfig`.
+2. Build radial, theta, and CGL `xi` grids.
+3. Build boundary `r_b(theta,xi)`.
+4. Build initial guess `r = sqrt(s) r_b(theta,xi)` or a smoothed interior guess.
+5. Build pressure and flux profiles.
+6. Project fixed side boundary, axis regularity, end policy, and lambda gauge.
+
+Stage 2: solve.
+
+1. Evaluate geometry and field kernels.
+2. Compute energy and residuals.
+3. Use LBFGS or Gauss--Newton-like residual minimization for fixed-budget solves.
+4. Apply constraints by projection after each update.
+5. Continue in pressure and resolution.
+6. Write `mout_*.nc` and a solve-history JSON/NPZ.
+
+Stage 3: validate and plot.
+
+1. Check finite positive `J`.
+2. Check `Bmag > 0`.
+3. Check side boundary exactly matches prescribed boundary.
+4. Check `div B` identity.
+5. Check residual/gradient norm.
+6. Generate plots if requested.
+
+### 6.4 Continuation
+
+Use staged continuation similar in spirit to VMEC/DESC:
+
+```text
+resolution stage 0: ns small, nxi small, mpol=0, pressure fraction 0
+pressure stages: 0 -> 0.1 -> 0.25 -> 0.5 -> 0.75 -> 1
+resolution stages: increase ns, nxi, mpol as needed
+```
+
+Every stage should record:
+
+```text
+stage index
+ns, ntheta, nxi, mpol
+pressure scale
+energy_B, energy_p, energy_total
+residual norm
+min(J), max(J)
+min(B), max(B), mirror ratio
+optimizer iterations
+line-search failures or restarts
+```
+
+### 6.5 Optimizer choices
+
+Required backend:
+
+- SciPy LBFGS-B or trust-region for beginner-friendly deterministic solves.
+
+JAX-native backend:
+
+- plain JAX gradient descent/LBFGS implementation inside `mirror/solvers/fixed_boundary/optimizers.py`.
+
+Optional later backends:
+
+- JAXopt implicit differentiation backend.
+- Optax for experimental optimization loops.
+
+Do not add JAXopt or Optax as mandatory dependencies.
+
+### 6.6 Derivatives
+
+Initial derivative claims should be narrow:
+
+1. Pure-kernel derivatives are JAX differentiable.
+2. Fixed-boundary solve-output derivatives are experimental until AD-vs-central-FD gates pass.
+3. Optimization objectives may initially differentiate through a fixed-budget solve or use finite differences.
+4. Promote implicit derivatives only after root residuals and Hessian/linear-solve gates pass.
+
+This follows PR #20's conservative derivative-policy approach.
+
+---
+
+## 7. I/O design
+
+### 7.1 Mirror input file
+
+Add a mirror-native input format. TOML is recommended because Python 3.11 includes `tomllib`; for Python 3.10 the project already uses `tomli` optionally.
+
+Example:
+
+```toml
+[mirror]
+geometry_type = "mirror"
+name = "fixed_flared_tube"
+mode = "fixed_boundary"
+axis = "straight"
+z_min = -1.2
+z_max = 1.2
+
+[resolution]
+ns = 17
+ntheta = 1
+nxi = 33
+mpol = 0
+
+[boundary]
+type = "polynomial_radius"
+r0 = 0.25
+a2 = -0.35
+a4 = 0.05
+fix_end_surfaces = true
+
+[flux]
+psi_edge = 0.05
+iprofile = "zero"
+
+[pressure]
+type = "polynomial"
+gamma = 0.0
+coeffs = [1000.0, -1000.0]
+
+[solver]
+optimizer = "lbfgs"
+ftol = 1.0e-10
+maxiter = 2000
+pressure_continuation = [0.0, 0.1, 0.25, 0.5, 0.75, 1.0]
+```
+
+Also allow Python API construction from dataclasses. Do not force mirror users to write classic VMEC `INDATA`, since `RBC/RBS/ZBC/ZBS` toroidal Fourier boundary coefficients do not represent an open mirror boundary.
+
+### 7.2 Mirror output file: `mout_*.nc`
+
+Use mirror-native NetCDF files:
+
+```text
+mout_<case>.nc
+```
+
+Global attributes:
+
+```text
+code = "vmec_jax"
+geometry_type = "mirror"
+mirror_schema_version = "0.1"
+algorithm = "fixed_boundary_variational_chebyshev_lobatto"
+coordinate_order = "s,theta,xi"
+axis = "straight"
+fixed_boundary = true
+free_boundary = false
+pressure_model = "scalar_p_of_s"
+```
+
+Dimensions:
+
+```text
+ns
+ntheta
+nxi
+m_modes
+k_modes          optional, once coefficient spectra are stored
+history_steps
+```
+
+Coordinate variables:
+
+```text
+s(ns)
+theta(ntheta)
+xi(nxi)
+z(nxi)
+w_s(ns)
+w_theta(ntheta)
+w_xi(nxi)
+```
+
+Geometry variables:
+
+```text
+r(ns,ntheta,nxi)
+X(ns,ntheta,nxi)
+Y(ns,ntheta,nxi)
+Z(ns,ntheta,nxi)
+sqrtg(ns,ntheta,nxi)
+g_ss, g_stheta, g_sxi, g_thetatheta, g_thetaxi, g_xixi
+boundary_r(ntheta,nxi)
+```
+
+Field variables:
+
+```text
+B_sup_s
+B_sup_theta
+B_sup_xi
+B_cov_s
+B_cov_theta
+B_cov_xi
+B_x
+B_y
+B_z
+Bmag
+lambda
+Psi_prime(ns)
+I_prime(ns)
+```
+
+Profile variables:
+
+```text
+pressure(ns)
+dpressure_ds(ns)
+beta(ns or scalar)
+```
+
+Diagnostics:
+
+```text
+energy_B
+energy_p
+energy_total
+residual_norm
+force_norm
+min_sqrtg
+max_sqrtg
+min_Bmag
+max_Bmag
+mirror_ratio
+solve_history_* arrays
+```
+
+### 7.3 Compatibility with WOUT
+
+Do not overload `wout_*.nc`. Provide explicit conversion/export helpers only for diagnostic comparison where possible:
+
+```python
+mirror_surface_to_vtk(...)
+mirror_output_to_npz(...)
+mirror_axisym_slice_to_csv(...)
+```
+
+Classic VMEC `booz_xform_jax` should reject `mout` files with a clear message and suggest `vmec --mirror-booz`.
+
+---
+
+## 8. Plotting and visualization
+
+### 8.1 CLI behavior
+
+Existing behavior:
+
+```bash
+vmec --plot wout_case.nc
+```
+
+New behavior:
+
+```bash
+vmec --plot mout_case.nc
+```
+
+Dispatch by NetCDF attribute `geometry_type`.
+
+### 8.2 Required mirror plots
+
+`vmec --plot mout_case.nc --outdir figures` should write:
+
+```text
+mirror_surfaces_rz.png          nested surfaces in r-z for axisymmetric cases
+mirror_boundary_3d.png          3D side boundary when ntheta > 1
+mirror_bmag_sxi.png             |B|(s,xi), axisymmetric or theta-averaged
+mirror_bmag_boundary.png        |B|(theta,xi) on s=1
+mirror_jacobian.png             sqrt(g), min/max diagnostics
+mirror_pressure_profile.png     p(s)
+mirror_residual_history.png     residual/energy history
+mirror_spectral_content.png     optional Chebyshev/Fourier spectra
+```
+
+Plotting tests should check numerical arrays behind the plots, not only file existence.
+
+### 8.3 VTK export
+
+Add structured-grid export:
+
+```python
+write_mirror_vtk(mout, "case.vts")
+```
+
+or, if avoiding a VTK dependency, write `.npz` plus docs for ParaView conversion. Optional VTK dependency must be lazy.
+
+---
+
+## 9. Mirror-Boozer-like coordinates
+
+Standard Boozer coordinates are toroidal closed-surface coordinates. Mirrors have open field lines and a nonperiodic axial coordinate, so this must be a separate transform.
+
+### 9.1 Straight-field-line transform
+
+On each surface, define a transformed angle:
+
+\[
+\vartheta=\theta+\Lambda_m(s,\theta,\xi),
+\]
+
+with a condition that field lines are straight in `(vartheta, xi)`:
+
+\[
+\frac{d\vartheta}{d\xi}=\frac{B^\theta}{B^\xi} + \partial_\xi\Lambda_m + \frac{B^\theta}{B^\xi}\partial_\theta\Lambda_m
+\]
+
+or solve a surface PDE of the form:
+
+\[
+B^\xi\partial_\xi\vartheta+B^\theta\partial_\theta\vartheta=C(s),
+\]
+
+with gauge and endpoint conditions replacing toroidal periodicity in `xi`.
+
+First tests:
+
+1. Straight cylinder with `Btheta = 0` gives `vartheta = theta`.
+2. Constant-pitch cylinder gives linear angle advance.
+3. Axisymmetric mirror gives only `m=0` content in `|B|`.
+
+### 9.2 Mirror-Boozer output
+
+Use:
+
+```text
+mbmn_<case>.nc
+```
+
+Variables:
+
+```text
+geometry_type = "mirror_boozer"
+s
+theta_b
+xi
+Bmag(theta_b,xi,s)
+Bmag_mk(s,m,k)
+mirror_ratio(s)
+well_depth(s)
+bounce_points optional
+```
+
+---
+
+## 10. Optimization integration
+
+### 10.1 Mirror objectives
+
+Initial objectives:
+
+1. Target mirror ratio:
+
+\[
+R_m(s)=\frac{\max_\xi |B(s,\xi)|}{\min_\xi |B(s,\xi)|}.
+\]
+
+2. Target axial well shape:
+
+\[
+|B(s,\xi)|\approx B_{target}(s,\xi).
+\]
+
+3. Minimum Jacobian barrier:
+
+\[
+\min J > J_{floor}.
+\]
+
+4. Boundary smoothness:
+
+\[
+\sum_k k^p |r_{b,k}|^2.
+\]
+
+5. Endpoint radius and wall-clearance constraints.
+
+6. Axis regularity and no-negative-radius constraints.
+
+### 10.2 Optimization workflow
+
+Use a Simsopt-like workflow consistent with current `optimization_workflow.py` style:
+
+```python
+boundary = MirrorBoundary.polynomial_radius(r0=..., a2=..., a4=...)
+vmec = FixedBoundaryMirror(config, boundary)
+problem = LeastSquaresProblem.from_terms([
+    MirrorRatio(target=8.0, weight=1.0),
+    MinJacobian(floor=1e-5, weight=10.0),
+])
+result = least_squares_solve(vmec, problem)
+result.save("results/mirror_ratio_opt")
+```
+
+Keep example scripts explicit and short. Do not hide all details behind opaque one-liners.
+
+---
+
+## 11. Free-boundary path, deferred
+
+Free boundary should follow the VMEC energy-principle idea, not Green's functions.
+
+Future free-boundary model:
+
+1. Plasma domain: `0 <= s <= 1`.
+2. Vacuum domain: `1 <= sigma <= sigma_wall`.
+3. Wall boundary: prescribed conducting or physical wall surface.
+4. External field: coil field provider, mgrid-like field, or imported vacuum field.
+5. Vacuum correction potential:
+
+\[
+\mathbf B_v=\mathbf B_{ext}+\nabla\nu.
+\]
+
+6. Vacuum energy:
+
+\[
+W_v=\int_{\Omega_v}\frac{|\mathbf B_v|^2}{2\mu_0}\,dV.
+\]
+
+7. Total energy:
+
+\[
+W=W_p+W_B+W_v.
+\]
+
+The free-boundary solve varies the plasma boundary, interior geometry, `lambda`, and vacuum potential `nu`, subject to interface and wall conditions.
+
+This is deliberately deferred until fixed-boundary geometry, fields, residuals, I/O, plotting, and optimization are trusted.
+
+---
+
+## 12. Test plan overview
+
+Tests must be real scientific/numerical tests, not scaffolds. The test suite should be layered:
+
+```text
+unit math tests
+geometry and identity tests
+energy/gradient tests
+manufactured-solution tests
+fixed-boundary solver tests
+literature-anchored WHAM tests
+code-to-code parity tests
+plotting/CLI/I/O tests
+Boozer-like transform tests
+optimization tests
+regression and benchmark tests
+```
+
+Suggested directory structure:
+
+```text
+tests/mirror/
+  test_chebyshev_lobatto.py
+  test_theta_fourier_basis.py
+  test_mirror_grids.py
+  test_mirror_geometry_axisym.py
+  test_mirror_geometry_3d.py
+  test_mirror_field_identities.py
+  test_mirror_energy.py
+  test_mirror_forces_gradients.py
+  test_mirror_manufactured_solutions.py
+  test_mirror_fixed_boundary_axisym.py
+  test_mirror_fixed_boundary_3d.py
+  test_mirror_io.py
+  test_mirror_plotting.py
+  test_mirror_boozer.py
+  test_mirror_optimization.py
+  test_mirror_convergence.py
+  test_mirror_performance.py
+  test_wham_magpylib_regression.py
+  test_desc_fourier_chebyshev_parity.py
+  test_optional_pleiades_parity.py
+
+validation/mirror/
+  wham_coils.json
+  manufactured_cases.json
+  reference_mout_cylinder.nc or compressed diagnostics
+  reference_mout_flared_finite_beta.nc or compressed diagnostics
+```
+
+Add pytest markers:
+
+```toml
+"mirror: tests for open-ended mirror geometry backend"
+"magpylib: optional tests requiring magpylib"
+"pleiades: optional tests requiring Pleiades"
+"desc: optional tests comparing against DESC"
+```
+
+Core tests should not require optional packages.
+
+---
+
+## 13. Unit and numerical identity tests
+
+### 13.1 Chebyshev--Lobatto tests
+
+1. **Node endpoint and ordering test**
+   - Verify public nodes are monotone increasing.
+   - Verify first and last nodes are exactly `-1` and `+1` within roundoff.
+   - Verify internal and public order permutations are inverse-consistent.
+   - This test is directly motivated by DESC PR #2194.
+
+2. **First derivative exactness**
+   - For `q = 0, ..., N`, test:
+     \[
+     D_\xi \xi^q = q\xi^{q-1}.
+     \]
+   - Include endpoints.
+
+3. **Second derivative exactness**
+   - Test:
+     \[
+     D_\xi^2 \xi^q = q(q-1)\xi^{q-2}.
+     \]
+
+4. **Clenshaw--Curtis quadrature for monomials**
+   - Test:
+     \[
+     \int_{-1}^{1}\xi^q d\xi =
+     \begin{cases}
+     2/(q+1), & q\;\text{even},\\
+     0, & q\;\text{odd}.
+     \end{cases}
+     \]
+
+5. **Spectral convergence**
+   - Test interpolation and derivative convergence for:
+     \[
+     e^\xi,
+     \qquad \cos(3\xi),
+     \qquad \frac{1}{1+0.2\xi^2}.
+     \]
+   - Require exponential-like convergence for smooth functions.
+
+6. **Resolution-change test**
+   - Interpolate from `Nxi=16` to `Nxi=32` and back for analytic functions.
+   - Verify errors match spectral expectations.
+
+7. **Filter test**
+   - Project a mixed low/high Chebyshev signal.
+   - Apply filter.
+   - Verify high-mode norm decreases and low modes remain unchanged within tolerance.
+
+### 13.2 Fourier theta tests
+
+1. **Fourier derivative exactness**
+   - For:
+     \[
+     f(\theta,\xi)=\cos(m\theta)T_k(\xi),
+     \]
+     verify `dtheta` and `dxi` exactly.
+
+2. **Orthogonality / Parseval test**
+   - Verify resolved quadrature norms:
+     \[
+     \int_0^{2\pi}\cos^2(m\theta)d\theta=\pi,
+     \qquad m>0.
+     \]
+
+3. **FFT parity test**
+   - If FFT path and direct matrix path both exist, compare transforms for random resolved coefficients.
+
+4. **Aliasing test**
+   - Show unresolved modes alias as expected and oversampling prevents contamination in nonlinear products.
+
+---
+
+## 14. Geometry and metric tests
+
+### 14.1 Straight cylinder
+
+Use:
+
+\[
+r(s,\xi)=a\sqrt{s},\qquad z=L\xi.
+\]
+
+Exact:
+
+\[
+J=\frac{a^2L}{2},\qquad
+V=2\pi L a^2.
+\]
+
+Verify:
+
+- `sqrtg`.
+- metric entries.
+- physical volume.
+- no negative Jacobian.
+- endpoint handling.
+- axis treatment.
+
+### 14.2 Flared polynomial tube
+
+Use:
+
+\[
+r(s,\xi)=\sqrt{s}\,a(1+\epsilon\xi^2),\qquad z=L\xi.
+\]
+
+Exact quantities:
+
+\[
+r_s=\frac{a(1+\epsilon\xi^2)}{2\sqrt{s}},
+\]
+
+\[
+r_\xi=2a\epsilon\xi\sqrt{s},
+\]
+
+\[
+J=r r_s L.
+\]
+
+Verify metric, Jacobian, and volume:
+
+\[
+V=\pi L\int_{-1}^{1}a^2(1+\epsilon\xi^2)^2 d\xi.
+\]
+
+### 14.3 Nonaxisymmetric boundary
+
+Use:
+
+\[
+r_b(\theta,\xi)=r_0(1+a_2\xi^2)(1+\epsilon\cos 2\theta).
+\]
+
+Verify:
+
+- side boundary exactness;
+- periodic theta closure;
+- metric finite positive for small `epsilon`;
+- symmetry identities.
+
+---
+
+## 15. Field identity and energy tests
+
+### 15.1 Discrete divergence-free identity
+
+For random smooth `lambda`:
+
+\[
+J B^\theta=I'(s)-\lambda_\xi,
+\qquad
+J B^\xi=\Psi'(s)+\lambda_\theta.
+\]
+
+Verify:
+
+\[
+\partial_\theta(JB^\theta)+\partial_\xi(JB^\xi)=0.
+\]
+
+This is a required core test.
+
+### 15.2 Lambda gauge invariance
+
+Add `c(s)` to `lambda`. Verify no change in:
+
+- `B^theta`;
+- `B^xi`;
+- `Bmag`;
+- `W_B`;
+- residuals.
+
+### 15.3 Constant axial field in a cylinder
+
+For `r = a sqrt(s)`, `z = L xi`, `lambda = 0`, `I' = 0`, choose `Psi'(s)` such that `B_z = B0`. Verify:
+
+\[
+\mathbf B=B_0\hat{\mathbf z},
+\]
+
+\[
+W_B=\frac{B_0^2}{2\mu_0}V.
+\]
+
+### 15.4 Pressure energy analytic test
+
+For cylinder and:
+
+\[
+p(s)=p_0(1-s),
+\]
+
+verify:
+
+\[
+W_p=\frac{1}{\gamma-1}\int p(s)J\,ds\,d\theta\,d\xi.
+\]
+
+### 15.5 Slender mirror ratio test
+
+For a slender tube with slowly varying area:
+
+\[
+A(\xi)\propto r_b(\xi)^2,
+\]
+
+check:
+
+\[
+B(\xi)\propto \frac{1}{A(\xi)}.
+\]
+
+Verify computed mirror ratio agrees with the area-ratio prediction in the small-slope limit.
+
+### 15.6 Gradient check
+
+For a small state, compare JAX gradients of `W` with central finite differences for selected degrees of freedom.
+
+### 15.7 Hessian symmetry
+
+For small states, test:
+
+\[
+u^T H v = v^T H u.
+\]
+
+This is important because the solver is variational.
+
+---
+
+## 16. Method of manufactured solutions (MMS)
+
+MMS should be a first-class validation lane. The goal is to verify geometry, field, energy, residual, constraints, and solver behavior against exact smooth solutions that are not limited to trivial cylinders.
+
+### 16.1 General MMS principle
+
+Choose smooth exact fields:
+
+\[
+a_*(s,\theta,\xi),\qquad \lambda_*(s,\theta,\xi),
+\]
+
+that satisfy boundary and gauge constraints. Compute the residual that the unforced ideal-MHD energy would produce:
+
+\[
+R_a^*=\left.\frac{\delta W}{\delta a}\right|_{a_*,\lambda_*},
+\qquad
+R_\lambda^*=\left.\frac{\delta W}{\delta\lambda}\right|_{a_*,\lambda_*}.
+\]
+
+Define a manufactured objective:
+
+\[
+W_{MMS}=W-\langle R_a^*, a\rangle - \langle R_\lambda^*, \lambda\rangle.
+\]
+
+Then the exact manufactured solution is stationary:
+
+\[
+\left.\frac{\delta W_{MMS}}{\delta a}\right|_{a_*,\lambda_*}=0,
+\qquad
+\left.\frac{\delta W_{MMS}}{\delta\lambda}\right|_{a_*,\lambda_*}=0.
+\]
+
+This approach is natural in a variational JAX code because source terms can be generated with automatic differentiation at the exact manufactured state.
+
+### 16.2 Axisymmetric MMS cases
+
+Case A: polynomial flared tube.
+
+\[
+a_*(s,\xi)=a_0(1+\epsilon\xi^2)(1+\alpha s(1-s)(1-\xi^2)).
+\]
+
+\[
+\lambda_*(s,\xi)=0.
+\]
+
+Case B: nonzero lambda.
+
+\[
+a_*(s,\xi)=a_0(1+\epsilon\xi^2),
+\]
+
+\[
+\lambda_*(s,\xi)=\lambda_0 s(1-s)(1-\xi^2)\xi.
+\]
+
+Case C: finite pressure.
+
+\[
+p(s)=p_0(1-s)^2.
+\]
+
+### 16.3 3D MMS cases
+
+Use:
+
+\[
+a_*(s,\theta,\xi)=a_0(1+\epsilon\xi^2)
+\left[1+\delta s(1-s)(1-\xi^2)\cos(2\theta)\right].
+\]
+
+\[
+\lambda_*(s,\theta,\xi)=\lambda_0s(1-s)(1-\xi^2)\sin(\theta)T_3(\xi).
+\]
+
+Tests:
+
+1. exact state has residual equal to zero in manufactured problem;
+2. perturbed initial condition converges back to exact solution;
+3. convergence rate improves with `Nxi`, `Ntheta`, `ns`;
+4. finite-difference and JAX-generated manufactured sources agree.
+
+### 16.4 MMS implementation files
+
+```text
+vmec_jax/mirror/kernels/manufactured.py
+vmec_jax/mirror/validation/manufactured.py
+tests/mirror/test_mirror_manufactured_solutions.py
+```
+
+Public helper:
+
+```python
+make_mms_case(name: str, resolution: MirrorResolution) -> ManufacturedMirrorCase
+```
+
+MMS artifacts should store exact solution formulas, parameters, and reference residuals in JSON or small NetCDF files.
+
+---
+
+## 17. Fixed-boundary solver tests
+
+### 17.1 Zero-pressure cylinder stationarity
+
+- Boundary: cylinder.
+- Pressure: zero.
+- Initial state: exact cylinder plus small admissible perturbation.
+- Expected: solver returns to cylinder; residual norm reaches tolerance; energy decreases.
+
+### 17.2 Zero-pressure flared tube relaxation
+
+- Boundary: flared polynomial tube.
+- Pressure: zero.
+- Initial state: perturbed nested surfaces.
+- Expected: no negative Jacobian; residual decreases; solution smooth.
+
+### 17.3 Finite-pressure continuation
+
+- Boundary: flared tube.
+- Pressure: `p0(1-s)`.
+- Continuation: `[0, 0.1, 0.25, 0.5, 0.75, 1]`.
+- Expected: each stage converges or improves residual; geometry remains finite-positive; final state reproducible.
+
+### 17.4 Resolution convergence
+
+Solve the same smooth case at increasing resolution:
+
+```text
+(ns, nxi, mpol) = (9, 17, 0), (17, 33, 0), (33, 65, 0)
+```
+
+Expected:
+
+- energy converges;
+- residual converges;
+- `Bmag` profile converges;
+- Chebyshev spectra decay rapidly for smooth cases.
+
+### 17.5 Nonaxisymmetric perturbation decay
+
+- Axisymmetric boundary.
+- Initial condition with small `m=1` or `m=2` perturbation.
+- Expected: perturbation decays if not supported by boundary or physics.
+
+### 17.6 Fixed nonaxisymmetric boundary
+
+- Boundary: `m=2` ellipticity varying in `xi`.
+- Expected: boundary exactly preserved; interior surfaces smooth; residual finite and convergent.
+
+---
+
+## 18. WHAM and literature-anchored tests
+
+### 18.1 WHAM coil fixture
+
+Convert the uploaded `coil_model_WHAM-2.txt` script to a fixture without requiring plotting at test time.
+
+Fixture metadata:
+
+```json
+{
+  "source": "coil_model_WHAM-2.txt",
+  "reference": "Radovinsky et al., Design of High Field HTS Coils for Magnetic Mirror, IEEE TAS 2023",
+  "coil_centers_z_m": [-0.98, 0.98],
+  "nz": 8,
+  "nr": 310,
+  "dz_HF_m": 0.1144,
+  "r_in_HF_m": 0.043,
+  "r_out_HF_m": 0.365,
+  "I_coil_A": 2000 * 17.0 / 17.51
+}
+```
+
+Tests:
+
+1. Build the coil fixture deterministically.
+2. If `magpylib` is installed, compare pure-JAX or project coil evaluator to `magpylib` for:
+   - `B_z(0,z)`;
+   - `B_r(r,z)`;
+   - `B_z(r,z)`;
+   - `|B|(r,z)`;
+   - on-axis mirror ratio.
+3. Save a small reference table for core CI so tests do not require `magpylib`.
+4. Verify symmetry about `z=0`.
+5. Verify coil centers match WHAM physics-basis article values `z = +/- 98 cm`.
+
+### 18.2 Boundary-from-vacuum-flux initialization
+
+Use the WHAM vacuum field only to generate initial fixed boundaries:
+
+```python
+boundary = mirror_boundary_from_vacuum_flux_tube(wham_field, psi_value, z_grid)
+```
+
+Tests:
+
+1. boundary is positive;
+2. boundary is symmetric in `xi` for symmetric coils;
+3. interpolation is resolution-consistent;
+4. smoothing/filtering preserves endpoints;
+5. generated `r_b(xi)` produces expected approximate mirror-ratio trend.
+
+### 18.3 WHAM finite-beta qualitative test
+
+Using a WHAM-inspired fixed boundary and scalar pressure:
+
+1. solve low beta;
+2. solve higher beta;
+3. verify diamagnetic response changes `Bmag` and mirror-ratio diagnostics smoothly;
+4. do not claim WHAM experimental predictive validity in this scalar-pressure fixed-boundary phase.
+
+### 18.4 Future anisotropic anchor
+
+Add a skipped or xfailed design test for anisotropic closure API:
+
+```python
+closure = AnisotropicMirrorClosure(p_parallel=lambda s, B: ..., p_perp=lambda s, B: ...)
+```
+
+This protects the API shape for later WHAM-relevant anisotropy without claiming implementation now.
+
+---
+
+## 19. Code-to-code parity tests
+
+### 19.1 DESC Fourier-Chebyshev scalar parity
+
+Optional `@pytest.mark.desc` test:
+
+1. Create scalar fields represented with Fourier in `theta` and Chebyshev in `xi`.
+2. Evaluate with `vmec_jax.mirror` transforms.
+3. Evaluate equivalent expressions with DESC basis utilities where applicable.
+4. Compare values and derivatives.
+
+Use DESC source/docs as the basis implementation reference, not as an equilibrium comparison.
+
+### 19.2 DESC PR #2012 compatibility-style test
+
+If PR #2012 or a similar feature lands in DESC, add a parity test for build/fit/evaluate semantics:
+
+```python
+field = FourierChebyshevField(...)
+field.build(eq_or_grid)
+fit = field.fit(...)
+field.evaluate(...)
+```
+
+For `vmec_jax`, mirror field interpolation should expose similar build/evaluate separations.
+
+### 19.3 Pleiades optional comparisons
+
+Optional `@pytest.mark.pleiades`:
+
+1. Compare vacuum coil fields for WHAM-like coils.
+2. Compare axisymmetric field-line/flux-tube shape diagnostics.
+3. Compare simple scalar-pressure or anisotropic literature cases only as validation data, not as the method to be implemented.
+
+### 19.4 GVEC mapping-inspired tests
+
+Optional mapping tests:
+
+1. Verify mirror geometry kernels can be expressed as a general mapping, not only hard-coded `r,z`.
+2. Use simple generalized coordinate maps to compare metric/Jacobian identities.
+3. Keep full GVEC code comparison optional.
+
+### 19.5 Toroidal-limit sanity check
+
+Construct a long weakly varying tube and compare local metric/field pieces with a large-aspect-ratio toroidal `vmec_jax` case away from the artificial seam. This is a sanity check only and must not be described as topological equivalence.
+
+---
+
+## 20. Boozer-like tests
+
+1. **Straight cylinder**
+   - Constant axial field.
+   - Expected mirror-Boozer transform is identity up to gauge.
+
+2. **Constant-pitch cylinder**
+   - Set `I'(s) != 0`, `lambda = 0`.
+   - Expected field-line pitch is analytic.
+
+3. **Axisymmetric mirror**
+   - `|B|` in mirror-Boozer-like coordinates should have only `m=0` Fourier content.
+
+4. **Mirror ratio consistency**
+   - Compute mirror ratio from physical grid and from `mbmn` output.
+   - Results must agree.
+
+5. **Endpoint behavior**
+   - Verify field-line integration reaches expected end plane and does not wrap around.
+
+---
+
+## 21. Plotting, CLI, and documentation tests
+
+### 21.1 CLI tests
+
+1. `vmec mirror examples/mirror/input.fixed_cylinder.toml` produces `mout_fixed_cylinder.nc`.
+2. `vmec --plot mout_fixed_cylinder.nc` generates expected figures.
+3. `vmec --plot wout_existing.nc` remains unchanged.
+4. `vmec --mirror-booz mout_fixed_cylinder.nc` writes `mbmn_fixed_cylinder.nc` after that feature lands.
+5. `booz_xform_jax` path rejects `mout` with a helpful error.
+
+### 21.2 Plot content tests
+
+Do not only check files exist. Extract arrays used for plotting and test:
+
+1. boundary curve equals stored `r_b`;
+2. symmetric input produces symmetric plots;
+3. `Bmax >= Bmin > 0`;
+4. no negative radius;
+5. `min(sqrtg)` in plot equals stored diagnostic;
+6. residual history matches solver trace.
+
+### 21.3 Docs build tests
+
+Update docs and run:
+
+```bash
+SPHINX_FAST=1 LC_ALL=C.UTF-8 LANG=C.UTF-8 python -m sphinx -W -j auto -b html docs docs/_build/html
+```
+
+Add normal docs build in optional docs CI.
+
+---
+
+## 22. Optimization tests
+
+### 22.1 Boundary-parameter gradient test
+
+Parameterize:
+
+\[
+r_b(\xi;p)=r_0[1+p(1-\xi^2)].
+\]
+
+Run a tiny solve and compare JAX or implicit gradient of mirror ratio with central finite differences.
+
+### 22.2 Target mirror-ratio optimization
+
+Use:
+
+\[
+r_b(\xi)=r_0(1+a\xi^2+b\xi^4).
+\]
+
+Optimize `a,b` to hit target `R_m`. Verify:
+
+1. objective decreases;
+2. final mirror ratio within tolerance;
+3. boundary remains positive;
+4. solver artifacts reproduce results.
+
+### 22.3 Pressure sensitivity
+
+Differentiate final diagnostics with respect to `p0`. Compare with central finite differences under fixed continuation policy.
+
+---
+
+## 23. Regression tests
+
+Create deterministic compact baselines for:
+
+1. zero-pressure cylinder;
+2. zero-pressure flared tube;
+3. finite-pressure flared tube;
+4. WHAM-inspired fixed boundary;
+5. nonaxisymmetric fixed boundary;
+6. manufactured 3D case.
+
+Store compressed reference diagnostics instead of large NetCDF when possible:
+
+```json
+{
+  "volume": ...,
+  "energy_B": ...,
+  "energy_p": ...,
+  "min_jacobian": ...,
+  "max_B": ...,
+  "min_B": ...,
+  "mirror_ratio": ...,
+  "residual_final": ...,
+  "B_axis_sample": [...],
+  "r_boundary_sample": [...]
+}
+```
+
+NetCDF reference files should be small and only used where schema/I/O regression is being tested.
+
+---
+
+## 24. Performance and benchmark tests
+
+### 24.1 Transform scaling
+
+Benchmark:
+
+```text
+Ntheta = 1, 8, 16, 32
+Nxi = 17, 33, 65, 129
+ns = 9, 17, 33
+```
+
+Track:
+
+1. CGL derivative matrix construction time;
+2. geometry kernel execution time;
+3. field kernel execution time;
+4. energy and residual time;
+5. gradient time;
+6. JIT compile vs warm execution time.
+
+### 24.2 Allocation discipline
+
+Add tests or diagnostics to catch accidental dense tensors such as:
+
+```text
+(ns * ntheta * nxi, nmodes_theta * nmodes_xi)
+```
+
+for production-sized cases. Dense Vandermonde is okay for tiny tests, not for production paths.
+
+### 24.3 JIT cache stability
+
+Call the same kernel/solve twice. The second call should not rebuild static matrices or trigger unexpected recompilation for identical static shapes.
+
+### 24.4 CI strategy
+
+Core CI should run:
+
+1. CGL unit tests;
+2. geometry analytic tests;
+3. divergence-free identity;
+4. energy analytic tests;
+5. tiny fixed-boundary solve;
+6. I/O schema test;
+7. one plot-data test.
+
+Optional markers should cover large convergence, WHAM/magpylib, Pleiades, DESC, and GPU benchmarks.
+
+---
+
+## 25. Step-by-step implementation plan
+
+### PR M0: plan and documentation skeleton
+
+Files:
+
+```text
+plan_mirror.md
+docs/mirror/index.rst
+docs/mirror/overview.rst
+```
+
+Tasks:
+
+1. Commit this plan.
+2. Add docs stub linking to this plan but marking feature as planned/experimental.
+3. Add no runtime behavior yet.
+
+Validation:
+
+```bash
+python -m ruff check docs/conf.py
+SPHINX_FAST=1 LC_ALL=C.UTF-8 LANG=C.UTF-8 python -m sphinx -W -j auto -b html docs docs/_build/html
+```
+
+### PR M1: mirror package skeleton and Chebyshev core
+
+Files:
+
+```text
+vmec_jax/mirror/__init__.py
+vmec_jax/mirror/api.py
+vmec_jax/mirror/core/grids.py
+vmec_jax/mirror/core/basis.py
+vmec_jax/mirror/kernels/chebyshev.py
+vmec_jax/mirror/kernels/fourier.py
+tests/mirror/test_chebyshev_lobatto.py
+tests/mirror/test_theta_fourier_basis.py
+```
+
+Tasks:
+
+1. Add CGL nodes in increasing public order.
+2. Add first derivative matrix.
+3. Add Clenshaw--Curtis weights.
+4. Add Fourier theta basis and derivatives.
+5. Add cached `MirrorGrid`.
+6. Add exactness, quadrature, and convergence tests.
+
+### PR M2: axisymmetric geometry kernels
+
+Files:
+
+```text
+vmec_jax/mirror/core/state.py
+vmec_jax/mirror/core/boundary.py
+vmec_jax/mirror/kernels/geometry.py
+vmec_jax/mirror/kernels/constraints.py
+tests/mirror/test_mirror_geometry_axisym.py
+```
+
+Tasks:
+
+1. Add `MirrorStateAxisym`.
+2. Add `MirrorBoundary` for cylinder and polynomial/flared boundaries.
+3. Add geometry evaluation.
+4. Add metrics and Jacobian.
+5. Add fixed boundary and endpoint projection.
+6. Add cylinder/flared analytic tests.
+
+### PR M3: magnetic field and energy
+
+Files:
+
+```text
+vmec_jax/mirror/core/profiles.py
+vmec_jax/mirror/kernels/fields.py
+vmec_jax/mirror/kernels/energy.py
+vmec_jax/mirror/kernels/residuals.py
+tests/mirror/test_mirror_field_identities.py
+tests/mirror/test_mirror_energy.py
+```
+
+Tasks:
+
+1. Add `PsiPrimeProfile`, `IPrimeProfile`, scalar `PressureProfile`.
+2. Add contravariant `B` kernels.
+3. Add `Bmag`, covariant/cartesian components.
+4. Add energy integrals.
+5. Add divergence-free, gauge-invariance, constant-field, and analytic energy tests.
+
+### PR M4: variational gradients and MMS
+
+Files:
+
+```text
+vmec_jax/mirror/kernels/forces.py
+vmec_jax/mirror/kernels/manufactured.py
+vmec_jax/mirror/validation/manufactured.py
+tests/mirror/test_mirror_forces_gradients.py
+tests/mirror/test_mirror_manufactured_solutions.py
+```
+
+Tasks:
+
+1. Add AD gradient wrappers for energy.
+2. Add residual projection.
+3. Add MMS source-term builder.
+4. Add gradient and Hessian symmetry tests.
+5. Add MMS exact-solution residual and convergence tests.
+
+### PR M5: fixed-boundary solver
+
+Files:
+
+```text
+vmec_jax/mirror/solvers/fixed_boundary/api.py
+vmec_jax/mirror/solvers/fixed_boundary/continuation.py
+vmec_jax/mirror/solvers/fixed_boundary/nonlinear.py
+vmec_jax/mirror/solvers/fixed_boundary/optimizers.py
+vmec_jax/mirror/solvers/fixed_boundary/diagnostics.py
+tests/mirror/test_mirror_fixed_boundary_axisym.py
+tests/mirror/test_mirror_convergence.py
+```
+
+Tasks:
+
+1. Add `run_mirror_fixed_boundary`.
+2. Add LBFGS/GD solve path.
+3. Add pressure continuation.
+4. Add resolution continuation.
+5. Add trace diagnostics.
+6. Add cylinder, flared, finite-pressure, and convergence tests.
+
+### PR M6: I/O and plotting
+
+Files:
+
+```text
+vmec_jax/mirror/io/schema.py
+vmec_jax/mirror/io/mout.py
+vmec_jax/mirror/plotting/geometry.py
+vmec_jax/mirror/plotting/bfield.py
+vmec_jax/mirror/plotting/diagnostics.py
+vmec_jax/mirror/plotting/export.py
+tests/mirror/test_mirror_io.py
+tests/mirror/test_mirror_plotting.py
+```
+
+Tasks:
+
+1. Add `mout_*.nc` schema.
+2. Add read/write roundtrip.
+3. Add plot-data helpers and PNG writing.
+4. Add CLI dispatch for `vmec --plot mout_*.nc`.
+5. Add I/O and plot numerical-content tests.
+
+### PR M7: WHAM fixture and examples
+
+Files:
+
+```text
+vmec_jax/mirror/validation/wham.py
+validation/mirror/wham_coils.json
+examples/mirror/fixed_cylinder.py
+examples/mirror/fixed_flared_tube.py
+examples/mirror/wham_vacuum_boundary.py
+tests/mirror/test_wham_magpylib_regression.py
+```
+
+Tasks:
+
+1. Convert uploaded `coil_model_WHAM-2.txt` into metadata and reusable fixture.
+2. Add optional `magpylib` comparison.
+3. Add pure stored reference arrays for core CI.
+4. Add examples.
+
+### PR M8: nonaxisymmetric fixed-boundary surfaces
+
+Files:
+
+```text
+vmec_jax/mirror/core/state.py
+vmec_jax/mirror/kernels/geometry.py
+vmec_jax/mirror/kernels/fourier.py
+tests/mirror/test_mirror_geometry_3d.py
+tests/mirror/test_mirror_fixed_boundary_3d.py
+```
+
+Tasks:
+
+1. Generalize axisymmetric state to nodal `theta` dependence.
+2. Enforce periodic theta and side boundary.
+3. Add `m>0` tests.
+4. Add nonaxisymmetric fixed-boundary solve.
+
+### PR M9: mirror-Boozer-like transform
+
+Files:
+
+```text
+vmec_jax/mirror/boozer/transform.py
+vmec_jax/mirror/boozer/spectra.py
+vmec_jax/mirror/boozer/fieldlines.py
+vmec_jax/mirror/boozer/io.py
+vmec_jax/mirror/plotting/boozer.py
+tests/mirror/test_mirror_boozer.py
+```
+
+Tasks:
+
+1. Implement straight-field-line transform.
+2. Add `mbmn_*.nc` output.
+3. Add identity and constant-pitch tests.
+4. Add mirror-ratio consistency tests.
+
+### PR M10: mirror optimization
+
+Files:
+
+```text
+vmec_jax/mirror/objectives/*.py
+vmec_jax/mirror/optimization/*.py
+examples/mirror/optimize_target_mirror_ratio.py
+tests/mirror/test_mirror_optimization.py
+```
+
+Tasks:
+
+1. Add mirror-ratio and B-well objectives.
+2. Add boundary parameter spaces.
+3. Add least-squares workflow.
+4. Add gradient and target-ratio optimization tests.
+
+### PR M11: fixed-boundary documentation completion
+
+Files:
+
+```text
+docs/mirror/index.rst
+docs/mirror/quickstart.rst
+docs/mirror/inputs.rst
+docs/mirror/outputs.rst
+docs/mirror/theory.rst
+docs/mirror/algorithms.rst
+docs/mirror/testing.rst
+docs/mirror/examples.rst
+docs/mirror/optimization.rst
+docs/mirror/boozer.rst
+docs/mirror/validation.rst
+docs/index.rst
+docs/references.rst
+docs/code_structure.rst
+docs/testing_strategy.rst
+```
+
+Tasks:
+
+1. Fully document fixed-boundary mirror input/output.
+2. Include equations and derivations.
+3. Include limitations.
+4. Include examples and plotting.
+5. Include test philosophy and validation table.
+6. Build docs with `-W`.
+
+### PR M12: free-boundary design skeleton only
+
+Files:
+
+```text
+vmec_jax/mirror/solvers/free_boundary/*.py
+docs/mirror/free_boundary.rst
+tests/mirror/test_mirror_free_boundary_interfaces.py
+```
+
+Tasks:
+
+1. Add interfaces and configuration only.
+2. No production free-boundary claim.
+3. Document PDE/spectral potential path.
+4. Add shape/unit tests only.
+
+---
+
+## 26. Documentation plan
+
+### 26.1 Add docs pages
+
+Add a new docs subtree:
+
+```text
+docs/mirror/index.rst
+docs/mirror/overview.rst
+docs/mirror/quickstart.rst
+docs/mirror/inputs.rst
+docs/mirror/outputs.rst
+docs/mirror/theory.rst
+docs/mirror/discretization.rst
+docs/mirror/algorithms.rst
+docs/mirror/fixed_boundary.rst
+docs/mirror/free_boundary_future.rst
+docs/mirror/boozer.rst
+docs/mirror/optimization.rst
+docs/mirror/validation.rst
+docs/mirror/testing.rst
+docs/mirror/examples.rst
+docs/mirror/api.rst
+```
+
+Update `docs/index.rst` under Physics and algorithms and User guide:
+
+```rst
+.. toctree::
+   :maxdepth: 2
+   :caption: Mirror geometries
+
+   mirror/index
+```
+
+For fast docs builds, keep mirror API autosummary optional if it slows CI.
+
+### 26.2 `docs/mirror/overview.rst`
+
+Explain:
+
+1. what a mirror geometry is;
+2. why toroidal Fourier boundary representations do not apply;
+3. what fixed boundary means for an open flux tube;
+4. what is implemented now and what is deferred.
+
+Include diagrams:
+
+- coordinate sketch `(s, theta, xi)`;
+- side boundary and open end planes;
+- nested flux tubes in `r-z`.
+
+### 26.3 `docs/mirror/theory.rst`
+
+Include derivations:
+
+1. coordinate mapping;
+2. metric and Jacobian;
+3. divergence-free `B` representation;
+4. energy functional;
+5. pressure model;
+6. gauge fixing;
+7. fixed-boundary variational conditions;
+8. relation to VMEC toroidal formulation;
+9. why Green's functions are not the equilibrium method here.
+
+### 26.4 `docs/mirror/discretization.rst`
+
+Explain:
+
+1. radial grid;
+2. Fourier theta basis;
+3. Chebyshev--Gauss--Lobatto axial grid;
+4. derivative matrices;
+5. Clenshaw--Curtis quadrature;
+6. resolution change;
+7. filtering and aliasing;
+8. node ordering conventions.
+
+Include a warning based on DESC PR #2194: CGL node ordering and resolution-change tests are critical.
+
+### 26.5 `docs/mirror/inputs.rst`
+
+Document TOML schema:
+
+- `[mirror]`
+- `[resolution]`
+- `[boundary]`
+- `[flux]`
+- `[pressure]`
+- `[solver]`
+- `[output]`
+
+Include full examples for cylinder, flared tube, and WHAM-inspired boundary.
+
+### 26.6 `docs/mirror/outputs.rst`
+
+Document `mout_*.nc` schema with:
+
+1. dimensions;
+2. variables;
+3. units;
+4. coordinate order;
+5. field component conventions;
+6. how it differs from `wout_*.nc`;
+7. how to plot and inspect.
+
+### 26.7 `docs/mirror/algorithms.rst`
+
+Document:
+
+1. fixed-boundary solve flow;
+2. continuation;
+3. optimizer choices;
+4. constraints and projections;
+5. diagnostics;
+6. derivative policies;
+7. failure modes and remedies.
+
+### 26.8 `docs/mirror/validation.rst`
+
+Include tables:
+
+| Test family | Purpose | Required? | Source anchor | Tolerance |
+|---|---|---:|---|---:|
+| CGL exactness | derivative/quadrature correctness | yes | Trefethen/DESC PR #2194 | near roundoff |
+| cylinder energy | analytic energy | yes | analytic | 1e-10 small case |
+| divergence-free identity | field representation | yes | VMEC-style contravariant B | 1e-10--1e-12 |
+| MMS | residual/solver correctness | yes | MMS methodology | convergence-based |
+| WHAM vacuum | fixture/parity | optional/core reduced | WHAM script, WHAM paper | documented |
+| DESC transform parity | transform parity | optional | DESC basis | documented |
+| Pleiades parity | mirror code comparison | optional | Pleiades | documented |
+
+### 26.9 `docs/mirror/testing.rst`
+
+Explain how to run:
+
+```bash
+pytest tests/mirror -q
+pytest tests/mirror -m "not magpylib and not pleiades and not desc" -q
+pytest tests/mirror -m magpylib -q
+pytest tests/mirror -m desc -q
+pytest tests/mirror -m full -q
+```
+
+### 26.10 `docs/mirror/examples.rst`
+
+Link examples:
+
+```text
+examples/mirror/fixed_cylinder.py
+examples/mirror/fixed_flared_tube.py
+examples/mirror/wham_vacuum_boundary.py
+examples/mirror/nonaxisymmetric_boundary.py
+examples/mirror/optimize_target_mirror_ratio.py
+```
+
+### 26.11 `docs/code_structure.rst`
+
+Update the code structure page to include the mirror package and to state:
+
+- mirror implementation lives under `vmec_jax/mirror/`;
+- new mirror code follows PR #20 package boundaries;
+- mirror I/O uses `mout`, not `wout`;
+- mirror plotting dispatches from `--plot` by output schema.
+
+### 26.12 `docs/references.rst`
+
+Add references to:
+
+- VMEC/STELLOPT docs;
+- DESC docs/source;
+- DESC PR #2012, #2194, #1508, #1893;
+- GVEC docs/JOSS paper;
+- WHAM physics-basis paper;
+- WHAM HTS coil design paper from uploaded script;
+- Pleiades docs;
+- VMEC++ numerics;
+- spectral methods references;
+- MMS references.
+
+---
+
+## 27. Example files to add
+
+```text
+examples/mirror/README.md
+examples/mirror/fixed_cylinder.py
+examples/mirror/fixed_flared_tube.py
+examples/mirror/wham_vacuum_boundary.py
+examples/mirror/nonaxisymmetric_boundary.py
+examples/mirror/optimize_target_mirror_ratio.py
+examples/mirror/inputs/fixed_cylinder.toml
+examples/mirror/inputs/fixed_flared_tube.toml
+examples/mirror/inputs/wham_vacuum_boundary.toml
+examples/mirror/inputs/nonaxisymmetric_boundary.toml
+examples/mirror/inputs/optimize_target_mirror_ratio.toml
+```
+
+Each example should:
+
+1. be runnable from a source checkout;
+2. save output into a user-selected directory;
+3. run at low resolution by default;
+4. show how to increase resolution;
+5. generate plots;
+6. mention limitations.
+
+---
+
+## 28. Acceptance criteria for fixed-boundary mirror MVP
+
+The feature should not be considered complete until all of these pass:
+
+1. CGL derivative and quadrature tests pass.
+2. Fourier-Chebyshev tensor derivative tests pass.
+3. Cylinder/flared geometry analytic tests pass.
+4. Divergence-free `B` identity passes.
+5. Constant-field energy test passes.
+6. Pressure-energy analytic test passes.
+7. JAX gradient vs central finite difference passes for small states.
+8. Hessian symmetry passes for small states.
+9. MMS residual and convergence tests pass.
+10. Zero-pressure cylinder fixed-boundary solve converges.
+11. Finite-pressure flared tube fixed-boundary solve converges with continuation.
+12. `mout_*.nc` read/write roundtrip passes.
+13. `vmec --plot mout_*.nc` produces numerical-content-validated plots.
+14. WHAM fixture metadata and core reference-field tests pass.
+15. Documentation builds with Sphinx `-W` in fast mode.
+16. No new root-level helper modules are added in violation of PR #20 naming rules.
+17. `import vmec_jax` remains fast and does not import optional mirror validation dependencies.
+
+---
+
+## 29. Known risks and mitigations
+
+### Risk: Chebyshev ringing near sharp expanders or walls
+
+Mitigation:
+
+- start with smooth fixed-boundary examples;
+- include spectral filters;
+- include multi-domain Chebyshev or B-spline abstraction as a planned second phase;
+- inspect Chebyshev spectra in plots and tests.
+
+### Risk: axis singularity
+
+Mitigation:
+
+- first axisymmetric state stores `a` with `r = sqrt(s) a`;
+- do not evaluate singular `r_s` at the axis naively;
+- add dedicated axis regularity tests;
+- later add Zernike-like or vector-basis regularization for 3D.
+
+### Risk: open-end boundary conditions are physically ambiguous
+
+Mitigation:
+
+- make end policy explicit in inputs and docs;
+- start with fixed end cross-sections;
+- add natural end conditions only after tests validate them;
+- do not overclaim end-loss physics.
+
+### Risk: Boozer terminology confusion
+
+Mitigation:
+
+- call it `mirror-Boozer-like` or `mirror straight-field-line` in docs;
+- do not run toroidal `booz_xform_jax` on `mout`;
+- document open-line differences clearly.
+
+### Risk: free-boundary scope creep
+
+Mitigation:
+
+- do fixed boundary first;
+- free-boundary files can exist as interface skeletons only after MVP;
+- no Green's-function equilibrium method;
+- future free boundary uses vacuum-region PDE/spectral potential and energy principle.
+
+### Risk: derivative overclaiming
+
+Mitigation:
+
+- follow PR #20 derivative-claim boundaries;
+- mark solve-through derivatives experimental until AD-vs-FD gates pass;
+- promote only pure kernels and validated fixed-branch derivatives.
+
+---
+
+## 30. Final design decisions
+
+1. Use `vmec_jax/mirror/` as a domain package, not flat root-level helper files.
+2. Use Chebyshev--Gauss--Lobatto nodes in axial `xi` for the first implementation.
+3. Store axial dependence nodally at first; add coefficient transforms later.
+4. Use Fourier in `theta`, not in `xi`.
+5. Use VMEC-like radial finite differences first.
+6. Use `r = sqrt(s) a` for first axisymmetric regularity.
+7. Use a divergence-free contravariant field representation with `lambda`.
+8. Use variational energy/residual solve, not Grad--Shafranov or Green's functions.
+9. Add scalar pressure first, anisotropic API later.
+10. Add fixed boundary first, free boundary later.
+11. Use `mout_*.nc` mirror-native output.
+12. Make `vmec --plot` dispatch seamlessly for `mout`.
+13. Add mirror-specific straight-field-line / Boozer-like transform after fixed-boundary output is stable.
+14. Use WHAM/magpylib/Pleiades/DESC/GVEC as validation and design anchors, not as replacement solvers.
+15. Treat tests as scientific verification gates: analytic, manufactured, parity, convergence, regression, and benchmark tests.

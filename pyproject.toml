@@ -68,6 +68,10 @@ markers = [
   "full: slower/full-physics tests; fetched-asset rows require tools/fetch_assets.py",
   "py311_coverage_only: expensive physics/numerics gates run in the Python 3.11 coverage lane and are skipped in compatibility-only CI lanes",
   "py311_slow_coverage: expensive physics/numerics gates split into a separate Python 3.11 coverage shard and skipped in core/compatibility CI lanes",
+  "mirror: tests for open-ended mirror geometry backend",
+  "magpylib: optional mirror tests requiring magpylib",
+  "pleiades: optional mirror tests requiring Pleiades",
+  "desc: optional mirror tests comparing against DESC",
 ]
 
 [tool.ruff]

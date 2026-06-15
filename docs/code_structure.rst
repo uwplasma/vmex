@@ -27,6 +27,10 @@ Top-level package layout (selected):
   objects, objective tuples, continuation stages, and example workflow helpers
 - ``vmec_jax/qi_diagnostics.py``: smooth and legacy QI diagnostics, seed
   ranking metadata, mirror/elongation gates, and acceptance annotations
+- ``vmec_jax/mirror/``: experimental open-ended mirror geometry domain package;
+  first phases keep grids, bases, kernels, solvers, I/O, plotting, validation,
+  and optimization under this package rather than adding root-level
+  ``mirror_*`` helpers
 - ``vmec_jax/plotting.py``: VMEC-style geometry, ``|B|`` contour, Boozer-grid,
   objective-history, and publication-panel plotting helpers
 - ``vmec_jax/wout.py``: minimal ``wout_*.nc`` reader for regression
