@@ -15,10 +15,12 @@ future solver:
 - Chebyshev-Gauss-Lobatto nodes, differentiation matrices, interpolation, modal
   filtering, and Clenshaw-Curtis quadrature;
 - uniform-theta Fourier grids, derivatives, and quadrature;
+- axisymmetric fixed side boundaries, state projection, metric and Jacobian
+  kernels for straight-axis cylinder/flared tubes;
 - focused tests for node ordering, polynomial exactness, interpolation, filtering,
-  and theta orthogonality.
+  theta orthogonality, and analytic axisymmetric geometry.
 
-Later phases add axisymmetric geometry, the divergence-free contravariant field
-representation, variational energy and residuals, fixed-boundary solves, mirror
-native ``mout`` output, plotting, WHAM-inspired validation, nonaxisymmetric
-boundaries, mirror straight-field-line diagnostics, and optimization workflows.
+Later phases add the divergence-free contravariant field representation,
+variational energy and residuals, fixed-boundary solves, mirror native ``mout``
+output, plotting, WHAM-inspired validation, nonaxisymmetric boundaries, mirror
+straight-field-line diagnostics, and optimization workflows.

@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .core.basis import ChebyshevLobattoBasis, ThetaFourierBasis
+from .core.boundary import MirrorBoundary
 from .core.grids import MirrorGrid, make_mirror_grid
+from .core.state import MirrorStateAxisym
 
 
 @dataclass(frozen=True)
@@ -44,9 +46,11 @@ class MirrorConfig:
 
 __all__ = [
     "ChebyshevLobattoBasis",
+    "MirrorBoundary",
     "MirrorConfig",
     "MirrorGrid",
     "MirrorResolution",
+    "MirrorStateAxisym",
     "ThetaFourierBasis",
     "make_mirror_grid",
 ]
