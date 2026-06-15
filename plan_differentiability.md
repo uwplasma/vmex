@@ -1828,3 +1828,72 @@ Completion:
 - Free-boundary adjoint monolith reduction: 30%.
 - Driver workflow decomposition: 35%.
 - WOUT diagnostic/profile decomposition: 22%.
+
+## 2026-06-15 Source Namespace Gate and First Solver Package Move
+
+Commit: `62fabc8` plus follow-up package migration on
+`codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added a source-health root namespace gate that counts root-level
+   helper-prefix files (`solve_`, `driver_`, `free_boundary_`, `wout_`) and
+   fails CI if the current baseline grows.
+2. Added focused unit tests for the new namespace metrics and baseline-aware
+   failure mode.
+3. Wired the namespace gate into the CI parity-smoke job so future refactor
+   work cannot add more root-package sprawl unnoticed.
+4. Created the first domain package seam,
+   `vmec_jax.solvers.fixed_boundary.scan`, and moved the VMEC2000-style scan
+   helpers into that package.
+5. Updated `vmec_jax.solve` to import the fixed-boundary scan helpers from the
+   new domain package directly.
+6. Preserved the old root-level `solve_scan_*` import paths as thin
+   compatibility shims, including private diagnostic hooks used by internal
+   tests.
+
+Results obtained:
+
+- The production solve path now uses the package-oriented fixed-boundary scan
+  namespace.
+- The current root helper-prefix baseline is frozen at 69 files; future CI can
+  ratchet this downward as shims are retired.
+- The package move made no algorithmic changes and preserved the existing
+  scan-loop test surface.
+
+Tests and commands run:
+
+- `python -m ruff check tools/diagnostics/source_health.py tests/test_source_health_diagnostics.py`
+- `python -m pytest -q tests/test_source_health_diagnostics.py -q`
+- `python tools/diagnostics/source_health.py --top 20 --max-root-helper-prefix-files 69`
+- `python -m pytest -q tests/test_solve_scan_output.py tests/test_solve_scan_output_edge_cases_more_coverage.py tests/test_solve_scan_resume_state.py tests/test_solve_scan_time_control.py tests/test_solve_scan_payload_helpers.py tests/test_solve_scan_math_helpers.py tests/test_solve_scan_planning_helpers.py tests/test_solve_scan_debug_helpers.py tests/test_scan_helper_edge_gates.py tests/test_performance_wave13_coverage.py tests/test_required_helper_coverage_margin.py -q`
+- `python -m ruff check vmec_jax/solve.py vmec_jax/solve_scan_*.py vmec_jax/solvers/fixed_boundary/scan tests/test_solve_scan_output.py tests/test_solve_scan_time_control.py tests/test_solve_scan_math_helpers.py tests/test_solve_scan_payload_helpers.py tests/test_solve_scan_planning_helpers.py tests/test_solve_scan_debug_helpers.py`
+- `python tools/diagnostics/ci_core_bucket_args.py driver-solve-discrete > /tmp/vmec_jax-driver-solve-discrete.txt && JAX_ENABLE_X64=1 VMEC_JAX_SKIP_PY311_COVERAGE_ONLY=1 xargs pytest -q -n 4 -m "not full and not vmec2000 and not simsopt" --durations=30 --cov=vmec_jax --cov-report= < /tmp/vmec_jax-driver-solve-discrete.txt`
+
+Best next steps:
+
+1. Ratchet the namespace gate downward only after updating downstream imports
+   and deleting compatibility shims in a controlled tranche.
+2. Continue package moves by migrating either the remaining fixed-boundary
+   residual-iteration helper group into `vmec_jax.solvers.fixed_boundary` or
+   the free-boundary trace helper group into `vmec_jax.solvers.free_boundary`.
+3. Add source-health reporting for large functions and import-time optional
+   dependency loading before moving hot kernels.
+4. Keep behavior changes separate from package moves so VMEC parity failures
+   are easy to bisect.
+
+User decisions needed:
+
+No immediate decision.  PR #20 remains draft and all work stays on the same
+branch.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 5%.
+- Differentiability/refactor implementation: 94.5%.
+- Solver monolith reduction: 72%.
+- Free-boundary adjoint monolith reduction: 30%.
+- Driver workflow decomposition: 35%.
+- WOUT diagnostic/profile decomposition: 22%.

@@ -288,7 +288,7 @@ from .solve_metric_dump_helpers import (
     maybe_dump_precond_inputs as _maybe_dump_precond_inputs,
     maybe_dump_xc as _maybe_dump_xc,
 )
-from .solve_scan_resume_helpers import (
+from .solvers.fixed_boundary.scan.resume import (
     ScanResumeInitialFields as _ScanResumeInitialFields,  # noqa: F401 - re-exported for existing internal tests/importers.
     build_traced_scan_resume_state as _build_traced_scan_resume_state,
     initialize_scan_resume_state as _initialize_scan_resume_state,
@@ -297,7 +297,7 @@ from .solve_residual_objective_helpers import (
     assemble_residual_objective_terms as _assemble_residual_objective_terms,
     residual_objective_vector as _residual_objective_vector,
 )
-from .solve_scan_output import (
+from .solvers.fixed_boundary.scan.output import (
     postprocess_vmec2000_scan_result,
     unpack_vmec2000_scan_histories,
     vmec2000_scan_full_history_row,
@@ -306,7 +306,7 @@ from .solve_scan_output import (
     vmec2000_state_only_scan_diagnostics,
     vmec2000_traced_scan_diagnostics,
 )
-from .solve_scan_payload_helpers import (
+from .solvers.fixed_boundary.scan.payload import (
     ScanStepFields as _ScanStepFields,
     current_scan_payload as _current_scan_payload,
     mask_scan_restart_force_payload as _mask_scan_restart_force_payload,  # noqa: F401 - re-exported for internal tests/importers.
@@ -314,7 +314,7 @@ from .solve_scan_payload_helpers import (
     select_scan_force_payload as _select_scan_force_payload,
     select_scan_step_fields as _select_scan_step_fields,
 )
-from .solve_scan_math_helpers import (
+from .solvers.fixed_boundary.scan.math import (
     _hold_step as _scan_math_hold_step,
     _kernel_arrays_from_k as _scan_math_kernel_arrays_from_k,
     _no_restart_updates as _scan_math_no_restart_updates,
@@ -323,7 +323,7 @@ from .solve_scan_math_helpers import (
     _restart_updates as _scan_math_restart_updates,
     _state_jacobian as _scan_math_state_jacobian,
 )
-from .solve_scan_debug_helpers import (
+from .solvers.fixed_boundary.scan.debug import (
     _append_timecontrol_scan_trace_row,
     _emit_vmec2000_iter_row as _emit_scan_vmec2000_iter_row,
     _emit_scan_prints as _emit_scan_debug_prints,
@@ -331,7 +331,7 @@ from .solve_scan_debug_helpers import (
     _print_vmec2000_row as _print_scan_vmec2000_row,
     _record_scan_device_ready,
 )
-from .solve_scan_planning_helpers import (
+from .solvers.fixed_boundary.scan.planning import (
     apply_state_only_scan_options as _apply_state_only_scan_options,
     build_scan_timing_report as _build_scan_timing_report,
     build_vmec2000_scan_cache_key as _build_vmec2000_scan_cache_key,
@@ -346,7 +346,7 @@ from .solve_scan_planning_helpers import (
     scan_timing_enabled as _scan_timing_enabled,
     validate_vmec2000_scan_guards as _validate_vmec2000_scan_guards,
 )
-from .solve_scan_time_control import (
+from .solvers.fixed_boundary.scan.time_control import (
     ScanCheckpointResiduals,
     scan_checkpoint_update,
     scan_fallback_probe_update,
