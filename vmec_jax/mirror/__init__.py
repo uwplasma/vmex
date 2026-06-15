@@ -5,13 +5,16 @@ from .api import (
     IPrimeProfile,
     MirrorBoundary,
     MirrorConfig,
+    MirrorFixedBoundaryResult,
     MirrorGrid,
     MirrorResolution,
+    MirrorSolveOptions,
     MirrorStateAxisym,
     PressureProfile,
     PsiPrimeProfile,
     ThetaFourierBasis,
     make_mirror_grid,
+    run_mirror_fixed_boundary,
 )
 
 __all__ = [
@@ -19,11 +22,14 @@ __all__ = [
     "IPrimeProfile",
     "MirrorBoundary",
     "MirrorConfig",
+    "MirrorFixedBoundaryResult",
     "MirrorGrid",
     "MirrorResolution",
+    "MirrorSolveOptions",
     "MirrorStateAxisym",
     "PressureProfile",
     "PsiPrimeProfile",
     "ThetaFourierBasis",
     "make_mirror_grid",
+    "run_mirror_fixed_boundary",
 ]

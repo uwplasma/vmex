@@ -21,10 +21,12 @@ future solver:
   kernels, and magnetic/pressure energy integrals;
 - differentiable axisymmetric energy wrappers, projected residuals, and
   manufactured-solution source helpers;
+- an experimental fixed-boundary axisymmetric projected-gradient solve path
+  with pressure-continuation trace diagnostics;
 - focused tests for node ordering, polynomial exactness, interpolation, filtering,
   theta orthogonality, analytic axisymmetric geometry, field identities, and
   analytic energy, gradient checks, Hessian symmetry, and MMS stationarity.
 
-Later phases add fixed-boundary solves, mirror native ``mout`` output, plotting,
-WHAM-inspired validation, nonaxisymmetric boundaries, mirror straight-field-line
-diagnostics, and optimization workflows.
+Later phases add mirror native ``mout`` output, plotting, WHAM-inspired
+validation, nonaxisymmetric boundaries, mirror straight-field-line diagnostics,
+and optimization workflows.
