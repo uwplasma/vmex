@@ -2365,6 +2365,84 @@ Completion:
 - Driver workflow decomposition: 35%.
 - WOUT diagnostic/profile decomposition: 72%.
 
+## 2026-06-15 Function-Level Refactor Tranche: Driver Finish, Scan Runtime, Free-Boundary Gates
+
+Commit: pending function-level simplification tranche on
+`codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Extracted the CLI fixed-boundary finish policy from the nested
+   `run_fixed_boundary._maybe_finish_cli_fixed_boundary_run` closure into
+   `vmec_jax.drivers.finish`.
+2. Added `FixedBoundaryFinishContext` so the driver facade can pass its current
+   staged-solve policy and callbacks explicitly instead of keeping another large
+   nested closure in `driver.py`.
+3. Extracted optional VMEC2000 scan runtime hook resolution from `solve.py` into
+   `vmec_jax.solvers.fixed_boundary.scan.runtime`, keeping the traced scan
+   numerical update body local for now because the full `_advance_step` closure
+   still has a high-risk JAX/static-capture context.
+4. Added focused scan-runtime tests for quiet defaults and time-control dump
+   path resolution.
+5. Extracted same-branch free-boundary adjoint promotion/gate reports into
+   `vmec_jax.solvers.free_boundary.adjoint.gate_reports`, while keeping
+   `vmec_jax.free_boundary_adjoint` as the public compatibility facade and
+   preserving the conservative “branch-local, not arbitrary adaptive-controller
+   differentiation” metadata.
+6. Updated the code-structure docs for the new driver finish helper.
+
+Results obtained:
+
+- `driver.py` dropped from 2,953 to 2,572 lines.
+- `run_fixed_boundary` dropped from 2,587 to 2,205 lines.
+- `free_boundary_adjoint.py` dropped from 5,687 to 5,329 lines.
+- `solve.py` dropped from 10,119 to 10,075 lines.
+- Root helper-prefix count remains at 2, preserving the public facade floor.
+- The next safe major complexity target remains the VMEC2000 scan step, but the
+  traced `_advance_step` extraction should wait for a deliberately designed
+  context object because it currently closes over most of the solver state.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solve.py vmec_jax/solvers/fixed_boundary/scan/runtime.py tests/test_solve_scan_planning_helpers.py vmec_jax/driver.py vmec_jax/drivers/finish.py vmec_jax/free_boundary_adjoint.py vmec_jax/solvers/free_boundary/adjoint/gate_reports.py`
+- `python -m compileall -q vmec_jax/solve.py vmec_jax/solvers/fixed_boundary/scan/runtime.py vmec_jax/driver.py vmec_jax/drivers/finish.py vmec_jax/free_boundary_adjoint.py vmec_jax/solvers/free_boundary/adjoint/gate_reports.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_scan_planning_helpers.py tests/test_solve_scan_chunking.py tests/test_solve_more_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_scan_time_control.py tests/test_solve_scan_payload_helpers.py tests/test_solve_scan_math_helpers.py tests/test_solve_scan_planning_helpers.py tests/test_solve_scan_output.py tests/test_solve_scan_output_edge_cases_more_coverage.py tests/test_solve_scan_resume_state.py tests/test_solve_scan_debug_helpers.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_adjoint_helpers_unit.py tests/test_free_boundary_vacuum_adjoint.py::test_jax_visible_controller_plain_step_outputs_and_segment_validation tests/test_free_boundary_vacuum_adjoint.py::test_segmented_accepted_controller_matches_monolithic_scan_and_gradient -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_trace_fingerprint_detects_control_branch_changes tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_native_rejected_slot_same_branch_jvp_matches_complete_solve_fd tests/test_free_boundary_qs_coil_optimization_smoke.py::test_same_branch_report_profiles_nestor_and_rejected_slot -q`
+- `python -m pytest tests/test_driver_api.py tests/test_driver_api_finish_more_coverage.py tests/test_driver_wave12_coverage.py tests/test_wout_driver_wave10_coverage.py -k "finish or finisher" -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_policy_helpers.py tests/test_driver_api.py -q`
+- `python tools/diagnostics/ci_core_bucket_args.py driver-solve-discrete > /tmp/vmec_jax-driver-solve-discrete-refactor.txt && JAX_ENABLE_X64=1 VMEC_JAX_SKIP_PY311_COVERAGE_ONLY=1 xargs pytest -q -n 4 -m "not full and not vmec2000 and not simsopt" --durations=30 --cov=vmec_jax --cov-report= < /tmp/vmec_jax-driver-solve-discrete-refactor.txt`
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 20 --max-root-helper-prefix-files 2`
+- `SPHINX_FAST=1 python -m sphinx -T -b html docs docs/_build/html_fast`
+
+Best next steps:
+
+1. Commit and push this function-level refactor tranche.
+2. Re-check GitHub Actions for the pushed commit.
+3. Start the next tranche with a purpose-built VMEC2000 scan-step context under
+   `vmec_jax.solvers.fixed_boundary.scan`, but only after writing a focused
+   scan-step equivalence test because `_advance_step` is the most parity-sensitive
+   remaining fixed-boundary solver closure.
+4. Continue reducing large pure report/helper functions before moving additional
+   traced numerical bodies.
+
+User decisions needed:
+
+No immediate user decision. The work remains in draft PR #20, and the remaining
+public facade modules should not be moved without an explicit API migration.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 98%.
+- Differentiability/refactor implementation: 99.2%.
+- Solver monolith reduction: 86%.
+- Free-boundary adjoint monolith reduction: 63%.
+- Driver workflow decomposition: 80%.
+- WOUT diagnostic/profile decomposition: 72%.
+
 ## 2026-06-15 Free-Boundary Adjoint Helper Package Move
 
 Commit: branch-local free-boundary adjoint helper package tranche on

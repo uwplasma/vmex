@@ -15,7 +15,6 @@ implementation uses gradient descent with a simple backtracking line search.
 from __future__ import annotations
 
 from collections import OrderedDict
-from contextlib import nullcontext
 from functools import partial
 import time
 import os
@@ -336,7 +335,6 @@ from .solvers.fixed_boundary.scan.planning import (
     build_scan_timing_report as _build_scan_timing_report,
     build_vmec2000_scan_cache_key as _build_vmec2000_scan_cache_key,
     new_scan_timing_stats as _new_scan_timing_stats,
-    normalize_scan_print_mode as _normalize_scan_print_mode,
     resolve_scan_iteration_plan as _resolve_scan_iteration_plan,
     resolve_scan_preflight_iters as _resolve_scan_preflight_iters,
     resolve_scan_run_flags as _resolve_scan_run_flags,
@@ -345,6 +343,10 @@ from .solvers.fixed_boundary.scan.planning import (
     scan_jit_preflight_enabled as _scan_jit_preflight_enabled,
     scan_timing_enabled as _scan_timing_enabled,
     validate_vmec2000_scan_guards as _validate_vmec2000_scan_guards,
+)
+from .solvers.fixed_boundary.scan.runtime import (
+    resolve_scan_runtime_hooks as _resolve_scan_runtime_hooks,
+    scan_trace_context_or_null as _scan_trace_context_or_null,
 )
 from .solvers.fixed_boundary.scan.time_control import (
     ScanCheckpointResiduals,
@@ -2964,15 +2966,12 @@ def solve_fixed_boundary_residual_iter(
             scan_restart_payload_env=os.getenv("VMEC_JAX_SCAN_RESTART_PAYLOAD", ""),
         )
         scan_options = _apply_state_only_scan_options(scan_options, state_only_scan=bool(state_only_scan))
-        scan_print_env = scan_options.scan_print_env
-        scan_print_mode = scan_options.scan_print_mode
         scan_print_ordered = scan_options.scan_print_ordered
         scan_light = scan_options.scan_light
         scan_minimal = scan_options.scan_minimal
         scan_collect_scalars = scan_options.scan_collect_scalars
         scan_collect_print = scan_options.scan_collect_print
         scan_core = scan_options.scan_core
-        scan_trace = scan_options.scan_trace
         abort_scan_on_badjac = scan_options.abort_scan_on_badjac
         scan_use_precomputed = scan_options.scan_use_precomputed
         scan_use_lax_tridi = scan_options.scan_use_lax_tridi
@@ -2983,69 +2982,26 @@ def solve_fixed_boundary_residual_iter(
         # selected at Python level (Python loop), so this overhead is avoided.
         # Default: use restart payload on CPU only; skip it on GPU/TPU.
         scan_use_restart_payload = scan_options.scan_use_restart_payload
-        dump_timecontrol_scan = os.getenv("VMEC_JAX_DUMP_TIMECONTROL", "") not in ("", "0")
-        scan_timecontrol_callback = None
-        if dump_timecontrol_scan:
-            try:
-                from jax.experimental import io_callback as _io_callback
-
-                scan_timecontrol_callback = _io_callback
-            except Exception:
-                dump_timecontrol_scan = False
-                scan_timecontrol_callback = None
-        print_in_scan = scan_options.print_in_scan
+        scan_hooks = _resolve_scan_runtime_hooks(
+            dump_timecontrol_env=os.getenv("VMEC_JAX_DUMP_TIMECONTROL", ""),
+            dump_dir_env=os.getenv("VMEC_JAX_DUMP_DIR", ""),
+            print_in_scan=scan_options.print_in_scan,
+            scan_print_mode=scan_options.scan_print_mode,
+            scan_trace=scan_options.scan_trace,
+        )
+        dump_timecontrol_scan = scan_hooks.dump_timecontrol_scan
+        scan_timecontrol_callback = scan_hooks.timecontrol_callback
+        _timecontrol_path = scan_hooks.timecontrol_path
+        _io_callback = scan_hooks.io_callback
         chunked_print = scan_options.chunked_print
-        _jax_debug = None
-        _jax_debug_print = None
-        if print_in_scan:
-            try:
-                from jax import debug as _jax_debug
-
-                _jax_debug_print = _jax_debug.print
-            except Exception:
-                print_in_scan = False
-        if scan_print_mode == "io_callback":
-            try:
-                from jax.experimental import io_callback as _io_callback
-                scan_print_mode = _normalize_scan_print_mode(
-                    scan_print_mode=scan_print_mode,
-                    io_callback_available=True,
-                )
-            except Exception:
-                scan_print_mode = _normalize_scan_print_mode(
-                    scan_print_mode=scan_print_mode,
-                    io_callback_available=False,
-                )
-                _io_callback = None  # type: ignore[assignment]
-        scan_trace_ctx = None
-        if scan_trace:
-            try:
-                from jax import profiler as _jax_profiler
-
-                def scan_trace_ctx(label: str):  # type: ignore[misc]
-                    return _jax_profiler.TraceAnnotation(label)
-            except Exception:
-                scan_trace = False
-                scan_trace_ctx = None
+        print_in_scan = scan_hooks.print_in_scan
+        scan_print_mode = scan_hooks.scan_print_mode
+        scan_trace = scan_hooks.scan_trace
+        _jax_debug = scan_hooks.jax_debug
+        _jax_debug_print = scan_hooks.jax_debug_print
 
         def _maybe_trace(label: str):
-            if scan_trace and scan_trace_ctx is not None:
-                return scan_trace_ctx(label)
-            return nullcontext()
-
-        _timecontrol_path = None
-        if dump_timecontrol_scan:
-            dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "").strip()
-            if dump_dir:
-                try:
-                    _timecontrol_path = Path(dump_dir) / "time_control_trace.log"
-                except Exception:
-                    _timecontrol_path = None
-            else:
-                _timecontrol_path = None
-            if _timecontrol_path is None:
-                dump_timecontrol_scan = False
-                scan_timecontrol_callback = None
+            return _scan_trace_context_or_null(scan_hooks, label)
         if resume_state is not None:
             try:
                 iter_offset0 = int(resume_state.get("iter_offset", iter_offset0))
