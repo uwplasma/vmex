@@ -11,6 +11,7 @@ from .vmec_tomnsp import TomnspsRZL
 
 __all__ = [
     "ResidualForceMetricPayload",
+    "force_z_channel_square_sums",
     "metric_force_payload_after_edge_policy",
     "residual_force_gcx2_after_edge_policy",
     "residual_force_z_nan_guard",
@@ -25,6 +26,17 @@ class ResidualForceMetricPayload(NamedTuple):
     gcr2: Any
     gcz2: Any
     gcl2: Any
+
+
+def force_z_channel_square_sums(frzl: TomnspsRZL) -> tuple[Any, Any]:
+    """Return squared sums of symmetric/asymmetric Z-force channels."""
+
+    fzsc = jnp.asarray(frzl.fzsc)
+    fzsc2 = jnp.sum(fzsc * fzsc)
+    if frzl.fzcs is None:
+        return fzsc2, jnp.asarray(0.0, dtype=fzsc.dtype)
+    fzcs = jnp.asarray(frzl.fzcs)
+    return fzsc2, jnp.sum(fzcs * fzcs)
 
 
 def resolve_residual_force_mask_pack(

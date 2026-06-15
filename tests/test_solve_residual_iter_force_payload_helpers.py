@@ -6,6 +6,7 @@ import numpy as np
 
 from vmec_jax.solve_residual_iter_force_payload_helpers import (
     ResidualForceMetricPayload,
+    force_z_channel_square_sums,
     metric_force_payload_after_edge_policy,
     residual_force_gcx2_after_edge_policy,
     residual_force_z_nan_guard,
@@ -38,6 +39,32 @@ def _frzl(*, edge_z_nan: bool = False) -> TomnspsRZL:
         flcc=block(100.0),
         flss=block(110.0),
     )
+
+
+def test_force_z_channel_square_sums_handles_asymmetric_and_symmetric_only_payloads() -> None:
+    frzl = _frzl()
+
+    fzsc2, fzcs2 = force_z_channel_square_sums(frzl)
+
+    np.testing.assert_allclose(np.asarray(fzsc2), np.sum(frzl.fzsc * frzl.fzsc))
+    np.testing.assert_allclose(np.asarray(fzcs2), np.sum(frzl.fzcs * frzl.fzcs))
+
+    symmetric = TomnspsRZL(
+        frcc=frzl.frcc,
+        frss=None,
+        fzsc=frzl.fzsc,
+        fzcs=None,
+        flsc=frzl.flsc,
+        flcs=None,
+        frsc=None,
+        frcs=None,
+        fzcc=None,
+        fzss=None,
+        flcc=None,
+        flss=None,
+    )
+    _, fzcs2_symmetric = force_z_channel_square_sums(symmetric)
+    assert float(np.asarray(fzcs2_symmetric)) == 0.0
 
 
 def test_resolve_residual_force_mask_pack_defaults_to_metric_edge_policy() -> None:
