@@ -42,6 +42,42 @@ def test_source_health_fail_lines_is_opt_in(tmp_path: Path, capsys) -> None:
     assert "large.py" in capsys.readouterr().out
 
 
+def test_source_health_collects_largest_functions(tmp_path: Path) -> None:
+    source = tmp_path / "module.py"
+    source.write_text(
+        "\n".join(
+            [
+                "def small():",
+                "    return 1",
+                "",
+                "class Solver:",
+                "    def large(self):",
+                "        x = 1",
+                "        y = 2",
+                "        return x + y",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    stats = source_health.collect_function_stats([source])
+
+    assert [(item.qualified_name, item.lines) for item in stats] == [("Solver.large", 4), ("small", 2)]
+    report = source_health.format_function_health_report(stats, top=1, warn_lines=3)
+    assert "Function-length report" in report
+    assert "Solver.large" in report
+    assert "WARN" in report
+
+
+def test_source_health_fail_function_lines_is_opt_in(tmp_path: Path) -> None:
+    source = tmp_path / "module.py"
+    source.write_text("def long_enough():\n    x = 1\n    return x\n", encoding="utf-8")
+
+    assert source_health.main([str(tmp_path), "--fail-function-lines", "0"]) == 0
+    assert source_health.main([str(tmp_path), "--fail-function-lines", "3"]) == 1
+
+
 def test_source_health_root_namespace_counts_helper_prefixes(tmp_path: Path) -> None:
     package = tmp_path / "vmec_jax"
     package.mkdir()
