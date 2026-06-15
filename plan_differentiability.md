@@ -1851,6 +1851,8 @@ Steps taken:
 6. Preserved the old root-level `solve_scan_*` import paths as thin
    compatibility shims, including private diagnostic hooks used by internal
    tests.
+7. Added function-length diagnostics to the source-health tool so future
+   refactors can target oversized routines, not only oversized files.
 
 Results obtained:
 
@@ -1860,12 +1862,16 @@ Results obtained:
   ratchet this downward as shims are retired.
 - The package move made no algorithmic changes and preserved the existing
   scan-loop test surface.
+- The current largest function target is
+  `vmec_jax/solve.py:solve_fixed_boundary_residual_iter` at roughly 9k
+  physical lines, followed by `driver.py:run_fixed_boundary` and the nested
+  VMEC2000 scan loop.
 
 Tests and commands run:
 
 - `python -m ruff check tools/diagnostics/source_health.py tests/test_source_health_diagnostics.py`
 - `python -m pytest -q tests/test_source_health_diagnostics.py -q`
-- `python tools/diagnostics/source_health.py --top 20 --max-root-helper-prefix-files 69`
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 20 --max-root-helper-prefix-files 69`
 - `python -m pytest -q tests/test_solve_scan_output.py tests/test_solve_scan_output_edge_cases_more_coverage.py tests/test_solve_scan_resume_state.py tests/test_solve_scan_time_control.py tests/test_solve_scan_payload_helpers.py tests/test_solve_scan_math_helpers.py tests/test_solve_scan_planning_helpers.py tests/test_solve_scan_debug_helpers.py tests/test_scan_helper_edge_gates.py tests/test_performance_wave13_coverage.py tests/test_required_helper_coverage_margin.py -q`
 - `python -m ruff check vmec_jax/solve.py vmec_jax/solve_scan_*.py vmec_jax/solvers/fixed_boundary/scan tests/test_solve_scan_output.py tests/test_solve_scan_time_control.py tests/test_solve_scan_math_helpers.py tests/test_solve_scan_payload_helpers.py tests/test_solve_scan_planning_helpers.py tests/test_solve_scan_debug_helpers.py`
 - `python tools/diagnostics/ci_core_bucket_args.py driver-solve-discrete > /tmp/vmec_jax-driver-solve-discrete.txt && JAX_ENABLE_X64=1 VMEC_JAX_SKIP_PY311_COVERAGE_ONLY=1 xargs pytest -q -n 4 -m "not full and not vmec2000 and not simsopt" --durations=30 --cov=vmec_jax --cov-report= < /tmp/vmec_jax-driver-solve-discrete.txt`
