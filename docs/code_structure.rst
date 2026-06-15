@@ -138,10 +138,10 @@ Top-level package layout (selected):
 - ``vmec_jax/wout.py``: minimal ``wout_*.nc`` reader/writer and VMEC-style
   output synthesis compatibility surface
 - ``vmec_jax/io/wout/``: persisted-WOUT schema, netCDF, flux-convention,
-  VMEC ``wrout``/``jxbforce`` Nyquist transform helpers, Mercier/JXBFORCE
-  reducer kernels, parity, and diagnostic helpers, including the fallback
-  ``DMerc``/Glasser ``D_R`` algebra used when older ``wout`` files do not
-  contain the newer stability fields
+  VMEC ``wrout``/``jxbforce`` Nyquist transform helpers, JXBFORCE Bsub filter
+  kernels, Mercier/JXBFORCE reducer kernels, parity, and diagnostic helpers,
+  including the fallback ``DMerc``/Glasser ``D_R`` algebra used when older
+  ``wout`` files do not contain the newer stability fields
 
 The ``examples/`` folder contains user-facing scripts and curated parity demos.
 Developer-only diagnostics and research utilities live under ``tools/``:

@@ -2963,3 +2963,68 @@ Completion:
 - Driver workflow decomposition: 84%.
 - WOUT diagnostic/profile decomposition: 80%.
 - Overall differentiability-refactor PR: 97.4%.
+
+## 2026-06-15 WOUT JXBFORCE Filter Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved pure VMEC JXBFORCE Bsub low-pass filters, parity filters, LASYM filter
+   loops, derivative reconstruction, and Nyquist-limit helpers into
+   `vmec_jax.io.wout.jxbforce`.
+2. Kept `getbsubs` collocation solvers and corrected-Bsubs application in
+   `wout.py` for now, because tests and diagnostic scripts monkeypatch those
+   helpers through the historical `vmec_jax.wout` namespace.
+3. Re-exported the moved helper names from `vmec_jax.wout` so direct imports
+   in tests and user diagnostics remain stable.
+4. Updated `docs/code_structure.rst` and the `io.wout` package docstring to
+   include JXBFORCE Bsub filters as an explicit domain responsibility.
+
+Results obtained:
+
+- `wout.py` dropped from 4,462 lines to 3,628 lines.
+- The pure JXBFORCE filter family is now isolated from NetCDF writing,
+  Mercier reduction, and WOUT schema logic.
+- Existing direct helper, Boozer-input parity, LASYM Bsubv parity, and WOUT
+  driver tests pass through the compatibility aliases.
+- Pre-existing synthetic single-surface divide warnings now point to
+  `io.wout.jxbforce`, as expected after moving the filter code.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/wout.py vmec_jax/io/wout/jxbforce.py tests/test_wout_helpers.py tests/test_wout_branch_coverage.py tests/test_booz_input.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_helpers.py::test_jxbforce_bsub_filters_match_loop_paths_and_guards tests/test_wout_wave3_coverage.py::test_filter_and_projection_helpers_cover_vectorized_error_identity_and_negative_paths -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_helpers.py tests/test_wout_branch_coverage.py tests/test_wout_fast_helpers.py tests/test_wout_wave3_coverage.py tests/test_wout_wave4_coverage.py tests/test_wout_wave5_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_booz_input.py tests/test_driver_wout_wave9_coverage.py tests/test_wout_driver_wave10_coverage.py tests/test_wout_lasym_bsubv_parity.py -q`
+- `python -m compileall -q vmec_jax/wout.py vmec_jax/io/wout/jxbforce.py vmec_jax/io/wout/mercier.py vmec_jax/io/wout/nyquist.py`
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 20 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. Run fast docs, final source-health, and a broad WOUT/driver smoke shard
+   before committing the JXBFORCE filter tranche.
+2. If continuing WOUT decomposition, split `_compute_bsubs_half_mesh` behind a
+   thin compatibility wrapper next; it is still 466 lines and has explicit
+   tests, but must preserve monkeypatch behavior.
+3. After WOUT, return to driver-stage decomposition or fixed-boundary scan
+   state extraction; do not move the numerical scan update core without a
+   separate parity gate.
+4. Use the new `io.wout.jxbforce` and `io.wout.mercier` modules as the natural
+   targets for upcoming DMerc/`D_R` AD-vs-FD tests.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.2%.
+- Differentiability/refactor implementation: 99.55%.
+- Solver monolith reduction: 86.5%.
+- Free-boundary adjoint monolith reduction: 65%.
+- Driver workflow decomposition: 84%.
+- WOUT diagnostic/profile decomposition: 84%.
+- Overall differentiability-refactor PR: 97.7%.
