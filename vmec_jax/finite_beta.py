@@ -1130,7 +1130,8 @@ def finite_beta_scalars_from_state(*, state, static, indata, signgs: int) -> dic
         s=jnp.asarray(static.s),
         signgs=int(signgs),
     )
-    beta_total = jnp.where(norms.wb != 0.0, norms.wp / norms.wb, jnp.asarray(0.0, dtype=norms.wb.dtype))
+    wb_safe = jnp.where(norms.wb != 0.0, norms.wb, jnp.asarray(1.0, dtype=norms.wb.dtype))
+    beta_total = jnp.where(norms.wb != 0.0, norms.wp / wb_safe, jnp.asarray(0.0, dtype=norms.wb.dtype))
     volavgB = jnp.sqrt(jnp.maximum(2.0 * norms.wb / jnp.maximum(norms.volume, 1e-300), 0.0))
     return {
         "aspect": aspect,

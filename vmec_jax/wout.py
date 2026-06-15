@@ -283,7 +283,8 @@ def equilibrium_iota_profiles_from_state(*, state: VMECState, static, indata, si
     )
 
     sqrtg = jnp.asarray(bc_pre.jac.sqrtg)
-    overg = jnp.where(sqrtg != 0.0, 1.0 / sqrtg, 0.0)
+    sqrtg_safe = jnp.where(sqrtg != 0.0, sqrtg, jnp.ones_like(sqrtg))
+    overg = jnp.where(sqrtg != 0.0, 1.0 / sqrtg_safe, 0.0)
     pwint = jnp.asarray(
         vmec_pwint_from_trig(trig, ns=int(overg.shape[0]), nzeta=int(overg.shape[2])),
         dtype=overg.dtype,
@@ -298,10 +299,12 @@ def equilibrium_iota_profiles_from_state(*, state: VMECState, static, indata, si
         axis=(1, 2),
     )
     bot = jnp.sum(pwint * (overg * guu), axis=(1, 2))
-    chips = jnp.where(bot != 0.0, top / bot, jnp.zeros_like(top))
+    bot_safe = jnp.where(bot != 0.0, bot, jnp.ones_like(bot))
+    chips = jnp.where(bot != 0.0, top / bot_safe, jnp.zeros_like(top))
     if chips.shape[0] >= 1:
         chips = chips.at[0].set(0.0)
-    iotas = jnp.where(phips != 0.0, chips / phips, jnp.zeros_like(chips))
+    phips_safe = jnp.where(phips != 0.0, phips, jnp.ones_like(phips))
+    iotas = jnp.where(phips != 0.0, chips / phips_safe, jnp.zeros_like(chips))
     if iotas.shape[0] >= 1:
         iotas = iotas.at[0].set(0.0)
     iotaf = jnp.asarray(_iotaf_from_iotas(iotas, lrfp=lrfp))
