@@ -1105,17 +1105,24 @@ Results obtained:
     passed.  The helper tests preserve the flattened resume-state payload
     contract and `_final_force_payload` propagation.  `solve.py` decreased
     from 10492 to 10477 lines.
+34. Added the narrow compute-force cache ownership test needed before any
+    residual force-pipeline extraction.  The test exercises the real
+    solver-owned `_COMPUTE_FORCES_CACHE` through the precompile-only path,
+    forces `VMEC_JAX_COMPUTE_FORCES_CACHE_SIZE=1`, uses two structural
+    `static_key` values, and verifies LRU eviction/recompile behavior without
+    touching force physics.  Focused checks passed: Ruff clean and the
+    finish-cache precompile subset passed with 3 tests.
 
 Best next steps:
 
 1. Keep all refactor work on PR #20 until the full plan is finalized.
 2. Continue Wave 1/Wave 2 with either final diagnostic-key grouping or the
-   residual-iteration force-pipeline adapter.  Prefer diagnostic grouping only
-   if the helper receives explicit typed payloads; the force-pipeline adapter
-   must still wait for a narrow cache-object ownership test.  Keep the
-   adaptive scan loop and branch-control policy in `solve.py` until the
-   fingerprinted free-boundary gates and solver hotpath tests can isolate that
-   risk.
+   residual-iteration force-pipeline adapter.  The force-pipeline adapter now
+   has the required cache-ownership precondition test, but it should still
+   avoid moving `_COMPUTE_FORCES_CACHE` itself until a first extraction proves
+   parity under the existing hotpath/cache tests.  Keep the adaptive scan loop
+   and branch-control policy in `solve.py` until the fingerprinted
+   free-boundary gates and solver hotpath tests can isolate that risk.
 3. Continue broader refactors in parallel with `driver.py`, `optimization.py`,
    `free_boundary_adjoint.py`, and `wout.py` by extracting pure
    policy/formatting/data-container seams before moving any physics kernels.
