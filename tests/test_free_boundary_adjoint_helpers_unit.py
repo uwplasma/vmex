@@ -7,6 +7,7 @@ import pytest
 
 import vmec_jax.free_boundary_adjoint as fba
 import vmec_jax.free_boundary_adjoint_objective_helpers as objective_helpers
+import vmec_jax.free_boundary_adjoint_pytree_helpers as pytree_helpers
 import vmec_jax.free_boundary_adjoint_replay_plan_helpers as replay_plan_helpers
 import vmec_jax.free_boundary_adjoint_runtime_helpers as runtime_helpers
 import vmec_jax.free_boundary_adjoint_trace_controls as trace_controls
@@ -157,6 +158,9 @@ def test_free_boundary_adjoint_trace_stackability_error_paths() -> None:
     assert fba._weighted_half_norm is objective_helpers.weighted_half_norm
     assert fba._static_weight_is_zero is objective_helpers.static_weight_is_zero
     assert fba._tree_weighted_half_norm is objective_helpers.tree_weighted_half_norm
+    assert fba._pytree_batched_directional_vdot_jax is pytree_helpers.pytree_batched_directional_vdot_jax
+    assert fba._pytree_pullback_basis_jax is pytree_helpers.pytree_pullback_basis_jax
+    assert fba._pytree_unstack_leading_axis_jax is pytree_helpers.pytree_unstack_leading_axis_jax
     assert (
         fba._accepted_step_policy_signature_for_complete_payload
         is replay_plan_helpers.accepted_step_policy_signature_for_complete_payload
@@ -267,6 +271,19 @@ def test_free_boundary_adjoint_trace_stackability_error_paths() -> None:
             raise TypeError("synthetic bad array")
 
     assert not objective_helpers.static_weight_is_zero(BadArray())
+    jacobian_tree = {"x": jnp.asarray([[1.0, 2.0], [3.0, 4.0]])}
+    direction_tree = {"x": jnp.asarray([10.0, -2.0])}
+    np.testing.assert_allclose(
+        np.asarray(pytree_helpers.pytree_batched_directional_vdot_jax(jacobian_tree, direction_tree, 2)),
+        np.asarray([6.0, 22.0]),
+    )
+    np.testing.assert_allclose(
+        np.asarray(pytree_helpers.pytree_batched_directional_vdot_jax({}, {}, 3)),
+        np.zeros(3),
+    )
+    unstacked = pytree_helpers.pytree_unstack_leading_axis_jax({"x": jnp.asarray([[1.0], [2.0]])}, 2)
+    np.testing.assert_allclose(np.asarray(unstacked[0]["x"]), np.asarray([1.0]))
+    np.testing.assert_allclose(np.asarray(unstacked[1]["x"]), np.asarray([2.0]))
     assert fba._accepted_trace_reset_flags([]) == ()
     assert fba._accepted_trace_reset_flags([{}, {}]) == (False, False)
     trace0 = {

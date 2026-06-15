@@ -1258,6 +1258,14 @@ Results obtained:
     weights, empty pytrees, and host-known zero-weight edge cases.  Focused
     helper tests, Ruff, and compileall passed.  `free_boundary_adjoint.py`
     decreased to 5888 lines.
+57. Extracted pytree directional algebra into
+    `free_boundary_adjoint_pytree_helpers.py`.  Batched directional
+    contractions, batched pullback application, and leading-axis unstacking now
+    live outside the main adjoint module with compatibility aliases retained.
+    Helper tests cover alias stability, empty-Jacobian contractions, numeric
+    contractions, and unstacking behavior; the existing branch-fingerprint test
+    still covers VJP pullback usage.  Focused helper tests, Ruff, and
+    compileall passed.  `free_boundary_adjoint.py` decreased to 5837 lines.
 
 Best next steps:
 
@@ -1285,9 +1293,9 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 74%.
+- Differentiability/refactor implementation: 75%.
 - Source-health instrumentation: 100%.
 - Solver monolith reduction: 57% of the large-file extraction work.
-- Free-boundary adjoint monolith reduction: 24%.
+- Free-boundary adjoint monolith reduction: 25%.
 - Driver workflow decomposition: 34%.
 - WOUT diagnostic decomposition: 4%.
