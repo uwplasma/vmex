@@ -91,6 +91,9 @@ Top-level package layout (selected):
 - ``vmec_jax/solve_residual_iter_setup_helpers.py``: VMEC-grid reuse checks,
   free-boundary provider policy, scan-disablement, and CPU/GPU strict-update
   setup decisions for residual iteration
+- ``vmec_jax/solve_residual_iter_finalize_helpers.py``: final timing
+  diagnostics, resume-state payload packing, and residual-iteration result
+  assembly
 - ``vmec_jax/solve.py``: fixed-boundary solvers + VMEC2000 iteration loop
 - ``vmec_jax/driver.py``: CLI-facing fixed/free-boundary drivers, output
   policies, staged solve dispatch, and wout writing

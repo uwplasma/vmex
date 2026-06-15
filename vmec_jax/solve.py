@@ -53,10 +53,7 @@ from .solve_residual_iter_policy import (
 )
 from .solve_residual_iter_runtime_helpers import (
     _attach_free_boundary_external_field_diag as _runtime_attach_free_boundary_external_field_diag,
-    _build_residual_iter_timing_report,
-    _build_resume_state_base,
     _converged_residuals_scan_fast as _runtime_converged_residuals_scan_fast,
-    _format_residual_iter_timing_message,
     _maybe_dump_ptau as _runtime_maybe_dump_ptau,
     _maybe_print_nonscan_state_debug,
     _scan_block_until_ready,
@@ -69,6 +66,11 @@ from .solve_residual_iter_runtime_helpers import (
 from .solve_residual_iter_setup_helpers import (
     grid_matches_vmec_static_grid as _grid_matches_vmec_static_grid,
     resolve_free_boundary_setup_policy as _resolve_free_boundary_setup_policy,
+)
+from .solve_residual_iter_finalize_helpers import (
+    attach_residual_iter_timing_diagnostics as _attach_residual_iter_timing_diagnostics,
+    build_residual_iter_resume_state_payload as _build_residual_iter_resume_state_payload,
+    finalize_residual_iter_result as _finalize_residual_iter_result,
 )
 from .solve_residual_iter_update_helpers import (
     ResidualVelocityBlocks as _ResidualVelocityBlocks,
@@ -10343,107 +10345,90 @@ def solve_fixed_boundary_residual_iter(
         "freeb_nestor_trial_sample_time_history": np.asarray(freeb_nestor_trial_sample_time_history, dtype=float),
         "freeb_nestor_trial_failed_history": np.asarray(freeb_nestor_trial_failed_history, dtype=int),
     }
-    if timing_enabled:
-        if t_finalize_diag_build_start is not None:
-            timing_stats["finalize_diag_build"] += time.perf_counter() - float(t_finalize_diag_build_start)
-        if t_iteration_loop_start is not None and t_finalize_start is not None:
-            timing_stats["iteration_loop"] = float(t_finalize_start) - float(t_iteration_loop_start)
-        if t_finalize_start is not None:
-            timing_stats["finalize"] = time.perf_counter() - float(t_finalize_start)
-        timing_report = _build_residual_iter_timing_report(
-            timing_stats,
-            solve_total_s=float(time.perf_counter() - float(_solve_wall_start)),
-            timing_detail_enabled=bool(timing_detail_enabled),
-        )
-        timing_stats["iteration_loop_unattributed"] = float(timing_report["iteration_loop_unattributed_s"])
-        diag["timing"] = timing_report
-        try:
-            print(
-                _format_residual_iter_timing_message(
-                    timing_report,
-                    timing_detail_enabled=bool(timing_detail_enabled),
-                ),
-                flush=True,
-            )
-        except Exception:
-            pass
-    resume_state_payload = None
-    if resume_state_mode != "none":
-        resume_state_base = _build_resume_state_base(
-            time_step=time_step,
-            inv_tau=inv_tau,
-            fsq_prev=fsq_prev,
-            fsq0_prev=fsq0_prev,
-            flip_sign=flip_sign,
-            iter1=iter1,
-            last_iter2=last_iter2,
-            ijacob=ijacob,
-            bad_resets=bad_resets,
-            res0=res0,
-            res1=res1,
-            prev_rz_fsq=prev_rz_fsq,
-            bad_growth_streak=bad_growth_streak,
-            huge_force_restart_count=huge_force_restart_count,
-            vmec2000_cache_valid=vmec2000_cache_valid,
-            freeb_ivac=freeb_ivac,
-            freeb_ivacskip=freeb_ivacskip,
-            freeb_nvacskip=freeb_nvacskip,
-            freeb_nvskip0=freeb_nvskip0,
-            freeb_last_model=freeb_last_model,
-            freeb_nestor_runtime=freeb_nestor_runtime,
-        )
-        resume_state_heavy = None
-        if resume_state_mode == "full":
-            resume_state_heavy = {
-                "vRcc": np.asarray(vRcc),
-                "vRss": np.asarray(vRss),
-                "vZsc": np.asarray(vZsc),
-                "vZcs": np.asarray(vZcs),
-                "vLsc": np.asarray(vLsc),
-                "vLcs": np.asarray(vLcs),
-                "vRsc": np.asarray(vRsc),
-                "vRcs": np.asarray(vRcs),
-                "vZcc": np.asarray(vZcc),
-                "vZss": np.asarray(vZss),
-                "vLcc": np.asarray(vLcc),
-                "vLss": np.asarray(vLss),
-                "state_checkpoint": state_checkpoint,
-                "cache_precond_diag": cache_precond_diag,
-                "cache_tcon": cache_tcon,
-                "cache_norms": cache_norms,
-                "cache_rz_scale": cache_rz_scale,
-                "cache_l_scale": cache_l_scale,
-                "cache_rz_norm": cache_rz_norm,
-                "cache_f_norm1": cache_f_norm1,
-                "cache_prec_rz_mats": cache_prec_rz_mats,
-                "cache_prec_rz_jmax": cache_prec_rz_jmax,
-                "cache_prec_lam_prec": cache_prec_lam_prec,
-                "cache_prec_faclam": cache_prec_faclam,
-                "cache_prec_lam_debug": cache_prec_lam_debug,
-                "cache_constraint_rcon0": cache_constraint_rcon0,
-                "cache_constraint_zcon0": cache_constraint_zcon0,
-            }
-        resume_state_payload = _pack_resume_state(resume_state_base, resume_state_heavy)
-    diag["resume_state"] = resume_state_payload
-    result = _attach_freeb_diag(
-        SolveVmecResidualResult(
-            state=state,
-            n_iter=len(w_history) - 1,
-            w_history=np.asarray(w_history, dtype=float),
-            fsqr2_history=np.asarray(fsqr2_history, dtype=float),
-            fsqz2_history=np.asarray(fsqz2_history, dtype=float),
-            fsql2_history=np.asarray(fsql2_history, dtype=float),
-            grad_rms_history=np.asarray(grad_rms_history, dtype=float),
-            step_history=np.asarray(step_history, dtype=float),
-            diagnostics=diag,
-        )
+    diag = _attach_residual_iter_timing_diagnostics(
+        diag,
+        timing_stats,
+        timing_enabled=bool(timing_enabled),
+        timing_detail_enabled=bool(timing_detail_enabled),
+        finalize_diag_build_start=t_finalize_diag_build_start,
+        iteration_loop_start=t_iteration_loop_start,
+        finalize_start=t_finalize_start,
+        solve_wall_start=float(_solve_wall_start),
     )
-    if bool(return_final_force_payload) and bool(converged):
-        try:
-            object.__setattr__(result, "_final_force_payload", k)
-        except Exception:
-            pass
-    return result
+    resume_state_base_kwargs = {
+        "time_step": time_step,
+        "inv_tau": inv_tau,
+        "fsq_prev": fsq_prev,
+        "fsq0_prev": fsq0_prev,
+        "flip_sign": flip_sign,
+        "iter1": iter1,
+        "last_iter2": last_iter2,
+        "ijacob": ijacob,
+        "bad_resets": bad_resets,
+        "res0": res0,
+        "res1": res1,
+        "prev_rz_fsq": prev_rz_fsq,
+        "bad_growth_streak": bad_growth_streak,
+        "huge_force_restart_count": huge_force_restart_count,
+        "vmec2000_cache_valid": vmec2000_cache_valid,
+        "freeb_ivac": freeb_ivac,
+        "freeb_ivacskip": freeb_ivacskip,
+        "freeb_nvacskip": freeb_nvacskip,
+        "freeb_nvskip0": freeb_nvskip0,
+        "freeb_last_model": freeb_last_model,
+        "freeb_nestor_runtime": freeb_nestor_runtime,
+    }
+    resume_state_heavy = None
+    if resume_state_mode == "full":
+        resume_state_heavy = {
+            "vRcc": np.asarray(vRcc),
+            "vRss": np.asarray(vRss),
+            "vZsc": np.asarray(vZsc),
+            "vZcs": np.asarray(vZcs),
+            "vLsc": np.asarray(vLsc),
+            "vLcs": np.asarray(vLcs),
+            "vRsc": np.asarray(vRsc),
+            "vRcs": np.asarray(vRcs),
+            "vZcc": np.asarray(vZcc),
+            "vZss": np.asarray(vZss),
+            "vLcc": np.asarray(vLcc),
+            "vLss": np.asarray(vLss),
+            "state_checkpoint": state_checkpoint,
+            "cache_precond_diag": cache_precond_diag,
+            "cache_tcon": cache_tcon,
+            "cache_norms": cache_norms,
+            "cache_rz_scale": cache_rz_scale,
+            "cache_l_scale": cache_l_scale,
+            "cache_rz_norm": cache_rz_norm,
+            "cache_f_norm1": cache_f_norm1,
+            "cache_prec_rz_mats": cache_prec_rz_mats,
+            "cache_prec_rz_jmax": cache_prec_rz_jmax,
+            "cache_prec_lam_prec": cache_prec_lam_prec,
+            "cache_prec_faclam": cache_prec_faclam,
+            "cache_prec_lam_debug": cache_prec_lam_debug,
+            "cache_constraint_rcon0": cache_constraint_rcon0,
+            "cache_constraint_zcon0": cache_constraint_zcon0,
+        }
+    diag["resume_state"] = _build_residual_iter_resume_state_payload(
+        resume_state_mode=str(resume_state_mode),
+        base_kwargs=resume_state_base_kwargs,
+        heavy_payload=resume_state_heavy,
+    )
+    return _finalize_residual_iter_result(
+        result_type=SolveVmecResidualResult,
+        state=state,
+        w_history=w_history,
+        fsqr2_history=fsqr2_history,
+        fsqz2_history=fsqz2_history,
+        fsql2_history=fsql2_history,
+        grad_rms_history=grad_rms_history,
+        step_history=step_history,
+        diagnostics=diag,
+        attach_free_boundary_diagnostics=_attach_freeb_diag,
+        return_final_force_payload=bool(return_final_force_payload),
+        converged=bool(converged),
+        final_force_payload=k,
+    )
 
 
 def first_step_diagnostics(

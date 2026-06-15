@@ -1095,17 +1095,27 @@ Results obtained:
     tests; mode-transform, hotpath, and finish-cache subsets passed with 22
     tests.  `solve.py` decreased from 10512 to 10492 lines while making the
     free-boundary CPU/GPU setup behavior directly testable.
+33. Residual-iteration finalization extraction moved final timing diagnostic
+    attachment, resume-state payload packing, and result-object construction
+    into `solve_residual_iter_finalize_helpers.py`.  The final free-boundary
+    NESTOR recompute, residual recompute, and diagnostic-key construction stay
+    in `solve.py` for now because those are parity-sensitive.  Focused checks
+    passed: Ruff clean; finalization, timing-instrumentation, finish-cache,
+    hotpath, and fast driver-control subsets passed with 31 tests; compileall
+    passed.  The helper tests preserve the flattened resume-state payload
+    contract and `_final_force_payload` propagation.  `solve.py` decreased
+    from 10492 to 10477 lines.
 
 Best next steps:
 
 1. Keep all refactor work on PR #20 until the full plan is finalized.
-2. Continue Wave 1/Wave 2 with either the non-scan final-result assembly
-   extraction or the residual-iteration force-pipeline adapter.  Prefer the
-   final-result assembly first because it is diagnostic/payload construction,
-   while the force-pipeline adapter must wait for a narrow cache-object
-   ownership test.  Keep the adaptive scan loop and branch-control policy in
-   `solve.py` until the fingerprinted free-boundary gates and solver hotpath
-   tests can isolate that risk.
+2. Continue Wave 1/Wave 2 with either final diagnostic-key grouping or the
+   residual-iteration force-pipeline adapter.  Prefer diagnostic grouping only
+   if the helper receives explicit typed payloads; the force-pipeline adapter
+   must still wait for a narrow cache-object ownership test.  Keep the
+   adaptive scan loop and branch-control policy in `solve.py` until the
+   fingerprinted free-boundary gates and solver hotpath tests can isolate that
+   risk.
 3. Continue broader refactors in parallel with `driver.py`, `optimization.py`,
    `free_boundary_adjoint.py`, and `wout.py` by extracting pure
    policy/formatting/data-container seams before moving any physics kernels.
@@ -1123,9 +1133,9 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 57%.
+- Differentiability/refactor implementation: 58%.
 - Source-health instrumentation: 100%.
-- Solver monolith reduction: 48% of the large-file extraction work.
+- Solver monolith reduction: 49% of the large-file extraction work.
 - Free-boundary adjoint monolith reduction: 13%.
 - Driver workflow decomposition: 34%.
 - WOUT diagnostic decomposition: 4%.
