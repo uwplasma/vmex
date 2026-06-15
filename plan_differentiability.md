@@ -3160,3 +3160,60 @@ Completion:
 - WOUT diagnostic/profile decomposition: 88%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 98.0%.
+
+## 2026-06-15 WOUT Bsub Parity-State Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved `_bsubuv_parity_from_state` into `vmec_jax.io.wout.bsubs` beside the
+   half-mesh Bsubs construction.
+2. Left the historical `vmec_jax.wout._bsubuv_parity_from_state` name as a
+   compatibility wrapper for tests and downstream diagnostic monkeypatches.
+3. Removed the now-unused WOUT realspace dzeta import from the compatibility
+   module.
+
+Results obtained:
+
+- `wout.py` dropped from 3,169 lines to 3,038 lines.
+- State-derived Bsub parity splitting now lives in the same WOUT-domain module
+  as half-mesh `B_s` construction.
+- The WOUT compatibility surface still supports direct imports from
+  `vmec_jax.wout`.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/wout.py vmec_jax/io/wout/bsubs.py tests/test_wout_branch_coverage.py tests/test_finite_beta.py vmec_jax/mercier.py vmec_jax/finite_beta.py`
+- `python -m compileall -q vmec_jax/wout.py vmec_jax/io/wout/bsubs.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_branch_coverage.py tests/test_wout_env_branch_coverage.py tests/test_wout_helpers.py tests/test_wout_physics_wave8_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_helpers.py tests/test_wout_branch_coverage.py tests/test_wout_env_branch_coverage.py tests/test_wout_fast_helpers.py tests/test_wout_wave2.py tests/test_wout_wave3_coverage.py tests/test_wout_wave4_coverage.py tests/test_wout_wave5_coverage.py tests/test_wout_physics_wave8_coverage.py tests/test_wout_driver_wave10_coverage.py tests/test_driver_wout_wave9_coverage.py tests/test_solve_dump_helpers.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_finite_beta.py tests/test_glasser_resistive_interchange.py tests/test_finite_beta_helpers_unit.py -q`
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 20 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. Commit and push the parity-state extraction.
+2. Continue only with source seams that have explicit local parity gates:
+   `wout_minimal_from_fixed_boundary` writer decomposition or driver-stage
+   policy helpers.  Avoid the solve scan-update core until a dedicated
+   VMEC2000 trace parity gate accompanies the move.
+3. Watch the latest CI run; intermediate runs are expected to cancel on each
+   push to this draft PR branch.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.3%.
+- Differentiability/refactor implementation: 99.67%.
+- Solver monolith reduction: 86.5%.
+- Free-boundary adjoint monolith reduction: 65%.
+- Driver workflow decomposition: 84%.
+- WOUT diagnostic/profile decomposition: 89%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 98.05%.
