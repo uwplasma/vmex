@@ -3272,3 +3272,53 @@ Completion:
 - WOUT diagnostic/profile decomposition: 90%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 98.1%.
+
+## 2026-06-15 WOUT Bcovar Parity Helper Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved `_bsubuv_parity_from_bcovar` into `vmec_jax.io.wout.bsubs`.
+2. Preserved the historical `vmec_jax.wout._bsubuv_parity_from_bcovar`
+   wrapper for helper tests and diagnostics.
+3. Re-ran the WOUT parity helper shards and source-health report.
+
+Results obtained:
+
+- `wout.py` dropped from 2,897 lines to 2,886 lines.
+- All Bsub parity construction helpers are now grouped in
+  `vmec_jax.io.wout.bsubs`.
+- The root compatibility module remains import-compatible.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/wout.py vmec_jax/io/wout/bsubs.py tests/test_wout_helpers.py tests/test_wout_fast_helpers.py tests/test_wout_wave3_coverage.py`
+- `python -m compileall -q vmec_jax/wout.py vmec_jax/io/wout/bsubs.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_helpers.py tests/test_wout_fast_helpers.py tests/test_wout_wave3_coverage.py tests/test_wout_branch_coverage.py tests/test_wout_env_branch_coverage.py -q`
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 20 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. Commit and push this final Bsubs cleanup.
+2. Let the latest CI run reach a terminal state before another push unless a
+   local failure is found.
+3. Next high-value refactor remains WOUT writer assembly or driver-stage
+   policy extraction with explicit parity tests.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.4%.
+- Differentiability/refactor implementation: 99.72%.
+- Solver monolith reduction: 86.5%.
+- Free-boundary adjoint monolith reduction: 65%.
+- Driver workflow decomposition: 84%.
+- WOUT diagnostic/profile decomposition: 90.5%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 98.15%.
