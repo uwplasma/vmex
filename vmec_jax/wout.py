@@ -30,8 +30,10 @@ from .vmec_realspace import (
     vmec_realspace_geom_from_state,
 )
 from .vmec_residue import vmec_pwint_from_trig
-from .wout_schema import WoutData, _bool_from_nc, _nc_scalar, assert_main_modes_match_wout
-from .wout_io import (
+from .io.wout import diagnostics as _wout_diagnostics
+from .io.wout import flux as _wout_flux_helpers
+from .io.wout import parity as _wout_parity_helpers
+from .io.wout.netcdf import (
     read_mode_table,
     read_nyquist_fourier_fields,
     read_optional_int_scalar,
@@ -42,9 +44,7 @@ from .wout_io import (
     write_int_variable,
     write_nyquist_fourier_fields,
 )
-from . import wout_diagnostics as _wout_diagnostics
-from . import wout_flux_helpers as _wout_flux_helpers
-from . import wout_parity_helpers as _wout_parity_helpers
+from .io.wout.schema import WoutData, _bool_from_nc, _nc_scalar, assert_main_modes_match_wout
 from .vmec_tomnsp import vmec_trig_tables
 
 

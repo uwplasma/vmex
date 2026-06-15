@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from .wout_schema import _bool_from_nc, _nc_scalar
+from .schema import _bool_from_nc, _nc_scalar
 
 
 # VMEC Nyquist Fourier fields are stored with (radius, mn_mode_nyq) dimensions.

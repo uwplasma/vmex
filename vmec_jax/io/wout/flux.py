@@ -6,8 +6,8 @@ from typing import Any, NamedTuple
 
 import numpy as np
 
-from ._compat import has_jax, jax, jnp
-from .wout_diagnostics import lambda_half_mesh_weights
+from ..._compat import has_jax, jax, jnp
+from .diagnostics import lambda_half_mesh_weights
 
 
 class CurrentProfileMetadata(NamedTuple):
@@ -210,7 +210,7 @@ def chipf_from_chips(chips: np.ndarray) -> np.ndarray:
 def icurv_full_mesh_from_indata(*, indata, s_full: np.ndarray, signgs: int) -> np.ndarray:
     """Return VMEC current profile on the full mesh from an input deck."""
 
-    from .profiles import eval_profiles
+    from ...profiles import eval_profiles
 
     s_full = jnp.asarray(s_full)
     ncurr = int(indata.get_int("NCURR", 0))
@@ -251,7 +251,7 @@ def wout_phi_profile_from_variables(variables, *, ns: int, phipf: np.ndarray) ->
     if "phi" in variables:
         return np.asarray(variables["phi"][:])
 
-    from .integrals import cumrect_s_halfmesh
+    from ...integrals import cumrect_s_halfmesh
 
     if ns < 2:
         s = np.zeros((ns,), dtype=float)

@@ -8,10 +8,10 @@ import pytest
 
 from vmec_jax.namelist import InData
 import vmec_jax.wout as wout_module
-from vmec_jax import wout_diagnostics
-from vmec_jax import wout_flux_helpers
-from vmec_jax import wout_io
-from vmec_jax import wout_parity_helpers
+from vmec_jax.io.wout import diagnostics as wout_diagnostics
+from vmec_jax.io.wout import flux as wout_flux_helpers
+from vmec_jax.io.wout import netcdf as wout_io
+from vmec_jax.io.wout import parity as wout_parity_helpers
 from vmec_jax.wout import (
     MU0,
     _apply_bsubv_equif_correction,
@@ -38,10 +38,10 @@ from vmec_jax.wout import (
     _wout_phi_profile_from_variables,
     assert_main_modes_match_wout,
 )
-from vmec_jax.wout_schema import WoutData as SchemaWoutData
-from vmec_jax.wout_schema import _bool_from_nc as schema_bool_from_nc
-from vmec_jax.wout_schema import _nc_scalar as schema_nc_scalar
-from vmec_jax.wout_schema import assert_main_modes_match_wout as schema_assert_main_modes_match_wout
+from vmec_jax.io.wout.schema import WoutData as SchemaWoutData
+from vmec_jax.io.wout.schema import _bool_from_nc as schema_bool_from_nc
+from vmec_jax.io.wout.schema import _nc_scalar as schema_nc_scalar
+from vmec_jax.io.wout.schema import assert_main_modes_match_wout as schema_assert_main_modes_match_wout
 
 
 class _FakeNcVar:

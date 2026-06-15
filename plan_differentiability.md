@@ -2301,3 +2301,66 @@ Completion:
 - Free-boundary adjoint monolith reduction: 30%.
 - Driver workflow decomposition: 35%.
 - WOUT diagnostic/profile decomposition: 22%.
+
+## 2026-06-15 WOUT I/O Package Move
+
+Commit: WOUT helper package tranche on `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Created `vmec_jax.io.wout` as the domain package for VMEC `wout_*.nc`
+   support code.
+2. Moved WOUT schema, netCDF I/O, persisted diagnostic reconstruction,
+   flux/current/lambda convention helpers, and BSS parity compatibility helpers
+   out of the root `vmec_jax` namespace.
+3. Kept `vmec_jax.wout` as the public compatibility surface while importing its
+   internal implementation helpers from `vmec_jax.io.wout`.
+4. Updated WOUT helper, WOUT physics gate, fixture inventory, and converged-WOUT
+   parity tests to import from the new internal package paths instead of root
+   helper modules.
+5. Updated code-structure docs and ratcheted the root-helper source-health CI
+   gate from 27 to 22 files.
+
+Results obtained:
+
+- Root Python files dropped from 93 to 88.
+- Root helper-prefix files dropped from 27 to 22.
+- WOUT internals now live in a coherent I/O namespace without adding public
+  root shims.
+- The public `vmec_jax.wout` reader/writer and private compatibility aliases
+  used by existing tests remain available.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/wout.py vmec_jax/io tests/test_wout_helpers.py tests/test_wout_fast_helpers.py tests/test_wout_io_helpers.py tests/test_wout_physics_gates.py tests/test_converged_wout_matrix_parity.py tests/test_wout_fixture_inventory.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_helpers.py tests/test_wout_fast_helpers.py tests/test_wout_io_helpers.py tests/test_wout_physics_gates.py tests/test_converged_wout_matrix_parity.py tests/test_wout_fixture_inventory.py -q`
+- `python tools/diagnostics/source_health.py --max-root-helper-prefix-files 22`
+- `python tools/diagnostics/source_health.py`
+- `SPHINX_FAST=1 python -m sphinx -T -b html docs docs/_build/html_fast`
+
+Best next steps:
+
+1. Commit and push this WOUT I/O package move.
+2. Use the free-boundary adjoint explorer findings to move trace/objective
+   support helpers under `vmec_jax.solvers.free_boundary.adjoint` in the next
+   behavior-preserving tranche.
+3. Use the driver/misc explorer findings to choose a domain name for CLI/driver
+   workflow decomposition before moving the remaining `driver_*` helpers.
+4. Keep the source-health gate ratcheting only after focused tests and docs pass
+   for each namespace move.
+
+User decisions needed:
+
+No immediate decision. PR #20 remains draft and all refactor work stays on this
+branch until the full plan is complete.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 50%.
+- Differentiability/refactor implementation: 97.0%.
+- Solver monolith reduction: 81%.
+- Free-boundary adjoint monolith reduction: 30%.
+- Driver workflow decomposition: 35%.
+- WOUT diagnostic/profile decomposition: 72%.

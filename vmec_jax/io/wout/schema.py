@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 
-from .modes import vmec_mode_table
+from ...modes import vmec_mode_table
 
 
 @dataclass(frozen=True)
