@@ -64,6 +64,15 @@ def lambda_preconditioned_full_norm(frzl_pre, *, use_jax: bool):
     return gcl2_full
 
 
+def residual_fsq_from_norms(norms, *, gcr2, gcz2, gcl2):
+    """Return VMEC residual ``(FSQR, FSQZ, FSQL)`` scalars from force norms."""
+
+    fsqr = norms.r1 * norms.fnorm * gcr2
+    fsqz = norms.r1 * norms.fnorm * gcz2
+    fsql = norms.fnormL * gcl2
+    return fsqr, fsqz, fsql
+
+
 def safe_dt_from_force_blocks(
     *,
     dt_nominal: float,

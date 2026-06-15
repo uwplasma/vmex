@@ -17,8 +17,8 @@ Top-level package layout (selected):
 - ``vmec_jax/vmec_bcovar.py``: bcovar/metric assembly and half-mesh pipeline
 - ``vmec_jax/preconditioner_1d.py``: VMEC-style preconditioner operators
 - ``vmec_jax/solve_force_norm_helpers.py``: force-block weighting, lambda
-  residual norms, and stability-guard timestep helpers extracted from the
-  residual iteration hot path
+  residual norms, VMEC residual ``FSQ`` scalar assembly, and stability-guard
+  timestep helpers extracted from the residual iteration hot path
 - ``vmec_jax/solve_force_payload_helpers.py``: residual-force payload
   containers, edge masking, staged VMEC ``m=1``/zero/scalxc transforms, and
   preconditioner-output block assembly
