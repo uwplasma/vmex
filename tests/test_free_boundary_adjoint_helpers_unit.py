@@ -165,6 +165,7 @@ def test_free_boundary_adjoint_trace_stackability_error_paths() -> None:
         fba._accepted_step_policy_summary_for_complete_payload
         is replay_plan_helpers.accepted_step_policy_summary_for_complete_payload
     )
+    assert fba._complete_solve_objective_values is replay_plan_helpers.complete_solve_objective_values
     assert fba._stack_trace_control_field is trace_stack.stack_trace_control_field
     assert fba._stack_trace_pytree_field is trace_stack.stack_trace_pytree_field
     assert fba._stack_optional_trace_pytree_field is trace_stack.stack_optional_trace_pytree_field
@@ -233,6 +234,17 @@ def test_free_boundary_adjoint_trace_stackability_error_paths() -> None:
         "accepted_free_boundary_slots": 1,
         "fixed_rejected_controller_slot_present": True,
     }
+    assert replay_plan_helpers.complete_solve_objective_values(2.5) == {"objective": 2.5}
+    assert replay_plan_helpers.complete_solve_objective_values({"a": np.asarray([1.5]), 2: 3.0}) == {
+        "a": 1.5,
+        "2": 3.0,
+    }
+    with pytest.raises(ValueError, match="empty mapping"):
+        replay_plan_helpers.complete_solve_objective_values({})
+    with pytest.raises(ValueError, match="mapping entry 'a' must be scalar"):
+        replay_plan_helpers.complete_solve_objective_values({"a": np.asarray([1.0, 2.0])})
+    with pytest.raises(ValueError, match="scalar or a mapping"):
+        replay_plan_helpers.complete_solve_objective_values(np.asarray([1.0, 2.0]))
     assert fba._accepted_trace_reset_flags([]) == ()
     assert fba._accepted_trace_reset_flags([{}, {}]) == (False, False)
     trace0 = {

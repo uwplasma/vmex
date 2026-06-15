@@ -1244,6 +1244,12 @@ Results obtained:
     private compatibility aliases, and helper-unit tests assert those aliases
     remain stable for internal users.  Focused helper tests, Ruff, and
     compileall passed.  `free_boundary_adjoint.py` decreased to 5941 lines.
+55. Moved complete-solve objective scalar normalization into
+    `free_boundary_adjoint_replay_plan_helpers.py`.  The same-branch complete
+    FD report now uses the extracted helper through a private compatibility
+    alias, with unit coverage for scalar objectives, mapping objectives,
+    non-scalar error paths, and empty mappings.  Focused helper tests, Ruff,
+    and compileall passed.  `free_boundary_adjoint.py` decreased to 5922 lines.
 
 Best next steps:
 
@@ -1271,9 +1277,9 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 72%.
+- Differentiability/refactor implementation: 73%.
 - Source-health instrumentation: 100%.
 - Solver monolith reduction: 57% of the large-file extraction work.
-- Free-boundary adjoint monolith reduction: 22%.
+- Free-boundary adjoint monolith reduction: 23%.
 - Driver workflow decomposition: 34%.
 - WOUT diagnostic decomposition: 4%.

@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+import numpy as np
+
 from vmec_jax._compat import jnp, tree_util
 
 from .free_boundary_adjoint_trace_stack import direct_coil_accepted_trace_step_policy_segments
@@ -124,3 +126,23 @@ def accepted_step_policy_summary_for_complete_payload(payload: Mapping[str, Any]
             for segment in segments
         ),
     }
+
+
+def complete_solve_objective_values(value: Any) -> dict[str, float]:
+    """Normalize one scalar or a mapping of scalar diagnostics."""
+
+    if isinstance(value, Mapping):
+        if not value:
+            raise ValueError("objective_fn returned an empty mapping")
+        values: dict[str, float] = {}
+        for key, item in value.items():
+            arr = np.asarray(item, dtype=float)
+            if arr.size != 1:
+                raise ValueError(f"objective_fn mapping entry {key!r} must be scalar")
+            values[str(key)] = float(arr.reshape(-1)[0])
+        return values
+
+    arr = np.asarray(value, dtype=float)
+    if arr.size != 1:
+        raise ValueError("objective_fn must return a scalar or a mapping of scalars")
+    return {"objective": float(arr.reshape(-1)[0])}

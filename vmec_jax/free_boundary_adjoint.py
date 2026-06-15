@@ -54,6 +54,7 @@ from .free_boundary_adjoint_replay_plan_helpers import (
     accepted_step_policy_layout_for_complete_payload as _accepted_step_policy_layout_for_complete_payload,
     accepted_step_policy_signature_for_complete_payload as _accepted_step_policy_signature_for_complete_payload,  # noqa: F401 - compatibility alias for tests/internal users.
     accepted_step_policy_summary_for_complete_payload as _accepted_step_policy_summary_for_complete_payload,
+    complete_solve_objective_values as _complete_solve_objective_values,
     extract_adjoint_step_trace as _extract_adjoint_step_trace,
     slice_replay_controls as _slice_replay_controls,
     stackability_probe as _stackability_probe,
@@ -3703,26 +3704,6 @@ def direct_coil_complete_solve_trace(
         "params": params,
         "active_trace": bool(active_trace),
     }
-
-
-def _complete_solve_objective_values(value: Any) -> dict[str, float]:
-    """Normalize one scalar or a mapping of scalar diagnostics."""
-
-    if isinstance(value, Mapping):
-        if not value:
-            raise ValueError("objective_fn returned an empty mapping")
-        values: dict[str, float] = {}
-        for key, item in value.items():
-            arr = np.asarray(item, dtype=float)
-            if arr.size != 1:
-                raise ValueError(f"objective_fn mapping entry {key!r} must be scalar")
-            values[str(key)] = float(arr.reshape(-1)[0])
-        return values
-
-    arr = np.asarray(value, dtype=float)
-    if arr.size != 1:
-        raise ValueError("objective_fn must return a scalar or a mapping of scalars")
-    return {"objective": float(arr.reshape(-1)[0])}
 
 
 def direct_coil_same_branch_complete_solve_fd_report(
