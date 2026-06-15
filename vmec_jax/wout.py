@@ -26,7 +26,6 @@ from .vmec_parity import (
 from .vmec_realspace import (
     vmec_realspace_synthesis,
     vmec_realspace_synthesis_dtheta,
-    vmec_realspace_synthesis_dzeta_phys,
     vmec_realspace_geom_from_state,
 )
 from .vmec_residue import vmec_pwint_from_trig
@@ -494,139 +493,9 @@ def _compute_bsubs_half_mesh(**kwargs) -> np.ndarray:
     return _wout_bsubs_helpers.compute_bsubs_half_mesh(**kwargs)
 
 
-def _bsubuv_parity_from_state(
-    *,
-    state: VMECState,
-    geom_modes,
-    trig,
-    s: np.ndarray,
-    lconm1: bool,
-    lthreed: bool,
-    lasym: bool,
-    bsupu: np.ndarray,
-    bsupv: np.ndarray,
-    lu1_full: np.ndarray,
-    lv1_full: np.ndarray,
-    sqrtg: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def _bsubuv_parity_from_state(**kwargs) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Construct parity-separated bsubu/bsubv using VMEC internal even/odd splitting."""
-    from .vmec_realspace import (
-        vmec_realspace_synthesis,
-        vmec_realspace_synthesis_dtheta,
-    )
-    from .vmec_jacobian import _apply_vmec_axis_rules
-
-    m = np.asarray(geom_modes.m, dtype=int)
-    mask_even = (m % 2) == 0
-    mask_odd = ~mask_even
-
-    Rcos = np.asarray(state.Rcos)
-    Rsin = np.asarray(state.Rsin)
-    Zcos = np.asarray(state.Zcos)
-    Zsin = np.asarray(state.Zsin)
-    if bool(lconm1):
-        Rcos, Zsin, Rsin, Zcos = vmec_m1_internal_to_physical_signed(
-            Rcos=Rcos,
-            Zsin=Zsin,
-            Rsin=Rsin,
-            Zcos=Zcos,
-            modes=geom_modes,
-            lthreed=bool(lthreed),
-            lasym=bool(lasym),
-            lconm1=bool(lconm1),
-        )
-
-    Rcos = _apply_vmec_axis_rules(Rcos, m)
-    Rsin = _apply_vmec_axis_rules(Rsin, m)
-    Zcos = _apply_vmec_axis_rules(Zcos, m)
-    Zsin = _apply_vmec_axis_rules(Zsin, m)
-
-    coeff_cos_stack = np.stack([Rcos, Zcos], axis=0)
-    coeff_sin_stack = np.stack([Rsin, Zsin], axis=0)
-    mask_stack = np.stack([mask_even.astype(float), mask_odd.astype(float)], axis=0)
-    coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
-    coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
-
-    stack = vmec_realspace_synthesis(
-        coeff_cos=coeff_cos,
-        coeff_sin=coeff_sin,
-        modes=geom_modes,
-        trig=trig,
-        coeffs_internal=True,
-        apply_scalxc=True,
-        s=s,
-    )
-    stack_t = vmec_realspace_synthesis_dtheta(
-        coeff_cos=coeff_cos,
-        coeff_sin=coeff_sin,
-        modes=geom_modes,
-        trig=trig,
-        coeffs_internal=True,
-        apply_scalxc=True,
-        s=s,
-    )
-    stack_p = vmec_realspace_synthesis_dzeta_phys(
-        coeff_cos=coeff_cos,
-        coeff_sin=coeff_sin,
-        modes=geom_modes,
-        trig=trig,
-        coeffs_internal=True,
-        apply_scalxc=True,
-        s=s,
-    )
-
-    even = np.asarray(stack[0])
-    odd = np.asarray(stack[1])
-    even_t = np.asarray(stack_t[0])
-    odd_t = np.asarray(stack_t[1])
-    even_p = np.asarray(stack_p[0])
-    odd_p = np.asarray(stack_p[1])
-
-    Ru_even = even_t[0]
-    Ru_odd = odd_t[0]
-    Zu_even = even_t[1]
-    Zu_odd = odd_t[1]
-    Rv_even = even_p[0]
-    Rv_odd = odd_p[0]
-    Zv_even = even_p[1]
-    Zv_odd = odd_p[1]
-
-    pshalf = _pshalf_from_s(np.asarray(s, dtype=float))[:, None, None]
-    # bsubu/bsubv live on the radial half mesh in VMEC. Their parity algebra
-    # must therefore use s_half = pshalf^2 (not full-mesh s_j).
-    s_term = pshalf * pshalf
-
-    guu_even = Ru_even * Ru_even + Zu_even * Zu_even + s_term * (Ru_odd * Ru_odd + Zu_odd * Zu_odd)
-    guu_odd = 2.0 * (Ru_even * Ru_odd + Zu_even * Zu_odd)
-    guv_even = Ru_even * Rv_even + Zu_even * Zv_even + s_term * (Ru_odd * Rv_odd + Zu_odd * Zv_odd)
-    guv_odd = Ru_even * Rv_odd + Ru_odd * Rv_even + Zu_even * Zv_odd + Zu_odd * Zv_even
-    gvv_even = Rv_even * Rv_even + Zv_even * Zv_even + s_term * (Rv_odd * Rv_odd + Zv_odd * Zv_odd)
-    gvv_odd = 2.0 * (Rv_even * Rv_odd + Zv_even * Zv_odd)
-
-    overg = np.where(np.asarray(sqrtg) != 0.0, 1.0 / np.asarray(sqrtg), 0.0)
-    bsupu_even = np.asarray(bsupu, dtype=float)
-    bsupv_even = np.asarray(bsupv, dtype=float)
-    bsupu_odd = np.zeros_like(bsupu_even)
-    bsupv_odd = np.zeros_like(bsupv_even)
-    if int(bsupu_even.shape[0]) >= 2:
-        avg_lv1 = np.asarray(lv1_full[1:] + lv1_full[:-1], dtype=float)
-        avg_lu1 = np.asarray(lu1_full[1:] + lu1_full[:-1], dtype=float)
-        bsupu_odd[1:] = 0.5 * overg[1:] * avg_lv1
-        bsupv_odd[1:] = 0.5 * overg[1:] * avg_lu1
-        bsupu_even = bsupu_even - pshalf * bsupu_odd
-        bsupv_even = bsupv_even - pshalf * bsupv_odd
-
-    bsubu_even = (
-        guu_even * bsupu_even + s_term * guu_odd * bsupu_odd + guv_even * bsupv_even + s_term * guv_odd * bsupv_odd
-    )
-    bsubu_odd = guu_even * bsupu_odd + guu_odd * bsupu_even + guv_even * bsupv_odd + guv_odd * bsupv_even
-    bsubv_even = (
-        guv_even * bsupu_even + s_term * guv_odd * bsupu_odd + gvv_even * bsupv_even + s_term * gvv_odd * bsupv_odd
-    )
-    bsubv_odd = guv_even * bsupu_odd + guv_odd * bsupu_even + gvv_even * bsupv_odd + gvv_odd * bsupv_even
-
-    return bsubu_even, bsubu_odd, bsubv_even, bsubv_odd
-
+    return _wout_bsubs_helpers.bsubuv_parity_from_state(**kwargs)
 
 def _bsubuv_parity_from_coeffs(
     *,
