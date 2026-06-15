@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Callable, NamedTuple
 
 import numpy as np
 
@@ -34,6 +34,65 @@ def resolve_preconditioner_tridi_policies(
     return (
         bool(env_precomputed) if use_precomputed is None else bool(use_precomputed),
         bool(env_lax_tridi) if use_lax_tridi is None else bool(use_lax_tridi),
+    )
+
+
+class PreconditionerCacheDecision(NamedTuple):
+    """Cache/reassembly decision for residual-iteration 1D preconditioners."""
+
+    need_prec_reassemble: bool
+    can_reuse_bcovar_seeded_precond: bool
+    need_prec_refresh: bool
+
+
+def resolve_preconditioner_cache_decision(
+    *,
+    precond_traced: bool,
+    vmec2000_cache_valid: bool,
+    need_bcovar_update: bool,
+    precond_cache_seeded_from_bcovar_update: bool,
+    need_lam_prec: bool,
+    need_lamcal: bool,
+    cache_prec_lam_prec: Any,
+    cache_prec_rz_mats: Any,
+    cache_prec_rz_jmax: int | None,
+    precond_expected_jmax: int,
+    can_reassemble_func: Callable[[Any], bool],
+) -> PreconditionerCacheDecision:
+    """Resolve cached preconditioner reuse, refresh, and reassembly policy."""
+
+    need_prec_reassemble = (
+        (not bool(precond_traced))
+        and (cache_prec_rz_jmax is not None)
+        and (int(cache_prec_rz_jmax) != int(precond_expected_jmax))
+        and bool(can_reassemble_func(cache_prec_rz_mats))
+    )
+    can_reuse_bcovar_seeded_precond = (
+        bool(precond_cache_seeded_from_bcovar_update)
+        and (not bool(precond_traced))
+        and (not bool(need_lam_prec))
+        and (not bool(need_lamcal))
+        and (cache_prec_lam_prec is not None)
+        and (cache_prec_rz_mats is not None)
+        and (cache_prec_rz_jmax is not None)
+    )
+    need_prec_refresh = (
+        bool(precond_traced)
+        or (not bool(vmec2000_cache_valid))
+        or (cache_prec_lam_prec is None)
+        or (cache_prec_rz_mats is None)
+        or (cache_prec_rz_jmax is None)
+        or (bool(need_bcovar_update) and (not bool(can_reuse_bcovar_seeded_precond)))
+        or (
+            (cache_prec_rz_jmax is not None)
+            and (int(cache_prec_rz_jmax) != int(precond_expected_jmax))
+            and (not bool(need_prec_reassemble))
+        )
+    )
+    return PreconditionerCacheDecision(
+        need_prec_reassemble=bool(need_prec_reassemble),
+        can_reuse_bcovar_seeded_precond=bool(can_reuse_bcovar_seeded_precond),
+        need_prec_refresh=bool(need_prec_refresh),
     )
 
 

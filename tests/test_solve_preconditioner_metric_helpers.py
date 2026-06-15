@@ -6,10 +6,12 @@ import numpy as np
 
 from vmec_jax._compat import jnp
 from vmec_jax.solve_preconditioner_helpers import (
+    PreconditionerCacheDecision,
     metric_surface_precond_from_bcovar_jax,
     metric_surface_precond_from_bcovar_np,
     metric_surface_precond_scales_jax,
     metric_surface_precond_scales_np,
+    resolve_preconditioner_cache_decision,
 )
 
 
@@ -135,3 +137,71 @@ def test_metric_surface_precond_from_bcovar_jax_allows_injected_scale_kernel():
     np.testing.assert_allclose(np.asarray(lam), [4.0])
     assert captured["guu"].dtype == jnp.float32
     assert captured["w_ang"].dtype == jnp.float32
+
+
+def _precond_decision(**overrides):
+    defaults = dict(
+        precond_traced=False,
+        vmec2000_cache_valid=True,
+        need_bcovar_update=False,
+        precond_cache_seeded_from_bcovar_update=False,
+        need_lam_prec=False,
+        need_lamcal=False,
+        cache_prec_lam_prec=object(),
+        cache_prec_rz_mats=object(),
+        cache_prec_rz_jmax=4,
+        precond_expected_jmax=4,
+        can_reassemble_func=lambda _mats: True,
+    )
+    defaults.update(overrides)
+    return resolve_preconditioner_cache_decision(**defaults)
+
+
+def test_resolve_preconditioner_cache_decision_allows_clean_cache_hit() -> None:
+    got = _precond_decision()
+
+    assert isinstance(got, PreconditionerCacheDecision)
+    assert got.need_prec_reassemble is False
+    assert got.can_reuse_bcovar_seeded_precond is False
+    assert got.need_prec_refresh is False
+
+
+def test_resolve_preconditioner_cache_decision_refreshes_traced_or_missing_cache() -> None:
+    assert _precond_decision(precond_traced=True).need_prec_refresh is True
+    assert _precond_decision(cache_prec_lam_prec=None).need_prec_refresh is True
+    assert _precond_decision(cache_prec_rz_mats=None).need_prec_refresh is True
+    assert _precond_decision(cache_prec_rz_jmax=None).need_prec_refresh is True
+    assert _precond_decision(vmec2000_cache_valid=False).need_prec_refresh is True
+
+
+def test_resolve_preconditioner_cache_decision_reuses_seeded_bcovar_update_cache() -> None:
+    got = _precond_decision(
+        need_bcovar_update=True,
+        precond_cache_seeded_from_bcovar_update=True,
+    )
+
+    assert got.can_reuse_bcovar_seeded_precond is True
+    assert got.need_prec_refresh is False
+
+    blocked_by_debug_dump = _precond_decision(
+        need_bcovar_update=True,
+        precond_cache_seeded_from_bcovar_update=True,
+        need_lam_prec=True,
+    )
+    assert blocked_by_debug_dump.can_reuse_bcovar_seeded_precond is False
+    assert blocked_by_debug_dump.need_prec_refresh is True
+
+
+def test_resolve_preconditioner_cache_decision_distinguishes_reassemble_from_refresh() -> None:
+    reassemble = _precond_decision(cache_prec_rz_jmax=3, precond_expected_jmax=4)
+
+    assert reassemble.need_prec_reassemble is True
+    assert reassemble.need_prec_refresh is False
+
+    refresh = _precond_decision(
+        cache_prec_rz_jmax=3,
+        precond_expected_jmax=4,
+        can_reassemble_func=lambda _mats: False,
+    )
+    assert refresh.need_prec_reassemble is False
+    assert refresh.need_prec_refresh is True
