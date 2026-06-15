@@ -2364,3 +2364,68 @@ Completion:
 - Free-boundary adjoint monolith reduction: 30%.
 - Driver workflow decomposition: 35%.
 - WOUT diagnostic/profile decomposition: 72%.
+
+## 2026-06-15 Free-Boundary Adjoint Helper Package Move
+
+Commit: branch-local free-boundary adjoint helper package tranche on
+`codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Created `vmec_jax.solvers.free_boundary.adjoint` as the domain package for
+   branch-local free-boundary adjoint support code.
+2. Moved accepted-trace objective, pytree, replay-plan, runtime, controller-mask,
+   branch-fingerprint, trace-metadata, and trace-stacking helpers out of the
+   root `vmec_jax` namespace.
+3. Kept `vmec_jax.free_boundary_adjoint` as the public validation/report facade
+   and updated it to import helper implementations from the solver package.
+4. Updated internal free-boundary adjoint helper tests and code-structure docs
+   to use the new package paths.
+5. Ratcheted the root-helper source-health CI gate from 22 to 14 files.
+
+Results obtained:
+
+- Root Python files dropped from 88 to 80.
+- Root helper-prefix files dropped from 22 to 14.
+- Branch-local free-boundary adjoint support code now has a coherent solver
+  namespace, while the main public facade and controller module remain stable.
+- Focused AD/controller gates still pass after the move.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/free_boundary_adjoint.py vmec_jax/solvers/free_boundary/adjoint tests/test_free_boundary_adjoint_helpers_unit.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_adjoint_helpers_unit.py -q`
+- `python - <<'PY' ... assert free_boundary_adjoint facade identity ... PY`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py::test_jax_visible_controller_plain_step_outputs_and_segment_validation tests/test_free_boundary_vacuum_adjoint.py::test_segmented_accepted_controller_matches_monolithic_scan_and_gradient -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_trace_fingerprint_detects_control_branch_changes tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_fd -q`
+- `python tools/diagnostics/source_health.py --max-root-helper-prefix-files 14`
+- `SPHINX_FAST=1 python -m sphinx -T -b html docs docs/_build/html_fast`
+
+Best next steps:
+
+1. Commit and push this free-boundary adjoint helper package move.
+2. Use the driver explorer recommendation to move the remaining `driver_*`
+   helpers under a small `vmec_jax.drivers` package, keeping `driver.py` as the
+   user-facing runtime facade.
+3. Defer the broader `solve_*` misc move until the driver package is stable,
+   because those files have wider fan-out through solver, implicit, finite-beta,
+   WOUT, and tests.
+4. After namespace moves, return to function-level reduction inside `solve.py`,
+   `driver.py`, `wout.py`, and `free_boundary_adjoint.py` using tests already
+   protecting each facade.
+
+User decisions needed:
+
+No immediate decision. PR #20 remains draft and all refactor work stays on this
+branch until the full plan is complete.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 65%.
+- Differentiability/refactor implementation: 97.8%.
+- Solver monolith reduction: 82%.
+- Free-boundary adjoint monolith reduction: 58%.
+- Driver workflow decomposition: 35%.
+- WOUT diagnostic/profile decomposition: 72%.

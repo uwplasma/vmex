@@ -135,17 +135,9 @@ Top-level package layout (selected):
   ``driver.py`` retaining wrappers for downstream monkeypatch compatibility
 - ``vmec_jax/free_boundary.py``: mgrid loading, NESTOR-like vacuum coupling,
   and free-boundary runtime state helpers
-- ``vmec_jax/free_boundary_adjoint_trace_controls.py``: accepted-trace
-  reset/status/controller-mask helpers used by fingerprint-gated
-  free-boundary adjoint replay reports
-- ``vmec_jax/free_boundary_adjoint_trace_metadata.py``: accepted-trace
-  replay-graph shape compaction, segment-summary trimming, and strict
-  JSON-safe fingerprint conversion helpers used by branch-local adjoint
-  diagnostics
-- ``vmec_jax/free_boundary_adjoint_trace_fingerprint.py``: accepted-trace
-  branch fingerprints and JSON-safe fingerprint-delta summaries used to reject
-  changed adaptive branches before comparing branch-local AD/JVP results with
-  complete-solve finite differences
+- ``vmec_jax/solvers/free_boundary/adjoint/``: accepted-trace replay plans,
+  branch fingerprints, controller-mask metadata, runtime helpers, and pytree
+  utilities used by branch-local free-boundary adjoint validation reports
 - ``vmec_jax/optimization.py``: exact fixed-boundary optimizer, boundary DOF
   maps, accepted-point replay, and discrete-adjoint Jacobian plumbing
 - ``vmec_jax/optimization_workflow.py``: user-facing optimization problem

@@ -33,35 +33,35 @@ from .free_boundary_adjoint_controller import (
     jax_visible_unrolled_accepted_only_nonlinear_controller_jax,
     pytree_directional_derivative_check_jax,
 )
-from .free_boundary_adjoint_objective_helpers import (
+from .solvers.free_boundary.adjoint.objectives import (
     static_weight_is_zero as _static_weight_is_zero,
     tree_weighted_half_norm as _tree_weighted_half_norm,
     weighted_half_norm as _weighted_half_norm,
 )
-from .free_boundary_adjoint_pytree_helpers import (
+from .solvers.free_boundary.adjoint.pytrees import (
     pytree_batched_directional_vdot_jax as _pytree_batched_directional_vdot_jax,
     pytree_pullback_basis_jax as _pytree_pullback_basis_jax,
     pytree_unstack_leading_axis_jax as _pytree_unstack_leading_axis_jax,
 )
-from .free_boundary_adjoint_trace_controls import (
+from .solvers.free_boundary.adjoint.trace_controls import (
     _accepted_trace_reset_flags,
     accepted_trace_effective_controller_masks as _accepted_trace_effective_controller_masks,
     accepted_trace_segment_is_unconditionally_accepted as _accepted_trace_segment_is_unconditionally_accepted,
     direct_coil_accepted_trace_controller_controls_jax,
     direct_coil_accepted_trace_status_masks,
 )
-from .free_boundary_adjoint_trace_metadata import (
+from .solvers.free_boundary.adjoint.trace_metadata import (
     _compact_segment_summaries,
     _fingerprint_has_rejected_controller_slot,
     _json_safe_fingerprint_value,
     _unique_shape_list,
     direct_coil_accepted_trace_controller_slot_summary,
 )
-from .free_boundary_adjoint_runtime_helpers import (
+from .solvers.free_boundary.adjoint.runtime import (
     block_until_ready_for_timing as _runtime_block_until_ready_for_timing,
     jax_named_scope as _runtime_jax_named_scope,
 )
-from .free_boundary_adjoint_replay_plan_helpers import (
+from .solvers.free_boundary.adjoint.replay_plan import (
     accepted_step_policy_layout_for_complete_payload as _accepted_step_policy_layout_for_complete_payload,
     accepted_step_policy_signature_for_complete_payload as _accepted_step_policy_signature_for_complete_payload,  # noqa: F401 - compatibility alias for tests/internal users.
     accepted_step_policy_summary_for_complete_payload as _accepted_step_policy_summary_for_complete_payload,
@@ -70,7 +70,7 @@ from .free_boundary_adjoint_replay_plan_helpers import (
     slice_replay_controls as _slice_replay_controls,
     stackability_probe as _stackability_probe,
 )
-from .free_boundary_adjoint_trace_stack import (
+from .solvers.free_boundary.adjoint.trace_stack import (
     ACCEPTED_TRACE_BOOL_CONTROL_KEYS as _ACCEPTED_TRACE_BOOL_CONTROL_KEYS,  # noqa: F401 - compatibility alias for tests/internal users.
     ACCEPTED_TRACE_NUMERIC_CONTROL_KEYS as _ACCEPTED_TRACE_NUMERIC_CONTROL_KEYS,  # noqa: F401 - compatibility alias for tests/internal users.
     ACCEPTED_TRACE_OPTIONAL_ARRAY_CONTROL_KEYS as _ACCEPTED_TRACE_OPTIONAL_ARRAY_CONTROL_KEYS,  # noqa: F401 - compatibility alias for tests/internal users.
@@ -93,7 +93,7 @@ from .free_boundary_adjoint_trace_stack import (
     trace_static_value_shape_signature as _trace_static_value_shape_signature,  # noqa: F401 - compatibility alias for tests/internal users.
     trace_step_policy_static_signature as _trace_step_policy_static_signature,  # noqa: F401 - compatibility alias for tests/internal users.
 )
-from . import free_boundary_adjoint_trace_fingerprint as _trace_fingerprint
+from .solvers.free_boundary.adjoint import trace_fingerprint as _trace_fingerprint
 
 __all__ = [
     "direct_coil_accepted_trace_branch_metadata",
