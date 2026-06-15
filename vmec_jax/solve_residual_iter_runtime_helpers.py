@@ -7,6 +7,15 @@ from typing import Any, Callable
 
 import numpy as np
 
+from ._compat import jax as _jax
+
+
+def _device_get_floats(*vals: Any, jax_module: Any | None = None) -> tuple[float, ...]:
+    """Batch host materialization for scalar diagnostics."""
+
+    module = _jax if jax_module is None else jax_module
+    return tuple(float(value) for value in module.device_get(vals))
+
 
 def _ptau_dump_enabled(*, dump_ptau_env: str, dump_dir: str) -> bool:
     return str(dump_ptau_env).strip() not in ("", "0") and bool(str(dump_dir).strip())

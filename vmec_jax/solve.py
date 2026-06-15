@@ -55,6 +55,7 @@ from .solve_residual_iter_policy import (
 from .solve_residual_iter_runtime_helpers import (
     _attach_free_boundary_external_field_diag as _runtime_attach_free_boundary_external_field_diag,
     _converged_residuals_scan_fast as _runtime_converged_residuals_scan_fast,
+    _device_get_floats,
     _maybe_dump_ptau as _runtime_maybe_dump_ptau,
     _maybe_print_nonscan_state_debug,
     _record_compute_force_timing as _runtime_record_compute_force_timing,
@@ -1061,16 +1062,6 @@ def solve_fixed_boundary_residual_iter(
             _setup_phase_timings[key] = float(_setup_phase_timings.get(key, 0.0)) + (
                 time.perf_counter() - float(start)
             )
-
-    def _device_get_floats(*vals):
-        """Batch host materialization for scalar diagnostics.
-
-        In the VMEC2000 parity (non-scan) loop we still need host scalars to
-        drive Python control flow (TimeStepControl / restarts / printing).
-        Pulling them one-by-one forces repeated synchronization; batch them.
-        """
-
-        return tuple(float(v) for v in jax.device_get(vals))
 
     opts = validate_residual_iteration_options(
         max_iter=max_iter,

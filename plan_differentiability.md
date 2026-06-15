@@ -1275,6 +1275,12 @@ Results obtained:
     staged debug path, and the existing non-scan debug solve regression still
     passes.  Focused solver/helper tests, Ruff, and compileall passed.
     `solve.py` decreased to 10308 lines.
+59. Moved batched scalar host materialization into
+    `solve_residual_iter_runtime_helpers.py`.  Non-scan VMEC2000-style control
+    flow still calls `_device_get_floats` at the same points, but the JAX
+    `device_get` batching policy is now isolated and unit-tested with an
+    injected fake JAX module.  Focused runtime/helper tests, Ruff, and
+    compileall passed.  `solve.py` decreased to 10299 lines.
 
 Best next steps:
 
@@ -1302,9 +1308,9 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 76%.
+- Differentiability/refactor implementation: 77%.
 - Source-health instrumentation: 100%.
-- Solver monolith reduction: 58% of the large-file extraction work.
+- Solver monolith reduction: 59% of the large-file extraction work.
 - Free-boundary adjoint monolith reduction: 25%.
 - Driver workflow decomposition: 34%.
 - WOUT diagnostic decomposition: 4%.

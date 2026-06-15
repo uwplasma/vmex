@@ -6,6 +6,7 @@ from vmec_jax.solve_residual_iter_runtime_helpers import (
     _build_residual_iter_timing_report,
     _build_resume_state_base,
     _converged_residuals_scan_fast,
+    _device_get_floats,
     _format_ptau_dump_row,
     _format_residual_iter_timing_message,
     _maybe_dump_ptau,
@@ -46,6 +47,19 @@ def _result_type(**kwargs):
     out.grad_rms_history = kwargs["grad_rms_history"]
     out.step_history = kwargs["step_history"]
     return out
+
+
+def test_device_get_floats_batches_scalar_materialization():
+    class FakeJax:
+        calls = []
+
+        @classmethod
+        def device_get(cls, vals):
+            cls.calls.append(vals)
+            return vals
+
+    assert _device_get_floats(np.asarray(1.25), 2.5, jax_module=FakeJax) == (1.25, 2.5)
+    assert len(FakeJax.calls) == 1
 
 
 def test_ptau_dump_enabled_requires_env_and_directory():
