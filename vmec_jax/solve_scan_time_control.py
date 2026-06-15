@@ -24,6 +24,24 @@ class ScanTimeControlScalars(NamedTuple):
     checkpoint_mask: Any
 
 
+class ScanCheckpointResiduals(NamedTuple):
+    """Residual diagnostics stored with a VMEC scan restart checkpoint."""
+
+    fsqr: Any
+    fsqz: Any
+    fsql: Any
+    fsqr1: Any
+    fsqz1: Any
+    fsql1: Any
+
+
+class ScanCheckpointUpdate(NamedTuple):
+    """State and residual values stored at the best accepted scan checkpoint."""
+
+    state_checkpoint: Any
+    residuals: ScanCheckpointResiduals
+
+
 class ScanRestartDecision(NamedTuple):
     restart_time: Any
     vmecpp_bad_progress: Any
@@ -99,6 +117,49 @@ def scan_time_control_scalars(
     res1 = jnp.where(skip_timecontrol, res1_prev, res1_tc)
     checkpoint_mask = jnp.where(skip_timecontrol, jnp.asarray(False), checkpoint_mask_tc)
     return ScanTimeControlScalars(res0=res0, res1=res1, checkpoint_mask=checkpoint_mask)
+
+
+def scan_checkpoint_update(
+    *,
+    skip_timecontrol: Any,
+    init_mask: Any,
+    checkpoint_mask: Any,
+    current_state: Any,
+    previous_state_checkpoint: Any,
+    current_residuals: ScanCheckpointResiduals,
+    previous_residuals: ScanCheckpointResiduals,
+    cond_func: Any,
+) -> ScanCheckpointUpdate:
+    """Materialize the VMEC scan checkpoint selected by time-control scalars.
+
+    VMEC stores a restart checkpoint when the residual improves.  The state
+    itself can be large, so this helper keeps the state switch as scalar
+    conditionals and only uses elementwise selection for the small diagnostic
+    residual scalars.
+    """
+    state_checkpoint_init = cond_func(
+        (~skip_timecontrol) & init_mask,
+        lambda _: current_state,
+        lambda _: previous_state_checkpoint,
+        operand=None,
+    )
+    state_checkpoint = cond_func(
+        checkpoint_mask,
+        lambda _: current_state,
+        lambda _: state_checkpoint_init,
+        operand=None,
+    )
+    return ScanCheckpointUpdate(
+        state_checkpoint=state_checkpoint,
+        residuals=ScanCheckpointResiduals(
+            fsqr=jnp.where(checkpoint_mask, current_residuals.fsqr, previous_residuals.fsqr),
+            fsqz=jnp.where(checkpoint_mask, current_residuals.fsqz, previous_residuals.fsqz),
+            fsql=jnp.where(checkpoint_mask, current_residuals.fsql, previous_residuals.fsql),
+            fsqr1=jnp.where(checkpoint_mask, current_residuals.fsqr1, previous_residuals.fsqr1),
+            fsqz1=jnp.where(checkpoint_mask, current_residuals.fsqz1, previous_residuals.fsqz1),
+            fsql1=jnp.where(checkpoint_mask, current_residuals.fsql1, previous_residuals.fsql1),
+        ),
+    )
 
 
 def scan_restart_decision(

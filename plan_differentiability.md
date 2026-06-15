@@ -1408,6 +1408,15 @@ Results obtained:
     passed locally (`904 passed, 30 skipped`), including the previously failing
     finish/cache coverage tests.  Ruff and compileall passed for the changed
     helper.
+75. Moved VMEC scan checkpoint materialization into
+    `solve_scan_time_control.py` as `scan_checkpoint_update` with explicit
+    `ScanCheckpointResiduals` bundles.  The solver now delegates the
+    "best accepted residual checkpoint" state/scalar selection to a named,
+    unit-tested helper while still injecting `jax.lax.cond` at the call site to
+    preserve scan performance and tracing behavior.  Direct tests cover
+    initialization, accepted checkpoint, and skipped-time-control branches;
+    focused scan/time-control tests and actual accelerated-scan smoke tests
+    passed along with Ruff.
 
 Best next steps:
 

@@ -337,6 +337,8 @@ from .solve_scan_planning_helpers import (
     validate_vmec2000_scan_guards as _validate_vmec2000_scan_guards,
 )
 from .solve_scan_time_control import (
+    ScanCheckpointResiduals,
+    scan_checkpoint_update,
     scan_fallback_probe_update,
     scan_restart_decision,
     scan_restart_transition,
@@ -3927,27 +3929,30 @@ def solve_fixed_boundary_residual_iter(
                 res1 = tc_scalars.res1
                 checkpoint_mask = tc_scalars.checkpoint_mask
 
-                # Important for scan performance: avoid element-wise `where`
-                # over full state arrays. VMEC checkpointing is a discrete
-                # choice, so keep it as conditionals driven by scalar masks.
-                state_checkpoint_init = jax.lax.cond(
-                    (~skip_timecontrol) & init_mask,
-                    lambda _: carry_adv.state,
-                    lambda _: carry_adv.state_checkpoint,
-                    operand=None,
+                checkpoint_update = scan_checkpoint_update(
+                    skip_timecontrol=skip_timecontrol,
+                    init_mask=init_mask,
+                    checkpoint_mask=checkpoint_mask,
+                    current_state=carry_adv.state,
+                    previous_state_checkpoint=carry_adv.state_checkpoint,
+                    current_residuals=ScanCheckpointResiduals(fsqr, fsqz, fsql, fsqr1, fsqz1, fsql1),
+                    previous_residuals=ScanCheckpointResiduals(
+                        carry_adv.fsqr_checkpoint,
+                        carry_adv.fsqz_checkpoint,
+                        carry_adv.fsql_checkpoint,
+                        carry_adv.fsqr1_checkpoint,
+                        carry_adv.fsqz1_checkpoint,
+                        carry_adv.fsql1_checkpoint,
+                    ),
+                    cond_func=jax.lax.cond,
                 )
-                state_checkpoint = jax.lax.cond(
-                    checkpoint_mask,
-                    lambda _: carry_adv.state,
-                    lambda _: state_checkpoint_init,
-                    operand=None,
-                )
-                fsqr_checkpoint = jnp.where(checkpoint_mask, fsqr, carry_adv.fsqr_checkpoint)
-                fsqz_checkpoint = jnp.where(checkpoint_mask, fsqz, carry_adv.fsqz_checkpoint)
-                fsql_checkpoint = jnp.where(checkpoint_mask, fsql, carry_adv.fsql_checkpoint)
-                fsqr1_checkpoint = jnp.where(checkpoint_mask, fsqr1, carry_adv.fsqr1_checkpoint)
-                fsqz1_checkpoint = jnp.where(checkpoint_mask, fsqz1, carry_adv.fsqz1_checkpoint)
-                fsql1_checkpoint = jnp.where(checkpoint_mask, fsql1, carry_adv.fsql1_checkpoint)
+                state_checkpoint = checkpoint_update.state_checkpoint
+                fsqr_checkpoint = checkpoint_update.residuals.fsqr
+                fsqz_checkpoint = checkpoint_update.residuals.fsqz
+                fsql_checkpoint = checkpoint_update.residuals.fsql
+                fsqr1_checkpoint = checkpoint_update.residuals.fsqr1
+                fsqz1_checkpoint = checkpoint_update.residuals.fsqz1
+                fsql1_checkpoint = checkpoint_update.residuals.fsql1
 
                 if dump_timecontrol_scan:
                     _maybe_dump_timecontrol_scan(
