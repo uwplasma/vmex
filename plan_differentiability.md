@@ -1150,6 +1150,13 @@ Results obtained:
     remain in `solve.py`; only duplicate quadrature/materialization policy
     moved.  Focused wrapper tests were added for direct scale-kernel parity and
     injected scale/wint functions.
+40. Extended `solve_force_payload_helpers.py` with staged residual-force
+    payload transforms for the VMEC `m=1`, zeroing, and `scalxc` conventions.
+    The scan-debug branch now prints from named helper stages instead of
+    owning direct `vmec_residue` transform calls, while the non-debug path
+    still returns the same final normalized payload.  Focused force-payload
+    and scan-debug tests passed, including the VMEC sign convention for the
+    rotated `m=1` Z-force channel.
 
 Best next steps:
 
@@ -1177,9 +1184,9 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 60%.
+- Differentiability/refactor implementation: 61%.
 - Source-health instrumentation: 100%.
-- Solver monolith reduction: 51% of the large-file extraction work.
+- Solver monolith reduction: 52% of the large-file extraction work.
 - Free-boundary adjoint monolith reduction: 13%.
 - Driver workflow decomposition: 34%.
 - WOUT diagnostic decomposition: 4%.

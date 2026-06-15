@@ -31,6 +31,14 @@ class ForceBlocks(NamedTuple):
     flss: Any
 
 
+class ResidualForcePayloadStages(NamedTuple):
+    """Intermediate residual-force payloads through VMEC force conventions."""
+
+    after_m1: TomnspsRZL
+    after_zero_m1: TomnspsRZL
+    after_scalxc: TomnspsRZL
+
+
 def zero_edge_rz_force_block(a, *, preserve_numpy: bool = True):
     """Zero the LCFS row in an R/Z force block, leaving short meshes unchanged."""
     if a is None:
@@ -105,11 +113,35 @@ def residual_force_payload_after_m1_scalxc(
     zero_m1,
 ) -> TomnspsRZL:
     """Apply residual force m=1, zeroing, and scalxc conventions."""
+    return residual_force_payload_m1_scalxc_stages(
+        frzl,
+        s=s,
+        apply_m1_constraints=apply_m1_constraints,
+        lconm1=lconm1,
+        zero_m1=zero_m1,
+    ).after_scalxc
+
+
+def residual_force_payload_m1_scalxc_stages(
+    frzl: TomnspsRZL,
+    *,
+    s,
+    apply_m1_constraints: bool,
+    lconm1: bool,
+    zero_m1,
+) -> ResidualForcePayloadStages:
+    """Return residual force payloads after m=1, zeroing, and scalxc stages."""
+
     if bool(apply_m1_constraints):
         frzl = vmec_apply_m1_constraints(frzl=frzl, lconm1=bool(lconm1))
-    frzl = vmec_zero_m1_zforce(frzl=frzl, enabled=zero_m1)
-    frzl = vmec_apply_scalxc_to_tomnsps(frzl=frzl, s=s)
-    return normalize_force_blocks(frzl)
+    after_m1 = frzl
+    after_zero_m1 = vmec_zero_m1_zforce(frzl=after_m1, enabled=zero_m1)
+    after_scalxc = normalize_force_blocks(vmec_apply_scalxc_to_tomnsps(frzl=after_zero_m1, s=s))
+    return ResidualForcePayloadStages(
+        after_m1=after_m1,
+        after_zero_m1=after_zero_m1,
+        after_scalxc=after_scalxc,
+    )
 
 
 def preconditioner_output_blocks_np(*, frzl_rz, lam_prec) -> ForceBlocks:
@@ -136,4 +168,5 @@ _zero_edge_rz_force_block = zero_edge_rz_force_block
 _zero_edge_rz_force_blocks = zero_edge_rz_force_blocks
 _normalize_force_blocks = normalize_force_blocks
 _residual_force_payload_after_m1_scalxc = residual_force_payload_after_m1_scalxc
+_residual_force_payload_m1_scalxc_stages = residual_force_payload_m1_scalxc_stages
 _preconditioner_output_blocks_np = preconditioner_output_blocks_np
