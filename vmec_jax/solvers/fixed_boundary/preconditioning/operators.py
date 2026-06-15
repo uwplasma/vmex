@@ -8,9 +8,9 @@ from typing import Any, Callable, NamedTuple
 import numpy as np
 
 from ...._compat import jax, jnp
-from ....solve_constraint_helpers import scale_mode_slice, scale_mode_slice_np
 from ....state import VMECState
 from ....vmec_tomnsp import TomnspsRZL
+from ..optimization.constraints import scale_mode_slice, scale_mode_slice_np
 
 
 def resolve_preconditioner_tridi_policies(

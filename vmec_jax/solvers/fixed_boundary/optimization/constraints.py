@@ -6,8 +6,8 @@ from typing import Optional
 
 import numpy as np
 
-from ._compat import jnp
-from .state import VMECState
+from ...._compat import jnp
+from ....state import VMECState
 
 
 def mode00_index(modes) -> Optional[int]:

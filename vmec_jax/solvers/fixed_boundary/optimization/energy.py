@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Tuple
 
-from .field import TWOPI
-from .state import VMECState
+from ....field import TWOPI
+from ....state import VMECState
 
 
 @dataclass(frozen=True)
@@ -59,26 +59,26 @@ def prepare_fixed_boundary_energy_context(
     """
 
     if jax_module is None or jnp_module is None or jit_func is None:
-        from ._compat import jax as _jax
-        from ._compat import jit as _jit
-        from ._compat import jnp as _jnp
+        from ...._compat import jax as _jax
+        from ...._compat import jit as _jit
+        from ...._compat import jnp as _jnp
 
         jax_module = _jax if jax_module is None else jax_module
         jnp_module = _jnp if jnp_module is None else jnp_module
         jit_func = _jit if jit_func is None else jit_func
 
     if mode00_index_func is None:
-        from .solve_constraint_helpers import mode00_index as mode00_index_func
+        from .constraints import mode00_index as mode00_index_func
     if eval_geom_func is None:
-        from .geom import eval_geom as eval_geom_func
+        from ....geom import eval_geom as eval_geom_func
     if bsup_from_geom_func is None:
-        from .field import bsup_from_geom as bsup_from_geom_func
+        from ....field import bsup_from_geom as bsup_from_geom_func
     if b2_from_bsup_func is None:
-        from .field import b2_from_bsup as b2_from_bsup_func
+        from ....field import b2_from_bsup as b2_from_bsup_func
     if angle_steps_func is None:
-        from .grids import angle_steps as angle_steps_func
+        from ....grids import angle_steps as angle_steps_func
     if validate_pressure_shape_func is None:
-        from .solve_options import validate_pressure_shape as validate_pressure_shape_func
+        from ....solve_options import validate_pressure_shape as validate_pressure_shape_func
 
     idx00 = mode00_index_func(static.modes)
 

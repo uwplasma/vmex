@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from ._compat import jnp
-from .state import VMECState
+from ...._compat import jnp
+from ....state import VMECState
 
 
 def update_state_gd(

@@ -6,9 +6,9 @@ from typing import Any, Callable, Dict
 
 import numpy as np
 
-from .field import TWOPI
-from .solve_result_types import SolveLambdaResult
-from .state import VMECState
+from ....field import TWOPI
+from ....solve_result_types import SolveLambdaResult
+from ....state import VMECState
 
 
 def solve_lambda_gd_impl(
@@ -53,10 +53,10 @@ def solve_lambda_gd_impl(
     """
 
     if has_jax_func is None or jax_module is None or jnp_module is None or jit_func is None:
-        from ._compat import has_jax as _has_jax
-        from ._compat import jax as _jax
-        from ._compat import jit as _jit
-        from ._compat import jnp as _jnp
+        from ...._compat import has_jax as _has_jax
+        from ...._compat import jax as _jax
+        from ...._compat import jit as _jit
+        from ...._compat import jnp as _jnp
 
         has_jax_func = _has_jax if has_jax_func is None else has_jax_func
         jax_module = _jax if jax_module is None else jax_module
@@ -67,23 +67,23 @@ def solve_lambda_gd_impl(
         raise ImportError("solve_lambda_gd requires JAX (jax + jaxlib)")
 
     if validate_options_func is None:
-        from .solve_options import validate_lambda_gd_options as validate_options_func
+        from ....solve_options import validate_lambda_gd_options as validate_options_func
     if mode00_index_func is None:
-        from .solve_constraint_helpers import mode00_index as mode00_index_func
+        from .constraints import mode00_index as mode00_index_func
     if eval_geom_func is None:
-        from .geom import eval_geom as eval_geom_func
+        from ....geom import eval_geom as eval_geom_func
     if eval_fourier_dtheta_func is None:
-        from .fourier import eval_fourier_dtheta as eval_fourier_dtheta_func
+        from ....fourier import eval_fourier_dtheta as eval_fourier_dtheta_func
     if eval_fourier_dzeta_phys_func is None:
-        from .fourier import eval_fourier_dzeta_phys as eval_fourier_dzeta_phys_func
+        from ....fourier import eval_fourier_dzeta_phys as eval_fourier_dzeta_phys_func
     if bsup_from_sqrtg_lambda_func is None:
-        from .field import bsup_from_sqrtg_lambda as bsup_from_sqrtg_lambda_func
+        from ....field import bsup_from_sqrtg_lambda as bsup_from_sqrtg_lambda_func
     if angle_steps_func is None:
-        from .grids import angle_steps as angle_steps_func
+        from ....grids import angle_steps as angle_steps_func
     if enforce_lambda_gauge_func is None:
-        from .solve_constraint_helpers import enforce_lambda_gauge as enforce_lambda_gauge_func
+        from .constraints import enforce_lambda_gauge as enforce_lambda_gauge_func
     if resolve_grad_tol_func is None:
-        from .solve_tolerance_helpers import resolve_grad_tol as resolve_grad_tol_func
+        from .tolerances import resolve_grad_tol as resolve_grad_tol_func
 
     opts = validate_options_func(
         max_iter=max_iter,

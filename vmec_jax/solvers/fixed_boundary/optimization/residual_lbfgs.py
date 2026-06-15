@@ -6,8 +6,8 @@ from typing import Any, Callable, Dict
 
 import numpy as np
 
-from .solve_result_types import SolveVmecResidualResult
-from .state import VMECState
+from ....solve_result_types import SolveVmecResidualResult
+from ....state import VMECState
 
 
 def solve_fixed_boundary_lbfgs_vmec_residual_impl(
@@ -62,10 +62,10 @@ def solve_fixed_boundary_lbfgs_vmec_residual_impl(
     """Minimize VMEC-style fixed-boundary force residuals with L-BFGS."""
 
     if has_jax_func is None or jax_module is None or jnp_module is None or jit_func is None:
-        from ._compat import has_jax as _has_jax
-        from ._compat import jax as _jax
-        from ._compat import jit as _jit
-        from ._compat import jnp as _jnp
+        from ...._compat import has_jax as _has_jax
+        from ...._compat import jax as _jax
+        from ...._compat import jit as _jit
+        from ...._compat import jnp as _jnp
 
         has_jax_func = _has_jax if has_jax_func is None else has_jax_func
         jax_module = _jax if jax_module is None else jax_module
@@ -76,42 +76,42 @@ def solve_fixed_boundary_lbfgs_vmec_residual_impl(
         raise ImportError("solve_fixed_boundary_lbfgs_vmec_residual requires JAX (jax + jaxlib)")
 
     if validate_options_func is None:
-        from .solve_options import validate_residual_lbfgs_options as validate_options_func
+        from ....solve_options import validate_residual_lbfgs_options as validate_options_func
     if prepare_residual_force_context_func is None:
-        from .solve_residual_force_context import (
+        from ....solve_residual_force_context import (
             prepare_residual_force_context as prepare_residual_force_context_func,
         )
     if mode00_index_func is None:
-        from .solve_constraint_helpers import mode00_index as mode00_index_func
+        from .constraints import mode00_index as mode00_index_func
     if assemble_residual_objective_terms_func is None:
-        from .solve_residual_objective_helpers import (
+        from ....solve_residual_objective_helpers import (
             assemble_residual_objective_terms as assemble_residual_objective_terms_func,
         )
     if enforce_fixed_boundary_and_axis_func is None:
-        from .solve_constraint_helpers import (
+        from .constraints import (
             enforce_fixed_boundary_and_axis as enforce_fixed_boundary_and_axis_func,
         )
     if mask_grad_for_constraints_func is None:
-        from .solve_gradient_helpers import mask_grad_for_constraints as mask_grad_for_constraints_func
+        from .gradient import mask_grad_for_constraints as mask_grad_for_constraints_func
     if apply_preconditioner_func is None:
-        from .solvers.fixed_boundary.preconditioning.operators import (
+        from ..preconditioning.operators import (
             apply_preconditioner as apply_preconditioner_func,
         )
     if grad_rms_state_func is None:
-        from .solve_constraint_helpers import grad_rms_state as grad_rms_state_func
+        from .constraints import grad_rms_state as grad_rms_state_func
     if resolve_grad_tol_func is None:
-        from .solve_tolerance_helpers import resolve_grad_tol as resolve_grad_tol_func
+        from .tolerances import resolve_grad_tol as resolve_grad_tol_func
     if lbfgs_two_loop_direction_func is None:
-        from .solve_optimizer_helpers import lbfgs_two_loop_direction as lbfgs_two_loop_direction_func
+        from ....solve_optimizer_helpers import lbfgs_two_loop_direction as lbfgs_two_loop_direction_func
     if ensure_descent_direction_func is None:
-        from .solve_optimizer_helpers import ensure_descent_direction as ensure_descent_direction_func
+        from ....solve_optimizer_helpers import ensure_descent_direction as ensure_descent_direction_func
     if resolve_lbfgs_curvature_tol_func is None:
-        from .solve_optimizer_helpers import (
+        from ....solve_optimizer_helpers import (
             lbfgs_curvature_tolerance as resolve_lbfgs_curvature_tol_func,
         )
     if pack_state_func is None or unpack_state_func is None:
-        from .state import pack_state as _pack_state
-        from .state import unpack_state as _unpack_state
+        from ....state import pack_state as _pack_state
+        from ....state import unpack_state as _unpack_state
 
         pack_state_func = _pack_state if pack_state_func is None else pack_state_func
         unpack_state_func = _unpack_state if unpack_state_func is None else unpack_state_func
@@ -168,8 +168,8 @@ def solve_fixed_boundary_lbfgs_vmec_residual_impl(
     edge_Zsin = residual_context.edge_Zsin
     mask_pack = residual_context.mask_pack
 
-    from .vmec_forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
-    from .vmec_residue import (
+    from ....vmec_forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
+    from ....vmec_residue import (
         vmec_force_norms_from_bcovar_dynamic,
     )
 
