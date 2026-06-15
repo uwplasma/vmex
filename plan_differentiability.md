@@ -1441,6 +1441,15 @@ Results obtained:
     tests, representative accelerated-scan tests, and the full
     `driver-solve-discrete` shard passed locally (`909 passed, 30 skipped`)
     along with Ruff.  `solve.py` decreased to 10138 lines.
+79. Moved VMEC2000 scan diagnostic dictionary construction for state-only and
+    traced-history scan exits into `solve_scan_output.py`.  The solver now asks
+    for `vmec2000_state_only_scan_diagnostics` and
+    `vmec2000_traced_scan_diagnostics` instead of open-coding result metadata
+    near the scan postprocessor.  Direct tests cover host-only scalar fields,
+    traced omission of host conversions, timing payloads, and resume-state
+    preservation.  Focused scan-output/resume tests and the full
+    `driver-solve-discrete` shard passed locally (`911 passed, 30 skipped`)
+    along with Ruff.  `solve.py` decreased to 10123 lines.
 
 Best next steps:
 

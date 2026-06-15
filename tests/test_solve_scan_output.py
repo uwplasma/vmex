@@ -11,6 +11,8 @@ from vmec_jax.solve_scan_output import (
     vmec2000_scan_full_history_row,
     vmec2000_scan_light_history_row,
     vmec2000_scan_minimal_history_row,
+    vmec2000_state_only_scan_diagnostics,
+    vmec2000_traced_scan_diagnostics,
 )
 
 
@@ -118,6 +120,56 @@ def test_scan_history_row_builders_match_unpacker_layouts():
     assert full.accepted == 6
     assert full.ptau_min == 19
     assert full.badjac_state == 24
+
+
+def test_state_only_scan_diagnostics_include_host_scalars_only_when_untraced():
+    carry = SimpleNamespace(
+        abort_scan=np.asarray(False),
+        converged=np.asarray(True),
+        ijacob=np.asarray(3),
+    )
+    host = vmec2000_state_only_scan_diagnostics(
+        carry_final=carry,
+        traced=False,
+        ftol=1.0e-9,
+        scan_minimal=True,
+        scan_light=False,
+        scan_use_precomputed=True,
+        scan_use_lax_tridi=False,
+        timing_report={"total_s": 1.25},
+    )
+    assert host["state_only"] is True
+    assert host["history_none"] is True
+    assert host["converged"] is True
+    assert host["ijacob"] == 3
+    assert host["timing"] == {"total_s": 1.25}
+
+    traced = vmec2000_state_only_scan_diagnostics(
+        carry_final=carry,
+        traced=True,
+        ftol=1.0e-9,
+        scan_minimal=False,
+        scan_light=True,
+        scan_use_precomputed=False,
+        scan_use_lax_tridi=True,
+    )
+    assert traced["light_history"] is True
+    assert "converged" not in traced
+    assert "ijacob" not in traced
+
+
+def test_traced_scan_diagnostics_preserve_resume_state_and_policy_flags():
+    resume_state = {"time_step": "traced"}
+    diagnostics = vmec2000_traced_scan_diagnostics(
+        resume_state=resume_state,
+        scan_use_precomputed=True,
+        scan_use_lax_tridi=False,
+    )
+
+    assert diagnostics["traced_scan"] is True
+    assert diagnostics["resume_state"] is resume_state
+    assert diagnostics["scan_use_precomputed"] is True
+    assert diagnostics["scan_use_lax_tridi"] is False
 
 
 def _post(histories, **kwargs):

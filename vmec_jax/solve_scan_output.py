@@ -221,6 +221,63 @@ def vmec2000_scan_full_history_row(
     )
 
 
+def vmec2000_state_only_scan_diagnostics(
+    *,
+    carry_final: Any,
+    traced: bool,
+    ftol: float,
+    scan_minimal: bool,
+    scan_light: bool,
+    scan_use_precomputed: bool,
+    scan_use_lax_tridi: bool,
+    timing_report: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return diagnostics for a VMEC2000 scan that only returns the final state."""
+    diagnostics = {
+        "use_scan": True,
+        "vmec2000_scan": True,
+        "scan_path": "vmec2000",
+        "state_only": True,
+        "history_mode": "none",
+        "history_none": True,
+        "ftol": float(ftol),
+        "requested_ftol": float(ftol),
+        "scan_minimal": bool(scan_minimal),
+        "light_history": bool(scan_light),
+        "scan_use_precomputed": bool(scan_use_precomputed),
+        "scan_use_lax_tridi": bool(scan_use_lax_tridi),
+    }
+    if timing_report is not None:
+        diagnostics["timing"] = timing_report
+    if not bool(traced):
+        diagnostics.update(
+            {
+                "abort_scan": bool(np.asarray(carry_final.abort_scan)),
+                "converged": bool(np.asarray(carry_final.converged)),
+                "ijacob": int(np.asarray(carry_final.ijacob)),
+            }
+        )
+    return diagnostics
+
+
+def vmec2000_traced_scan_diagnostics(
+    *,
+    resume_state: dict[str, Any],
+    scan_use_precomputed: bool,
+    scan_use_lax_tridi: bool,
+) -> dict[str, Any]:
+    """Return diagnostics for a traced VMEC2000 scan result with no host history."""
+    return {
+        "use_scan": True,
+        "vmec2000_scan": True,
+        "scan_path": "vmec2000",
+        "traced_scan": True,
+        "scan_use_precomputed": bool(scan_use_precomputed),
+        "scan_use_lax_tridi": bool(scan_use_lax_tridi),
+        "resume_state": resume_state,
+    }
+
+
 def unpack_vmec2000_scan_histories(
     hist: Any,
     *,

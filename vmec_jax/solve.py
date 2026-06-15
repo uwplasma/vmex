@@ -302,6 +302,8 @@ from .solve_scan_output import (
     vmec2000_scan_full_history_row,
     vmec2000_scan_light_history_row,
     vmec2000_scan_minimal_history_row,
+    vmec2000_state_only_scan_diagnostics,
+    vmec2000_traced_scan_diagnostics,
 )
 from .solve_scan_payload_helpers import (
     ScanStepFields as _ScanStepFields,
@@ -5023,29 +5025,16 @@ def solve_fixed_boundary_residual_iter(
                     stats=scan_timing_stats,
                     scan_total_s=float(scan_total_s),
                 )
-            diagnostics = {
-                "use_scan": True,
-                "vmec2000_scan": True,
-                "scan_path": "vmec2000",
-                "state_only": True,
-                "history_mode": "none",
-                "history_none": True,
-                "ftol": float(ftol),
-                "requested_ftol": float(ftol),
-                "scan_minimal": bool(scan_minimal),
-                "light_history": bool(scan_light),
-                "scan_use_precomputed": bool(scan_use_precomputed),
-                "scan_use_lax_tridi": bool(scan_use_lax_tridi),
-                **({"timing": scan_timing_report} if scan_timing_report is not None else {}),
-            }
-            if not traced:
-                diagnostics.update(
-                    {
-                        "abort_scan": bool(np.asarray(carry_final.abort_scan)),
-                        "converged": bool(np.asarray(carry_final.converged)),
-                        "ijacob": int(np.asarray(carry_final.ijacob)),
-                    }
-                )
+            diagnostics = vmec2000_state_only_scan_diagnostics(
+                carry_final=carry_final,
+                traced=bool(traced),
+                ftol=float(ftol),
+                scan_minimal=bool(scan_minimal),
+                scan_light=bool(scan_light),
+                scan_use_precomputed=bool(scan_use_precomputed),
+                scan_use_lax_tridi=bool(scan_use_lax_tridi),
+                timing_report=scan_timing_report,
+            )
             return _attach_freeb_diag(
                 SolveVmecResidualResult(
                     state=carry_final.state,
@@ -5078,15 +5067,11 @@ def solve_fixed_boundary_residual_iter(
                     fsql2_history=empty,
                     grad_rms_history=empty,
                     step_history=empty,
-                    diagnostics={
-                        "use_scan": True,
-                        "vmec2000_scan": True,
-                        "scan_path": "vmec2000",
-                        "traced_scan": True,
-                        "scan_use_precomputed": bool(scan_use_precomputed),
-                        "scan_use_lax_tridi": bool(scan_use_lax_tridi),
-                        "resume_state": traced_resume_state,
-                    },
+                    diagnostics=vmec2000_traced_scan_diagnostics(
+                        resume_state=traced_resume_state,
+                        scan_use_precomputed=bool(scan_use_precomputed),
+                        scan_use_lax_tridi=bool(scan_use_lax_tridi),
+                    ),
                 )
             )
         scan_output = postprocess_vmec2000_scan_result(
