@@ -120,6 +120,11 @@ def test_free_boundary_adjoint_trace_stackability_error_paths() -> None:
         fba.direct_coil_accepted_trace_controller_controls_jax
         is trace_controls.direct_coil_accepted_trace_controller_controls_jax
     )
+    assert fba._accepted_trace_effective_controller_masks is trace_controls.accepted_trace_effective_controller_masks
+    assert (
+        fba._accepted_trace_segment_is_unconditionally_accepted
+        is trace_controls.accepted_trace_segment_is_unconditionally_accepted
+    )
     assert fba._unique_shape_list is trace_metadata.unique_shape_list
     assert fba._compact_segment_summaries is trace_metadata.compact_segment_summaries
     assert fba._json_safe_fingerprint_value is trace_metadata.json_safe_fingerprint_value

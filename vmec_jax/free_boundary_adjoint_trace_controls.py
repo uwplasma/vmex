@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
@@ -115,3 +116,61 @@ def direct_coil_accepted_trace_controller_controls_jax(
             dtype=bool,
         ),
     }
+
+
+def accepted_trace_effective_controller_masks(controls: Mapping[str, Any]) -> dict[str, Any]:
+    """Return effective accepted/rejected/done masks for controller controls."""
+
+    accept_control = np.asarray(controls["accept"], dtype=bool)
+    done_control = np.asarray(controls["done"], dtype=bool)
+    active_values = []
+    accepted_values = []
+    rejected_values = []
+    done_values = []
+    done = False
+    for accept_i, done_i in zip(accept_control, done_control, strict=True):
+        active = not done
+        accepted = bool(active and accept_i)
+        rejected = bool(active and not accept_i)
+        done = bool(done or (accepted and done_i))
+        active_values.append(active)
+        accepted_values.append(accepted)
+        rejected_values.append(rejected)
+        done_values.append(done)
+    return {
+        "accept_control": jnp.asarray(accept_control, dtype=bool),
+        "done_control": jnp.asarray(done_control, dtype=bool),
+        "active": jnp.asarray(active_values, dtype=bool),
+        "accepted": jnp.asarray(accepted_values, dtype=bool),
+        "rejected": jnp.asarray(rejected_values, dtype=bool),
+        "done": jnp.asarray(done_values, dtype=bool),
+        "reset_to_trace_pre": jnp.asarray(controls["reset_to_trace_pre"], dtype=bool),
+        "has_active_freeb_replay": jnp.asarray(controls["has_active_freeb_replay"], dtype=bool),
+    }
+
+
+def accepted_trace_segment_is_unconditionally_accepted(
+    masks: Mapping[str, Any],
+    *,
+    start: int,
+    stop: int,
+) -> bool:
+    """Return whether a controller segment can skip accept/reject conditionals."""
+
+    active = np.asarray(masks["active"], dtype=bool)[int(start) : int(stop)]
+    accepted = np.asarray(masks["accepted"], dtype=bool)[int(start) : int(stop)]
+    rejected = np.asarray(masks["rejected"], dtype=bool)[int(start) : int(stop)]
+    done = np.asarray(masks["done"], dtype=bool)[int(start) : int(stop)]
+    if active.size == 0:
+        return False
+    if not bool(np.all(active)):
+        return False
+    if not bool(np.all(accepted)):
+        return False
+    if bool(np.any(rejected)):
+        return False
+    # A final done marker is allowed. Any earlier done marker would make later
+    # scan entries inactive in the ordinary controller, so it must not fast-path.
+    if done.size > 1 and bool(np.any(done[:-1])):
+        return False
+    return True
