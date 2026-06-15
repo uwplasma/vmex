@@ -42,6 +42,9 @@ from .wout_io import (
     write_nyquist_fourier_fields,
 )
 from .wout_diagnostics import glasser_from_wout_mercier_terms as _glasser_from_wout_mercier_terms
+from .wout_diagnostics import lambda_half_mesh_weights as _lambda_half_mesh_weights
+from .wout_diagnostics import pshalf_from_s as _pshalf_from_s
+from .wout_diagnostics import safe_divide as _safe_divide
 from .vmec_tomnsp import vmec_trig_tables
 
 
@@ -73,45 +76,6 @@ def _vmec_wint_from_trig_jax(trig):
     w_theta = cosmui3[:, 0] / mscale[0]
     nzeta = int(np.asarray(trig.cosnv).shape[0])
     return w_theta[:, None] * jnp.ones((nzeta,), dtype=w_theta.dtype)[None, :]
-
-
-def _pshalf_from_s(s_full: np.ndarray) -> np.ndarray:
-    """VMEC half-mesh sqrt(s) used in parity formulas."""
-    if s_full.shape[0] < 2:
-        return np.sqrt(np.maximum(s_full, 0.0))
-    sh = 0.5 * (s_full[1:] + s_full[:-1])
-    p = np.concatenate([sh[:1], sh], axis=0)
-    return np.sqrt(np.maximum(p, 0.0))
-
-
-def _lambda_half_mesh_weights(s: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Return VMEC Fortran-style ``sm``/``sp`` weights for lambda half-mesh maps."""
-
-    s_arr = np.asarray(s, dtype=float).reshape(-1)
-    ns = int(s_arr.shape[0])
-    if ns < 2:
-        return np.zeros((ns + 1,), dtype=float), np.zeros((ns + 1,), dtype=float)
-
-    hs = float(s_arr[1] - s_arr[0])
-    sqrts_f = np.zeros((ns + 1,), dtype=float)
-    shalf_f = np.zeros((ns + 1,), dtype=float)
-    for i in range(1, ns + 1):
-        sqrts_f[i] = np.sqrt(max(hs * float(i - 1), 0.0))
-        shalf_f[i] = np.sqrt(hs * abs(float(i) - 1.5))
-    sqrts_f[ns] = 1.0
-
-    sm_f = np.zeros((ns + 1,), dtype=float)
-    sp_f = np.zeros((ns + 1,), dtype=float)
-    for i in range(2, ns + 1):
-        sm_f[i] = shalf_f[i] / sqrts_f[i] if sqrts_f[i] != 0.0 else 0.0
-        if i < ns:
-            sp_f[i] = shalf_f[i + 1] / sqrts_f[i] if sqrts_f[i] != 0.0 else 0.0
-        else:
-            sp_f[i] = 1.0 / sqrts_f[i] if sqrts_f[i] != 0.0 else 0.0
-    sm_f[1] = 0.0
-    sp_f[0] = 0.0
-    sp_f[1] = sm_f[2] if ns >= 2 else 0.0
-    return sm_f, sp_f
 
 
 def _lambda_wout_from_full_mesh(
@@ -276,11 +240,6 @@ def _undo_bss_scalxc_if_enabled(s: np.ndarray, *arrays: np.ndarray) -> tuple[np.
         return tuple(arrays)
     factor = _bss_scalxc_undo_factor(s)
     return tuple(np.asarray(arr, dtype=float) * factor for arr in arrays)
-
-
-def _safe_divide(num: np.ndarray, den: np.ndarray) -> np.ndarray:
-    den_safe = np.where(np.abs(den) > 0.0, den, 1.0)
-    return num / den_safe
 
 
 def _jxbforce_nyquist_limits(trig) -> tuple[int, int]:

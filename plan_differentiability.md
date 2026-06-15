@@ -1302,6 +1302,13 @@ Results obtained:
     backend and environment readers for direct unit testing.  Focused driver
     policy/API tests, Ruff, and compileall passed.  `driver.py` decreased to
     2953 lines.
+63. Moved WOUT half-mesh diagnostic helpers into `wout_diagnostics.py`.
+    VMEC half-mesh `sqrt(s)`, lambda half-mesh `sm`/`sp` weights, and
+    VMEC-style zero-denominator-safe division now live with the persisted-WOUT
+    diagnostic algebra.  `wout.py` keeps private compatibility aliases for
+    downstream tests and internal call sites.  Direct diagnostics tests,
+    existing WOUT helper coverage, Ruff, and compileall passed.  `wout.py`
+    decreased to 6250 lines.
 
 Best next steps:
 
@@ -1329,9 +1336,9 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 80%.
+- Differentiability/refactor implementation: 81%.
 - Source-health instrumentation: 100%.
 - Solver monolith reduction: 60% of the large-file extraction work.
 - Free-boundary adjoint monolith reduction: 26%.
 - Driver workflow decomposition: 35%.
-- WOUT diagnostic decomposition: 4%.
+- WOUT diagnostic decomposition: 5%.
