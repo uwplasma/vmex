@@ -8,9 +8,10 @@ import numpy as np
 
 from vmec_jax._compat import tree_util
 
-from .free_boundary_adjoint_trace_controls import direct_coil_accepted_trace_status_masks
-from .free_boundary_adjoint_trace_metadata import json_safe_fingerprint_value
-from .state import pack_state
+from vmec_jax.state import pack_state
+
+from .trace_controls import direct_coil_accepted_trace_status_masks
+from .trace_metadata import json_safe_fingerprint_value
 
 __all__ = [
     "direct_coil_accepted_trace_fingerprint",

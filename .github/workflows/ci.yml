@@ -39,7 +39,7 @@ jobs:
 
       - name: Source namespace gate
         run: |
-          python tools/diagnostics/source_health.py --top 20 --max-root-helper-prefix-files 22
+          python tools/diagnostics/source_health.py --top 20 --max-root-helper-prefix-files 14
 
   test:
     name: Fast Tests (py${{ matrix.python-version }})

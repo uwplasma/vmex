@@ -9,8 +9,8 @@ import numpy as np
 
 from vmec_jax._compat import jnp, tree_util
 
-from .free_boundary_adjoint_trace_controls import direct_coil_accepted_trace_controller_controls_jax
-from .free_boundary_adjoint_trace_fingerprint import trace_pytree_shape_signature
+from .trace_controls import direct_coil_accepted_trace_controller_controls_jax
+from .trace_fingerprint import trace_pytree_shape_signature
 
 
 def stack_trace_control_field(trace_seq: tuple[dict[str, Any], ...], key: str, *, dtype: Any | None = None) -> Any:

@@ -6,15 +6,15 @@ import numpy as np
 import pytest
 
 import vmec_jax.free_boundary_adjoint as fba
-import vmec_jax.free_boundary_adjoint_objective_helpers as objective_helpers
-import vmec_jax.free_boundary_adjoint_pytree_helpers as pytree_helpers
-import vmec_jax.free_boundary_adjoint_replay_plan_helpers as replay_plan_helpers
-import vmec_jax.free_boundary_adjoint_runtime_helpers as runtime_helpers
-import vmec_jax.free_boundary_adjoint_trace_controls as trace_controls
-import vmec_jax.free_boundary_adjoint_trace_fingerprint as trace_fingerprint
-import vmec_jax.free_boundary_adjoint_trace_metadata as trace_metadata
-import vmec_jax.free_boundary_adjoint_trace_stack as trace_stack
 from vmec_jax._compat import jnp
+from vmec_jax.solvers.free_boundary.adjoint import objectives as objective_helpers
+from vmec_jax.solvers.free_boundary.adjoint import pytrees as pytree_helpers
+from vmec_jax.solvers.free_boundary.adjoint import replay_plan as replay_plan_helpers
+from vmec_jax.solvers.free_boundary.adjoint import runtime as runtime_helpers
+from vmec_jax.solvers.free_boundary.adjoint import trace_controls
+from vmec_jax.solvers.free_boundary.adjoint import trace_fingerprint
+from vmec_jax.solvers.free_boundary.adjoint import trace_metadata
+from vmec_jax.solvers.free_boundary.adjoint import trace_stack
 
 
 def test_free_boundary_adjoint_runtime_helpers_sync_and_scope_fallbacks() -> None:

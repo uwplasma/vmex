@@ -8,11 +8,10 @@ from typing import Any
 import numpy as np
 
 from vmec_jax._compat import jnp
+from vmec_jax.state import pack_state
 
 
 def _accepted_trace_state_reset_between(prev_trace: dict[str, Any], trace: dict[str, Any]) -> bool:
-    from .state import pack_state
-
     prev_post = prev_trace.get("state_post")
     next_pre = trace.get("state_pre")
     if prev_post is None or next_pre is None:

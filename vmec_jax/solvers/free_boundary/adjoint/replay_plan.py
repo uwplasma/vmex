@@ -9,7 +9,7 @@ import numpy as np
 
 from vmec_jax._compat import jnp, tree_util
 
-from .free_boundary_adjoint_trace_stack import direct_coil_accepted_trace_step_policy_segments
+from .trace_stack import direct_coil_accepted_trace_step_policy_segments
 
 
 def slice_replay_controls(controls: Mapping[str, Any], *, start: int, stop: int) -> dict[str, Any]:
