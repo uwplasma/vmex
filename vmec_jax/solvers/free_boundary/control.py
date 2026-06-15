@@ -6,7 +6,7 @@ import os
 
 import numpy as np
 
-from .solvers.fixed_boundary.residual.update import (
+from ..fixed_boundary.residual.update import (
     scale_velocity_blocks,
     zero_velocity_blocks_like,
 )

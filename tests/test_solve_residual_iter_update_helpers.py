@@ -90,7 +90,7 @@ def test_velocity_block_helpers_preserve_shape_dtype_and_scale() -> None:
 
 
 def test_free_boundary_control_module_reexports_velocity_helpers() -> None:
-    import vmec_jax.solve_free_boundary_control_helpers as freeb_control
+    import vmec_jax.solvers.free_boundary.control as freeb_control
 
     assert freeb_control.zero_velocity_blocks_like is zero_velocity_blocks_like
     assert freeb_control.scale_velocity_blocks is scale_velocity_blocks

@@ -72,9 +72,9 @@ Top-level package layout (selected):
   residual-iteration
   velocity-block containers, host momentum update, and generic velocity
   zeroing/scaling helpers
-- ``vmec_jax/solve_free_boundary_control_helpers.py``: free-boundary cadence,
+- ``vmec_jax/solvers/free_boundary/control.py``: free-boundary cadence,
   turn-on, and constraint-baseline control helpers
-- ``vmec_jax/solve_free_boundary_diagnostics.py``: solve-facing
+- ``vmec_jax/solvers/free_boundary/diagnostics.py``: solve-facing
   free-boundary external-field diagnostic adapters
 - ``vmec_jax/solvers/fixed_boundary/diagnostics/force.py``: optional force-channel,
   TOMNSP, scalar residual, and force-kernel debug dump helpers
