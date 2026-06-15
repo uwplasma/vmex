@@ -1,7 +1,7 @@
 import pytest
 
 from vmec_jax.solve_residual_iter_policy import vmec2000_scan_options_from_env
-from vmec_jax.solve_scan_planning_helpers import (
+from vmec_jax.solvers.fixed_boundary.scan.planning import (
     SCAN_TIMING_COUNT_KEYS,
     SCAN_TIMING_KEYS,
     apply_state_only_scan_options,

@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from vmec_jax.solve_scan_debug_helpers import _emit_scan_prints, _emit_vmec2000_iter_row
-from vmec_jax.solve_scan_math_helpers import _ptau_minmax_from_k_host
+from vmec_jax.solvers.fixed_boundary.scan.debug import _emit_scan_prints, _emit_vmec2000_iter_row
+from vmec_jax.solvers.fixed_boundary.scan.math import _ptau_minmax_from_k_host
 
 
 def _kernel(ns: int = 3) -> SimpleNamespace:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from vmec_jax._compat import jnp
-from vmec_jax.solve_scan_time_control import (
+from vmec_jax.solvers.fixed_boundary.scan.time_control import (
     RESTART_BADJAC,
     RESTART_BADPROG_VMEC,
     RESTART_NONE,

@@ -3,7 +3,7 @@ import pytest
 
 from vmec_jax._compat import has_jax, jnp
 from vmec_jax.solve import _initialize_scan_resume_state
-from vmec_jax.solve_scan_resume_helpers import build_traced_scan_resume_state
+from vmec_jax.solvers.fixed_boundary.scan.resume import build_traced_scan_resume_state
 
 
 pytestmark = pytest.mark.skipif(not has_jax(), reason="scan resume-state helper requires JAX arrays")

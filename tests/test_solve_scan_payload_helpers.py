@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from vmec_jax.solve_scan_payload_helpers import (
+from vmec_jax.solvers.fixed_boundary.scan.payload import (
     ScanForceBlocks,
     ScanForcePayload,
     ScanStepFields,

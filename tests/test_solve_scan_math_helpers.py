@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from vmec_jax._compat import jnp
-from vmec_jax.solve_scan_math_helpers import (
+from vmec_jax.solvers.fixed_boundary.scan.math import (
     _hold_step,
     _no_restart_updates,
     _ptau_minmax_from_k_host,

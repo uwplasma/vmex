@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from vmec_jax.solve_scan_output import Vmec2000ScanHistories, postprocess_vmec2000_scan_result
+from vmec_jax.solvers.fixed_boundary.scan.output import Vmec2000ScanHistories, postprocess_vmec2000_scan_result
 
 
 def _carry(**overrides):

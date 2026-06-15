@@ -12,7 +12,7 @@ from vmec_jax.preconditioner_1d import (
     _tridiagonal_solve,
     lambda_preconditioner,
 )
-from vmec_jax.solve_scan_math_helpers import _ptau_minmax_from_k_host, _state_jacobian
+from vmec_jax.solvers.fixed_boundary.scan.math import _ptau_minmax_from_k_host, _state_jacobian
 from vmec_jax.vmec_lforbal import (
     _eqfactor_from_precondn_like_vmec,
     _pshalf_from_s,
