@@ -73,6 +73,7 @@ def first_step_diagnostics_impl(
         from .solve_preconditioner_helpers import (
             metric_surface_precond_scales_np as metric_surface_precond_scales_np_func,
         )
+    from .solve_preconditioner_helpers import metric_surface_precond_from_bcovar_np
     if wout_like_vmec_forces_cls is None:
         from .solve_result_types import WoutLikeVmecForces as wout_like_vmec_forces_cls
 
@@ -179,13 +180,12 @@ def first_step_diagnostics_impl(
     def _metric_surface_precond_from_bcovar(bc):
         """Approximate radial preconditioner scaling from bcovar metrics."""
 
-        guu = np.asarray(bc.guu)
-        r12 = np.asarray(bc.jac.r12)
-        bsubu = np.asarray(bc.bsubu)
-        bsubv = np.asarray(bc.bsubv)
-        nzeta = int(guu.shape[2])
-        w_ang = np.asarray(vmec_wint_from_trig(trig, nzeta=nzeta)).astype(guu.dtype)
-        return metric_surface_precond_scales_np_func(guu=guu, r12=r12, bsubu=bsubu, bsubv=bsubv, w_ang=w_ang)
+        return metric_surface_precond_from_bcovar_np(
+            bc=bc,
+            trig=trig,
+            wint_from_trig_func=vmec_wint_from_trig,
+            scales_func=metric_surface_precond_scales_np_func,
+        )
 
     def _lambda_preconditioner(bc, *, return_faclam: bool = False):
         from .preconditioner_1d_jax import lambda_preconditioner

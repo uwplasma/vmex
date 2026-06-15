@@ -204,6 +204,46 @@ def metric_surface_precond_scales_np(*, guu, r12, bsubu, bsubv, w_ang) -> tuple[
     return np.clip(rz_scale, 1e-4, 1e2), np.clip(l_scale, 1e-4, 1e2)
 
 
+def metric_surface_precond_from_bcovar_jax(*, bc, trig, wint_from_trig_func=None, scales_func=None):
+    """Return traced metric preconditioner scales from a bcovar payload."""
+
+    if wint_from_trig_func is None:
+        from .vmec_residue import vmec_wint_from_trig as wint_from_trig_func
+    if scales_func is None:
+        scales_func = metric_surface_precond_scales_jax
+
+    guu = bc.guu
+    r12 = bc.jac.r12
+    bsubu = bc.bsubu
+    bsubv = bc.bsubv
+    nzeta = int(guu.shape[2])
+    w_ang = jnp.asarray(wint_from_trig_func(trig, nzeta=nzeta), dtype=guu.dtype)
+    return scales_func(guu=guu, r12=r12, bsubu=bsubu, bsubv=bsubv, w_ang=w_ang)
+
+
+def metric_surface_precond_from_bcovar_np(
+    *,
+    bc,
+    trig,
+    wint_from_trig_func=None,
+    scales_func=None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return host metric preconditioner scales from a bcovar payload."""
+
+    if wint_from_trig_func is None:
+        from .vmec_residue import vmec_wint_from_trig as wint_from_trig_func
+    if scales_func is None:
+        scales_func = metric_surface_precond_scales_np
+
+    guu = np.asarray(bc.guu)
+    r12 = np.asarray(bc.jac.r12)
+    bsubu = np.asarray(bc.bsubu)
+    bsubv = np.asarray(bc.bsubv)
+    nzeta = int(guu.shape[2])
+    w_ang = np.asarray(wint_from_trig_func(trig, nzeta=nzeta), dtype=guu.dtype)
+    return scales_func(guu=guu, r12=r12, bsubu=bsubu, bsubv=bsubv, w_ang=w_ang)
+
+
 def pshalf_from_s_np(s_arr) -> np.ndarray:
     """Return VMEC-style half-mesh square-root radial coordinate from full mesh."""
 

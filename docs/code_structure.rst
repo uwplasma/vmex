@@ -28,8 +28,8 @@ Top-level package layout (selected):
   feasible-gradient projections for fixed-boundary/axis/lambda constraints
 - ``vmec_jax/solve_preconditioner_helpers.py``: fixed-boundary mode-diagonal
   and radial Dirichlet smoothing preconditioner kernels, tridiagonal policy
-  resolution, metric preconditioner scales, radial mesh scale factors, and
-  VMEC ``m=1`` preconditioner scaling helpers
+  resolution, metric preconditioner scales and bcovar wrapper helpers, radial
+  mesh scale factors, and VMEC ``m=1`` preconditioner scaling helpers
 - ``vmec_jax/solve_jit_cache_helpers.py``: environment-controlled JIT-cache
   limits, structural cache keys, LRU helpers, and scan-cache miss diagnostics
 - ``vmec_jax/solve_preconditioner_payload_helpers.py``: cached strict-update,
