@@ -125,6 +125,32 @@ def compute_eqfor_betaxis(
     return float(1.5 * beta_vol[1] - 0.5 * beta_vol[2])
 
 
+def compute_aspectratio(
+    *,
+    R: np.ndarray,
+    Zu: np.ndarray,
+    wint: np.ndarray,
+) -> tuple[float, float, float, float, float]:
+    """Compute VMEC aspect-ratio geometry scalars from edge R, Zu arrays."""
+
+    if R.ndim != 3 or Zu.ndim != 3:
+        raise ValueError("Expected R/Zu with shape (ns, ntheta, nzeta)")
+    rb = np.asarray(R[-1], dtype=float)
+    zub = np.asarray(Zu[-1], dtype=float)
+    wint = np.asarray(wint, dtype=float)
+    if wint.shape != rb.shape:
+        raise ValueError("wint shape mismatch for aspectratio")
+    t1 = rb * zub * wint
+    volume_p = float(2.0 * np.pi * np.pi * abs(np.sum(rb * t1)))
+    cross_area_p = float(2.0 * np.pi * abs(np.sum(t1)))
+    if cross_area_p == 0.0:
+        return 0.0, 0.0, 0.0, volume_p, cross_area_p
+    Rmajor_p = float(volume_p / (2.0 * np.pi * cross_area_p))
+    Aminor_p = float(np.sqrt(cross_area_p / np.pi))
+    aspect = float(Rmajor_p / Aminor_p) if Aminor_p != 0.0 else 0.0
+    return Aminor_p, Rmajor_p, aspect, volume_p, cross_area_p
+
+
 def glasser_from_wout_mercier_terms(
     *,
     DMerc: np.ndarray,
@@ -157,6 +183,7 @@ def glasser_from_wout_mercier_terms(
 
 
 __all__ = [
+    "compute_aspectratio",
     "compute_eqfor_beta",
     "compute_eqfor_betaxis",
     "glasser_from_wout_mercier_terms",

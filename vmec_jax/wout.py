@@ -47,6 +47,7 @@ from .vmec_tomnsp import vmec_trig_tables
 
 
 MU0 = 4e-7 * np.pi  # N/A^2
+_compute_aspectratio = _wout_diagnostics.compute_aspectratio
 _compute_eqfor_beta = _wout_diagnostics.compute_eqfor_beta
 _compute_eqfor_betaxis = _wout_diagnostics.compute_eqfor_betaxis
 _glasser_from_wout_mercier_terms = _wout_diagnostics.glasser_from_wout_mercier_terms
@@ -238,31 +239,6 @@ def _jxbforce_nyquist_limits(trig) -> tuple[int, int]:
     mnyq = max(ntheta2 - 1, 0)
     nnyq = max(nzeta // 2, 0)
     return mnyq, nnyq
-
-
-def _compute_aspectratio(
-    *,
-    R: np.ndarray,
-    Zu: np.ndarray,
-    wint: np.ndarray,
-) -> tuple[float, float, float, float, float]:
-    """Compute VMEC aspect-ratio geometry scalars from edge R, Zu (aspectratio.f)."""
-    if R.ndim != 3 or Zu.ndim != 3:
-        raise ValueError("Expected R/Zu with shape (ns, ntheta, nzeta)")
-    rb = np.asarray(R[-1], dtype=float)
-    zub = np.asarray(Zu[-1], dtype=float)
-    wint = np.asarray(wint, dtype=float)
-    if wint.shape != rb.shape:
-        raise ValueError("wint shape mismatch for aspectratio")
-    t1 = rb * zub * wint
-    volume_p = float(2.0 * np.pi * np.pi * abs(np.sum(rb * t1)))
-    cross_area_p = float(2.0 * np.pi * abs(np.sum(t1)))
-    if cross_area_p == 0.0:
-        return 0.0, 0.0, 0.0, volume_p, cross_area_p
-    Rmajor_p = float(volume_p / (2.0 * np.pi * cross_area_p))
-    Aminor_p = float(np.sqrt(cross_area_p / np.pi))
-    aspect = float(Rmajor_p / Aminor_p) if Aminor_p != 0.0 else 0.0
-    return Aminor_p, Rmajor_p, aspect, volume_p, cross_area_p
 
 
 def equilibrium_aspect_ratio_from_state(*, state: VMECState, static) -> Any:

@@ -1322,6 +1322,13 @@ Results obtained:
     monkeypatch-heavy compatibility tests.  Direct module checks, WOUT
     finite-beta helper tests, bundled beta parity tests, Ruff, and compileall
     passed.  `wout.py` decreased to 6168 lines.
+66. Moved VMEC aspect-ratio edge geometry diagnostics into
+    `wout_diagnostics.py`.  The NumPy `aspectratio.f`-style scalar
+    reconstruction is now tested directly in the diagnostics module and kept
+    available through `wout._compute_aspectratio` for compatibility and
+    monkeypatch-based WOUT synthesis tests.  Focused WOUT and implicit-driver
+    helper tests, Ruff, and compileall passed.  `wout.py` decreased to
+    6144 lines.
 
 Best next steps:
 
@@ -1349,9 +1356,9 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 83%.
+- Differentiability/refactor implementation: 84%.
 - Source-health instrumentation: 100%.
 - Solver monolith reduction: 60% of the large-file extraction work.
 - Free-boundary adjoint monolith reduction: 26%.
 - Driver workflow decomposition: 35%.
-- WOUT diagnostic decomposition: 8%.
+- WOUT diagnostic decomposition: 10%.

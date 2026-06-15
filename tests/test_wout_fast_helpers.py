@@ -218,6 +218,10 @@ def test_eqfor_beta_aspect_and_ctor_match_vmec_normalizations() -> None:
     R = np.asarray([[[1.0, 1.0], [1.0, 1.0]], [[3.0, 3.0], [5.0, 5.0]]])
     Zu = np.ones_like(R)
     Aminor_p, Rmajor_p, aspect, volume_p, cross_area_p = _compute_aspectratio(R=R, Zu=Zu, wint=wint)
+    np.testing.assert_allclose(
+        wout_diagnostics.compute_aspectratio(R=R, Zu=Zu, wint=wint),
+        (Aminor_p, Rmajor_p, aspect, volume_p, cross_area_p),
+    )
     assert cross_area_p == pytest.approx(2.0 * np.pi * 4.0)
     assert volume_p == pytest.approx(2.0 * np.pi * np.pi * 17.0)
     assert Rmajor_p == pytest.approx(volume_p / (2.0 * np.pi * cross_area_p))
