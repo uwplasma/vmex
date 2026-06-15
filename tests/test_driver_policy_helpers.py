@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 import vmec_jax.driver as driver
+from vmec_jax.driver_policy_helpers import dynamic_scan_probe_settings
 
 
 class _Input:
@@ -46,6 +47,29 @@ def test_normalize_solver_mode_handles_aliases_case_and_defaults(solver_mode, pe
 def test_normalize_solver_mode_reports_valid_modes():
     with pytest.raises(ValueError, match="Expected one of: accelerated, default, parity"):
         driver._normalize_solver_mode(solver_mode="not-a-mode", performance_mode=False)
+
+
+def test_dynamic_scan_probe_settings_helper_uses_backend_and_env_dict():
+    env = {"VMEC_JAX_DYNAMIC_SCAN_ITERS": "7", "VMEC_JAX_DYNAMIC_SCAN_TIMED": "on"}
+
+    assert dynamic_scan_probe_settings(
+        5,
+        backend_name_func=lambda: "gpu",
+        getenv=lambda key, default="": env.get(key, default),
+    ) == (4, True, "gpu")
+
+    env = {"VMEC_JAX_DYNAMIC_SCAN_ITERS": "bad", "VMEC_JAX_DYNAMIC_SCAN_TIMED": "off"}
+    assert dynamic_scan_probe_settings(
+        10,
+        backend_name_func=lambda: "gpu",
+        getenv=lambda key, default="": env.get(key, default),
+    ) == (3, False, "gpu")
+
+    assert dynamic_scan_probe_settings(
+        50,
+        backend_name_func=lambda: "cpu",
+        getenv=lambda _key, default="": default,
+    ) == (10, True, "cpu")
 
 
 @pytest.mark.parametrize(

@@ -49,6 +49,7 @@ _default_preconditioner_use_lax_tridi = _driver_policy_helpers.default_precondit
 _default_preconditioner_use_precomputed_tridi = _driver_policy_helpers.default_preconditioner_use_precomputed_tridi
 _default_use_scan_for_backend = _driver_policy_helpers.default_use_scan_for_backend
 _distribute_stage_iters = _driver_policy_helpers.distribute_stage_iters
+_dynamic_scan_probe_settings_for_backend = _driver_policy_helpers.dynamic_scan_probe_settings
 _host_update_assembly_driver_default = _driver_policy_helpers.host_update_assembly_driver_default
 _normalize_solver_mode = _driver_policy_helpers.normalize_solver_mode
 _requested_final_ftol = _driver_policy_helpers.requested_final_ftol
@@ -155,25 +156,11 @@ def _default_backend_name() -> str:
 
 
 def _dynamic_scan_probe_settings(niter_i: int) -> tuple[int, bool, str]:
-    backend = _default_backend_name()
-    timed_env = os.getenv("VMEC_JAX_DYNAMIC_SCAN_TIMED", "").strip().lower()
-    if timed_env in ("1", "true", "yes", "on"):
-        timed_probe = True
-    elif timed_env in ("0", "false", "no", "off"):
-        timed_probe = False
-    else:
-        timed_probe = backend == "cpu"
-
-    default_probe_iters = 10 if timed_probe else 3
-    try:
-        pre_iters_env = os.getenv("VMEC_JAX_DYNAMIC_SCAN_ITERS", "").strip()
-        pre_iters = max(1, int(pre_iters_env)) if pre_iters_env else default_probe_iters
-    except Exception:
-        pre_iters = default_probe_iters
-
-    if pre_iters >= int(niter_i):
-        pre_iters = max(1, int(niter_i) - 1)
-    return pre_iters, timed_probe, backend
+    return _dynamic_scan_probe_settings_for_backend(
+        niter_i,
+        backend_name_func=_default_backend_name,
+        getenv=os.getenv,
+    )
 
 
 def default_non_autodiff_solver_policy(indata) -> tuple[str, bool]:

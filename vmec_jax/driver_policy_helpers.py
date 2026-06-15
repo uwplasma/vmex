@@ -220,6 +220,35 @@ def resolve_jit_forces_auto_policy(flag: bool | str, static_i, niter_i: int) -> 
     return bool(flag)
 
 
+def dynamic_scan_probe_settings(
+    niter_i: int,
+    *,
+    backend_name_func,
+    getenv=os.getenv,
+) -> tuple[int, bool, str]:
+    """Resolve dynamic scan-probe budget and timing mode for one stage."""
+
+    backend = str(backend_name_func()).strip().lower() or "cpu"
+    timed_env = str(getenv("VMEC_JAX_DYNAMIC_SCAN_TIMED", "")).strip().lower()
+    if timed_env in ("1", "true", "yes", "on"):
+        timed_probe = True
+    elif timed_env in ("0", "false", "no", "off"):
+        timed_probe = False
+    else:
+        timed_probe = backend == "cpu"
+
+    default_probe_iters = 10 if timed_probe else 3
+    try:
+        pre_iters_env = str(getenv("VMEC_JAX_DYNAMIC_SCAN_ITERS", "")).strip()
+        pre_iters = max(1, int(pre_iters_env)) if pre_iters_env else default_probe_iters
+    except Exception:
+        pre_iters = default_probe_iters
+
+    if pre_iters >= int(niter_i):
+        pre_iters = max(1, int(niter_i) - 1)
+    return pre_iters, timed_probe, backend
+
+
 def default_preconditioner_use_precomputed_tridi(
     *,
     cfg,
