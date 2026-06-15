@@ -1211,6 +1211,13 @@ Results obtained:
     exercise module-local JAX shims, while the helper behavior is now directly
     unit-tested.  Focused free-boundary helper/vacuum-adjoint tests, Ruff, and
     compileall passed.
+50. Extracted accepted-trace stacking and static-signature helpers into
+    `free_boundary_adjoint_trace_stack.py`.  The large adjoint module now keeps
+    compatibility aliases for private tests/internal users, while array control
+    stacking, pytree stacking, optional payload stacking, NESTOR-axis stacking,
+    preconditioner static signatures, and trace payload digests are covered
+    through the dedicated helper module and existing trace-stack tests.  Focused
+    free-boundary trace/control tests, Ruff, and compileall passed.
 
 Best next steps:
 
@@ -1238,9 +1245,9 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 67%.
+- Differentiability/refactor implementation: 68%.
 - Source-health instrumentation: 100%.
 - Solver monolith reduction: 57% of the large-file extraction work.
-- Free-boundary adjoint monolith reduction: 14%.
+- Free-boundary adjoint monolith reduction: 17%.
 - Driver workflow decomposition: 34%.
 - WOUT diagnostic decomposition: 4%.
