@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from vmec_jax.solve_options import (
+from vmec_jax.solvers.fixed_boundary.options import (
     validate_fixed_boundary_gd_options,
     validate_fixed_boundary_lbfgs_options,
     validate_lambda_gd_options,

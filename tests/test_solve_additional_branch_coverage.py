@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 import vmec_jax.solve as solve
-import vmec_jax.solve_jit_cache_helpers as jit_cache_helpers
+import vmec_jax.solvers.fixed_boundary.jit_cache as jit_cache_helpers
 from vmec_jax._compat import has_jax, jnp
 from vmec_jax.state import StateLayout, VMECState
 from vmec_jax.vmec_tomnsp import TomnspsRZL

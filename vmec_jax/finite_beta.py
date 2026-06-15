@@ -28,7 +28,7 @@ from .redl_bootstrap import (
     redl_bootstrap_mismatch_from_profiles,
     trapped_fraction_from_modb_sqrtg,
 )
-from .solve_profile_helpers import (
+from .solvers.fixed_boundary.profiles import (
     _half_mesh_from_full_mesh,
     _icurv_full_mesh_from_indata,
     _mass_half_mesh_from_indata,

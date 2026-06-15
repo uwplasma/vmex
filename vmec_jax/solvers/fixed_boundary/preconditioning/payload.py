@@ -6,7 +6,7 @@ from collections import OrderedDict
 from typing import Any, Callable
 
 from ...._compat import has_jax, jax, jit, jnp
-from ....solve_jit_cache_helpers import (
+from ..jit_cache import (
     jit_cache_get,
     jit_cache_put,
     strict_update_static_cache_key,

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from ._compat import jnp
-from .field import TWOPI, chips_from_wout_chipf
+from ..._compat import jnp
+from ...field import TWOPI, chips_from_wout_chipf
 
 
 def _vmec_force_flux_profiles(*, phipf, chipf, signgs: int, flux_is_internal: bool, iotaf=None, iotas=None):
@@ -50,7 +50,7 @@ def _half_mesh_from_full_mesh(x):
 
 
 def _pressure_half_mesh_from_indata(*, indata, s_full):
-    from .profiles import eval_profiles
+    from ...profiles import eval_profiles
 
     s_half = _s_half_from_full_mesh_s(s_full)
     prof = eval_profiles(indata, s_half)
@@ -59,7 +59,7 @@ def _pressure_half_mesh_from_indata(*, indata, s_full):
 
 def _mass_half_mesh_from_indata(*, indata, s_full, phips, r00, gamma, lrfp: bool = False, chips=None):
     """Compute VMEC mass profile on half mesh: mass = pmass * (|vnorm|*r00)^gamma."""
-    from .profiles import eval_profiles
+    from ...profiles import eval_profiles
 
     s_half = _s_half_from_full_mesh_s(s_full)
     prof = eval_profiles(indata, s_half)
@@ -74,7 +74,7 @@ def _mass_half_mesh_from_indata(*, indata, s_full, phips, r00, gamma, lrfp: bool
 
 
 def _icurv_full_mesh_from_indata(*, indata, s_full, signgs: int):
-    from .profiles import eval_profiles
+    from ...profiles import eval_profiles
 
     s_full = jnp.asarray(s_full)
     ncurr = int(indata.get_int("NCURR", 0))

@@ -5,7 +5,7 @@ import pytest
 
 from vmec_jax._compat import jnp
 from vmec_jax.solve import _resolve_lbfgs_curvature_tol
-from vmec_jax.solve_optimizer_helpers import (
+from vmec_jax.solvers.fixed_boundary.optimization.quasi_newton import (
     ensure_descent_direction,
     lbfgs_curvature_tolerance,
     lbfgs_two_loop_direction,

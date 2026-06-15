@@ -6,7 +6,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-from ....solve_result_types import SolveVmecResidualResult
+from ..results import SolveVmecResidualResult
 from ....state import VMECState
 
 
@@ -77,7 +77,7 @@ def solve_fixed_boundary_gn_vmec_residual_impl(
         raise ImportError("solve_fixed_boundary_gn_vmec_residual requires JAX (jax + jaxlib)")
 
     if validate_options_func is None:
-        from ....solve_options import validate_residual_gn_options as validate_options_func
+        from ..options import validate_residual_gn_options as validate_options_func
     if prepare_residual_force_context_func is None:
         from .residual_context import (
             prepare_residual_force_context as prepare_residual_force_context_func,

@@ -8,7 +8,7 @@ from vmec_jax.solvers.fixed_boundary.residual.finalize import (
     build_residual_iter_resume_state_payload,
     finalize_residual_iter_result,
 )
-from vmec_jax.solve_result_types import SolveVmecResidualResult
+from vmec_jax.solvers.fixed_boundary.results import SolveVmecResidualResult
 
 
 def _timing_stats() -> dict[str, float]:

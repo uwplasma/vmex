@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict
 
 import numpy as np
 
-from ....solve_result_types import SolveFixedBoundaryResult
+from ..results import SolveFixedBoundaryResult
 from ....state import VMECState
 
 
@@ -75,7 +75,7 @@ def solve_fixed_boundary_gd_impl(
         raise ImportError("solve_fixed_boundary_gd requires JAX (jax + jaxlib)")
 
     if validate_options_func is None:
-        from ....solve_options import validate_fixed_boundary_gd_options as validate_options_func
+        from ..options import validate_fixed_boundary_gd_options as validate_options_func
     if prepare_energy_context_func is None:
         from .energy import (
             prepare_fixed_boundary_energy_context as prepare_energy_context_func,

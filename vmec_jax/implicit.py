@@ -65,7 +65,7 @@ from .solve import (
     solve_fixed_boundary_residual_iter,
     solve_lambda_gd,
 )
-from .solve_profile_helpers import (
+from .solvers.fixed_boundary.profiles import (
     _half_mesh_from_full_mesh,
     _icurv_full_mesh_from_indata,
     _mass_half_mesh_from_indata,

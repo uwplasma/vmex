@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict
 
 import numpy as np
 
-from ....solve_result_types import SolveFixedBoundaryResult
+from ..results import SolveFixedBoundaryResult
 from ....state import VMECState
 
 
@@ -73,7 +73,7 @@ def solve_fixed_boundary_lbfgs_impl(
         raise ImportError("solve_fixed_boundary_lbfgs requires JAX (jax + jaxlib)")
 
     if validate_options_func is None:
-        from ....solve_options import validate_fixed_boundary_lbfgs_options as validate_options_func
+        from ..options import validate_fixed_boundary_lbfgs_options as validate_options_func
     if prepare_energy_context_func is None:
         from .energy import (
             prepare_fixed_boundary_energy_context as prepare_energy_context_func,
@@ -93,11 +93,11 @@ def solve_fixed_boundary_lbfgs_impl(
     if resolve_grad_tol_func is None:
         from .tolerances import resolve_grad_tol as resolve_grad_tol_func
     if lbfgs_two_loop_direction_func is None:
-        from ....solve_optimizer_helpers import lbfgs_two_loop_direction as lbfgs_two_loop_direction_func
+        from .quasi_newton import lbfgs_two_loop_direction as lbfgs_two_loop_direction_func
     if ensure_descent_direction_func is None:
-        from ....solve_optimizer_helpers import ensure_descent_direction as ensure_descent_direction_func
+        from .quasi_newton import ensure_descent_direction as ensure_descent_direction_func
     if resolve_lbfgs_curvature_tol_func is None:
-        from ....solve_optimizer_helpers import (
+            from .quasi_newton import (
             lbfgs_curvature_tolerance as resolve_lbfgs_curvature_tol_func,
         )
     if pack_state_func is None or unpack_state_func is None:

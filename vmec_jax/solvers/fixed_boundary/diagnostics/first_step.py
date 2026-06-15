@@ -54,15 +54,15 @@ def first_step_diagnostics_impl(
     if mode00_index_func is None:
         from ..optimization.constraints import mode00_index as mode00_index_func
     if half_mesh_from_full_mesh_func is None:
-        from ....solve_profile_helpers import _half_mesh_from_full_mesh as half_mesh_from_full_mesh_func
+        from ..profiles import _half_mesh_from_full_mesh as half_mesh_from_full_mesh_func
     if mass_half_mesh_from_indata_func is None:
-        from ....solve_profile_helpers import _mass_half_mesh_from_indata as mass_half_mesh_from_indata_func
+        from ..profiles import _mass_half_mesh_from_indata as mass_half_mesh_from_indata_func
     if pressure_half_mesh_from_indata_func is None:
-        from ....solve_profile_helpers import _pressure_half_mesh_from_indata as pressure_half_mesh_from_indata_func
+        from ..profiles import _pressure_half_mesh_from_indata as pressure_half_mesh_from_indata_func
     if icurv_full_mesh_from_indata_func is None:
-        from ....solve_profile_helpers import _icurv_full_mesh_from_indata as icurv_full_mesh_from_indata_func
+        from ..profiles import _icurv_full_mesh_from_indata as icurv_full_mesh_from_indata_func
     if vmec_force_flux_profiles_func is None:
-        from ....solve_profile_helpers import _vmec_force_flux_profiles as vmec_force_flux_profiles_func
+        from ..profiles import _vmec_force_flux_profiles as vmec_force_flux_profiles_func
     if zero_edge_rz_force_blocks_func is None:
         from ..residual.payload_blocks import (
             zero_edge_rz_force_blocks as zero_edge_rz_force_blocks_func,
@@ -77,7 +77,7 @@ def first_step_diagnostics_impl(
         )
     from ..preconditioning.operators import metric_surface_precond_from_bcovar_np
     if wout_like_vmec_forces_cls is None:
-        from ....solve_result_types import WoutLikeVmecForces as wout_like_vmec_forces_cls
+        from ..results import WoutLikeVmecForces as wout_like_vmec_forces_cls
 
     from ....energy import flux_profiles_from_indata
     from ....static import build_static

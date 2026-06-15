@@ -6,7 +6,7 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from ._compat import jnp
+from ...._compat import jnp
 
 
 def lbfgs_curvature_tolerance(s_vec: Any, y_vec: Any) -> float:

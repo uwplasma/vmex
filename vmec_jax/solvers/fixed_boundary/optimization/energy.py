@@ -78,7 +78,7 @@ def prepare_fixed_boundary_energy_context(
     if angle_steps_func is None:
         from ....grids import angle_steps as angle_steps_func
     if validate_pressure_shape_func is None:
-        from ....solve_options import validate_pressure_shape as validate_pressure_shape_func
+        from ..options import validate_pressure_shape as validate_pressure_shape_func
 
     idx00 = mode00_index_func(static.modes)
 

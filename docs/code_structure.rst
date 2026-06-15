@@ -34,8 +34,9 @@ Top-level package layout (selected):
   and radial Dirichlet smoothing preconditioner kernels, tridiagonal policy
   resolution, metric preconditioner scales and bcovar wrapper helpers, radial
   mesh scale factors, and VMEC ``m=1`` preconditioner scaling helpers
-- ``vmec_jax/solve_jit_cache_helpers.py``: environment-controlled JIT-cache
-  limits, structural cache keys, LRU helpers, and scan-cache miss diagnostics
+- ``vmec_jax/solvers/fixed_boundary/jit_cache.py``:
+  environment-controlled JIT-cache limits, structural cache keys, LRU helpers,
+  and scan-cache miss diagnostics
 - ``vmec_jax/solvers/fixed_boundary/preconditioning/payload.py``:
   cached strict-update,
   preconditioner-output, fused preconditioner-apply, accepted-control, and
@@ -85,9 +86,9 @@ Top-level package layout (selected):
   dump helpers
 - ``vmec_jax/solvers/fixed_boundary/diagnostics/metric.py``: optional metric,
   preconditioner-input, and VMEC internal state-vector debug dump helpers
-- ``vmec_jax/solve_result_types.py``: solver result dataclasses, scan carry
-  containers, and ``wout``-like force-kernel PyTree containers shared by solve,
-  driver, implicit differentiation, and tests
+- ``vmec_jax/solvers/fixed_boundary/results.py``: solver result dataclasses,
+  scan carry containers, and ``wout``-like force-kernel PyTree containers
+  shared by solve, driver, implicit differentiation, and tests
 - ``vmec_jax/solvers/fixed_boundary/scan/resume.py``: VMEC2000-style scan
   resume-state initialization and carry-field restoration
 - ``vmec_jax/solvers/fixed_boundary/residual/runtime.py``:

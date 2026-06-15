@@ -718,7 +718,7 @@ def _build_patches() -> list[tuple[Any, list[tuple[str, Any]]]]:
     import vmec_jax.init_guess as _init_guess
     import vmec_jax.multigrid as _multigrid
     import vmec_jax.solve as _solve
-    import vmec_jax.solve_profile_helpers as _solve_profile_helpers
+    import vmec_jax.solvers.fixed_boundary.profiles as _solve_profile_helpers
     import vmec_jax.solvers.fixed_boundary.residual.payload_blocks as _residual_payload_blocks
 
     patches = [

@@ -190,7 +190,7 @@ def equilibrium_iota_profiles_from_state(*, state: VMECState, static, indata, si
     from .boundary import boundary_from_indata
     from .energy import _iotaf_from_iotas, flux_profiles_from_indata
     from .profiles import eval_profiles
-    from .solve_profile_helpers import _half_mesh_from_full_mesh, _mass_half_mesh_from_indata
+    from .solvers.fixed_boundary.profiles import _half_mesh_from_full_mesh, _mass_half_mesh_from_indata
     from .vmec_bcovar import vmec_bcovar_half_mesh_from_wout
 
     s = jnp.asarray(static.s)

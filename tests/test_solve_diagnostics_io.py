@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 import vmec_jax.solvers.fixed_boundary.diagnostics.io as dio
-import vmec_jax.solve_profile_helpers as sph
+import vmec_jax.solvers.fixed_boundary.profiles as sph
 
 
 def _kernel_terms(ns: int = 3):

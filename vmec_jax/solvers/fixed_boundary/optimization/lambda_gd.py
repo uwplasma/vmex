@@ -7,7 +7,7 @@ from typing import Any, Callable, Dict
 import numpy as np
 
 from ....field import TWOPI
-from ....solve_result_types import SolveLambdaResult
+from ..results import SolveLambdaResult
 from ....state import VMECState
 
 
@@ -67,7 +67,7 @@ def solve_lambda_gd_impl(
         raise ImportError("solve_lambda_gd requires JAX (jax + jaxlib)")
 
     if validate_options_func is None:
-        from ....solve_options import validate_lambda_gd_options as validate_options_func
+        from ..options import validate_lambda_gd_options as validate_options_func
     if mode00_index_func is None:
         from .constraints import mode00_index as mode00_index_func
     if eval_geom_func is None:

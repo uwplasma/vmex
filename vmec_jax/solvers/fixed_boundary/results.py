@@ -7,8 +7,8 @@ from typing import Any, Dict, NamedTuple
 
 import numpy as np
 
-from ._compat import tree_util
-from .state import VMECState
+from ..._compat import tree_util
+from ...state import VMECState
 
 
 @tree_util.register_pytree_node_class
