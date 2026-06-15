@@ -22,11 +22,13 @@ from .init_guess import initial_guess_from_boundary
 from .multigrid import interp_vmec_state
 from .profiles import eval_profiles
 from .drivers import flux as _driver_flux_helpers
+from .drivers import debug as _driver_debug_helpers
 from .drivers import finish as _driver_finish_helpers
 from .drivers import io as _driver_io_helpers
 from .drivers import output as _driver_output_helpers
 from .drivers import policy as _driver_policy_helpers
 from .drivers import results as _driver_result_helpers
+from .drivers import runtime as _driver_runtime_helpers
 from .drivers import solve as _driver_solve_helpers
 from .solve import (
     SolveVmecResidualResult,
@@ -370,117 +372,6 @@ def run_fixed_boundary(
 ):
     t_start = time.perf_counter()
     max_iter_overridden = max_iter is not _MAX_ITER_SENTINEL
-
-    def _maybe_enable_compilation_cache(*, accelerator_requested: bool = False) -> None:
-        if os.getenv("VMEC_JAX_COMPILATION_CACHE", "").strip().lower() in ("0", "false", "no", "off"):
-            return
-        if os.getenv("VMEC_JAX_DISABLE_COMPILATION_CACHE", "") not in ("", "0"):
-            return
-        from ._compat import _default_compilation_cache_dir
-
-        cache_dir = _default_compilation_cache_dir()
-        if (
-            not cache_dir
-            and bool(accelerator_requested)
-            and "JAX_COMPILATION_CACHE_DIR" not in os.environ
-            and "VMEC_JAX_COMPILATION_CACHE_DIR" not in os.environ
-            and "VMEC_JAX_COMPILATION_CACHE" not in os.environ
-        ):
-            # solver_device="gpu" is a vmec_jax runtime request, not a JAX env
-            # var, so _compat cannot see it during package import.  Enable the
-            # same machine-scoped cache policy here before the first solve
-            # compilation so fresh GPU CLI/API processes can reuse kernels.
-            os.environ["VMEC_JAX_COMPILATION_CACHE"] = "1"
-            try:
-                cache_dir = _default_compilation_cache_dir()
-            finally:
-                os.environ.pop("VMEC_JAX_COMPILATION_CACHE", None)
-        if str(cache_dir).strip().lower() in ("disabled", "0", "false", "no", "off"):
-            return
-        if not cache_dir:
-            return
-        try:
-            import jax
-            from jax.experimental.compilation_cache import compilation_cache
-
-            cache_path = Path(cache_dir)
-            try:
-                cache_path.mkdir(parents=True, exist_ok=True)
-            except Exception:
-                # Fall back to /tmp when the home cache is not writable.
-                try:
-                    cache_path = Path("/tmp/vmec_jax/jax_compilation_cache")
-                    cache_path.mkdir(parents=True, exist_ok=True)
-                except Exception:
-                    return
-            cache_dir = str(cache_path)
-            compilation_cache.set_cache_dir(cache_dir)
-            try:
-                jax.config.update("jax_enable_compilation_cache", True)
-            except Exception:
-                pass
-            try:
-                jax.config.update("jax_compilation_cache_dir", cache_dir)
-            except Exception:
-                pass
-            try:
-                min_compile = os.getenv("VMEC_JAX_CACHE_MIN_COMPILE_TIME_SECS", "0")
-                jax.config.update("jax_persistent_cache_min_compile_time_secs", float(min_compile))
-                min_entry = os.getenv("VMEC_JAX_CACHE_MIN_ENTRY_SIZE_BYTES", "-1")
-                jax.config.update("jax_persistent_cache_min_entry_size_bytes", int(min_entry))
-                xla_caches = os.getenv("VMEC_JAX_PERSISTENT_CACHE_XLA_CACHES", "").strip()
-                if not xla_caches and bool(accelerator_requested):
-                    xla_caches = "xla_gpu_per_fusion_autotune_cache_dir"
-                if xla_caches.lower() not in ("", "none", "0", "false", "no", "off"):
-                    jax.config.update("jax_persistent_cache_enable_xla_caches", xla_caches)
-                max_size = os.getenv("VMEC_JAX_COMPILATION_CACHE_MAX_SIZE", "")
-                if max_size:
-                    jax.config.update("jax_compilation_cache_max_size", int(max_size))
-                explain = os.getenv("VMEC_JAX_EXPLAIN_CACHE_MISSES", "")
-                if explain.strip().lower() not in ("", "0", "false", "no"):
-                    jax.config.update("jax_explain_cache_misses", True)
-            except Exception:
-                pass
-        except Exception:
-            return
-
-    def _maybe_dump_xc_init(*, state, static, label: str) -> None:
-        env = os.getenv("VMEC_JAX_DUMP_XC_INIT", "")
-        if not env or env == "0":
-            return
-        outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
-        outdir.mkdir(parents=True, exist_ok=True)
-        ns = int(static.cfg.ns)
-        suffix = f"_{label}" if label else ""
-        path = outdir / f"xc_init{suffix}_ns{ns}.dat"
-        from .diagnostics import vmec_internal_mn_from_state, vmec_xc_from_mn_blocks
-
-        blocks = vmec_internal_mn_from_state(state, static, apply_basis_norm=False, apply_m1_constraint=False)
-        xc_kwargs = dict(
-            rcc=blocks["rcc"],
-            rss=blocks["rss"],
-            zsc=blocks["zsc"],
-            zcs=blocks["zcs"],
-            lsc=blocks["lsc"],
-            lcs=blocks["lcs"],
-        )
-        if "rsc" in blocks:
-            xc_kwargs.update(
-                rsc=blocks.get("rsc"),
-                rcs=blocks.get("rcs"),
-                zcc=blocks.get("zcc"),
-                zss=blocks.get("zss"),
-                lcc=blocks.get("lcc"),
-                lss=blocks.get("lss"),
-            )
-        xc = vmec_xc_from_mn_blocks(cfg=static.cfg, **xc_kwargs)
-        xcdot = np.zeros_like(xc)
-        with path.open("w") as f:
-            f.write("# xc/xcdot dump (init guess)\n")
-            f.write(f"neqs={xc.size}\n")
-            f.write("columns: i xc xcdot\n")
-            for i, (x, xd) in enumerate(zip(xc, xcdot), start=1):
-                f.write(f"{i:8d}{x:24.16e}{xd:24.16e}\n")
     """Run a vmec_jax solve from an ``input.*`` file.
 
     This is the main public driver and remains backward compatible with older
@@ -562,8 +453,12 @@ def run_fixed_boundary(
         else _default_backend_name()
     )
     if not bool(_solver_device_context_active):
-        _maybe_enable_compilation_cache(
-            accelerator_requested=str(policy_backend).strip().lower() in ("gpu", "cuda", "rocm", "tpu")
+        from ._compat import _default_compilation_cache_dir
+
+        _driver_runtime_helpers.maybe_enable_compilation_cache(
+            accelerator_requested=str(policy_backend).strip().lower() in ("gpu", "cuda", "rocm", "tpu"),
+            default_compilation_cache_dir=_default_compilation_cache_dir,
+            path_cls=Path,
         )
     cfg, indata = load_config(str(input_path))
     solver_mode_explicit = solver_mode is not None
@@ -1419,7 +1314,7 @@ def run_fixed_boundary(
             st0 = restart_state_eff
         else:
             st0 = _initial_guess_with_optional_nojit(static, bdy)
-            _maybe_dump_xc_init(state=st0, static=static, label="init")
+            _driver_debug_helpers.maybe_dump_xc_init(state=st0, static=static, label="init")
         return FixedBoundaryRun(
             cfg=cfg,
             indata=indata,
@@ -1776,7 +1671,7 @@ def run_fixed_boundary(
                         boundary_coeffs,
                         force_disable_jit=bool(jit_warmup_iters > 0),
                     )
-                    _maybe_dump_xc_init(state=state, static=static_i, label="stage0")
+                    _driver_debug_helpers.maybe_dump_xc_init(state=state, static=static_i, label="stage0")
             else:
                 state = interp_vmec_state(
                     state,
