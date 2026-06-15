@@ -2835,3 +2835,68 @@ Completion:
 - Driver workflow decomposition: 84%.
 - WOUT diagnostic/profile decomposition: 72%.
 - Overall differentiability-refactor PR: 96.8%.
+
+## 2026-06-15 WOUT Nyquist Transform Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Created `vmec_jax.io.wout.nyquist` for pure NumPy VMEC `wrout.f`,
+   `symforce.f`, and `jxbforce.f` Fourier-transform helper kernels.
+2. Moved WROUT Nyquist cosine/sine analysis, LASYM split/expand helpers,
+   LASYM Nyquist loop synthesis, JXBFORCE low-pass projection helpers, and
+   Nyquist synthesis into the new package module.
+3. Kept `vmec_jax.wout` as the compatibility facade by re-exporting the
+   historical private helper names used by tests and downstream diagnostic
+   scripts.
+4. Updated `docs/code_structure.rst` and `vmec_jax.io.wout.__init__` so the
+   WOUT package responsibilities include transform helpers explicitly.
+
+Results obtained:
+
+- `wout.py` dropped from 5,894 lines at the start of this tranche to 5,118
+  lines.
+- The extracted transform code is isolated from NetCDF writing and persisted
+  diagnostic reconstruction, making the WOUT writer easier to review and
+  keeping VMEC parity kernels directly unit-testable.
+- The public/private compatibility surface remained stable; existing tests
+  continue to import the historical `vmec_jax.wout._vmec_*` helper names.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/wout.py vmec_jax/io/wout/nyquist.py tests/test_wout_helpers.py tests/test_wout_fast_helpers.py`
+- `python -m compileall -q vmec_jax/wout.py vmec_jax/io/wout/nyquist.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_helpers.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_fast_helpers.py tests/test_wout_wave2.py tests/test_wout_wave3_coverage.py tests/test_wout_wave4_coverage.py tests/test_wout_wave5_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_branch_coverage.py tests/test_wout_env_branch_coverage.py tests/test_wout_bcovar_forces_extra_coverage.py tests/test_wout_driver_wave10_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_helpers.py tests/test_wout_fast_helpers.py tests/test_wout_wave2.py tests/test_wout_wave3_coverage.py tests/test_wout_wave4_coverage.py tests/test_wout_wave5_coverage.py tests/test_wout_branch_coverage.py tests/test_wout_env_branch_coverage.py tests/test_wout_bcovar_forces_extra_coverage.py tests/test_wout_driver_wave10_coverage.py -q`
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 20 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. Run a docs fast-build and the broad driver/solve/WOUT shard before
+   committing this WOUT transform tranche.
+2. Continue WOUT decomposition with the JXBFORCE/Mercier reducer seam only
+   after identifying monkeypatch-sensitive tests, because `_compute_bsubs_half_mesh`
+   and `_compute_mercier` are still long and tightly coupled to WOUT output.
+3. Continue driver decomposition at stage-dispatch seams, keeping the CLI/public
+   `run_fixed_boundary` facade stable.
+4. Keep adaptive full-loop free-boundary differentiability conservative until a
+   true fingerprint-gated adaptive AD-vs-central-FD gate exists.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 98.8%.
+- Differentiability/refactor implementation: 99.45%.
+- Solver monolith reduction: 86.5%.
+- Free-boundary adjoint monolith reduction: 65%.
+- Driver workflow decomposition: 84%.
+- WOUT diagnostic/profile decomposition: 76%.
+- Overall differentiability-refactor PR: 97.1%.
