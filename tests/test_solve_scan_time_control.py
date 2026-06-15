@@ -9,7 +9,9 @@ from vmec_jax.solve_scan_time_control import (
     RESTART_NONE,
     RESTART_STAGE,
     RESTART_TIME,
+    ScanCheckpointResiduals,
     scan_fallback_probe_update,
+    scan_checkpoint_update,
     scan_restart_decision,
     scan_restart_transition,
     scan_stage_spike_post_scalars,
@@ -20,6 +22,21 @@ from vmec_jax.solve_scan_time_control import (
 
 def _scalar(value):
     return np.asarray(value).item()
+
+
+def _eager_cond(cond, true_fun, false_fun, operand):
+    return true_fun(operand) if bool(np.asarray(cond)) else false_fun(operand)
+
+
+def _checkpoint_residuals(start: float) -> ScanCheckpointResiduals:
+    return ScanCheckpointResiduals(
+        fsqr=jnp.asarray(start),
+        fsqz=jnp.asarray(start + 1.0),
+        fsql=jnp.asarray(start + 2.0),
+        fsqr1=jnp.asarray(start + 3.0),
+        fsqz1=jnp.asarray(start + 4.0),
+        fsql1=jnp.asarray(start + 5.0),
+    )
 
 
 def _probe_update(**overrides):
@@ -399,6 +416,61 @@ def test_skip_timecontrol_tightens_res0_but_suppresses_checkpoint_and_restart():
     assert not _scalar(decision.restart_time)
     assert not _scalar(decision.do_restart)
     assert _scalar(decision.restart_reason) == RESTART_NONE
+
+
+def test_scan_checkpoint_update_initializes_state_without_storing_residual_scalars():
+    update = scan_checkpoint_update(
+        skip_timecontrol=jnp.asarray(False),
+        init_mask=jnp.asarray(True),
+        checkpoint_mask=jnp.asarray(False),
+        current_state="current",
+        previous_state_checkpoint="old",
+        current_residuals=_checkpoint_residuals(1.0),
+        previous_residuals=_checkpoint_residuals(10.0),
+        cond_func=_eager_cond,
+    )
+
+    assert update.state_checkpoint == "current"
+    np.testing.assert_allclose(_scalar(update.residuals.fsqr), 10.0)
+    np.testing.assert_allclose(_scalar(update.residuals.fsql1), 15.0)
+
+
+def test_scan_checkpoint_update_stores_current_state_and_residual_scalars_on_checkpoint():
+    update = scan_checkpoint_update(
+        skip_timecontrol=jnp.asarray(False),
+        init_mask=jnp.asarray(False),
+        checkpoint_mask=jnp.asarray(True),
+        current_state="current",
+        previous_state_checkpoint="old",
+        current_residuals=_checkpoint_residuals(1.0),
+        previous_residuals=_checkpoint_residuals(10.0),
+        cond_func=_eager_cond,
+    )
+
+    assert update.state_checkpoint == "current"
+    np.testing.assert_allclose(_scalar(update.residuals.fsqr), 1.0)
+    np.testing.assert_allclose(_scalar(update.residuals.fsqz), 2.0)
+    np.testing.assert_allclose(_scalar(update.residuals.fsql), 3.0)
+    np.testing.assert_allclose(_scalar(update.residuals.fsqr1), 4.0)
+    np.testing.assert_allclose(_scalar(update.residuals.fsqz1), 5.0)
+    np.testing.assert_allclose(_scalar(update.residuals.fsql1), 6.0)
+
+
+def test_scan_checkpoint_update_skip_timecontrol_preserves_previous_checkpoint():
+    update = scan_checkpoint_update(
+        skip_timecontrol=jnp.asarray(True),
+        init_mask=jnp.asarray(True),
+        checkpoint_mask=jnp.asarray(False),
+        current_state="current",
+        previous_state_checkpoint="old",
+        current_residuals=_checkpoint_residuals(1.0),
+        previous_residuals=_checkpoint_residuals(10.0),
+        cond_func=_eager_cond,
+    )
+
+    assert update.state_checkpoint == "old"
+    np.testing.assert_allclose(_scalar(update.residuals.fsqr), 10.0)
+    np.testing.assert_allclose(_scalar(update.residuals.fsql1), 15.0)
 
 
 def test_time_control_restart_and_non_vmec_iter_offset_branch():
