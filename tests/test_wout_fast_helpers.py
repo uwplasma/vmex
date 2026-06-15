@@ -239,6 +239,9 @@ def test_eqfor_beta_aspect_and_ctor_match_vmec_normalizations() -> None:
     free_exact = InData(scalars={"LFREEB": True, "ICTRL_PREC2D": 1, "LHESS_EXACT": True}, indexed={})
     buco = np.asarray([1.0, 2.0, 4.0])
     assert _compute_ctor_from_buco(buco=buco, signgs=-1, indata=fixed_bdy) == pytest.approx(-2.0 * np.pi * 5.0 / MU0)
+    assert wout_diagnostics.compute_ctor_from_buco(buco=buco, signgs=-1, indata=fixed_bdy) == pytest.approx(
+        _compute_ctor_from_buco(buco=buco, signgs=-1, indata=fixed_bdy)
+    )
     assert _compute_ctor_from_buco(buco=buco, signgs=1, indata=free_legacy) == pytest.approx(2.0 * np.pi * 4.0 / MU0)
     assert _compute_ctor_from_buco(buco=buco, signgs=1, indata=free_exact) == pytest.approx(2.0 * np.pi * 4.0 / MU0)
     assert _compute_ctor_from_buco(buco=np.asarray([1.0]), signgs=1, indata=fixed_bdy) == 0.0

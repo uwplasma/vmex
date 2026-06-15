@@ -48,6 +48,7 @@ from .vmec_tomnsp import vmec_trig_tables
 
 MU0 = 4e-7 * np.pi  # N/A^2
 _compute_aspectratio = _wout_diagnostics.compute_aspectratio
+_compute_ctor_from_buco = _wout_diagnostics.compute_ctor_from_buco
 _compute_eqfor_beta = _wout_diagnostics.compute_eqfor_beta
 _compute_eqfor_betaxis = _wout_diagnostics.compute_eqfor_betaxis
 _glasser_from_wout_mercier_terms = _wout_diagnostics.glasser_from_wout_mercier_terms
@@ -577,27 +578,6 @@ def _apply_bsubv_equif_correction(
         bsubv_h[js] = bsubv_h[js] + curpol
 
     return bsubv_h
-
-
-def _compute_ctor_from_buco(*, buco: np.ndarray, signgs: int, indata) -> float:
-    ns = int(buco.shape[0])
-    if ns < 2:
-        return 0.0
-    lfreeb = bool(indata.get_bool("LFREEB", False))
-    ictrl_prec2d = int(indata.get_int("ICTRL_PREC2D", 0))
-    lhess_exact = bool(indata.get_bool("LHESS_EXACT", False))
-    if lhess_exact:
-        lctor = lfreeb and (ictrl_prec2d != 0)
-    else:
-        lctor = lfreeb and (ictrl_prec2d > 1)
-    if lctor:
-        ctor_prec2d = 0.0
-        ctor = float(signgs) * (2.0 * np.pi) * (float(buco[-1]) + ctor_prec2d)
-    else:
-        ctor = float(signgs) * (2.0 * np.pi) * (1.5 * float(buco[-1]) - 0.5 * float(buco[-2]))
-    # VMEC wrout stores ctor in SI current units.  The buco edge integral is in
-    # VMEC magnetic units, so apply the same 1/mu0 conversion used by jxbforce.
-    return float(ctor / MU0)
 
 
 def _compute_bsubs_half_mesh(

@@ -1329,6 +1329,13 @@ Results obtained:
     monkeypatch-based WOUT synthesis tests.  Focused WOUT and implicit-driver
     helper tests, Ruff, and compileall passed.  `wout.py` decreased to
     6144 lines.
+67. Moved VMEC `ctor` reconstruction from `buco` into
+    `wout_diagnostics.py`.  Free-boundary and fixed-boundary current
+    normalization now lives with the other persisted-WOUT scalar diagnostics,
+    including the explicit SI-unit `mu0` conversion, while `wout.py` keeps the
+    private `_compute_ctor_from_buco` alias for compatibility.  Focused WOUT,
+    non-solve, and implicit-driver helper tests, Ruff, and compileall passed.
+    `wout.py` decreased to 6124 lines.
 
 Best next steps:
 
@@ -1356,9 +1363,9 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 84%.
+- Differentiability/refactor implementation: 85%.
 - Source-health instrumentation: 100%.
 - Solver monolith reduction: 60% of the large-file extraction work.
 - Free-boundary adjoint monolith reduction: 26%.
 - Driver workflow decomposition: 35%.
-- WOUT diagnostic decomposition: 10%.
+- WOUT diagnostic decomposition: 11%.
