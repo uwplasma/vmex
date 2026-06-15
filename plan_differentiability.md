@@ -2900,3 +2900,66 @@ Completion:
 - Driver workflow decomposition: 84%.
 - WOUT diagnostic/profile decomposition: 76%.
 - Overall differentiability-refactor PR: 97.1%.
+
+## 2026-06-15 WOUT Mercier/JXBFORCE Reducer Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved the VMEC `mercier.f`/`jxbforce.f`-style reducer implementation from
+   the monolithic `vmec_jax.wout` writer into `vmec_jax.io.wout.mercier`.
+2. Kept `wout._compute_mercier` as a thin compatibility wrapper with explicit
+   dependency injection for monkeypatch-sensitive helper seams:
+   `_compute_bsubs_half_mesh`, parity split/expand helpers, JXBFORCE filters,
+   Bsubs correction helpers, and VMEC angular weights.
+3. Left the external call surface unchanged so finite-beta tests, WOUT
+   synthesis, and downstream diagnostic scripts still call
+   `vmec_jax.wout._compute_mercier` when needed.
+4. Updated the WOUT package docs to identify Mercier/JXBFORCE reducer kernels
+   as part of the `io.wout` domain package.
+
+Results obtained:
+
+- `wout.py` dropped further from 5,118 to 4,461 lines.
+- The long Mercier reducer remains covered as a single physics kernel, but is
+  now isolated from NetCDF writing and WOUT schema code.
+- Existing monkeypatch-based tests still validate the wrapper path, so the
+  refactor preserves current debugging hooks while making future DMerc/`D_R`
+  AD-vs-FD gates easier to target at the reducer module.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/wout.py vmec_jax/io/wout/mercier.py tests/test_finite_beta.py tests/test_wout_physics_wave8_coverage.py tests/test_wout_wave4_coverage.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_physics_wave8_coverage.py::test_compute_mercier_lasym_lbsubs_branch_with_reduced_bsub_inputs tests/test_wout_wave4_coverage.py::test_compute_mercier_exact_sum_symmetrizes_full_grid_inputs_and_stays_finite -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_finite_beta.py tests/test_wout_physics_wave8_coverage.py tests/test_wout_wave4_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_helpers.py tests/test_wout_branch_coverage.py tests/test_wout_env_branch_coverage.py tests/test_wout_bcovar_forces_extra_coverage.py tests/test_driver_wout_wave9_coverage.py tests/test_wout_additional_helpers.py -q`
+- `python -m compileall -q vmec_jax/wout.py vmec_jax/io/wout/mercier.py vmec_jax/io/wout/nyquist.py`
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 20 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. Run fast docs, ruff on the WOUT package, and a broad driver/WOUT integration
+   shard before committing this reducer tranche.
+2. Continue WOUT decomposition by moving `_compute_bsubs_half_mesh` and
+   JXBFORCE Bsubs correction helpers only with the same dependency-injected
+   wrapper pattern, because those helpers are monkeypatched by several tests.
+3. Continue driver-stage decomposition after the WOUT tranche is green in CI.
+4. Use the new `io.wout.mercier` seam for future DMerc/`D_R` AD-vs-FD tests,
+   instead of adding more tests against the monolithic WOUT writer.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.0%.
+- Differentiability/refactor implementation: 99.5%.
+- Solver monolith reduction: 86.5%.
+- Free-boundary adjoint monolith reduction: 65%.
+- Driver workflow decomposition: 84%.
+- WOUT diagnostic/profile decomposition: 80%.
+- Overall differentiability-refactor PR: 97.4%.
