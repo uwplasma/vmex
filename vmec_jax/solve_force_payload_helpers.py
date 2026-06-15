@@ -163,6 +163,114 @@ def preconditioner_output_blocks_np(*, frzl_rz, lam_prec) -> ForceBlocks:
     )
 
 
+def preconditioner_output_blocks_jax(*, frzl_rz, lam_prec) -> ForceBlocks:
+    """Apply lambda preconditioner factors to device preconditioner outputs."""
+    lam = jnp.asarray(lam_prec)
+    frcc = jnp.asarray(frzl_rz.frcc)
+    fzsc = jnp.asarray(frzl_rz.fzsc)
+    flsc = jnp.asarray(frzl_rz.flsc) * lam
+    frsc = jnp.zeros_like(frcc)
+    frcs = jnp.zeros_like(frcc)
+    fzcc = jnp.zeros_like(fzsc)
+    fzss = jnp.zeros_like(fzsc)
+    flcc = jnp.zeros_like(flsc)
+    flss = jnp.zeros_like(flsc)
+    if getattr(frzl_rz, "frsc", None) is not None:
+        frsc = jnp.asarray(frzl_rz.frsc)
+    if getattr(frzl_rz, "frcs", None) is not None:
+        frcs = jnp.asarray(frzl_rz.frcs)
+    if getattr(frzl_rz, "fzcc", None) is not None:
+        fzcc = jnp.asarray(frzl_rz.fzcc)
+    if getattr(frzl_rz, "fzss", None) is not None:
+        fzss = jnp.asarray(frzl_rz.fzss)
+    if getattr(frzl_rz, "flcc", None) is not None:
+        flcc = jnp.asarray(frzl_rz.flcc) * lam
+    if getattr(frzl_rz, "flss", None) is not None:
+        flss = jnp.asarray(frzl_rz.flss) * lam
+    return ForceBlocks(
+        frcc=frcc,
+        frss=frzl_rz.frss,
+        fzsc=fzsc,
+        fzcs=frzl_rz.fzcs,
+        flsc=flsc,
+        flcs=None if frzl_rz.flcs is None else (jnp.asarray(frzl_rz.flcs) * lam),
+        frsc=frsc,
+        frcs=frcs,
+        fzcc=fzcc,
+        fzss=fzss,
+        flcc=flcc,
+        flss=flss,
+    )
+
+
+def radial_preconditioner_output_blocks_jax(
+    *,
+    frzl,
+    rz_scale,
+    l_scale,
+    precond_radial_alpha,
+    precond_lambda_alpha,
+    apply_radial_tridi_func,
+) -> ForceBlocks:
+    """Apply the scalar radial preconditioner policy to residual force blocks."""
+
+    rz_weight = jnp.asarray(rz_scale)[:, None, None]
+    l_weight = jnp.asarray(l_scale)[:, None, None]
+    frcc = apply_radial_tridi_func(frzl.frcc * rz_weight, precond_radial_alpha)
+    fzsc = apply_radial_tridi_func(frzl.fzsc * rz_weight, precond_radial_alpha)
+    flsc = apply_radial_tridi_func(frzl.flsc * l_weight, precond_lambda_alpha)
+    return ForceBlocks(
+        frcc=frcc,
+        frss=(
+            apply_radial_tridi_func(frzl.frss * rz_weight, precond_radial_alpha)
+            if frzl.frss is not None
+            else None
+        ),
+        fzsc=fzsc,
+        fzcs=(
+            apply_radial_tridi_func(frzl.fzcs * rz_weight, precond_radial_alpha)
+            if frzl.fzcs is not None
+            else None
+        ),
+        flsc=flsc,
+        flcs=(
+            apply_radial_tridi_func(frzl.flcs * l_weight, precond_lambda_alpha)
+            if frzl.flcs is not None
+            else None
+        ),
+        frsc=(
+            apply_radial_tridi_func(frzl.frsc * rz_weight, precond_radial_alpha)
+            if getattr(frzl, "frsc", None) is not None
+            else jnp.zeros_like(frcc)
+        ),
+        frcs=(
+            apply_radial_tridi_func(frzl.frcs * rz_weight, precond_radial_alpha)
+            if getattr(frzl, "frcs", None) is not None
+            else jnp.zeros_like(frcc)
+        ),
+        fzcc=(
+            apply_radial_tridi_func(frzl.fzcc * rz_weight, precond_radial_alpha)
+            if getattr(frzl, "fzcc", None) is not None
+            else jnp.zeros_like(fzsc)
+        ),
+        fzss=(
+            apply_radial_tridi_func(frzl.fzss * rz_weight, precond_radial_alpha)
+            if getattr(frzl, "fzss", None) is not None
+            else jnp.zeros_like(fzsc)
+        ),
+        flcc=(
+            apply_radial_tridi_func(frzl.flcc * l_weight, precond_lambda_alpha)
+            if getattr(frzl, "flcc", None) is not None
+            else jnp.zeros_like(flsc)
+        ),
+        flss=(
+            apply_radial_tridi_func(frzl.flss * l_weight, precond_lambda_alpha)
+            if getattr(frzl, "flss", None) is not None
+            else jnp.zeros_like(flsc)
+        ),
+    )
+
+
 _ForceBlocks = ForceBlocks
 _zero_edge_rz_force_block = zero_edge_rz_force_block
 _zero_edge_rz_force_blocks = zero_edge_rz_force_blocks
@@ -170,3 +278,5 @@ _normalize_force_blocks = normalize_force_blocks
 _residual_force_payload_after_m1_scalxc = residual_force_payload_after_m1_scalxc
 _residual_force_payload_m1_scalxc_stages = residual_force_payload_m1_scalxc_stages
 _preconditioner_output_blocks_np = preconditioner_output_blocks_np
+_preconditioner_output_blocks_jax = preconditioner_output_blocks_jax
+_radial_preconditioner_output_blocks_jax = radial_preconditioner_output_blocks_jax
