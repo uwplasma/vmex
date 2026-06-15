@@ -12,6 +12,7 @@ from vmec_jax.boundary import BoundaryCoeffs
 from vmec_jax.finite_beta import FiniteBetaTargets
 from vmec_jax.modes import ModeTable
 from vmec_jax.namelist import InData
+from vmec_jax.optimization_workflow import DMerc, GlasserResistiveInterchange, StageContext
 from vmec_jax.vmec_realspace import vmec_realspace_synthesis_multi
 from vmec_jax.vmec_tomnsp import vmec_trig_tables
 
@@ -533,6 +534,49 @@ def test_mercier_terms_from_state_dmerc_and_d_r_ad_match_central_fd(monkeypatch)
     for key in ("DMerc", "D_R"):
         grad_ad = jax.grad(lambda scale: objective(scale, key))(scale0)
         grad_fd = (objective(scale0 + eps, key) - objective(scale0 - eps, key)) / (2.0 * eps)
+        assert np.isfinite(float(np.asarray(grad_ad)))
+        assert np.isfinite(float(np.asarray(grad_fd)))
+        np.testing.assert_allclose(np.asarray(grad_ad), np.asarray(grad_fd), rtol=5.0e-6, atol=5.0e-8)
+
+
+def test_mercier_objective_wrappers_ad_match_central_fd(monkeypatch):
+    import jax
+
+    _state, static, shape = _make_fake_mercier_state_inputs()
+    _patch_fake_mercier_state_dependencies(monkeypatch, shape)
+    ctx = StageContext(
+        static=static,
+        indata=object(),
+        boundary_input=object(),
+        specs=(),
+        signgs=1,
+        flux=object(),
+        pressure=object(),
+    )
+
+    def state_for_scale(scale):
+        zeros = jnp.zeros((4, 1), dtype=jnp.float64)
+        return SimpleNamespace(
+            Rcos=jnp.asarray([[scale], [1.0], [1.0], [1.0]], dtype=jnp.float64),
+            Rsin=zeros,
+            Zcos=zeros,
+            Zsin=zeros,
+        )
+
+    objectives = (
+        DMerc(minimum=-0.1, softness=5.0e-2),
+        GlasserResistiveInterchange(maximum=0.25, softness=5.0e-2, shear_epsilon=1.0e-10),
+    )
+    scale0 = jnp.asarray(1.0, dtype=jnp.float64)
+    eps = jnp.asarray(1.0e-5, dtype=jnp.float64)
+    for objective in objectives:
+
+        def scalar_residual_sum(scale):
+            values = jnp.asarray(objective.J(ctx, state_for_scale(scale)), dtype=jnp.float64)
+            return jnp.sum(values)
+
+        grad_ad = jax.grad(scalar_residual_sum)(scale0)
+        grad_fd = (scalar_residual_sum(scale0 + eps) - scalar_residual_sum(scale0 - eps)) / (2.0 * eps)
         assert np.isfinite(float(np.asarray(grad_ad)))
         assert np.isfinite(float(np.asarray(grad_fd)))
         np.testing.assert_allclose(np.asarray(grad_ad), np.asarray(grad_fd), rtol=5.0e-6, atol=5.0e-8)

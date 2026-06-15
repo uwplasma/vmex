@@ -1428,8 +1428,7 @@ class MagneticWell:
 
     def J(self, ctx: StageContext, state):
         deficit = float(self.minimum) - self.well(ctx, state)
-        softness = jnp.asarray(float(self.softness), dtype=jnp.float64)
-        return softness * jnp.logaddexp(jnp.asarray(0.0, dtype=jnp.float64), deficit / softness)
+        return _smooth_positive_part(deficit, softness=self.softness)
 
     def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
         if not _target_is_zero(target):
@@ -1508,8 +1507,7 @@ class DMerc:
         dmerc = jnp.asarray(self.terms(ctx, state)["DMerc"], dtype=jnp.float64)
         active = dmerc[1:-1] if int(dmerc.shape[0]) > 2 else jnp.zeros((0,), dtype=dmerc.dtype)
         deficit = float(self.minimum) - active
-        softness = jnp.asarray(float(self.softness), dtype=jnp.float64)
-        return softness * jnp.logaddexp(jnp.asarray(0.0, dtype=jnp.float64), deficit / softness)
+        return _smooth_positive_part(deficit, softness=self.softness)
 
     def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
         if not _target_is_zero(target):
@@ -1570,8 +1568,7 @@ class GlasserResistiveInterchange:
         d_r = jnp.asarray(self.terms(ctx, state)["D_R"], dtype=jnp.float64)
         active = d_r[1:-1] if int(d_r.shape[0]) > 2 else jnp.zeros((0,), dtype=d_r.dtype)
         excess = active - float(self.maximum)
-        softness = jnp.asarray(float(self.softness), dtype=jnp.float64)
-        return softness * jnp.logaddexp(jnp.asarray(0.0, dtype=jnp.float64), excess / softness)
+        return _smooth_positive_part(excess, softness=self.softness)
 
     def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
         if not _target_is_zero(target):
