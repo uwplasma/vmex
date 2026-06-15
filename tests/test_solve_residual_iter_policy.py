@@ -10,6 +10,7 @@ from vmec_jax.solve_residual_iter_policy import (
     resolve_light_history,
     resolve_restart_flags,
     scan_fallback_decision,
+    scan_fallback_message,
     stage_transition_restart_reason,
 )
 
@@ -279,6 +280,36 @@ def test_scan_fallback_decision_uses_full_diagnostics_and_probe_message():
     assert decision.fsq_min_full == pytest.approx(0.1)
     assert decision.fsq_max_full == pytest.approx(30.0)
     assert decision.fsq_all_finite
+
+
+def test_scan_fallback_message_preserves_reason_and_probe_payload():
+    decision = scan_fallback_decision(
+        diagnostics={
+            "abort_scan": True,
+            "fsqr_full": np.asarray([0.25, 50.0]),
+            "fsqz_full": np.zeros(2),
+            "fsql_full": np.zeros(2),
+            "probe_count": 2,
+            "probe_accept_frac": 0.0,
+            "probe_ratio": 200.0,
+            "probe_fsq_min": 0.25,
+        },
+        fsqr_history=np.asarray([1.0]),
+        fsqz_history=np.asarray([0.0]),
+        fsql_history=np.asarray([0.0]),
+        max_iter=2,
+        fallback_iters=2,
+        badjac_limit=10,
+        fsq_abs=1.0e-2,
+        accept_frac=0.5,
+        fsq_factor=50.0,
+    )
+
+    assert scan_fallback_message(decision) == (
+        "[solve_fixed_boundary_residual_iter] "
+        "scan fallback -> non-scan (abort_scan) "
+        "(probe_count=2 probe_accept_frac=0.00 probe_ratio=200.00 probe_fsq_min=2.500e-01)"
+    )
 
 
 def test_scan_fallback_decision_suppresses_weak_failure_signals():

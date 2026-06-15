@@ -1458,6 +1458,14 @@ Results obtained:
     open-coding it in `wout.py`.  Direct tests cover missing variables,
     persisted variables, and legacy `H` naming; the full WOUT helper suite and
     finite-beta Glasser materialization gate passed along with Ruff.
+81. Moved VMEC2000 scan fallback reporting into
+    `solve_residual_iter_policy.py` as `scan_fallback_message`.  The solver
+    still owns the actual branch transition back to non-scan iteration, but the
+    user-facing reason/probe formatting is now a pure, tested policy helper.
+    Focused residual-iteration policy tests, the scan fallback integration
+    coverage test, Ruff, compileall, and the full `driver-solve-discrete` shard
+    passed locally (`912 passed, 30 skipped`).  `solve.py` decreased to
+    10119 lines.
 
 Best next steps:
 
@@ -1484,9 +1492,9 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 92%.
+- Differentiability/refactor implementation: 93%.
 - Source-health instrumentation: 100%.
-- Solver monolith reduction: 69% of the large-file extraction work.
+- Solver monolith reduction: 71% of the large-file extraction work.
 - Free-boundary adjoint monolith reduction: 30%.
 - Driver workflow decomposition: 35%.
-- WOUT diagnostic decomposition: 16%.
+- WOUT diagnostic decomposition: 18%.

@@ -49,6 +49,7 @@ from .solve_residual_iter_policy import (
     resolve_restart_flags as _resolve_restart_flags,
     residual_iter_history_record as _residual_iter_history_record,
     scan_fallback_decision as _scan_fallback_decision,
+    scan_fallback_message as _scan_fallback_message,
     vmec2000_scan_options_from_env as _vmec2000_scan_options_from_env,
     vmec2000_time_control_decision as _vmec2000_time_control_decision,
 )
@@ -5215,12 +5216,7 @@ def solve_fixed_boundary_residual_iter(
                 )
                 if fallback_decision.fallback:
                     if verbose:
-                        print(
-                            "[solve_fixed_boundary_residual_iter] "
-                            f"scan fallback -> non-scan ({fallback_decision.reason_text})"
-                            f"{fallback_decision.probe_message}",
-                            flush=True,
-                        )
+                        print(_scan_fallback_message(fallback_decision), flush=True)
                     use_scan = False
                     resume_state = None
                     state = state0

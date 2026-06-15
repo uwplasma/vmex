@@ -95,6 +95,21 @@ class ScanFallbackDecision(NamedTuple):
     fsq_all_finite: bool
 
 
+def scan_fallback_message(decision: ScanFallbackDecision) -> str:
+    """Return the user-facing VMEC2000 scan fallback message.
+
+    The solver owns the actual branch transition back to the host loop.  This
+    helper only centralizes the formatting so tests can validate the diagnostic
+    contract without executing the full residual iteration.
+    """
+
+    return (
+        "[solve_fixed_boundary_residual_iter] "
+        f"scan fallback -> non-scan ({decision.reason_text})"
+        f"{decision.probe_message}"
+    )
+
+
 @dataclass(frozen=True)
 class Vmec2000ScanOptions:
     scan_print_env: str
