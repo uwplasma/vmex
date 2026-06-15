@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 import vmec_jax.free_boundary_adjoint as fba
+import vmec_jax.free_boundary_adjoint_replay_plan_helpers as replay_plan_helpers
 import vmec_jax.free_boundary_adjoint_runtime_helpers as runtime_helpers
 import vmec_jax.free_boundary_adjoint_trace_controls as trace_controls
 import vmec_jax.free_boundary_adjoint_trace_fingerprint as trace_fingerprint
@@ -149,6 +150,9 @@ def test_free_boundary_adjoint_trace_stackability_error_paths() -> None:
         fba.direct_coil_accepted_trace_fingerprint_delta_summary
         is trace_fingerprint.direct_coil_accepted_trace_fingerprint_delta_summary
     )
+    assert fba._extract_adjoint_step_trace is replay_plan_helpers.extract_adjoint_step_trace
+    assert fba._slice_replay_controls is replay_plan_helpers.slice_replay_controls
+    assert fba._stackability_probe is replay_plan_helpers.stackability_probe
     assert fba._stack_trace_control_field is trace_stack.stack_trace_control_field
     assert fba._stack_trace_pytree_field is trace_stack.stack_trace_pytree_field
     assert fba._stack_optional_trace_pytree_field is trace_stack.stack_optional_trace_pytree_field
@@ -603,6 +607,13 @@ def test_accepted_trace_control_metadata_and_stack_contracts() -> None:
     )
     assert graph["active_free_boundary_replay_steps"] == 1
     assert graph["inferred_boundary_shape"] == [2, 2]
+    sliced = replay_plan_helpers.slice_replay_controls(
+        {"a": np.asarray([1, 2, 3]), "nested": {"b": np.asarray([[1], [2], [3]])}},
+        start=1,
+        stop=3,
+    )
+    np.testing.assert_array_equal(np.asarray(sliced["a"]), np.asarray([2, 3]))
+    np.testing.assert_array_equal(np.asarray(sliced["nested"]["b"]), np.asarray([[2], [3]]))
 
     plan = fba.direct_coil_accepted_trace_controller_replay_plan(
         missing_optional,

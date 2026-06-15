@@ -1225,6 +1225,12 @@ Results obtained:
     with the controller-control payload builder while `free_boundary_adjoint.py`
     keeps compatibility aliases.  Focused branch metadata/control tests, Ruff,
     and compileall passed.
+52. Extracted replay-plan utility helpers into
+    `free_boundary_adjoint_replay_plan_helpers.py`.  Trace extraction from
+    result/report containers, stacked-control slicing, and stackability probing
+    now live outside the main adjoint module with private compatibility aliases
+    retained.  Focused replay-plan/control tests, Ruff, and compileall passed.
+    `free_boundary_adjoint.py` decreased to 6248 lines.
 
 Best next steps:
 
@@ -1252,9 +1258,9 @@ complete.
 Completion:
 
 - Differentiability/refactor plan: 100%.
-- Differentiability/refactor implementation: 69%.
+- Differentiability/refactor implementation: 70%.
 - Source-health instrumentation: 100%.
 - Solver monolith reduction: 57% of the large-file extraction work.
-- Free-boundary adjoint monolith reduction: 18%.
+- Free-boundary adjoint monolith reduction: 19%.
 - Driver workflow decomposition: 34%.
 - WOUT diagnostic decomposition: 4%.

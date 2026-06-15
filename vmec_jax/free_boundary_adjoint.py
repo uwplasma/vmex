@@ -50,6 +50,11 @@ from .free_boundary_adjoint_runtime_helpers import (
     block_until_ready_for_timing as _runtime_block_until_ready_for_timing,
     jax_named_scope as _runtime_jax_named_scope,
 )
+from .free_boundary_adjoint_replay_plan_helpers import (
+    extract_adjoint_step_trace as _extract_adjoint_step_trace,
+    slice_replay_controls as _slice_replay_controls,
+    stackability_probe as _stackability_probe,
+)
 from .free_boundary_adjoint_trace_stack import (
     stack_optional_trace_pytree_field as _stack_optional_trace_pytree_field,
     stack_trace_control_field as _stack_trace_control_field,
@@ -2787,15 +2792,6 @@ def _direct_coil_boundary_replay_contexts_by_shape(static: Any, trace_seq: tuple
     return contexts
 
 
-def _slice_replay_controls(controls: Mapping[str, Any], *, start: int, stop: int) -> dict[str, Any]:
-    """Slice stacked replay controls without rebuilding them from traces."""
-
-    return tree_util.tree_map(
-        lambda value, start=start, stop=stop: jnp.asarray(value)[start:stop],
-        controls,
-    )
-
-
 def direct_coil_accepted_trace_controller_replay_plan(
     traces: Any,
     *,
@@ -2965,49 +2961,6 @@ def direct_coil_accepted_trace_controller_replay_plan(
             "use_accepted_only_fast_path": bool(use_accepted_only_fast_path),
         },
     }
-
-
-def _extract_adjoint_step_trace(source: Any) -> tuple[Any, ...]:
-    if isinstance(source, Mapping):
-        if "adjoint_step_trace" in source:
-            return tuple(source["adjoint_step_trace"])
-        if "diagnostics" in source and isinstance(source["diagnostics"], Mapping):
-            diagnostics = source["diagnostics"]
-            if "adjoint_step_trace" in diagnostics:
-                return tuple(diagnostics["adjoint_step_trace"])
-    diagnostics = getattr(source, "diagnostics", None)
-    if isinstance(diagnostics, Mapping) and "adjoint_step_trace" in diagnostics:
-        return tuple(diagnostics["adjoint_step_trace"])
-    result = getattr(source, "result", None)
-    result_diagnostics = getattr(result, "diagnostics", None)
-    if isinstance(result_diagnostics, Mapping) and "adjoint_step_trace" in result_diagnostics:
-        return tuple(result_diagnostics["adjoint_step_trace"])
-    if isinstance(source, (str, bytes)):
-        raise RuntimeError(
-            "No adjoint_step_trace found. Run the residual solver with "
-            "adjoint_trace=True and adjoint_trace_mode='full'."
-        )
-    try:
-        traces = tuple(source)
-    except TypeError as exc:
-        raise RuntimeError(
-            "No adjoint_step_trace found. Run the residual solver with "
-            "adjoint_trace=True and adjoint_trace_mode='full'."
-        ) from exc
-    if traces and all(isinstance(trace, Mapping) for trace in traces):
-        return traces
-    raise RuntimeError(
-        "No adjoint_step_trace found. Run the residual solver with "
-        "adjoint_trace=True and adjoint_trace_mode='full'."
-    )
-
-
-def _stackability_probe(name: str, fn: Any, traces: tuple[Any, ...]) -> tuple[bool, str | None]:
-    try:
-        fn(traces)
-    except Exception as exc:
-        return False, f"{name}: {exc}"
-    return True, None
 
 
 def free_boundary_adjoint_trace_replay_diagnostics(
