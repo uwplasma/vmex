@@ -497,6 +497,7 @@ def _bsubuv_parity_from_state(**kwargs) -> tuple[np.ndarray, np.ndarray, np.ndar
     """Construct parity-separated bsubu/bsubv using VMEC internal even/odd splitting."""
     return _wout_bsubs_helpers.bsubuv_parity_from_state(**kwargs)
 
+
 def _bsubuv_parity_from_coeffs(**kwargs) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Split bsubu/bsubv into even/odd m parity using Fourier coefficients."""
     return _wout_bsubs_helpers.bsubuv_parity_from_coeffs(**kwargs)
@@ -506,23 +507,10 @@ def _bsubuv_parity_from_realspace_jxbforce(**kwargs) -> tuple[np.ndarray, np.nda
     """Recover jxbforce parity channels directly from real-space bsubu/bsubv."""
     return _wout_bsubs_helpers.bsubuv_parity_from_realspace_jxbforce(**kwargs)
 
-def _bsubuv_parity_from_bcovar(
-    *,
-    bsubu_even: np.ndarray,
-    bsubv_even: np.ndarray,
-    s: np.ndarray,
-    iequi: int = 0,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+
+def _bsubuv_parity_from_bcovar(**kwargs) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Construct parity-separated bsubu/bsubv from bcovar even components."""
-    s_full = np.asarray(s, dtype=float)
-    psqrts = np.sqrt(np.maximum(s_full, 0.0))[:, None, None]
-    pshalf = _pshalf_from_s(s_full)[:, None, None]
-    scale = pshalf if int(iequi) == 1 else psqrts
-    bsubu_even = np.asarray(bsubu_even, dtype=float)
-    bsubv_even = np.asarray(bsubv_even, dtype=float)
-    bsubu_odd = scale * bsubu_even
-    bsubv_odd = scale * bsubv_even
-    return bsubu_even, bsubu_odd, bsubv_even, bsubv_odd
+    return _wout_bsubs_helpers.bsubuv_parity_from_bcovar(**kwargs)
 
 
 def _jxbforce_getbsubs_coeffs_lasym_false(

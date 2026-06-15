@@ -763,7 +763,28 @@ def bsubuv_parity_from_realspace_jxbforce(
 
 
 
+def bsubuv_parity_from_bcovar(
+    *,
+    bsubu_even: np.ndarray,
+    bsubv_even: np.ndarray,
+    s: np.ndarray,
+    iequi: int = 0,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Construct parity-separated bsubu/bsubv from bcovar even components."""
+    s_full = np.asarray(s, dtype=float)
+    psqrts = np.sqrt(np.maximum(s_full, 0.0))[:, None, None]
+    pshalf = _pshalf_from_s(s_full)[:, None, None]
+    scale = pshalf if int(iequi) == 1 else psqrts
+    bsubu_even = np.asarray(bsubu_even, dtype=float)
+    bsubv_even = np.asarray(bsubv_even, dtype=float)
+    bsubu_odd = scale * bsubu_even
+    bsubv_odd = scale * bsubv_even
+    return bsubu_even, bsubu_odd, bsubv_even, bsubv_odd
+
+
+
 __all__ = [
+    "bsubuv_parity_from_bcovar",
     "bsubuv_parity_from_coeffs",
     "bsubuv_parity_from_realspace_jxbforce",
     "bsubuv_parity_from_state",
