@@ -10,6 +10,7 @@ import vmec_jax.free_boundary_adjoint_runtime_helpers as runtime_helpers
 import vmec_jax.free_boundary_adjoint_trace_controls as trace_controls
 import vmec_jax.free_boundary_adjoint_trace_fingerprint as trace_fingerprint
 import vmec_jax.free_boundary_adjoint_trace_metadata as trace_metadata
+import vmec_jax.free_boundary_adjoint_trace_stack as trace_stack
 from vmec_jax._compat import jnp
 
 
@@ -143,6 +144,14 @@ def test_free_boundary_adjoint_trace_stackability_error_paths() -> None:
         fba.direct_coil_accepted_trace_fingerprint_delta_summary
         is trace_fingerprint.direct_coil_accepted_trace_fingerprint_delta_summary
     )
+    assert fba._stack_trace_control_field is trace_stack.stack_trace_control_field
+    assert fba._stack_trace_pytree_field is trace_stack.stack_trace_pytree_field
+    assert fba._stack_optional_trace_pytree_field is trace_stack.stack_optional_trace_pytree_field
+    assert fba._trace_preconditioner_policy_value is trace_stack.trace_preconditioner_policy_value
+    assert fba._trace_preconditioner_static_signature is trace_stack.trace_preconditioner_static_signature
+    assert fba._trace_static_value_shape_signature is trace_stack.trace_static_value_shape_signature
+    assert fba._trace_optional_presence_signature is trace_stack.trace_optional_presence_signature
+    assert fba._stack_trace_nestor_axis_controls is trace_stack.stack_trace_nestor_axis_controls
     assert trace_metadata.unique_shape_list([(2, 3), (2, 3), (1,)]) == [[2, 3], [1]]
     assert trace_metadata.compact_segment_summaries(
         [{"count": 1, "signature_repr": "large"}, {"count": 2, "tag": "kept"}]
