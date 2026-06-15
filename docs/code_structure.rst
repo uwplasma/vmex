@@ -123,8 +123,10 @@ Top-level package layout (selected):
 - ``vmec_jax/free_boundary.py``: mgrid loading, NESTOR-like vacuum coupling,
   and free-boundary runtime state helpers
 - ``vmec_jax/solvers/free_boundary/adjoint/``: accepted-trace replay plans,
-  branch fingerprints, controller-mask metadata, runtime helpers, and pytree
-  utilities used by branch-local free-boundary adjoint validation reports
+  branch fingerprints, controller-mask metadata, runtime helpers, reusable
+  controller AD-vs-FD checks, custom-VJP wrappers, branch-gate reports, and
+  pytree utilities used by branch-local free-boundary adjoint validation
+  reports
 - ``vmec_jax/optimization.py``: exact fixed-boundary optimizer, boundary DOF
   maps, accepted-point replay, and discrete-adjoint Jacobian plumbing
 - ``vmec_jax/optimization_workflow.py``: user-facing optimization problem

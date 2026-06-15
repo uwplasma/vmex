@@ -304,6 +304,71 @@ def _append_timecontrol_scan_trace_row(
     return True
 
 
+def _maybe_dump_timecontrol_scan(
+    *,
+    cond: Any,
+    stage_id: Any,
+    iter2: Any,
+    iter1: Any,
+    fsq: Any,
+    fsq0: Any,
+    res0: Any,
+    res1: Any,
+    time_step: Any,
+    irst: Any,
+    dump_timecontrol_scan: bool,
+    timecontrol_callback: Any | None,
+    timecontrol_path: str | Path | None,
+    jax_module: Any,
+    jnp_module: Any,
+) -> Any:
+    """Conditionally append one time-control trace row from inside a JAX scan."""
+
+    if not bool(dump_timecontrol_scan) or timecontrol_callback is None or timecontrol_path is None:
+        return jnp_module.asarray(0, dtype=jnp_module.int32)
+
+    def _emit(args):
+        (iter2_v, iter1_v, fsq_v, fsq0_v, res0_v, res1_v, time_step_v, irst_v, stage_id_v) = args
+        _append_timecontrol_scan_trace_row(
+            timecontrol_path,
+            stage_id=int(stage_id_v),
+            iter2=int(iter2_v),
+            iter1=int(iter1_v),
+            fsq=float(fsq_v),
+            fsq0=float(fsq0_v),
+            res0=float(res0_v),
+            res1=float(res1_v),
+            time_step=float(time_step_v),
+            irst=int(irst_v),
+        )
+        return np.int32(0)
+
+    def _call(_):
+        return timecontrol_callback(
+            _emit,
+            jax_module.ShapeDtypeStruct((), jnp_module.int32),
+            (
+                iter2,
+                iter1,
+                fsq,
+                fsq0,
+                res0,
+                res1,
+                time_step,
+                irst,
+                stage_id,
+            ),
+            ordered=True,
+        )
+
+    return jax_module.lax.cond(
+        cond,
+        _call,
+        lambda _: jnp_module.asarray(0, dtype=jnp_module.int32),
+        operand=None,
+    )
+
+
 def _emit_scan_prints(
     *,
     hist_np: tuple[Any, ...],

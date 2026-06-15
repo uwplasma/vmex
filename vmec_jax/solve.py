@@ -63,9 +63,6 @@ from .solvers.fixed_boundary.residual.runtime import (
     _record_setup_timing as _runtime_record_setup_timing,
     _scan_block_until_ready,
     _scan_device_run_ready as _runtime_scan_device_run_ready,
-    _scan_print_uses_debug_callback,
-    _scan_print_uses_debug_print,
-    _scan_print_uses_io_callback,
     _setup_timer_start as _runtime_setup_timer_start,
     _vmec_freeb_plascur_from_bcovar as _runtime_vmec_freeb_plascur_from_bcovar,
 )
@@ -323,9 +320,9 @@ from .solvers.fixed_boundary.scan.math import (
     _state_jacobian as _scan_math_state_jacobian,
 )
 from .solvers.fixed_boundary.scan.debug import (
-    _append_timecontrol_scan_trace_row,
     _emit_vmec2000_iter_row as _emit_scan_vmec2000_iter_row,
     _emit_scan_prints as _emit_scan_debug_prints,
+    _maybe_dump_timecontrol_scan as _scan_debug_maybe_dump_timecontrol_scan,
     _print_axis_guess as _print_scan_axis_guess,
     _print_vmec2000_row as _print_scan_vmec2000_row,
     _record_scan_device_ready,
@@ -3052,44 +3049,23 @@ def solve_fixed_boundary_residual_iter(
         dtype = jnp.asarray(state_init.Rcos).dtype
 
         def _maybe_dump_timecontrol_scan(*, cond, stage_id, iter2, iter1, fsq, fsq0, res0, res1, time_step, irst):
-            if not dump_timecontrol_scan or scan_timecontrol_callback is None or _timecontrol_path is None:
-                return jnp.asarray(0, dtype=jnp.int32)
-
-            def _emit(args):
-                (iter2_v, iter1_v, fsq_v, fsq0_v, res0_v, res1_v, time_step_v, irst_v, stage_id_v) = args
-                _append_timecontrol_scan_trace_row(
-                    _timecontrol_path,
-                    stage_id=int(stage_id_v),
-                    iter2=int(iter2_v),
-                    iter1=int(iter1_v),
-                    fsq=float(fsq_v),
-                    fsq0=float(fsq0_v),
-                    res0=float(res0_v),
-                    res1=float(res1_v),
-                    time_step=float(time_step_v),
-                    irst=int(irst_v),
-                )
-                return np.int32(0)
-
-            def _call(_):
-                return scan_timecontrol_callback(
-                    _emit,
-                    jax.ShapeDtypeStruct((), jnp.int32),
-                    (
-                        iter2,
-                        iter1,
-                        fsq,
-                        fsq0,
-                        res0,
-                        res1,
-                        time_step,
-                        irst,
-                        stage_id,
-                    ),
-                    ordered=True,
-                )
-
-            return jax.lax.cond(cond, _call, lambda _: jnp.asarray(0, dtype=jnp.int32), operand=None)
+            return _scan_debug_maybe_dump_timecontrol_scan(
+                cond=cond,
+                stage_id=stage_id,
+                iter2=iter2,
+                iter1=iter1,
+                fsq=fsq,
+                fsq0=fsq0,
+                res0=res0,
+                res1=res1,
+                time_step=time_step,
+                irst=irst,
+                dump_timecontrol_scan=bool(dump_timecontrol_scan),
+                timecontrol_callback=scan_timecontrol_callback,
+                timecontrol_path=_timecontrol_path,
+                jax_module=jax,
+                jnp_module=jnp,
+            )
 
         time_step0 = jnp.asarray(float(step_size), dtype=dtype)
         flip_sign0 = jnp.asarray(float(initial_flip_sign), dtype=dtype)
@@ -3411,7 +3387,6 @@ def solve_fixed_boundary_residual_iter(
         scan_fallback_improve_j = jnp.asarray(float(scan_fallback_improve), dtype=dtype)
 
         scan_jax_debug = _jax_debug
-        scan_jax_debug_print = _jax_debug_print
         scan_debug_force = os.getenv("VMEC_JAX_SCAN_DEBUG_FORCE", "") not in ("", "0")
         debug_iter_env = os.getenv("VMEC_JAX_SCAN_DEBUG_ITER", "").strip()
         try:
@@ -4393,75 +4368,33 @@ def solve_fixed_boundary_residual_iter(
                 if print_in_scan:
 
                     def _do_print(_):
-                        if _scan_print_uses_debug_print(
+                        _emit_scan_vmec2000_iter_row(
+                            iter_idx=iter2,
+                            fsqr=fsqr,
+                            fsqz=fsqz,
+                            fsql=fsql,
+                            delt0r=time_step_report,
+                            r00=r00_j,
+                            w_mhd=w_mhd,
+                            lasym=False,
+                            verbose=True,
+                            vmec2000_control=True,
+                            verbose_vmec2000_table=True,
+                            print_live=True,
                             scan_print_mode=scan_print_mode,
-                            debug_print_fn=scan_jax_debug_print,
-                        ):
-                            scan_jax_debug_print(
-                                "{i:5d}{fsqr:10.2E}{fsqz:10.2E}{fsql:10.2E}{r00:11.3E}{dt:10.2E}{w:12.4E}",
-                                i=iter2,
-                                fsqr=fsqr,
-                                fsqz=fsqz,
-                                fsql=fsql,
-                                r00=r00_j,
-                                dt=time_step_report,
-                                w=w_mhd,
-                                ordered=bool(scan_print_ordered),
-                            )
-                        elif _scan_print_uses_debug_callback(
-                            scan_print_mode=scan_print_mode,
-                            debug_module=scan_jax_debug,
-                        ):
+                            scan_print_ordered=bool(scan_print_ordered),
+                            jax_debug=scan_jax_debug,
+                            io_callback=_io_callback,
+                            print_row=_print_scan_vmec2000_row,
+                        )
+                        return jnp.asarray(0, dtype=jnp.int32)
 
-                            def _cb(i, fsqr_v, fsqz_v, fsql_v, r00_v, dt_v, w_v):
-                                print(
-                                    f"{int(i):5d}"
-                                    f"{float(fsqr_v):10.2E}{float(fsqz_v):10.2E}{float(fsql_v):10.2E}"
-                                    f"{float(r00_v):11.3E}{float(dt_v):10.2E}{float(w_v):12.4E}",
-                                    flush=True,
-                                )
-                                return None
-
-                            scan_jax_debug.callback(
-                                _cb,
-                                iter2,
-                                fsqr,
-                                fsqz,
-                                fsql,
-                                r00_j,
-                                time_step_report,
-                                w_mhd,
-                                ordered=bool(scan_print_ordered),
-                            )
-                        elif _scan_print_uses_io_callback(
-                            scan_print_mode=scan_print_mode,
-                            io_callback_fn=_io_callback,
-                        ):
-
-                            def _cb_io(i, fsqr_v, fsqz_v, fsql_v, r00_v, dt_v, w_v):
-                                print(
-                                    f"{int(i):5d}"
-                                    f"{float(fsqr_v):10.2E}{float(fsqz_v):10.2E}{float(fsql_v):10.2E}"
-                                    f"{float(r00_v):11.3E}{float(dt_v):10.2E}{float(w_v):12.4E}",
-                                    flush=True,
-                                )
-                                return ()
-
-                            _io_callback(  # type: ignore[misc]
-                                _cb_io,
-                                None,
-                                iter2,
-                                fsqr,
-                                fsqz,
-                                fsql,
-                                r00_j,
-                                time_step_report,
-                                w_mhd,
-                                ordered=bool(scan_print_ordered),
-                            )
-                        return 0
-
-                    _ = jax.lax.cond(sample_vmec, _do_print, lambda _: 0, operand=None)
+                    _ = jax.lax.cond(
+                        sample_vmec,
+                        _do_print,
+                        lambda _: jnp.asarray(0, dtype=jnp.int32),
+                        operand=None,
+                    )
                 new_carry = _ScanCarry(
                     state=state_new,
                     time_step=time_step_post,

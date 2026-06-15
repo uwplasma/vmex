@@ -5,6 +5,34 @@ from __future__ import annotations
 from typing import Any
 
 from vmec_jax._compat import jax, jnp, tree_util
+from vmec_jax.solvers.free_boundary.adjoint.controller_checks import (
+    controller_directional_check_jax as _controller_directional_check_jax,
+    pytree_directional_derivative_check_jax,
+    pytree_vdot_jax,
+)
+
+_pytree_vdot_jax = pytree_vdot_jax
+
+
+def _normalize_step_output(out: Any) -> tuple[Any, Any]:
+    if isinstance(out, tuple) and len(out) == 2:
+        return out
+    return out, {}
+
+
+def _step_eval_from(step_fn: Any, params: Any, checkpoint_steps: bool) -> Any:
+    def normalize_step(state, control):
+        return _normalize_step_output(step_fn(state, params, control))
+
+    return jax.checkpoint(normalize_step) if bool(checkpoint_steps) else normalize_step
+
+
+def _select_state(flag: Any, old_state: Any, new_state: Any) -> Any:
+    return tree_util.tree_map(
+        lambda old, new: jnp.where(flag, jnp.asarray(new), jnp.asarray(old)),
+        old_state,
+        new_state,
+    )
 
 
 def jax_visible_nonlinear_controller_jax(
@@ -20,15 +48,7 @@ def jax_visible_nonlinear_controller_jax(
     if jax is None:  # pragma: no cover - JAX is required for scan controllers.
         raise RuntimeError("JAX is required for JAX-visible nonlinear controllers.")
 
-    def _normalize_step(state, control):
-        out = step_fn(state, params, control)
-        if isinstance(out, tuple) and len(out) == 2:
-            next_state, aux = out
-        else:
-            next_state, aux = out, {}
-        return next_state, aux
-
-    scan_step = jax.checkpoint(_normalize_step) if bool(checkpoint_steps) else _normalize_step
+    scan_step = _step_eval_from(step_fn, params, checkpoint_steps)
     final_state, history = jax.lax.scan(scan_step, initial_state, controls)
     return {"state": final_state, "history": history}
 
@@ -47,28 +67,13 @@ def jax_visible_masked_nonlinear_controller_jax(
     if jax is None:  # pragma: no cover - JAX is required for scan controllers.
         raise RuntimeError("JAX is required for JAX-visible nonlinear controllers.")
 
-    def _select_state(done, old_state, new_state):
-        return tree_util.tree_map(
-            lambda old, new: jnp.where(done, jnp.asarray(old), jnp.asarray(new)),
-            old_state,
-            new_state,
-        )
-
-    def _normalize_step(state, control):
-        out = step_fn(state, params, control)
-        if isinstance(out, tuple) and len(out) == 2:
-            next_state, aux = out
-        else:
-            next_state, aux = out, {}
-        return next_state, aux
-
-    step_eval = jax.checkpoint(_normalize_step) if bool(checkpoint_steps) else _normalize_step
+    step_eval = _step_eval_from(step_fn, params, checkpoint_steps)
 
     def _scan_step(carry, control):
         state, done = carry
         proposed_state, aux = step_eval(state, control)
         active = jnp.logical_not(done)
-        state_out = _select_state(done, state, proposed_state)
+        state_out = _select_state(active, state, proposed_state)
         proposed_done = jnp.asarray(converged_fn(proposed_state, params, control, aux), dtype=bool)
         done_out = jnp.logical_or(done, proposed_done)
         aux_out = dict(aux) if isinstance(aux, dict) else {"aux": aux}
@@ -100,22 +105,7 @@ def jax_visible_accepted_nonlinear_controller_jax(
     if jax is None:  # pragma: no cover - JAX is required for scan controllers.
         raise RuntimeError("JAX is required for JAX-visible nonlinear controllers.")
 
-    def _select_state(flag, old_state, new_state):
-        return tree_util.tree_map(
-            lambda old, new: jnp.where(flag, jnp.asarray(new), jnp.asarray(old)),
-            old_state,
-            new_state,
-        )
-
-    def _normalize_step(state, control):
-        out = step_fn(state, params, control)
-        if isinstance(out, tuple) and len(out) == 2:
-            proposed_state, aux = out
-        else:
-            proposed_state, aux = out, {}
-        return proposed_state, aux
-
-    step_eval = jax.checkpoint(_normalize_step) if bool(checkpoint_steps) else _normalize_step
+    step_eval = _step_eval_from(step_fn, params, checkpoint_steps)
 
     def _scan_step(carry, control):
         state, done = carry
@@ -163,22 +153,7 @@ def jax_visible_accepted_only_nonlinear_controller_jax(
     if jax is None:  # pragma: no cover - JAX is required for scan controllers.
         raise RuntimeError("JAX is required for JAX-visible nonlinear controllers.")
 
-    def _normalize_step(state, control):
-        out = step_fn(state, params, control)
-        if isinstance(out, tuple) and len(out) == 2:
-            proposed_state, aux = out
-        else:
-            proposed_state, aux = out, {}
-        return proposed_state, aux
-
-    step_eval = jax.checkpoint(_normalize_step) if bool(checkpoint_steps) else _normalize_step
-
-    def _select_state(flag, old_state, new_state):
-        return tree_util.tree_map(
-            lambda old, new: jnp.where(flag, jnp.asarray(new), jnp.asarray(old)),
-            old_state,
-            new_state,
-        )
+    step_eval = _step_eval_from(step_fn, params, checkpoint_steps)
 
     def _scan_step(carry, control):
         state, done = carry
@@ -224,22 +199,7 @@ def jax_visible_state_only_accepted_nonlinear_controller_jax(
     if jax is None:  # pragma: no cover - JAX is required for controllers.
         raise RuntimeError("JAX is required for JAX-visible nonlinear controllers.")
 
-    def _select_state(flag, old_state, new_state):
-        return tree_util.tree_map(
-            lambda old, new: jnp.where(flag, jnp.asarray(new), jnp.asarray(old)),
-            old_state,
-            new_state,
-        )
-
-    def _normalize_step(state, control):
-        out = step_fn(state, params, control)
-        if isinstance(out, tuple) and len(out) == 2:
-            proposed_state, aux = out
-        else:
-            proposed_state, aux = out, {}
-        return proposed_state, aux
-
-    step_eval = jax.checkpoint(_normalize_step) if bool(checkpoint_steps) else _normalize_step
+    step_eval = _step_eval_from(step_fn, params, checkpoint_steps)
 
     def _scan_step(carry, control):
         state, done = carry
@@ -275,22 +235,7 @@ def jax_visible_state_only_accepted_only_nonlinear_controller_jax(
     if jax is None:  # pragma: no cover - JAX is required for controllers.
         raise RuntimeError("JAX is required for JAX-visible nonlinear controllers.")
 
-    def _select_state(flag, old_state, new_state):
-        return tree_util.tree_map(
-            lambda old, new: jnp.where(flag, jnp.asarray(new), jnp.asarray(old)),
-            old_state,
-            new_state,
-        )
-
-    def _normalize_step(state, control):
-        out = step_fn(state, params, control)
-        if isinstance(out, tuple) and len(out) == 2:
-            proposed_state, aux = out
-        else:
-            proposed_state, aux = out, {}
-        return proposed_state, aux
-
-    step_eval = jax.checkpoint(_normalize_step) if bool(checkpoint_steps) else _normalize_step
+    step_eval = _step_eval_from(step_fn, params, checkpoint_steps)
 
     def _scan_step(carry, control):
         state, done = carry
@@ -335,22 +280,7 @@ def jax_visible_unrolled_accepted_only_nonlinear_controller_jax(
     if jax is None:  # pragma: no cover - JAX is required for controllers.
         raise RuntimeError("JAX is required for JAX-visible nonlinear controllers.")
 
-    def _normalize_step(state, control):
-        out = step_fn(state, params, control)
-        if isinstance(out, tuple) and len(out) == 2:
-            proposed_state, aux = out
-        else:
-            proposed_state, aux = out, {}
-        return proposed_state, aux
-
-    step_eval = jax.checkpoint(_normalize_step) if bool(checkpoint_steps) else _normalize_step
-
-    def _select_state(flag, old_state, new_state):
-        return tree_util.tree_map(
-            lambda old, new: jnp.where(flag, jnp.asarray(new), jnp.asarray(old)),
-            old_state,
-            new_state,
-        )
+    step_eval = _step_eval_from(step_fn, params, checkpoint_steps)
 
     state = initial_state
     done = jnp.asarray(initial_done, dtype=bool)
@@ -392,22 +322,7 @@ def jax_visible_unrolled_state_only_accepted_only_nonlinear_controller_jax(
     if jax is None:  # pragma: no cover - JAX is required for controllers.
         raise RuntimeError("JAX is required for JAX-visible nonlinear controllers.")
 
-    def _normalize_step(state, control):
-        out = step_fn(state, params, control)
-        if isinstance(out, tuple) and len(out) == 2:
-            proposed_state, aux = out
-        else:
-            proposed_state, aux = out, {}
-        return proposed_state, aux
-
-    step_eval = jax.checkpoint(_normalize_step) if bool(checkpoint_steps) else _normalize_step
-
-    def _select_state(flag, old_state, new_state):
-        return tree_util.tree_map(
-            lambda old, new: jnp.where(flag, jnp.asarray(new), jnp.asarray(old)),
-            old_state,
-            new_state,
-        )
+    step_eval = _step_eval_from(step_fn, params, checkpoint_steps)
 
     state = initial_state
     done = jnp.asarray(initial_done, dtype=bool)
@@ -602,30 +517,16 @@ def jax_visible_nonlinear_controller_directional_check_jax(
 ) -> dict[str, Any]:
     """AD-vs-FD check for a fully JAX-visible nonlinear controller."""
 
-    def objective(controller_params):
-        run = jax_visible_nonlinear_controller_jax(
+    def run_controller(controller_params):
+        return jax_visible_nonlinear_controller_jax(
             step_fn,
             initial_state,
             controller_params,
             controls,
             checkpoint_steps=checkpoint_steps,
         )
-        return objective_from_run(run)
 
-    check = pytree_directional_derivative_check_jax(
-        objective,
-        params,
-        direction,
-        eps=eps,
-    )
-    run = jax_visible_nonlinear_controller_jax(
-        step_fn,
-        initial_state,
-        params,
-        controls,
-        checkpoint_steps=checkpoint_steps,
-    )
-    return {**check, "run": run}
+    return _controller_directional_check_jax(run_controller, objective_from_run, params, direction, eps=eps)
 
 
 def jax_visible_masked_nonlinear_controller_directional_check_jax(
@@ -642,8 +543,8 @@ def jax_visible_masked_nonlinear_controller_directional_check_jax(
 ) -> dict[str, Any]:
     """AD-vs-FD check for a JAX-visible masked nonlinear controller."""
 
-    def objective(controller_params):
-        run = jax_visible_masked_nonlinear_controller_jax(
+    def run_controller(controller_params):
+        return jax_visible_masked_nonlinear_controller_jax(
             step_fn,
             converged_fn,
             initial_state,
@@ -651,23 +552,8 @@ def jax_visible_masked_nonlinear_controller_directional_check_jax(
             controls,
             checkpoint_steps=checkpoint_steps,
         )
-        return objective_from_run(run)
 
-    check = pytree_directional_derivative_check_jax(
-        objective,
-        params,
-        direction,
-        eps=eps,
-    )
-    run = jax_visible_masked_nonlinear_controller_jax(
-        step_fn,
-        converged_fn,
-        initial_state,
-        params,
-        controls,
-        checkpoint_steps=checkpoint_steps,
-    )
-    return {**check, "run": run}
+    return _controller_directional_check_jax(run_controller, objective_from_run, params, direction, eps=eps)
 
 
 def jax_visible_accepted_nonlinear_controller_directional_check_jax(
@@ -685,8 +571,8 @@ def jax_visible_accepted_nonlinear_controller_directional_check_jax(
 ) -> dict[str, Any]:
     """AD-vs-FD check for accepted/rejected JAX-visible controllers."""
 
-    def objective(controller_params):
-        run = jax_visible_accepted_nonlinear_controller_jax(
+    def run_controller(controller_params):
+        return jax_visible_accepted_nonlinear_controller_jax(
             step_fn,
             accept_fn,
             converged_fn,
@@ -695,91 +581,8 @@ def jax_visible_accepted_nonlinear_controller_directional_check_jax(
             controls,
             checkpoint_steps=checkpoint_steps,
         )
-        return objective_from_run(run)
 
-    check = pytree_directional_derivative_check_jax(
-        objective,
-        params,
-        direction,
-        eps=eps,
-    )
-    run = jax_visible_accepted_nonlinear_controller_jax(
-        step_fn,
-        accept_fn,
-        converged_fn,
-        initial_state,
-        params,
-        controls,
-        checkpoint_steps=checkpoint_steps,
-    )
-    return {**check, "run": run}
-
-
-def pytree_directional_derivative_check_jax(
-    objective_fn: Any,
-    params: Any,
-    direction: Any,
-    *,
-    eps: float = 1.0e-4,
-    compute_fd: bool = True,
-) -> dict[str, Any]:
-    """Compare an exact JAX directional derivative with central differences.
-
-    Set ``compute_fd=False`` when an external finite-difference slope is
-    already available and the caller only needs the exact JAX directional
-    derivative.  This avoids two additional objective evaluations for expensive
-    replay diagnostics while preserving the default AD-vs-FD contract.
-    """
-
-    if jax is None:  # pragma: no cover - JAX is required for exact gradients.
-        raise RuntimeError("JAX is required for exact directional derivatives.")
-    step = float(eps)
-    if not step > 0.0:
-        raise ValueError("eps must be positive.")
-
-    def shifted(scale):
-        return tree_util.tree_map(
-            lambda value, delta: jnp.asarray(value) + float(scale) * jnp.asarray(delta),
-            params,
-            direction,
-        )
-
-    value, grad_params = jax.value_and_grad(objective_fn)(params)
-    exact_directional = _pytree_vdot_jax(grad_params, direction)
-    if bool(compute_fd):
-        fd_directional = (objective_fn(shifted(step)) - objective_fn(shifted(-step))) / (2.0 * step)
-        abs_error = jnp.abs(exact_directional - fd_directional)
-        rel_error = abs_error / jnp.maximum(jnp.asarray(1.0, dtype=abs_error.dtype), jnp.abs(fd_directional))
-    else:
-        fd_directional = jnp.asarray(jnp.nan, dtype=jnp.asarray(exact_directional).dtype)
-        abs_error = fd_directional
-        rel_error = fd_directional
-    return {
-        "value": value,
-        "grad": grad_params,
-        "exact_directional": exact_directional,
-        "fd_directional": fd_directional,
-        "abs_error": abs_error,
-        "rel_error": rel_error,
-    }
-
-
-def _pytree_vdot_jax(lhs: Any, rhs: Any) -> Any:
-    """Return the sum of leafwise ``vdot`` values for matching pytrees."""
-
-    products = tree_util.tree_leaves(
-        tree_util.tree_map(
-            lambda left, right: jnp.vdot(jnp.asarray(left), jnp.asarray(right)),
-            lhs,
-            rhs,
-        )
-    )
-    if not products:
-        return jnp.asarray(0.0)
-    total = products[0]
-    for product in products[1:]:
-        total = total + product
-    return total
+    return _controller_directional_check_jax(run_controller, objective_from_run, params, direction, eps=eps)
 
 
 __all__ = [

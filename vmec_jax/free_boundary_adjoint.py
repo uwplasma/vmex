@@ -62,6 +62,10 @@ from .solvers.free_boundary.adjoint.gate_reports import (
     direct_coil_same_branch_physical_scalar_gate_report,
     direct_coil_same_branch_replay_gate_report,
 )
+from .solvers.free_boundary.adjoint.custom_vjp import (
+    scalar_custom_vjp_value_jax as _scalar_custom_vjp_value_jax,
+    vector_custom_vjp_value_jax as _vector_custom_vjp_value_jax,
+)
 from .solvers.free_boundary.adjoint.runtime import (
     block_until_ready_for_timing as _runtime_block_until_ready_for_timing,
     jax_named_scope as _runtime_jax_named_scope,
@@ -4813,23 +4817,7 @@ def direct_coil_fixed_trace_custom_vjp_objective_jax(
         )
         return replay["objective"]
 
-    @jax.custom_vjp
-    def _wrapped(coil_params):
-        return objective(coil_params)
-
-    def _wrapped_fwd(coil_params):
-        return objective(coil_params), coil_params
-
-    def _wrapped_bwd(coil_params, cotangent):
-        grad_params = jax.grad(objective)(coil_params)
-        scaled_grad = tree_util.tree_map(
-            lambda value: jnp.asarray(cotangent) * jnp.asarray(value),
-            grad_params,
-        )
-        return (scaled_grad,)
-
-    _wrapped.defvjp(_wrapped_fwd, _wrapped_bwd)
-    return _wrapped(params)
+    return _scalar_custom_vjp_value_jax(objective, params)
 
 
 def direct_coil_accepted_trace_controller_custom_vjp_objective_jax(
@@ -4863,23 +4851,7 @@ def direct_coil_accepted_trace_controller_custom_vjp_objective_jax(
         )
         return replay["objective"]
 
-    @jax.custom_vjp
-    def _wrapped(coil_params):
-        return objective(coil_params)
-
-    def _wrapped_fwd(coil_params):
-        return objective(coil_params), coil_params
-
-    def _wrapped_bwd(coil_params, cotangent):
-        grad_params = jax.grad(objective)(coil_params)
-        scaled_grad = tree_util.tree_map(
-            lambda value: jnp.asarray(cotangent) * jnp.asarray(value),
-            grad_params,
-        )
-        return (scaled_grad,)
-
-    _wrapped.defvjp(_wrapped_fwd, _wrapped_bwd)
-    return _wrapped(params)
+    return _scalar_custom_vjp_value_jax(objective, params)
 
 
 def direct_coil_accepted_trace_controller_custom_vjp_scalar_jax(
@@ -4920,23 +4892,7 @@ def direct_coil_accepted_trace_controller_custom_vjp_scalar_jax(
         )
         return scalar_fn(replay)
 
-    @jax.custom_vjp
-    def _wrapped(coil_params):
-        return objective(coil_params)
-
-    def _wrapped_fwd(coil_params):
-        return objective(coil_params), coil_params
-
-    def _wrapped_bwd(coil_params, cotangent):
-        grad_params = jax.grad(objective)(coil_params)
-        scaled_grad = tree_util.tree_map(
-            lambda value: jnp.asarray(cotangent) * jnp.asarray(value),
-            grad_params,
-        )
-        return (scaled_grad,)
-
-    _wrapped.defvjp(_wrapped_fwd, _wrapped_bwd)
-    return _wrapped(params)
+    return _scalar_custom_vjp_value_jax(objective, params)
 
 
 def direct_coil_accepted_trace_controller_custom_vjp_scalars_jax(
@@ -4974,19 +4930,7 @@ def direct_coil_accepted_trace_controller_custom_vjp_scalars_jax(
         )
         return jnp.asarray([fn(replay) for fn in scalar_fn_seq])
 
-    @jax.custom_vjp
-    def _wrapped(coil_params):
-        return objective(coil_params)
-
-    def _wrapped_fwd(coil_params):
-        return objective(coil_params), coil_params
-
-    def _wrapped_bwd(coil_params, cotangent):
-        _, pullback = jax.vjp(objective, coil_params)
-        return pullback(jnp.asarray(cotangent))
-
-    _wrapped.defvjp(_wrapped_fwd, _wrapped_bwd)
-    return _wrapped(params)
+    return _vector_custom_vjp_value_jax(objective, params)
 
 
 def direct_coil_accepted_trace_directional_check_jax(

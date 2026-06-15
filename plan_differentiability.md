@@ -2689,3 +2689,86 @@ Completion:
 - Free-boundary adjoint monolith reduction: 58%.
 - Driver workflow decomposition: 72%.
 - WOUT diagnostic/profile decomposition: 72%.
+
+## 2026-06-15 Controller Checks, Custom VJPs, and Scan Debug Seams
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved reusable JAX-visible controller directional derivative checks from
+   `vmec_jax.free_boundary_adjoint_controller` into
+   `vmec_jax.solvers.free_boundary.adjoint.controller_checks`.
+2. Kept the historical `_pytree_vdot_jax` alias in the public controller facade
+   while making the implementation live in the solver package.
+3. Consolidated repeated controller step-output normalization and
+   accepted-state selection in `free_boundary_adjoint_controller.py`.
+4. Added `vmec_jax.solvers.free_boundary.adjoint.custom_vjp` for reusable
+   scalar/vector custom-VJP value wrappers and rewired the branch-local
+   accepted-trace custom-VJP objective helpers to use it.
+5. Moved the VMEC2000 scan time-control trace callback seam into
+   `vmec_jax.solvers.fixed_boundary.scan.debug`.
+6. Replaced the duplicated in-scan VMEC2000 iteration print callback branches in
+   `solve.py` with the existing scan debug emitter, preserving the current
+   non-LASYM row format in that scan path.
+7. Updated the code-structure docs for the new free-boundary adjoint helper
+   modules.
+
+Results obtained:
+
+- `free_boundary_adjoint_controller.py` dropped below the source-health warning
+  threshold, from roughly 783 lines before this tranche to 599 lines.
+- `free_boundary_adjoint.py` dropped from 5,329 to 5,273 lines by removing
+  duplicated custom-VJP wrapper bodies.
+- `solve.py` dropped from 10,075 to 10,008 lines in this tranche, and
+  `_run_vmec2000_scan._scan_step` dropped from 1,160 to 1,118 lines.
+- Root helper-prefix files remain at the ratcheted limit of 2, preserving the
+  package-consolidation gate.
+- The extracted seams are pure helper layers; no production adaptive-branch
+  differentiability claim was expanded.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/free_boundary_adjoint_controller.py vmec_jax/solvers/free_boundary/adjoint/controller_checks.py`
+- `python -m compileall -q vmec_jax/free_boundary_adjoint_controller.py vmec_jax/solvers/free_boundary/adjoint/controller_checks.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py::test_pytree_directional_derivative_check_can_skip_finite_difference tests/test_free_boundary_vacuum_adjoint.py::test_jax_visible_controller_plain_step_outputs_and_segment_validation tests/test_free_boundary_vacuum_adjoint.py::test_segmented_accepted_controller_matches_monolithic_scan_and_gradient -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_adjoint_helpers_unit.py tests/test_free_boundary_vacuum_adjoint.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_trace_fingerprint_detects_control_branch_changes tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_native_rejected_slot_same_branch_jvp_matches_complete_solve_fd tests/test_free_boundary_qs_coil_optimization_smoke.py::test_same_branch_report_profiles_nestor_and_rejected_slot -q`
+- `python -m ruff check vmec_jax/free_boundary_adjoint.py vmec_jax/free_boundary_adjoint_controller.py vmec_jax/solvers/free_boundary/adjoint/controller_checks.py vmec_jax/solvers/free_boundary/adjoint/custom_vjp.py`
+- `python -m compileall -q vmec_jax/free_boundary_adjoint.py vmec_jax/free_boundary_adjoint_controller.py vmec_jax/solvers/free_boundary/adjoint/controller_checks.py vmec_jax/solvers/free_boundary/adjoint/custom_vjp.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py::test_direct_coil_trace_directional_helpers_can_skip_finite_difference tests/test_free_boundary_vacuum_adjoint.py::test_jax_visible_nonlinear_controller_matches_manual_scan_and_fd tests/test_free_boundary_vacuum_adjoint.py::test_jax_visible_controller_direct_coil_gradient_matches_fd -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_fd tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_native_rejected_slot_same_branch_jvp_matches_complete_solve_fd -q`
+- `python -m ruff check vmec_jax/solve.py vmec_jax/solvers/fixed_boundary/scan/debug.py tests/test_solve_scan_debug_helpers.py tests/test_solve_scan_planning_helpers.py`
+- `python -m compileall -q vmec_jax/solve.py vmec_jax/solvers/fixed_boundary/scan/debug.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_scan_debug_helpers.py tests/test_solve_scan_planning_helpers.py tests/test_solve_scan_time_control.py -q`
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 20 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. Run the broad scan shard and broad driver/solve/discrete shard before
+   committing this tranche.
+2. Keep the remaining `solve.py` hot update logic local until a separately
+   tested scan-step state/update package is designed; avoid moving numerical
+   update blocks without parity gates.
+3. Next safe monolith-reduction targets are WOUT diagnostic/profile helpers and
+   small public-driver printing/finish seams, not the adaptive branch controller
+   itself.
+4. Continue treating adaptive host branch differentiation as unclaimed until a
+   true fingerprint-gated adaptive AD-vs-central-FD gate exists.
+
+User decisions needed:
+
+No immediate decision. PR #20 remains draft and all changes stay on this branch
+until the full differentiability/refactor plan is complete.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 98.5%.
+- Differentiability/refactor implementation: 99.35%.
+- Solver monolith reduction: 86.5%.
+- Free-boundary adjoint monolith reduction: 65%.
+- Driver workflow decomposition: 81%.
+- WOUT diagnostic/profile decomposition: 72%.
+- Overall differentiability-refactor PR: 96.5%.
