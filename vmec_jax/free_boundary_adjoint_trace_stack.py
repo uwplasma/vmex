@@ -150,6 +150,88 @@ def stack_trace_nestor_axis_controls(trace_seq: tuple[dict[str, Any], ...]) -> d
     return payload
 
 
+ACCEPTED_TRACE_NUMERIC_CONTROL_KEYS = (
+    "dt_eff",
+    "b1",
+    "fac",
+    "force_scale",
+    "max_update_rms_pre",
+    "lambda_update_scale",
+)
+
+ACCEPTED_TRACE_BOOL_CONTROL_KEYS = (
+    "flip_sign",
+    "limit_update_rms",
+    "divide_by_scalxc_for_update",
+    "preconditioner_use_precomputed_tridi",
+    "preconditioner_use_lax_tridi",
+)
+
+ACCEPTED_TRACE_REQUIRED_ARRAY_CONTROL_KEYS = (
+    "vRcc_before",
+    "vRss_before",
+    "vZsc_before",
+    "vZcs_before",
+    "vLsc_before",
+    "vLcs_before",
+)
+
+ACCEPTED_TRACE_OPTIONAL_ARRAY_CONTROL_KEYS = (
+    "vRsc_before",
+    "vRcs_before",
+    "vZcc_before",
+    "vZss_before",
+    "vLcc_before",
+    "vLss_before",
+)
+
+
+def direct_coil_accepted_trace_scalar_controls_jax(traces: Any) -> dict[str, Any]:
+    """Return stacked scalar/update controls consumed by accepted trace replay."""
+
+    trace_seq = tuple(traces)
+    if not trace_seq:
+        raise ValueError("at least one accepted trace is required")
+    payload: dict[str, Any] = {}
+    for key in ACCEPTED_TRACE_NUMERIC_CONTROL_KEYS:
+        payload[key] = stack_trace_control_field(trace_seq, key)
+    for key in ACCEPTED_TRACE_BOOL_CONTROL_KEYS:
+        payload[key] = stack_trace_control_field(trace_seq, key, dtype=bool)
+    return payload
+
+
+def direct_coil_accepted_trace_preconditioner_controls_jax(traces: Any) -> dict[str, Any]:
+    """Return stacked preconditioner/mode payloads for accepted replay."""
+
+    trace_seq = tuple(traces)
+    if not trace_seq:
+        raise ValueError("at least one accepted trace is required")
+    return {
+        "precond_mats": stack_trace_pytree_field(trace_seq, "precond_mats"),
+        "lam_prec": stack_trace_control_field(trace_seq, "lam_prec"),
+        "w_mode_mn": stack_trace_control_field(trace_seq, "w_mode_mn"),
+    }
+
+
+def direct_coil_accepted_trace_array_controls_jax(traces: Any) -> dict[str, Any]:
+    """Return stacked array-valued update controls for accepted trace replay."""
+
+    trace_seq = tuple(traces)
+    if not trace_seq:
+        raise ValueError("at least one accepted trace is required")
+    payload: dict[str, Any] = {}
+    for key in ACCEPTED_TRACE_REQUIRED_ARRAY_CONTROL_KEYS:
+        payload[key] = stack_trace_control_field(trace_seq, key)
+    for key in ACCEPTED_TRACE_OPTIONAL_ARRAY_CONTROL_KEYS:
+        values = [trace.get(key) for trace in trace_seq]
+        if all(value is None for value in values):
+            continue
+        if any(value is None for value in values):
+            raise ValueError(f"accepted trace optional array field {key!r} must be present for every step or none")
+        payload[key] = stack_trace_control_field(trace_seq, key)
+    return payload
+
+
 _ACCEPTED_TRACE_OPTIONAL_STEP_PYTREE_CONTROL_KEYS = (
     "force_state_pre",
     "freeb_pres_scale",
@@ -161,6 +243,43 @@ _ACCEPTED_TRACE_OPTIONAL_STEP_PYTREE_CONTROL_KEYS = (
     "constraint_precond_active",
     "constraint_tcon_active",
 )
+
+
+def direct_coil_accepted_trace_step_controls_jax(
+    traces: Any,
+    *,
+    include_state_pre: bool = True,
+    include_force_state_pre: bool = True,
+    include_nestor_axes: bool = True,
+    include_constraints: bool = True,
+) -> dict[str, Any]:
+    """Return stacked state/constraint controls for direct accepted replay."""
+
+    trace_seq = tuple(traces)
+    if not trace_seq:
+        raise ValueError("at least one accepted trace is required")
+    payload: dict[str, Any] = {}
+    if bool(include_state_pre):
+        payload["state_pre"] = stack_trace_pytree_field(trace_seq, "state_pre")
+    if bool(include_force_state_pre):
+        force_state_pre = stack_optional_trace_pytree_field(trace_seq, "force_state_pre")
+        if force_state_pre is not None:
+            payload["force_state_pre"] = force_state_pre
+    if bool(include_nestor_axes):
+        nestor_axes = stack_trace_nestor_axis_controls(trace_seq)
+        if nestor_axes is not None:
+            payload["freeb_nestor_axes"] = nestor_axes
+    freeb_pres_scale = stack_optional_trace_pytree_field(trace_seq, "freeb_pres_scale")
+    if freeb_pres_scale is not None:
+        payload["freeb_pres_scale"] = freeb_pres_scale
+    if bool(include_constraints):
+        for key in _ACCEPTED_TRACE_OPTIONAL_STEP_PYTREE_CONTROL_KEYS:
+            if key in ("force_state_pre", "freeb_pres_scale"):
+                continue
+            value = stack_optional_trace_pytree_field(trace_seq, key)
+            if value is not None:
+                payload[key] = value
+    return payload
 
 
 def trace_step_policy_static_signature(trace: dict[str, Any]) -> tuple[Any, ...]:

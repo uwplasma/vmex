@@ -71,15 +71,22 @@ from .free_boundary_adjoint_replay_plan_helpers import (
     stackability_probe as _stackability_probe,
 )
 from .free_boundary_adjoint_trace_stack import (
-    _ACCEPTED_TRACE_OPTIONAL_STEP_PYTREE_CONTROL_KEYS,
+    ACCEPTED_TRACE_BOOL_CONTROL_KEYS as _ACCEPTED_TRACE_BOOL_CONTROL_KEYS,  # noqa: F401 - compatibility alias for tests/internal users.
+    ACCEPTED_TRACE_NUMERIC_CONTROL_KEYS as _ACCEPTED_TRACE_NUMERIC_CONTROL_KEYS,  # noqa: F401 - compatibility alias for tests/internal users.
+    ACCEPTED_TRACE_OPTIONAL_ARRAY_CONTROL_KEYS as _ACCEPTED_TRACE_OPTIONAL_ARRAY_CONTROL_KEYS,  # noqa: F401 - compatibility alias for tests/internal users.
+    ACCEPTED_TRACE_REQUIRED_ARRAY_CONTROL_KEYS as _ACCEPTED_TRACE_REQUIRED_ARRAY_CONTROL_KEYS,  # noqa: F401 - compatibility alias for tests/internal users.
+    direct_coil_accepted_trace_array_controls_jax,
+    direct_coil_accepted_trace_preconditioner_controls_jax,
     direct_coil_accepted_trace_preconditioner_policy_segment_summary,
     direct_coil_accepted_trace_preconditioner_policy_segments,
+    direct_coil_accepted_trace_scalar_controls_jax,
+    direct_coil_accepted_trace_step_controls_jax,
     direct_coil_accepted_trace_step_policy_segment_summary,
     direct_coil_accepted_trace_step_policy_segments,
-    stack_optional_trace_pytree_field as _stack_optional_trace_pytree_field,
-    stack_trace_control_field as _stack_trace_control_field,
-    stack_trace_nestor_axis_controls as _stack_trace_nestor_axis_controls,
-    stack_trace_pytree_field as _stack_trace_pytree_field,
+    stack_optional_trace_pytree_field as _stack_optional_trace_pytree_field,  # noqa: F401 - compatibility alias for tests/internal users.
+    stack_trace_control_field as _stack_trace_control_field,  # noqa: F401 - compatibility alias for tests/internal users.
+    stack_trace_nestor_axis_controls as _stack_trace_nestor_axis_controls,  # noqa: F401 - compatibility alias for tests/internal users.
+    stack_trace_pytree_field as _stack_trace_pytree_field,  # noqa: F401 - compatibility alias for tests/internal users.
     trace_optional_presence_signature as _trace_optional_presence_signature,  # noqa: F401 - compatibility alias for tests/internal users.
     trace_preconditioner_policy_value as _trace_preconditioner_policy_value,  # noqa: F401 - compatibility alias for tests/internal users.
     trace_preconditioner_static_signature as _trace_preconditioner_static_signature,  # noqa: F401 - compatibility alias for tests/internal users.
@@ -2274,83 +2281,6 @@ def direct_coil_accepted_trace_replay_objective_jax(
     }
 
 
-_ACCEPTED_TRACE_NUMERIC_CONTROL_KEYS = (
-    "dt_eff",
-    "b1",
-    "fac",
-    "force_scale",
-    "max_update_rms_pre",
-    "lambda_update_scale",
-)
-
-_ACCEPTED_TRACE_BOOL_CONTROL_KEYS = (
-    "flip_sign",
-    "limit_update_rms",
-    "divide_by_scalxc_for_update",
-    "preconditioner_use_precomputed_tridi",
-    "preconditioner_use_lax_tridi",
-)
-
-_ACCEPTED_TRACE_REQUIRED_ARRAY_CONTROL_KEYS = (
-    "vRcc_before",
-    "vRss_before",
-    "vZsc_before",
-    "vZcs_before",
-    "vLsc_before",
-    "vLcs_before",
-)
-
-_ACCEPTED_TRACE_OPTIONAL_ARRAY_CONTROL_KEYS = (
-    "vRsc_before",
-    "vRcs_before",
-    "vZcc_before",
-    "vZss_before",
-    "vLcc_before",
-    "vLss_before",
-)
-
-
-def direct_coil_accepted_trace_scalar_controls_jax(traces: Any) -> dict[str, Any]:
-    """Return stacked scalar/update controls consumed by accepted trace replay.
-
-    This is the next phase-2 payload after the accepted/rejected controller
-    masks: fixed host decisions and update scalars are represented as JAX
-    arrays with leading dimension ``n_steps``.  The current replay still calls
-    ``strict_update_one_step_from_trace`` for behavior parity; this payload is
-    the validated interface for replacing per-step trace dictionary reads with
-    a fully stacked state-update kernel.
-    """
-
-    trace_seq = tuple(traces)
-    if not trace_seq:
-        raise ValueError("at least one accepted trace is required")
-    payload: dict[str, Any] = {}
-    for key in _ACCEPTED_TRACE_NUMERIC_CONTROL_KEYS:
-        payload[key] = _stack_trace_control_field(trace_seq, key)
-    for key in _ACCEPTED_TRACE_BOOL_CONTROL_KEYS:
-        payload[key] = _stack_trace_control_field(trace_seq, key, dtype=bool)
-    return payload
-
-
-def direct_coil_accepted_trace_preconditioner_controls_jax(traces: Any) -> dict[str, Any]:
-    """Return stacked preconditioner/mode payloads for accepted replay.
-
-    ``precond_jmax`` is intentionally not included yet because the current
-    preconditioner application still consumes it via Python ``int(jmax)``.  The
-    stacked payload covers fixed array pytrees whose leading scan axis can be
-    sliced safely by ``lax.scan``.
-    """
-
-    trace_seq = tuple(traces)
-    if not trace_seq:
-        raise ValueError("at least one accepted trace is required")
-    return {
-        "precond_mats": _stack_trace_pytree_field(trace_seq, "precond_mats"),
-        "lam_prec": _stack_trace_control_field(trace_seq, "lam_prec"),
-        "w_mode_mn": _stack_trace_control_field(trace_seq, "w_mode_mn"),
-    }
-
-
 def direct_coil_accepted_trace_branch_metadata(
     traces: Any,
     *,
@@ -2799,75 +2729,6 @@ def free_boundary_adjoint_trace_replay_diagnostics(
     if json_safe:
         return _json_safe_fingerprint_value(diagnostics)
     return diagnostics
-
-
-def direct_coil_accepted_trace_array_controls_jax(traces: Any) -> dict[str, Any]:
-    """Return stacked array-valued update controls for accepted trace replay.
-
-    The accepted VMEC state update uses velocity-history arrays captured before
-    each accepted step.  These arrays are fixed host-control data, not outputs
-    of the direct-coil replay.  Stacking them here moves another payload class
-    into the JAX-visible scan while preserving the legacy trace fallback for
-    optional asymmetric channels.
-    """
-
-    trace_seq = tuple(traces)
-    if not trace_seq:
-        raise ValueError("at least one accepted trace is required")
-    payload: dict[str, Any] = {}
-    for key in _ACCEPTED_TRACE_REQUIRED_ARRAY_CONTROL_KEYS:
-        payload[key] = _stack_trace_control_field(trace_seq, key)
-    for key in _ACCEPTED_TRACE_OPTIONAL_ARRAY_CONTROL_KEYS:
-        values = [trace.get(key) for trace in trace_seq]
-        if all(value is None for value in values):
-            continue
-        if any(value is None for value in values):
-            raise ValueError(f"accepted trace optional array field {key!r} must be present for every step or none")
-        payload[key] = _stack_trace_control_field(trace_seq, key)
-    return payload
-
-
-def direct_coil_accepted_trace_step_controls_jax(
-    traces: Any,
-    *,
-    include_state_pre: bool = True,
-    include_force_state_pre: bool = True,
-    include_nestor_axes: bool = True,
-    include_constraints: bool = True,
-) -> dict[str, Any]:
-    """Return stacked state/constraint controls for direct accepted replay.
-
-    The controls in this payload are sliced by ``lax.scan`` and passed directly
-    to ``strict_update_one_step_from_state``.  This removes one layer of
-    per-step trace dictionary indirection while keeping all host branch
-    decisions fixed and fingerprint-gated.
-    """
-
-    trace_seq = tuple(traces)
-    if not trace_seq:
-        raise ValueError("at least one accepted trace is required")
-    payload: dict[str, Any] = {}
-    if bool(include_state_pre):
-        payload["state_pre"] = _stack_trace_pytree_field(trace_seq, "state_pre")
-    if bool(include_force_state_pre):
-        force_state_pre = _stack_optional_trace_pytree_field(trace_seq, "force_state_pre")
-        if force_state_pre is not None:
-            payload["force_state_pre"] = force_state_pre
-    if bool(include_nestor_axes):
-        nestor_axes = _stack_trace_nestor_axis_controls(trace_seq)
-        if nestor_axes is not None:
-            payload["freeb_nestor_axes"] = nestor_axes
-    freeb_pres_scale = _stack_optional_trace_pytree_field(trace_seq, "freeb_pres_scale")
-    if freeb_pres_scale is not None:
-        payload["freeb_pres_scale"] = freeb_pres_scale
-    if bool(include_constraints):
-        for key in _ACCEPTED_TRACE_OPTIONAL_STEP_PYTREE_CONTROL_KEYS:
-            if key in ("force_state_pre", "freeb_pres_scale"):
-                continue
-            value = _stack_optional_trace_pytree_field(trace_seq, key)
-            if value is not None:
-                payload[key] = value
-    return payload
 
 
 def direct_coil_accepted_trace_controller_replay_objective_jax(

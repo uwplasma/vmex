@@ -200,6 +200,13 @@ def test_free_boundary_adjoint_trace_stackability_error_paths() -> None:
         fba.direct_coil_accepted_trace_preconditioner_policy_segment_summary
         is trace_stack.direct_coil_accepted_trace_preconditioner_policy_segment_summary
     )
+    assert fba.direct_coil_accepted_trace_scalar_controls_jax is trace_stack.direct_coil_accepted_trace_scalar_controls_jax
+    assert fba.direct_coil_accepted_trace_array_controls_jax is trace_stack.direct_coil_accepted_trace_array_controls_jax
+    assert (
+        fba.direct_coil_accepted_trace_preconditioner_controls_jax
+        is trace_stack.direct_coil_accepted_trace_preconditioner_controls_jax
+    )
+    assert fba.direct_coil_accepted_trace_step_controls_jax is trace_stack.direct_coil_accepted_trace_step_controls_jax
     assert trace_metadata.unique_shape_list([(2, 3), (2, 3), (1,)]) == [[2, 3], [1]]
     assert trace_metadata.compact_segment_summaries(
         [{"count": 1, "signature_repr": "large"}, {"count": 2, "tag": "kept"}]
