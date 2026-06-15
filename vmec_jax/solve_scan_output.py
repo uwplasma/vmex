@@ -144,6 +144,83 @@ class Vmec2000ScanPostprocessResult:
         }
 
 
+def vmec2000_scan_minimal_history_row(fsqr: Any, fsqz: Any, fsql: Any) -> tuple[Any, Any, Any]:
+    """Return the compact scan-history row used for residual-only scans."""
+    return (fsqr, fsqz, fsql)
+
+
+def vmec2000_scan_light_history_row(
+    fsqr: Any,
+    fsqz: Any,
+    fsql: Any,
+    accepted: Any,
+    r00: Any,
+    z00: Any,
+    w_mhd: Any,
+    time_step: Any,
+    bad_jacobian: Any,
+) -> tuple[Any, ...]:
+    """Return the light scan-history row consumed by ``unpack_vmec2000_scan_histories``."""
+    return (fsqr, fsqz, fsql, accepted, r00, z00, w_mhd, time_step, bad_jacobian)
+
+
+def vmec2000_scan_full_history_row(
+    fsqr: Any,
+    fsqz: Any,
+    fsql: Any,
+    fsqr1: Any,
+    fsqz1: Any,
+    fsql1: Any,
+    accepted: Any,
+    r00: Any,
+    z00: Any,
+    w_mhd: Any,
+    time_step: Any,
+    zero_m1: Any,
+    include_edge: Any,
+    res0: Any,
+    res1: Any,
+    iter1: Any,
+    bad_jacobian: Any,
+    min_tau: Any,
+    max_tau: Any,
+    min_tau_ptau: Any,
+    max_tau_ptau: Any,
+    min_tau_state: Any,
+    max_tau_state: Any,
+    badjac_ptau: Any,
+    badjac_state: Any,
+) -> tuple[Any, ...]:
+    """Return the full VMEC2000 scan-history row in unpacker field order."""
+    return (
+        fsqr,
+        fsqz,
+        fsql,
+        fsqr1,
+        fsqz1,
+        fsql1,
+        accepted,
+        r00,
+        z00,
+        w_mhd,
+        time_step,
+        zero_m1,
+        include_edge,
+        res0,
+        res1,
+        iter1,
+        bad_jacobian,
+        min_tau,
+        max_tau,
+        min_tau_ptau,
+        max_tau_ptau,
+        min_tau_state,
+        max_tau_state,
+        badjac_ptau,
+        badjac_state,
+    )
+
+
 def unpack_vmec2000_scan_histories(
     hist: Any,
     *,

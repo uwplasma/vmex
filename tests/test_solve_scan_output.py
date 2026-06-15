@@ -8,6 +8,9 @@ from vmec_jax.solve_scan_output import (
     Vmec2000ScanHistories,
     postprocess_vmec2000_scan_result,
     unpack_vmec2000_scan_histories,
+    vmec2000_scan_full_history_row,
+    vmec2000_scan_light_history_row,
+    vmec2000_scan_minimal_history_row,
 )
 
 
@@ -75,6 +78,46 @@ def _pack(base, heavy):
 def _freeb_controls(iter2: int, iter1: int, nvacskip: int) -> tuple[int, int]:
     ivacskip = (iter2 - iter1) % nvacskip
     return (1 if ivacskip == 0 else 2), ivacskip
+
+
+def test_scan_history_row_builders_match_unpacker_layouts():
+    minimal = unpack_vmec2000_scan_histories(
+        vmec2000_scan_minimal_history_row("fsqr", "fsqz", "fsql"),
+        scan_minimal=True,
+        scan_light=False,
+    )
+    assert minimal.fsqr == "fsqr"
+    assert minimal.fsql == "fsql"
+
+    light = unpack_vmec2000_scan_histories(
+        vmec2000_scan_light_history_row(
+            "fsqr",
+            "fsqz",
+            "fsql",
+            "accepted",
+            "r00",
+            "z00",
+            "w_mhd",
+            "dt",
+            "bad_jac",
+        ),
+        scan_minimal=False,
+        scan_light=True,
+    )
+    assert light.accepted == "accepted"
+    assert light.dt == "dt"
+    assert light.bad_jac == "bad_jac"
+
+    full = unpack_vmec2000_scan_histories(
+        vmec2000_scan_full_history_row(*range(25)),
+        scan_minimal=False,
+        scan_light=False,
+    )
+    assert full.fsqr == 0
+    assert full.fsql1 == 5
+    assert full.accepted == 6
+    assert full.ptau_min == 19
+    assert full.badjac_state == 24
 
 
 def _post(histories, **kwargs):
