@@ -18,6 +18,8 @@ from vmec_jax.vmec_realspace import (
 )
 
 from .diagnostics import pshalf_from_s as _pshalf_from_s
+from .jxbforce import _jxbforce_nyquist_limits
+from .nyquist import vmec_wrout_nyquist_synthesis as _vmec_wrout_nyquist_synthesis
 from .parity import undo_bss_scalxc_if_enabled as _undo_bss_scalxc_if_enabled
 
 def compute_bsubs_half_mesh(
@@ -611,4 +613,159 @@ def bsubuv_parity_from_state(
 
 
 
-__all__ = ["bsubuv_parity_from_state", "compute_bsubs_half_mesh"]
+def bsubuv_parity_from_coeffs(
+    *,
+    bsubumnc: np.ndarray,
+    bsubumns: np.ndarray,
+    bsubvmnc: np.ndarray,
+    bsubvmns: np.ndarray,
+    modes,
+    trig,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Split bsubu/bsubv into even/odd m parity using Fourier coefficients."""
+    m = np.asarray(modes.m, dtype=int)
+    mask_even = (m % 2) == 0
+    mask_odd = ~mask_even
+    mask_even = mask_even[None, :]
+    mask_odd = mask_odd[None, :]
+
+    bsubumnc = np.asarray(bsubumnc, dtype=float)
+    bsubumns = np.asarray(bsubumns, dtype=float)
+    bsubvmnc = np.asarray(bsubvmnc, dtype=float)
+    bsubvmns = np.asarray(bsubvmns, dtype=float)
+
+    bsubumnc_even = bsubumnc * mask_even
+    bsubumns_even = bsubumns * mask_even
+    bsubumnc_odd = bsubumnc * mask_odd
+    bsubumns_odd = bsubumns * mask_odd
+
+    bsubvmnc_even = bsubvmnc * mask_even
+    bsubvmns_even = bsubvmns * mask_even
+    bsubvmnc_odd = bsubvmnc * mask_odd
+    bsubvmns_odd = bsubvmns * mask_odd
+
+    # Use wrout-style Nyquist synthesis instead of generic helical eval so the
+    # parity split stays on VMEC's reduced-grid normalization.
+    bsubu_even = _vmec_wrout_nyquist_synthesis(
+        coeff_c=bsubumnc_even,
+        coeff_s=bsubumns_even,
+        modes=modes,
+        trig=trig,
+    )
+    bsubu_odd = _vmec_wrout_nyquist_synthesis(
+        coeff_c=bsubumnc_odd,
+        coeff_s=bsubumns_odd,
+        modes=modes,
+        trig=trig,
+    )
+    bsubv_even = _vmec_wrout_nyquist_synthesis(
+        coeff_c=bsubvmnc_even,
+        coeff_s=bsubvmns_even,
+        modes=modes,
+        trig=trig,
+    )
+    bsubv_odd = _vmec_wrout_nyquist_synthesis(
+        coeff_c=bsubvmnc_odd,
+        coeff_s=bsubvmns_odd,
+        modes=modes,
+        trig=trig,
+    )
+    return bsubu_even, bsubu_odd, bsubv_even, bsubv_odd
+
+
+def bsubuv_parity_from_realspace_jxbforce(
+    *,
+    bsubu: np.ndarray,
+    bsubv: np.ndarray,
+    trig,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Recover jxbforce parity channels directly from real-space bsubu/bsubv."""
+    # jdotb can be cancellation-limited near the edge. Keep this projection in
+    # long-double to reduce parity-channel roundoff before the jxbforce filter.
+    acc_dtype = np.longdouble
+    bsubu = np.asarray(bsubu, dtype=acc_dtype)
+    bsubv = np.asarray(bsubv, dtype=acc_dtype)
+    if bsubu.shape != bsubv.shape:
+        raise ValueError("bsubu/bsubv shape mismatch")
+    if bsubu.ndim != 3:
+        raise ValueError("Expected bsubu/bsubv with shape (ns, ntheta, nzeta)")
+
+    ns, ntheta, nzeta = bsubu.shape
+    nt2 = int(trig.ntheta2)
+    if ntheta < nt2:
+        raise ValueError("bsubu grid smaller than ntheta2")
+
+    mnyq, nnyq = _jxbforce_nyquist_limits(trig)
+    mmax = int(max(mnyq, 0))
+    nmax = int(max(nnyq, 0))
+
+    cosmui = np.asarray(trig.cosmui, dtype=acc_dtype)[:nt2, : mmax + 1]
+    sinmui = np.asarray(trig.sinmui, dtype=acc_dtype)[:nt2, : mmax + 1]
+    cosmu = np.asarray(trig.cosmu, dtype=acc_dtype)[:nt2, : mmax + 1]
+    sinmu = np.asarray(trig.sinmu, dtype=acc_dtype)[:nt2, : mmax + 1]
+    cosnv = np.asarray(trig.cosnv, dtype=acc_dtype)[:, : nmax + 1]
+    sinnv = np.asarray(trig.sinnv, dtype=acc_dtype)[:, : nmax + 1]
+
+    r0scale = float(getattr(trig, "r0scale", 1.0))
+    base_dnorm = acc_dtype(1.0) / acc_dtype(r0scale**2)
+
+    bsubu_even = np.zeros((ns, nt2, nzeta), dtype=acc_dtype)
+    bsubu_odd = np.zeros((ns, nt2, nzeta), dtype=acc_dtype)
+    bsubv_even = np.zeros((ns, nt2, nzeta), dtype=acc_dtype)
+    bsubv_odd = np.zeros((ns, nt2, nzeta), dtype=acc_dtype)
+
+    for js in range(ns):
+        bu = bsubu[js, :nt2, :]
+        bv = bsubv[js, :nt2, :]
+        for m in range(mmax + 1):
+            use_odd = (m % 2) == 1
+            for n in range(nmax + 1):
+                dnorm1 = base_dnorm
+                if mnyq > 0 and m == mnyq:
+                    dnorm1 *= 0.5
+                if nnyq > 0 and n == nnyq and n != 0:
+                    dnorm1 *= 0.5
+
+                bsubumn1 = acc_dtype(0.0)
+                bsubumn2 = acc_dtype(0.0)
+                bsubvmn1 = acc_dtype(0.0)
+                bsubvmn2 = acc_dtype(0.0)
+                for k in range(nzeta):
+                    for j in range(nt2):
+                        tcosi1 = cosmui[j, m] * cosnv[k, n] * dnorm1
+                        tcosi2 = sinmui[j, m] * sinnv[k, n] * dnorm1
+                        val_u = bu[j, k]
+                        val_v = bv[j, k]
+                        bsubumn1 += tcosi1 * val_u
+                        bsubumn2 += tcosi2 * val_u
+                        bsubvmn1 += tcosi1 * val_v
+                        bsubvmn2 += tcosi2 * val_v
+
+                for k in range(nzeta):
+                    for j in range(nt2):
+                        tcos1 = cosmu[j, m] * cosnv[k, n]
+                        tcos2 = sinmu[j, m] * sinnv[k, n]
+                        ucontrib = tcos1 * bsubumn1 + tcos2 * bsubumn2
+                        vcontrib = tcos1 * bsubvmn1 + tcos2 * bsubvmn2
+                        if use_odd:
+                            bsubu_odd[js, j, k] += ucontrib
+                            bsubv_odd[js, j, k] += vcontrib
+                        else:
+                            bsubu_even[js, j, k] += ucontrib
+                            bsubv_even[js, j, k] += vcontrib
+
+    return (
+        np.asarray(bsubu_even, dtype=float),
+        np.asarray(bsubu_odd, dtype=float),
+        np.asarray(bsubv_even, dtype=float),
+        np.asarray(bsubv_odd, dtype=float),
+    )
+
+
+
+__all__ = [
+    "bsubuv_parity_from_coeffs",
+    "bsubuv_parity_from_realspace_jxbforce",
+    "bsubuv_parity_from_state",
+    "compute_bsubs_half_mesh",
+]

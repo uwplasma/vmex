@@ -3217,3 +3217,58 @@ Completion:
 - WOUT diagnostic/profile decomposition: 89%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 98.05%.
+
+## 2026-06-15 WOUT Bsub Parity Projection Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved the coefficient-based and realspace-JXBFORCE Bsub parity projection
+   helpers into `vmec_jax.io.wout.bsubs`.
+2. Preserved `vmec_jax.wout._bsubuv_parity_from_coeffs` and
+   `vmec_jax.wout._bsubuv_parity_from_realspace_jxbforce` as wrappers for the
+   historical import surface.
+3. Restored `_vmec_wrout_nyquist_synthesis` as an explicit compatibility
+   export from `vmec_jax.wout` because tests and diagnostics import it directly.
+
+Results obtained:
+
+- `wout.py` dropped from 3,038 lines to 2,897 lines.
+- All state/coeff/realspace Bsub parity construction helpers now live in the
+  WOUT Bsubs domain module.
+- Existing WOUT helper imports remain backward compatible.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/wout.py vmec_jax/io/wout/bsubs.py tests/test_wout_helpers.py tests/test_wout_fast_helpers.py tests/test_wout_wave3_coverage.py`
+- `python -m compileall -q vmec_jax/wout.py vmec_jax/io/wout/bsubs.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_helpers.py tests/test_wout_fast_helpers.py tests/test_wout_wave3_coverage.py tests/test_wout_branch_coverage.py tests/test_wout_env_branch_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_helpers.py tests/test_wout_branch_coverage.py tests/test_wout_env_branch_coverage.py tests/test_wout_fast_helpers.py tests/test_wout_wave2.py tests/test_wout_wave3_coverage.py tests/test_wout_wave4_coverage.py tests/test_wout_wave5_coverage.py tests/test_wout_physics_wave8_coverage.py tests/test_wout_driver_wave10_coverage.py tests/test_driver_wout_wave9_coverage.py tests/test_solve_dump_helpers.py -q`
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 20 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. Commit and push this parity projection extraction.
+2. Next WOUT decomposition target is `wout_minimal_from_fixed_boundary`; split
+   writer assembly only after identifying a small helper boundary with existing
+   driver/WOUT tests.
+3. Keep driver/solver refactors conservative until their parity gates are
+   attached.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.35%.
+- Differentiability/refactor implementation: 99.7%.
+- Solver monolith reduction: 86.5%.
+- Free-boundary adjoint monolith reduction: 65%.
+- Driver workflow decomposition: 84%.
+- WOUT diagnostic/profile decomposition: 90%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 98.1%.
