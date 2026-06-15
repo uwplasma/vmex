@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import numpy as np
 
+_MU0 = 4e-7 * np.pi
+
 
 def pshalf_from_s(s_full: np.ndarray) -> np.ndarray:
     """Return VMEC half-mesh ``sqrt(s)`` values used in parity formulas."""
@@ -151,6 +153,27 @@ def compute_aspectratio(
     return Aminor_p, Rmajor_p, aspect, volume_p, cross_area_p
 
 
+def compute_ctor_from_buco(*, buco: np.ndarray, signgs: int, indata, mu0: float = _MU0) -> float:
+    """Compute VMEC ``ctor`` from half-mesh ``buco`` using wrout conventions."""
+
+    ns = int(buco.shape[0])
+    if ns < 2:
+        return 0.0
+    lfreeb = bool(indata.get_bool("LFREEB", False))
+    ictrl_prec2d = int(indata.get_int("ICTRL_PREC2D", 0))
+    lhess_exact = bool(indata.get_bool("LHESS_EXACT", False))
+    if lhess_exact:
+        lctor = lfreeb and (ictrl_prec2d != 0)
+    else:
+        lctor = lfreeb and (ictrl_prec2d > 1)
+    if lctor:
+        ctor_prec2d = 0.0
+        ctor = float(signgs) * (2.0 * np.pi) * (float(buco[-1]) + ctor_prec2d)
+    else:
+        ctor = float(signgs) * (2.0 * np.pi) * (1.5 * float(buco[-1]) - 0.5 * float(buco[-2]))
+    return float(ctor / float(mu0))
+
+
 def glasser_from_wout_mercier_terms(
     *,
     DMerc: np.ndarray,
@@ -184,6 +207,7 @@ def glasser_from_wout_mercier_terms(
 
 __all__ = [
     "compute_aspectratio",
+    "compute_ctor_from_buco",
     "compute_eqfor_beta",
     "compute_eqfor_betaxis",
     "glasser_from_wout_mercier_terms",
