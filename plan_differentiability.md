@@ -3434,3 +3434,58 @@ Completion:
 - WOUT diagnostic/profile decomposition: 92%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 98.25%.
+
+## 2026-06-15 Free-Boundary Mode Operator Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved JAX VMEC/NESTOR mode-source projection, dense mode-matrix assembly,
+   matrix-free matvec, and matrix-free mode solve helpers into
+   `vmec_jax.solvers.free_boundary.adjoint.mode_operator`.
+2. Kept the public `vmec_jax.free_boundary_adjoint` import facade intact for
+   tests and downstream callers.
+3. Re-ran the full vacuum-adjoint shard that exercises source projection,
+   dense mode matrices, matrix-free matvecs, Krylov solves, and error paths.
+
+Results obtained:
+
+- `free_boundary_adjoint.py` dropped from 5,091 to 4,758 lines.
+- The JAX mode-operator validation seam now has a domain-named module distinct
+  from replay/controller report assembly.
+- No adaptive-controller semantics changed; this is purely algebra/package
+  decomposition around already validated branch-local helpers.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/free_boundary_adjoint.py vmec_jax/solvers/free_boundary/adjoint/mode_operator.py tests/test_free_boundary_vacuum_adjoint.py`
+- `python -m compileall -q vmec_jax/free_boundary_adjoint.py vmec_jax/solvers/free_boundary/adjoint/mode_operator.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py -q`
+- `python tools/diagnostics/source_health.py --top 25 --top-functions 25 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. Continue free-boundary adjoint decomposition with nonsingular source/analytic
+   geometry helpers if tests remain bounded.
+2. Defer adaptive host-branch differentiation changes until a true
+   fingerprint-gated complete-loop AD-vs-FD gate is attached.
+3. Let CI reach a terminal state after the next push before another broad
+   refactor unless a local failure requires immediate action.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.45%.
+- Differentiability/refactor implementation: 99.78%.
+- Solver monolith reduction: 86.5%.
+- Free-boundary adjoint monolith reduction: 71%.
+- Driver workflow decomposition: 84%.
+- WOUT diagnostic/profile decomposition: 92%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 98.3%.
