@@ -72,6 +72,10 @@ from .solve_residual_iter_finalize_helpers import (
     build_residual_iter_resume_state_payload as _build_residual_iter_resume_state_payload,
     finalize_residual_iter_result as _finalize_residual_iter_result,
 )
+from .solve_residual_iter_force_cache_helpers import (
+    compute_forces_jit_cache_key as _compute_forces_jit_cache_key,
+    select_compute_forces_callable as _select_compute_forces_callable,
+)
 from .solve_residual_iter_update_helpers import (
     ResidualVelocityBlocks as _ResidualVelocityBlocks,
     host_momentum_update_np as _host_momentum_update_np,
@@ -2354,12 +2358,11 @@ def solve_fixed_boundary_residual_iter(
         except Exception:
             pass
 
-    compute_cache_key = (
-        "compute_forces_v1",
-        static_key,
-        wout_key,
-        int(signgs),
-        bool(apply_m1_constraints),
+    compute_cache_key = _compute_forces_jit_cache_key(
+        static_key=static_key,
+        wout_key=wout_key,
+        signgs=int(signgs),
+        apply_m1_constraints=bool(apply_m1_constraints),
     )
     if jit_forces:
 
@@ -2393,26 +2396,17 @@ def solve_fixed_boundary_residual_iter(
                 iter_idx=None,
             )
 
-        if differentiating_scan:
-            # Do not store a jitted closure created while tracing the scan solve:
-            # it can retain traced closure constants and leak them out of the
-            # transformation. Primal solves still reuse the global cache.
-            _compute_forces = jit(
-                _compute_forces_nodump,
-                static_argnames=("include_edge", "include_edge_residual"),
-            )
-        else:
-            cached = _jit_cache_get(_COMPUTE_FORCES_CACHE, compute_cache_key)
-            if cached is None:
-                cached = jit(_compute_forces_nodump, static_argnames=("include_edge", "include_edge_residual"))
-                cached = _jit_cache_put(
-                    _COMPUTE_FORCES_CACHE,
-                    compute_cache_key,
-                    cached,
-                    env_name="VMEC_JAX_COMPUTE_FORCES_CACHE_SIZE",
-                    default=32,
-                )
-            _compute_forces = cached
+        _compute_forces = _select_compute_forces_callable(
+            _compute_forces_nodump,
+            differentiating_scan=bool(differentiating_scan),
+            cache=_COMPUTE_FORCES_CACHE,
+            cache_key=compute_cache_key,
+            jit_func=jit,
+            cache_get=_jit_cache_get,
+            cache_put=_jit_cache_put,
+            cache_env_name="VMEC_JAX_COMPUTE_FORCES_CACHE_SIZE",
+            cache_default=32,
+        )
 
     if bool(jit_forces) and bool(jit_precompile) and has_jax() and (jax is not None) and (_compute_forces_np is None):
         try:

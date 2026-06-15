@@ -94,6 +94,9 @@ Top-level package layout (selected):
 - ``vmec_jax/solve_residual_iter_finalize_helpers.py``: final timing
   diagnostics, resume-state payload packing, and residual-iteration result
   assembly
+- ``vmec_jax/solve_residual_iter_force_cache_helpers.py``: structural force
+  JIT cache keys and callable selection while preserving solver-owned cache
+  objects
 - ``vmec_jax/solve.py``: fixed-boundary solvers + VMEC2000 iteration loop
 - ``vmec_jax/driver.py``: CLI-facing fixed/free-boundary drivers, output
   policies, staged solve dispatch, and wout writing
