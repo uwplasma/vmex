@@ -1181,6 +1181,11 @@ Results obtained:
     threshold policy in one place while leaving scan and VMEC2000 table behavior
     unchanged.  Focused convergence/runtime tests and compileall passed.
     `solve.py` decreased to 10409 lines.
+45. Removed the single-use VMEC2000 sampling-cadence closure in the residual
+    loop.  The scalar sampling branch now calls `_vmec2000_cadence_selected`
+    directly with the resolved `nstep_screen`, keeping print/sample cadence
+    policy in `solve_diagnostics_io.py`.  Focused cadence/formatting tests,
+    Ruff, and compileall passed.
 
 Best next steps:
 

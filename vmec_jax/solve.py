@@ -6022,14 +6022,6 @@ def solve_fixed_boundary_residual_iter(
             verbose_vmec2000_table=bool(verbose_vmec2000_table),
         )
 
-    def _should_sample_vmec2000(iter_idx: int, max_iter: int) -> bool:
-        """Sample VMEC2000 scalar diagnostics on the screen cadence."""
-        return _vmec2000_cadence_selected(
-            iter_idx=iter_idx,
-            max_iter=max_iter,
-            nstep_screen=nstep_screen,
-        )
-
     # VMEC2000 caches 1D preconditioner/norm/tcon updates every `ns4` iterations
     # (vmec_params.f: ns4=25), reusing the cached values between refreshes.
     # This materially affects the nonlinear iteration trace because the
@@ -7026,7 +7018,11 @@ def solve_fixed_boundary_residual_iter(
             # VMEC printout uses r00 = r1(1,0): axis R at theta=0, zeta=0,
             # evaluated in real space after scalxc (see funct3d.f).
             # For parity diagnostics, sample these scalars on VMEC's screen cadence.
-            sample_vmec = bool(vmec2000_control) and _should_sample_vmec2000(int(iter2), int(max_iter))
+            sample_vmec = bool(vmec2000_control) and _vmec2000_cadence_selected(
+                iter_idx=int(iter2),
+                max_iter=int(max_iter),
+                nstep_screen=nstep_screen,
+            )
             need_scalar = bool(sample_vmec) or (bool(verbose) and (not bool(vmec2000_control)))
             if need_scalar:
                 if host_update_assembly and (not _tree_has_tracer(k)):
