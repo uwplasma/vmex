@@ -14,6 +14,7 @@ from vmec_jax.solvers.fixed_boundary.residual.config import (
     resolve_host_profile_setup,
     resolve_host_residual_metric_config,
     resolve_nstep_screen,
+    resolve_setup_host_enforce,
     should_probe_bad_jacobian_state,
 )
 
@@ -204,6 +205,69 @@ def test_axis_reset_config_preserves_legacy_env_policy():
         axis_reset_fsq_min_env="-2.0",
     )
     assert negative.axis_reset_fsq_min == 0.0
+
+
+def test_setup_host_enforce_policy_preserves_tracing_and_backend_rules():
+    assert (
+        resolve_setup_host_enforce(
+            setup_host_enforce_env="0",
+            host_update_assembly=False,
+            use_scan=False,
+            state_has_tracer=False,
+            backend_name="gpu",
+        )
+        is False
+    )
+    assert (
+        resolve_setup_host_enforce(
+            setup_host_enforce_env="force",
+            host_update_assembly=True,
+            use_scan=True,
+            state_has_tracer=False,
+            backend_name="cpu",
+        )
+        is True
+    )
+    assert (
+        resolve_setup_host_enforce(
+            setup_host_enforce_env="1",
+            host_update_assembly=False,
+            use_scan=False,
+            state_has_tracer=True,
+            backend_name="gpu",
+        )
+        is False
+    )
+    assert (
+        resolve_setup_host_enforce(
+            setup_host_enforce_env="auto",
+            host_update_assembly=False,
+            use_scan=False,
+            state_has_tracer=False,
+            backend_name="gpu",
+        )
+        is True
+    )
+    assert (
+        resolve_setup_host_enforce(
+            setup_host_enforce_env="auto",
+            host_update_assembly=False,
+            use_scan=False,
+            state_has_tracer=False,
+            backend_name="cpu",
+        )
+        is False
+    )
+    assert (
+        resolve_setup_host_enforce(
+            setup_host_enforce_env="auto",
+            host_update_assembly=True,
+            use_scan=False,
+            state_has_tracer=False,
+            backend_name="gpu",
+        )
+        is False
+    )
 
 
 def test_nstep_override_parsing_and_clamping():

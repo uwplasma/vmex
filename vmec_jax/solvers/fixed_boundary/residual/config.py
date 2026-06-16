@@ -255,6 +255,29 @@ def resolve_axis_reset_config(
     )
 
 
+def resolve_setup_host_enforce(
+    *,
+    setup_host_enforce_env: str | None,
+    host_update_assembly: bool,
+    use_scan: bool,
+    state_has_tracer: bool,
+    backend_name: str,
+) -> bool:
+    """Resolve host-side setup row/gauge enforcement policy."""
+
+    value = str("auto" if setup_host_enforce_env is None else setup_host_enforce_env).strip().lower()
+    if value in ("", "0", "false", "no", "off"):
+        return False
+    if value in ("1", "true", "yes", "on", "force"):
+        return not bool(state_has_tracer)
+    return (
+        (not bool(host_update_assembly))
+        and (not bool(use_scan))
+        and (not bool(state_has_tracer))
+        and (str(backend_name).strip().lower() != "cpu")
+    )
+
+
 def resolve_nstep_screen(*, indata_nstep: int, override_env: str | None) -> int:
     """Resolve VMEC screen cadence with the legacy NSTEP override semantics."""
     nstep_screen = int(indata_nstep)

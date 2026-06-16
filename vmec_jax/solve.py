@@ -39,6 +39,7 @@ from .solvers.fixed_boundary.residual.config import (
     resolve_host_profile_setup as _resolve_host_profile_setup,
     resolve_host_residual_metric_config as _resolve_host_residual_metric_config,
     resolve_nstep_screen as _resolve_nstep_screen,
+    resolve_setup_host_enforce as _resolve_setup_host_enforce,
     should_probe_bad_jacobian_state as _should_probe_bad_jacobian_state,
 )
 from .solvers.fixed_boundary.residual.policy import (
@@ -2599,22 +2600,17 @@ def solve_fixed_boundary_residual_iter(
         and int(static.cfg.mpol) > 1
     )
 
-    setup_host_enforce_env = os.getenv("VMEC_JAX_HOST_SETUP_ENFORCE", "auto").strip().lower()
     state0_is_traced = _tree_has_tracer(state0)
-    if setup_host_enforce_env in ("", "0", "false", "no", "off"):
-        setup_host_enforce = False
-    elif setup_host_enforce_env in ("1", "true", "yes", "on", "force"):
-        setup_host_enforce = not bool(state0_is_traced)
-    else:
-        # On accelerator host-forward runs the initial row/gauge enforcement is
-        # setup work.  Using the NumPy row-assignment path avoids several tiny
-        # eager device dispatches without touching traced/differentiable solves.
-        setup_host_enforce = (
-            (not bool(host_update_assembly))
-            and (not bool(use_scan))
-            and (not bool(state0_is_traced))
-            and (_scan_backend_name() != "cpu")
-        )
+    # On accelerator host-forward runs the initial row/gauge enforcement is
+    # setup work.  Using the NumPy row-assignment path avoids several tiny eager
+    # device dispatches without touching traced/differentiable solves.
+    setup_host_enforce = _resolve_setup_host_enforce(
+        setup_host_enforce_env=os.getenv("VMEC_JAX_HOST_SETUP_ENFORCE", "auto"),
+        host_update_assembly=bool(host_update_assembly),
+        use_scan=bool(use_scan),
+        state_has_tracer=bool(state0_is_traced),
+        backend_name=_scan_backend_name(),
+    )
 
     def _m1_internal_to_physical_pair(rss, zcs):
         """Convert VMEC internal m=1 (rss,zcs) pair to physical coefficients."""
