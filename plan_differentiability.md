@@ -3663,3 +3663,56 @@ Completion:
 - WOUT diagnostic/profile decomposition: 92%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 98.45%.
+
+## 2026-06-15 Free-Boundary Branch Metadata Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved fixed accepted-branch metadata and replay-graph metadata reports into
+   `vmec_jax.solvers.free_boundary.adjoint.branch_metadata`.
+2. Preserved public facade names in `vmec_jax.free_boundary_adjoint` for
+   downstream callers and report-generation code.
+3. Re-ran focused branch-metadata, replay-graph, trace-fingerprint, and
+   branch-trace mode tests.
+
+Results obtained:
+
+- `free_boundary_adjoint.py` dropped from 4,186 to 4,001 lines.
+- Branch metadata/report construction now lives next to trace-control and
+  trace-stack helpers instead of the root facade.
+- No adaptive branch-selection or complete-solve semantics changed.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/free_boundary_adjoint.py vmec_jax/solvers/free_boundary/adjoint/branch_metadata.py tests/test_free_boundary_adjoint_helpers_unit.py tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+- `python -m compileall -q vmec_jax/free_boundary_adjoint.py vmec_jax/solvers/free_boundary/adjoint/branch_metadata.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_adjoint_helpers_unit.py::test_accepted_trace_control_metadata_and_stack_contracts tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_trace_fingerprint_detects_control_branch_changes tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_branch_trace_mode_keeps_replay_controls_without_raw_force_payload -q`
+- `python tools/diagnostics/source_health.py --top 25 --top-functions 25 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. Wait for the current CI run to finish or fix it if it fails.
+2. Next safe source-health target is the replay-plan/context execution seam or
+   WOUT minimal assembly; avoid the adaptive branch controller and scan core
+   until additional gates are attached.
+3. Once free-boundary facade drops below the next meaningful threshold, shift
+   effort to driver/optimization workflow and WOUT minimal decomposition.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.45%.
+- Differentiability/refactor implementation: 99.84%.
+- Solver monolith reduction: 86.5%.
+- Free-boundary adjoint monolith reduction: 78%.
+- Driver workflow decomposition: 84%.
+- WOUT diagnostic/profile decomposition: 92%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 98.5%.
