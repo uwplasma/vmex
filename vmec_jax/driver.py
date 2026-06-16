@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, replace
+from functools import partial
 from pathlib import Path
 import os
 import time
@@ -352,6 +353,31 @@ def _stage_array_list(value):
     return None
 
 
+def _driver_resume_step_size_value(*, step_size, indata) -> float:
+    """Resolve the step size used to sanitize resumable VMEC time-step state."""
+
+    if step_size is not _STEP_SIZE_SENTINEL and step_size is not None:
+        return float(step_size)
+    try:
+        return float(indata.get_float("DELT", 5e-3))
+    except Exception:
+        return 5e-3
+
+
+def _sanitize_resume_state_for_driver_stage(resume_state, *, step_size, indata):
+    return _sanitize_resume_state_for_grid_change(
+        resume_state,
+        step_size=_driver_resume_step_size_value(step_size=step_size, indata=indata),
+    )
+
+
+def _sanitize_resume_state_for_driver_same_stage(resume_state, *, step_size, indata):
+    return _sanitize_resume_state_for_same_grid(
+        resume_state,
+        step_size=_driver_resume_step_size_value(step_size=step_size, indata=indata),
+    )
+
+
 def run_fixed_boundary(
     input_path: str | Path,
     *,
@@ -654,19 +680,16 @@ def run_fixed_boundary(
         and (not bool(cfg.lfreeb))
     )
 
-    def _resume_step_size_value() -> float:
-        if step_size is not _STEP_SIZE_SENTINEL and step_size is not None:
-            return float(step_size)
-        try:
-            return float(indata.get_float("DELT", 5e-3))
-        except Exception:
-            return 5e-3
-
-    def _sanitize_resume_state_for_stage(resume_state):
-        return _sanitize_resume_state_for_grid_change(resume_state, step_size=_resume_step_size_value())
-
-    def _sanitize_resume_state_for_same_stage(resume_state):
-        return _sanitize_resume_state_for_same_grid(resume_state, step_size=_resume_step_size_value())
+    sanitize_resume_state_for_stage = partial(
+        _sanitize_resume_state_for_driver_stage,
+        step_size=step_size,
+        indata=indata,
+    )
+    sanitize_resume_state_for_same_stage = partial(
+        _sanitize_resume_state_for_driver_same_stage,
+        step_size=step_size,
+        indata=indata,
+    )
 
     def _run_cli_accelerated_budgeted_multigrid(
         *,
@@ -743,7 +766,7 @@ def run_fixed_boundary(
             run_fixed_boundary=run_fixed_boundary,
             interp_vmec_state=interp_vmec_state,
             maybe_finish_cli_fixed_boundary_run=_maybe_finish_cli_fixed_boundary_run,
-            sanitize_resume_state_for_stage=_sanitize_resume_state_for_stage,
+            sanitize_resume_state_for_stage=sanitize_resume_state_for_stage,
             timing_solve_total_s=_timing_solve_total_s,
             accelerated_cli_budgeted_stage_iters=_accelerated_cli_budgeted_stage_iters,
         )
@@ -796,7 +819,7 @@ def run_fixed_boundary(
             run_cli_explicit_staged_followup=_run_cli_explicit_staged_followup,
             get_stage_results=_finish_stage_results,
             get_stage_statics=_finish_stage_statics,
-            sanitize_resume_state_for_stage=_sanitize_resume_state_for_stage,
+            sanitize_resume_state_for_stage=sanitize_resume_state_for_stage,
             solve_fixed_boundary_residual_iter=solve_fixed_boundary_residual_iter,
             default_backend_name=_default_backend_name,
             host_update_assembly_driver_default=_host_update_assembly_driver_default,
@@ -1771,7 +1794,7 @@ def run_fixed_boundary(
                 completed_chunk_iters = min(int(chunk_budget), int(res_chunk.n_iter) + 1)
                 remaining_budget = max(0, int(remaining_budget) - int(completed_chunk_iters))
                 chunk_state = res_chunk.state
-                chunk_resume_state = _sanitize_resume_state_for_same_stage(
+                chunk_resume_state = sanitize_resume_state_for_same_stage(
                     res_chunk.diagnostics.get("resume_state")
                 )
 
@@ -1904,7 +1927,7 @@ def run_fixed_boundary(
             except Exception:
                 prev_stage_fsq = None
             if multigrid_resume and i < (nstep - 1):
-                resume_state_stage = _sanitize_resume_state_for_stage(res_i.diagnostics.get("resume_state"))
+                resume_state_stage = sanitize_resume_state_for_stage(res_i.diagnostics.get("resume_state"))
             state = stage_results[-1].state
             static_prev = static_i
             ftol_last = float(ftol_i)
