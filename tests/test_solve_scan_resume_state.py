@@ -3,7 +3,7 @@ import pytest
 
 from vmec_jax._compat import has_jax, jnp
 from vmec_jax.solve import _initialize_scan_resume_state
-from vmec_jax.solvers.fixed_boundary.scan.resume import build_traced_scan_resume_state
+from vmec_jax.solvers.fixed_boundary.scan.resume import build_initial_scan_carry, build_traced_scan_resume_state
 
 
 pytestmark = pytest.mark.skipif(not has_jax(), reason="scan resume-state helper requires JAX arrays")
@@ -203,3 +203,59 @@ def test_initialize_scan_resume_state_optional_payloads_default_and_override():
     assert _scalar(out.r00_prev) == pytest.approx(1.25)
     assert _scalar(out.z00_prev) == pytest.approx(-2.5)
     assert _scalar(out.w_mhd_prev) == pytest.approx(3.75)
+
+
+def test_build_initial_scan_carry_uses_resume_fields_cache_and_edges():
+    shape = (2, 2, 1)
+    state = object()
+    resume = _init(
+        {
+            "time_step": "0.25",
+            "flip_sign": "-1.0",
+            "iter1": "4",
+            "ijacob": "2",
+            "r00_prev": "1.5",
+            "z00_prev": "2.5",
+            "w_mhd_prev": "3.5",
+        },
+        checkpoint="checkpoint-state",
+        shape=shape,
+    )
+
+    carry = build_initial_scan_carry(
+        state_init=state,
+        resume_fields=resume,
+        dtype=jnp.float32,
+        iter_offset0=7,
+        cache_valid=jnp.asarray(True),
+        cache_precond_diag=("diag",),
+        cache_tcon=("tcon",),
+        cache_norms=("norms",),
+        cache_rz_scale="rz-scale",
+        cache_l_scale="l-scale",
+        cache_rz_norm=jnp.asarray(4.0),
+        cache_f_norm1=jnp.asarray(0.25),
+        cache_rz_mats=("mats",),
+        cache_lam_prec=jnp.asarray([1.0]),
+        edge_Rcos=np.asarray([1.0, 2.0]),
+        edge_Rsin=np.asarray([3.0, 4.0]),
+        edge_Zcos=np.asarray([5.0, 6.0]),
+        edge_Zsin=np.asarray([7.0, 8.0]),
+    )
+
+    assert carry.state is state
+    assert carry.state_checkpoint == "checkpoint-state"
+    assert _scalar(carry.time_step) == pytest.approx(0.25)
+    assert _scalar(carry.flip_sign) == pytest.approx(-1.0)
+    assert _int_scalar(carry.iter_offset) == 7
+    assert _int_scalar(carry.iter1) == 4
+    assert _int_scalar(carry.ijacob) == 2
+    assert bool(np.asarray(carry.cache_valid)) is True
+    assert carry.cache_precond_diag == ("diag",)
+    assert _scalar(carry.r00_prev) == pytest.approx(1.5)
+    assert _scalar(carry.z00_prev) == pytest.approx(2.5)
+    assert _scalar(carry.w_mhd_prev) == pytest.approx(3.5)
+    assert bool(np.asarray(carry.fallback_active)) is True
+    assert bool(np.asarray(carry.converged)) is False
+    np.testing.assert_allclose(np.asarray(carry.fsqr_prev_phys), 2.0)
+    np.testing.assert_allclose(np.asarray(carry.edge_Zsin), np.asarray([7.0, 8.0], dtype=np.float32))
