@@ -370,6 +370,38 @@ def _vmec_realspace_geom_light_from_state(
     return {"R": R, "Z": Z, "Zu": Zu}
 
 
+def _synthesize_wout_geometry_from_state(
+    *,
+    state: VMECState,
+    static,
+    trig,
+    light: bool,
+    timing_enabled: bool,
+    timing: dict[str, float],
+) -> dict[str, np.ndarray | None]:
+    """Synthesize real-space geometry for minimal WOUT construction."""
+    from .vmec_numpy_forces import _numpy_module_patch
+
+    if timing_enabled:
+        import time as _time
+
+        t0 = _time.perf_counter()
+    with _numpy_module_patch():
+        if light:
+            geom = _vmec_realspace_geom_light_from_state(state=state, modes=static.modes, trig=trig)
+        else:
+            geom = vmec_realspace_geom_from_state(state=state, modes=static.modes, trig=trig)
+    if has_jax():
+        try:
+            geom = jax.device_get(geom)
+        except Exception:
+            pass
+    geom = {k: (None if v is None else np.asarray(v)) for k, v in geom.items()}
+    if timing_enabled:
+        timing["geom_synthesis_s"] = _time.perf_counter() - t0
+    return geom
+
+
 def _apply_bsubv_equif_correction(
     *,
     bsubv: np.ndarray,
@@ -1095,23 +1127,14 @@ def wout_minimal_from_fixed_boundary(
     if wout_timing_enabled:
         wout_timing["trig_tables_s"] = _time.perf_counter() - t0
 
-    if wout_timing_enabled:
-        t0 = _time.perf_counter()
-    from .vmec_numpy_forces import _numpy_module_patch
-
-    with _numpy_module_patch():
-        if wout_light:
-            geom = _vmec_realspace_geom_light_from_state(state=state, modes=static.modes, trig=trig)
-        else:
-            geom = vmec_realspace_geom_from_state(state=state, modes=static.modes, trig=trig)
-    if has_jax():
-        try:
-            geom = jax.device_get(geom)
-        except Exception:
-            pass
-    geom = {k: (None if v is None else np.asarray(v)) for k, v in geom.items()}
-    if wout_timing_enabled:
-        wout_timing["geom_synthesis_s"] = _time.perf_counter() - t0
+    geom = _synthesize_wout_geometry_from_state(
+        state=state,
+        static=static,
+        trig=trig,
+        light=bool(wout_light),
+        timing_enabled=bool(wout_timing_enabled),
+        timing=wout_timing,
+    )
 
     # Flux and profiles on VMEC half mesh.
     s = np.asarray(static.s)
@@ -1189,6 +1212,7 @@ def wout_minimal_from_fixed_boundary(
         icurv_full_mesh_from_indata_func=_icurv_full_mesh_from_indata,
     )
     from .vmec_forces import vmec_forces_rz_from_wout
+    from .vmec_numpy_forces import _numpy_module_patch
 
     # Output diagnostics should default to the same IEQUI path used by the run.
     # A forced IEQUI=1 path is retained only as an explicit debug override.

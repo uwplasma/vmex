@@ -4923,3 +4923,58 @@ Completion:
 - Implicit residual-adjoint decomposition: 88%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.18%.
+
+## 2026-06-16 WOUT Geometry Synthesis Helper Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `_synthesize_wout_geometry_from_state` to isolate the minimal-WOUT
+   real-space geometry synthesis, host transfer, and timing bookkeeping.
+2. Replaced the inline geometry block in `wout_minimal_from_fixed_boundary`
+   with a call to that helper.
+3. Left the bcovar, bsub, JXBFORCE, Mercier, Glasser, and NetCDF payload
+   assembly paths unchanged.
+
+Results obtained:
+
+- `wout_minimal_from_fixed_boundary` decreased from 984 to 976 lines.
+- The public WOUT module API and compatibility exports were preserved.
+- No new source file was added; this improves readability without increasing
+  namespace sprawl.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/wout.py vmec_jax/io/wout`
+- `python -m compileall -q vmec_jax/wout.py vmec_jax/io/wout`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_helpers.py tests/test_wout_fast_helpers.py tests/test_wout_branch_coverage.py tests/test_driver_wout_wave9_coverage.py tests/test_wout_wave2.py tests/test_wout_wave3_coverage.py tests/test_wout_env_branch_coverage.py -q`
+- `python tools/diagnostics/source_health.py --top 16 --top-functions 24`
+- `git diff --check`
+
+Best next steps:
+
+1. Commit and push this WOUT helper extraction.
+2. Keep future WOUT changes focused on existing `vmec_jax.io.wout.*` domain
+   modules; do not split the public `wout.py` facade into many new root files.
+3. Continue monitoring CI and prioritize failures over further refactoring if
+   the newest run reports red.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.67%.
+- Differentiability/refactor implementation: 99.981%.
+- Solver monolith reduction: 88.7%.
+- Free-boundary adjoint monolith reduction: 80%.
+- Driver workflow decomposition: 91%.
+- WOUT diagnostic/profile decomposition: 98.2%.
+- Optimizer workflow decomposition: 84%.
+- Implicit residual-adjoint decomposition: 88%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.19%.
