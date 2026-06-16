@@ -4978,3 +4978,66 @@ Completion:
 - Implicit residual-adjoint decomposition: 88%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.19%.
+
+## 2026-06-16 WOUT Force/Bcovar Payload Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added a private `_WoutBcovarPayload` and `_prepare_wout_bcovar_payload`
+   helper in `vmec_jax.wout`.
+2. Centralized WOUT force/bcovar source selection, including:
+   `VMEC_JAX_WOUT_FORCE_IEQUI1`, `VMEC_JAX_WOUT_REUSE_FINAL_BCOVAR`,
+   `VMEC_JAX_WOUT_FAST_BCOVAR`, and `VMEC_JAX_WOUT_FORCE_VMEC_SYNTH`.
+3. Kept the existing monkeypatch seams explicit by passing the imported
+   `vmec_bcovar_half_mesh_from_wout`, `vmec_forces_rz_from_wout`, and
+   `_numpy_module_patch` callables into the helper.
+4. Left downstream BSS, Nyquist, Mercier, Glasser, and NetCDF assembly
+   unchanged.
+
+Results obtained:
+
+- `wout_minimal_from_fixed_boundary` decreased from 976 to 928 lines.
+- The file-level line count increased because the helper remains in the public
+  facade to avoid adding another source module during this tranche. A later
+  pass can move stable WOUT helpers into `vmec_jax.io.wout.minimal` if reducing
+  facade file size becomes more important than minimizing module count.
+- Force-payload reuse and force-BSS env branches remain covered by existing
+  tests.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/wout.py vmec_jax/io/wout tests/test_wout_env_branch_coverage.py tests/test_wout_driver_wave10_coverage.py`
+- `python -m compileall -q vmec_jax/wout.py vmec_jax/io/wout`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_env_branch_coverage.py tests/test_wout_driver_wave10_coverage.py tests/test_wout_helpers.py tests/test_wout_fast_helpers.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_env_branch_coverage.py tests/test_wout_driver_wave10_coverage.py tests/test_wout_helpers.py tests/test_wout_fast_helpers.py tests/test_wout_branch_coverage.py -q`
+- `python tools/diagnostics/source_health.py --top 24 --top-functions 32`
+
+Best next steps:
+
+1. Commit and push this WOUT force/bcovar extraction.
+2. Wait for the existing CI run to finish, then monitor the new run from this
+   commit.
+3. Continue WOUT cleanup through existing `vmec_jax.io.wout.*` domain helpers
+   only if the next extraction clearly reduces high-level function size without
+   increasing namespace sprawl.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.67%.
+- Differentiability/refactor implementation: 99.982%.
+- Solver monolith reduction: 88.7%.
+- Free-boundary adjoint monolith reduction: 80%.
+- Driver workflow decomposition: 91%.
+- WOUT diagnostic/profile decomposition: 98.5%.
+- Optimizer workflow decomposition: 84%.
+- Implicit residual-adjoint decomposition: 88%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.20%.
