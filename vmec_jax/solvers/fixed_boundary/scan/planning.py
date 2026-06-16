@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any, NamedTuple
+from typing import Any, Mapping, NamedTuple
 
-from ..residual.policy import Vmec2000ScanOptions
+from ..residual.config import resolve_nstep_screen
+from ..residual.policy import Vmec2000ScanOptions, vmec2000_scan_options_from_env
 
 
 SCAN_TIMING_KEYS: tuple[str, ...] = (
@@ -56,6 +57,21 @@ class ScanIterationPlan(NamedTuple):
     max_iter_scan: int
     preflight_iters: int
     max_iter_tail: int
+
+
+class Vmec2000ScanSetup(NamedTuple):
+    """Host-side scan setup resolved before entering the numerical controller."""
+
+    state_only_scan: bool
+    scan_fallback_enabled_run: bool
+    force_chunked_scan_run: bool
+    nstep_screen: int
+    options: Vmec2000ScanOptions
+
+
+def _env_value(env: Mapping[str, str | None], name: str, default: str = "") -> str:
+    value = env.get(name, default)
+    return default if value is None else str(value)
 
 
 def scan_timing_enabled(env_value: str) -> bool:
@@ -159,6 +175,78 @@ def apply_state_only_scan_options(
         scan_collect_print=False,
         print_in_scan=False,
         chunked_print=False,
+    )
+
+
+def resolve_vmec2000_scan_setup(
+    *,
+    env: Mapping[str, str | None],
+    state_only: bool,
+    scan_differentiated: bool,
+    scan_fallback_enabled: bool,
+    force_chunked_scan: bool,
+    indata_nstep: int,
+    preconditioner_use_precomputed_tridi: bool | None,
+    preconditioner_use_lax_tridi: bool | None,
+    verbose: bool,
+    vmec2000_control: bool,
+    verbose_vmec2000_table: bool,
+    light_history: bool,
+    scan_minimal_default: bool | None,
+    dump_any: bool,
+    fsq_total_target: float | None,
+    backend_name: str,
+) -> Vmec2000ScanSetup:
+    """Resolve scan options and state-only overrides in one pure setup step."""
+
+    run_flags = resolve_scan_run_flags(
+        state_only=bool(state_only),
+        scan_differentiated=bool(scan_differentiated),
+        scan_fallback_enabled=bool(scan_fallback_enabled),
+        force_chunked_scan=bool(force_chunked_scan),
+    )
+    nstep_screen = resolve_nstep_screen(indata_nstep=int(indata_nstep), override_env="")
+
+    tridi_precompute_env = _env_value(env, "VMEC_JAX_TRIDI_PRECOMPUTE", "")
+    if preconditioner_use_precomputed_tridi is not None:
+        tridi_precompute_env = "1" if bool(preconditioner_use_precomputed_tridi) else "0"
+    tridi_solve_env = _env_value(env, "VMEC_JAX_TRIDI_SOLVE", "")
+    if preconditioner_use_lax_tridi is not None:
+        tridi_solve_env = "force" if bool(preconditioner_use_lax_tridi) else "0"
+
+    options = vmec2000_scan_options_from_env(
+        verbose=bool(verbose),
+        vmec2000_control=bool(vmec2000_control),
+        verbose_vmec2000_table=bool(verbose_vmec2000_table),
+        light_history=bool(light_history),
+        scan_minimal_default=scan_minimal_default,
+        dump_any=bool(dump_any),
+        fsq_total_target=fsq_total_target,
+        backend_name=str(backend_name),
+        force_chunked_scan_run=bool(run_flags.force_chunked_scan_run),
+        scan_print_env=_env_value(env, "VMEC_JAX_SCAN_PRINT", "1"),
+        scan_print_mode_env=_env_value(env, "VMEC_JAX_SCAN_PRINT_MODE", "debug_callback"),
+        scan_print_ordered_env=_env_value(env, "VMEC_JAX_SCAN_PRINT_ORDERED", "0"),
+        scan_print_chunked_env=_env_value(env, "VMEC_JAX_SCAN_PRINT_CHUNKED", "1"),
+        scan_light_env=_env_value(env, "VMEC_JAX_SCAN_LIGHT", "0"),
+        scan_minimal_env=_env_value(env, "VMEC_JAX_SCAN_MINIMAL", ""),
+        scan_core_env=_env_value(env, "VMEC_JAX_SCAN_CORE", ""),
+        scan_trace_env=_env_value(env, "VMEC_JAX_SCAN_TRACE", "0"),
+        abort_scan_env=_env_value(env, "VMEC_JAX_SCAN_ABORT_ON_BADJAC", "0"),
+        scan_precompute_env=_env_value(env, "VMEC_JAX_SCAN_PRECOND_PRECOMPUTE", ""),
+        tridi_precompute_env=tridi_precompute_env,
+        scan_lax_env=_env_value(env, "VMEC_JAX_SCAN_PRECOND_LAXTRIDI", ""),
+        tridi_solve_env=tridi_solve_env,
+        scan_restart_payload_env=_env_value(env, "VMEC_JAX_SCAN_RESTART_PAYLOAD", ""),
+    )
+    options = apply_state_only_scan_options(options, state_only_scan=bool(run_flags.state_only_scan))
+
+    return Vmec2000ScanSetup(
+        state_only_scan=bool(run_flags.state_only_scan),
+        scan_fallback_enabled_run=bool(run_flags.scan_fallback_enabled_run),
+        force_chunked_scan_run=bool(run_flags.force_chunked_scan_run),
+        nstep_screen=int(nstep_screen),
+        options=options,
     )
 
 

@@ -5609,3 +5609,63 @@ Completion:
 - Implicit residual-adjoint decomposition: 88%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.37%.
+
+## 2026-06-16 VMEC2000 Scan Setup Domain Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `Vmec2000ScanSetup` and `resolve_vmec2000_scan_setup` to
+   `vmec_jax.solvers.fixed_boundary.scan.planning`.
+2. Moved VMEC2000 scan run-flag, state-only override, NSTEP screen cadence, and
+   scan preconditioner option resolution out of the numerical scan body.
+3. Updated `solve_fixed_boundary_residual_iter._run_vmec2000_scan` to consume
+   the resolved scan setup object before entering the accepted/rejected
+   controller logic.
+4. Added a focused pure-policy test covering state-only scan overrides and
+   explicit preconditioner option overrides.
+
+Results obtained:
+
+- The residual iteration module dropped from 9,544 lines to 9,521 lines.
+- `solve_fixed_boundary_residual_iter` dropped from 8,949 to 8,927 lines.
+- `_run_vmec2000_scan` dropped from 2,209 to 2,187 lines.
+- The more important result is architectural: scan environment/policy setup now
+  lives in `fixed_boundary.scan.planning`, not inside the nonlinear controller.
+  This makes the future `_run_vmec2000_scan` extraction depend on a smaller and
+  more explicit setup context.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/scan/planning.py vmec_jax/solvers/fixed_boundary/residual/iteration.py tests/test_solve_scan_planning_helpers.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_scan_planning_helpers.py tests/test_solve_scan_chunking.py tests/test_solve_real_scan_wave10_coverage.py tests/test_solve_residual_iter_helpers_wave8_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_branch_coverage.py tests/test_solve_gd_wave10_coverage.py tests/test_solve_lbfgs_wave8_coverage.py tests/test_solve_residual_optimizer_wave8_coverage.py -q`
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 25`
+
+Best next steps:
+
+1. Continue migrating setup/policy pieces out of `_run_vmec2000_scan` until the
+   remaining nested function is mostly numerical step logic.
+2. Introduce a typed scan/controller context once the setup surface is stable.
+3. Move the scan controller to `fixed_boundary.scan` under branch-fingerprint
+   and VMEC2000 parity tests.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.72%.
+- Differentiability/refactor implementation: 99.994%.
+- Solver monolith reduction: 91.6%.
+- Free-boundary adjoint monolith reduction: 80%.
+- Driver workflow decomposition: 91.6%.
+- WOUT diagnostic/profile decomposition: 98.5%.
+- Optimizer workflow decomposition: 86%.
+- Implicit residual-adjoint decomposition: 88%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.38%.

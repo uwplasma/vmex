@@ -12,6 +12,7 @@ from vmec_jax.solvers.fixed_boundary.scan.planning import (
     resolve_scan_iteration_plan,
     resolve_scan_preflight_iters,
     resolve_scan_run_flags,
+    resolve_vmec2000_scan_setup,
     scan_chunk_settings,
     scan_jit_forces_enabled,
     scan_jit_preflight_enabled,
@@ -226,6 +227,44 @@ def test_state_only_overrides_light_minimal_and_print_options():
     assert not state_only.print_in_scan
     assert not state_only.chunked_print
     assert apply_state_only_scan_options(options, state_only_scan=False) is options
+
+
+def test_vmec2000_scan_setup_resolves_state_only_and_preconditioner_overrides():
+    setup = resolve_vmec2000_scan_setup(
+        env={
+            "VMEC_JAX_SCAN_LIGHT": "1",
+            "VMEC_JAX_SCAN_PRINT": "1",
+            "VMEC_JAX_SCAN_PRECOND_PRECOMPUTE": "",
+            "VMEC_JAX_SCAN_PRECOND_LAXTRIDI": "",
+            "VMEC_JAX_TRIDI_PRECOMPUTE": "0",
+            "VMEC_JAX_TRIDI_SOLVE": "0",
+        },
+        state_only=True,
+        scan_differentiated=False,
+        scan_fallback_enabled=True,
+        force_chunked_scan=True,
+        indata_nstep=4,
+        preconditioner_use_precomputed_tridi=True,
+        preconditioner_use_lax_tridi=True,
+        verbose=True,
+        vmec2000_control=True,
+        verbose_vmec2000_table=True,
+        light_history=False,
+        scan_minimal_default=False,
+        dump_any=False,
+        fsq_total_target=None,
+        backend_name="gpu",
+    )
+
+    assert setup.state_only_scan
+    assert not setup.scan_fallback_enabled_run
+    assert setup.force_chunked_scan_run
+    assert setup.nstep_screen == 4
+    assert setup.options.scan_minimal
+    assert not setup.options.scan_collect_scalars
+    assert not setup.options.print_in_scan
+    assert setup.options.scan_use_precomputed
+    assert setup.options.scan_use_lax_tridi
 
 
 def test_scan_options_env_branches_for_minimal_light_and_restart_payload():

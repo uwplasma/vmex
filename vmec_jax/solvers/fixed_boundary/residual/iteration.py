@@ -337,13 +337,12 @@ from vmec_jax.solvers.fixed_boundary.scan.debug import (
     _record_scan_device_ready,
 )
 from vmec_jax.solvers.fixed_boundary.scan.planning import (
-    apply_state_only_scan_options as _apply_state_only_scan_options,
     build_scan_timing_report as _build_scan_timing_report,
     build_vmec2000_scan_cache_key as _build_vmec2000_scan_cache_key,
     new_scan_timing_stats as _new_scan_timing_stats,
     resolve_scan_iteration_plan as _resolve_scan_iteration_plan,
     resolve_scan_preflight_iters as _resolve_scan_preflight_iters,
-    resolve_scan_run_flags as _resolve_scan_run_flags,
+    resolve_vmec2000_scan_setup as _resolve_vmec2000_scan_setup,
     scan_chunk_settings as _resolve_scan_chunk_settings,
     scan_jit_forces_enabled as _scan_jit_forces_enabled,
     scan_jit_preflight_enabled as _scan_jit_preflight_enabled,
@@ -2495,31 +2494,15 @@ def solve_fixed_boundary_residual_iter(
         )
 
         scan_differentiated = _tree_has_tracer(state_init)
-        scan_run_flags = _resolve_scan_run_flags(
+        scan_setup = _resolve_vmec2000_scan_setup(
+            env=os.environ,
             state_only=bool(state_only),
             scan_differentiated=bool(scan_differentiated),
             scan_fallback_enabled=bool(scan_fallback_enabled),
             force_chunked_scan=bool(force_chunked_scan),
-        )
-        state_only_scan = scan_run_flags.state_only_scan
-        scan_fallback_enabled_run = scan_run_flags.scan_fallback_enabled_run
-        force_chunked_scan_run = scan_run_flags.force_chunked_scan_run
-        k_preconditioner_update_interval = 25
-        restart_badjac_factor = 0.9
-        restart_badprog_factor = 1.03
-        vmec2000_fact = 1.0e4
-        iter_offset0 = 0
-        nstep_screen = _resolve_nstep_screen(
             indata_nstep=int(indata.get_int("NSTEP", 1)) if indata is not None else 1,
-            override_env="",
-        )
-        tridi_precompute_env = os.getenv("VMEC_JAX_TRIDI_PRECOMPUTE", "")
-        if preconditioner_use_precomputed_tridi is not None:
-            tridi_precompute_env = "1" if bool(preconditioner_use_precomputed_tridi) else "0"
-        tridi_solve_env = os.getenv("VMEC_JAX_TRIDI_SOLVE", "")
-        if preconditioner_use_lax_tridi is not None:
-            tridi_solve_env = "force" if bool(preconditioner_use_lax_tridi) else "0"
-        scan_options = _vmec2000_scan_options_from_env(
+            preconditioner_use_precomputed_tridi=preconditioner_use_precomputed_tridi,
+            preconditioner_use_lax_tridi=preconditioner_use_lax_tridi,
             verbose=bool(verbose),
             vmec2000_control=bool(vmec2000_control),
             verbose_vmec2000_table=bool(verbose_vmec2000_table),
@@ -2528,23 +2511,17 @@ def solve_fixed_boundary_residual_iter(
             dump_any=bool(dump_any),
             fsq_total_target=fsq_total_target,
             backend_name=_scan_backend_name(),
-            force_chunked_scan_run=bool(force_chunked_scan_run),
-            scan_print_env=os.getenv("VMEC_JAX_SCAN_PRINT", "1"),
-            scan_print_mode_env=os.getenv("VMEC_JAX_SCAN_PRINT_MODE", "debug_callback"),
-            scan_print_ordered_env=os.getenv("VMEC_JAX_SCAN_PRINT_ORDERED", "0"),
-            scan_print_chunked_env=os.getenv("VMEC_JAX_SCAN_PRINT_CHUNKED", "1"),
-            scan_light_env=os.getenv("VMEC_JAX_SCAN_LIGHT", "0"),
-            scan_minimal_env=os.getenv("VMEC_JAX_SCAN_MINIMAL", ""),
-            scan_core_env=os.getenv("VMEC_JAX_SCAN_CORE", ""),
-            scan_trace_env=os.getenv("VMEC_JAX_SCAN_TRACE", "0"),
-            abort_scan_env=os.getenv("VMEC_JAX_SCAN_ABORT_ON_BADJAC", "0"),
-            scan_precompute_env=os.getenv("VMEC_JAX_SCAN_PRECOND_PRECOMPUTE", ""),
-            tridi_precompute_env=tridi_precompute_env,
-            scan_lax_env=os.getenv("VMEC_JAX_SCAN_PRECOND_LAXTRIDI", ""),
-            tridi_solve_env=tridi_solve_env,
-            scan_restart_payload_env=os.getenv("VMEC_JAX_SCAN_RESTART_PAYLOAD", ""),
         )
-        scan_options = _apply_state_only_scan_options(scan_options, state_only_scan=bool(state_only_scan))
+        state_only_scan = scan_setup.state_only_scan
+        scan_fallback_enabled_run = scan_setup.scan_fallback_enabled_run
+        force_chunked_scan_run = scan_setup.force_chunked_scan_run
+        k_preconditioner_update_interval = 25
+        restart_badjac_factor = 0.9
+        restart_badprog_factor = 1.03
+        vmec2000_fact = 1.0e4
+        iter_offset0 = 0
+        nstep_screen = scan_setup.nstep_screen
+        scan_options = scan_setup.options
         scan_print_ordered = scan_options.scan_print_ordered
         scan_light = scan_options.scan_light
         scan_minimal = scan_options.scan_minimal
