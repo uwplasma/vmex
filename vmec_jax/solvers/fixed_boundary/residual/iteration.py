@@ -339,6 +339,8 @@ from vmec_jax.solvers.fixed_boundary.scan.math import (
     build_ptau_minmax_context as _build_ptau_minmax_context,
 )
 from vmec_jax.solvers.fixed_boundary.scan.debug import (
+    dump_vmec2000_scan_ptau_rows as _dump_vmec2000_scan_ptau_rows,
+    emit_vmec2000_post_scan_rows as _emit_vmec2000_post_scan_rows,
     _emit_vmec2000_iter_row as _emit_scan_vmec2000_iter_row,
     _emit_scan_prints as _emit_scan_debug_prints,
     _maybe_dump_timecontrol_scan as _scan_debug_maybe_dump_timecontrol_scan,
@@ -363,6 +365,7 @@ from vmec_jax.solvers.fixed_boundary.scan.planning import (
 from vmec_jax.solvers.fixed_boundary.scan.runtime import (
     get_or_build_scan_runner as _get_or_build_scan_runner,
     resolve_scan_runtime_hooks_from_env as _resolve_scan_runtime_hooks_from_env,
+    run_scan_preflight_step as _run_scan_preflight_step,
     scan_trace_context_or_null as _scan_trace_context_or_null,
 )
 from vmec_jax.solvers.fixed_boundary.scan.time_control import (
@@ -3940,21 +3943,21 @@ def solve_fixed_boundary_residual_iter(
                 scan_differentiated=bool(scan_differentiated),
             ) and (not bool(need_print))
             if preflight_iters > 0:
-                t_preflight = time.perf_counter() if scan_timing_enabled else None
-                if iter_offset_preflight is not None:
-                    carry = carry._replace(iter_offset=jnp.asarray(iter_offset_preflight, dtype=jnp.int32))
-                if jit_preflight:
-                    preflight_runner, _preflight_cache_status = _get_scan_runner(1)
-                    carry, hist_pre_seq = preflight_runner(carry, jnp.asarray([0], dtype=jnp.int32))
-                    if scan_timing_enabled and t_preflight is not None:
-                        carry, hist_pre_seq = _block_scan_value((carry, hist_pre_seq))
-                    hist_pre = jax.tree_util.tree_map(lambda a: a[0], hist_pre_seq)
-                else:
-                    try:
-                        with jax.disable_jit():
-                            carry, hist_pre = _scan_step(carry, jnp.asarray(0, dtype=jnp.int32))
-                    except Exception:
-                        carry, hist_pre = _scan_step(carry, jnp.asarray(0, dtype=jnp.int32))
+                preflight = _run_scan_preflight_step(
+                    carry,
+                    iter_offset_preflight=iter_offset_preflight,
+                    jit_preflight=bool(jit_preflight),
+                    get_scan_runner=_get_scan_runner,
+                    scan_step=_scan_step,
+                    scan_timing_enabled=bool(scan_timing_enabled),
+                    scan_timing_stats=scan_timing_stats,
+                    block_scan_value=_block_scan_value,
+                    perf_counter=time.perf_counter,
+                    jnp_module=jnp,
+                    jax_module=jax,
+                )
+                carry = preflight.carry
+                hist_pre = preflight.history_row
                 if not state_only_scan:
                     fsq_min_global_j = jnp.minimum(
                         fsq_min_global_j,
@@ -3969,8 +3972,6 @@ def solve_fixed_boundary_residual_iter(
                 start_idx = int(preflight_iters)
                 if axis_reset_repeat:
                     carry = carry._replace(iter_offset=jnp.asarray(iter_offset0, dtype=jnp.int32))
-                if scan_timing_enabled and t_preflight is not None:
-                    scan_timing_stats["scan_preflight_s"] += time.perf_counter() - float(t_preflight)
             while start_idx < int(max_iter_scan):
                 # Fixed-length chunk to avoid retracing for varying tail sizes.
                 # On quiet accelerator runs, cap the chunk to the remaining work
@@ -4045,34 +4046,33 @@ def solve_fixed_boundary_residual_iter(
                 # Preflight the first iteration separately to avoid XLA aliasing
                 # issues in the initial tomnsps pass.  Accelerator runs may use
                 # a cached one-step runner to avoid a slow host-side force pass.
-                t_preflight = time.perf_counter() if scan_timing_enabled else None
                 carry_pre = carry_init
-                if iter_offset_preflight is not None:
-                    carry_pre = carry_pre._replace(iter_offset=jnp.asarray(iter_offset_preflight, dtype=jnp.int32))
                 jit_preflight = _scan_jit_preflight_enabled(
                     env_value=os.getenv("VMEC_JAX_SCAN_JIT_PREFLIGHT"),
                     backend_name=_scan_backend_name(),
                     scan_differentiated=bool(scan_differentiated),
                 ) and (not bool(scan_collect_print))
-                if jit_preflight:
-                    preflight_runner, _preflight_cache_status = _get_scan_runner(1)
-                    carry_pre, hist_pre_seq = preflight_runner(carry_pre, jnp.asarray([0], dtype=jnp.int32))
-                    hist_pre = jax.tree_util.tree_map(lambda a: a[0], hist_pre_seq)
-                else:
-                    try:
-                        with jax.disable_jit():
-                            carry_pre, hist_pre = _scan_step(carry_pre, jnp.asarray(0, dtype=jnp.int32))
-                    except Exception:
-                        carry_pre, hist_pre = _scan_step(carry_pre, jnp.asarray(0, dtype=jnp.int32))
+                preflight = _run_scan_preflight_step(
+                    carry_pre,
+                    iter_offset_preflight=iter_offset_preflight,
+                    jit_preflight=bool(jit_preflight),
+                    get_scan_runner=_get_scan_runner,
+                    scan_step=_scan_step,
+                    scan_timing_enabled=bool(scan_timing_enabled),
+                    scan_timing_stats=scan_timing_stats,
+                    block_scan_value=_block_scan_value,
+                    perf_counter=time.perf_counter,
+                    jnp_module=jnp,
+                    jax_module=jax,
+                )
+                carry_pre = preflight.carry
+                hist_pre = preflight.history_row
                 if (
                     scan_fallback_enabled_run
                     and int(scan_fallback_iters) > 0
                     and int(preflight_iters) >= int(scan_fallback_iters)
                 ):
                     carry_pre = carry_pre._replace(fallback_active=jnp.asarray(False))
-                if scan_timing_enabled and t_preflight is not None:
-                    carry_pre, hist_pre = _block_scan_value((carry_pre, hist_pre))
-                    scan_timing_stats["scan_preflight_s"] += time.perf_counter() - float(t_preflight)
                 if max_iter_tail > 0:
                     it_seq = jnp.arange(preflight_iters, int(max_iter_scan), dtype=jnp.int32)
                     if axis_reset_repeat:
@@ -4183,59 +4183,37 @@ def solve_fixed_boundary_residual_iter(
         fsql_full = scan_output.fsql_full
         conv_idx_print = scan_output.conv_idx_print
 
-        if (
-            (not scan_minimal)
-            and (not print_in_scan)
-            and (not chunked_print)
-            and verbose
-            and bool(vmec2000_control)
-            and bool(verbose_vmec2000_table)
-        ):
-            r00_full = np.asarray(scan_histories.r00)
-            z00_full = np.asarray(scan_histories.z00)
-            w_mhd_full = np.asarray(scan_histories.w_mhd)
-            dt_full = np.asarray(scan_histories.dt)
-            last_iter = int(conv_idx_print) if int(conv_idx_print) > 0 else int(max_iter)
-            for i in range(last_iter):
-                iter2 = i + 1
-                if _should_print_vmec2000_local(int(iter2), int(last_iter)):
-                    r00_val = float(r00_full[i])
-                    z00_val = float(z00_full[i])
-                    # Match VMEC precision (E11.3) for r00/z00.
-                    r00_val = float(f"{r00_val:.3E}")
-                    z00_val = float(f"{z00_val:.3E}")
-                    _print_vmec2000_row_local(
-                        iter_idx=int(iter2),
-                        fsqr=float(fsqr_full[i]),
-                        fsqz=float(fsqz_full[i]),
-                        fsql=float(fsql_full[i]),
-                        delt0r=float(dt_full[i]),
-                        r00=r00_val,
-                        w_mhd=float(w_mhd_full[i]),
-                        z00=z00_val,
-                    )
-        if (not scan_light) and (not scan_minimal) and os.getenv("VMEC_JAX_DUMP_PTAU", "") not in ("", "0"):
-            last_iter = int(conv_idx_print) if int(conv_idx_print) > 0 else int(max_iter)
-            ptau_min_full = np.asarray(scan_histories.ptau_min)
-            ptau_max_full = np.asarray(scan_histories.ptau_max)
-            tau_min_state_full = np.asarray(scan_histories.tau_min_state)
-            tau_max_state_full = np.asarray(scan_histories.tau_max_state)
-            badjac_ptau_full = np.asarray(scan_histories.badjac_ptau).astype(int)
-            badjac_state_full = np.asarray(scan_histories.badjac_state).astype(int)
-            for i in range(last_iter):
-                iter2 = i + 1 + int(iter_offset0)
-                _maybe_dump_ptau(
-                    iter_idx=int(iter2),
-                    ptau_min=float(ptau_min_full[i]),
-                    ptau_max=float(ptau_max_full[i]),
-                    tau_min_state=float(tau_min_state_full[i]) if np.isfinite(tau_min_state_full[i]) else None,
-                    tau_max_state=float(tau_max_state_full[i]) if np.isfinite(tau_max_state_full[i]) else None,
-                    badjac_ptau=bool(badjac_ptau_full[i]),
-                    badjac_state=bool(badjac_state_full[i]),
-                    badjac_used=bool(np.asarray(scan_histories.bad_jac)[i]),
-                    mode=badjac_mode,
-                    label="scan",
-                )
+        _emit_vmec2000_post_scan_rows(
+            enabled=(
+                (not scan_minimal)
+                and (not print_in_scan)
+                and (not chunked_print)
+                and bool(verbose)
+                and bool(vmec2000_control)
+                and bool(verbose_vmec2000_table)
+            ),
+            scan_histories=scan_histories,
+            fsqr_full=fsqr_full,
+            fsqz_full=fsqz_full,
+            fsql_full=fsql_full,
+            conv_idx_print=int(conv_idx_print),
+            max_iter=int(max_iter),
+            should_print=_should_print_vmec2000_local,
+            print_row=_print_vmec2000_row_local,
+        )
+        _dump_vmec2000_scan_ptau_rows(
+            enabled=(
+                (not scan_light)
+                and (not scan_minimal)
+                and os.getenv("VMEC_JAX_DUMP_PTAU", "") not in ("", "0")
+            ),
+            scan_histories=scan_histories,
+            conv_idx_print=int(conv_idx_print),
+            max_iter=int(max_iter),
+            iter_offset0=int(iter_offset0),
+            badjac_mode=badjac_mode,
+            dump_ptau=_maybe_dump_ptau,
+        )
         n_iter_hist = scan_output.n_iter_hist
         scan_timing_report = None
         if scan_timing_enabled:

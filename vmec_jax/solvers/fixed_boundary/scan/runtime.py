@@ -29,6 +29,13 @@ class ScanRuntimeHooks(NamedTuple):
     scan_trace_context: Callable[[str], Any] | None
 
 
+class ScanPreflightStepResult(NamedTuple):
+    """Result of a one-step scan preflight."""
+
+    carry: Any
+    history_row: Any
+
+
 def _env_value(env: Mapping[str, str | None], name: str, default: str = "") -> str:
     value = env.get(name, default)
     return default if value is None else str(value)
@@ -219,3 +226,40 @@ def get_or_build_scan_runner(
             scan_timing_stats.get("scan_runner_cache_build_s", 0.0)
         ) + (perf_counter() - float(build_start))
     return cached_runner, "miss"
+
+
+def run_scan_preflight_step(
+    carry,
+    *,
+    iter_offset_preflight: int | None,
+    jit_preflight: bool,
+    get_scan_runner: Callable[[int], tuple[Any, str]],
+    scan_step: Callable[[Any, Any], tuple[Any, Any]],
+    scan_timing_enabled: bool,
+    scan_timing_stats: dict[str, Any],
+    block_scan_value: Callable[[Any], Any],
+    perf_counter: Callable[[], float],
+    jnp_module,
+    jax_module,
+) -> ScanPreflightStepResult:
+    """Run the VMEC2000 scan's one-step preflight with shared timing logic."""
+
+    preflight_start = perf_counter() if bool(scan_timing_enabled) else None
+    if iter_offset_preflight is not None:
+        carry = carry._replace(iter_offset=jnp_module.asarray(iter_offset_preflight, dtype=jnp_module.int32))
+    if bool(jit_preflight):
+        preflight_runner, _preflight_cache_status = get_scan_runner(1)
+        carry, hist_pre_seq = preflight_runner(carry, jnp_module.asarray([0], dtype=jnp_module.int32))
+        hist_pre = jax_module.tree_util.tree_map(lambda a: a[0], hist_pre_seq)
+    else:
+        try:
+            with jax_module.disable_jit():
+                carry, hist_pre = scan_step(carry, jnp_module.asarray(0, dtype=jnp_module.int32))
+        except Exception:
+            carry, hist_pre = scan_step(carry, jnp_module.asarray(0, dtype=jnp_module.int32))
+    if bool(scan_timing_enabled) and preflight_start is not None:
+        carry, hist_pre = block_scan_value((carry, hist_pre))
+        scan_timing_stats["scan_preflight_s"] = float(scan_timing_stats.get("scan_preflight_s", 0.0)) + (
+            perf_counter() - float(preflight_start)
+        )
+    return ScanPreflightStepResult(carry=carry, history_row=hist_pre)
