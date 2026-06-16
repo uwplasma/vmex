@@ -15,6 +15,20 @@ class ScanTauDecision(NamedTuple):
     max_tau: Any
 
 
+class ScanBadJacobianDecision(NamedTuple):
+    """Bad-Jacobian decision plus the ptau/state diagnostics emitted to history."""
+
+    bad_jacobian: Any
+    min_tau: Any
+    max_tau: Any
+    min_tau_ptau: Any
+    max_tau_ptau: Any
+    min_tau_state: Any
+    max_tau_state: Any
+    badjac_ptau: Any
+    badjac_state: Any
+
+
 class ScanRestartUpdates(NamedTuple):
     state: Any
     time_step: Any
@@ -297,6 +311,94 @@ def _state_jacobian(
     finite = jnp.isfinite(min_tau) & jnp.isfinite(max_tau)
     bad_state = finite & (min_tau < -tau_tol) & (max_tau > tau_tol)
     return ScanTauDecision(bad_state, min_tau, max_tau)
+
+
+def scan_bad_jacobian_decision(
+    *,
+    vmec2000_control: bool,
+    use_apply_payload_fusion: bool,
+    badjac_use_state: bool,
+    dump_ptau_state: bool,
+    badjac_state_probe: bool,
+    badjac_initial_state_probe_iters: int,
+    iter2: Any,
+    ptau_min: Any | None,
+    ptau_max: Any | None,
+    state_tau_fn: Any,
+    nonvmec_tau_fn: Any,
+    ptau_tol: float,
+    dtype: Any,
+    cond: Any,
+) -> ScanBadJacobianDecision:
+    """Resolve scan bad-Jacobian policy from ptau and optional state Jacobians."""
+
+    nan = jnp.asarray(jnp.nan, dtype=dtype)
+    false = jnp.asarray(False)
+
+    if bool(vmec2000_control):
+        if (ptau_min is None) or (ptau_max is None):
+            min_tau_ptau = nan
+            max_tau_ptau = nan
+            badjac_ptau = false
+        else:
+            min_tau_ptau = jnp.asarray(ptau_min)
+            max_tau_ptau = jnp.asarray(ptau_max)
+            tau_tol_ptau = jnp.asarray(abs(ptau_tol), dtype=dtype)
+            badjac_ptau = (min_tau_ptau < -tau_tol_ptau) & (max_tau_ptau > tau_tol_ptau)
+
+        ptau_valid = jnp.isfinite(min_tau_ptau) & jnp.isfinite(max_tau_ptau)
+        state_probe = (
+            jnp.asarray(bool(badjac_state_probe))
+            & (jnp.asarray(int(badjac_initial_state_probe_iters), dtype=jnp.int32) > 0)
+            & (iter2 <= jnp.asarray(int(badjac_initial_state_probe_iters), dtype=jnp.int32))
+        )
+        need_state_jac = (
+            jnp.asarray(bool(badjac_use_state))
+            | jnp.asarray(bool(dump_ptau_state))
+            | state_probe
+            | (~ptau_valid)
+            | badjac_ptau
+        )
+
+        def _state_jacobian_branch(_):
+            return state_tau_fn()
+
+        def _ptau_only(_):
+            return false, nan, nan
+
+        badjac_state, min_tau_state, max_tau_state = cond(
+            need_state_jac, _state_jacobian_branch, _ptau_only, operand=None
+        )
+        min_tau = jnp.where(bool(badjac_use_state), min_tau_state, min_tau_ptau)
+        max_tau = jnp.where(bool(badjac_use_state), max_tau_state, max_tau_ptau)
+        bad_jacobian = jnp.where(bool(badjac_use_state), badjac_state, badjac_ptau)
+        return ScanBadJacobianDecision(
+            bad_jacobian=bad_jacobian,
+            min_tau=min_tau,
+            max_tau=max_tau,
+            min_tau_ptau=min_tau_ptau,
+            max_tau_ptau=max_tau_ptau,
+            min_tau_state=min_tau_state,
+            max_tau_state=max_tau_state,
+            badjac_ptau=badjac_ptau,
+            badjac_state=badjac_state,
+        )
+
+    if bool(use_apply_payload_fusion):
+        return ScanBadJacobianDecision(false, nan, nan, nan, nan, nan, nan, false, false)
+
+    tau_decision = _state_jacobian(nonvmec_tau_fn(), vmec2000_control=False, ptau_tol=ptau_tol)
+    return ScanBadJacobianDecision(
+        bad_jacobian=tau_decision.bad_jacobian,
+        min_tau=tau_decision.min_tau,
+        max_tau=tau_decision.max_tau,
+        min_tau_ptau=tau_decision.min_tau,
+        max_tau_ptau=tau_decision.max_tau,
+        min_tau_state=tau_decision.min_tau,
+        max_tau_state=tau_decision.max_tau,
+        badjac_ptau=false,
+        badjac_state=tau_decision.bad_jacobian,
+    )
 
 
 def _hold_step(
