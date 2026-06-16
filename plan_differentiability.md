@@ -3833,3 +3833,66 @@ Completion:
 - WOUT diagnostic/profile decomposition: 92%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 98.6%.
+
+## 2026-06-15 Free-Boundary MGrid Helper Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved VMEC2000-compatible mgrid validation, extcur normalization, netCDF
+   loading, character decoding, and trilinear interpolation helpers into
+   `vmec_jax.solvers.free_boundary.mgrid`.
+2. Kept `vmec_jax.free_boundary` as the compatibility facade for
+   `_MGRID_FIELD_CACHE`, `_normalize_extcur`, `_broadcast_xyz`,
+   `_decode_char_scalar`, `_decode_char_rows`, `load_mgrid`,
+   `interpolate_mgrid_bfield`, `validate_free_boundary_config`, and
+   `prepare_mgrid_for_config`.
+3. Preserved the existing monkeypatch contract for `prepare_mgrid_for_config`
+   by making the facade wrapper call the currently bound facade `load_mgrid`.
+4. Avoided NESTOR integral, controller, scan, and branch-selection changes.
+
+Results obtained:
+
+- `free_boundary.py` dropped from 4,114 to 3,821 lines in the source-health
+  report.
+- The mgrid path now has a focused implementation module under the
+  free-boundary solver package while retaining the historical public import
+  surface.
+- The remaining `free_boundary.py` hotspot is mostly true free-boundary field
+  sampling, NESTOR, and diagnostic logic rather than passive types or mgrid IO.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/free_boundary.py vmec_jax/solvers/free_boundary/mgrid.py tests/test_free_boundary_wave2.py tests/test_free_boundary_wp0.py tests/test_free_boundary_additional_helpers.py tests/test_external_fields_mgrid_jax.py`
+- `python -m compileall -q vmec_jax/free_boundary.py vmec_jax/solvers/free_boundary/mgrid.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_wave2.py::test_prepare_mgrid_for_config_validates_and_normalizes tests/test_free_boundary_wp0.py::test_prepare_mgrid_for_config_validates_and_normalizes_extcur tests/test_free_boundary_wp0.py::test_interpolate_mgrid_bfield_trilinear_linear_field tests/test_free_boundary_wp0.py::test_interpolate_mgrid_bfield_vmec_kv_subsamples_divisible_planes tests/test_free_boundary_additional_helpers.py::test_load_mgrid_reports_missing_metadata_and_bad_field_shape tests/test_external_fields_mgrid_jax.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_wave2.py tests/test_free_boundary_wp0.py::test_mgrid_loader_skeleton tests/test_free_boundary_wp0.py::test_prepare_mgrid_for_config_validates_and_normalizes_extcur tests/test_free_boundary_wp0.py::test_prepare_mgrid_for_config_rejects_nfp_mismatch tests/test_free_boundary_wp0.py::test_prepare_mgrid_for_config_rejects_kp_nzeta_mismatch tests/test_free_boundary_wp0.py::test_interpolate_mgrid_bfield_trilinear_linear_field tests/test_free_boundary_wp0.py::test_interpolate_mgrid_bfield_vmec_kv_subsamples_divisible_planes tests/test_free_boundary_wp0.py::test_interpolate_mgrid_bfield_allows_single_toroidal_plane tests/test_free_boundary_additional_helpers.py -q`
+- `python tools/diagnostics/source_health.py --top 12 --top-functions 12`
+
+Best next steps:
+
+1. Let CI complete for the latest pushed head; if this commit is pushed before
+   it finishes, monitor the superseding CI run.
+2. Next free-boundary extraction should target direct-coil/external-boundary
+   sampling utilities only if the test seam is clean; otherwise shift to WOUT
+   minimal assembly where behavior is easier to isolate.
+3. Keep adaptive full-loop differentiation claims conservative until a true
+   fingerprint-gated adaptive AD-vs-FD gate exists.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.5%.
+- Differentiability/refactor implementation: 99.87%.
+- Solver monolith reduction: 87.5%.
+- Free-boundary adjoint monolith reduction: 80%.
+- Driver workflow decomposition: 84%.
+- WOUT diagnostic/profile decomposition: 92%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 98.65%.
