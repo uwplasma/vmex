@@ -4357,3 +4357,66 @@ Completion:
 - WOUT diagnostic/profile decomposition: 96.8%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 98.90%.
+
+## 2026-06-16 Driver Staged-Continuation Runner Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `vmec_jax.drivers.staging` with
+   `FixedBoundaryStageRunnerContext`,
+   `run_cli_accelerated_budgeted_multigrid`, and
+   `run_cli_explicit_staged_followup`.
+2. Replaced the two long nested stage-runner implementations in
+   `run_fixed_boundary` with thin wrappers that call the staging helper.
+3. Kept the recursive public `run_fixed_boundary` call, `interp_vmec_state`,
+   finish callback, timing reducer, and resume-state sanitizer injected through
+   the context, preserving existing monkeypatch and finish-policy seams.
+4. Left the production adaptive solver loop, scan/probe branch selection, and
+   stage-monitor/fallback logic untouched in this tranche.
+
+Results obtained:
+
+- `run_fixed_boundary` dropped from 2,029 to 1,862 lines in the source-health
+  report, taking it below the 2,000-line function warning threshold.
+- The driver workflow is now closer to the intended structure:
+  policy/restart setup, staged runner dispatch, finish policy, then core solve
+  orchestration.
+- The extracted staging helper is in the `drivers` domain namespace, avoiding
+  more root-level module proliferation.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/driver.py vmec_jax/drivers/staging.py`
+- `python -m compileall -q vmec_jax/driver.py vmec_jax/drivers/staging.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_api.py::test_run_fixed_boundary_cli_budgeted_multigrid_path tests/test_driver_wave2_coverage.py::test_accelerated_single_grid_runs_explicit_staged_followup tests/test_driver_wave2_coverage.py::test_accelerated_staged_followup_skips_zero_budget_stage tests/test_driver_wave12_coverage.py::test_cli_staged_followup_records_policy_and_beats_single_grid -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_api.py tests/test_driver_wave2_coverage.py tests/test_driver_wave12_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_policy_helpers.py tests/test_driver_policy_coverage_extra.py tests/test_driver_helper_edges_wave14_coverage.py tests/test_driver_run_wave8_coverage.py -q`
+- `python tools/diagnostics/source_health.py --top 12 --top-functions 15`
+
+Best next steps:
+
+1. Let CI validate the previous pushed WOUT tranche, then push this driver
+   staging tranche.
+2. Next safe source-health target should be WOUT-minimal diagnostic/default
+   initialization or `wout_minimal_from_fixed_boundary` field-path assembly.
+3. Keep the core solve monolith and adaptive branch differentiation for a
+   separate tranche with explicit same-branch/fingerprint-gated tests.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.60%.
+- Differentiability/refactor implementation: 99.95%.
+- Solver monolith reduction: 88.7%.
+- Free-boundary adjoint monolith reduction: 80%.
+- Driver workflow decomposition: 90%.
+- WOUT diagnostic/profile decomposition: 96.8%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 98.95%.

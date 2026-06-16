@@ -30,6 +30,7 @@ from .drivers import policy as _driver_policy_helpers
 from .drivers import results as _driver_result_helpers
 from .drivers import runtime as _driver_runtime_helpers
 from .drivers import solve as _driver_solve_helpers
+from .drivers import staging as _driver_staging_helpers
 from .solve import (
     SolveVmecResidualResult,
     solve_fixed_boundary_gd,
@@ -669,107 +670,11 @@ def run_fixed_boundary(
         warm_start_budget: int,
         final_stage_budget: int,
     ):
-        stage_budgets = _accelerated_cli_budgeted_stage_iters(
-            total_budget=int(warm_start_budget),
-            ns_stages=ns_stage_list,
-        )
-        if stage_budgets:
-            stage_budgets[-1] = max(int(stage_budgets[-1]), int(final_stage_budget))
-        stage_runs: list[FixedBoundaryRun] = []
-        stage_state = None
-        stage_static_prev = None
-        stage_modes: list[str] = []
-        stage_wall_s: list[float] = []
-        stage_solve_total_s: list[float] = []
-        for idx, (ns_i, niter_i) in enumerate(zip(ns_stage_list, stage_budgets)):
-            is_final_stage = idx == (len(ns_stage_list) - 1)
-            stage_mode_i = "accelerated"
-            if stage_state is not None and int(stage_static_prev.cfg.ns) != int(ns_i):
-                stage_state = interp_vmec_state(
-                    stage_state,
-                    m=stage_static_prev.modes.m,
-                    n=stage_static_prev.modes.n,
-                    lthreed=bool(stage_static_prev.cfg.lthreed),
-                    lconm1=bool(getattr(stage_static_prev.cfg, "lconm1", True)),
-                    ns_new=int(ns_i),
-                )
-            kwargs = dict(
-                solver="vmec2000_iter",
-                solver_mode=stage_mode_i,
-                max_iter=int(niter_i),
-                step_size=step_size,
-                history_size=int(history_size),
-                gn_damping=gn_damping,
-                gn_cg_tol=gn_cg_tol,
-                gn_cg_maxiter=int(gn_cg_maxiter),
-                use_initial_guess=False,
-                vmec_project=bool(vmec_project),
-                use_restart_triggers=use_restart_triggers,
-                vmecpp_restart=bool(vmecpp_restart),
-                use_direct_fallback=use_direct_fallback,
-                multigrid=False,
-                multigrid_use_input_niter=False,
-                verbose=bool(verbose),
-                jit_forces=jit_forces,
-                jit_precompile=jit_precompile,
-                use_scan=bool(use_scan),
-                performance_mode=True,
-                scan_wout_corrector=scan_wout_corrector,
-                stage_transition_heuristic=stage_transition_heuristic,
-                stage_transition_factor=float(stage_transition_factor),
-                stage_transition_scale=float(stage_transition_scale),
-                grid=grid,
-                cli_fixed_boundary_mode=False,
-                _auto_cli_fixed_boundary_mode=False,
-            )
-            if stage_state is None:
-                kwargs["ns_override"] = int(ns_i)
-            else:
-                kwargs["restart_state"] = stage_state
-            stage_t0 = time.perf_counter()
-            stage_run = run_fixed_boundary(input_path, **kwargs)
-            stage_wall_s.append(float(time.perf_counter() - stage_t0))
-            try:
-                stage_timing = (
-                    stage_run.result.diagnostics.get("timing", {})
-                    if stage_run.result is not None
-                    else {}
-                )
-            except Exception:
-                stage_timing = {}
-            stage_solve_total_s.append(_timing_solve_total_s(stage_timing))
-            stage_runs.append(stage_run)
-            stage_modes.append(str(stage_mode_i))
-            stage_state = stage_run.state
-            stage_static_prev = stage_run.static
-
-        final_run = stage_runs[-1]
-        if final_run.result is None:
-            return final_run
-        diag = dict(final_run.result.diagnostics)
-        diag["solver_mode"] = str(solver_mode_eff)
-        diag["accelerated_mode"] = True
-        diag["cli_fixed_boundary_mode"] = True
-        diag["cli_accelerated_fixed_policy"] = "budgeted_multigrid"
-        diag["cli_accelerated_stage_ns"] = np.asarray(ns_stage_list, dtype=int)
-        diag["cli_accelerated_stage_niter"] = np.asarray(stage_budgets, dtype=int)
-        diag["cli_accelerated_stage_modes"] = np.asarray(stage_modes, dtype=object)
-        diag["cli_accelerated_stage_wall_s"] = np.asarray(stage_wall_s, dtype=float)
-        diag["cli_accelerated_stage_solve_total_s"] = np.asarray(stage_solve_total_s, dtype=float)
-        diag["cli_accelerated_stage_fsq"] = np.asarray(
-            [float(np.asarray(stage_run.result.w_history)[-1]) for stage_run in stage_runs],
-            dtype=float,
-        )
-        diag["cli_accelerated_budget_total"] = int(warm_start_budget)
-        diag["cli_accelerated_final_stage_budget"] = int(final_stage_budget)
-        diag["multigrid_ns_stages"] = np.asarray(ns_stage_list, dtype=int)
-        diag["multigrid_niter_stages"] = np.asarray(stage_budgets, dtype=int)
-        diag["accelerated_single_grid_default"] = False
-        final_run = replace(final_run, result=replace(final_run.result, diagnostics=diag))
-        return _maybe_finish_cli_fixed_boundary_run(
-            final_run,
-            initial_policy="budgeted_multigrid",
-            enabled=bool(cli_fixed_boundary_finish_enabled),
+        return _driver_staging_helpers.run_cli_accelerated_budgeted_multigrid(
+            _stage_runner_context(),
+            ns_stage_list=ns_stage_list,
+            warm_start_budget=int(warm_start_budget),
+            final_stage_budget=int(final_stage_budget),
         )
 
     def _run_cli_explicit_staged_followup(
@@ -786,129 +691,58 @@ def run_fixed_boundary(
         performance_mode_override: bool | None = None,
         policy_name: str = "input_multigrid",
     ) -> FixedBoundaryRun:
-        stage_runs: list[FixedBoundaryRun] = []
-        stage_state = restart_state
-        stage_static_prev = restart_static_prev
-        stage_resume_state = restart_resume_state
-        stage_modes: list[str] = []
-        stage_wall_s: list[float] = []
-        stage_solve_total_s: list[float] = []
-        for idx, (ns_i, niter_i, ftol_i) in enumerate(zip(ns_stage_list, niter_stage_list, ftol_stage_list)):
-            if int(idx) < int(start_stage_index):
-                continue
-            if int(niter_i) <= 0:
-                continue
-            is_final_stage = idx == (len(ns_stage_list) - 1)
-            if stage_mode_override is not None:
-                stage_mode_i = str(stage_mode_override)
-            elif bool(cfg.lthreed) and int(idx) == 0:
-                # On staged 3D fixed-boundary cases, the coarsest continuation
-                # stage determines which solution branch the later continuation
-                # follows. Keep the entry stage on the conservative
-                # VMEC-like controller; accelerate all later stages.
-                stage_mode_i = "parity"
-            else:
-                stage_mode_i = "accelerated"
-            if stage_state is not None and int(stage_static_prev.cfg.ns) != int(ns_i):
-                stage_state = interp_vmec_state(
-                    stage_state,
-                    m=stage_static_prev.modes.m,
-                    n=stage_static_prev.modes.n,
-                    lthreed=bool(stage_static_prev.cfg.lthreed),
-                    lconm1=bool(getattr(stage_static_prev.cfg, "lconm1", True)),
-                    ns_new=int(ns_i),
-                )
-            kwargs = dict(
-                solver="vmec2000_iter",
-                solver_mode=stage_mode_i,
-                max_iter=int(niter_i),
-                step_size=step_size,
-                history_size=int(history_size),
-                gn_damping=gn_damping,
-                gn_cg_tol=gn_cg_tol,
-                gn_cg_maxiter=int(gn_cg_maxiter),
-                use_initial_guess=False,
-                vmec_project=bool(vmec_project),
-                use_restart_triggers=use_restart_triggers,
-                vmecpp_restart=bool(vmecpp_restart),
-                use_direct_fallback=use_direct_fallback,
-                multigrid=False,
-                multigrid_use_input_niter=False,
-                verbose=bool(verbose),
-                jit_forces=jit_forces,
-                jit_precompile=jit_precompile,
-                use_scan=bool(use_scan if use_scan_override is None else use_scan_override),
-                performance_mode=(
-                    True if performance_mode_override is None else bool(performance_mode_override)
-                ),
-                scan_wout_corrector=scan_wout_corrector,
-                stage_transition_heuristic=stage_transition_heuristic,
-                stage_transition_factor=float(stage_transition_factor),
-                stage_transition_scale=float(stage_transition_scale),
-                grid=grid,
-                cli_fixed_boundary_mode=False,
-                _auto_cli_fixed_boundary_mode=False,
-            )
-            if stage_state is None:
-                kwargs["ns_override"] = int(ns_i)
-            else:
-                kwargs["restart_state"] = stage_state
-                if stage_resume_state is not None:
-                    kwargs["restart_solver_state"] = stage_resume_state
-            stage_t0 = time.perf_counter()
-            stage_run = run_fixed_boundary(input_path, **kwargs)
-            stage_wall_s.append(float(time.perf_counter() - stage_t0))
-            try:
-                stage_timing = (
-                    stage_run.result.diagnostics.get("timing", {})
-                    if stage_run.result is not None
-                    else {}
-                )
-            except Exception:
-                stage_timing = {}
-            stage_solve_total_s.append(_timing_solve_total_s(stage_timing))
-            stage_runs.append(stage_run)
-            stage_modes.append(str(stage_mode_i))
-            stage_state = stage_run.state
-            stage_static_prev = stage_run.static
-            stage_resume_state = _sanitize_resume_state_for_stage(
-                stage_run.result.diagnostics.get("resume_state") if stage_run.result is not None else None
-            )
-
-        final_run = stage_runs[-1]
-        if final_run.result is None:
-            return final_run
-        diag = dict(final_run.result.diagnostics)
-        diag["solver_mode"] = str(solver_mode_eff)
-        diag["accelerated_mode"] = True
-        diag["cli_fixed_boundary_mode"] = True
-        diag["cli_staged_followup_policy"] = str(policy_name)
-        diag["cli_staged_followup_stage_ns"] = np.asarray(ns_stage_list, dtype=int)
-        diag["cli_staged_followup_stage_niter"] = np.asarray(niter_stage_list, dtype=int)
-        diag["cli_staged_followup_executed_stage_ns"] = np.asarray(
-            [int(ns_stage_list[i]) for i in range(int(start_stage_index), len(ns_stage_list)) if int(niter_stage_list[i]) > 0],
-            dtype=int,
+        return _driver_staging_helpers.run_cli_explicit_staged_followup(
+            _stage_runner_context(),
+            ns_stage_list=ns_stage_list,
+            niter_stage_list=niter_stage_list,
+            ftol_stage_list=ftol_stage_list,
+            start_stage_index=int(start_stage_index),
+            restart_state=restart_state,
+            restart_static_prev=restart_static_prev,
+            restart_resume_state=restart_resume_state,
+            stage_mode_override=stage_mode_override,
+            use_scan_override=use_scan_override,
+            performance_mode_override=performance_mode_override,
+            policy_name=str(policy_name),
         )
-        diag["cli_staged_followup_executed_stage_niter"] = np.asarray(
-            [int(niter_stage_list[i]) for i in range(int(start_stage_index), len(niter_stage_list)) if int(niter_stage_list[i]) > 0],
-            dtype=int,
-        )
-        diag["cli_staged_followup_stage_modes"] = np.asarray(stage_modes, dtype=object)
-        diag["cli_staged_followup_stage_wall_s"] = np.asarray(stage_wall_s, dtype=float)
-        diag["cli_staged_followup_stage_solve_total_s"] = np.asarray(stage_solve_total_s, dtype=float)
-        diag["cli_staged_followup_start_stage_index"] = int(start_stage_index)
-        diag["cli_staged_followup_stage_fsq"] = np.asarray(
-            [float(np.asarray(stage_run.result.w_history)[-1]) for stage_run in stage_runs],
-            dtype=float,
-        )
-        final_run = replace(final_run, result=replace(final_run.result, diagnostics=diag))
-        return final_run
 
     def _finish_stage_results():
         try:
             return stage_results
         except NameError:
             return ()
+
+    def _stage_runner_context() -> _driver_staging_helpers.FixedBoundaryStageRunnerContext:
+        return _driver_staging_helpers.FixedBoundaryStageRunnerContext(
+            input_path=input_path,
+            cfg=cfg,
+            step_size=step_size,
+            history_size=int(history_size),
+            gn_damping=gn_damping,
+            gn_cg_tol=gn_cg_tol,
+            gn_cg_maxiter=int(gn_cg_maxiter),
+            vmec_project=bool(vmec_project),
+            use_restart_triggers=use_restart_triggers,
+            vmecpp_restart=bool(vmecpp_restart),
+            use_direct_fallback=use_direct_fallback,
+            verbose=bool(verbose),
+            jit_forces=jit_forces,
+            jit_precompile=jit_precompile,
+            use_scan=bool(use_scan),
+            scan_wout_corrector=scan_wout_corrector,
+            stage_transition_heuristic=stage_transition_heuristic,
+            stage_transition_factor=float(stage_transition_factor),
+            stage_transition_scale=float(stage_transition_scale),
+            grid=grid,
+            solver_mode_eff=str(solver_mode_eff),
+            cli_fixed_boundary_finish_enabled=bool(cli_fixed_boundary_finish_enabled),
+            run_fixed_boundary=run_fixed_boundary,
+            interp_vmec_state=interp_vmec_state,
+            maybe_finish_cli_fixed_boundary_run=_maybe_finish_cli_fixed_boundary_run,
+            sanitize_resume_state_for_stage=_sanitize_resume_state_for_stage,
+            timing_solve_total_s=_timing_solve_total_s,
+            accelerated_cli_budgeted_stage_iters=_accelerated_cli_budgeted_stage_iters,
+        )
 
     def _finish_stage_statics():
         try:
