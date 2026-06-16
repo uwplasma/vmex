@@ -4800,3 +4800,66 @@ Completion:
 - Implicit residual-adjoint decomposition: 87%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.16%.
+
+## 2026-06-16 Implicit Residual Host and Boundary Helper Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `_VmecResidualHostSolveSettings` and
+   `_solve_vmec_residual_host_from_boundary` to make the authoritative host
+   VMEC residual solve used by the implicit residual pure-callback explicit and
+   testable as a passive helper.
+2. Added `_project_boundary_edge_rows` for VMEC boundary projection and
+   `_boundary_edge_rows_vjp` for the repeated edge-row VJP plumbing.
+3. Replaced the corresponding nested closure bodies inside
+   `solve_fixed_boundary_state_implicit_vmec_residual` with calls to these
+   helpers.
+4. Left the residual equation, residual scaling, active/reduced packing,
+   linearized tangent modes, custom VJP/JVP definitions, and solver control flow
+   unchanged.
+
+Results obtained:
+
+- `solve_fixed_boundary_state_implicit_vmec_residual` decreased from 927 lines
+  before today's implicit refactor to 864 lines after the host/boundary helper
+  extraction.
+- The pure-callback host solve now has one explicit settings object, which
+  makes future callback shape and accepted-branch validation easier to audit.
+- No public API change and no new source file.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/implicit.py`
+- `python -m compileall -q vmec_jax/implicit.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q $(rg --files tests | rg 'implicit') tests/test_solve_wave7_coverage.py -q`
+- `python tools/diagnostics/source_health.py --top 16 --top-functions 24`
+
+Best next steps:
+
+1. Commit and push this implicit residual host/boundary extraction.
+2. Monitor the branch CI run after the push.
+3. Continue source-health work where a passive seam is available. The next
+   likely targets are optimizer workflow decomposition and same-branch
+   free-boundary report helpers; avoid the VMEC scan loop and adaptive host
+   branch semantics without a dedicated branch-fingerprint gate.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.67%.
+- Differentiability/refactor implementation: 99.978%.
+- Solver monolith reduction: 88.7%.
+- Free-boundary adjoint monolith reduction: 80%.
+- Driver workflow decomposition: 91%.
+- WOUT diagnostic/profile decomposition: 98.0%.
+- Optimizer workflow decomposition: 82%.
+- Implicit residual-adjoint decomposition: 88%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.17%.

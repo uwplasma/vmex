@@ -198,6 +198,19 @@ class _VmecResidualSetup:
     stellsym_residual_projector: Any
 
 
+@dataclass(frozen=True)
+class _VmecResidualHostSolveSettings:
+    """Host-only inputs for the primal VMEC residual solve used by pure_callback."""
+
+    static: Any
+    indata: Any
+    state_layout: Any
+    state0_host: VMECState | None
+    max_iter: int
+    step_size: float
+    ftol: float | None
+
+
 def _build_vmec_residual_setup(*, state0_c: VMECState, static, indata, signgs_i: int, idx00: int) -> _VmecResidualSetup:
     """Build profile, force, and structural residual metadata for implicit VMEC residual AD."""
     from .boundary import boundary_from_indata
@@ -249,6 +262,110 @@ def _build_vmec_residual_setup(*, state0_c: VMECState, static, indata, signgs_i:
         mask_pack=mask_pack,
         stellsym_residual_projector=stellsym_residual_projector,
     )
+
+
+def _solve_vmec_residual_host_from_boundary(eRcos, eRsin, eZcos, eZsin, settings: _VmecResidualHostSolveSettings):
+    """Run the authoritative host VMEC residual solve for a trial boundary."""
+    from .boundary import BoundaryCoeffs
+    from .init_guess import initial_guess_from_boundary
+
+    eRcos_np = np.asarray(eRcos)
+    eRsin_np = np.asarray(eRsin)
+    eZcos_np = np.asarray(eZcos)
+    eZsin_np = np.asarray(eZsin)
+    dtype_host = (
+        np.asarray(settings.state0_host.Rcos).dtype
+        if settings.state0_host is not None
+        else np.asarray(eRcos_np).dtype
+    )
+    boundary_host = BoundaryCoeffs(
+        R_cos=np.array(eRcos_np, copy=True),
+        R_sin=np.array(eRsin_np, copy=True),
+        Z_cos=np.array(eZcos_np, copy=True),
+        Z_sin=np.array(eZsin_np, copy=True),
+    )
+    state_init = initial_guess_from_boundary(
+        settings.static,
+        boundary_host,
+        settings.indata,
+        dtype=dtype_host,
+        vmec_project=True,
+    )
+    geom0 = eval_geom(state_init, settings.static)
+    signgs0 = signgs_from_sqrtg(np.asarray(geom0.sqrtg), axis_index=1)
+    state_init = VMECState(
+        layout=state_init.layout,
+        Rcos=np.asarray(jax.device_get(state_init.Rcos)),
+        Rsin=np.asarray(jax.device_get(state_init.Rsin)),
+        Zcos=np.asarray(jax.device_get(state_init.Zcos)),
+        Zsin=np.asarray(jax.device_get(state_init.Zsin)),
+        Lcos=np.asarray(jax.device_get(state_init.Lcos)),
+        Lsin=np.asarray(jax.device_get(state_init.Lsin)),
+    )
+    res = solve_fixed_boundary_residual_iter(
+        state_init,
+        settings.static,
+        indata=settings.indata,
+        signgs=int(signgs0),
+        ftol=settings.ftol,
+        max_iter=int(settings.max_iter),
+        step_size=float(settings.step_size),
+        vmec2000_control=True,
+        reference_mode=False,
+        backtracking=True,
+        limit_dt_from_force=True,
+        limit_update_rms=True,
+        verbose=False,
+        verbose_vmec2000_table=False,
+        jit_forces="auto",
+        use_scan=False,
+    )
+    zero_m1 = _zero_m1_zforce_flag_from_result(res, dtype=dtype_host)
+    return np.asarray(pack_state(res.state)), zero_m1
+
+
+def _project_boundary_edge_rows(*, static, indata, dtype, eRcos, eRsin, eZcos, eZsin):
+    """Project raw boundary coefficients to VMEC edge rows."""
+    from .boundary import BoundaryCoeffs
+    from .init_guess import initial_guess_from_boundary
+
+    boundary_state = initial_guess_from_boundary(
+        static,
+        BoundaryCoeffs(
+            R_cos=jnp.asarray(eRcos),
+            R_sin=jnp.asarray(eRsin),
+            Z_cos=jnp.asarray(eZcos),
+            Z_sin=jnp.asarray(eZsin),
+        ),
+        indata,
+        dtype=dtype,
+        vmec_project=True,
+    )
+    return (
+        jnp.asarray(boundary_state.Rcos)[-1, :],
+        jnp.asarray(boundary_state.Rsin)[-1, :],
+        jnp.asarray(boundary_state.Zcos)[-1, :],
+        jnp.asarray(boundary_state.Zsin)[-1, :],
+    )
+
+
+def _boundary_edge_rows_vjp(boundary_edge_rows_func: Callable[..., tuple[Any, Any, Any, Any]], residual_edges, ct_state):
+    """Apply the VJP of the boundary-edge projection to an output-state cotangent."""
+    eRcos_star, eRsin_star, eZcos_star, eZsin_star = residual_edges
+    ct_edge = (
+        jnp.asarray(ct_state.Rcos)[-1, :],
+        jnp.asarray(ct_state.Rsin)[-1, :],
+        jnp.asarray(ct_state.Zcos)[-1, :],
+        jnp.asarray(ct_state.Zsin)[-1, :],
+    )
+    _, edge_vjp_fun = jax.vjp(
+        boundary_edge_rows_func,
+        eRcos_star,
+        eRsin_star,
+        eZcos_star,
+        eZsin_star,
+    )
+    return edge_vjp_fun(ct_edge)
 
 
 def _stop_gradient_tree(x):
@@ -931,8 +1048,6 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
     edge_Zcos_use = jnp.asarray(edge_Zcos) if edge_Zcos is not None else jnp.asarray(state0_c.Zcos)[-1, :]
     edge_Zsin_use = jnp.asarray(edge_Zsin) if edge_Zsin is not None else jnp.asarray(state0_c.Zsin)[-1, :]
 
-    from .boundary import BoundaryCoeffs
-    from .init_guess import initial_guess_from_boundary
     from .preconditioner_1d_jax import (
         lambda_preconditioner_cached,
     )
@@ -959,23 +1074,14 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
     stellsym_residual_projector = setup.stellsym_residual_projector
 
     def _boundary_state_edge_rows(eRcos, eRsin, eZcos, eZsin):
-        boundary_state = initial_guess_from_boundary(
-            static,
-            BoundaryCoeffs(
-                R_cos=jnp.asarray(eRcos),
-                R_sin=jnp.asarray(eRsin),
-                Z_cos=jnp.asarray(eZcos),
-                Z_sin=jnp.asarray(eZsin),
-            ),
-            indata,
+        return _project_boundary_edge_rows(
+            static=static,
+            indata=indata,
             dtype=jnp.asarray(state0_c.Rcos).dtype,
-            vmec_project=True,
-        )
-        return (
-            jnp.asarray(boundary_state.Rcos)[-1, :],
-            jnp.asarray(boundary_state.Rsin)[-1, :],
-            jnp.asarray(boundary_state.Zcos)[-1, :],
-            jnp.asarray(boundary_state.Zsin)[-1, :],
+            eRcos=eRcos,
+            eRsin=eRsin,
+            eZcos=eZcos,
+            eZsin=eZsin,
         )
 
     def _enforce_state(st, eRcos, eRsin, eZcos, eZsin):
@@ -1079,60 +1185,18 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
 
         return _project_state(jax.grad(_objective_from_state)(state))
 
+    host_solve_settings = _VmecResidualHostSolveSettings(
+        static=static,
+        indata=indata,
+        state_layout=state0_c.layout,
+        state0_host=state0_host,
+        max_iter=int(max_iter),
+        step_size=float(step_size),
+        ftol=ftol,
+    )
+
     def _solve_host(eRcos, eRsin, eZcos, eZsin):
-        eRcos_np = np.asarray(eRcos)
-        eRsin_np = np.asarray(eRsin)
-        eZcos_np = np.asarray(eZcos)
-        eZsin_np = np.asarray(eZsin)
-        dtype_host = (
-            np.asarray(state0_host.Rcos).dtype
-            if state0_host is not None
-            else np.asarray(eRcos_np).dtype
-        )
-        boundary_host = BoundaryCoeffs(
-            R_cos=np.array(eRcos_np, copy=True),
-            R_sin=np.array(eRsin_np, copy=True),
-            Z_cos=np.array(eZcos_np, copy=True),
-            Z_sin=np.array(eZsin_np, copy=True),
-        )
-        state_init = initial_guess_from_boundary(
-            static,
-            boundary_host,
-            indata,
-            dtype=dtype_host,
-            vmec_project=True,
-        )
-        geom0 = eval_geom(state_init, static)
-        signgs0 = signgs_from_sqrtg(np.asarray(geom0.sqrtg), axis_index=1)
-        state_init = VMECState(
-            layout=state_init.layout,
-            Rcos=np.asarray(jax.device_get(state_init.Rcos)),
-            Rsin=np.asarray(jax.device_get(state_init.Rsin)),
-            Zcos=np.asarray(jax.device_get(state_init.Zcos)),
-            Zsin=np.asarray(jax.device_get(state_init.Zsin)),
-            Lcos=np.asarray(jax.device_get(state_init.Lcos)),
-            Lsin=np.asarray(jax.device_get(state_init.Lsin)),
-        )
-        res = solve_fixed_boundary_residual_iter(
-            state_init,
-            static,
-            indata=indata,
-            signgs=int(signgs0),
-            ftol=ftol,
-            max_iter=int(max_iter),
-            step_size=float(step_size),
-            vmec2000_control=True,
-            reference_mode=False,
-            backtracking=True,
-            limit_dt_from_force=True,
-            limit_update_rms=True,
-            verbose=False,
-            verbose_vmec2000_table=False,
-            jit_forces="auto",
-            use_scan=False,
-        )
-        zero_m1 = _zero_m1_zforce_flag_from_result(res, dtype=dtype_host)
-        return np.asarray(pack_state(res.state)), zero_m1
+        return _solve_vmec_residual_host_from_boundary(eRcos, eRsin, eZcos, eZsin, host_solve_settings)
 
     def _is_traced(*xs):
         return any(isinstance(x, jax.core.Tracer) for x in xs)
@@ -1141,17 +1205,17 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
         traced = _is_traced(eRcos, eRsin, eZcos, eZsin)
         if traced:
             out_shape = (
-                jax.ShapeDtypeStruct((int(state0_c.layout.size),), jnp.asarray(state0_c.Rcos).dtype),
+                jax.ShapeDtypeStruct((int(host_solve_settings.state_layout.size),), jnp.asarray(state0_c.Rcos).dtype),
                 jax.ShapeDtypeStruct((), jnp.asarray(state0_c.Rcos).dtype),
             )
             x_flat, zero_m1 = jax.pure_callback(_solve_host, out_shape, eRcos, eRsin, eZcos, eZsin)
-            return unpack_state(x_flat, state0_c.layout), zero_m1
+            return unpack_state(x_flat, host_solve_settings.state_layout), zero_m1
         x_flat, zero_m1 = _solve_host(eRcos, eRsin, eZcos, eZsin)
-        return unpack_state(jnp.asarray(x_flat), state0_c.layout), jnp.asarray(zero_m1)
+        return unpack_state(jnp.asarray(x_flat), host_solve_settings.state_layout), jnp.asarray(zero_m1)
 
     if not _is_traced(edge_Rcos_use, edge_Rsin_use, edge_Zcos_use, edge_Zsin_use):
         x_flat, _zero_m1 = _solve_host(edge_Rcos_use, edge_Rsin_use, edge_Zcos_use, edge_Zsin_use)
-        return unpack_state(jnp.asarray(x_flat), state0_c.layout)
+        return unpack_state(jnp.asarray(x_flat), host_solve_settings.state_layout)
 
     residual_tangent_mode = str(getattr(implicit, "residual_tangent_mode", "opaque")).strip().lower()
 
@@ -1457,21 +1521,11 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
         )
 
         def _edge_boundary_vjp():
-            ct_edge = (
-                jnp.asarray(ct_state_full.Rcos)[-1, :],
-                jnp.asarray(ct_state_full.Rsin)[-1, :],
-                jnp.asarray(ct_state_full.Zcos)[-1, :],
-                jnp.asarray(ct_state_full.Zsin)[-1, :],
-            )
-            _, edge_vjp_fun = jax.vjp(
+            return _boundary_edge_rows_vjp(
                 _boundary_state_edge_rows,
-                eRcos_star,
-                eRsin_star,
-                eZcos_star,
-                eZsin_star,
+                (eRcos_star, eRsin_star, eZcos_star, eZsin_star),
+                ct_state_full,
             )
-            edge_dRcos, edge_dRsin, edge_dZcos, edge_dZsin = edge_vjp_fun(ct_edge)
-            return edge_dRcos, edge_dRsin, edge_dZcos, edge_dZsin
 
         residual_adjoint_mode = str(getattr(implicit, "residual_adjoint_mode", "auto")).strip().lower()
         if (not bool(static.cfg.lasym)) and (not _vmec_disable_reduced_active_enabled()):
