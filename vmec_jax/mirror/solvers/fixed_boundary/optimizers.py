@@ -234,9 +234,10 @@ def axisym_reduced_bounds(grid: MirrorGrid, *, a_floor: float = 1.0e-10) -> list
     return [(float(a_floor), None)] * num_a + [(None, None)] * num_lam
 
 
-def _scaled_bounds(
+def scale_reduced_bounds(
     bounds: list[tuple[float | None, float | None]], scale: np.ndarray
 ) -> list[tuple[float | None, float | None]]:
+    """Convert reduced-coordinate bounds into scaled optimizer coordinates."""
     scale = _sanitize_scale(scale, expected_size=len(bounds))
     scaled: list[tuple[float | None, float | None]] = []
     for (lower, upper), item_scale in zip(bounds, scale, strict=True):
@@ -247,6 +248,12 @@ def _scaled_bounds(
             )
         )
     return scaled
+
+
+def _scaled_bounds(
+    bounds: list[tuple[float | None, float | None]], scale: np.ndarray
+) -> list[tuple[float | None, float | None]]:
+    return scale_reduced_bounds(bounds, scale)
 
 
 def unpack_axisym_reduced_state(vector, grid: MirrorGrid, boundary: MirrorBoundary) -> MirrorStateAxisym:
@@ -305,16 +312,21 @@ def unpack_reduced_state_3d(vector, grid: MirrorGrid, boundary: MirrorBoundary) 
     return project_state_3d(MirrorState3D(a=a, lam=lam), grid, boundary)
 
 
-def _pack_axisym_reduced_gradient(gradient, grid: MirrorGrid) -> np.ndarray:
+def pack_axisym_reduced_gradient_components(grad_a, grad_lam, grid: MirrorGrid) -> np.ndarray:
+    """Pack full-state axisymmetric gradients into reduced fixed-boundary coordinates."""
     mask = axisym_reduced_a_mask(grid)
-    grad_a = np.asarray(gradient.grad_a, dtype=float).copy()
+    grad_a = np.asarray(grad_a, dtype=float).copy()
     if grid.ns > 2:
         grad_a[1, :] += grad_a[0, :]
     a_values = grad_a[mask]
 
-    grad_lam = np.asarray(gradient.grad_lam, dtype=float)
+    grad_lam = np.asarray(grad_lam, dtype=float)
     lam_values = grad_lam[:, :-1] - (grid.w_xi[:-1] / grid.w_xi[-1])[None, :] * grad_lam[:, -1:]
     return np.concatenate([a_values, lam_values.ravel()])
+
+
+def _pack_axisym_reduced_gradient(gradient, grid: MirrorGrid) -> np.ndarray:
+    return pack_axisym_reduced_gradient_components(gradient.grad_a, gradient.grad_lam, grid)
 
 
 def _pack_reduced_gradient_3d(gradient, grid: MirrorGrid) -> np.ndarray:
@@ -338,6 +350,8 @@ def reduced_axisym_energy_and_gradient(
     psi_prime: PsiPrimeProfile,
     i_prime: IPrimeProfile,
     pressure: PressureProfile,
+    source_a=None,
+    source_lam=None,
     mu0: float = 4.0e-7 * np.pi,
 ) -> tuple[float, np.ndarray]:
     """Return energy and exact reduced-coordinate gradient."""
@@ -350,7 +364,22 @@ def reduced_axisym_energy_and_gradient(
         pressure=pressure,
         mu0=mu0,
     )
-    return gradient.energy, _pack_axisym_reduced_gradient(gradient, grid)
+    energy = float(gradient.energy)
+    grad_a = np.asarray(gradient.grad_a, dtype=float)
+    grad_lam = np.asarray(gradient.grad_lam, dtype=float)
+    if source_a is not None:
+        source_a = np.asarray(source_a, dtype=float)
+        if source_a.shape != state.a.shape:
+            raise ValueError(f"source_a shape {source_a.shape} does not match state shape {state.a.shape}")
+        energy -= float(np.sum(source_a * state.a))
+        grad_a = grad_a - source_a
+    if source_lam is not None:
+        source_lam = np.asarray(source_lam, dtype=float)
+        if source_lam.shape != state.lam.shape:
+            raise ValueError(f"source_lam shape {source_lam.shape} does not match state shape {state.lam.shape}")
+        energy -= float(np.sum(source_lam * state.lam))
+        grad_lam = grad_lam - source_lam
+    return energy, pack_axisym_reduced_gradient_components(grad_a, grad_lam, grid)
 
 
 def reduced_3d_energy_and_gradient(

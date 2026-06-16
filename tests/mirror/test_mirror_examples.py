@@ -143,3 +143,31 @@ def test_root_fixed_boundary_solve_diagnostic_runs_without_plots(tmp_path):
     assert "optimizer_candidate_min_sqrtg" in rows[0]
     assert rows[0]["final_residual_norm"] >= 0.0
     assert Path(rows[0]["mout"]).exists()
+
+
+def test_root_manufactured_fixed_boundary_example_runs_without_plots(tmp_path):
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "examples/mirror_manufactured_fixed_boundary.py",
+            "--outdir",
+            str(tmp_path / "manufactured"),
+            "--ns",
+            "5",
+            "--nxi",
+            "9",
+            "--maxiter",
+            "20",
+            "--no-plots",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    path = Path(completed.stdout.strip())
+    metrics = json.loads(path.read_text())
+    assert metrics["optimizer_success"]
+    assert metrics["reached_projected_gtol"]
+    assert metrics["final_residual_norm"] < 1.0e-12
+    assert metrics["final_exact_error_norm"] < 1.0e-10

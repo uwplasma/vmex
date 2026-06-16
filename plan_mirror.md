@@ -2876,3 +2876,65 @@ With geometry scaling enabled, the two-coil perturbed-interior diagnostic with
   should become the first true convergence acceptance test.
 - Add a mirror residual-iteration solver lane that mirrors the regular VMEC
   residual iteration more directly than scalar L-BFGS-B does.
+
+---
+
+## 36. 2026-06-16 manufactured fixed-boundary convergence gate
+
+This lane adds the first true fixed-boundary mirror convergence gate with a
+known stationary state. It is separate from the two-coil benchmark: the two-coil
+case validates physically motivated vacuum-field geometry, while this
+manufactured case validates the reduced solver machinery against a known
+projected residual target.
+
+### Implemented in this lane
+
+- Added the named MMS case `axisym_projected_fixed_boundary`.
+  - The exact state is explicitly projected through the same fixed-boundary,
+    end-cap, axis, and lambda-gauge policy used by the mirror solver.
+  - MMS sources are generated from the exact projected state.
+- Added `solve_axisym_mms_fixed_boundary`.
+  - It uses the same reduced-coordinate packing and geometry scaling as the
+    mirror L-BFGS-B path.
+  - It solves the reduced manufactured force vector directly with an exact
+    JAX reduced Hessian and damped Newton line search.
+  - It enforces positive-radius trial states.
+- Added a regression test showing a perturbed projected state reaches
+  projected `gtol=1e-12`.
+- Added `examples/mirror_manufactured_fixed_boundary.py`.
+  - It writes JSON metrics.
+  - It writes residual/`fsq`/exact-error history, exact-vs-solved geometry,
+    solved `|B|` map, and 3-D boundary `|B|` plots.
+
+### Validation result
+
+For `ns=5`, `nxi=9`, `maxiter=20`, `gtol=1e-12`, `ftol=1e-12`, and a
+`0.2%` admissible perturbation:
+
+- Damped Newton reaches `gtol` in `3` accepted iterations.
+- It uses `nfev=6` and `njev=3`.
+- Reduced residual drops from `0.009638224760704337` to
+  `3.109010553584091e-15`.
+- Manufactured `fsq` drops to `1.5845814134913533e-31`.
+- Exact-state error drops from `3.790866427575665e-04` to
+  `1.1114510037036217e-16`.
+
+### Interpretation
+
+- This is the first mirror fixed-boundary convergence proof against a known
+  projected solution.
+- The manufactured residual solve is a validation harness, not a replacement
+  for the production physical two-coil solve path.
+- The next production solver step should adapt this residual-iteration pattern
+  to unsourced physical fixed-boundary solves, with VMEC-style accepted-state
+  safeguards and radial/lambda preconditioners.
+
+### Next gates
+
+- Add a production `optimizer="residual_newton"` or similarly named mirror
+  residual-iteration path that reuses the same reduced scaling and acceptance
+  diagnostics.
+- Add a comparison table over gradient descent, scaled L-BFGS-B, and residual
+  Newton on cylinder, manufactured, and two-coil cases.
+- Extend manufactured gates to finite pressure and nonzero-current cases after
+  the scalar-pressure physical solver path is stable.

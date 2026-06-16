@@ -4,9 +4,10 @@ import numpy as np
 import pytest
 
 from vmec_jax.mirror import MirrorResolution
+from vmec_jax.mirror.core.state import MirrorStateAxisym
 from vmec_jax.mirror.kernels.forces import central_difference_energy_component
 from vmec_jax.mirror.kernels.manufactured import axisym_mms_gradient
-from vmec_jax.mirror.validation.manufactured import make_mms_case
+from vmec_jax.mirror.validation.manufactured import make_mms_case, solve_axisym_mms_fixed_boundary
 
 pytestmark = pytest.mark.mirror
 
@@ -53,3 +54,32 @@ def test_axisym_mms_stationarity_holds_across_resolutions():
         grad_a, grad_lam = axisym_mms_gradient(case)
         residual_norm = np.sqrt(np.sum(grad_a**2) + np.sum(grad_lam**2))
         assert residual_norm < 1.0e-7
+
+
+def test_axisym_mms_fixed_boundary_solve_reaches_projected_gtol():
+    case = make_mms_case("axisym_projected_fixed_boundary", MirrorResolution(ns=5, ntheta=1, nxi=9, mpol=0), mu0=1.0)
+    grid = case.grid
+    s = grid.s_full[:, None]
+    xi = grid.xi[None, :]
+    shape = s * (1.0 - s) * (1.0 - xi**2)
+    initial_state = MirrorStateAxisym(
+        a=case.state.a * (1.0 + 0.002 * shape),
+        lam=case.state.lam + 0.0002 * shape * xi,
+    )
+
+    result = solve_axisym_mms_fixed_boundary(
+        case,
+        initial_state=initial_state,
+        maxiter=20,
+        gtol=1.0e-12,
+        ftol=1.0e-12,
+        mu0=1.0,
+    )
+
+    assert result.optimizer_success
+    assert result.optimizer_status == 1
+    assert result.residual_norm < 1.0e-12
+    assert result.fsq < 1.0e-24
+    assert result.exact_error_norm < 1.0e-10
+    assert result.trace[0].residual_norm > 1.0e-4
+    assert result.trace[-1].residual_norm < result.trace[0].residual_norm

@@ -15,16 +15,19 @@ python examples/mirror/nonaxisymmetric_boundary.py --outdir results/mirror/nonax
 python examples/mirror_two_coil_axisym.py --outdir results/mirror/two_coil_axisym
 python examples/mirror_finite_current_pitch.py --outdir results/mirror/finite_current_pitch
 python examples/mirror_fixed_boundary_solve_diagnostic.py --outdir results/mirror/fixed_boundary_solve_diagnostic
+python examples/mirror_manufactured_fixed_boundary.py --outdir results/mirror/manufactured_fixed_boundary
 ```
 
-Each script writes a mirror-native ``mout_*.nc`` file and, unless
-``--no-plots`` is passed, a set of PNG diagnostics including horizontal
+The physical mirror examples write a mirror-native ``mout_*.nc`` file and,
+unless ``--no-plots`` is passed, a set of PNG diagnostics including horizontal
 ``z``-axis geometry, boundary magnetic-field direction with field-line traces,
 ``|B|``, beta/twist-proxy, magnetic-well-proxy, and residual/step-history
-figures.  These are research fixtures for the scalar-pressure fixed-boundary
-mirror path, not WHAM predictive modelling tools.  For physically axisymmetric
-mirrors use the cylinder, flared-tube, or WHAM examples; the nonaxisymmetric
-example is a solver/plot stress test.
+figures.  The manufactured validation example writes metrics and targeted
+convergence/geometry/``|B|`` plots rather than a production ``mout`` file.
+These are research fixtures for the scalar-pressure fixed-boundary mirror path,
+not WHAM predictive modelling tools.  For physically axisymmetric mirrors use
+the cylinder, flared-tube, or WHAM examples; the nonaxisymmetric example is a
+solver/plot stress test.
 
 The same standard figure bundle is available from the CLI:
 
@@ -53,3 +56,9 @@ runs an actual L-BFGS fixed-boundary relaxation from a perturbed interior state.
 Its default diagnostic uses ``ns_array=31``, ``maxiter=2000``, and explicit
 ``ftol=1e-12``/``gtol=1e-12`` and writes a JSON table with optimizer status,
 iteration counts, residuals, ``fsq``, and plot paths.
+
+The root-level ``examples/mirror_manufactured_fixed_boundary.py`` script solves
+a sourced manufactured fixed-boundary problem with a known stationary state. It
+uses the same reduced-coordinate layout and geometry scaling as the mirror
+solver, then applies an exact-Hessian damped residual iteration to verify that a
+perturbed projected state can reach the requested projected ``gtol``.

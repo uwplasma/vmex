@@ -1,6 +1,6 @@
 """Validation helpers for mirror geometry."""
 
-from .manufactured import make_mms_case
+from .manufactured import make_mms_case, solve_axisym_mms_fixed_boundary
 from .coils import (
     AxisymmetricFieldRZ,
     circular_loop_field_rz,
@@ -36,6 +36,7 @@ __all__ = [
     "mirror_boundary_from_two_coil_flux_tube",
     "mirror_boundary_from_vacuum_flux_tube",
     "on_axis_mirror_ratio",
+    "solve_axisym_mms_fixed_boundary",
     "two_coil_field_rz",
     "two_coil_on_axis_bz",
     "two_coil_on_axis_mirror_ratio",
