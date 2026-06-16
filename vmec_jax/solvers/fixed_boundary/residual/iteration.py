@@ -232,6 +232,7 @@ from vmec_jax.solvers.fixed_boundary.optimization.gradient import (
 from vmec_jax.solvers.fixed_boundary.preconditioning.operators import (
     apply_preconditioner as _apply_preconditioner,
     can_reassemble_precond_mats as _can_reassemble_precond_mats,
+    empty_preconditioner_cache_snapshot as _empty_preconditioner_cache_snapshot,
     lambda_preconditioner_outputs as _lambda_preconditioner_outputs,
     metric_surface_precond_from_bcovar_jax as _metric_surface_precond_from_bcovar_jax,
     metric_surface_precond_scales_jax as _metric_surface_precond_scales_jax,  # noqa: F401 - re-exported for existing internal tests/importers.
@@ -4985,21 +4986,47 @@ def solve_fixed_boundary_residual_iter(
     # This materially affects the nonlinear iteration trace because the
     # Garabedian time-step control depends on ratios of the *preconditioned*
     # residual scalars.
-    vmec2000_cache_valid = False
-    cache_precond_diag = None
-    cache_tcon = None
-    cache_norms = None
-    cache_rz_scale = None
-    cache_l_scale = None
-    cache_rz_norm = None
-    cache_f_norm1 = None
-    cache_prec_rz_mats = None
-    cache_prec_rz_jmax = None
-    cache_prec_lam_prec = None
-    cache_prec_faclam = None
-    cache_prec_lam_debug = None
+    (
+        vmec2000_cache_valid,
+        cache_precond_diag,
+        cache_tcon,
+        cache_norms,
+        cache_rz_scale,
+        cache_l_scale,
+        cache_rz_norm,
+        cache_f_norm1,
+        cache_prec_rz_mats,
+        cache_prec_rz_jmax,
+        cache_prec_lam_prec,
+        cache_prec_faclam,
+        cache_prec_lam_debug,
+    ) = _empty_preconditioner_cache_snapshot()
     cache_constraint_rcon0 = None
     cache_constraint_zcon0 = None
+
+    def _clear_preconditioner_cache_locals() -> None:
+        nonlocal vmec2000_cache_valid
+        nonlocal cache_precond_diag, cache_tcon, cache_norms, cache_rz_scale, cache_l_scale
+        nonlocal cache_rz_norm, cache_f_norm1
+        nonlocal cache_prec_rz_mats, cache_prec_rz_jmax, cache_prec_lam_prec
+        nonlocal cache_prec_faclam, cache_prec_lam_debug
+
+        (
+            vmec2000_cache_valid,
+            cache_precond_diag,
+            cache_tcon,
+            cache_norms,
+            cache_rz_scale,
+            cache_l_scale,
+            cache_rz_norm,
+            cache_f_norm1,
+            cache_prec_rz_mats,
+            cache_prec_rz_jmax,
+            cache_prec_lam_prec,
+            cache_prec_faclam,
+            cache_prec_lam_debug,
+        ) = _empty_preconditioner_cache_snapshot()
+
     bcovar_update_history: list[int] = []
     iter_offset = 0
 
@@ -5363,19 +5390,7 @@ def solve_fixed_boundary_residual_iter(
                 res0 = -1.0
                 res1 = -1.0
                 prev_rz_fsq = 2.0
-                vmec2000_cache_valid = False
-                cache_precond_diag = None
-                cache_tcon = None
-                cache_norms = None
-                cache_rz_scale = None
-                cache_l_scale = None
-                cache_rz_norm = None
-                cache_f_norm1 = None
-                cache_prec_rz_mats = None
-                cache_prec_rz_jmax = None
-                cache_prec_lam_prec = None
-                cache_prec_faclam = None
-                cache_prec_lam_debug = None
+                _clear_preconditioner_cache_locals()
                 cache_constraint_rcon0 = None
                 cache_constraint_zcon0 = None
         except Exception:
@@ -7188,19 +7203,7 @@ def solve_fixed_boundary_residual_iter(
                     freeb_controls_cached = None
                     bad_growth_streak = 0
                     inv_tau = [0.15 / time_step] * k_ndamp
-                    vmec2000_cache_valid = False
-                    cache_precond_diag = None
-                    cache_tcon = None
-                    cache_norms = None
-                    cache_rz_scale = None
-                    cache_l_scale = None
-                    cache_rz_norm = None
-                    cache_f_norm1 = None
-                    cache_prec_rz_mats = None
-                    cache_prec_rz_jmax = None
-                    cache_prec_lam_prec = None
-                    cache_prec_faclam = None
-                    cache_prec_lam_debug = None
+                    _clear_preconditioner_cache_locals()
                     _pop_iteration_histories()
                     prev_rz_fsq = prev_rz_fsq_before
                     # VMEC restarts the iteration after axis reset without
@@ -7341,19 +7344,7 @@ def solve_fixed_boundary_residual_iter(
                     fsq_prev = fsq_prev_before
                     fsq0_prev = fsq0_prev_before
                     inv_tau = [0.15 / time_step] * k_ndamp
-                    vmec2000_cache_valid = False
-                    cache_precond_diag = None
-                    cache_tcon = None
-                    cache_norms = None
-                    cache_rz_scale = None
-                    cache_l_scale = None
-                    cache_rz_norm = None
-                    cache_f_norm1 = None
-                    cache_prec_rz_mats = None
-                    cache_prec_rz_jmax = None
-                    cache_prec_lam_prec = None
-                    cache_prec_faclam = None
-                    cache_prec_lam_debug = None
+                    _clear_preconditioner_cache_locals()
                     force_bcovar_update = True
                     if track_history:
                         rec = _residual_iter_history_record(
@@ -7506,34 +7497,8 @@ def solve_fixed_boundary_residual_iter(
                 fsq_prev = fsq_prev_before
                 fsq0_prev = fsq0_prev_before
                 inv_tau = [0.15 / time_step] * k_ndamp
-                if not bool(vmec2000_control):
-                    vmec2000_cache_valid = False
-                    cache_precond_diag = None
-                    cache_tcon = None
-                    cache_norms = None
-                    cache_rz_scale = None
-                    cache_l_scale = None
-                    cache_rz_norm = None
-                    cache_f_norm1 = None
-                    cache_prec_rz_mats = None
-                    cache_prec_rz_jmax = None
-                    cache_prec_lam_prec = None
-                    cache_prec_faclam = None
-                    cache_prec_lam_debug = None
-                else:
-                    vmec2000_cache_valid = False
-                    cache_precond_diag = None
-                    cache_tcon = None
-                    cache_norms = None
-                    cache_rz_scale = None
-                    cache_l_scale = None
-                    cache_rz_norm = None
-                    cache_f_norm1 = None
-                    cache_prec_rz_mats = None
-                    cache_prec_rz_jmax = None
-                    cache_prec_lam_prec = None
-                    cache_prec_faclam = None
-                    cache_prec_lam_debug = None
+                _clear_preconditioner_cache_locals()
+                if bool(vmec2000_control):
                     force_bcovar_update = True
                 if track_history:
                     rec = _residual_iter_history_record(
@@ -8441,19 +8406,7 @@ def solve_fixed_boundary_residual_iter(
                         inv_tau = [0.15 / time_step] * k_ndamp
                         update_rms = 0.0
                         if bool(vmec2000_control):
-                            vmec2000_cache_valid = False
-                            cache_precond_diag = None
-                            cache_tcon = None
-                            cache_norms = None
-                            cache_rz_scale = None
-                            cache_l_scale = None
-                            cache_rz_norm = None
-                            cache_f_norm1 = None
-                            cache_prec_rz_mats = None
-                            cache_prec_rz_jmax = None
-                            cache_prec_lam_prec = None
-                            cache_prec_faclam = None
-                            cache_prec_lam_debug = None
+                            _clear_preconditioner_cache_locals()
                 else:
                     # Roll back state and zero velocity.
                     state = state_backup
@@ -8485,19 +8438,7 @@ def solve_fixed_boundary_residual_iter(
                     inv_tau = [0.15 / time_step] * k_ndamp
                     update_rms = 0.0
                     if not bool(vmec2000_control):
-                        vmec2000_cache_valid = False
-                        cache_precond_diag = None
-                        cache_tcon = None
-                        cache_norms = None
-                        cache_rz_scale = None
-                        cache_l_scale = None
-                        cache_rz_norm = None
-                        cache_f_norm1 = None
-                        cache_prec_rz_mats = None
-                        cache_prec_rz_jmax = None
-                        cache_prec_lam_prec = None
-                        cache_prec_faclam = None
-                        cache_prec_lam_debug = None
+                        _clear_preconditioner_cache_locals()
             if timing_enabled and t_state_update_start is not None:
                 t_state_update_dispatch_done = time.perf_counter()
                 try:

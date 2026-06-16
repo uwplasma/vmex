@@ -6025,3 +6025,61 @@ Completion:
 - Implicit residual-adjoint decomposition: 88%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.47%.
+
+## 2026-06-16 Preconditioner Cache Reset Consolidation
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `PreconditionerCacheSnapshot` and
+   `empty_preconditioner_cache_snapshot` to the fixed-boundary
+   preconditioning operators module.
+2. Added a local `_clear_preconditioner_cache_locals` invalidation seam inside
+   `solve_fixed_boundary_residual_iter`.
+3. Replaced repeated restart/fallback cache reset assignments with the shared
+   invalidation call, while preserving the existing VMEC2000
+   `force_bcovar_update` conditions.
+4. Added unit coverage for the empty cache snapshot field order used by the
+   residual-loop tuple assignment.
+
+Results obtained:
+
+- The residual iteration module dropped from 9,153 lines to 9,094 lines.
+- `solve_fixed_boundary_residual_iter` dropped from 8,551 to 8,491 lines.
+- Restart and fallback cache invalidation now has one local seam instead of
+  several repeated assignment blocks.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/preconditioning/operators.py vmec_jax/solvers/fixed_boundary/residual/iteration.py tests/test_solve_preconditioner_metric_helpers.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_preconditioner_metric_helpers.py tests/test_solve_finish_cache_more_coverage.py tests/test_solve_branch_coverage.py tests/test_solve_real_scan_wave10_coverage.py tests/test_solve_scan_chunking.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_full_adjoint_trace_records_raw_preconditioner_on_fused_payload_path -q`
+- `python tools/diagnostics/source_health.py --top 8 --top-functions 12`
+
+Best next steps:
+
+1. Wait for the CI run triggered by `5d3355a`; fix any regression before
+   pushing this reset tranche.
+2. If CI is green, commit this reset consolidation.
+3. Continue the residual-loop decomposition at the VMEC2000 scan-controller
+   boundary, but only after branch-fingerprint tests are kept green.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.77%.
+- Differentiability/refactor implementation: 99.995%.
+- Solver monolith reduction: 94.4%.
+- Free-boundary adjoint monolith reduction: 80%.
+- Driver workflow decomposition: 91.6%.
+- WOUT diagnostic/profile decomposition: 98.5%.
+- Optimizer workflow decomposition: 86%.
+- Implicit residual-adjoint decomposition: 88%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.48%.
