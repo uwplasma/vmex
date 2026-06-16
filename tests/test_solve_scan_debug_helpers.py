@@ -10,6 +10,8 @@ from vmec_jax.solvers.fixed_boundary.scan.debug import (
     _axis_guess_lines,
     dump_vmec2000_scan_ptau_rows,
     emit_vmec2000_post_scan_rows,
+    maybe_debug_scan_force_first_iter,
+    maybe_debug_scan_state_iter,
     _emit_vmec2000_iter_row,
     _emit_scan_prints,
     _print_axis_guess,
@@ -331,6 +333,100 @@ def test_dump_vmec2000_scan_ptau_rows_replays_scan_diagnostics():
             dump_ptau=lambda **_kwargs: pytest.fail("disabled dump should not run"),
         )
         == 0
+    )
+
+
+def test_maybe_debug_scan_force_first_iter_emits_first_iteration_payload():
+    calls = []
+    frzl = SimpleNamespace(
+        fzsc=np.asarray([[[1.0, 2.0]]]),
+        fzcs=np.asarray([[[3.0, 4.0], [5.0, 6.0]]]),
+    )
+    state = SimpleNamespace(Rcos=np.asarray([1.0, 2.0]), Zsin=np.asarray([3.0]))
+    norms = SimpleNamespace(fnorm=7.0, r1=8.0)
+
+    emitted = maybe_debug_scan_force_first_iter(
+        enabled=True,
+        iter2=1,
+        frzl=frzl,
+        carry_state=state,
+        use_cached_precond=True,
+        need_bcovar_update=False,
+        norms_used=norms,
+        gcr2=0.1,
+        gcz2=0.2,
+        fsqr=0.3,
+        fsqz=0.4,
+        jnp_module=np,
+        cond=lambda pred, true, false, operand=None: true(operand) if bool(pred) else false(operand),
+        debug_print=lambda fmt, **kwargs: calls.append((fmt, kwargs)),
+    )
+
+    assert emitted
+    assert len(calls) == 1
+    assert calls[0][0].startswith("[scan-debug]")
+    assert calls[0][1]["fzsc2"] == pytest.approx(5.0)
+    assert calls[0][1]["fzcsm1"] == pytest.approx(61.0)
+    assert calls[0][1]["rcsum"] == pytest.approx(3.0)
+    assert not maybe_debug_scan_force_first_iter(
+        enabled=False,
+        iter2=1,
+        frzl=frzl,
+        carry_state=state,
+        use_cached_precond=True,
+        need_bcovar_update=False,
+        norms_used=norms,
+        gcr2=0.1,
+        gcz2=0.2,
+        fsqr=0.3,
+        fsqz=0.4,
+        jnp_module=np,
+        cond=lambda *_args, **_kwargs: pytest.fail("disabled debug should not enter cond"),
+        debug_print=lambda **_kwargs: pytest.fail("disabled debug should not print"),
+    )
+
+
+def test_maybe_debug_scan_state_iter_emits_requested_iteration_payload():
+    calls = []
+    state = SimpleNamespace(Rcos=np.asarray([1.0]), Zsin=np.asarray([2.0]), Lsin=np.asarray([3.0]))
+    checkpoint = SimpleNamespace(Rcos=np.asarray([4.0]), Zsin=np.asarray([5.0]), Lsin=np.asarray([6.0]))
+    carry = SimpleNamespace(state=state, state_checkpoint=checkpoint)
+    norms = SimpleNamespace(fnorm=2.0, r1=3.0, fnormL=4.0)
+
+    emitted = maybe_debug_scan_state_iter(
+        scan_debug_iter=7,
+        iter2=7,
+        carry_adv=carry,
+        use_cached_precond=False,
+        need_bcovar_update=True,
+        norms_used=norms,
+        gcr2=0.5,
+        gcz2=0.25,
+        gcl2=0.125,
+        jnp_module=np,
+        cond=lambda pred, true, false, operand=None: true(operand) if bool(pred) else false(operand),
+        debug_print=lambda fmt, **kwargs: calls.append((fmt, kwargs)),
+    )
+
+    assert emitted
+    assert len(calls) == 1
+    assert calls[0][0].startswith("[scan-state]")
+    assert calls[0][1]["fsqr"] == pytest.approx(3.0)
+    assert calls[0][1]["fsqz"] == pytest.approx(1.5)
+    assert calls[0][1]["fsql"] == pytest.approx(0.5)
+    assert not maybe_debug_scan_state_iter(
+        scan_debug_iter=0,
+        iter2=7,
+        carry_adv=carry,
+        use_cached_precond=False,
+        need_bcovar_update=True,
+        norms_used=norms,
+        gcr2=0.5,
+        gcz2=0.25,
+        gcl2=0.125,
+        jnp_module=np,
+        cond=lambda *_args, **_kwargs: pytest.fail("disabled debug should not enter cond"),
+        debug_print=lambda **_kwargs: pytest.fail("disabled debug should not print"),
     )
 
 
