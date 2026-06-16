@@ -24620,3 +24620,59 @@ Completion:
   for the latest branch head.
 - Docs/release hygiene: 100%.
 - QI minimal-seed README artifacts: 100%.
+
+### 2026-06-16 Finite-Beta Scalar In Same-Branch Coil Reports
+
+Steps taken:
+
+1. Added ``betatotal`` as an opt-in same-branch scalar key for the direct-coil
+   free-boundary QS optimization report path.
+2. Reused ``finite_beta_scalars_from_state`` so the report gets the same
+   differentiable finite-beta scalar used by the fixed-boundary finite-beta
+   objective helpers.
+3. Kept ``betatotal`` out of the default scalar list to avoid adding finite-beta
+   real-space work to ordinary vacuum QS smoke runs.
+4. Extended the mocked branch-local vector report smoke test so ``betatotal``
+   flows through parsing, production-value summaries, replay values, base-delta
+   checks, and directional derivatives.
+
+Results obtained:
+
+1. Finite-beta QA coil reports can now request
+   ``--same-branch-report-vector-keys ... ,betatotal`` and carry beta evidence
+   through the same branch-local vector/JVP path as aspect, iota, QS, boundary
+   moment, and Bnormal RMS.
+2. The exact finite-beta ``betatotal`` AD-vs-central-FD gate still passes for
+   the native accepted/rejected direct-coil branch.
+3. ``python -m ruff check`` passed for the touched example and smoke test.
+4. ``JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_qs_coil_optimization_smoke.py
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_native_rejected_slot_betatotal_jvp_matches_complete_solve_fd
+   -q`` passed.
+
+Best next steps:
+
+1. Commit and push this finite-beta scalar report extension.
+2. Keep the default report key set lightweight; users opt into beta evidence
+   when running finite-beta coil examples.
+3. Continue phase-3 work by running the finite-beta QA wrapper with
+   ``betatotal`` included in the same-branch vector report when a heavier
+   example run is warranted.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999996%; finite-beta beta
+  scalar evidence is now available in same-branch reports, while arbitrary
+  adaptive host branch changes remain unclaimed.
+- VMEC parity and physics gates: 99.9%.
+- Single-stage coil-only optimization phase 3: 99.93%.
+- CPU/GPU performance: 99.45%.
+- CI/runtime/coverage hygiene: 100% locally for this shard; awaiting GitHub CI
+  for the latest branch head.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 100%.

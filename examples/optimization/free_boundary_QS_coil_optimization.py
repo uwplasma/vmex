@@ -66,6 +66,7 @@ from vmec_jax._compat import jax, jnp
 from vmec_jax.driver import run_free_boundary, write_wout_from_fixed_boundary_run
 from vmec_jax.external_fields import CoilFieldParams, from_essos_coils
 from vmec_jax.external_fields.coils_jax import coil_current_norm, coil_lengths
+from vmec_jax.finite_beta import finite_beta_scalars_from_state
 from vmec_jax.namelist import read_indata, write_indata
 from vmec_jax.profiles import pressure_profile_to_vmec_am, standard_finite_beta_profiles
 from vmec_jax.quasi_isodynamic import boozer_output_from_state
@@ -91,6 +92,7 @@ SUPPORTED_SAME_BRANCH_VECTOR_KEYS = (
     "boozer_qs_total",
     "lcfs_boundary_moment",
     "accepted_bnormal_rms",
+    "betatotal",
 )
 SAME_BRANCH_VECTOR_KEY_ALIASES = {
     "bnormal_rms": "accepted_bnormal_rms",
@@ -102,6 +104,7 @@ STATE_ONLY_SAME_BRANCH_KEYS = (
     "qs_total",
     "boozer_qs_total",
     "lcfs_boundary_moment",
+    "betatotal",
 )
 SINGLE_STAGE_LIMITATIONS = [
     "The QS term is a VMEC-state quasisymmetry-ratio residual, not a Boozer-space exact-adjoint objective.",
@@ -1438,6 +1441,16 @@ def write_same_branch_validation_report(
             np.asarray(lcfs_boundary_moment(payload["result"].state, payload["init"].static))
         ),
         "accepted_bnormal_rms": accepted_bnormal_rms_from_payload,
+        "betatotal": lambda payload: float(
+            np.asarray(
+                finite_beta_scalars_from_state(
+                    state=payload["result"].state,
+                    static=payload["init"].static,
+                    indata=payload["init"].indata,
+                    signgs=payload["init"].signgs,
+                )["betatotal"]
+            )
+        ),
     }
     scalar_replay_fns = {
         "state_norm": lambda replay, _payload: jnp.linalg.norm(pack_state(replay["state"])),
@@ -1468,6 +1481,12 @@ def write_same_branch_validation_report(
             payload["init"].static,
         ),
         "accepted_bnormal_rms": lambda replay, _payload: accepted_bnormal_rms_from_replay(replay),
+        "betatotal": lambda replay, payload: finite_beta_scalars_from_state(
+            state=replay["state"],
+            static=payload["init"].static,
+            indata=payload["init"].indata,
+            signgs=payload["init"].signgs,
+        )["betatotal"],
     }
     scalar_uses_state_only_replay = scalar_key in STATE_ONLY_SAME_BRANCH_KEYS
     vector_uses_state_only_replay = all(key in STATE_ONLY_SAME_BRANCH_KEYS for key in vector_keys)
@@ -2482,7 +2501,8 @@ def build_parser() -> argparse.ArgumentParser:
             "Physical scalar validated by --same-branch-report-mode scalar. "
             "Use 'state_norm' as a non-physics replay-graph timing probe, "
             "'aspect' for a cheap physical scalar, 'qs_total' for the VMEC-state "
-            "QS scalar, or 'boozer_qs_total' for the opt-in Boozer-space QS scalar."
+            "QS scalar, 'boozer_qs_total' for the opt-in Boozer-space QS scalar, "
+            "or 'betatotal' for the finite-beta total-beta scalar."
         ),
     )
     parser.add_argument(
