@@ -265,6 +265,94 @@ def _print_axis_guess(raxis_cc: Any, zaxis_cs: Any) -> bool:
     return True
 
 
+def emit_vmec2000_post_scan_rows(
+    *,
+    enabled: bool,
+    scan_histories: Any,
+    fsqr_full: Any,
+    fsqz_full: Any,
+    fsql_full: Any,
+    conv_idx_print: int,
+    max_iter: int,
+    should_print: Callable[[int, int], bool],
+    print_row: Callable[..., Any],
+) -> int:
+    """Replay VMEC2000-style iteration rows after a non-printing scan."""
+
+    if not bool(enabled):
+        return 0
+    r00_full = np.asarray(scan_histories.r00)
+    z00_full = np.asarray(scan_histories.z00)
+    w_mhd_full = np.asarray(scan_histories.w_mhd)
+    dt_full = np.asarray(scan_histories.dt)
+    fsqr_arr = np.asarray(fsqr_full)
+    fsqz_arr = np.asarray(fsqz_full)
+    fsql_arr = np.asarray(fsql_full)
+    last_iter = int(conv_idx_print) if int(conv_idx_print) > 0 else int(max_iter)
+    printed = 0
+    for i in range(last_iter):
+        iter2 = i + 1
+        if should_print(int(iter2), int(last_iter)):
+            r00_val = float(f"{float(r00_full[i]):.3E}")
+            z00_val = float(f"{float(z00_full[i]):.3E}")
+            print_row(
+                iter_idx=int(iter2),
+                fsqr=float(fsqr_arr[i]),
+                fsqz=float(fsqz_arr[i]),
+                fsql=float(fsql_arr[i]),
+                delt0r=float(dt_full[i]),
+                r00=r00_val,
+                w_mhd=float(w_mhd_full[i]),
+                z00=z00_val,
+            )
+            printed += 1
+    return printed
+
+
+def dump_vmec2000_scan_ptau_rows(
+    *,
+    enabled: bool,
+    scan_histories: Any,
+    conv_idx_print: int,
+    max_iter: int,
+    iter_offset0: int,
+    badjac_mode: str,
+    dump_ptau: Callable[..., Any],
+) -> int:
+    """Replay VMEC2000 scan p-tau min/max diagnostics to the host dump path."""
+
+    if not bool(enabled):
+        return 0
+    last_iter = int(conv_idx_print) if int(conv_idx_print) > 0 else int(max_iter)
+    ptau_min_full = np.asarray(scan_histories.ptau_min)
+    ptau_max_full = np.asarray(scan_histories.ptau_max)
+    tau_min_state_full = np.asarray(scan_histories.tau_min_state)
+    tau_max_state_full = np.asarray(scan_histories.tau_max_state)
+    badjac_ptau_full = np.asarray(scan_histories.badjac_ptau).astype(int)
+    badjac_state_full = np.asarray(scan_histories.badjac_state).astype(int)
+    bad_jac_full = np.asarray(scan_histories.bad_jac)
+    dumped = 0
+    for i in range(last_iter):
+        iter2 = i + 1 + int(iter_offset0)
+        dumped += int(
+            bool(
+                dump_ptau(
+                    iter_idx=int(iter2),
+                    ptau_min=float(ptau_min_full[i]),
+                    ptau_max=float(ptau_max_full[i]),
+                    tau_min_state=float(tau_min_state_full[i]) if np.isfinite(tau_min_state_full[i]) else None,
+                    tau_max_state=float(tau_max_state_full[i]) if np.isfinite(tau_max_state_full[i]) else None,
+                    badjac_ptau=bool(badjac_ptau_full[i]),
+                    badjac_state=bool(badjac_state_full[i]),
+                    badjac_used=bool(bad_jac_full[i]),
+                    mode=badjac_mode,
+                    label="scan",
+                )
+            )
+        )
+    return dumped
+
+
 def _timecontrol_scan_stage_name(stage_id: int) -> str:
     return {0: "init", 1: "pre", 2: "checkpoint", 3: "restart"}.get(int(stage_id), "pre")
 

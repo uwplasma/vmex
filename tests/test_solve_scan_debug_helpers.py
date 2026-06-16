@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -7,6 +8,8 @@ from vmec_jax.solvers.fixed_boundary.diagnostics.io import _format_vmec2000_iter
 from vmec_jax.solvers.fixed_boundary.scan.debug import (
     _append_timecontrol_scan_trace_row,
     _axis_guess_lines,
+    dump_vmec2000_scan_ptau_rows,
+    emit_vmec2000_post_scan_rows,
     _emit_vmec2000_iter_row,
     _emit_scan_prints,
     _print_axis_guess,
@@ -230,6 +233,105 @@ def test_print_axis_guess_matches_vmec_block_and_swallows_bad_inputs(capsys):
 
     assert not _print_axis_guess(BadArray(), zaxis)
     assert capsys.readouterr().out == ""
+
+
+def test_emit_vmec2000_post_scan_rows_replays_selected_rows_with_vmec_rounding():
+    rows = []
+    histories = SimpleNamespace(
+        r00=np.asarray([1.23456, 2.34567, 3.45678]),
+        z00=np.asarray([-0.12345, -0.23456, -0.34567]),
+        w_mhd=np.asarray([10.0, 20.0, 30.0]),
+        dt=np.asarray([0.1, 0.2, 0.3]),
+    )
+
+    printed = emit_vmec2000_post_scan_rows(
+        enabled=True,
+        scan_histories=histories,
+        fsqr_full=np.asarray([1.0, 2.0, 3.0]),
+        fsqz_full=np.asarray([4.0, 5.0, 6.0]),
+        fsql_full=np.asarray([7.0, 8.0, 9.0]),
+        conv_idx_print=2,
+        max_iter=3,
+        should_print=lambda iter_idx, last_iter: iter_idx == last_iter,
+        print_row=lambda **kwargs: rows.append(kwargs),
+    )
+
+    assert printed == 1
+    assert rows == [
+        {
+            "iter_idx": 2,
+            "fsqr": 2.0,
+            "fsqz": 5.0,
+            "fsql": 8.0,
+            "delt0r": 0.2,
+            "r00": float(f"{2.34567:.3E}"),
+            "w_mhd": 20.0,
+            "z00": float(f"{-0.23456:.3E}"),
+        }
+    ]
+    assert (
+        emit_vmec2000_post_scan_rows(
+            enabled=False,
+            scan_histories=histories,
+            fsqr_full=np.asarray([1.0]),
+            fsqz_full=np.asarray([1.0]),
+            fsql_full=np.asarray([1.0]),
+            conv_idx_print=0,
+            max_iter=1,
+            should_print=lambda *_args: True,
+            print_row=lambda **_kwargs: pytest.fail("disabled replay should not print"),
+        )
+        == 0
+    )
+
+
+def test_dump_vmec2000_scan_ptau_rows_replays_scan_diagnostics():
+    calls = []
+    histories = SimpleNamespace(
+        ptau_min=np.asarray([-1.0, -2.0]),
+        ptau_max=np.asarray([1.0, 2.0]),
+        tau_min_state=np.asarray([np.nan, -0.25]),
+        tau_max_state=np.asarray([0.5, np.nan]),
+        badjac_ptau=np.asarray([1, 0]),
+        badjac_state=np.asarray([0, 1]),
+        bad_jac=np.asarray([True, False]),
+    )
+
+    dumped = dump_vmec2000_scan_ptau_rows(
+        enabled=True,
+        scan_histories=histories,
+        conv_idx_print=0,
+        max_iter=2,
+        iter_offset0=5,
+        badjac_mode="state",
+        dump_ptau=lambda **kwargs: calls.append(kwargs) or True,
+    )
+
+    assert dumped == 2
+    assert calls[0]["iter_idx"] == 6
+    assert calls[0]["tau_min_state"] is None
+    assert calls[0]["tau_max_state"] == pytest.approx(0.5)
+    assert calls[0]["badjac_ptau"] is True
+    assert calls[0]["badjac_state"] is False
+    assert calls[0]["badjac_used"] is True
+    assert calls[0]["mode"] == "state"
+    assert calls[0]["label"] == "scan"
+    assert calls[1]["iter_idx"] == 7
+    assert calls[1]["tau_min_state"] == pytest.approx(-0.25)
+    assert calls[1]["tau_max_state"] is None
+    assert calls[1]["badjac_used"] is False
+    assert (
+        dump_vmec2000_scan_ptau_rows(
+            enabled=False,
+            scan_histories=histories,
+            conv_idx_print=0,
+            max_iter=2,
+            iter_offset0=0,
+            badjac_mode="state",
+            dump_ptau=lambda **_kwargs: pytest.fail("disabled dump should not run"),
+        )
+        == 0
+    )
 
 
 @pytest.mark.parametrize(

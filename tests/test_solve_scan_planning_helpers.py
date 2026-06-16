@@ -1,4 +1,4 @@
-from collections import OrderedDict
+from collections import OrderedDict, namedtuple
 
 import pytest
 
@@ -26,6 +26,7 @@ from vmec_jax.solvers.fixed_boundary.scan.runtime import (
     get_or_build_scan_runner,
     resolve_scan_runtime_hooks,
     resolve_scan_runtime_hooks_from_env,
+    run_scan_preflight_step,
     scan_trace_context_or_null,
 )
 
@@ -298,6 +299,107 @@ def test_get_or_build_scan_runner_records_miss_hit_and_bypass_paths():
     assert stats["scan_runner_cache_bypass_count"] == 1
     assert stats["scan_runner_cache_miss_category_test_count"] == 1
     assert miss_records == [(("case", 1), ())]
+
+
+def test_run_scan_preflight_step_handles_nojit_and_offset_with_timing():
+    Carry = namedtuple("Carry", "iter_offset value")
+    times = iter([1.0, 1.4])
+    stats = {"scan_preflight_s": 0.0}
+    block_calls = []
+
+    class Jnp:
+        int32 = "int32"
+
+        @staticmethod
+        def asarray(value, dtype=None):
+            return ("arr", value, dtype)
+
+    class Jax:
+        class tree_util:
+            @staticmethod
+            def tree_map(fn, value):
+                return tuple(fn(item) for item in value)
+
+        @staticmethod
+        def disable_jit():
+            class Context:
+                def __enter__(self):
+                    return None
+
+                def __exit__(self, exc_type, exc, tb):
+                    return None
+
+            return Context()
+
+    def scan_step(carry, it):
+        assert carry.iter_offset == ("arr", 7, "int32")
+        return carry._replace(value="advanced"), ("h0", it)
+
+    result = run_scan_preflight_step(
+        Carry(iter_offset=None, value="initial"),
+        iter_offset_preflight=7,
+        jit_preflight=False,
+        get_scan_runner=lambda _seq_len: pytest.fail("nojit preflight should not request runner"),
+        scan_step=scan_step,
+        scan_timing_enabled=True,
+        scan_timing_stats=stats,
+        block_scan_value=lambda value: block_calls.append(value) or value,
+        perf_counter=lambda: next(times),
+        jnp_module=Jnp,
+        jax_module=Jax,
+    )
+
+    assert result.carry.value == "advanced"
+    assert result.history_row == ("h0", ("arr", 0, "int32"))
+    assert block_calls == [(result.carry, result.history_row)]
+    assert stats["scan_preflight_s"] == pytest.approx(0.4)
+
+
+def test_run_scan_preflight_step_handles_jitted_sequence_history():
+    Carry = namedtuple("Carry", "iter_offset value")
+
+    class Jnp:
+        int32 = "int32"
+
+        @staticmethod
+        def asarray(value, dtype=None):
+            return tuple(value) if isinstance(value, list) else ("arr", value, dtype)
+
+    class Jax:
+        class tree_util:
+            @staticmethod
+            def tree_map(fn, value):
+                return tuple(fn(item) for item in value)
+
+        @staticmethod
+        def disable_jit():
+            raise AssertionError("jit preflight should not disable jit")
+
+    def get_scan_runner(seq_len):
+        assert seq_len == 1
+
+        def runner(carry, it_seq):
+            assert it_seq == (0,)
+            return carry._replace(value="jitted"), (("fsqr0",), ("fsqz0",), ("fsql0",))
+
+        return runner, "miss"
+
+    result = run_scan_preflight_step(
+        Carry(iter_offset=None, value="initial"),
+        iter_offset_preflight=None,
+        jit_preflight=True,
+        get_scan_runner=get_scan_runner,
+        scan_step=lambda *_args: pytest.fail("jit preflight should use runner"),
+        scan_timing_enabled=False,
+        scan_timing_stats={},
+        block_scan_value=lambda value: pytest.fail("timing disabled should not block"),
+        perf_counter=lambda: pytest.fail("timing disabled should not request time"),
+        jnp_module=Jnp,
+        jax_module=Jax,
+    )
+
+    assert result.carry.value == "jitted"
+    assert result.history_row == ("fsqr0", "fsqz0", "fsql0")
 
 
 def test_run_flags_disable_fallback_for_state_only_and_chunking_for_traced_scan():
