@@ -775,6 +775,50 @@ def same_branch_derivative_proposal_from_report(
     return {"available": False, "reason": "no same-branch derivative proposal was generated"}
 
 
+def same_branch_derivative_gate_evidence(report: dict[str, Any]) -> dict[str, Any]:
+    """Return compact gate evidence attached to derivative-assisted proposals."""
+
+    vector_gate = report.get("branch_local_vector_gate", {})
+    physical_gate = vector_gate.get("physical_scalar_gate", {}) if isinstance(vector_gate, dict) else {}
+    rejected_slot_gate = report.get("accepted_rejected_controller_slot_gate", {})
+    rejected_slot_requested = isinstance(rejected_slot_gate, dict) and bool(rejected_slot_gate.get("requested", False))
+    return {
+        "branch_local_vector_gate_available": bool(
+            isinstance(vector_gate, dict) and vector_gate.get("available", False)
+        ),
+        "branch_local_vector_gate_passed": bool(
+            isinstance(vector_gate, dict) and vector_gate.get("passed", False)
+        ),
+        "physical_scalar_gate_passed": bool(
+            isinstance(physical_gate, dict) and physical_gate.get("passed", False)
+        ),
+        "accepted_rejected_controller_slot_gate_requested": bool(rejected_slot_requested),
+        "accepted_rejected_controller_slot_gate_available": bool(
+            isinstance(rejected_slot_gate, dict) and rejected_slot_gate.get("available", False)
+        ),
+        "accepted_rejected_controller_slot_gate_passed": bool(
+            isinstance(rejected_slot_gate, dict) and rejected_slot_gate.get("passed", False)
+        ),
+        "accepted_rejected_controller_slot_scope": str(
+            rejected_slot_gate.get("scope", "") if isinstance(rejected_slot_gate, dict) else ""
+        ),
+        "same_stacked_step_policy_branch": bool(
+            isinstance(rejected_slot_gate, dict) and rejected_slot_gate.get("same_stacked_step_policy_branch", False)
+        ),
+        "fixed_rejected_controller_slots": int(
+            rejected_slot_gate.get("fixed_rejected_controller_slots", 0)
+            if isinstance(rejected_slot_gate, dict)
+            else 0
+        ),
+        "controller_slot_summary": (
+            dict(rejected_slot_gate.get("controller_slot_summary", {}))
+            if isinstance(rejected_slot_gate, dict)
+            and isinstance(rejected_slot_gate.get("controller_slot_summary", {}), dict)
+            else {}
+        ),
+    }
+
+
 def same_branch_derivative_proposals_from_report(
     report: dict[str, Any],
     objective_model: dict[str, Any],
@@ -949,6 +993,7 @@ def same_branch_derivative_proposals_from_report(
             "reason": f"direction_x shape {direction_x.shape} does not match best x shape {x_best.shape}",
         }]
 
+    gate_evidence = same_branch_derivative_gate_evidence(report)
     proposals = []
     for trial_index, step_size in enumerate(step_sizes):
         alpha = -float(step_size) * float(np.sign(directional))
@@ -969,6 +1014,7 @@ def same_branch_derivative_proposals_from_report(
                 "max_base_abs_delta_allowed": float(max_base_abs_delta),
                 "directional_derivative": float(directional),
                 "contributions": contributions,
+                "gate_evidence": gate_evidence,
                 "objective_terms_used": sorted(contributions),
                 "objective_terms_omitted": omitted_terms,
                 "alpha": float(alpha),

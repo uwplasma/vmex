@@ -24562,3 +24562,61 @@ Completion:
   GitHub CI for the latest branch head.
 - Docs/release hygiene: 100%.
 - QI minimal-seed README artifacts: 100%.
+
+### 2026-06-16 Same-Branch Coil Proposal Gate Evidence
+
+Steps taken:
+
+1. Rechecked the free-boundary phase-2/phase-3 branch-local derivative path
+   after the fixed-boundary scan refactor tranche.
+2. Verified the focused accepted/rejected-slot AD-vs-central-FD gate still
+   passes for the native direct-coil complete-loop fingerprint.
+3. Added compact accepted/rejected controller-slot and physical-scalar gate
+   evidence to same-branch derivative-assisted coil proposal artifacts.
+4. Extended the coil-only QS smoke test so proposal summaries retain the
+   branch-local vector gate, physical-scalar gate, and accepted/rejected
+   controller-slot proof that authorized the derivative proposal.
+
+Results obtained:
+
+1. The phase-3 optimization summary now records why a derivative-assisted
+   trial is valid without implying arbitrary adaptive host-branch
+   differentiation.
+2. Complete free-boundary solves remain the acceptance authority; the new
+   evidence only audits the fixed accepted/rejected branch-local proposal.
+3. ``python -m ruff check`` passed for the touched free-boundary example and
+   smoke test.
+4. ``JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_qs_coil_optimization_smoke.py -q`` passed.
+5. ``JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_native_rejected_slot_same_branch_jvp_matches_complete_solve_fd
+   -q`` passed.
+
+Best next steps:
+
+1. Commit and push this phase-3 evidence improvement.
+2. Watch CI for the latest draft-PR branch head.
+3. Continue keeping adaptive host branch-selection claims conservative:
+   accepted/rejected slot evidence is fingerprint-gated fixed-branch evidence,
+   not arbitrary differentiation through changed adaptive branches.
+4. Resume larger source-health work on the next meaningful monolith seam rather
+   than extracting debug-only plumbing.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999995%; accepted/rejected
+  same-branch gates remain covered, arbitrary adaptive host branch changes are
+  still unclaimed.
+- VMEC parity and physics gates: 99.9%.
+- Single-stage coil-only optimization phase 3: 99.92%; derivative proposals
+  now retain the gate evidence used for complete-solve-authorized trials.
+- CPU/GPU performance: 99.45%.
+- CI/runtime/coverage hygiene: 100% locally for this shard; awaiting GitHub CI
+  for the latest branch head.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 100%.
