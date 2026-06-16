@@ -4,11 +4,37 @@ from __future__ import annotations
 
 import os
 from types import SimpleNamespace
+from typing import Any
 
 import numpy as np
 
 from ..boundary import boundary_from_indata
 from ..energy import FluxProfiles, _iotaf_from_iotas
+
+
+def profiles_from_static(
+    *,
+    indata,
+    static_in,
+    signgs: int,
+    flux_profiles_from_indata_host_default_func,
+    flux_profiles_from_indata_func,
+    eval_profiles_func,
+) -> tuple[Any, dict, Any]:
+    """Build flux, VMEC profile, and pressure arrays for one static grid."""
+
+    flux_local = flux_profiles_from_indata_host_default_func(indata, static_in.s, signgs=int(signgs))
+    if flux_local is None:
+        flux_local = flux_profiles_from_indata_func(indata, static_in.s, signgs=int(signgs))
+    # VMEC evaluates pressure/iota/current profiles on the radial half mesh.
+    if int(static_in.cfg.ns) < 2:
+        s_half = np.asarray(static_in.s)
+    else:
+        s_full = np.asarray(static_in.s)
+        s_half = np.concatenate([s_full[:1], 0.5 * (s_full[1:] + s_full[:-1])], axis=0)
+    prof_local = eval_profiles_func(indata, s_half)
+    pressure_local = prof_local.get("pressure", np.zeros_like(np.asarray(static_in.s)))
+    return flux_local, prof_local, pressure_local
 
 
 def final_flux_profiles_from_state(

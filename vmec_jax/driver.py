@@ -62,9 +62,12 @@ _requested_solver_device_name = _driver_policy_helpers.requested_solver_device_n
 _requested_final_ftol = _driver_policy_helpers.requested_final_ftol
 _resolve_initial_fixed_boundary_policy = _driver_policy_helpers.resolve_initial_fixed_boundary_policy
 _resolve_axis_infer_missing_policy = _driver_policy_helpers.resolve_axis_infer_missing_policy
+_resolve_driver_signgs = _driver_policy_helpers.resolve_driver_signgs
+_resolve_driver_step_size = _driver_policy_helpers.resolve_driver_step_size
 _resolve_fixed_boundary_solver_device_name = _driver_policy_helpers.resolve_fixed_boundary_solver_device_name
 _resolve_jit_forces_auto_policy = _driver_policy_helpers.resolve_jit_forces_auto_policy
 _resolve_stage_jit_settings = _driver_policy_helpers.resolve_stage_jit_settings
+_resolve_vmec2000_jit_forces_policy = _driver_policy_helpers.resolve_vmec2000_jit_forces_policy
 _resolve_vmec2000_stage_controls = _driver_policy_helpers.resolve_vmec2000_stage_controls
 _result_final_fsq = _driver_policy_helpers.result_final_fsq
 _result_final_residuals = _driver_policy_helpers.result_final_residuals
@@ -955,25 +958,8 @@ def run_fixed_boundary(
         boundary_modes = vmec_mode_table(cfg.mpol, cfg.ntor)
         boundary_coeffs = boundary_from_indata(indata, boundary_modes)
 
-    # VMEC readin.f hard-codes signgs = -1 (then flips theta if needed).
-    # For VMEC2000-iter parity, ignore input SIGNGS and match VMEC behavior.
-    if solver_lower in ("vmec2000_iter", "vmec2000_scan", "vmec2000_iter_fast"):
-        signgs = -1
-    else:
-        signgs = int(indata.get_int("SIGNGS", -1))
-        if signgs not in (-1, 1):
-            signgs = -1
-    if solver_lower in ("vmec2000_iter", "vmec2000_scan", "vmec2000_iter_fast"):
-        force_jit_env = os.getenv("VMEC_JAX_VMEC2000_FORCE_JIT", "").strip().lower()
-        force_nojit_env = os.getenv("VMEC_JAX_VMEC2000_FORCE_NOJIT", "").strip().lower()
-        if force_jit_env not in ("", "0", "false", "no"):
-            jit_forces = True
-        elif force_nojit_env not in ("", "0", "false", "no"):
-            jit_forces = False
-        elif isinstance(jit_forces, str):
-            # default to JIT for vmec2000 unless explicitly disabled
-            if jit_forces.strip().lower() == "auto":
-                jit_forces = True
+    signgs = _resolve_driver_signgs(solver_lower=solver_lower, indata=indata)
+    jit_forces = _resolve_vmec2000_jit_forces_policy(solver_lower=solver_lower, jit_forces=jit_forces)
 
     gamma = indata.get_float("GAMMA", 0.0)
     static = None
@@ -994,18 +980,14 @@ def run_fixed_boundary(
         return build_static(cfg_in, grid=grid)
 
     def _profiles_from_static(static_in: VMECStatic):
-        flux_local = flux_profiles_from_indata_host_default(indata, static_in.s, signgs=signgs)
-        if flux_local is None:
-            flux_local = flux_profiles_from_indata(indata, static_in.s, signgs=signgs)
-        # VMEC evaluates pressure/iota/current profiles on the radial half mesh.
-        if int(cfg.ns) < 2:
-            s_half = np.asarray(static_in.s)
-        else:
-            s_full = np.asarray(static_in.s)
-            s_half = np.concatenate([s_full[:1], 0.5 * (s_full[1:] + s_full[:-1])], axis=0)
-        prof_local = eval_profiles(indata, s_half)
-        pressure_local = prof_local.get("pressure", np.zeros_like(np.asarray(static_in.s)))
-        return flux_local, prof_local, pressure_local
+        return _driver_flux_helpers.profiles_from_static(
+            indata=indata,
+            static_in=static_in,
+            signgs=signgs,
+            flux_profiles_from_indata_host_default_func=flux_profiles_from_indata_host_default,
+            flux_profiles_from_indata_func=flux_profiles_from_indata,
+            eval_profiles_func=eval_profiles,
+        )
 
     def _ensure_static_profiles() -> None:
         nonlocal static, bdy, flux, prof, pressure
@@ -1016,13 +998,12 @@ def run_fixed_boundary(
         if flux is None or prof is None or pressure is None:
             flux, prof, pressure = _profiles_from_static(static)
 
-    if step_size is _STEP_SIZE_SENTINEL or step_size is None:
-        if solver_lower in ("vmec2000_iter", "vmec2000_scan", "vmec2000_iter_fast"):
-            step_size_val = float(indata.get_float("DELT", 5e-3))
-        else:
-            step_size_val = 5e-3
-    else:
-        step_size_val = float(step_size)
+    step_size_val = _resolve_driver_step_size(
+        step_size=step_size,
+        step_size_sentinel=_STEP_SIZE_SENTINEL,
+        solver_lower=solver_lower,
+        indata=indata,
+    )
 
     if verbose and (solver_lower != "vmec2000_iter" or use_initial_guess):
         _driver_io_helpers.print_fixed_boundary_intro(
@@ -1041,60 +1022,17 @@ def run_fixed_boundary(
         )
 
     def _initial_guess_with_optional_nojit(static_in, bdy_in, *, force_disable_jit: bool = False):
-        disable_env = os.getenv("VMEC_JAX_DISABLE_JIT_INIT", "") not in ("", "0")
-        use_numpy_init = False
-        if bool(performance_mode) and (_default_backend_name() == "cpu") and not force_disable_jit:
-            env_numpy_init = os.getenv("VMEC_JAX_CPU_NUMPY_INIT_GUESS", "1").strip().lower()
-            if env_numpy_init not in ("", "0", "false", "no"):
-                try:
-                    from .multigrid import _contains_jax_tracer
-
-                    use_numpy_init = not _contains_jax_tracer(bdy_in)
-                except Exception:
-                    use_numpy_init = False
-        if use_numpy_init:
-            try:
-                from .vmec_numpy_forces import _numpy_module_patch
-
-                with _numpy_module_patch():
-                    return initial_guess_from_boundary(
-                        static_in,
-                        bdy_in,
-                        indata,
-                        vmec_project=vmec_project,
-                        infer_axis_if_missing=axis_infer_missing,
-                    )
-            except Exception:
-                # Fall through to the standard JAX path if the NumPy-compatible
-                # shim is missing an operation for an uncommon initialization.
-                pass
-        if not (disable_env or force_disable_jit):
-            return initial_guess_from_boundary(
-                static_in,
-                bdy_in,
-                indata,
-                vmec_project=vmec_project,
-                infer_axis_if_missing=axis_infer_missing,
-            )
-        try:
-            import jax
-
-            with jax.disable_jit():
-                return initial_guess_from_boundary(
-                    static_in,
-                    bdy_in,
-                    indata,
-                    vmec_project=vmec_project,
-                    infer_axis_if_missing=axis_infer_missing,
-                )
-        except Exception:
-            return initial_guess_from_boundary(
-                static_in,
-                bdy_in,
-                indata,
-                vmec_project=vmec_project,
-                infer_axis_if_missing=axis_infer_missing,
-            )
+        return _driver_solve_helpers.initial_guess_with_optional_nojit(
+            static_in,
+            bdy_in,
+            indata,
+            vmec_project=bool(vmec_project),
+            infer_axis_if_missing=bool(axis_infer_missing),
+            performance_mode=bool(performance_mode),
+            force_disable_jit=bool(force_disable_jit),
+            initial_guess_from_boundary_func=initial_guess_from_boundary,
+            default_backend_name_func=_default_backend_name,
+        )
 
     if use_initial_guess:
         _ensure_static_profiles()

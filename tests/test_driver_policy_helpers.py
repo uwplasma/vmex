@@ -9,9 +9,17 @@ import numpy as np
 import pytest
 
 import vmec_jax.driver as driver
+from vmec_jax.drivers import flux as driver_flux
 from vmec_jax.drivers import io as driver_io
 from vmec_jax.drivers import runtime as driver_runtime
-from vmec_jax.drivers.policy import dynamic_scan_probe_settings, resolve_stage_jit_settings
+from vmec_jax.drivers import solve as driver_solve
+from vmec_jax.drivers.policy import (
+    dynamic_scan_probe_settings,
+    resolve_driver_signgs,
+    resolve_driver_step_size,
+    resolve_stage_jit_settings,
+    resolve_vmec2000_jit_forces_policy,
+)
 
 
 class _Input:
@@ -121,6 +129,203 @@ def test_resolve_stage_jit_settings_preserves_scan_and_warmup_policy():
     assert settings.jit_warmup_iters == 2
     assert settings.jit_precompile_noscan is False
     assert settings.jit_warmup_noscan == 2
+
+
+def test_resolve_driver_signgs_preserves_vmec2000_parity_and_sanitizes_input():
+    assert resolve_driver_signgs(solver_lower="vmec2000_iter", indata=_Input(SIGNGS=1)) == -1
+    assert resolve_driver_signgs(solver_lower="VMEC2000_SCAN", indata=_Input(SIGNGS=1)) == -1
+    assert resolve_driver_signgs(solver_lower="vmec_lbfgs", indata=_Input(SIGNGS=1)) == 1
+    assert resolve_driver_signgs(solver_lower="vmec_lbfgs", indata=_Input(SIGNGS=7)) == -1
+
+
+def test_resolve_vmec2000_jit_forces_policy_honors_solver_and_env_overrides():
+    assert resolve_vmec2000_jit_forces_policy(
+        solver_lower="gd",
+        jit_forces="auto",
+        getenv=lambda _key, default="": default,
+    ) == "auto"
+    assert resolve_vmec2000_jit_forces_policy(
+        solver_lower="vmec2000_iter",
+        jit_forces="auto",
+        getenv=lambda _key, default="": default,
+    ) is True
+    assert resolve_vmec2000_jit_forces_policy(
+        solver_lower="vmec2000_iter",
+        jit_forces=False,
+        getenv=lambda key, default="": {"VMEC_JAX_VMEC2000_FORCE_JIT": "1"}.get(key, default),
+    ) is True
+    assert resolve_vmec2000_jit_forces_policy(
+        solver_lower="vmec2000_iter",
+        jit_forces=True,
+        getenv=lambda key, default="": {"VMEC_JAX_VMEC2000_FORCE_NOJIT": "yes"}.get(key, default),
+    ) is False
+
+
+def test_resolve_driver_step_size_uses_explicit_vmec_and_generic_defaults():
+    sentinel = object()
+    assert resolve_driver_step_size(
+        step_size=0.125,
+        step_size_sentinel=sentinel,
+        solver_lower="vmec2000_iter",
+        indata=_Input(DELT=0.9),
+    ) == pytest.approx(0.125)
+    assert resolve_driver_step_size(
+        step_size=sentinel,
+        step_size_sentinel=sentinel,
+        solver_lower="vmec2000_iter",
+        indata=_Input(DELT=0.9),
+    ) == pytest.approx(0.9)
+    assert resolve_driver_step_size(
+        step_size=None,
+        step_size_sentinel=sentinel,
+        solver_lower="gd",
+        indata=_Input(DELT=0.9),
+    ) == pytest.approx(5.0e-3)
+
+
+def test_profiles_from_static_prefers_host_default_and_uses_vmec_half_mesh():
+    static = SimpleNamespace(cfg=SimpleNamespace(ns=4), s=np.asarray([0.0, 0.25, 0.75, 1.0]))
+    calls = []
+
+    def host_default(indata, s, signgs):
+        calls.append(("host", tuple(s), signgs))
+        return "host-flux"
+
+    def fallback(_indata, _s, _signgs):
+        pytest.fail("host-default profile path should be used")
+
+    def eval_profiles(_indata, s_half):
+        calls.append(("eval", tuple(s_half), None))
+        return {"pressure": np.asarray(s_half) + 1.0}
+
+    flux, profiles, pressure = driver_flux.profiles_from_static(
+        indata=_Input(),
+        static_in=static,
+        signgs=-1,
+        flux_profiles_from_indata_host_default_func=host_default,
+        flux_profiles_from_indata_func=fallback,
+        eval_profiles_func=eval_profiles,
+    )
+
+    assert flux == "host-flux"
+    assert profiles["pressure"].tolist() == pytest.approx([1.0, 1.125, 1.5, 1.875])
+    np.testing.assert_allclose(pressure, [1.0, 1.125, 1.5, 1.875])
+    assert calls == [
+        ("host", (0.0, 0.25, 0.75, 1.0), -1),
+        ("eval", (0.0, 0.125, 0.5, 0.875), None),
+    ]
+
+
+def test_profiles_from_static_falls_back_and_defaults_missing_pressure():
+    static = SimpleNamespace(cfg=SimpleNamespace(ns=1), s=np.asarray([0.0]))
+
+    flux, profiles, pressure = driver_flux.profiles_from_static(
+        indata=_Input(),
+        static_in=static,
+        signgs=1,
+        flux_profiles_from_indata_host_default_func=lambda *_args, **_kwargs: None,
+        flux_profiles_from_indata_func=lambda _indata, s, signgs: ("fallback", tuple(s), signgs),
+        eval_profiles_func=lambda _indata, s_half: {"iota": np.asarray(s_half)},
+    )
+
+    assert flux == ("fallback", (0.0,), 1)
+    np.testing.assert_allclose(profiles["iota"], [0.0])
+    np.testing.assert_allclose(pressure, [0.0])
+
+
+def test_initial_guess_with_optional_nojit_uses_standard_path_by_default():
+    calls = []
+
+    def initial_guess(static, boundary, indata, *, vmec_project, infer_axis_if_missing):
+        calls.append((static, boundary, indata, vmec_project, infer_axis_if_missing))
+        return "state"
+
+    state = driver_solve.initial_guess_with_optional_nojit(
+        "static",
+        "boundary",
+        "indata",
+        vmec_project=True,
+        infer_axis_if_missing=False,
+        performance_mode=False,
+        initial_guess_from_boundary_func=initial_guess,
+        default_backend_name_func=lambda: "cpu",
+        getenv=lambda _key, default="": default,
+    )
+
+    assert state == "state"
+    assert calls == [("static", "boundary", "indata", True, False)]
+
+
+def test_initial_guess_with_optional_nojit_uses_cpu_numpy_patch_when_safe():
+    calls = []
+    patch_events = []
+
+    class Patch:
+        def __enter__(self):
+            patch_events.append("enter")
+
+        def __exit__(self, exc_type, exc, tb):
+            patch_events.append("exit")
+
+    def initial_guess(*_args, **_kwargs):
+        calls.append(tuple(patch_events))
+        return "numpy-state"
+
+    state = driver_solve.initial_guess_with_optional_nojit(
+        "static",
+        "boundary",
+        "indata",
+        vmec_project=False,
+        infer_axis_if_missing=True,
+        performance_mode=True,
+        initial_guess_from_boundary_func=initial_guess,
+        default_backend_name_func=lambda: "cpu",
+        getenv=lambda _key, default="": default,
+        contains_jax_tracer_func=lambda _boundary: False,
+        numpy_module_patch_func=Patch,
+    )
+
+    assert state == "numpy-state"
+    assert calls == [("enter",)]
+    assert patch_events == ["enter", "exit"]
+
+
+def test_initial_guess_with_optional_nojit_skips_numpy_patch_for_tracers_or_env_disable():
+    patch_calls = []
+
+    def initial_guess(*_args, **_kwargs):
+        return "state"
+
+    state_traced = driver_solve.initial_guess_with_optional_nojit(
+        "static",
+        "boundary",
+        "indata",
+        vmec_project=False,
+        infer_axis_if_missing=True,
+        performance_mode=True,
+        initial_guess_from_boundary_func=initial_guess,
+        default_backend_name_func=lambda: "cpu",
+        getenv=lambda _key, default="": default,
+        contains_jax_tracer_func=lambda _boundary: True,
+        numpy_module_patch_func=lambda: patch_calls.append("patch"),
+    )
+    state_env = driver_solve.initial_guess_with_optional_nojit(
+        "static",
+        "boundary",
+        "indata",
+        vmec_project=False,
+        infer_axis_if_missing=True,
+        performance_mode=True,
+        initial_guess_from_boundary_func=initial_guess,
+        default_backend_name_func=lambda: "cpu",
+        getenv=lambda key, default="": {"VMEC_JAX_CPU_NUMPY_INIT_GUESS": "0"}.get(key, default),
+        contains_jax_tracer_func=lambda _boundary: False,
+        numpy_module_patch_func=lambda: patch_calls.append("patch"),
+    )
+
+    assert state_traced == "state"
+    assert state_env == "state"
+    assert patch_calls == []
 
 
 def test_driver_io_helpers_print_concise_and_vmec_style_banners() -> None:

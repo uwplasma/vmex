@@ -271,6 +271,45 @@ def accelerated_fsq_total_target_from_ftol(ftol: float) -> float:
     return max(0.0, float(ftol)) * float(len(FSQ_COMPONENT_NAMES))
 
 
+def resolve_driver_signgs(*, solver_lower: str, indata) -> int:
+    """Resolve the driver sign convention, preserving VMEC2000 parity."""
+
+    solver_name = str(solver_lower).strip().lower()
+    if solver_name in ("vmec2000_iter", "vmec2000_scan", "vmec2000_iter_fast"):
+        # VMEC readin.f initializes signgs=-1 and flips theta later if needed.
+        return -1
+    signgs = int(indata.get_int("SIGNGS", -1))
+    return signgs if signgs in (-1, 1) else -1
+
+
+def resolve_vmec2000_jit_forces_policy(*, solver_lower: str, jit_forces, getenv=os.getenv):
+    """Apply VMEC2000-specific env overrides to the force-JIT policy."""
+
+    solver_name = str(solver_lower).strip().lower()
+    if solver_name not in ("vmec2000_iter", "vmec2000_scan", "vmec2000_iter_fast"):
+        return jit_forces
+    force_jit_env = str(getenv("VMEC_JAX_VMEC2000_FORCE_JIT", "")).strip().lower()
+    force_nojit_env = str(getenv("VMEC_JAX_VMEC2000_FORCE_NOJIT", "")).strip().lower()
+    if force_jit_env not in ("", "0", "false", "no"):
+        return True
+    if force_nojit_env not in ("", "0", "false", "no"):
+        return False
+    if isinstance(jit_forces, str) and jit_forces.strip().lower() == "auto":
+        return True
+    return jit_forces
+
+
+def resolve_driver_step_size(*, step_size, step_size_sentinel, solver_lower: str, indata) -> float:
+    """Resolve the public driver step-size default for the selected solver."""
+
+    if step_size is not step_size_sentinel and step_size is not None:
+        return float(step_size)
+    solver_name = str(solver_lower).strip().lower()
+    if solver_name in ("vmec2000_iter", "vmec2000_scan", "vmec2000_iter_fast"):
+        return float(indata.get_float("DELT", 5e-3))
+    return 5e-3
+
+
 def requested_final_ftol(*, indata, ftol_list_input) -> float:
     ftol_list = as_float_list(ftol_list_input)
     if ftol_list:
