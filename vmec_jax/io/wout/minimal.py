@@ -8,7 +8,8 @@ the delicate diagnostic assembly is easier to review and test.
 from __future__ import annotations
 
 import os
-from typing import Any, NamedTuple
+from pathlib import Path
+from typing import Any, Mapping, NamedTuple
 
 import numpy as np
 
@@ -296,3 +297,119 @@ class WoutMinimalVmecLike:
         )
         self.mass = np.asarray(mass)
         self.gamma = float(gamma)
+
+
+def build_minimal_wout_data_kwargs(
+    context: Mapping[str, Any],
+    *,
+    path: str | Path,
+    converged: bool,
+) -> dict[str, Any]:
+    """Map a fixed-boundary diagnostic payload to ``WoutData`` kwargs.
+
+    The full WOUT builder computes geometry, field, profile, and stability
+    diagnostics.  This helper is intentionally limited to VMEC schema assembly:
+    it performs output normalization and dtype coercion, but no physics
+    calculations.  Keeping the final schema mapping here makes the high-level
+    builder easier to audit while avoiding an import cycle with
+    :class:`vmec_jax.io.wout.schema.WoutData`.
+    """
+
+    main_modes = context["main_modes"]
+    nyq_modes = context["nyq_modes"]
+    nfp = int(context["nfp"])
+    ns = int(context["ns"])
+    indata = context["indata"]
+    converged_bool = bool(converged)
+
+    return {
+        "path": Path(path),
+        "ns": ns,
+        "mpol": int(context["mpol"]),
+        "ntor": int(context["ntor"]),
+        "nfp": nfp,
+        "lasym": bool(context["lasym"]),
+        "signgs": int(context["signgs"]),
+        "mnmax": int(main_modes.K),
+        "mpol_nyq": int(np.max(nyq_modes.m)) if int(nyq_modes.K) > 0 else 0,
+        "ntor_nyq": int(np.max(np.abs(nyq_modes.n))) if int(nyq_modes.K) > 0 else 0,
+        "mnmax_nyq": int(nyq_modes.K),
+        "xm": np.asarray(main_modes.m, dtype=int),
+        "xn": np.asarray(main_modes.n * nfp, dtype=int),
+        "xm_nyq": np.asarray(nyq_modes.m, dtype=int),
+        "xn_nyq": np.asarray(nyq_modes.n * nfp, dtype=int),
+        "rmnc": np.asarray(context["rmnc"], dtype=float),
+        "rmns": np.asarray(context["rmns"], dtype=float),
+        "zmnc": np.asarray(context["zmnc"], dtype=float),
+        "zmns": np.asarray(context["zmns"], dtype=float),
+        "lmnc": np.asarray(context["lmnc"], dtype=float),
+        "lmns": np.asarray(context["lmns"], dtype=float),
+        "phipf": np.asarray(context["phipf_out"], dtype=float),
+        "chipf": np.asarray(context["chipf_out"], dtype=float),
+        "phips": np.asarray(context["flux"].phips, dtype=float),
+        "iotaf": np.asarray(context["iotaf"], dtype=float),
+        "iotas": np.asarray(context["iotas"], dtype=float),
+        "gmnc": np.asarray(context["gmnc"], dtype=float),
+        "gmns": np.asarray(context["gmns"], dtype=float),
+        "bsupumnc": np.asarray(context["bsupumnc"], dtype=float),
+        "bsupumns": np.asarray(context["bsupumns"], dtype=float),
+        "bsupvmnc": np.asarray(context["bsupvmnc"], dtype=float),
+        "bsupvmns": np.asarray(context["bsupvmns"], dtype=float),
+        "bsubumnc": np.asarray(context["bsubumnc"], dtype=float),
+        "bsubumns": np.asarray(context["bsubumns"], dtype=float),
+        "bsubvmnc": np.asarray(context["bsubvmnc"], dtype=float),
+        "bsubvmns": np.asarray(context["bsubvmns"], dtype=float),
+        "bsubsmns": np.asarray(context["bsubsmns"], dtype=float),
+        "bsubsmnc": np.asarray(context["bsubsmnc"], dtype=float),
+        "bmnc": np.asarray(context["bmnc"], dtype=float),
+        "bmns": np.asarray(context["bmns"], dtype=float),
+        "wb": float(context["wb"]),
+        "volume_p": float(context["volume_p"]),
+        "gamma": float(getattr(indata, "get_float", lambda *_: 0.0)("GAMMA", 0.0)),
+        "wp": float(context["wp"]),
+        "vp": np.asarray(context["vp"], dtype=float),
+        "pres": np.asarray(context["pres"], dtype=float),
+        "presf": np.asarray(context["presf"], dtype=float),
+        "fsqr": float(context["fsqr"]),
+        "fsqz": float(context["fsqz"]),
+        "fsql": float(context["fsql"]),
+        "fsqt": np.asarray(context["fsqt_out"], dtype=float),
+        "equif": np.asarray(context["equif"], dtype=float),
+        "phi": np.asarray(context["phi"], dtype=float),
+        "buco": np.asarray(context["buco"], dtype=float),
+        "bvco": np.asarray(context["bvco"], dtype=float),
+        "jcuru": np.asarray(context["jcuru"], dtype=float),
+        "jcurv": np.asarray(context["jcurv"], dtype=float),
+        "raxis_cc": np.asarray(context["raxis_cc"], dtype=float),
+        "zaxis_cs": np.asarray(context["zaxis_cs"], dtype=float),
+        "raxis_cs": np.asarray(context["raxis_cs"], dtype=float),
+        "zaxis_cc": np.asarray(context["zaxis_cc"], dtype=float),
+        "Aminor_p": float(context["Aminor_p"]),
+        "Rmajor_p": float(context["Rmajor_p"]),
+        "aspect": float(context["aspect"]),
+        "betatotal": float(context["betatotal"]),
+        "betapol": float(context["betapol"]),
+        "betator": float(context["betator"]),
+        "betaxis": float(context["betaxis"]),
+        "ctor": float(context["ctor"]),
+        "DMerc": np.asarray(context["DMerc"], dtype=float),
+        "Dshear": np.asarray(context["Dshear"], dtype=float),
+        "Dwell": np.asarray(context["Dwell"], dtype=float),
+        "Dcurr": np.asarray(context["Dcurr"], dtype=float),
+        "Dgeod": np.asarray(context["Dgeod"], dtype=float),
+        "D_R": np.asarray(context["D_R"], dtype=float),
+        "H": np.asarray(context["H_glasser"], dtype=float),
+        "glasser_correction": np.asarray(context["glasser_correction"], dtype=float),
+        "glasser_shear_valid": np.asarray(context["glasser_shear_valid"], dtype=bool),
+        "jdotb": np.asarray(context["jdotb"], dtype=float),
+        "bdotb": np.asarray(context["bdotb"], dtype=float),
+        "bdotgradv": np.asarray(context["bdotgradv"], dtype=float),
+        "ac": np.asarray(context["ac"], dtype=float),
+        "ac_aux_s": np.asarray(context["ac_aux_s"], dtype=float),
+        "ac_aux_f": np.asarray(context["ac_aux_f"], dtype=float),
+        "pcurr_type": str(context["pcurr_type"]),
+        "piota_type": str(context["piota_type"]),
+        "ier_flag": 0 if converged_bool else 1,
+        "vmec_jax_converged": converged_bool,
+        "vmec_jax_status": "converged" if converged_bool else "nonconverged",
+    }
