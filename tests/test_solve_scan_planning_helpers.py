@@ -21,6 +21,7 @@ from vmec_jax.solvers.fixed_boundary.scan.planning import (
 )
 from vmec_jax.solvers.fixed_boundary.scan.runtime import (
     resolve_scan_runtime_hooks,
+    resolve_scan_runtime_hooks_from_env,
     scan_trace_context_or_null,
 )
 
@@ -173,6 +174,31 @@ def test_scan_runtime_hooks_disable_timecontrol_without_dump_dir(tmp_path):
     if hooks_with_path.timecontrol_callback is not None:
         assert hooks_with_path.dump_timecontrol_scan
         assert hooks_with_path.timecontrol_path == tmp_path / "time_control_trace.log"
+
+
+def test_scan_runtime_hooks_from_env_matches_direct_resolver(tmp_path):
+    hooks = resolve_scan_runtime_hooks_from_env(
+        {
+            "VMEC_JAX_DUMP_TIMECONTROL": "1",
+            "VMEC_JAX_DUMP_DIR": str(tmp_path),
+        },
+        print_in_scan=False,
+        scan_print_mode="debug_print",
+        scan_trace=False,
+    )
+
+    direct = resolve_scan_runtime_hooks(
+        dump_timecontrol_env="1",
+        dump_dir_env=str(tmp_path),
+        print_in_scan=False,
+        scan_print_mode="debug_print",
+        scan_trace=False,
+    )
+
+    assert hooks.dump_timecontrol_scan == direct.dump_timecontrol_scan
+    assert hooks.timecontrol_path == direct.timecontrol_path
+    assert hooks.print_in_scan == direct.print_in_scan
+    assert hooks.scan_print_mode == direct.scan_print_mode
 
 
 def test_run_flags_disable_fallback_for_state_only_and_chunking_for_traced_scan():

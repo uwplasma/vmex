@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Any, Callable, NamedTuple
+from typing import Any, Callable, Mapping, NamedTuple
 
 from .planning import normalize_scan_print_mode
 
@@ -27,6 +27,11 @@ class ScanRuntimeHooks(NamedTuple):
     jax_debug_print: Callable[..., Any] | None
     scan_trace: bool
     scan_trace_context: Callable[[str], Any] | None
+
+
+def _env_value(env: Mapping[str, str | None], name: str, default: str = "") -> str:
+    value = env.get(name, default)
+    return default if value is None else str(value)
 
 
 def resolve_scan_runtime_hooks(
@@ -117,6 +122,24 @@ def resolve_scan_runtime_hooks(
         jax_debug_print=jax_debug_print,
         scan_trace=bool(scan_trace),
         scan_trace_context=scan_trace_context,
+    )
+
+
+def resolve_scan_runtime_hooks_from_env(
+    env: Mapping[str, str | None],
+    *,
+    print_in_scan: bool,
+    scan_print_mode: str,
+    scan_trace: bool,
+) -> ScanRuntimeHooks:
+    """Resolve scan runtime hooks from process-environment-like values."""
+
+    return resolve_scan_runtime_hooks(
+        dump_timecontrol_env=_env_value(env, "VMEC_JAX_DUMP_TIMECONTROL", ""),
+        dump_dir_env=_env_value(env, "VMEC_JAX_DUMP_DIR", ""),
+        print_in_scan=bool(print_in_scan),
+        scan_print_mode=str(scan_print_mode),
+        scan_trace=bool(scan_trace),
     )
 
 
