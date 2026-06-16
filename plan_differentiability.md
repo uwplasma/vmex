@@ -4227,3 +4227,69 @@ Completion:
 - WOUT diagnostic/profile decomposition: 94%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 98.84%.
+
+## 2026-06-16 WOUT netCDF Facade Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved the mechanical netCDF read/write bodies behind
+   `vmec_jax.io.wout.netcdf.read_wout_payload` and
+   `vmec_jax.io.wout.netcdf.write_wout_payload`.
+2. Kept the public `vmec_jax.wout.read_wout` and `vmec_jax.wout.write_wout`
+   facade functions stable and thin.
+3. Avoided a dataclass import cycle by having the netCDF helper return
+   `WoutData` constructor kwargs instead of importing `WoutData`.
+4. Kept private compatibility exports `_bool_from_nc`, `_nc_scalar`, and
+   `_read_wout_scalar_metadata` available through `vmec_jax.wout`, since
+   existing helper tests and some downstream diagnostics use those seams.
+5. Passed the physics-specific callbacks into the serialization helpers:
+   - phi profile reconstruction from variables,
+   - Glasser profile reconstruction from WOUT variables,
+   - Glasser profile reconstruction from WOUT data on write.
+
+Results obtained:
+
+- `vmec_jax/wout.py` dropped below the 2,000-line source-health warning list.
+- `read_wout` and `write_wout` are now facade-level wrappers; low-level netCDF
+  details live in the existing `io/wout` domain namespace.
+- Roundtrip, helper, WOUT-minimal, LASYM, and VMECPlot2 compatibility shards
+  passed locally.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/wout.py vmec_jax/io/wout/netcdf.py tests/test_wout_fast_helpers.py tests/test_wout_helpers.py`
+- `python -m compileall -q vmec_jax/wout.py vmec_jax/io/wout/netcdf.py tests/test_wout_fast_helpers.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_fast_helpers.py tests/test_wout_helpers.py tests/test_wout_wave2.py tests/test_wout_roundtrip.py tests/test_wout_additional_helpers.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_driver_wave10_coverage.py tests/test_wout_env_branch_coverage.py tests/test_wout_physics_wave8_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_parity_reference.py tests/test_wout_lasym_bsubv_parity.py tests/test_wout_vmecplot2_compat.py -q`
+- `python tools/diagnostics/source_health.py --top 12 --top-functions 15`
+
+Best next steps:
+
+1. Commit and push the WOUT netCDF facade extraction, then let CI validate it.
+2. Next source-health tranche should target either:
+   - CLI staged/budgeted multigrid orchestration in `run_fixed_boundary`, with
+     dependency injection for monkeypatch compatibility, or
+   - a WOUT-minimal Nyquist/Bsub payload helper inside `io/wout`, since
+     `wout_minimal_from_fixed_boundary` remains the largest WOUT function.
+3. Keep phase-2 free-boundary adaptive differentiation claims conservative
+   until the full adaptive fingerprint-gated AD-vs-FD gate exists.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.55%.
+- Differentiability/refactor implementation: 99.93%.
+- Solver monolith reduction: 88.7%.
+- Free-boundary adjoint monolith reduction: 80%.
+- Driver workflow decomposition: 86%.
+- WOUT diagnostic/profile decomposition: 96%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 98.88%.
