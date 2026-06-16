@@ -4016,3 +4016,75 @@ Completion:
 - WOUT diagnostic/profile decomposition: 92%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 98.75%.
+
+## 2026-06-16 WOUT Minimal Assembly Helper Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `vmec_jax.io.wout.minimal` for passive minimal-WOUT assembly helpers:
+   profile payload preparation, internal-to-physical main coefficient
+   conversion, magnetic-axis coefficient extraction, and the small VMEC-like
+   force-reconstruction payload.
+2. Rewired `wout_minimal_from_fixed_boundary` to call those helpers while
+   preserving the public `vmec_jax.wout` facade and existing WOUT schema/output
+   behavior.
+3. Added fast helper tests for:
+   - scaled main coefficient and magnetic-axis extraction,
+   - VMEC-like force payload attributes,
+   - current-driven `NCURR=1` iota/chipf recomputation through the injected
+     recompute callback.
+4. Re-ran constructor-heavy WOUT tests, environment-branch WOUT tests,
+   LASYM/parity tests, and source-health reporting.
+
+Results obtained:
+
+- `wout_minimal_from_fixed_boundary` dropped from 1,144 to 1,102 lines in the
+  function-length report for this tranche.
+- `vmec_jax/wout.py` is now 2,585 lines; the new internal helper module is
+  298 lines and lives under the existing `io/wout` domain namespace instead of
+  adding another root-level source file.
+- Current-driven WOUT output parity semantics remain explicit: the helper still
+  recomputes iota/chipf from the accepted state unless
+  `VMEC_JAX_DISABLE_WOUT_NCURR_RECOMPUTE` disables it.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/wout.py vmec_jax/io/wout/minimal.py tests/test_wout_fast_helpers.py`
+- `python -m compileall -q vmec_jax/wout.py vmec_jax/io/wout/minimal.py tests/test_wout_fast_helpers.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_fast_helpers.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_wave2.py tests/test_wout_driver_wave10_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_env_branch_coverage.py tests/test_wout_physics_wave8_coverage.py tests/test_wout_geometry_mercier_bundled_parity.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_parity_reference.py tests/test_wout_lasym_bsubv_parity.py tests/test_vmec2000_exec_qa_regression.py -q`
+- `python tools/diagnostics/source_health.py --top 12 --top-functions 12`
+
+Best next steps:
+
+1. Run one broader local release/coverage shard or let CI validate this pushed
+   WOUT refactor before further WOUT surgery.
+2. Next source-health move should target either:
+   - another passive WOUT diagnostic seam, likely Nyquist/Bsub output assembly,
+     only if it can be extracted without changing parity branches, or
+   - driver/solver monolith decomposition, where `run_fixed_boundary` and
+     `solve_fixed_boundary_residual_iter` remain the largest maintainability
+     blockers.
+3. Keep adaptive free-boundary branch differentiation conservative until a
+   true fingerprint-gated full adaptive AD-vs-central-FD gate exists.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.55%.
+- Differentiability/refactor implementation: 99.9%.
+- Solver monolith reduction: 88.5%.
+- Free-boundary adjoint monolith reduction: 80%.
+- Driver workflow decomposition: 84%.
+- WOUT diagnostic/profile decomposition: 94%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 98.8%.

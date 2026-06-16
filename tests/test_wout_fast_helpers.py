@@ -10,8 +10,10 @@ from vmec_jax.namelist import InData
 import vmec_jax.wout as wout_module
 from vmec_jax.io.wout import diagnostics as wout_diagnostics
 from vmec_jax.io.wout import flux as wout_flux_helpers
+from vmec_jax.io.wout import minimal as wout_minimal_helpers
 from vmec_jax.io.wout import netcdf as wout_io
 from vmec_jax.io.wout import parity as wout_parity_helpers
+from vmec_jax.modes import vmec_mode_table
 from vmec_jax.wout import (
     MU0,
     _apply_bsubv_equif_correction,
@@ -132,6 +134,154 @@ def test_current_profile_full_mesh_uses_vmec_half_mesh_normalization() -> None:
 
     zero_edge = InData(scalars={"NCURR": 1, "CURTOR": 10.0, "AC": [0.0]}, indexed={})
     np.testing.assert_allclose(np.asarray(_icurv_full_mesh_from_indata(indata=zero_edge, s_full=s_full, signgs=1)), 0.0)
+
+
+def test_wout_minimal_geometry_helper_extracts_scaled_axis_coefficients() -> None:
+    modes = vmec_mode_table(mpol=2, ntor=1)
+    ns = 2
+    K = int(modes.K)
+    state = SimpleNamespace(
+        Rcos=np.arange(ns * K, dtype=float).reshape(ns, K) + 1.0,
+        Rsin=np.arange(ns * K, dtype=float).reshape(ns, K) + 11.0,
+        Zcos=np.arange(ns * K, dtype=float).reshape(ns, K) + 21.0,
+        Zsin=np.arange(ns * K, dtype=float).reshape(ns, K) + 31.0,
+        Lcos=np.arange(ns * K, dtype=float).reshape(ns, K) + 41.0,
+        Lsin=np.arange(ns * K, dtype=float).reshape(ns, K) + 51.0,
+    )
+
+    geom = wout_minimal_helpers.build_main_geometry_coefficients(
+        state=state,
+        modes=modes,
+        ntor=1,
+        lasym=True,
+        lconm1=True,
+    )
+
+    assert geom.rmnc.shape == (ns, K)
+    assert geom.lmnc_internal.shape == (ns, K)
+    m_arr = np.asarray(modes.m, dtype=int)
+    n_arr = np.asarray(modes.n, dtype=int)
+    scale = np.where(m_arr == 0, 1.0, np.sqrt(2.0)) * np.where(np.abs(n_arr) == 0, 1.0, np.sqrt(2.0))
+    np.testing.assert_allclose(geom.lmnc_internal, state.Lcos * scale[None, :])
+    for nval in (0, 1):
+        idx = int(np.where((m_arr == 0) & (n_arr == nval))[0][0])
+        np.testing.assert_allclose(geom.raxis_cc[nval], geom.rmnc[0, idx])
+        np.testing.assert_allclose(geom.raxis_cs[nval], geom.rmns[0, idx])
+        np.testing.assert_allclose(geom.zaxis_cc[nval], geom.zmnc[0, idx])
+        np.testing.assert_allclose(geom.zaxis_cs[nval], geom.zmns[0, idx])
+
+    symmetric = wout_minimal_helpers.build_main_geometry_coefficients(
+        state=state,
+        modes=modes,
+        ntor=1,
+        lasym=False,
+        lconm1=True,
+    )
+    np.testing.assert_allclose(symmetric.rmns, 0.0)
+    np.testing.assert_allclose(symmetric.zmnc, 0.0)
+
+
+def test_wout_minimal_vmec_like_payload_matches_force_reconstruction_contract() -> None:
+    flux = SimpleNamespace(
+        phipf=np.asarray([1.0, 2.0, 3.0]),
+        phips=np.asarray([0.0, 0.5, 1.0]),
+    )
+    indata = InData(scalars={"NCURR": 1}, indexed={})
+    s_full = np.asarray([0.0, 0.5, 1.0])
+
+    def fake_icurv(*, indata, s_full, signgs):
+        del indata
+        return np.asarray(s_full, dtype=float) + float(signgs)
+
+    payload = wout_minimal_helpers.WoutMinimalVmecLike(
+        flux=flux,
+        chipf=np.asarray([0.1, 0.2, 0.3]),
+        iotaf=np.asarray([0.0, 0.4, 0.5]),
+        iotas=np.asarray([0.0, 0.3, 0.4]),
+        signgs=-1,
+        nfp=2,
+        mpol=3,
+        ntor=1,
+        lasym=True,
+        ncurr=1,
+        mass=np.asarray([0.0, 1.0, 2.0]),
+        gamma=0.5,
+        indata=indata,
+        s_full=s_full,
+        icurv_full_mesh_from_indata_func=fake_icurv,
+    )
+
+    assert payload.signgs == -1
+    assert payload.nfp == 2
+    assert payload.mpol == 3
+    assert payload.ntor == 1
+    assert payload.lasym is True
+    assert payload.flux_is_internal is True
+    assert payload.ncurr == 1
+    assert payload.lcurrent is True
+    assert payload.gamma == 0.5
+    np.testing.assert_allclose(payload.phipf, flux.phipf)
+    np.testing.assert_allclose(payload.phips, flux.phips)
+    np.testing.assert_allclose(payload.chipf, [0.1, 0.2, 0.3])
+    np.testing.assert_allclose(payload.iotaf, [0.0, 0.4, 0.5])
+    np.testing.assert_allclose(payload.iotas, [0.0, 0.3, 0.4])
+    np.testing.assert_allclose(payload.icurv, [-1.0, -0.5, 0.0])
+    np.testing.assert_allclose(payload.mass, [0.0, 1.0, 2.0])
+
+
+def test_wout_profile_payload_preserves_current_driven_iota_recompute(monkeypatch) -> None:
+    modes = vmec_mode_table(mpol=2, ntor=0)
+    state = SimpleNamespace()
+    static = SimpleNamespace(s=np.asarray([0.0, 0.5, 1.0]))
+    indata = InData(scalars={"NCURR": 1, "GAMMA": 0.0}, indexed={})
+
+    monkeypatch.setattr(
+        "vmec_jax.energy.flux_profiles_from_indata",
+        lambda _indata, s, signgs: SimpleNamespace(
+            chipf=np.asarray([0.0, 0.5, 1.5]),
+            phips=np.asarray([3.0, 4.0, 5.0]) * float(signgs),
+            phipf=np.asarray([1.0, 2.0, 3.0]),
+        ),
+    )
+    monkeypatch.setattr(
+        "vmec_jax.profiles.eval_profiles",
+        lambda _indata, s: {
+            "pressure": np.asarray([9.0, 8.0, 7.0]),
+            "iota": np.asarray([0.9, 0.8, 0.7]),
+        },
+    )
+    monkeypatch.setattr("vmec_jax.boundary.boundary_from_indata", lambda _indata, _modes: SimpleNamespace(R_cos=np.asarray([2.0, 0.0])))
+
+    def fake_equilibrium_iota_profiles_from_state(**kwargs):
+        assert kwargs["state"] is state
+        assert kwargs["static"] is static
+        assert kwargs["indata"] is indata
+        assert kwargs["signgs"] == -1
+        return np.asarray([0.0, 1.0, 4.0]), np.asarray([0.0, 0.11, 0.22]), np.asarray([0.0, 0.33, 0.44])
+
+    payload = wout_minimal_helpers.prepare_profile_payload(
+        state=state,
+        static=static,
+        indata=indata,
+        modes=modes,
+        s=static.s,
+        ns=3,
+        signgs=-1,
+        flux_override=None,
+        profiles_override=None,
+        equilibrium_iota_profiles_from_state_func=fake_equilibrium_iota_profiles_from_state,
+        chipf_from_chips_func=lambda chips: np.asarray(chips, dtype=float) + 10.0,
+    )
+
+    np.testing.assert_allclose(payload.phips, [0.0, -4.0, -5.0])
+    np.testing.assert_allclose(payload.pres, [0.0, 8.0, 7.0])
+    np.testing.assert_allclose(payload.mass, [0.0, 8.0, 7.0])
+    np.testing.assert_allclose(payload.iotas, [0.0, 0.11, 0.22])
+    np.testing.assert_allclose(payload.iotaf, [0.0, 0.33, 0.44])
+    np.testing.assert_allclose(payload.chipf_wout, [10.0, 11.0, 14.0])
+    np.testing.assert_allclose(payload.phipf_internal, [1.0, 2.0, 3.0])
+    assert payload.ncurr == 1
+    assert payload.gamma == 0.0
 
 
 def test_current_profile_guard_branches_keep_output_finite(monkeypatch) -> None:
