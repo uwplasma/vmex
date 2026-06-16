@@ -672,6 +672,20 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
     report = {
         "branch_compatibility": {"same_branch": True},
         "direction_x": [1.0, 0.0, -1.0],
+        "branch_local_vector_gate": {
+            "available": True,
+            "passed": True,
+            "physical_scalar_gate": {"passed": True},
+        },
+        "accepted_rejected_controller_slot_gate": {
+            "requested": True,
+            "available": True,
+            "passed": True,
+            "scope": "fixed accepted/rejected controller-slot replay",
+            "same_stacked_step_policy_branch": True,
+            "fixed_rejected_controller_slots": 1,
+            "controller_slot_summary": {"accepted_slots": 2, "rejected_slots": 1},
+        },
         "branch_local_vector_jacobian": {
             "available": True,
             "uses_production_forward": True,
@@ -733,6 +747,14 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
     assert proposal["contributions"]["aspect"]["contribution"] == pytest.approx(2.0)
     assert proposal["contributions"]["mean_iota"]["contribution"] == pytest.approx(1.0)
     assert proposal["contributions"]["mean_iota"]["target"] == pytest.approx(0.4)
+    assert proposal["gate_evidence"]["branch_local_vector_gate_available"] is True
+    assert proposal["gate_evidence"]["branch_local_vector_gate_passed"] is True
+    assert proposal["gate_evidence"]["physical_scalar_gate_passed"] is True
+    assert proposal["gate_evidence"]["accepted_rejected_controller_slot_gate_requested"] is True
+    assert proposal["gate_evidence"]["accepted_rejected_controller_slot_gate_passed"] is True
+    assert proposal["gate_evidence"]["same_stacked_step_policy_branch"] is True
+    assert proposal["gate_evidence"]["fixed_rejected_controller_slots"] == 1
+    assert proposal["gate_evidence"]["controller_slot_summary"] == {"accepted_slots": 2, "rejected_slots": 1}
     assert proposal["objective_terms_used"] == ["aspect", "mean_iota", "qs_total"]
     assert proposal["objective_terms_omitted"]["residual_proxy"]["weight"] == pytest.approx(0.75)
     assert "complete free-boundary solve" in proposal["objective_terms_omitted"]["residual_proxy"]["reason"]
