@@ -3955,3 +3955,64 @@ Completion:
 - WOUT diagnostic/profile decomposition: 92%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 98.7%.
+
+## 2026-06-15 Free-Boundary Boundary-Field Helper Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved boundary metric, cylindrical-to-covariant projection,
+   covariant-to-contravariant projection, VMEC-like vacuum boundary channel
+   assembly, and provider boundary sampling into
+   `vmec_jax.solvers.free_boundary.boundary_fields`.
+2. Kept all historical `vmec_jax.free_boundary` public/facade imports intact.
+3. Re-ran provider, mgrid, boundary-projection, and JAX-vs-NumPy vacuum-field
+   parity tests.
+4. Avoided free-boundary adaptive controller, scan, reset, and NESTOR integral
+   changes.
+
+Results obtained:
+
+- `free_boundary.py` dropped from 3,609 to 3,371 lines in the source-health
+  report.
+- `free_boundary.py` is now below `discrete_adjoint.py` in the largest-source
+  ranking; the remaining largest source files are `solve.py`,
+  `optimization.py`, `optimization_workflow.py`, `free_boundary_adjoint.py`,
+  `discrete_adjoint.py`, and tests/examples.
+- Boundary-field projection code now has a domain-named module shared by mgrid,
+  direct-coil provider, and JAX projection parity tests.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/free_boundary.py vmec_jax/solvers/free_boundary/boundary_fields.py tests/test_free_boundary_additional_helpers.py tests/test_free_boundary_wp0.py tests/test_external_fields_mgrid_jax.py tests/test_free_boundary_coil_provider_forward.py tests/test_free_boundary_vacuum_adjoint.py`
+- `python -m compileall -q vmec_jax/free_boundary.py vmec_jax/solvers/free_boundary/boundary_fields.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_additional_helpers.py::test_boundary_metric_field_projection_and_degenerate_determinant_floor tests/test_free_boundary_wp0.py::test_boundary_vacuum_projection_toroidal_field tests/test_external_fields_mgrid_jax.py::test_mgrid_provider_boundary_projection_matches_jax_and_legacy_interpolation_off_grid tests/test_free_boundary_coil_provider_forward.py::test_sample_free_boundary_external_field_from_direct_coils_matches_provider_components tests/test_free_boundary_coil_provider_forward.py::test_sample_free_boundary_external_field_adds_axis_field_separately tests/test_free_boundary_vacuum_adjoint.py::test_jax_boundary_projection_matches_numpy_reference -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_coil_provider_forward.py tests/test_external_fields_mgrid_jax.py -q`
+- `python tools/diagnostics/source_health.py --top 12 --top-functions 12`
+
+Best next steps:
+
+1. Monitor CI for the newest pushed head.
+2. Next refactor candidate should not be another passive free-boundary helper
+   unless it cleanly isolates from the NESTOR integral body; consider switching
+   to WOUT minimal assembly decomposition or driver workflow simplification.
+3. Keep full adaptive branch differentiation deferred until the differentiable
+   controller plan has a real fingerprint-gated adaptive AD-vs-FD gate.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.55%.
+- Differentiability/refactor implementation: 99.89%.
+- Solver monolith reduction: 88.5%.
+- Free-boundary adjoint monolith reduction: 80%.
+- Driver workflow decomposition: 84%.
+- WOUT diagnostic/profile decomposition: 92%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 98.75%.
