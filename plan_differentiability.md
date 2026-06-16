@@ -3543,3 +3543,63 @@ Completion:
 - WOUT diagnostic/profile decomposition: 92%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 98.35%.
+
+## 2026-06-15 Accepted-Boundary Replay Helper Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved accepted-boundary vacuum-field projection, mode-coefficient field
+   reconstruction, fixed-geometry coil-normal-field RMS, and accepted-boundary
+   geometry synthesis helpers into
+   `vmec_jax.solvers.free_boundary.adjoint.boundary_replay`.
+2. Preserved the public `vmec_jax.free_boundary_adjoint` facade names and
+   added them to `__all__` so downstream callers and monkeypatch-based tests
+   keep the same import surface.
+3. Re-ran vacuum-adjoint and direct-coil finite-pressure shards that exercise
+   cylindrical field projection, mode reconstruction, accepted-state geometry
+   replay, and free-boundary same-branch AD/FD gates.
+
+Results obtained:
+
+- `free_boundary_adjoint.py` dropped from 4,617 to 4,344 lines.
+- The moved code is now a 265-line domain module with no production adaptive
+  branch-selection semantic changes.
+- The previous pushed CI run completed successfully before this tranche was
+  committed.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/free_boundary_adjoint.py vmec_jax/solvers/free_boundary/adjoint/boundary_replay.py tests/test_free_boundary_vacuum_adjoint.py tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+- `python -m compileall -q vmec_jax/free_boundary_adjoint.py vmec_jax/solvers/free_boundary/adjoint/boundary_replay.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_adjoint_helpers_unit.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py -q`
+- `python tools/diagnostics/source_health.py --top 25 --top-functions 25 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. Continue with low-risk free-boundary adjoint seams such as replay context
+   construction or diagnostics, leaving adaptive host branch selection intact.
+2. Start a separate pass on WOUT minimal assembly or driver workflow
+   decomposition once CI confirms this boundary replay extraction.
+3. Keep full adaptive-loop differentiability claims conservative until a true
+   fingerprint-gated adaptive branch AD-vs-FD gate exists.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.45%.
+- Differentiability/refactor implementation: 99.82%.
+- Solver monolith reduction: 86.5%.
+- Free-boundary adjoint monolith reduction: 74%.
+- Driver workflow decomposition: 84%.
+- WOUT diagnostic/profile decomposition: 92%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 98.4%.
