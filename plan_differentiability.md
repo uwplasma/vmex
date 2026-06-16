@@ -4420,3 +4420,65 @@ Completion:
 - WOUT diagnostic/profile decomposition: 96.8%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 98.95%.
+
+## 2026-06-16 WOUT Equif Diagnostic Helper Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved the VMEC `eqfor`/`equif` WOUT helper implementation from
+   `vmec_jax.wout` into the `vmec_jax.io.wout.diagnostics` domain module.
+2. Moved the VMEC `bcovar` IEQUI=1 `bsubv` surface-average correction into
+   `vmec_jax.io.wout.diagnostics`.
+3. Kept `_compute_equif_wout` and `_apply_bsubv_equif_correction` available
+   from `vmec_jax.wout` for compatibility with existing tests and downstream
+   private import usage.
+4. Preserved the existing `vmec_jax.wout.vmec_pwint_from_trig` monkeypatch seam
+   by dependency-injecting the quadrature-weight builder through the facade.
+
+Results obtained:
+
+- WOUT diagnostic logic is now further consolidated under `io/wout`, reducing
+  the amount of VMEC-specific diagnostic implementation embedded in the root
+  WOUT facade.
+- The initial test regression exposed a real compatibility seam; the final
+  implementation keeps that seam intact while still moving the implementation.
+- Source-health still reports `wout_minimal_from_fixed_boundary` as a remaining
+  long WOUT function, so the next WOUT tranche should target minimal-WOUT field
+  assembly/default initialization rather than private diagnostic kernels.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/wout.py vmec_jax/io/wout/diagnostics.py tests/test_wout_helpers.py tests/test_wout_fast_helpers.py`
+- `python -m compileall -q vmec_jax/wout.py vmec_jax/io/wout/diagnostics.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_helpers.py::test_bsubv_equif_correction_and_ctor_branches -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_helpers.py tests/test_wout_fast_helpers.py tests/test_wout_bcovar_forces_extra_coverage.py tests/test_wout_wave3_coverage.py tests/test_wout_additional_helpers.py tests/test_non_solve_wave6_coverage.py tests/test_implicit_wout_driver_branch_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_driver_wave10_coverage.py tests/test_wout_env_branch_coverage.py tests/test_wout_physics_wave8_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_parity_reference.py tests/test_wout_lasym_bsubv_parity.py tests/test_wout_vmecplot2_compat.py -q`
+- `python tools/diagnostics/source_health.py --top 12 --top-functions 15`
+
+Best next steps:
+
+1. Push the WOUT diagnostic-helper extraction and let CI validate it.
+2. Next refactor tranche should target either `wout_minimal_from_fixed_boundary`
+   field assembly or the solver scan sub-loop, with explicit parity/branch tests.
+3. Keep adaptive full-loop differentiation claims conservative until a true
+   fingerprint-gated adaptive AD-vs-central-FD gate exists.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.62%.
+- Differentiability/refactor implementation: 99.96%.
+- Solver monolith reduction: 88.7%.
+- Free-boundary adjoint monolith reduction: 80%.
+- Driver workflow decomposition: 90%.
+- WOUT diagnostic/profile decomposition: 97.5%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.00%.

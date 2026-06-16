@@ -74,6 +74,7 @@ _compute_aspectratio = _wout_diagnostics.compute_aspectratio
 _compute_ctor_from_buco = _wout_diagnostics.compute_ctor_from_buco
 _compute_eqfor_beta = _wout_diagnostics.compute_eqfor_beta
 _compute_eqfor_betaxis = _wout_diagnostics.compute_eqfor_betaxis
+_compute_equif_wout = _wout_diagnostics.compute_equif_wout
 _glasser_from_wout_mercier_terms = _wout_diagnostics.glasser_from_wout_mercier_terms
 _glasser_profiles_from_wout_data = _wout_diagnostics.glasser_profiles_from_wout_data
 _glasser_profiles_from_wout_variables = _wout_diagnostics.glasser_profiles_from_wout_variables
@@ -313,84 +314,6 @@ def equilibrium_iota_profiles_from_state(*, state: VMECState, static, indata, si
     return chips, iotas, iotaf
 
 
-def _compute_equif_wout(
-    *,
-    bsubu: np.ndarray,
-    bsubv: np.ndarray,
-    pres: np.ndarray,
-    vp: np.ndarray,
-    phipf: np.ndarray,
-    chipf: np.ndarray,
-    signgs: int,
-    trig,
-    s: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Compute buco/bvco/jcuru/jcurv/equif with VMEC eqfor normalization."""
-    s = np.asarray(s, dtype=float)
-    ns = int(s.shape[0])
-    if ns < 3:
-        z = np.zeros((ns,), dtype=float)
-        return z.copy(), z.copy(), z.copy(), z.copy(), z.copy()
-
-    hs = float(s[1] - s[0])
-    ohs = 1.0 / hs if hs != 0.0 else 0.0
-    wint = _vmec_wint_from_trig(trig)
-    bsubu = np.asarray(bsubu, dtype=float)
-    bsubv = np.asarray(bsubv, dtype=float)
-    pres = np.asarray(pres, dtype=float)
-    vp = np.asarray(vp, dtype=float)
-    phipf = np.asarray(phipf, dtype=float)
-    chipf = np.asarray(chipf, dtype=float)
-
-    buco = np.zeros((ns,), dtype=float)
-    bvco = np.zeros((ns,), dtype=float)
-    ntheta = int(wint.shape[0])
-    nzeta = int(wint.shape[1])
-    # Match VMEC's summation order (theta, then zeta) to reduce parity drift.
-    for js in range(1, ns):
-        acc_u = 0.0
-        acc_v = 0.0
-        for j in range(ntheta):
-            wrow = wint[j]
-            bu_row = bsubu[js, j]
-            bv_row = bsubv[js, j]
-            for k in range(nzeta):
-                w = float(wrow[k])
-                acc_u += float(bu_row[k]) * w
-                acc_v += float(bv_row[k]) * w
-        buco[js] = acc_u
-        bvco[js] = acc_v
-
-    jcuru = np.zeros((ns,), dtype=float)
-    jcurv = np.zeros((ns,), dtype=float)
-    vpphi = np.zeros((ns,), dtype=float)
-    presgrad = np.zeros((ns,), dtype=float)
-    for js in range(1, ns - 1):
-        jcurv[js] = float(signgs) * ohs * (buco[js + 1] - buco[js])
-        jcuru[js] = -float(signgs) * ohs * (bvco[js + 1] - bvco[js])
-        vpphi[js] = 0.5 * (vp[js + 1] + vp[js])
-        presgrad[js] = (pres[js + 1] - pres[js]) * ohs
-
-    equif = np.zeros((ns,), dtype=float)
-    for js in range(1, ns - 1):
-        denom = abs(jcurv[js] * chipf[js]) + abs(jcuru[js] * phipf[js]) + abs(presgrad[js] * vpphi[js])
-        if denom != 0.0 and vpphi[js] != 0.0:
-            raw = ((-phipf[js] * jcuru[js] + chipf[js] * jcurv[js]) / vpphi[js]) + presgrad[js]
-            equif[js] = raw * vpphi[js] / denom
-
-    # Extrapolate endpoints (eqfor.f).
-    for arr in (equif, jcuru, jcurv, presgrad, vpphi):
-        arr[0] = 2.0 * arr[1] - arr[2]
-        arr[-1] = 2.0 * arr[-2] - arr[-3]
-
-    # VMEC stores jcur* in physical units (divide by mu0).
-    from .vmec_lforbal import MU0
-
-    jcuru = jcuru / MU0
-    jcurv = jcurv / MU0
-    return buco, bvco, jcuru, jcurv, equif
-
-
 def _vmec_realspace_geom_light_from_state(
     *, state: VMECState, modes, trig, lasym: bool | None = None
 ) -> dict[str, Any]:
@@ -450,45 +373,14 @@ def _apply_bsubv_equif_correction(
     bsubv_e: np.ndarray,
     trig,
 ) -> np.ndarray:
-    """Apply VMEC bcovar iequi=1 correction to bsubv.
+    """Compatibility facade for the extracted WOUT IEQUI=1 correction helper."""
 
-    VMEC adjusts the half-mesh bsubv after mesh blending so that the
-    surface-average <bsubv> matches the pre-blend current profile fpsi
-    (bvco). This routine mirrors the bcovar.f sequence:
-
-      bsubvh(:,js) = 2*bsubv_e(:,js) - bsubvh(:,js+1)
-      bsubvh(:,js) += fpsi(js) - SUM(bsubvh(:,js) * pwint(:,js))
-
-    where fpsi(js) is the surface-average of the *pre*-blend bsubv.
-    """
-    bsubv = np.asarray(bsubv, dtype=float)
-    bsubv_e = np.asarray(bsubv_e, dtype=float)
-    ns = int(bsubv.shape[0])
-    if ns < 3:
-        return bsubv
-
-    nzeta = int(bsubv.shape[2])
-    pwint = np.asarray(vmec_pwint_from_trig(trig, ns=ns, nzeta=nzeta), dtype=float)
-    if pwint.shape != bsubv.shape:
-        # Expect (ns, ntheta, nzeta) matching bsubv.
-        raise ValueError("pwint shape mismatch in bsubv correction")
-
-    # fpsi = surface-average of pre-blend bsubv (VMEC: bvco)
-    fpsi = np.zeros((ns,), dtype=float)
-    for js in range(1, ns):
-        fpsi[js] = float(np.sum(bsubv[js] * pwint[js]))
-
-    # Start from pre-blend bsubv (half mesh) and update inward using bsubv_e.
-    bsubv_h = np.array(bsubv, dtype=float, copy=True)
-    for js in range(ns - 2, 0, -1):
-        bsubv_h[js] = 2.0 * bsubv_e[js] - bsubv_h[js + 1]
-
-    # Adjust <bsubvh> to fpsi after blending (skip axis).
-    for js in range(1, ns):
-        curpol = fpsi[js] - float(np.sum(bsubv_h[js] * pwint[js]))
-        bsubv_h[js] = bsubv_h[js] + curpol
-
-    return bsubv_h
+    return _wout_diagnostics.apply_bsubv_equif_correction(
+        bsubv=bsubv,
+        bsubv_e=bsubv_e,
+        trig=trig,
+        vmec_pwint_from_trig_func=vmec_pwint_from_trig,
+    )
 
 
 def _compute_bsubs_half_mesh(**kwargs) -> np.ndarray:

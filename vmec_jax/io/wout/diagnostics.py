@@ -129,6 +129,134 @@ def compute_eqfor_betaxis(
     return float(1.5 * beta_vol[1] - 0.5 * beta_vol[2])
 
 
+def _vmec_wint_from_trig(trig) -> np.ndarray:
+    """Return VMEC-style angular weights on the internal grid."""
+
+    cosmui3 = np.asarray(trig.cosmui3)
+    mscale = np.asarray(trig.mscale)
+    if cosmui3.ndim != 2:
+        raise ValueError("Expected trig.cosmui3 with shape (ntheta3, mmax+1)")
+    if mscale.size == 0:
+        raise ValueError("Expected non-empty trig.mscale")
+    w_theta = cosmui3[:, 0] / float(mscale[0])
+    nzeta = int(np.asarray(trig.cosnv).shape[0])
+    wint = w_theta[:, None] * np.ones((nzeta,), dtype=w_theta.dtype)[None, :]
+    return np.asarray(wint, dtype=float)
+
+
+def compute_equif_wout(
+    *,
+    bsubu: np.ndarray,
+    bsubv: np.ndarray,
+    pres: np.ndarray,
+    vp: np.ndarray,
+    phipf: np.ndarray,
+    chipf: np.ndarray,
+    signgs: int,
+    trig,
+    s: np.ndarray,
+    mu0: float = _MU0,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Compute buco/bvco/jcuru/jcurv/equif with VMEC eqfor normalization."""
+
+    s = np.asarray(s, dtype=float)
+    ns = int(s.shape[0])
+    if ns < 3:
+        z = np.zeros((ns,), dtype=float)
+        return z.copy(), z.copy(), z.copy(), z.copy(), z.copy()
+
+    hs = float(s[1] - s[0])
+    ohs = 1.0 / hs if hs != 0.0 else 0.0
+    wint = _vmec_wint_from_trig(trig)
+    bsubu = np.asarray(bsubu, dtype=float)
+    bsubv = np.asarray(bsubv, dtype=float)
+    pres = np.asarray(pres, dtype=float)
+    vp = np.asarray(vp, dtype=float)
+    phipf = np.asarray(phipf, dtype=float)
+    chipf = np.asarray(chipf, dtype=float)
+
+    buco = np.zeros((ns,), dtype=float)
+    bvco = np.zeros((ns,), dtype=float)
+    ntheta = int(wint.shape[0])
+    nzeta = int(wint.shape[1])
+    # Match VMEC's summation order (theta, then zeta) to reduce parity drift.
+    for js in range(1, ns):
+        acc_u = 0.0
+        acc_v = 0.0
+        for j in range(ntheta):
+            wrow = wint[j]
+            bu_row = bsubu[js, j]
+            bv_row = bsubv[js, j]
+            for k in range(nzeta):
+                w = float(wrow[k])
+                acc_u += float(bu_row[k]) * w
+                acc_v += float(bv_row[k]) * w
+        buco[js] = acc_u
+        bvco[js] = acc_v
+
+    jcuru = np.zeros((ns,), dtype=float)
+    jcurv = np.zeros((ns,), dtype=float)
+    vpphi = np.zeros((ns,), dtype=float)
+    presgrad = np.zeros((ns,), dtype=float)
+    for js in range(1, ns - 1):
+        jcurv[js] = float(signgs) * ohs * (buco[js + 1] - buco[js])
+        jcuru[js] = -float(signgs) * ohs * (bvco[js + 1] - bvco[js])
+        vpphi[js] = 0.5 * (vp[js + 1] + vp[js])
+        presgrad[js] = (pres[js + 1] - pres[js]) * ohs
+
+    equif = np.zeros((ns,), dtype=float)
+    for js in range(1, ns - 1):
+        denom = abs(jcurv[js] * chipf[js]) + abs(jcuru[js] * phipf[js]) + abs(presgrad[js] * vpphi[js])
+        if denom != 0.0 and vpphi[js] != 0.0:
+            raw = ((-phipf[js] * jcuru[js] + chipf[js] * jcurv[js]) / vpphi[js]) + presgrad[js]
+            equif[js] = raw * vpphi[js] / denom
+
+    # Extrapolate endpoints (eqfor.f).
+    for arr in (equif, jcuru, jcurv, presgrad, vpphi):
+        arr[0] = 2.0 * arr[1] - arr[2]
+        arr[-1] = 2.0 * arr[-2] - arr[-3]
+
+    return buco, bvco, jcuru / float(mu0), jcurv / float(mu0), equif
+
+
+def apply_bsubv_equif_correction(
+    *,
+    bsubv: np.ndarray,
+    bsubv_e: np.ndarray,
+    trig,
+    vmec_pwint_from_trig_func=None,
+) -> np.ndarray:
+    """Apply VMEC ``bcovar`` IEQUI=1 surface-average correction to ``bsubv``."""
+
+    if vmec_pwint_from_trig_func is None:
+        from ...vmec_residue import vmec_pwint_from_trig as vmec_pwint_from_trig_func
+
+    bsubv = np.asarray(bsubv, dtype=float)
+    bsubv_e = np.asarray(bsubv_e, dtype=float)
+    ns = int(bsubv.shape[0])
+    if ns < 3:
+        return bsubv
+
+    nzeta = int(bsubv.shape[2])
+    pwint = np.asarray(vmec_pwint_from_trig_func(trig, ns=ns, nzeta=nzeta), dtype=float)
+    if pwint.shape != bsubv.shape:
+        raise ValueError("pwint shape mismatch in bsubv correction")
+
+    fpsi = np.zeros((ns,), dtype=float)
+    for js in range(1, ns):
+        fpsi[js] = float(np.sum(bsubv[js] * pwint[js]))
+
+    bsubv_h = np.array(bsubv, dtype=float, copy=True)
+    for js in range(ns - 2, 0, -1):
+        bsubv_h[js] = 2.0 * bsubv_e[js] - bsubv_h[js + 1]
+
+    for js in range(1, ns):
+        curpol = fpsi[js] - float(np.sum(bsubv_h[js] * pwint[js]))
+        bsubv_h[js] = bsubv_h[js] + curpol
+
+    return bsubv_h
+
+
 def compute_aspectratio(
     *,
     R: np.ndarray,
@@ -273,10 +401,12 @@ def glasser_profiles_from_wout_data(wout: Any, ns: int) -> GlasserProfileArrays:
 
 __all__ = [
     "GlasserProfileArrays",
+    "apply_bsubv_equif_correction",
     "compute_aspectratio",
     "compute_ctor_from_buco",
     "compute_eqfor_beta",
     "compute_eqfor_betaxis",
+    "compute_equif_wout",
     "glasser_profiles_from_wout_data",
     "glasser_profiles_from_wout_variables",
     "glasser_from_wout_mercier_terms",
