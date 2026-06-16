@@ -1229,28 +1229,20 @@ def run_fixed_boundary(
         step_size_val = float(step_size)
 
     if verbose and (solver_lower != "vmec2000_iter" or use_initial_guess):
-        mode = "initial guess" if use_initial_guess else f"{solver} solve"
-        print(f"[vmec_jax] fixed-boundary run ({mode})", flush=True)
-        print(f"[vmec_jax] input={input_path}", flush=True)
-        print(f"[vmec_jax] ns={cfg.ns} mpol={cfg.mpol} ntor={cfg.ntor} nfp={cfg.nfp}", flush=True)
-        if not use_initial_guess:
-            print(f"[vmec_jax] max_iter={max_iter} step_size={step_size_val} history_size={history_size}", flush=True)
+        _driver_io_helpers.print_fixed_boundary_intro(
+            input_path=input_path,
+            cfg=cfg,
+            solver=solver,
+            use_initial_guess=bool(use_initial_guess),
+            max_iter=int(max_iter),
+            step_size=float(step_size_val),
+            history_size=int(history_size),
+        )
     elif verbose and (solver_lower == "vmec2000_iter") and (not use_initial_guess):
-        from datetime import datetime
-
-        now = datetime.now()
-        date_str = now.strftime("%b %d,%Y")
-        time_str = now.strftime("%H:%M:%S")
-        input_name = Path(input_path).name.upper()
-        version = os.getenv("VMEC_JAX_VMEC2000_VERSION", "vmec_jax")
-        print(" - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -", flush=True)
-        print("  SEQ =    1 TIME SLICE  0.0000E+00", flush=True)
-        print(f"  PROCESSING {input_name}", flush=True)
-        print(f"  THIS IS PARVMEC (PARALLEL VMEC), VERSION {version}", flush=True)
-        print("  Lambda: Full Radial Mesh. L-Force: hybrid full/half.", flush=True)
-        print("", flush=True)
-        print(f"  COMPUTER:    OS:    RELEASE:   DATE = {date_str}  TIME = {time_str}", flush=True)
-        print("", flush=True)
+        _driver_io_helpers.print_vmec2000_run_header(
+            input_path=input_path,
+            version=os.getenv("VMEC_JAX_VMEC2000_VERSION", "vmec_jax"),
+        )
 
     def _initial_guess_with_optional_nojit(static_in, bdy_in, *, force_disable_jit: bool = False):
         disable_env = os.getenv("VMEC_JAX_DISABLE_JIT_INIT", "") not in ("", "0")
@@ -2348,39 +2340,12 @@ def run_fixed_boundary(
         # preserves the existing behavior for single-stage solves.
         static = static_prev if static_prev is not None else _build_static_cfg(cfg)
         if verbose and solver == "vmec2000_iter":
-            converged = bool(res.diagnostics.get("converged", False))
-            if not converged and int(res.n_iter) >= int(niter_i):
-                print(" Try increasing NITER or PRE_NITER if the preconditioner is on.", flush=True)
-            print("", flush=True)
-            if converged:
-                print(" EXECUTION TERMINATED NORMALLY", flush=True)
-            else:
-                print(" EXECUTION FINISHED WITHOUT REQUESTED CONVERGENCE", flush=True)
-            print("", flush=True)
-            case_name = Path(input_path).name
-            if case_name.startswith("input."):
-                case_name = case_name.split("input.", 1)[-1]
-            print(f" FILE : {case_name}", flush=True)
-            ijacob = int(res.diagnostics.get("ijacob", 0))
-            print(f" NUMBER OF JACOBIAN RESETS = {ijacob:4d}", flush=True)
-            total_time = max(0.0, time.perf_counter() - t_start)
-            print("", flush=True)
-            print(f"    TOTAL COMPUTATIONAL TIME (SEC)         {total_time:8.2f}", flush=True)
-            print("    TIME TO INPUT/OUTPUT                   0.00", flush=True)
-            print("       READ IN DATA                        0.00", flush=True)
-            print("       WRITE OUT DATA TO WOUT              0.00", flush=True)
-            print(f"    TIME IN FUNCT3D                        {total_time:8.2f}", flush=True)
-            print("       BCOVAR FIELDS                       0.00", flush=True)
-            print("       FOURIER TRANSFORM                   0.00", flush=True)
-            print("       INVERSE FOURIER TRANSFORM           0.00", flush=True)
-            print("       FORCES AND SYMMETRIZE               0.00", flush=True)
-            print("       RESIDUE                             0.00", flush=True)
-            print("       EQFORCE                             0.00", flush=True)
-            print("", flush=True)
-            print(" NO. OF PROCS:     1", flush=True)
-            print(" PARVMEC     :     T", flush=True)
-            print(" LPRECOND    :     F", flush=True)
-            print(" LV3FITCALL  :     F", flush=True)
+            _driver_io_helpers.print_vmec2000_run_summary(
+                input_path=input_path,
+                result=res,
+                niter_stage=int(niter_i),
+                total_time=time.perf_counter() - t_start,
+            )
     else:
         raise ValueError(
             f"Unknown solver: {solver!r} (expected 'gd', 'lbfgs', 'vmec_lbfgs', 'vmec_gn', or 'vmec2000_iter')"

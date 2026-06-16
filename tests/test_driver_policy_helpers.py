@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 import os
 from types import SimpleNamespace
 
@@ -7,6 +8,7 @@ import numpy as np
 import pytest
 
 import vmec_jax.driver as driver
+from vmec_jax.drivers import io as driver_io
 from vmec_jax.drivers.policy import dynamic_scan_probe_settings
 
 
@@ -70,6 +72,57 @@ def test_dynamic_scan_probe_settings_helper_uses_backend_and_env_dict():
         backend_name_func=lambda: "cpu",
         getenv=lambda _key, default="": default,
     ) == (10, True, "cpu")
+
+
+def test_driver_io_helpers_print_concise_and_vmec_style_banners() -> None:
+    lines: list[str] = []
+
+    def collect(message="", **_kwargs):
+        lines.append(str(message))
+
+    cfg = SimpleNamespace(ns=7, mpol=3, ntor=1, nfp=2)
+    driver_io.print_fixed_boundary_intro(
+        input_path="input.case",
+        cfg=cfg,
+        solver="gd",
+        use_initial_guess=False,
+        max_iter=5,
+        step_size=0.25,
+        history_size=4,
+        print_func=collect,
+    )
+    assert lines == [
+        "[vmec_jax] fixed-boundary run (gd solve)",
+        "[vmec_jax] input=input.case",
+        "[vmec_jax] ns=7 mpol=3 ntor=1 nfp=2",
+        "[vmec_jax] max_iter=5 step_size=0.25 history_size=4",
+    ]
+
+    lines.clear()
+    driver_io.print_vmec2000_run_header(
+        input_path="input.case",
+        version="test-version",
+        now=datetime(2026, 6, 16, 1, 2, 3),
+        print_func=collect,
+    )
+    assert any("PROCESSING INPUT.CASE" in line for line in lines)
+    assert any("THIS IS PARVMEC (PARALLEL VMEC), VERSION test-version" in line for line in lines)
+    assert any("DATE = Jun 16,2026  TIME = 01:02:03" in line for line in lines)
+
+    lines.clear()
+    result = SimpleNamespace(n_iter=10, diagnostics={"converged": False, "ijacob": 3})
+    driver_io.print_vmec2000_run_summary(
+        input_path="input.case",
+        result=result,
+        niter_stage=10,
+        total_time=1.25,
+        print_func=collect,
+    )
+    assert " Try increasing NITER or PRE_NITER if the preconditioner is on." in lines
+    assert " EXECUTION FINISHED WITHOUT REQUESTED CONVERGENCE" in lines
+    assert any("FILE : case" in line for line in lines)
+    assert any("NUMBER OF JACOBIAN RESETS =    3" in line for line in lines)
+    assert any("TOTAL COMPUTATIONAL TIME (SEC)             1.25" in line for line in lines)
 
 
 @pytest.mark.parametrize(
