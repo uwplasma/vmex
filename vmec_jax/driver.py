@@ -333,6 +333,25 @@ _STEP_SIZE_SENTINEL = object()
 _MAX_ITER_SENTINEL = object()
 
 
+def _stage_array_list(value):
+    """Return VMEC stage arrays as Python lists with legacy driver semantics."""
+
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    try:
+        if isinstance(value, np.ndarray):
+            return list(value.tolist())
+    except Exception:
+        pass
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        return [value]
+    return None
+
+
 def run_fixed_boundary(
     input_path: str | Path,
     *,
@@ -596,25 +615,9 @@ def run_fixed_boundary(
             nfp=int(cfg.nfp),
             lasym=bool(cfg.lasym),
         )
-    def _as_list(value):
-        if value is None:
-            return None
-        if isinstance(value, list):
-            return value
-        if isinstance(value, tuple):
-            return list(value)
-        try:
-            if isinstance(value, np.ndarray):
-                return list(value.tolist())
-        except Exception:
-            pass
-        if isinstance(value, (int, float, np.integer, np.floating)):
-            return [value]
-        return None
-
-    ns_list_input = _as_list(indata.get("NS_ARRAY", None))
-    niter_list_input = _as_list(indata.get("NITER_ARRAY", None))
-    ftol_list_input = _as_list(indata.get("FTOL_ARRAY", None))
+    ns_list_input = _stage_array_list(indata.get("NS_ARRAY", None))
+    niter_list_input = _stage_array_list(indata.get("NITER_ARRAY", None))
+    ftol_list_input = _stage_array_list(indata.get("FTOL_ARRAY", None))
     cli_budgeted_multigrid_requested = (
         bool(cli_fixed_boundary_mode)
         and bool(accelerated_mode)
@@ -858,7 +861,7 @@ def run_fixed_boundary(
             accelerated_single_grid_default = True
     if max_iter is _MAX_ITER_SENTINEL:
         if solver_lower in ("vmec2000_iter", "vmec2000_scan", "vmec2000_iter_fast"):
-            niter_list = _as_list(indata.get("NITER_ARRAY", None))
+            niter_list = _stage_array_list(indata.get("NITER_ARRAY", None))
             if niter_list:
                 # VMEC2000 behavior: when NITER_ARRAY is present, it defines
                 # the stage budgets even if there is only one stage.
@@ -1222,8 +1225,8 @@ def run_fixed_boundary(
         nstep = len(ns_stages)
         niter_array = indata.get("NITER_ARRAY", None)
         ftol_array = indata.get("FTOL_ARRAY", None)
-        niter_list = _as_list(niter_array)
-        ftol_list = _as_list(ftol_array)
+        niter_list = _stage_array_list(niter_array)
+        ftol_list = _stage_array_list(ftol_array)
         niter_stages, ftol_stages, niter_stages_input, _ftol_stages_input = _resolve_vmec2000_stage_controls(
             nstep=int(nstep),
             niter_list=niter_list,
