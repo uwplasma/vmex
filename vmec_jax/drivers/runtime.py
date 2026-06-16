@@ -18,6 +18,15 @@ class RestartContext:
     restart_solver_state: Any | None
 
 
+@dataclass(frozen=True)
+class ExternalFieldProviderContext:
+    """Normalized direct-external-field provider setup for a driver run."""
+
+    direct_external_provider: bool
+    provider_kind: str
+    provider_static: Any
+
+
 def maybe_enable_compilation_cache(
     *,
     accelerator_requested: bool = False,
@@ -148,4 +157,65 @@ def resolve_restart_context(
     )
 
 
-__all__ = ["RestartContext", "maybe_enable_compilation_cache", "resolve_restart_context"]
+def resolve_external_field_provider_context(
+    *,
+    external_field_provider_kind: str | None,
+    external_field_provider_static: Any,
+    external_field_provider_params: Any,
+    getenv: Callable[[str, str], str] = os.getenv,
+    build_coil_field_geometry_func: Callable[[Any], Any] | None = None,
+) -> ExternalFieldProviderContext:
+    """Resolve direct-provider mode and optional host-side coil geometry cache."""
+
+    provider_kind = "" if external_field_provider_kind is None else str(external_field_provider_kind).strip().lower()
+    direct_external_provider = external_field_provider_kind is not None and provider_kind not in (
+        "",
+        "mgrid",
+        "legacy_mgrid",
+    )
+    provider_static_eff = external_field_provider_static
+    should_cache_coil_geometry = (
+        bool(direct_external_provider)
+        and provider_kind in ("direct_coils", "coils", "coil")
+        and external_field_provider_params is not None
+        and (
+            provider_static_eff is None
+            or (isinstance(provider_static_eff, dict) and "coil_geometry" not in provider_static_eff)
+        )
+        and getenv("VMEC_JAX_FREEB_DISABLE_COIL_GEOMETRY_CACHE", "").strip().lower()
+        not in ("1", "true", "yes", "on")
+    )
+    if should_cache_coil_geometry:
+        try:
+            if build_coil_field_geometry_func is None:
+                from ..external_fields import build_coil_field_geometry as build_coil_field_geometry_func
+
+            jit_sampler_env = getenv("VMEC_JAX_FREEB_JIT_COIL_SAMPLER", "1").strip().lower()
+            static_base = {} if provider_static_eff is None else dict(provider_static_eff)
+            provider_static_eff = {
+                **static_base,
+                "coil_geometry": build_coil_field_geometry_func(external_field_provider_params),
+                "regularization_epsilon": getattr(external_field_provider_params, "regularization_epsilon", 0.0),
+                "chunk_size": getattr(external_field_provider_params, "chunk_size", None),
+                "cache_scope": "host_forward_only",
+                "jit_sampler": jit_sampler_env not in ("", "0", "false", "no"),
+            }
+        except Exception:
+            # Preserve custom provider-like objects that are incompatible with
+            # the built-in coil geometry cache.
+            provider_static_eff = external_field_provider_static
+
+    return ExternalFieldProviderContext(
+        direct_external_provider=bool(direct_external_provider),
+        provider_kind=provider_kind,
+        provider_static=provider_static_eff,
+    )
+
+
+__all__ = [
+    "ExternalFieldProviderContext",
+    "RestartContext",
+    "maybe_enable_compilation_cache",
+    "resolve_external_field_provider_context",
+    "resolve_restart_context",
+]

@@ -314,6 +314,81 @@ def test_resolve_restart_context_rejects_mismatched_ns_override():
         )
 
 
+def test_resolve_external_field_provider_context_keeps_mgrid_path_legacy() -> None:
+    context = driver_runtime.resolve_external_field_provider_context(
+        external_field_provider_kind="mgrid",
+        external_field_provider_static={"existing": True},
+        external_field_provider_params=object(),
+    )
+
+    assert context.direct_external_provider is False
+    assert context.provider_kind == "mgrid"
+    assert context.provider_static == {"existing": True}
+
+
+def test_resolve_external_field_provider_context_caches_direct_coil_geometry() -> None:
+    params = SimpleNamespace(regularization_epsilon=1.25, chunk_size=7)
+    calls = []
+
+    def build_geometry(got):
+        calls.append(got)
+        return "geometry"
+
+    context = driver_runtime.resolve_external_field_provider_context(
+        external_field_provider_kind="Coils",
+        external_field_provider_static={"existing": True},
+        external_field_provider_params=params,
+        getenv=lambda key, default="": {"VMEC_JAX_FREEB_JIT_COIL_SAMPLER": "0"}.get(key, default),
+        build_coil_field_geometry_func=build_geometry,
+    )
+
+    assert context.direct_external_provider is True
+    assert context.provider_kind == "coils"
+    assert context.provider_static["existing"] is True
+    assert context.provider_static["coil_geometry"] == "geometry"
+    assert context.provider_static["regularization_epsilon"] == 1.25
+    assert context.provider_static["chunk_size"] == 7
+    assert context.provider_static["cache_scope"] == "host_forward_only"
+    assert context.provider_static["jit_sampler"] is False
+    assert calls == [params]
+
+
+def test_resolve_external_field_provider_context_respects_existing_or_disabled_cache() -> None:
+    params = SimpleNamespace()
+    existing = {"coil_geometry": object()}
+
+    context_existing = driver_runtime.resolve_external_field_provider_context(
+        external_field_provider_kind="direct_coils",
+        external_field_provider_static=existing,
+        external_field_provider_params=params,
+        build_coil_field_geometry_func=lambda _params: pytest.fail("should not rebuild existing geometry"),
+    )
+    assert context_existing.provider_static is existing
+
+    context_disabled = driver_runtime.resolve_external_field_provider_context(
+        external_field_provider_kind="direct_coils",
+        external_field_provider_static=None,
+        external_field_provider_params=params,
+        getenv=lambda key, default="": {"VMEC_JAX_FREEB_DISABLE_COIL_GEOMETRY_CACHE": "yes"}.get(key, default),
+        build_coil_field_geometry_func=lambda _params: pytest.fail("cache disabled"),
+    )
+    assert context_disabled.provider_static is None
+
+
+def test_resolve_external_field_provider_context_falls_back_on_custom_provider_error() -> None:
+    original_static = {"custom": object()}
+
+    context = driver_runtime.resolve_external_field_provider_context(
+        external_field_provider_kind="direct_coils",
+        external_field_provider_static=original_static,
+        external_field_provider_params=object(),
+        build_coil_field_geometry_func=lambda _params: (_ for _ in ()).throw(TypeError("custom")),
+    )
+
+    assert context.direct_external_provider is True
+    assert context.provider_static is original_static
+
+
 def test_resolve_jit_forces_auto_policy_preserves_explicit_flags():
     static = SimpleNamespace(
         modes=SimpleNamespace(m=np.arange(3)),

@@ -911,48 +911,13 @@ def run_fixed_boundary(
 
     fb_strict_env = os.getenv("VMEC_JAX_FREEB_STRICT", "1").strip().lower()
     fb_strict = fb_strict_env not in ("", "0", "false", "no")
-    direct_external_provider = external_field_provider_kind is not None and str(external_field_provider_kind).strip().lower() not in (
-        "",
-        "mgrid",
-        "legacy_mgrid",
+    external_provider_context = _driver_runtime_helpers.resolve_external_field_provider_context(
+        external_field_provider_kind=external_field_provider_kind,
+        external_field_provider_static=external_field_provider_static,
+        external_field_provider_params=external_field_provider_params,
     )
-    external_field_provider_static_eff = external_field_provider_static
-    provider_kind_eff = "" if external_field_provider_kind is None else str(external_field_provider_kind).strip().lower()
-    if (
-        direct_external_provider
-        and provider_kind_eff in ("direct_coils", "coils", "coil")
-        and external_field_provider_params is not None
-        and (
-            external_field_provider_static_eff is None
-            or (
-                isinstance(external_field_provider_static_eff, dict)
-                and "coil_geometry" not in external_field_provider_static_eff
-            )
-        )
-        and os.getenv("VMEC_JAX_FREEB_DISABLE_COIL_GEOMETRY_CACHE", "").strip().lower()
-        not in ("1", "true", "yes", "on")
-    ):
-        try:
-            from .external_fields import build_coil_field_geometry
-
-            jit_sampler_env = os.getenv("VMEC_JAX_FREEB_JIT_COIL_SAMPLER", "1").strip().lower()
-            static_base = (
-                {}
-                if external_field_provider_static_eff is None
-                else dict(external_field_provider_static_eff)
-            )
-            external_field_provider_static_eff = {
-                **static_base,
-                "coil_geometry": build_coil_field_geometry(external_field_provider_params),
-                "regularization_epsilon": getattr(external_field_provider_params, "regularization_epsilon", 0.0),
-                "chunk_size": getattr(external_field_provider_params, "chunk_size", None),
-                "cache_scope": "host_forward_only",
-                "jit_sampler": jit_sampler_env not in ("", "0", "false", "no"),
-            }
-        except Exception:
-            # Preserve the original uncached direct-provider path if a custom
-            # provider-like object is not compatible with the coil helper.
-            external_field_provider_static_eff = external_field_provider_static
+    direct_external_provider = bool(external_provider_context.direct_external_provider)
+    external_field_provider_static_eff = external_provider_context.provider_static
     if not bool(direct_external_provider):
         fb_meta, fb_extcur = _free_boundary_static_inputs(cfg, load_fields=False, strict=fb_strict)
     else:
