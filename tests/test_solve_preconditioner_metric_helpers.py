@@ -7,8 +7,10 @@ import numpy as np
 from vmec_jax._compat import jnp
 from vmec_jax.solvers.fixed_boundary.preconditioning.operators import (
     LambdaPreconditionerOutputs,
+    PreconditionerCacheSnapshot,
     PreconditionerCacheDecision,
     PreconditionerCacheUpdate,
+    empty_preconditioner_cache_snapshot,
     lambda_preconditioner_outputs,
     metric_surface_precond_from_bcovar_jax,
     metric_surface_precond_from_bcovar_np,
@@ -239,6 +241,16 @@ def test_lambda_preconditioner_outputs_requests_only_needed_payloads() -> None:
         )
         assert got == expected
         assert calls[-1] == expected_call
+
+
+def test_empty_preconditioner_cache_snapshot_matches_iteration_tuple_order() -> None:
+    got = empty_preconditioner_cache_snapshot()
+
+    assert isinstance(got, PreconditionerCacheSnapshot)
+    assert tuple(got) == (False,) + (None,) * 12
+    assert got.valid is False
+    assert got.prec_rz_jmax is None
+    assert got.prec_lam_debug is None
 
 
 def _cache_update_inputs(**overrides):

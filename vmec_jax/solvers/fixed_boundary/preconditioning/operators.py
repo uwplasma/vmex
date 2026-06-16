@@ -53,6 +53,24 @@ class LambdaPreconditionerOutputs(NamedTuple):
     lam_debug: Any | None
 
 
+class PreconditionerCacheSnapshot(NamedTuple):
+    """Residual-iteration cache fields for the 1D preconditioner state."""
+
+    valid: bool
+    precond_diag: Any
+    tcon: Any
+    norms: Any
+    rz_scale: Any
+    l_scale: Any
+    rz_norm: Any
+    f_norm1: Any
+    prec_rz_mats: Any
+    prec_rz_jmax: int | None
+    prec_lam_prec: Any
+    prec_faclam: Any | None
+    prec_lam_debug: Any | None
+
+
 class PreconditionerCacheUpdate(NamedTuple):
     """Resolved current preconditioner payload plus updated cache entries."""
 
@@ -67,6 +85,26 @@ class PreconditionerCacheUpdate(NamedTuple):
     cache_prec_lam_debug: Any | None
     cache_prec_rz_mats: Any
     cache_prec_rz_jmax: int | None
+
+
+def empty_preconditioner_cache_snapshot() -> PreconditionerCacheSnapshot:
+    """Return the invalid/empty residual-iteration preconditioner cache."""
+
+    return PreconditionerCacheSnapshot(
+        valid=False,
+        precond_diag=None,
+        tcon=None,
+        norms=None,
+        rz_scale=None,
+        l_scale=None,
+        rz_norm=None,
+        f_norm1=None,
+        prec_rz_mats=None,
+        prec_rz_jmax=None,
+        prec_lam_prec=None,
+        prec_faclam=None,
+        prec_lam_debug=None,
+    )
 
 
 def lambda_preconditioner_outputs(
