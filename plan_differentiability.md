@@ -6204,3 +6204,60 @@ Completion:
 - Implicit residual-adjoint decomposition: 88%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.50%.
+
+## 2026-06-16 VMEC2000 Scan Runner Cache Seam Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `get_or_build_scan_runner` to the existing fixed-boundary scan
+   runtime module.
+2. Centralized VMEC2000 scan-runner hit/miss/bypass cache bookkeeping,
+   build/lookup timing, and miss-category recording.
+3. Replaced the two inline scan-runner cache blocks inside the residual loop,
+   keeping the numerical scan-body closures at the call sites.
+4. Added direct unit coverage for cache miss, cache hit, and differentiating
+   scan bypass behavior.
+
+Results obtained:
+
+- The residual iteration module dropped from 9,094 lines to 9,043 lines.
+- `solve_fixed_boundary_residual_iter` dropped from 8,491 to 8,439 lines.
+- `_run_vmec2000_scan` dropped from 2,187 to 2,161 lines.
+- VMEC2000 scan cache semantics are now a named scan-runtime seam instead of
+  duplicated inline controller code.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/scan/runtime.py vmec_jax/solvers/fixed_boundary/residual/iteration.py tests/test_solve_scan_planning_helpers.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_scan_planning_helpers.py tests/test_solve_real_scan_wave10_coverage.py tests/test_solve_wave7_coverage.py::test_residual_iter_vmec2000_scan_minimal_one_step tests/test_solve_wave7_coverage.py::test_residual_iter_vmec2000_scan_state_only -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_finish_cache_more_coverage.py tests/test_solve_scan_math_helpers.py tests/test_solve_scan_output.py tests/test_solve_scan_output_edge_cases_more_coverage.py -q`
+- `python tools/diagnostics/source_health.py --top 8 --top-functions 12`
+
+Best next steps:
+
+1. Commit and push this solve seam if the final diff review is clean.
+2. Continue with the next scan-controller seam that is still closure-light:
+   preflight/chunk orchestration or status/fallback host post-processing.
+3. Avoid moving `_advance_step` wholesale until its force/preconditioner/free-
+   boundary dependencies are split into smaller domain payloads.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.77%.
+- Differentiability/refactor implementation: 99.995%.
+- Solver monolith reduction: 94.9%.
+- Free-boundary adjoint monolith reduction: 80%.
+- Driver workflow decomposition: 93.2%.
+- WOUT diagnostic/profile decomposition: 98.5%.
+- Optimizer workflow decomposition: 86%.
+- Implicit residual-adjoint decomposition: 88%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.51%.

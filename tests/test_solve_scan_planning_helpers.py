@@ -1,3 +1,5 @@
+from collections import OrderedDict
+
 import pytest
 
 from vmec_jax.solvers.fixed_boundary.residual.policy import vmec2000_scan_options_from_env
@@ -21,6 +23,7 @@ from vmec_jax.solvers.fixed_boundary.scan.planning import (
     validate_vmec2000_scan_guards,
 )
 from vmec_jax.solvers.fixed_boundary.scan.runtime import (
+    get_or_build_scan_runner,
     resolve_scan_runtime_hooks,
     resolve_scan_runtime_hooks_from_env,
     scan_trace_context_or_null,
@@ -210,6 +213,91 @@ def test_scan_runtime_hooks_from_env_matches_direct_resolver(tmp_path):
     assert hooks.timecontrol_path == direct.timecontrol_path
     assert hooks.print_in_scan == direct.print_in_scan
     assert hooks.scan_print_mode == direct.scan_print_mode
+
+
+def test_get_or_build_scan_runner_records_miss_hit_and_bypass_paths():
+    cache = OrderedDict()
+    stats = {
+        "scan_runner_cache_lookup_s": 0.0,
+        "scan_runner_cache_build_s": 0.0,
+        "scan_runner_cache_hit_count": 0,
+        "scan_runner_cache_miss_count": 0,
+        "scan_runner_cache_bypass_count": 0,
+    }
+    miss_records = []
+    times = iter([10.0, 10.25, 11.0, 11.5, 12.0, 12.1])
+
+    def jit_func(func):
+        return ("jit", func)
+
+    def cache_get(cache_obj, key):
+        return cache_obj.get(key)
+
+    def cache_put(cache_obj, key, value, *, env_name, default):
+        assert env_name == "VMEC_JAX_SCAN_RUNNER_CACHE_SIZE"
+        assert default == 32
+        cache_obj[key] = value
+        return value
+
+    def record_miss(stats_obj, *, requested_key, existing_keys):
+        miss_records.append((requested_key, existing_keys))
+        stats_obj["scan_runner_cache_miss_category_test_count"] = (
+            int(stats_obj.get("scan_runner_cache_miss_category_test_count", 0)) + 1
+        )
+
+    runner_miss, status_miss = get_or_build_scan_runner(
+        "run",
+        cache=cache,
+        key=("case", 1),
+        differentiating_scan=False,
+        scan_timing_enabled=True,
+        scan_timing_stats=stats,
+        jit_func=jit_func,
+        cache_get=cache_get,
+        cache_put=cache_put,
+        record_miss_categories=record_miss,
+        perf_counter=lambda: next(times),
+    )
+    runner_hit, status_hit = get_or_build_scan_runner(
+        "run",
+        cache=cache,
+        key=("case", 1),
+        differentiating_scan=False,
+        scan_timing_enabled=True,
+        scan_timing_stats=stats,
+        jit_func=jit_func,
+        cache_get=cache_get,
+        cache_put=cache_put,
+        record_miss_categories=record_miss,
+        perf_counter=lambda: next(times),
+    )
+    runner_bypass, status_bypass = get_or_build_scan_runner(
+        "run2",
+        cache=cache,
+        key=("case", 2),
+        differentiating_scan=True,
+        scan_timing_enabled=True,
+        scan_timing_stats=stats,
+        jit_func=jit_func,
+        cache_get=lambda *_args: pytest.fail("differentiating path must bypass cache lookup"),
+        cache_put=lambda *_args, **_kwargs: pytest.fail("differentiating path must bypass cache put"),
+        record_miss_categories=record_miss,
+        perf_counter=lambda: next(times),
+    )
+
+    assert status_miss == "miss"
+    assert runner_miss == ("jit", "run")
+    assert status_hit == "hit"
+    assert runner_hit is runner_miss
+    assert status_bypass == "bypass"
+    assert runner_bypass == ("jit", "run2")
+    assert stats["scan_runner_cache_lookup_s"] > 0.0
+    assert stats["scan_runner_cache_build_s"] > 0.0
+    assert stats["scan_runner_cache_miss_count"] == 1
+    assert stats["scan_runner_cache_hit_count"] == 1
+    assert stats["scan_runner_cache_bypass_count"] == 1
+    assert stats["scan_runner_cache_miss_category_test_count"] == 1
+    assert miss_records == [(("case", 1), ())]
 
 
 def test_run_flags_disable_fallback_for_state_only_and_chunking_for_traced_scan():

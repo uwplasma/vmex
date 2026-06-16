@@ -359,6 +359,7 @@ from vmec_jax.solvers.fixed_boundary.scan.planning import (
     validate_vmec2000_scan_guards as _validate_vmec2000_scan_guards,
 )
 from vmec_jax.solvers.fixed_boundary.scan.runtime import (
+    get_or_build_scan_runner as _get_or_build_scan_runner,
     resolve_scan_runtime_hooks_from_env as _resolve_scan_runtime_hooks_from_env,
     scan_trace_context_or_null as _scan_trace_context_or_null,
 )
@@ -3880,45 +3881,19 @@ def solve_fixed_boundary_residual_iter(
 
         def _get_scan_runner(seq_len: int):
             key = scan_cache_key + (int(seq_len),)
-            if scan_differentiated:
-                # A runner created during a JAX transform closes over traced
-                # constants from the solve setup. Keep it local to the transform.
-                if scan_timing_enabled:
-                    scan_timing_stats["scan_runner_cache_bypass_count"] = (
-                        int(scan_timing_stats.get("scan_runner_cache_bypass_count", 0)) + 1
-                    )
-                return jit(_run_scan), "bypass"
-            cache_lookup_start = time.perf_counter() if scan_timing_enabled else None
-            cached_run = _jit_cache_get(_SCAN_RUNNER_CACHE, key)
-            if scan_timing_enabled and cache_lookup_start is not None:
-                scan_timing_stats["scan_runner_cache_lookup_s"] += time.perf_counter() - float(cache_lookup_start)
-            if cached_run is None:
-                if scan_timing_enabled:
-                    scan_timing_stats["scan_runner_cache_miss_count"] = (
-                        int(scan_timing_stats.get("scan_runner_cache_miss_count", 0)) + 1
-                    )
-                    _record_scan_runner_cache_miss_categories(
-                        scan_timing_stats,
-                        requested_key=key,
-                        existing_keys=tuple(_SCAN_RUNNER_CACHE.keys()),
-                    )
-                cache_build_start = time.perf_counter() if scan_timing_enabled else None
-                runner = jit(_run_scan)
-                cached_runner = _jit_cache_put(
-                    _SCAN_RUNNER_CACHE,
-                    key,
-                    runner,
-                    env_name="VMEC_JAX_SCAN_RUNNER_CACHE_SIZE",
-                    default=32,
-                )
-                if scan_timing_enabled and cache_build_start is not None:
-                    scan_timing_stats["scan_runner_cache_build_s"] += time.perf_counter() - float(cache_build_start)
-                return cached_runner, "miss"
-            if scan_timing_enabled:
-                scan_timing_stats["scan_runner_cache_hit_count"] = (
-                    int(scan_timing_stats.get("scan_runner_cache_hit_count", 0)) + 1
-                )
-            return cached_run, "hit"
+            return _get_or_build_scan_runner(
+                _run_scan,
+                cache=_SCAN_RUNNER_CACHE,
+                key=key,
+                differentiating_scan=bool(scan_differentiated),
+                scan_timing_enabled=bool(scan_timing_enabled),
+                scan_timing_stats=scan_timing_stats,
+                jit_func=jit,
+                cache_get=_jit_cache_get,
+                cache_put=_jit_cache_put,
+                record_miss_categories=_record_scan_runner_cache_miss_categories,
+                perf_counter=time.perf_counter,
+            )
 
         def _emit_scan_prints(
             *,
@@ -4559,45 +4534,19 @@ def solve_fixed_boundary_residual_iter(
                 return jax.lax.scan(_scan_step, carry0, jnp.arange(max_iter, dtype=jnp.int32))
 
             scan_run_setup_start = time.perf_counter() if scan_timing_enabled else None
-            cached_run = None if differentiating_scan else _jit_cache_get(_SCAN_RUNNER_CACHE, scan_cache_key)
-            scan_runner_cache_status = "bypass" if differentiating_scan else ("miss" if cached_run is None else "hit")
-            if scan_timing_enabled:
-                if scan_run_setup_start is not None:
-                    scan_timing_stats["scan_runner_cache_lookup_s"] += time.perf_counter() - float(
-                        scan_run_setup_start
-                    )
-                if differentiating_scan:
-                    scan_timing_stats["scan_runner_cache_bypass_count"] = (
-                        int(scan_timing_stats.get("scan_runner_cache_bypass_count", 0)) + 1
-                    )
-            if cached_run is None:
-                if scan_timing_enabled and (not differentiating_scan):
-                    scan_timing_stats["scan_runner_cache_miss_count"] = (
-                        int(scan_timing_stats.get("scan_runner_cache_miss_count", 0)) + 1
-                    )
-                    _record_scan_runner_cache_miss_categories(
-                        scan_timing_stats,
-                        requested_key=scan_cache_key,
-                        existing_keys=tuple(_SCAN_RUNNER_CACHE.keys()),
-                    )
-                cache_build_start = time.perf_counter() if scan_timing_enabled else None
-                _run_scan = jit(_run_scan)
-                if not differentiating_scan:
-                    _run_scan = _jit_cache_put(
-                        _SCAN_RUNNER_CACHE,
-                        scan_cache_key,
-                        _run_scan,
-                        env_name="VMEC_JAX_SCAN_RUNNER_CACHE_SIZE",
-                        default=32,
-                    )
-                if scan_timing_enabled and cache_build_start is not None:
-                    scan_timing_stats["scan_runner_cache_build_s"] += time.perf_counter() - float(cache_build_start)
-            else:
-                if scan_timing_enabled:
-                    scan_timing_stats["scan_runner_cache_hit_count"] = (
-                        int(scan_timing_stats.get("scan_runner_cache_hit_count", 0)) + 1
-                    )
-                _run_scan = cached_run
+            _run_scan, scan_runner_cache_status = _get_or_build_scan_runner(
+                _run_scan,
+                cache=_SCAN_RUNNER_CACHE,
+                key=scan_cache_key,
+                differentiating_scan=bool(differentiating_scan),
+                scan_timing_enabled=bool(scan_timing_enabled),
+                scan_timing_stats=scan_timing_stats,
+                jit_func=jit,
+                cache_get=_jit_cache_get,
+                cache_put=_jit_cache_put,
+                record_miss_categories=_record_scan_runner_cache_miss_categories,
+                perf_counter=time.perf_counter,
+            )
             if scan_timing_enabled and scan_run_setup_start is not None:
                 scan_timing_stats["scan_run_setup_s"] += time.perf_counter() - float(scan_run_setup_start)
 

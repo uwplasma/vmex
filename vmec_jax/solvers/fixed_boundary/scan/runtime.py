@@ -149,3 +149,73 @@ def scan_trace_context_or_null(hooks: ScanRuntimeHooks, label: str):
     if hooks.scan_trace and hooks.scan_trace_context is not None:
         return hooks.scan_trace_context(label)
     return nullcontext()
+
+
+def get_or_build_scan_runner(
+    run_scan_func,
+    *,
+    cache,
+    key: tuple,
+    differentiating_scan: bool,
+    scan_timing_enabled: bool,
+    scan_timing_stats: dict[str, Any],
+    jit_func: Callable[[Any], Any],
+    cache_get: Callable[[Any, tuple], Any],
+    cache_put: Callable[..., Any],
+    record_miss_categories: Callable[..., Any],
+    perf_counter: Callable[[], float],
+    cache_env_name: str = "VMEC_JAX_SCAN_RUNNER_CACHE_SIZE",
+    cache_default: int = 32,
+):
+    """Return a JIT scan runner and cache status for VMEC scan controllers.
+
+    This helper owns only cache/timing bookkeeping.  The numerical scan body is
+    still built at the call site so branch-specific closed-over constants remain
+    explicit and fingerprintable.
+    """
+
+    if bool(differentiating_scan):
+        if bool(scan_timing_enabled):
+            scan_timing_stats["scan_runner_cache_bypass_count"] = (
+                int(scan_timing_stats.get("scan_runner_cache_bypass_count", 0)) + 1
+            )
+        return jit_func(run_scan_func), "bypass"
+
+    lookup_start = perf_counter() if bool(scan_timing_enabled) else None
+    cached_run = cache_get(cache, key)
+    if bool(scan_timing_enabled) and lookup_start is not None:
+        scan_timing_stats["scan_runner_cache_lookup_s"] = float(
+            scan_timing_stats.get("scan_runner_cache_lookup_s", 0.0)
+        ) + (perf_counter() - float(lookup_start))
+
+    if cached_run is not None:
+        if bool(scan_timing_enabled):
+            scan_timing_stats["scan_runner_cache_hit_count"] = (
+                int(scan_timing_stats.get("scan_runner_cache_hit_count", 0)) + 1
+            )
+        return cached_run, "hit"
+
+    if bool(scan_timing_enabled):
+        scan_timing_stats["scan_runner_cache_miss_count"] = (
+            int(scan_timing_stats.get("scan_runner_cache_miss_count", 0)) + 1
+        )
+        record_miss_categories(
+            scan_timing_stats,
+            requested_key=key,
+            existing_keys=tuple(cache.keys()),
+        )
+
+    build_start = perf_counter() if bool(scan_timing_enabled) else None
+    runner = jit_func(run_scan_func)
+    cached_runner = cache_put(
+        cache,
+        key,
+        runner,
+        env_name=str(cache_env_name),
+        default=int(cache_default),
+    )
+    if bool(scan_timing_enabled) and build_start is not None:
+        scan_timing_stats["scan_runner_cache_build_s"] = float(
+            scan_timing_stats.get("scan_runner_cache_build_s", 0.0)
+        ) + (perf_counter() - float(build_start))
+    return cached_runner, "miss"
