@@ -7,6 +7,7 @@ from vmec_jax.solvers.fixed_boundary.residual.config import (
     bad_jacobian_tau_tolerance,
     legacy_dump_enabled,
     parse_bad_jacobian_config,
+    resolve_axis_reset_config,
     resolve_chunked_scan_config,
     resolve_debug_print_config,
     resolve_dump_history_config,
@@ -167,6 +168,42 @@ def test_host_profile_setup_policy_auto_and_explicit_flags():
     assert resolve_host_profile_setup(backend_name="gpu", profile_setup_env="auto") is True
     assert resolve_host_profile_setup(backend_name="gpu", profile_setup_env=" off ") is False
     assert resolve_host_profile_setup(backend_name="cpu", profile_setup_env=" on ") is True
+
+
+def test_axis_reset_config_preserves_legacy_env_policy():
+    default = resolve_axis_reset_config(
+        force_axis_reset_env=None,
+        axis_reset_always_3d_env=None,
+        axis_reset_fsq_min_env=None,
+    )
+    assert default.force_axis_reset is False
+    assert default.axis_reset_always_3d is False
+    assert default.axis_reset_fsq_min == pytest.approx(1.0)
+
+    explicit = resolve_axis_reset_config(
+        force_axis_reset_env=" yes ",
+        axis_reset_always_3d_env="off",
+        axis_reset_fsq_min_env="2.5",
+    )
+    assert explicit.force_axis_reset is True
+    assert explicit.axis_reset_always_3d is True
+    assert explicit.axis_reset_fsq_min == pytest.approx(2.5)
+
+    invalid = resolve_axis_reset_config(
+        force_axis_reset_env="0",
+        axis_reset_always_3d_env="false",
+        axis_reset_fsq_min_env="not-a-float",
+    )
+    assert invalid.force_axis_reset is False
+    assert invalid.axis_reset_always_3d is False
+    assert invalid.axis_reset_fsq_min == 0.0
+
+    negative = resolve_axis_reset_config(
+        force_axis_reset_env="",
+        axis_reset_always_3d_env="",
+        axis_reset_fsq_min_env="-2.0",
+    )
+    assert negative.axis_reset_fsq_min == 0.0
 
 
 def test_nstep_override_parsing_and_clamping():

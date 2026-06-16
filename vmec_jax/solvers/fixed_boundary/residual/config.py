@@ -61,6 +61,12 @@ class HostResidualMetricConfig(NamedTuple):
     residual_metrics_on_accelerator: bool
 
 
+class AxisResetConfig(NamedTuple):
+    force_axis_reset: bool
+    axis_reset_always_3d: bool
+    axis_reset_fsq_min: float
+
+
 class DebugPrintConfig(NamedTuple):
     print_live: bool
     mode: str
@@ -224,6 +230,29 @@ def resolve_host_profile_setup(*, backend_name: str, profile_setup_env: str | No
     if value == "auto":
         return str(backend_name).strip().lower() != "cpu"
     return env_flag_enabled_with_off(value)
+
+
+def resolve_axis_reset_config(
+    *,
+    force_axis_reset_env: str | None,
+    axis_reset_always_3d_env: str | None,
+    axis_reset_fsq_min_env: str | None,
+) -> AxisResetConfig:
+    """Resolve VMEC-style initial-axis reset environment policy."""
+
+    try:
+        fsq_min_value = str("1.0" if axis_reset_fsq_min_env is None else axis_reset_fsq_min_env).strip()
+        axis_reset_fsq_min = float(fsq_min_value) if fsq_min_value else 0.0
+    except Exception:
+        axis_reset_fsq_min = 0.0
+    if axis_reset_fsq_min < 0.0:
+        axis_reset_fsq_min = 0.0
+
+    return AxisResetConfig(
+        force_axis_reset=env_flag_enabled("0" if force_axis_reset_env is None else force_axis_reset_env),
+        axis_reset_always_3d=env_flag_enabled("0" if axis_reset_always_3d_env is None else axis_reset_always_3d_env),
+        axis_reset_fsq_min=float(axis_reset_fsq_min),
+    )
 
 
 def resolve_nstep_screen(*, indata_nstep: int, override_env: str | None) -> int:

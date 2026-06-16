@@ -32,6 +32,7 @@ from .solvers.fixed_boundary.residual.config import (
     bad_jacobian_tau_tolerance as _bad_jacobian_tau_tolerance,
     normalize_debug_print_mode as _normalize_debug_print_mode,  # noqa: F401 - re-exported for internal helpers/tests.
     parse_bad_jacobian_config as _parse_bad_jacobian_config,
+    resolve_axis_reset_config as _resolve_axis_reset_config,
     resolve_chunked_scan_config as _resolve_chunked_scan_config,
     resolve_debug_print_config as _resolve_debug_print_config,
     resolve_dump_history_config as _resolve_dump_history_config,
@@ -1335,17 +1336,14 @@ def solve_fixed_boundary_residual_iter(
     )
     axis_reset_done = bool(resume_state is not None)
     lmove_axis = True if indata is None else bool(indata.get_bool("LMOVE_AXIS", True))
-    force_axis_reset_env = os.getenv("VMEC_JAX_FORCE_AXIS_RESET_INIT", "0").strip().lower()
-    force_axis_reset = force_axis_reset_env not in ("", "0", "false", "no")
-    axis_reset_env = os.getenv("VMEC_JAX_AXIS_RESET_ALWAYS_3D", "0").strip().lower()
-    axis_reset_always_3d = axis_reset_env not in ("", "0", "false", "no")
-    axis_reset_fsq_env = os.getenv("VMEC_JAX_AXIS_RESET_FSQ_MIN", "1.0").strip()
-    try:
-        axis_reset_fsq_min = float(axis_reset_fsq_env) if axis_reset_fsq_env else 0.0
-    except Exception:
-        axis_reset_fsq_min = 0.0
-    if axis_reset_fsq_min < 0.0:
-        axis_reset_fsq_min = 0.0
+    axis_reset_config = _resolve_axis_reset_config(
+        force_axis_reset_env=os.getenv("VMEC_JAX_FORCE_AXIS_RESET_INIT", "0"),
+        axis_reset_always_3d_env=os.getenv("VMEC_JAX_AXIS_RESET_ALWAYS_3D", "0"),
+        axis_reset_fsq_min_env=os.getenv("VMEC_JAX_AXIS_RESET_FSQ_MIN", "1.0"),
+    )
+    force_axis_reset = axis_reset_config.force_axis_reset
+    axis_reset_always_3d = axis_reset_config.axis_reset_always_3d
+    axis_reset_fsq_min = axis_reset_config.axis_reset_fsq_min
 
     def _apply_vmec_lambda_axis_rules(st: VMECState) -> VMECState:
         """Enforce VMEC lambda gauge without mutating stored axis coefficients.

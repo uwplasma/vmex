@@ -5340,3 +5340,60 @@ Completion:
 - Implicit residual-adjoint decomposition: 88%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.25%.
+
+## 2026-06-16 Residual Axis-Reset Config Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `AxisResetConfig` and `resolve_axis_reset_config` to
+   `vmec_jax.solvers.fixed_boundary.residual.config`.
+2. Replaced inline `VMEC_JAX_FORCE_AXIS_RESET_INIT`,
+   `VMEC_JAX_AXIS_RESET_ALWAYS_3D`, and `VMEC_JAX_AXIS_RESET_FSQ_MIN` parsing
+   in `solve_fixed_boundary_residual_iter`.
+3. Added focused tests for defaults, explicit true flags, invalid `FSQ_MIN`,
+   negative `FSQ_MIN`, and the existing legacy behavior that `off` is not a
+   false token for the axis-reset boolean envs.
+
+Results obtained:
+
+- `solve_fixed_boundary_residual_iter` decreased from 8957 to 8954 lines.
+- `solve.py` decreased from 10006 to 10004 lines.
+- Axis-reset env policy is now unit-tested without constructing a VMEC solve.
+- No initial-axis reset algorithm, bad-Jacobian handling, scan behavior, or
+  parity policy changed.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solve.py vmec_jax/solvers/fixed_boundary/residual/config.py tests/test_solve_residual_iter_config.py tests/test_solve_finish_cache_more_coverage.py`
+- `python -m compileall -q vmec_jax/solve.py vmec_jax/solvers/fixed_boundary/residual/config.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_config.py tests/test_solve_finish_cache_more_coverage.py tests/test_solve_axis_helpers_more_coverage.py -q`
+- `python tools/diagnostics/source_health.py --top 24 --top-functions 32`
+
+Best next steps:
+
+1. Commit and push the residual axis-reset config extraction.
+2. Continue simplifying the solver by moving pure setup policies into existing
+   residual domain modules, but avoid numerical loop rewrites without parity
+   gates.
+3. Keep prioritizing fewer clearer domain modules over many new helper files.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.67%.
+- Differentiability/refactor implementation: 99.988%.
+- Solver monolith reduction: 88.85%.
+- Free-boundary adjoint monolith reduction: 80%.
+- Driver workflow decomposition: 91.6%.
+- WOUT diagnostic/profile decomposition: 98.5%.
+- Optimizer workflow decomposition: 86%.
+- Implicit residual-adjoint decomposition: 88%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.26%.
