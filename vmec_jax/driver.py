@@ -63,6 +63,7 @@ _resolve_initial_fixed_boundary_policy = _driver_policy_helpers.resolve_initial_
 _resolve_axis_infer_missing_policy = _driver_policy_helpers.resolve_axis_infer_missing_policy
 _resolve_fixed_boundary_solver_device_name = _driver_policy_helpers.resolve_fixed_boundary_solver_device_name
 _resolve_jit_forces_auto_policy = _driver_policy_helpers.resolve_jit_forces_auto_policy
+_resolve_stage_jit_settings = _driver_policy_helpers.resolve_stage_jit_settings
 _resolve_vmec2000_stage_controls = _driver_policy_helpers.resolve_vmec2000_stage_controls
 _result_final_fsq = _driver_policy_helpers.result_final_fsq
 _result_final_residuals = _driver_policy_helpers.result_final_residuals
@@ -1412,52 +1413,18 @@ def run_fixed_boundary(
                             flush=True,
                         )
             jit_forces_base = _resolve_jit_forces(jit_forces, static_i, int(niter_i))
-            jit_forces_eff = jit_forces_base
-            if scan_mode and solver == "vmec2000_iter":
-                scan_jit_env = os.getenv("VMEC_JAX_SCAN_JIT_FORCES")
-                if scan_jit_env is None:
-                    # Fast mode keeps JIT enabled for scan; parity mode disables by default.
-                    if not bool(performance_mode):
-                        jit_forces_eff = False
-                elif scan_jit_env.strip().lower() in ("", "0", "false", "no"):
-                    jit_forces_eff = False
-                else:
-                    jit_forces_eff = True
-            jit_precompile_eff = False
-            if bool(jit_forces_eff) and (not bool(scan_mode)):
-                if jit_precompile is None:
-                    val = os.getenv("VMEC_JAX_JIT_PRECOMPILE", "1").strip().lower()
-                    jit_precompile_eff = val not in ("", "0", "false", "no")
-                else:
-                    jit_precompile_eff = bool(jit_precompile)
-            jit_warmup_iters = 0
-            if bool(jit_forces_eff) and (not bool(scan_mode)):
-                env_warmup = os.getenv("VMEC_JAX_JIT_WARMUP_ITERS")
-                if env_warmup is not None:
-                    try:
-                        jit_warmup_iters = max(0, int(env_warmup))
-                    except Exception:
-                        jit_warmup_iters = 2
-                else:
-                    jit_warmup_iters = 0 if bool(jit_precompile_eff) else 2
-            # Precompute non-scan JIT settings for fast-fallback.
-            jit_precompile_noscan = False
-            if bool(jit_forces_base):
-                if jit_precompile is None:
-                    val = os.getenv("VMEC_JAX_JIT_PRECOMPILE", "1").strip().lower()
-                    jit_precompile_noscan = val not in ("", "0", "false", "no")
-                else:
-                    jit_precompile_noscan = bool(jit_precompile)
-            jit_warmup_noscan = 0
-            if bool(jit_forces_base):
-                env_warmup = os.getenv("VMEC_JAX_JIT_WARMUP_ITERS")
-                if env_warmup is not None:
-                    try:
-                        jit_warmup_noscan = max(0, int(env_warmup))
-                    except Exception:
-                        jit_warmup_noscan = 2
-                else:
-                    jit_warmup_noscan = 0 if bool(jit_precompile_noscan) else 2
+            jit_settings = _resolve_stage_jit_settings(
+                jit_forces_base=bool(jit_forces_base),
+                scan_mode=bool(scan_mode),
+                solver=solver,
+                performance_mode=bool(performance_mode),
+                jit_precompile=jit_precompile,
+            )
+            jit_forces_eff = bool(jit_settings.jit_forces_eff)
+            jit_precompile_eff = bool(jit_settings.jit_precompile_eff)
+            jit_warmup_iters = int(jit_settings.jit_warmup_iters)
+            jit_precompile_noscan = bool(jit_settings.jit_precompile_noscan)
+            jit_warmup_noscan = int(jit_settings.jit_warmup_noscan)
             if i == 0:
                 if state is None:
                     if boundary_coeffs is None:
