@@ -3603,3 +3603,63 @@ Completion:
 - WOUT diagnostic/profile decomposition: 92%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 98.4%.
+
+## 2026-06-15 Free-Boundary Replay Context Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved JAX NESTOR replay-table enrichment, accepted-boundary replay context
+   construction, trace boundary-shape inference, and frozen-vacuum override
+   extraction into `vmec_jax.solvers.free_boundary.adjoint.replay_context`.
+2. Preserved root-facade compatibility names including private
+   `_direct_coil_trace_boundary_shape`,
+   `_direct_coil_trace_vacuum_field_override`, and
+   `_with_jax_nonsingular_replay_tables`.
+3. Re-ran focused tests that exercise the trace-shape helpers, frozen-vacuum
+   override contract, monkeypatch-compatible dense-solve seams, and JAX
+   accepted-boundary geometry replay.
+
+Results obtained:
+
+- `free_boundary_adjoint.py` dropped from 4,344 to 4,186 lines.
+- Replay-context construction is now a 186-line domain module.
+- The root facade remains compatible for tests/downstream callers.
+- The previous pushed CI run was in progress while this local tranche was
+  validated; the prior CI run was green.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/free_boundary_adjoint.py vmec_jax/solvers/free_boundary/adjoint/replay_context.py tests/test_free_boundary_adjoint_helpers_unit.py tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+- `python -m compileall -q vmec_jax/free_boundary_adjoint.py vmec_jax/solvers/free_boundary/adjoint/replay_context.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_adjoint_helpers_unit.py tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_trace_fingerprint_detects_control_branch_changes tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_vacuum_field_override_replay_contract tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_jax_free_boundary_boundary_geometry_matches_host_sampler -q`
+- `python tools/diagnostics/source_health.py --top 25 --top-functions 25 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. Let CI finish for the latest pushes and fix any failure before more
+   refactoring.
+2. If CI remains green, continue with WOUT minimal assembly or
+   driver/optimization workflow decomposition rather than changing adaptive
+   branch semantics.
+3. Keep exact adaptive full-loop differentiation as a separately gated
+   research lane; current production claims remain branch-local/fingerprint
+   gated.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.45%.
+- Differentiability/refactor implementation: 99.83%.
+- Solver monolith reduction: 86.5%.
+- Free-boundary adjoint monolith reduction: 76%.
+- Driver workflow decomposition: 84%.
+- WOUT diagnostic/profile decomposition: 92%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 98.45%.
