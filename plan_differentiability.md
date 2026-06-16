@@ -4293,3 +4293,67 @@ Completion:
 - WOUT diagnostic/profile decomposition: 96%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 98.88%.
+
+## 2026-06-16 WOUT Minimal Schema Assembly Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved the passive final `WoutData` schema mapping from
+   `wout_minimal_from_fixed_boundary` into
+   `vmec_jax.io.wout.minimal.build_minimal_wout_data_kwargs`.
+2. Kept all Nyquist, JXBFORCE, Mercier, Glasser, beta, and current-profile
+   calculations in the existing builder for this tranche; only the final
+   dtype/schema normalization moved.
+3. Preserved the public `vmec_jax.wout.wout_minimal_from_fixed_boundary`
+   facade and avoided importing `WoutData` into `io/wout/minimal.py`, so there
+   is no schema/dataclass import cycle.
+4. Confirmed the previously pushed CI run `27587654726` completed successfully
+   before committing this local tranche.
+
+Results obtained:
+
+- `wout_minimal_from_fixed_boundary` dropped from 1,102 to 1,012 lines in the
+  source-health report.
+- The WOUT-minimal builder now separates physics/diagnostic calculations from
+  the VMEC output schema mapping, making the next WOUT-specific reductions more
+  straightforward.
+- Local WOUT helper, roundtrip, driver-coverage, environment-branch, physics,
+  LASYM, parity-reference, and VMECPlot2 compatibility shards passed.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/wout.py vmec_jax/io/wout/minimal.py`
+- `python -m compileall -q vmec_jax/wout.py vmec_jax/io/wout/minimal.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_fast_helpers.py tests/test_wout_helpers.py tests/test_wout_wave2.py tests/test_wout_roundtrip.py tests/test_wout_additional_helpers.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_driver_wave10_coverage.py tests/test_wout_env_branch_coverage.py tests/test_wout_physics_wave8_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_parity_reference.py tests/test_wout_lasym_bsubv_parity.py tests/test_wout_vmecplot2_compat.py -q`
+- `python tools/diagnostics/source_health.py --top 12 --top-functions 15`
+- `gh run watch 27587654726 --exit-status`
+
+Best next steps:
+
+1. Commit and push this WOUT-minimal schema extraction and let CI validate it.
+2. Continue WOUT-minimal reduction only at clean seams, likely:
+   - diagnostics/default initialization and nonconverged status handling, or
+   - WOUT-light/current/equif metadata assembly.
+3. Defer the deeper solver-monolith split and adaptive branch differentiation
+   changes until a dedicated branch-fingerprint gate is in place.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.58%.
+- Differentiability/refactor implementation: 99.94%.
+- Solver monolith reduction: 88.7%.
+- Free-boundary adjoint monolith reduction: 80%.
+- Driver workflow decomposition: 86%.
+- WOUT diagnostic/profile decomposition: 96.8%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 98.90%.
