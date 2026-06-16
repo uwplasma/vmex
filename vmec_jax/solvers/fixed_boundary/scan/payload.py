@@ -44,6 +44,22 @@ class ScanForcePayload(NamedTuple):
     cache_valid: Any
 
 
+class ScanInitialCache(NamedTuple):
+    """Initial VMEC2000 scan preconditioner cache fields."""
+
+    precond_diag: Any
+    tcon: Any
+    norms: Any
+    rz_scale: Any
+    l_scale: Any
+    rz_norm: Any
+    f_norm1: Any
+    lam_prec: Any
+    rz_mats: Any
+    jmax: int
+    valid: Any
+
+
 class ScanStepFields(NamedTuple):
     state: Any
     vRcc: Any
@@ -60,6 +76,120 @@ class ScanStepFields(NamedTuple):
     vLss: Any
     inv_tau: Any
     fsq_prev: Any
+
+
+def build_initial_preconditioner_cache(
+    *,
+    state_init: Any,
+    k: Any,
+    norms: Any,
+    rz_scale: Any,
+    l_scale: Any,
+    constraint_tcon0: Any,
+    zero_precond_diag: Any,
+    zero_tcon: Any,
+    trig: Any,
+    s: Any,
+    cfg: Any,
+    dtype: Any,
+    scan_use_precomputed: bool,
+    scan_use_lax_tridi: bool,
+    lambda_preconditioner_func: Callable[[Any], Any],
+    rz_norm_func: Callable[[Any], Any],
+    resume_state: dict[str, Any] | None = None,
+) -> ScanInitialCache:
+    """Build the initial scan cache, then overlay any resume-cache payload."""
+
+    if constraint_tcon0 is None or float(constraint_tcon0) == 0.0:
+        cache_precond_diag = zero_precond_diag
+        cache_tcon = zero_tcon
+    else:
+        from vmec_jax.vmec_constraints import precondn_diag_axd1_from_bcovar
+
+        ard1, azd1 = precondn_diag_axd1_from_bcovar(
+            trig=trig,
+            s=s,
+            bsq=k.bc.bsq,
+            r12=k.bc.jac.r12,
+            sqrtg=k.bc.jac.sqrtg,
+            ru12=k.bc.jac.ru12,
+            zu12=k.bc.jac.zu12,
+        )
+        cache_precond_diag = (ard1, azd1)
+        cache_tcon = jnp.asarray(k.tcon)
+
+    cache_norms = norms
+    cache_rz_scale = rz_scale
+    cache_l_scale = l_scale
+    cache_rz_norm = rz_norm_func(state_init)
+    cache_f_norm1 = jnp.where(
+        cache_rz_norm != 0.0,
+        1.0 / cache_rz_norm,
+        jnp.asarray(float("inf"), dtype=dtype),
+    )
+
+    from vmec_jax.preconditioner_1d_jax import rz_preconditioner_matrices
+
+    cache_lam_prec = lambda_preconditioner_func(k.bc)
+    cache_rz_mats, _jmin, _jmax = rz_preconditioner_matrices(
+        bc=k.bc,
+        k=k,
+        trig=trig,
+        s=s,
+        cfg=cfg,
+        use_precomputed=bool(scan_use_precomputed),
+        use_lax_tridi=bool(scan_use_lax_tridi),
+    )
+    # Fixed-grid scans use a shape-derived jmax; this avoids carrying a JIT
+    # tracer from the matrix helper into host-side setup.
+    jmax = max(int(jnp.asarray(s).shape[0]) - 1, 1)
+    cache_valid = jnp.asarray(True)
+
+    if resume_state is not None:
+        try:
+            cache_valid = jnp.asarray(
+                bool(resume_state.get("vmec2000_cache_valid", bool(cache_valid))), dtype=bool
+            )
+        except Exception:
+            cache_valid = jnp.asarray(cache_valid, dtype=bool)
+        if "cache_precond_diag" in resume_state:
+            cache_precond_diag = resume_state.get("cache_precond_diag", cache_precond_diag)
+        if "cache_tcon" in resume_state:
+            cache_tcon = resume_state.get("cache_tcon", cache_tcon)
+        if "cache_norms" in resume_state:
+            cache_norms = resume_state.get("cache_norms", cache_norms)
+        if "cache_rz_scale" in resume_state:
+            cache_rz_scale = resume_state.get("cache_rz_scale", cache_rz_scale)
+        if "cache_l_scale" in resume_state:
+            cache_l_scale = resume_state.get("cache_l_scale", cache_l_scale)
+        if "cache_rz_norm" in resume_state:
+            try:
+                cache_rz_norm = jnp.asarray(resume_state.get("cache_rz_norm", cache_rz_norm), dtype=dtype)
+            except Exception:
+                pass
+        if "cache_f_norm1" in resume_state:
+            try:
+                cache_f_norm1 = jnp.asarray(resume_state.get("cache_f_norm1", cache_f_norm1), dtype=dtype)
+            except Exception:
+                pass
+        if "cache_prec_rz_mats" in resume_state:
+            cache_rz_mats = resume_state.get("cache_prec_rz_mats", cache_rz_mats)
+        if "cache_prec_lam_prec" in resume_state:
+            cache_lam_prec = resume_state.get("cache_prec_lam_prec", cache_lam_prec)
+
+    return ScanInitialCache(
+        precond_diag=cache_precond_diag,
+        tcon=cache_tcon,
+        norms=cache_norms,
+        rz_scale=cache_rz_scale,
+        l_scale=cache_l_scale,
+        rz_norm=cache_rz_norm,
+        f_norm1=cache_f_norm1,
+        lam_prec=cache_lam_prec,
+        rz_mats=cache_rz_mats,
+        jmax=jmax,
+        valid=cache_valid,
+    )
 
 
 def mask_scan_restart_force_payload(

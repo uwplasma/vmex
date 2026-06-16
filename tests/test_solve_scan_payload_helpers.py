@@ -11,6 +11,7 @@ from vmec_jax.solvers.fixed_boundary.scan.payload import (
     ScanForcePayload,
     ScanStepFields,
     build_current_preconditioned_scan_payload,
+    build_initial_preconditioner_cache,
     build_restart_preconditioned_scan_payload,
     build_scan_force_payload,
     build_scan_step_fields,
@@ -227,6 +228,104 @@ def test_scan_payload_wrappers_include_nonzero_flcs_in_lambda_metric():
     expected_fsql1 = (np.sum(np.full((2, 2, 2), 10.0) ** 2) + np.sum(np.full((2, 2, 2), 12.0) ** 2)) * 0.25
     np.testing.assert_allclose(np.asarray(current.fsql1), expected_fsql1)
     np.testing.assert_allclose(np.asarray(restart.fsql1), expected_fsql1)
+
+
+def test_build_initial_preconditioner_cache_builds_fresh_cache(monkeypatch):
+    import vmec_jax.preconditioner_1d_jax as precond_module
+
+    matrix_calls = []
+    monkeypatch.setattr(
+        precond_module,
+        "rz_preconditioner_matrices",
+        lambda **kwargs: matrix_calls.append(kwargs) or ("fresh-mats", 0, 99),
+    )
+
+    norms = SimpleNamespace(tag="norms")
+    cache = build_initial_preconditioner_cache(
+        state_init="state",
+        k=SimpleNamespace(bc="bc", tcon=np.asarray([0.25])),
+        norms=norms,
+        rz_scale="rz-scale",
+        l_scale="l-scale",
+        constraint_tcon0=0.0,
+        zero_precond_diag=("zero-diag",),
+        zero_tcon=np.asarray([0.0]),
+        trig="trig",
+        s=np.linspace(0.0, 1.0, 5),
+        cfg=SimpleNamespace(),
+        dtype=np.float64,
+        scan_use_precomputed=True,
+        scan_use_lax_tridi=False,
+        lambda_preconditioner_func=lambda bc: np.asarray(2.0) if bc == "bc" else pytest.fail("wrong bc"),
+        rz_norm_func=lambda state: np.asarray(4.0) if state == "state" else pytest.fail("wrong state"),
+        resume_state=None,
+    )
+
+    assert cache.precond_diag == ("zero-diag",)
+    assert cache.norms is norms
+    assert cache.rz_scale == "rz-scale"
+    assert cache.l_scale == "l-scale"
+    assert cache.rz_mats == "fresh-mats"
+    assert cache.jmax == 4
+    assert bool(np.asarray(cache.valid))
+    np.testing.assert_allclose(np.asarray(cache.f_norm1), 0.25)
+    np.testing.assert_allclose(np.asarray(cache.lam_prec), 2.0)
+    assert matrix_calls[0]["bc"] == "bc"
+    assert matrix_calls[0]["use_precomputed"] is True
+    assert matrix_calls[0]["use_lax_tridi"] is False
+
+
+def test_build_initial_preconditioner_cache_overlays_resume_cache(monkeypatch):
+    import vmec_jax.preconditioner_1d_jax as precond_module
+
+    monkeypatch.setattr(
+        precond_module,
+        "rz_preconditioner_matrices",
+        lambda **_kwargs: ("fresh-mats", 0, 3),
+    )
+
+    cache = build_initial_preconditioner_cache(
+        state_init="state",
+        k=SimpleNamespace(bc="bc", tcon=np.asarray([0.25])),
+        norms="fresh-norms",
+        rz_scale="fresh-rz",
+        l_scale="fresh-l",
+        constraint_tcon0=0.0,
+        zero_precond_diag=("zero-diag",),
+        zero_tcon=np.asarray([0.0]),
+        trig="trig",
+        s=np.linspace(0.0, 1.0, 4),
+        cfg=SimpleNamespace(),
+        dtype=np.float64,
+        scan_use_precomputed=False,
+        scan_use_lax_tridi=True,
+        lambda_preconditioner_func=lambda _bc: np.asarray(2.0),
+        rz_norm_func=lambda _state: np.asarray(4.0),
+        resume_state={
+            "vmec2000_cache_valid": False,
+            "cache_precond_diag": ("resume-diag",),
+            "cache_tcon": "resume-tcon",
+            "cache_norms": "resume-norms",
+            "cache_rz_scale": "resume-rz",
+            "cache_l_scale": "resume-l",
+            "cache_rz_norm": "8.0",
+            "cache_f_norm1": "0.125",
+            "cache_prec_rz_mats": "resume-mats",
+            "cache_prec_lam_prec": "resume-lam",
+        },
+    )
+
+    assert cache.precond_diag == ("resume-diag",)
+    assert cache.tcon == "resume-tcon"
+    assert cache.norms == "resume-norms"
+    assert cache.rz_scale == "resume-rz"
+    assert cache.l_scale == "resume-l"
+    assert cache.rz_mats == "resume-mats"
+    assert cache.lam_prec == "resume-lam"
+    assert not bool(np.asarray(cache.valid))
+    assert cache.jmax == 3
+    np.testing.assert_allclose(np.asarray(cache.rz_norm), 8.0)
+    np.testing.assert_allclose(np.asarray(cache.f_norm1), 0.125)
 
 
 def test_build_current_preconditioned_scan_payload_keeps_valid_cache(monkeypatch):
