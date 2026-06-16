@@ -376,10 +376,10 @@ from vmec_jax.solvers.fixed_boundary.scan.runtime import (
 from vmec_jax.solvers.fixed_boundary.scan.time_control import (
     ScanCheckpointResiduals,
     scan_checkpoint_update,
+    scan_post_restart_update,
     scan_fallback_probe_update,
     scan_restart_decision,
     scan_restart_transition,
-    scan_stage_spike_post_update,
     scan_time_control_scalars,
 )
 from vmec_jax.state import VMECState, pack_state, unpack_state
@@ -2963,51 +2963,11 @@ def solve_fixed_boundary_residual_iter(
                 def _no_restart_updates(_):
                     return _scan_math_no_restart_updates(carry_adv)
 
-                (
-                    state_post,
-                    time_step_post,
-                    inv_tau_post,
-                    fsq_prev_post,
-                    vRcc_post,
-                    vRss_post,
-                    vZsc_post,
-                    vZcs_post,
-                    vLsc_post,
-                    vLcs_post,
-                    vRsc_post,
-                    vRcs_post,
-                    vZcc_post,
-                    vZss_post,
-                    vLcc_post,
-                    vLss_post,
-                    iter_offset_post,
-                    iter1_post,
-                    ijacob_post,
-                    bad_resets_post,
-                    bad_growth_post,
-                    force_bcovar_post,
-                ) = jax.lax.cond(do_restart, _restart_updates, _no_restart_updates, operand=None)
-
-                fsq0_prev_post = jnp.where(do_restart, fsq0_prev_before, fsq_phys)
-
-                stage_post_update = scan_stage_spike_post_update(
-                    time_step=time_step_post,
-                    inv_tau=inv_tau_post,
-                    velocity_blocks=(
-                        vRcc_post,
-                        vRss_post,
-                        vZsc_post,
-                        vZcs_post,
-                        vLsc_post,
-                        vLcs_post,
-                        vRsc_post,
-                        vRcs_post,
-                        vZcc_post,
-                        vZss_post,
-                        vLcc_post,
-                        vLss_post,
-                    ),
-                    iter1=iter1_post,
+                restart_update = scan_post_restart_update(
+                    do_restart=do_restart,
+                    restart_updates_fn=_restart_updates,
+                    no_restart_updates_fn=_no_restart_updates,
+                    cond_func=jax.lax.cond,
                     iter2=iter2,
                     stage_spike=stage_spike,
                     stage_prev_fsq=stage_prev_fsq_j,
@@ -3015,8 +2975,10 @@ def solve_fixed_boundary_residual_iter(
                     k_ndamp=k_ndamp,
                     dtype=dtype,
                 )
-                time_step_post = stage_post_update.time_step
-                inv_tau_post = stage_post_update.inv_tau
+                state_post = restart_update.state
+                time_step_post = restart_update.time_step
+                inv_tau_post = restart_update.inv_tau
+                fsq_prev_post = restart_update.fsq_prev
                 (
                     vRcc_post,
                     vRss_post,
@@ -3030,8 +2992,15 @@ def solve_fixed_boundary_residual_iter(
                     vZss_post,
                     vLcc_post,
                     vLss_post,
-                ) = stage_post_update.velocity_blocks
-                iter1_post = stage_post_update.iter1
+                ) = restart_update.velocity_blocks
+                iter_offset_post = restart_update.iter_offset
+                iter1_post = restart_update.iter1
+                ijacob_post = restart_update.ijacob
+                bad_resets_post = restart_update.bad_resets
+                bad_growth_post = restart_update.bad_growth
+                force_bcovar_post = restart_update.force_bcovar_update
+
+                fsq0_prev_post = jnp.where(do_restart, fsq0_prev_before, fsq_phys)
 
                 def _restart_payload(_):
                     return _build_restart_preconditioned_scan_payload(

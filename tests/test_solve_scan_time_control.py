@@ -12,6 +12,7 @@ from vmec_jax.solvers.fixed_boundary.scan.time_control import (
     ScanCheckpointResiduals,
     scan_fallback_probe_update,
     scan_checkpoint_update,
+    scan_post_restart_update,
     scan_restart_decision,
     scan_restart_transition,
     scan_stage_spike_post_scalars,
@@ -332,6 +333,100 @@ def test_stage_spike_post_update_preserves_state_when_inactive_or_no_previous_st
     ):
         np.testing.assert_allclose(np.asarray(inactive_block), np.asarray(original))
         np.testing.assert_allclose(np.asarray(no_previous_block), np.asarray(original))
+
+
+def test_scan_post_restart_update_selects_branch_and_applies_stage_spike_reset():
+    velocity_blocks = tuple(jnp.full((2,), float(i + 1)) for i in range(12))
+    restart_fields = (
+        "restart-state",
+        jnp.asarray(0.02),
+        jnp.asarray([9.0, 8.0]),
+        jnp.asarray(7.0),
+        *velocity_blocks,
+        jnp.asarray(3, dtype=jnp.int32),
+        jnp.asarray(4, dtype=jnp.int32),
+        jnp.asarray(5, dtype=jnp.int32),
+        jnp.asarray(6, dtype=jnp.int32),
+        jnp.asarray(7, dtype=jnp.int32),
+        jnp.asarray(True),
+    )
+    keep_fields = (
+        "keep-state",
+        jnp.asarray(0.04),
+        jnp.asarray([1.0, 2.0]),
+        jnp.asarray(3.0),
+        *(block + 100.0 for block in velocity_blocks),
+        jnp.asarray(30, dtype=jnp.int32),
+        jnp.asarray(40, dtype=jnp.int32),
+        jnp.asarray(50, dtype=jnp.int32),
+        jnp.asarray(60, dtype=jnp.int32),
+        jnp.asarray(70, dtype=jnp.int32),
+        jnp.asarray(False),
+    )
+
+    update = scan_post_restart_update(
+        do_restart=jnp.asarray(True),
+        restart_updates_fn=lambda _operand: restart_fields,
+        no_restart_updates_fn=lambda _operand: keep_fields,
+        cond_func=_eager_cond,
+        iter2=jnp.asarray(6, dtype=jnp.int32),
+        stage_spike=jnp.asarray(True),
+        stage_prev_fsq=jnp.asarray(1.0),
+        stage_transition_scale=0.5,
+        k_ndamp=2,
+        dtype=jnp.asarray(0.0).dtype,
+    )
+
+    assert update.state == "restart-state"
+    np.testing.assert_allclose(_scalar(update.time_step), 0.01)
+    np.testing.assert_allclose(np.asarray(update.inv_tau), np.full(2, 15.0))
+    assert _scalar(update.fsq_prev) == 7.0
+    assert _scalar(update.iter_offset) == 3
+    assert _scalar(update.iter1) == 6
+    assert _scalar(update.ijacob) == 5
+    assert _scalar(update.bad_resets) == 6
+    assert _scalar(update.bad_growth) == 7
+    assert _scalar(update.force_bcovar_update)
+    for block in update.velocity_blocks:
+        np.testing.assert_allclose(np.asarray(block), 0.0)
+
+
+def test_scan_post_restart_update_preserves_no_restart_fields_without_stage_spike():
+    velocity_blocks = tuple(jnp.full((1,), float(i + 1)) for i in range(12))
+    keep_fields = (
+        "keep-state",
+        jnp.asarray(0.04),
+        jnp.asarray([1.0]),
+        jnp.asarray(3.0),
+        *velocity_blocks,
+        jnp.asarray(30, dtype=jnp.int32),
+        jnp.asarray(40, dtype=jnp.int32),
+        jnp.asarray(50, dtype=jnp.int32),
+        jnp.asarray(60, dtype=jnp.int32),
+        jnp.asarray(70, dtype=jnp.int32),
+        jnp.asarray(False),
+    )
+
+    update = scan_post_restart_update(
+        do_restart=jnp.asarray(False),
+        restart_updates_fn=lambda _operand: pytest.fail("restart branch should not run"),
+        no_restart_updates_fn=lambda _operand: keep_fields,
+        cond_func=_eager_cond,
+        iter2=jnp.asarray(6, dtype=jnp.int32),
+        stage_spike=jnp.asarray(False),
+        stage_prev_fsq=jnp.asarray(1.0),
+        stage_transition_scale=0.5,
+        k_ndamp=1,
+        dtype=jnp.asarray(0.0).dtype,
+    )
+
+    assert update.state == "keep-state"
+    np.testing.assert_allclose(_scalar(update.time_step), 0.04)
+    np.testing.assert_allclose(np.asarray(update.inv_tau), [1.0])
+    assert _scalar(update.iter1) == 40
+    assert not _scalar(update.force_bcovar_update)
+    for actual, expected in zip(update.velocity_blocks, velocity_blocks, strict=True):
+        np.testing.assert_allclose(np.asarray(actual), np.asarray(expected))
 
 
 def test_vmecpp_bad_progress_uses_bad_progress_reason_and_time_scaling():

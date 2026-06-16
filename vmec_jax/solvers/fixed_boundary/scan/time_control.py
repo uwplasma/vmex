@@ -74,6 +74,22 @@ class ScanStageSpikePostUpdate(NamedTuple):
     iter1: Any
 
 
+class ScanPostRestartUpdate(NamedTuple):
+    """Scan fields after restart/no-restart selection and stage-spike reset."""
+
+    state: Any
+    time_step: Any
+    inv_tau: Any
+    fsq_prev: Any
+    velocity_blocks: tuple[Any, ...]
+    iter_offset: Any
+    iter1: Any
+    ijacob: Any
+    bad_resets: Any
+    bad_growth: Any
+    force_bcovar_update: Any
+
+
 class ScanFallbackProbeUpdate(NamedTuple):
     probe_count: Any
     probe_bad_jac: Any
@@ -379,6 +395,87 @@ def scan_stage_spike_post_update(
         inv_tau=inv_tau_next,
         velocity_blocks=velocity_next,
         iter1=iter1_next,
+    )
+
+
+def scan_post_restart_update(
+    *,
+    do_restart: Any,
+    restart_updates_fn: Any,
+    no_restart_updates_fn: Any,
+    cond_func: Any,
+    iter2: Any,
+    stage_spike: Any,
+    stage_prev_fsq: Any | None,
+    stage_transition_scale: float,
+    k_ndamp: int,
+    dtype: Any,
+) -> ScanPostRestartUpdate:
+    """Select restart/no-restart update fields and apply stage-spike reset."""
+
+    selected = cond_func(do_restart, restart_updates_fn, no_restart_updates_fn, operand=None)
+    (
+        state_post,
+        time_step_post,
+        inv_tau_post,
+        fsq_prev_post,
+        vRcc_post,
+        vRss_post,
+        vZsc_post,
+        vZcs_post,
+        vLsc_post,
+        vLcs_post,
+        vRsc_post,
+        vRcs_post,
+        vZcc_post,
+        vZss_post,
+        vLcc_post,
+        vLss_post,
+        iter_offset_post,
+        iter1_post,
+        ijacob_post,
+        bad_resets_post,
+        bad_growth_post,
+        force_bcovar_post,
+    ) = selected
+
+    stage_update = scan_stage_spike_post_update(
+        time_step=time_step_post,
+        inv_tau=inv_tau_post,
+        velocity_blocks=(
+            vRcc_post,
+            vRss_post,
+            vZsc_post,
+            vZcs_post,
+            vLsc_post,
+            vLcs_post,
+            vRsc_post,
+            vRcs_post,
+            vZcc_post,
+            vZss_post,
+            vLcc_post,
+            vLss_post,
+        ),
+        iter1=iter1_post,
+        iter2=iter2,
+        stage_spike=stage_spike,
+        stage_prev_fsq=stage_prev_fsq,
+        stage_transition_scale=stage_transition_scale,
+        k_ndamp=k_ndamp,
+        dtype=dtype,
+    )
+    return ScanPostRestartUpdate(
+        state=state_post,
+        time_step=stage_update.time_step,
+        inv_tau=stage_update.inv_tau,
+        fsq_prev=fsq_prev_post,
+        velocity_blocks=stage_update.velocity_blocks,
+        iter_offset=iter_offset_post,
+        iter1=stage_update.iter1,
+        ijacob=ijacob_post,
+        bad_resets=bad_resets_post,
+        bad_growth=bad_growth_post,
+        force_bcovar_update=force_bcovar_post,
     )
 
 

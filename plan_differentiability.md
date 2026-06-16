@@ -6881,3 +6881,62 @@ Completion:
 - Implicit residual-adjoint decomposition: 88%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.61%.
+
+## 2026-06-16 VMEC2000 Restart/Stage Update Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `ScanPostRestartUpdate` and `scan_post_restart_update` to the scan
+   time-control module.
+2. Moved the restart/no-restart selected-field unpacking and stage-spike
+   post-reset application out of `_advance_step`.
+3. Kept time-control debug callback emission in the scan controller so the
+   logging order remains explicit and unchanged.
+4. Added direct tests for restart selection with stage-spike reset and for the
+   inactive no-restart branch.
+
+Results obtained:
+
+- The residual iteration module dropped from 8,435 lines to 8,404 lines.
+- `solve_fixed_boundary_residual_iter` dropped from 7,821 to 7,790 lines.
+- `_run_vmec2000_scan` dropped from 1,543 to 1,512 lines.
+- Restart update semantics are now a named branch-policy seam, making the
+  adaptive-controller state transition easier to fingerprint and validate.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/scan/time_control.py vmec_jax/solvers/fixed_boundary/residual/iteration.py tests/test_solve_scan_time_control.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_scan_time_control.py tests/test_solve_real_scan_wave10_coverage.py tests/test_solve_wave7_coverage.py::test_residual_iter_vmec2000_scan_minimal_one_step tests/test_solve_wave7_coverage.py::test_residual_iter_vmec2000_scan_state_only -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_scan_math_helpers.py tests/test_solve_scan_time_control.py tests/test_solve_scan_resume_state.py tests/test_solve_scan_planning_helpers.py tests/test_solve_scan_output.py tests/test_solve_scan_output_edge_cases_more_coverage.py tests/test_solve_finish_cache_more_coverage.py tests/test_solve_residual_iter_finalize_helpers.py tests/test_solve_scan_debug_helpers.py tests/test_solve_scan_payload_helpers.py -q`
+- `python tools/diagnostics/source_health.py --top 8 --top-functions 12`
+
+Best next steps:
+
+1. Commit and push this restart/stage update extraction.
+2. Check CI for the latest branch head after push.
+3. Continue with small but meaningful controller seams only where the extracted
+   helper has a stable physical/domain name and direct tests.
+4. Prioritize the free-boundary adaptive branch validation next if fixed-boundary
+   scan extractions become mostly debug plumbing rather than numerical branch
+   policy.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.77%.
+- Differentiability/refactor implementation: 99.996%.
+- Solver monolith reduction: 98.15%.
+- Free-boundary adjoint monolith reduction: 80%.
+- Driver workflow decomposition: 93.2%.
+- WOUT diagnostic/profile decomposition: 98.5%.
+- Optimizer workflow decomposition: 86%.
+- Implicit residual-adjoint decomposition: 88%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.62%.
