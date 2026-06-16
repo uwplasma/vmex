@@ -6571,3 +6571,66 @@ Completion:
 - Implicit residual-adjoint decomposition: 88%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.56%.
+
+## 2026-06-16 VMEC2000 Restart Force Payload Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `build_restart_preconditioned_scan_payload` to the scan payload module.
+2. Moved the restart-branch force recomputation, fresh preconditioner cache
+   assembly, R/Z preconditioner application, and restart payload construction
+   out of `_advance_step`.
+3. Kept restart selection in the scan controller while making the restart
+   recompute branch directly unit-testable.
+4. Added direct test coverage for restart force recomputation and cache payload
+   construction.
+
+Results obtained:
+
+- The residual iteration module dropped from 8,784 lines to 8,717 lines.
+- `solve_fixed_boundary_residual_iter` dropped from 8,174 to 8,107 lines.
+- `_run_vmec2000_scan` dropped from 1,896 to 1,829 lines.
+- `_scan_step` dropped from 889 to 822 lines.
+- `_advance_step` dropped from 873 to 806 lines.
+- The scan controller no longer owns restart force/cache recompute details,
+  leaving restart policy and branch choice separate from force payload
+  construction.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/scan/payload.py vmec_jax/solvers/fixed_boundary/residual/iteration.py tests/test_solve_scan_payload_helpers.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_scan_payload_helpers.py tests/test_solve_real_scan_wave10_coverage.py tests/test_solve_wave7_coverage.py::test_residual_iter_vmec2000_scan_minimal_one_step tests/test_solve_wave7_coverage.py::test_residual_iter_vmec2000_scan_state_only -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_scan_planning_helpers.py tests/test_solve_scan_output.py tests/test_solve_scan_output_edge_cases_more_coverage.py tests/test_solve_finish_cache_more_coverage.py tests/test_solve_residual_iter_finalize_helpers.py tests/test_solve_scan_debug_helpers.py -q`
+- `python tools/diagnostics/source_health.py --top 8 --top-functions 12`
+
+Best next steps:
+
+1. Commit and push this restart force-payload extraction.
+2. Re-check branch CI.
+3. The next largest remaining scan seam is history-row/new-carry assembly.
+   Extracting it should be done carefully because it touches scan history
+   modes, fallback probes, and accepted masks.
+4. After one more scan seam, reassess whether continuing in `iteration.py` or
+   shifting back to free-boundary adaptive-branch gates gives better marginal
+   value.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.77%.
+- Differentiability/refactor implementation: 99.995%.
+- Solver monolith reduction: 96.9%.
+- Free-boundary adjoint monolith reduction: 80%.
+- Driver workflow decomposition: 93.2%.
+- WOUT diagnostic/profile decomposition: 98.5%.
+- Optimizer workflow decomposition: 86%.
+- Implicit residual-adjoint decomposition: 88%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.57%.

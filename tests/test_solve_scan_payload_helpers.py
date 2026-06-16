@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import numpy as np
@@ -10,6 +11,7 @@ from vmec_jax.solvers.fixed_boundary.scan.payload import (
     ScanForcePayload,
     ScanStepFields,
     build_current_preconditioned_scan_payload,
+    build_restart_preconditioned_scan_payload,
     build_scan_force_payload,
     build_scan_step_fields,
     current_scan_payload,
@@ -355,6 +357,67 @@ def test_build_current_preconditioned_scan_payload_refreshes_cache(monkeypatch):
     assert matrix_calls[0]["bc"] == "bc"
     assert matrix_calls[0]["use_precomputed"] is True
     assert matrix_calls[0]["use_lax_tridi"] is True
+
+
+def test_build_restart_preconditioned_scan_payload_recomputes_restart_forces(monkeypatch):
+    import vmec_jax.preconditioner_1d_jax as precond_module
+
+    monkeypatch.setattr(
+        precond_module,
+        "rz_preconditioner_matrices",
+        lambda *, bc, k, trig, s, cfg, use_precomputed, use_lax_tridi: ("restart-mats", 1, 2),
+    )
+    monkeypatch.setattr(
+        precond_module,
+        "rz_preconditioner_apply",
+        lambda *, frzl_in, mats, jmax, cfg, use_precomputed, use_lax_tridi: frzl_in,
+    )
+
+    def compute_forces_scan(state, **kwargs):
+        assert state == "state-post"
+        assert kwargs["include_edge"] is False
+        return (
+            SimpleNamespace(bc=object(), tcon=np.asarray([0.0])),
+            _frzl(1.0),
+            np.asarray(10.0),
+            np.asarray(20.0),
+            np.asarray(30.0),
+            "restart-rz-scale",
+            "restart-l-scale",
+            SimpleNamespace(r1=np.asarray(2.0), fnorm=np.asarray(3.0), fnormL=np.asarray(5.0)),
+        )
+
+    payload = build_restart_preconditioned_scan_payload(
+        state_post="state-post",
+        compute_forces_scan_func=compute_forces_scan,
+        trace_context=nullcontext,
+        zero_m1=np.asarray(0.0),
+        zero_precond_diag=("zero",),
+        zero_tcon=np.asarray([0.0]),
+        constraint_active_false=False,
+        constraint_tcon0=0.0,
+        trig=SimpleNamespace(),
+        s=np.linspace(0.0, 1.0, 3),
+        cfg=SimpleNamespace(lconm1=True),
+        dtype=np.float64,
+        scan_use_precomputed=False,
+        scan_use_lax_tridi=False,
+        lambda_preconditioner_func=lambda _bc: np.asarray(2.0),
+        rz_norm_func=lambda _state: np.asarray(4.0),
+        scale_m1_precond_rhs_func=lambda frzl, _mats: frzl,
+        w_mode_mn=np.ones((2, 2)),
+        lambda_update_scale_j=np.asarray(1.0),
+        apply_lambda_update_scale=False,
+        delta_s=np.asarray(0.25),
+        jmax0=2,
+    )
+
+    np.testing.assert_allclose(np.asarray(payload.fsqr), 60.0)
+    np.testing.assert_allclose(np.asarray(payload.fsqz), 120.0)
+    np.testing.assert_allclose(np.asarray(payload.fsql), 150.0)
+    np.testing.assert_allclose(np.asarray(payload.cache_f_norm1), 0.25)
+    assert payload.cache_rz_mats == "restart-mats"
+    assert bool(np.asarray(payload.cache_valid))
 
 
 def test_select_scan_force_payload_restart_and_no_restart_paths():

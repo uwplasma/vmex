@@ -410,6 +410,116 @@ def build_current_preconditioned_scan_payload(
     )
 
 
+def build_restart_preconditioned_scan_payload(
+    *,
+    state_post: Any,
+    compute_forces_scan_func: Callable[..., tuple[Any, TomnspsRZL, Any, Any, Any, Any, Any, Any]],
+    trace_context: Callable[[], Any],
+    zero_m1: Any,
+    zero_precond_diag: Any,
+    zero_tcon: Any,
+    constraint_active_false: Any,
+    constraint_tcon0: Any,
+    trig: Any,
+    s: Any,
+    cfg: Any,
+    dtype: Any,
+    scan_use_precomputed: bool,
+    scan_use_lax_tridi: bool,
+    lambda_preconditioner_func: Callable[[Any], Any],
+    rz_norm_func: Callable[[Any], Any],
+    scale_m1_precond_rhs_func: Callable[[TomnspsRZL, Any], TomnspsRZL],
+    w_mode_mn: Any,
+    lambda_update_scale_j: Any,
+    apply_lambda_update_scale: bool,
+    delta_s: Any,
+    jmax0: Any,
+) -> ScanForcePayload:
+    """Recompute restart forces and return a fresh restart scan payload."""
+
+    with trace_context():
+        k_r, frzl_r, gcr2_r, gcz2_r, gcl2_r, rz_scale_r, l_scale_r, norms_used_r = compute_forces_scan_func(
+            state_post,
+            include_edge=False,
+            zero_m1=zero_m1,
+            constraint_precond_diag=zero_precond_diag,
+            constraint_tcon=zero_tcon,
+            constraint_precond_active=constraint_active_false,
+            constraint_tcon_active=constraint_active_false,
+            iter_idx=None,
+        )
+    fsqr_r = norms_used_r.r1 * norms_used_r.fnorm * gcr2_r
+    fsqz_r = norms_used_r.r1 * norms_used_r.fnorm * gcz2_r
+    fsql_r = norms_used_r.fnormL * gcl2_r
+
+    rz_norm_r = rz_norm_func(state_post)
+    f_norm1_r = jnp.where(rz_norm_r != 0.0, 1.0 / rz_norm_r, jnp.asarray(float("inf"), dtype=dtype))
+
+    if constraint_tcon0 is None or float(constraint_tcon0) == 0.0:
+        cache_precond_diag_r = zero_precond_diag
+        cache_tcon_r = zero_tcon
+    else:
+        from vmec_jax.vmec_constraints import precondn_diag_axd1_from_bcovar
+
+        ard1_r, azd1_r = precondn_diag_axd1_from_bcovar(
+            trig=trig,
+            s=s,
+            bsq=k_r.bc.bsq,
+            r12=k_r.bc.jac.r12,
+            sqrtg=k_r.bc.jac.sqrtg,
+            ru12=k_r.bc.jac.ru12,
+            zu12=k_r.bc.jac.zu12,
+        )
+        cache_precond_diag_r = (ard1_r, azd1_r)
+        cache_tcon_r = jnp.asarray(k_r.tcon)
+    cache_lam_prec_r = lambda_preconditioner_func(k_r.bc)
+    from vmec_jax.preconditioner_1d_jax import rz_preconditioner_matrices
+
+    mats_r, _jmin, _jmax = rz_preconditioner_matrices(
+        bc=k_r.bc,
+        k=k_r,
+        trig=trig,
+        s=s,
+        cfg=cfg,
+        use_precomputed=bool(scan_use_precomputed),
+        use_lax_tridi=bool(scan_use_lax_tridi),
+    )
+    frzl_rhs_r = scale_m1_precond_rhs_func(frzl_r, mats_r)
+    from vmec_jax.preconditioner_1d_jax import rz_preconditioner_apply
+
+    frzl_rz_r = rz_preconditioner_apply(
+        frzl_in=frzl_rhs_r,
+        mats=mats_r,
+        jmax=jmax0,
+        cfg=cfg,
+        use_precomputed=bool(scan_use_precomputed),
+        use_lax_tridi=bool(scan_use_lax_tridi),
+    )
+    return restart_scan_payload(
+        frzl_rz=frzl_rz_r,
+        cache_lam_prec=cache_lam_prec_r,
+        w_mode_mn=w_mode_mn,
+        lambda_update_scale_j=lambda_update_scale_j,
+        apply_lambda_update_scale=bool(apply_lambda_update_scale),
+        fsqr=fsqr_r,
+        fsqz=fsqz_r,
+        fsql=fsql_r,
+        f_norm1=f_norm1_r,
+        delta_s=delta_s,
+        s=s,
+        lconm1=bool(getattr(cfg, "lconm1", True)),
+        cache_precond_diag=cache_precond_diag_r,
+        cache_tcon=cache_tcon_r,
+        cache_norms=norms_used_r,
+        cache_rz_scale=rz_scale_r,
+        cache_l_scale=l_scale_r,
+        cache_rz_norm=rz_norm_r,
+        cache_f_norm1=f_norm1_r,
+        cache_rz_mats=mats_r,
+        cache_valid=jnp.asarray(True),
+    )
+
+
 def current_scan_payload(**kwargs: Any) -> ScanForcePayload:
     return build_scan_force_payload(**kwargs)
 
