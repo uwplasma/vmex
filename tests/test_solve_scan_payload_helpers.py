@@ -11,6 +11,7 @@ from vmec_jax.solvers.fixed_boundary.scan.payload import (
     ScanStepFields,
     build_current_preconditioned_scan_payload,
     build_scan_force_payload,
+    build_scan_step_fields,
     current_scan_payload,
     mask_scan_restart_force_payload,
     restart_scan_payload,
@@ -421,3 +422,92 @@ def test_select_scan_step_fields_matches_accept_reject_semantics():
         cond=_fake_cond,
     )
     assert fields.state == "accepted-0"
+
+
+def test_build_scan_step_fields_applies_vmec_accept_update_and_nonvmec_reject():
+    payload = _payload(1.0)
+    state = SimpleNamespace(
+        layout="layout",
+        Rcos=np.asarray([10.0, 20.0]),
+        Rsin=np.asarray([1.0, 2.0]),
+        Zcos=np.asarray([3.0, 4.0]),
+        Zsin=np.asarray([30.0, 40.0]),
+        Lcos=np.asarray([5.0, 6.0]),
+        Lsin=np.asarray([50.0, 60.0]),
+    )
+    zeros = tuple(np.zeros(2) for _ in range(12))
+
+    def add_modes(a, b):
+        return np.asarray(a) + np.asarray(b)
+
+    fields = build_scan_step_fields(
+        payload=payload,
+        state_post=state,
+        velocity_blocks_post=zeros,
+        inv_tau_post=np.asarray([0.1, 0.2]),
+        fsq_prev_post=np.asarray(1.0),
+        fsq1=np.asarray(1.0),
+        time_step_post=np.asarray(0.5),
+        iter2=np.asarray(2),
+        iter1_post=np.asarray(1),
+        k_ndamp=2,
+        dtype=np.float64,
+        flip_sign=np.asarray(1.0),
+        lasym=True,
+        static=SimpleNamespace(),
+        edge_Rcos=None,
+        edge_Rsin=None,
+        edge_Zcos=None,
+        edge_Zsin=None,
+        free_boundary_enabled=False,
+        idx00=0,
+        mn_cos_to_signed_physical=add_modes,
+        mn_sin_to_signed_physical=add_modes,
+        mn_sin_to_signed_physical_lambda=add_modes,
+        mn_cos_to_signed_physical_lambda=add_modes,
+        enforce_fixed_boundary_and_axis=lambda state_arg, *_args, **_kwargs: state_arg,
+        apply_vmec_lambda_axis_rules=lambda state_arg: state_arg,
+        vmec2000_control=True,
+        do_restart=True,
+        cond=_fake_cond,
+    )
+    assert fields.state is not state
+    assert bool(np.any(np.asarray(fields.state.Rcos) != np.asarray(state.Rcos)))
+    assert bool(np.any(np.asarray(fields.state.Rsin) != np.asarray(state.Rsin)))
+    assert np.asarray(fields.fsq_prev) == pytest.approx(1.0)
+
+    rejected = build_scan_step_fields(
+        payload=payload,
+        state_post=state,
+        velocity_blocks_post=zeros,
+        inv_tau_post=np.asarray([0.1, 0.2]),
+        fsq_prev_post=np.asarray(7.0),
+        fsq1=np.asarray(1.0),
+        time_step_post=np.asarray(0.5),
+        iter2=np.asarray(2),
+        iter1_post=np.asarray(1),
+        k_ndamp=2,
+        dtype=np.float64,
+        flip_sign=np.asarray(1.0),
+        lasym=True,
+        static=SimpleNamespace(),
+        edge_Rcos=None,
+        edge_Rsin=None,
+        edge_Zcos=None,
+        edge_Zsin=None,
+        free_boundary_enabled=False,
+        idx00=0,
+        mn_cos_to_signed_physical=add_modes,
+        mn_sin_to_signed_physical=add_modes,
+        mn_sin_to_signed_physical_lambda=add_modes,
+        mn_cos_to_signed_physical_lambda=add_modes,
+        enforce_fixed_boundary_and_axis=lambda state_arg, *_args, **_kwargs: state_arg,
+        apply_vmec_lambda_axis_rules=lambda state_arg: state_arg,
+        vmec2000_control=False,
+        do_restart=True,
+        cond=_fake_cond,
+    )
+    assert rejected.state is state
+    for actual, expected in zip(tuple(rejected)[1:13], zeros, strict=True):
+        np.testing.assert_allclose(np.asarray(actual), expected)
+    assert np.asarray(rejected.fsq_prev) == pytest.approx(7.0)

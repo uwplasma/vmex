@@ -319,12 +319,11 @@ from vmec_jax.solvers.fixed_boundary.scan.output import (
     vmec2000_traced_scan_diagnostics,
 )
 from vmec_jax.solvers.fixed_boundary.scan.payload import (
-    ScanStepFields as _ScanStepFields,
     build_current_preconditioned_scan_payload as _build_current_preconditioned_scan_payload,
+    build_scan_step_fields as _build_scan_step_fields,
     mask_scan_restart_force_payload as _mask_scan_restart_force_payload,  # noqa: F401 - re-exported for internal tests/importers.
     restart_scan_payload as _restart_scan_payload,
     select_scan_force_payload as _select_scan_force_payload,
-    select_scan_step_fields as _select_scan_step_fields,
 )
 from vmec_jax.solvers.fixed_boundary.scan.math import (
     _hold_step as _scan_math_hold_step,
@@ -3238,26 +3237,12 @@ def solve_fixed_boundary_residual_iter(
                     current_payload_fn=_current_payload,
                     cond=jax.lax.cond,
                 )
-                (
-                    frcc_u_use,
-                    frss_u_use,
-                    fzsc_u_use,
-                    fzcs_u_use,
-                    flsc_u_use,
-                    flcs_u_use,
-                    frsc_u_use,
-                    frcs_u_use,
-                    fzcc_u_use,
-                    fzss_u_use,
-                    flcc_u_use,
-                    flss_u_use,
-                ) = payload_use.blocks
-                fsqr_use = payload_use.fsqr
-                fsqz_use = payload_use.fsqz
-                fsql_use = payload_use.fsql
-                fsqr1_use = payload_use.fsqr1
-                fsqz1_use = payload_use.fsqz1
-                fsql1_use = payload_use.fsql1
+                fsqr = payload_use.fsqr
+                fsqz = payload_use.fsqz
+                fsql = payload_use.fsql
+                fsqr1 = payload_use.fsqr1
+                fsqz1 = payload_use.fsqz1
+                fsql1 = payload_use.fsql1
                 cache_precond_diag_use = payload_use.cache_precond_diag
                 cache_tcon_use = payload_use.cache_tcon
                 cache_norms_use = payload_use.cache_norms
@@ -3268,128 +3253,50 @@ def solve_fixed_boundary_residual_iter(
                 cache_rz_mats_use = payload_use.cache_rz_mats
                 cache_lam_prec_use = payload_use.cache_lam_prec
                 cache_valid_use = payload_use.cache_valid
-
-                frcc_u = frcc_u_use
-                frss_u = frss_u_use
-                fzsc_u = fzsc_u_use
-                fzcs_u = fzcs_u_use
-                flsc_u = flsc_u_use
-                flcs_u = flcs_u_use
-                frsc_u = frsc_u_use
-                frcs_u = frcs_u_use
-                fzcc_u = fzcc_u_use
-                fzss_u = fzss_u_use
-                flcc_u = flcc_u_use
-                flss_u = flss_u_use
-                fsqr = fsqr_use
-                fsqz = fsqz_use
-                fsql = fsql_use
-                fsqr1 = fsqr1_use
-                fsqz1 = fsqz1_use
-                fsql1 = fsql1_use
                 fsq1 = fsqr1 + fsqz1 + fsql1
 
-                def _accept_step(_):
-                    inv_tau_reset = jnp.full((k_ndamp,), jnp.asarray(0.15, dtype=dtype) / time_step_post)
-                    invtau_num = jnp.where(
-                        fsq1 == 0.0,
-                        0.0,
-                        jnp.minimum(jnp.abs(jnp.log(fsq1 / jnp.maximum(fsq_prev_post, 1.0e-30))), 0.15),
-                    )
-                    inv_tau_next = jnp.concatenate([inv_tau_post[1:], invtau_num[None] / time_step_post], axis=0)
-                    inv_tau = jnp.where(iter2 == iter1_post, inv_tau_reset, inv_tau_next)
-                    fsq_prev = fsq1
-                    otav = jnp.sum(inv_tau) / float(k_ndamp)
-                    dtau = time_step_post * otav / 2.0
-                    b1 = 1.0 - dtau
-                    fac = 1.0 / (1.0 + dtau)
-                    force_scale = time_step_post
-                    vRcc = fac * (b1 * vRcc_post + force_scale * (flip_sign0 * frcc_u))
-                    vRss = fac * (b1 * vRss_post + force_scale * (flip_sign0 * frss_u))
-                    vRsc = fac * (b1 * vRsc_post + force_scale * (flip_sign0 * frsc_u))
-                    vRcs = fac * (b1 * vRcs_post + force_scale * (flip_sign0 * frcs_u))
-                    vZsc = fac * (b1 * vZsc_post + force_scale * (flip_sign0 * fzsc_u))
-                    vZcs = fac * (b1 * vZcs_post + force_scale * (flip_sign0 * fzcs_u))
-                    vZcc = fac * (b1 * vZcc_post + force_scale * (flip_sign0 * fzcc_u))
-                    vZss = fac * (b1 * vZss_post + force_scale * (flip_sign0 * fzss_u))
-                    vLsc = fac * (b1 * vLsc_post + force_scale * (flip_sign0 * flsc_u))
-                    vLcs = fac * (b1 * vLcs_post + force_scale * (flip_sign0 * flcs_u))
-                    vLcc = fac * (b1 * vLcc_post + force_scale * (flip_sign0 * flcc_u))
-                    vLss = fac * (b1 * vLss_post + force_scale * (flip_sign0 * flss_u))
-                    dR = time_step_post * _mn_cos_to_signed_physical(vRcc, vRss)
-                    dZ = time_step_post * _mn_sin_to_signed_physical(vZsc, vZcs)
-                    dL = time_step_post * _mn_sin_to_signed_physical_lambda(vLsc, vLcs)
-                    if bool(cfg.lasym):
-                        dR_sin = time_step_post * _mn_sin_to_signed_physical(vRsc, vRcs)
-                        dZ_cos = time_step_post * _mn_cos_to_signed_physical(vZcc, vZss)
-                        dL_cos = time_step_post * _mn_cos_to_signed_physical_lambda(vLcc, vLss)
-                    else:
-                        dR_sin = jnp.zeros_like(dR)
-                        dZ_cos = jnp.zeros_like(dR)
-                        dL_cos = jnp.zeros_like(dR)
-                    state_new = VMECState(
-                        layout=state_post.layout,
-                        Rcos=jnp.asarray(state_post.Rcos) + dR,
-                        Rsin=jnp.asarray(state_post.Rsin) + dR_sin,
-                        Zcos=jnp.asarray(state_post.Zcos) + dZ_cos,
-                        Zsin=jnp.asarray(state_post.Zsin) + dZ,
-                        Lcos=jnp.asarray(state_post.Lcos) + dL_cos,
-                        Lsin=jnp.asarray(state_post.Lsin) + dL,
-                    )
-                    state_new = _enforce_fixed_boundary_and_axis(
-                        state_new,
-                        static,
-                        edge_Rcos=carry.edge_Rcos,
-                        edge_Rsin=carry.edge_Rsin,
-                        edge_Zcos=carry.edge_Zcos,
-                        edge_Zsin=carry.edge_Zsin,
-                        enforce_edge=not bool(free_boundary_enabled),
-                        enforce_lambda_axis=True,
-                        idx00=idx00,
-                    )
-                    state_new = _apply_vmec_lambda_axis_rules(state_new)
-                    return _ScanStepFields(
-                        state=state_new,
-                        vRcc=vRcc,
-                        vRss=vRss,
-                        vZsc=vZsc,
-                        vZcs=vZcs,
-                        vLsc=vLsc,
-                        vLcs=vLcs,
-                        vRsc=vRsc,
-                        vRcs=vRcs,
-                        vZcc=vZcc,
-                        vZss=vZss,
-                        vLcc=vLcc,
-                        vLss=vLss,
-                        inv_tau=inv_tau,
-                        fsq_prev=fsq_prev,
-                    )
-
-                def _reject_step(_):
-                    return _ScanStepFields(
-                        state=state_post,
-                        vRcc=vRcc_post,
-                        vRss=vRss_post,
-                        vZsc=vZsc_post,
-                        vZcs=vZcs_post,
-                        vLsc=vLsc_post,
-                        vLcs=vLcs_post,
-                        vRsc=vRsc_post,
-                        vRcs=vRcs_post,
-                        vZcc=vZcc_post,
-                        vZss=vZss_post,
-                        vLcc=vLcc_post,
-                        vLss=vLss_post,
-                        inv_tau=inv_tau_post,
-                        fsq_prev=fsq_prev_post,
-                    )
-
-                step_fields = _select_scan_step_fields(
+                step_fields = _build_scan_step_fields(
+                    payload=payload_use,
+                    state_post=state_post,
+                    velocity_blocks_post=(
+                        vRcc_post,
+                        vRss_post,
+                        vZsc_post,
+                        vZcs_post,
+                        vLsc_post,
+                        vLcs_post,
+                        vRsc_post,
+                        vRcs_post,
+                        vZcc_post,
+                        vZss_post,
+                        vLcc_post,
+                        vLss_post,
+                    ),
+                    inv_tau_post=inv_tau_post,
+                    fsq_prev_post=fsq_prev_post,
+                    fsq1=fsq1,
+                    time_step_post=time_step_post,
+                    iter2=iter2,
+                    iter1_post=iter1_post,
+                    k_ndamp=k_ndamp,
+                    dtype=dtype,
+                    flip_sign=flip_sign0,
+                    lasym=bool(cfg.lasym),
+                    static=static,
+                    edge_Rcos=carry.edge_Rcos,
+                    edge_Rsin=carry.edge_Rsin,
+                    edge_Zcos=carry.edge_Zcos,
+                    edge_Zsin=carry.edge_Zsin,
+                    free_boundary_enabled=bool(free_boundary_enabled),
+                    idx00=idx00,
+                    mn_cos_to_signed_physical=_mn_cos_to_signed_physical,
+                    mn_sin_to_signed_physical=_mn_sin_to_signed_physical,
+                    mn_sin_to_signed_physical_lambda=_mn_sin_to_signed_physical_lambda,
+                    mn_cos_to_signed_physical_lambda=_mn_cos_to_signed_physical_lambda,
+                    enforce_fixed_boundary_and_axis=_enforce_fixed_boundary_and_axis,
+                    apply_vmec_lambda_axis_rules=_apply_vmec_lambda_axis_rules,
                     vmec2000_control=bool(vmec2000_control),
                     do_restart=do_restart,
-                    accept_step_fn=_accept_step,
-                    reject_step_fn=_reject_step,
                     cond=jax.lax.cond,
                 )
                 (

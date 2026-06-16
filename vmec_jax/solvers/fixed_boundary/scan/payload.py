@@ -443,6 +443,168 @@ def select_scan_force_payload(
     return mask_scan_restart_payload(payload=current_payload_fn(None), do_restart=do_restart)
 
 
+def build_scan_step_fields(
+    *,
+    payload: ScanForcePayload,
+    state_post: Any,
+    velocity_blocks_post: tuple[Any, ...],
+    inv_tau_post: Any,
+    fsq_prev_post: Any,
+    fsq1: Any,
+    time_step_post: Any,
+    iter2: Any,
+    iter1_post: Any,
+    k_ndamp: int,
+    dtype: Any,
+    flip_sign: Any,
+    lasym: bool,
+    static: Any,
+    edge_Rcos: Any,
+    edge_Rsin: Any,
+    edge_Zcos: Any,
+    edge_Zsin: Any,
+    free_boundary_enabled: bool,
+    idx00: Any,
+    mn_cos_to_signed_physical: Callable[[Any, Any], Any],
+    mn_sin_to_signed_physical: Callable[[Any, Any], Any],
+    mn_sin_to_signed_physical_lambda: Callable[[Any, Any], Any],
+    mn_cos_to_signed_physical_lambda: Callable[[Any, Any], Any],
+    enforce_fixed_boundary_and_axis: Callable[..., Any],
+    apply_vmec_lambda_axis_rules: Callable[[Any], Any],
+    vmec2000_control: bool,
+    do_restart: Any,
+    cond: Callable[..., ScanStepFields] | None = None,
+) -> ScanStepFields:
+    """Apply VMEC scan accept/reject semantics to state and velocity fields.
+
+    The caller still owns branch policy.  This helper owns only the numerical
+    update once a preconditioned force payload and post-restart fields exist.
+    """
+
+    (
+        vRcc_post,
+        vRss_post,
+        vZsc_post,
+        vZcs_post,
+        vLsc_post,
+        vLcs_post,
+        vRsc_post,
+        vRcs_post,
+        vZcc_post,
+        vZss_post,
+        vLcc_post,
+        vLss_post,
+    ) = velocity_blocks_post
+    blocks = payload.blocks
+
+    def _accept_step(_):
+        inv_tau_reset = jnp.full((int(k_ndamp),), jnp.asarray(0.15, dtype=dtype) / time_step_post)
+        invtau_num = jnp.where(
+            fsq1 == 0.0,
+            0.0,
+            jnp.minimum(jnp.abs(jnp.log(fsq1 / jnp.maximum(fsq_prev_post, 1.0e-30))), 0.15),
+        )
+        inv_tau = jnp.where(
+            iter2 == iter1_post,
+            inv_tau_reset,
+            jnp.concatenate([inv_tau_post[1:], invtau_num[None] / time_step_post], axis=0),
+        )
+        fsq_prev = fsq1
+        otav = jnp.sum(inv_tau) / float(k_ndamp)
+        dtau = time_step_post * otav / 2.0
+        b1 = 1.0 - dtau
+        fac = 1.0 / (1.0 + dtau)
+        force_scale = time_step_post
+        vRcc = fac * (b1 * vRcc_post + force_scale * (flip_sign * blocks.frcc))
+        vRss = fac * (b1 * vRss_post + force_scale * (flip_sign * blocks.frss))
+        vRsc = fac * (b1 * vRsc_post + force_scale * (flip_sign * blocks.frsc))
+        vRcs = fac * (b1 * vRcs_post + force_scale * (flip_sign * blocks.frcs))
+        vZsc = fac * (b1 * vZsc_post + force_scale * (flip_sign * blocks.fzsc))
+        vZcs = fac * (b1 * vZcs_post + force_scale * (flip_sign * blocks.fzcs))
+        vZcc = fac * (b1 * vZcc_post + force_scale * (flip_sign * blocks.fzcc))
+        vZss = fac * (b1 * vZss_post + force_scale * (flip_sign * blocks.fzss))
+        vLsc = fac * (b1 * vLsc_post + force_scale * (flip_sign * blocks.flsc))
+        vLcs = fac * (b1 * vLcs_post + force_scale * (flip_sign * blocks.flcs))
+        vLcc = fac * (b1 * vLcc_post + force_scale * (flip_sign * blocks.flcc))
+        vLss = fac * (b1 * vLss_post + force_scale * (flip_sign * blocks.flss))
+        dR = time_step_post * mn_cos_to_signed_physical(vRcc, vRss)
+        dZ = time_step_post * mn_sin_to_signed_physical(vZsc, vZcs)
+        dL = time_step_post * mn_sin_to_signed_physical_lambda(vLsc, vLcs)
+        if bool(lasym):
+            dR_sin = time_step_post * mn_sin_to_signed_physical(vRsc, vRcs)
+            dZ_cos = time_step_post * mn_cos_to_signed_physical(vZcc, vZss)
+            dL_cos = time_step_post * mn_cos_to_signed_physical_lambda(vLcc, vLss)
+        else:
+            dR_sin = jnp.zeros_like(dR)
+            dZ_cos = jnp.zeros_like(dR)
+            dL_cos = jnp.zeros_like(dR)
+        state_new = type(state_post)(
+            layout=state_post.layout,
+            Rcos=jnp.asarray(state_post.Rcos) + dR,
+            Rsin=jnp.asarray(state_post.Rsin) + dR_sin,
+            Zcos=jnp.asarray(state_post.Zcos) + dZ_cos,
+            Zsin=jnp.asarray(state_post.Zsin) + dZ,
+            Lcos=jnp.asarray(state_post.Lcos) + dL_cos,
+            Lsin=jnp.asarray(state_post.Lsin) + dL,
+        )
+        state_new = enforce_fixed_boundary_and_axis(
+            state_new,
+            static,
+            edge_Rcos=edge_Rcos,
+            edge_Rsin=edge_Rsin,
+            edge_Zcos=edge_Zcos,
+            edge_Zsin=edge_Zsin,
+            enforce_edge=not bool(free_boundary_enabled),
+            enforce_lambda_axis=True,
+            idx00=idx00,
+        )
+        state_new = apply_vmec_lambda_axis_rules(state_new)
+        return ScanStepFields(
+            state=state_new,
+            vRcc=vRcc,
+            vRss=vRss,
+            vZsc=vZsc,
+            vLsc=vLsc,
+            vLcs=vLcs,
+            vRsc=vRsc,
+            vRcs=vRcs,
+            vZcc=vZcc,
+            vZss=vZss,
+            vLcc=vLcc,
+            vLss=vLss,
+            inv_tau=inv_tau,
+            fsq_prev=fsq_prev,
+            vZcs=vZcs,
+        )
+
+    def _reject_step(_):
+        return ScanStepFields(
+            state=state_post,
+            vRcc=vRcc_post,
+            vRss=vRss_post,
+            vZsc=vZsc_post,
+            vZcs=vZcs_post,
+            vLsc=vLsc_post,
+            vLcs=vLcs_post,
+            vRsc=vRsc_post,
+            vRcs=vRcs_post,
+            vZcc=vZcc_post,
+            vZss=vZss_post,
+            vLcc=vLcc_post,
+            vLss=vLss_post,
+            inv_tau=inv_tau_post,
+            fsq_prev=fsq_prev_post,
+        )
+
+    return select_scan_step_fields(
+        vmec2000_control=bool(vmec2000_control),
+        do_restart=do_restart,
+        accept_step_fn=_accept_step,
+        reject_step_fn=_reject_step,
+        cond=cond,
+    )
+
+
 def select_scan_step_fields(
     *,
     vmec2000_control: bool,
