@@ -174,6 +174,7 @@ from vmec_jax.solvers.fixed_boundary.residual.geometry import (
     _rz_norm_np as _geometry_rz_norm_np,
 )
 from vmec_jax.solvers.fixed_boundary.residual.mode_transform import (
+    build_mode_transform_context as _build_mode_transform_context,
     build_mode_transform_host_projection as _build_mode_transform_host_projection,
     mn_cos_to_signed_host_projected as _mn_cos_to_signed_host_projected,
     mn_sin_to_signed_host_projected as _mn_sin_to_signed_host_projected,
@@ -326,6 +327,8 @@ from vmec_jax.solvers.fixed_boundary.scan.math import (
     _no_restart_updates as _scan_math_no_restart_updates,
     _ptau_minmax_from_context_host as _scan_math_ptau_minmax_from_context_host,
     _ptau_minmax_from_context_jax as _scan_math_ptau_minmax_from_context_jax,
+    _ptau_minmax_from_k_host as _scan_math_ptau_minmax_from_k_host,
+    _ptau_minmax_from_k_jax as _scan_math_ptau_minmax_from_k_jax,
     _restart_updates as _scan_math_restart_updates,
     _state_jacobian as _scan_math_state_jacobian,
     build_ptau_minmax_context as _build_ptau_minmax_context,
@@ -1237,18 +1240,19 @@ def solve_fixed_boundary_residual_iter(
 
     def _ptau_minmax_from_k_host(k) -> tuple[Any | None, Any | None]:
         """Compute VMEC `ptau` min/max on the host for controller decisions."""
-        return _scan_math_ptau_minmax_from_context_host(
+        return _scan_math_ptau_minmax_from_k_host(
             k,
-            context=_ptau_context,
-            host_update_assembly=host_update_assembly,
-            tree_has_tracer=_tree_has_tracer,
+            pshalf=_ptau_context.pshalf_np,
+            ohs=float(_ptau_context.ohs_scalar) if _ptau_context.ohs_scalar is not None else 0.0,
             compute_jit=_ptau_compute_jit,
+            pshalf_jax=_ptau_context.pshalf_jax,
+            ohs_jax=_ptau_context.ohs_jax,
         )
 
     def _ptau_minmax_from_k_jax(k):
-        return _scan_math_ptau_minmax_from_context_jax(
+        return _scan_math_ptau_minmax_from_k_jax(
             k,
-            context=_ptau_context,
+            s=_ptau_context.s,
             pshalf_from_s_jax=_pshalf_from_s_jax,
         )
 
@@ -1920,77 +1924,45 @@ def solve_fixed_boundary_residual_iter(
     nrange = ntor + 1
     nfp = float(static.cfg.nfp)
     ncoeff = int(jnp.asarray(state0.Rcos).shape[1])
-
-    from vmec_jax.vmec_parity import signed_maps_from_modes
-
-    signed_maps = (
-        static.signed_maps if getattr(static, "signed_maps", None) is not None else signed_maps_from_modes(static.modes)
+    state0_is_traced = _tree_has_tracer(state0)
+    # On accelerator host-forward runs the initial row/gauge enforcement is
+    # setup work.  Using the NumPy row-assignment path avoids several tiny eager
+    # device dispatches without touching traced/differentiable solves.
+    setup_host_enforce = _resolve_setup_host_enforce(
+        setup_host_enforce_env=os.getenv("VMEC_JAX_HOST_SETUP_ENFORCE", "auto"),
+        host_update_assembly=bool(host_update_assembly),
+        use_scan=bool(use_scan),
+        state_has_tracer=bool(state0_is_traced),
+        backend_name=_scan_backend_name(),
     )
-    idx_pos = np.asarray(signed_maps.idx_pos, dtype=np.int32)
-    idx_neg = np.asarray(signed_maps.idx_neg, dtype=np.int32)
-    # Precompute projection matrix for _mn_*_to_signed_host: replaces np.add.at
-    # with DGEMM (vals_all @ _proj_mn_signed), 9× faster per call.
-    _host_mode_projection = _build_mode_transform_host_projection(signed_maps, ncoeff=ncoeff)
 
-    if getattr(static, "mn_idx_m", None) is not None:
-        m_idx_np = np.asarray(static.mn_idx_m, dtype=np.int32)
-        n_idx_np = np.asarray(static.mn_idx_n, dtype=np.int32)
-        kp_idx_np = np.asarray(static.mn_idx_kp, dtype=np.int32)
-        m_idx = jnp.asarray(m_idx_np)
-        n_idx = jnp.asarray(n_idx_np)
-        kp_idx = jnp.asarray(kp_idx_np)
-        kn_idx_np = np.asarray(static.mn_idx_kn, dtype=np.int32)
-        has_kn_np = np.asarray(static.mn_has_kn, dtype=bool) if static.mn_has_kn is not None else (kn_idx_np >= 0)
-    else:
-        m_idx_list = []
-        n_idx_list = []
-        kp_idx_list = []
-        kn_idx_list = []
-        for m_i in range(mpol):
-            for n_i in range(nrange):
-                kp = int(idx_pos[m_i, n_i])
-                if kp < 0:
-                    continue
-                m_idx_list.append(m_i)
-                n_idx_list.append(n_i)
-                kp_idx_list.append(kp)
-                kn_idx_list.append(int(idx_neg[m_i, n_i]))
-
-        m_idx_np = np.asarray(m_idx_list, dtype=np.int32)
-        n_idx_np = np.asarray(n_idx_list, dtype=np.int32)
-        kp_idx_np = np.asarray(kp_idx_list, dtype=np.int32)
-        m_idx = jnp.asarray(m_idx_np)
-        n_idx = jnp.asarray(n_idx_np)
-        kp_idx = jnp.asarray(kp_idx_np)
-        kn_idx_np = np.asarray(kn_idx_list, dtype=np.int32)
-        has_kn_np = kn_idx_np >= 0
-    kn_idx = jnp.asarray(kn_idx_np)
-    has_kn = jnp.asarray(has_kn_np)
-    # NumPy index arrays for _rz_norm_np (avoid JAX dispatch on preconditioner rebuilds).
-    _kp_idx_np = kp_idx_np
-    _m_idx_np = m_idx_np
-    _n_idx_np = n_idx_np
-    _include_rcc_np = (_m_idx_np > 0) | (_n_idx_np > 0)
-    _rz_norm_lthreed = bool(getattr(static.cfg, "lthreed", True))
-    _rz_norm_lasym = bool(getattr(static.cfg, "lasym", False))
-
-    def _rz_norm_np(state) -> float:
-        """Pure NumPy version of _rz_norm — avoids JAX dispatch on precond rebuilds.
-
-        Used by the host_update_assembly path to compute fnorm1 without
-        blocking on XLA.  Semantically identical to _rz_norm(state).
-        """
-        return _geometry_rz_norm_np(
-            state,
-            kp_idx_np=_kp_idx_np,
-            kn_idx_np=kn_idx_np,
-            has_kn_np=has_kn_np,
-            m_idx_np=_m_idx_np,
-            n_idx_np=_n_idx_np,
-            include_rcc_np=_include_rcc_np,
-            lthreed=_rz_norm_lthreed,
-            lasym=_rz_norm_lasym,
-        )
+    _mode_context = _build_mode_transform_context(
+        static=static,
+        state0=state0,
+        s=s,
+        host_update_assembly=bool(host_update_assembly),
+        setup_host_enforce=bool(setup_host_enforce),
+        divide_by_scalxc_for_update=bool(divide_by_scalxc_for_update),
+        mode_diag_exponent=mode_diag_exponent,
+        tree_has_tracer=_tree_has_tracer,
+        vmec_scalxc_from_s=vmec_scalxc_from_s,
+    )
+    signed_maps = _mode_context.signed_maps
+    idx_pos = _mode_context.idx_pos
+    idx_neg = _mode_context.idx_neg
+    m_idx = _mode_context.m_idx
+    n_idx = _mode_context.n_idx
+    kp_idx = _mode_context.kp_idx
+    kn_idx = _mode_context.kn_idx
+    has_kn = _mode_context.has_kn
+    m0_mask = _mode_context.m0_mask
+    m0 = _mode_context.m0
+    n0 = _mode_context.n0
+    scalxc_mn = _mode_context.scalxc_mn
+    scalxc_mn_np = _mode_context.scalxc_mn_np
+    w_mode_mn = _mode_context.w_mode_mn
+    w_mode_mn_np = _mode_context.w_mode_mn_np
+    _state0_dtype = _mode_context.state0_dtype
     _record_setup_timing("setup_index_constants", _t_setup_index_constants)
 
     def _tomnsps_to_numpy_host(frzl: Any) -> TomnspsRZL:
@@ -2016,64 +1988,16 @@ def solve_fixed_boundary_residual_iter(
             flss=_host_array(getattr(frzl, "flss", None)),
         )
 
-    m0_mask = np.asarray(
-        getattr(static, "m_is_m0", None)
-        if getattr(static, "m_is_m0", None) is not None
-        else (np.asarray(static.modes.m) == 0)
-    )
-    m0 = jnp.asarray((np.arange(mpol)[:, None] == 0))
-    n0 = jnp.asarray((np.arange(nrange)[None, :] == 0))
-    from vmec_jax.vmec_parity import _mn_cos_to_signed_cached as _mn_cos_to_signed_block
-    from vmec_jax.vmec_parity import _mn_sin_to_signed_cached as _mn_sin_to_signed_block
-
     def _mn_cos_to_signed(cc, ss):
-        if host_update_assembly:
-            return _mn_cos_to_signed_host(cc, ss)
-        cc = jnp.asarray(cc)
-        ss = jnp.asarray(ss) if ss is not None else jnp.zeros_like(cc)
-        return _mn_cos_to_signed_block(cc, ss, maps=signed_maps, ncoeff=ncoeff)
+        return _mode_context.mn_cos_to_signed(cc, ss)
 
     def _mn_sin_to_signed(sc, cs):
-        if host_update_assembly:
-            return _mn_sin_to_signed_host(sc, cs)
-        sc = jnp.asarray(sc)
-        cs = jnp.asarray(cs) if cs is not None else jnp.zeros_like(sc)
-        return _mn_sin_to_signed_block(sc, cs, maps=signed_maps, ncoeff=ncoeff)
-
-    if has_jax():
-
-        def _mn_sin_to_signed_batch(sc, cs):
-            sc = jnp.asarray(sc)
-            cs = jnp.asarray(cs) if cs is not None else jnp.zeros_like(sc)
-            return jax.vmap(lambda sc_i, cs_i: _mn_sin_to_signed_block(sc_i, cs_i, maps=signed_maps, ncoeff=ncoeff))(
-                sc, cs
-            )
-    else:
-
-        def _mn_sin_to_signed_batch(sc, cs):
-            sc = jnp.asarray(sc)
-            cs = jnp.asarray(cs) if cs is not None else jnp.zeros_like(sc)
-            out = [
-                _mn_sin_to_signed_block(sc[i], cs[i], maps=signed_maps, ncoeff=ncoeff) for i in range(int(sc.shape[0]))
-            ]
-            return jnp.stack(out, axis=0)
+        return _mode_context.mn_sin_to_signed(sc, cs)
 
     use_m1_pair_convert = (
         bool(getattr(static.cfg, "lthreed", True))
         and bool(getattr(static.cfg, "lconm1", True))
         and int(static.cfg.mpol) > 1
-    )
-
-    state0_is_traced = _tree_has_tracer(state0)
-    # On accelerator host-forward runs the initial row/gauge enforcement is
-    # setup work.  Using the NumPy row-assignment path avoids several tiny eager
-    # device dispatches without touching traced/differentiable solves.
-    setup_host_enforce = _resolve_setup_host_enforce(
-        setup_host_enforce_env=os.getenv("VMEC_JAX_HOST_SETUP_ENFORCE", "auto"),
-        host_update_assembly=bool(host_update_assembly),
-        use_scan=bool(use_scan),
-        state_has_tracer=bool(state0_is_traced),
-        backend_name=_scan_backend_name(),
     )
 
     def _m1_internal_to_physical_pair(rss, zcs):
@@ -2084,165 +2008,34 @@ def solve_fixed_boundary_residual_iter(
             use_m1_pair_convert=use_m1_pair_convert,
         )
 
-    _t_setup_update_constants = _setup_timer_start()
-    _state0_dtype = (
-        np.asarray(state0.Rcos).dtype
-        if (bool(host_update_assembly) or bool(setup_host_enforce)) and (not _tree_has_tracer(state0.Rcos))
-        else jnp.asarray(state0.Rcos).dtype
-    )
-
-    if bool(host_update_assembly) and (not _tree_has_tracer(s)):
-        if bool(divide_by_scalxc_for_update):
-            scalxc_mn_np = _vmec_scalxc_from_s_np_helper(s, mpol=int(static.cfg.mpol), dtype=_state0_dtype)[
-                :, :, None
-            ]
-        else:
-            scalxc_mn_np = np.ones((int(np.asarray(s).shape[0]), int(static.cfg.mpol), 1), dtype=_state0_dtype)
-        # Keep a JAX value available for scan/exact helper closures, but avoid
-        # constructing it through eager JAX elementwise primitives on the host path.
-        scalxc_mn = scalxc_mn_np
-    else:
-        scalxc_mn = vmec_scalxc_from_s(s=s, mpol=int(static.cfg.mpol)).astype(jnp.asarray(state0.Rcos).dtype)[
-            :, :, None
-        ]
-        if not bool(divide_by_scalxc_for_update):
-            scalxc_mn = jnp.ones_like(scalxc_mn)
-        scalxc_mn_np = (
-            np.asarray(scalxc_mn, dtype=float)
-            if bool(host_update_assembly) and (not _tree_has_tracer(scalxc_mn))
-            else None
-        )
-
     def _mn_cos_to_signed_host(cc, ss):
-        # Single-DGEMM path: [cc, ss] @ _AB_cos (= vstack([A_cos, B_cos]))
-        # Eliminates 3 np.where + old element-wise ops; keeps k=2*n_half for BLAS efficiency.
-        return _mn_cos_to_signed_host_projected(cc, ss, _host_mode_projection)
+        return _mode_context.mn_cos_to_signed_host(cc, ss)
 
     def _mn_sin_to_signed_host(sc, cs):
-        # Single-DGEMM path: [sc, cs] @ _AB_sin (= vstack([A_sin, B_sin]))
-        # Eliminates 3 np.where + old element-wise ops; keeps k=2*n_half for BLAS efficiency.
-        return _mn_sin_to_signed_host_projected(sc, cs, _host_mode_projection)
+        return _mode_context.mn_sin_to_signed_host(sc, cs)
 
     def _mn_cos_to_signed_physical(cc, ss):
-        if host_update_assembly:
-            cc = np.asarray(cc, dtype=float) / scalxc_mn_np
-            ss = np.asarray(ss, dtype=float) / scalxc_mn_np if ss is not None else None
-        else:
-            cc = jnp.asarray(cc) / scalxc_mn
-            ss = jnp.asarray(ss) / scalxc_mn if ss is not None else None
-        return _mn_cos_to_signed(cc, ss)
+        return _mode_context.mn_cos_to_signed_physical(cc, ss)
 
     def _mn_sin_to_signed_physical(sc, cs):
-        if host_update_assembly:
-            sc = np.asarray(sc, dtype=float) / scalxc_mn_np
-            cs = np.asarray(cs, dtype=float) / scalxc_mn_np if cs is not None else None
-        else:
-            sc = jnp.asarray(sc) / scalxc_mn
-            cs = jnp.asarray(cs) / scalxc_mn if cs is not None else None
-        return _mn_sin_to_signed(sc, cs)
+        return _mode_context.mn_sin_to_signed_physical(sc, cs)
 
     def _mn_sin_to_signed_physical_lambda(sc, cs):
         """Map lambda updates onto signed physical coefficients (VMEC scalxc)."""
-        if host_update_assembly:
-            sc = np.asarray(sc, dtype=float) / scalxc_mn_np
-            cs = np.asarray(cs, dtype=float) / scalxc_mn_np if cs is not None else None
-        else:
-            sc = jnp.asarray(sc) / scalxc_mn
-            cs = jnp.asarray(cs) / scalxc_mn if cs is not None else None
-        return _mn_sin_to_signed(sc, cs)
+        return _mode_context.mn_sin_to_signed_physical_lambda(sc, cs)
 
     def _mn_cos_to_signed_physical_lambda(cc, ss):
         """Map asymmetric lambda updates onto signed physical coefficients (VMEC scalxc)."""
-        if host_update_assembly:
-            cc = np.asarray(cc, dtype=float) / scalxc_mn_np
-            ss = np.asarray(ss, dtype=float) / scalxc_mn_np if ss is not None else None
-        else:
-            cc = jnp.asarray(cc) / scalxc_mn
-            ss = jnp.asarray(ss) / scalxc_mn if ss is not None else None
-        return _mn_cos_to_signed(cc, ss)
+        return _mode_context.mn_cos_to_signed_physical_lambda(cc, ss)
 
     def _mn_sin_to_signed_physical_batch(sc, cs):
-        return _geometry_mn_sin_to_signed_physical_batch(
-            sc,
-            cs,
-            scalxc_mn=scalxc_mn,
-            mn_sin_to_signed_batch=_mn_sin_to_signed_batch,
-        )
+        return _mode_context.mn_sin_to_signed_physical_batch(sc, cs)
+
+    def _rz_norm_np(state) -> float:
+        return _mode_context.rz_norm_np(state)
 
     def _rz_norm(state: VMECState) -> Any:
-        """R/Z norm (exclude R(0,0) offset) in (m,n>=0) storage.
-
-        This is a plain sum-of-squares over geometry Fourier coefficients in
-        (m,n>=0) storage, excluding the R(0,0) offset term. For parity with the
-        reference executable's norm conventions, do not apply `scalxc` here.
-        """
-        rpos = jnp.asarray(state.Rcos)[:, kp_idx]
-        zpos = jnp.asarray(state.Zsin)[:, kp_idx]
-        has_kn_mask = has_kn[None, :]
-        kn_idx_safe = jnp.maximum(kn_idx, 0)
-        rneg = jnp.where(has_kn_mask, jnp.asarray(state.Rcos)[:, kn_idx_safe], 0.0)
-        zneg = jnp.where(has_kn_mask, jnp.asarray(state.Zsin)[:, kn_idx_safe], 0.0)
-        is_m0 = (m_idx == 0)[None, :]
-        rcc = rpos + jnp.where(has_kn_mask, rneg, 0.0)
-        zsc = jnp.where(has_kn_mask, zpos + zneg, zpos)
-        is_n0 = (n_idx == 0)[None, :]
-        # VMEC m=0 uses only (rcc, zcs) for n>0; rss and zsc are canonicalized
-        # to zero in internal storage.
-        rss = jnp.where(is_n0 | is_m0, 0.0, jnp.where(has_kn_mask, rpos - rneg, 0.0))
-        zsc = jnp.where((~is_n0) & is_m0, 0.0, zsc)
-        zcs = jnp.where(is_n0, 0.0, jnp.where(has_kn_mask, zneg - zpos, -zpos))
-        # Note: VMEC builds fnorm1 directly from the internal xc vector without
-        # applying m=1 constraints or mscale/nscale basis normalization.
-
-        # VMEC `bcovar_par` accumulates fnorm1 over l=2..ns (excludes axis).
-        sl = slice(1, None)
-
-        include_rcc = ((m_idx > 0) | (n_idx > 0))[None, :].astype(rcc.dtype)
-        rz_norm = jnp.sum(zsc[sl] * zsc[sl]) + jnp.sum(include_rcc * (rcc[sl] * rcc[sl]))
-        if bool(getattr(static.cfg, "lthreed", True)):
-            rz_norm = rz_norm + jnp.sum(rss[sl] * rss[sl]) + jnp.sum(zcs[sl] * zcs[sl])
-        if bool(getattr(static.cfg, "lasym", False)):
-            # Asymmetric terms: include Rsin/Zcos internal components.
-            rs_pos = jnp.asarray(state.Rsin)[:, kp_idx]
-            zc_pos = jnp.asarray(state.Zcos)[:, kp_idx]
-            rs_neg = jnp.where(has_kn_mask, jnp.asarray(state.Rsin)[:, kn_idx_safe], 0.0)
-            zc_neg = jnp.where(has_kn_mask, jnp.asarray(state.Zcos)[:, kn_idx_safe], 0.0)
-
-            # Internal sin/cos blocks from signed coefficients.
-            rsc = jnp.where(has_kn_mask, rs_pos + rs_neg, jnp.where(is_n0, rs_pos, jnp.where(is_m0, 0.0, rs_pos)))
-            rcs = jnp.where(has_kn_mask, rs_neg - rs_pos, jnp.where(is_n0, 0.0, jnp.where(is_m0, -rs_pos, 0.0)))
-
-            zcc = zc_pos + jnp.where(has_kn_mask, zc_neg, 0.0)
-            zss = jnp.where(is_n0 | is_m0, 0.0, jnp.where(has_kn_mask, zc_pos - zc_neg, 0.0))
-
-            rz_norm = rz_norm + jnp.sum(rsc[sl] * rsc[sl]) + jnp.sum(rcs[sl] * rcs[sl])
-            rz_norm = rz_norm + jnp.sum(zcc[sl] * zcc[sl]) + jnp.sum(zss[sl] * zss[sl])
-        return rz_norm
-
-    # Precompute per-iteration constants once.
-    if bool(host_update_assembly) and (not _tree_has_tracer(state0.Rcos)):
-        w_mode_mn_np = _mode_diag_weights_mn_np_helper(
-            mpol=mpol,
-            nrange=nrange,
-            nfp=nfp,
-            mode_diag_exponent=mode_diag_exponent,
-            dtype=_state0_dtype,
-        )
-        # JAX value is still needed by scan/exact helper closures, but the raw
-        # CPU host-update path consumes the NumPy copy directly.
-        w_mode_mn = jnp.asarray(w_mode_mn_np)
-    else:
-        w_mode_mn = _mode_diag_weights_mn_helper(
-            mpol=mpol,
-            nrange=nrange,
-            nfp=nfp,
-            mode_diag_exponent=mode_diag_exponent,
-            dtype=jnp.asarray(state0.Rcos).dtype,
-        )
-        # NumPy copy for host-path mode-diagonal step (avoids 36 JAX dispatches/iter).
-        w_mode_mn_np = (
-            np.asarray(w_mode_mn) if bool(host_update_assembly) and (not _tree_has_tracer(w_mode_mn)) else None
-        )
+        return _mode_context.rz_norm(state)
     # Precompute axis mask for _enforce_fixed_boundary_and_axis_np (avoids 7000+
     # _axis_m0_mask JAX dispatches per solve — saves ~0.5s real).
     if bool(host_update_assembly) or bool(setup_host_enforce):
@@ -2331,6 +2124,7 @@ def solve_fixed_boundary_residual_iter(
             stage_prev_fsq_j = jnp.asarray(float(stage_prev_fsq), dtype=dtype)
         except Exception:
             stage_prev_fsq_j = None
+    _t_setup_update_constants = _setup_timer_start()
     _record_setup_timing("setup_update_constants", _t_setup_update_constants)
 
     def _run_vmec2000_scan(state_init: VMECState) -> SolveVmecResidualResult:
@@ -4696,7 +4490,7 @@ def solve_fixed_boundary_residual_iter(
                         flss_u = flss_u * lambda_update_scale_j
 
                     dR = (time_step_j * flip_sign_j) * _mn_cos_to_signed_physical(frcc_u, frss_u)
-                    sin_updates = _mn_sin_to_signed_batch(
+                    sin_updates = _mode_context.mn_sin_to_signed_batch(
                         jnp.stack([fzsc_u, flsc_u], axis=0),
                         jnp.stack([fzcs_u, flcs_u], axis=0),
                     )
@@ -6385,8 +6179,8 @@ def solve_fixed_boundary_residual_iter(
                         lconm1=bool(getattr(static.cfg, "lconm1", True)),
                         include_control_ptau=accepted_control_ptau_arrays is not None,
                         control_ptau_arrays=accepted_control_ptau_arrays,
-                        control_ptau_pshalf=_ptau_pshalf_jax,
-                        control_ptau_ohs=_ptau_ohs_jax,
+                        control_ptau_pshalf=_ptau_context.pshalf_jax,
+                        control_ptau_ohs=_ptau_context.ohs_jax,
                     )
                     if len(_precond_payload) == 4:
                         (
@@ -6641,8 +6435,8 @@ def solve_fixed_boundary_residual_iter(
                         lconm1=bool(getattr(static.cfg, "lconm1", True)),
                         include_control_ptau=accepted_control_ptau_arrays is not None,
                         control_ptau_arrays=accepted_control_ptau_arrays,
-                        control_ptau_pshalf=_ptau_pshalf_jax,
-                        control_ptau_ohs=_ptau_ohs_jax,
+                        control_ptau_pshalf=_ptau_context.pshalf_jax,
+                        control_ptau_ohs=_ptau_context.ohs_jax,
                     )
                     if len(_precond_payload) == 4:
                         (
@@ -7115,8 +6909,8 @@ def solve_fixed_boundary_residual_iter(
                             fsq1_payload, ptau_min_payload, ptau_max_payload = payload_fn(
                                 fsq1_j,
                                 *ptau_arrays,
-                                _ptau_pshalf_jax,
-                                _ptau_ohs_jax,
+                                _ptau_context.pshalf_jax,
+                                _ptau_context.ohs_jax,
                             )
                             fsq1, min_tau_ptau_payload, max_tau_ptau_payload = _device_get_floats(
                                 fsq1_payload,

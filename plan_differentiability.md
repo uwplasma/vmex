@@ -5839,3 +5839,72 @@ Completion:
 - Implicit residual-adjoint decomposition: 88%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.42%.
+
+## 2026-06-16 Mode-Transform Context Extraction and CI Seam Repair
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `ModeTransformContext` and `build_mode_transform_context` to
+   `vmec_jax.solvers.fixed_boundary.residual.mode_transform`.
+2. Moved signed-mode index setup, host DGEMM projections, VMEC `scalxc`
+   physical-update factors, mode-diagonal weights, and R/Z norm dispatch into
+   that context.
+3. Replaced the residual loop's inline mode-transform setup block with a
+   context construction plus short local compatibility wrappers.
+4. Restored the legacy `_scan_math_ptau_minmax_from_k_host` and
+   `_scan_math_ptau_minmax_from_k_jax` aliases after the ptau-context
+   extraction, preserving `vmec_jax.solve` monkeypatch seams used by tests and
+   downstream diagnostics.
+5. Replaced stale fused-controller references to `_ptau_pshalf_jax` and
+   `_ptau_ohs_jax` with the extracted `PtauMinmaxContext` fields.
+6. Added focused tests for context construction, host physical transforms, and
+   JAX-vs-NumPy R/Z norm parity.
+
+Results obtained:
+
+- The residual iteration module dropped from 9,397 lines to 9,188 lines.
+- `solve_fixed_boundary_residual_iter` dropped from 8,800 to 8,590 lines.
+- The prior CI failure on ptau monkeypatch aliases and fused free-boundary
+  payload constants is fixed locally.
+- Mode transform bookkeeping is now a named fixed-boundary residual domain,
+  which is a prerequisite for typed scan/controller context extraction.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/mode_transform.py vmec_jax/solvers/fixed_boundary/residual/iteration.py tests/test_solve_residual_iter_mode_transform_helpers.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_mode_transform_helpers.py tests/test_solve_residual_iter_geometry_helpers.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_finish_cache_more_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_full_adjoint_trace_records_raw_preconditioner_on_fused_payload_path -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_scan_math_helpers.py tests/test_solve_axis_helpers_more_coverage.py tests/test_solve_scan_planning_helpers.py tests/test_solve_scan_chunking.py tests/test_solve_real_scan_wave10_coverage.py tests/test_solve_residual_iter_helpers_wave8_coverage.py tests/test_solve_residual_iter_mode_transform_helpers.py tests/test_solve_residual_iter_geometry_helpers.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_branch_coverage.py tests/test_solve_gd_wave10_coverage.py tests/test_solve_lbfgs_wave8_coverage.py tests/test_solve_residual_optimizer_wave8_coverage.py -q`
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 25`
+
+Best next steps:
+
+1. Extract the next setup-only cluster from `solve_fixed_boundary_residual_iter`,
+   with priority on preconditioner cache planning and force-payload setup.
+2. Introduce a typed scan-controller context only after more setup state is out
+   of the residual loop.
+3. Move `_run_vmec2000_scan` only after context extraction and branch-fingerprint
+   tests make the accepted/rejected controller seam explicit.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.77%.
+- Differentiability/refactor implementation: 99.995%.
+- Solver monolith reduction: 93.6%.
+- Free-boundary adjoint monolith reduction: 80%.
+- Driver workflow decomposition: 91.6%.
+- WOUT diagnostic/profile decomposition: 98.5%.
+- Optimizer workflow decomposition: 86%.
+- Implicit residual-adjoint decomposition: 88%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.45%.
