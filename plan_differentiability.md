@@ -6381,3 +6381,64 @@ Completion:
 - Implicit residual-adjoint decomposition: 88%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.53%.
+
+## 2026-06-16 VMEC2000 Scan Debug Payload Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved the optional first-iteration force-channel scan debug print payload
+   from `_advance_step` into the scan debug module.
+2. Moved the optional requested-iteration state/checkpoint scan debug payload
+   from `_advance_step` into the scan debug module.
+3. Preserved the original force-debug behavior that requires the resolved scan
+   debug printer hook to be present.
+4. Added unit coverage for both moved debug helpers using fake `cond` and debug
+   printer callables.
+
+Results obtained:
+
+- The residual iteration module dropped from 9,012 lines to 8,956 lines.
+- `solve_fixed_boundary_residual_iter` dropped from 8,403 to 8,345 lines.
+- `_run_vmec2000_scan` dropped from 2,125 to 2,067 lines.
+- `_scan_step` dropped from 1,118 to 1,060 lines.
+- `_advance_step` dropped from 1,102 to 1,044 lines.
+- The large scan branch body now contains less optional diagnostic plumbing and
+  more directly exposes the remaining force, preconditioner, time-control, and
+  update payload seams.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/scan/debug.py vmec_jax/solvers/fixed_boundary/residual/iteration.py tests/test_solve_scan_debug_helpers.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_scan_debug_helpers.py tests/test_solve_real_scan_wave10_coverage.py tests/test_solve_wave7_coverage.py::test_residual_iter_vmec2000_scan_minimal_one_step tests/test_solve_wave7_coverage.py::test_residual_iter_vmec2000_scan_state_only -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_scan_planning_helpers.py tests/test_solve_scan_output.py tests/test_solve_scan_output_edge_cases_more_coverage.py tests/test_solve_finish_cache_more_coverage.py tests/test_solve_residual_iter_finalize_helpers.py -q`
+- `python tools/diagnostics/source_health.py --top 8 --top-functions 12`
+
+Best next steps:
+
+1. Commit and push this debug-payload extraction.
+2. If CI stays green, the next meaningful solve seam is the cache refresh /
+   preconditioned force-payload construction inside `_advance_step`.
+3. Keep each future `_advance_step` extraction tied to one VMEC domain concept:
+   force payload, time-control/restart transition, or accepted/rejected state
+   update.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.77%.
+- Differentiability/refactor implementation: 99.995%.
+- Solver monolith reduction: 95.8%.
+- Free-boundary adjoint monolith reduction: 80%.
+- Driver workflow decomposition: 93.2%.
+- WOUT diagnostic/profile decomposition: 98.5%.
+- Optimizer workflow decomposition: 86%.
+- Implicit residual-adjoint decomposition: 88%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.54%.

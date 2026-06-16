@@ -353,6 +353,142 @@ def dump_vmec2000_scan_ptau_rows(
     return dumped
 
 
+def maybe_debug_scan_force_first_iter(
+    *,
+    enabled: bool,
+    iter2: Any,
+    frzl: Any,
+    carry_state: Any,
+    use_cached_precond: Any,
+    need_bcovar_update: Any,
+    norms_used: Any,
+    gcr2: Any,
+    gcz2: Any,
+    fsqr: Any,
+    fsqz: Any,
+    jnp_module: Any,
+    cond: Callable[..., Any],
+    debug_print: Callable[..., Any] | None = None,
+) -> bool:
+    """Emit optional first-iteration force-channel diagnostics in scan mode."""
+
+    if not bool(enabled):
+        return False
+    if debug_print is None:
+        try:
+            from jax import debug as jax_debug  # type: ignore
+
+            debug_print = jax_debug.print
+        except Exception:
+            return False
+    if debug_print is None:
+        return False
+
+    def _dbg(_):
+        fzsc2 = jnp_module.sum(frzl.fzsc * frzl.fzsc)
+        fzcs2 = (
+            jnp_module.sum(frzl.fzcs * frzl.fzcs)
+            if frzl.fzcs is not None
+            else jnp_module.asarray(0.0, dtype=fsqz.dtype)
+        )
+        fzcs_m1 = (
+            jnp_module.sum(frzl.fzcs[:, 1, :] * frzl.fzcs[:, 1, :])
+            if frzl.fzcs is not None and int(jnp_module.asarray(frzl.fzcs).shape[1]) > 1
+            else jnp_module.asarray(0.0, dtype=fsqz.dtype)
+        )
+        rcos_sum = jnp_module.sum(carry_state.Rcos)
+        zsin_sum = jnp_module.sum(carry_state.Zsin)
+        debug_print(
+            "[scan-debug] iter={i} gcr2={gcr:.6e} gcz2={gcz:.6e} fzsc2={fzsc2:.6e} fzcs2={fzcs2:.6e} fzcs_m1={fzcsm1:.6e} rcos_sum={rcsum:.6e} zsin_sum={zssum:.6e} use_cached={uc} need_bcovar={nb} fnorm={fn:.6e} r1={r1:.6e} fsqr={fsqr:.6e} fsqz={fsqz:.6e}",
+            i=iter2,
+            gcr=gcr2,
+            gcz=gcz2,
+            fzsc2=fzsc2,
+            fzcs2=fzcs2,
+            fzcsm1=fzcs_m1,
+            rcsum=rcos_sum,
+            zssum=zsin_sum,
+            uc=jnp_module.asarray(use_cached_precond, dtype=jnp_module.int32),
+            nb=jnp_module.asarray(need_bcovar_update, dtype=jnp_module.int32),
+            fn=norms_used.fnorm,
+            r1=norms_used.r1,
+            fsqr=fsqr,
+            fsqz=fsqz,
+        )
+        return 0
+
+    _ = cond(iter2 == 1, _dbg, lambda _: 0, operand=None)
+    return True
+
+
+def maybe_debug_scan_state_iter(
+    *,
+    scan_debug_iter: int,
+    iter2: Any,
+    carry_adv: Any,
+    use_cached_precond: Any,
+    need_bcovar_update: Any,
+    norms_used: Any,
+    gcr2: Any,
+    gcz2: Any,
+    gcl2: Any,
+    jnp_module: Any,
+    cond: Callable[..., Any],
+    debug_print: Callable[..., Any] | None = None,
+) -> bool:
+    """Emit optional state/checkpoint diagnostics for one requested scan iteration."""
+
+    if int(scan_debug_iter) <= 0:
+        return False
+    if debug_print is None:
+        try:
+            from jax import debug as jax_debug  # type: ignore
+
+            debug_print = jax_debug.print
+        except Exception:
+            return False
+    if debug_print is None:
+        return False
+
+    def _dbg_state(_):
+        rcos_sum = jnp_module.sum(carry_adv.state.Rcos)
+        zsin_sum = jnp_module.sum(carry_adv.state.Zsin)
+        lsin_sum = jnp_module.sum(carry_adv.state.Lsin)
+        rcos_ck = jnp_module.sum(carry_adv.state_checkpoint.Rcos)
+        zsin_ck = jnp_module.sum(carry_adv.state_checkpoint.Zsin)
+        lsin_ck = jnp_module.sum(carry_adv.state_checkpoint.Lsin)
+        fsqr_dbg = norms_used.r1 * norms_used.fnorm * gcr2
+        fsqz_dbg = norms_used.r1 * norms_used.fnorm * gcz2
+        fsql_dbg = norms_used.fnormL * gcl2
+        debug_print(
+            "[scan-state] iter={i} rcos_sum={rc:.6e} zsin_sum={zs:.6e} lsin_sum={ls:.6e} "
+            "rcos_ck={rck:.6e} zsin_ck={zck:.6e} lsin_ck={lck:.6e} "
+            "use_cached={uc} need_bcovar={nb} gcr2={gcr:.6e} gcz2={gcz:.6e} gcl2={gcl:.6e} "
+            "fnorm={fn:.6e} r1={r1:.6e} fsqr={fsqr:.6e} fsqz={fsqz:.6e} fsql={fsql:.6e}",
+            i=iter2,
+            rc=rcos_sum,
+            zs=zsin_sum,
+            ls=lsin_sum,
+            rck=rcos_ck,
+            zck=zsin_ck,
+            lck=lsin_ck,
+            uc=jnp_module.asarray(use_cached_precond, dtype=jnp_module.int32),
+            nb=jnp_module.asarray(need_bcovar_update, dtype=jnp_module.int32),
+            gcr=gcr2,
+            gcz=gcz2,
+            gcl=gcl2,
+            fn=norms_used.fnorm,
+            r1=norms_used.r1,
+            fsqr=fsqr_dbg,
+            fsqz=fsqz_dbg,
+            fsql=fsql_dbg,
+        )
+        return 0
+
+    _ = cond(iter2 == int(scan_debug_iter), _dbg_state, lambda _: 0, operand=None)
+    return True
+
+
 def _timecontrol_scan_stage_name(stage_id: int) -> str:
     return {0: "init", 1: "pre", 2: "checkpoint", 3: "restart"}.get(int(stage_id), "pre")
 

@@ -341,6 +341,8 @@ from vmec_jax.solvers.fixed_boundary.scan.math import (
 from vmec_jax.solvers.fixed_boundary.scan.debug import (
     dump_vmec2000_scan_ptau_rows as _dump_vmec2000_scan_ptau_rows,
     emit_vmec2000_post_scan_rows as _emit_vmec2000_post_scan_rows,
+    maybe_debug_scan_force_first_iter as _maybe_debug_scan_force_first_iter,
+    maybe_debug_scan_state_iter as _maybe_debug_scan_state_iter,
     _emit_vmec2000_iter_row as _emit_scan_vmec2000_iter_row,
     _emit_scan_prints as _emit_scan_debug_prints,
     _maybe_dump_timecontrol_scan as _scan_debug_maybe_dump_timecontrol_scan,
@@ -2698,93 +2700,35 @@ def solve_fixed_boundary_residual_iter(
                 fsqr = norms_used.r1 * norms_used.fnorm * gcr2
                 fsqz = norms_used.r1 * norms_used.fnorm * gcz2
                 fsql = norms_used.fnormL * gcl2
-                if scan_debug_force:
-                    try:
-                        from jax import debug as _jax_debug  # type: ignore
-                    except Exception:
-                        _jax_debug = None  # type: ignore
-                    if _jax_debug is not None:
-
-                        def _dbg(_):
-                            fzsc2 = jnp.sum(frzl.fzsc * frzl.fzsc)
-                            fzcs2 = (
-                                jnp.sum(frzl.fzcs * frzl.fzcs)
-                                if frzl.fzcs is not None
-                                else jnp.asarray(0.0, dtype=fsqz.dtype)
-                            )
-                            fzcs_m1 = (
-                                jnp.sum(frzl.fzcs[:, 1, :] * frzl.fzcs[:, 1, :])
-                                if frzl.fzcs is not None and int(jnp.asarray(frzl.fzcs).shape[1]) > 1
-                                else jnp.asarray(0.0, dtype=fsqz.dtype)
-                            )
-                            rcos_sum = jnp.sum(carry_adv.state.Rcos)
-                            zsin_sum = jnp.sum(carry_adv.state.Zsin)
-                            use_cached_flag = jnp.asarray(use_cached_precond, dtype=jnp.int32)
-                            need_bcovar_flag = jnp.asarray(need_bcovar_update, dtype=jnp.int32)
-                            if _jax_debug_print is not None:
-                                _jax_debug_print(
-                                    "[scan-debug] iter={i} gcr2={gcr:.6e} gcz2={gcz:.6e} fzsc2={fzsc2:.6e} fzcs2={fzcs2:.6e} fzcs_m1={fzcsm1:.6e} rcos_sum={rcsum:.6e} zsin_sum={zssum:.6e} use_cached={uc} need_bcovar={nb} fnorm={fn:.6e} r1={r1:.6e} fsqr={fsqr:.6e} fsqz={fsqz:.6e}",
-                                    i=iter2,
-                                    gcr=gcr2,
-                                    gcz=gcz2,
-                                    fzsc2=fzsc2,
-                                    fzcs2=fzcs2,
-                                    fzcsm1=fzcs_m1,
-                                    rcsum=rcos_sum,
-                                    zssum=zsin_sum,
-                                    uc=use_cached_flag,
-                                    nb=need_bcovar_flag,
-                                    fn=norms_used.fnorm,
-                                    r1=norms_used.r1,
-                                    fsqr=fsqr,
-                                    fsqz=fsqz,
-                                )
-                            return 0
-
-                        _ = jax.lax.cond(iter2 == 1, _dbg, lambda _: 0, operand=None)
-                if scan_debug_iter > 0:
-                    try:
-                        from jax import debug as _jax_debug_state  # type: ignore
-                    except Exception:
-                        _jax_debug_state = None  # type: ignore
-                    if _jax_debug_state is not None:
-
-                        def _dbg_state(_):
-                            rcos_sum = jnp.sum(carry_adv.state.Rcos)
-                            zsin_sum = jnp.sum(carry_adv.state.Zsin)
-                            lsin_sum = jnp.sum(carry_adv.state.Lsin)
-                            rcos_ck = jnp.sum(carry_adv.state_checkpoint.Rcos)
-                            zsin_ck = jnp.sum(carry_adv.state_checkpoint.Zsin)
-                            lsin_ck = jnp.sum(carry_adv.state_checkpoint.Lsin)
-                            fsqr_dbg = norms_used.r1 * norms_used.fnorm * gcr2
-                            fsqz_dbg = norms_used.r1 * norms_used.fnorm * gcz2
-                            fsql_dbg = norms_used.fnormL * gcl2
-                            _jax_debug_state.print(
-                                "[scan-state] iter={i} rcos_sum={rc:.6e} zsin_sum={zs:.6e} lsin_sum={ls:.6e} "
-                                "rcos_ck={rck:.6e} zsin_ck={zck:.6e} lsin_ck={lck:.6e} "
-                                "use_cached={uc} need_bcovar={nb} gcr2={gcr:.6e} gcz2={gcz:.6e} gcl2={gcl:.6e} "
-                                "fnorm={fn:.6e} r1={r1:.6e} fsqr={fsqr:.6e} fsqz={fsqz:.6e} fsql={fsql:.6e}",
-                                i=iter2,
-                                rc=rcos_sum,
-                                zs=zsin_sum,
-                                ls=lsin_sum,
-                                rck=rcos_ck,
-                                zck=zsin_ck,
-                                lck=lsin_ck,
-                                uc=jnp.asarray(use_cached_precond, dtype=jnp.int32),
-                                nb=jnp.asarray(need_bcovar_update, dtype=jnp.int32),
-                                gcr=gcr2,
-                                gcz=gcz2,
-                                gcl=gcl2,
-                                fn=norms_used.fnorm,
-                                r1=norms_used.r1,
-                                fsqr=fsqr_dbg,
-                                fsqz=fsqz_dbg,
-                                fsql=fsql_dbg,
-                            )
-                            return 0
-
-                        _ = jax.lax.cond(iter2 == scan_debug_iter, _dbg_state, lambda _: 0, operand=None)
+                _maybe_debug_scan_force_first_iter(
+                    enabled=bool(scan_debug_force) and (_jax_debug_print is not None),
+                    iter2=iter2,
+                    frzl=frzl,
+                    carry_state=carry_adv.state,
+                    use_cached_precond=use_cached_precond,
+                    need_bcovar_update=need_bcovar_update,
+                    norms_used=norms_used,
+                    gcr2=gcr2,
+                    gcz2=gcz2,
+                    fsqr=fsqr,
+                    fsqz=fsqz,
+                    jnp_module=jnp,
+                    cond=jax.lax.cond,
+                    debug_print=_jax_debug_print,
+                )
+                _maybe_debug_scan_state_iter(
+                    scan_debug_iter=int(scan_debug_iter),
+                    iter2=iter2,
+                    carry_adv=carry_adv,
+                    use_cached_precond=use_cached_precond,
+                    need_bcovar_update=need_bcovar_update,
+                    norms_used=norms_used,
+                    gcr2=gcr2,
+                    gcz2=gcz2,
+                    gcl2=gcl2,
+                    jnp_module=jnp,
+                    cond=jax.lax.cond,
+                )
                 conv_now = _converged_residuals_scan(fsqr, fsqz, fsql)
                 # Scalars for VMEC-style screen output (sampled on NSTEP cadence + convergence).
                 sample_vmec = (iter2 <= 1) | (iter2 >= int(max_iter)) | ((iter2 % nstep_screen) == 0) | conv_now
