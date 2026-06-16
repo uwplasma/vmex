@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .coils import mirror_boundary_from_on_axis_bz
+from .coils import AxisymmetricFieldRZ, circular_loop_field_rz, mirror_boundary_from_on_axis_bz
 
 if TYPE_CHECKING:
     from ..core.boundary import MirrorBoundary
@@ -47,15 +47,6 @@ class WhamLoopTable:
     radius_m: np.ndarray
     z_m: np.ndarray
     current_a: np.ndarray
-
-
-@dataclass(frozen=True)
-class AxisymmetricFieldRZ:
-    """Axisymmetric vacuum field components in cylindrical coordinates."""
-
-    br: np.ndarray
-    bz: np.ndarray
-    bmag: np.ndarray
 
 
 def default_wham_fixture_path() -> Path:
@@ -103,36 +94,6 @@ def build_wham_loop_table(fixture: WhamCoilFixture | None = None) -> WhamLoopTab
     z = np.concatenate(z_blocks)
     current = np.full_like(radius, fixture.i_coil_a, dtype=float)
     return WhamLoopTable(radius_m=radius, z_m=z, current_a=current)
-
-
-def circular_loop_field_rz(radius_m, z_rel_m, *, loop_radius_m: float, current_a: float) -> AxisymmetricFieldRZ:
-    """Evaluate one circular current loop field at cylindrical ``(r, z_rel)`` points."""
-    from scipy.special import ellipe, ellipk
-
-    r = np.asarray(radius_m, dtype=float)
-    z = np.asarray(z_rel_m, dtype=float)
-    r, z = np.broadcast_arrays(r, z)
-    a = float(loop_radius_m)
-    current = float(current_a)
-    br = np.zeros_like(r, dtype=float)
-    bz = np.zeros_like(r, dtype=float)
-
-    on_axis = np.abs(r) < 1.0e-14
-    bz[on_axis] = MU0 * current * a**2 / (2.0 * (a**2 + z[on_axis] ** 2) ** 1.5)
-
-    off_axis = ~on_axis
-    if np.any(off_axis):
-        rr = r[off_axis]
-        zz = z[off_axis]
-        alpha2 = (a + rr) ** 2 + zz**2
-        beta2 = (a - rr) ** 2 + zz**2
-        k2 = np.clip(4.0 * a * rr / alpha2, 0.0, 1.0 - 1.0e-15)
-        ellip_k = ellipk(k2)
-        ellip_e = ellipe(k2)
-        common = MU0 * current / (2.0 * np.pi * np.sqrt(alpha2))
-        br[off_axis] = common * zz / rr * (-ellip_k + (a**2 + rr**2 + zz**2) * ellip_e / beta2)
-        bz[off_axis] = common * (ellip_k + (a**2 - rr**2 - zz**2) * ellip_e / beta2)
-    return AxisymmetricFieldRZ(br=br, bz=bz, bmag=np.sqrt(br**2 + bz**2))
 
 
 def wham_vacuum_field_rz(radius_m, z_m, fixture: WhamCoilFixture | None = None) -> AxisymmetricFieldRZ:

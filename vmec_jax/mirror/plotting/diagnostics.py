@@ -39,6 +39,8 @@ class MirrorResidualHistoryData:
 
     index: np.ndarray
     residual_norm: np.ndarray
+    fsq: np.ndarray
+    normalized_force: np.ndarray
     energy_total: np.ndarray
     step_size: np.ndarray
     pressure_scale: np.ndarray
@@ -89,6 +91,8 @@ def mirror_residual_history_data(output_or_path) -> MirrorResidualHistoryData:
     return MirrorResidualHistoryData(
         index=np.arange(output.history.residual_norm.size),
         residual_norm=np.asarray(output.history.residual_norm),
+        fsq=np.asarray(output.history.fsq),
+        normalized_force=np.asarray(output.history.normalized_force),
         energy_total=np.asarray(output.history.energy_total),
         step_size=np.asarray(output.history.step_size),
         pressure_scale=np.asarray(output.history.pressure_scale),
@@ -176,6 +180,8 @@ def write_mirror_residual_history(output_or_path, *, outdir: str | Path, name: s
     fig, axes = plt.subplots(2, 1, figsize=(6, 4.5), sharex=True)
     ax = axes[0]
     ax.semilogy(data.index, np.maximum(data.residual_norm, 1.0e-300), ".-", label="residual")
+    ax.semilogy(data.index, np.maximum(data.normalized_force, 1.0e-300), ".-", label="normalized force")
+    ax.semilogy(data.index, np.maximum(data.fsq, 1.0e-300), ".-", label="mirror fsq")
     positive_step = np.where(data.step_size > 0.0, data.step_size, np.nan)
     ax.semilogy(data.index, positive_step, ".-", label="step norm")
     ax.set_ylabel("norm")

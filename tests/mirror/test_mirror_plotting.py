@@ -73,6 +73,8 @@ def test_mirror_plot_data_helpers_expose_numerical_content(tmp_path):
     assert radial.mean_bmag.shape == output.s.shape
     assert radial.iota_like_twist.shape == output.s.shape
     assert np.allclose(history.residual_norm, output.history.residual_norm)
+    assert np.allclose(history.fsq, output.history.fsq)
+    assert np.allclose(history.normalized_force, output.history.normalized_force)
     assert np.allclose(history.step_size, output.history.step_size)
 
 

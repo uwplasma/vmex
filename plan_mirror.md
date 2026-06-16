@@ -2693,3 +2693,56 @@ The next step from scaffolds toward research-grade solves is to add analytic gat
 - Add off-axis low-radius comparisons against circular-loop Biot-Savart fields to test `B_r` and radial variation.
 - Add convergence studies in `ns` and `nxi` for the analytic two-coil boundary.
 - Only after those gates pass, promote higher-beta scalar-pressure and then anisotropic mirror solve benchmarks.
+
+---
+
+## 33. 2026-06-16 force-diagnostic, off-axis, and finite-current pitch lane
+
+This lane moves the analytic two-coil work from plotting scaffold toward testable research diagnostics.
+
+### Implemented in this lane
+
+- Added mirror-native projected-force diagnostics to fixed-boundary traces and `mout` files:
+  - `fsq = ||F_projected||^2 / N_active`;
+  - `normalized_force = sqrt(fsq) / max(|energy_total|, tiny)`;
+  - `active_force_dof`, counting only unconstrained interior shape degrees of freedom plus gauge-reduced `lambda` degrees of freedom.
+- Extended residual-history plots to show projected residual norm, normalized force, mirror `fsq`, accepted step norm, and total energy.
+- Added reusable circular-loop Biot-Savart helpers for off-axis axisymmetric fields:
+  - `circular_loop_field_rz(r, z_rel, ...)`;
+  - `two_coil_field_rz(r, z, ...)`.
+- Extended `examples/mirror_two_coil_axisym.py` so the root example writes:
+  - coil-overlaid 3-D flux-tube geometry;
+  - coil-overlaid 3-D `|B|`;
+  - analytic on-axis `B_z` comparison;
+  - low-radius off-axis `B_r`/`B_z` comparison against circular-loop Biot-Savart;
+  - `ns`/`nxi` convergence JSON and plot.
+- Added `examples/mirror_finite_current_pitch.py`, using the same two-coil boundary with nonzero `I'` so field-line pitch is visible from cap to cap.
+- Added tests for:
+  - circular-loop off-axis field against independent direct Biot-Savart quadrature;
+  - two-coil on-axis mirror benchmark;
+  - low-radius off-axis mirror-vs-Biot-Savart agreement;
+  - root two-coil CLI example;
+  - root finite-current pitch CLI example and field-line theta advance;
+  - `mout` round-trip of `fsq`, normalized force, and active force DOF.
+
+### Current benchmark results
+
+- The vacuum two-coil axis field matches the analytic on-axis `B_z` to roundoff (`axis_bz_relative_linf ~ 5.8e-16`).
+- The two-coil mirror ratio is `13.940048820983622`, and the output mirror ratio agrees to plotting/roundoff tolerance.
+- The low-radius off-axis comparison at `s = 0.125` has relative `B_r` and `B_z` errors of about `2.8%` and `2.7%`, respectively. This is acceptable for the near-axis flux-tube benchmark and should not be overclaimed as full finite-radius coil-plasma matching.
+- The finite-current pitch example gives mean cap-to-cap theta advance of about `3.43 rad` (`0.55` turns) for the default `I'`.
+- The convergence sweep currently shows machine-level on-axis errors and decreasing `fsq` with increasing `ns`/`nxi`; off-axis errors are limited by the near-axis boundary model, not by the loop-field analytic expression.
+
+### Interpretation
+
+- The new `fsq` is a mirror-native normalized projected-force diagnostic, not a bit-for-bit VMEC toroidal `fsq` port.
+- It is now suitable for comparing mirror solves across resolutions and examples, but further scaling studies are needed before using absolute thresholds as convergence guarantees.
+- The finite-current example verifies the field-line pitch visualization path. It is not yet a finite-beta or anisotropic mirror physics benchmark.
+
+### Next research gates
+
+- Add cap-policy objects for equal symmetric caps, independent left/right caps, and explicit axisymmetric mode filtering.
+- Add manufactured equilibria with known nonzero `I'` and pressure where projected forces have analytic expectations.
+- Add scalar-pressure two-coil benchmarks and compare convergence of energy, `fsq`, and magnetic well proxy over `ns`, `nxi`, and optimizer settings.
+- Add higher-order off-axis benchmarks by shrinking the flux tube radius and confirming the low-radius Biot-Savart discrepancy scales down as expected.
+- Add anisotropic-pressure APIs only after scalar-pressure force diagnostics converge on these analytic and manufactured cases.

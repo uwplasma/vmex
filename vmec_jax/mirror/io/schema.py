@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-MOUT_SCHEMA_VERSION = "0.1"
+MOUT_SCHEMA_VERSION = "0.2"
 MOUT_ALGORITHM = "fixed_boundary_variational_chebyshev_lobatto"
 
 MOUT_GLOBAL_ATTRIBUTES = {
@@ -75,6 +75,9 @@ MOUT_HISTORY_DIMS = {
     "solve_history_pressure_scale": ("history_steps",),
     "solve_history_energy_total": ("history_steps",),
     "solve_history_residual_norm": ("history_steps",),
+    "solve_history_fsq": ("history_steps",),
+    "solve_history_normalized_force": ("history_steps",),
+    "solve_history_active_force_dof": ("history_steps",),
     "solve_history_min_sqrtg": ("history_steps",),
     "solve_history_max_sqrtg": ("history_steps",),
     "solve_history_min_Bmag": ("history_steps",),
@@ -141,6 +144,9 @@ class MirrorOutputDiagnostics:
     energy_total: float
     residual_norm: float
     force_norm: float
+    fsq: float
+    normalized_force: float
+    active_force_dof: int
     min_sqrtg: float
     max_sqrtg: float
     min_bmag: float
@@ -157,6 +163,9 @@ class MirrorOutputHistory:
     pressure_scale: np.ndarray
     energy_total: np.ndarray
     residual_norm: np.ndarray
+    fsq: np.ndarray
+    normalized_force: np.ndarray
+    active_force_dof: np.ndarray
     min_sqrtg: np.ndarray
     max_sqrtg: np.ndarray
     min_bmag: np.ndarray

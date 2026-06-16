@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import runpy
 import subprocess
 import sys
 
+import numpy as np
 import pytest
 
 from vmec_jax.mirror import load_mirror_output
+from vmec_jax.mirror.plotting.bfield import mirror_boundary_field_line_data
 
 pytestmark = pytest.mark.mirror
 
@@ -76,4 +79,36 @@ def test_root_two_coil_axisym_example_runs_without_plots(tmp_path):
     metrics = (mout.parent / "two_coil_axisym_metrics.json").read_text()
     assert output.ntheta == 1
     assert output.diagnostics.min_sqrtg > 0.0
+    assert output.diagnostics.fsq >= 0.0
+    assert output.diagnostics.active_force_dof > 0
     assert "axis_bz_relative_linf" in metrics
+    assert "off_axis_br_relative_linf" in metrics
+
+
+def test_root_finite_current_pitch_example_runs_without_plots(tmp_path):
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "examples/mirror_finite_current_pitch.py",
+            "--outdir",
+            str(tmp_path / "finite_current_pitch"),
+            "--maxiter",
+            "0",
+            "--no-plots",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    mout = Path(completed.stdout.strip())
+    output = load_mirror_output(mout)
+    metrics = json.loads((mout.parent / "finite_current_pitch_metrics.json").read_text())
+    lines = mirror_boundary_field_line_data(output, num_lines=2)
+    theta_advance = lines.theta[:, -1] - lines.theta[:, 0]
+    assert output.ntheta == 1
+    assert output.diagnostics.min_sqrtg > 0.0
+    assert output.diagnostics.active_force_dof > 0
+    assert output.profiles.i_prime[0] > 0.0
+    assert np.min(theta_advance) > 1.0
+    assert metrics["field_line_theta_advance_mean"] > 1.0

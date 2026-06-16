@@ -43,7 +43,12 @@ _FIELD_ATTRS = {
 }
 _PROFILE_ATTRS = {"Psi_prime": "psi_prime", "I_prime": "i_prime"}
 _HISTORY_ATTRS = {"min_Bmag": "min_bmag", "max_Bmag": "max_bmag"}
-_INT_HISTORY_NAMES = {"solve_history_stage_index", "solve_history_iteration", "solve_history_accepted"}
+_INT_HISTORY_NAMES = {
+    "solve_history_stage_index",
+    "solve_history_iteration",
+    "solve_history_active_force_dof",
+    "solve_history_accepted",
+}
 
 
 def _as_axisym_3d(values, *, ntheta: int) -> np.ndarray:
@@ -69,8 +74,18 @@ def _read_float(variables: Any, name: str) -> np.ndarray:
     return np.asarray(variables[name][:], dtype=float)
 
 
+def _read_optional_float(variables: Any, name: str, fallback: str) -> np.ndarray:
+    return _read_float(variables, name if name in variables else fallback)
+
+
 def _read_int(variables: Any, name: str) -> np.ndarray:
     return np.asarray(variables[name][:], dtype=int)
+
+
+def _read_optional_int(variables: Any, name: str, fallback_value: int, fallback_length: int) -> np.ndarray:
+    if name in variables:
+        return _read_int(variables, name)
+    return np.full(int(fallback_length), int(fallback_value), dtype=int)
 
 
 def _history_array(trace, name: str, *, dtype=float) -> np.ndarray:
@@ -105,6 +120,7 @@ def _geometry_output(result, geometry) -> MirrorOutputGeometry:
         g_xixi=_as_axisym_3d(geometry.g_xixi, ntheta=grid.ntheta),
         boundary_r=boundary_r,
     )
+
 
 def _field_output(result, field) -> MirrorOutputField:
     ntheta = result.grid.ntheta
@@ -159,6 +175,9 @@ def _diagnostics_output(energy, residual, geometry, field_diag) -> MirrorOutputD
         energy_total=energy.total,
         residual_norm=residual.norm,
         force_norm=residual.norm,
+        fsq=residual.fsq,
+        normalized_force=residual.normalized_force,
+        active_force_dof=residual.active_dof,
         min_sqrtg=float(np.min(geometry.sqrtg)),
         max_sqrtg=float(np.max(geometry.sqrtg)),
         min_bmag=field_diag.min_bmag,
@@ -175,6 +194,9 @@ def _history_output(trace) -> MirrorOutputHistory:
         pressure_scale=_history_array(trace, "pressure_scale"),
         energy_total=_history_array(trace, "energy_total"),
         residual_norm=_history_array(trace, "residual_norm"),
+        fsq=_history_array(trace, "fsq"),
+        normalized_force=_history_array(trace, "normalized_force"),
+        active_force_dof=_history_array(trace, "active_force_dof", dtype=int),
         min_sqrtg=_history_array(trace, "min_sqrtg"),
         max_sqrtg=_history_array(trace, "max_sqrtg"),
         min_bmag=_history_array(trace, "min_bmag"),
@@ -211,6 +233,8 @@ def _write_diagnostic_scalars(ds: Any, output: MirrorOutput) -> None:
         "energy_total": output.diagnostics.energy_total,
         "residual_norm": output.diagnostics.residual_norm,
         "force_norm": output.diagnostics.force_norm,
+        "fsq": output.diagnostics.fsq,
+        "normalized_force": output.diagnostics.normalized_force,
         "min_sqrtg": output.diagnostics.min_sqrtg,
         "max_sqrtg": output.diagnostics.max_sqrtg,
         "min_Bmag": output.diagnostics.min_bmag,
@@ -219,6 +243,7 @@ def _write_diagnostic_scalars(ds: Any, output: MirrorOutput) -> None:
     }
     for name, value in scalar_values.items():
         _write_float_variable(ds, name, (), value)
+    _write_int_variable(ds, "active_force_dof", (), output.diagnostics.active_force_dof)
 
 
 def _write_history(ds: Any, output: MirrorOutput) -> None:
@@ -231,6 +256,16 @@ def _write_history(ds: Any, output: MirrorOutput) -> None:
 
 def _read_scalar(variables: Any, name: str) -> float:
     return float(np.asarray(variables[name][:]).reshape(()))
+
+
+def _read_optional_scalar(variables: Any, name: str, fallback: str) -> float:
+    return _read_scalar(variables, name if name in variables else fallback)
+
+
+def _read_optional_int_scalar(variables: Any, name: str, fallback_value: int) -> int:
+    if name in variables:
+        return int(np.asarray(variables[name][:]).reshape(()))
+    return int(fallback_value)
 
 
 def _read_geometry(variables: Any) -> MirrorOutputGeometry:
@@ -284,6 +319,9 @@ def _read_diagnostics(variables: Any) -> MirrorOutputDiagnostics:
         energy_total=_read_scalar(variables, "energy_total"),
         residual_norm=_read_scalar(variables, "residual_norm"),
         force_norm=_read_scalar(variables, "force_norm"),
+        fsq=_read_optional_scalar(variables, "fsq", "residual_norm"),
+        normalized_force=_read_optional_scalar(variables, "normalized_force", "force_norm"),
+        active_force_dof=_read_optional_int_scalar(variables, "active_force_dof", 0),
         min_sqrtg=_read_scalar(variables, "min_sqrtg"),
         max_sqrtg=_read_scalar(variables, "max_sqrtg"),
         min_bmag=_read_scalar(variables, "min_Bmag"),
@@ -299,6 +337,18 @@ def _read_history(variables: Any) -> MirrorOutputHistory:
         pressure_scale=_read_float(variables, "solve_history_pressure_scale"),
         energy_total=_read_float(variables, "solve_history_energy_total"),
         residual_norm=_read_float(variables, "solve_history_residual_norm"),
+        fsq=_read_optional_float(variables, "solve_history_fsq", "solve_history_residual_norm"),
+        normalized_force=_read_optional_float(
+            variables,
+            "solve_history_normalized_force",
+            "solve_history_residual_norm",
+        ),
+        active_force_dof=_read_optional_int(
+            variables,
+            "solve_history_active_force_dof",
+            fallback_value=0,
+            fallback_length=np.asarray(variables["solve_history_iteration"][:]).size,
+        ),
         min_sqrtg=_read_float(variables, "solve_history_min_sqrtg"),
         max_sqrtg=_read_float(variables, "solve_history_max_sqrtg"),
         min_bmag=_read_float(variables, "solve_history_min_Bmag"),
@@ -371,7 +421,9 @@ def write_mirror_output(path: str | Path, output_or_result, *, overwrite: bool =
     path = Path(path)
     if path.exists() and not overwrite:
         raise FileExistsError(f"{path} exists (pass overwrite=True to overwrite)")
-    output = output_or_result if isinstance(output_or_result, MirrorOutput) else mirror_output_from_result(output_or_result)
+    output = (
+        output_or_result if isinstance(output_or_result, MirrorOutput) else mirror_output_from_result(output_or_result)
+    )
 
     try:
         import netCDF4  # type: ignore

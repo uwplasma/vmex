@@ -24,6 +24,9 @@ class FixedBoundaryTraceRow:
     pressure_scale: float
     energy_total: float
     residual_norm: float
+    fsq: float
+    normalized_force: float
+    active_force_dof: int
     min_sqrtg: float
     max_sqrtg: float
     min_bmag: float
@@ -85,6 +88,9 @@ def trace_row_from_state(
         pressure_scale=float(pressure_scale),
         energy_total=float(residual.energy),
         residual_norm=float(residual.norm),
+        fsq=float(residual.fsq),
+        normalized_force=float(residual.normalized_force),
+        active_force_dof=int(residual.active_dof),
         min_sqrtg=float(np.min(geometry.sqrtg)),
         max_sqrtg=float(np.max(geometry.sqrtg)),
         min_bmag=diagnostics.min_bmag,

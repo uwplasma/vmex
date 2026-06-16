@@ -30,6 +30,9 @@ class AxisymProjectedResidual:
     projected_a: np.ndarray
     projected_lam: np.ndarray
     norm: float
+    fsq: float
+    normalized_force: float
+    active_dof: int
 
 
 @dataclass(frozen=True)
@@ -51,6 +54,9 @@ class ProjectedResidual3D:
     projected_a: np.ndarray
     projected_lam: np.ndarray
     norm: float
+    fsq: float
+    normalized_force: float
+    active_dof: int
 
 
 def _require_jax() -> None:
@@ -228,7 +234,9 @@ def flat_state_energy_3d_jax(flat_state, shape, grid, *, psi_prime, i_prime, pre
     )
 
 
-def axisym_energy_value_and_gradient(state, grid, *, psi_prime, i_prime, pressure, mu0: float = MU0) -> AxisymEnergyGradient:
+def axisym_energy_value_and_gradient(
+    state, grid, *, psi_prime, i_prime, pressure, mu0: float = MU0
+) -> AxisymEnergyGradient:
     """Return energy and AD gradients with respect to ``a`` and ``lambda``."""
     _require_jax()
 
@@ -305,6 +313,40 @@ def project_residual_3d(grad_a, grad_lam, grid, *, fix_end_surfaces: bool = True
     return projected_a, projected_lam
 
 
+def active_axisym_force_dof_count(grid, *, fix_end_surfaces: bool = True) -> int:
+    """Return the number of active projected force degrees of freedom."""
+    active_a = np.ones((grid.ns, grid.nxi), dtype=bool)
+    active_a[-1, :] = False
+    active_a[0, :] = False
+    if fix_end_surfaces:
+        active_a[:, 0] = False
+        active_a[:, -1] = False
+    # Lambda is gauge-projected by removing one weighted mean per radial surface.
+    active_lam = grid.ns * max(grid.nxi - 1, 0)
+    return int(np.count_nonzero(active_a) + active_lam)
+
+
+def active_3d_force_dof_count(grid, *, fix_end_surfaces: bool = True) -> int:
+    """Return the number of active projected 3D force degrees of freedom."""
+    active_a = np.ones((grid.ns, grid.ntheta, grid.nxi), dtype=bool)
+    active_a[-1, :, :] = False
+    active_a[0, :, :] = False
+    if fix_end_surfaces:
+        active_a[:, :, 0] = False
+        active_a[:, :, -1] = False
+    # Lambda is gauge-projected by removing one theta-xi mean per radial surface.
+    active_lam = grid.ns * max(grid.ntheta * grid.nxi - 1, 0)
+    return int(np.count_nonzero(active_a) + active_lam)
+
+
+def normalized_force_metrics(norm: float, energy: float, active_dof: int) -> tuple[float, float]:
+    """Return mirror-native ``fsq`` and normalized projected-force norm."""
+    active_dof = max(1, int(active_dof))
+    fsq = float(norm) ** 2 / active_dof
+    energy_scale = max(abs(float(energy)), np.finfo(float).tiny)
+    return fsq, float(np.sqrt(fsq) / energy_scale)
+
+
 def axisym_projected_energy_residual(
     state,
     grid,
@@ -325,6 +367,8 @@ def axisym_projected_energy_residual(
     )
     projected_a, projected_lam = project_axisym_residual(gradient.grad_a, gradient.grad_lam, grid)
     norm = float(np.sqrt(np.sum(projected_a**2) + np.sum(projected_lam**2)))
+    active_dof = active_axisym_force_dof_count(grid)
+    fsq, normalized_force = normalized_force_metrics(norm, gradient.energy, active_dof)
     return AxisymProjectedResidual(
         energy=gradient.energy,
         grad_a=gradient.grad_a,
@@ -332,6 +376,9 @@ def axisym_projected_energy_residual(
         projected_a=projected_a,
         projected_lam=projected_lam,
         norm=norm,
+        fsq=fsq,
+        normalized_force=normalized_force,
+        active_dof=active_dof,
     )
 
 
@@ -355,6 +402,8 @@ def projected_energy_residual_3d(
     )
     projected_a, projected_lam = project_residual_3d(gradient.grad_a, gradient.grad_lam, grid)
     norm = float(np.sqrt(np.sum(projected_a**2) + np.sum(projected_lam**2)))
+    active_dof = active_3d_force_dof_count(grid)
+    fsq, normalized_force = normalized_force_metrics(norm, gradient.energy, active_dof)
     return ProjectedResidual3D(
         energy=gradient.energy,
         grad_a=gradient.grad_a,
@@ -362,6 +411,9 @@ def projected_energy_residual_3d(
         projected_a=projected_a,
         projected_lam=projected_lam,
         norm=norm,
+        fsq=fsq,
+        normalized_force=normalized_force,
+        active_dof=active_dof,
     )
 
 

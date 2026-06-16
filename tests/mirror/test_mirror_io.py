@@ -76,6 +76,12 @@ def test_mirror_output_roundtrip_preserves_schema_and_arrays(tmp_path):
     assert np.allclose(loaded.geometry.boundary_r[0], result.boundary.radius_on_grid(result.grid))
     assert np.isclose(loaded.diagnostics.energy_total, loaded.history.energy_total[-1])
     assert np.isclose(loaded.diagnostics.residual_norm, loaded.history.residual_norm[-1])
+    assert np.isclose(loaded.diagnostics.fsq, loaded.history.fsq[-1])
+    assert np.isclose(loaded.diagnostics.normalized_force, loaded.history.normalized_force[-1])
+    assert loaded.diagnostics.active_force_dof == loaded.history.active_force_dof[-1]
+    assert loaded.diagnostics.fsq >= 0.0
+    assert loaded.diagnostics.normalized_force >= 0.0
+    assert loaded.diagnostics.active_force_dof > 0
     assert np.all(loaded.history.accepted)
 
     with pytest.raises(FileExistsError):
@@ -96,6 +102,8 @@ def test_mirror_output_roundtrip_preserves_nonaxisymmetric_arrays(tmp_path):
     assert np.allclose(loaded.geometry.boundary_r, result.boundary.radius_on_grid_3d(result.grid))
     assert np.max(np.ptp(loaded.geometry.boundary_r, axis=0)) > 0.0
     assert np.isclose(loaded.diagnostics.energy_total, loaded.history.energy_total[-1])
+    assert np.isclose(loaded.diagnostics.fsq, loaded.history.fsq[-1])
+    assert loaded.diagnostics.normalized_force >= 0.0
     assert loaded.diagnostics.min_sqrtg > 0.0
 
 
