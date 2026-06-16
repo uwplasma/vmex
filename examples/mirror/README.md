@@ -15,7 +15,10 @@ python examples/mirror/nonaxisymmetric_boundary.py --outdir results/mirror/nonax
 ```
 
 Each script writes a mirror-native ``mout_*.nc`` file and, unless
-``--no-plots`` is passed, a set of PNG diagnostics including geometry, boundary
-magnetic-field direction, ``|B|``, beta/twist-proxy, and magnetic-well-proxy
+``--no-plots`` is passed, a set of PNG diagnostics including horizontal
+``z``-axis geometry, boundary magnetic-field direction with field-line traces,
+``|B|``, beta/twist-proxy, magnetic-well-proxy, and residual/step-history
 figures.  These are research fixtures for the scalar-pressure fixed-boundary
-mirror path, not WHAM predictive modelling tools.
+mirror path, not WHAM predictive modelling tools.  For physically axisymmetric
+mirrors use the cylinder, flared-tube, or WHAM examples; the nonaxisymmetric
+example is a solver/plot stress test.

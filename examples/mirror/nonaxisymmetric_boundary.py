@@ -27,7 +27,7 @@ from vmec_jax.mirror import (
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--outdir", type=Path, default=Path("results/mirror/nonaxisymmetric_boundary"))
-    parser.add_argument("--epsilon", type=float, default=0.04)
+    parser.add_argument("--epsilon", type=float, default=0.02)
     parser.add_argument("--maxiter", type=int, default=6)
     parser.add_argument("--no-plots", action="store_true")
     return parser
@@ -35,8 +35,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def run_case(outdir: Path, *, epsilon: float, maxiter: int, write_plots: bool = True) -> Path:
     outdir.mkdir(parents=True, exist_ok=True)
-    config = MirrorConfig(MirrorResolution(ns=7, ntheta=13, nxi=13, mpol=4), z_min=-1.0, z_max=1.0)
-    boundary = MirrorBoundary.cosine_modulated_radius(r0=0.3, a2=0.08, epsilon=epsilon, theta_mode=2)
+    config = MirrorConfig(MirrorResolution(ns=7, ntheta=13, nxi=17, mpol=4), z_min=-1.6, z_max=1.6)
+    boundary = MirrorBoundary.cosine_modulated_radius(r0=0.3, a2=-0.35, epsilon=epsilon, theta_mode=2)
     result = run_mirror_fixed_boundary(
         config,
         boundary,

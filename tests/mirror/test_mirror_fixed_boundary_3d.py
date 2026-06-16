@@ -14,6 +14,7 @@ from vmec_jax.mirror import (
 )
 from vmec_jax.mirror.core.boundary import MirrorBoundary
 from vmec_jax.mirror.core.state import MirrorState3D
+from vmec_jax.mirror.kernels.fields import evaluate_field_3d
 from vmec_jax.mirror.kernels.forces import projected_energy_residual_3d
 from vmec_jax.mirror.kernels.geometry import evaluate_geometry_3d
 from vmec_jax.mirror.solvers.fixed_boundary.optimizers import (
@@ -26,9 +27,9 @@ pytestmark = pytest.mark.mirror
 
 
 def _case():
-    config = MirrorConfig(MirrorResolution(ns=5, ntheta=9, nxi=9, mpol=3), z_min=-1.0, z_max=1.0)
+    config = MirrorConfig(MirrorResolution(ns=5, ntheta=9, nxi=11, mpol=3), z_min=-1.3, z_max=1.3)
     grid = config.build_grid()
-    boundary = MirrorBoundary.cosine_modulated_radius(r0=0.3, a2=0.08, epsilon=0.04, theta_mode=2)
+    boundary = MirrorBoundary.cosine_modulated_radius(r0=0.3, a2=-0.25, epsilon=0.04, theta_mode=2)
     base = MirrorState3D.from_boundary(grid, boundary)
     s = grid.s_full[:, None, None]
     theta = grid.theta[None, :, None]
@@ -116,6 +117,8 @@ def test_nonaxisymmetric_fixed_boundary_solver_preserves_boundary_and_positive_j
         options=MirrorSolveOptions(optimizer="lbfgs", maxiter=6, tolerance=1.0e-10, mu0=1.0),
     )
     geometry = evaluate_geometry_3d(result.state, result.grid)
+    field = evaluate_field_3d(result.state, result.grid, geometry, psi_prime=psi, i_prime=current)
+    center_index = int(np.argmin(np.abs(result.grid.xi)))
 
     assert isinstance(result.state, MirrorState3D)
     assert result.final_trace.energy_total <= initial_residual.energy
@@ -125,3 +128,5 @@ def test_nonaxisymmetric_fixed_boundary_solver_preserves_boundary_and_positive_j
     assert np.allclose(result.state.a[-1], boundary.radius_on_grid_3d(result.grid))
     assert np.allclose(result.state.a[:, :, 0], boundary.radius_on_grid_3d(result.grid)[:, 0][None, :])
     assert np.allclose(result.state.a[:, :, -1], boundary.radius_on_grid_3d(result.grid)[:, -1][None, :])
+    assert np.mean(field.bmag[-1, :, 0]) > np.mean(field.bmag[-1, :, center_index])
+    assert np.mean(field.bmag[-1, :, -1]) > np.mean(field.bmag[-1, :, center_index])

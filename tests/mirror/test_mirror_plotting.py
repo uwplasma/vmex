@@ -20,6 +20,7 @@ from vmec_jax.mirror import (
 from vmec_jax.mirror.core.boundary import MirrorBoundary
 from vmec_jax.mirror.io.mout import load_mirror_output
 from vmec_jax.mirror.plotting.bfield import mirror_bfield_boundary_data, mirror_bmag_boundary_data, mirror_bmag_sxi_data
+from vmec_jax.mirror.plotting.bfield import mirror_boundary_field_line_data
 from vmec_jax.mirror.plotting.diagnostics import (
     mirror_jacobian_data,
     mirror_pressure_profile_data,
@@ -52,6 +53,7 @@ def test_mirror_plot_data_helpers_expose_numerical_content(tmp_path):
     bmag_sxi = mirror_bmag_sxi_data(output)
     bmag_boundary = mirror_bmag_boundary_data(output)
     bfield_boundary = mirror_bfield_boundary_data(output, stride_theta=3, stride_xi=2)
+    field_lines = mirror_boundary_field_line_data(output, num_lines=4)
     boundary = mirror_boundary_3d_data(output, ntheta_axisym=12)
     jacobian = mirror_jacobian_data(output)
     pressure = mirror_pressure_profile_data(output)
@@ -63,12 +65,15 @@ def test_mirror_plot_data_helpers_expose_numerical_content(tmp_path):
     assert np.allclose(bmag_sxi.bmag, np.mean(output.field.bmag, axis=1))
     assert np.allclose(bmag_boundary.bmag, output.field.bmag[-1])
     assert bfield_boundary.x.shape == bfield_boundary.bx.shape
+    assert field_lines.x.shape == (4, output.nxi)
+    assert np.allclose(field_lines.z, output.z[None, :])
     assert boundary.x.shape == boundary.y.shape == boundary.z.shape == boundary.bmag.shape
     assert jacobian.min_sqrtg == pytest.approx(float(np.min(jacobian.sqrtg)))
     assert np.allclose(pressure.pressure, output.profiles.pressure)
     assert radial.mean_bmag.shape == output.s.shape
     assert radial.iota_like_twist.shape == output.s.shape
     assert np.allclose(history.residual_norm, output.history.residual_norm)
+    assert np.allclose(history.step_size, output.history.step_size)
 
 
 def test_plot_mirror_output_writes_expected_pngs(tmp_path):

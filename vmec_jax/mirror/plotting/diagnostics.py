@@ -40,6 +40,7 @@ class MirrorResidualHistoryData:
     index: np.ndarray
     residual_norm: np.ndarray
     energy_total: np.ndarray
+    step_size: np.ndarray
     pressure_scale: np.ndarray
 
 
@@ -89,6 +90,7 @@ def mirror_residual_history_data(output_or_path) -> MirrorResidualHistoryData:
         index=np.arange(output.history.residual_norm.size),
         residual_norm=np.asarray(output.history.residual_norm),
         energy_total=np.asarray(output.history.energy_total),
+        step_size=np.asarray(output.history.step_size),
         pressure_scale=np.asarray(output.history.pressure_scale),
     )
 
@@ -171,13 +173,20 @@ def write_mirror_residual_history(output_or_path, *, outdir: str | Path, name: s
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    fig, ax = plt.subplots(figsize=(6, 3.5))
+    fig, axes = plt.subplots(2, 1, figsize=(6, 4.5), sharex=True)
+    ax = axes[0]
     ax.semilogy(data.index, np.maximum(data.residual_norm, 1.0e-300), ".-", label="residual")
-    ax.set_xlabel("history index")
-    ax.set_ylabel("residual norm")
-    ax2 = ax.twinx()
-    ax2.plot(data.index, data.energy_total, ".-", color="tab:orange", label="energy")
-    ax2.set_ylabel("total energy")
+    positive_step = np.where(data.step_size > 0.0, data.step_size, np.nan)
+    ax.semilogy(data.index, positive_step, ".-", label="step norm")
+    ax.set_ylabel("norm")
+    ax.set_title("fixed-boundary convergence")
+    ax.legend(fontsize="x-small")
+
+    ax_energy = axes[1]
+    ax_energy.plot(data.index, data.energy_total, ".-", color="tab:orange")
+    ax_energy.set_xlabel("history index")
+    ax_energy.set_ylabel("total energy")
+    ax_energy.ticklabel_format(axis="y", useOffset=False)
     fig.tight_layout()
     path = outdir / f"{_plot_name(output, name)}_mirror_residual_history.png"
     fig.savefig(path, dpi=180, bbox_inches="tight")

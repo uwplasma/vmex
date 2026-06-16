@@ -43,6 +43,16 @@ class MirrorBfieldBoundaryData:
     bmag: np.ndarray
 
 
+@dataclass(frozen=True)
+class MirrorBoundaryFieldLineData:
+    """Boundary field-line traces in physical coordinates."""
+
+    x: np.ndarray
+    y: np.ndarray
+    z: np.ndarray
+    theta: np.ndarray
+
+
 def _as_output(output_or_path) -> MirrorOutput:
     return output_or_path if isinstance(output_or_path, MirrorOutput) else load_mirror_output(output_or_path)
 
@@ -82,6 +92,48 @@ def mirror_bfield_boundary_data(output_or_path, *, stride_theta: int = 2, stride
         by=np.asarray(output.field.b_y[-1, theta_slice, xi_slice]),
         bz=np.asarray(output.field.b_z[-1, theta_slice, xi_slice]),
         bmag=np.asarray(output.field.bmag[-1, theta_slice, xi_slice]),
+    )
+
+
+def _interp_periodic(theta_nodes, values, theta_value: float) -> float:
+    theta_nodes = np.asarray(theta_nodes, dtype=float)
+    values = np.asarray(values, dtype=float)
+    period = 2.0 * np.pi
+    theta_wrapped = float(np.mod(theta_value, period))
+    extended_theta = np.concatenate([theta_nodes, theta_nodes[:1] + period])
+    extended_values = np.concatenate([values, values[:1]])
+    return float(np.interp(theta_wrapped, extended_theta, extended_values))
+
+
+def mirror_boundary_field_line_data(output_or_path, *, num_lines: int = 6) -> MirrorBoundaryFieldLineData:
+    """Trace boundary field lines from one end cap to the other in ``(theta, xi)``."""
+    output = _as_output(output_or_path)
+    num_lines = max(1, int(num_lines))
+    theta_nodes = np.asarray(output.theta, dtype=float)
+    xi = np.asarray(output.xi, dtype=float)
+    z = np.asarray(output.z, dtype=float)
+    start_theta = np.linspace(0.0, 2.0 * np.pi, num_lines, endpoint=False)
+    theta_lines = np.zeros((num_lines, output.nxi), dtype=float)
+    theta_lines[:, 0] = start_theta
+    btheta = np.asarray(output.field.b_sup_theta[-1], dtype=float)
+    bxi = np.asarray(output.field.b_sup_xi[-1], dtype=float)
+    for line_index in range(num_lines):
+        for k in range(output.nxi - 1):
+            numerator = _interp_periodic(theta_nodes, btheta[:, k], theta_lines[line_index, k])
+            denominator = _interp_periodic(theta_nodes, bxi[:, k], theta_lines[line_index, k])
+            slope = 0.0 if abs(denominator) <= np.finfo(float).tiny else numerator / denominator
+            theta_lines[line_index, k + 1] = theta_lines[line_index, k] + slope * (xi[k + 1] - xi[k])
+
+    radius = np.zeros_like(theta_lines)
+    boundary_r = np.asarray(output.geometry.boundary_r, dtype=float)
+    for line_index in range(num_lines):
+        for k in range(output.nxi):
+            radius[line_index, k] = _interp_periodic(theta_nodes, boundary_r[:, k], theta_lines[line_index, k])
+    return MirrorBoundaryFieldLineData(
+        x=radius * np.cos(theta_lines),
+        y=radius * np.sin(theta_lines),
+        z=np.broadcast_to(z[None, :], theta_lines.shape).copy(),
+        theta=theta_lines,
     )
 
 
@@ -133,37 +185,41 @@ def write_mirror_bfield_boundary(output_or_path, *, outdir: str | Path, name: st
     """Write a 3-D boundary magnetic-field vector plot."""
     output = _as_output(output_or_path)
     data = mirror_bfield_boundary_data(output)
+    lines = mirror_boundary_field_line_data(output)
     plt = _import_matplotlib()
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
     scale = np.maximum(data.bmag, np.finfo(float).tiny)
-    fig = plt.figure(figsize=(5.5, 4.25))
+    fig = plt.figure(figsize=(6.25, 4.5))
     ax = fig.add_subplot(111, projection="3d")
     ax.plot_surface(
+        np.asarray(output.geometry.z[-1]),
         np.asarray(output.geometry.x[-1]),
         np.asarray(output.geometry.y[-1]),
-        np.asarray(output.geometry.z[-1]),
         color="lightgray",
         alpha=0.25,
         linewidth=0.0,
     )
     ax.quiver(
+        data.z,
         data.x,
         data.y,
-        data.z,
+        data.bz / scale,
         data.bx / scale,
         data.by / scale,
-        data.bz / scale,
         length=0.14,
         normalize=False,
         color="tab:blue",
     )
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
-    ax.set_zlabel("Z")
-    ax.set_title("boundary B direction")
-    ax.set_box_aspect([1, 1, max(1.0, float(np.ptp(output.z)))])
+    for line_index in range(lines.z.shape[0]):
+        ax.plot(lines.z[line_index], lines.x[line_index], lines.y[line_index], color="tab:red", linewidth=1.0)
+    ax.set_xlabel("z")
+    ax.set_ylabel("x")
+    ax.set_zlabel("y")
+    ax.set_title("boundary B direction and field lines")
+    ax.set_box_aspect([max(1.0, float(np.ptp(output.z))), 1, 1])
+    ax.view_init(elev=18, azim=-62)
     fig.tight_layout()
     path = outdir / f"{_plot_name(output, name)}_mirror_bfield_boundary.png"
     fig.savefig(path, dpi=180, bbox_inches="tight")

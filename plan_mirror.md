@@ -2590,3 +2590,62 @@ Mitigation:
 13. Add mirror-specific straight-field-line / Boozer-like transform after fixed-boundary output is stable.
 14. Use WHAM/magpylib/Pleiades/DESC/GVEC as validation and design anchors, not as replacement solvers.
 15. Treat tests as scientific verification gates: analytic, manufactured, parity, convergence, regression, and benchmark tests.
+
+---
+
+## 31. 2026-06-16 mirror-plot and boundary-condition assessment
+
+This assessment was added after reviewing the first nonaxisymmetric fixed-boundary plots against mirror expectations, DESC fixed-boundary behavior, and magnetic-mirror literature.
+
+### Plotting convention
+
+- 3-D mirror plots should show the open axial coordinate horizontally.
+- The plotting convention is therefore `(horizontal, vertical, depth) = (z, x, y)`.
+- Boundary `|B|`, vector, field-line, and geometry plots should use this convention consistently.
+
+### Field lines and pitch
+
+- Boundary magnetic-field plots should overlay field-line traces from one cap to the other.
+- The trace equation used for the side boundary is `d theta / d xi = B^theta / B^xi`.
+- For the current zero-current examples, `I' = 0`, so no appreciable pitch is expected.
+- Pitch should appear in later tests once finite `I'`, finite `lambda`, or intentionally helical boundary/input data are used.
+- Open mirror field lines do not have a toroidal rotational transform; current plots should label `I'/Psi'` as an open-field twist proxy, not as true iota.
+
+### Poloidal symmetry
+
+- A physical axisymmetric mirror should be poloidally symmetric up to numerical tolerance.
+- The observed theta variation in the first stress-test plot is not, by itself, evidence of poor convergence; it is imposed by the prescribed `epsilon*cos(m theta)` side boundary.
+- DESC fixed-boundary solves likewise preserve the user-specified spectral boundary rather than symmetrizing it.
+- Axisymmetric mirror examples and tests should use `epsilon = 0`, and should include explicit checks that boundary radius and `|B|` have negligible theta variation.
+- Nonaxisymmetric examples should be documented as stress tests for 3-D fixed-boundary machinery, not as canonical mirror configurations.
+
+### End-cap field strength
+
+- Magnetic-mirror literature describes stronger field at the mirror throats/end regions and weaker field in the central well.
+- In a fixed-flux, low-beta, axisymmetric approximation, `|B_z|` scales approximately like flux divided by cross-sectional area, so smaller end radius gives stronger end-cap field.
+- The earlier positive-`a2` polynomial boundary made the radius larger at the caps and therefore produced the wrong qualitative trend.
+- Canonical fixed-boundary examples should use smaller end radii or a tabulated WHAM/Pleiades-like flux tube so that `|B|_end > |B|_center`.
+- Longer mirrors are useful for visual separation, but the sign and physical meaning of the radius profile matter more than length alone.
+
+### DESC comparison
+
+- DESC fixed-boundary equilibria enforce explicit surface constraints on the LCFS coefficients (`FixBoundaryR`, `FixBoundaryZ`, and related self-consistency constraints).
+- DESC uses spectral surface representations in angular coordinates; the boundary condition is an input constraint, not a post-solve symmetry operation.
+- DESC does not directly provide the open mirror cap policy needed here, but it gives the right design lesson: make fixed-boundary and cap constraints explicit, mode-resolved, and testable.
+- The mirror branch should therefore add an explicit cap-policy layer: equal left/right caps by default, optional independent cap data, and axisymmetric mode filters for physical mirror examples.
+
+### Residual and convergence plots
+
+- Every example figure set should include a residual-history plot with projected residual norm over solve-history index.
+- For L-BFGS examples, convergence plots should also include accepted reduced-step norms because the energy is the optimized scalar and projected residual callbacks are not guaranteed to decrease monotonically every recorded step.
+- Once a VMEC-like `fsq` diagnostic is implemented for mirror solves, plots should include both `fsq` and the projected residual norm.
+- Example captions and logs should report final energy, final residual, minimum Jacobian, mirror ratio, and end/center `|B|` comparison.
+
+### Plan changes from this assessment
+
+- Use horizontal-z 3-D plots by default.
+- Overlay field lines on boundary magnetic-field vector plots.
+- Correct canonical examples so cap fields are stronger than center fields.
+- Add regression tests for end-stronger-than-center field strength in mirror-like fixed-boundary cases.
+- Promote theta-symmetry tests for axisymmetric mirror cases into the M9/M11 validation lane.
+- Treat DESC as a boundary-condition reference for explicit fixed-surface constraints, while keeping vmec_jax mirror cap conditions mirror-native.
