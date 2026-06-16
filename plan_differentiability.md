@@ -5456,3 +5456,83 @@ Completion:
 - Implicit residual-adjoint decomposition: 88%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.27%.
+
+## 2026-06-16 Fixed-Boundary Residual Iteration Domain Relocation
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved the fixed-boundary residual solver implementation out of the generic
+   `vmec_jax.solve` facade and into the domain package
+   `vmec_jax.solvers.fixed_boundary.residual.iteration`.
+2. Replaced `vmec_jax.solve` with a small compatibility facade that re-exports
+   all legacy symbols from the domain implementation.
+3. Added assignment forwarding from the facade to the implementation module so
+   existing private monkeypatch/debug seams such as
+   `vmec_jax.solve._scan_backend_name` still affect the globals used by
+   `solve_fixed_boundary_residual_iter`.
+4. Converted the relocated implementation to absolute `vmec_jax.*` imports so
+   it is owned by the fixed-boundary residual domain instead of relying on the
+   old root-relative module location.
+5. Added a regression test that verifies private assignments on
+   `vmec_jax.solve` propagate to
+   `vmec_jax.solvers.fixed_boundary.residual.iteration`.
+
+Results obtained:
+
+- `vmec_jax/solve.py` changed from a 10,000-line generic implementation file
+  into a small compatibility facade.
+- The remaining 10,000-line hotspot is now explicitly named and located as
+  `vmec_jax/solvers/fixed_boundary/residual/iteration.py`.
+- This is a structural ownership change, not just a line-count shave: the next
+  split can target `residual.iteration.solve_fixed_boundary_residual_iter` and
+  its nested VMEC2000 scan/controller context directly.
+- Public imports from `vmec_jax.solve` still work, including private internal
+  aliases used by the test suite.
+- No solver math, scan branch behavior, adaptive-controller policy, CLI
+  behavior, or output semantics changed.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/solve.py vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `python - <<'PY' ...` import/assignment-forwarding smoke check for
+  `vmec_jax.solve` and `residual.iteration`
+- `python -m ruff check vmec_jax/solve.py vmec_jax/solvers/fixed_boundary/residual/iteration.py tests/test_solve_residual_iter_helpers_wave8_coverage.py tests/test_solve_scan_chunking.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_config.py tests/test_solve_residual_iter_helpers_wave8_coverage.py tests/test_solve_scan_chunking.py tests/test_solve_runtime.py tests/test_driver_api.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_additional_helpers.py tests/test_solve_real_scan_wave10_coverage.py tests/test_solve_finish_cache_more_coverage.py tests/test_driver_run_wave8_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_performance_instrumentation.py tests/test_free_boundary_coil_provider_forward.py::test_run_free_boundary_host_setup_enforce_matches_default_path tests/test_driver_policy_helpers.py -q`
+- `python tools/diagnostics/source_health.py --top 30 --top-functions 45`
+
+Best next steps:
+
+1. Commit and push the residual iteration domain relocation.
+2. Next large tranche should split `residual.iteration` itself, not keep
+   polishing the facade. The most useful target is a VMEC2000 scan/controller
+   context object that can move `_run_vmec2000_scan` out of
+   `solve_fixed_boundary_residual_iter`.
+3. Treat that next scan split as a parity-gated tranche because
+   `_run_vmec2000_scan` has 97 closure variables and owns accepted/rejected
+   controller behavior.
+4. After scan/controller split, separate force-assembly setup from iteration
+   control so Python API paths remain differentiable while CLI paths can keep
+   non-differentiable performance shortcuts.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.67%.
+- Differentiability/refactor implementation: 99.992%.
+- Solver monolith reduction: 91.0%.
+- Free-boundary adjoint monolith reduction: 80%.
+- Driver workflow decomposition: 91.6%.
+- WOUT diagnostic/profile decomposition: 98.5%.
+- Optimizer workflow decomposition: 86%.
+- Implicit residual-adjoint decomposition: 88%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.35%.
