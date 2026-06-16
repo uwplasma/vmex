@@ -11,7 +11,7 @@ import pytest
 import vmec_jax.driver as driver
 from vmec_jax.drivers import io as driver_io
 from vmec_jax.drivers import runtime as driver_runtime
-from vmec_jax.drivers.policy import dynamic_scan_probe_settings
+from vmec_jax.drivers.policy import dynamic_scan_probe_settings, resolve_stage_jit_settings
 
 
 class _Input:
@@ -74,6 +74,53 @@ def test_dynamic_scan_probe_settings_helper_uses_backend_and_env_dict():
         backend_name_func=lambda: "cpu",
         getenv=lambda _key, default="": default,
     ) == (10, True, "cpu")
+
+
+def test_resolve_stage_jit_settings_preserves_scan_and_warmup_policy():
+    env = {}
+    settings = resolve_stage_jit_settings(
+        jit_forces_base=True,
+        scan_mode=True,
+        solver="vmec2000_iter",
+        performance_mode=False,
+        jit_precompile=None,
+        getenv=lambda key, default=None: env.get(key, default),
+    )
+    assert settings.jit_forces_eff is False
+    assert settings.jit_precompile_eff is False
+    assert settings.jit_warmup_iters == 0
+    assert settings.jit_precompile_noscan is True
+    assert settings.jit_warmup_noscan == 0
+
+    env = {"VMEC_JAX_SCAN_JIT_FORCES": "1", "VMEC_JAX_JIT_PRECOMPILE": "0"}
+    settings = resolve_stage_jit_settings(
+        jit_forces_base=True,
+        scan_mode=True,
+        solver="vmec2000_iter",
+        performance_mode=False,
+        jit_precompile=None,
+        getenv=lambda key, default=None: env.get(key, default),
+    )
+    assert settings.jit_forces_eff is True
+    assert settings.jit_precompile_eff is False
+    assert settings.jit_warmup_iters == 0
+    assert settings.jit_precompile_noscan is False
+    assert settings.jit_warmup_noscan == 2
+
+    env = {"VMEC_JAX_JIT_WARMUP_ITERS": "bad"}
+    settings = resolve_stage_jit_settings(
+        jit_forces_base=True,
+        scan_mode=False,
+        solver="vmec2000_iter",
+        performance_mode=True,
+        jit_precompile=False,
+        getenv=lambda key, default=None: env.get(key, default),
+    )
+    assert settings.jit_forces_eff is True
+    assert settings.jit_precompile_eff is False
+    assert settings.jit_warmup_iters == 2
+    assert settings.jit_precompile_noscan is False
+    assert settings.jit_warmup_noscan == 2
 
 
 def test_driver_io_helpers_print_concise_and_vmec_style_banners() -> None:

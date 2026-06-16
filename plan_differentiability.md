@@ -4674,3 +4674,66 @@ Completion:
 - Implicit residual-adjoint decomposition: 86%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.13%.
+
+## 2026-06-16 Driver Stage JIT Policy Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `StageJitSettings` and `resolve_stage_jit_settings` to
+   `vmec_jax.drivers.policy`.
+2. Moved the per-stage VMEC2000 force-kernel JIT, precompile, and warmup policy
+   from the `run_fixed_boundary` stage loop into the tested policy helper.
+3. Preserved the same environment variables and defaults:
+   `VMEC_JAX_SCAN_JIT_FORCES`, `VMEC_JAX_JIT_PRECOMPILE`, and
+   `VMEC_JAX_JIT_WARMUP_ITERS`.
+4. Added direct policy tests for parity scan defaults, explicit scan-JIT
+   overrides, disabled precompile behavior, and invalid warmup values.
+5. Left stage construction, solver dispatch, scan/dynamic-scan selection,
+   preconditioner policy, free-boundary provider wiring, and result assembly
+   unchanged.
+
+Results obtained:
+
+- `run_fixed_boundary` dropped from 1,862 to 1,828 lines.
+- The stage JIT policy is now independently unit-tested instead of only
+  covered through full driver runs.
+- This is a narrow driver workflow decomposition with no new source file and no
+  public API change.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/driver.py vmec_jax/drivers/policy.py tests/test_driver_policy_helpers.py tests/test_driver_run_wave8_coverage.py tests/test_driver_wave2_coverage.py`
+- `python -m compileall -q vmec_jax/driver.py vmec_jax/drivers/policy.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_policy_helpers.py tests/test_driver_run_wave8_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_wave2_coverage.py tests/test_driver_policy_coverage_extra.py -q`
+- `python tools/diagnostics/source_health.py --top 16 --top-functions 24`
+
+Best next steps:
+
+1. Commit and push this driver-stage policy extraction.
+2. Continue driver decomposition only through similarly passive policy/runtime
+   seams; avoid moving the multigrid stage loop until there is a branch/parity
+   test suite specifically around that loop.
+3. Keep the newest CI run monitored after the push and inspect logs only if a
+   non-cancelled run fails.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.67%.
+- Differentiability/refactor implementation: 99.974%.
+- Solver monolith reduction: 88.7%.
+- Free-boundary adjoint monolith reduction: 80%.
+- Driver workflow decomposition: 91%.
+- WOUT diagnostic/profile decomposition: 98.0%.
+- Optimizer workflow decomposition: 82%.
+- Implicit residual-adjoint decomposition: 86%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.15%.

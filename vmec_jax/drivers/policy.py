@@ -32,6 +32,17 @@ class InitialFixedBoundaryPolicy:
     cli_fixed_boundary_mode: bool
 
 
+@dataclass(frozen=True)
+class StageJitSettings:
+    """Resolved JIT/precompile/warmup policy for one VMEC2000 stage."""
+
+    jit_forces_eff: bool
+    jit_precompile_eff: bool
+    jit_warmup_iters: int
+    jit_precompile_noscan: bool
+    jit_warmup_noscan: int
+
+
 def host_update_assembly_driver_default(
     *,
     cfg,
@@ -366,6 +377,88 @@ def resolve_jit_forces_auto_policy(flag: bool | str, static_i, niter_i: int) -> 
             return True
         return bool(work >= 2_000_000)
     return bool(flag)
+
+
+def _truthy_env(value: str | None) -> bool:
+    return str(value or "").strip().lower() not in ("", "0", "false", "no")
+
+
+def _optional_bool_env(value: str | None) -> bool | None:
+    if value is None:
+        return None
+    return _truthy_env(value)
+
+
+def _warmup_iters_from_env(value: str | None, *, precompile_enabled: bool) -> int:
+    if value is not None:
+        try:
+            return max(0, int(value))
+        except Exception:
+            return 2
+    return 0 if bool(precompile_enabled) else 2
+
+
+def resolve_stage_jit_settings(
+    *,
+    jit_forces_base: bool,
+    scan_mode: bool,
+    solver: str,
+    performance_mode: bool,
+    jit_precompile: bool | None,
+    getenv=os.getenv,
+) -> StageJitSettings:
+    """Resolve per-stage force-kernel JIT and warmup policy.
+
+    This helper preserves the driver defaults:
+    scan keeps JIT in fast/performance mode, parity scan disables JIT unless
+    explicitly overridden, and non-scan stages optionally precompile before the
+    actual iteration loop.
+    """
+
+    jit_forces_eff = bool(jit_forces_base)
+    if bool(scan_mode) and str(solver).strip().lower() == "vmec2000_iter":
+        scan_jit = _optional_bool_env(getenv("VMEC_JAX_SCAN_JIT_FORCES", None))
+        if scan_jit is None:
+            if not bool(performance_mode):
+                jit_forces_eff = False
+        else:
+            jit_forces_eff = bool(scan_jit)
+
+    jit_precompile_eff = False
+    if bool(jit_forces_eff) and (not bool(scan_mode)):
+        if jit_precompile is None:
+            jit_precompile_eff = _truthy_env(getenv("VMEC_JAX_JIT_PRECOMPILE", "1"))
+        else:
+            jit_precompile_eff = bool(jit_precompile)
+
+    jit_warmup_iters = 0
+    if bool(jit_forces_eff) and (not bool(scan_mode)):
+        jit_warmup_iters = _warmup_iters_from_env(
+            getenv("VMEC_JAX_JIT_WARMUP_ITERS", None),
+            precompile_enabled=bool(jit_precompile_eff),
+        )
+
+    jit_precompile_noscan = False
+    if bool(jit_forces_base):
+        if jit_precompile is None:
+            jit_precompile_noscan = _truthy_env(getenv("VMEC_JAX_JIT_PRECOMPILE", "1"))
+        else:
+            jit_precompile_noscan = bool(jit_precompile)
+
+    jit_warmup_noscan = 0
+    if bool(jit_forces_base):
+        jit_warmup_noscan = _warmup_iters_from_env(
+            getenv("VMEC_JAX_JIT_WARMUP_ITERS", None),
+            precompile_enabled=bool(jit_precompile_noscan),
+        )
+
+    return StageJitSettings(
+        jit_forces_eff=bool(jit_forces_eff),
+        jit_precompile_eff=bool(jit_precompile_eff),
+        jit_warmup_iters=int(jit_warmup_iters),
+        jit_precompile_noscan=bool(jit_precompile_noscan),
+        jit_warmup_noscan=int(jit_warmup_noscan),
+    )
 
 
 def dynamic_scan_probe_settings(
