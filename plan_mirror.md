@@ -3465,3 +3465,307 @@ Key residual-Newton results:
   residual Newton to validate lambda residual behavior.
 - Start the M9 straight-field-line / mirror-Boozer-like diagnostic lane once
   the finite-current adaptive gate is documented.
+
+---
+
+## 43. 2026-06-17 plan, source, method, and architecture review
+
+This section is the current single roadmap checkpoint.  The repo-root
+`plan_mirror.md` is the canonical plan; the copy in
+`/Users/rogeriojorge/Downloads/plan_mirror.md` must be kept byte-for-byte in
+sync after each plan edit.
+
+### Review scope
+
+- Branch: `codex/mirror-geometry`.
+- PR: <https://github.com/uwplasma/vmec_jax/pull/21>, kept as draft.
+- Current CI state after the adaptive residual-Newton commit: all checks pass
+  except the combined Python 3.11 coverage gate, where exact line coverage is
+  about `94.92%` against the required `95.00%`.
+- Current mirror package size: about `6,885` Python lines.
+- Largest simplification target:
+  `vmec_jax/mirror/solvers/fixed_boundary/optimizers.py`, about `1,337`
+  lines, mixing reduced-state packing, scaling, preconditioners, L-BFGS,
+  residual Newton, and 3D variants.
+- Documentation drift found:
+  - `docs/mirror/outputs.rst` still described schema `0.1`, while code writes
+    schema `0.2`.
+  - `docs/mirror/overview.rst` still described the old projected-gradient path
+    as the main solver and did not describe residual Newton, adaptive inner
+    budgets, solver-comparison examples, or mirror `--plot` output.
+
+### External method review
+
+- DESC current public source describes itself as solving and optimizing 3D MHD
+  equilibria with pseudo-spectral methods and automatic differentiation.  Its
+  source structure separates compute kernels, objective wrappers, optimizer
+  wrappers, derivative helpers, geometry, I/O, and plotting.  Relevant local
+  source anchors from `/tmp/DESC_review`:
+  - `desc/derivatives.py`: `Derivative` wrappers select `grad`, `fwd`, `rev`,
+    Hessian, JVP, and VJP paths.
+  - `desc/objectives/objective_funs.py`: objectives expose scaling,
+    derivative mode, and chunked Jacobian concepts.
+  - `desc/optimize/optimizer.py`: optimizer orchestration separates objective
+    construction, constraints, scaling, and solver dispatch.
+  - `desc/backend.py`: `jax.lax.custom_root` wrappers provide implicit
+    differentiation for root solves instead of differentiating through every
+    nonlinear iteration.
+- The spectral-solver adjoint preprint `arXiv:2506.14792` supports the same
+  direction for sparse spectral PDE solvers: build adjoint/transpose solves
+  from symbolic or operator graphs so gradients keep sparse-solver speed and
+  memory behavior.
+- JAX `lax.custom_linear_solve` is directly relevant to mirror residual Newton:
+  it gives matrix-free linear solves with gradients defined implicitly at the
+  solution and requires a transpose solve for reverse mode unless the operator
+  is symmetric.
+- JAXopt implicit differentiation is relevant for the fixed-boundary
+  equilibrium map: `custom_root`, `custom_fixed_point`, `root_jvp`, and
+  `root_vjp` give a direct route to differentiating solved states with respect
+  to boundary, profile, and current parameters.
+- Lineax is relevant for future JAX-native linear least-squares and Krylov
+  solves because it supports PyTree-valued vectors, general linear operators,
+  transposes, structured operators, and stable gradients.
+- Optax is useful for composable first-order optimization and staged objective
+  optimization, but it is not the main equilibrium Newton/Krylov solve engine.
+- Equinox is useful if mirror config/state objects grow into mixed static and
+  dynamic PyTrees, but adopting it now would add a dependency before there is a
+  clear need.
+
+### Differentiability policy
+
+Use two explicitly different execution paths:
+
+1. Fast CLI/reference path:
+   - may use NumPy, SciPy `minimize`/`lsmr`, NetCDF, and Matplotlib;
+   - must be fast, memory-conscious, and well diagnosed;
+   - is allowed to be non-differentiable because it is for command-line solves,
+     examples, benchmark plots, and regression artifacts.
+2. Research-grade differentiable path:
+   - must keep the residual/energy/field kernels as JAX functions over arrays
+     and PyTrees;
+   - must not rely on differentiating through host-side SciPy loops;
+   - should use implicit root/linear-solve differentiation or explicit
+     adjoint/VJP rules around converged solves;
+   - should expose forward-mode JVPs for few-parameter, many-output studies and
+     reverse/adjoint VJPs for scalar objectives over many design parameters;
+   - should choose Lineax or `jax.lax.custom_linear_solve` for JAX-native
+     matrix-free linear solves once the residual-Newton reference path is
+     stable enough to port.
+
+This policy resolves the CLI-versus-differentiability tension: CLI speed is
+kept where useful, while the differentiable API gets a separate implementation
+contract and validation gates.
+
+### File-simplification plan
+
+Do one no-behavior-change refactor before adding more solver machinery:
+
+1. Split `optimizers.py` into small modules while preserving the public imports:
+   - `types.py`: `OptimizerOptions`, `OptimizerStep`, `OptimizerRun`, and
+     `_CandidateDiagnostics`;
+   - `reduced.py`: axisymmetric/3D reduced-state masks, packing, unpacking,
+     bounds, gradient packing, and coordinate scaling;
+   - `preconditioners.py`: residual-preconditioner key parsing, tridiagonal
+     smoothers, and adaptive inner-budget policy;
+   - `optimizers.py`: high-level projected-gradient, L-BFGS, residual-Newton,
+     and 3D solver dispatch only.
+2. Keep re-export compatibility from `optimizers.py` until downstream examples
+   and tests are updated.
+3. Add tests around the refactor before changing behavior.
+4. Keep docstrings pedagogical: explain what each reduced vector represents,
+   what is fixed by the boundary, and why lambda has a gauge constraint.
+5. Avoid adding a deeper directory tree unless a module grows beyond one
+   coherent responsibility.
+
+### Finite completion roadmap
+
+The remaining draft-PR work is finite and ordered:
+
+1. M8l coverage/docs gate:
+   - add focused tests to lift exact coverage above `95.00%`;
+   - update mirror Sphinx docs to schema `0.2` and current solver status;
+   - confirm `ruff`, mirror tests, packaging smoke, and docs build.
+2. M8m finite-current residual gate:
+   - run adaptive residual-Newton residual decomposition on finite-current or
+     helical-pitch cases;
+   - verify lambda residuals are nonzero where expected and converge under the
+     same diagnostics used for the vacuum two-coil case.
+3. M8n no-behavior-change solver-file simplification:
+   - split `optimizers.py` as listed above;
+   - preserve public imports and JSON/mout fields;
+   - rerun tests and regenerate one solver-comparison artifact.
+4. M8o adaptive benchmark gate:
+   - add a CI-conscious two-coil adaptive residual-Newton benchmark;
+   - keep the heavier `ns=9`, `nxi=17` run as an example artifact, not a
+     default CI cost.
+5. M9 mirror straight-field-line diagnostics:
+   - define a mirror-Boozer-like transform and pitch/twist diagnostics;
+   - compare finite-current field-line traces, iota-like twist, and `|B|`
+     spectra.
+6. M10 differentiable solve API:
+   - prototype implicit differentiation for the fixed-boundary solved state;
+   - compare unrolled autodiff, implicit root VJP/JVP, and custom linear-solve
+     approaches on small manufactured cases;
+   - select the default method from accuracy, memory, runtime, and API
+     simplicity, not from implementation convenience.
+7. M11 optimization objectives:
+   - expose mirror ratio, well depth, on-axis field, beta, and geometric
+     objectives using the differentiable solve path where available;
+   - keep CLI optimization benchmarks separate from differentiable API tests.
+8. M12 documentation/readiness:
+   - document examples, output schema, CLI plotting, solver choices,
+     differentiability policy, and validation limits;
+   - update the draft PR body with final results and convert from draft only
+     after all gates pass.
+
+### Completion percentages after this review
+
+- Geometry/grids/bases: `90%`.
+- Field/energy/residual kernels: `80%`.
+- Fixed-boundary axisymmetric solve: `75%`.
+- Residual Newton / preconditioning: `65%`.
+- Two-coil and manufactured validation: `70%`.
+- Finite-current pitch validation: `45%`.
+- Plotting and `vmec --plot` mirror support: `75%`.
+- I/O schema and docs: `60%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `15%`.
+- Free-boundary mirror lane: `5%`.
+- PR merge readiness overall: `55%`.
+
+### Logging rule
+
+Every future work pass must append a dated plan section with:
+
+- steps taken;
+- results obtained;
+- how it was tested;
+- file structure and best-practice notes;
+- best next steps;
+- percentage of completion for open lanes;
+- whether user input is needed.
+
+This keeps progress in one plan and prevents scattered status files.
+
+---
+
+## 44. 2026-06-17 M8l coverage and documentation gate
+
+This lane implements the immediate actions found in the review above: fix the
+coverage-gate risk, update stale mirror documentation, and keep the plan
+canonical and synchronized.
+
+### Steps taken
+
+- Updated `docs/mirror/index.rst` to describe the current experimental status:
+  fixed-boundary scalar-pressure geometry, fields, residuals, manufactured
+  checks, `mout` output, plotting, and optimizer prototypes are present;
+  free-boundary mirrors, anisotropic pressure, and the final differentiable
+  implicit-solve API remain planned.
+- Updated `docs/mirror/overview.rst` to include:
+  - residual Newton;
+  - adaptive inner linear budgets;
+  - VMEC-like reduced-coordinate preconditioning;
+  - solver-comparison, manufactured, finite-current, and fixed-boundary
+    diagnostic examples;
+  - the fast CLI/reference path versus research-grade differentiable path
+    policy.
+- Updated `docs/mirror/outputs.rst` from schema `0.1` to schema `0.2` and added
+  the new residual-Newton metadata, `fsq`, and normalized-force output fields.
+- Added `tests/mirror/test_mirror_low_level_coverage.py`, a low-cost coverage
+  test file for:
+  - Chebyshev/Fourier convenience methods and guardrails;
+  - boundary, grid, profile, and state validation;
+  - field/energy/residual diagnostic guardrails;
+  - reduced-state source-shape checks and pressure-continuation guards;
+  - circular-coil validation guardrails;
+  - in-memory mirror-output plot naming and `show=True` dispatch.
+- Synced the repo-root `plan_mirror.md` to
+  `/Users/rogeriojorge/Downloads/plan_mirror.md`.
+
+### Results obtained
+
+- Mirror-only source coverage from the mirror test suite moved from `92%` to
+  `95%`.
+- Covered about 89 previously missed mirror source lines.  The combined CI gate
+  was short by about 38 lines, so this should clear the exact `95.00%` gate
+  unless unrelated coverage changes land first.
+- The documentation now matches the current code schema and solver status.
+- The plan now contains one finite roadmap from M8l through M12 and a clear
+  differentiation policy.
+
+### How it was tested
+
+Commands run:
+
+```bash
+JAX_ENABLE_X64=1 python -m pytest -q tests/mirror/test_mirror_low_level_coverage.py
+JAX_ENABLE_X64=1 coverage erase
+JAX_ENABLE_X64=1 coverage run --source=vmec_jax -m pytest -q tests/mirror tests/test_packaging_metadata.py
+coverage report --skip-covered --include='vmec_jax/mirror/*'
+JAX_ENABLE_X64=1 python -m pytest -q tests/mirror/test_mirror_low_level_coverage.py tests/mirror/test_mirror_plotting.py tests/mirror/test_mirror_io.py
+LC_ALL=C.UTF-8 LANG=C.UTF-8 SPHINX_FAST=1 python -m sphinx -W -j auto -b html docs docs/_build/html
+LC_ALL=C.UTF-8 LANG=C.UTF-8 python -m sphinx -W -j auto -b html docs docs/_build/html_full
+ruff check .
+ruff check tests/mirror/test_mirror_low_level_coverage.py
+ruff format --check tests/mirror/test_mirror_low_level_coverage.py
+git diff --check
+JAX_ENABLE_X64=1 python -m pytest -q tests/mirror tests/test_packaging_metadata.py
+```
+
+Passing results:
+
+- new focused test: `6 passed`;
+- mirror I/O/plot/new-test slice: `14 passed`;
+- full mirror/package smoke: `88 passed, 1 skipped`;
+- mirror coverage run: `88 passed, 1 skipped`, mirror source coverage `95%`;
+- fast Sphinx docs: passed with warnings as errors;
+- full mirror docs build: passed with warnings as errors;
+- `ruff check .`: passed;
+- new test file formatting check: passed;
+- `git diff --check`: passed.
+
+Note: full-repo `ruff format --check .` is not a useful gate on this branch
+because many pre-existing files outside this lane would be reformatted.  The
+new Python test file itself is formatted.
+
+### File structure and best-practice notes
+
+- The new tests are in `tests/mirror/` with the rest of the mirror domain
+  coverage.  They exercise public APIs where possible and only touch private
+  helpers that are already part of existing mirror solver tests.
+- The docs remain under `docs/mirror/` and avoid duplicating example-level
+  instructions already in `examples/mirror/README.md`.
+- The canonical plan is still a single file, `plan_mirror.md`, and the
+  downloaded copy is synchronized.
+- The test file is intentionally low resolution and avoids new expensive solve
+  cases, so it should help coverage without adding meaningful runtime.
+
+### Best next steps
+
+1. Commit and push the M8l review/docs/coverage update to the draft PR.
+2. Confirm GitHub reruns the combined coverage gate green.
+3. Start M8m: finite-current/helical-pitch residual decomposition under
+   adaptive residual Newton, focusing on nonzero lambda residual behavior and
+   visible pitch in field-line plots.
+4. Then do M8n: no-behavior-change `optimizers.py` simplification before
+   adding more solver machinery.
+
+### Completion percentages after M8l
+
+- Geometry/grids/bases: `90%`.
+- Field/energy/residual kernels: `80%`.
+- Fixed-boundary axisymmetric solve: `75%`.
+- Residual Newton / preconditioning: `65%`.
+- Two-coil and manufactured validation: `72%`.
+- Finite-current pitch validation: `45%`.
+- Plotting and `vmec --plot` mirror support: `75%`.
+- I/O schema and docs: `68%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `15%`.
+- Free-boundary mirror lane: `5%`.
+- PR merge readiness overall: `60%`.
+
+### User input needed
+
+No user input is needed for the next lane.

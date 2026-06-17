@@ -4,10 +4,10 @@ Mirror Geometries
 .. warning::
 
    Mirror geometry support is experimental. The current implementation contains
-   package, grid, boundary, state, axisymmetric geometry, field, energy,
-   differentiable residual, manufactured-solution, and first fixed-boundary
-   axisymmetric solve primitives plus mirror-native ``mout`` output and
-   plotting helpers; optimization is planned in a later phase.
+   fixed-boundary scalar-pressure mirror geometry, fields, residuals,
+   manufactured-solution checks, mirror-native ``mout`` output, plotting, and
+   optimizer prototypes.  Free-boundary mirrors, anisotropic pressure, and the
+   final differentiable implicit-solve API remain planned work.
 
 .. toctree::
    :maxdepth: 2

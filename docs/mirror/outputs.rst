@@ -5,11 +5,14 @@ Mirror outputs use a mirror-native NetCDF file named ``mout_*.nc``.  These
 files are not VMEC ``wout_*.nc`` files and are not intended to be consumed by
 classic toroidal WOUT readers.
 
-The current schema version is ``0.1`` and stores:
+The current schema version is ``0.2`` and stores:
 
 - global attributes including ``geometry_type = "mirror"``,
   ``coordinate_order = "s,theta,xi"``, and
   ``algorithm = "fixed_boundary_variational_chebyshev_lobatto"``;
+- solver metadata including optimizer name, reduced-coordinate scaling,
+  residual-Newton inner-budget policy, effective inner iteration budgets, and
+  residual-preconditioner settings when available;
 - coordinate arrays ``s``, ``theta``, ``xi``, physical ``z``, and quadrature
   weights;
 - geometry arrays ``r``, ``X``, ``Y``, ``Z``, ``sqrtg``, metric terms, and the
@@ -18,10 +21,11 @@ The current schema version is ``0.1`` and stores:
   ``lambda`` data;
 - radial ``Psi_prime``, ``I_prime``, pressure, pressure-gradient, and beta
   profiles;
-- scalar energy, residual, Jacobian, field-strength, and mirror-ratio
-  diagnostics;
+- scalar energy, residual, ``fsq``, normalized-force, Jacobian, field-strength,
+  and mirror-ratio diagnostics;
 - solve-history arrays for continuation stage, iteration, pressure scale,
-  residual, energy, Jacobian, ``|B|``, mirror ratio, step size, and acceptance.
+  residual, ``fsq``, normalized force, energy, Jacobian, ``|B|``, mirror ratio,
+  step size, and acceptance.
 
 Use ``vmec_jax.mirror.write_mirror_output`` and
 ``vmec_jax.mirror.load_mirror_output`` for Python roundtrips.  Use
