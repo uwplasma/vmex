@@ -131,6 +131,14 @@ def _attrs_with_result_metadata(result) -> dict[str, str]:
             attrs["solver_residual_linear_condition_estimate_last"] = str(
                 float(summary.residual_linear_condition_estimate_last)
             )
+        if summary.residual_dense_step_norm_last is not None:
+            attrs["solver_residual_dense_step_norm_last"] = str(float(summary.residual_dense_step_norm_last))
+        if summary.residual_dense_step_cosine_last is not None:
+            attrs["solver_residual_dense_step_cosine_last"] = str(float(summary.residual_dense_step_cosine_last))
+        if summary.residual_dense_step_relative_error_last is not None:
+            attrs["solver_residual_dense_step_relative_error_last"] = str(
+                float(summary.residual_dense_step_relative_error_last)
+            )
     attrs["pressure_continuation"] = ",".join(str(float(stage)) for stage in result.options.pressure_continuation)
     return attrs
 

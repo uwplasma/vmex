@@ -5153,3 +5153,163 @@ Visual validation:
 No user input is needed.  The next lane should compare matrix-free steps
 against the dense reference direction and then implement a better scalable
 linear correction.
+
+---
+
+## 52. 2026-06-17 M8s dense-step comparison diagnostics
+
+This lane adds an opt-in small-grid diagnostic that compares each matrix-free
+Newton correction against the dense reduced-Hessian correction from M8q.  The
+purpose is to measure the step-direction error directly, not just infer it
+from final residuals.
+
+### Steps taken
+
+- Added `residual_compare_dense_step=False` to `MirrorSolveOptions` and
+  `OptimizerOptions`.
+- When enabled for matrix-free residual-Newton solves, the solver computes the
+  dense scaled reduced-Hessian step at each Krylov iteration point and records
+  compact last-step comparison metrics:
+  - dense-reference step norm;
+  - cosine between the matrix-free and dense step in scaled physical
+    coordinates;
+  - relative step error.
+- Threaded these metrics through:
+  - optimizer summaries;
+  - mirror NetCDF global attributes;
+  - root example CLIs;
+  - root example JSON rows.
+- Added root CLI flag `--residual-compare-dense-step`.
+- Added focused unit coverage for the diagnostic on a small matrix-free
+  residual-Newton solve.
+- Ran a finite-current two-coil diagnostic with plots:
+  `ns=5`, `nxi=9`, `i_prime=0.01`, LSMR, `maxiter=6`, inner budget `54`,
+  `radial_xi_lambda_xi_tridi`, and dense-step comparison enabled.
+
+### Results obtained
+
+Finite-current dense-step comparison row:
+
+| metric | value |
+| --- | ---: |
+| final residual | `1.367152243798e-03` |
+| final `fsq` | `3.064106979871e-08` |
+| LSMR stop code | 7 |
+| last LSMR iterations | 54 |
+| last LSMR residual norm | `1.560130370207e-04` |
+| dense-reference step norm | `5.135420404703e-03` |
+| matrix-free/dense step cosine | `0.901356881087` |
+| matrix-free/dense relative step error | `0.764570403248` |
+
+Interpretation:
+
+- The matrix-free LSMR step points broadly in the dense-reference direction,
+  but the relative error is still large (`~0.765`) at the last recorded
+  correction.
+- This supports the M8r conclusion: the next improvement should target the
+  correction operator/preconditioner, not the outer residual definition.
+- The dense-step comparison is now a reusable small-grid diagnostic for any
+  future matrix-free preconditioner changes.
+
+Generated artifacts:
+
+- `results/mirror/m8s_dense_step_compare_plots/residual_newton_convergence_grid_metrics.json`.
+- `results/mirror/m8s_dense_step_compare_plots/residual_newton_convergence_history.png`.
+- `results/mirror/m8s_dense_step_compare_plots/residual_newton_convergence_components.png`.
+- `results/mirror/m8s_dense_step_compare_plots/residual_newton_convergence_budget.png`.
+- `results/mirror/m8s_dense_step_compare_plots/best_finite_current_dense_step_compare_m8s_residual_newton/figures/best_finite_current_dense_step_compare_m8s_residual_newton_mirror_boundary_3d.png`.
+- `results/mirror/m8s_dense_step_compare_plots/best_finite_current_dense_step_compare_m8s_residual_newton/figures/best_finite_current_dense_step_compare_m8s_residual_newton_mirror_bfield_boundary.png`.
+- `results/mirror/m8s_dense_step_compare_plots/best_finite_current_dense_step_compare_m8s_residual_newton/figures/best_finite_current_dense_step_compare_m8s_residual_newton_mirror_bmag_sxi.png`.
+- `results/mirror/m8s_dense_step_compare_plots/best_finite_current_dense_step_compare_m8s_residual_newton/figures/best_finite_current_dense_step_compare_m8s_residual_newton_mirror_cross_sections.png`.
+
+### How it was tested
+
+Focused pytest gate:
+
+```bash
+JAX_ENABLE_X64=1 pytest \
+  tests/mirror/test_mirror_fixed_boundary_axisym.py::test_residual_newton_records_dense_step_comparison_for_matrix_free_solver \
+  tests/mirror/test_mirror_fixed_boundary_axisym.py::test_residual_newton_solver_reaches_tight_residual_for_perturbed_cylinder \
+  tests/mirror/test_mirror_low_level_coverage.py \
+  tests/mirror/test_mirror_examples.py::test_root_residual_newton_convergence_grid_runs_without_plots \
+  tests/mirror/test_mirror_examples.py::test_root_residual_newton_convergence_grid_finite_current_reports_lambda_residual \
+  -q
+```
+
+Result: `10 passed in 32.88s`.
+
+Static checks:
+
+```bash
+python -m ruff format --check <touched Python files>
+python -m ruff check <touched Python files>
+git diff --check
+```
+
+Result: passed.
+
+Benchmark/plot command:
+
+```bash
+JAX_ENABLE_X64=1 python examples/mirror_residual_newton_convergence_grid.py \
+  --outdir results/mirror/m8s_dense_step_compare_plots \
+  --ns-array 5 \
+  --nxi-array 9 \
+  --maxiter-array 6 \
+  --residual-linear-maxiter-array 54 \
+  --residual-linear-maxiter-policy fixed \
+  --residual-linear-solver lsmr \
+  --residual-compare-dense-step \
+  --residual-xi-alpha 1.0 \
+  --i-prime 0.01 \
+  --case-label finite_current_dense_step_compare_m8s \
+  --preconditioners radial_xi_lambda_xi_tridi
+```
+
+Visual validation:
+
+- Residual history is monotone over the six recorded steps.
+- Field-line overlays render on the B-direction plot.
+- The standard horizontal-`z` geometry, `|B|`, and cross-section plots render.
+
+### File structure and best-practice notes
+
+- No new script was added.  The diagnostic lives in the residual-Newton solver
+  and is exposed through existing examples.
+- The option defaults to `False`, so production matrix-free runs do not pay the
+  dense-Hessian cost.
+- Metrics are scalar summary values, keeping output size small.
+
+### Best next steps
+
+1. Commit and push M8s.
+2. Start M8t with an actual correction improvement:
+   - compare dense and matrix-free steps with and without right
+     preconditioning;
+   - try a block-diagonal dense correction on the reduced radius/lambda
+     blocks;
+   - use the dense-step relative error as the primary small-grid metric;
+   - require improvement before returning to long finite-current convergence
+     runs.
+
+### Completion percentages after M8s
+
+- Geometry/grids/bases: `90%`.
+- Field/energy/residual kernels: `84%`.
+- Fixed-boundary axisymmetric solve: `85%`.
+- Residual Newton / preconditioning: `85%`.
+- Two-coil and manufactured validation: `80%`.
+- Finite-current pitch validation: `70%`.
+- Plotting and `vmec --plot` mirror support: `78%`.
+- I/O schema and docs: `78%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `15%`.
+- Free-boundary mirror lane: `5%`.
+- Stellarator-mirror hybrid lane: `10%`.
+- ESSOS circular-coil mirror beta scan: `0%`.
+- PR merge readiness overall: `72%`.
+
+### User input needed
+
+No user input is needed.  The next lane should use the dense-step metric to
+select and validate a better scalable preconditioned correction.

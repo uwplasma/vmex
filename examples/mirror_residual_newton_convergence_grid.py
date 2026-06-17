@@ -53,6 +53,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("lsmr", "lsqr", "dense_lstsq"),
         help="Linear solver for each residual-Newton correction; dense_lstsq is intended for small reference grids.",
     )
+    parser.add_argument(
+        "--residual-compare-dense-step",
+        action="store_true",
+        help="On small matrix-free runs, compare each Krylov correction with the dense reduced-Hessian step.",
+    )
     parser.add_argument("--preconditioners", type=str, default="radial_xi_tridi")
     parser.add_argument("--residual-radial-alpha", type=float, default=0.5)
     parser.add_argument("--residual-lambda-alpha", type=float, default=0.5)
@@ -241,6 +246,7 @@ def _run_one(
     residual_linear_maxiter_policy: str,
     residual_linear_adaptive_factor: float,
     residual_linear_solver: str,
+    residual_compare_dense_step: bool,
     preconditioner: str,
     residual_radial_alpha: float,
     residual_lambda_alpha: float,
@@ -282,6 +288,7 @@ def _run_one(
             residual_linear_maxiter_policy=residual_linear_maxiter_policy,
             residual_linear_adaptive_factor=residual_linear_adaptive_factor,
             residual_linear_solver=residual_linear_solver,
+            residual_compare_dense_step=residual_compare_dense_step,
             residual_preconditioner=preconditioner,
             residual_radial_alpha=residual_radial_alpha,
             residual_lambda_alpha=residual_lambda_alpha,
@@ -320,6 +327,12 @@ def _run_one(
         "residual_linear_condition_estimate_last": None
         if summary is None
         else summary.residual_linear_condition_estimate_last,
+        "residual_compare_dense_step": bool(residual_compare_dense_step),
+        "residual_dense_step_norm_last": None if summary is None else summary.residual_dense_step_norm_last,
+        "residual_dense_step_cosine_last": None if summary is None else summary.residual_dense_step_cosine_last,
+        "residual_dense_step_relative_error_last": None
+        if summary is None
+        else summary.residual_dense_step_relative_error_last,
         "residual_preconditioner": str(preconditioner),
         "residual_radial_alpha": float(residual_radial_alpha),
         "residual_lambda_alpha": float(residual_lambda_alpha),
@@ -673,6 +686,7 @@ def run_case(
     residual_linear_maxiter_policy: str = "fixed",
     residual_linear_adaptive_factor: float = 6.0,
     residual_linear_solver: str = "lsmr",
+    residual_compare_dense_step: bool = False,
     preconditioners: tuple[str, ...] = ("radial_xi_tridi",),
     residual_radial_alpha: float = 0.5,
     residual_lambda_alpha: float = 0.5,
@@ -717,6 +731,7 @@ def run_case(
                             residual_linear_maxiter_policy=residual_linear_maxiter_policy,
                             residual_linear_adaptive_factor=residual_linear_adaptive_factor,
                             residual_linear_solver=residual_linear_solver,
+                            residual_compare_dense_step=residual_compare_dense_step,
                             preconditioner=preconditioner,
                             residual_radial_alpha=residual_radial_alpha,
                             residual_lambda_alpha=residual_lambda_alpha,
@@ -785,6 +800,7 @@ def main(argv: list[str] | None = None) -> int:
         residual_linear_maxiter_policy=args.residual_linear_maxiter_policy,
         residual_linear_adaptive_factor=args.residual_linear_adaptive_factor,
         residual_linear_solver=args.residual_linear_solver,
+        residual_compare_dense_step=args.residual_compare_dense_step,
         preconditioners=_parse_preconditioners(args.preconditioners),
         residual_radial_alpha=args.residual_radial_alpha,
         residual_lambda_alpha=args.residual_lambda_alpha,

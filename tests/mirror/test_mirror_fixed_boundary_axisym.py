@@ -381,6 +381,36 @@ def test_residual_newton_dense_lstsq_solver_improves_perturbed_cylinder():
     assert result.final_trace.min_sqrtg > 0.0
 
 
+def test_residual_newton_records_dense_step_comparison_for_matrix_free_solver():
+    config, _grid, boundary, initial_state = _perturbed_cylinder_case()
+    result = run_mirror_fixed_boundary(
+        config,
+        boundary,
+        psi_prime=PsiPrimeProfile.constant(0.01),
+        i_prime=IPrimeProfile.zero(),
+        pressure=PressureProfile.zero(),
+        initial_state=initial_state,
+        options=MirrorSolveOptions(
+            optimizer="residual_newton",
+            maxiter=2,
+            tolerance=1.0e-12,
+            line_search_steps=16,
+            residual_linear_maxiter=16,
+            residual_linear_maxiter_policy="fixed",
+            residual_compare_dense_step=True,
+            mu0=1.0,
+        ),
+    )
+    summary = result.optimizer_summaries[0]
+
+    assert summary.residual_dense_step_norm_last is not None
+    assert summary.residual_dense_step_norm_last > 0.0
+    assert summary.residual_dense_step_cosine_last is not None
+    assert np.isfinite(summary.residual_dense_step_cosine_last)
+    assert summary.residual_dense_step_relative_error_last is not None
+    assert summary.residual_dense_step_relative_error_last >= 0.0
+
+
 def test_residual_newton_linear_maxiter_policy_preserves_fixed_and_expands_adaptive():
     config = MirrorConfig(MirrorResolution(ns=9, ntheta=1, nxi=17, mpol=0), z_min=-1.0, z_max=1.0)
     grid = config.build_grid()

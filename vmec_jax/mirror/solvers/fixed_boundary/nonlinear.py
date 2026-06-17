@@ -65,6 +65,9 @@ def _summary_from_run(
         residual_linear_residual_norm_last=run.residual_linear_residual_norm_last,
         residual_linear_normal_residual_norm_last=run.residual_linear_normal_residual_norm_last,
         residual_linear_condition_estimate_last=run.residual_linear_condition_estimate_last,
+        residual_dense_step_norm_last=run.residual_dense_step_norm_last,
+        residual_dense_step_cosine_last=run.residual_dense_step_cosine_last,
+        residual_dense_step_relative_error_last=run.residual_dense_step_relative_error_last,
     )
 
 

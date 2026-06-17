@@ -403,6 +403,9 @@ def _optimizer_run_from_result(
         residual_linear_residual_norm_last=getattr(result, "residual_linear_residual_norm_last", None),
         residual_linear_normal_residual_norm_last=getattr(result, "residual_linear_normal_residual_norm_last", None),
         residual_linear_condition_estimate_last=getattr(result, "residual_linear_condition_estimate_last", None),
+        residual_dense_step_norm_last=getattr(result, "residual_dense_step_norm_last", None),
+        residual_dense_step_cosine_last=getattr(result, "residual_dense_step_cosine_last", None),
+        residual_dense_step_relative_error_last=getattr(result, "residual_dense_step_relative_error_last", None),
     )
 
 
@@ -578,6 +581,7 @@ def projected_residual_newton_solve(
     scale_jax = jnp.asarray(x_scale, dtype=jnp.asarray(x0).dtype)
     preconditioner_kind = _residual_preconditioner_key(options.residual_preconditioner)
     linear_solver_kind = _residual_linear_solver_key(options.residual_linear_solver)
+    compare_dense_step = bool(options.residual_compare_dense_step)
 
     def objective_x(vector):
         return _axisym_reduced_energy_jax(
@@ -591,7 +595,7 @@ def projected_residual_newton_solve(
         )
 
     grad_fun = jax.grad(objective_x)
-    hessian_fun = jax.jacfwd(grad_fun) if linear_solver_kind == "dense_lstsq" else None
+    hessian_fun = jax.jacfwd(grad_fun) if linear_solver_kind == "dense_lstsq" or compare_dense_step else None
 
     def x_from_y(vector_y) -> np.ndarray:
         return np.asarray(vector_y, dtype=float) * x_scale
@@ -627,6 +631,9 @@ def projected_residual_newton_solve(
     linear_residual_norm_history: list[float] = []
     linear_normal_residual_norm_history: list[float] = []
     linear_condition_estimate_history: list[float] = []
+    dense_step_norm_history: list[float] = []
+    dense_step_cosine_history: list[float] = []
+    dense_step_relative_error_history: list[float] = []
 
     for _iteration in range(1, int(options.maxiter) + 1):
         grad_x = reduced_gradient_x(current_x)
@@ -657,23 +664,29 @@ def projected_residual_newton_solve(
 
         rhs = -grad_x * x_scale
         size = int(y.size)
-        if linear_solver_kind == "dense_lstsq":
+
+        def dense_step_y() -> np.ndarray:
             assert hessian_fun is not None
             hessian_x = np.asarray(hessian_fun(x_jax), dtype=float)
-            njev += 1
             jacobian_y = hessian_x * x_scale[:, None] * x_scale[None, :]
+            preconditioner_matrix = None
             if preconditioner_kind != "none":
                 basis = np.eye(size)
                 preconditioner_matrix = np.column_stack([precondition_y(basis[:, index]) for index in range(size)])
                 jacobian_y = jacobian_y @ preconditioner_matrix
+            step_y_raw, *_ = np.linalg.lstsq(jacobian_y, rhs, rcond=1.0e-12)
+            step_y = np.asarray(step_y_raw, dtype=float)
+            if preconditioner_matrix is not None:
+                step_y = np.asarray(preconditioner_matrix @ step_y, dtype=float)
+            return step_y
+
+        if linear_solver_kind == "dense_lstsq":
             try:
-                step_y_raw, *_ = np.linalg.lstsq(jacobian_y, rhs, rcond=1.0e-12)
+                step_y = dense_step_y()
             except np.linalg.LinAlgError:
                 message = "dense reduced-Hessian solve failed"
                 break
-            step_y = np.asarray(step_y_raw, dtype=float)
-            if preconditioner_kind != "none":
-                step_y = np.asarray(preconditioner_matrix @ step_y, dtype=float)
+            njev += 1
         else:
             if preconditioner_kind == "none":
                 operator = LinearOperator((size, size), matvec=matvec_y, rmatvec=matvec_y, dtype=float)
@@ -729,6 +742,26 @@ def projected_residual_newton_solve(
             njev += int(linear_result[2])
             step_y_raw = np.asarray(linear_result[0], dtype=float)
             step_y = step_y_raw if preconditioner_kind == "none" else precondition_y(step_y_raw)
+            if compare_dense_step:
+                try:
+                    dense_step = dense_step_y()
+                    njev += 1
+                    step_x = step_y * x_scale
+                    dense_step_x = dense_step * x_scale
+                    dense_norm = float(np.linalg.norm(dense_step_x))
+                    step_norm_for_cosine = float(np.linalg.norm(step_x))
+                    denominator = max(dense_norm * step_norm_for_cosine, np.finfo(float).tiny)
+                    cosine = float(np.dot(step_x, dense_step_x) / denominator)
+                    relative_error = float(
+                        np.linalg.norm(step_x - dense_step_x) / max(dense_norm, np.finfo(float).tiny)
+                    )
+                except np.linalg.LinAlgError:
+                    dense_norm = float("nan")
+                    cosine = float("nan")
+                    relative_error = float("nan")
+                dense_step_norm_history.append(dense_norm)
+                dense_step_cosine_history.append(cosine)
+                dense_step_relative_error_history.append(relative_error)
         if not np.all(np.isfinite(step_y)):
             message = "non-finite reduced-Newton step"
             break
@@ -803,6 +836,11 @@ def projected_residual_newton_solve(
     )
     result.residual_linear_condition_estimate_last = (
         float(linear_condition_estimate_history[-1]) if linear_condition_estimate_history else None
+    )
+    result.residual_dense_step_norm_last = float(dense_step_norm_history[-1]) if dense_step_norm_history else None
+    result.residual_dense_step_cosine_last = float(dense_step_cosine_history[-1]) if dense_step_cosine_history else None
+    result.residual_dense_step_relative_error_last = (
+        float(dense_step_relative_error_history[-1]) if dense_step_relative_error_history else None
     )
     candidate_diagnostics = _candidate_diagnostics(current_step, grid, initial_energy=initial_residual.energy)
     accepted_run = bool(steps and steps[-1].accepted and candidate_diagnostics.accepted)

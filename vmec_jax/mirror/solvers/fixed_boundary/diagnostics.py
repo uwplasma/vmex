@@ -68,6 +68,9 @@ class FixedBoundaryOptimizerSummary:
     residual_linear_residual_norm_last: float | None = None
     residual_linear_normal_residual_norm_last: float | None = None
     residual_linear_condition_estimate_last: float | None = None
+    residual_dense_step_norm_last: float | None = None
+    residual_dense_step_cosine_last: float | None = None
+    residual_dense_step_relative_error_last: float | None = None
 
 
 def ensure_finite_pressure_scale(scale: float) -> float:

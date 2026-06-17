@@ -69,7 +69,9 @@ Pass ``--residual-linear-solver dense_lstsq`` on small grids to use the dense
 reduced Hessian as a reference solve when diagnosing whether the matrix-free
 Krylov correction is limiting convergence, or
 ``--residual-linear-solver lsqr`` to compare the alternate SciPy least-squares
-Krylov iteration against the default ``lsmr`` path.
+Krylov iteration against the default ``lsmr`` path. On small matrix-free runs,
+``--residual-compare-dense-step`` also records the dense-reference step norm,
+cosine, and relative error for the last Newton correction.
 Finite-current diagnostics can also pass
 ``--residual-preconditioner radial_xi_lambda_xi_tridi`` to smooth lambda
 updates along the open axial coordinate when the residual decomposition is
@@ -110,4 +112,5 @@ axisymmetric residual-Newton path: they verify nonzero lambda residual behavior
 and write field-line plots. JSON rows also include compact iterative
 linear-solve diagnostics such as the stop code, actual iteration count,
 residual norm, normal-equation residual norm, and condition estimate when a
-Krylov solver is used.
+Krylov solver is used. With ``--residual-compare-dense-step``, rows also
+include dense-reference step comparison metrics.

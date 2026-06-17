@@ -25,6 +25,7 @@ class OptimizerOptions:
     residual_linear_maxiter_policy: str = "adaptive"
     residual_linear_adaptive_factor: float = 6.0
     residual_linear_solver: str = "lsmr"
+    residual_compare_dense_step: bool = False
     residual_preconditioner: str = "radial_xi_tridi"
     residual_radial_alpha: float = 0.5
     residual_lambda_alpha: float = 0.5
@@ -74,6 +75,9 @@ class OptimizerRun:
     residual_linear_residual_norm_last: float | None = None
     residual_linear_normal_residual_norm_last: float | None = None
     residual_linear_condition_estimate_last: float | None = None
+    residual_dense_step_norm_last: float | None = None
+    residual_dense_step_cosine_last: float | None = None
+    residual_dense_step_relative_error_last: float | None = None
 
 
 @dataclass(frozen=True)
