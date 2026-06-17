@@ -100,6 +100,8 @@ from vmec_jax.solvers.fixed_boundary.residual.force_payload import (
 )
 from vmec_jax.solvers.fixed_boundary.residual.update import (
     ResidualVelocityBlocks as _ResidualVelocityBlocks,
+    host_catastrophic_restart_update as _host_catastrophic_restart_update,
+    host_force_update_rms as _host_force_update_rms,
     host_momentum_update_np as _host_momentum_update_np,
     scale_velocity_blocks as _scale_velocity_blocks,
     zero_velocity_blocks_like as _zero_velocity_blocks_like,
@@ -7549,29 +7551,27 @@ def solve_fixed_boundary_residual_iter(
                 huge_force_restart_count = 0
                 restart_path = "momentum_accept"
             else:
+                catastrophic_restart = True
+                clear_cache_after_catastrophic = not bool(vmec2000_control)
                 if use_direct_fallback:
                     # Try a small direct-force step (no momentum memory) before
                     # a full restart. This is an experimental parity path.
+                    clear_cache_after_catastrophic = bool(vmec2000_control)
                     dt_direct = max(0.1 * dt_eff, 1e-12)
-                    force_rms = float(
-                        np.asarray(
-                            jnp.sqrt(
-                                jnp.mean(
-                                    frcc_u * frcc_u
-                                    + frss_u * frss_u
-                                    + frsc_u * frsc_u
-                                    + frcs_u * frcs_u
-                                    + fzsc_u * fzsc_u
-                                    + fzcs_u * fzcs_u
-                                    + fzcc_u * fzcc_u
-                                    + fzss_u * fzss_u
-                                    + flsc_u * flsc_u
-                                    + flcs_u * flcs_u
-                                    + flcc_u * flcc_u
-                                    + flss_u * flss_u
-                                )
-                            )
-                        )
+                    force_rms = _host_force_update_rms(
+                        1.0,
+                        frcc_u,
+                        frss_u,
+                        frsc_u,
+                        frcs_u,
+                        fzsc_u,
+                        fzcs_u,
+                        fzcc_u,
+                        fzss_u,
+                        flsc_u,
+                        flcs_u,
+                        flcc_u,
+                        flss_u,
                     )
                     if np.isfinite(force_rms) and force_rms > 0.0:
                         dt_cap = max_update_rms / max(force_rms, 1e-30)
@@ -7660,94 +7660,61 @@ def solve_fixed_boundary_residual_iter(
                         restart_reason = "none"
                         huge_force_restart_count = 0
                         restart_path = "fallback_direct"
-                        update_rms = float(
-                            np.asarray(
-                                jnp.sqrt(
-                                    jnp.mean(
-                                        (dt_direct * frcc_u) ** 2
-                                        + (dt_direct * frss_u) ** 2
-                                        + (dt_direct * frsc_u) ** 2
-                                        + (dt_direct * frcs_u) ** 2
-                                        + (dt_direct * fzsc_u) ** 2
-                                        + (dt_direct * fzcs_u) ** 2
-                                        + (dt_direct * fzcc_u) ** 2
-                                        + (dt_direct * fzss_u) ** 2
-                                        + (dt_direct * flsc_u) ** 2
-                                        + (dt_direct * flcs_u) ** 2
-                                        + (dt_direct * flcc_u) ** 2
-                                        + (dt_direct * flss_u) ** 2
-                                    )
-                                )
-                            )
+                        update_rms = _host_force_update_rms(
+                            dt_direct,
+                            frcc_u,
+                            frss_u,
+                            frsc_u,
+                            frcs_u,
+                            fzsc_u,
+                            fzcs_u,
+                            fzcc_u,
+                            fzss_u,
+                            flsc_u,
+                            flcs_u,
+                            flcc_u,
+                            flss_u,
                         )
                         if adjoint_trace:
                             trace_entry["fallback_direct_dt"] = float(dt_direct)
-                    else:
-                        # Roll back state and zero velocity.
-                        state = state_backup
-                        vRcc, vRss, vZsc, vZcs, vLsc, vLcs = _zero_velocity_blocks_like(
-                            vRcc, vRss, vZsc, vZcs, vLsc, vLcs
-                        )
-                        # Tighten displacement caps when restarting from
-                        # catastrophic growth; otherwise dt_eff can remain
-                        # stuck at the same limit.
-                        max_coeff_delta_rms = max(0.5 * max_coeff_delta_rms, 1e-12)
-                        max_update_rms = max(0.8 * max_update_rms, 1e-6)
-                        if bool(probe_bad_jacobian) or (not np.isfinite(w_try)):
-                            time_step = max(restart_badjac_factor * time_step, 1e-12)
-                            ijacob += 1
-                            restart_reason = "bad_jacobian"
-                            step_status = "restart_bad_jacobian"
-                            restart_path = "catastrophic_nonfinite"
-                        else:
-                            time_step = max(time_step / restart_badprog_factor, 1e-12)
-                            restart_reason = "bad_progress"
-                            step_status = "restart_bad_progress"
-                            restart_path = "catastrophic_growth"
-                        # Adjust time_step at reset milestones.
-                        if ijacob in (25, 50):
-                            scale = 0.98 if ijacob < 50 else 0.96
-                            time_step = max(scale * float(step_size), 1e-12)
-                        bad_resets += 1
-                        iter1 = iter2
-                        freeb_controls_cached = None
-                        fsq_prev = fsq_prev_before
-                        fsq0_prev = fsq0_prev_before
-                        inv_tau = [0.15 / time_step] * k_ndamp
-                        update_rms = 0.0
-                        if bool(vmec2000_control):
-                            _clear_preconditioner_cache_locals()
-                else:
+                        catastrophic_restart = False
+                if catastrophic_restart:
                     # Roll back state and zero velocity.
                     state = state_backup
-                    vRcc, vRss, vZsc, vZcs, vLsc, vLcs = _zero_velocity_blocks_like(vRcc, vRss, vZsc, vZcs, vLsc, vLcs)
-                    # Tighten displacement caps when restarting from catastrophic
-                    # growth; otherwise dt_eff can remain stuck at the same limit.
-                    max_coeff_delta_rms = max(0.5 * max_coeff_delta_rms, 1e-12)
-                    max_update_rms = max(0.8 * max_update_rms, 1e-6)
-                    if bool(probe_bad_jacobian) or (not np.isfinite(w_try)):
-                        time_step = max(restart_badjac_factor * time_step, 1e-12)
-                        ijacob += 1
-                        restart_reason = "bad_jacobian"
-                        step_status = "restart_bad_jacobian"
-                        restart_path = "catastrophic_nonfinite"
-                    else:
-                        time_step = max(time_step / restart_badprog_factor, 1e-12)
-                        restart_reason = "bad_progress"
-                        step_status = "restart_bad_progress"
-                        restart_path = "catastrophic_growth"
-                    # Adjust time_step at reset milestones.
-                    if ijacob in (25, 50):
-                        scale = 0.98 if ijacob < 50 else 0.96
-                        time_step = max(scale * float(step_size), 1e-12)
-                    bad_resets += 1
-                    iter1 = iter2
+                    vRcc, vRss, vZsc, vZcs, vLsc, vLcs = _zero_velocity_blocks_like(
+                        vRcc, vRss, vZsc, vZcs, vLsc, vLcs
+                    )
+                    restart_update = _host_catastrophic_restart_update(
+                        probe_bad_jacobian=bool(probe_bad_jacobian),
+                        w_try=float(w_try),
+                        time_step=float(time_step),
+                        restart_badjac_factor=float(restart_badjac_factor),
+                        restart_badprog_factor=float(restart_badprog_factor),
+                        step_size=float(step_size),
+                        ijacob=int(ijacob),
+                        bad_resets=int(bad_resets),
+                        iter2=int(iter2),
+                        fsq_prev_before=float(fsq_prev_before),
+                        fsq0_prev_before=float(fsq0_prev_before),
+                        k_ndamp=int(k_ndamp),
+                        max_coeff_delta_rms=float(max_coeff_delta_rms),
+                        max_update_rms=float(max_update_rms),
+                    )
+                    time_step = restart_update.time_step
+                    ijacob = restart_update.ijacob
+                    restart_reason = restart_update.restart_reason
+                    step_status = restart_update.step_status
+                    restart_path = restart_update.restart_path
+                    max_coeff_delta_rms = restart_update.max_coeff_delta_rms
+                    max_update_rms = restart_update.max_update_rms
+                    bad_resets = restart_update.bad_resets
+                    iter1 = restart_update.iter1
                     freeb_controls_cached = None
-                    fsq_prev = fsq_prev_before
-                    fsq0_prev = fsq0_prev_before
-                    inv_tau = [0.15 / time_step] * k_ndamp
-                    update_rms = 0.0
-                    if not bool(vmec2000_control):
+                    fsq_prev = restart_update.fsq_prev
+                    fsq0_prev = restart_update.fsq0_prev
+                    inv_tau = restart_update.inv_tau
+                    update_rms = restart_update.update_rms
+                    if bool(clear_cache_after_catastrophic):
                         _clear_preconditioner_cache_locals()
             if timing_enabled and t_state_update_start is not None:
                 t_state_update_dispatch_done = time.perf_counter()

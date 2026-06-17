@@ -1230,6 +1230,68 @@ Completion:
 - Research-grade arbitrary adaptive-branch differentiability: 7%.
 - Overall production-safe differentiability/refactor PR: 98.7%.
 
+## 2026-06-17 Catastrophic Trial-Restart Controller Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Extracted the host-loop catastrophic trial-restart scalar update into
+   `host_catastrophic_restart_update`.
+2. Extracted the 12-block direct-fallback force/update RMS calculation into
+   `host_force_update_rms`.
+3. Replaced duplicate direct-fallback-failure and ordinary trial-rejection
+   restart code in `solve_fixed_boundary_residual_iter` with one shared
+   catastrophic rollback/update path.
+4. Added unit tests for bad-progress restarts, nonfinite/bad-Jacobian restarts,
+   VMEC reset milestone scaling, and RMS parity with the original inline
+   formula.
+
+Results obtained:
+
+- `vmec_jax/solvers/fixed_boundary/residual/iteration.py` dropped from 8404
+  lines at the plan-review baseline to 8371 lines.
+- `solve_fixed_boundary_residual_iter` dropped from 7790 lines at the
+  plan-review baseline to 7755 lines.
+- The extracted helper gives the adaptive-controller/fingerprint work a named
+  scalar restart seam instead of two open-coded branches.
+- PR #20 CI run `27687965132` for the previous plan-consolidation commit is
+  fully green, including combined coverage and Codecov.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/update.py vmec_jax/solvers/fixed_boundary/residual/iteration.py tests/test_solve_residual_iter_update_helpers.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_update_helpers.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_real_scan_wave10_coverage.py tests/test_solve_wave7_coverage.py::test_residual_iter_vmec2000_scan_minimal_one_step tests/test_solve_wave7_coverage.py::test_residual_iter_vmec2000_scan_state_only -q`
+- `python tools/diagnostics/source_health.py --top 8 --top-functions 12`
+
+Best next steps:
+
+1. Commit and push the catastrophic restart extraction.
+2. Continue the fixed-boundary residual-controller split with another
+   domain-named state transition, preferably one that reduces
+   `_run_vmec2000_scan` or the host-loop accepted/rejected update path.
+3. Keep every extraction covered by direct helper tests plus one real scan
+   smoke shard before moving to the next seam.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999999%.
+- VMEC parity and physics gates: 99.92%.
+- Single-stage coil-only optimization phase 3: 99.997%.
+- CPU/GPU performance: 99.60%.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 100% for current claims.
+- QI minimal-seed README artifacts: 100%.
+- Refactor/source simplification: 72.4%.
+- Research-grade arbitrary adaptive-branch differentiability: 7%.
+- Overall production-safe differentiability/refactor PR: 98.72%.
+
 ## 2026-06-14 Umbrella PR and Solver Helper Extractions
 
 Commit: `6e8a335` plus follow-up extraction on
