@@ -672,6 +672,7 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
     report = {
         "branch_compatibility": {"same_branch": True},
         "direction_x": [1.0, 0.0, -1.0],
+        "current_only_coil_geometry_cache": {"available": True},
         "branch_local_vector_gate": {
             "available": True,
             "passed": True,
@@ -694,6 +695,13 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
             "differentiates_fixed_accepted_branch": True,
             "replay_ad_mode": "direct",
             "derivative_mode": "directional_jvp",
+            "directional_jvp_fast_path": "current_only",
+            "directional_uses_fixed_coil_geometry": True,
+            "replay_option_flags": {
+                "directional_jvp_fast_path": "current_only",
+                "directional_uses_fixed_coil_geometry": True,
+                "current_only_coil_geometry_source": "cached",
+            },
             "max_base_abs_delta": 0.0,
             "scalars": {
                 "qs_total": {
@@ -748,6 +756,10 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
     assert proposal["contributions"]["mean_iota"]["contribution"] == pytest.approx(1.0)
     assert proposal["contributions"]["mean_iota"]["target"] == pytest.approx(0.4)
     assert proposal["gate_evidence"]["branch_local_vector_gate_available"] is True
+    assert proposal["gate_evidence"]["directional_jvp_fast_path"] == "current_only"
+    assert proposal["gate_evidence"]["directional_uses_fixed_coil_geometry"] is True
+    assert proposal["gate_evidence"]["current_only_coil_geometry_cache_available"] is True
+    assert proposal["gate_evidence"]["current_only_coil_geometry_source"] == "cached"
     assert proposal["gate_evidence"]["branch_local_vector_gate_passed"] is True
     assert proposal["gate_evidence"]["physical_scalar_gate_passed"] is True
     assert proposal["gate_evidence"]["accepted_rejected_controller_slot_gate_requested"] is True
