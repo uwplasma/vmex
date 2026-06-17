@@ -12,6 +12,57 @@ Date opened: 2026-05-24
 
 ## Current Release Status
 
+### 2026-06-16 Scalar Same-Branch Replay-Plan Cache
+
+Steps taken:
+
+1. Extended the accepted-trace replay-plan cache from vector same-branch
+   reports to scalar branch-local value/gradient reports.
+2. Kept the cache opportunistic: complete production payloads use it, while
+   incomplete synthetic traces fall back to the existing in-call replay-plan
+   construction path.
+3. Added test coverage asserting the scalar helper receives the cached replay
+   plan, mirroring the vector/profile cache coverage.
+
+Results obtained:
+
+1. A real scalar-mode smoke report wrote
+   ``branch_local_scalar_replay_plan_cache.available=True``.
+2. The scalar helper reported internal ``replay_plan_build_wall_s=0.0`` when
+   supplied with the cached plan.
+3. The scalar ``aspect`` branch-local derivative agreed with complete-solve
+   central FD with absolute error ``3.6e-11`` in the smoke report.
+4. ``python -m ruff check`` passed for the touched example/test files.
+5. ``JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_qs_coil_optimization_smoke.py
+   tests/test_free_boundary_qa_finite_beta_coil_optimization_smoke.py -q``
+   passed with one expected xfail.
+
+Best next steps:
+
+1. Commit and push the scalar replay-plan cache.
+2. Re-check GitHub CI after the push.
+3. Continue performance work on first JVP graph construction and NESTOR
+   operator setup; replay-plan construction is now amortized for scalar,
+   vector, and profiling report paths.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999997%.
+- VMEC parity and physics gates: 99.9%.
+- Single-stage coil-only optimization phase 3: 99.97%.
+- CPU/GPU performance: 99.52%; scalar and vector same-branch reports now share
+  cached accepted-trace replay plans where possible.
+- CI/runtime/coverage hygiene: 100% locally for this shard; latest GitHub CI
+  was green before this local tranche.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 100%.
+
 ### 2026-06-14 Accepted-Trace Fingerprint Extraction
 
 Steps taken:

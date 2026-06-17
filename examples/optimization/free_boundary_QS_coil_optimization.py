@@ -1630,6 +1630,33 @@ def write_same_branch_validation_report(
         and "base" in report
         and scalar_key in report["objective_values"]
     ):
+        scalar_replay_plan: dict[str, Any] | None = None
+        try:
+            t0 = time.perf_counter()
+            scalar_replay_plan = direct_coil_accepted_trace_controller_replay_plan(
+                tuple(report["base"]["traces"]),
+                static=report["base"]["init"].static,
+                use_preconditioner_policy_segments=bool(
+                    replay_kwargs.get("use_preconditioner_policy_segments", False)
+                ),
+                use_segment_preconditioner_controls=bool(
+                    replay_kwargs.get("use_segment_preconditioner_controls", False)
+                ),
+                use_stacked_step_controls=bool(replay_kwargs.get("use_stacked_step_controls", False)),
+                use_accepted_only_fast_path=bool(replay_kwargs.get("use_accepted_only_fast_path", True)),
+            )
+            timings["branch_local_scalar_replay_plan_build_wall_s"] = float(time.perf_counter() - t0)
+            compact_report["branch_local_scalar_replay_plan_cache"] = {
+                "available": True,
+                "timing_key": "branch_local_scalar_replay_plan_build_wall_s",
+                "scope": "scalar replay with unchanged accepted traces and controller policy",
+            }
+        except Exception as exc:  # pragma: no cover - synthetic tests may omit stackable trace controls.
+            compact_report["branch_local_scalar_replay_plan_cache"] = {
+                "available": False,
+                "reason": f"{type(exc).__name__}: {exc}",
+                "scope": "scalar replay with unchanged accepted traces and controller policy",
+            }
         t0 = time.perf_counter()
         scalar = direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
             params=base_params,
@@ -1637,6 +1664,7 @@ def write_same_branch_validation_report(
             scalar_key=scalar_key,
             production_values={scalar_key: report_base_values[scalar_key]},
             replay_payload=replay_payload,
+            replay_plan=scalar_replay_plan,
             scalar_fn=lambda payload: {scalar_key: scalar_value_fns[scalar_key](payload)},
             replay_scalar_fn=lambda replay, payload: scalar_replay_fns[scalar_key](replay, payload),
             replay_kwargs={**replay_kwargs, "state_only_replay": scalar_uses_state_only_replay},
