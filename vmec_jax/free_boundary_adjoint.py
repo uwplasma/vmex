@@ -34,7 +34,8 @@ from .free_boundary_adjoint_controller import (
     pytree_directional_derivative_check_jax,
 )
 from .solvers.free_boundary.adjoint.objectives import (
-    static_weight_is_zero as _static_weight_is_zero,
+    accepted_controller_replay_result as _accepted_controller_replay_result,
+    static_weight_is_zero as _static_weight_is_zero,  # noqa: F401 - compatibility alias for tests/internal users.
     tree_weighted_half_norm as _tree_weighted_half_norm,
     weighted_half_norm as _weighted_half_norm,
 )
@@ -1519,8 +1520,6 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     """
 
     from .discrete_adjoint import strict_update_one_step_from_state, strict_update_one_step_from_trace
-    from .state import pack_state
-
     if replay_plan is None:
         trace_seq = tuple(traces)
         if max_steps is not None:
@@ -2142,60 +2141,26 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
                 controls,
                 checkpoint_steps=checkpoint_steps,
             )
-    state_objective = (
-        jnp.asarray(0.0)
-        if _static_weight_is_zero(state_weight)
-        else _weighted_half_norm(pack_state(run["state"]), state_weight)
+    return _accepted_controller_replay_result(
+        run=run,
+        controls=controls,
+        scalar_controls=scalar_controls,
+        array_controls=array_controls,
+        step_controls=step_controls,
+        preconditioner_controls=preconditioner_controls,
+        preconditioner_controls_stacked=bool(preconditioner_controls_stacked),
+        preconditioner_policy_segments=preconditioner_policy_segments,
+        preconditioner_policy_segment_summary=preconditioner_policy_segment_summary,
+        step_policy_segments=step_policy_segments,
+        step_policy_segment_summary=step_policy_segment_summary,
+        segment_preconditioner_controls_stacked=segment_preconditioner_controls_stacked,
+        use_preconditioner_policy_segments=bool(use_preconditioner_policy_segments),
+        use_stacked_step_controls=bool(use_stacked_step_controls),
+        accepted_only_fast_path_segments=accepted_only_fast_path_segments,
+        state_weight=state_weight,
+        include_replay_aux=bool(include_replay_aux),
+        state_only_replay=bool(state_only_replay),
     )
-    if bool(state_only_replay):
-        objective_components = {
-            "state": state_objective,
-            "force": jnp.asarray(0.0),
-            "bsqvac": jnp.asarray(0.0),
-        }
-    else:
-        accepted = jnp.asarray(run["history"]["accepted"], dtype=jnp.asarray(state_objective).dtype)
-        objective_components = {
-            "state": state_objective,
-            "force": jnp.sum(accepted * jnp.asarray(run["history"]["force"])),
-            "bsqvac": jnp.sum(accepted * jnp.asarray(run["history"]["bsqvac"])),
-        }
-    objective = sum(objective_components.values())
-    result = {
-        "objective": objective,
-        "objective_components": objective_components,
-        "state": run["state"],
-        "history": run["history"],
-        "used_state_only_replay": bool(state_only_replay),
-    }
-    if not bool(include_replay_aux):
-        return {
-            **result,
-            "controls": {
-                "has_active_freeb_replay": controls["has_active_freeb_replay"],
-            },
-        }
-    return {
-        **result,
-        "controls": controls,
-        "scalar_controls": scalar_controls,
-        "array_controls": array_controls,
-        "step_controls": step_controls,
-        "preconditioner_controls": preconditioner_controls,
-        "preconditioner_controls_stacked": bool(preconditioner_controls_stacked),
-        "preconditioner_policy_segments": preconditioner_policy_segments,
-        "preconditioner_policy_n_segments": len(preconditioner_policy_segments),
-        "preconditioner_policy_segment_summary": preconditioner_policy_segment_summary,
-        "step_policy_segments": step_policy_segments,
-        "step_policy_n_segments": len(step_policy_segments),
-        "step_policy_segment_summary": step_policy_segment_summary,
-        "preconditioner_controls_segment_stacked": segment_preconditioner_controls_stacked,
-        "used_preconditioner_policy_segments": bool(use_preconditioner_policy_segments),
-        "used_stacked_step_controls": bool(use_stacked_step_controls),
-        "used_accepted_only_fast_path": bool(any(accepted_only_fast_path_segments)),
-        "accepted_only_fast_path_segments": accepted_only_fast_path_segments,
-        "state_reset_flags": tuple(bool(flag) for flag in np.asarray(controls["reset_to_trace_pre"], dtype=bool)),
-    }
 
 
 def direct_coil_complete_solve_trace(

@@ -7352,3 +7352,62 @@ Completion:
 - Implicit residual-adjoint decomposition: 88%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.65%.
+
+## 2026-06-17 Free-Boundary Replay Result Packaging Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved accepted-controller replay objective/result packaging out of
+   `direct_coil_accepted_trace_controller_replay_objective_jax` and into
+   `accepted_controller_replay_result` in the free-boundary adjoint objective
+   helpers.
+2. Preserved the public compatibility aliases in `free_boundary_adjoint.py` so
+   existing tests and internal users continue to import the same names.
+3. Added a unit-level contract for accepted-mask objective aggregation,
+   state-only replay, compact replay auxiliary output, and state reset flags.
+
+Results obtained:
+
+- `vmec_jax/free_boundary_adjoint.py` dropped from 3,829 to 3,794 lines.
+- `direct_coil_accepted_trace_controller_replay_objective_jax` dropped from
+  769 to 733 lines.
+- The replay primitive now has a clearer seam between branch-local controller
+  execution and packaging the scalar objective/auxiliary payload used by tests
+  and optimization reports.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/free_boundary_adjoint.py vmec_jax/solvers/free_boundary/adjoint/objectives.py tests/test_free_boundary_adjoint_helpers_unit.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_adjoint_helpers_unit.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_adjoint_helpers_unit.py tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_branch_trace_mode_keeps_replay_controls_without_raw_force_payload tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_vacuum_field_override_replay_contract -q`
+- `python tools/diagnostics/source_health.py --top 12 --top-functions 18`
+
+Best next steps:
+
+1. Wait for the previous pushed CI run to finish before pushing this tranche, so
+   we do not restart GitHub Actions unnecessarily.
+2. Continue extracting small free-boundary replay/reporting seams only where a
+   helper has a crisp numerical contract and does not change branch selection.
+3. After CI is green, resume the next meaningful phase-2 gate: the narrow
+   fingerprint-gated same-branch adaptive-slot AD-vs-FD validation.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.77%.
+- Differentiability/refactor implementation: 99.996%.
+- Solver monolith reduction: 98.24%.
+- Free-boundary adjoint monolith reduction: 81%.
+- Driver workflow decomposition: 94.4%.
+- WOUT diagnostic/profile decomposition: 98.5%.
+- Optimizer workflow decomposition: 86%.
+- Implicit residual-adjoint decomposition: 88%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.66%.
