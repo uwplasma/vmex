@@ -72,16 +72,49 @@ def scale_velocity_blocks(scale: float, *blocks):
     return tuple(float(scale) * block for block in blocks)
 
 
-def host_force_update_rms(scale: float, *blocks) -> float:
-    """Return the RMS coefficient update implied by scaled force blocks."""
+def force_update_rms(scale: float, *blocks):
+    """Return the JAX-visible RMS coefficient update implied by scaled blocks."""
 
     if not blocks:
-        return 0.0
+        return jnp.asarray(0.0)
     total = None
+    scale_j = jnp.asarray(scale)
     for block in blocks:
-        term = (float(scale) * block) ** 2
+        term = (scale_j * block) ** 2
         total = term if total is None else total + term
-    return float(np.asarray(jnp.sqrt(jnp.mean(total))))
+    return jnp.sqrt(jnp.mean(total))
+
+
+def host_force_update_rms(scale: float, *blocks) -> float:
+    """Return the host scalar RMS coefficient update implied by scaled blocks."""
+
+    return float(np.asarray(force_update_rms(scale, *blocks)))
+
+
+def momentum_update_jax(
+    *,
+    velocities: ResidualVelocityBlocks,
+    forces: ResidualVelocityBlocks,
+    b1: float,
+    fac: float,
+    force_scale: float,
+    flip_sign: float,
+    dt_eff: float,
+    compute_update_rms: bool,
+) -> HostMomentumUpdate:
+    """Apply the JAX-visible strict momentum update to all velocity blocks."""
+
+    updated = ResidualVelocityBlocks(
+        *(
+            fac * (b1 * velocity + force_scale * (flip_sign * jnp.asarray(force)))
+            for velocity, force in zip(velocities, forces)
+        )
+    )
+    if compute_update_rms:
+        update_rms = force_update_rms(dt_eff, *updated)
+    else:
+        update_rms = jnp.asarray(0.0, dtype=jnp.asarray(updated.rcc).dtype)
+    return HostMomentumUpdate(velocities=updated, update_rms=update_rms)
 
 
 def host_momentum_update_np(
@@ -181,5 +214,6 @@ _HostCatastrophicRestartUpdate = HostCatastrophicRestartUpdate
 _zero_velocity_blocks_like = zero_velocity_blocks_like
 _scale_velocity_blocks = scale_velocity_blocks
 _host_force_update_rms = host_force_update_rms
+_momentum_update_jax = momentum_update_jax
 _host_momentum_update_np = host_momentum_update_np
 _host_catastrophic_restart_update = host_catastrophic_restart_update

@@ -5,9 +5,11 @@ import pytest
 
 from vmec_jax.solvers.fixed_boundary.residual.update import (
     ResidualVelocityBlocks,
+    force_update_rms,
     host_catastrophic_restart_update,
     host_force_update_rms,
     host_momentum_update_np,
+    momentum_update_jax,
     scale_velocity_blocks,
     zero_velocity_blocks_like,
 )
@@ -74,6 +76,29 @@ def test_host_momentum_update_np_can_skip_rms_without_changing_blocks() -> None:
     assert without_rms.update_rms == pytest.approx(0.0)
 
 
+def test_momentum_update_jax_matches_host_momentum_update_np() -> None:
+    velocities = _blocks(offset=0.25, scale=0.2)
+    forces = _blocks(offset=-3.0, scale=0.7)
+    kwargs = dict(
+        velocities=velocities,
+        forces=forces,
+        b1=0.6,
+        fac=1.2,
+        force_scale=0.09,
+        flip_sign=-1.0,
+        dt_eff=0.03,
+        compute_update_rms=True,
+    )
+
+    host_update = host_momentum_update_np(**kwargs)
+    jax_update = momentum_update_jax(**kwargs)
+
+    for host_block, jax_block in zip(host_update.velocities, jax_update.velocities):
+        np.testing.assert_allclose(np.asarray(jax_block), host_block)
+    expected_rms = np.sqrt(np.mean(sum((kwargs["dt_eff"] * block) ** 2 for block in host_update.velocities)))
+    assert float(np.asarray(jax_update.update_rms)) == pytest.approx(expected_rms)
+
+
 def test_velocity_block_helpers_preserve_shape_dtype_and_scale() -> None:
     a = np.arange(6.0, dtype=np.float64).reshape(2, 3)
     b = np.arange(6, dtype=np.int32).reshape(2, 3)
@@ -99,6 +124,16 @@ def test_host_force_update_rms_matches_inline_force_formula() -> None:
 
     assert host_force_update_rms(scale, *blocks) == pytest.approx(expected)
     assert host_force_update_rms(scale) == pytest.approx(0.0)
+
+
+def test_force_update_rms_is_jax_visible_and_matches_host_wrapper() -> None:
+    blocks = tuple(np.arange(6.0, dtype=float).reshape(2, 3) + idx for idx in range(12))
+    scale = 0.0375
+
+    got = force_update_rms(scale, *blocks)
+
+    assert np.asarray(got).shape == ()
+    assert float(np.asarray(got)) == pytest.approx(host_force_update_rms(scale, *blocks))
 
 
 def test_free_boundary_control_module_reexports_velocity_helpers() -> None:
