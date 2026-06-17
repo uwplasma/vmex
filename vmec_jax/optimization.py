@@ -31,6 +31,11 @@ from .optimizers.fixed_boundary.history import history_entry_from_residuals
 from .optimizers.fixed_boundary.history import monotone_final_wall_time
 from .optimizers.fixed_boundary.history import qs_objective_from_residuals
 from .optimizers.fixed_boundary.gauss_newton import gauss_newton_least_squares
+from .optimizers.fixed_boundary.exact_replay import jvp_only_basepoint_carries_enabled
+from .optimizers.fixed_boundary.exact_replay import jvp_only_exact_tape_enabled
+from .optimizers.fixed_boundary.exact_replay import scan_exact_helpers
+from .optimizers.fixed_boundary.exact_replay import solve_exact_with_tape_for_jvp
+from .optimizers.fixed_boundary.exact_replay import solve_scan_exact_state
 from .optimizers.fixed_boundary.matrix_free import build_residual_linear_operator
 from .optimizers.fixed_boundary.parameterization import BoundaryParamSpec
 from .optimizers.fixed_boundary.parameterization import apply_boundary_params
@@ -53,6 +58,13 @@ from .optimizers.fixed_boundary.profiling import profile_solver_timing
 from .optimizers.fixed_boundary.profiling import sync_replay_timing_enabled
 from .optimizers.fixed_boundary.qs_residuals import make_qh_residuals_fn as _make_qh_residuals_fn_impl
 from .optimizers.fixed_boundary.qs_residuals import make_qs_residuals_fn as _make_qs_residuals_fn_impl
+from .optimizers.fixed_boundary.replay_policy import chunked_projected_replay_projection_enabled
+from .optimizers.fixed_boundary.replay_policy import fused_projected_replay_enabled
+from .optimizers.fixed_boundary.replay_policy import lasym_replay_column_chunk
+from .optimizers.fixed_boundary.replay_policy import optimizer_backend_name
+from .optimizers.fixed_boundary.replay_policy import precompute_linear_operator_initial_tangents_enabled
+from .optimizers.fixed_boundary.replay_policy import projected_replay_residuals_enabled
+from .optimizers.fixed_boundary.replay_policy import scalar_gradient_initial_tangents_enabled
 from .optimizers.fixed_boundary.scalar_gradient import exact_objective_and_gradient
 from .optimizers.fixed_boundary.scalar_lbfgs import run_lbfgs_adjoint_exact_optimizer
 from .optimizers.fixed_boundary.scalar_trust import run_scalar_trust_exact_optimizer
@@ -122,15 +134,7 @@ class FixedBoundaryContext:
 def _optimizer_backend_name(solver_device_name: str | None) -> str:
     """Return the active optimizer backend name without changing device policy."""
 
-    backend = str(solver_device_name or "").strip().lower()
-    if backend:
-        return backend
-    try:
-        from ._compat import jax as _jax
-
-        return str(_jax.default_backend()).strip().lower() if _jax is not None else "cpu"
-    except Exception:
-        return "cpu"
+    return optimizer_backend_name(solver_device_name)
 
 
 def smooth_min_abs_iota_residual(
@@ -1193,97 +1197,13 @@ class FixedBoundaryExactOptimizer:
         """Return JIT-compiled scan residual/Jacobian helpers for accelerator solves."""
         if self._solver_device_name is not None and not self._inside_solver_device_context:
             return self._run_in_solver_device_context(self._scan_exact_helpers)
-        from ._compat import jax, jnp as _jnp
-        from .solve import solve_fixed_boundary_residual_iter
-
-        cache_key = (
-            int(len(self._specs)),
-            int(self._layout.size),
-            id(self._residuals_fn),
-            int(self._inner_max_iter),
-            float(self._inner_ftol),
-            self._solver_device_name or "default",
-        )
-        helper_cache = self._scan_exact_helper_cache.get(cache_key)
-        if helper_cache is not None:
-            return helper_cache
-
-        scan_solver_kwargs = dict(self._exact_solver_kwargs)
-        scan_solver_kwargs.update(
-            use_scan=True,
-            state_only=True,
-            light_history=True,
-            resume_state_mode="none",
-        )
-
-        def _scan_state_from_params(p):
-            boundary_now = self._boundary_from_params(p)
-            axis_override = getattr(self, "_initial_axis_override", None)
-            if axis_override is None:
-                state0 = initial_guess_from_boundary(
-                    self._static,
-                    boundary_now,
-                    self._indata,
-                    vmec_project=True,
-                )
-            else:
-                state0 = initial_guess_from_boundary(
-                    self._static,
-                    boundary_now,
-                    self._indata,
-                    vmec_project=True,
-                    axis_override=axis_override,
-                )
-            result = solve_fixed_boundary_residual_iter(
-                state0,
-                self._static,
-                max_iter=self._inner_max_iter,
-                ftol=self._inner_ftol,
-                **scan_solver_kwargs,
-            )
-            return result.state
-
-        def _scan_residuals_from_params(p):
-            return _jnp.asarray(
-                self._residuals_fn(_scan_state_from_params(p)),
-                dtype=_jnp.float64,
-            )
-
-        @jax.jit
-        def _residual_impl(p):
-            return _scan_residuals_from_params(p)
-
-        @jax.jit
-        def _residual_and_jacobian_impl(p):
-            residuals, linear = jax.linearize(_scan_residuals_from_params, p)
-            directions = _jnp.eye(int(p.size), dtype=p.dtype)
-            columns = jax.vmap(linear)(directions)
-            return residuals, columns.T
-
-        helper_cache = {
-            "state": _scan_state_from_params,
-            "residual": _residual_impl,
-            "residual_and_jacobian": _residual_and_jacobian_impl,
-        }
-        self._scan_exact_helper_cache[cache_key] = helper_cache
-        return helper_cache
+        return scan_exact_helpers(self, initial_guess_from_boundary_func=initial_guess_from_boundary)
 
     def _solve_scan_exact_state(self, params):
         """Run the scan accepted-point solve and remember the final state."""
         if self._solver_device_name is not None and not self._inside_solver_device_context:
             return self._run_in_solver_device_context(self._solve_scan_exact_state, params)
-        from ._compat import jnp as _jnp
-
-        cache_key = self._exact_cache_key(params)
-        if cache_key in getattr(self, "_exact_state_cache", {}):
-            self._profile_add("scan_exact_state_cache_hit", 0.0)
-            return self._exact_state_cache[cache_key]
-        helpers = self._scan_exact_helpers()
-        t0 = time.perf_counter()
-        state = helpers["state"](_jnp.asarray(params, dtype=_jnp.float64))
-        self._remember_exact_state(cache_key, state)
-        self._profile_add("scan_exact_state_solve", time.perf_counter() - t0)
-        return state
+        return solve_scan_exact_state(self, params)
 
     def _solve_exact_with_tape(self, params, *, return_payload: bool = False, jvp_only: bool = False):
         """Run exact solve + build adjoint tape, with caching."""
@@ -1447,46 +1367,13 @@ class FixedBoundaryExactOptimizer:
 
     def _solve_exact_with_tape_for_jvp(self, params):
         """Build an exact tape optimized for forward tangent-column replay."""
-        solve = self._solve_exact_with_tape
-        if not self._jvp_only_exact_tape_enabled():
-            return solve(params, return_payload=True)
-        try:
-            from inspect import Parameter, signature
-
-            parameters = signature(solve).parameters
-            accepts_jvp_only = "jvp_only" in parameters or any(
-                parameter.kind == Parameter.VAR_KEYWORD for parameter in parameters.values()
-            )
-        except (TypeError, ValueError):
-            accepts_jvp_only = True
-        if accepts_jvp_only:
-            env_name = "VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES"
-            previous = os.environ.get(env_name)
-            use_basepoint_carries = self._jvp_only_basepoint_carries_enabled()
-            if previous is None and use_basepoint_carries:
-                os.environ[env_name] = "1"
-                self._profile_add("exact_tape_jvp_only_basepoint_carries_auto", 0.0)
-            try:
-                return solve(params, return_payload=True, jvp_only=True)
-            finally:
-                if previous is None and use_basepoint_carries:
-                    os.environ.pop(env_name, None)
-        return solve(params, return_payload=True)
+        return solve_exact_with_tape_for_jvp(self, params)
 
     def _jvp_only_exact_tape_enabled(self) -> bool:
-        forced = self._env_bool_override("VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE")
-        if forced is not None:
-            return bool(forced)
-        enabled = self._gpu_like_exact_tape_backend()
-        if enabled:
-            self._profile_add("exact_tape_jvp_only_auto_gpu", 0.0)
-        return bool(enabled)
+        return jvp_only_exact_tape_enabled(self)
 
     def _jvp_only_basepoint_carries_enabled(self) -> bool:
-        forced = self._env_bool_override("VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES")
-        if forced is not None:
-            return bool(forced)
-        return self._gpu_like_exact_tape_backend()
+        return jvp_only_basepoint_carries_enabled(self)
 
     def _initial_tangent_columns(self, params, axis_override, *, profile_prefix: str):
         """Return cached packed initial-state tangents for boundary parameters."""
@@ -1623,156 +1510,22 @@ class FixedBoundaryExactOptimizer:
         return directions
 
     def _lasym_replay_column_chunk(self, n_params: int) -> int | None:
-        """Replay-column chunk heuristic for dense exact Jacobians."""
-
-        env_override = os.environ.get("VMEC_JAX_LASYM_REPLAY_COLUMN_CHUNK")
-        if env_override is not None:
-            from .discrete_adjoint import _replay_column_chunk_override
-
-            handled, requested = _replay_column_chunk_override(env_override)
-            if handled:
-                return requested
-        if os.environ.get("VMEC_JAX_REPLAY_COLUMN_CHUNK") is not None:
-            return None
-        backend_name = None
-        if self._solver_device_name is not None:
-            backend_name = str(self._solver_device_name).lower()
-        else:
-            try:
-                from ._compat import jax as _jax
-
-                backend_name = str(_jax.default_backend()).lower()
-            except Exception:
-                backend_name = None
-        if backend_name in ("gpu", "cuda", "rocm"):
-            if int(n_params) < 24:
-                return None
-            if bool(getattr(self._static.cfg, "lasym", False)):
-                # LASYM doubles the boundary columns and remains more memory
-                # sensitive on GPU; keep the older conservative replay chunks.
-                return 8
-            # Non-LASYM GPU projected replay is launch/transpose dominated.
-            # Fresh office RTX A4000/JAX 0.6.2 profiles in June 2026 showed
-            # larger chunks reduce cold and warm callback time for QH mode-2
-            # through mode-4 without increasing host materialization cost.
-            if int(n_params) <= 64:
-                return int(n_params)
-            if int(n_params) <= 128:
-                return max(24, int(n_params) // 2)
-            return 64
-        if backend_name == "tpu":
-            return None
-        if not bool(getattr(self._static.cfg, "lasym", False)):
-            return None
-        if int(n_params) >= 64:
-            return 8
-        if int(n_params) >= 32:
-            return 4
-        return None
+        return lasym_replay_column_chunk(self, n_params)
 
     def _precompute_linear_operator_initial_tangents_enabled(self, n_params: int) -> bool:
-        """Whether matrix-free operators should cache initial-state tangent columns.
-
-        Matrix-free least-squares avoids materializing the full residual
-        Jacobian, but every ``J.T @ w`` still needs the transpose of the frozen
-        initial-state map.  For stellarator-symmetric CPU/default high-mode
-        production runs this transpose was a repeat offender in accepted-point
-        profiles.  Precomputing the small ``n_params x state_size`` initial
-        tangent block once per accepted point lets both ``J @ v`` and
-        ``J.T @ w`` reuse fast tensor contractions while preserving the larger
-        matrix-free residual projection.  The default starts at 64 DOFs because
-        lower-DOF probes usually perform too few transpose products to amortize
-        the tangent-column build.
-        """
-
-        if int(n_params) <= 0:
-            return False
-        flag = os.getenv("VMEC_JAX_OPT_LINEAR_OPERATOR_INITIAL_TANGENTS")
-        if flag is not None:
-            return flag.strip().lower() not in ("", "0", "false", "no", "off")
-        backend = _optimizer_backend_name(getattr(self, "_solver_device_name", None))
-        if backend in ("gpu", "cuda", "rocm", "tpu", "metal"):
-            return False
-        if self._has_stellarator_asymmetric_configuration():
-            return False
-        min_dofs = int(os.getenv("VMEC_JAX_OPT_LINEAR_OPERATOR_INITIAL_TANGENT_MIN_DOFS", "64"))
-        max_dofs = int(os.getenv("VMEC_JAX_OPT_LINEAR_OPERATOR_INITIAL_TANGENT_MAX_DOFS", "128"))
-        return min_dofs <= int(n_params) <= max_dofs
+        return precompute_linear_operator_initial_tangents_enabled(self, n_params)
 
     def _scalar_gradient_initial_tangents_enabled(self, n_params: int) -> bool:
-        """Whether scalar-adjoint gradients should project cached initial tangents.
-
-        The reverse scalar-adjoint path needs one VMEC-tape VJP plus the
-        transpose of the initial-state map.  On GPU high-mode optimizations the
-        repeated initial VJP is a cold/warm callback hotspot.  The initial map is
-        affine for a fixed axis/flip branch, so precomputing its tangent columns
-        once per branch lets scalar gradients use a device-side dot product on
-        subsequent accepted points.  Keep this default narrow because CPU
-        single-gradient probes usually do not amortize the tangent build.
-        """
-
-        if int(n_params) <= 0:
-            return False
-        flag = os.getenv("VMEC_JAX_OPT_SCALAR_GRADIENT_INITIAL_TANGENTS")
-        if flag is not None:
-            return flag.strip().lower() not in ("", "0", "false", "no", "off")
-        backend = _optimizer_backend_name(getattr(self, "_solver_device_name", None))
-        if backend not in ("gpu", "cuda", "rocm", "tpu", "metal"):
-            return False
-        if self._has_stellarator_asymmetric_configuration():
-            return False
-        min_dofs = int(os.getenv("VMEC_JAX_OPT_SCALAR_GRADIENT_INITIAL_TANGENT_MIN_DOFS", "24"))
-        max_dofs = int(os.getenv("VMEC_JAX_OPT_SCALAR_GRADIENT_INITIAL_TANGENT_MAX_DOFS", "256"))
-        return min_dofs <= int(n_params) <= max_dofs
+        return scalar_gradient_initial_tangents_enabled(self, n_params)
 
     def _projected_replay_residuals_enabled(self, n_params: int | None = None) -> bool:
-        """Whether dense Jacobians should project replayed tangents without an intermediate sync."""
-
-        flag = os.getenv("VMEC_JAX_OPT_PROJECTED_REPLAY_RESIDUALS")
-        if flag is not None:
-            return flag.strip().lower() in ("1", "true", "yes", "on")
-        backend = _optimizer_backend_name(getattr(self, "_solver_device_name", None))
-        if backend not in ("gpu", "cuda", "rocm"):
-            return False
-        if n_params is None:
-            return False
-        if bool(getattr(getattr(self._static, "cfg", None), "lasym", False)):
-            return False
-        # June 2026 office profiles show projected replay is slower for QH
-        # mode-2 (24 columns): dispatch dominates the projected path, while the
-        # standard replay path is about 16% faster over two perturbed GPU
-        # Jacobian callbacks. Keep projected replay for larger non-LASYM dense
-        # Jacobians where avoiding the intermediate tangent synchronization can
-        # still amortize the extra dispatch cost.
-        return int(n_params) >= 48
+        return projected_replay_residuals_enabled(self, n_params)
 
     def _fused_projected_replay_enabled(self) -> bool:
-        """Whether projected replay should fuse replay and residual projection when possible."""
-
-        flag = os.getenv("VMEC_JAX_OPT_FUSED_PROJECTED_REPLAY", "").strip().lower()
-        if flag:
-            return flag in ("1", "true", "yes", "on")
-        # Office GPU profiles on 2026-05-28 show the fused mode-2 QH callback
-        # is slower than the regular projected replay path. Keep fusion opt-in
-        # for diagnostics until a broader matrix shows a reproducible win.
-        return False
+        return fused_projected_replay_enabled()
 
     def _chunked_projected_replay_projection_enabled(self, column_chunk: int | None, n_params: int) -> bool:
-        """Whether to project residual tangents immediately after each replay chunk."""
-
-        if column_chunk is None:
-            return False
-        if int(n_params) <= int(column_chunk):
-            return False
-        flag = os.getenv("VMEC_JAX_OPT_CHUNKED_PROJECTED_REPLAY_PROJECTION", "").strip().lower()
-        if flag:
-            return flag in ("1", "true", "yes", "on")
-        backend = _optimizer_backend_name(getattr(self, "_solver_device_name", None))
-        if backend not in ("gpu", "cuda", "rocm"):
-            return False
-        if bool(getattr(getattr(self._static, "cfg", None), "lasym", False)):
-            return False
-        return True
+        return chunked_projected_replay_projection_enabled(self, column_chunk, n_params)
 
     def _discrete_jacobian_residual_helper(self, params_size: int, residuals_from_packed, *, jax):
         """Return cached residual/Jacobian projection helper for packed tangents."""
