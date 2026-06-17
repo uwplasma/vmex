@@ -229,3 +229,78 @@ def run_fixed_boundary_optimizer_solver(
         jit_kernels=True,
         verbose=bool(verbose),
     )
+
+
+def maybe_run_fixed_boundary_in_solver_device_context(
+    *,
+    input_path: Any,
+    solver_device: str | None,
+    solver_device_context_active: bool,
+    cfg: Any,
+    indata: Any,
+    solver_lower: str,
+    cli_fixed_boundary_mode: bool,
+    accelerated_mode: bool,
+    restart_state_present: bool,
+    restart_solver_state_present: bool,
+    recursive_run_kwargs: dict[str, Any],
+    run_fixed_boundary_func: Callable[..., Any],
+    replace_func: Callable[..., Any],
+    as_list_like_func: Callable[[Any], Any],
+    default_backend_name_func: Callable[[], str],
+    resolve_solver_device_name_func: Callable[..., str | None],
+    getenv: Callable[[str, str | None], str | None] = os.getenv,
+) -> Any | None:
+    """Run a fixed-boundary solve inside a requested JAX device context.
+
+    The public driver owns policy resolution and restart setup.  This helper
+    owns the narrow reroute mechanics: resolve a device name, enter JAX's
+    default-device context, recursively call the driver once, and annotate the
+    returned diagnostics.  Returning ``None`` means no reroute was possible or
+    requested, so the caller should continue with the ordinary path.
+    """
+
+    backend_for_device = default_backend_name_func()
+    solver_device_name = resolve_solver_device_name_func(
+        solver_device=solver_device,
+        backend=backend_for_device,
+        cfg=cfg,
+        indata=indata,
+        solver_lower=solver_lower,
+        cli_fixed_boundary_mode=bool(cli_fixed_boundary_mode),
+        accelerated_mode=bool(accelerated_mode),
+        ns_list_input=as_list_like_func(indata.get("NS_ARRAY", None)),
+        niter_list_input=as_list_like_func(indata.get("NITER_ARRAY", None)),
+        restart_state_present=bool(restart_state_present),
+        restart_solver_state_present=bool(restart_solver_state_present),
+    )
+    if solver_device_name is None or bool(solver_device_context_active):
+        return None
+    try:
+        import jax
+
+        devices = jax.devices(str(solver_device_name))
+    except Exception:
+        devices = []
+    if not devices:
+        return None
+
+    from ..vmec_tomnsp import tomnsps_fft_policy_override
+
+    tomnsps_fft_override = (
+        str(solver_device_name).strip().lower() in ("gpu", "cuda", "rocm", "tpu")
+        if getenv("VMEC_JAX_TOMNSPS_FFT", None) is None
+        else None
+    )
+    run_kwargs = dict(recursive_run_kwargs)
+    run_kwargs["solver_device"] = str(solver_device_name)
+    run_kwargs["_solver_device_context_active"] = True
+    with jax.default_device(devices[0]), tomnsps_fft_policy_override(tomnsps_fft_override):
+        routed_run = run_fixed_boundary_func(input_path, **run_kwargs)
+    if getattr(routed_run, "result", None) is not None:
+        diag = dict(getattr(routed_run.result, "diagnostics", {}) or {})
+        diag["solver_device"] = str(solver_device_name)
+        diag["solver_device_auto_reroute"] = (str(solver_device or "auto").strip().lower() == "auto")
+        diag["solver_device_requested_backend"] = str(backend_for_device)
+        routed_run = replace_func(routed_run, result=replace_func(routed_run.result, diagnostics=diag))
+    return routed_run
