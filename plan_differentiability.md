@@ -7896,6 +7896,72 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.84%.
 
+## 2026-06-17 Fixed-Boundary Exact Replay Policy Split
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Extracted scan exact-helper construction and scan accepted-state solving into
+   `vmec_jax.optimizers.fixed_boundary.exact_replay`.
+2. Extracted JVP-only exact tape policy and basepoint-carry environment handling
+   into the same exact replay module.
+3. Extracted optimizer backend naming, LASYM replay chunking, projected replay
+   gates, fused replay opt-in policy, chunked projected replay policy, and
+   initial-tangent cache enablement into
+   `vmec_jax.optimizers.fixed_boundary.replay_policy`.
+4. Preserved `optimization.py` compatibility wrappers for all existing private
+   methods and kept scan helper monkeypatch behavior by passing the
+   module-level `initial_guess_from_boundary` function into the helper.
+
+Results obtained:
+
+- `vmec_jax/optimization.py` dropped from 3,115 to below the current top-12
+  source-health warning list; the 12th production/test file is now 2,896 lines.
+- The fixed-boundary optimizer class now delegates profiling, cache/state
+  bookkeeping, scan exact-helper construction, and replay policy to domain
+  modules.
+- Remaining optimizer-class work is concentrated in tangent replay/projection,
+  solve orchestration, callbacks, and result assembly.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/optimization.py vmec_jax/optimizers/fixed_boundary/exact_replay.py vmec_jax/optimizers/fixed_boundary/replay_policy.py tests/test_optimization_wave2_coverage.py tests/test_optimization_fast_optimizer_methods.py tests/test_optimization_auto_scalar_policy.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_optimization_wave2_coverage.py tests/test_optimization_fast_optimizer_methods.py tests/test_optimization_auto_scalar_policy.py tests/test_optimization_helpers.py -q`
+- `python tools/diagnostics/source_health.py --top 12 --top-functions 20`
+
+Best next steps:
+
+1. Move the remaining tangent replay/projection helpers out of
+   `optimization.py` only if they can be grouped coherently without obscuring
+   the exact accepted-point derivative path.
+2. Shift the next large tranche to `optimization_workflow.py` or the
+   fixed-boundary residual loop, where the source-health report still shows
+   large production monoliths.
+3. Keep free-boundary adaptive-branch claims conservative while refactoring:
+   current production evidence remains branch-local/fingerprint-gated, not
+   arbitrary adaptive-branch differentiability.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.92%.
+- Differentiability/refactor implementation: 99.9988%.
+- Solver monolith reduction: 98.50%.
+- Free-boundary adjoint monolith reduction: 82%.
+- Driver workflow decomposition: 96.4%.
+- WOUT diagnostic/profile decomposition: 98.8%.
+- Optimizer workflow decomposition: 95.2%.
+- Fixed-boundary optimizer decomposition: 94.0%.
+- Implicit residual-adjoint decomposition: 88%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.86%.
+
 ## 2026-06-17 Fixed-Boundary Seed/Input Workflow Extraction
 
 Branch: `codex/differentiability-refactor-plan`.
