@@ -6,7 +6,12 @@ import numpy as np
 import pytest
 
 from vmec_jax._compat import has_jax
-from vmec_jax.solvers.fixed_boundary.diagnostics.axis_reset import reset_axis_from_boundary
+from vmec_jax.solvers.fixed_boundary.diagnostics.axis_reset import (
+    bad_jacobian_from_tau_range,
+    bad_jacobian_ptau_from_minmax,
+    initial_force_physical_fsq,
+    reset_axis_from_boundary,
+)
 from vmec_jax.solve import (
     _apply_vmec_lambda_axis_rules_to_state,
     _enforce_field_rows,
@@ -198,6 +203,34 @@ def test_reset_axis_from_boundary_fallback_coefficients_preserve_non_axis_modes(
 def test_initial_axis_reset_decision_branch_matrix(kwargs, expected):
     decision = _initial_axis_reset_decision(**kwargs)
     assert (decision.bad_jacobian, decision.force_reset, decision.reset) == expected
+
+
+def test_initial_axis_reset_shared_bad_jacobian_helpers():
+    norms = SimpleNamespace(r1=2.0, fnorm=3.0, fnormL=5.0)
+    assert initial_force_physical_fsq(norms=norms, gcr2=0.5, gcz2=0.25, gcl2=0.1) == pytest.approx(5.0)
+    assert initial_force_physical_fsq(norms=object(), gcr2=0.5, gcz2=0.25, gcl2=0.1) is None
+
+    assert bad_jacobian_from_tau_range(min_tau=-1.0, max_tau=2.0)
+    assert not bad_jacobian_from_tau_range(min_tau=-1.0e-4, max_tau=2.0, abs_tol=1.0e-3)
+
+    assert bad_jacobian_ptau_from_minmax(
+        ptau_min=-1.0,
+        ptau_max=2.0,
+        ptau_tol=0.0,
+        ptau_tol_rel=0.0,
+    )
+    assert not bad_jacobian_ptau_from_minmax(
+        ptau_min=-1.0e-4,
+        ptau_max=2.0,
+        ptau_tol=0.0,
+        ptau_tol_rel=1.0e-3,
+    )
+    assert bad_jacobian_ptau_from_minmax(
+        ptau_min=None,
+        ptau_max=2.0,
+        ptau_tol=0.0,
+        ptau_tol_rel=0.0,
+    ) is None
 
 
 def test_write_axis_reset_dump_disabled_short_and_success_paths(tmp_path):

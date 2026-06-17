@@ -20,6 +20,49 @@ class InitialAxisResetDecision(NamedTuple):
     reset: bool
 
 
+def initial_force_physical_fsq(*, norms: Any, gcr2: Any, gcz2: Any, gcl2: Any) -> float | None:
+    """Return the physical initial residual used to gate axis reset attempts."""
+
+    try:
+        fsqr = norms.r1 * norms.fnorm * gcr2
+        fsqz = norms.r1 * norms.fnorm * gcz2
+        fsql = norms.fnormL * gcl2
+        return float(np.asarray(fsqr + fsqz + fsql))
+    except Exception:
+        return None
+
+
+def bad_jacobian_from_tau_range(*, min_tau: float, max_tau: float, abs_tol: float = 0.0) -> bool:
+    """Return whether a Jacobian-sign change is present across a tau range."""
+
+    tol = max(0.0, float(abs_tol))
+    return bool(float(min_tau) < -tol and float(max_tau) > tol)
+
+
+def bad_jacobian_ptau_from_minmax(
+    *,
+    ptau_min: Any | None,
+    ptau_max: Any | None,
+    ptau_tol: float,
+    ptau_tol_rel: float,
+) -> bool | None:
+    """Return the bad-Jacobian decision from VMEC ptau min/max diagnostics."""
+
+    if ptau_min is None or ptau_max is None:
+        return None
+    try:
+        min_tau = float(np.asarray(ptau_min))
+        max_tau = float(np.asarray(ptau_max))
+        tau_scale = max(abs(min_tau), abs(max_tau))
+        if float(ptau_tol_rel) > 0.0:
+            tau_tol = max(abs(float(ptau_tol)), float(ptau_tol_rel) * float(tau_scale))
+        else:
+            tau_tol = max(abs(float(ptau_tol)), 0.0)
+        return bad_jacobian_from_tau_range(min_tau=min_tau, max_tau=max_tau, abs_tol=tau_tol)
+    except Exception:
+        return None
+
+
 def merge_axis_reset_state(*, st: VMECState, st_axis: VMECState, static, full_reset: bool) -> VMECState:
     """Return an axis-reset state, preserving non-axis coefficients unless requested."""
 
