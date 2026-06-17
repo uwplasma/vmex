@@ -16,6 +16,7 @@ python examples/mirror_two_coil_axisym.py --outdir results/mirror/two_coil_axisy
 python examples/mirror_finite_current_pitch.py --outdir results/mirror/finite_current_pitch
 python examples/mirror_fixed_boundary_solve_diagnostic.py --outdir results/mirror/fixed_boundary_solve_diagnostic
 python examples/mirror_manufactured_fixed_boundary.py --outdir results/mirror/manufactured_fixed_boundary
+python examples/mirror_solver_comparison.py --outdir results/mirror/solver_comparison
 ```
 
 The physical mirror examples write a mirror-native ``mout_*.nc`` file and,
@@ -64,3 +65,11 @@ a sourced manufactured fixed-boundary problem with a known stationary state. It
 uses the same reduced-coordinate layout and geometry scaling as the mirror
 solver, then applies an exact-Hessian damped residual iteration to verify that a
 perturbed projected state can reach the requested projected ``gtol``.
+
+The root-level ``examples/mirror_solver_comparison.py`` script compares the
+production gradient-descent, scaled L-BFGS-B, and residual-Newton paths on
+small cylinder and two-coil fixed-boundary cases, and includes the sourced
+manufactured residual-Newton gate in the same JSON/plot report. With plots
+enabled it also writes the standard mirror plot bundle for the residual-Newton
+physical cases, including the 3-D boundary, field-line overlays, ``|B|``,
+cross sections, and residual history.

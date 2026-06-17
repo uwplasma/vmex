@@ -173,3 +173,43 @@ def test_root_manufactured_fixed_boundary_example_runs_without_plots(tmp_path):
     assert metrics["reached_projected_gtol"]
     assert metrics["final_residual_norm"] < 1.0e-12
     assert metrics["final_exact_error_norm"] < 1.0e-10
+
+
+def test_root_solver_comparison_example_runs_without_plots(tmp_path):
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "examples/mirror_solver_comparison.py",
+            "--outdir",
+            str(tmp_path / "solver_comparison"),
+            "--cases",
+            "cylinder,two_coil,manufactured",
+            "--maxiter-gd",
+            "1",
+            "--maxiter-lbfgs",
+            "2",
+            "--maxiter-newton",
+            "2",
+            "--two-coil-ns",
+            "5",
+            "--two-coil-nxi",
+            "9",
+            "--residual-linear-maxiter",
+            "12",
+            "--no-plots",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    path = Path(completed.stdout.strip())
+    metrics = json.loads(path.read_text())
+    row_keys = {(row["case"], row["optimizer"], row["solver_scope"]) for row in metrics["rows"]}
+    assert ("cylinder", "gradient_descent", "production_fixed_boundary") in row_keys
+    assert ("cylinder", "lbfgs", "production_fixed_boundary") in row_keys
+    assert ("cylinder", "residual_newton", "production_fixed_boundary") in row_keys
+    assert ("two_coil", "residual_newton", "production_fixed_boundary") in row_keys
+    assert ("manufactured", "residual_newton", "manufactured_source_validation") in row_keys
+    assert len(metrics["histories"]) == len(metrics["rows"])
+    assert all(row["final_residual_norm"] >= 0.0 for row in metrics["rows"])

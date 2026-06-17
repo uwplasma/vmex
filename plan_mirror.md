@@ -3014,3 +3014,80 @@ For the two-coil diagnostic with `ns=9`, `nxi=17`, `maxiter=15`,
   it to open `xi` caps.
 - Study two-coil convergence over `residual_linear_maxiter`, `maxiter`,
   `ns`, `nxi`, and cap constraints.
+
+---
+
+## 38. 2026-06-17 fixed-boundary solver comparison benchmark lane
+
+This lane adds a compact benchmark/report script that compares the currently
+available mirror fixed-boundary solver paths before adding the next
+preconditioner layer.
+
+### Implemented in this lane
+
+- Added the root-level `examples/mirror_solver_comparison.py` script.
+- The script runs production fixed-boundary solves on two physical cases:
+  - perturbed circular cylinder;
+  - perturbed analytic two-coil mirror boundary.
+- For each physical case it compares:
+  - projected gradient descent;
+  - geometry-scaled L-BFGS-B;
+  - axisymmetric residual Newton.
+- The same report includes the sourced manufactured fixed-boundary convergence
+  gate using `solve_axisym_mms_fixed_boundary`.
+  - This is intentionally marked as `manufactured_source_validation` because
+    production gradient descent and L-BFGS-B do not yet include MMS source
+    terms.
+- The script writes:
+  - `solver_comparison_metrics.json` with per-case/per-solver metrics and full
+    residual histories;
+  - residual-history and final-residual comparison plots;
+  - physical benchmark boundary plots with horizontal `z`;
+  - standard mirror `mout` and plot bundles for the residual-Newton physical
+    cases, including 3-D boundary, field-line overlays, `|B|`, cross sections,
+    and residual history.
+- Added a smoke regression that runs all three benchmark cases without plots at
+  reduced resolution.
+- Documented the new root example in `examples/mirror/README.md`.
+
+### Interpretation
+
+- The comparison report now makes the solver tradeoff visible in one place:
+  gradient descent is a low-order baseline, scaled L-BFGS-B improves the scalar
+  energy objective, and residual Newton is the first path that reaches tight
+  projected residuals on the cylinder.
+- The two-coil physical case remains the hard production benchmark: residual
+  Newton reduces the residual substantially, but the next solver lane still
+  needs a stronger radial/lambda preconditioner and cap-policy studies before
+  claiming tight convergence on realistic mirror boundaries.
+- The sourced MMS row is a validation gate, not a production optimizer
+  comparison row. Source-aware gradient/L-BFGS wrappers can be added later if
+  they become useful for diagnosing the manufactured problem.
+
+### Default benchmark result
+
+For `examples/mirror_solver_comparison.py --outdir results/mirror/solver_comparison`:
+
+- Cylinder:
+  - gradient descent: residual `1.523118e-02 -> 9.100286e-03`;
+  - scaled L-BFGS-B: residual `1.523118e-02 -> 4.342639e-07`;
+  - residual Newton: residual `1.523118e-02 -> 5.559206e-17`, reaching
+    projected `gtol`.
+- Two-coil:
+  - gradient descent: residual `6.786493e-02 -> 1.719975e-02`;
+  - scaled L-BFGS-B: residual `6.786493e-02 -> 1.006745e-04`;
+  - residual Newton: residual `6.786493e-02 -> 2.433266e-05`, not yet
+    reaching projected `gtol`.
+- Manufactured sourced gate:
+  - residual Newton: residual `9.638225e-03 -> 3.109011e-15`, reaching
+    projected `gtol`.
+
+### Next gates
+
+- Use the comparison example as the baseline artifact when adding radial/lambda
+  preconditioning to residual Newton.
+- Extend the comparison to a grid over `ns`, `nxi`, `maxiter`, and
+  `residual_linear_maxiter` after the preconditioner is in place.
+- Add source-aware manufactured gradient/L-BFGS wrappers only if the
+  manufactured comparison needs optimizer-level parity beyond the current
+  residual-Newton convergence gate.
