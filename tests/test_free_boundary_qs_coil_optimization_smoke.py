@@ -216,6 +216,58 @@ def test_same_branch_direction_selects_current_and_fourier_variables():
     assert float(np.asarray(tangent.base_curve_dofs)[0, 1, 1]) == pytest.approx(0.0)
 
 
+def test_same_branch_report_direction_policy_prefers_current_only_for_proposals():
+    module = _load_example_module()
+    variables = [
+        ("current", (0,)),
+        ("fourier_dof", (0, 0, 2)),
+    ]
+
+    requested, effective, reason = module.same_branch_report_direction_policy(
+        SimpleNamespace(same_branch_report_direction="auto", same_branch_derivative_proposal=False),
+        variables,
+    )
+    assert requested == "auto"
+    assert effective == "all"
+    assert "ordinary" in reason
+    np.testing.assert_array_equal(
+        module.same_branch_direction_from_variables(variables, policy=effective),
+        np.asarray([1.0, 1.0]),
+    )
+
+    requested, effective, reason = module.same_branch_report_direction_policy(
+        SimpleNamespace(same_branch_report_direction="auto", same_branch_derivative_proposal=True),
+        variables,
+    )
+    assert requested == "auto"
+    assert effective == "current-only"
+    assert "derivative-proposal" in reason
+    np.testing.assert_array_equal(
+        module.same_branch_direction_from_variables(variables, policy=effective),
+        np.asarray([1.0, 0.0]),
+    )
+
+    requested, effective, _reason = module.same_branch_report_direction_policy(
+        SimpleNamespace(same_branch_report_direction="all", same_branch_derivative_proposal=True),
+        variables,
+    )
+    assert requested == "all"
+    assert effective == "all"
+
+    requested, effective, _reason = module.same_branch_report_direction_policy(
+        SimpleNamespace(same_branch_report_direction="current-only", same_branch_derivative_proposal=False),
+        variables,
+    )
+    assert requested == "current-only"
+    assert effective == "current-only"
+
+    with pytest.raises(ValueError, match="requires at least one selected current"):
+        module.same_branch_report_direction_policy(
+            SimpleNamespace(same_branch_report_direction="current-only", same_branch_derivative_proposal=False),
+            [("fourier_dof", (0, 0, 2))],
+        )
+
+
 def test_same_branch_vector_key_parser_accepts_bnormal_alias():
     module = _load_example_module()
 
@@ -1112,6 +1164,11 @@ def test_same_branch_report_writer_uses_source_helper(tmp_path, monkeypatch):
     assert calls[0]["minus_current"] < float(np.asarray(base_params.base_currents)[0])
     report = json.loads(path.read_text())
     assert report["branch_compatibility"]["same_branch"] is True
+    assert report["direction_policy"] == {
+        "requested": "auto",
+        "effective": "all",
+        "reason": "auto selected mixed direction for ordinary same-branch validation",
+    }
     assert report["values"]["central_fd_directional"] == pytest.approx(1000.0)
     assert set(report["objective_values"]) == {"objective", "qs_total", "aspect"}
     assert report["primary_objective"] == "objective"
@@ -2176,6 +2233,11 @@ def test_circle_dry_run_writes_configuration_without_solves(tmp_path, monkeypatc
     assert summary["same_branch_report_config"]["enabled"] is False
     assert summary["same_branch_report_config"]["mode"] == "vector"
     assert summary["same_branch_report_config"]["ad_mode"] == "direct"
+    assert summary["same_branch_report_config"]["direction_policy"] == {
+        "requested": "auto",
+        "effective": "all",
+        "reason": "auto selected mixed direction for ordinary same-branch validation",
+    }
     assert summary["same_branch_report_config"]["vector_keys"] == [
         "aspect",
         "qs_total",
