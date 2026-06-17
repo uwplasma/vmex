@@ -17,6 +17,13 @@ def _residual_preconditioner_key(value: str) -> str:
         return "radial_tridi"
     if key in {"radial_xi_tridi", "open_xi_tridi", "radial_tridi_xi"}:
         return "radial_xi_tridi"
+    if key in {
+        "radial_xi_lambda_xi_tridi",
+        "lambda_xi_tridi",
+        "full_xi_tridi",
+        "radial_tridi_xi_lambda",
+    }:
+        return "radial_xi_lambda_xi_tridi"
     raise ValueError(f"unsupported mirror residual preconditioner {value!r}")
 
 
@@ -88,7 +95,9 @@ def axisym_reduced_residual_preconditioner(
     The mirror reduced vector contains interior radius ``a`` nodes followed by
     gauge-fixed ``lambda`` nodes.  The tridiagonal smoothers approximate the
     regular VMEC idea of radial preconditioning while respecting open mirror
-    end caps.
+    end caps.  The ``radial_xi_lambda_xi_tridi`` mode also smooths lambda
+    updates along ``xi``; this is useful for finite-current diagnostics where
+    the residual is lambda dominated.
     """
     key = _residual_preconditioner_key(kind)
     vector = np.asarray(vector, dtype=float).reshape(-1)
@@ -109,11 +118,13 @@ def axisym_reduced_residual_preconditioner(
         a_values = a_values.reshape(grid.ns - 2, grid.nxi - 2)
         if radial_alpha > 0.0:
             a_values = _tridiagonal_smooth_zero_dirichlet(a_values, alpha=radial_alpha, axis=0)
-        if key == "radial_xi_tridi" and xi_alpha > 0.0:
+        if key in {"radial_xi_tridi", "radial_xi_lambda_xi_tridi"} and xi_alpha > 0.0:
             a_values = _tridiagonal_smooth_zero_dirichlet(a_values, alpha=xi_alpha, axis=1)
         a_values = a_values.ravel()
     if lambda_alpha > 0.0:
         lam_values = _tridiagonal_smooth_zero_dirichlet(lam_values, alpha=lambda_alpha, axis=0)
+    if key == "radial_xi_lambda_xi_tridi" and xi_alpha > 0.0:
+        lam_values = _tridiagonal_smooth_zero_dirichlet(lam_values, alpha=xi_alpha, axis=1)
     return np.concatenate([a_values, lam_values.ravel()])
 
 

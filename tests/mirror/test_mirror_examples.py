@@ -287,7 +287,9 @@ def test_root_residual_newton_convergence_grid_finite_current_reports_lambda_res
             "--i-prime",
             "0.01",
             "--preconditioners",
-            "radial_xi_tridi",
+            "radial_xi_lambda_xi_tridi",
+            "--residual-xi-alpha",
+            "1.0",
             "--no-plots",
         ],
         check=True,
@@ -302,6 +304,8 @@ def test_root_residual_newton_convergence_grid_finite_current_reports_lambda_res
     row = metrics["rows"][0]
     assert row["finite_current"]
     assert row["i_prime_value"] == pytest.approx(0.01)
+    assert row["residual_preconditioner"] == "radial_xi_lambda_xi_tridi"
+    assert row["residual_xi_alpha"] == pytest.approx(1.0)
     assert row["twist_proxy_i_prime_over_psi_prime"] > 0.0
     assert row["residual_lam_norm"] > 0.0
     assert row["residual_lam_fraction"] > 0.0

@@ -207,11 +207,22 @@ def test_reduced_residual_preconditioner_preserves_axisym_layout_and_damps_high_
         lambda_alpha=0.5,
         xi_alpha=0.5,
     )
+    lambda_xi_smoothed = axisym_reduced_residual_preconditioner(
+        alternating,
+        grid,
+        kind="radial_xi_lambda_xi_tridi",
+        radial_alpha=0.5,
+        lambda_alpha=0.5,
+        xi_alpha=0.5,
+    )
+    num_a = int(np.count_nonzero(axisym_reduced_a_mask(grid)))
 
     assert identity.shape == alternating.shape
     assert smoothed.shape == alternating.shape
+    assert lambda_xi_smoothed.shape == alternating.shape
     assert np.allclose(identity, alternating)
     assert np.linalg.norm(smoothed) < np.linalg.norm(alternating)
+    assert np.linalg.norm(lambda_xi_smoothed[num_a:]) < np.linalg.norm(smoothed[num_a:])
     with pytest.raises(ValueError, match="expected"):
         axisym_reduced_residual_preconditioner(alternating[:-1], grid)
     with pytest.raises(ValueError, match="nonnegative"):

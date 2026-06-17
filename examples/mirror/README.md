@@ -65,6 +65,12 @@ with radial/lambda smoothing, an open-``xi`` radius smoother adapted to the
 mirror cap constraints, and an adaptive inner ``lsmr`` iteration policy; pass
 ``--residual-preconditioner none`` for baseline unpreconditioned studies or
 ``--residual-linear-maxiter-policy fixed`` for controlled fixed-budget studies.
+Finite-current diagnostics can also pass
+``--residual-preconditioner radial_xi_lambda_xi_tridi`` to smooth lambda
+updates along the open axial coordinate when the residual decomposition is
+lambda dominated. In current-carrying two-coil probes, pair that mode with
+``--residual-xi-alpha 1.0`` before increasing resolution or outer iteration
+budgets.
 
 The root-level ``examples/mirror_manufactured_fixed_boundary.py`` script solves
 a sourced manufactured fixed-boundary problem with a known stationary state. It

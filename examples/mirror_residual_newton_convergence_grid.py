@@ -80,7 +80,7 @@ def _parse_int_array(value: str, *, name: str, minimum: int) -> tuple[int, ...]:
 
 
 def _parse_preconditioners(value: str) -> tuple[str, ...]:
-    allowed = {"none", "radial_tridi", "radial_xi_tridi"}
+    allowed = {"none", "radial_tridi", "radial_xi_tridi", "radial_xi_lambda_xi_tridi"}
     values = tuple(item.strip().lower().replace("-", "_") for item in str(value).split(",") if item.strip())
     if not values:
         raise ValueError("preconditioners must contain at least one value")

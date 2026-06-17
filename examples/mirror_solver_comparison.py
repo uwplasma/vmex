@@ -56,7 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--residual-preconditioner",
         type=str,
         default="radial_xi_tridi",
-        choices=("none", "radial_tridi", "radial_xi_tridi"),
+        choices=("none", "radial_tridi", "radial_xi_tridi", "radial_xi_lambda_xi_tridi"),
     )
     parser.add_argument("--residual-radial-alpha", type=float, default=0.5)
     parser.add_argument("--residual-lambda-alpha", type=float, default=0.5)

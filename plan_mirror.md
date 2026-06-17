@@ -3775,152 +3775,6 @@ No user input is needed for the next lane.
 
 ---
 
-## 46. 2026-06-17 M8n fixed-boundary optimizer file simplification
-
-This lane implements the no-behavior-change solver-file simplification planned
-in section 43.  The goal is to make the fixed-boundary solver easier to audit
-and extend before adding stronger finite-current preconditioners.
-
-### Steps taken
-
-- Split `vmec_jax/mirror/solvers/fixed_boundary/optimizers.py` into focused
-  support modules:
-  - `types.py`: `OptimizerOptions`, `OptimizerStep`, `OptimizerRun`, and
-    `_CandidateDiagnostics`;
-  - `reduced.py`: reduced-coordinate masks, packing/unpacking, bounds,
-    coordinate scaling, and reduced energy/gradient helpers;
-  - `preconditioners.py`: residual-preconditioner key parsing, tridiagonal
-    smoothers, and adaptive residual-linear-budget policy;
-  - `optimizers.py`: high-level projected-gradient, L-BFGS-B,
-    residual-Newton, candidate acceptance, and run-summary dispatch.
-- Preserved compatibility by re-exporting the existing optimizer helper names
-  from `optimizers.py`, including private names currently used by tests.
-- Updated `api.py` so `MirrorSolveOptions` imports `OptimizerOptions` directly
-  from `types.py` instead of from the larger optimizer dispatch module.
-- Updated `docs/code_structure.rst` and the early package-structure block in
-  this plan to show the new fixed-boundary solver files.
-- Regenerated a lightweight solver-comparison artifact at:
-  `results/mirror/solver_comparison_refactor_m8n/`.
-
-### Results obtained
-
-- `optimizers.py` shrank from `1337` lines to `841` lines.
-- New support modules:
-  - `reduced.py`: `324` lines;
-  - `preconditioners.py`: `143` lines;
-  - `types.py`: `81` lines.
-- The refactor keeps solver behavior unchanged in the checked cases:
-  - cylinder residual Newton:
-    `1.523117825e-02 -> 5.610231716e-17`;
-  - manufactured residual Newton:
-    `9.638224761e-03 -> 3.109010554e-15`;
-  - cylinder L-BFGS-B:
-    `1.523117825e-02 -> 4.342638898e-07`;
-  - short cylinder gradient descent:
-    `1.523117825e-02 -> 1.248964815e-02`.
-- The regenerated residual-history and 3D cylinder plots render correctly, with
-  horizontal `z` geometry and visible standard mirror plot content.
-- Mirror source coverage remains at `95%` after adding the new modules.
-
-### How it was tested
-
-Commands run:
-
-```bash
-ruff format vmec_jax/mirror/solvers/fixed_boundary/optimizers.py \
-  vmec_jax/mirror/solvers/fixed_boundary/reduced.py \
-  vmec_jax/mirror/solvers/fixed_boundary/preconditioners.py \
-  vmec_jax/mirror/solvers/fixed_boundary/types.py
-ruff check vmec_jax/mirror/solvers/fixed_boundary/optimizers.py \
-  vmec_jax/mirror/solvers/fixed_boundary/reduced.py \
-  vmec_jax/mirror/solvers/fixed_boundary/preconditioners.py \
-  vmec_jax/mirror/solvers/fixed_boundary/types.py \
-  vmec_jax/mirror/solvers/fixed_boundary/api.py
-ruff format --check vmec_jax/mirror/solvers/fixed_boundary/optimizers.py \
-  vmec_jax/mirror/solvers/fixed_boundary/reduced.py \
-  vmec_jax/mirror/solvers/fixed_boundary/preconditioners.py \
-  vmec_jax/mirror/solvers/fixed_boundary/types.py \
-  vmec_jax/mirror/solvers/fixed_boundary/api.py
-JAX_ENABLE_X64=1 python -m pytest -q \
-  tests/mirror/test_mirror_low_level_coverage.py \
-  tests/mirror/test_mirror_fixed_boundary_axisym.py
-JAX_ENABLE_X64=1 python -m pytest -q \
-  tests/mirror/test_mirror_fixed_boundary_3d.py \
-  tests/mirror/test_mirror_examples.py::test_root_residual_newton_convergence_grid_finite_current_reports_lambda_residual
-JAX_ENABLE_X64=1 python examples/mirror_solver_comparison.py \
-  --outdir results/mirror/solver_comparison_refactor_m8n \
-  --cases cylinder,manufactured \
-  --maxiter-gd 4 \
-  --maxiter-lbfgs 20 \
-  --maxiter-newton 8 \
-  --residual-linear-maxiter 16 \
-  --residual-linear-maxiter-policy adaptive
-LC_ALL=C.UTF-8 LANG=C.UTF-8 SPHINX_FAST=1 python -m sphinx -W -j auto -b html docs docs/_build/html
-JAX_ENABLE_X64=1 python -m pytest -q tests/mirror tests/test_packaging_metadata.py
-ruff check .
-JAX_ENABLE_X64=1 coverage erase
-JAX_ENABLE_X64=1 coverage run --source=vmec_jax -m pytest -q tests/mirror tests/test_packaging_metadata.py
-coverage report --skip-covered --include='vmec_jax/mirror/*'
-coverage report --skip-covered --include='vmec_jax/mirror/solvers/fixed_boundary/*'
-```
-
-Passing results:
-
-- low-level plus axisymmetric fixed-boundary slice: `16 passed`;
-- 3D fixed-boundary plus finite-current example smoke: `5 passed`;
-- full mirror/package smoke: `89 passed, 1 skipped`;
-- instrumented mirror/package coverage run: `89 passed, 1 skipped`;
-- mirror source coverage: `95%`;
-- fixed-boundary solver-module coverage: `91%`;
-- fast docs build: passed with warnings as errors;
-- `ruff check .`: passed;
-- focused format checks: passed.
-
-### File structure and best-practice notes
-
-- This is intentionally a behavior-neutral split.  The high-level optimizer
-  functions still live in `optimizers.py` and call the same reduced-coordinate,
-  preconditioner, and residual-Newton logic as before.
-- New modules follow the existing fixed-boundary solver package instead of
-  creating root-level mirror helper files.
-- The reduced-coordinate module explains the packed vector in plain terms:
-  interior radius nodes plus gauge-fixed lambda nodes.
-- The preconditioner module is now isolated, which is the right place to add
-  cap-aware and finite-current lambda preconditioning next.
-- Compatibility re-exports keep existing tests and downstream imports working
-  while allowing future code to import directly from the focused modules.
-
-### Best next steps
-
-1. Commit and push the M8n simplification to the draft PR.
-2. Confirm GitHub CI and combined coverage stay green.
-3. Start M8o: use the simplified preconditioner module to improve
-   finite-current residual-Newton convergence, focusing on the lambda-dominated
-   residual from M8m.
-4. Add a tight, low-resolution finite-current convergence gate only after the
-   solver actually reaches tolerance without excessive inner iterations.
-
-### Completion percentages after M8n
-
-- Geometry/grids/bases: `90%`.
-- Field/energy/residual kernels: `82%`.
-- Fixed-boundary axisymmetric solve: `78%`.
-- Residual Newton / preconditioning: `70%`.
-- Two-coil and manufactured validation: `73%`.
-- Finite-current pitch validation: `52%`.
-- Plotting and `vmec --plot` mirror support: `77%`.
-- I/O schema and docs: `71%`.
-- Differentiable solved-state API: `20%`.
-- Mirror-Boozer-like diagnostics: `15%`.
-- Free-boundary mirror lane: `5%`.
-- PR merge readiness overall: `64%`.
-
-### User input needed
-
-No user input is needed for the next lane.
-
----
-
 ## 45. 2026-06-17 M8m finite-current residual decomposition gate
 
 This lane moves the residual-Newton convergence example from the vacuum
@@ -4080,3 +3934,349 @@ symmetry.
 ### User input needed
 
 No user input is needed for the next lane.
+
+---
+
+## 46. 2026-06-17 M8n fixed-boundary optimizer file simplification
+
+This lane implements the no-behavior-change solver-file simplification planned
+in section 43.  The goal is to make the fixed-boundary solver easier to audit
+and extend before adding stronger finite-current preconditioners.
+
+### Steps taken
+
+- Split `vmec_jax/mirror/solvers/fixed_boundary/optimizers.py` into focused
+  support modules:
+  - `types.py`: `OptimizerOptions`, `OptimizerStep`, `OptimizerRun`, and
+    `_CandidateDiagnostics`;
+  - `reduced.py`: reduced-coordinate masks, packing/unpacking, bounds,
+    coordinate scaling, and reduced energy/gradient helpers;
+  - `preconditioners.py`: residual-preconditioner key parsing, tridiagonal
+    smoothers, and adaptive residual-linear-budget policy;
+  - `optimizers.py`: high-level projected-gradient, L-BFGS-B,
+    residual-Newton, candidate acceptance, and run-summary dispatch.
+- Preserved compatibility by re-exporting the existing optimizer helper names
+  from `optimizers.py`, including private names currently used by tests.
+- Updated `api.py` so `MirrorSolveOptions` imports `OptimizerOptions` directly
+  from `types.py` instead of from the larger optimizer dispatch module.
+- Updated `docs/code_structure.rst` and the early package-structure block in
+  this plan to show the new fixed-boundary solver files.
+- Regenerated a lightweight solver-comparison artifact at:
+  `results/mirror/solver_comparison_refactor_m8n/`.
+
+### Results obtained
+
+- `optimizers.py` shrank from `1337` lines to `841` lines.
+- New support modules:
+  - `reduced.py`: `324` lines;
+  - `preconditioners.py`: `143` lines;
+  - `types.py`: `81` lines.
+- The refactor keeps solver behavior unchanged in the checked cases:
+  - cylinder residual Newton:
+    `1.523117825e-02 -> 5.610231716e-17`;
+  - manufactured residual Newton:
+    `9.638224761e-03 -> 3.109010554e-15`;
+  - cylinder L-BFGS-B:
+    `1.523117825e-02 -> 4.342638898e-07`;
+  - short cylinder gradient descent:
+    `1.523117825e-02 -> 1.248964815e-02`.
+- The regenerated residual-history and 3D cylinder plots render correctly, with
+  horizontal `z` geometry and visible standard mirror plot content.
+- Mirror source coverage remains at `95%` after adding the new modules.
+
+### How it was tested
+
+Commands run:
+
+```bash
+ruff format vmec_jax/mirror/solvers/fixed_boundary/optimizers.py \
+  vmec_jax/mirror/solvers/fixed_boundary/reduced.py \
+  vmec_jax/mirror/solvers/fixed_boundary/preconditioners.py \
+  vmec_jax/mirror/solvers/fixed_boundary/types.py
+ruff check vmec_jax/mirror/solvers/fixed_boundary/optimizers.py \
+  vmec_jax/mirror/solvers/fixed_boundary/reduced.py \
+  vmec_jax/mirror/solvers/fixed_boundary/preconditioners.py \
+  vmec_jax/mirror/solvers/fixed_boundary/types.py \
+  vmec_jax/mirror/solvers/fixed_boundary/api.py
+ruff format --check vmec_jax/mirror/solvers/fixed_boundary/optimizers.py \
+  vmec_jax/mirror/solvers/fixed_boundary/reduced.py \
+  vmec_jax/mirror/solvers/fixed_boundary/preconditioners.py \
+  vmec_jax/mirror/solvers/fixed_boundary/types.py \
+  vmec_jax/mirror/solvers/fixed_boundary/api.py
+JAX_ENABLE_X64=1 python -m pytest -q \
+  tests/mirror/test_mirror_low_level_coverage.py \
+  tests/mirror/test_mirror_fixed_boundary_axisym.py
+JAX_ENABLE_X64=1 python -m pytest -q \
+  tests/mirror/test_mirror_fixed_boundary_3d.py \
+  tests/mirror/test_mirror_examples.py::test_root_residual_newton_convergence_grid_finite_current_reports_lambda_residual
+JAX_ENABLE_X64=1 python examples/mirror_solver_comparison.py \
+  --outdir results/mirror/solver_comparison_refactor_m8n \
+  --cases cylinder,manufactured \
+  --maxiter-gd 4 \
+  --maxiter-lbfgs 20 \
+  --maxiter-newton 8 \
+  --residual-linear-maxiter 16 \
+  --residual-linear-maxiter-policy adaptive
+LC_ALL=C.UTF-8 LANG=C.UTF-8 SPHINX_FAST=1 python -m sphinx -W -j auto -b html docs docs/_build/html
+JAX_ENABLE_X64=1 python -m pytest -q tests/mirror tests/test_packaging_metadata.py
+ruff check .
+JAX_ENABLE_X64=1 coverage erase
+JAX_ENABLE_X64=1 coverage run --source=vmec_jax -m pytest -q tests/mirror tests/test_packaging_metadata.py
+coverage report --skip-covered --include='vmec_jax/mirror/*'
+coverage report --skip-covered --include='vmec_jax/mirror/solvers/fixed_boundary/*'
+```
+
+Passing results:
+
+- low-level plus axisymmetric fixed-boundary slice: `16 passed`;
+- 3D fixed-boundary plus finite-current example smoke: `5 passed`;
+- full mirror/package smoke: `89 passed, 1 skipped`;
+- instrumented mirror/package coverage run: `89 passed, 1 skipped`;
+- mirror source coverage: `95%`;
+- fixed-boundary solver-module coverage: `91%`;
+- fast docs build: passed with warnings as errors;
+- `ruff check .`: passed;
+- focused format checks: passed.
+
+### File structure and best-practice notes
+
+- This is intentionally a behavior-neutral split.  The high-level optimizer
+  functions still live in `optimizers.py` and call the same reduced-coordinate,
+  preconditioner, and residual-Newton logic as before.
+- New modules follow the existing fixed-boundary solver package instead of
+  creating root-level mirror helper files.
+- The reduced-coordinate module explains the packed vector in plain terms:
+  interior radius nodes plus gauge-fixed lambda nodes.
+- The preconditioner module is now isolated, which is the right place to add
+  cap-aware and finite-current lambda preconditioning next.
+- Compatibility re-exports keep existing tests and downstream imports working
+  while allowing future code to import directly from the focused modules.
+
+### Best next steps
+
+1. Commit and push the M8n simplification to the draft PR.
+2. Confirm GitHub CI and combined coverage stay green.
+3. Start M8o: use the simplified preconditioner module to improve
+   finite-current residual-Newton convergence, focusing on the lambda-dominated
+   residual from M8m.
+4. Add a tight, low-resolution finite-current convergence gate only after the
+   solver actually reaches tolerance without excessive inner iterations.
+
+### Completion percentages after M8n
+
+- Geometry/grids/bases: `90%`.
+- Field/energy/residual kernels: `82%`.
+- Fixed-boundary axisymmetric solve: `78%`.
+- Residual Newton / preconditioning: `70%`.
+- Two-coil and manufactured validation: `73%`.
+- Finite-current pitch validation: `52%`.
+- Plotting and `vmec --plot` mirror support: `77%`.
+- I/O schema and docs: `71%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `15%`.
+- Free-boundary mirror lane: `5%`.
+- PR merge readiness overall: `64%`.
+
+### User input needed
+
+No user input is needed for the next lane.
+
+---
+
+## 47. 2026-06-17 M8o finite-current lambda-xi preconditioner gate
+
+This lane starts converting the finite-current residual-Newton diagnostic from
+scaffolded behavior into a research-grade solve path by targeting the dominant
+lambda residual identified in M8m. The default residual-Newton preconditioner is
+unchanged; the new behavior is opt-in for finite-current mirror probes.
+
+### Steps taken
+
+- Added an opt-in residual preconditioner mode,
+  `radial_xi_lambda_xi_tridi`, in
+  `vmec_jax/mirror/solvers/fixed_boundary/preconditioners.py`.
+- Kept the existing `radial_xi_tridi` behavior intact and extended the
+  smoother only when the new mode is requested:
+  - radius `a` is smoothed radially and along open `xi`;
+  - lambda is smoothed radially and, in the new mode, along open `xi`.
+- Exposed the new mode in the residual-Newton CLI choices for:
+  - `examples/mirror_residual_newton_convergence_grid.py`;
+  - `examples/mirror_fixed_boundary_solve_diagnostic.py`;
+  - `examples/mirror_solver_comparison.py`.
+- Updated the finite-current example test to run the new preconditioner with
+  `--residual-xi-alpha 1.0` and verify the JSON schema records both settings.
+- Updated `examples/mirror/README.md` with the recommended finite-current
+  diagnostic invocation.
+- Rendered the best finite-current plot bundle at:
+  `results/mirror/m8o_lambda_xi_best_plots/`.
+
+### Results obtained
+
+The M8m baseline finite-current diagnostic used
+`radial_xi_tridi`, `residual_xi_alpha=0.2`, `i_prime=0.01`, `ns=5`,
+`nxi=9`, `maxiter=12`, adaptive inner `lsmr`, and reached:
+
+- final residual norm: `1.323339292922e-03`;
+- final `fsq`: `2.870863744577e-08`;
+- final normalized force: `7.447138270591e-03`;
+- residual `a` norm: `3.449810941780e-04`;
+- residual lambda norm: `1.277581672087e-03`;
+- lambda residual fraction: `0.9654226085`.
+
+A short `residual_lambda_alpha` sweep confirmed that changing the existing
+radial lambda smoother alone did not solve the finite-current bottleneck. The
+best point in that sweep was still the existing default
+`residual_lambda_alpha=0.5`.
+
+The new lambda-xi smoother produced:
+
+- with `residual_xi_alpha=0.2`:
+  - final residual norm: `9.369679625918e-04`;
+  - final `fsq`: `1.439195021186e-08`;
+  - final normalized force: `5.273070166859e-03`;
+  - residual `a` norm: `2.347639373661e-04`;
+  - residual lambda norm: `9.070804025200e-04`.
+- with `residual_xi_alpha=1.0`:
+  - final residual norm: `1.037065207446e-04`;
+  - final `fsq`: `1.763121712288e-10`;
+  - final normalized force: `5.836719181237e-04`;
+  - residual `a` norm: `7.912766682054e-05`;
+  - residual lambda norm: `6.703621997469e-05`;
+  - lambda residual fraction: `0.6464031335`;
+  - residual reduction factor from the initial state: `1.101747958e-03`;
+  - mirror ratio: `19.61011454`.
+
+Interpretation:
+
+- The new finite-current mode improves the final projected residual by about
+  `12.8x` relative to the M8m baseline at the same outer and inner budgets.
+- The final `fsq` improves by about `163x`, and the normalized force improves
+  by about `12.8x`.
+- The residual is no longer overwhelmingly lambda dominated, which means the
+  preconditioner is addressing the bottleneck found in M8m.
+- The solve is still iteration-limited (`optimizer_success=False`,
+  `optimizer_message="maximum iterations reached"`), so this is a solver
+  progress gate, not the final finite-current convergence claim.
+
+Generated plot bundle:
+
+- `results/mirror/m8o_lambda_xi_best_plots/residual_newton_convergence_history.png`.
+- `results/mirror/m8o_lambda_xi_best_plots/residual_newton_convergence_components.png`.
+- `results/mirror/m8o_lambda_xi_best_plots/residual_newton_convergence_budget.png`.
+- `results/mirror/m8o_lambda_xi_best_plots/residual_newton_convergence_resolution_heatmap.png`.
+- `results/mirror/m8o_lambda_xi_best_plots/best_finite_current_lambda_xi_residual_newton/figures/best_finite_current_lambda_xi_residual_newton_mirror_boundary_3d.png`.
+- `results/mirror/m8o_lambda_xi_best_plots/best_finite_current_lambda_xi_residual_newton/figures/best_finite_current_lambda_xi_residual_newton_mirror_bfield_boundary.png`.
+- `results/mirror/m8o_lambda_xi_best_plots/best_finite_current_lambda_xi_residual_newton/figures/best_finite_current_lambda_xi_residual_newton_mirror_bmag_boundary.png`.
+- `results/mirror/m8o_lambda_xi_best_plots/best_finite_current_lambda_xi_residual_newton/figures/best_finite_current_lambda_xi_residual_newton_mirror_bmag_sxi.png`.
+- `results/mirror/m8o_lambda_xi_best_plots/best_finite_current_lambda_xi_residual_newton/figures/best_finite_current_lambda_xi_residual_newton_mirror_cross_sections.png`.
+
+The rendered figures were visually inspected. The mirror is horizontal with
+`z` as the horizontal axis, cross sections remain circular and poloidally
+symmetric, field-line traces are visible over the B-direction arrows, and
+`|B|` is weakest near the center and strongest near the end caps.
+
+### How it was tested
+
+Commands run:
+
+```bash
+JAX_ENABLE_X64=1 python examples/mirror_residual_newton_convergence_grid.py \
+  --outdir results/mirror/m8o_lambda_xi_best_plots \
+  --ns-array 5 \
+  --nxi-array 9 \
+  --maxiter-array 12 \
+  --residual-linear-maxiter-array 16 \
+  --residual-linear-maxiter-policy adaptive \
+  --residual-xi-alpha 1.0 \
+  --i-prime 0.01 \
+  --case-label finite_current_lambda_xi \
+  --preconditioners radial_xi_lambda_xi_tridi
+JAX_ENABLE_X64=1 python -m pytest -q \
+  tests/mirror/test_mirror_fixed_boundary_axisym.py::test_reduced_residual_preconditioner_preserves_axisym_layout_and_damps_high_frequency_vector \
+  tests/mirror/test_mirror_examples.py::test_root_residual_newton_convergence_grid_finite_current_reports_lambda_residual
+ruff check \
+  vmec_jax/mirror/solvers/fixed_boundary/preconditioners.py \
+  examples/mirror_residual_newton_convergence_grid.py \
+  examples/mirror_fixed_boundary_solve_diagnostic.py \
+  examples/mirror_solver_comparison.py \
+  tests/mirror/test_mirror_fixed_boundary_axisym.py \
+  tests/mirror/test_mirror_examples.py
+ruff format --check \
+  vmec_jax/mirror/solvers/fixed_boundary/preconditioners.py \
+  examples/mirror_residual_newton_convergence_grid.py \
+  examples/mirror_fixed_boundary_solve_diagnostic.py \
+  examples/mirror_solver_comparison.py \
+  tests/mirror/test_mirror_fixed_boundary_axisym.py \
+  tests/mirror/test_mirror_examples.py
+JAX_ENABLE_X64=1 python -m pytest -q tests/mirror tests/test_packaging_metadata.py
+LC_ALL=C.UTF-8 LANG=C.UTF-8 SPHINX_FAST=1 python -m sphinx -W -j auto -b html docs docs/_build/html
+ruff check .
+git diff --check
+JAX_ENABLE_X64=1 python -m coverage run --timid -m pytest -q tests/mirror tests/test_packaging_metadata.py
+python -m coverage report --include='vmec_jax/mirror/*' --show-missing
+```
+
+Passing results:
+
+- focused preconditioner plus finite-current example tests: `2 passed`;
+- full mirror/package smoke: `89 passed, 1 skipped`;
+- pure-Python-tracer mirror/package coverage run: `89 passed, 1 skipped`;
+- mirror source coverage: `95%`;
+- fast docs build: passed with warnings as errors;
+- `ruff check .`: passed;
+- `git diff --check`: passed;
+- edited Python-file lint: passed;
+- edited Python-file format check: passed.
+
+Note: `python -m pytest --cov=vmec_jax.mirror ...` aborted locally with exit
+code `134` before pytest emitted output. Running Coverage with `--timid`
+avoided that C-tracer path and completed successfully.
+
+### File structure and best-practice notes
+
+- The new mode lives beside the existing residual preconditioner helpers in
+  `preconditioners.py`, after the M8n file split. This keeps solver dispatch,
+  reduced-state packing, and preconditioner policy separated.
+- The default solver path is unchanged, which keeps existing two-coil and
+  manufactured benchmarks stable.
+- The CLI examples share the same allowed preconditioner vocabulary, so
+  diagnostic scripts do not drift.
+- The example test remains a low-cost schema and path check rather than a
+  high-resolution convergence benchmark.
+- The implementation uses the existing symmetric tridiagonal smoother instead
+  of adding a new linear algebra dependency or a second smoothing kernel.
+
+### Best next steps
+
+1. Commit and push the M8o preconditioner gate to the draft PR and confirm CI.
+2. Start M8p: run a higher-budget convergence study for
+   `radial_xi_lambda_xi_tridi` over outer iterations and inner adaptive
+   budgets to determine whether the current method reaches `1e-8` to `1e-10`
+   residuals or needs a stronger block preconditioner.
+3. If still iteration-limited, implement a block-structured residual
+   preconditioner or Schur-style lambda/radius coupling using the simplified
+   M8n file structure.
+4. Promote the best finite-current run into a documented benchmark only after
+   the residual, `fsq`, normalized force, and cross-section diagnostics all
+   converge under resolution refinement.
+
+### Completion percentages after M8o
+
+- Geometry/grids/bases: `90%`.
+- Field/energy/residual kernels: `82%`.
+- Fixed-boundary axisymmetric solve: `79%`.
+- Residual Newton / preconditioning: `74%`.
+- Two-coil and manufactured validation: `73%`.
+- Finite-current pitch validation: `58%`.
+- Plotting and `vmec --plot` mirror support: `78%`.
+- I/O schema and docs: `72%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `15%`.
+- Free-boundary mirror lane: `5%`.
+- PR merge readiness overall: `66%`.
+
+### User input needed
+
+No user input is needed for the next lane.
+
+---
