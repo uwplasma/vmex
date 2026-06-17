@@ -495,6 +495,64 @@ def _write_preconditioner_plot(
     return path
 
 
+def _write_dense_step_plot(
+    rows: list[dict[str, object]],
+    *,
+    outdir: Path,
+    ns: int,
+    nxi: int,
+    maxiter: int,
+    residual_linear_maxiter: int,
+) -> Path | None:
+    import matplotlib.pyplot as plt
+
+    filtered = _rows_for_filter(
+        rows,
+        ns=ns,
+        nxi=nxi,
+        maxiter=maxiter,
+        residual_linear_maxiter=residual_linear_maxiter,
+    )
+    filtered = [row for row in filtered if row.get("residual_dense_step_relative_error_last") is not None]
+    if len(filtered) < 1:
+        return None
+    filtered = sorted(filtered, key=lambda row: str(row["residual_preconditioner"]))
+    labels = [str(row["residual_preconditioner"]) for row in filtered]
+    relative_error = [float(row["residual_dense_step_relative_error_last"]) for row in filtered]
+    cosine = [float(row["residual_dense_step_cosine_last"]) for row in filtered]
+
+    x = np.arange(len(filtered), dtype=float)
+    fig, ax_error = plt.subplots(figsize=(6.6, 3.8))
+    ax_error.bar(x, relative_error, color="tab:blue", alpha=0.75, label="relative step error")
+    ax_error.set_ylabel("relative step error")
+    ax_error.set_xticks(x)
+    ax_error.set_xticklabels(labels, rotation=25, ha="right")
+    ax_error.set_ylim(bottom=0.0)
+    ax_error.grid(True, axis="y", linewidth=0.35, alpha=0.35)
+
+    ax_cosine = ax_error.twinx()
+    ax_cosine.plot(x, cosine, "o-", color="tab:red", label="step cosine")
+    ax_cosine.set_ylabel("step cosine")
+    ax_cosine.set_ylim(-1.05, 1.05)
+
+    handles_error, labels_error = ax_error.get_legend_handles_labels()
+    handles_cosine, labels_cosine = ax_cosine.get_legend_handles_labels()
+    fig.legend(
+        handles_error + handles_cosine,
+        labels_error + labels_cosine,
+        fontsize="small",
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.02),
+        ncols=2,
+    )
+    ax_error.set_title(f"dense-step comparison, ns={ns}, nxi={nxi}")
+    fig.tight_layout(rect=(0, 0, 1, 0.94))
+    path = outdir / "residual_newton_dense_step_comparison.png"
+    fig.savefig(path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
 def _write_history_plot(
     rows: list[dict[str, object]],
     histories: list[dict[str, object]],
@@ -637,6 +695,14 @@ def _write_plots(
         ),
         _write_budget_plot(rows, outdir=outdir, preconditioner=default_preconditioner, ns=max_ns, nxi=max_nxi),
         _write_preconditioner_plot(
+            rows,
+            outdir=outdir,
+            ns=max_ns,
+            nxi=max_nxi,
+            maxiter=max_outer,
+            residual_linear_maxiter=max_linear,
+        ),
+        _write_dense_step_plot(
             rows,
             outdir=outdir,
             ns=max_ns,

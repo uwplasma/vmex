@@ -5313,3 +5313,148 @@ Visual validation:
 
 No user input is needed.  The next lane should use the dense-step metric to
 select and validate a better scalable preconditioned correction.
+
+---
+
+## 53. 2026-06-17 M8t dense-step preconditioner scan plot
+
+This lane used the M8s dense-step metric to compare existing right
+preconditioners before adding a new correction algorithm.  It also adds a
+dedicated dense-step comparison plot to the convergence-grid example.
+
+### Steps taken
+
+- Ran a finite-current dense-step preconditioner scan at:
+  - `ns=5`;
+  - `nxi=9`;
+  - `i_prime=0.01`;
+  - LSMR;
+  - `maxiter=6`;
+  - inner budget `54`;
+  - dense-step comparison enabled.
+- Compared:
+  - `none`;
+  - `radial_xi_tridi`;
+  - `radial_xi_lambda_xi_tridi`.
+- Added `residual_newton_dense_step_comparison.png` to
+  `examples/mirror_residual_newton_convergence_grid.py`.
+- The new plot shows last-step relative error as bars and last-step cosine as
+  a line for every preconditioner row that contains dense-step metrics.
+- Regenerated and visually inspected the new plot.
+
+### Results obtained
+
+| preconditioner | final residual | final fsq | lambda fraction | dense-step cosine | dense-step relative error |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `none` | `6.999955525369e-03` | `8.032684812647e-07` | `0.971081` | `0.834141083210` | `0.935121950426` |
+| `radial_xi_tridi` | `8.155451089785e-03` | `1.090350532424e-06` | `0.488111` | `0.648107171466` | `0.910060777745` |
+| `radial_xi_lambda_xi_tridi` | `1.367152243798e-03` | `3.064106979871e-08` | `0.851342` | `0.901356881087` | `0.764570403248` |
+
+Interpretation:
+
+- `radial_xi_lambda_xi_tridi` remains best among existing matrix-free
+  right-preconditioners by final residual and dense-step direction metrics.
+- Radius-only open-`xi` smoothing helps the lambda fraction but worsens the
+  final residual and has the weakest dense-step alignment.
+- No preconditioner leaves the largest dense-step relative error.
+- The next scalable improvement should be a new correction/preconditioner
+  family, not simply choosing a different existing mode.
+
+Generated artifacts:
+
+- `results/mirror/m8t_dense_step_preconditioner_scan/residual_newton_convergence_grid_metrics.json`.
+- `results/mirror/m8t_dense_step_preconditioner_scan/residual_newton_dense_step_comparison.png`.
+- `results/mirror/m8t_dense_step_preconditioner_scan/residual_newton_convergence_preconditioners.png`.
+- `results/mirror/m8t_dense_step_preconditioner_scan/residual_newton_convergence_history.png`.
+- `results/mirror/m8t_dense_step_preconditioner_scan/residual_newton_convergence_components.png`.
+- `results/mirror/m8t_dense_step_preconditioner_scan/best_finite_current_dense_step_preconditioner_m8t_residual_newton/figures/`.
+
+### How it was tested
+
+Focused tests:
+
+```bash
+JAX_ENABLE_X64=1 pytest \
+  tests/mirror/test_mirror_examples.py::test_root_residual_newton_convergence_grid_runs_without_plots \
+  tests/mirror/test_mirror_fixed_boundary_axisym.py::test_residual_newton_records_dense_step_comparison_for_matrix_free_solver \
+  -q
+```
+
+Result: `2 passed in 11.01s`.
+
+Static checks:
+
+```bash
+python -m ruff format --check \
+  examples/mirror_residual_newton_convergence_grid.py \
+  tests/mirror/test_mirror_examples.py \
+  tests/mirror/test_mirror_fixed_boundary_axisym.py \
+  vmec_jax/mirror/solvers/fixed_boundary/optimizers.py
+python -m ruff check <same files>
+git diff --check
+```
+
+Result: passed.
+
+Benchmark/plot command:
+
+```bash
+JAX_ENABLE_X64=1 python examples/mirror_residual_newton_convergence_grid.py \
+  --outdir results/mirror/m8t_dense_step_preconditioner_scan \
+  --ns-array 5 \
+  --nxi-array 9 \
+  --maxiter-array 6 \
+  --residual-linear-maxiter-array 54 \
+  --residual-linear-maxiter-policy fixed \
+  --residual-linear-solver lsmr \
+  --residual-compare-dense-step \
+  --residual-xi-alpha 1.0 \
+  --i-prime 0.01 \
+  --case-label finite_current_dense_step_preconditioner_m8t \
+  --preconditioners none,radial_xi_tridi,radial_xi_lambda_xi_tridi
+```
+
+Visual validation:
+
+- The dense-step comparison plot renders with an uncluttered top legend.
+- The plot makes `radial_xi_lambda_xi_tridi` visibly best by relative step
+  error and cosine.
+
+### File structure and best-practice notes
+
+- No new script was added.
+- The new plot is housed with the other convergence-grid plots.
+- The plot is skipped automatically when rows do not contain dense-step
+  metrics, so existing no-plot and no-comparison runs remain unchanged.
+
+### Best next steps
+
+1. Commit and push M8t.
+2. Start M8u with a new correction family:
+   - block diagonal dense reference on reduced `a` and lambda blocks;
+   - compare block correction against full dense and LSMR using the dense-step
+     plot;
+   - only promote the mode if it improves relative step error and final
+     residual over `radial_xi_lambda_xi_tridi`.
+
+### Completion percentages after M8t
+
+- Geometry/grids/bases: `90%`.
+- Field/energy/residual kernels: `84%`.
+- Fixed-boundary axisymmetric solve: `85%`.
+- Residual Newton / preconditioning: `86%`.
+- Two-coil and manufactured validation: `80%`.
+- Finite-current pitch validation: `70%`.
+- Plotting and `vmec --plot` mirror support: `79%`.
+- I/O schema and docs: `78%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `15%`.
+- Free-boundary mirror lane: `5%`.
+- Stellarator-mirror hybrid lane: `10%`.
+- ESSOS circular-coil mirror beta scan: `0%`.
+- PR merge readiness overall: `73%`.
+
+### User input needed
+
+No user input is needed.  The existing preconditioners have been ranked; the
+next work should implement and benchmark a new block correction.
