@@ -1243,16 +1243,18 @@ Steps taken:
 3. Replaced duplicate direct-fallback-failure and ordinary trial-rejection
    restart code in `solve_fixed_boundary_residual_iter` with one shared
    catastrophic rollback/update path.
-4. Added unit tests for bad-progress restarts, nonfinite/bad-Jacobian restarts,
+4. Reused the existing velocity scaling helper for accepted backtracking
+   momentum scaling.
+5. Added unit tests for bad-progress restarts, nonfinite/bad-Jacobian restarts,
    VMEC reset milestone scaling, and RMS parity with the original inline
    formula.
 
 Results obtained:
 
 - `vmec_jax/solvers/fixed_boundary/residual/iteration.py` dropped from 8404
-  lines at the plan-review baseline to 8371 lines.
+  lines at the plan-review baseline to 8368 lines.
 - `solve_fixed_boundary_residual_iter` dropped from 7790 lines at the
-  plan-review baseline to 7755 lines.
+  plan-review baseline to 7752 lines.
 - The extracted helper gives the adaptive-controller/fingerprint work a named
   scalar restart seam instead of two open-coded branches.
 - PR #20 CI run `27687965132` for the previous plan-consolidation commit is

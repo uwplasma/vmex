@@ -7532,12 +7532,9 @@ def solve_fixed_boundary_residual_iter(
                     w_try_ratio = w_try / max(w_curr, 1e-30) if np.isfinite(w_try) else float("inf")
                     if np.isfinite(w_try) and (w_try <= accept_ratio * max(w_curr, 1e-30)):
                         # Keep momentum consistent with the smaller step.
-                        vRcc = alpha * vRcc
-                        vRss = alpha * vRss
-                        vZsc = alpha * vZsc
-                        vZcs = alpha * vZcs
-                        vLsc = alpha * vLsc
-                        vLcs = alpha * vLcs
+                        vRcc, vRss, vZsc, vZcs, vLsc, vLcs = _scale_velocity_blocks(
+                            alpha, vRcc, vRss, vZsc, vZcs, vLsc, vLcs
+                        )
                         update_rms *= alpha
                         dt_eff *= alpha
                         break
