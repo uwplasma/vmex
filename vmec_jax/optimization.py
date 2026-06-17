@@ -23,6 +23,18 @@ from .geom import eval_geom
 from .init_guess import initial_guess_from_boundary
 from .namelist import InData, write_indata
 from .modes import ModeTable
+from .optimizers.fixed_boundary.linear_guards import finite_linear_operator_output as _finite_linear_operator_output
+from .optimizers.fixed_boundary.linear_guards import linear_operator_matrix_arg as _linear_operator_matrix_arg
+from .optimizers.fixed_boundary.linear_guards import linear_operator_vector_arg as _linear_operator_vector_arg
+from .optimizers.fixed_boundary.history import ResidualHistoryPolicy
+from .optimizers.fixed_boundary.history import build_run_history_dump
+from .optimizers.fixed_boundary.history import history_entry_from_residuals
+from .optimizers.fixed_boundary.history import monotone_final_wall_time
+from .optimizers.fixed_boundary.history import qs_objective_from_residuals
+from .optimizers.fixed_boundary.scalar_lbfgs import run_lbfgs_adjoint_exact_optimizer
+from .optimizers.fixed_boundary.scalar_trust import run_scalar_trust_exact_optimizer
+from .optimizers.fixed_boundary.scipy_least_squares import run_scipy_dense_exact_optimizer
+from .optimizers.fixed_boundary.scipy_least_squares import run_scipy_matrix_free_exact_optimizer
 from .profiles import eval_profiles
 from .state import VMECState
 from .static import VMECStatic
@@ -57,78 +69,6 @@ _EXACT_TAPE_BUILD_TIMING_PROFILE_NAMES = (
     ("tape_dynamic_payload_build_s", "exact_tape_build_dynamic_payload"),
     ("tape_trace_stack_s", "exact_tape_build_trace_stack"),
 )
-
-_MATRIX_FREE_NONFINITE_RESIDUAL_PENALTY = 1.0e12
-
-
-def _linear_operator_vector_arg(value, *, size: int, name: str) -> np.ndarray:
-    arr = np.asarray(value, dtype=float).reshape(-1)
-    if int(arr.size) != int(size):
-        raise ValueError(f"{name} expected {int(size)} entries, got {int(arr.size)}.")
-    return arr
-
-
-def _linear_operator_matrix_arg(value, *, rows: int, name: str) -> np.ndarray:
-    arr = np.asarray(value, dtype=float)
-    rows = int(rows)
-    if arr.ndim != 2:
-        if rows <= 0:
-            if arr.size != 0:
-                raise ValueError(f"{name} expected 0 rows, got {int(arr.size)} entries.")
-            return arr.reshape((0, 0))
-        if int(arr.size) % rows != 0:
-            raise ValueError(f"{name} with {int(arr.size)} entries cannot be reshaped to {rows} rows.")
-        arr = arr.reshape((rows, -1))
-    if int(arr.shape[0]) != rows:
-        raise ValueError(f"{name} expected {rows} rows, got {int(arr.shape[0])}.")
-    return arr
-
-
-def _finite_linear_operator_output(
-    value,
-    *,
-    profile_add: Callable[[str, float], None] | None = None,
-    profile_name: str,
-) -> np.ndarray:
-    """Return finite linear-operator output, zeroing invalid tangent products.
-
-    Matrix-free trust-region methods may probe directions that pass through
-    singular VMEC/QI states.  The accepted state is still valid, so those
-    invalid tangent products should not abort the optimizer.  Zeroing invalid
-    products is conservative for the local linear model, and residual callbacks
-    separately assign bad trial states a large finite residual so the trust
-    region rejects them.
-    """
-
-    arr = np.asarray(value, dtype=float)
-    if np.all(np.isfinite(arr)):
-        return arr
-    if profile_add is not None:
-        profile_add(profile_name, 0.0)
-    return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
-
-
-def _finite_residual_vector(
-    value,
-    *,
-    profile_add: Callable[[str, float], None] | None = None,
-    profile_name: str,
-    expected_size: int | None = None,
-    penalty: float = _MATRIX_FREE_NONFINITE_RESIDUAL_PENALTY,
-) -> np.ndarray:
-    """Return a finite residual vector, replacing invalid entries by a penalty."""
-
-    arr = np.asarray(value, dtype=float).reshape(-1)
-    if expected_size is not None and int(arr.size) != int(expected_size):
-        if profile_add is not None:
-            profile_add(profile_name, 0.0)
-        return np.full(int(expected_size), float(penalty), dtype=float)
-    if np.all(np.isfinite(arr)):
-        return arr
-    if profile_add is not None:
-        profile_add(profile_name, 0.0)
-    return np.nan_to_num(arr, nan=float(penalty), posinf=float(penalty), neginf=-float(penalty))
-
 
 def _skip_exhausted_gauss_newton_jacobian() -> bool:
     flag = os.getenv("VMEC_JAX_OPT_SKIP_EXHAUSTED_GN_JACOBIAN", "").strip().lower()
@@ -4193,53 +4133,42 @@ class FixedBoundaryExactOptimizer:
 
     def _qs_from_res(self, res: np.ndarray) -> float:
         """Sum of squared QS residuals only (excludes aspect and iota)."""
-        n_qs = getattr(self, "_n_qs", None)
-        if n_qs is not None:
-            return float(np.dot(res[-n_qs:], res[-n_qs:]))
-        start = max(0, min(int(getattr(self, "_n_non_qs", 1)), int(res.shape[0])))
-        return float(np.dot(res[start:], res[start:]))
+        return qs_objective_from_residuals(res, self._residual_history_policy())
+
+    def _residual_history_policy(self) -> ResidualHistoryPolicy:
+        """Return the residual-block metadata used for history reconstruction."""
+
+        return ResidualHistoryPolicy(
+            aspect_target=getattr(self, "_aspect_target", None),
+            aspect_weight=float(getattr(self, "_aspect_weight", 1.0)),
+            n_non_qs=int(getattr(self, "_n_non_qs", 1)),
+            n_qs=getattr(self, "_n_qs", None),
+            has_residual_block_metadata=getattr(self, "_has_residual_block_metadata", None),
+            has_iota_callback=getattr(self, "_iota_fn", None) is not None,
+        )
 
     def _has_qs_residual_block_metadata(self) -> bool:
-        flag = getattr(self, "_has_residual_block_metadata", None)
-        if flag is not None:
-            return bool(flag)
-        return hasattr(self, "_n_non_qs") or getattr(self, "_n_qs", None) is not None
+        return self._residual_history_policy().has_qs_residual_block_metadata()
 
     def _can_build_qs_from_residuals(self) -> bool:
         """Return true when residual block metadata identifies QS/objective blocks."""
-        return self._has_qs_residual_block_metadata()
+        return self._residual_history_policy().can_build_qs_from_residuals()
 
     def _can_build_aspect_from_residuals(self) -> bool:
         """Return true when the first residual encodes weighted aspect error."""
-        if getattr(self, "_aspect_target", None) is None:
-            return False
-        aspect_weight = float(getattr(self, "_aspect_weight", 1.0))
-        if not np.isfinite(aspect_weight) or aspect_weight == 0.0:
-            return False
-        return True
+        return self._residual_history_policy().can_build_aspect_from_residuals()
 
     def _can_build_history_from_residuals(self) -> bool:
         """Return true when residual metadata is enough for history metrics."""
-        if getattr(self, "_iota_fn", None) is not None:
-            return False
-        if not self._can_build_aspect_from_residuals():
-            return False
-        if not self._can_build_qs_from_residuals():
-            return False
-        return True
+        return self._residual_history_policy().can_build_history_from_residuals()
 
     def _history_entry_from_residuals(self, res: np.ndarray, *, wall_time_s: float) -> dict:
         """Build a history row without re-solving the accepted scan state."""
-        res = np.asarray(res, dtype=float).reshape(-1)
-        aspect = float(self._aspect_target) + float(res[0]) / float(self._aspect_weight)
-        cost = float(0.5 * np.dot(res, res))
-        return {
-            "wall_time_s": float(wall_time_s),
-            "cost": cost,
-            "objective": 2.0 * cost,
-            "qs_objective": self._qs_from_res(res),
-            "aspect": aspect,
-        }
+        return history_entry_from_residuals(
+            res,
+            wall_time_s=wall_time_s,
+            policy=self._residual_history_policy(),
+        )
 
     def _qs_total_from_residual_or_state(
         self,
@@ -4448,60 +4377,46 @@ class FixedBoundaryExactOptimizer:
     ) -> dict:
         """Assemble the serializable optimization history payload."""
 
-        history_dump: dict = {
-            "label": "Optimisation",
-            "max_nfev": max_nfev,
-            "ftol": ftol,
-            "gtol": gtol,
-            "xtol": xtol,
-            "method": method_key,
-            "method_requested": method_requested,
-            "method_auto_reason": method_auto_reason,
-            "exact_path": self._scan_exact_path,
-            "scipy_tr_solver": (
-                scipy_tr_solver
-                if method_key == "scipy"
-                else "lsmr"
-                if method_key in ("scipy_matrix_free", "matrix_free", "scipy_mf")
-                else None
-            ),
-            "scipy_lsmr_maxiter": (None if scipy_lsmr_maxiter is None else int(scipy_lsmr_maxiter)),
-            "lbfgs_step_bound": (None if lbfgs_step_bound is None else float(lbfgs_step_bound)),
-            "scalar_step_bound": (None if scalar_step_bound is None else float(scalar_step_bound)),
-            "scalar_cost_only_trials": scalar_cost_only_trials_used,
-            "solver_device": self._solver_device_name or "default",
-            "inner_max_iter": int(self._inner_max_iter),
-            "inner_ftol": float(self._inner_ftol),
-            "trial_max_iter": int(self._trial_max_iter),
-            "trial_ftol": float(self._trial_ftol),
-            "total_wall_time_s": final_wall_time_s,
-            "nfev": result["nfev"],
-            "njev": result["njev"],
-            "success": result["success"],
-            "message": result["message"],
-            "objective_initial": 2.0 * cost0,
-            "objective_final": 2.0 * cost_final,
-            "qs_initial": qs_total0,
-            "qs_final": qs_total_final,
-            "aspect_initial": aspect0,
-            "aspect_final": aspect_final,
-            "history": self._history,
-            "profile": self._profile_dump(),
-            "selected_best_exact_point": bool(selected_best_exact),
-            "rejected_trial_exact_history_count": int(self._exact_history_rejected_count),
-        }
-        if optimizer_exception is not None:
-            history_dump["optimizer_exception"] = str(optimizer_exception)
-        if iota_fn is not None:
-            history_dump["iota_initial"] = float(entry0["iota"])
-            history_dump["iota_final"] = float(entry_final["iota"])
-        if target_iota is not None:
-            history_dump["target_iota"] = float(target_iota)
-        if target_aspect is not None:
-            history_dump["target_aspect"] = float(target_aspect)
-        if self._callback_trace_enabled:
-            history_dump["callback_trace"] = self._callback_trace_dump()
-        return history_dump
+        return build_run_history_dump(
+            label="Optimisation",
+            max_nfev=max_nfev,
+            ftol=ftol,
+            gtol=gtol,
+            xtol=xtol,
+            method_key=method_key,
+            method_requested=method_requested,
+            method_auto_reason=method_auto_reason,
+            exact_path=self._scan_exact_path,
+            scipy_tr_solver=scipy_tr_solver,
+            scipy_lsmr_maxiter=scipy_lsmr_maxiter,
+            lbfgs_step_bound=lbfgs_step_bound,
+            scalar_step_bound=scalar_step_bound,
+            scalar_cost_only_trials_used=scalar_cost_only_trials_used,
+            solver_device=self._solver_device_name or "default",
+            inner_max_iter=int(self._inner_max_iter),
+            inner_ftol=float(self._inner_ftol),
+            trial_max_iter=int(self._trial_max_iter),
+            trial_ftol=float(self._trial_ftol),
+            final_wall_time_s=final_wall_time_s,
+            result=result,
+            cost0=cost0,
+            cost_final=cost_final,
+            qs_total0=qs_total0,
+            qs_total_final=qs_total_final,
+            aspect0=aspect0,
+            aspect_final=aspect_final,
+            history=self._history,
+            profile=self._profile_dump(),
+            selected_best_exact=selected_best_exact,
+            rejected_trial_exact_history_count=int(self._exact_history_rejected_count),
+            optimizer_exception=optimizer_exception,
+            iota_fn_present=iota_fn is not None,
+            entry0=entry0,
+            entry_final=entry_final,
+            target_iota=target_iota,
+            target_aspect=target_aspect,
+            callback_trace=(self._callback_trace_dump() if self._callback_trace_enabled else None),
+        )
 
     def _attach_run_private_payload(
         self,
@@ -4580,10 +4495,7 @@ class FixedBoundaryExactOptimizer:
     def _wall_time_for_final_history_entry(self) -> float:
         """Return monotone wall time for a final optimization-history entry."""
 
-        final_wall_time_s = time.perf_counter() - self._wall_t0
-        if self._history:
-            final_wall_time_s = max(final_wall_time_s, float(self._history[-1].get("wall_time_s", 0.0)))
-        return final_wall_time_s
+        return monotone_final_wall_time(now_s=time.perf_counter() - self._wall_t0, history=self._history)
 
     def _evaluate_and_record_final_exact_point(
         self,
@@ -4872,610 +4784,52 @@ class FixedBoundaryExactOptimizer:
                 verbose=verbose,
             )
         elif method_key in ("scalar_trust", "adjoint_trust", "gradient_trust"):
-            scale = np.ones_like(params0_arr) if x_scale is None else np.asarray(x_scale, dtype=float)
-            scale[scale == 0.0] = 1.0
-            base_params = self._base_params_vector()
-            y_current = (params0_arr + base_params) / scale
-            x_current = params0_arr.copy()
-            last_history_key = [self._exact_cache_key(params0_arr)]
-            max_scalar_evals = max(1, int(max_nfev))
-            initial_radius = (
-                1.0 if scalar_step_bound is None or float(scalar_step_bound) <= 0.0 else float(scalar_step_bound)
+            result, scalar_cost_only_trials_used = run_scalar_trust_exact_optimizer(
+                self,
+                params0_arr,
+                x_scale=x_scale,
+                max_nfev=max_nfev,
+                ftol=ftol,
+                gtol=gtol,
+                scalar_step_bound=scalar_step_bound,
+                scalar_cost_only_trials=scalar_cost_only_trials,
             )
-            radius = initial_radius
-            min_radius = max(1.0e-12, initial_radius * 1.0e-8)
-            eval_count = 0
-            accepted_steps = 0
-            best_eval: dict[str, object] = {
-                "cost": float("inf"),
-                "x": x_current.copy(),
-                "y": y_current.copy(),
-                "state": None,
-                "grad_x": np.zeros_like(params0_arr),
-                "grad_y": np.zeros_like(y_current),
-            }
-
-            def _record_history_from_cached_state(x, cost):
-                self._record_cached_exact_history_entry(x, last_history_key=last_history_key, cost=float(cost))
-
-            def _evaluate_y(y):
-                nonlocal eval_count
-                eval_count += 1
-                x = np.asarray(y, dtype=float) * scale - base_params
-                cost, grad_x = self.objective_and_gradient_fun(x)
-                grad_y = np.asarray(grad_x, dtype=float) * scale
-                if float(cost) < float(best_eval["cost"]):
-                    best_state = self._cached_exact_state(x)
-                    best_eval.update(
-                        {
-                            "cost": float(cost),
-                            "x": np.asarray(x, dtype=float).copy(),
-                            "y": np.asarray(y, dtype=float).copy(),
-                            "state": best_state,
-                            "grad_x": np.asarray(grad_x, dtype=float).copy(),
-                            "grad_y": grad_y.copy(),
-                        }
-                    )
-                return float(cost), np.asarray(x, dtype=float), grad_y
-
-            def _trial_cost_y(y):
-                x = np.asarray(y, dtype=float) * scale - base_params
-                t0 = time.perf_counter()
-                residual = np.asarray(self.forward_residual_fun(x), dtype=float).reshape(-1)
-                cost = 0.5 * float(np.dot(residual, residual))
-                self._profile_add("scalar_trust_cost_only_trial", time.perf_counter() - t0)
-                return cost, x
-
-            cost_current, x_current, grad_y = _evaluate_y(y_current)
-            grad_norm = float(np.linalg.norm(grad_y, ord=np.inf))
-            success_result = bool(grad_norm <= float(gtol))
-            status_result = 1 if success_result else 0
-            message_result = (
-                "`gtol` termination condition is satisfied."
-                if success_result
-                else "maximum number of scalar objective evaluations is exceeded"
-            )
-            lbfgs_pairs: list[tuple[np.ndarray, np.ndarray, float]] = []
-            max_lbfgs_pairs = 8
-            armijo_c1 = 1.0e-4
-            backtrack_factor = 0.1
-            if scalar_cost_only_trials is None:
-                cost_only_trial_flag = os.getenv("VMEC_JAX_OPT_SCALAR_COST_ONLY_TRIALS")
-                if cost_only_trial_flag is None:
-                    cost_only_trials = bool(getattr(self, "_scalar_trust_cost_only_trials", False))
-                else:
-                    cost_only_trials = cost_only_trial_flag.strip().lower() in ("1", "true", "yes", "on")
-            else:
-                cost_only_trials = bool(scalar_cost_only_trials)
-            scalar_cost_only_trials_used = bool(cost_only_trials)
-
-            def _scalar_trust_direction(grad):
-                grad = np.asarray(grad, dtype=float)
-                if not lbfgs_pairs:
-                    self._profile_add("scalar_trust_gradient_direction", 0.0)
-                    return -grad
-
-                q = grad.copy()
-                alphas: list[float] = []
-                for s_vec, y_vec, rho in reversed(lbfgs_pairs):
-                    alpha = float(rho * np.dot(s_vec, q))
-                    alphas.append(alpha)
-                    q = q - alpha * y_vec
-
-                s_last, y_last, _rho_last = lbfgs_pairs[-1]
-                yy_last = float(np.dot(y_last, y_last))
-                sy_last = float(np.dot(s_last, y_last))
-                h0 = sy_last / yy_last if yy_last > 0.0 and sy_last > 0.0 else 1.0
-                h0 = min(1.0e6, max(1.0e-12, h0))
-                r = h0 * q
-                for (s_vec, y_vec, rho), alpha in zip(lbfgs_pairs, reversed(alphas)):
-                    beta = float(rho * np.dot(y_vec, r))
-                    r = r + s_vec * (alpha - beta)
-
-                direction = -r
-                if (
-                    not np.all(np.isfinite(direction))
-                    or float(np.dot(direction, grad)) >= -1.0e-14 * max(1.0, float(np.linalg.norm(grad) ** 2))
-                ):
-                    self._profile_add("scalar_trust_gradient_direction", 0.0)
-                    return -grad
-                self._profile_add("scalar_trust_lbfgs_direction", 0.0)
-                return direction
-
-            while not success_result and eval_count < max_scalar_evals:
-                grad_norm_2 = float(np.linalg.norm(grad_y))
-                if not np.isfinite(grad_norm_2) or grad_norm_2 <= 0.0:
-                    message_result = "zero or non-finite scalar-adjoint gradient"
-                    break
-
-                direction_y = _scalar_trust_direction(grad_y)
-                direction_norm = float(np.linalg.norm(direction_y))
-                if not np.isfinite(direction_norm) or direction_norm <= 0.0:
-                    message_result = "zero or non-finite scalar-adjoint search direction"
-                    break
-                base_step_y = direction_y * min(1.0, radius / direction_norm)
-                directional_decrease = -float(np.dot(grad_y, base_step_y))
-                if directional_decrease <= 0.0 or not np.isfinite(directional_decrease):
-                    base_step_y = -grad_y * min(1.0, radius / grad_norm_2)
-                    directional_decrease = -float(np.dot(grad_y, base_step_y))
-                    lbfgs_pairs.clear()
-
-                accepted = False
-                shrink = 1.0
-                while eval_count < max_scalar_evals:
-                    step_y = shrink * base_step_y
-                    if float(np.linalg.norm(step_y)) < min_radius:
-                        break
-                    y_trial = y_current + step_y
-                    armijo_limit = cost_current - armijo_c1 * shrink * max(0.0, directional_decrease)
-                    if cost_only_trials:
-                        cost_trial_estimate, x_trial = _trial_cost_y(y_trial)
-                        passes_trial_filter = np.isfinite(cost_trial_estimate) and (
-                            cost_trial_estimate <= armijo_limit or cost_trial_estimate < cost_current
-                        )
-                        if not passes_trial_filter:
-                            self._profile_add("scalar_trust_rejected_step", 0.0)
-                            shrink *= backtrack_factor
-                            continue
-                        cost_trial, x_trial, grad_trial = _evaluate_y(y_trial)
-                        if not (
-                            np.isfinite(cost_trial)
-                            and (cost_trial <= armijo_limit or cost_trial < cost_current)
-                        ):
-                            self._profile_add("scalar_trust_exact_validation_rejected_step", 0.0)
-                            shrink *= backtrack_factor
-                            continue
-                    else:
-                        cost_trial, x_trial, grad_trial = _evaluate_y(y_trial)
-                    if np.isfinite(cost_trial) and (
-                        cost_trial <= armijo_limit or cost_trial < cost_current
-                    ):
-                        y_current = y_trial
-                        x_current = x_trial
-                        cost_previous = cost_current
-                        cost_current = cost_trial
-                        step_accepted = np.asarray(step_y, dtype=float)
-                        grad_delta = np.asarray(grad_trial, dtype=float) - np.asarray(grad_y, dtype=float)
-                        grad_y = grad_trial
-                        grad_norm = float(np.linalg.norm(grad_y, ord=np.inf))
-                        accepted_steps += 1
-                        accepted = True
-                        sy = float(np.dot(step_accepted, grad_delta))
-                        curvature_floor = 1.0e-12 * max(
-                            1.0,
-                            float(np.linalg.norm(step_accepted)) * float(np.linalg.norm(grad_delta)),
-                        )
-                        if sy > curvature_floor and np.all(np.isfinite(grad_delta)):
-                            lbfgs_pairs.append((step_accepted, grad_delta, 1.0 / sy))
-                            if len(lbfgs_pairs) > max_lbfgs_pairs:
-                                del lbfgs_pairs[0]
-                        _record_history_from_cached_state(x_current, cost_current)
-                        step_norm = float(np.linalg.norm(step_accepted))
-                        if shrink < 1.0:
-                            # Backtracking is a local globalization choice, not
-                            # evidence that future quasi-Newton directions need
-                            # a permanently tiny trust radius.  Re-expand to the
-                            # previous rejected scale so the next accepted-point
-                            # callback can still make useful progress.
-                            radius = min(
-                                initial_radius,
-                                max(2.0 * step_norm, step_norm / backtrack_factor),
-                            )
-                            self._profile_add("scalar_trust_backtracked_accept", 0.0)
-                        elif step_norm >= 0.8 * radius:
-                            radius = min(initial_radius, max(radius * 1.5, radius))
-                        else:
-                            radius = min(initial_radius, max(radius, 2.0 * step_norm))
-                        if abs(cost_previous - cost_current) <= float(ftol) * max(1.0, abs(cost_current)):
-                            success_result = True
-                            status_result = 2
-                            message_result = "`ftol` termination condition is satisfied."
-                        elif grad_norm <= float(gtol):
-                            success_result = True
-                            status_result = 1
-                            message_result = "`gtol` termination condition is satisfied."
-                        break
-                    self._profile_add("scalar_trust_rejected_step", 0.0)
-                    shrink *= backtrack_factor
-
-                if success_result:
-                    break
-                if not accepted:
-                    message_result = "scalar trust-region radius became too small"
-                    break
-
-            if not success_result and eval_count >= max_scalar_evals:
-                message_result = "maximum number of scalar objective evaluations is exceeded"
-
-            x_result = np.asarray(best_eval["x"], dtype=float)
-            best_state = best_eval.get("state")
-            if best_state is not None:
-                self._remember_exact_state(self._exact_cache_key(x_result), best_state)
-            cost_result = float(best_eval["cost"])
-            result = {
-                "x": x_result,
-                "cost": cost_result,
-                "objective": 2.0 * cost_result,
-                "nfev": int(eval_count),
-                "njev": int(eval_count),
-                "nit": int(accepted_steps),
-                "success": success_result,
-                "status": status_result,
-                "message": message_result,
-                "step_norm": float(np.linalg.norm(x_result - params0_arr)),
-                "x_prev": None,
-                "cost_prev": None,
-            }
         elif method_key in ("lbfgs", "lbfgs_adjoint"):
-            try:
-                from scipy.optimize import minimize as _scipy_minimize
-            except Exception as exc:  # pragma: no cover - optional dependency
-                raise ImportError("method='lbfgs_adjoint' requires scipy.optimize.minimize") from exc
-
-            scale = np.ones_like(params0_arr) if x_scale is None else np.asarray(x_scale, dtype=float)
-            scale[scale == 0.0] = 1.0
-            base_params = self._base_params_vector()
-            y0 = (params0_arr + base_params) / scale
-            last_history_key = [self._exact_cache_key(params0_arr)]
-            max_scalar_evals = max(1, int(max_nfev))
-            eval_count = [0]
-            best_eval: dict[str, object] = {
-                "cost": float("inf"),
-                "x": params0_arr.copy(),
-                "y": y0.copy(),
-                "grad_x": np.zeros_like(params0_arr),
-                "grad_y": np.zeros_like(y0),
-            }
-
-            class _LBFGSBudgetExceeded(RuntimeError):
-                pass
-
-            def _record_history_from_cached_state(x, cost):
-                self._record_cached_exact_history_entry(x, last_history_key=last_history_key, cost=float(cost))
-
-            def _objective_and_gradient_y(y):
-                if eval_count[0] >= max_scalar_evals:
-                    raise _LBFGSBudgetExceeded
-                eval_count[0] += 1
-                x = np.asarray(y, dtype=float) * scale - base_params
-                cost, grad_x = self.objective_and_gradient_fun(x)
-                grad_y = np.asarray(grad_x, dtype=float) * scale
-                if float(cost) < float(best_eval["cost"]):
-                    best_eval.update(
-                        {
-                            "cost": float(cost),
-                            "x": np.asarray(x, dtype=float).copy(),
-                            "y": np.asarray(y, dtype=float).copy(),
-                            "grad_x": np.asarray(grad_x, dtype=float).copy(),
-                            "grad_y": grad_y.copy(),
-                        }
-                    )
-                _record_history_from_cached_state(x, cost)
-                return float(cost), grad_y
-
-            try:
-                lbfgs_bounds = None
-                if lbfgs_step_bound is not None and float(lbfgs_step_bound) > 0.0:
-                    bound = float(lbfgs_step_bound)
-                    lbfgs_bounds = [
-                        (float(center) - bound, float(center) + bound) for center in np.asarray(y0, dtype=float)
-                    ]
-                minimize_result = _scipy_minimize(
-                    _objective_and_gradient_y,
-                    y0,
-                    jac=True,
-                    method="L-BFGS-B",
-                    bounds=lbfgs_bounds,
-                    options={
-                        "maxiter": int(max_nfev),
-                        "maxfun": int(max_nfev),
-                        "ftol": float(ftol),
-                        "gtol": float(gtol),
-                        "disp": bool(int(verbose) > 0),
-                    },
-                )
-                x_result = np.asarray(minimize_result.x, dtype=float) * scale - base_params
-                cost_result = float(minimize_result.fun)
-                success_result = bool(minimize_result.success)
-                status_result = int(minimize_result.status)
-                message_result = str(minimize_result.message)
-                nit_result = int(getattr(minimize_result, "nit", 0))
-            except _LBFGSBudgetExceeded:
-                x_result = np.asarray(best_eval["x"], dtype=float)
-                cost_result = float(best_eval["cost"])
-                success_result = False
-                status_result = 0
-                message_result = "maximum number of scalar objective evaluations is exceeded"
-                nit_result = 0
-            result = {
-                "x": x_result,
-                "cost": cost_result,
-                "objective": 2.0 * cost_result,
-                "nfev": int(eval_count[0]),
-                "njev": int(eval_count[0]),
-                "nit": nit_result,
-                "success": success_result,
-                "status": status_result,
-                "message": message_result,
-                "step_norm": 0.0,
-                "x_prev": None,
-                "cost_prev": None,
-            }
+            result = run_lbfgs_adjoint_exact_optimizer(
+                self,
+                params0_arr,
+                x_scale=x_scale,
+                max_nfev=max_nfev,
+                ftol=ftol,
+                gtol=gtol,
+                verbose=verbose,
+                lbfgs_step_bound=lbfgs_step_bound,
+            )
         elif method_key in ("scipy_matrix_free", "matrix_free", "scipy_mf"):
-            try:
-                from scipy.optimize import least_squares as _scipy_least_squares
-            except Exception as exc:  # pragma: no cover - optional dependency
-                raise ImportError("method='scipy_matrix_free' requires scipy.optimize.least_squares") from exc
-            if scipy_lsmr_maxiter is None:
-                scipy_lsmr_maxiter = 4
-
-            scale = np.ones_like(params0_arr) if x_scale is None else np.asarray(x_scale, dtype=float)
-            scale[scale == 0.0] = 1.0
-            base_params = self._base_params_vector()
-            y0 = (params0_arr + base_params) / scale
-            last_history_key = [self._exact_cache_key(params0_arr)]
-            matrix_free_residual_size = [None]
-
-            def _record_history_from_cached_state(x):
-                self._record_cached_exact_history_entry(x, last_history_key=last_history_key)
-
-            def _residuals_y(y):
-                x = np.asarray(y, dtype=float) * scale - base_params
-                cached_residual = self._cached_exact_residual(x)
-                if cached_residual is not None:
-                    raw_residual = cached_residual
-                else:
-                    cached_state = self._cached_exact_state(x)
-                    if cached_state is not None:
-                        raw_residual = self._evaluate_residuals_from_state(cached_state)
-                    else:
-                        raw_residual = self.forward_residual_fun(x)
-                residual = _finite_residual_vector(
-                    raw_residual,
-                    profile_add=self._profile_add,
-                    profile_name="matrix_free_nonfinite_residual",
-                    expected_size=matrix_free_residual_size[0],
-                )
-                if matrix_free_residual_size[0] is None:
-                    matrix_free_residual_size[0] = int(residual.size)
-                return residual
-
-            def _jacobian_y(y):
-                x = np.asarray(y, dtype=float) * scale - base_params
-                op_x = self.residual_linear_operator(x)
-                _record_history_from_cached_state(x)
-
-                def _matvec(v):
-                    v_arr = _linear_operator_vector_arg(v, size=int(scale.size), name="scaled matvec direction")
-                    return _finite_linear_operator_output(
-                        op_x.matvec(v_arr * scale),
-                        profile_add=self._profile_add,
-                        profile_name="matrix_free_nonfinite_matvec",
-                    )
-
-                def _matmat(v):
-                    v_arr = _linear_operator_matrix_arg(v, rows=int(scale.size), name="scaled matmat directions")
-                    return _finite_linear_operator_output(
-                        op_x.matmat(v_arr * scale[:, None]),
-                        profile_add=self._profile_add,
-                        profile_name="matrix_free_nonfinite_matmat",
-                    )
-
-                def _rmatvec(w):
-                    w_arr = _linear_operator_vector_arg(w, size=int(op_x.shape[0]), name="scaled rmatvec cotangent")
-                    return _finite_linear_operator_output(
-                        op_x.rmatvec(w_arr) * scale,
-                        profile_add=self._profile_add,
-                        profile_name="matrix_free_nonfinite_rmatvec",
-                    )
-
-                try:
-                    from scipy.sparse.linalg import LinearOperator
-                except Exception as exc:  # pragma: no cover - optional dependency
-                    raise ImportError("method='scipy_matrix_free' requires scipy") from exc
-
-                return LinearOperator(
-                    shape=op_x.shape,
-                    matvec=_matvec,
-                    matmat=_matmat,
-                    rmatvec=_rmatvec,
-                    dtype=np.dtype(float),
-                )
-
-            try:
-                scipy_result = _scipy_least_squares(
-                    _residuals_y,
-                    y0,
-                    jac=_jacobian_y,
-                    method="trf",
-                    tr_solver="lsmr",
-                    tr_options=({"maxiter": int(scipy_lsmr_maxiter)} if scipy_lsmr_maxiter is not None else None),
-                    max_nfev=max_nfev,
-                    ftol=ftol,
-                    gtol=gtol,
-                    xtol=xtol,
-                    verbose=2 if int(verbose) > 0 else 0,
-                )
-                x_result = np.asarray(scipy_result.x, dtype=float) * scale - base_params
-                result = {
-                    "x": x_result,
-                    "cost": float(scipy_result.cost),
-                    "objective": float(2.0 * scipy_result.cost),
-                    "nfev": int(scipy_result.nfev),
-                    "njev": 0 if scipy_result.njev is None else int(scipy_result.njev),
-                    "nit": 0,
-                    "success": bool(scipy_result.success),
-                    "status": int(scipy_result.status),
-                    "message": str(scipy_result.message),
-                    "step_norm": 0.0,
-                    "x_prev": None,
-                    "cost_prev": None,
-                }
-            except Exception as exc:
-                best_exact_params = getattr(self, "_best_exact_params", None)
-                best_exact_cost = float(getattr(self, "_best_exact_cost", math.inf))
-                if best_exact_params is None or not np.isfinite(best_exact_cost):
-                    raise
-                x_result = np.asarray(best_exact_params, dtype=float).copy()
-                result = {
-                    "x": x_result,
-                    "cost": best_exact_cost,
-                    "objective": 2.0 * best_exact_cost,
-                    "nfev": max(1, len(getattr(self, "_history", []))),
-                    "njev": max(0, len(getattr(self, "_history", [])) - 1),
-                    "nit": 0,
-                    "success": False,
-                    "status": -1,
-                    "message": f"scipy matrix-free least_squares failed; returning best exact accepted point: {exc}",
-                    "step_norm": float(np.linalg.norm(x_result - params0_arr)),
-                    "x_prev": None,
-                    "cost_prev": None,
-                    "_selected_best_exact_point": True,
-                    "_optimizer_exception": repr(exc),
-                }
+            result, scipy_lsmr_maxiter = run_scipy_matrix_free_exact_optimizer(
+                self,
+                params0_arr,
+                x_scale=x_scale,
+                max_nfev=max_nfev,
+                ftol=ftol,
+                gtol=gtol,
+                xtol=xtol,
+                verbose=verbose,
+                scipy_lsmr_maxiter=scipy_lsmr_maxiter,
+            )
         elif method_key == "scipy":
-            try:
-                from scipy.optimize import least_squares as _scipy_least_squares
-            except Exception as exc:  # pragma: no cover - optional dependency
-                raise ImportError("method='scipy' requires scipy.optimize.least_squares") from exc
-
-            scale = np.ones_like(params0_arr) if x_scale is None else np.asarray(x_scale, dtype=float)
-            scale[scale == 0.0] = 1.0
-            base_params = self._base_params_vector()
-            y0 = (params0_arr + base_params) / scale
-
-            def _forward_residual_exact(x):
-                # For SciPy trial-point residual callbacks, use the trial solver
-                # configuration even when the user requests deck-controlled
-                # budgets via TRIAL_MAX_ITER=0 / TRIAL_FTOL=0. This keeps the
-                # solve on the lighter forward path without building an exact
-                # adjoint tape for every trust-region trial point, which
-                # materially lowers RSS on QA/QH exact-optimization runs.
-                return self.forward_residual_fun(x)
-
-            def _residuals_y(y):
-                x = np.asarray(y, dtype=float) * scale - base_params
-                t_cb = time.perf_counter()
-                cache_key = self._exact_cache_key(x)
-                cached_residual = self._cached_exact_residual(cache_key=cache_key)
-                if cached_residual is not None:
-                    self._trace_callback_event(
-                        "residual",
-                        x,
-                        source="exact_residual_cache",
-                        wall_time_s=time.perf_counter() - t_cb,
-                    )
-                    return cached_residual
-                cached_state = self._cached_exact_state(x)
-                if cached_state is not None:
-                    out = self._evaluate_residuals_from_state(cached_state)
-                    self._trace_callback_event(
-                        "residual",
-                        x,
-                        source="exact_state_cache",
-                        wall_time_s=time.perf_counter() - t_cb,
-                    )
-                    return out
-                cached_trial = self._cached_trial_residual(x)
-                if cached_trial is not None:
-                    self._trace_callback_event(
-                        "residual",
-                        x,
-                        source="trial_residual_cache",
-                        wall_time_s=time.perf_counter() - t_cb,
-                    )
-                    return cached_trial
-                # Residual-only callbacks do not need an adjoint tape. Building one
-                # for every SciPy trial point bloats memory badly on converged QA/QH
-                # runs. Keep the Jacobian exact, but evaluate residuals through the
-                # converged forward solve only.
-                out = _forward_residual_exact(x)
-                self._trace_callback_event(
-                    "residual",
-                    x,
-                    source="trial_solve",
-                    wall_time_s=time.perf_counter() - t_cb,
-                )
-                return out
-
-            def _jacobian_y(y):
-                x = np.asarray(y, dtype=float) * scale - base_params
-                t_cb = time.perf_counter()
-                self._last_jacobian_source = "exact_tape_replay"
-                jac = np.asarray(self._jacobian_fun_tracked(x), dtype=float) * scale[None, :]
-                self._trace_callback_event(
-                    "jacobian",
-                    x,
-                    source=getattr(self, "_last_jacobian_source", "exact_tape_replay"),
-                    wall_time_s=time.perf_counter() - t_cb,
-                )
-                # SciPy residual callbacks above no longer consume the exact-tape cache.
-                # Drop the retained tape immediately after the Jacobian/history entry is
-                # materialized, otherwise later converged QA iterations keep a multi-GB
-                # exact tape alive between callbacks and get killed by RSS.
-                self._exact_cache.clear()
-                return jac
-
-            try:
-                scipy_result = _scipy_least_squares(
-                    _residuals_y,
-                    y0,
-                    jac=_jacobian_y,
-                    method="trf",
-                    # The exact-optimizer Jacobians are extremely tall
-                    # (tens of thousands of residuals, tens of parameters).
-                    # `lsmr` gives materially smaller direct-start trial steps on
-                    # the QA/QH mode-3 cases than the default dense path, which
-                    # avoids wasting minutes in hopeless VMEC trial solves.
-                    tr_solver=scipy_tr_solver,
-                    tr_options=(
-                        {"maxiter": int(scipy_lsmr_maxiter)}
-                        if scipy_lsmr_maxiter is not None and scipy_tr_solver == "lsmr"
-                        else None
-                    ),
-                    max_nfev=max_nfev,
-                    ftol=ftol,
-                    gtol=gtol,
-                    xtol=xtol,
-                    verbose=2 if int(verbose) > 0 else 0,
-                )
-                x_result = np.asarray(scipy_result.x, dtype=float) * scale - base_params
-                result = {
-                    "x": x_result,
-                    "cost": float(scipy_result.cost),
-                    "objective": float(2.0 * scipy_result.cost),
-                    "nfev": int(scipy_result.nfev),
-                    "njev": 0 if scipy_result.njev is None else int(scipy_result.njev),
-                    "nit": 0,
-                    "success": bool(scipy_result.success),
-                    "status": int(scipy_result.status),
-                    "message": str(scipy_result.message),
-                    "step_norm": 0.0,
-                    "x_prev": None,
-                    "cost_prev": None,
-                }
-            except Exception as exc:
-                best_exact_params = getattr(self, "_best_exact_params", None)
-                best_exact_cost = float(getattr(self, "_best_exact_cost", math.inf))
-                if best_exact_params is None or not np.isfinite(best_exact_cost):
-                    raise
-                x_result = np.asarray(best_exact_params, dtype=float).copy()
-                result = {
-                    "x": x_result,
-                    "cost": best_exact_cost,
-                    "objective": 2.0 * best_exact_cost,
-                    "nfev": max(1, len(getattr(self, "_history", []))),
-                    "njev": max(0, len(getattr(self, "_history", [])) - 1),
-                    "nit": 0,
-                    "success": False,
-                    "status": -1,
-                    "message": f"scipy least_squares failed; returning best exact accepted point: {exc}",
-                    "step_norm": float(np.linalg.norm(x_result - params0_arr)),
-                    "x_prev": None,
-                    "cost_prev": None,
-                    "_selected_best_exact_point": True,
-                    "_optimizer_exception": repr(exc),
-                }
+            result = run_scipy_dense_exact_optimizer(
+                self,
+                params0_arr,
+                x_scale=x_scale,
+                max_nfev=max_nfev,
+                ftol=ftol,
+                gtol=gtol,
+                xtol=xtol,
+                verbose=verbose,
+                scipy_tr_solver=scipy_tr_solver,
+                scipy_lsmr_maxiter=scipy_lsmr_maxiter,
+            )
         else:
             raise ValueError(f"Unknown optimization method '{method}'.")
         result["method"] = method_key

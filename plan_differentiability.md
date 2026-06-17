@@ -7827,6 +7827,74 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.72%.
 
+## 2026-06-17 Exact Optimizer Dispatch Decomposition
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added the domain package `vmec_jax.optimizers.fixed_boundary` for
+   fixed-boundary optimizer internals while keeping `vmec_jax.optimization` as
+   the public compatibility facade.
+2. Extracted exact-optimizer history reconstruction and history-dump assembly
+   into `optimizers.fixed_boundary.history`, including residual block metadata,
+   QS residual reconstruction, monotone final wall-clock handling, and history
+   serialization.
+3. Extracted scalar-adjoint trust-region and scalar L-BFGS optimizer branches
+   into `optimizers.fixed_boundary.scalar_trust` and
+   `optimizers.fixed_boundary.scalar_lbfgs`.
+4. Extracted SciPy dense and matrix-free least-squares branches into
+   `optimizers.fixed_boundary.scipy_least_squares`.
+5. Centralized finite residual/vector and linear-operator guard utilities in
+   `optimizers.fixed_boundary.linear_guards`.
+6. Added direct helper tests in `tests/test_optimizer_domain_helpers.py`.
+
+Results obtained:
+
+- `vmec_jax/optimization.py` dropped from 5,545 to 4,900 lines.
+- `FixedBoundaryExactOptimizer.run()` dropped from 598 lines after the first
+  history/scalar extraction to 264 lines after scalar and SciPy branch
+  extraction; it is now primarily an orchestration layer.
+- `FixedBoundaryExactOptimizer` dropped from 3,893 to 3,559 lines.
+- Exact accepted-point authority, cache hooks, callback tracing, scalar
+  cost-only trial policy, matrix-free finite-output guards, and fallback to the
+  best exact accepted point are preserved behind smaller tested modules.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/optimization.py vmec_jax/optimizers/fixed_boundary/*.py tests/test_optimizer_domain_helpers.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_optimizer_domain_helpers.py tests/test_optimization_fast_optimizer_methods.py tests/test_optimization_callback_trace.py tests/test_optimization_helpers.py -q`
+
+Best next steps:
+
+1. Commit and push this exact optimizer dispatch decomposition tranche.
+2. Continue with exact linearization/matrix-free product extraction from
+   `FixedBoundaryExactOptimizer` into a fixed-boundary optimizer linearization
+   module.
+3. Keep `vmec_jax.optimization` as the compatibility facade while moving
+   implementation details into domain modules.
+4. Do not broaden free-boundary adaptive-loop differentiation claims; current
+   evidence remains branch-local/fingerprint-gated.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.80%.
+- Differentiability/refactor implementation: 99.9965%.
+- Solver monolith reduction: 98.50%.
+- Free-boundary adjoint monolith reduction: 82%.
+- Driver workflow decomposition: 96.4%.
+- WOUT diagnostic/profile decomposition: 98.8%.
+- Optimizer workflow decomposition: 88%.
+- Implicit residual-adjoint decomposition: 88%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.73%.
+
 ## 2026-06-17 Shared Initial Axis-Reset Diagnostics
 
 Branch: `codex/differentiability-refactor-plan`.
