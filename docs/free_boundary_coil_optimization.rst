@@ -66,6 +66,36 @@ magnetic-grid bounds, and direct-coil provider wiring.  By default, outputs go
 under ``results/free_boundary_essos_mgrid_forward/`` and
 ``results/free_boundary_essos_direct_forward/``.
 
+Current-only derivative proposal smoke
+--------------------------------------
+
+The fastest same-branch derivative-proposal smoke keeps the optimization
+direction current-only.  This lets the branch-local vector/JVP replay reuse
+the fixed coil geometry while the final accept/reject decision still comes
+from a complete free-boundary solve:
+
+.. code-block:: bash
+
+   JAX_ENABLE_X64=1 python examples/optimization/free_boundary_QS_coil_optimization.py \
+     --smoke \
+     --max-evals 1 \
+     --max-fourier-vars 0 \
+     --write-same-branch-report \
+     --same-branch-report-mode vector \
+     --same-branch-report-nestor-solve-mode matrix_free \
+     --same-branch-report-nestor-operator-solver bicgstab \
+     --same-branch-report-replay-max-mode-count 0 \
+     --same-branch-derivative-proposal \
+     --same-branch-proposal-steps 0.05,0.1 \
+     --same-branch-proposal-max-trials 2
+
+Inspect ``summary.json`` for ``same_branch_derivative_proposal``.  A promoted
+current-only report records ``directional_jvp_fast_path=current_only``,
+``current_only_coil_geometry_cache_available=true``, and
+``current_only_coil_geometry_source=cached``.  These fields are performance
+and provenance evidence only; complete solves remain the acceptance authority,
+and adaptive host branch selection is still outside the differentiated scope.
+
 VMEC2000 generated-mgrid promotion fixture
 ------------------------------------------
 

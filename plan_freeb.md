@@ -57,6 +57,57 @@ Completion:
 - Docs/release hygiene: 100%.
 - QI minimal-seed README artifacts: 100%.
 
+### 2026-06-17 Current-Only Derivative-Proposal Smoke
+
+Steps taken:
+
+1. Ran the coil-only QS example with
+   ``--same-branch-derivative-proposal --max-fourier-vars 0`` so the
+   same-branch report direction is current-only.
+2. Used matrix-free/BiCGSTAB branch-local replay and disabled the mode-count
+   cap for the smoke.
+3. Inspected ``summary.json`` and ``same_branch_complete_solve_report.json``.
+
+Results obtained:
+
+1. The initial complete solve objective was ``1.3736419364589705``.
+2. The derivative-assisted trial objective was ``1.3723864922091615`` and was
+   accepted by the normal complete-solve objective authority.
+3. The proposal evidence records
+   ``directional_jvp_fast_path=current_only``,
+   ``directional_uses_fixed_coil_geometry=true``,
+   ``current_only_coil_geometry_cache_available=true``, and
+   ``current_only_coil_geometry_source=cached``.
+4. The branch-local vector gate passed, while the summary remains explicit that
+   adaptive host branch selection is not differentiated.
+
+Best next steps:
+
+1. Continue phase-3 hardening by adding a tiny optional example note or docs
+   snippet showing ``--max-fourier-vars 0`` as the fastest current-only
+   derivative-proposal validation path.
+2. Keep complete solves as acceptance authority for every derivative-assisted
+   coil proposal.
+3. Revisit mixed current+shape proposal performance only after identifying a
+   shape-geometry cache or projected-shape JVP that preserves AD-vs-FD gates.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999997%.
+- VMEC parity and physics gates: 99.9%.
+- Single-stage coil-only optimization phase 3: 99.99%.
+- CPU/GPU performance: 99.58%; current-only derivative-proposal evidence now
+  exercises the cached branch-local vector/JVP path.
+- CI/runtime/coverage hygiene: 100% locally for this shard; awaiting GitHub CI
+  for the latest branch head.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 100%.
+
 ### 2026-06-17 Derivative-Proposal Fast-Path Provenance
 
 Steps taken:
