@@ -7827,6 +7827,63 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.72%.
 
+## 2026-06-17 Fixed-Boundary Seed/Input Workflow Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `vmec_jax.optimizers.fixed_boundary.seed_inputs` for the
+   fixed-boundary input preparation helpers used by QA/QH/QP/QI examples.
+2. Moved the implementation of simple omnigenity seed construction, simple
+   seed file writing, boundary interpolation, and optimization-resolution
+   rebuilding out of `optimization_workflow.py`.
+3. Kept `vmec_jax.optimization_workflow` as a public compatibility facade, and
+   preserved the historical `rebuild_indata_with_resolution` monkeypatch seam
+   used by diagnostics and tests.
+
+Results obtained:
+
+- `optimization_workflow.py` dropped from 4,024 to 3,787 lines.
+- The seed construction logic now has a domain-specific home instead of being
+  embedded in the orchestration workflow.
+- Public imports such as `vj.prepare_simple_omnigenity_seed_input(...)` and
+  `vj.interpolate_indata_boundary(...)` remain stable.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/optimization_workflow.py vmec_jax/optimizers/fixed_boundary/seed_inputs.py tests/test_optimization_workflow_unit.py tests/test_optimization_helpers.py tests/test_optimization_examples.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_optimization_workflow_unit.py -k 'simple_omnigenity or prepare_simple or interpolate_indata or rebuild_for_optimization_resolution' tests/test_optimization_helpers.py -k 'interpolate_indata_boundary or rebuild_for_optimization_resolution' -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_optimization_workflow_unit.py tests/test_optimization_helpers.py tests/test_optimization_examples.py -q`
+- `python tools/diagnostics/source_health.py --top 12 --top-functions 20`
+
+Best next steps:
+
+1. Commit and push the seed/input workflow extraction.
+2. Continue workflow decomposition by extracting stage construction or
+   objective residual assembly into `optimizers.fixed_boundary` modules.
+3. Continue larger fixed-boundary solver seams after workflow helpers are
+   below the warning threshold.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.88%.
+- Differentiability/refactor implementation: 99.998%.
+- Solver monolith reduction: 98.50%.
+- Free-boundary adjoint monolith reduction: 82%.
+- Driver workflow decomposition: 96.4%.
+- WOUT diagnostic/profile decomposition: 98.8%.
+- Optimizer workflow decomposition: 93.5%.
+- Implicit residual-adjoint decomposition: 88%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.79%.
+
 ## 2026-06-17 Exact Optimizer Dispatch Decomposition
 
 Branch: `codex/differentiability-refactor-plan`.
