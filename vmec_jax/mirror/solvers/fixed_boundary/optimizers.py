@@ -18,6 +18,7 @@ from ...kernels.forces import (
 from ...kernels.geometry import evaluate_axisym_geometry, evaluate_geometry_3d
 from .preconditioners import (
     _residual_linear_maxiter_policy_key,
+    _residual_linear_solver_key,
     _residual_preconditioner_key,
     _validate_smoothing_alpha,
     axisym_reduced_residual_preconditioner,
@@ -52,6 +53,7 @@ __all__ = [
     "_axisym_reduced_energy_jax",
     "_lbfgs_options",
     "_residual_linear_maxiter_policy_key",
+    "_residual_linear_solver_key",
     "_residual_preconditioner_key",
     "_sanitize_scale",
     "_scaled_bounds",
@@ -392,6 +394,7 @@ def _optimizer_run_from_result(
         if candidate_diagnostics is None
         else bool(candidate_diagnostics.positive_jacobian),
         residual_linear_maxiter_policy=str(getattr(result, "residual_linear_maxiter_policy", "")),
+        residual_linear_solver=str(getattr(result, "residual_linear_solver", "")),
         residual_linear_maxiter_effective_max=getattr(result, "residual_linear_maxiter_effective_max", None),
         residual_linear_maxiter_effective_last=getattr(result, "residual_linear_maxiter_effective_last", None),
     )
@@ -568,6 +571,7 @@ def projected_residual_newton_solve(
     y = x0 / x_scale
     scale_jax = jnp.asarray(x_scale, dtype=jnp.asarray(x0).dtype)
     preconditioner_kind = _residual_preconditioner_key(options.residual_preconditioner)
+    linear_solver_kind = _residual_linear_solver_key(options.residual_linear_solver)
 
     def objective_x(vector):
         return _axisym_reduced_energy_jax(
@@ -581,6 +585,7 @@ def projected_residual_newton_solve(
         )
 
     grad_fun = jax.grad(objective_x)
+    hessian_fun = jax.jacfwd(grad_fun) if linear_solver_kind == "dense_lstsq" else None
 
     def x_from_y(vector_y) -> np.ndarray:
         return np.asarray(vector_y, dtype=float) * x_scale
@@ -639,41 +644,59 @@ def projected_residual_newton_solve(
                 xi_alpha=options.residual_xi_alpha,
             )
 
-        size = int(y.size)
-        if preconditioner_kind == "none":
-            operator = LinearOperator((size, size), matvec=matvec_y, rmatvec=matvec_y, dtype=float)
-        else:
-
-            def matvec_preconditioned(vector_z):
-                return matvec_y(precondition_y(vector_z))
-
-            def rmatvec_preconditioned(vector_y):
-                return precondition_y(matvec_y(vector_y))
-
-            operator = LinearOperator(
-                (size, size),
-                matvec=matvec_preconditioned,
-                rmatvec=rmatvec_preconditioned,
-                dtype=float,
-            )
         rhs = -grad_x * x_scale
-        linear_maxiter = axisym_residual_linear_maxiter(
-            options,
-            grid,
-            vector_size=size,
-            residual_norm=current_step.residual_norm,
-        )
-        linear_maxiter_history.append(linear_maxiter)
-        linear_result = lsmr(
-            operator,
-            rhs,
-            atol=min(1.0e-10, max(options.tolerance, np.finfo(float).eps)),
-            btol=min(1.0e-10, max(options.tolerance, np.finfo(float).eps)),
-            maxiter=linear_maxiter,
-        )
-        njev += int(linear_result[2])
-        step_y_raw = np.asarray(linear_result[0], dtype=float)
-        step_y = step_y_raw if preconditioner_kind == "none" else precondition_y(step_y_raw)
+        size = int(y.size)
+        if linear_solver_kind == "dense_lstsq":
+            assert hessian_fun is not None
+            hessian_x = np.asarray(hessian_fun(x_jax), dtype=float)
+            njev += 1
+            jacobian_y = hessian_x * x_scale[:, None] * x_scale[None, :]
+            if preconditioner_kind != "none":
+                basis = np.eye(size)
+                preconditioner_matrix = np.column_stack([precondition_y(basis[:, index]) for index in range(size)])
+                jacobian_y = jacobian_y @ preconditioner_matrix
+            try:
+                step_y_raw, *_ = np.linalg.lstsq(jacobian_y, rhs, rcond=1.0e-12)
+            except np.linalg.LinAlgError:
+                message = "dense reduced-Hessian solve failed"
+                break
+            step_y = np.asarray(step_y_raw, dtype=float)
+            if preconditioner_kind != "none":
+                step_y = np.asarray(preconditioner_matrix @ step_y, dtype=float)
+        else:
+            if preconditioner_kind == "none":
+                operator = LinearOperator((size, size), matvec=matvec_y, rmatvec=matvec_y, dtype=float)
+            else:
+
+                def matvec_preconditioned(vector_z):
+                    return matvec_y(precondition_y(vector_z))
+
+                def rmatvec_preconditioned(vector_y):
+                    return precondition_y(matvec_y(vector_y))
+
+                operator = LinearOperator(
+                    (size, size),
+                    matvec=matvec_preconditioned,
+                    rmatvec=rmatvec_preconditioned,
+                    dtype=float,
+                )
+            linear_maxiter = axisym_residual_linear_maxiter(
+                options,
+                grid,
+                vector_size=size,
+                residual_norm=current_step.residual_norm,
+            )
+            linear_maxiter_history.append(linear_maxiter)
+            linear_result = lsmr(
+                operator,
+                rhs,
+                atol=min(1.0e-10, max(options.tolerance, np.finfo(float).eps)),
+                btol=min(1.0e-10, max(options.tolerance, np.finfo(float).eps)),
+                maxiter=linear_maxiter,
+            )
+            njev += int(linear_result[2])
+            step_y_raw = np.asarray(linear_result[0], dtype=float)
+            step_y = step_y_raw if preconditioner_kind == "none" else precondition_y(step_y_raw)
         if not np.all(np.isfinite(step_y)):
             message = "non-finite reduced-Newton step"
             break
@@ -734,6 +757,7 @@ def projected_residual_newton_solve(
         njev=njev,
     )
     result.residual_linear_maxiter_policy = _residual_linear_maxiter_policy_key(options.residual_linear_maxiter_policy)
+    result.residual_linear_solver = linear_solver_kind
     result.residual_linear_maxiter_effective_max = int(max(linear_maxiter_history)) if linear_maxiter_history else None
     result.residual_linear_maxiter_effective_last = int(linear_maxiter_history[-1]) if linear_maxiter_history else None
     candidate_diagnostics = _candidate_diagnostics(current_step, grid, initial_energy=initial_residual.energy)

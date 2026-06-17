@@ -329,6 +329,49 @@ def test_residual_newton_solver_reaches_tight_residual_for_perturbed_cylinder():
     assert result.final_trace.min_sqrtg > 0.0
 
 
+def test_residual_newton_dense_lstsq_solver_improves_perturbed_cylinder():
+    config, grid, boundary, initial_state = _perturbed_cylinder_case()
+    psi = PsiPrimeProfile.constant(0.01)
+    current = IPrimeProfile.zero()
+    pressure = PressureProfile.zero()
+    initial_residual = axisym_projected_energy_residual(
+        initial_state,
+        grid,
+        psi_prime=psi,
+        i_prime=current,
+        pressure=pressure,
+        mu0=1.0,
+    )
+
+    result = run_mirror_fixed_boundary(
+        config,
+        boundary,
+        psi_prime=psi,
+        i_prime=current,
+        pressure=pressure,
+        initial_state=initial_state,
+        options=MirrorSolveOptions(
+            optimizer="residual_newton",
+            maxiter=4,
+            tolerance=1.0e-10,
+            ftol=1.0e-14,
+            line_search_steps=32,
+            residual_linear_solver="dense_lstsq",
+            residual_preconditioner="none",
+            mu0=1.0,
+        ),
+    )
+    summary = result.optimizer_summaries[0]
+
+    assert summary.accepted
+    assert summary.optimizer == "residual_newton"
+    assert summary.residual_linear_solver == "dense_lstsq"
+    assert summary.residual_linear_maxiter_effective_max is None
+    assert result.final_trace.residual_norm < initial_residual.norm
+    assert result.final_trace.energy_total < initial_residual.energy
+    assert result.final_trace.min_sqrtg > 0.0
+
+
 def test_residual_newton_linear_maxiter_policy_preserves_fixed_and_expands_adaptive():
     config = MirrorConfig(MirrorResolution(ns=9, ntheta=1, nxi=17, mpol=0), z_min=-1.0, z_max=1.0)
     grid = config.build_grid()

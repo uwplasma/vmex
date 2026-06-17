@@ -41,6 +41,7 @@ from vmec_jax.mirror.solvers.fixed_boundary.continuation import pressure_stage_p
 from vmec_jax.mirror.solvers.fixed_boundary.optimizers import (
     OptimizerOptions,
     _residual_linear_maxiter_policy_key,
+    _residual_linear_solver_key,
     _residual_preconditioner_key,
     _sanitize_scale,
     _scaling_key,
@@ -184,6 +185,8 @@ def test_low_level_field_energy_residual_and_optimizer_guards():
         _residual_preconditioner_key("bad")
     with pytest.raises(ValueError):
         _residual_linear_maxiter_policy_key("bad")
+    with pytest.raises(ValueError):
+        _residual_linear_solver_key("bad")
     with pytest.raises(ValueError):
         _sanitize_scale([1.0, 2.0], expected_size=3)
     with pytest.raises(ValueError):

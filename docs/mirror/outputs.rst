@@ -11,8 +11,8 @@ The current schema version is ``0.2`` and stores:
   ``coordinate_order = "s,theta,xi"``, and
   ``algorithm = "fixed_boundary_variational_chebyshev_lobatto"``;
 - solver metadata including optimizer name, reduced-coordinate scaling,
-  residual-Newton inner-budget policy, effective inner iteration budgets, and
-  residual-preconditioner settings when available;
+  residual-Newton linear solver, inner-budget policy, effective inner
+  iteration budgets, and residual-preconditioner settings when available;
 - coordinate arrays ``s``, ``theta``, ``xi``, physical ``z``, and quadrature
   weights;
 - geometry arrays ``r``, ``X``, ``Y``, ``Z``, ``sqrtg``, metric terms, and the

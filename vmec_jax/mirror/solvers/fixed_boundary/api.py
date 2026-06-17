@@ -33,6 +33,7 @@ class MirrorSolveOptions:
     residual_linear_maxiter: int = 16
     residual_linear_maxiter_policy: str = "adaptive"
     residual_linear_adaptive_factor: float = 6.0
+    residual_linear_solver: str = "lsmr"
     residual_preconditioner: str = "radial_xi_tridi"
     residual_radial_alpha: float = 0.5
     residual_lambda_alpha: float = 0.5
@@ -54,6 +55,7 @@ class MirrorSolveOptions:
             residual_linear_maxiter=self.residual_linear_maxiter,
             residual_linear_maxiter_policy=self.residual_linear_maxiter_policy,
             residual_linear_adaptive_factor=self.residual_linear_adaptive_factor,
+            residual_linear_solver=self.residual_linear_solver,
             residual_preconditioner=self.residual_preconditioner,
             residual_radial_alpha=self.residual_radial_alpha,
             residual_lambda_alpha=self.residual_lambda_alpha,

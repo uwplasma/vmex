@@ -65,6 +65,9 @@ with radial/lambda smoothing, an open-``xi`` radius smoother adapted to the
 mirror cap constraints, and an adaptive inner ``lsmr`` iteration policy; pass
 ``--residual-preconditioner none`` for baseline unpreconditioned studies or
 ``--residual-linear-maxiter-policy fixed`` for controlled fixed-budget studies.
+Pass ``--residual-linear-solver dense_lstsq`` on small grids to use the dense
+reduced Hessian as a reference solve when diagnosing whether the matrix-free
+Krylov correction is limiting convergence.
 Finite-current diagnostics can also pass
 ``--residual-preconditioner radial_xi_lambda_xi_tridi`` to smooth lambda
 updates along the open axial coordinate when the residual decomposition is
@@ -92,7 +95,9 @@ iteration budget, inner ``lsmr`` iteration budget, and preconditioner mode. It
 writes JSON metrics, residual heatmaps/budget plots, preconditioner comparison
 plots, residual-component plots that split radius/lambda and cap/interior
 contributions, and the standard mirror plot bundles for both the best-residual
-row and the highest-resolution, highest-budget row. Its default policy is
+row and the highest-resolution, highest-budget row. It can also run
+``--residual-linear-solver dense_lstsq`` for small exact-Hessian reference
+rows. Its default policy is
 ``fixed`` so the requested ``--residual-linear-maxiter-array`` values remain
 literal; pass ``--residual-linear-maxiter-policy adaptive`` to exercise the
 production adaptive inner budget in the same report. Pass ``--i-prime`` with a

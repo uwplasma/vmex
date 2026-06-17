@@ -48,6 +48,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--residual-linear-adaptive-factor", type=float, default=6.0)
     parser.add_argument(
+        "--residual-linear-solver",
+        type=str,
+        default="lsmr",
+        choices=("lsmr", "dense_lstsq"),
+        help="Linear solver for residual-Newton corrections.",
+    )
+    parser.add_argument(
         "--residual-preconditioner",
         type=str,
         default="radial_xi_tridi",
@@ -98,6 +105,7 @@ def _run_one(
     residual_linear_maxiter: int,
     residual_linear_maxiter_policy: str,
     residual_linear_adaptive_factor: float,
+    residual_linear_solver: str,
     residual_preconditioner: str,
     residual_radial_alpha: float,
     residual_lambda_alpha: float,
@@ -144,6 +152,7 @@ def _run_one(
             residual_linear_maxiter=residual_linear_maxiter,
             residual_linear_maxiter_policy=residual_linear_maxiter_policy,
             residual_linear_adaptive_factor=residual_linear_adaptive_factor,
+            residual_linear_solver=residual_linear_solver,
             residual_preconditioner=residual_preconditioner,
             residual_radial_alpha=residual_radial_alpha,
             residual_lambda_alpha=residual_lambda_alpha,
@@ -171,6 +180,7 @@ def _run_one(
         "residual_linear_maxiter": int(residual_linear_maxiter),
         "residual_linear_maxiter_policy": str(residual_linear_maxiter_policy),
         "residual_linear_adaptive_factor": float(residual_linear_adaptive_factor),
+        "residual_linear_solver": str(residual_linear_solver),
         "residual_linear_maxiter_effective_max": None
         if summary is None
         else summary.residual_linear_maxiter_effective_max,
@@ -225,6 +235,7 @@ def run_case(
     residual_linear_maxiter: int = 16,
     residual_linear_maxiter_policy: str = "adaptive",
     residual_linear_adaptive_factor: float = 6.0,
+    residual_linear_solver: str = "lsmr",
     residual_preconditioner: str = "radial_xi_tridi",
     residual_radial_alpha: float = 0.5,
     residual_lambda_alpha: float = 0.5,
@@ -250,6 +261,7 @@ def run_case(
             residual_linear_maxiter=residual_linear_maxiter,
             residual_linear_maxiter_policy=residual_linear_maxiter_policy,
             residual_linear_adaptive_factor=residual_linear_adaptive_factor,
+            residual_linear_solver=residual_linear_solver,
             residual_preconditioner=residual_preconditioner,
             residual_radial_alpha=residual_radial_alpha,
             residual_lambda_alpha=residual_lambda_alpha,
@@ -282,6 +294,7 @@ def main(argv: list[str] | None = None) -> int:
         residual_linear_maxiter=args.residual_linear_maxiter,
         residual_linear_maxiter_policy=args.residual_linear_maxiter_policy,
         residual_linear_adaptive_factor=args.residual_linear_adaptive_factor,
+        residual_linear_solver=args.residual_linear_solver,
         residual_preconditioner=args.residual_preconditioner,
         residual_radial_alpha=args.residual_radial_alpha,
         residual_lambda_alpha=args.residual_lambda_alpha,

@@ -99,6 +99,7 @@ def _attrs_with_result_metadata(result) -> dict[str, str]:
     attrs["solver_residual_linear_maxiter"] = str(int(result.options.residual_linear_maxiter))
     attrs["solver_residual_linear_maxiter_policy"] = str(result.options.residual_linear_maxiter_policy)
     attrs["solver_residual_linear_adaptive_factor"] = str(float(result.options.residual_linear_adaptive_factor))
+    attrs["solver_residual_linear_solver"] = str(result.options.residual_linear_solver)
     attrs["solver_residual_preconditioner"] = str(result.options.residual_preconditioner)
     attrs["solver_residual_radial_alpha"] = str(float(result.options.residual_radial_alpha))
     attrs["solver_residual_lambda_alpha"] = str(float(result.options.residual_lambda_alpha))

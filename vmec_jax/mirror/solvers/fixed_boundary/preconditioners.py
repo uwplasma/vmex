@@ -36,6 +36,15 @@ def _residual_linear_maxiter_policy_key(value: str) -> str:
     raise ValueError(f"unsupported mirror residual linear maxiter policy {value!r}")
 
 
+def _residual_linear_solver_key(value: str) -> str:
+    key = str(value).strip().lower().replace("-", "_")
+    if key in {"lsmr", "iterative", "matrix_free", "krylov"}:
+        return "lsmr"
+    if key in {"dense_lstsq", "dense", "lstsq", "exact", "direct"}:
+        return "dense_lstsq"
+    raise ValueError(f"unsupported mirror residual linear solver {value!r}")
+
+
 def _validate_smoothing_alpha(alpha: float, *, name: str) -> float:
     alpha = float(alpha)
     if not np.isfinite(alpha) or alpha < 0.0:

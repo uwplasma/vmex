@@ -4793,3 +4793,185 @@ before commit rather than a full test rerun.
 
 No user input is needed for M8q; defaults from section 48 remain in force until
 overridden.
+
+---
+
+## 50. 2026-06-17 M8q dense reference residual-Newton correction
+
+This lane moved the finite-current fixed-boundary solve from scaffolded
+iteration-budget studies to a true tight residual solve on the small
+two-coil benchmark.  The main result is that an exact dense reduced-Hessian
+linear correction reaches the requested `gtol=1e-12` on the finite-current
+case in five Newton iterations.  That identifies the current matrix-free
+`lsmr` correction quality, not the nonlinear residual definition, as the
+dominant blocker for tight finite-current convergence.
+
+### Steps taken
+
+- Tested a radius/interior-`xi` smoothing idea first, because M8p left a
+  radius-dominated residual.
+- Rejected that idea before committing it:
+  - `radial_xi2_lambda_xi_tridi`, `xi_alpha=1.0`, `24 x 54` row:
+    residual `1.337885508585e-03`, `fsq=2.934323990298e-08`;
+  - `radial_xi2_lambda_xi_tridi`, `xi_alpha=0.5`, `24 x 54` row:
+    residual `2.227816193816e-04`, `fsq=8.136336054802e-10`;
+  - both were worse than M8p `radial_xi_lambda_xi_tridi`, `24 x 54`,
+    residual `4.332436431347e-05`, `fsq=3.077050070764e-11`.
+- Added a public residual-Newton option:
+  - `residual_linear_solver="lsmr"` remains the scalable default;
+  - `residual_linear_solver="dense_lstsq"` builds the scaled reduced Hessian
+    and solves each Newton correction with `np.linalg.lstsq`;
+  - dense solves are intended as small-grid reference/debug runs, not the
+    production large-grid default.
+- Threaded the option through:
+  - `MirrorSolveOptions`;
+  - `OptimizerOptions`;
+  - optimizer summaries;
+  - mirror NetCDF global attributes;
+  - root example CLIs and JSON metrics.
+- Ran the finite-current `ns=5`, `nxi=9`, `i_prime=0.01` two-coil benchmark
+  with the dense solver and regenerated the full plot bundle.
+- Visually inspected residual history, horizontal-`z` 3D geometry, coils,
+  B-direction field-line overlays, `|B|`, cross sections, and Jacobian plots.
+
+### Results obtained
+
+Dense reference finite-current solve:
+
+| solver | preconditioner | outer budget | inner budget field | final residual | final fsq | normalized force | Newton iterations |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `dense_lstsq` | `none` | 24 | 1 | `2.150747940722e-13` | `7.583142138561e-28` | `1.210467906862e-12` | 5 |
+
+Comparison to the best M8p matrix-free rows:
+
+| solver | preconditioner | outer | inner | final residual | final fsq | normalized force |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `lsmr` | `radial_xi_lambda_xi_tridi` | 24 | 54 | `4.332436431347e-05` | `3.077050070764e-11` | `2.438347387145e-04` |
+| `lsmr` | `radial_xi_lambda_xi_tridi` | 36 | 96 | `2.099900437462e-07` | `7.228822700417e-16` | `1.181850294481e-06` |
+| `lsmr` | `radial_xi_lambda_xi_tridi` | 48 | 96 | `2.931165262408e-08` | `1.408480294352e-17` | `1.649696560286e-07` |
+| `dense_lstsq` | `none` | 24 | 1 | `2.150747940722e-13` | `7.583142138561e-28` | `1.210467906862e-12` |
+
+Interpretation:
+
+- The finite-current residual, force normalization, lambda block, and radius
+  block are all driven below the requested tolerance on the small benchmark.
+- The dense solve is fast at this small size because the reduced vector has
+  only 61 degrees of freedom.
+- Dense reduced Hessians are not the long-term large-grid answer, but they are
+  the right reference target for the next scalable solver work.
+- The next production step should approximate this dense correction with a
+  sparse/block/preconditioned matrix-free method rather than adding stronger
+  smoothing filters.
+
+Generated artifacts:
+
+- `results/mirror/m8q_dense_lstsq_probe/residual_newton_convergence_grid_metrics.json`.
+- `results/mirror/m8q_dense_lstsq_plots/residual_newton_convergence_grid_metrics.json`.
+- `results/mirror/m8q_dense_lstsq_plots/residual_newton_convergence_history.png`.
+- `results/mirror/m8q_dense_lstsq_plots/residual_newton_convergence_components.png`.
+- `results/mirror/m8q_dense_lstsq_plots/residual_newton_convergence_budget.png`.
+- `results/mirror/m8q_dense_lstsq_plots/residual_newton_convergence_resolution_heatmap.png`.
+- `results/mirror/m8q_dense_lstsq_plots/best_finite_current_dense_lstsq_m8q_residual_newton/figures/best_finite_current_dense_lstsq_m8q_residual_newton_mirror_boundary_3d.png`.
+- `results/mirror/m8q_dense_lstsq_plots/best_finite_current_dense_lstsq_m8q_residual_newton/figures/best_finite_current_dense_lstsq_m8q_residual_newton_mirror_bfield_boundary.png`.
+- `results/mirror/m8q_dense_lstsq_plots/best_finite_current_dense_lstsq_m8q_residual_newton/figures/best_finite_current_dense_lstsq_m8q_residual_newton_mirror_bmag_sxi.png`.
+- `results/mirror/m8q_dense_lstsq_plots/best_finite_current_dense_lstsq_m8q_residual_newton/figures/best_finite_current_dense_lstsq_m8q_residual_newton_mirror_cross_sections.png`.
+
+### How it was tested
+
+Focused pytest gate:
+
+```bash
+JAX_ENABLE_X64=1 pytest \
+  tests/mirror/test_mirror_fixed_boundary_axisym.py::test_residual_newton_dense_lstsq_solver_improves_perturbed_cylinder \
+  tests/mirror/test_mirror_fixed_boundary_axisym.py::test_residual_newton_solver_reaches_tight_residual_for_perturbed_cylinder \
+  tests/mirror/test_mirror_low_level_coverage.py \
+  tests/mirror/test_mirror_examples.py::test_root_fixed_boundary_solve_diagnostic_runs_without_plots \
+  tests/mirror/test_mirror_examples.py::test_root_solver_comparison_example_runs_without_plots \
+  tests/mirror/test_mirror_examples.py::test_root_residual_newton_convergence_grid_runs_without_plots \
+  tests/mirror/test_mirror_examples.py::test_root_residual_newton_convergence_grid_finite_current_reports_lambda_residual \
+  -q
+```
+
+Result: `12 passed in 40.90s`.
+
+Dense finite-current benchmark:
+
+```bash
+JAX_ENABLE_X64=1 python examples/mirror_residual_newton_convergence_grid.py \
+  --outdir results/mirror/m8q_dense_lstsq_plots \
+  --ns-array 5 \
+  --nxi-array 9 \
+  --maxiter-array 24 \
+  --residual-linear-maxiter-array 1 \
+  --residual-linear-solver dense_lstsq \
+  --residual-linear-maxiter-policy fixed \
+  --i-prime 0.01 \
+  --case-label finite_current_dense_lstsq_m8q \
+  --preconditioners none
+```
+
+Visual validation:
+
+- Residual history is monotone and reaches below `1e-12`.
+- 3D geometry is horizontal in `z`.
+- The two circular coils render on the end caps.
+- Field-line overlays are visible in the B-direction plot.
+- `|B|` is weakest near the center and strongest near both caps.
+- Cross sections remain circular and poloidally symmetric.
+- The minimum Jacobian remains positive.
+
+### File structure and best-practice notes
+
+- `vmec_jax/mirror/solvers/fixed_boundary/preconditioners.py`
+  contains string normalization for residual preconditioners, budget policy,
+  and now linear-solver choice.
+- `vmec_jax/mirror/solvers/fixed_boundary/optimizers.py`
+  keeps the residual-Newton nonlinear logic in one place and branches only at
+  the linear correction solve.
+- `vmec_jax/mirror/solvers/fixed_boundary/api.py` and
+  `types.py` carry the public option without changing the mirror state model.
+- `vmec_jax/mirror/solvers/fixed_boundary/diagnostics.py` and
+  `vmec_jax/mirror/io/mout.py` preserve the solver choice in summaries and
+  output metadata.
+- The root example scripts expose the same option name and write it into JSON
+  rows, so benchmark artifacts remain auditable.
+- The dense path is deliberately explicit and opt-in; the default remains the
+  scalable matrix-free LSMR path.
+
+### Best next steps
+
+1. Commit and push the dense-reference solver tranche.
+2. Start M8r: use the dense result as the reference target for a scalable
+   linear correction:
+   - test `lsmr` with better Hessian scaling/column equilibration;
+   - compare `lsmr`, `lsqr`, `cg`/`minres` where valid, and block
+     preconditioners against the dense step on the same reduced vector;
+   - record linear residuals/step quality per Newton iteration.
+3. Add a guarded benchmark that compares dense and matrix-free steps at
+   `ns=5`, `nxi=9`; keep it out of routine CI if runtime grows.
+4. Once matrix-free correction quality approaches the dense reference, rerun
+   moderate-resolution finite-current convergence and then return to the
+   hybrid/free-boundary lanes.
+
+### Completion percentages after M8q
+
+- Geometry/grids/bases: `90%`.
+- Field/energy/residual kernels: `84%`.
+- Fixed-boundary axisymmetric solve: `84%`.
+- Residual Newton / preconditioning: `82%`.
+- Two-coil and manufactured validation: `78%`.
+- Finite-current pitch validation: `68%`.
+- Plotting and `vmec --plot` mirror support: `78%`.
+- I/O schema and docs: `75%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `15%`.
+- Free-boundary mirror lane: `5%`.
+- Stellarator-mirror hybrid lane: `10%`.
+- ESSOS circular-coil mirror beta scan: `0%`.
+- PR merge readiness overall: `70%`.
+
+### User input needed
+
+No user input is needed.  The next lane should make the matrix-free correction
+approach the dense reference while preserving the dense path as the small-grid
+truth model.

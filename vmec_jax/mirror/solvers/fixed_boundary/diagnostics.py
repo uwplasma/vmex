@@ -59,6 +59,7 @@ class FixedBoundaryOptimizerSummary:
     candidate_positive_radius: bool | None = None
     candidate_positive_jacobian: bool | None = None
     residual_linear_maxiter_policy: str = ""
+    residual_linear_solver: str = ""
     residual_linear_maxiter_effective_max: int | None = None
     residual_linear_maxiter_effective_last: int | None = None
 
