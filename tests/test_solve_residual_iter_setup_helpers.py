@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from vmec_jax.solvers.fixed_boundary.residual.setup import (
+    build_residual_cache_keys,
     grid_matches_vmec_static_grid,
     resolve_free_boundary_setup_policy,
 )
@@ -35,6 +36,48 @@ def test_grid_matches_vmec_static_grid_requires_same_coordinates() -> None:
     assert not grid_matches_vmec_static_grid(grid, changed_nfp)
     assert not grid_matches_vmec_static_grid(grid, changed_theta)
     assert not grid_matches_vmec_static_grid(broken, same)
+
+
+def test_build_residual_cache_keys_delegates_hash_and_edge_signatures() -> None:
+    static = SimpleNamespace(
+        cfg=SimpleNamespace(mpol=4, ntor=2, ntheta=8, nzeta=6, nfp=3, ns=5, lasym=False),
+        modes=SimpleNamespace(m=np.asarray([0, 1]), n=np.asarray([0, 1])),
+        grid=SimpleNamespace(theta=np.asarray([0.0, 0.5]), zeta=np.asarray([0.0, 0.25])),
+    )
+    wout_like = SimpleNamespace(
+        nfp=3,
+        mpol=4,
+        ntor=2,
+        lasym=False,
+        signgs=-1,
+        phipf=np.asarray([1.0, 2.0]),
+        phips=np.asarray([0.0, 1.0]),
+        chipf=np.asarray([0.0, 0.5]),
+        pres=np.asarray([0.0, 0.1]),
+        icurv=np.asarray([0.0, 0.2]),
+    )
+
+    def fake_hash(value):
+        return ("hash", tuple(np.asarray(value).shape), float(np.asarray(value).sum()))
+
+    keys = build_residual_cache_keys(
+        static=static,
+        wout_like=wout_like,
+        edge_Rcos=np.asarray([1.0]),
+        edge_Rsin=np.asarray([2.0]),
+        edge_Zcos=np.asarray([3.0]),
+        edge_Zsin=np.asarray([4.0]),
+        constraint_tcon0=1.25,
+        hash_array_bytes_func=fake_hash,
+        edge_signature_key_func=lambda *arrays: ("sig", len(arrays)),
+        edge_value_key_func=lambda *arrays: ("val", sum(float(np.asarray(a).sum()) for a in arrays)),
+    )
+
+    assert keys.static_key[:7] == (4, 2, 8, 6, 3, 5, False)
+    assert keys.wout_key[:5] == (3, 4, 2, False, -1)
+    assert keys.wout_key[-1] == 1.25
+    assert keys.edge_signature_key == ("sig", 4)
+    assert keys.edge_value_key == ("val", 10.0)
 
 
 def test_free_boundary_setup_policy_disables_scan_and_resolves_direct_provider() -> None:

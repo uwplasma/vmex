@@ -70,6 +70,7 @@ from vmec_jax.solvers.fixed_boundary.residual.runtime import (
     _vmec_freeb_plascur_from_bcovar as _runtime_vmec_freeb_plascur_from_bcovar,
 )
 from vmec_jax.solvers.fixed_boundary.residual.setup import (
+    build_residual_cache_keys as _build_residual_cache_keys,
     grid_matches_vmec_static_grid as _grid_matches_vmec_static_grid,
     resolve_free_boundary_setup_policy as _resolve_free_boundary_setup_policy,
 )
@@ -1082,34 +1083,22 @@ def solve_fixed_boundary_residual_iter(
     apply_lforbal = bool(indata.get_bool("LFORBAL", False)) if indata is not None else False
 
     _t_setup_cache_key_hash = _setup_timer_start()
-    static_key = (
-        int(static.cfg.mpol),
-        int(static.cfg.ntor),
-        int(static.cfg.ntheta),
-        int(static.cfg.nzeta),
-        int(static.cfg.nfp),
-        int(static.cfg.ns),
-        bool(static.cfg.lasym),
-        _hash_array_bytes(static.modes.m),
-        _hash_array_bytes(static.modes.n),
-        _hash_array_bytes(static.grid.theta),
-        _hash_array_bytes(static.grid.zeta),
+    cache_keys = _build_residual_cache_keys(
+        static=static,
+        wout_like=wout_like,
+        edge_Rcos=edge_Rcos,
+        edge_Rsin=edge_Rsin,
+        edge_Zcos=edge_Zcos,
+        edge_Zsin=edge_Zsin,
+        constraint_tcon0=constraint_tcon0,
+        hash_array_bytes_func=_hash_array_bytes,
+        edge_signature_key_func=_edge_signature_key,
+        edge_value_key_func=_edge_value_key,
     )
-    wout_key = (
-        int(wout_like.nfp),
-        int(wout_like.mpol),
-        int(wout_like.ntor),
-        bool(wout_like.lasym),
-        int(wout_like.signgs),
-        _hash_array_bytes(wout_like.phipf),
-        _hash_array_bytes(wout_like.phips),
-        _hash_array_bytes(wout_like.chipf),
-        _hash_array_bytes(wout_like.pres),
-        _hash_array_bytes(wout_like.icurv) if getattr(wout_like, "icurv", None) is not None else None,
-        float(constraint_tcon0) if constraint_tcon0 is not None else None,
-    )
-    edge_signature_key = _edge_signature_key(edge_Rcos, edge_Rsin, edge_Zcos, edge_Zsin)
-    edge_value_key = _edge_value_key(edge_Rcos, edge_Rsin, edge_Zcos, edge_Zsin)
+    static_key = cache_keys.static_key
+    wout_key = cache_keys.wout_key
+    edge_signature_key = cache_keys.edge_signature_key
+    edge_value_key = cache_keys.edge_value_key
     _record_setup_timing("setup_cache_key_hash", _t_setup_cache_key_hash)
 
     def _apply_radial_tridi(a, alpha: float):

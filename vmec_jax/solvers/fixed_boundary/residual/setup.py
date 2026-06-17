@@ -9,6 +9,8 @@ import numpy as np
 
 __all__ = [
     "FreeBoundarySetupPolicy",
+    "ResidualCacheKeys",
+    "build_residual_cache_keys",
     "grid_matches_vmec_static_grid",
     "resolve_free_boundary_setup_policy",
 ]
@@ -32,6 +34,16 @@ class FreeBoundarySetupPolicy:
     jit_strict_update_enabled: bool
     update_work: int
     cpu_work_limit: int
+
+
+@dataclass(frozen=True)
+class ResidualCacheKeys:
+    """Cache keys for fixed-boundary residual force and scan runners."""
+
+    static_key: tuple[Any, ...]
+    wout_key: tuple[Any, ...]
+    edge_signature_key: Any
+    edge_value_key: Any
 
 
 def _truthy_env(value: str | None) -> bool:
@@ -111,4 +123,53 @@ def resolve_free_boundary_setup_policy(
         jit_strict_update_enabled=bool(jit_strict_update_enabled),
         update_work=int(update_work),
         cpu_work_limit=int(cpu_work_limit),
+    )
+
+
+def build_residual_cache_keys(
+    *,
+    static: Any,
+    wout_like: Any,
+    edge_Rcos: Any,
+    edge_Rsin: Any,
+    edge_Zcos: Any,
+    edge_Zsin: Any,
+    constraint_tcon0: float | None,
+    hash_array_bytes_func,
+    edge_signature_key_func,
+    edge_value_key_func,
+) -> ResidualCacheKeys:
+    """Build stable cache keys for residual force kernels and scan runners."""
+
+    static_key = (
+        int(static.cfg.mpol),
+        int(static.cfg.ntor),
+        int(static.cfg.ntheta),
+        int(static.cfg.nzeta),
+        int(static.cfg.nfp),
+        int(static.cfg.ns),
+        bool(static.cfg.lasym),
+        hash_array_bytes_func(static.modes.m),
+        hash_array_bytes_func(static.modes.n),
+        hash_array_bytes_func(static.grid.theta),
+        hash_array_bytes_func(static.grid.zeta),
+    )
+    wout_key = (
+        int(wout_like.nfp),
+        int(wout_like.mpol),
+        int(wout_like.ntor),
+        bool(wout_like.lasym),
+        int(wout_like.signgs),
+        hash_array_bytes_func(wout_like.phipf),
+        hash_array_bytes_func(wout_like.phips),
+        hash_array_bytes_func(wout_like.chipf),
+        hash_array_bytes_func(wout_like.pres),
+        hash_array_bytes_func(wout_like.icurv) if getattr(wout_like, "icurv", None) is not None else None,
+        float(constraint_tcon0) if constraint_tcon0 is not None else None,
+    )
+    return ResidualCacheKeys(
+        static_key=static_key,
+        wout_key=wout_key,
+        edge_signature_key=edge_signature_key_func(edge_Rcos, edge_Rsin, edge_Zcos, edge_Zsin),
+        edge_value_key=edge_value_key_func(edge_Rcos, edge_Rsin, edge_Zcos, edge_Zsin),
     )

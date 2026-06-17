@@ -7716,3 +7716,59 @@ Completion:
 - Implicit residual-adjoint decomposition: 88%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.71%.
+
+## 2026-06-17 Residual Cache-Key Setup Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved residual static/WOUT/edge cache-key tuple construction out of
+   `solve_fixed_boundary_residual_iter` and into
+   `build_residual_cache_keys` in
+   `vmec_jax.solvers.fixed_boundary.residual.setup`.
+2. Added the `ResidualCacheKeys` dataclass so scan-runner and force-cache keys
+   have a named domain object instead of ad hoc tuple blocks inside the solver.
+3. Added pure unit coverage for key field ordering, hash delegation, constraint
+   force inclusion, and edge signature/value key delegation.
+
+Results obtained:
+
+- `solve_fixed_boundary_residual_iter` dropped from 7,598 to 7,586 lines.
+- `vmec_jax/solvers/fixed_boundary/residual/iteration.py` dropped from 8,211
+  to 8,200 lines.
+- Cache-key construction is now an independently tested setup seam, which
+  reduces risk when tuning scan-runner cache behavior and fingerprint reports.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/setup.py vmec_jax/solvers/fixed_boundary/residual/iteration.py tests/test_solve_residual_iter_setup_helpers.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_setup_helpers.py tests/test_solve_wave7_coverage.py::test_residual_iter_vmec2000_scan_minimal_one_step tests/test_solve_wave7_coverage.py::test_residual_iter_vmec2000_scan_state_only -q`
+- `python tools/diagnostics/source_health.py --top 12 --top-functions 20`
+
+Best next steps:
+
+1. Commit and push this cache-key setup extraction.
+2. Target a larger residual-controller seam next: scan postprocess/fallback
+   materialization or initial-force/axis-reset preflight.
+3. Keep cache/fingerprint setup in typed domain helpers so future
+   same-branch derivative metadata is auditable.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.77%.
+- Differentiability/refactor implementation: 99.996%.
+- Solver monolith reduction: 98.47%.
+- Free-boundary adjoint monolith reduction: 82%.
+- Driver workflow decomposition: 96.4%.
+- WOUT diagnostic/profile decomposition: 98.8%.
+- Optimizer workflow decomposition: 86%.
+- Implicit residual-adjoint decomposition: 88%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.71%.
