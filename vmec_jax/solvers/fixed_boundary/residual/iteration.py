@@ -7882,25 +7882,20 @@ def solve_fixed_boundary_residual_iter(
                     vZcc_best, vZss_best = vZcc_try, vZss_try
                     vLcc_best, vLss_best = vLcc_try, vLss_try
                     dt_eff = float(dt_try)
-                    update_rms = float(
-                        np.asarray(
-                            jnp.sqrt(
-                                jnp.mean(
-                                    (dt_try * vRcc_try) ** 2
-                                    + (dt_try * vRss_try) ** 2
-                                    + (dt_try * vRsc_try) ** 2
-                                    + (dt_try * vRcs_try) ** 2
-                                    + (dt_try * vZsc_try) ** 2
-                                    + (dt_try * vZcs_try) ** 2
-                                    + (dt_try * vZcc_try) ** 2
-                                    + (dt_try * vZss_try) ** 2
-                                    + (dt_try * vLsc_try) ** 2
-                                    + (dt_try * vLcs_try) ** 2
-                                    + (dt_try * vLcc_try) ** 2
-                                    + (dt_try * vLss_try) ** 2
-                                )
-                            )
-                        )
+                    update_rms = _host_force_update_rms(
+                        dt_try,
+                        vRcc_try,
+                        vRss_try,
+                        vRsc_try,
+                        vRcs_try,
+                        vZsc_try,
+                        vZcs_try,
+                        vZcc_try,
+                        vZss_try,
+                        vLsc_try,
+                        vLcs_try,
+                        vLcc_try,
+                        vLss_try,
                     )
                     break
                 step_factor *= 0.5
@@ -7933,8 +7928,8 @@ def solve_fixed_boundary_residual_iter(
                 step_status = "rejected"
             timing_stats["iterations"] += 1
             if track_history:
-                step_history.append(dt_eff)
                 restart_reason = "none"
+                step_history.append(dt_eff)
                 w_curr_history.append(float(w_curr))
                 w_try_history.append(float("nan"))
                 w_try_ratio_history.append(float("nan"))

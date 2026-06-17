@@ -1245,16 +1245,19 @@ Steps taken:
    catastrophic rollback/update path.
 4. Reused the existing velocity scaling helper for accepted backtracking
    momentum scaling.
-5. Added unit tests for bad-progress restarts, nonfinite/bad-Jacobian restarts,
+5. Reused `host_force_update_rms` for non-strict backtracking update RMS.
+6. Tested and rejected a more abstract update-history helper and momentum-block
+   helper because their call-site argument lists increased the large function.
+7. Added unit tests for bad-progress restarts, nonfinite/bad-Jacobian restarts,
    VMEC reset milestone scaling, and RMS parity with the original inline
    formula.
 
 Results obtained:
 
 - `vmec_jax/solvers/fixed_boundary/residual/iteration.py` dropped from 8404
-  lines at the plan-review baseline to 8368 lines.
+  lines at the plan-review baseline to 8363 lines.
 - `solve_fixed_boundary_residual_iter` dropped from 7790 lines at the
-  plan-review baseline to 7752 lines.
+  plan-review baseline to 7747 lines.
 - The extracted helper gives the adaptive-controller/fingerprint work a named
   scalar restart seam instead of two open-coded branches.
 - PR #20 CI run `27687965132` for the previous plan-consolidation commit is
@@ -1290,9 +1293,9 @@ Completion:
 - CI/runtime/coverage hygiene: 100%.
 - Docs/release hygiene: 100% for current claims.
 - QI minimal-seed README artifacts: 100%.
-- Refactor/source simplification: 72.4%.
+- Refactor/source simplification: 72.5%.
 - Research-grade arbitrary adaptive-branch differentiability: 7%.
-- Overall production-safe differentiability/refactor PR: 98.72%.
+- Overall production-safe differentiability/refactor PR: 98.73%.
 
 ## 2026-06-14 Umbrella PR and Solver Helper Extractions
 
