@@ -7529,3 +7529,65 @@ Completion:
 - Implicit residual-adjoint decomposition: 88%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.68%.
+
+## 2026-06-17 Fixed-Boundary Stage Policy Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Extracted the fixed-boundary multigrid/staging decision block from
+   `run_fixed_boundary` into `FixedBoundaryStagePolicy` and
+   `resolve_fixed_boundary_stage_policy` in `vmec_jax.drivers.policy`.
+2. Kept the driver as the workflow owner while moving pure policy decisions for
+   input stage arrays, budgeted CLI multigrid, explicit input staging,
+   restart/ns-override multigrid disabling, max-iteration resolution, and stage
+   transition heuristics into one tested domain helper.
+3. Added direct helper-level tests for explicit input staging, accelerated
+   direct-final-grid selection, restart/ns-override behavior, and env-driven
+   stage-transition policy.
+
+Results obtained:
+
+- `run_fixed_boundary` dropped from 1,637 to 1,556 lines.
+- The fixed-boundary driver now has a clearer boundary between policy
+  resolution and solve execution without changing VMEC2000 staging semantics.
+- Source-health still identifies the remaining largest production hotspots as
+  fixed-boundary residual iteration, optimization workflow, and free-boundary
+  adjoint replay.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/driver.py vmec_jax/drivers/policy.py tests/test_driver_policy_helpers.py`
+- `python -m pytest -q tests/test_driver_policy_helpers.py tests/test_driver_api.py::test_run_fixed_boundary_cli_budgeted_multigrid_path tests/test_driver_api.py::test_run_fixed_boundary_cli_user_explicitly_staged_uses_direct_multigrid tests/test_driver_api.py::test_run_fixed_boundary_cli_current_driven_nonaxis_uses_direct_multigrid tests/test_driver_api.py::test_run_fixed_boundary_cli_two_stage_current_driven_nonaxis_uses_multigrid tests/test_driver_api.py::test_run_fixed_boundary_cli_three_stage_lasym_current_driven_nonaxis_uses_multigrid tests/test_driver_wave2_coverage.py::test_restart_solver_state_disables_multigrid_and_passes_resume_state tests/test_driver_wave2_coverage.py::test_ns_override_disables_input_multigrid_stages tests/test_driver_wave12_coverage.py tests/test_driver_policy_coverage_extra.py -q`
+- `python -m pytest -q tests/test_driver_wave12_coverage.py tests/test_driver_wave2_coverage.py tests/test_driver_policy_coverage_extra.py -q`
+- `python tools/diagnostics/source_health.py --top 12 --top-functions 20`
+
+Best next steps:
+
+1. Commit and push this policy extraction after confirming the worktree only
+   contains the intended driver/policy/test changes.
+2. Let CI validate both driver refactor tranches before starting another
+   driver split.
+3. Next high-value refactor target remains fixed-boundary residual iteration:
+   extract the VMEC2000 scan controller seam only with parity tests, not
+   cosmetic line moves.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.77%.
+- Differentiability/refactor implementation: 99.996%.
+- Solver monolith reduction: 98.24%.
+- Free-boundary adjoint monolith reduction: 82%.
+- Driver workflow decomposition: 96.4%.
+- WOUT diagnostic/profile decomposition: 98.5%.
+- Optimizer workflow decomposition: 86%.
+- Implicit residual-adjoint decomposition: 88%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.69%.

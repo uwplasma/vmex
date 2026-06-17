@@ -622,44 +622,38 @@ def run_fixed_boundary(
             nfp=int(cfg.nfp),
             lasym=bool(cfg.lasym),
         )
-    ns_list_input = _stage_array_list(indata.get("NS_ARRAY", None))
-    niter_list_input = _stage_array_list(indata.get("NITER_ARRAY", None))
-    ftol_list_input = _stage_array_list(indata.get("FTOL_ARRAY", None))
-    cli_budgeted_multigrid_requested = (
-        bool(cli_fixed_boundary_mode)
-        and bool(accelerated_mode)
-        and (solver_lower in ("vmec2000_iter", "vmec2000_scan", "vmec2000_iter_fast"))
-        and (not bool(cfg.lfreeb))
-        and (restart_state_eff is None)
-        and (restart_solver_state is None)
-        and (multigrid is None)
-        and (ns_list_input is not None)
-        and (len(ns_list_input) > 1)
-        and (niter_list_input is None)
+    stage_policy = _driver_policy_helpers.resolve_fixed_boundary_stage_policy(
+        cfg=cfg,
+        indata=indata,
+        solver_lower=solver_lower,
+        cli_fixed_boundary_mode=bool(cli_fixed_boundary_mode),
+        accelerated_mode=bool(accelerated_mode),
+        multigrid=multigrid,
+        max_iter=max_iter,
+        max_iter_sentinel=_MAX_ITER_SENTINEL,
+        max_iter_overridden=bool(max_iter_overridden),
+        restart_state_present=restart_state_eff is not None,
+        restart_solver_state_present=restart_solver_state is not None,
+        ns_override=ns_override,
+        stage_transition_heuristic=stage_transition_heuristic,
+        stage_array_list_func=_stage_array_list,
+        getenv=os.getenv,
     )
-    # When the user explicitly provides both NS_ARRAY and NITER_ARRAY with multiple
-    # stages, respect the staged sequence to match xvmec2000 behavior.  The
-    # accelerated_single_grid_default shortcut (run directly on the final NS grid)
-    # can diverge from the staged equilibrium for some axisymmetric or
-    # non-current-driven cases (e.g. purely_toroidal_field).
-    user_explicitly_staged_cli = (
-        bool(cli_fixed_boundary_mode)
-        and bool(accelerated_mode)
-        and (solver_lower in ("vmec2000_iter", "vmec2000_scan", "vmec2000_iter_fast"))
-        and (not bool(cfg.lfreeb))
-        and (restart_state_eff is None)
-        and (restart_solver_state is None)
-        and (multigrid is None)
-        and (ns_list_input is not None)
-        and (len(ns_list_input) > 1)
-        and (niter_list_input is not None)
-        and (len(niter_list_input) == len(ns_list_input))
-    )
-    cli_fixed_boundary_finish_enabled = (
-        bool(cli_fixed_boundary_mode)
-        and (solver_lower == "vmec2000_iter")
-        and (not bool(cfg.lfreeb))
-    )
+    ns_list_input = stage_policy.ns_list_input
+    niter_list_input = stage_policy.niter_list_input
+    ftol_list_input = stage_policy.ftol_list_input
+    cli_budgeted_multigrid_requested = bool(stage_policy.cli_budgeted_multigrid_requested)
+    user_explicitly_staged_cli = bool(stage_policy.user_explicitly_staged_cli)
+    cli_fixed_boundary_finish_enabled = bool(stage_policy.cli_fixed_boundary_finish_enabled)
+    multigrid = bool(stage_policy.multigrid)
+    multigrid_user_provided = bool(stage_policy.multigrid_user_provided)
+    accelerated_single_grid_default = bool(stage_policy.accelerated_single_grid_default)
+    current_driven_3d_cli = bool(stage_policy.current_driven_3d_cli)
+    direct_staged_current_driven_3d_cli = bool(stage_policy.direct_staged_current_driven_3d_cli)
+    deferred_staged_current_driven_3d_cli = bool(stage_policy.deferred_staged_current_driven_3d_cli)
+    max_iter = int(stage_policy.max_iter)
+    stage_transition_heuristic = bool(stage_policy.stage_transition_heuristic)
+    ns_stages = list(stage_policy.ns_stages)
 
     sanitize_resume_state_for_stage = partial(
         _sanitize_resume_state_for_driver_stage,
@@ -830,65 +824,6 @@ def run_fixed_boundary(
         )
 
     multigrid_use_input_niter = bool(multigrid_use_input_niter)
-    multigrid_user_provided = multigrid is not None
-    accelerated_single_grid_default = False
-    current_driven_3d_cli = (
-        bool(cli_fixed_boundary_mode)
-        and bool(accelerated_mode)
-        and (not bool(cfg.lfreeb))
-        and bool(cfg.lthreed)
-        and (ns_list_input is not None)
-        and (len(ns_list_input) > 1)
-        and (niter_list_input is not None)
-        and (len(niter_list_input) == len(ns_list_input))
-        and (int(indata.get_int("NCURR", 0)) != 0)
-    )
-    direct_staged_current_driven_3d_cli = bool(current_driven_3d_cli)
-    deferred_staged_current_driven_3d_cli = bool(current_driven_3d_cli) and (
-        not bool(direct_staged_current_driven_3d_cli)
-    )
-    if multigrid is None:
-        multigrid = solver_lower == "vmec2000_iter"
-        if bool(cli_budgeted_multigrid_requested):
-            multigrid = True
-        elif bool(direct_staged_current_driven_3d_cli):
-            multigrid = True
-        elif bool(user_explicitly_staged_cli):
-            # Explicit NS_ARRAY + NITER_ARRAY: follow the staged sequence to
-            # match xvmec2000 behavior instead of collapsing to a single grid.
-            multigrid = True
-        elif accelerated_mode and (not bool(cfg.lfreeb)):
-            # In accelerated fixed-boundary mode with no explicit stage sequence,
-            # direct final-grid solves avoid per-stage interpolation/recompilation
-            # overhead and have been more efficient across the tested cases.
-            multigrid = False
-            accelerated_single_grid_default = True
-    if max_iter is _MAX_ITER_SENTINEL:
-        if solver_lower in ("vmec2000_iter", "vmec2000_scan", "vmec2000_iter_fast"):
-            niter_list = _stage_array_list(indata.get("NITER_ARRAY", None))
-            if niter_list:
-                # VMEC2000 behavior: when NITER_ARRAY is present, it defines
-                # the stage budgets even if there is only one stage.
-                max_iter = int(sum(int(v) for v in niter_list))
-            else:
-                max_iter = int(indata.get_int("NITER", 10))
-        else:
-            max_iter = 10
-    max_iter = int(max_iter)
-    if restart_state_eff is not None:
-        multigrid = False
-    if restart_solver_state is not None:
-        multigrid = False
-    multigrid = bool(multigrid) and (ns_override is None)
-    if stage_transition_heuristic is None:
-        env_stage = os.getenv("VMEC_JAX_STAGE_HEURISTIC", "").strip().lower()
-        if env_stage in ("1", "true", "yes"):
-            stage_transition_heuristic = True
-        elif env_stage in ("0", "false", "no"):
-            stage_transition_heuristic = False
-        else:
-            stage_transition_heuristic = False
-    stage_transition_heuristic = bool(stage_transition_heuristic)
 
     fb_strict_env = os.getenv("VMEC_JAX_FREEB_STRICT", "1").strip().lower()
     fb_strict = fb_strict_env not in ("", "0", "false", "no")
@@ -903,22 +838,6 @@ def run_fixed_boundary(
         fb_meta, fb_extcur = _free_boundary_static_inputs(cfg, load_fields=False, strict=fb_strict)
     else:
         fb_meta, fb_extcur = None, None
-
-    # Build the initial state on either the final grid (single-grid solvers and
-    # use_initial_guess) or on the first multigrid stage for VMEC-style solves.
-    ns_stages = [int(cfg.ns)]
-    if multigrid:
-        if ns_list_input:
-            ns_stages = [int(v) for v in ns_list_input]
-
-    # When NITER_ARRAY is present, treat it as the authoritative total unless
-    # the caller explicitly overrides max_iter.
-    niter_list = niter_list_input
-    if niter_list:
-        niter_sum = int(sum(int(v) for v in niter_list))
-        niter_default = int(indata.get_int("NITER", max_iter))
-        if (not max_iter_overridden) and int(max_iter) == niter_default:
-            max_iter = niter_sum
 
     if bool(cli_budgeted_multigrid_requested):
         budget_total = _accelerated_cli_budgeted_total_iters(total_budget=int(max_iter), ns_stages=ns_stages)

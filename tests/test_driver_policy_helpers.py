@@ -15,6 +15,7 @@ from vmec_jax.drivers import runtime as driver_runtime
 from vmec_jax.drivers import solve as driver_solve
 from vmec_jax.drivers.policy import (
     dynamic_scan_probe_settings,
+    resolve_fixed_boundary_stage_policy,
     resolve_driver_signgs,
     resolve_driver_step_size,
     resolve_stage_jit_settings,
@@ -574,6 +575,97 @@ def test_resolve_initial_fixed_boundary_policy_honors_explicit_solver_mode_and_s
     assert policy.accelerated_mode is False
     assert policy.use_scan is True
     assert policy.cli_fixed_boundary_mode is False
+
+
+def test_resolve_fixed_boundary_stage_policy_preserves_explicit_input_staging():
+    policy = resolve_fixed_boundary_stage_policy(
+        cfg=SimpleNamespace(ns=35, lfreeb=False, lthreed=True),
+        indata=_Input(NS_ARRAY=[5, 35], NITER_ARRAY=[10, 20], NITER=30),
+        solver_lower="vmec2000_iter",
+        cli_fixed_boundary_mode=True,
+        accelerated_mode=True,
+        multigrid=None,
+        max_iter=driver._MAX_ITER_SENTINEL,
+        max_iter_sentinel=driver._MAX_ITER_SENTINEL,
+        max_iter_overridden=False,
+        restart_state_present=False,
+        restart_solver_state_present=False,
+        ns_override=None,
+        stage_transition_heuristic=None,
+        getenv=lambda _key, default="": default,
+    )
+
+    assert policy.multigrid is True
+    assert policy.user_explicitly_staged_cli is True
+    assert policy.accelerated_single_grid_default is False
+    assert policy.max_iter == 30
+    assert policy.ns_stages == [5, 35]
+
+
+def test_resolve_fixed_boundary_stage_policy_uses_direct_final_grid_for_unstaged_accelerated_cli():
+    policy = resolve_fixed_boundary_stage_policy(
+        cfg=SimpleNamespace(ns=35, lfreeb=False, lthreed=False),
+        indata=_Input(NITER=1500),
+        solver_lower="vmec2000_iter",
+        cli_fixed_boundary_mode=True,
+        accelerated_mode=True,
+        multigrid=None,
+        max_iter=driver._MAX_ITER_SENTINEL,
+        max_iter_sentinel=driver._MAX_ITER_SENTINEL,
+        max_iter_overridden=False,
+        restart_state_present=False,
+        restart_solver_state_present=False,
+        ns_override=None,
+        stage_transition_heuristic=None,
+        getenv=lambda _key, default="": default,
+    )
+
+    assert policy.multigrid is False
+    assert policy.accelerated_single_grid_default is True
+    assert policy.max_iter == 1500
+    assert policy.ns_stages == [35]
+
+
+def test_resolve_fixed_boundary_stage_policy_restart_and_ns_override_disable_multigrid():
+    restart_policy = resolve_fixed_boundary_stage_policy(
+        cfg=SimpleNamespace(ns=25, lfreeb=False, lthreed=True),
+        indata=_Input(NS_ARRAY=[5, 25], NITER_ARRAY=[3, 4], NITER=7),
+        solver_lower="vmec2000_iter",
+        cli_fixed_boundary_mode=True,
+        accelerated_mode=False,
+        multigrid=None,
+        max_iter=driver._MAX_ITER_SENTINEL,
+        max_iter_sentinel=driver._MAX_ITER_SENTINEL,
+        max_iter_overridden=False,
+        restart_state_present=True,
+        restart_solver_state_present=False,
+        ns_override=None,
+        stage_transition_heuristic=None,
+        getenv=lambda _key, default="": default,
+    )
+    override_policy = resolve_fixed_boundary_stage_policy(
+        cfg=SimpleNamespace(ns=25, lfreeb=False, lthreed=True),
+        indata=_Input(NS_ARRAY=[5, 25], NITER_ARRAY=[3, 4], NITER=7),
+        solver_lower="vmec2000_iter",
+        cli_fixed_boundary_mode=True,
+        accelerated_mode=False,
+        multigrid=True,
+        max_iter=driver._MAX_ITER_SENTINEL,
+        max_iter_sentinel=driver._MAX_ITER_SENTINEL,
+        max_iter_overridden=False,
+        restart_state_present=False,
+        restart_solver_state_present=False,
+        ns_override=13,
+        stage_transition_heuristic=None,
+        getenv=lambda key, default="": {"VMEC_JAX_STAGE_HEURISTIC": "yes"}.get(key, default),
+    )
+
+    assert restart_policy.multigrid is False
+    assert restart_policy.ns_stages == [25]
+    assert restart_policy.max_iter == 7
+    assert override_policy.multigrid is False
+    assert override_policy.multigrid_user_provided is True
+    assert override_policy.stage_transition_heuristic is True
 
 
 def test_resolve_axis_infer_missing_policy_matches_parity_performance_and_env():
