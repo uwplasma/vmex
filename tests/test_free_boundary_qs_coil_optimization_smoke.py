@@ -1140,11 +1140,13 @@ def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path
         jit_forces=False,
         activate_fsq=1.0e99,
     )
+    init = SimpleNamespace(static=SimpleNamespace(modes=SimpleNamespace(m=np.arange(4))))
+    replay_plan_sentinel = {"cached_scalar_plan": True}
 
     def fake_report(*_args, **_kwargs):
         gate = _same_branch_replay_gate_stub()
         return {
-            "base": {"traces": ("synthetic-trace",)},
+            "base": {"traces": ("synthetic-trace",), "init": init},
             "branch_compatibility": {
                 **gate["branch"],
                 "same_branch": True,
@@ -1188,6 +1190,7 @@ def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path
         assert kwargs["replay_kwargs"]["nestor_operator_restart"] is None
         assert kwargs["replay_kwargs"]["freeze_vacuum_field"] is False
         assert kwargs["replay_kwargs"]["freeze_freeb_bsqvac"] is False
+        assert kwargs["replay_plan"] is replay_plan_sentinel
         return {
             "uses_production_forward": True,
             "differentiates_adaptive_controller": False,
@@ -1231,6 +1234,11 @@ def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path
     monkeypatch.setattr(freeb_adj, "direct_coil_same_branch_complete_solve_fd_report", fake_report)
     monkeypatch.setattr(
         freeb_adj,
+        "direct_coil_accepted_trace_controller_replay_plan",
+        lambda *_args, **_kwargs: replay_plan_sentinel,
+    )
+    monkeypatch.setattr(
+        freeb_adj,
         "direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax",
         fake_branch_local_scalar,
     )
@@ -1269,7 +1277,9 @@ def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path
     assert scalar["complete_fd_directional"] == pytest.approx(0.7)
     assert scalar["abs_error"] == pytest.approx(abs(float(expected_directional) - 0.7))
     assert report["branch_local_vector_jacobian"]["available"] is False
+    assert report["branch_local_scalar_replay_plan_cache"]["available"] is True
     assert report["timings"]["complete_solve_fd_wall_s"] >= 0.0
+    assert report["timings"]["branch_local_scalar_replay_plan_build_wall_s"] >= 0.0
     assert report["timings"]["branch_local_scalar_wall_s"] >= 0.0
     assert scalar["timings"]["replay_value_and_grad_wall_s"] == pytest.approx(0.05)
     assert report["timings"]["branch_local_scalar_replay_value_and_grad_wall_s"] == pytest.approx(0.05)
