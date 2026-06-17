@@ -278,6 +278,65 @@ def test_free_boundary_adjoint_trace_stackability_error_paths() -> None:
     assert objective_helpers.static_weight_is_zero(np.zeros(2))
     assert not objective_helpers.static_weight_is_zero(np.asarray([0.0, 1.0]))
     assert not objective_helpers.static_weight_is_zero(np.asarray([]))
+    replay_result = objective_helpers.accepted_controller_replay_result(
+        run={
+            "state": "state-object",
+            "history": {
+                "accepted": jnp.asarray([1.0, 0.0, 1.0]),
+                "force": jnp.asarray([2.0, 100.0, 4.0]),
+                "bsqvac": jnp.asarray([0.5, 100.0, 1.5]),
+            },
+        },
+        controls={
+            "has_active_freeb_replay": jnp.asarray([True, False, True]),
+            "reset_to_trace_pre": np.asarray([False, True, False]),
+        },
+        scalar_controls={"dt": "scalar"},
+        array_controls={"v": "array"},
+        step_controls={"state_pre": "step"},
+        preconditioner_controls={"mats": "precond"},
+        preconditioner_controls_stacked=True,
+        preconditioner_policy_segments=({"start": 0, "stop": 3},),
+        preconditioner_policy_segment_summary={"n": 1},
+        step_policy_segments=({"start": 0, "stop": 3},),
+        step_policy_segment_summary={"n": 1},
+        segment_preconditioner_controls_stacked=(True,),
+        use_preconditioner_policy_segments=True,
+        use_stacked_step_controls=False,
+        accepted_only_fast_path_segments=(True,),
+        state_weight=0.0,
+        include_replay_aux=True,
+        state_only_replay=False,
+    )
+    np.testing.assert_allclose(np.asarray(replay_result["objective_components"]["state"]), 0.0)
+    np.testing.assert_allclose(np.asarray(replay_result["objective_components"]["force"]), 6.0)
+    np.testing.assert_allclose(np.asarray(replay_result["objective_components"]["bsqvac"]), 2.0)
+    np.testing.assert_allclose(np.asarray(replay_result["objective"]), 8.0)
+    assert replay_result["used_preconditioner_policy_segments"] is True
+    assert replay_result["used_accepted_only_fast_path"] is True
+    assert replay_result["state_reset_flags"] == (False, True, False)
+    stripped_replay_result = objective_helpers.accepted_controller_replay_result(
+        run=replay_result,
+        controls=replay_result["controls"],
+        scalar_controls={},
+        array_controls={},
+        step_controls={},
+        preconditioner_controls={},
+        preconditioner_controls_stacked=False,
+        preconditioner_policy_segments=(),
+        preconditioner_policy_segment_summary={},
+        step_policy_segments=(),
+        step_policy_segment_summary={},
+        segment_preconditioner_controls_stacked=(),
+        use_preconditioner_policy_segments=False,
+        use_stacked_step_controls=False,
+        accepted_only_fast_path_segments=(),
+        state_weight=0.0,
+        include_replay_aux=False,
+        state_only_replay=True,
+    )
+    assert set(stripped_replay_result["controls"]) == {"has_active_freeb_replay"}
+    np.testing.assert_allclose(np.asarray(stripped_replay_result["objective_components"]["force"]), 0.0)
 
     class BadArray:
         def __array__(self, _dtype=None):
