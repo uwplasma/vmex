@@ -24673,6 +24673,59 @@ Completion:
 - Docs/release hygiene: 100%.
 - QI minimal-seed README artifacts: 100%.
 
+### 2026-06-16 Branch-Local Vector Replay-Plan Cache
+
+Steps taken:
+
+1. Added an opportunistic accepted-trace replay-plan cache for the base
+   branch-local vector/JVP report path.
+2. Reused that replay plan for dense-vs-matrix-free profile variants when the
+   accepted traces and controller policy are unchanged.
+3. Kept rejected-slot replay separate, since that diagnostic intentionally
+   changes the trace sequence by appending a fixed rejected controller slot.
+4. Added a safe fallback: synthetic or incomplete traces skip the cache and use
+   the existing in-call replay-plan build path.
+
+Results obtained:
+
+1. The profiled finite-beta QA smoke wrote
+   ``branch_local_vector_replay_plan_cache.available=True``.
+2. The main vector report and both independent matrix-free profile replays
+   recorded ``replay_plan_build_wall_s=0.0`` after receiving the cached plan.
+3. The same smoke still promoted matrix-free ``bicgstab`` in the replay
+   profile, with dense ``10.69 s`` versus best matrix-free ``1.59 s``.
+4. ``python -m ruff check`` passed for the touched example/test files.
+5. ``JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_qs_coil_optimization_smoke.py
+   tests/test_free_boundary_qa_finite_beta_coil_optimization_smoke.py -q``
+   passed with one expected xfail.
+
+Best next steps:
+
+1. Commit and push this replay-plan cache.
+2. Continue profiling the remaining cold report cost; the next likely targets
+   are first JVP graph construction and NESTOR operator setup, not repeated
+   replay-plan construction.
+3. Keep phase-2 claims limited to fingerprint-gated same-branch evidence until
+   a true adaptive full-loop AD-vs-FD gate exists.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999997%.
+- VMEC parity and physics gates: 99.9%.
+- Single-stage coil-only optimization phase 3: 99.97%.
+- CPU/GPU performance: 99.5%; base vector/profile reports now share the
+  accepted-trace replay plan.
+- CI/runtime/coverage hygiene: 100% locally for this shard; awaiting GitHub CI
+  for the latest branch head after push.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 100%.
+
 ### 2026-06-16 Single-Pass Same-Branch Vector Gate Artifacts
 
 Steps taken:

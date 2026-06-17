@@ -1304,6 +1304,7 @@ def write_same_branch_validation_report(
 ) -> Path:
     """Write an optional same-branch complete-solve FD report for this example."""
     from vmec_jax.free_boundary_adjoint import (
+        direct_coil_accepted_trace_controller_replay_plan,
         direct_coil_accepted_trace_controller_slot_summary,
         direct_coil_branch_local_scalars_report_from_complete_fd,
         direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax,
@@ -1544,6 +1545,7 @@ def write_same_branch_validation_report(
         replay_kwargs_for_call: dict[str, Any],
         *,
         include_replay_graph_metadata: bool = False,
+        replay_plan_for_call: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
             params=base_params,
@@ -1554,6 +1556,7 @@ def write_same_branch_validation_report(
             replay_payload=replay_payload,
             scalar_fn=lambda payload: {key: scalar_value_fns[key](payload) for key in scalar_keys},
             replay_scalar_fns=scalar_replay_fns,
+            replay_plan=replay_plan_for_call,
             replay_kwargs=replay_kwargs_for_call,
             replay_ad_mode=ad_mode,
             include_trace_replay_diagnostics=False,
@@ -1678,12 +1681,41 @@ def write_same_branch_validation_report(
     if mode == "vector" and missing_vector_keys:
         branch_local_vector["reason"] = f"missing complete-solve objective value(s): {missing_vector_keys}"
     main_vector_summary: dict[str, Any] | None = None
+    main_vector_replay_plan: dict[str, Any] | None = None
     if same_branch and not replay_mode_count_guard_triggered and mode == "vector" and "base" in report and not missing_vector_keys:
         scalar_keys = vector_keys
+        try:
+            t0 = time.perf_counter()
+            main_vector_replay_plan = direct_coil_accepted_trace_controller_replay_plan(
+                tuple(report["base"]["traces"]),
+                static=report["base"]["init"].static,
+                use_preconditioner_policy_segments=bool(
+                    replay_kwargs.get("use_preconditioner_policy_segments", False)
+                ),
+                use_segment_preconditioner_controls=bool(
+                    replay_kwargs.get("use_segment_preconditioner_controls", False)
+                ),
+                use_stacked_step_controls=bool(replay_kwargs.get("use_stacked_step_controls", False)),
+                use_accepted_only_fast_path=bool(replay_kwargs.get("use_accepted_only_fast_path", True)),
+            )
+            timings["branch_local_vector_replay_plan_build_wall_s"] = float(time.perf_counter() - t0)
+            compact_report["branch_local_vector_replay_plan_cache"] = {
+                "available": True,
+                "timing_key": "branch_local_vector_replay_plan_build_wall_s",
+                "scope": "base vector/profile replays with unchanged accepted traces and controller policy",
+            }
+        except Exception as exc:  # pragma: no cover - synthetic tests may omit stackable trace controls.
+            main_vector_replay_plan = None
+            compact_report["branch_local_vector_replay_plan_cache"] = {
+                "available": False,
+                "reason": f"{type(exc).__name__}: {exc}",
+                "scope": "base vector/profile replays with unchanged accepted traces and controller policy",
+            }
         t0 = time.perf_counter()
         vector = _run_branch_local_vector(
             scalar_keys,
             {**replay_kwargs, "state_only_replay": vector_uses_state_only_replay},
+            replay_plan_for_call=main_vector_replay_plan,
         )
         timings["branch_local_vector_wall_s"] = float(time.perf_counter() - t0)
         vector_timings = {str(key): float(value) for key, value in vector.get("timings", {}).items()}
@@ -1894,7 +1926,11 @@ def write_same_branch_validation_report(
                     continue
                 t0 = time.perf_counter()
                 try:
-                    profile_vector = _run_branch_local_vector(vector_keys, case_kwargs)
+                    profile_vector = _run_branch_local_vector(
+                        vector_keys,
+                        case_kwargs,
+                        replay_plan_for_call=main_vector_replay_plan,
+                    )
                     wall_s = float(time.perf_counter() - t0)
                     profile_summary = _summarize_vector_result(profile_vector, vector_keys)
                     profile_results.append(
