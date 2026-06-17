@@ -25105,6 +25105,66 @@ Completion:
 - Docs/release hygiene: 100%.
 - QI minimal-seed README artifacts: 100%.
 
+### 2026-06-16 Rejected-Slot Gate Helper Extraction and CI Green Head
+
+Steps taken:
+
+1. Confirmed GitHub CI run ``27663729246`` for branch head ``b3e16f1`` passed:
+   Python 3.10/3.12 fast tests, all Python 3.11 core/exact/slow physics
+   coverage shards, docs, build, console smoke, physics smoke, parity-manifest
+   smoke, and the combined coverage gate.  The manual/nightly physics job was
+   skipped as expected.
+2. Extracted the accepted/rejected controller-slot replay artifact assembly
+   from ``write_same_branch_validation_report`` into
+   ``same_branch_rejected_slot_gate_from_vector_replay``.
+3. Kept the helper in the pedagogic coil-only QS example instead of adding a
+   new module, so the example remains self-contained while the report writer is
+   less monolithic.
+
+Results obtained:
+
+1. ``write_same_branch_validation_report`` dropped from 693 lines to 630 lines
+   while preserving the same JSON fields and timing key for
+   ``accepted_rejected_controller_slot_gate``.
+2. ``python -m ruff check
+   examples/optimization/free_boundary_QS_coil_optimization.py
+   tests/test_free_boundary_qs_coil_optimization_smoke.py`` passed.
+3. ``JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_qs_coil_optimization_smoke.py -q`` passed with
+   ``32 passed, 1 xfailed``.
+4. ``python tools/diagnostics/source_health.py --top 20 --top-functions 20``
+   confirms the same-branch report writer moved down to 630 lines; the file
+   line count increases slightly because the rejected-slot gate now has a
+   named, documented helper.
+
+Best next steps:
+
+1. Commit and push this focused source-health tranche.
+2. Continue phase-3 work by running a slightly longer complete-solve-accepted
+   coil-only QS/finite-beta QA example with the same-branch derivative
+   proposal enabled, then compare accepted trial behavior against the
+   branch-local evidence.
+3. Keep the phase-2 claim conservative: accepted/rejected controller-slot
+   replay is fingerprint-gated branch-local evidence, not arbitrary adaptive
+   host branch-selection differentiation.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999999%; branch-local
+  accepted/rejected gates are covered, arbitrary adaptive host branch selection
+  remains explicitly deferred.
+- VMEC parity and physics gates: 99.92%.
+- Single-stage coil-only optimization phase 3: 99.997%.
+- CPU/GPU performance: 99.60%.
+- CI/runtime/coverage hygiene: 100%; latest GitHub CI is green.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 100%.
+
 ### 2026-06-16 Requested Registry Scalars In Complete-Solve FD Reports
 
 Steps taken:

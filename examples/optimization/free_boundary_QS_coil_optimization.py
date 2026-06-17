@@ -1420,6 +1420,111 @@ def same_branch_scalar_function_registry(
     return scalar_value_fns, scalar_replay_fns
 
 
+def same_branch_rejected_slot_gate_from_vector_replay(
+    *,
+    requested: bool,
+    same_branch: bool,
+    replay_mode_count_guard_triggered: bool,
+    replay_mode_count_guard_reason: str,
+    mode: str,
+    report: dict[str, Any],
+    missing_vector_keys: tuple[str, ...],
+    vector_keys: tuple[str, ...],
+    replay_kwargs: dict[str, Any],
+    vector_uses_state_only_replay: bool,
+    run_branch_local_vector: Any,
+    summarize_vector_result: Any,
+) -> tuple[dict[str, Any], float | None]:
+    """Return the fixed accepted/rejected controller-slot gate artifact.
+
+    This is still a branch-local replay gate: it verifies that a fixed
+    rejected controller slot can be replayed under the same branch fingerprint.
+    It does not claim differentiation through arbitrary host-side adaptive
+    branch selection.
+    """
+
+    gate: dict[str, Any] = {
+        "available": False,
+        "requested": bool(requested),
+        "passed": False,
+        "reason": "not requested",
+        "differentiates_adaptive_controller": False,
+        "differentiates_run_free_boundary": False,
+        "same_stacked_step_policy_branch": False,
+    }
+    if not requested:
+        return gate, None
+    if replay_mode_count_guard_triggered:
+        gate["reason"] = replay_mode_count_guard_reason
+        return gate, None
+    if not (same_branch and mode == "vector" and "base" in report and not missing_vector_keys):
+        gate["reason"] = "requires same-branch vector report with all requested scalar keys"
+        return gate, None
+    base_traces = tuple(report["base"].get("traces", ()))
+    if not base_traces:
+        gate["reason"] = "base complete-solve payload has no traces"
+        return gate, None
+
+    rejected_trace = deepcopy(base_traces[-1])
+    rejected_trace["step_status"] = "rejected"
+    padded_traces = base_traces + (rejected_trace,)
+    t0 = time.perf_counter()
+    rejected_vector = run_branch_local_vector(
+        vector_keys,
+        {
+            **replay_kwargs,
+            "state_only_replay": vector_uses_state_only_replay,
+            "traces": padded_traces,
+            "use_accepted_only_fast_path": False,
+        },
+        include_replay_graph_metadata=False,
+    )
+    wall_s = float(time.perf_counter() - t0)
+    rejected_summary = summarize_vector_result(rejected_vector, vector_keys)
+    rejected_metadata = rejected_summary.get("replay_branch_metadata", {})
+    rejected_controller_slot_summary = rejected_summary.get("controller_slot_summary", {})
+    rejected_mask = np.asarray(rejected_metadata.get("rejected_mask", []), dtype=bool)
+    passed = bool(
+        same_branch
+        and rejected_summary["replay_option_flags"].get("use_stacked_step_controls", False)
+        and not rejected_summary["replay_option_flags"].get("use_accepted_only_fast_path", True)
+        and np.any(rejected_mask)
+        and np.isfinite(float(rejected_summary["max_base_abs_delta"]))
+        and float(rejected_summary["max_base_abs_delta"]) <= 2.0e-3
+        and not bool(rejected_summary.get("differentiates_adaptive_controller", True))
+        and not bool(rejected_summary.get("differentiates_run_free_boundary", True))
+        and bool(rejected_summary.get("differentiates_fixed_accepted_branch", False))
+    )
+    return {
+        "available": True,
+        "requested": True,
+        "passed": passed,
+        "scope": (
+            "fixed accepted/rejected controller-slot replay; "
+            "does not differentiate adaptive host branch selection"
+        ),
+        "differentiates_adaptive_controller": False,
+        "differentiates_run_free_boundary": False,
+        "same_branch": same_branch,
+        "same_stacked_step_policy_branch": bool(
+            rejected_summary["replay_option_flags"].get("use_stacked_step_controls", False)
+        ),
+        "scalar_keys": list(vector_keys),
+        "fixed_rejected_controller_slot_present": bool(np.any(rejected_mask)),
+        "fixed_rejected_controller_slots": int(np.count_nonzero(rejected_mask)),
+        "directional_jvp_fast_path": str(rejected_summary.get("directional_jvp_fast_path", "none")),
+        "directional_uses_fixed_coil_geometry": bool(
+            rejected_summary.get("directional_uses_fixed_coil_geometry", False)
+        ),
+        "controller_slot_summary": rejected_controller_slot_summary,
+        "replay_option_flags": rejected_summary["replay_option_flags"],
+        "replay_branch_metadata": rejected_metadata,
+        "max_base_abs_delta": float(rejected_summary["max_base_abs_delta"]),
+        "scalars": rejected_summary["scalars"],
+        "wall_s": wall_s,
+    }, wall_s
+
+
 def write_same_branch_validation_report(
     *,
     input_path: Path,
@@ -1905,85 +2010,22 @@ def write_same_branch_validation_report(
                 "scope": "same-branch production-forward vector/JVP physical-scalar gate",
                 "reason": f"{type(exc).__name__}: {exc}",
             }
-    rejected_slot_gate: dict[str, Any] = {
-        "available": False,
-        "requested": bool(getattr(args, "same_branch_report_rejected_slot_gate", False)),
-        "passed": False,
-        "reason": "not requested",
-        "differentiates_adaptive_controller": False,
-        "differentiates_run_free_boundary": False,
-        "same_stacked_step_policy_branch": False,
-    }
-    if bool(getattr(args, "same_branch_report_rejected_slot_gate", False)):
-        if replay_mode_count_guard_triggered:
-            rejected_slot_gate["reason"] = replay_mode_count_guard_reason
-        elif not (same_branch and mode == "vector" and "base" in report and not missing_vector_keys):
-            rejected_slot_gate["reason"] = "requires same-branch vector report with all requested scalar keys"
-        else:
-            base_traces = tuple(report["base"].get("traces", ()))
-            if not base_traces:
-                rejected_slot_gate["reason"] = "base complete-solve payload has no traces"
-            else:
-                rejected_trace = deepcopy(base_traces[-1])
-                rejected_trace["step_status"] = "rejected"
-                padded_traces = base_traces + (rejected_trace,)
-                t0 = time.perf_counter()
-                rejected_vector = _run_branch_local_vector(
-                    vector_keys,
-                    {
-                        **replay_kwargs,
-                        "state_only_replay": vector_uses_state_only_replay,
-                        "traces": padded_traces,
-                        "use_accepted_only_fast_path": False,
-                    },
-                    include_replay_graph_metadata=False,
-                )
-                timings["branch_local_rejected_slot_wall_s"] = float(time.perf_counter() - t0)
-                rejected_summary = _summarize_vector_result(rejected_vector, vector_keys)
-                rejected_metadata = rejected_summary.get("replay_branch_metadata", {})
-                rejected_controller_slot_summary = rejected_summary.get("controller_slot_summary", {})
-                rejected_mask = np.asarray(rejected_metadata.get("rejected_mask", []), dtype=bool)
-                rejected_slot_passed = bool(
-                    same_branch
-                    and rejected_summary["replay_option_flags"].get("use_stacked_step_controls", False)
-                    and not rejected_summary["replay_option_flags"].get("use_accepted_only_fast_path", True)
-                    and np.any(rejected_mask)
-                    and np.isfinite(float(rejected_summary["max_base_abs_delta"]))
-                    and float(rejected_summary["max_base_abs_delta"]) <= 2.0e-3
-                    and not bool(rejected_summary.get("differentiates_adaptive_controller", True))
-                    and not bool(rejected_summary.get("differentiates_run_free_boundary", True))
-                    and bool(rejected_summary.get("differentiates_fixed_accepted_branch", False))
-                )
-                rejected_slot_gate = {
-                    "available": True,
-                    "requested": True,
-                    "passed": rejected_slot_passed,
-                    "scope": (
-                        "fixed accepted/rejected controller-slot replay; "
-                        "does not differentiate adaptive host branch selection"
-                    ),
-                    "differentiates_adaptive_controller": False,
-                    "differentiates_run_free_boundary": False,
-                    "same_branch": same_branch,
-                    "same_stacked_step_policy_branch": bool(
-                        rejected_summary["replay_option_flags"].get("use_stacked_step_controls", False)
-                    ),
-                    "scalar_keys": list(vector_keys),
-                    "fixed_rejected_controller_slot_present": bool(np.any(rejected_mask)),
-                    "fixed_rejected_controller_slots": int(np.count_nonzero(rejected_mask)),
-                    "directional_jvp_fast_path": str(
-                        rejected_summary.get("directional_jvp_fast_path", "none")
-                    ),
-                    "directional_uses_fixed_coil_geometry": bool(
-                        rejected_summary.get("directional_uses_fixed_coil_geometry", False)
-                    ),
-                    "controller_slot_summary": rejected_controller_slot_summary,
-                    "replay_option_flags": rejected_summary["replay_option_flags"],
-                    "replay_branch_metadata": rejected_metadata,
-                    "max_base_abs_delta": float(rejected_summary["max_base_abs_delta"]),
-                    "scalars": rejected_summary["scalars"],
-                    "wall_s": float(timings["branch_local_rejected_slot_wall_s"]),
-                }
+    rejected_slot_gate, rejected_slot_wall_s = same_branch_rejected_slot_gate_from_vector_replay(
+        requested=bool(getattr(args, "same_branch_report_rejected_slot_gate", False)),
+        same_branch=same_branch,
+        replay_mode_count_guard_triggered=bool(replay_mode_count_guard_triggered),
+        replay_mode_count_guard_reason=replay_mode_count_guard_reason,
+        mode=mode,
+        report=report,
+        missing_vector_keys=missing_vector_keys,
+        vector_keys=vector_keys,
+        replay_kwargs=replay_kwargs,
+        vector_uses_state_only_replay=vector_uses_state_only_replay,
+        run_branch_local_vector=_run_branch_local_vector,
+        summarize_vector_result=_summarize_vector_result,
+    )
+    if rejected_slot_wall_s is not None:
+        timings["branch_local_rejected_slot_wall_s"] = rejected_slot_wall_s
     nestor_profile: dict[str, Any] = {
         "enabled": False,
         "request": str(getattr(args, "same_branch_report_profile_nestor", "none")),
