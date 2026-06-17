@@ -560,81 +560,59 @@ def run_fixed_boundary(
         performance_mode=bool(performance_mode),
     )
 
-    ns_list_for_device = _as_list_like(indata.get("NS_ARRAY", None))
-    niter_list_for_device = _as_list_like(indata.get("NITER_ARRAY", None))
-    backend_for_device = _default_backend_name()
-    solver_device_name = _resolve_fixed_boundary_solver_device_name(
+    routed_run = _driver_solve_helpers.maybe_run_fixed_boundary_in_solver_device_context(
+        input_path=input_path,
         solver_device=solver_device,
-        backend=backend_for_device,
+        solver_device_context_active=bool(_solver_device_context_active),
         cfg=cfg,
         indata=indata,
         solver_lower=solver_lower,
         cli_fixed_boundary_mode=bool(cli_fixed_boundary_mode),
         accelerated_mode=bool(accelerated_mode),
-        ns_list_input=ns_list_for_device,
-        niter_list_input=niter_list_for_device,
         restart_state_present=(restart_state_eff is not None) or (restart_wout_path is not None),
         restart_solver_state_present=restart_solver_state is not None,
+        recursive_run_kwargs={
+            "solver": solver,
+            "solver_mode": solver_mode_eff,
+            "max_iter": max_iter,
+            "step_size": step_size,
+            "history_size": int(history_size),
+            "gn_damping": gn_damping,
+            "gn_cg_tol": gn_cg_tol,
+            "gn_cg_maxiter": int(gn_cg_maxiter),
+            "use_initial_guess": bool(use_initial_guess),
+            "vmec_project": bool(vmec_project),
+            "use_restart_triggers": use_restart_triggers,
+            "vmecpp_restart": bool(vmecpp_restart),
+            "use_direct_fallback": use_direct_fallback,
+            "multigrid": multigrid,
+            "multigrid_use_input_niter": bool(multigrid_use_input_niter),
+            "verbose": bool(verbose),
+            "jit_forces": jit_forces,
+            "jit_precompile": jit_precompile,
+            "use_scan": bool(use_scan),
+            "performance_mode": bool(performance_mode),
+            "scan_wout_corrector": scan_wout_corrector,
+            "stage_transition_heuristic": stage_transition_heuristic,
+            "stage_transition_factor": float(stage_transition_factor),
+            "stage_transition_scale": float(stage_transition_scale),
+            "grid": grid,
+            "ns_override": ns_override,
+            "restart_state": restart_state,
+            "restart_wout_path": restart_wout_path,
+            "restart_solver_state": restart_solver_state,
+            "cli_fixed_boundary_mode": bool(cli_fixed_boundary_mode),
+            "_auto_cli_fixed_boundary_mode": bool(_auto_cli_fixed_boundary_mode),
+        },
+        run_fixed_boundary_func=run_fixed_boundary,
+        replace_func=replace,
+        as_list_like_func=_as_list_like,
+        default_backend_name_func=_default_backend_name,
+        resolve_solver_device_name_func=_resolve_fixed_boundary_solver_device_name,
+        getenv=os.getenv,
     )
-    if (solver_device_name is not None) and (not bool(_solver_device_context_active)):
-        try:
-            import jax
-
-            devices = jax.devices(str(solver_device_name))
-        except Exception:
-            devices = []
-        if devices:
-            from .vmec_tomnsp import tomnsps_fft_policy_override
-
-            tomnsps_fft_override = (
-                str(solver_device_name).strip().lower() in ("gpu", "cuda", "rocm", "tpu")
-                if os.getenv("VMEC_JAX_TOMNSPS_FFT") is None
-                else None
-            )
-            with jax.default_device(devices[0]), tomnsps_fft_policy_override(tomnsps_fft_override):
-                routed_run = run_fixed_boundary(
-                    input_path,
-                    solver=solver,
-                    solver_mode=solver_mode_eff,
-                    max_iter=max_iter,
-                    step_size=step_size,
-                    history_size=int(history_size),
-                    gn_damping=gn_damping,
-                    gn_cg_tol=gn_cg_tol,
-                    gn_cg_maxiter=int(gn_cg_maxiter),
-                    use_initial_guess=bool(use_initial_guess),
-                    vmec_project=bool(vmec_project),
-                    use_restart_triggers=use_restart_triggers,
-                    vmecpp_restart=bool(vmecpp_restart),
-                    use_direct_fallback=use_direct_fallback,
-                    multigrid=multigrid,
-                    multigrid_use_input_niter=bool(multigrid_use_input_niter),
-                    verbose=bool(verbose),
-                    jit_forces=jit_forces,
-                    jit_precompile=jit_precompile,
-                    use_scan=bool(use_scan),
-                    performance_mode=bool(performance_mode),
-                    scan_wout_corrector=scan_wout_corrector,
-                    stage_transition_heuristic=stage_transition_heuristic,
-                    stage_transition_factor=float(stage_transition_factor),
-                    stage_transition_scale=float(stage_transition_scale),
-                    grid=grid,
-                    ns_override=ns_override,
-                    restart_state=restart_state,
-                    restart_wout_path=restart_wout_path,
-                    restart_solver_state=restart_solver_state,
-                    cli_fixed_boundary_mode=bool(cli_fixed_boundary_mode),
-                    solver_device=str(solver_device_name),
-                    _auto_cli_fixed_boundary_mode=bool(_auto_cli_fixed_boundary_mode),
-                    _solver_device_context_active=True,
-                )
-            if routed_run.result is not None:
-                diag = dict(getattr(routed_run.result, "diagnostics", {}) or {})
-                diag["solver_device"] = str(solver_device_name)
-                diag["solver_device_auto_reroute"] = (str(solver_device or "auto").strip().lower() == "auto")
-                diag["solver_device_requested_backend"] = str(backend_for_device)
-                routed_run = replace(routed_run, result=replace(routed_run.result, diagnostics=diag))
-            return routed_run
+    if routed_run is not None:
+        return routed_run
     if grid is None and solver_lower in ("vmec_lbfgs", "vmec_gn", "vmec2000_iter"):
         from .vmec_tomnsp import vmec_angle_grid
 

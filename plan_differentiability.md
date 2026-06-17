@@ -7469,3 +7469,63 @@ Completion:
 - Implicit residual-adjoint decomposition: 88%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.67%.
+
+## 2026-06-17 Solver-Device Reroute Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Confirmed the previous pushed tranche (`6f0655f`) had a green PR CI run
+   before starting the next driver refactor step.
+2. Moved the CPU/GPU solver-device reroute policy out of
+   `run_fixed_boundary` and into
+   `maybe_run_fixed_boundary_in_solver_device_context` in the driver solve
+   helper module.
+3. Preserved the recursive reroute semantics, compilation-cache policy,
+   restart guards, and solver-device diagnostics while making the public driver
+   flow shorter and easier to audit.
+
+Results obtained:
+
+- `run_fixed_boundary` dropped from 1,659 to 1,637 lines.
+- Device reroute behavior now has one focused helper seam that can be unit
+  tested separately from the rest of the CLI/driver workflow.
+- Source-health still identifies the main remaining production hotspots as the
+  fixed-boundary residual iteration, optimization workflow, free-boundary
+  adjoint replay, and long validation tests.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/driver.py vmec_jax/drivers/solve.py`
+- `python -m pytest -q tests/test_driver_wave12_coverage.py::test_solver_device_reroute_wraps_recursive_run_and_adds_diagnostics tests/test_driver_wave2_coverage.py::test_solver_device_cpu_reroute_annotates_result_diagnostics tests/test_driver_wave2_coverage.py::test_solver_device_lookup_failure_falls_back_to_regular_run tests/test_driver_policy_coverage_extra.py::test_gpu_solver_device_enables_default_compilation_cache -q`
+- `python -m pytest -q tests/test_driver_wave12_coverage.py tests/test_driver_wave2_coverage.py tests/test_driver_policy_coverage_extra.py -q`
+- `python tools/diagnostics/source_health.py --top 12 --top-functions 20`
+
+Best next steps:
+
+1. Commit and push this driver extraction, then let CI validate the branch.
+2. Continue driver decomposition only at crisp policy seams; do not split the
+   driver into many small files without domain names and tests.
+3. Resume the next correctness milestone after CI: a narrow
+   fingerprint-gated adaptive-slot AD-vs-FD report for the free-boundary
+   controller.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.77%.
+- Differentiability/refactor implementation: 99.996%.
+- Solver monolith reduction: 98.24%.
+- Free-boundary adjoint monolith reduction: 82%.
+- Driver workflow decomposition: 95.2%.
+- WOUT diagnostic/profile decomposition: 98.5%.
+- Optimizer workflow decomposition: 86%.
+- Implicit residual-adjoint decomposition: 88%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.68%.
