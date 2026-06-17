@@ -44,6 +44,13 @@ from .optimizers.fixed_boundary.parameterization import indexed_boundary_maps_fr
 from .optimizers.fixed_boundary.parameterization import lift_boundary_params
 from .optimizers.fixed_boundary.parameterization import rebuild_indata_with_resolution
 from .optimizers.fixed_boundary.parameterization import truncate_indata_boundary_modes
+from .optimizers.fixed_boundary.profiling import profile_async_phase
+from .optimizers.fixed_boundary.profiling import profile_blocking_phase
+from .optimizers.fixed_boundary.profiling import profile_dump
+from .optimizers.fixed_boundary.profiling import profile_exact_tape_solver_timing
+from .optimizers.fixed_boundary.profiling import profile_solver_free_boundary_timing
+from .optimizers.fixed_boundary.profiling import profile_solver_timing
+from .optimizers.fixed_boundary.profiling import sync_replay_timing_enabled
 from .optimizers.fixed_boundary.qs_residuals import make_qh_residuals_fn as _make_qh_residuals_fn_impl
 from .optimizers.fixed_boundary.qs_residuals import make_qs_residuals_fn as _make_qs_residuals_fn_impl
 from .optimizers.fixed_boundary.scalar_gradient import exact_objective_and_gradient
@@ -51,6 +58,25 @@ from .optimizers.fixed_boundary.scalar_lbfgs import run_lbfgs_adjoint_exact_opti
 from .optimizers.fixed_boundary.scalar_trust import run_scalar_trust_exact_optimizer
 from .optimizers.fixed_boundary.scipy_least_squares import run_scipy_dense_exact_optimizer
 from .optimizers.fixed_boundary.scipy_least_squares import run_scipy_matrix_free_exact_optimizer
+from .optimizers.fixed_boundary.state_cache import base_params_vector
+from .optimizers.fixed_boundary.state_cache import boundary_from_params
+from .optimizers.fixed_boundary.state_cache import boundary_from_params_numpy
+from .optimizers.fixed_boundary.state_cache import boundary_input_from_params
+from .optimizers.fixed_boundary.state_cache import cached_exact_residual
+from .optimizers.fixed_boundary.state_cache import cached_exact_state
+from .optimizers.fixed_boundary.state_cache import cached_trial_residual
+from .optimizers.fixed_boundary.state_cache import callback_point_id
+from .optimizers.fixed_boundary.state_cache import exact_cache_key
+from .optimizers.fixed_boundary.state_cache import indata_from_params
+from .optimizers.fixed_boundary.state_cache import initial_state_from_params
+from .optimizers.fixed_boundary.state_cache import initial_tangent_cache_key
+from .optimizers.fixed_boundary.state_cache import remember_best_exact_point
+from .optimizers.fixed_boundary.state_cache import remember_exact_jacobian
+from .optimizers.fixed_boundary.state_cache import remember_exact_residual
+from .optimizers.fixed_boundary.state_cache import remember_exact_state
+from .optimizers.fixed_boundary.state_cache import remember_initial_state
+from .optimizers.fixed_boundary.state_cache import remember_trial_residual
+from .optimizers.fixed_boundary.state_cache import state_matches_params
 from .profiles import eval_profiles
 from .state import VMECState
 from .static import VMECStatic
@@ -92,14 +118,6 @@ class FixedBoundaryContext:
     pressure: jnp.ndarray
     booz_inputs: BoozXformInputs
 
-
-_EXACT_TAPE_BUILD_TIMING_PROFILE_NAMES = (
-    ("tape_solve_call_s", "exact_tape_build_solve_call"),
-    ("tape_final_state_pack_s", "exact_tape_build_final_state_pack"),
-    ("tape_step_trace_extract_s", "exact_tape_build_step_trace_extract"),
-    ("tape_dynamic_payload_build_s", "exact_tape_build_dynamic_payload"),
-    ("tape_trace_stack_s", "exact_tape_build_trace_stack"),
-)
 
 def _optimizer_backend_name(solver_device_name: str | None) -> str:
     """Return the active optimizer backend name without changing device policy."""
@@ -888,50 +906,7 @@ class FixedBoundaryExactOptimizer:
         rec["wall_time_s"] = float(rec["wall_time_s"]) + float(value)
 
     def _profile_solver_free_boundary_timing(self, diagnostics, *, profile_prefix: str) -> None:
-        if not isinstance(diagnostics, dict):
-            return
-
-        def _sum_time(key: str) -> float | None:
-            if key not in diagnostics:
-                return None
-            try:
-                arr = np.asarray(diagnostics.get(key), dtype=float).reshape(-1)
-            except Exception:
-                return None
-            arr = arr[np.isfinite(arr)]
-            if arr.size == 0:
-                return None
-            return float(np.sum(arr))
-
-        def _count_nonzero(key: str) -> int | None:
-            if key not in diagnostics:
-                return None
-            try:
-                arr = np.asarray(diagnostics.get(key), dtype=int).reshape(-1)
-            except Exception:
-                return None
-            if arr.size == 0:
-                return None
-            return int(np.count_nonzero(arr))
-
-        for key, suffix in (
-            ("freeb_nestor_sample_time_history", "freeb_nestor_sample"),
-            ("freeb_nestor_solve_time_history", "freeb_nestor_solve"),
-            ("freeb_nestor_trial_sample_time_history", "freeb_nestor_trial_sample"),
-            ("freeb_nestor_trial_solve_time_history", "freeb_nestor_trial_solve"),
-        ):
-            value = _sum_time(key)
-            if value is not None:
-                self._profile_add(f"{profile_prefix}_{suffix}", value)
-        for key, suffix in (
-            ("freeb_full_update_history", "freeb_nestor_full_update_count"),
-            ("freeb_nestor_reused_history", "freeb_nestor_reused_count"),
-            ("freeb_nestor_trial_reused_history", "freeb_nestor_trial_reused_count"),
-            ("freeb_nestor_trial_failed_history", "freeb_nestor_trial_failed_count"),
-        ):
-            value = _count_nonzero(key)
-            if value is not None:
-                self._profile_add_counter(f"{profile_prefix}_{suffix}", value)
+        return profile_solver_free_boundary_timing(self, diagnostics, profile_prefix=profile_prefix)
 
     def _profile_solver_timing(
         self,
@@ -941,193 +916,28 @@ class FixedBoundaryExactOptimizer:
         phase_wall_s: float,
         unattributed_name: str | None,
     ) -> float:
-        if not isinstance(diagnostics, dict):
-            return 0.0
-        timing = diagnostics.get("timing")
-        if not isinstance(timing, dict):
-            self._profile_solver_free_boundary_timing(diagnostics, profile_prefix=profile_prefix)
-            return 0.0
-        solver_total = 0.0
-        timing_keys = (
-            ("solve_total_s", "solve_total"),
-            ("setup_total_s", "setup_total"),
-            ("setup_axis_reset_s", "setup_axis_reset"),
-            ("setup_axis_reset_compute_forces_s", "setup_axis_reset_compute_forces"),
-            ("setup_axis_reset_unattributed_s", "setup_axis_reset_unattributed"),
-            ("setup_unattributed_s", "setup_unattributed"),
-            ("iteration_loop_s", "iteration_loop"),
-            ("iteration_prepare_s", "iteration_prepare"),
-            ("compute_forces_s", "compute_forces"),
-            ("compute_forces_first_s", "compute_forces_first"),
-            ("compute_forces_rest_s", "compute_forces_rest"),
-            ("iteration_residual_metrics_s", "iteration_residual_metrics"),
-            ("preconditioner_s", "preconditioner"),
-            ("iteration_control_s", "iteration_control"),
-            ("iteration_control_fsq1_s", "iteration_control_fsq1"),
-            ("iteration_control_fsq1_precond_norm_s", "iteration_control_fsq1_precond_norm"),
-            ("iteration_control_fsq1_scalar_build_s", "iteration_control_fsq1_scalar_build"),
-            ("iteration_control_fsq1_payload_get_s", "iteration_control_fsq1_payload_get"),
-            ("iteration_control_fsq1_direct_get_s", "iteration_control_fsq1_direct_get"),
-            ("iteration_control_fsq1_unattributed_s", "iteration_control_fsq1_unattributed"),
-            ("iteration_control_badjac_s", "iteration_control_badjac"),
-            ("iteration_control_badjac_ptau_get_s", "iteration_control_badjac_ptau_get"),
-            ("iteration_control_badjac_state_jacobian_s", "iteration_control_badjac_state_jacobian"),
-            ("iteration_control_badjac_unattributed_s", "iteration_control_badjac_unattributed"),
-            ("iteration_control_vmec_time_s", "iteration_control_vmec_time"),
-            ("iteration_control_restart_s", "iteration_control_restart"),
-            ("iteration_control_evolve_s", "iteration_control_evolve"),
-            ("iteration_control_unattributed_s", "iteration_control_unattributed"),
-            ("precond_refresh_s", "precond_refresh"),
-            ("precond_apply_s", "preconditioner_apply"),
-            ("precond_mode_scale_s", "preconditioner_mode_scale"),
-            ("update_s", "update"),
-            ("update_state_s", "update_state"),
-            ("update_trace_build_s", "update_trace_build"),
-            ("update_trace_finalize_s", "update_trace_finalize"),
-            ("iteration_post_update_s", "iteration_post_update"),
-            ("iteration_loop_unattributed_s", "iteration_loop_unattributed"),
-            ("finalize_s", "finalize"),
-            ("scan_total_s", "scan_total"),
-            ("scan_setup_s", "scan_setup"),
-            ("scan_initial_compute_forces_s", "scan_initial_compute_forces"),
-            ("scan_axis_reset_compute_forces_s", "scan_axis_reset_compute_forces"),
-            ("scan_run_setup_s", "scan_run_setup"),
-            ("scan_runner_cache_lookup_s", "scan_runner_cache_lookup"),
-            ("scan_runner_cache_build_s", "scan_runner_cache_build"),
-            ("scan_preflight_s", "scan_preflight"),
-            ("scan_device_run_s", "scan_device_run"),
-            ("scan_device_dispatch_s", "scan_device_dispatch"),
-            ("scan_device_ready_s", "scan_device_ready"),
-            ("scan_runner_cache_hit_device_run_s", "scan_runner_cache_hit_device_run"),
-            ("scan_runner_cache_hit_dispatch_s", "scan_runner_cache_hit_dispatch"),
-            ("scan_runner_cache_hit_ready_s", "scan_runner_cache_hit_ready"),
-            ("scan_runner_cache_miss_device_run_s", "scan_runner_cache_miss_device_run"),
-            ("scan_runner_cache_miss_dispatch_s", "scan_runner_cache_miss_dispatch"),
-            ("scan_runner_cache_miss_ready_s", "scan_runner_cache_miss_ready"),
-            ("scan_runner_cache_bypass_device_run_s", "scan_runner_cache_bypass_device_run"),
-            ("scan_runner_cache_bypass_dispatch_s", "scan_runner_cache_bypass_dispatch"),
-            ("scan_runner_cache_bypass_ready_s", "scan_runner_cache_bypass_ready"),
-            ("scan_host_materialize_s", "scan_host_materialize"),
-            ("scan_postprocess_s", "scan_postprocess"),
-            ("scan_unattributed_s", "scan_unattributed"),
+        return profile_solver_timing(
+            self,
+            diagnostics,
+            profile_prefix=profile_prefix,
+            phase_wall_s=phase_wall_s,
+            unattributed_name=unattributed_name,
         )
-        counter_keys = (
-            ("scan_runner_cache_hit_count", "scan_runner_cache_hit_count"),
-            ("scan_runner_cache_miss_count", "scan_runner_cache_miss_count"),
-            ("scan_runner_cache_bypass_count", "scan_runner_cache_bypass_count"),
-        )
-        outer_solver_total_keys = {"setup_total_s", "iteration_loop_s", "finalize_s", "scan_total_s"}
-        fallback_solver_total_keys = {"compute_forces_s", "preconditioner_s", "update_s", "scan_total_s"}
-        has_outer_solver_total = any(key in timing for key in outer_solver_total_keys)
-        for key, suffix in timing_keys:
-            if key not in timing:
-                continue
-            try:
-                value = float(timing.get(key, 0.0))
-            except Exception:
-                continue
-            self._profile_add(f"{profile_prefix}_{suffix}", value)
-            if key in (outer_solver_total_keys if has_outer_solver_total else fallback_solver_total_keys):
-                solver_total += max(0.0, value)
-        for key, suffix in counter_keys:
-            if key not in timing:
-                continue
-            try:
-                value = int(timing.get(key, 0))
-            except Exception:
-                continue
-            self._profile_add_counter(f"{profile_prefix}_{suffix}", value)
-        self._profile_solver_free_boundary_timing(diagnostics, profile_prefix=profile_prefix)
-        for key, value_raw in sorted(timing.items()):
-            if not (str(key).startswith("scan_runner_cache_miss_category_") and str(key).endswith("_count")):
-                continue
-            try:
-                value = int(value_raw)
-            except Exception:
-                continue
-            self._profile_add_counter(f"{profile_prefix}_{key}", value)
-        if unattributed_name is not None:
-            self._profile_add(unattributed_name, max(0.0, float(phase_wall_s) - solver_total))
-        return solver_total
 
     def _profile_exact_tape_solver_timing(self, tape, tape_build_wall_s: float) -> None:
-        diagnostics = getattr(tape, "diagnostics", None)
-        solver_total = self._profile_solver_timing(
-            diagnostics,
-            profile_prefix="exact_tape_solver",
-            phase_wall_s=tape_build_wall_s,
-            unattributed_name=None,
-        )
-        timing = diagnostics.get("timing") if isinstance(diagnostics, dict) else None
-        build_leaf_total = 0.0
-        has_solve_call_timer = False
-        if isinstance(timing, dict):
-            for key, profile_name in _EXACT_TAPE_BUILD_TIMING_PROFILE_NAMES:
-                if key not in timing:
-                    continue
-                try:
-                    value = float(timing.get(key, 0.0))
-                except Exception:
-                    continue
-                self._profile_add(profile_name, value)
-                build_leaf_total += max(0.0, value)
-                if key == "tape_solve_call_s":
-                    has_solve_call_timer = True
-        attributed = build_leaf_total if has_solve_call_timer else solver_total + build_leaf_total
-        self._profile_add("exact_tape_build_unattributed", max(0.0, float(tape_build_wall_s) - attributed))
+        return profile_exact_tape_solver_timing(self, tape, tape_build_wall_s)
 
     def _profile_dump(self) -> dict[str, dict[str, float | int]]:
-        out: dict[str, dict[str, float | int]] = {}
-        for name, rec in sorted(self._profile.items()):
-            count = int(rec.get("count", 0))
-            total = float(rec.get("wall_time_s", 0.0))
-            out[name] = {
-                "count": count,
-                "wall_time_s": total,
-                "mean_wall_time_s": total / count if count else 0.0,
-            }
-        return out
+        return profile_dump(self)
 
     def _sync_replay_timing_enabled(self) -> bool:
-        flag = os.getenv("VMEC_JAX_OPT_SYNC_REPLAY_TIMING", "").strip().lower()
-        return flag not in ("", "0", "false", "no", "off")
+        return sync_replay_timing_enabled()
 
     def _profile_async_phase(self, name: str, start: float, value):
-        """Record dispatch time, optionally synchronizing for device-ready timing."""
-
-        dispatch_s = time.perf_counter() - float(start)
-        self._profile_add(f"{name}_dispatch", dispatch_s)
-        total_s = dispatch_s
-        if self._sync_replay_timing_enabled():
-            try:
-                from ._compat import jax as _jax
-
-                t_ready = time.perf_counter()
-                value = _jax.block_until_ready(value)
-                ready_s = time.perf_counter() - t_ready
-            except Exception:
-                ready_s = 0.0
-            self._profile_add(f"{name}_ready", ready_s)
-            total_s += ready_s
-        self._profile_add(name, total_s)
-        return value
+        return profile_async_phase(self, name, start, value)
 
     def _profile_blocking_phase(self, name: str, start: float, value):
-        """Record dispatch and mandatory device-ready timing for a blocking callback phase."""
-
-        dispatch_s = time.perf_counter() - float(start)
-        self._profile_add(f"{name}_dispatch", dispatch_s)
-        try:
-            from ._compat import jax as _jax
-
-            t_ready = time.perf_counter()
-            value = _jax.block_until_ready(value)
-            ready_s = time.perf_counter() - t_ready
-        except Exception:
-            ready_s = 0.0
-        self._profile_add(f"{name}_ready", ready_s)
-        self._profile_add(name, dispatch_s + ready_s)
-        return value
+        return profile_blocking_phase(self, name, start, value)
 
     def _make_residuals_eval_fn(self, residuals_fn: Callable) -> Callable:
         """Return the non-differentiating residual evaluator used by callbacks."""
@@ -1148,15 +958,7 @@ class FixedBoundaryExactOptimizer:
         return np.asarray(fn(state), dtype=float)
 
     def _callback_point_id(self, cache_key: bytes) -> int:
-        point_ids = getattr(self, "_callback_point_ids", None)
-        if point_ids is None:
-            self._callback_point_ids = {}
-            point_ids = self._callback_point_ids
-        point_id = point_ids.get(cache_key)
-        if point_id is None:
-            point_id = len(point_ids)
-            point_ids[cache_key] = point_id
-        return int(point_id)
+        return callback_point_id(self, cache_key)
 
     def _trace_callback_event(
         self,
@@ -1196,54 +998,18 @@ class FixedBoundaryExactOptimizer:
         }
 
     def _exact_cache_key(self, params) -> bytes:
-        return np.asarray(params, dtype=float).reshape(-1).tobytes()
+        return exact_cache_key(params)
 
     def _remember_initial_state(self, params, state: VMECState) -> None:
-        cache = getattr(self, "_initial_state_cache", None)
-        if cache is None:
-            self._initial_state_cache = OrderedDict()
-            cache = self._initial_state_cache
-        cache_key = self._exact_cache_key(params)
-        cache[cache_key] = state
-        cache.move_to_end(cache_key)
-        max_size = max(0, int(getattr(self, "_initial_state_cache_max", 0)))
-        while max_size and len(cache) > max_size:
-            cache.popitem(last=False)
-        if max_size == 0:
-            cache.clear()
+        return remember_initial_state(self, params, state)
 
     def _initial_state_from_params(self, params, *, profile_name: str) -> VMECState:
-        cache_key = self._exact_cache_key(params)
-        cache = getattr(self, "_initial_state_cache", None)
-        if cache is not None and cache_key in cache:
-            state0 = cache.pop(cache_key)
-            cache[cache_key] = state0
-            self._profile_add(f"{profile_name}_cache_hit", 0.0)
-            return state0
-
-        t_guess = time.perf_counter()
-        state0 = self._initial_state_from_params_jit(params)
-        if state0 is None:
-            boundary_now = self._boundary_from_params(params)
-            axis_override = getattr(self, "_initial_axis_override", None)
-            if axis_override is None:
-                state0 = initial_guess_from_boundary(
-                    self._static,
-                    boundary_now,
-                    self._indata,
-                    vmec_project=True,
-                )
-            else:
-                state0 = initial_guess_from_boundary(
-                    self._static,
-                    boundary_now,
-                    self._indata,
-                    vmec_project=True,
-                    axis_override=axis_override,
-                )
-        self._remember_initial_state(params, state0)
-        self._profile_add(profile_name, time.perf_counter() - t_guess)
-        return state0
+        return initial_state_from_params(
+            self,
+            params,
+            profile_name=profile_name,
+            initial_guess_from_boundary_func=initial_guess_from_boundary,
+        )
 
     def _use_jit_initial_state(self) -> bool:
         flag = os.getenv("VMEC_JAX_OPT_JIT_INITIAL_STATE")
@@ -1309,32 +1075,16 @@ class FixedBoundaryExactOptimizer:
         return flag in ("1", "true", "yes", "on")
 
     def _remember_exact_state(self, cache_key: bytes, state: VMECState) -> None:
-        self._exact_state_cache = {cache_key: state}
-        if not hasattr(self, "_exact_state_key_by_id"):
-            self._exact_state_key_by_id = {}
-        self._exact_state_key_by_id[id(state)] = cache_key
-        residual_cache = getattr(self, "_exact_residual_cache", None)
-        if residual_cache is not None and cache_key not in residual_cache:
-            residual_cache.clear()
+        return remember_exact_state(self, cache_key, state)
 
     def _state_matches_params(self, state: VMECState, params) -> bool:
-        """Return true when *state* is a known exact solve for *params*."""
-
-        state_keys = getattr(self, "_exact_state_key_by_id", {})
-        return state_keys.get(id(state)) == self._exact_cache_key(params)
+        return state_matches_params(self, state, params)
 
     def _remember_exact_residual(self, cache_key: bytes, residual: np.ndarray) -> None:
-        self._exact_residual_cache = {cache_key: np.asarray(residual, dtype=float).reshape(-1).copy()}
+        return remember_exact_residual(self, cache_key, residual)
 
     def _remember_exact_jacobian(self, cache_key: bytes, jacobian: np.ndarray, residual: np.ndarray) -> None:
-        """Keep the most recent dense accepted-point Jacobian for same-point callbacks."""
-
-        self._exact_jacobian_cache = {
-            cache_key: (
-                np.asarray(jacobian, dtype=float).copy(),
-                np.asarray(residual, dtype=float).reshape(-1).copy(),
-            )
-        }
+        return remember_exact_jacobian(self, cache_key, jacobian, residual)
 
     def _remember_best_exact_point(
         self,
@@ -1344,28 +1094,7 @@ class FixedBoundaryExactOptimizer:
         *,
         state: VMECState | None = None,
     ) -> None:
-        """Track the best exact accepted-point residual seen during one run."""
-
-        residual_arr = np.asarray(residual, dtype=float).reshape(-1)
-        if cost is None:
-            cost = 0.5 * float(np.dot(residual_arr, residual_arr))
-        if not np.isfinite(float(cost)) or not np.all(np.isfinite(residual_arr)):
-            return
-        if float(cost) < float(getattr(self, "_best_exact_cost", math.inf)):
-            cache_key = self._exact_cache_key(params)
-            self._best_exact_cost = float(cost)
-            self._best_exact_params = np.asarray(params, dtype=float).reshape(-1).copy()
-            self._best_exact_residual = residual_arr.copy()
-            best_state = state
-            if best_state is not None and not self._state_matches_params(best_state, params):
-                best_state = None
-            if best_state is None:
-                exact_cache = getattr(self, "_exact_cache", {})
-                if cache_key in exact_cache:
-                    best_state = exact_cache[cache_key][0]
-                else:
-                    best_state = getattr(self, "_exact_state_cache", {}).get(cache_key)
-            self._best_exact_state = best_state
+        return remember_best_exact_point(self, params, residual, cost, state=state)
 
     def _exact_history_accepts(self, cost: float) -> bool:
         """Return whether an exact callback row should enter accepted history."""
@@ -1384,164 +1113,34 @@ class FixedBoundaryExactOptimizer:
         *,
         cache_key: bytes | None = None,
     ) -> np.ndarray | None:
-        if cache_key is None:
-            if params is None:
-                return None
-            cache_key = self._exact_cache_key(params)
-        last_key = getattr(self, "_last_jacobian_key", [None])[0]
-        if last_key == cache_key and getattr(self, "_last_jacobian_residual", None) is not None:
-            return np.asarray(self._last_jacobian_residual, dtype=float).reshape(-1)
-        cache = getattr(self, "_exact_residual_cache", None)
-        if cache is not None and cache_key in cache:
-            self._profile_add("exact_residual_cache_hit", 0.0)
-            return np.asarray(cache[cache_key], dtype=float).reshape(-1)
-        return None
+        return cached_exact_residual(self, params, cache_key=cache_key)
 
     def _cached_exact_state(self, params):
-        cache_key = self._exact_cache_key(params)
-        if cache_key in self._exact_cache:
-            state = self._exact_cache[cache_key][0]
-            self._remember_exact_state(cache_key, state)
-            self._profile_add("exact_cache_hit", 0.0)
-            return state
-        if cache_key in getattr(self, "_exact_state_cache", {}):
-            self._profile_add("exact_state_cache_hit", 0.0)
-            state = self._exact_state_cache[cache_key]
-            self._remember_exact_state(cache_key, state)
-            return state
-        return None
+        return cached_exact_state(self, params)
 
     def _cached_trial_residual(self, params) -> np.ndarray | None:
-        cache_key = self._exact_cache_key(params)
-        cache = getattr(self, "_trial_residual_cache", None)
-        if cache is None or cache_key not in cache:
-            return None
-        residual = cache.pop(cache_key)
-        cache[cache_key] = residual
-        self._profile_add("trial_residual_cache_hit", 0.0)
-        return np.asarray(residual, dtype=float)
+        return cached_trial_residual(self, params)
 
     def _remember_trial_residual(self, params, residual: np.ndarray) -> None:
-        cache_key = self._exact_cache_key(params)
-        cache = getattr(self, "_trial_residual_cache", None)
-        if cache is None:
-            self._trial_residual_cache = OrderedDict()
-            cache = self._trial_residual_cache
-        cache[cache_key] = np.asarray(residual, dtype=float).copy()
-        cache.move_to_end(cache_key)
-        max_size = max(0, int(getattr(self, "_trial_residual_cache_max", 0)))
-        while max_size and len(cache) > max_size:
-            cache.popitem(last=False)
-        if max_size == 0:
-            cache.clear()
+        return remember_trial_residual(self, params, residual)
 
     def _boundary_from_params(self, params):
-        from ._compat import jnp as _jnp
-
-        boundary = apply_boundary_params(
-            self._boundary_input if self._boundary_input is not None else self._boundary,
-            self._specs,
-            _jnp.asarray(params, dtype=_jnp.float64),
-        )
-        if self._boundary_input is None:
-            return boundary
-        from .boundary import boundary_from_input_convention
-
-        return boundary_from_input_convention(
-            boundary,
-            self._static.modes,
-            lasym=bool(self._static.cfg.lasym),
-            apply_m1_constraint=False,
-        )
+        return boundary_from_params(self, params)
 
     def _boundary_from_params_numpy(self, params) -> BoundaryCoeffs:
-        """Host-side boundary update for cache keys and other non-AD logic."""
-        boundary = _apply_boundary_params_numpy(
-            self._boundary_input if self._boundary_input is not None else self._boundary,
-            self._specs,
-            np.asarray(params, dtype=float),
-        )
-        if self._boundary_input is None:
-            return boundary
-        from .boundary import boundary_from_input_convention
-
-        return boundary_from_input_convention(
-            boundary,
-            self._static.modes,
-            lasym=bool(self._static.cfg.lasym),
-            apply_m1_constraint=False,
-        )
+        return boundary_from_params_numpy(self, params)
 
     def _boundary_input_from_params(self, params) -> BoundaryCoeffs:
-        """Boundary coefficients in VMEC input convention for ``params``."""
-        from ._compat import jnp as _jnp
-
-        base_boundary = self._boundary_input if self._boundary_input is not None else self._boundary
-        return apply_boundary_params(
-            base_boundary,
-            self._specs,
-            _jnp.asarray(params, dtype=_jnp.float64),
-        )
+        return boundary_input_from_params(self, params)
 
     def _initial_tangent_cache_key(self, params):
-        """Cache key for affine initial-state tangent maps.
-
-        With the accepted-point magnetic axis frozen, VMEC's initial state is
-        affine in the boundary coefficients except for the discrete theta-flip
-        branch.  Keep one tangent map per flip branch so Jacobian callbacks do
-        not re-linearize the same initialization graph at every accepted point.
-        """
-        from .init_guess import _vmec_lflip_from_boundary
-
-        try:
-            boundary = self._boundary_from_params_numpy(np.asarray(params, dtype=float))
-        except Exception:
-            try:
-                boundary = self._boundary_from_params(params)
-            except Exception:
-                return None
-        try:
-            lflip = _vmec_lflip_from_boundary(self._static, boundary)
-        except Exception:
-            return None
-        if lflip is None:
-            lflip = False
-        return (
-            int(np.asarray(params).size),
-            bool(lflip),
-            bool(self._boundary_input is not None),
-            bool(self._static.cfg.lasym),
-            int(self._static.cfg.ns),
-            int(self._static.modes.K),
-        )
+        return initial_tangent_cache_key(self, params)
 
     def _indata_from_params(self, params) -> InData:
-        """Return a VMEC namelist with boundary coefficients updated for ``params``."""
-        boundary_input = self._boundary_input_from_params(params)
-        indexed = {name: dict(values) for name, values in self._indata.indexed.items()}
-        indexed.update(_indexed_boundary_maps_from_boundary(boundary_input, self._static.modes))
-        return InData(
-            scalars=dict(self._indata.scalars),
-            indexed=indexed,
-            source_path=self._indata.source_path,
-        )
+        return indata_from_params(self, params)
 
     def _base_params_vector(self) -> np.ndarray:
-        """Return the reference free coefficients aligned with ``self._specs``."""
-        boundary = self._boundary_input if self._boundary_input is not None else self._boundary
-        base = np.empty(len(self._specs), dtype=float)
-        for idx, spec in enumerate(self._specs):
-            if spec.kind == "rc":
-                base[idx] = float(boundary.R_cos[spec.index])
-            elif spec.kind == "rs":
-                base[idx] = float(boundary.R_sin[spec.index])
-            elif spec.kind == "zc":
-                base[idx] = float(boundary.Z_cos[spec.index])
-            elif spec.kind == "zs":
-                base[idx] = float(boundary.Z_sin[spec.index])
-            else:  # pragma: no cover - guarded by boundary_param_specs
-                raise ValueError(f"Unknown boundary parameter kind '{spec.kind}'")
-        return base
+        return base_params_vector(self)
 
     def _solve_forward(self, params, *, trial: bool = False):
         """Run a forward equilibrium solve."""

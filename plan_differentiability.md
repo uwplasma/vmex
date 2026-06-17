@@ -7827,6 +7827,75 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.72%.
 
+## 2026-06-17 Fixed-Boundary Optimizer Profiling and State Cache Split
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Extracted fixed-boundary exact-optimizer timing aggregation into
+   `vmec_jax.optimizers.fixed_boundary.profiling`.
+2. Kept the existing `_profile_*` optimizer methods as thin compatibility
+   wrappers so tests and downstream profiling scripts can continue to bind
+   those method names directly.
+3. Extracted accepted-point state caches, trial/exact residual caches,
+   callback point ids, boundary reconstruction, VMEC-input reconstruction,
+   base-parameter vectors, and initial-state cache handling into
+   `vmec_jax.optimizers.fixed_boundary.state_cache`.
+4. Preserved monkeypatch seams used by the test suite:
+   module-level `initial_guess_from_boundary` still controls fallback initial
+   states, module-level `boundary.boundary_from_input_convention` is looked up
+   at runtime, and overridden optimizer cache-key methods remain authoritative.
+
+Results obtained:
+
+- `vmec_jax/optimization.py` dropped from 3,516 to 3,115 lines in this
+  optimizer tranche.
+- The exact optimizer class is now more focused on solve orchestration,
+  Jacobian/replay methods, and public optimizer callbacks rather than timing
+  bucket parsing and cache bookkeeping.
+- Source-health now reports `optimization.py` below the 3,200-line mark; the
+  largest remaining production monoliths are the fixed-boundary residual loop,
+  free-boundary adjoint module, workflow facade, discrete adjoint, and
+  free-boundary driver.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/optimization.py vmec_jax/optimizers/fixed_boundary/profiling.py tests/test_optimization_callback_trace.py tests/test_optimization_wave4_coverage.py tests/test_optimization_wave2_coverage.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_optimization_callback_trace.py tests/test_optimization_wave4_coverage.py tests/test_optimization_wave2_coverage.py -q`
+- `python -m ruff check vmec_jax/optimization.py vmec_jax/optimizers/fixed_boundary/state_cache.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_optimization_wave2_coverage.py tests/test_optimization_fast_optimizer_methods.py tests/test_optimization_callback_trace.py tests/test_optimization_helpers.py -q`
+- `python tools/diagnostics/source_health.py --top 12 --top-functions 20`
+
+Best next steps:
+
+1. Continue the fixed-boundary optimizer split by extracting scan exact-helper
+   construction and JVP-only exact tape policy into domain helpers, preserving
+   wrappers for existing tests.
+2. Continue workflow decomposition after the optimizer class is below the next
+   source-health threshold.
+3. Run the combined optimizer/workflow shard after the next tranche.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.90%.
+- Differentiability/refactor implementation: 99.9985%.
+- Solver monolith reduction: 98.50%.
+- Free-boundary adjoint monolith reduction: 82%.
+- Driver workflow decomposition: 96.4%.
+- WOUT diagnostic/profile decomposition: 98.8%.
+- Optimizer workflow decomposition: 94.7%.
+- Fixed-boundary optimizer decomposition: 91.8%.
+- Implicit residual-adjoint decomposition: 88%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.84%.
+
 ## 2026-06-17 Fixed-Boundary Seed/Input Workflow Extraction
 
 Branch: `codex/differentiability-refactor-plan`.
