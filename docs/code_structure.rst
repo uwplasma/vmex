@@ -163,8 +163,11 @@ Refactoring direction
 
 The current code intentionally preserves VMEC2000 semantics, but several
 translation-era modules are now too large for long-term research development.
-Use ``plan_differentiability.md`` as the source of truth for the staged
-refactor.  Before starting a large extraction, run:
+Use ``plan_differentiability.md`` as the active single source of truth for the
+staged differentiability/refactor plan.  ``plan_freeb.md`` is the detailed
+free-boundary evidence log; ``plan.md`` and
+``discrete_adjoint_2506_plan.md`` are historical/reference plans.  Before
+starting a large extraction, run:
 
 .. code-block:: bash
 
