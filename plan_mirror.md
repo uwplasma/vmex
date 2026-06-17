@@ -270,7 +270,10 @@ vmec_jax/
         api.py                  run_mirror_fixed_boundary
         continuation.py         pressure/resolution/stage continuation
         nonlinear.py            residual/energy solve orchestration
-        optimizers.py           LBFGS/GN/GD adapters, optional JAXopt adapter
+        types.py                optimizer options, step, run, diagnostics payloads
+        reduced.py              reduced-coordinate masks, packing, scaling, bounds
+        preconditioners.py      residual preconditioners, adaptive inner budgets
+        optimizers.py           high-level GD/L-BFGS-B/residual-Newton dispatch
         checkpoints.py          restart payloads, deterministic artifacts
         diagnostics.py          trace rows, residual histories, shape guards
 
@@ -3765,6 +3768,152 @@ new Python test file itself is formatted.
 - Mirror-Boozer-like diagnostics: `15%`.
 - Free-boundary mirror lane: `5%`.
 - PR merge readiness overall: `60%`.
+
+### User input needed
+
+No user input is needed for the next lane.
+
+---
+
+## 46. 2026-06-17 M8n fixed-boundary optimizer file simplification
+
+This lane implements the no-behavior-change solver-file simplification planned
+in section 43.  The goal is to make the fixed-boundary solver easier to audit
+and extend before adding stronger finite-current preconditioners.
+
+### Steps taken
+
+- Split `vmec_jax/mirror/solvers/fixed_boundary/optimizers.py` into focused
+  support modules:
+  - `types.py`: `OptimizerOptions`, `OptimizerStep`, `OptimizerRun`, and
+    `_CandidateDiagnostics`;
+  - `reduced.py`: reduced-coordinate masks, packing/unpacking, bounds,
+    coordinate scaling, and reduced energy/gradient helpers;
+  - `preconditioners.py`: residual-preconditioner key parsing, tridiagonal
+    smoothers, and adaptive residual-linear-budget policy;
+  - `optimizers.py`: high-level projected-gradient, L-BFGS-B,
+    residual-Newton, candidate acceptance, and run-summary dispatch.
+- Preserved compatibility by re-exporting the existing optimizer helper names
+  from `optimizers.py`, including private names currently used by tests.
+- Updated `api.py` so `MirrorSolveOptions` imports `OptimizerOptions` directly
+  from `types.py` instead of from the larger optimizer dispatch module.
+- Updated `docs/code_structure.rst` and the early package-structure block in
+  this plan to show the new fixed-boundary solver files.
+- Regenerated a lightweight solver-comparison artifact at:
+  `results/mirror/solver_comparison_refactor_m8n/`.
+
+### Results obtained
+
+- `optimizers.py` shrank from `1337` lines to `841` lines.
+- New support modules:
+  - `reduced.py`: `324` lines;
+  - `preconditioners.py`: `143` lines;
+  - `types.py`: `81` lines.
+- The refactor keeps solver behavior unchanged in the checked cases:
+  - cylinder residual Newton:
+    `1.523117825e-02 -> 5.610231716e-17`;
+  - manufactured residual Newton:
+    `9.638224761e-03 -> 3.109010554e-15`;
+  - cylinder L-BFGS-B:
+    `1.523117825e-02 -> 4.342638898e-07`;
+  - short cylinder gradient descent:
+    `1.523117825e-02 -> 1.248964815e-02`.
+- The regenerated residual-history and 3D cylinder plots render correctly, with
+  horizontal `z` geometry and visible standard mirror plot content.
+- Mirror source coverage remains at `95%` after adding the new modules.
+
+### How it was tested
+
+Commands run:
+
+```bash
+ruff format vmec_jax/mirror/solvers/fixed_boundary/optimizers.py \
+  vmec_jax/mirror/solvers/fixed_boundary/reduced.py \
+  vmec_jax/mirror/solvers/fixed_boundary/preconditioners.py \
+  vmec_jax/mirror/solvers/fixed_boundary/types.py
+ruff check vmec_jax/mirror/solvers/fixed_boundary/optimizers.py \
+  vmec_jax/mirror/solvers/fixed_boundary/reduced.py \
+  vmec_jax/mirror/solvers/fixed_boundary/preconditioners.py \
+  vmec_jax/mirror/solvers/fixed_boundary/types.py \
+  vmec_jax/mirror/solvers/fixed_boundary/api.py
+ruff format --check vmec_jax/mirror/solvers/fixed_boundary/optimizers.py \
+  vmec_jax/mirror/solvers/fixed_boundary/reduced.py \
+  vmec_jax/mirror/solvers/fixed_boundary/preconditioners.py \
+  vmec_jax/mirror/solvers/fixed_boundary/types.py \
+  vmec_jax/mirror/solvers/fixed_boundary/api.py
+JAX_ENABLE_X64=1 python -m pytest -q \
+  tests/mirror/test_mirror_low_level_coverage.py \
+  tests/mirror/test_mirror_fixed_boundary_axisym.py
+JAX_ENABLE_X64=1 python -m pytest -q \
+  tests/mirror/test_mirror_fixed_boundary_3d.py \
+  tests/mirror/test_mirror_examples.py::test_root_residual_newton_convergence_grid_finite_current_reports_lambda_residual
+JAX_ENABLE_X64=1 python examples/mirror_solver_comparison.py \
+  --outdir results/mirror/solver_comparison_refactor_m8n \
+  --cases cylinder,manufactured \
+  --maxiter-gd 4 \
+  --maxiter-lbfgs 20 \
+  --maxiter-newton 8 \
+  --residual-linear-maxiter 16 \
+  --residual-linear-maxiter-policy adaptive
+LC_ALL=C.UTF-8 LANG=C.UTF-8 SPHINX_FAST=1 python -m sphinx -W -j auto -b html docs docs/_build/html
+JAX_ENABLE_X64=1 python -m pytest -q tests/mirror tests/test_packaging_metadata.py
+ruff check .
+JAX_ENABLE_X64=1 coverage erase
+JAX_ENABLE_X64=1 coverage run --source=vmec_jax -m pytest -q tests/mirror tests/test_packaging_metadata.py
+coverage report --skip-covered --include='vmec_jax/mirror/*'
+coverage report --skip-covered --include='vmec_jax/mirror/solvers/fixed_boundary/*'
+```
+
+Passing results:
+
+- low-level plus axisymmetric fixed-boundary slice: `16 passed`;
+- 3D fixed-boundary plus finite-current example smoke: `5 passed`;
+- full mirror/package smoke: `89 passed, 1 skipped`;
+- instrumented mirror/package coverage run: `89 passed, 1 skipped`;
+- mirror source coverage: `95%`;
+- fixed-boundary solver-module coverage: `91%`;
+- fast docs build: passed with warnings as errors;
+- `ruff check .`: passed;
+- focused format checks: passed.
+
+### File structure and best-practice notes
+
+- This is intentionally a behavior-neutral split.  The high-level optimizer
+  functions still live in `optimizers.py` and call the same reduced-coordinate,
+  preconditioner, and residual-Newton logic as before.
+- New modules follow the existing fixed-boundary solver package instead of
+  creating root-level mirror helper files.
+- The reduced-coordinate module explains the packed vector in plain terms:
+  interior radius nodes plus gauge-fixed lambda nodes.
+- The preconditioner module is now isolated, which is the right place to add
+  cap-aware and finite-current lambda preconditioning next.
+- Compatibility re-exports keep existing tests and downstream imports working
+  while allowing future code to import directly from the focused modules.
+
+### Best next steps
+
+1. Commit and push the M8n simplification to the draft PR.
+2. Confirm GitHub CI and combined coverage stay green.
+3. Start M8o: use the simplified preconditioner module to improve
+   finite-current residual-Newton convergence, focusing on the lambda-dominated
+   residual from M8m.
+4. Add a tight, low-resolution finite-current convergence gate only after the
+   solver actually reaches tolerance without excessive inner iterations.
+
+### Completion percentages after M8n
+
+- Geometry/grids/bases: `90%`.
+- Field/energy/residual kernels: `82%`.
+- Fixed-boundary axisymmetric solve: `78%`.
+- Residual Newton / preconditioning: `70%`.
+- Two-coil and manufactured validation: `73%`.
+- Finite-current pitch validation: `52%`.
+- Plotting and `vmec --plot` mirror support: `77%`.
+- I/O schema and docs: `71%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `15%`.
+- Free-boundary mirror lane: `5%`.
+- PR merge readiness overall: `64%`.
 
 ### User input needed
 

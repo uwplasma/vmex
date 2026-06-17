@@ -30,7 +30,9 @@ Top-level package layout (selected):
 - ``vmec_jax/mirror/``: experimental open-ended mirror geometry domain package;
   first phases keep grids, bases, kernels, solvers, I/O, plotting, validation,
   and optimization under this package rather than adding root-level
-  ``mirror_*`` helpers
+  ``mirror_*`` helpers.  The fixed-boundary solver keeps reduced-coordinate
+  packing, residual preconditioners, optimizer dataclasses, and high-level
+  optimizer dispatch in separate ``solvers/fixed_boundary`` modules.
 - ``vmec_jax/plotting.py``: VMEC-style geometry, ``|B|`` contour, Boozer-grid,
   objective-history, and publication-panel plotting helpers
 - ``vmec_jax/wout.py``: minimal ``wout_*.nc`` reader for regression

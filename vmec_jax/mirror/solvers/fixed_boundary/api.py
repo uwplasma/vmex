@@ -15,7 +15,7 @@ from ...kernels.constraints import project_axisym_state, project_state_3d
 from .continuation import pressure_stage_profiles
 from .diagnostics import FixedBoundaryOptimizerSummary, FixedBoundaryTraceRow, trace_row_from_state
 from .nonlinear import solve_3d_fixed_boundary_stage, solve_axisym_fixed_boundary_stage
-from .optimizers import OptimizerOptions
+from .types import OptimizerOptions
 
 
 @dataclass(frozen=True)
