@@ -787,11 +787,38 @@ def same_branch_derivative_proposal_from_report(
 def same_branch_derivative_gate_evidence(report: dict[str, Any]) -> dict[str, Any]:
     """Return compact gate evidence attached to derivative-assisted proposals."""
 
+    vector = report.get("branch_local_vector_jacobian", {})
+    replay_flags = vector.get("replay_option_flags", {}) if isinstance(vector, dict) else {}
+    current_only_cache = report.get("current_only_coil_geometry_cache", {})
     vector_gate = report.get("branch_local_vector_gate", {})
     physical_gate = vector_gate.get("physical_scalar_gate", {}) if isinstance(vector_gate, dict) else {}
     rejected_slot_gate = report.get("accepted_rejected_controller_slot_gate", {})
     rejected_slot_requested = isinstance(rejected_slot_gate, dict) and bool(rejected_slot_gate.get("requested", False))
     return {
+        "directional_jvp_fast_path": str(
+            vector.get("directional_jvp_fast_path", replay_flags.get("directional_jvp_fast_path", "none"))
+            if isinstance(vector, dict)
+            else "none"
+        ),
+        "directional_uses_fixed_coil_geometry": bool(
+            vector.get(
+                "directional_uses_fixed_coil_geometry",
+                replay_flags.get("directional_uses_fixed_coil_geometry", False),
+            )
+            if isinstance(vector, dict)
+            else False
+        ),
+        "current_only_coil_geometry_cache_available": bool(
+            isinstance(current_only_cache, dict) and current_only_cache.get("available", False)
+        ),
+        "current_only_coil_geometry_cache_reason": str(
+            current_only_cache.get("reason", "") if isinstance(current_only_cache, dict) else ""
+        ),
+        "current_only_coil_geometry_source": str(
+            replay_flags.get("current_only_coil_geometry_source", "")
+            if isinstance(replay_flags, dict)
+            else ""
+        ),
         "branch_local_vector_gate_available": bool(
             isinstance(vector_gate, dict) and vector_gate.get("available", False)
         ),

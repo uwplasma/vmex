@@ -57,6 +57,50 @@ Completion:
 - Docs/release hygiene: 100%.
 - QI minimal-seed README artifacts: 100%.
 
+### 2026-06-17 Derivative-Proposal Fast-Path Provenance
+
+Steps taken:
+
+1. Added branch-local vector/JVP fast-path provenance to
+   ``same_branch_derivative_gate_evidence``.
+2. Exposed whether a derivative-assisted proposal used the current-only JVP
+   fast path, fixed coil geometry, and cached current-only coil geometry.
+3. Kept the proposal contract unchanged: branch-local derivatives only propose
+   a trial, while complete free-boundary solves remain the acceptance authority.
+
+Results obtained:
+
+1. ``python -m ruff check`` passed for the touched example and tests.
+2. Targeted proposal/cache tests passed.
+3. ``JAX_ENABLE_X64=1 python -m pytest -q
+   tests/test_free_boundary_qs_coil_optimization_smoke.py
+   tests/test_free_boundary_qa_finite_beta_coil_optimization_smoke.py -q``
+   passed with 33 pass and 1 expected xfail.
+
+Best next steps:
+
+1. Commit and push this provenance update.
+2. Continue phase-3 evidence by running the coil-only QS example with
+   ``--same-branch-derivative-proposal --max-fourier-vars 0`` and checking the
+   summary records both complete-solve acceptance and current-only fast-path
+   evidence.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999997%.
+- VMEC parity and physics gates: 99.9%.
+- Single-stage coil-only optimization phase 3: 99.985%.
+- CPU/GPU performance: 99.57%.
+- CI/runtime/coverage hygiene: 100% locally for this shard; awaiting GitHub CI
+  for the latest branch head after push.
+- Docs/release hygiene: 100%.
+- QI minimal-seed README artifacts: 100%.
+
 ### 2026-06-17 Current-Only Coil Geometry Cache for Same-Branch Reports
 
 Steps taken:
