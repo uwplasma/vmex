@@ -1709,6 +1709,7 @@ def test_qi_and_qs_object_wrappers_build_terms_without_solves(monkeypatch) -> No
 
 def test_state_objective_wrappers_use_monkeypatched_state_helpers(monkeypatch) -> None:
     import vmec_jax.optimization_workflow as workflow
+    import vmec_jax.optimizers.fixed_boundary.finite_beta_objectives as finite_beta_objectives
 
     ctx = SimpleNamespace(
         static=SimpleNamespace(s=np.asarray([0.0, 0.5, 1.0])),
@@ -1723,8 +1724,8 @@ def test_state_objective_wrappers_use_monkeypatched_state_helpers(monkeypatch) -
         assert kwargs["static"] is ctx.static
         return {"vp": np.asarray([4.0, 2.0]), "volavgB": 2.5, "betatotal": 0.03}
 
-    monkeypatch.setattr(workflow, "finite_beta_scalars_from_state", fake_finite_beta_scalars_from_state)
-    monkeypatch.setattr(workflow, "magnetic_well_from_vp", lambda vp: 0.05)
+    monkeypatch.setattr(finite_beta_objectives, "finite_beta_scalars_from_state", fake_finite_beta_scalars_from_state)
+    monkeypatch.setattr(finite_beta_objectives, "magnetic_well_from_vp", lambda vp: 0.05)
 
     well = workflow.MagneticWell(minimum=0.10, softness=0.01)
     assert float(np.asarray(well.J(ctx, "state"))) > 0.0
@@ -1756,7 +1757,7 @@ def test_state_objective_wrappers_use_monkeypatched_state_helpers(monkeypatch) -
             "ip": np.asarray([3.0, 4.0, 5.0]),
         }
 
-    monkeypatch.setattr(workflow, "mercier_terms_from_state", fake_mercier_terms_from_state)
+    monkeypatch.setattr(finite_beta_objectives, "mercier_terms_from_state", fake_mercier_terms_from_state)
 
     dmerc = workflow.DMerc(minimum=0.0, softness=0.01, mmax_force=2, nmax_force=3)
     assert np.asarray(dmerc.J(ctx, "state")).shape == (1,)
@@ -1779,7 +1780,7 @@ def test_state_objective_wrappers_use_monkeypatched_state_helpers(monkeypatch) -
     np.testing.assert_allclose(np.asarray(j_vector.J(ctx, "state")), [2.0, 6.0, 0.0, 0.0])
 
     monkeypatch.setattr(
-        workflow,
+        finite_beta_objectives,
         "b_cartesian_from_state",
         lambda state, static, **kwargs: np.asarray([[1.0, 2.0, 3.0]]) if state == "state" and static is ctx.static else None,
     )
