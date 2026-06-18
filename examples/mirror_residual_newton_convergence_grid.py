@@ -50,7 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--residual-linear-solver",
         type=str,
         default="lsmr",
-        choices=("lsmr", "lsqr", "dense_lstsq", "block_dense_lstsq"),
+        choices=("lsmr", "lsqr", "dense_lstsq", "block_dense_lstsq", "block_lsmr"),
         help="Linear solver for each residual-Newton correction; dense_lstsq is intended for small reference grids.",
     )
     parser.add_argument(

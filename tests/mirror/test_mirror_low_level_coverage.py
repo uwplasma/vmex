@@ -189,6 +189,8 @@ def test_low_level_field_energy_residual_and_optimizer_guards():
         _residual_linear_solver_key("bad")
     assert _residual_linear_solver_key("lsqr") == "lsqr"
     assert _residual_linear_solver_key("block_dense_lstsq") == "block_dense_lstsq"
+    assert _residual_linear_solver_key("block_lsmr") == "block_lsmr"
+    assert _residual_linear_solver_key("split_lsmr") == "block_lsmr"
     with pytest.raises(ValueError):
         _sanitize_scale([1.0, 2.0], expected_size=3)
     with pytest.raises(ValueError):

@@ -46,6 +46,8 @@ def _residual_linear_solver_key(value: str) -> str:
         return "dense_lstsq"
     if key in {"block_dense_lstsq", "dense_block_lstsq", "block_lstsq", "block_dense"}:
         return "block_dense_lstsq"
+    if key in {"block_lsmr", "split_lsmr", "block_matrix_free_lsmr"}:
+        return "block_lsmr"
     raise ValueError(f"unsupported mirror residual linear solver {value!r}")
 
 
