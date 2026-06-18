@@ -14529,3 +14529,111 @@ The new evidence run completed with VMEC2000 return code `0`, parsed `80`
 No user input is needed.
 
 ---
+
+## 115. 2026-06-18 M14 toroidal hybrid accelerated solve evidence
+
+### Steps taken
+
+After validating VMEC/JAX parity against VMEC2000 for the upgraded rotating
+ellipse fixture, I ran the accelerated CLI-style path on the same input to check
+whether the production/default path reaches a deeper residual at similar cost.
+
+### Results obtained
+
+Command run:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_hybrid_m115_accelerated80 \
+  --ns-array 7 \
+  --mode-pairs 5:20 \
+  --ntheta-fit 64 \
+  --nzeta-fit 64 \
+  --shape-cases default \
+  --run-solve \
+  --max-iter 80 \
+  --nstep 1 \
+  --solver-mode accelerated \
+  --use-scan
+```
+
+Observed:
+
+- solver mode: `accelerated`;
+- scan path: `True`;
+- CLI finish/fallback policy: `True`;
+- runtime recorded by the example: `6.118939124979079 s`;
+- stored rows: `66`;
+- first stored `fsq`: `4.9979943890699955e-6`;
+- best/final `fsq`: `2.7719123357593158e-9` at row `65`;
+- reduction from first stored row: `1803.09x`;
+- strict per-component convergence: `False`;
+- total-`fsq` convergence: `True`;
+- final residual components:
+  - `fsqr = 1.2743019453850022e-9`;
+  - `fsqz = 8.910607448490252e-10`;
+  - `fsql = 6.065496455252883e-10`;
+- mean iota: `0.014897818141733415`;
+- magnetic well proxy: `-0.06343611260202262`.
+
+Compared with the M114 parity/VMEC2000 evidence, the accelerated path uses a
+different boundary-inferred initialization and reaches the total-`fsq` target
+within the same small-run wall-time range.  This supports keeping the fast CLI
+path distinct from the raw parity path: parity is for VMEC2000 control-flow
+audits, while accelerated mode is the practical solve mode for examples.
+
+Rendered ignored plots:
+
+- `results/toroidal_hybrid_m115_accelerated80/figures/toroidal_hybrid_fsq_history.png`;
+- `results/toroidal_hybrid_m115_accelerated80/figures/toroidal_hybrid_profiles.png`;
+- `results/toroidal_hybrid_m115_accelerated80/figures/toroidal_hybrid_orientation_preservation.png`.
+
+### How it was tested
+
+This was an evidence-only tranche using code already tested in M113/M114.  The
+accelerated solve completed, wrote a WOUT, and rendered the plots above.  PR
+checks were queried before the run and GitHub reported no checks for the branch
+at that moment.
+
+### File structure and best-practice notes
+
+- No source changes were needed.
+- Evidence stays under ignored `results/`.
+- The plan records the command and metrics so the result can be reproduced
+  without storing large artifacts in git.
+
+### Best next steps
+
+1. Commit and push the M115 plan evidence.
+2. Resume the circular-coil finite-beta/free-boundary lane:
+   - run finite-beta fixed-boundary baselines for 1%, 3%, and 10%;
+   - add LCFS pilot tolerance/stagnation termination;
+   - compare cross-beta LCFS metrics after actual iterations.
+3. After the free-boundary lane is stable, return to differentiable
+   solved-state/implicit derivative promotion.
+4. Keep PR checks non-blocking; inspect only failing logs when they appear.
+
+### Completion percentages after M115
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `87%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `90%`.
+- I/O schema and docs: `97%`.
+- Differentiable solved-state API: `30%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `74%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `66%`.
+- PR merge readiness overall: `95%`.
+
+### User input needed
+
+No user input is needed.
+
+---
