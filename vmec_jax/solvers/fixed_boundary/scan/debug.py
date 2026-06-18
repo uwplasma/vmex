@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 import numpy as np
 
+from ...._compat import jnp
 from ..diagnostics.io import (
     _format_axis_coeff,
     _format_time_control_trace_row,
@@ -241,6 +242,60 @@ def _emit_vmec2000_iter_row(
         ordered=bool(scan_print_ordered),
     )
     return True
+
+
+def emit_live_scan_vmec2000_row(
+    *,
+    enabled: bool,
+    sample_vmec: Any,
+    iter_idx: Any,
+    fsqr: Any,
+    fsqz: Any,
+    fsql: Any,
+    delt0r: Any,
+    r00: Any,
+    w_mhd: Any,
+    scan_print_mode: str,
+    scan_print_ordered: bool,
+    jax_debug: Any | None,
+    io_callback: Any | None,
+    cond: Callable[..., Any],
+    emit_iter_row: Callable[..., Any] = _emit_vmec2000_iter_row,
+    print_row: Callable[..., Any] = _print_vmec2000_row,
+) -> Any:
+    """Emit one live VMEC scan row inside a JAX conditional when requested."""
+
+    if not bool(enabled):
+        return None
+
+    def _do_print(_):
+        emit_iter_row(
+            iter_idx=iter_idx,
+            fsqr=fsqr,
+            fsqz=fsqz,
+            fsql=fsql,
+            delt0r=delt0r,
+            r00=r00,
+            w_mhd=w_mhd,
+            lasym=False,
+            verbose=True,
+            vmec2000_control=True,
+            verbose_vmec2000_table=True,
+            print_live=True,
+            scan_print_mode=scan_print_mode,
+            scan_print_ordered=bool(scan_print_ordered),
+            jax_debug=jax_debug,
+            io_callback=io_callback,
+            print_row=print_row,
+        )
+        return jnp.asarray(0, dtype=jnp.int32)
+
+    return cond(
+        sample_vmec,
+        _do_print,
+        lambda _: jnp.asarray(0, dtype=jnp.int32),
+        operand=None,
+    )
 
 
 def _axis_guess_lines(raxis_cc: Any, zaxis_cs: Any) -> tuple[str, str, str, str]:

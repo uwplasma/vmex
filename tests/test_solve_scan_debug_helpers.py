@@ -10,6 +10,7 @@ from vmec_jax.solvers.fixed_boundary.scan.debug import (
     _axis_guess_lines,
     dump_vmec2000_scan_ptau_rows,
     emit_vmec2000_post_scan_rows,
+    emit_live_scan_vmec2000_row,
     maybe_debug_scan_force_first_iter,
     maybe_debug_scan_state_iter,
     _emit_vmec2000_iter_row,
@@ -110,6 +111,57 @@ def test_emit_vmec2000_iter_row_uses_plain_print_fallback_and_controls():
     )
     assert rows[0]["lasym"] is True
     assert np.isnan(rows[0]["z00"])
+
+
+def test_emit_live_scan_vmec2000_row_uses_conditional_wrapper():
+    rows = []
+
+    def cond(pred, true_fun, false_fun, operand=None):
+        return true_fun(operand) if bool(pred) else false_fun(operand)
+
+    assert (
+        emit_live_scan_vmec2000_row(
+            enabled=False,
+            sample_vmec=True,
+            iter_idx=2,
+            fsqr=1.0,
+            fsqz=2.0,
+            fsql=3.0,
+            delt0r=0.1,
+            r00=1.2,
+            w_mhd=4.0,
+            scan_print_mode="debug_print",
+            scan_print_ordered=False,
+            jax_debug=None,
+            io_callback=None,
+            cond=cond,
+            print_row=lambda **kwargs: rows.append(kwargs),
+        )
+        is None
+    )
+    assert rows == []
+
+    result = emit_live_scan_vmec2000_row(
+        enabled=True,
+        sample_vmec=True,
+        iter_idx=3,
+        fsqr=1.0,
+        fsqz=2.0,
+        fsql=3.0,
+        delt0r=0.1,
+        r00=1.2,
+        w_mhd=4.0,
+        scan_print_mode="debug_print",
+        scan_print_ordered=False,
+        jax_debug=None,
+        io_callback=None,
+        cond=cond,
+        print_row=lambda **kwargs: rows.append(kwargs),
+    )
+
+    assert int(result) == 0
+    assert rows[0]["iter_idx"] == 3
+    assert rows[0]["lasym"] is False
 
 
 @pytest.mark.parametrize("lasym", [False, True])
