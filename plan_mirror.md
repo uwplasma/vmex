@@ -17765,3 +17765,147 @@ Results:
 No user input is needed.
 
 ---
+## 143. Guarded Circular-Coil Free-Boundary Beta-Scan Evidence Run
+
+### Steps taken
+
+- Checked local branch state and draft PR #21 status.
+- Confirmed GitHub CLI authentication and checked the latest PR status rollup.
+- Ran the circular-coil mirror free-boundary example with:
+  - `ntheta=8`;
+  - `nxi=11`;
+  - `n_segments=64`;
+  - fixed-boundary baseline enabled;
+  - LCFS pilot enabled for up to five guarded steps;
+  - stagnation tolerance `1e-3`;
+  - fsq-growth guard `1.1`.
+- Validated the emitted metrics with the example's schema validator.
+- Inspected the rendered beta-scan summary, horizontal 3D coil/boundary plot,
+  LCFS diagnostic, and residual-history plot.
+
+### Results obtained
+
+- Output metrics:
+  `results/mirror/free_boundary_circular_coils_m143_schema03_guard1p1/free_boundary_circular_coils_metrics.json`.
+- Metrics schema version: `0.3`.
+- Workflow status: `lcfs_pilot`.
+- Free-boundary status:
+  `lcfs_pilot_not_converged_free_boundary`.
+- Pilot totals:
+  - rows attempted: `5`;
+  - accepted rows: `2`;
+  - skipped rows: `0`;
+  - stop reasons: one `rejected_merit_increase`, two
+    `fsq_growth_guard`, and two active rows with no stop reason.
+- Per-beta summary:
+  - `1%`: fixed-boundary fsq `7.181025259848037e-08`; first LCFS
+    trial rejected because the merit increased; final trial fsq-growth ratio
+    `12498.631673700875`.
+  - `3%`: fixed-boundary fsq `0.004468220052785157`; one accepted LCFS
+    update; last accepted fsq `0.004709131909718425`; fsq-growth ratio
+    `1.0539167395712978`; next trial stopped by the fsq-growth guard.
+  - `10%`: fixed-boundary fsq `0.04263091618797516`; one accepted LCFS
+    update; last accepted fsq `0.046665979566329834`; fsq-growth ratio
+    `1.0946511062666966`; next trial stopped by the fsq-growth guard.
+- The beta-scan summary plot shows that the LCFS pilot improves pressure
+  balance and LCFS merit for `3%` and `10%`, but the coupled fixed-boundary
+  residual grows enough that the guard correctly rejects further progress.
+- The horizontal 3D plot shows the mirror boundary with `z` horizontal and the
+  circular coils at both end caps.
+- The LCFS diagnostic shows that the current pilot remains mostly a
+  scalar-radius pressure-balance update; this is useful but not yet a fully
+  coupled free-boundary solve.
+
+### How it was tested
+
+Commands run:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/mirror_free_boundary_circular_coils.py \
+    --outdir results/mirror/free_boundary_circular_coils_m143_schema03_guard1p1 \
+    --ntheta 8 --nxi 11 --n-segments 64 \
+    --run-fixed-boundary-baseline --baseline-maxiter 20 \
+    --run-lcfs-pilot --lcfs-pilot-steps 5 \
+    --lcfs-pilot-stagnation-rtol 1e-3 \
+    --lcfs-pilot-fsq-growth-limit 1.1
+
+python - <<'PY'
+import json, runpy
+from pathlib import Path
+m = json.loads(Path(
+    "results/mirror/free_boundary_circular_coils_m143_schema03_guard1p1/"
+    "free_boundary_circular_coils_metrics.json"
+).read_text())
+mod = runpy.run_path("examples/mirror_free_boundary_circular_coils.py")
+mod["validate_circular_coil_beta_scan_metrics"](m)
+print("validated", m["metrics_schema_version"], len(m["summary_rows"]))
+PY
+
+find results/mirror/free_boundary_circular_coils_m143_schema03_guard1p1/figures \
+  -maxdepth 3 -type f -name '*.png' -print | sort
+
+gh auth status
+gh pr view 21 --json number,isDraft,headRefName,headRefOid,url,statusCheckRollup
+```
+
+Results:
+
+- The example completed and wrote the metrics JSON.
+- The metrics validator passed with `validated 0.3 3`.
+- The expected figure tree was present, including:
+  - beta-scan summary;
+  - axis `B_z`;
+  - boundary `|B|`;
+  - horizontal coil/boundary geometry;
+  - per-beta fixed-boundary diagnostics;
+  - per-step LCFS diagnostics.
+- The PR remains draft.
+- The CI snapshot showed completed checks green so far, with other checks still
+  running and no failure conclusion reported in that snapshot.
+
+### File structure and best-practice notes
+
+- No generated metrics or figures were added to git; they remain under ignored
+  `results/`.
+- The root example remains the single entry point for the ESSOS-style circular
+  coil beta scan.
+- The schema validator remains inside the example so downstream scripts and
+  tests can reuse the same contract.
+- The plot set remains organized by run and by beta/LCFS pilot step, which keeps
+  root-level examples clean while still making diagnostics easy to inspect.
+
+### Best next steps
+
+1. Commit and push this M143 plan log.
+2. Add or improve the coupled free-boundary update strategy so that pressure
+   balance improvement and reduced-equilibrium residual reduction are solved
+   together instead of competing under a guard.
+3. Add a local regression that exercises a small guarded LCFS pilot and asserts
+   the schema, status fields, and at least one accepted/rejected update path.
+4. Keep the final production beta-scan evidence ignored in `results/`, with
+   compressed figures only if any image must be included in docs.
+
+### Completion percentages after M143
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `91%`.
+- Fixed-boundary axisymmetric solve: `91%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `89%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `92%`.
+- I/O schema and docs: `99%`.
+- Differentiable solved-state API: `92%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `88%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `91%`.
+- PR merge readiness overall: `97%`.
+
+### User input needed
+
+No user input is needed.
+
+---
