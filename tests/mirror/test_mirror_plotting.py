@@ -23,6 +23,7 @@ from vmec_jax.mirror.plotting.bfield import mirror_bfield_boundary_data, mirror_
 from vmec_jax.mirror.plotting.bfield import mirror_boundary_field_line_data
 from vmec_jax.mirror.plotting.diagnostics import (
     mirror_boozer_like_diagnostics_data,
+    mirror_boozer_like_summary_metrics,
     mirror_field_line_pitch_profile_data,
     mirror_jacobian_data,
     mirror_pressure_profile_data,
@@ -67,6 +68,7 @@ def test_mirror_plot_data_helpers_expose_numerical_content(tmp_path):
     pitch = mirror_field_line_pitch_profile_data(output)
     radial = mirror_radial_diagnostics_data(output)
     boozer_like = mirror_boozer_like_diagnostics_data(output)
+    boozer_summary = mirror_boozer_like_summary_metrics(output)
     history = mirror_residual_history_data(output)
 
     assert surfaces.radii.shape == (4, output.nxi)
@@ -95,6 +97,10 @@ def test_mirror_plot_data_helpers_expose_numerical_content(tmp_path):
     assert np.allclose(boozer_like.field_line_turns, pitch.turns_mean)
     assert np.allclose(boozer_like.contravariant_pitch_mean, 0.0)
     assert np.allclose(boozer_like.contravariant_pitch_rms, 0.0)
+    assert boozer_summary["boozer_like_surface_mirror_ratio_max"] == pytest.approx(
+        float(np.max(boozer_like.surface_mirror_ratio))
+    )
+    assert boozer_summary["boozer_like_field_line_turns_mean"] == pytest.approx(0.0)
     assert np.allclose(history.residual_norm, output.history.residual_norm)
     assert np.allclose(history.fsq, output.history.fsq)
     assert np.allclose(history.normalized_force, output.history.normalized_force)

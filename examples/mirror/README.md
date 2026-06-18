@@ -36,6 +36,10 @@ production ``mout`` file.  These are research fixtures for the scalar-pressure
 fixed-boundary mirror path, not WHAM predictive modelling tools.  For
 physically axisymmetric mirrors use the cylinder, flared-tube, or WHAM
 examples; the nonaxisymmetric example is a solver/plot stress test.
+The two-coil and finite-current root examples also record compact
+mirror-Boozer-like extrema in their metrics JSON files so no-plot benchmark
+runs still retain surface-average ``|B|``, ripple, mirror-ratio, pitch, and
+well-proxy summaries.
 
 The same standard figure bundle is available from the CLI:
 

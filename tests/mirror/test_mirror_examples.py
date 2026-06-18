@@ -84,13 +84,15 @@ def test_root_two_coil_axisym_example_runs_without_plots(tmp_path):
 
     mout = Path(completed.stdout.strip())
     output = load_mirror_output(mout)
-    metrics = (mout.parent / "two_coil_axisym_metrics.json").read_text()
+    metrics = json.loads((mout.parent / "two_coil_axisym_metrics.json").read_text())
     assert output.ntheta == 1
     assert output.diagnostics.min_sqrtg > 0.0
     assert output.diagnostics.fsq >= 0.0
     assert output.diagnostics.active_force_dof > 0
     assert "axis_bz_relative_linf" in metrics
     assert "off_axis_br_relative_linf" in metrics
+    assert metrics["boozer_like_surface_mirror_ratio_max"] >= 1.0
+    assert metrics["boozer_like_field_line_turns_mean"] == pytest.approx(0.0)
 
 
 def test_root_finite_current_pitch_example_runs_without_plots(tmp_path):
@@ -122,6 +124,8 @@ def test_root_finite_current_pitch_example_runs_without_plots(tmp_path):
     assert np.min(theta_advance) > 1.0
     assert np.min(pitch.turns_mean) > 0.0
     assert metrics["field_line_theta_advance_mean"] > 1.0
+    assert metrics["boozer_like_field_line_turns_mean"] > 0.0
+    assert metrics["boozer_like_contravariant_pitch_rms_max"] >= 0.0
 
 
 def test_root_free_boundary_vector_ls_benchmark_runs_without_plots(tmp_path):

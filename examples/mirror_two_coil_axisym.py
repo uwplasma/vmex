@@ -30,6 +30,7 @@ from vmec_jax.mirror import (
     write_mirror_output,
 )
 from vmec_jax.mirror.plotting.bfield import mirror_boundary_field_line_data
+from vmec_jax.mirror.plotting.diagnostics import mirror_boozer_like_summary_metrics
 from vmec_jax.mirror.plotting.geometry import mirror_boundary_3d_data
 
 
@@ -51,7 +52,7 @@ def _axis_comparison_metrics(output, analytic_bz) -> dict[str, float]:
     mirror_bz = np.asarray(output.field.b_z[0, 0], dtype=float)
     analytic_bz = np.asarray(analytic_bz, dtype=float)
     relative_error = np.abs(mirror_bz - analytic_bz) / np.maximum(np.abs(analytic_bz), np.finfo(float).tiny)
-    return {
+    metrics = {
         "axis_bz_relative_linf": float(np.max(relative_error)),
         "analytic_mirror_ratio": on_axis_mirror_ratio(analytic_bz),
         "mirror_axis_mirror_ratio": on_axis_mirror_ratio(mirror_bz),
@@ -63,6 +64,8 @@ def _axis_comparison_metrics(output, analytic_bz) -> dict[str, float]:
         "final_energy_total": float(output.diagnostics.energy_total),
         "min_sqrtg": float(output.diagnostics.min_sqrtg),
     }
+    metrics.update(mirror_boozer_like_summary_metrics(output))
+    return metrics
 
 
 def _write_axis_comparison_plot(output, analytic_bz, *, outdir: Path) -> Path:

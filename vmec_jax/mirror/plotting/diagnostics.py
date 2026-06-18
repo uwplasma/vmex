@@ -307,6 +307,33 @@ def mirror_boozer_like_diagnostics_data(output_or_path) -> MirrorBoozerLikeDiagn
     )
 
 
+def mirror_boozer_like_summary_metrics(output_or_path) -> dict[str, float]:
+    """Return scalar extrema for the mirror-Boozer-like profile diagnostics."""
+    data = mirror_boozer_like_diagnostics_data(output_or_path)
+    return {
+        "boozer_like_bmag_average_min": float(np.min(data.bmag_flux_surface_average)),
+        "boozer_like_bmag_average_max": float(np.max(data.bmag_flux_surface_average)),
+        "boozer_like_bmag_min_global": float(np.min(data.bmag_min)),
+        "boozer_like_bmag_max_global": float(np.max(data.bmag_max)),
+        "boozer_like_surface_mirror_ratio_min": float(np.min(data.surface_mirror_ratio)),
+        "boozer_like_surface_mirror_ratio_max": float(np.max(data.surface_mirror_ratio)),
+        "boozer_like_bmag_ripple_rms_max": float(np.max(data.normalized_bmag_ripple_rms)),
+        "boozer_like_iota_like_twist_mean": float(np.mean(data.iota_like_twist)),
+        "boozer_like_iota_like_twist_min": float(np.min(data.iota_like_twist)),
+        "boozer_like_iota_like_twist_max": float(np.max(data.iota_like_twist)),
+        "boozer_like_field_line_turns_mean": float(np.mean(data.field_line_turns)),
+        "boozer_like_field_line_turns_min": float(np.min(data.field_line_turns)),
+        "boozer_like_field_line_turns_max": float(np.max(data.field_line_turns)),
+        "boozer_like_contravariant_pitch_mean_min": float(np.min(data.contravariant_pitch_mean)),
+        "boozer_like_contravariant_pitch_mean_max": float(np.max(data.contravariant_pitch_mean)),
+        "boozer_like_contravariant_pitch_rms_max": float(np.max(data.contravariant_pitch_rms)),
+        "boozer_like_covariant_pitch_ratio_min": float(np.min(data.covariant_pitch_ratio)),
+        "boozer_like_covariant_pitch_ratio_max": float(np.max(data.covariant_pitch_ratio)),
+        "boozer_like_magnetic_well_proxy_min": float(np.min(data.magnetic_well_proxy)),
+        "boozer_like_magnetic_well_proxy_max": float(np.max(data.magnetic_well_proxy)),
+    }
+
+
 def write_mirror_jacobian(output_or_path, *, outdir: str | Path, name: str | None = None) -> Path:
     """Write the theta-averaged Jacobian map."""
     output = _as_output(output_or_path)

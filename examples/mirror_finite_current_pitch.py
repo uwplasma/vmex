@@ -29,6 +29,7 @@ from vmec_jax.mirror import (
     write_mirror_output,
 )
 from vmec_jax.mirror.plotting.bfield import mirror_boundary_field_line_data
+from vmec_jax.mirror.plotting.diagnostics import mirror_boozer_like_summary_metrics
 from vmec_jax.mirror.plotting.geometry import mirror_boundary_3d_data
 
 
@@ -60,7 +61,7 @@ def _pitch_metrics(output, analytic_bz) -> dict[str, float]:
             out=np.zeros_like(output.profiles.i_prime),
             where=np.abs(output.profiles.psi_prime) > 0.0,
         )
-    return {
+    metrics = {
         "axis_bz_relative_linf": float(np.max(relative_error)),
         "analytic_mirror_ratio": on_axis_mirror_ratio(analytic_bz),
         "mirror_axis_mirror_ratio": on_axis_mirror_ratio(mirror_bz),
@@ -77,6 +78,8 @@ def _pitch_metrics(output, analytic_bz) -> dict[str, float]:
         "final_energy_total": float(output.diagnostics.energy_total),
         "min_sqrtg": float(output.diagnostics.min_sqrtg),
     }
+    metrics.update(mirror_boozer_like_summary_metrics(output))
+    return metrics
 
 
 def _write_pitch_plot(output, *, outdir: Path) -> Path:
