@@ -5740,1314 +5740,6 @@ No user input is needed.
 
 ---
 
-## 89. 2026-06-18 M13f.4 initial residual component fields
-
-This tranche made the initialization difference explicit in the toroidal hybrid
-parity rows by recording initial residual components for VMEC/JAX and VMEC2000.
-
-### Steps taken
-
-- Added VMEC/JAX row fields:
-  - `initial_fsqr`;
-  - `initial_fsqz`;
-  - `initial_fsql`.
-- Added VMEC2000 `threed1` row fields:
-  - `vmec2000_initial_fsqr`;
-  - `vmec2000_initial_fsqz`;
-  - `vmec2000_initial_fsql`.
-- Kept these fields in the CSV export so initialization comparisons are table
-  driven.
-
-### Results obtained
-
-Schema smoke:
-
-```bash
-PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
-  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  --outdir results/toroidal_stellarator_mirror_hybrid_initial_components_m13j \
-  --ns-array 7 \
-  --mode-pairs 5:4 \
-  --ntheta-fit 32 \
-  --nzeta-fit 32 \
-  --niter 20 \
-  --ftol 1e-12 \
-  --run-solve \
-  --max-iter 5 \
-  --solver-mode parity \
-  --no-use-scan \
-  --run-vmec2000 \
-  --vmec2000-exec /Users/rogeriojorge/bin/xvmec2000 \
-  --no-plots
-```
-
-Result:
-
-| component | VMEC/JAX initial | VMEC2000 initial |
-| :--- | ---: | ---: |
-| total `fsq` | `1.101895164557e-02` | `7.091000000000e-02` |
-| `fsqr` | `5.710626825885e-03` | `4.280000000000e-02` |
-| `fsqz` | `3.739018993131e-03` | `5.310000000000e-03` |
-| `fsql` | `1.569305826559e-03` | `2.280000000000e-02` |
-
-For this generated toroidal hybrid input, VMEC/JAX starts from a lower residual
-than VMEC2000's first printed `threed1` row.  Most of the initial gap is in the
-radial and lambda components.  This supports treating future parity differences
-as an initialization/stopping-convention issue before changing the hybrid
-boundary model.
-
-### How it was tested
-
-Focused tests:
-
-```bash
-JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
-```
-
-Result: `5 passed in 1.95s`.
-
-Lint and format:
-
-```bash
-python -m ruff check \
-  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  tests/test_toroidal_hybrid.py
-python -m ruff format --check \
-  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  tests/test_toroidal_hybrid.py
-```
-
-Result: all checks passed and both files were formatted.
-
-Docs and whitespace:
-
-```bash
-python -m sphinx -W -j auto -b html docs docs/_build/html
-git diff --check
-```
-
-Result: docs built successfully and no whitespace errors were found.
-
-### File structure and best-practice notes
-
-- The fields are schema additions to the convergence workflow only.
-- No core solver behavior changed.
-- Generated validation output remains ignored under `results/`.
-
-### Best next steps
-
-1. Commit and push this initialization-component schema update.
-2. Add one concise initialization-parity note to the root example or docs after
-   running the next mode-pair parity row.
-3. Proceed to M13g geometry refinement once parity behavior is documented
-   across `mpol=5,ntor=4` and `mpol=6,ntor=5`.
-
-### Completion percentages after M89
-
-- Geometry/grids/bases: `93%`.
-- Field/energy/residual kernels: `86%`.
-- Fixed-boundary axisymmetric solve: `89%`.
-- Residual Newton / preconditioning: `91%`.
-- Two-coil and manufactured validation: `83%`.
-- Finite-current pitch validation: `82%`.
-- Plotting and `vmec --plot` mirror support: `88%`.
-- I/O schema and docs: `93%`.
-- Differentiable solved-state API: `20%`.
-- Mirror-Boozer-like diagnostics: `36%`.
-- Free-boundary mirror lane: `67%`.
-- Straight-axis hybrid fixture lane: `25%`.
-- Toroidal stellarator-mirror hybrid lane: `43%`.
-- ESSOS circular-coil mirror beta scan: `53%`.
-- PR merge readiness overall: `92%`.
-
-### User input needed
-
-No user input is needed.
-
----
-
-## 88. 2026-06-18 M13f.3 parity component plot and ns=9 parity row
-
-This tranche added a side-by-side final residual component plot for VMEC/JAX
-and VMEC2000 parity rows, then ran the next radial-resolution parity case.
-
-### Steps taken
-
-- Added `toroidal_hybrid_parity_components.png` to the convergence runner when
-  both VMEC/JAX and VMEC2000 final residual components are available.
-- Updated `examples/mirror/README.md`.
-- Ran the `ns=9`, `mpol=5`, `ntor=4` parity row with:
-  - VMEC/JAX parity mode;
-  - non-scan update loop;
-  - `NITER_ARRAY=100`;
-  - VMEC/JAX `max_iter=100`;
-  - local `/Users/rogeriojorge/bin/xvmec2000`.
-
-### Results obtained
-
-Component-plot smoke:
-
-```bash
-PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
-  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  --outdir results/toroidal_stellarator_mirror_hybrid_parity_components_smoke_m13i \
-  --ns-array 7 \
-  --mode-pairs 5:4 \
-  --ntheta-fit 32 \
-  --nzeta-fit 32 \
-  --niter 20 \
-  --ftol 1e-12 \
-  --run-solve \
-  --max-iter 5 \
-  --solver-mode parity \
-  --no-use-scan \
-  --run-vmec2000 \
-  --vmec2000-exec /Users/rogeriojorge/bin/xvmec2000
-```
-
-Generated and visually checked:
-
-- `results/toroidal_stellarator_mirror_hybrid_parity_components_smoke_m13i/figures/toroidal_hybrid_parity_components.png`.
-
-For the short `ns=7` smoke, the component plot shows VMEC/JAX with the larger
-`fsqz` component and VMEC2000 with the larger `fsql` component.
-
-`ns=9` parity row:
-
-```bash
-PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
-  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  --outdir results/toroidal_stellarator_mirror_hybrid_parity_ns9_m13h \
-  --ns-array 9 \
-  --mode-pairs 5:4 \
-  --ntheta-fit 32 \
-  --nzeta-fit 32 \
-  --niter 100 \
-  --ftol 1e-12 \
-  --run-solve \
-  --max-iter 100 \
-  --solver-mode parity \
-  --no-use-scan \
-  --run-vmec2000 \
-  --vmec2000-exec /Users/rogeriojorge/bin/xvmec2000
-```
-
-Result:
-
-| diagnostic | VMEC/JAX | VMEC2000 |
-| :--- | ---: | ---: |
-| runtime | `11.049476125 s` | `0.217696958 s` |
-| best/final `fsq` | `2.055168581245e-10` | `9.160000000000e-07` |
-| best iteration | `99` | `100` |
-| final `fsqr` | `1.079914959190e-10` | `4.158481175634e-07` |
-| final `fsqz` | `4.381988014471e-11` | `3.905312682467e-07` |
-| final `fsql` | `5.370548206077e-11` | `1.088439080074e-07` |
-| mean iota | `7.329089073972e-03` | `7.370706838615e-03` |
-
-The residual-history plot was visually checked.  VMEC/JAX starts below the
-VMEC2000 printed residual level and remains lower through the recorded history,
-which indicates the remaining comparison is about initialization and stopping
-conventions as much as force-kernel parity.
-
-### How it was tested
-
-Focused tests:
-
-```bash
-JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
-```
-
-Result: `5 passed in 1.95s`.
-
-Lint and format:
-
-```bash
-python -m ruff check \
-  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  tests/test_toroidal_hybrid.py
-python -m ruff format --check \
-  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  tests/test_toroidal_hybrid.py
-```
-
-Result: all checks passed and both files were formatted.
-
-Docs and whitespace:
-
-```bash
-python -m sphinx -W -j auto -b html docs docs/_build/html
-git diff --check
-```
-
-Result: docs built successfully and no whitespace errors were found.
-
-### File structure and best-practice notes
-
-- The parity component plot remains in the root convergence example, because
-  it is workflow reporting rather than core solver logic.
-- The plot uses existing row fields and does not re-run either solver.
-- Generated plots remain under ignored `results/`.
-
-### Best next steps
-
-1. Commit and push the component plot and plan update.
-2. Add an initialization-parity diagnostic: compare VMEC/JAX initial state
-   residuals against VMEC2000's first `threed1` row and document the
-   initialization difference.
-3. Run the next mode-pair parity row (`mpol=6,ntor=5`) only after the
-   initialization comparison is explicit.
-4. Then return to M13g geometry refinement.
-
-### Completion percentages after M88
-
-- Geometry/grids/bases: `93%`.
-- Field/energy/residual kernels: `86%`.
-- Fixed-boundary axisymmetric solve: `89%`.
-- Residual Newton / preconditioning: `91%`.
-- Two-coil and manufactured validation: `83%`.
-- Finite-current pitch validation: `82%`.
-- Plotting and `vmec --plot` mirror support: `88%`.
-- I/O schema and docs: `93%`.
-- Differentiable solved-state API: `20%`.
-- Mirror-Boozer-like diagnostics: `36%`.
-- Free-boundary mirror lane: `67%`.
-- Straight-axis hybrid fixture lane: `25%`.
-- Toroidal stellarator-mirror hybrid lane: `42%`.
-- ESSOS circular-coil mirror beta scan: `53%`.
-- PR merge readiness overall: `92%`.
-
-### User input needed
-
-No user input is needed.
-
----
-
-## 87. 2026-06-18 M13f.2 convergence-target and VMEC2000 component fields
-
-This tranche made the toroidal hybrid parity rows more self-explanatory by
-recording the convergence target fields and VMEC2000 WOUT component residuals
-directly in the CSV/JSON output.
-
-### Steps taken
-
-- Added row fields:
-  - `requested_ftol`;
-  - `fsq_total_target`;
-  - `converged_strict`;
-  - `converged_by_total_fsq`.
-- Added VMEC2000 WOUT-derived fields:
-  - `vmec2000_final_fsqr`;
-  - `vmec2000_final_fsqz`;
-  - `vmec2000_final_fsql`;
-  - `vmec2000_aspect`;
-  - `vmec2000_mean_iota`.
-- Updated `examples/mirror/README.md`.
-
-### Results obtained
-
-Schema smoke:
-
-```bash
-PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
-  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  --outdir results/toroidal_stellarator_mirror_hybrid_schema_smoke_m13h \
-  --ns-array 7 \
-  --mode-pairs 5:4 \
-  --ntheta-fit 32 \
-  --nzeta-fit 32 \
-  --niter 20 \
-  --ftol 1e-12 \
-  --run-solve \
-  --max-iter 5 \
-  --solver-mode parity \
-  --no-use-scan \
-  --run-vmec2000 \
-  --vmec2000-exec /Users/rogeriojorge/bin/xvmec2000 \
-  --no-plots
-```
-
-Result:
-
-| field | value |
-| :--- | ---: |
-| `requested_ftol` | `1.0e-12` |
-| `fsq_total_target` | `None` |
-| `converged` | `false` |
-| `converged_strict` | `false` |
-| `converged_by_total_fsq` | `false` |
-| VMEC/JAX final `fsq` | `8.301471170622e-03` |
-| VMEC2000 final `fsq` | `7.770000000000e-03` |
-| VMEC2000 final `fsqr` | `4.432781063259e-03` |
-| VMEC2000 final `fsqz` | `2.310638399457e-03` |
-| VMEC2000 final `fsql` | `1.028225492522e-03` |
-| VMEC2000 mean iota | `1.000535474965e-02` |
-
-The `fsq_total_target` is intentionally `None` in parity mode; it is an
-accelerated-mode stopping field.  The strict convergence flag therefore
-continues to track the requested `ftol` convention.
-
-### How it was tested
-
-Focused tests:
-
-```bash
-JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
-```
-
-Result: `5 passed in 1.89s`.
-
-Lint and format:
-
-```bash
-python -m ruff check \
-  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  tests/test_toroidal_hybrid.py
-python -m ruff format --check \
-  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  tests/test_toroidal_hybrid.py
-```
-
-Result: all checks passed and both files were formatted.
-
-Docs and whitespace:
-
-```bash
-python -m sphinx -W -j auto -b html docs docs/_build/html
-git diff --check
-```
-
-Result: docs built successfully and no whitespace errors were found.
-
-### File structure and best-practice notes
-
-- The runner now carries enough schema to compare stopping rules without
-  re-opening WOUT files by hand.
-- VMEC2000 WOUT parsing reuses `vmec_jax.wout.read_wout`.
-- The added fields are optional and empty unless the relevant solve path runs.
-
-### Best next steps
-
-1. Commit and push the schema update.
-2. Run the `ns=9` parity row now that the row schema is complete.
-3. Add a compact parity-summary plot or table for VMEC/JAX versus VMEC2000
-   final residual components when both are present.
-4. Return to the toroidal hybrid geometry parameterization after the parity
-   summary identifies whether residual differences are solver-control or
-   geometry-resolution limited.
-
-### Completion percentages after M87
-
-- Geometry/grids/bases: `93%`.
-- Field/energy/residual kernels: `86%`.
-- Fixed-boundary axisymmetric solve: `89%`.
-- Residual Newton / preconditioning: `91%`.
-- Two-coil and manufactured validation: `83%`.
-- Finite-current pitch validation: `82%`.
-- Plotting and `vmec --plot` mirror support: `88%`.
-- I/O schema and docs: `93%`.
-- Differentiable solved-state API: `20%`.
-- Mirror-Boozer-like diagnostics: `36%`.
-- Free-boundary mirror lane: `67%`.
-- Straight-axis hybrid fixture lane: `25%`.
-- Toroidal stellarator-mirror hybrid lane: `40%`.
-- ESSOS circular-coil mirror beta scan: `53%`.
-- PR merge readiness overall: `92%`.
-
-### User input needed
-
-No user input is needed.
-
----
-
-## 86. 2026-06-18 M13f.1 VMEC/JAX solver-mode controls in convergence runner
-
-This tranche exposed solver controls in the toroidal hybrid convergence runner
-so the same generated input can be tested with the fast CLI path or a closer
-VMEC2000-control path.
-
-### Steps taken
-
-- Added `--solver-mode {default,parity,accelerated}` to
-  `examples/toroidal_stellarator_mirror_hybrid_convergence.py`.
-- Added `--use-scan` / `--no-use-scan` to the same runner.
-- Added `solver_mode` and `use_scan` columns to the CSV/JSON row outputs.
-- Updated `examples/mirror/README.md` to recommend
-  `--solver-mode parity --no-use-scan` for VMEC2000-control comparisons.
-
-### Results obtained
-
-Parity-mode, non-scan, `NITER_ARRAY=20`, VMEC/JAX capped at 20:
-
-```bash
-PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
-  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  --outdir results/toroidal_stellarator_mirror_hybrid_parity_smoke_m13g \
-  --ns-array 7 \
-  --mode-pairs 5:4 \
-  --ntheta-fit 32 \
-  --nzeta-fit 32 \
-  --niter 20 \
-  --ftol 1e-12 \
-  --run-solve \
-  --max-iter 20 \
-  --solver-mode parity \
-  --no-use-scan \
-  --run-vmec2000 \
-  --vmec2000-exec /Users/rogeriojorge/bin/xvmec2000 \
-  --no-plots
-```
-
-Result:
-
-- VMEC/JAX final `fsq=1.839147093094e-05`;
-- VMEC/JAX best `fsq=1.471854259816e-05` at iteration 18;
-- VMEC2000 final `fsq=7.770000000000e-03` at iteration 20.
-
-Parity-mode, non-scan, `NITER_ARRAY=100`, VMEC/JAX capped at 20:
-
-```bash
-PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
-  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  --outdir results/toroidal_stellarator_mirror_hybrid_parity_niter100_m13g \
-  --ns-array 7 \
-  --mode-pairs 5:4 \
-  --ntheta-fit 32 \
-  --nzeta-fit 32 \
-  --niter 100 \
-  --ftol 1e-12 \
-  --run-solve \
-  --max-iter 20 \
-  --solver-mode parity \
-  --no-use-scan \
-  --run-vmec2000 \
-  --vmec2000-exec /Users/rogeriojorge/bin/xvmec2000 \
-  --no-plots
-```
-
-Result:
-
-- VMEC/JAX final `fsq=1.839147093094e-05`;
-- VMEC2000 final `fsq=5.546000000000e-07` at iteration 100.
-
-Parity-mode, non-scan, equal `100` iteration budget:
-
-```bash
-PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
-  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  --outdir results/toroidal_stellarator_mirror_hybrid_parity_max100_m13g \
-  --ns-array 7 \
-  --mode-pairs 5:4 \
-  --ntheta-fit 32 \
-  --nzeta-fit 32 \
-  --niter 100 \
-  --ftol 1e-12 \
-  --run-solve \
-  --max-iter 100 \
-  --solver-mode parity \
-  --no-use-scan \
-  --run-vmec2000 \
-  --vmec2000-exec /Users/rogeriojorge/bin/xvmec2000 \
-  --no-plots
-```
-
-Result:
-
-| diagnostic | VMEC/JAX | VMEC2000 |
-| :--- | ---: | ---: |
-| runtime | `10.943271542 s` | `0.198557916 s` |
-| final recorded iteration | `99` | `100` |
-| best `fsq` | `1.094466932561e-10` | `5.546000000000e-07` |
-| final `fsq` | `1.094466932561e-10` | `5.546000000000e-07` |
-| final `fsqr` | `5.496583583656e-11` | not parsed as final component in row |
-| final `fsqz` | `1.881559404507e-11` | not parsed as final component in row |
-| final `fsql` | `3.566526337451e-11` | not parsed as final component in row |
-
-VMEC/JAX reduced the residual well below the VMEC2000 `threed1` final value for
-the same nominal iteration budget, but still did not mark strict convergence to
-the requested `ftol=1e-12`.  This means the next parity question is no longer
-whether the hybrid input is runnable; it is whether the VMEC/JAX strict
-convergence flag, total-`fsq` target, and VMEC2000 `FTOL` stopping conventions
-are being compared on exactly the same quantity.
-
-### How it was tested
-
-Focused tests:
-
-```bash
-JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
-```
-
-Result: `5 passed in 1.92s`.
-
-Lint and format:
-
-```bash
-python -m ruff check \
-  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  tests/test_toroidal_hybrid.py
-python -m ruff format --check \
-  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  tests/test_toroidal_hybrid.py
-```
-
-Result: all checks passed and both files were formatted.
-
-Docs and whitespace:
-
-```bash
-python -m sphinx -W -j auto -b html docs docs/_build/html
-git diff --check
-```
-
-Result: docs built successfully and no whitespace errors were found.
-
-### File structure and best-practice notes
-
-- Solver-control flags live in the convergence example, not the core
-  `vmec_jax.toroidal_hybrid` boundary helper.
-- The runner defaults remain fast (`accelerated`) while parity controls are
-  explicit.
-- The VMEC2000 path remains optional and does not affect tests or docs builds.
-
-### Best next steps
-
-1. Commit and push solver-control support.
-2. Add a row field for the requested `ftol`, the VMEC/JAX strict-convergence
-   target, and `converged_by_total_fsq` so parity tables explain why
-   `fsq=1e-10` can still be flagged as not strictly converged.
-3. Parse VMEC2000 final component values from WOUT into the VMEC2000 row fields
-   to make component comparisons first-class.
-4. Run `ns=9` parity once the row schema includes those convergence target
-   fields.
-
-### Completion percentages after M86
-
-- Geometry/grids/bases: `93%`.
-- Field/energy/residual kernels: `86%`.
-- Fixed-boundary axisymmetric solve: `89%`.
-- Residual Newton / preconditioning: `91%`.
-- Two-coil and manufactured validation: `83%`.
-- Finite-current pitch validation: `82%`.
-- Plotting and `vmec --plot` mirror support: `88%`.
-- I/O schema and docs: `93%`.
-- Differentiable solved-state API: `20%`.
-- Mirror-Boozer-like diagnostics: `36%`.
-- Free-boundary mirror lane: `67%`.
-- Straight-axis hybrid fixture lane: `25%`.
-- Toroidal stellarator-mirror hybrid lane: `38%`.
-- ESSOS circular-coil mirror beta scan: `53%`.
-- PR merge readiness overall: `92%`.
-
-### User input needed
-
-No user input is needed.
-
----
-
-## 85. 2026-06-18 M13f VMEC2000 parity hook for toroidal hybrid runner
-
-This tranche added an opt-in VMEC2000 parity path to the toroidal hybrid
-convergence runner and used it on the low-resolution generated hybrid input.
-
-### Steps taken
-
-- Added `--run-vmec2000`, `--vmec2000-exec`, and
-  `--vmec2000-timeout-s` options to
-  `examples/toroidal_stellarator_mirror_hybrid_convergence.py`.
-- Reused the existing `vmec_jax.vmec2000_exec` wrapper:
-  - copy generated `input.*` to a case-local VMEC2000 work directory;
-  - run `xvmec2000`;
-  - parse `threed1.*`;
-  - preserve local ignored VMEC2000 work products under `results/`.
-- Added VMEC/JAX component histories:
-  - `fsqr_history`;
-  - `fsqz_history`;
-  - `fsql_history`;
-  - final and best component values.
-- Added VMEC2000 row metrics:
-  - return code and runtime;
-  - parsed `threed1` path;
-  - WOUT path;
-  - iteration and `fsq` histories;
-  - initial/best/final `fsq` and best iteration.
-- Updated the residual-history plot to overlay VMEC/JAX and VMEC2000 histories.
-- Updated `examples/mirror/README.md`.
-
-### Results obtained
-
-VMEC2000 smoke command:
-
-```bash
-PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
-  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  --outdir results/toroidal_stellarator_mirror_hybrid_vmec2000_smoke_m13f \
-  --ns-array 7 \
-  --mode-pairs 5:4 \
-  --ntheta-fit 32 \
-  --nzeta-fit 32 \
-  --niter 20 \
-  --ftol 1e-12 \
-  --run-solve \
-  --max-iter 5 \
-  --run-vmec2000 \
-  --vmec2000-exec /Users/rogeriojorge/bin/xvmec2000
-```
-
-Result:
-
-| diagnostic | VMEC/JAX | VMEC2000 |
-| :--- | ---: | ---: |
-| runtime | `6.880363625 s` | `0.208919458 s` |
-| recorded rows | `5` | `2` |
-| initial `fsq` | `1.225087897344e-02` | `7.091000000000e-02` |
-| best `fsq` | `7.077559614612e-03` | `7.770000000000e-03` |
-| best iteration | `3` | `20` |
-| final `fsq` | `9.744035513153e-03` | `7.770000000000e-03` |
-| final `fsqr` | `4.402392805632e-03` | `4.432781063259e-03` |
-| final `fsqz` | `5.132793049570e-03` | `2.310638399457e-03` |
-| final `fsql` | `2.088496579511e-04` | `1.028225492522e-03` |
-
-The VMEC2000 run returned code `0` and wrote:
-
-- `results/toroidal_stellarator_mirror_hybrid_vmec2000_smoke_m13f/ns007_mpol05_ntor04/vmec2000/threed1.toroidal_stellarator_mirror_hybrid`;
-- `results/toroidal_stellarator_mirror_hybrid_vmec2000_smoke_m13f/ns007_mpol05_ntor04/vmec2000/wout_toroidal_stellarator_mirror_hybrid.nc`.
-
-The residual-history overlay was visually checked.  VMEC/JAX reaches a
-comparable best residual earlier in its recorded history, but the final row is
-slightly worse than the best row.  VMEC2000 records only the first and final
-rows in this short `threed1` output, so finer per-iteration parity requires
-either fuller VMEC2000 diagnostics or comparing final WOUT components.
-
-### How it was tested
-
-Focused tests:
-
-```bash
-JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
-```
-
-Result: `4 passed in 1.99s`.
-
-Lint and format:
-
-```bash
-python -m ruff format examples/toroidal_stellarator_mirror_hybrid_convergence.py
-python -m ruff check \
-  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  tests/test_toroidal_hybrid.py
-python -m ruff format --check \
-  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  tests/test_toroidal_hybrid.py
-```
-
-Result: one file was formatted, then lint and format checks passed.
-
-Docs and whitespace:
-
-```bash
-python -m sphinx -W -j auto -b html docs docs/_build/html
-git diff --check
-```
-
-Result: docs built successfully and no whitespace errors were found.
-
-### File structure and best-practice notes
-
-- VMEC2000 parity remains opt-in and local; CI and quick examples do not depend
-  on a system VMEC2000 executable.
-- The new code reuses the repository's existing VMEC2000 wrapper instead of
-  creating a second subprocess/parser path.
-- Parsed VMEC2000 fields are stored beside VMEC/JAX fields in the same JSON/CSV
-  row, which keeps parity studies table-driven.
-- Generated `threed1`, WOUT, and plots remain under ignored `results/`.
-
-### Best next steps
-
-1. Commit and push M13f parity-hook support.
-2. Add a small test around `_summarize_fsq_history` and VMEC2000 parser usage
-   without requiring the executable.
-3. Decide whether VMEC/JAX should expose a "best state" or best-row diagnostics
-   for this solver path, since final residual can be worse than best residual.
-4. Run a longer VMEC/JAX row with solver controls closer to VMEC2000 and compare
-   final WOUT component residuals.
-5. Use the parity hook for `ns=9` and the next mode pair before changing the
-   hybrid geometry parameterization.
-
-### Completion percentages after M85
-
-- Geometry/grids/bases: `93%`.
-- Field/energy/residual kernels: `86%`.
-- Fixed-boundary axisymmetric solve: `89%`.
-- Residual Newton / preconditioning: `91%`.
-- Two-coil and manufactured validation: `83%`.
-- Finite-current pitch validation: `82%`.
-- Plotting and `vmec --plot` mirror support: `88%`.
-- I/O schema and docs: `93%`.
-- Differentiable solved-state API: `20%`.
-- Mirror-Boozer-like diagnostics: `36%`.
-- Free-boundary mirror lane: `67%`.
-- Straight-axis hybrid fixture lane: `25%`.
-- Toroidal stellarator-mirror hybrid lane: `35%`.
-- ESSOS circular-coil mirror beta scan: `53%`.
-- PR merge readiness overall: `92%`.
-
-### User input needed
-
-No user input is needed.
-
----
-
-## 84. 2026-06-18 M13e.1 best-residual convergence metrics
-
-The first local multi-row convergence grid showed that the ordinary accelerated
-VMEC/JAX iteration can be nonmonotone for the first toroidal hybrid fixture.
-That made a single final-`fsq` grid summary too weak for diagnosing solver
-behavior, so this tranche added best-history metrics.
-
-### Steps taken
-
-- Added solved-row fields:
-  - `initial_fsq`;
-  - `best_fsq`;
-  - `best_iter`;
-  - `fsq_reduction`;
-  - `final_fsq`.
-- Updated the convergence summary plot to use best `fsq` for solved rows.
-- Kept full `fsq_history` in JSON for residual-history plots and downstream
-  analysis.
-- Updated the CSV export columns and example README.
-
-### Results obtained
-
-Four-row local grid:
-
-```bash
-PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
-  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  --outdir results/toroidal_stellarator_mirror_hybrid_convergence_m13e_grid \
-  --ns-array 7,9 \
-  --mode-pairs 5:4,6:5 \
-  --ntheta-fit 32 \
-  --nzeta-fit 32 \
-  --niter 12 \
-  --run-solve \
-  --max-iter 3
-```
-
-Result:
-
-| case | final `fsq` | status |
-| :--- | ---: | :--- |
-| `ns007_mpol05_ntor04` | `1.831175339596e-02` | not converged |
-| `ns007_mpol06_ntor05` | `1.807228867411e-02` | not converged |
-| `ns009_mpol05_ntor04` | `1.933402066353e-02` | not converged |
-| `ns009_mpol06_ntor05` | `1.924948523463e-02` | not converged |
-
-The residual history dropped sharply on the first iteration and rose on the
-third for all rows, indicating that the early accelerated path is nonmonotone
-for this fixture.  The generated `fsq` history and WOUT profile plots were
-visually checked.
-
-Longer low-resolution diagnostic:
-
-```bash
-PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
-  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  --outdir results/toroidal_stellarator_mirror_hybrid_convergence_m13e_ns7_long \
-  --ns-array 7 \
-  --mode-pairs 5:4 \
-  --ntheta-fit 32 \
-  --nzeta-fit 32 \
-  --niter 100 \
-  --ftol 1e-12 \
-  --run-solve \
-  --max-iter 20 \
-  --no-plots
-```
-
-Result:
-
-- `n_iter=20`;
-- `converged=false`;
-- final `fsq=1.883052951600e-05`;
-- best `fsq=1.423987393420e-05` at iteration 18;
-- the requested `ftol=1e-12` was not reached.
-
-Best-metric smoke:
-
-```bash
-PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
-  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  --outdir results/toroidal_stellarator_mirror_hybrid_convergence_m13f_best_smoke \
-  --ns-array 7 \
-  --mode-pairs 5:4 \
-  --ntheta-fit 32 \
-  --nzeta-fit 32 \
-  --niter 20 \
-  --ftol 1e-12 \
-  --run-solve \
-  --max-iter 5 \
-  --no-plots
-```
-
-Result:
-
-- `initial_fsq=1.225087897344e-02`;
-- `best_fsq=7.077559614612e-03`;
-- `best_iter=3`;
-- `fsq_reduction=1.730946772690`;
-- `final_fsq=9.744035513153e-03`;
-- `converged=false`.
-
-### How it was tested
-
-Focused tests:
-
-```bash
-JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
-```
-
-Result: `4 passed in 1.98s`.
-
-Lint and format:
-
-```bash
-python -m ruff format examples/toroidal_stellarator_mirror_hybrid_convergence.py
-python -m ruff check \
-  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  tests/test_toroidal_hybrid.py
-python -m ruff format --check \
-  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  tests/test_toroidal_hybrid.py
-```
-
-Result: one file was formatted, then lint and format checks passed.
-
-Documentation and whitespace:
-
-```bash
-python -m sphinx -W -j auto -b html docs docs/_build/html
-git diff --check
-```
-
-Result: docs built successfully and no whitespace errors were found.
-
-### File structure and best-practice notes
-
-- The best-residual metrics live in the example runner because they describe a
-  convergence-study workflow, not a new solver API.
-- Keeping initial/best/final values in CSV makes long local or GPU runs easy
-  to compare without loading JSON.
-- Full residual history remains in JSON for plotting and deeper inspection.
-
-### Best next steps
-
-1. Commit and push this best-residual metrics tranche.
-2. Inspect the ordinary toroidal `vmec2000_iter` controls for a monotone or
-   less aggressive first convergence study mode before VMEC2000 parity.
-3. Run VMEC2000 on the same low-resolution generated input and compare whether
-   its early `fsq` history is similarly nonmonotone.
-4. If VMEC2000 converges more robustly, narrow the difference to solver
-   controls, damping, restart, or normalization before changing the hybrid
-   geometry fixture.
-
-### Completion percentages after M84
-
-- Geometry/grids/bases: `93%`.
-- Field/energy/residual kernels: `86%`.
-- Fixed-boundary axisymmetric solve: `89%`.
-- Residual Newton / preconditioning: `91%`.
-- Two-coil and manufactured validation: `83%`.
-- Finite-current pitch validation: `82%`.
-- Plotting and `vmec --plot` mirror support: `88%`.
-- I/O schema and docs: `92%`.
-- Differentiable solved-state API: `20%`.
-- Mirror-Boozer-like diagnostics: `36%`.
-- Free-boundary mirror lane: `67%`.
-- Straight-axis hybrid fixture lane: `25%`.
-- Toroidal stellarator-mirror hybrid lane: `31%`.
-- ESSOS circular-coil mirror beta scan: `53%`.
-- PR merge readiness overall: `92%`.
-
-### User input needed
-
-No user input is needed.
-
----
-
-## 82. 2026-06-18 M13d toroidal hybrid convergence runner
-
-This tranche added the first repeatable convergence harness for the toroidal
-stellarator-mirror hybrid fixture.  The harness stays on the ordinary
-toroidal VMEC/JAX input, solver, WOUT, and profile-diagnostic path; it is not a
-mirror-native open-ended solve.
-
-### Steps taken
-
-- Checked PR #21 CI with the GitHub Actions helper:
-  - no failing checks were detected for the latest pushed commit at the time of
-    this audit;
-  - the branch remained draft and mergeable.
-- Added `examples/toroidal_stellarator_mirror_hybrid_convergence.py`.
-- Added a focused smoke test in `tests/test_toroidal_hybrid.py` that runs the
-  convergence example without solves or plots.
-- Updated `examples/mirror/README.md` with the new root example command and
-  diagnostic outputs.
-- Extended the run-solve rows to record:
-  - runtime;
-  - iteration count;
-  - final `fsq`;
-  - convergence flag;
-  - aspect ratio from the ordinary WOUT helper;
-  - mean iota from the ordinary VMEC/JAX iota-profile helper;
-  - magnetic-well proxy from the ordinary finite-beta helper;
-  - the generated `wout_toroidal_stellarator_mirror_hybrid.nc` path.
-
-### Results obtained
-
-No generated results were committed.  Local ignored artifacts were written
-under `results/` only for validation.
-
-No-solve convergence plot run:
-
-```bash
-PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
-  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  --outdir results/toroidal_stellarator_mirror_hybrid_convergence_m13d_plot \
-  --ns-array 7,9 \
-  --mode-pairs 5:4 \
-  --ntheta-fit 32 \
-  --nzeta-fit 32
-```
-
-Result:
-
-- wrote a JSON summary and
-  `figures/toroidal_hybrid_convergence.png`;
-- the plotted fit errors were at machine precision for the two rows.
-
-One-iteration solve smoke:
-
-```bash
-PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
-  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  --outdir results/toroidal_stellarator_mirror_hybrid_convergence_m13d_solve_smoke2 \
-  --ns-array 7 \
-  --mode-pairs 5:4 \
-  --ntheta-fit 32 \
-  --nzeta-fit 32 \
-  --niter 3 \
-  --run-solve \
-  --max-iter 1 \
-  --no-plots
-```
-
-Result for `ns007_mpol05_ntor04`:
-
-| quantity | value |
-| :--- | ---: |
-| max boundary fit error | `6.661338147751e-16` |
-| runtime | `6.688981666 s` |
-| VMEC/JAX iterations | `1` |
-| final `fsq` | `1.222006074808e-02` |
-| converged | `false` |
-| aspect | `5.661074062196` |
-| mean iota | `2.768637859473e-02` |
-| magnetic-well proxy | `-1.686348206555e-02` |
-
-The false convergence flag is expected for a deliberate one-iteration smoke
-row.
-
-### How it was tested
-
-Focused tests:
-
-```bash
-JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
-```
-
-Result: `4 passed in 1.93s`.
-
-Lint and format checks:
-
-```bash
-python -m ruff check \
-  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  tests/test_toroidal_hybrid.py
-python -m ruff format --check \
-  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  tests/test_toroidal_hybrid.py
-```
-
-Result: all checks passed; both Python files were already formatted.
-
-Documentation:
-
-```bash
-python -m sphinx -W -j auto -b html docs docs/_build/html
-```
-
-Result: build succeeded.
-
-Whitespace:
-
-```bash
-git diff --check
-```
-
-Result: no whitespace errors.
-
-### File structure and best-practice notes
-
-- The convergence runner is a separate root example because it is a workflow
-  script, not a reusable physics kernel.
-- It reuses `vmec_jax.toroidal_hybrid` for boundary construction and the
-  ordinary `run_fixed_boundary`/`write_wout_from_fixed_boundary_run` path for
-  solves.
-- It writes generated files below user-selected output directories, with the
-  documented default under ignored `results/`.
-- The CI-facing test exercises the cheap no-solve path, while real solve rows
-  remain opt-in through `--run-solve`.
-
-### Finite plan from here
-
-M13e: toroidal hybrid solve convergence.
-
-- Run a low-resolution matrix over `ns`, `mpol`, and `ntor` with
-  `--run-solve`, initially with modest iteration budgets.
-- Add optional CSV export for convergence rows so longer local/GPU runs can be
-  compared without hand-parsing JSON.
-- Add iota and magnetic-well plots when solve rows are present.
-- Keep the committed code light and keep generated plots/results out of git.
-
-M13f: VMEC2000 parity for the toroidal hybrid input.
-
-- Run local VMEC2000 on at least one generated low-resolution input.
-- Compare convergence status, `fsq`, boundary coefficients, aspect, iota, and
-  available WOUT scalar/profile diagnostics against VMEC/JAX.
-- Log runtime and memory where practical.
-
-M13g: toroidal hybrid geometry refinement.
-
-- Replace the first analytic side/corner weighting with a more physically
-  controlled parameterization:
-  - mirror-like toroidal side arcs;
-  - stellarator-like corner arcs;
-  - smooth periodic connection;
-  - up-down symmetry by default;
-  - optional helicity and corner-width controls.
-- Keep the parameterization VMEC-compatible and differentiable.
-
-M10/M13h: differentiable solved-state path.
-
-- Keep fast CLI examples on NumPy/SciPy/host-side loops when that is the
-  better runtime path.
-- For research-grade derivatives, add a solved-state API based on implicit
-  differentiation or adjoint/custom linear-solve differentiation instead of
-  differentiating through long nonlinear iteration histories.
-- Reuse the regular toroidal solver's preconditioning, residual normalization,
-  line-search, and profile helpers wherever possible.
-
-M16: ESSOS circular-coil free-boundary beta scan.
-
-- Keep the open-ended mirror LCFS pilot separate from the toroidal hybrid lane.
-- Build the default `1%`, `3%`, and `10%` beta scan through the existing
-  ESSOS-compatible circular-loop bridge.
-- Promote only validated setup scripts, summaries, and compressed illustrative
-  figures to docs; keep run directories ignored.
-
-Documentation cleanup:
-
-- Update the PR body after each major section so GitHub does not lag the local
-  plan.
-- Keep `docs/mirror/` and `examples/mirror/README.md` synchronized with source
-  status and known limitations.
-- Prefer compact source modules and pedagogical docstrings over one-off helper
-  proliferation.
-
-### Best next steps
-
-1. Commit and push M13d.
-2. Refresh the PR body so it reflects sections 80-82.
-3. Add CSV export and solved-row profile plots to the toroidal hybrid
-   convergence runner.
-4. Run the first modest `--run-solve` grid locally, then move longer rows to
-   the office GPU/VMEC2000 environment.
-5. Start VMEC2000 parity on the generated toroidal-hybrid input.
-
-### Completion percentages after M82
-
-- Geometry/grids/bases: `93%`.
-- Field/energy/residual kernels: `86%`.
-- Fixed-boundary axisymmetric solve: `89%`.
-- Residual Newton / preconditioning: `91%`.
-- Two-coil and manufactured validation: `83%`.
-- Finite-current pitch validation: `82%`.
-- Plotting and `vmec --plot` mirror support: `88%`.
-- I/O schema and docs: `92%`.
-- Differentiable solved-state API: `20%`.
-- Mirror-Boozer-like diagnostics: `36%`.
-- Free-boundary mirror lane: `67%`.
-- Straight-axis hybrid fixture lane: `25%`.
-- Toroidal stellarator-mirror hybrid lane: `24%`.
-- ESSOS circular-coil mirror beta scan: `53%`.
-- PR merge readiness overall: `92%`.
-
-### User input needed
-
-No user input is needed.  The current default toroidal hybrid interpretation is
-mirror-like side arcs connected by stellarator-like corner arcs in a closed
-toroidal VMEC geometry.
-
----
-
-## 83. 2026-06-18 M13e toroidal hybrid convergence CSV and profile plots
-
-This tranche turned the toroidal hybrid convergence runner from a JSON-only
-smoke harness into a more useful diagnostic script for actual solve rows.
-
-### Steps taken
-
-- Added a compact CSV export:
-  - `toroidal_stellarator_mirror_hybrid_convergence.csv`.
-- Added `fsq_history` to solved JSON rows.
-- Added solved-row plotting:
-  - convergence summary;
-  - residual/`fsq` history;
-  - WOUT profile figure with iota and Mercier `DWell`.
-- Fixed the WOUT reader path in the example by importing `read_wout`
-  explicitly from `vmec_jax.wout`.
-- Updated the toroidal hybrid smoke test to assert that CSV output exists and
-  that no-solve rows keep an empty `fsq_history`.
-- Updated `examples/mirror/README.md` to document JSON/CSV exports and the new
-  solved-row plots.
-
-### Results obtained
-
-Solved plotting smoke:
-
-```bash
-PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
-  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  --outdir results/toroidal_stellarator_mirror_hybrid_convergence_m13e_plot_smoke2 \
-  --ns-array 7 \
-  --mode-pairs 5:4 \
-  --ntheta-fit 32 \
-  --nzeta-fit 32 \
-  --niter 3 \
-  --run-solve \
-  --max-iter 1
-```
-
-Result for `ns007_mpol05_ntor04`:
-
-| quantity | value |
-| :--- | ---: |
-| max boundary fit error | `6.661338147751e-16` |
-| runtime | `7.087745458 s` |
-| VMEC/JAX iterations | `1` |
-| final `fsq` | `1.222006074808e-02` |
-| converged | `false` |
-| aspect | `5.661074062196` |
-| mean iota | `2.768637859473e-02` |
-| magnetic-well proxy | `-1.686348206555e-02` |
-
-Generated local ignored figures:
-
-- `results/toroidal_stellarator_mirror_hybrid_convergence_m13e_plot_smoke2/figures/toroidal_hybrid_convergence.png`;
-- `results/toroidal_stellarator_mirror_hybrid_convergence_m13e_plot_smoke2/figures/toroidal_hybrid_fsq_history.png`;
-- `results/toroidal_stellarator_mirror_hybrid_convergence_m13e_plot_smoke2/figures/toroidal_hybrid_profiles.png`.
-
-The profile plot was visually checked.  The iota profile rendered correctly.
-The `DWell` profile is zero for this one-iteration vacuum-style smoke, which
-is expected; it should become more informative for finite-beta or longer
-solved rows.
-
-### How it was tested
-
-Focused tests:
-
-```bash
-JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
-```
-
-Result: `4 passed in 2.16s`.
-
-Lint and format:
-
-```bash
-python -m ruff check \
-  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  tests/test_toroidal_hybrid.py
-python -m ruff format --check \
-  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
-  tests/test_toroidal_hybrid.py
-```
-
-Result: all checks passed; both files were formatted.
-
-Docs:
-
-```bash
-python -m sphinx -W -j auto -b html docs docs/_build/html
-```
-
-Result: build succeeded.
-
-Whitespace:
-
-```bash
-git diff --check
-```
-
-Result: no whitespace errors.
-
-### File structure and best-practice notes
-
-- The plotting helpers remain local to the root example because they are
-  workflow outputs, not reusable core geometry or solver logic.
-- The example now has a table-first output (`CSV`) for convergence studies and
-  JSON for richer row metadata.
-- Solved-row profile plotting uses `vmec_jax.wout.read_wout`, preserving the
-  ordinary WOUT schema and avoiding a duplicate profile parser.
-- Generated results stay under ignored `results/`.
-
-### Best next steps
-
-1. Commit and push M13e.
-2. Run a small multi-row `--run-solve` convergence grid with
-   `ns=7,9` and one or two mode pairs.
-3. Use the grid output to decide whether the first toroidal hybrid fixture is
-   solver-friendly enough for VMEC2000 parity.
-4. Start VMEC2000 parity on a low-resolution generated input and compare WOUT
-   scalar/profile diagnostics.
-5. Return to source simplification only after the convergence/parity bottleneck
-   is visible.
-
-### Completion percentages after M83
-
-- Geometry/grids/bases: `93%`.
-- Field/energy/residual kernels: `86%`.
-- Fixed-boundary axisymmetric solve: `89%`.
-- Residual Newton / preconditioning: `91%`.
-- Two-coil and manufactured validation: `83%`.
-- Finite-current pitch validation: `82%`.
-- Plotting and `vmec --plot` mirror support: `88%`.
-- I/O schema and docs: `92%`.
-- Differentiable solved-state API: `20%`.
-- Mirror-Boozer-like diagnostics: `36%`.
-- Free-boundary mirror lane: `67%`.
-- Straight-axis hybrid fixture lane: `25%`.
-- Toroidal stellarator-mirror hybrid lane: `28%`.
-- ESSOS circular-coil mirror beta scan: `53%`.
-- PR merge readiness overall: `92%`.
-
-### User input needed
-
-No user input is needed.
-
----
-
 ## 56. 2026-06-17 M8w matrix-free block LSMR correction
 
 This lane converted the successful M8u/M8v block-dense split into a scalable
@@ -8827,6 +7519,7 @@ Result: all checks passed.
 ### User input needed
 
 No user input is needed.
+
 ## 67. 2026-06-18 M12e LCFS target diagnostic for circular-coil mirror baselines
 
 This tranche turned the fixed-boundary beta-scan baseline into a measurable
@@ -9603,6 +8296,7 @@ Result: all checks passed.
 No user input is needed.
 
 ---
+
 ## 72. 2026-06-18 M12j normal-field-aware LCFS proposal direction
 
 This tranche added a normal-field-aware candidate selection path for the
@@ -9771,6 +8465,7 @@ Result: all checks passed.
 No user input is needed.
 
 ---
+
 ## 73. 2026-06-18 M12k strict normal-field guard for LCFS pilots
 
 This tranche added an optional strict normal-field guard for LCFS pilot
@@ -10083,6 +8778,7 @@ Result: all checks passed.
 No user input is needed.
 
 ---
+
 ## 75. 2026-06-18 M12m mixed scale/normal-field LCFS candidate
 
 This tranche added a two-direction LCFS proposal that combines the smooth
@@ -10389,6 +9085,7 @@ Result: all checks passed.
 No user input is needed.
 
 ---
+
 ## 77. 2026-06-18 M12o LCFS selection and pilot-row helpers
 
 This tranche finished the next simplification slice for the circular-coil
@@ -11122,6 +9819,1422 @@ Result: metrics JSON and `wout_toroidal_stellarator_mirror_hybrid.nc` written.
 - Toroidal stellarator-mirror hybrid lane: `18%`.
 - ESSOS circular-coil mirror beta scan: `53%`.
 - PR merge readiness overall: `91%`.
+
+### User input needed
+
+No user input is needed.
+
+---
+
+## 82. 2026-06-18 M13d toroidal hybrid convergence runner
+
+This tranche added the first repeatable convergence harness for the toroidal
+stellarator-mirror hybrid fixture.  The harness stays on the ordinary
+toroidal VMEC/JAX input, solver, WOUT, and profile-diagnostic path; it is not a
+mirror-native open-ended solve.
+
+### Steps taken
+
+- Checked PR #21 CI with the GitHub Actions helper:
+  - no failing checks were detected for the latest pushed commit at the time of
+    this audit;
+  - the branch remained draft and mergeable.
+- Added `examples/toroidal_stellarator_mirror_hybrid_convergence.py`.
+- Added a focused smoke test in `tests/test_toroidal_hybrid.py` that runs the
+  convergence example without solves or plots.
+- Updated `examples/mirror/README.md` with the new root example command and
+  diagnostic outputs.
+- Extended the run-solve rows to record:
+  - runtime;
+  - iteration count;
+  - final `fsq`;
+  - convergence flag;
+  - aspect ratio from the ordinary WOUT helper;
+  - mean iota from the ordinary VMEC/JAX iota-profile helper;
+  - magnetic-well proxy from the ordinary finite-beta helper;
+  - the generated `wout_toroidal_stellarator_mirror_hybrid.nc` path.
+
+### Results obtained
+
+No generated results were committed.  Local ignored artifacts were written
+under `results/` only for validation.
+
+No-solve convergence plot run:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_stellarator_mirror_hybrid_convergence_m13d_plot \
+  --ns-array 7,9 \
+  --mode-pairs 5:4 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32
+```
+
+Result:
+
+- wrote a JSON summary and
+  `figures/toroidal_hybrid_convergence.png`;
+- the plotted fit errors were at machine precision for the two rows.
+
+One-iteration solve smoke:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_stellarator_mirror_hybrid_convergence_m13d_solve_smoke2 \
+  --ns-array 7 \
+  --mode-pairs 5:4 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 3 \
+  --run-solve \
+  --max-iter 1 \
+  --no-plots
+```
+
+Result for `ns007_mpol05_ntor04`:
+
+| quantity | value |
+| :--- | ---: |
+| max boundary fit error | `6.661338147751e-16` |
+| runtime | `6.688981666 s` |
+| VMEC/JAX iterations | `1` |
+| final `fsq` | `1.222006074808e-02` |
+| converged | `false` |
+| aspect | `5.661074062196` |
+| mean iota | `2.768637859473e-02` |
+| magnetic-well proxy | `-1.686348206555e-02` |
+
+The false convergence flag is expected for a deliberate one-iteration smoke
+row.
+
+### How it was tested
+
+Focused tests:
+
+```bash
+JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
+```
+
+Result: `4 passed in 1.93s`.
+
+Lint and format checks:
+
+```bash
+python -m ruff check \
+  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  tests/test_toroidal_hybrid.py
+python -m ruff format --check \
+  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  tests/test_toroidal_hybrid.py
+```
+
+Result: all checks passed; both Python files were already formatted.
+
+Documentation:
+
+```bash
+python -m sphinx -W -j auto -b html docs docs/_build/html
+```
+
+Result: build succeeded.
+
+Whitespace:
+
+```bash
+git diff --check
+```
+
+Result: no whitespace errors.
+
+### File structure and best-practice notes
+
+- The convergence runner is a separate root example because it is a workflow
+  script, not a reusable physics kernel.
+- It reuses `vmec_jax.toroidal_hybrid` for boundary construction and the
+  ordinary `run_fixed_boundary`/`write_wout_from_fixed_boundary_run` path for
+  solves.
+- It writes generated files below user-selected output directories, with the
+  documented default under ignored `results/`.
+- The CI-facing test exercises the cheap no-solve path, while real solve rows
+  remain opt-in through `--run-solve`.
+
+### Finite plan from here
+
+M13e: toroidal hybrid solve convergence.
+
+- Run a low-resolution matrix over `ns`, `mpol`, and `ntor` with
+  `--run-solve`, initially with modest iteration budgets.
+- Add optional CSV export for convergence rows so longer local/GPU runs can be
+  compared without hand-parsing JSON.
+- Add iota and magnetic-well plots when solve rows are present.
+- Keep the committed code light and keep generated plots/results out of git.
+
+M13f: VMEC2000 parity for the toroidal hybrid input.
+
+- Run local VMEC2000 on at least one generated low-resolution input.
+- Compare convergence status, `fsq`, boundary coefficients, aspect, iota, and
+  available WOUT scalar/profile diagnostics against VMEC/JAX.
+- Log runtime and memory where practical.
+
+M13g: toroidal hybrid geometry refinement.
+
+- Replace the first analytic side/corner weighting with a more physically
+  controlled parameterization:
+  - mirror-like toroidal side arcs;
+  - stellarator-like corner arcs;
+  - smooth periodic connection;
+  - up-down symmetry by default;
+  - optional helicity and corner-width controls.
+- Keep the parameterization VMEC-compatible and differentiable.
+
+M10/M13h: differentiable solved-state path.
+
+- Keep fast CLI examples on NumPy/SciPy/host-side loops when that is the
+  better runtime path.
+- For research-grade derivatives, add a solved-state API based on implicit
+  differentiation or adjoint/custom linear-solve differentiation instead of
+  differentiating through long nonlinear iteration histories.
+- Reuse the regular toroidal solver's preconditioning, residual normalization,
+  line-search, and profile helpers wherever possible.
+
+M16: ESSOS circular-coil free-boundary beta scan.
+
+- Keep the open-ended mirror LCFS pilot separate from the toroidal hybrid lane.
+- Build the default `1%`, `3%`, and `10%` beta scan through the existing
+  ESSOS-compatible circular-loop bridge.
+- Promote only validated setup scripts, summaries, and compressed illustrative
+  figures to docs; keep run directories ignored.
+
+Documentation cleanup:
+
+- Update the PR body after each major section so GitHub does not lag the local
+  plan.
+- Keep `docs/mirror/` and `examples/mirror/README.md` synchronized with source
+  status and known limitations.
+- Prefer compact source modules and pedagogical docstrings over one-off helper
+  proliferation.
+
+### Best next steps
+
+1. Commit and push M13d.
+2. Refresh the PR body so it reflects sections 80-82.
+3. Add CSV export and solved-row profile plots to the toroidal hybrid
+   convergence runner.
+4. Run the first modest `--run-solve` grid locally, then move longer rows to
+   the office GPU/VMEC2000 environment.
+5. Start VMEC2000 parity on the generated toroidal-hybrid input.
+
+### Completion percentages after M82
+
+- Geometry/grids/bases: `93%`.
+- Field/energy/residual kernels: `86%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `88%`.
+- I/O schema and docs: `92%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `67%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `24%`.
+- ESSOS circular-coil mirror beta scan: `53%`.
+- PR merge readiness overall: `92%`.
+
+### User input needed
+
+No user input is needed.  The current default toroidal hybrid interpretation is
+mirror-like side arcs connected by stellarator-like corner arcs in a closed
+toroidal VMEC geometry.
+
+---
+
+## 83. 2026-06-18 M13e toroidal hybrid convergence CSV and profile plots
+
+This tranche turned the toroidal hybrid convergence runner from a JSON-only
+smoke harness into a more useful diagnostic script for actual solve rows.
+
+### Steps taken
+
+- Added a compact CSV export:
+  - `toroidal_stellarator_mirror_hybrid_convergence.csv`.
+- Added `fsq_history` to solved JSON rows.
+- Added solved-row plotting:
+  - convergence summary;
+  - residual/`fsq` history;
+  - WOUT profile figure with iota and Mercier `DWell`.
+- Fixed the WOUT reader path in the example by importing `read_wout`
+  explicitly from `vmec_jax.wout`.
+- Updated the toroidal hybrid smoke test to assert that CSV output exists and
+  that no-solve rows keep an empty `fsq_history`.
+- Updated `examples/mirror/README.md` to document JSON/CSV exports and the new
+  solved-row plots.
+
+### Results obtained
+
+Solved plotting smoke:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_stellarator_mirror_hybrid_convergence_m13e_plot_smoke2 \
+  --ns-array 7 \
+  --mode-pairs 5:4 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 3 \
+  --run-solve \
+  --max-iter 1
+```
+
+Result for `ns007_mpol05_ntor04`:
+
+| quantity | value |
+| :--- | ---: |
+| max boundary fit error | `6.661338147751e-16` |
+| runtime | `7.087745458 s` |
+| VMEC/JAX iterations | `1` |
+| final `fsq` | `1.222006074808e-02` |
+| converged | `false` |
+| aspect | `5.661074062196` |
+| mean iota | `2.768637859473e-02` |
+| magnetic-well proxy | `-1.686348206555e-02` |
+
+Generated local ignored figures:
+
+- `results/toroidal_stellarator_mirror_hybrid_convergence_m13e_plot_smoke2/figures/toroidal_hybrid_convergence.png`;
+- `results/toroidal_stellarator_mirror_hybrid_convergence_m13e_plot_smoke2/figures/toroidal_hybrid_fsq_history.png`;
+- `results/toroidal_stellarator_mirror_hybrid_convergence_m13e_plot_smoke2/figures/toroidal_hybrid_profiles.png`.
+
+The profile plot was visually checked.  The iota profile rendered correctly.
+The `DWell` profile is zero for this one-iteration vacuum-style smoke, which
+is expected; it should become more informative for finite-beta or longer
+solved rows.
+
+### How it was tested
+
+Focused tests:
+
+```bash
+JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
+```
+
+Result: `4 passed in 2.16s`.
+
+Lint and format:
+
+```bash
+python -m ruff check \
+  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  tests/test_toroidal_hybrid.py
+python -m ruff format --check \
+  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  tests/test_toroidal_hybrid.py
+```
+
+Result: all checks passed; both files were formatted.
+
+Docs:
+
+```bash
+python -m sphinx -W -j auto -b html docs docs/_build/html
+```
+
+Result: build succeeded.
+
+Whitespace:
+
+```bash
+git diff --check
+```
+
+Result: no whitespace errors.
+
+### File structure and best-practice notes
+
+- The plotting helpers remain local to the root example because they are
+  workflow outputs, not reusable core geometry or solver logic.
+- The example now has a table-first output (`CSV`) for convergence studies and
+  JSON for richer row metadata.
+- Solved-row profile plotting uses `vmec_jax.wout.read_wout`, preserving the
+  ordinary WOUT schema and avoiding a duplicate profile parser.
+- Generated results stay under ignored `results/`.
+
+### Best next steps
+
+1. Commit and push M13e.
+2. Run a small multi-row `--run-solve` convergence grid with
+   `ns=7,9` and one or two mode pairs.
+3. Use the grid output to decide whether the first toroidal hybrid fixture is
+   solver-friendly enough for VMEC2000 parity.
+4. Start VMEC2000 parity on a low-resolution generated input and compare WOUT
+   scalar/profile diagnostics.
+5. Return to source simplification only after the convergence/parity bottleneck
+   is visible.
+
+### Completion percentages after M83
+
+- Geometry/grids/bases: `93%`.
+- Field/energy/residual kernels: `86%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `88%`.
+- I/O schema and docs: `92%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `67%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `28%`.
+- ESSOS circular-coil mirror beta scan: `53%`.
+- PR merge readiness overall: `92%`.
+
+### User input needed
+
+No user input is needed.
+
+---
+
+## 84. 2026-06-18 M13e.1 best-residual convergence metrics
+
+The first local multi-row convergence grid showed that the ordinary accelerated
+VMEC/JAX iteration can be nonmonotone for the first toroidal hybrid fixture.
+That made a single final-`fsq` grid summary too weak for diagnosing solver
+behavior, so this tranche added best-history metrics.
+
+### Steps taken
+
+- Added solved-row fields:
+  - `initial_fsq`;
+  - `best_fsq`;
+  - `best_iter`;
+  - `fsq_reduction`;
+  - `final_fsq`.
+- Updated the convergence summary plot to use best `fsq` for solved rows.
+- Kept full `fsq_history` in JSON for residual-history plots and downstream
+  analysis.
+- Updated the CSV export columns and example README.
+
+### Results obtained
+
+Four-row local grid:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_stellarator_mirror_hybrid_convergence_m13e_grid \
+  --ns-array 7,9 \
+  --mode-pairs 5:4,6:5 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 12 \
+  --run-solve \
+  --max-iter 3
+```
+
+Result:
+
+| case | final `fsq` | status |
+| :--- | ---: | :--- |
+| `ns007_mpol05_ntor04` | `1.831175339596e-02` | not converged |
+| `ns007_mpol06_ntor05` | `1.807228867411e-02` | not converged |
+| `ns009_mpol05_ntor04` | `1.933402066353e-02` | not converged |
+| `ns009_mpol06_ntor05` | `1.924948523463e-02` | not converged |
+
+The residual history dropped sharply on the first iteration and rose on the
+third for all rows, indicating that the early accelerated path is nonmonotone
+for this fixture.  The generated `fsq` history and WOUT profile plots were
+visually checked.
+
+Longer low-resolution diagnostic:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_stellarator_mirror_hybrid_convergence_m13e_ns7_long \
+  --ns-array 7 \
+  --mode-pairs 5:4 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 100 \
+  --ftol 1e-12 \
+  --run-solve \
+  --max-iter 20 \
+  --no-plots
+```
+
+Result:
+
+- `n_iter=20`;
+- `converged=false`;
+- final `fsq=1.883052951600e-05`;
+- best `fsq=1.423987393420e-05` at iteration 18;
+- the requested `ftol=1e-12` was not reached.
+
+Best-metric smoke:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_stellarator_mirror_hybrid_convergence_m13f_best_smoke \
+  --ns-array 7 \
+  --mode-pairs 5:4 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 20 \
+  --ftol 1e-12 \
+  --run-solve \
+  --max-iter 5 \
+  --no-plots
+```
+
+Result:
+
+- `initial_fsq=1.225087897344e-02`;
+- `best_fsq=7.077559614612e-03`;
+- `best_iter=3`;
+- `fsq_reduction=1.730946772690`;
+- `final_fsq=9.744035513153e-03`;
+- `converged=false`.
+
+### How it was tested
+
+Focused tests:
+
+```bash
+JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
+```
+
+Result: `4 passed in 1.98s`.
+
+Lint and format:
+
+```bash
+python -m ruff format examples/toroidal_stellarator_mirror_hybrid_convergence.py
+python -m ruff check \
+  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  tests/test_toroidal_hybrid.py
+python -m ruff format --check \
+  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  tests/test_toroidal_hybrid.py
+```
+
+Result: one file was formatted, then lint and format checks passed.
+
+Documentation and whitespace:
+
+```bash
+python -m sphinx -W -j auto -b html docs docs/_build/html
+git diff --check
+```
+
+Result: docs built successfully and no whitespace errors were found.
+
+### File structure and best-practice notes
+
+- The best-residual metrics live in the example runner because they describe a
+  convergence-study workflow, not a new solver API.
+- Keeping initial/best/final values in CSV makes long local or GPU runs easy
+  to compare without loading JSON.
+- Full residual history remains in JSON for plotting and deeper inspection.
+
+### Best next steps
+
+1. Commit and push this best-residual metrics tranche.
+2. Inspect the ordinary toroidal `vmec2000_iter` controls for a monotone or
+   less aggressive first convergence study mode before VMEC2000 parity.
+3. Run VMEC2000 on the same low-resolution generated input and compare whether
+   its early `fsq` history is similarly nonmonotone.
+4. If VMEC2000 converges more robustly, narrow the difference to solver
+   controls, damping, restart, or normalization before changing the hybrid
+   geometry fixture.
+
+### Completion percentages after M84
+
+- Geometry/grids/bases: `93%`.
+- Field/energy/residual kernels: `86%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `88%`.
+- I/O schema and docs: `92%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `67%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `31%`.
+- ESSOS circular-coil mirror beta scan: `53%`.
+- PR merge readiness overall: `92%`.
+
+### User input needed
+
+No user input is needed.
+
+---
+
+## 85. 2026-06-18 M13f VMEC2000 parity hook for toroidal hybrid runner
+
+This tranche added an opt-in VMEC2000 parity path to the toroidal hybrid
+convergence runner and used it on the low-resolution generated hybrid input.
+
+### Steps taken
+
+- Added `--run-vmec2000`, `--vmec2000-exec`, and
+  `--vmec2000-timeout-s` options to
+  `examples/toroidal_stellarator_mirror_hybrid_convergence.py`.
+- Reused the existing `vmec_jax.vmec2000_exec` wrapper:
+  - copy generated `input.*` to a case-local VMEC2000 work directory;
+  - run `xvmec2000`;
+  - parse `threed1.*`;
+  - preserve local ignored VMEC2000 work products under `results/`.
+- Added VMEC/JAX component histories:
+  - `fsqr_history`;
+  - `fsqz_history`;
+  - `fsql_history`;
+  - final and best component values.
+- Added VMEC2000 row metrics:
+  - return code and runtime;
+  - parsed `threed1` path;
+  - WOUT path;
+  - iteration and `fsq` histories;
+  - initial/best/final `fsq` and best iteration.
+- Updated the residual-history plot to overlay VMEC/JAX and VMEC2000 histories.
+- Updated `examples/mirror/README.md`.
+
+### Results obtained
+
+VMEC2000 smoke command:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_stellarator_mirror_hybrid_vmec2000_smoke_m13f \
+  --ns-array 7 \
+  --mode-pairs 5:4 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 20 \
+  --ftol 1e-12 \
+  --run-solve \
+  --max-iter 5 \
+  --run-vmec2000 \
+  --vmec2000-exec /Users/rogeriojorge/bin/xvmec2000
+```
+
+Result:
+
+| diagnostic | VMEC/JAX | VMEC2000 |
+| :--- | ---: | ---: |
+| runtime | `6.880363625 s` | `0.208919458 s` |
+| recorded rows | `5` | `2` |
+| initial `fsq` | `1.225087897344e-02` | `7.091000000000e-02` |
+| best `fsq` | `7.077559614612e-03` | `7.770000000000e-03` |
+| best iteration | `3` | `20` |
+| final `fsq` | `9.744035513153e-03` | `7.770000000000e-03` |
+| final `fsqr` | `4.402392805632e-03` | `4.432781063259e-03` |
+| final `fsqz` | `5.132793049570e-03` | `2.310638399457e-03` |
+| final `fsql` | `2.088496579511e-04` | `1.028225492522e-03` |
+
+The VMEC2000 run returned code `0` and wrote:
+
+- `results/toroidal_stellarator_mirror_hybrid_vmec2000_smoke_m13f/ns007_mpol05_ntor04/vmec2000/threed1.toroidal_stellarator_mirror_hybrid`;
+- `results/toroidal_stellarator_mirror_hybrid_vmec2000_smoke_m13f/ns007_mpol05_ntor04/vmec2000/wout_toroidal_stellarator_mirror_hybrid.nc`.
+
+The residual-history overlay was visually checked.  VMEC/JAX reaches a
+comparable best residual earlier in its recorded history, but the final row is
+slightly worse than the best row.  VMEC2000 records only the first and final
+rows in this short `threed1` output, so finer per-iteration parity requires
+either fuller VMEC2000 diagnostics or comparing final WOUT components.
+
+### How it was tested
+
+Focused tests:
+
+```bash
+JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
+```
+
+Result: `4 passed in 1.99s`.
+
+Lint and format:
+
+```bash
+python -m ruff format examples/toroidal_stellarator_mirror_hybrid_convergence.py
+python -m ruff check \
+  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  tests/test_toroidal_hybrid.py
+python -m ruff format --check \
+  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  tests/test_toroidal_hybrid.py
+```
+
+Result: one file was formatted, then lint and format checks passed.
+
+Docs and whitespace:
+
+```bash
+python -m sphinx -W -j auto -b html docs docs/_build/html
+git diff --check
+```
+
+Result: docs built successfully and no whitespace errors were found.
+
+### File structure and best-practice notes
+
+- VMEC2000 parity remains opt-in and local; CI and quick examples do not depend
+  on a system VMEC2000 executable.
+- The new code reuses the repository's existing VMEC2000 wrapper instead of
+  creating a second subprocess/parser path.
+- Parsed VMEC2000 fields are stored beside VMEC/JAX fields in the same JSON/CSV
+  row, which keeps parity studies table-driven.
+- Generated `threed1`, WOUT, and plots remain under ignored `results/`.
+
+### Best next steps
+
+1. Commit and push M13f parity-hook support.
+2. Add a small test around `_summarize_fsq_history` and VMEC2000 parser usage
+   without requiring the executable.
+3. Decide whether VMEC/JAX should expose a "best state" or best-row diagnostics
+   for this solver path, since final residual can be worse than best residual.
+4. Run a longer VMEC/JAX row with solver controls closer to VMEC2000 and compare
+   final WOUT component residuals.
+5. Use the parity hook for `ns=9` and the next mode pair before changing the
+   hybrid geometry parameterization.
+
+### Completion percentages after M85
+
+- Geometry/grids/bases: `93%`.
+- Field/energy/residual kernels: `86%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `88%`.
+- I/O schema and docs: `93%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `67%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `35%`.
+- ESSOS circular-coil mirror beta scan: `53%`.
+- PR merge readiness overall: `92%`.
+
+### User input needed
+
+No user input is needed.
+
+---
+
+## 86. 2026-06-18 M13f.1 VMEC/JAX solver-mode controls in convergence runner
+
+This tranche exposed solver controls in the toroidal hybrid convergence runner
+so the same generated input can be tested with the fast CLI path or a closer
+VMEC2000-control path.
+
+### Steps taken
+
+- Added `--solver-mode {default,parity,accelerated}` to
+  `examples/toroidal_stellarator_mirror_hybrid_convergence.py`.
+- Added `--use-scan` / `--no-use-scan` to the same runner.
+- Added `solver_mode` and `use_scan` columns to the CSV/JSON row outputs.
+- Updated `examples/mirror/README.md` to recommend
+  `--solver-mode parity --no-use-scan` for VMEC2000-control comparisons.
+
+### Results obtained
+
+Parity-mode, non-scan, `NITER_ARRAY=20`, VMEC/JAX capped at 20:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_stellarator_mirror_hybrid_parity_smoke_m13g \
+  --ns-array 7 \
+  --mode-pairs 5:4 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 20 \
+  --ftol 1e-12 \
+  --run-solve \
+  --max-iter 20 \
+  --solver-mode parity \
+  --no-use-scan \
+  --run-vmec2000 \
+  --vmec2000-exec /Users/rogeriojorge/bin/xvmec2000 \
+  --no-plots
+```
+
+Result:
+
+- VMEC/JAX final `fsq=1.839147093094e-05`;
+- VMEC/JAX best `fsq=1.471854259816e-05` at iteration 18;
+- VMEC2000 final `fsq=7.770000000000e-03` at iteration 20.
+
+Parity-mode, non-scan, `NITER_ARRAY=100`, VMEC/JAX capped at 20:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_stellarator_mirror_hybrid_parity_niter100_m13g \
+  --ns-array 7 \
+  --mode-pairs 5:4 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 100 \
+  --ftol 1e-12 \
+  --run-solve \
+  --max-iter 20 \
+  --solver-mode parity \
+  --no-use-scan \
+  --run-vmec2000 \
+  --vmec2000-exec /Users/rogeriojorge/bin/xvmec2000 \
+  --no-plots
+```
+
+Result:
+
+- VMEC/JAX final `fsq=1.839147093094e-05`;
+- VMEC2000 final `fsq=5.546000000000e-07` at iteration 100.
+
+Parity-mode, non-scan, equal `100` iteration budget:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_stellarator_mirror_hybrid_parity_max100_m13g \
+  --ns-array 7 \
+  --mode-pairs 5:4 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 100 \
+  --ftol 1e-12 \
+  --run-solve \
+  --max-iter 100 \
+  --solver-mode parity \
+  --no-use-scan \
+  --run-vmec2000 \
+  --vmec2000-exec /Users/rogeriojorge/bin/xvmec2000 \
+  --no-plots
+```
+
+Result:
+
+| diagnostic | VMEC/JAX | VMEC2000 |
+| :--- | ---: | ---: |
+| runtime | `10.943271542 s` | `0.198557916 s` |
+| final recorded iteration | `99` | `100` |
+| best `fsq` | `1.094466932561e-10` | `5.546000000000e-07` |
+| final `fsq` | `1.094466932561e-10` | `5.546000000000e-07` |
+| final `fsqr` | `5.496583583656e-11` | not parsed as final component in row |
+| final `fsqz` | `1.881559404507e-11` | not parsed as final component in row |
+| final `fsql` | `3.566526337451e-11` | not parsed as final component in row |
+
+VMEC/JAX reduced the residual well below the VMEC2000 `threed1` final value for
+the same nominal iteration budget, but still did not mark strict convergence to
+the requested `ftol=1e-12`.  This means the next parity question is no longer
+whether the hybrid input is runnable; it is whether the VMEC/JAX strict
+convergence flag, total-`fsq` target, and VMEC2000 `FTOL` stopping conventions
+are being compared on exactly the same quantity.
+
+### How it was tested
+
+Focused tests:
+
+```bash
+JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
+```
+
+Result: `5 passed in 1.92s`.
+
+Lint and format:
+
+```bash
+python -m ruff check \
+  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  tests/test_toroidal_hybrid.py
+python -m ruff format --check \
+  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  tests/test_toroidal_hybrid.py
+```
+
+Result: all checks passed and both files were formatted.
+
+Docs and whitespace:
+
+```bash
+python -m sphinx -W -j auto -b html docs docs/_build/html
+git diff --check
+```
+
+Result: docs built successfully and no whitespace errors were found.
+
+### File structure and best-practice notes
+
+- Solver-control flags live in the convergence example, not the core
+  `vmec_jax.toroidal_hybrid` boundary helper.
+- The runner defaults remain fast (`accelerated`) while parity controls are
+  explicit.
+- The VMEC2000 path remains optional and does not affect tests or docs builds.
+
+### Best next steps
+
+1. Commit and push solver-control support.
+2. Add a row field for the requested `ftol`, the VMEC/JAX strict-convergence
+   target, and `converged_by_total_fsq` so parity tables explain why
+   `fsq=1e-10` can still be flagged as not strictly converged.
+3. Parse VMEC2000 final component values from WOUT into the VMEC2000 row fields
+   to make component comparisons first-class.
+4. Run `ns=9` parity once the row schema includes those convergence target
+   fields.
+
+### Completion percentages after M86
+
+- Geometry/grids/bases: `93%`.
+- Field/energy/residual kernels: `86%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `88%`.
+- I/O schema and docs: `93%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `67%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `38%`.
+- ESSOS circular-coil mirror beta scan: `53%`.
+- PR merge readiness overall: `92%`.
+
+### User input needed
+
+No user input is needed.
+
+---
+
+## 87. 2026-06-18 M13f.2 convergence-target and VMEC2000 component fields
+
+This tranche made the toroidal hybrid parity rows more self-explanatory by
+recording the convergence target fields and VMEC2000 WOUT component residuals
+directly in the CSV/JSON output.
+
+### Steps taken
+
+- Added row fields:
+  - `requested_ftol`;
+  - `fsq_total_target`;
+  - `converged_strict`;
+  - `converged_by_total_fsq`.
+- Added VMEC2000 WOUT-derived fields:
+  - `vmec2000_final_fsqr`;
+  - `vmec2000_final_fsqz`;
+  - `vmec2000_final_fsql`;
+  - `vmec2000_aspect`;
+  - `vmec2000_mean_iota`.
+- Updated `examples/mirror/README.md`.
+
+### Results obtained
+
+Schema smoke:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_stellarator_mirror_hybrid_schema_smoke_m13h \
+  --ns-array 7 \
+  --mode-pairs 5:4 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 20 \
+  --ftol 1e-12 \
+  --run-solve \
+  --max-iter 5 \
+  --solver-mode parity \
+  --no-use-scan \
+  --run-vmec2000 \
+  --vmec2000-exec /Users/rogeriojorge/bin/xvmec2000 \
+  --no-plots
+```
+
+Result:
+
+| field | value |
+| :--- | ---: |
+| `requested_ftol` | `1.0e-12` |
+| `fsq_total_target` | `None` |
+| `converged` | `false` |
+| `converged_strict` | `false` |
+| `converged_by_total_fsq` | `false` |
+| VMEC/JAX final `fsq` | `8.301471170622e-03` |
+| VMEC2000 final `fsq` | `7.770000000000e-03` |
+| VMEC2000 final `fsqr` | `4.432781063259e-03` |
+| VMEC2000 final `fsqz` | `2.310638399457e-03` |
+| VMEC2000 final `fsql` | `1.028225492522e-03` |
+| VMEC2000 mean iota | `1.000535474965e-02` |
+
+The `fsq_total_target` is intentionally `None` in parity mode; it is an
+accelerated-mode stopping field.  The strict convergence flag therefore
+continues to track the requested `ftol` convention.
+
+### How it was tested
+
+Focused tests:
+
+```bash
+JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
+```
+
+Result: `5 passed in 1.89s`.
+
+Lint and format:
+
+```bash
+python -m ruff check \
+  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  tests/test_toroidal_hybrid.py
+python -m ruff format --check \
+  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  tests/test_toroidal_hybrid.py
+```
+
+Result: all checks passed and both files were formatted.
+
+Docs and whitespace:
+
+```bash
+python -m sphinx -W -j auto -b html docs docs/_build/html
+git diff --check
+```
+
+Result: docs built successfully and no whitespace errors were found.
+
+### File structure and best-practice notes
+
+- The runner now carries enough schema to compare stopping rules without
+  re-opening WOUT files by hand.
+- VMEC2000 WOUT parsing reuses `vmec_jax.wout.read_wout`.
+- The added fields are optional and empty unless the relevant solve path runs.
+
+### Best next steps
+
+1. Commit and push the schema update.
+2. Run the `ns=9` parity row now that the row schema is complete.
+3. Add a compact parity-summary plot or table for VMEC/JAX versus VMEC2000
+   final residual components when both are present.
+4. Return to the toroidal hybrid geometry parameterization after the parity
+   summary identifies whether residual differences are solver-control or
+   geometry-resolution limited.
+
+### Completion percentages after M87
+
+- Geometry/grids/bases: `93%`.
+- Field/energy/residual kernels: `86%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `88%`.
+- I/O schema and docs: `93%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `67%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `40%`.
+- ESSOS circular-coil mirror beta scan: `53%`.
+- PR merge readiness overall: `92%`.
+
+### User input needed
+
+No user input is needed.
+
+---
+
+## 88. 2026-06-18 M13f.3 parity component plot and ns=9 parity row
+
+This tranche added a side-by-side final residual component plot for VMEC/JAX
+and VMEC2000 parity rows, then ran the next radial-resolution parity case.
+
+### Steps taken
+
+- Added `toroidal_hybrid_parity_components.png` to the convergence runner when
+  both VMEC/JAX and VMEC2000 final residual components are available.
+- Updated `examples/mirror/README.md`.
+- Ran the `ns=9`, `mpol=5`, `ntor=4` parity row with:
+  - VMEC/JAX parity mode;
+  - non-scan update loop;
+  - `NITER_ARRAY=100`;
+  - VMEC/JAX `max_iter=100`;
+  - local `/Users/rogeriojorge/bin/xvmec2000`.
+
+### Results obtained
+
+Component-plot smoke:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_stellarator_mirror_hybrid_parity_components_smoke_m13i \
+  --ns-array 7 \
+  --mode-pairs 5:4 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 20 \
+  --ftol 1e-12 \
+  --run-solve \
+  --max-iter 5 \
+  --solver-mode parity \
+  --no-use-scan \
+  --run-vmec2000 \
+  --vmec2000-exec /Users/rogeriojorge/bin/xvmec2000
+```
+
+Generated and visually checked:
+
+- `results/toroidal_stellarator_mirror_hybrid_parity_components_smoke_m13i/figures/toroidal_hybrid_parity_components.png`.
+
+For the short `ns=7` smoke, the component plot shows VMEC/JAX with the larger
+`fsqz` component and VMEC2000 with the larger `fsql` component.
+
+`ns=9` parity row:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_stellarator_mirror_hybrid_parity_ns9_m13h \
+  --ns-array 9 \
+  --mode-pairs 5:4 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 100 \
+  --ftol 1e-12 \
+  --run-solve \
+  --max-iter 100 \
+  --solver-mode parity \
+  --no-use-scan \
+  --run-vmec2000 \
+  --vmec2000-exec /Users/rogeriojorge/bin/xvmec2000
+```
+
+Result:
+
+| diagnostic | VMEC/JAX | VMEC2000 |
+| :--- | ---: | ---: |
+| runtime | `11.049476125 s` | `0.217696958 s` |
+| best/final `fsq` | `2.055168581245e-10` | `9.160000000000e-07` |
+| best iteration | `99` | `100` |
+| final `fsqr` | `1.079914959190e-10` | `4.158481175634e-07` |
+| final `fsqz` | `4.381988014471e-11` | `3.905312682467e-07` |
+| final `fsql` | `5.370548206077e-11` | `1.088439080074e-07` |
+| mean iota | `7.329089073972e-03` | `7.370706838615e-03` |
+
+The residual-history plot was visually checked.  VMEC/JAX starts below the
+VMEC2000 printed residual level and remains lower through the recorded history,
+which indicates the remaining comparison is about initialization and stopping
+conventions as much as force-kernel parity.
+
+### How it was tested
+
+Focused tests:
+
+```bash
+JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
+```
+
+Result: `5 passed in 1.95s`.
+
+Lint and format:
+
+```bash
+python -m ruff check \
+  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  tests/test_toroidal_hybrid.py
+python -m ruff format --check \
+  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  tests/test_toroidal_hybrid.py
+```
+
+Result: all checks passed and both files were formatted.
+
+Docs and whitespace:
+
+```bash
+python -m sphinx -W -j auto -b html docs docs/_build/html
+git diff --check
+```
+
+Result: docs built successfully and no whitespace errors were found.
+
+### File structure and best-practice notes
+
+- The parity component plot remains in the root convergence example, because
+  it is workflow reporting rather than core solver logic.
+- The plot uses existing row fields and does not re-run either solver.
+- Generated plots remain under ignored `results/`.
+
+### Best next steps
+
+1. Commit and push the component plot and plan update.
+2. Add an initialization-parity diagnostic: compare VMEC/JAX initial state
+   residuals against VMEC2000's first `threed1` row and document the
+   initialization difference.
+3. Run the next mode-pair parity row (`mpol=6,ntor=5`) only after the
+   initialization comparison is explicit.
+4. Then return to M13g geometry refinement.
+
+### Completion percentages after M88
+
+- Geometry/grids/bases: `93%`.
+- Field/energy/residual kernels: `86%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `88%`.
+- I/O schema and docs: `93%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `67%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `42%`.
+- ESSOS circular-coil mirror beta scan: `53%`.
+- PR merge readiness overall: `92%`.
+
+### User input needed
+
+No user input is needed.
+
+---
+
+## 89. 2026-06-18 M13f.4 initial residual component fields
+
+This tranche made the initialization difference explicit in the toroidal hybrid
+parity rows by recording initial residual components for VMEC/JAX and VMEC2000.
+
+### Steps taken
+
+- Added VMEC/JAX row fields:
+  - `initial_fsqr`;
+  - `initial_fsqz`;
+  - `initial_fsql`.
+- Added VMEC2000 `threed1` row fields:
+  - `vmec2000_initial_fsqr`;
+  - `vmec2000_initial_fsqz`;
+  - `vmec2000_initial_fsql`.
+- Kept these fields in the CSV export so initialization comparisons are table
+  driven.
+
+### Results obtained
+
+Schema smoke:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_stellarator_mirror_hybrid_initial_components_m13j \
+  --ns-array 7 \
+  --mode-pairs 5:4 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 20 \
+  --ftol 1e-12 \
+  --run-solve \
+  --max-iter 5 \
+  --solver-mode parity \
+  --no-use-scan \
+  --run-vmec2000 \
+  --vmec2000-exec /Users/rogeriojorge/bin/xvmec2000 \
+  --no-plots
+```
+
+Result:
+
+| component | VMEC/JAX initial | VMEC2000 initial |
+| :--- | ---: | ---: |
+| total `fsq` | `1.101895164557e-02` | `7.091000000000e-02` |
+| `fsqr` | `5.710626825885e-03` | `4.280000000000e-02` |
+| `fsqz` | `3.739018993131e-03` | `5.310000000000e-03` |
+| `fsql` | `1.569305826559e-03` | `2.280000000000e-02` |
+
+For this generated toroidal hybrid input, VMEC/JAX starts from a lower residual
+than VMEC2000's first printed `threed1` row.  Most of the initial gap is in the
+radial and lambda components.  This supports treating future parity differences
+as an initialization/stopping-convention issue before changing the hybrid
+boundary model.
+
+### How it was tested
+
+Focused tests:
+
+```bash
+JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
+```
+
+Result: `5 passed in 1.95s`.
+
+Lint and format:
+
+```bash
+python -m ruff check \
+  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  tests/test_toroidal_hybrid.py
+python -m ruff format --check \
+  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  tests/test_toroidal_hybrid.py
+```
+
+Result: all checks passed and both files were formatted.
+
+Docs and whitespace:
+
+```bash
+python -m sphinx -W -j auto -b html docs docs/_build/html
+git diff --check
+```
+
+Result: docs built successfully and no whitespace errors were found.
+
+### File structure and best-practice notes
+
+- The fields are schema additions to the convergence workflow only.
+- No core solver behavior changed.
+- Generated validation output remains ignored under `results/`.
+
+### Best next steps
+
+1. Commit and push this initialization-component schema update.
+2. Add one concise initialization-parity note to the root example or docs after
+   running the next mode-pair parity row.
+3. Proceed to M13g geometry refinement once parity behavior is documented
+   across `mpol=5,ntor=4` and `mpol=6,ntor=5`.
+
+### Completion percentages after M89
+
+- Geometry/grids/bases: `93%`.
+- Field/energy/residual kernels: `86%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `88%`.
+- I/O schema and docs: `93%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `67%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `43%`.
+- ESSOS circular-coil mirror beta scan: `53%`.
+- PR merge readiness overall: `92%`.
+
+### User input needed
+
+No user input is needed.
+
+---
+
+## 90. 2026-06-18 M13f.5 mode-pair parity evidence
+
+This tranche ran the next toroidal hybrid parity mode pair after the row schema
+was complete.  No source behavior changed; this is evidence for the plan and
+for deciding when to move from parity instrumentation to geometry refinement.
+
+### Steps taken
+
+- Ran `mpol=6`, `ntor=5` with `ns=7,9`.
+- Used:
+  - VMEC/JAX `solver_mode=parity`;
+  - VMEC/JAX non-scan update loop;
+  - `NITER_ARRAY=100`;
+  - VMEC/JAX `max_iter=100`;
+  - local VMEC2000 through `/Users/rogeriojorge/bin/xvmec2000`.
+- Visually checked the residual component comparison plot.
+
+### Results obtained
+
+Command:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_stellarator_mirror_hybrid_parity_mode65_m13j \
+  --ns-array 7,9 \
+  --mode-pairs 6:5 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 100 \
+  --ftol 1e-12 \
+  --run-solve \
+  --max-iter 100 \
+  --solver-mode parity \
+  --no-use-scan \
+  --run-vmec2000 \
+  --vmec2000-exec /Users/rogeriojorge/bin/xvmec2000
+```
+
+Result:
+
+| case | VMEC/JAX final `fsq` | VMEC2000 final `fsq` | VMEC/JAX mean iota | VMEC2000 mean iota |
+| :--- | ---: | ---: | ---: | ---: |
+| `ns007_mpol06_ntor05` | `2.528886614099e-11` | `1.883000000000e-06` | `7.611228280938e-03` | `7.632971966475e-03` |
+| `ns009_mpol06_ntor05` | `2.496867145599e-11` | `2.655000000000e-06` | `7.428331079955e-03` | `7.460177714933e-03` |
+
+Initial residuals:
+
+| case | VMEC/JAX initial `fsq` | VMEC2000 initial `fsq` |
+| :--- | ---: | ---: |
+| `ns007_mpol06_ntor05` | `1.465570385579e-10` | `7.007000000000e-02` |
+| `ns009_mpol06_ntor05` | `1.089057628325e-10` | `7.271000000000e-02` |
+
+The parity component plot was visually checked:
+
+- `results/toroidal_stellarator_mirror_hybrid_parity_mode65_m13j/figures/toroidal_hybrid_parity_components.png`.
+
+The result reinforces the section 89 conclusion: VMEC/JAX and VMEC2000 are not
+starting from equivalent residual states for these generated inputs.  Mean iota
+is close between codes, while final force residuals differ by orders of
+magnitude after the same nominal iteration budget.  The next useful work is to
+document or control initialization parity before changing physics conclusions.
+
+### How it was tested
+
+The command above ran both solvers and produced JSON, CSV, WOUT files, and
+plots.  No committed source files changed for this evidence run.
+
+### File structure and best-practice notes
+
+- Results stayed under ignored `results/`.
+- No generated artifacts were staged.
+- The plan records only the concise metrics needed to guide the next
+  implementation step.
+
+### Best next steps
+
+1. Add a short docs note explaining that current toroidal hybrid parity rows
+   compare solved outcomes, not identical raw initial states.
+2. Begin M13g: refine the toroidal side/corner parameterization while retaining
+   the current parity runner as the regression harness.
+3. Before claiming VMEC2000 numerical parity, add an option or fixture for a
+   VMEC/JAX initial state closer to VMEC2000's raw initialization.
+
+### Completion percentages after M90
+
+- Geometry/grids/bases: `93%`.
+- Field/energy/residual kernels: `86%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `88%`.
+- I/O schema and docs: `93%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `67%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `44%`.
+- ESSOS circular-coil mirror beta scan: `53%`.
+- PR merge readiness overall: `92%`.
 
 ### User input needed
 
