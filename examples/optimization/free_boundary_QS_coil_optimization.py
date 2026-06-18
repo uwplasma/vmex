@@ -84,6 +84,7 @@ from vmec_jax.solvers.free_boundary.coil_optimization import (
     parse_same_branch_vector_keys,
     parse_profile_matrix_free_solvers,
     same_branch_current_only_coil_geometry_cache,
+    same_branch_complete_fd_report_metadata,
     same_branch_derivative_gate_evidence as same_branch_derivative_gate_evidence,
     same_branch_derivative_proposal_from_report as same_branch_derivative_proposal_from_report,
     same_branch_derivative_proposals_from_report,
@@ -809,45 +810,17 @@ def write_same_branch_validation_report(
         },
     )
     timings["complete_solve_fd_wall_s"] = float(time.perf_counter() - t0)
-    compact_report = {
-        "phase": "phase-2-same-branch-complete-solve-fd",
-        "scope": "coil-only proxy-objective validation; not arbitrary adaptive-branch differentiation",
-        "input": str(input_path),
-        "report_anchor": str(report_anchor),
-        "eps": float(args.same_branch_report_eps),
-        "direction_policy": {
-            "requested": requested_direction_policy,
-            "effective": effective_direction_policy,
-            "reason": direction_policy_reason,
-        },
-        "direction_x": direction_x.tolist(),
-        "direction_variables": [
-            variable_manifest
-            for active, variable_manifest in zip(
-                direction_x != 0.0,
-                variable_records(
-                    variables,
-                    base_params,
-                    current_step=float(args.current_step),
-                    dof_step=float(args.dof_step),
-                ),
-                strict=True,
-            )
-            if bool(active)
-        ],
-        "branch_compatibility": {
-            "same_branch": bool(report["branch_compatibility"]["same_branch"]),
-            "plus_changed_fields": list(report["branch_compatibility"]["plus"]["changed_fields"]),
-            "minus_changed_fields": list(report["branch_compatibility"]["minus"]["changed_fields"]),
-            "plus_max_abs_scalar_delta": float(report["branch_compatibility"]["plus"]["max_abs_scalar_delta"]),
-            "minus_max_abs_scalar_delta": float(report["branch_compatibility"]["minus"]["max_abs_scalar_delta"]),
-            "plus_max_rel_scalar_delta": float(report["branch_compatibility"]["plus"]["max_rel_scalar_delta"]),
-            "minus_max_rel_scalar_delta": float(report["branch_compatibility"]["minus"]["max_rel_scalar_delta"]),
-        },
-        "values": report["values"],
-        "objective_values": report["objective_values"],
-        "primary_objective": report["primary_objective"],
-    }
+    variable_manifest = variable_records(variables, base_params, current_step=float(args.current_step), dof_step=float(args.dof_step))
+    direction_variables = [manifest for active, manifest in zip(direction_x != 0.0, variable_manifest, strict=True) if bool(active)]
+    compact_report = same_branch_complete_fd_report_metadata(
+        input_path=input_path,
+        report_anchor=report_anchor,
+        eps=float(args.same_branch_report_eps),
+        direction_policy=(requested_direction_policy, effective_direction_policy, direction_policy_reason),
+        direction_x=direction_x,
+        direction_variables=direction_variables,
+        report=report,
+    )
     same_branch = bool(report["branch_compatibility"]["same_branch"])
     current_only_coil_geometry: tuple[Any, Any] | None = None
     compact_report["current_only_coil_geometry_cache"] = {
@@ -855,29 +828,14 @@ def write_same_branch_validation_report(
         "reason": "not requested",
         "scope": "current-only branch-local vector/profile replays",
     }
-    branch_local_scalar: dict[str, Any] = {
-        "available": False,
-        "scope": "fixed accepted branch only; does not differentiate adaptive host branch selection",
-        "mode": mode,
-        "replay_ad_mode": ad_mode,
-        "same_branch": same_branch,
-        "reason": "not requested" if mode != "scalar" else "branch fingerprint is not same-branch compatible",
-    }
-    branch_local_vector: dict[str, Any] = {
-        "available": False,
-        "scope": "fixed accepted branch only; does not differentiate adaptive host branch selection",
-        "mode": mode,
-        "replay_ad_mode": ad_mode,
-        "same_branch": same_branch,
-        "scalar_keys": list(vector_keys),
-        "reason": "not requested" if mode != "vector" else "branch fingerprint is not same-branch compatible",
-    }
-    branch_local_vector_gate: dict[str, Any] = {
-        "available": False,
-        "passed": False,
-        "scope": "same-branch production-forward vector/JVP physical-scalar gate",
-        "reason": "requires an available branch-local vector report",
-    }
+    branch_scope = "fixed accepted branch only; does not differentiate adaptive host branch selection"
+    branch_local_scalar: dict[str, Any] = {"available": False, "scope": branch_scope, "mode": mode, "replay_ad_mode": ad_mode, "same_branch": same_branch,
+                                           "reason": "not requested" if mode != "scalar" else "branch fingerprint is not same-branch compatible"}
+    branch_local_vector: dict[str, Any] = {"available": False, "scope": branch_scope, "mode": mode, "replay_ad_mode": ad_mode, "same_branch": same_branch,
+                                           "scalar_keys": list(vector_keys),
+                                           "reason": "not requested" if mode != "vector" else "branch fingerprint is not same-branch compatible"}
+    branch_local_vector_gate: dict[str, Any] = {"available": False, "passed": False, "scope": "same-branch production-forward vector/JVP physical-scalar gate",
+                                                "reason": "requires an available branch-local vector report"}
     report_base_values = {
         str(key): float(values["base"])
         for key, values in report["objective_values"].items()
@@ -909,13 +867,10 @@ def write_same_branch_validation_report(
         f"mode_count {int(mode_count)} exceeds replay cap {replay_max_mode_count}; "
         "set --same-branch-report-replay-max-mode-count 0 to disable this guard"
     )
-    compact_report["same_branch_replay_mode_count_guard"] = {
-        "enabled": replay_max_mode_count > 0,
-        "triggered": bool(replay_mode_count_guard_triggered),
-        "mode_count": int(mode_count),
-        "max_mode_count": replay_max_mode_count,
-        "reason": replay_mode_count_guard_reason if replay_mode_count_guard_triggered else "not triggered",
-    }
+    compact_report["same_branch_replay_mode_count_guard"] = {"enabled": replay_max_mode_count > 0,
+                                                             "triggered": bool(replay_mode_count_guard_triggered),
+                                                             "mode_count": int(mode_count), "max_mode_count": replay_max_mode_count,
+                                                             "reason": replay_mode_count_guard_reason if replay_mode_count_guard_triggered else "not triggered"}
 
     def _run_branch_local_vector(
         scalar_keys: tuple[str, ...],
