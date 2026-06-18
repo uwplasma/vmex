@@ -15483,3 +15483,74 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.99995%.
+
+## 2026-06-18 QS/ESS Sweep Diagnostic Budget Table Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Replaced repeated QA diagnostic-budget entries in
+   `examples/optimization/generate_qs_ess_sweep.py` with two compact
+   comprehensions and a shared solve-budget dictionary.
+2. Preserved all explicit QH/QP budget overrides and the opt-in
+   `--diagnostic-budgets` semantics.
+3. Validated the generated QA budget keys and representative values at import
+   time.
+
+Results obtained:
+
+- `examples/optimization/generate_qs_ess_sweep.py` dropped from 3190 to 3173
+  lines.
+- The table still produces 14 QA diagnostic overrides and 20 total diagnostic
+  overrides.
+- Representative continuation/direct CPU/GPU QA budgets match the previous
+  explicit values.
+- No optimization defaults, production budget policy, generated artifacts, or
+  large files changed.
+
+Tests and commands run:
+
+- `python -m compileall -q examples/optimization/generate_qs_ess_sweep.py`
+- `python -m ruff check examples/optimization/generate_qs_ess_sweep.py`
+- Import-time budget validation script:
+  - Result: passed; 14 QA keys and 20 total keys.
+- `python tools/diagnostics/source_health.py --top 16 --top-functions 30`
+
+Best next steps:
+
+1. Continue sweep/example simplification by compressing repeated summary or
+   profile bookkeeping only when the generated artifact schema stays identical.
+2. Avoid changing production sweep science defaults in a refactor-only tranche.
+3. Add a small persistent unit test for diagnostic budget expansion if this
+   table changes again.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999998%.
+- Solver monolith reduction: 99.62%.
+- Free-boundary adjoint monolith reduction: 99.40%.
+- Driver workflow decomposition: 99.89%.
+- Residual iteration decomposition: 97.5%.
+- WOUT diagnostic/profile decomposition: 99.88%.
+- Bcovar/WOUT parity decomposition: 99.09%.
+- Force-kernel decomposition: 99.65%.
+- Scan/performance policy consolidation: 99.6%.
+- Tomnsps transform decomposition: 98.4%.
+- Initial-guess decomposition: 99.0%.
+- Optimizer workflow decomposition: 99.48%.
+- Fixed-boundary optimizer decomposition: 95.5%.
+- Plotting/WOUT visualization decomposition: 95.8%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.3%.
+- QI objective/staged-runner decomposition: 96.8%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.99996%.

@@ -132,54 +132,37 @@ class CaseBudget:
 # Bounded policies for known poor/runaway diagnostic cases. These are opt-in via
 # ``--diagnostic-budgets`` and intentionally very small, so they remain useful
 # for CI/render smoke tests without being mistaken for production results.
+_QA_GPU_DIAGNOSTIC_SOLVE_BUDGET = dict(inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8)
 CASE_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {
     # QA needs a moderately converged inner solve before the iota residual has a
     # useful derivative. The old 40-iteration GPU diagnostic cap kept QA on the
     # zero-iota branch. These budgets were selected to keep each GPU QA case
     # below the old short sweep timeout while moving continuation/ESS cases to the
     # target-iota basin.
-    ("gpu", "continuation", "qa", 1, False): CaseBudget(
-        max_nfev=12, continuation_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
-    ("gpu", "continuation", "qa", 1, True): CaseBudget(
-        max_nfev=12, continuation_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
-    ("gpu", "continuation", "qa", 2, False): CaseBudget(
-        max_nfev=8, continuation_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
-    ("gpu", "continuation", "qa", 2, True): CaseBudget(
-        max_nfev=8, continuation_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
-    ("gpu", "continuation", "qa", 3, False): CaseBudget(
-        max_nfev=6, continuation_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
-    ("gpu", "continuation", "qa", 3, True): CaseBudget(
-        max_nfev=6, continuation_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
-    ("gpu", "direct", "qa", 1, False): CaseBudget(
-        max_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
-    ("gpu", "direct", "qa", 1, True): CaseBudget(
-        max_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
-    ("gpu", "direct", "qa", 2, False): CaseBudget(
-        max_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
-    ("gpu", "direct", "qa", 2, True): CaseBudget(
-        max_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
-    ("gpu", "direct", "qa", 3, False): CaseBudget(
-        max_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
-    ("gpu", "direct", "qa", 3, True): CaseBudget(
-        max_nfev=24, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
-    ("cpu", "direct", "qa", 3, False): CaseBudget(
-        max_nfev=24, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
-    ("cpu", "direct", "qa", 3, True): CaseBudget(
-        max_nfev=24, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
+    **{
+        ("gpu", "continuation", "qa", mode, use_ess): CaseBudget(
+            max_nfev=max_nfev,
+            continuation_nfev=12,
+            **_QA_GPU_DIAGNOSTIC_SOLVE_BUDGET,
+        )
+        for mode, max_nfev in ((1, 12), (2, 8), (3, 6))
+        for use_ess in ESS_OPTIONS
+    },
+    **{
+        ("gpu", "direct", "qa", mode, use_ess): CaseBudget(
+            max_nfev=24 if (mode, use_ess) == (3, True) else 12,
+            **_QA_GPU_DIAGNOSTIC_SOLVE_BUDGET,
+        )
+        for mode in (1, 2, 3)
+        for use_ess in ESS_OPTIONS
+    },
+    **{
+        ("cpu", "direct", "qa", 3, use_ess): CaseBudget(
+            max_nfev=24,
+            **_QA_GPU_DIAGNOSTIC_SOLVE_BUDGET,
+        )
+        for use_ess in ESS_OPTIONS
+    },
     ("gpu", "direct", "qh", 2, False): CaseBudget(max_nfev=4, inner_max_iter=40, trial_max_iter=40, trial_ftol=1e-8),
     ("gpu", "direct", "qh", 3, False): CaseBudget(max_nfev=4, inner_max_iter=40, trial_max_iter=40, trial_ftol=1e-8),
     ("gpu", "direct", "qp", 2, False): CaseBudget(max_nfev=4, inner_max_iter=40, trial_max_iter=40, trial_ftol=1e-8),
