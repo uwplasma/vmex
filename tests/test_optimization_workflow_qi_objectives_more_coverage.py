@@ -5,6 +5,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from vmec_jax.optimizers.fixed_boundary import qi_objectives
+
 
 def test_smooth_positive_part_hard_and_soft_branches() -> None:
     import vmec_jax.optimization_workflow as workflow
@@ -89,7 +91,7 @@ def test_qi_mirror_ratio_constraint_normalizes_surfaces(monkeypatch) -> None:
             "total": 0.04,
         }
 
-    monkeypatch.setattr(workflow, "mirror_ratio_penalty_from_boozer_output", fake_mirror_ratio_penalty_from_boozer_output)
+    monkeypatch.setattr(qi_objectives, "mirror_ratio_penalty_from_boozer_output", fake_mirror_ratio_penalty_from_boozer_output)
 
     term = workflow.qi_mirror_ratio_constraint(
         threshold=0.3,
@@ -129,7 +131,7 @@ def test_qi_mirror_ratio_constraint_slices_one_surface_without_normalization(mon
         seen["kwargs"] = kwargs
         return {"mirror_ratio": np.asarray([0.45]), "residuals1d": np.asarray([0.1]), "total": 0.01}
 
-    monkeypatch.setattr(workflow, "mirror_ratio_penalty_from_boozer_output", fake_mirror_ratio_penalty_from_boozer_output)
+    monkeypatch.setattr(qi_objectives, "mirror_ratio_penalty_from_boozer_output", fake_mirror_ratio_penalty_from_boozer_output)
 
     term = workflow.qi_mirror_ratio_constraint(threshold=0.4, surface_index=1, normalize_surfaces=True)
     field = {
@@ -159,7 +161,7 @@ def test_qi_max_elongation_constraint_monkeypatches_geometry_helper(monkeypatch)
         calls.append(kwargs)
         return {"max_elongation": kwargs["state"], "residuals1d": np.asarray([99.0]), "total": 99.0}
 
-    monkeypatch.setattr(workflow, "max_elongation_penalty_from_state", fake_max_elongation_penalty_from_state)
+    monkeypatch.setattr(qi_objectives, "max_elongation_penalty_from_state", fake_max_elongation_penalty_from_state)
 
     term = workflow.qi_max_elongation_constraint(threshold=4.0, ntheta=5, nphi=6, smooth_extrema=0.02)
     high_residuals, high_total = term.residual_and_total(ctx, 5.5, {})

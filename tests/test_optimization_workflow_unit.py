@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from vmec_jax.optimization import BoundaryParamSpec
+from vmec_jax.optimizers.fixed_boundary import qi_objectives
 
 
 def test_objective_factory_callbacks_dispatch_to_helpers(monkeypatch) -> None:
@@ -44,7 +45,7 @@ def test_objective_factory_callbacks_dispatch_to_helpers(monkeypatch) -> None:
         return {"residuals1d": np.asarray([2.0, 3.0]), "total": 13.0}
 
     monkeypatch.setattr(workflow, "smooth_min_abs_iota_residual", fake_iota_floor)
-    monkeypatch.setattr(workflow, "lgradb_penalty_from_state", fake_lgradb_penalty_from_state)
+    monkeypatch.setattr(qi_objectives, "lgradb_penalty_from_state", fake_lgradb_penalty_from_state)
 
     aspect = workflow.aspect_objective(target=7.0, weight=2.0)
     iota = workflow.mean_iota_objective(target=0.4, weight=3.0)
@@ -120,7 +121,7 @@ def test_workflow_mode_limit_seed_and_summary_guard_branches(capsys) -> None:
     with pytest.raises(ValueError, match="lambda must be finite"):
         workflow.interpolate_indata_boundary(seed, seed, float("nan"))
     with pytest.raises(ValueError, match="bmnc_b"):
-        workflow._slice_boozer_surfaces({}, 0)
+        qi_objectives._slice_boozer_surfaces({}, 0)
 
     workflow.print_qs_problem_summary(
         method="gauss-newton",
@@ -1233,7 +1234,7 @@ def test_lgradb_and_redl_object_state_paths_validate_and_scale(monkeypatch) -> N
         assert kwargs["s_index"] == -1
         return {"residuals1d": np.asarray([1.5]), "total": 2.25}
 
-    monkeypatch.setattr(workflow, "lgradb_penalty_from_state", fake_lgradb_penalty_from_state)
+    monkeypatch.setattr(qi_objectives, "lgradb_penalty_from_state", fake_lgradb_penalty_from_state)
     lgradb = workflow.LgradB(threshold=0.2)
     np.testing.assert_allclose(lgradb.J(ctx, "state"), [1.5])
     assert lgradb.total(ctx, "state") == 2.25
@@ -1407,7 +1408,7 @@ def test_vmec_mirror_ratio_uses_vmec_field_without_boozer(monkeypatch) -> None:
             ]
         )
 
-    monkeypatch.setattr(workflow, "b_cartesian_from_state", fake_b_cartesian_from_state)
+    monkeypatch.setattr(qi_objectives, "b_cartesian_from_state", fake_b_cartesian_from_state)
     ctx = SimpleNamespace(static=SimpleNamespace(s=np.asarray([0.0, 0.5, 1.0])), indata=object(), signgs=1)
     objective = workflow.VMECMirrorRatio(threshold=0.2, surfaces=(1.0,))
 
@@ -1441,7 +1442,7 @@ def test_vmec_mirror_ratio_smooth_penalty_weights_multiple_surfaces(monkeypatch)
             axis=-1,
         )
 
-    monkeypatch.setattr(workflow, "b_cartesian_from_state", fake_b_cartesian_from_state)
+    monkeypatch.setattr(qi_objectives, "b_cartesian_from_state", fake_b_cartesian_from_state)
 
     ctx = SimpleNamespace(static=SimpleNamespace(s=np.asarray([0.0, 0.5, 1.0])), indata=object(), signgs=1)
     objective = workflow.VMECMirrorRatio(
@@ -1510,7 +1511,7 @@ def test_mirror_ratio_objective_terms_cover_surface_selection_and_prepared_paths
             "mirror_ratio": np.asarray([0.35, 0.45]),
         }
 
-    monkeypatch.setattr(workflow, "mirror_ratio_penalty_from_state", fake_penalty)
+    monkeypatch.setattr(qi_objectives, "mirror_ratio_penalty_from_state", fake_penalty)
     monkeypatch.setattr(
         workflow.MirrorRatio,
         "_prepare_boozer_constants",
@@ -1565,7 +1566,7 @@ def test_vmec_mirror_ratio_surface_selection_errors_and_unnormalized_weights(mon
     objective = workflow.VMECMirrorRatio(threshold=0.2, surfaces=(0.0, 1.0), normalize_surfaces=False)
 
     monkeypatch.setattr(
-        workflow,
+        qi_objectives,
         "b_cartesian_from_state",
         lambda *args, **kwargs: np.asarray([[[1.0, 0.0, 0.0], [2.0, 0.0, 0.0]]]),
     )
@@ -1590,7 +1591,7 @@ def test_max_elongation_objective_term_and_constraint_paths(monkeypatch) -> None
         calls.append(kwargs)
         return {"residuals1d": np.asarray([0.2]), "total": 0.04, "max_elongation": 8.5}
 
-    monkeypatch.setattr(workflow, "max_elongation_penalty_from_state", fake_elongation)
+    monkeypatch.setattr(qi_objectives, "max_elongation_penalty_from_state", fake_elongation)
     ctx = SimpleNamespace(static="static")
     objective = workflow.MaxElongation(threshold=8.0, ntheta=9, nphi=7, smooth_extrema=0.1, smooth_penalty=0.2)
 
@@ -1665,8 +1666,8 @@ def test_qi_and_qs_object_wrappers_build_terms_without_solves(monkeypatch) -> No
                 wrapper.J(ctx, "state")
         else:
             monkeypatch.setattr(
-                workflow,
-                "max_elongation_penalty_from_state",
+                    qi_objectives,
+                    "max_elongation_penalty_from_state",
                 lambda **_kwargs: {
                     "residuals1d": workflow.jnp.asarray([0.0]),
                     "total": workflow.jnp.asarray(0.0),
