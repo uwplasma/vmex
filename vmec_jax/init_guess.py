@@ -302,7 +302,6 @@ def _blend_axis_m0_full(
     """Blend m=0 modes between axis and boundary (profil3d convention)."""
     m0_idx = getattr(static, "m0_n_index", None)
     if m0_idx is None:
-        m0_mask = static.modes.m == 0
         m0_idx = -np.ones((static.cfg.ntor + 1,), dtype=int)
         for k, (m_k, n_k) in enumerate(zip(static.modes.m, static.modes.n)):
             if m_k == 0 and n_k >= 0 and n_k < m0_idx.shape[0]:

@@ -707,8 +707,6 @@ def solve_lambda_state_implicit(
             gsin = gsin * mask
             return _flatten_L(gcos, gsin)
 
-        x_star = _flatten_L(Lcos_star, Lsin_star)
-
         def Hvp(u_flat):
             ucos, usin = _unflatten_L(u_flat, shape=(ns, K))
             ucos = ucos * mask

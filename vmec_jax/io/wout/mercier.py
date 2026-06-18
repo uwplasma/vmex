@@ -618,8 +618,6 @@ def compute_mercier(
         vmec_wint_from_trig=vmec_wint_from_trig,
     )
     wint = sum_context.wint
-    nzeta = sum_context.nzeta
-    exact_sum = sum_context.exact_sum
     _sum_w = sum_context.sum_w
 
     bsubs = compute_bsubs_half_mesh(

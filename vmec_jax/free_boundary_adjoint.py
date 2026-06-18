@@ -341,7 +341,6 @@ def direct_coil_same_branch_controller_scalar_custom_vjp_report(
     )
     value = float(np.asarray(check["value"], dtype=float))
     exact = float(np.asarray(check["exact_directional"], dtype=float))
-    frozen_fd = float(np.asarray(check["fd_directional"], dtype=float))
     complete_values = objective_values[key]
     complete_base = float(complete_values["base"])
     complete_fd = float(complete_values["central_fd_directional"])
@@ -482,7 +481,6 @@ def direct_coil_same_branch_controller_scalars_custom_vjp_report(
     for index, key in enumerate(keys):
         value = float(np.asarray(values[index], dtype=float))
         exact = float(np.asarray(exact_directionals[index], dtype=float))
-        frozen_fd = float(np.asarray(frozen_fd_directionals[index], dtype=float))
         complete_values = objective_values[key]
         complete_base = float(complete_values["base"])
         complete_fd = float(complete_values["central_fd_directional"])

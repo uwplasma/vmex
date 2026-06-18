@@ -191,8 +191,6 @@ def _vmec_phase_tables_dtheta(*, m: Any, n: Any, trig: VmecTrigTables):
     m_idx, n1_idx, sgn_np = _mode_index_arrays(m=m, n=n)
     sgn = jnp.asarray(sgn_np)
 
-    cosmu_m = _take_mode_columns(trig.cosmu, m_idx)
-    sinmu_m = _take_mode_columns(trig.sinmu, m_idx)
     cosmum_m = _take_mode_columns(trig.cosmum, m_idx)
     sinmum_m = _take_mode_columns(trig.sinmum, m_idx)
     cosnv_n = _take_mode_columns(trig.cosnv, n1_idx)

@@ -893,8 +893,6 @@ def tomnsps_rzl(
 
     cosnv = trig.cosnv[:, : (ntor + 1)]  # (nzeta, ntor+1)
     sinnv = trig.sinnv[:, : (ntor + 1)]
-    cosnvn = trig.cosnvn[:, : (ntor + 1)]
-    sinnvn = trig.sinnvn[:, : (ntor + 1)]
 
     # VMEC constraint operator multiplier: xmpq(m,1)=m*(m-1).
     xmpq1 = None

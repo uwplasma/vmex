@@ -573,7 +573,6 @@ def bootstrap_current_fixed_point(
                 dpds=update_samples["dpds"],
             )
             proposed_derivative = update["current_derivative"]
-            proposed_current = update["current"]
         else:
             previous_current = diag.get("previous_current")
             if previous_current is None:
@@ -590,7 +589,6 @@ def bootstrap_current_fixed_point(
                 previous_current=previous_current,
                 policy=options.policy,
             )
-            proposed_current = integrate_current_derivative(s, proposed_derivative)
 
         old_derivative = _current_derivative_from_indata(current_indata, s, options.pcurr_type)
         effective_damping = float(options.damping)

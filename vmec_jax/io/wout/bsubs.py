@@ -576,15 +576,6 @@ def bsubuv_parity_from_state(
     coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
     coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
 
-    stack = vmec_realspace_synthesis(
-        coeff_cos=coeff_cos,
-        coeff_sin=coeff_sin,
-        modes=geom_modes,
-        trig=trig,
-        coeffs_internal=True,
-        apply_scalxc=True,
-        s=s,
-    )
     stack_t = vmec_realspace_synthesis_dtheta(
         coeff_cos=coeff_cos,
         coeff_sin=coeff_sin,
@@ -604,8 +595,6 @@ def bsubuv_parity_from_state(
         s=s,
     )
 
-    even = np.asarray(stack[0])
-    odd = np.asarray(stack[1])
     even_t = np.asarray(stack_t[0])
     odd_t = np.asarray(stack_t[1])
     even_p = np.asarray(stack_p[0])

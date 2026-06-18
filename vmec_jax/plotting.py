@@ -2013,10 +2013,8 @@ def plot_wout(
     ns = int(wout.ns)
     nfp = int(wout.nfp)
 
-    phi = np.asarray(wout.phi, dtype=float)
     iotaf = np.asarray(wout.iotaf, dtype=float)
     presf = np.asarray(wout.presf, dtype=float)
-    iotas = np.asarray(wout.iotas, dtype=float)
     pres = np.asarray(wout.pres, dtype=float)
     buco = np.asarray(wout.buco, dtype=float)
     bvco = np.asarray(wout.bvco, dtype=float)
