@@ -6,6 +6,7 @@ import numpy as np
 
 from vmec_jax.solvers.fixed_boundary.residual.setup import (
     build_residual_cache_keys,
+    free_boundary_pressure_edge_scale,
     grid_matches_vmec_static_grid,
     resolve_free_boundary_setup_policy,
 )
@@ -352,6 +353,62 @@ def test_free_boundary_setup_policy_disables_scan_and_resolves_direct_provider()
     assert not policy.use_scan
     assert policy.freeb_sample_external
     assert not policy.jit_strict_update_enabled
+
+
+def test_free_boundary_pressure_edge_scale_uses_last_half_mesh_pressure_ratio() -> None:
+    calls = []
+
+    def fake_eval_profiles(_indata, s_values):
+        s_arr = np.asarray(s_values, dtype=float)
+        calls.append(float(s_arr[0]))
+        return {"pressure": 4.0 * s_arr}
+
+    scale = free_boundary_pressure_edge_scale(
+        free_boundary_enabled=True,
+        indata={"profile": "synthetic"},
+        s=np.linspace(0.0, 1.0, 5),
+        eval_profiles_func=fake_eval_profiles,
+    )
+
+    np.testing.assert_allclose(scale, 1.0 / 0.875)
+    np.testing.assert_allclose(calls, [0.875, 1.0])
+
+
+def test_free_boundary_pressure_edge_scale_handles_disabled_zero_and_errors() -> None:
+    assert (
+        free_boundary_pressure_edge_scale(
+            free_boundary_enabled=False,
+            indata={"profile": "synthetic"},
+            s=np.linspace(0.0, 1.0, 5),
+            eval_profiles_func=lambda _indata, _s: {"pressure": np.asarray([1.0])},
+        )
+        is None
+    )
+    assert (
+        free_boundary_pressure_edge_scale(
+            free_boundary_enabled=True,
+            indata=None,
+            s=np.linspace(0.0, 1.0, 5),
+            eval_profiles_func=lambda _indata, _s: {"pressure": np.asarray([1.0])},
+        )
+        is None
+    )
+
+    zero_edge = free_boundary_pressure_edge_scale(
+        free_boundary_enabled=True,
+        indata={"profile": "synthetic"},
+        s=np.linspace(0.0, 1.0, 5),
+        eval_profiles_func=lambda _indata, _s: {"pressure": np.asarray([0.0])},
+    )
+    assert zero_edge == 0.0
+
+    failed = free_boundary_pressure_edge_scale(
+        free_boundary_enabled=True,
+        indata={"profile": "synthetic"},
+        s=np.linspace(0.0, 1.0, 5),
+        eval_profiles_func=lambda _indata, _s: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    assert failed is None
 
 
 def test_free_boundary_setup_policy_auto_strict_update_matches_cpu_gpu_defaults() -> None:

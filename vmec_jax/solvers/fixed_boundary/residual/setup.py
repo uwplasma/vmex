@@ -11,6 +11,7 @@ __all__ = [
     "FreeBoundarySetupPolicy",
     "ResidualCacheKeys",
     "build_residual_cache_keys",
+    "free_boundary_pressure_edge_scale",
     "grid_matches_vmec_static_grid",
     "resolve_free_boundary_setup_policy",
 ]
@@ -124,6 +125,39 @@ def resolve_free_boundary_setup_policy(
         update_work=int(update_work),
         cpu_work_limit=int(cpu_work_limit),
     )
+
+
+def free_boundary_pressure_edge_scale(
+    *,
+    free_boundary_enabled: bool,
+    indata: Any,
+    s: Any,
+    eval_profiles_func: Any | None = None,
+) -> float | None:
+    """Return VMEC's edge pressure scaling for free-boundary coupling.
+
+    VMEC samples pressure on the last half-mesh point for the coupled
+    free-boundary force, while the external-field interface often needs the
+    boundary value.  This helper returns the ratio ``pressure(s=1) /
+    pressure(s_edge_half)`` when the input deck and mesh are available.
+    """
+
+    s_arr = np.asarray(s, dtype=float)
+    if not bool(free_boundary_enabled) or indata is None or int(s_arr.shape[0]) < 2:
+        return None
+    try:
+        if eval_profiles_func is None:
+            from vmec_jax.profiles import eval_profiles as eval_profiles_func
+
+        hs_f = float(s_arr[1] - s_arr[0])
+        sedge = hs_f * (float(int(s_arr.shape[0])) - 1.5)
+        prof_edge = eval_profiles_func(indata, np.asarray([sedge], dtype=float))
+        prof_one = eval_profiles_func(indata, np.asarray([1.0], dtype=float))
+        p_edge = float(np.asarray(prof_edge.get("pressure", np.asarray([0.0], dtype=float))).reshape(-1)[0])
+        p_one = float(np.asarray(prof_one.get("pressure", np.asarray([0.0], dtype=float))).reshape(-1)[0])
+        return float(p_one / p_edge) if p_edge != 0.0 else 0.0
+    except Exception:
+        return None
 
 
 def build_residual_cache_keys(
