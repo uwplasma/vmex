@@ -6730,3 +6730,102 @@ JAX_ENABLE_X64=1 python examples/mirror_finite_current_pitch.py \
 ### User input needed
 
 No user input is needed.
+
+---
+
+## 61. 2026-06-17 M10/M11 mirror documentation and status cleanup
+
+This lane synchronized the public mirror documentation with the current code
+state after the dense/block-dense residual references, matrix-free block-LSMR
+diagnostics, split lambda-block budgets, and cap-to-cap open-field pitch
+diagnostics.
+
+### Steps taken
+
+- Reviewed the active branch status, recent commits, and plan ordering through
+  section 60.
+- Updated `docs/mirror/overview.rst` to describe:
+  - dense and block-dense residual-Newton reference solves;
+  - matrix-free LSMR/LSQR/block-LSMR as diagnostic scalable paths;
+  - adaptive and split radius/lambda inner linear-solve budgets;
+  - cap-to-cap field-line overlays and open-field pitch radial diagnostics;
+  - later differentiable optimization, free-boundary, hybrid, and ESSOS lanes.
+- Updated `docs/mirror/index.rst` to include cap-to-cap pitch diagnostics in
+  the experimental feature warning and to name stellarator-mirror hybrid
+  boundaries as planned work.
+- Updated `docs/mirror/outputs.rst` to document:
+  - optional split lambda-block iteration metadata;
+  - the standard mirror plot bundle;
+  - the distinction between open-field cap-to-cap pitch and toroidal iota;
+  - the absence of toroidal Boozer coordinates in current mirror `mout` files.
+- Wrapped a long line in `examples/mirror/README.md` while preserving content.
+
+### Results obtained
+
+- Documentation now matches the implemented solver and plotting status.
+- The docs no longer imply matrix-free block-LSMR is a production tight solve
+  on the moderate finite-current row.
+- The pitch language is explicit: the code reports cap-to-cap field-line
+  advance/turns for open mirror lines, not toroidal rotational transform.
+- The single plan remains ordered after section 60 and now records this cleanup
+  as a finite tranche.
+
+### How it was tested
+
+Whitespace:
+
+```bash
+git diff --check
+```
+
+Result: passed.
+
+Sphinx docs with warnings as errors:
+
+```bash
+python -m sphinx -W -j auto -b html docs docs/_build/html
+```
+
+Result: build succeeded.
+
+### File structure and best-practice notes
+
+- Status documentation stays under `docs/mirror/`:
+  - `index.rst` owns the experimental status warning;
+  - `overview.rst` owns architecture and solver-status narrative;
+  - `outputs.rst` owns mirror-native `mout` schema and plot-bundle behavior.
+- User-facing runnable examples remain documented in `examples/mirror/README.md`.
+- No solver code was changed in this lane.
+
+### Best next steps
+
+1. Commit and push this documentation/status cleanup.
+2. Resume implementation work with the next finite lane:
+   - export open-field pitch diagnostics to analysis artifacts if needed;
+   - continue simplifying fixed-boundary solver files without changing
+     behavior;
+   - begin a small, tested free-boundary data-model/coil-field bridge that can
+     support the ESSOS circular-coil beta scan lane;
+   - keep the stellarator-mirror hybrid boundary plan after the current
+     fixed-boundary MVP gates unless user priorities change.
+
+### Completion percentages after M10/M11 cleanup
+
+- Geometry/grids/bases: `90%`.
+- Field/energy/residual kernels: `84%`.
+- Fixed-boundary axisymmetric solve: `88%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `81%`.
+- Plotting and `vmec --plot` mirror support: `83%`.
+- I/O schema and docs: `86%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `35%`.
+- Free-boundary mirror lane: `5%`.
+- Stellarator-mirror hybrid lane: `10%`.
+- ESSOS circular-coil mirror beta scan: `0%`.
+- PR merge readiness overall: `81%`.
+
+### User input needed
+
+No user input is needed.

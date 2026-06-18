@@ -13,7 +13,8 @@ The current schema version is ``0.2`` and stores:
 - solver metadata including optimizer name, reduced-coordinate scaling,
   residual-Newton linear solver, inner-budget policy, effective inner
   iteration budgets, Krylov stop diagnostics, optional dense-step comparison
-  metrics, and residual-preconditioner settings when available;
+  metrics, optional split lambda-block iteration budgets, and
+  residual-preconditioner settings when available;
 - coordinate arrays ``s``, ``theta``, ``xi``, physical ``z``, and quadrature
   weights;
 - geometry arrays ``r``, ``X``, ``Y``, ``Z``, ``sqrtg``, metric terms, and the
@@ -32,3 +33,14 @@ Use ``vmec_jax.mirror.write_mirror_output`` and
 ``vmec_jax.mirror.load_mirror_output`` for Python roundtrips.  Use
 ``vmec --plot mout_case.nc --outdir figures`` or
 ``vmec_jax.mirror.plot_mirror_output`` to write the standard mirror plots.
+
+The standard plot bundle contains horizontal ``z``-axis geometry, ``r-z`` cross
+sections, boundary ``|B|`` and magnetic-field direction views, cap-to-cap
+field-line overlays, ``|B|`` maps, Jacobian maps, pressure/beta profiles,
+residual/force history, and radial diagnostics.  The radial diagnostics show
+both the profile ratio ``I'/Psi'`` and the measured cap-to-cap field-line turns
+as open-field pitch indicators.
+
+Mirror ``mout`` files do not currently store toroidal Boozer coordinates or
+toroidal rotational transform.  The open-field pitch diagnostics are defined
+only for the nonperiodic mirror axis between the two caps.

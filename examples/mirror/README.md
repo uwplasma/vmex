@@ -24,12 +24,12 @@ The physical mirror examples write a mirror-native ``mout_*.nc`` file and,
 unless ``--no-plots`` is passed, a set of PNG diagnostics including horizontal
 ``z``-axis geometry, boundary magnetic-field direction with field-line traces,
 ``|B|``, beta, cap-to-cap field-line pitch, magnetic-well-proxy, and
-residual/step-history figures.  The manufactured validation example writes metrics and targeted
-convergence/geometry/``|B|`` plots rather than a production ``mout`` file.
-These are research fixtures for the scalar-pressure fixed-boundary mirror path,
-not WHAM predictive modelling tools.  For physically axisymmetric mirrors use
-the cylinder, flared-tube, or WHAM examples; the nonaxisymmetric example is a
-solver/plot stress test.
+residual/step-history figures.  The manufactured validation example writes
+metrics and targeted convergence/geometry/``|B|`` plots rather than a
+production ``mout`` file.  These are research fixtures for the scalar-pressure
+fixed-boundary mirror path, not WHAM predictive modelling tools.  For
+physically axisymmetric mirrors use the cylinder, flared-tube, or WHAM
+examples; the nonaxisymmetric example is a solver/plot stress test.
 
 The same standard figure bundle is available from the CLI:
 

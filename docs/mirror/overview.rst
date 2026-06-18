@@ -23,14 +23,16 @@ without coupling it to toroidal VMEC assumptions:
   kernels, and magnetic/pressure energy integrals;
 - differentiable axisymmetric energy wrappers, projected residuals,
   manufactured-solution source helpers, and gradient/Hessian validation gates;
-- fixed-boundary projected-gradient, scaled L-BFGS-B, and matrix-free
-  residual-Newton solve prototypes with pressure-continuation trace
-  diagnostics;
-- a VMEC-like reduced-coordinate residual preconditioner and an adaptive inner
-  linear-solve budget policy for residual Newton;
+- fixed-boundary projected-gradient, scaled L-BFGS-B, dense/block-dense
+  residual-Newton reference solves, and matrix-free residual-Newton diagnostics
+  with pressure-continuation trace diagnostics;
+- a VMEC-like reduced-coordinate residual preconditioner, adaptive inner
+  linear-solve budgets, and split radius/lambda block-LSMR controls for
+  residual Newton;
 - mirror-native ``mout_*.nc`` read/write helpers, plot-data extraction, PNG
-  writing, 3D boundary field-vector and radial beta/twist/well-proxy diagnostics,
-  ``.npz``/CSV export helpers, and ``vmec --plot mout_*.nc`` dispatch;
+  writing, 3D boundary field-vector plots, cap-to-cap field-line overlays,
+  radial beta/open-field-pitch/well-proxy diagnostics, ``.npz``/CSV export
+  helpers, and ``vmec --plot mout_*.nc`` dispatch;
 - WHAM-inspired circular-loop fixture metadata, deterministic vacuum-field
   reference checks, optional ``magpylib`` comparison hooks, and low-resolution
   runnable axisymmetric/nonaxisymmetric examples;
@@ -52,5 +54,17 @@ runtime and memory use low.  Research-grade differentiable APIs should stay in
 JAX kernels and use implicit/root or custom linear-solve differentiation rather
 than differentiating through long host-side solver loops.
 
-Later phases finish finite-current validation, mirror straight-field-line
-diagnostics, differentiable optimization APIs, and free-boundary design.
+Current solver status:
+
+- ``dense_lstsq`` and ``block_dense_lstsq`` are small-to-moderate-grid
+  correctness references.  They reach tight residuals on the current
+  finite-current two-coil benchmark rows, including ``ns=9``, ``nxi=17``.
+- Matrix-free ``lsmr``/``lsqr``/``block_lsmr`` paths are diagnostic scalable
+  paths.  They expose useful residual, condition, and dense-step comparison
+  metrics, but the moderate finite-current row remains lambda dominated and is
+  not yet a tight-convergence production claim.
+- Open-field pitch diagnostics measure cap-to-cap field-line advance and turns.
+  They should not be interpreted as toroidal rotational transform.
+
+Later phases finish differentiable optimization APIs, free-boundary design,
+stellarator-mirror hybrid boundaries, and ESSOS circular-coil beta scans.
