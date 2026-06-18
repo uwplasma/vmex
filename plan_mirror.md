@@ -11502,3 +11502,135 @@ Result: all checks passed.
 No user input is needed.
 
 ---
+
+## 93. 2026-06-18 M13g low-cost sharpened-shape convergence comparison
+
+This evidence run compared the default toroidal hybrid shape against the first
+sharpened side/corner shape from section 92 using the same short fixed-boundary
+solver budget.
+
+### Steps taken
+
+- Ran the default `mpol=5`, `ntor=4` toroidal hybrid row.
+- Ran the sharpened `mpol=5`, `ntor=10` row with:
+  - `side_minor_modulation=0.16`;
+  - `side_elongation=0.35`;
+  - `side_power=2.0`;
+  - `corner_amplitude=0.025`;
+  - `corner_power=2.0`.
+- Used the ordinary toroidal VMEC/JAX fixed-boundary path with:
+  - `solver_mode=parity`;
+  - `use_scan=False`;
+  - `ns=7`;
+  - `NITER_ARRAY=30`;
+  - `max_iter=20`;
+  - `ftol=1e-9`.
+- Wrote ignored convergence, residual-history, and profile plots for both rows.
+
+### Results obtained
+
+Commands:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_hybrid_m13g_default_compare \
+  --ns-array 7 \
+  --mode-pairs 5:4 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 30 \
+  --ftol 1e-9 \
+  --run-solve \
+  --max-iter 20 \
+  --solver-mode parity \
+  --no-use-scan
+```
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_hybrid_m13g_sharp_compare \
+  --ns-array 7 \
+  --mode-pairs 5:10 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 30 \
+  --ftol 1e-9 \
+  --run-solve \
+  --max-iter 20 \
+  --solver-mode parity \
+  --no-use-scan \
+  --side-minor-modulation 0.16 \
+  --side-elongation 0.35 \
+  --side-power 2.0 \
+  --corner-amplitude 0.025 \
+  --corner-power 2.0
+```
+
+Comparison:
+
+| case | best `fsq` | final `fsq` | best iter | mean iota | magnetic well | runtime |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| default `5:4` | `1.471854259816e-05` | `1.839147093094e-05` | `18` | `7.629462473006e-03` | `-4.182573686373e-02` | `8.81 s` |
+| sharpened `5:10` | `1.180571456258e-05` | `1.558342244087e-05` | `18` | `3.085941451021e-03` | `-5.392764202769e-02` | `8.71 s` |
+
+The sharpened shape has a slightly lower best and final `fsq` over the same
+short budget, but it changes the physics profile noticeably: mean iota is lower
+and the magnetic-well proxy is more negative.  This is useful as a controlled
+geometry knob, not yet an optimized target.
+
+Generated ignored plot paths:
+
+- `results/toroidal_hybrid_m13g_default_compare/figures/toroidal_hybrid_fsq_history.png`;
+- `results/toroidal_hybrid_m13g_default_compare/figures/toroidal_hybrid_profiles.png`;
+- `results/toroidal_hybrid_m13g_sharp_compare/figures/toroidal_hybrid_fsq_history.png`;
+- `results/toroidal_hybrid_m13g_sharp_compare/figures/toroidal_hybrid_profiles.png`.
+
+The sharpened residual plot was visually checked and rendered correctly.
+
+### How it was tested
+
+The commands above ran the solver and plot paths end to end.  No source files
+changed for this evidence run.
+
+### File structure and best-practice notes
+
+- Evidence stays in `plan_mirror.md`; generated JSON/CSV/WOUT/PNG files remain
+  ignored under `results/`.
+- The comparison uses the existing convergence runner rather than adding a new
+  workflow prematurely.
+
+### Best next steps
+
+1. Commit and push this evidence log.
+2. Add a small parameter-scan helper around the existing convergence runner so
+   M13g can compare side/corner powers and amplitudes without manual command
+   duplication.
+3. Keep scan outputs ignored and summarize only compact metrics in the plan.
+4. Recheck PR CI state after the coverage-fix/shaping commits have had time to
+   complete.
+
+### Completion percentages after M93
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `86%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `88%`.
+- I/O schema and docs: `94%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `68%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `51%`.
+- ESSOS circular-coil mirror beta scan: `53%`.
+- PR merge readiness overall: `92%`.
+
+### User input needed
+
+No user input is needed.
+
+---
