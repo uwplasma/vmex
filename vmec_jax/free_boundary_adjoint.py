@@ -68,6 +68,14 @@ from .solvers.free_boundary.adjoint.branch_metadata import (
     direct_coil_accepted_trace_branch_metadata,
     direct_coil_accepted_trace_replay_graph_metadata,
 )
+from .solvers.free_boundary.adjoint.branch_local import (
+    branch_local_replay_option_flags as _branch_local_replay_option_flags,
+    evaluate_branch_local_production_values as _evaluate_branch_local_production_values,
+    prepare_branch_local_payload as _prepare_branch_local_payload,
+    prepare_branch_local_replay_setup as _prepare_branch_local_replay_setup,
+    select_branch_local_scalar_key as _select_branch_local_scalar_key,
+    select_branch_local_scalar_keys as _select_branch_local_scalar_keys,
+)
 from .solvers.free_boundary.adjoint.custom_vjp import (
     scalar_custom_vjp_value_jax as _scalar_custom_vjp_value_jax,
     vector_custom_vjp_value_jax as _vector_custom_vjp_value_jax,
@@ -1853,119 +1861,49 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
     if ad_mode not in {"direct", "custom_vjp"}:
         raise ValueError("replay_ad_mode must be 'direct' or 'custom_vjp'")
 
-    timings: dict[str, float] = {}
     total_start = time.perf_counter()
-    if complete_payload is None:
-        if input_path is None or params is None:
-            raise ValueError("input_path and params are required when complete_payload is not supplied")
-        t0 = time.perf_counter()
-        payload = direct_coil_complete_solve_trace(
-            input_path,
-            params,
-            init_kwargs=init_kwargs,
-            solve_kwargs=solve_kwargs,
-            require_active_trace=require_active_trace,
-        )
-        timings["complete_solve_trace_wall_s"] = float(time.perf_counter() - t0)
-    else:
-        t0 = time.perf_counter()
-        payload = dict(complete_payload)
-        if params is None:
-            params = payload.get("params")
-        if params is None:
-            raise ValueError("params must be supplied when complete_payload does not contain params")
-        timings["payload_copy_wall_s"] = float(time.perf_counter() - t0)
-
-    traces = tuple(payload.get("traces", ()))
-    if not traces:
-        raise ValueError("complete payload contains no accepted traces")
-    active_trace = any(trace.get("freeb_bsqvac_half") is not None for trace in traces)
-    if bool(require_active_trace) and not active_trace:
-        raise RuntimeError("complete payload contains no active free-boundary trace")
-    init = payload.get("init")
-    if init is None:
-        raise ValueError("complete payload is missing the initialization result")
-
-    t0 = time.perf_counter()
-    values = _complete_solve_objective_values(
-        scalar_fn(payload) if production_values is None else production_values
+    branch_payload = _prepare_branch_local_payload(
+        input_path=input_path,
+        params=params,
+        complete_payload=complete_payload,
+        init_kwargs=init_kwargs,
+        solve_kwargs=solve_kwargs,
+        require_active_trace=require_active_trace,
+        complete_solve_trace_func=direct_coil_complete_solve_trace,
     )
-    timings["production_scalar_eval_wall_s"] = float(time.perf_counter() - t0)
-    production_values_source = "scalar_fn" if production_values is None else "precomputed"
-    key = str(scalar_key or ("objective" if "objective" in values else next(iter(values))))
-    if key not in values:
-        raise KeyError(f"scalar_key {key!r} not returned by scalar_fn")
+    payload = branch_payload.payload
+    params = branch_payload.params
+    traces = branch_payload.traces
+    init = branch_payload.init
+    timings = branch_payload.timings
 
-    replay_options: dict[str, Any] = {
-        "static": init.static,
-        "traces": traces,
-        "signgs": int(init.signgs),
-        "state_weight": 0.0,
-        "bsqvac_weight": 0.0,
-        "force_weight": 0.0,
-        "enforce_edge": False,
-        "use_preconditioner_policy_segments": True,
-        "use_stacked_step_controls": True,
-        "include_replay_aux": False,
-        "unroll_accepted_only_segments_below": 8,
-    }
-    if replay_kwargs:
-        replay_options.update(replay_kwargs)
-    replay_traces_for_scalars = tuple(replay_options.get("traces", traces))
-    replay_branch_metadata = direct_coil_accepted_trace_branch_metadata(
-        replay_traces_for_scalars,
-        accept_mask=replay_options.get("accept_mask"),
-        done_mask=replay_options.get("done_mask"),
-        max_steps=replay_options.get("max_steps"),
-        json_safe=True,
+    values, production_values_source = _evaluate_branch_local_production_values(
+        payload=payload,
+        scalar_fn=scalar_fn,
+        production_values=production_values,
+        timings=timings,
     )
-    controller_slot_summary = direct_coil_accepted_trace_controller_slot_summary(replay_branch_metadata)
-    replay_payload_for_scalars = payload if replay_payload is None else replay_payload
-    replay_payload_source = "complete_payload" if replay_payload is None else "user"
-    replay_plan_for_scalars = replay_plan
-    if replay_plan_for_scalars is None and bool(use_replay_plan):
-        t0 = time.perf_counter()
-        replay_plan_for_scalars = direct_coil_accepted_trace_controller_replay_plan(
-            replay_traces_for_scalars,
-            static=init.static,
-            accept_mask=replay_options.get("accept_mask"),
-            done_mask=replay_options.get("done_mask"),
-            max_steps=replay_options.get("max_steps"),
-            use_preconditioner_policy_segments=bool(
-                replay_options.get("use_preconditioner_policy_segments", False)
-            ),
-            use_segment_preconditioner_controls=bool(
-                replay_options.get("use_segment_preconditioner_controls", False)
-            ),
-            use_stacked_step_controls=bool(replay_options.get("use_stacked_step_controls", False)),
-            use_accepted_only_fast_path=bool(replay_options.get("use_accepted_only_fast_path", True)),
-        )
-        timings["replay_plan_build_wall_s"] = float(time.perf_counter() - t0)
-    else:
-        timings["replay_plan_build_wall_s"] = 0.0
+    key = _select_branch_local_scalar_key(values, scalar_key)
 
-    t0 = time.perf_counter()
-    if bool(include_replay_graph_metadata):
-        graph_metadata = direct_coil_accepted_trace_replay_graph_metadata(
-            replay_traces_for_scalars,
-            static=init.static,
-            accept_mask=replay_options.get("accept_mask"),
-            done_mask=replay_options.get("done_mask"),
-            max_steps=replay_options.get("max_steps"),
-            sample_nzeta=replay_options.get("sample_nzeta"),
-            include_analytic=bool(replay_options.get("include_analytic", True)),
-            use_stacked_step_controls=bool(replay_options.get("use_stacked_step_controls", False)),
-            use_accepted_only_fast_path=bool(replay_options.get("use_accepted_only_fast_path", True)),
-            json_safe=True,
-        )
-    else:
-        graph_metadata = {
-            "contract": "fixed accepted-branch replay graph metadata",
-            "omitted": True,
-            "reason": "include_replay_graph_metadata=False",
-            "differentiates_adaptive_controller": False,
-        }
-    timings["replay_graph_metadata_wall_s"] = float(time.perf_counter() - t0)
+    replay_setup = _prepare_branch_local_replay_setup(
+        init=init,
+        traces=traces,
+        replay_kwargs=replay_kwargs,
+        replay_payload=replay_payload,
+        payload=payload,
+        replay_plan=replay_plan,
+        use_replay_plan=bool(use_replay_plan),
+        include_replay_graph_metadata=bool(include_replay_graph_metadata),
+        timings=timings,
+    )
+    replay_options = replay_setup.replay_options
+    replay_traces_for_scalars = replay_setup.replay_traces
+    replay_payload_for_scalars = replay_setup.replay_payload
+    replay_payload_source = replay_setup.replay_payload_source
+    replay_plan_for_scalars = replay_setup.replay_plan
+    replay_branch_metadata = replay_setup.replay_branch_metadata
+    controller_slot_summary = replay_setup.controller_slot_summary
+    graph_metadata = replay_setup.graph_metadata
 
     def _replay_scalar_direct(coil_params):
         replay = direct_coil_accepted_trace_controller_replay_objective_jax(
@@ -2031,39 +1969,11 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
         "replay_graph_metadata": graph_metadata,
         "replay_branch_metadata": replay_branch_metadata,
         "controller_slot_summary": controller_slot_summary,
-        "replay_option_flags": {
-            "use_preconditioner_policy_segments": bool(
-                replay_options.get("use_preconditioner_policy_segments", False)
-            ),
-            "use_stacked_step_controls": bool(replay_options.get("use_stacked_step_controls", False)),
-            "use_accepted_only_fast_path": bool(replay_options.get("use_accepted_only_fast_path", True)),
-            "use_replay_plan": bool(replay_plan_for_scalars is not None),
-            "include_replay_aux": bool(replay_options.get("include_replay_aux", True)),
-            "include_analytic": bool(replay_options.get("include_analytic", True)),
-            "include_mode_diagnostics": bool(replay_options.get("include_mode_diagnostics", False)),
-            "nestor_solve_mode": str(replay_options.get("nestor_solve_mode", "dense")),
-            "nestor_operator_solver": str(replay_options.get("nestor_operator_solver", "gmres")),
-            "nestor_operator_tol": float(replay_options.get("nestor_operator_tol", 1.0e-11)),
-            "nestor_operator_atol": float(replay_options.get("nestor_operator_atol", 1.0e-13)),
-            "nestor_operator_maxiter": (
-                None
-                if replay_options.get("nestor_operator_maxiter") is None
-                else int(replay_options.get("nestor_operator_maxiter"))
-            ),
-            "nestor_operator_restart": (
-                None
-                if replay_options.get("nestor_operator_restart") is None
-                else int(replay_options.get("nestor_operator_restart"))
-            ),
-            "freeze_vacuum_field": bool(replay_options.get("freeze_vacuum_field", False)),
-            "freeze_freeb_bsqvac": bool(replay_options.get("freeze_freeb_bsqvac", False)),
-            "state_only_replay": bool(replay_options.get("state_only_replay", False)),
-            "jit_preconditioner_apply": bool(replay_options.get("jit_preconditioner_apply", True)),
-            "unroll_accepted_only_segments_below": int(
-                replay_options.get("unroll_accepted_only_segments_below", 0)
-            ),
-            "replay_ad_mode": ad_mode,
-        },
+        "replay_option_flags": _branch_local_replay_option_flags(
+            replay_options,
+            replay_plan=replay_plan_for_scalars,
+            ad_mode=ad_mode,
+        ),
     }
 
 
@@ -2130,124 +2040,53 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
     if direction_params is not None and ad_mode != "direct":
         raise ValueError("direction_params directional mode requires replay_ad_mode='direct'")
 
-    timings: dict[str, float] = {}
     total_start = time.perf_counter()
-    if complete_payload is None:
-        if input_path is None or params is None:
-            raise ValueError("input_path and params are required when complete_payload is not supplied")
-        t0 = time.perf_counter()
-        payload = direct_coil_complete_solve_trace(
-            input_path,
-            params,
-            init_kwargs=init_kwargs,
-            solve_kwargs=solve_kwargs,
-            require_active_trace=require_active_trace,
-        )
-        timings["complete_solve_trace_wall_s"] = float(time.perf_counter() - t0)
-    else:
-        t0 = time.perf_counter()
-        payload = dict(complete_payload)
-        if params is None:
-            params = payload.get("params")
-        if params is None:
-            raise ValueError("params must be supplied when complete_payload does not contain params")
-        timings["payload_copy_wall_s"] = float(time.perf_counter() - t0)
-
-    traces = tuple(payload.get("traces", ()))
-    if not traces:
-        raise ValueError("complete payload contains no accepted traces")
-    active_trace = any(trace.get("freeb_bsqvac_half") is not None for trace in traces)
-    if bool(require_active_trace) and not active_trace:
-        raise RuntimeError("complete payload contains no active free-boundary trace")
-    init = payload.get("init")
-    if init is None:
-        raise ValueError("complete payload is missing the initialization result")
-
-    t0 = time.perf_counter()
-    all_values = _complete_solve_objective_values(
-        scalar_fn(payload) if production_values is None else production_values
+    branch_payload = _prepare_branch_local_payload(
+        input_path=input_path,
+        params=params,
+        complete_payload=complete_payload,
+        init_kwargs=init_kwargs,
+        solve_kwargs=solve_kwargs,
+        require_active_trace=require_active_trace,
+        complete_solve_trace_func=direct_coil_complete_solve_trace,
     )
-    timings["production_scalar_eval_wall_s"] = float(time.perf_counter() - t0)
-    production_values_source = "scalar_fn" if production_values is None else "precomputed"
-    keys = tuple(str(key) for key in (scalar_keys if scalar_keys is not None else tuple(replay_scalar_fns)))
-    if not keys:
-        raise ValueError("scalar_keys must contain at least one scalar")
-    for key in keys:
-        if key not in all_values:
-            raise KeyError(f"scalar_key {key!r} not returned by scalar_fn")
-        if key not in replay_scalar_fns:
-            raise KeyError(f"scalar_key {key!r} not present in replay_scalar_fns")
+    payload = branch_payload.payload
+    params = branch_payload.params
+    traces = branch_payload.traces
+    init = branch_payload.init
+    timings = branch_payload.timings
 
-    replay_options: dict[str, Any] = {
-        "static": init.static,
-        "traces": traces,
-        "signgs": int(init.signgs),
-        "state_weight": 0.0,
-        "bsqvac_weight": 0.0,
-        "force_weight": 0.0,
-        "enforce_edge": False,
-        "use_preconditioner_policy_segments": True,
-        "use_stacked_step_controls": True,
-        "include_replay_aux": False,
-        "unroll_accepted_only_segments_below": 8,
-    }
-    if replay_kwargs:
-        replay_options.update(replay_kwargs)
-    replay_traces_for_scalars = tuple(replay_options.get("traces", traces))
-    replay_branch_metadata = direct_coil_accepted_trace_branch_metadata(
-        replay_traces_for_scalars,
-        accept_mask=replay_options.get("accept_mask"),
-        done_mask=replay_options.get("done_mask"),
-        max_steps=replay_options.get("max_steps"),
-        json_safe=True,
+    all_values, production_values_source = _evaluate_branch_local_production_values(
+        payload=payload,
+        scalar_fn=scalar_fn,
+        production_values=production_values,
+        timings=timings,
     )
-    controller_slot_summary = direct_coil_accepted_trace_controller_slot_summary(replay_branch_metadata)
-    replay_payload_for_scalars = payload if replay_payload is None else replay_payload
-    replay_payload_source = "complete_payload" if replay_payload is None else "user"
-    replay_plan_for_scalars = replay_plan
-    if replay_plan_for_scalars is None and bool(use_replay_plan):
-        t0 = time.perf_counter()
-        replay_plan_for_scalars = direct_coil_accepted_trace_controller_replay_plan(
-            replay_traces_for_scalars,
-            static=init.static,
-            accept_mask=replay_options.get("accept_mask"),
-            done_mask=replay_options.get("done_mask"),
-            max_steps=replay_options.get("max_steps"),
-            use_preconditioner_policy_segments=bool(
-                replay_options.get("use_preconditioner_policy_segments", False)
-            ),
-            use_segment_preconditioner_controls=bool(
-                replay_options.get("use_segment_preconditioner_controls", False)
-            ),
-            use_stacked_step_controls=bool(replay_options.get("use_stacked_step_controls", False)),
-            use_accepted_only_fast_path=bool(replay_options.get("use_accepted_only_fast_path", True)),
-        )
-        timings["replay_plan_build_wall_s"] = float(time.perf_counter() - t0)
-    else:
-        timings["replay_plan_build_wall_s"] = 0.0
+    keys = _select_branch_local_scalar_keys(
+        all_values=all_values,
+        replay_scalar_fns=replay_scalar_fns,
+        scalar_keys=scalar_keys,
+    )
 
-    t0 = time.perf_counter()
-    if bool(include_replay_graph_metadata):
-        graph_metadata = direct_coil_accepted_trace_replay_graph_metadata(
-            replay_traces_for_scalars,
-            static=init.static,
-            accept_mask=replay_options.get("accept_mask"),
-            done_mask=replay_options.get("done_mask"),
-            max_steps=replay_options.get("max_steps"),
-            sample_nzeta=replay_options.get("sample_nzeta"),
-            include_analytic=bool(replay_options.get("include_analytic", True)),
-            use_stacked_step_controls=bool(replay_options.get("use_stacked_step_controls", False)),
-            use_accepted_only_fast_path=bool(replay_options.get("use_accepted_only_fast_path", True)),
-            json_safe=True,
-        )
-    else:
-        graph_metadata = {
-            "contract": "fixed accepted-branch replay graph metadata",
-            "omitted": True,
-            "reason": "include_replay_graph_metadata=False",
-            "differentiates_adaptive_controller": False,
-        }
-    timings["replay_graph_metadata_wall_s"] = float(time.perf_counter() - t0)
+    replay_setup = _prepare_branch_local_replay_setup(
+        init=init,
+        traces=traces,
+        replay_kwargs=replay_kwargs,
+        replay_payload=replay_payload,
+        payload=payload,
+        replay_plan=replay_plan,
+        use_replay_plan=bool(use_replay_plan),
+        include_replay_graph_metadata=bool(include_replay_graph_metadata),
+        timings=timings,
+    )
+    replay_options = replay_setup.replay_options
+    replay_traces_for_scalars = replay_setup.replay_traces
+    replay_payload_for_scalars = replay_setup.replay_payload
+    replay_payload_source = replay_setup.replay_payload_source
+    replay_plan_for_scalars = replay_setup.replay_plan
+    replay_branch_metadata = replay_setup.replay_branch_metadata
+    controller_slot_summary = replay_setup.controller_slot_summary
+    graph_metadata = replay_setup.graph_metadata
 
     scalar_fn_seq = tuple(
         (lambda replay, key=key: replay_scalar_fns[key](replay, replay_payload_for_scalars)) for key in keys
@@ -2429,42 +2268,16 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
         "replay_graph_metadata": graph_metadata,
         "replay_branch_metadata": replay_branch_metadata,
         "controller_slot_summary": controller_slot_summary,
-        "replay_option_flags": {
-            "use_preconditioner_policy_segments": bool(
-                replay_options.get("use_preconditioner_policy_segments", False)
-            ),
-            "use_stacked_step_controls": bool(replay_options.get("use_stacked_step_controls", False)),
-            "use_accepted_only_fast_path": bool(replay_options.get("use_accepted_only_fast_path", True)),
-            "use_replay_plan": bool(replay_plan_for_scalars is not None),
-            "include_replay_aux": bool(replay_options.get("include_replay_aux", True)),
-            "include_analytic": bool(replay_options.get("include_analytic", True)),
-            "include_mode_diagnostics": bool(replay_options.get("include_mode_diagnostics", False)),
-            "nestor_solve_mode": str(replay_options.get("nestor_solve_mode", "dense")),
-            "nestor_operator_solver": str(replay_options.get("nestor_operator_solver", "gmres")),
-            "nestor_operator_tol": float(replay_options.get("nestor_operator_tol", 1.0e-11)),
-            "nestor_operator_atol": float(replay_options.get("nestor_operator_atol", 1.0e-13)),
-            "nestor_operator_maxiter": (
-                None
-                if replay_options.get("nestor_operator_maxiter") is None
-                else int(replay_options.get("nestor_operator_maxiter"))
-            ),
-            "nestor_operator_restart": (
-                None
-                if replay_options.get("nestor_operator_restart") is None
-                else int(replay_options.get("nestor_operator_restart"))
-            ),
-            "freeze_vacuum_field": bool(replay_options.get("freeze_vacuum_field", False)),
-            "freeze_freeb_bsqvac": bool(replay_options.get("freeze_freeb_bsqvac", False)),
-            "state_only_replay": bool(replay_options.get("state_only_replay", False)),
-            "jit_preconditioner_apply": bool(replay_options.get("jit_preconditioner_apply", True)),
-            "unroll_accepted_only_segments_below": int(
-                replay_options.get("unroll_accepted_only_segments_below", 0)
-            ),
-            "replay_ad_mode": ad_mode,
-            "directional_jvp_fast_path": directional_fast_path,
-            "directional_uses_fixed_coil_geometry": directional_uses_fixed_coil_geometry,
-            "current_only_coil_geometry_source": current_only_geometry_source,
-        },
+        "replay_option_flags": _branch_local_replay_option_flags(
+            replay_options,
+            replay_plan=replay_plan_for_scalars,
+            ad_mode=ad_mode,
+            extra={
+                "directional_jvp_fast_path": directional_fast_path,
+                "directional_uses_fixed_coil_geometry": directional_uses_fixed_coil_geometry,
+                "current_only_coil_geometry_source": current_only_geometry_source,
+            },
+        ),
     }
 
 

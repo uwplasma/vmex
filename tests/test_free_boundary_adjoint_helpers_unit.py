@@ -8,6 +8,7 @@ import pytest
 import vmec_jax.free_boundary_adjoint as fba
 from vmec_jax._compat import jnp
 from vmec_jax.solvers.free_boundary.adjoint import objectives as objective_helpers
+from vmec_jax.solvers.free_boundary.adjoint import branch_local as branch_local_helpers
 from vmec_jax.solvers.free_boundary.adjoint import pytrees as pytree_helpers
 from vmec_jax.solvers.free_boundary.adjoint import replay_plan as replay_plan_helpers
 from vmec_jax.solvers.free_boundary.adjoint import runtime as runtime_helpers
@@ -64,6 +65,89 @@ def test_free_boundary_adjoint_runtime_helpers_sync_and_scope_fallbacks() -> Non
         nullcontext_factory=lambda: pytest.fail("named_scope should be used"),
     ):
         pass
+
+
+def test_free_boundary_branch_local_helpers_validate_payloads_and_report_flags() -> None:
+    init = SimpleNamespace(static=SimpleNamespace(cfg=SimpleNamespace(nfp=2, mpol=2, ntor=1, lasym=False)), signgs=1)
+    trace = {
+        "step_status": "accepted",
+        "freeb_bsqvac_half": None,
+        "freeb_nestor_trace": None,
+        "preconditioner_use_precomputed_tridi": False,
+        "preconditioner_use_lax_tridi": True,
+        "precond_jmax": 3,
+        "precond_mats": {"a": np.ones((1,))},
+        "lam_prec": np.ones((2,)),
+        "w_mode_mn": np.ones((2, 3)),
+    }
+    payload = {"init": init, "params": {"current": 1.0}, "traces": [trace]}
+
+    branch_payload = branch_local_helpers.prepare_branch_local_payload(
+        input_path=None,
+        params=None,
+        complete_payload=payload,
+        init_kwargs=None,
+        solve_kwargs=None,
+        require_active_trace=False,
+        complete_solve_trace_func=lambda *_args, **_kwargs: pytest.fail("complete solve should not run"),
+    )
+    assert branch_payload.params == {"current": 1.0}
+    assert branch_payload.traces == (trace,)
+    assert "payload_copy_wall_s" in branch_payload.timings
+
+    with pytest.raises(RuntimeError, match="active free-boundary trace"):
+        branch_local_helpers.prepare_branch_local_payload(
+            input_path=None,
+            params={"current": 1.0},
+            complete_payload=payload,
+            init_kwargs=None,
+            solve_kwargs=None,
+            require_active_trace=True,
+            complete_solve_trace_func=lambda *_args, **_kwargs: payload,
+        )
+
+    values, source = branch_local_helpers.evaluate_branch_local_production_values(
+        payload=payload,
+        scalar_fn=lambda _payload: {"objective": 2.0, "aspect": 5.0},
+        production_values=None,
+        timings=branch_payload.timings,
+    )
+    assert source == "scalar_fn"
+    assert values == {"objective": 2.0, "aspect": 5.0}
+    assert branch_local_helpers.select_branch_local_scalar_key(values, None) == "objective"
+    assert branch_local_helpers.select_branch_local_scalar_keys(
+        all_values=values,
+        replay_scalar_fns={"objective": object(), "aspect": object()},
+        scalar_keys=["aspect"],
+    ) == ("aspect",)
+
+    replay_setup = branch_local_helpers.prepare_branch_local_replay_setup(
+        init=init,
+        traces=(trace,),
+        replay_kwargs={"use_accepted_only_fast_path": False, "nestor_operator_tol": 1.0e-9},
+        replay_payload={"slim": True},
+        payload=payload,
+        replay_plan={"plan": "cached"},
+        use_replay_plan=True,
+        include_replay_graph_metadata=False,
+        timings=branch_payload.timings,
+    )
+    assert replay_setup.replay_payload == {"slim": True}
+    assert replay_setup.replay_payload_source == "user"
+    assert replay_setup.replay_plan == {"plan": "cached"}
+    assert replay_setup.graph_metadata["omitted"]
+    assert replay_setup.replay_branch_metadata["n_steps"] == 1
+
+    flags = branch_local_helpers.branch_local_replay_option_flags(
+        replay_setup.replay_options,
+        replay_plan=replay_setup.replay_plan,
+        ad_mode="direct",
+        extra={"directional_jvp_fast_path": "none"},
+    )
+    assert flags["use_replay_plan"]
+    assert not flags["use_accepted_only_fast_path"]
+    assert flags["nestor_operator_tol"] == 1.0e-9
+    assert flags["directional_jvp_fast_path"] == "none"
 
 
 @pytest.mark.py311_coverage_only

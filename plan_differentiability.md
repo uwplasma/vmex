@@ -9280,3 +9280,68 @@ Completion:
 - Implicit residual-adjoint decomposition: 88%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.955%.
+
+## 2026-06-18 Branch-Local Free-Boundary Report Split
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `vmec_jax.solvers.free_boundary.adjoint.branch_local` to own
+   branch-local production report setup: complete-solve payload validation,
+   production scalar normalization, scalar-key validation, replay option
+   assembly, replay-plan construction, graph metadata omission/collection, and
+   compact replay option flags.
+2. Rewired
+   `direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax` and
+   `direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax`
+   to share the new helper seam.
+3. Added direct unit tests for payload validation, active-trace guarding,
+   scalar-key selection, replay setup, and option-flag reporting.
+
+Results obtained:
+
+- `vmec_jax/free_boundary_adjoint.py` dropped from 2,734 to 2,550 lines.
+- The duplicated scalar/vector branch-local setup code was consolidated without
+  changing the public report APIs or the conservative differentiation contract.
+- The next large free-boundary reduction target is the 653-line
+  `direct_coil_accepted_trace_controller_replay_objective_jax` function.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/free_boundary_adjoint.py vmec_jax/solvers/free_boundary/adjoint/branch_local.py`
+- `python -m ruff check vmec_jax/free_boundary_adjoint.py vmec_jax/solvers/free_boundary/adjoint/branch_local.py tests/test_free_boundary_adjoint_helpers_unit.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_adjoint_helpers_unit.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py -q -k "branch_local or custom_vjp or complete_solve_fd or same_branch or controller"`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py -q -k "branch_local or custom_vjp or same_branch or fingerprint"`
+- `python tools/diagnostics/source_health.py --top 12 --top-functions 16`
+
+Best next steps:
+
+1. Move accepted-controller replay-objective assembly out of
+   `free_boundary_adjoint.py` into a domain module while preserving root
+   re-exports.
+2. Continue residual solver reduction only through small safe controller-state
+   seams; avoid moving `_scan_step` wholesale until it has narrower tests.
+3. Keep adaptive full-loop differentiation claims conservative until the
+   fingerprint-gated adaptive AD-vs-FD gate exists.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.96%.
+- Differentiability/refactor implementation: 99.99976%.
+- Solver monolith reduction: 99.15%.
+- Free-boundary adjoint monolith reduction: 94%.
+- Driver workflow decomposition: 96.4%.
+- WOUT diagnostic/profile decomposition: 98.8%.
+- Optimizer workflow decomposition: 98.8%.
+- Fixed-boundary optimizer decomposition: 94.0%.
+- Implicit residual-adjoint decomposition: 88%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.96%.
