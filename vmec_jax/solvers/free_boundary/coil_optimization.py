@@ -37,6 +37,7 @@ __all__ = [
     "same_branch_derivative_gate_evidence",
     "same_branch_derivative_proposal_from_report",
     "same_branch_derivative_proposals_from_report",
+    "same_branch_complete_fd_report_metadata",
     "same_branch_rejected_slot_gate_from_vector_replay",
     "same_branch_replay_plan_cache",
     "same_branch_report_direction_policy",
@@ -279,6 +280,47 @@ def same_branch_report_mode_count(report: dict[str, Any]) -> int:
         return int(np.asarray(static.modes.m).size)
     except Exception:
         return 0
+
+
+def same_branch_complete_fd_report_metadata(
+    *,
+    input_path: Any,
+    report_anchor: str,
+    eps: float,
+    direction_policy: tuple[str, str, str],
+    direction_x: Any,
+    direction_variables: list[dict[str, Any]],
+    report: dict[str, Any],
+) -> dict[str, Any]:
+    """Return compact same-branch complete-solve FD report metadata."""
+
+    requested, effective, reason = direction_policy
+    compatibility = report["branch_compatibility"]
+    plus = compatibility["plus"]
+    minus = compatibility["minus"]
+    branch_compatibility = {
+        "same_branch": bool(compatibility["same_branch"]),
+        "plus_changed_fields": list(plus["changed_fields"]),
+        "minus_changed_fields": list(minus["changed_fields"]),
+        "plus_max_abs_scalar_delta": float(plus["max_abs_scalar_delta"]),
+        "minus_max_abs_scalar_delta": float(minus["max_abs_scalar_delta"]),
+        "plus_max_rel_scalar_delta": float(plus["max_rel_scalar_delta"]),
+        "minus_max_rel_scalar_delta": float(minus["max_rel_scalar_delta"]),
+    }
+    return {
+        "phase": "phase-2-same-branch-complete-solve-fd",
+        "scope": "coil-only proxy-objective validation; not arbitrary adaptive-branch differentiation",
+        "input": str(input_path),
+        "report_anchor": str(report_anchor),
+        "eps": float(eps),
+        "direction_policy": {"requested": requested, "effective": effective, "reason": reason},
+        "direction_x": np.asarray(direction_x, dtype=float).tolist(),
+        "direction_variables": direction_variables,
+        "branch_compatibility": branch_compatibility,
+        "values": report["values"],
+        "objective_values": report["objective_values"],
+        "primary_objective": report["primary_objective"],
+    }
 
 
 def same_branch_scalar_function_registry(
