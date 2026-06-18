@@ -726,10 +726,7 @@ def run_fixed_boundary(
         return startup.routed_run
     cfg = startup.cfg
     indata = startup.indata
-    requested_solver_device = startup.requested_solver_device
     policy_backend = startup.policy_backend
-    initial_policy = startup.initial_policy
-    solver_mode_explicit = startup.solver_mode_explicit
     solver_mode_eff = startup.solver_mode_eff
     accelerated_mode = startup.accelerated_mode
     performance_mode = startup.performance_mode
@@ -770,12 +767,10 @@ def run_fixed_boundary(
     niter_list_input = stage_policy.niter_list_input
     ftol_list_input = stage_policy.ftol_list_input
     cli_budgeted_multigrid_requested = bool(stage_policy.cli_budgeted_multigrid_requested)
-    user_explicitly_staged_cli = bool(stage_policy.user_explicitly_staged_cli)
     cli_fixed_boundary_finish_enabled = bool(stage_policy.cli_fixed_boundary_finish_enabled)
     multigrid = bool(stage_policy.multigrid)
     multigrid_user_provided = bool(stage_policy.multigrid_user_provided)
     accelerated_single_grid_default = bool(stage_policy.accelerated_single_grid_default)
-    current_driven_3d_cli = bool(stage_policy.current_driven_3d_cli)
     direct_staged_current_driven_3d_cli = bool(stage_policy.direct_staged_current_driven_3d_cli)
     deferred_staged_current_driven_3d_cli = bool(stage_policy.deferred_staged_current_driven_3d_cli)
     max_iter = int(stage_policy.max_iter)
@@ -965,7 +960,6 @@ def run_fixed_boundary(
 
     gamma = indata.get_float("GAMMA", 0.0)
     static = None
-    static_final = None
     bdy = None
     flux = None
     prof = None
