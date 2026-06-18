@@ -13031,3 +13031,189 @@ Results:
 No user input is needed.
 
 ---
+
+## 104. 2026-06-18 M13k full VMEC/JAX step diagnostics for toroidal hybrid audits
+
+### Steps taken
+
+- Added a public ``run_fixed_boundary(..., light_history=...)`` override:
+  - ``None`` keeps the existing fast/light policy;
+  - ``True`` forces compact histories;
+  - ``False`` forces full per-step solver histories.
+- Propagated the override through device rerouting, CLI staged helpers,
+  parity fallbacks, finish paths, and the scan WOUT corrector.
+- Added ``--full-solver-diagnostics`` to the root-level toroidal-hybrid
+  convergence example.
+- Added compact JSON/CSV fields for:
+  - light-history mode;
+  - resume-state mode;
+  - multigrid stage modes, budgets, and offsets;
+  - terminal step iteration labels;
+  - step status and restart reason counts;
+  - effective time step;
+  - update RMS;
+  - trial/current residual ratio;
+  - bcovar update flags.
+- Added ``toroidal_hybrid_step_diagnostics.png`` for the full-history audit
+  path.
+- Corrected component best-residual bookkeeping so component ``best_*`` values
+  use the best residual array index rather than the one-based/VMEC iteration
+  label.
+- Updated docs to pair ``--nstep 1`` with ``--full-solver-diagnostics`` for
+  trajectory audits.
+
+### Results obtained
+
+Evidence run:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_hybrid_m13k_full_step_diagnostics \
+  --ns-array 7 \
+  --mode-pairs 5:10 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 25 \
+  --nstep 1 \
+  --ftol 1e-9 \
+  --run-solve \
+  --max-iter 8 \
+  --solver-mode accelerated \
+  --no-use-scan \
+  --full-solver-diagnostics \
+  --run-vmec2000 \
+  --vmec2000-exec /Users/rogeriojorge/bin/xvmec2000 \
+  --vmec2000-timeout-s 120
+```
+
+Key results:
+
+- ``full_solver_diagnostics = True``.
+- ``diagnostic_light_history = False``.
+- ``diagnostic_resume_state_mode = minimal``.
+- ``diagnostic_stage_modes = ["accelerated"]``.
+- ``diagnostic_stage_niter = [8]``.
+- ``diagnostic_step_history_size = 8``.
+- ``diagnostic_step_iter_history = [1, 2, 3, 4, 5, 6, 7, 8]``.
+- ``diagnostic_step_status_counts = {"momentum": 8}``.
+- ``diagnostic_restart_reason_counts = {"none": 8}``.
+- ``diagnostic_bcovar_updates = 1`` and the first step updated bcovar.
+- ``diagnostic_final_dt_eff = 9.000000000000e-01``.
+- ``diagnostic_max_update_rms = 2.738820461439e-04``.
+- ``diagnostic_final_update_rms = 1.189436400498e-04``.
+- ``diagnostic_w_try_ratio_history`` remained all ``1.0`` in this momentum
+  path.
+
+Interpretation:
+
+- The accelerated low-resolution toroidal-hybrid run is not diverging because
+  of restarts, backtracking, or unstable large updates.
+- The trajectory difference after the matched direct-initial residual is a
+  solver-policy difference: the accelerated path takes small momentum updates
+  from a boundary-inferred, minimal-resume policy and rapidly reaches lower
+  residuals than the VMEC2000 printed trajectory.
+- The next parity audit should run the same full-diagnostic export in
+  ``solver_mode=parity`` and compare raw-axis initialization plus conservative
+  update behavior.
+
+Generated ignored artifacts checked:
+
+- ``results/toroidal_hybrid_m13k_full_step_diagnostics/toroidal_stellarator_mirror_hybrid_convergence.json``.
+- ``results/toroidal_hybrid_m13k_full_step_diagnostics/toroidal_stellarator_mirror_hybrid_convergence.csv``.
+- ``results/toroidal_hybrid_m13k_full_step_diagnostics/figures/toroidal_hybrid_fsq_history.png``.
+- ``results/toroidal_hybrid_m13k_full_step_diagnostics/figures/toroidal_hybrid_step_diagnostics.png``.
+- ``results/toroidal_hybrid_m13k_full_step_diagnostics/figures/toroidal_hybrid_convergence.png``.
+- ``results/toroidal_hybrid_m13k_full_step_diagnostics/figures/toroidal_hybrid_profiles.png``.
+- ``results/toroidal_hybrid_m13k_full_step_diagnostics/figures/toroidal_hybrid_parity_components.png``.
+
+The new step-diagnostics PNG rendered correctly and is about 89 KB. No result
+files are committed.
+
+### How it was tested
+
+Commands run:
+
+```bash
+python -m ruff check vmec_jax/driver.py examples/toroidal_stellarator_mirror_hybrid_convergence.py tests/test_toroidal_hybrid.py tests/test_driver_run_wave8_coverage.py
+python -m ruff format vmec_jax/driver.py examples/toroidal_stellarator_mirror_hybrid_convergence.py tests/test_toroidal_hybrid.py tests/test_driver_run_wave8_coverage.py
+python -m ruff format --check vmec_jax/driver.py examples/toroidal_stellarator_mirror_hybrid_convergence.py tests/test_toroidal_hybrid.py tests/test_driver_run_wave8_coverage.py
+JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py tests/test_driver_run_wave8_coverage.py::test_direct_coil_free_boundary_quiet_performance_path_uses_light_history -q
+git diff --check
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_hybrid_m13k_full_step_diagnostics \
+  --ns-array 7 \
+  --mode-pairs 5:10 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 25 \
+  --nstep 1 \
+  --ftol 1e-9 \
+  --run-solve \
+  --max-iter 8 \
+  --solver-mode accelerated \
+  --no-use-scan \
+  --full-solver-diagnostics \
+  --run-vmec2000 \
+  --vmec2000-exec /Users/rogeriojorge/bin/xvmec2000 \
+  --vmec2000-timeout-s 120
+```
+
+Results:
+
+- `23 passed` in the focused pytest run.
+- Ruff check passed.
+- Ruff format check passed after formatting.
+- ``git diff --check`` passed.
+- The full-diagnostics audit completed successfully.
+- The residual-history, step-diagnostics, profile, convergence, and parity
+  component plots rendered.
+
+### File structure and best-practice notes
+
+- The driver change is an optional keyword routed to an existing solver option;
+  it does not change default behavior or solver mathematics.
+- Full histories are opt-in from the example, so normal CLI/API fast paths keep
+  their current memory and runtime profile.
+- The example exports scalar CSV summaries and JSON arrays only in ignored
+  result files.
+- Tests cover the public driver override and the example diagnostic schema.
+- Documentation lives with the existing mirror overview and mirror examples
+  README.
+
+### Best next steps
+
+1. Commit and push M13k.
+2. Run the same ``--full-solver-diagnostics --nstep 1`` audit in
+   ``solver_mode=parity`` to distinguish raw-axis parity behavior from
+   accelerated policy behavior.
+3. If parity mode still starts from an unexpectedly low solve-history row,
+   inspect the initial bad-Jacobian/reset path and compare it against VMEC2000
+   ``guess_axis``/``restart`` behavior.
+4. Then continue to the differentiable solved-state API and mirror diagnostics
+   lanes from the finite plan.
+
+### Completion percentages after M104
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `87%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `88%`.
+- I/O schema and docs: `96%`.
+- Differentiable solved-state API: `22%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `68%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `76%`.
+- ESSOS circular-coil mirror beta scan: `53%`.
+- PR merge readiness overall: `93%`.
+
+### User input needed
+
+No user input is needed.
+
+---

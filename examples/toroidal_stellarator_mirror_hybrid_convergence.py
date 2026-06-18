@@ -145,6 +145,20 @@ _CSV_COLUMNS = (
     "ran_solve",
     "solver_mode",
     "use_scan",
+    "full_solver_diagnostics",
+    "diagnostic_light_history",
+    "diagnostic_resume_state_mode",
+    "diagnostic_stage_modes",
+    "diagnostic_stage_niter",
+    "diagnostic_stage_offsets",
+    "diagnostic_step_history_size",
+    "diagnostic_step_status_counts",
+    "diagnostic_restart_reason_counts",
+    "diagnostic_bcovar_updates",
+    "diagnostic_initial_bcovar_update",
+    "diagnostic_final_dt_eff",
+    "diagnostic_max_update_rms",
+    "diagnostic_final_update_rms",
     "requested_ftol",
     "fsq_total_target",
     "seconds",
@@ -213,13 +227,21 @@ _CSV_COLUMNS = (
 )
 
 
+def _csv_cell(value: object) -> object:
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(value, sort_keys=True)
+    return value
+
+
 def _write_rows_csv(rows: list[dict[str, object]], *, outdir: Path) -> str:
     path = outdir / "toroidal_stellarator_mirror_hybrid_convergence.csv"
     with path.open("w", newline="") as file_obj:
         writer = csv.DictWriter(file_obj, fieldnames=list(_CSV_COLUMNS), extrasaction="ignore")
         writer.writeheader()
         for row in rows:
-            writer.writerow({name: "" if row.get(name) is None else row.get(name) for name in _CSV_COLUMNS})
+            writer.writerow({name: _csv_cell(row.get(name)) for name in _CSV_COLUMNS})
     return str(path)
 
 
@@ -293,6 +315,87 @@ def _row_history_iterations(row: dict[str, object], history_size: int) -> np.nda
     if labels.size != int(history_size):
         return np.arange(1, int(history_size) + 1, dtype=int)
     return labels
+
+
+def _diag_float_list(diag: dict[str, object], key: str) -> list[float]:
+    values = np.asarray(diag.get(key, []), dtype=float).reshape(-1)
+    return [float(value) for value in values]
+
+
+def _diag_int_list(diag: dict[str, object], key: str) -> list[int]:
+    values = np.asarray(diag.get(key, []), dtype=int).reshape(-1)
+    return [int(value) for value in values]
+
+
+def _diag_str_list(diag: dict[str, object], key: str) -> list[str]:
+    values = np.asarray(diag.get(key, []), dtype=object).reshape(-1)
+    return [str(value) for value in values]
+
+
+def _counts_json(values: list[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in values:
+        counts[str(value)] = counts.get(str(value), 0) + 1
+    return counts
+
+
+def _solver_diagnostic_fields(diag: dict[str, object], *, fallback_size: int) -> dict[str, object]:
+    """Return compact JSON-safe solver histories for trajectory audits."""
+    step_status = _diag_str_list(diag, "step_status_history")
+    restart_reason = _diag_str_list(diag, "restart_reason_history")
+    pre_restart_reason = _diag_str_list(diag, "pre_restart_reason_history")
+    dt_eff = _diag_float_list(diag, "dt_eff_history")
+    update_rms = _diag_float_list(diag, "update_rms_history")
+    w_curr = _diag_float_list(diag, "w_curr_history")
+    w_try = _diag_float_list(diag, "w_try_history")
+    w_try_ratio = _diag_float_list(diag, "w_try_ratio_history")
+    terminal_size = max(
+        len(step_status),
+        len(restart_reason),
+        len(pre_restart_reason),
+        len(dt_eff),
+        len(update_rms),
+        len(w_curr),
+        len(w_try),
+        len(w_try_ratio),
+        0,
+    )
+    iter2 = _diag_int_list(diag, "iter2_history")
+    if terminal_size and len(iter2) != terminal_size:
+        iter2 = [int(value) for value in range(1, terminal_size + 1)]
+    elif not terminal_size and int(fallback_size) > 0:
+        iter2 = []
+    bcovar = _diag_int_list(diag, "bcovar_update_history")
+    stage_modes = _diag_str_list(diag, "multigrid_stage_modes")
+    stage_niter = _diag_int_list(diag, "multigrid_niter_stages")
+    stage_offsets = _diag_int_list(diag, "multigrid_stage_offsets")
+    return {
+        "diagnostic_light_history": None if "light_history" not in diag else bool(diag.get("light_history")),
+        "diagnostic_resume_state_mode": None
+        if diag.get("resume_state_mode") is None
+        else str(diag.get("resume_state_mode")),
+        "diagnostic_stage_modes": stage_modes,
+        "diagnostic_stage_niter": stage_niter,
+        "diagnostic_stage_offsets": stage_offsets,
+        "diagnostic_step_history_size": int(terminal_size),
+        "diagnostic_step_iter_history": iter2,
+        "diagnostic_step_status_history": step_status,
+        "diagnostic_restart_reason_history": restart_reason,
+        "diagnostic_pre_restart_reason_history": pre_restart_reason,
+        "diagnostic_dt_eff_history": dt_eff,
+        "diagnostic_update_rms_history": update_rms,
+        "diagnostic_w_curr_history": w_curr,
+        "diagnostic_w_try_history": w_try,
+        "diagnostic_w_try_ratio_history": w_try_ratio,
+        "diagnostic_bcovar_update_history": bcovar,
+        "diagnostic_step_status_counts": _counts_json(step_status),
+        "diagnostic_restart_reason_counts": _counts_json(restart_reason),
+        "diagnostic_bcovar_updates": int(sum(1 for value in bcovar if int(value) != 0)),
+        "diagnostic_initial_bcovar_update": None if not bcovar else bool(int(bcovar[0])),
+        "diagnostic_final_dt_eff": None if not dt_eff else float(dt_eff[-1]),
+        "diagnostic_max_update_rms": None if not update_rms else float(np.nanmax(update_rms)),
+        "diagnostic_final_update_rms": None if not update_rms else float(update_rms[-1]),
+    }
 
 
 def _compute_direct_initial_residual(
@@ -408,6 +511,45 @@ def _write_fsq_history_plot(rows: list[dict[str, object]], *, outdir: Path) -> s
     ax.grid(True, which="both", alpha=0.25)
     ax.legend(loc="best", fontsize=8)
     path = outdir / "toroidal_hybrid_fsq_history.png"
+    fig.savefig(path, dpi=180)
+    plt.close(fig)
+    return str(path)
+
+
+def _write_step_diagnostic_plot(rows: list[dict[str, object]], *, outdir: Path) -> str | None:
+    step_rows = [
+        row
+        for row in rows
+        if row.get("diagnostic_dt_eff_history")
+        or row.get("diagnostic_update_rms_history")
+        or row.get("diagnostic_w_try_ratio_history")
+    ]
+    if not step_rows:
+        return None
+    plt = _import_matplotlib()
+    outdir.mkdir(parents=True, exist_ok=True)
+    fig, axes = plt.subplots(3, 1, figsize=(7.2, 6.4), sharex=True, constrained_layout=True)
+    for row in step_rows:
+        label = str(row["case"])
+        iters = np.asarray(row.get("diagnostic_step_iter_history", []), dtype=int).reshape(-1)
+        for ax, key, ylabel in (
+            (axes[0], "diagnostic_dt_eff_history", "dt effective"),
+            (axes[1], "diagnostic_update_rms_history", "update RMS"),
+            (axes[2], "diagnostic_w_try_ratio_history", "trial/current fsq"),
+        ):
+            values = np.asarray(row.get(key, []), dtype=float).reshape(-1)
+            if values.size == 0:
+                continue
+            x = iters if iters.size == values.size else np.arange(1, values.size + 1, dtype=int)
+            ax.semilogy(x, np.maximum(values, 1.0e-300), ".-", lw=1.1, ms=3, label=label)
+            ax.set_ylabel(ylabel)
+            ax.grid(True, which="both", alpha=0.25)
+    axes[-1].set_xlabel("iteration")
+    for ax in axes:
+        if ax.lines:
+            ax.legend(loc="best", fontsize=8)
+    axes[0].set_title("Toroidal hybrid solver step diagnostics")
+    path = outdir / "toroidal_hybrid_step_diagnostics.png"
     fig.savefig(path, dpi=180)
     plt.close(fig)
     return str(path)
@@ -544,6 +686,12 @@ def main() -> None:
         default=True,
         help="When solving, also evaluate VMEC/JAX residual scalars on the pre-iteration initial state.",
     )
+    parser.add_argument(
+        "--full-solver-diagnostics",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Store full per-step VMEC/JAX solver histories instead of the quiet light-history path.",
+    )
     parser.add_argument("--run-vmec2000", action="store_true")
     parser.add_argument("--vmec2000-exec", type=str, default="")
     parser.add_argument("--vmec2000-timeout-s", type=float, default=120.0)
@@ -621,6 +769,30 @@ def main() -> None:
                     "ran_solve": bool(args.run_solve),
                     "solver_mode": str(args.solver_mode),
                     "use_scan": None if args.use_scan is None else bool(args.use_scan),
+                    "full_solver_diagnostics": bool(args.full_solver_diagnostics),
+                    "diagnostic_light_history": None,
+                    "diagnostic_resume_state_mode": None,
+                    "diagnostic_stage_modes": [],
+                    "diagnostic_stage_niter": [],
+                    "diagnostic_stage_offsets": [],
+                    "diagnostic_step_history_size": 0,
+                    "diagnostic_step_iter_history": [],
+                    "diagnostic_step_status_history": [],
+                    "diagnostic_restart_reason_history": [],
+                    "diagnostic_pre_restart_reason_history": [],
+                    "diagnostic_dt_eff_history": [],
+                    "diagnostic_update_rms_history": [],
+                    "diagnostic_w_curr_history": [],
+                    "diagnostic_w_try_history": [],
+                    "diagnostic_w_try_ratio_history": [],
+                    "diagnostic_bcovar_update_history": [],
+                    "diagnostic_step_status_counts": {},
+                    "diagnostic_restart_reason_counts": {},
+                    "diagnostic_bcovar_updates": 0,
+                    "diagnostic_initial_bcovar_update": None,
+                    "diagnostic_final_dt_eff": None,
+                    "diagnostic_max_update_rms": None,
+                    "diagnostic_final_update_rms": None,
                     "requested_ftol": float(args.ftol),
                     "fsq_total_target": None,
                     "seconds": None,
@@ -715,6 +887,7 @@ def main() -> None:
                         solver_mode=str(args.solver_mode),
                         use_scan=args.use_scan,
                         max_iter=int(args.max_iter),
+                        light_history=False if bool(args.full_solver_diagnostics) else None,
                         cli_fixed_boundary_mode=True,
                         verbose=False,
                     )
@@ -728,6 +901,8 @@ def main() -> None:
                     if diag.get("fsq_total_target") is not None:
                         row["fsq_total_target"] = float(diag["fsq_total_target"])
                     row["n_iter"] = int(getattr(run.result, "n_iter", -1)) if run.result is not None else None
+                    best_component_index = None
+                    fsq_history = np.zeros((0,), dtype=float)
                     if run.result is not None and getattr(run.result, "w_history", None) is not None:
                         fsq_history = np.asarray(run.result.w_history, dtype=float).reshape(-1)
                         row["fsq_history"] = [float(value) for value in fsq_history]
@@ -737,6 +912,10 @@ def main() -> None:
                         else:
                             row["iter_history"] = [int(value) for value in range(1, fsq_history.size + 1)]
                         row.update(_summarize_fsq_history(fsq_history))
+                        if fsq_history.size and np.any(np.isfinite(fsq_history)):
+                            best_component_index = int(
+                                np.argmin(np.where(np.isfinite(fsq_history), fsq_history, np.inf))
+                            )
                         row["initial_residual_source"] = "vmec_jax_solve_history_first_stored_row"
                         for source, history_key, initial_key, final_key, best_key in (
                             ("fsqr2_history", "fsqr_history", "initial_fsqr", "final_fsqr", "best_fsqr"),
@@ -748,9 +927,9 @@ def main() -> None:
                             if component.size:
                                 row[initial_key] = float(component[0])
                                 row[final_key] = float(component[-1])
-                                best_iter = row.get("best_iter")
-                                if best_iter is not None and 0 <= int(best_iter) < component.size:
-                                    row[best_key] = float(component[int(best_iter)])
+                                if best_component_index is not None and 0 <= int(best_component_index) < component.size:
+                                    row[best_key] = float(component[int(best_component_index)])
+                    row.update(_solver_diagnostic_fields(diag, fallback_size=int(fsq_history.size)))
                     try:
                         row["aspect"] = float(
                             vj.equilibrium_aspect_ratio_from_state(state=run.state, static=run.static)
@@ -845,6 +1024,9 @@ def main() -> None:
         fsq_history_plot = _write_fsq_history_plot(rows, outdir=outdir / "figures")
         if fsq_history_plot is not None:
             summary["figures"]["fsq_history"] = fsq_history_plot
+        step_plot = _write_step_diagnostic_plot(rows, outdir=outdir / "figures")
+        if step_plot is not None:
+            summary["figures"]["step_diagnostics"] = step_plot
         profile_plot = _write_profile_plots(rows, outdir=outdir / "figures")
         if profile_plot is not None:
             summary["figures"]["profiles"] = profile_plot

@@ -137,7 +137,9 @@ def _install_fast_run_fakes(monkeypatch, *, cfg: VMECConfig, indata: InData):
 
 
 @pytest.mark.parametrize("lfreeb, expected_scan", [(False, True), (True, False)])
-def test_run_fixed_boundary_dispatches_fixed_and_free_static_branches(monkeypatch, tmp_path: Path, lfreeb: bool, expected_scan: bool) -> None:
+def test_run_fixed_boundary_dispatches_fixed_and_free_static_branches(
+    monkeypatch, tmp_path: Path, lfreeb: bool, expected_scan: bool
+) -> None:
     cfg = _cfg(lfreeb=lfreeb)
     indata = _indata(LFREEB=lfreeb, MGRID_FILE=cfg.mgrid_file)
     calls = _install_fast_run_fakes(monkeypatch, cfg=cfg, indata=indata)
@@ -178,7 +180,9 @@ def test_run_fixed_boundary_selects_default_accelerated_policy_and_explicit_pari
     cfg = _cfg()
     indata = _indata()
     calls = _install_fast_run_fakes(monkeypatch, cfg=cfg, indata=indata)
-    monkeypatch.setattr(driver, "_default_non_autodiff_solver_policy_for_backend", lambda _indata, _backend: ("accelerated", True))
+    monkeypatch.setattr(
+        driver, "_default_non_autodiff_solver_policy_for_backend", lambda _indata, _backend: ("accelerated", True)
+    )
     monkeypatch.setattr(driver, "_default_use_scan_for_backend", lambda _indata, _backend, _solver_mode: True)
 
     accelerated = driver.run_fixed_boundary(
@@ -261,7 +265,9 @@ def test_direct_coil_free_boundary_quiet_performance_path_uses_light_history(
     cfg = _cfg(lfreeb=True)
     indata = _indata(LFREEB=True, MGRID_FILE="DIRECT_COILS")
     calls = _install_fast_run_fakes(monkeypatch, cfg=cfg, indata=indata)
-    monkeypatch.setattr(driver, "_default_non_autodiff_solver_policy_for_backend", lambda _indata, _backend: ("default", True))
+    monkeypatch.setattr(
+        driver, "_default_non_autodiff_solver_policy_for_backend", lambda _indata, _backend: ("default", True)
+    )
     monkeypatch.setattr(driver, "_default_use_scan_for_backend", lambda _indata, _backend, _solver_mode: False)
 
     driver.run_free_boundary(
@@ -278,6 +284,22 @@ def test_direct_coil_free_boundary_quiet_performance_path_uses_light_history(
     )
 
     assert calls["solve_residual_iter"][-1][2]["light_history"] is True
+
+    driver.run_free_boundary(
+        tmp_path / "input.direct",
+        max_iter=2,
+        verbose=False,
+        grid=object(),
+        jit_forces=False,
+        jit_precompile=False,
+        external_field_provider_kind="direct_coils",
+        external_field_provider_static={"coil_geometry": object()},
+        external_field_provider_params=object(),
+        light_history=False,
+        _auto_cli_fixed_boundary_mode=False,
+    )
+
+    assert calls["solve_residual_iter"][-1][2]["light_history"] is False
 
     cfg_mgrid = _cfg(lfreeb=True)
     indata_mgrid = _indata(LFREEB=True, MGRID_FILE=cfg_mgrid.mgrid_file)
@@ -306,7 +328,9 @@ def test_run_free_boundary_rejects_fixed_input_and_delegates_free_input(monkeypa
 
     captured = {}
     free_cfg = _cfg(lfreeb=True)
-    monkeypatch.setattr(driver, "load_config", lambda _path: (free_cfg, _indata(LFREEB=True, MGRID_FILE=free_cfg.mgrid_file)))
+    monkeypatch.setattr(
+        driver, "load_config", lambda _path: (free_cfg, _indata(LFREEB=True, MGRID_FILE=free_cfg.mgrid_file))
+    )
 
     def fake_run_fixed_boundary(path, **kwargs):
         captured["path"] = path
@@ -361,7 +385,11 @@ def test_cli_run_writes_wout_and_plot_mode_skips_solver_and_wout(monkeypatch, tm
         SimpleNamespace(plot_wout=lambda path, *, outdir: plot_calls.append((path, outdir))),
     )
     monkeypatch.setattr(cli, "run_fixed_boundary", lambda *args, **kwargs: pytest.fail("plot mode should not solve"))
-    monkeypatch.setattr(cli, "write_wout_from_fixed_boundary_run", lambda *args, **kwargs: pytest.fail("plot mode should not write wout"))
+    monkeypatch.setattr(
+        cli,
+        "write_wout_from_fixed_boundary_run",
+        lambda *args, **kwargs: pytest.fail("plot mode should not write wout"),
+    )
 
     assert cli.main(["--plot", str(wout_path), "--outdir", str(tmp_path / "plots")]) == 0
     assert plot_calls == [(wout_path.resolve(), (tmp_path / "plots").resolve())]
@@ -371,7 +399,11 @@ def test_cli_errors_before_solver_for_conflicting_modes_and_missing_plot(monkeyp
     input_path = tmp_path / "input.case"
     input_path.write_text("&INDATA\n/\n")
     monkeypatch.setattr(cli, "run_fixed_boundary", lambda *args, **kwargs: pytest.fail("error path should not solve"))
-    monkeypatch.setattr(cli, "write_wout_from_fixed_boundary_run", lambda *args, **kwargs: pytest.fail("error path should not write wout"))
+    monkeypatch.setattr(
+        cli,
+        "write_wout_from_fixed_boundary_run",
+        lambda *args, **kwargs: pytest.fail("error path should not write wout"),
+    )
 
     with pytest.raises(SystemExit) as conflicting_modes:
         cli.main([str(input_path), "--parity", "--fast"])

@@ -244,6 +244,8 @@ def test_toroidal_hybrid_convergence_example_runs_without_solve(tmp_path: Path):
     assert summary["figures"] == {}
     assert all(not row["ran_solve"] for row in summary["rows"])
     assert all(row["nstep"] == 25 for row in summary["rows"])
+    assert all(row["full_solver_diagnostics"] is False for row in summary["rows"])
+    assert all(row["diagnostic_step_history_size"] == 0 for row in summary["rows"])
     assert all(row["initialization_policy"] == "vmec_jax_default_input_boundary" for row in summary["rows"])
     assert all(
         row["vmec_jax_axis_initialization_policy"] == "boundary_inferred_missing_axis" for row in summary["rows"]
@@ -265,6 +267,8 @@ def test_toroidal_hybrid_convergence_example_runs_without_solve(tmp_path: Path):
         csv_row = next(csv.DictReader(file_obj))
     assert csv_row["initialization_policy"] == "vmec_jax_default_input_boundary"
     assert csv_row["nstep"] == "25"
+    assert csv_row["full_solver_diagnostics"] == "False"
+    assert csv_row["diagnostic_step_history_size"] == "0"
     assert csv_row["vmec_jax_axis_initialization_policy"] == "boundary_inferred_missing_axis"
     assert csv_row["vmec2000_initialization_policy"] == "vmec2000_default_input_boundary"
     assert csv_row["direct_initial_residual_requested"] == "True"
@@ -335,6 +339,36 @@ def test_toroidal_hybrid_convergence_history_summary_uses_iteration_labels():
         module._row_history_iterations({"iter_history": [3]}, 3),
         np.asarray([1, 2, 3]),
     )
+    diag_fields = module._solver_diagnostic_fields(
+        {
+            "light_history": False,
+            "resume_state_mode": "minimal",
+            "multigrid_stage_modes": np.asarray(["accelerated"], dtype=object),
+            "multigrid_niter_stages": np.asarray([8], dtype=int),
+            "multigrid_stage_offsets": np.asarray([0], dtype=int),
+            "iter2_history": np.asarray([1, 2], dtype=int),
+            "step_status_history": np.asarray(["accepted", "accepted"], dtype=object),
+            "restart_reason_history": np.asarray(["none", "bad_progress"], dtype=object),
+            "dt_eff_history": np.asarray([0.1, 0.05], dtype=float),
+            "update_rms_history": np.asarray([1.0e-3, 5.0e-4], dtype=float),
+            "w_try_ratio_history": np.asarray([0.8, 1.2], dtype=float),
+            "bcovar_update_history": np.asarray([1, 0], dtype=int),
+        },
+        fallback_size=2,
+    )
+    assert diag_fields["diagnostic_light_history"] is False
+    assert diag_fields["diagnostic_resume_state_mode"] == "minimal"
+    assert diag_fields["diagnostic_stage_modes"] == ["accelerated"]
+    assert diag_fields["diagnostic_step_iter_history"] == [1, 2]
+    assert diag_fields["diagnostic_step_history_size"] == 2
+    assert diag_fields["diagnostic_step_status_counts"] == {"accepted": 2}
+    assert diag_fields["diagnostic_restart_reason_counts"] == {"none": 1, "bad_progress": 1}
+    assert diag_fields["diagnostic_bcovar_updates"] == 1
+    assert diag_fields["diagnostic_initial_bcovar_update"] is True
+    assert diag_fields["diagnostic_final_dt_eff"] == 0.05
+    assert diag_fields["diagnostic_max_update_rms"] == 1.0e-3
+    assert diag_fields["diagnostic_final_update_rms"] == 5.0e-4
+    assert module._csv_cell({"accepted": 2}) == '{"accepted": 2}'
     with pytest.raises(ValueError, match="unknown shape"):
         module._parse_shape_cases("unknown")
 

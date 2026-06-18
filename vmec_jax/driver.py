@@ -777,11 +777,7 @@ def _copy_final_force_payload(result_i: SolveVmecResidualResult, source_i) -> So
 def _cat_result_history(results_i: list[object], attr: str) -> np.ndarray:
     """Concatenate an optional history array across VMEC stage/chunk results."""
 
-    parts = [
-        np.asarray(getattr(result_i, attr))
-        for result_i in results_i
-        if getattr(result_i, attr, None) is not None
-    ]
+    parts = [np.asarray(getattr(result_i, attr)) for result_i in results_i if getattr(result_i, attr, None) is not None]
     return np.concatenate(parts, axis=0) if parts else np.zeros((0,), dtype=float)
 
 
@@ -1209,9 +1205,7 @@ def residual_scalars_from_state(
         flss=rzl.flss,
     )
     norms = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=static.s, signgs=int(signgs))
-    scal = vmec_fsq_from_tomnsps_dynamic(
-        frzl=frzl, norms=norms, lconm1=bool(getattr(static.cfg, "lconm1", True))
-    )
+    scal = vmec_fsq_from_tomnsps_dynamic(frzl=frzl, norms=norms, lconm1=bool(getattr(static.cfg, "lconm1", True)))
     return float(scal.fsqr), float(scal.fsqz), float(scal.fsql)
 
 
@@ -1322,7 +1316,11 @@ def wout_from_fixed_boundary_run(
                         fsqr = fsqz = fsql = None
             if fsqr is None or fsqz is None or fsql is None:
                 fsqr, fsqz, fsql = residual_scalars_from_state(
-                    state=run.state, static=run.static, indata=run.indata, signgs=int(run.signgs), use_vmec_synthesis=True
+                    state=run.state,
+                    static=run.static,
+                    indata=run.indata,
+                    signgs=int(run.signgs),
+                    use_vmec_synthesis=True,
                 )
         else:
             fsqr = fsqz = fsql = 0.0
@@ -1443,6 +1441,7 @@ def run_fixed_boundary(
     max_iter: int | object = _MAX_ITER_SENTINEL,
     step_size: float | object = _STEP_SIZE_SENTINEL,
     history_size: int = 10,
+    light_history: bool | None = None,
     # vmec_gn tuning (Gauss-Newton on VMEC residual vector)
     gn_damping: float | None = None,
     gn_cg_tol: float | None = None,
@@ -1591,6 +1590,7 @@ def run_fixed_boundary(
             f.write("columns: i xc xcdot\n")
             for i, (x, xd) in enumerate(zip(xc, xcdot), start=1):
                 f.write(f"{i:8d}{x:24.16e}{xd:24.16e}\n")
+
     """Run a vmec_jax solve from an ``input.*`` file.
 
     This is the main public driver and remains backward compatible with older
@@ -1637,6 +1637,10 @@ def run_fixed_boundary(
         internal grid/weights before returning or solving.
     verbose:
         If True (default), print VMEC-style iteration progress and a summary.
+    light_history:
+        Optional override for solver diagnostic history retention. ``None`` keeps
+        the default fast/light policy, ``True`` stores compact histories, and
+        ``False`` stores full per-step histories for debugging or benchmarks.
     jit_forces:
         If True (default), JIT the force kernels. If ``"auto"``, disable JIT
         for very small workloads to reduce first-iteration latency.
@@ -1666,11 +1670,7 @@ def run_fixed_boundary(
     except Exception:
         pass
     requested_solver_device = "auto" if solver_device is None else str(solver_device).strip().lower()
-    policy_backend = (
-        requested_solver_device
-        if requested_solver_device in ("cpu", "gpu")
-        else _default_backend_name()
-    )
+    policy_backend = requested_solver_device if requested_solver_device in ("cpu", "gpu") else _default_backend_name()
     if not bool(_solver_device_context_active):
         _maybe_enable_compilation_cache(
             accelerator_requested=str(policy_backend).strip().lower() in ("gpu", "cuda", "rocm", "tpu")
@@ -1713,9 +1713,7 @@ def run_fixed_boundary(
     if restart_state_eff is not None:
         restart_ns = int(restart_state_eff.layout.ns)
         if ns_override is not None and int(ns_override) != restart_ns:
-            raise ValueError(
-                f"restart_state ns={restart_ns} does not match ns_override={ns_override}"
-            )
+            raise ValueError(f"restart_state ns={restart_ns} does not match ns_override={ns_override}")
         cfg = replace(cfg, ns=int(restart_ns))
         if restart_solver_state is not None:
             # Ensure resume checkpoints align with the provided restart state.
@@ -1794,6 +1792,7 @@ def run_fixed_boundary(
                     max_iter=max_iter,
                     step_size=step_size,
                     history_size=int(history_size),
+                    light_history=light_history,
                     gn_damping=gn_damping,
                     gn_cg_tol=gn_cg_tol,
                     gn_cg_maxiter=int(gn_cg_maxiter),
@@ -1826,7 +1825,7 @@ def run_fixed_boundary(
             if routed_run.result is not None:
                 diag = dict(getattr(routed_run.result, "diagnostics", {}) or {})
                 diag["solver_device"] = str(solver_device_name)
-                diag["solver_device_auto_reroute"] = (str(solver_device or "auto").strip().lower() == "auto")
+                diag["solver_device_auto_reroute"] = str(solver_device or "auto").strip().lower() == "auto"
                 diag["solver_device_requested_backend"] = str(backend_for_device)
                 routed_run = replace(routed_run, result=replace(routed_run.result, diagnostics=diag))
             return routed_run
@@ -1839,6 +1838,7 @@ def run_fixed_boundary(
             nfp=int(cfg.nfp),
             lasym=bool(cfg.lasym),
         )
+
     def _as_list(value):
         if value is None:
             return None
@@ -1889,9 +1889,7 @@ def run_fixed_boundary(
         and (len(niter_list_input) == len(ns_list_input))
     )
     cli_fixed_boundary_finish_enabled = (
-        bool(cli_fixed_boundary_mode)
-        and (solver_lower == "vmec2000_iter")
-        and (not bool(cfg.lfreeb))
+        bool(cli_fixed_boundary_mode) and (solver_lower == "vmec2000_iter") and (not bool(cfg.lfreeb))
     )
 
     def _resume_step_size_value() -> float:
@@ -1944,6 +1942,7 @@ def run_fixed_boundary(
                 max_iter=int(niter_i),
                 step_size=step_size,
                 history_size=int(history_size),
+                light_history=light_history,
                 gn_damping=gn_damping,
                 gn_cg_tol=gn_cg_tol,
                 gn_cg_maxiter=int(gn_cg_maxiter),
@@ -1975,11 +1974,7 @@ def run_fixed_boundary(
             stage_run = run_fixed_boundary(input_path, **kwargs)
             stage_wall_s.append(float(time.perf_counter() - stage_t0))
             try:
-                stage_timing = (
-                    stage_run.result.diagnostics.get("timing", {})
-                    if stage_run.result is not None
-                    else {}
-                )
+                stage_timing = stage_run.result.diagnostics.get("timing", {}) if stage_run.result is not None else {}
             except Exception:
                 stage_timing = {}
             stage_solve_total_s.append(_timing_solve_total_s(stage_timing))
@@ -2069,6 +2064,7 @@ def run_fixed_boundary(
                 max_iter=int(niter_i),
                 step_size=step_size,
                 history_size=int(history_size),
+                light_history=light_history,
                 gn_damping=gn_damping,
                 gn_cg_tol=gn_cg_tol,
                 gn_cg_maxiter=int(gn_cg_maxiter),
@@ -2083,9 +2079,7 @@ def run_fixed_boundary(
                 jit_forces=jit_forces,
                 jit_precompile=jit_precompile,
                 use_scan=bool(use_scan if use_scan_override is None else use_scan_override),
-                performance_mode=(
-                    True if performance_mode_override is None else bool(performance_mode_override)
-                ),
+                performance_mode=(True if performance_mode_override is None else bool(performance_mode_override)),
                 scan_wout_corrector=scan_wout_corrector,
                 stage_transition_heuristic=stage_transition_heuristic,
                 stage_transition_factor=float(stage_transition_factor),
@@ -2104,11 +2098,7 @@ def run_fixed_boundary(
             stage_run = run_fixed_boundary(input_path, **kwargs)
             stage_wall_s.append(float(time.perf_counter() - stage_t0))
             try:
-                stage_timing = (
-                    stage_run.result.diagnostics.get("timing", {})
-                    if stage_run.result is not None
-                    else {}
-                )
+                stage_timing = stage_run.result.diagnostics.get("timing", {}) if stage_run.result is not None else {}
             except Exception:
                 stage_timing = {}
             stage_solve_total_s.append(_timing_solve_total_s(stage_timing))
@@ -2131,11 +2121,19 @@ def run_fixed_boundary(
         diag["cli_staged_followup_stage_ns"] = np.asarray(ns_stage_list, dtype=int)
         diag["cli_staged_followup_stage_niter"] = np.asarray(niter_stage_list, dtype=int)
         diag["cli_staged_followup_executed_stage_ns"] = np.asarray(
-            [int(ns_stage_list[i]) for i in range(int(start_stage_index), len(ns_stage_list)) if int(niter_stage_list[i]) > 0],
+            [
+                int(ns_stage_list[i])
+                for i in range(int(start_stage_index), len(ns_stage_list))
+                if int(niter_stage_list[i]) > 0
+            ],
             dtype=int,
         )
         diag["cli_staged_followup_executed_stage_niter"] = np.asarray(
-            [int(niter_stage_list[i]) for i in range(int(start_stage_index), len(niter_stage_list)) if int(niter_stage_list[i]) > 0],
+            [
+                int(niter_stage_list[i])
+                for i in range(int(start_stage_index), len(niter_stage_list))
+                if int(niter_stage_list[i]) > 0
+            ],
             dtype=int,
         )
         diag["cli_staged_followup_stage_modes"] = np.asarray(stage_modes, dtype=object)
@@ -2198,10 +2196,7 @@ def run_fixed_boundary(
             base_diag["converged_strict"] = True
             base_diag["converged_by_total_fsq"] = bool(run_in_total)
             return replace(run_in, result=replace(run_in.result, diagnostics=base_diag))
-        if (
-            bool(run_in_strict)
-            and (not bool(require_staged_followup))
-        ):
+        if bool(run_in_strict) and (not bool(require_staged_followup)):
             base_diag["converged"] = True
             base_diag["converged_strict"] = True
             base_diag["converged_by_total_fsq"] = bool(run_in_total)
@@ -2302,7 +2297,7 @@ def run_fixed_boundary(
                 jit_warmup_iters=0,
                 use_scan=bool(use_scan_i),
                 scan_minimal_default=scan_minimal_default_i,
-                light_history=True,
+                light_history=True if light_history is None else bool(light_history),
                 resume_state_mode=finish_resume_state_mode,
                 fsq_total_target=finish_fsq_total_target,
                 host_update_assembly=host_update_assembly_i,
@@ -2415,6 +2410,7 @@ def run_fixed_boundary(
                     max_iter=int(max_fallback_budget),
                     step_size=step_size,
                     history_size=int(history_size),
+                    light_history=light_history,
                     gn_damping=gn_damping,
                     gn_cg_tol=gn_cg_tol,
                     gn_cg_maxiter=int(gn_cg_maxiter),
@@ -2488,11 +2484,12 @@ def run_fixed_boundary(
         # For multigrid paths where the final stage exhausted its NITER budget,
         # skip extra parity iterations — matching xvmec2000's "EXECUTION TERMINATED
         # NORMALLY" behavior when NITER is reached regardless of FTOLV convergence.
-        _multigrid_niter_exhausted = (
-            str(initial_policy) == "multigrid"
-            and bool(best_run.result.diagnostics.get("multigrid_final_stage_niter_exhausted", False))
+        _multigrid_niter_exhausted = str(initial_policy) == "multigrid" and bool(
+            best_run.result.diagnostics.get("multigrid_final_stage_niter_exhausted", False)
         )
-        if not bool(_multigrid_niter_exhausted) and not bool(_result_meets_requested_ftol(best_run.result, ftol=float(requested_ftol))):
+        if not bool(_multigrid_niter_exhausted) and not bool(
+            _result_meets_requested_ftol(best_run.result, ftol=float(requested_ftol))
+        ):
             budget_i = int(base_total_budget)
             while int(budget_i) >= 1:
                 if finish_budget_cap is not None:
@@ -2529,9 +2526,12 @@ def run_fixed_boundary(
                     break
                 budget_i = int(next_budget)
 
-        if staged_input and not (
-            bool(_result_meets_requested_ftol(best_run.result, ftol=float(requested_ftol)))
-        ) and bool(accelerated_mode) and not bool(_multigrid_niter_exhausted):
+        if (
+            staged_input
+            and not (bool(_result_meets_requested_ftol(best_run.result, ftol=float(requested_ftol))))
+            and bool(accelerated_mode)
+            and not bool(_multigrid_niter_exhausted)
+        ):
             fallback_used = True
             fallback = run_fixed_boundary(
                 input_path,
@@ -2540,6 +2540,7 @@ def run_fixed_boundary(
                 max_iter=int(max_fallback_budget),
                 step_size=step_size,
                 history_size=int(history_size),
+                light_history=light_history,
                 gn_damping=gn_damping,
                 gn_cg_tol=gn_cg_tol,
                 gn_cg_maxiter=int(gn_cg_maxiter),
@@ -2677,13 +2678,17 @@ def run_fixed_boundary(
 
     fb_strict_env = os.getenv("VMEC_JAX_FREEB_STRICT", "1").strip().lower()
     fb_strict = fb_strict_env not in ("", "0", "false", "no")
-    direct_external_provider = external_field_provider_kind is not None and str(external_field_provider_kind).strip().lower() not in (
+    direct_external_provider = external_field_provider_kind is not None and str(
+        external_field_provider_kind
+    ).strip().lower() not in (
         "",
         "mgrid",
         "legacy_mgrid",
     )
     external_field_provider_static_eff = external_field_provider_static
-    provider_kind_eff = "" if external_field_provider_kind is None else str(external_field_provider_kind).strip().lower()
+    provider_kind_eff = (
+        "" if external_field_provider_kind is None else str(external_field_provider_kind).strip().lower()
+    )
     if (
         direct_external_provider
         and provider_kind_eff in ("direct_coils", "coils", "coil")
@@ -2702,11 +2707,7 @@ def run_fixed_boundary(
             from .external_fields import build_coil_field_geometry
 
             jit_sampler_env = os.getenv("VMEC_JAX_FREEB_JIT_COIL_SAMPLER", "1").strip().lower()
-            static_base = (
-                {}
-                if external_field_provider_static_eff is None
-                else dict(external_field_provider_static_eff)
-            )
+            static_base = {} if external_field_provider_static_eff is None else dict(external_field_provider_static_eff)
             external_field_provider_static_eff = {
                 **static_base,
                 "coil_geometry": build_coil_field_geometry(external_field_provider_params),
@@ -2982,6 +2983,7 @@ def run_fixed_boundary(
         )
     elif solver == "vmec_lbfgs":
         from .solve import solve_fixed_boundary_lbfgs_vmec_residual
+
         _ensure_static_profiles()
         st0 = restart_state_eff if restart_state_eff is not None else _initial_guess_with_optional_nojit(static, bdy)
 
@@ -3001,6 +3003,7 @@ def run_fixed_boundary(
         )
     elif solver == "vmec_gn":
         from .solve import solve_fixed_boundary_gn_vmec_residual
+
         _ensure_static_profiles()
         st0 = restart_state_eff if restart_state_eff is not None else _initial_guess_with_optional_nojit(static, bdy)
 
@@ -3072,11 +3075,7 @@ def run_fixed_boundary(
                 continue
             stage_t0 = time.perf_counter()
             stage_accelerated_mode = bool(accelerated_mode)
-            if (
-                bool(stage_accelerated_mode)
-                and bool(direct_staged_current_driven_3d_cli)
-                and bool(cfg.lasym)
-            ):
+            if bool(stage_accelerated_mode) and bool(direct_staged_current_driven_3d_cli) and bool(cfg.lasym):
                 # LASYM current-driven 3D staged runs remain noticeably more
                 # sensitive in lambda than in geometry. The mixed accelerated
                 # controller was slightly faster here, but it consistently
@@ -3285,17 +3284,20 @@ def run_fixed_boundary(
             stage_offsets.append(sum(int(np.asarray(r.w_history).size) for r in stage_results))
             vmec2000_ctrl = True
             stage_prev_fsq = prev_stage_fsq if bool(stage_transition_heuristic) else None
-            stage_light_history = (
-                True
-                if (
-                    bool(performance_mode)
-                    and (not bool(verbose))
-                    and ((not bool(cfg.lfreeb)) or bool(direct_external_provider))
+            if light_history is None:
+                stage_light_history = (
+                    True
+                    if (
+                        bool(performance_mode)
+                        and (not bool(verbose))
+                        and ((not bool(cfg.lfreeb)) or bool(direct_external_provider))
+                    )
+                    else None
                 )
-                else None
-            )
+            else:
+                stage_light_history = bool(light_history)
             stage_resume_state_mode = "minimal" if stage_accelerated_mode else None
-            is_last_stage = (i == len(ns_stages) - 1)
+            is_last_stage = i == len(ns_stages) - 1
             _final_cpu_scan_env = os.getenv("VMEC_JAX_FINAL_STAGE_CPU_SCAN", "1").strip().lower()
             _final_cpu_scan_disabled = _final_cpu_scan_env in ("0", "false", "no")
             if (
@@ -3389,8 +3391,7 @@ def run_fixed_boundary(
             dynamic_scan = dynamic_scan_env not in ("", "0", "false", "no")
             if (
                 (not accelerated_mode)
-                and
-                dynamic_scan
+                and dynamic_scan
                 and bool(performance_mode)
                 and bool(scan_mode)
                 and bool(vmec2000_ctrl)
@@ -3431,6 +3432,7 @@ def run_fixed_boundary(
                         if not bool(jit_forces_base):
                             try:
                                 import jax
+
                                 with jax.disable_jit():
                                     return solve_fixed_boundary_residual_iter(
                                         state_probe,
@@ -3524,6 +3526,7 @@ def run_fixed_boundary(
                     )
                 except Exception:
                     pass
+
             def _run_stage_solve(
                 *,
                 state_i,
@@ -3533,6 +3536,7 @@ def run_fixed_boundary(
                 if not bool(jit_forces_flag):
                     try:
                         import jax
+
                         with jax.disable_jit():
                             return solve_fixed_boundary_residual_iter(
                                 state_i,
@@ -3555,10 +3559,7 @@ def run_fixed_boundary(
                 )
 
             explicit_stage_monitor = (
-                bool(stage_accelerated_mode)
-                and (niter_stages_input is not None)
-                and int(nstep) > 1
-                and int(i) > 0
+                bool(stage_accelerated_mode) and (niter_stages_input is not None) and int(nstep) > 1 and int(i) > 0
             )
             explicit_stage_chunk = min(int(niter_i), max(int(indata.get_int("NSTEP", 1)), 200))
             explicit_stage_target = _accelerated_fsq_total_target_from_ftol(float(ftol_i))
@@ -3602,9 +3603,7 @@ def run_fixed_boundary(
                 completed_chunk_iters = min(int(chunk_budget), int(res_chunk.n_iter) + 1)
                 remaining_budget = max(0, int(remaining_budget) - int(completed_chunk_iters))
                 chunk_state = res_chunk.state
-                chunk_resume_state = _sanitize_resume_state_for_same_stage(
-                    res_chunk.diagnostics.get("resume_state")
-                )
+                chunk_resume_state = _sanitize_resume_state_for_same_stage(res_chunk.diagnostics.get("resume_state"))
 
                 strict_chunk = bool(_result_meets_requested_ftol(res_chunk, ftol=float(ftol_i)))
                 if (not bool(strict_chunk)) and int(remaining_budget) > 0:
@@ -3658,7 +3657,7 @@ def run_fixed_boundary(
                             "max_iter": int(niter_i),
                             "jit_warmup_iters": int(jit_warmup_noscan),
                             "jit_precompile": bool(jit_precompile_noscan),
-                            "light_history": None,
+                            "light_history": None if light_history is None else bool(light_history),
                             "resume_state_mode": None,
                             "fsq_total_target": None,
                             "host_update_assembly": False,
@@ -3818,17 +3817,20 @@ def run_fixed_boundary(
                     [np.asarray(r.diagnostics.get(k, np.zeros((0,), dtype=float))) for r in stage_results]
                 )
 
-        res = _copy_final_force_payload(SolveVmecResidualResult(
-            state=state,
-            n_iter=int(sum(int(r.n_iter) + 1 for r in stage_results) - 1),
-            w_history=_cat_result_history(stage_results, "w_history"),
-            fsqr2_history=_cat_result_history(stage_results, "fsqr2_history"),
-            fsqz2_history=_cat_result_history(stage_results, "fsqz2_history"),
-            fsql2_history=_cat_result_history(stage_results, "fsql2_history"),
-            grad_rms_history=_cat_result_history(stage_results, "grad_rms_history"),
-            step_history=_cat_result_history(stage_results, "step_history"),
-            diagnostics=diag,
-        ), stage_results[-1])
+        res = _copy_final_force_payload(
+            SolveVmecResidualResult(
+                state=state,
+                n_iter=int(sum(int(r.n_iter) + 1 for r in stage_results) - 1),
+                w_history=_cat_result_history(stage_results, "w_history"),
+                fsqr2_history=_cat_result_history(stage_results, "fsqr2_history"),
+                fsqz2_history=_cat_result_history(stage_results, "fsqz2_history"),
+                fsql2_history=_cat_result_history(stage_results, "fsql2_history"),
+                grad_rms_history=_cat_result_history(stage_results, "grad_rms_history"),
+                step_history=_cat_result_history(stage_results, "step_history"),
+                diagnostics=diag,
+            ),
+            stage_results[-1],
+        )
         # Optional scan corrector: run a single non-scan VMEC2000 step to
         # re-anchor the final state before writing wout outputs.
         try:
@@ -3878,7 +3880,9 @@ def run_fixed_boundary(
                     jit_warmup_iters=0,
                     use_scan=False,
                     scan_minimal_default=scan_minimal_default,
-                    light_history=True if accelerated_mode else None,
+                    light_history=(
+                        (True if accelerated_mode else None) if light_history is None else bool(light_history)
+                    ),
                     resume_state_mode="minimal" if accelerated_mode else None,
                     fsq_total_target=(
                         _accelerated_fsq_total_target_from_ftol(float(ftol_corr)) if accelerated_mode else None
@@ -3894,17 +3898,20 @@ def run_fixed_boundary(
                 diag = dict(res.diagnostics)
                 diag["scan_wout_corrector"] = True
                 diag["scan_wout_corrector_iters"] = int(res_corr.n_iter)
-                res = _copy_final_force_payload(SolveVmecResidualResult(
-                    state=res_corr.state,
-                    n_iter=res.n_iter,
-                    w_history=res.w_history,
-                    fsqr2_history=res.fsqr2_history,
-                    fsqz2_history=res.fsqz2_history,
-                    fsql2_history=res.fsql2_history,
-                    grad_rms_history=res.grad_rms_history,
-                    step_history=res.step_history,
-                    diagnostics=diag,
-                ), res_corr)
+                res = _copy_final_force_payload(
+                    SolveVmecResidualResult(
+                        state=res_corr.state,
+                        n_iter=res.n_iter,
+                        w_history=res.w_history,
+                        fsqr2_history=res.fsqr2_history,
+                        fsqz2_history=res.fsqz2_history,
+                        fsql2_history=res.fsql2_history,
+                        grad_rms_history=res.grad_rms_history,
+                        step_history=res.step_history,
+                        diagnostics=diag,
+                    ),
+                    res_corr,
+                )
             except Exception:
                 pass
         final_requested_ftol = _requested_final_ftol(indata=indata, ftol_list_input=ftol_list_input)
@@ -3913,7 +3920,9 @@ def run_fixed_boundary(
         final_diag = dict(res.diagnostics)
         final_diag["requested_ftol"] = float(final_requested_ftol)
         final_diag["fsq_total_target"] = (
-            final_target_fsq if (final_diag.get("fsq_total_target", None) is not None or bool(accelerated_mode)) else None
+            final_target_fsq
+            if (final_diag.get("fsq_total_target", None) is not None or bool(accelerated_mode))
+            else None
         )
         if final_residuals is not None:
             final_diag["final_fsqr"] = float(final_residuals[0])
@@ -3924,17 +3933,20 @@ def run_fixed_boundary(
             _result_hits_total_target(res, fsq_total_target=float(final_target_fsq))
         )
         final_diag["converged"] = bool(final_diag["converged_strict"])
-        res = _copy_final_force_payload(SolveVmecResidualResult(
-            state=res.state,
-            n_iter=int(res.n_iter),
-            w_history=np.asarray(res.w_history),
-            fsqr2_history=np.asarray(res.fsqr2_history),
-            fsqz2_history=np.asarray(res.fsqz2_history),
-            fsql2_history=np.asarray(res.fsql2_history),
-            grad_rms_history=np.asarray(res.grad_rms_history),
-            step_history=np.asarray(res.step_history),
-            diagnostics=final_diag,
-        ), res)
+        res = _copy_final_force_payload(
+            SolveVmecResidualResult(
+                state=res.state,
+                n_iter=int(res.n_iter),
+                w_history=np.asarray(res.w_history),
+                fsqr2_history=np.asarray(res.fsqr2_history),
+                fsqz2_history=np.asarray(res.fsqz2_history),
+                fsql2_history=np.asarray(res.fsql2_history),
+                grad_rms_history=np.asarray(res.grad_rms_history),
+                step_history=np.asarray(res.step_history),
+                diagnostics=final_diag,
+            ),
+            res,
+        )
         # Use the static from the last executed stage (static_prev) when
         # available.  This ensures that static.cfg.ns matches the actual
         # solved state's ns even when the final NS_ARRAY stage is skipped
@@ -4058,7 +4070,6 @@ def run_free_boundary(input_path: str | Path, **kwargs):
     cfg, _ = load_config(str(input_path))
     if not bool(cfg.lfreeb):
         raise ValueError(
-            f"Input {input_path!s} is not a free-boundary case (LFREEB=F). "
-            "Use run_fixed_boundary(...) instead."
+            f"Input {input_path!s} is not a free-boundary case (LFREEB=F). Use run_fixed_boundary(...) instead."
         )
     return run_fixed_boundary(input_path, **kwargs)
