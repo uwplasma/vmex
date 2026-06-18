@@ -18749,3 +18749,126 @@ Results:
 No user input is needed.
 
 ---
+## 152. Line-Searched Free-Boundary Least-Squares Step Prototype
+
+### Steps taken
+
+- Added `MirrorFreeBoundaryLeastSquaresStep` to
+  `vmec_jax.mirror.free_boundary`.
+- Added `mirror_free_boundary_residual_jacobian_finite_difference`, a central
+  finite-difference Jacobian helper for residual builders that return the
+  existing `MirrorFreeBoundaryResidual`.
+- Added `mirror_free_boundary_least_squares_step`, which:
+  - builds the combined residual Jacobian;
+  - solves a regularized linear least-squares boundary-coefficient update;
+  - applies damping and a per-coefficient step cap;
+  - evaluates a short backtracking list;
+  - returns the best non-increasing trial, or marks the step unaccepted and
+    keeps the original coefficients if all trials increase the residual.
+- Exported the new dataclass and helpers through `vmec_jax.mirror.api` and
+  `vmec_jax.mirror`.
+- Added synthetic tests that still construct residuals through
+  `mirror_lcfs_residual` and `mirror_free_boundary_residual`, so the prototype
+  exercises the same vector contract as the coupled mirror solve lane.
+- Updated the mirror overview and example README to describe the finite-
+  difference LS step as a CLI/prototype derivative path to be replaced by
+  implicit/JAX/adjoint derivatives once the full residual path is
+  differentiable.
+- Checked draft PR #21 once after the previous push; the PR was still draft,
+  several jobs were green, and no CI failures were present in the rollup.
+
+### Results obtained
+
+- The free-boundary lane now has a package-level boundary-coefficient LS step
+  that directly consumes the combined equilibrium-plus-LCFS residual vector.
+- Linear synthetic residual tests recover the exact target coefficients and
+  finite-difference Jacobian.
+- A nonlinear synthetic residual test confirms the backtracking path rejects a
+  worse full linear step and accepts a smaller residual-reducing step.
+- Invalid input tests cover empty/nonfinite coefficients, invalid finite-
+  difference step, damping, step cap, ridge, line-search factors, and callbacks
+  that do not return `MirrorFreeBoundaryResidual`.
+- The helper is still a prototype derivative path for CLI workflows; it is not
+  yet the full coupled mirror free-boundary solve.
+
+### How it was tested
+
+Commands run:
+
+```bash
+python -m ruff format vmec_jax/mirror/free_boundary.py \
+  vmec_jax/mirror/api.py vmec_jax/mirror/__init__.py \
+  tests/mirror/test_mirror_free_boundary.py
+python -m ruff check vmec_jax/mirror/free_boundary.py \
+  vmec_jax/mirror/api.py vmec_jax/mirror/__init__.py \
+  tests/mirror/test_mirror_free_boundary.py
+
+JAX_ENABLE_X64=1 pytest \
+  tests/mirror/test_mirror_free_boundary.py::test_mirror_free_boundary_residual_jacobian_finite_difference_matches_linear_model \
+  tests/mirror/test_mirror_free_boundary.py::test_mirror_free_boundary_least_squares_step_reduces_linear_combined_residual \
+  tests/mirror/test_mirror_free_boundary.py::test_mirror_free_boundary_least_squares_step_backtracks_nonlinear_residual \
+  tests/mirror/test_mirror_free_boundary.py::test_mirror_free_boundary_least_squares_step_rejects_invalid_inputs \
+  tests/mirror/test_mirror_free_boundary.py::test_mirror_free_boundary_residual_jacobian_rejects_non_residual_return \
+  -q
+
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_free_boundary.py -q
+python -m sphinx -W -b html docs docs/_build/html
+git diff --check
+```
+
+Results:
+
+- Ruff format/check passed.
+- Focused LS-step tests passed: `12 passed in 0.25s`.
+- Full free-boundary tests passed: `50 passed in 2.14s`.
+- Sphinx docs build passed with warnings treated as errors.
+- Whitespace check passed.
+- Public import check printed:
+  `MirrorFreeBoundaryLeastSquaresStep True True`.
+
+### File structure and best-practice notes
+
+- The LS-step dataclass and helpers live in `vmec_jax/mirror/free_boundary.py`
+  beside the residual assembly helpers they consume.
+- Public exports remain centralized through `vmec_jax/mirror/api.py` and
+  `vmec_jax/mirror/__init__.py`.
+- Tests stay in `tests/mirror/test_mirror_free_boundary.py`, close to the LCFS
+  residual and combined residual checks.
+- Documentation updates are limited to `docs/mirror/overview.rst` and
+  `examples/mirror/README.md`.
+- No generated result files or figures were added in this source-level
+  tranche.
+
+### Best next steps
+
+1. Commit and push M152.
+2. Wire `mirror_free_boundary_least_squares_step` into the circular-coil mirror
+   beta-scan example as an optional diagnostic mode over a compact polynomial
+   boundary basis.
+3. Add a lightweight plot for LS residual components versus trial/backtracking
+   step once the example path exists.
+4. Check CI later and fix failures if any appear.
+
+### Completion percentages after M152
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `93%`.
+- Fixed-boundary axisymmetric solve: `91%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `89%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `92%`.
+- I/O schema and docs: `99%`.
+- Differentiable solved-state API: `92%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `95%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `94%`.
+- PR merge readiness overall: `98%`.
+
+### User input needed
+
+No user input is needed.
+
+---

@@ -49,7 +49,8 @@ without coupling it to toroidal VMEC assumptions:
   actual before/after diagnostics with a combined pressure/normal-field merit,
   the corresponding normalized LCFS residual vector for future coupled solves,
   a combined equilibrium-plus-LCFS residual assembly helper for least-squares
-  prototypes,
+  prototypes, and a finite-difference, line-searched least-squares boundary
+  coefficient step for the first true coupled-solve iterations,
   and normal-field-aware candidate selection between local, shape-preserving
   scale, normal-field-slope, mixed scale/normal-field, no-op, and realized
   coupled trial-scoring updates, plus an optional strict normal-field guard

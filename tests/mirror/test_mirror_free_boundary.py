@@ -20,7 +20,9 @@ from vmec_jax.mirror import (
     mirror_circular_coils_to_direct_params,
     mirror_external_bnormal,
     mirror_external_pressure_balance_response,
+    mirror_free_boundary_least_squares_step,
     mirror_free_boundary_residual,
+    mirror_free_boundary_residual_jacobian_finite_difference,
     mirror_lcfs_diagnostic,
     mirror_lcfs_diagnostic_from_arrays,
     mirror_lcfs_merit,
@@ -437,6 +439,132 @@ def test_mirror_free_boundary_residual_rejects_invalid_inputs(kwargs, match):
 
     with pytest.raises(ValueError, match=match):
         mirror_free_boundary_residual(equilibrium, lcfs, **kwargs)
+
+
+def _linear_synthetic_free_boundary_residual(coefficients):
+    target = np.asarray([0.4, -0.2])
+    matrix = np.asarray(
+        [
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 1.0],
+            [2.0, -1.0],
+        ]
+    )
+    vector = matrix @ (np.asarray(coefficients, dtype=float) - target)
+    diagnostic = SimpleNamespace(
+        pressure_balance=vector[2:3][None, :],
+        pressure_balance_rms=float(np.sqrt(np.mean(vector[2:3] ** 2))),
+        external_bnormal=vector[3:4][None, :],
+        external_bnormal_rms=float(np.sqrt(np.mean(vector[3:4] ** 2))),
+        external_bmag=np.ones((1, 1)),
+    )
+    lcfs = mirror_lcfs_residual(diagnostic, pressure_scale=1.0, bnormal_scale=1.0)
+    return mirror_free_boundary_residual(
+        vector[:2],
+        lcfs,
+        equilibrium_scale=1.0,
+        equilibrium_weight=1.0,
+        lcfs_weight=1.0,
+    )
+
+
+def test_mirror_free_boundary_residual_jacobian_finite_difference_matches_linear_model():
+    coefficients = np.asarray([0.1, 0.3])
+    residual, jacobian, steps = mirror_free_boundary_residual_jacobian_finite_difference(
+        coefficients,
+        _linear_synthetic_free_boundary_residual,
+        finite_difference_step=1.0e-6,
+    )
+
+    expected_jacobian = np.asarray(
+        [
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 1.0],
+            [2.0, -1.0],
+        ]
+    )
+    assert residual.vector.shape == (4,)
+    np.testing.assert_allclose(jacobian, expected_jacobian, rtol=1.0e-10, atol=1.0e-10)
+    np.testing.assert_allclose(steps, [1.0e-6, 1.0e-6])
+
+
+def test_mirror_free_boundary_least_squares_step_reduces_linear_combined_residual():
+    coefficients = np.asarray([0.1, 0.3])
+
+    step = mirror_free_boundary_least_squares_step(
+        coefficients,
+        _linear_synthetic_free_boundary_residual,
+        max_relative_step=2.0,
+        line_search_factors=(1.0, 0.5),
+    )
+
+    assert step.accepted is True
+    assert step.line_search_factor == pytest.approx(1.0)
+    np.testing.assert_allclose(step.new_coefficients, [0.4, -0.2], rtol=1.0e-10, atol=1.0e-10)
+    np.testing.assert_allclose(step.predicted_vector, 0.0, atol=1.0e-10)
+    assert step.trial_residual.value < 1.0e-10
+    assert step.trial_residual.value < step.residual.value
+
+
+def test_mirror_free_boundary_least_squares_step_backtracks_nonlinear_residual():
+    def nonlinear_residual(coefficients):
+        c0 = float(np.asarray(coefficients, dtype=float)[0])
+        equilibrium = np.asarray([c0 - 1.0 + 4.0 * c0**2])
+        diagnostic = SimpleNamespace(
+            pressure_balance=np.zeros((1, 1)),
+            pressure_balance_rms=0.0,
+            external_bnormal=np.zeros((1, 1)),
+            external_bnormal_rms=0.0,
+            external_bmag=np.ones((1, 1)),
+        )
+        lcfs = mirror_lcfs_residual(diagnostic, pressure_scale=1.0, bnormal_scale=1.0)
+        return mirror_free_boundary_residual(equilibrium, lcfs, equilibrium_scale=1.0)
+
+    step = mirror_free_boundary_least_squares_step(
+        np.asarray([0.0]),
+        nonlinear_residual,
+        max_relative_step=2.0,
+        line_search_factors=(1.0, 0.5, 0.25),
+    )
+
+    assert step.accepted is True
+    assert step.line_search_factor == pytest.approx(0.5)
+    np.testing.assert_allclose(step.new_coefficients, [0.5], atol=1.0e-10)
+    assert step.trial_residual.value < step.residual.value
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"coefficients": []}, "coefficients"),
+        ({"coefficients": [np.inf]}, "finite"),
+        ({"finite_difference_step": 0.0}, "finite_difference_step"),
+        ({"damping": 0.0}, "damping"),
+        ({"max_relative_step": 0.0}, "max_relative_step"),
+        ({"ridge": -1.0}, "ridge"),
+        ({"line_search_factors": ()}, "line_search_factors"),
+        ({"line_search_factors": (1.0, -0.5)}, "line_search_factors"),
+    ],
+)
+def test_mirror_free_boundary_least_squares_step_rejects_invalid_inputs(kwargs, match):
+    coefficients = kwargs.pop("coefficients", [0.0, 0.0])
+
+    with pytest.raises(ValueError, match=match):
+        mirror_free_boundary_least_squares_step(
+            coefficients,
+            _linear_synthetic_free_boundary_residual,
+            **kwargs,
+        )
+
+
+def test_mirror_free_boundary_residual_jacobian_rejects_non_residual_return():
+    with pytest.raises(TypeError, match="MirrorFreeBoundaryResidual"):
+        mirror_free_boundary_residual_jacobian_finite_difference(
+            np.asarray([0.0]),
+            lambda coefficients: coefficients,
+        )
 
 
 def test_mirror_lcfs_residual_has_boundary_coefficient_finite_difference_jacobian():

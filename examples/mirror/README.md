@@ -163,7 +163,12 @@ before and after pilot updates. This is still an LCFS pilot workflow, not a
 converged free-boundary equilibrium solve. The public
 ``mirror_lcfs_residual`` helper returns the normalized pressure-balance and
 external-normal-field residual vector behind the scalar LCFS merit, which is
-the target vector for the next true coupled free-boundary solve lane.
+the target vector for the next true coupled free-boundary solve lane. The
+public ``mirror_free_boundary_least_squares_step`` helper now adds the first
+line-searched boundary-coefficient step on top of the combined equilibrium plus
+LCFS residual vector. It uses central finite differences so CLI workflows can
+exercise the coupled residual contract before the fully differentiable solve
+path replaces those derivatives with implicit/JAX/adjoint variants.
 
 The circular-coil beta-scan metrics use the compact schema
 ``mirror_free_boundary_circular_coil_beta_scan`` version ``0.3``. The top-level

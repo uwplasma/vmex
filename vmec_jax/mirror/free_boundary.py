@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 
@@ -248,6 +248,28 @@ class MirrorFreeBoundaryResidual:
     equilibrium_scale: float
     equilibrium_weight: float
     lcfs_weight: float
+
+
+@dataclass(frozen=True)
+class MirrorFreeBoundaryLeastSquaresStep:
+    """One linearized free-boundary least-squares boundary update."""
+
+    coefficients: Any
+    residual: MirrorFreeBoundaryResidual
+    jacobian: Any
+    finite_difference_steps: Any
+    raw_step: Any
+    limited_step: Any
+    line_search_factor: float
+    new_coefficients: Any
+    trial_residual: MirrorFreeBoundaryResidual
+    predicted_vector: Any
+    predicted_value: float
+    accepted: bool
+    damping: float
+    max_relative_step: float
+    ridge: float
+    rcond: float | None
 
 
 @dataclass(frozen=True)
@@ -741,6 +763,171 @@ def mirror_free_boundary_residual(
         equilibrium_scale=float(equilibrium_scale),
         equilibrium_weight=equilibrium_weight,
         lcfs_weight=lcfs_weight,
+    )
+
+
+def _as_free_boundary_residual(value: Any) -> MirrorFreeBoundaryResidual:
+    if not isinstance(value, MirrorFreeBoundaryResidual):
+        raise TypeError("residual_function must return MirrorFreeBoundaryResidual")
+    vector = np.asarray(value.vector, dtype=float).ravel()
+    if vector.size == 0:
+        raise ValueError("residual_function returned an empty residual vector")
+    if not np.all(np.isfinite(vector)):
+        raise ValueError("residual_function returned a non-finite residual vector")
+    return value
+
+
+def mirror_free_boundary_residual_jacobian_finite_difference(
+    coefficients: Any,
+    residual_function: Callable[[np.ndarray], MirrorFreeBoundaryResidual],
+    *,
+    finite_difference_step: float = 1.0e-6,
+    residual: MirrorFreeBoundaryResidual | None = None,
+) -> tuple[MirrorFreeBoundaryResidual, np.ndarray, np.ndarray]:
+    """Return a central-difference Jacobian for a combined residual function.
+
+    This helper is intended for CLI diagnostics and early coupled-solve
+    prototypes where the residual builder may include non-JAX pieces.  JAX or
+    implicit derivatives should replace it when the full residual path is
+    differentiable.
+    """
+
+    coefficients = np.asarray(coefficients, dtype=float).ravel()
+    if coefficients.size == 0:
+        raise ValueError("coefficients must contain at least one value")
+    if not np.all(np.isfinite(coefficients)):
+        raise ValueError("coefficients must be finite")
+    finite_difference_step = float(finite_difference_step)
+    if finite_difference_step <= 0.0:
+        raise ValueError("finite_difference_step must be positive")
+
+    base = _as_free_boundary_residual(residual_function(coefficients) if residual is None else residual)
+    base_vector = np.asarray(base.vector, dtype=float).ravel()
+    steps = finite_difference_step * np.maximum(1.0, np.abs(coefficients))
+    jacobian = np.empty((base_vector.size, coefficients.size), dtype=float)
+    for index, step in enumerate(steps):
+        direction = np.zeros_like(coefficients)
+        direction[index] = step
+        plus = _as_free_boundary_residual(residual_function(coefficients + direction))
+        minus = _as_free_boundary_residual(residual_function(coefficients - direction))
+        plus_vector = np.asarray(plus.vector, dtype=float).ravel()
+        minus_vector = np.asarray(minus.vector, dtype=float).ravel()
+        if plus_vector.shape != base_vector.shape or minus_vector.shape != base_vector.shape:
+            raise ValueError("residual_function must return vectors with a fixed shape")
+        jacobian[:, index] = (plus_vector - minus_vector) / (2.0 * step)
+    return base, jacobian, steps
+
+
+def mirror_free_boundary_least_squares_step(
+    coefficients: Any,
+    residual_function: Callable[[np.ndarray], MirrorFreeBoundaryResidual],
+    *,
+    finite_difference_step: float = 1.0e-6,
+    damping: float = 1.0,
+    max_relative_step: float = 0.25,
+    ridge: float = 0.0,
+    rcond: float | None = 1.0e-12,
+    line_search_factors: Any = (1.0, 0.5, 0.25, 0.125),
+    accept_tolerance: float = 1.0e-12,
+) -> MirrorFreeBoundaryLeastSquaresStep:
+    """Return one damped least-squares update of boundary coefficients.
+
+    The step solves ``min ||J dx + F||`` for the current combined residual
+    vector ``F`` and finite-difference Jacobian ``J``.  It then tries a small
+    backtracking list and reports the best non-increasing trial. If every trial
+    increases the residual, the returned step is marked unaccepted and keeps
+    the original coefficients.
+    """
+
+    coefficients = np.asarray(coefficients, dtype=float).ravel()
+    if coefficients.size == 0:
+        raise ValueError("coefficients must contain at least one value")
+    if not np.all(np.isfinite(coefficients)):
+        raise ValueError("coefficients must be finite")
+    damping = float(damping)
+    max_relative_step = float(max_relative_step)
+    ridge = float(ridge)
+    accept_tolerance = float(accept_tolerance)
+    if damping <= 0.0:
+        raise ValueError("damping must be positive")
+    if max_relative_step <= 0.0:
+        raise ValueError("max_relative_step must be positive")
+    if ridge < 0.0:
+        raise ValueError("ridge must be nonnegative")
+    if accept_tolerance < 0.0:
+        raise ValueError("accept_tolerance must be nonnegative")
+    factors = np.asarray(tuple(line_search_factors), dtype=float)
+    if factors.ndim != 1 or factors.size == 0:
+        raise ValueError("line_search_factors must be a nonempty one-dimensional sequence")
+    if not np.all(np.isfinite(factors)) or np.any(factors <= 0.0):
+        raise ValueError("line_search_factors must be finite and positive")
+
+    residual, jacobian, steps = mirror_free_boundary_residual_jacobian_finite_difference(
+        coefficients,
+        residual_function,
+        finite_difference_step=finite_difference_step,
+    )
+    vector = np.asarray(residual.vector, dtype=float).ravel()
+    if ridge > 0.0:
+        lhs = np.vstack([jacobian, np.sqrt(ridge) * np.eye(coefficients.size)])
+        rhs = np.concatenate([-vector, np.zeros(coefficients.size)])
+    else:
+        lhs = jacobian
+        rhs = -vector
+    raw_step, *_ = np.linalg.lstsq(lhs, rhs, rcond=rcond)
+    if not np.all(np.isfinite(raw_step)):
+        raise ValueError("least-squares step is not finite")
+
+    step_limit = max_relative_step * np.maximum(1.0, np.abs(coefficients))
+    limited_step = np.clip(damping * raw_step, -step_limit, step_limit)
+    predicted_vector = vector + jacobian @ limited_step
+    predicted_value = float(np.sqrt(np.mean(predicted_vector**2)))
+
+    best_factor = float(factors[0])
+    best_coefficients = coefficients + best_factor * limited_step
+    best_residual = _as_free_boundary_residual(residual_function(best_coefficients))
+    best_value = float(best_residual.value)
+    accepted = best_value <= float(residual.value) + accept_tolerance
+    for factor in factors[1:]:
+        trial_coefficients = coefficients + float(factor) * limited_step
+        trial_residual = _as_free_boundary_residual(residual_function(trial_coefficients))
+        trial_value = float(trial_residual.value)
+        trial_accepted = trial_value <= float(residual.value) + accept_tolerance
+        if trial_accepted and not accepted:
+            best_factor = float(factor)
+            best_coefficients = trial_coefficients
+            best_residual = trial_residual
+            best_value = trial_value
+            accepted = True
+        elif trial_accepted == accepted and trial_value < best_value:
+            best_factor = float(factor)
+            best_coefficients = trial_coefficients
+            best_residual = trial_residual
+            best_value = trial_value
+            accepted = trial_accepted
+
+    if not accepted:
+        best_coefficients = coefficients.copy()
+        best_factor = 0.0
+        best_residual = residual
+
+    return MirrorFreeBoundaryLeastSquaresStep(
+        coefficients=coefficients,
+        residual=residual,
+        jacobian=jacobian,
+        finite_difference_steps=steps,
+        raw_step=raw_step,
+        limited_step=limited_step,
+        line_search_factor=best_factor,
+        new_coefficients=best_coefficients,
+        trial_residual=best_residual,
+        predicted_vector=predicted_vector,
+        predicted_value=predicted_value,
+        accepted=accepted,
+        damping=damping,
+        max_relative_step=max_relative_step,
+        ridge=ridge,
+        rcond=rcond,
     )
 
 
