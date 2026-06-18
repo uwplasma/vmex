@@ -79,9 +79,9 @@ script scans ``ns`` and ``mpol:ntor`` pairs for the same generated toroidal
 hybrid input. By default it writes lightweight JSON/CSV boundary-fit reports;
 pass ``--run-solve`` to run the ordinary fixed-boundary driver for each row and
 record runtime, iteration count, final ``fsq``, residual history, convergence
-status, aspect, mean iota, magnetic-well proxy, and a ``wout_*.nc``. With plots
-enabled, solved rows also write ``fsq`` history plus iota and Mercier ``DWell``
-profile figures.
+status, best ``fsq`` reached, aspect, mean iota, magnetic-well proxy, and a
+``wout_*.nc``. With plots enabled, solved rows also write ``fsq`` history plus
+iota and Mercier ``DWell`` profile figures.
 
 The root-level ``examples/mirror_free_boundary_circular_coils.py`` script is a
 free-boundary planning fixture. It builds ESSOS-compatible circular-loop direct

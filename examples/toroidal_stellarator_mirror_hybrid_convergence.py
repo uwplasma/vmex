@@ -65,6 +65,10 @@ _CSV_COLUMNS = (
     "ran_solve",
     "seconds",
     "n_iter",
+    "initial_fsq",
+    "best_fsq",
+    "best_iter",
+    "fsq_reduction",
     "final_fsq",
     "converged",
     "aspect",
@@ -89,11 +93,18 @@ def _write_summary_plot(rows: list[dict[str, object]], *, outdir: Path) -> str:
     plt = _import_matplotlib()
     outdir.mkdir(parents=True, exist_ok=True)
     labels = [f"ns={row['ns']}, {row['mpol']}:{row['ntor']}" for row in rows]
-    values = [
-        float(row["final_fsq"]) if row.get("final_fsq") is not None else float(row["max_boundary_fit_error"])
-        for row in rows
-    ]
-    ylabel = "final fsq" if any(row.get("final_fsq") is not None for row in rows) else "max boundary fit error"
+    solved_rows = any(row.get("best_fsq") is not None or row.get("final_fsq") is not None for row in rows)
+    if solved_rows:
+        values = [
+            float(row["best_fsq"] if row.get("best_fsq") is not None else row["final_fsq"])
+            if row.get("final_fsq") is not None
+            else float(row["max_boundary_fit_error"])
+            for row in rows
+        ]
+        ylabel = "best fsq"
+    else:
+        values = [float(row["max_boundary_fit_error"]) for row in rows]
+        ylabel = "max boundary fit error"
     fig, ax = plt.subplots(1, 1, figsize=(max(7.0, 0.6 * len(rows)), 4.2), constrained_layout=True)
     ax.semilogy(np.arange(len(rows)), np.maximum(values, 1.0e-300), "o-", lw=1.5)
     ax.set_xticks(np.arange(len(rows)))
@@ -244,6 +255,10 @@ def main() -> None:
                 "stellsym_Z_error": reference_metrics["stellsym_Z_error"],
                 "ran_solve": bool(args.run_solve),
                 "seconds": None,
+                "initial_fsq": None,
+                "best_fsq": None,
+                "best_iter": None,
+                "fsq_reduction": None,
                 "final_fsq": None,
                 "converged": None,
                 "n_iter": None,
@@ -270,7 +285,17 @@ def main() -> None:
                 if run.result is not None and getattr(run.result, "w_history", None) is not None:
                     fsq_history = np.asarray(run.result.w_history, dtype=float).reshape(-1)
                     row["fsq_history"] = [float(value) for value in fsq_history]
-                    row["final_fsq"] = float(fsq_history[-1]) if fsq_history.size else None
+                    if fsq_history.size:
+                        finite = np.isfinite(fsq_history)
+                        row["initial_fsq"] = float(fsq_history[0])
+                        row["final_fsq"] = float(fsq_history[-1])
+                        if np.any(finite):
+                            finite_values = np.where(finite, fsq_history, np.inf)
+                            best_iter = int(np.argmin(finite_values))
+                            best_fsq = float(finite_values[best_iter])
+                            row["best_iter"] = best_iter
+                            row["best_fsq"] = best_fsq
+                            row["fsq_reduction"] = float(row["initial_fsq"]) / best_fsq if best_fsq > 0.0 else None
                 try:
                     row["aspect"] = float(vj.equilibrium_aspect_ratio_from_state(state=run.state, static=run.static))
                 except Exception:

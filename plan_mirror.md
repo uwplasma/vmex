@@ -5740,6 +5740,184 @@ No user input is needed.
 
 ---
 
+## 84. 2026-06-18 M13e.1 best-residual convergence metrics
+
+The first local multi-row convergence grid showed that the ordinary accelerated
+VMEC/JAX iteration can be nonmonotone for the first toroidal hybrid fixture.
+That made a single final-`fsq` grid summary too weak for diagnosing solver
+behavior, so this tranche added best-history metrics.
+
+### Steps taken
+
+- Added solved-row fields:
+  - `initial_fsq`;
+  - `best_fsq`;
+  - `best_iter`;
+  - `fsq_reduction`;
+  - `final_fsq`.
+- Updated the convergence summary plot to use best `fsq` for solved rows.
+- Kept full `fsq_history` in JSON for residual-history plots and downstream
+  analysis.
+- Updated the CSV export columns and example README.
+
+### Results obtained
+
+Four-row local grid:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_stellarator_mirror_hybrid_convergence_m13e_grid \
+  --ns-array 7,9 \
+  --mode-pairs 5:4,6:5 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 12 \
+  --run-solve \
+  --max-iter 3
+```
+
+Result:
+
+| case | final `fsq` | status |
+| :--- | ---: | :--- |
+| `ns007_mpol05_ntor04` | `1.831175339596e-02` | not converged |
+| `ns007_mpol06_ntor05` | `1.807228867411e-02` | not converged |
+| `ns009_mpol05_ntor04` | `1.933402066353e-02` | not converged |
+| `ns009_mpol06_ntor05` | `1.924948523463e-02` | not converged |
+
+The residual history dropped sharply on the first iteration and rose on the
+third for all rows, indicating that the early accelerated path is nonmonotone
+for this fixture.  The generated `fsq` history and WOUT profile plots were
+visually checked.
+
+Longer low-resolution diagnostic:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_stellarator_mirror_hybrid_convergence_m13e_ns7_long \
+  --ns-array 7 \
+  --mode-pairs 5:4 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 100 \
+  --ftol 1e-12 \
+  --run-solve \
+  --max-iter 20 \
+  --no-plots
+```
+
+Result:
+
+- `n_iter=20`;
+- `converged=false`;
+- final `fsq=1.883052951600e-05`;
+- best `fsq=1.423987393420e-05` at iteration 18;
+- the requested `ftol=1e-12` was not reached.
+
+Best-metric smoke:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_stellarator_mirror_hybrid_convergence_m13f_best_smoke \
+  --ns-array 7 \
+  --mode-pairs 5:4 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 20 \
+  --ftol 1e-12 \
+  --run-solve \
+  --max-iter 5 \
+  --no-plots
+```
+
+Result:
+
+- `initial_fsq=1.225087897344e-02`;
+- `best_fsq=7.077559614612e-03`;
+- `best_iter=3`;
+- `fsq_reduction=1.730946772690`;
+- `final_fsq=9.744035513153e-03`;
+- `converged=false`.
+
+### How it was tested
+
+Focused tests:
+
+```bash
+JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
+```
+
+Result: `4 passed in 1.98s`.
+
+Lint and format:
+
+```bash
+python -m ruff format examples/toroidal_stellarator_mirror_hybrid_convergence.py
+python -m ruff check \
+  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  tests/test_toroidal_hybrid.py
+python -m ruff format --check \
+  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  tests/test_toroidal_hybrid.py
+```
+
+Result: one file was formatted, then lint and format checks passed.
+
+Documentation and whitespace:
+
+```bash
+python -m sphinx -W -j auto -b html docs docs/_build/html
+git diff --check
+```
+
+Result: docs built successfully and no whitespace errors were found.
+
+### File structure and best-practice notes
+
+- The best-residual metrics live in the example runner because they describe a
+  convergence-study workflow, not a new solver API.
+- Keeping initial/best/final values in CSV makes long local or GPU runs easy
+  to compare without loading JSON.
+- Full residual history remains in JSON for plotting and deeper inspection.
+
+### Best next steps
+
+1. Commit and push this best-residual metrics tranche.
+2. Inspect the ordinary toroidal `vmec2000_iter` controls for a monotone or
+   less aggressive first convergence study mode before VMEC2000 parity.
+3. Run VMEC2000 on the same low-resolution generated input and compare whether
+   its early `fsq` history is similarly nonmonotone.
+4. If VMEC2000 converges more robustly, narrow the difference to solver
+   controls, damping, restart, or normalization before changing the hybrid
+   geometry fixture.
+
+### Completion percentages after M84
+
+- Geometry/grids/bases: `93%`.
+- Field/energy/residual kernels: `86%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `88%`.
+- I/O schema and docs: `92%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `67%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `31%`.
+- ESSOS circular-coil mirror beta scan: `53%`.
+- PR merge readiness overall: `92%`.
+
+### User input needed
+
+No user input is needed.
+
+---
+
 ## 82. 2026-06-18 M13d toroidal hybrid convergence runner
 
 This tranche added the first repeatable convergence harness for the toroidal
