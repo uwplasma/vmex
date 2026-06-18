@@ -24,6 +24,7 @@ from .multigrid import interp_vmec_state
 from .profiles import eval_profiles
 from .drivers import flux as _driver_flux_helpers
 from .drivers import debug as _driver_debug_helpers
+from .drivers import dynamic_scan as _driver_dynamic_scan_helpers
 from .drivers import finish as _driver_finish_helpers
 from .drivers import io as _driver_io_helpers
 from .drivers import output as _driver_output_helpers
@@ -1326,125 +1327,27 @@ def run_fixed_boundary(
                 free_boundary_activate_fsq=free_boundary_activate_fsq,
                 return_final_force_payload=True,
             )
-            dynamic_scan_default = "1" if bool(cfg.lasym) else "0"
-            dynamic_scan_env = os.getenv("VMEC_JAX_DYNAMIC_SCAN", dynamic_scan_default).strip().lower()
-            dynamic_scan = dynamic_scan_env not in ("", "0", "false", "no")
-            if (
-                (not accelerated_mode)
-                and
-                dynamic_scan
-                and bool(performance_mode)
-                and bool(scan_mode)
-                and bool(vmec2000_ctrl)
-                and int(niter_i) > 1
-            ):
-                pre_iters, timed_probe, probe_backend = _dynamic_scan_probe_settings(int(niter_i))
-                if pre_iters > 0:
-                    fsq_tol_env = os.getenv("VMEC_JAX_DYNAMIC_SCAN_FSQ_RTOL", "1e-6").strip()
-                    try:
-                        fsq_tol = float(fsq_tol_env)
-                    except Exception:
-                        fsq_tol = 1e-6
-                    hist_atol_env = os.getenv("VMEC_JAX_DYNAMIC_SCAN_ATOL", "1e-12").strip()
-                    try:
-                        hist_atol = float(hist_atol_env)
-                    except Exception:
-                        hist_atol = 1e-12
-                    pre_kwargs = dict(solve_kwargs)
-                    pre_kwargs.update(
-                        {
-                            "max_iter": int(pre_iters),
-                            "verbose": False,
-                            "verbose_vmec2000_table": False,
-                            "jit_warmup_iters": 0,
-                            "jit_precompile": False,
-                            # Keep full histories in the probe so we can compare
-                            # the warmed scan/non-scan traces, not just a single
-                            # terminal residual scalar.
-                            "scan_minimal_default": False,
-                        }
-                    )
-
-                    def _run_pref(*, use_scan_flag: bool):
-                        kwargs = dict(pre_kwargs)
-                        kwargs["use_scan"] = bool(use_scan_flag)
-                        kwargs["resume_state"] = deepcopy(resume_state_stage)
-                        state_probe = deepcopy(state_stage_start)
-                        if not bool(jit_forces_base):
-                            try:
-                                import jax
-                                with jax.disable_jit():
-                                    return solve_fixed_boundary_residual_iter(
-                                        state_probe,
-                                        static_i,
-                                        jit_forces=False,
-                                        **kwargs,
-                                    )
-                            except Exception:
-                                return solve_fixed_boundary_residual_iter(
-                                    state_probe,
-                                    static_i,
-                                    jit_forces=False,
-                                    **kwargs,
-                                )
-                        return solve_fixed_boundary_residual_iter(
-                            state_probe,
-                            static_i,
-                            jit_forces=True,
-                            **kwargs,
-                        )
-
-                    if timed_probe:
-                        # Warm both variants before timing so the selector compares
-                        # steady-state iteration cost rather than one-off compile cost.
-                        _ = _run_pref(use_scan_flag=False)
-                        _ = _run_pref(use_scan_flag=True)
-
-                        t0 = time.perf_counter()
-                        res_pref_noscan = _run_pref(use_scan_flag=False)
-                        t_noscan = time.perf_counter() - t0
-                        t0 = time.perf_counter()
-                        res_pref_scan = _run_pref(use_scan_flag=True)
-                        t_scan = time.perf_counter() - t0
-                    else:
-                        t_noscan = None
-                        t_scan = None
-                        res_pref_scan = _run_pref(use_scan_flag=True)
-                        res_pref_noscan = _run_pref(use_scan_flag=False)
-
-                    fsq_ok = _vmec_histories_match(
-                        res_pref_scan,
-                        res_pref_noscan,
-                        rtol=float(fsq_tol),
-                        atol=float(hist_atol),
-                    )
-                    choose_scan = bool(fsq_ok) and ((not timed_probe) or (t_scan < t_noscan))
-                    scan_mode = bool(choose_scan)
-                    solve_kwargs["use_scan"] = bool(scan_mode)
-                    if bool(verbose):
-                        if not bool(fsq_ok):
-                            print(
-                                "[vmec_jax] dynamic scan probe mismatch: "
-                                f"w={_vmec_history_relerr(res_pref_scan.w_history, res_pref_noscan.w_history):.3e} "
-                                f"fsqr={_vmec_history_relerr(res_pref_scan.fsqr2_history, res_pref_noscan.fsqr2_history):.3e} "
-                                f"fsqz={_vmec_history_relerr(res_pref_scan.fsqz2_history, res_pref_noscan.fsqz2_history):.3e} "
-                                f"fsql={_vmec_history_relerr(res_pref_scan.fsql2_history, res_pref_noscan.fsql2_history):.3e}",
-                                flush=True,
-                            )
-                        if timed_probe:
-                            print(
-                                "[vmec_jax] dynamic scan selection: "
-                                f"backend={probe_backend} scan={t_scan:.3f}s noscan={t_noscan:.3f}s "
-                                f"fsq_ok={fsq_ok} -> use_scan={scan_mode}",
-                                flush=True,
-                            )
-                        else:
-                            print(
-                                "[vmec_jax] dynamic scan parity probe: "
-                                f"backend={probe_backend} iters={pre_iters} "
-                                f"fsq_ok={fsq_ok} -> use_scan={scan_mode}",
-                                flush=True,
-                            )
+            scan_mode = _driver_dynamic_scan_helpers.maybe_select_dynamic_scan_mode(
+                cfg=cfg,
+                accelerated_mode=bool(accelerated_mode),
+                performance_mode=bool(performance_mode),
+                scan_mode=bool(scan_mode),
+                vmec2000_control=bool(vmec2000_ctrl),
+                niter=int(niter_i),
+                solve_kwargs=solve_kwargs,
+                state_stage_start=state_stage_start,
+                static_stage=static_i,
+                resume_state_stage=resume_state_stage,
+                jit_forces_base=bool(jit_forces_base),
+                solve_fixed_boundary_residual_iter=solve_fixed_boundary_residual_iter,
+                dynamic_scan_probe_settings=_dynamic_scan_probe_settings,
+                vmec_histories_match=_vmec_histories_match,
+                vmec_history_relerr=_vmec_history_relerr,
+                verbose=bool(verbose),
+                getenv=os.getenv,
+                deepcopy_func=deepcopy,
+            )
+            solve_kwargs["use_scan"] = bool(scan_mode)
             if bool(precompile_stages) and bool(jit_forces_eff):
                 try:
                     precompile_kwargs = dict(solve_kwargs)
