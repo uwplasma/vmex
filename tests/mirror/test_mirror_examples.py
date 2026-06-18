@@ -163,6 +163,25 @@ def test_root_free_boundary_circular_coils_example_runs_without_plots(tmp_path):
         row["lcfs_update_max_relative_delta_radius"] <= 0.05 + 1.0e-14
         for row in metrics["fixed_boundary_baseline_rows"]
     )
+    assert all(row["lcfs_update_strategy"] == "scale_pressure" for row in metrics["fixed_boundary_baseline_rows"])
+    assert all(
+        {candidate["strategy"] for candidate in row["lcfs_update_candidate_summaries"]}
+        == {"local_pressure", "scale_pressure"}
+        for row in metrics["fixed_boundary_baseline_rows"]
+    )
+    assert all(
+        next(
+            candidate["predicted_external_bnormal_rms"]
+            for candidate in row["lcfs_update_candidate_summaries"]
+            if candidate["strategy"] == "scale_pressure"
+        )
+        <= next(
+            candidate["predicted_external_bnormal_rms"]
+            for candidate in row["lcfs_update_candidate_summaries"]
+            if candidate["strategy"] == "local_pressure"
+        )
+        for row in metrics["fixed_boundary_baseline_rows"]
+    )
     assert all(len(row["lcfs_pilot_rows"]) == 1 for row in metrics["fixed_boundary_baseline_rows"])
     assert all(Path(row["lcfs_pilot_rows"][0]["mout"]).exists() for row in metrics["fixed_boundary_baseline_rows"])
     assert all(

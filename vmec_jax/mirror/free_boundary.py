@@ -239,6 +239,7 @@ class MirrorLCFSUpdateProposal:
     smoothing_passes: int
     preserve_caps: bool
     boundary: MirrorBoundary
+    strategy: str
 
 
 def mirror_circular_coils_to_direct_params(coils: MirrorCircularCoils) -> CoilFieldParams:
@@ -468,12 +469,7 @@ def mirror_lcfs_diagnostic(
     if float(mu0) <= 0.0:
         raise ValueError("mu0 must be positive")
 
-    edge_order = 2 if z.size > 2 else 1
-    dr_dz = np.gradient(boundary_r, z, axis=-1, edge_order=edge_order)
-    normal_scale = np.sqrt(1.0 + dr_dz**2)
-    normal_r = 1.0 / normal_scale
-    normal_z = -dr_dz / normal_scale
-    external_bnormal = external_br * normal_r + external_bz * normal_z
+    external_bnormal, dr_dz = mirror_external_bnormal(boundary_r, z, external_sample, return_dr_dz=True)
     edge_pressure = float(np.asarray(output.profiles.pressure, dtype=float)[-1])
     pressure_balance = edge_pressure + (edge_internal_bmag**2 - external_bmag**2) / (2.0 * float(mu0))
     return MirrorLCFSDiagnostic(
@@ -491,6 +487,36 @@ def mirror_lcfs_diagnostic(
         external_bmag=external_bmag,
         edge_pressure=edge_pressure,
     )
+
+
+def mirror_external_bnormal(
+    boundary_r: Any,
+    z: Any,
+    external_sample: MirrorExternalFieldSample,
+    *,
+    return_dr_dz: bool = False,
+) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
+    """Return external normal field on a mirror side boundary."""
+
+    boundary_r = np.asarray(boundary_r, dtype=float)
+    z = np.asarray(z, dtype=float)
+    external_br = np.asarray(external_sample.br, dtype=float)
+    external_bz = np.asarray(external_sample.bz, dtype=float)
+    if boundary_r.ndim != 2:
+        raise ValueError("boundary_r must have shape (ntheta, nxi)")
+    if z.ndim != 1 or z.size != boundary_r.shape[-1]:
+        raise ValueError("z must be one-dimensional with length nxi")
+    if z.size < 2:
+        raise ValueError("at least two axial nodes are required")
+    if external_br.shape != boundary_r.shape or external_bz.shape != boundary_r.shape:
+        raise ValueError("external field sample must have shape (ntheta, nxi)")
+    edge_order = 2 if z.size > 2 else 1
+    dr_dz = np.gradient(boundary_r, z, axis=-1, edge_order=edge_order)
+    normal_scale = np.sqrt(1.0 + dr_dz**2)
+    external_bnormal = external_br / normal_scale - external_bz * dr_dz / normal_scale
+    if return_dr_dz:
+        return external_bnormal, dr_dz
+    return external_bnormal
 
 
 def mirror_external_pressure_balance_response(
@@ -669,4 +695,71 @@ def propose_axisymmetric_mirror_lcfs_update(
         smoothing_passes=smoothing_passes,
         preserve_caps=bool(preserve_caps),
         boundary=MirrorBoundary.tabulated_radius(xi, new_radius),
+        strategy="local_pressure",
+    )
+
+
+def propose_axisymmetric_mirror_lcfs_scale_update(
+    diagnostic: MirrorLCFSDiagnostic,
+    pressure_response: Any,
+    *,
+    max_relative_step: float = 0.05,
+    radius_floor: float = 1.0e-4,
+) -> MirrorLCFSUpdateProposal:
+    """Return a shape-preserving radius-scale proposal.
+
+    This candidate keeps the axial boundary shape smooth and changes the flux
+    tube radius by one global scale factor chosen from the linearized pressure
+    response.  It is useful as a normal-field-friendly alternative to nodal
+    pressure updates.
+    """
+
+    max_relative_step = float(max_relative_step)
+    radius_floor = float(radius_floor)
+    if max_relative_step <= 0.0:
+        raise ValueError("max_relative_step must be positive")
+    if radius_floor <= 0.0:
+        raise ValueError("radius_floor must be positive")
+
+    z = np.asarray(diagnostic.z, dtype=float)
+    if z.ndim != 1 or z.size < 2 or not np.all(np.diff(z) > 0.0):
+        raise ValueError("diagnostic z nodes must be a strictly increasing one-dimensional array")
+    radius = np.mean(np.asarray(diagnostic.boundary_r, dtype=float), axis=0)
+    residual = np.mean(np.asarray(diagnostic.pressure_balance, dtype=float), axis=0)
+    response = np.asarray(pressure_response, dtype=float)
+    if response.shape == np.asarray(diagnostic.boundary_r).shape:
+        response = np.mean(response, axis=0)
+    elif response.shape != radius.shape:
+        raise ValueError("pressure_response must have shape (ntheta, nxi) or (nxi,)")
+    if not (np.all(np.isfinite(radius)) and np.all(np.isfinite(residual)) and np.all(np.isfinite(response))):
+        raise ValueError("LCFS scale-update inputs must be finite")
+
+    direction = radius.copy()
+    linear_response = response * direction
+    denom = float(np.dot(linear_response, linear_response))
+    scale_step = 0.0 if denom <= np.finfo(float).eps else -float(np.dot(residual, linear_response)) / denom
+    scale_step = float(np.clip(scale_step, -max_relative_step, max_relative_step))
+    delta = scale_step * direction
+    new_radius = np.maximum(radius + delta, radius_floor)
+    delta = new_radius - radius
+    predicted = residual + response * delta
+    xi = 2.0 * (z - z[0]) / (z[-1] - z[0]) - 1.0
+    return MirrorLCFSUpdateProposal(
+        z=z,
+        xi=xi,
+        old_radius=radius,
+        new_radius=new_radius,
+        delta_radius=delta,
+        pressure_response=response,
+        pressure_balance_before=residual,
+        pressure_balance_predicted=predicted,
+        pressure_balance_rms_before=float(np.sqrt(np.mean(residual**2))),
+        pressure_balance_rms_predicted=float(np.sqrt(np.mean(predicted**2))),
+        damping=abs(scale_step),
+        max_relative_step=max_relative_step,
+        cap_taper_power=0.0,
+        smoothing_passes=0,
+        preserve_caps=False,
+        boundary=MirrorBoundary.tabulated_radius(xi, new_radius),
+        strategy="scale_pressure",
     )

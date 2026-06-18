@@ -25,11 +25,13 @@ from vmec_jax.mirror import (
     load_mirror_output,
     make_mirror_free_boundary_circular_coil_scan,
     make_mirror_grid,
+    mirror_external_bnormal,
     mirror_external_pressure_balance_response,
     mirror_lcfs_diagnostic,
     mirror_lcfs_merit,
     plot_mirror_output,
     propose_axisymmetric_mirror_lcfs_update,
+    propose_axisymmetric_mirror_lcfs_scale_update,
     run_mirror_fixed_boundary,
     sample_mirror_axis_external_field,
     sample_mirror_boundary_external_field,
@@ -60,6 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lcfs-update-cap-taper-power", type=float, default=2.0)
     parser.add_argument("--lcfs-update-smoothing-passes", type=int, default=1)
     parser.add_argument("--lcfs-merit-bnormal-weight", type=float, default=1.0)
+    parser.add_argument("--lcfs-proposal-mode", choices=("best_predicted", "local", "scale"), default="best_predicted")
     parser.add_argument("--run-lcfs-pilot", action="store_true")
     parser.add_argument("--lcfs-pilot-steps", type=int, default=1)
     parser.add_argument("--no-plots", action="store_true")
@@ -189,6 +192,68 @@ def _beta_label(beta_percent: float) -> str:
     return f"{float(beta_percent):g}".replace(".", "p")
 
 
+def _proposal_predicted_metrics(proposal, *, grid, coils, baseline_merit) -> dict[str, object]:
+    sample = sample_mirror_boundary_external_field(grid, proposal.boundary, coils)
+    boundary_r = proposal.boundary.radius_on_grid_3d(grid)
+    bnormal = mirror_external_bnormal(boundary_r, grid.z, sample)
+    bnormal_rms = float(np.sqrt(np.mean(np.asarray(bnormal, dtype=float) ** 2)))
+    pressure_rms = float(proposal.pressure_balance_rms_predicted)
+    pressure_term = pressure_rms / max(float(baseline_merit.pressure_scale), 1.0e-300)
+    bnormal_term = bnormal_rms / max(float(baseline_merit.bnormal_scale), 1.0e-300)
+    merit = float(np.sqrt(pressure_term**2 + float(baseline_merit.bnormal_weight) * bnormal_term**2))
+    return {
+        "strategy": str(proposal.strategy),
+        "predicted_merit": merit,
+        "predicted_pressure_balance_rms": pressure_rms,
+        "predicted_external_bnormal_rms": bnormal_rms,
+        "max_relative_delta_radius": float(
+            np.max(np.abs(proposal.delta_radius) / np.maximum(proposal.old_radius, 1.0e-300))
+        ),
+    }
+
+
+def _select_lcfs_proposal(
+    *,
+    lcfs,
+    pressure_response,
+    grid,
+    coils,
+    baseline_merit,
+    mode: str,
+    damping: float,
+    max_relative_step: float,
+    cap_taper_power: float,
+    smoothing_passes: int,
+):
+    local = propose_axisymmetric_mirror_lcfs_update(
+        lcfs,
+        pressure_response,
+        damping=damping,
+        max_relative_step=max_relative_step,
+        radius_floor=1.0e-4,
+        preserve_caps=True,
+        cap_taper_power=cap_taper_power,
+        smoothing_passes=smoothing_passes,
+    )
+    scale = propose_axisymmetric_mirror_lcfs_scale_update(
+        lcfs,
+        pressure_response,
+        max_relative_step=max_relative_step,
+        radius_floor=1.0e-4,
+    )
+    candidates = [local, scale]
+    summaries = [
+        _proposal_predicted_metrics(candidate, grid=grid, coils=coils, baseline_merit=baseline_merit)
+        for candidate in candidates
+    ]
+    if mode == "local":
+        return local, summaries
+    if mode == "scale":
+        return scale, summaries
+    best_index = int(np.argmin([summary["predicted_merit"] for summary in summaries]))
+    return candidates[best_index], summaries
+
+
 def _run_fixed_boundary_baseline_cases(
     *,
     outdir: Path,
@@ -202,6 +267,7 @@ def _run_fixed_boundary_baseline_cases(
     lcfs_update_cap_taper_power: float,
     lcfs_update_smoothing_passes: int,
     lcfs_merit_bnormal_weight: float,
+    lcfs_proposal_mode: str,
     run_lcfs_pilot: bool,
     lcfs_pilot_steps: int,
     write_plots: bool,
@@ -241,13 +307,15 @@ def _run_fixed_boundary_baseline_cases(
         lcfs = mirror_lcfs_diagnostic(output, external_sample, mu0=1.0)
         lcfs_merit = mirror_lcfs_merit(lcfs, bnormal_weight=lcfs_merit_bnormal_weight)
         pressure_response = mirror_external_pressure_balance_response(lcfs, scan.coils, mu0=1.0)
-        proposal = propose_axisymmetric_mirror_lcfs_update(
-            lcfs,
-            pressure_response,
+        proposal, proposal_candidates = _select_lcfs_proposal(
+            lcfs=lcfs,
+            pressure_response=pressure_response,
+            grid=baseline_grid,
+            coils=scan.coils,
+            baseline_merit=lcfs_merit,
+            mode=lcfs_proposal_mode,
             damping=lcfs_update_damping,
             max_relative_step=lcfs_update_max_relative_step,
-            radius_floor=1.0e-4,
-            preserve_caps=True,
             cap_taper_power=lcfs_update_cap_taper_power,
             smoothing_passes=lcfs_update_smoothing_passes,
         )
@@ -280,13 +348,15 @@ def _run_fixed_boundary_baseline_cases(
                     bnormal_weight=lcfs_merit_bnormal_weight,
                 )
                 pilot_response = mirror_external_pressure_balance_response(pilot_lcfs, scan.coils, mu0=1.0)
-                pilot_proposal = propose_axisymmetric_mirror_lcfs_update(
-                    pilot_lcfs,
-                    pilot_response,
+                pilot_proposal, pilot_proposal_candidates = _select_lcfs_proposal(
+                    lcfs=pilot_lcfs,
+                    pressure_response=pilot_response,
+                    grid=baseline_grid,
+                    coils=scan.coils,
+                    baseline_merit=lcfs_merit,
+                    mode=lcfs_proposal_mode,
                     damping=lcfs_update_damping,
                     max_relative_step=lcfs_update_max_relative_step,
-                    radius_floor=1.0e-4,
-                    preserve_caps=True,
                     cap_taper_power=lcfs_update_cap_taper_power,
                     smoothing_passes=lcfs_update_smoothing_passes,
                 )
@@ -330,6 +400,8 @@ def _run_fixed_boundary_baseline_cases(
                         "lcfs_update_pressure_balance_rms_predicted_next": float(
                             pilot_proposal.pressure_balance_rms_predicted
                         ),
+                        "lcfs_update_strategy_next": str(pilot_proposal.strategy),
+                        "lcfs_update_candidate_summaries_next": pilot_proposal_candidates,
                         "lcfs_update_cap_taper_power_next": float(pilot_proposal.cap_taper_power),
                         "lcfs_update_smoothing_passes_next": int(pilot_proposal.smoothing_passes),
                         "lcfs_update_max_relative_delta_radius_next": float(
@@ -384,6 +456,8 @@ def _run_fixed_boundary_baseline_cases(
                 "lcfs_pressure_response_min": float(np.min(proposal.pressure_response)),
                 "lcfs_pressure_response_max": float(np.max(proposal.pressure_response)),
                 "lcfs_update_pressure_balance_rms_predicted": float(proposal.pressure_balance_rms_predicted),
+                "lcfs_update_strategy": str(proposal.strategy),
+                "lcfs_update_candidate_summaries": proposal_candidates,
                 "lcfs_update_pressure_balance_rms_reduction_fraction": float(
                     1.0 - proposal.pressure_balance_rms_predicted / max(proposal.pressure_balance_rms_before, 1.0e-300)
                 ),
@@ -421,6 +495,7 @@ def run_case(
     lcfs_update_cap_taper_power: float = 2.0,
     lcfs_update_smoothing_passes: int = 1,
     lcfs_merit_bnormal_weight: float = 1.0,
+    lcfs_proposal_mode: str = "best_predicted",
     run_lcfs_pilot: bool = False,
     lcfs_pilot_steps: int = 1,
     write_plots: bool = True,
@@ -481,6 +556,7 @@ def run_case(
             lcfs_update_cap_taper_power=lcfs_update_cap_taper_power,
             lcfs_update_smoothing_passes=lcfs_update_smoothing_passes,
             lcfs_merit_bnormal_weight=lcfs_merit_bnormal_weight,
+            lcfs_proposal_mode=lcfs_proposal_mode,
             run_lcfs_pilot=run_lcfs_pilot,
             lcfs_pilot_steps=lcfs_pilot_steps,
             write_plots=write_plots,
@@ -535,6 +611,7 @@ def main() -> None:
         lcfs_update_cap_taper_power=args.lcfs_update_cap_taper_power,
         lcfs_update_smoothing_passes=args.lcfs_update_smoothing_passes,
         lcfs_merit_bnormal_weight=args.lcfs_merit_bnormal_weight,
+        lcfs_proposal_mode=args.lcfs_proposal_mode,
         run_lcfs_pilot=args.run_lcfs_pilot,
         lcfs_pilot_steps=args.lcfs_pilot_steps,
         write_plots=not args.no_plots,

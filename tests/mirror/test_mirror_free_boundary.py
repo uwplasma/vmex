@@ -17,9 +17,11 @@ from vmec_jax.mirror import (
     make_mirror_grid,
     mirror_boundary_from_on_axis_bz,
     mirror_circular_coils_to_direct_params,
+    mirror_external_bnormal,
     mirror_lcfs_diagnostic,
     mirror_lcfs_merit,
     propose_axisymmetric_mirror_lcfs_update,
+    propose_axisymmetric_mirror_lcfs_scale_update,
     sample_mirror_axis_external_field,
     sample_mirror_boundary_external_field,
     two_coil_on_axis_bz,
@@ -205,6 +207,26 @@ def test_mirror_lcfs_diagnostic_reports_side_boundary_targets():
     assert diagnostic.pressure_balance_max == pytest.approx(1.5)
 
 
+def test_mirror_external_bnormal_is_zero_for_axial_field_on_cylinder():
+    theta = np.asarray([0.0])
+    z = np.linspace(-1.0, 1.0, 7)
+    boundary_r = np.full((theta.size, z.size), 0.25)
+    sample = MirrorExternalFieldSample(
+        r=boundary_r,
+        theta=theta,
+        z=z,
+        br=np.zeros_like(boundary_r),
+        btheta=np.zeros_like(boundary_r),
+        bz=np.ones_like(boundary_r),
+        bmag=np.ones_like(boundary_r),
+    )
+
+    bnormal, dr_dz = mirror_external_bnormal(boundary_r, z, sample, return_dr_dz=True)
+
+    np.testing.assert_allclose(dr_dz, 0.0, atol=1.0e-14)
+    np.testing.assert_allclose(bnormal, 0.0, atol=1.0e-14)
+
+
 def test_mirror_lcfs_merit_combines_pressure_and_normal_field():
     diagnostic = SimpleNamespace(
         pressure_balance_rms=2.0,
@@ -286,3 +308,27 @@ def test_axisymmetric_lcfs_update_tapers_near_caps():
     assert abs(tapered.delta_radius[1]) < abs(untapered.delta_radius[1])
     assert abs(tapered.delta_radius[-2]) < abs(untapered.delta_radius[-2])
     np.testing.assert_allclose(tapered.delta_radius[[0, -1]], 0.0, atol=1.0e-14)
+
+
+def test_axisymmetric_lcfs_scale_update_reduces_synthetic_pressure_imbalance():
+    theta = np.asarray([0.0])
+    z = np.linspace(-1.0, 1.0, 5)
+    boundary_r = np.ones((theta.size, z.size))
+    pressure_balance = np.full((theta.size, z.size), 0.2)
+    diagnostic = SimpleNamespace(
+        theta=theta,
+        z=z,
+        boundary_r=boundary_r,
+        pressure_balance=pressure_balance,
+    )
+
+    proposal = propose_axisymmetric_mirror_lcfs_scale_update(
+        diagnostic,
+        np.ones_like(pressure_balance),
+        max_relative_step=0.5,
+    )
+
+    assert proposal.strategy == "scale_pressure"
+    assert proposal.pressure_balance_rms_predicted < proposal.pressure_balance_rms_before
+    np.testing.assert_allclose(proposal.delta_radius, -0.2)
+    np.testing.assert_allclose(proposal.pressure_balance_predicted, 0.0, atol=1.0e-14)

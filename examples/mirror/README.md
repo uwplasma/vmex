@@ -72,6 +72,9 @@ more low-resolution fixed-boundary pilot steps and report actual before/after
 LCFS diagnostics. Pilot acceptance uses a dimensionless combined merit with
 pressure-balance and normalized normal-field terms. It does not solve for a
 free-boundary LCFS yet.
+The default ``--lcfs-proposal-mode best_predicted`` compares the local
+pressure-update candidate with a shape-preserving scale candidate and uses the
+candidate with lower predicted combined merit.
 
 The root-level ``examples/mirror_fixed_boundary_solve_diagnostic.py`` script
 runs an actual L-BFGS fixed-boundary relaxation from a perturbed interior state.
