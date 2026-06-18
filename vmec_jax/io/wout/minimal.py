@@ -85,6 +85,28 @@ class WoutBssSourcePayload(NamedTuple):
     geom: dict[str, Any]
 
 
+class WoutScalarDiagnostics(NamedTuple):
+    """Scalar and radial diagnostics written by the minimal WOUT builder."""
+
+    betatotal: float
+    betapol: float
+    betator: float
+    betaxis: float
+    ctor: float
+    DMerc: np.ndarray
+    Dshear: np.ndarray
+    Dcurr: np.ndarray
+    Dwell: np.ndarray
+    Dgeod: np.ndarray
+    D_R: np.ndarray
+    H_glasser: np.ndarray
+    glasser_correction: np.ndarray
+    glasser_shear_valid: np.ndarray
+    jdotb: np.ndarray
+    bdotb: np.ndarray
+    bdotgradv: np.ndarray
+
+
 def env_enabled(value: str | None, *, false_values: tuple[str, ...] = ("", "0", "false", "no")) -> bool:
     """Return whether a VMEC-JAX environment toggle should be considered enabled."""
 
@@ -361,6 +383,226 @@ def pressure_profiles_from_mass_vp(
         presf[1:-1] = 0.5 * (pres[1:-1] + pres[2:])
         presf[-1] = 1.5 * pres[-1] - 0.5 * pres[-2]
     return pres, presf
+
+
+def compute_minimal_wout_scalar_diagnostics(
+    *,
+    ns: int,
+    wout_light: bool,
+    betatotal: float,
+    state: Any,
+    static: Any,
+    s: np.ndarray,
+    lconm1: bool,
+    ntor: int,
+    nfp: int,
+    mpol: int,
+    lasym: bool,
+    lbsubs: bool,
+    signgs: int,
+    pres: np.ndarray,
+    vp: np.ndarray,
+    flux_phips: np.ndarray,
+    iotas: np.ndarray,
+    bc: Any,
+    buco: np.ndarray,
+    trig: Any,
+    geom_bss: dict[str, Any],
+    bsupu_bss: np.ndarray,
+    bsupv_bss: np.ndarray,
+    rs_bss: np.ndarray | None,
+    zs_bss: np.ndarray | None,
+    ru12_bss: np.ndarray | None,
+    zu12_bss: np.ndarray | None,
+    bsubu_diag: np.ndarray,
+    bsubv_diag: np.ndarray,
+    bsubu_raw: np.ndarray,
+    bsubv_raw: np.ndarray,
+    bsubu_phys: np.ndarray | None,
+    bsubv_phys: np.ndarray | None,
+    indata: Any,
+    timing_enabled: bool,
+    timing: dict[str, float],
+    vmec_wint_from_trig_func: Any,
+    compute_eqfor_betaxis_func: Any,
+    compute_eqfor_beta_func: Any,
+    compute_ctor_from_buco_func: Any,
+    compute_mercier_func: Any,
+    glasser_from_wout_mercier_terms_func: Any,
+) -> WoutScalarDiagnostics:
+    """Compute beta, current, Mercier, and Glasser profiles for minimal WOUT."""
+
+    betapol = 0.0
+    betator = 0.0
+    betaxis = 0.0
+    ctor = 0.0
+    DMerc = np.zeros((ns,), dtype=float)
+    Dshear = np.zeros((ns,), dtype=float)
+    Dcurr = np.zeros((ns,), dtype=float)
+    Dwell = np.zeros((ns,), dtype=float)
+    Dgeod = np.zeros((ns,), dtype=float)
+    D_R = np.zeros((ns,), dtype=float)
+    H_glasser = np.zeros((ns,), dtype=float)
+    glasser_correction = np.zeros((ns,), dtype=float)
+    glasser_shear_valid = np.zeros((ns,), dtype=bool)
+    jdotb = np.zeros((ns,), dtype=float)
+    bdotb = np.zeros((ns,), dtype=float)
+    bdotgradv = np.zeros((ns,), dtype=float)
+
+    if wout_light:
+        return WoutScalarDiagnostics(
+            betatotal=float(betatotal),
+            betapol=betapol,
+            betator=betator,
+            betaxis=betaxis,
+            ctor=ctor,
+            DMerc=DMerc,
+            Dshear=Dshear,
+            Dcurr=Dcurr,
+            Dwell=Dwell,
+            Dgeod=Dgeod,
+            D_R=D_R,
+            H_glasser=H_glasser,
+            glasser_correction=glasser_correction,
+            glasser_shear_valid=glasser_shear_valid,
+            jdotb=jdotb,
+            bdotb=bdotb,
+            bdotgradv=bdotgradv,
+        )
+
+    try:
+        bsubu_merc = np.asarray(bsubu_diag, dtype=float)
+        bsubv_merc = np.asarray(bsubv_diag, dtype=float)
+        if env_enabled(os.getenv("VMEC_JAX_MERCIER_USE_RAW_BSUBUV", "")):
+            bsubu_merc = np.asarray(bsubu_raw, dtype=float)
+            bsubv_merc = np.asarray(bsubv_raw, dtype=float)
+        elif env_enabled(os.getenv("VMEC_JAX_MERCIER_USE_WROUT_BSUBUV", "")):
+            bsubu_merc = np.asarray(bsubu_phys, dtype=float)
+            bsubv_merc = np.asarray(bsubv_phys, dtype=float)
+        elif env_enabled(os.getenv("VMEC_JAX_MERCIER_USE_RAW_BSUBV", "")):
+            bsubv_merc = np.asarray(bsubv_raw, dtype=float)
+
+        if timing_enabled:
+            import time as _time
+
+            t_beta = _time.perf_counter()
+        wint = vmec_wint_from_trig_func(trig)
+        betaxis = compute_eqfor_betaxis_func(
+            pres=np.asarray(pres, dtype=float),
+            vp=np.asarray(vp, dtype=float),
+            bsq=np.asarray(bc.bsq, dtype=float),
+            sqrtg=np.asarray(bc.jac.sqrtg, dtype=float),
+            wint=wint,
+            signgs=int(signgs),
+        )
+        betapol, betator, betatot_eq, betaxis = compute_eqfor_beta_func(
+            pres=np.asarray(pres, dtype=float),
+            vp=np.asarray(vp, dtype=float),
+            bsq=np.asarray(bc.bsq, dtype=float),
+            r12=np.asarray(bc.jac.r12, dtype=float),
+            bsupv=np.asarray(bc.bsupv, dtype=float),
+            sqrtg=np.asarray(bc.jac.sqrtg, dtype=float),
+            wint=wint,
+            signgs=int(signgs),
+        )
+        if timing_enabled:
+            timing["beta_s"] = _time.perf_counter() - t_beta
+        betatotal = float(betatot_eq)
+        ctor = compute_ctor_from_buco_func(buco=np.asarray(buco, dtype=float), signgs=int(signgs), indata=indata)
+
+        if timing_enabled:
+            t_mercier = _time.perf_counter()
+        (
+            DMerc,
+            Dshear,
+            Dcurr,
+            Dwell,
+            Dgeod,
+            jdotb,
+            bdotb,
+            bdotgradv,
+        ) = compute_mercier_func(
+            state=state,
+            geom_modes=static.modes,
+            s=np.asarray(s, dtype=float),
+            lconm1=bool(lconm1),
+            lthreed=bool(ntor > 0),
+            lasym=bool(lasym),
+            nfp=int(nfp),
+            lbsubs=bool(lbsubs),
+            mmax_force=max(int(mpol) - 1, 0),
+            nmax_force=int(ntor),
+            pres=np.asarray(pres, dtype=float),
+            vp=np.asarray(vp, dtype=float),
+            phips=np.asarray(flux_phips, dtype=float),
+            iotas=np.asarray(iotas, dtype=float),
+            bsq=np.asarray(bc.bsq, dtype=float),
+            sqrtg=np.asarray(bc.jac.sqrtg, dtype=float),
+            bsubu=bsubu_merc,
+            bsubv=bsubv_merc,
+            bsubu_parity_even=(
+                None
+                if getattr(bc, "bsubu_parity_even", None) is None
+                else np.asarray(getattr(bc, "bsubu_parity_even"), dtype=float)
+            ),
+            bsubu_parity_odd=(
+                None
+                if getattr(bc, "bsubu_parity_odd", None) is None
+                else np.asarray(getattr(bc, "bsubu_parity_odd"), dtype=float)
+            ),
+            bsubv_parity_even=(
+                None
+                if getattr(bc, "bsubv_parity_even", None) is None
+                else np.asarray(getattr(bc, "bsubv_parity_even"), dtype=float)
+            ),
+            bsubv_parity_odd=(
+                None
+                if getattr(bc, "bsubv_parity_odd", None) is None
+                else np.asarray(getattr(bc, "bsubv_parity_odd"), dtype=float)
+            ),
+            bsupu=np.asarray(bsupu_bss, dtype=float),
+            bsupv=np.asarray(bsupv_bss, dtype=float),
+            trig=trig,
+            geom=geom_bss,
+            jac_half=bc.jac,
+            force_rs=rs_bss,
+            force_zs=zs_bss,
+            force_ru12=ru12_bss,
+            force_zu12=zu12_bss,
+            bsubu_raw=np.asarray(bsubu_raw, dtype=float),
+            bsubv_raw=np.asarray(bsubv_raw, dtype=float),
+            signgs=int(signgs),
+        )
+        D_R, H_glasser, glasser_correction, glasser_shear_valid = glasser_from_wout_mercier_terms_func(
+            DMerc=DMerc,
+            Dshear=Dshear,
+            Dcurr=Dcurr,
+        )
+        if timing_enabled:
+            timing["mercier_s"] = _time.perf_counter() - t_mercier
+    except Exception:
+        if env_enabled(os.getenv("VMEC_JAX_STRICT_WOUT_DIAGNOSTICS", "")):
+            raise
+
+    return WoutScalarDiagnostics(
+        betatotal=float(betatotal),
+        betapol=float(betapol),
+        betator=float(betator),
+        betaxis=float(betaxis),
+        ctor=float(ctor),
+        DMerc=np.asarray(DMerc, dtype=float),
+        Dshear=np.asarray(Dshear, dtype=float),
+        Dcurr=np.asarray(Dcurr, dtype=float),
+        Dwell=np.asarray(Dwell, dtype=float),
+        Dgeod=np.asarray(Dgeod, dtype=float),
+        D_R=np.asarray(D_R, dtype=float),
+        H_glasser=np.asarray(H_glasser, dtype=float),
+        glasser_correction=np.asarray(glasser_correction, dtype=float),
+        glasser_shear_valid=np.asarray(glasser_shear_valid, dtype=bool),
+        jdotb=np.asarray(jdotb, dtype=float),
+        bdotb=np.asarray(bdotb, dtype=float),
+        bdotgradv=np.asarray(bdotgradv, dtype=float),
+    )
 
 
 def prepare_profile_payload(

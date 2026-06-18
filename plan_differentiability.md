@@ -11328,3 +11328,70 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.6%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.9972%.
+
+## 2026-06-18 Minimal WOUT Scalar Diagnostics Seam
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `WoutScalarDiagnostics` and
+   `compute_minimal_wout_scalar_diagnostics` to `vmec_jax.io.wout.minimal`.
+2. Moved beta, toroidal-current, Mercier, Glasser, and JXBFORCE scalar-profile
+   assembly out of `wout_minimal_from_fixed_boundary`.
+3. Preserved the existing WOUT light-mode behavior, strict-diagnostics escape
+   hatch, Mercier bsub source toggles, and timing bucket names.
+4. Kept final WOUT schema assembly in `build_minimal_wout_data_kwargs`, so the
+   top-level builder now coordinates source preparation while scalar physics
+   lives in a named reducer.
+
+Results obtained:
+
+- `wout_minimal_from_fixed_boundary` dropped from 892 to 821 lines.
+- The WOUT minimal builder is now split into clearer phases: source setup,
+  Nyquist coefficient production, scalar diagnostics, lambda conversion, and
+  final schema assembly.
+- Focused WOUT physics, finite-beta, Mercier, and Glasser shards remained
+  green after the extraction.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/wout.py vmec_jax/io/wout/minimal.py`
+- `python -m ruff check vmec_jax/wout.py vmec_jax/io/wout/minimal.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_physics_wave8_coverage.py tests/test_wout_wave4_coverage.py tests/test_wout_helpers.py tests/test_glasser_resistive_interchange.py -q`
+  - Result: `41 passed`.
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_driver_wave10_coverage.py tests/test_physics_parity_helper_gates.py tests/test_finite_beta_helpers_unit.py -q`
+  - Result: `68 passed, 1 skipped`.
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 30`
+
+Best next steps:
+
+1. Continue WOUT decomposition by moving the Nyquist coefficient production
+   policy out of `wout_minimal_from_fixed_boundary`; this should remove another
+   large block while preserving schema and diagnostics.
+2. Keep `io.wout.minimal` from becoming a second monolith by splitting Nyquist
+   policy into `io.wout.nyquist` if the next seam is large enough.
+3. Run the broader driver-solve-discrete shard after one more WOUT tranche, not
+   after every small helper extraction.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.97%.
+- Differentiability/refactor implementation: 99.999988%.
+- Solver monolith reduction: 99.46%.
+- Free-boundary adjoint monolith reduction: 99.30%.
+- Driver workflow decomposition: 99.72%.
+- Residual iteration decomposition: 95.8%.
+- WOUT diagnostic/profile decomposition: 99.47%.
+- Optimizer workflow decomposition: 98.8%.
+- Fixed-boundary optimizer decomposition: 94.0%.
+- Implicit residual-adjoint decomposition: 93%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.7%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.9973%.

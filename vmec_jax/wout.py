@@ -37,6 +37,7 @@ from .io.wout.minimal import (
     attach_force_payload_geometry,
     build_main_geometry_coefficients,
     build_minimal_wout_data_kwargs,
+    compute_minimal_wout_scalar_diagnostics,
     device_get_if_available,
     env_enabled,
     indata_for_wout_force_path,
@@ -1719,138 +1720,67 @@ def wout_minimal_from_fixed_boundary(
     pcurr_type = current_metadata.pcurr_type
     piota_type = current_metadata.piota_type
 
-    betapol = 0.0
-    betator = 0.0
-    betaxis = 0.0
-    ctor = 0.0
-    DMerc = np.zeros((ns,), dtype=float)
-    Dshear = np.zeros((ns,), dtype=float)
-    Dcurr = np.zeros((ns,), dtype=float)
-    Dwell = np.zeros((ns,), dtype=float)
-    Dgeod = np.zeros((ns,), dtype=float)
-    D_R = np.zeros((ns,), dtype=float)
-    H_glasser = np.zeros((ns,), dtype=float)
-    glasser_correction = np.zeros((ns,), dtype=float)
-    glasser_shear_valid = np.zeros((ns,), dtype=bool)
-    jdotb = np.zeros((ns,), dtype=float)
-    bdotb = np.zeros((ns,), dtype=float)
-    bdotgradv = np.zeros((ns,), dtype=float)
-    if not wout_light:
-        try:
-            # Mercier/jxbforce operate on real-space bsub* fields on VMEC's reduced
-            # angular grid. Do not reconstruct from wout Fourier coefficients here:
-            # wrout output transforms are not a strict inverse of eval_fourier.
-            bsubu_merc = np.asarray(bsubu_diag, dtype=float)
-            bsubv_merc = np.asarray(bsubv_diag, dtype=float)
-            if os.getenv("VMEC_JAX_MERCIER_USE_RAW_BSUBUV", "") not in ("", "0"):
-                bsubu_merc = np.asarray(bsubu_raw, dtype=float)
-                bsubv_merc = np.asarray(bsubv_raw, dtype=float)
-            elif os.getenv("VMEC_JAX_MERCIER_USE_WROUT_BSUBUV", "") not in ("", "0"):
-                # Optional parity path for debugging: use Nyquist-reconstructed
-                # bsubu/bsubv from wrout coefficients in the jxbforce scalars.
-                bsubu_merc = np.asarray(bsubu_phys, dtype=float)
-                bsubv_merc = np.asarray(bsubv_phys, dtype=float)
-            elif os.getenv("VMEC_JAX_MERCIER_USE_RAW_BSUBV", "") not in ("", "0"):
-                bsubv_merc = np.asarray(bsubv_raw, dtype=float)
-            wint = _vmec_wint_from_trig(trig)
-            if wout_timing_enabled:
-                t_beta = _time.perf_counter()
-            betaxis = _compute_eqfor_betaxis(
-                pres=np.asarray(pres, dtype=float),
-                vp=np.asarray(vp, dtype=float),
-                bsq=np.asarray(bc.bsq, dtype=float),
-                sqrtg=np.asarray(bc.jac.sqrtg, dtype=float),
-                wint=wint,
-                signgs=int(signgs),
-            )
-            betapol, betator, betatot_eq, betaxis = _compute_eqfor_beta(
-                pres=np.asarray(pres, dtype=float),
-                vp=np.asarray(vp, dtype=float),
-                bsq=np.asarray(bc.bsq, dtype=float),
-                r12=np.asarray(bc.jac.r12, dtype=float),
-                bsupv=np.asarray(bc.bsupv, dtype=float),
-                sqrtg=np.asarray(bc.jac.sqrtg, dtype=float),
-                wint=wint,
-                signgs=int(signgs),
-            )
-            if wout_timing_enabled:
-                wout_timing["beta_s"] = _time.perf_counter() - t_beta
-            betatotal = float(betatot_eq)
-            ctor = _compute_ctor_from_buco(buco=np.asarray(buco, dtype=float), signgs=int(signgs), indata=indata)
-            if wout_timing_enabled:
-                t_mercier = _time.perf_counter()
-            (
-                DMerc,
-                Dshear,
-                Dcurr,
-                Dwell,
-                Dgeod,
-                jdotb,
-                bdotb,
-                bdotgradv,
-            ) = _compute_mercier(
-                state=state,
-                geom_modes=static.modes,
-                s=np.asarray(s, dtype=float),
-                lconm1=bool(getattr(cfg, "lconm1", True)),
-                lthreed=bool(ntor > 0),
-                lasym=bool(lasym),
-                nfp=int(nfp),
-                lbsubs=bool(lbsubs),
-                mmax_force=max(int(mpol) - 1, 0),
-                nmax_force=int(ntor),
-                pres=np.asarray(pres, dtype=float),
-                vp=np.asarray(vp, dtype=float),
-                phips=np.asarray(flux.phips, dtype=float),
-                iotas=np.asarray(iotas, dtype=float),
-                # Use bcovar real-space fields directly (VMEC internal grid/normalization)
-                bsq=np.asarray(bc.bsq, dtype=float),
-                sqrtg=np.asarray(bc.jac.sqrtg, dtype=float),
-                bsubu=bsubu_merc,
-                bsubv=bsubv_merc,
-                bsubu_parity_even=(
-                    None
-                    if getattr(bc, "bsubu_parity_even", None) is None
-                    else np.asarray(getattr(bc, "bsubu_parity_even"), dtype=float)
-                ),
-                bsubu_parity_odd=(
-                    None
-                    if getattr(bc, "bsubu_parity_odd", None) is None
-                    else np.asarray(getattr(bc, "bsubu_parity_odd"), dtype=float)
-                ),
-                bsubv_parity_even=(
-                    None
-                    if getattr(bc, "bsubv_parity_even", None) is None
-                    else np.asarray(getattr(bc, "bsubv_parity_even"), dtype=float)
-                ),
-                bsubv_parity_odd=(
-                    None
-                    if getattr(bc, "bsubv_parity_odd", None) is None
-                    else np.asarray(getattr(bc, "bsubv_parity_odd"), dtype=float)
-                ),
-                bsupu=np.asarray(bsupu_bss, dtype=float),
-                bsupv=np.asarray(bsupv_bss, dtype=float),
-                trig=trig,
-                geom=geom_bss,
-                jac_half=bc.jac,
-                force_rs=rs_bss,
-                force_zs=zs_bss,
-                force_ru12=ru12_bss,
-                force_zu12=zu12_bss,
-                bsubu_raw=np.asarray(bsubu_raw, dtype=float),
-                bsubv_raw=np.asarray(bsubv_raw, dtype=float),
-                signgs=int(signgs),
-            )
-            D_R, H_glasser, glasser_correction, glasser_shear_valid = _glasser_from_wout_mercier_terms(
-                DMerc=DMerc,
-                Dshear=Dshear,
-                Dcurr=Dcurr,
-            )
-            if wout_timing_enabled:
-                wout_timing["mercier_s"] = _time.perf_counter() - t_mercier
-        except Exception:
-            if os.getenv("VMEC_JAX_STRICT_WOUT_DIAGNOSTICS", "") not in ("", "0"):
-                raise
+    scalar_diag = compute_minimal_wout_scalar_diagnostics(
+        ns=int(ns),
+        wout_light=bool(wout_light),
+        betatotal=float(betatotal),
+        state=state,
+        static=static,
+        s=np.asarray(s, dtype=float),
+        lconm1=bool(getattr(cfg, "lconm1", True)),
+        ntor=int(ntor),
+        nfp=int(nfp),
+        mpol=int(mpol),
+        lasym=bool(lasym),
+        lbsubs=bool(lbsubs),
+        signgs=int(signgs),
+        pres=np.asarray(pres, dtype=float),
+        vp=np.asarray(vp, dtype=float),
+        flux_phips=np.asarray(flux.phips, dtype=float),
+        iotas=np.asarray(iotas, dtype=float),
+        bc=bc,
+        buco=np.asarray(buco, dtype=float),
+        trig=trig,
+        geom_bss=geom_bss,
+        bsupu_bss=np.asarray(bsupu_bss, dtype=float),
+        bsupv_bss=np.asarray(bsupv_bss, dtype=float),
+        rs_bss=rs_bss,
+        zs_bss=zs_bss,
+        ru12_bss=ru12_bss,
+        zu12_bss=zu12_bss,
+        bsubu_diag=np.asarray(bsubu_diag, dtype=float),
+        bsubv_diag=np.asarray(bsubv_diag, dtype=float),
+        bsubu_raw=np.asarray(bsubu_raw, dtype=float),
+        bsubv_raw=np.asarray(bsubv_raw, dtype=float),
+        bsubu_phys=bsubu_phys,
+        bsubv_phys=bsubv_phys,
+        indata=indata,
+        timing_enabled=bool(wout_timing_enabled),
+        timing=wout_timing,
+        vmec_wint_from_trig_func=_vmec_wint_from_trig,
+        compute_eqfor_betaxis_func=_compute_eqfor_betaxis,
+        compute_eqfor_beta_func=_compute_eqfor_beta,
+        compute_ctor_from_buco_func=_compute_ctor_from_buco,
+        compute_mercier_func=_compute_mercier,
+        glasser_from_wout_mercier_terms_func=_glasser_from_wout_mercier_terms,
+    )
+    betatotal = scalar_diag.betatotal
+    betapol = scalar_diag.betapol
+    betator = scalar_diag.betator
+    betaxis = scalar_diag.betaxis
+    ctor = scalar_diag.ctor
+    DMerc = scalar_diag.DMerc
+    Dshear = scalar_diag.Dshear
+    Dcurr = scalar_diag.Dcurr
+    Dwell = scalar_diag.Dwell
+    Dgeod = scalar_diag.Dgeod
+    D_R = scalar_diag.D_R
+    H_glasser = scalar_diag.H_glasser
+    glasser_correction = scalar_diag.glasser_correction
+    glasser_shear_valid = scalar_diag.glasser_shear_valid
+    jdotb = scalar_diag.jdotb
+    bdotb = scalar_diag.bdotb
+    bdotgradv = scalar_diag.bdotgradv
 
     # vmec_jax writes VMEC++-style diagnostic wout files for non-converged runs:
     # preserve every field computed from the last state and mark solver status.
