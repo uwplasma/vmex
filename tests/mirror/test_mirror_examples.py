@@ -190,6 +190,9 @@ def test_root_free_boundary_circular_coils_example_runs_without_plots(tmp_path):
     assert metrics["lcfs_pilot_rows_total"] == 3
     assert metrics["lcfs_pilot_accepted_rows_total"] == 3
     assert metrics["lcfs_pilot_skipped_rows_total"] == 0
+    assert metrics["lcfs_pilot_target_merit"] == 0.0
+    assert metrics["lcfs_pilot_stagnation_rtol"] == 0.0
+    assert metrics["lcfs_pilot_stop_reason_counts"] == {"max_steps": 3}
     assert metrics["axis_bz_relative_linf"] < 1.0e-12
     assert metrics["boundary_bmag_min"] > 0.0
     assert metrics["beta_scan_requested_percent"] == [1.0, 3.0, 10.0]
@@ -241,6 +244,7 @@ def test_root_free_boundary_circular_coils_example_runs_without_plots(tmp_path):
     assert all(row["lcfs_pilot_skipped_rows"] == 0 for row in metrics["fixed_boundary_baseline_rows"])
     assert all(row["lcfs_pilot_final_merit"] is not None for row in metrics["fixed_boundary_baseline_rows"])
     assert all(row["lcfs_pilot_best_merit"] is not None for row in metrics["fixed_boundary_baseline_rows"])
+    assert all(row["lcfs_pilot_stop_reason"] == "max_steps" for row in metrics["fixed_boundary_baseline_rows"])
     assert all(
         row["lcfs_pilot_final_pressure_balance_rms"] is not None for row in metrics["fixed_boundary_baseline_rows"]
     )
@@ -252,6 +256,9 @@ def test_root_free_boundary_circular_coils_example_runs_without_plots(tmp_path):
         isinstance(row["lcfs_pilot_rows"][0]["accepted"], bool) for row in metrics["fixed_boundary_baseline_rows"]
     )
     assert all(row["lcfs_pilot_rows"][0]["accepted"] for row in metrics["fixed_boundary_baseline_rows"])
+    assert all(
+        row["lcfs_pilot_rows"][0]["stop_reason"] == "max_steps" for row in metrics["fixed_boundary_baseline_rows"]
+    )
     assert all(
         row["lcfs_pilot_rows"][0]["lcfs_pressure_balance_rms"] <= row["lcfs_pressure_balance_rms"]
         for row in metrics["fixed_boundary_baseline_rows"]
@@ -296,10 +303,12 @@ def test_root_free_boundary_circular_coils_strict_bnormal_guard_can_skip_pilot(t
     assert metrics["lcfs_pilot_rows_total"] == 1
     assert metrics["lcfs_pilot_accepted_rows_total"] == 0
     assert metrics["lcfs_pilot_skipped_rows_total"] == 1
+    assert metrics["lcfs_pilot_stop_reason_counts"] == {"noop_candidate": 1}
     row = metrics["fixed_boundary_baseline_rows"][0]
     pilot = row["lcfs_pilot_rows"][0]
     assert row["lcfs_update_strategy"] == "noop"
     assert row["lcfs_pilot_status"] == "skipped"
+    assert row["lcfs_pilot_stop_reason"] == "noop_candidate"
     assert row["lcfs_pilot_rows_count"] == 1
     assert row["lcfs_pilot_accepted_rows"] == 0
     assert row["lcfs_pilot_skipped_rows"] == 1
@@ -309,9 +318,52 @@ def test_root_free_boundary_circular_coils_strict_bnormal_guard_can_skip_pilot(t
     assert pilot["skipped"] is True
     assert pilot["accepted"] is False
     assert pilot["rejection_reason"] == "normal_field_guard_no_candidate"
+    assert pilot["stop_reason"] == "noop_candidate"
     assert pilot["lcfs_update_allowed_strategies_next"] == ["noop"]
     assert pilot["lcfs_update_rejection_reason_next"] == "normal_field_guard_no_candidate"
     assert pilot["mout"] is None
+
+
+def test_root_free_boundary_circular_coils_pilot_stagnation_stops_early(tmp_path):
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "examples/mirror_free_boundary_circular_coils.py",
+            "--outdir",
+            str(tmp_path / "stagnation_stop"),
+            "--betas",
+            "1",
+            "--ntheta",
+            "8",
+            "--nxi",
+            "11",
+            "--n-segments",
+            "64",
+            "--run-fixed-boundary-baseline",
+            "--baseline-maxiter",
+            "0",
+            "--run-lcfs-pilot",
+            "--lcfs-pilot-steps",
+            "3",
+            "--lcfs-pilot-stagnation-rtol",
+            "1.0",
+            "--no-plots",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    metrics = json.loads(Path(completed.stdout.strip()).read_text())
+    row = metrics["fixed_boundary_baseline_rows"][0]
+    assert metrics["lcfs_pilot_steps_requested"] == 3
+    assert metrics["lcfs_pilot_stagnation_rtol"] == 1.0
+    assert metrics["lcfs_pilot_rows_total"] == 1
+    assert metrics["lcfs_pilot_stop_reason_counts"] == {"merit_stagnation": 1}
+    assert row["lcfs_pilot_rows_count"] == 1
+    assert row["lcfs_pilot_stop_reason"] == "merit_stagnation"
+    assert row["lcfs_pilot_rows"][0]["stop_reason"] == "merit_stagnation"
+    assert row["lcfs_pilot_rows"][0]["lcfs_merit_improvement_fraction"] <= 1.0
 
 
 def test_root_fixed_boundary_solve_diagnostic_runs_without_plots(tmp_path):

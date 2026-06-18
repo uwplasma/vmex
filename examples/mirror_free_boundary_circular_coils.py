@@ -87,6 +87,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lcfs-require-bnormal-nonincrease", action="store_true")
     parser.add_argument("--run-lcfs-pilot", action="store_true")
     parser.add_argument("--lcfs-pilot-steps", type=int, default=1)
+    parser.add_argument("--lcfs-pilot-target-merit", type=float, default=0.0)
+    parser.add_argument("--lcfs-pilot-stagnation-rtol", type=float, default=0.0)
     parser.add_argument("--no-plots", action="store_true")
     return parser
 
@@ -282,6 +284,7 @@ def _lcfs_pilot_summary(pilot_rows: list[dict[str, object]]) -> dict[str, object
             "lcfs_pilot_final_merit": None,
             "lcfs_pilot_best_merit": None,
             "lcfs_pilot_final_pressure_balance_rms": None,
+            "lcfs_pilot_stop_reason": None,
         }
     accepted = sum(bool(row.get("accepted", False)) and not bool(row.get("skipped", False)) for row in pilot_rows)
     skipped = sum(bool(row.get("skipped", False)) for row in pilot_rows)
@@ -303,7 +306,15 @@ def _lcfs_pilot_summary(pilot_rows: list[dict[str, object]]) -> dict[str, object
         "lcfs_pilot_final_pressure_balance_rms": None
         if final.get("lcfs_pressure_balance_rms") is None
         else float(final["lcfs_pressure_balance_rms"]),
+        "lcfs_pilot_stop_reason": final.get("stop_reason"),
     }
+
+
+def _counts_json(values: list[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in values:
+        counts[str(value)] = counts.get(str(value), 0) + 1
+    return counts
 
 
 def _beta_scan_summary(
@@ -312,6 +323,8 @@ def _beta_scan_summary(
     run_fixed_boundary_baseline: bool,
     run_lcfs_pilot: bool,
     lcfs_pilot_steps: int,
+    lcfs_pilot_target_merit: float,
+    lcfs_pilot_stagnation_rtol: float,
 ) -> dict[str, object]:
     """Return top-level status fields for the circular-coil beta scan."""
     pilot_rows = [pilot for row in baseline_rows for pilot in row.get("lcfs_pilot_rows", [])]
@@ -329,11 +342,14 @@ def _beta_scan_summary(
         "fixed_boundary_baseline_count": len(baseline_rows),
         "lcfs_pilot_requested": bool(run_lcfs_pilot),
         "lcfs_pilot_steps_requested": int(lcfs_pilot_steps) if run_lcfs_pilot else 0,
+        "lcfs_pilot_target_merit": float(lcfs_pilot_target_merit) if run_lcfs_pilot else None,
+        "lcfs_pilot_stagnation_rtol": float(lcfs_pilot_stagnation_rtol) if run_lcfs_pilot else None,
         "lcfs_pilot_rows_total": len(pilot_rows),
         "lcfs_pilot_accepted_rows_total": sum(
             bool(row.get("accepted", False)) and not bool(row.get("skipped", False)) for row in pilot_rows
         ),
         "lcfs_pilot_skipped_rows_total": sum(bool(row.get("skipped", False)) for row in pilot_rows),
+        "lcfs_pilot_stop_reason_counts": _counts_json([str(row.get("stop_reason")) for row in pilot_rows]),
     }
 
 
@@ -464,6 +480,7 @@ def _skipped_lcfs_pilot_row(
         "accepted": False,
         "skipped": True,
         "rejection_reason": selection.rejection_reason or "noop_candidate_selected",
+        "stop_reason": "noop_candidate",
         "final_residual_norm": None,
         "final_fsq": None,
         "final_normalized_force": None,
@@ -633,6 +650,8 @@ def _run_fixed_boundary_baseline_cases(
     lcfs_require_bnormal_nonincrease: bool,
     run_lcfs_pilot: bool,
     lcfs_pilot_steps: int,
+    lcfs_pilot_target_merit: float,
+    lcfs_pilot_stagnation_rtol: float,
     write_plots: bool,
 ) -> list[dict[str, object]]:
     config = MirrorConfig(
@@ -729,7 +748,18 @@ def _run_fixed_boundary_baseline_cases(
                 )
                 pilot_rows.append(pilot_step.row)
                 if not pilot_step.accepted:
+                    pilot_rows[-1]["stop_reason"] = "rejected_merit_increase"
                     break
+                merit_improvement_fraction = float(1.0 - pilot_step.merit.value / max(accepted_merit_value, 1.0e-300))
+                pilot_rows[-1]["lcfs_merit_improvement_fraction"] = merit_improvement_fraction
+                if pilot_step.merit.value <= float(lcfs_pilot_target_merit):
+                    pilot_rows[-1]["stop_reason"] = "target_merit"
+                    break
+                if merit_improvement_fraction <= float(lcfs_pilot_stagnation_rtol):
+                    pilot_rows[-1]["stop_reason"] = "merit_stagnation"
+                    break
+                if step == int(lcfs_pilot_steps):
+                    pilot_rows[-1]["stop_reason"] = "max_steps"
                 accepted_merit_value = float(pilot_step.merit.value)
                 current_lcfs = pilot_step.lcfs
                 current_merit = pilot_step.merit
@@ -822,10 +852,16 @@ def run_case(
     lcfs_require_bnormal_nonincrease: bool = False,
     run_lcfs_pilot: bool = False,
     lcfs_pilot_steps: int = 1,
+    lcfs_pilot_target_merit: float = 0.0,
+    lcfs_pilot_stagnation_rtol: float = 0.0,
     write_plots: bool = True,
 ) -> Path:
     if run_lcfs_pilot and int(lcfs_pilot_steps) < 1:
         raise ValueError("lcfs_pilot_steps must be at least 1 when run_lcfs_pilot is enabled")
+    if float(lcfs_pilot_target_merit) < 0.0:
+        raise ValueError("lcfs_pilot_target_merit must be nonnegative")
+    if float(lcfs_pilot_stagnation_rtol) < 0.0:
+        raise ValueError("lcfs_pilot_stagnation_rtol must be nonnegative")
     outdir.mkdir(parents=True, exist_ok=True)
     grid = make_mirror_grid(
         ns=ns, ntheta=ntheta, nxi=nxi, mpol=max(0, (ntheta - 1) // 2), z_min=-0.5 * separation, z_max=0.5 * separation
@@ -884,6 +920,8 @@ def run_case(
             lcfs_require_bnormal_nonincrease=lcfs_require_bnormal_nonincrease,
             run_lcfs_pilot=run_lcfs_pilot,
             lcfs_pilot_steps=lcfs_pilot_steps,
+            lcfs_pilot_target_merit=lcfs_pilot_target_merit,
+            lcfs_pilot_stagnation_rtol=lcfs_pilot_stagnation_rtol,
             write_plots=write_plots,
         )
         if run_fixed_boundary_baseline
@@ -903,6 +941,8 @@ def run_case(
             run_fixed_boundary_baseline=run_fixed_boundary_baseline,
             run_lcfs_pilot=run_lcfs_pilot,
             lcfs_pilot_steps=lcfs_pilot_steps,
+            lcfs_pilot_target_merit=lcfs_pilot_target_merit,
+            lcfs_pilot_stagnation_rtol=lcfs_pilot_stagnation_rtol,
         ),
         "coil_radius": float(coil_radius),
         "separation": float(separation),
@@ -954,6 +994,8 @@ def main() -> None:
         lcfs_require_bnormal_nonincrease=args.lcfs_require_bnormal_nonincrease,
         run_lcfs_pilot=args.run_lcfs_pilot,
         lcfs_pilot_steps=args.lcfs_pilot_steps,
+        lcfs_pilot_target_merit=args.lcfs_pilot_target_merit,
+        lcfs_pilot_stagnation_rtol=args.lcfs_pilot_stagnation_rtol,
         write_plots=not args.no_plots,
     )
     print(path)

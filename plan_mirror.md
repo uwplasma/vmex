@@ -14637,3 +14637,146 @@ at that moment.
 No user input is needed.
 
 ---
+
+## 116. 2026-06-18 M16 circular-coil LCFS pilot stop criteria
+
+### Steps taken
+
+I resumed the ESSOS-compatible circular-coil/free-boundary lane by making the
+LCFS pilot loop finite and auditable.  The example can now stop multi-step pilot
+updates by target merit, accepted-step stagnation, rejected merit increase,
+explicit no-op selection, or the requested step cap.
+
+Concretely:
+
+- added `--lcfs-pilot-target-merit`;
+- added `--lcfs-pilot-stagnation-rtol`;
+- added top-level `lcfs_pilot_target_merit`,
+  `lcfs_pilot_stagnation_rtol`, and `lcfs_pilot_stop_reason_counts`;
+- added per-beta `lcfs_pilot_stop_reason`;
+- added per-pilot-row `stop_reason`;
+- added accepted-row `lcfs_merit_improvement_fraction`;
+- preserved current defaults, so the existing one-step pilot still stops by
+  `max_steps`;
+- documented the new controls in the mirror README and overview;
+- added tests for accepted/max-step, strict no-op skip, and stagnation stop
+  behavior.
+
+### Results obtained
+
+Plotted finite-beta evidence run:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/mirror_free_boundary_circular_coils.py \
+  --outdir results/mirror/free_boundary_circular_coils_m116_stop_criteria \
+  --ntheta 8 \
+  --nxi 11 \
+  --n-segments 64 \
+  --run-fixed-boundary-baseline \
+  --baseline-maxiter 2 \
+  --run-lcfs-pilot \
+  --lcfs-pilot-steps 3 \
+  --lcfs-pilot-stagnation-rtol 1.0
+```
+
+Observed:
+
+- workflow: `lcfs_pilot`;
+- baseline beta rows: `3`;
+- requested pilot steps: `3`;
+- actual pilot rows: `3`;
+- accepted pilot rows: `2`;
+- skipped pilot rows: `0`;
+- stop reasons: `{"rejected_merit_increase": 1, "merit_stagnation": 2}`;
+- beta `1%`:
+  - baseline optimizer iterations: `2`;
+  - baseline `final_fsq`: `2.4933734830599714e-4`;
+  - baseline LCFS merit: `1.0000568856893208`;
+  - pilot stop: `rejected_merit_increase`;
+  - pilot final merit: `1.027986964110209`;
+- beta `3%`:
+  - baseline optimizer iterations: `2`;
+  - baseline `final_fsq`: `0.004468220052785157`;
+  - baseline LCFS merit: `1.0000568856893208`;
+  - pilot stop: `merit_stagnation`;
+  - pilot final merit: `0.7182791913011406`;
+  - merit improvement: `0.2817616661815753`;
+- beta `10%`:
+  - baseline optimizer iterations: `2`;
+  - baseline `final_fsq`: `0.04263091618797516`;
+  - baseline LCFS merit: `1.0000568856893208`;
+  - pilot stop: `merit_stagnation`;
+  - pilot final merit: `0.7182791913011406`;
+  - merit improvement: `0.2817616661815753`.
+
+This is still a low-resolution pilot, not a converged free-boundary solve, but
+the beta scan now has explicit, machine-readable termination reasons and actual
+finite-beta baseline iterations.
+
+Rendered ignored plot:
+
+- `results/mirror/free_boundary_circular_coils_m116_stop_criteria/figures/free_boundary_circular_coils_beta_scan_summary.png`.
+
+### How it was tested
+
+Commands run:
+
+```bash
+python -m ruff check examples/mirror_free_boundary_circular_coils.py tests/mirror/test_mirror_examples.py
+python -m ruff format --check examples/mirror_free_boundary_circular_coils.py tests/mirror/test_mirror_examples.py
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_example_runs_without_plots tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_strict_bnormal_guard_can_skip_pilot tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_pilot_stagnation_stops_early -q
+git diff --check
+```
+
+Results:
+
+- Ruff lint passed.
+- Ruff format check passed after formatting.
+- `3 passed` in the focused circular-coil example tests.
+- `git diff --check` passed.
+- The plotted finite-beta run completed and rendered the beta summary figure.
+
+### File structure and best-practice notes
+
+- Stop criteria live in the root circular-coil example because this is still an
+  example-level LCFS pilot workflow, not a core free-boundary solver API.
+- The low-level mirror update proposal helpers were not changed.
+- Tests exercise the CLI output contract through the example, matching how users
+  will run the beta scan.
+- Generated evidence remains under ignored `results/`.
+
+### Best next steps
+
+1. Commit and push M116.
+2. Run a less artificial pilot with a realistic stagnation tolerance, e.g.
+   `1e-3`, and enough steps to see whether beta trends separate.
+3. Add finite-beta baseline trend fields to the beta summary plot if needed
+   (for example final `fsq` or optimizer iterations).
+4. Promote a compact JSON contract for the beta scan that downstream ESSOS work
+   can consume.
+5. Then return to differentiable solved-state/implicit derivative promotion.
+
+### Completion percentages after M116
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `87%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `90%`.
+- I/O schema and docs: `97%`.
+- Differentiable solved-state API: `30%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `77%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `72%`.
+- PR merge readiness overall: `95%`.
+
+### User input needed
+
+No user input is needed.
+
+---
