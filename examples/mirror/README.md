@@ -166,8 +166,9 @@ contains ``accepted``, ``rejection_reason``, ``stop_reason``,
 ``lcfs_merit_improvement_fraction``, final residual/``fsq`` diagnostics when a
 trial solve ran, ``fsq_growth_ratio`` relative to the beta row baseline, and
 the next candidate-update summary. Each beta row also reports final/best pilot
-``fsq`` growth ratios. Rejected pilot rows are kept in JSON for audit, but the
-summary plot only draws accepted pilot-final values.
+``fsq`` growth ratios plus ``lcfs_pilot_last_accepted_*`` fields. Rejected
+pilot rows are kept in JSON for audit, but the summary plot draws the last
+accepted pilot state when a later trial is rejected.
 
 The root-level ``examples/mirror_fixed_boundary_solve_diagnostic.py`` script
 runs an actual L-BFGS fixed-boundary relaxation from a perturbed interior state.

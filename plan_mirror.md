@@ -15401,3 +15401,155 @@ Results:
 No user input is needed.
 
 ---
+
+## 122. Circular-Coil Last-Accepted Pilot State
+
+### Steps taken
+
+- Ran the higher-budget circular-coil beta scan with a tolerant fsq-growth
+  guard:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 python examples/mirror_free_boundary_circular_coils.py \
+  --outdir results/mirror/free_boundary_circular_coils_m122_baseline20_fsq_guard1p1 \
+  --ntheta 8 --nxi 11 --n-segments 64 \
+  --run-fixed-boundary-baseline --baseline-maxiter 20 \
+  --run-lcfs-pilot --lcfs-pilot-steps 5 \
+  --lcfs-pilot-stagnation-rtol 1e-3 \
+  --lcfs-pilot-fsq-growth-limit 1.1
+```
+
+- The run showed that beta `3%` and `10%` accepted pilot step 1, then rejected
+  step 2 by the fsq-growth guard; however, the summary plot only drew rows whose
+  final pilot status was accepted, hiding the accepted step-1 progress.
+- Added explicit last-accepted pilot-state fields to each beta row:
+  - `lcfs_pilot_last_accepted_step`;
+  - `lcfs_pilot_last_accepted_merit`;
+  - `lcfs_pilot_last_accepted_pressure_balance_rms`;
+  - `lcfs_pilot_last_accepted_fsq`;
+  - `lcfs_pilot_last_accepted_fsq_growth_ratio`;
+  - `lcfs_pilot_last_accepted_normalized_force`.
+- Updated the beta-scan summary plot to draw the last accepted pilot state, not
+  the final rejected trial.
+- Extended the compact schema, tests, README, and mirror overview docs.
+- Reran the tolerant-guard evidence into a fresh ignored results directory:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 python examples/mirror_free_boundary_circular_coils.py \
+  --outdir results/mirror/free_boundary_circular_coils_m122_guard1p1_last_accepted \
+  --ntheta 8 --nxi 11 --n-segments 64 \
+  --run-fixed-boundary-baseline --baseline-maxiter 20 \
+  --run-lcfs-pilot --lcfs-pilot-steps 5 \
+  --lcfs-pilot-stagnation-rtol 1e-3 \
+  --lcfs-pilot-fsq-growth-limit 1.1
+```
+
+### Results obtained
+
+Refreshed tolerant-guard run:
+
+- output JSON:
+  `results/mirror/free_boundary_circular_coils_m122_guard1p1_last_accepted/free_boundary_circular_coils_metrics.json`;
+- figure count: `92` ignored PNGs;
+- summary plot:
+  `results/mirror/free_boundary_circular_coils_m122_guard1p1_last_accepted/figures/free_boundary_circular_coils_beta_scan_summary.png`;
+- pilot rows: `5`;
+- accepted pilot rows: `2`;
+- stop counts: `{"rejected_merit_increase": 1, "None": 2, "fsq_growth_guard": 2}`.
+
+Per-beta outcome:
+
+- beta `1%`:
+  - final status: `rejected`;
+  - accepted rows: `0`;
+  - last accepted step: `null`;
+  - final rejected trial `fsq_growth_ratio`: `12498.631673700875`;
+  - reason: actual LCFS merit worsened.
+- beta `3%`:
+  - final status: `rejected`;
+  - accepted rows: `1`;
+  - last accepted step: `1`;
+  - last accepted `fsq_growth_ratio`: `1.0539167395712978`;
+  - final rejected trial `fsq_growth_ratio`: `1.1236410160141437`;
+  - last accepted LCFS merit: `0.7182791913011406`;
+  - final rejected trial LCFS merit: `0.48532561064534907`.
+- beta `10%`:
+  - final status: `rejected`;
+  - accepted rows: `1`;
+  - last accepted step: `1`;
+  - last accepted `fsq_growth_ratio`: `1.0946511062666966`;
+  - final rejected trial `fsq_growth_ratio`: `1.2003050324215168`;
+  - last accepted LCFS merit: `0.7182791913011406`;
+  - final rejected trial LCFS merit: `0.48532561064534907`.
+
+The refreshed summary plot now displays orange last-accepted pilot markers for
+the `3%` and `10%` cases, while leaving the `1%` case without a pilot marker.
+This matches the actual acceptance decisions and keeps rejected trial rows
+available in JSON for audit.
+
+### How it was tested
+
+Commands run:
+
+```bash
+gh pr checks 21 --watch=false
+python -m ruff check examples/mirror_free_boundary_circular_coils.py tests/mirror/test_mirror_examples.py
+python -m ruff format --check examples/mirror_free_boundary_circular_coils.py tests/mirror/test_mirror_examples.py
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_example_runs_without_plots tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_strict_bnormal_guard_can_skip_pilot tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_pilot_stagnation_stops_early tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_fsq_growth_guard_rejects_pilot tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_tolerant_fsq_guard_keeps_last_accepted -q
+python -m ruff format examples/mirror_free_boundary_circular_coils.py tests/mirror/test_mirror_examples.py
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 python examples/mirror_free_boundary_circular_coils.py --outdir results/mirror/free_boundary_circular_coils_m122_guard1p1_last_accepted --ntheta 8 --nxi 11 --n-segments 64 --run-fixed-boundary-baseline --baseline-maxiter 20 --run-lcfs-pilot --lcfs-pilot-steps 5 --lcfs-pilot-stagnation-rtol 1e-3 --lcfs-pilot-fsq-growth-limit 1.1
+git diff --check
+```
+
+Results:
+
+- CI had no reported checks for the newest head when inspected.
+- Ruff lint passed.
+- Ruff format check passed after formatting.
+- Focused tests: `5 passed`.
+- The tolerant plotted evidence run completed.
+- The generated `results/` tree remains ignored by git.
+
+### File structure and best-practice notes
+
+- Final rejected-trial fields and last-accepted fields are intentionally
+  separate. This avoids overloading `final_*` with accepted-state semantics.
+- Plotting now uses last accepted pilot data, while JSON retains every rejected
+  trial row for audit and method development.
+- The schema remains compact and example-scoped.
+- No core solver API was changed.
+
+### Best next steps
+
+1. Commit and push M122.
+2. Update the README recommendation to describe strict guard `1.0` as a
+   diagnostic mode and `1.1` as the current low-resolution pragmatic pilot
+   tolerance for the 3%/10% circular-coil rows.
+3. Add a lightweight JSON postprocessor or table helper that extracts baseline,
+   last-accepted, and final rejected trial columns for ESSOS comparison reports.
+4. Resume differentiable solved-state/implicit-derivative API work after the
+   ESSOS beta-scan reporting contract is stable.
+
+### Completion percentages after M122
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `87%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `92%`.
+- I/O schema and docs: `99%`.
+- Differentiable solved-state API: `30%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `85%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `84%`.
+- PR merge readiness overall: `95%`.
+
+### User input needed
+
+No user input is needed.
+
+---

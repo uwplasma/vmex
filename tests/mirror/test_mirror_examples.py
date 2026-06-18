@@ -262,6 +262,19 @@ def test_root_free_boundary_circular_coils_example_runs_without_plots(tmp_path):
     assert all(row["lcfs_pilot_best_fsq"] is not None for row in metrics["fixed_boundary_baseline_rows"])
     assert all(row["lcfs_pilot_final_fsq_growth_ratio"] is not None for row in metrics["fixed_boundary_baseline_rows"])
     assert all(row["lcfs_pilot_best_fsq_growth_ratio"] is not None for row in metrics["fixed_boundary_baseline_rows"])
+    assert all(row["lcfs_pilot_last_accepted_step"] == 1 for row in metrics["fixed_boundary_baseline_rows"])
+    assert all(row["lcfs_pilot_last_accepted_merit"] is not None for row in metrics["fixed_boundary_baseline_rows"])
+    assert all(
+        row["lcfs_pilot_last_accepted_pressure_balance_rms"] is not None
+        for row in metrics["fixed_boundary_baseline_rows"]
+    )
+    assert all(row["lcfs_pilot_last_accepted_fsq"] is not None for row in metrics["fixed_boundary_baseline_rows"])
+    assert all(
+        row["lcfs_pilot_last_accepted_fsq_growth_ratio"] is not None for row in metrics["fixed_boundary_baseline_rows"]
+    )
+    assert all(
+        row["lcfs_pilot_last_accepted_normalized_force"] is not None for row in metrics["fixed_boundary_baseline_rows"]
+    )
     assert all(row["lcfs_pilot_final_normalized_force"] is not None for row in metrics["fixed_boundary_baseline_rows"])
     assert all(
         row["lcfs_pilot_final_pressure_balance_rms"] is not None for row in metrics["fixed_boundary_baseline_rows"]
@@ -348,6 +361,9 @@ def test_root_free_boundary_circular_coils_strict_bnormal_guard_can_skip_pilot(t
     assert pilot["fsq_growth_ratio"] is None
     assert row["lcfs_pilot_final_fsq_growth_ratio"] is None
     assert row["lcfs_pilot_best_fsq_growth_ratio"] is None
+    assert row["lcfs_pilot_last_accepted_step"] is None
+    assert row["lcfs_pilot_last_accepted_merit"] is None
+    assert row["lcfs_pilot_last_accepted_fsq_growth_ratio"] is None
     assert pilot["lcfs_update_allowed_strategies_next"] == ["noop"]
     assert pilot["lcfs_update_rejection_reason_next"] == "normal_field_guard_no_candidate"
     assert pilot["mout"] is None
@@ -396,6 +412,8 @@ def test_root_free_boundary_circular_coils_pilot_stagnation_stops_early(tmp_path
     assert row["lcfs_pilot_best_fsq"] is not None
     assert row["lcfs_pilot_final_fsq_growth_ratio"] is not None
     assert row["lcfs_pilot_best_fsq_growth_ratio"] is not None
+    assert row["lcfs_pilot_last_accepted_step"] == 1
+    assert row["lcfs_pilot_last_accepted_fsq_growth_ratio"] == pytest.approx(row["lcfs_pilot_final_fsq_growth_ratio"])
     assert row["lcfs_pilot_rows"][0]["stop_reason"] == "merit_stagnation"
     assert row["lcfs_pilot_rows"][0]["fsq_growth_ratio"] == pytest.approx(row["lcfs_pilot_final_fsq_growth_ratio"])
     assert row["lcfs_pilot_rows"][0]["lcfs_merit_improvement_fraction"] <= 1.0
@@ -447,6 +465,58 @@ def test_root_free_boundary_circular_coils_fsq_growth_guard_rejects_pilot(tmp_pa
     assert pilot["fsq_growth_ratio"] > 1.0
     assert row["lcfs_pilot_final_fsq_growth_ratio"] == pytest.approx(pilot["fsq_growth_ratio"])
     assert row["lcfs_pilot_best_fsq_growth_ratio"] == pytest.approx(pilot["fsq_growth_ratio"])
+    assert row["lcfs_pilot_last_accepted_step"] is None
+    assert row["lcfs_pilot_last_accepted_fsq_growth_ratio"] is None
+
+
+def test_root_free_boundary_circular_coils_tolerant_fsq_guard_keeps_last_accepted(tmp_path):
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "examples/mirror_free_boundary_circular_coils.py",
+            "--outdir",
+            str(tmp_path / "tolerant_fsq_guard"),
+            "--betas",
+            "3",
+            "--ntheta",
+            "8",
+            "--nxi",
+            "11",
+            "--n-segments",
+            "64",
+            "--run-fixed-boundary-baseline",
+            "--baseline-maxiter",
+            "5",
+            "--run-lcfs-pilot",
+            "--lcfs-pilot-steps",
+            "2",
+            "--lcfs-pilot-fsq-growth-limit",
+            "1.1",
+            "--no-plots",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    metrics = json.loads(Path(completed.stdout.strip()).read_text())
+    row = metrics["fixed_boundary_baseline_rows"][0]
+    first, second = row["lcfs_pilot_rows"]
+    assert metrics["lcfs_pilot_fsq_growth_limit"] == 1.1
+    assert metrics["lcfs_pilot_rows_total"] == 2
+    assert metrics["lcfs_pilot_accepted_rows_total"] == 1
+    assert row["lcfs_pilot_status"] == "rejected"
+    assert row["lcfs_pilot_accepted_rows"] == 1
+    assert row["lcfs_pilot_last_accepted_step"] == 1
+    assert first["accepted"] is True
+    assert first["fsq_growth_ratio"] < 1.1
+    assert second["accepted"] is False
+    assert second["rejection_reason"] == "fsq_growth_guard"
+    assert second["fsq_growth_ratio"] > 1.1
+    assert row["lcfs_pilot_last_accepted_fsq"] == pytest.approx(first["final_fsq"])
+    assert row["lcfs_pilot_last_accepted_fsq_growth_ratio"] == pytest.approx(first["fsq_growth_ratio"])
+    assert row["lcfs_pilot_final_fsq"] == pytest.approx(second["final_fsq"])
+    assert row["lcfs_pilot_final_fsq_growth_ratio"] == pytest.approx(second["fsq_growth_ratio"])
 
 
 def test_root_fixed_boundary_solve_diagnostic_runs_without_plots(tmp_path):

@@ -53,8 +53,9 @@ without coupling it to toroidal VMEC assumptions:
   target-merit/stagnation stop criteria, an optional fixed-boundary ``fsq``
   growth guard, a compact ``mirror_free_boundary_circular_coil_beta_scan`` JSON
   schema version that names top-level, beta-row, and pilot-row contract fields
-  for ESSOS handoff scripts, explicit pilot ``fsq`` growth-ratio diagnostics,
-  and a cross-beta LCFS/final-``fsq`` metrics summary plot;
+  for ESSOS handoff scripts, explicit pilot ``fsq`` growth-ratio and
+  last-accepted-state diagnostics, and a cross-beta LCFS/final-``fsq`` metrics
+  summary plot;
 - a repo-root ``examples/mirror_two_coil_axisym.py`` analytic benchmark that
   builds a fixed boundary from the closed-form on-axis field of two circular
   coils, overlays mirror ``B_z`` against that reference, draws the coils, and

@@ -92,6 +92,12 @@ CIRCULAR_COIL_BETA_SCAN_ROW_FIELDS = (
     "lcfs_pilot_final_fsq_growth_ratio",
     "lcfs_pilot_best_fsq_growth_ratio",
     "lcfs_pilot_stop_reason",
+    "lcfs_pilot_last_accepted_step",
+    "lcfs_pilot_last_accepted_merit",
+    "lcfs_pilot_last_accepted_pressure_balance_rms",
+    "lcfs_pilot_last_accepted_fsq",
+    "lcfs_pilot_last_accepted_fsq_growth_ratio",
+    "lcfs_pilot_last_accepted_normalized_force",
     "lcfs_pilot_rows",
     "figures",
 )
@@ -364,26 +370,25 @@ def _write_beta_scan_summary_plot(rows: list[dict[str, object]], *, outdir: Path
     def _ordered(name: str) -> np.ndarray:
         return np.asarray([float(rows[index][name]) for index in order], dtype=float)
 
-    def _ordered_accepted_optional(name: str) -> np.ndarray:
+    def _ordered_optional(name: str) -> np.ndarray:
         values = []
         for index in order:
             value = rows[index].get(name)
-            accepted = str(rows[index].get("lcfs_pilot_status")) == "accepted"
-            values.append(np.nan if value is None or not accepted else float(value))
+            values.append(np.nan if value is None else float(value))
         return np.asarray(values, dtype=float)
 
     baseline_pressure = _ordered("lcfs_pressure_balance_rms")
     baseline_bnormal = _ordered("lcfs_external_bnormal_rms")
     baseline_merit = _ordered("lcfs_merit")
     baseline_fsq = _ordered("final_fsq")
-    pilot_pressure = _ordered_accepted_optional("lcfs_pilot_final_pressure_balance_rms")
-    pilot_merit = _ordered_accepted_optional("lcfs_pilot_final_merit")
-    pilot_fsq = _ordered_accepted_optional("lcfs_pilot_final_fsq")
+    pilot_pressure = _ordered_optional("lcfs_pilot_last_accepted_pressure_balance_rms")
+    pilot_merit = _ordered_optional("lcfs_pilot_last_accepted_merit")
+    pilot_fsq = _ordered_optional("lcfs_pilot_last_accepted_fsq")
 
     fig, axes = plt.subplots(4, 1, figsize=(6.6, 8.2), sharex=True)
     axes[0].plot(beta, baseline_pressure, "o-", label="baseline")
     if np.isfinite(pilot_pressure).any():
-        axes[0].plot(beta, pilot_pressure, "s--", label="accepted pilot final")
+        axes[0].plot(beta, pilot_pressure, "s--", label="last accepted pilot")
     axes[0].set_ylabel("pressure RMS")
     axes[0].legend(fontsize="small")
 
@@ -392,13 +397,13 @@ def _write_beta_scan_summary_plot(rows: list[dict[str, object]], *, outdir: Path
 
     axes[2].plot(beta, baseline_merit, "o-", label="baseline")
     if np.isfinite(pilot_merit).any():
-        axes[2].plot(beta, pilot_merit, "s--", label="accepted pilot final")
+        axes[2].plot(beta, pilot_merit, "s--", label="last accepted pilot")
     axes[2].set_ylabel("LCFS merit")
     axes[2].legend(fontsize="small")
 
     axes[3].plot(beta, baseline_fsq, "o-", label="baseline")
     if np.isfinite(pilot_fsq).any():
-        axes[3].plot(beta, pilot_fsq, "s--", label="accepted pilot final")
+        axes[3].plot(beta, pilot_fsq, "s--", label="last accepted pilot")
     axes[3].set_ylabel("final fsq")
     axes[3].set_xlabel("nominal beta (%)")
     axes[3].legend(fontsize="small")
@@ -437,9 +442,18 @@ def _lcfs_pilot_summary(pilot_rows: list[dict[str, object]]) -> dict[str, object
             "lcfs_pilot_best_fsq_growth_ratio": None,
             "lcfs_pilot_final_normalized_force": None,
             "lcfs_pilot_stop_reason": None,
+            "lcfs_pilot_last_accepted_step": None,
+            "lcfs_pilot_last_accepted_merit": None,
+            "lcfs_pilot_last_accepted_pressure_balance_rms": None,
+            "lcfs_pilot_last_accepted_fsq": None,
+            "lcfs_pilot_last_accepted_fsq_growth_ratio": None,
+            "lcfs_pilot_last_accepted_normalized_force": None,
         }
     accepted = sum(bool(row.get("accepted", False)) and not bool(row.get("skipped", False)) for row in pilot_rows)
     skipped = sum(bool(row.get("skipped", False)) for row in pilot_rows)
+    accepted_rows = [
+        row for row in pilot_rows if bool(row.get("accepted", False)) and not bool(row.get("skipped", False))
+    ]
     merit_values = [float(row["lcfs_merit"]) for row in pilot_rows if row.get("lcfs_merit") is not None]
     fsq_values = [float(row["final_fsq"]) for row in pilot_rows if row.get("final_fsq") is not None]
     fsq_growth_ratios = [
@@ -452,6 +466,7 @@ def _lcfs_pilot_summary(pilot_rows: list[dict[str, object]]) -> dict[str, object
         status = "accepted"
     else:
         status = "rejected"
+    last_accepted = accepted_rows[-1] if accepted_rows else None
     return {
         "lcfs_pilot_status": status,
         "lcfs_pilot_rows_count": len(pilot_rows),
@@ -472,6 +487,22 @@ def _lcfs_pilot_summary(pilot_rows: list[dict[str, object]]) -> dict[str, object
         if final.get("final_normalized_force") is None
         else float(final["final_normalized_force"]),
         "lcfs_pilot_stop_reason": final.get("stop_reason"),
+        "lcfs_pilot_last_accepted_step": None if last_accepted is None else int(last_accepted["step"]),
+        "lcfs_pilot_last_accepted_merit": None
+        if last_accepted is None or last_accepted.get("lcfs_merit") is None
+        else float(last_accepted["lcfs_merit"]),
+        "lcfs_pilot_last_accepted_pressure_balance_rms": None
+        if last_accepted is None or last_accepted.get("lcfs_pressure_balance_rms") is None
+        else float(last_accepted["lcfs_pressure_balance_rms"]),
+        "lcfs_pilot_last_accepted_fsq": None
+        if last_accepted is None or last_accepted.get("final_fsq") is None
+        else float(last_accepted["final_fsq"]),
+        "lcfs_pilot_last_accepted_fsq_growth_ratio": None
+        if last_accepted is None or last_accepted.get("fsq_growth_ratio") is None
+        else float(last_accepted["fsq_growth_ratio"]),
+        "lcfs_pilot_last_accepted_normalized_force": None
+        if last_accepted is None or last_accepted.get("final_normalized_force") is None
+        else float(last_accepted["final_normalized_force"]),
     }
 
 
