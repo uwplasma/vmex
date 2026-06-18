@@ -16,7 +16,7 @@ VMEC constraint-force pipeline (`tcon` + `alias`) for fixed-boundary parity.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 import importlib
 import os
 from pathlib import Path
@@ -28,6 +28,7 @@ import time
 import numpy as np
 
 from ._compat import jnp, has_jax, jax, tree_util
+from ._solve_runtime import _parse_iter_list
 from .fourier import project_to_modes
 from .fourier import eval_fourier, eval_fourier_dtheta, eval_fourier_dzeta_phys
 from .field import lamscale_from_phips
@@ -357,51 +358,34 @@ def _apply_freeb_edge_forcing(ctx):
     )
 
 
-_VMEC_RZ_FORCE_KERNEL_FIELDS = (
-    "armn_e", "armn_o", "brmn_e", "brmn_o", "crmn_e", "crmn_o",
-    "azmn_e", "azmn_o", "bzmn_e", "bzmn_o", "czmn_e", "czmn_o", "bc",
-    "arcon_e", "arcon_o", "azcon_e", "azcon_o", "gcon",
-    "pr1_even", "pr1_odd", "pz1_even", "pz1_odd", "pru_even", "pru_odd",
-    "pzu_even", "pzu_odd", "prv_even", "prv_odd", "pzv_even", "pzv_odd",
-    "tcon", "constraint_rcon0", "constraint_zcon0",
-)
-
-
 @tree_util.register_pytree_node_class
 @dataclass(frozen=True)
 class VmecRZForceKernels:
-    """Force kernels on the full angular grid, split by m-parity."""
+    """Force kernels on the full angular grid, split by m-parity.
 
-    # R kernels
+    Array fields are on the ``(ns, ntheta, nzeta)`` grid unless noted.
+    Geometry parity fields use VMEC's internal decomposition
+    ``X = X_even + sqrt(s) * X_odd_internal``.
+    """
+
     armn_e: Any  # (ns, ntheta, nzeta)
     armn_o: Any  # (ns, ntheta, nzeta)
     brmn_e: Any  # (ns, ntheta, nzeta)
     brmn_o: Any  # (ns, ntheta, nzeta)
     crmn_e: Any  # (ns, ntheta, nzeta)
     crmn_o: Any  # (ns, ntheta, nzeta)
-
-    # Z kernels
     azmn_e: Any  # (ns, ntheta, nzeta)
     azmn_o: Any  # (ns, ntheta, nzeta)
     bzmn_e: Any  # (ns, ntheta, nzeta)
     bzmn_o: Any  # (ns, ntheta, nzeta)
     czmn_e: Any  # (ns, ntheta, nzeta)
     czmn_o: Any  # (ns, ntheta, nzeta)
-
-    # Carry bcovar outputs for downstream scalings.
     bc: Any
-
-    # Constraint force kernels (passed to `tomnsps` as ARCON/AZCON).
     arcon_e: Any  # (ns, ntheta, nzeta)
     arcon_o: Any  # (ns, ntheta, nzeta)
     azcon_e: Any  # (ns, ntheta, nzeta)
     azcon_o: Any  # (ns, ntheta, nzeta)
     gcon: Any  # (ns, ntheta, nzeta)
-
-    # Geometry parity fields (VMEC internal decomposition):
-    #   X(s,θ,ζ) = X_even(s,θ,ζ) + sqrt(s) * X_odd_internal(s,θ,ζ)
-    #
-    # These are used to reproduce additional VMEC conventions (e.g. `lforbal`).
     pr1_even: Any  # (ns, ntheta, nzeta)
     pr1_odd: Any  # (ns, ntheta, nzeta)
     pz1_even: Any  # (ns, ntheta, nzeta)
@@ -414,14 +398,12 @@ class VmecRZForceKernels:
     prv_odd: Any  # (ns, ntheta, nzeta)
     pzv_even: Any  # (ns, ntheta, nzeta)
     pzv_odd: Any  # (ns, ntheta, nzeta)
-
-    # Optional diagnostic (set by constraint pipeline).
     tcon: Any | None = None  # (ns,)
     constraint_rcon0: Any | None = None  # (ns, ntheta, nzeta)
     constraint_zcon0: Any | None = None  # (ns, ntheta, nzeta)
 
     def tree_flatten(self):
-        return tuple(getattr(self, name) for name in _VMEC_RZ_FORCE_KERNEL_FIELDS), None
+        return tuple(getattr(self, field.name) for field in fields(self)), None
 
     @classmethod
     def tree_unflatten(cls, aux_data, children):
@@ -464,6 +446,37 @@ def _constraint_preconditioner_and_tcon(
 ):
     """Select VMEC constraint preconditioner diagonals and `tcon` profile."""
     tcon0_val = jnp.asarray(0.0 if constraint_tcon0 is None else constraint_tcon0, dtype=dtype)
+
+    def _diag_from_bc():
+        return precondn_diag_axd1_from_bcovar(
+            trig=trig,
+            s=s,
+            bsq=bc.bsq,
+            r12=bc.jac.r12,
+            sqrtg=bc.jac.sqrtg,
+            ru12=bc.jac.ru12,
+            zu12=bc.jac.zu12,
+        )
+
+    def _safe_tcon_from_diag(ard1, azd1):
+        tcon_tmp = tcon_from_cached_precondn_diag(
+            tcon0=tcon0_val,
+            trig=trig,
+            s=s,
+            lasym=bool(wout.lasym),
+            ard1=ard1,
+            azd1=azd1,
+            ru0=ru0,
+            zu0=zu0,
+        )
+        tcon_heur = tcon_from_tcon0_heuristic(
+            tcon0=tcon0_val,
+            s=s,
+            trig=trig,
+            lasym=bool(wout.lasym),
+        )
+        return jnp.where(jnp.all(jnp.isfinite(tcon_tmp)), tcon_tmp, tcon_heur)
+
     use_dynamic = (precond_active is not None) or (tcon_active is not None)
     if use_dynamic:
         if jax is None:
@@ -486,38 +499,13 @@ def _constraint_preconditioner_and_tcon(
         def _diag_override(_):
             return precond_override
 
-        def _diag_from_bc(_):
-            return precondn_diag_axd1_from_bcovar(
-                trig=trig,
-                s=s,
-                bsq=bc.bsq,
-                r12=bc.jac.r12,
-                sqrtg=bc.jac.sqrtg,
-                ru12=bc.jac.ru12,
-                zu12=bc.jac.zu12,
-            )
+        def _diag_from_bc_cond(_):
+            return _diag_from_bc()
 
-        ard1, azd1 = jax.lax.cond(use_precond, _diag_override, _diag_from_bc, operand=None)
+        ard1, azd1 = jax.lax.cond(use_precond, _diag_override, _diag_from_bc_cond, operand=None)
 
         def _tcon_from_diag(_):
-            tcon_tmp = tcon_from_cached_precondn_diag(
-                tcon0=tcon0_val,
-                trig=trig,
-                s=s,
-                lasym=bool(wout.lasym),
-                ard1=ard1,
-                azd1=azd1,
-                ru0=ru0,
-                zu0=zu0,
-            )
-            finite = jnp.all(jnp.isfinite(tcon_tmp))
-            tcon_heur = tcon_from_tcon0_heuristic(
-                tcon0=tcon0_val,
-                s=s,
-                trig=trig,
-                lasym=bool(wout.lasym),
-            )
-            return jnp.where(finite, tcon_tmp, tcon_heur)
+            return _safe_tcon_from_diag(ard1, azd1)
 
         def _tcon_override(_):
             return jnp.asarray(tcon_override_arr, dtype=dtype)
@@ -527,38 +515,13 @@ def _constraint_preconditioner_and_tcon(
 
     if tcon_override is None:
         if precond_diag_override is None:
-            ard1, azd1 = precondn_diag_axd1_from_bcovar(
-                trig=trig,
-                s=s,
-                bsq=bc.bsq,
-                r12=bc.jac.r12,
-                sqrtg=bc.jac.sqrtg,
-                ru12=bc.jac.ru12,
-                zu12=bc.jac.zu12,
-            )
+            ard1, azd1 = _diag_from_bc()
         else:
             ard1, azd1 = precond_diag_override
 
         # VMEC2000 updates `tcon(js)` only when refreshing the 1D
         # preconditioner blocks; between refreshes, callers may reuse it.
-        tcon = tcon_from_cached_precondn_diag(
-            tcon0=tcon0_val,
-            trig=trig,
-            s=s,
-            lasym=bool(wout.lasym),
-            ard1=ard1,
-            azd1=azd1,
-            ru0=ru0,
-            zu0=zu0,
-        )
-        finite = jnp.all(jnp.isfinite(tcon))
-        tcon_heur = tcon_from_tcon0_heuristic(
-            tcon0=tcon0_val,
-            s=s,
-            trig=trig,
-            lasym=bool(wout.lasym),
-        )
-        return ard1, azd1, jnp.where(finite, tcon, tcon_heur)
+        return ard1, azd1, _safe_tcon_from_diag(ard1, azd1)
 
     tcon = jnp.asarray(tcon_override, dtype=dtype)
     if precond_diag_override is None:
@@ -569,30 +532,18 @@ def _constraint_preconditioner_and_tcon(
     return ard1, azd1, tcon
 
 
-def _parse_iter_list(val: str) -> set[int] | None:
-    """Parse a comma-separated list of ints/ranges like '1,2,5-7'."""
-    if not val:
-        return None
-    out: set[int] = set()
-    for chunk in val.replace(" ", "").split(","):
-        if not chunk:
-            continue
-        if "-" in chunk:
-            a, b = chunk.split("-", 1)
-            try:
-                lo = int(a)
-                hi = int(b)
-            except ValueError:
-                continue
-            if hi < lo:
-                lo, hi = hi, lo
-            out.update(range(lo, hi + 1))
-        else:
-            try:
-                out.add(int(chunk))
-            except ValueError:
-                continue
-    return out if out else None
+def _maybe_dump_iter_npz(env_name: str, *, iter_idx: int | None, stem: str, arrays) -> None:
+    env = os.getenv(env_name, "")
+    if not env or env == "0" or iter_idx is None:
+        return
+    iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_ITER", ""))
+    if iters is not None and int(iter_idx) not in iters:
+        return
+    outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
+    outdir.mkdir(parents=True, exist_ok=True)
+    if callable(arrays):
+        arrays = arrays()
+    np.savez(outdir / f"{stem}_iter{int(iter_idx)}.npz", **arrays)
 
 
 def _pshalf_from_s(s: Any) -> Any:
@@ -819,81 +770,68 @@ def _constraint_kernels_from_state(
     )
 
     # Optional debug dump of the constraint pipeline for parity work.
-    import os
-    from pathlib import Path
-
-    env = os.getenv("VMEC_JAX_DUMP_CONSTRAINTS", "")
-    if env and env != "0" and iter_idx is not None:
-        iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_ITER", ""))
-        if iters is None or int(iter_idx) in iters:
-            outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
-            outdir.mkdir(parents=True, exist_ok=True)
-            path = outdir / f"constraints_raw_iter{int(iter_idx)}.npz"
-            np.savez(
-                path,
-                gcon=np.asarray(gcon),
-                ztemp=np.asarray(ztemp),
-                ru0=np.asarray(ru0),
-                zu0=np.asarray(zu0),
-                rcon0=np.asarray(rcon0),
-                zcon0=np.asarray(zcon0),
-                rcon=np.asarray(rcon_phys),
-                zcon=np.asarray(zcon_phys),
-                tcon=np.asarray(tcon),
-                ard1=np.asarray(ard1),
-                azd1=np.asarray(azd1),
-                ns=int(ns),
-                ntheta3=int(trig.ntheta3),
-                nzeta=int(trig.cosnv.shape[0]),
-            )
+    _maybe_dump_iter_npz(
+        "VMEC_JAX_DUMP_CONSTRAINTS",
+        iter_idx=iter_idx,
+        stem="constraints_raw",
+        arrays=lambda: {
+            "gcon": np.asarray(gcon),
+            "ztemp": np.asarray(ztemp),
+            "ru0": np.asarray(ru0),
+            "zu0": np.asarray(zu0),
+            "rcon0": np.asarray(rcon0),
+            "zcon0": np.asarray(zcon0),
+            "rcon": np.asarray(rcon_phys),
+            "zcon": np.asarray(zcon_phys),
+            "tcon": np.asarray(tcon),
+            "ard1": np.asarray(ard1),
+            "azd1": np.asarray(azd1),
+            "ns": int(ns),
+            "ntheta3": int(trig.ntheta3),
+            "nzeta": int(trig.cosnv.shape[0]),
+        },
+    )
 
     env_bcovar = os.getenv("VMEC_JAX_DUMP_BCOVAR", "")
     if env_bcovar and env_bcovar != "0" and iter_idx is not None:
-        iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_ITER", ""))
-        if iters is None or int(iter_idx) in iters:
-            outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
-            outdir.mkdir(parents=True, exist_ok=True)
-            path = outdir / f"bcovar_raw_iter{int(iter_idx)}.npz"
-
-            sqrtg = np.asarray(bc.jac.sqrtg, dtype=float)
-            twopi = float(2.0 * np.pi)
-            denom = float(int(wout.signgs)) * sqrtg * twopi
-            overg = np.where(denom != 0.0, 1.0 / denom, 0.0)
-            phipog_vmec = np.where(sqrtg != 0.0, 1.0 / sqrtg, 0.0)
-
-            w_theta = np.asarray(trig.cosmui3[:, 0], dtype=float) / float(np.asarray(trig.mscale[0]))
-            wint2 = w_theta[:, None] * np.ones((int(np.asarray(trig.cosnv).shape[0]),), dtype=float)[None, :]
-            wint3 = np.broadcast_to(wint2[None, :, :], sqrtg.shape).copy()
-            if wint3.shape[0] > 0:
-                wint3[0, :, :] = 0.0
-
-            bsupu = np.asarray(bc.bsupu, dtype=float)
-            bsupv = np.asarray(bc.bsupv, dtype=float)
-            bsubu = np.asarray(bc.bsubu, dtype=float)
-            bsubv = np.asarray(bc.bsubv, dtype=float)
-            b2 = (bsupu * bsubu) + (bsupv * bsubv)
-            bsq = np.asarray(bc.bsq, dtype=float)
-
-            np.savez(
-                path,
-                r12=np.asarray(bc.jac.r12, dtype=float),
-                sqrtg=sqrtg,
-                tau=np.asarray(bc.jac.tau, dtype=float),
-                ru12=np.asarray(bc.jac.ru12, dtype=float),
-                zu12=np.asarray(bc.jac.zu12, dtype=float),
-                bsupu=bsupu,
-                bsupv=bsupv,
-                bsubu=bsubu,
-                bsubv=bsubv,
-                b2=b2,
-                bsq=bsq,
-                overg=overg,
-                phipog_vmec=phipog_vmec,
-                wint=wint3,
-                ns=int(ns),
-                ntheta3=int(trig.ntheta3),
-                nzeta=int(trig.cosnv.shape[0]),
-            )
+        sqrtg = np.asarray(bc.jac.sqrtg, dtype=float)
+        twopi = float(2.0 * np.pi)
+        denom = float(int(wout.signgs)) * sqrtg * twopi
+        overg = np.where(denom != 0.0, 1.0 / denom, 0.0)
+        phipog_vmec = np.where(sqrtg != 0.0, 1.0 / sqrtg, 0.0)
+        w_theta = np.asarray(trig.cosmui3[:, 0], dtype=float) / float(np.asarray(trig.mscale[0]))
+        wint2 = w_theta[:, None] * np.ones((int(np.asarray(trig.cosnv).shape[0]),), dtype=float)[None, :]
+        wint3 = np.broadcast_to(wint2[None, :, :], sqrtg.shape).copy()
+        if wint3.shape[0] > 0:
+            wint3[0, :, :] = 0.0
+        bsupu = np.asarray(bc.bsupu, dtype=float)
+        bsupv = np.asarray(bc.bsupv, dtype=float)
+        bsubu = np.asarray(bc.bsubu, dtype=float)
+        bsubv = np.asarray(bc.bsubv, dtype=float)
+        _maybe_dump_iter_npz(
+            "VMEC_JAX_DUMP_BCOVAR",
+            iter_idx=iter_idx,
+            stem="bcovar_raw",
+            arrays={
+                "r12": np.asarray(bc.jac.r12, dtype=float),
+                "sqrtg": sqrtg,
+                "tau": np.asarray(bc.jac.tau, dtype=float),
+                "ru12": np.asarray(bc.jac.ru12, dtype=float),
+                "zu12": np.asarray(bc.jac.zu12, dtype=float),
+                "bsupu": bsupu,
+                "bsupv": bsupv,
+                "bsubu": bsubu,
+                "bsubv": bsubv,
+                "b2": (bsupu * bsubu) + (bsupv * bsubv),
+                "bsq": np.asarray(bc.bsq, dtype=float),
+                "overg": overg,
+                "phipog_vmec": phipog_vmec,
+                "wint": wint3,
+                "ns": int(ns),
+                "ntheta3": int(trig.ntheta3),
+                "nzeta": int(trig.cosnv.shape[0]),
+            },
+        )
 
     rcon_force = (rcon_phys - rcon0) * gcon
     zcon_force = (zcon_phys - zcon0) * gcon
