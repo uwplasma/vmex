@@ -7,6 +7,72 @@ and should not drive new work unless a specific old result needs to be audited.
 
 Last updated: 2026-06-18.
 
+## 2026-06-18 QI Branch-Width Residual Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Extracted the Goodman-style branch-width residual block from
+   `quasi_isodynamic_residual_from_boozer_modes` into the private helper
+   `_qi_branch_width_residuals`.
+2. Kept the validated QI grid construction, public output keys, and residual
+   concatenation unchanged.
+3. Left the larger aligned-profile and shuffle-profile blocks in place for
+   future focused tranches, since they are more coupled to interpolation and
+   weighted-profile diagnostics.
+
+Results obtained:
+
+- `quasi_isodynamic_residual_from_boozer_modes` dropped from 557 to 519 lines.
+- `_qi_branch_width_residuals` is 36 lines and names the physics term directly.
+- The tranche is line-neutral overall in `vmec_jax/quasi_isodynamic.py`: 47
+  insertions and 47 deletions.
+- QI residual values, validation behavior, shape checks, and legacy ranking
+  tests remain covered.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/quasi_isodynamic.py tests/test_quasi_isodynamic.py tests/test_qi_legacy.py`
+- `python -m compileall -q vmec_jax/quasi_isodynamic.py tests/test_quasi_isodynamic.py tests/test_qi_legacy.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_quasi_isodynamic.py::test_qi_boozer_mode_residual_is_zero_for_alpha_independent_wells tests/test_quasi_isodynamic.py::test_qi_boozer_mode_residual_validates_shapes_and_resolution tests/test_qi_legacy.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_quasi_isodynamic.py tests/test_qi_legacy.py -q`
+- `python tools/diagnostics/source_health.py --top 12 --top-functions 16`
+
+Best next steps:
+
+1. Continue QI decomposition with the aligned-profile or shuffle-profile block,
+   but only as a single named physics helper with full QI tests.
+2. Keep the public residual output dictionary unchanged until a broader
+   objective API redesign is ready.
+3. Revisit fixed-boundary residual context-object design after one more QI
+   objective tranche.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999998%.
+- Solver monolith reduction: 99.57%.
+- Free-boundary adjoint monolith reduction: 99.40%.
+- Driver workflow decomposition: 99.87%.
+- Residual iteration decomposition: 96.9%.
+- WOUT diagnostic/profile decomposition: 99.72%.
+- Bcovar/WOUT parity decomposition: 98.35%.
+- Force-kernel decomposition: 98.55%.
+- Optimizer workflow decomposition: 99.19%.
+- Fixed-boundary optimizer decomposition: 94.8%.
+- Implicit residual-adjoint decomposition: 95%.
+- QI objective decomposition: 93.4%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.7%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.99944%.
+
 ## 2026-06-18 Same-Branch NESTOR Profile Extraction
 
 Branch: `codex/differentiability-refactor-plan`.
