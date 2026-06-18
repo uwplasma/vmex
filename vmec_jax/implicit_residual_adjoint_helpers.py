@@ -42,6 +42,15 @@ class FullResidualAdjointSolveResult:
     state_update: Any | None = None
 
 
+@dataclass(frozen=True)
+class ActiveResidualTangentSolveResult:
+    """Tangent update and route metadata for an active residual solve."""
+
+    dx: Any
+    route: str
+    info: Any = None
+
+
 def lineax_bicgstab_solve(
     matvec: Callable[[Any], Any],
     b: Any,
@@ -100,6 +109,89 @@ def linear_map_jacobian_columns(
         chunk = jnp.reshape(chunk, (int(output_size), stop - start))
         chunks.append(chunk)
     return jnp.concatenate(chunks, axis=1)
+
+
+def solve_active_residual_tangent_linearized(
+    stationarity_jvp_active: Callable[[Any], Any],
+    stationarity_vjp_active: Callable[[Any], Any],
+    *,
+    stationarity_star_active: Any,
+    x_active_star: Any,
+    rhs: Any,
+    tangent_mode: str,
+    damping: float,
+    cg_tol: float,
+    cg_max_iter: int,
+    jac_chunk_size: Any,
+    cg_solve: Callable[..., Any],
+    bicgstab_solve: Callable[..., tuple[Any, Any]] | None = None,
+    lineax_solve: Callable[..., tuple[Any, bool, Any]] | None = None,
+    jacobian_columns: Callable[..., Any] = linear_map_jacobian_columns,
+) -> ActiveResidualTangentSolveResult:
+    """Solve the active tangent equation used by the residual custom JVP."""
+    tangent_mode = str(tangent_mode).strip().lower()
+    damping_arr = jnp.asarray(float(damping), dtype=jnp.asarray(x_active_star).dtype)
+    active_is_square = tuple(stationarity_star_active.shape) == tuple(x_active_star.shape)
+
+    def stationarity_jvp_active_damped(u_active):
+        return stationarity_jvp_active(u_active) + damping_arr * u_active
+
+    if active_is_square and tangent_mode in ("auto", "lineax") and lineax_solve is not None:
+        dx_lineax, success, stats = lineax_solve(
+            stationarity_jvp_active_damped,
+            rhs,
+            tol=float(cg_tol),
+            max_iter=int(cg_max_iter),
+        )
+        if bool(success):
+            return ActiveResidualTangentSolveResult(dx=dx_lineax, route="lineax", info=stats)
+
+    if active_is_square and tangent_mode in ("direct", "bicgstab") and bicgstab_solve is not None:
+        dx_bicgstab, info = bicgstab_solve(
+            stationarity_jvp_active_damped,
+            rhs,
+            tol=float(cg_tol),
+            atol=0.0,
+            maxiter=int(cg_max_iter),
+        )
+        if info is None:
+            return ActiveResidualTangentSolveResult(dx=dx_bicgstab, route="bicgstab", info=info)
+
+    if tangent_mode == "chunked":
+        chunk_size = default_jac_chunk_size(x_active_star, jac_chunk_size)
+        J_active = jacobian_columns(
+            stationarity_jvp_active,
+            input_size=int(x_active_star.shape[0]),
+            output_size=int(np.prod(np.shape(stationarity_star_active))),
+            dtype=jnp.asarray(x_active_star).dtype,
+            chunk_size=int(chunk_size),
+        )
+        eye = jnp.eye(int(J_active.shape[1]), dtype=J_active.dtype)
+        if active_is_square:
+            dx_active = jnp.linalg.solve(
+                J_active + damping_arr * eye,
+                rhs,
+            )
+        else:
+            dx_active = jnp.linalg.solve(
+                J_active.T @ J_active + damping_arr * eye,
+                J_active.T @ rhs,
+            )
+        return ActiveResidualTangentSolveResult(dx=dx_active, route="dense")
+
+    Hvp_active = make_active_normal_map(
+        stationarity_jvp_active,
+        stationarity_vjp_active,
+        damping=float(damping),
+    )
+    rhs_normal = stationarity_vjp_active(rhs)[0]
+    dx_active = cg_solve(
+        Hvp_active,
+        rhs_normal,
+        tol=float(cg_tol),
+        max_iter=int(cg_max_iter),
+    )
+    return ActiveResidualTangentSolveResult(dx=dx_active, route="cg")
 
 
 def solve_active_residual_adjoint_linearized(
