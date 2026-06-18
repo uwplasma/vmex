@@ -659,6 +659,261 @@ def axisym_reduced_implicit_source_state_jax(
     return solved_state_from_source(solved_vector, source_vector)
 
 
+def _profile_coefficient_key(profile: str) -> str:
+    key = str(profile).strip().lower().replace("-", "_")
+    if key in {"pressure", "p", "pressure_profile"}:
+        return "pressure"
+    if key in {"i", "i_prime", "iprime", "current", "current_profile"}:
+        return "i_prime"
+    if key in {"psi", "psi_prime", "psiprime", "flux", "flux_profile"}:
+        return "psi_prime"
+    raise ValueError("profile must be 'pressure', 'i_prime', or 'psi_prime'")
+
+
+def _profiles_with_profile_coefficients(
+    profile: str,
+    coefficients,
+    *,
+    psi_prime: PsiPrimeProfile,
+    i_prime: IPrimeProfile,
+    pressure: PressureProfile,
+) -> tuple[PsiPrimeProfile, IPrimeProfile, PressureProfile]:
+    key = _profile_coefficient_key(profile)
+    if key == "pressure":
+        return psi_prime, i_prime, PressureProfile(coefficients=coefficients, gamma=pressure.gamma)
+    if key == "i_prime":
+        return psi_prime, IPrimeProfile(coefficients=coefficients), pressure
+    return PsiPrimeProfile(coefficients=coefficients), i_prime, pressure
+
+
+def axisym_reduced_residual_profile_jacobian_jax(
+    vector,
+    profile_coefficients,
+    grid: MirrorGrid,
+    boundary: MirrorBoundary,
+    *,
+    profile: str,
+    psi_prime: PsiPrimeProfile,
+    i_prime: IPrimeProfile,
+    pressure: PressureProfile,
+    source_vector=None,
+    state_ridge: float = 0.0,
+    reference_vector=None,
+    derivative: str = "forward",
+    mu0: float = 4.0e-7 * np.pi,
+):
+    """Return ``dF/dcoeffs`` for one reduced-profile coefficient vector."""
+    _require_jax()
+    vector = jnp.asarray(vector)
+    profile_coefficients = jnp.asarray(profile_coefficients, dtype=vector.dtype)
+    if profile_coefficients.ndim != 1 or profile_coefficients.size < 1:
+        raise ValueError("profile_coefficients must be a nonempty vector")
+    key = str(derivative).strip().lower().replace("-", "_")
+
+    def residual_for_profile(coefficients):
+        active_psi, active_i, active_pressure = _profiles_with_profile_coefficients(
+            profile,
+            coefficients,
+            psi_prime=psi_prime,
+            i_prime=i_prime,
+            pressure=pressure,
+        )
+        return axisym_reduced_residual_jax(
+            vector,
+            grid,
+            boundary,
+            psi_prime=active_psi,
+            i_prime=active_i,
+            pressure=active_pressure,
+            source_vector=source_vector,
+            state_ridge=state_ridge,
+            reference_vector=reference_vector,
+            mu0=mu0,
+        )
+
+    if key in {"forward", "fwd", "jacfwd"}:
+        return jax.jacfwd(residual_for_profile)(profile_coefficients)
+    if key in {"reverse", "rev", "jacrev"}:
+        return jax.jacrev(residual_for_profile)(profile_coefficients)
+    raise ValueError("derivative must be 'forward' or 'reverse'")
+
+
+def axisym_reduced_implicit_profile_sensitivity_jax(
+    vector,
+    profile_coefficients,
+    grid: MirrorGrid,
+    boundary: MirrorBoundary,
+    *,
+    profile: str,
+    psi_prime: PsiPrimeProfile,
+    i_prime: IPrimeProfile,
+    pressure: PressureProfile,
+    source_vector=None,
+    state_ridge: float = 0.0,
+    reference_vector=None,
+    derivative: str = "hessian",
+    parameter_derivative: str = "forward",
+    ridge: float = 0.0,
+    solve_method: str = "dense",
+    cg_tol: float = 1.0e-8,
+    cg_atol: float = 0.0,
+    cg_maxiter: int | None = None,
+    mu0: float = 4.0e-7 * np.pi,
+):
+    """Return ``dx/dcoeffs`` for one profile coefficient vector."""
+    _require_jax()
+    vector = jnp.asarray(vector)
+    profile_coefficients = jnp.asarray(profile_coefficients, dtype=vector.dtype)
+    active_psi, active_i, active_pressure = _profiles_with_profile_coefficients(
+        profile,
+        profile_coefficients,
+        psi_prime=psi_prime,
+        i_prime=i_prime,
+        pressure=pressure,
+    )
+    profile_jacobian = axisym_reduced_residual_profile_jacobian_jax(
+        vector,
+        profile_coefficients,
+        grid,
+        boundary,
+        profile=profile,
+        psi_prime=psi_prime,
+        i_prime=i_prime,
+        pressure=pressure,
+        source_vector=source_vector,
+        state_ridge=state_ridge,
+        reference_vector=reference_vector,
+        derivative=parameter_derivative,
+        mu0=mu0,
+    )
+    columns = []
+    for idx in range(int(profile_coefficients.size)):
+        columns.append(
+            axisym_reduced_residual_linear_solve_jax(
+                vector,
+                -profile_jacobian[:, idx],
+                grid,
+                boundary,
+                psi_prime=active_psi,
+                i_prime=active_i,
+                pressure=active_pressure,
+                source_vector=source_vector,
+                state_ridge=state_ridge,
+                reference_vector=reference_vector,
+                derivative=derivative,
+                ridge=ridge,
+                method=solve_method,
+                cg_tol=cg_tol,
+                cg_atol=cg_atol,
+                cg_maxiter=cg_maxiter,
+                mu0=mu0,
+            )
+        )
+    return jnp.stack(columns, axis=1)
+
+
+def axisym_reduced_implicit_profile_state_jax(
+    solved_vector,
+    profile_coefficients,
+    grid: MirrorGrid,
+    boundary: MirrorBoundary,
+    *,
+    profile: str,
+    psi_prime: PsiPrimeProfile,
+    i_prime: IPrimeProfile,
+    pressure: PressureProfile,
+    source_vector=None,
+    state_ridge: float = 0.0,
+    reference_vector=None,
+    derivative: str = "hessian",
+    ridge: float = 0.0,
+    solve_method: str = "dense",
+    cg_tol: float = 1.0e-8,
+    cg_atol: float = 0.0,
+    cg_maxiter: int | None = None,
+    initial_guess=None,
+    mu0: float = 4.0e-7 * np.pi,
+):
+    """Return a solved reduced state with an implicit VJP for profile coefficients.
+
+    As with ``axisym_reduced_implicit_source_state_jax``, the primal value is a
+    cached converged reduced state.  The reverse pass differentiates a scalar
+    objective with respect to one profile's polynomial coefficients using
+    ``-adjoint.T @ dF/dp_coeffs``.
+    """
+    _require_jax()
+    solved_vector = jnp.asarray(solved_vector)
+    profile_coefficients = jnp.asarray(profile_coefficients, dtype=solved_vector.dtype)
+    if profile_coefficients.ndim != 1 or profile_coefficients.size < 1:
+        raise ValueError("profile_coefficients must be a nonempty vector")
+
+    @jax.custom_vjp
+    def solved_state_from_profile(root, coefficients):
+        del coefficients
+        return root
+
+    def solved_state_from_profile_fwd(root, coefficients):
+        return root, (root, coefficients)
+
+    def solved_state_from_profile_bwd(residual_data, cotangent):
+        root, coefficients = residual_data
+        active_psi, active_i, active_pressure = _profiles_with_profile_coefficients(
+            profile,
+            coefficients,
+            psi_prime=psi_prime,
+            i_prime=i_prime,
+            pressure=pressure,
+        )
+        adjoint = axisym_reduced_implicit_adjoint_jax(
+            root,
+            cotangent,
+            grid,
+            boundary,
+            psi_prime=active_psi,
+            i_prime=active_i,
+            pressure=active_pressure,
+            source_vector=source_vector,
+            state_ridge=state_ridge,
+            reference_vector=reference_vector,
+            derivative=derivative,
+            ridge=ridge,
+            solve_method=solve_method,
+            cg_tol=cg_tol,
+            cg_atol=cg_atol,
+            cg_maxiter=cg_maxiter,
+            initial_guess=initial_guess,
+            mu0=mu0,
+        )
+
+        def residual_for_profile(items):
+            item_psi, item_i, item_pressure = _profiles_with_profile_coefficients(
+                profile,
+                items,
+                psi_prime=psi_prime,
+                i_prime=i_prime,
+                pressure=pressure,
+            )
+            return axisym_reduced_residual_jax(
+                root,
+                grid,
+                boundary,
+                psi_prime=item_psi,
+                i_prime=item_i,
+                pressure=item_pressure,
+                source_vector=source_vector,
+                state_ridge=state_ridge,
+                reference_vector=reference_vector,
+                mu0=mu0,
+            )
+
+        _, pullback = jax.vjp(residual_for_profile, coefficients)
+        profile_bar = -pullback(adjoint)[0]
+        return jnp.zeros_like(root), profile_bar
+
+    solved_state_from_profile.defvjp(solved_state_from_profile_fwd, solved_state_from_profile_bwd)
+    return solved_state_from_profile(solved_vector, profile_coefficients)
+
+
 def axisym_reduced_residual_pressure_jacobian_jax(
     vector,
     pressure_coefficients,
@@ -675,33 +930,22 @@ def axisym_reduced_residual_pressure_jacobian_jax(
     mu0: float = 4.0e-7 * np.pi,
 ):
     """Return ``dF/dp_coeffs`` for the reduced residual."""
-    _require_jax()
-    vector = jnp.asarray(vector)
-    pressure_coefficients = jnp.asarray(pressure_coefficients, dtype=vector.dtype)
-    if pressure_coefficients.ndim != 1 or pressure_coefficients.size < 1:
-        raise ValueError("pressure_coefficients must be a nonempty vector")
-    key = str(derivative).strip().lower().replace("-", "_")
-
-    def residual_for_pressure(coefficients):
-        pressure = PressureProfile(coefficients=coefficients, gamma=float(pressure_gamma))
-        return axisym_reduced_residual_jax(
-            vector,
-            grid,
-            boundary,
-            psi_prime=psi_prime,
-            i_prime=i_prime,
-            pressure=pressure,
-            source_vector=source_vector,
-            state_ridge=state_ridge,
-            reference_vector=reference_vector,
-            mu0=mu0,
-        )
-
-    if key in {"forward", "fwd", "jacfwd"}:
-        return jax.jacfwd(residual_for_pressure)(pressure_coefficients)
-    if key in {"reverse", "rev", "jacrev"}:
-        return jax.jacrev(residual_for_pressure)(pressure_coefficients)
-    raise ValueError("derivative must be 'forward' or 'reverse'")
+    pressure = PressureProfile(coefficients=jnp.asarray(pressure_coefficients), gamma=float(pressure_gamma))
+    return axisym_reduced_residual_profile_jacobian_jax(
+        vector,
+        pressure_coefficients,
+        grid,
+        boundary,
+        profile="pressure",
+        psi_prime=psi_prime,
+        i_prime=i_prime,
+        pressure=pressure,
+        source_vector=source_vector,
+        state_ridge=state_ridge,
+        reference_vector=reference_vector,
+        derivative=derivative,
+        mu0=mu0,
+    )
 
 
 def axisym_reduced_implicit_pressure_sensitivity_jax(
@@ -726,48 +970,28 @@ def axisym_reduced_implicit_pressure_sensitivity_jax(
     mu0: float = 4.0e-7 * np.pi,
 ):
     """Return ``dx/dp_coeffs`` for pressure-profile coefficients."""
-    _require_jax()
-    vector = jnp.asarray(vector)
-    pressure_coefficients = jnp.asarray(pressure_coefficients, dtype=vector.dtype)
-    pressure = PressureProfile(coefficients=pressure_coefficients, gamma=float(pressure_gamma))
-    pressure_jacobian = axisym_reduced_residual_pressure_jacobian_jax(
+    pressure = PressureProfile(coefficients=jnp.asarray(pressure_coefficients), gamma=float(pressure_gamma))
+    return axisym_reduced_implicit_profile_sensitivity_jax(
         vector,
         pressure_coefficients,
         grid,
         boundary,
+        profile="pressure",
         psi_prime=psi_prime,
         i_prime=i_prime,
-        pressure_gamma=pressure_gamma,
+        pressure=pressure,
         source_vector=source_vector,
         state_ridge=state_ridge,
         reference_vector=reference_vector,
-        derivative=parameter_derivative,
+        derivative=derivative,
+        parameter_derivative=parameter_derivative,
+        ridge=ridge,
+        solve_method=solve_method,
+        cg_tol=cg_tol,
+        cg_atol=cg_atol,
+        cg_maxiter=cg_maxiter,
         mu0=mu0,
     )
-    columns = []
-    for idx in range(int(pressure_coefficients.size)):
-        columns.append(
-            axisym_reduced_residual_linear_solve_jax(
-                vector,
-                -pressure_jacobian[:, idx],
-                grid,
-                boundary,
-                psi_prime=psi_prime,
-                i_prime=i_prime,
-                pressure=pressure,
-                source_vector=source_vector,
-                state_ridge=state_ridge,
-                reference_vector=reference_vector,
-                derivative=derivative,
-                ridge=ridge,
-                method=solve_method,
-                cg_tol=cg_tol,
-                cg_atol=cg_atol,
-                cg_maxiter=cg_maxiter,
-                mu0=mu0,
-            )
-        )
-    return jnp.stack(columns, axis=1)
 
 
 def axisym_reduced_implicit_pressure_state_jax(
@@ -791,72 +1015,29 @@ def axisym_reduced_implicit_pressure_state_jax(
     initial_guess=None,
     mu0: float = 4.0e-7 * np.pi,
 ):
-    """Return a solved reduced state with an implicit VJP for pressure coefficients.
-
-    As with ``axisym_reduced_implicit_source_state_jax``, the primal value is a
-    cached converged reduced state.  The reverse pass differentiates a scalar
-    objective with respect to pressure polynomial coefficients using
-    ``-adjoint.T @ dF/dp_coeffs``.
-    """
-    _require_jax()
-    solved_vector = jnp.asarray(solved_vector)
-    pressure_coefficients = jnp.asarray(pressure_coefficients, dtype=solved_vector.dtype)
-    if pressure_coefficients.ndim != 1 or pressure_coefficients.size < 1:
-        raise ValueError("pressure_coefficients must be a nonempty vector")
-
-    @jax.custom_vjp
-    def solved_state_from_pressure(root, coefficients):
-        del coefficients
-        return root
-
-    def solved_state_from_pressure_fwd(root, coefficients):
-        return root, (root, coefficients)
-
-    def solved_state_from_pressure_bwd(residual_data, cotangent):
-        root, coefficients = residual_data
-        pressure = PressureProfile(coefficients=coefficients, gamma=float(pressure_gamma))
-        adjoint = axisym_reduced_implicit_adjoint_jax(
-            root,
-            cotangent,
-            grid,
-            boundary,
-            psi_prime=psi_prime,
-            i_prime=i_prime,
-            pressure=pressure,
-            source_vector=source_vector,
-            state_ridge=state_ridge,
-            reference_vector=reference_vector,
-            derivative=derivative,
-            ridge=ridge,
-            solve_method=solve_method,
-            cg_tol=cg_tol,
-            cg_atol=cg_atol,
-            cg_maxiter=cg_maxiter,
-            initial_guess=initial_guess,
-            mu0=mu0,
-        )
-
-        def residual_for_pressure(items):
-            pressure_for_items = PressureProfile(coefficients=items, gamma=float(pressure_gamma))
-            return axisym_reduced_residual_jax(
-                root,
-                grid,
-                boundary,
-                psi_prime=psi_prime,
-                i_prime=i_prime,
-                pressure=pressure_for_items,
-                source_vector=source_vector,
-                state_ridge=state_ridge,
-                reference_vector=reference_vector,
-                mu0=mu0,
-            )
-
-        _, pullback = jax.vjp(residual_for_pressure, coefficients)
-        pressure_bar = -pullback(adjoint)[0]
-        return jnp.zeros_like(root), pressure_bar
-
-    solved_state_from_pressure.defvjp(solved_state_from_pressure_fwd, solved_state_from_pressure_bwd)
-    return solved_state_from_pressure(solved_vector, pressure_coefficients)
+    """Return a solved reduced state with an implicit VJP for pressure coefficients."""
+    pressure = PressureProfile(coefficients=jnp.asarray(pressure_coefficients), gamma=float(pressure_gamma))
+    return axisym_reduced_implicit_profile_state_jax(
+        solved_vector,
+        pressure_coefficients,
+        grid,
+        boundary,
+        profile="pressure",
+        psi_prime=psi_prime,
+        i_prime=i_prime,
+        pressure=pressure,
+        source_vector=source_vector,
+        state_ridge=state_ridge,
+        reference_vector=reference_vector,
+        derivative=derivative,
+        ridge=ridge,
+        solve_method=solve_method,
+        cg_tol=cg_tol,
+        cg_atol=cg_atol,
+        cg_maxiter=cg_maxiter,
+        initial_guess=initial_guess,
+        mu0=mu0,
+    )
 
 
 def pack_reduced_state_3d(state: MirrorState3D, grid: MirrorGrid, boundary: MirrorBoundary) -> np.ndarray:

@@ -37,6 +37,11 @@ only:
 - ``axisym_reduced_implicit_pressure_state_jax`` returns a cached converged
   reduced state with a custom reverse-mode derivative with respect to pressure
   coefficients.
+- ``axisym_reduced_residual_profile_jacobian_jax``,
+  ``axisym_reduced_implicit_profile_sensitivity_jax``, and
+  ``axisym_reduced_implicit_profile_state_jax`` expose the same pattern for
+  one selected profile coefficient vector: ``pressure``, ``i_prime``, or
+  ``psi_prime``.
 
 These functions are intended as method gates for implicit differentiation:
 
@@ -58,11 +63,11 @@ matrix-free Hessian-vector path, and explicit forward/adjoint implicit wrappers.
 The test suite also validates the custom reverse-mode source wrapper against
 the explicit adjoint and a separately solved perturbed root, then applies the
 forward wrapper to a tiny converged fixed-boundary cylinder with a local state
-ridge about the solved state. A second gate validates pressure-coefficient
-Jacobians, forward sensitivities, and custom VJPs against a separately solved
-perturbed-pressure root. These are the first differentiable solved-state
-contracts, but only for reduced axisymmetric source and pressure-coefficient
-perturbations.
+ridge about the solved state. Additional gates validate pressure- and
+current-profile coefficient Jacobians, forward sensitivities, and custom VJPs
+against separately solved perturbed roots. These are the first differentiable
+solved-state contracts, but only for reduced axisymmetric source and profile
+coefficient perturbations.
 
 The benchmark example ``examples/mirror_implicit_solve_benchmark.py`` compares
 dense and matrix-free wrapper calls on a small ``ns``/``nxi`` ladder and writes
@@ -77,8 +82,8 @@ Next Steps
    solver stack.
 3. Extend the benchmark ladder after the physical residual conditioning is
    improved enough for larger low-ridge systems.
-4. Extend the custom implicit wrapper from pressure coefficients to boundary
-   coefficients and current/flux profile coefficients.
+4. Extend the custom implicit wrapper from profile coefficients to boundary
+   coefficients.
 5. Promote the differentiable API only after those additional
    physical-parameter derivatives agree with finite differences and the
    existing fixed-boundary solver diagnostics.

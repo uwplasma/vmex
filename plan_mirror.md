@@ -17230,3 +17230,115 @@ Results:
 No user input is needed.
 
 ---
+## 138. Generic Profile-Coefficient Differentiability Gate
+
+### Steps taken
+
+- Refactored the pressure-coefficient differentiability implementation into a
+  generic profile-coefficient path.
+- Added:
+  - `axisym_reduced_residual_profile_jacobian_jax`;
+  - `axisym_reduced_implicit_profile_sensitivity_jax`;
+  - `axisym_reduced_implicit_profile_state_jax`.
+- The generic path accepts one selected profile coefficient vector:
+  - `pressure`;
+  - `i_prime`;
+  - `psi_prime`.
+- Kept the pressure-specific public functions as thin wrappers around the
+  generic implementation so existing callers remain stable.
+- Exported the generic profile functions through `vmec_jax.mirror.api` and
+  `vmec_jax.mirror`.
+- Added a current-profile coefficient regression test using the generic API.
+- The current-profile test checks:
+  - forward and reverse `dF/dI'_coeffs` Jacobians agree;
+  - `jax.grad` through the custom profile VJP matches `-F_p.T @ adjoint`;
+  - the custom VJP directional derivative matches the forward sensitivity
+    contraction;
+  - dense and matrix-free current-profile sensitivities agree;
+  - the same directional derivative matches a separately solved perturbed-root
+    finite difference.
+- Updated `docs/mirror/differentiability.rst` to document the generic profile
+  API and current-profile coverage.
+
+### Results obtained
+
+- The profile-coefficient differentiability path is now shared instead of
+  duplicated for each profile family.
+- Pressure wrappers still pass their focused regression after the refactor.
+- Current-profile coefficients now have the same dense, matrix-free, forward,
+  and reverse validation pattern as pressure coefficients.
+- Full fixed-boundary axisymmetric mirror tests pass with the added generic
+  profile gate: `20 passed`.
+
+### How it was tested
+
+Commands run:
+
+```bash
+python -m ruff format --check vmec_jax/mirror/solvers/fixed_boundary/reduced.py \
+  vmec_jax/mirror/api.py vmec_jax/mirror/__init__.py \
+  tests/mirror/test_mirror_fixed_boundary_axisym.py
+python -m ruff check vmec_jax/mirror/solvers/fixed_boundary/reduced.py \
+  vmec_jax/mirror/api.py vmec_jax/mirror/__init__.py \
+  tests/mirror/test_mirror_fixed_boundary_axisym.py
+JAX_ENABLE_X64=1 pytest \
+  tests/mirror/test_mirror_fixed_boundary_axisym.py::test_reduced_pressure_custom_vjp_matches_adjoint_and_perturbed_root \
+  tests/mirror/test_mirror_fixed_boundary_axisym.py::test_reduced_current_profile_custom_vjp_matches_adjoint_and_perturbed_root -q
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_fixed_boundary_axisym.py -q
+python -m sphinx -W -b html docs docs/_build/html
+git diff --check
+```
+
+Results:
+
+- Ruff Python format check passed.
+- Ruff lint passed.
+- Focused pressure/current profile differentiability tests: `2 passed`.
+- Full fixed-boundary axisymmetric mirror test file: `20 passed`.
+- Sphinx docs build passed with warnings treated as errors.
+- Whitespace check passed.
+
+### File structure and best-practice notes
+
+- The reusable profile machinery stays in
+  `vmec_jax/mirror/solvers/fixed_boundary/reduced.py`, where it can share the
+  existing residual, adjoint, and dense/matrix-free linear solve helpers.
+- Pressure-specific wrappers are retained for discoverability while avoiding a
+  second implementation path.
+- The generic public API keeps current, flux, and pressure coefficient
+  derivatives under one conceptual entry point.
+- No generated files or large artifacts were added.
+
+### Best next steps
+
+1. Commit and push M138.
+2. Add a small `psi_prime` profile derivative assertion or include it in the
+   current-profile test matrix if runtime remains acceptable.
+3. Decide whether boundary-parameter implicit differentiation should use a
+   similar explicit-coefficient wrapper or a pytree boundary object.
+4. Resume final free-boundary/ESSOS beta-scan cleanup after the remaining
+   differentiability profile gate is committed.
+
+### Completion percentages after M138
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `90%`.
+- Fixed-boundary axisymmetric solve: `90%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `89%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `92%`.
+- I/O schema and docs: `99%`.
+- Differentiable solved-state API: `86%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `87%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `90%`.
+- PR merge readiness overall: `97%`.
+
+### User input needed
+
+No user input is needed.
+
+---
