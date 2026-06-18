@@ -20258,3 +20258,86 @@ Results:
 ### User input needed
 
 No user input is needed.
+
+---
+## 165. Draft PR Description Synchronization After Reduced Vector LS Benchmark
+
+### Steps taken
+
+- Updated draft PR #21 body after M162-M164.
+- Changed the detailed implementation-log pointer from section 160 to
+  section 164.
+- Added PR-body language for the reduced residual-vector
+  finite-difference/JAX least-squares helpers and benchmark example.
+- Updated latest validation evidence:
+  - `108 passed in 3.53s` for mirror free-boundary tests;
+  - `23 passed in 98.10s` for full mirror example tests;
+  - retained the prior combined coverage estimate `95.09%` versus the `95.00%`
+    coverage gate;
+  - plotted reduced vector LS backend benchmark evidence under
+    `results/mirror/free_boundary_vector_ls_benchmark_m164_plots/`.
+- Kept the PR in draft state.
+- Verified the remote PR body after editing.
+
+### Results obtained
+
+- Remote PR body verification confirmed:
+  - PR number `21`;
+  - draft state `true`;
+  - head SHA `bc11a9cfa0886f5cd565aad9465356cd978cfad6`;
+  - body contains `section 164`;
+  - body contains reduced residual-vector finite-difference/JAX LS wording;
+  - body contains `108 passed in 3.53s`;
+  - body contains `23 passed in 98.10s`;
+  - body contains `free_boundary_vector_ls_benchmark_m164_plots`.
+
+### How it was tested
+
+Commands run:
+
+```bash
+gh pr view 21 --json body -q .body > /tmp/vmec_mirror_pr_body_current.md
+gh pr edit 21 --body-file /tmp/vmec_mirror_pr_body_current.md
+gh pr view 21 --json number,isDraft,headRefOid,body,url | python -c '...'
+```
+
+Results:
+
+- PR edit succeeded.
+- PR body verification passed.
+- PR remained draft.
+
+### File structure and best-practice notes
+
+- No source files changed in this administrative tranche.
+- The PR body remains a concise review index; detailed evidence stays in
+  `plan_mirror.md`.
+
+### Best next steps
+
+1. Commit and push M165 plan log.
+2. Check CI once completed jobs are available.
+3. Use M164 benchmark evidence to document the default derivative route for
+   reduced differentiable free-boundary prototypes.
+
+### Completion percentages after M165
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `93%`.
+- Fixed-boundary axisymmetric solve: `91%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `89%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `93%`.
+- I/O schema and docs: `99%`.
+- Differentiable solved-state API: `93%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `99%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `97%`.
+- PR merge readiness overall: `98%`.
+
+### User input needed
+
+No user input is needed.
