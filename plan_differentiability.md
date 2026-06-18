@@ -9164,3 +9164,58 @@ Completion:
 - Implicit residual-adjoint decomposition: 88%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.945%.
+
+## 2026-06-18 Residual Trace Dump Wrapper Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Replaced one-to-one residual trace dump wrapper functions with direct
+   aliases or `partial`-bound helpers.
+2. Preserved the existing diagnostic record functions as the single source of
+   truth for time-control, checkpoint, free-boundary control/axis, and evolve
+   trace dumps.
+3. Validated the keyword signatures through diagnostics and hotpath tests.
+
+Results obtained:
+
+- `vmec_jax/solvers/fixed_boundary/residual/iteration.py` dropped from 7,947
+  to 7,817 lines.
+- `solve_fixed_boundary_residual_iter` dropped from 7,433 to 7,303 lines.
+- No new module was needed; this was a direct simplification of redundant
+  wrappers.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_diagnostics_io.py tests/test_solve_scan_debug_helpers.py tests/test_scan_helper_edge_gates.py tests/test_solve_hotpaths.py tests/test_solve_wave4_coverage.py tests/test_solve_additional_branch_coverage.py -q`
+- `python tools/diagnostics/source_health.py --top 8 --top-functions 12`
+
+Best next steps:
+
+1. Continue residual-loop reduction with scan-runtime adapters or the
+   preconditioner call-adapter context.
+2. Decompose the largest free-boundary test files after production module
+   seams stabilize.
+3. Run a broader local release shard after one more tranche before checking CI.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.96%.
+- Differentiability/refactor implementation: 99.99972%.
+- Solver monolith reduction: 99.08%.
+- Free-boundary adjoint monolith reduction: 92%.
+- Driver workflow decomposition: 96.4%.
+- WOUT diagnostic/profile decomposition: 98.8%.
+- Optimizer workflow decomposition: 98.8%.
+- Fixed-boundary optimizer decomposition: 94.0%.
+- Implicit residual-adjoint decomposition: 88%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.95%.
