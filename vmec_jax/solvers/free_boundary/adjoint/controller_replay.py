@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from vmec_jax._compat import jax, jnp
-from vmec_jax.free_boundary_adjoint_controller import (
+from vmec_jax.solvers.free_boundary.adjoint.controller import (
     jax_visible_accepted_nonlinear_controller_jax,
     jax_visible_accepted_only_nonlinear_controller_jax,
     jax_visible_segmented_accepted_nonlinear_controller_jax,

@@ -17,7 +17,7 @@ import numpy as np
 
 from vmec_jax._compat import jax, jnp, tree_util
 
-from .free_boundary_adjoint_controller import (
+from .solvers.free_boundary.adjoint.controller import (
     jax_visible_accepted_only_nonlinear_controller_jax,
     jax_visible_accepted_nonlinear_controller_directional_check_jax,
     jax_visible_accepted_nonlinear_controller_jax,
