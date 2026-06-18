@@ -15,9 +15,9 @@ if str(ROOT) not in sys.path:
 
 from vmec_jax.mirror import (
     MirrorCircularCoils,
+    initial_mirror_boundary_from_circular_coil_scan,
     make_mirror_free_boundary_circular_coil_scan,
     make_mirror_grid,
-    mirror_boundary_from_on_axis_bz,
     sample_mirror_axis_external_field,
     sample_mirror_boundary_external_field,
     two_coil_on_axis_bz,
@@ -146,24 +146,26 @@ def run_case(
         current_a=current,
         n_segments=n_segments,
     )
+    scan = make_mirror_free_boundary_circular_coil_scan(
+        coils,
+        betas,
+        pressure_scale_for_one_percent=pressure_scale_one_percent,
+    )
     analytic_bz = two_coil_on_axis_bz(
         grid.z,
         coil_radius_m=coil_radius,
         separation_m=separation,
         current_a=current,
     )
-    midplane_bz = float(two_coil_on_axis_bz(0.0, coil_radius_m=coil_radius, separation_m=separation, current_a=current))
-    psi_value = 0.5 * midplane_bz * float(midplane_radius) ** 2
-    boundary = mirror_boundary_from_on_axis_bz(psi_value, grid.z, analytic_bz)
+    boundary = initial_mirror_boundary_from_circular_coil_scan(
+        grid,
+        scan,
+        midplane_radius=midplane_radius,
+    )
     axis_sample = sample_mirror_axis_external_field(grid, coils)
     boundary_sample = sample_mirror_boundary_external_field(grid, boundary, coils)
     direct_bz = np.asarray(axis_sample.bz, dtype=float)
     relative_error = np.max(np.abs(direct_bz - analytic_bz) / np.maximum(np.abs(analytic_bz), np.finfo(float).tiny))
-    scan = make_mirror_free_boundary_circular_coil_scan(
-        coils,
-        betas,
-        pressure_scale_for_one_percent=pressure_scale_one_percent,
-    )
     setup_path = write_mirror_free_boundary_circular_coil_scan(
         outdir / "free_boundary_circular_coils_setup.json",
         scan,

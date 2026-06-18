@@ -58,8 +58,9 @@ The root-level ``examples/mirror_free_boundary_circular_coils.py`` script is a
 free-boundary planning fixture. It builds ESSOS-compatible circular-loop direct
 coil parameters, samples the external field on the mirror axis and side
 boundary, writes a reusable JSON setup for the default 1%, 3%, and 10%
-beta-scan cases, and plots the coils, boundary, on-axis field comparison, and
-boundary ``|B|``. It does not solve for a free-boundary LCFS yet.
+beta-scan cases, builds the initial fixed-boundary flux-tube boundary from the
+sampled on-axis field, and plots the coils, boundary, on-axis field comparison,
+and boundary ``|B|``. It does not solve for a free-boundary LCFS yet.
 
 The root-level ``examples/mirror_fixed_boundary_solve_diagnostic.py`` script
 runs an actual L-BFGS fixed-boundary relaxation from a perturbed interior state.

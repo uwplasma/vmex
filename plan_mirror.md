@@ -7239,3 +7239,136 @@ Result: all checks passed.
 ### User input needed
 
 No user input is needed.
+
+---
+
+## 65. 2026-06-17 M12c setup-to-fixed-boundary initializer
+
+This lane factored the circular-coil setup-to-boundary step out of the example
+and into tested library helpers.  A scan setup can now produce the initial
+fixed-boundary flux-tube surface from sampled on-axis external field data.
+
+### Steps taken
+
+- Added `mirror_boundary_from_external_axis_field`.
+- Added `initial_mirror_boundary_from_circular_coil_scan`.
+- Exported both helpers through `vmec_jax.mirror`.
+- Refactored `examples/mirror_free_boundary_circular_coils.py` so it builds
+  its initial boundary through the scan setup helper instead of duplicating the
+  flux-tube calculation inline.
+- Added a test that compares the scan initializer against the analytic
+  two-coil flux-tube boundary.
+- Updated the example README and mirror overview docs.
+
+### Results obtained
+
+- The setup JSON is now enough to reconstruct the circular-coil scan and build
+  the fixed-boundary initial surface.
+- The initializer reproduces the analytic two-coil flux-tube boundary to test
+  tolerance on the sampled mirror grid.
+- The example still writes the same three plots and metrics, now through the
+  shared initializer path.
+
+Generated example artifacts:
+
+- `results/mirror/m12c_setup_to_fixed_boundary_initializer/free_boundary_circular_coils_metrics.json`.
+- `results/mirror/m12c_setup_to_fixed_boundary_initializer/free_boundary_circular_coils_setup.json`.
+- `results/mirror/m12c_setup_to_fixed_boundary_initializer/figures/free_boundary_circular_coils_axis_bz.png`.
+- `results/mirror/m12c_setup_to_fixed_boundary_initializer/figures/free_boundary_circular_coils_boundary_bmag.png`.
+- `results/mirror/m12c_setup_to_fixed_boundary_initializer/figures/free_boundary_circular_coils_geometry.png`.
+
+Example metrics:
+
+| quantity | value |
+| --- | ---: |
+| on-axis `B_z` relative Linf error | `9.098256159668e-16` |
+| minimum boundary `|B|` | `1.053675512271e-01` |
+| maximum boundary `|B|` | `1.879005770409e+00` |
+
+### How it was tested
+
+Focused tests:
+
+```bash
+JAX_ENABLE_X64=1 pytest \
+  tests/mirror/test_mirror_free_boundary.py \
+  tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_example_runs_without_plots \
+  -q
+```
+
+Result: `7 passed in 4.00s`.
+
+Example with plots:
+
+```bash
+JAX_ENABLE_X64=1 python examples/mirror_free_boundary_circular_coils.py \
+  --outdir results/mirror/m12c_setup_to_fixed_boundary_initializer \
+  --ntheta 24 \
+  --nxi 33 \
+  --n-segments 256
+```
+
+Result: setup JSON, metrics JSON, and three PNG figures written.
+
+Lint/format/docs/whitespace:
+
+```bash
+python -m ruff format \
+  vmec_jax/mirror/free_boundary.py \
+  tests/mirror/test_mirror_free_boundary.py \
+  examples/mirror_free_boundary_circular_coils.py \
+  tests/mirror/test_mirror_examples.py \
+  vmec_jax/mirror/api.py \
+  vmec_jax/mirror/__init__.py
+python -m ruff check \
+  vmec_jax/mirror/free_boundary.py \
+  tests/mirror/test_mirror_free_boundary.py \
+  examples/mirror_free_boundary_circular_coils.py \
+  tests/mirror/test_mirror_examples.py \
+  vmec_jax/mirror/api.py \
+  vmec_jax/mirror/__init__.py
+python -m sphinx -W -j auto -b html docs docs/_build/html
+git diff --check
+```
+
+Result: all checks passed.
+
+### File structure and best-practice notes
+
+- The initializer lives with other circular-coil bridge helpers in
+  `vmec_jax/mirror/free_boundary.py`.
+- The helper accepts a generic axial `B_z` array, so later ESSOS/mgrid fields
+  can reuse the same flux-tube initialization.
+- The root example remains a planning/diagnostic fixture and still does not
+  claim a free-boundary LCFS solve.
+
+### Best next steps
+
+1. Commit and push M12c.
+2. Add a controlled beta-case fixed-boundary baseline driver:
+   - load scan setup JSON;
+   - build the initial boundary;
+   - run existing fixed-boundary solves for each beta case at low resolution;
+   - plot residual history, cross sections, boundary `|B|`, and beta profiles.
+3. Use that baseline to define the free-boundary LCFS update target.
+
+### Completion percentages after M12c
+
+- Geometry/grids/bases: `90%`.
+- Field/energy/residual kernels: `84%`.
+- Fixed-boundary axisymmetric solve: `88%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `84%`.
+- I/O schema and docs: `88%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `25%`.
+- Stellarator-mirror hybrid lane: `10%`.
+- ESSOS circular-coil mirror beta scan: `15%`.
+- PR merge readiness overall: `84%`.
+
+### User input needed
+
+No user input is needed.

@@ -7,10 +7,12 @@ from vmec_jax._compat import enable_x64
 from vmec_jax.mirror import (
     MirrorBoundary,
     MirrorCircularCoils,
+    initial_mirror_boundary_from_circular_coil_scan,
     load_mirror_free_boundary_circular_coil_scan,
     make_mirror_free_boundary_beta_cases,
     make_mirror_free_boundary_circular_coil_scan,
     make_mirror_grid,
+    mirror_boundary_from_on_axis_bz,
     mirror_circular_coils_to_direct_params,
     sample_mirror_axis_external_field,
     sample_mirror_boundary_external_field,
@@ -129,3 +131,35 @@ def test_mirror_free_boundary_circular_coil_scan_json_roundtrip(tmp_path):
     assert loaded.coils.regularization_epsilon == pytest.approx(1.0e-5)
     assert [case.beta_percent for case in loaded.beta_cases] == [1.0, 3.0, 10.0]
     assert [case.pressure_scale for case in loaded.beta_cases] == [4.0, 12.0, 40.0]
+
+
+def test_initial_mirror_boundary_from_circular_coil_scan_matches_analytic_flux_tube():
+    enable_x64(True)
+    coil_radius = 0.35
+    separation = 1.2
+    current = 1.0e6
+    midplane_radius = 0.25
+    grid = make_mirror_grid(ns=5, ntheta=1, nxi=17, z_min=-0.6, z_max=0.6)
+    coils = MirrorCircularCoils.symmetric_pair(
+        coil_radius_m=coil_radius,
+        separation_m=separation,
+        current_a=current,
+        n_segments=256,
+    )
+    scan = make_mirror_free_boundary_circular_coil_scan(coils)
+
+    boundary = initial_mirror_boundary_from_circular_coil_scan(
+        grid,
+        scan,
+        midplane_radius=midplane_radius,
+    )
+    analytic_bz = two_coil_on_axis_bz(
+        grid.z,
+        coil_radius_m=coil_radius,
+        separation_m=separation,
+        current_a=current,
+    )
+    midplane_bz = float(two_coil_on_axis_bz(0.0, coil_radius_m=coil_radius, separation_m=separation, current_a=current))
+    expected = mirror_boundary_from_on_axis_bz(0.5 * midplane_bz * midplane_radius**2, grid.z, analytic_bz)
+
+    np.testing.assert_allclose(boundary.radius_on_grid(grid), expected.radius_on_grid(grid), rtol=1.0e-12)

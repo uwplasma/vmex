@@ -38,7 +38,8 @@ without coupling it to toroidal VMEC assumptions:
   runnable axisymmetric/nonaxisymmetric examples;
 - a first free-boundary mirror bridge with ESSOS-compatible circular-loop coil
   parameters, direct-coil external-field sampling on the mirror axis/boundary,
-  reusable JSON setup export, and explicit beta-scan case metadata for the
+  reusable JSON setup export, initial fixed-boundary flux-tube construction
+  from sampled on-axis fields, and explicit beta-scan case metadata for the
   planned 1%, 3%, and 10% circular coil studies;
 - a repo-root ``examples/mirror_two_coil_axisym.py`` analytic benchmark that
   builds a fixed boundary from the closed-form on-axis field of two circular

@@ -19,6 +19,7 @@ from vmec_jax.external_fields import CoilFieldParams, sample_external_field_cyli
 
 from .core.boundary import MirrorBoundary
 from .core.grids import MirrorGrid
+from .validation.coils import mirror_boundary_from_on_axis_bz
 
 
 @dataclass(frozen=True)
@@ -337,3 +338,44 @@ def load_mirror_free_boundary_circular_coil_scan(path: str | Path) -> MirrorFree
     """Load a circular-coil beta-scan setup from JSON."""
 
     return MirrorFreeBoundaryCircularCoilScan.from_dict(json.loads(Path(path).read_text()))
+
+
+def mirror_boundary_from_external_axis_field(
+    grid: MirrorGrid,
+    axis_bz: Any,
+    *,
+    midplane_radius: float,
+    radius_floor: float = 1.0e-4,
+) -> MirrorBoundary:
+    """Build an initial fixed boundary from sampled external on-axis ``Bz``."""
+
+    z = np.asarray(grid.z, dtype=float)
+    bz = np.asarray(axis_bz, dtype=float)
+    if bz.shape != z.shape:
+        raise ValueError(f"axis_bz must have shape {z.shape}, got {bz.shape}")
+    radius = float(midplane_radius)
+    if radius <= 0.0:
+        raise ValueError("midplane_radius must be positive")
+    midplane_bmag = float(np.interp(0.0, z, np.abs(bz)))
+    if midplane_bmag <= 0.0:
+        raise ValueError("midplane external field must be nonzero")
+    psi_value = 0.5 * midplane_bmag * radius**2
+    return mirror_boundary_from_on_axis_bz(psi_value, z, bz, radius_floor=radius_floor)
+
+
+def initial_mirror_boundary_from_circular_coil_scan(
+    grid: MirrorGrid,
+    scan: MirrorFreeBoundaryCircularCoilScan,
+    *,
+    midplane_radius: float,
+    radius_floor: float = 1.0e-4,
+) -> MirrorBoundary:
+    """Build the fixed-boundary baseline from a circular-coil scan setup."""
+
+    axis_sample = sample_mirror_axis_external_field(grid, scan.coils)
+    return mirror_boundary_from_external_axis_field(
+        grid,
+        axis_sample.bz,
+        midplane_radius=midplane_radius,
+        radius_floor=radius_floor,
+    )

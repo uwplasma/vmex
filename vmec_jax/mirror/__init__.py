@@ -48,8 +48,10 @@ from .api import (
     wham_on_axis_mirror_ratio,
     wham_reference_field,
     wham_vacuum_field_rz,
+    initial_mirror_boundary_from_circular_coil_scan,
     write_mirror_free_boundary_circular_coil_scan,
     write_mirror_output,
+    mirror_boundary_from_external_axis_field,
 )
 
 __all__ = [
@@ -100,6 +102,8 @@ __all__ = [
     "wham_on_axis_mirror_ratio",
     "wham_reference_field",
     "wham_vacuum_field_rz",
+    "initial_mirror_boundary_from_circular_coil_scan",
     "write_mirror_free_boundary_circular_coil_scan",
     "write_mirror_output",
+    "mirror_boundary_from_external_axis_field",
 ]
