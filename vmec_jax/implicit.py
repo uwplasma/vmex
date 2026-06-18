@@ -45,6 +45,7 @@ from .implicit_residual_adjoint_helpers import (
     lineax_bicgstab_solve as _lineax_bicgstab_solve_impl,
     linear_map_jacobian_columns as _linear_map_jacobian_columns_impl,
     solve_active_residual_adjoint_linearized as _solve_active_residual_adjoint_linearized,
+    solve_full_residual_adjoint_linearized as _solve_full_residual_adjoint_linearized,
 )
 
 try:
@@ -1761,25 +1762,25 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
         residual_star, residual_jvp = jax.linearize(stationarity_fun, st_star)
         residual_vjp = jax.linear_transpose(residual_jvp, st_star)
         _vmec_backward_profile_log("full_linearize_done", linearize_start, residual_size=int(np.prod(np.shape(residual_star))))
-        validate_full_adjoint_shapes(residual_star, b)
-        Hvp = make_full_normal_map(
+        full_adjoint_result = _solve_full_residual_adjoint_linearized(
             residual_jvp,
             residual_vjp,
+            residual_star=residual_star,
+            b=b,
+            st_star=st_star,
+            damping=float(implicit.damping),
+            cg_tol=float(implicit.cg_tol),
+            cg_max_iter=int(implicit.cg_max_iter),
+            cg_solve=_cg_solve,
             unpack_state=unpack_state,
             pack_state=pack_state,
             project_state=_project_state,
-            layout=st_star.layout,
-            damping=float(implicit.damping),
+            make_full_normal_map_func=make_full_normal_map,
+            validate_full_shapes=validate_full_adjoint_shapes,
+            profile_log=_vmec_backward_profile_log,
+            time_module=time,
         )
-
-        cg_start = time.perf_counter()
-        u = _cg_solve(Hvp, b, tol=float(implicit.cg_tol), max_iter=int(implicit.cg_max_iter))
-        _vmec_backward_profile_log("full_cg_done", cg_start)
-        u_state = _project_state(unpack_state(u, st_star.layout))
-        jvp_start = time.perf_counter()
-        lam = residual_jvp(u_state)
-        _vmec_backward_profile_log("full_jvp_done", jvp_start)
-        result = _boundary_param_vjp_full(lam)
+        result = _boundary_param_vjp_full(full_adjoint_result.lam)
         _vmec_backward_profile_log("bwd_done_full", bwd_start)
         return result
 

@@ -221,3 +221,48 @@ def test_active_residual_adjoint_falls_back_to_cg_after_failed_square_solvers():
 
     assert result.route == "cg"
     np.testing.assert_allclose(np.asarray(result.lam), [-1.0, 2.0])
+
+
+def test_full_residual_adjoint_routes_matrix_free_cg_and_jvp():
+    from vmec_jax._compat import jnp
+    from vmec_jax.implicit_residual_adjoint_helpers import solve_full_residual_adjoint_linearized
+
+    calls = {}
+    st_star = SimpleNamespace(layout="layout-token")
+    b = jnp.asarray([1.0, 2.0, 3.0])
+    residual_star = jnp.asarray([0.1, 0.2, 0.3])
+
+    def fake_make_full_normal_map(residual_jvp, residual_vjp, *, unpack_state, pack_state, project_state, layout, damping):
+        del residual_jvp, residual_vjp, unpack_state, pack_state, project_state
+        calls["normal_args"] = (layout, damping)
+        return lambda x: 2.0 * x
+
+    def fake_cg(matvec, rhs, *, tol, max_iter):
+        calls["cg"] = (np.asarray(matvec(jnp.asarray([1.0, 1.0, 1.0]))), np.asarray(rhs), tol, max_iter)
+        return jnp.asarray([4.0, 5.0, 6.0])
+
+    result = solve_full_residual_adjoint_linearized(
+        lambda state: jnp.asarray(state.values) + 1.0,
+        lambda _x: _x,
+        residual_star=residual_star,
+        b=b,
+        st_star=st_star,
+        damping=0.125,
+        cg_tol=1e-6,
+        cg_max_iter=11,
+        cg_solve=fake_cg,
+        unpack_state=lambda u, layout: SimpleNamespace(values=u, layout=layout),
+        pack_state=lambda state: state.values,
+        project_state=lambda state: SimpleNamespace(values=state.values * 0.5, layout=state.layout),
+        make_full_normal_map_func=fake_make_full_normal_map,
+        validate_full_shapes=lambda residual, rhs: calls.setdefault("validated", (np.shape(residual), np.shape(rhs))),
+    )
+
+    assert result.route == "cg"
+    assert calls["normal_args"] == ("layout-token", 0.125)
+    np.testing.assert_allclose(calls["cg"][0], [2.0, 2.0, 2.0])
+    np.testing.assert_allclose(calls["cg"][1], [1.0, 2.0, 3.0])
+    assert calls["cg"][2:] == (1e-6, 11)
+    assert calls["validated"] == ((3,), (3,))
+    np.testing.assert_allclose(np.asarray(result.state_update.values), [2.0, 2.5, 3.0])
+    np.testing.assert_allclose(np.asarray(result.lam), [3.0, 3.5, 4.0])

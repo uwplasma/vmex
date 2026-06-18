@@ -33,6 +33,15 @@ class ActiveResidualAdjointSolveResult:
     info: Any = None
 
 
+@dataclass(frozen=True)
+class FullResidualAdjointSolveResult:
+    """Result and route metadata for a full-state residual-adjoint solve."""
+
+    lam: Any
+    route: str = "cg"
+    state_update: Any | None = None
+
+
 def lineax_bicgstab_solve(
     matvec: Callable[[Any], Any],
     b: Any,
@@ -211,3 +220,52 @@ def solve_active_residual_adjoint_linearized(
     lam = cg_solve(Hvp_active, rhs_active, tol=float(cg_tol), max_iter=int(cg_max_iter))
     _log("active_cg_done", cg_start)
     return ActiveResidualAdjointSolveResult(lam=lam, route="cg")
+
+
+def solve_full_residual_adjoint_linearized(
+    residual_jvp: Callable[[Any], Any],
+    residual_vjp: Callable[[Any], Any],
+    *,
+    residual_star: Any,
+    b: Any,
+    st_star: Any,
+    damping: float,
+    cg_tol: float,
+    cg_max_iter: int,
+    cg_solve: Callable[..., Any],
+    unpack_state: Callable[..., Any],
+    pack_state: Callable[..., Any],
+    project_state: Callable[[Any], Any],
+    make_full_normal_map_func: Callable[..., Any],
+    validate_full_shapes: Callable[..., None],
+    profile_log: Callable[..., None] | None = None,
+    time_module: Any = time,
+) -> FullResidualAdjointSolveResult:
+    """Solve the full-state residual adjoint with the matrix-free normal map."""
+
+    def _start():
+        return time_module.perf_counter() if profile_log is not None else None
+
+    def _log(stage: str, start: float | None = None, **extra) -> None:
+        if profile_log is not None:
+            profile_log(stage, start, **extra)
+
+    validate_full_shapes(residual_star, b)
+    Hvp = make_full_normal_map_func(
+        residual_jvp,
+        residual_vjp,
+        unpack_state=unpack_state,
+        pack_state=pack_state,
+        project_state=project_state,
+        layout=st_star.layout,
+        damping=float(damping),
+    )
+
+    cg_start = _start()
+    u = cg_solve(Hvp, b, tol=float(cg_tol), max_iter=int(cg_max_iter))
+    _log("full_cg_done", cg_start)
+    u_state = project_state(unpack_state(u, st_star.layout))
+    jvp_start = _start()
+    lam = residual_jvp(u_state)
+    _log("full_jvp_done", jvp_start)
+    return FullResidualAdjointSolveResult(lam=lam, route="cg", state_update=u_state)
