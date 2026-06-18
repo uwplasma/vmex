@@ -32,6 +32,7 @@ from vmec_jax.mirror import (
     plot_mirror_output,
     propose_axisymmetric_mirror_lcfs_update,
     propose_axisymmetric_mirror_lcfs_scale_update,
+    propose_axisymmetric_mirror_lcfs_noop_update,
     run_mirror_fixed_boundary,
     sample_mirror_axis_external_field,
     sample_mirror_boundary_external_field,
@@ -63,6 +64,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lcfs-update-smoothing-passes", type=int, default=1)
     parser.add_argument("--lcfs-merit-bnormal-weight", type=float, default=1.0)
     parser.add_argument("--lcfs-proposal-mode", choices=("best_predicted", "local", "scale"), default="best_predicted")
+    parser.add_argument("--lcfs-require-bnormal-nonincrease", action="store_true")
     parser.add_argument("--run-lcfs-pilot", action="store_true")
     parser.add_argument("--lcfs-pilot-steps", type=int, default=1)
     parser.add_argument("--no-plots", action="store_true")
@@ -224,6 +226,7 @@ def _select_lcfs_proposal(
     max_relative_step: float,
     cap_taper_power: float,
     smoothing_passes: int,
+    require_bnormal_nonincrease: bool,
 ):
     local = propose_axisymmetric_mirror_lcfs_update(
         lcfs,
@@ -241,7 +244,8 @@ def _select_lcfs_proposal(
         max_relative_step=max_relative_step,
         radius_floor=1.0e-4,
     )
-    candidates = [local, scale]
+    noop = propose_axisymmetric_mirror_lcfs_noop_update(lcfs, pressure_response)
+    candidates = [local, scale, noop]
     summaries = [
         _proposal_predicted_metrics(candidate, grid=grid, coils=coils, baseline_merit=baseline_merit)
         for candidate in candidates
@@ -250,7 +254,18 @@ def _select_lcfs_proposal(
         return local, summaries
     if mode == "scale":
         return scale, summaries
-    best_index = int(np.argmin([summary["predicted_merit"] for summary in summaries]))
+    allowed = np.ones(len(summaries), dtype=bool)
+    if require_bnormal_nonincrease:
+        baseline_bnormal = float(baseline_merit.external_bnormal_rms)
+        allowed = np.asarray(
+            [
+                summary["strategy"] == "noop" or summary["predicted_external_bnormal_rms"] <= baseline_bnormal + 1.0e-14
+                for summary in summaries
+            ],
+            dtype=bool,
+        )
+    merit_values = [summary["predicted_merit"] if allowed[index] else np.inf for index, summary in enumerate(summaries)]
+    best_index = int(np.argmin(merit_values))
     return candidates[best_index], summaries
 
 
@@ -268,6 +283,7 @@ def _run_fixed_boundary_baseline_cases(
     lcfs_update_smoothing_passes: int,
     lcfs_merit_bnormal_weight: float,
     lcfs_proposal_mode: str,
+    lcfs_require_bnormal_nonincrease: bool,
     run_lcfs_pilot: bool,
     lcfs_pilot_steps: int,
     write_plots: bool,
@@ -318,12 +334,49 @@ def _run_fixed_boundary_baseline_cases(
             max_relative_step=lcfs_update_max_relative_step,
             cap_taper_power=lcfs_update_cap_taper_power,
             smoothing_passes=lcfs_update_smoothing_passes,
+            require_bnormal_nonincrease=lcfs_require_bnormal_nonincrease,
         )
         pilot_rows: list[dict[str, object]] = []
         accepted_merit_value = float(lcfs_merit.value)
+        current_lcfs = lcfs
+        current_merit = lcfs_merit
+        candidate_proposal = proposal
         candidate_boundary = proposal.boundary
         if run_lcfs_pilot:
             for step in range(1, int(lcfs_pilot_steps) + 1):
+                if candidate_proposal.strategy == "noop":
+                    pilot_rows.append(
+                        {
+                            "step": int(step),
+                            "mout": None,
+                            "accepted": False,
+                            "skipped": True,
+                            "rejection_reason": "normal_field_guard_no_candidate",
+                            "final_residual_norm": None,
+                            "final_fsq": None,
+                            "final_normalized_force": None,
+                            "min_sqrtg": None,
+                            "mirror_ratio": None,
+                            "lcfs_external_bnormal_rms": float(current_lcfs.external_bnormal_rms),
+                            "lcfs_external_bnormal_max": float(current_lcfs.external_bnormal_max),
+                            "lcfs_pressure_balance_rms": float(current_lcfs.pressure_balance_rms),
+                            "lcfs_pressure_balance_max": float(current_lcfs.pressure_balance_max),
+                            "lcfs_pressure_balance_rms_change_fraction": 0.0,
+                            "lcfs_merit": float(current_merit.value),
+                            "lcfs_merit_change_fraction": 0.0,
+                            "lcfs_merit_bnormal_weight": float(current_merit.bnormal_weight),
+                            "lcfs_update_pressure_balance_rms_predicted_next": float(
+                                candidate_proposal.pressure_balance_rms_predicted
+                            ),
+                            "lcfs_update_strategy_next": str(candidate_proposal.strategy),
+                            "lcfs_update_candidate_summaries_next": proposal_candidates,
+                            "lcfs_update_cap_taper_power_next": float(candidate_proposal.cap_taper_power),
+                            "lcfs_update_smoothing_passes_next": int(candidate_proposal.smoothing_passes),
+                            "lcfs_update_max_relative_delta_radius_next": 0.0,
+                            "figures": {},
+                        }
+                    )
+                    break
                 pilot_result = run_mirror_fixed_boundary(
                     config,
                     candidate_boundary,
@@ -359,6 +412,7 @@ def _run_fixed_boundary_baseline_cases(
                     max_relative_step=lcfs_update_max_relative_step,
                     cap_taper_power=lcfs_update_cap_taper_power,
                     smoothing_passes=lcfs_update_smoothing_passes,
+                    require_bnormal_nonincrease=lcfs_require_bnormal_nonincrease,
                 )
                 pilot_plot_paths: dict[str, str] = {}
                 if write_plots:
@@ -415,6 +469,9 @@ def _run_fixed_boundary_baseline_cases(
                 if not accepted:
                     break
                 accepted_merit_value = float(pilot_merit.value)
+                current_lcfs = pilot_lcfs
+                current_merit = pilot_merit
+                candidate_proposal = pilot_proposal
                 candidate_boundary = pilot_proposal.boundary
         plot_paths: dict[str, str] = {}
         if write_plots:
@@ -458,6 +515,7 @@ def _run_fixed_boundary_baseline_cases(
                 "lcfs_update_pressure_balance_rms_predicted": float(proposal.pressure_balance_rms_predicted),
                 "lcfs_update_strategy": str(proposal.strategy),
                 "lcfs_update_candidate_summaries": proposal_candidates,
+                "lcfs_update_normal_field_guard": bool(lcfs_require_bnormal_nonincrease),
                 "lcfs_update_pressure_balance_rms_reduction_fraction": float(
                     1.0 - proposal.pressure_balance_rms_predicted / max(proposal.pressure_balance_rms_before, 1.0e-300)
                 ),
@@ -496,6 +554,7 @@ def run_case(
     lcfs_update_smoothing_passes: int = 1,
     lcfs_merit_bnormal_weight: float = 1.0,
     lcfs_proposal_mode: str = "best_predicted",
+    lcfs_require_bnormal_nonincrease: bool = False,
     run_lcfs_pilot: bool = False,
     lcfs_pilot_steps: int = 1,
     write_plots: bool = True,
@@ -557,6 +616,7 @@ def run_case(
             lcfs_update_smoothing_passes=lcfs_update_smoothing_passes,
             lcfs_merit_bnormal_weight=lcfs_merit_bnormal_weight,
             lcfs_proposal_mode=lcfs_proposal_mode,
+            lcfs_require_bnormal_nonincrease=lcfs_require_bnormal_nonincrease,
             run_lcfs_pilot=run_lcfs_pilot,
             lcfs_pilot_steps=lcfs_pilot_steps,
             write_plots=write_plots,
@@ -612,6 +672,7 @@ def main() -> None:
         lcfs_update_smoothing_passes=args.lcfs_update_smoothing_passes,
         lcfs_merit_bnormal_weight=args.lcfs_merit_bnormal_weight,
         lcfs_proposal_mode=args.lcfs_proposal_mode,
+        lcfs_require_bnormal_nonincrease=args.lcfs_require_bnormal_nonincrease,
         run_lcfs_pilot=args.run_lcfs_pilot,
         lcfs_pilot_steps=args.lcfs_pilot_steps,
         write_plots=not args.no_plots,

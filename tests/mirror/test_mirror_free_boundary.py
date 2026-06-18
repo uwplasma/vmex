@@ -22,6 +22,7 @@ from vmec_jax.mirror import (
     mirror_lcfs_merit,
     propose_axisymmetric_mirror_lcfs_update,
     propose_axisymmetric_mirror_lcfs_scale_update,
+    propose_axisymmetric_mirror_lcfs_noop_update,
     sample_mirror_axis_external_field,
     sample_mirror_boundary_external_field,
     two_coil_on_axis_bz,
@@ -332,3 +333,23 @@ def test_axisymmetric_lcfs_scale_update_reduces_synthetic_pressure_imbalance():
     assert proposal.pressure_balance_rms_predicted < proposal.pressure_balance_rms_before
     np.testing.assert_allclose(proposal.delta_radius, -0.2)
     np.testing.assert_allclose(proposal.pressure_balance_predicted, 0.0, atol=1.0e-14)
+
+
+def test_axisymmetric_lcfs_noop_update_preserves_boundary_and_residual():
+    theta = np.asarray([0.0])
+    z = np.linspace(-1.0, 1.0, 5)
+    boundary_r = np.linspace(0.8, 1.2, z.size)[None, :]
+    pressure_balance = np.linspace(-0.1, 0.2, z.size)[None, :]
+    diagnostic = SimpleNamespace(
+        theta=theta,
+        z=z,
+        boundary_r=boundary_r,
+        pressure_balance=pressure_balance,
+    )
+
+    proposal = propose_axisymmetric_mirror_lcfs_noop_update(diagnostic)
+
+    assert proposal.strategy == "noop"
+    np.testing.assert_allclose(proposal.new_radius, boundary_r[0])
+    np.testing.assert_allclose(proposal.delta_radius, 0.0)
+    np.testing.assert_allclose(proposal.pressure_balance_predicted, pressure_balance[0])

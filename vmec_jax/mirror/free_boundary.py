@@ -763,3 +763,44 @@ def propose_axisymmetric_mirror_lcfs_scale_update(
         boundary=MirrorBoundary.tabulated_radius(xi, new_radius),
         strategy="scale_pressure",
     )
+
+
+def propose_axisymmetric_mirror_lcfs_noop_update(
+    diagnostic: MirrorLCFSDiagnostic,
+    pressure_response: Any | None = None,
+) -> MirrorLCFSUpdateProposal:
+    """Return an explicit no-op LCFS proposal."""
+
+    z = np.asarray(diagnostic.z, dtype=float)
+    if z.ndim != 1 or z.size < 2 or not np.all(np.diff(z) > 0.0):
+        raise ValueError("diagnostic z nodes must be a strictly increasing one-dimensional array")
+    radius = np.mean(np.asarray(diagnostic.boundary_r, dtype=float), axis=0)
+    residual = np.mean(np.asarray(diagnostic.pressure_balance, dtype=float), axis=0)
+    if pressure_response is None:
+        response = np.zeros_like(radius)
+    else:
+        response = np.asarray(pressure_response, dtype=float)
+        if response.shape == np.asarray(diagnostic.boundary_r).shape:
+            response = np.mean(response, axis=0)
+        elif response.shape != radius.shape:
+            raise ValueError("pressure_response must have shape (ntheta, nxi) or (nxi,)")
+    xi = 2.0 * (z - z[0]) / (z[-1] - z[0]) - 1.0
+    return MirrorLCFSUpdateProposal(
+        z=z,
+        xi=xi,
+        old_radius=radius,
+        new_radius=radius.copy(),
+        delta_radius=np.zeros_like(radius),
+        pressure_response=response,
+        pressure_balance_before=residual,
+        pressure_balance_predicted=residual.copy(),
+        pressure_balance_rms_before=float(np.sqrt(np.mean(residual**2))),
+        pressure_balance_rms_predicted=float(np.sqrt(np.mean(residual**2))),
+        damping=0.0,
+        max_relative_step=0.0,
+        cap_taper_power=0.0,
+        smoothing_passes=0,
+        preserve_caps=True,
+        boundary=MirrorBoundary.tabulated_radius(xi, radius),
+        strategy="noop",
+    )

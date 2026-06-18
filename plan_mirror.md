@@ -8463,3 +8463,144 @@ Result: all checks passed.
 No user input is needed.
 
 ---
+## 73. 2026-06-18 M12k strict normal-field guard for LCFS pilots
+
+This tranche added an optional strict normal-field guard for LCFS pilot
+candidates.  In guarded mode, the example includes an explicit no-op candidate
+and refuses to run a pilot solve when every nonzero candidate would increase
+predicted side-boundary `B_ext.n` RMS.
+
+### Steps taken
+
+- Added `propose_axisymmetric_mirror_lcfs_noop_update`.
+- Exported the no-op helper through the public mirror API.
+- Added `--lcfs-require-bnormal-nonincrease` to the root circular-coil example.
+- Extended candidate selection so guarded mode filters out nonzero candidates
+  whose predicted `B_ext.n` RMS is above the current accepted value.
+- Added skipped-pilot row reporting with:
+  - `skipped=true`;
+  - `accepted=false`;
+  - `rejection_reason="normal_field_guard_no_candidate"`;
+  - no pilot `mout` path.
+- Added tests for:
+  - no-op proposal invariants;
+  - strict-guard example behavior.
+- Updated docs and the mirror examples README.
+
+### Results obtained
+
+Generated artifacts:
+
+- `results/mirror/m12k_strict_bnormal_guard/free_boundary_circular_coils_metrics.json`.
+- `results/mirror/m12k_strict_bnormal_guard/free_boundary_circular_coils_setup.json`.
+- Three baseline beta-row `mout` files.
+- Thirty-six baseline PNGs, including LCFS diagnostic panels.
+
+Strict-guard candidate summary for each beta row:
+
+| candidate | predicted merit | predicted `B_ext.n` RMS |
+| :--- | ---: | ---: |
+| local pressure | `1.000000106` | `1.1115358e-02` |
+| scale pressure | `0.996004406` | `8.783073e-03` |
+| no-op | `1.000020372` | `7.657346e-03` |
+
+Because both nonzero candidates increase predicted normal-field RMS, guarded
+mode selects `noop` and skips the pilot solve.  This explicitly distinguishes
+pressure-limited progress from normal-field-limited progress.
+
+### How it was tested
+
+Focused free-boundary and root example tests:
+
+```bash
+JAX_ENABLE_X64=1 pytest \
+  tests/mirror/test_mirror_free_boundary.py \
+  tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_example_runs_without_plots \
+  tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_strict_bnormal_guard_can_skip_pilot \
+  -q
+```
+
+Result: `15 passed in 8.45s`.
+
+Example with plots and strict guard:
+
+```bash
+JAX_ENABLE_X64=1 python examples/mirror_free_boundary_circular_coils.py \
+  --outdir results/mirror/m12k_strict_bnormal_guard \
+  --ntheta 24 \
+  --nxi 33 \
+  --n-segments 256 \
+  --run-fixed-boundary-baseline \
+  --run-lcfs-pilot \
+  --lcfs-pilot-steps 1 \
+  --baseline-maxiter 0 \
+  --lcfs-require-bnormal-nonincrease
+```
+
+Result: metrics JSON, setup JSON, three baseline `mout` files, and 36 PNGs
+written.
+
+Lint/format/docs/whitespace:
+
+```bash
+python -m ruff check \
+  vmec_jax/mirror/free_boundary.py \
+  vmec_jax/mirror/api.py \
+  vmec_jax/mirror/__init__.py \
+  examples/mirror_free_boundary_circular_coils.py \
+  tests/mirror/test_mirror_free_boundary.py \
+  tests/mirror/test_mirror_examples.py
+python -m ruff format --check \
+  vmec_jax/mirror/free_boundary.py \
+  vmec_jax/mirror/api.py \
+  vmec_jax/mirror/__init__.py \
+  examples/mirror_free_boundary_circular_coils.py \
+  tests/mirror/test_mirror_free_boundary.py \
+  tests/mirror/test_mirror_examples.py
+python -m sphinx -W -j auto -b html docs docs/_build/html
+git diff --check
+```
+
+Result: all checks passed.
+
+### File structure and best-practice notes
+
+- The no-op proposal is a first-class helper because rejection and no-op
+  behavior are part of the LCFS candidate model, not just test scaffolding.
+- Guarded no-op rows are explicit in the JSON, so downstream scripts can
+  distinguish skipped candidates from failed solves.
+- The default example still uses best-predicted merit without the strict guard;
+  guarded mode is opt-in because the current pressure and normal-field
+  objectives are in tension for the circular-coil baseline.
+
+### Best next steps
+
+1. Commit and push M12k.
+2. Add a normal-field descent term rather than only a guard:
+   - estimate `B_ext.n` response to smooth radius perturbations;
+   - search over a small basis of scale/taper/local modes;
+   - require accepted candidates to reduce pressure merit and not increase
+     normal-field RMS.
+3. Once pressure and normal-field can both improve, move the pilot loop into a
+   reusable helper and begin the stellarator-mirror hybrid boundary lane.
+
+### Completion percentages after M12k
+
+- Geometry/grids/bases: `90%`.
+- Field/energy/residual kernels: `85%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `85%`.
+- I/O schema and docs: `90%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `54%`.
+- Stellarator-mirror hybrid lane: `10%`.
+- ESSOS circular-coil mirror beta scan: `42%`.
+- PR merge readiness overall: `89%`.
+
+### User input needed
+
+No user input is needed.

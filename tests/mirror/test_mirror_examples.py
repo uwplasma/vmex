@@ -166,7 +166,7 @@ def test_root_free_boundary_circular_coils_example_runs_without_plots(tmp_path):
     assert all(row["lcfs_update_strategy"] == "scale_pressure" for row in metrics["fixed_boundary_baseline_rows"])
     assert all(
         {candidate["strategy"] for candidate in row["lcfs_update_candidate_summaries"]}
-        == {"local_pressure", "scale_pressure"}
+        == {"local_pressure", "scale_pressure", "noop"}
         for row in metrics["fixed_boundary_baseline_rows"]
     )
     assert all(
@@ -199,6 +199,46 @@ def test_root_free_boundary_circular_coils_example_runs_without_plots(tmp_path):
         row["lcfs_pilot_rows"][0]["lcfs_merit"] <= row["lcfs_merit"] for row in metrics["fixed_boundary_baseline_rows"]
     )
     assert metrics["figures"] == {}
+
+
+def test_root_free_boundary_circular_coils_strict_bnormal_guard_can_skip_pilot(tmp_path):
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "examples/mirror_free_boundary_circular_coils.py",
+            "--outdir",
+            str(tmp_path / "strict_guard"),
+            "--betas",
+            "1",
+            "--ntheta",
+            "8",
+            "--nxi",
+            "11",
+            "--n-segments",
+            "64",
+            "--run-fixed-boundary-baseline",
+            "--baseline-maxiter",
+            "0",
+            "--run-lcfs-pilot",
+            "--lcfs-pilot-steps",
+            "1",
+            "--lcfs-require-bnormal-nonincrease",
+            "--no-plots",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    metrics = json.loads(Path(completed.stdout.strip()).read_text())
+    row = metrics["fixed_boundary_baseline_rows"][0]
+    pilot = row["lcfs_pilot_rows"][0]
+    assert row["lcfs_update_strategy"] == "noop"
+    assert row["lcfs_update_normal_field_guard"] is True
+    assert pilot["skipped"] is True
+    assert pilot["accepted"] is False
+    assert pilot["rejection_reason"] == "normal_field_guard_no_candidate"
+    assert pilot["mout"] is None
 
 
 def test_root_fixed_boundary_solve_diagnostic_runs_without_plots(tmp_path):
