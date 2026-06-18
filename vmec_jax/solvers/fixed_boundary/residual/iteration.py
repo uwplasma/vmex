@@ -665,8 +665,6 @@ def solve_fixed_boundary_residual_iter(
     step_size = startup_policy.step_size
     precompile_only = startup_policy.precompile_only
     host_update_assembly = startup_policy.host_update_assembly
-    host_fsq1_norms_on_accelerator = startup_policy.host_fsq1_norms_on_accelerator
-    host_residual_metrics_on_accelerator = startup_policy.host_residual_metrics_on_accelerator
     adjoint_trace = startup_policy.adjoint_trace
     adjoint_trace_mode = startup_policy.adjoint_trace_mode
     preconditioner_use_precomputed_tridi_policy = startup_policy.preconditioner_use_precomputed_tridi_policy
@@ -701,21 +699,17 @@ def solve_fixed_boundary_residual_iter(
     scan_fallback_fsq_abs = startup_policy.scan_fallback_fsq_abs
     scan_fallback_accept_frac = startup_policy.scan_fallback_accept_frac
     scan_fallback_fsq_factor = startup_policy.scan_fallback_fsq_factor
-    scan_fallback_improve = startup_policy.scan_fallback_improve
     stage_transition_factor = startup_policy.stage_transition_factor
     stage_transition_scale = startup_policy.stage_transition_scale
     stage_prev_fsq = startup_policy.stage_prev_fsq
     auto_flip_force = startup_policy.auto_flip_force
     jit_forces = startup_policy.jit_forces
     use_scan = startup_policy.use_scan
-    force_chunked_scan = startup_policy.force_chunked_scan
     differentiating_scan = startup_policy.differentiating_scan
     limit_dt_from_force = startup_policy.limit_dt_from_force
     limit_update_rms = startup_policy.limit_update_rms
     backtracking = startup_policy.backtracking
     strict_update = startup_policy.strict_update
-    dumps_enabled = startup_policy.dumps_enabled
-    dump_any = startup_policy.dump_any
     if startup_policy.disabled_jit_for_dumps:
         if verbose:
             print("[solve_fixed_boundary_residual_iter] jit_forces disabled (debug dumps enabled)")
@@ -1559,7 +1553,7 @@ def solve_fixed_boundary_residual_iter(
             resume_state=resume_state,
             state_only=bool(state_only),
             scan_fallback_enabled=bool(scan_fallback_enabled),
-            force_chunked_scan=bool(force_chunked_scan),
+            force_chunked_scan=bool(startup_policy.force_chunked_scan),
             preconditioner_use_precomputed_tridi=preconditioner_use_precomputed_tridi,
             preconditioner_use_lax_tridi=preconditioner_use_lax_tridi,
             verbose=bool(verbose),
@@ -1567,7 +1561,7 @@ def solve_fixed_boundary_residual_iter(
             verbose_vmec2000_table=bool(verbose_vmec2000_table),
             light_history=bool(light_history),
             scan_minimal_default=scan_minimal_default,
-            dump_any=bool(dump_any),
+            dump_any=bool(startup_policy.dump_any),
             fsq_total_target=fsq_total_target,
             axis_reset_done=bool(axis_reset_done),
             lmove_axis=bool(lmove_axis),
@@ -1863,7 +1857,7 @@ def solve_fixed_boundary_residual_iter(
         scan_fallback_accept_frac_j = jnp.asarray(float(scan_fallback_accept_frac), dtype=dtype)
         scan_fallback_fsq_factor_j = jnp.asarray(float(scan_fallback_fsq_factor), dtype=dtype)
         scan_fallback_fsq_abs_j = jnp.asarray(float(scan_fallback_fsq_abs), dtype=dtype)
-        scan_fallback_improve_j = jnp.asarray(float(scan_fallback_improve), dtype=dtype)
+        scan_fallback_improve_j = jnp.asarray(float(startup_policy.scan_fallback_improve), dtype=dtype)
 
         scan_jax_debug = _jax_debug
         scan_debug_force = os.getenv("VMEC_JAX_SCAN_DEBUG_FORCE", "") not in ("", "0")
@@ -3531,7 +3525,7 @@ def solve_fixed_boundary_residual_iter(
                 else norms_current
             )
             use_host_residual_metrics = (
-                bool(host_residual_metrics_on_accelerator)
+                bool(startup_policy.host_residual_metrics_on_accelerator)
                 and (not bool(host_update_assembly))
                 and (jax.default_backend() != "cpu")
                 and (not _tree_has_tracer((gcr2, gcz2, gcl2, norms_used)))
@@ -4464,7 +4458,7 @@ def solve_fixed_boundary_residual_iter(
             # Damping for the fixed-point update.
             accepted_control_ptau_host: tuple[float, float] | None = None
             use_host_fsq1_norms = (
-                bool(host_fsq1_norms_on_accelerator)
+                bool(startup_policy.host_fsq1_norms_on_accelerator)
                 and (not bool(host_update_assembly))
                 and (jax.default_backend() != "cpu")
                 and (not _tree_has_tracer(state))

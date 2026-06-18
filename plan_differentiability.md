@@ -14912,12 +14912,14 @@ Steps taken:
    and setup-host enforcement.
 3. Kept the NumPy module-patch branch and JAX branch behavior unchanged while
    removing repeated tree-walks and duplicated profile-builder arguments.
+4. Removed one-use startup-policy aliases and used `startup_policy.*` directly
+   for scan-runtime flags and host metric placement options.
 
 Results obtained:
 
 - `vmec_jax/solvers/fixed_boundary/residual/iteration.py` dropped from 6696 to
-  6687 lines.
-- `solve_fixed_boundary_residual_iter` dropped from 6165 to 6155 lines.
+  6681 lines.
+- `solve_fixed_boundary_residual_iter` dropped from 6165 to 6149 lines.
 - Host-profile setup remains compatible with traced solves, host-update
   assembly, and `VMEC_JAX_HOST_PROFILE_SETUP`.
 - No adaptive update formulas, scan acceptance logic, or force kernels were
@@ -14930,7 +14932,7 @@ Tests and commands run:
 - `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/iteration.py`
 - `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_performance_instrumentation.py::test_residual_iter_attempts_host_default_flux_profile_setup tests/test_solve_performance_instrumentation.py::test_residual_iter_forced_host_profile_setup_matches_default tests/test_solve_wave7_coverage.py::test_wout_like_profile_setup_uses_real_input_profiles tests/test_solve_residual_iter_setup_helpers.py -q`
   - Result: passed.
-- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_api.py::test_host_update_assembly_matches_jax_update_path tests/test_driver_api.py::test_host_update_assembly_driver_default_env_override tests/test_driver_api.py::test_vmec2000_iter_histories_materialize_numeric_arrays -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_api.py::test_host_update_assembly_matches_jax_update_path tests/test_driver_api.py::test_host_update_assembly_driver_default_env_override tests/test_driver_api.py::test_dynamic_scan_probe_settings_cpu tests/test_driver_api.py::test_vmec2000_iter_histories_materialize_numeric_arrays -q`
   - Result: passed.
 - `python tools/diagnostics/source_health.py --top 16 --top-functions 30`
 
@@ -14958,7 +14960,7 @@ Completion:
 - Solver monolith reduction: 99.59%.
 - Free-boundary adjoint monolith reduction: 99.40%.
 - Driver workflow decomposition: 99.89%.
-- Residual iteration decomposition: 97.2%.
+- Residual iteration decomposition: 97.25%.
 - WOUT diagnostic/profile decomposition: 99.88%.
 - Bcovar/WOUT parity decomposition: 99.09%.
 - Force-kernel decomposition: 99.65%.
@@ -14973,4 +14975,4 @@ Completion:
 - QI objective/staged-runner decomposition: 96.8%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
-- Overall differentiability-refactor PR: 99.99986%.
+- Overall differentiability-refactor PR: 99.99987%.
