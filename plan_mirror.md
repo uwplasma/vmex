@@ -17679,3 +17679,89 @@ Results:
 No user input is needed.
 
 ---
+## 142. Draft PR Description Synchronization After Differentiability Gates
+
+### Steps taken
+
+- Updated draft PR #21 body on GitHub.
+- Changed the detailed-log pointer from section 134 to section 141.
+- Added the new reduced differentiability status:
+  - custom VJP cached-state gates for source parameters;
+  - pressure-profile coefficients;
+  - current-profile coefficients;
+  - flux-profile coefficients;
+  - polynomial-boundary coefficients.
+- Added the new root-level example
+  `examples/mirror_implicit_parameter_gradients.py`.
+- Updated the current solver status so it no longer says the reduced
+  differentiability path is only planned.
+- Kept the PR in draft state.
+- Checked PR status after the update.
+
+### Results obtained
+
+- Remote PR body verification confirmed:
+  - PR number `21`;
+  - draft state `true`;
+  - body contains `section 141`;
+  - body contains `mirror_implicit_parameter_gradients.py`;
+  - body contains `source/profile/polynomial-boundary`;
+  - body contains `22 passed`.
+- CI snapshot after the push showed checks running/queued and no reported
+  failures at that moment.
+
+### How it was tested
+
+Commands run:
+
+```bash
+gh pr edit 21 --body-file /tmp/vmec_mirror_pr_body_m141.md
+gh pr view 21 --json number,isDraft,body,url | python -c '...'
+gh pr view 21 --json number,isDraft,headRefName,statusCheckRollup,url
+```
+
+Results:
+
+- PR edit succeeded.
+- PR body verification passed.
+- PR remained draft.
+- CI/status rollup was visible and in progress, with no failure conclusion
+  reported in the snapshot.
+
+### File structure and best-practice notes
+
+- No source files changed in this tranche.
+- Detailed evidence remains in `plan_mirror.md`; the PR body stays a concise
+  review index.
+- The PR remains draft as requested.
+
+### Best next steps
+
+1. Commit and push M142 plan log.
+2. Continue implementation work without waiting on CI unless a failure appears.
+3. Resume free-boundary/ESSOS beta-scan convergence cleanup.
+4. Later, refresh the PR body again after the next substantial tranche.
+
+### Completion percentages after M142
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `91%`.
+- Fixed-boundary axisymmetric solve: `91%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `89%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `92%`.
+- I/O schema and docs: `99%`.
+- Differentiable solved-state API: `92%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `87%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `90%`.
+- PR merge readiness overall: `97%`.
+
+### User input needed
+
+No user input is needed.
+
+---
