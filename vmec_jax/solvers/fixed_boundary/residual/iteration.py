@@ -409,6 +409,7 @@ from vmec_jax.solvers.fixed_boundary.scan.planning import (
 from vmec_jax.solvers.fixed_boundary.scan.runtime import (
     get_or_build_scan_runner as _get_or_build_scan_runner,
     resolve_scan_runtime_hooks_from_env as _resolve_scan_runtime_hooks_from_env,
+    run_chunked_scan as _run_chunked_scan,
     run_scan_preflight_step as _run_scan_preflight_step,
     scan_trace_context_or_null as _scan_trace_context_or_null,
 )
@@ -2469,127 +2470,43 @@ def solve_fixed_boundary_residual_iter(
             scan_timing_stats["scan_run_setup_s"] += time.perf_counter() - float(scan_run_setup_start)
         carry_init = carry0._replace(state=state_init, state_checkpoint=state_init)
         if chunked_print:
-            hist_parts = []
-            start_idx = 0
-            carry = carry_init
-            abort_scan_host = False
-            fsq_min_global_j = jnp.asarray(jnp.inf, dtype=dtype)
-            early_fallback = bool(scan_fallback_enabled_run) and (int(cfg.ns) > int(scan_fallback_iters))
             need_print = bool(scan_collect_print)
-            chunk_size, chunk_cap_remaining = _scan_chunk_settings(
+            chunked_result = _run_chunked_scan(
+                carry_init,
+                max_iter=int(max_iter),
                 max_iter_scan=int(max_iter_scan),
                 nstep_screen=int(nstep_screen),
                 need_print=bool(need_print),
                 lthreed=bool(cfg.lthreed),
                 spectral_mode_count=int(ncoeff),
-            )
-            jit_preflight = _scan_jit_preflight_enabled(
-                env_value=os.getenv("VMEC_JAX_SCAN_JIT_PREFLIGHT"),
+                scan_chunk_settings_func=_scan_chunk_settings,
+                scan_jit_preflight_enabled_func=_scan_jit_preflight_enabled,
+                scan_jit_preflight_env=os.getenv("VMEC_JAX_SCAN_JIT_PREFLIGHT"),
                 backend_name=_scan_backend_name(),
                 scan_differentiated=bool(scan_differentiated),
-            ) and (not bool(need_print))
-            if preflight_iters > 0:
-                preflight = _run_scan_preflight_step(
-                    carry,
-                    iter_offset_preflight=iter_offset_preflight,
-                    jit_preflight=bool(jit_preflight),
-                    get_scan_runner=_get_scan_runner,
-                    scan_step=_scan_step,
-                    scan_timing_enabled=bool(scan_timing_enabled),
-                    scan_timing_stats=scan_timing_stats,
-                    block_scan_value=scan_device_runtime.block_value,
-                    perf_counter=time.perf_counter,
-                    jnp_module=jnp,
-                    jax_module=jax,
-                )
-                carry = preflight.carry
-                hist_pre = preflight.history_row
-                if not state_only_scan:
-                    fsq_min_global_j = jnp.minimum(
-                        fsq_min_global_j,
-                        jnp.min(hist_pre[0] + hist_pre[1] + hist_pre[2]),
-                    )
-                if need_print:
-                    hist_pre_np = jax.tree_util.tree_map(lambda a: np.asarray(a)[None], hist_pre)
-                    hist_parts.append(hist_pre_np)
-                    _ = _emit_scan_prints(hist_np=hist_pre_np, it_start=0, max_iter_local=int(max_iter))
-                elif not state_only_scan:
-                    hist_parts.append(jax.tree_util.tree_map(lambda a: a[None], hist_pre))
-                start_idx = int(preflight_iters)
-                if axis_reset_repeat:
-                    carry = carry._replace(iter_offset=jnp.asarray(iter_offset0, dtype=jnp.int32))
-            while start_idx < int(max_iter_scan):
-                # Fixed-length chunk to avoid retracing for varying tail sizes.
-                # On quiet accelerator runs, cap the chunk to the remaining work
-                # so short probe windows do not pay hundreds of masked no-op steps.
-                remaining = int(max_iter_scan) - int(start_idx)
-                if remaining <= 0:
-                    break
-                chunk_len = min(int(chunk_size), int(remaining)) if chunk_cap_remaining else int(chunk_size)
-                it_seq = jnp.arange(start_idx, start_idx + int(chunk_len), dtype=jnp.int32)
-                runner, cache_status = _get_scan_runner(int(chunk_len))
-                t_device = time.perf_counter() if scan_timing_enabled else None
-                carry, hist_chunk = runner(carry, it_seq)
-                if scan_timing_enabled and t_device is not None:
-                    carry, hist_chunk = scan_device_runtime.ready(
-                        t_device,
-                        (carry, hist_chunk),
-                        cache_status=cache_status,
-                    )
-                if not state_only_scan:
-                    fsq_min_global_j = jnp.minimum(
-                        fsq_min_global_j,
-                        jnp.min(hist_chunk[0] + hist_chunk[1] + hist_chunk[2]),
-                    )
-                if need_print:
-                    hist_chunk_np = jax.tree_util.tree_map(lambda a: np.asarray(a), hist_chunk)
-                    hist_parts.append(hist_chunk_np)
-                    converged_now = _emit_scan_prints(
-                        hist_np=hist_chunk_np,
-                        it_start=int(start_idx),
-                        max_iter_local=int(max_iter),
-                    )
-                else:
-                    if not state_only_scan:
-                        hist_parts.append(hist_chunk)
-                    converged_now = False
-                start_idx = int(start_idx + int(chunk_len))
-                if (
-                    scan_fallback_enabled_run
-                    and int(scan_fallback_iters) > 0
-                    and start_idx >= int(scan_fallback_iters)
-                    and bool(np.asarray(carry.fallback_active))
-                ):
-                    # Disable fallback logic after the probe window completes.
-                    carry = carry._replace(fallback_active=jnp.asarray(False))
-                if converged_now:
-                    break
-                if scan_fallback_enabled_run and start_idx >= int(scan_fallback_iters):
-                    # Defer host sync for fsq_min_global until after the loop.
-                    pass
-                if bool(np.asarray(carry.converged)) or bool(np.asarray(carry.abort_scan)):
-                    break
-            if scan_fallback_enabled_run and start_idx >= int(scan_fallback_iters):
-                try:
-                    fsq_min_global = float(jax.device_get(fsq_min_global_j))
-                except Exception:
-                    fsq_min_global = None
-                if fsq_min_global is not None and fsq_min_global > float(scan_fallback_fsq_abs):
-                    abort_scan_host = True
-            if state_only_scan and not need_print:
-                hist = None
-            elif need_print:
-                hist = jax.tree_util.tree_map(lambda *parts: np.concatenate(parts, axis=0), *hist_parts)
-            else:
-                t_materialize = time.perf_counter() if scan_timing_enabled else None
-                hist = jax.tree_util.tree_map(lambda *parts: jnp.concatenate(parts, axis=0), *hist_parts)
-                if not _tree_has_tracer(hist):
-                    hist = jax.tree_util.tree_map(lambda a: np.asarray(a), hist)
-                if scan_timing_enabled and t_materialize is not None:
-                    scan_timing_stats["scan_host_materialize_s"] += time.perf_counter() - float(t_materialize)
-            carry_final = carry
-            if abort_scan_host:
-                carry_final = carry_final._replace(abort_scan=jnp.asarray(True))
+                preflight_iters=int(preflight_iters),
+                iter_offset_preflight=int(iter_offset_preflight),
+                axis_reset_repeat=bool(axis_reset_repeat),
+                iter_offset0=int(iter_offset0),
+                get_scan_runner=_get_scan_runner,
+                scan_step=_scan_step,
+                scan_timing_enabled=bool(scan_timing_enabled),
+                scan_timing_stats=scan_timing_stats,
+                scan_device_runtime=scan_device_runtime,
+                perf_counter=time.perf_counter,
+                state_only_scan=bool(state_only_scan),
+                scan_fallback_enabled_run=bool(scan_fallback_enabled_run),
+                scan_fallback_iters=int(scan_fallback_iters),
+                scan_fallback_fsq_abs=float(scan_fallback_fsq_abs),
+                dtype=dtype,
+                emit_scan_prints=_emit_scan_prints,
+                tree_has_tracer=_tree_has_tracer,
+                jnp_module=jnp,
+                jax_module=jax,
+                np_module=np,
+            )
+            carry_final = chunked_result.carry_final
+            hist = chunked_result.history
         else:
             runner, cache_status = _get_scan_runner(int(max_iter_tail) if int(max_iter_tail) > 0 else int(max_iter_scan))
             if preflight_iters > 0:
