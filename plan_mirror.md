@@ -7372,3 +7372,150 @@ Result: all checks passed.
 ### User input needed
 
 No user input is needed.
+
+---
+
+## 66. 2026-06-17 M12d beta-case fixed-boundary baseline driver
+
+This lane added a controlled pre-LCFS baseline for the circular-coil beta scan.
+The root example can now write one low-resolution fixed-boundary `mout` file
+per beta case after building the initial flux-tube boundary from the scan
+setup.  This is still not a free-boundary LCFS solve.
+
+### Steps taken
+
+- Added `--run-fixed-boundary-baseline` to
+  `examples/mirror_free_boundary_circular_coils.py`.
+- Added `--baseline-maxiter` and `--baseline-psi-prime` controls.
+- For each beta case, the example now:
+  - builds the initial boundary from the circular-coil scan;
+  - runs `run_mirror_fixed_boundary` with the existing fixed-boundary solver;
+  - writes a beta-labeled `mout` file;
+  - optionally writes the standard mirror plot bundle for that beta row.
+- Made the baseline summary robust for `maxiter=0` by falling back to
+  `result.final_trace` when no optimizer summary is present.
+- Extended the root example smoke test to exercise the baseline path and check
+  that all beta-row `mout` files are written.
+- Updated the example README and mirror overview docs.
+
+### Results obtained
+
+Generated example artifacts:
+
+- `results/mirror/m12d_beta_fixed_boundary_baseline/free_boundary_circular_coils_metrics.json`.
+- `results/mirror/m12d_beta_fixed_boundary_baseline/free_boundary_circular_coils_setup.json`.
+- `results/mirror/m12d_beta_fixed_boundary_baseline/mout_free_boundary_circular_coils_beta_1.nc`.
+- `results/mirror/m12d_beta_fixed_boundary_baseline/mout_free_boundary_circular_coils_beta_3.nc`.
+- `results/mirror/m12d_beta_fixed_boundary_baseline/mout_free_boundary_circular_coils_beta_10.nc`.
+- Standard mirror plot bundles under:
+  - `results/mirror/m12d_beta_fixed_boundary_baseline/figures/fixed_boundary_beta_1/`;
+  - `results/mirror/m12d_beta_fixed_boundary_baseline/figures/fixed_boundary_beta_3/`;
+  - `results/mirror/m12d_beta_fixed_boundary_baseline/figures/fixed_boundary_beta_10/`.
+
+Baseline rows with `baseline_maxiter=0`:
+
+| beta percent | residual | `fsq` | min `sqrt(g)` | mirror ratio |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | `1.884728113343e-01` | `9.372559528304e-05` | `3.228109210942e-03` | `13.940049439983` |
+| 3 | `4.011165408143e-01` | `4.245236921236e-04` | `3.228109210942e-03` | `13.940049439983` |
+| 10 | `1.237976350530e+00` | `4.043761067210e-03` | `3.228109210942e-03` | `13.940049439983` |
+
+Visual validation:
+
+- Representative beta-10 pressure/beta plot rendered.
+- Representative beta-10 3-D boundary plot rendered horizontally with `z` as
+  the long axis.
+- All first 12 inspected baseline PNGs were nonblank.
+
+### How it was tested
+
+Focused smoke test:
+
+```bash
+JAX_ENABLE_X64=1 pytest \
+  tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_example_runs_without_plots \
+  -q
+```
+
+Result: `1 passed in 3.02s`.
+
+Focused free-boundary and example tests:
+
+```bash
+JAX_ENABLE_X64=1 pytest \
+  tests/mirror/test_mirror_free_boundary.py \
+  tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_example_runs_without_plots \
+  -q
+```
+
+Result: `7 passed in 4.83s`.
+
+Example with plots and baseline outputs:
+
+```bash
+JAX_ENABLE_X64=1 python examples/mirror_free_boundary_circular_coils.py \
+  --outdir results/mirror/m12d_beta_fixed_boundary_baseline \
+  --ntheta 24 \
+  --nxi 33 \
+  --n-segments 256 \
+  --run-fixed-boundary-baseline \
+  --baseline-maxiter 0
+```
+
+Result: setup JSON, metrics JSON, three `mout` files, and standard plot bundles
+written.
+
+Lint/format/docs/whitespace:
+
+```bash
+python -m ruff check \
+  examples/mirror_free_boundary_circular_coils.py \
+  tests/mirror/test_mirror_examples.py
+python -m ruff format --check \
+  examples/mirror_free_boundary_circular_coils.py \
+  tests/mirror/test_mirror_examples.py
+python -m sphinx -W -j auto -b html docs docs/_build/html
+git diff --check
+```
+
+Result: all checks passed.
+
+### File structure and best-practice notes
+
+- The beta baseline remains in the root example because it is a workflow
+  fixture, not a new solver API.
+- It reuses the existing fixed-boundary solver and mirror `mout` writer instead
+  of creating a parallel output path.
+- The metrics label this as fixed-boundary baseline data; it is not a
+  free-boundary LCFS result.
+
+### Best next steps
+
+1. Commit and push M12d.
+2. Promote the baseline driver from example-only to a small reusable function
+   only if another script needs it.
+3. Define and test the actual free-boundary LCFS update target:
+   - boundary normal-field/pressure-balance diagnostic;
+   - cap boundary conditions;
+   - convergence metric and plots for the beta scan.
+
+### Completion percentages after M12d
+
+- Geometry/grids/bases: `90%`.
+- Field/energy/residual kernels: `84%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `85%`.
+- I/O schema and docs: `88%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `30%`.
+- Stellarator-mirror hybrid lane: `10%`.
+- ESSOS circular-coil mirror beta scan: `20%`.
+- PR merge readiness overall: `85%`.
+
+### User input needed
+
+No user input is needed.

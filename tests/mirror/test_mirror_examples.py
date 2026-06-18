@@ -130,6 +130,9 @@ def test_root_free_boundary_circular_coils_example_runs_without_plots(tmp_path):
             "11",
             "--n-segments",
             "64",
+            "--run-fixed-boundary-baseline",
+            "--baseline-maxiter",
+            "0",
             "--no-plots",
         ],
         check=True,
@@ -144,6 +147,9 @@ def test_root_free_boundary_circular_coils_example_runs_without_plots(tmp_path):
     assert [case["beta_percent"] for case in metrics["beta_cases"]] == [1.0, 3.0, 10.0]
     setup = load_mirror_free_boundary_circular_coil_scan(metrics["setup_json"])
     assert [case.beta_fraction for case in setup.beta_cases] == [0.01, 0.03, 0.10]
+    assert len(metrics["fixed_boundary_baseline_rows"]) == 3
+    assert all(Path(row["mout"]).exists() for row in metrics["fixed_boundary_baseline_rows"])
+    assert all(row["final_fsq"] >= 0.0 for row in metrics["fixed_boundary_baseline_rows"])
     assert metrics["figures"] == {}
 
 

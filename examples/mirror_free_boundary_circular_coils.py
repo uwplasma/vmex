@@ -14,13 +14,22 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from vmec_jax.mirror import (
+    IPrimeProfile,
     MirrorCircularCoils,
+    MirrorConfig,
+    MirrorResolution,
+    MirrorSolveOptions,
+    PressureProfile,
+    PsiPrimeProfile,
     initial_mirror_boundary_from_circular_coil_scan,
     make_mirror_free_boundary_circular_coil_scan,
     make_mirror_grid,
+    plot_mirror_output,
+    run_mirror_fixed_boundary,
     sample_mirror_axis_external_field,
     sample_mirror_boundary_external_field,
     two_coil_on_axis_bz,
+    write_mirror_output,
     write_mirror_free_boundary_circular_coil_scan,
 )
 
@@ -38,6 +47,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--n-segments", type=int, default=256)
     parser.add_argument("--betas", type=str, default="1,3,10")
     parser.add_argument("--pressure-scale-one-percent", type=float, default=1.0)
+    parser.add_argument("--run-fixed-boundary-baseline", action="store_true")
+    parser.add_argument("--baseline-maxiter", type=int, default=0)
+    parser.add_argument("--baseline-psi-prime", type=float, default=0.01)
     parser.add_argument("--no-plots", action="store_true")
     return parser
 
@@ -121,6 +133,66 @@ def _write_geometry_plot(grid, boundary, coils: MirrorCircularCoils, *, outdir: 
     return path
 
 
+def _beta_label(beta_percent: float) -> str:
+    return f"{float(beta_percent):g}".replace(".", "p")
+
+
+def _run_fixed_boundary_baseline_cases(
+    *,
+    outdir: Path,
+    grid,
+    boundary,
+    scan,
+    maxiter: int,
+    psi_prime_value: float,
+    write_plots: bool,
+) -> list[dict[str, object]]:
+    config = MirrorConfig(
+        MirrorResolution(ns=grid.ns, ntheta=1, nxi=grid.nxi, mpol=0),
+        z_min=float(grid.z[0]),
+        z_max=float(grid.z[-1]),
+    )
+    rows = []
+    for case in scan.beta_cases:
+        label = _beta_label(case.beta_percent)
+        result = run_mirror_fixed_boundary(
+            config,
+            boundary,
+            psi_prime=PsiPrimeProfile.constant(float(psi_prime_value)),
+            i_prime=IPrimeProfile.zero(),
+            pressure=PressureProfile.polynomial([case.pressure_scale, -case.pressure_scale], gamma=2.0),
+            options=MirrorSolveOptions(optimizer="lbfgs", maxiter=int(maxiter), tolerance=1.0e-10, mu0=1.0),
+        )
+        mout_path = outdir / f"mout_free_boundary_circular_coils_beta_{label}.nc"
+        if mout_path.exists():
+            mout_path.unlink()
+        mout = write_mirror_output(mout_path, result)
+        plot_paths: dict[str, str] = {}
+        if write_plots:
+            figure_dir = outdir / "figures" / f"fixed_boundary_beta_{label}"
+            plot_paths = {name: str(path) for name, path in plot_mirror_output(mout, outdir=figure_dir).items()}
+        summary = result.optimizer_summaries[-1] if result.optimizer_summaries else None
+        final = result.final_trace
+        rows.append(
+            {
+                "beta_percent": float(case.beta_percent),
+                "beta_fraction": float(case.beta_fraction),
+                "pressure_scale": float(case.pressure_scale),
+                "mout": str(mout),
+                "optimizer": str(summary.optimizer if summary is not None else "lbfgs"),
+                "optimizer_success": bool(summary.success) if summary is not None else False,
+                "optimizer_nit": int(summary.nit) if summary is not None else 0,
+                "final_residual_norm": float(final.residual_norm),
+                "final_fsq": float(final.fsq),
+                "final_normalized_force": float(final.normalized_force),
+                "min_sqrtg": float(final.min_sqrtg),
+                "mirror_ratio": float(final.mirror_ratio),
+                "figures": plot_paths,
+            }
+        )
+    return rows
+
+
 def run_case(
     outdir: Path,
     *,
@@ -134,6 +206,9 @@ def run_case(
     n_segments: int = 256,
     betas: tuple[float, ...] = (1.0, 3.0, 10.0),
     pressure_scale_one_percent: float = 1.0,
+    run_fixed_boundary_baseline: bool = False,
+    baseline_maxiter: int = 0,
+    baseline_psi_prime: float = 0.01,
     write_plots: bool = True,
 ) -> Path:
     outdir.mkdir(parents=True, exist_ok=True)
@@ -177,6 +252,19 @@ def run_case(
         figure_paths["axis_bz"] = str(_write_axis_plot(grid.z, direct_bz, analytic_bz, outdir=figure_dir))
         figure_paths["boundary_bmag"] = str(_write_boundary_bmag_plot(boundary_sample, outdir=figure_dir))
         figure_paths["geometry"] = str(_write_geometry_plot(grid, boundary, coils, outdir=figure_dir))
+    baseline_rows = (
+        _run_fixed_boundary_baseline_cases(
+            outdir=outdir,
+            grid=grid,
+            boundary=boundary,
+            scan=scan,
+            maxiter=baseline_maxiter,
+            psi_prime_value=baseline_psi_prime,
+            write_plots=write_plots,
+        )
+        if run_fixed_boundary_baseline
+        else []
+    )
 
     metrics = {
         "coil_radius": float(coil_radius),
@@ -194,6 +282,7 @@ def run_case(
         "boundary_bmag_max": float(np.max(np.asarray(boundary_sample.bmag))),
         "setup_json": str(setup_path),
         "beta_cases": [case.to_dict() for case in scan.beta_cases],
+        "fixed_boundary_baseline_rows": baseline_rows,
         "figures": figure_paths,
     }
     metrics_path = outdir / "free_boundary_circular_coils_metrics.json"
@@ -215,6 +304,9 @@ def main() -> None:
         n_segments=args.n_segments,
         betas=_parse_float_list(args.betas),
         pressure_scale_one_percent=args.pressure_scale_one_percent,
+        run_fixed_boundary_baseline=args.run_fixed_boundary_baseline,
+        baseline_maxiter=args.baseline_maxiter,
+        baseline_psi_prime=args.baseline_psi_prime,
         write_plots=not args.no_plots,
     )
     print(path)
