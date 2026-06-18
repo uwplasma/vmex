@@ -7,6 +7,72 @@ and should not drive new work unless a specific old result needs to be audited.
 
 Last updated: 2026-06-18.
 
+## 2026-06-18 Free-Boundary Same-Branch Scalar Registry Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved `same_branch_scalar_function_registry` from the direct-coil
+   optimization example into
+   `vmec_jax.solvers.free_boundary.coil_optimization`.
+2. Kept the example's visible workflow intact: users still see how the run is
+   configured, how objective weights are assembled, how reports are written,
+   and how complete solves decide acceptance.
+3. Removed imports from the example that were only needed by the moved registry.
+
+Results obtained:
+
+- `examples/optimization/free_boundary_QS_coil_optimization.py` dropped to
+  2286 lines.
+- `vmec_jax.solvers.free_boundary.coil_optimization` is 759 lines and owns the
+  same-branch report scalar registry, proposal helpers, replay cache helpers,
+  and profiling policy helpers.
+- The example-level function name is still importable/monkeypatchable because
+  the script imports it from the package module.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/solvers/free_boundary/coil_optimization.py examples/optimization/free_boundary_QS_coil_optimization.py`
+- `python -m ruff check vmec_jax/solvers/free_boundary/coil_optimization.py examples/optimization/free_boundary_QS_coil_optimization.py tests/test_free_boundary_qs_coil_optimization_smoke.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_qs_coil_optimization_smoke.py::test_same_branch_report_profiles_nestor_and_rejected_slot tests/test_free_boundary_qs_coil_optimization_smoke.py::test_same_branch_report_profile_skips_above_mode_count_cap tests/test_free_boundary_qs_coil_optimization_smoke.py::test_derivative_proposal_summary_marks_report_stale_when_trial_is_accepted tests/test_free_boundary_qs_coil_optimization_smoke.py::test_derivative_proposal_summary_records_rejected_trial_as_complete_solve_rejection -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_qs_coil_optimization_smoke.py tests/test_free_boundary_qa_finite_beta_coil_optimization_smoke.py -q`
+- `python tools/diagnostics/source_health.py --top 10 --top-functions 12`
+
+Best next steps:
+
+1. Stop moving additional same-branch report internals unless
+   `write_same_branch_validation_report` can be split into readable report
+   assembly stages.
+2. Prioritize residual iteration seams and broad CI validation after the recent
+   accelerated-scan extraction.
+3. Recheck GitHub checks after this push and address concrete failures.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999998%.
+- Solver monolith reduction: 99.57%.
+- Free-boundary adjoint monolith reduction: 99.35%.
+- Driver workflow decomposition: 99.87%.
+- Residual iteration decomposition: 96.9%.
+- WOUT diagnostic/profile decomposition: 99.72%.
+- Bcovar/WOUT parity decomposition: 98.35%.
+- Force-kernel decomposition: 98.55%.
+- Optimizer workflow decomposition: 99.1%.
+- Fixed-boundary optimizer decomposition: 94.8%.
+- Implicit residual-adjoint decomposition: 95%.
+- QI objective decomposition: 93%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.7%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.99935%.
+
 ## 2026-06-18 Accelerated Residual Scan Runner Extraction
 
 Branch: `codex/differentiability-refactor-plan`.

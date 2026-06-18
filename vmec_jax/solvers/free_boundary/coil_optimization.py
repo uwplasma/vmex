@@ -15,6 +15,14 @@ from typing import Any, Sequence
 import numpy as np
 
 from vmec_jax.external_fields import CoilFieldParams, build_coil_field_geometry
+from vmec_jax._compat import jnp
+from vmec_jax.finite_beta import finite_beta_scalars_from_state
+from vmec_jax.quasi_isodynamic import boozer_output_from_state
+from vmec_jax.quasisymmetry import (
+    quasisymmetry_boozer_mode_residual_from_boozer_output,
+    quasisymmetry_ratio_residual_from_state,
+)
+from vmec_jax.wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
 
 __all__ = [
     "nestor_profile_policy_from_results",
@@ -25,6 +33,7 @@ __all__ = [
     "same_branch_rejected_slot_gate_from_vector_replay",
     "same_branch_replay_plan_cache",
     "same_branch_report_mode_count",
+    "same_branch_scalar_function_registry",
 ]
 
 
@@ -36,6 +45,182 @@ def same_branch_report_mode_count(report: dict[str, Any]) -> int:
         return int(np.asarray(static.modes.m).size)
     except Exception:
         return 0
+
+
+def same_branch_scalar_function_registry(
+    *,
+    args: Any,
+    qs_surfaces: Sequence[float],
+    qs_angle_cache_for_static: Any,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return production and replay scalar functions for same-branch reports."""
+
+    from vmec_jax.free_boundary_adjoint import free_boundary_boundary_geometry_jax
+    from vmec_jax.state import pack_state
+
+    def lcfs_boundary_moment(state: Any, static: Any) -> Any:
+        geometry = free_boundary_boundary_geometry_jax(state, static)
+        r = jnp.asarray(geometry["R"])
+        z = jnp.asarray(geometry["Z"])
+        return jnp.mean((r - 1.0) * (r - 1.0) + z * z)
+
+    def mean_iota_from_state(state: Any, static: Any, indata: Any, signgs: int) -> Any:
+        _chips, iotas, _iotaf = equilibrium_iota_profiles_from_state(
+            state=state,
+            static=static,
+            indata=indata,
+            signgs=int(signgs),
+        )
+        iota_arr = jnp.asarray(iotas)
+        return jnp.mean(iota_arr[1:] if iota_arr.size > 1 else iota_arr)
+
+    def accepted_bnormal_rms_from_payload(payload: dict[str, Any]) -> float:
+        values = [
+            float(np.sqrt(np.mean(np.square(np.asarray(trace["freeb_nestor_trace"]["bnormal"], dtype=float)))))
+            for trace in payload["traces"]
+            if trace.get("freeb_bsqvac_half") is not None
+            and isinstance(trace.get("freeb_nestor_trace"), dict)
+            and trace["freeb_nestor_trace"].get("bnormal") is not None
+        ]
+        if not values:
+            return 0.0
+        return float(np.mean(values))
+
+    def accepted_bnormal_rms_from_replay(replay: dict[str, Any]) -> Any:
+        bnormal = jnp.asarray(replay["history"]["bnormal_rms"])
+        accepted = jnp.asarray(replay["history"]["accepted"], dtype=bnormal.dtype)
+        active = jnp.asarray(replay["controls"]["has_active_freeb_replay"], dtype=bnormal.dtype)
+        weights = accepted * active
+        denom = jnp.maximum(jnp.sum(weights), jnp.asarray(1.0, dtype=bnormal.dtype))
+        return jnp.sum(weights * bnormal) / denom
+
+    def qs_total_from_state(state: Any, static: Any, indata: Any, signgs: int) -> Any:
+        qs = quasisymmetry_ratio_residual_from_state(
+            state=state,
+            static=static,
+            indata=indata,
+            signgs=int(signgs),
+            surfaces=qs_surfaces,
+            helicity_m=int(args.helicity_m),
+            helicity_n=int(args.helicity_n),
+            ntheta=int(args.qs_ntheta),
+            nphi=int(args.qs_nphi),
+            angle_cache=qs_angle_cache_for_static(static),
+        )
+        return qs["total"]
+
+    def boozer_qs_total_from_state(state: Any, static: Any, indata: Any, signgs: int) -> Any:
+        field = boozer_output_from_state(
+            state=state,
+            static=static,
+            indata=indata,
+            signgs=int(signgs),
+            surfaces=qs_surfaces,
+            mboz=int(getattr(args, "same_branch_boozer_mboz", 8)),
+            nboz=int(getattr(args, "same_branch_boozer_nboz", 8)),
+            jit_booz=False,
+        )
+        qs = quasisymmetry_boozer_mode_residual_from_boozer_output(
+            field["booz"],
+            helicity_m=int(args.helicity_m),
+            helicity_n=int(args.helicity_n),
+            nfp=int(field["nfp"]),
+            normalize=bool(getattr(args, "same_branch_boozer_normalize", True)),
+        )
+        return qs["total"]
+
+    scalar_value_fns = {
+        "state_norm": lambda payload: float(np.linalg.norm(np.asarray(pack_state(payload["result"].state), dtype=float))),
+        "aspect": lambda payload: float(
+            np.asarray(
+                equilibrium_aspect_ratio_from_state(
+                    state=payload["result"].state,
+                    static=payload["init"].static,
+                )
+            )
+        ),
+        "mean_iota": lambda payload: float(
+            np.asarray(
+                mean_iota_from_state(
+                    payload["result"].state,
+                    payload["init"].static,
+                    payload["init"].indata,
+                    payload["init"].signgs,
+                )
+            )
+        ),
+        "qs_total": lambda payload: float(
+            np.asarray(
+                qs_total_from_state(
+                    payload["result"].state,
+                    payload["init"].static,
+                    payload["init"].indata,
+                    payload["init"].signgs,
+                )
+            )
+        ),
+        "boozer_qs_total": lambda payload: float(
+            np.asarray(
+                boozer_qs_total_from_state(
+                    payload["result"].state,
+                    payload["init"].static,
+                    payload["init"].indata,
+                    payload["init"].signgs,
+                )
+            )
+        ),
+        "lcfs_boundary_moment": lambda payload: float(
+            np.asarray(lcfs_boundary_moment(payload["result"].state, payload["init"].static))
+        ),
+        "accepted_bnormal_rms": accepted_bnormal_rms_from_payload,
+        "betatotal": lambda payload: float(
+            np.asarray(
+                finite_beta_scalars_from_state(
+                    state=payload["result"].state,
+                    static=payload["init"].static,
+                    indata=payload["init"].indata,
+                    signgs=payload["init"].signgs,
+                )["betatotal"]
+            )
+        ),
+    }
+    scalar_replay_fns = {
+        "state_norm": lambda replay, _payload: jnp.linalg.norm(pack_state(replay["state"])),
+        "aspect": lambda replay, payload: equilibrium_aspect_ratio_from_state(
+            state=replay["state"],
+            static=payload["init"].static,
+        ),
+        "mean_iota": lambda replay, payload: mean_iota_from_state(
+            replay["state"],
+            payload["init"].static,
+            payload["init"].indata,
+            payload["init"].signgs,
+        ),
+        "qs_total": lambda replay, payload: qs_total_from_state(
+            replay["state"],
+            payload["init"].static,
+            payload["init"].indata,
+            payload["init"].signgs,
+        ),
+        "boozer_qs_total": lambda replay, payload: boozer_qs_total_from_state(
+            replay["state"],
+            payload["init"].static,
+            payload["init"].indata,
+            payload["init"].signgs,
+        ),
+        "lcfs_boundary_moment": lambda replay, payload: lcfs_boundary_moment(
+            replay["state"],
+            payload["init"].static,
+        ),
+        "accepted_bnormal_rms": lambda replay, _payload: accepted_bnormal_rms_from_replay(replay),
+        "betatotal": lambda replay, payload: finite_beta_scalars_from_state(
+            state=replay["state"],
+            static=payload["init"].static,
+            indata=payload["init"].indata,
+            signgs=payload["init"].signgs,
+        )["betatotal"],
+    }
+    return scalar_value_fns, scalar_replay_fns
 
 
 def same_branch_replay_plan_cache(
