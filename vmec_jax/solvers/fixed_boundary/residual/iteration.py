@@ -19,6 +19,7 @@ implementation uses gradient descent with a simple backtracking line search.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from collections import OrderedDict
 from functools import partial
 import time
@@ -594,6 +595,7 @@ def solve_fixed_boundary_residual_iter(
     timing_detail_env = os.getenv("VMEC_JAX_TIMING_DETAIL", "").strip().lower()
     timing_detail_enabled = timing_enabled and timing_detail_env not in ("", "0", "false", "no")
     _setup_phase_timings = _initial_setup_phase_timings()
+    state0_has_tracer = _tree_has_tracer(state0)
 
     def _setup_timer_start() -> float | None:
         return _runtime_setup_timer_start(timing_enabled=bool(timing_enabled), perf_counter=time.perf_counter)
@@ -633,7 +635,7 @@ def solve_fixed_boundary_residual_iter(
         host_update_assembly=host_update_assembly,
         backend_name=jax.default_backend(),
         scan_backend_name=_scan_backend_name(),
-        state_has_tracer=_tree_has_tracer(state0),
+        state_has_tracer=state0_has_tracer,
         env=os.environ,
         validate_options=validate_residual_iteration_options,
         resolve_tridi_policies=_resolve_preconditioner_tridi_policies,
@@ -891,7 +893,7 @@ def solve_fixed_boundary_residual_iter(
             axis_reset_coeffs = coeffs
         return st_out
 
-    prefer_host_default_profiles = not _tree_has_tracer(state0)
+    prefer_host_default_profiles = not state0_has_tracer
 
     _profile_numpy_patch = None
     host_profile_setup = _resolve_host_profile_setup(
@@ -901,36 +903,27 @@ def solve_fixed_boundary_residual_iter(
     if (
         (bool(host_update_assembly) or bool(host_profile_setup))
         and has_jax()
-        and (not _tree_has_tracer(state0))
+        and (not state0_has_tracer)
     ):
         try:
             from vmec_jax.vmec_numpy_forces import _numpy_module_patch as _profile_numpy_patch
         except Exception:
             _profile_numpy_patch = None
     try:
-        if _profile_numpy_patch is not None:
-            with _profile_numpy_patch():
+        with _profile_numpy_patch() if _profile_numpy_patch is not None else nullcontext():
+            s_profile = s
+            if _profile_numpy_patch is not None:
                 from vmec_jax.vmec_numpy_forces import _wrap as _np_wrap
 
                 s_profile = _np_wrap(np.asarray(s))
-                profile_setup = _build_wout_like_profiles_from_indata(
-                    indata=indata,
-                    static=static,
-                    s_profile=s_profile,
-                    signgs=signgs,
-                    idx00=idx00,
-                    prefer_host_default_profiles=prefer_host_default_profiles,
-                    s_profile_has_tracer=_tree_has_tracer(s_profile),
-                )
-        else:
             profile_setup = _build_wout_like_profiles_from_indata(
                 indata=indata,
                 static=static,
-                s_profile=s,
+                s_profile=s_profile,
                 signgs=signgs,
                 idx00=idx00,
                 prefer_host_default_profiles=prefer_host_default_profiles,
-                s_profile_has_tracer=_tree_has_tracer(s),
+                s_profile_has_tracer=_tree_has_tracer(s_profile),
             )
     except Exception:
         if bool(precompile_only):
@@ -956,11 +949,10 @@ def solve_fixed_boundary_residual_iter(
     mscale = np.asarray(trig.mscale)
     nscale = np.asarray(trig.nscale)
     idx00 = _mode00_index(static.modes)
-    _traced_state0 = _tree_has_tracer(state0)
-    _state_dtype = jnp.asarray(state0.Rcos).dtype if _traced_state0 else np.asarray(state0.Rcos).dtype
+    _state_dtype = jnp.asarray(state0.Rcos).dtype if state0_has_tracer else np.asarray(state0.Rcos).dtype
     lambda_update_scale_j = (
         jnp.asarray(lambda_update_scale, dtype=_state_dtype)
-        if _traced_state0
+        if state0_has_tracer
         else np.asarray(lambda_update_scale, dtype=_state_dtype)
     )
 
@@ -970,7 +962,7 @@ def solve_fixed_boundary_residual_iter(
     # residual/preconditioner updates operate in the same internal coefficient
     # space as `VMECState`.
 
-    if _traced_state0:
+    if state0_has_tracer:
         edge_Rcos = jnp.asarray(state0.Rcos)[-1, :]
         edge_Rsin = jnp.asarray(state0.Rsin)[-1, :]
         edge_Zcos = jnp.asarray(state0.Zcos)[-1, :]
@@ -1441,7 +1433,6 @@ def solve_fixed_boundary_residual_iter(
     nrange = ntor + 1
     nfp = float(static.cfg.nfp)
     ncoeff = int(jnp.asarray(state0.Rcos).shape[1])
-    state0_is_traced = _tree_has_tracer(state0)
     # On accelerator host-forward runs the initial row/gauge enforcement is
     # setup work.  Using the NumPy row-assignment path avoids several tiny eager
     # device dispatches without touching traced/differentiable solves.
@@ -1449,7 +1440,7 @@ def solve_fixed_boundary_residual_iter(
         setup_host_enforce_env=os.getenv("VMEC_JAX_HOST_SETUP_ENFORCE", "auto"),
         host_update_assembly=bool(host_update_assembly),
         use_scan=bool(use_scan),
-        state_has_tracer=bool(state0_is_traced),
+        state_has_tracer=state0_has_tracer,
         backend_name=_scan_backend_name(),
     )
 
