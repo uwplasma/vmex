@@ -84,6 +84,13 @@ Current solver status:
   not yet a tight-convergence production claim.
 - Open-field pitch diagnostics measure cap-to-cap field-line advance and turns.
   They should not be interpreted as toroidal rotational transform.
+- Toroidal hybrid VMEC/JAX versus VMEC2000 parity rows currently compare
+  solved outcomes from the same generated ``input.*`` file.  They should not
+  yet be read as identical-initial-state parity: the parsed VMEC2000
+  ``threed1`` first rows start from different residual components than the
+  VMEC/JAX initialized state.  Mean-iota agreement is therefore a useful
+  regression signal, while strict force-residual parity still needs an
+  initialization-matched fixture or option.
 
 Later phases finish differentiable optimization APIs, production
 free-boundary LCFS solves, toroidal stellarator-mirror hybrid convergence and

@@ -11241,3 +11241,111 @@ plots.  No committed source files changed for this evidence run.
 No user input is needed.
 
 ---
+
+## 91. 2026-06-18 CI coverage fix and toroidal-hybrid parity docs note
+
+This tranche fixed the PR's immediate CI blocker and moved the section 90
+parity caveat into user-facing docs.
+
+### Steps taken
+
+- Checked draft PR #21 and confirmed a single failing check:
+  `Coverage Gate (py3.11 combined)`.
+- Downloaded the CI coverage artifacts and inspected exact missed source lines.
+- Added focused validation tests for:
+  - toroidal-hybrid boundary geometry guards;
+  - toroidal-hybrid mode extent guards;
+  - non-stellarator-symmetric sampled-boundary rejection;
+  - mirror circular-coil input guards;
+  - mirror beta-case pressure-scale guards;
+  - mirror LCFS merit and finite-difference response guards.
+- Added concise parity caveats to:
+  - `docs/mirror/overview.rst`;
+  - `examples/mirror/README.md`.
+
+### Results obtained
+
+- The old CI gate failed because exact coverage was `94.96%` against the
+  `95.00%` threshold.
+- The new tests cover the visible toroidal-hybrid misses plus additional
+  mirror free-boundary guard branches, enough to clear the small exact-coverage
+  deficit without changing solver behavior or CI policy.
+- The docs now explicitly say current toroidal hybrid VMEC/JAX-vs-VMEC2000
+  rows compare solved outcomes from the same generated input, not identical
+  raw initialized states.
+
+### How it was tested
+
+Focused tests:
+
+```bash
+JAX_ENABLE_X64=1 pytest \
+  tests/test_toroidal_hybrid.py \
+  tests/mirror/test_mirror_free_boundary.py -q
+```
+
+Result: `46 passed in 4.05s`.
+
+Lint and format:
+
+```bash
+python -m ruff check \
+  tests/test_toroidal_hybrid.py \
+  tests/mirror/test_mirror_free_boundary.py
+python -m ruff format --check \
+  tests/test_toroidal_hybrid.py \
+  tests/mirror/test_mirror_free_boundary.py
+```
+
+Result: all checks passed.
+
+Whitespace:
+
+```bash
+git diff --check
+```
+
+Result: no whitespace errors.
+
+### File structure and best-practice notes
+
+- The coverage fix is test-only and keeps behavior untouched.
+- Documentation edits are limited to source docs, not generated `docs/_build`
+  output.
+- Generated caches and `results/` remain ignored and unstaged.
+
+### Best next steps
+
+1. Validate the docs build after the parity note.
+2. Commit and push this docs tranche.
+3. Start M13g geometry refinement:
+   - expose controlled side/corner-shaping parameters;
+   - preserve stellarator symmetry and positive cylindrical `R`;
+   - run the existing convergence/parity runner as the regression harness;
+   - keep generated plots under ignored `results/`.
+4. Recheck CI after it has had time to run, without blocking active
+   implementation on Actions latency.
+
+### Completion percentages after M91
+
+- Geometry/grids/bases: `93%`.
+- Field/energy/residual kernels: `86%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `88%`.
+- I/O schema and docs: `94%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `68%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `45%`.
+- ESSOS circular-coil mirror beta scan: `53%`.
+- PR merge readiness overall: `92%`.
+
+### User input needed
+
+No user input is needed.
+
+---
