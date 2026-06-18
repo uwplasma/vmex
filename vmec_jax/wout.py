@@ -23,7 +23,7 @@ from .vmec_realspace import (
     vmec_realspace_synthesis_dtheta,
     vmec_realspace_geom_from_state,
 )
-from .vmec_residue import vmec_pwint_from_trig
+from .vmec_residue import vmec_pwint_from_trig, vmec_wint_from_trig
 from .io.wout import bsubs as _wout_bsubs_helpers
 from .io.wout import debug as _wout_debug_helpers
 from .io.wout import diagnostics as _wout_diagnostics
@@ -110,30 +110,31 @@ _jxbforce_filter_with_bsubs_derivs_loop = _wout_jxbforce_helpers._jxbforce_filte
 _jxbforce_nyquist_limits = _wout_jxbforce_helpers._jxbforce_nyquist_limits
 
 
-def _vmec_wint_from_trig(trig) -> np.ndarray:
-    """Return VMEC-style angular weights (wint) on the internal grid."""
+def _validate_wint_trig(trig) -> int:
     cosmui3 = np.asarray(trig.cosmui3)
     mscale = np.asarray(trig.mscale)
     if cosmui3.ndim != 2:
         raise ValueError("Expected trig.cosmui3 with shape (ntheta3, mmax+1)")
     if mscale.size == 0:
         raise ValueError("Expected non-empty trig.mscale")
-    w_theta = cosmui3[:, 0] / float(mscale[0])
-    nzeta = int(np.asarray(trig.cosnv).shape[0])
-    wint = w_theta[:, None] * np.ones((nzeta,), dtype=w_theta.dtype)[None, :]
-    return np.asarray(wint, dtype=float)
+    return int(np.asarray(trig.cosnv).shape[0])
+
+
+def _vmec_wint_from_trig(trig) -> np.ndarray:
+    """Return VMEC-style angular weights (wint) on the internal grid."""
+    nzeta = _validate_wint_trig(trig)
+    if hasattr(trig, "ntheta3"):
+        return np.asarray(vmec_wint_from_trig(trig, nzeta=nzeta), dtype=float)
+    w_theta = np.asarray(trig.cosmui3)[:, 0] / float(np.asarray(trig.mscale)[0])
+    return np.asarray(w_theta[:, None] * np.ones((nzeta,), dtype=w_theta.dtype)[None, :], dtype=float)
 
 
 def _vmec_wint_from_trig_jax(trig):
     """Return VMEC-style angular weights on the internal grid as JAX arrays."""
-    cosmui3 = jnp.asarray(trig.cosmui3)
-    mscale = jnp.asarray(trig.mscale)
-    if cosmui3.ndim != 2:
-        raise ValueError("Expected trig.cosmui3 with shape (ntheta3, mmax+1)")
-    if int(mscale.size) == 0:
-        raise ValueError("Expected non-empty trig.mscale")
-    w_theta = cosmui3[:, 0] / mscale[0]
-    nzeta = int(np.asarray(trig.cosnv).shape[0])
+    nzeta = _validate_wint_trig(trig)
+    if hasattr(trig, "ntheta3"):
+        return vmec_wint_from_trig(trig, nzeta=nzeta)
+    w_theta = jnp.asarray(trig.cosmui3)[:, 0] / jnp.asarray(trig.mscale)[0]
     return w_theta[:, None] * jnp.ones((nzeta,), dtype=w_theta.dtype)[None, :]
 
 

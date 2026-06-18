@@ -59,53 +59,36 @@ _PRODUCTION_VMEC_BCOVAR_HALF_MESH_FROM_WOUT = vmec_bcovar_half_mesh_from_wout
 
 
 @contextmanager
+def _optional_jax_context(factory):
+    if has_jax():
+        try:
+            context = factory()
+        except Exception:
+            context = None
+        if context is not None:
+            try:
+                context.__enter__()
+            except Exception:
+                pass
+            else:
+                try:
+                    yield
+                except BaseException as exc:
+                    suppress = context.__exit__(type(exc), exc, exc.__traceback__)
+                    if not suppress:
+                        raise
+                else:
+                    context.__exit__(None, None, None)
+                return
+    yield
+
+
 def _named_scope(name: str):
-    if has_jax():
-        try:
-            scope = jax.named_scope(name)
-        except Exception:
-            scope = None
-        if scope is not None:
-            try:
-                scope.__enter__()
-            except Exception:
-                pass
-            else:
-                try:
-                    yield
-                except BaseException as exc:
-                    suppress = scope.__exit__(type(exc), exc, exc.__traceback__)
-                    if not suppress:
-                        raise
-                else:
-                    scope.__exit__(None, None, None)
-                return
-    yield
+    return _optional_jax_context(lambda: jax.named_scope(name))
 
 
-@contextmanager
 def _trace(name: str):
-    if has_jax():
-        try:
-            annotation = jax.profiler.TraceAnnotation(name)
-        except Exception:
-            annotation = None
-        if annotation is not None:
-            try:
-                annotation.__enter__()
-            except Exception:
-                pass
-            else:
-                try:
-                    yield
-                except BaseException as exc:
-                    suppress = annotation.__exit__(type(exc), exc, exc.__traceback__)
-                    if not suppress:
-                        raise
-                else:
-                    annotation.__exit__(None, None, None)
-                return
-    yield
+    return _optional_jax_context(lambda: jax.profiler.TraceAnnotation(name))
 
 
 def _vmec_force_profile_enabled() -> bool:
@@ -374,6 +357,16 @@ def _apply_freeb_edge_forcing(ctx):
     )
 
 
+_VMEC_RZ_FORCE_KERNEL_FIELDS = (
+    "armn_e", "armn_o", "brmn_e", "brmn_o", "crmn_e", "crmn_o",
+    "azmn_e", "azmn_o", "bzmn_e", "bzmn_o", "czmn_e", "czmn_o", "bc",
+    "arcon_e", "arcon_o", "azcon_e", "azcon_o", "gcon",
+    "pr1_even", "pr1_odd", "pz1_even", "pz1_odd", "pru_even", "pru_odd",
+    "pzu_even", "pzu_odd", "prv_even", "prv_odd", "pzv_even", "pzv_odd",
+    "tcon", "constraint_rcon0", "constraint_zcon0",
+)
+
+
 @tree_util.register_pytree_node_class
 @dataclass(frozen=True)
 class VmecRZForceKernels:
@@ -428,42 +421,7 @@ class VmecRZForceKernels:
     constraint_zcon0: Any | None = None  # (ns, ntheta, nzeta)
 
     def tree_flatten(self):
-        children = (
-            self.armn_e,
-            self.armn_o,
-            self.brmn_e,
-            self.brmn_o,
-            self.crmn_e,
-            self.crmn_o,
-            self.azmn_e,
-            self.azmn_o,
-            self.bzmn_e,
-            self.bzmn_o,
-            self.czmn_e,
-            self.czmn_o,
-            self.bc,
-            self.arcon_e,
-            self.arcon_o,
-            self.azcon_e,
-            self.azcon_o,
-            self.gcon,
-            self.pr1_even,
-            self.pr1_odd,
-            self.pz1_even,
-            self.pz1_odd,
-            self.pru_even,
-            self.pru_odd,
-            self.pzu_even,
-            self.pzu_odd,
-            self.prv_even,
-            self.prv_odd,
-            self.pzv_even,
-            self.pzv_odd,
-            self.tcon,
-            self.constraint_rcon0,
-            self.constraint_zcon0,
-        )
-        return children, None
+        return tuple(getattr(self, name) for name in _VMEC_RZ_FORCE_KERNEL_FIELDS), None
 
     @classmethod
     def tree_unflatten(cls, aux_data, children):
