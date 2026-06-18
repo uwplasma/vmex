@@ -879,6 +879,7 @@ def build_minimal_wout_data_kwargs(
     ns = int(context["ns"])
     indata = context["indata"]
     converged_bool = bool(converged)
+    main_geom = context["main_geom"]
     scalar_diag = context["scalar_diag"]
     current_metadata = context["current_metadata"]
 
@@ -898,10 +899,10 @@ def build_minimal_wout_data_kwargs(
         "xn": np.asarray(main_modes.n * nfp, dtype=int),
         "xm_nyq": np.asarray(nyq_modes.m, dtype=int),
         "xn_nyq": np.asarray(nyq_modes.n * nfp, dtype=int),
-        "rmnc": np.asarray(context["rmnc"], dtype=float),
-        "rmns": np.asarray(context["rmns"], dtype=float),
-        "zmnc": np.asarray(context["zmnc"], dtype=float),
-        "zmns": np.asarray(context["zmns"], dtype=float),
+        "rmnc": np.asarray(main_geom.rmnc, dtype=float),
+        "rmns": np.asarray(main_geom.rmns, dtype=float),
+        "zmnc": np.asarray(main_geom.zmnc, dtype=float),
+        "zmns": np.asarray(main_geom.zmns, dtype=float),
         "lmnc": np.asarray(context["lmnc"], dtype=float),
         "lmns": np.asarray(context["lmns"], dtype=float),
         "phipf": np.asarray(context["phipf_out"], dtype=float),
@@ -940,10 +941,10 @@ def build_minimal_wout_data_kwargs(
         "bvco": np.asarray(context["bvco"], dtype=float),
         "jcuru": np.asarray(context["jcuru"], dtype=float),
         "jcurv": np.asarray(context["jcurv"], dtype=float),
-        "raxis_cc": np.asarray(context["raxis_cc"], dtype=float),
-        "zaxis_cs": np.asarray(context["zaxis_cs"], dtype=float),
-        "raxis_cs": np.asarray(context["raxis_cs"], dtype=float),
-        "zaxis_cc": np.asarray(context["zaxis_cc"], dtype=float),
+        "raxis_cc": np.asarray(main_geom.raxis_cc, dtype=float),
+        "zaxis_cs": np.asarray(main_geom.zaxis_cs, dtype=float),
+        "raxis_cs": np.asarray(main_geom.raxis_cs, dtype=float),
+        "zaxis_cc": np.asarray(main_geom.zaxis_cc, dtype=float),
         "Aminor_p": float(context["Aminor_p"]),
         "Rmajor_p": float(context["Rmajor_p"]),
         "aspect": float(context["aspect"]),
