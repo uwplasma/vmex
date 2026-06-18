@@ -16,6 +16,13 @@ from vmec_jax.solvers.fixed_boundary.residual.ptau import (
     maybe_dump_ptau,
     ptau_minmax,
 )
+from vmec_jax.solvers.fixed_boundary.residual.scan_adapters import (
+    ScanConvergencePredicate,
+    ScanDeviceRuntime,
+    ScanTimeControlDumper,
+    ScanVmec2000PrintContext,
+    scan_m1_preconditioner_rhs,
+)
 from vmec_jax.solvers.fixed_boundary.residual.state_setup import build_residual_state_setup
 from vmec_jax.config import VMECConfig
 from vmec_jax.state import StateLayout, VMECState
@@ -205,6 +212,67 @@ def test_resolve_vmec2000_print_context_forwards_rows_and_cadence() -> None:
     assert rows[0]["iter_idx"] == 6
     assert rows[0]["lasym"]
     assert rows[0]["scan_print_mode"] == "debug_print"
+
+
+def test_scan_adapter_contexts_delegate_runtime_and_scan_contracts() -> None:
+    ready_calls = []
+
+    runtime = ScanDeviceRuntime(
+        scan_timing_enabled=True,
+        stats={"scan_device_s": 0.0},
+        perf_counter=lambda: 3.5,
+        block_until_ready=lambda value: ready_calls.append(value) or value,
+        tree_map=lambda func, value: func(value),
+        record_ready=lambda **kwargs: ready_calls.append(("record", kwargs)),
+    )
+    assert runtime.block_value("payload") == "payload"
+    assert ready_calls[0] == "payload"
+    assert runtime.ready(1.0, "device", cache_status="hit") == "device"
+    assert ready_calls[-1][0] == "record"
+    assert ready_calls[-1][1]["cache_status"] == "hit"
+
+    print_context = ScanVmec2000PrintContext(
+        nstep_screen=5,
+        lasym=False,
+        verbose=True,
+        vmec2000_control=True,
+        verbose_vmec2000_table=True,
+    )
+    assert print_context.should_print(5, 12)
+    assert not print_context.should_print(6, 12)
+
+    dumper = ScanTimeControlDumper(
+        enabled=False,
+        timecontrol_callback=None,
+        timecontrol_path=None,
+        jax_module=None,
+        jnp_module=np,
+    )
+    assert int(dumper(cond=True, stage_id=1, iter2=2, iter1=1, fsq=1.0, fsq0=1.0, res0=1.0, res1=1.0, time_step=0.9, irst=1)) == 0
+
+    predicate = ScanConvergencePredicate(
+        ftol=1.0e-3,
+        fsq_total_target=None,
+        converged_func=lambda fsqr, fsqz, fsql, *, ftol, fsq_total_target: (fsqr + fsqz + fsql) <= ftol,
+    )
+    assert predicate(1.0e-4, 2.0e-4, 3.0e-4)
+    assert not predicate(1.0e-3, 2.0e-3, 3.0e-3)
+
+    call_args = {}
+    assert (
+        scan_m1_preconditioner_rhs(
+            "forces",
+            {"mat": "value"},
+            cfg=SimpleNamespace(lconm1=False, mpol=7),
+            scale_m1_precond_rhs_from_mats=lambda *args, **kwargs: call_args.update(
+                {"args": args, "kwargs": kwargs}
+            )
+            or "scaled",
+        )
+        == "scaled"
+    )
+    assert call_args["args"] == ("forces", {"mat": "value"})
+    assert call_args["kwargs"] == {"lconm1": False, "mpol": 7, "host_update_assembly": False}
 
 
 def test_grid_matches_vmec_static_grid_requires_same_coordinates() -> None:

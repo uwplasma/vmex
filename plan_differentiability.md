@@ -9219,3 +9219,64 @@ Completion:
 - Implicit residual-adjoint decomposition: 88%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.95%.
+
+## 2026-06-18 Residual Scan Adapter Split
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `vmec_jax.solvers.fixed_boundary.residual.scan_adapters` to own
+   scan adapter plumbing: device synchronization/timing, VMEC2000 row cadence,
+   time-control trace dumping, scan convergence predicates, and `m=1`
+   preconditioner RHS scaling.
+2. Replaced the corresponding nested closures in the VMEC2000 scan path and the
+   generic scan path with named adapter contexts.
+3. Added direct unit coverage for the adapter contracts.
+
+Results obtained:
+
+- `vmec_jax/solvers/fixed_boundary/residual/iteration.py` dropped from 7,817
+  to 7,765 lines.
+- `solve_fixed_boundary_residual_iter` dropped from 7,303 to 7,248 lines.
+- `_run_vmec2000_scan` dropped from 1,491 to 1,438 lines.
+- Scan math and controller branch selection remain in place; this tranche moved
+  only adapter plumbing.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/residual/scan_adapters.py`
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/residual/scan_adapters.py tests/test_solve_residual_iter_setup_helpers.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_setup_helpers.py tests/test_solve_scan_debug_helpers.py tests/test_scan_helper_edge_gates.py tests/test_solve_scan_planning_helpers.py tests/test_solve_scan_payload_helpers.py tests/test_solve_scan_math_helpers.py tests/test_solve_residual_iter_runtime_helpers.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_config.py tests/test_solve_residual_iter_runtime_helpers.py tests/test_solve_residual_iter_setup_helpers.py tests/test_solve_residual_iter_finalize_helpers.py tests/test_solve_residual_iter_force_cache_helpers.py tests/test_solve_diagnostics_io.py tests/test_solve_scan_debug_helpers.py tests/test_scan_helper_edge_gates.py tests/test_solve_scan_planning_helpers.py tests/test_solve_scan_payload_helpers.py tests/test_solve_scan_math_helpers.py tests/test_solve_preconditioner_metric_helpers.py tests/test_solve_residual_iter_mode_transform_helpers.py tests/test_solve_residual_iter_geometry_helpers.py tests/test_solve_residual_iter_force_payload_helpers.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_hotpaths.py tests/test_solve_wave4_coverage.py tests/test_solve_additional_branch_coverage.py -q`
+- `python tools/diagnostics/source_health.py --top 12 --top-functions 16`
+
+Best next steps:
+
+1. Split the branch-local free-boundary replay/report assembly now that the
+   residual scan adapter seam is covered.
+2. Defer the risky `_scan_step`/`_advance_step` extraction until smaller
+   controller-state seams are identified.
+3. Continue keeping arbitrary adaptive-branch differentiation claims
+   conservative; this refactor does not change those semantics.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.96%.
+- Differentiability/refactor implementation: 99.99974%.
+- Solver monolith reduction: 99.15%.
+- Free-boundary adjoint monolith reduction: 92%.
+- Driver workflow decomposition: 96.4%.
+- WOUT diagnostic/profile decomposition: 98.8%.
+- Optimizer workflow decomposition: 98.8%.
+- Fixed-boundary optimizer decomposition: 94.0%.
+- Implicit residual-adjoint decomposition: 88%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.955%.
