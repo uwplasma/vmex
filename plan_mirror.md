@@ -8604,6 +8604,9 @@ Result: all checks passed.
 ### User input needed
 
 No user input is needed.
+
+---
+
 ## 74. 2026-06-18 M12l normal-field-slope LCFS proposal basis
 
 This tranche added a real normal-field descent candidate for circular-coil LCFS
