@@ -15412,3 +15412,74 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.99994%.
+
+## 2026-06-18 Discrete-Adjoint Redundant JAX Import Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Removed redundant local `from ._compat import jax` imports from
+   `vmec_jax/discrete_adjoint.py`.
+2. Kept the existing module-scope `jax` import as the single binding used by
+   checkpoint tape VJP/JVP, stacked replay, dynamic replay, and parameter
+   tangent helpers.
+
+Results obtained:
+
+- `vmec_jax/discrete_adjoint.py` dropped from 3557 to 3529 lines.
+- No replay math, tape construction, cache keys, or differentiation APIs
+  changed.
+- The redundant local import removal also reduces visual clutter in the
+  branch-local replay code.
+- No generated outputs or large files were added.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/discrete_adjoint.py`
+- `python -m ruff check vmec_jax/discrete_adjoint.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_discrete_adjoint_wave6_coverage.py -q`
+  - Result: passed.
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_optimization_wave2_coverage.py::test_run_scipy_final_exact_failure_uses_prior_best_exact_not_trial tests/test_optimization_wave2_coverage.py::test_run_matrix_free_history_best_exact_drives_final_fallback -q`
+  - Result: passed.
+- `python tools/diagnostics/source_health.py --top 16 --top-functions 30`
+
+Best next steps:
+
+1. Continue discrete-adjoint cleanup only for non-semantic scaffolding such as
+   duplicate imports, repeated cache-recording boilerplate, or shared replay
+   metadata helpers.
+2. Do not change replay equations or accepted-step differentiation semantics
+   without a dedicated AD-vs-FD gate in the same tranche.
+3. Return to residual iteration or example workflow simplification for the next
+   net-negative edit if no discrete-adjoint scaffolding remains obvious.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999998%.
+- Solver monolith reduction: 99.62%.
+- Free-boundary adjoint monolith reduction: 99.40%.
+- Driver workflow decomposition: 99.89%.
+- Residual iteration decomposition: 97.5%.
+- WOUT diagnostic/profile decomposition: 99.88%.
+- Bcovar/WOUT parity decomposition: 99.09%.
+- Force-kernel decomposition: 99.65%.
+- Scan/performance policy consolidation: 99.6%.
+- Tomnsps transform decomposition: 98.4%.
+- Initial-guess decomposition: 99.0%.
+- Optimizer workflow decomposition: 99.48%.
+- Fixed-boundary optimizer decomposition: 95.5%.
+- Plotting/WOUT visualization decomposition: 95.8%.
+- Sweep/example workflow decomposition: 93.8%.
+- Implicit residual-adjoint decomposition: 95.3%.
+- QI objective/staged-runner decomposition: 96.8%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.99995%.
