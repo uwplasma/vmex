@@ -106,6 +106,17 @@ class ScanStepFields(NamedTuple):
     fsq_prev: Any
 
 
+class ScanSelectedPayloadStep(NamedTuple):
+    """Selected scan payload and state-update fields for one scan step."""
+
+    payload: ScanForcePayload
+    step_fields: ScanStepFields
+    fsqr: Any
+    fsqz: Any
+    fsql: Any
+    fsq1: Any
+
+
 def build_initial_preconditioner_cache(
     *,
     state_init: Any,
@@ -995,6 +1006,135 @@ def build_scan_step_fields(
         accept_step_fn=_accept_step,
         reject_step_fn=_reject_step,
         cond=cond,
+    )
+
+
+def select_payload_and_build_step_fields(
+    *,
+    do_restart: Any,
+    use_restart_payload: bool,
+    current_payload: ScanForcePayload,
+    state_post: Any,
+    compute_forces_scan_func: Callable[..., tuple[Any, TomnspsRZL, Any, Any, Any, Any, Any, Any]],
+    restart_trace_context: Callable[[], Any],
+    zero_m1: Any,
+    zero_precond_diag: Any,
+    zero_tcon: Any,
+    constraint_active_false: Any,
+    constraint_tcon0: Any,
+    trig: Any,
+    s: Any,
+    cfg: Any,
+    dtype: Any,
+    scan_use_precomputed: bool,
+    scan_use_lax_tridi: bool,
+    lambda_preconditioner_func: Callable[[Any], Any],
+    rz_norm_func: Callable[[Any], Any],
+    scale_m1_precond_rhs_func: Callable[[TomnspsRZL, Any], TomnspsRZL],
+    w_mode_mn: Any,
+    lambda_update_scale_j: Any,
+    apply_lambda_update_scale: bool,
+    delta_s: Any,
+    jmax0: Any,
+    velocity_blocks_post: tuple[Any, ...],
+    inv_tau_post: Any,
+    fsq_prev_post: Any,
+    time_step_post: Any,
+    iter2: Any,
+    iter1_post: Any,
+    k_ndamp: int,
+    flip_sign: Any,
+    lasym: bool,
+    static: Any,
+    edge_Rcos: Any,
+    edge_Rsin: Any,
+    edge_Zcos: Any,
+    edge_Zsin: Any,
+    free_boundary_enabled: bool,
+    idx00: Any,
+    mn_cos_to_signed_physical: Callable[[Any, Any], Any],
+    mn_sin_to_signed_physical: Callable[[Any, Any], Any],
+    mn_sin_to_signed_physical_lambda: Callable[[Any, Any], Any],
+    mn_cos_to_signed_physical_lambda: Callable[[Any, Any], Any],
+    enforce_fixed_boundary_and_axis: Callable[..., Any],
+    apply_vmec_lambda_axis_rules: Callable[[Any], Any],
+    vmec2000_control: bool,
+    cond: Callable[..., Any],
+) -> ScanSelectedPayloadStep:
+    """Select restart/current payloads and build accepted-step fields."""
+
+    def _restart_payload(_):
+        return build_restart_preconditioned_scan_payload(
+            state_post=state_post,
+            compute_forces_scan_func=compute_forces_scan_func,
+            trace_context=restart_trace_context,
+            zero_m1=zero_m1,
+            zero_precond_diag=zero_precond_diag,
+            zero_tcon=zero_tcon,
+            constraint_active_false=constraint_active_false,
+            constraint_tcon0=constraint_tcon0,
+            trig=trig,
+            s=s,
+            cfg=cfg,
+            dtype=dtype,
+            scan_use_precomputed=bool(scan_use_precomputed),
+            scan_use_lax_tridi=bool(scan_use_lax_tridi),
+            lambda_preconditioner_func=lambda_preconditioner_func,
+            rz_norm_func=rz_norm_func,
+            scale_m1_precond_rhs_func=scale_m1_precond_rhs_func,
+            w_mode_mn=w_mode_mn,
+            lambda_update_scale_j=lambda_update_scale_j,
+            apply_lambda_update_scale=bool(apply_lambda_update_scale),
+            delta_s=delta_s,
+            jmax0=jmax0,
+        )
+
+    payload = select_scan_force_payload(
+        do_restart=do_restart,
+        use_restart_payload=bool(use_restart_payload),
+        restart_payload_fn=_restart_payload,
+        current_payload_fn=lambda _: current_payload,
+        cond=cond,
+    )
+    fsq1 = payload.fsqr1 + payload.fsqz1 + payload.fsql1
+    step_fields = build_scan_step_fields(
+        payload=payload,
+        state_post=state_post,
+        velocity_blocks_post=velocity_blocks_post,
+        inv_tau_post=inv_tau_post,
+        fsq_prev_post=fsq_prev_post,
+        fsq1=fsq1,
+        time_step_post=time_step_post,
+        iter2=iter2,
+        iter1_post=iter1_post,
+        k_ndamp=k_ndamp,
+        dtype=dtype,
+        flip_sign=flip_sign,
+        lasym=bool(lasym),
+        static=static,
+        edge_Rcos=edge_Rcos,
+        edge_Rsin=edge_Rsin,
+        edge_Zcos=edge_Zcos,
+        edge_Zsin=edge_Zsin,
+        free_boundary_enabled=bool(free_boundary_enabled),
+        idx00=idx00,
+        mn_cos_to_signed_physical=mn_cos_to_signed_physical,
+        mn_sin_to_signed_physical=mn_sin_to_signed_physical,
+        mn_sin_to_signed_physical_lambda=mn_sin_to_signed_physical_lambda,
+        mn_cos_to_signed_physical_lambda=mn_cos_to_signed_physical_lambda,
+        enforce_fixed_boundary_and_axis=enforce_fixed_boundary_and_axis,
+        apply_vmec_lambda_axis_rules=apply_vmec_lambda_axis_rules,
+        vmec2000_control=bool(vmec2000_control),
+        do_restart=do_restart,
+        cond=cond,
+    )
+    return ScanSelectedPayloadStep(
+        payload=payload,
+        step_fields=step_fields,
+        fsqr=payload.fsqr,
+        fsqz=payload.fsqz,
+        fsql=payload.fsql,
+        fsq1=fsq1,
     )
 
 

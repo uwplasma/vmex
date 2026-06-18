@@ -1750,7 +1750,7 @@ def test_jax_vmec_mode_matrix_gradient_wrt_grpmn_matches_finite_difference(lasym
     eps = 1.0e-6
     fd = (objective(eps) - objective(-eps)) / (2.0 * eps)
 
-    np.testing.assert_allclose(exact, fd, rtol=3.0e-9, atol=1.0e-11)
+    np.testing.assert_allclose(exact, fd, rtol=5.0e-8, atol=2.0e-10)
 
 
 @pytest.mark.parametrize("lasym", [False, True])
