@@ -1641,9 +1641,6 @@ def solve_fixed_boundary_residual_iter(
         print_in_scan = scan_runtime.print_in_scan
         scan_print_mode = scan_runtime.scan_print_mode
         scan_trace = scan_runtime.scan_trace
-        _jax_debug = scan_runtime.jax_debug
-        _jax_debug_print = scan_runtime.jax_debug_print
-
         def _maybe_trace(label: str):
             return scan_runtime.maybe_trace(label)
 
@@ -1859,7 +1856,6 @@ def solve_fixed_boundary_residual_iter(
         scan_fallback_fsq_abs_j = jnp.asarray(float(scan_fallback_fsq_abs), dtype=dtype)
         scan_fallback_improve_j = jnp.asarray(float(startup_policy.scan_fallback_improve), dtype=dtype)
 
-        scan_jax_debug = _jax_debug
         scan_debug_force = os.getenv("VMEC_JAX_SCAN_DEBUG_FORCE", "") not in ("", "0")
         debug_iter_env = os.getenv("VMEC_JAX_SCAN_DEBUG_ITER", "").strip()
         try:
@@ -1896,7 +1892,7 @@ def solve_fixed_boundary_residual_iter(
                     scan_debug_iter=int(scan_debug_iter),
                     debug_force_first_iter=_maybe_debug_scan_force_first_iter,
                     debug_state_iter=_maybe_debug_scan_state_iter,
-                    debug_print=_jax_debug_print,
+                    debug_print=scan_runtime.jax_debug_print,
                 )
                 iter2 = force_eval.iter2
                 fsq_prev_before = force_eval.fsq_prev_before
@@ -2224,7 +2220,7 @@ def solve_fixed_boundary_residual_iter(
                     w_mhd=w_mhd,
                     scan_print_mode=scan_print_mode,
                     scan_print_ordered=bool(scan_print_ordered),
-                    jax_debug=scan_jax_debug,
+                    jax_debug=scan_runtime.jax_debug,
                     io_callback=_io_callback,
                     cond=jax.lax.cond,
                     print_row=_print_scan_vmec2000_row,
