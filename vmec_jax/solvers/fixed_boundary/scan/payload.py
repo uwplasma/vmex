@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import Any, Callable, NamedTuple
 
 from ...._compat import jax, jnp
@@ -58,6 +59,33 @@ class ScanInitialCache(NamedTuple):
     rz_mats: Any
     jmax: int
     valid: Any
+
+
+class ScanStepForceEvaluation(NamedTuple):
+    """First force/residual payload for one VMEC2000 scan step."""
+
+    iter2: Any
+    fsq_prev_before: Any
+    fsq0_prev_before: Any
+    skip_timecontrol: Any
+    time_step_report: Any
+    zero_m1: Any
+    include_edge: Any
+    need_bcovar_update: Any
+    use_cached_precond: Any
+    kernels: Any
+    frzl: Any
+    gcr2: Any
+    gcz2: Any
+    gcl2: Any
+    rz_scale: Any
+    l_scale: Any
+    norms_current: Any
+    norms_used: Any
+    fsqr: Any
+    fsqz: Any
+    fsql: Any
+    conv_now: Any
 
 
 class ScanStepFields(NamedTuple):
@@ -382,6 +410,131 @@ def build_scan_force_payload(
         cache_rz_mats=cache_rz_mats,
         cache_lam_prec=cache_lam_prec,
         cache_valid=cache_valid,
+    )
+
+
+def evaluate_scan_step_force(
+    *,
+    carry_adv: Any,
+    it: Any,
+    dtype: Any,
+    k_preconditioner_update_interval: int,
+    zero_precond_diag: Any,
+    zero_tcon: Any,
+    compute_forces_scan: Callable[..., Any],
+    scan_converged: Callable[..., Any],
+    tree_select: Callable[[Any, Any, Any], Any],
+    cond: Callable[..., Any],
+    trace_context: Callable[[], Any] | None = None,
+    scan_debug_force_enabled: bool = False,
+    scan_debug_iter: int = -1,
+    debug_force_first_iter: Callable[..., Any] | None = None,
+    debug_state_iter: Callable[..., Any] | None = None,
+    debug_print: Callable[..., Any] | None = None,
+) -> ScanStepForceEvaluation:
+    """Evaluate the force and scalar residuals at the start of a scan step."""
+
+    iter2 = jnp.asarray(it + 1, dtype=jnp.int32) + jnp.asarray(carry_adv.iter_offset, dtype=jnp.int32)
+    fsq_prev_before = carry_adv.fsq_prev
+    fsq0_prev_before = carry_adv.fsq0_prev
+    skip_timecontrol = carry_adv.skip_timecontrol
+    iter_since_restart = iter2 - carry_adv.iter1
+    time_step_report = carry_adv.time_step
+    # VMEC `constrain_m1`: zero gcz(m=1) on the first global iteration, and
+    # again when the previous fsqz drops below the tolerance.
+    zero_m1 = jnp.where(
+        (iter2 < 2) | (carry_adv.fsqz_prev < 1.0e-6),
+        jnp.asarray(1.0, dtype=dtype),
+        jnp.asarray(0.0, dtype=dtype),
+    )
+    prev_rz_fsq = carry_adv.fsqr_prev_phys + carry_adv.fsqz_prev_phys
+    include_edge = (iter_since_restart < 50) & (prev_rz_fsq < jnp.asarray(1.0e-6, dtype=prev_rz_fsq.dtype))
+
+    precond_age = iter2 - carry_adv.iter1
+    need_periodic_precond_update = (precond_age > 0) & (
+        (precond_age % int(k_preconditioner_update_interval)) == 0
+    )
+    need_bcovar_update = (~carry_adv.cache_valid) | carry_adv.force_bcovar_update | need_periodic_precond_update
+    use_cached_precond = carry_adv.cache_valid & (~need_bcovar_update)
+    constraint_precond_diag = tree_select(use_cached_precond, carry_adv.cache_precond_diag, zero_precond_diag)
+    constraint_tcon_override = jnp.where(use_cached_precond, carry_adv.cache_tcon, zero_tcon)
+
+    context = nullcontext if trace_context is None else trace_context
+    with context():
+        kernels, frzl, gcr2, gcz2, gcl2, rz_scale, l_scale, norms_current = compute_forces_scan(
+            carry_adv.state,
+            include_edge=False,
+            zero_m1=zero_m1,
+            constraint_precond_diag=constraint_precond_diag,
+            constraint_tcon=constraint_tcon_override,
+            constraint_precond_active=use_cached_precond,
+            constraint_tcon_active=use_cached_precond,
+            iter_idx=None,
+        )
+    norms_used = cond(
+        use_cached_precond,
+        lambda _: carry_adv.cache_norms,
+        lambda _: norms_current,
+        operand=None,
+    )
+    fsqr = norms_used.r1 * norms_used.fnorm * gcr2
+    fsqz = norms_used.r1 * norms_used.fnorm * gcz2
+    fsql = norms_used.fnormL * gcl2
+    if debug_force_first_iter is not None:
+        debug_force_first_iter(
+            enabled=bool(scan_debug_force_enabled) and debug_print is not None,
+            iter2=iter2,
+            frzl=frzl,
+            carry_state=carry_adv.state,
+            use_cached_precond=use_cached_precond,
+            need_bcovar_update=need_bcovar_update,
+            norms_used=norms_used,
+            gcr2=gcr2,
+            gcz2=gcz2,
+            fsqr=fsqr,
+            fsqz=fsqz,
+            jnp_module=jnp,
+            cond=cond,
+            debug_print=debug_print,
+        )
+    if debug_state_iter is not None:
+        debug_state_iter(
+            scan_debug_iter=int(scan_debug_iter),
+            iter2=iter2,
+            carry_adv=carry_adv,
+            use_cached_precond=use_cached_precond,
+            need_bcovar_update=need_bcovar_update,
+            norms_used=norms_used,
+            gcr2=gcr2,
+            gcz2=gcz2,
+            gcl2=gcl2,
+            jnp_module=jnp,
+            cond=cond,
+        )
+    conv_now = scan_converged(fsqr, fsqz, fsql)
+    return ScanStepForceEvaluation(
+        iter2=iter2,
+        fsq_prev_before=fsq_prev_before,
+        fsq0_prev_before=fsq0_prev_before,
+        skip_timecontrol=skip_timecontrol,
+        time_step_report=time_step_report,
+        zero_m1=zero_m1,
+        include_edge=include_edge,
+        need_bcovar_update=need_bcovar_update,
+        use_cached_precond=use_cached_precond,
+        kernels=kernels,
+        frzl=frzl,
+        gcr2=gcr2,
+        gcz2=gcz2,
+        gcl2=gcl2,
+        rz_scale=rz_scale,
+        l_scale=l_scale,
+        norms_current=norms_current,
+        norms_used=norms_used,
+        fsqr=fsqr,
+        fsqz=fsqz,
+        fsql=fsql,
+        conv_now=conv_now,
     )
 
 
