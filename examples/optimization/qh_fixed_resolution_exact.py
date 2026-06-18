@@ -315,6 +315,20 @@ def main() -> None:
 
     _last_jacobian_key: list = [None]
 
+    def _qs_total_from_residual(residual) -> float:
+        residual = np.asarray(residual, dtype=float).reshape(-1)
+        return float(np.dot(residual[1:], residual[1:]))
+
+    def _history_entry(residual, *, aspect: float, wall_time_s: float) -> dict:
+        objective = total_from_residual(residual)
+        return {
+            "wall_time_s": float(wall_time_s),
+            "cost": 0.5 * objective,
+            "objective": objective,
+            "qs_objective": _qs_total_from_residual(residual),
+            "aspect": float(aspect),
+        }
+
     def _jacobian_fun_tracked(params):
         _last_jacobian_key[0] = np.asarray(params, dtype=float).tobytes()
         jac = jacobian_fun(params)
@@ -323,18 +337,10 @@ def main() -> None:
         if key is not None and key in _exact_cache:
             cached_state, _ = _exact_cache[key]
             res = np.asarray(residuals_from_state(cached_state), dtype=float)
-            cost = float(0.5 * np.dot(res, res))
-            qs_total = float(np.dot(res[1:], res[1:]))
             aspect = float(np.asarray(
                 vj.equilibrium_aspect_ratio_from_state(state=cached_state, static=static)
             ))
-            _history.append({
-                "wall_time_s": time.perf_counter() - _wall_t0,
-                "cost": cost,
-                "objective": 2.0 * cost,
-                "qs_objective": qs_total,
-                "aspect": aspect,
-            })
+            _history.append(_history_entry(res, aspect=aspect, wall_time_s=time.perf_counter() - _wall_t0))
         return jac
 
     def _exact_residual_after_jacobian():
@@ -348,33 +354,16 @@ def main() -> None:
     residual0 = residual_fun(params0)
     # Reuse the exact state from the cache (residual_fun already built the tape).
     state0, _ = solve_exact_state(np.asarray(params0, dtype=float), return_payload=True)
-    qs0 = vj.quasisymmetry_ratio_residual_from_state(
-        state=state0,
-        static=static,
-        indata=indata,
-        signgs=signgs,
-        flux_local=flux,
-        prof_local={"pressure": pressure},
-        pressure_local=pressure,
-        surfaces=np.arange(0, 1.01, 0.1),
-        helicity_m=1,
-        helicity_n=-1,
-    )
     aspect0 = float(np.asarray(vj.equilibrium_aspect_ratio_from_state(state=state0, static=static)))
     cost0 = total_from_residual(residual0)
+    qs_total0 = _qs_total_from_residual(residual0)
 
     print(f"Aspect ratio before optimization:        {aspect0:.4f}")
-    print(f"Quasisymmetry objective before:          {float(np.asarray(qs0['total'])):.6f}")
+    print(f"Quasisymmetry objective before:          {qs_total0:.6f}")
     print(f"Total objective before optimization:     {cost0:.6f}")
 
     # Record the initial point.
-    _history.append({
-        "wall_time_s": 0.0,
-        "cost": 0.5 * cost0,
-        "objective": cost0,
-        "qs_objective": float(np.dot(np.asarray(residual0[1:]), np.asarray(residual0[1:]))),
-        "aspect": aspect0,
-    })
+    _history.append(_history_entry(residual0, aspect=aspect0, wall_time_s=0.0))
 
     # Write initial wout if requested.
     if outdir is not None:
@@ -412,29 +401,18 @@ def main() -> None:
     else:
         state_final = solve_forward_state(result["x"], trial=False)
     residual_final = np.asarray(residuals_from_state(state_final), dtype=float)
-    qs_final = vj.quasisymmetry_ratio_residual_from_state(
-        state=state_final,
-        static=static,
-        indata=indata,
-        signgs=signgs,
-        flux_local=flux,
-        prof_local={"pressure": pressure},
-        pressure_local=pressure,
-        surfaces=np.arange(0, 1.01, 0.1),
-        helicity_m=1,
-        helicity_n=-1,
-    )
     aspect_final = float(np.asarray(
         vj.equilibrium_aspect_ratio_from_state(state=state_final, static=static)
     ))
     cost_final = total_from_residual(residual_final)
+    qs_total_final = _qs_total_from_residual(residual_final)
 
     print()
     print(f"Optimization complete in {t_opt_total:.1f} s  "
           f"({result['nfev']} residual evals, {result['njev']} Jacobian evals)")
     print(f"Termination: {result['message']}")
     print(f"Aspect ratio after optimization:         {aspect_final:.4f}")
-    print(f"Quasisymmetry objective after:           {float(np.asarray(qs_final['total'])):.6f}")
+    print(f"Quasisymmetry objective after:           {qs_total_final:.6f}")
     print(f"Total objective after optimization:      {cost_final:.6f}")
     print(f"Objective reduction:                     "
           f"{100.0 * (1.0 - cost_final / cost0):.1f}%")
@@ -447,13 +425,7 @@ def main() -> None:
 
         # Append final point to history (may duplicate last jacobian entry if
         # the last accepted step is already there, but that's harmless).
-        _history.append({
-            "wall_time_s": t_opt_total,
-            "cost": 0.5 * cost_final,
-            "objective": cost_final,
-            "qs_objective": float(np.dot(residual_final[1:], residual_final[1:])),
-            "aspect": aspect_final,
-        })
+        _history.append(_history_entry(residual_final, aspect=aspect_final, wall_time_s=t_opt_total))
 
         hist_path = outdir / "history.json"
         hist_path.parent.mkdir(parents=True, exist_ok=True)
@@ -472,8 +444,8 @@ def main() -> None:
                     "message": result["message"],
                     "objective_initial": cost0,
                     "objective_final": cost_final,
-                    "qs_initial": float(np.asarray(qs0["total"])),
-                    "qs_final": float(np.asarray(qs_final["total"])),
+                    "qs_initial": qs_total0,
+                    "qs_final": qs_total_final,
                     "aspect_initial": aspect0,
                     "aspect_final": aspect_final,
                     "history": _history,
