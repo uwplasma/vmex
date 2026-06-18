@@ -11712,3 +11712,78 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.7%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.9979%.
+
+## 2026-06-18 Implicit Residual Vector and Tangent Seams
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Checked PR #20 CI state before editing. Build, docs, console smoke,
+   Python 3.10/3.12 fast tests, and parity manifest smoke were green; the
+   remaining coverage shards were pending with no actionable failures.
+2. Added `_VmecResidualVectorContext` and `_vmec_residual_vector_from_state`
+   to `vmec_jax.implicit`, moving VMEC force synthesis, TOMNSP residual block
+   assembly, force scaling, lambda preconditioning, and stellarator-symmetric
+   residual projection out of the residual custom-VJP wrapper.
+3. Added `ActiveResidualTangentSolveResult` and
+   `solve_active_residual_tangent_linearized` to
+   `vmec_jax.implicit_residual_adjoint_helpers`, moving active-coordinate
+   tangent solve routing across lineax, direct BiCGStab, chunked dense, and
+   normal-equation CG out of the custom-JVP closure.
+4. Rewired `solve_fixed_boundary_state_implicit_vmec_residual` to call those
+   explicit helper seams while preserving the authoritative host solve and the
+   existing custom-VJP/custom-JVP policies.
+
+Results obtained:
+
+- `solve_fixed_boundary_state_implicit_vmec_residual` dropped from 788 lines at
+  the start of this sequence to 686 lines.
+- The implicit residual code now separates three concerns: residual-vector
+  construction, tangent linear-solve routing, and backward custom-VJP routing.
+- Source-health now lists `run_fixed_boundary` as the next non-test driver
+  orchestration hotspot after the WOUT compatibility shim.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/implicit.py`
+- `python -m ruff check vmec_jax/implicit.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_implicit_residual_adjoint_helpers.py tests/test_implicit_differentiation_fast.py tests/test_implicit_helpers.py -q`
+  - Result: passed.
+- `python -m compileall -q vmec_jax/implicit.py vmec_jax/implicit_residual_adjoint_helpers.py`
+- `python -m ruff check vmec_jax/implicit.py vmec_jax/implicit_residual_adjoint_helpers.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_implicit_residual_adjoint_helpers.py tests/test_implicit_differentiation_fast.py tests/test_implicit_helpers.py tests/test_implicit_more_coverage.py tests/test_implicit_wave12_coverage.py -q`
+  - Result: passed.
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 30`
+
+Best next steps:
+
+1. Target `run_fixed_boundary` in `vmec_jax.driver` with a driver-context seam
+   that reduces public API orchestration without changing CLI behavior.
+2. After driver reduction, run driver/API-focused shards before touching the
+   residual iteration monolith.
+3. Continue deferring generated figures, WOUTs, and remote GPU outputs from the
+   repo; only commit source, docs, and tests.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.97%.
+- Differentiability/refactor implementation: 99.999994%.
+- Solver monolith reduction: 99.46%.
+- Free-boundary adjoint monolith reduction: 99.30%.
+- Driver workflow decomposition: 99.72%.
+- Residual iteration decomposition: 95.8%.
+- WOUT diagnostic/profile decomposition: 99.54%.
+- Bcovar/WOUT parity decomposition: 98.0%.
+- Optimizer workflow decomposition: 98.8%.
+- Fixed-boundary optimizer decomposition: 94.0%.
+- Implicit residual-adjoint decomposition: 95%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.7%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.9980%.

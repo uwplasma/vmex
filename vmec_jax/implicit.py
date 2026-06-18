@@ -45,6 +45,7 @@ from .implicit_residual_adjoint_helpers import (
     lineax_bicgstab_solve as _lineax_bicgstab_solve_impl,
     linear_map_jacobian_columns as _linear_map_jacobian_columns_impl,
     solve_active_residual_adjoint_linearized as _solve_active_residual_adjoint_linearized,
+    solve_active_residual_tangent_linearized as _solve_active_residual_tangent_linearized,
     solve_full_residual_adjoint_linearized as _solve_full_residual_adjoint_linearized,
 )
 
@@ -194,6 +195,21 @@ class _VmecResidualSetup:
 
 
 @dataclass(frozen=True)
+class _VmecResidualVectorContext:
+    """Static metadata for the VMEC residual vector used by implicit AD."""
+
+    static: Any
+    indata: Any
+    signgs_i: int
+    s: Any
+    wout_like: Any
+    trig: Any
+    apply_lforbal: bool
+    mask_pack: Any
+    stellsym_residual_projector: Any
+
+
+@dataclass(frozen=True)
 class _VmecResidualHostSolveSettings:
     """Host-only inputs for the primal VMEC residual solve used by pure_callback."""
 
@@ -257,6 +273,104 @@ def _build_vmec_residual_setup(*, state0_c: VMECState, static, indata, signgs_i:
         mask_pack=mask_pack,
         stellsym_residual_projector=stellsym_residual_projector,
     )
+
+
+def _vmec_residual_vector_from_state(
+    *,
+    state: VMECState,
+    zero_m1_zforce,
+    eRcos,
+    eRsin,
+    eZcos,
+    eZsin,
+    context: _VmecResidualVectorContext,
+    enforce_state_func: Callable[..., VMECState],
+    project_stellsym: bool = False,
+):
+    """Assemble the scaled VMEC residual vector for an implicit fixed-boundary solve."""
+    from .preconditioner_1d_jax import (
+        lambda_preconditioner_cached,
+    )
+    from .vmec_forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
+    from .vmec_residue import (
+        vmec_apply_m1_constraints,
+        vmec_apply_scalxc_to_tomnsps,
+        vmec_force_norms_from_bcovar_dynamic,
+        vmec_zero_m1_zforce,
+    )
+
+    residual_start = time.perf_counter()
+    state = enforce_state_func(state, eRcos, eRsin, eZcos, eZsin)
+    forces_start = time.perf_counter()
+    k = vmec_forces_rz_from_wout(
+        state=state,
+        static=context.static,
+        wout=context.wout_like,
+        indata=None,
+        constraint_tcon0=float(context.indata.get_float("TCON0", 1.0)),
+        use_vmec_synthesis=True,
+        trig=context.trig,
+    )
+    _vmec_residual_profile_log("forces_done", forces_start)
+    tomnsps_start = time.perf_counter()
+    frzl = vmec_residual_internal_from_kernels(
+        k,
+        cfg_ntheta=int(context.static.cfg.ntheta),
+        cfg_nzeta=int(context.static.cfg.nzeta),
+        wout=context.wout_like,
+        trig=context.trig,
+        apply_lforbal=context.apply_lforbal,
+        include_edge=False,
+        masks=context.mask_pack,
+    )
+    _vmec_residual_profile_log("tomnsps_done", tomnsps_start)
+    post_start = time.perf_counter()
+    frzl = vmec_apply_m1_constraints(frzl=frzl, lconm1=bool(getattr(context.static.cfg, "lconm1", True)))
+    frzl = vmec_zero_m1_zforce(frzl=frzl, enabled=zero_m1_zforce)
+    frzl = vmec_apply_scalxc_to_tomnsps(frzl=frzl, s=context.s)
+    frzl = _zero_edge_rz_force_blocks(frzl, preserve_numpy=False)
+    norms = vmec_force_norms_from_bcovar_dynamic(
+        bc=k.bc,
+        trig=context.trig,
+        s=context.s,
+        signgs=context.signgs_i,
+    )
+    scale_rz = jnp.sqrt(norms.r1 * norms.fnorm)
+    scale_l = jnp.sqrt(norms.fnormL)
+    lam_prec = lambda_preconditioner_cached(
+        bc=k.bc,
+        trig=context.trig,
+        s=context.s,
+        cfg=context.static.cfg,
+    )
+    parts = [
+        ("frcc", scale_rz * frzl.frcc),
+        ("fzsc", scale_rz * frzl.fzsc),
+        ("flsc", scale_l * jnp.asarray(frzl.flsc) * jnp.asarray(lam_prec)),
+    ]
+    if frzl.frss is not None:
+        parts.append(("frss", scale_rz * frzl.frss))
+    if frzl.fzcs is not None:
+        parts.append(("fzcs", scale_rz * frzl.fzcs))
+    if frzl.flcs is not None:
+        parts.append(("flcs", scale_l * jnp.asarray(frzl.flcs) * jnp.asarray(lam_prec)))
+    for name in ["frsc", "fzcc", "flcc", "frcs", "fzss", "flss"]:
+        arr = getattr(frzl, name, None)
+        if arr is not None:
+            scale = scale_l if name.startswith("fl") else scale_rz
+            if name.startswith("fl"):
+                arr = jnp.asarray(arr) * jnp.asarray(lam_prec)
+            parts.append((name, scale * arr))
+    projector = context.stellsym_residual_projector if bool(project_stellsym) else None
+    packed = _pack_named_residual_parts(parts, projector=projector)
+    _vmec_residual_profile_log("postprocess_done", post_start)
+    _vmec_residual_profile_log(
+        "residual_done",
+        residual_start,
+        projected=bool(project_stellsym),
+        output_size=int(np.prod(np.shape(packed))),
+    )
+    return packed
 
 
 def _solve_vmec_residual_host_from_boundary(eRcos, eRsin, eZcos, eZsin, settings: _VmecResidualHostSolveSettings):
@@ -1043,17 +1157,6 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
     edge_Zcos_use = jnp.asarray(edge_Zcos) if edge_Zcos is not None else jnp.asarray(state0_c.Zcos)[-1, :]
     edge_Zsin_use = jnp.asarray(edge_Zsin) if edge_Zsin is not None else jnp.asarray(state0_c.Zsin)[-1, :]
 
-    from .preconditioner_1d_jax import (
-        lambda_preconditioner_cached,
-    )
-    from .vmec_forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
-    from .vmec_residue import (
-        vmec_apply_m1_constraints,
-        vmec_apply_scalxc_to_tomnsps,
-        vmec_force_norms_from_bcovar_dynamic,
-        vmec_zero_m1_zforce,
-    )
-
     setup = _build_vmec_residual_setup(
         state0_c=state0_c,
         static=static,
@@ -1061,12 +1164,17 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
         signgs_i=signgs_i,
         idx00=idx00,
     )
-    s = setup.s
-    wout_like = setup.wout_like
-    trig = setup.trig
-    apply_lforbal = setup.apply_lforbal
-    mask_pack = setup.mask_pack
-    stellsym_residual_projector = setup.stellsym_residual_projector
+    residual_vector_context = _VmecResidualVectorContext(
+        static=static,
+        indata=indata,
+        signgs_i=signgs_i,
+        s=setup.s,
+        wout_like=setup.wout_like,
+        trig=setup.trig,
+        apply_lforbal=setup.apply_lforbal,
+        mask_pack=setup.mask_pack,
+        stellsym_residual_projector=setup.stellsym_residual_projector,
+    )
 
     def _boundary_state_edge_rows(eRcos, eRsin, eZcos, eZsin):
         return _project_boundary_edge_rows(
@@ -1096,73 +1204,17 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
         return _mask_grad_for_constraints(st, static, idx00=idx00, mask_lambda_axis=True)
 
     def _residual_vec(state, zero_m1_zforce, eRcos, eRsin, eZcos, eZsin, *, project_stellsym: bool = False):
-        residual_start = time.perf_counter()
-        state = _enforce_state(state, eRcos, eRsin, eZcos, eZsin)
-        forces_start = time.perf_counter()
-        k = vmec_forces_rz_from_wout(
+        return _vmec_residual_vector_from_state(
             state=state,
-            static=static,
-            wout=wout_like,
-            indata=None,
-            constraint_tcon0=float(indata.get_float("TCON0", 1.0)),
-            use_vmec_synthesis=True,
-            trig=trig,
+            zero_m1_zforce=zero_m1_zforce,
+            eRcos=eRcos,
+            eRsin=eRsin,
+            eZcos=eZcos,
+            eZsin=eZsin,
+            context=residual_vector_context,
+            enforce_state_func=_enforce_state,
+            project_stellsym=project_stellsym,
         )
-        _vmec_residual_profile_log("forces_done", forces_start)
-        tomnsps_start = time.perf_counter()
-        frzl = vmec_residual_internal_from_kernels(
-            k,
-            cfg_ntheta=int(static.cfg.ntheta),
-            cfg_nzeta=int(static.cfg.nzeta),
-            wout=wout_like,
-            trig=trig,
-            apply_lforbal=apply_lforbal,
-            include_edge=False,
-            masks=mask_pack,
-        )
-        _vmec_residual_profile_log("tomnsps_done", tomnsps_start)
-        post_start = time.perf_counter()
-        frzl = vmec_apply_m1_constraints(frzl=frzl, lconm1=bool(getattr(static.cfg, "lconm1", True)))
-        frzl = vmec_zero_m1_zforce(frzl=frzl, enabled=zero_m1_zforce)
-        frzl = vmec_apply_scalxc_to_tomnsps(frzl=frzl, s=s)
-        frzl = _zero_edge_rz_force_blocks(frzl, preserve_numpy=False)
-        norms = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs_i)
-        scale_rz = jnp.sqrt(norms.r1 * norms.fnorm)
-        scale_l = jnp.sqrt(norms.fnormL)
-        lam_prec = lambda_preconditioner_cached(
-            bc=k.bc,
-            trig=trig,
-            s=s,
-            cfg=static.cfg,
-        )
-        parts = [
-            ("frcc", scale_rz * frzl.frcc),
-            ("fzsc", scale_rz * frzl.fzsc),
-            ("flsc", scale_l * jnp.asarray(frzl.flsc) * jnp.asarray(lam_prec)),
-        ]
-        if frzl.frss is not None:
-            parts.append(("frss", scale_rz * frzl.frss))
-        if frzl.fzcs is not None:
-            parts.append(("fzcs", scale_rz * frzl.fzcs))
-        if frzl.flcs is not None:
-            parts.append(("flcs", scale_l * jnp.asarray(frzl.flcs) * jnp.asarray(lam_prec)))
-        for name in ["frsc", "fzcc", "flcc", "frcs", "fzss", "flss"]:
-            arr = getattr(frzl, name, None)
-            if arr is not None:
-                scale = scale_l if name.startswith("fl") else scale_rz
-                if name.startswith("fl"):
-                    arr = jnp.asarray(arr) * jnp.asarray(lam_prec)
-                parts.append((name, scale * arr))
-        projector = stellsym_residual_projector if bool(project_stellsym) else None
-        packed = _pack_named_residual_parts(parts, projector=projector)
-        _vmec_residual_profile_log("postprocess_done", post_start)
-        _vmec_residual_profile_log(
-            "residual_done",
-            residual_start,
-            projected=bool(project_stellsym),
-            output_size=int(np.prod(np.shape(packed))),
-        )
-        return packed
 
     def _stationarity_state(state, zero_m1_zforce, eRcos, eRsin, eZcos, eZsin, *, project_stellsym: bool = False):
         def _objective_from_state(st):
@@ -1346,12 +1398,6 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
 
         stationarity_star_active, stationarity_jvp_active = jax.linearize(stationarity_fun_active, x_active_star)
         stationarity_vjp_active = jax.linear_transpose(stationarity_jvp_active, x_active_star)
-        damping = jnp.asarray(float(implicit.damping), dtype=jnp.asarray(x_active_star).dtype)
-        active_is_square = tuple(stationarity_star_active.shape) == tuple(x_active_star.shape)
-
-        def stationarity_jvp_active_damped(u_active):
-            return stationarity_jvp_active(u_active) + damping * u_active
-
         boundary_tangent = jax.jvp(
             stationarity_params_active,
             (eRcos_star, eRsin_star, eZcos_star, eZsin_star),
@@ -1359,62 +1405,28 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
         )[1]
         rhs = jnp.asarray(boundary_tangent)
 
-        dx_active = None
-        if active_is_square and tangent_mode in ("auto", "lineax"):
-            dx_lineax, success, _stats = _lineax_bicgstab_solve(
-                stationarity_jvp_active_damped,
-                rhs,
-                tol=float(implicit.cg_tol),
-                max_iter=int(implicit.cg_max_iter),
-            )
-            if bool(success):
-                dx_active = dx_lineax
-        if dx_active is None and active_is_square and tangent_mode in ("direct", "bicgstab"):
+        def _active_bicgstab_solve(*args, **kwargs):
             from jax.scipy.sparse.linalg import bicgstab
 
-            dx_bicgstab, info = bicgstab(
-                stationarity_jvp_active_damped,
-                rhs,
-                tol=float(implicit.cg_tol),
-                atol=0.0,
-                maxiter=int(implicit.cg_max_iter),
-            )
-            if info is None:
-                dx_active = dx_bicgstab
-        if dx_active is None and tangent_mode == "chunked":
-            chunk_size = getattr(implicit, "jac_chunk_size", None)
-            if chunk_size is None:
-                chunk_size = min(int(x_active_star.shape[0]), 64)
-            J_active = _linear_map_jacobian_columns(
-                stationarity_jvp_active,
-                input_size=int(x_active_star.shape[0]),
-                output_size=int(np.prod(np.shape(stationarity_star_active))),
-                dtype=jnp.asarray(x_active_star).dtype,
-                chunk_size=int(chunk_size),
-            )
-            if active_is_square:
-                dx_active = jnp.linalg.solve(
-                    J_active + damping * jnp.eye(int(J_active.shape[0]), dtype=J_active.dtype),
-                    rhs,
-                )
-            else:
-                dx_active = jnp.linalg.solve(
-                    J_active.T @ J_active + damping * jnp.eye(int(J_active.shape[1]), dtype=J_active.dtype),
-                    J_active.T @ rhs,
-                )
-        if dx_active is None:
-            def Hvp_active(u_active):
-                jv = stationarity_jvp_active(u_active)
-                jt_jv = stationarity_vjp_active(jv)[0]
-                return jt_jv + damping * u_active
+            return bicgstab(*args, **kwargs)
 
-            rhs_normal = stationarity_vjp_active(rhs)[0]
-            dx_active = _cg_solve(
-                Hvp_active,
-                rhs_normal,
-                tol=float(implicit.cg_tol),
-                max_iter=int(implicit.cg_max_iter),
-            )
+        active_tangent_result = _solve_active_residual_tangent_linearized(
+            stationarity_jvp_active,
+            stationarity_vjp_active,
+            stationarity_star_active=stationarity_star_active,
+            x_active_star=x_active_star,
+            rhs=rhs,
+            tangent_mode=tangent_mode,
+            damping=float(implicit.damping),
+            cg_tol=float(implicit.cg_tol),
+            cg_max_iter=int(implicit.cg_max_iter),
+            jac_chunk_size=getattr(implicit, "jac_chunk_size", None),
+            cg_solve=_cg_solve,
+            bicgstab_solve=_active_bicgstab_solve,
+            lineax_solve=_lineax_bicgstab_solve,
+            jacobian_columns=_linear_map_jacobian_columns,
+        )
+        dx_active = active_tangent_result.dx
 
         if _vmec_keep_all_active_enabled():
             dx_active_full = jnp.zeros_like(x_active_star_full).at[active_keep_idx].set(
