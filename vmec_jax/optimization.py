@@ -743,18 +743,6 @@ class FixedBoundaryExactOptimizer:
         except Exception:
             return "cpu"
 
-    @staticmethod
-    def _env_bool_override(name: str) -> bool | None:
-        flag = os.getenv(name, "").strip().lower()
-        if flag in ("1", "true", "yes", "on"):
-            return True
-        if flag in ("0", "false", "no", "off"):
-            return False
-        return None
-
-    def _gpu_like_exact_tape_backend(self) -> bool:
-        return self._exact_tape_backend_name() in ("gpu", "cuda", "tpu", "rocm")
-
     def _solver_device_context(self):
         if self._solver_device_name is None:
             return nullcontext()

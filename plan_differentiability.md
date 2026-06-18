@@ -15693,3 +15693,65 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.999971%.
+
+## 2026-06-18 Optimizer Dead Policy Helper Removal
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Removed `_env_bool_override()` after confirming no source or test references
+   remained.
+2. Removed `_gpu_like_exact_tape_backend()` after exact-tape backend policy was
+   consolidated into `_exact_tape_backend_name()`.
+
+Results obtained:
+
+- `vmec_jax/optimization.py` dropped from 2778 to 2766 lines.
+- Source-health now reports `vmec_jax/optimization.py` at 2766 lines.
+- No public API, optimizer defaults, generated artifacts, or examples changed.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/optimization.py`
+- `python -m ruff check vmec_jax/optimization.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_optimization_fast_optimizer_methods.py::test_optimizer_private_policy_error_branches tests/test_optimization_fast_optimizer_methods.py::test_fixed_boundary_exact_optimizer_init_uses_profiled_gpu_trial_loop_policy tests/test_optimization_fast_optimizer_methods.py::test_optimizer_backend_name_preserves_explicit_device_and_falls_back -q`
+- `python tools/diagnostics/source_health.py --top 12 --top-functions 20`
+- `git diff --check`
+
+Best next steps:
+
+1. Continue source-health cleanup in larger monoliths rather than accumulating
+   new helper files.
+2. Reassess `optimization.py` only if there is a clear net-negative extraction
+   with direct regression coverage.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999%.
+- Solver monolith reduction: 99.62%.
+- Free-boundary adjoint monolith reduction: 99.40%.
+- Driver workflow decomposition: 99.89%.
+- Residual iteration decomposition: 97.5%.
+- WOUT diagnostic/profile decomposition: 99.88%.
+- Bcovar/WOUT parity decomposition: 99.09%.
+- Force-kernel decomposition: 99.65%.
+- Scan/performance policy consolidation: 99.72%.
+- Tomnsps transform decomposition: 98.4%.
+- Initial-guess decomposition: 99.0%.
+- Optimizer workflow decomposition: 99.56%.
+- Fixed-boundary optimizer decomposition: 95.8%.
+- Plotting/WOUT visualization decomposition: 95.8%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.3%.
+- QI objective/staged-runner decomposition: 96.8%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.999972%.
