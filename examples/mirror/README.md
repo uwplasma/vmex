@@ -56,11 +56,14 @@ two-coil fixed boundary with nonzero ``I'`` so the boundary field-line traces
 have visible cap-to-cap pitch.
 
 The root-level ``examples/mirror_stellarator_hybrid_boundary.py`` script is the
-first fixed-boundary stellarator-mirror hybrid geometry fixture. It keeps the
-mirror axis straight in ``z`` while a central elliptical cross-section rotates
-by one field-period angle and tapers smoothly into circular mirror end
-sections. The metrics JSON reports end circularity, midplane theta variation,
-up-down symmetry error, residual/force diagnostics, and standard plot paths.
+first straight-axis hybrid geometry fixture. It keeps the mirror axis straight
+in ``z`` while a central elliptical cross-section rotates by one
+field-period-like angle and tapers smoothly into circular mirror end sections.
+The metrics JSON reports end circularity, midplane theta variation, up-down
+symmetry error, residual/force diagnostics, and standard plot paths. The final
+stellarator-mirror hybrid target is a separate toroidal lane: mirror-like side
+arcs connected through stellarator-like corner arcs using ordinary VMEC/JAX
+toroidal boundary coefficients and solver paths.
 
 The root-level ``examples/mirror_free_boundary_circular_coils.py`` script is a
 free-boundary planning fixture. It builds ESSOS-compatible circular-loop direct

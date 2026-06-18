@@ -56,10 +56,9 @@ without coupling it to toroidal VMEC assumptions:
 - repo-root residual-Newton, solver-comparison, manufactured fixed-boundary,
   finite-current pitch, and fixed-boundary solve-diagnostic examples with
   standard mirror plot bundles;
-- a first repo-root stellarator-mirror hybrid fixed-boundary fixture that uses
-  a straight mirror axis, a central rotating elliptical cross-section, smooth
-  tapering into circular mirror end sections, and standard geometry/field
-  plots;
+- a first repo-root straight-axis hybrid fixed-boundary fixture that uses a
+  central rotating elliptical cross-section, smooth tapering into circular
+  mirror end sections, and standard geometry/field plots;
 - focused tests for node ordering, polynomial exactness, interpolation, filtering,
   theta orthogonality, analytic axisymmetric geometry, field identities, and
   analytic energy, gradient checks, Hessian symmetry, MMS stationarity, I/O
@@ -84,5 +83,6 @@ Current solver status:
   They should not be interpreted as toroidal rotational transform.
 
 Later phases finish differentiable optimization APIs, production
-free-boundary LCFS solves, higher-fidelity stellarator-mirror hybrid
-coordinates, and ESSOS circular-coil beta scan examples.
+free-boundary LCFS solves, a toroidal stellarator-mirror hybrid with
+mirror-like side arcs and stellarator-like corner arcs, and ESSOS circular-coil
+beta scan examples.

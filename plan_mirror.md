@@ -9496,3 +9496,173 @@ Result: all checks passed.
 No user input is needed.
 
 ---
+
+## 80. 2026-06-18 CI fix, stopped-work audit, and toroidal hybrid correction
+
+This tranche resumed the stopped work by checking the draft PR state, fixing
+the only failing CI check, and correcting the hybrid lane after the user
+clarified that the final stellarator-mirror hybrid should remain toroidal:
+mirror-like geometry on either side, with stellarator-like geometry through the
+corner regions.
+
+### Steps taken
+
+- Checked the local branch and draft PR:
+  - branch: `codex/mirror-geometry`;
+  - draft PR: `https://github.com/uwplasma/vmec_jax/pull/21`;
+  - head before this tranche: `54056f12`.
+- Inspected CI with `gh` and the GitHub PR metadata tool.
+- Found one failing check:
+  - `Fast Tests (py3.11 core coverage: freeb-external)`;
+  - run `27760685902`, job `82134006425`.
+- Read the failing log and traced both failures to
+  `test_jax_vmec_mode_matrix_gradient_wrt_grpmn_matches_finite_difference`.
+- Diagnosed the failure as finite-difference cancellation in a linear
+  `grpmn -> mode_matrix` objective, not a production derivative defect.
+- Changed only the central-difference step in that test from `1e-6` to `1e-3`;
+  the tight `rtol=3e-9`/`atol=1e-11` assertion remains in place.
+- Reconciled the hybrid plan:
+  - M13a remains a straight-axis rotating-ellipse fixture and test case;
+  - the final hybrid target is now a toroidal fixed-boundary lane with
+    mirror-like side sections and stellarator-like corner sections;
+  - the toroidal lane should reuse ordinary VMEC/JAX boundary, solver,
+    preconditioner, and plotting conventions instead of extending the
+    open-ended mirror coordinate model beyond its topology.
+
+### Results obtained
+
+- CI root cause:
+  - `lasym=True`: CI reported max relative difference
+    `5.71346392e-09`, just above `3e-9`;
+  - `lasym=False`: CI reported max relative difference
+    `3.30379762e-08`, also from finite-difference cancellation.
+- Local step-size probe confirmed the objective is better conditioned with a
+  larger step:
+  - for `lasym=False`, `eps=1e-3` gave relative mismatch about `4.16e-12`;
+  - for `lasym=True`, `eps=1e-3` gave relative mismatch about `1.35e-11`.
+- No generated result files or figures were added to the repository.
+
+### How it was tested
+
+Targeted failing test:
+
+```bash
+JAX_ENABLE_X64=1 pytest \
+  tests/test_free_boundary_vacuum_adjoint.py::test_jax_vmec_mode_matrix_gradient_wrt_grpmn_matches_finite_difference \
+  -q
+```
+
+Result: `2 passed in 1.22s`.
+
+Local replica of the failing CI bucket:
+
+```bash
+python tools/diagnostics/ci_core_bucket_args.py freeb-external > /tmp/py311-core-freeb-external.txt
+JAX_ENABLE_X64=1 VMEC_JAX_SKIP_PY311_COVERAGE_ONLY=1 \
+  xargs pytest -q -n 4 -m "not full and not vmec2000 and not simsopt" \
+  --durations=50 --cov=vmec_jax --cov-report= \
+  < /tmp/py311-core-freeb-external.txt
+```
+
+Result: `269 passed, 42 skipped, 1 xfailed, 75 warnings in 42.81s`.
+
+### File structure and best-practice notes
+
+- The CI fix stays in the owning test file because it is a test-discretization
+  issue, not a source-code derivative change.
+- The comment explains why the larger finite-difference step is valid for this
+  linear objective.
+- The hybrid correction keeps the straight-axis mirror package scoped to open
+  mirrors.  The new toroidal hybrid work should be implemented through the
+  existing toroidal VMEC boundary/input path, with helper constructors and
+  examples layered around that path.
+- Repository weight policy remains unchanged: examples may generate plots and
+  `results/` locally, but generated artifacts should not be committed unless a
+  compressed documentation figure is intentionally promoted.
+
+### Revised toroidal hybrid milestones
+
+M13b: toroidal hybrid source audit and parameterization design.
+
+- Inspect current VMEC/JAX boundary coefficient conventions, examples, tests,
+  and plotting paths for fixed-boundary toroidal equilibria.
+- Define a compact toroidal boundary generator with:
+  - mirror-like side sections, meaning weakly helical or nearly axisymmetric
+    elongated side arcs;
+  - stellarator-like corner sections, meaning rotating ellipse/nonaxisymmetric
+    shaping localized near the turns;
+  - up-down symmetry by default;
+  - field-period repeat metadata compatible with existing `nfp` handling.
+- Keep the first generator in a small helper module or example-local helper
+  until at least two examples/tests need it.
+
+M13c: toroidal fixed-boundary hybrid fixture and example.
+
+- Add a repo-root example that writes a normal VMEC input/solution path for the
+  toroidal hybrid, plus plots of:
+  - 3D LCFS;
+  - cross sections at side and corner stations;
+  - `|B|`;
+  - iota and magnetic-well profiles when the ordinary toroidal solve provides
+    them;
+  - residual/`fsq` history.
+- Reuse the ordinary toroidal solver, preconditioning, continuation, and plot
+  functions before adding hybrid-specific logic.
+
+M13d: toroidal hybrid convergence and parity checks.
+
+- Run `ns`/mode-resolution convergence at low and moderate resolution.
+- Compare fixed-boundary runtime/memory and convergence against a nearby
+  conventional toroidal VMEC/JAX case.
+- Use local VMEC2000 for parity checks where the input representation is
+  directly VMEC-compatible.
+
+M16 update: ESSOS circular-coil free-boundary scan.
+
+- Keep the open-ended mirror circular-coil LCFS pilot lane separate from the
+  toroidal hybrid lane.
+- For the requested circular-coil ESSOS beta scan, keep using the mirror-native
+  circular-loop bridge for the open mirror LCFS study unless the user later
+  asks for a toroidal coil set.
+- The default beta targets remain `1%`, `3%`, and `10%`, with low-resolution
+  dry-run and one-step pilot tests before any longer free-boundary run.
+
+### Best next steps
+
+1. Commit and push the CI fix and plan/doc clarification.
+2. Let CI run in the background and do not block on it unless a new failure is
+   available.
+3. Inspect the existing toroidal fixed-boundary boundary/input code, examples,
+   and tests.
+4. Implement M13b/M13c as a minimal toroidal hybrid boundary generator plus a
+   root example that uses ordinary VMEC/JAX solver and plotting paths.
+5. Add focused tests for coefficient construction, symmetry, example smoke, and
+   plot-generation paths.
+6. Continue the mirror-native free-boundary LCFS pilot lane toward a finite
+   `1%`, `3%`, `10%` beta scan without committing generated outputs.
+
+### Completion percentages after M80
+
+- Geometry/grids/bases: `92%`.
+- Field/energy/residual kernels: `86%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `88%`.
+- I/O schema and docs: `91%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `67%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `5%`.
+- ESSOS circular-coil mirror beta scan: `53%`.
+- PR merge readiness overall: `91%`.
+
+### User input needed
+
+No user input is needed for the next step.  The default toroidal hybrid
+interpretation is mirror-like side arcs and stellarator-like corner arcs with
+up-down symmetry and ordinary VMEC-compatible toroidal boundary coefficients.
+
+---

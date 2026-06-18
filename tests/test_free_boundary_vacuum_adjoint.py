@@ -1747,7 +1747,9 @@ def test_jax_vmec_mode_matrix_gradient_wrt_grpmn_matches_finite_difference(lasym
         return jnp.vdot(weights, matrix)
 
     exact = jax.grad(objective)(0.0)
-    eps = 1.0e-6
+    # The matrix objective is linear in grpmn, so a larger central-difference
+    # step reduces cancellation without adding truncation error on CI platforms.
+    eps = 1.0e-3
     fd = (objective(eps) - objective(-eps)) / (2.0 * eps)
 
     np.testing.assert_allclose(exact, fd, rtol=3.0e-9, atol=1.0e-11)

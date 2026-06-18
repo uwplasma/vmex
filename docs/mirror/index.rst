@@ -8,9 +8,10 @@ Mirror Geometries
    manufactured-solution checks, mirror-native ``mout`` output, plotting,
    cap-to-cap field-line pitch diagnostics, optimizer prototypes, a
    free-boundary circular-coil pilot workflow, and a first straight-axis
-   stellarator-mirror hybrid boundary fixture. Production free-boundary
-   equilibrium solves, anisotropic pressure, higher-fidelity hybrid coordinates,
-   and the final differentiable implicit-solve API remain planned work.
+   rotating-ellipse hybrid boundary fixture. Production free-boundary
+   equilibrium solves, anisotropic pressure, the toroidal stellarator-mirror
+   hybrid target, and the final differentiable implicit-solve API remain
+   planned work.
 
 .. toctree::
    :maxdepth: 2
