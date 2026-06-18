@@ -16018,3 +16018,74 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.999976%.
+
+## 2026-06-18 Residual Iteration Stale Local Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Removed side-effect-free stale locals from
+   `vmec_jax/solvers/fixed_boundary/residual/iteration.py`.
+2. Kept live payload computations intact when the payload object still feeds
+   scan blocks, restart state, or accepted-step updates.
+3. Re-ran residual-iteration compile/lint checks and a focused
+   fixed-boundary parity/regression shard.
+
+Results obtained:
+
+- Removed 53 source lines from the residual iteration monolith.
+- `vmec_jax/solvers/fixed_boundary/residual/iteration.py` dropped from 6657
+  to 6604 lines.
+- Source-wide `F841/F401` is now clean for `vmec_jax`.
+- Source-health still identifies residual iteration as the dominant remaining
+  file/function-size hotspot, but the stale-local debt is gone.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/iteration.py --select F841,F401`
+- `python -m ruff check vmec_jax --select F841,F401 --output-format=concise`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_step6_solve_fixed_boundary.py tests/test_vmec2000_fixed_boundary_physics_gates.py tests/test_nonaxis_exec_stage_trace_parity.py tests/test_force_norms_dynamic_parity.py tests/test_residue_getfsq_parity.py tests/test_driver_api.py::test_run_fixed_boundary_accelerated_mode_defaults_to_single_grid -q`
+- `python tools/diagnostics/source_health.py --top 16 --top-functions 30`
+- `git diff --check`
+
+Best next steps:
+
+1. Start the next residual-iteration structural tranche by extracting a narrow
+   scan-step preparation helper or reducing the `_run_vmec2000_scan`
+   subfunction, with the same focused parity shard as the guardrail.
+2. Continue deleting or moving code only when it reduces the largest files or
+   improves the differentiable seam; avoid adding new one-off helper files.
+3. Do not spend time watching CI between tranches; run local focused gates and
+   inspect CI later in batch.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999%.
+- Solver monolith reduction: 99.64%.
+- Free-boundary adjoint monolith reduction: 99.42%.
+- Driver workflow decomposition: 99.90%.
+- Residual iteration decomposition: 97.6%.
+- WOUT diagnostic/profile decomposition: 99.89%.
+- Bcovar/WOUT parity decomposition: 99.11%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.72%.
+- Tomnsps transform decomposition: 98.5%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.56%.
+- Fixed-boundary optimizer decomposition: 95.8%.
+- Plotting/WOUT visualization decomposition: 95.9%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.35%.
+- QI objective/staged-runner decomposition: 96.9%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.999977%.

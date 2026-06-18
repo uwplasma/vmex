@@ -761,7 +761,6 @@ def solve_fixed_boundary_residual_iter(
         cpu_work_limit_env=os.getenv("VMEC_JAX_HOST_UPDATE_CPU_WORK_LIMIT", "1000"),
     )
     free_boundary_enabled = _freeb_policy.free_boundary_enabled
-    free_boundary_provider_kind = _freeb_policy.free_boundary_provider_kind
     direct_free_boundary_provider = _freeb_policy.direct_free_boundary_provider
     freeb_nvacskip = _freeb_policy.freeb_nvacskip
     freeb_nvskip0 = _freeb_policy.freeb_nvskip0
@@ -784,18 +783,6 @@ def solve_fixed_boundary_residual_iter(
 
     _t_setup_boundary_profiles = _setup_timer_start()
     idx00 = _mode00_index(static.modes)
-    m_modes = np.asarray(
-        getattr(static, "m_np", None) if getattr(static, "m_np", None) is not None else static.modes.m, dtype=int
-    )
-    n_modes = np.asarray(
-        getattr(static, "n_np", None) if getattr(static, "n_np", None) is not None else static.modes.n, dtype=int
-    )
-    axis_copy_mask_np = (
-        np.asarray(getattr(static, "lambda_axis_copy_mask", None), dtype=bool)
-        if getattr(static, "lambda_axis_copy_mask", None) is not None
-        else (m_modes == 0) & (n_modes > 0)
-    )
-    lambda_axis_copy_mask = jnp.asarray(axis_copy_mask_np, dtype=jnp.asarray(state0.Rcos).dtype)
     s = jnp.asarray(static.s)
     freeb_pres_scale = _free_boundary_pressure_edge_scale(
         free_boundary_enabled=bool(free_boundary_enabled),
@@ -920,15 +907,6 @@ def solve_fixed_boundary_residual_iter(
         jnp_module=jnp,
     )
     _record_setup_timing("setup_boundary_profiles", _t_setup_boundary_profiles)
-    modes = static.modes
-    # Use np.asarray for static setup data – these are closure constants captured
-    # by _run_scan and converted to device arrays once at the JIT boundary.
-    # Using jnp.asarray here triggers one eager XLA compilation per call (~2 ms
-    # each), adding unnecessary cold-start overhead.
-    m_idx = np.asarray(modes.m, dtype=np.int32)
-    n_idx = np.asarray(modes.n, dtype=np.int32)
-    mscale = np.asarray(trig.mscale)
-    nscale = np.asarray(trig.nscale)
     idx00 = _mode00_index(static.modes)
     _state_dtype = jnp.asarray(state0.Rcos).dtype if state0_has_tracer else np.asarray(state0.Rcos).dtype
     lambda_update_scale_j = (
@@ -1412,7 +1390,6 @@ def solve_fixed_boundary_residual_iter(
     mpol = int(static.cfg.mpol)
     ntor = int(static.cfg.ntor)
     nrange = ntor + 1
-    nfp = float(static.cfg.nfp)
     ncoeff = int(jnp.asarray(state0.Rcos).shape[1])
     # On accelerator host-forward runs the initial row/gauge enforcement is
     # setup work.  Using the NumPy row-assignment path avoids several tiny eager
@@ -1436,19 +1413,7 @@ def solve_fixed_boundary_residual_iter(
         tree_has_tracer=_tree_has_tracer,
         vmec_scalxc_from_s=vmec_scalxc_from_s,
     )
-    signed_maps = _mode_context.signed_maps
-    idx_pos = _mode_context.idx_pos
-    idx_neg = _mode_context.idx_neg
-    m_idx = _mode_context.m_idx
-    n_idx = _mode_context.n_idx
-    kp_idx = _mode_context.kp_idx
-    kn_idx = _mode_context.kn_idx
-    has_kn = _mode_context.has_kn
     m0_mask = _mode_context.m0_mask
-    m0 = _mode_context.m0
-    n0 = _mode_context.n0
-    scalxc_mn = _mode_context.scalxc_mn
-    scalxc_mn_np = _mode_context.scalxc_mn_np
     w_mode_mn = _mode_context.w_mode_mn
     w_mode_mn_np = _mode_context.w_mode_mn_np
     _state0_dtype = _mode_context.state0_dtype
@@ -1882,12 +1847,8 @@ def solve_fixed_boundary_residual_iter(
                 zero_m1 = force_eval.zero_m1
                 include_edge = force_eval.include_edge
                 need_bcovar_update = force_eval.need_bcovar_update
-                use_cached_precond = force_eval.use_cached_precond
                 k = force_eval.kernels
                 frzl = force_eval.frzl
-                gcr2 = force_eval.gcr2
-                gcz2 = force_eval.gcz2
-                gcl2 = force_eval.gcl2
                 rz_scale = force_eval.rz_scale
                 l_scale = force_eval.l_scale
                 norms_current = force_eval.norms_current
@@ -1947,16 +1908,6 @@ def solve_fixed_boundary_residual_iter(
                     jmax0=jmax0,
                     cond=jax.lax.cond,
                 )
-                cache_precond_diag = current_payload_pre.cache_precond_diag
-                cache_tcon = current_payload_pre.cache_tcon
-                cache_norms = current_payload_pre.cache_norms
-                cache_rz_scale = current_payload_pre.cache_rz_scale
-                cache_l_scale = current_payload_pre.cache_l_scale
-                cache_rz_norm = current_payload_pre.cache_rz_norm
-                cache_f_norm1 = current_payload_pre.cache_f_norm1
-                cache_lam_prec = current_payload_pre.cache_lam_prec
-                cache_rz_mats = current_payload_pre.cache_rz_mats
-                cache_valid = current_payload_pre.cache_valid
                 (
                     frcc_u,
                     frss_u,
@@ -2080,12 +2031,10 @@ def solve_fixed_boundary_residual_iter(
                     cond_func=jax.lax.cond,
                 )
                 fsq_phys = time_restart.fsq_phys
-                fsq = time_restart.fsq
                 res0 = time_restart.res0
                 res1 = time_restart.res1
                 checkpoint_update = time_restart.checkpoint_update
                 restart_decision = time_restart.restart_decision
-                stage_spike = restart_decision.stage_spike
                 do_restart = restart_decision.do_restart
                 restart_update = time_restart.restart_update
                 state_post = restart_update.state
@@ -2809,7 +2758,6 @@ def solve_fixed_boundary_residual_iter(
     restart_badjac_factor = controller_constants.restart_badjac_factor
     restart_badprog_factor = controller_constants.restart_badprog_factor
     huge_force_restart_count = 0
-    huge_force_restart_budget = 2
     res1 = -1.0
     vmec2000_fact = controller_constants.vmec2000_fact
 
@@ -3155,7 +3103,6 @@ def solve_fixed_boundary_residual_iter(
             pre_restart_reason = "none"
             if time_step_report_hold is None:
                 time_step_report_hold = float(time_step)
-            time_step_report = float(time_step_report_hold)
             if free_boundary_enabled:
                 # Keep free-boundary cadence fixed for this `iter2` across
                 # retry/restart passes in the inner while-loop.
