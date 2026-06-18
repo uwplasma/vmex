@@ -244,6 +244,9 @@ def test_toroidal_hybrid_convergence_example_runs_without_solve(tmp_path: Path):
     assert summary["figures"] == {}
     assert all(not row["ran_solve"] for row in summary["rows"])
     assert all(row["initialization_policy"] == "vmec_jax_default_input_boundary" for row in summary["rows"])
+    assert all(
+        row["vmec_jax_axis_initialization_policy"] == "boundary_inferred_missing_axis" for row in summary["rows"]
+    )
     assert all(row["vmec2000_initialization_policy"] == "vmec2000_default_input_boundary" for row in summary["rows"])
     assert all(row["fsq_history"] == [] for row in summary["rows"])
     assert all(row["max_boundary_fit_error"] < 1.0e-12 for row in summary["rows"])
@@ -253,6 +256,7 @@ def test_toroidal_hybrid_convergence_example_runs_without_solve(tmp_path: Path):
     with Path(summary["csv"]).open(newline="") as file_obj:
         csv_row = next(csv.DictReader(file_obj))
     assert csv_row["initialization_policy"] == "vmec_jax_default_input_boundary"
+    assert csv_row["vmec_jax_axis_initialization_policy"] == "boundary_inferred_missing_axis"
     assert csv_row["vmec2000_initialization_policy"] == "vmec2000_default_input_boundary"
 
 
@@ -310,3 +314,18 @@ def test_toroidal_hybrid_convergence_history_summary_uses_iteration_labels():
     assert module._parse_shape_cases("default, sharp") == ["default", "sharp"]
     with pytest.raises(ValueError, match="unknown shape"):
         module._parse_shape_cases("unknown")
+
+
+def test_toroidal_hybrid_axis_initialization_policy_tracks_solver_mode_and_env(monkeypatch):
+    module = import_module("examples.toroidal_stellarator_mirror_hybrid_convergence")
+
+    monkeypatch.delenv("VMEC_JAX_ENABLE_AXIS_INFER", raising=False)
+    monkeypatch.delenv("VMEC_JAX_DISABLE_AXIS_INFER", raising=False)
+    assert module._vmec_jax_axis_initialization_policy("parity") == "raw_input_axis_or_zero"
+    assert module._vmec_jax_axis_initialization_policy("accelerated") == "boundary_inferred_missing_axis"
+
+    monkeypatch.setenv("VMEC_JAX_ENABLE_AXIS_INFER", "1")
+    assert module._vmec_jax_axis_initialization_policy("parity") == "boundary_inferred_missing_axis"
+
+    monkeypatch.setenv("VMEC_JAX_DISABLE_AXIS_INFER", "1")
+    assert module._vmec_jax_axis_initialization_policy("accelerated") == "raw_input_axis_or_zero"

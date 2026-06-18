@@ -54,6 +54,8 @@ _SHAPE_CASE_PRESETS = {
 
 _VMEC_JAX_INITIALIZATION_POLICY = "vmec_jax_default_input_boundary"
 _VMEC2000_INITIALIZATION_POLICY = "vmec2000_default_input_boundary"
+_VMEC_JAX_AXIS_RAW_POLICY = "raw_input_axis_or_zero"
+_VMEC_JAX_AXIS_INFERRED_POLICY = "boundary_inferred_missing_axis"
 
 
 def _parse_shape_cases(text: str) -> list[str]:
@@ -63,6 +65,19 @@ def _parse_shape_cases(text: str) -> list[str]:
         choices = ", ".join(sorted(_SHAPE_CASE_PRESETS))
         raise ValueError(f"unknown shape case(s) {unknown}; choices are {choices}")
     return names
+
+
+def _vmec_jax_axis_initialization_policy(solver_mode: str) -> str:
+    """Return the VMEC/JAX axis branch used by this runner's fixed-boundary call."""
+    mode = str(solver_mode).strip().lower()
+    infer_axis = mode != "parity"
+    enable_env = os.getenv("VMEC_JAX_ENABLE_AXIS_INFER", "").strip().lower()
+    disable_env = os.getenv("VMEC_JAX_DISABLE_AXIS_INFER", "").strip().lower()
+    if enable_env in ("1", "true", "yes", "on"):
+        infer_axis = True
+    if disable_env in ("1", "true", "yes", "on"):
+        infer_axis = False
+    return _VMEC_JAX_AXIS_INFERRED_POLICY if infer_axis else _VMEC_JAX_AXIS_RAW_POLICY
 
 
 def _base_sample_kwargs(args: argparse.Namespace) -> dict[str, float | int]:
@@ -125,6 +140,7 @@ _CSV_COLUMNS = (
     "corner_helicity",
     "corner_power",
     "initialization_policy",
+    "vmec_jax_axis_initialization_policy",
     "ran_solve",
     "solver_mode",
     "use_scan",
@@ -482,6 +498,7 @@ def main() -> None:
                     "corner_helicity": sample_kwargs["corner_helicity"],
                     "corner_power": sample_kwargs["corner_power"],
                     "initialization_policy": _VMEC_JAX_INITIALIZATION_POLICY,
+                    "vmec_jax_axis_initialization_policy": _vmec_jax_axis_initialization_policy(args.solver_mode),
                     "min_R": reference_metrics["min_R"],
                     "stellsym_R_error": reference_metrics["stellsym_R_error"],
                     "stellsym_Z_error": reference_metrics["stellsym_Z_error"],

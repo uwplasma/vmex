@@ -12294,3 +12294,112 @@ single active log.
 No user input is needed.
 
 ---
+
+## 99. 2026-06-18 M13h toroidal-hybrid axis-initialization audit
+
+This tranche made the first M13h audit concrete by recording the VMEC/JAX
+axis-initialization branch used by the toroidal-hybrid convergence runner.
+This is a small but important parity field: VMEC/JAX can either start from the
+raw input-axis/zero-axis state or infer a missing axis from the boundary, while
+VMEC2000 parity claims require knowing which branch was used.
+
+### Steps taken
+
+- Inspected VMEC/JAX initialization paths in:
+  - `vmec_jax/driver.py`;
+  - `vmec_jax/init_guess.py`;
+  - `vmec_jax/solve.py`;
+  - `vmec_jax/vmec2000_exec.py`.
+- Confirmed that:
+  - `vmec2000_iter` parity mode defaults to the raw input-axis/zero-axis
+    branch unless environment variables override it;
+  - performance/default/accelerated modes may infer a missing axis from the
+    boundary before the first solve iteration;
+  - VMEC2000 parity data currently comes from the parsed first `threed1` row,
+    not from a shared serialized initial state.
+- Added `vmec_jax_axis_initialization_policy` to toroidal-hybrid convergence
+  JSON/CSV rows.
+- Added a small helper in the convergence runner that mirrors the driver branch
+  for this specific `vmec2000_iter` call:
+  - `raw_input_axis_or_zero`;
+  - `boundary_inferred_missing_axis`.
+- Updated tests to assert:
+  - row JSON contains the field;
+  - CSV contains the field;
+  - parity mode maps to the raw branch;
+  - accelerated/default behavior maps to boundary-inferred axis;
+  - environment overrides are reflected.
+- Updated mirror overview docs and the root mirror example README.
+
+### Results obtained
+
+The toroidal-hybrid convergence schema now records both:
+
+- broad initialization policy labels;
+- the concrete VMEC/JAX axis branch used for a row.
+
+This narrows the parity ambiguity without adding heavy files or a new module.
+It also preserves the fast CLI path: the audit is a string label computed from
+runner/driver policy, not an extra solve.
+
+### How it was tested
+
+```bash
+JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
+python -m ruff check examples/toroidal_stellarator_mirror_hybrid_convergence.py tests/test_toroidal_hybrid.py
+python -m ruff format --check examples/toroidal_stellarator_mirror_hybrid_convergence.py tests/test_toroidal_hybrid.py
+git diff --check
+```
+
+Results:
+
+- `20 passed` in `tests/test_toroidal_hybrid.py`.
+- Ruff check passed.
+- Ruff format check passed.
+- `git diff --check` passed.
+- Plan section-ordering check passed.
+
+### File structure and best-practice notes
+
+- The audit stays in the existing toroidal-hybrid convergence runner.
+- No result files or figures are committed.
+- The helper is intentionally narrow because it describes this runner's
+  `run_fixed_boundary(..., solver="vmec2000_iter")` policy, not every possible
+  driver call.
+- Documentation remains concise and user-facing.
+
+### Best next steps
+
+1. Commit and push this M13h schema/audit tranche.
+2. Recheck CI for any concrete failures.
+3. Add a cheap raw residual audit next:
+   - record whether VMEC/JAX initial residuals come from the solve history or
+     an explicit first-step diagnostic;
+   - compare those values to VMEC2000's first parsed `threed1` row in one
+     low-resolution parity row;
+   - avoid claiming matched-initial-state parity until the state itself is
+     serialized or reconstructed on both sides.
+
+### Completion percentages after M99
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `86%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `88%`.
+- I/O schema and docs: `94%`.
+- Differentiable solved-state API: `22%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `68%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `64%`.
+- ESSOS circular-coil mirror beta scan: `53%`.
+- PR merge readiness overall: `92%`.
+
+### User input needed
+
+No user input is needed.
+
+---
