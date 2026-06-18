@@ -13,6 +13,13 @@ Advanced users can import lower-level kernels directly from submodules.
 from __future__ import annotations
 
 from .namelist import minimal_fixed_boundary_indata, read_indata, write_indata
+from .toroidal_hybrid import (
+    ToroidalHybridBoundarySamples,
+    evaluate_toroidal_hybrid_indata_boundary,
+    sample_toroidal_stellarator_mirror_hybrid_boundary,
+    toroidal_stellarator_mirror_hybrid_indata,
+    toroidal_stellarator_mirror_hybrid_metrics,
+)
 from .driver import (
     ExampleData,
     FixedBoundaryRun,
@@ -192,6 +199,11 @@ __all__ = [
     "read_indata",
     "write_indata",
     "minimal_fixed_boundary_indata",
+    "ToroidalHybridBoundarySamples",
+    "evaluate_toroidal_hybrid_indata_boundary",
+    "sample_toroidal_stellarator_mirror_hybrid_boundary",
+    "toroidal_stellarator_mirror_hybrid_indata",
+    "toroidal_stellarator_mirror_hybrid_metrics",
     "booz_xform_inputs_from_state",
     "BoozConfig",
     "parse_booz_surfaces",

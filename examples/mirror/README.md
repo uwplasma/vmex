@@ -18,6 +18,7 @@ python examples/mirror_free_boundary_circular_coils.py --outdir results/mirror/f
 python examples/mirror_fixed_boundary_solve_diagnostic.py --outdir results/mirror/fixed_boundary_solve_diagnostic
 python examples/mirror_manufactured_fixed_boundary.py --outdir results/mirror/manufactured_fixed_boundary
 python examples/mirror_stellarator_hybrid_boundary.py --outdir results/mirror/stellarator_hybrid_boundary
+python examples/toroidal_stellarator_mirror_hybrid.py --outdir results/toroidal_stellarator_mirror_hybrid
 python examples/mirror_solver_comparison.py --outdir results/mirror/solver_comparison
 python examples/mirror_residual_newton_convergence_grid.py --outdir results/mirror/residual_newton_convergence_grid
 ```
@@ -64,6 +65,13 @@ symmetry error, residual/force diagnostics, and standard plot paths. The final
 stellarator-mirror hybrid target is a separate toroidal lane: mirror-like side
 arcs connected through stellarator-like corner arcs using ordinary VMEC/JAX
 toroidal boundary coefficients and solver paths.
+
+The root-level ``examples/toroidal_stellarator_mirror_hybrid.py`` script starts
+that toroidal lane. It writes a VMEC-compatible ``input.*`` file whose LCFS has
+mirror-like side arcs and localized stellarator-like corner shaping, writes
+boundary metrics and plots, and can optionally run the ordinary toroidal
+fixed-boundary solver with ``--run-solve`` to produce a ``wout_*.nc`` plus
+standard VMEC plots.
 
 The root-level ``examples/mirror_free_boundary_circular_coils.py`` script is a
 free-boundary planning fixture. It builds ESSOS-compatible circular-loop direct

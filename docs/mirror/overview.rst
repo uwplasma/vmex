@@ -59,6 +59,9 @@ without coupling it to toroidal VMEC assumptions:
 - a first repo-root straight-axis hybrid fixed-boundary fixture that uses a
   central rotating elliptical cross-section, smooth tapering into circular
   mirror end sections, and standard geometry/field plots;
+- a first repo-root toroidal stellarator-mirror hybrid input fixture that writes
+  ordinary VMEC ``RBC``/``ZBS`` boundary coefficients, with mirror-like side
+  arcs and stellarator-like corner arcs;
 - focused tests for node ordering, polynomial exactness, interpolation, filtering,
   theta orthogonality, analytic axisymmetric geometry, field identities, and
   analytic energy, gradient checks, Hessian symmetry, MMS stationarity, I/O
@@ -83,6 +86,5 @@ Current solver status:
   They should not be interpreted as toroidal rotational transform.
 
 Later phases finish differentiable optimization APIs, production
-free-boundary LCFS solves, a toroidal stellarator-mirror hybrid with
-mirror-like side arcs and stellarator-like corner arcs, and ESSOS circular-coil
-beta scan examples.
+free-boundary LCFS solves, toroidal stellarator-mirror hybrid convergence and
+VMEC2000 parity studies, and ESSOS circular-coil beta scan examples.

@@ -9666,3 +9666,157 @@ interpretation is mirror-like side arcs and stellarator-like corner arcs with
 up-down symmetry and ordinary VMEC-compatible toroidal boundary coefficients.
 
 ---
+
+## 81. 2026-06-18 M13b/M13c first toroidal hybrid VMEC input fixture
+
+This tranche implemented the first toroidal stellarator-mirror hybrid fixture
+after the user clarified that the final hybrid target remains toroidal.  It
+does not extend the open-ended mirror coordinate system.  Instead, it writes
+ordinary VMEC fixed-boundary coefficients and enters the existing toroidal
+`run_fixed_boundary`/`wout`/`plot_wout` path.
+
+### Steps taken
+
+- Added `vmec_jax/toroidal_hybrid.py` with:
+  - `ToroidalHybridBoundarySamples`;
+  - `sample_toroidal_stellarator_mirror_hybrid_boundary`;
+  - `toroidal_stellarator_mirror_hybrid_indata`;
+  - `toroidal_stellarator_mirror_hybrid_metrics`;
+  - `evaluate_toroidal_hybrid_indata_boundary`.
+- Added a root example:
+  - `examples/toroidal_stellarator_mirror_hybrid.py`.
+- The example writes:
+  - a VMEC-compatible `input.toroidal_stellarator_mirror_hybrid`;
+  - a metrics JSON file;
+  - boundary-only 3D/top-view/cross-section plots;
+  - optionally a standard `wout_*.nc` and `plot_wout` figures through
+    `--run-solve`.
+- Added tests in `tests/test_toroidal_hybrid.py` for:
+  - stellarator symmetry;
+  - side/corner localization;
+  - exact low-mode reconstruction from written VMEC coefficients;
+  - root-example smoke output without plots.
+- Added public exports through `vmec_jax.api` and lazy top-level `vmec_jax`
+  attributes.
+- Updated mirror docs and example README to distinguish:
+  - the straight-axis open-ended hybrid fixture;
+  - the new toroidal VMEC-compatible hybrid fixture.
+
+### Results obtained
+
+Generated local artifacts, not committed:
+
+- `results/toroidal_stellarator_mirror_hybrid_m13b/input.toroidal_stellarator_mirror_hybrid`.
+- `results/toroidal_stellarator_mirror_hybrid_m13b/toroidal_stellarator_mirror_hybrid_metrics.json`.
+- `results/toroidal_stellarator_mirror_hybrid_m13b/figures/toroidal_hybrid_lcfs_3d.png`.
+- `results/toroidal_stellarator_mirror_hybrid_m13b/figures/toroidal_hybrid_top_view.png`.
+- `results/toroidal_stellarator_mirror_hybrid_m13b/figures/toroidal_hybrid_cross_sections.png`.
+
+Plotted example metrics:
+
+| quantity | value |
+| :--- | ---: |
+| min `R` | `0.857516280079` |
+| max `R` | `1.448000000000` |
+| max `|Z|` | `0.253440000000` |
+| stellarator-symmetry `R` error | `6.661338147751e-16` |
+| stellarator-symmetry `Z` error | `1.804112415016e-16` |
+| `RBC` coefficient count | `8` |
+| `ZBS` coefficient count | `8` |
+
+The 3D LCFS plot was visually checked.  The corner-weight coloring localizes
+the stellarator-like shaping at the corner arcs, and the cross-section plot now
+draws closed side/corner curves.
+
+A low-iteration optional solve smoke also succeeded:
+
+- command used `--run-solve --max-iter 1 --ns 9 --niter 3 --no-plots`;
+- wrote `wout_toroidal_stellarator_mirror_hybrid.nc`;
+- this verifies the generated input enters the ordinary toroidal fixed-boundary
+  driver.
+
+### How it was tested
+
+New toroidal hybrid tests:
+
+```bash
+JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
+```
+
+Result: `3 passed in 1.16s`.
+
+Plotted example:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid.py \
+  --outdir results/toroidal_stellarator_mirror_hybrid_m13b \
+  --ntheta-fit 64 \
+  --nzeta-fit 64
+```
+
+Result: input, metrics JSON, and three PNG figures written.
+
+Optional solve smoke:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid.py \
+  --outdir results/toroidal_stellarator_mirror_hybrid_m13b_solve_smoke \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --ns 9 \
+  --niter 3 \
+  --run-solve \
+  --max-iter 1 \
+  --no-plots
+```
+
+Result: metrics JSON and `wout_toroidal_stellarator_mirror_hybrid.nc` written.
+
+### File structure and best-practice notes
+
+- The new helper lives at top level, not under `vmec_jax.mirror`, because this
+  is a closed toroidal VMEC boundary.
+- The first generator is still compact: one source module, one root example,
+  one focused test file.
+- The boundary is sampled and projected to the existing VMEC helical Fourier
+  convention using `project_to_modes`, avoiding a separate coefficient system.
+- The example keeps solver execution optional so CI and quick docs runs remain
+  light; the same input can still be solved and plotted through the ordinary
+  toroidal CLI/API path.
+
+### Best next steps
+
+1. Run lint, docs, and focused tests for the new module/example/docs.
+2. Commit and push M13b/M13c.
+3. Add a low-cost toroidal hybrid `--run-solve` smoke test if runtime remains
+   stable in CI.
+4. Add a convergence script over `ns`, `mpol`, and `ntor` for this toroidal
+   hybrid input, tracking `fsq`, iota, magnetic well, runtime, and memory.
+5. Use local VMEC2000 for parity on the generated input once the low-resolution
+   vmec_jax solve is stable.
+
+### Completion percentages after M81
+
+- Geometry/grids/bases: `93%`.
+- Field/energy/residual kernels: `86%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `88%`.
+- I/O schema and docs: `92%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `67%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `18%`.
+- ESSOS circular-coil mirror beta scan: `53%`.
+- PR merge readiness overall: `91%`.
+
+### User input needed
+
+No user input is needed.
+
+---

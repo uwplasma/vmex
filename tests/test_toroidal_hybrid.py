@@ -1,0 +1,83 @@
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+import numpy as np
+
+from vmec_jax.namelist import read_indata, write_indata
+from vmec_jax.toroidal_hybrid import (
+    evaluate_toroidal_hybrid_indata_boundary,
+    sample_toroidal_stellarator_mirror_hybrid_boundary,
+    toroidal_stellarator_mirror_hybrid_indata,
+    toroidal_stellarator_mirror_hybrid_metrics,
+)
+
+
+def test_toroidal_hybrid_boundary_is_stellarator_symmetric_and_corner_localized():
+    samples = sample_toroidal_stellarator_mirror_hybrid_boundary(ntheta=32, nzeta=32)
+    metrics = toroidal_stellarator_mirror_hybrid_metrics(samples)
+
+    assert metrics["min_R"] > 0.0
+    assert metrics["stellsym_R_error"] < 1.0e-13
+    assert metrics["stellsym_Z_error"] < 1.0e-13
+    assert metrics["corner_weight_max"] == 1.0
+    assert metrics["side_weight_max"] == 1.0
+
+    side_cols = [0, samples.zeta.size // 2]
+    corner_cols = [samples.zeta.size // 4, (3 * samples.zeta.size) // 4]
+    side_m2 = np.mean(np.abs(samples.R[:, side_cols] - np.mean(samples.R[:, side_cols], axis=0)))
+    corner_m2 = np.mean(np.abs(samples.R[:, corner_cols] - np.mean(samples.R[:, corner_cols], axis=0)))
+    assert corner_m2 > 0.5 * side_m2
+
+
+def test_toroidal_hybrid_indata_roundtrips_and_reconstructs_samples(tmp_path: Path):
+    samples = sample_toroidal_stellarator_mirror_hybrid_boundary(ntheta=32, nzeta=32)
+    indata = toroidal_stellarator_mirror_hybrid_indata(nfp=2, mpol=5, ntor=4, ntheta_fit=32, nzeta_fit=32)
+
+    input_path = tmp_path / "input.hybrid"
+    write_indata(input_path, indata)
+    read_back = read_indata(input_path)
+    reconstructed = evaluate_toroidal_hybrid_indata_boundary(read_back, ntheta=32, nzeta=32)
+
+    np.testing.assert_allclose(reconstructed.R, samples.R, rtol=0.0, atol=1.0e-12)
+    np.testing.assert_allclose(reconstructed.Z, samples.Z, rtol=0.0, atol=1.0e-12)
+    assert read_back.get_int("NFP") == 2
+    assert read_back.get_int("MPOL") == 5
+    assert read_back.get_int("NTOR") == 4
+    assert "RBS" not in read_back.indexed
+    assert "ZBC" not in read_back.indexed
+
+
+def test_toroidal_hybrid_example_runs_without_plots(tmp_path: Path):
+    env = dict(os.environ)
+    env["PYTHONPATH"] = f"{Path.cwd()}{os.pathsep}{env.get('PYTHONPATH', '')}"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "examples/toroidal_stellarator_mirror_hybrid.py",
+            "--outdir",
+            str(tmp_path / "hybrid"),
+            "--ntheta-fit",
+            "32",
+            "--nzeta-fit",
+            "32",
+            "--no-plots",
+        ],
+        check=True,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+
+    metrics_path = Path(completed.stdout.strip())
+    metrics = json.loads(metrics_path.read_text())
+    assert Path(metrics["input"]).exists()
+    assert metrics["figures"] == {}
+    assert metrics["stellsym_R_error"] < 1.0e-13
+    assert metrics["stellsym_Z_error"] < 1.0e-13
+    assert metrics["rbc_count"] > 3
+    assert metrics["zbs_count"] > 3

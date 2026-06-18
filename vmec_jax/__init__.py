@@ -45,6 +45,7 @@ _os.environ.setdefault("GLOG_minloglevel", "2")
 # cache by default; CPU runs are opt-in to avoid XLA:CPU AOT feature-mismatch
 # warnings on shared or changing runtime environments.
 import jax as _jax
+
 _jax_cache_dir = _default_jax_cache_dir()
 if _jax_cache_dir is not None:
     _os.makedirs(_jax_cache_dir, exist_ok=True)
@@ -251,6 +252,11 @@ _LAZY_ATTRS = {
     "load_mgrid": ".free_boundary",
     "prepare_mgrid_for_config": ".free_boundary",
     "validate_free_boundary_config": ".free_boundary",
+    "ToroidalHybridBoundarySamples": ".toroidal_hybrid",
+    "evaluate_toroidal_hybrid_indata_boundary": ".toroidal_hybrid",
+    "sample_toroidal_stellarator_mirror_hybrid_boundary": ".toroidal_hybrid",
+    "toroidal_stellarator_mirror_hybrid_indata": ".toroidal_hybrid",
+    "toroidal_stellarator_mirror_hybrid_metrics": ".toroidal_hybrid",
     "SurfaceData": ".plotting",
     "axis_rz_from_wout": ".plotting",
     "axis_rz_from_wout_physical": ".plotting",
@@ -436,6 +442,7 @@ def __getattr__(name: str):
 def __dir__():
     return sorted(set(globals()) | set(_LAZY_ATTRS))
 
+
 __all__ = [
     "api",
     "mirror",
@@ -458,6 +465,11 @@ __all__ = [
     "boundary_from_input_convention",
     "boundary_aspect_ratio",
     "boundary_aspect_ratio_from_static",
+    "ToroidalHybridBoundarySamples",
+    "evaluate_toroidal_hybrid_indata_boundary",
+    "sample_toroidal_stellarator_mirror_hybrid_boundary",
+    "toroidal_stellarator_mirror_hybrid_indata",
+    "toroidal_stellarator_mirror_hybrid_metrics",
     "HelicalBasis",
     "build_helical_basis",
     "eval_fourier",
