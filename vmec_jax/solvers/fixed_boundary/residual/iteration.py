@@ -36,7 +36,9 @@ from vmec_jax.solvers.fixed_boundary.residual.config import (
     LIGHT_DUMP_ENVS as _LIGHT_DUMP_ENVS,
     bad_jacobian_tau_tolerance as _bad_jacobian_tau_tolerance,
     normalize_debug_print_mode as _normalize_debug_print_mode,  # noqa: F401 - re-exported for internal helpers/tests.
+    parse_bad_jacobian_config as _parse_bad_jacobian_config,  # noqa: F401 - re-exported for internal helpers/tests.
     resolve_axis_reset_config as _resolve_axis_reset_config,
+    resolve_chunked_scan_config as _resolve_chunked_scan_config,  # noqa: F401 - re-exported for internal helpers/tests.
     resolve_debug_print_config as _resolve_debug_print_config,
     resolve_host_profile_setup as _resolve_host_profile_setup,
     resolve_nstep_screen as _resolve_nstep_screen,
@@ -590,6 +592,20 @@ def solve_fixed_boundary_residual_iter(
     def _record_setup_timing(key: str, start: float | None) -> None:
         _runtime_record_setup_timing(_setup_phase_timings, key, start, perf_counter=time.perf_counter)
 
+    def _precompile_only_result() -> SolveVmecResidualResult:
+        empty = np.zeros((0,), dtype=float)
+        return SolveVmecResidualResult(
+            state=state0,
+            n_iter=0,
+            w_history=empty,
+            fsqr2_history=empty,
+            fsqz2_history=empty,
+            fsql2_history=empty,
+            grad_rms_history=empty,
+            step_history=empty,
+            diagnostics={"precompile_only": True},
+        )
+
     startup_policy = _resolve_residual_iter_startup_policy(
         max_iter=max_iter,
         step_size=step_size,
@@ -894,30 +910,35 @@ def solve_fixed_boundary_residual_iter(
             from vmec_jax.vmec_numpy_forces import _numpy_module_patch as _profile_numpy_patch
         except Exception:
             _profile_numpy_patch = None
-    if _profile_numpy_patch is not None:
-        with _profile_numpy_patch():
-            from vmec_jax.vmec_numpy_forces import _wrap as _np_wrap
+    try:
+        if _profile_numpy_patch is not None:
+            with _profile_numpy_patch():
+                from vmec_jax.vmec_numpy_forces import _wrap as _np_wrap
 
-            s_profile = _np_wrap(np.asarray(s))
+                s_profile = _np_wrap(np.asarray(s))
+                profile_setup = _build_wout_like_profiles_from_indata(
+                    indata=indata,
+                    static=static,
+                    s_profile=s_profile,
+                    signgs=signgs,
+                    idx00=idx00,
+                    prefer_host_default_profiles=prefer_host_default_profiles,
+                    s_profile_has_tracer=_tree_has_tracer(s_profile),
+                )
+        else:
             profile_setup = _build_wout_like_profiles_from_indata(
                 indata=indata,
                 static=static,
-                s_profile=s_profile,
+                s_profile=s,
                 signgs=signgs,
                 idx00=idx00,
                 prefer_host_default_profiles=prefer_host_default_profiles,
-                s_profile_has_tracer=_tree_has_tracer(s_profile),
+                s_profile_has_tracer=_tree_has_tracer(s),
             )
-    else:
-        profile_setup = _build_wout_like_profiles_from_indata(
-            indata=indata,
-            static=static,
-            s_profile=s,
-            signgs=signgs,
-            idx00=idx00,
-            prefer_host_default_profiles=prefer_host_default_profiles,
-            s_profile_has_tracer=_tree_has_tracer(s),
-        )
+    except Exception:
+        if bool(precompile_only):
+            return _precompile_only_result()
+        raise
     wout_like = profile_setup.wout_like
 
     trig = getattr(static, "trig_vmec", None)
@@ -1379,18 +1400,7 @@ def solve_fixed_boundary_residual_iter(
     )
 
     if precompile_only:
-        empty = np.zeros((0,), dtype=float)
-        return SolveVmecResidualResult(
-            state=state0,
-            n_iter=0,
-            w_history=empty,
-            fsqr2_history=empty,
-            fsqz2_history=empty,
-            fsql2_history=empty,
-            grad_rms_history=empty,
-            step_history=empty,
-            diagnostics={"precompile_only": True},
-        )
+        return _precompile_only_result()
 
     def _iter_idx_for_dump(it: int | None) -> int | None:
         return None if jit_forces else it

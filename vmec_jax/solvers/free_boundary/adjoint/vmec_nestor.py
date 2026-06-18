@@ -520,9 +520,9 @@ def _nonsingular_full_grid_from_active_jax(
     zuu2 = jnp.asarray(zuu)
     zuv2 = jnp.asarray(zuv)
     zvv2 = jnp.asarray(zvv)
-    nu_full = int(basis["nu_full"])
     ntheta3, nv = int(R2.shape[0]), int(R2.shape[1])
-    if bool(basis["lasym"]) or nu_full == ntheta3:
+    nu_full = int(basis.get("nu_full", ntheta3))
+    if bool(basis.get("lasym", False)) or nu_full == ntheta3:
         return R2, Z2, Ru2, Zu2, Rv2, Zv2, ruu2, ruv2, rvv2, zuu2, zuv2, zvv2
 
     shape_full = (nu_full, nv)

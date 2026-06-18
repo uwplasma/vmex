@@ -8,9 +8,11 @@ in the backward pass rather than differentiating through an iterative solver.
 
 from __future__ import annotations
 
+import sys
 import time
 from collections.abc import Mapping
 from contextlib import nullcontext
+import types
 from typing import Any
 
 import numpy as np
@@ -170,6 +172,9 @@ from .solvers.free_boundary.adjoint.trace_stack import (
     trace_step_policy_static_signature as _trace_step_policy_static_signature,  # noqa: F401 - compatibility alias for tests/internal users.
 )
 from .solvers.free_boundary.adjoint import trace_fingerprint as _trace_fingerprint
+from .solvers.free_boundary.adjoint import boundary_replay as _boundary_replay_module
+from .solvers.free_boundary.adjoint import direct_coil_replay as _direct_coil_replay_module
+from .solvers.free_boundary.adjoint import vmec_nestor as _vmec_nestor_module
 
 __all__ = [
     "_finite_difference_jacobian",
@@ -1272,3 +1277,24 @@ def direct_coil_projected_mode_fixed_point_directional_check_jax(
         eps=eps,
         **objective_kwargs,
     )
+
+
+_COMPAT_FORWARD_MODULES = (
+    _boundary_replay_module,
+    _direct_coil_replay_module,
+    _vmec_nestor_module,
+)
+
+
+class _FreeBoundaryAdjointFacadeModule(types.ModuleType):
+    """Forward root-facade monkeypatches to moved adjoint implementations."""
+
+    def __setattr__(self, name, value):
+        if not (name.startswith("__") and name.endswith("__")):
+            for module in _COMPAT_FORWARD_MODULES:
+                if hasattr(module, name):
+                    setattr(module, name, value)
+        super().__setattr__(name, value)
+
+
+sys.modules[__name__].__class__ = _FreeBoundaryAdjointFacadeModule
