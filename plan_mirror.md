@@ -15300,3 +15300,104 @@ Results:
 No user input is needed.
 
 ---
+
+## 121. Circular-Coil Fsq-Growth Ratio Diagnostics
+
+### Steps taken
+
+- Added explicit residual-growth diagnostics to
+  `examples/mirror_free_boundary_circular_coils.py`:
+  - pilot rows now include `fsq_growth_ratio`;
+  - beta rows now include `lcfs_pilot_final_fsq_growth_ratio`;
+  - beta rows now include `lcfs_pilot_best_fsq_growth_ratio`.
+- Reused the same `fsq_growth_ratio` value for the fsq-growth guard decision so
+  the logged diagnostic and acceptance decision cannot drift.
+- Extended the compact schema contract to require the new beta-row and
+  pilot-row fields.
+- Updated the focused circular-coil tests for accepted, skipped, stagnation,
+  and fsq-guard paths.
+- Updated `examples/mirror/README.md` and `docs/mirror/overview.rst` to document
+  the new growth-ratio fields.
+
+### Results obtained
+
+- Downstream ESSOS or analysis scripts can now read residual growth directly
+  from the JSON rather than recomputing it from baseline and pilot rows.
+- Skipped pilot rows report `fsq_growth_ratio: null`.
+- Trial pilot rows report finite ratios whether accepted or rejected, including
+  rejected merit-increase and fsq-growth-guard cases.
+- The schema helper now reports `26` beta-row required fields and `18`
+  pilot-row required fields.
+
+### How it was tested
+
+Commands run:
+
+```bash
+python -m ruff check examples/mirror_free_boundary_circular_coils.py tests/mirror/test_mirror_examples.py
+python -m ruff format --check examples/mirror_free_boundary_circular_coils.py tests/mirror/test_mirror_examples.py
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_example_runs_without_plots tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_strict_bnormal_guard_can_skip_pilot tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_pilot_stagnation_stops_early tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_fsq_growth_guard_rejects_pilot -q
+python - <<'PY'
+import runpy
+m=runpy.run_path('examples/mirror_free_boundary_circular_coils.py')
+s=m['circular_coil_beta_scan_schema']()
+print(s['metrics_schema'], s['metrics_schema_version'])
+print('row fields', len(s['beta_row_required_fields']), 'pilot fields', len(s['pilot_row_required_fields']))
+print('has ratio', 'lcfs_pilot_final_fsq_growth_ratio' in s['beta_row_required_fields'], 'fsq_growth_ratio' in s['pilot_row_required_fields'])
+PY
+python -m ruff format examples/mirror_free_boundary_circular_coils.py tests/mirror/test_mirror_examples.py
+git diff --check
+```
+
+Results:
+
+- Ruff lint passed.
+- Ruff format check passed after formatting two files.
+- `4 passed` in focused circular-coil tests.
+- Schema helper confirmed the ratio fields are in the contract.
+- `git diff --check` passed.
+
+### File structure and best-practice notes
+
+- The diagnostic remains example-level and schema-level; no core solver API was
+  changed.
+- The field names are scalar and explicit, matching the rest of the beta-scan
+  JSON.
+- The guard uses the same ratio that is written to JSON, reducing duplicated
+  arithmetic and audit ambiguity.
+
+### Best next steps
+
+1. Commit and push M121.
+2. Rerun the higher-budget circular-coil scan with
+   `--lcfs-pilot-fsq-growth-limit 1.1` to test whether the 3% and 10% rows are
+   acceptable under a small residual-growth tolerance while 1% remains rejected
+   by actual LCFS merit.
+3. If 3% and 10% accept at `1.1`, document strict versus tolerant guard
+   behavior and make the recommended guard explicit in the example docs.
+4. If they still reject, add a proposal-selection diagnostic that accounts for
+   fixed-boundary residual growth before selecting the LCFS update.
+
+### Completion percentages after M121
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `87%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `91%`.
+- I/O schema and docs: `98%`.
+- Differentiable solved-state API: `30%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `84%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `82%`.
+- PR merge readiness overall: `95%`.
+
+### User input needed
+
+No user input is needed.
+
+---

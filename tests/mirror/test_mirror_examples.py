@@ -260,6 +260,8 @@ def test_root_free_boundary_circular_coils_example_runs_without_plots(tmp_path):
     assert all(row["lcfs_pilot_stop_reason"] == "max_steps" for row in metrics["fixed_boundary_baseline_rows"])
     assert all(row["lcfs_pilot_final_fsq"] is not None for row in metrics["fixed_boundary_baseline_rows"])
     assert all(row["lcfs_pilot_best_fsq"] is not None for row in metrics["fixed_boundary_baseline_rows"])
+    assert all(row["lcfs_pilot_final_fsq_growth_ratio"] is not None for row in metrics["fixed_boundary_baseline_rows"])
+    assert all(row["lcfs_pilot_best_fsq_growth_ratio"] is not None for row in metrics["fixed_boundary_baseline_rows"])
     assert all(row["lcfs_pilot_final_normalized_force"] is not None for row in metrics["fixed_boundary_baseline_rows"])
     assert all(
         row["lcfs_pilot_final_pressure_balance_rms"] is not None for row in metrics["fixed_boundary_baseline_rows"]
@@ -270,6 +272,10 @@ def test_root_free_boundary_circular_coils_example_runs_without_plots(tmp_path):
     )
     assert all(
         set(schema["pilot_row_required_fields"]).issubset(row["lcfs_pilot_rows"][0])
+        for row in metrics["fixed_boundary_baseline_rows"]
+    )
+    assert all(
+        row["lcfs_pilot_rows"][0]["fsq_growth_ratio"] == pytest.approx(row["lcfs_pilot_final_fsq_growth_ratio"])
         for row in metrics["fixed_boundary_baseline_rows"]
     )
     assert all(
@@ -339,6 +345,9 @@ def test_root_free_boundary_circular_coils_strict_bnormal_guard_can_skip_pilot(t
     assert pilot["accepted"] is False
     assert pilot["rejection_reason"] == "normal_field_guard_no_candidate"
     assert pilot["stop_reason"] == "noop_candidate"
+    assert pilot["fsq_growth_ratio"] is None
+    assert row["lcfs_pilot_final_fsq_growth_ratio"] is None
+    assert row["lcfs_pilot_best_fsq_growth_ratio"] is None
     assert pilot["lcfs_update_allowed_strategies_next"] == ["noop"]
     assert pilot["lcfs_update_rejection_reason_next"] == "normal_field_guard_no_candidate"
     assert pilot["mout"] is None
@@ -385,7 +394,10 @@ def test_root_free_boundary_circular_coils_pilot_stagnation_stops_early(tmp_path
     assert row["lcfs_pilot_stop_reason"] == "merit_stagnation"
     assert row["lcfs_pilot_final_fsq"] is not None
     assert row["lcfs_pilot_best_fsq"] is not None
+    assert row["lcfs_pilot_final_fsq_growth_ratio"] is not None
+    assert row["lcfs_pilot_best_fsq_growth_ratio"] is not None
     assert row["lcfs_pilot_rows"][0]["stop_reason"] == "merit_stagnation"
+    assert row["lcfs_pilot_rows"][0]["fsq_growth_ratio"] == pytest.approx(row["lcfs_pilot_final_fsq_growth_ratio"])
     assert row["lcfs_pilot_rows"][0]["lcfs_merit_improvement_fraction"] <= 1.0
 
 
@@ -432,6 +444,9 @@ def test_root_free_boundary_circular_coils_fsq_growth_guard_rejects_pilot(tmp_pa
     assert pilot["rejection_reason"] == "fsq_growth_guard"
     assert pilot["stop_reason"] == "fsq_growth_guard"
     assert pilot["final_fsq"] > row["final_fsq"]
+    assert pilot["fsq_growth_ratio"] > 1.0
+    assert row["lcfs_pilot_final_fsq_growth_ratio"] == pytest.approx(pilot["fsq_growth_ratio"])
+    assert row["lcfs_pilot_best_fsq_growth_ratio"] == pytest.approx(pilot["fsq_growth_ratio"])
 
 
 def test_root_fixed_boundary_solve_diagnostic_runs_without_plots(tmp_path):

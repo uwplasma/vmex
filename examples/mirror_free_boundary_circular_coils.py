@@ -89,6 +89,8 @@ CIRCULAR_COIL_BETA_SCAN_ROW_FIELDS = (
     "lcfs_pilot_rows_count",
     "lcfs_pilot_accepted_rows",
     "lcfs_pilot_skipped_rows",
+    "lcfs_pilot_final_fsq_growth_ratio",
+    "lcfs_pilot_best_fsq_growth_ratio",
     "lcfs_pilot_stop_reason",
     "lcfs_pilot_rows",
     "figures",
@@ -100,6 +102,7 @@ CIRCULAR_COIL_BETA_SCAN_PILOT_ROW_FIELDS = (
     "rejection_reason",
     "stop_reason",
     "lcfs_merit_improvement_fraction",
+    "fsq_growth_ratio",
     "final_residual_norm",
     "final_fsq",
     "final_normalized_force",
@@ -430,6 +433,8 @@ def _lcfs_pilot_summary(pilot_rows: list[dict[str, object]]) -> dict[str, object
             "lcfs_pilot_final_pressure_balance_rms": None,
             "lcfs_pilot_final_fsq": None,
             "lcfs_pilot_best_fsq": None,
+            "lcfs_pilot_final_fsq_growth_ratio": None,
+            "lcfs_pilot_best_fsq_growth_ratio": None,
             "lcfs_pilot_final_normalized_force": None,
             "lcfs_pilot_stop_reason": None,
         }
@@ -437,6 +442,9 @@ def _lcfs_pilot_summary(pilot_rows: list[dict[str, object]]) -> dict[str, object
     skipped = sum(bool(row.get("skipped", False)) for row in pilot_rows)
     merit_values = [float(row["lcfs_merit"]) for row in pilot_rows if row.get("lcfs_merit") is not None]
     fsq_values = [float(row["final_fsq"]) for row in pilot_rows if row.get("final_fsq") is not None]
+    fsq_growth_ratios = [
+        float(row["fsq_growth_ratio"]) for row in pilot_rows if row.get("fsq_growth_ratio") is not None
+    ]
     final = pilot_rows[-1]
     if bool(final.get("skipped", False)):
         status = "skipped"
@@ -456,6 +464,10 @@ def _lcfs_pilot_summary(pilot_rows: list[dict[str, object]]) -> dict[str, object
         else float(final["lcfs_pressure_balance_rms"]),
         "lcfs_pilot_final_fsq": None if final.get("final_fsq") is None else float(final["final_fsq"]),
         "lcfs_pilot_best_fsq": None if not fsq_values else float(min(fsq_values)),
+        "lcfs_pilot_final_fsq_growth_ratio": None
+        if final.get("fsq_growth_ratio") is None
+        else float(final["fsq_growth_ratio"]),
+        "lcfs_pilot_best_fsq_growth_ratio": None if not fsq_growth_ratios else float(min(fsq_growth_ratios)),
         "lcfs_pilot_final_normalized_force": None
         if final.get("final_normalized_force") is None
         else float(final["final_normalized_force"]),
@@ -637,6 +649,7 @@ def _skipped_lcfs_pilot_row(
         "rejection_reason": selection.rejection_reason or "noop_candidate_selected",
         "stop_reason": "noop_candidate",
         "lcfs_merit_improvement_fraction": None,
+        "fsq_growth_ratio": None,
         "final_residual_norm": None,
         "final_fsq": None,
         "final_normalized_force": None,
@@ -678,6 +691,7 @@ def _completed_lcfs_pilot_row(
         "rejection_reason": None,
         "stop_reason": None,
         "lcfs_merit_improvement_fraction": None,
+        "fsq_growth_ratio": None,
         "final_residual_norm": float(final.residual_norm),
         "final_fsq": float(final.fsq),
         "final_normalized_force": float(final.normalized_force),
@@ -908,13 +922,13 @@ def _run_fixed_boundary_baseline_cases(
                     write_plots=write_plots,
                 )
                 pilot_rows.append(pilot_step.row)
+                fsq_growth_ratio = float(pilot_step.row["final_fsq"]) / max(baseline_final_fsq, 1.0e-300)
+                pilot_rows[-1]["fsq_growth_ratio"] = fsq_growth_ratio
                 if not pilot_step.accepted:
                     pilot_rows[-1]["rejection_reason"] = "merit_increase"
                     pilot_rows[-1]["stop_reason"] = "rejected_merit_increase"
                     break
-                if float(lcfs_pilot_fsq_growth_limit) > 0.0 and float(pilot_step.row["final_fsq"]) > float(
-                    lcfs_pilot_fsq_growth_limit
-                ) * max(baseline_final_fsq, 1.0e-300):
+                if float(lcfs_pilot_fsq_growth_limit) > 0.0 and fsq_growth_ratio > float(lcfs_pilot_fsq_growth_limit):
                     pilot_rows[-1]["accepted"] = False
                     pilot_rows[-1]["rejection_reason"] = "fsq_growth_guard"
                     pilot_rows[-1]["stop_reason"] = "fsq_growth_guard"
