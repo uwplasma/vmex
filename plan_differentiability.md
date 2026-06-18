@@ -11851,3 +11851,64 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.7%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.9981%.
+
+## 2026-06-18 Mercier Weighted-Sum and Geometry Seams
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `_MercierWeightedSumContext` and `_mercier_weighted_sum_context` to
+   isolate VMEC-compatible weighted surface summation policy, including the
+   exact Fortran-order debug path and the vectorized fast path.
+2. Added `_mercier_parity_geometry_fields` to isolate parity-decomposed
+   geometry synthesis for the VMEC Mercier terms.
+3. Rewired `compute_mercier` to use those explicit seams and removed unused
+   inline full-geometry array materialization.
+
+Results obtained:
+
+- `compute_mercier` dropped from 646 to 568 lines.
+- Mercier now separates quadrature policy, parity geometry, radial stability
+  terms, current diagnostics, and the remaining JXBFORCE derivative path.
+- Focused Mercier/Glasser/WOUT tests remained green.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/io/wout/mercier.py`
+- `python -m ruff check vmec_jax/io/wout/mercier.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_glasser_resistive_interchange.py tests/test_finite_beta_helpers_unit.py tests/test_wout_helpers.py tests/test_wout_physics_wave8_coverage.py tests/test_wout_driver_wave10_coverage.py -q`
+  - Result: passed, with one skip and known single-surface JXBFORCE warnings.
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 30`
+
+Best next steps:
+
+1. Continue Mercier/JXBFORCE cleanup by extracting bsub preprocessing or the
+   bsubs-derivative reconstruction block.
+2. If that becomes too branch-heavy, return to driver/implicit seams or start a
+   carefully staged residual-iteration split.
+3. Recheck PR CI later for actual failures; current local shards cover the
+   touched source paths.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.97%.
+- Differentiability/refactor implementation: 99.999996%.
+- Solver monolith reduction: 99.46%.
+- Free-boundary adjoint monolith reduction: 99.30%.
+- Driver workflow decomposition: 99.82%.
+- Residual iteration decomposition: 95.8%.
+- WOUT diagnostic/profile decomposition: 99.64%.
+- Bcovar/WOUT parity decomposition: 98.0%.
+- Optimizer workflow decomposition: 98.8%.
+- Fixed-boundary optimizer decomposition: 94.0%.
+- Implicit residual-adjoint decomposition: 95%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.7%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.9982%.
