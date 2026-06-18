@@ -18,15 +18,17 @@ Steps taken:
    builder to unpack every scalar/profile field into locals.
 2. Changed current-profile metadata mapping to consume the structured metadata
    payload directly.
-3. Preserved the VMEC++-style non-converged WOUT behavior by applying the
+3. Changed main-geometry coefficient mapping to consume the structured
+   `WoutMainGeometryCoefficients` payload directly.
+4. Preserved the VMEC++-style non-converged WOUT behavior by applying the
    optional beta-zeroing escape hatch via `scalar_diag._replace(...)`.
 
 Results obtained:
 
-- `vmec_jax/wout.py` is 24 lines smaller.
-- `vmec_jax/io/wout/minimal.py` grows by only 2 lines, for a net 22-line source
+- `vmec_jax/wout.py` is 34 lines smaller.
+- `vmec_jax/io/wout/minimal.py` grows by only 3 lines, for a net 31-line source
   reduction.
-- `wout_minimal_from_fixed_boundary` dropped from 806 to 782 lines.
+- `wout_minimal_from_fixed_boundary` dropped from 806 to 772 lines.
 - Full WOUT focused tests pass.
 
 Tests and commands run:

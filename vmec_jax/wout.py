@@ -1159,16 +1159,6 @@ def wout_minimal_from_fixed_boundary(
         lasym=bool(lasym),
         lconm1=bool(lconm1),
     )
-    rmnc = main_geom.rmnc
-    rmns = main_geom.rmns
-    zmnc = main_geom.zmnc
-    zmns = main_geom.zmns
-    lmnc_internal = main_geom.lmnc_internal
-    lmns_internal = main_geom.lmns_internal
-    raxis_cc = main_geom.raxis_cc
-    raxis_cs = main_geom.raxis_cs
-    zaxis_cc = main_geom.zaxis_cc
-    zaxis_cs = main_geom.zaxis_cs
 
     # Toroidal flux (VMEC `phi`) in physical units.
     phipf_out = phipf_internal * float(2.0 * np.pi * signgs)
@@ -1769,14 +1759,14 @@ def wout_minimal_from_fixed_boundary(
         wout_timing["jxbforce_mercier_s"] = _time.perf_counter() - t0
 
     lmns = _lambda_wout_from_full_mesh(
-        lam_full=lmns_internal,
+        lam_full=main_geom.lmns_internal,
         m_modes=np.asarray(main_modes.m, dtype=int),
         s=s,
         phipf_internal=phipf_internal,
         lamscale=lamscale,
     )
     lmnc = _lambda_wout_from_full_mesh(
-        lam_full=lmnc_internal,
+        lam_full=main_geom.lmnc_internal,
         m_modes=np.asarray(main_modes.m, dtype=int),
         s=s,
         phipf_internal=phipf_internal,
