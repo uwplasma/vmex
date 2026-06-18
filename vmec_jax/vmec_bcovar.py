@@ -323,6 +323,24 @@ class BcovarParityChannels:
     Lv1: Any
 
 
+@dataclass(frozen=True)
+class BcovarMetricAssembly:
+    """Half-mesh metric and lambda derivative fields from parity channels."""
+
+    jac: VmecHalfMeshJacobian
+    guu: Any
+    guv: Any
+    gvv: Any
+    guu_eh: Any
+    guu_oh: Any
+    guv_eh: Any
+    guv_oh: Any
+    gvv_eh: Any
+    gvv_oh: Any
+    lam_u: Any
+    lam_v: Any
+
+
 def _resolve_bcovar_state_and_trig(
     *,
     state: Any,
@@ -603,6 +621,88 @@ def _compute_bcovar_parity_channels(
     )
 
 
+def _compute_bcovar_metric_assembly(
+    *,
+    channels: BcovarParityChannels,
+    s: Any,
+    ns: int,
+) -> BcovarMetricAssembly:
+    """Build half-mesh Jacobian, metric tensors, and lambda derivatives."""
+
+    parity = channels.parity
+    R1 = channels.R1
+    Z1 = channels.Z1
+    Ru1 = channels.Ru1
+    Zu1 = channels.Zu1
+    Rv1 = channels.Rv1
+    Zv1 = channels.Zv1
+    Lu1 = channels.Lu1
+    Lv1 = channels.Lv1
+    metric_start = time.perf_counter()
+    jac = jacobian_half_mesh_from_parity(
+        pr1_even=parity.R_even,
+        pr1_odd=R1,
+        pz1_even=parity.Z_even,
+        pz1_odd=Z1,
+        pru_even=parity.Rt_even,
+        pru_odd=Ru1,
+        pzu_even=parity.Zt_even,
+        pzu_odd=Zu1,
+        s=s,
+    )
+    guu_e, guu_o = _metric_even_odd(a0=parity.Rt_even, a1=Ru1, b0=parity.Zt_even, b1=Zu1, s=s)
+    guv_e, guv_o = _metric_cross_even_odd(a0=parity.Rt_even, a1=Ru1, b0=parity.Rp_even, b1=Rv1, s=s)
+    guv_e2, guv_o2 = _metric_cross_even_odd(a0=parity.Zt_even, a1=Zu1, b0=parity.Zp_even, b1=Zv1, s=s)
+    guv_e = guv_e + guv_e2
+    guv_o = guv_o + guv_o2
+    gvv_e, gvv_o = _metric_even_odd(a0=parity.Rp_even, a1=Rv1, b0=parity.Zp_even, b1=Zv1, s=s)
+
+    ss = s[:, None, None]
+    r2_even = parity.R_even * parity.R_even + ss * (R1 * R1)
+    r2_odd = 2.0 * parity.R_even * R1
+    gvv_e_total = gvv_e + r2_even
+    gvv_o_total = gvv_o + r2_odd
+
+    guu = _half_mesh_from_even_odd(guu_e, guu_o, s=s)
+    guv = _half_mesh_from_even_odd(guv_e, guv_o, s=s)
+    gvv = _half_mesh_from_even_odd(gvv_e_total, gvv_o_total, s=s)
+    if ns >= 1:
+        guv = _with_axis_zero(guv)
+        gvv = _with_axis_zero(gvv)
+
+    def _half_even_odd_full(e_full, o_full):
+        if ns < 2:
+            z = jnp.zeros_like(guu)
+            return z, z
+        e_body = 0.5 * (e_full[1:] + e_full[:-1])
+        o_body = 0.5 * (o_full[1:] + o_full[:-1])
+        return (
+            jnp.concatenate([e_body[:1], e_body], axis=0),
+            jnp.concatenate([o_body[:1], o_body], axis=0),
+        )
+
+    guu_eh, guu_oh = _half_even_odd_full(guu_e, guu_o)
+    guv_eh, guv_oh = _half_even_odd_full(guv_e, guv_o)
+    gvv_eh, gvv_oh = _half_even_odd_full(gvv_e_total, gvv_o_total)
+    lam_u = _half_mesh_from_even_odd(parity.Lt_even, Lu1, s=s)
+    lam_v = _half_mesh_from_even_odd(parity.Lp_even, Lv1, s=s)
+    _vmec_bcovar_profile_log("metric_done", metric_start)
+    return BcovarMetricAssembly(
+        jac=jac,
+        guu=guu,
+        guv=guv,
+        gvv=gvv,
+        guu_eh=guu_eh,
+        guu_oh=guu_oh,
+        guv_eh=guv_eh,
+        guv_oh=guv_oh,
+        gvv_eh=gvv_eh,
+        gvv_oh=gvv_oh,
+        lam_u=lam_u,
+        lam_v=lam_v,
+    )
+
+
 def vmec_bcovar_half_mesh_from_wout(
     *,
     state,
@@ -690,67 +790,23 @@ def vmec_bcovar_half_mesh_from_wout(
     Lu1 = parity_channels.Lu1
     Lv1 = parity_channels.Lv1
 
-    # Half-mesh Jacobian quantities from VMEC's discrete formula.
-    metric_start = time.perf_counter()
-    jac = jacobian_half_mesh_from_parity(
-        pr1_even=parity.R_even,
-        pr1_odd=R1,
-        pz1_even=parity.Z_even,
-        pz1_odd=Z1,
-        pru_even=parity.Rt_even,
-        pru_odd=Ru1,
-        pzu_even=parity.Zt_even,
-        pzu_odd=Zu1,
+    metric = _compute_bcovar_metric_assembly(
+        channels=parity_channels,
         s=s,
+        ns=int(ns),
     )
-    # Metric elements on full mesh split into even/odd (internal) pieces, then
-    # staggered to the half mesh using VMEC's pshalf convention.
-    guu_e, guu_o = _metric_even_odd(a0=parity.Rt_even, a1=Ru1, b0=parity.Zt_even, b1=Zu1, s=s)
-    guv_e, guv_o = _metric_cross_even_odd(a0=parity.Rt_even, a1=Ru1, b0=parity.Rp_even, b1=Rv1, s=s)
-    guv_e2, guv_o2 = _metric_cross_even_odd(a0=parity.Zt_even, a1=Zu1, b0=parity.Zp_even, b1=Zv1, s=s)
-    guv_e = guv_e + guv_e2
-    guv_o = guv_o + guv_o2
-    gvv_e, gvv_o = _metric_even_odd(a0=parity.Rp_even, a1=Rv1, b0=parity.Zp_even, b1=Zv1, s=s)
-
-    # R^2 term in cylindrical metric: gvv <- gvv + R^2
-    ss = s[:, None, None]
-    R2_e = parity.R_even * parity.R_even + ss * (R1 * R1)
-    R2_o = 2.0 * parity.R_even * R1
-
-    gvv_e_total = gvv_e + R2_e
-    gvv_o_total = gvv_o + R2_o
-
-    guu = _half_mesh_from_even_odd(guu_e, guu_o, s=s)
-    guv = _half_mesh_from_even_odd(guv_e, guv_o, s=s)
-    gvv = _half_mesh_from_even_odd(gvv_e_total, gvv_o_total, s=s)
-    if ns >= 1:
-        guv = _with_axis_zero(guv)
-        gvv = _with_axis_zero(gvv)
-
-    def _half_even_odd_full(e_full, o_full):
-        if ns < 2:
-            z = jnp.zeros_like(guu)
-            return z, z
-        e_body = 0.5 * (e_full[1:] + e_full[:-1])
-        o_body = 0.5 * (o_full[1:] + o_full[:-1])
-        return (
-            jnp.concatenate([e_body[:1], e_body], axis=0),
-            jnp.concatenate([o_body[:1], o_body], axis=0),
-        )
-
-    guu_eh, guu_oh = _half_even_odd_full(guu_e, guu_o)
-    guv_eh, guv_oh = _half_even_odd_full(guv_e, guv_o)
-    gvv_eh, gvv_oh = _half_even_odd_full(gvv_e_total, gvv_o_total)
-
-    # Lambda derivatives on half mesh (scaled lambda).
-    lam_u = _half_mesh_from_even_odd(parity.Lt_even, Lu1, s=s)
-    lam_v = _half_mesh_from_even_odd(parity.Lp_even, Lv1, s=s)
-
-    # NOTE: `lam_u/lam_v` are used downstream in VMEC's magnetic-field and
-    # force pipeline, but the (guu,guv,gvv) metric elements used for bsub*
-    # parity are those constructed above from (Ru,Zu,Rv,Zv) and the cylindrical
-    # +R^2 term.
-    _vmec_bcovar_profile_log("metric_done", metric_start)
+    jac = metric.jac
+    guu = metric.guu
+    guv = metric.guv
+    gvv = metric.gvv
+    guu_eh = metric.guu_eh
+    guu_oh = metric.guu_oh
+    guv_eh = metric.guv_eh
+    guv_oh = metric.guv_oh
+    gvv_eh = metric.gvv_eh
+    gvv_oh = metric.gvv_oh
+    lam_u = metric.lam_u
+    lam_v = metric.lam_v
 
     # ---------------------------------------------------------------------
     # Contravariant B components (bsupu, bsupv) on the half mesh.
