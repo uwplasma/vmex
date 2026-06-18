@@ -43,6 +43,7 @@ from .io.wout.minimal import (
     lbsubs_from_indata_and_env,
     minimal_wout_runtime_options_from_env,
     pressure_profiles_from_mass_vp,
+    prepare_wout_bss_source_payload,
     prepare_wout_bcovar_payload,
     prepare_profile_payload,
 )
@@ -1220,34 +1221,6 @@ def wout_minimal_from_fixed_boundary(
     k_force = bcovar_payload.k_force
     indata_wout = bcovar_payload.indata_wout
 
-    # VMEC output routes the bss/jxbforce path through the force-kernel arrays
-    # (crmn_e/czmn_e and friends). In vmec_jax, the bcovar/Jacobian-based path
-    # currently matches VMEC2000 bsubsmns more reliably, so keep force-kernels
-    # opt-in.
-    _force_bss_env = os.getenv("VMEC_JAX_WOUT_FORCE_BSS", "").strip().lower()
-    if _force_bss_env == "":
-        # Default to bcovar/Jacobian bss inputs. Force-kernel bss inputs remain
-        # opt-in for targeted debugging.
-        use_force_bss = False
-    else:
-        use_force_bss = _force_bss_env not in ("0", "false", "no")
-    bsupu_bss = np.asarray(bc.bsupu, dtype=float)
-    bsupv_bss = np.asarray(bc.bsupv, dtype=float)
-    ru12_bss = None
-    zu12_bss = None
-    rs_bss = None
-    zs_bss = None
-    crmn_e_sym = None
-    czmn_e_sym = None
-    bzmn_e_sym = None
-    brmn_e_sym = None
-    azmn_e_sym = None
-    armn_e_sym = None
-    # For bss, default to using the half-mesh Jacobian (bcovar parity) and
-    # avoid force-parity geometry unless explicitly requested.
-    use_parity_geom_bss = os.getenv("VMEC_JAX_BSS_FROM_PARITY_GEOM", "1") not in ("", "0")
-    geom_bss = geom if use_parity_geom_bss else {}
-
     def _force_sym(arr, kind: str):
         arr_np = np.asarray(arr, dtype=float)
         # For LASYM there is no symmetry reduction; keep full-grid values.
@@ -1260,42 +1233,34 @@ def wout_minimal_from_fixed_boundary(
         # Enforce stellarator symmetry on the full grid when lasym=False.
         return _vmec_symforce_apply(f=arr_np, trig=trig, kind=kind)
 
-    if use_force_bss and (k_force is None):
-        wout_force_vmec_synth_env = os.getenv("VMEC_JAX_WOUT_FORCE_VMEC_SYNTH", "").strip().lower()
-        wout_force_vmec_synth = wout_force_vmec_synth_env not in ("", "0", "false", "no")
-        k_force = vmec_forces_rz_from_wout(
-            state=state,
-            static=static,
-            wout=wout_like,
-            indata=indata_wout,
-            use_wout_bsup=False,
-            use_vmec_synthesis=wout_force_vmec_synth,
-            trig=None,
-        )
-        if has_jax():
-            try:
-                k_force = jax.device_get(k_force)
-            except Exception:
-                pass
-
-    if use_force_bss and (k_force is not None):
-        if hasattr(k_force, "crmn_e") and hasattr(k_force, "czmn_e"):
-            crmn_e_sym = _force_sym(k_force.crmn_e, "crs")
-            czmn_e_sym = _force_sym(k_force.czmn_e, "czs")
-            bsupu_bss = crmn_e_sym
-            bsupv_bss = czmn_e_sym
-        if hasattr(k_force, "bzmn_e"):
-            bzmn_e_sym = _force_sym(k_force.bzmn_e, "bzs")
-            rs_bss = bzmn_e_sym
-        if hasattr(k_force, "brmn_e"):
-            brmn_e_sym = _force_sym(k_force.brmn_e, "brs")
-            zs_bss = brmn_e_sym
-        if hasattr(k_force, "azmn_e"):
-            azmn_e_sym = _force_sym(k_force.azmn_e, "azs")
-            ru12_bss = azmn_e_sym
-        if hasattr(k_force, "armn_e"):
-            armn_e_sym = _force_sym(k_force.armn_e, "ars")
-            zu12_bss = armn_e_sym
+    bss_payload = prepare_wout_bss_source_payload(
+        state=state,
+        static=static,
+        indata_wout=indata_wout,
+        wout_like=wout_like,
+        bc=bc,
+        k_force=k_force,
+        trig=trig,
+        geom=geom,
+        lasym=bool(lasym),
+        force_sym_func=_force_sym,
+        vmec_forces_rz_from_wout_func=vmec_forces_rz_from_wout,
+    )
+    use_force_bss = bss_payload.use_force_bss
+    k_force = bss_payload.k_force
+    bsupu_bss = bss_payload.bsupu
+    bsupv_bss = bss_payload.bsupv
+    ru12_bss = bss_payload.ru12
+    zu12_bss = bss_payload.zu12
+    rs_bss = bss_payload.rs
+    zs_bss = bss_payload.zs
+    crmn_e_sym = bss_payload.crmn_e_sym
+    czmn_e_sym = bss_payload.czmn_e_sym
+    bzmn_e_sym = bss_payload.bzmn_e_sym
+    brmn_e_sym = bss_payload.brmn_e_sym
+    azmn_e_sym = bss_payload.azmn_e_sym
+    armn_e_sym = bss_payload.armn_e_sym
+    geom_bss = bss_payload.geom
     _wout_debug_helpers.dump_bsub_parity_if_requested(s=np.asarray(s, dtype=float), bc=bc)
     _wout_debug_helpers.dump_bsubh_if_requested(s=np.asarray(s, dtype=float), bsupu=bsupu_bss, bsupv=bsupv_bss, bc=bc)
 

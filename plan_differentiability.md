@@ -10091,3 +10091,59 @@ Completion:
 - Implicit residual-adjoint decomposition: 91%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.986%.
+
+## 2026-06-18 WOUT BSS Source Policy Split
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `WoutBssSourcePayload` and `prepare_wout_bss_source_payload` to
+   `vmec_jax.io.wout.minimal`.
+2. Moved BSS/JXBFORCE source selection for force-kernel vs bcovar/Jacobian
+   arrays out of `wout_minimal_from_fixed_boundary`.
+3. Preserved downstream local names in `wout.py` so the existing bsubs/filter
+   and Nyquist sections were not rewritten.
+
+Results obtained:
+
+- `wout_minimal_from_fixed_boundary` dropped from 928 to 892 lines.
+- BSS source-policy behavior remains exercised by forced-BSS and source-filter
+   branch tests.
+- Stopped before the Nyquist/Mercier parity-sensitive blocks, as planned.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/wout.py vmec_jax/io/wout/minimal.py`
+- `python -m ruff check vmec_jax/wout.py vmec_jax/io/wout/minimal.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_env_branch_coverage.py::test_forced_bss_uses_symforced_force_kernel_arrays tests/test_wout_driver_wave10_coverage.py::test_wout_minimal_bsub_source_filter_branches tests/test_wout_driver_wave10_coverage.py::test_wout_minimal_equif_correction_and_raw_filter_branch tests/test_wout_fast_helpers.py -q`
+- `python tools/diagnostics/source_health.py --top 14 --top-functions 20`
+
+Best next steps:
+
+1. Return to residual scan preparation: split axis-reset preparation into a
+   scan setup object only if tests can cover reset and non-reset paths.
+2. Otherwise address `implicit.py` full-adjoint routing next, which is a clearer
+   differentiability seam than WOUT Nyquist output.
+3. Run a broader local release shard after the next residual/implicit tranche.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.97%.
+- Differentiability/refactor implementation: 99.99992%.
+- Solver monolith reduction: 99.30%.
+- Free-boundary adjoint monolith reduction: 99.1%.
+- Driver workflow decomposition: 99.3%.
+- Residual iteration decomposition: 92.0%.
+- WOUT diagnostic/profile decomposition: 99.1%.
+- Optimizer workflow decomposition: 98.8%.
+- Fixed-boundary optimizer decomposition: 94.0%.
+- Implicit residual-adjoint decomposition: 91%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.987%.

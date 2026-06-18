@@ -65,6 +65,26 @@ class WoutBcovarPayload(NamedTuple):
     indata_wout: Any
 
 
+class WoutBssSourcePayload(NamedTuple):
+    """BSS/JXBFORCE source arrays selected for minimal WOUT assembly."""
+
+    use_force_bss: bool
+    k_force: Any | None
+    bsupu: np.ndarray
+    bsupv: np.ndarray
+    ru12: np.ndarray | None
+    zu12: np.ndarray | None
+    rs: np.ndarray | None
+    zs: np.ndarray | None
+    crmn_e_sym: np.ndarray | None
+    czmn_e_sym: np.ndarray | None
+    bzmn_e_sym: np.ndarray | None
+    brmn_e_sym: np.ndarray | None
+    azmn_e_sym: np.ndarray | None
+    armn_e_sym: np.ndarray | None
+    geom: dict[str, Any]
+
+
 def env_enabled(value: str | None, *, false_values: tuple[str, ...] = ("", "0", "false", "no")) -> bool:
     """Return whether a VMEC-JAX environment toggle should be considered enabled."""
 
@@ -187,6 +207,99 @@ def prepare_wout_bcovar_payload(
         bc=bc,
         k_force=k_force,
         indata_wout=indata_wout,
+    )
+
+
+def prepare_wout_bss_source_payload(
+    *,
+    state: Any,
+    static: Any,
+    indata_wout: Any,
+    wout_like: Any,
+    bc: Any,
+    k_force: Any | None,
+    trig: Any,
+    geom: dict[str, Any],
+    lasym: bool,
+    force_sym_func: Any,
+    vmec_forces_rz_from_wout_func: Any,
+    environ: Mapping[str, str] | None = None,
+) -> WoutBssSourcePayload:
+    """Select raw or force-kernel source arrays for the BSS output path."""
+
+    env = os.environ if environ is None else environ
+    force_bss_env = env.get("VMEC_JAX_WOUT_FORCE_BSS", "").strip().lower()
+    if force_bss_env == "":
+        # Default to bcovar/Jacobian bss inputs. Force-kernel bss inputs remain
+        # opt-in for targeted debugging.
+        use_force_bss = False
+    else:
+        use_force_bss = force_bss_env not in ("0", "false", "no")
+
+    bsupu_bss = np.asarray(bc.bsupu, dtype=float)
+    bsupv_bss = np.asarray(bc.bsupv, dtype=float)
+    ru12_bss = None
+    zu12_bss = None
+    rs_bss = None
+    zs_bss = None
+    crmn_e_sym = None
+    czmn_e_sym = None
+    bzmn_e_sym = None
+    brmn_e_sym = None
+    azmn_e_sym = None
+    armn_e_sym = None
+    use_parity_geom_bss = env.get("VMEC_JAX_BSS_FROM_PARITY_GEOM", "1") not in ("", "0")
+    geom_bss = geom if use_parity_geom_bss else {}
+
+    if use_force_bss and (k_force is None):
+        wout_force_vmec_synth_env = env.get("VMEC_JAX_WOUT_FORCE_VMEC_SYNTH", "").strip().lower()
+        wout_force_vmec_synth = wout_force_vmec_synth_env not in ("", "0", "false", "no")
+        k_force = vmec_forces_rz_from_wout_func(
+            state=state,
+            static=static,
+            wout=wout_like,
+            indata=indata_wout,
+            use_wout_bsup=False,
+            use_vmec_synthesis=wout_force_vmec_synth,
+            trig=None,
+        )
+        k_force = device_get_if_available(k_force)
+
+    if use_force_bss and (k_force is not None):
+        if hasattr(k_force, "crmn_e") and hasattr(k_force, "czmn_e"):
+            crmn_e_sym = force_sym_func(k_force.crmn_e, "crs")
+            czmn_e_sym = force_sym_func(k_force.czmn_e, "czs")
+            bsupu_bss = crmn_e_sym
+            bsupv_bss = czmn_e_sym
+        if hasattr(k_force, "bzmn_e"):
+            bzmn_e_sym = force_sym_func(k_force.bzmn_e, "bzs")
+            rs_bss = bzmn_e_sym
+        if hasattr(k_force, "brmn_e"):
+            brmn_e_sym = force_sym_func(k_force.brmn_e, "brs")
+            zs_bss = brmn_e_sym
+        if hasattr(k_force, "azmn_e"):
+            azmn_e_sym = force_sym_func(k_force.azmn_e, "azs")
+            ru12_bss = azmn_e_sym
+        if hasattr(k_force, "armn_e"):
+            armn_e_sym = force_sym_func(k_force.armn_e, "ars")
+            zu12_bss = armn_e_sym
+
+    return WoutBssSourcePayload(
+        use_force_bss=bool(use_force_bss),
+        k_force=k_force,
+        bsupu=bsupu_bss,
+        bsupv=bsupv_bss,
+        ru12=ru12_bss,
+        zu12=zu12_bss,
+        rs=rs_bss,
+        zs=zs_bss,
+        crmn_e_sym=crmn_e_sym,
+        czmn_e_sym=czmn_e_sym,
+        bzmn_e_sym=bzmn_e_sym,
+        brmn_e_sym=brmn_e_sym,
+        azmn_e_sym=azmn_e_sym,
+        armn_e_sym=armn_e_sym,
+        geom=geom_bss,
     )
 
 
