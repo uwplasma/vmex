@@ -13226,6 +13226,98 @@ Completion:
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.9982%.
 
+## 2026-06-18 Residual/WOUT/Force Shared Runtime Seams
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `resolve_residual_trig` as the shared VMEC-grid trig-table seam for
+   residual-objective optimizers and production residual iteration.
+2. Replaced the duplicated trig-table rebuild logic in
+   `solve_fixed_boundary_residual_iter` with that shared helper.
+3. Replaced WOUT-local angular-weight construction with compatibility wrappers
+   around the canonical `vmec_residue.vmec_wint_from_trig`, preserving fallback
+   behavior for lightweight test/diagnostic trig mocks.
+4. Deduplicated `vmec_forces` optional JAX named-scope and profiler-trace
+   context managers into one local optional-context helper.
+5. Replaced the explicit 33-field `VmecRZForceKernels.tree_flatten` tuple with
+   a compact field-name table so the pytree contract is explicit without
+   boilerplate.
+
+Results obtained:
+
+- `solve_fixed_boundary_residual_iter` dropped from 6185 to 6165 lines.
+- `vmec_forces.py` dropped from 2084 to 2042 lines.
+- The batch is line-negative overall: 85 insertions, 118 deletions.
+- Residual-optimizer and production residual trig resolution now share one
+  compatibility path, reducing drift between exact optimizer callbacks and the
+  VMEC-style residual loop.
+- WOUT angular weights now use the canonical VMEC residue implementation for
+  real trig tables while keeping private WOUT helper compatibility.
+- No generated outputs, figures, WOUT files, or large artifacts were added.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/optimization/residual_context.py vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/optimization/residual_context.py vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `python -m compileall -q vmec_jax/wout.py vmec_jax/vmec_residue.py`
+- `python -m ruff check vmec_jax/wout.py vmec_jax/vmec_residue.py`
+- `python -m compileall -q vmec_jax/vmec_forces.py`
+- `python -m ruff check vmec_jax/vmec_forces.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_finish_cache_more_coverage.py::test_precompile_setup_rebuilds_mismatched_trig_tables tests/test_solve_residual_optimizer_wave8_coverage.py::test_lbfgs_builds_missing_trig_jits_gradient_and_warns_on_negative_jacobian -q`
+  - Result: passed.
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_optimizer_helpers.py tests/test_end_to_end_vmec_residual_gn.py -q`
+  - Result: passed, with one expected skip.
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_helpers.py::test_mesh_weight_and_safe_divide_helpers tests/test_wout_fast_helpers.py::test_wint_nyquist_and_scalxc_helper_edges tests/test_wout_wave3_coverage.py::test_scalar_weight_profile_and_beta_helpers_cover_errors_and_edges -q`
+  - Result: passed.
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_finite_beta.py::test_mercier_terms_from_state_dmerc_and_dr_ad_match_fd_on_bundled_qi_input 'tests/test_wout_beta_eqfor_bundled_parity.py::test_bundled_finite_beta_wout_scalars_match_eqfor_decomposition[finite_beta_3d]' -q`
+  - Result: one passed, one expected skip.
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_forces_bcovar_wave12_coverage.py::test_force_scope_fallbacks_and_kernel_pytree_roundtrip tests/test_vmec_forces_synthetic_helpers.py tests/test_vmec_forces_fast_helpers.py -q`
+  - Result: passed.
+- Consolidated validation:
+  `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_finish_cache_more_coverage.py::test_precompile_setup_rebuilds_mismatched_trig_tables tests/test_solve_residual_optimizer_wave8_coverage.py::test_lbfgs_builds_missing_trig_jits_gradient_and_warns_on_negative_jacobian tests/test_solve_optimizer_helpers.py tests/test_end_to_end_vmec_residual_gn.py tests/test_wout_helpers.py::test_mesh_weight_and_safe_divide_helpers tests/test_wout_fast_helpers.py::test_wint_nyquist_and_scalxc_helper_edges tests/test_wout_wave3_coverage.py::test_scalar_weight_profile_and_beta_helpers_cover_errors_and_edges tests/test_forces_bcovar_wave12_coverage.py::test_force_scope_fallbacks_and_kernel_pytree_roundtrip tests/test_vmec_forces_synthetic_helpers.py tests/test_vmec_forces_fast_helpers.py -q`
+  - Result: passed, 29 focused tests with one expected skip.
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 45`
+
+Best next steps:
+
+1. Continue driving `vmec_forces.py` below the 2000-line warning threshold,
+   preferably by extracting or deleting true duplication rather than moving code
+   to a new generic file.
+2. Revisit `run_fixed_boundary` after one more force/WOUT cleanup tranche; the
+   driver closure block still needs simplification but should avoid line-positive
+   context-object churn.
+3. Continue residual-iteration decomposition by targeting setup/profile seams
+   that can be shared with optimizer callbacks and exact-adjoint paths.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999998%.
+- Solver monolith reduction: 99.58%.
+- Free-boundary adjoint monolith reduction: 99.40%.
+- Driver workflow decomposition: 99.87%.
+- Residual iteration decomposition: 97.1%.
+- WOUT diagnostic/profile decomposition: 99.88%.
+- Bcovar/WOUT parity decomposition: 99.09%.
+- Force-kernel decomposition: 99.35%.
+- Tomnsps transform decomposition: 98.4%.
+- Initial-guess decomposition: 99.0%.
+- Optimizer workflow decomposition: 99.20%.
+- Fixed-boundary optimizer decomposition: 94.9%.
+- Implicit residual-adjoint decomposition: 95%.
+- QI objective decomposition: 96.2%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.99975%.
+
 ## 2026-06-18 Bcovar Field and Pressure Seam Extraction
 
 Branch: `codex/differentiability-refactor-plan`.

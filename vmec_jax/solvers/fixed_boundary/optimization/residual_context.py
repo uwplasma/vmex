@@ -29,6 +29,38 @@ class ResidualForceContext:
     mask_pack: Any
 
 
+def resolve_residual_trig(
+    *,
+    state0,
+    static,
+    wout_like,
+    vmec_trig_tables_func: Callable[..., Any],
+    jnp_module: Any = jnp,
+):
+    """Return VMEC-grid trig tables compatible with one residual solve."""
+
+    trig = getattr(static, "trig_vmec", None)
+    needs_build = trig is None
+    if not needs_build:
+        needs_build = (
+            int(trig.ntheta1) != int(static.cfg.ntheta)
+            or int(trig.cosnv.shape[0]) != int(static.cfg.nzeta)
+            or int(trig.cosmu.shape[1]) != int(wout_like.mpol)
+            or int(trig.cosnv.shape[1]) != int(wout_like.ntor) + 1
+        )
+    if needs_build:
+        trig = vmec_trig_tables_func(
+            ntheta=int(static.cfg.ntheta),
+            nzeta=int(static.cfg.nzeta),
+            nfp=int(wout_like.nfp),
+            mmax=int(wout_like.mpol) - 1,
+            nmax=int(wout_like.ntor),
+            lasym=bool(wout_like.lasym),
+            dtype=jnp_module.asarray(state0.Rcos).dtype,
+        )
+    return trig
+
+
 def prepare_residual_force_context(
     state0,
     static,
@@ -135,17 +167,13 @@ def prepare_residual_force_context(
         chips_eff=chips_eff,
     )
 
-    trig = getattr(static, "trig_vmec", None)
-    if trig is None:
-        trig = vmec_trig_tables_func(
-            ntheta=int(static.cfg.ntheta),
-            nzeta=int(static.cfg.nzeta),
-            nfp=int(wout_like.nfp),
-            mmax=int(wout_like.mpol) - 1,
-            nmax=int(wout_like.ntor),
-            lasym=bool(wout_like.lasym),
-            dtype=jnp_module.asarray(state0.Rcos).dtype,
-        )
+    trig = resolve_residual_trig(
+        state0=state0,
+        static=static,
+        wout_like=wout_like,
+        vmec_trig_tables_func=vmec_trig_tables_func,
+        jnp_module=jnp_module,
+    )
 
     constraint_tcon0: float | None = None
     if bool(include_constraint_force):

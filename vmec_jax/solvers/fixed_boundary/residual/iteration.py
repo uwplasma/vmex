@@ -938,33 +938,13 @@ def solve_fixed_boundary_residual_iter(
         raise
     wout_like = profile_setup.wout_like
 
-    trig = getattr(static, "trig_vmec", None)
-    if trig is None:
-        trig = vmec_trig_tables(
-            ntheta=int(static.cfg.ntheta),
-            nzeta=int(static.cfg.nzeta),
-            nfp=int(wout_like.nfp),
-            mmax=int(wout_like.mpol) - 1,
-            nmax=int(wout_like.ntor),
-            lasym=bool(wout_like.lasym),
-            dtype=jnp.asarray(state0.Rcos).dtype,
-        )
-    else:
-        if (
-            int(trig.ntheta1) != int(static.cfg.ntheta)
-            or int(trig.cosnv.shape[0]) != int(static.cfg.nzeta)
-            or int(trig.cosmu.shape[1]) != int(wout_like.mpol)
-            or int(trig.cosnv.shape[1]) != int(wout_like.ntor) + 1
-        ):
-            trig = vmec_trig_tables(
-                ntheta=int(static.cfg.ntheta),
-                nzeta=int(static.cfg.nzeta),
-                nfp=int(wout_like.nfp),
-                mmax=int(wout_like.mpol) - 1,
-                nmax=int(wout_like.ntor),
-                lasym=bool(wout_like.lasym),
-                dtype=jnp.asarray(state0.Rcos).dtype,
-            )
+    trig = _residual_force_context_helpers.resolve_residual_trig(
+        state0=state0,
+        static=static,
+        wout_like=wout_like,
+        vmec_trig_tables_func=vmec_trig_tables,
+        jnp_module=jnp,
+    )
     _record_setup_timing("setup_boundary_profiles", _t_setup_boundary_profiles)
     modes = static.modes
     # Use np.asarray for static setup data – these are closure constants captured
