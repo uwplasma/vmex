@@ -586,37 +586,67 @@ def _profile_wall_time(profile: dict, key: str) -> float | None:
     return wall_f if math.isfinite(wall_f) else None
 
 
+_PROFILE_SUMMARY_BUCKETS: tuple[tuple[str, str], ...] = (
+    ("profile_solve_forward_trial_total_wall_time_s", "solve_forward_trial_total"),
+    ("profile_solve_forward_exact_total_wall_time_s", "solve_forward_exact_total"),
+    ("profile_exact_tape_build_wall_time_s", "exact_tape_build"),
+    ("profile_exact_tape_build_solve_call_wall_time_s", "exact_tape_build_solve_call"),
+    ("profile_exact_tape_build_unattributed_wall_time_s", "exact_tape_build_unattributed"),
+    (
+        "profile_exact_tape_solver_compute_forces_first_wall_time_s",
+        "exact_tape_solver_compute_forces_first",
+    ),
+    (
+        "profile_exact_tape_solver_compute_forces_rest_wall_time_s",
+        "exact_tape_solver_compute_forces_rest",
+    ),
+    ("profile_trial_solver_scan_total_wall_time_s", "trial_solver_scan_total"),
+    (
+        "profile_trial_solver_scan_runner_cache_lookup_wall_time_s",
+        "trial_solver_scan_runner_cache_lookup",
+    ),
+    (
+        "profile_trial_solver_scan_runner_cache_build_wall_time_s",
+        "trial_solver_scan_runner_cache_build",
+    ),
+    ("profile_trial_solver_scan_runner_cache_hit_count", "trial_solver_scan_runner_cache_hit_count"),
+    ("profile_trial_solver_scan_runner_cache_miss_count", "trial_solver_scan_runner_cache_miss_count"),
+    (
+        "profile_trial_solver_scan_runner_cache_bypass_count",
+        "trial_solver_scan_runner_cache_bypass_count",
+    ),
+    (
+        "profile_trial_solver_scan_runner_cache_hit_device_run_wall_time_s",
+        "trial_solver_scan_runner_cache_hit_device_run",
+    ),
+    (
+        "profile_trial_solver_scan_runner_cache_miss_device_run_wall_time_s",
+        "trial_solver_scan_runner_cache_miss_device_run",
+    ),
+    (
+        "profile_trial_solver_scan_runner_cache_bypass_device_run_wall_time_s",
+        "trial_solver_scan_runner_cache_bypass_device_run",
+    ),
+    ("profile_trial_solver_scan_device_dispatch_wall_time_s", "trial_solver_scan_device_dispatch"),
+    ("profile_trial_solver_scan_device_ready_wall_time_s", "trial_solver_scan_device_ready"),
+    ("profile_trial_solver_scan_host_materialize_wall_time_s", "trial_solver_scan_host_materialize"),
+    ("profile_jacobian_total_wall_time_s", "jacobian_total"),
+    ("profile_write_wout_wall_time_s", "write_wout"),
+)
+
+_PROFILE_SUMMARY_KEYS = (
+    "profile_wall_time_s",
+    "profile_top_name",
+    "profile_top_wall_time_s",
+) + tuple(field for field, _bucket in _PROFILE_SUMMARY_BUCKETS)
+
+
 def _profile_summary_fields(history: dict | None) -> dict[str, object]:
     """Return compact profile fields suitable for case_result/CSV summaries."""
 
     profile = history.get("profile") if isinstance(history, dict) else None
     if not isinstance(profile, dict) or not profile:
-        return {
-            "profile_wall_time_s": None,
-            "profile_top_name": None,
-            "profile_top_wall_time_s": None,
-            "profile_solve_forward_trial_total_wall_time_s": None,
-            "profile_solve_forward_exact_total_wall_time_s": None,
-            "profile_exact_tape_build_wall_time_s": None,
-            "profile_exact_tape_build_solve_call_wall_time_s": None,
-            "profile_exact_tape_build_unattributed_wall_time_s": None,
-            "profile_exact_tape_solver_compute_forces_first_wall_time_s": None,
-            "profile_exact_tape_solver_compute_forces_rest_wall_time_s": None,
-            "profile_trial_solver_scan_total_wall_time_s": None,
-            "profile_trial_solver_scan_runner_cache_lookup_wall_time_s": None,
-            "profile_trial_solver_scan_runner_cache_build_wall_time_s": None,
-            "profile_trial_solver_scan_runner_cache_hit_count": None,
-            "profile_trial_solver_scan_runner_cache_miss_count": None,
-            "profile_trial_solver_scan_runner_cache_bypass_count": None,
-            "profile_trial_solver_scan_runner_cache_hit_device_run_wall_time_s": None,
-            "profile_trial_solver_scan_runner_cache_miss_device_run_wall_time_s": None,
-            "profile_trial_solver_scan_runner_cache_bypass_device_run_wall_time_s": None,
-            "profile_trial_solver_scan_device_dispatch_wall_time_s": None,
-            "profile_trial_solver_scan_device_ready_wall_time_s": None,
-            "profile_trial_solver_scan_host_materialize_wall_time_s": None,
-            "profile_jacobian_total_wall_time_s": None,
-            "profile_write_wout_wall_time_s": None,
-        }
+        return dict.fromkeys(_PROFILE_SUMMARY_KEYS)
 
     entries: list[tuple[str, float]] = []
     for key in sorted(profile):
@@ -627,66 +657,13 @@ def _profile_summary_fields(history: dict | None) -> dict[str, object]:
     top_wall = None
     if entries:
         top_name, top_wall = max(entries, key=lambda item: item[1])
-    return {
+    summary = {
         "profile_wall_time_s": float(sum(wall for _key, wall in entries)) if entries else 0.0,
         "profile_top_name": top_name,
         "profile_top_wall_time_s": top_wall,
-        "profile_solve_forward_trial_total_wall_time_s": _profile_wall_time(
-            profile, "solve_forward_trial_total"
-        ),
-        "profile_solve_forward_exact_total_wall_time_s": _profile_wall_time(
-            profile, "solve_forward_exact_total"
-        ),
-        "profile_exact_tape_build_wall_time_s": _profile_wall_time(profile, "exact_tape_build"),
-        "profile_exact_tape_build_solve_call_wall_time_s": _profile_wall_time(
-            profile, "exact_tape_build_solve_call"
-        ),
-        "profile_exact_tape_build_unattributed_wall_time_s": _profile_wall_time(
-            profile, "exact_tape_build_unattributed"
-        ),
-        "profile_exact_tape_solver_compute_forces_first_wall_time_s": _profile_wall_time(
-            profile, "exact_tape_solver_compute_forces_first"
-        ),
-        "profile_exact_tape_solver_compute_forces_rest_wall_time_s": _profile_wall_time(
-            profile, "exact_tape_solver_compute_forces_rest"
-        ),
-        "profile_trial_solver_scan_total_wall_time_s": _profile_wall_time(profile, "trial_solver_scan_total"),
-        "profile_trial_solver_scan_runner_cache_lookup_wall_time_s": _profile_wall_time(
-            profile, "trial_solver_scan_runner_cache_lookup"
-        ),
-        "profile_trial_solver_scan_runner_cache_build_wall_time_s": _profile_wall_time(
-            profile, "trial_solver_scan_runner_cache_build"
-        ),
-        "profile_trial_solver_scan_runner_cache_hit_count": _profile_wall_time(
-            profile, "trial_solver_scan_runner_cache_hit_count"
-        ),
-        "profile_trial_solver_scan_runner_cache_miss_count": _profile_wall_time(
-            profile, "trial_solver_scan_runner_cache_miss_count"
-        ),
-        "profile_trial_solver_scan_runner_cache_bypass_count": _profile_wall_time(
-            profile, "trial_solver_scan_runner_cache_bypass_count"
-        ),
-        "profile_trial_solver_scan_runner_cache_hit_device_run_wall_time_s": _profile_wall_time(
-            profile, "trial_solver_scan_runner_cache_hit_device_run"
-        ),
-        "profile_trial_solver_scan_runner_cache_miss_device_run_wall_time_s": _profile_wall_time(
-            profile, "trial_solver_scan_runner_cache_miss_device_run"
-        ),
-        "profile_trial_solver_scan_runner_cache_bypass_device_run_wall_time_s": _profile_wall_time(
-            profile, "trial_solver_scan_runner_cache_bypass_device_run"
-        ),
-        "profile_trial_solver_scan_device_dispatch_wall_time_s": _profile_wall_time(
-            profile, "trial_solver_scan_device_dispatch"
-        ),
-        "profile_trial_solver_scan_device_ready_wall_time_s": _profile_wall_time(
-            profile, "trial_solver_scan_device_ready"
-        ),
-        "profile_trial_solver_scan_host_materialize_wall_time_s": _profile_wall_time(
-            profile, "trial_solver_scan_host_materialize"
-        ),
-        "profile_jacobian_total_wall_time_s": _profile_wall_time(profile, "jacobian_total"),
-        "profile_write_wout_wall_time_s": _profile_wall_time(profile, "write_wout"),
     }
+    summary.update({field: _profile_wall_time(profile, bucket) for field, bucket in _PROFILE_SUMMARY_BUCKETS})
+    return summary
 
 
 def _start_worker_session() -> None:
@@ -1816,66 +1793,7 @@ def _case_result_from_history(
         "nfev": _int_or_none(history.get("nfev")),
         "njev": _int_or_none(history.get("njev")),
         "total_wall_time_s": _float_or_none(history.get("total_wall_time_s")),
-        "profile_wall_time_s": profile_summary["profile_wall_time_s"],
-        "profile_top_name": profile_summary["profile_top_name"],
-        "profile_top_wall_time_s": profile_summary["profile_top_wall_time_s"],
-        "profile_solve_forward_trial_total_wall_time_s": profile_summary[
-            "profile_solve_forward_trial_total_wall_time_s"
-        ],
-        "profile_solve_forward_exact_total_wall_time_s": profile_summary[
-            "profile_solve_forward_exact_total_wall_time_s"
-        ],
-        "profile_exact_tape_build_wall_time_s": profile_summary["profile_exact_tape_build_wall_time_s"],
-        "profile_exact_tape_build_solve_call_wall_time_s": profile_summary[
-            "profile_exact_tape_build_solve_call_wall_time_s"
-        ],
-        "profile_exact_tape_build_unattributed_wall_time_s": profile_summary[
-            "profile_exact_tape_build_unattributed_wall_time_s"
-        ],
-        "profile_exact_tape_solver_compute_forces_first_wall_time_s": profile_summary[
-            "profile_exact_tape_solver_compute_forces_first_wall_time_s"
-        ],
-        "profile_exact_tape_solver_compute_forces_rest_wall_time_s": profile_summary[
-            "profile_exact_tape_solver_compute_forces_rest_wall_time_s"
-        ],
-        "profile_trial_solver_scan_total_wall_time_s": profile_summary[
-            "profile_trial_solver_scan_total_wall_time_s"
-        ],
-        "profile_trial_solver_scan_runner_cache_lookup_wall_time_s": profile_summary[
-            "profile_trial_solver_scan_runner_cache_lookup_wall_time_s"
-        ],
-        "profile_trial_solver_scan_runner_cache_build_wall_time_s": profile_summary[
-            "profile_trial_solver_scan_runner_cache_build_wall_time_s"
-        ],
-        "profile_trial_solver_scan_runner_cache_hit_count": profile_summary[
-            "profile_trial_solver_scan_runner_cache_hit_count"
-        ],
-        "profile_trial_solver_scan_runner_cache_miss_count": profile_summary[
-            "profile_trial_solver_scan_runner_cache_miss_count"
-        ],
-        "profile_trial_solver_scan_runner_cache_bypass_count": profile_summary[
-            "profile_trial_solver_scan_runner_cache_bypass_count"
-        ],
-        "profile_trial_solver_scan_runner_cache_hit_device_run_wall_time_s": profile_summary[
-            "profile_trial_solver_scan_runner_cache_hit_device_run_wall_time_s"
-        ],
-        "profile_trial_solver_scan_runner_cache_miss_device_run_wall_time_s": profile_summary[
-            "profile_trial_solver_scan_runner_cache_miss_device_run_wall_time_s"
-        ],
-        "profile_trial_solver_scan_runner_cache_bypass_device_run_wall_time_s": profile_summary[
-            "profile_trial_solver_scan_runner_cache_bypass_device_run_wall_time_s"
-        ],
-        "profile_trial_solver_scan_device_dispatch_wall_time_s": profile_summary[
-            "profile_trial_solver_scan_device_dispatch_wall_time_s"
-        ],
-        "profile_trial_solver_scan_device_ready_wall_time_s": profile_summary[
-            "profile_trial_solver_scan_device_ready_wall_time_s"
-        ],
-        "profile_trial_solver_scan_host_materialize_wall_time_s": profile_summary[
-            "profile_trial_solver_scan_host_materialize_wall_time_s"
-        ],
-        "profile_jacobian_total_wall_time_s": profile_summary["profile_jacobian_total_wall_time_s"],
-        "profile_write_wout_wall_time_s": profile_summary["profile_write_wout_wall_time_s"],
+        **profile_summary,
         "output_dir": str(output_dir),
         "jax_backend": jax_backend,
         "jax_device_kind": jax_device_kind,
@@ -2909,30 +2827,7 @@ def _write_summary_csv(results: list[CaseResult], path: Path) -> None:
                 "nfev",
                 "njev",
                 "total_wall_time_s",
-                "profile_wall_time_s",
-                "profile_top_name",
-                "profile_top_wall_time_s",
-                "profile_solve_forward_trial_total_wall_time_s",
-                "profile_solve_forward_exact_total_wall_time_s",
-                "profile_exact_tape_build_wall_time_s",
-                "profile_exact_tape_build_solve_call_wall_time_s",
-                "profile_exact_tape_build_unattributed_wall_time_s",
-                "profile_exact_tape_solver_compute_forces_first_wall_time_s",
-                "profile_exact_tape_solver_compute_forces_rest_wall_time_s",
-                "profile_trial_solver_scan_total_wall_time_s",
-                "profile_trial_solver_scan_runner_cache_lookup_wall_time_s",
-                "profile_trial_solver_scan_runner_cache_build_wall_time_s",
-                "profile_trial_solver_scan_runner_cache_hit_count",
-                "profile_trial_solver_scan_runner_cache_miss_count",
-                "profile_trial_solver_scan_runner_cache_bypass_count",
-                "profile_trial_solver_scan_runner_cache_hit_device_run_wall_time_s",
-                "profile_trial_solver_scan_runner_cache_miss_device_run_wall_time_s",
-                "profile_trial_solver_scan_runner_cache_bypass_device_run_wall_time_s",
-                "profile_trial_solver_scan_device_dispatch_wall_time_s",
-                "profile_trial_solver_scan_device_ready_wall_time_s",
-                "profile_trial_solver_scan_host_materialize_wall_time_s",
-                "profile_jacobian_total_wall_time_s",
-                "profile_write_wout_wall_time_s",
+                *_PROFILE_SUMMARY_KEYS,
                 "jax_backend",
                 "jax_device_kind",
                 "solver_device",

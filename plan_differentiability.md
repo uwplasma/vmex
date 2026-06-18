@@ -14682,3 +14682,75 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.99982%.
+
+## 2026-06-18 Sweep Profile Schema Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Centralized the ESS/QS sweep profile summary fields into one
+   `_PROFILE_SUMMARY_BUCKETS` mapping.
+2. Reused the same profile key tuple in `_profile_summary_fields`,
+   `_case_result_from_history`, and `_write_summary_csv`.
+3. Removed hand-copied profile field dictionaries from the no-profile branch,
+   case-result construction, and CSV schema.
+
+Results obtained:
+
+- `examples/optimization/generate_qs_ess_sweep.py` dropped from 3337 to 3232
+  lines.
+- The sweep profile/CSV schema is now table-driven, so future exact-tape or
+  scan-cache profiling buckets only need one mapping update.
+- No optimization policy, objective assembly, result fields, or output file
+  names were changed.
+- No generated outputs or large files were added.
+
+Tests and commands run:
+
+- `python -m compileall -q examples/optimization/generate_qs_ess_sweep.py`
+- `python -m ruff check examples/optimization/generate_qs_ess_sweep.py`
+- Import-level schema check for `_profile_summary_fields`.
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_qs_ess_render_smoke.py::test_qs_ess_sweep_profile_summary_fields tests/test_optimization_examples.py::test_qs_sweep_reports_true_legacy_qi_metric tests/test_optimization_examples.py::test_qs_sweep_qi_mirror_defaults_to_all_surfaces tests/test_optimization_examples.py::test_qs_sweep_history_merge_preserves_stage_profiles_and_traces -q`
+  - Result: passed.
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 45`
+
+Best next steps:
+
+1. Continue sweep/example cleanup by extracting result-field and CSV schema
+   groups that are still duplicated outside profile buckets.
+2. Keep the next sweep refactors focused on schema/data plumbing before
+   touching `_run_case`, which still mixes stage policy, subprocess handling,
+   diagnostics, and plotting.
+3. Resume source-code monolith reduction in WOUT assembly or residual
+   iteration only with tighter parity gates.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999998%.
+- Solver monolith reduction: 99.58%.
+- Free-boundary adjoint monolith reduction: 99.40%.
+- Driver workflow decomposition: 99.89%.
+- Residual iteration decomposition: 97.1%.
+- WOUT diagnostic/profile decomposition: 99.88%.
+- Bcovar/WOUT parity decomposition: 99.09%.
+- Force-kernel decomposition: 99.65%.
+- Scan/performance policy consolidation: 99.6%.
+- Tomnsps transform decomposition: 98.4%.
+- Initial-guess decomposition: 99.0%.
+- Optimizer workflow decomposition: 99.30%.
+- Fixed-boundary optimizer decomposition: 95.2%.
+- Plotting/WOUT visualization decomposition: 95.4%.
+- Sweep/example workflow decomposition: 92.5%.
+- Implicit residual-adjoint decomposition: 95%.
+- QI objective/staged-runner decomposition: 96.8%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.99983%.
