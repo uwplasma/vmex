@@ -18023,3 +18023,176 @@ Results:
 No user input is needed.
 
 ---
+## 145. Realized Coupled LCFS Pilot Candidate Selection
+
+### Steps taken
+
+- Added `--lcfs-proposal-mode coupled` to the root circular-coil
+  free-boundary example.
+- Added `--lcfs-coupled-fsq-weight` to control how strongly realized
+  fixed-boundary residual growth penalizes an LCFS trial.
+- Kept the existing `best_predicted`, `local`, `scale`, `bnormal`, and `mixed`
+  modes unchanged.
+- Extended the internal proposal selection record so the pilot loop can reuse
+  the same candidate set and allowed-strategy filtering.
+- Added coupled-mode trial evaluation:
+  - no-op is retained as a zero-cost fallback;
+  - allowed non-noop candidates are each evaluated by a short fixed-boundary
+    trial solve;
+  - each trial gets a realized score equal to merit ratio plus
+    `lcfs_coupled_fsq_weight * max(fsq_growth_ratio - 1, 0)`;
+  - the selected trial row records `coupled_trial_rows`, `coupled_score`,
+    `coupled_merit_ratio`, `coupled_fsq_penalty`, and
+    `coupled_fsq_weight`.
+- Fixed the no-op shortcut so coupled mode still evaluates non-noop candidates
+  when the predicted selector alone would pick no-op.
+- Added a regression test showing that the compact 3% beta case selects the
+  realized minimum-score trial.
+- Updated the mirror examples README with the coupled-mode workflow and JSON
+  fields.
+- Ran a plotted coupled beta scan for evidence.
+
+### Results obtained
+
+- The compact coupled regression selects `bnormal_slope` for the 3% beta case
+  with `lcfs_coupled_fsq_weight=1.0`, because it gives nearly the same LCFS
+  merit improvement as the scale candidate with much lower realized fsq growth.
+- Plotted evidence run:
+  `results/mirror/free_boundary_circular_coils_m145_coupled/free_boundary_circular_coils_metrics.json`.
+- Evidence run settings:
+  - `ntheta=8`;
+  - `nxi=11`;
+  - `n_segments=64`;
+  - fixed-boundary baseline `maxiter=20`;
+  - coupled LCFS pilot up to three steps;
+  - stagnation tolerance `1e-3`;
+  - fsq-growth guard `1.1`;
+  - coupled fsq weight `1.0`.
+- Evidence run validation:
+  - metrics schema version `0.3`;
+  - workflow status `lcfs_pilot`;
+  - free-boundary status `lcfs_pilot_not_converged_free_boundary`;
+  - pilot rows total `6`;
+  - accepted rows `3`;
+  - skipped rows `1`;
+  - stop reasons: one `noop_candidate`, two `fsq_growth_guard`, and three
+    active rows with no stop reason.
+- Per-beta evidence:
+  - `1%`: coupled mode selected no-op instead of taking the residual-exploding
+    first trial seen in M143.
+  - `3%`: accepted two pilot updates before the fsq guard; last accepted fsq
+    growth ratio `1.0698819230159147`; last accepted LCFS merit
+    `0.4854722189173122`.
+  - `10%`: accepted one pilot update before the fsq guard; last accepted fsq
+    growth ratio `1.0377588770446344`; last accepted LCFS merit
+    `0.7184197888333153`.
+- Compared with M143, the coupled selector makes the early free-boundary pilot
+  more conservative at `1%`, allows one additional accepted update at `3%`,
+  and reduces first-step fsq growth at `3%` and `10%`.
+- The rendered beta-scan summary plot and selected-step LCFS diagnostic were
+  inspected. The summary plot clearly shows no accepted pilot at `1%` and
+  improved `3%`/`10%` LCFS merit after accepted coupled steps.
+
+### How it was tested
+
+Commands run:
+
+```bash
+python -m ruff format examples/mirror_free_boundary_circular_coils.py \
+  tests/mirror/test_mirror_examples.py
+python -m ruff check examples/mirror_free_boundary_circular_coils.py \
+  tests/mirror/test_mirror_examples.py
+
+JAX_ENABLE_X64=1 pytest \
+  tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_coupled_mode_scores_realized_trials \
+  tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_tolerant_fsq_guard_keeps_last_accepted \
+  tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_example_runs_without_plots \
+  -q
+
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/mirror_free_boundary_circular_coils.py \
+    --outdir results/mirror/free_boundary_circular_coils_m145_coupled \
+    --ntheta 8 --nxi 11 --n-segments 64 \
+    --run-fixed-boundary-baseline --baseline-maxiter 20 \
+    --run-lcfs-pilot --lcfs-pilot-steps 3 \
+    --lcfs-proposal-mode coupled \
+    --lcfs-coupled-fsq-weight 1.0 \
+    --lcfs-pilot-stagnation-rtol 1e-3 \
+    --lcfs-pilot-fsq-growth-limit 1.1
+
+python - <<'PY'
+import json, runpy
+from pathlib import Path
+m = json.loads(Path(
+    "results/mirror/free_boundary_circular_coils_m145_coupled/"
+    "free_boundary_circular_coils_metrics.json"
+).read_text())
+mod = runpy.run_path("examples/mirror_free_boundary_circular_coils.py")
+mod["validate_circular_coil_beta_scan_metrics"](m)
+print("validated", m.get("metrics_schema_version"),
+      len(m.get("summary_rows", [])), "weight",
+      m.get("lcfs_coupled_fsq_weight"))
+PY
+
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_examples.py \
+  tests/mirror/test_mirror_free_boundary.py -q
+python -m sphinx -W -b html docs docs/_build/html
+git diff --check
+```
+
+Results:
+
+- Ruff format/check passed.
+- Focused coupled/guard tests passed: `3 passed`.
+- The plotted coupled evidence run completed and validated.
+- Full examples plus free-boundary tests passed: `50 passed in 78.27s`.
+- Sphinx docs build passed with warnings treated as errors.
+- Whitespace check passed.
+
+### File structure and best-practice notes
+
+- The new coupled pilot mode stays in the root example because it is still an
+  ESSOS-style planning workflow, not a reusable package-level free-boundary
+  solver API.
+- Public mirror package imports did not change.
+- The generated evidence remains under ignored `results/`.
+- The JSON keeps the compact schema version at `0.3`; coupled trial rows are
+  additive optional fields on pilot rows, so existing consumers remain
+  compatible.
+- The implementation is intentionally explicit rather than hidden behind a new
+  abstraction because the next research step is to replace this pilot with a
+  true coupled free-boundary solve.
+
+### Best next steps
+
+1. Commit and push M145.
+2. Refresh the draft PR body with the coupled-mode free-boundary progress.
+3. Decide whether the coupled pilot's realized trial-score table should get a
+   dedicated plot panel in the example output.
+4. Move from pilot candidate selection toward a true coupled free-boundary
+   solve that includes boundary parameters in the nonlinear residual rather
+   than selecting among externally proposed boundaries.
+
+### Completion percentages after M145
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `91%`.
+- Fixed-boundary axisymmetric solve: `91%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `89%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `92%`.
+- I/O schema and docs: `99%`.
+- Differentiable solved-state API: `92%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `91%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `94%`.
+- PR merge readiness overall: `98%`.
+
+### User input needed
+
+No user input is needed.
+
+---

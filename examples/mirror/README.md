@@ -135,6 +135,11 @@ diagnostics. The default ``--lcfs-proposal-mode best_predicted`` scores local
 pressure, shape-preserving scale, normal-field-slope, mixed
 scale/normal-field, and no-op candidates using a dimensionless merit with
 pressure-balance and normalized normal-field terms. Pass
+``--lcfs-proposal-mode coupled`` to run short fixed-boundary trial solves for
+the allowed non-noop candidates and choose the lowest realized score against a
+no-op fallback. The coupled score combines the realized LCFS merit ratio with a
+nonnegative ``final_fsq`` growth penalty controlled by
+``--lcfs-coupled-fsq-weight``. Pass
 ``--lcfs-require-bnormal-nonincrease`` to enable a stricter guard: candidates
 that increase exact coil-resampled ``B_ext.n`` RMS are filtered out, the mixed
 scale/normal-field candidate is selected when it improves merit while satisfying
@@ -169,8 +174,10 @@ all candidate-update summaries, per-beta pilot summary fields, and
 contains ``accepted``, ``rejection_reason``, ``stop_reason``,
 ``lcfs_merit_improvement_fraction``, final residual/``fsq`` diagnostics when a
 trial solve ran, ``fsq_growth_ratio`` relative to the beta row baseline, and
-the next candidate-update summary. Each beta row also reports final/best pilot
-``fsq`` growth ratios plus ``lcfs_pilot_last_accepted_*`` fields. Rejected
+the next candidate-update summary. Coupled-mode pilot rows also include
+``coupled_trial_rows`` with one compact realized score row per tried strategy.
+Each beta row also reports final/best pilot ``fsq`` growth ratios plus
+``lcfs_pilot_last_accepted_*`` fields. Rejected
 pilot rows are kept in JSON for audit, but the summary plot draws the last
 accepted pilot state when a later trial is rejected. The same run also writes
 ``free_boundary_circular_coils_beta_scan_summary.csv`` with baseline,

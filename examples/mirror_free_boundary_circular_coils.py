@@ -314,6 +314,7 @@ def _write_beta_scan_report_csv(path: Path, rows: list[dict[str, object]]) -> Pa
 @dataclass(frozen=True)
 class _LCFSProposalSelection:
     proposal: object
+    candidates: tuple[object, ...]
     candidate_summaries: list[dict[str, object]]
     allowed_strategies: tuple[str, ...]
     rejection_reason: str | None
@@ -351,9 +352,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lcfs-merit-bnormal-weight", type=float, default=1.0)
     parser.add_argument(
         "--lcfs-proposal-mode",
-        choices=("best_predicted", "local", "scale", "bnormal", "mixed"),
+        choices=("best_predicted", "coupled", "local", "scale", "bnormal", "mixed"),
         default="best_predicted",
     )
+    parser.add_argument("--lcfs-coupled-fsq-weight", type=float, default=1.0)
     parser.add_argument("--lcfs-require-bnormal-nonincrease", action="store_true")
     parser.add_argument("--run-lcfs-pilot", action="store_true")
     parser.add_argument("--lcfs-pilot-steps", type=int, default=1)
@@ -742,6 +744,7 @@ def _select_lcfs_proposal(
         proposal = next(candidate for candidate in candidates if candidate.strategy == strategy)
         return _LCFSProposalSelection(
             proposal=proposal,
+            candidates=tuple(candidates),
             candidate_summaries=summaries,
             allowed_strategies=tuple(summary["strategy"] for summary in summaries),
             rejection_reason=None,
@@ -770,6 +773,7 @@ def _select_lcfs_proposal(
     )
     return _LCFSProposalSelection(
         proposal=selected,
+        candidates=tuple(candidates),
         candidate_summaries=summaries,
         allowed_strategies=allowed_strategies,
         rejection_reason=rejection_reason,
@@ -964,6 +968,175 @@ def _run_lcfs_pilot_step(
     )
 
 
+def _strategy_slug(strategy: object) -> str:
+    return str(strategy).replace(" ", "_").replace("/", "_")
+
+
+def _coupled_trial_summary(
+    *,
+    strategy: object,
+    mout: object | None,
+    accepted: bool,
+    skipped: bool,
+    final_fsq: float | None,
+    lcfs_merit: float,
+    merit_ratio: float,
+    fsq_growth_ratio: float,
+    fsq_weight: float,
+) -> dict[str, object]:
+    fsq_penalty = max(float(fsq_growth_ratio) - 1.0, 0.0)
+    score = float(merit_ratio) + float(fsq_weight) * fsq_penalty
+    return {
+        "strategy": str(strategy),
+        "mout": None if mout is None else str(mout),
+        "selected": False,
+        "accepted_by_merit": bool(accepted),
+        "skipped": bool(skipped),
+        "final_fsq": None if final_fsq is None else float(final_fsq),
+        "lcfs_merit": float(lcfs_merit),
+        "merit_ratio": float(merit_ratio),
+        "fsq_growth_ratio": float(fsq_growth_ratio),
+        "fsq_penalty": float(fsq_penalty),
+        "score": score,
+    }
+
+
+def _run_lcfs_coupled_pilot_step(
+    *,
+    step: int,
+    outdir: Path,
+    label: str,
+    config,
+    current_lcfs,
+    current_merit,
+    current_selection: _LCFSProposalSelection,
+    grid,
+    coils,
+    psi_prime_value: float,
+    pressure,
+    solve_options,
+    reference_lcfs,
+    reference_merit,
+    accepted_merit_value: float,
+    baseline_final_fsq: float,
+    lcfs_merit_bnormal_weight: float,
+    lcfs_update_damping: float,
+    lcfs_update_max_relative_step: float,
+    lcfs_update_cap_taper_power: float,
+    lcfs_update_smoothing_passes: int,
+    lcfs_require_bnormal_nonincrease: bool,
+    lcfs_coupled_fsq_weight: float,
+    write_plots: bool,
+) -> _LCFSPilotStepResult:
+    allowed = set(current_selection.allowed_strategies)
+    trial_summaries = [
+        _coupled_trial_summary(
+            strategy="noop",
+            mout=None,
+            accepted=False,
+            skipped=True,
+            final_fsq=baseline_final_fsq,
+            lcfs_merit=float(current_merit.value),
+            merit_ratio=1.0,
+            fsq_growth_ratio=1.0,
+            fsq_weight=lcfs_coupled_fsq_weight,
+        )
+    ]
+    best_key = (1.0, 1.0, 1.0, 0)
+    best_result: _LCFSPilotStepResult | None = None
+    best_summary_index = 0
+    for order, candidate in enumerate(current_selection.candidates, start=1):
+        strategy = str(candidate.strategy)
+        if strategy == "noop" or strategy not in allowed:
+            continue
+        trial = _run_lcfs_pilot_step(
+            step=step,
+            outdir=outdir,
+            label=f"{label}_coupled_{_strategy_slug(strategy)}",
+            config=config,
+            boundary=candidate.boundary,
+            grid=grid,
+            coils=coils,
+            psi_prime_value=psi_prime_value,
+            pressure=pressure,
+            solve_options=solve_options,
+            reference_lcfs=reference_lcfs,
+            reference_merit=reference_merit,
+            accepted_merit_value=accepted_merit_value,
+            lcfs_merit_bnormal_weight=lcfs_merit_bnormal_weight,
+            lcfs_proposal_mode="best_predicted",
+            lcfs_update_damping=lcfs_update_damping,
+            lcfs_update_max_relative_step=lcfs_update_max_relative_step,
+            lcfs_update_cap_taper_power=lcfs_update_cap_taper_power,
+            lcfs_update_smoothing_passes=lcfs_update_smoothing_passes,
+            lcfs_require_bnormal_nonincrease=lcfs_require_bnormal_nonincrease,
+            write_plots=False,
+        )
+        fsq_growth_ratio = float(trial.row["final_fsq"]) / max(float(baseline_final_fsq), 1.0e-300)
+        merit_ratio = float(trial.merit.value) / max(float(accepted_merit_value), 1.0e-300)
+        summary = _coupled_trial_summary(
+            strategy=strategy,
+            mout=trial.row["mout"],
+            accepted=trial.accepted,
+            skipped=False,
+            final_fsq=float(trial.row["final_fsq"]),
+            lcfs_merit=float(trial.merit.value),
+            merit_ratio=merit_ratio,
+            fsq_growth_ratio=fsq_growth_ratio,
+            fsq_weight=lcfs_coupled_fsq_weight,
+        )
+        trial_summaries.append(summary)
+        key = (float(summary["score"]), merit_ratio, fsq_growth_ratio, order)
+        if key < best_key:
+            best_key = key
+            best_result = trial
+            best_summary_index = len(trial_summaries) - 1
+
+    trial_summaries[best_summary_index]["selected"] = True
+    if best_result is None:
+        row = _skipped_lcfs_pilot_row(
+            step=step,
+            current_lcfs=current_lcfs,
+            current_merit=current_merit,
+            selection=current_selection,
+        )
+        row["coupled_trial_rows"] = trial_summaries
+        row["coupled_score"] = 1.0
+        row["coupled_merit_ratio"] = 1.0
+        row["coupled_fsq_penalty"] = 0.0
+        row["coupled_fsq_weight"] = float(lcfs_coupled_fsq_weight)
+        return _LCFSPilotStepResult(
+            row=row,
+            lcfs=current_lcfs,
+            merit=current_merit,
+            selection=current_selection,
+            accepted=False,
+        )
+
+    selected_summary = trial_summaries[best_summary_index]
+    best_result.row["fsq_growth_ratio"] = selected_summary["fsq_growth_ratio"]
+    best_result.row["coupled_trial_rows"] = trial_summaries
+    best_result.row["coupled_score"] = selected_summary["score"]
+    best_result.row["coupled_merit_ratio"] = selected_summary["merit_ratio"]
+    best_result.row["coupled_fsq_penalty"] = selected_summary["fsq_penalty"]
+    best_result.row["coupled_fsq_weight"] = float(lcfs_coupled_fsq_weight)
+    if write_plots:
+        figure_dir = outdir / "figures" / f"fixed_boundary_beta_{label}_lcfs_step_{step}"
+        plot_paths = {
+            name: str(path) for name, path in plot_mirror_output(best_result.row["mout"], outdir=figure_dir).items()
+        }
+        plot_paths["lcfs_diagnostic"] = str(
+            _write_lcfs_diagnostic_plot(
+                best_result.lcfs,
+                best_result.selection.proposal,
+                outdir=figure_dir,
+                name=f"free_boundary_circular_coils_beta_{label}_lcfs_step_{step}",
+            )
+        )
+        best_result.row["figures"] = plot_paths
+    return best_result
+
+
 def _run_fixed_boundary_baseline_cases(
     *,
     outdir: Path,
@@ -978,6 +1151,7 @@ def _run_fixed_boundary_baseline_cases(
     lcfs_update_smoothing_passes: int,
     lcfs_merit_bnormal_weight: float,
     lcfs_proposal_mode: str,
+    lcfs_coupled_fsq_weight: float,
     lcfs_require_bnormal_nonincrease: bool,
     run_lcfs_pilot: bool,
     lcfs_pilot_steps: int,
@@ -1046,7 +1220,7 @@ def _run_fixed_boundary_baseline_cases(
         candidate_selection = proposal_selection
         if run_lcfs_pilot:
             for step in range(1, int(lcfs_pilot_steps) + 1):
-                if candidate_proposal.strategy == "noop":
+                if lcfs_proposal_mode != "coupled" and candidate_proposal.strategy == "noop":
                     pilot_rows.append(
                         _skipped_lcfs_pilot_row(
                             step=step,
@@ -1056,30 +1230,60 @@ def _run_fixed_boundary_baseline_cases(
                         )
                     )
                     break
-                pilot_step = _run_lcfs_pilot_step(
-                    step=step,
-                    outdir=outdir,
-                    label=label,
-                    config=config,
-                    boundary=candidate_boundary,
-                    grid=baseline_grid,
-                    coils=scan.coils,
-                    psi_prime_value=psi_prime_value,
-                    pressure=pressure,
-                    solve_options=solve_options,
-                    reference_lcfs=lcfs,
-                    reference_merit=lcfs_merit,
-                    accepted_merit_value=accepted_merit_value,
-                    lcfs_merit_bnormal_weight=lcfs_merit_bnormal_weight,
-                    lcfs_proposal_mode=lcfs_proposal_mode,
-                    lcfs_update_damping=lcfs_update_damping,
-                    lcfs_update_max_relative_step=lcfs_update_max_relative_step,
-                    lcfs_update_cap_taper_power=lcfs_update_cap_taper_power,
-                    lcfs_update_smoothing_passes=lcfs_update_smoothing_passes,
-                    lcfs_require_bnormal_nonincrease=lcfs_require_bnormal_nonincrease,
-                    write_plots=write_plots,
-                )
+                if lcfs_proposal_mode == "coupled":
+                    pilot_step = _run_lcfs_coupled_pilot_step(
+                        step=step,
+                        outdir=outdir,
+                        label=label,
+                        config=config,
+                        current_lcfs=current_lcfs,
+                        current_merit=current_merit,
+                        current_selection=candidate_selection,
+                        grid=baseline_grid,
+                        coils=scan.coils,
+                        psi_prime_value=psi_prime_value,
+                        pressure=pressure,
+                        solve_options=solve_options,
+                        reference_lcfs=lcfs,
+                        reference_merit=lcfs_merit,
+                        accepted_merit_value=accepted_merit_value,
+                        baseline_final_fsq=baseline_final_fsq,
+                        lcfs_merit_bnormal_weight=lcfs_merit_bnormal_weight,
+                        lcfs_update_damping=lcfs_update_damping,
+                        lcfs_update_max_relative_step=lcfs_update_max_relative_step,
+                        lcfs_update_cap_taper_power=lcfs_update_cap_taper_power,
+                        lcfs_update_smoothing_passes=lcfs_update_smoothing_passes,
+                        lcfs_require_bnormal_nonincrease=lcfs_require_bnormal_nonincrease,
+                        lcfs_coupled_fsq_weight=lcfs_coupled_fsq_weight,
+                        write_plots=write_plots,
+                    )
+                else:
+                    pilot_step = _run_lcfs_pilot_step(
+                        step=step,
+                        outdir=outdir,
+                        label=label,
+                        config=config,
+                        boundary=candidate_boundary,
+                        grid=baseline_grid,
+                        coils=scan.coils,
+                        psi_prime_value=psi_prime_value,
+                        pressure=pressure,
+                        solve_options=solve_options,
+                        reference_lcfs=lcfs,
+                        reference_merit=lcfs_merit,
+                        accepted_merit_value=accepted_merit_value,
+                        lcfs_merit_bnormal_weight=lcfs_merit_bnormal_weight,
+                        lcfs_proposal_mode=lcfs_proposal_mode,
+                        lcfs_update_damping=lcfs_update_damping,
+                        lcfs_update_max_relative_step=lcfs_update_max_relative_step,
+                        lcfs_update_cap_taper_power=lcfs_update_cap_taper_power,
+                        lcfs_update_smoothing_passes=lcfs_update_smoothing_passes,
+                        lcfs_require_bnormal_nonincrease=lcfs_require_bnormal_nonincrease,
+                        write_plots=write_plots,
+                    )
                 pilot_rows.append(pilot_step.row)
+                if bool(pilot_step.row.get("skipped", False)):
+                    break
                 fsq_growth_ratio = float(pilot_step.row["final_fsq"]) / max(baseline_final_fsq, 1.0e-300)
                 pilot_rows[-1]["fsq_growth_ratio"] = fsq_growth_ratio
                 if not pilot_step.accepted:
@@ -1190,6 +1394,7 @@ def run_case(
     lcfs_update_smoothing_passes: int = 1,
     lcfs_merit_bnormal_weight: float = 1.0,
     lcfs_proposal_mode: str = "best_predicted",
+    lcfs_coupled_fsq_weight: float = 1.0,
     lcfs_require_bnormal_nonincrease: bool = False,
     run_lcfs_pilot: bool = False,
     lcfs_pilot_steps: int = 1,
@@ -1206,6 +1411,8 @@ def run_case(
         raise ValueError("lcfs_pilot_stagnation_rtol must be nonnegative")
     if float(lcfs_pilot_fsq_growth_limit) < 0.0:
         raise ValueError("lcfs_pilot_fsq_growth_limit must be nonnegative")
+    if float(lcfs_coupled_fsq_weight) < 0.0:
+        raise ValueError("lcfs_coupled_fsq_weight must be nonnegative")
     outdir.mkdir(parents=True, exist_ok=True)
     grid = make_mirror_grid(
         ns=ns, ntheta=ntheta, nxi=nxi, mpol=max(0, (ntheta - 1) // 2), z_min=-0.5 * separation, z_max=0.5 * separation
@@ -1261,6 +1468,7 @@ def run_case(
             lcfs_update_smoothing_passes=lcfs_update_smoothing_passes,
             lcfs_merit_bnormal_weight=lcfs_merit_bnormal_weight,
             lcfs_proposal_mode=lcfs_proposal_mode,
+            lcfs_coupled_fsq_weight=lcfs_coupled_fsq_weight,
             lcfs_require_bnormal_nonincrease=lcfs_require_bnormal_nonincrease,
             run_lcfs_pilot=run_lcfs_pilot,
             lcfs_pilot_steps=lcfs_pilot_steps,
@@ -1306,6 +1514,7 @@ def run_case(
         "axis_bz_max": float(np.max(np.abs(direct_bz))),
         "boundary_bmag_min": float(np.min(np.asarray(boundary_sample.bmag))),
         "boundary_bmag_max": float(np.max(np.asarray(boundary_sample.bmag))),
+        "lcfs_coupled_fsq_weight": float(lcfs_coupled_fsq_weight),
         "setup_json": str(setup_path),
         "summary_csv": str(summary_csv_path),
         "summary_rows": [],
@@ -1345,6 +1554,7 @@ def main() -> None:
         lcfs_update_smoothing_passes=args.lcfs_update_smoothing_passes,
         lcfs_merit_bnormal_weight=args.lcfs_merit_bnormal_weight,
         lcfs_proposal_mode=args.lcfs_proposal_mode,
+        lcfs_coupled_fsq_weight=args.lcfs_coupled_fsq_weight,
         lcfs_require_bnormal_nonincrease=args.lcfs_require_bnormal_nonincrease,
         run_lcfs_pilot=args.run_lcfs_pilot,
         lcfs_pilot_steps=args.lcfs_pilot_steps,

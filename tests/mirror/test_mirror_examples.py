@@ -569,6 +569,57 @@ def test_root_free_boundary_circular_coils_tolerant_fsq_guard_keeps_last_accepte
     assert summary["final_trial_fsq_growth_ratio"] == pytest.approx(second["fsq_growth_ratio"])
 
 
+def test_root_free_boundary_circular_coils_coupled_mode_scores_realized_trials(tmp_path):
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "examples/mirror_free_boundary_circular_coils.py",
+            "--outdir",
+            str(tmp_path / "coupled_lcfs"),
+            "--betas",
+            "3",
+            "--ntheta",
+            "8",
+            "--nxi",
+            "11",
+            "--n-segments",
+            "64",
+            "--run-fixed-boundary-baseline",
+            "--baseline-maxiter",
+            "0",
+            "--run-lcfs-pilot",
+            "--lcfs-pilot-steps",
+            "1",
+            "--lcfs-proposal-mode",
+            "coupled",
+            "--lcfs-coupled-fsq-weight",
+            "1.0",
+            "--no-plots",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    metrics = json.loads(Path(completed.stdout.strip()).read_text())
+    row = metrics["fixed_boundary_baseline_rows"][0]
+    pilot = row["lcfs_pilot_rows"][0]
+    trial_rows = pilot["coupled_trial_rows"]
+    selected = [trial for trial in trial_rows if trial["selected"]]
+    assert metrics["lcfs_coupled_fsq_weight"] == 1.0
+    assert row["lcfs_pilot_status"] == "accepted"
+    assert len(selected) == 1
+    assert selected[0]["strategy"] == "bnormal_slope"
+    assert selected[0]["score"] == pytest.approx(min(trial["score"] for trial in trial_rows))
+    assert pilot["coupled_score"] == pytest.approx(selected[0]["score"])
+    assert pilot["coupled_merit_ratio"] == pytest.approx(selected[0]["merit_ratio"])
+    assert pilot["coupled_fsq_penalty"] == pytest.approx(selected[0]["fsq_penalty"])
+    assert pilot["fsq_growth_ratio"] == pytest.approx(selected[0]["fsq_growth_ratio"])
+    assert selected[0]["fsq_growth_ratio"] < 1.01
+    assert selected[0]["accepted_by_merit"] is True
+    assert selected[0]["mout"] == pilot["mout"]
+
+
 def test_root_fixed_boundary_solve_diagnostic_runs_without_plots(tmp_path):
     completed = subprocess.run(
         [
