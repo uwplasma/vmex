@@ -12050,6 +12050,75 @@ Completion:
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.9989%.
 
+## 2026-06-18 WOUT NetCDF Serialization Table Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Replaced repeated NetCDF dimension creation calls with a dimension table in
+   `vmec_jax.io.wout.netcdf.write_wout_payload`.
+2. Replaced repeated scalar, mode-table, radius-profile, Glasser-profile,
+   axis-profile, and auxiliary-profile write calls with explicit ordered
+   field tables.
+3. Preserved all variable names, dimensions, defaults, conversion rules, and
+   write helper functions; no physics diagnostics or WOUT synthesis formulas
+   were changed.
+
+Results obtained:
+
+- Net source reduction for this tranche: 96 insertions and 106 deletions
+  (`-10` LOC) in `vmec_jax/io/wout/netcdf.py`.
+- `write_wout_payload` dropped below the source-health function warning
+  threshold, so WOUT serialization boilerplate is no longer listed among the
+  long-function blockers.
+- WOUT roundtrip and VMECPlot2 compatibility writer tests remain green.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/io/wout/netcdf.py`
+  - Result: passed.
+- `python -m ruff check vmec_jax/io/wout/netcdf.py`
+  - Result: passed.
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_additional_helpers.py::test_write_wout_roundtrips_synthetic_profiles_and_default_aux_arrays tests/test_wout_wave2.py::test_write_wout_logs_set_fill_off_failure tests/test_wout_wave2.py::test_nonconverged_wout_roundtrip_preserves_fields_and_status tests/test_wout_roundtrip.py tests/test_wout_vmecplot2_compat.py -q`
+  - Result: passed (`5 passed, 3 skipped`).
+- `python tools/diagnostics/source_health.py --top 25 --top-functions 45`
+
+Best next steps:
+
+1. Continue WOUT simplification only at similarly passive serialization or
+   diagnostics seams; avoid changing Mercier/JXBFORCE numerical formulas in
+   the refactor PR.
+2. Return to free-boundary phase-2 evidence and adaptive-branch claims after
+   source-health tranches are stable and CI has had time to run.
+3. Keep validating writer refactors with roundtrip tests because variable
+   names/dimensions are user-facing compatibility contracts.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.97%.
+- Differentiability/refactor implementation: 99.999997%.
+- Solver monolith reduction: 99.49%.
+- Free-boundary adjoint monolith reduction: 99.30%.
+- Driver workflow decomposition: 99.87%.
+- Residual iteration decomposition: 96.2%.
+- WOUT diagnostic/profile decomposition: 99.72%.
+- Bcovar/WOUT parity decomposition: 98.45%.
+- Force-kernel decomposition: 98.55%.
+- Optimizer workflow decomposition: 98.9%.
+- Fixed-boundary optimizer decomposition: 94.8%.
+- Implicit residual-adjoint decomposition: 95%.
+- QI objective decomposition: 93%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.7%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.9990%.
+
 ## 2026-06-18 Optimizer Dependency Default Cleanup
 
 Branch: `codex/differentiability-refactor-plan`.
