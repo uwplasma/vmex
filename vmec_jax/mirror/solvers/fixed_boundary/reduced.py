@@ -335,6 +335,55 @@ def axisym_reduced_residual_jacobian_jax(
     raise ValueError("derivative must be 'hessian', 'forward', or 'reverse'")
 
 
+def axisym_reduced_residual_matvec_jax(
+    vector,
+    direction,
+    grid: MirrorGrid,
+    boundary: MirrorBoundary,
+    *,
+    psi_prime: PsiPrimeProfile,
+    i_prime: IPrimeProfile,
+    pressure: PressureProfile,
+    source_vector=None,
+    state_ridge: float = 0.0,
+    reference_vector=None,
+    transpose: bool = False,
+    ridge: float = 0.0,
+    mu0: float = 4.0e-7 * np.pi,
+):
+    """Apply the reduced residual Hessian without forming a dense matrix.
+
+    The current reduced residual is the gradient of a scalar energy, so the
+    linearization is symmetric.  ``transpose`` is accepted to match adjoint
+    solve call sites; for this energy-Hessian gate it uses the same operator.
+    """
+    _require_jax()
+    vector = jnp.asarray(vector)
+    direction = jnp.asarray(direction, dtype=vector.dtype)
+    if direction.shape != vector.shape:
+        raise ValueError(f"direction shape {direction.shape} does not match vector shape {vector.shape}")
+
+    def residual(items):
+        return axisym_reduced_residual_jax(
+            items,
+            grid,
+            boundary,
+            psi_prime=psi_prime,
+            i_prime=i_prime,
+            pressure=pressure,
+            source_vector=source_vector,
+            state_ridge=state_ridge,
+            reference_vector=reference_vector,
+            mu0=mu0,
+        )
+
+    del transpose
+    _, product = jax.jvp(residual, (vector,), (direction,))
+    if float(ridge) != 0.0:
+        product = product + float(ridge) * direction
+    return product
+
+
 def axisym_reduced_residual_linear_solve_jax(
     vector,
     rhs,
@@ -350,14 +399,64 @@ def axisym_reduced_residual_linear_solve_jax(
     derivative: str = "hessian",
     transpose: bool = False,
     ridge: float = 0.0,
+    method: str = "dense",
+    cg_tol: float = 1.0e-8,
+    cg_atol: float = 0.0,
+    cg_maxiter: int | None = None,
+    initial_guess=None,
     mu0: float = 4.0e-7 * np.pi,
 ):
-    """Solve a dense reduced residual linear system for validation grids.
+    """Solve a reduced residual linear system for implicit-differentiation gates.
 
-    This is the small-grid reference solve used to validate implicit
-    differentiation formulas.  It intentionally forms the dense Jacobian; large
-    production solves should use a matrix-free or structured linear solver.
+    ``method="dense"`` forms the dense Jacobian and is the tiny-grid correctness
+    reference.  ``method="matrix_free_cg"`` uses JAX CG with Hessian-vector
+    products and keeps the same forward/transpose call shape for larger
+    validation grids.
     """
+    key = str(method).strip().lower().replace("-", "_")
+    if key in {"matrix_free", "matrix_free_cg", "cg", "jax_cg"}:
+        derivative_key = str(derivative).strip().lower().replace("-", "_")
+        if derivative_key not in {"hessian", "energy_hessian"}:
+            raise ValueError("matrix_free_cg requires derivative='hessian'")
+        from jax.scipy.sparse.linalg import cg as jax_cg
+
+        vector = jnp.asarray(vector)
+        rhs = jnp.asarray(rhs, dtype=vector.dtype)
+        if rhs.shape != vector.shape:
+            raise ValueError(f"rhs shape {rhs.shape} does not match vector shape {vector.shape}")
+        x0 = None if initial_guess is None else jnp.asarray(initial_guess, dtype=rhs.dtype)
+        if x0 is not None and x0.shape != rhs.shape:
+            raise ValueError(f"initial_guess shape {x0.shape} does not match rhs shape {rhs.shape}")
+
+        def matvec(direction):
+            return axisym_reduced_residual_matvec_jax(
+                vector,
+                direction,
+                grid,
+                boundary,
+                psi_prime=psi_prime,
+                i_prime=i_prime,
+                pressure=pressure,
+                source_vector=source_vector,
+                state_ridge=state_ridge,
+                reference_vector=reference_vector,
+                transpose=transpose,
+                ridge=ridge,
+                mu0=mu0,
+            )
+
+        solution, _ = jax_cg(
+            matvec,
+            rhs,
+            x0=x0,
+            tol=float(cg_tol),
+            atol=float(cg_atol),
+            maxiter=None if cg_maxiter is None else int(cg_maxiter),
+        )
+        return solution
+    if key not in {"dense", "direct", "dense_direct"}:
+        raise ValueError("method must be 'dense' or 'matrix_free_cg'")
+
     jacobian = axisym_reduced_residual_jacobian_jax(
         vector,
         grid,

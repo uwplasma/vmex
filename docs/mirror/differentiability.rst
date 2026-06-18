@@ -17,8 +17,11 @@ only:
   ``F(x, p)`` as the JAX gradient of the reduced mirror energy.
 - ``axisym_reduced_residual_jacobian_jax`` returns ``dF/dx`` using either the
   energy Hessian, ``jax.jacfwd``, or ``jax.jacrev``.
-- ``axisym_reduced_residual_linear_solve_jax`` solves dense tiny-grid systems
-  ``(dF/dx) dx = rhs`` or ``(dF/dx)^T adjoint = rhs`` for validation.
+- ``axisym_reduced_residual_matvec_jax`` applies the reduced energy Hessian to
+  a vector without forming the dense matrix.
+- ``axisym_reduced_residual_linear_solve_jax`` solves tiny-grid dense systems
+  or ridge-stabilized matrix-free ``jax.scipy.sparse.linalg.cg`` systems with
+  the same forward/transpose call shape.
 
 These functions are intended as method gates for implicit differentiation:
 
@@ -35,16 +38,17 @@ an exact tiny-grid reduced root using a linear reduced source and a small state
 ridge. It then compares the dense implicit sensitivity against a finite
 difference of an independently solved perturbed source problem.
 
-This validates the residual, Jacobian, and dense linear-solve machinery. It is
-not yet a production differentiable equilibrium solve.
+This validates the residual, Jacobian, dense linear-solve machinery, and the
+first matrix-free Hessian-vector path. It is not yet a production
+differentiable equilibrium solve.
 
 Next Steps
 ----------
 
 1. Keep dense solves as the correctness reference on tiny grids.
-2. Add a matrix-free or lineax-backed linear solve with the same forward and
-   transpose semantics.
-3. Validate the scalable solve against the dense reference.
-4. Wrap a small converged solved state with a custom implicit derivative rule.
-5. Promote the differentiable API only after it agrees with finite differences
+2. Benchmark the matrix-free CG path on larger reduced grids and compare it
+   with a lineax-backed operator if that dependency becomes part of the public
+   solver stack.
+3. Wrap a small converged solved state with a custom implicit derivative rule.
+4. Promote the differentiable API only after it agrees with finite differences
    and the existing fixed-boundary solver diagnostics.

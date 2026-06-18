@@ -16174,3 +16174,112 @@ Results:
 No user input is needed.
 
 ---
+## 129. Matrix-Free Reduced Implicit Linear Solve Gate
+
+### Steps taken
+
+- Added `axisym_reduced_residual_matvec_jax`, a JAX Hessian-vector product for
+  the reduced axisymmetric mirror residual.
+- Extended `axisym_reduced_residual_linear_solve_jax` with a method dispatch:
+  - `method="dense"` keeps the existing dense Jacobian reference solve;
+  - `method="matrix_free_cg"` uses `jax.scipy.sparse.linalg.cg` with the
+    matrix-free Hessian-vector product.
+- Kept the forward and transpose call shape the same as the dense helper. The
+  current reduced residual is an energy gradient, so the Hessian gate is
+  symmetric and the transpose operator is identical at this stage.
+- Added explicit shape checks for the right-hand side, matvec direction, and
+  optional CG initial guess.
+- Exported the new matvec helper through the mirror public API.
+- Updated the differentiability docs to describe the dense reference and
+  matrix-free CG validation path.
+- Extended the reduced fixed-boundary test to compare:
+  - matrix-free Hessian-vector products against dense Jacobian products;
+  - matrix-free CG solves against dense solves in both forward and transpose
+    modes on a ridge-stabilized tiny problem.
+
+### Results obtained
+
+- The differentiability lane now has the first scalable linear-operator path
+  without giving up the dense tiny-grid reference.
+- The CG path is deliberately introduced as a validation gate, not a production
+  solved-state derivative claim.
+- The public API now exposes the operator needed for future lineax, custom VJP,
+  or adjoint wrappers while keeping the implementation inside
+  `vmec_jax.mirror.solvers.fixed_boundary.reduced`.
+
+### How it was tested
+
+Commands run:
+
+```bash
+python -m ruff check vmec_jax/mirror/solvers/fixed_boundary/reduced.py vmec_jax/mirror/api.py vmec_jax/mirror/__init__.py tests/mirror/test_mirror_fixed_boundary_axisym.py
+python -m ruff format --check vmec_jax/mirror/solvers/fixed_boundary/reduced.py vmec_jax/mirror/api.py vmec_jax/mirror/__init__.py tests/mirror/test_mirror_fixed_boundary_axisym.py
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_fixed_boundary_axisym.py::test_reduced_jax_residual_and_jacobian_match_gradient_and_jvp tests/mirror/test_mirror_fixed_boundary_axisym.py::test_reduced_implicit_sensitivity_matches_manufactured_source_finite_difference -q
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_fixed_boundary_axisym.py -q
+python -m sphinx -W -b html docs docs/_build/html
+git diff --check
+python - <<'PY'
+import re
+from pathlib import Path
+text = Path("plan_mirror.md").read_text()
+nums = [int(m.group(1)) for m in re.finditer(r"^## (\\d+)\\.", text, flags=re.M)]
+print("milestones", len(nums), "last", nums[-1], "monotonic", nums == sorted(nums))
+PY
+```
+
+Results:
+
+- Ruff lint passed.
+- Ruff format check passed.
+- Focused reduced differentiability tests: `2 passed`.
+- Full axisymmetric fixed-boundary test file: `16 passed`.
+- Sphinx docs build passed with warnings treated as errors.
+- Whitespace check passed.
+- Plan milestone numbering remained monotonic.
+
+### File structure and best-practice notes
+
+- The dense solve, matrix-free matvec, and CG solve stay in the reduced
+  fixed-boundary solver module because they operate on the same reduced state
+  layout.
+- The implementation keeps dense and matrix-free methods under one public solve
+  function instead of creating a parallel helper stack.
+- The matrix-free path uses JAX primitives, so it is compatible with future
+  implicit-differentiation wrappers and avoids differentiating through long
+  nonlinear host-side solve loops.
+- The test uses a ridge-stabilized tiny problem, making the CG gate stable and
+  cheap while preserving the dense reference comparison.
+
+### Best next steps
+
+1. Commit and push M129.
+2. Add a small solved-state implicit wrapper around the reduced fixed-boundary
+   residual that can call either dense or matrix-free linear solves.
+3. Validate that wrapper with the manufactured source example and then a tiny
+   converged fixed-boundary solve.
+4. Begin benchmarking the matrix-free path on larger `ns`/`nxi` reduced grids
+   before promoting it beyond validation status.
+
+### Completion percentages after M129
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `90%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `86%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `92%`.
+- I/O schema and docs: `99%`.
+- Differentiable solved-state API: `59%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `85%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `85%`.
+- PR merge readiness overall: `95%`.
+
+### User input needed
+
+No user input is needed.
+
+---

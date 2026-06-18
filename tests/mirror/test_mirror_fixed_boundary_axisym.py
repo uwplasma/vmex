@@ -13,6 +13,7 @@ from vmec_jax.mirror import (
     axisym_reduced_residual_jacobian_jax,
     axisym_reduced_residual_jax,
     axisym_reduced_residual_linear_solve_jax,
+    axisym_reduced_residual_matvec_jax,
     run_mirror_fixed_boundary,
 )
 from vmec_jax.mirror.core.boundary import MirrorBoundary
@@ -261,6 +262,21 @@ def test_reduced_jax_residual_and_jacobian_match_gradient_and_jvp():
 
     ridge = 1.0e-8
     identity = np.eye(vector.size)
+    matvec_product = np.asarray(
+        axisym_reduced_residual_matvec_jax(
+            vector,
+            direction,
+            grid,
+            boundary,
+            psi_prime=psi,
+            i_prime=current,
+            pressure=pressure,
+            ridge=ridge,
+            mu0=1.0,
+        )
+    )
+    np.testing.assert_allclose((jacobian + ridge * identity) @ direction, matvec_product, rtol=1.0e-6, atol=1.0e-7)
+
     rhs = np.cos(np.linspace(0.0, 1.0, vector.size))
     forward_solution = np.asarray(
         axisym_reduced_residual_linear_solve_jax(
@@ -291,6 +307,44 @@ def test_reduced_jax_residual_and_jacobian_match_gradient_and_jvp():
     )
     np.testing.assert_allclose((jacobian + ridge * identity) @ forward_solution, rhs, rtol=1.0e-6, atol=1.0e-7)
     np.testing.assert_allclose((jacobian.T + ridge * identity) @ adjoint_solution, rhs, rtol=1.0e-6, atol=1.0e-7)
+
+    state_ridge = 10.0
+    for transpose in (False, True):
+        dense_reference = np.asarray(
+            axisym_reduced_residual_linear_solve_jax(
+                vector,
+                rhs,
+                grid,
+                boundary,
+                psi_prime=psi,
+                i_prime=current,
+                pressure=pressure,
+                state_ridge=state_ridge,
+                reference_vector=vector,
+                transpose=transpose,
+                method="dense",
+                mu0=1.0,
+            )
+        )
+        matrix_free_solution = np.asarray(
+            axisym_reduced_residual_linear_solve_jax(
+                vector,
+                rhs,
+                grid,
+                boundary,
+                psi_prime=psi,
+                i_prime=current,
+                pressure=pressure,
+                state_ridge=state_ridge,
+                reference_vector=vector,
+                transpose=transpose,
+                method="matrix_free_cg",
+                cg_tol=1.0e-10,
+                cg_maxiter=200,
+                mu0=1.0,
+            )
+        )
+        np.testing.assert_allclose(matrix_free_solution, dense_reference, rtol=5.0e-6, atol=5.0e-8)
 
 
 def test_reduced_implicit_sensitivity_matches_manufactured_source_finite_difference():

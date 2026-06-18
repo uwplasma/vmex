@@ -44,6 +44,7 @@ from .solvers.fixed_boundary.api import (
     run_mirror_fixed_boundary,
 )
 from .solvers.fixed_boundary.reduced import (
+    axisym_reduced_residual_matvec_jax,
     axisym_reduced_residual_jacobian_jax,
     axisym_reduced_residual_jax,
     axisym_reduced_residual_linear_solve_jax,
@@ -94,6 +95,7 @@ __all__ = [
     "axisym_reduced_residual_jacobian_jax",
     "axisym_reduced_residual_jax",
     "axisym_reduced_residual_linear_solve_jax",
+    "axisym_reduced_residual_matvec_jax",
     "circular_loop_field_rz",
     "circular_loop_on_axis_bz",
     "initial_mirror_boundary_from_circular_coil_scan",
