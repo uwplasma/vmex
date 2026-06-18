@@ -87,6 +87,7 @@ from vmec_jax.solvers.fixed_boundary.residual.finalize import (
     attach_residual_iter_timing_diagnostics as _attach_residual_iter_timing_diagnostics,
     build_residual_iter_resume_state_payload as _build_residual_iter_resume_state_payload,
     finalize_residual_iter_result as _finalize_residual_iter_result,
+    precompile_only_residual_iter_result as _precompile_only_residual_iter_result,
     vmec2000_state_only_scan_result as _vmec2000_state_only_scan_result,
     vmec2000_traced_scan_result as _vmec2000_traced_scan_result,
 )
@@ -603,20 +604,6 @@ def solve_fixed_boundary_residual_iter(
     def _record_setup_timing(key: str, start: float | None) -> None:
         _runtime_record_setup_timing(_setup_phase_timings, key, start, perf_counter=time.perf_counter)
 
-    def _precompile_only_result() -> SolveVmecResidualResult:
-        empty = np.zeros((0,), dtype=float)
-        return SolveVmecResidualResult(
-            state=state0,
-            n_iter=0,
-            w_history=empty,
-            fsqr2_history=empty,
-            fsqz2_history=empty,
-            fsql2_history=empty,
-            grad_rms_history=empty,
-            step_history=empty,
-            diagnostics={"precompile_only": True},
-        )
-
     startup_policy = _resolve_residual_iter_startup_policy(
         max_iter=max_iter,
         step_size=step_size,
@@ -918,10 +905,10 @@ def solve_fixed_boundary_residual_iter(
                 idx00=idx00,
                 prefer_host_default_profiles=prefer_host_default_profiles,
                 s_profile_has_tracer=_tree_has_tracer(s_profile),
-            )
+        )
     except Exception:
         if bool(precompile_only):
-            return _precompile_only_result()
+            return _precompile_only_residual_iter_result(result_type=SolveVmecResidualResult, state=state0)
         raise
     wout_like = profile_setup.wout_like
 
@@ -1333,7 +1320,7 @@ def solve_fixed_boundary_residual_iter(
     )
 
     if precompile_only:
-        return _precompile_only_result()
+        return _precompile_only_residual_iter_result(result_type=SolveVmecResidualResult, state=state0)
 
     def _iter_idx_for_dump(it: int | None) -> int | None:
         return None if jit_forces else it

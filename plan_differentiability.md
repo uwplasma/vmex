@@ -15338,3 +15338,77 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.99993%.
+
+## 2026-06-18 Residual Empty-History Result Finalization Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added a shared empty-history result constructor in the residual finalization
+   layer.
+2. Reused it for precompile-only residual-iteration exits and VMEC2000 scan
+   empty-history result assembly.
+3. Removed the local precompile-only result closure from
+   `solve_fixed_boundary_residual_iter`.
+
+Results obtained:
+
+- `vmec_jax/solvers/fixed_boundary/residual/iteration.py` dropped from 6670 to
+  6657 lines.
+- `vmec_jax/solvers/fixed_boundary/residual/finalize.py` increased from 180 to
+  185 lines.
+- The touched source is net-negative by 8 lines while moving repeated
+  result-construction policy out of the monolithic residual loop.
+- `solve_fixed_boundary_residual_iter` dropped from 6138 to 6124 lines.
+- No force, preconditioner, convergence, or scan-controller numerics changed.
+- No generated outputs or large files were added.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/residual/finalize.py vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/finalize.py vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_finish_cache_more_coverage.py::test_precompile_only_jit_precompile_exercises_force_cache_and_lower tests/test_solve_finish_cache_more_coverage.py::test_precompile_only_jit_precompile_swallows_compile_failure tests/test_solve_finish_cache_more_coverage.py::test_precompile_only_compute_force_cache_is_owned_and_limited -q`
+  - Result: passed.
+- `python tools/diagnostics/source_health.py --top 16 --top-functions 30`
+
+Best next steps:
+
+1. Continue residual-loop shrinkage by moving result assembly, policy decoding,
+   or diagnostics plumbing into existing domain modules only when the diff is
+   net-negative and covered by focused tests.
+2. Keep numerical scan/update kernels unchanged unless a dedicated VMEC2000
+   parity or AD-vs-FD gate is selected for the same tranche.
+3. Defer large adaptive-branch differentiability rewrites to the separate
+   differentiability research plan; this PR should keep simplifying and
+   preserving behavior.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999998%.
+- Solver monolith reduction: 99.62%.
+- Free-boundary adjoint monolith reduction: 99.40%.
+- Driver workflow decomposition: 99.89%.
+- Residual iteration decomposition: 97.5%.
+- WOUT diagnostic/profile decomposition: 99.88%.
+- Bcovar/WOUT parity decomposition: 99.09%.
+- Force-kernel decomposition: 99.65%.
+- Scan/performance policy consolidation: 99.6%.
+- Tomnsps transform decomposition: 98.4%.
+- Initial-guess decomposition: 99.0%.
+- Optimizer workflow decomposition: 99.48%.
+- Fixed-boundary optimizer decomposition: 95.5%.
+- Plotting/WOUT visualization decomposition: 95.8%.
+- Sweep/example workflow decomposition: 93.8%.
+- Implicit residual-adjoint decomposition: 95%.
+- QI objective/staged-runner decomposition: 96.8%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.99994%.
