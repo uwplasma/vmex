@@ -1020,6 +1020,40 @@ def _axis_parity_from_state_lasym(
     }
 
 
+def _resolve_initial_guess_numerics(static: VMECStatic, dtype):
+    cfg = static.cfg
+    if dtype is None:
+        if has_jax():
+            try:
+                import jax
+
+                dtype = jnp.float64 if bool(jax.config.read("jax_enable_x64")) else jnp.float32
+            except Exception:
+                dtype = jnp.float64
+        else:
+            import numpy as _np
+
+            dtype = _np.float64
+    trig = getattr(static, "trig_vmec", None)
+    if trig is None or (int(trig.ntheta1) != int(cfg.ntheta)) or (int(trig.cosnv.shape[0]) != int(cfg.nzeta)):
+        trig = vmec_trig_tables(
+            ntheta=cfg.ntheta,
+            nzeta=cfg.nzeta,
+            nfp=cfg.nfp,
+            mmax=cfg.mpol - 1,
+            nmax=cfg.ntor,
+            lasym=cfg.lasym,
+            dtype=dtype,
+        )
+    if getattr(static, "mode_scale_internal", None) is not None:
+        mode_scale = jnp.asarray(static.mode_scale_internal, dtype=dtype)
+    else:
+        m_idx = jnp.asarray(static.modes.m, dtype=jnp.int32)
+        n_idx = jnp.asarray(static.modes.n, dtype=jnp.int32)
+        mode_scale = (1.0 / (jnp.asarray(trig.mscale, dtype=dtype)[m_idx] * jnp.asarray(trig.nscale, dtype=dtype)[jnp.abs(n_idx)])).astype(dtype)
+    return dtype, trig, mode_scale
+
+
 def initial_guess_from_boundary(
     static: VMECStatic,
     boundary: BoundaryCoeffs,
@@ -1061,22 +1095,7 @@ def initial_guess_from_boundary(
 
     m = jnp.asarray(static.modes.m)
     s = jnp.asarray(static.s)
-    if dtype is None:
-        # Choose a dtype that avoids JAX warning spam.
-        # VMEC expects float64; we default to float64 when x64 is enabled.
-        if has_jax():
-            try:
-                import jax
-
-                x64 = bool(jax.config.read("jax_enable_x64"))
-            except Exception:
-                x64 = True
-            dtype = jnp.float64 if x64 else jnp.float32
-        else:
-            # numpy fallback: use float64 for VMEC parity
-            import numpy as _np
-
-            dtype = _np.float64
+    dtype, trig, mode_scale = _resolve_initial_guess_numerics(static, dtype)
 
     boundary_use = boundary
     use_jax_boundary = bool(has_jax()) and (
@@ -1107,40 +1126,6 @@ def initial_guess_from_boundary(
             boundary_use = _flip_boundary_theta(static, boundary_use)
     boundary_use = _apply_m1_constraint(static, boundary_use)
 
-
-    # VMEC internal scaling: divide coefficients by mscale*nscale.
-    trig = getattr(static, "trig_vmec", None)
-    if trig is None:
-        trig = vmec_trig_tables(
-            ntheta=cfg.ntheta,
-            nzeta=cfg.nzeta,
-            nfp=cfg.nfp,
-            mmax=cfg.mpol - 1,
-            nmax=cfg.ntor,
-            lasym=cfg.lasym,
-            dtype=dtype,
-        )
-    else:
-        # Ensure cached trig tables match the requested resolution.
-        if (int(trig.ntheta1) != int(cfg.ntheta)) or (int(trig.cosnv.shape[0]) != int(cfg.nzeta)):
-            trig = vmec_trig_tables(
-                ntheta=cfg.ntheta,
-                nzeta=cfg.nzeta,
-                nfp=cfg.nfp,
-                mmax=cfg.mpol - 1,
-                nmax=cfg.ntor,
-                lasym=cfg.lasym,
-                dtype=dtype,
-            )
-    if getattr(static, "mode_scale_internal", None) is not None:
-        mode_scale = jnp.asarray(static.mode_scale_internal, dtype=dtype)
-    else:
-        m_idx = jnp.asarray(static.modes.m, dtype=jnp.int32)
-        n_idx = jnp.asarray(static.modes.n, dtype=jnp.int32)
-        n1 = jnp.abs(n_idx)
-        mscale = jnp.asarray(trig.mscale, dtype=dtype)
-        nscale = jnp.asarray(trig.nscale, dtype=dtype)
-        mode_scale = (1.0 / (mscale[m_idx] * nscale[n1])).astype(dtype)  # internal scale
 
     # Base: broadcast boundary vectors to (ns,K) in internal convention.
     Rcos_b = (jnp.asarray(boundary_use.R_cos, dtype=dtype) * mode_scale)[None, :]
