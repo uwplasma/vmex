@@ -2037,21 +2037,6 @@ def plot_wout(
 
     ns = int(wout.ns)
     nfp = int(wout.nfp)
-    ntor = int(wout.ntor)
-    lasym = bool(wout.lasym)
-
-    xm = np.asarray(wout.xm, dtype=float)
-    xn = np.asarray(wout.xn, dtype=float)
-    xm_nyq = np.asarray(wout.xm_nyq, dtype=float)
-    xn_nyq = np.asarray(wout.xn_nyq, dtype=float)
-    rmnc, rmns = _wout_coeff_pair(wout, "rmnc", "rmns", zero_secondary_if_sym=True, dtype=float)
-    zmns, zmnc = _wout_coeff_pair(wout, "zmns", "zmnc", zero_secondary_if_sym=True, dtype=float)
-    bmnc, bmns = _wout_coeff_pair(wout, "bmnc", "bmns", zero_secondary_if_sym=True, dtype=float)
-
-    raxis_cc = np.asarray(wout.raxis_cc, dtype=float)
-    raxis_cs = np.asarray(wout.raxis_cs, dtype=float)
-    zaxis_cs = np.asarray(wout.zaxis_cs, dtype=float)
-    zaxis_cc = np.asarray(wout.zaxis_cc, dtype=float)
 
     phi = np.asarray(wout.phi, dtype=float)
     iotaf = np.asarray(wout.iotaf, dtype=float)
@@ -2068,33 +2053,7 @@ def plot_wout(
     s_half = [(i - 0.5) / (ns - 1) for i in range(1, ns)]
     xLabel = r"$s = \psi/\psi_b$"
 
-    # ── Helper: evaluate Fourier series on a (ntheta, nzeta) grid ──────────────
-    def _eval_rz(isurf: int, theta: np.ndarray, zeta: np.ndarray):
-        """(ntheta, nzeta) R and Z arrays for surface isurf."""
-        zeta2d, theta2d = np.meshgrid(zeta, theta)
-        angles = (xm[:, None, None] * theta2d[None] - xn[:, None, None] * zeta2d[None])
-        R = np.tensordot(rmnc[isurf] + rmns[isurf], np.zeros_like(angles[0]), axes=0)
-        Z = np.zeros_like(R)
-        R = (np.tensordot(rmnc[isurf], np.cos(angles), axes=([0], [0]))
-             + np.tensordot(rmns[isurf], np.sin(angles), axes=([0], [0])))
-        Z = (np.tensordot(zmns[isurf], np.sin(angles), axes=([0], [0]))
-             + np.tensordot(zmnc[isurf], np.cos(angles), axes=([0], [0])))
-        return R, Z
-
-    def _eval_bmag(isurf: int, theta: np.ndarray, zeta: np.ndarray):
-        """(ntheta, nzeta) |B| array for surface isurf (Nyquist)."""
-        zeta2d, theta2d = np.meshgrid(zeta, theta)
-        angles = (xm_nyq[:, None, None] * theta2d[None] - xn_nyq[:, None, None] * zeta2d[None])
-        B = (np.tensordot(bmnc[isurf], np.cos(angles), axes=([0], [0]))
-             + np.tensordot(bmns[isurf], np.sin(angles), axes=([0], [0])))
-        return B
-
     # ── Plot 1: VMECparams — 9-panel diagnostics ────────────────────────────────
-    ntheta_b = 30
-    nzeta_b = 65
-    theta_b = np.linspace(0.0, 2.0 * np.pi, ntheta_b)
-    zeta_b = np.linspace(0.0, 2.0 * np.pi, nzeta_b)
-
     fig1, axes1 = plt.subplots(3, 3, figsize=(14, 7))
     fig1.patch.set_facecolor("white")
 
@@ -2139,7 +2098,7 @@ def plot_wout(
     _titles_b = ["Mid radius |B|", "Plasma boundary |B|"]
     _iradii_b = [int(np.argmin(np.abs(s - 0.5))), ns - 1]
     for _col, (_irad, _ttl) in enumerate(zip(_iradii_b, _titles_b)):
-        B_b = _eval_bmag(_irad, theta_b, zeta_b)
+        theta_b, zeta_b, B_b = vmecplot2_bmag_grid(wout, s_index=int(_irad), ntheta=30, nzeta=65)
         zeta2d_b, theta2d_b = np.meshgrid(zeta_b, theta_b)
         ax = axes1[2, 1 + _col]
         cf = ax.contour(zeta2d_b, theta2d_b, B_b, 20, cmap="viridis", linewidths=0.8)
@@ -2162,21 +2121,8 @@ def plot_wout(
     plt.close(fig1)
 
     # ── Plot 2: Poloidal cross-sections at LCFS ──────────────────────────────────
-    ntheta_p = 200
-    nzeta_p = 8
-    theta_p = np.linspace(0.0, 2.0 * np.pi, ntheta_p)
-    zeta_p = np.linspace(0.0, 2.0 * np.pi / nfp, nzeta_p, endpoint=False)
-    R_lcfs, Z_lcfs = _eval_rz(ns - 1, theta_p, zeta_p)
-
-    # Axis positions
-    nzeta_ax = nzeta_p
-    zeta_ax = zeta_p
-    n_arr = np.arange(ntor + 1)
-    angles_ax = -n_arr[:, None] * nfp * zeta_ax[None, :]  # (ntor+1, nzeta)
-    Raxis = (raxis_cc[:ntor + 1, None] * np.cos(angles_ax)
-             + raxis_cs[:ntor + 1, None] * np.sin(angles_ax)).sum(axis=0)
-    Zaxis = (zaxis_cs[:ntor + 1, None] * np.sin(angles_ax)
-             + zaxis_cc[:ntor + 1, None] * np.cos(angles_ax)).sum(axis=0)
+    _theta_p, zeta_p, R_lcfs, Z_lcfs = vmecplot2_surface_grid(wout, s_index=ns - 1, ntheta=200, nzeta=8)
+    Raxis, Zaxis = axis_rz_from_wout(wout, zeta=zeta_p)
 
     fig2, ax2 = plt.subplots(1, 1, figsize=(6, 6))
     fig2.patch.set_facecolor("white")
@@ -2187,7 +2133,7 @@ def plot_wout(
         (6, r"$\phi=3\pi/2$"),
     ]
     for _iz, _lbl in _zeta_lbls:
-        if _iz < nzeta_p:
+        if _iz < len(zeta_p):
             ax2.plot(R_lcfs[:, _iz], Z_lcfs[:, _iz], "-", label=_lbl)
     ax2.set_aspect("equal", adjustable="box")
     ax2.legend(fontsize=18)
@@ -2206,6 +2152,7 @@ def plot_wout(
     nradius_s = 8
     theta_s = np.linspace(0.0, 2.0 * np.pi, ntheta_s)
     zeta_s = np.linspace(0.0, 2.0 * np.pi / nfp, nzeta_s, endpoint=False)
+    Raxis_s, Zaxis_s = axis_rz_from_wout(wout, zeta=zeta_s)
     iradii_s = np.round(np.linspace(0, ns - 1, nradius_s)).astype(int)
 
     fig3, axes3 = plt.subplots(2, 4, figsize=(14, 7))
@@ -2215,9 +2162,9 @@ def plot_wout(
     for _iz in range(nzeta_s):
         ax = axes3_flat[_iz]
         for _ir, _irad in enumerate(iradii_s):
-            R_s, Z_s = _eval_rz(_irad, theta_s, zeta_s)
+            R_s, Z_s = surface_rz_from_wout(wout, s_index=int(_irad), theta=theta_s, zeta=zeta_s)
             ax.plot(R_s[:, _iz], Z_s[:, _iz], "-")
-        ax.plot(Raxis[_iz], Zaxis[_iz], "xr")
+        ax.plot(Raxis_s[_iz], Zaxis_s[_iz], "xr")
         ax.set_aspect("equal", adjustable="box")
         ax.set_xlabel("R", fontsize=10)
         ax.set_ylabel("Z", fontsize=10)
@@ -2231,11 +2178,12 @@ def plot_wout(
     # ── Plot 4: 3-D LCFS surface coloured by |B| ─────────────────────────────────
     ntheta_3d = 80
     nzeta_3d = max(500, int(150 * nfp))
-    theta_3d = np.linspace(0.0, 2.0 * np.pi, ntheta_3d)
-    zeta_3d = np.linspace(0.0, 2.0 * np.pi, nzeta_3d)
-
-    R_3d, Z_3d = _eval_rz(ns - 1, theta_3d, zeta_3d)
-    B_3d = _eval_bmag(ns - 1, theta_3d, zeta_3d)
+    theta_3d, zeta_3d, R_3d, Z_3d, B_3d = vmecplot2_lcfs_3d_grid(
+        wout,
+        s_index=ns - 1,
+        ntheta=ntheta_3d,
+        nzeta=nzeta_3d,
+    )
 
     zeta2d_3d, _ = np.meshgrid(zeta_3d, theta_3d)
     X_3d = R_3d * np.cos(zeta2d_3d)
