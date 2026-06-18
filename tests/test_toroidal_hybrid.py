@@ -255,6 +255,8 @@ def test_toroidal_hybrid_convergence_example_runs_without_solve(tmp_path: Path):
     assert all(row["direct_initial_residual_source"] is None for row in summary["rows"])
     assert all(row["direct_initial_fsq"] is None for row in summary["rows"])
     assert all(row["direct_initial_fsq_ratio_vmec2000"] is None for row in summary["rows"])
+    assert all(row["initial_fsq_ratio_direct_initial"] is None for row in summary["rows"])
+    assert all(row["vmec2000_initial_fsq_ratio_direct_initial"] is None for row in summary["rows"])
     assert all(row["initial_residual_source"] is None for row in summary["rows"])
     assert all(row["vmec2000_initial_residual_source"] is None for row in summary["rows"])
     assert all(row["initial_fsq_ratio_vmec2000"] is None for row in summary["rows"])
@@ -274,6 +276,8 @@ def test_toroidal_hybrid_convergence_example_runs_without_solve(tmp_path: Path):
     assert csv_row["direct_initial_residual_requested"] == "True"
     assert csv_row["direct_initial_residual_source"] == ""
     assert csv_row["direct_initial_fsq_ratio_vmec2000"] == ""
+    assert csv_row["initial_fsq_ratio_direct_initial"] == ""
+    assert csv_row["vmec2000_initial_fsq_ratio_direct_initial"] == ""
     assert csv_row["initial_residual_source"] == ""
     assert csv_row["vmec2000_initial_residual_source"] == ""
     assert csv_row["initial_fsq_ratio_vmec2000"] == ""
@@ -411,6 +415,8 @@ def test_toroidal_hybrid_initial_residual_comparison_ratios():
     assert row["direct_initial_fsqr_ratio_vmec2000"] == 1.0
     assert row["direct_initial_fsqz_ratio_vmec2000"] is None
     assert row["direct_initial_fsql_ratio_vmec2000"] is None
+    assert row["initial_fsq_ratio_direct_initial"] == pytest.approx(2.0 / 3.0)
+    assert row["vmec2000_initial_fsq_ratio_direct_initial"] == pytest.approx(4.0 / 3.0)
     assert row["initial_fsq_ratio_vmec2000"] == 0.5
     assert row["initial_fsqr_ratio_vmec2000"] == 0.5
     assert row["initial_fsqz_ratio_vmec2000"] is None

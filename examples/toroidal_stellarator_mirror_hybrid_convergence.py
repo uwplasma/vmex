@@ -174,6 +174,8 @@ _CSV_COLUMNS = (
     "direct_initial_fsqr_ratio_vmec2000",
     "direct_initial_fsqz_ratio_vmec2000",
     "direct_initial_fsql_ratio_vmec2000",
+    "initial_fsq_ratio_direct_initial",
+    "vmec2000_initial_fsq_ratio_direct_initial",
     "direct_initial_error",
     "initial_residual_source",
     "initial_fsq",
@@ -297,6 +299,14 @@ def _attach_initial_residual_comparison(row: dict[str, object]) -> None:
     row["direct_initial_fsq_ratio_vmec2000"] = _safe_ratio(
         row.get("direct_initial_fsq"),
         row.get("vmec2000_initial_fsq"),
+    )
+    row["initial_fsq_ratio_direct_initial"] = _safe_ratio(
+        row.get("initial_fsq"),
+        row.get("direct_initial_fsq"),
+    )
+    row["vmec2000_initial_fsq_ratio_direct_initial"] = _safe_ratio(
+        row.get("vmec2000_initial_fsq"),
+        row.get("direct_initial_fsq"),
     )
     for name in ("fsqr", "fsqz", "fsql"):
         row[f"initial_{name}_ratio_vmec2000"] = _safe_ratio(
@@ -807,6 +817,8 @@ def main() -> None:
                     "direct_initial_fsqr_ratio_vmec2000": None,
                     "direct_initial_fsqz_ratio_vmec2000": None,
                     "direct_initial_fsql_ratio_vmec2000": None,
+                    "initial_fsq_ratio_direct_initial": None,
+                    "vmec2000_initial_fsq_ratio_direct_initial": None,
                     "direct_initial_error": None,
                     "initial_residual_source": None,
                     "initial_fsq": None,

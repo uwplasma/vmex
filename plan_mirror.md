@@ -13217,3 +13217,190 @@ Results:
 No user input is needed.
 
 ---
+
+## 105. 2026-06-18 M13l parity trajectory audit and direct-vs-history ratios
+
+### Steps taken
+
+- Ran the full-diagnostics toroidal-hybrid trajectory audit in
+  ``solver_mode=parity``.
+- Added total residual ratio fields to the convergence example:
+  - ``initial_fsq_ratio_direct_initial``;
+  - ``vmec2000_initial_fsq_ratio_direct_initial``.
+- Added tests for the new ratio fields and CSV serialization.
+- Updated the mirror examples README to explain that these fields separate
+  pre-iteration direct residuals from first stored solve-history rows.
+
+### Results obtained
+
+Parity evidence run:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_hybrid_m13l_parity_full_step_diagnostics \
+  --ns-array 7 \
+  --mode-pairs 5:10 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 25 \
+  --nstep 1 \
+  --ftol 1e-9 \
+  --run-solve \
+  --max-iter 8 \
+  --solver-mode parity \
+  --no-use-scan \
+  --full-solver-diagnostics \
+  --run-vmec2000 \
+  --vmec2000-exec /Users/rogeriojorge/bin/xvmec2000 \
+  --vmec2000-timeout-s 120
+```
+
+Comparison to the refreshed accelerated audit:
+
+- accelerated:
+  - direct VMEC/JAX initial ``fsq = 8.285359474768e-02``;
+  - VMEC2000 first-row ``fsq = 8.274000000000e-02``;
+  - direct/VMEC2000 initial ratio ``= 1.001372912106``;
+  - first stored VMEC/JAX history ``fsq = 4.602563219108e-03``;
+  - first-history/direct-initial ratio ``= 5.555055556883e-02``;
+  - first-history/VMEC2000-first-row ratio ``= 5.562682159909e-02``.
+- parity:
+  - raw-axis direct VMEC/JAX initial ``fsq = 7.655972553630e+08``;
+  - VMEC2000 first-row ``fsq = 8.274000000000e-02``;
+  - direct/VMEC2000 initial ratio ``= 9.253048771610e+09``;
+  - first stored VMEC/JAX history ``fsq = 4.429242451231e-03``;
+  - first-history/direct-initial ratio ``= 5.785342646155e-12``;
+  - first-history/VMEC2000-first-row ratio ``= 5.353205766535e-02``.
+
+Step diagnostics:
+
+- accelerated:
+  - ``diagnostic_step_status_counts = {"momentum": 8}``;
+  - ``diagnostic_restart_reason_counts = {"none": 8}``;
+  - max update RMS ``= 2.738820461439e-04``.
+- parity:
+  - ``diagnostic_step_status_counts = {"momentum": 8}``;
+  - ``diagnostic_restart_reason_counts = {"none": 8}``;
+  - max update RMS ``= 9.332066713808e-04``.
+
+Interpretation:
+
+- Accelerated direct-initial residual parity with VMEC2000 is good for this
+  low-resolution audit.
+- The first stored VMEC/JAX solve-history row is not the same diagnostic as
+  VMEC2000's first ``threed1`` row; it is after solver startup/update.
+- Parity mode with the raw input axis exposes an enormous pre-iteration
+  residual, then quickly reaches a small first stored history row without
+  terminal restart reasons in the exported history.
+- The next numerical audit should inspect the very first bad-Jacobian/axis
+  handling path inside ``solve_fixed_boundary_residual_iter`` and compare that
+  against VMEC2000 ``guess_axis`` behavior, because the mismatch is before the
+  terminal step-control histories now exported by the example.
+
+Generated ignored artifacts checked:
+
+- ``results/toroidal_hybrid_m13l_parity_full_step_diagnostics/toroidal_stellarator_mirror_hybrid_convergence.json``.
+- ``results/toroidal_hybrid_m13l_parity_full_step_diagnostics/toroidal_stellarator_mirror_hybrid_convergence.csv``.
+- ``results/toroidal_hybrid_m13l_parity_full_step_diagnostics/figures/toroidal_hybrid_fsq_history.png``.
+- ``results/toroidal_hybrid_m13l_parity_full_step_diagnostics/figures/toroidal_hybrid_step_diagnostics.png``.
+
+### How it was tested
+
+Commands run:
+
+```bash
+python -m ruff check examples/toroidal_stellarator_mirror_hybrid_convergence.py tests/test_toroidal_hybrid.py
+python -m ruff format --check examples/toroidal_stellarator_mirror_hybrid_convergence.py tests/test_toroidal_hybrid.py
+JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
+git diff --check
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_hybrid_m13k_full_step_diagnostics \
+  --ns-array 7 \
+  --mode-pairs 5:10 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 25 \
+  --nstep 1 \
+  --ftol 1e-9 \
+  --run-solve \
+  --max-iter 8 \
+  --solver-mode accelerated \
+  --no-use-scan \
+  --full-solver-diagnostics \
+  --run-vmec2000 \
+  --vmec2000-exec /Users/rogeriojorge/bin/xvmec2000 \
+  --vmec2000-timeout-s 120
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_hybrid_m13l_parity_full_step_diagnostics \
+  --ns-array 7 \
+  --mode-pairs 5:10 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 25 \
+  --nstep 1 \
+  --ftol 1e-9 \
+  --run-solve \
+  --max-iter 8 \
+  --solver-mode parity \
+  --no-use-scan \
+  --full-solver-diagnostics \
+  --run-vmec2000 \
+  --vmec2000-exec /Users/rogeriojorge/bin/xvmec2000 \
+  --vmec2000-timeout-s 120
+```
+
+Results:
+
+- `22 passed` in ``tests/test_toroidal_hybrid.py``.
+- Ruff check passed.
+- Ruff format check passed.
+- ``git diff --check`` passed.
+- Both accelerated and parity evidence runs completed successfully.
+- The residual-history and step-diagnostics figures rendered.
+
+### File structure and best-practice notes
+
+- The new ratio fields are scalar reporting fields in the root-level
+  convergence example.
+- Tests stay in ``tests/test_toroidal_hybrid.py`` and do not require VMEC2000.
+- Evidence artifacts remain ignored under ``results/``.
+- No source-level solver behavior changed in this tranche.
+
+### Best next steps
+
+1. Commit and push M13l.
+2. Inspect the first-iteration bad-Jacobian/axis reset path in
+   ``solve_fixed_boundary_residual_iter`` to identify where raw-axis parity
+   moves from the huge direct residual to the small first stored history row.
+3. If the transition is intentional and VMEC-like, document the precise
+   diagnostic timing difference; if it is not, add a targeted regression test
+   and align the history/print sampling.
+4. Continue with differentiable solved-state API cleanup after this
+   toroidal-hybrid trajectory explanation is pinned down.
+
+### Completion percentages after M105
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `87%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `88%`.
+- I/O schema and docs: `96%`.
+- Differentiable solved-state API: `22%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `68%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `78%`.
+- ESSOS circular-coil mirror beta scan: `53%`.
+- PR merge readiness overall: `94%`.
+
+### User input needed
+
+No user input is needed.
+
+---
