@@ -12506,3 +12506,131 @@ Results:
 No user input is needed.
 
 ---
+
+## 101. 2026-06-18 M13h low-resolution initial-residual audit row
+
+This evidence run exercised the M99/M100 audit fields on one low-resolution
+toroidal-hybrid VMEC/JAX-versus-VMEC2000 parity row.
+
+### Steps taken
+
+- Ran the toroidal-hybrid convergence runner with:
+  - `ns=7`;
+  - `mpol=5`, `ntor=10`;
+  - `ntheta_fit=32`, `nzeta_fit=32`;
+  - `NITER_ARRAY=25`;
+  - VMEC/JAX `max_iter=12`;
+  - `solver_mode=parity`;
+  - `use_scan=False`;
+  - local VMEC2000 executable `/Users/rogeriojorge/bin/xvmec2000`.
+- Extracted the JSON/CSV audit fields.
+- Visually checked:
+  - residual-history plot;
+  - final residual component parity plot;
+  - iota / Mercier-well profile plot.
+
+Command:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_hybrid_m13h_initial_residual_audit \
+  --ns-array 7 \
+  --mode-pairs 5:10 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 25 \
+  --ftol 1e-9 \
+  --run-solve \
+  --max-iter 12 \
+  --solver-mode parity \
+  --no-use-scan \
+  --run-vmec2000 \
+  --vmec2000-exec /Users/rogeriojorge/bin/xvmec2000 \
+  --vmec2000-timeout-s 120
+```
+
+### Results obtained
+
+The audit row reports:
+
+| quantity | VMEC/JAX | VMEC2000 | ratio |
+| --- | ---: | ---: | ---: |
+| initial total `fsq` | `4.110992387738e-03` | `8.274000000000e-02` | `4.968567062773e-02` |
+| initial `fsqr` | `2.237248194160e-03` | `5.290000000000e-02` | `4.229202635463e-02` |
+| initial `fsqz` | `1.334014202350e-03` | `4.640000000000e-03` | `2.875030608512e-01` |
+| initial `fsql` | `5.397299912286e-04` | `2.520000000000e-02` | `2.141785679479e-02` |
+
+Other row metrics:
+
+- `vmec_jax_axis_initialization_policy = raw_input_axis_or_zero`.
+- `initial_residual_source = vmec_jax_solve_history_first_row`.
+- `vmec2000_initial_residual_source = vmec2000_threed1_first_row`.
+- VMEC/JAX best/final `fsq = 6.601249629690e-04`.
+- VMEC2000 best/final `fsq = 7.770000000000e-03`.
+- VMEC/JAX mean iota `7.435406701687e-03`.
+- VMEC2000 mean iota `7.622815625446e-03`.
+- Magnetic-well scalar from VMEC/JAX `-5.222353091036e-02`.
+
+Interpretation:
+
+- The raw-axis parity branch still does not produce matched initial residuals.
+- VMEC/JAX starts at about `5%` of VMEC2000's parsed first-row total residual.
+- Mean-iota agreement remains good for this short row, but strict force
+  residual parity is still initialization-limited.
+
+Generated ignored files checked:
+
+- `results/toroidal_hybrid_m13h_initial_residual_audit/figures/toroidal_hybrid_fsq_history.png`.
+- `results/toroidal_hybrid_m13h_initial_residual_audit/figures/toroidal_hybrid_parity_components.png`.
+- `results/toroidal_hybrid_m13h_initial_residual_audit/figures/toroidal_hybrid_profiles.png`.
+
+### How it was tested
+
+- The command completed successfully.
+- JSON and CSV both contain the new source/ratio fields.
+- The generated plots rendered without blank or missing axes.
+- No source files changed for this evidence run.
+
+### File structure and best-practice notes
+
+- Results remain under ignored `results/`.
+- The plan records compact numerical evidence only.
+- The runner schema now provides enough information to distinguish
+  source-of-residual comparisons from true matched-state parity.
+
+### Best next steps
+
+1. Commit and push this evidence log.
+2. Recheck CI for concrete failures.
+3. Start the next M13h design step:
+   - inspect whether VMEC2000 can ingest a restart/initial-state artifact that
+     VMEC/JAX can also write;
+   - if not, document that strict VMEC2000 residual parity is a non-goal for
+     this PR and pivot to validated VMEC/JAX-internal initialization studies.
+4. Continue M10 differentiable solved-state cleanup once the parity limitation
+   is documented.
+
+### Completion percentages after M101
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `86%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `88%`.
+- I/O schema and docs: `95%`.
+- Differentiable solved-state API: `22%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `68%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `66%`.
+- ESSOS circular-coil mirror beta scan: `53%`.
+- PR merge readiness overall: `92%`.
+
+### User input needed
+
+No user input is needed.
+
+---
