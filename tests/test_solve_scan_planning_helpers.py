@@ -13,6 +13,7 @@ from vmec_jax.solvers.fixed_boundary.scan.planning import (
     new_scan_timing_stats,
     normalize_scan_print_mode,
     resolve_scan_iteration_plan,
+    resolve_scan_iteration_runtime_plan,
     resolve_scan_preflight_iters,
     resolve_scan_run_flags,
     resolve_vmec2000_scan_setup,
@@ -721,6 +722,59 @@ def test_scan_cache_key_is_stable_and_tracks_behavioral_toggles():
     assert _cache_key(scan_use_precomputed=True) != base
     assert _cache_key(scan_use_lax_tridi=True) != base
     assert _cache_key(stage_prev_fsq=3)[18] == 3.0
+
+
+def test_scan_iteration_runtime_plan_resolves_offsets_and_cache_key():
+    plan = resolve_scan_iteration_runtime_plan(
+        env={
+            "VMEC_JAX_SCAN_PREFLIGHT": "2",
+            "VMEC_JAX_SCAN_EXTRA_ITERS": "3",
+            "VMEC_JAX_TOMNSPS_FFT": "yes",
+            "VMEC_JAX_TOMNSPS_FFT_FUSED": "0",
+            "VMEC_JAX_TOMNSPS_THETA_FUSED": "1",
+            "VMEC_JAX_TOMNSPS_ZETA_FUSED": "1",
+        },
+        jit_forces_scan=False,
+        vmec2000_control=True,
+        max_iter=10,
+        axis_reset_repeat=True,
+        iter_offset0=4,
+        static_key=("static",),
+        wout_key=("wout",),
+        edge_signature_key=("edge",),
+        step_size=0.2,
+        initial_flip_sign=-1.0,
+        lambda_update_scale=0.5,
+        ftol=1.0e-12,
+        nstep_screen=25,
+        use_restart_triggers=True,
+        vmecpp_restart=False,
+        scan_use_precomputed=True,
+        scan_use_lax_tridi=True,
+        scan_use_restart_payload=True,
+        stage_prev_fsq=None,
+        stage_transition_factor=1.0,
+        stage_transition_scale=2.0,
+        state_only_scan=False,
+        scan_light=True,
+        scan_minimal=False,
+        scan_fallback_iters=7,
+        scan_fallback_accept_frac=0.5,
+        scan_fallback_fsq_factor=3.0,
+        scan_fallback_badjac_limit=2,
+        scan_fallback_fsq_abs=1.0e-4,
+    )
+
+    assert plan.preflight_iters == 2
+    assert plan.max_iter_scan == 13
+    assert plan.max_iter_tail == 11
+    assert plan.iter_offset_preflight == 0
+    assert plan.iter_offset0 == -1
+    assert plan.axis_reset_repeated
+    assert plan.scan_cache_key[1:4] == (("static",), ("wout",), ("edge",))
+    assert plan.scan_cache_key[4] == ("yes", "0", "1", "1")
+    assert plan.scan_cache_key[5:8] == (11, 2, -1)
+    assert plan.scan_cache_key[15:18] == (True, True, True)
 
 
 def test_scan_print_mode_normalization_and_invalid_guard_errors():

@@ -397,6 +397,7 @@ from vmec_jax.solvers.fixed_boundary.scan.planning import (
     default_vmec2000_controller_constants as _default_vmec2000_controller_constants,
     new_scan_timing_stats as _new_scan_timing_stats,
     resolve_scan_iteration_plan as _resolve_scan_iteration_plan,
+    resolve_scan_iteration_runtime_plan as _resolve_scan_iteration_runtime_plan,
     resolve_scan_preflight_iters as _resolve_scan_preflight_iters,
     resolve_vmec2000_scan_setup as _resolve_vmec2000_scan_setup,
     scan_chunk_settings as _resolve_scan_chunk_settings,
@@ -2384,42 +2385,16 @@ def solve_fixed_boundary_residual_iter(
             edge_Zsin=edge_Zsin,
         )
 
-        preflight_plan = _resolve_scan_preflight_iters(
+        scan_runtime_plan = _resolve_scan_iteration_runtime_plan(
+            env=os.environ,
             jit_forces_scan=bool(jit_forces_scan),
             vmec2000_control=bool(vmec2000_control),
             max_iter=int(max_iter),
             axis_reset_repeat=bool(axis_reset_repeat),
-            preflight_env=os.getenv("VMEC_JAX_SCAN_PREFLIGHT"),
-        )
-        iteration_plan = _resolve_scan_iteration_plan(
-            max_iter=int(max_iter),
-            preflight_iters=int(preflight_plan.preflight_iters),
-            vmec2000_control=bool(vmec2000_control),
-            extra_iters_env=os.getenv("VMEC_JAX_SCAN_EXTRA_ITERS"),
-        )
-        preflight_iters = iteration_plan.preflight_iters
-        max_iter_scan = iteration_plan.max_iter_scan
-        max_iter_tail = iteration_plan.max_iter_tail
-
-        iter_offset_preflight = iter_offset0
-        if axis_reset_repeat:
-            iter_offset_preflight = 0
-            iter_offset0 = -1
-            carry0 = carry0._replace(iter_offset=jnp.asarray(iter_offset0, dtype=jnp.int32))
-
-        scan_cache_key = _build_vmec2000_scan_cache_key(
+            iter_offset0=int(iter_offset0),
             static_key=static_key,
             wout_key=wout_key,
             edge_signature_key=edge_signature_key,
-            tomnsps_policy_key=(
-                os.getenv("VMEC_JAX_TOMNSPS_FFT", "").strip().lower(),
-                os.getenv("VMEC_JAX_TOMNSPS_FFT_FUSED", "1").strip().lower(),
-                os.getenv("VMEC_JAX_TOMNSPS_THETA_FUSED", "1").strip().lower(),
-                os.getenv("VMEC_JAX_TOMNSPS_ZETA_FUSED", "1").strip().lower(),
-            ),
-            max_iter_tail=int(max_iter_tail),
-            preflight_iters=int(preflight_iters),
-            iter_offset0=int(iter_offset0),
             step_size=float(step_size),
             initial_flip_sign=float(initial_flip_sign),
             lambda_update_scale=float(lambda_update_scale),
@@ -2433,7 +2408,6 @@ def solve_fixed_boundary_residual_iter(
             stage_prev_fsq=stage_prev_fsq,
             stage_transition_factor=float(stage_transition_factor),
             stage_transition_scale=float(stage_transition_scale),
-            jit_forces_scan=bool(jit_forces_scan),
             state_only_scan=bool(state_only_scan),
             scan_light=bool(scan_light),
             scan_minimal=bool(scan_minimal),
@@ -2443,6 +2417,15 @@ def solve_fixed_boundary_residual_iter(
             scan_fallback_badjac_limit=int(scan_fallback_badjac_limit),
             scan_fallback_fsq_abs=float(scan_fallback_fsq_abs),
         )
+        preflight_iters = scan_runtime_plan.preflight_iters
+        max_iter_scan = scan_runtime_plan.max_iter_scan
+        max_iter_tail = scan_runtime_plan.max_iter_tail
+        iter_offset_preflight = scan_runtime_plan.iter_offset_preflight
+        iter_offset0 = scan_runtime_plan.iter_offset0
+        if scan_runtime_plan.axis_reset_repeated:
+            carry0 = carry0._replace(iter_offset=jnp.asarray(iter_offset0, dtype=jnp.int32))
+
+        scan_cache_key = scan_runtime_plan.scan_cache_key
 
         def _run_scan(carry_init, it_seq):
             return jax.lax.scan(_scan_step, carry_init, it_seq)

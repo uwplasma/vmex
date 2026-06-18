@@ -59,6 +59,18 @@ class ScanIterationPlan(NamedTuple):
     max_iter_tail: int
 
 
+class ScanIterationRuntimePlan(NamedTuple):
+    """Resolved scan iteration counts, offsets, and runner cache key."""
+
+    preflight_iters: int
+    max_iter_scan: int
+    max_iter_tail: int
+    iter_offset0: int
+    iter_offset_preflight: int
+    axis_reset_repeated: bool
+    scan_cache_key: tuple[Any, ...]
+
+
 class Vmec2000ScanSetup(NamedTuple):
     """Host-side scan setup resolved before entering the numerical controller."""
 
@@ -461,4 +473,104 @@ def build_vmec2000_scan_cache_key(
         float(scan_fallback_fsq_factor),
         int(scan_fallback_badjac_limit),
         float(scan_fallback_fsq_abs),
+    )
+
+
+def resolve_scan_iteration_runtime_plan(
+    *,
+    env: Mapping[str, str | None],
+    jit_forces_scan: bool,
+    vmec2000_control: bool,
+    max_iter: int,
+    axis_reset_repeat: bool,
+    iter_offset0: int,
+    static_key: Any,
+    wout_key: Any,
+    edge_signature_key: Any,
+    step_size: float,
+    initial_flip_sign: float,
+    lambda_update_scale: float,
+    ftol: float,
+    nstep_screen: int,
+    use_restart_triggers: bool,
+    vmecpp_restart: bool,
+    scan_use_precomputed: bool,
+    scan_use_lax_tridi: bool,
+    scan_use_restart_payload: bool,
+    stage_prev_fsq: float | None,
+    stage_transition_factor: float,
+    stage_transition_scale: float,
+    state_only_scan: bool,
+    scan_light: bool,
+    scan_minimal: bool,
+    scan_fallback_iters: int,
+    scan_fallback_accept_frac: float,
+    scan_fallback_fsq_factor: float,
+    scan_fallback_badjac_limit: int,
+    scan_fallback_fsq_abs: float,
+) -> ScanIterationRuntimePlan:
+    """Resolve scan iteration counts, axis-reset offset, and runner cache key."""
+
+    preflight_plan = resolve_scan_preflight_iters(
+        jit_forces_scan=bool(jit_forces_scan),
+        vmec2000_control=bool(vmec2000_control),
+        max_iter=int(max_iter),
+        axis_reset_repeat=bool(axis_reset_repeat),
+        preflight_env=env.get("VMEC_JAX_SCAN_PREFLIGHT"),
+    )
+    iteration_plan = resolve_scan_iteration_plan(
+        max_iter=int(max_iter),
+        preflight_iters=int(preflight_plan.preflight_iters),
+        vmec2000_control=bool(vmec2000_control),
+        extra_iters_env=env.get("VMEC_JAX_SCAN_EXTRA_ITERS"),
+    )
+    iter_offset_preflight = int(iter_offset0)
+    iter_offset_runtime = int(iter_offset0)
+    if bool(axis_reset_repeat):
+        iter_offset_preflight = 0
+        iter_offset_runtime = -1
+    scan_cache_key = build_vmec2000_scan_cache_key(
+        static_key=static_key,
+        wout_key=wout_key,
+        edge_signature_key=edge_signature_key,
+        tomnsps_policy_key=(
+            _env_value(env, "VMEC_JAX_TOMNSPS_FFT", "").strip().lower(),
+            _env_value(env, "VMEC_JAX_TOMNSPS_FFT_FUSED", "1").strip().lower(),
+            _env_value(env, "VMEC_JAX_TOMNSPS_THETA_FUSED", "1").strip().lower(),
+            _env_value(env, "VMEC_JAX_TOMNSPS_ZETA_FUSED", "1").strip().lower(),
+        ),
+        max_iter_tail=int(iteration_plan.max_iter_tail),
+        preflight_iters=int(iteration_plan.preflight_iters),
+        iter_offset0=int(iter_offset_runtime),
+        step_size=float(step_size),
+        initial_flip_sign=float(initial_flip_sign),
+        lambda_update_scale=float(lambda_update_scale),
+        ftol=float(ftol),
+        nstep_screen=int(nstep_screen),
+        use_restart_triggers=bool(use_restart_triggers),
+        vmecpp_restart=bool(vmecpp_restart),
+        scan_use_precomputed=bool(scan_use_precomputed),
+        scan_use_lax_tridi=bool(scan_use_lax_tridi),
+        scan_use_restart_payload=bool(scan_use_restart_payload),
+        stage_prev_fsq=stage_prev_fsq,
+        stage_transition_factor=float(stage_transition_factor),
+        stage_transition_scale=float(stage_transition_scale),
+        jit_forces_scan=bool(jit_forces_scan),
+        state_only_scan=bool(state_only_scan),
+        scan_light=bool(scan_light),
+        scan_minimal=bool(scan_minimal),
+        scan_fallback_iters=int(scan_fallback_iters),
+        scan_fallback_accept_frac=float(scan_fallback_accept_frac),
+        scan_fallback_fsq_factor=float(scan_fallback_fsq_factor),
+        scan_fallback_badjac_limit=int(scan_fallback_badjac_limit),
+        scan_fallback_fsq_abs=float(scan_fallback_fsq_abs),
+    )
+    return ScanIterationRuntimePlan(
+        preflight_iters=int(iteration_plan.preflight_iters),
+        max_iter_scan=int(iteration_plan.max_iter_scan),
+        max_iter_tail=int(iteration_plan.max_iter_tail),
+        iter_offset0=int(iter_offset_runtime),
+        iter_offset_preflight=int(iter_offset_preflight),
+        axis_reset_repeated=bool(axis_reset_repeat),
+        scan_cache_key=scan_cache_key,
     )
