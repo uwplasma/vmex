@@ -6,7 +6,6 @@ import numpy as np
 import pytest
 
 import vmec_jax as vj
-import vmec_jax.optimization_workflow as workflow
 from vmec_jax._compat import jnp
 
 
@@ -144,7 +143,9 @@ def test_public_dmerc_and_glasser_objective_gradients_match_central_finite_diffe
             "shear": shear,
         }
 
-    monkeypatch.setattr(workflow, "mercier_terms_from_state", fake_mercier_terms_from_state)
+    import vmec_jax.optimizers.fixed_boundary.finite_beta_objectives as finite_beta_objectives
+
+    monkeypatch.setattr(finite_beta_objectives, "mercier_terms_from_state", fake_mercier_terms_from_state)
     ctx = SimpleNamespace(static="static", indata="indata", signgs=1)
     if objective == "DMerc":
         term = vj.DMerc(minimum=0.0, softness=0.15)
@@ -296,7 +297,9 @@ def test_public_glasser_objective_uses_upper_bound_penalty_and_regularized_terms
         calls.append(kwargs)
         return raw_terms
 
-    monkeypatch.setattr(workflow, "mercier_terms_from_state", fake_mercier_terms_from_state)
+    import vmec_jax.optimizers.fixed_boundary.finite_beta_objectives as finite_beta_objectives
+
+    monkeypatch.setattr(finite_beta_objectives, "mercier_terms_from_state", fake_mercier_terms_from_state)
     ctx = SimpleNamespace(static="static", indata="indata", signgs=-1)
 
     unregularized = vj.GlasserResistiveInterchange(maximum=0.05, softness=0.20, mmax_force=4, nmax_force=5)

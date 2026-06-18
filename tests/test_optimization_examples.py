@@ -1568,10 +1568,11 @@ def test_qi_objective_factories_apply_weights_and_slice_shared_fields(monkeypatc
 
 def test_lower_bound_and_lgradb_objective_edge_paths(monkeypatch) -> None:
     import vmec_jax.optimization_workflow as workflow
+    import vmec_jax.optimizers.fixed_boundary.finite_beta_objectives as finite_beta_objectives
 
     ctx = SimpleNamespace(static="static", indata="indata", signgs=1, flux="flux")
     monkeypatch.setattr(
-        workflow,
+        finite_beta_objectives,
         "finite_beta_scalars_from_state",
         lambda **_kwargs: {"vp": np.asarray([1.0, 2.0])},
     )
@@ -1782,6 +1783,7 @@ def test_dmerc_tuple_stays_regular_state_objective() -> None:
 
 def test_magnetic_well_tuple_stays_regular_state_objective(monkeypatch) -> None:
     import vmec_jax.optimization_workflow as workflow
+    import vmec_jax.optimizers.fixed_boundary.finite_beta_objectives as finite_beta_objectives
     from vmec_jax import api
     from vmec_jax.optimization_workflow import LeastSquaresProblem, MagneticWell
 
@@ -1790,7 +1792,7 @@ def test_magnetic_well_tuple_stays_regular_state_objective(monkeypatch) -> None:
     assert api.GlasserResistiveInterchange is workflow.GlasserResistiveInterchange
 
     monkeypatch.setattr(
-        workflow,
+        finite_beta_objectives,
         "finite_beta_scalars_from_state",
         lambda **_kwargs: {"vp": np.asarray([0.0, 2.0, 1.5, 1.0])},
     )
@@ -1955,6 +1957,7 @@ def test_jxbforce_profile_tuple_stays_regular_state_objective() -> None:
 def test_finite_beta_objective_terms_expose_residuals_totals_and_metadata(monkeypatch) -> None:
     from vmec_jax._compat import jnp
     import vmec_jax.optimization_workflow as workflow
+    import vmec_jax.optimizers.fixed_boundary.finite_beta_objectives as finite_beta_objectives
     from vmec_jax.optimization_workflow import (
         BetaTotal,
         DMerc,
@@ -2002,9 +2005,9 @@ def test_finite_beta_objective_terms_expose_residuals_totals_and_metadata(monkey
         residuals = jnp.asarray([0.50, -0.25], dtype=jnp.float64)
         return {"residuals1d": residuals, "total": jnp.dot(residuals, residuals)}
 
-    monkeypatch.setattr(workflow, "finite_beta_scalars_from_state", fake_scalars_from_state)
-    monkeypatch.setattr(workflow, "mercier_terms_from_state", fake_mercier_terms_from_state)
-    monkeypatch.setattr(workflow, "redl_bootstrap_mismatch_from_state", fake_redl_bootstrap_mismatch_from_state)
+    monkeypatch.setattr(finite_beta_objectives, "finite_beta_scalars_from_state", fake_scalars_from_state)
+    monkeypatch.setattr(finite_beta_objectives, "mercier_terms_from_state", fake_mercier_terms_from_state)
+    monkeypatch.setattr(finite_beta_objectives, "redl_bootstrap_mismatch_from_state", fake_redl_bootstrap_mismatch_from_state)
 
     objectives = [
         VolavgB(),
@@ -2087,7 +2090,7 @@ def test_finite_beta_workflow_objectives_are_jax_differentiable(monkeypatch) -> 
     import jax
 
     from vmec_jax._compat import jnp
-    import vmec_jax.optimization_workflow as workflow
+    import vmec_jax.optimizers.fixed_boundary.finite_beta_objectives as finite_beta_objectives
     from vmec_jax.optimization_workflow import (
         BDotB,
         BDotGradV,
@@ -2137,11 +2140,11 @@ def test_finite_beta_workflow_objectives_are_jax_differentiable(monkeypatch) -> 
         residuals = jnp.asarray([0.2 + 0.02 * scale, -0.1 + 0.01 * scale], dtype=jnp.float64)
         return {"residuals1d": residuals, "total": jnp.dot(residuals, residuals)}
 
-    monkeypatch.setattr(workflow, "finite_beta_scalars_from_state", fake_scalars_from_state)
-    monkeypatch.setattr(workflow, "mercier_terms_from_state", fake_mercier_terms_from_state)
-    monkeypatch.setattr(workflow, "redl_bootstrap_mismatch_from_state", fake_redl_bootstrap_mismatch_from_state)
+    monkeypatch.setattr(finite_beta_objectives, "finite_beta_scalars_from_state", fake_scalars_from_state)
+    monkeypatch.setattr(finite_beta_objectives, "mercier_terms_from_state", fake_mercier_terms_from_state)
+    monkeypatch.setattr(finite_beta_objectives, "redl_bootstrap_mismatch_from_state", fake_redl_bootstrap_mismatch_from_state)
     monkeypatch.setattr(
-        workflow,
+        finite_beta_objectives,
         "b_cartesian_from_state",
         lambda state, *_args, **_kwargs: jnp.asarray(state, dtype=jnp.float64) * jnp.ones((2, 3, 3), dtype=jnp.float64),
     )
@@ -2215,7 +2218,7 @@ def test_jxbforce_and_current_objective_gradients_match_finite_difference(monkey
     pytest.importorskip("jax")
 
     from vmec_jax._compat import jnp
-    import vmec_jax.optimization_workflow as workflow
+    import vmec_jax.optimizers.fixed_boundary.finite_beta_objectives as finite_beta_objectives
     from vmec_jax.optimization_workflow import BVector, JDotB, JVector, ToroidalCurrent
 
     def fake_mercier_terms_from_state(*, state, **_kwargs):
@@ -2228,9 +2231,9 @@ def test_jxbforce_and_current_objective_gradients_match_finite_difference(monkey
             "sqrtg": 4.0 * jnp.ones((4, 2, 3), dtype=jnp.float64),
         }
 
-    monkeypatch.setattr(workflow, "mercier_terms_from_state", fake_mercier_terms_from_state)
+    monkeypatch.setattr(finite_beta_objectives, "mercier_terms_from_state", fake_mercier_terms_from_state)
     monkeypatch.setattr(
-        workflow,
+        finite_beta_objectives,
         "b_cartesian_from_state",
         lambda state, *_args, **_kwargs: jnp.asarray(state, dtype=jnp.float64) ** 2
         * jnp.ones((2, 3, 3), dtype=jnp.float64),
@@ -2258,7 +2261,7 @@ def test_dmerc_and_glasser_objective_gradients_match_finite_difference(monkeypat
     pytest.importorskip("jax")
 
     from vmec_jax._compat import jnp
-    import vmec_jax.optimization_workflow as workflow
+    import vmec_jax.optimizers.fixed_boundary.finite_beta_objectives as finite_beta_objectives
     from vmec_jax.optimization_workflow import DMerc, GlasserResistiveInterchange
 
     def fake_mercier_terms_from_state(*, state, **_kwargs):
@@ -2282,7 +2285,7 @@ def test_dmerc_and_glasser_objective_gradients_match_finite_difference(monkeypat
             ),
         }
 
-    monkeypatch.setattr(workflow, "mercier_terms_from_state", fake_mercier_terms_from_state)
+    monkeypatch.setattr(finite_beta_objectives, "mercier_terms_from_state", fake_mercier_terms_from_state)
     ctx = SimpleNamespace(static=SimpleNamespace(s=np.asarray([0.0, 0.25, 0.75, 1.0])), indata=None, signgs=1)
 
     def centered_fd(fn, x0, eps=1.0e-6):

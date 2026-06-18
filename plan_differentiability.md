@@ -5,7 +5,7 @@ Status: active umbrella plan and single source of truth for PR #20.
 `plan.md` and `discrete_adjoint_2506_plan.md` are historical/reference plans
 and should not drive new work unless a specific old result needs to be audited.
 
-Last updated: 2026-06-17.
+Last updated: 2026-06-18.
 
 Repository: `/Users/rogeriojorge/local/vmec_jax`.
 
@@ -8716,3 +8716,69 @@ Completion:
 - Implicit residual-adjoint decomposition: 88%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.72%.
+
+## 2026-06-18 Fixed-Boundary Finite-Beta Objective Split
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Extracted finite-beta and MHD-profile optimization objective wrappers from
+   `vmec_jax.optimization_workflow` into
+   `vmec_jax.optimizers.fixed_boundary.finite_beta_objectives`.
+2. Moved `MagneticWell`, `VolavgB`, `BetaTotal`, `DMerc`,
+   `GlasserResistiveInterchange`, `JDotB`, `BDotB`, `BDotGradV`, `BVector`,
+   `JVector`, `ToroidalCurrent`, `ToroidalCurrentGradient`, and
+   `RedlBootstrapMismatch` into that domain module.
+3. Kept the public teaching-workflow facade stable by re-exporting the same
+   class names from `vmec_jax.optimization_workflow` and therefore from
+   `vmec_jax.api` / `import vmec_jax as vj`.
+4. Updated tests that monkeypatch finite-beta/Mercier/field helper functions
+   to patch the new implementation module rather than the workflow facade.
+
+Results obtained:
+
+- `vmec_jax/optimization_workflow.py` dropped from 3,412 lines to 3,027
+  lines.
+- The finite-beta/Mercier objective family is now isolated in a 399-line
+  domain module with no public API break.
+- Source-health top offenders now show `optimization_workflow.py` below the
+  3,100-line mark; the next workflow target is stage construction and QI
+  solve orchestration.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/optimization_workflow.py vmec_jax/optimizers/fixed_boundary/finite_beta_objectives.py tests/test_optimization_workflow_unit.py tests/test_glasser_resistive_interchange.py tests/test_optimization_examples.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_optimization_workflow_unit.py::test_state_objective_wrappers_use_monkeypatched_state_helpers tests/test_glasser_resistive_interchange.py::test_public_glasser_objective_uses_upper_bound_penalty_and_regularized_terms tests/test_optimization_examples.py::test_finite_beta_workflow_objectives_are_jax_differentiable tests/test_optimization_examples.py::test_jxbforce_and_current_objective_gradients_match_finite_difference tests/test_optimization_examples.py::test_dmerc_and_glasser_objective_gradients_match_finite_difference -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_optimization_workflow_unit.py -k 'state_objective or VMECMirrorRatio or mirror_ratio or LgradB or objective_wrappers' -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_optimization_workflow_unit.py tests/test_optimization_helpers.py tests/test_optimization_examples.py tests/test_glasser_resistive_interchange.py -q`
+- `python tools/diagnostics/source_health.py --top 15 --top-functions 25`
+
+Best next steps:
+
+1. Commit and push this finite-beta objective split.
+2. Continue optimizer workflow decomposition by extracting stage construction
+   and QI solve orchestration while keeping the example-facing API stable.
+3. In parallel, continue solver monolith reduction in
+   `solvers/fixed_boundary/residual/iteration.py`, prioritizing preconditioner
+   setup and accepted/rejected transition seams.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.94%.
+- Differentiability/refactor implementation: 99.9992%.
+- Solver monolith reduction: 98.55%.
+- Free-boundary adjoint monolith reduction: 82%.
+- Driver workflow decomposition: 96.4%.
+- WOUT diagnostic/profile decomposition: 98.8%.
+- Optimizer workflow decomposition: 97.0%.
+- Fixed-boundary optimizer decomposition: 94.0%.
+- Implicit residual-adjoint decomposition: 88%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.89%.
