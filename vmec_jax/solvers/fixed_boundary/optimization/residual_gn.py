@@ -10,6 +10,25 @@ from ..results import SolveVmecResidualResult
 from ....state import VMECState
 
 
+def _state_plus_scaled_step(state: VMECState, dx_state: VMECState, *, step: float, jnp_module: Any) -> VMECState:
+    """Apply one projected optimizer step while preserving per-array dtypes."""
+    return VMECState(
+        layout=state.layout,
+        Rcos=jnp_module.asarray(state.Rcos)
+        + jnp_module.asarray(step, dtype=jnp_module.asarray(state.Rcos).dtype) * jnp_module.asarray(dx_state.Rcos),
+        Rsin=jnp_module.asarray(state.Rsin)
+        + jnp_module.asarray(step, dtype=jnp_module.asarray(state.Rsin).dtype) * jnp_module.asarray(dx_state.Rsin),
+        Zcos=jnp_module.asarray(state.Zcos)
+        + jnp_module.asarray(step, dtype=jnp_module.asarray(state.Zcos).dtype) * jnp_module.asarray(dx_state.Zcos),
+        Zsin=jnp_module.asarray(state.Zsin)
+        + jnp_module.asarray(step, dtype=jnp_module.asarray(state.Zsin).dtype) * jnp_module.asarray(dx_state.Zsin),
+        Lcos=jnp_module.asarray(state.Lcos)
+        + jnp_module.asarray(step, dtype=jnp_module.asarray(state.Lcos).dtype) * jnp_module.asarray(dx_state.Lcos),
+        Lsin=jnp_module.asarray(state.Lsin)
+        + jnp_module.asarray(step, dtype=jnp_module.asarray(state.Lsin).dtype) * jnp_module.asarray(dx_state.Lsin),
+    )
+
+
 def solve_fixed_boundary_gn_vmec_residual_impl(
     state0: VMECState,
     static,
@@ -341,27 +360,7 @@ def solve_fixed_boundary_gn_vmec_residual_impl(
             for bt in range(int(max_backtracks) + 1):
                 if bt > 0:
                     step *= float(bt_factor)
-                st_try = VMECState(
-                    layout=state.layout,
-                    Rcos=jnp_module.asarray(state.Rcos)
-                    + jnp_module.asarray(step, dtype=jnp_module.asarray(state.Rcos).dtype)
-                    * jnp_module.asarray(dx_state.Rcos),
-                    Rsin=jnp_module.asarray(state.Rsin)
-                    + jnp_module.asarray(step, dtype=jnp_module.asarray(state.Rsin).dtype)
-                    * jnp_module.asarray(dx_state.Rsin),
-                    Zcos=jnp_module.asarray(state.Zcos)
-                    + jnp_module.asarray(step, dtype=jnp_module.asarray(state.Zcos).dtype)
-                    * jnp_module.asarray(dx_state.Zcos),
-                    Zsin=jnp_module.asarray(state.Zsin)
-                    + jnp_module.asarray(step, dtype=jnp_module.asarray(state.Zsin).dtype)
-                    * jnp_module.asarray(dx_state.Zsin),
-                    Lcos=jnp_module.asarray(state.Lcos)
-                    + jnp_module.asarray(step, dtype=jnp_module.asarray(state.Lcos).dtype)
-                    * jnp_module.asarray(dx_state.Lcos),
-                    Lsin=jnp_module.asarray(state.Lsin)
-                    + jnp_module.asarray(step, dtype=jnp_module.asarray(state.Lsin).dtype)
-                    * jnp_module.asarray(dx_state.Lsin),
-                )
+                st_try = _state_plus_scaled_step(state, dx_state, step=step, jnp_module=jnp_module)
                 st_try = _enforce_state(st_try)
                 fsqr2_t, fsqz2_t, fsql2_t, w_t = _obj_terms_jit(st_try, zero_m1)
                 w_tf = float(np.asarray(w_t))
@@ -395,27 +394,7 @@ def solve_fixed_boundary_gn_vmec_residual_impl(
             for bt in range(int(max_backtracks) + 1):
                 if bt > 0:
                     step *= float(bt_factor)
-                st_try = VMECState(
-                    layout=state.layout,
-                    Rcos=jnp_module.asarray(state.Rcos)
-                    + jnp_module.asarray(step, dtype=jnp_module.asarray(state.Rcos).dtype)
-                    * jnp_module.asarray(dx_state.Rcos),
-                    Rsin=jnp_module.asarray(state.Rsin)
-                    + jnp_module.asarray(step, dtype=jnp_module.asarray(state.Rsin).dtype)
-                    * jnp_module.asarray(dx_state.Rsin),
-                    Zcos=jnp_module.asarray(state.Zcos)
-                    + jnp_module.asarray(step, dtype=jnp_module.asarray(state.Zcos).dtype)
-                    * jnp_module.asarray(dx_state.Zcos),
-                    Zsin=jnp_module.asarray(state.Zsin)
-                    + jnp_module.asarray(step, dtype=jnp_module.asarray(state.Zsin).dtype)
-                    * jnp_module.asarray(dx_state.Zsin),
-                    Lcos=jnp_module.asarray(state.Lcos)
-                    + jnp_module.asarray(step, dtype=jnp_module.asarray(state.Lcos).dtype)
-                    * jnp_module.asarray(dx_state.Lcos),
-                    Lsin=jnp_module.asarray(state.Lsin)
-                    + jnp_module.asarray(step, dtype=jnp_module.asarray(state.Lsin).dtype)
-                    * jnp_module.asarray(dx_state.Lsin),
-                )
+                st_try = _state_plus_scaled_step(state, dx_state, step=step, jnp_module=jnp_module)
                 st_try = _enforce_state(st_try)
                 fsqr2_t, fsqz2_t, fsql2_t, w_t = _obj_terms_jit(st_try, zero_m1)
                 w_tf = float(np.asarray(w_t))

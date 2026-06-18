@@ -12106,6 +12106,65 @@ Completion:
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.9985%.
 
+## 2026-06-18 Gauss-Newton State-Step Helper
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `_state_plus_scaled_step` to the fixed-boundary residual
+   Gauss-Newton optimizer.
+2. Replaced duplicate inline `VMECState` update construction in both the
+   Gauss-Newton backtracking loop and steepest-descent fallback loop.
+
+Results obtained:
+
+- `solve_fixed_boundary_gn_vmec_residual_impl` dropped from 455 to 415 lines.
+- Optimizer step construction is now shared, dtype-preserving, and easier to
+  reuse in future matrix-free/scalar-adjoint optimizer variants.
+- No generated outputs or large files were added.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/optimization/residual_gn.py`
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/optimization/residual_gn.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_optimizer_helpers.py tests/test_solve_residual_optimizer_wave8_coverage.py tests/test_end_to_end_vmec_residual_gn.py -q`
+  - Result: passed, with one expected skip.
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 40`
+
+Best next steps:
+
+1. Apply the same duplicate-step cleanup to residual L-BFGS/GD only if the
+   repeated state-update pattern exists there.
+2. Continue larger optimizer setup decomposition after the repeated low-risk
+   seams are removed.
+3. Recheck PR CI for concrete failures after the next push.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.97%.
+- Differentiability/refactor implementation: 99.999996%.
+- Solver monolith reduction: 99.46%.
+- Free-boundary adjoint monolith reduction: 99.30%.
+- Driver workflow decomposition: 99.87%.
+- Residual iteration decomposition: 95.8%.
+- WOUT diagnostic/profile decomposition: 99.68%.
+- Bcovar/WOUT parity decomposition: 98.35%.
+- Force-kernel decomposition: 98.55%.
+- Optimizer workflow decomposition: 98.85%.
+- Fixed-boundary optimizer decomposition: 94.4%.
+- Implicit residual-adjoint decomposition: 95%.
+- QI objective decomposition: 93%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.7%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.9986%.
+
 ## 2026-06-18 QI Boozer Grid Context Seam
 
 Branch: `codex/differentiability-refactor-plan`.
