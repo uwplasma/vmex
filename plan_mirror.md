@@ -19109,3 +19109,141 @@ Results:
 No user input is needed.
 
 ---
+## 155. Realized Coupled Trial for LS-Selected Boundary Updates
+
+### Steps taken
+
+- Added `--run-ls-boundary-coupled-trial` to
+  `examples/mirror_free_boundary_circular_coils.py`.
+- Bumped the circular-coil beta-scan schema to version `0.5`.
+- Added top-level metrics:
+  - `ls_boundary_coupled_trial_requested`;
+  - `ls_boundary_coupled_trial_rows_total`.
+- Added nested `ls_boundary_step.coupled_trial` metrics with:
+  - trial status;
+  - trial MOUT path;
+  - realized residual norm, `fsq`, and normalized force;
+  - `fsq` growth ratio relative to the baseline fixed-boundary row;
+  - realized LCFS pressure-balance RMS, external-normal-field RMS, LCFS merit,
+    and LCFS merit ratio;
+  - merit acceptance and rejection reason;
+  - optional trial plot paths.
+- Added schema validation for nested coupled trial rows and trial row counts.
+- Added a focused regression test that runs one beta with
+  `--run-ls-boundary-step --run-ls-boundary-coupled-trial`.
+- Updated the mirror example README for schema `0.5` and the realized coupled
+  LS trial option.
+- Generated and inspected a plotted one-beta realized LS trial.
+
+### Results obtained
+
+- The one-beta realized LS smoke run completed:
+  `results/mirror/free_boundary_circular_coils_m155_lsq_coupled_smoke/free_boundary_circular_coils_metrics.json`.
+- The plotted one-beta realized LS run completed:
+  `results/mirror/free_boundary_circular_coils_m155_lsq_coupled_plots/free_boundary_circular_coils_metrics.json`.
+- The smoke metrics reported:
+  - schema version `0.5`;
+  - `ls_boundary_step_requested == true`;
+  - `ls_boundary_coupled_trial_requested == true`;
+  - `ls_boundary_step_rows_total == 1`;
+  - `ls_boundary_coupled_trial_rows_total == 1`;
+  - LS selected line-search factor `1.0`;
+  - coupled trial status `accepted`;
+  - `final_fsq = 0.0008633410961533115`;
+  - `fsq_growth_ratio = 0.8804859565965772`;
+  - `lcfs_merit = 0.48021241738262876`;
+  - `lcfs_merit_ratio = 0.4801851017221157`.
+- The plotted run produced:
+  - the LS residual/backtracking figure;
+  - the realized trial standard mirror plots;
+  - the realized trial LCFS diagnostic plot.
+- Visual inspection confirmed the LS plot is sorted by line-search factor and
+  that the realized trial LCFS diagnostic renders useful normal-field and
+  pressure-balance profiles.
+
+### How it was tested
+
+Commands run:
+
+```bash
+python examples/mirror_free_boundary_circular_coils.py \
+  --outdir results/mirror/free_boundary_circular_coils_m155_lsq_coupled_smoke \
+  --betas 1 --ntheta 8 --nxi 11 --n-segments 64 \
+  --run-fixed-boundary-baseline --baseline-maxiter 0 \
+  --run-ls-boundary-step --run-ls-boundary-coupled-trial --no-plots
+
+python examples/mirror_free_boundary_circular_coils.py \
+  --outdir results/mirror/free_boundary_circular_coils_m155_lsq_coupled_plots \
+  --betas 1 --ntheta 8 --nxi 11 --n-segments 64 \
+  --run-fixed-boundary-baseline --baseline-maxiter 0 \
+  --run-ls-boundary-step --run-ls-boundary-coupled-trial
+
+python -m ruff format examples/mirror_free_boundary_circular_coils.py \
+  tests/mirror/test_mirror_examples.py
+python -m ruff check examples/mirror_free_boundary_circular_coils.py \
+  tests/mirror/test_mirror_examples.py
+
+JAX_ENABLE_X64=1 pytest \
+  tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_example_runs_without_plots \
+  tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_ls_boundary_step_reports_reduction \
+  tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_ls_boundary_coupled_trial_reports_realized_solve \
+  -q
+
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_examples.py -q
+python -m sphinx -W -b html docs docs/_build/html
+git diff --check
+```
+
+Results:
+
+- Realized coupled LS smoke run passed.
+- Realized coupled LS plotted run passed and the PNG outputs were visually
+  inspected.
+- Ruff format/check passed on touched Python files.
+- Focused example tests passed: `3 passed in 10.07s`.
+- Full mirror example tests passed: `21 passed in 94.85s`.
+- Sphinx docs build passed with warnings treated as errors.
+- Whitespace check passed.
+
+### File structure and best-practice notes
+
+- The realized coupled trial remains private to the circular-coil example,
+  where the fixed-boundary trial solve, MOUT output, and plots are already
+  managed.
+- Package-level solver helpers were not expanded in this tranche.
+- The example metrics schema is versioned to `0.5` because the JSON contract
+  gained required top-level fields and nested `coupled_trial` fields.
+- Generated smoke/plot outputs remain under ignored `results/` paths and are
+  not added to git.
+
+### Best next steps
+
+1. Commit and push M155.
+2. Refresh the draft PR body after the schema `0.5` coupled-trial tranche.
+3. Extend from one realized LS trial to a guarded multi-step coupled LS loop
+   with `fsq` growth and merit guards.
+4. Check CI later and fix failures if any appear.
+
+### Completion percentages after M155
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `93%`.
+- Fixed-boundary axisymmetric solve: `91%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `89%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `93%`.
+- I/O schema and docs: `99%`.
+- Differentiable solved-state API: `92%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `97%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `96%`.
+- PR merge readiness overall: `98%`.
+
+### User input needed
+
+No user input is needed.
+
+---

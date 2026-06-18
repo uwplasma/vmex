@@ -48,7 +48,7 @@ from vmec_jax.mirror import (
 
 
 CIRCULAR_COIL_BETA_SCAN_SCHEMA = "mirror_free_boundary_circular_coil_beta_scan"
-CIRCULAR_COIL_BETA_SCAN_SCHEMA_VERSION = "0.4"
+CIRCULAR_COIL_BETA_SCAN_SCHEMA_VERSION = "0.5"
 CIRCULAR_COIL_BETA_SCAN_TOP_LEVEL_FIELDS = (
     "metrics_schema",
     "metrics_schema_version",
@@ -89,6 +89,8 @@ CIRCULAR_COIL_BETA_SCAN_TOP_LEVEL_FIELDS = (
     "ls_boundary_max_relative_step",
     "ls_boundary_ridge",
     "ls_boundary_step_rows_total",
+    "ls_boundary_coupled_trial_requested",
+    "ls_boundary_coupled_trial_rows_total",
     "figures",
 )
 CIRCULAR_COIL_BETA_SCAN_ROW_FIELDS = (
@@ -144,7 +146,23 @@ CIRCULAR_COIL_BETA_SCAN_LS_STEP_FIELDS = (
     "lcfs_value_after",
     "max_relative_radius_change",
     "trial_rows",
+    "coupled_trial",
     "figure",
+)
+CIRCULAR_COIL_BETA_SCAN_LS_COUPLED_TRIAL_FIELDS = (
+    "status",
+    "mout",
+    "accepted_by_merit",
+    "rejection_reason",
+    "final_residual_norm",
+    "final_fsq",
+    "final_normalized_force",
+    "fsq_growth_ratio",
+    "lcfs_external_bnormal_rms",
+    "lcfs_pressure_balance_rms",
+    "lcfs_merit",
+    "lcfs_merit_ratio",
+    "figures",
 )
 CIRCULAR_COIL_BETA_SCAN_PILOT_ROW_FIELDS = (
     "step",
@@ -216,6 +234,7 @@ def circular_coil_beta_scan_schema() -> dict[str, object]:
         "beta_row_required_fields": list(CIRCULAR_COIL_BETA_SCAN_ROW_FIELDS),
         "pilot_row_required_fields": list(CIRCULAR_COIL_BETA_SCAN_PILOT_ROW_FIELDS),
         "ls_boundary_step_fields": list(CIRCULAR_COIL_BETA_SCAN_LS_STEP_FIELDS),
+        "ls_boundary_coupled_trial_fields": list(CIRCULAR_COIL_BETA_SCAN_LS_COUPLED_TRIAL_FIELDS),
         "pilot_status_values": list(CIRCULAR_COIL_BETA_SCAN_PILOT_STATUSES),
         "workflow_status_values": list(CIRCULAR_COIL_BETA_SCAN_WORKFLOW_STATUSES),
         "free_boundary_status_values": list(CIRCULAR_COIL_BETA_SCAN_FREE_BOUNDARY_STATUSES),
@@ -257,6 +276,9 @@ def validate_circular_coil_beta_scan_metrics(metrics: dict[str, object]) -> None
     ls_rows = [
         row.get("ls_boundary_step") for row in baseline_rows if isinstance(row, dict) and row.get("ls_boundary_step")
     ]
+    ls_trial_rows = [
+        row["coupled_trial"] for row in ls_rows if isinstance(row, dict) and row.get("coupled_trial") is not None
+    ]
     accepted_rows = sum(bool(row.get("accepted", False)) and not bool(row.get("skipped", False)) for row in pilot_rows)
     skipped_rows = sum(bool(row.get("skipped", False)) for row in pilot_rows)
     if int(metrics["lcfs_pilot_rows_total"]) != len(pilot_rows):
@@ -267,6 +289,8 @@ def validate_circular_coil_beta_scan_metrics(metrics: dict[str, object]) -> None
         raise ValueError("lcfs_pilot_skipped_rows_total does not match nested pilot rows")
     if int(metrics["ls_boundary_step_rows_total"]) != len(ls_rows):
         raise ValueError("ls_boundary_step_rows_total does not match nested LS rows")
+    if int(metrics["ls_boundary_coupled_trial_rows_total"]) != len(ls_trial_rows):
+        raise ValueError("ls_boundary_coupled_trial_rows_total does not match nested LS trial rows")
     if metrics["lcfs_pilot_stop_reason_counts"] != _counts_json([str(row.get("stop_reason")) for row in pilot_rows]):
         raise ValueError("lcfs_pilot_stop_reason_counts does not match nested pilot rows")
 
@@ -285,6 +309,17 @@ def validate_circular_coil_beta_scan_metrics(metrics: dict[str, object]) -> None
             if not isinstance(ls_step, dict):
                 raise ValueError(f"baseline row {index} ls_boundary_step must be a JSON object or null")
             _require_fields(ls_step, CIRCULAR_COIL_BETA_SCAN_LS_STEP_FIELDS, f"baseline row {index} ls_boundary_step")
+            coupled_trial = ls_step.get("coupled_trial")
+            if coupled_trial is not None:
+                if not isinstance(coupled_trial, dict):
+                    raise ValueError(
+                        f"baseline row {index} ls_boundary_step coupled_trial must be a JSON object or null"
+                    )
+                _require_fields(
+                    coupled_trial,
+                    CIRCULAR_COIL_BETA_SCAN_LS_COUPLED_TRIAL_FIELDS,
+                    f"baseline row {index} ls_boundary_step coupled_trial",
+                )
         for step_index, pilot in enumerate(case_pilot_rows):
             if not isinstance(pilot, dict):
                 raise ValueError(f"pilot row {index}.{step_index} must be a JSON object")
@@ -406,6 +441,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lcfs-pilot-stagnation-rtol", type=float, default=0.0)
     parser.add_argument("--lcfs-pilot-fsq-growth-limit", type=float, default=0.0)
     parser.add_argument("--run-ls-boundary-step", action="store_true")
+    parser.add_argument("--run-ls-boundary-coupled-trial", action="store_true")
     parser.add_argument("--ls-boundary-finite-difference-step", type=float, default=1.0e-5)
     parser.add_argument("--ls-boundary-damping", type=float, default=1.0)
     parser.add_argument("--ls-boundary-max-relative-step", type=float, default=0.1)
@@ -758,11 +794,101 @@ def _run_ls_boundary_step(
         "lcfs_value_after": float(step.trial_residual.lcfs_value),
         "max_relative_radius_change": float(np.max(np.abs(new_radius - old_radius) / np.maximum(old_radius, 1.0e-300))),
         "trial_rows": trial_rows,
+        "coupled_trial": None,
         "figure": None,
     }
     if write_plots:
         summary["figure"] = str(_write_ls_boundary_step_plot(summary, outdir=figure_dir, name=name))
     return summary
+
+
+def _run_ls_boundary_coupled_trial(
+    *,
+    step_summary: dict[str, object],
+    outdir: Path,
+    label: str,
+    config,
+    grid,
+    coils,
+    psi_prime_value: float,
+    pressure,
+    solve_options,
+    baseline_final_fsq: float,
+    reference_merit,
+    write_plots: bool,
+) -> dict[str, object]:
+    """Evaluate the LS-selected boundary with a realized fixed-boundary solve."""
+
+    if not bool(step_summary["accepted"]):
+        return {
+            "status": "skipped",
+            "mout": None,
+            "accepted_by_merit": False,
+            "rejection_reason": "ls_step_not_accepted",
+            "final_residual_norm": None,
+            "final_fsq": None,
+            "final_normalized_force": None,
+            "fsq_growth_ratio": None,
+            "lcfs_external_bnormal_rms": None,
+            "lcfs_pressure_balance_rms": None,
+            "lcfs_merit": None,
+            "lcfs_merit_ratio": None,
+            "figures": {},
+        }
+
+    trial_boundary = _polynomial_boundary_from_coefficients(step_summary["coefficients_new"])
+    result = run_mirror_fixed_boundary(
+        config,
+        trial_boundary,
+        psi_prime=PsiPrimeProfile.constant(float(psi_prime_value)),
+        i_prime=IPrimeProfile.zero(),
+        pressure=pressure,
+        options=solve_options,
+    )
+    mout_path = outdir / f"mout_free_boundary_circular_coils_beta_{label}_ls_boundary_trial.nc"
+    if mout_path.exists():
+        mout_path.unlink()
+    mout = write_mirror_output(mout_path, result)
+    output = load_mirror_output(mout)
+    external_sample = sample_mirror_boundary_external_field(grid, trial_boundary, coils)
+    lcfs = mirror_lcfs_diagnostic(output, external_sample, mu0=1.0)
+    merit = mirror_lcfs_merit(
+        lcfs,
+        pressure_scale=reference_merit.pressure_scale,
+        bnormal_scale=reference_merit.bnormal_scale,
+        bnormal_weight=reference_merit.bnormal_weight,
+    )
+    final = result.final_trace
+    merit_ratio = float(merit.value) / max(float(reference_merit.value), 1.0e-300)
+    fsq_growth_ratio = float(final.fsq) / max(float(baseline_final_fsq), 1.0e-300)
+    accepted_by_merit = merit_ratio <= 1.0
+    plot_paths: dict[str, str] = {}
+    if write_plots:
+        figure_dir = outdir / "figures" / f"fixed_boundary_beta_{label}_ls_boundary_trial"
+        plot_paths = {name: str(path) for name, path in plot_mirror_output(mout, outdir=figure_dir).items()}
+        plot_paths["lcfs_diagnostic"] = str(
+            _write_lcfs_diagnostic_plot(
+                lcfs,
+                None,
+                outdir=figure_dir,
+                name=f"free_boundary_circular_coils_beta_{label}_ls_boundary_trial",
+            )
+        )
+    return {
+        "status": "accepted" if accepted_by_merit else "rejected",
+        "mout": str(mout),
+        "accepted_by_merit": bool(accepted_by_merit),
+        "rejection_reason": None if accepted_by_merit else "merit_increase",
+        "final_residual_norm": float(final.residual_norm),
+        "final_fsq": float(final.fsq),
+        "final_normalized_force": float(final.normalized_force),
+        "fsq_growth_ratio": fsq_growth_ratio,
+        "lcfs_external_bnormal_rms": float(lcfs.external_bnormal_rms),
+        "lcfs_pressure_balance_rms": float(lcfs.pressure_balance_rms),
+        "lcfs_merit": float(merit.value),
+        "lcfs_merit_ratio": merit_ratio,
+        "figures": plot_paths,
+    }
 
 
 def _beta_label(beta_percent: float) -> str:
@@ -867,6 +993,7 @@ def _beta_scan_summary(
     lcfs_pilot_stagnation_rtol: float,
     lcfs_pilot_fsq_growth_limit: float,
     run_ls_boundary_step: bool,
+    run_ls_boundary_coupled_trial: bool,
     ls_boundary_finite_difference_step: float,
     ls_boundary_damping: float,
     ls_boundary_max_relative_step: float,
@@ -875,6 +1002,11 @@ def _beta_scan_summary(
     """Return top-level status fields for the circular-coil beta scan."""
     pilot_rows = [pilot for row in baseline_rows for pilot in row.get("lcfs_pilot_rows", [])]
     ls_rows = [row for row in baseline_rows if row.get("ls_boundary_step") is not None]
+    ls_trial_rows = [
+        row["ls_boundary_step"]["coupled_trial"]
+        for row in ls_rows
+        if row["ls_boundary_step"].get("coupled_trial") is not None
+    ]
     if run_lcfs_pilot:
         workflow_status = "lcfs_pilot"
     elif run_fixed_boundary_baseline:
@@ -906,6 +1038,8 @@ def _beta_scan_summary(
         "ls_boundary_max_relative_step": float(ls_boundary_max_relative_step) if run_ls_boundary_step else None,
         "ls_boundary_ridge": float(ls_boundary_ridge) if run_ls_boundary_step else None,
         "ls_boundary_step_rows_total": len(ls_rows),
+        "ls_boundary_coupled_trial_requested": bool(run_ls_boundary_coupled_trial),
+        "ls_boundary_coupled_trial_rows_total": len(ls_trial_rows),
     }
 
 
@@ -1388,6 +1522,7 @@ def _run_fixed_boundary_baseline_cases(
     lcfs_pilot_stagnation_rtol: float,
     lcfs_pilot_fsq_growth_limit: float,
     run_ls_boundary_step: bool,
+    run_ls_boundary_coupled_trial: bool,
     ls_boundary_finite_difference_step: float,
     ls_boundary_damping: float,
     ls_boundary_max_relative_step: float,
@@ -1575,6 +1710,21 @@ def _run_fixed_boundary_baseline_cases(
                 figure_dir=outdir / "figures" / f"fixed_boundary_beta_{label}",
                 name=f"free_boundary_circular_coils_beta_{label}",
             )
+            if run_ls_boundary_coupled_trial:
+                ls_boundary_step["coupled_trial"] = _run_ls_boundary_coupled_trial(
+                    step_summary=ls_boundary_step,
+                    outdir=outdir,
+                    label=label,
+                    config=config,
+                    grid=baseline_grid,
+                    coils=scan.coils,
+                    psi_prime_value=psi_prime_value,
+                    pressure=pressure,
+                    solve_options=solve_options,
+                    baseline_final_fsq=baseline_final_fsq,
+                    reference_merit=lcfs_merit,
+                    write_plots=write_plots,
+                )
             if ls_boundary_step["figure"] is not None:
                 plot_paths["ls_boundary_step"] = str(ls_boundary_step["figure"])
         summary = result.optimizer_summaries[-1] if result.optimizer_summaries else None
@@ -1656,6 +1806,7 @@ def run_case(
     lcfs_pilot_stagnation_rtol: float = 0.0,
     lcfs_pilot_fsq_growth_limit: float = 0.0,
     run_ls_boundary_step: bool = False,
+    run_ls_boundary_coupled_trial: bool = False,
     ls_boundary_finite_difference_step: float = 1.0e-5,
     ls_boundary_damping: float = 1.0,
     ls_boundary_max_relative_step: float = 0.1,
@@ -1672,6 +1823,8 @@ def run_case(
         raise ValueError("lcfs_pilot_fsq_growth_limit must be nonnegative")
     if float(lcfs_coupled_fsq_weight) < 0.0:
         raise ValueError("lcfs_coupled_fsq_weight must be nonnegative")
+    if run_ls_boundary_coupled_trial and not run_ls_boundary_step:
+        raise ValueError("run_ls_boundary_coupled_trial requires run_ls_boundary_step")
     if float(ls_boundary_finite_difference_step) <= 0.0:
         raise ValueError("ls_boundary_finite_difference_step must be positive")
     if float(ls_boundary_damping) <= 0.0:
@@ -1743,6 +1896,7 @@ def run_case(
             lcfs_pilot_stagnation_rtol=lcfs_pilot_stagnation_rtol,
             lcfs_pilot_fsq_growth_limit=lcfs_pilot_fsq_growth_limit,
             run_ls_boundary_step=run_ls_boundary_step,
+            run_ls_boundary_coupled_trial=run_ls_boundary_coupled_trial,
             ls_boundary_finite_difference_step=ls_boundary_finite_difference_step,
             ls_boundary_damping=ls_boundary_damping,
             ls_boundary_max_relative_step=ls_boundary_max_relative_step,
@@ -1773,6 +1927,7 @@ def run_case(
             lcfs_pilot_stagnation_rtol=lcfs_pilot_stagnation_rtol,
             lcfs_pilot_fsq_growth_limit=lcfs_pilot_fsq_growth_limit,
             run_ls_boundary_step=run_ls_boundary_step,
+            run_ls_boundary_coupled_trial=run_ls_boundary_coupled_trial,
             ls_boundary_finite_difference_step=ls_boundary_finite_difference_step,
             ls_boundary_damping=ls_boundary_damping,
             ls_boundary_max_relative_step=ls_boundary_max_relative_step,
@@ -1839,6 +1994,7 @@ def main() -> None:
         lcfs_pilot_stagnation_rtol=args.lcfs_pilot_stagnation_rtol,
         lcfs_pilot_fsq_growth_limit=args.lcfs_pilot_fsq_growth_limit,
         run_ls_boundary_step=args.run_ls_boundary_step,
+        run_ls_boundary_coupled_trial=args.run_ls_boundary_coupled_trial,
         ls_boundary_finite_difference_step=args.ls_boundary_finite_difference_step,
         ls_boundary_damping=args.ls_boundary_damping,
         ls_boundary_max_relative_step=args.ls_boundary_max_relative_step,
