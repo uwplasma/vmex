@@ -17117,3 +17117,116 @@ Results:
 No user input is needed.
 
 ---
+## 137. Pressure-Coefficient Implicit Differentiation Gate
+
+### Steps taken
+
+- Added `axisym_reduced_residual_pressure_jacobian_jax`.
+- Added `axisym_reduced_implicit_pressure_sensitivity_jax`.
+- Added `axisym_reduced_implicit_pressure_state_jax`.
+- The pressure state wrapper follows the same cached-solved-state contract as
+  the source wrapper:
+  - the primal call returns the supplied converged reduced vector;
+  - the reverse pass solves the implicit adjoint equation;
+  - the pressure-coefficient VJP is `-adjoint.T @ dF/dp_coeffs`.
+- Exported the new pressure differentiability functions through
+  `vmec_jax.mirror.api` and `vmec_jax.mirror`.
+- Added a focused pressure-coefficient regression test that checks:
+  - forward and reverse residual pressure Jacobians agree;
+  - `jax.grad` through the custom pressure VJP matches `-F_p.T @ adjoint`;
+  - the custom VJP directional derivative matches the forward sensitivity
+    contraction;
+  - the dense and matrix-free pressure sensitivity paths agree;
+  - the same directional derivative matches a separately solved perturbed
+    pressure-root finite difference.
+- Updated `docs/mirror/differentiability.rst` to mark pressure coefficients as
+  the first physical-parameter differentiability gate.
+
+### Results obtained
+
+- The differentiability lane now covers both:
+  - reduced linear source perturbations;
+  - scalar pressure-profile polynomial coefficients.
+- The pressure path uses the existing dense and matrix-free linear solve
+  machinery rather than adding a separate solver path.
+- The new test reaches a perturbed-pressure residual below `1e-10`.
+- Full axisymmetric mirror tests pass with the added pressure gate:
+  `19 passed`.
+
+### How it was tested
+
+Commands run:
+
+```bash
+python -m ruff check vmec_jax/mirror/solvers/fixed_boundary/reduced.py \
+  vmec_jax/mirror/api.py vmec_jax/mirror/__init__.py \
+  tests/mirror/test_mirror_fixed_boundary_axisym.py
+python -m ruff format --check vmec_jax/mirror/solvers/fixed_boundary/reduced.py \
+  vmec_jax/mirror/api.py vmec_jax/mirror/__init__.py \
+  tests/mirror/test_mirror_fixed_boundary_axisym.py
+JAX_ENABLE_X64=1 pytest \
+  tests/mirror/test_mirror_fixed_boundary_axisym.py::test_reduced_pressure_custom_vjp_matches_adjoint_and_perturbed_root -q
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_fixed_boundary_axisym.py -q
+python -m sphinx -W -b html docs docs/_build/html
+git diff --check
+```
+
+Results:
+
+- Ruff lint passed.
+- Ruff Python format check passed.
+- New pressure custom-VJP test: `1 passed`.
+- Full fixed-boundary axisymmetric mirror test file: `19 passed`.
+- Sphinx docs build passed with warnings treated as errors.
+- Whitespace check passed.
+- A transient Ruff format command accidentally included
+  `docs/mirror/differentiability.rst`; Ruff cannot parse reStructuredText, so
+  that command is not a valid docs check. Sphinx is the docs validation for this
+  tranche.
+
+### File structure and best-practice notes
+
+- Pressure differentiability stays in
+  `vmec_jax/mirror/solvers/fixed_boundary/reduced.py`, alongside the residual,
+  Hessian, linear solve, source sensitivity, and adjoint utilities it reuses.
+- Public exports remain centralized in `vmec_jax/mirror/api.py` and
+  `vmec_jax/mirror/__init__.py`.
+- No generated artifacts or reference files were added.
+- The implementation keeps the CLI/host-solver path separate from the
+  differentiable research API: users differentiate cached solved states, not
+  long optimizer traces.
+
+### Best next steps
+
+1. Commit and push M137.
+2. Add one more physical-parameter gate for current or flux-profile
+   coefficients, reusing the same pressure-coefficient pattern.
+3. Add boundary-parameter implicit differentiation only after deciding whether
+   the boundary object should become a JAX pytree or remain a lightweight
+   dataclass with explicit coefficient wrappers.
+4. Continue final free-boundary and ESSOS beta-scan convergence cleanup after
+   the differentiability gates are committed.
+
+### Completion percentages after M137
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `90%`.
+- Fixed-boundary axisymmetric solve: `90%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `89%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `92%`.
+- I/O schema and docs: `99%`.
+- Differentiable solved-state API: `83%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `87%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `90%`.
+- PR merge readiness overall: `96%`.
+
+### User input needed
+
+No user input is needed.
+
+---

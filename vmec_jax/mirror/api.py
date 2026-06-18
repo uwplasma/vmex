@@ -45,8 +45,11 @@ from .solvers.fixed_boundary.api import (
 )
 from .solvers.fixed_boundary.reduced import (
     axisym_reduced_implicit_adjoint_jax,
+    axisym_reduced_implicit_pressure_sensitivity_jax,
+    axisym_reduced_implicit_pressure_state_jax,
     axisym_reduced_implicit_source_state_jax,
     axisym_reduced_implicit_state_sensitivity_jax,
+    axisym_reduced_residual_pressure_jacobian_jax,
     axisym_reduced_residual_matvec_jax,
     axisym_reduced_residual_jacobian_jax,
     axisym_reduced_residual_jax,
@@ -97,8 +100,11 @@ __all__ = [
     "ThetaFourierBasis",
     "axisym_reduced_residual_jacobian_jax",
     "axisym_reduced_implicit_adjoint_jax",
+    "axisym_reduced_implicit_pressure_sensitivity_jax",
+    "axisym_reduced_implicit_pressure_state_jax",
     "axisym_reduced_implicit_source_state_jax",
     "axisym_reduced_implicit_state_sensitivity_jax",
+    "axisym_reduced_residual_pressure_jacobian_jax",
     "axisym_reduced_residual_jax",
     "axisym_reduced_residual_linear_solve_jax",
     "axisym_reduced_residual_matvec_jax",
