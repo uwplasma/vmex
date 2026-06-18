@@ -92,7 +92,10 @@ enabled and both solvers ran, the example also writes a final
 ``fsqr``/``fsqz``/``fsql`` component comparison. CSV/JSON rows also label the
 VMEC/JAX and VMEC2000 initialization policies used for the comparison, including
 whether VMEC/JAX used the raw input-axis branch or inferred a missing axis from
-the boundary. Current VMEC2000 rows compare
+the boundary. When both histories exist, the CSV also records whether the
+initial residual came from the VMEC/JAX solve history or VMEC2000's first
+``threed1`` row, plus VMEC/JAX-to-VMEC2000 first-row residual ratios. Current
+VMEC2000 rows compare
 solved outcomes from the same generated input, not identical raw initial
 states: VMEC2000's first parsed ``threed1`` residual components differ from the
 VMEC/JAX initialized residual components. Treat mean-iota agreement as a useful

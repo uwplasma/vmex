@@ -90,9 +90,10 @@ Current solver status:
   ``threed1`` first rows start from different residual components than the
   VMEC/JAX initialized state.  The convergence CSV/JSON rows label the two
   initialization policies and the VMEC/JAX axis-initialization branch, so this
-  limitation is explicit.  Mean-iota agreement is therefore a useful
-  regression signal, while strict force-residual parity still needs an
-  initialization-matched fixture or option.
+  limitation is explicit.  Rows with both histories also report first-row
+  residual sources and VMEC/JAX-to-VMEC2000 initial residual ratios.  Mean-iota
+  agreement is therefore a useful regression signal, while strict
+  force-residual parity still needs an initialization-matched fixture or option.
 
 Later phases finish differentiable optimization APIs, production
 free-boundary LCFS solves, toroidal stellarator-mirror hybrid convergence and

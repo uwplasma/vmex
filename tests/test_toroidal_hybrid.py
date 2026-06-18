@@ -248,6 +248,9 @@ def test_toroidal_hybrid_convergence_example_runs_without_solve(tmp_path: Path):
         row["vmec_jax_axis_initialization_policy"] == "boundary_inferred_missing_axis" for row in summary["rows"]
     )
     assert all(row["vmec2000_initialization_policy"] == "vmec2000_default_input_boundary" for row in summary["rows"])
+    assert all(row["initial_residual_source"] is None for row in summary["rows"])
+    assert all(row["vmec2000_initial_residual_source"] is None for row in summary["rows"])
+    assert all(row["initial_fsq_ratio_vmec2000"] is None for row in summary["rows"])
     assert all(row["fsq_history"] == [] for row in summary["rows"])
     assert all(row["max_boundary_fit_error"] < 1.0e-12 for row in summary["rows"])
     assert [row["ns"] for row in summary["rows"]] == [7, 9]
@@ -258,6 +261,9 @@ def test_toroidal_hybrid_convergence_example_runs_without_solve(tmp_path: Path):
     assert csv_row["initialization_policy"] == "vmec_jax_default_input_boundary"
     assert csv_row["vmec_jax_axis_initialization_policy"] == "boundary_inferred_missing_axis"
     assert csv_row["vmec2000_initialization_policy"] == "vmec2000_default_input_boundary"
+    assert csv_row["initial_residual_source"] == ""
+    assert csv_row["vmec2000_initial_residual_source"] == ""
+    assert csv_row["initial_fsq_ratio_vmec2000"] == ""
 
 
 def test_toroidal_hybrid_convergence_example_scans_shape_cases_without_solve(tmp_path: Path):
@@ -329,3 +335,24 @@ def test_toroidal_hybrid_axis_initialization_policy_tracks_solver_mode_and_env(m
 
     monkeypatch.setenv("VMEC_JAX_DISABLE_AXIS_INFER", "1")
     assert module._vmec_jax_axis_initialization_policy("accelerated") == "raw_input_axis_or_zero"
+
+
+def test_toroidal_hybrid_initial_residual_comparison_ratios():
+    module = import_module("examples.toroidal_stellarator_mirror_hybrid_convergence")
+    row = {
+        "initial_fsq": 2.0,
+        "vmec2000_initial_fsq": 4.0,
+        "initial_fsqr": 1.0,
+        "vmec2000_initial_fsqr": 2.0,
+        "initial_fsqz": 3.0,
+        "vmec2000_initial_fsqz": 0.0,
+        "initial_fsql": None,
+        "vmec2000_initial_fsql": 5.0,
+    }
+
+    module._attach_initial_residual_comparison(row)
+
+    assert row["initial_fsq_ratio_vmec2000"] == 0.5
+    assert row["initial_fsqr_ratio_vmec2000"] == 0.5
+    assert row["initial_fsqz_ratio_vmec2000"] is None
+    assert row["initial_fsql_ratio_vmec2000"] is None

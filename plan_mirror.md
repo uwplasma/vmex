@@ -12403,3 +12403,106 @@ Results:
 No user input is needed.
 
 ---
+
+## 100. 2026-06-18 M13h first-row residual source and ratio audit
+
+This tranche finished the cheap raw-residual audit started in M99.  The
+toroidal-hybrid convergence runner now labels where each initial residual came
+from and, when both VMEC/JAX and VMEC2000 histories exist, reports first-row
+VMEC/JAX-to-VMEC2000 residual ratios.
+
+### Steps taken
+
+- Added residual-source fields to the convergence JSON/CSV schema:
+  - `initial_residual_source`;
+  - `vmec2000_initial_residual_source`.
+- Added first-row residual-ratio fields:
+  - `initial_fsq_ratio_vmec2000`;
+  - `initial_fsqr_ratio_vmec2000`;
+  - `initial_fsqz_ratio_vmec2000`;
+  - `initial_fsql_ratio_vmec2000`.
+- Added a small `_safe_ratio` helper that returns `None` for missing,
+  nonfinite, or zero-denominator values.
+- Added `_attach_initial_residual_comparison(row)` and call it after the
+  optional VMEC/JAX and VMEC2000 branches.
+- Set the VMEC/JAX source to `vmec_jax_solve_history_first_row` when a solve
+  history exists.
+- Set the VMEC2000 source to `vmec2000_threed1_first_row` when parsed `threed1`
+  rows exist.
+- Updated tests for:
+  - no-solve rows leaving source/ratio fields empty;
+  - CSV serialization of empty source/ratio fields;
+  - ratio computation and zero-denominator handling.
+- Updated the mirror overview and root mirror example README.
+
+### Results obtained
+
+The current parity rows are now self-describing:
+
+- VMEC/JAX first residuals are clearly identified as solve-history first rows.
+- VMEC2000 first residuals are clearly identified as parsed `threed1` first
+  rows.
+- Ratios are produced only when both sides exist, so dry boundary-fit scans
+  stay lightweight and unambiguous.
+
+This still is not matched-initial-state parity.  It is a stronger audit trail
+for explaining why strict residual parity is not yet claimed.
+
+### How it was tested
+
+```bash
+JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
+python -m ruff check examples/toroidal_stellarator_mirror_hybrid_convergence.py tests/test_toroidal_hybrid.py
+python -m ruff format --check examples/toroidal_stellarator_mirror_hybrid_convergence.py tests/test_toroidal_hybrid.py
+git diff --check
+```
+
+Results:
+
+- `21 passed` in `tests/test_toroidal_hybrid.py`.
+- Ruff check passed.
+- Ruff format check passed.
+- `git diff --check` passed.
+
+### File structure and best-practice notes
+
+- The change is schema-only plus helper tests inside the existing convergence
+  runner/test file.
+- No figures or result outputs are committed.
+- The helper avoids adding a new module because the logic is runner-specific
+  reporting, not shared solver infrastructure.
+
+### Best next steps
+
+1. Commit and push this M13h residual audit tranche.
+2. Recheck CI for concrete failures.
+3. Run one ignored low-resolution parity row with the new fields and log the
+   resulting ratios in the plan.
+4. Then move from audit fields to either:
+   - a true matched-initialization fixture, if source paths expose enough state;
+   - or the M10 differentiable solved-state public API cleanup if matched
+     initialization would require intrusive VMEC2000 changes.
+
+### Completion percentages after M100
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `86%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `88%`.
+- I/O schema and docs: `95%`.
+- Differentiable solved-state API: `22%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `68%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `65%`.
+- ESSOS circular-coil mirror beta scan: `53%`.
+- PR merge readiness overall: `92%`.
+
+### User input needed
+
+No user input is needed.
+
+---

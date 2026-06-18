@@ -148,6 +148,7 @@ _CSV_COLUMNS = (
     "fsq_total_target",
     "seconds",
     "n_iter",
+    "initial_residual_source",
     "initial_fsq",
     "best_fsq",
     "best_iter",
@@ -173,6 +174,7 @@ _CSV_COLUMNS = (
     "vmec2000_returncode",
     "vmec2000_runtime_s",
     "vmec2000_n_rows",
+    "vmec2000_initial_residual_source",
     "vmec2000_initial_fsq",
     "vmec2000_best_fsq",
     "vmec2000_best_iter",
@@ -186,6 +188,10 @@ _CSV_COLUMNS = (
     "vmec2000_final_fsql",
     "vmec2000_aspect",
     "vmec2000_mean_iota",
+    "initial_fsq_ratio_vmec2000",
+    "initial_fsqr_ratio_vmec2000",
+    "initial_fsqz_ratio_vmec2000",
+    "initial_fsql_ratio_vmec2000",
     "input",
     "wout",
     "vmec2000_wout",
@@ -238,6 +244,26 @@ def _summarize_fsq_history(
         out["best_iter"] = int(iter_values[best_idx])
         out["fsq_reduction"] = float(history[0]) / best_fsq if best_fsq > 0.0 else None
     return out
+
+
+def _safe_ratio(numerator: object, denominator: object) -> float | None:
+    if numerator is None or denominator is None:
+        return None
+    num = float(numerator)
+    den = float(denominator)
+    if not np.isfinite(num) or not np.isfinite(den) or den == 0.0:
+        return None
+    return num / den
+
+
+def _attach_initial_residual_comparison(row: dict[str, object]) -> None:
+    """Attach VMEC/JAX-to-VMEC2000 first-row residual ratios when available."""
+    row["initial_fsq_ratio_vmec2000"] = _safe_ratio(row.get("initial_fsq"), row.get("vmec2000_initial_fsq"))
+    for name in ("fsqr", "fsqz", "fsql"):
+        row[f"initial_{name}_ratio_vmec2000"] = _safe_ratio(
+            row.get(f"initial_{name}"),
+            row.get(f"vmec2000_initial_{name}"),
+        )
 
 
 def _write_summary_plot(rows: list[dict[str, object]], *, outdir: Path) -> str:
@@ -508,6 +534,7 @@ def main() -> None:
                     "requested_ftol": float(args.ftol),
                     "fsq_total_target": None,
                     "seconds": None,
+                    "initial_residual_source": None,
                     "initial_fsq": None,
                     "best_fsq": None,
                     "best_iter": None,
@@ -539,6 +566,7 @@ def main() -> None:
                     "vmec2000_returncode": None,
                     "vmec2000_runtime_s": None,
                     "vmec2000_n_rows": None,
+                    "vmec2000_initial_residual_source": None,
                     "vmec2000_initial_fsq": None,
                     "vmec2000_best_fsq": None,
                     "vmec2000_best_iter": None,
@@ -557,6 +585,10 @@ def main() -> None:
                     "vmec2000_fsqr_history": [],
                     "vmec2000_fsqz_history": [],
                     "vmec2000_fsql_history": [],
+                    "initial_fsq_ratio_vmec2000": None,
+                    "initial_fsqr_ratio_vmec2000": None,
+                    "initial_fsqz_ratio_vmec2000": None,
+                    "initial_fsql_ratio_vmec2000": None,
                     "vmec2000_threed1": None,
                     "vmec2000_wout": None,
                     "vmec2000_error": None,
@@ -586,6 +618,7 @@ def main() -> None:
                         fsq_history = np.asarray(run.result.w_history, dtype=float).reshape(-1)
                         row["fsq_history"] = [float(value) for value in fsq_history]
                         row.update(_summarize_fsq_history(fsq_history))
+                        row["initial_residual_source"] = "vmec_jax_solve_history_first_row"
                         for source, history_key, initial_key, final_key, best_key in (
                             ("fsqr2_history", "fsqr_history", "initial_fsqr", "final_fsqr", "best_fsqr"),
                             ("fsqz2_history", "fsqz_history", "initial_fsqz", "final_fsqz", "best_fsqz"),
@@ -673,11 +706,13 @@ def main() -> None:
                             row["vmec2000_fsqr_history"] = [float(item.fsqr) for item in vmec2000_rows]
                             row["vmec2000_fsqz_history"] = [float(item.fsqz) for item in vmec2000_rows]
                             row["vmec2000_fsql_history"] = [float(item.fsql) for item in vmec2000_rows]
+                            row["vmec2000_initial_residual_source"] = "vmec2000_threed1_first_row"
                             row["vmec2000_initial_fsqr"] = float(vmec2000_rows[0].fsqr)
                             row["vmec2000_initial_fsqz"] = float(vmec2000_rows[0].fsqz)
                             row["vmec2000_initial_fsql"] = float(vmec2000_rows[0].fsql)
                     except Exception as exc:
                         row["vmec2000_error"] = str(exc)
+                _attach_initial_residual_comparison(row)
                 rows.append(row)
 
     summary = {
