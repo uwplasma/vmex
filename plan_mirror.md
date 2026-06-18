@@ -11751,3 +11751,163 @@ Result: all checks passed.
 No user input is needed.
 
 ---
+
+## 95. 2026-06-18 M13g solved shape-case scan and sharpened VMEC2000 parity
+
+This tranche used the new `--shape-cases` helper for a solved default-vs-sharp
+comparison, then ran a VMEC2000 parity smoke for the sharpened preset.
+
+### Steps taken
+
+- Ran a short solved scan with `--shape-cases default,sharp`.
+- Used the same `ns=7`, `mpol=5`, `ntor=10`, `max_iter=20` parity-mode
+  controls for both rows.
+- Visually checked the combined residual-history plot.
+- Ran a sharpened-preset VMEC2000 parity smoke with local
+  `/Users/rogeriojorge/bin/xvmec2000`.
+- Visually checked the residual-component parity plot.
+- Rechecked PR CI status after the last push.
+
+### Results obtained
+
+Solved shape-case scan command:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_hybrid_m13g_shape_cases_solved \
+  --ns-array 7 \
+  --mode-pairs 5:10 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --shape-cases default,sharp \
+  --niter 30 \
+  --ftol 1e-9 \
+  --run-solve \
+  --max-iter 20 \
+  --solver-mode parity \
+  --no-use-scan
+```
+
+Solved comparison:
+
+| case | initial `fsq` | best `fsq` | final `fsq` | mean iota | magnetic well |
+| :--- | ---: | ---: | ---: | ---: | ---: |
+| `default_ns007_mpol05_ntor10` | `4.322385032595e-04` | `1.892679128454e-05` | `1.892679128454e-05` | `7.696236376067e-03` | `-3.944608070785e-02` |
+| `sharp_ns007_mpol05_ntor10` | `3.030663121330e-04` | `1.180571456258e-05` | `1.558342244087e-05` | `3.085941451021e-03` | `-5.392764202769e-02` |
+
+The combined residual plot rendered correctly and showed the sharp trace below
+the default trace over the short run:
+
+- `results/toroidal_hybrid_m13g_shape_cases_solved/figures/toroidal_hybrid_fsq_history.png`.
+
+Sharpened VMEC2000 parity command:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_hybrid_m13g_sharp_vmec2000_parity \
+  --ns-array 7 \
+  --mode-pairs 5:10 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --shape-cases sharp \
+  --niter 30 \
+  --ftol 1e-9 \
+  --run-solve \
+  --max-iter 20 \
+  --solver-mode parity \
+  --no-use-scan \
+  --run-vmec2000 \
+  --vmec2000-exec /Users/rogeriojorge/bin/xvmec2000 \
+  --vmec2000-timeout-s 120
+```
+
+VMEC2000 returned code `0`.
+
+| metric | VMEC/JAX | VMEC2000 |
+| :--- | ---: | ---: |
+| initial `fsq` | `3.030663121330e-04` | `5.736000000000e-02` |
+| final/best `fsq` | `1.558342244087e-05` | `3.743000000000e-03` |
+| final `fsqr` | `7.523614811853e-06` | `1.827575564773e-03` |
+| final `fsqz` | `4.952314560279e-06` | `1.299063949455e-03` |
+| final `fsql` | `3.107493068743e-06` | `6.132958046633e-04` |
+| mean iota | `3.085941451021e-03` | `2.705787605846e-03` |
+
+The parity component plot rendered correctly:
+
+- `results/toroidal_hybrid_m13g_sharp_vmec2000_parity/figures/toroidal_hybrid_parity_components.png`.
+
+Interpretation is consistent with earlier sections: VMEC/JAX and VMEC2000 are
+still not starting from equivalent residual states, but the sharpened input is
+valid for both codes and gives close low-iota behavior over this short smoke.
+
+CI status at this checkpoint:
+
+- Latest head: `239e1430cbdcf64ed60aa88453a1053ea62ca2fa`.
+- PR remains draft.
+- `Parity Manifest Smoke (dry-run)` passed.
+- Most remaining CI jobs were queued/pending, so no new failure was available
+  to fix yet.
+
+### How it was tested
+
+Source/test checks before these evidence runs:
+
+```bash
+JAX_ENABLE_X64=1 pytest \
+  tests/test_toroidal_hybrid.py \
+  tests/mirror/test_mirror_free_boundary.py -q
+python -m ruff check \
+  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  tests/test_toroidal_hybrid.py
+python -m ruff format --check \
+  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  tests/test_toroidal_hybrid.py
+git diff --check
+```
+
+Result: `50 passed`; lint, format, and whitespace checks passed.
+
+The solved scan and VMEC2000 command above exercised the example, plot, WOUT,
+and VMEC2000-wrapper paths end to end.
+
+### File structure and best-practice notes
+
+- Evidence remains in the plan; generated products remain under ignored
+  `results/`.
+- The parity rows use the same convergence runner, CSV schema, and plot helpers
+  as the default shape, so future shape scans are table-driven.
+
+### Best next steps
+
+1. Commit and push this evidence log.
+2. When CI finishes, fix any concrete failures.
+3. Continue M13g with a small scan over `corner_amplitude` and `side_power`
+   using the shape-case framework.
+4. Start designing the initialization-matched parity fixture before claiming
+   strict VMEC2000 residual parity.
+
+### Completion percentages after M95
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `86%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `88%`.
+- I/O schema and docs: `94%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `68%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `57%`.
+- ESSOS circular-coil mirror beta scan: `53%`.
+- PR merge readiness overall: `92%`.
+
+### User input needed
+
+No user input is needed.
+
+---
