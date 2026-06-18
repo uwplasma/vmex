@@ -39,12 +39,14 @@ Validation Status
 
 The validation example ``examples/mirror_implicit_sensitivity.py`` manufactures
 an exact tiny-grid reduced root using a linear reduced source and a small state
-ridge. It then compares the dense implicit sensitivity against a finite
-difference of an independently solved perturbed source problem.
+ridge. It then compares the implicit sensitivity against a finite difference of
+an independently solved perturbed source problem.
 
 This validates the residual, Jacobian, dense linear-solve machinery, first
 matrix-free Hessian-vector path, and explicit forward/adjoint implicit wrappers.
-It is not yet a production differentiable equilibrium solve.
+The test suite also applies the forward wrapper to a tiny converged
+fixed-boundary cylinder with a local state ridge about the solved state. This is
+still not a production differentiable equilibrium solve.
 
 Next Steps
 ----------
@@ -53,8 +55,8 @@ Next Steps
 2. Benchmark the matrix-free CG path on larger reduced grids and compare it
    with a lineax-backed operator if that dependency becomes part of the public
    solver stack.
-3. Validate the wrappers on a tiny converged fixed-boundary state, not only on
-   manufactured roots.
+3. Benchmark wrapper solves over a small ``ns``/``nxi`` ladder to quantify
+   dense versus matrix-free runtime and memory.
 4. Wrap a small converged solved state with a custom implicit derivative rule.
 5. Promote the differentiable API only after it agrees with finite differences
    and the existing fixed-boundary solver diagnostics.

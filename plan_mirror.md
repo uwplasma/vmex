@@ -16416,3 +16416,120 @@ Results:
 No user input is needed.
 
 ---
+## 131. Tiny Solved-State Implicit Sensitivity Gate
+
+### Steps taken
+
+- Added a solved-state finite-difference validation for the reduced implicit
+  wrapper.
+- The test first runs an actual tiny fixed-boundary residual-Newton solve for a
+  perturbed constant-radius cylinder.
+- It then packs the converged solver result into reduced coordinates and checks
+  the JAX reduced residual at that state.
+- A source perturbation direction `q` is applied through the residual source
+  term.
+- The forward implicit wrapper computes the predicted sensitivity using
+
+```text
+F_x dx/dp = q
+```
+
+  because the source perturbation enters the residual as `F - p q`.
+- The validation then solves the perturbed sourced nonlinear problem with
+  SciPy root and compares the finite-difference state change against the
+  wrapper sensitivity.
+- A small local `state_ridge=1e-3` about the solved state is used in both the
+  wrapper and the perturbed nonlinear residual. The unregularized tiny
+  zero-pressure cylinder Hessian is singular enough to produce non-finite dense
+  solves, so the ridge is an explicit validation regularization, not a hidden
+  production claim.
+- Updated the differentiability docs to state that the wrapper is now tested on
+  both manufactured roots and a tiny converged fixed-boundary state.
+
+### Results obtained
+
+- The tiny residual-Newton solve reached final residual
+  `2.8151371433923005e-17` in the prototype run.
+- The reduced residual at the packed solved state was below `1e-12` in the
+  test.
+- The perturbed sourced root solve converged with residual below `1e-10`.
+- The finite-difference sensitivity agrees with the implicit wrapper within
+  the focused tolerance (`rtol=5e-4`, `atol=5e-3`).
+- The differentiability lane now has evidence on an actual solver result, not
+  only a manufactured exact root.
+
+### How it was tested
+
+Commands run:
+
+```bash
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_fixed_boundary_axisym.py::test_reduced_implicit_sensitivity_matches_tiny_solved_state_source_finite_difference -q
+python -m ruff check tests/mirror/test_mirror_fixed_boundary_axisym.py
+python -m ruff format --check tests/mirror/test_mirror_fixed_boundary_axisym.py
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_fixed_boundary_axisym.py -q
+python -m sphinx -W -b html docs docs/_build/html
+git diff --check
+python - <<'PY'
+import re
+from pathlib import Path
+text = Path("plan_mirror.md").read_text()
+nums = [int(m.group(1)) for m in re.finditer(r"^## (\\d+)\\.", text, flags=re.M)]
+print("milestones", len(nums), "last", nums[-1], "monotonic", nums == sorted(nums))
+PY
+```
+
+Results:
+
+- New solved-state implicit sensitivity test: `1 passed`.
+- Ruff lint passed for the Python test file.
+- Ruff format check passed for the Python test file.
+- Full axisymmetric fixed-boundary test file: `17 passed`.
+- Sphinx docs build passed with warnings treated as errors.
+- Whitespace check passed.
+- Plan milestone numbering remained monotonic.
+- I also tried `python -m ruff check ... docs/mirror/differentiability.rst`;
+  this is not an applicable docs check in this repo because `ruff` parses `.rst`
+  files as Python source.
+
+### File structure and best-practice notes
+
+- The new validation lives beside the other reduced axisymmetric solver tests,
+  since it exercises the same reduced state layout and residual API.
+- The state ridge is visible in the test and docs so the validation does not
+  overstate the conditioning of the unregularized tiny physical Hessian.
+- No generated artifacts are added to git.
+
+### Best next steps
+
+1. Commit and push M131.
+2. Add a lightweight dense-versus-matrix-free wrapper benchmark over a small
+   `ns`/`nxi` ladder, writing JSON/CSV under ignored `results/`.
+3. Use that benchmark to decide the default method for future differentiable
+   solved-state experiments.
+4. Continue toward the remaining open lanes after the differentiability gates:
+   toroidal hybrid VMEC2000 parity/refinement and circular-coil beta-scan
+   hardening.
+
+### Completion percentages after M131
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `90%`.
+- Fixed-boundary axisymmetric solve: `90%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `88%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `92%`.
+- I/O schema and docs: `99%`.
+- Differentiable solved-state API: `68%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `85%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `85%`.
+- PR merge readiness overall: `95%`.
+
+### User input needed
+
+No user input is needed.
+
+---
