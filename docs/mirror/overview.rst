@@ -95,8 +95,9 @@ Current solver status:
   boundary-inferred direct initial residual agrees with the VMEC2000 first row
   to within plotting/diagnostic precision, whereas the raw-axis parity branch
   is a different, deliberately stricter initialization.  Use ``--nstep 1`` and
-  ``--full-solver-diagnostics`` in the toroidal-hybrid convergence example when
-  comparing full iteration trajectories and solver step controls.
+  ``--full-solver-diagnostics`` and ``--no-cli-finish`` in the toroidal-hybrid
+  convergence example when comparing full VMEC-style iteration trajectories and
+  solver step controls.
 
 Later phases finish differentiable optimization APIs, production
 free-boundary LCFS solves, toroidal stellarator-mirror hybrid convergence and

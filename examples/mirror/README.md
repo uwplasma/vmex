@@ -99,11 +99,13 @@ use the first parsed ``threed1`` row. The direct-initial diagnostic can be
 disabled with ``--no-direct-initial-residual`` for large scans. Pass
 ``--nstep 1`` when running ``--run-vmec2000`` to make VMEC2000 print every
 iteration into ``threed1``; pass ``--full-solver-diagnostics`` to keep full
-VMEC/JAX terminal step histories and write the step-diagnostics plot. The
-residual-history plot then aligns VMEC/JAX and VMEC2000 by actual iteration
-labels. ``initial_fsq_ratio_direct_initial`` records how far the first stored
-VMEC/JAX history row is from the pre-iteration direct residual. Treat mean-iota
-and direct-initial residual agreement as useful regression signals, and use the
+VMEC/JAX terminal step histories and write the step-diagnostics plot. Add
+``--no-cli-finish`` when the goal is raw VMEC-style trajectory parity rather
+than the faster CLI finish/fallback policy. The residual-history plot then
+aligns VMEC/JAX and VMEC2000 by actual iteration labels.
+``initial_fsq_ratio_direct_initial`` records how far the first stored VMEC/JAX
+history row is from the pre-iteration direct residual. Treat mean-iota and
+direct-initial residual agreement as useful regression signals, and use the
 history fields to understand convergence after solver startup. For
 toroidal-hybrid geometry refinement, pass ``--shape-cases default,sharp`` to
 scan the default boundary and a sharpened side/corner preset in one run; use

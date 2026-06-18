@@ -11014,11 +11014,22 @@ def solve_fixed_boundary_residual_iter(
             flss_val=flss_val,
         )
 
+    initial_axis_reset_attempted = bool(vmec2000_control) and (not axis_reset_done) and bool(lmove_axis)
+    initial_axis_reset_reset = False
+    initial_axis_reset_bad_jacobian = False
+    initial_axis_reset_force_reset = False
+    initial_axis_reset_fsq = None
+    initial_axis_reset_ptau_min = None
+    initial_axis_reset_ptau_max = None
+    initial_axis_reset_state_tau_min = None
+    initial_axis_reset_state_tau_max = None
+    initial_axis_reset_error = None
+
     # VMEC `eqsolve`: if the initial Jacobian changes sign, improve the axis
     # guess *before* the first iteration (no extra iter1). This aligns the
     # zero_m1 gating and time-control history with VMEC2000.
     t_setup_axis_reset_start = time.perf_counter() if timing_enabled else None
-    if bool(vmec2000_control) and (not axis_reset_done) and bool(lmove_axis):
+    if initial_axis_reset_attempted:
         try:
             t_setup_axis_force_start = time.perf_counter() if timing_enabled else None
             k0, _frzl0, _gcr2_0, _gcz2_0, _gcl2_0, _rz_scale0, _l_scale0, _norms0 = _compute_forces_iter(
@@ -11045,6 +11056,8 @@ def solve_fixed_boundary_residual_iter(
                 min_tau_ptau = float(np.asarray(ptau_min0))
                 max_tau_ptau = float(np.asarray(ptau_max0))
                 bad_jacobian_ptau = (min_tau_ptau < 0.0) and (max_tau_ptau > 0.0)
+                initial_axis_reset_ptau_min = float(min_tau_ptau)
+                initial_axis_reset_ptau_max = float(max_tau_ptau)
 
             bad_jacobian_state = False
             min_tau_state = float("nan")
@@ -11065,6 +11078,8 @@ def solve_fixed_boundary_residual_iter(
                 min_tau_state = float(np.asarray(jnp.min(tau0_use)))
                 max_tau_state = float(np.asarray(jnp.max(tau0_use)))
                 bad_jacobian_state = (min_tau_state < 0.0) and (max_tau_state > 0.0)
+                initial_axis_reset_state_tau_min = float(min_tau_state)
+                initial_axis_reset_state_tau_max = float(max_tau_state)
 
             axis_reset_debug = os.getenv("VMEC_JAX_AXIS_RESET_DEBUG", "").strip().lower() not in (
                 "",
@@ -11080,6 +11095,7 @@ def solve_fixed_boundary_residual_iter(
                 fsq_phys0_val = float(np.asarray(fsqr0 + fsqz0 + fsql0))
             except Exception:
                 fsq_phys0_val = None
+            initial_axis_reset_fsq = None if fsq_phys0_val is None else float(fsq_phys0_val)
 
             axis_reset_decision = _initial_axis_reset_decision(
                 bad_jacobian_ptau=bad_jacobian_ptau,
@@ -11092,6 +11108,7 @@ def solve_fixed_boundary_residual_iter(
                 lthreed=bool(getattr(cfg, "lthreed", True)),
             )
             bad_jacobian0 = axis_reset_decision.bad_jacobian
+            initial_axis_reset_bad_jacobian = bool(bad_jacobian0)
             if axis_reset_debug:
                 try:
                     fsq_debug_val = float("nan") if fsq_phys0_val is None else float(fsq_phys0_val)
@@ -11107,7 +11124,9 @@ def solve_fixed_boundary_residual_iter(
                     pass
 
             force_axis_reset_init = axis_reset_decision.force_reset
+            initial_axis_reset_force_reset = bool(force_axis_reset_init)
             if axis_reset_decision.reset:
+                initial_axis_reset_reset = True
                 if verbose and bool(vmec2000_control) and bool(verbose_vmec2000_table):
                     if bad_jacobian0 or force_axis_reset_init:
                         print(" INITIAL JACOBIAN CHANGED SIGN!", flush=True)
@@ -11141,8 +11160,8 @@ def solve_fixed_boundary_residual_iter(
                 cache_prec_lam_debug = None
                 cache_constraint_rcon0 = None
                 cache_constraint_zcon0 = None
-        except Exception:
-            pass
+        except Exception as exc:
+            initial_axis_reset_error = f"{type(exc).__name__}: {exc}"
     if timing_enabled and t_setup_axis_reset_start is not None:
         timing_stats["setup_axis_reset"] += time.perf_counter() - float(t_setup_axis_reset_start)
 
@@ -14867,6 +14886,16 @@ def solve_fixed_boundary_residual_iter(
         "badjac_mode": badjac_mode,
         "badjac_state_probe": bool(badjac_state_probe),
         "badjac_initial_state_probe_iters": int(badjac_initial_state_probe_iters),
+        "initial_axis_reset_attempted": bool(initial_axis_reset_attempted),
+        "initial_axis_reset_reset": bool(initial_axis_reset_reset),
+        "initial_axis_reset_bad_jacobian": bool(initial_axis_reset_bad_jacobian),
+        "initial_axis_reset_force_reset": bool(initial_axis_reset_force_reset),
+        "initial_axis_reset_fsq": initial_axis_reset_fsq,
+        "initial_axis_reset_ptau_min": initial_axis_reset_ptau_min,
+        "initial_axis_reset_ptau_max": initial_axis_reset_ptau_max,
+        "initial_axis_reset_state_tau_min": initial_axis_reset_state_tau_min,
+        "initial_axis_reset_state_tau_max": initial_axis_reset_state_tau_max,
+        "initial_axis_reset_error": initial_axis_reset_error,
         "light_history": bool(light_history),
         "resume_state_mode": str(resume_state_mode),
         "fsq_total_target": fsq_total_target,

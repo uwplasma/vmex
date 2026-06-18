@@ -243,9 +243,12 @@ def test_toroidal_hybrid_convergence_example_runs_without_solve(tmp_path: Path):
     assert Path(summary["csv"]).exists()
     assert summary["figures"] == {}
     assert all(not row["ran_solve"] for row in summary["rows"])
+    assert all(row["cli_finish"] is True for row in summary["rows"])
     assert all(row["nstep"] == 25 for row in summary["rows"])
     assert all(row["full_solver_diagnostics"] is False for row in summary["rows"])
     assert all(row["diagnostic_step_history_size"] == 0 for row in summary["rows"])
+    assert all(row["diagnostic_initial_axis_reset_attempted"] is None for row in summary["rows"])
+    assert all(row["diagnostic_initial_axis_reset_reset"] is None for row in summary["rows"])
     assert all(row["initialization_policy"] == "vmec_jax_default_input_boundary" for row in summary["rows"])
     assert all(
         row["vmec_jax_axis_initialization_policy"] == "boundary_inferred_missing_axis" for row in summary["rows"]
@@ -268,9 +271,12 @@ def test_toroidal_hybrid_convergence_example_runs_without_solve(tmp_path: Path):
     with Path(summary["csv"]).open(newline="") as file_obj:
         csv_row = next(csv.DictReader(file_obj))
     assert csv_row["initialization_policy"] == "vmec_jax_default_input_boundary"
+    assert csv_row["cli_finish"] == "True"
     assert csv_row["nstep"] == "25"
     assert csv_row["full_solver_diagnostics"] == "False"
     assert csv_row["diagnostic_step_history_size"] == "0"
+    assert csv_row["diagnostic_initial_axis_reset_attempted"] == ""
+    assert csv_row["diagnostic_initial_axis_reset_reset"] == ""
     assert csv_row["vmec_jax_axis_initialization_policy"] == "boundary_inferred_missing_axis"
     assert csv_row["vmec2000_initialization_policy"] == "vmec2000_default_input_boundary"
     assert csv_row["direct_initial_residual_requested"] == "True"
@@ -357,6 +363,16 @@ def test_toroidal_hybrid_convergence_history_summary_uses_iteration_labels():
             "update_rms_history": np.asarray([1.0e-3, 5.0e-4], dtype=float),
             "w_try_ratio_history": np.asarray([0.8, 1.2], dtype=float),
             "bcovar_update_history": np.asarray([1, 0], dtype=int),
+            "initial_axis_reset_attempted": True,
+            "initial_axis_reset_reset": True,
+            "initial_axis_reset_bad_jacobian": True,
+            "initial_axis_reset_force_reset": False,
+            "initial_axis_reset_fsq": 7.0,
+            "initial_axis_reset_ptau_min": -1.0,
+            "initial_axis_reset_ptau_max": 2.0,
+            "initial_axis_reset_state_tau_min": -0.5,
+            "initial_axis_reset_state_tau_max": 1.5,
+            "initial_axis_reset_error": None,
         },
         fallback_size=2,
     )
@@ -372,6 +388,16 @@ def test_toroidal_hybrid_convergence_history_summary_uses_iteration_labels():
     assert diag_fields["diagnostic_final_dt_eff"] == 0.05
     assert diag_fields["diagnostic_max_update_rms"] == 1.0e-3
     assert diag_fields["diagnostic_final_update_rms"] == 5.0e-4
+    assert diag_fields["diagnostic_initial_axis_reset_attempted"] is True
+    assert diag_fields["diagnostic_initial_axis_reset_reset"] is True
+    assert diag_fields["diagnostic_initial_axis_reset_bad_jacobian"] is True
+    assert diag_fields["diagnostic_initial_axis_reset_force_reset"] is False
+    assert diag_fields["diagnostic_initial_axis_reset_fsq"] == 7.0
+    assert diag_fields["diagnostic_initial_axis_reset_ptau_min"] == -1.0
+    assert diag_fields["diagnostic_initial_axis_reset_ptau_max"] == 2.0
+    assert diag_fields["diagnostic_initial_axis_reset_state_tau_min"] == -0.5
+    assert diag_fields["diagnostic_initial_axis_reset_state_tau_max"] == 1.5
+    assert diag_fields["diagnostic_initial_axis_reset_error"] is None
     assert module._csv_cell({"accepted": 2}) == '{"accepted": 2}'
     with pytest.raises(ValueError, match="unknown shape"):
         module._parse_shape_cases("unknown")

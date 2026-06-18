@@ -13404,3 +13404,117 @@ Results:
 No user input is needed.
 
 ---
+
+## 106. 2026-06-18 M13m raw VMEC-style trajectory diagnostics and CI check
+
+### Steps taken
+
+- Checked draft PR #21 on GitHub: all reported CI jobs on the pushed head
+  passed; the manual/nightly full-physics job was skipped by design.
+- Trimmed the interrupted local solver diff so ``vmec_jax/solve.py`` only
+  carries setup-axis-reset diagnostics, not broad formatter churn.
+- Added exported setup-axis-reset fields to the toroidal hybrid convergence
+  example:
+  - attempted/reset/bad-Jacobian/force-reset flags;
+  - pre-reset fsq;
+  - ``ptau`` and state-tau ranges;
+  - setup-axis-reset exception text, when present.
+- Added ``--cli-finish/--no-cli-finish`` to the root-level toroidal hybrid
+  convergence example.  The default remains the faster VMEC/JAX CLI
+  finish/fallback policy, while ``--no-cli-finish`` keeps the raw VMEC-style
+  trajectory for VMEC2000 comparisons.
+- Updated mirror docs and the mirror examples README to explain when
+  ``--nstep 1 --full-solver-diagnostics --no-cli-finish`` is the correct
+  parity mode.
+- Render-checked the accelerated and parity no-finish residual-history plots.
+
+### Results obtained
+
+- CI state before this commit: clean on the pushed PR head.
+- The previous low first-history residual mismatch was explained as a
+  diagnostic-timing issue:
+  - with CLI finish enabled, ``run.result.w_history`` can refer to the
+    finish/fallback attempt, not the initial VMEC-style stage;
+  - with ``--no-cli-finish``, accelerated VMEC/JAX matches VMEC2000 over the
+    first eight printed iterations to about ``0.1%`` for this low-resolution
+    audit;
+  - parity mode exposes the raw-axis direct residual near ``7.66e8``, then the
+    setup-axis reset brings the stored VMEC-style trajectory close to VMEC2000.
+- The no-finish evidence plots rendered:
+  - ``results/toroidal_hybrid_m13n_no_cli_finish_accelerated/figures/toroidal_hybrid_fsq_history.png``;
+  - ``results/toroidal_hybrid_m13n_no_cli_finish_parity/figures/toroidal_hybrid_fsq_history.png``.
+- Generated artifacts remain ignored under ``results/``; no output files or
+  figures are tracked.
+
+### How it was tested
+
+Commands run:
+
+```bash
+gh pr view --json number,url,title,isDraft,headRefName,baseRefName,mergeStateStatus,statusCheckRollup
+python -m ruff check vmec_jax/solve.py examples/toroidal_stellarator_mirror_hybrid_convergence.py tests/test_toroidal_hybrid.py
+python -m ruff format --check examples/toroidal_stellarator_mirror_hybrid_convergence.py tests/test_toroidal_hybrid.py
+JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
+git diff --check
+```
+
+Results:
+
+- GitHub CI reported success on all non-skipped jobs.
+- Ruff lint passed for solver, example, and test files.
+- Ruff format check passed for the changed example and test files.
+- ``22 passed`` in ``tests/test_toroidal_hybrid.py``.
+- ``git diff --check`` passed.
+- ``ruff format --check vmec_jax/solve.py`` was intentionally not used as a
+  gating check for this tranche because the existing large solver file is not
+  formatter-clean without unrelated whole-file style movement; the source diff
+  was kept narrow instead.
+
+### File structure and best-practice notes
+
+- Solver-only diagnostics live in ``vmec_jax/solve.py`` beside the setup-axis
+  reset path that produces them.
+- Public reporting and plotting remain in the root-level convergence example,
+  keeping evidence generation outside the library API.
+- Tests stay focused in ``tests/test_toroidal_hybrid.py`` and do not require a
+  local VMEC2000 executable.
+- Docs were updated in ``docs/mirror/overview.rst`` and
+  ``examples/mirror/README.md``.
+- The tracked repository stays light; evidence plots and CSV/JSON outputs are
+  ignored under ``results/``.
+
+### Best next steps
+
+1. Commit and push M13m.
+2. Continue M10 differentiable solved-state API cleanup with a small,
+   documented return object for fixed-boundary solved states and residual
+   diagnostics.
+3. Continue M12/M16 free-boundary circular-coil/ESSOS lane by pinning the
+   lightweight circular-coil LCFS example and beta-scan result schema.
+4. Continue M14 toroidal stellarator-mirror hybrid work by adding the toroidal
+   corner-stellarator / side-mirror geometry fixture to the finite plan after
+   the current mirror lanes are stable.
+
+### Completion percentages after M106
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `87%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `88%`.
+- I/O schema and docs: `96%`.
+- Differentiable solved-state API: `22%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `68%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `82%`.
+- ESSOS circular-coil mirror beta scan: `53%`.
+- PR merge readiness overall: `95%`.
+
+### User input needed
+
+No user input is needed.
+
+---

@@ -145,6 +145,7 @@ _CSV_COLUMNS = (
     "ran_solve",
     "solver_mode",
     "use_scan",
+    "cli_finish",
     "full_solver_diagnostics",
     "diagnostic_light_history",
     "diagnostic_resume_state_mode",
@@ -159,6 +160,16 @@ _CSV_COLUMNS = (
     "diagnostic_final_dt_eff",
     "diagnostic_max_update_rms",
     "diagnostic_final_update_rms",
+    "diagnostic_initial_axis_reset_attempted",
+    "diagnostic_initial_axis_reset_reset",
+    "diagnostic_initial_axis_reset_bad_jacobian",
+    "diagnostic_initial_axis_reset_force_reset",
+    "diagnostic_initial_axis_reset_fsq",
+    "diagnostic_initial_axis_reset_ptau_min",
+    "diagnostic_initial_axis_reset_ptau_max",
+    "diagnostic_initial_axis_reset_state_tau_min",
+    "diagnostic_initial_axis_reset_state_tau_max",
+    "diagnostic_initial_axis_reset_error",
     "requested_ftol",
     "fsq_total_target",
     "seconds",
@@ -342,6 +353,17 @@ def _diag_str_list(diag: dict[str, object], key: str) -> list[str]:
     return [str(value) for value in values]
 
 
+def _diag_optional_bool(diag: dict[str, object], key: str) -> bool | None:
+    return None if key not in diag or diag.get(key) is None else bool(diag.get(key))
+
+
+def _diag_optional_float(diag: dict[str, object], key: str) -> float | None:
+    if key not in diag or diag.get(key) is None:
+        return None
+    value = float(diag[key])
+    return value if np.isfinite(value) else None
+
+
 def _counts_json(values: list[str]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for value in values:
@@ -405,6 +427,24 @@ def _solver_diagnostic_fields(diag: dict[str, object], *, fallback_size: int) ->
         "diagnostic_final_dt_eff": None if not dt_eff else float(dt_eff[-1]),
         "diagnostic_max_update_rms": None if not update_rms else float(np.nanmax(update_rms)),
         "diagnostic_final_update_rms": None if not update_rms else float(update_rms[-1]),
+        "diagnostic_initial_axis_reset_attempted": _diag_optional_bool(diag, "initial_axis_reset_attempted"),
+        "diagnostic_initial_axis_reset_reset": _diag_optional_bool(diag, "initial_axis_reset_reset"),
+        "diagnostic_initial_axis_reset_bad_jacobian": _diag_optional_bool(diag, "initial_axis_reset_bad_jacobian"),
+        "diagnostic_initial_axis_reset_force_reset": _diag_optional_bool(diag, "initial_axis_reset_force_reset"),
+        "diagnostic_initial_axis_reset_fsq": _diag_optional_float(diag, "initial_axis_reset_fsq"),
+        "diagnostic_initial_axis_reset_ptau_min": _diag_optional_float(diag, "initial_axis_reset_ptau_min"),
+        "diagnostic_initial_axis_reset_ptau_max": _diag_optional_float(diag, "initial_axis_reset_ptau_max"),
+        "diagnostic_initial_axis_reset_state_tau_min": _diag_optional_float(
+            diag,
+            "initial_axis_reset_state_tau_min",
+        ),
+        "diagnostic_initial_axis_reset_state_tau_max": _diag_optional_float(
+            diag,
+            "initial_axis_reset_state_tau_max",
+        ),
+        "diagnostic_initial_axis_reset_error": None
+        if diag.get("initial_axis_reset_error") is None
+        else str(diag.get("initial_axis_reset_error")),
     }
 
 
@@ -691,6 +731,12 @@ def main() -> None:
     parser.add_argument("--solver-mode", choices=("default", "parity", "accelerated"), default="accelerated")
     parser.add_argument("--use-scan", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument(
+        "--cli-finish",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable the vmec_jax CLI finish/fallback policy; disable for raw VMEC-style trajectory parity.",
+    )
+    parser.add_argument(
         "--direct-initial-residual",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -779,6 +825,7 @@ def main() -> None:
                     "ran_solve": bool(args.run_solve),
                     "solver_mode": str(args.solver_mode),
                     "use_scan": None if args.use_scan is None else bool(args.use_scan),
+                    "cli_finish": bool(args.cli_finish),
                     "full_solver_diagnostics": bool(args.full_solver_diagnostics),
                     "diagnostic_light_history": None,
                     "diagnostic_resume_state_mode": None,
@@ -803,6 +850,16 @@ def main() -> None:
                     "diagnostic_final_dt_eff": None,
                     "diagnostic_max_update_rms": None,
                     "diagnostic_final_update_rms": None,
+                    "diagnostic_initial_axis_reset_attempted": None,
+                    "diagnostic_initial_axis_reset_reset": None,
+                    "diagnostic_initial_axis_reset_bad_jacobian": None,
+                    "diagnostic_initial_axis_reset_force_reset": None,
+                    "diagnostic_initial_axis_reset_fsq": None,
+                    "diagnostic_initial_axis_reset_ptau_min": None,
+                    "diagnostic_initial_axis_reset_ptau_max": None,
+                    "diagnostic_initial_axis_reset_state_tau_min": None,
+                    "diagnostic_initial_axis_reset_state_tau_max": None,
+                    "diagnostic_initial_axis_reset_error": None,
                     "requested_ftol": float(args.ftol),
                     "fsq_total_target": None,
                     "seconds": None,
@@ -900,7 +957,7 @@ def main() -> None:
                         use_scan=args.use_scan,
                         max_iter=int(args.max_iter),
                         light_history=False if bool(args.full_solver_diagnostics) else None,
-                        cli_fixed_boundary_mode=True,
+                        cli_fixed_boundary_mode=bool(args.cli_finish),
                         verbose=False,
                     )
                     row["seconds"] = float(perf_counter() - t0)
