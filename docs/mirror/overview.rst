@@ -46,8 +46,8 @@ without coupling it to toroidal VMEC assumptions:
   optional low-resolution pilot steps that apply the proposal and report
   actual before/after diagnostics with a combined pressure/normal-field merit
   and normal-field-aware candidate selection between local and shape-preserving
-  scale updates, plus an optional strict normal-field guard with no-op
-  fallback;
+  scale updates, normal-field-slope updates, and no-op fallback, plus an
+  optional strict normal-field guard;
 - a repo-root ``examples/mirror_two_coil_axisym.py`` analytic benchmark that
   builds a fixed boundary from the closed-form on-axis field of two circular
   coils, overlays mirror ``B_z`` against that reference, draws the coils, and

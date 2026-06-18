@@ -33,6 +33,7 @@ from vmec_jax.mirror import (
     propose_axisymmetric_mirror_lcfs_update,
     propose_axisymmetric_mirror_lcfs_scale_update,
     propose_axisymmetric_mirror_lcfs_noop_update,
+    propose_axisymmetric_mirror_lcfs_bnormal_update,
     run_mirror_fixed_boundary,
     sample_mirror_axis_external_field,
     sample_mirror_boundary_external_field,
@@ -63,7 +64,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lcfs-update-cap-taper-power", type=float, default=2.0)
     parser.add_argument("--lcfs-update-smoothing-passes", type=int, default=1)
     parser.add_argument("--lcfs-merit-bnormal-weight", type=float, default=1.0)
-    parser.add_argument("--lcfs-proposal-mode", choices=("best_predicted", "local", "scale"), default="best_predicted")
+    parser.add_argument(
+        "--lcfs-proposal-mode",
+        choices=("best_predicted", "local", "scale", "bnormal"),
+        default="best_predicted",
+    )
     parser.add_argument("--lcfs-require-bnormal-nonincrease", action="store_true")
     parser.add_argument("--run-lcfs-pilot", action="store_true")
     parser.add_argument("--lcfs-pilot-steps", type=int, default=1)
@@ -220,6 +225,7 @@ def _select_lcfs_proposal(
     pressure_response,
     grid,
     coils,
+    external_sample,
     baseline_merit,
     mode: str,
     damping: float,
@@ -244,8 +250,16 @@ def _select_lcfs_proposal(
         max_relative_step=max_relative_step,
         radius_floor=1.0e-4,
     )
+    bnormal = propose_axisymmetric_mirror_lcfs_bnormal_update(
+        lcfs,
+        external_sample,
+        pressure_response,
+        max_relative_step=max_relative_step,
+        radius_floor=1.0e-4,
+        smoothing_passes=smoothing_passes,
+    )
     noop = propose_axisymmetric_mirror_lcfs_noop_update(lcfs, pressure_response)
-    candidates = [local, scale, noop]
+    candidates = [local, scale, bnormal, noop]
     summaries = [
         _proposal_predicted_metrics(candidate, grid=grid, coils=coils, baseline_merit=baseline_merit)
         for candidate in candidates
@@ -254,6 +268,8 @@ def _select_lcfs_proposal(
         return local, summaries
     if mode == "scale":
         return scale, summaries
+    if mode == "bnormal":
+        return bnormal, summaries
     allowed = np.ones(len(summaries), dtype=bool)
     if require_bnormal_nonincrease:
         baseline_bnormal = float(baseline_merit.external_bnormal_rms)
@@ -328,6 +344,7 @@ def _run_fixed_boundary_baseline_cases(
             pressure_response=pressure_response,
             grid=baseline_grid,
             coils=scan.coils,
+            external_sample=external_sample,
             baseline_merit=lcfs_merit,
             mode=lcfs_proposal_mode,
             damping=lcfs_update_damping,
@@ -406,6 +423,7 @@ def _run_fixed_boundary_baseline_cases(
                     pressure_response=pilot_response,
                     grid=baseline_grid,
                     coils=scan.coils,
+                    external_sample=pilot_external_sample,
                     baseline_merit=lcfs_merit,
                     mode=lcfs_proposal_mode,
                     damping=lcfs_update_damping,

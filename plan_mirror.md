@@ -8604,3 +8604,171 @@ Result: all checks passed.
 ### User input needed
 
 No user input is needed.
+## 74. 2026-06-18 M12l normal-field-slope LCFS proposal basis
+
+This tranche added a real normal-field descent candidate for circular-coil LCFS
+pilots.  The new candidate estimates the boundary slope needed for
+`B_ext.n ~= 0`, integrates that slope from the current midplane radius, and
+takes a clipped step toward the resulting smooth field-line-following shape.
+
+### Steps taken
+
+- Added `propose_axisymmetric_mirror_lcfs_bnormal_update`.
+- Exported the helper through the public mirror API.
+- Added `bnormal_slope` to the root example candidate set.
+- Added explicit `--lcfs-proposal-mode bnormal` for diagnostics.
+- Updated default `best_predicted` mode so it compares:
+  - local pressure update;
+  - shape-preserving scale update;
+  - normal-field-slope update;
+  - no-op.
+- Added tests for:
+  - synthetic normal-field descent;
+  - candidate summary expectations in the root example.
+- Updated docs and the mirror examples README.
+
+### Results obtained
+
+Generated artifacts:
+
+- `results/mirror/m12l_bnormal_descent_pilot/free_boundary_circular_coils_metrics.json`.
+- `results/mirror/m12l_bnormal_descent_strict_guard/free_boundary_circular_coils_metrics.json`.
+- `results/mirror/m12l_forced_bnormal_pilot/free_boundary_circular_coils_metrics.json`.
+
+Baseline candidate summary:
+
+| candidate | predicted merit | predicted pressure RMS | predicted `B_ext.n` RMS |
+| :--- | ---: | ---: | ---: |
+| local pressure | `1.000000106` | `1.803438138` | `1.1115358e-02` |
+| scale pressure | `0.996004406` | `1.796260719` | `8.783073e-03` |
+| normal-field slope | `1.004048383` | `1.810804122` | `4.486880e-03` |
+| no-op | `1.000020372` | `1.803515366` | `7.657346e-03` |
+
+Default `best_predicted` still selects `scale_pressure` because it gives the
+best combined merit.  Strict normal-field-guard mode selects `noop`, because
+the normal-field-slope candidate reduces `B_ext.n` but worsens combined merit.
+
+Forced normal-field-slope pilot:
+
+| row | merit | pressure RMS | `B_ext.n` RMS | accepted |
+| :--- | ---: | ---: | ---: | :---: |
+| baseline | `1.000020371650` | `1.803515365850` | `7.657346104349e-03` | n/a |
+| forced bnormal step | `1.358618842647` | `2.450280673959` | `4.486879987461e-03` | `false` |
+
+Interpretation:
+
+- The new candidate is a genuine normal-field descent direction.
+- The current pressure and normal-field objectives remain in tension on the
+  circular-coil fixed-boundary baseline.
+- The next useful step is a small multi-mode line search or least-squares
+  candidate that mixes scale and normal-field-slope modes, rather than choosing
+  one pure mode.
+
+### How it was tested
+
+Focused free-boundary and root example tests:
+
+```bash
+JAX_ENABLE_X64=1 pytest \
+  tests/mirror/test_mirror_free_boundary.py \
+  tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_example_runs_without_plots \
+  tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_strict_bnormal_guard_can_skip_pilot \
+  -q
+```
+
+Result: `16 passed in 7.97s`.
+
+Examples with plots:
+
+```bash
+JAX_ENABLE_X64=1 python examples/mirror_free_boundary_circular_coils.py \
+  --outdir results/mirror/m12l_bnormal_descent_pilot \
+  --ntheta 24 \
+  --nxi 33 \
+  --n-segments 256 \
+  --run-fixed-boundary-baseline \
+  --run-lcfs-pilot \
+  --lcfs-pilot-steps 2 \
+  --baseline-maxiter 0
+
+JAX_ENABLE_X64=1 python examples/mirror_free_boundary_circular_coils.py \
+  --outdir results/mirror/m12l_forced_bnormal_pilot \
+  --ntheta 24 \
+  --nxi 33 \
+  --n-segments 256 \
+  --run-fixed-boundary-baseline \
+  --run-lcfs-pilot \
+  --lcfs-pilot-steps 1 \
+  --baseline-maxiter 0 \
+  --lcfs-proposal-mode bnormal
+```
+
+Result: metrics JSON files, `mout` outputs, and plot bundles written.
+
+Lint/format/docs/whitespace:
+
+```bash
+python -m ruff check \
+  vmec_jax/mirror/free_boundary.py \
+  vmec_jax/mirror/api.py \
+  vmec_jax/mirror/__init__.py \
+  examples/mirror_free_boundary_circular_coils.py \
+  tests/mirror/test_mirror_free_boundary.py \
+  tests/mirror/test_mirror_examples.py
+python -m ruff format --check \
+  vmec_jax/mirror/free_boundary.py \
+  vmec_jax/mirror/api.py \
+  vmec_jax/mirror/__init__.py \
+  examples/mirror_free_boundary_circular_coils.py \
+  tests/mirror/test_mirror_free_boundary.py \
+  tests/mirror/test_mirror_examples.py
+python -m sphinx -W -j auto -b html docs docs/_build/html
+git diff --check
+```
+
+Result: all checks passed.
+
+### File structure and best-practice notes
+
+- The normal-field-slope proposal is a public helper because it is a reusable
+  physical candidate direction.
+- The example still owns candidate selection and pilot bookkeeping while this
+  remains a workflow diagnostic rather than a solver API.
+- The forced mode is intentionally exposed so users can inspect the pressure
+  versus normal-field tradeoff.
+
+### Best next steps
+
+1. Commit and push M12l.
+2. Add a two-mode candidate search over scale and normal-field-slope
+   amplitudes:
+   - small grid search or least-squares fit in normalized pressure/normal-field
+     residual space;
+   - include no-op fallback;
+   - accept only candidates that improve combined merit and do not increase
+     `B_ext.n` beyond a configurable tolerance.
+3. Once the candidate search gives a useful accepted step, promote the pilot
+   loop into a reusable helper.
+
+### Completion percentages after M12l
+
+- Geometry/grids/bases: `90%`.
+- Field/energy/residual kernels: `86%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `85%`.
+- I/O schema and docs: `90%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `57%`.
+- Stellarator-mirror hybrid lane: `10%`.
+- ESSOS circular-coil mirror beta scan: `45%`.
+- PR merge readiness overall: `90%`.
+
+### User input needed
+
+No user input is needed.
+
+---

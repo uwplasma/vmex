@@ -166,7 +166,7 @@ def test_root_free_boundary_circular_coils_example_runs_without_plots(tmp_path):
     assert all(row["lcfs_update_strategy"] == "scale_pressure" for row in metrics["fixed_boundary_baseline_rows"])
     assert all(
         {candidate["strategy"] for candidate in row["lcfs_update_candidate_summaries"]}
-        == {"local_pressure", "scale_pressure", "noop"}
+        == {"local_pressure", "scale_pressure", "bnormal_slope", "noop"}
         for row in metrics["fixed_boundary_baseline_rows"]
     )
     assert all(

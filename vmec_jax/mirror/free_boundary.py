@@ -804,3 +804,99 @@ def propose_axisymmetric_mirror_lcfs_noop_update(
         boundary=MirrorBoundary.tabulated_radius(xi, radius),
         strategy="noop",
     )
+
+
+def propose_axisymmetric_mirror_lcfs_bnormal_update(
+    diagnostic: MirrorLCFSDiagnostic,
+    external_sample: MirrorExternalFieldSample,
+    pressure_response: Any | None = None,
+    *,
+    max_relative_step: float = 0.05,
+    radius_floor: float = 1.0e-4,
+    slope_limit: float = 5.0,
+    smoothing_passes: int = 1,
+) -> MirrorLCFSUpdateProposal:
+    """Return a radius proposal that moves toward ``B_ext.n = 0``.
+
+    The target shape is obtained by integrating the axisymmetric field-line
+    slope ``dr/dz ~= B_r / B_z`` from the current midplane radius, then taking
+    a clipped step toward that smooth target.  This is a candidate direction
+    for pilot line searches, not a complete free-boundary solve.
+    """
+
+    max_relative_step = float(max_relative_step)
+    radius_floor = float(radius_floor)
+    slope_limit = float(slope_limit)
+    smoothing_passes = int(smoothing_passes)
+    if max_relative_step <= 0.0:
+        raise ValueError("max_relative_step must be positive")
+    if radius_floor <= 0.0:
+        raise ValueError("radius_floor must be positive")
+    if slope_limit <= 0.0:
+        raise ValueError("slope_limit must be positive")
+    if smoothing_passes < 0:
+        raise ValueError("smoothing_passes must be nonnegative")
+
+    z = np.asarray(diagnostic.z, dtype=float)
+    if z.ndim != 1 or z.size < 2 or not np.all(np.diff(z) > 0.0):
+        raise ValueError("diagnostic z nodes must be a strictly increasing one-dimensional array")
+    radius = np.mean(np.asarray(diagnostic.boundary_r, dtype=float), axis=0)
+    residual = np.mean(np.asarray(diagnostic.pressure_balance, dtype=float), axis=0)
+    external_br = np.mean(np.asarray(external_sample.br, dtype=float), axis=0)
+    external_bz = np.mean(np.asarray(external_sample.bz, dtype=float), axis=0)
+    if external_br.shape != radius.shape or external_bz.shape != radius.shape:
+        raise ValueError("external field sample must have shape (ntheta, nxi)")
+    slope = np.zeros_like(radius)
+    active = np.abs(external_bz) > np.finfo(float).eps
+    slope[active] = external_br[active] / external_bz[active]
+    slope = np.clip(slope, -slope_limit, slope_limit)
+
+    center = int(np.argmin(np.abs(z)))
+    target = np.empty_like(radius)
+    target[center] = radius[center]
+    for index in range(center + 1, z.size):
+        dz = z[index] - z[index - 1]
+        target[index] = target[index - 1] + 0.5 * (slope[index - 1] + slope[index]) * dz
+    for index in range(center - 1, -1, -1):
+        dz = z[index + 1] - z[index]
+        target[index] = target[index + 1] - 0.5 * (slope[index + 1] + slope[index]) * dz
+
+    delta = target - radius
+    limit = max_relative_step * np.maximum(radius, radius_floor)
+    delta = np.clip(delta, -limit, limit)
+    for _ in range(smoothing_passes):
+        if delta.size > 2:
+            smoothed = delta.copy()
+            smoothed[1:-1] = 0.25 * delta[:-2] + 0.5 * delta[1:-1] + 0.25 * delta[2:]
+            delta = np.clip(smoothed, -limit, limit)
+    new_radius = np.maximum(radius + delta, radius_floor)
+    delta = new_radius - radius
+    if pressure_response is None:
+        response = np.zeros_like(radius)
+    else:
+        response = np.asarray(pressure_response, dtype=float)
+        if response.shape == np.asarray(diagnostic.boundary_r).shape:
+            response = np.mean(response, axis=0)
+        elif response.shape != radius.shape:
+            raise ValueError("pressure_response must have shape (ntheta, nxi) or (nxi,)")
+    predicted = residual + response * delta
+    xi = 2.0 * (z - z[0]) / (z[-1] - z[0]) - 1.0
+    return MirrorLCFSUpdateProposal(
+        z=z,
+        xi=xi,
+        old_radius=radius,
+        new_radius=new_radius,
+        delta_radius=delta,
+        pressure_response=response,
+        pressure_balance_before=residual,
+        pressure_balance_predicted=predicted,
+        pressure_balance_rms_before=float(np.sqrt(np.mean(residual**2))),
+        pressure_balance_rms_predicted=float(np.sqrt(np.mean(predicted**2))),
+        damping=1.0,
+        max_relative_step=max_relative_step,
+        cap_taper_power=0.0,
+        smoothing_passes=smoothing_passes,
+        preserve_caps=False,
+        boundary=MirrorBoundary.tabulated_radius(xi, new_radius),
+        strategy="bnormal_slope",
+    )
