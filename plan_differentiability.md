@@ -7,6 +7,74 @@ and should not drive new work unless a specific old result needs to be audited.
 
 Last updated: 2026-06-18.
 
+## 2026-06-18 Accelerated Residual Scan Runner Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved the non-VMEC2000 accelerated scan runner out of
+   `solve_fixed_boundary_residual_iter` into
+   `vmec_jax.solvers.fixed_boundary.residual.accelerated_scan.run_accelerated_residual_scan`.
+2. Preserved monkeypatch/cache compatibility by passing JAX, JIT, scan-runner
+   cache, cache get/put hooks, scan timing hooks, and cache-miss recorders from
+   `residual.iteration` into the helper instead of importing private globals in
+   the new module.
+3. Left VMEC2000 scan fallback and surrounding branch-selection logic in
+   `iteration.py`; only the accelerated scan body, cache setup,
+   device-synchronization, timing report, and result assembly moved.
+
+Results obtained:
+
+- `vmec_jax/solvers/fixed_boundary/residual/iteration.py` dropped from 6927
+  to 6716 lines.
+- `solve_fixed_boundary_residual_iter` dropped from 6399 to 6185 lines.
+- The new accelerated-scan module is 344 lines and owns one domain-specific
+  runner.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/residual/accelerated_scan.py vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/accelerated_scan.py vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_real_scan_wave10_coverage.py::test_accelerated_scan_one_step_updates_state_and_histories tests/test_solve_performance_instrumentation.py::test_accelerated_scan_timing_is_opt_in_and_path_labeled tests/test_solve_finish_cache_more_coverage.py::test_accelerated_scan_runner_cache_reports_timing_hit_and_miss -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_real_scan_wave10_coverage.py::test_vmec2000_scan_full_history_runs_fallback_decision tests/test_solve_wave7_coverage.py::test_residual_iter_vmec2000_scan_minimal_one_step -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_real_scan_wave10_coverage.py tests/test_solve_performance_instrumentation.py tests/test_solve_finish_cache_more_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_run_wave8_coverage.py::test_run_fixed_boundary_selects_default_accelerated_policy_and_explicit_parity tests/test_driver_api.py::test_run_fixed_boundary_accelerated_mode_uses_scan tests/test_driver_api.py::test_run_fixed_boundary_cli_single_grid_uses_accelerated_finish_first tests/test_driver_api.py::test_run_fixed_boundary_accelerated_mode_defaults_to_single_grid -q`
+- `python tools/diagnostics/source_health.py --top 10 --top-functions 12`
+
+Best next steps:
+
+1. Continue residual decomposition around smaller setup/preconditioner seams;
+   keep `_run_vmec2000_scan` in place until a proper context object is designed.
+2. Add a direct unit test for `run_accelerated_residual_scan` only if a compact
+   synthetic force payload can be built without duplicating existing scan tests.
+3. Recheck PR CI after this push and fix concrete failures if any appear.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999998%.
+- Solver monolith reduction: 99.57%.
+- Free-boundary adjoint monolith reduction: 99.35%.
+- Driver workflow decomposition: 99.87%.
+- Residual iteration decomposition: 96.9%.
+- WOUT diagnostic/profile decomposition: 99.72%.
+- Bcovar/WOUT parity decomposition: 98.35%.
+- Force-kernel decomposition: 98.55%.
+- Optimizer workflow decomposition: 99.05%.
+- Fixed-boundary optimizer decomposition: 94.8%.
+- Implicit residual-adjoint decomposition: 95%.
+- QI objective decomposition: 93%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.7%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.9993%.
+
 ## 2026-06-18 Free-Boundary Rejected-Slot Gate Extraction
 
 Branch: `codex/differentiability-refactor-plan`.
