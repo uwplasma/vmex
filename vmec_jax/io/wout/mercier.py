@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import os
 from typing import Any, Callable
 
@@ -17,6 +18,18 @@ from vmec_jax.vmec_realspace import (
 )
 
 MU0 = 4e-7 * np.pi
+
+
+@dataclass(frozen=True)
+class _MercierWeightedSumContext:
+    """Surface-quadrature policy used by Mercier/JXBFORCE reducers."""
+
+    wint: np.ndarray
+    ntheta: int
+    nzeta: int
+    exact_sum: bool
+    sum_w: Callable[[np.ndarray], float]
+    wint_f: np.ndarray | None
 
 
 def _require_dependency(name: str, value):
@@ -166,6 +179,132 @@ def _jxbforce_1d_current_diagnostics(
     return jdotb, bdotb, bdotgradv
 
 
+def _mercier_weighted_sum_context(*, trig, vmec_wint_from_trig) -> _MercierWeightedSumContext:
+    """Return the VMEC-compatible weighted surface-sum implementation."""
+    wint = vmec_wint_from_trig(trig)
+    nzeta = int(wint.shape[1])
+    ntheta = int(wint.shape[0])
+    exact_sum = os.getenv("VMEC_JAX_MERCIER_EXACT_SUM", "").strip().lower() not in ("", "0", "false", "no")
+    if exact_sum:
+        # Match VMEC2000 Fortran summation order on cancellation-sensitive
+        # surface averages (slow; intended for parity debugging).
+        def _sum_w(arr: np.ndarray) -> float:
+            acc = 0.0
+            for j in range(ntheta):
+                wrow = wint[j]
+                arow = arr[j]
+                for k in range(nzeta):
+                    acc += float(arow[k]) * float(wrow[k])
+            return acc
+
+        wint_f = None
+    else:
+        wint_f = np.asarray(wint, dtype=float)
+
+        def _sum_w(arr: np.ndarray) -> float:
+            # Fast path: vectorized weighted sum on the reduced (theta,zeta) grid.
+            return float(np.einsum("ij,ij->", np.asarray(arr, dtype=float), wint_f, optimize=True))
+
+    return _MercierWeightedSumContext(
+        wint=np.asarray(wint, dtype=float),
+        ntheta=int(ntheta),
+        nzeta=int(nzeta),
+        exact_sum=bool(exact_sum),
+        sum_w=_sum_w,
+        wint_f=None if wint_f is None else np.asarray(wint_f, dtype=float),
+    )
+
+
+def _mercier_parity_geometry_fields(
+    *,
+    state: VMECState,
+    geom_modes,
+    trig,
+    s: np.ndarray,
+    lconm1: bool,
+    lthreed: bool,
+    lasym: bool,
+) -> dict[str, np.ndarray]:
+    """Synthesize even/odd geometry channels used by VMEC Mercier terms."""
+    m = np.asarray(geom_modes.m)
+    mask_even = (m % 2) == 0
+    mask_odd = np.logical_not(mask_even)
+    Rcos = np.asarray(state.Rcos)
+    Rsin = np.asarray(state.Rsin)
+    Zcos = np.asarray(state.Zcos)
+    Zsin = np.asarray(state.Zsin)
+    if bool(lconm1):
+        Rcos, Zsin, Rsin, Zcos = vmec_m1_internal_to_physical_signed(
+            Rcos=Rcos,
+            Zsin=Zsin,
+            Rsin=Rsin,
+            Zcos=Zcos,
+            modes=geom_modes,
+            lthreed=bool(lthreed),
+            lasym=bool(lasym),
+            lconm1=bool(lconm1),
+        )
+    Rcos = _apply_vmec_axis_rules(Rcos, m)
+    Rsin = _apply_vmec_axis_rules(Rsin, m)
+    Zcos = _apply_vmec_axis_rules(Zcos, m)
+    Zsin = _apply_vmec_axis_rules(Zsin, m)
+
+    coeff_cos_stack = np.stack([Rcos, Zcos], axis=0)
+    coeff_sin_stack = np.stack([Rsin, Zsin], axis=0)
+    mask_stack = np.stack([mask_even.astype(float), mask_odd.astype(float)], axis=0)
+    coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
+    coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
+
+    stack = vmec_realspace_synthesis(
+        coeff_cos=coeff_cos,
+        coeff_sin=coeff_sin,
+        modes=geom_modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=True,
+        s=s,
+    )
+    stack_t = vmec_realspace_synthesis_dtheta(
+        coeff_cos=coeff_cos,
+        coeff_sin=coeff_sin,
+        modes=geom_modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=True,
+        s=s,
+    )
+    stack_p = vmec_realspace_synthesis_dzeta_phys(
+        coeff_cos=coeff_cos,
+        coeff_sin=coeff_sin,
+        modes=geom_modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=True,
+        s=s,
+    )
+    even = np.asarray(stack[0])
+    odd = np.asarray(stack[1])
+    even_t = np.asarray(stack_t[0])
+    odd_t = np.asarray(stack_t[1])
+    even_p = np.asarray(stack_p[0])
+    odd_p = np.asarray(stack_p[1])
+
+    return {
+        "R_even": even[0],
+        "R_odd": odd[0],
+        "Z_even": even[1],
+        "Z_odd": odd[1],
+        "Ru_even": even_t[0],
+        "Ru_odd": odd_t[0],
+        "Zu_even": even_t[1],
+        "Zu_odd": odd_t[1],
+        "Rv_even": even_p[0],
+        "Rv_odd": odd_p[0],
+        "Zv_even": even_p[1],
+        "Zv_odd": odd_p[1],
+    }
+
+
 def compute_mercier(
     *,
     state: VMECState,
@@ -252,35 +391,14 @@ def compute_mercier(
     vp_real = np.zeros_like(phip_real)
     vp_real[1:] = sign_jac * (2.0 * np.pi) ** 2 * np.asarray(vp[1:], dtype=float) / phip_real[1:]
 
-    wint = vmec_wint_from_trig(trig)
-    nzeta = wint.shape[1]
-    ntheta = wint.shape[0]
-    exact_sum = os.getenv("VMEC_JAX_MERCIER_EXACT_SUM", "").strip().lower() not in ("", "0", "false", "no")
-    if exact_sum:
-        # Match VMEC2000 Fortran summation order on cancellation-sensitive
-        # surface averages (slow; intended for parity debugging).
-        def _sum_w(arr: np.ndarray) -> float:
-            acc = 0.0
-            for j in range(ntheta):
-                wrow = wint[j]
-                arow = arr[j]
-                for k in range(nzeta):
-                    acc += float(arow[k]) * float(wrow[k])
-            return acc
-    else:
-        wint_f = np.asarray(wint, dtype=float)
-
-        def _sum_w(arr: np.ndarray) -> float:
-            # Fast path: vectorized weighted sum on the reduced (theta,zeta) grid.
-            return float(np.einsum("ij,ij->", np.asarray(arr, dtype=float), wint_f, optimize=True))
-
-    # Geometry fields on the full mesh (physical values from internal VMEC coefficients).
-    R = np.asarray(geom["R"], dtype=float)
-    Z = np.asarray(geom["Z"], dtype=float)
-    Ru = np.asarray(geom["Ru"], dtype=float)
-    Zu = np.asarray(geom["Zu"], dtype=float)
-    Rv = np.asarray(geom["Rv"], dtype=float)
-    Zv = np.asarray(geom["Zv"], dtype=float)
+    sum_context = _mercier_weighted_sum_context(
+        trig=trig,
+        vmec_wint_from_trig=vmec_wint_from_trig,
+    )
+    wint = sum_context.wint
+    nzeta = sum_context.nzeta
+    exact_sum = sum_context.exact_sum
+    _sum_w = sum_context.sum_w
 
     bsubs = compute_bsubs_half_mesh(
         state=state,
@@ -373,82 +491,25 @@ def compute_mercier(
                 else np.asarray(bsubv_parity_odd, dtype=float),
             )
 
-    # Parity-decomposed geometry (totzsps convention): X = X_even + sqrt(s)*X_odd.
-    m = np.asarray(geom_modes.m)
-    mask_even = (m % 2) == 0
-    mask_odd = np.logical_not(mask_even)
-    Rcos = np.asarray(state.Rcos)
-    Rsin = np.asarray(state.Rsin)
-    Zcos = np.asarray(state.Zcos)
-    Zsin = np.asarray(state.Zsin)
-    if bool(lconm1):
-        Rcos, Zsin, Rsin, Zcos = vmec_m1_internal_to_physical_signed(
-            Rcos=Rcos,
-            Zsin=Zsin,
-            Rsin=Rsin,
-            Zcos=Zcos,
-            modes=geom_modes,
-            lthreed=bool(lthreed),
-            lasym=bool(lasym),
-            lconm1=bool(lconm1),
-        )
-    Rcos = _apply_vmec_axis_rules(Rcos, m)
-    Rsin = _apply_vmec_axis_rules(Rsin, m)
-    Zcos = _apply_vmec_axis_rules(Zcos, m)
-    Zsin = _apply_vmec_axis_rules(Zsin, m)
-
-    coeff_cos_stack = np.stack([Rcos, Zcos], axis=0)
-    coeff_sin_stack = np.stack([Rsin, Zsin], axis=0)
-    mask_stack = np.stack([mask_even.astype(float), mask_odd.astype(float)], axis=0)
-    coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
-    coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
-
-    stack = vmec_realspace_synthesis(
-        coeff_cos=coeff_cos,
-        coeff_sin=coeff_sin,
-        modes=geom_modes,
+    geom_channels = _mercier_parity_geometry_fields(
+        state=state,
+        geom_modes=geom_modes,
         trig=trig,
-        coeffs_internal=True,
-        apply_scalxc=True,
         s=s,
+        lconm1=bool(lconm1),
+        lthreed=bool(lthreed),
+        lasym=bool(lasym),
     )
-    stack_t = vmec_realspace_synthesis_dtheta(
-        coeff_cos=coeff_cos,
-        coeff_sin=coeff_sin,
-        modes=geom_modes,
-        trig=trig,
-        coeffs_internal=True,
-        apply_scalxc=True,
-        s=s,
-    )
-    stack_p = vmec_realspace_synthesis_dzeta_phys(
-        coeff_cos=coeff_cos,
-        coeff_sin=coeff_sin,
-        modes=geom_modes,
-        trig=trig,
-        coeffs_internal=True,
-        apply_scalxc=True,
-        s=s,
-    )
-    even = np.asarray(stack[0])
-    odd = np.asarray(stack[1])
-    even_t = np.asarray(stack_t[0])
-    odd_t = np.asarray(stack_t[1])
-    even_p = np.asarray(stack_p[0])
-    odd_p = np.asarray(stack_p[1])
-
-    R_even = even[0]
-    R_odd = odd[0]
-    Z_even = even[1]
-    Z_odd = odd[1]
-    Ru_even = even_t[0]
-    Ru_odd = odd_t[0]
-    Zu_even = even_t[1]
-    Zu_odd = odd_t[1]
-    Rv_even = even_p[0]
-    Rv_odd = odd_p[0]
-    Zv_even = even_p[1]
-    Zv_odd = odd_p[1]
+    R_even = geom_channels["R_even"]
+    R_odd = geom_channels["R_odd"]
+    Ru_even = geom_channels["Ru_even"]
+    Ru_odd = geom_channels["Ru_odd"]
+    Zu_even = geom_channels["Zu_even"]
+    Zu_odd = geom_channels["Zu_odd"]
+    Rv_even = geom_channels["Rv_even"]
+    Rv_odd = geom_channels["Rv_odd"]
+    Zv_even = geom_channels["Zv_even"]
+    Zv_odd = geom_channels["Zv_odd"]
 
     # VMEC jxbforce-style derivatives of bsubs on the reduced grid.
     mmax = int(mmax_force)
@@ -786,7 +847,7 @@ def compute_mercier(
         sign_jac=float(sign_jac),
         exact_sum=bool(exact_sum),
         sum_w=_sum_w,
-        wint_f=None if exact_sum else np.asarray(wint_f, dtype=float),
+        wint_f=sum_context.wint_f,
     )
 
     jdotb, bdotb, bdotgradv = _jxbforce_1d_current_diagnostics(
