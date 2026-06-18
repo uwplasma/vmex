@@ -631,16 +631,30 @@ def _write_fsq_history_plot(rows: list[dict[str, object]], *, outdir: Path) -> s
     outdir.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots(1, 1, figsize=(7.0, 4.2), constrained_layout=True)
     for row in history_rows:
+        history = np.asarray(row.get("fsq_history", []), dtype=float).reshape(-1)
+        vmec2000_history = np.asarray(row.get("vmec2000_fsq_history", []), dtype=float).reshape(-1)
+        finite_history = np.concatenate(
+            [
+                history[np.isfinite(history) & (history > 0.0)],
+                vmec2000_history[np.isfinite(vmec2000_history) & (vmec2000_history > 0.0)],
+            ]
+        )
+        visible_scale = float(np.max(finite_history)) if finite_history.size else 0.0
         direct_initial = row.get("direct_initial_fsq")
         if direct_initial is not None:
+            direct_value = float(direct_initial)
+            plot_value = direct_value
+            label = f"{row['case']} VMEC/JAX direct initial"
+            if visible_scale > 0.0 and direct_value > 1.0e4 * visible_scale:
+                plot_value = 10.0 * visible_scale
+                label = f"{label} (off-scale {direct_value:.2e})"
             ax.semilogy(
                 [0],
-                [max(float(direct_initial), 1.0e-300)],
+                [max(plot_value, 1.0e-300)],
                 "*",
                 ms=8,
-                label=f"{row['case']} VMEC/JAX direct initial",
+                label=label,
             )
-        history = np.asarray(row.get("fsq_history", []), dtype=float).reshape(-1)
         if history.size:
             iters = _row_history_iterations(row, int(history.size))
             ax.semilogy(
@@ -651,7 +665,6 @@ def _write_fsq_history_plot(rows: list[dict[str, object]], *, outdir: Path) -> s
                 ms=3,
                 label=f"{row['case']} VMEC/JAX",
             )
-        vmec2000_history = np.asarray(row.get("vmec2000_fsq_history", []), dtype=float).reshape(-1)
         if vmec2000_history.size:
             vmec2000_iters = np.asarray(row.get("vmec2000_iter_history", []), dtype=int).reshape(-1)
             if vmec2000_iters.size != vmec2000_history.size:

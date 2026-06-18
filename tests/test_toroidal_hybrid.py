@@ -460,6 +460,27 @@ def test_toroidal_hybrid_convergence_history_summary_uses_iteration_labels():
         module._parse_shape_cases("unknown")
 
 
+def test_toroidal_hybrid_fsq_history_plot_handles_offscale_direct_initial(tmp_path: Path):
+    module = import_module("examples.toroidal_stellarator_mirror_hybrid_convergence")
+    path = module._write_fsq_history_plot(
+        [
+            {
+                "case": "offscale",
+                "direct_initial_fsq": 1.0e11,
+                "fsq_history": [1.0e-1, 1.0e-2],
+                "iter_history": [1, 2],
+                "vmec2000_fsq_history": [1.0e-1, 1.0e-3],
+                "vmec2000_iter_history": [1, 2],
+            }
+        ],
+        outdir=tmp_path,
+    )
+
+    assert path is not None
+    assert Path(path).exists()
+    assert Path(path).stat().st_size > 0
+
+
 def test_toroidal_hybrid_axis_initialization_policy_tracks_solver_mode_and_env(monkeypatch):
     module = import_module("examples.toroidal_stellarator_mirror_hybrid_convergence")
 

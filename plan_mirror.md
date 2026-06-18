@@ -14241,3 +14241,169 @@ Results:
 No user input is needed.
 
 ---
+
+## 113. 2026-06-18 M14 toroidal hybrid fixed-boundary and VMEC2000 evidence
+
+### Steps taken
+
+With the rotating-ellipse corner fixture in place, I ran the first finite
+fixed-boundary evidence cases and a local VMEC2000 comparison.  The residual
+history plot also needed a small robustness fix: the raw-axis direct-initial
+diagnostic can be intentionally enormous in parity mode, so the plot now marks
+that value as off-scale instead of letting it compress the useful residual
+history.
+
+Concretely:
+
+- ran a default rotating-ellipse toroidal hybrid VMEC/JAX solve with `ns=7`,
+  `mpol:ntor=5:20`, `max_iter=25`, and `nstep=1`;
+- ran the same low-resolution input in parity mode with `--no-use-scan`,
+  `--no-cli-finish`, and `--run-vmec2000`;
+- updated `_write_fsq_history_plot` so direct-initial outliers are plotted near
+  the visible history and labeled with their true off-scale value;
+- added a regression test for the off-scale direct-initial plot path.
+
+### Results obtained
+
+VMEC/JAX accelerated CLI-style 25-iteration evidence:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_hybrid_m113_lowres_solve25 \
+  --ns-array 7 \
+  --mode-pairs 5:20 \
+  --ntheta-fit 64 \
+  --nzeta-fit 64 \
+  --shape-cases default \
+  --run-solve \
+  --max-iter 25 \
+  --nstep 1
+```
+
+Observed:
+
+- first stored `fsq`: `2.161189183188116e-4`;
+- best/final `fsq`: `7.00103198199691e-6` at iteration `24`;
+- reduction from first stored row: `30.87x`;
+- not converged to `ftol=1e-9`;
+- aspect: `5.565962975574549`;
+- mean iota: `0.014328435636658836`;
+- magnetic well proxy: `-0.10440717436433497`;
+- valid side orientation span: `0.0`;
+- valid corner orientation span: `2.5463968425417773`.
+
+VMEC/JAX parity plus VMEC2000 comparison evidence:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_hybrid_m114_vmec2000_compare \
+  --ns-array 7 \
+  --mode-pairs 5:20 \
+  --ntheta-fit 64 \
+  --nzeta-fit 64 \
+  --shape-cases default \
+  --run-solve \
+  --max-iter 25 \
+  --nstep 1 \
+  --solver-mode parity \
+  --no-use-scan \
+  --no-cli-finish \
+  --run-vmec2000 \
+  --vmec2000-timeout-s 120
+```
+
+Observed:
+
+- VMEC/JAX first stored `fsq`: `0.10777007753805128`;
+- VMEC2000 first `threed1` `fsq`: `0.1078`;
+- first-row ratio VMEC/JAX / VMEC2000: `0.9997224261414774`;
+- VMEC/JAX best/final `fsq` after 25 rows: `0.007967987810592103`;
+- VMEC2000 best/final `fsq` after 80 rows: `6.116e-6`;
+- VMEC2000 residual reduction: `17625.9x`;
+- raw-axis direct-initial diagnostic: `1.0015553931025441e11`, intentionally
+  off-scale relative to the first stored residual;
+- VMEC2000 final component residuals:
+  - `fsqr = 2.5839013890856746e-6`;
+  - `fsqz = 2.6858120494979713e-6`;
+  - `fsql = 8.458938582274209e-7`.
+
+The comparison shows that the first stored VMEC/JAX parity residual matches the
+VMEC2000 first row closely, but the current 25-row VMEC/JAX parity trajectory is
+not yet matching VMEC2000's later convergence depth.  That makes the next
+solver step concrete: inspect parity trajectory controls and/or run a longer
+parity case before claiming fixed-boundary convergence parity for this hybrid.
+
+Rendered ignored plots:
+
+- `results/toroidal_hybrid_m113_lowres_solve25/figures/toroidal_hybrid_fsq_history.png`;
+- `results/toroidal_hybrid_m113_lowres_solve25/figures/toroidal_hybrid_profiles.png`;
+- `results/toroidal_hybrid_m114_vmec2000_compare/figures/toroidal_hybrid_fsq_history.png`;
+- `results/toroidal_hybrid_m114_vmec2000_compare/figures/toroidal_hybrid_parity_components.png`.
+
+### How it was tested
+
+Commands run:
+
+```bash
+python -m ruff check examples/toroidal_stellarator_mirror_hybrid_convergence.py tests/test_toroidal_hybrid.py
+python -m ruff format --check examples/toroidal_stellarator_mirror_hybrid_convergence.py tests/test_toroidal_hybrid.py
+JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
+git diff --check
+```
+
+Results:
+
+- Ruff lint passed.
+- Ruff format check passed.
+- `26 passed` in `tests/test_toroidal_hybrid.py`.
+- `git diff --check` passed.
+- VMEC/JAX and VMEC2000 evidence runs completed and rendered.
+
+### File structure and best-practice notes
+
+- The plotting fix stays in the convergence example because it is report
+  presentation logic.
+- The new regression test uses a temporary plot path and leaves the repository
+  clean.
+- Solver code was not changed in this tranche; the evidence points to the next
+  solver-parity investigation.
+- Generated evidence remains under ignored `results/`.
+
+### Best next steps
+
+1. Commit and push M113.
+2. Run a longer VMEC/JAX parity case on the same input and compare the full
+   residual trajectory with VMEC2000.
+3. If VMEC/JAX still stalls above VMEC2000, inspect the parity branch update
+   controls, restart behavior, and bcovar update cadence for this high-`ntor`
+   hybrid.
+4. After parity behavior is understood, run the accelerated CLI path with a
+   tighter convergence target and record the cost/residual tradeoff.
+5. Continue circular-coil finite-beta/free-boundary work after the fixed-boundary
+   hybrid evidence is stable.
+
+### Completion percentages after M113
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `87%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `90%`.
+- I/O schema and docs: `97%`.
+- Differentiable solved-state API: `30%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `74%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `92%`.
+- ESSOS circular-coil mirror beta scan: `66%`.
+- PR merge readiness overall: `95%`.
+
+### User input needed
+
+No user input is needed.
+
+---
