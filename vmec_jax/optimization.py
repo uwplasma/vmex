@@ -49,13 +49,7 @@ from .optimizers.fixed_boundary.parameterization import indexed_boundary_maps_fr
 from .optimizers.fixed_boundary.parameterization import lift_boundary_params
 from .optimizers.fixed_boundary.parameterization import rebuild_indata_with_resolution
 from .optimizers.fixed_boundary.parameterization import truncate_indata_boundary_modes
-from .optimizers.fixed_boundary.profiling import profile_async_phase
-from .optimizers.fixed_boundary.profiling import profile_blocking_phase
-from .optimizers.fixed_boundary.profiling import profile_dump
-from .optimizers.fixed_boundary.profiling import profile_exact_tape_solver_timing
-from .optimizers.fixed_boundary.profiling import profile_solver_free_boundary_timing
-from .optimizers.fixed_boundary.profiling import profile_solver_timing
-from .optimizers.fixed_boundary.profiling import sync_replay_timing_enabled
+from .optimizers.fixed_boundary import profiling as _profiling
 from .optimizers.fixed_boundary.qs_residuals import make_qh_residuals_fn as _make_qh_residuals_fn_impl
 from .optimizers.fixed_boundary.qs_residuals import make_qs_residuals_fn as _make_qs_residuals_fn_impl
 from .optimizers.fixed_boundary.replay_policy import chunked_projected_replay_projection_enabled
@@ -70,25 +64,7 @@ from .optimizers.fixed_boundary.scalar_lbfgs import run_lbfgs_adjoint_exact_opti
 from .optimizers.fixed_boundary.scalar_trust import run_scalar_trust_exact_optimizer
 from .optimizers.fixed_boundary.scipy_least_squares import run_scipy_dense_exact_optimizer
 from .optimizers.fixed_boundary.scipy_least_squares import run_scipy_matrix_free_exact_optimizer
-from .optimizers.fixed_boundary.state_cache import base_params_vector
-from .optimizers.fixed_boundary.state_cache import boundary_from_params
-from .optimizers.fixed_boundary.state_cache import boundary_from_params_numpy
-from .optimizers.fixed_boundary.state_cache import boundary_input_from_params
-from .optimizers.fixed_boundary.state_cache import cached_exact_residual
-from .optimizers.fixed_boundary.state_cache import cached_exact_state
-from .optimizers.fixed_boundary.state_cache import cached_trial_residual
-from .optimizers.fixed_boundary.state_cache import callback_point_id
-from .optimizers.fixed_boundary.state_cache import exact_cache_key
-from .optimizers.fixed_boundary.state_cache import indata_from_params
-from .optimizers.fixed_boundary.state_cache import initial_state_from_params
-from .optimizers.fixed_boundary.state_cache import initial_tangent_cache_key
-from .optimizers.fixed_boundary.state_cache import remember_best_exact_point
-from .optimizers.fixed_boundary.state_cache import remember_exact_jacobian
-from .optimizers.fixed_boundary.state_cache import remember_exact_residual
-from .optimizers.fixed_boundary.state_cache import remember_exact_state
-from .optimizers.fixed_boundary.state_cache import remember_initial_state
-from .optimizers.fixed_boundary.state_cache import remember_trial_residual
-from .optimizers.fixed_boundary.state_cache import state_matches_params
+from .optimizers.fixed_boundary import state_cache as _state_cache
 from .profiles import eval_profiles
 from .state import VMECState
 from .static import VMECStatic
@@ -910,7 +886,7 @@ class FixedBoundaryExactOptimizer:
         rec["wall_time_s"] = float(rec["wall_time_s"]) + float(value)
 
     def _profile_solver_free_boundary_timing(self, diagnostics, *, profile_prefix: str) -> None:
-        return profile_solver_free_boundary_timing(self, diagnostics, profile_prefix=profile_prefix)
+        return _profiling.profile_solver_free_boundary_timing(self, diagnostics, profile_prefix=profile_prefix)
 
     def _profile_solver_timing(
         self,
@@ -920,7 +896,7 @@ class FixedBoundaryExactOptimizer:
         phase_wall_s: float,
         unattributed_name: str | None,
     ) -> float:
-        return profile_solver_timing(
+        return _profiling.profile_solver_timing(
             self,
             diagnostics,
             profile_prefix=profile_prefix,
@@ -929,19 +905,19 @@ class FixedBoundaryExactOptimizer:
         )
 
     def _profile_exact_tape_solver_timing(self, tape, tape_build_wall_s: float) -> None:
-        return profile_exact_tape_solver_timing(self, tape, tape_build_wall_s)
+        return _profiling.profile_exact_tape_solver_timing(self, tape, tape_build_wall_s)
 
     def _profile_dump(self) -> dict[str, dict[str, float | int]]:
-        return profile_dump(self)
+        return _profiling.profile_dump(self)
 
     def _sync_replay_timing_enabled(self) -> bool:
-        return sync_replay_timing_enabled()
+        return _profiling.sync_replay_timing_enabled()
 
     def _profile_async_phase(self, name: str, start: float, value):
-        return profile_async_phase(self, name, start, value)
+        return _profiling.profile_async_phase(self, name, start, value)
 
     def _profile_blocking_phase(self, name: str, start: float, value):
-        return profile_blocking_phase(self, name, start, value)
+        return _profiling.profile_blocking_phase(self, name, start, value)
 
     def _make_residuals_eval_fn(self, residuals_fn: Callable) -> Callable:
         """Return the non-differentiating residual evaluator used by callbacks."""
@@ -962,7 +938,7 @@ class FixedBoundaryExactOptimizer:
         return np.asarray(fn(state), dtype=float)
 
     def _callback_point_id(self, cache_key: bytes) -> int:
-        return callback_point_id(self, cache_key)
+        return _state_cache.callback_point_id(self, cache_key)
 
     def _trace_callback_event(
         self,
@@ -1002,13 +978,13 @@ class FixedBoundaryExactOptimizer:
         }
 
     def _exact_cache_key(self, params) -> bytes:
-        return exact_cache_key(params)
+        return _state_cache.exact_cache_key(params)
 
     def _remember_initial_state(self, params, state: VMECState) -> None:
-        return remember_initial_state(self, params, state)
+        return _state_cache.remember_initial_state(self, params, state)
 
     def _initial_state_from_params(self, params, *, profile_name: str) -> VMECState:
-        return initial_state_from_params(
+        return _state_cache.initial_state_from_params(
             self,
             params,
             profile_name=profile_name,
@@ -1079,16 +1055,16 @@ class FixedBoundaryExactOptimizer:
         return flag in ("1", "true", "yes", "on")
 
     def _remember_exact_state(self, cache_key: bytes, state: VMECState) -> None:
-        return remember_exact_state(self, cache_key, state)
+        return _state_cache.remember_exact_state(self, cache_key, state)
 
     def _state_matches_params(self, state: VMECState, params) -> bool:
-        return state_matches_params(self, state, params)
+        return _state_cache.state_matches_params(self, state, params)
 
     def _remember_exact_residual(self, cache_key: bytes, residual: np.ndarray) -> None:
-        return remember_exact_residual(self, cache_key, residual)
+        return _state_cache.remember_exact_residual(self, cache_key, residual)
 
     def _remember_exact_jacobian(self, cache_key: bytes, jacobian: np.ndarray, residual: np.ndarray) -> None:
-        return remember_exact_jacobian(self, cache_key, jacobian, residual)
+        return _state_cache.remember_exact_jacobian(self, cache_key, jacobian, residual)
 
     def _remember_best_exact_point(
         self,
@@ -1098,7 +1074,7 @@ class FixedBoundaryExactOptimizer:
         *,
         state: VMECState | None = None,
     ) -> None:
-        return remember_best_exact_point(self, params, residual, cost, state=state)
+        return _state_cache.remember_best_exact_point(self, params, residual, cost, state=state)
 
     def _exact_history_accepts(self, cost: float) -> bool:
         """Return whether an exact callback row should enter accepted history."""
@@ -1117,34 +1093,34 @@ class FixedBoundaryExactOptimizer:
         *,
         cache_key: bytes | None = None,
     ) -> np.ndarray | None:
-        return cached_exact_residual(self, params, cache_key=cache_key)
+        return _state_cache.cached_exact_residual(self, params, cache_key=cache_key)
 
     def _cached_exact_state(self, params):
-        return cached_exact_state(self, params)
+        return _state_cache.cached_exact_state(self, params)
 
     def _cached_trial_residual(self, params) -> np.ndarray | None:
-        return cached_trial_residual(self, params)
+        return _state_cache.cached_trial_residual(self, params)
 
     def _remember_trial_residual(self, params, residual: np.ndarray) -> None:
-        return remember_trial_residual(self, params, residual)
+        return _state_cache.remember_trial_residual(self, params, residual)
 
     def _boundary_from_params(self, params):
-        return boundary_from_params(self, params)
+        return _state_cache.boundary_from_params(self, params)
 
     def _boundary_from_params_numpy(self, params) -> BoundaryCoeffs:
-        return boundary_from_params_numpy(self, params)
+        return _state_cache.boundary_from_params_numpy(self, params)
 
     def _boundary_input_from_params(self, params) -> BoundaryCoeffs:
-        return boundary_input_from_params(self, params)
+        return _state_cache.boundary_input_from_params(self, params)
 
     def _initial_tangent_cache_key(self, params):
-        return initial_tangent_cache_key(self, params)
+        return _state_cache.initial_tangent_cache_key(self, params)
 
     def _indata_from_params(self, params) -> InData:
-        return indata_from_params(self, params)
+        return _state_cache.indata_from_params(self, params)
 
     def _base_params_vector(self) -> np.ndarray:
-        return base_params_vector(self)
+        return _state_cache.base_params_vector(self)
 
     def _solve_forward(self, params, *, trial: bool = False):
         """Run a forward equilibrium solve."""
