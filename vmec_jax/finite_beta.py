@@ -460,7 +460,6 @@ def mercier_bss_geometry_channels_from_state(
 
     coeff_cos_stack = jnp.stack([Rcos, Zcos], axis=0)
     coeff_sin_stack = jnp.stack([Rsin, Zsin], axis=0)
-    zeros = jnp.zeros_like(coeff_cos_stack)
     mask_even = jnp.asarray((m_np % 2) == 0, dtype=jnp.float64)
     mask_m1 = jnp.asarray(m_np == 1, dtype=jnp.float64)
     mask_odd_rest = jnp.asarray(((m_np % 2) == 1) & (m_np != 1), dtype=jnp.float64)

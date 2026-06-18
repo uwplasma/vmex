@@ -128,9 +128,6 @@ def split_rzl_even_odd_lasym(state, basis) -> ParityRZL:
     m-parity. This helper mirrors that by evaluating the cosine-only and
     sine-only series separately on the full VMEC grid.
     """
-    dtype = jnp.asarray(state.Rcos).dtype
-    zeros = jnp.zeros_like(state.Rcos)
-
     coeff_cos_stack = jnp.stack([state.Rcos, state.Zcos, state.Lcos], axis=0)
     coeff_sin_stack = jnp.stack([state.Rsin, state.Zsin, state.Lsin], axis=0)
 

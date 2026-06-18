@@ -1420,7 +1420,6 @@ def run_boundary_reference_preconditioner(input_file, output_dir, config, *, ctx
         raise RuntimeError("Boundary-reference preconditioner found no successful candidates.")
 
     candidate_pool = [record for record in successful if bool(record.get("qi_engineering_gate_passed"))] or successful
-    target_aspect = float(config.get("target_aspect", _ctx(ctx, "target_aspect")))
     aspect_relative_tolerance = float(config.get("aspect_relative_tolerance", 0.37))
     if bool(config.get("prefer_qi_safe_candidates", True)):
         max_mirror_ratio = float(config.get("max_mirror_ratio", _ctx(ctx, "max_mirror_ratio")))

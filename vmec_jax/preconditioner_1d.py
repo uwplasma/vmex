@@ -112,8 +112,6 @@ def lambda_preconditioner(
                 return out, np.zeros_like(out), debug
             return out, debug
         return (out, np.zeros_like(out)) if return_faclam else out
-    ntheta = int(guu.shape[1])
-    nzeta = int(guu.shape[2])
     w_int = wint_from_config(cfg=cfg)
 
     gsqrt_safe = np.where(gsqrt != 0.0, gsqrt, 1.0)

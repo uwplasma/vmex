@@ -194,7 +194,6 @@ def flux_profiles_from_indata(indata: InData, s, *, signgs: int) -> FluxProfiles
     aphi = _as_float_list(indata.get("APHI", []))
     if not aphi:
         aphi = [1.0]
-    aphi_arr = jnp.asarray(aphi, dtype=s.dtype)
 
     lrfp = bool(indata.get_bool("LRFP", False))
     has_iota_profile = _has_nonzero_profile_coeffs(indata.get("AI", []))

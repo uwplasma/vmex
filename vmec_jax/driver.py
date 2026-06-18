@@ -733,7 +733,6 @@ def run_fixed_boundary(
     use_scan = startup.use_scan
     cli_fixed_boundary_mode = startup.cli_fixed_boundary_mode
     restart_state_eff = startup.restart_state
-    restart_wout = startup.restart_wout
     restart_solver_state = startup.restart_solver_state
     solver_lower = startup.solver_lower
     axis_infer_missing = startup.axis_infer_missing
