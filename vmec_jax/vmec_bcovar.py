@@ -346,7 +346,6 @@ class BcovarFluxContext:
     """Flux/current profiles used by VMEC bcovar and add_fluxes."""
 
     lamscale: Any
-    signgs: int
     phipf_internal: Any
     chips_eff: Any
     ncurr: int
@@ -760,13 +759,117 @@ def _resolve_bcovar_flux_context(*, wout: Any, s: Any, ns: int) -> BcovarFluxCon
         icurv = jnp.zeros((ns,), dtype=phipf_internal.dtype)
     return BcovarFluxContext(
         lamscale=lamscale,
-        signgs=int(signgs),
         phipf_internal=phipf_internal,
         chips_eff=chips_eff,
         ncurr=int(ncurr),
         lcurrent=bool(lcurrent),
         icurv=icurv,
     )
+
+
+def _compute_bcovar_contravariant_field(
+    *,
+    flux_context: BcovarFluxContext,
+    parity: ParityRZL,
+    Lu1: Any,
+    Lv1: Any,
+    jac: VmecHalfMeshJacobian,
+    guu: Any,
+    guv: Any,
+    s: Any,
+    trig: VmecTrigTables,
+    ns: int,
+) -> SimpleNamespace:
+    """Build VMEC half-mesh ``B^u``/``B^v`` channels before reference overrides."""
+
+    lamscale = flux_context.lamscale
+    phipf_internal = flux_context.phipf_internal
+    denom = jac.sqrtg
+    safe_denom = jnp.where(denom != 0, denom, jnp.asarray(1.0, dtype=denom.dtype))
+    overg = jnp.where(denom != 0, 1.0 / safe_denom, 0.0)
+    lu0_full = (lamscale * jnp.asarray(parity.Lt_even)) + jnp.asarray(phipf_internal)[:, None, None]
+    lu1_full = lamscale * jnp.asarray(Lu1)
+    lv0_full = -lamscale * jnp.asarray(parity.Lp_even)
+    lv1_full = -lamscale * jnp.asarray(Lv1)
+
+    pshalf = _pshalf_from_s(s)[:, None, None]
+    zero = jnp.zeros_like(jac.sqrtg)
+    bsupu_even = bsupu_odd = bsupv_even = bsupv_odd = bsupu = bsupv = zero
+    if ns >= 2:
+        bsupv_even = _prepend_axis_zero(0.5 * overg[1:] * (lu0_full[1:] + lu0_full[:-1]), jac.sqrtg)
+        bsupv_odd = _prepend_axis_zero(0.5 * overg[1:] * (lu1_full[1:] + lu1_full[:-1]), jac.sqrtg)
+        bsupu_even = _prepend_axis_zero(0.5 * overg[1:] * (lv0_full[1:] + lv0_full[:-1]), jac.sqrtg)
+        bsupu_odd = _prepend_axis_zero(0.5 * overg[1:] * (lv1_full[1:] + lv1_full[:-1]), jac.sqrtg)
+        bsupv = bsupv_even + pshalf * bsupv_odd
+        bsupu = bsupu_even + pshalf * bsupu_odd
+
+    chips_eff = flux_context.chips_eff
+    if (flux_context.ncurr == 1) and flux_context.lcurrent and (ns >= 2):
+        pwint = vmec_pwint_from_trig(trig, ns=int(overg.shape[0]), nzeta=int(overg.shape[2])).astype(bsupu.dtype)
+        if pwint.shape[1:] != bsupu.shape[1:]:
+            dnorm3 = jnp.asarray(getattr(trig, "dnorm3", 0.0), dtype=bsupu.dtype)
+            pwint = _with_axis_zero(jnp.broadcast_to(dnorm3, bsupu.shape))
+        top = jnp.asarray(flux_context.icurv, dtype=bsupu.dtype) - jnp.sum(
+            pwint * ((guu * bsupu) + (guv * bsupv)),
+            axis=(1, 2),
+        )
+        bot = jnp.sum(pwint * (overg * guu), axis=(1, 2))
+        chips_dyn = jnp.asarray(chips_eff, dtype=bsupu.dtype)
+        safe_bot = jnp.where(bot != 0.0, bot, jnp.asarray(1.0, dtype=bot.dtype))
+        chips_eff = jnp.concatenate([jnp.zeros_like(chips_dyn[:1]), jnp.where(bot != 0.0, top / safe_bot, chips_dyn)[1:]], axis=0)
+
+    chip_term = jnp.asarray(chips_eff)[:, None, None] * overg
+    return SimpleNamespace(
+        lamscale=lamscale,
+        phipf_internal=phipf_internal,
+        lu0_full=lu0_full,
+        lu1_full=lu1_full,
+        lv0_full=lv0_full,
+        lv1_full=lv1_full,
+        bsupu=bsupu + chip_term,
+        bsupv=bsupv,
+        bsupu_even=bsupu_even + chip_term,
+        bsupu_odd=bsupu_odd,
+        bsupv_even=bsupv_even,
+        bsupv_odd=bsupv_odd,
+    )
+
+
+def _resolve_bcovar_half_mesh_pressure(*, wout: Any, pres: Any | None, mass: Any | None, jac, ns: int, trig):
+    """Resolve VMEC half-mesh pressure, including the finite-beta mass profile path."""
+
+    try:
+        mass_in = mass if mass is not None else getattr(wout, "mass", None)
+    except Exception:
+        mass_in = mass
+    try:
+        gamma = getattr(wout, "gamma", None)
+    except Exception:
+        gamma = None
+    if mass_in is not None and gamma is not None and trig is not None:
+        try:
+            sqrtg = jnp.asarray(jac.sqrtg)
+            pwint = vmec_pwint_from_trig(trig, ns=int(ns), nzeta=int(sqrtg.shape[2]))
+            signgs = int(getattr(wout, "signgs", 1))
+            vp = jnp.sum(jnp.asarray(float(signgs), dtype=sqrtg.dtype) * pwint * sqrtg, axis=(1, 2))
+            mass_in = jnp.asarray(mass_in, dtype=vp.dtype)
+            safe_vp = jnp.where(vp != 0.0, vp, jnp.asarray(1.0, dtype=vp.dtype))
+            pres_1d = jnp.where(vp != 0.0, mass_in / (safe_vp**float(gamma)), jnp.asarray(0.0, dtype=vp.dtype))
+            return pres_1d[:, None, None]
+        except Exception:
+            pass
+    return jnp.asarray(wout.pres if pres is None else pres)[:, None, None]
+
+
+def _apply_freeb_bsqvac_edge(*, bsq, pres_h, freeb_bsqvac_edge):
+    if freeb_bsqvac_edge is None:
+        return bsq
+    vac_edge = jnp.asarray(freeb_bsqvac_edge, dtype=bsq.dtype)
+    if vac_edge.ndim != 2:
+        raise ValueError(f"freeb_bsqvac_edge must have shape (ntheta,nzeta), got {vac_edge.shape}")
+    if vac_edge.shape != bsq.shape[1:]:
+        raise ValueError(f"freeb_bsqvac_edge shape mismatch: expected {bsq.shape[1:]}, got {vac_edge.shape}")
+    return _replace_edge_row(bsq, vac_edge + pres_h[-1])
 
 
 def vmec_bcovar_half_mesh_from_wout(
@@ -878,93 +981,32 @@ def vmec_bcovar_half_mesh_from_wout(
     # Contravariant B components (bsupu, bsupv) on the half mesh.
     # ---------------------------------------------------------------------
     field_start = time.perf_counter()
-    # VMEC does not form bsupu/bsupv from pointwise (sqrtg, lam_u, lam_v) alone.
-    # Instead, it:
-    #   1) builds full-mesh LU = d(lambda)/du and LV = -d(lambda)/dv (even/odd-m),
-    #   2) scales LU/LV by lamscale and adds phipf to LU_even,
-    #   3) averages (LU,LV) from full -> half radial mesh using pshalf,
-    #   4) adds the full-mesh flux function chips(js) via `add_fluxes`.
-    #
-    # See `VMEC2000/Sources/General/bcovar.f` and `add_fluxes.f90`.
     flux_context = _resolve_bcovar_flux_context(wout=wout, s=s, ns=int(ns))
-    lamscale = flux_context.lamscale
-    signgs = flux_context.signgs
-    phipf_internal = flux_context.phipf_internal
-    chips_eff = flux_context.chips_eff
-    ncurr = flux_context.ncurr
-    lcurrent = flux_context.lcurrent
-    icurv = flux_context.icurv
-
-    # VMEC bcovar: overg = 1 / sqrtg (phipog in bcovar.f).
-    denom = jac.sqrtg
-    # Avoid NaNs in autodiff by preventing division-by-zero in the inactive branch.
-    safe_denom = jnp.where(denom != 0, denom, jnp.asarray(1.0, dtype=denom.dtype))
-    overg = jnp.where(denom != 0, 1.0 / safe_denom, 0.0)
-
-    # Full-mesh LU = d(lambda)/du and LV = -d(lambda)/dv in VMEC conventions.
-    lu0_full = jnp.asarray(parity.Lt_even)
-    lu1_full = jnp.asarray(Lu1)
-    lv0_full = -jnp.asarray(parity.Lp_even)
-    lv1_full = -jnp.asarray(Lv1)
-
-    # Scale by lamscale and add wout phipf to LU_even (bsupv path).
-    lu0_full = (lamscale * lu0_full) + jnp.asarray(phipf_internal)[:, None, None]
-    lu1_full = lamscale * lu1_full
-    lv0_full = lamscale * lv0_full
-    lv1_full = lamscale * lv1_full
-
+    field = _compute_bcovar_contravariant_field(
+        flux_context=flux_context,
+        parity=parity,
+        Lu1=Lu1,
+        Lv1=Lv1,
+        jac=jac,
+        guu=guu,
+        guv=guv,
+        s=s,
+        trig=trig,
+        ns=int(ns),
+    )
+    lamscale = field.lamscale
+    phipf_internal = field.phipf_internal
+    lu0_full = field.lu0_full
+    lu1_full = field.lu1_full
+    lv0_full = field.lv0_full
+    lv1_full = field.lv1_full
     pshalf = _pshalf_from_s(s)[:, None, None]
-
-    # Radial full->half average (Fortran: for l=2..ns).
-    bsupu_even = jnp.zeros_like(jac.sqrtg)
-    bsupu_odd = jnp.zeros_like(jac.sqrtg)
-    bsupv_even = jnp.zeros_like(jac.sqrtg)
-    bsupv_odd = jnp.zeros_like(jac.sqrtg)
-    bsupu = jnp.zeros_like(jac.sqrtg)
-    bsupv = jnp.zeros_like(jac.sqrtg)
-    if ns >= 2:
-        avg_lu0 = lu0_full[1:] + lu0_full[:-1]
-        avg_lu1 = lu1_full[1:] + lu1_full[:-1]
-        avg_lv0 = lv0_full[1:] + lv0_full[:-1]
-        avg_lv1 = lv1_full[1:] + lv1_full[:-1]
-
-        bsupv_even = _prepend_axis_zero(0.5 * overg[1:] * avg_lu0, jac.sqrtg)
-        bsupv_odd = _prepend_axis_zero(0.5 * overg[1:] * avg_lu1, jac.sqrtg)
-        bsupu_even = _prepend_axis_zero(0.5 * overg[1:] * avg_lv0, jac.sqrtg)
-        bsupu_odd = _prepend_axis_zero(0.5 * overg[1:] * avg_lv1, jac.sqrtg)
-
-        bsupv = bsupv_even + pshalf * bsupv_odd
-        bsupu = bsupu_even + pshalf * bsupu_odd
-
-    if (ncurr == 1) and lcurrent and (ns >= 2):
-        # VMEC's add_fluxes computes chips using bsup in VMEC orientation.
-        pwint = vmec_pwint_from_trig(trig, ns=int(overg.shape[0]), nzeta=int(overg.shape[2])).astype(bsupu.dtype)
-        if pwint.shape[1:] != bsupu.shape[1:]:
-            # The non-VMEC-synthesis path uses the full theta grid instead of
-            # VMEC's reduced ntheta3 grid. Fall back to uniform surface-average
-            # weights on that active grid so the current-driven chips update can
-            # run on the same angular discretization as guu/bsupu/bsupv.
-            dnorm3 = jnp.asarray(getattr(trig, "dnorm3", 0.0), dtype=bsupu.dtype)
-            pwint = jnp.broadcast_to(dnorm3, bsupu.shape)
-            pwint = _with_axis_zero(pwint)
-
-        top = jnp.asarray(icurv, dtype=bsupu.dtype) - jnp.sum(
-            pwint * ((guu * bsupu) + (guv * bsupv)),
-            axis=(1, 2),
-        )
-        bot = jnp.sum(pwint * (overg * guu), axis=(1, 2))
-
-        chips_dyn = jnp.asarray(chips_eff, dtype=bsupu.dtype)
-        safe_bot = jnp.where(bot != 0.0, bot, jnp.asarray(1.0, dtype=bot.dtype))
-        chips_new = jnp.where(bot != 0.0, top / safe_bot, chips_dyn)
-        chips_dyn = jnp.concatenate([jnp.zeros_like(chips_dyn[:1]), chips_new[1:]], axis=0)
-        chips_eff = chips_dyn
-
-    # `add_fluxes`: VMEC updates `bsupu` in VMEC orientation:
-    #   bsupu <- bsupu + chips*overg.
-    chip_term = jnp.asarray(chips_eff)[:, None, None] * overg
-    bsupu_even = bsupu_even + chip_term
-    bsupu = bsupu + chip_term
+    bsupu = field.bsupu
+    bsupv = field.bsupv
+    bsupu_even = field.bsupu_even
+    bsupu_odd = field.bsupu_odd
+    bsupv_even = field.bsupv_even
+    bsupv_odd = field.bsupv_odd
 
     basis_nyq = None
     grid_nyq = None
@@ -1050,54 +1092,9 @@ def vmec_bcovar_half_mesh_from_wout(
             basis_nyq = nyquist_basis_from_wout(wout=wout, grid=_nyq_grid())
         bmag_ref = jnp.asarray(eval_fourier(wout.bmnc, wout.bmns, basis_nyq))
         b2 = bmag_ref * bmag_ref
-    pres_h = None
-    mass_in = None
-    try:
-        mass_in = getattr(wout, "mass", None)
-    except Exception:
-        mass_in = None
-    if mass is not None:
-        mass_in = mass
-    gamma = None
-    try:
-        gamma = float(getattr(wout, "gamma"))
-    except Exception:
-        gamma = None
-    if mass_in is not None and gamma is not None and trig is not None:
-        try:
-            sqrtg = jnp.asarray(jac.sqrtg)
-            nzeta = int(sqrtg.shape[2])
-            pwint = vmec_pwint_from_trig(trig, ns=int(ns), nzeta=int(nzeta))
-            signgs = int(getattr(wout, "signgs", 1))
-            jac_s = jnp.asarray(float(signgs), dtype=sqrtg.dtype) * sqrtg
-            vp = jnp.sum(pwint * jac_s, axis=(1, 2))
-            mass_in = jnp.asarray(mass_in, dtype=vp.dtype)
-            # Axis value is treated as zero in VMEC (pwint masks js=1).
-            safe_vp = jnp.where(vp != 0.0, vp, jnp.asarray(1.0, dtype=vp.dtype))
-            pres_1d = jnp.where(
-                vp != 0.0,
-                mass_in / (safe_vp**gamma),
-                jnp.asarray(0.0, dtype=vp.dtype),
-            )
-            pres_h = pres_1d[:, None, None]
-        except Exception:
-            pres_h = None
-    if pres_h is None:
-        pres_h = jnp.asarray(wout.pres if pres is None else pres)[:, None, None]
+    pres_h = _resolve_bcovar_half_mesh_pressure(wout=wout, pres=pres, mass=mass, jac=jac, ns=int(ns), trig=trig)
     bsq = 0.5 * b2 + pres_h
-    if freeb_bsqvac_edge is not None:
-        vac_edge = jnp.asarray(freeb_bsqvac_edge, dtype=bsq.dtype)
-        if vac_edge.ndim != 2:
-            raise ValueError(
-                f"freeb_bsqvac_edge must have shape (ntheta,nzeta), got {vac_edge.shape}"
-            )
-        if vac_edge.shape != bsq.shape[1:]:
-            raise ValueError(
-                "freeb_bsqvac_edge shape mismatch: "
-                f"expected {bsq.shape[1:]}, got {vac_edge.shape}"
-            )
-        bsq_edge = vac_edge + pres_h[-1]
-        bsq = _replace_edge_row(bsq, bsq_edge)
+    bsq = _apply_freeb_bsqvac_edge(bsq=bsq, pres_h=pres_h, freeb_bsqvac_edge=freeb_bsqvac_edge)
 
     # Force-kernel inputs matching what `forces.f` expects after `bcovar`.
     gij_b_uu = (bsupu * bsupu) * jac.sqrtg
