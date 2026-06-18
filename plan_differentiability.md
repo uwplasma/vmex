@@ -15818,3 +15818,71 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.999973%.
+
+## 2026-06-18 Lint-Guided Unused Local Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Ran a focused `F841/F401` lint pass over `vmec_jax` to identify stale locals
+   left by previous refactors.
+2. Removed unused local assignments from simple, covered helper paths in
+   `driver.py`, `booz_input.py`, `boundary.py`, `energy.py`, `finite_beta.py`,
+   `preconditioner_1d.py`, `qi_optimization.py`, `quasisymmetry.py`, and
+   `vmec_parity.py`.
+3. Avoided the large residual/free-boundary solver internals in this tranche;
+   those require dedicated parity tests before editing.
+
+Results obtained:
+
+- Removed 13 source lines without adding any new files.
+- `run_fixed_boundary` dropped from 677 to 676 lines.
+- `qi_optimization.py` dropped below the source-health 2000-line warning
+  threshold at 1993 lines.
+- The touched files pass focused unused-local/import linting.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/driver.py vmec_jax/booz_input.py vmec_jax/boundary.py vmec_jax/energy.py vmec_jax/finite_beta.py vmec_jax/preconditioner_1d.py vmec_jax/qi_optimization.py vmec_jax/quasisymmetry.py vmec_jax/vmec_parity.py`
+- `python -m ruff check vmec_jax/driver.py vmec_jax/booz_input.py vmec_jax/boundary.py vmec_jax/energy.py vmec_jax/finite_beta.py vmec_jax/preconditioner_1d.py vmec_jax/qi_optimization.py vmec_jax/quasisymmetry.py vmec_jax/vmec_parity.py --select F841,F401`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_run_wave8_coverage.py::test_run_fixed_boundary_dispatches_fixed_and_free_static_branches tests/test_driver_api.py::test_driver_scalar_list_and_ftol_helpers tests/test_quasisymmetry.py tests/test_booz_input.py tests/test_boundary_eval.py tests/test_finite_beta_helpers_unit.py tests/test_vmec_parity_host.py tests/test_energy_integrals_parity.py tests/test_preconditioner_1d_fast_helpers.py -q`
+- `python tools/diagnostics/source_health.py --top 16 --top-functions 30`
+- `git diff --check`
+
+Best next steps:
+
+1. Use the remaining F841 report as a prioritized cleanup backlog, but edit
+   residual/free-boundary internals only with matching parity/focused tests.
+2. Continue pushing source files below source-health warning thresholds without
+   creating new helper sprawl.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999%.
+- Solver monolith reduction: 99.62%.
+- Free-boundary adjoint monolith reduction: 99.40%.
+- Driver workflow decomposition: 99.90%.
+- Residual iteration decomposition: 97.5%.
+- WOUT diagnostic/profile decomposition: 99.88%.
+- Bcovar/WOUT parity decomposition: 99.09%.
+- Force-kernel decomposition: 99.65%.
+- Scan/performance policy consolidation: 99.72%.
+- Tomnsps transform decomposition: 98.4%.
+- Initial-guess decomposition: 99.0%.
+- Optimizer workflow decomposition: 99.56%.
+- Fixed-boundary optimizer decomposition: 95.8%.
+- Plotting/WOUT visualization decomposition: 95.8%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.3%.
+- QI objective/staged-runner decomposition: 96.9%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.999974%.

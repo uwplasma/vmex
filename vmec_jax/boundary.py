@@ -506,7 +506,6 @@ def _boundary_helical_from_internal(
         zbsc = internal.zbsc
 
         m_nonneg = m_arr >= 0
-        m_pos = m_arr > 0
         n_pos = n_arr > 0
         n_zero = n_arr == 0
         n_nonzero = n_arr != 0
