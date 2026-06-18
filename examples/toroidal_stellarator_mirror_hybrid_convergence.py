@@ -127,6 +127,7 @@ _CSV_COLUMNS = (
     "ns",
     "mpol",
     "ntor",
+    "nstep",
     "rbc_count",
     "zbs_count",
     "max_boundary_fit_error",
@@ -286,6 +287,14 @@ def _attach_initial_residual_comparison(row: dict[str, object]) -> None:
         )
 
 
+def _row_history_iterations(row: dict[str, object], history_size: int) -> np.ndarray:
+    """Return stored iteration labels for a row, or a one-based fallback."""
+    labels = np.asarray(row.get("iter_history", []), dtype=int).reshape(-1)
+    if labels.size != int(history_size):
+        return np.arange(1, int(history_size) + 1, dtype=int)
+    return labels
+
+
 def _compute_direct_initial_residual(
     input_path: Path,
     *,
@@ -363,7 +372,7 @@ def _write_fsq_history_plot(rows: list[dict[str, object]], *, outdir: Path) -> s
         direct_initial = row.get("direct_initial_fsq")
         if direct_initial is not None:
             ax.semilogy(
-                [-1],
+                [0],
                 [max(float(direct_initial), 1.0e-300)],
                 "*",
                 ms=8,
@@ -371,8 +380,9 @@ def _write_fsq_history_plot(rows: list[dict[str, object]], *, outdir: Path) -> s
             )
         history = np.asarray(row.get("fsq_history", []), dtype=float).reshape(-1)
         if history.size:
+            iters = _row_history_iterations(row, int(history.size))
             ax.semilogy(
-                np.arange(history.size),
+                iters,
                 np.maximum(history, 1.0e-300),
                 "o-",
                 lw=1.3,
@@ -392,7 +402,7 @@ def _write_fsq_history_plot(rows: list[dict[str, object]], *, outdir: Path) -> s
                 ms=3,
                 label=f"{row['case']} VMEC2000",
             )
-    ax.set_xlabel("iteration (-1 is VMEC/JAX direct initial)")
+    ax.set_xlabel("iteration (0 is VMEC/JAX direct initial)")
     ax.set_ylabel("fsq")
     ax.set_title("Toroidal hybrid residual history")
     ax.grid(True, which="both", alpha=0.25)
@@ -500,6 +510,12 @@ def main() -> None:
     parser.add_argument("--mode-pairs", type=str, default="5:4")
     parser.add_argument("--nfp", type=int, default=2)
     parser.add_argument("--niter", type=int, default=80)
+    parser.add_argument(
+        "--nstep",
+        type=int,
+        default=25,
+        help="VMEC print cadence written into NSTEP; use 1 for full VMEC2000 threed1 trajectories.",
+    )
     parser.add_argument("--ftol", type=float, default=1.0e-9)
     parser.add_argument("--max-iter", type=int, default=3)
     parser.add_argument("--major-radius", type=float, default=1.15)
@@ -565,6 +581,7 @@ def main() -> None:
                     ftol_array=float(args.ftol),
                     **sample_kwargs,
                 )
+                indata.scalars["NSTEP"] = int(args.nstep)
                 input_path = case_dir / "input.toroidal_stellarator_mirror_hybrid"
                 write_indata(input_path, indata)
                 fitted = evaluate_toroidal_hybrid_indata_boundary(
@@ -582,6 +599,7 @@ def main() -> None:
                     "ns": int(ns),
                     "mpol": int(mpol),
                     "ntor": int(ntor),
+                    "nstep": int(args.nstep),
                     "input": str(input_path),
                     "rbc_count": len(indata.indexed.get("RBC", {})),
                     "zbs_count": len(indata.indexed.get("ZBS", {})),
@@ -641,6 +659,7 @@ def main() -> None:
                     "mean_iota": None,
                     "magnetic_well": None,
                     "fsq_history": [],
+                    "iter_history": [],
                     "fsqr_history": [],
                     "fsqz_history": [],
                     "fsql_history": [],
@@ -712,6 +731,11 @@ def main() -> None:
                     if run.result is not None and getattr(run.result, "w_history", None) is not None:
                         fsq_history = np.asarray(run.result.w_history, dtype=float).reshape(-1)
                         row["fsq_history"] = [float(value) for value in fsq_history]
+                        iter_history = np.asarray(diag.get("iter2_history", []), dtype=int).reshape(-1)
+                        if iter_history.size == fsq_history.size:
+                            row["iter_history"] = [int(value) for value in iter_history]
+                        else:
+                            row["iter_history"] = [int(value) for value in range(1, fsq_history.size + 1)]
                         row.update(_summarize_fsq_history(fsq_history))
                         row["initial_residual_source"] = "vmec_jax_solve_history_first_stored_row"
                         for source, history_key, initial_key, final_key, best_key in (

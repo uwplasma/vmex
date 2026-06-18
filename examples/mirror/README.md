@@ -96,9 +96,12 @@ the boundary. With ``--run-solve`` enabled, ``direct_initial_*`` fields evaluate
 the VMEC/JAX residual on the pre-iteration initial state, while ``initial_*``
 fields are the first stored VMEC/JAX solve-history row. VMEC2000 comparisons
 use the first parsed ``threed1`` row. The direct-initial diagnostic can be
-disabled with ``--no-direct-initial-residual`` for large scans. Treat mean-iota
-and direct-initial residual agreement as useful regression signals, and use the
-history fields to understand convergence after solver startup. For
+disabled with ``--no-direct-initial-residual`` for large scans. Pass
+``--nstep 1`` when running ``--run-vmec2000`` to make VMEC2000 print every
+iteration into ``threed1``; the residual-history plot then aligns VMEC/JAX and
+VMEC2000 by actual iteration labels. Treat mean-iota and direct-initial
+residual agreement as useful regression signals, and use the history fields to
+understand convergence after solver startup. For
 toroidal-hybrid geometry refinement, pass ``--shape-cases default,sharp`` to
 scan the default boundary and a sharpened side/corner preset in one run; use
 ``5:10`` or higher ``mpol:ntor`` pairs when asserting exact fit for the

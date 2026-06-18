@@ -94,7 +94,9 @@ Current solver status:
   ``threed1`` row.  A low-resolution audit showed the VMEC/JAX
   boundary-inferred direct initial residual agrees with the VMEC2000 first row
   to within plotting/diagnostic precision, whereas the raw-axis parity branch
-  is a different, deliberately stricter initialization.
+  is a different, deliberately stricter initialization.  Use ``--nstep 1`` in
+  the toroidal-hybrid convergence example when comparing full iteration
+  trajectories.
 
 Later phases finish differentiable optimization APIs, production
 free-boundary LCFS solves, toroidal stellarator-mirror hybrid convergence and

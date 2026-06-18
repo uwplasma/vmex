@@ -243,6 +243,7 @@ def test_toroidal_hybrid_convergence_example_runs_without_solve(tmp_path: Path):
     assert Path(summary["csv"]).exists()
     assert summary["figures"] == {}
     assert all(not row["ran_solve"] for row in summary["rows"])
+    assert all(row["nstep"] == 25 for row in summary["rows"])
     assert all(row["initialization_policy"] == "vmec_jax_default_input_boundary" for row in summary["rows"])
     assert all(
         row["vmec_jax_axis_initialization_policy"] == "boundary_inferred_missing_axis" for row in summary["rows"]
@@ -263,6 +264,7 @@ def test_toroidal_hybrid_convergence_example_runs_without_solve(tmp_path: Path):
     with Path(summary["csv"]).open(newline="") as file_obj:
         csv_row = next(csv.DictReader(file_obj))
     assert csv_row["initialization_policy"] == "vmec_jax_default_input_boundary"
+    assert csv_row["nstep"] == "25"
     assert csv_row["vmec_jax_axis_initialization_policy"] == "boundary_inferred_missing_axis"
     assert csv_row["vmec2000_initialization_policy"] == "vmec2000_default_input_boundary"
     assert csv_row["direct_initial_residual_requested"] == "True"
@@ -325,6 +327,14 @@ def test_toroidal_hybrid_convergence_history_summary_uses_iteration_labels():
     assert summary["fsq_reduction"] == 1.5
     assert summary["final_fsq"] == 5.0
     assert module._parse_shape_cases("default, sharp") == ["default", "sharp"]
+    np.testing.assert_array_equal(
+        module._row_history_iterations({"iter_history": [3, 5, 9]}, 3),
+        np.asarray([3, 5, 9]),
+    )
+    np.testing.assert_array_equal(
+        module._row_history_iterations({"iter_history": [3]}, 3),
+        np.asarray([1, 2, 3]),
+    )
     with pytest.raises(ValueError, match="unknown shape"):
         module._parse_shape_cases("unknown")
 

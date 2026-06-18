@@ -5740,7 +5740,6 @@ No user input is needed.
 
 ---
 
-
 ## 56. 2026-06-17 M8w matrix-free block LSMR correction
 
 This lane converted the successful M8u/M8v block-dense split into a scalable
@@ -12815,6 +12814,215 @@ Results:
 - Free-boundary mirror lane: `68%`.
 - Straight-axis hybrid fixture lane: `25%`.
 - Toroidal stellarator-mirror hybrid lane: `70%`.
+- ESSOS circular-coil mirror beta scan: `53%`.
+- PR merge readiness overall: `93%`.
+
+### User input needed
+
+No user input is needed.
+
+---
+
+## 103. 2026-06-18 M13j full VMEC2000 residual-trajectory labels
+
+### Steps taken
+
+- Checked PR #21 CI before continuing:
+  - completed jobs were passing;
+  - remaining jobs were pending;
+  - no failing CI log needed a fix at this checkpoint.
+- Added an explicit ``--nstep`` option to
+  ``examples/toroidal_stellarator_mirror_hybrid_convergence.py``.
+- Wrote ``NSTEP`` into each generated toroidal-hybrid input so VMEC2000
+  ``threed1`` traces can print every iteration with ``--nstep 1``.
+- Added ``nstep`` to the CSV/JSON schema.
+- Added ``iter_history`` to the JSON schema for VMEC/JAX residual histories.
+- Made the residual-history plot show:
+  - direct VMEC/JAX initial residual at iteration ``0``;
+  - VMEC/JAX solve-history samples at their stored iteration labels, or at
+    the physical one-based fallback ``1..N`` when the lightweight diagnostic
+    path omits labels;
+  - VMEC2000 ``threed1`` rows at their parsed iteration labels.
+- Updated the mirror docs and example README to recommend ``--nstep 1`` for
+  full VMEC/JAX versus VMEC2000 trajectory comparisons.
+
+### Results obtained
+
+Evidence run:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_hybrid_m13j_nstep1_trajectory_audit \
+  --ns-array 7 \
+  --mode-pairs 5:10 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 25 \
+  --nstep 1 \
+  --ftol 1e-9 \
+  --run-solve \
+  --max-iter 8 \
+  --solver-mode accelerated \
+  --no-use-scan \
+  --run-vmec2000 \
+  --vmec2000-exec /Users/rogeriojorge/bin/xvmec2000 \
+  --vmec2000-timeout-s 120
+```
+
+Key results:
+
+- direct VMEC/JAX initial ``fsq = 8.285359474768e-02``;
+- VMEC/JAX direct-initial / VMEC2000 first-row ``fsq`` ratio
+  ``= 1.001372912106``;
+- VMEC/JAX iteration labels ``[1, 2, 3, 4, 5, 6, 7, 8]``;
+- VMEC/JAX ``fsq`` history:
+  ``[4.602563219108e-03, 3.502378151427e-03, 1.497604222532e-03,
+  3.563874272729e-03, 2.573380868047e-03, 1.700582286179e-03,
+  2.035545202556e-03, 1.245978256565e-03]``;
+- VMEC2000 first 10 ``fsq`` rows:
+  ``[8.274000000000e-02, 1.514000000000e-02, 3.742000000000e-02,
+  7.387000000000e-02, 2.497000000000e-02, 3.015000000000e-02,
+  3.551000000000e-02, 2.897000000000e-02, 2.868000000000e-02,
+  3.542000000000e-02]``;
+- aligned VMEC/JAX / VMEC2000 ``fsq`` ratios for iterations 1 to 8:
+  ``[5.562682159909e-02, 2.313327709000e-01, 4.002149178332e-02,
+  4.824521825814e-02, 1.030589054084e-01, 5.640405592635e-02,
+  5.732315411309e-02, 4.300925980548e-02]``;
+- VMEC/JAX best/final ``fsq = 1.245978256565e-03`` in the 8-iteration run;
+- VMEC2000 best/final ``fsq = 6.790000000000e-03`` /
+  ``7.770000000000e-03`` in the 25-iteration printed trace.
+
+Interpretation:
+
+- The direct initial residual now agrees with VMEC2000 at the expected level
+  for this low-resolution toroidal-hybrid audit.
+- The remaining discrepancy is the solver trajectory after startup:
+  accelerated VMEC/JAX immediately moves to much lower force residual than
+  VMEC2000's printed first iterations.
+- Next parity work should compare update controls, preconditioner usage,
+  step acceptance, and lightweight-history timing, not boundary fitting.
+
+Generated ignored artifacts checked:
+
+- ``results/toroidal_hybrid_m13j_nstep1_trajectory_audit/toroidal_stellarator_mirror_hybrid_convergence.json``.
+- ``results/toroidal_hybrid_m13j_nstep1_trajectory_audit/toroidal_stellarator_mirror_hybrid_convergence.csv``.
+- ``results/toroidal_hybrid_m13j_nstep1_trajectory_audit/figures/toroidal_hybrid_fsq_history.png``.
+- ``results/toroidal_hybrid_m13j_nstep1_trajectory_audit/figures/toroidal_hybrid_convergence.png``.
+- ``results/toroidal_hybrid_m13j_nstep1_trajectory_audit/figures/toroidal_hybrid_parity_components.png``.
+- ``results/toroidal_hybrid_m13j_nstep1_trajectory_audit/figures/toroidal_hybrid_profiles.png``.
+
+The figure files are small ignored PNGs, not committed output.
+
+### How it was tested
+
+Commands run:
+
+```bash
+JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
+python -m ruff check examples/toroidal_stellarator_mirror_hybrid_convergence.py tests/test_toroidal_hybrid.py
+python -m ruff format --check examples/toroidal_stellarator_mirror_hybrid_convergence.py tests/test_toroidal_hybrid.py
+git diff --check
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_hybrid_m13j_nstep1_trajectory_audit \
+  --ns-array 7 \
+  --mode-pairs 5:10 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 25 \
+  --nstep 1 \
+  --ftol 1e-9 \
+  --run-solve \
+  --max-iter 8 \
+  --solver-mode accelerated \
+  --no-use-scan \
+  --run-vmec2000 \
+  --vmec2000-exec /Users/rogeriojorge/bin/xvmec2000 \
+  --vmec2000-timeout-s 120
+```
+
+Results:
+
+- `22 passed` in ``tests/test_toroidal_hybrid.py``.
+- Ruff check passed.
+- Ruff format check passed.
+- ``git diff --check`` passed.
+- The ``NSTEP=1`` audit run completed successfully.
+- The refreshed residual-history plot rendered with aligned iteration labels.
+
+### File structure and best-practice notes
+
+- The ``--nstep`` and history-label changes remain inside the root-level
+  convergence example because they are benchmark/reporting controls.
+- The schema assertions stay in ``tests/test_toroidal_hybrid.py`` so the
+  example contract is checked without committing generated output.
+- Documentation updates stay in ``docs/mirror/overview.rst`` and
+  ``examples/mirror/README.md``.
+- All evidence files remain under ignored ``results/`` directories; no bulky
+  benchmark outputs were added to the repository.
+
+### Finite completion plan from here
+
+1. Commit and push M13j.
+2. Recheck PR #21 CI only for concrete failures; do not idle on pending jobs.
+3. M13k: instrument the toroidal-hybrid VMEC/JAX run with solver-step
+   diagnostics that explain the post-initial trajectory gap:
+   - stage mode;
+   - preconditioner/update path;
+   - step acceptance;
+   - restart/axis-reset reason;
+   - history timing.
+4. M13l: add a parity-mode trajectory audit beside the accelerated audit and
+   decide which mismatch is a true regression versus an intended accelerated
+   CLI improvement.
+5. M10: finish a small differentiable solved-state API:
+   - keep CLI performance paths non-differentiable when useful;
+   - expose differentiable residual/objective hooks for JAX workflows;
+   - document when to use implicit/adjoint/custom-VJP approaches instead of
+     tracing the whole CLI solve.
+6. M11: finish mirror-Boozer-like diagnostics and plots for ``|B|``, pitch,
+   iota-like quantities, magnetic well, and force residual trends.
+7. M12/M16: finish the free-boundary circular-coil/ESSOS lane:
+   - keep coil/input generation light;
+   - scan beta ``1%``, ``3%``, and ``10%``;
+   - compare LCFS/on-axis/off-axis fields against analytic circular-loop
+     checks where applicable.
+8. M13: finish the toroidal stellarator-mirror hybrid lane:
+   - mirror sections on the sides;
+   - stellarator shaping in the toroidal corners;
+   - up-down symmetry and one-field-period repetition controls;
+   - fixed-boundary convergence benchmarks and plots.
+9. Final PR-readiness pass:
+   - simplify source files where recent scaffolding can be folded down;
+   - remove duplicated helpers;
+   - tighten docstrings/comments;
+   - run focused tests plus one broader fast-test slice;
+   - keep PR #21 draft until all lanes are ready for review.
+
+### Best next steps
+
+1. Commit and push the current M13j tranche.
+2. Inspect solver diagnostics available from ``run_fixed_boundary`` and
+   ``solve.py`` for the low-resolution toroidal hybrid case.
+3. Add the smallest reporting hook needed to distinguish VMEC/JAX history
+   timing from true update/preconditioner differences.
+
+### Completion percentages after M103
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `87%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `88%`.
+- I/O schema and docs: `96%`.
+- Differentiable solved-state API: `22%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `68%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `73%`.
 - ESSOS circular-coil mirror beta scan: `53%`.
 - PR merge readiness overall: `93%`.
 
