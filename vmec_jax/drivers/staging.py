@@ -147,6 +147,22 @@ class Vmec2000StagedSolveResult:
     stage_statics: list[Any]
 
 
+@dataclass(frozen=True)
+class Vmec2000StageSolvePlan:
+    """Resolved controls for one VMEC2000 stage solve."""
+
+    scan_mode: bool
+    solve_kwargs: dict[str, Any]
+    jit_forces_eff: bool
+    jit_forces_base: bool
+    jit_precompile_noscan: bool
+    jit_warmup_noscan: int
+    explicit_stage_monitor: bool
+    explicit_stage_chunk: int
+    explicit_stage_target: float
+    explicit_stage_monitor_jit_forces: bool
+
+
 def _stage_timing_s(run: Any, timing_solve_total_s: Callable[[dict[str, Any]], float]) -> float:
     try:
         timing = run.result.diagnostics.get("timing", {}) if run.result is not None else {}
@@ -343,6 +359,164 @@ def run_stage_with_optional_explicit_monitor(
     return result, effective_mode
 
 
+def _build_vmec2000_stage_solve_plan(
+    ctx: Vmec2000StagedSolveContext,
+    *,
+    stage_index: int,
+    nstep: int,
+    niter: int,
+    ftol: float,
+    static_i: Any,
+    state: Any,
+    state_stage_start: Any,
+    resume_state_stage: Any,
+    stage_accelerated_mode: bool,
+    scan_mode: bool,
+    jit_forces_base: bool,
+    jit_forces_eff: bool,
+    jit_precompile_eff: bool,
+    jit_warmup_iters: int,
+    jit_precompile_noscan: bool,
+    jit_warmup_noscan: int,
+    stage_prev_fsq: float | None,
+    is_last_stage: bool,
+) -> Vmec2000StageSolvePlan:
+    """Build one stage's scan policy, solve kwargs, and precompile hook."""
+
+    final_cpu_scan_env = ctx.getenv("VMEC_JAX_FINAL_STAGE_CPU_SCAN", "1").strip().lower()
+    final_cpu_scan_disabled = final_cpu_scan_env in ("0", "false", "no")
+    if bool(ctx.cli_fixed_boundary_mode) and scan_mode and (ctx.default_backend_name() == "cpu") and final_cpu_scan_disabled:
+        scan_mode = False
+    stage_fsq_total_target = (
+        ctx.accelerated_fsq_total_target_from_ftol(float(ftol))
+        if (stage_accelerated_mode and not is_last_stage)
+        else None
+    )
+    stage_light_history = (
+        True
+        if (
+            bool(ctx.performance_mode)
+            and (not bool(ctx.verbose))
+            and ((not bool(ctx.cfg.lfreeb)) or bool(ctx.direct_external_provider))
+        )
+        else None
+    )
+    stage_host_update_assembly = ctx.host_update_assembly_driver_default(
+        cfg=static_i.cfg,
+        performance_mode=bool(ctx.performance_mode),
+        backend=ctx.default_backend_name(),
+        use_scan=bool(scan_mode),
+    )
+    stage_preconditioner_use_precomputed_tridi = ctx.default_preconditioner_use_precomputed_tridi(
+        cfg=static_i.cfg,
+        backend=ctx.policy_backend,
+        performance_mode=bool(ctx.performance_mode),
+        use_scan=bool(scan_mode),
+        direct_external_provider=bool(ctx.direct_external_provider),
+    )
+    stage_preconditioner_use_lax_tridi = ctx.default_preconditioner_use_lax_tridi(
+        cfg=static_i.cfg,
+        backend=ctx.policy_backend,
+        performance_mode=bool(ctx.performance_mode),
+        use_scan=bool(scan_mode),
+        direct_external_provider=bool(ctx.direct_external_provider),
+    )
+    stage_limit_update_rms = False if ctx.limit_update_rms is None else bool(ctx.limit_update_rms)
+    solve_kwargs = dict(
+        indata=ctx.indata,
+        signgs=ctx.signgs,
+        ftol=float(ftol),
+        max_iter=int(niter),
+        step_size=float(ctx.step_size_val),
+        include_constraint_force=True,
+        apply_m1_constraints=True,
+        precond_radial_alpha=0.5,
+        precond_lambda_alpha=0.5,
+        mode_diag_exponent=0.0,
+        auto_flip_force=False,
+        divide_by_scalxc_for_update=False,
+        lambda_update_scale=1.0,
+        enforce_vmec_lambda_axis=True,
+        vmec2000_control=True,
+        strict_update=True,
+        backtracking=False,
+        limit_update_rms=stage_limit_update_rms,
+        reference_mode=False,
+        use_restart_triggers=True if ctx.use_restart_triggers is None else bool(ctx.use_restart_triggers),
+        vmecpp_restart=bool(ctx.vmecpp_restart),
+        use_direct_fallback=False,
+        stage_prev_fsq=stage_prev_fsq,
+        stage_transition_factor=float(ctx.stage_transition_factor),
+        stage_transition_scale=float(ctx.stage_transition_scale),
+        resume_state=resume_state_stage,
+        verbose=bool(ctx.verbose),
+        verbose_vmec2000_table=bool(ctx.verbose),
+        use_scan=bool(scan_mode),
+        jit_warmup_iters=int(jit_warmup_iters),
+        jit_precompile=bool(jit_precompile_eff),
+        scan_minimal_default=ctx.scan_minimal_default,
+        light_history=stage_light_history,
+        resume_state_mode="minimal" if stage_accelerated_mode else None,
+        fsq_total_target=stage_fsq_total_target,
+        host_update_assembly=stage_host_update_assembly,
+        preconditioner_use_precomputed_tridi=stage_preconditioner_use_precomputed_tridi,
+        preconditioner_use_lax_tridi=stage_preconditioner_use_lax_tridi,
+        external_field_provider_kind=ctx.external_field_provider_kind,
+        external_field_provider_static=ctx.external_field_provider_static,
+        external_field_provider_params=ctx.external_field_provider_params,
+        free_boundary_activate_fsq=ctx.free_boundary_activate_fsq,
+        return_final_force_payload=True,
+    )
+    scan_mode = ctx.maybe_select_dynamic_scan_mode(
+        cfg=ctx.cfg,
+        accelerated_mode=bool(ctx.accelerated_mode),
+        performance_mode=bool(ctx.performance_mode),
+        scan_mode=bool(scan_mode),
+        vmec2000_control=True,
+        niter=int(niter),
+        solve_kwargs=solve_kwargs,
+        state_stage_start=state_stage_start,
+        static_stage=static_i,
+        resume_state_stage=resume_state_stage,
+        jit_forces_base=bool(jit_forces_base),
+        solve_fixed_boundary_residual_iter=ctx.solve_fixed_boundary_residual_iter,
+        dynamic_scan_probe_settings=ctx.dynamic_scan_probe_settings,
+        vmec_histories_match=ctx.vmec_histories_match,
+        vmec_history_relerr=ctx.vmec_history_relerr,
+        verbose=bool(ctx.verbose),
+        getenv=ctx.getenv,
+        deepcopy_func=ctx.deepcopy_func,
+    )
+    solve_kwargs["use_scan"] = bool(scan_mode)
+    ctx.maybe_precompile_fixed_boundary_stage(
+        enabled=bool(ctx.precompile_stages) and bool(jit_forces_eff),
+        state=state,
+        static=static_i,
+        solve_kwargs=solve_kwargs,
+        solve_fixed_boundary_residual_iter_func=ctx.solve_fixed_boundary_residual_iter,
+    )
+    explicit_stage_monitor = (
+        bool(stage_accelerated_mode)
+        and (ctx.niter_stages_input is not None)
+        and int(nstep) > 1
+        and int(stage_index) > 0
+    )
+    explicit_stage_chunk = min(int(niter), max(int(ctx.indata.get_int("NSTEP", 1)), 200))
+    explicit_stage_target = ctx.accelerated_fsq_total_target_from_ftol(float(ftol))
+    return Vmec2000StageSolvePlan(
+        scan_mode=bool(scan_mode),
+        solve_kwargs=solve_kwargs,
+        jit_forces_eff=bool(jit_forces_eff),
+        jit_forces_base=bool(jit_forces_base),
+        jit_precompile_noscan=bool(jit_precompile_noscan),
+        jit_warmup_noscan=int(jit_warmup_noscan),
+        explicit_stage_monitor=bool(explicit_stage_monitor),
+        explicit_stage_chunk=int(explicit_stage_chunk),
+        explicit_stage_target=float(explicit_stage_target),
+        explicit_stage_monitor_jit_forces=bool(jit_forces_base),
+    )
+
+
 def run_vmec2000_staged_solve(ctx: Vmec2000StagedSolveContext) -> Vmec2000StagedSolveResult:
     """Run the multigrid/single-grid VMEC2000-style staged solve path."""
 
@@ -470,121 +644,28 @@ def run_vmec2000_staged_solve(ctx: Vmec2000StagedSolveContext) -> Vmec2000Staged
         static_prev = static_i
 
         stage_offsets.append(sum(int(np.asarray(r.w_history).size) for r in stage_results))
-        vmec2000_ctrl = True
         stage_prev_fsq = prev_stage_fsq if bool(ctx.stage_transition_heuristic) else None
-        stage_light_history = (
-            True
-            if (
-                bool(ctx.performance_mode)
-                and (not bool(ctx.verbose))
-                and ((not bool(ctx.cfg.lfreeb)) or bool(ctx.direct_external_provider))
-            )
-            else None
-        )
-        stage_resume_state_mode = "minimal" if stage_accelerated_mode else None
         is_last_stage = i == len(ctx.ns_stages) - 1
-        final_cpu_scan_env = ctx.getenv("VMEC_JAX_FINAL_STAGE_CPU_SCAN", "1").strip().lower()
-        final_cpu_scan_disabled = final_cpu_scan_env in ("0", "false", "no")
-        if bool(ctx.cli_fixed_boundary_mode) and scan_mode and (ctx.default_backend_name() == "cpu") and final_cpu_scan_disabled:
-            scan_mode = False
-        stage_fsq_total_target = (
-            ctx.accelerated_fsq_total_target_from_ftol(float(ftol_i))
-            if (stage_accelerated_mode and not is_last_stage)
-            else None
-        )
-        stage_host_update_assembly = ctx.host_update_assembly_driver_default(
-            cfg=cfg_i,
-            performance_mode=bool(ctx.performance_mode),
-            backend=ctx.default_backend_name(),
-            use_scan=bool(scan_mode),
-        )
-        stage_preconditioner_use_precomputed_tridi = ctx.default_preconditioner_use_precomputed_tridi(
-            cfg=cfg_i,
-            backend=ctx.policy_backend,
-            performance_mode=bool(ctx.performance_mode),
-            use_scan=bool(scan_mode),
-            direct_external_provider=bool(ctx.direct_external_provider),
-        )
-        stage_preconditioner_use_lax_tridi = ctx.default_preconditioner_use_lax_tridi(
-            cfg=cfg_i,
-            backend=ctx.policy_backend,
-            performance_mode=bool(ctx.performance_mode),
-            use_scan=bool(scan_mode),
-            direct_external_provider=bool(ctx.direct_external_provider),
-        )
-        stage_limit_update_rms = False if ctx.limit_update_rms is None else bool(ctx.limit_update_rms)
-        solve_kwargs = dict(
-            indata=ctx.indata,
-            signgs=ctx.signgs,
-            ftol=float(ftol_i),
-            max_iter=int(niter_i),
-            step_size=float(ctx.step_size_val),
-            include_constraint_force=True,
-            apply_m1_constraints=True,
-            precond_radial_alpha=0.5,
-            precond_lambda_alpha=0.5,
-            mode_diag_exponent=0.0,
-            auto_flip_force=False,
-            divide_by_scalxc_for_update=False,
-            lambda_update_scale=1.0,
-            enforce_vmec_lambda_axis=True,
-            vmec2000_control=vmec2000_ctrl,
-            strict_update=True,
-            backtracking=False,
-            limit_update_rms=stage_limit_update_rms,
-            reference_mode=False,
-            use_restart_triggers=True if ctx.use_restart_triggers is None else bool(ctx.use_restart_triggers),
-            vmecpp_restart=bool(ctx.vmecpp_restart),
-            use_direct_fallback=False,
-            stage_prev_fsq=stage_prev_fsq,
-            stage_transition_factor=float(ctx.stage_transition_factor),
-            stage_transition_scale=float(ctx.stage_transition_scale),
-            resume_state=resume_state_stage,
-            verbose=bool(ctx.verbose),
-            verbose_vmec2000_table=bool(ctx.verbose),
-            use_scan=bool(scan_mode),
-            jit_warmup_iters=int(jit_warmup_iters),
-            jit_precompile=bool(jit_precompile_eff),
-            scan_minimal_default=ctx.scan_minimal_default,
-            light_history=stage_light_history,
-            resume_state_mode=stage_resume_state_mode,
-            fsq_total_target=stage_fsq_total_target,
-            host_update_assembly=stage_host_update_assembly,
-            preconditioner_use_precomputed_tridi=stage_preconditioner_use_precomputed_tridi,
-            preconditioner_use_lax_tridi=stage_preconditioner_use_lax_tridi,
-            external_field_provider_kind=ctx.external_field_provider_kind,
-            external_field_provider_static=ctx.external_field_provider_static,
-            external_field_provider_params=ctx.external_field_provider_params,
-            free_boundary_activate_fsq=ctx.free_boundary_activate_fsq,
-            return_final_force_payload=True,
-        )
-        scan_mode = ctx.maybe_select_dynamic_scan_mode(
-            cfg=ctx.cfg,
-            accelerated_mode=bool(ctx.accelerated_mode),
-            performance_mode=bool(ctx.performance_mode),
-            scan_mode=bool(scan_mode),
-            vmec2000_control=bool(vmec2000_ctrl),
+        stage_plan = _build_vmec2000_stage_solve_plan(
+            ctx,
+            stage_index=int(i),
+            nstep=int(nstep),
             niter=int(niter_i),
-            solve_kwargs=solve_kwargs,
-            state_stage_start=state_stage_start,
-            static_stage=static_i,
-            resume_state_stage=resume_state_stage,
-            jit_forces_base=bool(jit_forces_base),
-            solve_fixed_boundary_residual_iter=ctx.solve_fixed_boundary_residual_iter,
-            dynamic_scan_probe_settings=ctx.dynamic_scan_probe_settings,
-            vmec_histories_match=ctx.vmec_histories_match,
-            vmec_history_relerr=ctx.vmec_history_relerr,
-            verbose=bool(ctx.verbose),
-            getenv=ctx.getenv,
-            deepcopy_func=ctx.deepcopy_func,
-        )
-        solve_kwargs["use_scan"] = bool(scan_mode)
-        ctx.maybe_precompile_fixed_boundary_stage(
-            enabled=bool(ctx.precompile_stages) and bool(jit_forces_eff),
+            ftol=float(ftol_i),
+            static_i=static_i,
             state=state,
-            static=static_i,
-            solve_kwargs=solve_kwargs,
-            solve_fixed_boundary_residual_iter_func=ctx.solve_fixed_boundary_residual_iter,
+            state_stage_start=state_stage_start,
+            resume_state_stage=resume_state_stage,
+            stage_accelerated_mode=bool(stage_accelerated_mode),
+            scan_mode=bool(scan_mode),
+            jit_forces_base=bool(jit_forces_base),
+            jit_forces_eff=bool(jit_forces_eff),
+            jit_precompile_eff=bool(jit_precompile_eff),
+            jit_warmup_iters=int(jit_warmup_iters),
+            jit_precompile_noscan=bool(jit_precompile_noscan),
+            jit_warmup_noscan=int(jit_warmup_noscan),
+            stage_prev_fsq=stage_prev_fsq,
+            is_last_stage=bool(is_last_stage),
         )
 
         def run_stage_solve(*, state, solve_kwargs, jit_forces):
@@ -596,36 +677,26 @@ def run_vmec2000_staged_solve(ctx: Vmec2000StagedSolveContext) -> Vmec2000Staged
                 solve_fixed_boundary_residual_iter_func=ctx.solve_fixed_boundary_residual_iter,
             )
 
-        explicit_stage_monitor = (
-            bool(stage_accelerated_mode)
-            and (ctx.niter_stages_input is not None)
-            and int(nstep) > 1
-            and int(i) > 0
-        )
-        explicit_stage_chunk = min(int(niter_i), max(int(ctx.indata.get_int("NSTEP", 1)), 200))
-        explicit_stage_target = ctx.accelerated_fsq_total_target_from_ftol(float(ftol_i))
-        explicit_stage_monitor_jit_forces = bool(jit_forces_base)
-
         res_i, stage_mode_i = run_stage_with_optional_explicit_monitor(
-            monitor_enabled=bool(explicit_stage_monitor),
+            monitor_enabled=bool(stage_plan.explicit_stage_monitor),
             stage_mode=str(stage_mode_i),
             ns=int(ns_i),
             niter=int(niter_i),
             ftol=float(ftol_i),
-            explicit_stage_chunk=int(explicit_stage_chunk),
-            explicit_stage_target=float(explicit_stage_target),
+            explicit_stage_chunk=int(stage_plan.explicit_stage_chunk),
+            explicit_stage_target=float(stage_plan.explicit_stage_target),
             policy_backend=str(ctx.policy_backend),
-            scan_mode=bool(scan_mode),
+            scan_mode=bool(stage_plan.scan_mode),
             state=state,
             state_stage_start=state_stage_start,
             resume_state_stage=resume_state_stage,
             stage_prev_fsq=stage_prev_fsq,
-            solve_kwargs=solve_kwargs,
-            jit_forces_eff=bool(jit_forces_eff),
-            jit_forces_base=bool(jit_forces_base),
-            explicit_stage_monitor_jit_forces=bool(explicit_stage_monitor_jit_forces),
-            jit_warmup_noscan=int(jit_warmup_noscan),
-            jit_precompile_noscan=bool(jit_precompile_noscan),
+            solve_kwargs=stage_plan.solve_kwargs,
+            jit_forces_eff=bool(stage_plan.jit_forces_eff),
+            jit_forces_base=bool(stage_plan.jit_forces_base),
+            explicit_stage_monitor_jit_forces=bool(stage_plan.explicit_stage_monitor_jit_forces),
+            jit_warmup_noscan=int(stage_plan.jit_warmup_noscan),
+            jit_precompile_noscan=bool(stage_plan.jit_precompile_noscan),
             run_stage_solve=run_stage_solve,
             sanitize_resume_state_for_same_stage=ctx.sanitize_resume_state_for_same_stage,
             result_meets_requested_ftol=ctx.result_meets_requested_ftol,
@@ -633,7 +704,7 @@ def run_vmec2000_staged_solve(ctx: Vmec2000StagedSolveContext) -> Vmec2000Staged
             merge_stage_chunk_results=ctx.merge_stage_chunk_results,
             result_with_diag=ctx.result_with_diag,
             maybe_rerun_scan_abort_stage=ctx.maybe_rerun_scan_abort_stage,
-            scan_abort_fallback_enabled=(not ctx.accelerated_mode) and bool(ctx.performance_mode) and bool(scan_mode),
+            scan_abort_fallback_enabled=(not ctx.accelerated_mode) and bool(ctx.performance_mode) and bool(stage_plan.scan_mode),
             verbose=bool(ctx.verbose),
         )
         stage_mode_history[-1] = str(stage_mode_i)

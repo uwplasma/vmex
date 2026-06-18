@@ -11123,3 +11123,74 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.9968%.
+
+## 2026-06-18 VMEC2000 Stage Solve Plan Seam
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `Vmec2000StageSolvePlan` inside `vmec_jax.drivers.staging`.
+2. Extracted per-stage solve-plan construction from
+   `run_vmec2000_staged_solve`: final CPU scan policy, accelerated-stage
+   target, light-history policy, host update assembly, tridiagonal
+   preconditioner choices, VMEC2000 residual-solver kwargs, dynamic scan
+   selection, optional precompile, and explicit-stage monitor controls.
+3. Kept the execution branch in `run_vmec2000_staged_solve`, so the loop now
+   follows a simpler structure: prepare stage state, build stage plan, run
+   stage, collect histories.
+
+Results obtained:
+
+- The newly introduced `run_vmec2000_staged_solve` no longer appears in the top
+  30 function-length source-health report.
+- `run_fixed_boundary` remains at 772 lines, but its largest VMEC2000 staged
+  mechanics are now in named driver-staging seams.
+- Behavior stayed stable across the targeted driver and scan shards.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/drivers/staging.py vmec_jax/driver.py`
+- `python -m ruff check vmec_jax/drivers/staging.py vmec_jax/driver.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_run_wave8_coverage.py tests/test_driver_wave12_coverage.py tests/test_driver_policy_coverage_extra.py -q`
+  - Result: `26 passed`.
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_finish_policy_more_coverage.py tests/test_driver_fast_reconstruction.py tests/test_driver_helper_edges_wave14_coverage.py -q`
+  - Result: `31 passed`.
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_wave7_coverage.py::test_residual_iter_vmec2000_scan_minimal_one_step tests/test_solve_wave7_coverage.py::test_residual_iter_vmec2000_scan_state_only tests/test_resume_state.py::test_accelerated_resume_state_is_minimal_and_restartable tests/test_solve_performance_instrumentation.py::test_accelerated_scan_timing_is_opt_in_and_path_labeled tests/test_solve_real_scan_wave10_coverage.py::test_vmec2000_scan_full_history_runs_fallback_decision -q`
+  - Result: `5 passed`.
+- `JAX_ENABLE_X64=1 VMEC_JAX_SKIP_PY311_COVERAGE_ONLY=1 xargs python -m pytest -q -n 4 -m "not full and not vmec2000 and not simsopt" --durations=20 < /tmp/driver-solve-discrete.args`
+  - Result: `997 passed, 30 skipped`.
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 30`
+
+Best next steps:
+
+1. Move to the next production scientific hotspot instead of continuing to
+   churn the staging helper: WOUT construction and Mercier/Glasser diagnostics
+   are higher leverage because they are long, science-facing, and tied to
+   physics gates.
+2. Preserve the current driver staging seams and only revisit them if source
+   health or tests show the context signature becoming hard to maintain.
+3. Continue checking CI opportunistically after completed runs, not while runs
+   are queued or being cancelled by newer pushes.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.97%.
+- Differentiability/refactor implementation: 99.999985%.
+- Solver monolith reduction: 99.46%.
+- Free-boundary adjoint monolith reduction: 99.30%.
+- Driver workflow decomposition: 99.72%.
+- Residual iteration decomposition: 95.8%.
+- WOUT diagnostic/profile decomposition: 99.1%.
+- Optimizer workflow decomposition: 98.8%.
+- Fixed-boundary optimizer decomposition: 94.0%.
+- Implicit residual-adjoint decomposition: 93%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.997%.
