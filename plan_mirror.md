@@ -5740,6 +5740,264 @@ No user input is needed.
 
 ---
 
+## 56. 2026-06-17 M8w matrix-free block LSMR correction
+
+This lane converted the successful M8u/M8v block-dense split into a scalable
+matrix-free diagnostic solver.  The new `block_lsmr` mode keeps the reduced
+axisymmetric `a`/lambda split, but solves each diagonal block with SciPy LSMR
+through Hessian-vector products instead of materializing the reduced Hessian.
+
+### Steps taken
+
+- Added residual linear-solver aliases:
+  - `block_lsmr`;
+  - `split_lsmr`;
+  - `block_matrix_free_lsmr`.
+- Exposed `block_lsmr` in the root-level residual-Newton CLIs:
+  - `examples/mirror_residual_newton_convergence_grid.py`;
+  - `examples/mirror_solver_comparison.py`;
+  - `examples/mirror_fixed_boundary_solve_diagnostic.py`.
+- Implemented the split block LSMR correction in
+  `projected_residual_newton_solve`.
+- Refactored the iterative linear-solve details into local helper functions so
+  the main residual-Newton loop now shares bookkeeping between:
+  - full LSMR/LSQR;
+  - split block LSMR;
+  - dense and block-dense reference solves.
+- Added focused unit coverage for the alias normalization and a small
+  perturbed-cylinder `block_lsmr` solve.
+- Updated `examples/mirror/README.md` to describe `block_lsmr` as the scalable
+  split radius/lambda diagnostic path.
+- Ran finite-current two-coil comparisons against the previously logged full
+  LSMR and block-dense rows.
+- Generated and visually inspected the full standard plot bundle for the
+  24-step finite-current `block_lsmr` row.
+
+### Results obtained
+
+Small finite-current two-coil rows, `ns=5`, `nxi=9`, `I'=0.01`:
+
+| row | preconditioner | outer x inner | final residual | final `fsq` | dense-step cosine | dense-step relative error |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| M8w `block_lsmr` | none | 6 x 54 | `6.238420625904e-03` | `6.379982279623e-07` | `0.880578524931` | `0.875679418150` |
+| M8w `block_lsmr` | `radial_xi_lambda_xi_tridi` | 6 x 54 | `3.813022192885e-04` | `2.383465285809e-09` | `0.987200858532` | `0.349685129692` |
+| M8w `block_lsmr` | `radial_xi_lambda_xi_tridi` | 24 x 54 | `7.544736216469e-08` | `9.331646651820e-17` | `0.961205122336` | `0.738477842202` |
+
+Interpretation:
+
+- With no preconditioner, split block LSMR is slightly better aligned with the
+  dense reference step than the previous full LSMR no-preconditioner row.
+- With the lambda-xi smoother, the 6-step split row improves the finite-current
+  residual from the earlier full-LSMR lambda-xi value of about `1.37e-03` to
+  `3.81e-04`.
+- At the same 24 x 54 budget, split block LSMR reaches `7.54e-08`, compared
+  with the earlier full-LSMR lambda-xi value of about `4.33e-05`.
+- The split LSMR path is still not dense-quality: the M8u/M8v dense and
+  block-dense rows reached tight residuals in about five Newton iterations.
+- The result is therefore a useful scalable approximation and benchmark lane,
+  not yet the final production residual-Newton correction.
+
+The 24-step plotted row also reported:
+
+| quantity | value |
+| --- | ---: |
+| normalized force | `4.246272137637e-07` |
+| optimizer success | false, maximum iterations reached |
+| Newton iterations | 24 |
+| last split LSMR stop code | 7 |
+| last summed split LSMR iterations | 89 |
+| minimum `sqrt(g)` | `3.043082037079e-03` |
+| mirror ratio | `19.532434206345` |
+
+The positive `sqrt(g)` and plot inspection show that this row remains a valid
+geometry while the residual decreases.
+
+Generated artifacts:
+
+- `results/mirror/m8w_block_lsmr_probe/residual_newton_convergence_grid_metrics.json`.
+- `results/mirror/m8w_block_lsmr_lambda_xi_probe/residual_newton_convergence_grid_metrics.json`.
+- `results/mirror/m8w_block_lsmr_lambda_xi_24_probe/residual_newton_convergence_grid_metrics.json`.
+- `results/mirror/m8w_block_lsmr_lambda_xi_24_plots/residual_newton_convergence_grid_metrics.json`.
+- `results/mirror/m8w_block_lsmr_lambda_xi_24_plots/residual_newton_convergence_history.png`.
+- `results/mirror/m8w_block_lsmr_lambda_xi_24_plots/residual_newton_dense_step_comparison.png`.
+- `results/mirror/m8w_block_lsmr_lambda_xi_24_plots/best_finite_current_block_lsmr_lambda_xi_24_m8w_residual_newton/figures/best_finite_current_block_lsmr_lambda_xi_24_m8w_residual_newton_mirror_boundary_3d.png`.
+- `results/mirror/m8w_block_lsmr_lambda_xi_24_plots/best_finite_current_block_lsmr_lambda_xi_24_m8w_residual_newton/figures/best_finite_current_block_lsmr_lambda_xi_24_m8w_residual_newton_mirror_bfield_boundary.png`.
+- `results/mirror/m8w_block_lsmr_lambda_xi_24_plots/best_finite_current_block_lsmr_lambda_xi_24_m8w_residual_newton/figures/best_finite_current_block_lsmr_lambda_xi_24_m8w_residual_newton_mirror_bmag_sxi.png`.
+- `results/mirror/m8w_block_lsmr_lambda_xi_24_plots/best_finite_current_block_lsmr_lambda_xi_24_m8w_residual_newton/figures/best_finite_current_block_lsmr_lambda_xi_24_m8w_residual_newton_mirror_cross_sections.png`.
+- `results/mirror/m8w_block_lsmr_cli_smoke/residual_newton_convergence_grid_metrics.json`.
+
+Visual validation:
+
+- The residual history decreases monotonically over the plotted row.
+- The horizontal-`z` 3-D mirror plot shows the expected narrow end caps and
+  wider central throat.
+- The `|B|` map is strongest near the caps and weakest near the center.
+- The B-direction plot includes visible cap-to-cap field-line traces.
+- Cross sections remain circular and ordered for this axisymmetric benchmark.
+
+### How it was tested
+
+Focused automated tests:
+
+```bash
+JAX_ENABLE_X64=1 pytest \
+  tests/mirror/test_mirror_fixed_boundary_axisym.py::test_residual_newton_block_lsmr_solver_improves_perturbed_cylinder \
+  tests/mirror/test_mirror_fixed_boundary_axisym.py::test_residual_newton_block_dense_lstsq_solver_improves_perturbed_cylinder \
+  tests/mirror/test_mirror_low_level_coverage.py::test_low_level_field_energy_residual_and_optimizer_guards \
+  -q
+```
+
+Result: `3 passed in 15.62s`.
+
+Broader nearby tests:
+
+```bash
+JAX_ENABLE_X64=1 pytest \
+  tests/mirror/test_mirror_fixed_boundary_axisym.py \
+  tests/mirror/test_mirror_examples.py::test_root_residual_newton_convergence_grid_runs_without_plots \
+  -q
+```
+
+Result: `15 passed in 41.91s`.
+
+Lint/format/whitespace:
+
+```bash
+python -m ruff format vmec_jax/mirror/solvers/fixed_boundary/optimizers.py \
+  vmec_jax/mirror/solvers/fixed_boundary/preconditioners.py \
+  examples/mirror_residual_newton_convergence_grid.py \
+  examples/mirror_solver_comparison.py \
+  examples/mirror_fixed_boundary_solve_diagnostic.py \
+  tests/mirror/test_mirror_fixed_boundary_axisym.py \
+  tests/mirror/test_mirror_low_level_coverage.py
+python -m ruff check vmec_jax/mirror/solvers/fixed_boundary/optimizers.py \
+  vmec_jax/mirror/solvers/fixed_boundary/preconditioners.py \
+  examples/mirror_residual_newton_convergence_grid.py \
+  examples/mirror_solver_comparison.py \
+  examples/mirror_fixed_boundary_solve_diagnostic.py \
+  tests/mirror/test_mirror_fixed_boundary_axisym.py \
+  tests/mirror/test_mirror_low_level_coverage.py
+git diff --check
+```
+
+Result: all checks passed.
+
+CLI smoke:
+
+```bash
+JAX_ENABLE_X64=1 python examples/mirror_residual_newton_convergence_grid.py \
+  --outdir results/mirror/m8w_block_lsmr_cli_smoke \
+  --ns-array 5 \
+  --nxi-array 9 \
+  --maxiter-array 2 \
+  --residual-linear-maxiter-array 16 \
+  --residual-linear-maxiter-policy fixed \
+  --residual-linear-solver block_lsmr \
+  --preconditioners radial_xi_lambda_xi_tridi \
+  --residual-xi-alpha 1.0 \
+  --i-prime 0.01 \
+  --case-label finite_current_block_lsmr_cli_smoke_m8w \
+  --no-plots
+```
+
+Result: metrics JSON was written with positive `sqrt(g)` and finite residual
+diagnostics.
+
+Benchmark commands:
+
+```bash
+JAX_ENABLE_X64=1 python examples/mirror_residual_newton_convergence_grid.py \
+  --outdir results/mirror/m8w_block_lsmr_probe \
+  --ns-array 5 \
+  --nxi-array 9 \
+  --maxiter-array 6 \
+  --residual-linear-maxiter-array 54 \
+  --residual-linear-maxiter-policy fixed \
+  --residual-linear-solver block_lsmr \
+  --residual-compare-dense-step \
+  --i-prime 0.01 \
+  --case-label finite_current_block_lsmr_m8w \
+  --preconditioners none \
+  --no-plots
+JAX_ENABLE_X64=1 python examples/mirror_residual_newton_convergence_grid.py \
+  --outdir results/mirror/m8w_block_lsmr_lambda_xi_probe \
+  --ns-array 5 \
+  --nxi-array 9 \
+  --maxiter-array 6 \
+  --residual-linear-maxiter-array 54 \
+  --residual-linear-maxiter-policy fixed \
+  --residual-linear-solver block_lsmr \
+  --residual-compare-dense-step \
+  --residual-xi-alpha 1.0 \
+  --i-prime 0.01 \
+  --case-label finite_current_block_lsmr_lambda_xi_m8w \
+  --preconditioners radial_xi_lambda_xi_tridi \
+  --no-plots
+JAX_ENABLE_X64=1 python examples/mirror_residual_newton_convergence_grid.py \
+  --outdir results/mirror/m8w_block_lsmr_lambda_xi_24_plots \
+  --ns-array 5 \
+  --nxi-array 9 \
+  --maxiter-array 24 \
+  --residual-linear-maxiter-array 54 \
+  --residual-linear-maxiter-policy fixed \
+  --residual-linear-solver block_lsmr \
+  --residual-compare-dense-step \
+  --residual-xi-alpha 1.0 \
+  --i-prime 0.01 \
+  --case-label finite_current_block_lsmr_lambda_xi_24_m8w \
+  --preconditioners radial_xi_lambda_xi_tridi
+```
+
+### File structure and best-practice notes
+
+- `preconditioners.py` remains the single normalization point for residual
+  preconditioner, solver, and linear-budget option strings.
+- `optimizers.py` keeps the residual-Newton algorithm in one place but now
+  separates full Krylov and split block LSMR operator construction into helper
+  functions inside `projected_residual_newton_solve`.
+- The root-level example CLIs expose the same solver choices, avoiding drift
+  between diagnostic scripts.
+- Tests remain focused on behavior and diagnostics, while benchmark-quality
+  assertions stay in `plan_mirror.md` and generated result artifacts.
+
+### Best next steps
+
+1. Commit and push M8w.
+2. Probe whether `block_lsmr` can close the remaining gap to dense/block-dense:
+   - separate radius and lambda inner iteration budgets;
+   - adaptive split budgets based on block residuals;
+   - stronger block approximations for the lambda-dominated finite-current
+     residual;
+   - `ns=9`, `nxi=17` comparison against M8v `block_dense_lstsq`.
+3. Start reducing residual-Newton complexity by moving stable linear-solve
+   helpers into a small dedicated module once the next scalable strategy is
+   selected.
+4. Continue the finite-current lane with visible pitch and normalized force
+   diagnostics tied to solve convergence.
+
+### Completion percentages after M8w
+
+- Geometry/grids/bases: `90%`.
+- Field/energy/residual kernels: `84%`.
+- Fixed-boundary axisymmetric solve: `88%`.
+- Residual Newton / preconditioning: `90%`.
+- Two-coil and manufactured validation: `82%`.
+- Finite-current pitch validation: `77%`.
+- Plotting and `vmec --plot` mirror support: `79%`.
+- I/O schema and docs: `80%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `15%`.
+- Free-boundary mirror lane: `5%`.
+- Stellarator-mirror hybrid lane: `10%`.
+- ESSOS circular-coil mirror beta scan: `0%`.
+- PR merge readiness overall: `77%`.
+
+### User input needed
+
+No user input is needed.
+
+---
+
 ## 57. 2026-06-17 M8x split lambda-block budget diagnostic
 
 This lane tested whether the M8w matrix-free split block solver could scale to
@@ -5992,249 +6250,192 @@ No user input is needed.
 
 ---
 
-## 56. 2026-06-17 M8w matrix-free block LSMR correction
+## 58. 2026-06-17 M8y lambda smoother strength diagnostic
 
-This lane converted the successful M8u/M8v block-dense split into a scalable
-matrix-free diagnostic solver.  The new `block_lsmr` mode keeps the reduced
-axisymmetric `a`/lambda split, but solves each diagonal block with SciPy LSMR
-through Hessian-vector products instead of materializing the reduced Hessian.
+This lane tested whether the existing lambda-xi smoother could materially
+improve the moderate finite-current `block_lsmr` row before adding a new
+structured lambda-block preconditioner.
 
 ### Steps taken
 
-- Added residual linear-solver aliases:
+- Used the M8x split-budget setup:
+  - `ns=9`;
+  - `nxi=17`;
+  - `I'=0.01`;
+  - radius block budget `102`;
+  - lambda block budget `249`;
   - `block_lsmr`;
-  - `split_lsmr`;
-  - `block_matrix_free_lsmr`.
-- Exposed `block_lsmr` in the root-level residual-Newton CLIs:
-  - `examples/mirror_residual_newton_convergence_grid.py`;
-  - `examples/mirror_solver_comparison.py`;
-  - `examples/mirror_fixed_boundary_solve_diagnostic.py`.
-- Implemented the split block LSMR correction in
-  `projected_residual_newton_solve`.
-- Refactored the iterative linear-solve details into local helper functions so
-  the main residual-Newton loop now shares bookkeeping between:
-  - full LSMR/LSQR;
-  - split block LSMR;
-  - dense and block-dense reference solves.
-- Added focused unit coverage for the alias normalization and a small
-  perturbed-cylinder `block_lsmr` solve.
-- Updated `examples/mirror/README.md` to describe `block_lsmr` as the scalable
-  split radius/lambda diagnostic path.
-- Ran finite-current two-coil comparisons against the previously logged full
-  LSMR and block-dense rows.
-- Generated and visually inspected the full standard plot bundle for the
-  24-step finite-current `block_lsmr` row.
+  - `radial_xi_lambda_xi_tridi`.
+- Compared baseline M8x smoothing (`lambda_alpha=0.5`, `xi_alpha=1.0`) with
+  stronger lambda smoothing:
+  - `lambda_alpha=2.0`, `xi_alpha=2.0`;
+  - `lambda_alpha=4.0`, `xi_alpha=4.0`.
+- Ran short three-step probes to compare early residual reduction.
+- Ran six-step rows for alpha 2 and alpha 4.
+- Generated the full standard plot bundle for the alpha-2 six-step row.
 
 ### Results obtained
 
-Small finite-current two-coil rows, `ns=5`, `nxi=9`, `I'=0.01`:
+Three-step comparison:
 
-| row | preconditioner | outer x inner | final residual | final `fsq` | dense-step cosine | dense-step relative error |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| M8w `block_lsmr` | none | 6 x 54 | `6.238420625904e-03` | `6.379982279623e-07` | `0.880578524931` | `0.875679418150` |
-| M8w `block_lsmr` | `radial_xi_lambda_xi_tridi` | 6 x 54 | `3.813022192885e-04` | `2.383465285809e-09` | `0.987200858532` | `0.349685129692` |
-| M8w `block_lsmr` | `radial_xi_lambda_xi_tridi` | 24 x 54 | `7.544736216469e-08` | `9.331646651820e-17` | `0.961205122336` | `0.738477842202` |
+| row | final residual at iteration 3 | final `fsq` | last condition estimate |
+| --- | ---: | ---: | ---: |
+| baseline alpha 0.5 / xi 1.0 | `5.288281736435e-03` | `1.123129466824e-07` | n/a |
+| alpha 2 / xi 2 | `2.924857182997e-03` | `3.435658450173e-08` | `1.313407914284e+05` |
+| alpha 4 / xi 4 | `2.656280989205e-03` | `2.833666142013e-08` | `8.423944279065e+05` |
+
+Six-step comparison:
+
+| row | final residual | final `fsq` | normalized force | last condition estimate |
+| --- | ---: | ---: | ---: | ---: |
+| baseline alpha 0.5 / xi 1.0 | `3.126838214005e-03` | `3.926553099020e-08` | `8.661032213469e-03` | `1.922836515180e+06` |
+| alpha 2 / xi 2 | `2.292622037387e-03` | `2.110889882053e-08` | `6.356914852152e-03` | `2.205966918221e+05` |
+| alpha 4 / xi 4 | `2.243485142828e-03` | `2.021375737386e-08` | `6.221477478322e-03` | `5.204567175882e+05` |
 
 Interpretation:
 
-- With no preconditioner, split block LSMR is slightly better aligned with the
-  dense reference step than the previous full LSMR no-preconditioner row.
-- With the lambda-xi smoother, the 6-step split row improves the finite-current
-  residual from the earlier full-LSMR lambda-xi value of about `1.37e-03` to
-  `3.81e-04`.
-- At the same 24 x 54 budget, split block LSMR reaches `7.54e-08`, compared
-  with the earlier full-LSMR lambda-xi value of about `4.33e-05`.
-- The split LSMR path is still not dense-quality: the M8u/M8v dense and
-  block-dense rows reached tight residuals in about five Newton iterations.
-- The result is therefore a useful scalable approximation and benchmark lane,
-  not yet the final production residual-Newton correction.
+- Stronger lambda smoothing is beneficial for this finite-current moderate
+  row.
+- Alpha 2 gives most of the residual improvement while reducing the reported
+  condition estimate by nearly an order of magnitude relative to the baseline
+  split-budget row.
+- Alpha 4 gives a small additional residual improvement but a worse condition
+  estimate than alpha 2 and higher observed runtime.
+- The residual remains almost entirely lambda dominated in all rows, so alpha
+  tuning alone is not the final production answer.
+- The next scalable solver lane should add or test a structured lambda-block
+  preconditioner/operator, using alpha 2 as a balanced benchmark setting and
+  block-dense as the correctness reference.
 
-The 24-step plotted row also reported:
+Plotted alpha-2 row:
 
 | quantity | value |
 | --- | ---: |
-| normalized force | `4.246272137637e-07` |
-| optimizer success | false, maximum iterations reached |
-| Newton iterations | 24 |
-| last split LSMR stop code | 7 |
-| last summed split LSMR iterations | 89 |
-| minimum `sqrt(g)` | `3.043082037079e-03` |
-| mirror ratio | `19.532434206345` |
-
-The positive `sqrt(g)` and plot inspection show that this row remains a valid
-geometry while the residual decreases.
+| final residual | `2.292622037387e-03` |
+| final `fsq` | `2.110889882053e-08` |
+| normalized force | `6.356914852152e-03` |
+| residual `a` norm | `2.358844253055e-05` |
+| residual lambda norm | `2.292500685211e-03` |
+| lambda residual fraction | `0.999947068390` |
+| minimum `sqrt(g)` | `2.997256222477e-03` |
+| mirror ratio | `22.063595093559` |
 
 Generated artifacts:
 
-- `results/mirror/m8w_block_lsmr_probe/residual_newton_convergence_grid_metrics.json`.
-- `results/mirror/m8w_block_lsmr_lambda_xi_probe/residual_newton_convergence_grid_metrics.json`.
-- `results/mirror/m8w_block_lsmr_lambda_xi_24_probe/residual_newton_convergence_grid_metrics.json`.
-- `results/mirror/m8w_block_lsmr_lambda_xi_24_plots/residual_newton_convergence_grid_metrics.json`.
-- `results/mirror/m8w_block_lsmr_lambda_xi_24_plots/residual_newton_convergence_history.png`.
-- `results/mirror/m8w_block_lsmr_lambda_xi_24_plots/residual_newton_dense_step_comparison.png`.
-- `results/mirror/m8w_block_lsmr_lambda_xi_24_plots/best_finite_current_block_lsmr_lambda_xi_24_m8w_residual_newton/figures/best_finite_current_block_lsmr_lambda_xi_24_m8w_residual_newton_mirror_boundary_3d.png`.
-- `results/mirror/m8w_block_lsmr_lambda_xi_24_plots/best_finite_current_block_lsmr_lambda_xi_24_m8w_residual_newton/figures/best_finite_current_block_lsmr_lambda_xi_24_m8w_residual_newton_mirror_bfield_boundary.png`.
-- `results/mirror/m8w_block_lsmr_lambda_xi_24_plots/best_finite_current_block_lsmr_lambda_xi_24_m8w_residual_newton/figures/best_finite_current_block_lsmr_lambda_xi_24_m8w_residual_newton_mirror_bmag_sxi.png`.
-- `results/mirror/m8w_block_lsmr_lambda_xi_24_plots/best_finite_current_block_lsmr_lambda_xi_24_m8w_residual_newton/figures/best_finite_current_block_lsmr_lambda_xi_24_m8w_residual_newton_mirror_cross_sections.png`.
-- `results/mirror/m8w_block_lsmr_cli_smoke/residual_newton_convergence_grid_metrics.json`.
+- `results/mirror/m8y_lambda_smoother_alpha2_probe/residual_newton_convergence_grid_metrics.json`.
+- `results/mirror/m8y_lambda_smoother_alpha2_plots/residual_newton_convergence_grid_metrics.json`.
+- `results/mirror/m8y_lambda_smoother_alpha2_plots/residual_newton_convergence_history.png`.
+- `results/mirror/m8y_lambda_smoother_alpha2_plots/residual_newton_convergence_components.png`.
+- `results/mirror/m8y_lambda_smoother_alpha2_plots/best_finite_current_lambda_smoother_alpha2_m8y_residual_newton/figures/best_finite_current_lambda_smoother_alpha2_m8y_residual_newton_mirror_boundary_3d.png`.
+- `results/mirror/m8y_lambda_smoother_alpha2_plots/best_finite_current_lambda_smoother_alpha2_m8y_residual_newton/figures/best_finite_current_lambda_smoother_alpha2_m8y_residual_newton_mirror_bfield_boundary.png`.
+- `results/mirror/m8y_lambda_smoother_alpha2_plots/best_finite_current_lambda_smoother_alpha2_m8y_residual_newton/figures/best_finite_current_lambda_smoother_alpha2_m8y_residual_newton_mirror_bmag_sxi.png`.
+- `results/mirror/m8y_lambda_smoother_alpha2_plots/best_finite_current_lambda_smoother_alpha2_m8y_residual_newton/figures/best_finite_current_lambda_smoother_alpha2_m8y_residual_newton_mirror_cross_sections.png`.
+- `results/mirror/m8y_lambda_smoother_alpha4_probe/residual_newton_convergence_grid_metrics.json`.
+- `results/mirror/m8y_lambda_smoother_alpha4_six_probe/residual_newton_convergence_grid_metrics.json`.
 
 Visual validation:
 
-- The residual history decreases monotonically over the plotted row.
-- The horizontal-`z` 3-D mirror plot shows the expected narrow end caps and
-  wider central throat.
-- The `|B|` map is strongest near the caps and weakest near the center.
-- The B-direction plot includes visible cap-to-cap field-line traces.
-- Cross sections remain circular and ordered for this axisymmetric benchmark.
+- Alpha-2 residual history decreases but still stalls above tight convergence.
+- Horizontal-`z` geometry remains well ordered.
+- `|B|` remains strongest near the end caps and weakest near the center.
+- B-direction field-line traces remain visible.
+- Cross sections remain nested and circular.
 
 ### How it was tested
 
-Focused automated tests:
+This was a benchmark/log lane; no source changes were made after M8x.
 
-```bash
-JAX_ENABLE_X64=1 pytest \
-  tests/mirror/test_mirror_fixed_boundary_axisym.py::test_residual_newton_block_lsmr_solver_improves_perturbed_cylinder \
-  tests/mirror/test_mirror_fixed_boundary_axisym.py::test_residual_newton_block_dense_lstsq_solver_improves_perturbed_cylinder \
-  tests/mirror/test_mirror_low_level_coverage.py::test_low_level_field_energy_residual_and_optimizer_guards \
-  -q
-```
-
-Result: `3 passed in 15.62s`.
-
-Broader nearby tests:
-
-```bash
-JAX_ENABLE_X64=1 pytest \
-  tests/mirror/test_mirror_fixed_boundary_axisym.py \
-  tests/mirror/test_mirror_examples.py::test_root_residual_newton_convergence_grid_runs_without_plots \
-  -q
-```
-
-Result: `15 passed in 41.91s`.
-
-Lint/format/whitespace:
-
-```bash
-python -m ruff format vmec_jax/mirror/solvers/fixed_boundary/optimizers.py \
-  vmec_jax/mirror/solvers/fixed_boundary/preconditioners.py \
-  examples/mirror_residual_newton_convergence_grid.py \
-  examples/mirror_solver_comparison.py \
-  examples/mirror_fixed_boundary_solve_diagnostic.py \
-  tests/mirror/test_mirror_fixed_boundary_axisym.py \
-  tests/mirror/test_mirror_low_level_coverage.py
-python -m ruff check vmec_jax/mirror/solvers/fixed_boundary/optimizers.py \
-  vmec_jax/mirror/solvers/fixed_boundary/preconditioners.py \
-  examples/mirror_residual_newton_convergence_grid.py \
-  examples/mirror_solver_comparison.py \
-  examples/mirror_fixed_boundary_solve_diagnostic.py \
-  tests/mirror/test_mirror_fixed_boundary_axisym.py \
-  tests/mirror/test_mirror_low_level_coverage.py
-git diff --check
-```
-
-Result: all checks passed.
-
-CLI smoke:
+Commands:
 
 ```bash
 JAX_ENABLE_X64=1 python examples/mirror_residual_newton_convergence_grid.py \
-  --outdir results/mirror/m8w_block_lsmr_cli_smoke \
-  --ns-array 5 \
-  --nxi-array 9 \
-  --maxiter-array 2 \
-  --residual-linear-maxiter-array 16 \
+  --outdir results/mirror/m8y_lambda_smoother_alpha2_probe \
+  --ns-array 9 \
+  --nxi-array 17 \
+  --maxiter-array 3 \
+  --residual-linear-maxiter-array 102 \
+  --residual-block-lambda-maxiter 249 \
   --residual-linear-maxiter-policy fixed \
   --residual-linear-solver block_lsmr \
-  --preconditioners radial_xi_lambda_xi_tridi \
-  --residual-xi-alpha 1.0 \
+  --residual-lambda-alpha 2.0 \
+  --residual-xi-alpha 2.0 \
   --i-prime 0.01 \
-  --case-label finite_current_block_lsmr_cli_smoke_m8w \
-  --no-plots
-```
-
-Result: metrics JSON was written with positive `sqrt(g)` and finite residual
-diagnostics.
-
-Benchmark commands:
-
-```bash
-JAX_ENABLE_X64=1 python examples/mirror_residual_newton_convergence_grid.py \
-  --outdir results/mirror/m8w_block_lsmr_probe \
-  --ns-array 5 \
-  --nxi-array 9 \
-  --maxiter-array 6 \
-  --residual-linear-maxiter-array 54 \
-  --residual-linear-maxiter-policy fixed \
-  --residual-linear-solver block_lsmr \
-  --residual-compare-dense-step \
-  --i-prime 0.01 \
-  --case-label finite_current_block_lsmr_m8w \
-  --preconditioners none \
-  --no-plots
-JAX_ENABLE_X64=1 python examples/mirror_residual_newton_convergence_grid.py \
-  --outdir results/mirror/m8w_block_lsmr_lambda_xi_probe \
-  --ns-array 5 \
-  --nxi-array 9 \
-  --maxiter-array 6 \
-  --residual-linear-maxiter-array 54 \
-  --residual-linear-maxiter-policy fixed \
-  --residual-linear-solver block_lsmr \
-  --residual-compare-dense-step \
-  --residual-xi-alpha 1.0 \
-  --i-prime 0.01 \
-  --case-label finite_current_block_lsmr_lambda_xi_m8w \
+  --case-label finite_current_lambda_smoother_alpha2_m8y \
   --preconditioners radial_xi_lambda_xi_tridi \
   --no-plots
 JAX_ENABLE_X64=1 python examples/mirror_residual_newton_convergence_grid.py \
-  --outdir results/mirror/m8w_block_lsmr_lambda_xi_24_plots \
-  --ns-array 5 \
-  --nxi-array 9 \
-  --maxiter-array 24 \
-  --residual-linear-maxiter-array 54 \
+  --outdir results/mirror/m8y_lambda_smoother_alpha2_plots \
+  --ns-array 9 \
+  --nxi-array 17 \
+  --maxiter-array 6 \
+  --residual-linear-maxiter-array 102 \
+  --residual-block-lambda-maxiter 249 \
   --residual-linear-maxiter-policy fixed \
   --residual-linear-solver block_lsmr \
-  --residual-compare-dense-step \
-  --residual-xi-alpha 1.0 \
+  --residual-lambda-alpha 2.0 \
+  --residual-xi-alpha 2.0 \
   --i-prime 0.01 \
-  --case-label finite_current_block_lsmr_lambda_xi_24_m8w \
+  --case-label finite_current_lambda_smoother_alpha2_m8y \
   --preconditioners radial_xi_lambda_xi_tridi
+JAX_ENABLE_X64=1 python examples/mirror_residual_newton_convergence_grid.py \
+  --outdir results/mirror/m8y_lambda_smoother_alpha4_probe \
+  --ns-array 9 \
+  --nxi-array 17 \
+  --maxiter-array 3 \
+  --residual-linear-maxiter-array 102 \
+  --residual-block-lambda-maxiter 249 \
+  --residual-linear-maxiter-policy fixed \
+  --residual-linear-solver block_lsmr \
+  --residual-lambda-alpha 4.0 \
+  --residual-xi-alpha 4.0 \
+  --i-prime 0.01 \
+  --case-label finite_current_lambda_smoother_alpha4_m8y \
+  --preconditioners radial_xi_lambda_xi_tridi \
+  --no-plots
+JAX_ENABLE_X64=1 python examples/mirror_residual_newton_convergence_grid.py \
+  --outdir results/mirror/m8y_lambda_smoother_alpha4_six_probe \
+  --ns-array 9 \
+  --nxi-array 17 \
+  --maxiter-array 6 \
+  --residual-linear-maxiter-array 102 \
+  --residual-block-lambda-maxiter 249 \
+  --residual-linear-maxiter-policy fixed \
+  --residual-linear-solver block_lsmr \
+  --residual-lambda-alpha 4.0 \
+  --residual-xi-alpha 4.0 \
+  --i-prime 0.01 \
+  --case-label finite_current_lambda_smoother_alpha4_six_m8y \
+  --preconditioners radial_xi_lambda_xi_tridi \
+  --no-plots
 ```
 
 ### File structure and best-practice notes
 
-- `preconditioners.py` remains the single normalization point for residual
-  preconditioner, solver, and linear-budget option strings.
-- `optimizers.py` keeps the residual-Newton algorithm in one place but now
-  separates full Krylov and split block LSMR operator construction into helper
-  functions inside `projected_residual_newton_solve`.
-- The root-level example CLIs expose the same solver choices, avoiding drift
-  between diagnostic scripts.
-- Tests remain focused on behavior and diagnostics, while benchmark-quality
-  assertions stay in `plan_mirror.md` and generated result artifacts.
+- No source files changed in this lane.
+- The existing convergence-grid example and plot bundle were sufficient.
+- The M8x CLI option made the alpha comparison cheaper by avoiding unnecessary
+  high budgets on the radius block.
 
 ### Best next steps
 
-1. Commit and push M8w.
-2. Probe whether `block_lsmr` can close the remaining gap to dense/block-dense:
-   - separate radius and lambda inner iteration budgets;
-   - adaptive split budgets based on block residuals;
-   - stronger block approximations for the lambda-dominated finite-current
-     residual;
-   - `ns=9`, `nxi=17` comparison against M8v `block_dense_lstsq`.
-3. Start reducing residual-Newton complexity by moving stable linear-solve
-   helpers into a small dedicated module once the next scalable strategy is
-   selected.
-4. Continue the finite-current lane with visible pitch and normalized force
-   diagnostics tied to solve convergence.
+1. Commit and push the M8y plan log.
+2. Implement a structured lambda-block preconditioner/operator instead of more
+   alpha sweeps:
+   - use the existing tridiagonal smoother as a baseline;
+   - consider a separable radial/xi lambda inverse with tunable diagonal shift;
+   - compare against block-dense on `ns=5,nxi=9` and `ns=9,nxi=17`;
+   - keep alpha 2 / xi 2 as the balanced current matrix-free benchmark.
+3. Continue to plot residual histories and horizontal-`z` field-line bundles
+   for each new benchmark row.
 
-### Completion percentages after M8w
+### Completion percentages after M8y
 
 - Geometry/grids/bases: `90%`.
 - Field/energy/residual kernels: `84%`.
 - Fixed-boundary axisymmetric solve: `88%`.
-- Residual Newton / preconditioning: `90%`.
-- Two-coil and manufactured validation: `82%`.
-- Finite-current pitch validation: `77%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `78%`.
 - Plotting and `vmec --plot` mirror support: `79%`.
 - I/O schema and docs: `80%`.
 - Differentiable solved-state API: `20%`.
@@ -6242,7 +6443,7 @@ JAX_ENABLE_X64=1 python examples/mirror_residual_newton_convergence_grid.py \
 - Free-boundary mirror lane: `5%`.
 - Stellarator-mirror hybrid lane: `10%`.
 - ESSOS circular-coil mirror beta scan: `0%`.
-- PR merge readiness overall: `77%`.
+- PR merge readiness overall: `78%`.
 
 ### User input needed
 
