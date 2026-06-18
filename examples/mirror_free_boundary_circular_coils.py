@@ -43,7 +43,7 @@ from vmec_jax.mirror import (
 
 
 CIRCULAR_COIL_BETA_SCAN_SCHEMA = "mirror_free_boundary_circular_coil_beta_scan"
-CIRCULAR_COIL_BETA_SCAN_SCHEMA_VERSION = "0.2"
+CIRCULAR_COIL_BETA_SCAN_SCHEMA_VERSION = "0.3"
 CIRCULAR_COIL_BETA_SCAN_TOP_LEVEL_FIELDS = (
     "metrics_schema",
     "metrics_schema_version",
@@ -64,6 +64,7 @@ CIRCULAR_COIL_BETA_SCAN_TOP_LEVEL_FIELDS = (
     "boundary_bmag_max",
     "setup_json",
     "summary_csv",
+    "summary_rows",
     "beta_scan_requested_percent",
     "beta_cases",
     "fixed_boundary_baseline_count",
@@ -211,6 +212,13 @@ def validate_circular_coil_beta_scan_metrics(metrics: dict[str, object]) -> None
     baseline_rows = metrics.get("fixed_boundary_baseline_rows", [])
     if int(metrics["fixed_boundary_baseline_count"]) != len(baseline_rows):
         raise ValueError("fixed_boundary_baseline_count does not match fixed_boundary_baseline_rows")
+    summary_rows = metrics.get("summary_rows", [])
+    if len(summary_rows) != len(baseline_rows):
+        raise ValueError("summary_rows must have one row per fixed-boundary baseline row")
+    for index, report_row in enumerate(summary_rows):
+        if not isinstance(report_row, dict):
+            raise ValueError(f"summary row {index} must be a JSON object")
+        _require_fields(report_row, CIRCULAR_COIL_BETA_SCAN_REPORT_FIELDS, f"summary row {index}")
 
     pilot_rows = [pilot for row in baseline_rows if isinstance(row, dict) for pilot in row.get("lcfs_pilot_rows", [])]
     accepted_rows = sum(bool(row.get("accepted", False)) and not bool(row.get("skipped", False)) for row in pilot_rows)
@@ -1288,13 +1296,15 @@ def run_case(
         "boundary_bmag_max": float(np.max(np.asarray(boundary_sample.bmag))),
         "setup_json": str(setup_path),
         "summary_csv": str(summary_csv_path),
+        "summary_rows": [],
         "beta_scan_requested_percent": [float(case.beta_percent) for case in scan.beta_cases],
         "beta_cases": [case.to_dict() for case in scan.beta_cases],
         "fixed_boundary_baseline_rows": baseline_rows,
         "figures": figure_paths,
     }
+    metrics["summary_rows"] = circular_coil_beta_scan_report_rows(metrics)
     validate_circular_coil_beta_scan_metrics(metrics)
-    _write_beta_scan_report_csv(summary_csv_path, circular_coil_beta_scan_report_rows(metrics))
+    _write_beta_scan_report_csv(summary_csv_path, metrics["summary_rows"])
     metrics_path = outdir / "free_boundary_circular_coils_metrics.json"
     metrics_path.write_text(json.dumps(metrics, indent=2) + "\n")
     return metrics_path

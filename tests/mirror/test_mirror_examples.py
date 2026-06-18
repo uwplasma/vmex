@@ -205,13 +205,19 @@ def test_root_free_boundary_circular_coils_example_runs_without_plots(tmp_path):
     assert metrics["lcfs_pilot_stagnation_rtol"] == 0.0
     assert metrics["lcfs_pilot_fsq_growth_limit"] == 0.0
     assert metrics["lcfs_pilot_stop_reason_counts"] == {"max_steps": 3}
-    assert schema["metrics_schema_version"] == "0.2"
+    assert schema["metrics_schema_version"] == "0.3"
     assert "workflow_status_values" in schema
     assert "free_boundary_status_values" in schema
+    assert len(metrics["summary_rows"]) == 3
+    assert all(set(schema["report_fields"]).issubset(row) for row in metrics["summary_rows"])
     bad_count = dict(metrics)
     bad_count["fixed_boundary_baseline_count"] = metrics["fixed_boundary_baseline_count"] + 1
     with pytest.raises(ValueError, match="fixed_boundary_baseline_count"):
         module["validate_circular_coil_beta_scan_metrics"](bad_count)
+    bad_summary_rows = dict(metrics)
+    bad_summary_rows["summary_rows"] = metrics["summary_rows"][:-1]
+    with pytest.raises(ValueError, match="summary_rows"):
+        module["validate_circular_coil_beta_scan_metrics"](bad_summary_rows)
     bad_pilot_total = dict(metrics)
     bad_pilot_total["lcfs_pilot_rows_total"] = metrics["lcfs_pilot_rows_total"] + 1
     with pytest.raises(ValueError, match="lcfs_pilot_rows_total"):
@@ -229,7 +235,9 @@ def test_root_free_boundary_circular_coils_example_runs_without_plots(tmp_path):
     with Path(metrics["summary_csv"]).open(newline="") as stream:
         report_rows = list(csv.DictReader(stream))
     assert [float(row["beta_percent"]) for row in report_rows] == [1.0, 3.0, 10.0]
+    assert [float(row["beta_percent"]) for row in metrics["summary_rows"]] == [1.0, 3.0, 10.0]
     assert report_rows[0]["baseline_final_fsq"] == str(metrics["fixed_boundary_baseline_rows"][0]["final_fsq"])
+    assert metrics["summary_rows"][0]["baseline_final_fsq"] == metrics["fixed_boundary_baseline_rows"][0]["final_fsq"]
     assert report_rows[0]["pilot_status"] == metrics["fixed_boundary_baseline_rows"][0]["lcfs_pilot_status"]
     assert report_rows[0]["last_accepted_step"] == "1"
     assert report_rows[0]["last_accepted_fsq"] == str(

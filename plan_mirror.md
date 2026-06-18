@@ -16778,3 +16778,98 @@ Results:
 No user input is needed.
 
 ---
+## 134. Circular-Coil Beta-Scan Embedded Summary Rows
+
+### Steps taken
+
+- Bumped the circular-coil beta-scan metrics schema from `0.2` to `0.3`.
+- Added required top-level `summary_rows`.
+- `summary_rows` contains the same compact baseline / last-accepted /
+  final-trial report table that is written to
+  `free_boundary_circular_coils_beta_scan_summary.csv`.
+- Updated `validate_circular_coil_beta_scan_metrics` so it checks:
+  - `summary_rows` has one row per fixed-boundary baseline row;
+  - every summary row contains all `report_fields`.
+- Updated the CSV writer path to write the already embedded `summary_rows`,
+  keeping JSON and CSV reports in sync.
+- Updated `examples/mirror/README.md` to document schema version `0.3` and the
+  embedded summary table.
+- Extended the circular-coil tests to validate `summary_rows`, count mismatch
+  rejection, and JSON/CSV consistency.
+
+### Results obtained
+
+- Downstream ESSOS comparison tooling can now consume one JSON metrics file
+  without needing to open the sidecar CSV for the compact summary table.
+- The CSV remains available for spreadsheets and quick reports.
+- Existing circular-coil example tests pass with the stricter schema.
+
+### How it was tested
+
+Commands run:
+
+```bash
+python -m ruff check examples/mirror_free_boundary_circular_coils.py tests/mirror/test_mirror_examples.py
+python -m ruff format --check examples/mirror_free_boundary_circular_coils.py tests/mirror/test_mirror_examples.py
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_examples.py -k free_boundary_circular_coils -q
+python -m sphinx -W -b html docs docs/_build/html
+git diff --check
+python - <<'PY'
+import re
+from pathlib import Path
+text = Path("plan_mirror.md").read_text()
+nums = [int(m.group(1)) for m in re.finditer(r"^## (\\d+)\\.", text, flags=re.M)]
+print("milestones", len(nums), "last", nums[-1], "monotonic", nums == sorted(nums))
+PY
+```
+
+Results:
+
+- Ruff lint passed.
+- Ruff format check passed.
+- Circular-coil example subset: `5 passed, 12 deselected`.
+- Sphinx docs build passed with warnings treated as errors.
+- Whitespace check passed.
+- Plan milestone numbering remained monotonic.
+
+### File structure and best-practice notes
+
+- The embedded summary is produced by the existing
+  `circular_coil_beta_scan_report_rows` helper, avoiding a second table
+  construction path.
+- The JSON remains self-contained while preserving the CSV convenience output.
+- The schema stays local to the planning fixture and avoids external
+  validation dependencies.
+
+### Best next steps
+
+1. Commit and push M134.
+2. Re-run a higher-budget schema `0.3` beta scan when compute time is available
+   to capture accepted/rejected behavior in the embedded summary table.
+3. Add docs for interpreting `summary_rows` if external ESSOS scripts start
+   consuming it directly.
+4. Continue final lane cleanup and CI-failure checks as PR #21 updates run.
+
+### Completion percentages after M134
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `90%`.
+- Fixed-boundary axisymmetric solve: `90%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `89%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `92%`.
+- I/O schema and docs: `99%`.
+- Differentiable solved-state API: `72%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `87%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `90%`.
+- PR merge readiness overall: `95%`.
+
+### User input needed
+
+No user input is needed.
+
+---
