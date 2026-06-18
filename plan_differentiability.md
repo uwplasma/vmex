@@ -9907,3 +9907,71 @@ Completion:
 - Implicit residual-adjoint decomposition: 91%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.982%.
+
+## 2026-06-18 Residual HLO and NumPy Force Setup Split
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `maybe_dump_initial_residual_hlo_kernels` to
+   `vmec_jax.solvers.fixed_boundary.diagnostics.hlo`.
+2. Replaced inline residual HLO debug probes for bcovar/tomnsps with the
+   diagnostics helper, preserving failure-swallowing debug behavior.
+3. Added `NumpyForceFastPath` and `prepare_numpy_force_fast_path` to
+   `vmec_jax.solvers.fixed_boundary.residual.force_cache`.
+4. Replaced inline NumPy force wrapper setup and static/trig/wout conversion
+   in `solve_fixed_boundary_residual_iter` with the explicit fast-path object.
+5. Fixed the scan setup extraction by carrying `scan_differentiated` through
+   `Vmec2000ScanRuntimeSetup`, preserving scan preflight/cache behavior.
+
+Results obtained:
+
+- `iteration.py` dropped from 7,732 lines at the start of this resumed session
+  to 7,579 lines after the residual scan/HLO/NumPy fast-path splits.
+- `solve_fixed_boundary_residual_iter` dropped from about 7,214 to 7,060 lines
+  in this resumed session.
+- Debug HLO extraction is now in the diagnostics domain, and host NumPy force
+  setup is now in the residual force-cache domain rather than buried inside the
+  solver loop.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/residual/scan_adapters.py vmec_jax/solvers/fixed_boundary/residual/force_cache.py vmec_jax/solvers/fixed_boundary/diagnostics/hlo.py`
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/residual/scan_adapters.py vmec_jax/solvers/fixed_boundary/residual/force_cache.py vmec_jax/solvers/fixed_boundary/diagnostics/hlo.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_finish_cache_more_coverage.py::test_precompile_only_jit_precompile_exercises_force_cache_and_lower tests/test_solve_finish_cache_more_coverage.py::test_precompile_only_compute_force_cache_is_owned_and_limited tests/test_solve_finish_cache_more_coverage.py::test_precompile_only_jit_precompile_swallows_compile_failure tests/test_vmec_numpy_forces_cache.py::test_compute_forces_numpy_converts_state_and_constraint_inputs -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_debug_dump_wave10_coverage.py::test_maybe_dump_hlo_kernel_uses_fake_jax_and_deduplicates tests/test_solve_debug_dump_wave10_coverage.py::test_maybe_dump_hlo_kernel_respects_disabled_and_missing_jax tests/test_solve_wave6_coverage.py::test_hlo_dump_label_specific_env_writes_once tests/test_solve_residual_iter_force_payload_helpers.py::test_residual_force_payload_from_kernels_routes_masks_callbacks_and_hlo_dump -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_policy_coverage_extra.py tests/test_driver_api_finish_more_coverage.py tests/test_driver_wave2_coverage.py tests/test_driver_policy_helpers.py tests/test_driver_helper_edges_wave14_coverage.py tests/test_driver_finish_policy_more_coverage.py -q -k "scan or vmec2000 or dynamic or precompile or cache"`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_api.py::test_run_fixed_boundary_accelerated_mode_uses_scan tests/test_driver_api.py::test_run_fixed_boundary_accelerated_mode_defaults_to_single_grid -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_driver_control_fast.py tests/test_driver_api.py -q`
+- `python tools/diagnostics/source_health.py --top 14 --top-functions 20`
+
+Best next steps:
+
+1. Extract the strict-update precompile block from residual iteration into a
+   force/precompile helper, with the existing cache/precompile tests as gates.
+2. Then split VMEC2000 scan axis-reset preparation and initial preconditioner
+   cache construction from `_run_vmec2000_scan`.
+3. Keep commits at coherent tranche boundaries; avoid CI polling until a larger
+   milestone is ready.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.97%.
+- Differentiability/refactor implementation: 99.99989%.
+- Solver monolith reduction: 99.25%.
+- Free-boundary adjoint monolith reduction: 99.1%.
+- Driver workflow decomposition: 99.3%.
+- Residual iteration decomposition: 91.5%.
+- WOUT diagnostic/profile decomposition: 98.9%.
+- Optimizer workflow decomposition: 98.8%.
+- Fixed-boundary optimizer decomposition: 94.0%.
+- Implicit residual-adjoint decomposition: 91%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.984%.

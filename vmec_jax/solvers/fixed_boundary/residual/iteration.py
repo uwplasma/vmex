@@ -84,6 +84,7 @@ from vmec_jax.solvers.fixed_boundary.residual.finalize import (
 )
 from vmec_jax.solvers.fixed_boundary.residual.force_cache import (
     compute_forces_jit_cache_key as _compute_forces_jit_cache_key,
+    prepare_numpy_force_fast_path as _prepare_numpy_force_fast_path,
     select_compute_forces_callable as _select_compute_forces_callable,
 )
 from vmec_jax.solvers.fixed_boundary.residual.force_payload import (
@@ -1264,188 +1265,33 @@ def solve_fixed_boundary_residual_iter(
         rz_scale, l_scale = _metric_surface_precond_from_bcovar_jax(bc=k.bc, trig=trig)
         return k, frzl_full, gcr2, gcz2, gcl2, rz_scale, l_scale, norms_current
 
-    if os.getenv("VMEC_JAX_DUMP_HLO_DIR", "").strip():
-        try:
-
-            def _bcovar_only(st):
-                from vmec_jax.vmec_bcovar import vmec_bcovar_half_mesh_from_wout
-
-                return vmec_bcovar_half_mesh_from_wout(
-                    state=st,
-                    static=static,
-                    wout=wout_like,
-                    pres=None,
-                    use_wout_bsup=False,
-                    use_wout_bsub_for_lambda=False,
-                    use_wout_bmag_for_bsq=False,
-                    use_vmec_synthesis=True,
-                    trig=trig,
-                )
-
-            _maybe_dump_hlo_kernel(
-                label="bcovar",
-                fn=_bcovar_only,
-                args=(state0,),
-                kwargs={},
-                static=static,
-                wout_like=wout_like,
-            )
-        except Exception:
-            pass
-        try:
-            from vmec_jax.vmec_forces import vmec_forces_rz_from_wout
-            from vmec_jax.vmec_forces import vmec_residual_internal_from_kernels
-
-            k_hlo = vmec_forces_rz_from_wout(
-                state=state0,
-                static=static,
-                wout=wout_like,
-                indata=None,
-                constraint_tcon0=constraint_tcon0,
-                constraint_tcon=None,
-                constraint_precond_diag=None,
-                constraint_precond_active=None,
-                constraint_tcon_active=None,
-                use_wout_bsup=False,
-                use_vmec_synthesis=True,
-                trig=trig,
-                iter_idx=None,
-            )
-            mask_pack_hlo = static.tomnsps_masks if getattr(static, "tomnsps_masks", None) is not None else None
-
-            def _tomnsps_only(k_in):
-                frzl = vmec_residual_internal_from_kernels(
-                    k_in,
-                    cfg_ntheta=int(static.cfg.ntheta),
-                    cfg_nzeta=int(static.cfg.nzeta),
-                    wout=wout_like,
-                    trig=trig,
-                    apply_lforbal=apply_lforbal,
-                    include_edge=False,
-                    masks=mask_pack_hlo,
-                )
-                return (frzl.frcc, frzl.frss, frzl.fzsc, frzl.fzcs, frzl.flsc, frzl.flcs)
-
-            _maybe_dump_hlo_kernel(
-                label="tomnsps",
-                fn=_tomnsps_only,
-                args=(k_hlo,),
-                kwargs={},
-                static=static,
-                wout_like=wout_like,
-            )
-        except Exception:
-            pass
+    _hlo_dump_helpers.maybe_dump_initial_residual_hlo_kernels(
+        state0=state0,
+        static=static,
+        wout_like=wout_like,
+        trig=trig,
+        constraint_tcon0=constraint_tcon0,
+        apply_lforbal=bool(apply_lforbal),
+        maybe_dump_kernel=_maybe_dump_hlo_kernel,
+    )
 
     _compute_forces_impl = _compute_forces
 
     # NumPy hot-path: wrap _compute_forces_impl with pure-NumPy module patching.
     # Used when host_update_assembly=True to eliminate all JAX dispatch overhead.
-    _compute_forces_np = None
-    if bool(host_update_assembly) and has_jax():
-        try:
-            from vmec_jax.vmec_numpy_forces import compute_forces_numpy as _cfn_helper
-
-            def _compute_forces_np(
-                state: VMECState,
-                *,
-                include_edge: bool,
-                include_edge_residual: bool | None = None,
-                zero_m1: Any,
-                freeb_bsqvac_half: Any | None = None,
-                constraint_rcon0: Any | None = None,
-                constraint_zcon0: Any | None = None,
-                constraint_precond_diag: tuple[Any, Any] | None = None,
-                constraint_tcon: Any | None = None,
-                constraint_precond_active: Any | None = None,
-                constraint_tcon_active: Any | None = None,
-                iter_idx: int | None = None,
-            ):
-                return _cfn_helper(
-                    _compute_forces_impl,
-                    state,
-                    include_edge=include_edge,
-                    include_edge_residual=include_edge_residual,
-                    zero_m1=zero_m1,
-                    freeb_bsqvac_half=freeb_bsqvac_half,
-                    constraint_rcon0=constraint_rcon0,
-                    constraint_zcon0=constraint_zcon0,
-                    constraint_precond_diag=constraint_precond_diag,
-                    constraint_tcon=constraint_tcon,
-                    constraint_precond_active=constraint_precond_active,
-                    constraint_tcon_active=constraint_tcon_active,
-                    iter_idx=iter_idx,
-                )
-        except Exception:
-            _compute_forces_np = None
-
-    # Pre-convert trig/wout_like/static.tomnsps_masks to pure-NumPy so that
-    # indexing their array fields inside vmec_bcovar/tomnsps_rzl never triggers
-    # JAX dispatch.  This must happen AFTER _compute_forces_np is set (so we
-    # know the NumPy path is active) and BEFORE the iteration loop.
-    #
-    # Because _compute_forces is a closure that reads `trig`, `wout_like`, and
-    # `static` from this enclosing scope by reference (Python cell variables),
-    # reassigning them here makes the closure see the NumPy versions on every
-    # subsequent call.
-    #
-    # static.tomnsps_masks contains TomnspsMasks with mask_even_j as a JAX
-    # array; accessing it in _select_mparity triggers ~62 JAX dispatches/iter.
-    # Replacing static with a shallow copy that has NumPy masks eliminates this.
-    if _compute_forces_np is not None:
-        try:
-            import dataclasses as _dc
-            import numpy as _np_host
-            from vmec_jax.vmec_numpy_forces import _to_numpy_recursive as _tonp, _wrap as _np_wrap
-
-            trig = _tonp(trig)
-            try:
-                if getattr(trig, "phase_stack", None) is not None:
-                    trig = _dc.replace(
-                        trig,
-                        phase_stack_m=static.modes.m,
-                        phase_stack_n=static.modes.n,
-                    )
-            except Exception:
-                pass
-            wout_like = _tonp(wout_like)
-            # Build a replacement dict for static fields that benefit from
-            # pre-conversion to _NpArray.  This eliminates JAX device→host
-            # transfers that would otherwise happen on every iteration when
-            # vmec_bcovar/vmec_realspace access static.s and friends.
-            _repl: dict = {}
-            # static.s: accessed as jnp.asarray(static.s) ~490×/run in vmec_bcovar;
-            # converting to _NpArray here makes that a cheap isinstance pass.
-            _s_val = getattr(static, "s", None)
-            if _s_val is not None:
-                try:
-                    _repl["s"] = _np_wrap(_np_host.asarray(_s_val))
-                except Exception:
-                    pass
-            # Also convert tomnsps_masks (holds JAX mask_even_j etc.)
-            _np_masks = getattr(static, "tomnsps_masks", None)
-            _np_masks_edge = getattr(static, "tomnsps_masks_edge", None)
-            if _np_masks is not None:
-                _repl["tomnsps_masks"] = _tonp(_np_masks)
-                if _np_masks_edge is not None:
-                    _repl["tomnsps_masks_edge"] = _tonp(_np_masks_edge)
-            # Pre-convert boolean mask arrays (m_is_even, m_is_m1, etc.) to
-            # float _NpArray with the state dtype so that
-            #   jnp.asarray(static.m_is_even, dtype=dtype)
-            # hits the fast path in _NP_MODULE.asarray and returns immediately
-            # when dtype already matches, saving ~60k np.asarray calls per run.
-            try:
-                _state_dtype = _np_host.asarray(state0.Rcos).dtype
-                for _mask_field in ("m_is_even", "m_is_odd", "m_is_m1", "m_is_odd_rest"):
-                    _mval = getattr(static, _mask_field, None)
-                    if _mval is not None:
-                        _repl[_mask_field] = _np_wrap(_np_host.asarray(_mval, dtype=_state_dtype))
-            except Exception:
-                pass
-            if _repl:
-                static = _dc.replace(static, **_repl)
-        except Exception:
-            pass
+    numpy_force = _prepare_numpy_force_fast_path(
+        host_update_assembly=bool(host_update_assembly),
+        has_jax_func=has_jax,
+        compute_forces_impl=_compute_forces_impl,
+        state0=state0,
+        static=static,
+        trig=trig,
+        wout_like=wout_like,
+    )
+    static = numpy_force.static
+    trig = numpy_force.trig
+    wout_like = numpy_force.wout_like
+    _compute_forces_np = numpy_force.compute_forces_np
 
     compute_cache_key = _compute_forces_jit_cache_key(
         static_key=static_key,
@@ -1902,6 +1748,7 @@ def solve_fixed_boundary_residual_iter(
         scan_total_start = scan_runtime.total_start
         scan_device_runtime = scan_runtime.device_runtime
         scan_setup = scan_runtime.setup
+        scan_differentiated = scan_runtime.scan_differentiated
         state_only_scan = scan_runtime.state_only_scan
         scan_fallback_enabled_run = scan_runtime.scan_fallback_enabled_run
         force_chunked_scan_run = scan_runtime.force_chunked_scan_run

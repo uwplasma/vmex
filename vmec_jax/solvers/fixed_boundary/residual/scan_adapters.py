@@ -177,6 +177,7 @@ class Vmec2000ScanRuntimeSetup:
     total_start: float | None
     device_runtime: ScanDeviceRuntime
     setup: Any
+    scan_differentiated: bool
     controller_constants: Any
     iter_offset0: int
     nstep_screen: int
@@ -400,6 +401,7 @@ def build_vmec2000_scan_runtime_setup(
         total_start=scan_total_start,
         device_runtime=scan_device_runtime,
         setup=scan_setup,
+        scan_differentiated=bool(scan_differentiated),
         controller_constants=controller_constants,
         iter_offset0=int(iter_offset0),
         nstep_screen=int(scan_setup.nstep_screen),
