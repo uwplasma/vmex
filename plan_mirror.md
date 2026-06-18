@@ -15678,3 +15678,112 @@ Results:
 No user input is needed.
 
 ---
+
+## 124. Axisymmetric Reduced Residual/Jacobian API
+
+### Steps taken
+
+- Added differentiable reduced-coordinate fixed-boundary utilities in
+  `vmec_jax/mirror/solvers/fixed_boundary/reduced.py`:
+  - `axisym_reduced_residual_jax(...)`;
+  - `axisym_reduced_residual_jacobian_jax(...)`.
+- The residual is the JAX gradient of the reduced axisymmetric mirror energy
+  with respect to independent fixed-boundary coordinates.
+- The Jacobian helper supports:
+  - `derivative="hessian"` for the current energy-gradient residual;
+  - `derivative="forward"` for `jax.jacfwd`;
+  - `derivative="reverse"` for `jax.jacrev`.
+- Exported the functions through `vmec_jax.mirror.api` and
+  `vmec_jax.mirror`.
+- Added focused tests that:
+  - compare the JAX residual against the existing NumPy/JAX reduced-gradient
+    path;
+  - verify Hessian symmetry;
+  - compare `hessian` and `jacfwd` modes;
+  - compare the dense Jacobian action against `jax.jvp`.
+- Updated `docs/mirror/overview.rst` to describe this as the first
+  implicit-differentiation building block.
+
+### Results obtained
+
+- We now have an explicit residual map `F(x, p)` and dense linearization
+  `dF/dx` for small axisymmetric fixed-boundary mirror states.
+- This is the correct foundation for implicit differentiation:
+
+```text
+dF/dx * dx/dp = -dF/dp
+```
+
+or, in reverse mode,
+
+```text
+(dF/dx)^T * adjoint = dL/dx
+```
+
+- The implementation stays in JAX for differentiable kernels while the existing
+  CLI/optimizer path remains free to use NumPy/SciPy for speed and memory.
+- No host-side optimizer loop is being differentiated through.
+
+### How it was tested
+
+Commands run:
+
+```bash
+python -m ruff check vmec_jax/mirror/solvers/fixed_boundary/reduced.py vmec_jax/mirror/api.py vmec_jax/mirror/__init__.py tests/mirror/test_mirror_fixed_boundary_axisym.py
+python -m ruff format --check vmec_jax/mirror/solvers/fixed_boundary/reduced.py vmec_jax/mirror/api.py vmec_jax/mirror/__init__.py tests/mirror/test_mirror_fixed_boundary_axisym.py
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_fixed_boundary_axisym.py::test_reduced_jax_residual_and_jacobian_match_gradient_and_jvp tests/mirror/test_mirror_fixed_boundary_axisym.py::test_reduced_lbfgs_gradient_matches_central_difference -q
+python - <<'PY'
+from vmec_jax.mirror import axisym_reduced_residual_jacobian_jax, axisym_reduced_residual_jax
+print(axisym_reduced_residual_jax.__name__, axisym_reduced_residual_jacobian_jax.__name__)
+PY
+```
+
+Results:
+
+- Ruff lint passed.
+- Ruff format check passed.
+- Focused tests: `2 passed`.
+- Public API import returned the expected function names.
+
+### File structure and best-practice notes
+
+- The new functions live in `solvers/fixed_boundary/reduced.py`, beside the
+  reduced-coordinate packing and energy-gradient utilities they linearize.
+- Public exports are explicit through `api.py` and `__init__.py`.
+- The implementation is intentionally small: residual and linearization first,
+  custom implicit solve/VJP later.
+- The API names make the axisymmetric limitation explicit.
+
+### Best next steps
+
+1. Commit and push M124.
+2. Add a small implicit sensitivity helper that solves dense
+   `(dF/dx) dx = rhs` and `(dF/dx)^T adjoint = rhs` for tiny validation grids.
+3. Validate the dense implicit sensitivity against finite differences of a
+   manufactured or low-dimensional solved state.
+4. Only after that, promote to a custom JAX implicit-differentiation rule or
+   lineax-backed solve path for larger grids.
+
+### Completion percentages after M124
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `88%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `92%`.
+- I/O schema and docs: `99%`.
+- Differentiable solved-state API: `37%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `85%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `85%`.
+- PR merge readiness overall: `95%`.
+
+### User input needed
+
+No user input is needed.
+
+---

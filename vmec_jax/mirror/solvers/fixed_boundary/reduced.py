@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from vmec_jax._compat import jnp
+from vmec_jax._compat import jax, jnp
 
 from ...core.boundary import MirrorBoundary
 from ...core.grids import MirrorGrid
@@ -34,6 +34,11 @@ def _sanitize_scale(scale, *, expected_size: int) -> np.ndarray:
     scale = np.abs(scale)
     scale[(~np.isfinite(scale)) | (scale <= np.finfo(float).tiny)] = 1.0
     return scale
+
+
+def _require_jax() -> None:
+    if jax is None:
+        raise RuntimeError("JAX is required for differentiable reduced mirror residuals")
 
 
 def axisym_reduced_a_mask(grid: MirrorGrid) -> np.ndarray:
@@ -192,6 +197,86 @@ def _axisym_reduced_energy_jax(
         pressure=pressure,
         mu0=mu0,
     )
+
+
+def axisym_reduced_residual_jax(
+    vector,
+    grid: MirrorGrid,
+    boundary: MirrorBoundary,
+    *,
+    psi_prime: PsiPrimeProfile,
+    i_prime: IPrimeProfile,
+    pressure: PressureProfile,
+    mu0: float = 4.0e-7 * np.pi,
+):
+    """Return the differentiable reduced fixed-boundary residual.
+
+    The residual is the gradient of the axisymmetric reduced energy with
+    respect to the independent fixed-boundary coordinates.  It is the equation
+    ``F(x, p) = 0`` used by implicit differentiation of a converged mirror
+    state.
+    """
+    _require_jax()
+    vector = jnp.asarray(vector)
+
+    def objective(items):
+        return _axisym_reduced_energy_jax(
+            items,
+            grid,
+            boundary,
+            psi_prime=psi_prime,
+            i_prime=i_prime,
+            pressure=pressure,
+            mu0=mu0,
+        )
+
+    return jax.grad(objective)(vector)
+
+
+def axisym_reduced_residual_jacobian_jax(
+    vector,
+    grid: MirrorGrid,
+    boundary: MirrorBoundary,
+    *,
+    psi_prime: PsiPrimeProfile,
+    i_prime: IPrimeProfile,
+    pressure: PressureProfile,
+    derivative: str = "hessian",
+    mu0: float = 4.0e-7 * np.pi,
+):
+    """Return the JAX linearization of the reduced residual.
+
+    ``derivative="hessian"`` uses the fact that the current residual is an
+    energy gradient.  ``"forward"`` and ``"reverse"`` are available as explicit
+    Jacobian modes for method comparisons before introducing a custom implicit
+    derivative rule.
+    """
+    _require_jax()
+    vector = jnp.asarray(vector)
+    key = str(derivative).strip().lower().replace("-", "_")
+
+    def objective(items):
+        return _axisym_reduced_energy_jax(
+            items,
+            grid,
+            boundary,
+            psi_prime=psi_prime,
+            i_prime=i_prime,
+            pressure=pressure,
+            mu0=mu0,
+        )
+
+    if key in {"hessian", "energy_hessian"}:
+        return jax.hessian(objective)(vector)
+
+    def residual(items):
+        return jax.grad(objective)(items)
+
+    if key in {"forward", "fwd", "jacfwd"}:
+        return jax.jacfwd(residual)(vector)
+    if key in {"reverse", "rev", "jacrev"}:
+        return jax.jacrev(residual)(vector)
+    raise ValueError("derivative must be 'hessian', 'forward', or 'reverse'")
 
 
 def pack_reduced_state_3d(state: MirrorState3D, grid: MirrorGrid, boundary: MirrorBoundary) -> np.ndarray:

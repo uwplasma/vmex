@@ -10,6 +10,8 @@ from vmec_jax.mirror import (
     MirrorSolveOptions,
     PressureProfile,
     PsiPrimeProfile,
+    axisym_reduced_residual_jacobian_jax,
+    axisym_reduced_residual_jax,
     run_mirror_fixed_boundary,
 )
 from vmec_jax.mirror.core.boundary import MirrorBoundary
@@ -171,6 +173,90 @@ def test_reduced_lbfgs_gradient_matches_central_difference():
         finite_difference = (e_plus - e_minus) / (2.0 * step)
         assert np.isfinite(value)
         assert gradient[index] == pytest.approx(finite_difference, rel=2.0e-2, abs=2.0e-5)
+
+
+def test_reduced_jax_residual_and_jacobian_match_gradient_and_jvp():
+    jax = pytest.importorskip("jax")
+    jnp = pytest.importorskip("jax.numpy")
+    config = MirrorConfig(MirrorResolution(ns=5, ntheta=1, nxi=7, mpol=0), z_min=-1.0, z_max=1.0)
+    grid = config.build_grid()
+    boundary = MirrorBoundary.polynomial_radius(r0=0.3, a2=0.04)
+    base = MirrorStateAxisym.from_boundary(grid, boundary)
+    s = grid.s_full[:, None]
+    xi = grid.xi[None, :]
+    state = MirrorStateAxisym(
+        a=base.a * (1.0 + 0.01 * s * (1.0 - s) * (1.0 - xi**2)),
+        lam=0.005 * s * (xi - np.mean(grid.xi)),
+    )
+    psi = PsiPrimeProfile.constant(0.01)
+    current = IPrimeProfile.zero()
+    pressure = PressureProfile.zero()
+    vector = pack_axisym_reduced_state(state, grid, boundary)
+
+    _, gradient = reduced_axisym_energy_and_gradient(
+        vector,
+        grid,
+        boundary,
+        psi_prime=psi,
+        i_prime=current,
+        pressure=pressure,
+        mu0=1.0,
+    )
+    residual = np.asarray(
+        axisym_reduced_residual_jax(
+            vector,
+            grid,
+            boundary,
+            psi_prime=psi,
+            i_prime=current,
+            pressure=pressure,
+            mu0=1.0,
+        )
+    )
+    np.testing.assert_allclose(residual, gradient, rtol=1.0e-6, atol=1.0e-7)
+
+    jacobian = np.asarray(
+        axisym_reduced_residual_jacobian_jax(
+            vector,
+            grid,
+            boundary,
+            psi_prime=psi,
+            i_prime=current,
+            pressure=pressure,
+            mu0=1.0,
+        )
+    )
+    forward_jacobian = np.asarray(
+        axisym_reduced_residual_jacobian_jax(
+            vector,
+            grid,
+            boundary,
+            psi_prime=psi,
+            i_prime=current,
+            pressure=pressure,
+            derivative="forward",
+            mu0=1.0,
+        )
+    )
+    assert jacobian.shape == (vector.size, vector.size)
+    np.testing.assert_allclose(jacobian, jacobian.T, rtol=1.0e-6, atol=1.0e-7)
+    np.testing.assert_allclose(forward_jacobian, jacobian, rtol=1.0e-6, atol=1.0e-7)
+
+    direction = np.linspace(-0.5, 0.5, vector.size)
+    _, residual_jvp = jax.jvp(
+        lambda items: axisym_reduced_residual_jax(
+            items,
+            grid,
+            boundary,
+            psi_prime=psi,
+            i_prime=current,
+            pressure=pressure,
+            mu0=1.0,
+        ),
+        (jnp.asarray(vector),),
+        (jnp.asarray(direction),),
+    )
+    np.testing.assert_allclose(jacobian @ direction, np.asarray(residual_jvp), rtol=1.0e-6, atol=1.0e-7)
 
 
 def test_reduced_coordinate_scaling_matches_reduced_axisym_layout():
