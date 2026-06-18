@@ -91,6 +91,15 @@ The fast CLI/example path may use NumPy, SciPy, and Matplotlib when that keeps
 runtime and memory use low.  Research-grade differentiable APIs should stay in
 JAX kernels and use implicit/root or custom linear-solve differentiation rather
 than differentiating through long host-side solver loops.
+For the current free-boundary bridge, that means finite-difference Jacobians are
+the documented default for host-side CLI loops that call fixed-boundary trial
+solves or reporting callbacks, while reduced pure-JAX residual-vector
+prototypes should use ``jacobian_backend="jax"`` with ``jax_mode="auto"``.
+Automatic mode uses forward differentiation when the number of boundary
+parameters is no larger than the residual-vector length, and reverse
+differentiation for smaller residual or scalar-like targets.  The
+``examples/mirror_free_boundary_vector_ls_benchmark.py`` example records the
+backend comparison used to keep that guidance tested.
 
 Current solver status:
 

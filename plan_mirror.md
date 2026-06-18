@@ -5739,6 +5739,99 @@ Visual validation:
 No user input is needed.
 
 ---
+## 166. Documented Free-Boundary Derivative-Backend Selection
+
+### Steps taken
+
+- Re-checked the active repository and draft PR state after resuming:
+  - branch `codex/mirror-geometry`;
+  - PR #21 still draft;
+  - head SHA `3372029339498762d82c639d63fb685a1438cd39`;
+  - GitHub reported all current checks passing, including the combined coverage
+    gate, docs, fast tests, physics smoke, build, and Codecov statuses.
+- Confirmed that `/Users/rogeriojorge/local/vmec_mirror/plan_mirror.md` is the
+  active single plan; the original Downloads attachment is stale.
+- Added user-facing derivative-route guidance to the mirror example README.
+- Added matching Sphinx overview guidance for free-boundary derivative backend
+  selection.
+
+### Results obtained
+
+- The documented default is now explicit:
+  - use finite-difference Jacobians for current host-side CLI loops that call
+    fixed-boundary trial solves, write MOUT files, or use plotting/report
+    callbacks;
+  - use `jacobian_backend="jax"` with `jax_mode="auto"` for reduced residual
+    vector prototypes that are already pure JAX functions of boundary
+    parameters;
+  - automatic JAX mode uses forward differentiation when the number of boundary
+    parameters is no larger than the residual-vector length and reverse
+    differentiation for smaller residual or scalar-like targets.
+- The docs now point to `examples/mirror_free_boundary_vector_ls_benchmark.py`
+  as the benchmark that compares finite-difference, JAX forward, JAX reverse,
+  and JAX automatic derivative routes.
+
+### How it was tested
+
+Commands run:
+
+```bash
+gh pr view 21 --repo uwplasma/vmec_jax --json number,title,isDraft,headRefName,headRefOid,baseRefName,mergeStateStatus,url
+gh pr checks 21 --repo uwplasma/vmec_jax --json name,state,bucket,startedAt,completedAt,link
+python -m sphinx -W -b html docs docs/_build/html
+git diff --check
+```
+
+Results:
+
+- PR state check confirmed draft PR #21 on the expected branch and SHA.
+- GitHub checks were all passing on the current head; the manual/nightly full
+  physics job was skipped as configured.
+- Sphinx docs build passed with warnings treated as errors.
+- Whitespace check passed.
+
+### File structure and best-practice notes
+
+- `examples/mirror/README.md` now carries practical example-level guidance for
+  derivative backend choice.
+- `docs/mirror/overview.rst` carries the same policy at package-doc level.
+- No generated benchmark outputs or figures were committed.
+- The documentation separates fast CLI runtime concerns from the differentiable
+  pure-JAX residual-vector path, matching the source structure in
+  `vmec_jax/mirror/free_boundary.py`.
+
+### Best next steps
+
+1. Commit and push M166.
+2. Refresh the PR body to mention the derivative-backend policy if the body
+   does not already point reviewers to section 166.
+3. Continue the next open implementation lane, prioritizing the
+   Mirror-Boozer-like diagnostics lane because it remains the lowest-completion
+   source lane.
+
+### Completion percentages after M166
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `93%`.
+- Fixed-boundary axisymmetric solve: `91%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `89%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `93%`.
+- I/O schema and docs: `100%`.
+- Differentiable solved-state API: `94%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `99%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `97%`.
+- PR merge readiness overall: `98%`.
+
+### User input needed
+
+No user input is needed.
+
+---
 ## 56. 2026-06-17 M8w matrix-free block LSMR correction
 
 This lane converted the successful M8u/M8v block-dense split into a scalable

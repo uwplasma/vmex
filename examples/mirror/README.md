@@ -181,6 +181,17 @@ uses the same vector residual contract and can choose the
 ``finite_difference`` or ``jax`` Jacobian backend for one damped, line-searched
 step.
 
+Use finite differences for the current host-side CLI workflows that call fixed
+boundary solves, write MOUT files, or invoke plotting/report callbacks. Use
+``jacobian_backend="jax"`` with ``jax_mode="auto"`` for reduced residual-vector
+prototypes that are already pure JAX functions of boundary parameters. The
+automatic mode uses forward-mode differentiation when the number of boundary
+parameters is no larger than the residual-vector length, and reverse mode for
+smaller residual or scalar-like targets. The benchmark
+``examples/mirror_free_boundary_vector_ls_benchmark.py`` compares the finite
+difference, JAX forward, JAX reverse, and JAX automatic routes on the same
+reduced free-boundary residual contract.
+
 The circular-coil beta-scan metrics use the compact schema
 ``mirror_free_boundary_circular_coil_beta_scan`` version ``0.6``. The top-level
 JSON records the workflow status, direct-coil metadata, requested beta list,
