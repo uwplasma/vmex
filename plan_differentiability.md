@@ -15755,3 +15755,66 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.999972%.
+
+## 2026-06-18 Fixed-Boundary Driver Unused Assignment Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Removed stale local assignments in `run_fixed_boundary` that were no longer
+   consumed after earlier startup/staging context extraction.
+2. Left the startup and stage-policy dataclasses unchanged so downstream tests
+   and helpers still receive the same structured context.
+
+Results obtained:
+
+- `vmec_jax/driver.py` dropped from 1298 to 1292 lines.
+- `run_fixed_boundary` dropped from 683 to 677 lines.
+- Source-health confirms the driver warning is smaller without adding files or
+  changing public driver semantics.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/driver.py`
+- `python -m ruff check vmec_jax/driver.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_run_wave8_coverage.py::test_run_fixed_boundary_dispatches_fixed_and_free_static_branches tests/test_driver_run_wave8_coverage.py::test_run_fixed_boundary_selects_default_accelerated_policy_and_explicit_parity tests/test_driver_run_wave8_coverage.py::test_run_free_boundary_rejects_fixed_input_and_delegates_free_input tests/test_driver_policy_coverage_extra.py::test_run_fixed_boundary_nojit_initial_guess_falls_back_when_jax_context_fails tests/test_driver_api.py::test_run_free_boundary_delegates_to_shared_driver -q`
+- `python tools/diagnostics/source_health.py --top 16 --top-functions 30`
+- `git diff --check`
+
+Best next steps:
+
+1. Continue line-negative cleanups in existing driver/staging seams before
+   adding any new module structure.
+2. Revisit `run_fixed_boundary` for larger extraction only if the extraction
+   reduces total lines and has targeted driver coverage.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999%.
+- Solver monolith reduction: 99.62%.
+- Free-boundary adjoint monolith reduction: 99.40%.
+- Driver workflow decomposition: 99.90%.
+- Residual iteration decomposition: 97.5%.
+- WOUT diagnostic/profile decomposition: 99.88%.
+- Bcovar/WOUT parity decomposition: 99.09%.
+- Force-kernel decomposition: 99.65%.
+- Scan/performance policy consolidation: 99.72%.
+- Tomnsps transform decomposition: 98.4%.
+- Initial-guess decomposition: 99.0%.
+- Optimizer workflow decomposition: 99.56%.
+- Fixed-boundary optimizer decomposition: 95.8%.
+- Plotting/WOUT visualization decomposition: 95.8%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.3%.
+- QI objective/staged-runner decomposition: 96.8%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.999973%.
