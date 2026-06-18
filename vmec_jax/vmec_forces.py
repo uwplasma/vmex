@@ -242,6 +242,48 @@ def _production_bcovar_half_mesh_from_wout(*, expected_s: Any | None = None, **k
     return reloaded.vmec_bcovar_half_mesh_from_wout(**kwargs)
 
 
+class _WoutProfileProxy:
+    """WOUT-like view with input-deck flux/profile overrides."""
+
+    __slots__ = ("_base", "_overrides")
+
+    def __init__(self, base, overrides):
+        self._base = base
+        self._overrides = overrides
+
+    def __getattr__(self, name):
+        if name in self._overrides:
+            return self._overrides[name]
+        return getattr(self._base, name)
+
+
+def _resolve_force_wout_and_pressure(*, wout: Any, indata: Any | None, s: Any):
+    """Fill missing WOUT flux functions from input profiles for solver diagnostics."""
+
+    need_fill = (indata is not None) and any(not hasattr(wout, name) for name in ("phipf", "phips", "chipf", "pres"))
+    if not need_fill:
+        return wout, None
+
+    from .energy import flux_profiles_from_indata
+    from .profiles import eval_profiles
+
+    signgs = int(getattr(wout, "signgs", 1))
+    flux = flux_profiles_from_indata(indata, s, signgs=signgs)
+    s_half = s if int(s.shape[0]) < 2 else jnp.concatenate([s[:1], 0.5 * (s[1:] + s[:-1])], axis=0)
+    return (
+        _WoutProfileProxy(
+            wout,
+            {
+                "phipf": flux.phipf,
+                "phips": flux.phips,
+                "chipf": jnp.asarray(flux.chipf),
+                "signgs": int(signgs),
+            },
+        ),
+        eval_profiles(indata, s_half).get("pressure", None),
+    )
+
+
 @tree_util.register_pytree_node_class
 @dataclass(frozen=True)
 class VmecRZForceKernels:
@@ -953,58 +995,9 @@ def vmec_forces_rz_from_wout(
     ohs = jnp.asarray(1.0 / (s[1] - s[0])) if s.shape[0] >= 2 else jnp.asarray(0.0)
     dshalfds = jnp.asarray(0.25, dtype=s.dtype)
 
-    # For input-only workflows (solvers / diagnostics), allow computing the
-    # needed 1D flux functions and pressure directly from &INDATA instead of
-    # requiring a full VMEC2000 `wout` file.
-    wout_eff = wout
-    pres_half = None
-    need_indata_fill = (
-        (indata is not None)
-        and (
-            (not hasattr(wout, "phipf"))
-            or (not hasattr(wout, "phips"))
-            or (not hasattr(wout, "chipf"))
-            or (not hasattr(wout, "pres"))
-        )
-    )
-    if need_indata_fill:
-        from .energy import flux_profiles_from_indata
-        from .profiles import eval_profiles
-
-        signgs = int(getattr(wout, "signgs", 1))
-        flux = flux_profiles_from_indata(indata, s, signgs=signgs)
-
-        chipf_wout = jnp.asarray(flux.chipf)
-
-        # Pressure profile is defined on the VMEC half mesh.
-        if int(s.shape[0]) < 2:
-            s_half = s
-        else:
-            s_half = jnp.concatenate([s[:1], 0.5 * (s[1:] + s[:-1])], axis=0)
-        prof = eval_profiles(indata, s_half)
-        pres_half = prof.get("pressure", None)
-
-        class _WoutProxy:
-            __slots__ = ("_base", "_overrides")
-
-            def __init__(self, base, overrides):
-                self._base = base
-                self._overrides = overrides
-
-            def __getattr__(self, name):
-                if name in self._overrides:
-                    return self._overrides[name]
-                return getattr(self._base, name)
-
-        wout_eff = _WoutProxy(
-            wout,
-            {
-                "phipf": flux.phipf,
-                "phips": flux.phips,
-                "chipf": chipf_wout,
-                "signgs": int(signgs),
-            },
-        )
+    # Solver diagnostics may start from an input deck plus a lightweight WOUT
+    # shell. Normalize that case once before the force and bcovar paths.
+    wout_eff, pres_half = _resolve_force_wout_and_pressure(wout=wout, indata=indata, s=s)
 
     phips = wout_eff.phips
     # This conversion is needed both by bcovar and by the constraint kernels.
