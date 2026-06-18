@@ -11,11 +11,15 @@ from vmec_jax.mirror import (
     MirrorBoundary,
     MirrorCircularCoils,
     MirrorExternalFieldSample,
+    MirrorFreeBoundaryBetaCase,
+    MirrorFreeBoundaryCircularCoilScan,
+    MirrorFreeBoundaryResidual,
     initial_mirror_boundary_from_circular_coil_scan,
     load_mirror_free_boundary_circular_coil_scan,
     make_mirror_free_boundary_beta_cases,
     make_mirror_free_boundary_circular_coil_scan,
     make_mirror_grid,
+    mirror_boundary_from_external_axis_field,
     mirror_boundary_from_on_axis_bz,
     mirror_circular_coils_to_direct_params,
     mirror_external_bnormal,
@@ -234,6 +238,19 @@ def test_mirror_free_boundary_circular_coil_scan_json_roundtrip(tmp_path):
     assert payload["status"] == "setup_only_no_lcfs_solve"
 
 
+def test_mirror_free_boundary_scan_rejects_empty_cases_and_beta_case_defaults():
+    coils = MirrorCircularCoils.symmetric_pair(
+        coil_radius_m=0.4,
+        separation_m=1.6,
+        current_a=9.0e5,
+    )
+    case = MirrorFreeBoundaryBetaCase.from_dict({"beta_percent": 2.5, "pressure_scale": 7.0})
+
+    assert case.beta_fraction == pytest.approx(0.025)
+    with pytest.raises(ValueError, match="at least one beta case"):
+        MirrorFreeBoundaryCircularCoilScan(coils=coils, beta_cases=())
+
+
 def test_initial_mirror_boundary_from_circular_coil_scan_matches_analytic_flux_tube():
     enable_x64(True)
     coil_radius = 0.35
@@ -264,6 +281,17 @@ def test_initial_mirror_boundary_from_circular_coil_scan_matches_analytic_flux_t
     expected = mirror_boundary_from_on_axis_bz(0.5 * midplane_bz * midplane_radius**2, grid.z, analytic_bz)
 
     np.testing.assert_allclose(boundary.radius_on_grid(grid), expected.radius_on_grid(grid), rtol=1.0e-12)
+
+
+def test_mirror_boundary_from_external_axis_field_rejects_invalid_inputs():
+    grid = make_mirror_grid(ns=3, ntheta=1, nxi=5, z_min=-1.0, z_max=1.0)
+
+    with pytest.raises(ValueError, match="axis_bz"):
+        mirror_boundary_from_external_axis_field(grid, np.ones(grid.nxi + 1), midplane_radius=0.25)
+    with pytest.raises(ValueError, match="midplane_radius"):
+        mirror_boundary_from_external_axis_field(grid, np.ones(grid.nxi), midplane_radius=0.0)
+    with pytest.raises(ValueError, match="nonzero"):
+        mirror_boundary_from_external_axis_field(grid, np.zeros(grid.nxi), midplane_radius=0.25)
 
 
 def test_mirror_lcfs_diagnostic_reports_side_boundary_targets():
@@ -311,6 +339,84 @@ def test_mirror_lcfs_diagnostic_reports_side_boundary_targets():
     assert diagnostic.pressure_balance_max == pytest.approx(1.5)
 
 
+def test_mirror_lcfs_diagnostic_from_arrays_rejects_invalid_shapes():
+    theta = np.asarray([0.0])
+    z = np.linspace(-1.0, 1.0, 3)
+    boundary_r = np.ones((theta.size, z.size))
+    sample = MirrorExternalFieldSample(
+        r=boundary_r,
+        theta=theta,
+        z=z,
+        br=np.zeros_like(boundary_r),
+        btheta=np.zeros_like(boundary_r),
+        bz=np.ones_like(boundary_r),
+        bmag=np.ones_like(boundary_r),
+    )
+
+    with pytest.raises(ValueError, match="boundary_r"):
+        mirror_lcfs_diagnostic_from_arrays(
+            theta=theta,
+            z=z,
+            boundary_r=np.ones((2, z.size)),
+            edge_internal_bmag=boundary_r,
+            external_sample=sample,
+            edge_pressure=0.0,
+        )
+    with pytest.raises(ValueError, match="at least two"):
+        mirror_lcfs_diagnostic_from_arrays(
+            theta=theta,
+            z=np.asarray([0.0]),
+            boundary_r=np.ones((1, 1)),
+            edge_internal_bmag=np.ones((1, 1)),
+            external_sample=MirrorExternalFieldSample(
+                r=np.ones((1, 1)),
+                theta=theta,
+                z=np.asarray([0.0]),
+                br=np.zeros((1, 1)),
+                btheta=np.zeros((1, 1)),
+                bz=np.ones((1, 1)),
+                bmag=np.ones((1, 1)),
+            ),
+            edge_pressure=0.0,
+        )
+    with pytest.raises(ValueError, match="external field sample"):
+        mirror_lcfs_diagnostic_from_arrays(
+            theta=theta,
+            z=z,
+            boundary_r=boundary_r,
+            edge_internal_bmag=boundary_r,
+            external_sample=MirrorExternalFieldSample(
+                r=boundary_r,
+                theta=theta,
+                z=z,
+                br=np.zeros((1, z.size + 1)),
+                btheta=np.zeros_like(boundary_r),
+                bz=np.ones_like(boundary_r),
+                bmag=np.ones_like(boundary_r),
+            ),
+            edge_pressure=0.0,
+        )
+    with pytest.raises(ValueError, match=r"internal edge \|B\|"):
+        mirror_lcfs_diagnostic_from_arrays(
+            theta=theta,
+            z=z,
+            boundary_r=boundary_r,
+            edge_internal_bmag=np.ones((1, z.size + 1)),
+            external_sample=sample,
+            edge_pressure=0.0,
+        )
+    with pytest.raises(ValueError, match="mu0"):
+        mirror_lcfs_diagnostic_from_arrays(
+            theta=theta,
+            z=z,
+            boundary_r=boundary_r,
+            edge_internal_bmag=boundary_r,
+            external_sample=sample,
+            edge_pressure=0.0,
+            mu0=0.0,
+        )
+
+
 def test_mirror_external_bnormal_is_zero_for_axial_field_on_cylinder():
     theta = np.asarray([0.0])
     z = np.linspace(-1.0, 1.0, 7)
@@ -329,6 +435,30 @@ def test_mirror_external_bnormal_is_zero_for_axial_field_on_cylinder():
 
     np.testing.assert_allclose(dr_dz, 0.0, atol=1.0e-14)
     np.testing.assert_allclose(bnormal, 0.0, atol=1.0e-14)
+
+
+@pytest.mark.parametrize(
+    ("boundary_r", "z", "sample_br", "match"),
+    [
+        (np.ones(3), np.linspace(-1.0, 1.0, 3), np.zeros((1, 3)), "boundary_r"),
+        (np.ones((1, 3)), np.ones((1, 3)), np.zeros((1, 3)), "z must be"),
+        (np.ones((1, 1)), np.asarray([0.0]), np.zeros((1, 1)), "at least two"),
+        (np.ones((1, 3)), np.linspace(-1.0, 1.0, 3), np.zeros((1, 4)), "external field sample"),
+    ],
+)
+def test_mirror_external_bnormal_rejects_invalid_shapes(boundary_r, z, sample_br, match):
+    sample = MirrorExternalFieldSample(
+        r=np.ones_like(sample_br),
+        theta=np.asarray([0.0]),
+        z=z,
+        br=sample_br,
+        btheta=np.zeros_like(sample_br),
+        bz=np.ones_like(sample_br),
+        bmag=np.ones_like(sample_br),
+    )
+
+    with pytest.raises(ValueError, match=match):
+        mirror_external_bnormal(boundary_r, z, sample)
 
 
 def test_mirror_lcfs_merit_combines_pressure_and_normal_field():
@@ -441,6 +571,33 @@ def test_mirror_free_boundary_residual_rejects_invalid_inputs(kwargs, match):
         mirror_free_boundary_residual(equilibrium, lcfs, **kwargs)
 
 
+def test_mirror_free_boundary_residual_rejects_nonfinite_blocks():
+    lcfs = SimpleNamespace(vector=np.asarray([0.0]), value=0.0)
+
+    with pytest.raises(ValueError, match="equilibrium_residual must be finite"):
+        mirror_free_boundary_residual([np.inf], lcfs, equilibrium_scale=1.0)
+    with pytest.raises(ValueError, match="lcfs_residual.vector"):
+        mirror_free_boundary_residual([1.0], SimpleNamespace(vector=np.asarray([]), value=0.0))
+    with pytest.raises(ValueError, match="lcfs_residual.vector must be finite"):
+        mirror_free_boundary_residual([1.0], SimpleNamespace(vector=np.asarray([np.nan]), value=0.0))
+
+
+def _free_boundary_residual_from_vector(vector):
+    vector = np.asarray(vector, dtype=float).ravel()
+    value = 0.0 if vector.size == 0 else float(np.sqrt(np.mean(vector**2)))
+    return MirrorFreeBoundaryResidual(
+        vector=vector,
+        equilibrium_component=vector,
+        lcfs_component=np.asarray([], dtype=float),
+        value=value,
+        equilibrium_rms=value,
+        lcfs_value=0.0,
+        equilibrium_scale=1.0,
+        equilibrium_weight=1.0,
+        lcfs_weight=0.0,
+    )
+
+
 def _linear_synthetic_free_boundary_residual(coefficients):
     target = np.asarray([0.4, -0.2])
     matrix = np.asarray(
@@ -535,6 +692,42 @@ def test_mirror_free_boundary_least_squares_step_backtracks_nonlinear_residual()
     assert step.trial_residual.value < step.residual.value
 
 
+def test_mirror_free_boundary_least_squares_step_can_select_better_accepted_factor():
+    def nonlinear_residual(coefficients):
+        c0 = float(np.asarray(coefficients, dtype=float)[0])
+        return _free_boundary_residual_from_vector([c0 - 1.0 + c0**2])
+
+    step = mirror_free_boundary_least_squares_step(
+        np.asarray([0.0]),
+        nonlinear_residual,
+        max_relative_step=2.0,
+        line_search_factors=(1.0, 0.5),
+    )
+
+    assert step.accepted is True
+    assert step.line_search_factor == pytest.approx(0.5)
+    assert step.trial_residual.value < step.residual.value
+
+
+def test_mirror_free_boundary_least_squares_step_rejects_all_worse_trials_with_ridge():
+    def nonlinear_residual(coefficients):
+        c0 = float(np.asarray(coefficients, dtype=float)[0])
+        return _free_boundary_residual_from_vector([c0 - 1.0 + 100.0 * c0**2])
+
+    step = mirror_free_boundary_least_squares_step(
+        np.asarray([0.0]),
+        nonlinear_residual,
+        max_relative_step=2.0,
+        ridge=0.1,
+        line_search_factors=(1.0, 0.5),
+    )
+
+    assert step.accepted is False
+    assert step.line_search_factor == pytest.approx(0.0)
+    np.testing.assert_allclose(step.new_coefficients, [0.0])
+    np.testing.assert_allclose(step.trial_residual.vector, step.residual.vector)
+
+
 @pytest.mark.parametrize(
     ("kwargs", "match"),
     [
@@ -544,6 +737,7 @@ def test_mirror_free_boundary_least_squares_step_backtracks_nonlinear_residual()
         ({"damping": 0.0}, "damping"),
         ({"max_relative_step": 0.0}, "max_relative_step"),
         ({"ridge": -1.0}, "ridge"),
+        ({"accept_tolerance": -1.0}, "accept_tolerance"),
         ({"line_search_factors": ()}, "line_search_factors"),
         ({"line_search_factors": (1.0, -0.5)}, "line_search_factors"),
     ],
@@ -564,6 +758,48 @@ def test_mirror_free_boundary_residual_jacobian_rejects_non_residual_return():
         mirror_free_boundary_residual_jacobian_finite_difference(
             np.asarray([0.0]),
             lambda coefficients: coefficients,
+        )
+
+
+@pytest.mark.parametrize(
+    ("coefficients", "match"),
+    [
+        ([], "coefficients"),
+        ([np.inf], "finite"),
+    ],
+)
+def test_mirror_free_boundary_residual_jacobian_rejects_invalid_coefficients(coefficients, match):
+    with pytest.raises(ValueError, match=match):
+        mirror_free_boundary_residual_jacobian_finite_difference(
+            coefficients,
+            _linear_synthetic_free_boundary_residual,
+        )
+
+
+@pytest.mark.parametrize(
+    ("residual", "match"),
+    [
+        (_free_boundary_residual_from_vector([]), "empty residual vector"),
+        (_free_boundary_residual_from_vector([np.inf]), "non-finite residual vector"),
+    ],
+)
+def test_mirror_free_boundary_residual_jacobian_rejects_invalid_residual_vectors(residual, match):
+    with pytest.raises(ValueError, match=match):
+        mirror_free_boundary_residual_jacobian_finite_difference(
+            np.asarray([0.0]),
+            lambda coefficients: residual,
+            residual=residual,
+        )
+
+
+def test_mirror_free_boundary_residual_jacobian_rejects_varying_vector_shape():
+    base = _free_boundary_residual_from_vector([0.0])
+
+    with pytest.raises(ValueError, match="fixed shape"):
+        mirror_free_boundary_residual_jacobian_finite_difference(
+            np.asarray([0.0]),
+            lambda coefficients: _free_boundary_residual_from_vector([0.0, float(np.asarray(coefficients)[0])]),
+            residual=base,
         )
 
 
@@ -666,6 +902,31 @@ def test_mirror_external_pressure_balance_response_rejects_invalid_steps(kwargs,
         mirror_external_pressure_balance_response(diagnostic, provider_params=None, **kwargs)
 
 
+def test_mirror_external_pressure_balance_response_samples_direct_circular_coils():
+    enable_x64(True)
+    theta = np.asarray([0.0])
+    z = np.linspace(-0.5, 0.5, 3)
+    boundary_r = np.full((theta.size, z.size), 0.2)
+    diagnostic = SimpleNamespace(theta=theta, z=z, boundary_r=boundary_r)
+    coils = MirrorCircularCoils.symmetric_pair(
+        coil_radius_m=0.4,
+        separation_m=1.2,
+        current_a=8.0e5,
+        n_segments=32,
+    )
+
+    response = mirror_external_pressure_balance_response(
+        diagnostic,
+        coils,
+        radius_step_fraction=1.0e-3,
+        radius_step_min=1.0e-5,
+    )
+
+    assert response.shape == boundary_r.shape
+    assert np.all(np.isfinite(response))
+    assert np.linalg.norm(response) > 0.0
+
+
 def test_axisymmetric_lcfs_update_reduces_synthetic_pressure_imbalance():
     theta = np.asarray([0.0])
     z = np.linspace(-1.0, 1.0, 5)
@@ -734,6 +995,68 @@ def test_axisymmetric_lcfs_update_tapers_near_caps():
     np.testing.assert_allclose(tapered.delta_radius[[0, -1]], 0.0, atol=1.0e-14)
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"damping": 0.0}, "damping"),
+        ({"max_relative_step": 0.0}, "max_relative_step"),
+        ({"radius_floor": 0.0}, "radius_floor"),
+        ({"cap_taper_power": -1.0}, "cap_taper_power"),
+        ({"smoothing_passes": -1}, "smoothing_passes"),
+    ],
+)
+def test_axisymmetric_lcfs_update_rejects_invalid_options(kwargs, match):
+    diagnostic = SimpleNamespace(
+        theta=np.asarray([0.0]),
+        z=np.linspace(-1.0, 1.0, 5),
+        boundary_r=np.ones((1, 5)),
+        pressure_balance=np.ones((1, 5)),
+    )
+
+    with pytest.raises(ValueError, match=match):
+        propose_axisymmetric_mirror_lcfs_update(diagnostic, np.ones((1, 5)), **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("diagnostic", "pressure_response", "match"),
+    [
+        (
+            SimpleNamespace(
+                theta=np.asarray([0.0]),
+                z=np.asarray([0.0, -1.0]),
+                boundary_r=np.ones((1, 2)),
+                pressure_balance=np.ones((1, 2)),
+            ),
+            np.ones((1, 2)),
+            "strictly increasing",
+        ),
+        (
+            SimpleNamespace(
+                theta=np.asarray([0.0]),
+                z=np.linspace(-1.0, 1.0, 5),
+                boundary_r=np.ones((1, 5)),
+                pressure_balance=np.ones((1, 5)),
+            ),
+            np.ones((2, 5)),
+            "pressure_response",
+        ),
+        (
+            SimpleNamespace(
+                theta=np.asarray([0.0]),
+                z=np.linspace(-1.0, 1.0, 5),
+                boundary_r=np.full((1, 5), np.nan),
+                pressure_balance=np.ones((1, 5)),
+            ),
+            np.ones((1, 5)),
+            "finite",
+        ),
+    ],
+)
+def test_axisymmetric_lcfs_update_rejects_invalid_arrays(diagnostic, pressure_response, match):
+    with pytest.raises(ValueError, match=match):
+        propose_axisymmetric_mirror_lcfs_update(diagnostic, pressure_response)
+
+
 def test_axisymmetric_lcfs_scale_update_reduces_synthetic_pressure_imbalance():
     theta = np.asarray([0.0])
     z = np.linspace(-1.0, 1.0, 5)
@@ -758,6 +1081,65 @@ def test_axisymmetric_lcfs_scale_update_reduces_synthetic_pressure_imbalance():
     np.testing.assert_allclose(proposal.pressure_balance_predicted, 0.0, atol=1.0e-14)
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"max_relative_step": 0.0}, "max_relative_step"),
+        ({"radius_floor": 0.0}, "radius_floor"),
+    ],
+)
+def test_axisymmetric_lcfs_scale_update_rejects_invalid_options(kwargs, match):
+    diagnostic = SimpleNamespace(
+        theta=np.asarray([0.0]),
+        z=np.linspace(-1.0, 1.0, 5),
+        boundary_r=np.ones((1, 5)),
+        pressure_balance=np.ones((1, 5)),
+    )
+
+    with pytest.raises(ValueError, match=match):
+        propose_axisymmetric_mirror_lcfs_scale_update(diagnostic, np.ones((1, 5)), **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("diagnostic", "pressure_response", "match"),
+    [
+        (
+            SimpleNamespace(
+                theta=np.asarray([0.0]),
+                z=np.asarray([0.0, -1.0]),
+                boundary_r=np.ones((1, 2)),
+                pressure_balance=np.ones((1, 2)),
+            ),
+            np.ones((1, 2)),
+            "strictly increasing",
+        ),
+        (
+            SimpleNamespace(
+                theta=np.asarray([0.0]),
+                z=np.linspace(-1.0, 1.0, 5),
+                boundary_r=np.ones((1, 5)),
+                pressure_balance=np.ones((1, 5)),
+            ),
+            np.ones((2, 5)),
+            "pressure_response",
+        ),
+        (
+            SimpleNamespace(
+                theta=np.asarray([0.0]),
+                z=np.linspace(-1.0, 1.0, 5),
+                boundary_r=np.full((1, 5), np.nan),
+                pressure_balance=np.ones((1, 5)),
+            ),
+            np.ones((1, 5)),
+            "finite",
+        ),
+    ],
+)
+def test_axisymmetric_lcfs_scale_update_rejects_invalid_arrays(diagnostic, pressure_response, match):
+    with pytest.raises(ValueError, match=match):
+        propose_axisymmetric_mirror_lcfs_scale_update(diagnostic, pressure_response)
+
+
 def test_axisymmetric_lcfs_noop_update_preserves_boundary_and_residual():
     theta = np.asarray([0.0])
     z = np.linspace(-1.0, 1.0, 5)
@@ -776,6 +1158,23 @@ def test_axisymmetric_lcfs_noop_update_preserves_boundary_and_residual():
     np.testing.assert_allclose(proposal.new_radius, boundary_r[0])
     np.testing.assert_allclose(proposal.delta_radius, 0.0)
     np.testing.assert_allclose(proposal.pressure_balance_predicted, pressure_balance[0])
+
+
+def test_axisymmetric_lcfs_noop_update_rejects_invalid_arrays():
+    diagnostic = SimpleNamespace(
+        theta=np.asarray([0.0]),
+        z=np.asarray([0.0, -1.0]),
+        boundary_r=np.ones((1, 2)),
+        pressure_balance=np.ones((1, 2)),
+    )
+    with pytest.raises(ValueError, match="strictly increasing"):
+        propose_axisymmetric_mirror_lcfs_noop_update(diagnostic)
+
+    diagnostic.z = np.linspace(-1.0, 1.0, 5)
+    diagnostic.boundary_r = np.ones((1, 5))
+    diagnostic.pressure_balance = np.ones((1, 5))
+    with pytest.raises(ValueError, match="pressure_response"):
+        propose_axisymmetric_mirror_lcfs_noop_update(diagnostic, pressure_response=np.ones((2, 5)))
 
 
 def test_axisymmetric_lcfs_bnormal_update_reduces_synthetic_normal_field():
@@ -813,6 +1212,85 @@ def test_axisymmetric_lcfs_bnormal_update_reduces_synthetic_normal_field():
     assert proposal.strategy == "bnormal_slope"
     assert float(np.sqrt(np.mean(after**2))) < 1.0e-12
     assert float(np.sqrt(np.mean(after**2))) < float(np.sqrt(np.mean(before**2)))
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"max_relative_step": 0.0}, "max_relative_step"),
+        ({"radius_floor": 0.0}, "radius_floor"),
+        ({"slope_limit": 0.0}, "slope_limit"),
+        ({"smoothing_passes": -1}, "smoothing_passes"),
+    ],
+)
+def test_axisymmetric_lcfs_bnormal_update_rejects_invalid_options(kwargs, match):
+    theta = np.asarray([0.0])
+    z = np.linspace(-1.0, 1.0, 5)
+    boundary_r = np.ones((1, 5))
+    sample = MirrorExternalFieldSample(
+        r=boundary_r,
+        theta=theta,
+        z=z,
+        br=np.zeros_like(boundary_r),
+        btheta=np.zeros_like(boundary_r),
+        bz=np.ones_like(boundary_r),
+        bmag=np.ones_like(boundary_r),
+    )
+    diagnostic = SimpleNamespace(theta=theta, z=z, boundary_r=boundary_r, pressure_balance=np.zeros_like(boundary_r))
+
+    with pytest.raises(ValueError, match=match):
+        propose_axisymmetric_mirror_lcfs_bnormal_update(diagnostic, sample, np.ones_like(boundary_r), **kwargs)
+
+
+def test_axisymmetric_lcfs_bnormal_update_rejects_invalid_arrays_and_smooths():
+    theta = np.asarray([0.0])
+    z = np.linspace(-1.0, 1.0, 5)
+    boundary_r = np.ones((1, 5))
+    diagnostic = SimpleNamespace(theta=theta, z=z, boundary_r=boundary_r, pressure_balance=np.zeros_like(boundary_r))
+    sample = MirrorExternalFieldSample(
+        r=boundary_r,
+        theta=theta,
+        z=z,
+        br=np.linspace(-0.1, 0.1, z.size)[None, :],
+        btheta=np.zeros_like(boundary_r),
+        bz=np.ones_like(boundary_r),
+        bmag=np.ones_like(boundary_r),
+    )
+
+    bad_z = SimpleNamespace(
+        theta=theta, z=np.asarray([0.0, -1.0]), boundary_r=np.ones((1, 2)), pressure_balance=np.ones((1, 2))
+    )
+    with pytest.raises(ValueError, match="strictly increasing"):
+        propose_axisymmetric_mirror_lcfs_bnormal_update(bad_z, sample, np.ones((1, 2)))
+    bad_sample = MirrorExternalFieldSample(
+        r=np.ones((1, 4)),
+        theta=theta,
+        z=z,
+        br=np.ones((1, 4)),
+        btheta=np.zeros((1, 4)),
+        bz=np.ones((1, 4)),
+        bmag=np.ones((1, 4)),
+    )
+    with pytest.raises(ValueError, match="external field sample"):
+        propose_axisymmetric_mirror_lcfs_bnormal_update(diagnostic, bad_sample, np.ones_like(boundary_r))
+    with pytest.raises(ValueError, match="pressure_response"):
+        propose_axisymmetric_mirror_lcfs_bnormal_update(diagnostic, sample, np.ones((2, 5)))
+
+    default_response = propose_axisymmetric_mirror_lcfs_bnormal_update(
+        diagnostic,
+        sample,
+        smoothing_passes=0,
+    )
+    np.testing.assert_allclose(default_response.pressure_response, 0.0)
+
+    proposal = propose_axisymmetric_mirror_lcfs_bnormal_update(
+        diagnostic,
+        sample,
+        np.ones_like(boundary_r),
+        smoothing_passes=1,
+    )
+    assert proposal.strategy == "bnormal_slope"
+    assert np.all(np.isfinite(proposal.new_radius))
 
 
 def test_axisymmetric_lcfs_mixed_update_improves_pressure_without_increasing_normal_field():

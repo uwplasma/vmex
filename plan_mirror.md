@@ -5739,7 +5739,6 @@ Visual validation:
 No user input is needed.
 
 ---
-
 ## 56. 2026-06-17 M8w matrix-free block LSMR correction
 
 This lane converted the successful M8u/M8v block-dense split into a scalable
@@ -5997,7 +5996,6 @@ JAX_ENABLE_X64=1 python examples/mirror_residual_newton_convergence_grid.py \
 No user input is needed.
 
 ---
-
 ## 57. 2026-06-17 M8x split lambda-block budget diagnostic
 
 This lane tested whether the M8w matrix-free split block solver could scale to
@@ -19325,6 +19323,184 @@ Results:
 - Straight-axis hybrid fixture lane: `25%`.
 - Toroidal stellarator-mirror hybrid lane: `95%`.
 - ESSOS circular-coil mirror beta scan: `96%`.
+- PR merge readiness overall: `98%`.
+
+### User input needed
+
+No user input is needed.
+
+---
+## 157. Guarded Multi-Step Coupled LS Loop and CI Coverage-Gate Repair
+
+### Steps taken
+
+- Added `--run-ls-boundary-coupled-loop` to
+  `examples/mirror_free_boundary_circular_coils.py`.
+- Bumped the circular-coil beta-scan schema to version `0.6`.
+- Added guarded loop controls:
+  - `--ls-boundary-coupled-loop-steps`;
+  - `--ls-boundary-coupled-loop-target-merit`;
+  - `--ls-boundary-coupled-loop-stagnation-rtol`;
+  - `--ls-boundary-coupled-loop-fsq-growth-limit`.
+- Added loop-level metrics:
+  - requested flag and requested guard values;
+  - total loop rows;
+  - accepted loop rows;
+  - stop-reason counts.
+- Added per-beta loop summary metrics:
+  - loop status;
+  - row count and accepted-row count;
+  - final stop reason;
+  - final merit and `fsq` growth ratio;
+  - last accepted step, merit, and `fsq` growth ratio.
+- Added nested loop rows that record each LS boundary step, realized
+  fixed-boundary trial, acceptance decision, rejection reason, stop reason,
+  realized MOUT path, and optional plot paths.
+- Added schema validation for nested loop rows and their nested
+  `ls_boundary_step` / `coupled_trial` records.
+- Added a focused root-example regression test for a two-step guarded loop.
+- Updated `examples/mirror/README.md` and `docs/mirror/overview.rst` for schema
+  `0.6` and the guarded realized loop.
+- Investigated the current PR #21 CI failure:
+  - failing check: `Coverage Gate (py3.11 combined)`;
+  - root cause: exact line coverage was `94.94%`, below the `95.00%` gate.
+- Downloaded the CI coverage shards, remapped runner paths to the local checkout,
+  and used them to identify real mirror free-boundary coverage gaps.
+- Added focused `tests/mirror/test_mirror_free_boundary.py` coverage for public
+  mirror free-boundary guard paths, finite-difference residual validation,
+  line-search acceptance/rejection, direct-coil pressure-response sampling, and
+  LCFS proposal validation branches.
+
+### Results obtained
+
+- The guarded loop now performs repeated cycles of:
+  1. finite-difference LS boundary step on `[r0, a2, a4]`;
+  2. realized fixed-boundary solve on the selected polynomial boundary;
+  3. LCFS merit / `fsq` guard evaluation;
+  4. update of the current boundary and output when accepted.
+- The one-beta two-step smoke run reported:
+  - schema version `0.6`;
+  - workflow `ls_boundary_coupled_loop`;
+  - free-boundary status `ls_boundary_coupled_loop_not_converged_free_boundary`;
+  - `ls_boundary_coupled_loop_rows_total == 2`;
+  - `ls_boundary_coupled_loop_accepted_rows_total == 1`;
+  - stop counts `{"None": 1, "ls_step_not_accepted": 1}`;
+  - first loop row accepted with `fsq_growth_ratio = 0.8804859565965772`;
+  - first loop row accepted with `lcfs_merit_ratio = 0.4801851017221157`;
+  - second loop row stopped because the nested LS step selected no improving
+    boundary step.
+- The plotted loop run produced and was visually inspected:
+  - step-1 LS residual/backtracking plot:
+    `results/mirror/free_boundary_circular_coils_m157_lsq_loop_plots/figures/fixed_boundary_beta_1_ls_loop_step_1/free_boundary_circular_coils_beta_1_ls_loop_step_1_ls_boundary_step.png`;
+  - step-2 LS residual/backtracking plot:
+    `results/mirror/free_boundary_circular_coils_m157_lsq_loop_plots/figures/fixed_boundary_beta_1_ls_loop_step_2/free_boundary_circular_coils_beta_1_ls_loop_step_2_ls_boundary_step.png`;
+  - step-1 realized trial LCFS diagnostic plot:
+    `results/mirror/free_boundary_circular_coils_m157_lsq_loop_plots/figures/fixed_boundary_beta_1_ls_loop_step_1_ls_boundary_trial/free_boundary_circular_coils_beta_1_ls_loop_step_1_ls_boundary_trial_lcfs_diagnostic.png`.
+- The updated local coverage estimate combines the failed CI shards with local
+  coverage from the updated mirror free-boundary and example tests and reports:
+  `Exact line coverage estimate: 95.09%`.
+- The same estimate raises `vmec_jax/mirror/free_boundary.py` coverage to `98%`.
+
+### How it was tested
+
+Commands run:
+
+```bash
+python examples/mirror_free_boundary_circular_coils.py \
+  --outdir results/mirror/free_boundary_circular_coils_m157_lsq_loop_smoke \
+  --betas 1 --ntheta 8 --nxi 11 --n-segments 64 \
+  --run-fixed-boundary-baseline --baseline-maxiter 0 \
+  --run-ls-boundary-coupled-loop --ls-boundary-coupled-loop-steps 2 \
+  --no-plots
+
+python examples/mirror_free_boundary_circular_coils.py \
+  --outdir results/mirror/free_boundary_circular_coils_m157_lsq_loop_plots \
+  --betas 1 --ntheta 8 --nxi 11 --n-segments 64 \
+  --run-fixed-boundary-baseline --baseline-maxiter 0 \
+  --run-ls-boundary-coupled-loop --ls-boundary-coupled-loop-steps 2
+
+python -m ruff format examples/mirror_free_boundary_circular_coils.py \
+  tests/mirror/test_mirror_examples.py tests/mirror/test_mirror_free_boundary.py
+python -m ruff check examples/mirror_free_boundary_circular_coils.py \
+  tests/mirror/test_mirror_examples.py tests/mirror/test_mirror_free_boundary.py
+
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_free_boundary.py -q
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_examples.py -q
+
+JAX_ENABLE_X64=1 COVERAGE_FILE=/tmp/vmec_jax_m157.coverage \
+  pytest tests/mirror/test_mirror_free_boundary.py \
+  tests/mirror/test_mirror_examples.py -q --cov=vmec_jax --cov-report=
+
+JAX_ENABLE_X64=1 COVERAGE_FILE=/tmp/vmec_jax_m157_free_boundary.coverage \
+  pytest tests/mirror/test_mirror_free_boundary.py -q \
+  --cov=vmec_jax --cov-report=
+
+python -m sphinx -W -b html docs docs/_build/html
+git diff --check
+```
+
+Results:
+
+- Guarded LS loop smoke run passed.
+- Guarded LS loop plotted run passed and PNG outputs were visually inspected.
+- Ruff format/check passed on touched Python files.
+- Mirror free-boundary tests passed: `86 passed in 2.97s`.
+- Mirror example tests passed during the combined coverage run; combined
+  free-boundary plus example coverage run passed: `93 passed in 101.07s`.
+- Updated free-boundary coverage run passed: `86 passed in 3.18s`.
+- Estimated combined coverage gate rose from failed CI `94.94%` to local
+  estimate `95.09%`.
+- Sphinx docs build passed with warnings treated as errors.
+- Whitespace check passed.
+
+### File structure and best-practice notes
+
+- The guarded loop remains in the root circular-coil example because it is still
+  an example/diagnostic driver around host-side finite differences and realized
+  fixed-boundary solves, not the final differentiable production solver API.
+- Core mirror free-boundary package code was not changed for the coverage-gate
+  repair; the additional tests cover existing public guard behavior and direct
+  circular-coil sampling paths.
+- Schema `0.6` is explicit because the JSON output contract gained new
+  loop-level fields and nested loop-row records.
+- Generated smoke, plot, and coverage artifacts remain under ignored `results/`
+  or `/tmp` paths and are not added to git.
+- The file structure remains aligned with current practice:
+  - reusable physics kernels stay under `vmec_jax/mirror/`;
+  - root examples own CLI workflow/report orchestration;
+  - mirror example behavior is tested from `tests/mirror/test_mirror_examples.py`;
+  - package API guard behavior is tested from
+    `tests/mirror/test_mirror_free_boundary.py`;
+  - user-facing documentation stays in `examples/mirror/README.md` and
+    `docs/mirror/overview.rst`.
+
+### Best next steps
+
+1. Commit and push M157.
+2. Refresh the draft PR body for schema `0.6`, the guarded loop, and the
+   coverage-gate repair.
+3. Let CI run without waiting on every check; inspect failures later if any
+   remain.
+4. Continue the finite-step plan by promoting the guarded loop toward a true
+   coupled nonlinear free-boundary solve with reusable solver structure, while
+   keeping CLI paths fast and differentiable APIs separate.
+
+### Completion percentages after M157
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `93%`.
+- Fixed-boundary axisymmetric solve: `91%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `89%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `93%`.
+- I/O schema and docs: `99%`.
+- Differentiable solved-state API: `92%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `98%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `97%`.
 - PR merge readiness overall: `98%`.
 
 ### User input needed

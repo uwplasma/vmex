@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -48,7 +49,7 @@ from vmec_jax.mirror import (
 
 
 CIRCULAR_COIL_BETA_SCAN_SCHEMA = "mirror_free_boundary_circular_coil_beta_scan"
-CIRCULAR_COIL_BETA_SCAN_SCHEMA_VERSION = "0.5"
+CIRCULAR_COIL_BETA_SCAN_SCHEMA_VERSION = "0.6"
 CIRCULAR_COIL_BETA_SCAN_TOP_LEVEL_FIELDS = (
     "metrics_schema",
     "metrics_schema_version",
@@ -91,6 +92,14 @@ CIRCULAR_COIL_BETA_SCAN_TOP_LEVEL_FIELDS = (
     "ls_boundary_step_rows_total",
     "ls_boundary_coupled_trial_requested",
     "ls_boundary_coupled_trial_rows_total",
+    "ls_boundary_coupled_loop_requested",
+    "ls_boundary_coupled_loop_steps_requested",
+    "ls_boundary_coupled_loop_target_merit",
+    "ls_boundary_coupled_loop_stagnation_rtol",
+    "ls_boundary_coupled_loop_fsq_growth_limit",
+    "ls_boundary_coupled_loop_rows_total",
+    "ls_boundary_coupled_loop_accepted_rows_total",
+    "ls_boundary_coupled_loop_stop_reason_counts",
     "figures",
 )
 CIRCULAR_COIL_BETA_SCAN_ROW_FIELDS = (
@@ -126,6 +135,16 @@ CIRCULAR_COIL_BETA_SCAN_ROW_FIELDS = (
     "lcfs_pilot_last_accepted_normalized_force",
     "lcfs_pilot_rows",
     "ls_boundary_step",
+    "ls_boundary_coupled_loop_status",
+    "ls_boundary_coupled_loop_rows_count",
+    "ls_boundary_coupled_loop_accepted_rows",
+    "ls_boundary_coupled_loop_stop_reason",
+    "ls_boundary_coupled_loop_final_merit",
+    "ls_boundary_coupled_loop_final_fsq_growth_ratio",
+    "ls_boundary_coupled_loop_last_accepted_step",
+    "ls_boundary_coupled_loop_last_accepted_merit",
+    "ls_boundary_coupled_loop_last_accepted_fsq_growth_ratio",
+    "ls_boundary_coupled_loop_rows",
     "figures",
 )
 CIRCULAR_COIL_BETA_SCAN_LS_STEP_FIELDS = (
@@ -164,6 +183,22 @@ CIRCULAR_COIL_BETA_SCAN_LS_COUPLED_TRIAL_FIELDS = (
     "lcfs_merit_ratio",
     "figures",
 )
+CIRCULAR_COIL_BETA_SCAN_LS_COUPLED_LOOP_ROW_FIELDS = (
+    "step",
+    "status",
+    "accepted",
+    "rejection_reason",
+    "stop_reason",
+    "merit_improvement_fraction",
+    "fsq_growth_ratio",
+    "final_fsq",
+    "final_normalized_force",
+    "lcfs_merit",
+    "lcfs_merit_ratio",
+    "mout",
+    "ls_boundary_step",
+    "figures",
+)
 CIRCULAR_COIL_BETA_SCAN_PILOT_ROW_FIELDS = (
     "step",
     "mout",
@@ -185,10 +220,20 @@ CIRCULAR_COIL_BETA_SCAN_PILOT_ROW_FIELDS = (
     "figures",
 )
 CIRCULAR_COIL_BETA_SCAN_PILOT_STATUSES = ("not_requested", "accepted", "rejected", "skipped")
-CIRCULAR_COIL_BETA_SCAN_WORKFLOW_STATUSES = ("setup_only", "fixed_boundary_baseline", "lcfs_pilot")
-CIRCULAR_COIL_BETA_SCAN_FREE_BOUNDARY_STATUSES = ("not_run", "lcfs_pilot_not_converged_free_boundary")
+CIRCULAR_COIL_BETA_SCAN_WORKFLOW_STATUSES = (
+    "setup_only",
+    "fixed_boundary_baseline",
+    "lcfs_pilot",
+    "ls_boundary_coupled_loop",
+)
+CIRCULAR_COIL_BETA_SCAN_FREE_BOUNDARY_STATUSES = (
+    "not_run",
+    "lcfs_pilot_not_converged_free_boundary",
+    "ls_boundary_coupled_loop_not_converged_free_boundary",
+)
 CIRCULAR_COIL_BETA_SCAN_STOP_REASONS = (
     "fsq_growth_guard",
+    "ls_step_not_accepted",
     "max_steps",
     "merit_stagnation",
     "noop_candidate",
@@ -197,6 +242,7 @@ CIRCULAR_COIL_BETA_SCAN_STOP_REASONS = (
 )
 CIRCULAR_COIL_BETA_SCAN_REJECTION_REASONS = (
     "fsq_growth_guard",
+    "ls_step_not_accepted",
     "merit_increase",
     "noop_candidate_selected",
     "normal_field_guard_no_candidate",
@@ -235,6 +281,7 @@ def circular_coil_beta_scan_schema() -> dict[str, object]:
         "pilot_row_required_fields": list(CIRCULAR_COIL_BETA_SCAN_PILOT_ROW_FIELDS),
         "ls_boundary_step_fields": list(CIRCULAR_COIL_BETA_SCAN_LS_STEP_FIELDS),
         "ls_boundary_coupled_trial_fields": list(CIRCULAR_COIL_BETA_SCAN_LS_COUPLED_TRIAL_FIELDS),
+        "ls_boundary_coupled_loop_row_fields": list(CIRCULAR_COIL_BETA_SCAN_LS_COUPLED_LOOP_ROW_FIELDS),
         "pilot_status_values": list(CIRCULAR_COIL_BETA_SCAN_PILOT_STATUSES),
         "workflow_status_values": list(CIRCULAR_COIL_BETA_SCAN_WORKFLOW_STATUSES),
         "free_boundary_status_values": list(CIRCULAR_COIL_BETA_SCAN_FREE_BOUNDARY_STATUSES),
@@ -279,6 +326,13 @@ def validate_circular_coil_beta_scan_metrics(metrics: dict[str, object]) -> None
     ls_trial_rows = [
         row["coupled_trial"] for row in ls_rows if isinstance(row, dict) and row.get("coupled_trial") is not None
     ]
+    ls_loop_rows = [
+        loop_row
+        for row in baseline_rows
+        if isinstance(row, dict)
+        for loop_row in row.get("ls_boundary_coupled_loop_rows", [])
+    ]
+    ls_loop_accepted_rows = sum(bool(row.get("accepted", False)) for row in ls_loop_rows)
     accepted_rows = sum(bool(row.get("accepted", False)) and not bool(row.get("skipped", False)) for row in pilot_rows)
     skipped_rows = sum(bool(row.get("skipped", False)) for row in pilot_rows)
     if int(metrics["lcfs_pilot_rows_total"]) != len(pilot_rows):
@@ -291,6 +345,14 @@ def validate_circular_coil_beta_scan_metrics(metrics: dict[str, object]) -> None
         raise ValueError("ls_boundary_step_rows_total does not match nested LS rows")
     if int(metrics["ls_boundary_coupled_trial_rows_total"]) != len(ls_trial_rows):
         raise ValueError("ls_boundary_coupled_trial_rows_total does not match nested LS trial rows")
+    if int(metrics["ls_boundary_coupled_loop_rows_total"]) != len(ls_loop_rows):
+        raise ValueError("ls_boundary_coupled_loop_rows_total does not match nested LS loop rows")
+    if int(metrics["ls_boundary_coupled_loop_accepted_rows_total"]) != int(ls_loop_accepted_rows):
+        raise ValueError("ls_boundary_coupled_loop_accepted_rows_total does not match nested LS loop rows")
+    if metrics["ls_boundary_coupled_loop_stop_reason_counts"] != _counts_json(
+        [str(row.get("stop_reason")) for row in ls_loop_rows]
+    ):
+        raise ValueError("ls_boundary_coupled_loop_stop_reason_counts does not match nested LS loop rows")
     if metrics["lcfs_pilot_stop_reason_counts"] != _counts_json([str(row.get("stop_reason")) for row in pilot_rows]):
         raise ValueError("lcfs_pilot_stop_reason_counts does not match nested pilot rows")
 
@@ -301,6 +363,9 @@ def validate_circular_coil_beta_scan_metrics(metrics: dict[str, object]) -> None
         case_pilot_rows = row.get("lcfs_pilot_rows", [])
         if not isinstance(case_pilot_rows, list):
             raise ValueError(f"baseline row {index} lcfs_pilot_rows must be a JSON array")
+        case_loop_rows = row.get("ls_boundary_coupled_loop_rows", [])
+        if not isinstance(case_loop_rows, list):
+            raise ValueError(f"baseline row {index} ls_boundary_coupled_loop_rows must be a JSON array")
         status = str(row["lcfs_pilot_status"])
         if status not in CIRCULAR_COIL_BETA_SCAN_PILOT_STATUSES:
             raise ValueError(f"baseline row {index} has unknown lcfs_pilot_status {status!r}")
@@ -330,9 +395,43 @@ def validate_circular_coil_beta_scan_metrics(metrics: dict[str, object]) -> None
             rejection_reason = pilot.get("rejection_reason")
             if rejection_reason is not None and str(rejection_reason) not in CIRCULAR_COIL_BETA_SCAN_REJECTION_REASONS:
                 raise ValueError(f"pilot row {index}.{step_index} has unknown rejection_reason {rejection_reason!r}")
+        for step_index, loop_row in enumerate(case_loop_rows):
+            if not isinstance(loop_row, dict):
+                raise ValueError(f"LS loop row {index}.{step_index} must be a JSON object")
+            _require_fields(
+                loop_row,
+                CIRCULAR_COIL_BETA_SCAN_LS_COUPLED_LOOP_ROW_FIELDS,
+                f"LS loop row {index}.{step_index}",
+            )
+            stop_reason = loop_row.get("stop_reason")
+            if stop_reason is not None and str(stop_reason) not in CIRCULAR_COIL_BETA_SCAN_STOP_REASONS:
+                raise ValueError(f"LS loop row {index}.{step_index} has unknown stop_reason {stop_reason!r}")
+            rejection_reason = loop_row.get("rejection_reason")
+            if rejection_reason is not None and str(rejection_reason) not in CIRCULAR_COIL_BETA_SCAN_REJECTION_REASONS:
+                raise ValueError(f"LS loop row {index}.{step_index} has unknown rejection_reason {rejection_reason!r}")
+            ls_loop_step = loop_row.get("ls_boundary_step")
+            if not isinstance(ls_loop_step, dict):
+                raise ValueError(f"LS loop row {index}.{step_index} ls_boundary_step must be a JSON object")
+            _require_fields(
+                ls_loop_step,
+                CIRCULAR_COIL_BETA_SCAN_LS_STEP_FIELDS,
+                f"LS loop row {index}.{step_index} ls_boundary_step",
+            )
+            coupled_trial = ls_loop_step.get("coupled_trial")
+            if coupled_trial is not None:
+                if not isinstance(coupled_trial, dict):
+                    raise ValueError(f"LS loop row {index}.{step_index} coupled_trial must be a JSON object or null")
+                _require_fields(
+                    coupled_trial,
+                    CIRCULAR_COIL_BETA_SCAN_LS_COUPLED_TRIAL_FIELDS,
+                    f"LS loop row {index}.{step_index} coupled_trial",
+                )
         for field, expected_value in _lcfs_pilot_summary(case_pilot_rows).items():
             if row.get(field) != expected_value:
                 raise ValueError(f"baseline row {index} field {field} does not match nested pilot rows")
+        for field, expected_value in _ls_boundary_coupled_loop_summary(case_loop_rows).items():
+            if row.get(field) != expected_value:
+                raise ValueError(f"baseline row {index} field {field} does not match nested LS loop rows")
 
     for index, expected_row in enumerate(circular_coil_beta_scan_report_rows(metrics)):
         report_row = summary_rows[index]
@@ -442,6 +541,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lcfs-pilot-fsq-growth-limit", type=float, default=0.0)
     parser.add_argument("--run-ls-boundary-step", action="store_true")
     parser.add_argument("--run-ls-boundary-coupled-trial", action="store_true")
+    parser.add_argument("--run-ls-boundary-coupled-loop", action="store_true")
+    parser.add_argument("--ls-boundary-coupled-loop-steps", type=int, default=1)
+    parser.add_argument("--ls-boundary-coupled-loop-target-merit", type=float, default=0.0)
+    parser.add_argument("--ls-boundary-coupled-loop-stagnation-rtol", type=float, default=0.0)
+    parser.add_argument("--ls-boundary-coupled-loop-fsq-growth-limit", type=float, default=0.0)
     parser.add_argument("--ls-boundary-finite-difference-step", type=float, default=1.0e-5)
     parser.add_argument("--ls-boundary-damping", type=float, default=1.0)
     parser.add_argument("--ls-boundary-max-relative-step", type=float, default=0.1)
@@ -891,6 +995,142 @@ def _run_ls_boundary_coupled_trial(
     }
 
 
+def _run_ls_boundary_coupled_loop(
+    *,
+    outdir: Path,
+    label: str,
+    config,
+    grid,
+    initial_boundary,
+    initial_output,
+    initial_final,
+    coils,
+    psi_prime_value: float,
+    pressure,
+    solve_options,
+    baseline_final_fsq: float,
+    reference_merit,
+    max_steps: int,
+    target_merit: float,
+    stagnation_rtol: float,
+    fsq_growth_limit: float,
+    finite_difference_step: float,
+    damping: float,
+    max_relative_step: float,
+    ridge: float,
+    write_plots: bool,
+) -> list[dict[str, object]]:
+    """Run a guarded multi-step coupled LS boundary loop."""
+
+    rows: list[dict[str, object]] = []
+    current_boundary = initial_boundary
+    current_output = initial_output
+    current_final = initial_final
+    current_merit_value = float(reference_merit.value)
+    for step_index in range(1, int(max_steps) + 1):
+        step_label = f"{label}_ls_loop_step_{step_index}"
+        step_summary = _run_ls_boundary_step(
+            grid=grid,
+            boundary=current_boundary,
+            coils=coils,
+            output=current_output,
+            final_trace=current_final,
+            reference_merit=reference_merit,
+            finite_difference_step=finite_difference_step,
+            damping=damping,
+            max_relative_step=max_relative_step,
+            ridge=ridge,
+            write_plots=write_plots,
+            figure_dir=outdir / "figures" / f"fixed_boundary_beta_{label}_ls_loop_step_{step_index}",
+            name=f"free_boundary_circular_coils_beta_{label}_ls_loop_step_{step_index}",
+        )
+        row: dict[str, object] = {
+            "step": int(step_index),
+            "status": "skipped",
+            "accepted": False,
+            "rejection_reason": None,
+            "stop_reason": None,
+            "merit_improvement_fraction": None,
+            "fsq_growth_ratio": None,
+            "final_fsq": None,
+            "final_normalized_force": None,
+            "lcfs_merit": None,
+            "lcfs_merit_ratio": None,
+            "mout": None,
+            "ls_boundary_step": step_summary,
+            "figures": {},
+        }
+        if not bool(step_summary["accepted"]):
+            row["rejection_reason"] = "ls_step_not_accepted"
+            row["stop_reason"] = "ls_step_not_accepted"
+            rows.append(row)
+            break
+
+        trial = _run_ls_boundary_coupled_trial(
+            step_summary=step_summary,
+            outdir=outdir,
+            label=step_label,
+            config=config,
+            grid=grid,
+            coils=coils,
+            psi_prime_value=psi_prime_value,
+            pressure=pressure,
+            solve_options=solve_options,
+            baseline_final_fsq=baseline_final_fsq,
+            reference_merit=reference_merit,
+            write_plots=write_plots,
+        )
+        step_summary["coupled_trial"] = trial
+        row.update(
+            {
+                "status": str(trial["status"]),
+                "mout": trial["mout"],
+                "fsq_growth_ratio": trial["fsq_growth_ratio"],
+                "final_fsq": trial["final_fsq"],
+                "final_normalized_force": trial["final_normalized_force"],
+                "lcfs_merit": trial["lcfs_merit"],
+                "lcfs_merit_ratio": trial["lcfs_merit_ratio"],
+                "figures": trial["figures"],
+            }
+        )
+        if not bool(trial["accepted_by_merit"]):
+            row["rejection_reason"] = trial["rejection_reason"] or "merit_increase"
+            row["stop_reason"] = "rejected_merit_increase"
+            rows.append(row)
+            break
+        if float(fsq_growth_limit) > 0.0 and float(trial["fsq_growth_ratio"]) > float(fsq_growth_limit):
+            row["status"] = "rejected"
+            row["rejection_reason"] = "fsq_growth_guard"
+            row["stop_reason"] = "fsq_growth_guard"
+            rows.append(row)
+            break
+
+        merit = float(trial["lcfs_merit"])
+        merit_improvement_fraction = float(1.0 - merit / max(current_merit_value, 1.0e-300))
+        row["status"] = "accepted"
+        row["accepted"] = True
+        row["merit_improvement_fraction"] = merit_improvement_fraction
+        if merit <= float(target_merit):
+            row["stop_reason"] = "target_merit"
+            rows.append(row)
+            break
+        if merit_improvement_fraction <= float(stagnation_rtol):
+            row["stop_reason"] = "merit_stagnation"
+            rows.append(row)
+            break
+        if step_index == int(max_steps):
+            row["stop_reason"] = "max_steps"
+            rows.append(row)
+            break
+
+        rows.append(row)
+        current_boundary = _polynomial_boundary_from_coefficients(step_summary["coefficients_new"])
+        current_output = load_mirror_output(str(trial["mout"]))
+        current_final = SimpleNamespace(normalized_force=float(trial["final_normalized_force"]))
+        current_merit_value = merit
+    return rows
+
+
 def _beta_label(beta_percent: float) -> str:
     return f"{float(beta_percent):g}".replace(".", "p")
 
@@ -976,6 +1216,50 @@ def _lcfs_pilot_summary(pilot_rows: list[dict[str, object]]) -> dict[str, object
     }
 
 
+def _ls_boundary_coupled_loop_summary(loop_rows: list[dict[str, object]]) -> dict[str, object]:
+    """Return scalar status fields for a beta-case coupled LS loop."""
+
+    if not loop_rows:
+        return {
+            "ls_boundary_coupled_loop_status": "not_requested",
+            "ls_boundary_coupled_loop_rows_count": 0,
+            "ls_boundary_coupled_loop_accepted_rows": 0,
+            "ls_boundary_coupled_loop_stop_reason": None,
+            "ls_boundary_coupled_loop_final_merit": None,
+            "ls_boundary_coupled_loop_final_fsq_growth_ratio": None,
+            "ls_boundary_coupled_loop_last_accepted_step": None,
+            "ls_boundary_coupled_loop_last_accepted_merit": None,
+            "ls_boundary_coupled_loop_last_accepted_fsq_growth_ratio": None,
+        }
+
+    accepted_rows = [row for row in loop_rows if bool(row.get("accepted", False))]
+    final = loop_rows[-1]
+    if bool(final.get("accepted", False)):
+        status = "accepted"
+    elif final.get("rejection_reason") == "ls_step_not_accepted":
+        status = "skipped"
+    else:
+        status = "rejected"
+    last_accepted = accepted_rows[-1] if accepted_rows else None
+    return {
+        "ls_boundary_coupled_loop_status": status,
+        "ls_boundary_coupled_loop_rows_count": len(loop_rows),
+        "ls_boundary_coupled_loop_accepted_rows": len(accepted_rows),
+        "ls_boundary_coupled_loop_stop_reason": final.get("stop_reason"),
+        "ls_boundary_coupled_loop_final_merit": None if final.get("lcfs_merit") is None else float(final["lcfs_merit"]),
+        "ls_boundary_coupled_loop_final_fsq_growth_ratio": None
+        if final.get("fsq_growth_ratio") is None
+        else float(final["fsq_growth_ratio"]),
+        "ls_boundary_coupled_loop_last_accepted_step": None if last_accepted is None else int(last_accepted["step"]),
+        "ls_boundary_coupled_loop_last_accepted_merit": None
+        if last_accepted is None or last_accepted.get("lcfs_merit") is None
+        else float(last_accepted["lcfs_merit"]),
+        "ls_boundary_coupled_loop_last_accepted_fsq_growth_ratio": None
+        if last_accepted is None or last_accepted.get("fsq_growth_ratio") is None
+        else float(last_accepted["fsq_growth_ratio"]),
+    }
+
+
 def _counts_json(values: list[str]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for value in values:
@@ -994,6 +1278,11 @@ def _beta_scan_summary(
     lcfs_pilot_fsq_growth_limit: float,
     run_ls_boundary_step: bool,
     run_ls_boundary_coupled_trial: bool,
+    run_ls_boundary_coupled_loop: bool,
+    ls_boundary_coupled_loop_steps: int,
+    ls_boundary_coupled_loop_target_merit: float,
+    ls_boundary_coupled_loop_stagnation_rtol: float,
+    ls_boundary_coupled_loop_fsq_growth_limit: float,
     ls_boundary_finite_difference_step: float,
     ls_boundary_damping: float,
     ls_boundary_max_relative_step: float,
@@ -1007,15 +1296,24 @@ def _beta_scan_summary(
         for row in ls_rows
         if row["ls_boundary_step"].get("coupled_trial") is not None
     ]
+    ls_loop_rows = [loop_row for row in baseline_rows for loop_row in row.get("ls_boundary_coupled_loop_rows", [])]
     if run_lcfs_pilot:
         workflow_status = "lcfs_pilot"
+    elif run_ls_boundary_coupled_loop:
+        workflow_status = "ls_boundary_coupled_loop"
     elif run_fixed_boundary_baseline:
         workflow_status = "fixed_boundary_baseline"
     else:
         workflow_status = "setup_only"
+    if run_lcfs_pilot:
+        free_boundary_status = "lcfs_pilot_not_converged_free_boundary"
+    elif run_ls_boundary_coupled_loop:
+        free_boundary_status = "ls_boundary_coupled_loop_not_converged_free_boundary"
+    else:
+        free_boundary_status = "not_run"
     return {
         "workflow_status": workflow_status,
-        "free_boundary_solve_status": "lcfs_pilot_not_converged_free_boundary" if run_lcfs_pilot else "not_run",
+        "free_boundary_solve_status": free_boundary_status,
         "external_field_provider_kind": "direct_coils",
         "coil_format": "essos_compatible_circular_fourier",
         "fixed_boundary_baseline_count": len(baseline_rows),
@@ -1040,6 +1338,24 @@ def _beta_scan_summary(
         "ls_boundary_step_rows_total": len(ls_rows),
         "ls_boundary_coupled_trial_requested": bool(run_ls_boundary_coupled_trial),
         "ls_boundary_coupled_trial_rows_total": len(ls_trial_rows),
+        "ls_boundary_coupled_loop_requested": bool(run_ls_boundary_coupled_loop),
+        "ls_boundary_coupled_loop_steps_requested": int(ls_boundary_coupled_loop_steps)
+        if run_ls_boundary_coupled_loop
+        else 0,
+        "ls_boundary_coupled_loop_target_merit": float(ls_boundary_coupled_loop_target_merit)
+        if run_ls_boundary_coupled_loop
+        else None,
+        "ls_boundary_coupled_loop_stagnation_rtol": float(ls_boundary_coupled_loop_stagnation_rtol)
+        if run_ls_boundary_coupled_loop
+        else None,
+        "ls_boundary_coupled_loop_fsq_growth_limit": float(ls_boundary_coupled_loop_fsq_growth_limit)
+        if run_ls_boundary_coupled_loop
+        else None,
+        "ls_boundary_coupled_loop_rows_total": len(ls_loop_rows),
+        "ls_boundary_coupled_loop_accepted_rows_total": sum(bool(row.get("accepted", False)) for row in ls_loop_rows),
+        "ls_boundary_coupled_loop_stop_reason_counts": _counts_json(
+            [str(row.get("stop_reason")) for row in ls_loop_rows]
+        ),
     }
 
 
@@ -1523,6 +1839,11 @@ def _run_fixed_boundary_baseline_cases(
     lcfs_pilot_fsq_growth_limit: float,
     run_ls_boundary_step: bool,
     run_ls_boundary_coupled_trial: bool,
+    run_ls_boundary_coupled_loop: bool,
+    ls_boundary_coupled_loop_steps: int,
+    ls_boundary_coupled_loop_target_merit: float,
+    ls_boundary_coupled_loop_stagnation_rtol: float,
+    ls_boundary_coupled_loop_fsq_growth_limit: float,
     ls_boundary_finite_difference_step: float,
     ls_boundary_damping: float,
     ls_boundary_max_relative_step: float,
@@ -1727,6 +2048,32 @@ def _run_fixed_boundary_baseline_cases(
                 )
             if ls_boundary_step["figure"] is not None:
                 plot_paths["ls_boundary_step"] = str(ls_boundary_step["figure"])
+        ls_boundary_coupled_loop_rows: list[dict[str, object]] = []
+        if run_ls_boundary_coupled_loop:
+            ls_boundary_coupled_loop_rows = _run_ls_boundary_coupled_loop(
+                outdir=outdir,
+                label=label,
+                config=config,
+                grid=baseline_grid,
+                initial_boundary=boundary,
+                initial_output=output,
+                initial_final=final,
+                coils=scan.coils,
+                psi_prime_value=psi_prime_value,
+                pressure=pressure,
+                solve_options=solve_options,
+                baseline_final_fsq=baseline_final_fsq,
+                reference_merit=lcfs_merit,
+                max_steps=ls_boundary_coupled_loop_steps,
+                target_merit=ls_boundary_coupled_loop_target_merit,
+                stagnation_rtol=ls_boundary_coupled_loop_stagnation_rtol,
+                fsq_growth_limit=ls_boundary_coupled_loop_fsq_growth_limit,
+                finite_difference_step=ls_boundary_finite_difference_step,
+                damping=ls_boundary_damping,
+                max_relative_step=ls_boundary_max_relative_step,
+                ridge=ls_boundary_ridge,
+                write_plots=write_plots,
+            )
         summary = result.optimizer_summaries[-1] if result.optimizer_summaries else None
         row = {
             "beta_percent": float(case.beta_percent),
@@ -1769,9 +2116,11 @@ def _run_fixed_boundary_baseline_cases(
             ),
             "lcfs_pilot_rows": pilot_rows,
             "ls_boundary_step": ls_boundary_step,
+            "ls_boundary_coupled_loop_rows": ls_boundary_coupled_loop_rows,
             "figures": plot_paths,
         }
         row.update(_lcfs_pilot_summary(pilot_rows))
+        row.update(_ls_boundary_coupled_loop_summary(ls_boundary_coupled_loop_rows))
         rows.append(row)
     return rows
 
@@ -1807,6 +2156,11 @@ def run_case(
     lcfs_pilot_fsq_growth_limit: float = 0.0,
     run_ls_boundary_step: bool = False,
     run_ls_boundary_coupled_trial: bool = False,
+    run_ls_boundary_coupled_loop: bool = False,
+    ls_boundary_coupled_loop_steps: int = 1,
+    ls_boundary_coupled_loop_target_merit: float = 0.0,
+    ls_boundary_coupled_loop_stagnation_rtol: float = 0.0,
+    ls_boundary_coupled_loop_fsq_growth_limit: float = 0.0,
     ls_boundary_finite_difference_step: float = 1.0e-5,
     ls_boundary_damping: float = 1.0,
     ls_boundary_max_relative_step: float = 0.1,
@@ -1825,6 +2179,14 @@ def run_case(
         raise ValueError("lcfs_coupled_fsq_weight must be nonnegative")
     if run_ls_boundary_coupled_trial and not run_ls_boundary_step:
         raise ValueError("run_ls_boundary_coupled_trial requires run_ls_boundary_step")
+    if run_ls_boundary_coupled_loop and int(ls_boundary_coupled_loop_steps) < 1:
+        raise ValueError("ls_boundary_coupled_loop_steps must be at least 1 when the loop is enabled")
+    if float(ls_boundary_coupled_loop_target_merit) < 0.0:
+        raise ValueError("ls_boundary_coupled_loop_target_merit must be nonnegative")
+    if float(ls_boundary_coupled_loop_stagnation_rtol) < 0.0:
+        raise ValueError("ls_boundary_coupled_loop_stagnation_rtol must be nonnegative")
+    if float(ls_boundary_coupled_loop_fsq_growth_limit) < 0.0:
+        raise ValueError("ls_boundary_coupled_loop_fsq_growth_limit must be nonnegative")
     if float(ls_boundary_finite_difference_step) <= 0.0:
         raise ValueError("ls_boundary_finite_difference_step must be positive")
     if float(ls_boundary_damping) <= 0.0:
@@ -1897,6 +2259,11 @@ def run_case(
             lcfs_pilot_fsq_growth_limit=lcfs_pilot_fsq_growth_limit,
             run_ls_boundary_step=run_ls_boundary_step,
             run_ls_boundary_coupled_trial=run_ls_boundary_coupled_trial,
+            run_ls_boundary_coupled_loop=run_ls_boundary_coupled_loop,
+            ls_boundary_coupled_loop_steps=ls_boundary_coupled_loop_steps,
+            ls_boundary_coupled_loop_target_merit=ls_boundary_coupled_loop_target_merit,
+            ls_boundary_coupled_loop_stagnation_rtol=ls_boundary_coupled_loop_stagnation_rtol,
+            ls_boundary_coupled_loop_fsq_growth_limit=ls_boundary_coupled_loop_fsq_growth_limit,
             ls_boundary_finite_difference_step=ls_boundary_finite_difference_step,
             ls_boundary_damping=ls_boundary_damping,
             ls_boundary_max_relative_step=ls_boundary_max_relative_step,
@@ -1928,6 +2295,11 @@ def run_case(
             lcfs_pilot_fsq_growth_limit=lcfs_pilot_fsq_growth_limit,
             run_ls_boundary_step=run_ls_boundary_step,
             run_ls_boundary_coupled_trial=run_ls_boundary_coupled_trial,
+            run_ls_boundary_coupled_loop=run_ls_boundary_coupled_loop,
+            ls_boundary_coupled_loop_steps=ls_boundary_coupled_loop_steps,
+            ls_boundary_coupled_loop_target_merit=ls_boundary_coupled_loop_target_merit,
+            ls_boundary_coupled_loop_stagnation_rtol=ls_boundary_coupled_loop_stagnation_rtol,
+            ls_boundary_coupled_loop_fsq_growth_limit=ls_boundary_coupled_loop_fsq_growth_limit,
             ls_boundary_finite_difference_step=ls_boundary_finite_difference_step,
             ls_boundary_damping=ls_boundary_damping,
             ls_boundary_max_relative_step=ls_boundary_max_relative_step,
@@ -1995,6 +2367,11 @@ def main() -> None:
         lcfs_pilot_fsq_growth_limit=args.lcfs_pilot_fsq_growth_limit,
         run_ls_boundary_step=args.run_ls_boundary_step,
         run_ls_boundary_coupled_trial=args.run_ls_boundary_coupled_trial,
+        run_ls_boundary_coupled_loop=args.run_ls_boundary_coupled_loop,
+        ls_boundary_coupled_loop_steps=args.ls_boundary_coupled_loop_steps,
+        ls_boundary_coupled_loop_target_merit=args.ls_boundary_coupled_loop_target_merit,
+        ls_boundary_coupled_loop_stagnation_rtol=args.ls_boundary_coupled_loop_stagnation_rtol,
+        ls_boundary_coupled_loop_fsq_growth_limit=args.ls_boundary_coupled_loop_fsq_growth_limit,
         ls_boundary_finite_difference_step=args.ls_boundary_finite_difference_step,
         ls_boundary_damping=args.ls_boundary_damping,
         ls_boundary_max_relative_step=args.ls_boundary_max_relative_step,

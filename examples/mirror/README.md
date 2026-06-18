@@ -171,7 +171,7 @@ exercise the coupled residual contract before the fully differentiable solve
 path replaces those derivatives with implicit/JAX/adjoint variants.
 
 The circular-coil beta-scan metrics use the compact schema
-``mirror_free_boundary_circular_coil_beta_scan`` version ``0.5``. The top-level
+``mirror_free_boundary_circular_coil_beta_scan`` version ``0.6``. The top-level
 JSON records the workflow status, direct-coil metadata, requested beta list,
 setup JSON path, aggregate pilot counts, optional LS boundary-step settings,
 figure paths, and ``fixed_boundary_baseline_rows``. It also embeds
@@ -185,8 +185,11 @@ least-squares step using the combined residual vector, and when plots are
 enabled writes a residual-component/backtracking figure. Pass
 ``--run-ls-boundary-coupled-trial`` with ``--run-ls-boundary-step`` to rerun the
 fixed-boundary solve on the LS-selected polynomial boundary and record realized
-``fsq``, normalized force, LCFS merit ratio, and optional trial plots. Each
-pilot row always
+``fsq``, normalized force, LCFS merit ratio, and optional trial plots. Pass
+``--run-ls-boundary-coupled-loop`` to repeat realized LS-selected boundary
+updates with target-merit, stagnation, and ``fsq`` growth guards; loop rows
+record each LS step, realized trial, acceptance decision, stop reason, and
+optional per-step plots. Each pilot row always
 contains ``accepted``, ``rejection_reason``, ``stop_reason``,
 ``lcfs_merit_improvement_fraction``, final residual/``fsq`` diagnostics when a
 trial solve ran, ``fsq_growth_ratio`` relative to the beta row baseline, and
