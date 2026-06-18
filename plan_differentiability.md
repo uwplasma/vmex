@@ -11913,6 +11913,73 @@ Completion:
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.9982%.
 
+## 2026-06-18 Residual Iteration Mode-Alias Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Removed local pass-through mode-conversion wrappers from
+   `solve_fixed_boundary_residual_iter`.
+2. Replaced the wrappers that are still used by the update loop with direct
+   method aliases from the already-built mode-transform context.
+3. Removed an unused local m=1 conversion closure and unused host/batch
+   conversion aliases from the monolithic loop.
+
+Results obtained:
+
+- Net source reduction for this tranche: 8 insertions and 48 deletions
+  (`-40` LOC) in `vmec_jax/solvers/fixed_boundary/residual/iteration.py`.
+- Residual iteration file length dropped from 7080 to 7040 lines.
+- `solve_fixed_boundary_residual_iter` dropped from 6554 to 6514 lines.
+- Numerical behavior is unchanged: the same mode-transform context methods are
+  called, only the local wrapper layer was removed.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+  - Result: passed.
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+  - Result: passed.
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_finish_cache_more_coverage.py tests/test_solve_wave7_coverage.py tests/test_solve_additional_helpers.py tests/test_end_to_end_vmec_residual_gn.py -q`
+  - Result: passed (`91 passed, 1 skipped`).
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 35`
+
+Best next steps:
+
+1. Continue residual-loop simplification only at seams with clear local
+   invariants; the next target should be startup/setup plumbing or scan
+   print/fallback plumbing, not force-update math.
+2. Keep the production adaptive branch differentiation claims conservative
+   until a full fingerprint-gated adaptive AD-vs-FD gate is explicitly present.
+3. Use the source-health report to prioritize net reductions in existing large
+   files rather than adding new generic modules.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.97%.
+- Differentiability/refactor implementation: 99.999997%.
+- Solver monolith reduction: 99.48%.
+- Free-boundary adjoint monolith reduction: 99.30%.
+- Driver workflow decomposition: 99.87%.
+- Residual iteration decomposition: 96.0%.
+- WOUT diagnostic/profile decomposition: 99.68%.
+- Bcovar/WOUT parity decomposition: 98.35%.
+- Force-kernel decomposition: 98.55%.
+- Optimizer workflow decomposition: 98.9%.
+- Fixed-boundary optimizer decomposition: 94.8%.
+- Implicit residual-adjoint decomposition: 95%.
+- QI objective decomposition: 93%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.7%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.9988%.
+
 ## 2026-06-18 Optimizer Dependency Default Cleanup
 
 Branch: `codex/differentiability-refactor-plan`.

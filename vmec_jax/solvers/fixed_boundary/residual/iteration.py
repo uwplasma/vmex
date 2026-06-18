@@ -1532,54 +1532,14 @@ def solve_fixed_boundary_residual_iter(
             flss=_host_array(getattr(frzl, "flss", None)),
         )
 
-    def _mn_cos_to_signed(cc, ss):
-        return _mode_context.mn_cos_to_signed(cc, ss)
-
-    def _mn_sin_to_signed(sc, cs):
-        return _mode_context.mn_sin_to_signed(sc, cs)
-
-    use_m1_pair_convert = (
-        bool(getattr(static.cfg, "lthreed", True))
-        and bool(getattr(static.cfg, "lconm1", True))
-        and int(static.cfg.mpol) > 1
-    )
-
-    def _m1_internal_to_physical_pair(rss, zcs):
-        """Convert VMEC internal m=1 (rss,zcs) pair to physical coefficients."""
-        return _geometry_m1_internal_to_physical_pair(
-            rss,
-            zcs,
-            use_m1_pair_convert=use_m1_pair_convert,
-        )
-
-    def _mn_cos_to_signed_host(cc, ss):
-        return _mode_context.mn_cos_to_signed_host(cc, ss)
-
-    def _mn_sin_to_signed_host(sc, cs):
-        return _mode_context.mn_sin_to_signed_host(sc, cs)
-
-    def _mn_cos_to_signed_physical(cc, ss):
-        return _mode_context.mn_cos_to_signed_physical(cc, ss)
-
-    def _mn_sin_to_signed_physical(sc, cs):
-        return _mode_context.mn_sin_to_signed_physical(sc, cs)
-
-    def _mn_sin_to_signed_physical_lambda(sc, cs):
-        """Map lambda updates onto signed physical coefficients (VMEC scalxc)."""
-        return _mode_context.mn_sin_to_signed_physical_lambda(sc, cs)
-
-    def _mn_cos_to_signed_physical_lambda(cc, ss):
-        """Map asymmetric lambda updates onto signed physical coefficients (VMEC scalxc)."""
-        return _mode_context.mn_cos_to_signed_physical_lambda(cc, ss)
-
-    def _mn_sin_to_signed_physical_batch(sc, cs):
-        return _mode_context.mn_sin_to_signed_physical_batch(sc, cs)
-
-    def _rz_norm_np(state) -> float:
-        return _mode_context.rz_norm_np(state)
-
-    def _rz_norm(state: VMECState) -> Any:
-        return _mode_context.rz_norm(state)
+    _mn_cos_to_signed = _mode_context.mn_cos_to_signed
+    _mn_sin_to_signed = _mode_context.mn_sin_to_signed
+    _mn_cos_to_signed_physical = _mode_context.mn_cos_to_signed_physical
+    _mn_sin_to_signed_physical = _mode_context.mn_sin_to_signed_physical
+    _mn_sin_to_signed_physical_lambda = _mode_context.mn_sin_to_signed_physical_lambda
+    _mn_cos_to_signed_physical_lambda = _mode_context.mn_cos_to_signed_physical_lambda
+    _rz_norm_np = _mode_context.rz_norm_np
+    _rz_norm = _mode_context.rz_norm
     state_setup = _build_residual_state_setup(
         state0=state0,
         static=static,
