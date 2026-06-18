@@ -1560,6 +1560,25 @@ StageRecord = tuple[str, int, dict]
 StageCheckpointCallback = Callable[[StageRecord, object, object, object, object], None]
 
 
+@dataclass(frozen=True)
+class CaseRunMetadata:
+    """Immutable per-case metadata shared by checkpoints and final summaries."""
+
+    problem_cfg: ProblemConfig
+    cfg: object
+    backend: str
+    problem: str
+    max_mode: int
+    use_ess: bool
+    output_dir: Path
+    policy: str
+    solver_device: str | None
+    jax_platforms: str | None
+    jax_backend: str | None
+    jax_device_kind: str | None
+    stellarator_asymmetric: bool
+
+
 def _merge_stage_histories(stage_results: list[StageRecord], *, problem_cfg: ProblemConfig) -> dict:
     combined_entries = []
     stage_boundaries = []
@@ -1749,19 +1768,7 @@ def _iota_final_from_history(problem_cfg: ProblemConfig, history: dict) -> float
 def _case_result_from_history(
     *,
     history: dict,
-    problem_cfg: ProblemConfig,
-    cfg,
-    backend: str,
-    problem: str,
-    max_mode: int,
-    use_ess: bool,
-    output_dir: Path,
-    policy: str,
-    solver_device: str | None,
-    jax_platforms: str | None,
-    jax_backend: str | None,
-    jax_device_kind: str | None,
-    stellarator_asymmetric: bool,
+    metadata: CaseRunMetadata,
     specs,
     params_final,
     opt,
@@ -1770,22 +1777,23 @@ def _case_result_from_history(
     message: str,
     extra_fields: dict | None = None,
 ) -> CaseResult:
+    problem_cfg = metadata.problem_cfg
     profile_summary = _profile_summary_fields(history)
     asym_stats = _checkpoint_asymmetry_stats(
         specs=specs,
         params_final=params_final,
         opt=opt,
-        stellarator_asymmetric=stellarator_asymmetric,
+        stellarator_asymmetric=metadata.stellarator_asymmetric,
     )
     fields = {
-        "backend": str(backend),
-        "problem": problem,
-        "max_mode": int(max_mode),
-        "use_ess": bool(use_ess),
+        "backend": str(metadata.backend),
+        "problem": metadata.problem,
+        "max_mode": int(metadata.max_mode),
+        "use_ess": bool(metadata.use_ess),
         "success": bool(success),
         "crashed": bool(crashed),
         "message": str(message),
-        "policy": str(policy),
+        "policy": str(metadata.policy),
         "objective_final": _float_or_none(history.get("objective_final")),
         "qs_final": _float_or_none(history.get("qs_final")),
         "aspect_final": _float_or_none(history.get("aspect_final")),
@@ -1794,15 +1802,15 @@ def _case_result_from_history(
         "njev": _int_or_none(history.get("njev")),
         "total_wall_time_s": _float_or_none(history.get("total_wall_time_s")),
         **profile_summary,
-        "output_dir": str(output_dir),
-        "jax_backend": jax_backend,
-        "jax_device_kind": jax_device_kind,
-        "solver_device": solver_device,
-        "jax_platforms": jax_platforms,
-        "stellarator_asymmetric": bool(stellarator_asymmetric),
-        "asymmetry_seed": float(ASYMMETRIC_SEED if stellarator_asymmetric else 0.0),
+        "output_dir": str(metadata.output_dir),
+        "jax_backend": metadata.jax_backend,
+        "jax_device_kind": metadata.jax_device_kind,
+        "solver_device": metadata.solver_device,
+        "jax_platforms": metadata.jax_platforms,
+        "stellarator_asymmetric": bool(metadata.stellarator_asymmetric),
+        "asymmetry_seed": float(ASYMMETRIC_SEED if metadata.stellarator_asymmetric else 0.0),
         "input_file": str(problem_cfg.input_file),
-        "input_nfp": _input_nfp_or_none(cfg),
+        "input_nfp": _input_nfp_or_none(metadata.cfg),
         "project_input_boundary_to_max_mode": bool(problem_cfg.project_input_boundary_to_max_mode),
         "target_aspect": float(problem_cfg.target_aspect),
         "target_iota": (None if problem_cfg.target_iota is None else float(problem_cfg.target_iota)),
@@ -1880,21 +1888,9 @@ def _stage_checkpoint_payload(
 
 def _write_case_checkpoint(
     *,
-    output_dir: Path,
+    metadata: CaseRunMetadata,
     result_path: Path,
     stage_results: list[StageRecord],
-    problem_cfg: ProblemConfig,
-    cfg,
-    backend: str,
-    problem: str,
-    max_mode: int,
-    use_ess: bool,
-    policy: str,
-    solver_device: str | None,
-    jax_platforms: str | None,
-    jax_backend: str | None,
-    jax_device_kind: str | None,
-    stellarator_asymmetric: bool,
     latest_specs,
     latest_opt,
     latest_params_final,
@@ -1909,7 +1905,8 @@ def _write_case_checkpoint(
 
     if not stage_results:
         raise ValueError("stage_results must contain at least one stage")
-    output_dir = Path(output_dir)
+    problem_cfg = metadata.problem_cfg
+    output_dir = Path(metadata.output_dir)
     result_path = Path(result_path)
     output_dir.mkdir(parents=True, exist_ok=True)
     latest_stage_result = stage_results[-1][2]
@@ -1931,19 +1928,7 @@ def _write_case_checkpoint(
     _atomic_write_json(output_dir / "history.json", history)
     case_result = _case_result_from_history(
         history=history,
-        problem_cfg=problem_cfg,
-        cfg=cfg,
-        backend=backend,
-        problem=problem,
-        max_mode=max_mode,
-        use_ess=use_ess,
-        output_dir=output_dir,
-        policy=policy,
-        solver_device=solver_device,
-        jax_platforms=jax_platforms,
-        jax_backend=jax_backend,
-        jax_device_kind=jax_device_kind,
-        stellarator_asymmetric=stellarator_asymmetric,
+        metadata=metadata,
         specs=latest_specs,
         params_final=latest_params_final,
         opt=latest_opt,
@@ -2252,6 +2237,21 @@ def _run_case(
         stellarator_asymmetric=stellarator_asymmetric,
     )
     jax_backend, jax_device_kind = _jax_runtime_info()
+    metadata = CaseRunMetadata(
+        problem_cfg=problem_cfg,
+        cfg=cfg,
+        backend=backend,
+        problem=problem,
+        max_mode=max_mode,
+        use_ess=use_ess,
+        output_dir=Path(output_dir),
+        policy=policy,
+        solver_device=solver_device,
+        jax_platforms=jax_platforms,
+        jax_backend=jax_backend,
+        jax_device_kind=jax_device_kind,
+        stellarator_asymmetric=stellarator_asymmetric,
+    )
 
     stage_results: list[StageRecord] = []
     params_stage = None
@@ -2300,21 +2300,9 @@ def _run_case(
         stage_label = stage_record[0]
         try:
             _write_case_checkpoint(
-                output_dir=output_dir,
+                metadata=metadata,
                 result_path=result_path,
                 stage_results=checkpoint_stage_results,
-                problem_cfg=problem_cfg,
-                cfg=cfg,
-                backend=backend,
-                problem=problem,
-                max_mode=max_mode,
-                use_ess=use_ess,
-                policy=policy,
-                solver_device=solver_device,
-                jax_platforms=jax_platforms,
-                jax_backend=jax_backend,
-                jax_device_kind=jax_device_kind,
-                stellarator_asymmetric=stellarator_asymmetric,
                 latest_specs=stage_specs,
                 latest_opt=stage_opt,
                 latest_params_final=params_final,
@@ -2422,21 +2410,9 @@ def _run_case(
     hist = case_output_result["_history_dump"]
     try:
         _write_case_checkpoint(
-            output_dir=output_dir,
+            metadata=metadata,
             result_path=result_path,
             stage_results=checkpoint_stage_results,
-            problem_cfg=problem_cfg,
-            cfg=cfg,
-            backend=backend,
-            problem=problem,
-            max_mode=max_mode,
-            use_ess=use_ess,
-            policy=policy,
-            solver_device=solver_device,
-            jax_platforms=jax_platforms,
-            jax_backend=jax_backend,
-            jax_device_kind=jax_device_kind,
-            stellarator_asymmetric=stellarator_asymmetric,
             latest_specs=prev_specs,
             latest_opt=final_opt,
             latest_params_final=final_result["x"],
@@ -2471,19 +2447,7 @@ def _run_case(
 
     return _case_result_from_history(
         history=hist,
-        problem_cfg=problem_cfg,
-        cfg=cfg,
-        backend=backend,
-        problem=problem,
-        max_mode=max_mode,
-        use_ess=use_ess,
-        output_dir=output_dir,
-        policy=policy,
-        solver_device=solver_device,
-        jax_platforms=jax_platforms,
-        jax_backend=jax_backend,
-        jax_device_kind=jax_device_kind,
-        stellarator_asymmetric=stellarator_asymmetric,
+        metadata=metadata,
         specs=prev_specs,
         params_final=final_result["x"],
         opt=final_opt,
