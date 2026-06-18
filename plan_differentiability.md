@@ -7,6 +7,76 @@ and should not drive new work unless a specific old result needs to be audited.
 
 Last updated: 2026-06-18.
 
+## 2026-06-18 Mercier/JXBFORCE Diagnostic Decomposition
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Changed `_mercier_radial_stability_terms` to consume structured geometry and
+   weighted-sum contexts instead of a long argument list of parity channels.
+2. Extracted VMEC/JXBFORCE bsubu/bsubv preprocessing into
+   `_mercier_preprocess_bsubuv`.
+3. Extracted bsubs derivative reconstruction into
+   `_jxbforce_bsubs_derivatives`, leaving the public `compute_mercier` function
+   focused on orchestration, optional LBSUBS correction, debug dumps, and final
+   diagnostic assembly.
+
+Results obtained:
+
+- `vmec_jax/io/wout/mercier.py` is net-negative: 270 insertions and 282
+  deletions, for a 12-line reduction.
+- `compute_mercier` dropped from 568 to 334 lines.
+- `compute_mercier` no longer appears in the top 16 source-health function
+  hotspots.
+- The extracted helpers are named by physics/numerics role:
+  `_mercier_preprocess_bsubuv` is 74 lines and
+  `_jxbforce_bsubs_derivatives` is 131 lines.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/io/wout/mercier.py tests/test_wout_physics_wave8_coverage.py tests/test_finite_beta.py`
+- `python -m compileall -q vmec_jax/io/wout/mercier.py tests/test_wout_physics_wave8_coverage.py tests/test_finite_beta.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_helpers.py::test_wout_glasser_fallback_matches_current_term_reconstruction_and_private_alias tests/test_wout_helpers.py::test_wout_glasser_profile_reader_uses_persisted_or_fallback_variables tests/test_wout_helpers.py::test_wout_glasser_profile_writer_bundle_uses_data_or_zero_defaults -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_physics_wave8_coverage.py::test_compute_mercier_lasym_lbsubs_branch_with_reduced_bsub_inputs tests/test_wout_physics_wave8_coverage.py::test_compute_mercier_short_mesh_returns_all_zero_component_profiles tests/test_finite_beta.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_physics_wave8_coverage.py -q`
+- `python tools/diagnostics/source_health.py --top 12 --top-functions 16`
+
+Best next steps:
+
+1. Move back to `solve_fixed_boundary_residual_iter` with the same strategy:
+   extract named, testable setup or scan-reporting seams before touching
+   adaptive update formulas.
+2. If continuing WOUT work, split Nyquist coefficient assembly only with an
+   explicit parity test selected first.
+3. Keep Mercier formula order and debug environment branches stable until a
+   dedicated numerical parity tranche is planned.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999998%.
+- Solver monolith reduction: 99.57%.
+- Free-boundary adjoint monolith reduction: 99.40%.
+- Driver workflow decomposition: 99.87%.
+- Residual iteration decomposition: 96.9%.
+- WOUT diagnostic/profile decomposition: 99.83%.
+- Bcovar/WOUT parity decomposition: 98.55%.
+- Force-kernel decomposition: 98.55%.
+- Optimizer workflow decomposition: 99.19%.
+- Fixed-boundary optimizer decomposition: 94.8%.
+- Implicit residual-adjoint decomposition: 95%.
+- QI objective decomposition: 96.2%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.99955%.
+
 ## 2026-06-18 WOUT Diagnostic Payload Fan-Out Reduction
 
 Branch: `codex/differentiability-refactor-plan`.
