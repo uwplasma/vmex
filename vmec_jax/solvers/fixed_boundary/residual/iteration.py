@@ -346,6 +346,7 @@ from vmec_jax.solvers.fixed_boundary.optimization.residual_objective import (
     residual_objective_vector as _residual_objective_vector,
 )
 from vmec_jax.solvers.fixed_boundary.scan.output import (
+    finalize_vmec2000_scan_run,
     finalize_vmec2000_scan_step,
     postprocess_vmec2000_scan_result,
     unpack_vmec2000_scan_histories,
@@ -2536,72 +2537,20 @@ def solve_fixed_boundary_residual_iter(
             )
             carry_final = nonchunked_result.carry_final
             hist = nonchunked_result.history
-        scan_postprocess_start = time.perf_counter() if scan_timing_enabled else None
-        if state_only_scan:
-            traced = _tree_has_tracer(carry_final.state)
-            hist_dtype = jnp.asarray(state0.Rcos).dtype
-            empty = jnp.zeros((0,), dtype=hist_dtype) if traced else np.asarray([], dtype=float)
-            scan_timing_report = None
-            if scan_timing_enabled:
-                if scan_postprocess_start is not None:
-                    scan_timing_stats["scan_postprocess_s"] += time.perf_counter() - float(scan_postprocess_start)
-                scan_total_s = (
-                    time.perf_counter() - float(scan_total_start)
-                    if scan_total_start is not None
-                    else sum(scan_timing_stats.values())
-                )
-                scan_timing_report = _build_scan_timing_report(
-                    iterations=int(max_iter),
-                    stats=scan_timing_stats,
-                    scan_total_s=float(scan_total_s),
-                )
-            diagnostics = vmec2000_state_only_scan_diagnostics(
-                carry_final=carry_final,
-                traced=bool(traced),
-                ftol=float(ftol),
-                scan_minimal=bool(scan_minimal),
-                scan_light=bool(scan_light),
-                scan_use_precomputed=bool(scan_use_precomputed),
-                scan_use_lax_tridi=bool(scan_use_lax_tridi),
-                timing_report=scan_timing_report,
-            )
-            return _vmec2000_state_only_scan_result(
-                result_type=SolveVmecResidualResult,
-                carry_final=carry_final,
-                empty_history=empty,
-                max_iter=int(max_iter),
-                diagnostics=diagnostics,
-                attach_free_boundary_diagnostics=_attach_freeb_diag,
-            )
-        scan_histories = unpack_vmec2000_scan_histories(
-            hist,
+        return finalize_vmec2000_scan_run(
+            carry_final=carry_final,
+            history=hist,
+            state0=state0,
+            result_type=SolveVmecResidualResult,
+            state_only_scan=bool(state_only_scan),
             scan_minimal=bool(scan_minimal),
             scan_light=bool(scan_light),
-        )
-        if _tree_has_tracer(hist) or _tree_has_tracer(carry_final.state):
-            hist_dtype = jnp.asarray(state0.Rcos).dtype
-            empty = jnp.zeros((0,), dtype=hist_dtype)
-            traced_resume_state = _build_traced_scan_resume_state(carry_final, max_iter=int(max_iter))
-            return _vmec2000_traced_scan_result(
-                result_type=SolveVmecResidualResult,
-                carry_final=carry_final,
-                empty_history=empty,
-                max_iter=int(max_iter),
-                resume_state=traced_resume_state,
-                scan_use_precomputed=bool(scan_use_precomputed),
-                scan_use_lax_tridi=bool(scan_use_lax_tridi),
-                attach_free_boundary_diagnostics=_attach_freeb_diag,
-                traced_diagnostics_func=vmec2000_traced_scan_diagnostics,
-            )
-        scan_output = postprocess_vmec2000_scan_result(
-            scan_histories,
-            carry_final,
+            scan_use_precomputed=bool(scan_use_precomputed),
+            scan_use_lax_tridi=bool(scan_use_lax_tridi),
             vmec2000_control=bool(vmec2000_control),
             ftol=float(ftol),
             fsq_total_target=fsq_total_target,
             max_iter=int(max_iter),
-            scan_minimal=bool(scan_minimal),
-            scan_light=bool(scan_light),
             resume_state_mode=str(resume_state_mode),
             pack_resume_state=_pack_resume_state,
             free_boundary_enabled=bool(free_boundary_enabled),
@@ -2609,77 +2558,40 @@ def solve_fixed_boundary_residual_iter(
             freeb_nvskip0=int(freeb_nvskip0),
             iter_offset0=int(iter_offset0),
             free_boundary_iter_controls=_free_boundary_iter_controls,
-        )
-        fsqr_full = scan_output.fsqr_full
-        fsqz_full = scan_output.fsqz_full
-        fsql_full = scan_output.fsql_full
-        conv_idx_print = scan_output.conv_idx_print
-
-        _emit_vmec2000_post_scan_rows(
-            enabled=(
-                (not scan_minimal)
-                and (not print_in_scan)
-                and (not chunked_print)
+            scan_timing_enabled=bool(scan_timing_enabled),
+            scan_timing_stats=scan_timing_stats,
+            scan_postprocess_start=time.perf_counter() if scan_timing_enabled else None,
+            scan_total_start=scan_total_start,
+            perf_counter=time.perf_counter,
+            build_timing_report=_build_scan_timing_report,
+            tree_has_tracer=_tree_has_tracer,
+            build_traced_scan_resume_state=_build_traced_scan_resume_state,
+            state_only_scan_result=_vmec2000_state_only_scan_result,
+            traced_scan_result=_vmec2000_traced_scan_result,
+            attach_free_boundary_diagnostics=_attach_freeb_diag,
+            emit_post_scan_rows=_emit_vmec2000_post_scan_rows,
+            post_scan_print_enabled=(
+                (not bool(scan_minimal))
+                and (not bool(print_in_scan))
+                and (not bool(chunked_print))
                 and bool(verbose)
                 and bool(vmec2000_control)
                 and bool(verbose_vmec2000_table)
             ),
-            scan_histories=scan_histories,
-            fsqr_full=fsqr_full,
-            fsqz_full=fsqz_full,
-            fsql_full=fsql_full,
-            conv_idx_print=int(conv_idx_print),
-            max_iter=int(max_iter),
             should_print=scan_print_context.should_print,
             print_row=scan_print_context.print_row,
-        )
-        _dump_vmec2000_scan_ptau_rows(
-            enabled=(
-                (not scan_light)
-                and (not scan_minimal)
+            dump_ptau_rows=_dump_vmec2000_scan_ptau_rows,
+            dump_ptau_enabled=(
+                (not bool(scan_light))
+                and (not bool(scan_minimal))
                 and os.getenv("VMEC_JAX_DUMP_PTAU", "") not in ("", "0")
             ),
-            scan_histories=scan_histories,
-            conv_idx_print=int(conv_idx_print),
-            max_iter=int(max_iter),
-            iter_offset0=int(iter_offset0),
             badjac_mode=badjac_mode,
             dump_ptau=_maybe_dump_ptau,
-        )
-        n_iter_hist = scan_output.n_iter_hist
-        scan_timing_report = None
-        if scan_timing_enabled:
-            if scan_postprocess_start is not None:
-                scan_timing_stats["scan_postprocess_s"] += time.perf_counter() - float(scan_postprocess_start)
-            scan_total_s = (
-                time.perf_counter() - float(scan_total_start)
-                if scan_total_start is not None
-                else sum(scan_timing_stats.values())
-            )
-            scan_timing_report = _build_scan_timing_report(
-                iterations=int(n_iter_hist),
-                stats=scan_timing_stats,
-                scan_total_s=float(scan_total_s),
-            )
-        res_scan = vmec2000_scan_residual_result(
-            state=carry_final.state,
-            scan_output=scan_output,
-            ftol=float(ftol),
-            scan_light=bool(scan_light),
-            scan_minimal=bool(scan_minimal),
-            scan_use_precomputed=bool(scan_use_precomputed),
-            scan_use_lax_tridi=bool(scan_use_lax_tridi),
-            resume_state_mode=str(resume_state_mode),
-            fsq_total_target=fsq_total_target,
             badjac_use_state=bool(badjac_use_state),
-            badjac_mode=badjac_mode,
             badjac_state_probe=bool(badjac_state_probe),
             badjac_initial_state_probe_iters=int(badjac_initial_state_probe_iters),
-            ijacob=int(np.asarray(carry_final.ijacob)),
-            abort_scan=bool(np.asarray(carry_final.abort_scan)),
-            timing_report=scan_timing_report,
         )
-        return _attach_freeb_diag(res_scan)
 
     if use_scan:
         if vmec2000_control:

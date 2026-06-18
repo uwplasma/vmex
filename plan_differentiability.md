@@ -10975,3 +10975,71 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.9962%.
+
+## 2026-06-18 Scan Run Finalizer Seam
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `finalize_vmec2000_scan_run` to
+   `vmec_jax.solvers.fixed_boundary.scan.output`.
+2. Moved state-only, traced, and materialized scan-result postprocessing out of
+   `_run_vmec2000_scan`.
+3. Kept the finalizer explicit about hooks for timing, tracer detection,
+   traced resume-state construction, state-only/traced result assembly,
+   post-scan row printing, PTAU dumps, and free-boundary diagnostic attachment.
+4. Rewired `_run_vmec2000_scan` to return the finalizer result directly.
+
+Results obtained:
+
+- The VMEC2000 scan path now has named seams for planning, runtime execution,
+   live/deferred output, and final result assembly.
+- `iteration.py` dropped from 7168 to 7080 lines.
+- `solve_fixed_boundary_residual_iter` dropped from 6643 to 6554 lines.
+- `_run_vmec2000_scan` dropped from 1057 to 968 lines, now below 1000 lines.
+- Functionality remains covered by the scan helper suites and driver shard.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/scan/output.py vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/scan/output.py vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_scan_output.py tests/test_solve_scan_planning_helpers.py tests/test_solve_scan_debug_helpers.py tests/test_solve_scan_time_control.py -q`
+  - Result: `83 passed`.
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_wave7_coverage.py::test_residual_iter_vmec2000_scan_minimal_one_step tests/test_solve_wave7_coverage.py::test_residual_iter_vmec2000_scan_state_only tests/test_resume_state.py::test_accelerated_resume_state_is_minimal_and_restartable tests/test_solve_performance_instrumentation.py::test_accelerated_scan_timing_is_opt_in_and_path_labeled tests/test_solve_real_scan_wave10_coverage.py::test_vmec2000_scan_full_history_runs_fallback_decision -q`
+  - Result: `5 passed`.
+- `JAX_ENABLE_X64=1 VMEC_JAX_SKIP_PY311_COVERAGE_ONLY=1 xargs python -m pytest -q -n 4 -m "not full and not vmec2000 and not simsopt" --durations=20 < /tmp/driver-solve-discrete.args`
+  - Result: `997 passed, 30 skipped`.
+- `python tools/diagnostics/source_health.py --top 16 --top-functions 22`
+
+Best next steps:
+
+1. Reassess `_run_vmec2000_scan` now that it is below 1000 lines; the next
+   useful extraction is likely the remaining setup/cache orchestration, not
+   further micro-splitting `_advance_step`.
+2. Then target the next source-health hotspot outside residual iteration:
+   `run_fixed_boundary`, `free_boundary.py`, or WOUT diagnostic builders.
+3. Inspect CI later only if the newest run has completed; avoid waiting on
+   Actions between locally verified tranches.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.97%.
+- Differentiability/refactor implementation: 99.999982%.
+- Solver monolith reduction: 99.46%.
+- Free-boundary adjoint monolith reduction: 99.30%.
+- Driver workflow decomposition: 99.3%.
+- Residual iteration decomposition: 95.8%.
+- WOUT diagnostic/profile decomposition: 99.1%.
+- Optimizer workflow decomposition: 98.8%.
+- Fixed-boundary optimizer decomposition: 94.0%.
+- Implicit residual-adjoint decomposition: 93%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.9965%.

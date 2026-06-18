@@ -993,3 +993,179 @@ def postprocess_vmec2000_scan_result(
         probe_ratio=probe_ratio_final,
         probe_accept_frac=probe_accept_frac_final,
     )
+
+
+def finalize_vmec2000_scan_run(
+    *,
+    carry_final: Any,
+    history: Any,
+    state0: Any,
+    result_type: type[SolveVmecResidualResult],
+    state_only_scan: bool,
+    scan_minimal: bool,
+    scan_light: bool,
+    scan_use_precomputed: bool,
+    scan_use_lax_tridi: bool,
+    vmec2000_control: bool,
+    ftol: float,
+    fsq_total_target: float | None,
+    max_iter: int,
+    resume_state_mode: str,
+    pack_resume_state: Callable[[dict[str, Any], dict[str, Any] | None], dict[str, Any] | None],
+    free_boundary_enabled: bool,
+    freeb_nvacskip: int,
+    freeb_nvskip0: int,
+    iter_offset0: int,
+    free_boundary_iter_controls: Callable[[int, int, int], tuple[int, int]],
+    scan_timing_enabled: bool,
+    scan_timing_stats: dict[str, Any],
+    scan_postprocess_start: float | None,
+    scan_total_start: float | None,
+    perf_counter: Callable[[], float],
+    build_timing_report: Callable[..., dict[str, float | int]],
+    tree_has_tracer: Callable[[Any], bool],
+    build_traced_scan_resume_state: Callable[..., dict[str, Any]],
+    state_only_scan_result: Callable[..., SolveVmecResidualResult],
+    traced_scan_result: Callable[..., SolveVmecResidualResult],
+    attach_free_boundary_diagnostics: Callable[[SolveVmecResidualResult], SolveVmecResidualResult],
+    emit_post_scan_rows: Callable[..., Any],
+    post_scan_print_enabled: bool,
+    should_print: Callable[[int, int], bool],
+    print_row: Callable[..., Any],
+    dump_ptau_rows: Callable[..., Any],
+    dump_ptau_enabled: bool,
+    badjac_mode: str,
+    dump_ptau: Callable[..., Any],
+    badjac_use_state: bool,
+    badjac_state_probe: bool,
+    badjac_initial_state_probe_iters: int,
+) -> SolveVmecResidualResult:
+    """Finalize a VMEC2000 scan run into the public residual result."""
+
+    scan_timing_report = None
+    if bool(state_only_scan):
+        traced = tree_has_tracer(carry_final.state)
+        hist_dtype = jnp.asarray(state0.Rcos).dtype
+        empty = jnp.zeros((0,), dtype=hist_dtype) if traced else np.asarray([], dtype=float)
+        if bool(scan_timing_enabled):
+            if scan_postprocess_start is not None:
+                scan_timing_stats["scan_postprocess_s"] = float(
+                    scan_timing_stats.get("scan_postprocess_s", 0.0)
+                ) + (perf_counter() - float(scan_postprocess_start))
+            scan_total_s = (
+                perf_counter() - float(scan_total_start) if scan_total_start is not None else sum(scan_timing_stats.values())
+            )
+            scan_timing_report = build_timing_report(
+                iterations=int(max_iter),
+                stats=scan_timing_stats,
+                scan_total_s=float(scan_total_s),
+            )
+        diagnostics = vmec2000_state_only_scan_diagnostics(
+            carry_final=carry_final,
+            traced=bool(traced),
+            ftol=float(ftol),
+            scan_minimal=bool(scan_minimal),
+            scan_light=bool(scan_light),
+            scan_use_precomputed=bool(scan_use_precomputed),
+            scan_use_lax_tridi=bool(scan_use_lax_tridi),
+            timing_report=scan_timing_report,
+        )
+        return state_only_scan_result(
+            result_type=result_type,
+            carry_final=carry_final,
+            empty_history=empty,
+            max_iter=int(max_iter),
+            diagnostics=diagnostics,
+            attach_free_boundary_diagnostics=attach_free_boundary_diagnostics,
+        )
+
+    scan_histories = unpack_vmec2000_scan_histories(
+        history,
+        scan_minimal=bool(scan_minimal),
+        scan_light=bool(scan_light),
+    )
+    if tree_has_tracer(history) or tree_has_tracer(carry_final.state):
+        hist_dtype = jnp.asarray(state0.Rcos).dtype
+        empty = jnp.zeros((0,), dtype=hist_dtype)
+        traced_resume_state = build_traced_scan_resume_state(carry_final, max_iter=int(max_iter))
+        return traced_scan_result(
+            result_type=result_type,
+            carry_final=carry_final,
+            empty_history=empty,
+            max_iter=int(max_iter),
+            resume_state=traced_resume_state,
+            scan_use_precomputed=bool(scan_use_precomputed),
+            scan_use_lax_tridi=bool(scan_use_lax_tridi),
+            attach_free_boundary_diagnostics=attach_free_boundary_diagnostics,
+            traced_diagnostics_func=vmec2000_traced_scan_diagnostics,
+        )
+
+    scan_output = postprocess_vmec2000_scan_result(
+        scan_histories,
+        carry_final,
+        vmec2000_control=bool(vmec2000_control),
+        ftol=float(ftol),
+        fsq_total_target=fsq_total_target,
+        max_iter=int(max_iter),
+        scan_minimal=bool(scan_minimal),
+        scan_light=bool(scan_light),
+        resume_state_mode=str(resume_state_mode),
+        pack_resume_state=pack_resume_state,
+        free_boundary_enabled=bool(free_boundary_enabled),
+        freeb_nvacskip=int(freeb_nvacskip),
+        freeb_nvskip0=int(freeb_nvskip0),
+        iter_offset0=int(iter_offset0),
+        free_boundary_iter_controls=free_boundary_iter_controls,
+    )
+    emit_post_scan_rows(
+        enabled=bool(post_scan_print_enabled),
+        scan_histories=scan_histories,
+        fsqr_full=scan_output.fsqr_full,
+        fsqz_full=scan_output.fsqz_full,
+        fsql_full=scan_output.fsql_full,
+        conv_idx_print=int(scan_output.conv_idx_print),
+        max_iter=int(max_iter),
+        should_print=should_print,
+        print_row=print_row,
+    )
+    dump_ptau_rows(
+        enabled=bool(dump_ptau_enabled),
+        scan_histories=scan_histories,
+        conv_idx_print=int(scan_output.conv_idx_print),
+        max_iter=int(max_iter),
+        iter_offset0=int(iter_offset0),
+        badjac_mode=badjac_mode,
+        dump_ptau=dump_ptau,
+    )
+    if bool(scan_timing_enabled):
+        if scan_postprocess_start is not None:
+            scan_timing_stats["scan_postprocess_s"] = float(scan_timing_stats.get("scan_postprocess_s", 0.0)) + (
+                perf_counter() - float(scan_postprocess_start)
+            )
+        scan_total_s = (
+            perf_counter() - float(scan_total_start) if scan_total_start is not None else sum(scan_timing_stats.values())
+        )
+        scan_timing_report = build_timing_report(
+            iterations=int(scan_output.n_iter_hist),
+            stats=scan_timing_stats,
+            scan_total_s=float(scan_total_s),
+        )
+    res_scan = vmec2000_scan_residual_result(
+        state=carry_final.state,
+        scan_output=scan_output,
+        ftol=float(ftol),
+        scan_light=bool(scan_light),
+        scan_minimal=bool(scan_minimal),
+        scan_use_precomputed=bool(scan_use_precomputed),
+        scan_use_lax_tridi=bool(scan_use_lax_tridi),
+        resume_state_mode=str(resume_state_mode),
+        fsq_total_target=fsq_total_target,
+        badjac_use_state=bool(badjac_use_state),
+        badjac_mode=badjac_mode,
+        badjac_state_probe=bool(badjac_state_probe),
+        badjac_initial_state_probe_iters=int(badjac_initial_state_probe_iters),
+        ijacob=int(np.asarray(carry_final.ijacob)),
+        abort_scan=bool(np.asarray(carry_final.abort_scan)),
+        timing_report=scan_timing_report,
+    )
+    return attach_free_boundary_diagnostics(res_scan)
