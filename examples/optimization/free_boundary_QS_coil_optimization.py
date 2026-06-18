@@ -79,10 +79,10 @@ from vmec_jax.solvers.free_boundary.coil_optimization import (
     SUPPORTED_SAME_BRANCH_VECTOR_KEYS,
     direct_coil_optimization_workflow_metadata,
     direct_coil_qs_summary_configs,
-    nestor_profile_policy_from_results,
+    nestor_profile_policy_from_results,  # noqa: F401 - compatibility export for tests/users.
     parse_float_list,
+    parse_profile_matrix_free_solvers,  # noqa: F401 - compatibility export for tests/users.
     parse_same_branch_vector_keys,
-    parse_profile_matrix_free_solvers,
     same_branch_current_only_coil_geometry_cache,
     same_branch_complete_fd_report_metadata,
     same_branch_derivative_gate_evidence as same_branch_derivative_gate_evidence,
@@ -92,6 +92,7 @@ from vmec_jax.solvers.free_boundary.coil_optimization import (
     same_branch_replay_mode_count_guard,
     same_branch_replay_options_from_args,
     same_branch_replay_plan_cache,
+    same_branch_nestor_profile_from_vector_replay,
     same_branch_report_direction_policy,
     same_branch_report_mode_count,
     same_branch_report_runtime_configs,
@@ -1012,126 +1013,25 @@ def write_same_branch_validation_report(
     )
     if rejected_slot_wall_s is not None:
         timings["branch_local_rejected_slot_wall_s"] = rejected_slot_wall_s
-    nestor_profile: dict[str, Any] = {
-        "enabled": False,
-        "request": str(getattr(args, "same_branch_report_profile_nestor", "none")),
-        "reason": "not requested",
-    }
-    profile_request = str(getattr(args, "same_branch_report_profile_nestor", "none")).strip().lower()
-    if profile_request != "none":
-        nestor_profile = {
-            "enabled": True,
-            "request": profile_request,
-            "scope": "same complete-solve payload replay/JVP timings; no additional full FD solves",
-            "mode_count": int(mode_count),
-            "results": [],
-        }
-        profile_max_mode_count = int(getattr(args, "same_branch_report_profile_max_mode_count", 220))
-        if profile_request != "dense-vs-matrix-free":
-            nestor_profile["reason"] = "--same-branch-report-profile-nestor must be none or dense-vs-matrix-free"
-        elif not (same_branch and mode == "vector" and "base" in report and not missing_vector_keys):
-            nestor_profile["reason"] = "requires same-branch vector report with all requested scalar keys"
-        elif replay_mode_count_guard_triggered:
-            nestor_profile["reason"] = replay_mode_count_guard_reason
-            nestor_profile["skipped_due_to_replay_mode_count_cap"] = True
-            nestor_profile["replay_max_mode_count"] = replay_max_mode_count
-            nestor_profile["policy"] = {
-                "promote_matrix_free": False,
-                "reason": "profile skipped by replay mode-count cap",
-                "mode_count": int(mode_count),
-                "replay_max_mode_count": replay_max_mode_count,
-            }
-        elif profile_max_mode_count > 0 and int(mode_count) > profile_max_mode_count:
-            nestor_profile["reason"] = (
-                f"mode_count {int(mode_count)} exceeds profile cap {profile_max_mode_count}; "
-                "set --same-branch-report-profile-max-mode-count 0 to disable this guard"
-            )
-            nestor_profile["skipped_due_to_mode_count_cap"] = True
-            nestor_profile["profile_max_mode_count"] = profile_max_mode_count
-            nestor_profile["policy"] = {
-                "promote_matrix_free": False,
-                "reason": "profile skipped by mode-count cap",
-                "mode_count": int(mode_count),
-                "profile_max_mode_count": profile_max_mode_count,
-            }
-        else:
-            profile_results: list[dict[str, Any]] = []
-            profile_cases = [("dense", str(getattr(args, "same_branch_report_nestor_operator_solver", "gmres")))]
-            profile_cases.extend(
-                ("matrix_free", solver)
-                for solver in parse_profile_matrix_free_solvers(
-                    getattr(args, "same_branch_report_profile_matrix_free_solvers", None)
-                )
-            )
-            for solve_mode, operator_solver in profile_cases:
-                case_kwargs = {
-                    **replay_kwargs,
-                    "state_only_replay": vector_uses_state_only_replay,
-                    "nestor_solve_mode": solve_mode,
-                    "nestor_operator_solver": operator_solver,
-                }
-                if (
-                    main_vector_summary is not None
-                    and solve_mode == str(replay_kwargs["nestor_solve_mode"])
-                    and operator_solver == str(replay_kwargs["nestor_operator_solver"])
-                ):
-                    profile_results.append(
-                        {
-                            "available": True,
-                            "nestor_solve_mode": solve_mode,
-                            "nestor_operator_solver": operator_solver,
-                            "wall_s": float(timings.get("branch_local_vector_wall_s", 0.0)),
-                            "timing_source": "main_branch_local_vector_report",
-                            "timings": main_vector_summary["timings"],
-                            "max_base_abs_delta": float(main_vector_summary["max_base_abs_delta"]),
-                            "max_abs_error": max(
-                                float(item["abs_error"]) for item in main_vector_summary["scalars"].values()
-                            ),
-                            "replay_option_flags": main_vector_summary["replay_option_flags"],
-                        }
-                    )
-                    continue
-                t0 = time.perf_counter()
-                try:
-                    profile_vector = _run_branch_local_vector(
-                        vector_keys,
-                        case_kwargs,
-                        replay_plan_for_call=main_vector_replay_plan,
-                    )
-                    wall_s = float(time.perf_counter() - t0)
-                    profile_summary = _summarize_vector_result(profile_vector, vector_keys)
-                    profile_results.append(
-                        {
-                            "available": True,
-                            "nestor_solve_mode": solve_mode,
-                            "nestor_operator_solver": operator_solver,
-                            "wall_s": wall_s,
-                            "timing_source": "independent_profile_replay",
-                            "timings": profile_summary["timings"],
-                            "max_base_abs_delta": float(profile_summary["max_base_abs_delta"]),
-                            "max_abs_error": max(
-                                float(item["abs_error"]) for item in profile_summary["scalars"].values()
-                            ),
-                            "replay_option_flags": profile_summary["replay_option_flags"],
-                        }
-                    )
-                except Exception as exc:  # pragma: no cover - profile diagnostics should not abort the promoted report.
-                    profile_results.append(
-                        {
-                            "available": False,
-                            "nestor_solve_mode": solve_mode,
-                            "nestor_operator_solver": operator_solver,
-                            "wall_s": float(time.perf_counter() - t0),
-                            "error": f"{type(exc).__name__}: {exc}",
-                        }
-                    )
-            nestor_profile["results"] = profile_results
-            nestor_profile["policy"] = nestor_profile_policy_from_results(
-                profile_results,
-                mode_count=int(mode_count),
-                min_mode_count=int(getattr(args, "same_branch_report_profile_min_mode_count", 96)),
-                min_speedup=float(getattr(args, "same_branch_report_profile_min_speedup", 1.15)),
-            )
+    nestor_profile = same_branch_nestor_profile_from_vector_replay(
+        args=args,
+        same_branch=same_branch,
+        mode=mode,
+        report=report,
+        mode_count=mode_count,
+        replay_mode_count_guard_triggered=replay_mode_count_guard_triggered,
+        replay_mode_count_guard_reason=replay_mode_count_guard_reason,
+        replay_max_mode_count=replay_max_mode_count,
+        missing_vector_keys=missing_vector_keys,
+        vector_keys=vector_keys,
+        replay_kwargs=replay_kwargs,
+        vector_uses_state_only_replay=vector_uses_state_only_replay,
+        main_vector_summary=main_vector_summary,
+        main_vector_replay_plan=main_vector_replay_plan,
+        timings=timings,
+        run_branch_local_vector=_run_branch_local_vector,
+        summarize_vector_result=_summarize_vector_result,
+    )
     compact_report["branch_local_scalar_gradient"] = branch_local_scalar
     compact_report["branch_local_vector_jacobian"] = branch_local_vector
     compact_report["branch_local_vector_gate"] = branch_local_vector_gate

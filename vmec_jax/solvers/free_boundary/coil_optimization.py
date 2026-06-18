@@ -30,6 +30,7 @@ __all__ = [
     "direct_coil_optimization_workflow_metadata",
     "direct_coil_qs_summary_configs",
     "nestor_profile_policy_from_results",
+    "same_branch_nestor_profile_from_vector_replay",
     "parse_float_list",
     "parse_same_branch_vector_keys",
     "parse_profile_matrix_free_solvers",
@@ -792,6 +793,97 @@ def nestor_profile_policy_from_results(
             "reason": "use promoted matrix-free replay settings" if promote else "keep dense replay settings",
         },
     }
+
+
+def same_branch_nestor_profile_from_vector_replay(
+    *,
+    args: Any,
+    same_branch: bool,
+    mode: str,
+    report: dict[str, Any],
+    mode_count: int,
+    replay_mode_count_guard_triggered: bool,
+    replay_mode_count_guard_reason: str,
+    replay_max_mode_count: int,
+    missing_vector_keys: tuple[str, ...],
+    vector_keys: tuple[str, ...],
+    replay_kwargs: dict[str, Any],
+    vector_uses_state_only_replay: bool,
+    main_vector_summary: dict[str, Any] | None,
+    main_vector_replay_plan: dict[str, Any] | None,
+    timings: dict[str, float],
+    run_branch_local_vector: Any,
+    summarize_vector_result: Any,
+) -> dict[str, Any]:
+    """Return optional dense-vs-matrix-free NESTOR replay profile evidence."""
+
+    request = str(getattr(args, "same_branch_report_profile_nestor", "none")).strip().lower()
+    profile: dict[str, Any] = {"enabled": False, "request": request, "reason": "not requested"}
+    if request == "none":
+        return profile
+    profile = {"enabled": True, "request": request, "mode_count": int(mode_count), "results": [],
+               "scope": "same complete-solve payload replay/JVP timings; no additional full FD solves"}
+    profile_max_mode_count = int(getattr(args, "same_branch_report_profile_max_mode_count", 220))
+    if request != "dense-vs-matrix-free":
+        profile["reason"] = "--same-branch-report-profile-nestor must be none or dense-vs-matrix-free"
+        return profile
+    if not (same_branch and mode == "vector" and "base" in report and not missing_vector_keys):
+        profile["reason"] = "requires same-branch vector report with all requested scalar keys"
+        return profile
+    if replay_mode_count_guard_triggered:
+        profile.update({"reason": replay_mode_count_guard_reason, "skipped_due_to_replay_mode_count_cap": True,
+                        "replay_max_mode_count": replay_max_mode_count,
+                        "policy": {"promote_matrix_free": False, "reason": "profile skipped by replay mode-count cap",
+                                   "mode_count": int(mode_count), "replay_max_mode_count": replay_max_mode_count}})
+        return profile
+    if profile_max_mode_count > 0 and int(mode_count) > profile_max_mode_count:
+        profile.update({"reason": (f"mode_count {int(mode_count)} exceeds profile cap {profile_max_mode_count}; "
+                                   "set --same-branch-report-profile-max-mode-count 0 to disable this guard"),
+                        "skipped_due_to_mode_count_cap": True,
+                        "profile_max_mode_count": profile_max_mode_count,
+                        "policy": {"promote_matrix_free": False, "reason": "profile skipped by mode-count cap",
+                                   "mode_count": int(mode_count), "profile_max_mode_count": profile_max_mode_count}})
+        return profile
+
+    def _result_from_summary(solve_mode: str, operator_solver: str, wall_s: float, timing_source: str,
+                             summary: dict[str, Any]) -> dict[str, Any]:
+        return {"available": True, "nestor_solve_mode": solve_mode, "nestor_operator_solver": operator_solver,
+                "wall_s": float(wall_s), "timing_source": timing_source, "timings": summary["timings"],
+                "max_base_abs_delta": float(summary["max_base_abs_delta"]),
+                "max_abs_error": max(float(item["abs_error"]) for item in summary["scalars"].values()),
+                "replay_option_flags": summary["replay_option_flags"]}
+
+    profile_results: list[dict[str, Any]] = []
+    profile_cases = [("dense", str(getattr(args, "same_branch_report_nestor_operator_solver", "gmres")))] + [
+        ("matrix_free", solver)
+        for solver in parse_profile_matrix_free_solvers(getattr(args, "same_branch_report_profile_matrix_free_solvers", None))
+    ]
+    for solve_mode, operator_solver in profile_cases:
+        case_kwargs = {**replay_kwargs, "state_only_replay": vector_uses_state_only_replay,
+                       "nestor_solve_mode": solve_mode, "nestor_operator_solver": operator_solver}
+        if (main_vector_summary is not None and solve_mode == str(replay_kwargs["nestor_solve_mode"])
+                and operator_solver == str(replay_kwargs["nestor_operator_solver"])):
+            profile_results.append(_result_from_summary(
+                solve_mode, operator_solver, float(timings.get("branch_local_vector_wall_s", 0.0)),
+                "main_branch_local_vector_report", main_vector_summary))
+            continue
+        t0 = time.perf_counter()
+        try:
+            vector = run_branch_local_vector(vector_keys, case_kwargs, replay_plan_for_call=main_vector_replay_plan)
+            summary = summarize_vector_result(vector, vector_keys)
+            profile_results.append(_result_from_summary(
+                solve_mode, operator_solver, float(time.perf_counter() - t0),
+                "independent_profile_replay", summary))
+        except Exception as exc:  # pragma: no cover - profile diagnostics should not abort promoted reports.
+            profile_results.append({"available": False, "nestor_solve_mode": solve_mode,
+                                    "nestor_operator_solver": operator_solver,
+                                    "wall_s": float(time.perf_counter() - t0),
+                                    "error": f"{type(exc).__name__}: {exc}"})
+    profile["results"] = profile_results
+    profile["policy"] = nestor_profile_policy_from_results(profile_results, mode_count=int(mode_count),
+                                                           min_mode_count=int(getattr(args, "same_branch_report_profile_min_mode_count", 96)),
+                                                           min_speedup=float(getattr(args, "same_branch_report_profile_min_speedup", 1.15)))
+    return profile
 
 
 def same_branch_rejected_slot_gate_from_vector_replay(

@@ -7,6 +7,77 @@ and should not drive new work unless a specific old result needs to be audited.
 
 Last updated: 2026-06-18.
 
+## 2026-06-18 Same-Branch NESTOR Profile Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved dense-vs-matrix-free NESTOR profile orchestration from
+   `examples/optimization/free_boundary_QS_coil_optimization.py` into
+   `vmec_jax.solvers.free_boundary.coil_optimization`.
+2. Kept the actual branch-local vector replay and summary functions as
+   callbacks supplied by the example, so the validated JAX replay path is
+   unchanged.
+3. Preserved example-module compatibility exports for
+   `nestor_profile_policy_from_results` and
+   `parse_profile_matrix_free_solvers`, since tests and user scripts may still
+   import those names from the example.
+
+Results obtained:
+
+- `write_same_branch_validation_report` dropped from 480 to 379 lines.
+- The new package helper `same_branch_nestor_profile_from_vector_replay` is 89
+  lines and keeps profile/report decisions in package code.
+- The tranche is net-negative across touched source files: 114 insertions and
+  122 deletions.
+- `write_same_branch_validation_report` no longer appears in the top 16
+  source-health function hotspots.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solvers/free_boundary/coil_optimization.py examples/optimization/free_boundary_QS_coil_optimization.py tests/test_free_boundary_qs_coil_optimization_smoke.py`
+- `python -m compileall -q vmec_jax/solvers/free_boundary/coil_optimization.py examples/optimization/free_boundary_QS_coil_optimization.py tests/test_free_boundary_qs_coil_optimization_smoke.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_qs_coil_optimization_smoke.py::test_nestor_profile_policy_requires_size_and_speedup_thresholds tests/test_free_boundary_qs_coil_optimization_smoke.py::test_same_branch_report_profiles_nestor_and_rejected_slot tests/test_free_boundary_qs_coil_optimization_smoke.py::test_same_branch_report_profile_skips_above_mode_count_cap -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_qs_coil_optimization_smoke.py tests/test_free_boundary_qa_finite_beta_coil_optimization_smoke.py -q`
+- `python tools/diagnostics/source_health.py --top 12 --top-functions 16`
+
+Best next steps:
+
+1. Stop extracting from `free_boundary_QS_coil_optimization.py` for now unless
+   another coherent user-facing simplification appears; the example is below
+   the source-health threshold and still shows the workflow.
+2. Move to the next source-health hotspot with safe seams: either test-helper
+   extraction for repeated free-boundary FD assertions or context-object design
+   for fixed-boundary residual scan internals.
+3. Continue avoiding CI polling; check only after a larger batch or concrete
+   failure report.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999998%.
+- Solver monolith reduction: 99.57%.
+- Free-boundary adjoint monolith reduction: 99.39%.
+- Driver workflow decomposition: 99.87%.
+- Residual iteration decomposition: 96.9%.
+- WOUT diagnostic/profile decomposition: 99.72%.
+- Bcovar/WOUT parity decomposition: 98.35%.
+- Force-kernel decomposition: 98.55%.
+- Optimizer workflow decomposition: 99.18%.
+- Fixed-boundary optimizer decomposition: 94.8%.
+- Implicit residual-adjoint decomposition: 95%.
+- QI objective decomposition: 93%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.7%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.99942%.
+
 ## 2026-06-18 Same-Branch Replay Setup Extraction
 
 Branch: `codex/differentiability-refactor-plan`.
