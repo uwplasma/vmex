@@ -987,8 +987,6 @@ def checkpoint_tape_state_vjp(
     rebuild_preconditioner: bool = False,
 ):
     """Reverse a packed-state cotangent through the extracted step tape."""
-    from ._compat import jax
-
     if bool(getattr(tape, "jvp_only", False)):
         raise ValueError(
             "JVP-only checkpoint tapes are forward-replay only; rebuild the tape with jvp_only=False."
@@ -1049,8 +1047,6 @@ def checkpoint_tape_state_vjp(
 
     if not tape.step_traces:
         return jnp.asarray(final_cotangent)
-
-    from ._compat import jax
 
     cotangent = jnp.asarray(final_cotangent)
     for trace in reversed(tape.step_traces):
@@ -1121,8 +1117,6 @@ def checkpoint_tape_state_jvp(
         return tangents[0]
     if not tape.step_traces:
         return jnp.asarray(initial_tangent)
-
-    from ._compat import jax
 
     tangent = jnp.asarray(initial_tangent)
     for trace in tape.step_traces:
@@ -1276,8 +1270,6 @@ def _trace_with_replay_defaults(trace: dict[str, Any]) -> dict[str, Any]:
 
 
 def _stack_replay_step_traces(step_traces: tuple[dict[str, Any], ...]):
-    from ._compat import jax
-
     step_traces = tuple(_trace_with_replay_defaults(trace) for trace in step_traces)
     optional_keys = _OPTIONAL_REPLAY_STEP_TRACE_KEYS
     optional_present: dict[str, list[bool]] = {
@@ -1347,8 +1339,6 @@ def _build_dynamic_replay_payload(
     *,
     store_base_carries: bool = True,
 ):
-    from ._compat import jax
-
     step_traces = tuple(_trace_with_replay_defaults(trace) for trace in step_traces)
     use_device_stack = _backend_is_accelerator(jax.default_backend())
     jax_array_type = getattr(jax, "Array", ())
@@ -1452,8 +1442,6 @@ def _build_dynamic_replay_payload(
 
 
 def _stacked_trace_signature(stacked) -> tuple[tuple[tuple[int, ...], str], ...]:
-    from ._compat import jax
-
     leaves = jax.tree_util.tree_leaves(stacked)
     signature = []
     for leaf in leaves:
@@ -1466,8 +1454,6 @@ def _stacked_trace_signature(stacked) -> tuple[tuple[tuple[int, ...], str], ...]
 
 
 def _stacked_leading_axis_size(stacked) -> int | None:
-    from ._compat import jax
-
     sizes: set[int] = set()
     for leaf in jax.tree_util.tree_leaves(stacked):
         shape = tuple(getattr(leaf, "shape", np.shape(leaf)))
@@ -1987,8 +1973,6 @@ def _packed_dynamic_replay_step_from_carry(
 
 
 def _checkpoint_tape_scan_runner(*, static, stacked, static_flags, rebuild_preconditioner: bool):
-    from ._compat import jax
-
     key = (
         id(static),
         bool(rebuild_preconditioner),
@@ -2057,8 +2041,6 @@ def _checkpoint_tape_scan_runner(*, static, stacked, static_flags, rebuild_preco
 
 
 def _checkpoint_tape_dynamic_scan_runner(*, static, stacked, static_flags):
-    from ._compat import jax
-
     key = (
         id(static),
         bool(static_flags["apply_lforbal"]),
@@ -2122,8 +2104,6 @@ def _checkpoint_tape_dynamic_scan_runner(*, static, stacked, static_flags):
 
 
 def _checkpoint_tape_dynamic_basepoint_scan_runner(*, static, stacked, stacked_base_carries, static_flags):
-    from ._compat import jax
-
     key = (
         id(static),
         bool(static_flags["apply_lforbal"]),
@@ -2223,8 +2203,6 @@ def _run_dynamic_basepoint_scan_zero_aux(*, run_scan, state_tangents, stacked_ba
     if run_zero_aux is not None:
         return run_zero_aux(state_tangents, stacked_base_carries, stacked)
 
-    from ._compat import jax
-
     carry0 = jax.tree_util.tree_map(lambda x: x[0], stacked_base_carries)
 
     def _zeros_like_base(arr):
@@ -2238,8 +2216,6 @@ def _run_dynamic_basepoint_scan_zero_aux(*, run_scan, state_tangents, stacked_ba
 
 
 def _checkpoint_tape_dynamic_basepoint_vjp_scan_runner(*, static, stacked, stacked_base_carries, static_flags):
-    from ._compat import jax
-
     key = (
         id(static),
         bool(static_flags["apply_lforbal"]),
@@ -2334,8 +2310,6 @@ def checkpoint_tape_state_jvp_columns(
         n_columns = int(getattr(initial_tangents, "shape", (0,))[0]) if getattr(initial_tangents, "shape", ()) else 0
         _record_replay_jvp_columns_path("identity", n_columns=n_columns)
         return jnp.asarray(initial_tangents)
-
-    from ._compat import jax
 
     tangents = jnp.asarray(initial_tangents)
     if _allow_chunking:
@@ -2553,7 +2527,6 @@ def checkpoint_tape_param_vjp(
     rebuild_preconditioner: bool = True,
 ):
     """Reverse a packed-state cotangent back to boundary parameters."""
-    from ._compat import jax
     from .init_guess import initial_guess_from_boundary
     from .optimization import apply_boundary_params
 
@@ -2595,7 +2568,6 @@ def checkpoint_tape_param_jvp(
     rebuild_preconditioner: bool = True,
 ):
     """Push a parameter tangent forward to the final packed state."""
-    from ._compat import jax
     from .init_guess import initial_guess_from_boundary
     from .optimization import apply_boundary_params
 
