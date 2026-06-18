@@ -715,6 +715,14 @@ def _select_mparity(a_even, a_odd, mask_even: jnp.ndarray):
     return jnp.where(mask, a_even, a_odd)
 
 
+def _slice_theta2(a, nt2: int):
+    return jnp.asarray(a)[:, : int(nt2), :]
+
+
+def _optional_theta2(a, like, nt2: int):
+    return jnp.zeros_like(like) if a is None else _slice_theta2(a, nt2)
+
+
 def tomnsps_masks(
     *,
     ns: int,
@@ -844,44 +852,26 @@ def tomnsps_rzl(
 
     # Restrict theta integration to VMEC's ntheta2 (u in [0,pi]).
     nt2 = int(trig.ntheta2)
-    armn_even = armn_even[:, :nt2, :]
-    armn_odd = armn_odd[:, :nt2, :]
-    brmn_even = jnp.asarray(brmn_even)[:, :nt2, :]
-    brmn_odd = jnp.asarray(brmn_odd)[:, :nt2, :]
-    crmn_even = jnp.asarray(crmn_even)[:, :nt2, :]
-    crmn_odd = jnp.asarray(crmn_odd)[:, :nt2, :]
-    azmn_even = jnp.asarray(azmn_even)[:, :nt2, :]
-    azmn_odd = jnp.asarray(azmn_odd)[:, :nt2, :]
-    bzmn_even = jnp.asarray(bzmn_even)[:, :nt2, :]
-    bzmn_odd = jnp.asarray(bzmn_odd)[:, :nt2, :]
-    czmn_even = jnp.asarray(czmn_even)[:, :nt2, :]
-    czmn_odd = jnp.asarray(czmn_odd)[:, :nt2, :]
-
-    if arcon_even is None:
-        arcon_even = jnp.zeros_like(armn_even)
-    if arcon_odd is None:
-        arcon_odd = jnp.zeros_like(armn_odd)
-    if azcon_even is None:
-        azcon_even = jnp.zeros_like(armn_even)
-    if azcon_odd is None:
-        azcon_odd = jnp.zeros_like(armn_odd)
-
-    if blmn_even is None:
-        blmn_even = jnp.zeros_like(armn_even)
-    if blmn_odd is None:
-        blmn_odd = jnp.zeros_like(armn_odd)
-    if clmn_even is None:
-        clmn_even = jnp.zeros_like(armn_even)
-    if clmn_odd is None:
-        clmn_odd = jnp.zeros_like(armn_odd)
-    blmn_even = jnp.asarray(blmn_even)[:, :nt2, :]
-    blmn_odd = jnp.asarray(blmn_odd)[:, :nt2, :]
-    clmn_even = jnp.asarray(clmn_even)[:, :nt2, :]
-    clmn_odd = jnp.asarray(clmn_odd)[:, :nt2, :]
-    arcon_even = jnp.asarray(arcon_even)[:, :nt2, :]
-    arcon_odd = jnp.asarray(arcon_odd)[:, :nt2, :]
-    azcon_even = jnp.asarray(azcon_even)[:, :nt2, :]
-    azcon_odd = jnp.asarray(azcon_odd)[:, :nt2, :]
+    armn_even = _slice_theta2(armn_even, nt2)
+    armn_odd = _slice_theta2(armn_odd, nt2)
+    brmn_even = _slice_theta2(brmn_even, nt2)
+    brmn_odd = _slice_theta2(brmn_odd, nt2)
+    crmn_even = _slice_theta2(crmn_even, nt2)
+    crmn_odd = _slice_theta2(crmn_odd, nt2)
+    azmn_even = _slice_theta2(azmn_even, nt2)
+    azmn_odd = _slice_theta2(azmn_odd, nt2)
+    bzmn_even = _slice_theta2(bzmn_even, nt2)
+    bzmn_odd = _slice_theta2(bzmn_odd, nt2)
+    czmn_even = _slice_theta2(czmn_even, nt2)
+    czmn_odd = _slice_theta2(czmn_odd, nt2)
+    arcon_even = _optional_theta2(arcon_even, armn_even, nt2)
+    arcon_odd = _optional_theta2(arcon_odd, armn_odd, nt2)
+    azcon_even = _optional_theta2(azcon_even, armn_even, nt2)
+    azcon_odd = _optional_theta2(azcon_odd, armn_odd, nt2)
+    blmn_even = _optional_theta2(blmn_even, armn_even, nt2)
+    blmn_odd = _optional_theta2(blmn_odd, armn_odd, nt2)
+    clmn_even = _optional_theta2(clmn_even, armn_even, nt2)
+    clmn_odd = _optional_theta2(clmn_odd, armn_odd, nt2)
 
     # Tables for m=0..mpol-1 and n=0..ntor.
     cosmui = getattr(trig, "cosmui_nt2", None)
