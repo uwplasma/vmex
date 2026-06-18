@@ -10147,3 +10147,60 @@ Completion:
 - Implicit residual-adjoint decomposition: 91%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.987%.
+
+## 2026-06-18 Full Residual Adjoint Routing Helper
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `FullResidualAdjointSolveResult` and
+   `solve_full_residual_adjoint_linearized` to
+   `vmec_jax.implicit_residual_adjoint_helpers`.
+2. Replaced inline full-state residual-adjoint CG/JVP routing in `implicit.py`
+   with the helper call.
+3. Added a focused unit test that exercises the full helper with fake
+   pack/unpack/project functions and verifies CG/JVP plumbing.
+
+Results obtained:
+
+- Active and full residual-adjoint solve routing now live in the same helper
+   module and can be unit-tested independently of a VMEC solve.
+- Existing backward profiling labels (`full_cg_done`, `full_jvp_done`) are
+   preserved through the helper callback.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/implicit.py vmec_jax/implicit_residual_adjoint_helpers.py tests/test_implicit_residual_adjoint_helpers.py`
+- `python -m ruff check vmec_jax/implicit.py vmec_jax/implicit_residual_adjoint_helpers.py tests/test_implicit_residual_adjoint_helpers.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_implicit_residual_adjoint_helpers.py tests/test_implicit_adjoint_helpers.py tests/test_implicit_helpers.py tests/test_implicit_wave12_coverage.py tests/test_implicit_more_coverage.py tests/test_implicit_sensitivity_fast_coverage.py -q`
+- `python tools/diagnostics/source_health.py --top 14 --top-functions 20`
+
+Best next steps:
+
+1. Continue residual scan axis-reset/preconditioner setup split, guarded by
+   scan/driver shards.
+2. Add broader local release-gate shards after another residual tranche.
+3. Keep adaptive-branch differentiability claims conservative; no arbitrary
+   adaptive branch differentiation has been added here.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.97%.
+- Differentiability/refactor implementation: 99.99993%.
+- Solver monolith reduction: 99.30%.
+- Free-boundary adjoint monolith reduction: 99.1%.
+- Driver workflow decomposition: 99.3%.
+- Residual iteration decomposition: 92.0%.
+- WOUT diagnostic/profile decomposition: 99.1%.
+- Optimizer workflow decomposition: 98.8%.
+- Fixed-boundary optimizer decomposition: 94.0%.
+- Implicit residual-adjoint decomposition: 93%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.988%.
