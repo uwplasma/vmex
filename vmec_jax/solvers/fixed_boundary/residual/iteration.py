@@ -1603,11 +1603,9 @@ def solve_fixed_boundary_residual_iter(
         scan_timing_stats = scan_runtime.timing_stats
         scan_total_start = scan_runtime.total_start
         scan_device_runtime = scan_runtime.device_runtime
-        scan_setup = scan_runtime.setup
         scan_differentiated = scan_runtime.scan_differentiated
         state_only_scan = scan_runtime.state_only_scan
         scan_fallback_enabled_run = scan_runtime.scan_fallback_enabled_run
-        force_chunked_scan_run = scan_runtime.force_chunked_scan_run
         controller_constants = scan_runtime.controller_constants
         k_preconditioner_update_interval = controller_constants.preconditioner_update_interval
         restart_badjac_factor = controller_constants.restart_badjac_factor
@@ -1632,15 +1630,11 @@ def solve_fixed_boundary_residual_iter(
         # selected at Python level (Python loop), so this overhead is avoided.
         # Default: use restart payload on CPU only; skip it on GPU/TPU.
         scan_use_restart_payload = scan_options.scan_use_restart_payload
-        scan_hooks = scan_runtime.hooks
         dump_timecontrol_scan = scan_runtime.dump_timecontrol_scan
-        scan_timecontrol_callback = scan_runtime.timecontrol_callback
-        _timecontrol_path = scan_runtime.timecontrol_path
-        _io_callback = scan_runtime.io_callback
         chunked_print = scan_runtime.chunked_print
         print_in_scan = scan_runtime.print_in_scan
         scan_print_mode = scan_runtime.scan_print_mode
-        scan_trace = scan_runtime.scan_trace
+
         def _maybe_trace(label: str):
             return scan_runtime.maybe_trace(label)
 
@@ -1649,7 +1643,6 @@ def solve_fixed_boundary_residual_iter(
         scan_print_context = scan_runtime.print_context
         dtype = scan_runtime.dtype
         scan_timecontrol_dumper = scan_runtime.timecontrol_dumper
-        time_step0 = scan_runtime.time_step0
         flip_sign0 = scan_runtime.flip_sign0
         scan_converged = scan_runtime.converged
         k_ndamp = controller_constants.ndamp
@@ -2221,7 +2214,7 @@ def solve_fixed_boundary_residual_iter(
                     scan_print_mode=scan_print_mode,
                     scan_print_ordered=bool(scan_print_ordered),
                     jax_debug=scan_runtime.jax_debug,
-                    io_callback=_io_callback,
+                    io_callback=scan_runtime.io_callback,
                     cond=jax.lax.cond,
                     print_row=_print_scan_vmec2000_row,
                 )

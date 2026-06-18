@@ -14981,3 +14981,78 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.99988%.
+
+## 2026-06-18 Residual Scan Runtime Unpacking Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Removed unused VMEC2000 scan-runtime unpacking for setup, hook,
+   time-control, trace, and time-step fields that were assigned but never
+   consumed.
+2. Replaced the one-use `_io_callback` alias with the explicit
+   `scan_runtime.io_callback` call-site, keeping the runtime plan object as the
+   source of truth for scan callback plumbing.
+3. Re-ran the scan/runtime alias audit to confirm no dead scan-runtime aliases
+   remain in the setup block.
+
+Results obtained:
+
+- `vmec_jax/solvers/fixed_boundary/residual/iteration.py` dropped from 6677 to
+  6670 lines.
+- `solve_fixed_boundary_residual_iter` dropped from 6145 to 6138 lines.
+- `_run_vmec2000_scan` dropped from 964 to 957 lines.
+- No numerical update formulas, branch decisions, force kernels, or scan
+  acceptance logic were changed.
+- No generated outputs or large files were added.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_api.py::test_dynamic_scan_probe_settings_cpu tests/test_driver_api.py::test_vmec2000_iter_histories_materialize_numeric_arrays tests/test_solve_residual_iter_setup_helpers.py -q`
+  - Result: passed.
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_performance_instrumentation.py::test_residual_iter_attempts_host_default_flux_profile_setup tests/test_solve_performance_instrumentation.py::test_residual_iter_forced_host_profile_setup_matches_default tests/test_solve_wave7_coverage.py::test_wout_like_profile_setup_uses_real_input_profiles -q`
+  - Result: passed.
+- `python tools/diagnostics/source_health.py --top 16 --top-functions 30`
+
+Best next steps:
+
+1. Continue residual-iteration decomposition only where the seam is clearly
+   non-numerical and net-negative.
+2. Separately inspect WOUT synthesis and optimizer internals for larger
+   simplification tranches; do not mix those with scan cleanup without their
+   own focused parity tests.
+3. Keep deferring full CI polling until a larger tranche is ready, per the
+   project workflow.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999998%.
+- Solver monolith reduction: 99.60%.
+- Free-boundary adjoint monolith reduction: 99.40%.
+- Driver workflow decomposition: 99.89%.
+- Residual iteration decomposition: 97.4%.
+- WOUT diagnostic/profile decomposition: 99.88%.
+- Bcovar/WOUT parity decomposition: 99.09%.
+- Force-kernel decomposition: 99.65%.
+- Scan/performance policy consolidation: 99.6%.
+- Tomnsps transform decomposition: 98.4%.
+- Initial-guess decomposition: 99.0%.
+- Optimizer workflow decomposition: 99.30%.
+- Fixed-boundary optimizer decomposition: 95.2%.
+- Plotting/WOUT visualization decomposition: 95.4%.
+- Sweep/example workflow decomposition: 93.2%.
+- Implicit residual-adjoint decomposition: 95%.
+- QI objective/staged-runner decomposition: 96.8%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.99989%.
