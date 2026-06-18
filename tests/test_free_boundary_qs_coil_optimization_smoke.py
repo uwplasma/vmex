@@ -2566,7 +2566,22 @@ def test_derivative_proposal_summary_marks_report_stale_when_trial_is_accepted(t
             json.dumps(
                 {
                     "direction_x": [1.0, 0.0],
+                    "current_only_coil_geometry_cache": {"available": True, "reason": ""},
                     "branch_compatibility": {"same_branch": True},
+                    "branch_local_vector_gate": {
+                        "available": True,
+                        "passed": True,
+                        "physical_scalar_gate": {"passed": True},
+                    },
+                    "accepted_rejected_controller_slot_gate": {
+                        "requested": True,
+                        "available": True,
+                        "passed": True,
+                        "scope": "fixed accepted/rejected controller-slot replay",
+                        "same_stacked_step_policy_branch": True,
+                        "fixed_rejected_controller_slots": 1,
+                        "controller_slot_summary": {"accepted_slots": 2, "rejected_slots": 1},
+                    },
                     "branch_local_vector_jacobian": {
                         "available": True,
                         "uses_production_forward": True,
@@ -2575,6 +2590,13 @@ def test_derivative_proposal_summary_marks_report_stale_when_trial_is_accepted(t
                         "differentiates_fixed_accepted_branch": True,
                         "replay_ad_mode": "direct",
                         "derivative_mode": "directional_jvp",
+                        "directional_jvp_fast_path": "current_only",
+                        "directional_uses_fixed_coil_geometry": True,
+                        "replay_option_flags": {
+                            "directional_jvp_fast_path": "current_only",
+                            "directional_uses_fixed_coil_geometry": True,
+                            "current_only_coil_geometry_source": "cached",
+                        },
                         "max_base_abs_delta": 0.0,
                         "scalars": {
                             "qs_total": {"value": 0.25, "exact_directional": 1.0, "base_abs_delta": 0.0},
@@ -2624,6 +2646,19 @@ def test_derivative_proposal_summary_marks_report_stale_when_trial_is_accepted(t
     assert proposal["accepted_by_complete_solve"] is True
     assert proposal["rejected_by_complete_solve"] is False
     assert proposal["acceptance_decision_source"] == "complete_solve_objective"
+    assert proposal["complete_solve_acceptance_authority"] is True
+    assert proposal["differentiates_adaptive_controller"] is False
+    assert proposal["differentiates_run_free_boundary"] is False
+    assert proposal["differentiates_fixed_accepted_branch"] is True
+    gate_evidence = proposal["gate_evidence"]
+    assert gate_evidence["directional_jvp_fast_path"] == "current_only"
+    assert gate_evidence["directional_uses_fixed_coil_geometry"] is True
+    assert gate_evidence["current_only_coil_geometry_cache_available"] is True
+    assert gate_evidence["current_only_coil_geometry_source"] == "cached"
+    assert gate_evidence["accepted_rejected_controller_slot_gate_requested"] is True
+    assert gate_evidence["accepted_rejected_controller_slot_gate_passed"] is True
+    assert gate_evidence["fixed_rejected_controller_slots"] == 1
+    assert gate_evidence["controller_slot_summary"] == {"accepted_slots": 2, "rejected_slots": 1}
     assert proposal["best_eval_before_trial"] == 0
     assert proposal["best_eval_after_trial"] == 1
     assert proposal["trial_objective"] < proposal["previous_best_objective"]
@@ -2632,6 +2667,7 @@ def test_derivative_proposal_summary_marks_report_stale_when_trial_is_accepted(t
     assert report_status["report_generated_before_derivative_proposal"] is True
     assert report_status["final_best_changed_after_report"] is True
     assert report_status["report_matches_final_best"] is False
+    assert report_status["accepted_proposal_index"] == 0
 
 
 def test_derivative_proposal_summary_records_rejected_trial_as_complete_solve_rejection(tmp_path, monkeypatch):
@@ -2700,7 +2736,22 @@ def test_derivative_proposal_summary_records_rejected_trial_as_complete_solve_re
             json.dumps(
                 {
                     "direction_x": [1.0, 0.0],
+                    "current_only_coil_geometry_cache": {"available": True, "reason": ""},
                     "branch_compatibility": {"same_branch": True},
+                    "branch_local_vector_gate": {
+                        "available": True,
+                        "passed": True,
+                        "physical_scalar_gate": {"passed": True},
+                    },
+                    "accepted_rejected_controller_slot_gate": {
+                        "requested": True,
+                        "available": True,
+                        "passed": True,
+                        "scope": "fixed accepted/rejected controller-slot replay",
+                        "same_stacked_step_policy_branch": True,
+                        "fixed_rejected_controller_slots": 1,
+                        "controller_slot_summary": {"accepted_slots": 2, "rejected_slots": 1},
+                    },
                     "branch_local_vector_jacobian": {
                         "available": True,
                         "uses_production_forward": True,
@@ -2709,6 +2760,13 @@ def test_derivative_proposal_summary_records_rejected_trial_as_complete_solve_re
                         "differentiates_fixed_accepted_branch": True,
                         "replay_ad_mode": "direct",
                         "derivative_mode": "directional_jvp",
+                        "directional_jvp_fast_path": "current_only",
+                        "directional_uses_fixed_coil_geometry": True,
+                        "replay_option_flags": {
+                            "directional_jvp_fast_path": "current_only",
+                            "directional_uses_fixed_coil_geometry": True,
+                            "current_only_coil_geometry_source": "cached",
+                        },
                         "max_base_abs_delta": 0.0,
                         "scalars": {
                             "qs_total": {"value": 0.25, "exact_directional": 1.0, "base_abs_delta": 0.0},
@@ -2759,6 +2817,19 @@ def test_derivative_proposal_summary_records_rejected_trial_as_complete_solve_re
     assert proposal["accepted_by_complete_solve"] is False
     assert proposal["rejected_by_complete_solve"] is True
     assert proposal["acceptance_decision_source"] == "complete_solve_objective"
+    assert proposal["complete_solve_acceptance_authority"] is True
+    assert proposal["differentiates_adaptive_controller"] is False
+    assert proposal["differentiates_run_free_boundary"] is False
+    assert proposal["differentiates_fixed_accepted_branch"] is True
+    gate_evidence = proposal["gate_evidence"]
+    assert gate_evidence["directional_jvp_fast_path"] == "current_only"
+    assert gate_evidence["directional_uses_fixed_coil_geometry"] is True
+    assert gate_evidence["current_only_coil_geometry_cache_available"] is True
+    assert gate_evidence["current_only_coil_geometry_source"] == "cached"
+    assert gate_evidence["accepted_rejected_controller_slot_gate_requested"] is True
+    assert gate_evidence["accepted_rejected_controller_slot_gate_passed"] is True
+    assert gate_evidence["fixed_rejected_controller_slots"] == 1
+    assert gate_evidence["controller_slot_summary"] == {"accepted_slots": 2, "rejected_slots": 1}
     assert proposal["trial_objective"] > proposal["previous_best_objective"]
     assert proposal["best_eval_before_trial"] == 0
     assert proposal["best_eval_after_trial"] == 0
@@ -2766,6 +2837,8 @@ def test_derivative_proposal_summary_records_rejected_trial_as_complete_solve_re
     assert len(proposals) == 2
     assert [item["step_size"] for item in proposals] == [pytest.approx(0.1), pytest.approx(1.0)]
     assert [item["accepted_by_complete_solve"] for item in proposals] == [False, False]
+    assert all(item["complete_solve_acceptance_authority"] is True for item in proposals)
+    assert all(item["gate_evidence"]["directional_jvp_fast_path"] == "current_only" for item in proposals)
     assert [item["trial_eval"] for item in proposals] == [1, 2]
     assert summary["best"]["eval"] == 0
     report_status = summary["same_branch_complete_solve_report_final_best_status"]
