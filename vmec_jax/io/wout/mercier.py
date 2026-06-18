@@ -124,6 +124,48 @@ def _mercier_radial_stability_terms(
     return DMerc, Dshear, Dcurr, Dwell, Dgeod
 
 
+def _jxbforce_1d_current_diagnostics(
+    *,
+    ns: int,
+    vp: np.ndarray,
+    phips: np.ndarray,
+    sqrtg: np.ndarray,
+    bsq: np.ndarray,
+    pres: np.ndarray,
+    bdotk: np.ndarray,
+    sigma_an: np.ndarray,
+    sign_jac: float,
+    sum_w: Callable[[np.ndarray], float],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return VMEC/JXBFORCE 1D current and field-line diagnostics."""
+
+    jdotb = np.zeros((ns,), dtype=float)
+    bdotb = np.zeros((ns,), dtype=float)
+    bdotgradv = np.zeros((ns,), dtype=float)
+    dnorm1 = float((2.0 * np.pi) ** 2)
+    vp = np.asarray(vp, dtype=float)
+    phips = np.asarray(phips, dtype=float)
+    for js in range(1, ns - 1):
+        denom = vp[js + 1] + vp[js]
+        if denom == 0.0:
+            continue
+        ovp = 2.0 / denom / dnorm1
+        tjnorm = ovp * float(sign_jac)
+        sqgb2 = sqrtg[js + 1] * (bsq[js + 1] - pres[js + 1]) + sqrtg[js] * (bsq[js] - pres[js])
+        sigma = sigma_an[js]
+        jdotb[js] = dnorm1 * tjnorm * sum_w(bdotk[js] / sigma)
+        bdotb[js] = dnorm1 * tjnorm * sum_w(sqgb2 / sigma)
+        bdotgradv[js] = 0.5 * dnorm1 * tjnorm * (phips[js] + phips[js + 1])
+    if ns > 2:
+        jdotb[0] = 2.0 * jdotb[1] - jdotb[2]
+        jdotb[-1] = 2.0 * jdotb[-2] - jdotb[-3]
+        bdotb[0] = 2.0 * bdotb[2] - bdotb[1]
+        bdotb[-1] = 2.0 * bdotb[-2] - bdotb[-3]
+        bdotgradv[0] = 2.0 * bdotgradv[1] - bdotgradv[2]
+        bdotgradv[-1] = 2.0 * bdotgradv[-2] - bdotgradv[-3]
+    return jdotb, bdotb, bdotgradv
+
+
 def compute_mercier(
     *,
     state: VMECState,
@@ -747,31 +789,18 @@ def compute_mercier(
         wint_f=None if exact_sum else np.asarray(wint_f, dtype=float),
     )
 
-    # jxbforce-style 1D diagnostics (jdotb, bdotb, bdotgradv).
-    jdotb = np.zeros((ns,), dtype=float)
-    bdotb = np.zeros((ns,), dtype=float)
-    bdotgradv = np.zeros((ns,), dtype=float)
-    dnorm1 = float((2.0 * np.pi) ** 2)
-    vp = np.asarray(vp, dtype=float)
-    phips = np.asarray(phips, dtype=float)
-    for js in range(1, ns - 1):
-        denom = vp[js + 1] + vp[js]
-        if denom == 0.0:
-            continue
-        ovp = 2.0 / denom / dnorm1
-        tjnorm = ovp * float(sign_jac)
-        sqgb2 = sqrtg[js + 1] * (bsq[js + 1] - pres[js + 1]) + sqrtg[js] * (bsq[js] - pres[js])
-        sigma = sigma_an[js]
-        jdotb[js] = dnorm1 * tjnorm * _sum_w(bdotk[js] / sigma)
-        bdotb[js] = dnorm1 * tjnorm * _sum_w(sqgb2 / sigma)
-        bdotgradv[js] = 0.5 * dnorm1 * tjnorm * (phips[js] + phips[js + 1])
-    if ns > 2:
-        jdotb[0] = 2.0 * jdotb[1] - jdotb[2]
-        jdotb[-1] = 2.0 * jdotb[-2] - jdotb[-3]
-        bdotb[0] = 2.0 * bdotb[2] - bdotb[1]
-        bdotb[-1] = 2.0 * bdotb[-2] - bdotb[-3]
-        bdotgradv[0] = 2.0 * bdotgradv[1] - bdotgradv[2]
-        bdotgradv[-1] = 2.0 * bdotgradv[-2] - bdotgradv[-3]
+    jdotb, bdotb, bdotgradv = _jxbforce_1d_current_diagnostics(
+        ns=int(ns),
+        vp=np.asarray(vp, dtype=float),
+        phips=np.asarray(phips, dtype=float),
+        sqrtg=np.asarray(sqrtg, dtype=float),
+        bsq=np.asarray(bsq, dtype=float),
+        pres=np.asarray(pres, dtype=float),
+        bdotk=np.asarray(bdotk, dtype=float),
+        sigma_an=np.asarray(sigma_an, dtype=float),
+        sign_jac=float(sign_jac),
+        sum_w=_sum_w,
+    )
 
     return (
         np.asarray(DMerc, dtype=float),
