@@ -43,7 +43,7 @@ from vmec_jax.mirror import (
 
 
 CIRCULAR_COIL_BETA_SCAN_SCHEMA = "mirror_free_boundary_circular_coil_beta_scan"
-CIRCULAR_COIL_BETA_SCAN_SCHEMA_VERSION = "0.1"
+CIRCULAR_COIL_BETA_SCAN_SCHEMA_VERSION = "0.2"
 CIRCULAR_COIL_BETA_SCAN_TOP_LEVEL_FIELDS = (
     "metrics_schema",
     "metrics_schema_version",
@@ -66,7 +66,17 @@ CIRCULAR_COIL_BETA_SCAN_TOP_LEVEL_FIELDS = (
     "summary_csv",
     "beta_scan_requested_percent",
     "beta_cases",
+    "fixed_boundary_baseline_count",
     "fixed_boundary_baseline_rows",
+    "lcfs_pilot_requested",
+    "lcfs_pilot_steps_requested",
+    "lcfs_pilot_target_merit",
+    "lcfs_pilot_stagnation_rtol",
+    "lcfs_pilot_fsq_growth_limit",
+    "lcfs_pilot_rows_total",
+    "lcfs_pilot_accepted_rows_total",
+    "lcfs_pilot_skipped_rows_total",
+    "lcfs_pilot_stop_reason_counts",
     "figures",
 )
 CIRCULAR_COIL_BETA_SCAN_ROW_FIELDS = (
@@ -124,6 +134,8 @@ CIRCULAR_COIL_BETA_SCAN_PILOT_ROW_FIELDS = (
     "figures",
 )
 CIRCULAR_COIL_BETA_SCAN_PILOT_STATUSES = ("not_requested", "accepted", "rejected", "skipped")
+CIRCULAR_COIL_BETA_SCAN_WORKFLOW_STATUSES = ("setup_only", "fixed_boundary_baseline", "lcfs_pilot")
+CIRCULAR_COIL_BETA_SCAN_FREE_BOUNDARY_STATUSES = ("not_run", "lcfs_pilot_not_converged_free_boundary")
 CIRCULAR_COIL_BETA_SCAN_STOP_REASONS = (
     "fsq_growth_guard",
     "max_steps",
@@ -171,6 +183,8 @@ def circular_coil_beta_scan_schema() -> dict[str, object]:
         "beta_row_required_fields": list(CIRCULAR_COIL_BETA_SCAN_ROW_FIELDS),
         "pilot_row_required_fields": list(CIRCULAR_COIL_BETA_SCAN_PILOT_ROW_FIELDS),
         "pilot_status_values": list(CIRCULAR_COIL_BETA_SCAN_PILOT_STATUSES),
+        "workflow_status_values": list(CIRCULAR_COIL_BETA_SCAN_WORKFLOW_STATUSES),
+        "free_boundary_status_values": list(CIRCULAR_COIL_BETA_SCAN_FREE_BOUNDARY_STATUSES),
         "pilot_stop_reasons": list(CIRCULAR_COIL_BETA_SCAN_STOP_REASONS),
         "pilot_rejection_reasons": list(CIRCULAR_COIL_BETA_SCAN_REJECTION_REASONS),
         "report_fields": list(CIRCULAR_COIL_BETA_SCAN_REPORT_FIELDS),
@@ -184,7 +198,33 @@ def validate_circular_coil_beta_scan_metrics(metrics: dict[str, object]) -> None
         raise ValueError(f"unexpected metrics schema {metrics['metrics_schema']!r}")
     if metrics["metrics_schema_version"] != CIRCULAR_COIL_BETA_SCAN_SCHEMA_VERSION:
         raise ValueError(f"unexpected metrics schema version {metrics['metrics_schema_version']!r}")
-    for index, row in enumerate(metrics.get("fixed_boundary_baseline_rows", [])):
+    workflow_status = str(metrics["workflow_status"])
+    if workflow_status not in CIRCULAR_COIL_BETA_SCAN_WORKFLOW_STATUSES:
+        raise ValueError(f"unknown workflow_status {workflow_status!r}")
+    free_boundary_status = str(metrics["free_boundary_solve_status"])
+    if free_boundary_status not in CIRCULAR_COIL_BETA_SCAN_FREE_BOUNDARY_STATUSES:
+        raise ValueError(f"unknown free_boundary_solve_status {free_boundary_status!r}")
+    beta_requested = metrics.get("beta_scan_requested_percent", [])
+    beta_cases = metrics.get("beta_cases", [])
+    if len(beta_requested) != len(beta_cases):
+        raise ValueError("beta_scan_requested_percent and beta_cases must have the same length")
+    baseline_rows = metrics.get("fixed_boundary_baseline_rows", [])
+    if int(metrics["fixed_boundary_baseline_count"]) != len(baseline_rows):
+        raise ValueError("fixed_boundary_baseline_count does not match fixed_boundary_baseline_rows")
+
+    pilot_rows = [pilot for row in baseline_rows if isinstance(row, dict) for pilot in row.get("lcfs_pilot_rows", [])]
+    accepted_rows = sum(bool(row.get("accepted", False)) and not bool(row.get("skipped", False)) for row in pilot_rows)
+    skipped_rows = sum(bool(row.get("skipped", False)) for row in pilot_rows)
+    if int(metrics["lcfs_pilot_rows_total"]) != len(pilot_rows):
+        raise ValueError("lcfs_pilot_rows_total does not match nested pilot rows")
+    if int(metrics["lcfs_pilot_accepted_rows_total"]) != int(accepted_rows):
+        raise ValueError("lcfs_pilot_accepted_rows_total does not match nested pilot rows")
+    if int(metrics["lcfs_pilot_skipped_rows_total"]) != int(skipped_rows):
+        raise ValueError("lcfs_pilot_skipped_rows_total does not match nested pilot rows")
+    if metrics["lcfs_pilot_stop_reason_counts"] != _counts_json([str(row.get("stop_reason")) for row in pilot_rows]):
+        raise ValueError("lcfs_pilot_stop_reason_counts does not match nested pilot rows")
+
+    for index, row in enumerate(baseline_rows):
         if not isinstance(row, dict):
             raise ValueError(f"baseline row {index} must be a JSON object")
         _require_fields(row, CIRCULAR_COIL_BETA_SCAN_ROW_FIELDS, f"baseline row {index}")

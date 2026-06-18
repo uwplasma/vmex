@@ -16670,3 +16670,111 @@ Results:
 No user input is needed.
 
 ---
+## 133. Circular-Coil Beta-Scan Schema 0.2 Hardening
+
+### Steps taken
+
+- Bumped the circular-coil beta-scan metrics schema from `0.1` to `0.2`.
+- Added aggregate workflow fields to the required top-level JSON contract:
+  - `fixed_boundary_baseline_count`;
+  - `lcfs_pilot_requested`;
+  - `lcfs_pilot_steps_requested`;
+  - `lcfs_pilot_target_merit`;
+  - `lcfs_pilot_stagnation_rtol`;
+  - `lcfs_pilot_fsq_growth_limit`;
+  - `lcfs_pilot_rows_total`;
+  - `lcfs_pilot_accepted_rows_total`;
+  - `lcfs_pilot_skipped_rows_total`;
+  - `lcfs_pilot_stop_reason_counts`.
+- Added enumerated workflow/free-boundary status values to the schema helper.
+- Hardened `validate_circular_coil_beta_scan_metrics` so it checks:
+  - workflow status is known;
+  - free-boundary status is known;
+  - requested beta list and beta-case list have the same length;
+  - `fixed_boundary_baseline_count` matches the baseline row count;
+  - aggregate pilot row totals match nested pilot rows;
+  - aggregate stop-reason counts match nested pilot rows.
+- Updated `examples/mirror/README.md` to document schema version `0.2`.
+- Extended the circular-coil example test to assert schema `0.2` and verify
+  that count mismatches are rejected.
+
+### Results obtained
+
+- The beta-scan JSON contract now covers the aggregate fields downstream ESSOS
+  comparison scripts need for quick validation.
+- The validator catches mismatches between top-level pilot summaries and nested
+  pilot rows.
+- Existing circular-coil example paths still pass with the stricter validator.
+
+### How it was tested
+
+Commands run:
+
+```bash
+python -m ruff check examples/mirror_free_boundary_circular_coils.py tests/mirror/test_mirror_examples.py
+python -m ruff format --check examples/mirror_free_boundary_circular_coils.py tests/mirror/test_mirror_examples.py
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_example_runs_without_plots -q
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_examples.py -k free_boundary_circular_coils -q
+python -m sphinx -W -b html docs docs/_build/html
+git diff --check
+python - <<'PY'
+import re
+from pathlib import Path
+text = Path("plan_mirror.md").read_text()
+nums = [int(m.group(1)) for m in re.finditer(r"^## (\\d+)\\.", text, flags=re.M)]
+print("milestones", len(nums), "last", nums[-1], "monotonic", nums == sorted(nums))
+PY
+```
+
+Results:
+
+- Ruff lint passed.
+- Ruff format check passed.
+- Main circular-coil example smoke test: `1 passed`.
+- Circular-coil example subset: `5 passed, 12 deselected`.
+- Sphinx docs build passed with warnings treated as errors.
+- Whitespace check passed.
+- Plan milestone numbering remained monotonic.
+
+### File structure and best-practice notes
+
+- The schema remains local to the root example because it describes that
+  example's planning-fixture metrics, not the mirror `mout` format.
+- The stricter validator is still lightweight and avoids JSON-schema
+  dependencies.
+- No generated artifacts are added to git.
+
+### Best next steps
+
+1. Commit and push M133.
+2. Add a compact top-level beta-scan status plot/table field for final trial vs
+   last accepted state if downstream ESSOS reporting needs a single field.
+3. Re-run a higher-budget 1%, 3%, and 10% pilot scan when compute time is
+   available and record the accepted/rejected pilot behavior under schema
+   `0.2`.
+4. Continue toroidal-hybrid refinement only where it adds new evidence beyond
+   the existing VMEC2000 80-row parity run.
+
+### Completion percentages after M133
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `90%`.
+- Fixed-boundary axisymmetric solve: `90%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `89%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `92%`.
+- I/O schema and docs: `99%`.
+- Differentiable solved-state API: `72%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `86%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `88%`.
+- PR merge readiness overall: `95%`.
+
+### User input needed
+
+No user input is needed.
+
+---

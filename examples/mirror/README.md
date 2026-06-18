@@ -158,7 +158,7 @@ before and after pilot updates. This is still an LCFS pilot workflow, not a
 converged free-boundary equilibrium solve.
 
 The circular-coil beta-scan metrics use the compact schema
-``mirror_free_boundary_circular_coil_beta_scan`` version ``0.1``. The top-level
+``mirror_free_boundary_circular_coil_beta_scan`` version ``0.2``. The top-level
 JSON records the workflow status, direct-coil metadata, requested beta list,
 setup JSON path, aggregate pilot counts, figure paths, and
 ``fixed_boundary_baseline_rows``. Each beta row records fixed-boundary residual

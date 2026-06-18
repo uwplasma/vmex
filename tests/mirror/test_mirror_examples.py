@@ -205,6 +205,21 @@ def test_root_free_boundary_circular_coils_example_runs_without_plots(tmp_path):
     assert metrics["lcfs_pilot_stagnation_rtol"] == 0.0
     assert metrics["lcfs_pilot_fsq_growth_limit"] == 0.0
     assert metrics["lcfs_pilot_stop_reason_counts"] == {"max_steps": 3}
+    assert schema["metrics_schema_version"] == "0.2"
+    assert "workflow_status_values" in schema
+    assert "free_boundary_status_values" in schema
+    bad_count = dict(metrics)
+    bad_count["fixed_boundary_baseline_count"] = metrics["fixed_boundary_baseline_count"] + 1
+    with pytest.raises(ValueError, match="fixed_boundary_baseline_count"):
+        module["validate_circular_coil_beta_scan_metrics"](bad_count)
+    bad_pilot_total = dict(metrics)
+    bad_pilot_total["lcfs_pilot_rows_total"] = metrics["lcfs_pilot_rows_total"] + 1
+    with pytest.raises(ValueError, match="lcfs_pilot_rows_total"):
+        module["validate_circular_coil_beta_scan_metrics"](bad_pilot_total)
+    bad_stop_counts = dict(metrics)
+    bad_stop_counts["lcfs_pilot_stop_reason_counts"] = {"max_steps": 2}
+    with pytest.raises(ValueError, match="lcfs_pilot_stop_reason_counts"):
+        module["validate_circular_coil_beta_scan_metrics"](bad_stop_counts)
     assert metrics["axis_bz_relative_linf"] < 1.0e-12
     assert metrics["boundary_bmag_min"] > 0.0
     assert metrics["beta_scan_requested_percent"] == [1.0, 3.0, 10.0]
