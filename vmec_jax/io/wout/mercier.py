@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 
@@ -23,6 +23,105 @@ def _require_dependency(name: str, value):
     if value is None:
         raise TypeError(f"compute_mercier requires dependency {name}")
     return value
+
+
+def _mercier_radial_stability_terms(
+    *,
+    ns: int,
+    hs: float,
+    s: np.ndarray,
+    iotas: np.ndarray,
+    pres: np.ndarray,
+    phip_real: np.ndarray,
+    vp_real: np.ndarray,
+    bsubu: np.ndarray,
+    bsq: np.ndarray,
+    sqrtg: np.ndarray,
+    R_even: np.ndarray,
+    R_odd: np.ndarray,
+    Ru_even: np.ndarray,
+    Ru_odd: np.ndarray,
+    Zu_even: np.ndarray,
+    Zu_odd: np.ndarray,
+    Rv_even: np.ndarray,
+    Rv_odd: np.ndarray,
+    Zv_even: np.ndarray,
+    Zv_odd: np.ndarray,
+    bdotk_merc: np.ndarray,
+    sign_jac: float,
+    exact_sum: bool,
+    sum_w: Callable[[np.ndarray], float],
+    wint_f: np.ndarray | None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Compute VMEC Mercier radial terms without changing formula order."""
+
+    DMerc = np.zeros((ns,), dtype=float)
+    Dshear = np.zeros((ns,), dtype=float)
+    Dcurr = np.zeros((ns,), dtype=float)
+    Dwell = np.zeros((ns,), dtype=float)
+    Dgeod = np.zeros((ns,), dtype=float)
+    shear = np.zeros((ns,), dtype=float)
+    vpp = np.zeros((ns,), dtype=float)
+    presp = np.zeros((ns,), dtype=float)
+    ip = np.zeros((ns,), dtype=float)
+    torcur = np.zeros((ns,), dtype=float)
+    if ns > 1:
+        if exact_sum:
+            for i in range(1, ns):
+                torcur[i] = sign_jac * (2.0 * np.pi) * sum_w(bsubu[i])
+        else:
+            if wint_f is None:
+                raise ValueError("wint_f is required for vectorized Mercier summation")
+            torcur[1:] = sign_jac * (2.0 * np.pi) * np.einsum("sij,ij->s", bsubu[1:], wint_f, optimize=True)
+    if ns > 2:
+        phip_full = 0.5 * (phip_real[2:] + phip_real[1:-1])
+        denom = 1.0 / (hs * phip_full)
+        shear[1:-1] = (iotas[2:] - iotas[1:-1]) * denom
+        vpp[1:-1] = (vp_real[2:] - vp_real[1:-1]) * denom
+        presp[1:-1] = (pres[2:] - pres[1:-1]) * denom
+        ip[1:-1] = (torcur[2:] - torcur[1:-1]) * denom
+
+    b2 = 2.0 * (bsq - pres[:, None, None])
+    for i in range(1, ns - 1):
+        phip_full = 0.5 * (phip_real[i + 1] + phip_real[i])
+        gsqrt_raw = 0.5 * (sqrtg[i] + sqrtg[i + 1])
+        gsqrt_full = gsqrt_raw / phip_full
+        sqs = float(np.sqrt(s[i]))
+        r1f = R_even[i] + sqs * R_odd[i]
+        rtf = Ru_even[i] + sqs * Ru_odd[i]
+        ztf = Zu_even[i] + sqs * Zu_odd[i]
+        rzf = Rv_even[i] + sqs * Rv_odd[i]
+        zzf = Zv_even[i] + sqs * Zv_odd[i]
+        gtt = rtf * rtf + ztf * ztf
+        gpp = (gsqrt_full * gsqrt_full) / (gtt * r1f * r1f + (rtf * zzf - rzf * ztf) ** 2)
+        b2i = 0.5 * (b2[i + 1] + b2[i])
+        ob2 = gsqrt_full / b2i
+        tpp = sum_w(ob2)
+        ob2 = b2i * gsqrt_full * gpp
+        tbb = sum_w(ob2)
+        # VMEC divides bdotj by the raw Jacobian (before phip scaling),
+        # then uses the flux-normalized Jacobian in jdotb.
+        bdotj_norm = np.where(gsqrt_raw != 0.0, bdotk_merc[i] / gsqrt_raw, 0.0)
+        jdotb = bdotj_norm * gpp * gsqrt_full
+        tjb = sum_w(jdotb)
+        jdotb2 = jdotb * bdotj_norm / b2i
+        tjj = sum_w(jdotb2)
+
+        tpp *= (2.0 * np.pi) ** 2
+        tjb *= (2.0 * np.pi) ** 2
+        tbb *= (2.0 * np.pi) ** 2
+        tjj *= (2.0 * np.pi) ** 2
+        dshear = 0.25 * shear[i] * shear[i]
+        dcurr = -shear[i] * (tjb - ip[i] * tbb)
+        dwell = presp[i] * (vpp[i] - presp[i] * tpp) * tbb
+        dgeod = tjb * tjb - tbb * tjj
+        Dshear[i] = dshear
+        Dcurr[i] = dcurr
+        Dwell[i] = dwell
+        Dgeod[i] = dgeod
+        DMerc[i] = dshear + dcurr + dwell + dgeod
+
+    return DMerc, Dshear, Dcurr, Dwell, Dgeod
 
 
 def compute_mercier(
@@ -620,69 +719,33 @@ def compute_mercier(
             wint=np.asarray(wint, dtype=float),
         )
 
-    DMerc = np.zeros((ns,), dtype=float)
-    Dshear = np.zeros((ns,), dtype=float)
-    Dcurr = np.zeros((ns,), dtype=float)
-    Dwell = np.zeros((ns,), dtype=float)
-    Dgeod = np.zeros((ns,), dtype=float)
-    shear = np.zeros((ns,), dtype=float)
-    vpp = np.zeros((ns,), dtype=float)
-    presp = np.zeros((ns,), dtype=float)
-    ip = np.zeros((ns,), dtype=float)
-    torcur = np.zeros((ns,), dtype=float)
-    if ns > 1:
-        if exact_sum:
-            for i in range(1, ns):
-                torcur[i] = sign_jac * (2.0 * np.pi) * _sum_w(bsubu[i])
-        else:
-            torcur[1:] = sign_jac * (2.0 * np.pi) * np.einsum("sij,ij->s", bsubu[1:], wint_f, optimize=True)
-    if ns > 2:
-        phip_full = 0.5 * (phip_real[2:] + phip_real[1:-1])
-        denom = 1.0 / (hs * phip_full)
-        shear[1:-1] = (iotas[2:] - iotas[1:-1]) * denom
-        vpp[1:-1] = (vp_real[2:] - vp_real[1:-1]) * denom
-        presp[1:-1] = (pres[2:] - pres[1:-1]) * denom
-        ip[1:-1] = (torcur[2:] - torcur[1:-1]) * denom
-
-    b2 = 2.0 * (bsq - pres[:, None, None])
-    for i in range(1, ns - 1):
-        phip_full = 0.5 * (phip_real[i + 1] + phip_real[i])
-        gsqrt_raw = 0.5 * (sqrtg[i] + sqrtg[i + 1])
-        gsqrt_full = gsqrt_raw / phip_full
-        sqs = float(np.sqrt(s[i]))
-        r1f = R_even[i] + sqs * R_odd[i]
-        rtf = Ru_even[i] + sqs * Ru_odd[i]
-        ztf = Zu_even[i] + sqs * Zu_odd[i]
-        rzf = Rv_even[i] + sqs * Rv_odd[i]
-        zzf = Zv_even[i] + sqs * Zv_odd[i]
-        gtt = rtf * rtf + ztf * ztf
-        gpp = (gsqrt_full * gsqrt_full) / (gtt * r1f * r1f + (rtf * zzf - rzf * ztf) ** 2)
-        b2i = 0.5 * (b2[i + 1] + b2[i])
-        ob2 = gsqrt_full / b2i
-        tpp = _sum_w(ob2)
-        ob2 = b2i * gsqrt_full * gpp
-        tbb = _sum_w(ob2)
-        # VMEC divides bdotj by the raw Jacobian (before phip scaling),
-        # then uses the flux-normalized Jacobian in jdotb.
-        bdotj_norm = np.where(gsqrt_raw != 0.0, bdotk_merc[i] / gsqrt_raw, 0.0)
-        jdotb = bdotj_norm * gpp * gsqrt_full
-        tjb = _sum_w(jdotb)
-        jdotb2 = jdotb * bdotj_norm / b2i
-        tjj = _sum_w(jdotb2)
-
-        tpp *= (2.0 * np.pi) ** 2
-        tjb *= (2.0 * np.pi) ** 2
-        tbb *= (2.0 * np.pi) ** 2
-        tjj *= (2.0 * np.pi) ** 2
-        dshear = 0.25 * shear[i] * shear[i]
-        dcurr = -shear[i] * (tjb - ip[i] * tbb)
-        dwell = presp[i] * (vpp[i] - presp[i] * tpp) * tbb
-        dgeod = tjb * tjb - tbb * tjj
-        Dshear[i] = dshear
-        Dcurr[i] = dcurr
-        Dwell[i] = dwell
-        Dgeod[i] = dgeod
-        DMerc[i] = dshear + dcurr + dwell + dgeod
+    DMerc, Dshear, Dcurr, Dwell, Dgeod = _mercier_radial_stability_terms(
+        ns=int(ns),
+        hs=float(hs),
+        s=np.asarray(s, dtype=float),
+        iotas=np.asarray(iotas, dtype=float),
+        pres=np.asarray(pres, dtype=float),
+        phip_real=np.asarray(phip_real, dtype=float),
+        vp_real=np.asarray(vp_real, dtype=float),
+        bsubu=np.asarray(bsubu, dtype=float),
+        bsq=np.asarray(bsq, dtype=float),
+        sqrtg=np.asarray(sqrtg, dtype=float),
+        R_even=np.asarray(R_even, dtype=float),
+        R_odd=np.asarray(R_odd, dtype=float),
+        Ru_even=np.asarray(Ru_even, dtype=float),
+        Ru_odd=np.asarray(Ru_odd, dtype=float),
+        Zu_even=np.asarray(Zu_even, dtype=float),
+        Zu_odd=np.asarray(Zu_odd, dtype=float),
+        Rv_even=np.asarray(Rv_even, dtype=float),
+        Rv_odd=np.asarray(Rv_odd, dtype=float),
+        Zv_even=np.asarray(Zv_even, dtype=float),
+        Zv_odd=np.asarray(Zv_odd, dtype=float),
+        bdotk_merc=np.asarray(bdotk_merc, dtype=float),
+        sign_jac=float(sign_jac),
+        exact_sum=bool(exact_sum),
+        sum_w=_sum_w,
+        wint_f=None if exact_sum else np.asarray(wint_f, dtype=float),
+    )
 
     # jxbforce-style 1D diagnostics (jdotb, bdotb, bdotgradv).
     jdotb = np.zeros((ns,), dtype=float)
