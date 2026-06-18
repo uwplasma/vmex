@@ -18,6 +18,8 @@ import numpy as np
 import vmec_jax as vj
 from vmec_jax.namelist import InData
 from vmec_jax.optimization import boundary_param_names, create_x_scale
+from vmec_jax.optimizers.fixed_boundary.workflow_outputs import json_safe as _jsonable
+from vmec_jax.optimizers.fixed_boundary.workflow_outputs import write_json_atomic as _write_json_atomic
 from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, annotate_qi_seed_suitability
 
 QI_ENGINEERING_ASPECT_MAX = 7.0
@@ -167,14 +169,18 @@ def _float_tuple(value: str) -> tuple[float, ...]:
     return tuple(float(part.strip()) for part in text.split(",") if part.strip())
 
 
+def _read_json_file(value, *, label: str):
+    path = Path(value).expanduser()
+    try:
+        return path, json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid {label} JSON file: {path}") from exc
+
+
 def _json_stage_mode_limits(value) -> tuple:
     if value is None:
         return ()
-    path = Path(value).expanduser()
-    try:
-        data = json.loads(path.read_text())
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Invalid stage mode limits JSON file: {path}") from exc
+    _, data = _read_json_file(value, label="stage mode limits")
     if not isinstance(data, list):
         raise ValueError("Stage mode limits JSON must contain a list of ints, tuples, or objects.")
     limits = []
@@ -329,12 +335,23 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
     parser = argparse.ArgumentParser(add_help=True)
     parser.add_argument("--input-file", type=Path)
     parser.add_argument("--output-dir", type=Path)
-    parser.add_argument("--max-mode", type=int)
-    parser.add_argument("--min-vmec-mode", type=int)
-    parser.add_argument("--vmec-mpol", type=int)
-    parser.add_argument("--vmec-ntor", type=int)
-    parser.add_argument("--max-nfev", type=int)
-    parser.add_argument("--continuation-nfev", type=int)
+    for name in (
+        "max-mode", "min-vmec-mode", "vmec-mpol", "vmec-ntor", "max-nfev",
+        "continuation-nfev", "inner-max-iter", "trial-max-iter",
+        "stage-repeats", "scipy-lsmr-maxiter", "qi-mboz", "qi-nboz",
+        "qi-nphi", "qi-nalpha", "qi-n-bounce", "audit-qi-mboz",
+        "audit-qi-nboz", "audit-qi-nphi", "audit-qi-nalpha",
+        "audit-qi-n-bounce",
+    ):
+        parser.add_argument(f"--{name}", type=int)
+    for name in (
+        "ftol", "gtol", "xtol", "inner-ftol", "trial-ftol", "ess-alpha",
+        "target-aspect", "target-abs-iota-min", "max-mirror-ratio",
+        "max-elongation", "mirror-weight", "elongation-weight",
+        "qi-gate-smooth-max", "qi-gate-legacy-max", "qi-ceiling-max",
+        "qi-ceiling-smooth-penalty",
+    ):
+        parser.add_argument(f"--{name}", type=float)
     parser.add_argument(
         "--method",
         choices=(
@@ -347,15 +364,7 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
             "scalar_trust",
         ),
     )
-    parser.add_argument("--ftol", type=float)
-    parser.add_argument("--gtol", type=float)
-    parser.add_argument("--xtol", type=float)
-    parser.add_argument("--inner-max-iter", type=int)
-    parser.add_argument("--inner-ftol", type=float)
-    parser.add_argument("--trial-max-iter", type=int)
-    parser.add_argument("--trial-ftol", type=float)
     parser.add_argument("--solver-device", choices=("cpu", "gpu", "none", "default"))
-    parser.add_argument("--ess-alpha", type=float)
     parser.add_argument("--use-ess", action=argparse.BooleanOptionalAction)
     parser.add_argument("--use-mode-continuation", action=argparse.BooleanOptionalAction)
     parser.add_argument("--use-simple-seed", action=argparse.BooleanOptionalAction)
@@ -364,34 +373,12 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
     parser.add_argument("--reference-input", type=Path)
     parser.add_argument("--reference-lambdas", type=_float_tuple)
     parser.add_argument("--accept-boundary-reference-baseline", action=argparse.BooleanOptionalAction)
-    parser.add_argument("--stage-repeats", type=int)
     parser.add_argument("--stage-mode-policy", choices=("lower", "lower-repeat", "repeat"))
     parser.add_argument("--stage-mode-limits-json", type=Path)
-    parser.add_argument("--scipy-lsmr-maxiter", type=int)
     parser.add_argument("--scalar-cost-only-trials", action=argparse.BooleanOptionalAction)
     parser.add_argument("--make-plots", action=argparse.BooleanOptionalAction)
     parser.add_argument("--jit-booz", action=argparse.BooleanOptionalAction)
-    parser.add_argument("--qi-mboz", type=int)
-    parser.add_argument("--qi-nboz", type=int)
-    parser.add_argument("--qi-nphi", type=int)
-    parser.add_argument("--qi-nalpha", type=int)
-    parser.add_argument("--qi-n-bounce", type=int)
-    parser.add_argument("--target-aspect", type=float)
-    parser.add_argument("--target-abs-iota-min", type=float)
-    parser.add_argument("--max-mirror-ratio", type=float)
-    parser.add_argument("--max-elongation", type=float)
     parser.add_argument("--mirror-surface-index")
-    parser.add_argument("--mirror-weight", type=float)
-    parser.add_argument("--elongation-weight", type=float)
-    parser.add_argument("--qi-gate-smooth-max", type=float)
-    parser.add_argument("--qi-gate-legacy-max", type=float)
-    parser.add_argument("--qi-ceiling-max", type=float)
-    parser.add_argument("--qi-ceiling-smooth-penalty", type=float)
-    parser.add_argument("--audit-qi-mboz", type=int)
-    parser.add_argument("--audit-qi-nboz", type=int)
-    parser.add_argument("--audit-qi-nphi", type=int)
-    parser.add_argument("--audit-qi-nalpha", type=int)
-    parser.add_argument("--audit-qi-n-bounce", type=int)
     parser.add_argument("--boundary-reference-json", type=Path)
     parser.add_argument("--mirror-ramp-stages-json", type=Path)
     args, _unknown = parser.parse_known_args(argv)
@@ -490,11 +477,7 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
                 audit_resolution[key] = int(value)
         namespace["AUDIT_QI_RESOLUTION"] = audit_resolution
     if args.boundary_reference_json is not None:
-        reference_path = args.boundary_reference_json.expanduser()
-        try:
-            reference_overrides = json.loads(reference_path.read_text())
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"Invalid --boundary-reference-json file: {reference_path}") from exc
+        _, reference_overrides = _read_json_file(args.boundary_reference_json, label="--boundary-reference-json")
         if not isinstance(reference_overrides, dict):
             raise ValueError("--boundary-reference-json must contain a JSON object.")
         if reference_overrides.get("reference_input") is not None:
@@ -503,11 +486,7 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
             reference_overrides["lambdas"] = tuple(float(value) for value in reference_overrides["lambdas"])
         namespace["BOUNDARY_REFERENCE_OVERRIDES"] = reference_overrides
     if args.mirror_ramp_stages_json is not None:
-        stages_path = args.mirror_ramp_stages_json.expanduser()
-        try:
-            stages = json.loads(stages_path.read_text())
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"Invalid --mirror-ramp-stages-json file: {stages_path}") from exc
+        _, stages = _read_json_file(args.mirror_ramp_stages_json, label="--mirror-ramp-stages-json")
         if not isinstance(stages, list) or not all(isinstance(stage, dict) for stage in stages):
             raise ValueError("--mirror-ramp-stages-json must contain a JSON list of stage dictionaries.")
         namespace["MIRROR_RAMP_STAGES"] = tuple(stages)
@@ -766,44 +745,10 @@ def run_target_helicity_seed_preconditioner(input_file, output_dir, config, *, c
     return input_out
 
 
-def _jsonable(value):
-    """Convert NumPy/JAX-like values into JSON-serializable containers."""
-
-    if value is None or isinstance(value, (str, bool, int)):
-        return value
-    if isinstance(value, float):
-        return value if np.isfinite(value) else None
-    if isinstance(value, np.generic):
-        return _jsonable(value.item())
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, dict):
-        return {str(key): _jsonable(val) for key, val in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_jsonable(item) for item in value]
-    try:
-        arr = np.asarray(value)
-    except Exception:
-        return str(value)
-    if arr.ndim == 0:
-        return _jsonable(arr.item())
-    return _jsonable(arr.tolist())
-
-
 def jsonable(value):
     """Convert NumPy/JAX-like values into JSON-serializable containers."""
 
     return _jsonable(value)
-
-
-def _write_json_atomic(path, payload) -> None:
-    """Write a JSON artifact via replace so interrupted writes do not corrupt it."""
-
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.tmp")
-    tmp.write_text(json.dumps(_jsonable(payload), indent=2, sort_keys=True) + "\n")
-    tmp.replace(path)
 
 
 def _stage_result_history(stage_result) -> dict:

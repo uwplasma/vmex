@@ -101,9 +101,11 @@ def _scan_chunk_settings(
     need_print: bool,
     lthreed: bool,
     backend_name: str | None = None,
+    chunk_size_env: str | None = None,
     spectral_mode_count: int | None = None,
 ) -> tuple[int, bool]:
-    chunk_size_env = os.getenv("VMEC_JAX_SCAN_CHUNK_SIZE", "").strip()
+    chunk_size_env = os.getenv("VMEC_JAX_SCAN_CHUNK_SIZE", "") if chunk_size_env is None else chunk_size_env
+    chunk_size_env = str(chunk_size_env).strip()
     backend = _scan_backend_name() if backend_name is None else str(backend_name).strip().lower()
     long_quiet_accelerator = (
         backend not in ("", "cpu")
