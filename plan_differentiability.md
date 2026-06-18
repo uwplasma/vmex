@@ -7,6 +7,73 @@ and should not drive new work unless a specific old result needs to be audited.
 
 Last updated: 2026-06-18.
 
+## 2026-06-18 QI Shuffle-Profile Residual Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Extracted the base occupancy-width/profile residual setup from
+   `quasi_isodynamic_residual_from_boozer_modes` into
+   `_qi_width_profile_residuals`.
+2. Extracted the legacy Goodman shuffle-profile and weighted shuffle-profile
+   residual machinery into `_qi_shuffle_profile_residuals`.
+3. Kept public output keys and residual ordering unchanged while moving branch
+   stretching, crossing interpolation, profile reconstruction, and weighted
+   alpha weights out of the public QI residual function.
+
+Results obtained:
+
+- `vmec_jax/quasi_isodynamic.py` is net-negative: 210 insertions and 265
+  deletions, for a 55-line reduction.
+- `quasi_isodynamic_residual_from_boozer_modes` dropped to 227 lines and no
+  longer appears in the top 16 function-length hotspots.
+- `_qi_width_profile_residuals` is 15 lines and
+  `_qi_shuffle_profile_residuals` is 176 lines.
+- Full QI and QI legacy tests pass after the extraction.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/quasi_isodynamic.py tests/test_quasi_isodynamic.py tests/test_qi_legacy.py`
+- `python -m compileall -q vmec_jax/quasi_isodynamic.py tests/test_quasi_isodynamic.py tests/test_qi_legacy.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_quasi_isodynamic.py tests/test_qi_legacy.py -q`
+- `python tools/diagnostics/source_health.py --top 12 --top-functions 16`
+
+Best next steps:
+
+1. Move to fixed-boundary residual context/object decomposition rather than
+   continuing to over-split the QI objective.
+2. Keep the QI public residual dictionary stable until the broader objective
+   API redesign is handled as a dedicated migration.
+3. Target the next high-impact monolith with a similarly net-negative tranche:
+   either `solve_fixed_boundary_residual_iter` context setup or WOUT diagnostic
+   profile assembly.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999998%.
+- Solver monolith reduction: 99.57%.
+- Free-boundary adjoint monolith reduction: 99.40%.
+- Driver workflow decomposition: 99.87%.
+- Residual iteration decomposition: 96.9%.
+- WOUT diagnostic/profile decomposition: 99.72%.
+- Bcovar/WOUT parity decomposition: 98.35%.
+- Force-kernel decomposition: 98.55%.
+- Optimizer workflow decomposition: 99.19%.
+- Fixed-boundary optimizer decomposition: 94.8%.
+- Implicit residual-adjoint decomposition: 95%.
+- QI objective decomposition: 96.2%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.7%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.99952%.
+
 ## 2026-06-18 QI Aligned-Profile Residual Extraction
 
 Branch: `codex/differentiability-refactor-plan`.

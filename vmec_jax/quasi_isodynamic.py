@@ -250,6 +250,23 @@ def _qi_branch_width_residuals(grid: _QIBoozerSurfaceGrid, *, branch_width_weigh
             "branch_widths_mean": branch_widths_mean}
 
 
+def _qi_width_profile_residuals(grid: _QIBoozerSurfaceGrid, *, width_weight: float, profile_weight: float):
+    occupancy = jax_sigmoid((grid.levels[None, None, None, :] - grid.bnorm[:, :, :, None]) / grid.eps)
+    widths = jnp.mean(occupancy, axis=1)
+    widths_mean = jnp.mean(widths, axis=1, keepdims=True)
+    width_residuals3d = ((widths - widths_mean) * jnp.sqrt(grid.weights_arr)[:, None, None]
+                         * jnp.asarray(float(width_weight), dtype=grid.dtype))
+    width_residuals1d = jnp.ravel(width_residuals3d) / jnp.sqrt(jnp.asarray(grid.nalpha * grid.level_count,
+                                                                            dtype=grid.dtype))
+    profile_mean = jnp.mean(grid.bnorm, axis=2, keepdims=True)
+    profile_residuals3d = ((grid.bnorm - profile_mean) * jnp.sqrt(grid.weights_arr)[:, None, None]
+                           * jnp.asarray(float(profile_weight), dtype=grid.dtype))
+    profile_residuals1d = jnp.ravel(profile_residuals3d) / jnp.sqrt(jnp.asarray(grid.nalpha * grid.nphi,
+                                                                                dtype=grid.dtype))
+    return (width_residuals1d, width_residuals3d, widths, widths_mean,
+            profile_residuals1d, profile_residuals3d, profile_mean)
+
+
 def _qi_aligned_profile_residuals(grid: _QIBoozerSurfaceGrid, *, aligned_profile_weight: float,
                                   aligned_profile_softness: float, aligned_profile_trap_level: float,
                                   aligned_profile_trap_softness: float):
@@ -287,6 +304,184 @@ def _qi_aligned_profile_residuals(grid: _QIBoozerSurfaceGrid, *, aligned_profile
     residuals1d = jnp.ravel(residuals3d) / jnp.sqrt(jnp.asarray(grid.nalpha * nperiodic, dtype=dtype))
     return {"residuals1d": residuals1d, "residuals3d": residuals3d, "profile": aligned_profile,
             "profile_mean": aligned_profile_mean, "trap_weight": trap_weight, "min_phi": aligned_min_phi}
+
+
+def _qi_shuffle_profile_residuals(grid: _QIBoozerSurfaceGrid, *, n_bounce: int, include_bounce_endpoints: bool,
+                                  shuffle_profile_weight: float, shuffle_profile_softness: float,
+                                  shuffle_profile_nphi_out: int | None,
+                                  weighted_shuffle_profile_weight: float,
+                                  weighted_shuffle_profile_softness: float):
+    nsurf, nphi, nalpha, dtype = grid.nsurf, grid.nphi, grid.nalpha, grid.dtype
+    shuffle_profile_residuals1d = jnp.zeros((0,), dtype=dtype)
+    shuffle_profile_residuals3d = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
+    shuffle_profile = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
+    weighted_shuffle_profile_residuals1d = jnp.zeros((0,), dtype=dtype)
+    weighted_shuffle_profile_residuals3d = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
+    weighted_shuffle_profile = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
+    weighted_shuffle_alpha_weights = jnp.zeros((nsurf, nalpha), dtype=dtype)
+    shuffle_branch_widths = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
+    shuffle_branch_widths_mean = jnp.zeros((nsurf, 1, 0), dtype=dtype)
+    weighted_shuffle_branch_widths_mean = jnp.zeros((nsurf, 1, 0), dtype=dtype)
+    if float(shuffle_profile_weight) == 0.0 and float(weighted_shuffle_profile_weight) == 0.0:
+        return (shuffle_profile_residuals1d, shuffle_profile_residuals3d, shuffle_profile,
+                weighted_shuffle_profile_residuals1d, weighted_shuffle_profile_residuals3d,
+                weighted_shuffle_profile, weighted_shuffle_alpha_weights, shuffle_branch_widths,
+                shuffle_branch_widths_mean, weighted_shuffle_branch_widths_mean)
+
+    b_by_alpha = jnp.swapaxes(grid.bnorm, 1, 2)  # (nsurf, nalpha, nphi)
+    offsets = jnp.arange(nphi, dtype=jnp.int32)
+    offsets_float = jnp.asarray(offsets, dtype=dtype)
+    dphi = (grid.phi1 - grid.phi0) / jnp.asarray(max(nphi - 1, 1), dtype=dtype)
+    period = grid.phi1 - grid.phi0
+    min_index = jnp.argmin(b_by_alpha, axis=-1)
+
+    left_index_raw = min_index[:, :, None] - offsets[None, None, :]
+    right_index_raw = min_index[:, :, None] + offsets[None, None, :]
+    left_valid = left_index_raw >= 0
+    right_valid = right_index_raw < nphi
+    left_index = jnp.clip(left_index_raw, 0, nphi - 1)
+    right_index = jnp.clip(right_index_raw, 0, nphi - 1)
+    left_raw = jnp.take_along_axis(b_by_alpha, left_index, axis=-1)
+    right_raw = jnp.take_along_axis(b_by_alpha, right_index, axis=-1)
+    left_raw = jnp.where(left_valid, left_raw, jnp.asarray(1.0, dtype=dtype))
+    right_raw = jnp.where(right_valid, right_raw, jnp.asarray(1.0, dtype=dtype))
+
+    left_branch = jnp.maximum.accumulate(left_raw, axis=-1)
+    right_branch = jnp.maximum.accumulate(right_raw, axis=-1)
+
+    def _stretch_branches(left, right):
+        pmax = jnp.asarray(50.0, dtype=dtype)
+        pmin = jnp.asarray(15.0, dtype=dtype)
+        denom = jnp.maximum(jnp.asarray(nphi - 1, dtype=dtype), jnp.asarray(1.0, dtype=dtype))
+        x = offsets_float / denom
+        window = ((jnp.cos(2.0 * jnp.pi * x) + 1.0) / 2.0)
+        left_legacy = jnp.flip(left, axis=-1)
+        f_left = jnp.where((x < 0.5)[None, None, :],
+                           (1.0 - left_legacy[..., :1]) * window[None, None, :] ** pmax,
+                           (-left_legacy[..., -1:]) * window[None, None, :] ** pmin)
+        f_right = jnp.where((x < 0.5)[None, None, :],
+                            (-right[..., :1]) * window[None, None, :] ** pmin,
+                            (1.0 - right[..., -1:]) * window[None, None, :] ** pmax)
+        return (jnp.maximum.accumulate(jnp.flip(left_legacy + f_left, axis=-1), axis=-1),
+                jnp.maximum.accumulate(right + f_right, axis=-1))
+
+    if bool(include_bounce_endpoints):
+        shuffle_levels = jnp.linspace(0.0, 1.0, n_bounce, endpoint=True, dtype=dtype)
+    else:
+        shuffle_levels = jnp.linspace(0.0, 1.0, n_bounce + 2, endpoint=True, dtype=dtype)[1:-1]
+    shuffle_eps = jnp.maximum(jnp.asarray(float(shuffle_profile_softness), dtype=dtype),
+                              jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype))
+    trapz_weights = jnp.ones((nphi,), dtype=dtype).at[0].set(0.5).at[-1].set(0.5)
+
+    def _branch_crossing(branch):
+        occupancy_local = jax_sigmoid((shuffle_levels[None, None, None, :] - branch[:, :, :, None]) / shuffle_eps)
+        return jnp.sum(occupancy_local * trapz_weights[None, None, :, None], axis=2) * dphi
+
+    def _linear_branch_crossing(branch):
+        distance = offsets_float * dphi
+        branch_ramp = jnp.arange(nphi, dtype=dtype) * jnp.asarray(1.0e-14, dtype=dtype)
+
+        def _interp_branch_one(branch_1d):
+            return jnp.interp(shuffle_levels, branch_1d + branch_ramp, distance)
+
+        return jax.vmap(jax.vmap(_interp_branch_one, in_axes=0, out_axes=0), in_axes=0, out_axes=0)(branch)
+
+    left_crossing = _branch_crossing(left_branch)
+    right_crossing = _branch_crossing(right_branch)
+    shuffle_branch_widths = left_crossing + right_crossing
+    shuffle_branch_widths_mean = jnp.mean(shuffle_branch_widths, axis=1, keepdims=True)
+    weighted_left_crossing = left_crossing
+    weighted_right_crossing = right_crossing
+    weighted_shuffle_branch_widths = shuffle_branch_widths
+    if float(weighted_shuffle_profile_weight) != 0.0:
+        weighted_left_branch, weighted_right_branch = _stretch_branches(left_branch, right_branch)
+        weighted_left_crossing = _linear_branch_crossing(weighted_left_branch)
+        weighted_right_crossing = _linear_branch_crossing(weighted_right_branch)
+        weighted_shuffle_branch_widths = weighted_left_crossing + weighted_right_crossing
+        valid_count = jnp.maximum(jnp.sum(left_valid.astype(dtype) + right_valid.astype(dtype), axis=-1),
+                                  jnp.asarray(1.0, dtype=dtype))
+        squash_error = jnp.sum(jnp.where(left_valid, (left_raw - weighted_left_branch) ** 2, 0.0)
+                               + jnp.where(right_valid, (right_raw - weighted_right_branch) ** 2, 0.0),
+                               axis=-1) / valid_count
+        weighted_eps = jnp.maximum(jnp.asarray(float(weighted_shuffle_profile_softness), dtype=dtype) ** 2,
+                                   jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype))
+        inv_error = 1.0 / jnp.maximum(squash_error, weighted_eps)
+        weighted_shuffle_alpha_weights = inv_error / jnp.maximum(
+            jnp.sum(inv_error, axis=1, keepdims=True), jnp.asarray(jnp.finfo(dtype).tiny, dtype=dtype)
+        )
+        weighted_shuffle_branch_widths_mean = jnp.sum(
+            weighted_shuffle_branch_widths * weighted_shuffle_alpha_weights[:, :, None], axis=1, keepdims=True
+        )
+
+    min_phi = grid.phi0 + jnp.asarray(min_index, dtype=dtype) * dphi
+    left_endpoint = jnp.maximum(min_phi - grid.phi0, jnp.asarray(0.0, dtype=dtype))
+    right_endpoint = jnp.maximum(grid.phi1 - min_phi, jnp.asarray(0.0, dtype=dtype))
+    signed_phi = (offsets_float[None, None, :] - jnp.asarray(min_index[:, :, None], dtype=dtype)) * dphi
+    shuffle_eval_count = nphi if shuffle_profile_nphi_out is None else int(shuffle_profile_nphi_out)
+    if shuffle_eval_count == nphi:
+        signed_phi_eval = signed_phi
+        b_eval = b_by_alpha
+    else:
+        phi_eval = jnp.linspace(grid.phi0, grid.phi1, shuffle_eval_count, endpoint=True, dtype=dtype)
+        signed_phi_eval = phi_eval[None, None, :] - min_phi[:, :, None]
+        original_ramp = jnp.arange(nphi, dtype=dtype) * jnp.asarray(1.0e-14, dtype=dtype) * period
+        signed_phi_interp = signed_phi + original_ramp[None, None, :]
+
+        def _interp_original_one(xp, fp, x):
+            return jnp.interp(x, xp, fp)
+
+        b_eval = jax.vmap(
+            jax.vmap(_interp_original_one, in_axes=(0, 0, 0), out_axes=0), in_axes=(0, 0, 0), out_axes=0
+        )(signed_phi_interp, b_by_alpha, signed_phi_eval)
+
+    level_full = jnp.concatenate([jnp.zeros((1,), dtype=dtype), shuffle_levels, jnp.ones((1,), dtype=dtype)])
+    y_target = jnp.concatenate([jnp.flip(level_full, axis=0), level_full[1:]], axis=0)
+
+    def _interp_one(xp, x):
+        return jnp.interp(x, xp, y_target)
+
+    def _profile_from_width_mean(left_cross, right_cross, branch_widths, width_mean, x_eval):
+        delta_width = 0.5 * (branch_widths - width_mean)
+        left_target = jnp.clip(left_cross - delta_width, 0.0, left_endpoint[:, :, None])
+        right_target = jnp.clip(right_cross - delta_width, 0.0, right_endpoint[:, :, None])
+        left_full = jnp.concatenate([jnp.zeros((nsurf, nalpha, 1), dtype=dtype), left_target,
+                                     left_endpoint[:, :, None]], axis=-1)
+        right_full = jnp.concatenate([jnp.zeros((nsurf, nalpha, 1), dtype=dtype), right_target,
+                                      right_endpoint[:, :, None]], axis=-1)
+        left_full = jnp.maximum.accumulate(left_full, axis=-1)
+        right_full = jnp.maximum.accumulate(right_full, axis=-1)
+        x_target = jnp.concatenate([-jnp.flip(left_full, axis=-1), right_full[:, :, 1:]], axis=-1)
+        ramp = jnp.arange(x_target.shape[-1], dtype=dtype) * jnp.asarray(1.0e-14, dtype=dtype) * period
+        x_target = x_target + ramp[None, None, :]
+        return jax.vmap(jax.vmap(_interp_one, in_axes=(0, 0), out_axes=0), in_axes=(0, 0), out_axes=0)(
+            x_target, x_eval
+        )
+
+    if float(shuffle_profile_weight) != 0.0:
+        shuffle_profile = _profile_from_width_mean(
+            left_crossing, right_crossing, shuffle_branch_widths, shuffle_branch_widths_mean, signed_phi_eval
+        )
+        shuffle_profile_residuals3d = ((shuffle_profile - b_eval) * jnp.sqrt(grid.weights_arr)[:, None, None]
+                                       * jnp.asarray(float(shuffle_profile_weight), dtype=dtype))
+        shuffle_profile_residuals1d = jnp.ravel(shuffle_profile_residuals3d) / jnp.sqrt(
+            jnp.asarray(nalpha * shuffle_eval_count, dtype=dtype)
+        )
+    if float(weighted_shuffle_profile_weight) != 0.0:
+        weighted_shuffle_profile = _profile_from_width_mean(
+            weighted_left_crossing, weighted_right_crossing, weighted_shuffle_branch_widths,
+            weighted_shuffle_branch_widths_mean, signed_phi_eval
+        )
+        weighted_shuffle_profile_residuals3d = (
+            (weighted_shuffle_profile - b_eval) * jnp.sqrt(grid.weights_arr)[:, None, None]
+            * jnp.asarray(float(weighted_shuffle_profile_weight), dtype=dtype)
+        )
+        weighted_shuffle_profile_residuals1d = jnp.ravel(weighted_shuffle_profile_residuals3d) / jnp.sqrt(
+            jnp.asarray(nalpha * shuffle_eval_count, dtype=dtype)
+        )
+    return (shuffle_profile_residuals1d, shuffle_profile_residuals3d, shuffle_profile,
+            weighted_shuffle_profile_residuals1d, weighted_shuffle_profile_residuals3d,
+            weighted_shuffle_profile, weighted_shuffle_alpha_weights, shuffle_branch_widths,
+            shuffle_branch_widths_mean, weighted_shuffle_branch_widths_mean)
 
 
 def mirror_ratio_penalty_from_boozer_modes(
@@ -853,32 +1048,14 @@ def quasi_isodynamic_residual_from_boozer_modes(
         phimin=float(phimin),
     )
     iota_b = qi_grid.iota_b
-    nphi = qi_grid.nphi
-    nalpha = qi_grid.nalpha
-    nsurf = qi_grid.nsurf
-    weights_arr = qi_grid.weights_arr
-    dtype = qi_grid.dtype
-    phi0 = qi_grid.phi0
-    phi1 = qi_grid.phi1
     phi = qi_grid.phi
     alpha = qi_grid.alpha
     bmag = qi_grid.bmag
     bnorm = qi_grid.bnorm
     levels = qi_grid.levels
-    level_count = qi_grid.level_count
-    eps = qi_grid.eps
-    occupancy = jax_sigmoid((levels[None, None, None, :] - bnorm[:, :, :, None]) / eps)
-
-    # Mean over the uniformly sampled toroidal interval. This is proportional
-    # to the bounce width used in the branch-based diagnostic.
-    widths = jnp.mean(occupancy, axis=1)
-    widths_mean = jnp.mean(widths, axis=1, keepdims=True)
-    width_residuals3d = (
-        (widths - widths_mean)
-        * jnp.sqrt(weights_arr)[:, None, None]
-        * jnp.asarray(float(width_weight), dtype=dtype)
+    width_residuals1d, width_residuals3d, widths, widths_mean, profile_residuals1d, profile_residuals3d, profile_mean = (
+        _qi_width_profile_residuals(qi_grid, width_weight=width_weight, profile_weight=profile_weight)
     )
-    width_residuals1d = jnp.ravel(width_residuals3d) / jnp.sqrt(jnp.asarray(nalpha * level_count, dtype=dtype))
 
     branch_width = _qi_branch_width_residuals(
         qi_grid,
@@ -888,13 +1065,6 @@ def quasi_isodynamic_residual_from_boozer_modes(
     branch_width_residuals1d, branch_width_residuals3d = branch_width["residuals1d"], branch_width["residuals3d"]
     branch_widths, branch_widths_mean = branch_width["branch_widths"], branch_width["branch_widths_mean"]
 
-    profile_mean = jnp.mean(bnorm, axis=2, keepdims=True)
-    profile_residuals3d = (
-        (bnorm - profile_mean)
-        * jnp.sqrt(weights_arr)[:, None, None]
-        * jnp.asarray(float(profile_weight), dtype=dtype)
-    )
-    profile_residuals1d = jnp.ravel(profile_residuals3d) / jnp.sqrt(jnp.asarray(nalpha * nphi, dtype=dtype))
     aligned = _qi_aligned_profile_residuals(
         qi_grid,
         aligned_profile_weight=aligned_profile_weight,
@@ -906,244 +1076,19 @@ def quasi_isodynamic_residual_from_boozer_modes(
     aligned_profile, aligned_profile_mean = aligned["profile"], aligned["profile_mean"]
     aligned_profile_trap_weight, aligned_min_phi = aligned["trap_weight"], aligned["min_phi"]
 
-    shuffle_profile_residuals1d = jnp.zeros((0,), dtype=dtype)
-    shuffle_profile_residuals3d = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
-    shuffle_profile = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
-    weighted_shuffle_profile_residuals1d = jnp.zeros((0,), dtype=dtype)
-    weighted_shuffle_profile_residuals3d = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
-    weighted_shuffle_profile = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
-    weighted_shuffle_alpha_weights = jnp.zeros((nsurf, nalpha), dtype=dtype)
-    shuffle_branch_widths = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
-    shuffle_branch_widths_mean = jnp.zeros((nsurf, 1, 0), dtype=dtype)
-    weighted_shuffle_branch_widths_mean = jnp.zeros((nsurf, 1, 0), dtype=dtype)
-    if float(shuffle_profile_weight) != 0.0 or float(weighted_shuffle_profile_weight) != 0.0:
-        if jax is None:  # pragma: no cover - guarded by _require_jax()
-            raise ImportError("shuffle-profile QI residual requires JAX")
-        b_by_alpha = jnp.swapaxes(bnorm, 1, 2)  # (nsurf, nalpha, nphi)
-        offsets = jnp.arange(nphi, dtype=jnp.int32)
-        offsets_float = jnp.asarray(offsets, dtype=dtype)
-        dphi = (phi1 - phi0) / jnp.asarray(max(nphi - 1, 1), dtype=dtype)
-        period = phi1 - phi0
-        min_index = jnp.argmin(b_by_alpha, axis=-1)
-
-        left_index_raw = min_index[:, :, None] - offsets[None, None, :]
-        right_index_raw = min_index[:, :, None] + offsets[None, None, :]
-        left_valid = left_index_raw >= 0
-        right_valid = right_index_raw < nphi
-        left_index = jnp.clip(left_index_raw, 0, nphi - 1)
-        right_index = jnp.clip(right_index_raw, 0, nphi - 1)
-        left_raw = jnp.take_along_axis(b_by_alpha, left_index, axis=-1)
-        right_raw = jnp.take_along_axis(b_by_alpha, right_index, axis=-1)
-        left_raw = jnp.where(left_valid, left_raw, jnp.asarray(1.0, dtype=dtype))
-        right_raw = jnp.where(right_valid, right_raw, jnp.asarray(1.0, dtype=dtype))
-
-        left_branch = jnp.maximum.accumulate(left_raw, axis=-1)
-        right_branch = jnp.maximum.accumulate(right_raw, axis=-1)
-
-        def _stretch_branches(left, right):
-            """Apply the legacy Goodman squash/stretch endpoint correction."""
-            pmax = jnp.asarray(50.0, dtype=dtype)
-            pmin = jnp.asarray(15.0, dtype=dtype)
-            denom = jnp.maximum(jnp.asarray(nphi - 1, dtype=dtype), jnp.asarray(1.0, dtype=dtype))
-            x = offsets_float / denom
-            window = ((jnp.cos(2.0 * jnp.pi * x) + 1.0) / 2.0)
-
-            # ``left`` is stored from well minimum outward to the left endpoint.
-            # Reverse it to match the legacy left-endpoint -> minimum formula,
-            # then reverse back so downstream crossing distances stay unchanged.
-            left_legacy = jnp.flip(left, axis=-1)
-            left_half = x < 0.5
-            f_left = jnp.where(
-                left_half[None, None, :],
-                (1.0 - left_legacy[..., :1]) * window[None, None, :] ** pmax,
-                (-left_legacy[..., -1:]) * window[None, None, :] ** pmin,
-            )
-            left_stretched = jnp.flip(left_legacy + f_left, axis=-1)
-
-            right_half = x < 0.5
-            f_right = jnp.where(
-                right_half[None, None, :],
-                (-right[..., :1]) * window[None, None, :] ** pmin,
-                (1.0 - right[..., -1:]) * window[None, None, :] ** pmax,
-            )
-            right_stretched = right + f_right
-            return (
-                jnp.maximum.accumulate(left_stretched, axis=-1),
-                jnp.maximum.accumulate(right_stretched, axis=-1),
-            )
-
-        if bool(include_bounce_endpoints):
-            shuffle_levels = jnp.linspace(0.0, 1.0, n_bounce, endpoint=True, dtype=dtype)
-        else:
-            shuffle_levels = jnp.linspace(0.0, 1.0, n_bounce + 2, endpoint=True, dtype=dtype)[1:-1]
-        shuffle_eps = jnp.maximum(
-            jnp.asarray(float(shuffle_profile_softness), dtype=dtype),
-            jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype),
-        )
-        trapz_weights = jnp.ones((nphi,), dtype=dtype)
-        trapz_weights = trapz_weights.at[0].set(0.5)
-        trapz_weights = trapz_weights.at[-1].set(0.5)
-
-        def _branch_crossing(branch):
-            occupancy_local = jax_sigmoid(
-                (shuffle_levels[None, None, None, :] - branch[:, :, :, None]) / shuffle_eps
-            )
-            return jnp.sum(occupancy_local * trapz_weights[None, None, :, None], axis=2) * dphi
-
-        def _linear_branch_crossing(branch):
-            distance = offsets_float * dphi
-            branch_ramp = jnp.arange(nphi, dtype=dtype) * jnp.asarray(1.0e-14, dtype=dtype)
-
-            def _interp_branch_one(branch_1d):
-                return jnp.interp(shuffle_levels, branch_1d + branch_ramp, distance)
-
-            return jax.vmap(
-                jax.vmap(_interp_branch_one, in_axes=0, out_axes=0),
-                in_axes=0,
-                out_axes=0,
-            )(branch)
-
-        left_crossing = _branch_crossing(left_branch)
-        right_crossing = _branch_crossing(right_branch)
-        shuffle_branch_widths = left_crossing + right_crossing
-        shuffle_branch_widths_mean = jnp.mean(shuffle_branch_widths, axis=1, keepdims=True)
-        weighted_left_crossing = left_crossing
-        weighted_right_crossing = right_crossing
-        weighted_shuffle_branch_widths = shuffle_branch_widths
-        if float(weighted_shuffle_profile_weight) != 0.0:
-            weighted_left_branch, weighted_right_branch = _stretch_branches(left_branch, right_branch)
-            weighted_left_crossing = _linear_branch_crossing(weighted_left_branch)
-            weighted_right_crossing = _linear_branch_crossing(weighted_right_branch)
-            weighted_shuffle_branch_widths = weighted_left_crossing + weighted_right_crossing
-            valid_count = jnp.maximum(
-                jnp.sum(left_valid.astype(dtype) + right_valid.astype(dtype), axis=-1),
-                jnp.asarray(1.0, dtype=dtype),
-            )
-            squash_error = jnp.sum(
-                jnp.where(left_valid, (left_raw - weighted_left_branch) ** 2, 0.0)
-                + jnp.where(right_valid, (right_raw - weighted_right_branch) ** 2, 0.0),
-                axis=-1,
-            ) / valid_count
-            # Legacy qi_functions.py uses the inverse squash/stretch error as
-            # alpha weights.  Keep this differentiable and bounded enough for
-            # trust-region linear algebra by using the shuffle softness as the
-            # regularization scale.
-            weighted_eps = jnp.maximum(
-                jnp.asarray(float(weighted_shuffle_profile_softness), dtype=dtype) ** 2,
-                jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype),
-            )
-            inv_error = 1.0 / jnp.maximum(squash_error, weighted_eps)
-            weighted_shuffle_alpha_weights = inv_error / jnp.maximum(
-                jnp.sum(inv_error, axis=1, keepdims=True),
-                jnp.asarray(jnp.finfo(dtype).tiny, dtype=dtype),
-            )
-            weighted_shuffle_branch_widths_mean = jnp.sum(
-                weighted_shuffle_branch_widths * weighted_shuffle_alpha_weights[:, :, None],
-                axis=1,
-                keepdims=True,
-            )
-
-        min_phi = phi0 + jnp.asarray(min_index, dtype=dtype) * dphi
-        left_endpoint = jnp.maximum(min_phi - phi0, jnp.asarray(0.0, dtype=dtype))
-        right_endpoint = jnp.maximum(phi1 - min_phi, jnp.asarray(0.0, dtype=dtype))
-        signed_phi = (offsets_float[None, None, :] - jnp.asarray(min_index[:, :, None], dtype=dtype)) * dphi
-        shuffle_eval_count = nphi if shuffle_profile_nphi_out is None else int(shuffle_profile_nphi_out)
-        if shuffle_eval_count == nphi:
-            signed_phi_eval = signed_phi
-            b_eval = b_by_alpha
-        else:
-            phi_eval = jnp.linspace(phi0, phi1, shuffle_eval_count, endpoint=True, dtype=dtype)
-            signed_phi_eval = phi_eval[None, None, :] - min_phi[:, :, None]
-            original_ramp = jnp.arange(nphi, dtype=dtype) * jnp.asarray(1.0e-14, dtype=dtype) * period
-            signed_phi_interp = signed_phi + original_ramp[None, None, :]
-
-            def _interp_original_one(xp, fp, x):
-                return jnp.interp(x, xp, fp)
-
-            b_eval = jax.vmap(
-                jax.vmap(_interp_original_one, in_axes=(0, 0, 0), out_axes=0),
-                in_axes=(0, 0, 0),
-                out_axes=0,
-            )(signed_phi_interp, b_by_alpha, signed_phi_eval)
-
-        level_full = jnp.concatenate(
-            [
-                jnp.zeros((1,), dtype=dtype),
-                shuffle_levels,
-                jnp.ones((1,), dtype=dtype),
-            ]
-        )
-        y_target = jnp.concatenate([jnp.flip(level_full, axis=0), level_full[1:]], axis=0)
-
-        def _interp_one(xp, x):
-            return jnp.interp(x, xp, y_target)
-
-        def _profile_from_width_mean(left_cross, right_cross, branch_widths, width_mean, x_eval):
-            delta_width = 0.5 * (branch_widths - width_mean)
-            left_target = jnp.clip(left_cross - delta_width, 0.0, left_endpoint[:, :, None])
-            right_target = jnp.clip(right_cross - delta_width, 0.0, right_endpoint[:, :, None])
-            left_full = jnp.concatenate(
-                [
-                    jnp.zeros((nsurf, nalpha, 1), dtype=dtype),
-                    left_target,
-                    left_endpoint[:, :, None],
-                ],
-                axis=-1,
-            )
-            right_full = jnp.concatenate(
-                [
-                    jnp.zeros((nsurf, nalpha, 1), dtype=dtype),
-                    right_target,
-                    right_endpoint[:, :, None],
-                ],
-                axis=-1,
-            )
-            left_full = jnp.maximum.accumulate(left_full, axis=-1)
-            right_full = jnp.maximum.accumulate(right_full, axis=-1)
-            x_target = jnp.concatenate([-jnp.flip(left_full, axis=-1), right_full[:, :, 1:]], axis=-1)
-            # ``jnp.interp`` requires strictly increasing xp.  The cumulative-
-            # max monotonicity correction can leave repeated crossings in flat
-            # wells, so add a tiny deterministic ramp below the sampling error.
-            ramp = jnp.arange(x_target.shape[-1], dtype=dtype) * jnp.asarray(1.0e-14, dtype=dtype) * period
-            x_target = x_target + ramp[None, None, :]
-            return jax.vmap(
-                jax.vmap(_interp_one, in_axes=(0, 0), out_axes=0),
-                in_axes=(0, 0),
-                out_axes=0,
-            )(x_target, x_eval)
-
-        if float(shuffle_profile_weight) != 0.0:
-            shuffle_profile = _profile_from_width_mean(
-                left_crossing,
-                right_crossing,
-                shuffle_branch_widths,
-                shuffle_branch_widths_mean,
-                signed_phi_eval,
-            )
-            shuffle_profile_residuals3d = (
-                (shuffle_profile - b_eval)
-                * jnp.sqrt(weights_arr)[:, None, None]
-                * jnp.asarray(float(shuffle_profile_weight), dtype=dtype)
-            )
-            shuffle_profile_residuals1d = jnp.ravel(shuffle_profile_residuals3d) / jnp.sqrt(
-                jnp.asarray(nalpha * shuffle_eval_count, dtype=dtype)
-            )
-        if float(weighted_shuffle_profile_weight) != 0.0:
-            weighted_shuffle_profile = _profile_from_width_mean(
-                weighted_left_crossing,
-                weighted_right_crossing,
-                weighted_shuffle_branch_widths,
-                weighted_shuffle_branch_widths_mean,
-                signed_phi_eval,
-            )
-            weighted_shuffle_profile_residuals3d = (
-                (weighted_shuffle_profile - b_eval)
-                * jnp.sqrt(weights_arr)[:, None, None]
-                * jnp.asarray(float(weighted_shuffle_profile_weight), dtype=dtype)
-            )
-            weighted_shuffle_profile_residuals1d = jnp.ravel(weighted_shuffle_profile_residuals3d) / jnp.sqrt(
-                jnp.asarray(nalpha * shuffle_eval_count, dtype=dtype)
-            )
+    (shuffle_profile_residuals1d, shuffle_profile_residuals3d, shuffle_profile,
+     weighted_shuffle_profile_residuals1d, weighted_shuffle_profile_residuals3d,
+     weighted_shuffle_profile, weighted_shuffle_alpha_weights, shuffle_branch_widths,
+     shuffle_branch_widths_mean, weighted_shuffle_branch_widths_mean) = _qi_shuffle_profile_residuals(
+        qi_grid,
+        n_bounce=int(n_bounce),
+        include_bounce_endpoints=bool(include_bounce_endpoints),
+        shuffle_profile_weight=shuffle_profile_weight,
+        shuffle_profile_softness=shuffle_profile_softness,
+        shuffle_profile_nphi_out=shuffle_profile_nphi_out,
+        weighted_shuffle_profile_weight=weighted_shuffle_profile_weight,
+        weighted_shuffle_profile_softness=weighted_shuffle_profile_softness,
+    )
     residuals1d = jnp.concatenate(
         [
             width_residuals1d,
