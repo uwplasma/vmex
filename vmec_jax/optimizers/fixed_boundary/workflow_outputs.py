@@ -401,19 +401,25 @@ def write_json_atomic(path: Path, payload: object) -> None:
 def json_safe(value):
     """Convert common array/scalar containers to JSON-serializable values."""
 
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        return value if np.isfinite(value) else None
     if isinstance(value, Path):
         return str(value)
-    if isinstance(value, np.ndarray):
-        return [json_safe(v) for v in value.tolist()]
-    if isinstance(value, (np.floating, np.integer)):
-        return value.item()
-    if isinstance(value, np.bool_):
-        return bool(value)
+    if isinstance(value, np.generic):
+        return json_safe(value.item())
     if isinstance(value, dict):
         return {str(k): json_safe(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [json_safe(v) for v in value]
-    return value
+    try:
+        arr = np.asarray(value)
+    except Exception:
+        return str(value)
+    if arr.ndim == 0:
+        return json_safe(arr.item())
+    return json_safe(arr.tolist())
 
 
 def slice_boozer_surfaces(booz: dict, surface_index: int) -> dict:

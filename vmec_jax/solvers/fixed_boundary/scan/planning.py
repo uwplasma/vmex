@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any, Mapping, NamedTuple
 
+from .... import _solve_runtime
 from ..residual.config import resolve_nstep_screen
 from ..residual.policy import Vmec2000ScanOptions, vmec2000_scan_options_from_env
 
@@ -380,33 +381,15 @@ def scan_chunk_settings(
     spectral_mode_count: int | None = None,
 ) -> tuple[int, bool]:
     """Resolve scan chunk size without reading process environment."""
-    chunk_size_env = str(chunk_size_env).strip()
-    backend = str(backend_name).strip().lower()
-    long_quiet_accelerator = (
-        backend not in ("", "cpu")
-        and not bool(need_print)
-        and int(max_iter_scan) > 512
+    return _solve_runtime._scan_chunk_settings(
+        max_iter_scan=max_iter_scan,
+        nstep_screen=nstep_screen,
+        need_print=need_print,
+        lthreed=lthreed,
+        backend_name=backend_name,
+        chunk_size_env=chunk_size_env,
+        spectral_mode_count=spectral_mode_count,
     )
-    if chunk_size_env:
-        try:
-            chunk_size = max(1, int(chunk_size_env))
-        except Exception:
-            chunk_size = max(1, int(nstep_screen))
-    elif (backend == "cpu") and (not bool(need_print)):
-        chunk_size = max(1, int(max_iter_scan))
-    elif long_quiet_accelerator:
-        # Fresh-process GPU profiles are dominated by compiling/dispatching one
-        # large scan executable.  A fixed 512-iteration chunk keeps the compiled
-        # body smaller and reusable inside the solve.  The 2026-05-30 office
-        # RTX A4000 sweep showed this is neutral for the low-mode QH warm-start
-        # case and much faster for the finite-beta high-mode case.
-        chunk_size = min(max(1, int(max_iter_scan)), 512)
-    elif (backend != "cpu") and (not bool(need_print)):
-        chunk_size = max(1, int(max_iter_scan))
-    else:
-        chunk_size = max(1, int(nstep_screen))
-    cap_to_remaining = (not bool(need_print)) and (not long_quiet_accelerator)
-    return chunk_size, cap_to_remaining
 
 
 def build_vmec2000_scan_cache_key(

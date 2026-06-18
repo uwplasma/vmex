@@ -14328,3 +14328,82 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.99976%.
+
+## 2026-06-18 Shared Scan Chunk Policy and QI JSON Utilities
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added an explicit `chunk_size_env` override to
+   `_solve_runtime._scan_chunk_settings` so the same implementation can serve
+   both environment-reading runtime callers and pure planner callers.
+2. Replaced the duplicate CPU/GPU scan chunking implementation in
+   `solvers.fixed_boundary.scan.planning.scan_chunk_settings` with delegation to
+   the shared runtime helper.
+3. Promoted the fixed-boundary workflow JSON converter to handle the QI staged
+   runner's NumPy/JAX cases: non-finite Python floats, NumPy scalars, arrays,
+   paths, containers, and opaque fallback objects.
+4. Replaced QI's local JSON-safe converter and atomic writer with the shared
+   workflow output helpers while preserving the public `jsonable` and
+   `_jsonable` imports used by examples and tests.
+5. Collapsed repeated QI CLI option declarations into grouped integer/float
+   registrations without changing flag names or argparse destinations.
+
+Results obtained:
+
+- `vmec_jax/qi_optimization.py` dropped from 2049 to 1994 lines and is no
+  longer above the source-health warning threshold.
+- Scan chunking now has one CPU/GPU performance policy instead of two
+  independently edited copies.
+- QI stage JSON and fixed-boundary workflow JSON now share the same
+  serialization behavior, reducing drift between optimization result paths.
+- No generated outputs or large files were added.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/_solve_runtime.py vmec_jax/solvers/fixed_boundary/scan/planning.py vmec_jax/optimizers/fixed_boundary/workflow_outputs.py vmec_jax/qi_optimization.py`
+- `python -m ruff check vmec_jax/_solve_runtime.py vmec_jax/solvers/fixed_boundary/scan/planning.py vmec_jax/optimizers/fixed_boundary/workflow_outputs.py vmec_jax/qi_optimization.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_qi_optimization_context_more_coverage.py tests/test_qi_optimization_more_coverage.py tests/test_qi_optimization_public_helpers.py tests/test_qi_staged_runner.py -q`
+  - Result: passed.
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_runtime.py tests/test_solve_scan_chunking.py tests/test_solve_more_coverage.py tests/test_solve_residual_iter_helpers_wave8_coverage.py tests/test_optimization_workflow_unit.py -q`
+  - Result: passed.
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 45`
+
+Best next steps:
+
+1. Continue line-negative source-health work on production modules still over
+   threshold, with priority on `optimization.py`, `plotting.py`, and the
+   fixed-boundary residual iteration monolith.
+2. Avoid further QI staged-runner behavior changes until optimizer artifacts are
+   explicitly regenerated; this tranche only touched CLI/JSON plumbing.
+3. When touching scan policy again, edit the shared `_solve_runtime` helper and
+   keep the pure planner as a thin delegate.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999998%.
+- Solver monolith reduction: 99.58%.
+- Free-boundary adjoint monolith reduction: 99.40%.
+- Driver workflow decomposition: 99.87%.
+- Residual iteration decomposition: 97.1%.
+- WOUT diagnostic/profile decomposition: 99.88%.
+- Bcovar/WOUT parity decomposition: 99.09%.
+- Force-kernel decomposition: 99.65%.
+- Scan/performance policy consolidation: 99.6%.
+- Tomnsps transform decomposition: 98.4%.
+- Initial-guess decomposition: 99.0%.
+- Optimizer workflow decomposition: 99.24%.
+- Fixed-boundary optimizer decomposition: 94.9%.
+- Implicit residual-adjoint decomposition: 95%.
+- QI objective/staged-runner decomposition: 96.8%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.99978%.
