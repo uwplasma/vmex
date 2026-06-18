@@ -1190,6 +1190,12 @@ class FixedBoundaryExactOptimizer:
             return self._solve_exact_with_tape(params, return_payload=True)
         return self._solve_exact_with_tape(params)
 
+    def _best_exact_state_or_solve(self, params, retained_state: VMECState | None = None):
+        state = self._cached_exact_state(params)
+        if state is None:
+            state = retained_state
+        return state if state is not None else self._solve_exact_state(params)
+
     def _solve_exact_with_tape(self, params, *, return_payload: bool = False, jvp_only: bool = False):
         """Run exact solve + build adjoint tape, with caching."""
         if self._solver_device_name is not None and not self._inside_solver_device_context:
@@ -2480,11 +2486,7 @@ class FixedBoundaryExactOptimizer:
                     result["x"] = np.asarray(best_exact_params, dtype=float).copy()
                     final_key = self._exact_cache_key(result["x"])
                     res_final = np.asarray(best_exact_residual, dtype=float).reshape(-1)
-                    state_final = self._cached_exact_state(result["x"])
-                    if state_final is None:
-                        state_final = best_exact_state
-                    if state_final is None:
-                        state_final = self._solve_exact_state(result["x"])
+                    state_final = self._best_exact_state_or_solve(result["x"], best_exact_state)
                 else:
                     raise RuntimeError(
                         "Final exact accepted-point solve failed and no prior exact "
@@ -2524,17 +2526,13 @@ class FixedBoundaryExactOptimizer:
             result["x"] = np.asarray(best_exact_params, dtype=float).copy()
             final_key = self._exact_cache_key(result["x"])
             res_final = np.asarray(best_exact_residual, dtype=float).reshape(-1)
-            state_final = self._cached_exact_state(result["x"])
-            if state_final is None:
-                state_final = best_exact_state
-            if state_final is None:
-                try:
-                    state_final = self._solve_exact_state(result["x"])
-                except Exception as exc:
-                    raise RuntimeError(
-                        "Best exact accepted point was selected for final output, "
-                        "but its exact state could not be reconstructed."
-                    ) from exc
+            try:
+                state_final = self._best_exact_state_or_solve(result["x"], best_exact_state)
+            except Exception as exc:
+                raise RuntimeError(
+                    "Best exact accepted point was selected for final output, "
+                    "but its exact state could not be reconstructed."
+                ) from exc
             final_wall_time_s = self._wall_time_for_final_history_entry()
             entry_final = self._history_entry_from_state_or_residual(
                 state_final,
