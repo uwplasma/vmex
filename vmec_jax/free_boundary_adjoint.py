@@ -45,7 +45,7 @@ from .solvers.free_boundary.adjoint.pytrees import (
     pytree_unstack_leading_axis_jax as _pytree_unstack_leading_axis_jax,
 )
 from .solvers.free_boundary.adjoint.trace_controls import (
-    _accepted_trace_reset_flags,
+    _accepted_trace_reset_flags,  # noqa: F401 - compatibility alias for tests/internal users.
     accepted_trace_effective_controller_masks as _accepted_trace_effective_controller_masks,  # noqa: F401 - compatibility alias.
     accepted_trace_segment_is_unconditionally_accepted as _accepted_trace_segment_is_unconditionally_accepted,  # noqa: F401 - compatibility alias.
     direct_coil_accepted_trace_controller_controls_jax,  # noqa: F401 - compatibility alias.
@@ -54,7 +54,7 @@ from .solvers.free_boundary.adjoint.trace_controls import (
 from .solvers.free_boundary.adjoint.trace_metadata import (
     _compact_segment_summaries,  # noqa: F401 - compatibility alias for tests/internal users.
     _fingerprint_has_rejected_controller_slot,  # noqa: F401 - compatibility alias for tests/internal users.
-    _json_safe_fingerprint_value,
+    _json_safe_fingerprint_value,  # noqa: F401 - compatibility alias for tests/internal users.
     _unique_shape_list,  # noqa: F401 - compatibility alias for tests/internal users.
     direct_coil_accepted_trace_controller_slot_summary,
 )
@@ -75,6 +75,12 @@ from .solvers.free_boundary.adjoint.branch_local import (
     prepare_branch_local_replay_setup as _prepare_branch_local_replay_setup,
     select_branch_local_scalar_key as _select_branch_local_scalar_key,
     select_branch_local_scalar_keys as _select_branch_local_scalar_keys,
+)
+from .solvers.free_boundary.adjoint.complete_solve_reports import (
+    direct_coil_accepted_trace_replay_objective_jax,
+    direct_coil_complete_solve_trace,
+    direct_coil_same_branch_complete_solve_fd_report,
+    free_boundary_adjoint_trace_replay_diagnostics,
 )
 from .solvers.free_boundary.adjoint.custom_vjp import (
     scalar_custom_vjp_value_jax as _scalar_custom_vjp_value_jax,
@@ -111,6 +117,10 @@ from .solvers.free_boundary.adjoint.boundary_replay import (
     vacuum_boundary_fields_from_cylindrical_jax,
     vacuum_boundary_fields_from_mode_coeffs_jax,
 )
+from .solvers.free_boundary.adjoint.direct_coil_replay import (
+    direct_coil_boundary_bsqvac_from_trace_jax,
+    direct_coil_boundary_bsqvac_jax,
+)
 from .solvers.free_boundary.adjoint.replay_context import (
     direct_coil_boundary_replay_context,
     direct_coil_boundary_replay_context_for_shape,
@@ -126,12 +136,12 @@ from .solvers.free_boundary.adjoint.replay_plan import (
     accepted_step_policy_layout_for_complete_payload as _accepted_step_policy_layout_for_complete_payload,  # noqa: F401 - compatibility alias for tests/internal users.
     accepted_step_policy_signature_for_complete_payload as _accepted_step_policy_signature_for_complete_payload,  # noqa: F401 - compatibility alias for tests/internal users.
     accepted_step_policy_summary_for_complete_payload as _accepted_step_policy_summary_for_complete_payload,  # noqa: F401 - compatibility alias for tests/internal users.
-    complete_solve_objective_values as _complete_solve_objective_values,
+    complete_solve_objective_values as _complete_solve_objective_values,  # noqa: F401 - compatibility alias.
     direct_coil_accepted_trace_controller_replay_plan,
     direct_coil_boundary_replay_contexts_by_shape as _direct_coil_boundary_replay_contexts_by_shape,  # noqa: F401 - compatibility alias.
-    extract_adjoint_step_trace as _extract_adjoint_step_trace,
+    extract_adjoint_step_trace as _extract_adjoint_step_trace,  # noqa: F401 - compatibility alias.
     slice_replay_controls as _slice_replay_controls,  # noqa: F401 - compatibility alias.
-    stackability_probe as _stackability_probe,
+    stackability_probe as _stackability_probe,  # noqa: F401 - compatibility alias.
 )
 from .solvers.free_boundary.adjoint.trace_stack import (
     ACCEPTED_TRACE_BOOL_CONTROL_KEYS as _ACCEPTED_TRACE_BOOL_CONTROL_KEYS,  # noqa: F401 - compatibility alias for tests/internal users.
@@ -163,6 +173,7 @@ __all__ = [
     "dense_fixed_point_solve_jax",
     "dense_nonlinear_solve_jax",
     "dense_mode_vacuum_solve_jax",
+    "dense_vmec_nestor_mode_solve_jax",
     "dense_vacuum_residual",
     "dense_vacuum_solve_jax",
     "mode_matrix_from_grpmn_jax",
@@ -179,17 +190,22 @@ __all__ = [
     "vacuum_boundary_fields_from_cylindrical_jax",
     "vacuum_boundary_fields_from_mode_coeffs_jax",
     "direct_coil_accepted_trace_branch_metadata",
+    "direct_coil_accepted_trace_array_controls_jax",
     "direct_coil_accepted_trace_controller_slot_summary",
     "direct_coil_accepted_trace_controller_custom_vjp_scalars_jax",
     "direct_coil_accepted_trace_controller_replay_plan",
     "direct_coil_accepted_trace_fingerprint",
     "direct_coil_accepted_trace_fingerprint_delta",
     "direct_coil_accepted_trace_fingerprint_delta_summary",
+    "direct_coil_accepted_trace_preconditioner_controls_jax",
+    "direct_coil_accepted_trace_replay_objective_jax",
     "direct_coil_accepted_trace_replay_graph_metadata",
+    "direct_coil_accepted_trace_scalar_controls_jax",
     "direct_coil_accepted_trace_status_masks",
     "direct_coil_accepted_trace_step_controls_jax",
     "direct_coil_accepted_trace_step_policy_segments",
     "direct_coil_boundary_replay_context_for_shape",
+    "direct_coil_complete_solve_trace",
     "direct_coil_adaptive_full_loop_same_branch_gate_report",
     "direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax",
     "direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax",
@@ -199,6 +215,7 @@ __all__ = [
     "direct_coil_projected_mode_fixed_point_directional_check_jax",
     "direct_coil_same_branch_physical_scalar_gate_report",
     "direct_coil_same_branch_replay_gate_report",
+    "direct_coil_same_branch_complete_solve_fd_report",
     "direct_coil_same_branch_controller_scalars_custom_vjp_report",
     "free_boundary_adjoint_trace_replay_diagnostics",
     "jax_visible_accepted_only_nonlinear_controller_jax",
@@ -235,451 +252,6 @@ def _block_until_ready_for_timing(value: Any) -> Any:
 
 def _jax_named_scope(name: str) -> Any:
     return _runtime_jax_named_scope(name, jax_module=jax, nullcontext_factory=nullcontext)
-
-
-def direct_coil_boundary_bsqvac_jax(
-    params: Any,
-    *,
-    R: Any,
-    Z: Any,
-    phi: Any,
-    Ru: Any,
-    Zu: Any,
-    Rv: Any,
-    Zv: Any,
-    ruu: Any,
-    ruv: Any,
-    rvv: Any,
-    zuu: Any,
-    zuv: Any,
-    zvv: Any,
-    basis: dict[str, Any],
-    tables: dict[str, Any],
-    signgs: int,
-    nvper: int,
-    br_add: Any = 0.0,
-    bp_add: Any = 0.0,
-    bz_add: Any = 0.0,
-    wint: Any | None = None,
-    include_analytic: bool = True,
-    include_diagnostics: bool = True,
-    include_mode_diagnostics: bool = True,
-    vac_override: Mapping[str, Any] | None = None,
-    coil_geometry: Any | None = None,
-    nestor_solve_mode: str = "dense",
-    nestor_operator_solver: str = "gmres",
-    nestor_operator_tol: float = 1.0e-11,
-    nestor_operator_atol: float = 1.0e-13,
-    nestor_operator_maxiter: int | None = None,
-    nestor_operator_restart: int | None = None,
-) -> dict[str, Any]:
-    """Replay accepted-boundary direct-coil ``bsqvac`` through JAX NESTOR.
-
-    This is the reusable phase-2 validation primitive for the production
-    accepted-output ladder.  It holds a VMEC plasma boundary fixed, samples the
-    differentiable direct-coil Biot-Savart field on that boundary, projects the
-    normal field into VMEC/NESTOR source space, solves the dense JAX mode-space
-    vacuum response, and reconstructs ``bsqvac`` on the boundary.
-
-    The helper validates and exposes the differentiable accepted-boundary
-    replay contract.  It intentionally does **not** differentiate through the
-    outer host-controlled nonlinear VMEC iteration loop.
-    """
-
-    from .external_fields import sample_coil_field_cylindrical, sample_coil_field_cylindrical_from_geometry
-
-    R_j = jnp.asarray(R)
-    if vac_override is None:
-        with _jax_named_scope("vmec_jax.free_boundary.direct_coil_sample"):
-            if coil_geometry is None:
-                br, bp, bz = sample_coil_field_cylindrical(
-                    params,
-                    R_j,
-                    jnp.asarray(Z),
-                    jnp.asarray(phi),
-                )
-            else:
-                br, bp, bz = sample_coil_field_cylindrical_from_geometry(
-                    coil_geometry,
-                    R_j,
-                    jnp.asarray(Z),
-                    jnp.asarray(phi),
-                    regularization_epsilon=float(getattr(params, "regularization_epsilon", 0.0)),
-                    chunk_size=getattr(params, "chunk_size", None),
-                )
-            br = br + jnp.asarray(br_add, dtype=br.dtype)
-            bp = bp + jnp.asarray(bp_add, dtype=bp.dtype)
-            bz = bz + jnp.asarray(bz_add, dtype=bz.dtype)
-        with _jax_named_scope("vmec_jax.free_boundary.vacuum_boundary_projection"):
-            vac = vacuum_boundary_fields_from_cylindrical_jax(
-                br=br,
-                bp=bp,
-                bz=bz,
-                R=R_j,
-                Ru=Ru,
-                Zu=Zu,
-                Rv=Rv,
-                Zv=Zv,
-                include_bnormal_unit=False,
-                include_contravariant=False,
-            )
-    else:
-        vac = {
-            "bu": jnp.asarray(vac_override["bu"]),
-            "bv": jnp.asarray(vac_override["bv"]),
-            "bnormal": jnp.asarray(vac_override["bnormal"]),
-            "g_uu": jnp.asarray(vac_override["g_uu"]),
-            "g_uv": jnp.asarray(vac_override["g_uv"]),
-            "g_vv": jnp.asarray(vac_override["g_vv"]),
-        }
-    if wint is None:
-        wint_j = jnp.ones_like(R_j)
-    else:
-        wint_j = jnp.asarray(wint, dtype=jnp.asarray(vac["bnormal"]).dtype)
-    bexni = -jnp.asarray(vac["bnormal"]) * wint_j * ((2.0 * jnp.pi) ** 2)
-    with _jax_named_scope("vmec_jax.free_boundary.dense_nestor_mode_solve"):
-        mode_solution = dense_vmec_nestor_mode_solve_jax(
-            R=R_j,
-            Z=Z,
-            Ru=Ru,
-            Zu=Zu,
-            Rv=Rv,
-            Zv=Zv,
-            ruu=ruu,
-            ruv=ruv,
-            rvv=rvv,
-            zuu=zuu,
-            zuv=zuv,
-            zvv=zvv,
-            bexni=jnp.ravel(bexni),
-            basis=basis,
-            tables=tables,
-            signgs=int(signgs),
-            nvper=int(nvper),
-            include_analytic=bool(include_analytic),
-            include_phi_flat=bool(include_mode_diagnostics),
-            include_residual=bool(include_mode_diagnostics),
-            solve_mode=str(nestor_solve_mode),
-            operator_solver=str(nestor_operator_solver),
-            operator_tol=float(nestor_operator_tol),
-            operator_atol=float(nestor_operator_atol),
-            operator_maxiter=nestor_operator_maxiter,
-            operator_restart=nestor_operator_restart,
-        )
-    with _jax_named_scope("vmec_jax.free_boundary.mode_field_reconstruction"):
-        channels = vacuum_boundary_fields_from_mode_coeffs_jax(
-            mode_solution["mode_coeffs"],
-            basis=basis,
-            bu_ext=vac["bu"],
-            bv_ext=vac["bv"],
-            g_uu=vac["g_uu"],
-            g_uv=vac["g_uv"],
-            g_vv=vac["g_vv"],
-        )
-    out = {"bsqvac": channels["bsqvac"]}
-    if bool(include_diagnostics):
-        out.update(
-            {
-                "channels": channels,
-                "mode_solution": mode_solution,
-                "vac": vac,
-                "bexni": bexni,
-            }
-        )
-    return out
-
-
-def direct_coil_boundary_bsqvac_from_trace_jax(
-    params: Any,
-    geometry: dict[str, Any],
-    trace: dict[str, Any],
-    *,
-    basis: dict[str, Any],
-    tables: dict[str, Any],
-    signgs: int,
-    nvper: int,
-    wint: Any,
-    include_analytic: bool = True,
-    include_diagnostics: bool = True,
-    include_mode_diagnostics: bool = True,
-    freeze_vacuum_field: bool = False,
-    coil_geometry: Any | None = None,
-    nestor_solve_mode: str = "dense",
-    nestor_operator_solver: str = "gmres",
-    nestor_operator_tol: float = 1.0e-11,
-    nestor_operator_atol: float = 1.0e-13,
-    nestor_operator_maxiter: int | None = None,
-    nestor_operator_restart: int | None = None,
-) -> dict[str, Any]:
-    """Replay direct-coil ``bsqvac`` on accepted geometry using trace metadata.
-
-    ``trace`` may be either a full residual-step trace containing
-    ``freeb_nestor_trace`` or the nested NESTOR trace itself.  This keeps the
-    production validation ladder from duplicating trace-to-replay plumbing in
-    every test while keeping the differentiated path explicit: accepted
-    geometry and direct-coil parameters remain JAX-visible, while basis/tables
-    and axis-additive fields are captured trace data.
-    """
-
-    nestor_trace = trace.get("freeb_nestor_trace", trace)
-    if not isinstance(nestor_trace, dict):
-        raise ValueError("trace must be a NESTOR trace or contain 'freeb_nestor_trace'")
-
-    vac_override = _direct_coil_trace_vacuum_field_override(trace) if bool(freeze_vacuum_field) else None
-    return direct_coil_boundary_bsqvac_jax(
-        params,
-        R=geometry["R"],
-        Z=geometry["Z"],
-        phi=geometry["phi"],
-        Ru=geometry["Ru"],
-        Zu=geometry["Zu"],
-        Rv=geometry["Rv"],
-        Zv=geometry["Zv"],
-        ruu=geometry["ruu"],
-        ruv=geometry["ruv"],
-        rvv=geometry["rvv"],
-        zuu=geometry["zuu"],
-        zuv=geometry["zuv"],
-        zvv=geometry["zvv"],
-        basis=basis,
-        tables=tables,
-        signgs=int(signgs),
-        nvper=int(nvper),
-        br_add=jnp.asarray(nestor_trace["br_axis"]),
-        bp_add=jnp.asarray(nestor_trace["bp_axis"]),
-        bz_add=jnp.asarray(nestor_trace["bz_axis"]),
-        wint=jnp.asarray(wint),
-        include_analytic=bool(include_analytic),
-        include_diagnostics=bool(include_diagnostics),
-        include_mode_diagnostics=bool(include_mode_diagnostics),
-        vac_override=vac_override,
-        coil_geometry=coil_geometry,
-        nestor_solve_mode=nestor_solve_mode,
-        nestor_operator_solver=nestor_operator_solver,
-        nestor_operator_tol=nestor_operator_tol,
-        nestor_operator_atol=nestor_operator_atol,
-        nestor_operator_maxiter=nestor_operator_maxiter,
-        nestor_operator_restart=nestor_operator_restart,
-    )
-
-
-def direct_coil_accepted_trace_replay_objective_jax(
-    params: Any,
-    initial_state: Any,
-    *,
-    static: Any,
-    traces: Any,
-    signgs: int,
-    max_steps: int | None = None,
-    sample_nzeta: int | None = None,
-    include_analytic: bool = True,
-    enforce_edge: bool = False,
-    state_weight: Any = 1.0,
-    force_weight: Any = 0.0,
-    bsqvac_weight: Any = 0.0,
-    coil_geometry: Any | None = None,
-) -> dict[str, Any]:
-    """Replay fixed accepted free-boundary traces with differentiable coils.
-
-    This helper is the reusable bridge between accepted-boundary replay and a
-    future full nonlinear ``run_free_boundary`` custom adjoint.  A production
-    solve supplies accepted trace metadata: step controls, preconditioner
-    matrices, axis-additive fields, and NESTOR replay context.  This function
-    keeps those controls fixed, while recomputing at every replayed step
-
-    ``state -> boundary geometry -> direct-coil Biot-Savart -> JAX NESTOR
-    bsqvac -> strict VMEC update``.
-
-    The result is a small differentiable fixed-control nonlinear replay.  It is
-    appropriate for AD-vs-central-FD validation of accepted-output
-    sensitivities, but it intentionally does not claim gradients through the
-    adaptive host controller that selected the accepted production traces.
-    """
-
-    from .discrete_adjoint import strict_update_one_step_from_trace
-    from .state import pack_state
-
-    trace_seq = list(traces)
-    if max_steps is not None:
-        trace_seq = trace_seq[: int(max_steps)]
-    if not trace_seq:
-        raise ValueError("at least one accepted trace is required")
-    reset_flags = _accepted_trace_reset_flags(trace_seq)
-
-    state = initial_state
-    objective_components: dict[str, Any] = {
-        "state": jnp.asarray(0.0),
-        "force": jnp.asarray(0.0),
-        "bsqvac": jnp.asarray(0.0),
-    }
-    context_cache: dict[tuple[int, int], dict[str, Any]] = {}
-
-    def _precomputed_context_for_trace(trace: Mapping[str, Any]) -> dict[str, Any] | None:
-        shape = _direct_coil_trace_boundary_shape(trace)
-        if shape is None:
-            return None
-        if shape not in context_cache:
-            context_cache[shape] = direct_coil_boundary_replay_context_for_shape(
-                static,
-                ntheta=shape[0],
-                nzeta=shape[1],
-            )
-        return context_cache[shape]
-
-    steps: list[dict[str, Any]] = []
-    bsqvac_values: list[Any] = []
-    for trace, reset_to_trace_pre in zip(trace_seq, reset_flags, strict=True):
-        if reset_to_trace_pre:
-            # VMEC free-boundary turn-on/restart control can reset the working
-            # state between accepted trace entries. Preserve that fixed host
-            # control transition instead of incorrectly chaining state_post.
-            state = trace["state_pre"]
-        has_active_freeb_replay = trace.get("freeb_bsqvac_half") is not None and trace.get("freeb_nestor_trace") is not None
-        if has_active_freeb_replay:
-            with _jax_named_scope("vmec_jax.free_boundary.boundary_geometry"):
-                geometry = free_boundary_boundary_geometry_jax(
-                    state,
-                    static,
-                    sample_nzeta=sample_nzeta,
-                )
-            context = _precomputed_context_for_trace(trace)
-            if context is None or tuple(int(v) for v in geometry["R"].shape) != (
-                int(context["ntheta"]),
-                int(context["nzeta"]),
-            ):
-                with _jax_named_scope("vmec_jax.free_boundary.replay_context"):
-                    context = direct_coil_boundary_replay_context(static, geometry)
-            with _jax_named_scope("vmec_jax.free_boundary.direct_coil_bsqvac_replay"):
-                replay = direct_coil_boundary_bsqvac_from_trace_jax(
-                    params,
-                    geometry,
-                    trace,
-                    basis=context["basis"],
-                    tables=context["tables"],
-                    signgs=int(signgs),
-                    nvper=int(context["nvper"]),
-                    wint=jnp.asarray(context["wint"]),
-                    include_analytic=bool(include_analytic),
-                    coil_geometry=coil_geometry,
-                )
-            freeb_bsqvac_half = replay["bsqvac"]
-        else:
-            # Full accepted-trace replay must preserve non-vacuum/setup steps.
-            # These steps do not have enough NESTOR metadata to resample coils,
-            # so replay the original trace payload and keep coil derivatives
-            # zero for that step.
-            replay = None
-            freeb_bsqvac_half = trace.get("freeb_bsqvac_half", None)
-        with _jax_named_scope("vmec_jax.free_boundary.strict_update_one_step_from_trace"):
-            step = strict_update_one_step_from_trace(
-                state,
-                static,
-                trace,
-                freeb_bsqvac_half=freeb_bsqvac_half,
-                enforce_edge=bool(enforce_edge),
-            )
-        state = step["step"]["state_post"]
-        steps.append(step)
-        bsqvac_values.append(freeb_bsqvac_half)
-        objective_components["force"] = objective_components["force"] + _tree_weighted_half_norm(
-            step["force"],
-            force_weight,
-        )
-        if replay is not None:
-            objective_components["bsqvac"] = objective_components["bsqvac"] + _weighted_half_norm(
-                replay["bsqvac"],
-                bsqvac_weight,
-            )
-
-    objective_components["state"] = _weighted_half_norm(
-        pack_state(state),
-        state_weight,
-    )
-    objective = sum(objective_components.values())
-    return {
-        "objective": objective,
-        "objective_components": objective_components,
-        "state": state,
-        "steps": steps,
-        "bsqvac": bsqvac_values,
-        "state_reset_flags": tuple(reset_flags),
-    }
-
-
-def free_boundary_adjoint_trace_replay_diagnostics(
-    source: Any,
-    *,
-    accept_mask: Any | None = None,
-    done_mask: Any | None = None,
-    max_steps: int | None = None,
-    json_safe: bool = False,
-) -> dict[str, Any]:
-    """Return diagnostics for fixed accepted-trace free-boundary replay.
-
-    The returned contract is intentionally conservative: it describes a fixed
-    accepted-branch replay payload and explicitly does *not* claim that the
-    adaptive host controller is differentiated.  Callers should use it to gate
-    complete-solve finite-difference comparisons before invoking any
-    branch-local custom VJP.
-    """
-
-    traces = _extract_adjoint_step_trace(source)
-    if max_steps is not None:
-        traces = traces[: int(max_steps)]
-    if not traces:
-        raise RuntimeError(
-            "adjoint_step_trace is empty. Run the residual solver with "
-            "adjoint_trace=True and adjoint_trace_mode='full'."
-        )
-    metadata = direct_coil_accepted_trace_branch_metadata(
-        traces,
-        accept_mask=accept_mask,
-        done_mask=done_mask,
-        max_steps=max_steps,
-        json_safe=False,
-    )
-    scalar_ok, scalar_error = _stackability_probe(
-        "scalar_controls",
-        direct_coil_accepted_trace_scalar_controls_jax,
-        traces,
-    )
-    array_ok, array_error = _stackability_probe(
-        "array_controls",
-        direct_coil_accepted_trace_array_controls_jax,
-        traces,
-    )
-    preconditioner_ok, preconditioner_error = _stackability_probe(
-        "preconditioner_controls",
-        direct_coil_accepted_trace_preconditioner_controls_jax,
-        traces,
-    )
-    errors = {
-        key: value
-        for key, value in {
-            "scalar_controls": scalar_error,
-            "array_controls": array_error,
-            "preconditioner_controls": preconditioner_error,
-        }.items()
-        if value is not None
-    }
-    diagnostics = {
-        "contract": "fixed accepted-trace replay diagnostics only",
-        "differentiates_adaptive_controller": False,
-        "n_steps": metadata["n_steps"],
-        "branch_fingerprint": metadata["fingerprint"],
-        "masks": metadata["masks"],
-        "replay_diagnostics": {
-            "preconditioner_policy_n_segments": len(metadata["preconditioner_policy_segments"]),
-            "preconditioner_policy_segment_summary": metadata["preconditioner_policy_segment_summary"],
-            "scalar_controls_stackable": bool(scalar_ok),
-            "array_controls_stackable": bool(array_ok),
-            "preconditioner_controls_stackable": bool(preconditioner_ok),
-            "errors": errors,
-        },
-    }
-    if json_safe:
-        return _json_safe_fingerprint_value(diagnostics)
-    return diagnostics
 
 
 def direct_coil_accepted_trace_controller_replay_objective_jax(
@@ -1335,204 +907,6 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
         include_replay_aux=bool(include_replay_aux),
         state_only_replay=bool(state_only_replay),
     )
-
-
-def direct_coil_complete_solve_trace(
-    input_path: Any,
-    params: Any,
-    *,
-    init_kwargs: dict[str, Any] | None = None,
-    solve_kwargs: dict[str, Any] | None = None,
-    require_active_trace: bool = True,
-) -> dict[str, Any]:
-    """Run a direct-coil free-boundary solve and return accepted traces.
-
-    This is a validation helper for phase-2 same-branch adjoint promotion.  It
-    runs the same direct-coil initialization plus accepted residual iteration
-    used by the complete-solve finite-difference gates and returns the
-    initialization result, final solve result, and recorded adjoint traces.
-
-    The helper intentionally does not decide whether perturbations are on the
-    same adaptive branch.  Use
-    :func:`direct_coil_same_branch_complete_solve_fd_report` or
-    :func:`direct_coil_accepted_trace_fingerprint_delta` for that gate.
-    """
-
-    from .driver import run_free_boundary
-    from .solve import solve_fixed_boundary_residual_iter
-
-    init_options: dict[str, Any] = {
-        "use_initial_guess": True,
-        "verbose": False,
-        "external_field_provider_kind": "direct_coils",
-        "external_field_provider_params": params,
-    }
-    if init_kwargs:
-        init_options.update(init_kwargs)
-    init = run_free_boundary(input_path, **init_options)
-
-    solve_options: dict[str, Any] = {
-        "max_iter": 2,
-        "ftol": 1.0e-8,
-        "vmec2000_control": True,
-        "auto_flip_force": False,
-        "use_direct_fallback": True,
-        "verbose": False,
-        "verbose_vmec2000_table": False,
-        "jit_forces": False,
-        "use_scan": False,
-        "host_update_assembly": False,
-        "adjoint_trace": True,
-        "adjoint_trace_mode": "full",
-        "external_field_provider_kind": "direct_coils",
-        "external_field_provider_params": params,
-        "free_boundary_activate_fsq": 1.0e99,
-    }
-    if solve_kwargs:
-        solve_options.update(solve_kwargs)
-    solve_options["external_field_provider_params"] = params
-    result = solve_fixed_boundary_residual_iter(
-        init.state,
-        init.static,
-        indata=init.indata,
-        signgs=init.signgs,
-        **solve_options,
-    )
-    traces = list(result.diagnostics.get("adjoint_step_trace", []))
-    if not traces:
-        raise RuntimeError("direct-coil solve did not record adjoint_step_trace")
-    active_trace = any(trace.get("freeb_bsqvac_half") is not None for trace in traces)
-    if bool(require_active_trace) and not active_trace:
-        raise RuntimeError("direct-coil solve did not record an active free-boundary trace")
-    return {
-        "init": init,
-        "result": result,
-        "traces": traces,
-        "params": params,
-        "active_trace": bool(active_trace),
-    }
-
-
-def direct_coil_same_branch_complete_solve_fd_report(
-    input_path: Any,
-    base_params: Any,
-    *,
-    params_for: Any,
-    objective_fn: Any,
-    eps: float = 1.0e-4,
-    init_kwargs: dict[str, Any] | None = None,
-    solve_kwargs: dict[str, Any] | None = None,
-    fingerprint_rtol: float = 1.0e-6,
-    fingerprint_atol: float = 1.0e-9,
-    require_active_trace: bool = True,
-) -> dict[str, Any]:
-    """Return same-branch complete-solve finite-difference diagnostics.
-
-    ``params_for(scale)`` must return the coil parameters for ``base + scale *
-    direction``.  ``objective_fn(payload)`` receives each payload returned by
-    :func:`direct_coil_complete_solve_trace` and returns either one scalar or a
-    mapping of scalar diagnostics.  The result contains raw base/plus/minus
-    payloads, branch fingerprint deltas, scalar values, and central
-    finite-difference slopes.  For backward compatibility, ``values`` reports
-    the primary scalar.  ``objective_values`` reports every scalar returned by
-    ``objective_fn``.
-
-    This helper is deliberately a validation seam rather than a production
-    adjoint: it rejects branch changes using accepted-trace and residual
-    controller fingerprints and leaves the differentiated frozen-branch replay
-    to the caller.
-    """
-
-    from .discrete_adjoint import residual_branch_fingerprint
-
-    eps_f = float(eps)
-    if eps_f == 0.0:
-        raise ValueError("eps must be nonzero")
-    base = direct_coil_complete_solve_trace(
-        input_path,
-        base_params,
-        init_kwargs=init_kwargs,
-        solve_kwargs=solve_kwargs,
-        require_active_trace=require_active_trace,
-    )
-    plus = direct_coil_complete_solve_trace(
-        input_path,
-        params_for(eps_f),
-        init_kwargs=init_kwargs,
-        solve_kwargs=solve_kwargs,
-        require_active_trace=require_active_trace,
-    )
-    minus = direct_coil_complete_solve_trace(
-        input_path,
-        params_for(-eps_f),
-        init_kwargs=init_kwargs,
-        solve_kwargs=solve_kwargs,
-        require_active_trace=require_active_trace,
-    )
-    plus_branch = direct_coil_accepted_trace_fingerprint_delta(
-        base["traces"],
-        plus["traces"],
-        rtol=float(fingerprint_rtol),
-        atol=float(fingerprint_atol),
-    )
-    minus_branch = direct_coil_accepted_trace_fingerprint_delta(
-        base["traces"],
-        minus["traces"],
-        rtol=float(fingerprint_rtol),
-        atol=float(fingerprint_atol),
-    )
-    base_fingerprint = direct_coil_accepted_trace_fingerprint(base["traces"])
-    plus_fingerprint = direct_coil_accepted_trace_fingerprint(plus["traces"])
-    minus_fingerprint = direct_coil_accepted_trace_fingerprint(minus["traces"])
-    base_residual_fingerprint = residual_branch_fingerprint(base["result"])
-    plus_residual_fingerprint = residual_branch_fingerprint(plus["result"])
-    minus_residual_fingerprint = residual_branch_fingerprint(minus["result"])
-    same_residual_branch = bool(
-        base_residual_fingerprint == plus_residual_fingerprint
-        and base_residual_fingerprint == minus_residual_fingerprint
-    )
-    trace_replay_diagnostics = {
-        "base": free_boundary_adjoint_trace_replay_diagnostics(base["traces"]),
-        "plus": free_boundary_adjoint_trace_replay_diagnostics(plus["traces"]),
-        "minus": free_boundary_adjoint_trace_replay_diagnostics(minus["traces"]),
-    }
-    base_values = _complete_solve_objective_values(objective_fn(base))
-    plus_values = _complete_solve_objective_values(objective_fn(plus))
-    minus_values = _complete_solve_objective_values(objective_fn(minus))
-    if base_values.keys() != plus_values.keys() or base_values.keys() != minus_values.keys():
-        raise ValueError("objective_fn returned different scalar keys for base/plus/minus solves")
-    primary_key = "objective" if "objective" in base_values else next(iter(base_values))
-    objective_values = {
-        key: {
-            "base": float(base_values[key]),
-            "plus": float(plus_values[key]),
-            "minus": float(minus_values[key]),
-            "central_fd_directional": float((plus_values[key] - minus_values[key]) / (2.0 * eps_f)),
-        }
-        for key in base_values
-    }
-    return {
-        "base": base,
-        "plus": plus,
-        "minus": minus,
-        "branch_compatibility": {
-            "same_branch": bool(plus_branch["compatible"] and minus_branch["compatible"] and same_residual_branch),
-            "same_accepted_trace_branch": bool(plus_branch["compatible"] and minus_branch["compatible"]),
-            "same_residual_branch": same_residual_branch,
-            "plus": plus_branch,
-            "minus": minus_branch,
-            "base_fingerprint": base_fingerprint,
-            "plus_fingerprint": plus_fingerprint,
-            "minus_fingerprint": minus_fingerprint,
-            "base_residual_fingerprint": base_residual_fingerprint,
-            "plus_residual_fingerprint": plus_residual_fingerprint,
-            "minus_residual_fingerprint": minus_residual_fingerprint,
-        },
-        "trace_replay_diagnostics": trace_replay_diagnostics,
-        "primary_objective": primary_key,
-        "values": objective_values[primary_key],
-        "objective_values": objective_values,
-    }
 
 
 def direct_coil_same_branch_controller_scalar_custom_vjp_report(

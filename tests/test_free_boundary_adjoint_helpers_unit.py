@@ -9,6 +9,7 @@ import vmec_jax.free_boundary_adjoint as fba
 from vmec_jax._compat import jnp
 from vmec_jax.solvers.free_boundary.adjoint import objectives as objective_helpers
 from vmec_jax.solvers.free_boundary.adjoint import branch_local as branch_local_helpers
+from vmec_jax.solvers.free_boundary.adjoint import direct_coil_replay as direct_coil_replay_helpers
 from vmec_jax.solvers.free_boundary.adjoint import pytrees as pytree_helpers
 from vmec_jax.solvers.free_boundary.adjoint import replay_plan as replay_plan_helpers
 from vmec_jax.solvers.free_boundary.adjoint import runtime as runtime_helpers
@@ -675,9 +676,13 @@ def test_direct_coil_trace_shape_and_frozen_vacuum_wrapper(monkeypatch: pytest.M
         del basis
         return {"bsqvac": jnp.asarray(bu_ext) - jnp.asarray(bv_ext) + jnp.asarray(g_uu) + jnp.asarray(g_uv) + jnp.asarray(g_vv)}
 
-    monkeypatch.setattr(fba, "dense_vmec_nestor_mode_solve_jax", fake_dense_vmec_nestor_mode_solve_jax)
     monkeypatch.setattr(
-        fba,
+        direct_coil_replay_helpers,
+        "dense_vmec_nestor_mode_solve_jax",
+        fake_dense_vmec_nestor_mode_solve_jax,
+    )
+    monkeypatch.setattr(
+        direct_coil_replay_helpers,
         "vacuum_boundary_fields_from_mode_coeffs_jax",
         fake_vacuum_boundary_fields_from_mode_coeffs_jax,
     )
