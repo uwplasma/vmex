@@ -250,6 +250,45 @@ def _qi_branch_width_residuals(grid: _QIBoozerSurfaceGrid, *, branch_width_weigh
             "branch_widths_mean": branch_widths_mean}
 
 
+def _qi_aligned_profile_residuals(grid: _QIBoozerSurfaceGrid, *, aligned_profile_weight: float,
+                                  aligned_profile_softness: float, aligned_profile_trap_level: float,
+                                  aligned_profile_trap_softness: float):
+    """Return smooth minimum-aligned trapped-well profile residuals."""
+
+    dtype, empty = grid.dtype, jnp.zeros((grid.nsurf, 0, grid.nalpha), dtype=grid.dtype)
+    aligned_min_phi = jnp.zeros((grid.nsurf, grid.nalpha), dtype=dtype)
+    if float(aligned_profile_weight) == 0.0:
+        return {"residuals1d": jnp.zeros((0,), dtype=dtype), "residuals3d": empty, "profile": empty,
+                "profile_mean": jnp.zeros((grid.nsurf, 0, 1), dtype=dtype), "trap_weight": empty,
+                "min_phi": aligned_min_phi}
+
+    # Drop the repeated endpoint before FFT-based periodic shifts.
+    bperiodic = grid.bnorm[:, :-1, :]
+    nperiodic = int(grid.nphi - 1)
+    period = jnp.asarray(2.0 * np.pi / grid.nfp, dtype=dtype)
+    min_temperature = jnp.maximum(jnp.asarray(float(aligned_profile_softness), dtype=dtype),
+                                  jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype))
+    shifted_for_weights = bperiodic - jnp.min(bperiodic, axis=1, keepdims=True)
+    argmin_weights = jnp.exp(-shifted_for_weights / min_temperature)
+    argmin_weights = argmin_weights / jnp.sum(argmin_weights, axis=1, keepdims=True)
+    grid_angle = 2.0 * jnp.pi * jnp.arange(nperiodic, dtype=dtype) / jnp.asarray(nperiodic, dtype=dtype)
+    min_angle = jnp.mod(jnp.angle(jnp.sum(argmin_weights * jnp.exp(1j * grid_angle)[None, :, None], axis=1)), 2.0 * jnp.pi)
+    aligned_min_phi = min_angle * period / (2.0 * jnp.pi) + grid.phi0
+
+    coeffs = jnp.fft.fft(bperiodic, axis=1)
+    mode_numbers = jnp.fft.fftfreq(nperiodic) * jnp.asarray(nperiodic, dtype=dtype)
+    phase = jnp.exp(1j * 2.0 * jnp.pi * mode_numbers[None, :, None] * (aligned_min_phi - grid.phi0)[:, None, :] / period)
+    aligned_profile = jnp.real(jnp.fft.ifft(coeffs * phase, axis=1))
+    aligned_profile_mean = jnp.mean(aligned_profile, axis=2, keepdims=True)
+    trap_eps = jnp.maximum(jnp.asarray(float(aligned_profile_trap_softness), dtype=dtype), jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype))
+    trap_weight = jax_sigmoid((jnp.asarray(float(aligned_profile_trap_level), dtype=dtype) - aligned_profile) / trap_eps)
+    residuals3d = ((aligned_profile - aligned_profile_mean) * trap_weight * jnp.sqrt(grid.weights_arr)[:, None, None]
+                   * jnp.asarray(float(aligned_profile_weight), dtype=dtype))
+    residuals1d = jnp.ravel(residuals3d) / jnp.sqrt(jnp.asarray(grid.nalpha * nperiodic, dtype=dtype))
+    return {"residuals1d": residuals1d, "residuals3d": residuals3d, "profile": aligned_profile,
+            "profile_mean": aligned_profile_mean, "trap_weight": trap_weight, "min_phi": aligned_min_phi}
+
+
 def mirror_ratio_penalty_from_boozer_modes(
     *,
     bmnc_b,
@@ -813,11 +852,7 @@ def quasi_isodynamic_residual_from_boozer_modes(
         softness=float(softness),
         phimin=float(phimin),
     )
-    bmnc_b = qi_grid.bmnc_b
-    xm_b = qi_grid.xm_b
-    xn_b = qi_grid.xn_b
     iota_b = qi_grid.iota_b
-    nfp = qi_grid.nfp
     nphi = qi_grid.nphi
     nalpha = qi_grid.nalpha
     nsurf = qi_grid.nsurf
@@ -850,10 +885,8 @@ def quasi_isodynamic_residual_from_boozer_modes(
         branch_width_weight=branch_width_weight,
         branch_width_softness=branch_width_softness,
     )
-    branch_width_residuals1d = branch_width["residuals1d"]
-    branch_width_residuals3d = branch_width["residuals3d"]
-    branch_widths = branch_width["branch_widths"]
-    branch_widths_mean = branch_width["branch_widths_mean"]
+    branch_width_residuals1d, branch_width_residuals3d = branch_width["residuals1d"], branch_width["residuals3d"]
+    branch_widths, branch_widths_mean = branch_width["branch_widths"], branch_width["branch_widths_mean"]
 
     profile_mean = jnp.mean(bnorm, axis=2, keepdims=True)
     profile_residuals3d = (
@@ -862,52 +895,16 @@ def quasi_isodynamic_residual_from_boozer_modes(
         * jnp.asarray(float(profile_weight), dtype=dtype)
     )
     profile_residuals1d = jnp.ravel(profile_residuals3d) / jnp.sqrt(jnp.asarray(nalpha * nphi, dtype=dtype))
-    aligned_profile_residuals1d = jnp.zeros((0,), dtype=dtype)
-    aligned_profile_residuals3d = jnp.zeros((nsurf, 0, nalpha), dtype=dtype)
-    aligned_profile = jnp.zeros((nsurf, 0, nalpha), dtype=dtype)
-    aligned_profile_mean = jnp.zeros((nsurf, 0, 1), dtype=dtype)
-    aligned_profile_trap_weight = jnp.zeros((nsurf, 0, nalpha), dtype=dtype)
-    aligned_min_phi = jnp.zeros((nsurf, nalpha), dtype=dtype)
-    if float(aligned_profile_weight) != 0.0:
-        # The base phi grid includes both endpoints for the width integral.
-        # Drop the repeated endpoint before using FFT-based periodic shifts.
-        bperiodic = bnorm[:, :-1, :]
-        nperiodic = int(nphi - 1)
-        period = jnp.asarray(2.0 * np.pi / nfp, dtype=dtype)
-        min_temperature = jnp.maximum(
-            jnp.asarray(float(aligned_profile_softness), dtype=dtype),
-            jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype),
-        )
-        shifted_for_weights = bperiodic - jnp.min(bperiodic, axis=1, keepdims=True)
-        argmin_weights = jnp.exp(-shifted_for_weights / min_temperature)
-        argmin_weights = argmin_weights / jnp.sum(argmin_weights, axis=1, keepdims=True)
-        grid_angle = 2.0 * jnp.pi * jnp.arange(nperiodic, dtype=dtype) / jnp.asarray(nperiodic, dtype=dtype)
-        z = jnp.sum(argmin_weights * jnp.exp(1j * grid_angle)[None, :, None], axis=1)
-        min_angle = jnp.mod(jnp.angle(z), 2.0 * jnp.pi)
-        aligned_min_phi = min_angle * period / (2.0 * jnp.pi) + phi0
-
-        # g(phi) = f(phi + phi_min) aligns the minimum near phi=0.
-        coeffs = jnp.fft.fft(bperiodic, axis=1)
-        mode_numbers = jnp.fft.fftfreq(nperiodic) * jnp.asarray(nperiodic, dtype=dtype)
-        phase = jnp.exp(1j * 2.0 * jnp.pi * mode_numbers[None, :, None] * (aligned_min_phi - phi0)[:, None, :] / period)
-        aligned_profile = jnp.real(jnp.fft.ifft(coeffs * phase, axis=1))
-        aligned_profile_mean = jnp.mean(aligned_profile, axis=2, keepdims=True)
-        trap_eps = jnp.maximum(
-            jnp.asarray(float(aligned_profile_trap_softness), dtype=dtype),
-            jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype),
-        )
-        aligned_profile_trap_weight = jax_sigmoid(
-            (jnp.asarray(float(aligned_profile_trap_level), dtype=dtype) - aligned_profile) / trap_eps
-        )
-        aligned_profile_residuals3d = (
-            (aligned_profile - aligned_profile_mean)
-            * aligned_profile_trap_weight
-            * jnp.sqrt(weights_arr)[:, None, None]
-            * jnp.asarray(float(aligned_profile_weight), dtype=dtype)
-        )
-        aligned_profile_residuals1d = jnp.ravel(aligned_profile_residuals3d) / jnp.sqrt(
-            jnp.asarray(nalpha * nperiodic, dtype=dtype)
-        )
+    aligned = _qi_aligned_profile_residuals(
+        qi_grid,
+        aligned_profile_weight=aligned_profile_weight,
+        aligned_profile_softness=aligned_profile_softness,
+        aligned_profile_trap_level=aligned_profile_trap_level,
+        aligned_profile_trap_softness=aligned_profile_trap_softness,
+    )
+    aligned_profile_residuals1d, aligned_profile_residuals3d = aligned["residuals1d"], aligned["residuals3d"]
+    aligned_profile, aligned_profile_mean = aligned["profile"], aligned["profile_mean"]
+    aligned_profile_trap_weight, aligned_min_phi = aligned["trap_weight"], aligned["min_phi"]
 
     shuffle_profile_residuals1d = jnp.zeros((0,), dtype=dtype)
     shuffle_profile_residuals3d = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
