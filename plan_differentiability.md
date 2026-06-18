@@ -8782,3 +8782,67 @@ Completion:
 - Implicit residual-adjoint decomposition: 88%.
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - Overall differentiability-refactor PR: 99.89%.
+
+## 2026-06-18 Fixed-Boundary QI Objective Split
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Extracted QI/Boozer objective ownership from
+   `vmec_jax.optimization_workflow` into
+   `vmec_jax.optimizers.fixed_boundary.qi_objectives`.
+2. Moved `QuasiIsodynamicOptions`, `QuasiIsodynamicResidual`,
+   `QuasiIsodynamicResidualCeiling`, `MirrorRatio`, `VMECMirrorRatio`,
+   `BoozerBTarget`, `MaxElongation`, `LgradB`, all QI objective factories,
+   and `boozer_b_target_from_wout` into the new domain module.
+3. Preserved the public workflow/API imports by re-exporting those names from
+   `optimization_workflow`.
+4. Updated QI objective tests to monkeypatch the new implementation module
+   rather than the old facade, while keeping workflow-stage assembly tests on
+   the workflow seam that still owns shared QI field construction.
+
+Results obtained:
+
+- `vmec_jax/optimization_workflow.py` dropped from 3,027 lines to 2,074
+  lines.
+- The workflow facade no longer appears in the source-health top-15 file list.
+- Boozer surface slicing in the new QI module now preserves the previous
+  validation and slices `bmnc_b`, `bmns_b`, `iota_b`, and `s_b` consistently.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/optimization_workflow.py vmec_jax/optimizers/fixed_boundary/qi_objectives.py tests/test_optimization_workflow_unit.py tests/test_optimization_workflow_qi_objectives_more_coverage.py tests/test_augmented_lagrangian.py tests/test_optimization_examples.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_optimization_workflow_unit.py -k 'QI or qi or MirrorRatio or VMECMirrorRatio or MaxElongation or LgradB or BoozerBTarget or boozer' tests/test_optimization_workflow_qi_objectives_more_coverage.py tests/test_augmented_lagrangian.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_optimization_examples.py -k 'qi_mirror or qi_max or qi_lgradb or BoozerBTarget or finite_beta_objective_terms or lower_bound_and_lgradb or magnetic_well_tuple or public_api_reexports' -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_optimization_workflow_unit.py tests/test_optimization_helpers.py tests/test_optimization_examples.py tests/test_optimization_workflow_qi_objectives_more_coverage.py tests/test_augmented_lagrangian.py -q`
+- `python tools/diagnostics/source_health.py --top 15 --top-functions 25`
+
+Best next steps:
+
+1. Commit and push this QI/Boozer objective split.
+2. Extract the remaining workflow stage-construction/QI shared-field assembly
+   into a small orchestration module.
+3. Move to the solver residual monolith next: split preconditioner setup,
+   accepted/rejected transition, and scan bookkeeping from
+   `solve_fixed_boundary_residual_iter`.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.95%.
+- Differentiability/refactor implementation: 99.9994%.
+- Solver monolith reduction: 98.55%.
+- Free-boundary adjoint monolith reduction: 82%.
+- Driver workflow decomposition: 96.4%.
+- WOUT diagnostic/profile decomposition: 98.8%.
+- Optimizer workflow decomposition: 98.4%.
+- Fixed-boundary optimizer decomposition: 94.0%.
+- Implicit residual-adjoint decomposition: 88%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- Overall differentiability-refactor PR: 99.91%.

@@ -11,6 +11,8 @@ from types import ModuleType, SimpleNamespace
 import numpy as np
 import pytest
 
+from vmec_jax.optimizers.fixed_boundary import qi_objectives
+
 
 ROOT = Path(__file__).resolve().parents[1]
 PRIMARY_OPTIMIZATION_SCRIPTS = (
@@ -1410,7 +1412,7 @@ def test_qi_objective_factories_apply_weights_and_slice_shared_fields(monkeypatc
         assert booz["untouched"] == "kept"
         return {"residuals1d": np.asarray([0.5]), "total": 0.25}
 
-    monkeypatch.setattr(workflow, "mirror_ratio_penalty_from_boozer_output", fake_mirror_ratio_penalty_from_boozer_output)
+    monkeypatch.setattr(qi_objectives, "mirror_ratio_penalty_from_boozer_output", fake_mirror_ratio_penalty_from_boozer_output)
     mirror_term = workflow.qi_mirror_ratio_objective(
         threshold=1.2,
         weight=3.0,
@@ -1497,7 +1499,7 @@ def test_qi_objective_factories_apply_weights_and_slice_shared_fields(monkeypatc
         return {"residuals1d": np.asarray([0.5, 0.5]), "total": 0.5}
 
     monkeypatch.setattr(
-        workflow,
+        qi_objectives,
         "mirror_ratio_penalty_from_boozer_output",
         fake_all_surface_mirror_ratio_penalty_from_boozer_output,
     )
@@ -1533,7 +1535,7 @@ def test_qi_objective_factories_apply_weights_and_slice_shared_fields(monkeypatc
         assert smooth_penalty == 0.0
         return {"residuals1d": np.asarray([2.0]), "total": 4.0}
 
-    monkeypatch.setattr(workflow, "max_elongation_penalty_from_state", fake_max_elongation_penalty_from_state)
+    monkeypatch.setattr(qi_objectives, "max_elongation_penalty_from_state", fake_max_elongation_penalty_from_state)
     elongation_term = workflow.qi_max_elongation_objective(threshold=4.0, weight=0.5, ntheta=10, nphi=11)
     residual, total = elongation_term.residual_and_total(ctx, "state", {})
     np.testing.assert_allclose(residual, [1.0])
@@ -1552,7 +1554,7 @@ def test_qi_objective_factories_apply_weights_and_slice_shared_fields(monkeypatc
         assert smooth_penalty == 0.01
         return {"residuals1d": np.asarray([4.0]), "total": 16.0}
 
-    monkeypatch.setattr(workflow, "lgradb_penalty_from_state", fake_lgradb_penalty_from_state)
+    monkeypatch.setattr(qi_objectives, "lgradb_penalty_from_state", fake_lgradb_penalty_from_state)
     lgradb_term = workflow.qi_lgradb_objective(
         threshold=0.3,
         weight=0.25,
@@ -1594,7 +1596,7 @@ def test_lower_bound_and_lgradb_objective_edge_paths(monkeypatch) -> None:
         assert kwargs["smooth_penalty"] == 0.02
         return {"residuals1d": np.asarray([2.0]), "total": 4.0}
 
-    monkeypatch.setattr(workflow, "lgradb_penalty_from_state", fake_lgradb_penalty_from_state)
+    monkeypatch.setattr(qi_objectives, "lgradb_penalty_from_state", fake_lgradb_penalty_from_state)
     term = workflow.LgradB(threshold=0.3, smooth_penalty=0.02).to_qi_term(residual_weight=5.0)
     residual, total = term.residual_and_total(ctx, "state", {})
     np.testing.assert_allclose(residual, [10.0])

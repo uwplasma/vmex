@@ -7,6 +7,7 @@ import pytest
 
 from vmec_jax import optimization_workflow as workflow
 from vmec_jax._compat import jnp
+from vmec_jax.optimizers.fixed_boundary import qi_objectives
 
 
 class _StateViolation:
@@ -251,7 +252,7 @@ def test_qi_mirror_and_elongation_constraints_expose_signed_residuals(monkeypatc
         }
 
     monkeypatch.setattr(
-        workflow,
+        qi_objectives,
         "mirror_ratio_penalty_from_boozer_output",
         fake_mirror_ratio_penalty_from_boozer_output,
     )
@@ -276,7 +277,7 @@ def test_qi_mirror_and_elongation_constraints_expose_signed_residuals(monkeypatc
             "total": jnp.asarray(0.25, dtype=jnp.float64),
         }
 
-    monkeypatch.setattr(workflow, "max_elongation_penalty_from_state", fake_max_elongation_penalty_from_state)
+    monkeypatch.setattr(qi_objectives, "max_elongation_penalty_from_state", fake_max_elongation_penalty_from_state)
     elongation = workflow.MaxElongation(threshold=8.0, smooth_extrema=0.1, qi_options=options)
     elongation_term = workflow.AugmentedLagrangianConstraint(elongation, penalty=9.0).to_qi_term(1.0)
     residual, _total = elongation_term.residual_and_total(ctx, "state", {})
