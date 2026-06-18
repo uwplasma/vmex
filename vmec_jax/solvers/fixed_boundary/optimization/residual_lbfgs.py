@@ -7,7 +7,25 @@ from typing import Any, Callable, Dict
 import numpy as np
 
 from ..results import SolveVmecResidualResult
+from ..options import validate_residual_lbfgs_options as _validate_residual_lbfgs_options
+from ..preconditioning.operators import apply_preconditioner as _apply_preconditioner
+from .constraints import enforce_fixed_boundary_and_axis as _enforce_fixed_boundary_and_axis
+from .constraints import grad_rms_state as _grad_rms_state
+from .constraints import mode00_index as _mode00_index
+from .gradient import mask_grad_for_constraints as _mask_grad_for_constraints
+from .quasi_newton import ensure_descent_direction as _ensure_descent_direction
+from .quasi_newton import lbfgs_curvature_tolerance as _lbfgs_curvature_tolerance
+from .quasi_newton import lbfgs_two_loop_direction as _lbfgs_two_loop_direction
+from .residual_context import prepare_residual_force_context as _prepare_residual_force_context
+from .residual_objective import assemble_residual_objective_terms as _assemble_residual_objective_terms
+from .tolerances import resolve_grad_tol as _resolve_grad_tol
+from ...._compat import has_jax as _has_jax
+from ...._compat import jax as _jax
+from ...._compat import jit as _jit
+from ...._compat import jnp as _jnp
 from ....state import VMECState
+from ....state import pack_state as _pack_state
+from ....state import unpack_state as _unpack_state
 
 
 def solve_fixed_boundary_lbfgs_vmec_residual_impl(
@@ -61,60 +79,28 @@ def solve_fixed_boundary_lbfgs_vmec_residual_impl(
 ) -> SolveVmecResidualResult:
     """Minimize VMEC-style fixed-boundary force residuals with L-BFGS."""
 
-    if has_jax_func is None or jax_module is None or jnp_module is None or jit_func is None:
-        from ...._compat import has_jax as _has_jax
-        from ...._compat import jax as _jax
-        from ...._compat import jit as _jit
-        from ...._compat import jnp as _jnp
-
-        has_jax_func = _has_jax if has_jax_func is None else has_jax_func
-        jax_module = _jax if jax_module is None else jax_module
-        jnp_module = _jnp if jnp_module is None else jnp_module
-        jit_func = _jit if jit_func is None else jit_func
+    has_jax_func = has_jax_func or _has_jax
+    jax_module = jax_module or _jax
+    jnp_module = jnp_module or _jnp
+    jit_func = jit_func or _jit
 
     if not has_jax_func():
         raise ImportError("solve_fixed_boundary_lbfgs_vmec_residual requires JAX (jax + jaxlib)")
 
-    if validate_options_func is None:
-        from ..options import validate_residual_lbfgs_options as validate_options_func
-    if prepare_residual_force_context_func is None:
-        from .residual_context import (
-            prepare_residual_force_context as prepare_residual_force_context_func,
-        )
-    if mode00_index_func is None:
-        from .constraints import mode00_index as mode00_index_func
-    if assemble_residual_objective_terms_func is None:
-        from .residual_objective import (
-            assemble_residual_objective_terms as assemble_residual_objective_terms_func,
-        )
-    if enforce_fixed_boundary_and_axis_func is None:
-        from .constraints import (
-            enforce_fixed_boundary_and_axis as enforce_fixed_boundary_and_axis_func,
-        )
-    if mask_grad_for_constraints_func is None:
-        from .gradient import mask_grad_for_constraints as mask_grad_for_constraints_func
-    if apply_preconditioner_func is None:
-        from ..preconditioning.operators import (
-            apply_preconditioner as apply_preconditioner_func,
-        )
-    if grad_rms_state_func is None:
-        from .constraints import grad_rms_state as grad_rms_state_func
-    if resolve_grad_tol_func is None:
-        from .tolerances import resolve_grad_tol as resolve_grad_tol_func
-    if lbfgs_two_loop_direction_func is None:
-        from .quasi_newton import lbfgs_two_loop_direction as lbfgs_two_loop_direction_func
-    if ensure_descent_direction_func is None:
-        from .quasi_newton import ensure_descent_direction as ensure_descent_direction_func
-    if resolve_lbfgs_curvature_tol_func is None:
-            from .quasi_newton import (
-            lbfgs_curvature_tolerance as resolve_lbfgs_curvature_tol_func,
-        )
-    if pack_state_func is None or unpack_state_func is None:
-        from ....state import pack_state as _pack_state
-        from ....state import unpack_state as _unpack_state
-
-        pack_state_func = _pack_state if pack_state_func is None else pack_state_func
-        unpack_state_func = _unpack_state if unpack_state_func is None else unpack_state_func
+    validate_options_func = validate_options_func or _validate_residual_lbfgs_options
+    prepare_residual_force_context_func = prepare_residual_force_context_func or _prepare_residual_force_context
+    mode00_index_func = mode00_index_func or _mode00_index
+    assemble_residual_objective_terms_func = assemble_residual_objective_terms_func or _assemble_residual_objective_terms
+    enforce_fixed_boundary_and_axis_func = enforce_fixed_boundary_and_axis_func or _enforce_fixed_boundary_and_axis
+    mask_grad_for_constraints_func = mask_grad_for_constraints_func or _mask_grad_for_constraints
+    apply_preconditioner_func = apply_preconditioner_func or _apply_preconditioner
+    grad_rms_state_func = grad_rms_state_func or _grad_rms_state
+    resolve_grad_tol_func = resolve_grad_tol_func or _resolve_grad_tol
+    lbfgs_two_loop_direction_func = lbfgs_two_loop_direction_func or _lbfgs_two_loop_direction
+    ensure_descent_direction_func = ensure_descent_direction_func or _ensure_descent_direction
+    resolve_lbfgs_curvature_tol_func = resolve_lbfgs_curvature_tol_func or _lbfgs_curvature_tolerance
+    pack_state_func = pack_state_func or _pack_state
+    unpack_state_func = unpack_state_func or _unpack_state
 
     opts = validate_options_func(
         w_rz=w_rz,

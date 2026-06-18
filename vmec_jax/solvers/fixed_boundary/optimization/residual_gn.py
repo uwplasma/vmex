@@ -7,7 +7,24 @@ from typing import Any, Callable
 import numpy as np
 
 from ..results import SolveVmecResidualResult
+from ..options import validate_residual_gn_options as _validate_residual_gn_options
+from .constraints import enforce_fixed_boundary_and_axis as _enforce_fixed_boundary_and_axis
+from .constraints import grad_rms_state as _grad_rms_state
+from .constraints import mode00_index as _mode00_index
+from .gradient import mask_grad_for_constraints as _mask_grad_for_constraints
+from .residual_context import prepare_residual_force_context as _prepare_residual_force_context
+from .residual_objective import assemble_residual_objective_terms as _assemble_residual_objective_terms
+from .residual_objective import residual_objective_vector as _residual_objective_vector
+from .tolerances import dtype_tiny as _dtype_tiny
+from .tolerances import resolve_cg_tol as _resolve_cg_tol
+from .tolerances import resolve_lm_damping as _resolve_lm_damping
+from ...._compat import has_jax as _has_jax
+from ...._compat import jax as _jax
+from ...._compat import jit as _jit
+from ...._compat import jnp as _jnp
 from ....state import VMECState
+from ....state import pack_state as _pack_state
+from ....state import unpack_state as _unpack_state
 
 
 def _state_plus_scaled_step(state: VMECState, dx_state: VMECState, *, step: float, jnp_module: Any) -> VMECState:
@@ -81,56 +98,27 @@ def solve_fixed_boundary_gn_vmec_residual_impl(
 ) -> SolveVmecResidualResult:
     """Solve a VMEC residual least-squares system with Gauss-Newton steps."""
 
-    if has_jax_func is None or jax_module is None or jnp_module is None or jit_func is None:
-        from ...._compat import has_jax as _has_jax
-        from ...._compat import jax as _jax
-        from ...._compat import jit as _jit
-        from ...._compat import jnp as _jnp
-
-        has_jax_func = _has_jax if has_jax_func is None else has_jax_func
-        jax_module = _jax if jax_module is None else jax_module
-        jnp_module = _jnp if jnp_module is None else jnp_module
-        jit_func = _jit if jit_func is None else jit_func
+    has_jax_func = has_jax_func or _has_jax
+    jax_module = jax_module or _jax
+    jnp_module = jnp_module or _jnp
+    jit_func = jit_func or _jit
 
     if not has_jax_func():
         raise ImportError("solve_fixed_boundary_gn_vmec_residual requires JAX (jax + jaxlib)")
 
-    if validate_options_func is None:
-        from ..options import validate_residual_gn_options as validate_options_func
-    if prepare_residual_force_context_func is None:
-        from .residual_context import (
-            prepare_residual_force_context as prepare_residual_force_context_func,
-        )
-    if mode00_index_func is None:
-        from .constraints import mode00_index as mode00_index_func
-    if assemble_residual_objective_terms_func is None:
-        from .residual_objective import (
-            assemble_residual_objective_terms as assemble_residual_objective_terms_func,
-        )
-    if residual_objective_vector_func is None:
-        from .residual_objective import (
-            residual_objective_vector as residual_objective_vector_func,
-        )
-    if enforce_fixed_boundary_and_axis_func is None:
-        from .constraints import (
-            enforce_fixed_boundary_and_axis as enforce_fixed_boundary_and_axis_func,
-        )
-    if mask_grad_for_constraints_func is None:
-        from .gradient import mask_grad_for_constraints as mask_grad_for_constraints_func
-    if grad_rms_state_func is None:
-        from .constraints import grad_rms_state as grad_rms_state_func
-    if resolve_cg_tol_func is None:
-        from .tolerances import resolve_cg_tol as resolve_cg_tol_func
-    if resolve_lm_damping_func is None:
-        from .tolerances import resolve_lm_damping as resolve_lm_damping_func
-    if dtype_tiny_func is None:
-        from .tolerances import dtype_tiny as dtype_tiny_func
-    if pack_state_func is None or unpack_state_func is None:
-        from ....state import pack_state as _pack_state
-        from ....state import unpack_state as _unpack_state
-
-        pack_state_func = _pack_state if pack_state_func is None else pack_state_func
-        unpack_state_func = _unpack_state if unpack_state_func is None else unpack_state_func
+    validate_options_func = validate_options_func or _validate_residual_gn_options
+    prepare_residual_force_context_func = prepare_residual_force_context_func or _prepare_residual_force_context
+    mode00_index_func = mode00_index_func or _mode00_index
+    assemble_residual_objective_terms_func = assemble_residual_objective_terms_func or _assemble_residual_objective_terms
+    residual_objective_vector_func = residual_objective_vector_func or _residual_objective_vector
+    enforce_fixed_boundary_and_axis_func = enforce_fixed_boundary_and_axis_func or _enforce_fixed_boundary_and_axis
+    mask_grad_for_constraints_func = mask_grad_for_constraints_func or _mask_grad_for_constraints
+    grad_rms_state_func = grad_rms_state_func or _grad_rms_state
+    resolve_cg_tol_func = resolve_cg_tol_func or _resolve_cg_tol
+    resolve_lm_damping_func = resolve_lm_damping_func or _resolve_lm_damping
+    dtype_tiny_func = dtype_tiny_func or _dtype_tiny
+    pack_state_func = pack_state_func or _pack_state
+    unpack_state_func = unpack_state_func or _unpack_state
 
     opts = validate_options_func(
         damping=damping,

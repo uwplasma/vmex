@@ -7,6 +7,18 @@ from typing import Any, Callable, Dict
 import numpy as np
 
 from ..results import SolveFixedBoundaryResult
+from ..options import validate_fixed_boundary_gd_options as _validate_fixed_boundary_gd_options
+from ..preconditioning.operators import apply_preconditioner as _apply_preconditioner
+from .constraints import enforce_fixed_boundary_and_axis as _enforce_fixed_boundary_and_axis
+from .constraints import grad_rms_state as _grad_rms_state
+from .energy import prepare_fixed_boundary_energy_context as _prepare_fixed_boundary_energy_context
+from .gradient import mask_grad_for_constraints as _mask_grad_for_constraints
+from .gradient import update_state_gd as _update_state_gd
+from .tolerances import resolve_grad_tol as _resolve_grad_tol
+from ...._compat import has_jax as _has_jax
+from ...._compat import jax as _jax
+from ...._compat import jit as _jit
+from ...._compat import jnp as _jnp
 from ....state import VMECState
 
 
@@ -60,42 +72,22 @@ def solve_fixed_boundary_gd_impl(
 ) -> SolveFixedBoundaryResult:
     """Minimize fixed-boundary magnetic energy with gradient descent."""
 
-    if has_jax_func is None or jax_module is None or jnp_module is None or jit_func is None:
-        from ...._compat import has_jax as _has_jax
-        from ...._compat import jax as _jax
-        from ...._compat import jit as _jit
-        from ...._compat import jnp as _jnp
-
-        has_jax_func = _has_jax if has_jax_func is None else has_jax_func
-        jax_module = _jax if jax_module is None else jax_module
-        jnp_module = _jnp if jnp_module is None else jnp_module
-        jit_func = _jit if jit_func is None else jit_func
+    has_jax_func = has_jax_func or _has_jax
+    jax_module = jax_module or _jax
+    jnp_module = jnp_module or _jnp
+    jit_func = jit_func or _jit
 
     if not has_jax_func():
         raise ImportError("solve_fixed_boundary_gd requires JAX (jax + jaxlib)")
 
-    if validate_options_func is None:
-        from ..options import validate_fixed_boundary_gd_options as validate_options_func
-    if prepare_energy_context_func is None:
-        from .energy import (
-            prepare_fixed_boundary_energy_context as prepare_energy_context_func,
-        )
-    if enforce_fixed_boundary_and_axis_func is None:
-        from .constraints import (
-            enforce_fixed_boundary_and_axis as enforce_fixed_boundary_and_axis_func,
-        )
-    if mask_grad_for_constraints_func is None:
-        from .gradient import mask_grad_for_constraints as mask_grad_for_constraints_func
-    if apply_preconditioner_func is None:
-        from ..preconditioning.operators import (
-            apply_preconditioner as apply_preconditioner_func,
-        )
-    if update_state_gd_func is None:
-        from .gradient import update_state_gd as update_state_gd_func
-    if grad_rms_state_func is None:
-        from .constraints import grad_rms_state as grad_rms_state_func
-    if resolve_grad_tol_func is None:
-        from .tolerances import resolve_grad_tol as resolve_grad_tol_func
+    validate_options_func = validate_options_func or _validate_fixed_boundary_gd_options
+    prepare_energy_context_func = prepare_energy_context_func or _prepare_fixed_boundary_energy_context
+    enforce_fixed_boundary_and_axis_func = enforce_fixed_boundary_and_axis_func or _enforce_fixed_boundary_and_axis
+    mask_grad_for_constraints_func = mask_grad_for_constraints_func or _mask_grad_for_constraints
+    apply_preconditioner_func = apply_preconditioner_func or _apply_preconditioner
+    update_state_gd_func = update_state_gd_func or _update_state_gd
+    grad_rms_state_func = grad_rms_state_func or _grad_rms_state
+    resolve_grad_tol_func = resolve_grad_tol_func or _resolve_grad_tol
 
     opts = validate_options_func(
         max_iter=max_iter,

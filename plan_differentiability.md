@@ -11913,6 +11913,78 @@ Completion:
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.9982%.
 
+## 2026-06-18 Optimizer Dependency Default Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved fixed-boundary optimizer default dependencies to module-level aliases
+   in `gd`, `lbfgs`, residual Gauss-Newton, and residual L-BFGS solvers.
+2. Replaced repeated lazy-import/defaulting blocks with compact dependency
+   default assignments while preserving the existing injection hooks used by
+   unit tests and future differentiation seams.
+3. Kept the refactor behavior-preserving: no optimizer policy, tolerances,
+   update rules, or objective assembly changes were made.
+
+Results obtained:
+
+- Net source reduction for this tranche: 124 insertions and 170 deletions
+  across four optimizer files (`-46` LOC).
+- Current implementation function sizes after the cleanup:
+  - `solve_fixed_boundary_gd_impl`: 306 lines.
+  - `solve_fixed_boundary_lbfgs_impl`: 271 lines.
+  - `solve_fixed_boundary_gn_vmec_residual_impl`: 386 lines.
+  - `solve_fixed_boundary_lbfgs_vmec_residual_impl`: 402 lines.
+- The next source-health blocker is still the fixed-boundary residual
+  iteration loop; optimizer dependency boilerplate is no longer the immediate
+  cleanup target.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/optimization/gd.py vmec_jax/solvers/fixed_boundary/optimization/lbfgs.py vmec_jax/solvers/fixed_boundary/optimization/residual_gn.py vmec_jax/solvers/fixed_boundary/optimization/residual_lbfgs.py`
+  - Result: passed.
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/optimization/gd.py vmec_jax/solvers/fixed_boundary/optimization/lbfgs.py vmec_jax/solvers/fixed_boundary/optimization/residual_gn.py vmec_jax/solvers/fixed_boundary/optimization/residual_lbfgs.py`
+  - Result: passed.
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_optimizer_helpers.py tests/test_solve_residual_optimizer_wave8_coverage.py tests/test_end_to_end_vmec_residual_gn.py tests/test_solve_wave3_coverage.py -q`
+  - Result: passed (`51 passed, 1 skipped`).
+- `python tools/diagnostics/source_health.py --top 25 --top-functions 50`
+
+Best next steps:
+
+1. Target the fixed-boundary residual iteration loop with one precise seam,
+   preferably a VMEC2000 scan/trace helper or another localized block that has
+   existing regression coverage.
+2. Avoid adding new generic files for tiny helpers; source-health progress
+   should reduce total lines and preserve understandable domain names.
+3. Continue committing behavior-preserving tranches only after focused tests
+   pass, and rely on CI summaries rather than blocking on long pending shards.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.97%.
+- Differentiability/refactor implementation: 99.999997%.
+- Solver monolith reduction: 99.47%.
+- Free-boundary adjoint monolith reduction: 99.30%.
+- Driver workflow decomposition: 99.87%.
+- Residual iteration decomposition: 95.8%.
+- WOUT diagnostic/profile decomposition: 99.68%.
+- Bcovar/WOUT parity decomposition: 98.35%.
+- Force-kernel decomposition: 98.55%.
+- Optimizer workflow decomposition: 98.9%.
+- Fixed-boundary optimizer decomposition: 94.8%.
+- Implicit residual-adjoint decomposition: 95%.
+- QI objective decomposition: 93%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.7%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.9987%.
+
 ## 2026-06-18 Bsubs Geometry Channel Seam
 
 Branch: `codex/differentiability-refactor-plan`.
