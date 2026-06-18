@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, NamedTuple
+from typing import Any, Callable, NamedTuple
 
 from ...._compat import jnp
 
@@ -88,6 +88,19 @@ class ScanPostRestartUpdate(NamedTuple):
     bad_resets: Any
     bad_growth: Any
     force_bcovar_update: Any
+
+
+class ScanTimeRestartEvaluation(NamedTuple):
+    """Time-control, checkpoint, and restart state for one scan step."""
+
+    fsq_phys: Any
+    fsq: Any
+    res0: Any
+    res1: Any
+    checkpoint_update: ScanCheckpointUpdate
+    restart_decision: ScanRestartDecision
+    restart_update: ScanPostRestartUpdate
+    fsq0_prev_post: Any
 
 
 class ScanFallbackProbeUpdate(NamedTuple):
@@ -476,6 +489,193 @@ def scan_post_restart_update(
         bad_resets=bad_resets_post,
         bad_growth=bad_growth_post,
         force_bcovar_update=force_bcovar_post,
+    )
+
+
+def evaluate_scan_time_control_restart(
+    *,
+    carry_adv: Any,
+    iter2: Any,
+    fsqr: Any,
+    fsqz: Any,
+    fsql: Any,
+    fsqr1: Any,
+    fsqz1: Any,
+    fsql1: Any,
+    fsq0: Any,
+    fsq1: Any,
+    fsq_prev_before: Any,
+    fsq0_prev_before: Any,
+    bad_jacobian: Any,
+    skip_timecontrol: Any,
+    vmec2000_control: bool,
+    reference_mode: bool,
+    use_apply_payload_fusion: bool,
+    dump_timecontrol_scan: bool,
+    scan_timecontrol_dumper: Callable[..., Any],
+    vmec2000_fact: float,
+    use_restart_triggers: bool,
+    vmecpp_restart: bool,
+    k_preconditioner_update_interval: int,
+    stage_prev_fsq: Any | None,
+    stage_transition_factor: float,
+    restart_badjac_factor: float,
+    restart_badprog_factor: float,
+    stage_transition_scale: float,
+    step_size: float,
+    k_ndamp: int,
+    dtype: Any,
+    restart_updates_func: Callable[..., Any],
+    no_restart_updates_func: Callable[..., Any],
+    scan_restart_transition_func: Callable[..., Any],
+    cond_func: Callable[..., Any],
+) -> ScanTimeRestartEvaluation:
+    """Apply VMEC2000 time-control, checkpoint, and restart selection."""
+
+    fsq_phys = fsq0
+    if bool(vmec2000_control):
+        fsq_phys = jnp.where(
+            bad_jacobian & (iter2 > carry_adv.iter1),
+            fsq0_prev_before,
+            fsq_phys,
+        )
+        # VMEC2000 TimeStepControl uses the previous preconditioned residual.
+        fsq = carry_adv.fsq_prev
+        fsq_res = fsq
+    elif not bool(use_apply_payload_fusion):
+        fsq_res = jnp.where(jnp.asarray(reference_mode), fsq_phys, fsq1)
+        fsq = fsq_res
+    else:
+        fsq_res = fsq1
+        fsq = fsq1
+
+    init_mask = (iter2 == carry_adv.iter1) | (carry_adv.res0 < 0.0) | (carry_adv.res1 < 0.0)
+    tc_scalars = scan_time_control_scalars(
+        skip_timecontrol=skip_timecontrol,
+        init_mask=init_mask,
+        fsq=fsq,
+        fsq_res=fsq_res,
+        fsq_phys=fsq_phys,
+        fsq1=fsq1,
+        fsq_prev_before=fsq_prev_before,
+        res0_prev=carry_adv.res0,
+        res1_prev=carry_adv.res1,
+        bad_jacobian=bad_jacobian,
+        vmec2000_control=bool(vmec2000_control),
+    )
+    res0 = tc_scalars.res0
+    res1 = tc_scalars.res1
+    checkpoint_mask = tc_scalars.checkpoint_mask
+    checkpoint_update = scan_checkpoint_update(
+        skip_timecontrol=skip_timecontrol,
+        init_mask=init_mask,
+        checkpoint_mask=checkpoint_mask,
+        current_state=carry_adv.state,
+        previous_state_checkpoint=carry_adv.state_checkpoint,
+        current_residuals=ScanCheckpointResiduals(fsqr, fsqz, fsql, fsqr1, fsqz1, fsql1),
+        previous_residuals=ScanCheckpointResiduals(
+            carry_adv.fsqr_checkpoint,
+            carry_adv.fsqz_checkpoint,
+            carry_adv.fsql_checkpoint,
+            carry_adv.fsqr1_checkpoint,
+            carry_adv.fsqz1_checkpoint,
+            carry_adv.fsql1_checkpoint,
+        ),
+        cond_func=cond_func,
+    )
+    if bool(dump_timecontrol_scan):
+        for cond, stage_id, irst in (
+            ((~skip_timecontrol) & init_mask, 0, 1),
+            (~skip_timecontrol, 1, 1),
+            (checkpoint_mask, 2, 1),
+        ):
+            scan_timecontrol_dumper(
+                cond=cond,
+                stage_id=jnp.asarray(stage_id, dtype=jnp.int32),
+                iter2=iter2,
+                iter1=carry_adv.iter1,
+                fsq=fsq,
+                fsq0=fsq_phys,
+                res0=res0,
+                res1=res1,
+                time_step=carry_adv.time_step,
+                irst=jnp.asarray(irst, dtype=jnp.int32),
+            )
+
+    restart_decision = scan_restart_decision(
+        skip_timecontrol=skip_timecontrol,
+        iter2=iter2,
+        iter1=carry_adv.iter1,
+        fsq=fsq,
+        fsq_phys=fsq_phys,
+        res0=res0,
+        res1=res1,
+        bad_jacobian=bad_jacobian,
+        fsqr=fsqr,
+        fsqz=fsqz,
+        vmec2000_fact=vmec2000_fact,
+        use_restart_triggers=bool(use_restart_triggers),
+        vmecpp_restart=bool(vmecpp_restart),
+        k_preconditioner_update_interval=k_preconditioner_update_interval,
+        stage_prev_fsq=stage_prev_fsq,
+        stage_transition_factor=stage_transition_factor,
+        vmec2000_control=bool(vmec2000_control),
+    )
+    if bool(dump_timecontrol_scan):
+        scan_timecontrol_dumper(
+            cond=restart_decision.do_restart,
+            stage_id=jnp.asarray(3, dtype=jnp.int32),
+            iter2=iter2,
+            iter1=carry_adv.iter1,
+            fsq=fsq,
+            fsq0=fsq_phys,
+            res0=res0,
+            res1=res1,
+            time_step=carry_adv.time_step,
+            irst=restart_decision.irst_restart,
+        )
+
+    def _restart_updates(_):
+        return restart_updates_func(
+            carry_adv=carry_adv,
+            state_checkpoint=checkpoint_update.state_checkpoint,
+            fsq_prev_before=fsq_prev_before,
+            iter2=iter2,
+            restart_reason=restart_decision.restart_reason,
+            vmec2000_control=bool(vmec2000_control),
+            restart_badjac_factor=restart_badjac_factor,
+            restart_badprog_factor=restart_badprog_factor,
+            stage_transition_scale=stage_transition_scale,
+            step_size=step_size,
+            k_ndamp=k_ndamp,
+            dtype=dtype,
+            scan_restart_transition_fn=scan_restart_transition_func,
+        )
+
+    def _no_restart_updates(_):
+        return no_restart_updates_func(carry_adv)
+
+    restart_update = scan_post_restart_update(
+        do_restart=restart_decision.do_restart,
+        restart_updates_fn=_restart_updates,
+        no_restart_updates_fn=_no_restart_updates,
+        cond_func=cond_func,
+        iter2=iter2,
+        stage_spike=restart_decision.stage_spike,
+        stage_prev_fsq=stage_prev_fsq,
+        stage_transition_scale=stage_transition_scale,
+        k_ndamp=k_ndamp,
+        dtype=dtype,
+    )
+    return ScanTimeRestartEvaluation(
+        fsq_phys=fsq_phys,
+        fsq=fsq,
+        res0=res0,
+        res1=res1,
+        checkpoint_update=checkpoint_update,
+        restart_decision=restart_decision,
+        restart_update=restart_update,
+        fsq0_prev_post=jnp.where(restart_decision.do_restart, fsq0_prev_before, fsq_phys),
     )
 
 
