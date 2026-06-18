@@ -91,6 +91,7 @@ from vmec_jax.solvers.fixed_boundary.residual.force_cache import (
     select_compute_forces_callable as _select_compute_forces_callable,
 )
 from vmec_jax.solvers.fixed_boundary.residual.force_payload import (
+    evaluate_residual_force_from_state as _evaluate_residual_force_from_state,
     force_z_channel_square_sums as _force_z_channel_square_sums,  # noqa: F401 - compatibility alias for tests/internal users.
     maybe_debug_force_z_channel_square_sums as _maybe_debug_force_z_channel_square_sums,  # noqa: F401 - compatibility alias for tests/internal users.
     residual_force_payload_after_m1_scalxc_with_scan_debug as _residual_force_payload_after_m1_scalxc_with_scan_debug,  # noqa: F401 - compatibility alias for tests/internal users.
@@ -1186,42 +1187,6 @@ def solve_fixed_boundary_residual_iter(
         constraint_tcon_active: Any | None = None,
         iter_idx: int | None = None,
     ):
-        k = vmec_forces_rz_from_wout(
-            state=state,
-            static=static,
-            wout=wout_like,
-            indata=None,
-            constraint_tcon0=constraint_tcon0,
-            constraint_tcon=constraint_tcon,
-            constraint_precond_diag=constraint_precond_diag,
-            constraint_precond_active=constraint_precond_active,
-            constraint_tcon_active=constraint_tcon_active,
-            constraint_rcon0=constraint_rcon0,
-            constraint_zcon0=constraint_zcon0,
-            freeb_bsqvac_half=freeb_bsqvac_half,
-            freeb_pres_scale=freeb_pres_scale,
-            use_vmec_synthesis=True,
-            trig=trig,
-            iter_idx=iter_idx,
-        )
-        if iter_idx is not None:
-            _maybe_dump_bsube(bc=k.bc, static=static, iter_idx=int(iter_idx))
-            _maybe_dump_bsube_terms(bc=k.bc, static=static, iter_idx=int(iter_idx))
-            _maybe_dump_bsubh(bc=k.bc, static=static, iter_idx=int(iter_idx))
-            _maybe_dump_bsubs(
-                bc=k.bc,
-                state=state,
-                static=static,
-                trig=trig,
-                iter_idx=int(iter_idx),
-                kernels=k,
-            )
-            _maybe_dump_lulv(bc=k.bc, static=static, iter_idx=int(iter_idx), state=state, trig=trig)
-            _maybe_dump_jacobian_terms(k=k, iter_idx=int(iter_idx))
-            _maybe_dump_precond_inputs(bc=k.bc, trig=trig, static=static, iter_idx=int(iter_idx), kernels=k)
-            _maybe_dump_gmetric(bc=k.bc, static=static, iter_idx=int(iter_idx))
-        if iter_idx is not None:
-            _maybe_dump_force_kernels(k=k, static=static, iter_idx=int(iter_idx), label="raw")
         scan_debug_force_enabled = os.getenv("VMEC_JAX_SCAN_DEBUG_FORCE", "") not in ("", "0")
         dump_hlo_force_tomnsps = os.getenv("VMEC_JAX_DUMP_HLO_FORCE_TOMNSPS", "").strip().lower() not in (
             "",
@@ -1230,7 +1195,7 @@ def solve_fixed_boundary_residual_iter(
             "no",
         )
 
-        def _dump_force_tomnsps_hlo(*, label, fn, args, kwargs):
+        def _dump_force_tomnsps_hlo(*, label, fn, args, kwargs) -> None:
             _maybe_dump_hlo_kernel(
                 label=label,
                 fn=fn,
@@ -1241,51 +1206,57 @@ def solve_fixed_boundary_residual_iter(
                 force=True,
             )
 
-        raw_tomnsps_callback = (
-            (lambda frzl: _maybe_dump_tomnsps(frzl=frzl, static=static, iter_idx=int(iter_idx), label="raw"))
-            if iter_idx is not None
-            else None
-        )
-        gc_callback = (
-            (lambda frzl: _maybe_dump_gc(frzl=frzl, static=static, iter_idx=int(iter_idx), label="raw"))
-            if iter_idx is not None
-            else None
-        )
-        force_payload = _residual_force_payload_from_kernels(
-            kernels=k,
+        force_eval = _evaluate_residual_force_from_state(
+            state=state,
             static=static,
-            wout=wout_like,
+            wout_like=wout_like,
             trig=trig,
+            s=s,
+            signgs=signgs,
+            constraint_tcon0=constraint_tcon0,
+            freeb_pres_scale=freeb_pres_scale,
             apply_lforbal=apply_lforbal,
+            apply_m1_constraints=bool(apply_m1_constraints),
             include_edge=bool(include_edge),
             include_edge_residual=include_edge_residual,
-            apply_m1_constraints=bool(apply_m1_constraints),
-            lconm1=bool(getattr(static.cfg, "lconm1", True)),
             zero_m1=zero_m1,
-            s=s,
+            freeb_bsqvac_half=freeb_bsqvac_half,
+            constraint_rcon0=constraint_rcon0,
+            constraint_zcon0=constraint_zcon0,
+            constraint_precond_diag=constraint_precond_diag,
+            constraint_tcon=constraint_tcon,
+            constraint_precond_active=constraint_precond_active,
+            constraint_tcon_active=constraint_tcon_active,
+            iter_idx=iter_idx,
             scan_debug_force_enabled=bool(scan_debug_force_enabled),
             dump_hlo_force_tomnsps=bool(dump_hlo_force_tomnsps),
             hlo_dump_func=_dump_force_tomnsps_hlo,
-            raw_tomnsps_callback=raw_tomnsps_callback,
-            gc_callback=gc_callback,
+            dump_hooks={
+                "bsube": _maybe_dump_bsube,
+                "bsube_terms": _maybe_dump_bsube_terms,
+                "bsubh": _maybe_dump_bsubh,
+                "bsubs": _maybe_dump_bsubs,
+                "lulv": _maybe_dump_lulv,
+                "jacobian_terms": _maybe_dump_jacobian_terms,
+                "precond_inputs": _maybe_dump_precond_inputs,
+                "gmetric": _maybe_dump_gmetric,
+                "force_kernels": _maybe_dump_force_kernels,
+                "tomnsps": _maybe_dump_tomnsps,
+                "gc": _maybe_dump_gc,
+                "gcx2": _maybe_dump_gcx2,
+                "scalars": _maybe_dump_scalars,
+            },
         )
-        frzl_full = force_payload.frzl_full
-        metric_payload = force_payload.metric_payload
-        gcr2, gcz2, gcl2 = metric_payload.gcr2, metric_payload.gcz2, metric_payload.gcl2
-        if iter_idx is not None:
-            _maybe_dump_gcx2(
-                gcr2=gcr2,
-                gcz2=gcz2,
-                gcl2=gcl2,
-                iter_idx=int(iter_idx),
-                include_edge=bool(np.asarray(include_edge)),
-                ns=int(static.cfg.ns),
-            )
-        norms_current = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs)
-        if iter_idx is not None:
-            _maybe_dump_scalars(norms=norms_current, iter_idx=int(iter_idx), ns=int(static.cfg.ns))
-        rz_scale, l_scale = _metric_surface_precond_from_bcovar_jax(bc=k.bc, trig=trig)
-        return k, frzl_full, gcr2, gcz2, gcl2, rz_scale, l_scale, norms_current
+        return (
+            force_eval.kernels,
+            force_eval.frzl_full,
+            force_eval.gcr2,
+            force_eval.gcz2,
+            force_eval.gcl2,
+            force_eval.rz_scale,
+            force_eval.l_scale,
+            force_eval.norms,
+        )
 
     _hlo_dump_helpers.maybe_dump_initial_residual_hlo_kernels(
         state0=state0,

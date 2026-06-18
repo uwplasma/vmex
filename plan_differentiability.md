@@ -10344,3 +10344,72 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
 - CI/runtime/coverage hygiene for this PR: 99.9%.
 - Overall differentiability-refactor PR: 99.990%.
+
+## 2026-06-18 Residual Force Evaluation Seam
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `ResidualForceEvaluationResult` and
+   `evaluate_residual_force_from_state` to the residual force-payload domain
+   module.
+2. Moved the nested residual-loop force evaluation plumbing into that helper:
+   VMEC force-kernel evaluation, optional diagnostic dumps, TOMNSP residual
+   payload construction, scalar force norms, and metric preconditioner scale
+   assembly.
+3. Rewired `solve_fixed_boundary_residual_iter` to call the new helper through
+   a named diagnostic-hook map instead of carrying all diagnostic plumbing in
+   the loop body.
+4. Kept compatibility aliases in `iteration.py` stable for internal tests and
+   downstream monkeypatch users.
+
+Results obtained:
+
+- The force-evaluation part of the residual solve now has a named,
+   separately-testable domain seam.
+- The residual iteration file dropped from 7543 to 7514 lines; the main solve
+   function dropped from 7021 to 6991 lines.
+- The remaining dominant hotspot is still `_run_vmec2000_scan` and its nested
+   `_scan_step`/`_advance_step` controller code.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/residual/force_payload.py vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/force_payload.py vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_vmec_forces_synthetic_helpers.py tests/test_solve_hotpaths.py::test_preconditioner_output_scaling_gate_is_gpu_only_without_gpu tests/test_resume_state.py::test_accelerated_resume_state_is_minimal_and_restartable tests/test_solve_wave7_coverage.py::test_residual_iter_vmec2000_scan_minimal_one_step -q`
+- `JAX_ENABLE_X64=1 VMEC_JAX_SKIP_PY311_COVERAGE_ONLY=1 xargs python -m pytest -q -n 4 -m "not full and not vmec2000 and not simsopt" --durations=20 < /tmp/driver-solve-discrete.args`
+  - Result: `995 passed, 30 skipped`.
+- `python tools/diagnostics/source_health.py --top 14 --top-functions 20`
+
+Best next steps:
+
+1. Extract the scan controller state transition in `_run_vmec2000_scan`,
+   starting with `_advance_step`, because that is now the largest residual-loop
+   inner helper and is the next meaningful simplification point.
+2. Add focused tests for the extracted scan transition before moving the full
+   scan runner out of `iteration.py`.
+3. Re-run the driver shard after each scan-controller move; this shard catches
+   the relevant scan, resume, VMEC2000-control, and xdist interactions.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.97%.
+- Differentiability/refactor implementation: 99.999955%.
+- Solver monolith reduction: 99.32%.
+- Free-boundary adjoint monolith reduction: 99.30%.
+- Driver workflow decomposition: 99.3%.
+- Residual iteration decomposition: 92.5%.
+- WOUT diagnostic/profile decomposition: 99.1%.
+- Optimizer workflow decomposition: 98.8%.
+- Fixed-boundary optimizer decomposition: 94.0%.
+- Implicit residual-adjoint decomposition: 93%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95%.
+- CI/runtime/coverage hygiene for this PR: 99.9%.
+- Overall differentiability-refactor PR: 99.991%.
