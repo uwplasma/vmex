@@ -12019,3 +12019,118 @@ generation for all three rows.  No source files changed for this evidence run.
 No user input is needed.
 
 ---
+
+## 97. 2026-06-18 M13g side-power scan at fixed corner amplitude
+
+This evidence run scanned integer side-localization powers at fixed corner
+amplitude to decide whether sharper mirror-side localization is helping the
+toroidal hybrid fixture.
+
+### Steps taken
+
+- Ran three short solved rows with:
+  - `side_minor_modulation=0.16`;
+  - `side_elongation=0.35`;
+  - `corner_amplitude=0.025`;
+  - `corner_power=2.0`;
+  - `side_power` in `{1.0, 2.0, 3.0}`.
+- Used `ns=7`, `mpol=5`, `ntor=14`, `max_iter=15`, `NITER_ARRAY=25`,
+  `solver_mode=parity`, and `use_scan=False`.
+- Checked the residual-history plot for the sharpest `side_power=3` row.
+- Rechecked PR CI; early jobs had started passing, with the main test/coverage
+  jobs still pending.
+
+### Results obtained
+
+Commands used the same pattern, varying only `--side-power` and `--outdir`:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_hybrid_m13g_side_power_X \
+  --ns-array 7 \
+  --mode-pairs 5:14 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 25 \
+  --ftol 1e-9 \
+  --run-solve \
+  --max-iter 15 \
+  --solver-mode parity \
+  --no-use-scan \
+  --side-minor-modulation 0.16 \
+  --side-elongation 0.35 \
+  --side-power X \
+  --corner-amplitude 0.025 \
+  --corner-power 2.0
+```
+
+Scan table:
+
+| side power | fit error | initial `fsq` | best `fsq` | final `fsq` | best iter | mean iota | magnetic well |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `1.0` | `4.440892098501e-16` | `8.340589921272e-04` | `7.503096893488e-05` | `8.147623070621e-05` | `13` | `3.181644631676e-03` | `-5.008247661877e-02` |
+| `2.0` | `8.881784197001e-16` | `9.246691962930e-04` | `8.749615941543e-05` | `9.300821628263e-05` | `13` | `3.166542338166e-03` | `-5.670267292936e-02` |
+| `3.0` | `8.881784197001e-16` | `1.085636359630e-03` | `1.091580926128e-04` | `1.091580926128e-04` | `14` | `3.083387738702e-03` | `-6.178935866879e-02` |
+
+Sharper side localization makes the magnetic-well proxy more negative but
+increases the residual and does not improve mean iota in this short scan.
+`side_power=1` is easiest for the solver, while `side_power=2` remains useful
+for visibly sharper side/corner separation.  `side_power=3` is not attractive
+as a default without a stronger physics target.
+
+Generated ignored plot checked visually:
+
+- `results/toroidal_hybrid_m13g_side_power_3/figures/toroidal_hybrid_fsq_history.png`.
+
+CI status at this checkpoint:
+
+- `Console Script Smoke`: passed.
+- `Parity Manifest Smoke (dry-run)`: passed.
+- `Build (wheel/sdist + docs)`: passed.
+- Main fast-test and coverage jobs: pending.
+
+### How it was tested
+
+The commands above exercised the convergence runner, WOUT writing, and plot
+generation for all three rows.  No source files changed for this evidence run.
+
+### File structure and best-practice notes
+
+- Results remain under ignored `results/`.
+- The plan records compact metrics only.
+- The current `sharp` preset remains `side_power=2`, `corner_amplitude=0.025`
+  because it gives visible localization without the larger residual penalty of
+  `side_power=3` or `corner_amplitude=0.035`.
+
+### Best next steps
+
+1. Commit and push this side-power scan evidence.
+2. Wait for CI only if a concrete failure appears; otherwise continue work.
+3. Start an initialization-matched parity design note for toroidal hybrids.
+4. Then return to implementation lanes outside M13g: differentiable
+   solved-state API design and ESSOS beta-scan completion.
+
+### Completion percentages after M97
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `86%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `88%`.
+- I/O schema and docs: `94%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `68%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `60%`.
+- ESSOS circular-coil mirror beta scan: `53%`.
+- PR merge readiness overall: `92%`.
+
+### User input needed
+
+No user input is needed.
+
+---
