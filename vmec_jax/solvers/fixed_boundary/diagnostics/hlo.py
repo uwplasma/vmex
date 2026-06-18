@@ -99,3 +99,95 @@ def maybe_dump_hlo_kernel(
         HLO_DUMPED_KEYS.add(key)
     except Exception:
         return
+
+
+def maybe_dump_initial_residual_hlo_kernels(
+    *,
+    state0: Any,
+    static: Any,
+    wout_like: Any,
+    trig: Any,
+    constraint_tcon0: Any,
+    apply_lforbal: bool,
+    maybe_dump_kernel: Callable[..., None] = maybe_dump_hlo_kernel,
+    getenv: Callable[[str, str], str] = os.getenv,
+) -> None:
+    """Dump optional first-call HLO probes for residual force assembly.
+
+    This is intentionally diagnostic-only.  All failures are swallowed so that
+    debug HLO extraction never changes solver behavior.
+    """
+
+    if not getenv("VMEC_JAX_DUMP_HLO_DIR", "").strip():
+        return
+    try:
+
+        def _bcovar_only(st):
+            from vmec_jax.vmec_bcovar import vmec_bcovar_half_mesh_from_wout
+
+            return vmec_bcovar_half_mesh_from_wout(
+                state=st,
+                static=static,
+                wout=wout_like,
+                pres=None,
+                use_wout_bsup=False,
+                use_wout_bsub_for_lambda=False,
+                use_wout_bmag_for_bsq=False,
+                use_vmec_synthesis=True,
+                trig=trig,
+            )
+
+        maybe_dump_kernel(
+            label="bcovar",
+            fn=_bcovar_only,
+            args=(state0,),
+            kwargs={},
+            static=static,
+            wout_like=wout_like,
+        )
+    except Exception:
+        pass
+    try:
+        from vmec_jax.vmec_forces import vmec_forces_rz_from_wout
+        from vmec_jax.vmec_forces import vmec_residual_internal_from_kernels
+
+        k_hlo = vmec_forces_rz_from_wout(
+            state=state0,
+            static=static,
+            wout=wout_like,
+            indata=None,
+            constraint_tcon0=constraint_tcon0,
+            constraint_tcon=None,
+            constraint_precond_diag=None,
+            constraint_precond_active=None,
+            constraint_tcon_active=None,
+            use_wout_bsup=False,
+            use_vmec_synthesis=True,
+            trig=trig,
+            iter_idx=None,
+        )
+        mask_pack_hlo = static.tomnsps_masks if getattr(static, "tomnsps_masks", None) is not None else None
+
+        def _tomnsps_only(k_in):
+            frzl = vmec_residual_internal_from_kernels(
+                k_in,
+                cfg_ntheta=int(static.cfg.ntheta),
+                cfg_nzeta=int(static.cfg.nzeta),
+                wout=wout_like,
+                trig=trig,
+                apply_lforbal=apply_lforbal,
+                include_edge=False,
+                masks=mask_pack_hlo,
+            )
+            return (frzl.frcc, frzl.frss, frzl.fzsc, frzl.fzcs, frzl.flsc, frzl.flcs)
+
+        maybe_dump_kernel(
+            label="tomnsps",
+            fn=_tomnsps_only,
+            args=(k_hlo,),
+            kwargs={},
+            static=static,
+            wout_like=wout_like,
+        )
+    except Exception:
+        pass
