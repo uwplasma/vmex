@@ -341,6 +341,19 @@ class BcovarMetricAssembly:
     lam_v: Any
 
 
+@dataclass(frozen=True)
+class BcovarFluxContext:
+    """Flux/current profiles used by VMEC bcovar and add_fluxes."""
+
+    lamscale: Any
+    signgs: int
+    phipf_internal: Any
+    chips_eff: Any
+    ncurr: int
+    lcurrent: bool
+    icurv: Any
+
+
 def _resolve_bcovar_state_and_trig(
     *,
     state: Any,
@@ -703,6 +716,59 @@ def _compute_bcovar_metric_assembly(
     )
 
 
+def _resolve_bcovar_flux_context(*, wout: Any, s: Any, ns: int) -> BcovarFluxContext:
+    """Resolve VMEC internal flux/current arrays for bcovar field assembly."""
+
+    lamscale = lamscale_from_phips(wout.phips, s)
+    signgs = int(getattr(wout, "signgs", 1))
+    chipf_out = getattr(wout, "chipf", None)
+    phipf_cached = getattr(wout, "phipf_internal", None)
+    chipf_cached = getattr(wout, "chipf_internal", None)
+    chips_cached = getattr(wout, "chips_eff", None)
+    if phipf_cached is None:
+        phipf_out = jnp.asarray(getattr(wout, "phipf"))
+        signgs = int(getattr(wout, "signgs", 1))
+        flux_is_internal = bool(getattr(wout, "flux_is_internal", False))
+        if not flux_is_internal:
+            scale = jnp.asarray(TWOPI, dtype=phipf_out.dtype) * jnp.asarray(signgs, dtype=phipf_out.dtype)
+            phipf_internal = phipf_out / scale
+            chipf_internal = None if chipf_out is None else (jnp.asarray(chipf_out) / scale)
+        else:
+            phipf_internal = phipf_out
+            chipf_internal = None if chipf_out is None else jnp.asarray(chipf_out)
+    else:
+        phipf_internal = jnp.asarray(phipf_cached)
+        chipf_internal = None if chipf_cached is None else jnp.asarray(chipf_cached)
+    if chips_cached is not None:
+        chips_eff = jnp.asarray(chips_cached)
+    elif chipf_out is not None:
+        chips_eff = chips_from_wout_chipf(
+            chipf=chipf_internal,
+            phipf=phipf_internal,
+            iotaf=getattr(wout, "iotaf", None),
+            iotas=getattr(wout, "iotas", None),
+            # Solver-internal wout-like objects may omit iotaf/iotas and provide
+            # half-mesh chipf; keep VMEC2000-compatible behavior in that case.
+            assume_half_if_unknown=True,
+        )
+    else:
+        chips_eff = jnp.asarray(getattr(wout, "iotaf", getattr(wout, "iotas", 0.0))) * jnp.asarray(phipf_internal)
+    ncurr = int(getattr(wout, "ncurr", 0))
+    lcurrent = bool(getattr(wout, "lcurrent", True))
+    icurv = jnp.asarray(getattr(wout, "icurv", jnp.zeros((ns,), dtype=phipf_internal.dtype)))
+    if int(icurv.shape[0]) != ns:
+        icurv = jnp.zeros((ns,), dtype=phipf_internal.dtype)
+    return BcovarFluxContext(
+        lamscale=lamscale,
+        signgs=int(signgs),
+        phipf_internal=phipf_internal,
+        chips_eff=chips_eff,
+        ncurr=int(ncurr),
+        lcurrent=bool(lcurrent),
+        icurv=icurv,
+    )
+
+
 def vmec_bcovar_half_mesh_from_wout(
     *,
     state,
@@ -820,48 +886,14 @@ def vmec_bcovar_half_mesh_from_wout(
     #   4) adds the full-mesh flux function chips(js) via `add_fluxes`.
     #
     # See `VMEC2000/Sources/General/bcovar.f` and `add_fluxes.f90`.
-    lamscale = lamscale_from_phips(wout.phips, s)
-    signgs = int(getattr(wout, "signgs", 1))
-
-    # VMEC adds the **full-mesh** flux function `chips(js)` to bsupu in
-    # `add_fluxes`, while `wout` commonly stores the half-mesh array `chipf`.
-    chipf_out = getattr(wout, "chipf", None)
-    phipf_cached = getattr(wout, "phipf_internal", None)
-    chipf_cached = getattr(wout, "chipf_internal", None)
-    chips_cached = getattr(wout, "chips_eff", None)
-    if phipf_cached is None:
-        phipf_out = jnp.asarray(getattr(wout, "phipf"))
-        signgs = int(getattr(wout, "signgs", 1))
-        flux_is_internal = bool(getattr(wout, "flux_is_internal", False))
-        if not flux_is_internal:
-            scale = jnp.asarray(TWOPI, dtype=phipf_out.dtype) * jnp.asarray(signgs, dtype=phipf_out.dtype)
-            phipf_internal = phipf_out / scale
-            chipf_internal = None if chipf_out is None else (jnp.asarray(chipf_out) / scale)
-        else:
-            phipf_internal = phipf_out
-            chipf_internal = None if chipf_out is None else jnp.asarray(chipf_out)
-    else:
-        phipf_internal = jnp.asarray(phipf_cached)
-        chipf_internal = None if chipf_cached is None else jnp.asarray(chipf_cached)
-    if chips_cached is not None:
-        chips_eff = jnp.asarray(chips_cached)
-    elif chipf_out is not None:
-        chips_eff = chips_from_wout_chipf(
-            chipf=chipf_internal,
-            phipf=phipf_internal,
-            iotaf=getattr(wout, "iotaf", None),
-            iotas=getattr(wout, "iotas", None),
-            # Solver-internal wout-like objects may omit iotaf/iotas and provide
-            # half-mesh chipf; keep VMEC2000-compatible behavior in that case.
-            assume_half_if_unknown=True,
-        )
-    else:
-        chips_eff = jnp.asarray(getattr(wout, "iotaf", getattr(wout, "iotas", 0.0))) * jnp.asarray(phipf_internal)
-    ncurr = int(getattr(wout, "ncurr", 0))
-    lcurrent = bool(getattr(wout, "lcurrent", True))
-    icurv = jnp.asarray(getattr(wout, "icurv", jnp.zeros((ns,), dtype=phipf_internal.dtype)))
-    if int(icurv.shape[0]) != ns:
-        icurv = jnp.zeros((ns,), dtype=phipf_internal.dtype)
+    flux_context = _resolve_bcovar_flux_context(wout=wout, s=s, ns=int(ns))
+    lamscale = flux_context.lamscale
+    signgs = flux_context.signgs
+    phipf_internal = flux_context.phipf_internal
+    chips_eff = flux_context.chips_eff
+    ncurr = flux_context.ncurr
+    lcurrent = flux_context.lcurrent
+    icurv = flux_context.icurv
 
     # VMEC bcovar: overg = 1 / sqrtg (phipog in bcovar.f).
     denom = jac.sqrtg

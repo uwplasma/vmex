@@ -11650,3 +11650,65 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.7%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.9978%.
+
+## 2026-06-18 Bcovar Flux Context Seam
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `BcovarFluxContext` and `_resolve_bcovar_flux_context` to
+   `vmec_jax.vmec_bcovar`.
+2. Moved VMEC internal flux scaling, cached `phipf`/`chipf` handling,
+   `chips_eff` reconstruction, current flags, and `icurv` normalization out of
+   `vmec_bcovar_half_mesh_from_wout`.
+3. Preserved the solver-internal `chipf` fallback and current-driven
+   `add_fluxes` inputs.
+
+Results obtained:
+
+- `vmec_bcovar_half_mesh_from_wout` dropped from 527 to 493 lines.
+- The remaining field block now starts from explicit flux/current context
+  variables, which makes the next contravariant-field extraction less likely to
+  mix convention handling with numerical assembly.
+- Focused WOUT/bcovar, finite-beta, and physics-parity helper tests remained
+  green.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/vmec_bcovar.py`
+- `python -m ruff check vmec_jax/vmec_bcovar.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_driver_wave10_coverage.py tests/test_physics_parity_helper_gates.py tests/test_finite_beta_helpers_unit.py tests/test_wout_helpers.py -q`
+  - Result: passed, with one skip and the known single-surface JXBFORCE warnings.
+- `python tools/diagnostics/source_health.py --top 25 --top-functions 35`
+
+Best next steps:
+
+1. Extract the contravariant-field/current-update producer from bcovar, but do
+   that as one coherent payload because it includes VMEC `add_fluxes`.
+2. Run a broader driver/WOUT validation shard after that extraction.
+3. Then reassess source-health; `vmec_bcovar_half_mesh_from_wout` should be
+   close enough to leave in favor of implicit-adjoint and driver hotspots.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.97%.
+- Differentiability/refactor implementation: 99.999993%.
+- Solver monolith reduction: 99.46%.
+- Free-boundary adjoint monolith reduction: 99.30%.
+- Driver workflow decomposition: 99.72%.
+- Residual iteration decomposition: 95.8%.
+- WOUT diagnostic/profile decomposition: 99.54%.
+- Bcovar/WOUT parity decomposition: 98.0%.
+- Optimizer workflow decomposition: 98.8%.
+- Fixed-boundary optimizer decomposition: 94.0%.
+- Implicit residual-adjoint decomposition: 93%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.7%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.9979%.
