@@ -212,6 +212,44 @@ def _qi_boozer_surface_grid(
     )
 
 
+def _qi_branch_width_residuals(grid: _QIBoozerSurfaceGrid, *, branch_width_weight: float, branch_width_softness: float):
+    """Return Goodman-style branch-width residuals on the smooth QI grid."""
+
+    dtype, empty3 = grid.dtype, jnp.zeros((grid.nsurf, grid.nalpha, 0), dtype=grid.dtype)
+    if float(branch_width_weight) == 0.0:
+        return {"residuals1d": jnp.zeros((0,), dtype=dtype), "residuals3d": empty3,
+                "branch_widths": empty3, "branch_widths_mean": jnp.zeros((grid.nsurf, 1, 0), dtype=dtype)}
+
+    bperiodic = jnp.swapaxes(grid.bnorm[:, :-1, :], 1, 2)  # (nsurf, nalpha, nperiodic)
+    nperiodic = int(grid.nphi - 1)
+    offsets = jnp.arange(max(1, nperiodic // 2) + 1, dtype=jnp.int32)
+    min_index = jnp.argmin(bperiodic, axis=-1)
+    left_index = jnp.mod(min_index[:, :, None] - offsets[None, None, :], nperiodic)
+    right_index = jnp.mod(min_index[:, :, None] + offsets[None, None, :], nperiodic)
+    left_branch = jnp.maximum.accumulate(jnp.take_along_axis(bperiodic, left_index, axis=-1), axis=-1)
+    right_branch = jnp.maximum.accumulate(jnp.take_along_axis(bperiodic, right_index, axis=-1), axis=-1)
+    tiny = jnp.asarray(jnp.finfo(dtype).tiny, dtype=dtype)
+    left_branch = (left_branch - left_branch[..., :1]) / jnp.maximum(left_branch[..., -1:] - left_branch[..., :1], tiny)
+    right_branch = (right_branch - right_branch[..., :1]) / jnp.maximum(right_branch[..., -1:] - right_branch[..., :1], tiny)
+    distance = jnp.asarray(offsets, dtype=dtype) / jnp.asarray(nperiodic, dtype=dtype)
+    branch_eps = jnp.maximum(jnp.asarray(float(branch_width_softness), dtype=dtype), jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype))
+
+    def _smooth_branch_crossing(branch):
+        logits = -((branch[:, :, :, None] - grid.levels[None, None, None, :]) / branch_eps) ** 2
+        logits = logits - jnp.max(logits, axis=2, keepdims=True)
+        crossing_weights = jnp.exp(logits)
+        crossing_weights = crossing_weights / jnp.sum(crossing_weights, axis=2, keepdims=True)
+        return jnp.sum(crossing_weights * distance[None, None, :, None], axis=2)
+
+    branch_widths = _smooth_branch_crossing(left_branch) + _smooth_branch_crossing(right_branch)
+    branch_widths_mean = jnp.mean(branch_widths, axis=1, keepdims=True)
+    residuals3d = ((branch_widths - branch_widths_mean) * jnp.sqrt(grid.weights_arr)[:, None, None]
+                   * jnp.asarray(float(branch_width_weight), dtype=dtype))
+    residuals1d = jnp.ravel(residuals3d) / jnp.sqrt(jnp.asarray(grid.nalpha * grid.level_count, dtype=dtype))
+    return {"residuals1d": residuals1d, "residuals3d": residuals3d, "branch_widths": branch_widths,
+            "branch_widths_mean": branch_widths_mean}
+
+
 def mirror_ratio_penalty_from_boozer_modes(
     *,
     bmnc_b,
@@ -807,53 +845,15 @@ def quasi_isodynamic_residual_from_boozer_modes(
     )
     width_residuals1d = jnp.ravel(width_residuals3d) / jnp.sqrt(jnp.asarray(nalpha * level_count, dtype=dtype))
 
-    branch_width_residuals1d = jnp.zeros((0,), dtype=dtype)
-    branch_width_residuals3d = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
-    branch_widths = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
-    branch_widths_mean = jnp.zeros((nsurf, 1, 0), dtype=dtype)
-    if float(branch_width_weight) != 0.0:
-        bperiodic = jnp.swapaxes(bnorm[:, :-1, :], 1, 2)  # (nsurf, nalpha, nperiodic)
-        nperiodic = int(nphi - 1)
-        half_period = max(1, nperiodic // 2)
-        offsets = jnp.arange(half_period + 1, dtype=jnp.int32)
-        min_index = jnp.argmin(bperiodic, axis=-1)
-        left_index = jnp.mod(min_index[:, :, None] - offsets[None, None, :], nperiodic)
-        right_index = jnp.mod(min_index[:, :, None] + offsets[None, None, :], nperiodic)
-        left_raw = jnp.take_along_axis(bperiodic, left_index, axis=-1)
-        right_raw = jnp.take_along_axis(bperiodic, right_index, axis=-1)
-
-        left_branch = jnp.maximum.accumulate(left_raw, axis=-1)
-        right_branch = jnp.maximum.accumulate(right_raw, axis=-1)
-        tiny = jnp.asarray(jnp.finfo(dtype).tiny, dtype=dtype)
-        left_branch = (left_branch - left_branch[..., :1]) / jnp.maximum(left_branch[..., -1:] - left_branch[..., :1], tiny)
-        right_branch = (right_branch - right_branch[..., :1]) / jnp.maximum(
-            right_branch[..., -1:] - right_branch[..., :1], tiny
-        )
-        distance = jnp.asarray(offsets, dtype=dtype) / jnp.asarray(nperiodic, dtype=dtype)
-        branch_eps = jnp.maximum(
-            jnp.asarray(float(branch_width_softness), dtype=dtype),
-            jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype),
-        )
-
-        def _smooth_branch_crossing(branch):
-            logits = -((branch[:, :, :, None] - levels[None, None, None, :]) / branch_eps) ** 2
-            logits = logits - jnp.max(logits, axis=2, keepdims=True)
-            crossing_weights = jnp.exp(logits)
-            crossing_weights = crossing_weights / jnp.sum(crossing_weights, axis=2, keepdims=True)
-            return jnp.sum(crossing_weights * distance[None, None, :, None], axis=2)
-
-        left_crossing = _smooth_branch_crossing(left_branch)
-        right_crossing = _smooth_branch_crossing(right_branch)
-        branch_widths = left_crossing + right_crossing
-        branch_widths_mean = jnp.mean(branch_widths, axis=1, keepdims=True)
-        branch_width_residuals3d = (
-            (branch_widths - branch_widths_mean)
-            * jnp.sqrt(weights_arr)[:, None, None]
-            * jnp.asarray(float(branch_width_weight), dtype=dtype)
-        )
-        branch_width_residuals1d = jnp.ravel(branch_width_residuals3d) / jnp.sqrt(
-            jnp.asarray(nalpha * level_count, dtype=dtype)
-        )
+    branch_width = _qi_branch_width_residuals(
+        qi_grid,
+        branch_width_weight=branch_width_weight,
+        branch_width_softness=branch_width_softness,
+    )
+    branch_width_residuals1d = branch_width["residuals1d"]
+    branch_width_residuals3d = branch_width["residuals3d"]
+    branch_widths = branch_width["branch_widths"]
+    branch_widths_mean = branch_width["branch_widths_mean"]
 
     profile_mean = jnp.mean(bnorm, axis=2, keepdims=True)
     profile_residuals3d = (
