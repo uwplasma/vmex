@@ -9081,3 +9081,144 @@ Result: all checks passed.
 No user input is needed.
 
 ---
+## 77. 2026-06-18 M12o LCFS selection and pilot-row helpers
+
+This tranche finished the next simplification slice for the circular-coil
+free-boundary example.  Candidate selection now returns an explicit selection
+object with exact coil-resampled scoring metadata, and skipped/completed pilot
+rows are generated through shared helper functions instead of hand-built JSON
+blocks in the main solve loop.
+
+### Steps taken
+
+- Added the private `_LCFSProposalSelection` dataclass in the root
+  `examples/mirror_free_boundary_circular_coils.py` workflow.
+- Updated `_select_lcfs_proposal` to return:
+  - chosen proposal;
+  - exact candidate summaries;
+  - guard-allowed strategy list;
+  - guard rejection reason when the strict normal-field guard leaves only
+    no-op.
+- Added shared pilot-row helpers:
+  - `_next_proposal_fields`;
+  - `_skipped_lcfs_pilot_row`;
+  - `_completed_lcfs_pilot_row`.
+- Added root example test assertions for the new guard metadata fields.
+- Ran a plotted three-step strict mixed beta-10 case after the helper
+  extraction.
+
+### Results obtained
+
+Generated artifacts:
+
+- `results/mirror/m12o_mixed_lcfs_three_step_plots/free_boundary_circular_coils_metrics.json`.
+- `results/mirror/m12o_mixed_lcfs_three_step_plots/figures/fixed_boundary_beta_10_lcfs_step_3/free_boundary_circular_coils_beta_10_lcfs_step_3_lcfs_diagnostic.png`.
+- `results/mirror/m12o_mixed_lcfs_three_step_plots/figures/fixed_boundary_beta_10_lcfs_step_3/free_boundary_circular_coils_beta_10_lcfs_step_3_mirror_boundary_3d.png`.
+
+Strict mixed beta-10 plotted three-step probe:
+
+| row | merit | pressure RMS | `B_ext.n` RMS | accepted | figures |
+| :--- | ---: | ---: | ---: | :---: | ---: |
+| baseline | `1.000020371650` | `1.803515365850` | `7.657346104349e-03` | n/a | `11` |
+| step 1 | `0.782835620661` | `1.411809156436` | `7.655747922838e-03` | `true` | `11` |
+| step 2 | `0.594625153775` | `1.072354482550` | `7.615656217692e-03` | `true` | `11` |
+| step 3 | `0.431268555842` | `0.777718985048` | `7.442445773682e-03` | `true` | `11` |
+
+The baseline strict guard allowed `bnormal_slope`, `mixed_scale_bnormal`, and
+`noop`; it selected `mixed_scale_bnormal`.  The three pilot rows remain
+accepted and monotonic after the row-helper extraction.
+
+### How it was tested
+
+Focused root example tests:
+
+```bash
+JAX_ENABLE_X64=1 pytest \
+  tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_example_runs_without_plots \
+  tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_strict_bnormal_guard_can_skip_pilot \
+  -q
+```
+
+Result: `2 passed in 7.01s`.
+
+Plotted three-step strict mixed probe:
+
+```bash
+JAX_ENABLE_X64=1 python examples/mirror_free_boundary_circular_coils.py \
+  --outdir results/mirror/m12o_mixed_lcfs_three_step_plots \
+  --betas 10 \
+  --ntheta 24 \
+  --nxi 33 \
+  --n-segments 256 \
+  --run-fixed-boundary-baseline \
+  --run-lcfs-pilot \
+  --lcfs-pilot-steps 3 \
+  --baseline-maxiter 0 \
+  --lcfs-require-bnormal-nonincrease
+```
+
+Result: metrics JSON, setup JSON, baseline `mout`, three pilot `mout` files,
+and plotted bundles written.  The step-3 LCFS diagnostic and 3D boundary plots
+were opened and visually checked.
+
+Lint/format/whitespace:
+
+```bash
+python -m ruff check \
+  examples/mirror_free_boundary_circular_coils.py \
+  tests/mirror/test_mirror_examples.py
+python -m ruff format --check \
+  examples/mirror_free_boundary_circular_coils.py \
+  tests/mirror/test_mirror_examples.py
+git diff --check
+```
+
+Result: all checks passed.
+
+### File structure and best-practice notes
+
+- Exact candidate scoring remains private to the root example because it is
+  tied to the example's circular-coil provider and plotting grid.
+- The selection dataclass makes guard behavior explicit without adding a new
+  public API object too early.
+- Pilot row helpers centralize skipped and completed row schemas, reducing
+  drift risk as more pilot modes are added.
+- The main fixed-boundary baseline loop is still long, but the largest JSON
+  assembly blocks are now factored and can be moved into a reusable pilot-step
+  helper in the next tranche.
+
+### Best next steps
+
+1. Commit and push M12o.
+2. Extract a reusable one-step LCFS pilot helper from the remaining loop body:
+   - run fixed-boundary candidate solve;
+   - write/reload `mout`;
+   - sample external field;
+   - compute LCFS diagnostic and merit;
+   - build next candidate selection;
+   - optionally write plots.
+3. After that extraction, update docs with the current strict mixed pilot
+   workflow and proceed to the stellarator-mirror hybrid boundary lane.
+
+### Completion percentages after M12o
+
+- Geometry/grids/bases: `90%`.
+- Field/energy/residual kernels: `86%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `87%`.
+- I/O schema and docs: `90%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `65%`.
+- Stellarator-mirror hybrid lane: `10%`.
+- ESSOS circular-coil mirror beta scan: `52%`.
+- PR merge readiness overall: `90%`.
+
+### User input needed
+
+No user input is needed.
+
+---

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import json
 from pathlib import Path
 import sys
@@ -38,6 +39,14 @@ from vmec_jax.mirror import (
     write_mirror_output,
     write_mirror_free_boundary_circular_coil_scan,
 )
+
+
+@dataclass(frozen=True)
+class _LCFSProposalSelection:
+    proposal: object
+    candidate_summaries: list[dict[str, object]]
+    allowed_strategies: tuple[str, ...]
+    rejection_reason: str | None
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -230,7 +239,7 @@ def _select_lcfs_proposal(
     cap_taper_power: float,
     smoothing_passes: int,
     require_bnormal_nonincrease: bool,
-):
+) -> _LCFSProposalSelection:
     candidates = list(
         propose_axisymmetric_mirror_lcfs_candidate_set(
             lcfs,
@@ -257,7 +266,13 @@ def _select_lcfs_proposal(
     }
     if mode in mode_to_strategy:
         strategy = mode_to_strategy[mode]
-        return next(candidate for candidate in candidates if candidate.strategy == strategy), summaries
+        proposal = next(candidate for candidate in candidates if candidate.strategy == strategy)
+        return _LCFSProposalSelection(
+            proposal=proposal,
+            candidate_summaries=summaries,
+            allowed_strategies=tuple(summary["strategy"] for summary in summaries),
+            rejection_reason=None,
+        )
     allowed = np.ones(len(summaries), dtype=bool)
     if require_bnormal_nonincrease:
         baseline_bnormal = float(baseline_merit.external_bnormal_rms)
@@ -270,7 +285,110 @@ def _select_lcfs_proposal(
         )
     merit_values = [summary["predicted_merit"] if allowed[index] else np.inf for index, summary in enumerate(summaries)]
     best_index = int(np.argmin(merit_values))
-    return candidates[best_index], summaries
+    allowed_strategies = tuple(
+        str(summary["strategy"]) for index, summary in enumerate(summaries) if bool(allowed[index])
+    )
+    nonzero_allowed = any(strategy != "noop" for strategy in allowed_strategies)
+    selected = candidates[best_index]
+    rejection_reason = (
+        "normal_field_guard_no_candidate"
+        if require_bnormal_nonincrease and selected.strategy == "noop" and not nonzero_allowed
+        else None
+    )
+    return _LCFSProposalSelection(
+        proposal=selected,
+        candidate_summaries=summaries,
+        allowed_strategies=allowed_strategies,
+        rejection_reason=rejection_reason,
+    )
+
+
+def _next_proposal_fields(selection: _LCFSProposalSelection) -> dict[str, object]:
+    proposal = selection.proposal
+    return {
+        "lcfs_update_pressure_balance_rms_predicted_next": float(proposal.pressure_balance_rms_predicted),
+        "lcfs_update_strategy_next": str(proposal.strategy),
+        "lcfs_update_candidate_summaries_next": selection.candidate_summaries,
+        "lcfs_update_allowed_strategies_next": list(selection.allowed_strategies),
+        "lcfs_update_rejection_reason_next": selection.rejection_reason,
+        "lcfs_update_cap_taper_power_next": float(proposal.cap_taper_power),
+        "lcfs_update_smoothing_passes_next": int(proposal.smoothing_passes),
+        "lcfs_update_max_relative_delta_radius_next": float(
+            np.max(np.abs(proposal.delta_radius) / np.maximum(proposal.old_radius, 1.0e-300))
+        ),
+    }
+
+
+def _skipped_lcfs_pilot_row(
+    *,
+    step: int,
+    current_lcfs,
+    current_merit,
+    selection: _LCFSProposalSelection,
+) -> dict[str, object]:
+    row = {
+        "step": int(step),
+        "mout": None,
+        "accepted": False,
+        "skipped": True,
+        "rejection_reason": selection.rejection_reason or "noop_candidate_selected",
+        "final_residual_norm": None,
+        "final_fsq": None,
+        "final_normalized_force": None,
+        "min_sqrtg": None,
+        "mirror_ratio": None,
+        "lcfs_external_bnormal_rms": float(current_lcfs.external_bnormal_rms),
+        "lcfs_external_bnormal_max": float(current_lcfs.external_bnormal_max),
+        "lcfs_pressure_balance_rms": float(current_lcfs.pressure_balance_rms),
+        "lcfs_pressure_balance_max": float(current_lcfs.pressure_balance_max),
+        "lcfs_pressure_balance_rms_change_fraction": 0.0,
+        "lcfs_merit": float(current_merit.value),
+        "lcfs_merit_change_fraction": 0.0,
+        "lcfs_merit_bnormal_weight": float(current_merit.bnormal_weight),
+        "figures": {},
+    }
+    row.update(_next_proposal_fields(selection))
+    row["lcfs_update_max_relative_delta_radius_next"] = 0.0
+    return row
+
+
+def _completed_lcfs_pilot_row(
+    *,
+    step: int,
+    mout,
+    result,
+    lcfs,
+    merit,
+    reference_lcfs,
+    reference_merit,
+    next_selection: _LCFSProposalSelection,
+    accepted: bool,
+    figures: dict[str, str],
+) -> dict[str, object]:
+    final = result.final_trace
+    row = {
+        "step": int(step),
+        "mout": str(mout),
+        "accepted": bool(accepted),
+        "final_residual_norm": float(final.residual_norm),
+        "final_fsq": float(final.fsq),
+        "final_normalized_force": float(final.normalized_force),
+        "min_sqrtg": float(final.min_sqrtg),
+        "mirror_ratio": float(final.mirror_ratio),
+        "lcfs_external_bnormal_rms": float(lcfs.external_bnormal_rms),
+        "lcfs_external_bnormal_max": float(lcfs.external_bnormal_max),
+        "lcfs_pressure_balance_rms": float(lcfs.pressure_balance_rms),
+        "lcfs_pressure_balance_max": float(lcfs.pressure_balance_max),
+        "lcfs_pressure_balance_rms_change_fraction": float(
+            1.0 - lcfs.pressure_balance_rms / max(reference_lcfs.pressure_balance_rms, 1.0e-300)
+        ),
+        "lcfs_merit": float(merit.value),
+        "lcfs_merit_change_fraction": float(1.0 - merit.value / max(reference_merit.value, 1.0e-300)),
+        "lcfs_merit_bnormal_weight": float(merit.bnormal_weight),
+        "figures": figures,
+    }
+    row.update(_next_proposal_fields(next_selection))
+    return row
 
 
 def _run_fixed_boundary_baseline_cases(
@@ -327,7 +445,7 @@ def _run_fixed_boundary_baseline_cases(
         lcfs = mirror_lcfs_diagnostic(output, external_sample, mu0=1.0)
         lcfs_merit = mirror_lcfs_merit(lcfs, bnormal_weight=lcfs_merit_bnormal_weight)
         pressure_response = mirror_external_pressure_balance_response(lcfs, scan.coils, mu0=1.0)
-        proposal, proposal_candidates = _select_lcfs_proposal(
+        proposal_selection = _select_lcfs_proposal(
             lcfs=lcfs,
             pressure_response=pressure_response,
             grid=baseline_grid,
@@ -341,45 +459,24 @@ def _run_fixed_boundary_baseline_cases(
             smoothing_passes=lcfs_update_smoothing_passes,
             require_bnormal_nonincrease=lcfs_require_bnormal_nonincrease,
         )
+        proposal = proposal_selection.proposal
         pilot_rows: list[dict[str, object]] = []
         accepted_merit_value = float(lcfs_merit.value)
         current_lcfs = lcfs
         current_merit = lcfs_merit
         candidate_proposal = proposal
         candidate_boundary = proposal.boundary
+        candidate_selection = proposal_selection
         if run_lcfs_pilot:
             for step in range(1, int(lcfs_pilot_steps) + 1):
                 if candidate_proposal.strategy == "noop":
                     pilot_rows.append(
-                        {
-                            "step": int(step),
-                            "mout": None,
-                            "accepted": False,
-                            "skipped": True,
-                            "rejection_reason": "normal_field_guard_no_candidate",
-                            "final_residual_norm": None,
-                            "final_fsq": None,
-                            "final_normalized_force": None,
-                            "min_sqrtg": None,
-                            "mirror_ratio": None,
-                            "lcfs_external_bnormal_rms": float(current_lcfs.external_bnormal_rms),
-                            "lcfs_external_bnormal_max": float(current_lcfs.external_bnormal_max),
-                            "lcfs_pressure_balance_rms": float(current_lcfs.pressure_balance_rms),
-                            "lcfs_pressure_balance_max": float(current_lcfs.pressure_balance_max),
-                            "lcfs_pressure_balance_rms_change_fraction": 0.0,
-                            "lcfs_merit": float(current_merit.value),
-                            "lcfs_merit_change_fraction": 0.0,
-                            "lcfs_merit_bnormal_weight": float(current_merit.bnormal_weight),
-                            "lcfs_update_pressure_balance_rms_predicted_next": float(
-                                candidate_proposal.pressure_balance_rms_predicted
-                            ),
-                            "lcfs_update_strategy_next": str(candidate_proposal.strategy),
-                            "lcfs_update_candidate_summaries_next": proposal_candidates,
-                            "lcfs_update_cap_taper_power_next": float(candidate_proposal.cap_taper_power),
-                            "lcfs_update_smoothing_passes_next": int(candidate_proposal.smoothing_passes),
-                            "lcfs_update_max_relative_delta_radius_next": 0.0,
-                            "figures": {},
-                        }
+                        _skipped_lcfs_pilot_row(
+                            step=step,
+                            current_lcfs=current_lcfs,
+                            current_merit=current_merit,
+                            selection=candidate_selection,
+                        )
                     )
                     break
                 pilot_result = run_mirror_fixed_boundary(
@@ -406,7 +503,7 @@ def _run_fixed_boundary_baseline_cases(
                     bnormal_weight=lcfs_merit_bnormal_weight,
                 )
                 pilot_response = mirror_external_pressure_balance_response(pilot_lcfs, scan.coils, mu0=1.0)
-                pilot_proposal, pilot_proposal_candidates = _select_lcfs_proposal(
+                pilot_selection = _select_lcfs_proposal(
                     lcfs=pilot_lcfs,
                     pressure_response=pilot_response,
                     grid=baseline_grid,
@@ -420,6 +517,7 @@ def _run_fixed_boundary_baseline_cases(
                     smoothing_passes=lcfs_update_smoothing_passes,
                     require_bnormal_nonincrease=lcfs_require_bnormal_nonincrease,
                 )
+                pilot_proposal = pilot_selection.proposal
                 pilot_plot_paths: dict[str, str] = {}
                 if write_plots:
                     pilot_figure_dir = outdir / "figures" / f"fixed_boundary_beta_{label}_lcfs_step_{step}"
@@ -438,39 +536,18 @@ def _run_fixed_boundary_baseline_cases(
                 pilot_final = pilot_result.final_trace
                 accepted = bool(pilot_merit.value <= accepted_merit_value)
                 pilot_rows.append(
-                    {
-                        "step": int(step),
-                        "mout": str(pilot_mout),
-                        "accepted": accepted,
-                        "final_residual_norm": float(pilot_final.residual_norm),
-                        "final_fsq": float(pilot_final.fsq),
-                        "final_normalized_force": float(pilot_final.normalized_force),
-                        "min_sqrtg": float(pilot_final.min_sqrtg),
-                        "mirror_ratio": float(pilot_final.mirror_ratio),
-                        "lcfs_external_bnormal_rms": float(pilot_lcfs.external_bnormal_rms),
-                        "lcfs_external_bnormal_max": float(pilot_lcfs.external_bnormal_max),
-                        "lcfs_pressure_balance_rms": float(pilot_lcfs.pressure_balance_rms),
-                        "lcfs_pressure_balance_max": float(pilot_lcfs.pressure_balance_max),
-                        "lcfs_pressure_balance_rms_change_fraction": float(
-                            1.0 - pilot_lcfs.pressure_balance_rms / max(lcfs.pressure_balance_rms, 1.0e-300)
-                        ),
-                        "lcfs_merit": float(pilot_merit.value),
-                        "lcfs_merit_change_fraction": float(1.0 - pilot_merit.value / max(lcfs_merit.value, 1.0e-300)),
-                        "lcfs_merit_bnormal_weight": float(pilot_merit.bnormal_weight),
-                        "lcfs_update_pressure_balance_rms_predicted_next": float(
-                            pilot_proposal.pressure_balance_rms_predicted
-                        ),
-                        "lcfs_update_strategy_next": str(pilot_proposal.strategy),
-                        "lcfs_update_candidate_summaries_next": pilot_proposal_candidates,
-                        "lcfs_update_cap_taper_power_next": float(pilot_proposal.cap_taper_power),
-                        "lcfs_update_smoothing_passes_next": int(pilot_proposal.smoothing_passes),
-                        "lcfs_update_max_relative_delta_radius_next": float(
-                            np.max(
-                                np.abs(pilot_proposal.delta_radius) / np.maximum(pilot_proposal.old_radius, 1.0e-300)
-                            )
-                        ),
-                        "figures": pilot_plot_paths,
-                    }
+                    _completed_lcfs_pilot_row(
+                        step=step,
+                        mout=pilot_mout,
+                        result=pilot_result,
+                        lcfs=pilot_lcfs,
+                        merit=pilot_merit,
+                        reference_lcfs=lcfs,
+                        reference_merit=lcfs_merit,
+                        next_selection=pilot_selection,
+                        accepted=accepted,
+                        figures=pilot_plot_paths,
+                    )
                 )
                 if not accepted:
                     break
@@ -479,6 +556,7 @@ def _run_fixed_boundary_baseline_cases(
                 current_merit = pilot_merit
                 candidate_proposal = pilot_proposal
                 candidate_boundary = pilot_proposal.boundary
+                candidate_selection = pilot_selection
         plot_paths: dict[str, str] = {}
         if write_plots:
             figure_dir = outdir / "figures" / f"fixed_boundary_beta_{label}"
@@ -520,7 +598,9 @@ def _run_fixed_boundary_baseline_cases(
                 "lcfs_pressure_response_max": float(np.max(proposal.pressure_response)),
                 "lcfs_update_pressure_balance_rms_predicted": float(proposal.pressure_balance_rms_predicted),
                 "lcfs_update_strategy": str(proposal.strategy),
-                "lcfs_update_candidate_summaries": proposal_candidates,
+                "lcfs_update_candidate_summaries": proposal_selection.candidate_summaries,
+                "lcfs_update_allowed_strategies": list(proposal_selection.allowed_strategies),
+                "lcfs_update_rejection_reason": proposal_selection.rejection_reason,
                 "lcfs_update_normal_field_guard": bool(lcfs_require_bnormal_nonincrease),
                 "lcfs_update_pressure_balance_rms_reduction_fraction": float(
                     1.0 - proposal.pressure_balance_rms_predicted / max(proposal.pressure_balance_rms_before, 1.0e-300)
