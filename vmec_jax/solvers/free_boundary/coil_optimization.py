@@ -26,6 +26,7 @@ from vmec_jax.wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_
 
 __all__ = [
     "nestor_profile_policy_from_results",
+    "parse_profile_matrix_free_solvers",
     "same_branch_current_only_coil_geometry_cache",
     "same_branch_derivative_gate_evidence",
     "same_branch_derivative_proposal_from_report",
@@ -35,6 +36,22 @@ __all__ = [
     "same_branch_report_mode_count",
     "same_branch_scalar_function_registry",
 ]
+
+
+def parse_profile_matrix_free_solvers(value: str | Sequence[str] | None) -> tuple[str, ...]:
+    """Parse matrix-free solver names for the same-branch NESTOR profile."""
+
+    if value is None:
+        return ("gmres", "bicgstab")
+    if isinstance(value, str):
+        raw = value.replace(",", " ").split()
+    else:
+        raw = [str(item) for item in value]
+    solvers = tuple(item.strip().lower() for item in raw if item.strip())
+    unsupported = tuple(item for item in solvers if item not in {"gmres", "bicgstab"})
+    if unsupported:
+        raise ValueError(f"unsupported matrix-free NESTOR solver(s): {unsupported}")
+    return solvers or ("gmres", "bicgstab")
 
 
 def same_branch_report_mode_count(report: dict[str, Any]) -> int:
