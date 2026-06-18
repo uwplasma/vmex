@@ -19,3 +19,4 @@ Mirror Geometries
 
    overview
    outputs
+   differentiability

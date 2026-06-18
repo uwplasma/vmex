@@ -16078,3 +16078,99 @@ Results:
 No user input is needed.
 
 ---
+## 128. Mirror Differentiability Documentation
+
+### Steps taken
+
+- Added the mirror differentiability page to the mirror documentation toctree.
+- Documented the intended split between:
+  - fast CLI/example workflows, which may use NumPy/SciPy/Matplotlib for low
+    runtime and memory;
+  - research differentiable APIs, which should keep residuals,
+    linearizations, and derivative rules in JAX and avoid differentiating
+    through long host-side optimizer loops.
+- Recorded the current reduced-coordinate API:
+  - `axisym_reduced_residual_jax`;
+  - `axisym_reduced_residual_jacobian_jax`;
+  - `axisym_reduced_residual_linear_solve_jax`.
+- Documented the validation ladder from dense tiny-grid reference solves to a
+  scalable matrix-free/lineax solve and then to a custom implicit derivative
+  around a converged solved state.
+
+### Results obtained
+
+- The differentiability lane is now discoverable from `docs/mirror/index.rst`.
+- The docs state clearly that the current dense implicit-sensitivity machinery
+  is a correctness gate, not yet a production differentiable equilibrium solve.
+- The plan now has a finite next step for the differentiability lane: add a
+  scalable linear-solve abstraction that preserves the existing forward and
+  transpose solve semantics.
+
+### How it was tested
+
+Commands run:
+
+```bash
+python -m sphinx -W -b html docs docs/_build/html
+git diff --check
+python - <<'PY'
+import re
+from pathlib import Path
+text = Path("plan_mirror.md").read_text()
+nums = [int(m.group(1)) for m in re.finditer(r"^## (\\d+)\\.", text, flags=re.M)]
+print("milestones", len(nums), "last", nums[-1], "monotonic", nums == sorted(nums))
+PY
+```
+
+Results:
+
+- Sphinx docs build passed with warnings treated as errors.
+- Whitespace check passed.
+- Plan milestone numbering remained monotonic.
+- I also tried `python -m ruff check docs/mirror/index.rst
+  docs/mirror/differentiability.rst`; this is not an applicable docs check in
+  this repo because `ruff` parses `.rst` files as Python source.
+
+### File structure and best-practice notes
+
+- The docs page lives under `docs/mirror/` with the rest of the mirror user and
+  developer documentation.
+- The root examples remain in `examples/`; generated metrics and figures remain
+  under ignored `results/`.
+- The docs keep the production claim narrow: reduced, axisymmetric, tiny-grid
+  differentiability validation is promoted; full solved-state differentiability
+  remains a planned lane.
+
+### Best next steps
+
+1. Commit and push M128.
+2. Add a scalable linear-solve abstraction behind
+   `axisym_reduced_residual_linear_solve_jax`.
+3. Validate the scalable solve against the dense reference in both forward and
+   transpose modes.
+4. Use that abstraction as the bridge toward custom implicit solved-state
+   derivatives.
+
+### Completion percentages after M128
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `89%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `85%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `92%`.
+- I/O schema and docs: `99%`.
+- Differentiable solved-state API: `54%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `85%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `85%`.
+- PR merge readiness overall: `95%`.
+
+### User input needed
+
+No user input is needed.
+
+---
