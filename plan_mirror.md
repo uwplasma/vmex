@@ -15967,3 +15967,114 @@ Results:
 No user input is needed.
 
 ---
+## 127. Mirror Implicit Sensitivity Example
+
+### Steps taken
+
+- Added root-level example `examples/mirror_implicit_sensitivity.py`.
+- The example:
+  - builds a tiny axisymmetric reduced-coordinate mirror state;
+  - manufactures an exact reduced root using a linear source and small state
+    ridge;
+  - computes dense implicit sensitivity with
+    `axisym_reduced_residual_linear_solve_jax`;
+  - independently solves a perturbed source problem with SciPy root;
+  - compares finite-difference and implicit sensitivities;
+  - writes JSON metrics and, unless `--no-plots` is passed, a component
+    comparison plot.
+- Added the example to `examples/mirror/README.md`.
+- Added a smoke test in `tests/mirror/test_mirror_examples.py`.
+- Updated the mirror overview to list the implicit-sensitivity example.
+- Split root reporting into:
+  - `perturbed_root_solver_success`: raw SciPy progress flag;
+  - `perturbed_root_success`: residual-based acceptance.
+
+### Results obtained
+
+Plotted evidence command:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 python examples/mirror_implicit_sensitivity.py \
+  --outdir results/mirror/implicit_sensitivity_m127
+```
+
+Metrics:
+
+- vector size: `45`;
+- epsilon: `1e-5`;
+- state ridge: `1e-3`;
+- exact manufactured-root residual norm: `0.0`;
+- perturbed residual norm: `1.4596461408271606e-15`;
+- relative sensitivity error: `1.30713025011797e-6`;
+- max absolute sensitivity error: `0.0011775265450486572`;
+- residual-based acceptance: `true`;
+- raw SciPy solver success: `false`, due to progress-stall detection at machine
+  precision despite tiny residual.
+
+Rendered ignored plot:
+
+- `results/mirror/implicit_sensitivity_m127/figures/mirror_implicit_sensitivity_components.png`.
+
+The plot overlays implicit and finite-difference sensitivity components and
+shows the small difference vector beneath them.
+
+### How it was tested
+
+Commands run:
+
+```bash
+python -m ruff check examples/mirror_implicit_sensitivity.py tests/mirror/test_mirror_examples.py vmec_jax/mirror/solvers/fixed_boundary/reduced.py
+python -m ruff format --check examples/mirror_implicit_sensitivity.py tests/mirror/test_mirror_examples.py vmec_jax/mirror/solvers/fixed_boundary/reduced.py
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_examples.py::test_root_implicit_sensitivity_example_runs_without_plots tests/mirror/test_mirror_fixed_boundary_axisym.py::test_reduced_implicit_sensitivity_matches_manufactured_source_finite_difference -q
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 python examples/mirror_implicit_sensitivity.py --outdir results/mirror/implicit_sensitivity_m127
+```
+
+Results:
+
+- Ruff lint passed.
+- Ruff format check passed.
+- Focused tests: `2 passed`.
+- The plotted example completed and wrote accepted metrics.
+
+### File structure and best-practice notes
+
+- The example is root-level, matching the other research fixtures.
+- The example output remains under ignored `results/`.
+- The example is explicit that this is a tiny reduced validation problem, not a
+  production equilibrium solve.
+- It provides a user-facing bridge from the low-level residual/Jacobian helpers
+  toward future custom implicit solved-state APIs.
+
+### Best next steps
+
+1. Commit and push M127.
+2. Add a short differentiability section to the docs that explains the intended
+   progression: dense validation -> matrix-free/lineax solve -> custom implicit
+   VJP.
+3. Start the scalable linear-solve abstraction behind the current dense helper,
+   preserving the same forward/transpose solve semantics.
+4. Keep checking CI periodically for concrete failures, but do not block on it.
+
+### Completion percentages after M127
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `89%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `85%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `92%`.
+- I/O schema and docs: `99%`.
+- Differentiable solved-state API: `52%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `85%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `85%`.
+- PR merge readiness overall: `95%`.
+
+### User input needed
+
+No user input is needed.
+
+---

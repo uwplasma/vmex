@@ -18,6 +18,7 @@ python examples/mirror_free_boundary_circular_coils.py --outdir results/mirror/f
 python examples/mirror_fixed_boundary_solve_diagnostic.py --outdir results/mirror/fixed_boundary_solve_diagnostic
 python examples/mirror_manufactured_fixed_boundary.py --outdir results/mirror/manufactured_fixed_boundary
 python examples/mirror_stellarator_hybrid_boundary.py --outdir results/mirror/stellarator_hybrid_boundary
+python examples/mirror_implicit_sensitivity.py --outdir results/mirror/implicit_sensitivity
 python examples/toroidal_stellarator_mirror_hybrid.py --outdir results/toroidal_stellarator_mirror_hybrid
 python examples/toroidal_stellarator_mirror_hybrid_convergence.py --outdir results/toroidal_stellarator_mirror_hybrid_convergence
 python examples/mirror_solver_comparison.py --outdir results/mirror/solver_comparison
@@ -214,6 +215,13 @@ a sourced manufactured fixed-boundary problem with a known stationary state. It
 uses the same reduced-coordinate layout and geometry scaling as the mirror
 solver, then applies an exact-Hessian damped residual iteration to verify that a
 perturbed projected state can reach the requested projected ``gtol``.
+
+The root-level ``examples/mirror_implicit_sensitivity.py`` script is the first
+differentiability example. It manufactures an exact tiny-grid reduced root with
+a linear source and small state ridge, computes the dense implicit sensitivity,
+solves an independently perturbed source problem, and compares the finite
+difference state change against the implicit result. With plots enabled it
+writes a component comparison figure for the reduced sensitivity vector.
 
 The root-level ``examples/mirror_solver_comparison.py`` script compares the
 production gradient-descent, scaled L-BFGS-B, and residual-Newton paths on

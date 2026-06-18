@@ -597,6 +597,31 @@ def test_root_manufactured_fixed_boundary_example_runs_without_plots(tmp_path):
     assert metrics["final_exact_error_norm"] < 1.0e-10
 
 
+def test_root_implicit_sensitivity_example_runs_without_plots(tmp_path):
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "examples/mirror_implicit_sensitivity.py",
+            "--outdir",
+            str(tmp_path / "implicit_sensitivity"),
+            "--no-plots",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    path = Path(completed.stdout.strip())
+    metrics = json.loads(path.read_text())
+    assert metrics["vector_size"] > 0
+    assert metrics["root_residual_norm"] < 1.0e-12
+    assert metrics["perturbed_root_success"]
+    assert metrics["perturbed_residual_norm"] < 1.0e-10
+    assert metrics["relative_error"] < 1.0e-3
+    assert metrics["accepted"]
+    assert metrics["figures"] == {}
+
+
 def test_root_solver_comparison_example_runs_without_plots(tmp_path):
     completed = subprocess.run(
         [

@@ -63,8 +63,9 @@ without coupling it to toroidal VMEC assumptions:
   coils, overlays mirror ``B_z`` against that reference, draws the coils, and
   runs on-axis/off-axis convergence checks;
 - repo-root residual-Newton, solver-comparison, manufactured fixed-boundary,
-  finite-current pitch, and fixed-boundary solve-diagnostic examples with
-  standard mirror plot bundles;
+  finite-current pitch, implicit-sensitivity, and fixed-boundary
+  solve-diagnostic examples with standard mirror plot bundles or targeted
+  validation figures;
 - a first repo-root straight-axis hybrid fixed-boundary fixture that uses a
   central rotating elliptical cross-section, smooth tapering into circular
   mirror end sections, and standard geometry/field plots;
