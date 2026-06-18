@@ -19714,3 +19714,132 @@ Results:
 ### User input needed
 
 No user input is needed.
+
+---
+## 160. Circular-Coil Example Guarded Loop Uses Reusable Controller
+
+### Steps taken
+
+- Refactored `examples/mirror_free_boundary_circular_coils.py` so the
+  schema-`0.6` guarded circular-coil LS loop uses
+  `mirror_free_boundary_guarded_least_squares_loop` for repeated-step and
+  stop/guard policy.
+- Extracted the frozen-output LS residual builder into
+  `_build_ls_boundary_residual_function`.
+- Extracted LS step JSON/plot formatting into
+  `_ls_boundary_step_summary_from_step`.
+- Kept the root example responsible for physics-specific work:
+  - realized fixed-boundary trial solves;
+  - MOUT writing/loading;
+  - LCFS diagnostic plotting;
+  - schema-specific JSON rows and figure paths.
+- Preserved the public schema fields and row values expected by the existing
+  schema `0.6` tests.
+- Ran and visually inspected a plotted one-beta two-step controller-loop smoke.
+
+### Results obtained
+
+- The focused schema regression for the guarded loop still passes after the
+  refactor.
+- Full mirror example tests still pass after the refactor.
+- The plotted controller-loop smoke reports:
+  - schema version `0.6`;
+  - workflow `ls_boundary_coupled_loop`;
+  - free-boundary status `ls_boundary_coupled_loop_not_converged_free_boundary`;
+  - `ls_boundary_coupled_loop_rows_total == 2`;
+  - `ls_boundary_coupled_loop_accepted_rows_total == 1`;
+  - stop counts `{"None": 1, "ls_step_not_accepted": 1}`;
+  - row 1 accepted with `fsq_growth_ratio = 0.8804859565965772`;
+  - row 1 accepted with `lcfs_merit_ratio = 0.4801851017221157`;
+  - row 2 skipped with `ls_step_not_accepted`.
+- The plotted smoke rendered:
+  - step-1 LS plot:
+    `results/mirror/free_boundary_circular_coils_m160_controller_loop_plots/figures/fixed_boundary_beta_1_ls_loop_step_1/free_boundary_circular_coils_beta_1_ls_loop_step_1_ls_boundary_step.png`;
+  - step-2 LS plot:
+    `results/mirror/free_boundary_circular_coils_m160_controller_loop_plots/figures/fixed_boundary_beta_1_ls_loop_step_2/free_boundary_circular_coils_beta_1_ls_loop_step_2_ls_boundary_step.png`;
+  - realized trial LCFS diagnostic:
+    `results/mirror/free_boundary_circular_coils_m160_controller_loop_plots/figures/fixed_boundary_beta_1_ls_loop_step_1_ls_boundary_trial/free_boundary_circular_coils_beta_1_ls_loop_step_1_ls_boundary_trial_lcfs_diagnostic.png`;
+  - realized trial boundary B-direction and field-line plot:
+    `results/mirror/free_boundary_circular_coils_m160_controller_loop_plots/figures/fixed_boundary_beta_1_ls_loop_step_1_ls_boundary_trial/free_boundary_circular_coils_beta_1_ls_loop_step_1_ls_boundary_trial_mirror_bfield_boundary.png`.
+- Visual inspection confirmed:
+  - the step-1 LS plot selected the full step;
+  - the step-2 LS plot selected the no-op factor because every trial increased
+    the combined residual;
+  - the LCFS diagnostic plot rendered the pressure-balance and normal-field
+    profiles;
+  - the boundary B-direction plot rendered field arrows and field lines.
+
+### How it was tested
+
+Commands run:
+
+```bash
+python -m ruff format examples/mirror_free_boundary_circular_coils.py
+python -m ruff check examples/mirror_free_boundary_circular_coils.py \
+  tests/mirror/test_mirror_examples.py vmec_jax/mirror/free_boundary.py
+
+JAX_ENABLE_X64=1 pytest \
+  tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_ls_boundary_coupled_loop_reports_guarded_steps \
+  -q
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_free_boundary.py -q
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_examples.py -q
+
+python examples/mirror_free_boundary_circular_coils.py \
+  --outdir results/mirror/free_boundary_circular_coils_m160_controller_loop_plots \
+  --betas 1 --ntheta 8 --nxi 11 --n-segments 64 \
+  --run-fixed-boundary-baseline --baseline-maxiter 0 \
+  --run-ls-boundary-coupled-loop --ls-boundary-coupled-loop-steps 2
+
+git diff --check
+```
+
+Results:
+
+- Focused guarded-loop example test passed: `1 passed in 3.37s`.
+- Mirror free-boundary tests passed: `90 passed in 2.82s`.
+- Full mirror example tests passed: `22 passed in 96.84s`.
+- Plotted controller-loop smoke passed and generated the expected PNG outputs.
+- Whitespace check passed.
+
+### File structure and best-practice notes
+
+- Reusable stop/guard policy now lives in package code under
+  `vmec_jax/mirror/free_boundary.py`.
+- The root example keeps only workflow-specific concerns: fixed-boundary trial
+  execution, NetCDF output, plotting, and JSON schema projection.
+- The refactor avoids changing the schema `0.6` contract and keeps generated
+  result trees ignored under `results/`.
+- The code is simpler to extend because future true coupled-solve APIs can
+  reuse the same controller semantics without depending on the root example.
+
+### Best next steps
+
+1. Commit and push M160.
+2. Refresh the draft PR body to mention the reusable controller wiring.
+3. Continue toward a true coupled nonlinear solve by replacing finite
+   differences with the best available derivative path for the selected
+   residual block.
+4. Check CI after enough time has elapsed for the latest pushes to produce
+   useful results.
+
+### Completion percentages after M160
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `93%`.
+- Fixed-boundary axisymmetric solve: `91%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `89%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `93%`.
+- I/O schema and docs: `99%`.
+- Differentiable solved-state API: `92%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `98%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `97%`.
+- PR merge readiness overall: `98%`.
+
+### User input needed
+
+No user input is needed.

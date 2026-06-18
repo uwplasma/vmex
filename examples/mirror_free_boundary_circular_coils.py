@@ -21,6 +21,7 @@ from vmec_jax.mirror import (
     MirrorBoundary,
     MirrorCircularCoils,
     MirrorConfig,
+    MirrorFreeBoundaryLoopState,
     MirrorResolution,
     MirrorSolveOptions,
     PressureProfile,
@@ -31,6 +32,7 @@ from vmec_jax.mirror import (
     make_mirror_grid,
     mirror_external_bnormal,
     mirror_external_pressure_balance_response,
+    mirror_free_boundary_guarded_least_squares_loop,
     mirror_free_boundary_least_squares_step,
     mirror_free_boundary_residual,
     mirror_lcfs_diagnostic,
@@ -50,6 +52,7 @@ from vmec_jax.mirror import (
 
 CIRCULAR_COIL_BETA_SCAN_SCHEMA = "mirror_free_boundary_circular_coil_beta_scan"
 CIRCULAR_COIL_BETA_SCAN_SCHEMA_VERSION = "0.6"
+CIRCULAR_COIL_BETA_SCAN_LS_LINE_SEARCH_FACTORS = (1.0, 0.5, 0.25, 0.125)
 CIRCULAR_COIL_BETA_SCAN_TOP_LEVEL_FIELDS = (
     "metrics_schema",
     "metrics_schema_version",
@@ -799,25 +802,16 @@ def _write_ls_boundary_step_plot(summary: dict[str, object], *, outdir: Path, na
     return path
 
 
-def _run_ls_boundary_step(
+def _build_ls_boundary_residual_function(
     *,
     grid,
-    boundary,
     coils,
     output,
     final_trace,
     reference_merit,
-    finite_difference_step: float,
-    damping: float,
-    max_relative_step: float,
-    ridge: float,
-    write_plots: bool,
-    figure_dir: Path,
-    name: str,
-) -> dict[str, object]:
-    """Run one diagnostic LS update over polynomial side-boundary coefficients."""
+) -> object:
+    """Build the frozen-output residual function used by one LS boundary step."""
 
-    coefficients = _fit_polynomial_boundary_coefficients(grid, boundary)
     edge_internal_bmag = np.asarray(output.field.bmag, dtype=float)[-1]
     theta = np.asarray(output.theta, dtype=float)
     z = np.asarray(output.z, dtype=float)
@@ -853,18 +847,23 @@ def _run_ls_boundary_step(
             equilibrium_scale=equilibrium_scale,
         )
 
-    line_search_factors = (1.0, 0.5, 0.25, 0.125)
-    step = mirror_free_boundary_least_squares_step(
-        coefficients,
-        residual_function,
-        finite_difference_step=finite_difference_step,
-        damping=damping,
-        max_relative_step=max_relative_step,
-        ridge=ridge,
-        line_search_factors=line_search_factors,
-    )
+    return residual_function
+
+
+def _ls_boundary_step_summary_from_step(
+    *,
+    step,
+    residual_function,
+    grid,
+    line_search_factors,
+    write_plots: bool,
+    figure_dir: Path,
+    name: str,
+) -> dict[str, object]:
+    """Return the JSON/plot summary for a computed LS boundary step."""
+
     trial_rows = []
-    for factor in (0.0, *line_search_factors):
+    for factor in (0.0, *tuple(line_search_factors)):
         trial_coefficients = step.coefficients + float(factor) * step.limited_step
         trial_residual = residual_function(trial_coefficients)
         trial_rows.append(
@@ -904,6 +903,52 @@ def _run_ls_boundary_step(
     if write_plots:
         summary["figure"] = str(_write_ls_boundary_step_plot(summary, outdir=figure_dir, name=name))
     return summary
+
+
+def _run_ls_boundary_step(
+    *,
+    grid,
+    boundary,
+    coils,
+    output,
+    final_trace,
+    reference_merit,
+    finite_difference_step: float,
+    damping: float,
+    max_relative_step: float,
+    ridge: float,
+    write_plots: bool,
+    figure_dir: Path,
+    name: str,
+) -> dict[str, object]:
+    """Run one diagnostic LS update over polynomial side-boundary coefficients."""
+
+    coefficients = _fit_polynomial_boundary_coefficients(grid, boundary)
+    residual_function = _build_ls_boundary_residual_function(
+        grid=grid,
+        coils=coils,
+        output=output,
+        final_trace=final_trace,
+        reference_merit=reference_merit,
+    )
+    step = mirror_free_boundary_least_squares_step(
+        coefficients,
+        residual_function,
+        finite_difference_step=finite_difference_step,
+        damping=damping,
+        max_relative_step=max_relative_step,
+        ridge=ridge,
+        line_search_factors=CIRCULAR_COIL_BETA_SCAN_LS_LINE_SEARCH_FACTORS,
+    )
+    return _ls_boundary_step_summary_from_step(
+        step=step,
+        residual_function=residual_function,
+        grid=grid,
+        line_search_factors=CIRCULAR_COIL_BETA_SCAN_LS_LINE_SEARCH_FACTORS,
+        write_plots=write_plots,
+        figure_dir=figure_dir,
+        name=name,
+    )
 
 
 def _run_ls_boundary_coupled_trial(
@@ -1022,50 +1067,45 @@ def _run_ls_boundary_coupled_loop(
 ) -> list[dict[str, object]]:
     """Run a guarded multi-step coupled LS boundary loop."""
 
-    rows: list[dict[str, object]] = []
-    current_boundary = initial_boundary
-    current_output = initial_output
-    current_final = initial_final
-    current_merit_value = float(reference_merit.value)
-    for step_index in range(1, int(max_steps) + 1):
-        step_label = f"{label}_ls_loop_step_{step_index}"
-        step_summary = _run_ls_boundary_step(
+    def payload_for(boundary, output, final_trace):
+        return SimpleNamespace(boundary=boundary, output=output, final=final_trace)
+
+    def residual_for_state(state, coefficients):
+        payload = state.payload
+        residual_function = _build_ls_boundary_residual_function(
             grid=grid,
-            boundary=current_boundary,
             coils=coils,
-            output=current_output,
-            final_trace=current_final,
+            output=payload.output,
+            final_trace=payload.final,
             reference_merit=reference_merit,
-            finite_difference_step=finite_difference_step,
-            damping=damping,
-            max_relative_step=max_relative_step,
-            ridge=ridge,
+        )
+        return residual_function(coefficients)
+
+    def step_summary_for(step_index: int, state, step):
+        step_label = f"{label}_ls_loop_step_{step_index}"
+        residual_function = _build_ls_boundary_residual_function(
+            grid=grid,
+            coils=coils,
+            output=state.payload.output,
+            final_trace=state.payload.final,
+            reference_merit=reference_merit,
+        )
+        return _ls_boundary_step_summary_from_step(
+            step=step,
+            residual_function=residual_function,
+            grid=grid,
+            line_search_factors=CIRCULAR_COIL_BETA_SCAN_LS_LINE_SEARCH_FACTORS,
             write_plots=write_plots,
             figure_dir=outdir / "figures" / f"fixed_boundary_beta_{label}_ls_loop_step_{step_index}",
-            name=f"free_boundary_circular_coils_beta_{label}_ls_loop_step_{step_index}",
+            name=f"free_boundary_circular_coils_beta_{step_label}",
         )
-        row: dict[str, object] = {
-            "step": int(step_index),
-            "status": "skipped",
-            "accepted": False,
-            "rejection_reason": None,
-            "stop_reason": None,
-            "merit_improvement_fraction": None,
-            "fsq_growth_ratio": None,
-            "final_fsq": None,
-            "final_normalized_force": None,
-            "lcfs_merit": None,
-            "lcfs_merit_ratio": None,
-            "mout": None,
-            "ls_boundary_step": step_summary,
-            "figures": {},
-        }
-        if not bool(step_summary["accepted"]):
-            row["rejection_reason"] = "ls_step_not_accepted"
-            row["stop_reason"] = "ls_step_not_accepted"
-            rows.append(row)
-            break
 
+    step_summaries: dict[int, dict[str, object]] = {}
+
+    def trial_for_state(state, step):
+        step_index = len(step_summaries) + 1
+        step_label = f"{label}_ls_loop_step_{step_index}"
+        step_summary = step_summary_for(step_index, state, step)
         trial = _run_ls_boundary_coupled_trial(
             step_summary=step_summary,
             outdir=outdir,
@@ -1081,53 +1121,80 @@ def _run_ls_boundary_coupled_loop(
             write_plots=write_plots,
         )
         step_summary["coupled_trial"] = trial
-        row.update(
-            {
-                "status": str(trial["status"]),
-                "mout": trial["mout"],
-                "fsq_growth_ratio": trial["fsq_growth_ratio"],
-                "final_fsq": trial["final_fsq"],
-                "final_normalized_force": trial["final_normalized_force"],
-                "lcfs_merit": trial["lcfs_merit"],
-                "lcfs_merit_ratio": trial["lcfs_merit_ratio"],
-                "figures": trial["figures"],
-            }
+        step_summaries[step_index] = step_summary
+        trial_boundary = _polynomial_boundary_from_coefficients(step_summary["coefficients_new"])
+        trial_output = load_mirror_output(str(trial["mout"]))
+        trial_final = SimpleNamespace(normalized_force=float(trial["final_normalized_force"]))
+        return MirrorFreeBoundaryLoopState(
+            coefficients=step.new_coefficients,
+            residual=step.trial_residual,
+            merit=float(trial["lcfs_merit"]),
+            equilibrium_value=float(trial["final_fsq"]),
+            payload=payload_for(trial_boundary, trial_output, trial_final),
         )
-        if not bool(trial["accepted_by_merit"]):
-            row["rejection_reason"] = trial["rejection_reason"] or "merit_increase"
-            row["stop_reason"] = "rejected_merit_increase"
-            rows.append(row)
-            break
-        if float(fsq_growth_limit) > 0.0 and float(trial["fsq_growth_ratio"]) > float(fsq_growth_limit):
-            row["status"] = "rejected"
-            row["rejection_reason"] = "fsq_growth_guard"
-            row["stop_reason"] = "fsq_growth_guard"
-            rows.append(row)
-            break
 
-        merit = float(trial["lcfs_merit"])
-        merit_improvement_fraction = float(1.0 - merit / max(current_merit_value, 1.0e-300))
-        row["status"] = "accepted"
-        row["accepted"] = True
-        row["merit_improvement_fraction"] = merit_improvement_fraction
-        if merit <= float(target_merit):
-            row["stop_reason"] = "target_merit"
-            rows.append(row)
-            break
-        if merit_improvement_fraction <= float(stagnation_rtol):
-            row["stop_reason"] = "merit_stagnation"
-            rows.append(row)
-            break
-        if step_index == int(max_steps):
-            row["stop_reason"] = "max_steps"
-            rows.append(row)
-            break
+    initial_coefficients = _fit_polynomial_boundary_coefficients(grid, initial_boundary)
+    initial_residual_function = _build_ls_boundary_residual_function(
+        grid=grid,
+        coils=coils,
+        output=initial_output,
+        final_trace=initial_final,
+        reference_merit=reference_merit,
+    )
+    initial_residual = initial_residual_function(initial_coefficients)
+    initial_state = MirrorFreeBoundaryLoopState(
+        coefficients=initial_coefficients,
+        residual=initial_residual,
+        merit=float(reference_merit.value),
+        equilibrium_value=float(baseline_final_fsq),
+        payload=payload_for(initial_boundary, initial_output, initial_final),
+    )
+    loop = mirror_free_boundary_guarded_least_squares_loop(
+        initial_state,
+        residual_for_state,
+        trial_function=trial_for_state,
+        max_steps=max_steps,
+        target_merit=target_merit,
+        stagnation_rtol=stagnation_rtol,
+        equilibrium_growth_limit=fsq_growth_limit,
+        equilibrium_growth_reference=baseline_final_fsq,
+        finite_difference_step=finite_difference_step,
+        damping=damping,
+        max_relative_step=max_relative_step,
+        ridge=ridge,
+        line_search_factors=CIRCULAR_COIL_BETA_SCAN_LS_LINE_SEARCH_FACTORS,
+    )
 
+    rows: list[dict[str, object]] = []
+    for loop_row in loop.rows:
+        step_summary = step_summaries.get(loop_row.step)
+        if step_summary is None:
+            step_summary = step_summary_for(loop_row.step, loop_row.state_before, loop_row.ls_step)
+            step_summaries[loop_row.step] = step_summary
+        trial = step_summary.get("coupled_trial")
+        rejection_reason = loop_row.rejection_reason
+        stop_reason = loop_row.stop_reason
+        if rejection_reason == "equilibrium_growth_guard":
+            rejection_reason = "fsq_growth_guard"
+        if stop_reason == "equilibrium_growth_guard":
+            stop_reason = "fsq_growth_guard"
+        row: dict[str, object] = {
+            "step": int(loop_row.step),
+            "status": str(loop_row.status),
+            "accepted": bool(loop_row.accepted),
+            "rejection_reason": rejection_reason,
+            "stop_reason": stop_reason,
+            "merit_improvement_fraction": loop_row.merit_improvement_fraction if loop_row.accepted else None,
+            "fsq_growth_ratio": None if trial is None else trial["fsq_growth_ratio"],
+            "final_fsq": None if trial is None else trial["final_fsq"],
+            "final_normalized_force": None if trial is None else trial["final_normalized_force"],
+            "lcfs_merit": None if trial is None else trial["lcfs_merit"],
+            "lcfs_merit_ratio": None if trial is None else trial["lcfs_merit_ratio"],
+            "mout": None if trial is None else trial["mout"],
+            "ls_boundary_step": step_summary,
+            "figures": {} if trial is None else trial["figures"],
+        }
         rows.append(row)
-        current_boundary = _polynomial_boundary_from_coefficients(step_summary["coefficients_new"])
-        current_output = load_mirror_output(str(trial["mout"]))
-        current_final = SimpleNamespace(normalized_force=float(trial["final_normalized_force"]))
-        current_merit_value = merit
     return rows
 
 
