@@ -5966,6 +5966,153 @@ toroidal VMEC geometry.
 
 ---
 
+## 83. 2026-06-18 M13e toroidal hybrid convergence CSV and profile plots
+
+This tranche turned the toroidal hybrid convergence runner from a JSON-only
+smoke harness into a more useful diagnostic script for actual solve rows.
+
+### Steps taken
+
+- Added a compact CSV export:
+  - `toroidal_stellarator_mirror_hybrid_convergence.csv`.
+- Added `fsq_history` to solved JSON rows.
+- Added solved-row plotting:
+  - convergence summary;
+  - residual/`fsq` history;
+  - WOUT profile figure with iota and Mercier `DWell`.
+- Fixed the WOUT reader path in the example by importing `read_wout`
+  explicitly from `vmec_jax.wout`.
+- Updated the toroidal hybrid smoke test to assert that CSV output exists and
+  that no-solve rows keep an empty `fsq_history`.
+- Updated `examples/mirror/README.md` to document JSON/CSV exports and the new
+  solved-row plots.
+
+### Results obtained
+
+Solved plotting smoke:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_stellarator_mirror_hybrid_convergence_m13e_plot_smoke2 \
+  --ns-array 7 \
+  --mode-pairs 5:4 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --niter 3 \
+  --run-solve \
+  --max-iter 1
+```
+
+Result for `ns007_mpol05_ntor04`:
+
+| quantity | value |
+| :--- | ---: |
+| max boundary fit error | `6.661338147751e-16` |
+| runtime | `7.087745458 s` |
+| VMEC/JAX iterations | `1` |
+| final `fsq` | `1.222006074808e-02` |
+| converged | `false` |
+| aspect | `5.661074062196` |
+| mean iota | `2.768637859473e-02` |
+| magnetic-well proxy | `-1.686348206555e-02` |
+
+Generated local ignored figures:
+
+- `results/toroidal_stellarator_mirror_hybrid_convergence_m13e_plot_smoke2/figures/toroidal_hybrid_convergence.png`;
+- `results/toroidal_stellarator_mirror_hybrid_convergence_m13e_plot_smoke2/figures/toroidal_hybrid_fsq_history.png`;
+- `results/toroidal_stellarator_mirror_hybrid_convergence_m13e_plot_smoke2/figures/toroidal_hybrid_profiles.png`.
+
+The profile plot was visually checked.  The iota profile rendered correctly.
+The `DWell` profile is zero for this one-iteration vacuum-style smoke, which
+is expected; it should become more informative for finite-beta or longer
+solved rows.
+
+### How it was tested
+
+Focused tests:
+
+```bash
+JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
+```
+
+Result: `4 passed in 2.16s`.
+
+Lint and format:
+
+```bash
+python -m ruff check \
+  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  tests/test_toroidal_hybrid.py
+python -m ruff format --check \
+  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  tests/test_toroidal_hybrid.py
+```
+
+Result: all checks passed; both files were formatted.
+
+Docs:
+
+```bash
+python -m sphinx -W -j auto -b html docs docs/_build/html
+```
+
+Result: build succeeded.
+
+Whitespace:
+
+```bash
+git diff --check
+```
+
+Result: no whitespace errors.
+
+### File structure and best-practice notes
+
+- The plotting helpers remain local to the root example because they are
+  workflow outputs, not reusable core geometry or solver logic.
+- The example now has a table-first output (`CSV`) for convergence studies and
+  JSON for richer row metadata.
+- Solved-row profile plotting uses `vmec_jax.wout.read_wout`, preserving the
+  ordinary WOUT schema and avoiding a duplicate profile parser.
+- Generated results stay under ignored `results/`.
+
+### Best next steps
+
+1. Commit and push M13e.
+2. Run a small multi-row `--run-solve` convergence grid with
+   `ns=7,9` and one or two mode pairs.
+3. Use the grid output to decide whether the first toroidal hybrid fixture is
+   solver-friendly enough for VMEC2000 parity.
+4. Start VMEC2000 parity on a low-resolution generated input and compare WOUT
+   scalar/profile diagnostics.
+5. Return to source simplification only after the convergence/parity bottleneck
+   is visible.
+
+### Completion percentages after M83
+
+- Geometry/grids/bases: `93%`.
+- Field/energy/residual kernels: `86%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `91%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `88%`.
+- I/O schema and docs: `92%`.
+- Differentiable solved-state API: `20%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `67%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `28%`.
+- ESSOS circular-coil mirror beta scan: `53%`.
+- PR merge readiness overall: `92%`.
+
+### User input needed
+
+No user input is needed.
+
+---
+
 ## 56. 2026-06-17 M8w matrix-free block LSMR correction
 
 This lane converted the successful M8u/M8v block-dense split into a scalable

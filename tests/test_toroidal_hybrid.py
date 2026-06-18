@@ -111,7 +111,9 @@ def test_toroidal_hybrid_convergence_example_runs_without_solve(tmp_path: Path):
     summary_path = Path(completed.stdout.strip())
     summary = json.loads(summary_path.read_text())
     assert len(summary["rows"]) == 2
+    assert Path(summary["csv"]).exists()
     assert summary["figures"] == {}
     assert all(not row["ran_solve"] for row in summary["rows"])
+    assert all(row["fsq_history"] == [] for row in summary["rows"])
     assert all(row["max_boundary_fit_error"] < 1.0e-12 for row in summary["rows"])
     assert [row["ns"] for row in summary["rows"]] == [7, 9]

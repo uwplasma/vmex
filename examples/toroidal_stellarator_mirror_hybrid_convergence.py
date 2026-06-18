@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 from pathlib import Path
@@ -19,6 +20,7 @@ from vmec_jax.toroidal_hybrid import (
     toroidal_stellarator_mirror_hybrid_indata,
     toroidal_stellarator_mirror_hybrid_metrics,
 )
+from vmec_jax.wout import read_wout
 
 
 def _parse_ints(text: str) -> list[int]:
@@ -52,6 +54,37 @@ def _import_matplotlib():
     return plt
 
 
+_CSV_COLUMNS = (
+    "case",
+    "ns",
+    "mpol",
+    "ntor",
+    "rbc_count",
+    "zbs_count",
+    "max_boundary_fit_error",
+    "ran_solve",
+    "seconds",
+    "n_iter",
+    "final_fsq",
+    "converged",
+    "aspect",
+    "mean_iota",
+    "magnetic_well",
+    "input",
+    "wout",
+)
+
+
+def _write_rows_csv(rows: list[dict[str, object]], *, outdir: Path) -> str:
+    path = outdir / "toroidal_stellarator_mirror_hybrid_convergence.csv"
+    with path.open("w", newline="") as file_obj:
+        writer = csv.DictWriter(file_obj, fieldnames=list(_CSV_COLUMNS), extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({name: "" if row.get(name) is None else row.get(name) for name in _CSV_COLUMNS})
+    return str(path)
+
+
 def _write_summary_plot(rows: list[dict[str, object]], *, outdir: Path) -> str:
     plt = _import_matplotlib()
     outdir.mkdir(parents=True, exist_ok=True)
@@ -69,6 +102,73 @@ def _write_summary_plot(rows: list[dict[str, object]], *, outdir: Path) -> str:
     ax.set_title("Toroidal hybrid convergence grid")
     ax.grid(True, which="both", alpha=0.25)
     path = outdir / "toroidal_hybrid_convergence.png"
+    fig.savefig(path, dpi=180)
+    plt.close(fig)
+    return str(path)
+
+
+def _write_fsq_history_plot(rows: list[dict[str, object]], *, outdir: Path) -> str | None:
+    history_rows = [row for row in rows if row.get("fsq_history")]
+    if not history_rows:
+        return None
+    plt = _import_matplotlib()
+    outdir.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(1, 1, figsize=(7.0, 4.2), constrained_layout=True)
+    for row in history_rows:
+        history = np.asarray(row["fsq_history"], dtype=float).reshape(-1)
+        if history.size == 0:
+            continue
+        ax.semilogy(np.arange(history.size), np.maximum(history, 1.0e-300), "o-", lw=1.3, ms=3, label=str(row["case"]))
+    ax.set_xlabel("VMEC/JAX iteration")
+    ax.set_ylabel("fsq")
+    ax.set_title("Toroidal hybrid residual history")
+    ax.grid(True, which="both", alpha=0.25)
+    ax.legend(loc="best", fontsize=8)
+    path = outdir / "toroidal_hybrid_fsq_history.png"
+    fig.savefig(path, dpi=180)
+    plt.close(fig)
+    return str(path)
+
+
+def _write_profile_plots(rows: list[dict[str, object]], *, outdir: Path) -> str | None:
+    wout_rows = [row for row in rows if row.get("wout")]
+    if not wout_rows:
+        return None
+    plt = _import_matplotlib()
+    outdir.mkdir(parents=True, exist_ok=True)
+    fig, axes = plt.subplots(1, 2, figsize=(9.0, 4.0), constrained_layout=True)
+    plotted = False
+    for row in wout_rows:
+        try:
+            wout = read_wout(str(row["wout"]))
+        except Exception:
+            continue
+        ns = int(getattr(wout, "ns", 0))
+        if ns <= 0:
+            continue
+        s = np.linspace(0.0, 1.0, ns)
+        label = str(row["case"])
+        iotas = np.asarray(getattr(wout, "iotas", np.zeros((0,))), dtype=float).reshape(-1)
+        if iotas.size == ns:
+            axes[0].plot(s, iotas, ".-", lw=1.2, ms=3, label=label)
+            plotted = True
+        dwell = np.asarray(getattr(wout, "Dwell", np.zeros((0,))), dtype=float).reshape(-1)
+        if dwell.size == ns:
+            axes[1].plot(s, dwell, ".-", lw=1.2, ms=3, label=label)
+            plotted = True
+    if not plotted:
+        plt.close(fig)
+        return None
+    axes[0].set_xlabel("s")
+    axes[0].set_ylabel("iota")
+    axes[0].set_title("iota profile")
+    axes[1].set_xlabel("s")
+    axes[1].set_ylabel("DWell")
+    axes[1].set_title("Mercier well term")
+    for ax in axes:
+        ax.grid(True, alpha=0.25)
+        ax.legend(loc="best", fontsize=8)
+    path = outdir / "toroidal_hybrid_profiles.png"
     fig.savefig(path, dpi=180)
     plt.close(fig)
     return str(path)
@@ -150,6 +250,8 @@ def main() -> None:
                 "aspect": None,
                 "mean_iota": None,
                 "magnetic_well": None,
+                "fsq_history": [],
+                "wout": None,
             }
             if bool(args.run_solve):
                 t0 = perf_counter()
@@ -166,7 +268,9 @@ def main() -> None:
                 row["converged"] = bool(diag.get("converged", False))
                 row["n_iter"] = int(getattr(run.result, "n_iter", -1)) if run.result is not None else None
                 if run.result is not None and getattr(run.result, "w_history", None) is not None:
-                    row["final_fsq"] = float(np.asarray(run.result.w_history)[-1])
+                    fsq_history = np.asarray(run.result.w_history, dtype=float).reshape(-1)
+                    row["fsq_history"] = [float(value) for value in fsq_history]
+                    row["final_fsq"] = float(fsq_history[-1]) if fsq_history.size else None
                 try:
                     row["aspect"] = float(vj.equilibrium_aspect_ratio_from_state(state=run.state, static=run.static))
                 except Exception:
@@ -199,10 +303,17 @@ def main() -> None:
 
     summary = {
         "rows": rows,
+        "csv": _write_rows_csv(rows, outdir=outdir),
         "figures": {},
     }
     if not bool(args.no_plots):
         summary["figures"]["convergence"] = _write_summary_plot(rows, outdir=outdir / "figures")
+        fsq_history_plot = _write_fsq_history_plot(rows, outdir=outdir / "figures")
+        if fsq_history_plot is not None:
+            summary["figures"]["fsq_history"] = fsq_history_plot
+        profile_plot = _write_profile_plots(rows, outdir=outdir / "figures")
+        if profile_plot is not None:
+            summary["figures"]["profiles"] = profile_plot
 
     summary_path = outdir / "toroidal_stellarator_mirror_hybrid_convergence.json"
     summary_path.write_text(json.dumps(summary, indent=2) + "\n")
