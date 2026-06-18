@@ -81,7 +81,9 @@ pass ``--run-solve`` to run the ordinary fixed-boundary driver for each row and
 record runtime, iteration count, final ``fsq``, residual history, convergence
 status, best ``fsq`` reached, aspect, mean iota, magnetic-well proxy, and a
 ``wout_*.nc``. With plots enabled, solved rows also write ``fsq`` history plus
-iota and Mercier ``DWell`` profile figures.
+iota and Mercier ``DWell`` profile figures. Pass ``--run-vmec2000`` to run the
+same generated inputs through the local VMEC2000 executable and record parsed
+``threed1`` residual histories beside the VMEC/JAX rows.
 
 The root-level ``examples/mirror_free_boundary_circular_coils.py`` script is a
 free-boundary planning fixture. It builds ESSOS-compatible circular-loop direct

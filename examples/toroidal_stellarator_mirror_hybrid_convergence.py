@@ -7,8 +7,8 @@ import csv
 import json
 import os
 from pathlib import Path
-from time import perf_counter
 import tempfile
+from time import perf_counter
 
 import numpy as np
 
@@ -20,6 +20,7 @@ from vmec_jax.toroidal_hybrid import (
     toroidal_stellarator_mirror_hybrid_indata,
     toroidal_stellarator_mirror_hybrid_metrics,
 )
+from vmec_jax.vmec2000_exec import flatten_threed1, run_xvmec2000, threed1_fsq_total
 from vmec_jax.wout import read_wout
 
 
@@ -70,12 +71,30 @@ _CSV_COLUMNS = (
     "best_iter",
     "fsq_reduction",
     "final_fsq",
+    "final_fsqr",
+    "final_fsqz",
+    "final_fsql",
+    "best_fsqr",
+    "best_fsqz",
+    "best_fsql",
     "converged",
     "aspect",
     "mean_iota",
     "magnetic_well",
+    "ran_vmec2000",
+    "vmec2000_returncode",
+    "vmec2000_runtime_s",
+    "vmec2000_n_rows",
+    "vmec2000_initial_fsq",
+    "vmec2000_best_fsq",
+    "vmec2000_best_iter",
+    "vmec2000_fsq_reduction",
+    "vmec2000_final_fsq",
     "input",
     "wout",
+    "vmec2000_wout",
+    "vmec2000_threed1",
+    "vmec2000_error",
 )
 
 
@@ -87,6 +106,42 @@ def _write_rows_csv(rows: list[dict[str, object]], *, outdir: Path) -> str:
         for row in rows:
             writer.writerow({name: "" if row.get(name) is None else row.get(name) for name in _CSV_COLUMNS})
     return str(path)
+
+
+def _summarize_fsq_history(
+    values: np.ndarray, *, iterations: np.ndarray | None = None
+) -> dict[str, float | int | None]:
+    history = np.asarray(values, dtype=float).reshape(-1)
+    if history.size == 0:
+        return {
+            "initial_fsq": None,
+            "best_fsq": None,
+            "best_iter": None,
+            "fsq_reduction": None,
+            "final_fsq": None,
+        }
+    if iterations is None:
+        iter_values = np.arange(history.size, dtype=int)
+    else:
+        iter_values = np.asarray(iterations, dtype=int).reshape(-1)
+        if iter_values.size != history.size:
+            iter_values = np.arange(history.size, dtype=int)
+    out: dict[str, float | int | None] = {
+        "initial_fsq": float(history[0]),
+        "best_fsq": None,
+        "best_iter": None,
+        "fsq_reduction": None,
+        "final_fsq": float(history[-1]),
+    }
+    finite = np.isfinite(history)
+    if np.any(finite):
+        finite_values = np.where(finite, history, np.inf)
+        best_idx = int(np.argmin(finite_values))
+        best_fsq = float(finite_values[best_idx])
+        out["best_fsq"] = best_fsq
+        out["best_iter"] = int(iter_values[best_idx])
+        out["fsq_reduction"] = float(history[0]) / best_fsq if best_fsq > 0.0 else None
+    return out
 
 
 def _write_summary_plot(rows: list[dict[str, object]], *, outdir: Path) -> str:
@@ -119,18 +174,37 @@ def _write_summary_plot(rows: list[dict[str, object]], *, outdir: Path) -> str:
 
 
 def _write_fsq_history_plot(rows: list[dict[str, object]], *, outdir: Path) -> str | None:
-    history_rows = [row for row in rows if row.get("fsq_history")]
+    history_rows = [row for row in rows if row.get("fsq_history") or row.get("vmec2000_fsq_history")]
     if not history_rows:
         return None
     plt = _import_matplotlib()
     outdir.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots(1, 1, figsize=(7.0, 4.2), constrained_layout=True)
     for row in history_rows:
-        history = np.asarray(row["fsq_history"], dtype=float).reshape(-1)
-        if history.size == 0:
-            continue
-        ax.semilogy(np.arange(history.size), np.maximum(history, 1.0e-300), "o-", lw=1.3, ms=3, label=str(row["case"]))
-    ax.set_xlabel("VMEC/JAX iteration")
+        history = np.asarray(row.get("fsq_history", []), dtype=float).reshape(-1)
+        if history.size:
+            ax.semilogy(
+                np.arange(history.size),
+                np.maximum(history, 1.0e-300),
+                "o-",
+                lw=1.3,
+                ms=3,
+                label=f"{row['case']} VMEC/JAX",
+            )
+        vmec2000_history = np.asarray(row.get("vmec2000_fsq_history", []), dtype=float).reshape(-1)
+        if vmec2000_history.size:
+            vmec2000_iters = np.asarray(row.get("vmec2000_iter_history", []), dtype=int).reshape(-1)
+            if vmec2000_iters.size != vmec2000_history.size:
+                vmec2000_iters = np.arange(vmec2000_history.size, dtype=int)
+            ax.semilogy(
+                vmec2000_iters,
+                np.maximum(vmec2000_history, 1.0e-300),
+                "s--",
+                lw=1.2,
+                ms=3,
+                label=f"{row['case']} VMEC2000",
+            )
+    ax.set_xlabel("iteration")
     ax.set_ylabel("fsq")
     ax.set_title("Toroidal hybrid residual history")
     ax.grid(True, which="both", alpha=0.25)
@@ -201,6 +275,9 @@ def main() -> None:
     parser.add_argument("--ntheta-fit", type=int, default=64)
     parser.add_argument("--nzeta-fit", type=int, default=64)
     parser.add_argument("--run-solve", action="store_true")
+    parser.add_argument("--run-vmec2000", action="store_true")
+    parser.add_argument("--vmec2000-exec", type=str, default="")
+    parser.add_argument("--vmec2000-timeout-s", type=float, default=120.0)
     parser.add_argument("--no-plots", action="store_true")
     args = parser.parse_args()
 
@@ -208,6 +285,7 @@ def main() -> None:
     outdir.mkdir(parents=True, exist_ok=True)
     ns_values = _parse_ints(args.ns_array)
     mode_pairs = _parse_mode_pairs(args.mode_pairs)
+    vmec2000_exec = Path(args.vmec2000_exec).expanduser() if str(args.vmec2000_exec).strip() else None
     samples = sample_toroidal_stellarator_mirror_hybrid_boundary(
         ntheta=int(args.ntheta_fit),
         nzeta=int(args.nzeta_fit),
@@ -260,13 +338,39 @@ def main() -> None:
                 "best_iter": None,
                 "fsq_reduction": None,
                 "final_fsq": None,
+                "final_fsqr": None,
+                "final_fsqz": None,
+                "final_fsql": None,
+                "best_fsqr": None,
+                "best_fsqz": None,
+                "best_fsql": None,
                 "converged": None,
                 "n_iter": None,
                 "aspect": None,
                 "mean_iota": None,
                 "magnetic_well": None,
                 "fsq_history": [],
+                "fsqr_history": [],
+                "fsqz_history": [],
+                "fsql_history": [],
                 "wout": None,
+                "ran_vmec2000": bool(args.run_vmec2000),
+                "vmec2000_returncode": None,
+                "vmec2000_runtime_s": None,
+                "vmec2000_n_rows": None,
+                "vmec2000_initial_fsq": None,
+                "vmec2000_best_fsq": None,
+                "vmec2000_best_iter": None,
+                "vmec2000_fsq_reduction": None,
+                "vmec2000_final_fsq": None,
+                "vmec2000_iter_history": [],
+                "vmec2000_fsq_history": [],
+                "vmec2000_fsqr_history": [],
+                "vmec2000_fsqz_history": [],
+                "vmec2000_fsql_history": [],
+                "vmec2000_threed1": None,
+                "vmec2000_wout": None,
+                "vmec2000_error": None,
             }
             if bool(args.run_solve):
                 t0 = perf_counter()
@@ -285,17 +389,19 @@ def main() -> None:
                 if run.result is not None and getattr(run.result, "w_history", None) is not None:
                     fsq_history = np.asarray(run.result.w_history, dtype=float).reshape(-1)
                     row["fsq_history"] = [float(value) for value in fsq_history]
-                    if fsq_history.size:
-                        finite = np.isfinite(fsq_history)
-                        row["initial_fsq"] = float(fsq_history[0])
-                        row["final_fsq"] = float(fsq_history[-1])
-                        if np.any(finite):
-                            finite_values = np.where(finite, fsq_history, np.inf)
-                            best_iter = int(np.argmin(finite_values))
-                            best_fsq = float(finite_values[best_iter])
-                            row["best_iter"] = best_iter
-                            row["best_fsq"] = best_fsq
-                            row["fsq_reduction"] = float(row["initial_fsq"]) / best_fsq if best_fsq > 0.0 else None
+                    row.update(_summarize_fsq_history(fsq_history))
+                    for source, history_key, final_key, best_key in (
+                        ("fsqr2_history", "fsqr_history", "final_fsqr", "best_fsqr"),
+                        ("fsqz2_history", "fsqz_history", "final_fsqz", "best_fsqz"),
+                        ("fsql2_history", "fsql_history", "final_fsql", "best_fsql"),
+                    ):
+                        component = np.asarray(getattr(run.result, source, []), dtype=float).reshape(-1)
+                        row[history_key] = [float(value) for value in component]
+                        if component.size:
+                            row[final_key] = float(component[-1])
+                            best_iter = row.get("best_iter")
+                            if best_iter is not None and 0 <= int(best_iter) < component.size:
+                                row[best_key] = float(component[int(best_iter)])
                 try:
                     row["aspect"] = float(vj.equilibrium_aspect_ratio_from_state(state=run.state, static=run.static))
                 except Exception:
@@ -324,6 +430,38 @@ def main() -> None:
                 wout_path = case_dir / "wout_toroidal_stellarator_mirror_hybrid.nc"
                 vj.write_wout_from_fixed_boundary_run(wout_path, run, include_fsq=True)
                 row["wout"] = str(wout_path)
+            if bool(args.run_vmec2000):
+                try:
+                    vmec2000 = run_xvmec2000(
+                        input_path,
+                        exec_path=vmec2000_exec,
+                        workdir=case_dir / "vmec2000",
+                        timeout_s=float(args.vmec2000_timeout_s),
+                        keep_workdir=True,
+                    )
+                    row["vmec2000_returncode"] = int(vmec2000.returncode)
+                    row["vmec2000_runtime_s"] = float(vmec2000.runtime_s)
+                    row["vmec2000_threed1"] = str(vmec2000.threed1_path) if vmec2000.threed1_path is not None else None
+                    vmec2000_wouts = sorted(vmec2000.workdir.glob("wout*.nc"))
+                    row["vmec2000_wout"] = str(vmec2000_wouts[0]) if vmec2000_wouts else None
+                    vmec2000_rows = flatten_threed1(vmec2000.stages)
+                    row["vmec2000_n_rows"] = len(vmec2000_rows)
+                    if vmec2000_rows:
+                        vmec2000_iters = np.asarray([item.it for item in vmec2000_rows], dtype=int)
+                        vmec2000_fsq = threed1_fsq_total(vmec2000_rows)
+                        row["vmec2000_iter_history"] = [int(value) for value in vmec2000_iters]
+                        row["vmec2000_fsq_history"] = [float(value) for value in vmec2000_fsq]
+                        vmec2000_summary = _summarize_fsq_history(vmec2000_fsq, iterations=vmec2000_iters)
+                        row["vmec2000_initial_fsq"] = vmec2000_summary["initial_fsq"]
+                        row["vmec2000_best_fsq"] = vmec2000_summary["best_fsq"]
+                        row["vmec2000_best_iter"] = vmec2000_summary["best_iter"]
+                        row["vmec2000_fsq_reduction"] = vmec2000_summary["fsq_reduction"]
+                        row["vmec2000_final_fsq"] = vmec2000_summary["final_fsq"]
+                        row["vmec2000_fsqr_history"] = [float(item.fsqr) for item in vmec2000_rows]
+                        row["vmec2000_fsqz_history"] = [float(item.fsqz) for item in vmec2000_rows]
+                        row["vmec2000_fsql_history"] = [float(item.fsql) for item in vmec2000_rows]
+                except Exception as exc:
+                    row["vmec2000_error"] = str(exc)
             rows.append(row)
 
     summary = {

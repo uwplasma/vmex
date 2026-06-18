@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from importlib import import_module
 
 import numpy as np
 
@@ -117,3 +118,17 @@ def test_toroidal_hybrid_convergence_example_runs_without_solve(tmp_path: Path):
     assert all(row["fsq_history"] == [] for row in summary["rows"])
     assert all(row["max_boundary_fit_error"] < 1.0e-12 for row in summary["rows"])
     assert [row["ns"] for row in summary["rows"]] == [7, 9]
+
+
+def test_toroidal_hybrid_convergence_history_summary_uses_iteration_labels():
+    module = import_module("examples.toroidal_stellarator_mirror_hybrid_convergence")
+    summary = module._summarize_fsq_history(
+        np.asarray([3.0, 2.0, 5.0]),
+        iterations=np.asarray([1, 7, 11]),
+    )
+
+    assert summary["initial_fsq"] == 3.0
+    assert summary["best_fsq"] == 2.0
+    assert summary["best_iter"] == 7
+    assert summary["fsq_reduction"] == 1.5
+    assert summary["final_fsq"] == 5.0
