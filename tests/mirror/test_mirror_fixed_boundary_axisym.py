@@ -11,16 +11,20 @@ from vmec_jax.mirror import (
     PressureProfile,
     PsiPrimeProfile,
     axisym_reduced_implicit_adjoint_jax,
+    axisym_reduced_implicit_polynomial_boundary_sensitivity_jax,
+    axisym_reduced_implicit_polynomial_boundary_state_jax,
     axisym_reduced_implicit_profile_sensitivity_jax,
     axisym_reduced_implicit_profile_state_jax,
     axisym_reduced_implicit_pressure_sensitivity_jax,
     axisym_reduced_implicit_pressure_state_jax,
     axisym_reduced_implicit_source_state_jax,
     axisym_reduced_implicit_state_sensitivity_jax,
+    axisym_reduced_polynomial_boundary_radius_jax,
     axisym_reduced_residual_jacobian_jax,
     axisym_reduced_residual_jax,
     axisym_reduced_residual_linear_solve_jax,
     axisym_reduced_residual_matvec_jax,
+    axisym_reduced_residual_polynomial_boundary_jacobian_jax,
     axisym_reduced_residual_profile_jacobian_jax,
     axisym_reduced_residual_pressure_jacobian_jax,
     run_mirror_fixed_boundary,
@@ -1113,6 +1117,237 @@ def test_reduced_profile_custom_vjp_matches_adjoint_and_perturbed_root(
     finite_difference_directional = float(np.vdot(loss_weights, (solved.x - vector) / eps))
     np.testing.assert_allclose(
         float(np.vdot(custom_vjp_gradient, profile_direction)),
+        finite_difference_directional,
+        rtol=2.0e-4,
+        atol=2.0e-4,
+    )
+
+
+def test_reduced_polynomial_boundary_custom_vjp_matches_adjoint_and_perturbed_root():
+    jax = pytest.importorskip("jax")
+    jnp = pytest.importorskip("jax.numpy")
+    scipy_optimize = pytest.importorskip("scipy.optimize")
+    config = MirrorConfig(MirrorResolution(ns=5, ntheta=1, nxi=7, mpol=0), z_min=-1.0, z_max=1.0)
+    grid = config.build_grid()
+    boundary_coefficients = np.asarray([0.3, 0.04, 0.01], dtype=float)
+    boundary = MirrorBoundary.polynomial_radius(
+        r0=boundary_coefficients[0],
+        a2=boundary_coefficients[1],
+        a4=boundary_coefficients[2],
+    )
+    boundary_radius = np.asarray(axisym_reduced_polynomial_boundary_radius_jax(boundary_coefficients, grid))
+    np.testing.assert_allclose(boundary_radius, boundary.radius_on_grid(grid), rtol=1.0e-12, atol=1.0e-12)
+
+    base = MirrorStateAxisym.from_boundary(grid, boundary)
+    s = grid.s_full[:, None]
+    xi = grid.xi[None, :]
+    state = MirrorStateAxisym(
+        a=base.a * (1.0 + 0.01 * s * (1.0 - s) * (1.0 - xi**2)),
+        lam=0.005 * s * (xi - np.mean(grid.xi)),
+    )
+    psi = PsiPrimeProfile.constant(0.01)
+    current = IPrimeProfile.zero()
+    pressure = PressureProfile.zero()
+    vector = pack_axisym_reduced_state(state, grid, boundary)
+    source0 = np.asarray(
+        axisym_reduced_residual_jax(
+            vector,
+            grid,
+            boundary,
+            psi_prime=psi,
+            i_prime=current,
+            pressure=pressure,
+            boundary_radius=boundary_radius,
+            mu0=1.0,
+        )
+    )
+    state_ridge = 1.0e-3
+    exact_root_residual = np.asarray(
+        axisym_reduced_residual_jax(
+            vector,
+            grid,
+            boundary,
+            psi_prime=psi,
+            i_prime=current,
+            pressure=pressure,
+            source_vector=source0,
+            state_ridge=state_ridge,
+            reference_vector=vector,
+            boundary_radius=boundary_radius,
+            mu0=1.0,
+        )
+    )
+    np.testing.assert_allclose(exact_root_residual, 0.0, atol=1.0e-12)
+
+    boundary_jacobian = np.asarray(
+        axisym_reduced_residual_polynomial_boundary_jacobian_jax(
+            vector,
+            boundary_coefficients,
+            grid,
+            boundary,
+            psi_prime=psi,
+            i_prime=current,
+            pressure=pressure,
+            source_vector=source0,
+            state_ridge=state_ridge,
+            reference_vector=vector,
+            derivative="forward",
+            mu0=1.0,
+        )
+    )
+    boundary_jacobian_reverse = np.asarray(
+        axisym_reduced_residual_polynomial_boundary_jacobian_jax(
+            vector,
+            boundary_coefficients,
+            grid,
+            boundary,
+            psi_prime=psi,
+            i_prime=current,
+            pressure=pressure,
+            source_vector=source0,
+            state_ridge=state_ridge,
+            reference_vector=vector,
+            derivative="reverse",
+            mu0=1.0,
+        )
+    )
+    assert boundary_jacobian.shape == (vector.size, boundary_coefficients.size)
+    np.testing.assert_allclose(boundary_jacobian_reverse, boundary_jacobian, rtol=1.0e-8, atol=1.0e-10)
+
+    loss_weights = np.cos(np.linspace(0.2, 1.5, vector.size))
+
+    def loss_for_boundary(coefficients):
+        solved_state = axisym_reduced_implicit_polynomial_boundary_state_jax(
+            jnp.asarray(vector),
+            coefficients,
+            grid,
+            boundary,
+            psi_prime=psi,
+            i_prime=current,
+            pressure=pressure,
+            source_vector=source0,
+            state_ridge=state_ridge,
+            reference_vector=vector,
+            solve_method="dense",
+            mu0=1.0,
+        )
+        return jnp.vdot(jnp.asarray(loss_weights, dtype=solved_state.dtype), solved_state)
+
+    custom_vjp_gradient = np.asarray(jax.grad(loss_for_boundary)(jnp.asarray(boundary_coefficients)))
+    adjoint = np.asarray(
+        axisym_reduced_implicit_adjoint_jax(
+            vector,
+            loss_weights,
+            grid,
+            boundary,
+            psi_prime=psi,
+            i_prime=current,
+            pressure=pressure,
+            source_vector=source0,
+            state_ridge=state_ridge,
+            reference_vector=vector,
+            boundary_radius=boundary_radius,
+            solve_method="dense",
+            mu0=1.0,
+        )
+    )
+    explicit_boundary_gradient = -boundary_jacobian.T @ adjoint
+    np.testing.assert_allclose(custom_vjp_gradient, explicit_boundary_gradient, rtol=1.0e-8, atol=1.0e-10)
+
+    boundary_sensitivity = np.asarray(
+        axisym_reduced_implicit_polynomial_boundary_sensitivity_jax(
+            vector,
+            boundary_coefficients,
+            grid,
+            boundary,
+            psi_prime=psi,
+            i_prime=current,
+            pressure=pressure,
+            source_vector=source0,
+            state_ridge=state_ridge,
+            reference_vector=vector,
+            solve_method="dense",
+            mu0=1.0,
+        )
+    )
+    boundary_sensitivity_matrix_free = np.asarray(
+        axisym_reduced_implicit_polynomial_boundary_sensitivity_jax(
+            vector,
+            boundary_coefficients,
+            grid,
+            boundary,
+            psi_prime=psi,
+            i_prime=current,
+            pressure=pressure,
+            source_vector=source0,
+            state_ridge=state_ridge,
+            reference_vector=vector,
+            solve_method="matrix_free_cg",
+            cg_tol=1.0e-10,
+            cg_maxiter=200,
+            mu0=1.0,
+        )
+    )
+    np.testing.assert_allclose(boundary_sensitivity_matrix_free, boundary_sensitivity, rtol=5.0e-6, atol=5.0e-8)
+    boundary_direction = np.asarray([0.02, -0.03, 0.01], dtype=float)
+    np.testing.assert_allclose(
+        float(np.vdot(custom_vjp_gradient, boundary_direction)),
+        float(np.vdot(loss_weights, boundary_sensitivity @ boundary_direction)),
+        rtol=1.0e-8,
+        atol=1.0e-10,
+    )
+
+    eps = 1.0e-5
+    boundary_radius_eps = axisym_reduced_polynomial_boundary_radius_jax(
+        boundary_coefficients + eps * boundary_direction,
+        grid,
+    )
+
+    def residual(items):
+        return np.asarray(
+            axisym_reduced_residual_jax(
+                items,
+                grid,
+                boundary,
+                psi_prime=psi,
+                i_prime=current,
+                pressure=pressure,
+                source_vector=source0,
+                state_ridge=state_ridge,
+                reference_vector=vector,
+                boundary_radius=boundary_radius_eps,
+                mu0=1.0,
+            )
+        )
+
+    def jacobian(items):
+        return np.asarray(
+            axisym_reduced_residual_jacobian_jax(
+                items,
+                grid,
+                boundary,
+                psi_prime=psi,
+                i_prime=current,
+                pressure=pressure,
+                source_vector=source0,
+                state_ridge=state_ridge,
+                reference_vector=vector,
+                boundary_radius=boundary_radius_eps,
+                mu0=1.0,
+            )
+        )
+
+    solved = scipy_optimize.root(
+        residual,
+        vector + eps * (boundary_sensitivity @ boundary_direction),
+        jac=jacobian,
+        method="hybr",
+        options={"xtol": 1.0e-11, "maxfev": 120},
+    )
+    assert np.linalg.norm(residual(solved.x)) < 1.0e-10
+    finite_difference_directional = float(np.vdot(loss_weights, (solved.x - vector) / eps))
+    np.testing.assert_allclose(
+        float(np.vdot(custom_vjp_gradient, boundary_direction)),
         finite_difference_directional,
         rtol=2.0e-4,
         atol=2.0e-4,

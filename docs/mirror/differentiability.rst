@@ -42,6 +42,11 @@ only:
   ``axisym_reduced_implicit_profile_state_jax`` expose the same pattern for
   one selected profile coefficient vector: ``pressure``, ``i_prime``, or
   ``psi_prime``.
+- ``axisym_reduced_polynomial_boundary_radius_jax``,
+  ``axisym_reduced_residual_polynomial_boundary_jacobian_jax``,
+  ``axisym_reduced_implicit_polynomial_boundary_sensitivity_jax``, and
+  ``axisym_reduced_implicit_polynomial_boundary_state_jax`` expose the same
+  pattern for axisymmetric polynomial-boundary coefficients ``[r0, a2, a4]``.
 
 These functions are intended as method gates for implicit differentiation:
 
@@ -64,10 +69,11 @@ The test suite also validates the custom reverse-mode source wrapper against
 the explicit adjoint and a separately solved perturbed root, then applies the
 forward wrapper to a tiny converged fixed-boundary cylinder with a local state
 ridge about the solved state. Additional gates validate pressure-, current-,
-and flux-profile coefficient Jacobians, forward sensitivities, and custom VJPs
-against separately solved perturbed roots. These are the first differentiable
-solved-state contracts, but only for reduced axisymmetric source and profile
-coefficient perturbations.
+and flux-profile coefficient Jacobians plus polynomial-boundary coefficient
+Jacobians, forward sensitivities, and custom VJPs against separately solved
+perturbed roots. These are the first differentiable solved-state contracts, but
+only for reduced axisymmetric source, profile-coefficient, and polynomial
+boundary-coefficient perturbations.
 
 The benchmark example ``examples/mirror_implicit_solve_benchmark.py`` compares
 dense and matrix-free wrapper calls on a small ``ns``/``nxi`` ladder and writes
@@ -82,8 +88,8 @@ Next Steps
    solver stack.
 3. Extend the benchmark ladder after the physical residual conditioning is
    improved enough for larger low-ridge systems.
-4. Extend the custom implicit wrapper from profile coefficients to boundary
-   coefficients.
-5. Promote the differentiable API only after those additional
-   physical-parameter derivatives agree with finite differences and the
-   existing fixed-boundary solver diagnostics.
+4. Benchmark the profile and polynomial-boundary VJP paths against forward
+   sensitivity contractions on larger reduced grids.
+5. Promote the differentiable API only after those derivatives agree with
+   finite differences and the existing fixed-boundary solver diagnostics across
+   the target validation ladder.

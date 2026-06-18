@@ -159,8 +159,12 @@ def unpack_axisym_reduced_state(vector, grid: MirrorGrid, boundary: MirrorBounda
     return project_axisym_state(MirrorStateAxisym(a=a, lam=lam), grid, boundary)
 
 
-def _unpack_axisym_reduced_state_jax(vector, grid: MirrorGrid, boundary: MirrorBoundary):
-    boundary_radius = jnp.asarray(boundary.radius_on_grid(grid), dtype=jnp.asarray(vector).dtype)
+def _unpack_axisym_reduced_state_jax(vector, grid: MirrorGrid, boundary: MirrorBoundary, *, boundary_radius=None):
+    if boundary_radius is None:
+        boundary_radius = boundary.radius_on_grid(grid)
+    boundary_radius = jnp.asarray(boundary_radius, dtype=jnp.asarray(vector).dtype)
+    if boundary_radius.shape != (grid.nxi,):
+        raise ValueError(f"boundary_radius shape {boundary_radius.shape} does not match ({grid.nxi},)")
     mask_i, mask_j = np.nonzero(axisym_reduced_a_mask(grid))
     num_a = int(mask_i.size)
 
@@ -185,9 +189,10 @@ def _axisym_reduced_energy_jax(
     psi_prime: PsiPrimeProfile,
     i_prime: IPrimeProfile,
     pressure: PressureProfile,
+    boundary_radius=None,
     mu0: float,
 ):
-    a, lam = _unpack_axisym_reduced_state_jax(vector, grid, boundary)
+    a, lam = _unpack_axisym_reduced_state_jax(vector, grid, boundary, boundary_radius=boundary_radius)
     return axisym_total_energy_jax(
         a,
         lam,
@@ -210,6 +215,7 @@ def _axisym_reduced_objective_jax(
     source_vector=None,
     state_ridge: float = 0.0,
     reference_vector=None,
+    boundary_radius=None,
     mu0: float,
 ):
     energy = _axisym_reduced_energy_jax(
@@ -219,6 +225,7 @@ def _axisym_reduced_objective_jax(
         psi_prime=psi_prime,
         i_prime=i_prime,
         pressure=pressure,
+        boundary_radius=boundary_radius,
         mu0=mu0,
     )
     if source_vector is None:
@@ -254,6 +261,7 @@ def axisym_reduced_residual_jax(
     source_vector=None,
     state_ridge: float = 0.0,
     reference_vector=None,
+    boundary_radius=None,
     mu0: float = 4.0e-7 * np.pi,
 ):
     """Return the differentiable reduced fixed-boundary residual.
@@ -277,6 +285,7 @@ def axisym_reduced_residual_jax(
             source_vector=source_vector,
             state_ridge=state_ridge,
             reference_vector=reference_vector,
+            boundary_radius=boundary_radius,
             mu0=mu0,
         )
 
@@ -294,6 +303,7 @@ def axisym_reduced_residual_jacobian_jax(
     source_vector=None,
     state_ridge: float = 0.0,
     reference_vector=None,
+    boundary_radius=None,
     derivative: str = "hessian",
     mu0: float = 4.0e-7 * np.pi,
 ):
@@ -319,6 +329,7 @@ def axisym_reduced_residual_jacobian_jax(
             source_vector=source_vector,
             state_ridge=state_ridge,
             reference_vector=reference_vector,
+            boundary_radius=boundary_radius,
             mu0=mu0,
         )
 
@@ -347,6 +358,7 @@ def axisym_reduced_residual_matvec_jax(
     source_vector=None,
     state_ridge: float = 0.0,
     reference_vector=None,
+    boundary_radius=None,
     transpose: bool = False,
     ridge: float = 0.0,
     mu0: float = 4.0e-7 * np.pi,
@@ -374,6 +386,7 @@ def axisym_reduced_residual_matvec_jax(
             source_vector=source_vector,
             state_ridge=state_ridge,
             reference_vector=reference_vector,
+            boundary_radius=boundary_radius,
             mu0=mu0,
         )
 
@@ -396,6 +409,7 @@ def axisym_reduced_residual_linear_solve_jax(
     source_vector=None,
     state_ridge: float = 0.0,
     reference_vector=None,
+    boundary_radius=None,
     derivative: str = "hessian",
     transpose: bool = False,
     ridge: float = 0.0,
@@ -440,6 +454,7 @@ def axisym_reduced_residual_linear_solve_jax(
                 source_vector=source_vector,
                 state_ridge=state_ridge,
                 reference_vector=reference_vector,
+                boundary_radius=boundary_radius,
                 transpose=transpose,
                 ridge=ridge,
                 mu0=mu0,
@@ -467,6 +482,7 @@ def axisym_reduced_residual_linear_solve_jax(
         source_vector=source_vector,
         state_ridge=state_ridge,
         reference_vector=reference_vector,
+        boundary_radius=boundary_radius,
         derivative=derivative,
         mu0=mu0,
     )
@@ -489,6 +505,7 @@ def axisym_reduced_implicit_state_sensitivity_jax(
     source_vector=None,
     state_ridge: float = 0.0,
     reference_vector=None,
+    boundary_radius=None,
     derivative: str = "hessian",
     ridge: float = 0.0,
     solve_method: str = "dense",
@@ -518,6 +535,7 @@ def axisym_reduced_implicit_state_sensitivity_jax(
         source_vector=source_vector,
         state_ridge=state_ridge,
         reference_vector=reference_vector,
+        boundary_radius=boundary_radius,
         derivative=derivative,
         ridge=ridge,
         method=solve_method,
@@ -541,6 +559,7 @@ def axisym_reduced_implicit_adjoint_jax(
     source_vector=None,
     state_ridge: float = 0.0,
     reference_vector=None,
+    boundary_radius=None,
     derivative: str = "hessian",
     ridge: float = 0.0,
     solve_method: str = "dense",
@@ -569,6 +588,7 @@ def axisym_reduced_implicit_adjoint_jax(
         source_vector=source_vector,
         state_ridge=state_ridge,
         reference_vector=reference_vector,
+        boundary_radius=boundary_radius,
         derivative=derivative,
         transpose=True,
         ridge=ridge,
@@ -592,6 +612,7 @@ def axisym_reduced_implicit_source_state_jax(
     pressure: PressureProfile,
     state_ridge: float = 0.0,
     reference_vector=None,
+    boundary_radius=None,
     derivative: str = "hessian",
     ridge: float = 0.0,
     solve_method: str = "dense",
@@ -644,6 +665,7 @@ def axisym_reduced_implicit_source_state_jax(
             source_vector=source,
             state_ridge=state_ridge,
             reference_vector=reference_vector,
+            boundary_radius=boundary_radius,
             derivative=derivative,
             ridge=ridge,
             solve_method=solve_method,
@@ -699,6 +721,7 @@ def axisym_reduced_residual_profile_jacobian_jax(
     source_vector=None,
     state_ridge: float = 0.0,
     reference_vector=None,
+    boundary_radius=None,
     derivative: str = "forward",
     mu0: float = 4.0e-7 * np.pi,
 ):
@@ -728,6 +751,7 @@ def axisym_reduced_residual_profile_jacobian_jax(
             source_vector=source_vector,
             state_ridge=state_ridge,
             reference_vector=reference_vector,
+            boundary_radius=boundary_radius,
             mu0=mu0,
         )
 
@@ -751,6 +775,7 @@ def axisym_reduced_implicit_profile_sensitivity_jax(
     source_vector=None,
     state_ridge: float = 0.0,
     reference_vector=None,
+    boundary_radius=None,
     derivative: str = "hessian",
     parameter_derivative: str = "forward",
     ridge: float = 0.0,
@@ -783,6 +808,7 @@ def axisym_reduced_implicit_profile_sensitivity_jax(
         source_vector=source_vector,
         state_ridge=state_ridge,
         reference_vector=reference_vector,
+        boundary_radius=boundary_radius,
         derivative=parameter_derivative,
         mu0=mu0,
     )
@@ -800,6 +826,7 @@ def axisym_reduced_implicit_profile_sensitivity_jax(
                 source_vector=source_vector,
                 state_ridge=state_ridge,
                 reference_vector=reference_vector,
+                boundary_radius=boundary_radius,
                 derivative=derivative,
                 ridge=ridge,
                 method=solve_method,
@@ -825,6 +852,7 @@ def axisym_reduced_implicit_profile_state_jax(
     source_vector=None,
     state_ridge: float = 0.0,
     reference_vector=None,
+    boundary_radius=None,
     derivative: str = "hessian",
     ridge: float = 0.0,
     solve_method: str = "dense",
@@ -875,6 +903,7 @@ def axisym_reduced_implicit_profile_state_jax(
             source_vector=source_vector,
             state_ridge=state_ridge,
             reference_vector=reference_vector,
+            boundary_radius=boundary_radius,
             derivative=derivative,
             ridge=ridge,
             solve_method=solve_method,
@@ -903,6 +932,7 @@ def axisym_reduced_implicit_profile_state_jax(
                 source_vector=source_vector,
                 state_ridge=state_ridge,
                 reference_vector=reference_vector,
+                boundary_radius=boundary_radius,
                 mu0=mu0,
             )
 
@@ -1038,6 +1068,213 @@ def axisym_reduced_implicit_pressure_state_jax(
         initial_guess=initial_guess,
         mu0=mu0,
     )
+
+
+def axisym_reduced_polynomial_boundary_radius_jax(boundary_coefficients, grid: MirrorGrid):
+    """Evaluate ``r0 * (1 + a2*xi**2 + a4*xi**4)`` on the mirror axial grid."""
+    _require_jax()
+    coefficients = jnp.asarray(boundary_coefficients)
+    if coefficients.ndim != 1 or coefficients.size not in {1, 2, 3}:
+        raise ValueError("boundary_coefficients must contain r0, optionally a2 and a4")
+    xi = jnp.asarray(grid.xi, dtype=coefficients.dtype)
+    r0 = coefficients[0]
+    a2 = coefficients[1] if int(coefficients.size) >= 2 else jnp.asarray(0.0, dtype=coefficients.dtype)
+    a4 = coefficients[2] if int(coefficients.size) >= 3 else jnp.asarray(0.0, dtype=coefficients.dtype)
+    return r0 * (1.0 + a2 * xi**2 + a4 * xi**4)
+
+
+def axisym_reduced_residual_polynomial_boundary_jacobian_jax(
+    vector,
+    boundary_coefficients,
+    grid: MirrorGrid,
+    boundary: MirrorBoundary,
+    *,
+    psi_prime: PsiPrimeProfile,
+    i_prime: IPrimeProfile,
+    pressure: PressureProfile,
+    source_vector=None,
+    state_ridge: float = 0.0,
+    reference_vector=None,
+    derivative: str = "forward",
+    mu0: float = 4.0e-7 * np.pi,
+):
+    """Return ``dF/db`` for polynomial boundary coefficients ``[r0, a2, a4]``."""
+    _require_jax()
+    vector = jnp.asarray(vector)
+    boundary_coefficients = jnp.asarray(boundary_coefficients, dtype=vector.dtype)
+    key = str(derivative).strip().lower().replace("-", "_")
+
+    def residual_for_boundary(coefficients):
+        return axisym_reduced_residual_jax(
+            vector,
+            grid,
+            boundary,
+            psi_prime=psi_prime,
+            i_prime=i_prime,
+            pressure=pressure,
+            source_vector=source_vector,
+            state_ridge=state_ridge,
+            reference_vector=reference_vector,
+            boundary_radius=axisym_reduced_polynomial_boundary_radius_jax(coefficients, grid),
+            mu0=mu0,
+        )
+
+    if key in {"forward", "fwd", "jacfwd"}:
+        return jax.jacfwd(residual_for_boundary)(boundary_coefficients)
+    if key in {"reverse", "rev", "jacrev"}:
+        return jax.jacrev(residual_for_boundary)(boundary_coefficients)
+    raise ValueError("derivative must be 'forward' or 'reverse'")
+
+
+def axisym_reduced_implicit_polynomial_boundary_sensitivity_jax(
+    vector,
+    boundary_coefficients,
+    grid: MirrorGrid,
+    boundary: MirrorBoundary,
+    *,
+    psi_prime: PsiPrimeProfile,
+    i_prime: IPrimeProfile,
+    pressure: PressureProfile,
+    source_vector=None,
+    state_ridge: float = 0.0,
+    reference_vector=None,
+    derivative: str = "hessian",
+    parameter_derivative: str = "forward",
+    ridge: float = 0.0,
+    solve_method: str = "dense",
+    cg_tol: float = 1.0e-8,
+    cg_atol: float = 0.0,
+    cg_maxiter: int | None = None,
+    mu0: float = 4.0e-7 * np.pi,
+):
+    """Return ``dx/db`` for polynomial boundary coefficients."""
+    _require_jax()
+    vector = jnp.asarray(vector)
+    boundary_coefficients = jnp.asarray(boundary_coefficients, dtype=vector.dtype)
+    boundary_radius = axisym_reduced_polynomial_boundary_radius_jax(boundary_coefficients, grid)
+    boundary_jacobian = axisym_reduced_residual_polynomial_boundary_jacobian_jax(
+        vector,
+        boundary_coefficients,
+        grid,
+        boundary,
+        psi_prime=psi_prime,
+        i_prime=i_prime,
+        pressure=pressure,
+        source_vector=source_vector,
+        state_ridge=state_ridge,
+        reference_vector=reference_vector,
+        derivative=parameter_derivative,
+        mu0=mu0,
+    )
+    columns = []
+    for idx in range(int(boundary_coefficients.size)):
+        columns.append(
+            axisym_reduced_residual_linear_solve_jax(
+                vector,
+                -boundary_jacobian[:, idx],
+                grid,
+                boundary,
+                psi_prime=psi_prime,
+                i_prime=i_prime,
+                pressure=pressure,
+                source_vector=source_vector,
+                state_ridge=state_ridge,
+                reference_vector=reference_vector,
+                boundary_radius=boundary_radius,
+                derivative=derivative,
+                ridge=ridge,
+                method=solve_method,
+                cg_tol=cg_tol,
+                cg_atol=cg_atol,
+                cg_maxiter=cg_maxiter,
+                mu0=mu0,
+            )
+        )
+    return jnp.stack(columns, axis=1)
+
+
+def axisym_reduced_implicit_polynomial_boundary_state_jax(
+    solved_vector,
+    boundary_coefficients,
+    grid: MirrorGrid,
+    boundary: MirrorBoundary,
+    *,
+    psi_prime: PsiPrimeProfile,
+    i_prime: IPrimeProfile,
+    pressure: PressureProfile,
+    source_vector=None,
+    state_ridge: float = 0.0,
+    reference_vector=None,
+    derivative: str = "hessian",
+    ridge: float = 0.0,
+    solve_method: str = "dense",
+    cg_tol: float = 1.0e-8,
+    cg_atol: float = 0.0,
+    cg_maxiter: int | None = None,
+    initial_guess=None,
+    mu0: float = 4.0e-7 * np.pi,
+):
+    """Return a solved reduced state with an implicit VJP for boundary coefficients."""
+    _require_jax()
+    solved_vector = jnp.asarray(solved_vector)
+    boundary_coefficients = jnp.asarray(boundary_coefficients, dtype=solved_vector.dtype)
+    if boundary_coefficients.ndim != 1 or boundary_coefficients.size not in {1, 2, 3}:
+        raise ValueError("boundary_coefficients must contain r0, optionally a2 and a4")
+
+    @jax.custom_vjp
+    def solved_state_from_boundary(root, coefficients):
+        del coefficients
+        return root
+
+    def solved_state_from_boundary_fwd(root, coefficients):
+        return root, (root, coefficients)
+
+    def solved_state_from_boundary_bwd(residual_data, cotangent):
+        root, coefficients = residual_data
+        boundary_radius = axisym_reduced_polynomial_boundary_radius_jax(coefficients, grid)
+        adjoint = axisym_reduced_implicit_adjoint_jax(
+            root,
+            cotangent,
+            grid,
+            boundary,
+            psi_prime=psi_prime,
+            i_prime=i_prime,
+            pressure=pressure,
+            source_vector=source_vector,
+            state_ridge=state_ridge,
+            reference_vector=reference_vector,
+            boundary_radius=boundary_radius,
+            derivative=derivative,
+            ridge=ridge,
+            solve_method=solve_method,
+            cg_tol=cg_tol,
+            cg_atol=cg_atol,
+            cg_maxiter=cg_maxiter,
+            initial_guess=initial_guess,
+            mu0=mu0,
+        )
+
+        def residual_for_boundary(items):
+            return axisym_reduced_residual_jax(
+                root,
+                grid,
+                boundary,
+                psi_prime=psi_prime,
+                i_prime=i_prime,
+                pressure=pressure,
+                source_vector=source_vector,
+                state_ridge=state_ridge,
+                reference_vector=reference_vector,
+                boundary_radius=axisym_reduced_polynomial_boundary_radius_jax(items, grid),
+                mu0=mu0,
+            )
+
+        _, pullback = jax.vjp(residual_for_boundary, coefficients)
+        boundary_bar = -pullback(adjoint)[0]
+        return jnp.zeros_like(root), boundary_bar
+
+    solved_state_from_boundary.defvjp(solved_state_from_boundary_fwd, solved_state_from_boundary_bwd)
+    return solved_state_from_boundary(solved_vector, boundary_coefficients)
 
 
 def pack_reduced_state_3d(state: MirrorState3D, grid: MirrorGrid, boundary: MirrorBoundary) -> np.ndarray:

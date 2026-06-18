@@ -17442,3 +17442,112 @@ Results:
 No user input is needed.
 
 ---
+## 140. Polynomial-Boundary Implicit Differentiation Gate
+
+### Steps taken
+
+- Added an optional `boundary_radius` override through the reduced residual,
+  Jacobian, Hessian-vector product, linear solve, and implicit adjoint paths.
+- Added `axisym_reduced_polynomial_boundary_radius_jax`.
+- Added `axisym_reduced_residual_polynomial_boundary_jacobian_jax`.
+- Added `axisym_reduced_implicit_polynomial_boundary_sensitivity_jax`.
+- Added `axisym_reduced_implicit_polynomial_boundary_state_jax`.
+- Exported the polynomial-boundary differentiability functions through
+  `vmec_jax.mirror.api` and `vmec_jax.mirror`.
+- Added a regression test for polynomial boundary coefficients `[r0, a2, a4]`.
+- The test checks:
+  - JAX polynomial-radius evaluation matches `MirrorBoundary.polynomial_radius`;
+  - forward and reverse boundary residual Jacobians agree;
+  - custom boundary VJP gradient matches `-F_b.T @ adjoint`;
+  - custom VJP directional derivative matches the forward sensitivity
+    contraction;
+  - dense and matrix-free boundary sensitivities agree;
+  - directional derivative matches a separately solved perturbed-boundary root
+    finite difference.
+- Updated `docs/mirror/differentiability.rst` to document the boundary
+  coefficient API and validation status.
+
+### Results obtained
+
+- The differentiable solved-state lane now covers:
+  - reduced source perturbations;
+  - pressure coefficients;
+  - current coefficients;
+  - flux coefficients;
+  - axisymmetric polynomial-boundary coefficients.
+- Boundary derivatives do not require turning `MirrorBoundary` into a pytree;
+  the tested path uses an explicit JAX boundary-radius override.
+- The existing static boundary API remains unchanged for CLI and non-AD usage.
+- Full fixed-boundary axisymmetric mirror tests pass with the added boundary
+  gate: `22 passed`.
+
+### How it was tested
+
+Commands run:
+
+```bash
+python -m ruff format --check vmec_jax/mirror/solvers/fixed_boundary/reduced.py \
+  vmec_jax/mirror/api.py vmec_jax/mirror/__init__.py \
+  tests/mirror/test_mirror_fixed_boundary_axisym.py
+python -m ruff check vmec_jax/mirror/solvers/fixed_boundary/reduced.py \
+  vmec_jax/mirror/api.py vmec_jax/mirror/__init__.py \
+  tests/mirror/test_mirror_fixed_boundary_axisym.py
+JAX_ENABLE_X64=1 pytest \
+  tests/mirror/test_mirror_fixed_boundary_axisym.py::test_reduced_polynomial_boundary_custom_vjp_matches_adjoint_and_perturbed_root -q
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_fixed_boundary_axisym.py -q
+python -m sphinx -W -b html docs docs/_build/html
+git diff --check
+```
+
+Results:
+
+- Ruff Python format check passed.
+- Ruff lint passed.
+- Focused polynomial-boundary differentiability test: `1 passed`.
+- Full fixed-boundary axisymmetric mirror test file: `22 passed`.
+- Sphinx docs build passed with warnings treated as errors.
+- Whitespace check passed.
+
+### File structure and best-practice notes
+
+- Boundary coefficient differentiation stays in
+  `vmec_jax/mirror/solvers/fixed_boundary/reduced.py`, because it reuses the
+  same reduced residual and implicit linear solve machinery as source/profile
+  derivatives.
+- The boundary path is explicit and narrow: polynomial axisymmetric boundary
+  coefficients only.
+- The ordinary `MirrorBoundary` dataclass remains simple and NumPy-oriented.
+- No generated artifacts or large files were added.
+
+### Best next steps
+
+1. Commit and push M140.
+2. Add a compact benchmark/example comparing profile and boundary custom VJPs
+   against forward sensitivity contractions over a tiny grid ladder.
+3. Update the draft PR body so it reflects the new differentiability status.
+4. Return to the free-boundary/ESSOS beta-scan convergence lane after the PR
+   description is synchronized.
+
+### Completion percentages after M140
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `91%`.
+- Fixed-boundary axisymmetric solve: `91%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `89%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `92%`.
+- I/O schema and docs: `99%`.
+- Differentiable solved-state API: `90%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `87%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `90%`.
+- PR merge readiness overall: `97%`.
+
+### User input needed
+
+No user input is needed.
+
+---
