@@ -8,6 +8,8 @@ behavior independently testable.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import numpy as np
 
 from ..solve import SolveVmecResidualResult
@@ -265,6 +267,49 @@ def assemble_multigrid_stage_result(
         diagnostics=diag,
     )
     return copy_final_force_payload(out, last)
+
+
+def finalize_fixed_boundary_convergence_result(
+    result: SolveVmecResidualResult,
+    *,
+    requested_ftol: float,
+    fsq_total_target: float,
+    accelerated_mode: bool,
+    result_final_residuals: Callable[..., object],
+    result_meets_requested_ftol: Callable[..., bool],
+    result_hits_total_target: Callable[..., bool],
+) -> SolveVmecResidualResult:
+    """Attach final convergence diagnostics to a fixed-boundary result."""
+
+    final_residuals = result_final_residuals(result)
+    final_diag = dict(result.diagnostics)
+    final_diag["requested_ftol"] = float(requested_ftol)
+    final_diag["fsq_total_target"] = (
+        float(fsq_total_target)
+        if (final_diag.get("fsq_total_target", None) is not None or bool(accelerated_mode))
+        else None
+    )
+    if final_residuals is not None:
+        final_diag["final_fsqr"] = float(final_residuals[0])
+        final_diag["final_fsqz"] = float(final_residuals[1])
+        final_diag["final_fsql"] = float(final_residuals[2])
+    final_diag["converged_strict"] = bool(result_meets_requested_ftol(result, ftol=float(requested_ftol)))
+    final_diag["converged_by_total_fsq"] = bool(
+        result_hits_total_target(result, fsq_total_target=float(fsq_total_target))
+    )
+    final_diag["converged"] = bool(final_diag["converged_strict"])
+    out = SolveVmecResidualResult(
+        state=result.state,
+        n_iter=int(result.n_iter),
+        w_history=np.asarray(result.w_history),
+        fsqr2_history=np.asarray(result.fsqr2_history),
+        fsqz2_history=np.asarray(result.fsqz2_history),
+        fsql2_history=np.asarray(result.fsql2_history),
+        grad_rms_history=np.asarray(result.grad_rms_history),
+        step_history=np.asarray(result.step_history),
+        diagnostics=final_diag,
+    )
+    return copy_final_force_payload(out, result)
 
 
 def stage_switch_reason_from_progress(

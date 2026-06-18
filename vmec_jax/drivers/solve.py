@@ -348,6 +348,116 @@ def maybe_rerun_scan_abort_stage(
         return result
 
 
+def maybe_apply_scan_wout_corrector(
+    *,
+    result: Any,
+    stage_results: list[Any],
+    scan_wout_corrector: bool | None,
+    accelerated_mode: bool,
+    static_prev: Any,
+    build_static_func: Callable[[Any], Any],
+    cfg: Any,
+    ftol_last: float | None,
+    step_size_last: float | None,
+    indata: Any,
+    signgs: int,
+    use_restart_triggers: bool | None,
+    vmecpp_restart: bool,
+    stage_transition_factor: float,
+    stage_transition_scale: float,
+    scan_minimal_default: bool | None,
+    jit_forces: Any,
+    resolve_jit_forces: Callable[[Any, Any, int], bool],
+    solve_fixed_boundary_residual_iter_func: Callable[..., Any],
+    accelerated_fsq_total_target_from_ftol: Callable[[float], float],
+    copy_final_force_payload: Callable[..., Any],
+    getenv: Callable[[str, str], str] = os.getenv,
+) -> Any:
+    """Optionally run one non-scan corrector step before writing WOUT output."""
+
+    try:
+        use_scan_any = any(bool(r.diagnostics.get("vmec2000_scan", False)) for r in stage_results)
+    except Exception:
+        use_scan_any = False
+    if bool(accelerated_mode) and scan_wout_corrector is None:
+        scan_wout_corrector = False
+    if scan_wout_corrector is None:
+        scan_wout_env = getenv("VMEC_JAX_SCAN_WOUT_CORRECTOR", "0").strip().lower()
+        scan_wout_corrector = scan_wout_env not in ("", "0", "false", "no")
+    if not (bool(use_scan_any) and bool(scan_wout_corrector)):
+        return result
+
+    try:
+        from ..solve import SolveVmecResidualResult
+
+        resume_state_corr = result.diagnostics.get("resume_state", None)
+        static_corr = static_prev if static_prev is not None else build_static_func(cfg)
+        ftol_corr = float(ftol_last) if ftol_last is not None else float(indata.get_float("FTOL", 1e-13))
+        step_corr = float(step_size_last) if step_size_last is not None else 1.0
+        corr_kwargs = dict(
+            indata=indata,
+            signgs=signgs,
+            ftol=ftol_corr,
+            max_iter=1,
+            step_size=step_corr,
+            include_constraint_force=True,
+            apply_m1_constraints=True,
+            precond_radial_alpha=0.5,
+            precond_lambda_alpha=0.5,
+            mode_diag_exponent=0.0,
+            auto_flip_force=False,
+            divide_by_scalxc_for_update=False,
+            lambda_update_scale=1.0,
+            enforce_vmec_lambda_axis=True,
+            vmec2000_control=True,
+            strict_update=True,
+            backtracking=False,
+            reference_mode=False,
+            use_restart_triggers=True if use_restart_triggers is None else bool(use_restart_triggers),
+            vmecpp_restart=bool(vmecpp_restart),
+            stage_prev_fsq=None,
+            stage_transition_factor=float(stage_transition_factor),
+            stage_transition_scale=float(stage_transition_scale),
+            use_direct_fallback=False,
+            resume_state=resume_state_corr,
+            verbose=False,
+            verbose_vmec2000_table=False,
+            jit_precompile=False,
+            jit_warmup_iters=0,
+            use_scan=False,
+            scan_minimal_default=scan_minimal_default,
+            light_history=True if accelerated_mode else None,
+            resume_state_mode="minimal" if accelerated_mode else None,
+            fsq_total_target=(
+                accelerated_fsq_total_target_from_ftol(float(ftol_corr)) if bool(accelerated_mode) else None
+            ),
+            return_final_force_payload=True,
+        )
+        res_corr = solve_fixed_boundary_residual_iter_func(
+            result.state,
+            static_corr,
+            jit_forces=resolve_jit_forces(jit_forces, static_corr, 1),
+            **corr_kwargs,
+        )
+        diag = dict(result.diagnostics)
+        diag["scan_wout_corrector"] = True
+        diag["scan_wout_corrector_iters"] = int(res_corr.n_iter)
+        corrected = SolveVmecResidualResult(
+            state=res_corr.state,
+            n_iter=result.n_iter,
+            w_history=result.w_history,
+            fsqr2_history=result.fsqr2_history,
+            fsqz2_history=result.fsqz2_history,
+            fsql2_history=result.fsql2_history,
+            grad_rms_history=result.grad_rms_history,
+            step_history=result.step_history,
+            diagnostics=diag,
+        )
+        return copy_final_force_payload(corrected, res_corr)
+    except Exception:
+        return result
+
+
 def maybe_run_fixed_boundary_in_solver_device_context(
     *,
     input_path: Any,

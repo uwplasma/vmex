@@ -1370,112 +1370,41 @@ def run_fixed_boundary(
             stage_solve_total_s=stage_solve_total_s,
             niter_stages_input=niter_stages_input,
         )
-        # Optional scan corrector: run a single non-scan VMEC2000 step to
-        # re-anchor the final state before writing wout outputs.
-        try:
-            use_scan_any = any(bool(r.diagnostics.get("vmec2000_scan", False)) for r in stage_results)
-        except Exception:
-            use_scan_any = False
-        if accelerated_mode and scan_wout_corrector is None:
-            scan_wout_corrector = False
-        if scan_wout_corrector is None:
-            scan_wout_env = os.getenv("VMEC_JAX_SCAN_WOUT_CORRECTOR", "0").strip().lower()
-            scan_wout_corrector = scan_wout_env not in ("", "0", "false", "no")
-        if use_scan_any and bool(scan_wout_corrector):
-            try:
-                resume_state_corr = res.diagnostics.get("resume_state", None)
-                static_corr = static_prev if static_prev is not None else _build_static_cfg(cfg)
-                ftol_corr = float(ftol_last) if ftol_last is not None else float(indata.get_float("FTOL", 1e-13))
-                step_corr = float(step_size_last) if step_size_last is not None else 1.0
-                corr_kwargs = dict(
-                    indata=indata,
-                    signgs=signgs,
-                    ftol=ftol_corr,
-                    max_iter=1,
-                    step_size=step_corr,
-                    include_constraint_force=True,
-                    apply_m1_constraints=True,
-                    precond_radial_alpha=0.5,
-                    precond_lambda_alpha=0.5,
-                    mode_diag_exponent=0.0,
-                    auto_flip_force=False,
-                    divide_by_scalxc_for_update=False,
-                    lambda_update_scale=1.0,
-                    enforce_vmec_lambda_axis=True,
-                    vmec2000_control=True,
-                    strict_update=True,
-                    backtracking=False,
-                    reference_mode=False,
-                    use_restart_triggers=True if use_restart_triggers is None else bool(use_restart_triggers),
-                    vmecpp_restart=bool(vmecpp_restart),
-                    stage_prev_fsq=None,
-                    stage_transition_factor=float(stage_transition_factor),
-                    stage_transition_scale=float(stage_transition_scale),
-                    use_direct_fallback=False,
-                    resume_state=resume_state_corr,
-                    verbose=False,
-                    verbose_vmec2000_table=False,
-                    jit_precompile=False,
-                    jit_warmup_iters=0,
-                    use_scan=False,
-                    scan_minimal_default=scan_minimal_default,
-                    light_history=True if accelerated_mode else None,
-                    resume_state_mode="minimal" if accelerated_mode else None,
-                    fsq_total_target=(
-                        _accelerated_fsq_total_target_from_ftol(float(ftol_corr)) if accelerated_mode else None
-                    ),
-                    return_final_force_payload=True,
-                )
-                res_corr = solve_fixed_boundary_residual_iter(
-                    res.state,
-                    static_corr,
-                    jit_forces=_resolve_jit_forces(jit_forces, static_corr, 1),
-                    **corr_kwargs,
-                )
-                diag = dict(res.diagnostics)
-                diag["scan_wout_corrector"] = True
-                diag["scan_wout_corrector_iters"] = int(res_corr.n_iter)
-                res = _copy_final_force_payload(SolveVmecResidualResult(
-                    state=res_corr.state,
-                    n_iter=res.n_iter,
-                    w_history=res.w_history,
-                    fsqr2_history=res.fsqr2_history,
-                    fsqz2_history=res.fsqz2_history,
-                    fsql2_history=res.fsql2_history,
-                    grad_rms_history=res.grad_rms_history,
-                    step_history=res.step_history,
-                    diagnostics=diag,
-                ), res_corr)
-            except Exception:
-                pass
+        res = _driver_solve_helpers.maybe_apply_scan_wout_corrector(
+            result=res,
+            stage_results=stage_results,
+            scan_wout_corrector=scan_wout_corrector,
+            accelerated_mode=bool(accelerated_mode),
+            static_prev=static_prev,
+            build_static_func=_build_static_cfg,
+            cfg=cfg,
+            ftol_last=ftol_last,
+            step_size_last=step_size_last,
+            indata=indata,
+            signgs=signgs,
+            use_restart_triggers=use_restart_triggers,
+            vmecpp_restart=bool(vmecpp_restart),
+            stage_transition_factor=float(stage_transition_factor),
+            stage_transition_scale=float(stage_transition_scale),
+            scan_minimal_default=scan_minimal_default,
+            jit_forces=jit_forces,
+            resolve_jit_forces=_resolve_jit_forces,
+            solve_fixed_boundary_residual_iter_func=solve_fixed_boundary_residual_iter,
+            accelerated_fsq_total_target_from_ftol=_accelerated_fsq_total_target_from_ftol,
+            copy_final_force_payload=_copy_final_force_payload,
+            getenv=os.getenv,
+        )
         final_requested_ftol = _requested_final_ftol(indata=indata, ftol_list_input=ftol_list_input)
         final_target_fsq = _accelerated_fsq_total_target_from_ftol(float(final_requested_ftol))
-        final_residuals = _result_final_residuals(res)
-        final_diag = dict(res.diagnostics)
-        final_diag["requested_ftol"] = float(final_requested_ftol)
-        final_diag["fsq_total_target"] = (
-            final_target_fsq if (final_diag.get("fsq_total_target", None) is not None or bool(accelerated_mode)) else None
+        res = _driver_result_helpers.finalize_fixed_boundary_convergence_result(
+            res,
+            requested_ftol=float(final_requested_ftol),
+            fsq_total_target=float(final_target_fsq),
+            accelerated_mode=bool(accelerated_mode),
+            result_final_residuals=_result_final_residuals,
+            result_meets_requested_ftol=_result_meets_requested_ftol,
+            result_hits_total_target=_result_hits_total_target,
         )
-        if final_residuals is not None:
-            final_diag["final_fsqr"] = float(final_residuals[0])
-            final_diag["final_fsqz"] = float(final_residuals[1])
-            final_diag["final_fsql"] = float(final_residuals[2])
-        final_diag["converged_strict"] = bool(_result_meets_requested_ftol(res, ftol=float(final_requested_ftol)))
-        final_diag["converged_by_total_fsq"] = bool(
-            _result_hits_total_target(res, fsq_total_target=float(final_target_fsq))
-        )
-        final_diag["converged"] = bool(final_diag["converged_strict"])
-        res = _copy_final_force_payload(SolveVmecResidualResult(
-            state=res.state,
-            n_iter=int(res.n_iter),
-            w_history=np.asarray(res.w_history),
-            fsqr2_history=np.asarray(res.fsqr2_history),
-            fsqz2_history=np.asarray(res.fsqz2_history),
-            fsql2_history=np.asarray(res.fsql2_history),
-            grad_rms_history=np.asarray(res.grad_rms_history),
-            step_history=np.asarray(res.step_history),
-            diagnostics=final_diag,
-        ), res)
         # Use the static from the last executed stage (static_prev) when
         # available.  This ensures that static.cfg.ns matches the actual
         # solved state's ns even when the final NS_ARRAY stage is skipped
