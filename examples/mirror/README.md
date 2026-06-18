@@ -82,7 +82,10 @@ pass ``--run-solve`` to run the ordinary fixed-boundary driver for each row and
 record runtime, iteration count, final ``fsq``, residual history, convergence
 status, best ``fsq`` reached, aspect, mean iota, magnetic-well proxy, and a
 ``wout_*.nc``. With plots enabled, solved rows also write ``fsq`` history plus
-iota and Mercier ``DWell`` profile figures. Pass ``--run-vmec2000`` to run the
+iota and Mercier ``DWell`` profile figures. The no-solve path also records
+target and fitted side/corner principal-axis orientation spans, covariance
+anisotropy ranges, valid-axis fractions, and an orientation-preservation plot
+when plots are enabled. Pass ``--run-vmec2000`` to run the
 same generated inputs through the local VMEC2000 executable and record parsed
 ``threed1`` residual histories beside the VMEC/JAX rows. Use
 ``--solver-mode parity --no-use-scan`` for the closest VMEC2000-control

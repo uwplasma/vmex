@@ -16,6 +16,7 @@ from .namelist import minimal_fixed_boundary_indata, read_indata, write_indata
 from .toroidal_hybrid import (
     ToroidalHybridBoundarySamples,
     evaluate_toroidal_hybrid_indata_boundary,
+    toroidal_hybrid_cross_section_anisotropy,
     sample_toroidal_stellarator_mirror_hybrid_boundary,
     toroidal_hybrid_cross_section_orientation,
     toroidal_stellarator_mirror_hybrid_indata,
@@ -213,6 +214,7 @@ __all__ = [
     "minimal_fixed_boundary_indata",
     "ToroidalHybridBoundarySamples",
     "evaluate_toroidal_hybrid_indata_boundary",
+    "toroidal_hybrid_cross_section_anisotropy",
     "sample_toroidal_stellarator_mirror_hybrid_boundary",
     "toroidal_hybrid_cross_section_orientation",
     "toroidal_stellarator_mirror_hybrid_indata",

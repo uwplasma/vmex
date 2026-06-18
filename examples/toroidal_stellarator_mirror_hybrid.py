@@ -14,6 +14,7 @@ import vmec_jax as vj
 from vmec_jax.namelist import write_indata
 from vmec_jax.toroidal_hybrid import (
     sample_toroidal_stellarator_mirror_hybrid_boundary,
+    toroidal_hybrid_cross_section_anisotropy,
     toroidal_hybrid_cross_section_orientation,
     toroidal_stellarator_mirror_hybrid_indata,
     toroidal_stellarator_mirror_hybrid_metrics,
@@ -107,10 +108,29 @@ def _write_boundary_plots(samples, *, outdir: Path, nfp: int) -> dict[str, str]:
     paths["cross_sections"] = str(path)
 
     orientation = toroidal_hybrid_cross_section_orientation(samples)
+    anisotropy = toroidal_hybrid_cross_section_anisotropy(samples)
+    anisotropy_threshold = 1.0e-14 + 1.0e-8 * float(np.max(anisotropy))
+    valid_orientation = anisotropy > anisotropy_threshold
     side_weight = np.mean(samples.side_weight, axis=0)
     corner_weight = np.mean(samples.corner_weight, axis=0)
     fig, ax0 = plt.subplots(1, 1, figsize=(6.8, 4.2), constrained_layout=True)
-    ax0.plot(samples.zeta, orientation, color="tab:purple", lw=1.8, label="ellipse orientation")
+    ax0.plot(
+        samples.zeta[valid_orientation],
+        orientation[valid_orientation],
+        ".",
+        color="tab:purple",
+        ms=4,
+        label="valid ellipse orientation",
+    )
+    if np.any(~valid_orientation):
+        ax0.plot(
+            samples.zeta[~valid_orientation],
+            orientation[~valid_orientation],
+            "x",
+            color="0.45",
+            ms=5,
+            label="undefined covariance axis",
+        )
     ax0.set_xlabel("zeta")
     ax0.set_ylabel("principal-axis angle")
     ax1 = ax0.twinx()

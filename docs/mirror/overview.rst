@@ -99,7 +99,10 @@ Current solver status:
   is a different, deliberately stricter initialization.  Use ``--nstep 1`` and
   ``--full-solver-diagnostics`` and ``--no-cli-finish`` in the toroidal-hybrid
   convergence example when comparing full VMEC-style iteration trajectories and
-  solver step controls.
+  solver step controls.  The same convergence rows also record target and fitted
+  side/corner orientation spans, covariance anisotropy ranges, and valid-axis
+  fractions so low-mode boundary fits can be audited before interpreting
+  residual trends.
 
 Later phases finish differentiable optimization APIs, production
 free-boundary LCFS solves, toroidal stellarator-mirror hybrid convergence and

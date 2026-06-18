@@ -199,10 +199,15 @@ def toroidal_stellarator_mirror_hybrid_metrics(samples: ToroidalHybridBoundarySa
     side_r_span = float(np.mean(np.ptp(samples.R[:, side_cols], axis=0)))
     corner_r_span = float(np.mean(np.ptp(samples.R[:, corner_cols], axis=0)))
     orientation = toroidal_hybrid_cross_section_orientation(samples)
+    anisotropy = toroidal_hybrid_cross_section_anisotropy(samples)
     side_weight = np.mean(samples.side_weight, axis=0)
     corner_weight = np.mean(samples.corner_weight, axis=0)
     side_region = side_weight >= 0.5
     corner_region = corner_weight >= 0.5
+    anisotropy_threshold = 1.0e-14 + 1.0e-8 * float(np.max(anisotropy))
+    valid_orientation = anisotropy > anisotropy_threshold
+    side_valid = side_region & valid_orientation
+    corner_valid = corner_region & valid_orientation
     return {
         "min_R": float(np.min(samples.R)),
         "max_R": float(np.max(samples.R)),
@@ -216,18 +221,49 @@ def toroidal_stellarator_mirror_hybrid_metrics(samples: ToroidalHybridBoundarySa
         "cross_section_orientation_span": float(np.ptp(orientation)),
         "side_orientation_span": float(np.ptp(orientation[side_region])) if np.any(side_region) else 0.0,
         "corner_orientation_span": float(np.ptp(orientation[corner_region])) if np.any(corner_region) else 0.0,
+        "orientation_valid_fraction": float(np.mean(valid_orientation)) if valid_orientation.size else 0.0,
+        "valid_cross_section_orientation_span": float(np.ptp(orientation[valid_orientation]))
+        if np.any(valid_orientation)
+        else 0.0,
+        "valid_side_orientation_span": float(np.ptp(orientation[side_valid])) if np.any(side_valid) else 0.0,
+        "valid_corner_orientation_span": float(np.ptp(orientation[corner_valid])) if np.any(corner_valid) else 0.0,
         "side_corner_weight_overlap_max": float(np.max(side_weight * corner_weight)),
+        "cross_section_anisotropy_min": float(np.min(anisotropy)),
+        "cross_section_anisotropy_max": float(np.max(anisotropy)),
     }
 
 
-def toroidal_hybrid_cross_section_orientation(samples: ToroidalHybridBoundarySamples) -> np.ndarray:
-    """Return the unwrapped principal-axis angle of each sampled cross section."""
+def _sample_RZ_arrays(samples: ToroidalHybridBoundarySamples) -> tuple[np.ndarray, np.ndarray]:
     R = np.asarray(samples.R, dtype=float)
     Z = np.asarray(samples.Z, dtype=float)
     if R.shape != Z.shape:
         raise ValueError("R and Z samples must have the same shape")
     if R.ndim != 2 or R.shape[0] < 3 or R.shape[1] < 1:
         raise ValueError("R and Z samples must have shape (ntheta, nzeta)")
+    return R, Z
+
+
+def toroidal_hybrid_cross_section_anisotropy(samples: ToroidalHybridBoundarySamples) -> np.ndarray:
+    """Return the covariance anisotropy strength of each sampled cross section."""
+    R, Z = _sample_RZ_arrays(samples)
+    values = []
+    for col in range(R.shape[1]):
+        r = R[:, col] - float(np.mean(R[:, col]))
+        z = Z[:, col] - float(np.mean(Z[:, col]))
+        q1 = float(np.mean(r * r) - np.mean(z * z))
+        q2 = float(2.0 * np.mean(r * z))
+        values.append(np.hypot(q1, q2))
+    return np.asarray(values, dtype=float)
+
+
+def toroidal_hybrid_cross_section_orientation(samples: ToroidalHybridBoundarySamples) -> np.ndarray:
+    """Return the unwrapped principal-axis angle of each sampled cross section.
+
+    The angle is undefined where the cross-section covariance is isotropic.  Use
+    `toroidal_hybrid_cross_section_anisotropy` to mask those points before
+    interpreting orientation differences.
+    """
+    R, Z = _sample_RZ_arrays(samples)
     angles = []
     for col in range(R.shape[1]):
         r = R[:, col] - float(np.mean(R[:, col]))

@@ -17,6 +17,8 @@ from vmec_jax.namelist import write_indata
 from vmec_jax.toroidal_hybrid import (
     evaluate_toroidal_hybrid_indata_boundary,
     sample_toroidal_stellarator_mirror_hybrid_boundary,
+    toroidal_hybrid_cross_section_anisotropy,
+    toroidal_hybrid_cross_section_orientation,
     toroidal_stellarator_mirror_hybrid_indata,
     toroidal_stellarator_mirror_hybrid_metrics,
 )
@@ -131,6 +133,8 @@ _CSV_COLUMNS = (
     "rbc_count",
     "zbs_count",
     "max_boundary_fit_error",
+    "max_orientation_fit_error",
+    "orientation_fit_valid_fraction",
     "major_radius",
     "minor_radius",
     "axis_oval",
@@ -140,6 +144,26 @@ _CSV_COLUMNS = (
     "corner_amplitude",
     "corner_helicity",
     "corner_power",
+    "cross_section_orientation_span",
+    "side_orientation_span",
+    "corner_orientation_span",
+    "orientation_valid_fraction",
+    "valid_cross_section_orientation_span",
+    "valid_side_orientation_span",
+    "valid_corner_orientation_span",
+    "side_corner_weight_overlap_max",
+    "fitted_cross_section_orientation_span",
+    "fitted_side_orientation_span",
+    "fitted_corner_orientation_span",
+    "fitted_orientation_valid_fraction",
+    "fitted_valid_cross_section_orientation_span",
+    "fitted_valid_side_orientation_span",
+    "fitted_valid_corner_orientation_span",
+    "fitted_side_corner_weight_overlap_max",
+    "cross_section_anisotropy_min",
+    "cross_section_anisotropy_max",
+    "fitted_cross_section_anisotropy_min",
+    "fitted_cross_section_anisotropy_max",
     "initialization_policy",
     "vmec_jax_axis_initialization_policy",
     "ran_solve",
@@ -302,6 +326,39 @@ def _safe_ratio(numerator: object, denominator: object) -> float | None:
     if not np.isfinite(num) or not np.isfinite(den) or den == 0.0:
         return None
     return num / den
+
+
+def _orientation_fit_diagnostics(
+    reference,
+    fitted,
+    *,
+    anisotropy_rtol: float = 1.0e-8,
+    anisotropy_atol: float = 1.0e-14,
+) -> dict[str, float | None]:
+    """Compare fitted principal-axis angles where the axis is well-defined."""
+    reference_angle = toroidal_hybrid_cross_section_orientation(reference)
+    fitted_angle = toroidal_hybrid_cross_section_orientation(fitted)
+    if reference_angle.shape != fitted_angle.shape:
+        raise ValueError("reference and fitted orientation arrays must have the same shape")
+    reference_anisotropy = toroidal_hybrid_cross_section_anisotropy(reference)
+    fitted_anisotropy = toroidal_hybrid_cross_section_anisotropy(fitted)
+    anisotropy_scale = max(
+        float(np.max(reference_anisotropy)) if reference_anisotropy.size else 0.0,
+        float(np.max(fitted_anisotropy)) if fitted_anisotropy.size else 0.0,
+    )
+    threshold = float(anisotropy_atol) + float(anisotropy_rtol) * anisotropy_scale
+    valid = (reference_anisotropy > threshold) & (fitted_anisotropy > threshold)
+    valid_fraction = float(np.mean(valid)) if valid.size else 0.0
+    if not np.any(valid):
+        return {
+            "max_orientation_fit_error": None,
+            "orientation_fit_valid_fraction": valid_fraction,
+        }
+    wrapped_delta = 0.5 * np.angle(np.exp(2.0j * (fitted_angle - reference_angle)))
+    return {
+        "max_orientation_fit_error": float(np.max(np.abs(wrapped_delta[valid]))),
+        "orientation_fit_valid_fraction": valid_fraction,
+    }
 
 
 def _attach_initial_residual_comparison(row: dict[str, object]) -> None:
@@ -509,6 +566,52 @@ def _write_summary_plot(rows: list[dict[str, object]], *, outdir: Path) -> str:
     ax.set_title("Toroidal hybrid convergence grid")
     ax.grid(True, which="both", alpha=0.25)
     path = outdir / "toroidal_hybrid_convergence.png"
+    fig.savefig(path, dpi=180)
+    plt.close(fig)
+    return str(path)
+
+
+def _write_orientation_plot(rows: list[dict[str, object]], *, outdir: Path) -> str | None:
+    if not rows:
+        return None
+    plt = _import_matplotlib()
+    outdir.mkdir(parents=True, exist_ok=True)
+    labels = [str(row["case"]) for row in rows]
+    x = np.arange(len(rows), dtype=float)
+    fig, ax0 = plt.subplots(1, 1, figsize=(max(7.0, 0.62 * len(rows)), 4.4), constrained_layout=True)
+    error = np.asarray(
+        [
+            np.nan if row.get("max_orientation_fit_error") is None else float(row["max_orientation_fit_error"])
+            for row in rows
+        ],
+        dtype=float,
+    )
+    valid_fraction = np.asarray(
+        [
+            np.nan
+            if row.get("orientation_fit_valid_fraction") is None
+            else float(row["orientation_fit_valid_fraction"])
+            for row in rows
+        ],
+        dtype=float,
+    )
+    if np.any(np.isfinite(error)):
+        ax0.semilogy(x, np.maximum(error, 1.0e-300), "o-", lw=1.4, ms=4, label="valid max fit error")
+    ax0.set_xticks(x)
+    ax0.set_xticklabels(labels, rotation=30, ha="right")
+    ax0.set_ylabel("angle error [rad]")
+    ax0.set_title("Toroidal hybrid orientation preservation")
+    ax0.grid(True, which="both", alpha=0.25)
+    ax1 = ax0.twinx()
+    if np.any(np.isfinite(valid_fraction)):
+        ax1.plot(x, valid_fraction, "s--", color="tab:orange", lw=1.3, ms=4, label="valid fraction")
+    ax1.set_ylim(-0.02, 1.02)
+    ax1.set_ylabel("valid-axis fraction")
+    lines0, labels0 = ax0.get_legend_handles_labels()
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    if lines0 or lines1:
+        ax0.legend(lines0 + lines1, labels0 + labels1, loc="best", fontsize=8)
+    path = outdir / "toroidal_hybrid_orientation_preservation.png"
     fig.savefig(path, dpi=180)
     plt.close(fig)
     return str(path)
@@ -797,6 +900,8 @@ def main() -> None:
                     float(np.max(np.abs(fitted.R - samples.R))),
                     float(np.max(np.abs(fitted.Z - samples.Z))),
                 )
+                fitted_metrics = toroidal_stellarator_mirror_hybrid_metrics(fitted)
+                orientation_fit = _orientation_fit_diagnostics(samples, fitted)
                 row: dict[str, object] = {
                     "case": case,
                     "shape_case": shape_case,
@@ -808,6 +913,8 @@ def main() -> None:
                     "rbc_count": len(indata.indexed.get("RBC", {})),
                     "zbs_count": len(indata.indexed.get("ZBS", {})),
                     "max_boundary_fit_error": max_fit_error,
+                    "max_orientation_fit_error": orientation_fit["max_orientation_fit_error"],
+                    "orientation_fit_valid_fraction": orientation_fit["orientation_fit_valid_fraction"],
                     "major_radius": sample_kwargs["major_radius"],
                     "minor_radius": sample_kwargs["minor_radius"],
                     "axis_oval": sample_kwargs["axis_oval"],
@@ -817,6 +924,28 @@ def main() -> None:
                     "corner_amplitude": sample_kwargs["corner_amplitude"],
                     "corner_helicity": sample_kwargs["corner_helicity"],
                     "corner_power": sample_kwargs["corner_power"],
+                    "cross_section_orientation_span": reference_metrics["cross_section_orientation_span"],
+                    "side_orientation_span": reference_metrics["side_orientation_span"],
+                    "corner_orientation_span": reference_metrics["corner_orientation_span"],
+                    "orientation_valid_fraction": reference_metrics["orientation_valid_fraction"],
+                    "valid_cross_section_orientation_span": reference_metrics["valid_cross_section_orientation_span"],
+                    "valid_side_orientation_span": reference_metrics["valid_side_orientation_span"],
+                    "valid_corner_orientation_span": reference_metrics["valid_corner_orientation_span"],
+                    "side_corner_weight_overlap_max": reference_metrics["side_corner_weight_overlap_max"],
+                    "fitted_cross_section_orientation_span": fitted_metrics["cross_section_orientation_span"],
+                    "fitted_side_orientation_span": fitted_metrics["side_orientation_span"],
+                    "fitted_corner_orientation_span": fitted_metrics["corner_orientation_span"],
+                    "fitted_orientation_valid_fraction": fitted_metrics["orientation_valid_fraction"],
+                    "fitted_valid_cross_section_orientation_span": fitted_metrics[
+                        "valid_cross_section_orientation_span"
+                    ],
+                    "fitted_valid_side_orientation_span": fitted_metrics["valid_side_orientation_span"],
+                    "fitted_valid_corner_orientation_span": fitted_metrics["valid_corner_orientation_span"],
+                    "fitted_side_corner_weight_overlap_max": fitted_metrics["side_corner_weight_overlap_max"],
+                    "cross_section_anisotropy_min": reference_metrics["cross_section_anisotropy_min"],
+                    "cross_section_anisotropy_max": reference_metrics["cross_section_anisotropy_max"],
+                    "fitted_cross_section_anisotropy_min": fitted_metrics["cross_section_anisotropy_min"],
+                    "fitted_cross_section_anisotropy_max": fitted_metrics["cross_section_anisotropy_max"],
                     "initialization_policy": _VMEC_JAX_INITIALIZATION_POLICY,
                     "vmec_jax_axis_initialization_policy": _vmec_jax_axis_initialization_policy(args.solver_mode),
                     "min_R": reference_metrics["min_R"],
@@ -1090,6 +1219,9 @@ def main() -> None:
     }
     if not bool(args.no_plots):
         summary["figures"]["convergence"] = _write_summary_plot(rows, outdir=outdir / "figures")
+        orientation_plot = _write_orientation_plot(rows, outdir=outdir / "figures")
+        if orientation_plot is not None:
+            summary["figures"]["orientation"] = orientation_plot
         fsq_history_plot = _write_fsq_history_plot(rows, outdir=outdir / "figures")
         if fsq_history_plot is not None:
             summary["figures"]["fsq_history"] = fsq_history_plot

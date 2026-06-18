@@ -17,6 +17,7 @@ from vmec_jax.toroidal_hybrid import (
     ToroidalHybridBoundarySamples,
     evaluate_toroidal_hybrid_indata_boundary,
     sample_toroidal_stellarator_mirror_hybrid_boundary,
+    toroidal_hybrid_cross_section_anisotropy,
     toroidal_hybrid_cross_section_orientation,
     toroidal_stellarator_mirror_hybrid_indata,
     toroidal_stellarator_mirror_hybrid_metrics,
@@ -36,7 +37,9 @@ def test_toroidal_hybrid_boundary_is_stellarator_symmetric_and_corner_localized(
     assert metrics["corner_weight_max"] == 1.0
     assert metrics["side_weight_max"] == 1.0
     assert metrics["side_orientation_span"] < 1.0e-12
-    assert metrics["corner_orientation_span"] > 0.05
+    assert metrics["orientation_valid_fraction"] > 0.8
+    assert metrics["valid_side_orientation_span"] < 1.0e-12
+    assert metrics["valid_corner_orientation_span"] < 1.0e-10
     assert metrics["side_corner_weight_overlap_max"] <= 0.25 + 1.0e-14
 
     side_cols = [0, samples.zeta.size // 2]
@@ -46,9 +49,15 @@ def test_toroidal_hybrid_boundary_is_stellarator_symmetric_and_corner_localized(
     assert corner_m2 > 0.5 * side_m2
 
     orientation = toroidal_hybrid_cross_section_orientation(samples)
+    anisotropy = toroidal_hybrid_cross_section_anisotropy(samples)
     assert orientation.shape == samples.zeta.shape
+    assert anisotropy.shape == samples.zeta.shape
+    assert np.min(anisotropy) >= 0.0
+    assert np.max(anisotropy) == pytest.approx(metrics["cross_section_anisotropy_max"])
     assert np.ptp(orientation) == pytest.approx(metrics["cross_section_orientation_span"])
+    assert vj.toroidal_hybrid_cross_section_anisotropy is toroidal_hybrid_cross_section_anisotropy
     assert vj.toroidal_hybrid_cross_section_orientation is toroidal_hybrid_cross_section_orientation
+    assert public_api.toroidal_hybrid_cross_section_anisotropy is toroidal_hybrid_cross_section_anisotropy
     assert public_api.toroidal_hybrid_cross_section_orientation is toroidal_hybrid_cross_section_orientation
 
 
@@ -278,6 +287,16 @@ def test_toroidal_hybrid_convergence_example_runs_without_solve(tmp_path: Path):
     assert all(row["initial_fsq_ratio_vmec2000"] is None for row in summary["rows"])
     assert all(row["fsq_history"] == [] for row in summary["rows"])
     assert all(row["max_boundary_fit_error"] < 1.0e-12 for row in summary["rows"])
+    assert all(row["max_orientation_fit_error"] < 1.0e-12 for row in summary["rows"])
+    assert all(0.8 < row["orientation_fit_valid_fraction"] <= 1.0 for row in summary["rows"])
+    assert all(row["side_orientation_span"] < 1.0e-12 for row in summary["rows"])
+    assert all(row["valid_side_orientation_span"] < 1.0e-12 for row in summary["rows"])
+    assert all(row["valid_corner_orientation_span"] < 1.0e-10 for row in summary["rows"])
+    assert all(row["fitted_side_orientation_span"] < 1.0e-12 for row in summary["rows"])
+    assert all(row["fitted_valid_side_orientation_span"] < 1.0e-12 for row in summary["rows"])
+    assert all(row["fitted_valid_corner_orientation_span"] < 1.0e-10 for row in summary["rows"])
+    assert all(row["cross_section_anisotropy_max"] > 0.0 for row in summary["rows"])
+    assert all(row["fitted_cross_section_anisotropy_max"] > 0.0 for row in summary["rows"])
     assert [row["ns"] for row in summary["rows"]] == [7, 9]
     assert summary["shape_cases"][0]["sample_parameters"]["side_power"] == 2.0
     assert summary["shape_cases"][0]["sample_parameters"]["corner_power"] == 2.0
@@ -300,6 +319,9 @@ def test_toroidal_hybrid_convergence_example_runs_without_solve(tmp_path: Path):
     assert csv_row["initial_residual_source"] == ""
     assert csv_row["vmec2000_initial_residual_source"] == ""
     assert csv_row["initial_fsq_ratio_vmec2000"] == ""
+    assert float(csv_row["max_orientation_fit_error"]) < 1.0e-12
+    assert 0.8 < float(csv_row["orientation_fit_valid_fraction"]) <= 1.0
+    assert float(csv_row["fitted_valid_corner_orientation_span"]) < 1.0e-10
 
 
 def test_toroidal_hybrid_convergence_example_scans_shape_cases_without_solve(tmp_path: Path):
@@ -339,6 +361,10 @@ def test_toroidal_hybrid_convergence_example_scans_shape_cases_without_solve(tmp
     assert rows[1]["side_power"] == 2.0
     assert rows[1]["corner_power"] == 2.0
     assert all(row["max_boundary_fit_error"] < 1.0e-12 for row in rows)
+    assert all(row["max_orientation_fit_error"] < 1.0e-12 for row in rows)
+    assert all(0.8 < row["orientation_fit_valid_fraction"] <= 1.0 for row in rows)
+    assert all(row["fitted_side_orientation_span"] < 1.0e-12 for row in rows)
+    assert all(row["fitted_valid_corner_orientation_span"] < 1.0e-10 for row in rows)
 
 
 def test_toroidal_hybrid_convergence_history_summary_uses_iteration_labels():
@@ -412,6 +438,10 @@ def test_toroidal_hybrid_convergence_history_summary_uses_iteration_labels():
     assert diag_fields["diagnostic_initial_axis_reset_state_tau_max"] == 1.5
     assert diag_fields["diagnostic_initial_axis_reset_error"] is None
     assert module._csv_cell({"accepted": 2}) == '{"accepted": 2}'
+    samples = sample_toroidal_stellarator_mirror_hybrid_boundary(ntheta=32, nzeta=32)
+    orientation_fit = module._orientation_fit_diagnostics(samples, samples)
+    assert orientation_fit["max_orientation_fit_error"] == pytest.approx(0.0)
+    assert orientation_fit["orientation_fit_valid_fraction"] > 0.8
     with pytest.raises(ValueError, match="unknown shape"):
         module._parse_shape_cases("unknown")
 

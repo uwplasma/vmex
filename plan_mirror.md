@@ -13978,3 +13978,132 @@ Results:
 No user input is needed.
 
 ---
+
+## 111. 2026-06-18 M14 toroidal hybrid valid-axis orientation audit
+
+### Steps taken
+
+The M110 orientation plot exposed a branch-sensitivity problem in the principal
+axis diagnostic: at some corner-centered cross sections the covariance is nearly
+isotropic, so the ellipse-axis angle is mathematically undefined.  I added
+anisotropy diagnostics and changed the convergence runner to compare
+principal-axis angles only where the axis is well-defined.
+
+Concretely:
+
+- added `toroidal_hybrid_cross_section_anisotropy(samples)` in
+  `vmec_jax/toroidal_hybrid.py`;
+- added orientation valid fractions, valid orientation spans, and anisotropy
+  min/max metrics;
+- exported the anisotropy helper through `vmec_jax` and `vmec_jax.api`;
+- changed the toroidal hybrid convergence CSV/JSON to include target and fitted
+  anisotropy/valid-axis fields;
+- replaced the misleading raw corner-span convergence plot with a valid-axis
+  max orientation-fit-error plot and valid-fraction overlay;
+- updated the root toroidal hybrid orientation plot to mark undefined
+  covariance-axis samples explicitly;
+- updated tests and docs to prefer valid-axis fields over raw orientation spans.
+
+### Results obtained
+
+The no-solve convergence evidence run:
+
+```bash
+PYTHONPATH=.:$PYTHONPATH JAX_ENABLE_X64=1 \
+  python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir results/toroidal_hybrid_m111_orientation_convergence \
+  --ns-array 7,9 \
+  --mode-pairs 5:10 \
+  --ntheta-fit 32 \
+  --nzeta-fit 32 \
+  --side-power 2.0 \
+  --corner-power 2.0
+```
+
+Observed values for both rows:
+
+- `max_boundary_fit_error`: `2.220446049250313e-15`;
+- `max_orientation_fit_error`: `3.498198326819346e-13`;
+- `orientation_fit_valid_fraction`: `0.9375`;
+- `valid_corner_orientation_span`: about `2.26e-13`;
+- `fitted_valid_corner_orientation_span`: about `3.83e-13`;
+- `cross_section_anisotropy_min`: about `4.23e-18`;
+- `cross_section_anisotropy_max`: about `1.25e-2`.
+
+This corrects the M110 interpretation: the current toroidal fixture preserves a
+flat, well-defined side orientation, but the apparent corner orientation span is
+coming from nearly isotropic/undefined covariance-axis samples.  The next hybrid
+geometry step should therefore implement a true rotating-ellipse corner fixture
+rather than treating the current localized `m=2` perturbation as sufficient.
+
+Rendered ignored plots:
+
+- `results/toroidal_hybrid_m111_orientation_convergence/figures/toroidal_hybrid_orientation_preservation.png`;
+- `results/toroidal_hybrid_m111_boundary_plot/figures/toroidal_hybrid_region_orientation.png`.
+
+### How it was tested
+
+Commands run:
+
+```bash
+python -m ruff check vmec_jax/toroidal_hybrid.py vmec_jax/api.py vmec_jax/__init__.py examples/toroidal_stellarator_mirror_hybrid.py examples/toroidal_stellarator_mirror_hybrid_convergence.py tests/test_toroidal_hybrid.py
+python -m ruff format --check vmec_jax/toroidal_hybrid.py vmec_jax/api.py vmec_jax/__init__.py examples/toroidal_stellarator_mirror_hybrid.py examples/toroidal_stellarator_mirror_hybrid_convergence.py tests/test_toroidal_hybrid.py
+JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
+git diff --check
+```
+
+Results:
+
+- Ruff lint passed.
+- Ruff format check passed after formatting the convergence example.
+- `22 passed` in `tests/test_toroidal_hybrid.py`.
+- `git diff --check` passed.
+- Both plotted evidence runs completed and the images rendered.
+
+### File structure and best-practice notes
+
+- Reusable orientation/anisotropy diagnostics stay in
+  `vmec_jax/toroidal_hybrid.py`.
+- Example CSV/JSON fields and plots stay in the root convergence example because
+  they are run-report artifacts.
+- Public exports are explicit in `vmec_jax/api.py` and lazy in
+  `vmec_jax/__init__.py`.
+- The tests focus on scientific semantics: valid-axis comparison must be tight,
+  and undefined-axis fractions must be visible.
+- Generated plots remain ignored under `results/`.
+
+### Best next steps
+
+1. Commit and push M111.
+2. Implement the true toroidal rotating-ellipse corner fixture so valid-axis
+   corner orientation changes are physical rather than branch artifacts.
+3. Re-run the toroidal hybrid convergence example and require nonzero
+   valid-corner orientation span for the upgraded fixture.
+4. Then run a finite fixed-boundary toroidal hybrid solve at low resolution and
+   record residual, solved-state metrics, and geometry preservation.
+5. Continue the circular-coil free-boundary lane with finite-beta fixed-boundary
+   baselines and an LCFS pilot tolerance/stagnation criterion.
+
+### Completion percentages after M111
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `87%`.
+- Fixed-boundary axisymmetric solve: `89%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `83%`.
+- Finite-current pitch validation: `82%`.
+- Plotting and `vmec --plot` mirror support: `89%`.
+- I/O schema and docs: `97%`.
+- Differentiable solved-state API: `30%`.
+- Mirror-Boozer-like diagnostics: `36%`.
+- Free-boundary mirror lane: `74%`.
+- Straight-axis hybrid fixture lane: `25%`.
+- Toroidal stellarator-mirror hybrid lane: `84%`.
+- ESSOS circular-coil mirror beta scan: `66%`.
+- PR merge readiness overall: `95%`.
+
+### User input needed
+
+No user input is needed.
+
+---
