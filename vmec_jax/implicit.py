@@ -1171,13 +1171,8 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
 
     def _boundary_state_edge_rows(eRcos, eRsin, eZcos, eZsin):
         return _project_boundary_edge_rows(
-            static=static,
-            indata=indata,
-            dtype=jnp.asarray(state0_c.Rcos).dtype,
-            eRcos=eRcos,
-            eRsin=eRsin,
-            eZcos=eZcos,
-            eZsin=eZsin,
+            static=static, indata=indata, dtype=jnp.asarray(state0_c.Rcos).dtype,
+            eRcos=eRcos, eRsin=eRsin, eZcos=eZcos, eZsin=eZsin,
         )
 
     def _enforce_state(st, eRcos, eRsin, eZcos, eZsin):
