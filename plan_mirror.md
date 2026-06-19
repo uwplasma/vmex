@@ -21711,3 +21711,87 @@ Results:
 ### User input needed
 
 No user input is needed.
+
+---
+## 179. Residual-Newton Diagnostic Example Coverage
+
+### Steps taken
+
+- Added a focused smoke test for the root
+  `examples/mirror_fixed_boundary_solve_diagnostic.py` residual-Newton path.
+- The test runs the diagnostic example with matrix-free `lsmr`, fixed inner
+  iteration budget, the VMEC-like `radial_xi_tridi` preconditioner, and dense
+  step comparison enabled.
+- Verified that the emitted JSON records the expected Krylov/preconditioner
+  fields, dense-step comparison fields, accepted optimizer state, final `fsq`,
+  and a written MOUT file.
+
+### Results obtained
+
+- The fixed-boundary diagnostic example now has direct test coverage for both
+  default L-BFGS and residual-Newton/Krylov modes.
+- The residual-Newton/preconditioning lane has a stronger review-facing example
+  contract: metadata used in convergence plots and PR diagnostics is checked by
+  the test suite, not only by manual plotted runs.
+
+### How it was tested
+
+Commands run:
+
+```bash
+python -m ruff format tests/mirror/test_mirror_examples.py
+python -m ruff check tests/mirror/test_mirror_examples.py
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_examples.py::test_root_fixed_boundary_solve_diagnostic_residual_newton_reports_krylov_fields -q
+JAX_ENABLE_X64=1 pytest tests/mirror -q
+git diff --check
+```
+
+Results:
+
+- Ruff format left the file unchanged.
+- Ruff check passed.
+- Focused residual-Newton diagnostic example test passed: `1 passed in 5.27s`.
+- Full mirror suite passed on the updated head: `229 passed, 1 skipped in
+  202.80s`.
+- Whitespace check passed.
+
+### File structure and best-practice notes
+
+- The test stays in `tests/mirror/test_mirror_examples.py`, beside the existing
+  root-example smoke tests.
+- It uses a tiny `ns=5`, `nxi=7`, `maxiter=1` diagnostic run so coverage is
+  meaningful without adding heavy runtime or repository artifacts.
+- No generated output files or figures were added to the repository.
+
+### Best next steps
+
+1. Commit and push M179.
+2. Update the draft PR body validation note to include the `229 passed,
+   1 skipped` full mirror-suite result and residual-Newton diagnostic coverage.
+3. Re-check CI after the latest push has had time to finish, inspecting only
+   failed jobs.
+4. Continue the requirement-by-requirement completion audit, focusing next on
+   source/API simplification and any remaining finite-current validation gaps.
+
+### Completion percentages after M179
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `93%`.
+- Fixed-boundary axisymmetric solve: `93%`.
+- Residual Newton / preconditioning: `94%`.
+- Two-coil and manufactured validation: `92%`.
+- Finite-current pitch validation: `87%`.
+- Plotting and `vmec --plot` mirror support: `97%`.
+- I/O schema and docs: `100%`.
+- Differentiable solved-state API: `95%`.
+- Mirror-Boozer-like diagnostics: `88%`.
+- Free-boundary mirror lane: `99%` overall, with reduced residual-vector
+  nonlinear solve scope complete.
+- Straight-axis hybrid support fixture lane: `100%` for support-fixture scope.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `97%`.
+- PR merge readiness overall: `99%`.
+
+### User input needed
+
+No user input is needed.

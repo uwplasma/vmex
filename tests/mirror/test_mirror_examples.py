@@ -939,6 +939,55 @@ def test_root_fixed_boundary_solve_diagnostic_runs_without_plots(tmp_path):
     assert Path(rows[0]["mout"]).exists()
 
 
+def test_root_fixed_boundary_solve_diagnostic_residual_newton_reports_krylov_fields(tmp_path):
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "examples/mirror_fixed_boundary_solve_diagnostic.py",
+            "--outdir",
+            str(tmp_path / "solve_diagnostic_residual_newton"),
+            "--ns-array",
+            "5",
+            "--nxi",
+            "7",
+            "--maxiter",
+            "1",
+            "--optimizer",
+            "residual_newton",
+            "--residual-linear-solver",
+            "lsmr",
+            "--residual-linear-maxiter",
+            "4",
+            "--residual-linear-maxiter-policy",
+            "fixed",
+            "--residual-preconditioner",
+            "radial_xi_tridi",
+            "--residual-compare-dense-step",
+            "--no-plots",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    path = Path(completed.stdout.strip())
+    rows = json.loads(path.read_text())
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["optimizer"] == "residual_newton"
+    assert row["residual_linear_solver"] == "lsmr"
+    assert row["residual_linear_maxiter_policy"] == "fixed"
+    assert row["residual_linear_maxiter_effective_last"] == 4
+    assert row["residual_linear_iterations_last"] >= 1
+    assert row["residual_compare_dense_step"] is True
+    assert row["residual_dense_step_cosine_last"] is not None
+    assert row["residual_dense_step_relative_error_last"] is not None
+    assert row["residual_preconditioner"] == "radial_xi_tridi"
+    assert row["optimizer_accepted"] is True
+    assert row["final_fsq"] >= 0.0
+    assert Path(row["mout"]).exists()
+
+
 def test_root_manufactured_fixed_boundary_example_runs_without_plots(tmp_path):
     completed = subprocess.run(
         [
