@@ -534,6 +534,9 @@ def solve_fixed_boundary_residual_iter(
     def _adjoint_trace_array(value):
         return _materialize_adjoint_trace_array(value, mode=adjoint_trace_mode)
 
+    def _optional_adjoint_trace_array(value):
+        return None if value is None else _adjoint_trace_array(value)
+
     def _trace_named_arrays(prefix: str, items, *, suffix: str = "") -> dict[str, Any]:
         return {f"{prefix}{name}{suffix}": None if value is None else np.asarray(value) for name, value in items}
 
@@ -4944,39 +4947,22 @@ def solve_fixed_boundary_residual_iter(
                     "reset_inv_tau": bool(iter2 == iter1),
                     "constraint_cache_update": bool(need_bcovar_update),
                     "precond_cache_update": bool(preconditioner_cache_update_trace),
-                    "freeb_bsqvac_half": (
-                        None
-                        if freeb_bsqvac_half_current is None
-                        else _adjoint_trace_array(freeb_bsqvac_half_current)
-                    ),
+                    "freeb_bsqvac_half": _optional_adjoint_trace_array(freeb_bsqvac_half_current),
                     "freeb_pres_scale": None if freeb_pres_scale is None else float(freeb_pres_scale),
                     "freeb_plascur": float(freeb_plascur),
                     "freeb_plascur_for_bsqvac": float(freeb_plascur_for_bsqvac),
                     "freeb_nestor_trace": freeb_nestor_trace_current,
-                    "constraint_rcon0": (
-                        None if constraint_rcon0_current is None else _adjoint_trace_array(constraint_rcon0_current)
-                    ),
-                    "constraint_zcon0": (
-                        None if constraint_zcon0_current is None else _adjoint_trace_array(constraint_zcon0_current)
-                    ),
+                    "constraint_rcon0": _optional_adjoint_trace_array(constraint_rcon0_current),
+                    "constraint_zcon0": _optional_adjoint_trace_array(constraint_zcon0_current),
                     "constraint_tcon0": None if constraint_tcon0 is None else float(constraint_tcon0),
                     "constraint_precond_diag": constraint_precond_diag_trace,
-                    "constraint_tcon": None if constraint_tcon_override is None else _adjoint_trace_array(
-                        constraint_tcon_override
-                    ),
+                    "constraint_tcon": _optional_adjoint_trace_array(constraint_tcon_override),
                     "constraint_precond_active": _adjoint_trace_array(constraint_precond_active),
                     "constraint_tcon_active": _adjoint_trace_array(constraint_tcon_active),
                     "lam_prec": np.asarray(lam_prec),
                     "precond_mats": mats,
                 }
                 trace_entry.update(_trace_velocity_adjoint(locals(), "_before"))
-                if adjoint_trace_mode in {"full", "branch"}:
-                    trace_entry.update(
-                        {
-                            "lam_prec": np.asarray(lam_prec),
-                            "precond_mats": mats,
-                        }
-                    )
                 if adjoint_trace_mode == "full":
                     trace_entry.update(
                         _trace_named_arrays("frzl_", ((name, getattr(frzl, name, None)) for name in _TRACE_TOMNSP_NAMES))

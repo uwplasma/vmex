@@ -20801,3 +20801,71 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.999999980%.
+
+## 2026-06-19 Strict-Update Trace Simplification
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Continued residual-iteration cleanup after extracting the non-strict
+   momentum search.
+2. Removed a duplicate strict-update trace insertion of `lam_prec` and
+   `precond_mats`.
+3. Added a small optional-array materialization helper for strict-update trace
+   payloads, replacing repeated `None` checks for optional arrays.
+
+Results obtained:
+
+- `iteration.py` decreased from 5762 to 5748 lines in this tranche.
+- `solve_fixed_boundary_residual_iter` decreased from 5353 to 5339 lines.
+- Strict-update trace payload contents are unchanged; duplicate dictionary
+  updates were removed and optional array conversion is centralized.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/iteration.py tests/test_solve_residual_iter_update_helpers.py vmec_jax/solvers/fixed_boundary/residual/update.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_update_helpers.py tests/test_solve_finish_cache_more_coverage.py::test_nonscan_non_strict_backtracking_accepts_momentum_update -q`
+- `git diff --check`
+
+Best next steps:
+
+1. Continue peeling strict-update trace construction into compact helper
+   functions only where behavior is mechanically identical.
+2. Rebalance to free-boundary adjoint or discrete-adjoint hotspots after one
+   more residual tranche.
+3. Keep CI observation deferred; rely on focused local checks during the
+   refactor pass and inspect CI later if the pushed branch reports failures.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999455%.
+- Solver monolith reduction: 99.825%.
+- Free-boundary adjoint monolith reduction: 99.53%.
+- Driver workflow decomposition: 99.945%.
+- Residual iteration decomposition: 99.04%.
+- WOUT diagnostic/profile decomposition: 99.975%.
+- Bcovar/WOUT parity decomposition: 99.15%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.82%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.74%.
+- Fixed-boundary optimizer decomposition: 96.22%.
+- Plotting/WOUT visualization decomposition: 96.80%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.75%.
+- Discrete-adjoint replay decomposition: 96.62%.
+- Free-boundary validation-gate maintainability: 97.96%.
+- QI objective/staged-runner decomposition: 96.9%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.999999981%.
