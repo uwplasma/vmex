@@ -248,9 +248,6 @@ def maybe_finish_cli_fixed_boundary_run(
     staged_followup_wall_s = np.zeros((0,), dtype=float)
     staged_followup_solve_total_s = np.zeros((0,), dtype=float)
 
-    def _resolve_finish_jit_forces(static_i, niter_i: int) -> bool:
-        return ctx.resolve_jit_forces_auto_policy(ctx.jit_forces, static_i, niter_i)
-
     def _run_finish_attempt(*, budget_i: int, mode_i: str, use_scan_i: bool, performance_mode_i: bool):
         static_i = best_run.static
         mode_i_l = str(mode_i).strip().lower()
@@ -325,7 +322,7 @@ def maybe_finish_cli_fixed_boundary_run(
             preconditioner_use_precomputed_tridi=preconditioner_use_precomputed_tridi_i,
             preconditioner_use_lax_tridi=preconditioner_use_lax_tridi_i,
             return_final_force_payload=True,
-            jit_forces=_resolve_finish_jit_forces(static_i, int(budget_i)),
+            jit_forces=ctx.resolve_jit_forces_auto_policy(ctx.jit_forces, static_i, int(budget_i)),
         )
         return replace(best_run, state=res_i.state, result=res_i)
 
