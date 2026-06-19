@@ -18591,3 +18591,74 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.9999995%.
+
+## 2026-06-18 Accepted-Update History Comparison Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added local `assert_history_close` and `assert_history_equal` helpers inside
+   `test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree`.
+2. Replaced repeated controller-history allclose and array-equality loops with
+   the helpers.
+3. Kept the same keys and tolerances for accepted-only, segmented, stacked, and
+   axis-changed replay comparisons.
+
+Results obtained:
+
+- Removed 10 net source lines from
+  `tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`.
+- The file dropped from 4949 to 4939 lines.
+- `test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree`
+  dropped from 760 to 750 lines.
+- The accepted-update replay test now has consistent local assertion seams for
+  state, objective, array, and history comparisons.
+
+Tests and commands run:
+
+- `python -m compileall -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+- `python -m ruff check tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree -q`
+- `python tools/diagnostics/source_health.py | head -100`
+
+Best next steps:
+
+1. Continue the accepted-update validation cleanup only if further helpers
+   remove repeated assertion plumbing without hiding physical evidence.
+2. Re-check `wout_minimal_from_fixed_boundary` and `implicit.py` for source
+   helper opportunities that reduce production code, not just tests.
+3. Preserve the current rule: reject any refactor that increases hotspot
+   line counts or adds hot-loop overhead.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999%.
+- Solver monolith reduction: 99.78%.
+- Free-boundary adjoint monolith reduction: 99.48%.
+- Driver workflow decomposition: 99.94%.
+- Residual iteration decomposition: 98.79%.
+- WOUT diagnostic/profile decomposition: 99.94%.
+- Bcovar/WOUT parity decomposition: 99.13%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.81%.
+- Tomnsps transform decomposition: 98.5%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.66%.
+- Fixed-boundary optimizer decomposition: 96.05%.
+- Plotting/WOUT visualization decomposition: 95.9%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.45%.
+- Discrete-adjoint replay decomposition: 96.45%.
+- Free-boundary validation-gate maintainability: 97.3%.
+- QI objective/staged-runner decomposition: 96.9%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.9999996%.

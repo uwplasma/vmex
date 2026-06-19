@@ -4272,6 +4272,12 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
     def assert_array_equal(container, name, expected) -> None:
         np.testing.assert_array_equal(np.asarray(container[name]), np.asarray(expected))
 
+    def assert_history_close(left, right, key, *, rtol: float = 5.0e-12, atol: float = 5.0e-12) -> None:
+        np.testing.assert_allclose(np.asarray(left["history"][key]), np.asarray(right["history"][key]), rtol=rtol, atol=atol)
+
+    def assert_history_equal(left, right, key) -> None:
+        np.testing.assert_array_equal(np.asarray(left["history"][key]), np.asarray(right["history"][key]))
+
     replay = accepted_replay_objective()
     assert {"state", "bsqvac", "force"}.issubset(replay["objective_components"])
     assert np.isfinite(float(replay["objective"]))
@@ -4284,12 +4290,7 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
     assert_objective_close(controller_replay, fallback_controller_replay)
     assert_state_close(controller_replay, fallback_controller_replay)
     for key in ("active", "accepted", "rejected", "done", "state_reset", "force", "bsqvac"):
-        np.testing.assert_allclose(
-            np.asarray(controller_replay["history"][key]),
-            np.asarray(fallback_controller_replay["history"][key]),
-            rtol=5.0e-12,
-            atol=5.0e-12,
-        )
+        assert_history_close(controller_replay, fallback_controller_replay, key)
     for container, name, expected in (
         (controller_replay["history"], "accepted", [True, True]),
         (controller_replay["history"], "rejected", [False, False]),
@@ -4454,14 +4455,8 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
     assert_state_close(stacked_controller_replay, controller_replay)
     assert_objective_close(stacked_controller_replay, stacked_fallback_replay)
     for key in ("active", "accepted", "rejected", "done", "state_reset"):
-        np.testing.assert_array_equal(
-            np.asarray(segmented_controller_replay["history"][key]),
-            np.asarray(controller_replay["history"][key]),
-        )
-        np.testing.assert_array_equal(
-            np.asarray(stacked_controller_replay["history"][key]),
-            np.asarray(controller_replay["history"][key]),
-        )
+        assert_history_equal(segmented_controller_replay, controller_replay, key)
+        assert_history_equal(stacked_controller_replay, controller_replay, key)
 
     axis_reference_trace = deepcopy(trace0)
     axis_changed_trace = deepcopy(trace0)
@@ -4496,12 +4491,7 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
         )
     ) > 1.0e-9
     for key in ("bsqvac_rms", "bnormal_rms"):
-        np.testing.assert_allclose(
-            np.asarray(axis_changed_stacked_replay["history"][key]),
-            np.asarray(axis_changed_controller_replay["history"][key]),
-            rtol=5.0e-12,
-            atol=5.0e-12,
-        )
+        assert_history_close(axis_changed_stacked_replay, axis_changed_controller_replay, key)
     assert_objective_close(axis_changed_stacked_replay, axis_changed_controller_replay, rtol=5.0e-12, atol=5.0e-12)
     assert_state_close(axis_changed_stacked_replay, axis_changed_controller_replay)
 
