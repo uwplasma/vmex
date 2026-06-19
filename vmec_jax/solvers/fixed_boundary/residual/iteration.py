@@ -1602,14 +1602,12 @@ def solve_fixed_boundary_residual_iter(
             freeb_nvskip0 = max(1, int(resume_state.get("freeb_nvskip0", freeb_nvskip0)))
             freeb_last_model = str(resume_state.get("freeb_model", freeb_last_model))
 
-    def _apply_vmec_scale_m1_precond_rhs(frzl_in: TomnspsRZL, mats: dict[str, Any]) -> TomnspsRZL:
-        return _scale_m1_precond_rhs_from_mats(
-            frzl_in,
-            mats,
-            lconm1=getattr(cfg, "lconm1", True),
-            mpol=int(cfg.mpol),
-            host_update_assembly=host_update_assembly,
-        )
+    _apply_vmec_scale_m1_precond_rhs = partial(
+        _scale_m1_precond_rhs_from_mats,
+        lconm1=getattr(cfg, "lconm1", True),
+        mpol=int(cfg.mpol),
+        host_update_assembly=host_update_assembly,
+    )
 
     def _refresh_preconditioner_cache(k, *, iter2: int):
         nonlocal cache_prec_lam_prec, cache_prec_faclam, cache_prec_lam_debug
