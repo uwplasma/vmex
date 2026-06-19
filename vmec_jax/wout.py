@@ -41,6 +41,7 @@ from .io.wout.minimal import (
     compute_minimal_wout_scalar_diagnostics,
     device_get_if_available,
     env_enabled,
+    filter_symmetric_bsubuv_diagnostics_for_wout,
     indata_for_wout_force_path,
     lbsubs_from_indata_and_env,
     minimal_wout_field_options_from_env,
@@ -1302,7 +1303,6 @@ def wout_minimal_from_fixed_boundary(
 
     # JXBFORCE applies a low-pass filter on bsubu/bsubv using (mpol-1, ntor).
     skip_bsub_filter = field_options.skip_bsub_filter
-    filter_from_raw = field_options.filter_from_raw
 
     t0 = _timing_start(bool(wout_timing_enabled))
     if bool(lasym):
@@ -1411,54 +1411,20 @@ def wout_minimal_from_fixed_boundary(
         bsubv_phys = np.asarray(eval_fourier(bsubvmnc, bsubvmns, basis_nyq))
     t_bsub_filter = _timing_start(bool(wout_timing_enabled))
     if (not bool(lasym)) and (not skip_bsub_filter):
-        if filter_from_raw:
-            # Match jxbforce.f directly: filter from the real-space bsubu/bsubv
-            # fields (with odd-m shalf handling done inside the loop filter).
-            bsubu_diag, bsubv_diag = _filter_bsubuv_jxbforce_loop(
-                bsubu=np.asarray(bsubu_diag, dtype=float),
-                bsubv=np.asarray(bsubv_diag, dtype=float),
-                trig=trig,
-                mmax_force=max(int(mpol) - 1, 0),
-                nmax_force=int(ntor),
-                s=np.asarray(s, dtype=float),
-            )
-        else:
-            # Match VMEC bcovar iequi=1 storage convention used by jxbforce:
-            # parity channel 0 is the half-mesh field and parity channel 1 is
-            # shalf*channel0 (before jxbforce divides odd by shalf).
-            _psh = _pshalf_from_s(np.asarray(s, dtype=float))[:, None, None]
-            if _psh.shape[0] > 1:
-                _psh[0] = _psh[1]
-            use_bc_parity = field_options.bsub_filter_use_bc_parity
-            if use_bc_parity and getattr(bc, "bsubu_parity_even", None) is not None:
-                bsubu_even = np.asarray(getattr(bc, "bsubu_parity_even"), dtype=float)
-                bsubv_even = np.asarray(getattr(bc, "bsubv_parity_even"), dtype=float)
-                bsubu_odd = np.asarray(getattr(bc, "bsubu_parity_odd"), dtype=float)
-                bsubv_odd = np.asarray(getattr(bc, "bsubv_parity_odd"), dtype=float)
-            else:
-                bsubu_even = np.asarray(bsubu_diag, dtype=float)
-                bsubv_even = np.asarray(bsubv_diag, dtype=float)
-                bsubu_odd = _psh * bsubu_even
-                bsubv_odd = _psh * bsubv_even
-            _wout_debug_helpers.dump_bsub_parity_inputs_if_requested(
-                bsubu_diag=bsubu_diag,
-                bsubv_diag=bsubv_diag,
-                bsubu_even=bsubu_even,
-                bsubu_odd=bsubu_odd,
-                bsubv_even=bsubv_even,
-                bsubv_odd=bsubv_odd,
-                use_bc_parity=bool(use_bc_parity),
-            )
-            bsubu_diag, bsubv_diag = _filter_bsubuv_jxbforce_parity(
-                bsubu_even=np.asarray(bsubu_even, dtype=float),
-                bsubu_odd=np.asarray(bsubu_odd, dtype=float),
-                bsubv_even=np.asarray(bsubv_even, dtype=float),
-                bsubv_odd=np.asarray(bsubv_odd, dtype=float),
-                trig=trig,
-                mmax_force=max(int(mpol) - 1, 0),
-                nmax_force=int(ntor),
-                s=np.asarray(s, dtype=float),
-            )
+        bsubu_diag, bsubv_diag = filter_symmetric_bsubuv_diagnostics_for_wout(
+            bsubu_diag=bsubu_diag,
+            bsubv_diag=bsubv_diag,
+            bc=bc,
+            trig=trig,
+            field_options=field_options,
+            mpol=int(mpol),
+            ntor=int(ntor),
+            s=np.asarray(s, dtype=float),
+            pshalf_from_s_func=_pshalf_from_s,
+            filter_loop_func=_filter_bsubuv_jxbforce_loop,
+            filter_parity_func=_filter_bsubuv_jxbforce_parity,
+            dump_parity_inputs_func=_wout_debug_helpers.dump_bsub_parity_inputs_if_requested,
+        )
     _record_timing(wout_timing, "bsub_filter_s", t_bsub_filter)
     # Match VMEC wrout: bsubu/bsubv Fourier output uses the jxbforce-filtered
     # fields, not the raw bcovar fields.

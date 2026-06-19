@@ -136,6 +136,71 @@ def select_bsubuv_diagnostic_fields(
     return bsubu_diag, bsubv_diag
 
 
+def filter_symmetric_bsubuv_diagnostics_for_wout(
+    *,
+    bsubu_diag: np.ndarray,
+    bsubv_diag: np.ndarray,
+    bc: Any,
+    trig: Any,
+    field_options: WoutMinimalFieldOptions,
+    mpol: int,
+    ntor: int,
+    s: np.ndarray,
+    pshalf_from_s_func,
+    filter_loop_func,
+    filter_parity_func,
+    dump_parity_inputs_func,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Apply VMEC jxbforce filtering for stellarator-symmetric diagnostics."""
+    if field_options.skip_bsub_filter:
+        return np.asarray(bsubu_diag, dtype=float), np.asarray(bsubv_diag, dtype=float)
+
+    s_arr = np.asarray(s, dtype=float)
+    if field_options.filter_from_raw:
+        return filter_loop_func(
+            bsubu=np.asarray(bsubu_diag, dtype=float),
+            bsubv=np.asarray(bsubv_diag, dtype=float),
+            trig=trig,
+            mmax_force=max(int(mpol) - 1, 0),
+            nmax_force=int(ntor),
+            s=s_arr,
+        )
+
+    psh = pshalf_from_s_func(s_arr)[:, None, None]
+    if psh.shape[0] > 1:
+        psh[0] = psh[1]
+    use_bc_parity = field_options.bsub_filter_use_bc_parity
+    if use_bc_parity and getattr(bc, "bsubu_parity_even", None) is not None:
+        bsubu_even = np.asarray(getattr(bc, "bsubu_parity_even"), dtype=float)
+        bsubv_even = np.asarray(getattr(bc, "bsubv_parity_even"), dtype=float)
+        bsubu_odd = np.asarray(getattr(bc, "bsubu_parity_odd"), dtype=float)
+        bsubv_odd = np.asarray(getattr(bc, "bsubv_parity_odd"), dtype=float)
+    else:
+        bsubu_even = np.asarray(bsubu_diag, dtype=float)
+        bsubv_even = np.asarray(bsubv_diag, dtype=float)
+        bsubu_odd = psh * bsubu_even
+        bsubv_odd = psh * bsubv_even
+    dump_parity_inputs_func(
+        bsubu_diag=bsubu_diag,
+        bsubv_diag=bsubv_diag,
+        bsubu_even=bsubu_even,
+        bsubu_odd=bsubu_odd,
+        bsubv_even=bsubv_even,
+        bsubv_odd=bsubv_odd,
+        use_bc_parity=bool(use_bc_parity),
+    )
+    return filter_parity_func(
+        bsubu_even=np.asarray(bsubu_even, dtype=float),
+        bsubu_odd=np.asarray(bsubu_odd, dtype=float),
+        bsubv_even=np.asarray(bsubv_even, dtype=float),
+        bsubv_odd=np.asarray(bsubv_odd, dtype=float),
+        trig=trig,
+        mmax_force=max(int(mpol) - 1, 0),
+        nmax_force=int(ntor),
+        s=s_arr,
+    )
+
+
 class WoutScalarDiagnostics(NamedTuple):
     """Scalar and radial diagnostics written by the minimal WOUT builder."""
 

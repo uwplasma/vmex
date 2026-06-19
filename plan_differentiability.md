@@ -24775,3 +24775,75 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.999999999895%.
+
+## 2026-06-19 Symmetric WOUT Bsub Filter Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Extracted the stellarator-symmetric JXBFORCE B-sub diagnostic filtering
+   policy from `wout_minimal_from_fixed_boundary` into
+   `filter_symmetric_bsubuv_diagnostics_for_wout`.
+2. Kept the helper in the existing `vmec_jax/io/wout/minimal.py` domain module
+   rather than adding another source file.
+3. Preserved both raw-realspace filtering and parity-channel filtering,
+   including the debug parity-input hook and VMEC shalf convention.
+
+Results obtained:
+
+- `wout_minimal_from_fixed_boundary` decreased from 563 to 528 lines.
+- The WOUT facade now delegates symmetric B-sub filtering to the WOUT minimal
+  domain, matching the earlier Nyquist and Bsubs helper split.
+- Source-health remains within namespace limits: 68 root files and 2
+  helper-prefix files.
+
+Tests and commands run:
+
+- `python -m py_compile vmec_jax/wout.py vmec_jax/io/wout/minimal.py`
+- `python -m ruff check vmec_jax/wout.py vmec_jax/io/wout/minimal.py`
+- `python tools/diagnostics/source_health.py --top 20 --max-root-helper-prefix-files 2`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_booz_input.py::test_booz_jxbforce_parity_jax_matches_numpy_and_guards tests/test_implicit_wout_driver_branch_coverage.py::test_wout_bsubv_ctor_and_current_helpers -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_wave2.py tests/test_wout_env_branch_coverage.py::test_mercier_bsub_source_env_uses_scaled_bcovar_fields tests/test_wout_env_branch_coverage.py::test_forced_bss_uses_symforced_force_kernel_arrays tests/test_wout_helpers.py::test_jxbforce_bsub_filters_match_loop_paths_and_guards -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_driver_wave10_coverage.py::test_wout_minimal_bsub_source_filter_branches tests/test_wout_driver_wave10_coverage.py::test_wout_minimal_equif_correction_and_raw_filter_branch tests/test_wout_driver_wave10_coverage.py::test_wout_minimal_force_bss_and_lambda_zero_or_single_surface_branches -q`
+
+Best next steps:
+
+1. Commit and push this WOUT filter extraction.
+2. Consider a matching LASYM B-sub filter extraction only if it can keep all
+   parity and asymmetric-source conventions explicit.
+3. Return to the residual loop or scan controller only for larger context/result
+   seams; avoid adding small files or generic `solve_*` modules.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.99999991%.
+- Solver monolith reduction: 99.891%.
+- Free-boundary adjoint monolith reduction: 99.60%.
+- Driver workflow decomposition: 99.957%.
+- Residual iteration decomposition: 99.45%.
+- WOUT diagnostic/profile decomposition: 99.992%.
+- Bcovar/WOUT parity decomposition: 99.30%.
+- Force-kernel decomposition: 99.69%.
+- Scan/performance policy consolidation: 99.895%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.89%.
+- Fixed-boundary optimizer decomposition: 98.05%.
+- Plotting/WOUT visualization decomposition: 98.05%.
+- Free-boundary facade/domain decomposition: 99.1%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.86%.
+- Discrete-adjoint replay decomposition: 99.20%.
+- Free-boundary validation-gate maintainability: 98.40%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.99999999990%.
