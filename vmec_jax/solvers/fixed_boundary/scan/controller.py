@@ -232,6 +232,50 @@ class ScanInitialForceSetup:
     norms: Any
 
 
+@dataclass(slots=True)
+class ScanDispatchFinalizeInputs:
+    """Explicit inputs for running and finalizing a VMEC2000 scan."""
+
+    ctx: Vmec2000ScanControllerContext
+    state_init: VMECState
+    carry0: Any
+    scan_step: Any
+    scan_runtime_plan: Any
+    scan_timing_enabled: bool
+    scan_timing_stats: dict[str, float]
+    scan_differentiated: bool
+    scan_print_context: Any
+    scan_minimal: bool
+    scan_light: bool
+    ftol: float
+    fsq_total_target: Any
+    scan_run_setup_start: float | None
+    axis_reset_repeat: bool
+    scan_backend_name: Any
+    scan_device_runtime: Any
+    state_only_scan: bool
+    scan_fallback_enabled_run: bool
+    scan_fallback_iters: int
+    chunked_print: bool
+    max_iter: int
+    nstep_screen: int
+    scan_collect_print: bool
+    scan_fallback_fsq_abs: float
+    dtype: Any
+    tree_has_tracer: Any
+    scan_use_precomputed: bool
+    scan_use_lax_tridi: bool
+    vmec2000_control: bool
+    free_boundary_enabled: bool
+    scan_total_start: float
+    print_in_scan: bool
+    verbose: bool
+    verbose_vmec2000_table: bool
+    badjac_use_state: bool
+    badjac_state_probe: bool
+    badjac_initial_state_probe_iters: int
+
+
 def _prepare_scan_initial_force_and_axis_reset(
     *,
     ctx: Vmec2000ScanControllerContext,
@@ -359,6 +403,155 @@ def _prepare_scan_initial_force_and_axis_reset(
         rz_scale=rz_scale0,
         l_scale=l_scale0,
         norms=norms0,
+    )
+
+
+def _run_scan_dispatch_and_finalize(inputs: ScanDispatchFinalizeInputs) -> SolveVmecResidualResult:
+    """Run the scan body and convert scan outputs to the public result."""
+
+    ctx = inputs.ctx
+    scan_runtime_plan = inputs.scan_runtime_plan
+    scan_cache_key = scan_runtime_plan.scan_cache_key
+    iter_offset0 = scan_runtime_plan.iter_offset0
+    scan_timing_enabled = bool(inputs.scan_timing_enabled)
+    scan_timing_stats = inputs.scan_timing_stats
+
+    def _run_scan(carry_init, it_seq):
+        return jax.lax.scan(inputs.scan_step, carry_init, it_seq)
+
+    def _get_scan_runner(seq_len: int):
+        key = scan_cache_key + (int(seq_len),)
+        return _get_or_build_scan_runner(
+            _run_scan,
+            cache=ctx._SCAN_RUNNER_CACHE,
+            key=key,
+            differentiating_scan=bool(inputs.scan_differentiated),
+            scan_timing_enabled=scan_timing_enabled,
+            scan_timing_stats=scan_timing_stats,
+            jit_func=jit,
+            cache_get=_jit_cache_get,
+            cache_put=_jit_cache_put,
+            record_miss_categories=_record_scan_runner_cache_miss_categories,
+            perf_counter=time.perf_counter,
+        )
+
+    scan_print_context = inputs.scan_print_context
+    emit_scan_prints = partial(
+        _emit_scan_debug_prints,
+        scan_minimal=bool(inputs.scan_minimal),
+        scan_light=bool(inputs.scan_light),
+        ftol=float(inputs.ftol),
+        fsq_total_target=inputs.fsq_total_target,
+        iter_offset0=int(iter_offset0),
+        should_print=scan_print_context.should_print,
+        print_row=scan_print_context.print_row,
+    )
+
+    scan_run_setup_start = inputs.scan_run_setup_start
+    if scan_timing_enabled and scan_run_setup_start is not None:
+        scan_timing_stats["scan_run_setup_s"] += time.perf_counter() - float(scan_run_setup_start)
+    carry_init = inputs.carry0._replace(state=inputs.state_init, state_checkpoint=inputs.state_init)
+    scan_dispatch_common = {
+        "scan_jit_preflight_enabled_func": _scan_jit_preflight_enabled,
+        "scan_jit_preflight_env": os.getenv("VMEC_JAX_SCAN_JIT_PREFLIGHT"),
+        "backend_name": inputs.scan_backend_name(),
+        "scan_differentiated": bool(inputs.scan_differentiated),
+        "preflight_iters": int(scan_runtime_plan.preflight_iters),
+        "iter_offset_preflight": int(scan_runtime_plan.iter_offset_preflight),
+        "axis_reset_repeat": bool(inputs.axis_reset_repeat),
+        "iter_offset0": int(iter_offset0),
+        "get_scan_runner": _get_scan_runner,
+        "scan_step": inputs.scan_step,
+        "scan_timing_enabled": scan_timing_enabled,
+        "scan_timing_stats": scan_timing_stats,
+        "scan_device_runtime": inputs.scan_device_runtime,
+        "perf_counter": time.perf_counter,
+        "state_only_scan": bool(inputs.state_only_scan),
+        "scan_fallback_enabled_run": bool(inputs.scan_fallback_enabled_run),
+        "scan_fallback_iters": int(inputs.scan_fallback_iters),
+        "jnp_module": jnp,
+        "jax_module": jax,
+    }
+    cfg = ctx.cfg
+    scan_dispatch = _run_vmec2000_scan_dispatch(
+        carry_init,
+        chunked_print=bool(inputs.chunked_print),
+        chunked_kwargs={
+            **scan_dispatch_common,
+            "max_iter": int(inputs.max_iter),
+            "max_iter_scan": int(scan_runtime_plan.max_iter_scan),
+            "nstep_screen": int(inputs.nstep_screen),
+            "need_print": bool(inputs.scan_collect_print),
+            "lthreed": bool(cfg.lthreed),
+            "spectral_mode_count": int(ctx.ncoeff),
+            "scan_chunk_settings_func": ctx._scan_chunk_settings,
+            "scan_fallback_fsq_abs": float(inputs.scan_fallback_fsq_abs),
+            "dtype": inputs.dtype,
+            "emit_scan_prints": emit_scan_prints,
+            "tree_has_tracer": inputs.tree_has_tracer,
+            "np_module": np,
+        },
+        nonchunked_kwargs={
+            **scan_dispatch_common,
+            "max_iter_scan": int(scan_runtime_plan.max_iter_scan),
+            "max_iter_tail": int(scan_runtime_plan.max_iter_tail),
+            "scan_collect_print": bool(inputs.scan_collect_print),
+        },
+    )
+    return finalize_vmec2000_scan_run(
+        carry_final=scan_dispatch.carry_final,
+        history=scan_dispatch.history,
+        state0=ctx.state0,
+        result_type=SolveVmecResidualResult,
+        state_only_scan=bool(inputs.state_only_scan),
+        scan_minimal=bool(inputs.scan_minimal),
+        scan_light=bool(inputs.scan_light),
+        scan_use_precomputed=bool(inputs.scan_use_precomputed),
+        scan_use_lax_tridi=bool(inputs.scan_use_lax_tridi),
+        vmec2000_control=bool(inputs.vmec2000_control),
+        ftol=float(inputs.ftol),
+        fsq_total_target=inputs.fsq_total_target,
+        max_iter=int(inputs.max_iter),
+        resume_state_mode=str(ctx.resume_state_mode),
+        pack_resume_state=ctx._pack_resume_state,
+        free_boundary_enabled=bool(inputs.free_boundary_enabled),
+        freeb_nvacskip=int(ctx.freeb_nvacskip),
+        freeb_nvskip0=int(ctx.freeb_nvskip0),
+        iter_offset0=int(iter_offset0),
+        free_boundary_iter_controls=_free_boundary_iter_controls,
+        scan_timing_enabled=scan_timing_enabled,
+        scan_timing_stats=scan_timing_stats,
+        scan_postprocess_start=time.perf_counter() if scan_timing_enabled else None,
+        scan_total_start=inputs.scan_total_start,
+        perf_counter=time.perf_counter,
+        build_timing_report=_build_scan_timing_report,
+        tree_has_tracer=inputs.tree_has_tracer,
+        build_traced_scan_resume_state=_build_traced_scan_resume_state,
+        state_only_scan_result=_vmec2000_state_only_scan_result,
+        traced_scan_result=_vmec2000_traced_scan_result,
+        attach_free_boundary_diagnostics=ctx._attach_freeb_diag,
+        emit_post_scan_rows=_emit_vmec2000_post_scan_rows,
+        post_scan_print_enabled=(
+            (not bool(inputs.scan_minimal))
+            and (not bool(inputs.print_in_scan))
+            and (not bool(inputs.chunked_print))
+            and bool(inputs.verbose)
+            and bool(inputs.vmec2000_control)
+            and bool(inputs.verbose_vmec2000_table)
+        ),
+        should_print=scan_print_context.should_print,
+        print_row=scan_print_context.print_row,
+        dump_ptau_rows=_dump_vmec2000_scan_ptau_rows,
+        dump_ptau_enabled=(
+            (not bool(inputs.scan_light))
+            and (not bool(inputs.scan_minimal))
+            and os.getenv("VMEC_JAX_DUMP_PTAU", "") not in ("", "0")
+        ),
+        badjac_mode=ctx.badjac_mode,
+        dump_ptau=ctx._maybe_dump_ptau,
+        badjac_use_state=bool(inputs.badjac_use_state),
+        badjac_state_probe=bool(inputs.badjac_state_probe),
+        badjac_initial_state_probe_iters=int(inputs.badjac_initial_state_probe_iters),
     )
 
 
@@ -1014,149 +1207,49 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
         scan_fallback_badjac_limit=int(scan_fallback_badjac_limit),
         scan_fallback_fsq_abs=float(scan_fallback_fsq_abs),
     )
-    preflight_iters = scan_runtime_plan.preflight_iters
-    max_iter_scan = scan_runtime_plan.max_iter_scan
-    max_iter_tail = scan_runtime_plan.max_iter_tail
-    iter_offset_preflight = scan_runtime_plan.iter_offset_preflight
     iter_offset0 = scan_runtime_plan.iter_offset0
     if scan_runtime_plan.axis_reset_repeated:
         carry0 = carry0._replace(iter_offset=jnp.asarray(iter_offset0, dtype=jnp.int32))
 
-    scan_cache_key = scan_runtime_plan.scan_cache_key
-
-    def _run_scan(carry_init, it_seq):
-        return jax.lax.scan(_scan_step, carry_init, it_seq)
-
-    def _get_scan_runner(seq_len: int):
-        key = scan_cache_key + (int(seq_len),)
-        return _get_or_build_scan_runner(
-            _run_scan,
-            cache=ctx._SCAN_RUNNER_CACHE,
-            key=key,
-            differentiating_scan=bool(scan_differentiated),
+    return _run_scan_dispatch_and_finalize(
+        ScanDispatchFinalizeInputs(
+            ctx=ctx,
+            state_init=state_init,
+            carry0=carry0,
+            scan_step=_scan_step,
+            scan_runtime_plan=scan_runtime_plan,
             scan_timing_enabled=bool(scan_timing_enabled),
             scan_timing_stats=scan_timing_stats,
-            jit_func=jit,
-            cache_get=_jit_cache_get,
-            cache_put=_jit_cache_put,
-            record_miss_categories=_record_scan_runner_cache_miss_categories,
-            perf_counter=time.perf_counter,
+            scan_differentiated=bool(scan_differentiated),
+            scan_print_context=scan_print_context,
+            scan_minimal=bool(scan_minimal),
+            scan_light=bool(scan_light),
+            ftol=float(ftol),
+            fsq_total_target=fsq_total_target,
+            scan_run_setup_start=scan_run_setup_start,
+            axis_reset_repeat=bool(axis_reset_repeat),
+            scan_backend_name=_scan_backend_name,
+            scan_device_runtime=scan_device_runtime,
+            state_only_scan=bool(state_only_scan),
+            scan_fallback_enabled_run=bool(scan_fallback_enabled_run),
+            scan_fallback_iters=int(scan_fallback_iters),
+            chunked_print=bool(chunked_print),
+            max_iter=int(max_iter),
+            nstep_screen=int(nstep_screen),
+            scan_collect_print=bool(scan_collect_print),
+            scan_fallback_fsq_abs=float(scan_fallback_fsq_abs),
+            dtype=dtype,
+            tree_has_tracer=_tree_has_tracer,
+            scan_use_precomputed=bool(scan_use_precomputed),
+            scan_use_lax_tridi=bool(scan_use_lax_tridi),
+            vmec2000_control=bool(vmec2000_control),
+            free_boundary_enabled=bool(free_boundary_enabled),
+            scan_total_start=scan_total_start,
+            print_in_scan=bool(print_in_scan),
+            verbose=bool(verbose),
+            verbose_vmec2000_table=bool(verbose_vmec2000_table),
+            badjac_use_state=bool(badjac_use_state),
+            badjac_state_probe=bool(badjac_state_probe),
+            badjac_initial_state_probe_iters=int(badjac_initial_state_probe_iters),
         )
-
-    _emit_scan_prints = partial(
-        _emit_scan_debug_prints,
-        scan_minimal=bool(scan_minimal),
-        scan_light=bool(scan_light),
-        ftol=float(ftol),
-        fsq_total_target=fsq_total_target,
-        iter_offset0=int(iter_offset0),
-        should_print=scan_print_context.should_print,
-        print_row=scan_print_context.print_row,
-    )
-
-    if scan_timing_enabled and scan_run_setup_start is not None:
-        scan_timing_stats["scan_run_setup_s"] += time.perf_counter() - float(scan_run_setup_start)
-    carry_init = carry0._replace(state=state_init, state_checkpoint=state_init)
-    scan_dispatch_common = {
-        "scan_jit_preflight_enabled_func": _scan_jit_preflight_enabled,
-        "scan_jit_preflight_env": os.getenv("VMEC_JAX_SCAN_JIT_PREFLIGHT"),
-        "backend_name": _scan_backend_name(),
-        "scan_differentiated": bool(scan_differentiated),
-        "preflight_iters": int(preflight_iters),
-        "iter_offset_preflight": int(iter_offset_preflight),
-        "axis_reset_repeat": bool(axis_reset_repeat),
-        "iter_offset0": int(iter_offset0),
-        "get_scan_runner": _get_scan_runner,
-        "scan_step": _scan_step,
-        "scan_timing_enabled": bool(scan_timing_enabled),
-        "scan_timing_stats": scan_timing_stats,
-        "scan_device_runtime": scan_device_runtime,
-        "perf_counter": time.perf_counter,
-        "state_only_scan": bool(state_only_scan),
-        "scan_fallback_enabled_run": bool(scan_fallback_enabled_run),
-        "scan_fallback_iters": int(scan_fallback_iters),
-        "jnp_module": jnp,
-        "jax_module": jax,
-    }
-    scan_dispatch = _run_vmec2000_scan_dispatch(
-        carry_init,
-        chunked_print=bool(chunked_print),
-        chunked_kwargs={
-            **scan_dispatch_common,
-            "max_iter": int(max_iter),
-            "max_iter_scan": int(max_iter_scan),
-            "nstep_screen": int(nstep_screen),
-            "need_print": bool(scan_collect_print),
-            "lthreed": bool(cfg.lthreed),
-            "spectral_mode_count": int(ctx.ncoeff),
-            "scan_chunk_settings_func": ctx._scan_chunk_settings,
-            "scan_fallback_fsq_abs": float(scan_fallback_fsq_abs),
-            "dtype": dtype,
-            "emit_scan_prints": _emit_scan_prints,
-            "tree_has_tracer": _tree_has_tracer,
-            "np_module": np,
-        },
-        nonchunked_kwargs={
-            **scan_dispatch_common,
-            "max_iter_scan": int(max_iter_scan),
-            "max_iter_tail": int(max_iter_tail),
-            "scan_collect_print": bool(scan_collect_print),
-        },
-    )
-    carry_final = scan_dispatch.carry_final
-    hist = scan_dispatch.history
-    return finalize_vmec2000_scan_run(
-        carry_final=carry_final,
-        history=hist,
-        state0=ctx.state0,
-        result_type=SolveVmecResidualResult,
-        state_only_scan=bool(state_only_scan),
-        scan_minimal=bool(scan_minimal),
-        scan_light=bool(scan_light),
-        scan_use_precomputed=bool(scan_use_precomputed),
-        scan_use_lax_tridi=bool(scan_use_lax_tridi),
-        vmec2000_control=bool(vmec2000_control),
-        ftol=float(ftol),
-        fsq_total_target=fsq_total_target,
-        max_iter=int(max_iter),
-        resume_state_mode=str(ctx.resume_state_mode),
-        pack_resume_state=ctx._pack_resume_state,
-        free_boundary_enabled=bool(free_boundary_enabled),
-        freeb_nvacskip=int(ctx.freeb_nvacskip),
-        freeb_nvskip0=int(ctx.freeb_nvskip0),
-        iter_offset0=int(iter_offset0),
-        free_boundary_iter_controls=_free_boundary_iter_controls,
-        scan_timing_enabled=bool(scan_timing_enabled),
-        scan_timing_stats=scan_timing_stats,
-        scan_postprocess_start=time.perf_counter() if scan_timing_enabled else None,
-        scan_total_start=scan_total_start,
-        perf_counter=time.perf_counter,
-        build_timing_report=_build_scan_timing_report,
-        tree_has_tracer=_tree_has_tracer,
-        build_traced_scan_resume_state=_build_traced_scan_resume_state,
-        state_only_scan_result=_vmec2000_state_only_scan_result,
-        traced_scan_result=_vmec2000_traced_scan_result,
-        attach_free_boundary_diagnostics=ctx._attach_freeb_diag,
-        emit_post_scan_rows=_emit_vmec2000_post_scan_rows,
-        post_scan_print_enabled=(
-            (not bool(scan_minimal))
-            and (not bool(print_in_scan))
-            and (not bool(chunked_print))
-            and bool(verbose)
-            and bool(vmec2000_control)
-            and bool(verbose_vmec2000_table)
-        ),
-        should_print=scan_print_context.should_print,
-        print_row=scan_print_context.print_row,
-        dump_ptau_rows=_dump_vmec2000_scan_ptau_rows,
-        dump_ptau_enabled=(
-            (not bool(scan_light))
-            and (not bool(scan_minimal))
-            and os.getenv("VMEC_JAX_DUMP_PTAU", "") not in ("", "0")
-        ),
-        badjac_mode=ctx.badjac_mode,
-        dump_ptau=ctx._maybe_dump_ptau,
-        badjac_use_state=bool(badjac_use_state),
-        badjac_state_probe=bool(badjac_state_probe),
-        badjac_initial_state_probe_iters=int(badjac_initial_state_probe_iters),
     )
