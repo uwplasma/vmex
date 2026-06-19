@@ -588,16 +588,17 @@ def _freeb_axis_current_field(
     """Return the plasma-axis current contribution, with VMEC fallback policy."""
 
     axis_field_mode = os.getenv("VMEC_JAX_FREEB_AXIS_FIELD_MODE", "vmec_filament").strip().lower()
+    simple_kwargs = dict(
+        R=R,
+        Z=Z,
+        phi=phi_grid,
+        axis_r=axis_r,
+        axis_z=axis_z,
+        nfp=int(static.cfg.nfp),
+        plascur=float(plascur),
+    )
     if axis_field_mode in ("simple", "legacy"):
-        return _axis_current_field_simple(
-            R=R,
-            Z=Z,
-            phi=phi_grid,
-            axis_r=axis_r,
-            axis_z=axis_z,
-            nfp=int(static.cfg.nfp),
-            plascur=float(plascur),
-        )
+        return _axis_current_field_simple(**simple_kwargs)
     try:
         return _axis_current_field_vmec_filament(
             R=R,
@@ -608,15 +609,7 @@ def _freeb_axis_current_field(
             plascur=float(plascur),
         )
     except Exception:
-        return _axis_current_field_simple(
-            R=R,
-            Z=Z,
-            phi=phi_grid,
-            axis_r=axis_r,
-            axis_z=axis_z,
-            nfp=int(static.cfg.nfp),
-            plascur=float(plascur),
-        )
+        return _axis_current_field_simple(**simple_kwargs)
 
 
 def _sample_external_boundary_arrays(
@@ -1079,10 +1072,7 @@ def _vmec_source_from_gsource(*, gsource: np.ndarray, basis: dict[str, Any]) -> 
     nuv3 = int(basis.get("nuv3", gsrc.size))
     nuv_full = int(basis.get("nuv_full", nuv3))
     if bool(basis["lasym"]):
-        if gsrc.size >= nuv_full:
-            src = onp * gsrc[:nuv3]
-        else:
-            src = onp * gsrc[:nuv3]
+        src = onp * gsrc[:nuv3]
     else:
         if gsrc.size >= nuv_full and "imirr_full" in basis:
             imirr_full = np.asarray(basis["imirr_full"], dtype=np.int64)
