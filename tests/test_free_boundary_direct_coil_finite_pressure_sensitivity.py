@@ -1204,6 +1204,47 @@ def _state_central_difference_rms(plus_run, minus_run, *, step: float) -> float:
     return float(np.sqrt(np.mean(diff * diff)))
 
 
+def _assert_direct_coil_bnormal_fd_slope_stable(
+    tmp_path: Path,
+    *,
+    input_name: str,
+    variables: list[tuple[str, tuple[int, ...]]],
+    current_step: float,
+    dof_step: float,
+    rtol: float,
+) -> None:
+    from examples.optimization.free_boundary_QS_coil_optimization import (
+        apply_coil_variables,
+        run_direct_free_boundary,
+        summarize_run,
+    )
+
+    enable_x64(True)
+    input_path = _write_tiny_direct_freeb_input(tmp_path / input_name)
+    base_params = _circle_coil_params(current=3.0e7)
+
+    def objective(x: float) -> float:
+        params = apply_coil_variables(
+            base_params,
+            np.asarray([x], dtype=float),
+            variables=variables,
+            current_step=current_step,
+            dof_step=dof_step,
+        )
+        run, wall_s = run_direct_free_boundary(input_path, params, vmec_max_iter=4, activate_fsq=1.0e99)
+        summary = summarize_run(run, params, objective=np.nan, wall_s=wall_s, target_aspect=6.0, target_iota=0.4)
+        assert summary["free_boundary_vacuum_stub"] is False
+        assert summary["free_boundary_nestor_model"].startswith("vmec2000_like_dense_integral")
+        assert summary["free_boundary_bnormal_rms"] > 0.0
+        assert summary["free_boundary_bsqvac_rms"] > 0.0
+        return float(summary["free_boundary_bnormal_rms"])
+
+    slopes = np.asarray([(objective(eps) - objective(-eps)) / (2.0 * eps) for eps in (0.25, 0.125)], dtype=float)
+    assert np.all(np.isfinite(slopes))
+    assert np.min(np.abs(slopes)) > 1.0e-7
+    np.testing.assert_allclose(slopes[0], slopes[1], rtol=rtol, atol=1.0e-12)
+
+
 def test_active_direct_coil_provider_is_sensitive_in_finite_pressure_context(tmp_path: Path) -> None:
     """Active NESTOR sampling should scale consistently with direct-coil current."""
 
@@ -1539,109 +1580,27 @@ def test_direct_coil_trial_nestor_timing_records_solver_trial_calls(tmp_path: Pa
 def test_direct_coil_current_only_objective_fd_slope_is_stable(tmp_path: Path) -> None:
     """Central finite-difference slopes should be stable for a current-only direct-coil objective."""
 
-    enable_x64(True)
-    from examples.optimization.free_boundary_QS_coil_optimization import (
-        apply_coil_variables,
-        run_direct_free_boundary,
-        summarize_run,
+    _assert_direct_coil_bnormal_fd_slope_stable(
+        tmp_path,
+        input_name="input.direct_current_fd_slope",
+        variables=[("current", (0,))],
+        current_step=0.02,
+        dof_step=0.0,
+        rtol=5.0e-6,
     )
-
-    input_path = _write_tiny_direct_freeb_input(tmp_path / "input.direct_current_fd_slope")
-    base_params = _circle_coil_params(current=3.0e7)
-    variables = [("current", (0,))]
-
-    def objective(x: float) -> float:
-        params = apply_coil_variables(
-            base_params,
-            np.asarray([x], dtype=float),
-            variables=variables,
-            current_step=0.02,
-            dof_step=0.0,
-        )
-        run, wall_s = run_direct_free_boundary(
-            input_path,
-            params,
-            vmec_max_iter=4,
-            activate_fsq=1.0e99,
-        )
-        summary = summarize_run(
-            run,
-            params,
-            objective=np.nan,
-            wall_s=wall_s,
-            target_aspect=6.0,
-            target_iota=0.4,
-        )
-        assert summary["free_boundary_vacuum_stub"] is False
-        assert summary["free_boundary_nestor_model"].startswith("vmec2000_like_dense_integral")
-        assert summary["free_boundary_bnormal_rms"] > 0.0
-        assert summary["free_boundary_bsqvac_rms"] > 0.0
-        return float(summary["free_boundary_bnormal_rms"])
-
-    slopes = []
-    for eps in (0.25, 0.125):
-        forward = objective(eps)
-        backward = objective(-eps)
-        slopes.append((forward - backward) / (2.0 * eps))
-
-    slopes = np.asarray(slopes, dtype=float)
-    assert np.all(np.isfinite(slopes))
-    assert np.min(np.abs(slopes)) > 1.0e-7
-    np.testing.assert_allclose(slopes[0], slopes[1], rtol=5.0e-6, atol=1.0e-12)
 
 
 def test_direct_coil_geometry_dof_accepted_state_fd_slope_is_stable(tmp_path: Path) -> None:
     """Boundary-normal vacuum response should vary smoothly with a coil geometry DOF."""
 
-    enable_x64(True)
-    from examples.optimization.free_boundary_QS_coil_optimization import (
-        apply_coil_variables,
-        run_direct_free_boundary,
-        summarize_run,
+    _assert_direct_coil_bnormal_fd_slope_stable(
+        tmp_path,
+        input_name="input.direct_geometry_fd_slope",
+        variables=[("fourier_dof", (0, 0, 2))],
+        current_step=0.0,
+        dof_step=1.0e-2,
+        rtol=1.0e-4,
     )
-
-    input_path = _write_tiny_direct_freeb_input(tmp_path / "input.direct_geometry_fd_slope")
-    base_params = _circle_coil_params(current=3.0e7)
-    variables = [("fourier_dof", (0, 0, 2))]
-
-    def objective(x: float) -> float:
-        params = apply_coil_variables(
-            base_params,
-            np.asarray([x], dtype=float),
-            variables=variables,
-            current_step=0.0,
-            dof_step=1.0e-2,
-        )
-        run, wall_s = run_direct_free_boundary(
-            input_path,
-            params,
-            vmec_max_iter=4,
-            activate_fsq=1.0e99,
-        )
-        summary = summarize_run(
-            run,
-            params,
-            objective=np.nan,
-            wall_s=wall_s,
-            target_aspect=6.0,
-            target_iota=0.4,
-        )
-        assert summary["free_boundary_vacuum_stub"] is False
-        assert summary["free_boundary_nestor_model"].startswith("vmec2000_like_dense_integral")
-        assert summary["free_boundary_bnormal_rms"] > 0.0
-        assert summary["free_boundary_bsqvac_rms"] > 0.0
-        return float(summary["free_boundary_bnormal_rms"])
-
-    slopes = []
-    for eps in (0.25, 0.125):
-        forward = objective(eps)
-        backward = objective(-eps)
-        slopes.append((forward - backward) / (2.0 * eps))
-
-    slopes = np.asarray(slopes, dtype=float)
-    assert np.all(np.isfinite(slopes))
-    assert np.min(np.abs(slopes)) > 1.0e-7
-    np.testing.assert_allclose(slopes[0], slopes[1], rtol=1.0e-4, atol=1.0e-12)
 
 
 def test_direct_coil_complete_solve_proxy_objective_fd_response_for_current_and_geometry(tmp_path: Path) -> None:
