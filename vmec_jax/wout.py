@@ -7,6 +7,7 @@ It is meant for regression comparisons against VMEC2000 outputs.
 from __future__ import annotations
 
 import os
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -393,20 +394,10 @@ def _synthesize_wout_geometry_from_state(
     return geom
 
 
-def _apply_bsubv_equif_correction(
-    *,
-    bsubv: np.ndarray,
-    bsubv_e: np.ndarray,
-    trig,
-) -> np.ndarray:
-    """Compatibility facade for the extracted WOUT IEQUI=1 correction helper."""
-
-    return _wout_diagnostics.apply_bsubv_equif_correction(
-        bsubv=bsubv,
-        bsubv_e=bsubv_e,
-        trig=trig,
-        vmec_pwint_from_trig_func=vmec_pwint_from_trig,
-    )
+_apply_bsubv_equif_correction = partial(
+    _wout_diagnostics.apply_bsubv_equif_correction,
+    vmec_pwint_from_trig_func=vmec_pwint_from_trig,
+)
 
 
 _compute_bsubs_half_mesh = _wout_bsubs_helpers.compute_bsubs_half_mesh

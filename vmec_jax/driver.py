@@ -215,25 +215,7 @@ def _final_flux_profiles_from_state(**kwargs):
     )
 
 
-def residual_scalars_from_state(
-    *,
-    state,
-    static,
-    indata,
-    signgs: int,
-    wout=None,
-    use_vmec_synthesis: bool = True,
-):
-    """Compatibility wrapper for VMEC-style residual scalar construction."""
-
-    return _driver_output_helpers.residual_scalars_from_state(
-        state=state,
-        static=static,
-        indata=indata,
-        signgs=signgs,
-        wout=wout,
-        use_vmec_synthesis=use_vmec_synthesis,
-    )
+residual_scalars_from_state = _driver_output_helpers.residual_scalars_from_state
 
 
 def solve_fixed_boundary_from_boundary(
@@ -351,9 +333,7 @@ def load_wout(path: str | Path) -> WoutData:
     return _driver_io_helpers.load_wout(path, read_wout_func=read_wout)
 
 
-def save_npz(path: str | Path, **arrays) -> Path:
-    """Save arrays into a NumPy `.npz` file and return the path."""
-    return _driver_io_helpers.save_npz(path, **arrays)
+save_npz = _driver_io_helpers.save_npz
 
 
 _STEP_SIZE_SENTINEL = object()
