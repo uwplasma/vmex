@@ -20,3 +20,4 @@ Mirror Geometries
    overview
    outputs
    differentiability
+   readiness

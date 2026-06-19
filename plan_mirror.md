@@ -21279,3 +21279,99 @@ Results:
 ### User input needed
 
 No user input is needed.
+
+---
+## 174. Mirror Readiness Matrix Documentation
+
+### Steps taken
+
+- Repaired the committed plan ordering before this tranche so numbered
+  sections now run monotonically from `0` through `173`.
+- Committed and pushed the repaired plan-sync log as
+  `3733c43d Sync mirror PR plan after vector solve loop`.
+- Sampled PR #21 after the push:
+  - draft state remained `true`;
+  - latest head was `3733c43d0a9f649420b911761fbc5d45fcb09810`;
+  - no failing checks were detected;
+  - the latest run had parity smoke passed, full physics skipped as configured,
+    and the standard jobs still running.
+- Added `docs/mirror/readiness.rst` as a single review-facing scope matrix.
+- Linked the new page from `docs/mirror/index.rst`.
+
+### Results obtained
+
+- The mirror docs now distinguish:
+  - supported fixed-boundary/grid/output/plotting/two-coil paths;
+  - validated prototypes for theta-dependent surfaces, residual Newton,
+    reduced differentiable APIs, and toroidal hybrid fixtures;
+  - diagnostic free-boundary, ESSOS beta-scan, finite-current pitch, and
+    support-fixture paths;
+  - deferred anisotropic/kinetic/open-end physics.
+- The readiness page states the derivative-backend policy explicitly:
+  finite differences for host-side CLI loops, JAX forward/reverse for pure JAX
+  residual-vector prototypes according to parameter/residual shape, and dense
+  solves as tiny-grid correctness references.
+- The page also records the final undrafting gate: full mirror tests, warning-
+  clean docs, current PR body, lightweight artifacts, and no failing GitHub
+  checks at the latest pushed head.
+
+### How it was tested
+
+Commands run:
+
+```bash
+python -m sphinx -W -b html docs docs/_build/html
+git diff --check
+gh auth status
+gh pr view 21 --repo uwplasma/vmec_jax --json number,isDraft,headRefOid,mergeStateStatus,url
+python /Users/rogeriojorge/.codex/plugins/cache/openai-curated-remote/github/0.1.5/skills/gh-fix-ci/scripts/inspect_pr_checks.py --repo . --pr 21 --json
+gh pr checks 21 --repo uwplasma/vmec_jax --json name,state,bucket,startedAt,completedAt,link
+```
+
+Results:
+
+- Sphinx completed successfully with warnings treated as errors.
+- Whitespace check passed.
+- GitHub CLI authentication was valid with `repo` and `workflow` scopes.
+- PR #21 remained draft and had no detected failing checks at the sampled head.
+
+### File structure and best-practice notes
+
+- The scope matrix is in `docs/mirror/readiness.rst`, alongside the existing
+  mirror overview, output, and differentiability pages.
+- `docs/mirror/index.rst` owns the toctree link, so the page is included in
+  full docs without adding another root-level document.
+- No generated output files or figures were added to the repository.
+
+### Best next steps
+
+1. Commit and push M174.
+2. Re-check PR #21 after CI has had enough time to finish and inspect only
+   failed jobs.
+3. Update the draft PR body to point reviewers at the readiness matrix and the
+   latest plan section if the branch remains otherwise clean.
+4. Run a final full `tests/mirror` pass before deciding whether any lane is
+   mature enough to undraft.
+
+### Completion percentages after M174
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `93%`.
+- Fixed-boundary axisymmetric solve: `91%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `90%`.
+- Finite-current pitch validation: `86%`.
+- Plotting and `vmec --plot` mirror support: `97%`.
+- I/O schema and docs: `100%`.
+- Differentiable solved-state API: `95%`.
+- Mirror-Boozer-like diagnostics: `83%`.
+- Free-boundary mirror lane: `99%` overall, with reduced residual-vector
+  nonlinear solve scope complete.
+- Straight-axis hybrid support fixture lane: `100%` for support-fixture scope.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `97%`.
+- PR merge readiness overall: `99%`.
+
+### User input needed
+
+No user input is needed.
