@@ -159,6 +159,22 @@ def fixed_boundary_initial_guess_run(
     )
 
 
+def maybe_print_optimizer_summary(result: Any, *, solver: str, verbose: bool, print_func: Callable[..., None] = print) -> None:
+    """Print the short non-VMEC2000 optimizer summary used by the driver."""
+
+    if not bool(verbose) or str(solver) == "vmec2000_iter":
+        return
+    n_iter = int(getattr(result, "n_iter", -1))
+    w_history = getattr(result, "w_history", None)
+    w_final = float(w_history[-1]) if w_history is not None else float("nan")
+    grad_history = getattr(result, "grad_rms_history", None)
+    if grad_history is not None and len(grad_history) > 0:
+        grad_final = float(grad_history[-1])
+    else:
+        grad_final = float("nan")
+    print_func(f"[vmec_jax] finished: n_iter={n_iter} w={w_final:.8e} grad_rms={grad_final:.3e}")
+
+
 def run_fixed_boundary_optimizer_solver(
     *,
     solver: str,

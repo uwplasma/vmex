@@ -1125,27 +1125,18 @@ def run_fixed_boundary(
             f"Unknown solver: {solver!r} (expected 'gd', 'lbfgs', 'vmec_lbfgs', 'vmec_gn', or 'vmec2000_iter')"
         )
 
-    if verbose and solver != "vmec2000_iter":
-        n_iter = int(getattr(res, "n_iter", -1))
-        w_final = float(res.w_history[-1]) if getattr(res, "w_history", None) is not None else float("nan")
-        if getattr(res, "grad_rms_history", None) is not None and len(res.grad_rms_history) > 0:
-            grad_final = float(res.grad_rms_history[-1])
-        else:
-            grad_final = float("nan")
-        print(f"[vmec_jax] finished: n_iter={n_iter} w={w_final:.8e} grad_rms={grad_final:.3e}")
-
-    if flux is None or prof is None or pressure is None:
-        if static is None:
-            static = static_profile_cache.build_static_cfg(cfg)
-        flux, prof, pressure = static_profile_cache.profiles_for_static(static)
-    flux, prof = _final_flux_profiles_from_state(
+    _driver_solve_helpers.maybe_print_optimizer_summary(res, solver=solver, verbose=bool(verbose))
+    static, flux, prof = _driver_flux_helpers.finalize_flux_profiles_for_run(
+        cfg=cfg,
         indata=indata,
-        static_in=static,
-        state=res.state,
+        static=static,
+        result=res,
         signgs=signgs,
         flux_local=flux,
-        prof_local=prof,
+        profiles_local=prof,
         pressure_local=pressure,
+        static_profile_cache=static_profile_cache,
+        final_flux_profiles_from_state_func=_final_flux_profiles_from_state,
     )
 
     run_out = FixedBoundaryRun(

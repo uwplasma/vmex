@@ -37,6 +37,37 @@ def profiles_from_static(
     return flux_local, prof_local, pressure_local
 
 
+def finalize_flux_profiles_for_run(
+    *,
+    cfg,
+    indata,
+    static,
+    result,
+    signgs: int,
+    flux_local,
+    profiles_local,
+    pressure_local,
+    static_profile_cache,
+    final_flux_profiles_from_state_func,
+) -> tuple[Any, Any, dict]:
+    """Return final static, flux, and profiles for a completed driver result."""
+
+    if flux_local is None or profiles_local is None or pressure_local is None:
+        if static is None:
+            static = static_profile_cache.build_static_cfg(cfg)
+        flux_local, profiles_local, pressure_local = static_profile_cache.profiles_for_static(static)
+    flux_out, profiles_out = final_flux_profiles_from_state_func(
+        indata=indata,
+        static_in=static,
+        state=result.state,
+        signgs=signgs,
+        flux_local=flux_local,
+        prof_local=profiles_local,
+        pressure_local=pressure_local,
+    )
+    return static, flux_out, profiles_out
+
+
 def final_flux_profiles_from_state(
     *,
     indata,
