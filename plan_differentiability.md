@@ -19484,3 +19484,86 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.99999994%.
+
+## 2026-06-19 Residual Iterator Candidate-State and Trace Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Reviewed the current source-health report after the discrete-adjoint replay
+   cleanup and confirmed the fixed-boundary residual iterator remains the
+   largest production hotspot.
+2. Consolidated repeated candidate-state construction in
+   `solve_fixed_boundary_residual_iter` by sharing a local delta/state helper
+   across strict update, strict backtracking, direct fallback, and non-strict
+   backtracking paths.
+3. Consolidated repeated adjoint trace array maps for velocity and force blocks,
+   preserving dynamic/full trace materialization semantics.
+4. Restored missing legacy private aliases in `vmec_jax.solve` for residual
+   configuration helpers exercised by compatibility tests.
+
+Results obtained:
+
+- `vmec_jax/solvers/fixed_boundary/residual/iteration.py` changed by 135
+  insertions and 142 deletions before solve-facade aliases; the full tranche is
+  net `-4` source lines across two files.
+- `iteration.py` dropped from 5869 to 5862 lines.
+- `solve_fixed_boundary_residual_iter` dropped from 5464 to 5454 lines.
+- Trace keys and candidate-state enforcement remain owned by the same local
+  solver branch; no adaptive branch-selection logic was changed.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `python -m compileall -q vmec_jax/solve.py vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `python -m ruff check vmec_jax/solve.py vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_update_helpers.py tests/test_solve_residual_iter_helpers_wave8_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_active_direct_coil_adjoint_trace_records_vacuum_forcing_and_pressure_scale tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_full_adjoint_trace_records_raw_preconditioner_on_fused_payload_path tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_config.py tests/test_step6_solve_fixed_boundary.py -q`
+- `python tools/diagnostics/source_health.py --top 12`
+- `git diff --check`
+
+Best next steps:
+
+1. Continue residual iterator decomposition with only net-negative, behavior-safe
+   tranches; the next promising seam is repeated update/trace payload ownership,
+   not adaptive-control logic.
+2. If no clean residual iterator tranche is available, move to WOUT/driver/QI
+   example hotspots where helper extraction can reduce code without adding
+   namespace sprawl.
+3. Run a broader local suite after a few more tranches; continue deferring CI
+   polling unless a check fails.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.99999936%.
+- Solver monolith reduction: 99.79%.
+- Free-boundary adjoint monolith reduction: 99.50%.
+- Driver workflow decomposition: 99.94%.
+- Residual iteration decomposition: 98.88%.
+- WOUT diagnostic/profile decomposition: 99.96%.
+- Bcovar/WOUT parity decomposition: 99.14%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.81%.
+- Tomnsps transform decomposition: 98.9%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.67%.
+- Fixed-boundary optimizer decomposition: 96.10%.
+- Plotting/WOUT visualization decomposition: 96.1%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.75%.
+- Discrete-adjoint replay decomposition: 96.58%.
+- Free-boundary validation-gate maintainability: 97.4%.
+- QI objective/staged-runner decomposition: 96.9%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.99999995%.

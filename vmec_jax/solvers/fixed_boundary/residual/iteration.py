@@ -315,6 +315,9 @@ _m1_internal_to_physical_pair = _geometry_m1_internal_to_physical_pair
 _mn_sin_to_signed_physical_batch = _geometry_mn_sin_to_signed_physical_batch
 _rz_norm_np = _geometry_rz_norm_np
 
+_TRACE_VELOCITY_NAMES = ("Rcc", "Rss", "Zsc", "Zcs", "Lsc", "Lcs", "Rsc", "Rcs", "Zcc", "Zss", "Lcc", "Lss")
+_TRACE_TOMNSP_NAMES = ("frcc", "frss", "fzsc", "fzcs", "flsc", "flcs", "frsc", "frcs", "fzcc", "fzss", "flcc", "flss")
+
 
 _strict_update_step_jit = partial(_precond_payload_facade._strict_update_step_jit, has_jax_func=has_jax)
 _preconditioner_output_scaling_jit = partial(
@@ -529,6 +532,15 @@ def solve_fixed_boundary_residual_iter(
 
     def _adjoint_trace_array(value):
         return _materialize_adjoint_trace_array(value, mode=adjoint_trace_mode)
+
+    def _trace_named_arrays(prefix: str, items, *, suffix: str = "") -> dict[str, Any]:
+        return {f"{prefix}{name}{suffix}": None if value is None else np.asarray(value) for name, value in items}
+
+    def _trace_velocity_adjoint(ns: dict[str, Any], suffix: str) -> dict[str, Any]:
+        return {f"v{name}{suffix}": _adjoint_trace_array(ns[f"v{name}"]) for name in _TRACE_VELOCITY_NAMES}
+
+    def _trace_velocity_arrays(ns: dict[str, Any], suffix: str) -> dict[str, Any]:
+        return {f"v{name}{suffix}": np.asarray(ns[f"v{name}"]) for name in _TRACE_VELOCITY_NAMES}
 
     signgs = startup_policy.signgs
     fsq_total_target = startup_policy.fsq_total_target
@@ -1274,6 +1286,8 @@ def solve_fixed_boundary_residual_iter(
     _mn_sin_to_signed_physical = _mode_context.mn_sin_to_signed_physical
     _mn_sin_to_signed_physical_lambda = _mode_context.mn_sin_to_signed_physical_lambda
     _mn_cos_to_signed_physical_lambda = _mode_context.mn_cos_to_signed_physical_lambda
+    _physical_delta_transforms = (_mn_cos_to_signed_physical, _mn_sin_to_signed_physical, _mn_cos_to_signed_physical_lambda, _mn_sin_to_signed_physical_lambda)
+    _internal_delta_transforms = (_mn_cos_to_signed, _mn_sin_to_signed, _mn_cos_to_signed, _mn_sin_to_signed)
     _rz_norm_np = _mode_context.rz_norm_np
     _rz_norm = _mode_context.rz_norm
     state_setup = _build_residual_state_setup(
@@ -3149,6 +3163,42 @@ def solve_fixed_boundary_residual_iter(
                     )
                 return _apply_vmec_lambda_axis_rules(candidate)
 
+            def _delta_tuple_from_blocks(dt, transforms, *blocks, use_numpy_lasym_zeros: bool = False):
+                rcc, rss, rsc, rcs, zsc, zcs, zcc, zss, lsc, lcs, lcc, lss = blocks
+                mn_cos_to_signed, mn_sin_to_signed, mn_cos_to_signed_lambda, mn_sin_to_signed_lambda = transforms
+                dR = dt * mn_cos_to_signed(rcc, rss)
+                dZ = dt * mn_sin_to_signed(zsc, zcs)
+                dL = dt * mn_sin_to_signed_lambda(lsc, lcs)
+                if bool(cfg.lasym):
+                    dR_sin = dt * mn_sin_to_signed(rsc, rcs)
+                    dZ_cos = dt * mn_cos_to_signed(zcc, zss)
+                    dL_cos = dt * mn_cos_to_signed_lambda(lcc, lss)
+                elif use_numpy_lasym_zeros:
+                    # Reuse preallocated arrays on the host-update path.
+                    dR_sin = _zeros_dR_np
+                    dZ_cos = _zeros_dR_np
+                    dL_cos = _zeros_dR_np
+                else:
+                    dR_sin = jnp.zeros_like(dR)
+                    dZ_cos = jnp.zeros_like(dR)
+                    dL_cos = jnp.zeros_like(dR)
+                return (dR, dR_sin, dZ_cos, dZ, dL_cos, dL)
+
+            def _candidate_state_from_delta_tuple(deltas, *, scale: float = 1.0, use_numpy_arrays: bool = False, use_numpy_enforce: bool = False) -> VMECState:
+                if float(scale) != 1.0:
+                    deltas = tuple(float(scale) * value for value in deltas)
+                dR, dR_sin, dZ_cos, dZ, dL_cos, dL = deltas
+                return _candidate_state_from_deltas(
+                    dR_value=dR,
+                    dR_sin_value=dR_sin,
+                    dZ_cos_value=dZ_cos,
+                    dZ_value=dZ,
+                    dL_cos_value=dL_cos,
+                    dL_value=dL,
+                    use_numpy_arrays=use_numpy_arrays,
+                    use_numpy_enforce=use_numpy_enforce,
+                )
+
             constraint_rcon0_current = None
             constraint_zcon0_current = None
             if (
@@ -4916,18 +4966,6 @@ def solve_fixed_boundary_residual_iter(
                     "reset_inv_tau": bool(iter2 == iter1),
                     "constraint_cache_update": bool(need_bcovar_update),
                     "precond_cache_update": bool(preconditioner_cache_update_trace),
-                    "vRcc_before": _adjoint_trace_array(vRcc),
-                    "vRss_before": _adjoint_trace_array(vRss),
-                    "vZsc_before": _adjoint_trace_array(vZsc),
-                    "vZcs_before": _adjoint_trace_array(vZcs),
-                    "vLsc_before": _adjoint_trace_array(vLsc),
-                    "vLcs_before": _adjoint_trace_array(vLcs),
-                    "vRsc_before": _adjoint_trace_array(vRsc),
-                    "vRcs_before": _adjoint_trace_array(vRcs),
-                    "vZcc_before": _adjoint_trace_array(vZcc),
-                    "vZss_before": _adjoint_trace_array(vZss),
-                    "vLcc_before": _adjoint_trace_array(vLcc),
-                    "vLss_before": _adjoint_trace_array(vLss),
                     "freeb_bsqvac_half": (
                         None
                         if freeb_bsqvac_half_current is None
@@ -4953,6 +4991,7 @@ def solve_fixed_boundary_residual_iter(
                     "lam_prec": np.asarray(lam_prec),
                     "precond_mats": mats,
                 }
+                trace_entry.update(_trace_velocity_adjoint(locals(), "_before"))
                 if adjoint_trace_mode in {"full", "branch"}:
                     trace_entry.update(
                         {
@@ -4962,56 +5001,31 @@ def solve_fixed_boundary_residual_iter(
                     )
                 if adjoint_trace_mode == "full":
                     trace_entry.update(
-                        {
-                            "frzl_frcc": np.asarray(frzl.frcc),
-                            "frzl_frss": None if frzl.frss is None else np.asarray(frzl.frss),
-                            "frzl_fzsc": np.asarray(frzl.fzsc),
-                            "frzl_fzcs": None if frzl.fzcs is None else np.asarray(frzl.fzcs),
-                            "frzl_flsc": np.asarray(frzl.flsc),
-                            "frzl_flcs": None if frzl.flcs is None else np.asarray(frzl.flcs),
-                            "frzl_frsc": None if getattr(frzl, "frsc", None) is None else np.asarray(frzl.frsc),
-                            "frzl_frcs": None if getattr(frzl, "frcs", None) is None else np.asarray(frzl.frcs),
-                            "frzl_fzcc": None if getattr(frzl, "fzcc", None) is None else np.asarray(frzl.fzcc),
-                            "frzl_fzss": None if getattr(frzl, "fzss", None) is None else np.asarray(frzl.fzss),
-                            "frzl_flcc": None if getattr(frzl, "flcc", None) is None else np.asarray(frzl.flcc),
-                            "frzl_flss": None if getattr(frzl, "flss", None) is None else np.asarray(frzl.flss),
-                            "frzl_rz_frcc": np.asarray(frzl_rz.frcc),
-                            "frzl_rz_frss": None if frzl_rz.frss is None else np.asarray(frzl_rz.frss),
-                            "frzl_rz_fzsc": np.asarray(frzl_rz.fzsc),
-                            "frzl_rz_fzcs": None if frzl_rz.fzcs is None else np.asarray(frzl_rz.fzcs),
-                            "frzl_rz_flsc": np.asarray(frzl_rz.flsc),
-                            "frzl_rz_flcs": None if frzl_rz.flcs is None else np.asarray(frzl_rz.flcs),
-                            "frzl_rz_frsc": None
-                            if getattr(frzl_rz, "frsc", None) is None
-                            else np.asarray(frzl_rz.frsc),
-                            "frzl_rz_frcs": None
-                            if getattr(frzl_rz, "frcs", None) is None
-                            else np.asarray(frzl_rz.frcs),
-                            "frzl_rz_fzcc": None
-                            if getattr(frzl_rz, "fzcc", None) is None
-                            else np.asarray(frzl_rz.fzcc),
-                            "frzl_rz_fzss": None
-                            if getattr(frzl_rz, "fzss", None) is None
-                            else np.asarray(frzl_rz.fzss),
-                            "frzl_rz_flcc": None
-                            if getattr(frzl_rz, "flcc", None) is None
-                            else np.asarray(frzl_rz.flcc),
-                            "frzl_rz_flss": None
-                            if getattr(frzl_rz, "flss", None) is None
-                            else np.asarray(frzl_rz.flss),
-                            "frcc_u": np.asarray(frcc_u),
-                            "frss_u": np.asarray(frss_u),
-                            "fzsc_u": np.asarray(fzsc_u),
-                            "fzcs_u": np.asarray(fzcs_u),
-                            "flsc_u": np.asarray(flsc_u),
-                            "flcs_u": np.asarray(flcs_u),
-                            "frsc_u": np.asarray(frsc_u),
-                            "frcs_u": np.asarray(frcs_u),
-                            "fzcc_u": np.asarray(fzcc_u),
-                            "fzss_u": np.asarray(fzss_u),
-                            "flcc_u": np.asarray(flcc_u),
-                            "flss_u": np.asarray(flss_u),
-                        }
+                        _trace_named_arrays("frzl_", ((name, getattr(frzl, name, None)) for name in _TRACE_TOMNSP_NAMES))
+                    )
+                    trace_entry.update(
+                        _trace_named_arrays(
+                            "frzl_rz_", ((name, getattr(frzl_rz, name, None)) for name in _TRACE_TOMNSP_NAMES)
+                        )
+                    )
+                    trace_entry.update(
+                        _trace_named_arrays(
+                            "",
+                            (
+                                ("frcc_u", frcc_u),
+                                ("frss_u", frss_u),
+                                ("fzsc_u", fzsc_u),
+                                ("fzcs_u", fzcs_u),
+                                ("flsc_u", flsc_u),
+                                ("flcs_u", flcs_u),
+                                ("frsc_u", frsc_u),
+                                ("frcs_u", frcs_u),
+                                ("fzcc_u", fzcc_u),
+                                ("fzss_u", fzss_u),
+                                ("flcc_u", flcc_u),
+                                ("flss_u", flss_u),
+                            ),
+                        )
                     )
             if timing_enabled and t_trace_build_start is not None:
                 timing_stats["update_trace_build"] += time.perf_counter() - float(t_trace_build_start)
@@ -5221,30 +5235,25 @@ def solve_fixed_boundary_residual_iter(
                 else:
                     scl = 1.0
 
-                dR = dt_eff * _mn_cos_to_signed_physical(vRcc, vRss)
-                dZ = dt_eff * _mn_sin_to_signed_physical(vZsc, vZcs)
-                dL = dt_eff * _mn_sin_to_signed_physical_lambda(vLsc, vLcs)
-                if bool(cfg.lasym):
-                    dR_sin = dt_eff * _mn_sin_to_signed_physical(vRsc, vRcs)
-                    dZ_cos = dt_eff * _mn_cos_to_signed_physical(vZcc, vZss)
-                    dL_cos = dt_eff * _mn_cos_to_signed_physical_lambda(vLcc, vLss)
-                else:
-                    if host_update_assembly:
-                        # Use pre-allocated zero arrays (avoid 3 np.zeros_like allocs/iter).
-                        dR_sin = _zeros_dR_np
-                        dZ_cos = _zeros_dR_np
-                        dL_cos = _zeros_dR_np
-                    else:
-                        dR_sin = jnp.zeros_like(dR)
-                        dZ_cos = jnp.zeros_like(dR)
-                        dL_cos = jnp.zeros_like(dR)
-                state_try = _candidate_state_from_deltas(
-                    dR_value=dR,
-                    dR_sin_value=dR_sin,
-                    dZ_cos_value=dZ_cos,
-                    dZ_value=dZ,
-                    dL_cos_value=dL_cos,
-                    dL_value=dL,
+                update_deltas = _delta_tuple_from_blocks(
+                    dt_eff,
+                    _physical_delta_transforms,
+                    vRcc,
+                    vRss,
+                    vRsc,
+                    vRcs,
+                    vZsc,
+                    vZcs,
+                    vZcc,
+                    vZss,
+                    vLsc,
+                    vLcs,
+                    vLcc,
+                    vLss,
+                    use_numpy_lasym_zeros=bool(host_update_assembly),
+                )
+                state_try = _candidate_state_from_delta_tuple(
+                    update_deltas,
                     use_numpy_arrays=bool(host_update_assembly),
                     use_numpy_enforce=bool(host_update_assembly),
                 )
@@ -5282,13 +5291,9 @@ def solve_fixed_boundary_residual_iter(
             if np.isfinite(w_try) and (w_try > accept_ratio * max(w_curr, 1e-30)):
                 for _ in range(8):
                     alpha *= 0.5
-                    state_try = _candidate_state_from_deltas(
-                        dR_value=alpha * dR,
-                        dR_sin_value=alpha * dR_sin,
-                        dZ_cos_value=alpha * dZ_cos,
-                        dZ_value=alpha * dZ,
-                        dL_cos_value=alpha * dL_cos,
-                        dL_value=alpha * dL,
+                    state_try = _candidate_state_from_delta_tuple(
+                        update_deltas,
+                        scale=alpha,
                         use_numpy_arrays=False,
                         use_numpy_enforce=bool(host_update_assembly),
                     )
@@ -5343,24 +5348,23 @@ def solve_fixed_boundary_residual_iter(
                     if np.isfinite(force_rms) and force_rms > 0.0:
                         dt_cap = max_update_rms / max(force_rms, 1e-30)
                         dt_direct = max(min(dt_direct, float(dt_cap)), 1e-12)
-                    dR_dir = dt_direct * _mn_cos_to_signed(flip_sign * frcc_u, flip_sign * frss_u)
-                    dZ_dir = dt_direct * _mn_sin_to_signed(flip_sign * fzsc_u, flip_sign * fzcs_u)
-                    dL_dir = dt_direct * _mn_sin_to_signed(flip_sign * flsc_u, flip_sign * flcs_u)
-                    if bool(cfg.lasym):
-                        dR_sin_dir = dt_direct * _mn_sin_to_signed(flip_sign * frsc_u, flip_sign * frcs_u)
-                        dZ_cos_dir = dt_direct * _mn_cos_to_signed(flip_sign * fzcc_u, flip_sign * fzss_u)
-                        dL_cos_dir = dt_direct * _mn_cos_to_signed(flip_sign * flcc_u, flip_sign * flss_u)
-                    else:
-                        dR_sin_dir = jnp.zeros_like(dR_dir)
-                        dZ_cos_dir = jnp.zeros_like(dR_dir)
-                        dL_cos_dir = jnp.zeros_like(dR_dir)
-                    state_dir = _candidate_state_from_deltas(
-                        dR_value=dR_dir,
-                        dR_sin_value=dR_sin_dir,
-                        dZ_cos_value=dZ_cos_dir,
-                        dZ_value=dZ_dir,
-                        dL_cos_value=dL_cos_dir,
-                        dL_value=dL_dir,
+                    state_dir = _candidate_state_from_delta_tuple(
+                        _delta_tuple_from_blocks(
+                            dt_direct,
+                            _internal_delta_transforms,
+                            flip_sign * frcc_u,
+                            flip_sign * frss_u,
+                            flip_sign * frsc_u,
+                            flip_sign * frcs_u,
+                            flip_sign * fzsc_u,
+                            flip_sign * fzcs_u,
+                            flip_sign * fzcc_u,
+                            flip_sign * fzss_u,
+                            flip_sign * flsc_u,
+                            flip_sign * flcs_u,
+                            flip_sign * flcc_u,
+                            flip_sign * flss_u,
+                        ),
                         use_numpy_arrays=False,
                         use_numpy_enforce=False,
                     )
@@ -5502,19 +5506,10 @@ def solve_fixed_boundary_residual_iter(
                             "update_rms_preclip": None if update_rms_preclip is None else float(update_rms_preclip),
                             "update_rms_postclip": None if update_rms is None else float(update_rms),
                             "update_rms_scale": float(scl),
-                            "vRcc_after": np.asarray(vRcc),
-                            "vRss_after": np.asarray(vRss),
-                            "vZsc_after": np.asarray(vZsc),
-                            "vZcs_after": np.asarray(vZcs),
-                            "vLsc_after": np.asarray(vLsc),
-                            "vLcs_after": np.asarray(vLcs),
-                            "vRsc_after": np.asarray(vRsc),
-                            "vRcs_after": np.asarray(vRcs),
-                            "vZcc_after": np.asarray(vZcc),
-                            "vZss_after": np.asarray(vZss),
-                            "vLcc_after": np.asarray(vLcc),
-                            "vLss_after": np.asarray(vLss),
                         }
+                    )
+                    trace_entry.update(
+                        _trace_velocity_arrays(locals(), "_after")
                     )
                 adjoint_step_trace_history.append(trace_entry)
             if timing_enabled and t_trace_finalize_start is not None:
@@ -5563,25 +5558,23 @@ def solve_fixed_boundary_residual_iter(
                 vLcc_try = fac * (b1 * vLcc + dt_try * (flip_sign * jnp.asarray(flcc_u)))
                 vLss_try = fac * (b1 * vLss + dt_try * (flip_sign * jnp.asarray(flss_u)))
 
-                dR_try = dt_try * _mn_cos_to_signed(vRcc_try, vRss_try)
-                dZ_try = dt_try * _mn_sin_to_signed(vZsc_try, vZcs_try)
-                dL_try = dt_try * _mn_sin_to_signed(vLsc_try, vLcs_try)
-                if bool(cfg.lasym):
-                    dR_sin_try = dt_try * _mn_sin_to_signed(vRsc_try, vRcs_try)
-                    dZ_cos_try = dt_try * _mn_cos_to_signed(vZcc_try, vZss_try)
-                    dL_cos_try = dt_try * _mn_cos_to_signed(vLcc_try, vLss_try)
-                else:
-                    dR_sin_try = jnp.zeros_like(dR_try)
-                    dZ_cos_try = jnp.zeros_like(dR_try)
-                    dL_cos_try = jnp.zeros_like(dR_try)
-
-                state_try = _candidate_state_from_deltas(
-                    dR_value=dR_try,
-                    dR_sin_value=dR_sin_try,
-                    dZ_cos_value=dZ_cos_try,
-                    dZ_value=dZ_try,
-                    dL_cos_value=dL_cos_try,
-                    dL_value=dL_try,
+                state_try = _candidate_state_from_delta_tuple(
+                    _delta_tuple_from_blocks(
+                        dt_try,
+                        _internal_delta_transforms,
+                        vRcc_try,
+                        vRss_try,
+                        vRsc_try,
+                        vRcs_try,
+                        vZsc_try,
+                        vZcs_try,
+                        vZcc_try,
+                        vZss_try,
+                        vLsc_try,
+                        vLcs_try,
+                        vLcc_try,
+                        vLss_try,
+                    ),
                     use_numpy_arrays=False,
                     use_numpy_enforce=False,
                 )
