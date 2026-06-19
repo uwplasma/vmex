@@ -2004,58 +2004,33 @@ def solve_fixed_boundary_residual_iter(
                 )
                 return float(np.asarray(fsqr_t + fsqz_t + fsql_t))
 
-            def _candidate_state_from_deltas(
-                *,
-                dR_value,
-                dR_sin_value,
-                dZ_cos_value,
-                dZ_value,
-                dL_cos_value,
-                dL_value,
-                use_numpy_arrays: bool,
-                use_numpy_enforce: bool,
-            ) -> VMECState:
-                return _candidate_state_from_deltas_helper(
-                    state=state,
-                    static=static,
-                    dR_value=dR_value,
-                    dR_sin_value=dR_sin_value,
-                    dZ_cos_value=dZ_cos_value,
-                    dZ_value=dZ_value,
-                    dL_cos_value=dL_cos_value,
-                    dL_value=dL_value,
-                    use_numpy_arrays=use_numpy_arrays,
-                    use_numpy_enforce=use_numpy_enforce,
-                    edge_Rcos=edge_Rcos,
-                    edge_Rsin=edge_Rsin,
-                    edge_Zcos=edge_Zcos,
-                    edge_Zsin=edge_Zsin,
-                    free_boundary_enabled=bool(free_boundary_enabled),
-                    idx00=idx00,
-                    precomputed_axis_mask=_precomputed_axis_mask_np,
-                    enforce_fixed_boundary_and_axis=_enforce_fixed_boundary_and_axis,
-                    enforce_fixed_boundary_and_axis_np=_enforce_fixed_boundary_and_axis_np,
-                    apply_vmec_lambda_axis_rules=_apply_vmec_lambda_axis_rules,
-                )
-
-            def _delta_tuple_from_blocks(dt, transforms, *blocks, use_numpy_lasym_zeros: bool = False):
-                return _delta_tuple_from_blocks_helper(
-                    dt,
-                    transforms,
-                    *blocks,
-                    lasym=bool(cfg.lasym),
-                    zeros_dR_np=_zeros_dR_np,
-                    use_numpy_lasym_zeros=use_numpy_lasym_zeros,
-                )
-
-            def _candidate_state_from_delta_tuple(deltas, *, scale: float = 1.0, use_numpy_arrays: bool = False, use_numpy_enforce: bool = False) -> VMECState:
-                return _candidate_state_from_delta_tuple_helper(
-                    deltas,
-                    scale=scale,
-                    use_numpy_arrays=use_numpy_arrays,
-                    use_numpy_enforce=use_numpy_enforce,
-                    candidate_from_deltas=_candidate_state_from_deltas,
-                )
+            _candidate_state_from_deltas = partial(
+                _candidate_state_from_deltas_helper,
+                state=state,
+                static=static,
+                edge_Rcos=edge_Rcos,
+                edge_Rsin=edge_Rsin,
+                edge_Zcos=edge_Zcos,
+                edge_Zsin=edge_Zsin,
+                free_boundary_enabled=bool(free_boundary_enabled),
+                idx00=idx00,
+                precomputed_axis_mask=_precomputed_axis_mask_np,
+                enforce_fixed_boundary_and_axis=_enforce_fixed_boundary_and_axis,
+                enforce_fixed_boundary_and_axis_np=_enforce_fixed_boundary_and_axis_np,
+                apply_vmec_lambda_axis_rules=_apply_vmec_lambda_axis_rules,
+            )
+            _delta_tuple_from_blocks = partial(
+                _delta_tuple_from_blocks_helper,
+                lasym=bool(cfg.lasym),
+                zeros_dR_np=_zeros_dR_np,
+            )
+            _candidate_state_from_delta_tuple = partial(
+                _candidate_state_from_delta_tuple_helper,
+                scale=1.0,
+                use_numpy_arrays=False,
+                use_numpy_enforce=False,
+                candidate_from_deltas=_candidate_state_from_deltas,
+            )
 
             constraint_rcon0_current = None
             constraint_zcon0_current = None
