@@ -220,6 +220,95 @@ def _direct_nestor_step(run, params: CoilFieldParams, *, ivac: int = 1, ivacskip
     )
 
 
+def _synthetic_direct_coil_trace(
+    z: np.ndarray,
+    *,
+    dt_eff: float = 0.5,
+    bsqvac_scale: float = 1.0,
+    axis_offset: float | None = None,
+    **updates,
+) -> dict:
+    nestor_trace = {"gsource": np.ones(2), "bsqvac": np.ones(2)}
+    if axis_offset is not None:
+        nestor_trace |= {
+            "br_axis": np.ones((2, 3)) + axis_offset,
+            "bp_axis": np.ones((2, 3)) * 2.0 + axis_offset,
+            "bz_axis": np.ones((2, 3)) * 3.0 + axis_offset,
+    }
+    trace = {
+        "dt_eff": np.asarray(dt_eff),
+        "b1": np.asarray(0.125), "fac": np.asarray(0.9),
+        "force_scale": np.asarray(1.0), "max_update_rms_pre": np.asarray(0.25),
+        "lambda_update_scale": np.asarray([1.0, 0.5]),
+        "limit_update_rms": np.asarray(1.0),
+        "flip_sign": False, "divide_by_scalxc_for_update": True,
+        "preconditioner_use_precomputed_tridi": False, "preconditioner_use_lax_tridi": True,
+        "precond_jmax": 2,
+        "precond_mats": {"ar": z + 6.0, "br": z + 7.0},
+        "lam_prec": np.asarray([1.0, 2.0, 3.0]),
+        "w_mode_mn": np.ones((2, 3)),
+        "vRcc_before": z, "vRss_before": z + 1.0,
+        "vZsc_before": z + 2.0, "vZcs_before": z + 3.0,
+        "vLsc_before": z + 4.0, "vLcs_before": z + 5.0,
+        "freeb_bsqvac_half": np.ones((2, 3)) * bsqvac_scale,
+        "freeb_nestor_trace": nestor_trace,
+        "state_pre": np.ones(4), "state_post": np.ones(4) * 2.0,
+    }
+    trace.update(updates)
+    return trace
+
+
+def _synthetic_same_branch_replay_report(trace0: dict, trace1: dict) -> dict:
+    from vmec_jax.free_boundary_adjoint import (
+        direct_coil_accepted_trace_fingerprint,
+        free_boundary_adjoint_trace_replay_diagnostics,
+    )
+
+    traces = [trace0, trace1]
+    fingerprint = direct_coil_accepted_trace_fingerprint(traces)
+    return {
+        "branch_compatibility": {
+            "same_branch": True,
+            "same_accepted_trace_branch": True,
+            "same_residual_branch": True,
+            "base_fingerprint": fingerprint,
+            "plus_fingerprint": fingerprint,
+            "minus_fingerprint": fingerprint,
+        },
+        "trace_replay_diagnostics": {
+            label: free_boundary_adjoint_trace_replay_diagnostics(traces)
+            for label in ("base", "plus", "minus")
+        },
+    }
+
+
+def _synthetic_physical_scalar_inputs(synthetic_report: dict, branch_metadata: dict, trace0: dict, trace1: dict) -> tuple[dict, dict]:
+    physical_report = deepcopy(synthetic_report)
+    physical_report.update({label: {"traces": (trace0, trace1)} for label in ("base", "plus", "minus")})
+    physical_report["objective_values"] = {
+        "aspect": {"base": 5.0, "plus": 5.01, "minus": 4.99, "central_fd_directional": 100.0},
+        "accepted_bnormal_rms": {
+            "base": 0.2, "plus": 0.21, "minus": 0.19, "central_fd_directional": 100.0,
+        },
+    }
+    scalar_report = {
+        "passed": True, "same_branch": True, "uses_production_forward": True,
+        "differentiates_adaptive_controller": False, "differentiates_run_free_boundary": False,
+        "differentiates_fixed_accepted_branch": True,
+        "replay_option_flags": {"use_stacked_step_controls": True},
+        "replay_branch_metadata": branch_metadata,
+        "scalar_keys": ("aspect", "accepted_bnormal_rms"),
+        "scalar_reports": {
+            key: {
+                "passed": True, "same_branch": True, "exact_directional": 100.0,
+                "abs_error": 0.0, "rel_error": 0.0, "base_abs_delta": 1.0e-6,
+            }
+            for key in ("aspect", "accepted_bnormal_rms")
+        },
+    }
+    return physical_report, scalar_report
+
+
 @pytest.mark.py311_coverage_only
 def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatch: pytest.MonkeyPatch) -> None:
     from vmec_jax._compat import jax, jnp
@@ -248,43 +337,9 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatc
     )
 
     z = np.arange(6.0).reshape(2, 3)
-    trace0 = {
-        "dt_eff": np.asarray(0.5),
-        "b1": np.asarray(0.125),
-        "fac": np.asarray(0.9),
-        "force_scale": np.asarray(1.0),
-        "max_update_rms_pre": np.asarray(0.25),
-        "lambda_update_scale": np.asarray([1.0, 0.5]),
-        "limit_update_rms": np.asarray(1.0),
-        "flip_sign": False,
-        "divide_by_scalxc_for_update": True,
-        "preconditioner_use_precomputed_tridi": False,
-        "preconditioner_use_lax_tridi": True,
-        "precond_jmax": 2,
-        "precond_mats": {"ar": z + 6.0, "br": z + 7.0},
-        "lam_prec": np.asarray([1.0, 2.0, 3.0]),
-        "w_mode_mn": np.ones((2, 3)),
-        "vRcc_before": z,
-        "vRss_before": z + 1.0,
-        "vZsc_before": z + 2.0,
-        "vZcs_before": z + 3.0,
-        "vLsc_before": z + 4.0,
-        "vLcs_before": z + 5.0,
-        "freeb_bsqvac_half": np.ones((2, 3)),
-        "freeb_nestor_trace": {"gsource": np.ones(2), "bsqvac": np.ones(2)},
-        "state_pre": np.ones(4),
-        "state_post": np.ones(4) * 2.0,
-    }
-    trace1 = {
-        **trace0,
-        "dt_eff": np.asarray(0.25),
-        "freeb_bsqvac_half": np.ones((2, 3)) * 3.0,
-    }
-    trace2 = {
-        **trace0,
-        "dt_eff": np.asarray(0.125),
-        "freeb_bsqvac_half": np.ones((2, 3)) * 4.0,
-    }
+    trace0 = _synthetic_direct_coil_trace(z)
+    trace1 = _synthetic_direct_coil_trace(z, dt_eff=0.25, bsqvac_scale=3.0)
+    trace2 = _synthetic_direct_coil_trace(z, dt_eff=0.125, bsqvac_scale=4.0)
     scalar_controls = direct_coil_accepted_trace_scalar_controls_jax([trace0, trace1])
     assert np.allclose(np.asarray(scalar_controls["dt_eff"]), np.asarray([0.5, 0.25]))
     assert np.allclose(np.asarray(scalar_controls["lambda_update_scale"]), np.asarray([[1.0, 0.5], [1.0, 0.5]]))
@@ -357,15 +412,8 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatc
     assert np.asarray(optional_step_controls["force_state_pre"]["r"]).shape == (2, 2)
     np.testing.assert_allclose(np.asarray(optional_step_controls["freeb_pres_scale"][1]), np.asarray([3.0, 4.0]))
     np.testing.assert_allclose(np.asarray(optional_step_controls["constraint_rcon0"][0]), np.asarray([0.0, 1.0]))
-    axis_trace0 = deepcopy(trace0)
-    axis_trace1 = deepcopy(trace1)
-    for trace, offset in ((axis_trace0, 0.0), (axis_trace1, 10.0)):
-        trace["freeb_nestor_trace"] = {
-            **trace["freeb_nestor_trace"],
-            "br_axis": np.ones((2, 3)) + offset,
-            "bp_axis": np.ones((2, 3)) * 2.0 + offset,
-            "bz_axis": np.ones((2, 3)) * 3.0 + offset,
-        }
+    axis_trace0 = _synthetic_direct_coil_trace(z, axis_offset=0.0)
+    axis_trace1 = _synthetic_direct_coil_trace(z, dt_eff=0.25, bsqvac_scale=3.0, axis_offset=10.0)
     axis_controls = direct_coil_accepted_trace_step_controls_jax([axis_trace0, axis_trace1])
     assert np.asarray(axis_controls["freeb_nestor_axes"]["br_axis"]).shape == (2, 2, 3)
     np.testing.assert_allclose(np.asarray(axis_controls["freeb_nestor_axes"]["bz_axis"][1]), np.ones((2, 3)) * 13.0)
@@ -519,22 +567,7 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatc
     assert padded_json["masks"]["done"] == [False, True, True]
     with pytest.raises(RuntimeError, match="adjoint_trace=True"):
         free_boundary_adjoint_trace_replay_diagnostics({"diagnostics": {}})
-    synthetic_fingerprint = direct_coil_accepted_trace_fingerprint([trace0, trace1])
-    synthetic_report = {
-        "branch_compatibility": {
-            "same_branch": True,
-            "same_accepted_trace_branch": True,
-            "same_residual_branch": True,
-            "base_fingerprint": synthetic_fingerprint,
-            "plus_fingerprint": synthetic_fingerprint,
-            "minus_fingerprint": synthetic_fingerprint,
-        },
-        "trace_replay_diagnostics": {
-            "base": free_boundary_adjoint_trace_replay_diagnostics([trace0, trace1]),
-            "plus": free_boundary_adjoint_trace_replay_diagnostics([trace0, trace1]),
-            "minus": free_boundary_adjoint_trace_replay_diagnostics([trace0, trace1]),
-        },
-    }
+    synthetic_report = _synthetic_same_branch_replay_report(trace0, trace1)
     synthetic_gate = direct_coil_same_branch_replay_gate_report(synthetic_report)
     assert synthetic_gate["passed"], synthetic_gate
     json.dumps(direct_coil_same_branch_replay_gate_report(synthetic_report, json_safe=True), allow_nan=False)
@@ -596,48 +629,9 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatc
         _pytree_unstack_leading_axis_jax,
     )
 
-    physical_synthetic_report = deepcopy(synthetic_report)
-    physical_synthetic_report["base"] = {"traces": (trace0, trace1)}
-    physical_synthetic_report["plus"] = {"traces": (trace0, trace1)}
-    physical_synthetic_report["minus"] = {"traces": (trace0, trace1)}
-    physical_synthetic_report["objective_values"] = {
-        "aspect": {"base": 5.0, "plus": 5.01, "minus": 4.99, "central_fd_directional": 100.0},
-        "accepted_bnormal_rms": {
-            "base": 0.2,
-            "plus": 0.21,
-            "minus": 0.19,
-            "central_fd_directional": 100.0,
-        },
-    }
-    physical_scalars_report = {
-        "passed": True,
-        "same_branch": True,
-        "uses_production_forward": True,
-        "differentiates_adaptive_controller": False,
-        "differentiates_run_free_boundary": False,
-        "differentiates_fixed_accepted_branch": True,
-        "replay_option_flags": {"use_stacked_step_controls": True},
-        "replay_branch_metadata": branch_metadata,
-        "scalar_keys": ("aspect", "accepted_bnormal_rms"),
-        "scalar_reports": {
-            "aspect": {
-                "passed": True,
-                "same_branch": True,
-                "exact_directional": 100.0,
-                "abs_error": 0.0,
-                "rel_error": 0.0,
-                "base_abs_delta": 1.0e-6,
-            },
-            "accepted_bnormal_rms": {
-                "passed": True,
-                "same_branch": True,
-                "exact_directional": 100.0,
-                "abs_error": 0.0,
-                "rel_error": 0.0,
-                "base_abs_delta": 1.0e-6,
-            },
-        },
-    }
+    physical_synthetic_report, physical_scalars_report = _synthetic_physical_scalar_inputs(
+        synthetic_report, branch_metadata, trace0, trace1
+    )
     physical_gate = direct_coil_same_branch_physical_scalar_gate_report(
         physical_synthetic_report,
         physical_scalars_report,

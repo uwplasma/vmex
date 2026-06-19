@@ -20577,3 +20577,78 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.999999977%.
+
+## 2026-06-19 Synthetic Direct-Coil Trace Fixture Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Continued the source-health pass on the direct-coil free-boundary validation
+   file, targeting the largest remaining test function:
+   `test_direct_coil_trace_fingerprint_detects_control_branch_changes`.
+2. Added `_synthetic_direct_coil_trace` to remove the inline accepted-trace
+   dictionary and axis-trace mutation loop from the test body.
+3. Added `_synthetic_same_branch_replay_report` and
+   `_synthetic_physical_scalar_inputs` to centralize repeated synthetic replay
+   and physical-scalar report setup.
+4. Preserved the same branch-fingerprint, replay-diagnostics, physical-scalar,
+   adaptive seam, JSON-safety, and error-path assertions.
+
+Results obtained:
+
+- `tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+  changed by 98 insertions and 104 deletions, net `-6` lines.
+- The file decreased from 4816 to 4810 lines.
+- `test_direct_coil_trace_fingerprint_detects_control_branch_changes` decreased
+  from 897 to 802 lines.
+- The validation fixtures are now reusable for additional direct-coil branch
+  gates without growing the file as quickly.
+
+Tests and commands run:
+
+- `python -m ruff check tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+- `python -m compileall -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_trace_fingerprint_detects_control_branch_changes -q`
+- `git diff --check`
+
+Best next steps:
+
+1. Return to production-code reduction, prioritizing residual iteration,
+   `free_boundary.py`, and `discrete_adjoint.py`.
+2. In `free_boundary.py`, look for small safe seams around NESTOR diagnostics
+   and provider timing before touching the dense solve branches.
+3. Keep direct-coil validation helpers in this test file for now; moving them
+   to a shared test utility can be considered only if multiple files need them.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999450%.
+- Solver monolith reduction: 99.80%.
+- Free-boundary adjoint monolith reduction: 99.51%.
+- Driver workflow decomposition: 99.945%.
+- Residual iteration decomposition: 98.93%.
+- WOUT diagnostic/profile decomposition: 99.975%.
+- Bcovar/WOUT parity decomposition: 99.15%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.82%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.74%.
+- Fixed-boundary optimizer decomposition: 96.22%.
+- Plotting/WOUT visualization decomposition: 96.80%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.75%.
+- Discrete-adjoint replay decomposition: 96.62%.
+- Free-boundary validation-gate maintainability: 97.96%.
+- QI objective/staged-runner decomposition: 96.9%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.999999978%.
