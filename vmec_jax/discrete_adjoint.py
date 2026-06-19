@@ -970,6 +970,11 @@ def replay_residual_checkpoint_step(
     )
 
 
+def _carry_cotangents_with_zero_aux(final_cotangent, carry0):
+    zero_cotangent = lambda value: jax.tree_util.tree_map(lambda x: jnp.zeros_like(jnp.asarray(x)), value)
+    return (jnp.asarray(final_cotangent, dtype=jnp.asarray(carry0[0]).dtype), *(zero_cotangent(value) for value in carry0[1:]))
+
+
 def checkpoint_tape_state_vjp(
     *,
     tape: ResidualCheckpointTape,
@@ -991,11 +996,7 @@ def checkpoint_tape_state_vjp(
         and tape.step_trace_static_flags is not None
     ):
         carry0 = tape.dynamic_initial_carry
-        zero_cotangent = lambda value: jax.tree_util.tree_map(lambda x: jnp.zeros_like(jnp.asarray(x)), value)
-        final_carry_cotangents = (
-            jnp.asarray(final_cotangent, dtype=jnp.asarray(carry0[0]).dtype),
-            *(zero_cotangent(value) for value in carry0[1:]),
-        )
+        final_carry_cotangents = _carry_cotangents_with_zero_aux(final_cotangent, carry0)
         run_scan = _checkpoint_tape_dynamic_scan_runner(
             static=static,
             stacked=tape.stacked_step_traces,
@@ -1018,11 +1019,7 @@ def checkpoint_tape_state_vjp(
         and _dynamic_basepoint_payload_shapes_match(tape.stacked_step_traces, tape.dynamic_base_carries_stacked)
     ):
         carry0 = tape.dynamic_initial_carry
-        zero_cotangent = lambda value: jax.tree_util.tree_map(lambda x: jnp.zeros_like(jnp.asarray(x)), value)
-        final_carry_cotangents = (
-            jnp.asarray(final_cotangent, dtype=jnp.asarray(carry0[0]).dtype),
-            *(zero_cotangent(value) for value in carry0[1:]),
-        )
+        final_carry_cotangents = _carry_cotangents_with_zero_aux(final_cotangent, carry0)
         run_scan = _checkpoint_tape_dynamic_basepoint_vjp_scan_runner(
             static=static,
             stacked=tape.stacked_step_traces,

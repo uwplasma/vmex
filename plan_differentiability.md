@@ -19411,3 +19411,76 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.99999993%.
+
+## 2026-06-19 Discrete-Adjoint VJP Carry Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Reviewed the reverse replay side of `discrete_adjoint.py` after the JVP carry
+   cleanup.
+2. Extracted the repeated "final packed cotangent plus zero auxiliary
+   cotangents" construction into `_carry_cotangents_with_zero_aux`.
+3. Reused that helper in both whole-scan dynamic VJP replay and dynamic
+   basepoint VJP replay.
+
+Results obtained:
+
+- `vmec_jax/discrete_adjoint.py` changed by 7 insertions and 10 deletions, net
+  `-3` source lines.
+- File length dropped from 3491 to 3488 lines.
+- Forward and reverse replay now use symmetric helper ownership for zero
+  auxiliary carry construction.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/discrete_adjoint.py`
+- `python -m ruff check vmec_jax/discrete_adjoint.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_discrete_adjoint_chunking.py::test_state_vjp_basepoint_runner_receives_zero_aux_cotangents tests/test_discrete_adjoint_chunking.py::test_state_vjp_whole_scan_uses_linearized_dynamic_runner tests/test_discrete_adjoint_chunking.py::test_empty_tape_jvp_and_vjp_are_identity tests/test_discrete_adjoint_chunking.py::test_fallback_state_jvp_and_vjp_apply_linearized_step -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_discrete_adjoint_wave6_coverage.py::test_empty_tape_jvp_vjp_and_column_replay_are_identity tests/test_discrete_adjoint_wave6_coverage.py::test_state_jvp_and_vjp_replay_synthetic_linear_steps tests/test_discrete_adjoint_wave6_coverage.py::test_param_jvp_and_vjp_differentiate_synthetic_initial_guess -q`
+- `python tools/diagnostics/source_health.py --top 20`
+- `git diff --check`
+
+Best next steps:
+
+1. Move to a larger tranche in the fixed-boundary residual iterator, preferably
+   one that reuses existing update/result helper objects instead of introducing
+   new files.
+2. Continue avoiding driver refactors that merely hide wiring; only accept a
+   driver change if it simplifies a user-facing context or reduces duplicated
+   policy construction.
+3. Run a broader local gate after the next few tranches, but continue deferring
+   CI watching.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.99999934%.
+- Solver monolith reduction: 99.79%.
+- Free-boundary adjoint monolith reduction: 99.50%.
+- Driver workflow decomposition: 99.94%.
+- Residual iteration decomposition: 98.86%.
+- WOUT diagnostic/profile decomposition: 99.96%.
+- Bcovar/WOUT parity decomposition: 99.14%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.81%.
+- Tomnsps transform decomposition: 98.9%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.67%.
+- Fixed-boundary optimizer decomposition: 96.10%.
+- Plotting/WOUT visualization decomposition: 96.1%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.75%.
+- Discrete-adjoint replay decomposition: 96.58%.
+- Free-boundary validation-gate maintainability: 97.4%.
+- QI objective/staged-runner decomposition: 96.9%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.99999994%.
