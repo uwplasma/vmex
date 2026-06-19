@@ -2984,6 +2984,35 @@ def solve_fixed_boundary_residual_iter(
                         raise
                     return freeb_bsqvac_half_current
 
+            def _trial_residual_total(
+                candidate_state: VMECState,
+                freeb_bsqvac_half_trial,
+                *,
+                zero_m1_value,
+                timing_label: str | None = None,
+            ) -> float:
+                t_trial_force_start = time.perf_counter() if (timing_label and timing_detail_enabled) else None
+                _, _, gcr2_t, gcz2_t, gcl2_t, _, _, norms_t = _compute_forces_iter(
+                    candidate_state,
+                    include_edge=include_edge,
+                    zero_m1=zero_m1_value,
+                    freeb_bsqvac_half=freeb_bsqvac_half_trial,
+                    constraint_precond_diag=constraint_precond_diag,
+                    constraint_tcon=constraint_tcon_override,
+                    constraint_precond_active=constraint_precond_active,
+                    constraint_tcon_active=constraint_tcon_active,
+                    iter2=iter2,
+                )
+                if timing_label:
+                    _record_compute_force_timing(timing_label, t_trial_force_start, gcr2_t)
+                fsqr_t, fsqz_t, fsql_t = _residual_fsq_from_norms(
+                    norms_t,
+                    gcr2=gcr2_t,
+                    gcz2=gcz2_t,
+                    gcl2=gcl2_t,
+                )
+                return float(np.asarray(fsqr_t + fsqz_t + fsql_t))
+
             constraint_rcon0_current = None
             constraint_zcon0_current = None
             if (
@@ -3963,26 +3992,12 @@ def solve_fixed_boundary_residual_iter(
                         Lcos=jnp.asarray(state.Lcos) + sign * dL_cos_dir,
                         Lsin=jnp.asarray(state.Lsin) + sign * dL_dir,
                     )
-                    t_auto_flip_force_start = time.perf_counter() if timing_detail_enabled else None
-                    _, _, gcr2_t, gcz2_t, gcl2_t, _, _, norms_t = _compute_forces_iter(
+                    return _trial_residual_total(
                         st_try,
-                        include_edge=True,
-                        zero_m1=zero_m1,
-                        freeb_bsqvac_half=_freeb_bsqvac_half_for_trial_state(st_try),
-                        constraint_precond_diag=constraint_precond_diag,
-                        constraint_tcon=constraint_tcon_override,
-                        constraint_precond_active=constraint_precond_active,
-                        constraint_tcon_active=constraint_tcon_active,
-                        iter2=iter2,
+                        _freeb_bsqvac_half_for_trial_state(st_try),
+                        zero_m1_value=zero_m1,
+                        timing_label="auto_flip",
                     )
-                    _record_compute_force_timing("auto_flip", t_auto_flip_force_start, gcr2_t)
-                    fsqr_t, fsqz_t, fsql_t = _residual_fsq_from_norms(
-                        norms_t,
-                        gcr2=gcr2_t,
-                        gcz2=gcz2_t,
-                        gcl2=gcl2_t,
-                    )
-                    return float(np.asarray(fsqr_t + fsqz_t + fsql_t))
 
                 w_pos = _trial(+1.0)
                 w_neg = _trial(-1.0)
@@ -5289,46 +5304,19 @@ def solve_fixed_boundary_residual_iter(
             probe_bad_jacobian = False
             if need_trial_eval:
                 freeb_bsqvac_half_trial = _freeb_bsqvac_half_for_trial_state(state_try)
-                t_trial_force_start = time.perf_counter() if timing_detail_enabled else None
-                _, _, gcr2_t, gcz2_t, gcl2_t, _, _, norms_t = _compute_forces_iter(
+                w_try = _trial_residual_total(
                     state_try,
-                    include_edge=include_edge,
-                    zero_m1=zero_m1,
-                    freeb_bsqvac_half=freeb_bsqvac_half_trial,
-                    constraint_precond_diag=constraint_precond_diag,
-                    constraint_tcon=constraint_tcon_override,
-                    constraint_precond_active=constraint_precond_active,
-                    constraint_tcon_active=constraint_tcon_active,
-                    iter2=iter2,
+                    freeb_bsqvac_half_trial,
+                    zero_m1_value=zero_m1,
+                    timing_label="trial",
                 )
-                _record_compute_force_timing("trial", t_trial_force_start, gcr2_t)
-                fsqr_t, fsqz_t, fsql_t = _residual_fsq_from_norms(
-                    norms_t,
-                    gcr2=gcr2_t,
-                    gcz2=gcz2_t,
-                    gcl2=gcl2_t,
-                )
-                w_try = float(np.asarray(fsqr_t + fsqz_t + fsql_t))
                 w_try_ratio = w_try / max(w_curr, 1e-30) if np.isfinite(w_try) else float("inf")
                 if bool(reference_mode) and (float(np.asarray(zero_m1)) > 0.5):
-                    _, _, gcr2_probe, gcz2_probe, gcl2_probe, _, _, norms_probe = _compute_forces_iter(
+                    w_probe = _trial_residual_total(
                         state_try,
-                        include_edge=include_edge,
-                        zero_m1=jnp.asarray(0.0, dtype=zero_m1.dtype),
-                        freeb_bsqvac_half=freeb_bsqvac_half_trial,
-                        constraint_precond_diag=constraint_precond_diag,
-                        constraint_tcon=constraint_tcon_override,
-                        constraint_precond_active=constraint_precond_active,
-                        constraint_tcon_active=constraint_tcon_active,
-                        iter2=iter2,
+                        freeb_bsqvac_half_trial,
+                        zero_m1_value=jnp.asarray(0.0, dtype=zero_m1.dtype),
                     )
-                    fsqr_probe, fsqz_probe, fsql_probe = _residual_fsq_from_norms(
-                        norms_probe,
-                        gcr2=gcr2_probe,
-                        gcz2=gcz2_probe,
-                        gcl2=gcl2_probe,
-                    )
-                    w_probe = float(np.asarray(fsqr_probe + fsqz_probe + fsql_probe))
                     if (not np.isfinite(w_probe)) or (w_probe > 1.0e2 * max(w_curr, 1e-30)):
                         probe_bad_jacobian = True
                         w_try = float("inf")
@@ -5383,26 +5371,12 @@ def solve_fixed_boundary_residual_iter(
                     )
                     state_try = _apply_vmec_lambda_axis_rules(state_try)
                     freeb_bsqvac_half_trial = _freeb_bsqvac_half_for_trial_state(state_try)
-                    t_trial_force_start = time.perf_counter() if timing_detail_enabled else None
-                    _, _, gcr2_t, gcz2_t, gcl2_t, _, _, norms_t = _compute_forces_iter(
+                    w_try = _trial_residual_total(
                         state_try,
-                        include_edge=include_edge,
-                        zero_m1=zero_m1,
-                        freeb_bsqvac_half=freeb_bsqvac_half_trial,
-                        constraint_precond_diag=constraint_precond_diag,
-                        constraint_tcon=constraint_tcon_override,
-                        constraint_precond_active=constraint_precond_active,
-                        constraint_tcon_active=constraint_tcon_active,
-                        iter2=iter2,
+                        freeb_bsqvac_half_trial,
+                        zero_m1_value=zero_m1,
+                        timing_label="trial",
                     )
-                    _record_compute_force_timing("trial", t_trial_force_start, gcr2_t)
-                    fsqr_t, fsqz_t, fsql_t = _residual_fsq_from_norms(
-                        norms_t,
-                        gcr2=gcr2_t,
-                        gcz2=gcz2_t,
-                        gcl2=gcl2_t,
-                    )
-                    w_try = float(np.asarray(fsqr_t + fsqz_t + fsql_t))
                     w_try_ratio = w_try / max(w_curr, 1e-30) if np.isfinite(w_try) else float("inf")
                     if np.isfinite(w_try) and (w_try <= accept_ratio * max(w_curr, 1e-30)):
                         # Keep momentum consistent with the smaller step.
@@ -5480,24 +5454,11 @@ def solve_fixed_boundary_residual_iter(
                     )
                     state_dir = _apply_vmec_lambda_axis_rules(state_dir)
                     freeb_bsqvac_half_dir = _freeb_bsqvac_half_for_trial_state(state_dir)
-                    _, _, gcr2_d, gcz2_d, gcl2_d, _, _, norms_d = _compute_forces_iter(
+                    w_dir = _trial_residual_total(
                         state_dir,
-                        include_edge=include_edge,
-                        zero_m1=zero_m1,
-                        freeb_bsqvac_half=freeb_bsqvac_half_dir,
-                        constraint_precond_diag=constraint_precond_diag,
-                        constraint_tcon=constraint_tcon_override,
-                        constraint_precond_active=constraint_precond_active,
-                        constraint_tcon_active=constraint_tcon_active,
-                        iter2=iter2,
+                        freeb_bsqvac_half_dir,
+                        zero_m1_value=zero_m1,
                     )
-                    fsqr_d, fsqz_d, fsql_d = _residual_fsq_from_norms(
-                        norms_d,
-                        gcr2=gcr2_d,
-                        gcz2=gcz2_d,
-                        gcl2=gcl2_d,
-                    )
-                    w_dir = float(np.asarray(fsqr_d + fsqz_d + fsql_d))
                     if np.isfinite(w_dir) and (w_dir <= 1.5 * max(w_curr, 1e-30)):
                         state = state_dir
                         (
@@ -5725,26 +5686,12 @@ def solve_fixed_boundary_residual_iter(
                 )
                 state_try = _apply_vmec_lambda_axis_rules(state_try)
                 freeb_bsqvac_half_trial = _freeb_bsqvac_half_for_trial_state(state_try)
-                t_backtracking_force_start = time.perf_counter() if timing_detail_enabled else None
-                _, _, gcr2_t, gcz2_t, gcl2_t, _, _, norms_t = _compute_forces_iter(
+                w_try = _trial_residual_total(
                     state_try,
-                    include_edge=include_edge,
-                    zero_m1=zero_m1,
-                    freeb_bsqvac_half=freeb_bsqvac_half_trial,
-                    constraint_precond_diag=constraint_precond_diag,
-                    constraint_tcon=constraint_tcon_override,
-                    constraint_precond_active=constraint_precond_active,
-                    constraint_tcon_active=constraint_tcon_active,
-                    iter2=iter2,
+                    freeb_bsqvac_half_trial,
+                    zero_m1_value=zero_m1,
+                    timing_label="backtracking",
                 )
-                _record_compute_force_timing("backtracking", t_backtracking_force_start, gcr2_t)
-                fsqr_t, fsqz_t, fsql_t = _residual_fsq_from_norms(
-                    norms_t,
-                    gcr2=gcr2_t,
-                    gcz2=gcz2_t,
-                    gcl2=gcl2_t,
-                )
-                w_try = float(np.asarray(fsqr_t + fsqz_t + fsql_t))
                 if np.isfinite(w_try) and (w_try <= 1.05 * w_curr):
                     accepted = True
                     step_status = "momentum"

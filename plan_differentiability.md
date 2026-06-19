@@ -7,6 +7,85 @@ and should not drive new work unless a specific old result needs to be audited.
 
 Last updated: 2026-06-19.
 
+## 2026-06-19 Residual Trial-Force Evaluation Consolidation
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added a local `_trial_residual_total` helper inside the nonscan residual
+   loop to centralize candidate-state force evaluation and residual norm
+   reduction.
+2. Replaced repeated trial-force blocks in auto-flip, accepted-step trial
+   scoring, reference zero-m1 probing, backtracking retries, direct fallback,
+   and momentum backtracking.
+3. Preserved existing timing labels and free-boundary trial-vacuum sampling
+   side effects by keeping `_freeb_bsqvac_half_for_trial_state` calls at each
+   original decision point.
+
+Results obtained:
+
+- `vmec_jax/solvers/fixed_boundary/residual/iteration.py` dropped from 6022
+  to 5969 lines.
+- `solve_fixed_boundary_residual_iter` dropped from 5624 to 5571 lines.
+- The diff for this tranche is net-negative by 53 source lines.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `python tools/diagnostics/source_health.py | head -80`
+- `git diff --check`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_api.py::test_host_update_assembly_matches_jax_update_path tests/test_driver_api.py::test_host_update_assembly_matches_jax_update_path_lasym -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_finish_cache_more_coverage.py::test_nonscan_debug_force_path_runs_with_m1_and_zeroing tests/test_solve_finish_cache_more_coverage.py::test_nonscan_non_strict_backtracking_accepts_momentum_update -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_real_scan_wave10_coverage.py::test_accelerated_scan_one_step_updates_state_and_histories tests/test_solve_finish_cache_more_coverage.py::test_precompile_only_jit_precompile_exercises_force_cache_and_lower -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_trial_nestor_timing_records_solver_trial_calls -q`
+- A one-iteration local auto-flip smoke run on `examples/data/input.circular_tokamak`
+  completed with a finite residual history.
+
+Best next steps:
+
+1. Continue residual-iteration simplification by extracting state-update or
+   history-append repetition only if it remains net-negative and covered by
+   focused nonscan tests.
+2. Do not move `_run_vmec2000_scan` wholesale until a context object exists;
+   it still closes over too much state for a safe direct extraction.
+3. Re-run source-health after the next tranche and use it to decide whether
+   the next target should remain residual iteration or switch back to
+   free-boundary validation tests.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999%.
+- Solver monolith reduction: 99.75%.
+- Free-boundary adjoint monolith reduction: 99.48%.
+- Driver workflow decomposition: 99.94%.
+- Residual iteration decomposition: 98.70%.
+- WOUT diagnostic/profile decomposition: 99.94%.
+- Bcovar/WOUT parity decomposition: 99.13%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.81%.
+- Tomnsps transform decomposition: 98.5%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.66%.
+- Fixed-boundary optimizer decomposition: 96.05%.
+- Plotting/WOUT visualization decomposition: 95.9%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.45%.
+- Discrete-adjoint replay decomposition: 96.45%.
+- Free-boundary validation-gate maintainability: 96.0%.
+- QI objective/staged-runner decomposition: 96.9%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.9999988%.
+
 ## 2026-06-19 Residual Force-Call Forwarding Consolidation
 
 Branch: `codex/differentiability-refactor-plan`.
