@@ -1045,6 +1045,49 @@ def test_root_fixed_boundary_solve_diagnostic_runs_without_plots(tmp_path):
     assert Path(rows[0]["mout"]).exists()
 
 
+def test_root_fixed_boundary_solve_diagnostic_writes_nonblank_plots(tmp_path):
+    image = pytest.importorskip("matplotlib.image")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "examples/mirror_fixed_boundary_solve_diagnostic.py",
+            "--outdir",
+            str(tmp_path / "solve_diagnostic_plots"),
+            "--ns-array",
+            "7",
+            "--nxi",
+            "13",
+            "--maxiter",
+            "2",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    rows = json.loads(Path(completed.stdout.strip()).read_text())
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["ns"] == 7
+    assert row["nxi"] == 13
+    assert row["optimizer"] == "lbfgs"
+    assert row["optimizer_nit"] <= 2
+    assert row["optimizer_accepted"] is True
+    assert row["final_fsq"] >= 0.0
+    assert row["final_normalized_force"] >= 0.0
+    output = load_mirror_output(row["mout"])
+    assert output.diagnostics.min_sqrtg > 0.0
+    figure_dir = Path(row["mout"]).parent / "figures"
+    for name in [
+        "fixed_boundary_solve_ns7_nxi13_mirror_boundary_3d.png",
+        "fixed_boundary_solve_ns7_nxi13_mirror_cross_sections.png",
+        "fixed_boundary_solve_ns7_nxi13_mirror_bfield_boundary.png",
+        "fixed_boundary_solve_ns7_nxi13_mirror_residual_history.png",
+        "fixed_boundary_solve_ns7_nxi13_mirror_boozer_like_diagnostics.png",
+    ]:
+        _assert_nonblank_image(figure_dir / name, image)
+
+
 def test_root_fixed_boundary_solve_diagnostic_residual_newton_reports_krylov_fields(tmp_path):
     completed = subprocess.run(
         [

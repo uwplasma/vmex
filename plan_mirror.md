@@ -22832,3 +22832,101 @@ Results:
 ### User input needed
 
 No user input is needed.
+
+---
+## 190. Fixed-Boundary Solve Diagnostic Plot Coverage
+
+### Steps taken
+
+- Audited `examples/mirror_fixed_boundary_solve_diagnostic.py`, which is the
+  documented fixed-boundary diagnostic runner for the requested `ns_array`,
+  `maxiter`, `ftol`, and cross-section plotting lane.
+- Ran a plotted probe at the existing small CI settings: `ns=7`, `nxi=13`, and
+  `maxiter=2`.
+- Confirmed the JSON row records the MOUT path and solver diagnostics while the
+  standard mirror plot bundle is written beside that MOUT under a `figures/`
+  directory.
+- Added a plotted smoke test that verifies the JSON contract, reloads the MOUT,
+  and checks representative nonblank 3D, cross-section, field-direction,
+  residual-history, and mirror-Boozer-like figures.
+
+### Results obtained
+
+- The fixed-boundary solve diagnostic example now has automated coverage for
+  the plot bundle users inspect when diagnosing convergence and geometry.
+- The test verifies positive Jacobian diagnostics from the reloaded MOUT and
+  nonnegative `fsq`/normalized-force reporting from the JSON row.
+- This strengthens the fixed-boundary axisymmetric solve, field/residual
+  diagnostic, and plotting lanes without changing solver behavior or tracking
+  generated images.
+
+### How it was tested
+
+Commands run:
+
+```bash
+JAX_ENABLE_X64=1 python examples/mirror_fixed_boundary_solve_diagnostic.py \
+  --outdir /tmp/mirror_fixed_boundary_solve_plot_probe \
+  --ns-array 7 \
+  --nxi 13 \
+  --maxiter 2
+JAX_ENABLE_X64=1 pytest \
+  tests/mirror/test_mirror_examples.py::test_root_fixed_boundary_solve_diagnostic_runs_without_plots \
+  tests/mirror/test_mirror_examples.py::test_root_fixed_boundary_solve_diagnostic_writes_nonblank_plots \
+  tests/mirror/test_mirror_examples.py::test_root_fixed_boundary_solve_diagnostic_residual_newton_reports_krylov_fields -q
+python -m ruff check tests/mirror/test_mirror_examples.py
+python -m ruff format --check tests/mirror/test_mirror_examples.py
+JAX_ENABLE_X64=1 pytest tests/mirror -q
+```
+
+Results:
+
+- The temporary probe wrote one diagnostic JSON row, one MOUT file, and eleven
+  standard mirror PNGs; inspected PNGs were nonblank.
+- Focused fixed-boundary diagnostic tests passed: `3 passed in 9.69s`.
+- Ruff check and format check passed.
+- Full mirror suite passed: `238 passed, 1 skipped in 250.30s`.
+
+### File structure and best-practice notes
+
+- The new coverage stays in `tests/mirror/test_mirror_examples.py`, next to the
+  existing fixed-boundary diagnostic root-example tests.
+- The test infers the figure directory from the JSON `mout` path because the
+  example intentionally keeps the JSON row compact.
+- Plot generation remains in `plot_mirror_output`; no example-specific image
+  assertions or committed binary artifacts were added.
+- Generated probe and pytest outputs stay under `/tmp` or pytest temporary
+  directories.
+
+### Best next steps
+
+1. Commit and push M190.
+2. Update the draft PR body with section 190 and the `238 passed, 1 skipped`
+   full mirror-suite result.
+3. Inspect only failed CI jobs after the push.
+4. Continue the final audit with docs/readiness synchronization and remaining
+   differentiability, toroidal-hybrid, and ESSOS/free-boundary percentages.
+
+### Completion percentages after M190
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `95%`.
+- Fixed-boundary axisymmetric solve: `96%`.
+- Residual Newton / preconditioning: `96%`.
+- Two-coil and manufactured validation: `95%`.
+- Finite-current pitch validation: `94%`.
+- Plotting and `vmec --plot` mirror support: `99%`.
+- I/O schema and docs: `100%`.
+- Differentiable solved-state API: `96%`.
+- Mirror-Boozer-like diagnostics: `94%`.
+- Free-boundary mirror lane: `99%` overall, with reduced residual-vector
+  nonlinear solve scope complete and benchmark plots covered.
+- Straight-axis hybrid support fixture lane: `100%` for support-fixture scope.
+- Toroidal stellarator-mirror hybrid lane: `96%`.
+- ESSOS circular-coil mirror beta scan: `97%`.
+- Public API/source simplification: `100%` for the mirror package initializer.
+- PR merge readiness overall: `99%`.
+
+### User input needed
+
+No user input is needed.
