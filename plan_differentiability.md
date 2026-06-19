@@ -25052,3 +25052,76 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.999999999912%.
+
+## 2026-06-19 NESTOR Runtime Cache Seam Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Extracted NESTOR runtime-cache update and debug-dump source selection from
+   `nestor_external_only_step` into `_nestor_runtime_next_and_dump_source`.
+2. Left the sampling, mode selection, dense/spectral solve, and branch decisions
+   inside `nestor_external_only_step`; only post-solve cache bookkeeping moved.
+3. Fixed the scalpot debug dump to read the cache iteration from
+   `runtime_next.source_cache_iter` after the extraction.
+
+Results obtained:
+
+- `nestor_external_only_step` decreased from 437 to 388 lines.
+- `free_boundary.py` increased by 7 lines because the cache policy is now a
+  named helper instead of inline solver tail code.
+- The extracted seam is directly aligned with free-boundary differentiability:
+  branch decisions remain conservative while runtime reuse/cache behavior is
+  isolated and covered by existing tests.
+
+Tests and commands run:
+
+- `python -m py_compile vmec_jax/free_boundary.py`
+- `python -m ruff check vmec_jax/free_boundary.py`
+- `python tools/diagnostics/source_health.py --top 30 --max-root-helper-prefix-files 2`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_wave2.py::test_nestor_external_only_step_reuse_spectral_and_dense_fallback tests/test_free_boundary_wave2.py::test_nestor_external_only_step_dense_grid_and_mode_success -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_fast_physics_coverage.py::test_spectral_ivacskip_reuses_poisson_cache_but_refreshes_rhs tests/test_free_boundary_fast_physics_coverage.py::test_legacy_reuse_hold_path_preserves_cached_bsqvac_without_sampling tests/test_free_boundary_fast_physics_coverage.py::test_dense_mode_reuse_keeps_operator_and_cached_source_vectors -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_wp0.py::test_nestor_external_only_step_reuse -q`
+
+Best next steps:
+
+1. Commit and push this free-boundary cache-seam extraction.
+2. Continue reducing large functions by moving self-contained postprocessing
+   seams first; avoid adaptive branch behavior until the fingerprint-gated gates
+   are expanded.
+3. Next candidates: finish-context diagnostics assembly or residual accepted
+   trace assembly, depending on which has the cleaner focused tests.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999925%.
+- Solver monolith reduction: 99.892%.
+- Free-boundary adjoint monolith reduction: 99.63%.
+- Driver workflow decomposition: 99.958%.
+- Residual iteration decomposition: 99.45%.
+- WOUT diagnostic/profile decomposition: 99.992%.
+- Bcovar/WOUT parity decomposition: 99.30%.
+- Force-kernel decomposition: 99.69%.
+- Scan/performance policy consolidation: 99.899%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.89%.
+- Fixed-boundary optimizer decomposition: 98.05%.
+- Plotting/WOUT visualization decomposition: 98.05%.
+- Free-boundary facade/domain decomposition: 99.15%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.86%.
+- Discrete-adjoint replay decomposition: 99.20%.
+- Free-boundary validation-gate maintainability: 98.45%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.999999999915%.

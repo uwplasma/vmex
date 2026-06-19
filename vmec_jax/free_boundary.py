@@ -1195,6 +1195,62 @@ def _nestor_step_diagnostics(ctx: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _nestor_runtime_next_and_dump_source(ctx: dict[str, Any]) -> tuple[NestorRuntimeState, np.ndarray]:
+    """Build the next NESTOR runtime cache and source array used by debug dumps."""
+
+    runtime = ctx["runtime"]
+    cache = ctx["cache"]
+    reuse_step = bool(ctx["reuse_step"])
+    provider_allows_source_reuse = bool(ctx["provider_allows_source_reuse"])
+    gsource_cached = ctx["runtime_gsource_cached"]
+    source_sym_cached = ctx["runtime_source_sym_cached"]
+    bvec_nonsing_cached = ctx["runtime_bvec_nonsing_cached"]
+    source_cache_iter = int(ctx["runtime_source_cache_iter"])
+    if isinstance(cache, NestorVmecLikeCache) and (cache.mode_basis is not None):
+        basis = cache.mode_basis
+        if (not reuse_step) or (not provider_allows_source_reuse) or (gsource_cached is None):
+            gsource_cached = np.asarray(ctx["gsource_vmec"], dtype=float)
+        if (not reuse_step) or (not provider_allows_source_reuse) or (source_sym_cached is None):
+            try:
+                source_sym_cached = _vmec_source_from_gsource(
+                    gsource=np.asarray(gsource_cached, dtype=float),
+                    basis=basis,
+                )
+            except Exception:
+                source_sym_cached = ctx["runtime_source_sym_cached"]
+        if (not reuse_step) or (not provider_allows_source_reuse) or (bvec_nonsing_cached is None):
+            if ctx["bvec_mode_nonsing"] is not None:
+                bvec_nonsing_cached = np.asarray(ctx["bvec_mode_nonsing"], dtype=float)
+            else:
+                try:
+                    bvec_nonsing_cached = _vmec_bvec_from_gsource(
+                        gsource=np.asarray(gsource_cached, dtype=float),
+                        basis=basis,
+                    )
+                except Exception:
+                    bvec_nonsing_cached = ctx["runtime_bvec_nonsing_cached"]
+        if (not reuse_step) and (ctx["iter_idx"] is not None):
+            source_cache_iter = int(ctx["iter_idx"])
+    runtime_next = NestorRuntimeState(
+        operator_cache=cache,
+        phi=np.asarray(ctx["phi"]),
+        bsqvac=np.asarray(ctx["bsqvac"]),
+        mode=ctx["used_mode"],
+        update_count=(0 if runtime is None else int(runtime.update_count)) + (0 if reuse_step else 1),
+        reuse_count=(0 if runtime is None else int(runtime.reuse_count)) + (1 if reuse_step else 0),
+        source_cache_iter=int(source_cache_iter),
+        gsource_cached=None if gsource_cached is None else np.asarray(gsource_cached, dtype=float),
+        source_sym_cached=None if source_sym_cached is None else np.asarray(source_sym_cached, dtype=float),
+        bvec_nonsing_cached=None if bvec_nonsing_cached is None else np.asarray(bvec_nonsing_cached, dtype=float),
+    )
+    gsource_dump = (
+        np.asarray(gsource_cached, dtype=float)
+        if (reuse_step and gsource_cached is not None)
+        else np.asarray(ctx["gsource_vmec"], dtype=float)
+    )
+    return runtime_next, gsource_dump
+
+
 def nestor_external_only_step(
     *,
     state: Any,
@@ -1550,56 +1606,7 @@ def nestor_external_only_step(
         diagnostics=diagnostics,
         trace_arrays=trace_arrays,
     )
-    source_sym_cached, bvec_nonsing_cached, gsource_cached, source_cache_iter = (
-        runtime_source_sym_cached,
-        runtime_bvec_nonsing_cached,
-        runtime_gsource_cached,
-        runtime_source_cache_iter,
-    )
-    if isinstance(cache, NestorVmecLikeCache) and (cache.mode_basis is not None):
-        basis = cache.mode_basis
-        if (not reuse_step) or (not provider_allows_source_reuse) or (gsource_cached is None):
-            gsource_cached = np.asarray(gsource_vmec, dtype=float)
-        if (not reuse_step) or (not provider_allows_source_reuse) or (source_sym_cached is None):
-            try:
-                source_sym_cached = _vmec_source_from_gsource(
-                    gsource=np.asarray(gsource_cached, dtype=float),
-                    basis=basis,
-                )
-            except Exception:
-                source_sym_cached = runtime_source_sym_cached
-        if (not reuse_step) or (not provider_allows_source_reuse) or (bvec_nonsing_cached is None):
-            if bvec_mode_nonsing is not None:
-                bvec_nonsing_cached = np.asarray(bvec_mode_nonsing, dtype=float)
-            else:
-                try:
-                    bvec_nonsing_cached = _vmec_bvec_from_gsource(
-                        gsource=np.asarray(gsource_cached, dtype=float),
-                        basis=basis,
-                    )
-                except Exception:
-                    bvec_nonsing_cached = runtime_bvec_nonsing_cached
-        if (not reuse_step) and (iter_idx is not None):
-            source_cache_iter = int(iter_idx)
-    runtime_next = NestorRuntimeState(
-        operator_cache=cache,
-        phi=np.asarray(phi),
-        bsqvac=np.asarray(bsqvac),
-        mode=used_mode,
-        update_count=(0 if runtime is None else int(runtime.update_count)) + (0 if reuse_step else 1),
-        reuse_count=(0 if runtime is None else int(runtime.reuse_count)) + (1 if reuse_step else 0),
-        source_cache_iter=int(source_cache_iter),
-        gsource_cached=None if gsource_cached is None else np.asarray(gsource_cached, dtype=float),
-        source_sym_cached=None if source_sym_cached is None else np.asarray(source_sym_cached, dtype=float),
-        bvec_nonsing_cached=None
-        if bvec_nonsing_cached is None
-        else np.asarray(bvec_nonsing_cached, dtype=float),
-    )
-    gsource_dump = (
-        np.asarray(gsource_cached, dtype=float)
-        if (reuse_step and gsource_cached is not None)
-        else np.asarray(gsource_vmec, dtype=float)
-    )
+    runtime_next, gsource_dump = _nestor_runtime_next_and_dump_source(locals())
     _maybe_dump_scalpot_jax(
         iter_idx=iter_idx,
         ivac=int(ivac),
@@ -1620,7 +1627,7 @@ def nestor_external_only_step(
         bvec_mode=None if bvec_mode is None else np.asarray(bvec_mode, dtype=float),
         bvec_mode_nonsing=None if bvec_mode_nonsing is None else np.asarray(bvec_mode_nonsing, dtype=float),
         bvec_mode_analytic=None if bvec_mode_analytic is None else np.asarray(bvec_mode_analytic, dtype=float),
-        source_cache_iter=int(source_cache_iter),
+        source_cache_iter=int(runtime_next.source_cache_iter),
         matrix_override_applied=bool(matrix_override_applied),
         amatrix_mode_pre=None if amatrix_mode_pre is None else np.asarray(amatrix_mode_pre, dtype=float),
         amatrix_mode_from_grpmn=None
