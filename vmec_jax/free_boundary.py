@@ -2916,6 +2916,73 @@ def _nestor_legacy_fast_reuse(
     )
 
 
+def _rms_float(arr: Any) -> float:
+    vals = np.asarray(arr, dtype=float)
+    return float(np.sqrt(np.mean(vals * vals))) if vals.size else 0.0
+
+
+def _nestor_step_diagnostics(ctx: dict[str, Any]) -> dict[str, Any]:
+    sample = ctx["sample"]
+    bsqvac = ctx["bsqvac"]
+    out = {
+        "provider_kind": ctx["provider_kind"],
+        "rhs_mode": str(ctx["rhs_mode"]),
+        "mode": str(ctx["used_mode"]),
+        "jax_nestor_operator_reason": str(ctx["jax_nestor_operator_reason"]),
+        "sample_points": int(ctx["ntheta"] * ctx["nzeta"]),
+        "bsqvac_mean": float(np.mean(np.asarray(bsqvac, dtype=float))) if np.asarray(bsqvac).size else 0.0,
+    }
+    for key in ("ntheta", "nzeta"):
+        out[f"sample_{key}"] = int(ctx[key])
+    for key in "provider_allows_source_reuse source_reused matrix_override_applied jax_nestor_operator_applied jax_nestor_operator_jitted jax_nestor_operator_cache_hit".split():
+        out[key] = bool(ctx[key])
+    out["reused"] = bool(ctx["reuse_step"])
+    for key in ("sample_time", "solve_time"):
+        out[f"{key}_s"] = float(ctx[key])
+    for key in "cache_build_time_s source_time_s bvec_time_s matrix_time_s linear_solve_time_s vacuum_channels_time_s jax_nestor_operator_time_s".split():
+        out[key] = float(ctx[key])
+    for key, value in (
+        ("br", sample.br),
+        ("bp", sample.bp),
+        ("bz", sample.bz),
+        ("bnormal", sample.vac_ext.bnormal),
+        ("bnormal_unit", sample.vac_ext.bnormal_unit),
+        ("rhs", ctx["rhs"]),
+        ("gsource", ctx["gsource_vmec"]),
+        ("bsqvac", bsqvac),
+        ("bvec_mode", ctx["bvec_mode"]),
+        ("bvec_mode_nonsing", ctx["bvec_mode_nonsing"]),
+        ("bvec_mode_analytic", ctx["bvec_mode_analytic"]),
+    ):
+        if value is not None:
+            out[f"{key}_rms"] = _rms_float(value)
+    provider_static = ctx["external_field_provider_static"]
+    provider_params = ctx["external_field_provider_params"]
+    if isinstance(provider_static, dict):
+        chunk_size = provider_static.get("chunk_size", getattr(provider_params, "chunk_size", None))
+        out.update({
+            "provider_coil_geometry_cached": bool("coil_geometry" in provider_static),
+            "provider_jit_sampler": bool(provider_static.get("jit_sampler", False)),
+            "provider_cache_scope": str(provider_static.get("cache_scope", "")),
+            "provider_regularization_epsilon": float(provider_static.get("regularization_epsilon", getattr(provider_params, "regularization_epsilon", 0.0))),
+            "provider_chunk_size": None if chunk_size is None else int(chunk_size),
+        })
+        geometry = provider_static.get("coil_geometry")
+        if isinstance(geometry, tuple) and len(geometry) >= 1:
+            shape = tuple(int(dim) for dim in getattr(geometry[0], "shape", ())[:2])
+            out.update(dict(zip(("provider_coil_count", "provider_segments_per_coil"), shape, strict=False)))
+    if isinstance(getattr(sample, "timing", None), dict):
+        for key, value in sample.timing.items():
+            try:
+                out[f"sample_{key}"] = float(value)
+            except Exception:
+                pass
+    cache = ctx["cache"]
+    if isinstance(cache, NestorVmecLikeCache):
+        out.update({"physical_matrix_lu_built": bool(cache.matrix_lu is not None), "mode_matrix_lu_built": bool(cache.mode_matrix_lu is not None)})
+    return out
+
+
 def nestor_external_only_step(
     *,
     state: Any,
@@ -3246,81 +3313,7 @@ def nestor_external_only_step(
     bsqvac = np.asarray(vac_total.bsqvac)
     solve_time = max(0.0, time.perf_counter() - ts)
 
-    def _rms(arr: Any) -> float:
-        vals = np.asarray(arr, dtype=float)
-        return float(np.sqrt(np.mean(vals * vals))) if vals.size else 0.0
-
-    diagnostics: dict[str, Any] = {
-        "provider_kind": provider_kind,
-        "provider_allows_source_reuse": bool(provider_allows_source_reuse),
-        "reused": bool(reuse_step),
-        "source_reused": bool(source_reused),
-        "rhs_mode": str(rhs_mode),
-        "mode": str(used_mode),
-        "sample_time_s": float(sample_time),
-        "solve_time_s": float(solve_time),
-        "cache_build_time_s": float(cache_build_time_s),
-        "source_time_s": float(source_time_s),
-        "bvec_time_s": float(bvec_time_s),
-        "matrix_time_s": float(matrix_time_s),
-        "linear_solve_time_s": float(linear_solve_time_s),
-        "vacuum_channels_time_s": float(vacuum_channels_time_s),
-        "matrix_override_applied": bool(matrix_override_applied),
-        "jax_nestor_operator_applied": bool(jax_nestor_operator_applied),
-        "jax_nestor_operator_reason": str(jax_nestor_operator_reason),
-        "jax_nestor_operator_time_s": float(jax_nestor_operator_time_s),
-        "jax_nestor_operator_jitted": bool(jax_nestor_operator_jitted),
-        "jax_nestor_operator_cache_hit": bool(jax_nestor_operator_cache_hit),
-        "sample_ntheta": int(ntheta),
-        "sample_nzeta": int(nzeta),
-        "sample_points": int(ntheta * nzeta),
-        "br_rms": _rms(sample.br),
-        "bp_rms": _rms(sample.bp),
-        "bz_rms": _rms(sample.bz),
-        "bnormal_rms": _rms(sample.vac_ext.bnormal),
-        "bnormal_unit_rms": _rms(sample.vac_ext.bnormal_unit),
-        "rhs_rms": _rms(rhs),
-        "gsource_rms": _rms(gsource_vmec),
-        "bsqvac_rms": _rms(bsqvac),
-        "bsqvac_mean": float(np.mean(np.asarray(bsqvac, dtype=float))) if np.asarray(bsqvac).size else 0.0,
-    }
-    if isinstance(external_field_provider_static, dict):
-        diagnostics["provider_coil_geometry_cached"] = bool("coil_geometry" in external_field_provider_static)
-        diagnostics["provider_jit_sampler"] = bool(external_field_provider_static.get("jit_sampler", False))
-        diagnostics["provider_cache_scope"] = str(external_field_provider_static.get("cache_scope", ""))
-        diagnostics["provider_regularization_epsilon"] = float(
-            external_field_provider_static.get(
-                "regularization_epsilon",
-                getattr(external_field_provider_params, "regularization_epsilon", 0.0),
-            )
-        )
-        chunk_size_diag = external_field_provider_static.get(
-            "chunk_size",
-            getattr(external_field_provider_params, "chunk_size", None),
-        )
-        diagnostics["provider_chunk_size"] = None if chunk_size_diag is None else int(chunk_size_diag)
-        geometry = external_field_provider_static.get("coil_geometry")
-        if isinstance(geometry, tuple) and len(geometry) >= 1:
-            shape = tuple(int(dim) for dim in getattr(geometry[0], "shape", ())[:2])
-            if len(shape) >= 1:
-                diagnostics["provider_coil_count"] = int(shape[0])
-            if len(shape) >= 2:
-                diagnostics["provider_segments_per_coil"] = int(shape[1])
-    if isinstance(getattr(sample, "timing", None), dict):
-        for key, value in sample.timing.items():
-            try:
-                diagnostics[f"sample_{key}"] = float(value)
-            except Exception:
-                pass
-    if bvec_mode is not None:
-        diagnostics["bvec_mode_rms"] = _rms(bvec_mode)
-    if bvec_mode_nonsing is not None:
-        diagnostics["bvec_mode_nonsing_rms"] = _rms(bvec_mode_nonsing)
-    if bvec_mode_analytic is not None:
-        diagnostics["bvec_mode_analytic_rms"] = _rms(bvec_mode_analytic)
-    if isinstance(cache, NestorVmecLikeCache):
-        diagnostics["physical_matrix_lu_built"] = bool(cache.matrix_lu is not None)
-        diagnostics["mode_matrix_lu_built"] = bool(cache.mode_matrix_lu is not None)
+    diagnostics = _nestor_step_diagnostics(locals())
 
     trace_arrays = None
     if bool(collect_trace_arrays):
