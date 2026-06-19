@@ -299,6 +299,7 @@ _preconditioner_apply_payload_jit = partial(
 )
 _accepted_control_payload_jit = partial(_precond_payload_facade._accepted_control_payload_jit, has_jax_func=has_jax)
 _preconditioner_apply_payload_fused = _precond_payload_facade._preconditioner_apply_payload_fused
+_split_preconditioner_apply_payload = _precond_payload_facade._split_preconditioner_apply_payload
 
 
 _ptau_compute_jit = _precond_payload_facade._ptau_compute_jit
@@ -2442,15 +2443,12 @@ def solve_fixed_boundary_residual_iter(
                         control_ptau_pshalf=_ptau_context.pshalf_jax,
                         control_ptau_ohs=_ptau_context.ohs_jax,
                     )
-                    if len(_precond_payload) == 4:
-                        (
-                            _precond_pre_blocks,
-                            _precond_update_blocks,
-                            _precond_diag,
-                            accepted_control_ptau_payload,
-                        ) = _precond_payload
-                    else:
-                        _precond_pre_blocks, _precond_update_blocks, _precond_diag = _precond_payload
+                    (
+                        _precond_pre_blocks,
+                        _precond_update_blocks,
+                        _precond_diag,
+                        accepted_control_ptau_payload,
+                    ) = _split_preconditioner_apply_payload(_precond_payload)
                     (
                         (frcc, frss, fzsc, fzcs, flsc, flcs, frsc, frcs, fzcc, fzss, flcc, flss),
                         (
@@ -2607,15 +2605,12 @@ def solve_fixed_boundary_residual_iter(
                         control_ptau_pshalf=_ptau_context.pshalf_jax,
                         control_ptau_ohs=_ptau_context.ohs_jax,
                     )
-                    if len(_precond_payload) == 4:
-                        (
-                            _precond_pre_blocks,
-                            _precond_update_blocks,
-                            _precond_diag,
-                            accepted_control_ptau_payload,
-                        ) = _precond_payload
-                    else:
-                        _precond_pre_blocks, _precond_update_blocks, _precond_diag = _precond_payload
+                    (
+                        _precond_pre_blocks,
+                        _precond_update_blocks,
+                        _precond_diag,
+                        accepted_control_ptau_payload,
+                    ) = _split_preconditioner_apply_payload(_precond_payload)
                     (
                         (frcc, frss, fzsc, fzcs, flsc, flcs, frsc, frcs, fzcc, fzss, flcc, flss),
                         (

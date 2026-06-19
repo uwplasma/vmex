@@ -196,6 +196,13 @@ def _preconditioner_apply_payload_fused(
     )
 
 
+def _split_preconditioner_apply_payload(payload):
+    if len(payload) == 4:
+        return payload
+    pre_blocks, update_blocks, diag = payload
+    return pre_blocks, update_blocks, diag, None
+
+
 def refresh_preconditioner_cache_runtime(
     *,
     k: Any,
