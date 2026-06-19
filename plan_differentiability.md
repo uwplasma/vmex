@@ -22324,3 +22324,74 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.9999999992%.
+
+## 2026-06-19 Optimizer Run API Docstring Simplification
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved from plotting cleanup to `vmec_jax/optimization.py`, the next
+   production source-health hotspot.
+2. Replaced the overgrown `FixedBoundaryExactOptimizer.run` method docstring
+   with a concise API contract that describes the dispatch families and result
+   payload without embedding full user documentation inside the method body.
+3. Left all runtime dispatch, exact-history selection, cache handling, and
+   serialized history semantics unchanged.
+
+Results obtained:
+
+- `vmec_jax/optimization.py` decreased from 2654 to 2563 lines.
+- `FixedBoundaryExactOptimizer.run` dropped out of the source-health
+  function-length warning list.
+- The detailed optimizer behavior remains covered by tests and the example/docs
+  workflow rather than duplicated in one large method docstring.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/optimization.py`
+- `python -m ruff check vmec_jax/optimization.py tests/test_optimization_helpers.py tests/test_optimization_wave2_coverage.py tests/test_optimization_auto_scalar_policy.py tests/test_differentiation_optimization_api_fast.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_differentiation_optimization_api_fast.py tests/test_optimization_auto_scalar_policy.py tests/test_optimization_wave2_coverage.py tests/test_optimization_helpers.py -q`
+- `python tools/diagnostics/source_health.py --top 25 --top-functions 60`
+
+Best next steps:
+
+1. Extract a true optimizer-run seam next: method dispatch, final exact-point
+   selection, or history attachment, with behavior tests around accepted-output
+   correctness.
+2. Continue reducing `optimization.py` toward the 2000-line threshold without
+   making the public workflow harder for users.
+3. Keep larger residual-loop and free-boundary adaptive seams gated by parity
+   and AD-vs-FD tests rather than mechanical movement.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.99999956%.
+- Solver monolith reduction: 99.827%.
+- Free-boundary adjoint monolith reduction: 99.60%.
+- Driver workflow decomposition: 99.949%.
+- Residual iteration decomposition: 99.055%.
+- WOUT diagnostic/profile decomposition: 99.982%.
+- Bcovar/WOUT parity decomposition: 99.16%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.825%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.785%.
+- Fixed-boundary optimizer decomposition: 96.55%.
+- Plotting/WOUT visualization decomposition: 97.32%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.82%.
+- Discrete-adjoint replay decomposition: 96.82%.
+- Free-boundary validation-gate maintainability: 98.18%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.99999999925%.

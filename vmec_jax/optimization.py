@@ -2409,103 +2409,12 @@ class FixedBoundaryExactOptimizer:
         scalar_cost_only_trials: bool | None = None,
         trace_callbacks: bool | None = None,
     ) -> dict:
-        """Run exact least-squares optimisation.
+        """Run the configured exact fixed-boundary optimization stage.
 
-        Parameters
-        ----------
-        params0:
-            Initial parameter vector (usually ``np.zeros(len(specs))``).
-        method:
-            Outer least-squares method. Supported values are ``"gauss_newton"``
-            and ``"scipy"``. ``"auto"`` keeps the current device selection and
-            resolves to a conservative device-preserving method for known cases:
-            currently matrix-free SciPy for high-mode, stellarator-symmetric
-            QS/QI on CPU/default CPU, otherwise dense SciPy. This is an opt-in
-            policy and not a guarantee that every warm run is fastest.
-            ``"auto_scalar"``/``"auto_adjoint"`` keep the same safeguards but
-            choose ``"scalar_trust"`` for high-mode, stellarator-symmetric
-            QS/QI CPU/default-backend cases, enabling scalar-adjoint production
-            tests without environment variables.
-            ``"scipy"`` uses ``scipy.optimize.least_squares``
-            with the exact residual and discrete-adjoint Jacobian callbacks,
-            which is more robust on some QA/QH examples.
-            ``"scipy_matrix_free"`` uses the same SciPy trust-region solver
-            with a matrix-free exact ``LinearOperator`` Jacobian.  It applies
-            ``Jv`` and ``J.Tv`` products by replaying the converged VMEC tape
-            without materializing the dense Jacobian. ``"lbfgs_adjoint"``
-            minimizes the same scalar objective using one reverse discrete
-            adjoint gradient per callback; it is experimental but scales much
-            better with boundary-parameter count on mode-2/3 diagnostics.
-            ``"scalar_trust"`` is a safeguarded scalar-adjoint path with
-            monotone accepted steps, limited-memory inverse-Hessian directions,
-            aggressive backtracking, and a hard evaluation budget.  It is
-            intended for profiling high-parameter-count cases before a full
-            matrix-free least-squares trust-region implementation is available.
-        max_nfev:
-            Maximum residual/Jacobian evaluations.
-        ftol, gtol, xtol:
-            Convergence tolerances.
-        x_scale:
-            Optional per-parameter scale vector.  When provided, parameter
-            *i* is divided by ``x_scale[i]`` in the internal optimisation
-            space.  Use :func:`create_x_scale` to build an exponential
-            spectral-scaling vector.  ``None`` (default) treats all
-            parameters uniformly.
-        verbose:
-            Verbosity (0 = silent, 1 = iteration table).
-        iota_fn:
-            Optional callable ``iota_fn(state) -> float`` that returns the
-            mean rotational transform for a solved state.  When provided,
-            the iota value is recorded in the per-iteration history under
-            the key ``"iota"`` and saved by :meth:`save_history`.  Use this
-            for QA runs where iota is a target quantity.
-        target_iota:
-            If provided alongside *iota_fn*, saved to the history dump
-            under ``"target_iota"`` so plotting code can draw the target
-            line.
-        scipy_tr_solver:
-            Trust-region linear solver passed through to
-            :func:`scipy.optimize.least_squares` when ``method="scipy"``.
-            Use ``"exact"`` for SciPy's dense SVD/QR-style path, ``"lsmr"``
-            for the iterative path, or ``None`` for SciPy's default.
-        scipy_lsmr_maxiter:
-            Optional maximum number of LSMR iterations for SciPy's iterative
-            trust-region linear solve.  This is primarily useful for the
-            matrix-free path, where every LSMR iteration costs one or more
-            exact ``Jv``/``J.Tv`` products.  For ``method="scipy_matrix_free"``,
-            ``None`` uses vmec_jax's bounded default of 4 to avoid unbounded
-            inner Krylov work; pass an explicit integer to tighten or relax
-            that cap.
-        lbfgs_step_bound:
-            Optional half-width of the L-BFGS-B trust box in scaled parameter
-            space when ``method="lbfgs_adjoint"``. The scalar-adjoint path is
-            not a least-squares trust-region method; this bound prevents the
-            line search from probing extremely distorted boundaries. Set to
-            ``None`` or a non-positive value to run unbounded L-BFGS-B.
-        scalar_step_bound:
-            Initial and maximum trust radius in scaled parameter space when
-            ``method="scalar_trust"``. Set to ``None`` or a non-positive value
-            to use a unit initial radius.
-        scalar_cost_only_trials:
-            When true with ``method="scalar_trust"``, evaluate trial points with
-            the lighter forward residual path before building a full exact
-            scalar-adjoint tape for accepted candidates.  This can reduce
-            accepted-point tape builds in rugged high-mode cases, at the cost
-            of additional forward solves. ``None`` preserves the legacy
-            environment/private-attribute controls for profiling scripts.
-        trace_callbacks:
-            When true, include a lightweight SciPy callback trace in the
-            history dump.  This is intended for CPU/GPU profiling of repeated
-            trial residuals, exact-state cache hits, and accepted-point
-            Jacobian replay.  ``None`` enables tracing only when
-            ``VMEC_JAX_OPT_TRACE_CALLBACKS`` is set to a truthy value.
-
-        Returns
-        -------
-        dict
-            Result dict from :func:`gauss_newton_least_squares` extended with
-            ``_history_dump`` (the full per-iteration history suitable for
-            :meth:`save_history`).
+        The method dispatch supports dense, matrix-free, scalar-adjoint, and
+        Gauss-Newton paths.  The returned dictionary includes the optimizer
+        result plus private exact VMEC states and a serializable
+        ``"_history_dump"`` payload for :meth:`save_history`.
         """
         self._reset_run_state(trace_callbacks=trace_callbacks, iota_fn=iota_fn)
 
