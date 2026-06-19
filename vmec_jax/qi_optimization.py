@@ -1521,6 +1521,42 @@ def engineering_promotion_score(record):
     )
 
 
+def _ctx_or_default(ctx: QIOptimizationContext | None, field: str, default):
+    try:
+        return _ctx(ctx, field)
+    except KeyError:
+        return default
+
+
+def _qi_safe_reference_limits(stage, reference_diagnostics, *, ctx: QIOptimizationContext | None = None) -> dict:
+    """Return QI-safe promotion limits relative to the current reference."""
+
+    reference_smooth = _finite_or_inf(reference_diagnostics.get("qi_smooth_total"))
+    reference_legacy = _finite_or_inf(reference_diagnostics.get("qi_legacy_total"))
+    reference_mirror = _finite_or_inf(reference_diagnostics.get("qi_mirror_ratio_max"))
+    reference_elongation = _finite_or_inf(reference_diagnostics.get("qi_max_elongation"))
+    reference_abs_iota = abs(_finite_or_inf(reference_diagnostics.get("mean_iota")))
+    return {
+        "reference_smooth": reference_smooth,
+        "reference_legacy": reference_legacy,
+        "reference_mirror": reference_mirror,
+        "reference_elongation": reference_elongation,
+        "reference_abs_iota": reference_abs_iota,
+        "smooth_limit": float(stage.get("qi_safe_smooth_relax", 1.0))
+        * max(float(stage.get("smooth_qi_max", _ctx_or_default(ctx, "qi_gate_smooth_max", reference_smooth))), reference_smooth),
+        "legacy_limit": float(stage.get("qi_safe_legacy_relax", 1.0))
+        * max(float(stage.get("legacy_qi_max", _ctx_or_default(ctx, "qi_gate_legacy_max", reference_legacy))), reference_legacy),
+        "mirror_limit": float(stage.get("qi_safe_mirror_relax", 1.0))
+        * max(float(stage.get("promotion_mirror_threshold", _ctx_or_default(ctx, "max_mirror_ratio", reference_mirror))), reference_mirror),
+        "elongation_limit": float(stage.get("qi_safe_elongation_relax", 1.0))
+        * max(float(stage.get("max_elongation", _ctx_or_default(ctx, "max_elongation", reference_elongation))), reference_elongation),
+        "min_abs_iota": min(
+            reference_abs_iota,
+            float(stage.get("target_abs_iota_min", _ctx_or_default(ctx, "target_abs_iota_min", reference_abs_iota))),
+        ),
+    }
+
+
 def stage_promotes_candidate(
     stage,
     promotion,
@@ -1532,49 +1568,19 @@ def stage_promotes_candidate(
 
     reasons = list(promotion.get("qi_cleanup_rejection_reasons", []))
     if bool(stage.get("accept_if_qi_safe_aspect_improves", False)) and reference_diagnostics is not None:
-        def ctx_or_default(field, default):
-            try:
-                return _ctx(ctx, field)
-            except KeyError:
-                return default
-
+        safe = _qi_safe_reference_limits(stage, reference_diagnostics, ctx=ctx)
         candidate_aspect_error = _finite_or_inf(promotion.get("aspect_relative_error"))
         reference_aspect_error = _finite_or_inf(reference_diagnostics.get("aspect_relative_error"))
         aspect_gain = reference_aspect_error - candidate_aspect_error
-        reference_smooth = _finite_or_inf(reference_diagnostics.get("qi_smooth_total"))
-        reference_legacy = _finite_or_inf(reference_diagnostics.get("qi_legacy_total"))
-        reference_mirror = _finite_or_inf(reference_diagnostics.get("qi_mirror_ratio_max"))
-        reference_elongation = _finite_or_inf(reference_diagnostics.get("qi_max_elongation"))
-        reference_abs_iota = abs(_finite_or_inf(reference_diagnostics.get("mean_iota")))
-        smooth_limit = float(stage.get("qi_safe_smooth_relax", 1.0)) * max(
-            float(stage.get("smooth_qi_max", ctx_or_default("qi_gate_smooth_max", reference_smooth))),
-            reference_smooth,
-        )
-        legacy_limit = float(stage.get("qi_safe_legacy_relax", 1.0)) * max(
-            float(stage.get("legacy_qi_max", ctx_or_default("qi_gate_legacy_max", reference_legacy))),
-            reference_legacy,
-        )
-        mirror_limit = float(stage.get("qi_safe_mirror_relax", 1.0)) * max(
-            float(stage.get("promotion_mirror_threshold", ctx_or_default("max_mirror_ratio", reference_mirror))),
-            reference_mirror,
-        )
-        elongation_limit = float(stage.get("qi_safe_elongation_relax", 1.0)) * max(
-            float(stage.get("max_elongation", ctx_or_default("max_elongation", reference_elongation))),
-            reference_elongation,
-        )
-        min_abs_iota = min(
-            reference_abs_iota,
-            float(stage.get("target_abs_iota_min", ctx_or_default("target_abs_iota_min", reference_abs_iota))),
-        )
         candidate_abs_iota = abs(_finite_or_inf(promotion.get("mean_iota")))
         tol = float(stage.get("qi_safe_abs_tol", 1.0e-12))
         if (
             aspect_gain >= float(stage.get("aspect_improvement_min", 1.0e-3))
-            and _finite_or_inf(promotion.get("qi_smooth_total")) <= smooth_limit + tol
-            and _finite_or_inf(promotion.get("qi_legacy_total")) <= legacy_limit + tol
-            and candidate_abs_iota + tol >= min_abs_iota
-            and _finite_or_inf(promotion.get("qi_mirror_ratio_max")) <= mirror_limit + tol
-            and _finite_or_inf(promotion.get("qi_max_elongation")) <= elongation_limit + tol
+            and _finite_or_inf(promotion.get("qi_smooth_total")) <= safe["smooth_limit"] + tol
+            and _finite_or_inf(promotion.get("qi_legacy_total")) <= safe["legacy_limit"] + tol
+            and candidate_abs_iota + tol >= safe["min_abs_iota"]
+            and _finite_or_inf(promotion.get("qi_mirror_ratio_max")) <= safe["mirror_limit"] + tol
+            and _finite_or_inf(promotion.get("qi_max_elongation")) <= safe["elongation_limit"] + tol
         ):
             out = dict(promotion)
             out["qi_cleanup_promoted"] = True
@@ -1586,9 +1592,9 @@ def stage_promotes_candidate(
             return out
         reasons.append(
             "QI-safe aspect promotion failed: "
-            f"aspect_gain={aspect_gain:.6g}, smooth_limit={smooth_limit:.6g}, "
-            f"legacy_limit={legacy_limit:.6g}, mirror_limit={mirror_limit:.6g}, "
-            f"elongation_limit={elongation_limit:.6g}, min_abs_iota={min_abs_iota:.6g}"
+            f"aspect_gain={aspect_gain:.6g}, smooth_limit={safe['smooth_limit']:.6g}, "
+            f"legacy_limit={safe['legacy_limit']:.6g}, mirror_limit={safe['mirror_limit']:.6g}, "
+            f"elongation_limit={safe['elongation_limit']:.6g}, min_abs_iota={safe['min_abs_iota']:.6g}"
         )
     if bool(stage.get("accept_if_iota_improves", False)) and reference_diagnostics is not None:
         candidate_iota = abs(_finite_or_inf(promotion.get("mean_iota")))
@@ -1621,41 +1627,19 @@ def stage_promotes_candidate(
             f"gain={iota_gain:.6g}, smooth_limit={smooth_limit:.6g}, legacy_limit={legacy_limit:.6g}"
         )
     if bool(stage.get("accept_if_qi_improves", False)) and reference_diagnostics is not None:
-        def ctx_or_default(field, default):
-            try:
-                return _ctx(ctx, field)
-            except KeyError:
-                return default
-
+        safe = _qi_safe_reference_limits(stage, reference_diagnostics, ctx=ctx)
         candidate_smooth = _finite_or_inf(promotion.get("qi_smooth_total"))
-        reference_smooth = _finite_or_inf(reference_diagnostics.get("qi_smooth_total"))
         candidate_legacy = _finite_or_inf(promotion.get("qi_legacy_total"))
-        reference_legacy = _finite_or_inf(reference_diagnostics.get("qi_legacy_total"))
-        smooth_gain = reference_smooth - candidate_smooth
-        legacy_gain = reference_legacy - candidate_legacy
-        reference_mirror = _finite_or_inf(reference_diagnostics.get("qi_mirror_ratio_max"))
-        reference_elongation = _finite_or_inf(reference_diagnostics.get("qi_max_elongation"))
-        reference_abs_iota = abs(_finite_or_inf(reference_diagnostics.get("mean_iota")))
-        mirror_limit = float(stage.get("qi_safe_mirror_relax", 1.0)) * max(
-            float(stage.get("promotion_mirror_threshold", ctx_or_default("max_mirror_ratio", reference_mirror))),
-            reference_mirror,
-        )
-        elongation_limit = float(stage.get("qi_safe_elongation_relax", 1.0)) * max(
-            float(stage.get("max_elongation", ctx_or_default("max_elongation", reference_elongation))),
-            reference_elongation,
-        )
-        min_abs_iota = min(
-            reference_abs_iota,
-            float(stage.get("target_abs_iota_min", ctx_or_default("target_abs_iota_min", reference_abs_iota))),
-        )
+        smooth_gain = safe["reference_smooth"] - candidate_smooth
+        legacy_gain = safe["reference_legacy"] - candidate_legacy
         candidate_abs_iota = abs(_finite_or_inf(promotion.get("mean_iota")))
         tol = float(stage.get("qi_safe_abs_tol", 1.0e-12))
         if (
             smooth_gain >= float(stage.get("smooth_qi_improvement_min", 0.0))
             and legacy_gain >= float(stage.get("legacy_qi_improvement_min", 0.0))
-            and candidate_abs_iota + tol >= min_abs_iota
-            and _finite_or_inf(promotion.get("qi_mirror_ratio_max")) <= mirror_limit + tol
-            and _finite_or_inf(promotion.get("qi_max_elongation")) <= elongation_limit + tol
+            and candidate_abs_iota + tol >= safe["min_abs_iota"]
+            and _finite_or_inf(promotion.get("qi_mirror_ratio_max")) <= safe["mirror_limit"] + tol
+            and _finite_or_inf(promotion.get("qi_max_elongation")) <= safe["elongation_limit"] + tol
         ):
             out = dict(promotion)
             out["qi_cleanup_promoted"] = True
@@ -1668,8 +1652,8 @@ def stage_promotes_candidate(
         reasons.append(
             "QI-improvement promotion failed: "
             f"smooth_gain={smooth_gain:.6g}, legacy_gain={legacy_gain:.6g}, "
-            f"mirror_limit={mirror_limit:.6g}, elongation_limit={elongation_limit:.6g}, "
-            f"min_abs_iota={min_abs_iota:.6g}"
+            f"mirror_limit={safe['mirror_limit']:.6g}, elongation_limit={safe['elongation_limit']:.6g}, "
+            f"min_abs_iota={safe['min_abs_iota']:.6g}"
         )
     if bool(stage.get("accept_if_rank_improves", False)) and reference_diagnostics is not None:
         candidate_score = promotion_score(promotion)
