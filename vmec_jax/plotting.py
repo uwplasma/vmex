@@ -1893,37 +1893,7 @@ def plot_wout(
     s_plot_ignore: float = 0.2,
     show: bool = False,
 ) -> dict:
-    """Generate diagnostic plots from a VMEC ``wout_*.nc`` file.
-
-    Replicates the output of the standalone ``vmecPlot2.py`` script in a
-    vectorised, vmec_jax-native form.  Four figures are written:
-
-    * ``<name>_VMECparams.pdf``  — 9-panel profile + ``|B|`` overview
-    * ``<name>_poloidal_plot.png`` — LCFS cross-sections at multiple toroidal angles
-    * ``<name>_VMECsurfaces.pdf``  — nested flux-surface cross-sections (8 panels)
-    * ``<name>_VMEC_3Dplot.png``   — 3-D LCFS surface coloured by ``|B|``
-
-    Parameters
-    ----------
-    wout_path:
-        Path to the ``wout_*.nc`` file.
-    outdir:
-        Directory to save figures.  Defaults to the directory containing
-        *wout_path*.
-    name:
-        Base name for output files.  Defaults to the wout stem with the
-        leading ``wout_`` stripped (e.g. ``wout_nfp4_QH.nc`` → ``nfp4_QH``).
-    s_plot_ignore:
-        Fraction of flux surfaces near the axis to ignore when plotting DMerc.
-    show:
-        If ``True``, call ``plt.show()`` after saving all figures.
-
-    Returns
-    -------
-    dict
-        ``{"vmec_params", "poloidal_plot", "vmec_surfaces", "3d_plot"}``
-        mapping to saved :class:`~pathlib.Path` objects.
-    """
+    """Generate VMEC profile, cross-section, surface, and 3-D LCFS plots."""
     plt = _import_matplotlib()
     from matplotlib import cm
     from matplotlib.colors import Normalize
@@ -1955,7 +1925,6 @@ def plot_wout(
     s_half = [(i - 0.5) / (ns - 1) for i in range(1, ns)]
     xLabel = r"$s = \psi/\psi_b$"
 
-    # ── Plot 1: VMECparams — 9-panel diagnostics ────────────────────────────────
     fig1, axes1 = plt.subplots(3, 3, figsize=(14, 7))
     fig1.patch.set_facecolor("white")
 
@@ -2012,18 +1981,17 @@ def plot_wout(
     fig1.savefig(out_params, bbox_inches="tight", pad_inches=0)
     plt.close(fig1)
 
-    # ── Plot 2: Poloidal cross-sections at LCFS ──────────────────────────────────
     _theta_p, zeta_p, R_lcfs, Z_lcfs = vmecplot2_surface_grid(wout, s_index=ns - 1, ntheta=200, nzeta=8)
     Raxis, Zaxis = axis_rz_from_wout(wout, zeta=zeta_p)
 
     fig2, ax2 = plt.subplots(1, 1, figsize=(6, 6))
     fig2.patch.set_facecolor("white")
-    _zeta_lbls = [
+    _zeta_lbls = (
         (0, r"$\phi=0$"),
         (2, r"$\phi=\pi/2$"),
         (4, r"$\phi=\pi$"),
         (6, r"$\phi=3\pi/2$"),
-    ]
+    )
     for _iz, _lbl in _zeta_lbls:
         if _iz < len(zeta_p):
             ax2.plot(R_lcfs[:, _iz], Z_lcfs[:, _iz], "-", label=_lbl)
@@ -2031,14 +1999,12 @@ def plot_wout(
     ax2.legend(fontsize=18)
     ax2.set_xlabel("R", fontsize=22)
     ax2.set_ylabel("Z", fontsize=22)
-    ax2.tick_params(axis="x", labelsize=16)
-    ax2.tick_params(axis="y", labelsize=16)
+    ax2.tick_params(axis="both", labelsize=16)
     fig2.tight_layout()
     out_poloidal = outdir / f"{name}_poloidal_plot.png"
     fig2.savefig(out_poloidal)
     plt.close(fig2)
 
-    # ── Plot 3: VMECsurfaces — 8 nested cross-section panels ─────────────────────
     ntheta_s = 200
     nzeta_s = 8
     nradius_s = 8
@@ -2067,7 +2033,6 @@ def plot_wout(
     fig3.savefig(out_surfaces, bbox_inches="tight", pad_inches=0)
     plt.close(fig3)
 
-    # ── Plot 4: 3-D LCFS surface coloured by |B| ─────────────────────────────────
     ntheta_3d = 80
     nzeta_3d = max(500, int(150 * nfp))
     theta_3d, zeta_3d, R_3d, Z_3d, B_3d = vmecplot2_lcfs_3d_grid(
@@ -2091,11 +2056,7 @@ def plot_wout(
         rstride=1, cstride=1, antialiased=False,
     )
     scale = 0.7 * max(abs(X_3d).max(), abs(Y_3d).max())
-    ax4.auto_scale_xyz(
-        [-scale, scale],
-        [-scale, scale],
-        [-scale, scale],
-    )
+    ax4.auto_scale_xyz([-scale, scale], [-scale, scale], [-scale, scale])
     ax4.set_box_aspect([1, 1, 1])
     ax4.axis("off")
 
