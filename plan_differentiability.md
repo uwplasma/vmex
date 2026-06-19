@@ -5,7 +5,77 @@ Status: active umbrella plan and single source of truth for PR #20.
 `plan.md` and `discrete_adjoint_2506_plan.md` are historical/reference plans
 and should not drive new work unless a specific old result needs to be audited.
 
-Last updated: 2026-06-18.
+Last updated: 2026-06-19.
+
+## 2026-06-19 Residual Host-History Plumbing Reduction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Replaced the residual host loop's one-list-per-line history initialization
+   block with grouped distinct-list initialization.
+2. Added `residual_iter_history_list_maps` in residual policy so the residual
+   loop no longer owns the append-list and terminal-history dictionary literals.
+3. Kept existing append helpers, result payload keys, and free-boundary history
+   channels unchanged.
+
+Results obtained:
+
+- `vmec_jax/solvers/fixed_boundary/residual/iteration.py` dropped from 6341 to
+  6276 lines.
+- `solve_fixed_boundary_residual_iter` dropped from 5938 to 5872 lines.
+- `vmec_jax/solvers/fixed_boundary/residual/policy.py` grew by 45 lines for the
+  reusable history-map helper.
+- The touched source diff is net-negative: 82 insertions and 102 deletions.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/residual/policy.py`
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/residual/policy.py --select F401,F841 --ignore-noqa`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_step6_solve_fixed_boundary.py tests/test_vmec2000_fixed_boundary_physics_gates.py tests/test_nonaxis_exec_stage_trace_parity.py tests/test_force_norms_dynamic_parity.py tests/test_residue_getfsq_parity.py tests/test_driver_api.py::test_run_fixed_boundary_accelerated_mode_defaults_to_single_grid -q`
+- `python tools/diagnostics/source_health.py --top 16 --top-functions 30`
+- `git diff --check`
+
+Best next steps:
+
+1. Continue the residual-host reduction with result/final-diagnostics assembly
+   or scan-step setup, choosing only seams that reduce `iteration.py` without
+   adding one-off helper files.
+2. Keep the focused fixed-boundary parity shard as the guardrail for every
+   residual-loop tranche.
+3. Defer CI watching; inspect CI in batch after several pushed refactor
+   tranches.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999%.
+- Solver monolith reduction: 99.71%.
+- Free-boundary adjoint monolith reduction: 99.42%.
+- Driver workflow decomposition: 99.92%.
+- Residual iteration decomposition: 98.35%.
+- WOUT diagnostic/profile decomposition: 99.89%.
+- Bcovar/WOUT parity decomposition: 99.11%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.77%.
+- Tomnsps transform decomposition: 98.5%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.56%.
+- Fixed-boundary optimizer decomposition: 95.8%.
+- Plotting/WOUT visualization decomposition: 95.9%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.35%.
+- QI objective/staged-runner decomposition: 96.9%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.999983%.
 
 ## 2026-06-18 Non-Scan Axis-Reset Evaluator Reuse
 

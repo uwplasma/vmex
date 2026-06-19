@@ -44,6 +44,7 @@ from vmec_jax.solvers.fixed_boundary.residual.policy import (
     host_restart_decision as _host_restart_decision,
     numpy_preconditioner_apply_policy as _numpy_preconditioner_apply_policy,
     resolve_residual_iter_startup_policy as _resolve_residual_iter_startup_policy,
+    residual_iter_history_list_maps as _residual_iter_history_list_maps,
     residual_iter_history_record as _residual_iter_history_record,
     scan_fallback_decision as _scan_fallback_decision,
     scan_fallback_message as _scan_fallback_message,
@@ -2357,108 +2358,42 @@ def solve_fixed_boundary_residual_iter(
         block_until_ready=jax.block_until_ready if has_jax() else None,
     )
 
-    w_history = []
-    fsqr2_history = []
-    fsqz2_history = []
-    fsql2_history = []
-    r00_history: list[float] = []
-    z00_history: list[float] = []
-    wb_history: list[float] = []
-    wp_history: list[float] = []
-    w_vmec_history: list[float] = []
-    fsqr1_history = []
-    fsqz1_history = []
-    fsql1_history = []
-    fsq1_history = []
-    rz_norm_history: list[float] = []
-    f_norm1_history: list[float] = []
-    gcr2_p_history: list[float] = []
-    gcz2_p_history: list[float] = []
-    gcl2_p_history: list[float] = []
-    step_status_history: list[str] = []
-    restart_reason_history: list[str] = []
-    pre_restart_reason_history: list[str] = []
-    time_step_history: list[float] = []
-    res0_history: list[float] = []
-    res1_history: list[float] = []
-    fsq_prev_history: list[float] = []
-    bad_growth_streak_history: list[int] = []
-    iter1_history: list[int] = []
-    iter2_history: list[int] = []
-    include_edge_history: list[int] = []
-    zero_m1_history: list[int] = []
-    freeb_ivac_history: list[int] = []
-    freeb_ivacskip_history: list[int] = []
-    freeb_full_update_history: list[int] = []
-    freeb_nestor_reused_history: list[int] = []
-    freeb_nestor_source_reused_history: list[int] = []
-    freeb_nestor_provider_allows_source_reuse_history: list[int] = []
-    freeb_nestor_bnormal_rms_history: list[float] = []
-    freeb_nestor_gsource_rms_history: list[float] = []
-    freeb_nestor_bsqvac_rms_history: list[float] = []
-    freeb_nestor_solve_time_history: list[float] = []
-    freeb_nestor_sample_time_history: list[float] = []
-    freeb_nestor_trial_reused_history: list[int] = []
-    freeb_nestor_trial_solve_time_history: list[float] = []
-    freeb_nestor_trial_sample_time_history: list[float] = []
-    freeb_nestor_trial_failed_history: list[int] = []
-    dt_eff_history: list[float] = []
-    update_rms_history: list[float] = []
-    w_curr_history: list[float] = []
-    w_try_history: list[float] = []
-    w_try_ratio_history: list[float] = []
-    restart_path_history: list[str] = []
-    adjoint_step_trace_history: list[dict[str, Any]] = []
-    min_tau_history: list[float] = []
-    max_tau_history: list[float] = []
-    bad_jacobian_history: list[int] = []
-    grad_rms_history = []
-    step_history = []
+    w_history, fsqr2_history, fsqz2_history, fsql2_history = ([] for _ in range(4))
+    r00_history, z00_history, wb_history, wp_history, w_vmec_history = ([] for _ in range(5))
+    fsqr1_history, fsqz1_history, fsql1_history, fsq1_history = ([] for _ in range(4))
+    rz_norm_history, f_norm1_history, gcr2_p_history, gcz2_p_history, gcl2_p_history = (
+        [] for _ in range(5)
+    )
+    step_status_history, restart_reason_history, pre_restart_reason_history = ([] for _ in range(3))
+    time_step_history, res0_history, res1_history, fsq_prev_history = ([] for _ in range(4))
+    bad_growth_streak_history, iter1_history, iter2_history = ([] for _ in range(3))
+    include_edge_history, zero_m1_history = ([] for _ in range(2))
+    freeb_ivac_history, freeb_ivacskip_history, freeb_full_update_history = ([] for _ in range(3))
+    (
+        freeb_nestor_reused_history,
+        freeb_nestor_source_reused_history,
+        freeb_nestor_provider_allows_source_reuse_history,
+        freeb_nestor_bnormal_rms_history,
+        freeb_nestor_gsource_rms_history,
+        freeb_nestor_bsqvac_rms_history,
+        freeb_nestor_solve_time_history,
+        freeb_nestor_sample_time_history,
+        freeb_nestor_trial_reused_history,
+        freeb_nestor_trial_solve_time_history,
+        freeb_nestor_trial_sample_time_history,
+        freeb_nestor_trial_failed_history,
+    ) = ([] for _ in range(12))
+    dt_eff_history, update_rms_history, w_curr_history, w_try_history, w_try_ratio_history = (
+        [] for _ in range(5)
+    )
+    restart_path_history, adjoint_step_trace_history = ([] for _ in range(2))
+    min_tau_history, max_tau_history, bad_jacobian_history = ([] for _ in range(3))
+    grad_rms_history, step_history = ([] for _ in range(2))
 
-    _history_record_lists = {
-        "step_history": step_history,
-        "dt_eff_history": dt_eff_history,
-        "update_rms_history": update_rms_history,
-        "w_curr_history": w_curr_history,
-        "w_try_history": w_try_history,
-        "w_try_ratio_history": w_try_ratio_history,
-        "restart_path_history": restart_path_history,
-        "step_status_history": step_status_history,
-        "restart_reason_history": restart_reason_history,
-        "pre_restart_reason_history": pre_restart_reason_history,
-        "time_step_history": time_step_history,
-        "res0_history": res0_history,
-        "res1_history": res1_history,
-        "fsq_prev_history": fsq_prev_history,
-        "bad_growth_streak_history": bad_growth_streak_history,
-        "iter1_history": iter1_history,
-        "iter2_history": iter2_history,
-        "grad_rms_history": grad_rms_history,
-        "free_boundary_enabled": free_boundary_enabled,
-        "freeb_ivac_history": freeb_ivac_history,
-        "freeb_ivacskip_history": freeb_ivacskip_history,
-        "freeb_full_update_history": freeb_full_update_history,
-    }
-    _terminal_history_lists = {
-        "step_status_history": step_status_history,
-        "restart_reason_history": restart_reason_history,
-        "pre_restart_reason_history": pre_restart_reason_history,
-        "time_step_history": time_step_history,
-        "res0_history": res0_history,
-        "res1_history": res1_history,
-        "fsq_prev_history": fsq_prev_history,
-        "bad_growth_streak_history": bad_growth_streak_history,
-        "iter1_history": iter1_history,
-        "iter2_history": iter2_history,
-        "grad_rms_history": grad_rms_history,
-        "free_boundary_enabled": free_boundary_enabled,
-        "freeb_ivac_history": freeb_ivac_history,
-        "freeb_ivacskip_history": freeb_ivacskip_history,
-        "freeb_full_update_history": freeb_full_update_history,
-        "freeb_nestor_reused_history": freeb_nestor_reused_history,
-        "freeb_nestor_solve_time_history": freeb_nestor_solve_time_history,
-        "freeb_nestor_sample_time_history": freeb_nestor_sample_time_history,
-    }
+    _history_record_lists, _terminal_history_lists = _residual_iter_history_list_maps(
+        locals(),
+        free_boundary_enabled=bool(free_boundary_enabled),
+    )
 
     r00_last = float("nan")
     z00_last = float("nan")

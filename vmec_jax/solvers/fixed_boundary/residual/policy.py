@@ -91,6 +91,51 @@ class ResidualIterHistoryRecord(NamedTuple):
     freeb_full_update: int | None
 
 
+_RESIDUAL_ITER_HISTORY_RECORD_KEYS = (
+    "step_history",
+    "dt_eff_history",
+    "update_rms_history",
+    "w_curr_history",
+    "w_try_history",
+    "w_try_ratio_history",
+    "restart_path_history",
+    "step_status_history",
+    "restart_reason_history",
+    "pre_restart_reason_history",
+    "time_step_history",
+    "res0_history",
+    "res1_history",
+    "fsq_prev_history",
+    "bad_growth_streak_history",
+    "iter1_history",
+    "iter2_history",
+    "grad_rms_history",
+    "freeb_ivac_history",
+    "freeb_ivacskip_history",
+    "freeb_full_update_history",
+)
+
+_RESIDUAL_ITER_TERMINAL_HISTORY_KEYS = _RESIDUAL_ITER_HISTORY_RECORD_KEYS[7:] + (
+    "freeb_nestor_reused_history",
+    "freeb_nestor_solve_time_history",
+    "freeb_nestor_sample_time_history",
+)
+
+
+def residual_iter_history_list_maps(
+    namespace: Mapping[str, Any],
+    *,
+    free_boundary_enabled: bool,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return aligned append-list maps for host residual iteration histories."""
+
+    record_lists = {key: namespace[key] for key in _RESIDUAL_ITER_HISTORY_RECORD_KEYS}
+    terminal_lists = {key: namespace[key] for key in _RESIDUAL_ITER_TERMINAL_HISTORY_KEYS}
+    record_lists["free_boundary_enabled"] = bool(free_boundary_enabled)
+    terminal_lists["free_boundary_enabled"] = bool(free_boundary_enabled)
+    return record_lists, terminal_lists
+
+
 class ScanFallbackDecision(NamedTuple):
     fallback: bool
     reasons: tuple[str, ...]
