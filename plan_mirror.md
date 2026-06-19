@@ -25952,3 +25952,141 @@ Results:
 ### User input needed
 
 No user input is needed for the next technical step.
+
+---
+## 216. Office Free-Boundary Resolution Ladder
+
+### Steps taken
+
+- Synced the `codex/mirror-geometry` branch on `ssh office` to commit
+  `d5bd8fec`.
+- Verified the office machine has two NVIDIA RTX A4000 GPUs visible to JAX.
+- Ran the M215 circular-coil free-boundary coupled-loop policy on office with
+  `--ls-boundary-inner-solve-steps 2` for a three-point resolution ladder:
+  `(ns, nxi) = (7, 11), (9, 15), (11, 17)`.
+- Captured `/usr/bin/time -v` wall time and maximum resident set size for each
+  ladder row.
+- Ran targeted follow-up probes to separate step-budget, retry-ladder,
+  fixed-boundary baseline, polynomial-degree, and accept-tolerance effects.
+
+### Results obtained
+
+- Office GPU/JAX environment:
+  - host: `pop-os`;
+  - Python: `3.10.12`;
+  - JAX: `0.6.2`;
+  - devices: two CUDA GPUs;
+  - GPUs: two NVIDIA RTX A4000 devices with 16 GiB each.
+- Three-point degree-4 ladder with `baseline_maxiter = 5`,
+  `max_relative_step = 0.05`, `inner_solve_steps = 2`,
+  `target_merit = 0.1`, and `fsq_growth_limit = 1.5`:
+  - `(ns, nxi) = (7, 11)` converged all 1%, 3%, and 10% beta rows; final
+    merits were `0.06384412004281963`, `0.047285219537912024`, and
+    `0.047285219537912024`; elapsed time `2:32.01`, max RSS `1166556 KiB`.
+  - `(ns, nxi) = (9, 15)` converged beta 3% and 10% to
+    `0.09227264626028128`, but beta 1% rejected at merit
+    `0.20967526507127807`; elapsed time `2:11.21`, max RSS `1167444 KiB`.
+  - `(ns, nxi) = (11, 17)` converged beta 1% to
+    `0.0632243695944156`, but beta 3% and 10% reached `max_steps = 12` at
+    merit `0.10614366728455933`; elapsed time `4:31.69`, max RSS
+    `1168272 KiB`.
+- Increasing the `(11, 17)` beta 3% and 10% row to `max_steps = 16`
+  converged both rows with final merit `0.05918247235266881`; elapsed time
+  `2:59.45`, max RSS `1167876 KiB`.
+- Deeper realized retry factors for `(9, 15)` beta 1% did not fix the row:
+  it still rejected around merit `0.20932806042975383`.
+- Increasing the fixed-boundary baseline to `baseline_maxiter = 20` made the
+  beta 1% row hit the `fsq` growth guard; this is not the right fix.
+- Increasing the boundary step cap to `0.1` made the beta 1% row stop after an
+  unaccepted LS step; this is not the right fix.
+- Degree 6 improved `(9, 15)` beta 1% to about `0.141`, but then stalled on
+  an unaccepted or stagnating frozen step. Loosening frozen-LS accept tolerance
+  to `1e-3` or `1e-2` did not get below `0.1`.
+- Degree 8 solved `(9, 15)` beta 1% in one accepted realized step with final
+  merit `0.05857709842407309`, elapsed time `0:13.24`, max RSS `1149188 KiB`.
+- Degree 8 is not a universal replacement: for all betas at `(9, 15)`, it
+  solved beta 1% but left beta 3% and 10% at `ls_step_not_accepted`; at
+  `(11, 17)`, degree 8 left all three beta rows at `ls_step_not_accepted`.
+
+### Interpretation
+
+- The low-resolution M215 target-merit result is stable and reproduced on
+  office.
+- The higher-resolution lane needs an adaptive boundary basis policy, not a
+  single global polynomial degree.
+- The next implementation should let the circular-coil workflow try a small
+  ordered degree set per beta row, for example degree 4 first and degree 8 as a
+  fallback only when the degree-4 loop misses `target_merit`. This would have
+  preserved the degree-4 successes for beta 3% and 10%, while rescuing the
+  `(9, 15)` beta 1% row.
+- The `(11, 17)` beta 3% and 10% rows mainly need a larger loop budget
+  (`16` instead of `12`) under degree 4.
+
+### How it was tested
+
+```bash
+ssh office 'cd ~/local/vmec_mirror && git fetch origin codex/mirror-geometry && git merge --ff-only origin/codex/mirror-geometry'
+ssh office 'cd ~/local/vmec_mirror && python3 - <<PY
+import jax
+print(jax.__version__)
+print(jax.devices())
+PY'
+```
+
+The ladder and targeted probes were run inline through `ssh office 'bash -s'`
+using `python3 examples/mirror_free_boundary_circular_coils.py` with the
+arguments described above. They wrote ignored outputs under:
+
+- `results/mirror/free_boundary_circular_coils_m216_office_inner_fallback_ladder/`;
+- `results/mirror/free_boundary_circular_coils_m216_office_targeted_probes/`;
+- `results/mirror/free_boundary_circular_coils_m216_office_ns9_beta1_policy_probes/`;
+- `results/mirror/free_boundary_circular_coils_m216_office_ns9_beta1_accept_tolerance_probes/`;
+- `results/mirror/free_boundary_circular_coils_m216_office_degree8_resolution_probes/`;
+- `results/mirror/free_boundary_circular_coils_m216_office_ns9_beta1_degree8/`.
+
+### File structure and best-practice notes
+
+- No generated office output is tracked; all result trees remain under ignored
+  `results/mirror/...` paths.
+- The office audit did not require source edits, only a plan update.
+- The findings argue for one small root-example policy extension rather than
+  changing core mirror solver APIs: a per-beta ordered polynomial-degree
+  fallback list for the host-side circular-coil diagnostic workflow.
+
+### Best next steps
+
+1. Add an optional `--ls-boundary-polynomial-degree-candidates` control to the
+   circular-coil example.
+2. Keep the default degree 4 path unchanged, but when candidates are provided,
+   run the degree candidates per beta row until one reaches `target_merit`, and
+   otherwise keep the best realized merit.
+3. Record the selected degree and attempted degree list in schema `0.13`.
+4. Re-run the office ladder with degree candidates `4,8`, `max_steps = 16`,
+   and `inner_solve_steps = 2`.
+
+### Completion percentages after M216
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `95%`.
+- Fixed-boundary axisymmetric solve: `96%`.
+- Residual Newton / preconditioning: `96%`.
+- Two-coil and manufactured validation: `95%`.
+- Finite-current pitch validation: `94%`.
+- Plotting and `vmec --plot` mirror support: `99%`.
+- I/O schema and docs: `100%`.
+- Differentiable solved-state API: `97%`.
+- Mirror-Boozer-like diagnostics: `94%`.
+- Free-boundary mirror lane: `99.84%`; low-resolution target-merit is closed,
+  and office has identified the precise higher-resolution adaptive-degree
+  policy needed next.
+- Straight-axis hybrid support fixture lane: `100%` for support-fixture scope.
+- Toroidal stellarator-mirror hybrid lane: `99.9%`.
+- ESSOS circular-coil mirror beta scan: `99.78%`.
+- Public API/source simplification: `100%` for the current mirror package
+  structure.
+- PR merge readiness overall: `99.945%`, pending adaptive degree fallback,
+  re-run office ladder, final CI review, and review decision on deferred lanes.
+
+### User input needed
+
+No user input is needed for the next technical step.
