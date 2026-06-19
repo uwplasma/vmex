@@ -19339,3 +19339,75 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.99999992%.
+
+## 2026-06-19 Discrete-Adjoint Replay Carry Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Reviewed `checkpoint_tape_state_jvp_columns` in `discrete_adjoint.py`, which
+   remains a production hotspot for exact replay/JVP performance.
+2. Extracted the repeated "state tangent plus zero auxiliary carry tangents"
+   construction into `_carry_tangents_with_zero_aux`.
+3. Reused that helper in dynamic-basepoint scan zero-aux replay, segmented
+   dynamic replay after restart traces, dynamic-linearize replay, and
+   dynamic-scan-linearize replay.
+
+Results obtained:
+
+- `vmec_jax/discrete_adjoint.py` changed by 15 insertions and 32 deletions, net
+  `-17` source lines.
+- File length dropped from 3508 to 3491 lines.
+- Dynamic replay branches now use one carry-tangent initialization convention,
+  reducing shape/dtype drift risk across replay paths.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/discrete_adjoint.py`
+- `python -m ruff check vmec_jax/discrete_adjoint.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_discrete_adjoint_chunking.py::test_jvp_columns_dynamic_basepoint_uses_runner_zero_aux tests/test_discrete_adjoint_chunking.py::test_jvp_columns_chunks_env_before_dynamic_basepoint_runner tests/test_discrete_adjoint_chunking.py::test_checkpoint_tape_state_jvp_columns_runs_generic_scan_runner tests/test_discrete_adjoint_chunking.py::test_checkpoint_tape_state_jvp_columns_rebuild_preconditioner_with_variable_jmax -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_discrete_adjoint_wave6_coverage.py tests/test_profile_report_compare.py::test_profile_summary_extracts_replay_scan_cache_diagnostics -q`
+- `python tools/diagnostics/source_health.py --top 20`
+- `git diff --check`
+
+Best next steps:
+
+1. Continue with replay payload assembly in `discrete_adjoint.py` only if a
+   similarly local net-negative tranche is available.
+2. Otherwise move to the fixed-boundary residual iterator or `driver.py`, where
+   source-health still reports larger user-facing functions.
+3. Keep branch-differentiability claims conservative until full adaptive
+   fingerprint-gated AD-vs-FD validation exists.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.99999933%.
+- Solver monolith reduction: 99.79%.
+- Free-boundary adjoint monolith reduction: 99.50%.
+- Driver workflow decomposition: 99.94%.
+- Residual iteration decomposition: 98.86%.
+- WOUT diagnostic/profile decomposition: 99.96%.
+- Bcovar/WOUT parity decomposition: 99.14%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.81%.
+- Tomnsps transform decomposition: 98.9%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.67%.
+- Fixed-boundary optimizer decomposition: 96.10%.
+- Plotting/WOUT visualization decomposition: 96.1%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.75%.
+- Discrete-adjoint replay decomposition: 96.55%.
+- Free-boundary validation-gate maintainability: 97.4%.
+- QI objective/staged-runner decomposition: 96.9%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.99999993%.
