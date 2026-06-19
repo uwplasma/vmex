@@ -65,6 +65,30 @@ def _well_conditioned_matrix():
     return A, b
 
 
+def _single_circular_coil_params(
+    *,
+    radius,
+    current,
+    n_segments: int,
+    out_of_plane: float = 0.0,
+) -> CoilFieldParams:
+    """Build the one-coil circular Fourier fixture used by adjoint gates."""
+
+    from vmec_jax._compat import jnp
+
+    dofs = jnp.zeros((1, 3, 3), dtype=float)
+    dofs = dofs.at[0, 0, 2].set(radius)
+    dofs = dofs.at[0, 1, 1].set(radius)
+    if out_of_plane != 0.0:
+        dofs = dofs.at[0, 2, 0].set(out_of_plane)
+    return CoilFieldParams(
+        base_curve_dofs=dofs,
+        base_currents=jnp.asarray([current], dtype=float),
+        n_segments=n_segments,
+        regularization_epsilon=1.0e-9,
+    )
+
+
 def test_dense_vacuum_solve_matches_jnp_linalg_solve():
     from vmec_jax._compat import jnp
 
@@ -1056,16 +1080,7 @@ def test_jax_visible_controller_direct_coil_gradient_matches_fd():
     from vmec_jax._compat import jnp
 
     enable_x64(True)
-    radius = 1.27
-    dofs = jnp.zeros((1, 3, 3), dtype=float)
-    dofs = dofs.at[0, 0, 2].set(radius)
-    dofs = dofs.at[0, 1, 1].set(radius)
-    coil_params = CoilFieldParams(
-        base_curve_dofs=dofs,
-        base_currents=jnp.asarray([4.8e6], dtype=float),
-        n_segments=32,
-        regularization_epsilon=1.0e-9,
-    )
+    coil_params = _single_circular_coil_params(radius=1.27, current=4.8e6, n_segments=32)
     dofs_direction = jnp.zeros_like(coil_params.base_curve_dofs)
     dofs_direction = dofs_direction.at[0, 0, 2].set(0.012)
     dofs_direction = dofs_direction.at[0, 1, 1].set(-0.010)
@@ -1138,16 +1153,7 @@ def test_masked_controller_direct_coil_projected_mode_ad_matches_fd_for_current_
     from vmec_jax._compat import jnp
 
     enable_x64(True)
-    radius = 1.31
-    dofs = jnp.zeros((1, 3, 3), dtype=float)
-    dofs = dofs.at[0, 0, 2].set(radius)
-    dofs = dofs.at[0, 1, 1].set(radius)
-    coil_params = CoilFieldParams(
-        base_curve_dofs=dofs,
-        base_currents=jnp.asarray([4.6e6], dtype=float),
-        n_segments=32,
-        regularization_epsilon=1.0e-9,
-    )
+    coil_params = _single_circular_coil_params(radius=1.31, current=4.6e6, n_segments=32)
     controls = {
         "gain": jnp.asarray([0.12, 0.10, 0.09, 0.08, 0.75], dtype=float),
         "phase": jnp.asarray([0.06, 0.24, 0.43, 0.67, 0.91], dtype=float),
@@ -1319,16 +1325,7 @@ def test_accepted_controller_direct_coil_projected_mode_ad_matches_fd_and_reject
     from vmec_jax._compat import jnp, tree_util
 
     enable_x64(True)
-    radius = 1.28
-    dofs = jnp.zeros((1, 3, 3), dtype=float)
-    dofs = dofs.at[0, 0, 2].set(radius)
-    dofs = dofs.at[0, 1, 1].set(radius)
-    coil_params = CoilFieldParams(
-        base_curve_dofs=dofs,
-        base_currents=jnp.asarray([4.4e6], dtype=float),
-        n_segments=32,
-        regularization_epsilon=1.0e-9,
-    )
+    coil_params = _single_circular_coil_params(radius=1.28, current=4.4e6, n_segments=32)
     controls = {
         "gain": jnp.asarray([0.10, 4.0, 0.09, 0.08, 0.75], dtype=float),
         "phase": jnp.asarray([0.04, 0.21, 0.40, 0.63, 0.88], dtype=float),
@@ -2914,15 +2911,10 @@ def _toy_coil_vacuum_response(*, current_scale: float = 0.0, radius_shift: float
 
     from vmec_jax._compat import jnp
 
-    radius = 1.15 + 0.02 * radius_shift
-    dofs = jnp.zeros((1, 3, 3), dtype=float)
-    dofs = dofs.at[0, 0, 2].set(radius)
-    dofs = dofs.at[0, 1, 1].set(radius)
-    params = CoilFieldParams(
-        base_curve_dofs=dofs,
-        base_currents=jnp.asarray([3.0e7 * (1.0 + 0.01 * current_scale)], dtype=float),
+    params = _single_circular_coil_params(
+        radius=1.15 + 0.02 * radius_shift,
+        current=3.0e7 * (1.0 + 0.01 * current_scale),
         n_segments=96,
-        regularization_epsilon=1.0e-9,
     )
     R = jnp.asarray([0.24, 0.37, 0.51], dtype=float)
     Z = jnp.asarray([0.11, -0.17, 0.23], dtype=float)
@@ -2952,15 +2944,10 @@ def _toy_coil_nonlinear_response(*, current_scale: float = 0.0, radius_shift: fl
 
     from vmec_jax._compat import jnp
 
-    radius = 1.25 + 0.03 * radius_shift
-    dofs = jnp.zeros((1, 3, 3), dtype=float)
-    dofs = dofs.at[0, 0, 2].set(radius)
-    dofs = dofs.at[0, 1, 1].set(radius)
-    params = CoilFieldParams(
-        base_curve_dofs=dofs,
-        base_currents=jnp.asarray([6.0e6 * (1.0 + 0.02 * current_scale)], dtype=float),
+    params = _single_circular_coil_params(
+        radius=1.25 + 0.03 * radius_shift,
+        current=6.0e6 * (1.0 + 0.02 * current_scale),
         n_segments=96,
-        regularization_epsilon=1.0e-9,
     )
     R = jnp.asarray([0.32, 0.47, 0.61], dtype=float)
     Z = jnp.asarray([0.09, -0.16, 0.19], dtype=float)
@@ -3001,15 +2988,10 @@ def _toy_coil_free_boundary_fixed_point_response(
 
     from vmec_jax._compat import jnp
 
-    radius = 1.28 + 0.02 * radius_shift
-    dofs = jnp.zeros((1, 3, 3), dtype=float)
-    dofs = dofs.at[0, 0, 2].set(radius)
-    dofs = dofs.at[0, 1, 1].set(radius)
-    coil_params = CoilFieldParams(
-        base_curve_dofs=dofs,
-        base_currents=jnp.asarray([4.5e6 * (1.0 + 0.015 * current_scale)], dtype=float),
+    coil_params = _single_circular_coil_params(
+        radius=1.28 + 0.02 * radius_shift,
+        current=4.5e6 * (1.0 + 0.015 * current_scale),
         n_segments=64,
-        regularization_epsilon=1.0e-9,
     )
     theta_shape = (2, 2)
     phi = jnp.asarray([[0.0, 0.4], [0.8, 1.2]], dtype=float)
@@ -3065,15 +3047,10 @@ def _toy_coil_projected_mode_fixed_point_response(
 
     from vmec_jax._compat import jnp
 
-    radius = 1.34 + 0.025 * radius_shift
-    dofs = jnp.zeros((1, 3, 3), dtype=float)
-    dofs = dofs.at[0, 0, 2].set(radius)
-    dofs = dofs.at[0, 1, 1].set(radius)
-    coil_params = CoilFieldParams(
-        base_curve_dofs=dofs,
-        base_currents=jnp.asarray([5.5e6 * (1.0 + 0.012 * current_scale)], dtype=float),
+    coil_params = _single_circular_coil_params(
+        radius=1.34 + 0.025 * radius_shift,
+        current=5.5e6 * (1.0 + 0.012 * current_scale),
         n_segments=64,
-        regularization_epsilon=1.0e-9,
     )
     phi = jnp.asarray([[0.05, 0.45], [0.85, 1.25]], dtype=float)
     Ru_base = jnp.asarray([[0.03, -0.04], [0.02, 0.05]], dtype=float)
@@ -3291,16 +3268,7 @@ def test_projected_mode_fixed_point_objective_exposes_components():
     assert np.isfinite(float(value))
     assert float(value) > 0.0
 
-    radius = 1.34
-    dofs = jnp.zeros((1, 3, 3), dtype=float)
-    dofs = dofs.at[0, 0, 2].set(radius)
-    dofs = dofs.at[0, 1, 1].set(radius)
-    coil_params = CoilFieldParams(
-        base_curve_dofs=dofs,
-        base_currents=jnp.asarray([5.5e6], dtype=float),
-        n_segments=32,
-        regularization_epsilon=1.0e-9,
-    )
+    coil_params = _single_circular_coil_params(radius=1.34, current=5.5e6, n_segments=32)
     phi = jnp.asarray([[0.05, 0.45], [0.85, 1.25]], dtype=float)
     sin_basis = jnp.asarray(
         [
@@ -3356,16 +3324,7 @@ def test_projected_mode_fixed_point_objective_value_and_grad_wrt_coil_pytree():
     from vmec_jax._compat import jnp
 
     enable_x64(True)
-    radius = 1.34
-    dofs = jnp.zeros((1, 3, 3), dtype=float)
-    dofs = dofs.at[0, 0, 2].set(radius)
-    dofs = dofs.at[0, 1, 1].set(radius)
-    coil_params = CoilFieldParams(
-        base_curve_dofs=dofs,
-        base_currents=jnp.asarray([5.5e6], dtype=float),
-        n_segments=32,
-        regularization_epsilon=1.0e-9,
-    )
+    coil_params = _single_circular_coil_params(radius=1.34, current=5.5e6, n_segments=32)
     phi = jnp.asarray([[0.05, 0.45], [0.85, 1.25]], dtype=float)
     sin_basis = jnp.asarray(
         [
@@ -3477,16 +3436,11 @@ def test_lasym_projected_mode_fixed_point_objective_ad_matches_central_fd_for_co
     from vmec_jax._compat import jnp
 
     enable_x64(True)
-    radius = 1.29
-    dofs = jnp.zeros((1, 3, 3), dtype=float)
-    dofs = dofs.at[0, 0, 2].set(radius)
-    dofs = dofs.at[0, 1, 1].set(radius)
-    dofs = dofs.at[0, 2, 0].set(0.035)
-    coil_params = CoilFieldParams(
-        base_curve_dofs=dofs,
-        base_currents=jnp.asarray([4.2e6], dtype=float),
+    coil_params = _single_circular_coil_params(
+        radius=1.29,
+        current=4.2e6,
         n_segments=32,
-        regularization_epsilon=1.0e-9,
+        out_of_plane=0.035,
     )
     phi = jnp.asarray([[0.08, 0.47], [0.91, 1.31]], dtype=float)
     sin_basis = jnp.asarray(
@@ -3721,15 +3675,10 @@ def _toy_coil_projected_vacuum_response(*, current_scale: float = 0.0, radius_sh
 
     from vmec_jax._compat import jnp
 
-    radius = 1.45 + 0.03 * radius_shift
-    dofs = jnp.zeros((1, 3, 3), dtype=float)
-    dofs = dofs.at[0, 0, 2].set(radius)
-    dofs = dofs.at[0, 1, 1].set(radius)
-    params = CoilFieldParams(
-        base_curve_dofs=dofs,
-        base_currents=jnp.asarray([2.5e7 * (1.0 + 0.02 * current_scale)], dtype=float),
+    params = _single_circular_coil_params(
+        radius=1.45 + 0.03 * radius_shift,
+        current=2.5e7 * (1.0 + 0.02 * current_scale),
         n_segments=128,
-        regularization_epsilon=1.0e-9,
     )
     R = jnp.asarray([[0.78, 0.86], [0.92, 0.81]], dtype=float)
     Z = jnp.asarray([[0.16, -0.13], [0.22, -0.19]], dtype=float)
@@ -3775,15 +3724,10 @@ def _toy_coil_projected_mode_vacuum_response(*, current_scale: float = 0.0, radi
 
     from vmec_jax._compat import jnp
 
-    radius = 1.45 + 0.03 * radius_shift
-    dofs = jnp.zeros((1, 3, 3), dtype=float)
-    dofs = dofs.at[0, 0, 2].set(radius)
-    dofs = dofs.at[0, 1, 1].set(radius)
-    params = CoilFieldParams(
-        base_curve_dofs=dofs,
-        base_currents=jnp.asarray([2.5e7 * (1.0 + 0.02 * current_scale)], dtype=float),
+    params = _single_circular_coil_params(
+        radius=1.45 + 0.03 * radius_shift,
+        current=2.5e7 * (1.0 + 0.02 * current_scale),
         n_segments=128,
-        regularization_epsilon=1.0e-9,
     )
     R = jnp.asarray([[0.78, 0.86], [0.92, 0.81]], dtype=float)
     Z = jnp.asarray([[0.16, -0.13], [0.22, -0.19]], dtype=float)
