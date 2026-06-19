@@ -130,12 +130,18 @@ sharpened preset. Pass ``--resolution-preset smoke``, ``promotion``, or
 ``ns = 7,9,15`` and ``mpol:ntor = 5:20,6:24`` and labels rows as target-ladder
 inputs. Office GPU runs of that ladder reached total-``fsq`` convergence at
 ``ftol=1e-8`` for all six rows with VMEC2000 outputs present; strict component
-convergence remains a documented caveat. Use ``--case-filter '*ns015*'`` or
-another comma-separated shell pattern to run a subset of the generated case
-names when splitting the target campaign across machines. After split campaigns
-finish, pass ``--aggregate-json`` one or more existing convergence JSON files
-to merge chunked rows, de-duplicate by case, write a compact aggregate CSV/JSON
-report, and optionally regenerate the residual/history plots without rerunning
+convergence remains a documented caveat. Rows now report the largest
+``fsqr``/``fsqz``/``fsql`` component, that component divided by requested
+``ftol``, and the strict-component bottleneck when one remains. Re-aggregating
+the current 80-iteration target output with those diagnostics shows one strict
+component pass and ``fsqr`` as the remaining bottleneck in five rows, with the
+largest VMEC/JAX component only about ``1.24`` times requested ``ftol``. Use
+``--case-filter '*ns015*'`` or another comma-separated shell pattern to run a
+subset of the generated case names when splitting the target campaign across
+machines. After split campaigns finish, pass ``--aggregate-json`` one or more
+existing convergence JSON files to merge chunked rows, de-duplicate by case,
+write a compact aggregate CSV/JSON report with strict-component blocker
+counts, and optionally regenerate the residual/history plots without rerunning
 VMEC/JAX or VMEC2000.
 
 The root-level ``examples/mirror_free_boundary_circular_coils.py`` script is a

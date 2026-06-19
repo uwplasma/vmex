@@ -11,8 +11,8 @@ Mirror Geometries
    straight-axis rotating-ellipse hybrid boundary fixture, and a first
    VMEC-compatible toroidal stellarator-mirror hybrid input fixture. Production
    free-boundary equilibrium solves, anisotropic pressure, strict-component
-   toroidal hybrid target checks, broader hybrid convergence studies, and the
-   final differentiable implicit-solve API remain planned work.
+   toroidal hybrid convergence promotion, broader hybrid convergence studies,
+   and the final differentiable implicit-solve API remain planned work.
 
 .. toctree::
    :maxdepth: 2

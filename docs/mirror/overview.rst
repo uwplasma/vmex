@@ -149,9 +149,13 @@ Current solver status:
   ``--resolution-preset target`` writes the current target
   ladder, ``ns = 7,9,15`` and ``mpol:ntor = 5:20,6:24``.  Office GPU runs of
   that ladder reached total-``fsq`` convergence at ``ftol=1e-8`` for all six
-  rows with VMEC2000 outputs present; strict component convergence remains a
-  documented caveat.  ``--case-filter`` accepts comma-separated shell patterns
-  for splitting that target campaign into smaller row subsets.
+  rows with VMEC2000 outputs present.  Rows and aggregate reports now record
+  largest residual-component names, component values divided by requested
+  ``ftol``, strict-component pass counts, and strict bottleneck counts.  The
+  current re-aggregated 80-iteration target evidence has one strict-component
+  pass, five ``fsqr`` bottlenecks, and a largest VMEC/JAX component about
+  ``1.24`` times requested ``ftol``.  ``--case-filter`` accepts comma-separated
+  shell patterns for splitting that target campaign into smaller row subsets.
   ``--aggregate-json`` reads one or more existing convergence JSON files from
   split campaigns and writes a de-duplicated aggregate CSV/JSON plus optional
   plots, which keeps remote target-ladder evidence compact and avoids copying

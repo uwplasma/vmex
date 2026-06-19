@@ -483,10 +483,20 @@ def test_toroidal_hybrid_convergence_example_aggregates_chunk_jsons(tmp_path: Pa
                         "ran_vmec2000": True,
                         "converged_by_total_fsq": True,
                         "vmec2000_returncode": 0,
+                        "requested_ftol": 0.01,
                         "direct_initial_fsq_ratio_vmec2000": 1.006,
                         "best_fsq": 0.04,
+                        "best_fsqr": 0.004,
+                        "best_fsqz": 0.02,
+                        "best_fsql": 0.01,
                         "final_fsq": 0.05,
+                        "final_fsqr": 0.005,
+                        "final_fsqz": 0.02,
+                        "final_fsql": 0.015,
                         "vmec2000_final_fsq": 0.009,
+                        "vmec2000_final_fsqr": 0.003,
+                        "vmec2000_final_fsqz": 0.004,
+                        "vmec2000_final_fsql": 0.002,
                         "max_boundary_fit_error": 1.0e-14,
                     },
                     {
@@ -502,9 +512,16 @@ def test_toroidal_hybrid_convergence_example_aggregates_chunk_jsons(tmp_path: Pa
                         "ran_vmec2000": True,
                         "converged_by_total_fsq": False,
                         "vmec2000_returncode": 1,
+                        "requested_ftol": 0.01,
                         "direct_initial_fsq_ratio_vmec2000": 9.0,
                         "best_fsq": 9.0,
+                        "best_fsqr": 2.0,
+                        "best_fsqz": 3.0,
+                        "best_fsql": 4.0,
                         "final_fsq": 9.0,
+                        "final_fsqr": 2.0,
+                        "final_fsqz": 3.0,
+                        "final_fsql": 4.0,
                         "vmec2000_final_fsq": 9.0,
                         "max_boundary_fit_error": 1.0e-14,
                     },
@@ -533,10 +550,20 @@ def test_toroidal_hybrid_convergence_example_aggregates_chunk_jsons(tmp_path: Pa
                         "ran_vmec2000": True,
                         "converged_by_total_fsq": True,
                         "vmec2000_returncode": 0,
+                        "requested_ftol": 0.01,
                         "direct_initial_fsq_ratio_vmec2000": 1.002,
                         "best_fsq": 0.03,
+                        "best_fsqr": 0.004,
+                        "best_fsqz": 0.003,
+                        "best_fsql": 0.002,
                         "final_fsq": 0.04,
+                        "final_fsqr": 0.005,
+                        "final_fsqz": 0.004,
+                        "final_fsql": 0.003,
                         "vmec2000_final_fsq": 0.008,
+                        "vmec2000_final_fsqr": 0.002,
+                        "vmec2000_final_fsqz": 0.003,
+                        "vmec2000_final_fsql": 0.004,
                         "max_boundary_fit_error": 1.0e-14,
                     },
                     {
@@ -552,10 +579,20 @@ def test_toroidal_hybrid_convergence_example_aggregates_chunk_jsons(tmp_path: Pa
                         "ran_vmec2000": True,
                         "converged_by_total_fsq": False,
                         "vmec2000_returncode": 0,
+                        "requested_ftol": 0.01,
                         "direct_initial_fsq_ratio_vmec2000": 1.004,
                         "best_fsq": 0.06,
+                        "best_fsqr": 0.03,
+                        "best_fsqz": 0.01,
+                        "best_fsql": 0.02,
                         "final_fsq": 0.12,
+                        "final_fsqr": 0.03,
+                        "final_fsqz": 0.02,
+                        "final_fsql": 0.04,
                         "vmec2000_final_fsq": 0.022,
+                        "vmec2000_final_fsqr": 0.005,
+                        "vmec2000_final_fsqz": 0.006,
+                        "vmec2000_final_fsql": 0.007,
                         "max_boundary_fit_error": 1.0e-14,
                     },
                 ],
@@ -597,15 +634,27 @@ def test_toroidal_hybrid_convergence_example_aggregates_chunk_jsons(tmp_path: Pa
     assert metrics["ran_solve_rows"] == 3
     assert metrics["vmec2000_returncode_zero_rows"] == 3
     assert metrics["vmec_jax_total_fsq_converged_rows"] == 2
+    assert metrics["vmec_jax_strict_component_known_rows"] == 3
+    assert metrics["vmec_jax_strict_component_pass_rows"] == 1
+    assert metrics["vmec_jax_strict_component_blocker_counts"] == {"fsql": 1, "fsqz": 1}
+    assert metrics["vmec_jax_final_max_component_over_ftol_min"] == pytest.approx(0.5)
+    assert metrics["vmec_jax_final_max_component_over_ftol_max"] == pytest.approx(4.0)
+    assert metrics["vmec2000_final_max_component_over_ftol_max"] == pytest.approx(0.7)
     assert metrics["direct_initial_fsq_ratio_vmec2000_min"] == pytest.approx(1.002)
     assert metrics["direct_initial_fsq_ratio_vmec2000_max"] == pytest.approx(1.006)
     assert metrics["best_fsq_min"] == pytest.approx(0.03)
     assert metrics["final_fsq_max"] == pytest.approx(0.12)
+    assert rows[0]["strict_component_pass"] is True
+    assert rows[0]["strict_component_bottleneck"] is None
+    assert rows[1]["strict_component_bottleneck"] == "fsqz"
+    assert rows[2]["strict_component_bottleneck"] == "fsql"
     assert Path(summary["csv"]).exists()
     with Path(summary["csv"]).open(newline="") as file_obj:
         csv_rows = list(csv.DictReader(file_obj))
     assert [row["case"] for row in csv_rows] == [row["case"] for row in rows]
     assert Path(csv_rows[0]["aggregate_source_json"]) == chunk_b.resolve()
+    assert csv_rows[2]["final_max_component_name"] == "fsql"
+    assert float(csv_rows[2]["final_max_component_over_ftol"]) == pytest.approx(4.0)
 
 
 def test_toroidal_hybrid_convergence_example_writes_nonblank_no_solve_plots(tmp_path: Path):

@@ -296,6 +296,9 @@ _CSV_COLUMNS = (
     "direct_initial_fsqr",
     "direct_initial_fsqz",
     "direct_initial_fsql",
+    "direct_initial_max_component",
+    "direct_initial_max_component_name",
+    "direct_initial_max_component_over_ftol",
     "direct_initial_fsq_ratio_vmec2000",
     "direct_initial_fsqr_ratio_vmec2000",
     "direct_initial_fsqz_ratio_vmec2000",
@@ -312,12 +315,24 @@ _CSV_COLUMNS = (
     "initial_fsqr",
     "initial_fsqz",
     "initial_fsql",
+    "initial_max_component",
+    "initial_max_component_name",
+    "initial_max_component_over_ftol",
     "final_fsqr",
     "final_fsqz",
     "final_fsql",
+    "final_max_component",
+    "final_max_component_name",
+    "final_max_component_over_ftol",
     "best_fsqr",
     "best_fsqz",
     "best_fsql",
+    "best_max_component",
+    "best_max_component_name",
+    "best_max_component_over_ftol",
+    "strict_component_pass",
+    "strict_component_bottleneck",
+    "strict_component_margin",
     "converged",
     "converged_strict",
     "converged_by_total_fsq",
@@ -338,9 +353,15 @@ _CSV_COLUMNS = (
     "vmec2000_initial_fsqr",
     "vmec2000_initial_fsqz",
     "vmec2000_initial_fsql",
+    "vmec2000_initial_max_component",
+    "vmec2000_initial_max_component_name",
+    "vmec2000_initial_max_component_over_ftol",
     "vmec2000_final_fsqr",
     "vmec2000_final_fsqz",
     "vmec2000_final_fsql",
+    "vmec2000_final_max_component",
+    "vmec2000_final_max_component_name",
+    "vmec2000_final_max_component_over_ftol",
     "vmec2000_aspect",
     "vmec2000_mean_iota",
     "initial_fsq_ratio_vmec2000",
@@ -1019,6 +1040,55 @@ def _range_or_none(values: list[float]) -> dict[str, float | None]:
     return {"min": float(min(values)), "max": float(max(values))}
 
 
+_RESIDUAL_COMPONENTS = ("fsqr", "fsqz", "fsql")
+
+
+def _row_float(row: dict[str, object], key: str) -> float | None:
+    value = row.get(key)
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if np.isfinite(number) else None
+
+
+def _component_max(row: dict[str, object], prefix: str) -> tuple[str | None, float | None]:
+    values: list[tuple[str, float]] = []
+    for name in _RESIDUAL_COMPONENTS:
+        value = _row_float(row, f"{prefix}_{name}")
+        if value is not None:
+            values.append((name, value))
+    if not values:
+        return None, None
+    name, value = max(values, key=lambda item: item[1])
+    return name, float(value)
+
+
+def _attach_component_max_diagnostics(row: dict[str, object]) -> None:
+    """Attach strict-component bottleneck metrics for any available residuals."""
+    ftol = _row_float(row, "requested_ftol")
+    for prefix in ("direct_initial", "initial", "best", "final", "vmec2000_initial", "vmec2000_final"):
+        name, value = _component_max(row, prefix)
+        row[f"{prefix}_max_component"] = value
+        row[f"{prefix}_max_component_name"] = name
+        row[f"{prefix}_max_component_over_ftol"] = (
+            None if value is None or ftol is None or ftol <= 0.0 else float(value / ftol)
+        )
+
+    final_name = row.get("final_max_component_name")
+    final_value = _row_float(row, "final_max_component")
+    if final_value is None or ftol is None:
+        row["strict_component_pass"] = None
+        row["strict_component_bottleneck"] = final_name
+        row["strict_component_margin"] = None
+        return
+    row["strict_component_pass"] = bool(final_value <= ftol)
+    row["strict_component_bottleneck"] = None if final_value <= ftol else final_name
+    row["strict_component_margin"] = float(ftol - final_value)
+
+
 def _row_sort_key(row: dict[str, object]) -> tuple[str, int, int, int, str]:
     def _int_value(name: str) -> int:
         try:
@@ -1040,7 +1110,17 @@ def _aggregate_metrics(rows: list[dict[str, object]]) -> dict[str, object]:
     best_fsq = _range_or_none(_finite_row_values(rows, "best_fsq"))
     final_fsq = _range_or_none(_finite_row_values(rows, "final_fsq"))
     vmec2000_final_fsq = _range_or_none(_finite_row_values(rows, "vmec2000_final_fsq"))
+    final_component = _range_or_none(_finite_row_values(rows, "final_max_component"))
+    final_component_over_ftol = _range_or_none(_finite_row_values(rows, "final_max_component_over_ftol"))
+    vmec2000_final_component_over_ftol = _range_or_none(
+        _finite_row_values(rows, "vmec2000_final_max_component_over_ftol")
+    )
     vmec2000_rows = [row for row in rows if bool(row.get("ran_vmec2000"))]
+    strict_blockers = [
+        str(row.get("strict_component_bottleneck"))
+        for row in rows
+        if row.get("strict_component_bottleneck") is not None
+    ]
     return {
         "row_count": len(rows),
         "ran_solve_rows": sum(1 for row in rows if bool(row.get("ran_solve"))),
@@ -1053,6 +1133,19 @@ def _aggregate_metrics(rows: list[dict[str, object]]) -> dict[str, object]:
         "vmec_jax_total_fsq_converged_rows": sum(
             1 for row in rows if bool(row.get("converged_by_total_fsq"))
         ),
+        "vmec_jax_strict_component_pass_rows": sum(
+            1 for row in rows if row.get("strict_component_pass") is True
+        ),
+        "vmec_jax_strict_component_known_rows": sum(
+            1 for row in rows if row.get("strict_component_pass") is not None
+        ),
+        "vmec_jax_strict_component_blocker_counts": _counts_json(strict_blockers),
+        "vmec_jax_final_max_component_min": final_component["min"],
+        "vmec_jax_final_max_component_max": final_component["max"],
+        "vmec_jax_final_max_component_over_ftol_min": final_component_over_ftol["min"],
+        "vmec_jax_final_max_component_over_ftol_max": final_component_over_ftol["max"],
+        "vmec2000_final_max_component_over_ftol_min": vmec2000_final_component_over_ftol["min"],
+        "vmec2000_final_max_component_over_ftol_max": vmec2000_final_component_over_ftol["max"],
         "direct_initial_fsq_ratio_vmec2000_min": direct_ratio["min"],
         "direct_initial_fsq_ratio_vmec2000_max": direct_ratio["max"],
         "best_fsq_min": best_fsq["min"],
@@ -1104,6 +1197,7 @@ def _aggregate_convergence_jsons(
                 duplicate_cases.append(case)
             row = dict(source_row)
             row["aggregate_source_json"] = str(path)
+            _attach_component_max_diagnostics(row)
             rows_by_case[case] = row
     rows = sorted(rows_by_case.values(), key=_row_sort_key)
     if not rows:
@@ -1405,6 +1499,9 @@ def main() -> None:
                     "direct_initial_fsqr": None,
                     "direct_initial_fsqz": None,
                     "direct_initial_fsql": None,
+                    "direct_initial_max_component": None,
+                    "direct_initial_max_component_name": None,
+                    "direct_initial_max_component_over_ftol": None,
                     "direct_initial_fsq_ratio_vmec2000": None,
                     "direct_initial_fsqr_ratio_vmec2000": None,
                     "direct_initial_fsqz_ratio_vmec2000": None,
@@ -1421,12 +1518,24 @@ def main() -> None:
                     "initial_fsqr": None,
                     "initial_fsqz": None,
                     "initial_fsql": None,
+                    "initial_max_component": None,
+                    "initial_max_component_name": None,
+                    "initial_max_component_over_ftol": None,
                     "final_fsqr": None,
                     "final_fsqz": None,
                     "final_fsql": None,
+                    "final_max_component": None,
+                    "final_max_component_name": None,
+                    "final_max_component_over_ftol": None,
                     "best_fsqr": None,
                     "best_fsqz": None,
                     "best_fsql": None,
+                    "best_max_component": None,
+                    "best_max_component_name": None,
+                    "best_max_component_over_ftol": None,
+                    "strict_component_pass": None,
+                    "strict_component_bottleneck": None,
+                    "strict_component_margin": None,
                     "converged": None,
                     "converged_strict": None,
                     "converged_by_total_fsq": None,
@@ -1454,9 +1563,15 @@ def main() -> None:
                     "vmec2000_initial_fsqr": None,
                     "vmec2000_initial_fsqz": None,
                     "vmec2000_initial_fsql": None,
+                    "vmec2000_initial_max_component": None,
+                    "vmec2000_initial_max_component_name": None,
+                    "vmec2000_initial_max_component_over_ftol": None,
                     "vmec2000_final_fsqr": None,
                     "vmec2000_final_fsqz": None,
                     "vmec2000_final_fsql": None,
+                    "vmec2000_final_max_component": None,
+                    "vmec2000_final_max_component_name": None,
+                    "vmec2000_final_max_component_over_ftol": None,
                     "vmec2000_aspect": None,
                     "vmec2000_mean_iota": None,
                     "vmec2000_iter_history": [],
@@ -1616,6 +1731,7 @@ def main() -> None:
                     except Exception as exc:
                         row["vmec2000_error"] = str(exc)
                 _attach_initial_residual_comparison(row)
+                _attach_component_max_diagnostics(row)
                 rows.append(row)
 
     if not rows:

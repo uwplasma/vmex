@@ -24734,3 +24734,127 @@ No user input is required to continue technical work, but a review decision will
 eventually be needed on whether strict component convergence and production
 free-boundary LCFS should be required before undrafting this PR or split into
 follow-up PRs.
+
+---
+## 206. Toroidal Target Strict-Component Bottleneck Diagnostics
+
+### Steps taken
+
+- Added strict-component bottleneck fields to the toroidal hybrid convergence
+  runner CSV/JSON rows.
+- Added aggregate metrics for strict-component pass rows, known rows, blocker
+  counts, largest final component values, and largest-component-over-`ftol`
+  ranges.
+- Made `--aggregate-json` backfill these fields from older chunk JSONs so the
+  existing office target results remain useful without rerunning solves.
+- Re-aggregated the existing office 80-iteration target JSON locally from a
+  compact copied file under `/tmp`, writing the new report under ignored
+  `results/`.
+- Updated `examples/mirror/README.md`, `docs/mirror/overview.rst`,
+  `docs/mirror/readiness.rst`, and `docs/mirror/index.rst` so the strict
+  component lane now points to bottleneck diagnostics rather than only a
+  boolean caveat.
+
+### Results obtained
+
+- The target aggregate schema now reports which residual component blocks
+  strict convergence and by what factor relative to requested `ftol`.
+- Re-aggregating the previous six-row office target report gave:
+  - `row_count = 6`;
+  - `vmec_jax_total_fsq_converged_rows = 6`;
+  - `vmec_jax_strict_converged_rows = 0`;
+  - `vmec_jax_strict_component_known_rows = 6`;
+  - `vmec_jax_strict_component_pass_rows = 1`;
+  - `vmec_jax_strict_component_blocker_counts = {"fsqr": 5}`;
+  - `vmec_jax_final_max_component_over_ftol_min = 0.9766237449115789`;
+  - `vmec_jax_final_max_component_over_ftol_max = 1.241120814042714`.
+- The five non-strict rows are therefore close `fsqr` misses, not mixed
+  component failures.  This makes the next campaign a targeted strict-`fsqr`
+  closure run instead of a blind longer solve.
+- VMEC2000 final component-over-`ftol` ranges in the same aggregate remain much
+  larger (`268.58120494993966` to `1293.7081823931007`) because that comparison
+  is a fixed VMEC2000 output/reference run, not a strict-component closure
+  claim at the same requested target.
+
+### How it was tested
+
+```bash
+python -m ruff check examples/toroidal_stellarator_mirror_hybrid_convergence.py tests/test_toroidal_hybrid.py
+JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py::test_toroidal_hybrid_convergence_example_aggregates_chunk_jsons -q
+JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
+JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py::test_toroidal_hybrid_convergence_example_target_preset_without_solve -q
+python -m sphinx -W -b html docs docs/_build/html
+scp office:/home/rjorge/local/vmec_mirror/results/toroidal_hybrid_target_iter80_aggregate_m210/toroidal_stellarator_mirror_hybrid_convergence_aggregate.json /tmp/toroidal_hybrid_target_iter80_aggregate_m210.json
+python examples/toroidal_stellarator_mirror_hybrid_convergence.py --outdir results/toroidal_hybrid_target_iter80_strict_component_m206 --aggregate-json /tmp/toroidal_hybrid_target_iter80_aggregate_m210.json --no-plots
+git status --ignored --short results/toroidal_hybrid_target_iter80_strict_component_m206 docs/_build
+```
+
+Results:
+
+- Ruff passed.
+- Focused aggregate regression passed: `1 passed in 0.74s`, then again after
+  docs updates: `1 passed in 0.68s`.
+- Full toroidal-hybrid test module passed: `31 passed in 8.21s`.
+- Focused target-preset no-solve schema test passed: `1 passed in 1.23s`.
+- Sphinx docs build passed with warnings as errors before and after the final
+  wording update.
+- Generated docs and target re-aggregation outputs remain ignored:
+  `!! docs/_build/` and `!! results/`.
+
+### File structure and best-practice notes
+
+- Strict-component diagnostics live in
+  `examples/toroidal_stellarator_mirror_hybrid_convergence.py` because they are
+  campaign/reporting evidence, not a new core solver contract.
+- The core solver API remains unchanged; it already reports strict and total
+  convergence flags plus component histories.
+- The helper backfills older aggregate JSONs defensively, which avoids copying
+  bulky WOUT/`threed1` trees or rerunning expensive target solves just to
+  diagnose the final component bottleneck.
+- Docs now distinguish strict-component diagnostics from strict-component
+  convergence promotion.
+
+### Best next steps
+
+1. Commit and push this M206 tranche.
+2. Update the draft PR body to section 206 and snapshot failed checks.
+3. Run a targeted office strict-closure campaign for the five `fsqr` bottleneck
+   rows with a modest higher iteration budget, keeping plots off and aggregating
+   compact JSON only.
+4. If strict closure succeeds, update readiness and PR status.  If it does not,
+   use the new bottleneck metrics to decide whether this is a solver-policy
+   issue or an acceptable documented follow-up.
+5. Continue after that with the production free-boundary LCFS and broader
+   differentiable solved-state lanes.
+
+### Completion percentages after M206
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `95%`.
+- Fixed-boundary axisymmetric solve: `96%`.
+- Residual Newton / preconditioning: `96%`.
+- Two-coil and manufactured validation: `95%`.
+- Finite-current pitch validation: `94%`.
+- Plotting and `vmec --plot` mirror support: `99%`.
+- I/O schema and docs: `100%`.
+- Differentiable solved-state API: `97%`.
+- Mirror-Boozer-like diagnostics: `94%`.
+- Free-boundary mirror lane: `99.3%` overall for the current diagnostic/reduced
+  solver scope, with production LCFS convergence still explicitly planned.
+- Straight-axis hybrid support fixture lane: `100%` for support-fixture scope.
+- Toroidal stellarator-mirror hybrid lane: `99.7%`, with total-`fsq`
+  convergence complete and strict-component blockers now quantified as near
+  `fsqr` misses.
+- ESSOS circular-coil mirror beta scan: `99%`.
+- Public API/source simplification: `100%` for the current mirror package
+  structure.
+- PR merge readiness overall: `99.75%`, pending strict-component closure
+  decision, production free-boundary LCFS decision, broader differentiable
+  solved-state promotion, and final checks.
+
+### User input needed
+
+No user input is needed to continue.  A later review decision is still needed
+on whether production free-boundary LCFS convergence and broad differentiable
+full-equilibrium APIs must be included before undrafting, or split into
+follow-up PRs after this mirror-geometry PR.
