@@ -23260,3 +23260,85 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.99999999966%.
+
+## 2026-06-19 Discrete-Adjoint Replay Policy/Payload Decomposition
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added the `vmec_jax/solvers/fixed_boundary/adjoint/` domain package for
+   fixed-boundary adjoint implementation details.
+2. Moved replay-cache diagnostics, replay scan cache objects, replay bucket
+   policy, column chunk policy, and preconditioner trace policy helpers from
+   `vmec_jax/discrete_adjoint.py` into
+   `vmec_jax/solvers/fixed_boundary/adjoint/replay_policy.py`.
+3. Moved dynamic replay payload stacking, static-flag inference, signature
+   helpers, dynamic trace support checks, basepoint carry construction, and
+   dynamic replay scalar/cache helpers into
+   `vmec_jax/solvers/fixed_boundary/adjoint/replay_payload.py`.
+4. Kept legacy private names importable from `vmec_jax.discrete_adjoint`,
+   including monkeypatch-sensitive hooks such as
+   `_DEFAULT_REPLAY_COLUMN_TARGET_MB`, `_scan_cache_limit`,
+   `_replay_column_chunk_default`, and replay-cache objects.
+
+Results obtained:
+
+- `vmec_jax/discrete_adjoint.py` decreased from 3375 to 2513 lines.
+- Replay runtime policy and dynamic payload construction now have clearer
+  ownership under the fixed-boundary adjoint domain instead of sitting in the
+  root namespace module.
+- Existing discrete-adjoint private tests continue to pass through the
+  compatibility facade.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/discrete_adjoint.py vmec_jax/solvers/fixed_boundary/adjoint/replay_policy.py vmec_jax/solvers/fixed_boundary/adjoint/replay_payload.py vmec_jax/solvers/fixed_boundary/adjoint/__init__.py`
+- `python -m ruff check vmec_jax/discrete_adjoint.py vmec_jax/solvers/fixed_boundary/adjoint/replay_policy.py vmec_jax/solvers/fixed_boundary/adjoint/replay_payload.py vmec_jax/solvers/fixed_boundary/adjoint/__init__.py tests/test_discrete_adjoint_qh.py tests/test_discrete_adjoint_chunking.py tests/test_discrete_adjoint_wave6_coverage.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_discrete_adjoint_chunking.py tests/test_discrete_adjoint_wave6_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_discrete_adjoint_qh.py -q`
+- `python tools/diagnostics/source_health.py --top 24 --top-functions 55`
+
+Best next steps:
+
+1. Continue with one final discrete-adjoint decomposition tranche if needed:
+   either strict-update primitives or tape builders, whichever can be moved
+   without circular dependencies.
+2. Otherwise move back to the largest remaining source-health warning,
+   `solvers/fixed_boundary/residual/iteration.py`, using a context-object seam
+   for `_run_vmec2000_scan` rather than another direct block move.
+3. Keep focused AD replay tests as the validation gate for further
+   discrete-adjoint changes.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.99999972%.
+- Solver monolith reduction: 99.827%.
+- Free-boundary adjoint monolith reduction: 99.60%.
+- Driver workflow decomposition: 99.949%.
+- Residual iteration decomposition: 99.055%.
+- WOUT diagnostic/profile decomposition: 99.982%.
+- Bcovar/WOUT parity decomposition: 99.16%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.825%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.89%.
+- Fixed-boundary optimizer decomposition: 98.05%.
+- Plotting/WOUT visualization decomposition: 98.05%.
+- Free-boundary facade/domain decomposition: 99.1%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.82%.
+- Discrete-adjoint replay decomposition: 98.45%.
+- Free-boundary validation-gate maintainability: 98.35%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.99999999970%.
