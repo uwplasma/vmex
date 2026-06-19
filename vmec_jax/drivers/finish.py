@@ -144,10 +144,16 @@ def maybe_finish_cli_fixed_boundary_run(
     base_diag["requested_ftol"] = float(requested_ftol)
     base_diag["fsq_total_target"] = float(target_fsq)
     staged_input = (ctx.ns_list_input is not None) and (len(ctx.ns_list_input) > 1)
+    ns_stage_count = len(ctx.ns_list_input) if staged_input else 0
     explicit_niter_stages = (
         [int(v) for v in ctx.niter_list_input]
-        if (ctx.niter_list_input is not None) and (len(ctx.niter_list_input) == len(ctx.ns_list_input or []))
+        if (ctx.niter_list_input is not None) and (len(ctx.niter_list_input) == ns_stage_count)
         else None
+    )
+    explicit_ftol_stages = (
+        [float(v) for v in ctx.ftol_list_input]
+        if (ctx.ftol_list_input is not None) and (len(ctx.ftol_list_input) == ns_stage_count)
+        else [float(ctx.indata.get_float("FTOL", 1.0e-13))] * ns_stage_count
     )
     require_staged_followup = (
         bool(ctx.accelerated_mode)
@@ -159,13 +165,6 @@ def maybe_finish_cli_fixed_boundary_run(
     )
     run_in_strict = ctx.result_meets_requested_ftol(run_in.result, ftol=float(requested_ftol))
     run_in_total = ctx.result_hits_total_target(run_in.result, fsq_total_target=float(target_fsq))
-    if (
-        bool(run_in.result.diagnostics.get("converged", False))
-        and bool(run_in_strict)
-        and (not bool(require_staged_followup))
-    ):
-        _empty_finish_diagnostics(base_diag, converged=True, strict=True, total=bool(run_in_total))
-        return replace(run_in, result=replace(run_in.result, diagnostics=base_diag))
     if bool(run_in_strict) and (not bool(require_staged_followup)):
         _empty_finish_diagnostics(base_diag, converged=True, strict=True, total=bool(run_in_total))
         return replace(run_in, result=replace(run_in.result, diagnostics=base_diag))
@@ -272,11 +271,6 @@ def maybe_finish_cli_fixed_boundary_run(
         return replace(best_run, state=res_i.state, result=res_i)
 
     if staged_input and bool(ctx.accelerated_mode) and str(initial_policy) == "single_grid":
-        explicit_ftol_stages = (
-            [float(v) for v in ctx.ftol_list_input]
-            if (ctx.ftol_list_input is not None) and (len(ctx.ftol_list_input) == len(ctx.ns_list_input))
-            else [float(ctx.indata.get_float("FTOL", 1.0e-13))] * len(ctx.ns_list_input)
-        )
         missed_target = not bool(ctx.result_meets_requested_ftol(best_run.result, ftol=float(requested_ftol)))
         should_run_staged_followup = bool(explicit_niter_stages is not None) and (
             bool(require_staged_followup) or bool(missed_target)
@@ -341,11 +335,7 @@ def maybe_finish_cli_fixed_boundary_run(
             partial_fallback = ctx.run_cli_explicit_staged_followup(
                 ns_stage_list=[int(v) for v in ctx.ns_list_input],
                 niter_stage_list=explicit_niter_stages,
-                ftol_stage_list=(
-                    [float(v) for v in ctx.ftol_list_input]
-                    if (ctx.ftol_list_input is not None) and (len(ctx.ftol_list_input) == len(ctx.ns_list_input))
-                    else [float(ctx.indata.get_float("FTOL", 1.0e-13))] * len(ctx.ns_list_input)
-                ),
+                ftol_stage_list=explicit_ftol_stages,
                 start_stage_index=int(partial_start_stage),
                 restart_state=partial_restart_state,
                 restart_static_prev=partial_restart_static_prev,
