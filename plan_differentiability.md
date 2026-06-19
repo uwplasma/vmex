@@ -19919,3 +19919,77 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.999999968%.
+
+## 2026-06-19 Fixed-Boundary Optimizer Cache Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Inspected `FixedBoundaryExactOptimizer` after the plotting tranche because
+   `optimization.py` remains a source-health production warning.
+2. Centralized exact-state, residual, Jacobian, helper, and small LRU cache
+   names into explicit class-level cache groups.
+3. Replaced repeated cache initialization and `clear_caches` branches with one
+   defensive cache-clearing loop that still supports tests and diagnostics that
+   instantiate the optimizer with `object.__new__`.
+4. Simplified `_read_last_array` to normalize scalar, sequence, and ndarray
+   values through one NumPy path.
+5. Removed the unused `_has_qs_residual_block_metadata` private wrapper.
+
+Results obtained:
+
+- `vmec_jax/optimization.py` changed by 20 insertions and 29 deletions, net
+  `-9` source lines.
+- The file decreased from 2671 to 2662 lines.
+- Cache ownership is now documented in one place, reducing the chance that a
+  new optimizer cache is initialized but not released by `clear_caches`.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/optimization.py`
+- `python -m ruff check vmec_jax/optimization.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_optimization_wave2_coverage.py::test_jit_initial_state_env_and_clear_caches tests/test_optimization_wave2_coverage.py::test_post_jacobian_clear_invokes_global_cache_clearers tests/test_gpu_cpu_performance_profile.py::test_exact_optimizer_point_cache_clear_preserves_initial_tangent_cache tests/test_optimization_fast_optimizer_methods.py::test_cache_helpers_and_clear_caches_manage_small_payloads tests/test_optimization_fast_optimizer_methods.py::test_read_last_array_covers_numpy_empty_and_fallback_values tests/test_optimization_helpers.py::test_fixed_boundary_optimizer_read_last_array_prefers_scalar_array_value tests/test_optimization_helpers.py::test_fixed_boundary_optimizer_read_last_array_handles_sequence_values tests/test_optimization_wave4_coverage.py::test_optimizer_profile_cache_and_history_small_branches -q`
+- `git diff --check`
+
+Best next steps:
+
+1. Continue reducing `optimization.py` only where there are real duplicated
+   dispatch or bookkeeping seams; otherwise shift to the bigger residual or
+   discrete-adjoint hotspots.
+2. Keep exact-cache behavior covered by targeted tests because it is directly
+   tied to accepted-point output correctness and long optimization memory use.
+3. Use `ssh office` for accelerator/performance validation only when a tranche
+   changes replay/JVP or solve execution paths.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999405%.
+- Solver monolith reduction: 99.79%.
+- Free-boundary adjoint monolith reduction: 99.51%.
+- Driver workflow decomposition: 99.945%.
+- Residual iteration decomposition: 98.88%.
+- WOUT diagnostic/profile decomposition: 99.965%.
+- Bcovar/WOUT parity decomposition: 99.14%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.81%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.71%.
+- Fixed-boundary optimizer decomposition: 96.18%.
+- Plotting/WOUT visualization decomposition: 96.35%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.75%.
+- Discrete-adjoint replay decomposition: 96.58%.
+- Free-boundary validation-gate maintainability: 97.45%.
+- QI objective/staged-runner decomposition: 96.9%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.999999969%.

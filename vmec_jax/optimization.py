@@ -367,6 +367,17 @@ class FixedBoundaryExactOptimizer:
         opt.save_history("history.json", result)
     """
 
+    _DICT_CACHE_ATTRS = (
+        "_exact_cache",
+        "_exact_state_cache",
+        "_exact_state_key_by_id",
+        "_exact_residual_cache",
+        "_exact_jacobian_cache",
+        "_discrete_jacobian_helper_cache",
+        "_scan_exact_helper_cache",
+    )
+    _ORDERED_CACHE_ATTRS = ("_initial_state_cache", "_trial_residual_cache")
+
     def __init__(
         self,
         static: VMECStatic,
@@ -493,13 +504,8 @@ class FixedBoundaryExactOptimizer:
         # Single-entry caches: keep the heavy adjoint tape only while the
         # current accepted-point Jacobian needs it, but retain the much smaller
         # solved state so final metrics/wout writing do not rerun VMEC.
-        self._exact_cache: dict = {}
-        self._exact_state_cache: dict = {}
-        self._exact_state_key_by_id: dict[int, object] = {}
-        self._exact_residual_cache: dict = {}
-        self._exact_jacobian_cache: dict = {}
-        self._discrete_jacobian_helper_cache: dict = {}
-        self._scan_exact_helper_cache: dict = {}
+        for cache_attr in self._DICT_CACHE_ATTRS:
+            setattr(self, cache_attr, {})
         self._scan_exact_path = self._select_exact_path()
         self._initial_state_cache: OrderedDict[bytes, VMECState] = OrderedDict()
         self._initial_state_cache_max = 4
@@ -821,14 +827,9 @@ class FixedBoundaryExactOptimizer:
     def _read_last_array(self, array_key: str, scalar_key: str, default, cast):
         value = self._indata.get(array_key, None)
         if value is not None:
-            if isinstance(value, (list, tuple)):
-                if value:
-                    return cast(value[-1])
-            elif isinstance(value, np.ndarray):
-                if int(value.size) > 0:
-                    return cast(np.asarray(value).reshape(-1)[-1])
-            else:
-                return cast(value)
+            array_value = np.asarray(value).reshape(-1)
+            if int(array_value.size) > 0:
+                return cast(array_value[-1])
         return cast(self._indata.get(scalar_key, default))
 
     def _profile_add(self, name: str, dt: float) -> None:
@@ -1901,17 +1902,10 @@ class FixedBoundaryExactOptimizer:
 
     def clear_caches(self) -> None:
         """Release JIT and exact-solve caches."""
-        self._exact_cache.clear()
-        self._exact_state_cache.clear()
-        if hasattr(self, "_exact_state_key_by_id"):
-            self._exact_state_key_by_id.clear()
-        if hasattr(self, "_exact_residual_cache"):
-            self._exact_residual_cache.clear()
-        if hasattr(self, "_exact_jacobian_cache"):
-            self._exact_jacobian_cache.clear()
-        self._trial_residual_cache.clear()
-        if hasattr(self, "_initial_state_cache"):
-            self._initial_state_cache.clear()
+        for cache_attr in (*self._DICT_CACHE_ATTRS, *self._ORDERED_CACHE_ATTRS):
+            cache = getattr(self, cache_attr, None)
+            if cache is not None:
+                cache.clear()
         self._initial_state_packed_helper = None
         self._initial_tangent_cache.clear()
         if hasattr(self, "_initial_tangent_direction_cache"):
@@ -1945,9 +1939,6 @@ class FixedBoundaryExactOptimizer:
             has_residual_block_metadata=getattr(self, "_has_residual_block_metadata", None),
             has_iota_callback=getattr(self, "_iota_fn", None) is not None,
         )
-
-    def _has_qs_residual_block_metadata(self) -> bool:
-        return self._residual_history_policy().has_qs_residual_block_metadata()
 
     def _can_build_qs_from_residuals(self) -> bool:
         """Return true when residual block metadata identifies QS/objective blocks."""
