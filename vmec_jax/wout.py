@@ -111,6 +111,17 @@ _jxbforce_filter_with_bsubs_derivs_loop = _wout_jxbforce_helpers._jxbforce_filte
 _jxbforce_nyquist_limits = _wout_jxbforce_helpers._jxbforce_nyquist_limits
 
 
+def _solve_jxbforce_collocation(A: np.ndarray, rhs: np.ndarray) -> np.ndarray | None:
+    try:
+        return np.linalg.solve(A, rhs)
+    except np.linalg.LinAlgError:
+        try:
+            sol, *_ = np.linalg.lstsq(A, rhs, rcond=None)
+            return sol
+        except np.linalg.LinAlgError:
+            return None
+
+
 def _validate_wint_trig(trig) -> int:
     cosmui3 = np.asarray(trig.cosmui3)
     mscale = np.asarray(trig.mscale)
@@ -497,13 +508,9 @@ def _jxbforce_getbsubs_coeffs_lasym_false(
     if row != itotal:
         return None
 
-    try:
-        sol = np.linalg.solve(A, rhs)
-    except np.linalg.LinAlgError:
-        try:
-            sol, *_ = np.linalg.lstsq(A, rhs, rcond=None)
-        except np.linalg.LinAlgError:
-            return None
+    sol = _solve_jxbforce_collocation(A, rhs)
+    if sol is None:
+        return None
 
     coeff = np.zeros((mmax + 1, 2 * nmax + 1), dtype=float)
     off = nmax
@@ -635,13 +642,9 @@ def _jxbforce_getbsubs_coeffs_lasym_true(
     if row != itotal:
         return None
 
-    try:
-        sol = np.linalg.solve(A, rhs)
-    except np.linalg.LinAlgError:
-        try:
-            sol, *_ = np.linalg.lstsq(A, rhs, rcond=None)
-        except np.linalg.LinAlgError:
-            return None
+    sol = _solve_jxbforce_collocation(A, rhs)
+    if sol is None:
+        return None
 
     coeff = np.zeros((mmax + 1, 2 * nmax + 1, 2), dtype=float)
     off = nmax
@@ -686,6 +689,23 @@ def _jxbforce_getbsubs_coeffs_lasym_true(
     return coeff
 
 
+def _jxbforce_float_arrays(*arrays: np.ndarray) -> tuple[np.ndarray, ...]:
+    return tuple(np.asarray(arr, dtype=float) for arr in arrays)
+
+
+def _jxbforce_trig_slices(trig, *, nt2: int, mnyq: int, nnyq: int) -> tuple[np.ndarray, ...]:
+    return (
+        np.asarray(trig.cosmu, dtype=float)[:nt2, : mnyq + 1],
+        np.asarray(trig.sinmu, dtype=float)[:nt2, : mnyq + 1],
+        np.asarray(trig.cosmum, dtype=float)[:nt2, : mnyq + 1],
+        np.asarray(trig.sinmum, dtype=float)[:nt2, : mnyq + 1],
+        np.asarray(trig.cosnv, dtype=float)[:, : nnyq + 1],
+        np.asarray(trig.sinnv, dtype=float)[:, : nnyq + 1],
+        np.asarray(trig.cosnvn, dtype=float)[:, : nnyq + 1],
+        np.asarray(trig.sinnvn, dtype=float)[:, : nnyq + 1],
+    )
+
+
 def _jxbforce_apply_bsubs_correction_lasym_false(
     *,
     bsubu: np.ndarray,
@@ -705,16 +725,9 @@ def _jxbforce_apply_bsubs_correction_lasym_false(
     sum_w,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Mirror VMEC jxbforce corrected-bsubs pass for lasym=False."""
-    bsubu = np.asarray(bsubu, dtype=float)
-    bsubv = np.asarray(bsubv, dtype=float)
-    bsubs = np.asarray(bsubs, dtype=float)
-    bsubsu = np.asarray(bsubsu, dtype=float)
-    bsubsv = np.asarray(bsubsv, dtype=float)
-    bsupu = np.asarray(bsupu, dtype=float)
-    bsupv = np.asarray(bsupv, dtype=float)
-    sqrtg = np.asarray(sqrtg, dtype=float)
-    pres = np.asarray(pres, dtype=float)
-    vp = np.asarray(vp, dtype=float)
+    bsubu, bsubv, bsubs, bsubsu, bsubsv, bsupu, bsupv, sqrtg, pres, vp = _jxbforce_float_arrays(
+        bsubu, bsubv, bsubs, bsubsu, bsubsv, bsupu, bsupv, sqrtg, pres, vp
+    )
 
     ns, nt2, nzeta = bsubu.shape
     if ns < 3 or hs == 0.0:
@@ -722,14 +735,9 @@ def _jxbforce_apply_bsubs_correction_lasym_false(
 
     ohs = 1.0 / hs
     mnyq, nnyq = _jxbforce_nyquist_limits(trig)
-    cosmu = np.asarray(trig.cosmu, dtype=float)[:nt2, : mnyq + 1]
-    sinmu = np.asarray(trig.sinmu, dtype=float)[:nt2, : mnyq + 1]
-    cosmum = np.asarray(trig.cosmum, dtype=float)[:nt2, : mnyq + 1]
-    sinmum = np.asarray(trig.sinmum, dtype=float)[:nt2, : mnyq + 1]
-    cosnv = np.asarray(trig.cosnv, dtype=float)[:, : nnyq + 1]
-    sinnv = np.asarray(trig.sinnv, dtype=float)[:, : nnyq + 1]
-    cosnvn = np.asarray(trig.cosnvn, dtype=float)[:, : nnyq + 1]
-    sinnvn = np.asarray(trig.sinnvn, dtype=float)[:, : nnyq + 1]
+    cosmu, sinmu, cosmum, sinmum, cosnv, sinnv, cosnvn, sinnvn = _jxbforce_trig_slices(
+        trig, nt2=nt2, mnyq=mnyq, nnyq=nnyq
+    )
 
     for js in range(1, ns - 1):
         jxb = 0.5 * (sqrtg[js] + sqrtg[js + 1])
@@ -806,16 +814,9 @@ def _jxbforce_apply_bsubs_correction_lasym_true(
     sum_w,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Mirror VMEC jxbforce corrected-bsubs pass for lasym=True."""
-    bsubu = np.asarray(bsubu, dtype=float)
-    bsubv = np.asarray(bsubv, dtype=float)
-    bsubs = np.asarray(bsubs, dtype=float)
-    bsubsu = np.asarray(bsubsu, dtype=float)
-    bsubsv = np.asarray(bsubsv, dtype=float)
-    bsupu = np.asarray(bsupu, dtype=float)
-    bsupv = np.asarray(bsupv, dtype=float)
-    sqrtg = np.asarray(sqrtg, dtype=float)
-    pres = np.asarray(pres, dtype=float)
-    vp = np.asarray(vp, dtype=float)
+    bsubu, bsubv, bsubs, bsubsu, bsubsv, bsupu, bsupv, sqrtg, pres, vp = _jxbforce_float_arrays(
+        bsubu, bsubv, bsubs, bsubsu, bsubsv, bsupu, bsupv, sqrtg, pres, vp
+    )
 
     ns, nt2, nzeta = bsubu.shape
     nt1 = int(getattr(trig, "ntheta1", nt2))
@@ -827,14 +828,9 @@ def _jxbforce_apply_bsubs_correction_lasym_true(
 
     ohs = 1.0 / hs
     mnyq, nnyq = _jxbforce_nyquist_limits(trig)
-    cosmu = np.asarray(trig.cosmu, dtype=float)[:nt2, : mnyq + 1]
-    sinmu = np.asarray(trig.sinmu, dtype=float)[:nt2, : mnyq + 1]
-    cosmum = np.asarray(trig.cosmum, dtype=float)[:nt2, : mnyq + 1]
-    sinmum = np.asarray(trig.sinmum, dtype=float)[:nt2, : mnyq + 1]
-    cosnv = np.asarray(trig.cosnv, dtype=float)[:, : nnyq + 1]
-    sinnv = np.asarray(trig.sinnv, dtype=float)[:, : nnyq + 1]
-    cosnvn = np.asarray(trig.cosnvn, dtype=float)[:, : nnyq + 1]
-    sinnvn = np.asarray(trig.sinnvn, dtype=float)[:, : nnyq + 1]
+    cosmu, sinmu, cosmum, sinmum, cosnv, sinnv, cosnvn, sinnvn = _jxbforce_trig_slices(
+        trig, nt2=nt2, mnyq=mnyq, nnyq=nnyq
+    )
 
     def _expand_sym_to_full(sym: np.ndarray) -> np.ndarray:
         return _vmec_symoutput_expand(sym=sym, asym=None, trig=trig)
@@ -951,7 +947,6 @@ def _jxbforce_apply_bsubs_correction_lasym_true(
         bsubs_out[0] = 2.0 * bsubs_out[1] - bsubs_out[2]
         bsubs_out[-1] = 2.0 * bsubs_out[-1] - bsubs_out[-2]
     return bsubs_out, bsubsu_out, bsubsv_out
-
 
 
 def _compute_mercier(**kwargs) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
