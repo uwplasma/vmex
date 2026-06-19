@@ -202,8 +202,8 @@ from vmec_jax.solvers.fixed_boundary.results import (
     SolveVmecResidualResult,
 )
 from vmec_jax.solvers.fixed_boundary.diagnostics.axis_reset import (
-    evaluate_initial_axis_reset as _evaluate_initial_axis_reset,
     reset_axis_from_boundary as _reset_axis_from_boundary_impl,
+    run_initial_axis_reset_setup as _run_initial_axis_reset_setup,
 )
 from vmec_jax.solvers.free_boundary.control import (
     free_boundary_iter_controls_vmec as _free_boundary_iter_controls_vmec,
@@ -246,6 +246,7 @@ from vmec_jax.solvers.fixed_boundary.scan.math import (
 )
 from vmec_jax.solvers.fixed_boundary.scan.debug import (
     _emit_vmec2000_iter_row as _emit_scan_vmec2000_iter_row,
+    _print_axis_guess as _print_scan_axis_guess,
     _print_vmec2000_row as _print_scan_vmec2000_row,
     _record_scan_device_ready,
 )
@@ -342,32 +343,6 @@ def _scan_chunk_settings(
 
 
 _default_scan_core = _solve_runtime._default_scan_core
-
-
-_HLO_DUMPED_KEYS = _hlo_dump_helpers.HLO_DUMPED_KEYS
-
-
-def _maybe_dump_hlo_kernel(
-    *,
-    label: str,
-    fn,
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-    static: Any,
-    wout_like: Any,
-    force: bool = False,
-) -> None:
-    _hlo_dump_helpers.maybe_dump_hlo_kernel(
-        label=label,
-        fn=fn,
-        args=args,
-        kwargs=kwargs,
-        static=static,
-        wout_like=wout_like,
-        force=force,
-        has_jax_func=has_jax,
-        path_cls=Path,
-    )
 
 
 def solve_fixed_boundary_residual_iter(
@@ -949,7 +924,7 @@ def solve_fixed_boundary_residual_iter(
         apply_m1_constraints=bool(apply_m1_constraints),
         runtime_env_enabled=_runtime_env_enabled,
         getenv=os.getenv,
-        maybe_dump_hlo_kernel=_maybe_dump_hlo_kernel,
+        maybe_dump_hlo_kernel=_hlo_dump_helpers.maybe_dump_hlo_kernel,
         dump_hooks={
             "bsube": _maybe_dump_bsube,
             "bsube_terms": _maybe_dump_bsube_terms,
@@ -974,7 +949,7 @@ def solve_fixed_boundary_residual_iter(
         trig=trig,
         constraint_tcon0=constraint_tcon0,
         apply_lforbal=bool(apply_lforbal),
-        maybe_dump_kernel=_maybe_dump_hlo_kernel,
+        maybe_dump_kernel=_hlo_dump_helpers.maybe_dump_hlo_kernel,
     )
 
     _compute_forces_impl = _compute_forces
@@ -1792,82 +1767,56 @@ def solve_fixed_boundary_residual_iter(
     # VMEC `eqsolve`: if the initial Jacobian changes sign, improve the axis
     # guess *before* the first iteration (no extra iter1). This aligns the
     # zero_m1 gating and time-control history with VMEC2000.
-    t_setup_axis_reset_start = time.perf_counter() if timing_enabled else None
-    if bool(vmec2000_control) and (not axis_reset_done) and bool(lmove_axis):
-        try:
-            t_setup_axis_force_start = time.perf_counter() if timing_enabled else None
-            k0, _frzl0, _gcr2_0, _gcz2_0, _gcl2_0, _rz_scale0, _l_scale0, _norms0 = _compute_forces_iter(
-                state,
-                include_edge=False,
-                zero_m1=jnp.asarray(1.0, dtype=jnp.asarray(state.Rcos).dtype),
-                constraint_precond_diag=zero_precond_diag,
-                constraint_tcon=zero_tcon,
-                constraint_precond_active=jnp.asarray(False),
-                constraint_tcon_active=jnp.asarray(False),
-                iter_idx=None,
-                iter2=1,
-            )
-            if timing_enabled and t_setup_axis_force_start is not None:
-                try:
-                    if has_jax():
-                        jax.block_until_ready((_gcr2_0, _gcz2_0, _gcl2_0))
-                except Exception:
-                    pass
-                timing_stats["setup_axis_reset_compute_forces"] += time.perf_counter() - float(t_setup_axis_force_start)
-            axis_reset_eval = _evaluate_initial_axis_reset(
-                axis_reset_enabled=True,
-                norms=_norms0,
-                gcr2=_gcr2_0,
-                gcz2=_gcz2_0,
-                gcl2=_gcl2_0,
-                k=k0,
-                state=state,
-                static=static,
-                trig=trig,
-                s=s,
-                badjac_use_state=bool(badjac_use_state),
-                ptau_tol=0.0,
-                ptau_tol_rel=0.0,
-                axis_reset_fsq_min=axis_reset_fsq_min,
-                force_axis_reset=bool(force_axis_reset),
-                axis_reset_always_3d=bool(axis_reset_always_3d),
-                vmec2000_control=True,
-                lmove_axis=True,
-                debug_enabled=_runtime_env_enabled(os.getenv("VMEC_JAX_AXIS_RESET_DEBUG", "")),
-                state_check_on_missing_ptau=True,
-                ptau_minmax_from_k_host=_ptau_minmax_from_k_host,
-                vmec_half_mesh_jacobian_from_state_func=vmec_half_mesh_jacobian_from_state,
-            )
-            axis_reset_decision = axis_reset_eval.decision
-            bad_jacobian0 = bool(axis_reset_decision.bad_jacobian)
-
-            force_axis_reset_init = axis_reset_decision.force_reset
-            if axis_reset_decision.reset:
-                if verbose and bool(vmec2000_control) and bool(verbose_vmec2000_table):
-                    if bad_jacobian0 or force_axis_reset_init:
-                        print(" INITIAL JACOBIAN CHANGED SIGN!", flush=True)
-                    print(" TRYING TO IMPROVE INITIAL MAGNETIC AXIS GUESS", flush=True)
-                state = _reset_axis_from_boundary(state, k_guess=k0, full_reset=False, refine_axis_guess=False)
-                if verbose and bool(vmec2000_control) and bool(verbose_vmec2000_table):
-                    if axis_reset_coeffs is not None:
-                        raxis_cc, _raxis_cs, _zaxis_cc, zaxis_cs = axis_reset_coeffs
-                        _print_scan_axis_guess(raxis_cc, zaxis_cs)
-                axis_reset_done = True
-                ijacob = 1
-                state_checkpoint = state
-                vRcc, vRss, vZsc, vZcs, vLsc, vLcs = _zero_velocity_blocks_like(
-                    vRcc, vRss, vZsc, vZcs, vLsc, vLcs
-                )
-                res0 = -1.0
-                res1 = -1.0
-                prev_rz_fsq = 2.0
-                _clear_preconditioner_cache_locals()
-                cache_constraint_rcon0 = None
-                cache_constraint_zcon0 = None
-        except Exception:
-            pass
-    if timing_enabled and t_setup_axis_reset_start is not None:
-        timing_stats["setup_axis_reset"] += time.perf_counter() - float(t_setup_axis_reset_start)
+    axis_setup = _run_initial_axis_reset_setup(
+        state=state,
+        axis_reset_done=bool(axis_reset_done),
+        ijacob=int(ijacob),
+        state_checkpoint=state_checkpoint,
+        velocities=(vRcc, vRss, vZsc, vZcs, vLsc, vLcs),
+        res0=float(res0),
+        res1=float(res1),
+        prev_rz_fsq=float(prev_rz_fsq),
+        vmec2000_control=bool(vmec2000_control),
+        lmove_axis=bool(lmove_axis),
+        verbose=bool(verbose),
+        verbose_vmec2000_table=bool(verbose_vmec2000_table),
+        timing_enabled=bool(timing_enabled),
+        timing_stats=timing_stats,
+        force_axis_reset=bool(force_axis_reset),
+        axis_reset_always_3d=bool(axis_reset_always_3d),
+        axis_reset_fsq_min=float(axis_reset_fsq_min),
+        badjac_use_state=bool(badjac_use_state),
+        static=static,
+        trig=trig,
+        s=s,
+        zero_precond_diag=zero_precond_diag,
+        zero_tcon=zero_tcon,
+        compute_forces_iter_func=_compute_forces_iter,
+        reset_axis_from_boundary_func=_reset_axis_from_boundary,
+        zero_velocity_blocks_like_func=_zero_velocity_blocks_like,
+        ptau_minmax_from_k_host_func=_ptau_minmax_from_k_host,
+        vmec_half_mesh_jacobian_from_state_func=vmec_half_mesh_jacobian_from_state,
+        print_axis_guess_func=_print_scan_axis_guess,
+        axis_reset_coeffs_func=lambda: axis_reset_coeffs,
+        env_enabled_func=_runtime_env_enabled,
+        getenv_func=os.getenv,
+        perf_counter_func=time.perf_counter,
+        has_jax_func=has_jax,
+        block_until_ready_func=jax.block_until_ready if has_jax() else None,
+        jnp_module=jnp,
+    )
+    state = axis_setup.state
+    axis_reset_done = bool(axis_setup.axis_reset_done)
+    ijacob = int(axis_setup.ijacob)
+    state_checkpoint = axis_setup.state_checkpoint
+    vRcc, vRss, vZsc, vZcs, vLsc, vLcs = axis_setup.velocities
+    res0 = float(axis_setup.res0)
+    res1 = float(axis_setup.res1)
+    prev_rz_fsq = float(axis_setup.prev_rz_fsq)
+    if axis_setup.reset_applied:
+        _clear_preconditioner_cache_locals()
+        cache_constraint_rcon0 = None
+        cache_constraint_zcon0 = None
 
     # Cache os.getenv calls that would otherwise be repeated every iteration
     # in the hot loop below (saves ~9 os.getenv calls × ~2144 iters = ~19k calls).

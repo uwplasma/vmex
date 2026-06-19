@@ -25,6 +25,7 @@ _COMPAT_MODULE_NAMES = (
     "vmec_jax.solvers.fixed_boundary.diagnostics.axis_reset",
     "vmec_jax.solvers.fixed_boundary.diagnostics.first_step",
     "vmec_jax.solvers.fixed_boundary.diagnostics.force",
+    "vmec_jax.solvers.fixed_boundary.diagnostics.hlo",
     "vmec_jax.solvers.fixed_boundary.diagnostics.io",
     "vmec_jax.solvers.fixed_boundary.optimization.constraints",
     "vmec_jax.solvers.fixed_boundary.optimization.energy",

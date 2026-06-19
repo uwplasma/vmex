@@ -10,6 +10,7 @@ from ...._compat import has_jax
 
 
 HLO_DUMPED_KEYS: set[tuple[str, int, int, int, int, int, bool]] = set()
+_HLO_DUMPED_KEYS = HLO_DUMPED_KEYS
 
 
 def maybe_dump_hlo_kernel(
@@ -99,6 +100,13 @@ def maybe_dump_hlo_kernel(
         HLO_DUMPED_KEYS.add(key)
     except Exception:
         return
+
+
+def _maybe_dump_hlo_kernel(**kwargs) -> None:
+    """Compatibility wrapper with dynamically monkeypatchable JAX detection."""
+
+    kwargs.setdefault("has_jax_func", has_jax)
+    maybe_dump_hlo_kernel(**kwargs)
 
 
 def maybe_dump_initial_residual_hlo_kernels(

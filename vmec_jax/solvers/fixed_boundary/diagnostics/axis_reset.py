@@ -29,6 +29,20 @@ class InitialAxisResetEvaluation(NamedTuple):
     bad_jacobian_state: bool
 
 
+class InitialAxisResetSetupResult(NamedTuple):
+    """State returned after optional setup-time magnetic-axis reset."""
+
+    state: VMECState
+    axis_reset_done: bool
+    ijacob: int
+    state_checkpoint: VMECState
+    velocities: tuple[Any, ...]
+    res0: float
+    res1: float
+    prev_rz_fsq: float
+    reset_applied: bool
+
+
 def initial_force_physical_fsq(*, norms: Any, gcr2: Any, gcz2: Any, gcl2: Any) -> float | None:
     """Return the physical initial residual used to gate axis reset attempts."""
 
@@ -196,6 +210,142 @@ def evaluate_initial_axis_reset(
         except Exception:
             pass
     return InitialAxisResetEvaluation(decision, fsq_phys, bad_jacobian_ptau, bool(bad_jacobian_state))
+
+
+def run_initial_axis_reset_setup(
+    *,
+    state: VMECState,
+    axis_reset_done: bool,
+    ijacob: int,
+    state_checkpoint: VMECState,
+    velocities: tuple[Any, ...],
+    res0: float,
+    res1: float,
+    prev_rz_fsq: float,
+    vmec2000_control: bool,
+    lmove_axis: bool,
+    verbose: bool,
+    verbose_vmec2000_table: bool,
+    timing_enabled: bool,
+    timing_stats: dict[str, float],
+    force_axis_reset: bool,
+    axis_reset_always_3d: bool,
+    axis_reset_fsq_min: float,
+    badjac_use_state: bool,
+    static: Any,
+    trig: Any,
+    s: Any,
+    zero_precond_diag: Any,
+    zero_tcon: Any,
+    compute_forces_iter_func: Callable[..., Any],
+    reset_axis_from_boundary_func: Callable[..., VMECState],
+    zero_velocity_blocks_like_func: Callable[..., tuple[Any, ...]],
+    ptau_minmax_from_k_host_func: Callable[[Any], tuple[Any | None, Any | None]],
+    vmec_half_mesh_jacobian_from_state_func: Callable[..., Any],
+    print_axis_guess_func: Callable[[Any, Any], None],
+    axis_reset_coeffs_func: Callable[[], tuple[Any, Any, Any, Any] | None],
+    env_enabled_func: Callable[[str], bool],
+    getenv_func: Callable[[str, str], str],
+    perf_counter_func: Callable[[], float],
+    has_jax_func: Callable[[], bool],
+    block_until_ready_func: Callable[[Any], Any] | None,
+    jnp_module: Any = jnp,
+) -> InitialAxisResetSetupResult:
+    """Run the setup-time VMEC magnetic-axis reset with host-loop semantics."""
+
+    reset_applied = False
+    t_setup_axis_reset_start = perf_counter_func() if timing_enabled else None
+    if bool(vmec2000_control) and (not bool(axis_reset_done)) and bool(lmove_axis):
+        try:
+            t_setup_axis_force_start = perf_counter_func() if timing_enabled else None
+            k0, _frzl0, gcr2_0, gcz2_0, gcl2_0, _rz_scale0, _l_scale0, norms0 = (
+                compute_forces_iter_func(
+                    state,
+                    include_edge=False,
+                    zero_m1=jnp_module.asarray(1.0, dtype=jnp_module.asarray(state.Rcos).dtype),
+                    constraint_precond_diag=zero_precond_diag,
+                    constraint_tcon=zero_tcon,
+                    constraint_precond_active=jnp_module.asarray(False),
+                    constraint_tcon_active=jnp_module.asarray(False),
+                    iter_idx=None,
+                    iter2=1,
+                )
+            )
+            if timing_enabled and t_setup_axis_force_start is not None:
+                try:
+                    if has_jax_func() and block_until_ready_func is not None:
+                        block_until_ready_func((gcr2_0, gcz2_0, gcl2_0))
+                except Exception:
+                    pass
+                timing_stats["setup_axis_reset_compute_forces"] += (
+                    perf_counter_func() - float(t_setup_axis_force_start)
+                )
+            axis_reset_eval = evaluate_initial_axis_reset(
+                axis_reset_enabled=True,
+                norms=norms0,
+                gcr2=gcr2_0,
+                gcz2=gcz2_0,
+                gcl2=gcl2_0,
+                k=k0,
+                state=state,
+                static=static,
+                trig=trig,
+                s=s,
+                badjac_use_state=bool(badjac_use_state),
+                ptau_tol=0.0,
+                ptau_tol_rel=0.0,
+                axis_reset_fsq_min=axis_reset_fsq_min,
+                force_axis_reset=bool(force_axis_reset),
+                axis_reset_always_3d=bool(axis_reset_always_3d),
+                vmec2000_control=True,
+                lmove_axis=True,
+                debug_enabled=env_enabled_func(getenv_func("VMEC_JAX_AXIS_RESET_DEBUG", "")),
+                state_check_on_missing_ptau=True,
+                ptau_minmax_from_k_host=ptau_minmax_from_k_host_func,
+                vmec_half_mesh_jacobian_from_state_func=vmec_half_mesh_jacobian_from_state_func,
+            )
+            axis_reset_decision = axis_reset_eval.decision
+            bad_jacobian0 = bool(axis_reset_decision.bad_jacobian)
+            force_axis_reset_init = bool(axis_reset_decision.force_reset)
+            if axis_reset_decision.reset:
+                if verbose and bool(vmec2000_control) and bool(verbose_vmec2000_table):
+                    if bad_jacobian0 or force_axis_reset_init:
+                        print(" INITIAL JACOBIAN CHANGED SIGN!", flush=True)
+                    print(" TRYING TO IMPROVE INITIAL MAGNETIC AXIS GUESS", flush=True)
+                state = reset_axis_from_boundary_func(
+                    state,
+                    k_guess=k0,
+                    full_reset=False,
+                    refine_axis_guess=False,
+                )
+                if verbose and bool(vmec2000_control) and bool(verbose_vmec2000_table):
+                    coeffs = axis_reset_coeffs_func()
+                    if coeffs is not None:
+                        raxis_cc, _raxis_cs, _zaxis_cc, zaxis_cs = coeffs
+                        print_axis_guess_func(raxis_cc, zaxis_cs)
+                axis_reset_done = True
+                ijacob = 1
+                state_checkpoint = state
+                velocities = zero_velocity_blocks_like_func(*velocities)
+                res0 = -1.0
+                res1 = -1.0
+                prev_rz_fsq = 2.0
+                reset_applied = True
+        except Exception:
+            pass
+    if timing_enabled and t_setup_axis_reset_start is not None:
+        timing_stats["setup_axis_reset"] += perf_counter_func() - float(t_setup_axis_reset_start)
+    return InitialAxisResetSetupResult(
+        state=state,
+        axis_reset_done=bool(axis_reset_done),
+        ijacob=int(ijacob),
+        state_checkpoint=state_checkpoint,
+        velocities=velocities,
+        res0=float(res0),
+        res1=float(res1),
+        prev_rz_fsq=float(prev_rz_fsq),
+        reset_applied=bool(reset_applied),
+    )
 
 
 def write_axis_reset_dump(
