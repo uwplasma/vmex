@@ -22207,3 +22207,95 @@ Results:
 ### User input needed
 
 No user input is needed.
+
+
+---
+## 184. Mirror-Boozer-Like Diagnostic Contract Coverage
+
+### Steps taken
+
+- Audited the mirror-Boozer-like diagnostic implementation, docs, public API,
+  plotting bundle, IO exports, and existing tests.
+- Confirmed existing coverage already checks surface-average bounds, mirror
+  ratio, finite-current field-line turns, contravariant pitch, public summary
+  metrics, and plotted Boozer-like diagnostics.
+- Added direct tests for the remaining exported diagnostic fields:
+  - positive Jacobian-weighted surface measure;
+  - zero-current covariant pitch proxy;
+  - finite-current covariant pitch proxy;
+  - magnetic-well-proxy summary extrema;
+  - covariant pitch summary extrema.
+
+### Results obtained
+
+- The mirror-Boozer-like diagnostic lane now has direct coverage for every
+  scalar family exported in the summary and CSV/NPZ radial diagnostic contract.
+- The finite-current diagnostic test now checks both contravariant and
+  covariant pitch proxies, so pitch regressions are less likely to hide behind
+  only field-line-turn checks.
+- The implementation remains explicitly mirror-native and does not claim
+  toroidal Boozer coordinates or toroidal rotational transform.
+
+### How it was tested
+
+Commands run:
+
+```bash
+JAX_ENABLE_X64=1 pytest \
+  tests/mirror/test_mirror_plotting.py::test_mirror_plot_data_helpers_expose_numerical_content \
+  tests/mirror/test_mirror_plotting.py::test_mirror_boozer_like_diagnostics_capture_finite_current_pitch -q
+python -m ruff check tests/mirror/test_mirror_plotting.py
+python -m ruff format --check tests/mirror/test_mirror_plotting.py
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_plotting.py -q
+JAX_ENABLE_X64=1 pytest tests/mirror -q
+```
+
+Results:
+
+- Focused Boozer-like diagnostic tests passed: `2 passed in 1.25s`.
+- Ruff check and format check passed.
+- Full mirror plotting test file passed: `5 passed in 5.00s`.
+- Full mirror suite passed: `232 passed, 1 skipped in 218.77s`.
+
+### File structure and best-practice notes
+
+- The new checks stay in `tests/mirror/test_mirror_plotting.py`, next to the
+  plotting-data helper tests that already construct the relevant small mirror
+  outputs.
+- No new fixtures or generated files were added.
+- The added assertions strengthen the public diagnostic data contract without
+  changing implementation behavior or introducing brittle image snapshots.
+
+### Best next steps
+
+1. Commit and push M184.
+2. Update the draft PR body with section 184 and the latest mirror-suite
+   validation result.
+3. Inspect only failed CI jobs after the latest push.
+4. Continue the final audit across remaining non-100% lanes, especially the
+   boundary between diagnostic free-boundary evidence and future production
+   free-boundary claims.
+
+### Completion percentages after M184
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `93%`.
+- Fixed-boundary axisymmetric solve: `93%`.
+- Residual Newton / preconditioning: `94%`.
+- Two-coil and manufactured validation: `92%`.
+- Finite-current pitch validation: `92%`.
+- Plotting and `vmec --plot` mirror support: `99%`.
+- I/O schema and docs: `100%`.
+- Differentiable solved-state API: `96%`.
+- Mirror-Boozer-like diagnostics: `93%`.
+- Free-boundary mirror lane: `99%` overall, with reduced residual-vector
+  nonlinear solve scope complete.
+- Straight-axis hybrid support fixture lane: `100%` for support-fixture scope.
+- Toroidal stellarator-mirror hybrid lane: `96%`.
+- ESSOS circular-coil mirror beta scan: `97%`.
+- Public API/source simplification: `100%` for the mirror package initializer.
+- PR merge readiness overall: `99%`.
+
+### User input needed
+
+No user input is needed.

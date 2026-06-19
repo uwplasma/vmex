@@ -107,15 +107,23 @@ def test_mirror_plot_data_helpers_expose_numerical_content(tmp_path):
     assert boozer_like.bmag_flux_surface_average.shape == output.s.shape
     assert np.all(boozer_like.bmag_min <= boozer_like.bmag_flux_surface_average)
     assert np.all(boozer_like.bmag_flux_surface_average <= boozer_like.bmag_max)
+    assert np.all(boozer_like.surface_measure > 0.0)
     assert np.all(boozer_like.surface_mirror_ratio >= 1.0)
     assert np.all(boozer_like.normalized_bmag_ripple_rms >= 0.0)
     assert np.allclose(boozer_like.field_line_turns, pitch.turns_mean)
     assert np.allclose(boozer_like.contravariant_pitch_mean, 0.0)
     assert np.allclose(boozer_like.contravariant_pitch_rms, 0.0)
+    assert np.allclose(boozer_like.covariant_pitch_ratio, 0.0)
     assert boozer_summary["boozer_like_surface_mirror_ratio_max"] == pytest.approx(
         float(np.max(boozer_like.surface_mirror_ratio))
     )
     assert boozer_summary["boozer_like_field_line_turns_mean"] == pytest.approx(0.0)
+    assert boozer_summary["boozer_like_magnetic_well_proxy_min"] == pytest.approx(
+        float(np.min(boozer_like.magnetic_well_proxy))
+    )
+    assert boozer_summary["boozer_like_magnetic_well_proxy_max"] == pytest.approx(
+        float(np.max(boozer_like.magnetic_well_proxy))
+    )
     assert public_mirror_boozer_like_summary_metrics(output) == boozer_summary
     assert np.allclose(history.residual_norm, output.history.residual_norm)
     assert np.allclose(history.fsq, output.history.fsq)
@@ -136,12 +144,20 @@ def test_mirror_boozer_like_diagnostics_capture_finite_current_pitch(tmp_path):
     assert np.allclose(boozer_like.field_line_turns, pitch.turns_mean)
     assert np.min(boozer_like.contravariant_pitch_mean) > 0.0
     assert np.max(boozer_like.contravariant_pitch_rms) > 0.0
+    assert np.all(boozer_like.covariant_pitch_ratio >= 0.0)
+    assert np.max(boozer_like.covariant_pitch_ratio) > 0.0
     assert summary["boozer_like_field_line_turns_min"] == pytest.approx(float(np.min(pitch.turns_mean)))
     assert summary["boozer_like_contravariant_pitch_mean_min"] == pytest.approx(
         float(np.min(boozer_like.contravariant_pitch_mean))
     )
     assert summary["boozer_like_contravariant_pitch_rms_max"] == pytest.approx(
         float(np.max(boozer_like.contravariant_pitch_rms))
+    )
+    assert summary["boozer_like_covariant_pitch_ratio_max"] == pytest.approx(
+        float(np.max(boozer_like.covariant_pitch_ratio))
+    )
+    assert summary["boozer_like_magnetic_well_proxy_min"] == pytest.approx(
+        float(np.min(boozer_like.magnetic_well_proxy))
     )
 
 
