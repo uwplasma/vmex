@@ -3013,6 +3013,54 @@ def solve_fixed_boundary_residual_iter(
                 )
                 return float(np.asarray(fsqr_t + fsqz_t + fsql_t))
 
+            def _candidate_state_from_deltas(
+                *,
+                dR_value,
+                dR_sin_value,
+                dZ_cos_value,
+                dZ_value,
+                dL_cos_value,
+                dL_value,
+                use_numpy_arrays: bool,
+                use_numpy_enforce: bool,
+            ) -> VMECState:
+                array = np.asarray if use_numpy_arrays else jnp.asarray
+                candidate = VMECState(
+                    layout=state.layout,
+                    Rcos=array(state.Rcos) + array(dR_value),
+                    Rsin=array(state.Rsin) + array(dR_sin_value),
+                    Zcos=array(state.Zcos) + array(dZ_cos_value),
+                    Zsin=array(state.Zsin) + array(dZ_value),
+                    Lcos=array(state.Lcos) + array(dL_cos_value),
+                    Lsin=array(state.Lsin) + array(dL_value),
+                )
+                if use_numpy_enforce:
+                    candidate = _enforce_fixed_boundary_and_axis_np(
+                        candidate,
+                        static,
+                        edge_Rcos=edge_Rcos,
+                        edge_Rsin=edge_Rsin,
+                        edge_Zcos=edge_Zcos,
+                        edge_Zsin=edge_Zsin,
+                        enforce_edge=not bool(free_boundary_enabled),
+                        enforce_lambda_axis=True,
+                        idx00=idx00,
+                        precomputed_axis_mask=_precomputed_axis_mask_np,
+                    )
+                else:
+                    candidate = _enforce_fixed_boundary_and_axis(
+                        candidate,
+                        static,
+                        edge_Rcos=edge_Rcos,
+                        edge_Rsin=edge_Rsin,
+                        edge_Zcos=edge_Zcos,
+                        edge_Zsin=edge_Zsin,
+                        enforce_edge=not bool(free_boundary_enabled),
+                        enforce_lambda_axis=True,
+                        idx00=idx00,
+                    )
+                return _apply_vmec_lambda_axis_rules(candidate)
+
             constraint_rcon0_current = None
             constraint_zcon0_current = None
             if (
@@ -5253,54 +5301,16 @@ def solve_fixed_boundary_residual_iter(
                         dR_sin = jnp.zeros_like(dR)
                         dZ_cos = jnp.zeros_like(dR)
                         dL_cos = jnp.zeros_like(dR)
-                if host_update_assembly:
-                    # All dR/dZ/dL/dR_sin/dZ_cos/dL_cos are NumPy here;
-                    # keep state arrays as NumPy — JAX JIT converts at call site.
-                    state_try = VMECState(
-                        layout=state.layout,
-                        Rcos=np.asarray(state.Rcos) + np.asarray(dR),
-                        Rsin=np.asarray(state.Rsin) + np.asarray(dR_sin),
-                        Zcos=np.asarray(state.Zcos) + np.asarray(dZ_cos),
-                        Zsin=np.asarray(state.Zsin) + np.asarray(dZ),
-                        Lcos=np.asarray(state.Lcos) + np.asarray(dL_cos),
-                        Lsin=np.asarray(state.Lsin) + np.asarray(dL),
-                    )
-                else:
-                    state_try = VMECState(
-                        layout=state.layout,
-                        Rcos=jnp.asarray(state.Rcos) + dR,
-                        Rsin=jnp.asarray(state.Rsin) + dR_sin,
-                        Zcos=jnp.asarray(state.Zcos) + dZ_cos,
-                        Zsin=jnp.asarray(state.Zsin) + dZ,
-                        Lcos=jnp.asarray(state.Lcos) + dL_cos,
-                        Lsin=jnp.asarray(state.Lsin) + dL,
-                    )
-                if host_update_assembly:
-                    state_try = _enforce_fixed_boundary_and_axis_np(
-                        state_try,
-                        static,
-                        edge_Rcos=edge_Rcos,
-                        edge_Rsin=edge_Rsin,
-                        edge_Zcos=edge_Zcos,
-                        edge_Zsin=edge_Zsin,
-                        enforce_edge=not bool(free_boundary_enabled),
-                        enforce_lambda_axis=True,
-                        idx00=idx00,
-                        precomputed_axis_mask=_precomputed_axis_mask_np,
-                    )
-                else:
-                    state_try = _enforce_fixed_boundary_and_axis(
-                        state_try,
-                        static,
-                        edge_Rcos=edge_Rcos,
-                        edge_Rsin=edge_Rsin,
-                        edge_Zcos=edge_Zcos,
-                        edge_Zsin=edge_Zsin,
-                        enforce_edge=not bool(free_boundary_enabled),
-                        enforce_lambda_axis=True,
-                        idx00=idx00,
-                    )
-                state_try = _apply_vmec_lambda_axis_rules(state_try)
+                state_try = _candidate_state_from_deltas(
+                    dR_value=dR,
+                    dR_sin_value=dR_sin,
+                    dZ_cos_value=dZ_cos,
+                    dZ_value=dZ,
+                    dL_cos_value=dL_cos,
+                    dL_value=dL,
+                    use_numpy_arrays=bool(host_update_assembly),
+                    use_numpy_enforce=bool(host_update_assembly),
+                )
             probe_bad_jacobian = False
             if need_trial_eval:
                 freeb_bsqvac_half_trial = _freeb_bsqvac_half_for_trial_state(state_try)
@@ -5335,41 +5345,16 @@ def solve_fixed_boundary_residual_iter(
             if np.isfinite(w_try) and (w_try > accept_ratio * max(w_curr, 1e-30)):
                 for _ in range(8):
                     alpha *= 0.5
-                    state_try = VMECState(
-                        layout=state.layout,
-                        Rcos=jnp.asarray(state.Rcos) + alpha * dR,
-                        Rsin=jnp.asarray(state.Rsin) + alpha * dR_sin,
-                        Zcos=jnp.asarray(state.Zcos) + alpha * dZ_cos,
-                        Zsin=jnp.asarray(state.Zsin) + alpha * dZ,
-                        Lcos=jnp.asarray(state.Lcos) + alpha * dL_cos,
-                        Lsin=jnp.asarray(state.Lsin) + alpha * dL,
+                    state_try = _candidate_state_from_deltas(
+                        dR_value=alpha * dR,
+                        dR_sin_value=alpha * dR_sin,
+                        dZ_cos_value=alpha * dZ_cos,
+                        dZ_value=alpha * dZ,
+                        dL_cos_value=alpha * dL_cos,
+                        dL_value=alpha * dL,
+                        use_numpy_arrays=False,
+                        use_numpy_enforce=bool(host_update_assembly),
                     )
-                    if host_update_assembly:
-                        state_try = _enforce_fixed_boundary_and_axis_np(
-                            state_try,
-                            static,
-                            edge_Rcos=edge_Rcos,
-                            edge_Rsin=edge_Rsin,
-                            edge_Zcos=edge_Zcos,
-                            edge_Zsin=edge_Zsin,
-                            enforce_edge=not bool(free_boundary_enabled),
-                            enforce_lambda_axis=True,
-                            idx00=idx00,
-                            precomputed_axis_mask=_precomputed_axis_mask_np,
-                        )
-                    else:
-                        state_try = _enforce_fixed_boundary_and_axis(
-                            state_try,
-                            static,
-                            edge_Rcos=edge_Rcos,
-                            edge_Rsin=edge_Rsin,
-                            edge_Zcos=edge_Zcos,
-                            edge_Zsin=edge_Zsin,
-                            enforce_edge=not bool(free_boundary_enabled),
-                            enforce_lambda_axis=True,
-                            idx00=idx00,
-                    )
-                    state_try = _apply_vmec_lambda_axis_rules(state_try)
                     freeb_bsqvac_half_trial = _freeb_bsqvac_half_for_trial_state(state_try)
                     w_try = _trial_residual_total(
                         state_try,
@@ -5432,27 +5417,16 @@ def solve_fixed_boundary_residual_iter(
                         dR_sin_dir = jnp.zeros_like(dR_dir)
                         dZ_cos_dir = jnp.zeros_like(dR_dir)
                         dL_cos_dir = jnp.zeros_like(dR_dir)
-                    state_dir = VMECState(
-                        layout=state.layout,
-                        Rcos=jnp.asarray(state.Rcos) + dR_dir,
-                        Rsin=jnp.asarray(state.Rsin) + dR_sin_dir,
-                        Zcos=jnp.asarray(state.Zcos) + dZ_cos_dir,
-                        Zsin=jnp.asarray(state.Zsin) + dZ_dir,
-                        Lcos=jnp.asarray(state.Lcos) + dL_cos_dir,
-                        Lsin=jnp.asarray(state.Lsin) + dL_dir,
+                    state_dir = _candidate_state_from_deltas(
+                        dR_value=dR_dir,
+                        dR_sin_value=dR_sin_dir,
+                        dZ_cos_value=dZ_cos_dir,
+                        dZ_value=dZ_dir,
+                        dL_cos_value=dL_cos_dir,
+                        dL_value=dL_dir,
+                        use_numpy_arrays=False,
+                        use_numpy_enforce=False,
                     )
-                    state_dir = _enforce_fixed_boundary_and_axis(
-                        state_dir,
-                        static,
-                        edge_Rcos=edge_Rcos,
-                        edge_Rsin=edge_Rsin,
-                        edge_Zcos=edge_Zcos,
-                        edge_Zsin=edge_Zsin,
-                        enforce_edge=not bool(free_boundary_enabled),
-                        enforce_lambda_axis=True,
-                        idx00=idx00,
-                    )
-                    state_dir = _apply_vmec_lambda_axis_rules(state_dir)
                     freeb_bsqvac_half_dir = _freeb_bsqvac_half_for_trial_state(state_dir)
                     w_dir = _trial_residual_total(
                         state_dir,
@@ -5664,27 +5638,16 @@ def solve_fixed_boundary_residual_iter(
                     dZ_cos_try = jnp.zeros_like(dR_try)
                     dL_cos_try = jnp.zeros_like(dR_try)
 
-                state_try = VMECState(
-                    layout=state.layout,
-                    Rcos=jnp.asarray(state.Rcos) + dR_try,
-                    Rsin=jnp.asarray(state.Rsin) + dR_sin_try,
-                    Zcos=jnp.asarray(state.Zcos) + dZ_cos_try,
-                    Zsin=jnp.asarray(state.Zsin) + dZ_try,
-                    Lcos=jnp.asarray(state.Lcos) + dL_cos_try,
-                    Lsin=jnp.asarray(state.Lsin) + dL_try,
+                state_try = _candidate_state_from_deltas(
+                    dR_value=dR_try,
+                    dR_sin_value=dR_sin_try,
+                    dZ_cos_value=dZ_cos_try,
+                    dZ_value=dZ_try,
+                    dL_cos_value=dL_cos_try,
+                    dL_value=dL_try,
+                    use_numpy_arrays=False,
+                    use_numpy_enforce=False,
                 )
-                state_try = _enforce_fixed_boundary_and_axis(
-                    state_try,
-                    static,
-                    edge_Rcos=edge_Rcos,
-                    edge_Rsin=edge_Rsin,
-                    edge_Zcos=edge_Zcos,
-                    edge_Zsin=edge_Zsin,
-                    enforce_edge=not bool(free_boundary_enabled),
-                    enforce_lambda_axis=True,
-                    idx00=idx00,
-                )
-                state_try = _apply_vmec_lambda_axis_rules(state_try)
                 freeb_bsqvac_half_trial = _freeb_bsqvac_half_for_trial_state(state_try)
                 w_try = _trial_residual_total(
                     state_try,
