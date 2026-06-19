@@ -22503,3 +22503,114 @@ Results:
 ### User input needed
 
 No user input is needed.
+
+
+---
+## 187. Two-Coil Benchmark Plot Coverage
+
+### Steps taken
+
+- Audited `examples/mirror_two_coil_axisym.py` and confirmed it already writes
+  the requested analytic two-coil plot bundle:
+  - on-axis `B_z` comparison;
+  - 3D mirror geometry with coils and field lines;
+  - 3D boundary `|B|` with coils and field lines;
+  - off-axis low-radius Biot-Savart `B_r` and `B_z` comparison;
+  - convergence study over the fixed `ns/nxi` benchmark grid;
+  - the standard mirror plot bundle from `plot_mirror_output`.
+- Ran a temporary plotted probe to inspect the actual artifact names, image
+  sizes, nonblank image statistics, and benchmark JSON metrics.
+- Added a focused root-example smoke test that runs the two-coil example with
+  plotting enabled at small `ns=5`, `nxi=9`, `maxiter=0` settings.
+- Checked that the plotted run writes the benchmark convergence JSON and
+  representative nonblank analytic/3D/diagnostic PNGs.
+
+### Results obtained
+
+- The two-coil analytic benchmark now has automated coverage for the figures
+  the user reviews most directly:
+  - `two_coil_axisym_axis_bz_comparison.png`;
+  - `two_coil_axisym_geometry_with_coils.png`;
+  - `two_coil_axisym_bmag_with_coils.png`;
+  - `two_coil_axisym_off_axis_biot_savart_comparison.png`;
+  - `two_coil_axisym_convergence.png`;
+  - `two_coil_axisym_mirror_boundary_3d.png`;
+  - `two_coil_axisym_mirror_boozer_like_diagnostics.png`.
+- The test asserts the on-axis analytic agreement remains near machine
+  precision and that the convergence study still reports the intended
+  `(ns, nxi)` rows `(7, 17)`, `(9, 25)`, and `(11, 33)`.
+- No source behavior changed; this tranche closes a reporting/plot coverage
+  gap around an already implemented research benchmark.
+
+### How it was tested
+
+Commands run:
+
+```bash
+JAX_ENABLE_X64=1 python examples/mirror_two_coil_axisym.py \
+  --outdir /tmp/mirror_two_coil_axisym_plot_probe \
+  --ns 5 \
+  --nxi 9 \
+  --maxiter 0
+JAX_ENABLE_X64=1 pytest \
+  tests/mirror/test_mirror_examples.py::test_root_two_coil_axisym_example_runs_without_plots \
+  tests/mirror/test_mirror_examples.py::test_root_two_coil_axisym_example_writes_nonblank_benchmark_plots -q
+python -m ruff check tests/mirror/test_mirror_examples.py
+python -m ruff format --check tests/mirror/test_mirror_examples.py
+JAX_ENABLE_X64=1 pytest tests/mirror -q
+```
+
+Results:
+
+- The temporary probe wrote 16 PNG files in the two-coil figure directory; all
+  inspected files had nonzero image variance and expected file sizes.
+- Focused two-coil tests passed: `2 passed in 7.38s`.
+- Ruff check and format check passed.
+- Full mirror suite passed: `235 passed, 1 skipped in 227.87s`.
+
+### File structure and best-practice notes
+
+- The new coverage is localized to
+  `tests/mirror/test_mirror_examples.py`, alongside other root example smoke
+  tests.
+- The test reuses the shared nonblank-image helper introduced in M186, keeping
+  image checks generic and avoiding brittle pixel snapshots.
+- Generated figures remain in pytest temporary directories or ignored result
+  paths; no binary output was added to the repository.
+- The two-coil example remains in the repository-root `examples/` folder as the
+  user requested, while detailed mirror package functionality remains under
+  `vmec_jax/mirror/`.
+
+### Best next steps
+
+1. Commit and push M187.
+2. Update the draft PR body with section 187 and the `235 passed, 1 skipped`
+   full mirror-suite result.
+3. Inspect only failed CI jobs after the push.
+4. Continue the final audit by checking whether finite-current pitch and
+   Boozer-like diagnostics need one last numerical gate or can be promoted as
+   complete for this draft-PR scope.
+
+### Completion percentages after M187
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `93%`.
+- Fixed-boundary axisymmetric solve: `94%`.
+- Residual Newton / preconditioning: `95%`.
+- Two-coil and manufactured validation: `94%`.
+- Finite-current pitch validation: `92%`.
+- Plotting and `vmec --plot` mirror support: `99%`.
+- I/O schema and docs: `100%`.
+- Differentiable solved-state API: `96%`.
+- Mirror-Boozer-like diagnostics: `93%`.
+- Free-boundary mirror lane: `99%` overall, with reduced residual-vector
+  nonlinear solve scope complete and benchmark plots covered.
+- Straight-axis hybrid support fixture lane: `100%` for support-fixture scope.
+- Toroidal stellarator-mirror hybrid lane: `96%`.
+- ESSOS circular-coil mirror beta scan: `97%`.
+- Public API/source simplification: `100%` for the mirror package initializer.
+- PR merge readiness overall: `99%`.
+
+### User input needed
+
+No user input is needed.

@@ -101,6 +101,49 @@ def test_root_two_coil_axisym_example_runs_without_plots(tmp_path):
     assert metrics["boozer_like_field_line_turns_mean"] == pytest.approx(0.0)
 
 
+def test_root_two_coil_axisym_example_writes_nonblank_benchmark_plots(tmp_path):
+    image = pytest.importorskip("matplotlib.image")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "examples/mirror_two_coil_axisym.py",
+            "--outdir",
+            str(tmp_path / "two_coil_plots"),
+            "--ns",
+            "5",
+            "--nxi",
+            "9",
+            "--maxiter",
+            "0",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    mout = Path(completed.stdout.strip())
+    metrics = json.loads((mout.parent / "two_coil_axisym_metrics.json").read_text())
+    convergence_rows = json.loads((mout.parent / "two_coil_axisym_convergence.json").read_text())
+    assert metrics["axis_bz_relative_linf"] < 1.0e-12
+    assert "off_axis_br_relative_linf" in metrics
+    assert "off_axis_bz_relative_linf" in metrics
+    assert len(convergence_rows) == 3
+    assert [row["ns"] for row in convergence_rows] == [7, 9, 11]
+    assert [row["nxi"] for row in convergence_rows] == [17, 25, 33]
+
+    figure_dir = mout.parent / "figures"
+    for name in [
+        "two_coil_axisym_axis_bz_comparison.png",
+        "two_coil_axisym_geometry_with_coils.png",
+        "two_coil_axisym_bmag_with_coils.png",
+        "two_coil_axisym_off_axis_biot_savart_comparison.png",
+        "two_coil_axisym_convergence.png",
+        "two_coil_axisym_mirror_boundary_3d.png",
+        "two_coil_axisym_mirror_boozer_like_diagnostics.png",
+    ]:
+        _assert_nonblank_image(figure_dir / name, image)
+
+
 def test_root_finite_current_pitch_example_runs_without_plots(tmp_path):
     completed = subprocess.run(
         [
