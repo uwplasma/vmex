@@ -6,7 +6,195 @@ from typing import Any
 
 import numpy as np
 
-from .types import ExternalBoundarySample, VacuumBoundaryFields
+from .types import ExternalBoundarySample, FreeBoundarySampleSetup, VacuumBoundaryFields
+
+_FREEB_HOST_PHASE_CACHE: dict[tuple[int, int, tuple[str, ...]], np.ndarray] = {}
+_FREEB_TRIG_CACHE: dict[tuple[int, int, int, int, int, bool], Any] = {}
+_FREEB_BOUNDARY_SETUP_CACHE: dict[tuple[int, int], Any] = {}
+_FREEB_WINT_CACHE: dict[tuple[int, int, int], np.ndarray] = {}
+
+
+def freeb_host_phase_stack(*, modes: Any, trig: Any, derivs: tuple[str, ...]) -> np.ndarray:
+    """Return cached NumPy phase stacks for host-side boundary synthesis."""
+
+    key = (id(modes), id(trig), tuple(derivs))
+    cached = _FREEB_HOST_PHASE_CACHE.get(key)
+    if cached is not None:
+        try:
+            K = int(np.asarray(modes.m).shape[0])
+            nzeta = int(np.asarray(trig.cosnv).shape[0])
+            ntheta3 = int(np.asarray(trig.cosmu).shape[0])
+            if (
+                int(cached.shape[1]) != 2 * K
+                or int(cached.shape[2]) != ntheta3
+                or int(cached.shape[3]) != nzeta
+            ):
+                cached = None
+        except Exception:
+            cached = None
+    if cached is not None:
+        return cached
+
+    m = np.asarray(modes.m, dtype=np.int32)
+    n = np.asarray(modes.n, dtype=np.int32)
+    n1 = np.abs(n)
+    sgn = np.where(n < 0, -1.0, 1.0)
+
+    cosmu = np.asarray(trig.cosmu, dtype=float)
+    sinmu = np.asarray(trig.sinmu, dtype=float)
+    cosmum = np.asarray(trig.cosmum, dtype=float)
+    sinmum = np.asarray(trig.sinmum, dtype=float)
+    cosnv = np.asarray(trig.cosnv, dtype=float)
+    sinnv = np.asarray(trig.sinnv, dtype=float)
+    cosnvn = np.asarray(trig.cosnvn, dtype=float)
+    sinnvn = np.asarray(trig.sinnvn, dtype=float)
+
+    cosmu_m = cosmu[:, m].T
+    sinmu_m = sinmu[:, m].T
+    cosmum_m = cosmum[:, m].T
+    sinmum_m = sinmum[:, m].T
+    cosnv_n = cosnv[:, n1].T
+    sinnv_n = sinnv[:, n1].T
+    cosnvn_n = cosnvn[:, n1].T
+    sinnvn_n = sinnvn[:, n1].T
+
+    phase_blocks: list[np.ndarray] = []
+    for deriv in derivs:
+        if deriv == "base":
+            cos_phase = cosmu_m[:, :, None] * cosnv_n[:, None, :] + sgn[:, None, None] * sinmu_m[:, :, None] * sinnv_n[:, None, :]
+            sin_phase = sinmu_m[:, :, None] * cosnv_n[:, None, :] - sgn[:, None, None] * cosmu_m[:, :, None] * sinnv_n[:, None, :]
+        elif deriv == "dtheta":
+            cos_phase = sinmum_m[:, :, None] * cosnv_n[:, None, :] + sgn[:, None, None] * cosmum_m[:, :, None] * sinnv_n[:, None, :]
+            sin_phase = cosmum_m[:, :, None] * cosnv_n[:, None, :] - sgn[:, None, None] * sinmum_m[:, :, None] * sinnv_n[:, None, :]
+        elif deriv == "dzeta":
+            cos_phase = cosmu_m[:, :, None] * sinnvn_n[:, None, :] + sgn[:, None, None] * sinmu_m[:, :, None] * cosnvn_n[:, None, :]
+            sin_phase = sinmu_m[:, :, None] * sinnvn_n[:, None, :] - sgn[:, None, None] * cosmu_m[:, :, None] * cosnvn_n[:, None, :]
+        else:  # pragma: no cover
+            raise ValueError(f"Unknown deriv={deriv!r}")
+        phase_blocks.append(np.concatenate([cos_phase, sin_phase], axis=0))
+
+    phase_all = np.stack(phase_blocks, axis=0)
+    _FREEB_HOST_PHASE_CACHE[key] = phase_all
+    return phase_all
+
+
+def freeb_boundary_trig(*, cfg: Any, nzeta: int) -> Any:
+    """Return cached trig tables for free-boundary boundary sampling."""
+
+    from ...vmec_tomnsp import vmec_trig_tables
+
+    key = (
+        int(cfg.ntheta),
+        int(nzeta),
+        int(cfg.nfp),
+        int(cfg.mpol) - 1,
+        int(cfg.ntor),
+        bool(cfg.lasym),
+    )
+    cached = _FREEB_TRIG_CACHE.get(key)
+    if cached is not None:
+        return cached
+    trig = vmec_trig_tables(
+        ntheta=int(cfg.ntheta),
+        nzeta=int(nzeta),
+        nfp=int(cfg.nfp),
+        mmax=int(cfg.mpol) - 1,
+        nmax=int(cfg.ntor),
+        lasym=bool(cfg.lasym),
+    )
+    _FREEB_TRIG_CACHE[key] = trig
+    return trig
+
+
+def vmec_realspace_synthesis_multi_host(
+    *,
+    coeff_cos: np.ndarray,
+    coeff_sin: np.ndarray,
+    modes: Any,
+    trig: Any,
+    derivs: tuple[str, ...] = ("base",),
+) -> tuple[np.ndarray, ...]:
+    """Host-side VMEC synthesis for external boundary sampling."""
+
+    coeff_cos = np.asarray(coeff_cos, dtype=float)
+    coeff_sin = np.asarray(coeff_sin, dtype=float)
+    if coeff_cos.shape != coeff_sin.shape:
+        raise ValueError("coeff_cos and coeff_sin must have the same shape")
+    phase_all = freeb_host_phase_stack(modes=modes, trig=trig, derivs=tuple(derivs))
+    coeff = np.concatenate([coeff_cos, coeff_sin], axis=-1)
+    out = np.einsum("...k,tkij->t...ij", coeff, phase_all, optimize=True)
+    return tuple(np.asarray(out[i], dtype=float) for i in range(len(derivs)))
+
+
+def vmec_boundary_wint(*, static: Any, ntheta: int, nzeta: int, trig: Any | None = None) -> np.ndarray:
+    """Return VMEC angular weights on the free-boundary mesh."""
+
+    key = (id(static), int(ntheta), int(nzeta))
+    cached = _FREEB_WINT_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    trig = getattr(static, "trig_vmec", None) if trig is None else trig
+    if trig is not None:
+        try:
+            from ...vmec_residue import vmec_wint_from_trig
+
+            w = np.asarray(vmec_wint_from_trig(trig, nzeta=int(nzeta)), dtype=float)
+            if w.shape == (int(ntheta), int(nzeta)):
+                _FREEB_WINT_CACHE[key] = w
+                return w
+        except Exception:
+            pass
+    w = np.full((int(ntheta), int(nzeta)), 1.0 / float(max(1, int(ntheta) * int(nzeta))), dtype=float)
+    _FREEB_WINT_CACHE[key] = w
+    return w
+
+
+def freeb_boundary_sample_setup(*, static: Any, sample_nzeta: int) -> FreeBoundarySampleSetup:
+    """Return cached static data used by host-side free-boundary sampling."""
+
+    _trig_hint = getattr(static, "trig_vmec", None)
+    _ntheta3_hint = int(_trig_hint.ntheta3) if _trig_hint is not None else -1
+    key = (id(static), _ntheta3_hint, int(sample_nzeta))
+    cached = _FREEB_BOUNDARY_SETUP_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    trig = getattr(static, "trig_vmec", None)
+    if trig is None or int(sample_nzeta) != int(static.cfg.nzeta):
+        trig = freeb_boundary_trig(cfg=static.cfg, nzeta=int(sample_nzeta))
+
+    m_arr = np.asarray(static.modes.m, dtype=float)
+    n_arr = np.asarray(static.modes.n, dtype=float) * float(int(static.cfg.nfp))
+    second_facs = np.stack(
+        [
+            (-(m_arr**2)).reshape((1, -1)),
+            (m_arr * n_arr).reshape((1, -1)),
+            (-(n_arr**2)).reshape((1, -1)),
+        ],
+        axis=0,
+    )
+
+    ntheta = int(np.asarray(trig.cosmu).shape[0])
+    nzeta = max(1, int(sample_nzeta))
+    phi = (2.0 * np.pi / float(nzeta)) * np.arange(nzeta, dtype=float)
+    phi /= float(max(1, int(static.cfg.nfp)))
+    phi_grid = np.broadcast_to(phi[None, :], (ntheta, nzeta))
+
+    if getattr(static, "m_is_even", None) is not None:
+        even_m_mask = np.asarray(static.m_is_even, dtype=float).reshape((1, 1, -1))
+    else:
+        even_m_mask = (np.asarray(static.modes.m, dtype=int) % 2 == 0).astype(float).reshape((1, 1, -1))
+
+    setup = FreeBoundarySampleSetup(
+        trig=trig,
+        second_facs=second_facs,
+        phi_grid=phi_grid,
+        even_m_mask=even_m_mask,
+        wint_vmec=vmec_boundary_wint(static=static, ntheta=ntheta, nzeta=nzeta, trig=trig),
+    )
+    _FREEB_BOUNDARY_SETUP_CACHE[key] = setup
+    return setup
 
 
 def boundary_metric_from_rz(
@@ -240,6 +428,11 @@ __all__ = [
     "boundary_metric_from_rz",
     "contravariant_boundary_field_from_covariant",
     "covariant_boundary_field_from_cylindrical",
+    "freeb_boundary_sample_setup",
+    "freeb_boundary_trig",
+    "freeb_host_phase_stack",
     "sample_free_boundary_external_field",
     "vacuum_boundary_fields_from_cylindrical",
+    "vmec_boundary_wint",
+    "vmec_realspace_synthesis_multi_host",
 ]
