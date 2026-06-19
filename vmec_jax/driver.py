@@ -920,23 +920,7 @@ def run_fixed_boundary(
     jit_forces = _resolve_vmec2000_jit_forces_policy(solver_lower=solver_lower, jit_forces=jit_forces)
 
     gamma = indata.get_float("GAMMA", 0.0)
-    static = None
-    bdy = None
-    flux = None
-    prof = None
-    pressure = None
-
-    def _build_static_cfg(cfg_in: VMECConfig) -> VMECStatic:
-        if bool(cfg_in.lfreeb):
-            return build_static(
-                cfg_in,
-                grid=grid,
-                mgrid_metadata=fb_meta,
-                free_boundary_extcur=fb_extcur,
-            )
-        return build_static(cfg_in, grid=grid)
-
-    _profiles_from_static = partial(
+    profiles_from_static = partial(
         _driver_flux_helpers.profiles_from_static,
         indata=indata,
         signgs=signgs,
@@ -944,15 +928,22 @@ def run_fixed_boundary(
         flux_profiles_from_indata_func=flux_profiles_from_indata,
         eval_profiles_func=eval_profiles,
     )
-
-    def _ensure_static_profiles() -> None:
-        nonlocal static, bdy, flux, prof, pressure
-        if static is None:
-            static = _build_static_cfg(cfg)
-        if bdy is None:
-            bdy = boundary_from_indata(indata, static.modes)
-        if flux is None or prof is None or pressure is None:
-            flux, prof, pressure = _profiles_from_static(static_in=static)
+    static_profile_cache = _driver_runtime_helpers.StaticProfileCache(
+        cfg=cfg,
+        indata=indata,
+        grid=grid,
+        signgs=signgs,
+        free_boundary_metadata=fb_meta,
+        free_boundary_extcur=fb_extcur,
+        build_static_func=build_static,
+        boundary_from_indata_func=boundary_from_indata,
+        profiles_from_static_func=profiles_from_static,
+    )
+    static = None
+    bdy = None
+    flux = None
+    prof = None
+    pressure = None
 
     step_size_val = _resolve_driver_step_size(
         step_size=step_size,
@@ -988,21 +979,19 @@ def run_fixed_boundary(
     )
 
     if use_initial_guess:
-        _ensure_static_profiles()
-        if restart_state_eff is not None:
-            st0 = restart_state_eff
-        else:
-            st0 = _initial_guess_with_optional_nojit(static, bdy)
-            _driver_debug_helpers.maybe_dump_xc_init(state=st0, static=static, label="init")
-        return FixedBoundaryRun(
+        static, bdy, flux, prof, pressure = static_profile_cache.ensure()
+        return _driver_solve_helpers.fixed_boundary_initial_guess_run(
             cfg=cfg,
             indata=indata,
             static=static,
-            state=st0,
-            result=None,
+            boundary=bdy,
             flux=flux,
             profiles=prof,
             signgs=signgs,
+            restart_state=restart_state_eff,
+            initial_guess_func=_initial_guess_with_optional_nojit,
+            maybe_dump_xc_init=_driver_debug_helpers.maybe_dump_xc_init,
+            run_container=FixedBoundaryRun,
         )
 
     if performance_mode:
@@ -1027,7 +1016,7 @@ def run_fixed_boundary(
     if os.getenv("VMEC_JAX_USE_SCAN", "") not in ("", "0"):
         use_scan = True
     if solver in _driver_solve_helpers.FIXED_BOUNDARY_OPTIMIZER_SOLVERS:
-        _ensure_static_profiles()
+        static, bdy, flux, prof, pressure = static_profile_cache.ensure()
         res = _driver_solve_helpers.run_fixed_boundary_optimizer_solver(
             solver=solver,
             restart_state=restart_state_eff,
@@ -1098,7 +1087,7 @@ def run_fixed_boundary(
                 niter_stages=list(niter_stages),
                 ftol_stages=list(ftol_stages),
                 t_start=float(t_start),
-                build_static_cfg=_build_static_cfg,
+                build_static_cfg=static_profile_cache.build_static_cfg,
                 initial_guess_with_optional_nojit=_initial_guess_with_optional_nojit,
                 resolve_jit_forces=_resolve_jit_forces_auto_policy,
                 interp_vmec_state=interp_vmec_state,
@@ -1157,8 +1146,8 @@ def run_fixed_boundary(
 
     if flux is None or prof is None or pressure is None:
         if static is None:
-            static = _build_static_cfg(cfg)
-        flux, prof, pressure = _profiles_from_static(static_in=static)
+            static = static_profile_cache.build_static_cfg(cfg)
+        flux, prof, pressure = static_profile_cache.profiles_for_static(static)
     flux, prof = _final_flux_profiles_from_state(
         indata=indata,
         static_in=static,

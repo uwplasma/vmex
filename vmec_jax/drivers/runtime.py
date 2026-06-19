@@ -27,6 +27,55 @@ class ExternalFieldProviderContext:
     provider_static: Any
 
 
+@dataclass
+class StaticProfileCache:
+    """Lazy static/boundary/profile builder for one driver invocation."""
+
+    cfg: Any
+    indata: Any
+    grid: Any
+    signgs: int
+    free_boundary_metadata: Any
+    free_boundary_extcur: Any
+    build_static_func: Callable[..., Any]
+    boundary_from_indata_func: Callable[..., Any]
+    profiles_from_static_func: Callable[..., tuple[Any, dict, Any]]
+    static: Any = None
+    boundary: Any = None
+    flux: Any = None
+    profiles: dict | None = None
+    pressure: Any = None
+
+    def build_static_cfg(self, cfg_in: Any | None = None) -> Any:
+        """Build ``VMECStatic`` with the free-boundary metadata, if needed."""
+
+        cfg_eff = self.cfg if cfg_in is None else cfg_in
+        if bool(getattr(cfg_eff, "lfreeb", False)):
+            return self.build_static_func(
+                cfg_eff,
+                grid=self.grid,
+                mgrid_metadata=self.free_boundary_metadata,
+                free_boundary_extcur=self.free_boundary_extcur,
+            )
+        return self.build_static_func(cfg_eff, grid=self.grid)
+
+    def profiles_for_static(self, static_in: Any) -> tuple[Any, dict, Any]:
+        """Build flux, profile, and pressure arrays for ``static_in``."""
+
+        return self.profiles_from_static_func(static_in=static_in)
+
+    def ensure(self) -> tuple[Any, Any, Any, dict, Any]:
+        """Materialize cached static, boundary, flux, profiles, and pressure."""
+
+        if self.static is None:
+            self.static = self.build_static_cfg(self.cfg)
+        if self.boundary is None:
+            self.boundary = self.boundary_from_indata_func(self.indata, self.static.modes)
+        if self.flux is None or self.profiles is None or self.pressure is None:
+            self.flux, self.profiles, self.pressure = self.profiles_for_static(self.static)
+        return self.static, self.boundary, self.flux, self.profiles, self.pressure
+
+
 def maybe_enable_compilation_cache(
     *,
     accelerator_requested: bool = False,
@@ -215,6 +264,7 @@ def resolve_external_field_provider_context(
 __all__ = [
     "ExternalFieldProviderContext",
     "RestartContext",
+    "StaticProfileCache",
     "maybe_enable_compilation_cache",
     "resolve_external_field_provider_context",
     "resolve_restart_context",
