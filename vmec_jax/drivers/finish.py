@@ -126,6 +126,59 @@ def _run_full_parity_fallback(ctx: FixedBoundaryFinishContext, *, max_fallback_b
     )
 
 
+def _finish_run_with_diagnostics(ns: dict[str, Any]) -> Any:
+    """Attach CLI finish diagnostics to the selected fixed-boundary run."""
+
+    ctx = ns["ctx"]
+    best_run = ns["best_run"]
+    requested_ftol = float(ns["requested_ftol"])
+    target_fsq = float(ns["target_fsq"])
+    final_residuals = ctx.result_final_residuals(best_run.result)
+    strict_converged = bool(ctx.result_meets_requested_ftol(best_run.result, ftol=requested_ftol))
+    total_converged = bool(ctx.result_hits_total_target(best_run.result, fsq_total_target=target_fsq))
+    finish_budget_cap = ns["finish_budget_cap"]
+    diag = dict(ns["base_diag"])
+    diag.update(best_run.result.diagnostics)
+    diag["solver_mode"] = str(ctx.solver_mode_eff)
+    diag["accelerated_mode"] = bool(ctx.accelerated_mode)
+    diag["cli_fixed_boundary_mode"] = True
+    diag["cli_fixed_boundary_initial_policy"] = str(ns["initial_policy"])
+    diag["requested_ftol"] = requested_ftol
+    if final_residuals is not None:
+        diag["final_fsqr"] = float(final_residuals[0])
+        diag["final_fsqz"] = float(final_residuals[1])
+        diag["final_fsql"] = float(final_residuals[2])
+    diag["converged"] = bool(strict_converged)
+    diag["converged_strict"] = bool(strict_converged)
+    diag["converged_by_total_fsq"] = bool(total_converged)
+    diag["cli_fixed_boundary_partial_parity_fallback"] = bool(ns["partial_fallback_used"])
+    diag["cli_fixed_boundary_finish_budgets"] = np.asarray(ns["attempt_budgets"], dtype=int)
+    diag["cli_fixed_boundary_finish_fsq"] = np.asarray(ns["attempt_fsq"], dtype=float)
+    diag["cli_fixed_boundary_finish_converged"] = np.asarray(ns["attempt_converged"], dtype=bool)
+    diag["cli_fixed_boundary_finish_modes"] = np.asarray(ns["attempt_modes"])
+    diag["cli_fixed_boundary_finish_budget_cap"] = -1 if finish_budget_cap is None else int(finish_budget_cap)
+    diag["cli_fixed_boundary_finish_budget_exhausted"] = bool(
+        (finish_budget_cap is not None)
+        and int(ns["finish_budget_used"]) >= int(finish_budget_cap)
+        and not bool(strict_converged)
+    )
+    diag["cli_fixed_boundary_full_parity_fallback"] = bool(ns["fallback_used"])
+    diag["cli_fixed_boundary_staged_followup_used"] = bool(ns["staged_followup_used"])
+    diag["cli_fixed_boundary_staged_followup_policy"] = str(ns["staged_followup_policy"])
+    diag["cli_fixed_boundary_staged_followup_ns"] = ns["staged_followup_ns"]
+    diag["cli_fixed_boundary_staged_followup_niter"] = ns["staged_followup_niter"]
+    diag["cli_fixed_boundary_staged_followup_modes"] = ns["staged_followup_modes"]
+    diag["cli_fixed_boundary_staged_followup_fsq"] = ns["staged_followup_fsq"]
+    diag["cli_fixed_boundary_staged_followup_wall_s"] = ns["staged_followup_wall_s"]
+    diag["cli_fixed_boundary_staged_followup_solve_total_s"] = ns["staged_followup_solve_total_s"]
+    diag["multigrid_user_provided"] = bool(ctx.multigrid_user_provided)
+    diag["accelerated_single_grid_default"] = bool(ctx.accelerated_single_grid_default)
+    if bool(ctx.accelerated_mode):
+        diag["resume_state_mode"] = "minimal"
+        diag["resume_state"] = ctx.sanitize_minimal_resume_state_for_finish(diag.get("resume_state"))
+    return replace(best_run, result=replace(best_run.result, diagnostics=diag))
+
+
 def maybe_finish_cli_fixed_boundary_run(
     run_in: Any,
     *,
@@ -471,47 +524,4 @@ def maybe_finish_cli_fixed_boundary_run(
             best_run = fallback
             best_fsq = float(fallback_fsq)
 
-    diag = dict(base_diag)
-    diag.update(best_run.result.diagnostics)
-    diag["solver_mode"] = str(ctx.solver_mode_eff)
-    diag["accelerated_mode"] = bool(ctx.accelerated_mode)
-    diag["cli_fixed_boundary_mode"] = True
-    diag["cli_fixed_boundary_initial_policy"] = str(initial_policy)
-    final_residuals = ctx.result_final_residuals(best_run.result)
-    strict_converged = bool(ctx.result_meets_requested_ftol(best_run.result, ftol=float(requested_ftol)))
-    total_converged = bool(ctx.result_hits_total_target(best_run.result, fsq_total_target=float(target_fsq)))
-    diag["requested_ftol"] = float(requested_ftol)
-    if final_residuals is not None:
-        diag["final_fsqr"] = float(final_residuals[0])
-        diag["final_fsqz"] = float(final_residuals[1])
-        diag["final_fsql"] = float(final_residuals[2])
-    diag["converged"] = bool(strict_converged)
-    diag["converged_strict"] = bool(strict_converged)
-    diag["converged_by_total_fsq"] = bool(total_converged)
-    diag["cli_fixed_boundary_partial_parity_fallback"] = bool(partial_fallback_used)
-    diag["cli_fixed_boundary_finish_budgets"] = np.asarray(attempt_budgets, dtype=int)
-    diag["cli_fixed_boundary_finish_fsq"] = np.asarray(attempt_fsq, dtype=float)
-    diag["cli_fixed_boundary_finish_converged"] = np.asarray(attempt_converged, dtype=bool)
-    diag["cli_fixed_boundary_finish_modes"] = np.asarray(attempt_modes)
-    diag["cli_fixed_boundary_finish_budget_cap"] = -1 if finish_budget_cap is None else int(finish_budget_cap)
-    diag["cli_fixed_boundary_finish_budget_exhausted"] = bool(
-        (finish_budget_cap is not None)
-        and int(finish_budget_used) >= int(finish_budget_cap)
-        and not bool(strict_converged)
-    )
-    diag["cli_fixed_boundary_full_parity_fallback"] = bool(fallback_used)
-    diag["cli_fixed_boundary_staged_followup_used"] = bool(staged_followup_used)
-    diag["cli_fixed_boundary_staged_followup_policy"] = str(staged_followup_policy)
-    diag["cli_fixed_boundary_staged_followup_ns"] = staged_followup_ns
-    diag["cli_fixed_boundary_staged_followup_niter"] = staged_followup_niter
-    diag["cli_fixed_boundary_staged_followup_modes"] = staged_followup_modes
-    diag["cli_fixed_boundary_staged_followup_fsq"] = staged_followup_fsq
-    diag["cli_fixed_boundary_staged_followup_wall_s"] = staged_followup_wall_s
-    diag["cli_fixed_boundary_staged_followup_solve_total_s"] = staged_followup_solve_total_s
-    diag["multigrid_user_provided"] = bool(ctx.multigrid_user_provided)
-    diag["accelerated_single_grid_default"] = bool(ctx.accelerated_single_grid_default)
-    if bool(ctx.accelerated_mode):
-        diag["resume_state_mode"] = "minimal"
-        diag["resume_state"] = ctx.sanitize_minimal_resume_state_for_finish(diag.get("resume_state"))
-    best_run = replace(best_run, result=replace(best_run.result, diagnostics=diag))
-    return best_run
+    return _finish_run_with_diagnostics(locals())
