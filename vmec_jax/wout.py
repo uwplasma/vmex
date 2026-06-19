@@ -1139,10 +1139,6 @@ def wout_minimal_from_fixed_boundary(
     chipf_out = np.asarray(chipf_wout, dtype=float) * float(2.0 * np.pi * signgs)
     phi = np.asarray(cumrect_s_halfmesh(phipf_out, s))
 
-    Aminor_p = 0.0
-    Rmajor_p = 0.0
-    aspect = 0.0
-
     # Build VMEC parity grids for Nyquist outputs.
     wout_like = WoutMinimalVmecLike(
         flux=flux,
@@ -1237,10 +1233,6 @@ def wout_minimal_from_fixed_boundary(
         wint=wint,
     )
 
-    # buco/bvco/jcur* will be computed after aligning bsubu sign for wout output.
-    buco = bvco = jcuru = jcurv = None
-    equif = None
-
     # Nyquist Fourier coefficients for fields stored in wout.
     bsupu_out = np.asarray(bc.bsupu)
     bsupv_out = np.asarray(bc.bsupv)
@@ -1285,7 +1277,6 @@ def wout_minimal_from_fixed_boundary(
         if hasattr(bc, "bsubu_e") and hasattr(bc, "bsubv_e"):
             bsubu_diag = np.asarray(getattr(bc, "bsubu_e"), dtype=float)
             bsubv_diag = np.asarray(getattr(bc, "bsubv_e"), dtype=float)
-    bsubv_diag_from_raw = True
     # VMEC fileout.f forces IEQUI=1 before calling funct3d/wrout at output
     # time, regardless of the runtime IEQUI used in iterations.
     iequi = 1
@@ -1297,7 +1288,6 @@ def wout_minimal_from_fixed_boundary(
             bsubv_e=np.asarray(bc.bsubv_e),
             trig=trig,
         )
-        bsubv_diag_from_raw = False
     if wout_timing_enabled:
         t0 = _time.perf_counter()
     bsubs_half = _compute_bsubs_half_mesh(
