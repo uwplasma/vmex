@@ -209,95 +209,42 @@ class Vmec2000ScanControllerContext:
 
 def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState) -> SolveVmecResidualResult:
     """Run the VMEC2000-style residual scan controller."""
-    _SCAN_RUNNER_CACHE = ctx._SCAN_RUNNER_CACHE
-    _apply_vmec_lambda_axis_rules = ctx._apply_vmec_lambda_axis_rules
-    _attach_freeb_diag = ctx._attach_freeb_diag
-    _compute_forces = ctx._compute_forces
-    _compute_forces_impl = ctx._compute_forces_impl
     _lambda_preconditioner = ctx._lambda_preconditioner
-    _maybe_dump_ptau = ctx._maybe_dump_ptau
-    _mn_cos_to_signed_physical = ctx._mn_cos_to_signed_physical
-    _mn_cos_to_signed_physical_lambda = ctx._mn_cos_to_signed_physical_lambda
-    _mn_sin_to_signed_physical = ctx._mn_sin_to_signed_physical
-    _mn_sin_to_signed_physical_lambda = ctx._mn_sin_to_signed_physical_lambda
-    _pack_resume_state = ctx._pack_resume_state
-    _ptau_minmax = ctx._ptau_minmax
-    _ptau_minmax_from_k_host = ctx._ptau_minmax_from_k_host
-    _reset_axis_from_boundary = ctx._reset_axis_from_boundary
     _runtime_env_enabled = ctx._runtime_env_enabled
     _rz_norm = ctx._rz_norm
     _scan_backend_name = ctx._scan_backend_name
-    _scan_chunk_settings = ctx._scan_chunk_settings
     _tree_has_tracer = ctx._tree_has_tracer
-    auto_flip_force = ctx.auto_flip_force
-    axis_reset_always_3d = ctx.axis_reset_always_3d
     axis_reset_coeffs = ctx.axis_reset_coeffs
-    axis_reset_done = ctx.axis_reset_done
-    axis_reset_fsq_min = ctx.axis_reset_fsq_min
-    backtracking = ctx.backtracking
     badjac_initial_state_probe_iters = ctx.badjac_initial_state_probe_iters
-    badjac_mode = ctx.badjac_mode
     badjac_state_probe = ctx.badjac_state_probe
     badjac_use_state = ctx.badjac_use_state
     cfg = ctx.cfg
     constraint_active_false = ctx.constraint_active_false
     constraint_tcon0 = ctx.constraint_tcon0
     delta_s = ctx.delta_s
-    dump_ptau_state = ctx.dump_ptau_state
-    edge_Rcos = ctx.edge_Rcos
-    edge_Rsin = ctx.edge_Rsin
-    edge_Zcos = ctx.edge_Zcos
-    edge_Zsin = ctx.edge_Zsin
-    edge_signature_key = ctx.edge_signature_key
-    force_axis_reset = ctx.force_axis_reset
     free_boundary_enabled = ctx.free_boundary_enabled
-    freeb_nvacskip = ctx.freeb_nvacskip
-    freeb_nvskip0 = ctx.freeb_nvskip0
     fsq_total_target = ctx.fsq_total_target
     ftol = ctx.ftol
-    gamma = ctx.gamma
-    idx00 = ctx.idx00
-    indata = ctx.indata
     initial_flip_sign = ctx.initial_flip_sign
-    jit_forces = ctx.jit_forces
     lambda_update_scale = ctx.lambda_update_scale
     lambda_update_scale_j = ctx.lambda_update_scale_j
-    light_history = ctx.light_history
-    limit_dt_from_force = ctx.limit_dt_from_force
-    limit_update_rms = ctx.limit_update_rms
     lmove_axis = ctx.lmove_axis
     max_iter = ctx.max_iter
-    mpol = ctx.mpol
-    ncoeff = ctx.ncoeff
-    nrange = ctx.nrange
-    preconditioner_use_lax_tridi = ctx.preconditioner_use_lax_tridi
-    preconditioner_use_precomputed_tridi = ctx.preconditioner_use_precomputed_tridi
     ptau_tol = ctx.ptau_tol
-    ptau_tol_rel = ctx.ptau_tol_rel
     reference_mode = ctx.reference_mode
     resume_state = ctx.resume_state
-    resume_state_mode = ctx.resume_state_mode
     s = ctx.s
     scan_fallback_accept_frac = ctx.scan_fallback_accept_frac
     scan_fallback_badjac_limit = ctx.scan_fallback_badjac_limit
-    scan_fallback_enabled = ctx.scan_fallback_enabled
     scan_fallback_fsq_abs = ctx.scan_fallback_fsq_abs
     scan_fallback_fsq_factor = ctx.scan_fallback_fsq_factor
     scan_fallback_iters = ctx.scan_fallback_iters
-    scan_minimal_default = ctx.scan_minimal_default
-    stage_prev_fsq = ctx.stage_prev_fsq
-    stage_prev_fsq_j = ctx.stage_prev_fsq_j
     stage_transition_factor = ctx.stage_transition_factor
     stage_transition_scale = ctx.stage_transition_scale
     startup_policy = ctx.startup_policy
-    state0 = ctx.state0
-    state_only = ctx.state_only
     static = ctx.static
-    static_key = ctx.static_key
     step_size = ctx.step_size
-    strict_update = ctx.strict_update
     trig = ctx.trig
-    use_direct_fallback = ctx.use_direct_fallback
     use_restart_triggers = ctx.use_restart_triggers
     verbose = ctx.verbose
     verbose_vmec2000_table = ctx.verbose_vmec2000_table
@@ -305,37 +252,36 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
     vmec_half_mesh_jacobian_from_state = ctx.vmec_half_mesh_jacobian_from_state
     vmecpp_restart = ctx.vmecpp_restart
     w_mode_mn = ctx.w_mode_mn
-    wout_key = ctx.wout_key
     zero_precond_diag = ctx.zero_precond_diag
     zero_tcon = ctx.zero_tcon
     scan_runtime = _build_vmec2000_scan_runtime_setup(
         env=os.environ,
         state_init=state_init,
-        indata=indata,
+        indata=ctx.indata,
         cfg=cfg,
-        mpol=mpol,
-        nrange=nrange,
+        mpol=ctx.mpol,
+        nrange=ctx.nrange,
         resume_state=resume_state,
-        state_only=bool(state_only),
-        scan_fallback_enabled=bool(scan_fallback_enabled),
+        state_only=bool(ctx.state_only),
+        scan_fallback_enabled=bool(ctx.scan_fallback_enabled),
         force_chunked_scan=bool(startup_policy.force_chunked_scan),
-        preconditioner_use_precomputed_tridi=preconditioner_use_precomputed_tridi,
-        preconditioner_use_lax_tridi=preconditioner_use_lax_tridi,
+        preconditioner_use_precomputed_tridi=ctx.preconditioner_use_precomputed_tridi,
+        preconditioner_use_lax_tridi=ctx.preconditioner_use_lax_tridi,
         verbose=bool(verbose),
         vmec2000_control=bool(vmec2000_control),
         verbose_vmec2000_table=bool(verbose_vmec2000_table),
-        light_history=bool(light_history),
-        scan_minimal_default=scan_minimal_default,
+        light_history=bool(ctx.light_history),
+        scan_minimal_default=ctx.scan_minimal_default,
         dump_any=bool(startup_policy.dump_any),
         fsq_total_target=fsq_total_target,
-        axis_reset_done=bool(axis_reset_done),
+        axis_reset_done=bool(ctx.axis_reset_done),
         lmove_axis=bool(lmove_axis),
         step_size=float(step_size),
         initial_flip_sign=float(initial_flip_sign),
         ftol=float(ftol),
-        jit_forces=bool(jit_forces),
-        compute_forces=_compute_forces,
-        compute_forces_impl=_compute_forces_impl,
+        jit_forces=bool(ctx.jit_forces),
+        compute_forces=ctx._compute_forces,
+        compute_forces_impl=ctx._compute_forces_impl,
         scan_timing_enabled_func=_scan_timing_enabled,
         new_scan_timing_stats_func=_new_scan_timing_stats,
         scan_backend_name_func=_scan_backend_name,
@@ -355,13 +301,13 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
         jax_module=jax,
         jnp_module=jnp,
         time_module=time,
-        backtracking=bool(backtracking),
-        limit_dt_from_force=bool(limit_dt_from_force),
-        limit_update_rms=bool(limit_update_rms),
-        use_direct_fallback=bool(use_direct_fallback),
+        backtracking=bool(ctx.backtracking),
+        limit_dt_from_force=bool(ctx.limit_dt_from_force),
+        limit_update_rms=bool(ctx.limit_update_rms),
+        use_direct_fallback=bool(ctx.use_direct_fallback),
         reference_mode=bool(reference_mode),
-        strict_update=bool(strict_update),
-        auto_flip_force=bool(auto_flip_force),
+        strict_update=bool(ctx.strict_update),
+        auto_flip_force=bool(ctx.auto_flip_force),
     )
 
     scan_timing_enabled = scan_runtime.timing_enabled
@@ -449,17 +395,17 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
         s=s,
         badjac_use_state=bool(badjac_use_state),
         ptau_tol=ptau_tol,
-        ptau_tol_rel=ptau_tol_rel,
-        axis_reset_fsq_min=axis_reset_fsq_min,
-        force_axis_reset=bool(force_axis_reset),
-        axis_reset_always_3d=bool(axis_reset_always_3d),
+        ptau_tol_rel=ctx.ptau_tol_rel,
+        axis_reset_fsq_min=ctx.axis_reset_fsq_min,
+        force_axis_reset=bool(ctx.force_axis_reset),
+        axis_reset_always_3d=bool(ctx.axis_reset_always_3d),
         vmec2000_control=bool(vmec2000_control),
         lmove_axis=bool(lmove_axis),
         debug_enabled=(
             bool(axis_reset_enabled)
             and _runtime_env_enabled(os.getenv("VMEC_JAX_AXIS_RESET_DEBUG", ""))
         ),
-        ptau_minmax_from_k_host=_ptau_minmax_from_k_host,
+        ptau_minmax_from_k_host=ctx._ptau_minmax_from_k_host,
         vmec_half_mesh_jacobian_from_state_func=vmec_half_mesh_jacobian_from_state,
     )
     axis_reset_decision = axis_reset_eval.decision
@@ -470,7 +416,7 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
             if bad_jacobian0 or force_axis_reset_init:
                 print(" INITIAL JACOBIAN CHANGED SIGN!", flush=True)
             print(" TRYING TO IMPROVE INITIAL MAGNETIC AXIS GUESS", flush=True)
-        state_init = _reset_axis_from_boundary(state_init, k_guess=k0, full_reset=False, refine_axis_guess=False)
+        state_init = ctx._reset_axis_from_boundary(state_init, k_guess=k0, full_reset=False, refine_axis_guess=False)
         if bool(verbose) and bool(vmec2000_control) and bool(verbose_vmec2000_table):
             if axis_reset_coeffs is not None:
                 raxis_cc, _raxis_cs, _zaxis_cc, zaxis_cs = axis_reset_coeffs
@@ -616,7 +562,7 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
                 force_sample=conv_now,
                 kernels=k,
                 norms_current=norms_current,
-                gamma=float(gamma),
+                gamma=float(ctx.gamma),
                 twopi=float(TWOPI),
                 lasym=bool(cfg.lasym),
                 cond=jax.lax.cond,
@@ -674,7 +620,7 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
             fsq0 = fsqr + fsqz + fsql
             use_state_jac = _runtime_env_enabled(os.getenv("VMEC_JAX_SCAN_JAC_FROM_STATE", "0"))
             use_apply_payload_fusion = False
-            ptau_min, ptau_max = _ptau_minmax(k) if bool(vmec2000_control) else (None, None)
+            ptau_min, ptau_max = ctx._ptau_minmax(k) if bool(vmec2000_control) else (None, None)
             tau_decision = _scan_bad_jacobian_decision_from_step(
                 carry_adv=carry_adv,
                 kernels=k,
@@ -685,7 +631,7 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
                 vmec2000_control=bool(vmec2000_control),
                 use_apply_payload_fusion=bool(use_apply_payload_fusion),
                 badjac_use_state=bool(badjac_use_state),
-                dump_ptau_state=bool(dump_ptau_state),
+                dump_ptau_state=bool(ctx.dump_ptau_state),
                 badjac_state_probe=bool(badjac_state_probe),
                 badjac_initial_state_probe_iters=int(badjac_initial_state_probe_iters),
                 ptau_min=ptau_min,
@@ -732,7 +678,7 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
                 use_restart_triggers=bool(use_restart_triggers),
                 vmecpp_restart=bool(vmecpp_restart),
                 k_preconditioner_update_interval=k_preconditioner_update_interval,
-                stage_prev_fsq=stage_prev_fsq_j,
+                stage_prev_fsq=ctx.stage_prev_fsq_j,
                 stage_transition_factor=stage_transition_factor,
                 restart_badjac_factor=restart_badjac_factor,
                 restart_badprog_factor=restart_badprog_factor,
@@ -833,13 +779,13 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
                 edge_Zcos=carry.edge_Zcos,
                 edge_Zsin=carry.edge_Zsin,
                 free_boundary_enabled=bool(free_boundary_enabled),
-                idx00=idx00,
-                mn_cos_to_signed_physical=_mn_cos_to_signed_physical,
-                mn_sin_to_signed_physical=_mn_sin_to_signed_physical,
-                mn_sin_to_signed_physical_lambda=_mn_sin_to_signed_physical_lambda,
-                mn_cos_to_signed_physical_lambda=_mn_cos_to_signed_physical_lambda,
+                idx00=ctx.idx00,
+                mn_cos_to_signed_physical=ctx._mn_cos_to_signed_physical,
+                mn_sin_to_signed_physical=ctx._mn_sin_to_signed_physical,
+                mn_sin_to_signed_physical_lambda=ctx._mn_sin_to_signed_physical_lambda,
+                mn_cos_to_signed_physical_lambda=ctx._mn_cos_to_signed_physical_lambda,
                 enforce_fixed_boundary_and_axis=_enforce_fixed_boundary_and_axis,
-                apply_vmec_lambda_axis_rules=_apply_vmec_lambda_axis_rules,
+                apply_vmec_lambda_axis_rules=ctx._apply_vmec_lambda_axis_rules,
                 vmec2000_control=bool(vmec2000_control),
                 cond=jax.lax.cond,
             )
@@ -940,10 +886,10 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
         cache_f_norm1=cache_f_norm1_0,
         cache_rz_mats=cache_rz_mats0,
         cache_lam_prec=cache_lam_prec0,
-        edge_Rcos=edge_Rcos,
-        edge_Rsin=edge_Rsin,
-        edge_Zcos=edge_Zcos,
-        edge_Zsin=edge_Zsin,
+        edge_Rcos=ctx.edge_Rcos,
+        edge_Rsin=ctx.edge_Rsin,
+        edge_Zcos=ctx.edge_Zcos,
+        edge_Zsin=ctx.edge_Zsin,
     )
 
     scan_runtime_plan = _resolve_scan_iteration_runtime_plan(
@@ -953,9 +899,9 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
         max_iter=int(max_iter),
         axis_reset_repeat=bool(axis_reset_repeat),
         iter_offset0=int(iter_offset0),
-        static_key=static_key,
-        wout_key=wout_key,
-        edge_signature_key=edge_signature_key,
+        static_key=ctx.static_key,
+        wout_key=ctx.wout_key,
+        edge_signature_key=ctx.edge_signature_key,
         step_size=float(step_size),
         initial_flip_sign=float(initial_flip_sign),
         lambda_update_scale=float(lambda_update_scale),
@@ -966,7 +912,7 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
         scan_use_precomputed=bool(scan_use_precomputed),
         scan_use_lax_tridi=bool(scan_use_lax_tridi),
         scan_use_restart_payload=bool(scan_use_restart_payload),
-        stage_prev_fsq=stage_prev_fsq,
+        stage_prev_fsq=ctx.stage_prev_fsq,
         stage_transition_factor=float(stage_transition_factor),
         stage_transition_scale=float(stage_transition_scale),
         state_only_scan=bool(state_only_scan),
@@ -995,7 +941,7 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
         key = scan_cache_key + (int(seq_len),)
         return _get_or_build_scan_runner(
             _run_scan,
-            cache=_SCAN_RUNNER_CACHE,
+            cache=ctx._SCAN_RUNNER_CACHE,
             key=key,
             differentiating_scan=bool(scan_differentiated),
             scan_timing_enabled=bool(scan_timing_enabled),
@@ -1052,8 +998,8 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
             "nstep_screen": int(nstep_screen),
             "need_print": bool(scan_collect_print),
             "lthreed": bool(cfg.lthreed),
-            "spectral_mode_count": int(ncoeff),
-            "scan_chunk_settings_func": _scan_chunk_settings,
+            "spectral_mode_count": int(ctx.ncoeff),
+            "scan_chunk_settings_func": ctx._scan_chunk_settings,
             "scan_fallback_fsq_abs": float(scan_fallback_fsq_abs),
             "dtype": dtype,
             "emit_scan_prints": _emit_scan_prints,
@@ -1072,7 +1018,7 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
     return finalize_vmec2000_scan_run(
         carry_final=carry_final,
         history=hist,
-        state0=state0,
+        state0=ctx.state0,
         result_type=SolveVmecResidualResult,
         state_only_scan=bool(state_only_scan),
         scan_minimal=bool(scan_minimal),
@@ -1083,11 +1029,11 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
         ftol=float(ftol),
         fsq_total_target=fsq_total_target,
         max_iter=int(max_iter),
-        resume_state_mode=str(resume_state_mode),
-        pack_resume_state=_pack_resume_state,
+        resume_state_mode=str(ctx.resume_state_mode),
+        pack_resume_state=ctx._pack_resume_state,
         free_boundary_enabled=bool(free_boundary_enabled),
-        freeb_nvacskip=int(freeb_nvacskip),
-        freeb_nvskip0=int(freeb_nvskip0),
+        freeb_nvacskip=int(ctx.freeb_nvacskip),
+        freeb_nvskip0=int(ctx.freeb_nvskip0),
         iter_offset0=int(iter_offset0),
         free_boundary_iter_controls=_free_boundary_iter_controls,
         scan_timing_enabled=bool(scan_timing_enabled),
@@ -1100,7 +1046,7 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
         build_traced_scan_resume_state=_build_traced_scan_resume_state,
         state_only_scan_result=_vmec2000_state_only_scan_result,
         traced_scan_result=_vmec2000_traced_scan_result,
-        attach_free_boundary_diagnostics=_attach_freeb_diag,
+        attach_free_boundary_diagnostics=ctx._attach_freeb_diag,
         emit_post_scan_rows=_emit_vmec2000_post_scan_rows,
         post_scan_print_enabled=(
             (not bool(scan_minimal))
@@ -1118,8 +1064,8 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
             and (not bool(scan_minimal))
             and os.getenv("VMEC_JAX_DUMP_PTAU", "") not in ("", "0")
         ),
-        badjac_mode=badjac_mode,
-        dump_ptau=_maybe_dump_ptau,
+        badjac_mode=ctx.badjac_mode,
+        dump_ptau=ctx._maybe_dump_ptau,
         badjac_use_state=bool(badjac_use_state),
         badjac_state_probe=bool(badjac_state_probe),
         badjac_initial_state_probe_iters=int(badjac_initial_state_probe_iters),
