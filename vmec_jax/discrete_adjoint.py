@@ -150,15 +150,20 @@ _DIRECT_TAPE_TIMING_KEYS = (
 _TRACE_OVERRIDE_UNSET = object()
 
 
-def _scan_cache_limit() -> int:
-    env = os.getenv("VMEC_JAX_SCAN_CACHE_LIMIT", "").strip()
-    if not env:
-        return 8
+def _positive_int_env(name: str, default) -> int:
+    fallback = int(default() if callable(default) else default)
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return fallback
     try:
-        value = int(env)
+        value = int(raw)
     except Exception:
-        return 8
+        return fallback
     return max(1, value)
+
+
+def _scan_cache_limit() -> int:
+    return _positive_int_env("VMEC_JAX_SCAN_CACHE_LIMIT", 8)
 
 
 def _lru_cache_get(cache: OrderedDict[tuple[Any, ...], Any], key: tuple[Any, ...]):
@@ -267,14 +272,7 @@ def _dynamic_replay_bucket_default() -> int:
 
 
 def _dynamic_replay_bucket_size() -> int:
-    env = os.getenv("VMEC_JAX_DYNAMIC_REPLAY_BUCKET", "").strip()
-    if not env:
-        return _dynamic_replay_bucket_default()
-    try:
-        bucket = int(env)
-    except Exception:
-        return _dynamic_replay_bucket_default()
-    return max(1, bucket)
+    return _positive_int_env("VMEC_JAX_DYNAMIC_REPLAY_BUCKET", _dynamic_replay_bucket_default)
 
 
 def _dynamic_replay_bucket_len(length: int) -> int:
@@ -384,18 +382,17 @@ def _tridi_policy_cache_value(value: bool | None) -> int:
     return 1 if bool(value) else 0
 
 
+def _trace_bool_policy(trace: dict[str, Any], static_flags: dict[str, Any] | None, key: str) -> bool | None:
+    value = static_flags[key] if static_flags is not None and key in static_flags else trace.get(key, None)
+    return None if value is None else bool(value)
+
+
 def _trace_preconditioner_use_precomputed_tridi(
     trace: dict[str, Any],
     static_flags: dict[str, Any] | None = None,
 ) -> bool | None:
     """Return the precomputed-Thomas policy recorded by the primal solve."""
-    if static_flags is not None and "preconditioner_use_precomputed_tridi" in static_flags:
-        value = static_flags["preconditioner_use_precomputed_tridi"]
-    else:
-        value = trace.get("preconditioner_use_precomputed_tridi", None)
-    if value is None:
-        return None
-    return bool(value)
+    return _trace_bool_policy(trace, static_flags, "preconditioner_use_precomputed_tridi")
 
 
 def _trace_preconditioner_use_lax_tridi(
@@ -403,13 +400,7 @@ def _trace_preconditioner_use_lax_tridi(
     static_flags: dict[str, Any] | None = None,
 ) -> bool | None:
     """Return the lax tridiagonal-solver policy recorded by the primal solve."""
-    if static_flags is not None and "preconditioner_use_lax_tridi" in static_flags:
-        value = static_flags["preconditioner_use_lax_tridi"]
-    else:
-        value = trace.get("preconditioner_use_lax_tridi", None)
-    if value is None:
-        return None
-    return bool(value)
+    return _trace_bool_policy(trace, static_flags, "preconditioner_use_lax_tridi")
 
 
 @dataclass(frozen=True)
