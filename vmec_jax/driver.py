@@ -954,15 +954,14 @@ def run_fixed_boundary(
             )
         return build_static(cfg_in, grid=grid)
 
-    def _profiles_from_static(static_in: VMECStatic):
-        return _driver_flux_helpers.profiles_from_static(
-            indata=indata,
-            static_in=static_in,
-            signgs=signgs,
-            flux_profiles_from_indata_host_default_func=flux_profiles_from_indata_host_default,
-            flux_profiles_from_indata_func=flux_profiles_from_indata,
-            eval_profiles_func=eval_profiles,
-        )
+    _profiles_from_static = partial(
+        _driver_flux_helpers.profiles_from_static,
+        indata=indata,
+        signgs=signgs,
+        flux_profiles_from_indata_host_default_func=flux_profiles_from_indata_host_default,
+        flux_profiles_from_indata_func=flux_profiles_from_indata,
+        eval_profiles_func=eval_profiles,
+    )
 
     def _ensure_static_profiles() -> None:
         nonlocal static, bdy, flux, prof, pressure
@@ -971,7 +970,7 @@ def run_fixed_boundary(
         if bdy is None:
             bdy = boundary_from_indata(indata, static.modes)
         if flux is None or prof is None or pressure is None:
-            flux, prof, pressure = _profiles_from_static(static)
+            flux, prof, pressure = _profiles_from_static(static_in=static)
 
     step_size_val = _resolve_driver_step_size(
         step_size=step_size,
@@ -996,18 +995,15 @@ def run_fixed_boundary(
             version=os.getenv("VMEC_JAX_VMEC2000_VERSION", "vmec_jax"),
         )
 
-    def _initial_guess_with_optional_nojit(static_in, bdy_in, *, force_disable_jit: bool = False):
-        return _driver_solve_helpers.initial_guess_with_optional_nojit(
-            static_in,
-            bdy_in,
-            indata,
-            vmec_project=bool(vmec_project),
-            infer_axis_if_missing=bool(axis_infer_missing),
-            performance_mode=bool(performance_mode),
-            force_disable_jit=bool(force_disable_jit),
-            initial_guess_from_boundary_func=initial_guess_from_boundary,
-            default_backend_name_func=_default_backend_name,
-        )
+    _initial_guess_with_optional_nojit = partial(
+        _driver_solve_helpers.initial_guess_with_optional_nojit,
+        indata=indata,
+        vmec_project=bool(vmec_project),
+        infer_axis_if_missing=bool(axis_infer_missing),
+        performance_mode=bool(performance_mode),
+        initial_guess_from_boundary_func=initial_guess_from_boundary,
+        default_backend_name_func=_default_backend_name,
+    )
 
     if use_initial_guess:
         _ensure_static_profiles()
@@ -1090,9 +1086,6 @@ def run_fixed_boundary(
             indata=indata,
         )
 
-        def _resolve_jit_forces(flag: bool | str, static_i: VMECStatic, niter_i: int) -> bool:
-            return _resolve_jit_forces_auto_policy(flag, static_i, niter_i)
-
         env_precompile_stages = os.getenv("VMEC_JAX_PRECOMPILE_STAGES", "0")
         precompile_stages = env_precompile_stages.strip().lower() not in ("", "0", "false", "no")
 
@@ -1142,7 +1135,7 @@ def run_fixed_boundary(
                 t_start=float(t_start),
                 build_static_cfg=_build_static_cfg,
                 initial_guess_with_optional_nojit=_initial_guess_with_optional_nojit,
-                resolve_jit_forces=_resolve_jit_forces,
+                resolve_jit_forces=_resolve_jit_forces_auto_policy,
                 sanitize_resume_state_for_stage=sanitize_resume_state_for_stage,
                 sanitize_resume_state_for_same_stage=sanitize_resume_state_for_same_stage,
                 interp_vmec_state=interp_vmec_state,
@@ -1202,7 +1195,7 @@ def run_fixed_boundary(
     if flux is None or prof is None or pressure is None:
         if static is None:
             static = _build_static_cfg(cfg)
-        flux, prof, pressure = _profiles_from_static(static)
+        flux, prof, pressure = _profiles_from_static(static_in=static)
     flux, prof = _final_flux_profiles_from_state(
         indata=indata,
         static_in=static,
