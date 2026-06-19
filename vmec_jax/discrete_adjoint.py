@@ -763,20 +763,11 @@ def build_residual_checkpoint_tape(
     solver_kwargs: dict[str, Any] | None = None,
 ) -> ResidualCheckpointTape:
     """Replay the residual solver in one-step chunks and collect checkpoints."""
-    solver_kwargs = dict(solver_kwargs or {})
-    solve_kwargs = dict(solver_kwargs)
-    solve_kwargs.setdefault("indata", indata)
-    solve_kwargs.setdefault("signgs", int(signgs))
-    solve_kwargs.setdefault("ftol", ftol)
-    solve_kwargs.setdefault("step_size", float(step_size))
-    # Full scalar histories are only required when the caller intends to keep
-    # the compact trace diagnostics. The replay/JVP path only needs the
-    # step-level adjoint traces plus the internal resume checkpoint carried
-    # between one-step solves.
+    solve_kwargs = dict(solver_kwargs or {})
+    for key, value in (("indata", indata), ("signgs", int(signgs)), ("ftol", ftol), ("step_size", float(step_size))):
+        solve_kwargs.setdefault(key, value)
     solve_kwargs["light_history"] = False if store_trace else bool(light_history)
-    # Multi-step replay currently needs the cached preconditioner/control state
-    # carried in the full resume checkpoint. A later optimization pass can
-    # shrink this once exact replay coverage is in place.
+    # Multi-step replay needs the full resume checkpoint carried between steps.
     solve_kwargs["resume_state_mode"] = "full"
     state = state0
     resume_state = None
@@ -847,12 +838,9 @@ def build_residual_checkpoint_tape_direct(
     """Build a replay tape from one direct residual solve with adjoint tracing."""
     from .solve import solve_fixed_boundary_residual_iter
 
-    solver_kwargs = dict(solver_kwargs or {})
-    solve_kwargs = dict(solver_kwargs)
-    solve_kwargs.setdefault("indata", indata)
-    solve_kwargs.setdefault("signgs", int(signgs))
-    solve_kwargs.setdefault("ftol", ftol)
-    solve_kwargs.setdefault("step_size", float(step_size))
+    solve_kwargs = dict(solver_kwargs or {})
+    for key, value in (("indata", indata), ("signgs", int(signgs)), ("ftol", ftol), ("step_size", float(step_size))):
+        solve_kwargs.setdefault(key, value)
     solve_kwargs["light_history"] = False if store_trace else bool(light_history)
     solve_kwargs.setdefault(
         "adjoint_trace_mode",
@@ -1463,6 +1451,27 @@ def _stacked_leading_axis_size(stacked) -> int | None:
     return next(iter(sizes))
 
 
+def _dynamic_replay_cache_key(*, static, stacked, static_flags, stacked_base_carries=None) -> tuple[Any, ...]:
+    key = (
+        id(static),
+        bool(static_flags["apply_lforbal"]),
+        bool(static_flags["include_edge_residual"]),
+        bool(static_flags["apply_m1_constraints"]),
+        bool(static_flags["limit_update_rms"]),
+        bool(static_flags["limit_dt_from_force"]),
+        bool(static_flags["vmec2000_control"]),
+        bool(static_flags["divide_by_scalxc_for_update"]),
+        int(static_flags["signgs"]),
+        int(static_flags["precond_jmax"]),
+        _tridi_policy_cache_value(static_flags.get("preconditioner_use_precomputed_tridi", None)),
+        _tridi_policy_cache_value(static_flags.get("preconditioner_use_lax_tridi", None)),
+        _stacked_trace_signature(stacked),
+    )
+    if stacked_base_carries is not None:
+        key += (_stacked_trace_signature(stacked_base_carries),)
+    return key
+
+
 def _dynamic_basepoint_payload_shapes_match(stacked, stacked_base_carries) -> bool:
     trace_len = _stacked_leading_axis_size(stacked)
     carry_len = _stacked_leading_axis_size(stacked_base_carries)
@@ -2037,21 +2046,7 @@ def _checkpoint_tape_scan_runner(*, static, stacked, static_flags, rebuild_preco
 
 
 def _checkpoint_tape_dynamic_scan_runner(*, static, stacked, static_flags):
-    key = (
-        id(static),
-        bool(static_flags["apply_lforbal"]),
-        bool(static_flags["include_edge_residual"]),
-        bool(static_flags["apply_m1_constraints"]),
-        bool(static_flags["limit_update_rms"]),
-        bool(static_flags["limit_dt_from_force"]),
-        bool(static_flags["vmec2000_control"]),
-        bool(static_flags["divide_by_scalxc_for_update"]),
-        int(static_flags["signgs"]),
-        int(static_flags["precond_jmax"]),
-        _tridi_policy_cache_value(static_flags.get("preconditioner_use_precomputed_tridi", None)),
-        _tridi_policy_cache_value(static_flags.get("preconditioner_use_lax_tridi", None)),
-        _stacked_trace_signature(stacked),
-    )
+    key = _dynamic_replay_cache_key(static=static, stacked=stacked, static_flags=static_flags)
     cached, cache_miss = _get_replay_scan_runner("dynamic", _CHECKPOINT_TAPE_DYNAMIC_SCAN_CACHE, key)
     if cached is not None:
         return cached
@@ -2088,21 +2083,11 @@ def _checkpoint_tape_dynamic_scan_runner(*, static, stacked, static_flags):
 
 
 def _checkpoint_tape_dynamic_basepoint_scan_runner(*, static, stacked, stacked_base_carries, static_flags):
-    key = (
-        id(static),
-        bool(static_flags["apply_lforbal"]),
-        bool(static_flags["include_edge_residual"]),
-        bool(static_flags["apply_m1_constraints"]),
-        bool(static_flags["limit_update_rms"]),
-        bool(static_flags["limit_dt_from_force"]),
-        bool(static_flags["vmec2000_control"]),
-        bool(static_flags["divide_by_scalxc_for_update"]),
-        int(static_flags["signgs"]),
-        int(static_flags["precond_jmax"]),
-        _tridi_policy_cache_value(static_flags.get("preconditioner_use_precomputed_tridi", None)),
-        _tridi_policy_cache_value(static_flags.get("preconditioner_use_lax_tridi", None)),
-        _stacked_trace_signature(stacked),
-        _stacked_trace_signature(stacked_base_carries),
+    key = _dynamic_replay_cache_key(
+        static=static,
+        stacked=stacked,
+        static_flags=static_flags,
+        stacked_base_carries=stacked_base_carries,
     )
     cached, cache_miss = _get_replay_scan_runner("dynamic_basepoint", _CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_SCAN_CACHE, key)
     if cached is not None:
@@ -2180,21 +2165,11 @@ def _run_dynamic_basepoint_scan_zero_aux(*, run_scan, state_tangents, stacked_ba
 
 
 def _checkpoint_tape_dynamic_basepoint_vjp_scan_runner(*, static, stacked, stacked_base_carries, static_flags):
-    key = (
-        id(static),
-        bool(static_flags["apply_lforbal"]),
-        bool(static_flags["include_edge_residual"]),
-        bool(static_flags["apply_m1_constraints"]),
-        bool(static_flags["limit_update_rms"]),
-        bool(static_flags["limit_dt_from_force"]),
-        bool(static_flags["vmec2000_control"]),
-        bool(static_flags["divide_by_scalxc_for_update"]),
-        int(static_flags["signgs"]),
-        int(static_flags["precond_jmax"]),
-        _tridi_policy_cache_value(static_flags.get("preconditioner_use_precomputed_tridi", None)),
-        _tridi_policy_cache_value(static_flags.get("preconditioner_use_lax_tridi", None)),
-        _stacked_trace_signature(stacked),
-        _stacked_trace_signature(stacked_base_carries),
+    key = _dynamic_replay_cache_key(
+        static=static,
+        stacked=stacked,
+        static_flags=static_flags,
+        stacked_base_carries=stacked_base_carries,
     )
     cached, cache_miss = _get_replay_scan_runner(
         "dynamic_basepoint_vjp",

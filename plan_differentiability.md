@@ -21008,3 +21008,73 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.999999983%.
+
+## 2026-06-19 Dynamic Replay Cache-Key Consolidation
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Used the discrete-adjoint explorer results to target a low-risk replay
+   infrastructure seam.
+2. Extracted a shared dynamic replay cache-key builder used by dynamic,
+   dynamic-basepoint, and dynamic-basepoint-VJP scan runners.
+3. Kept local solve-kwargs setup in the two tape builders because the shared
+   helper version increased file size without enough simplification.
+
+Results obtained:
+
+- `discrete_adjoint.py` decreased from 3478 to 3453 lines relative to the
+  previous committed state.
+- The three dynamic replay scan-runner caches now share one key construction
+  path, reducing risk of future cache-key drift between JVP and VJP runners.
+- Replay math, dynamic scan payloads, and branch semantics were unchanged.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/discrete_adjoint.py`
+- `python -m ruff check vmec_jax/discrete_adjoint.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_discrete_adjoint_chunking.py::test_checkpoint_scan_runner_factories_reuse_cached_runners tests/test_discrete_adjoint_chunking.py::test_checkpoint_scan_runner_cache_keys_include_tridi_policies tests/test_discrete_adjoint_chunking.py::test_checkpoint_tape_dynamic_scan_runner_skips_inactive_trace_entries tests/test_discrete_adjoint_chunking.py::test_direct_checkpoint_tape_jvp_only_can_preserve_basepoint_carries_for_fast_scan tests/test_discrete_adjoint_chunking.py::test_jvp_columns_dynamic_basepoint_uses_runner_zero_aux tests/test_discrete_adjoint_chunking.py::test_direct_checkpoint_tape_reruns_full_trace_when_dynamic_trace_unsupported -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_discrete_adjoint_chunking.py -q`
+- `git diff --check`
+
+Best next steps:
+
+1. Use the direct-coil/vacuum test explorer recommendations for a test
+   maintainability tranche, but avoid weakening AD-vs-FD physics gates.
+2. Continue production cleanup in `driver.py`, `wout.py`, or
+   `free_boundary.py` only where extraction is line-negative and covered.
+3. Keep heavier real-case QH replay parity for an environment where those
+   fixtures are enabled.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999458%.
+- Solver monolith reduction: 99.825%.
+- Free-boundary adjoint monolith reduction: 99.54%.
+- Driver workflow decomposition: 99.945%.
+- Residual iteration decomposition: 99.04%.
+- WOUT diagnostic/profile decomposition: 99.975%.
+- Bcovar/WOUT parity decomposition: 99.15%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.82%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.74%.
+- Fixed-boundary optimizer decomposition: 96.22%.
+- Plotting/WOUT visualization decomposition: 96.80%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.75%.
+- Discrete-adjoint replay decomposition: 96.69%.
+- Free-boundary validation-gate maintainability: 97.96%.
+- QI objective/staged-runner decomposition: 96.9%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.999999984%.
