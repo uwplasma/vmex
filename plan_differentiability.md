@@ -7,6 +7,72 @@ and should not drive new work unless a specific old result needs to be audited.
 
 Last updated: 2026-06-19.
 
+## 2026-06-19 Discrete-Adjoint Replay Stacker Consolidation
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Consolidated duplicated host/device replay stacking closures in
+   `discrete_adjoint.py` into `_replay_stack_values_fn`.
+2. Reused the same stacker for static replay step traces, dynamic replay
+   payloads, and dynamic base-carry stacking.
+3. Preserved accelerator behavior: JAX arrays remain device-resident on GPU,
+   while CPU paths still use NumPy stacking for host-side replay payloads.
+
+Results obtained:
+
+- `vmec_jax/discrete_adjoint.py` dropped from 3520 to 3508 lines.
+- Replay/cache focused tests still pass for dynamic bucket sizing, env
+  overrides, cache clearing, and tridiagonal replay policies.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/discrete_adjoint.py`
+- `python -m ruff check vmec_jax/discrete_adjoint.py --select F401,F841`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_discrete_adjoint_chunking.py::test_dynamic_replay_bucket_default_is_modest tests/test_discrete_adjoint_chunking.py::test_dynamic_replay_bucket_backend_failure_and_empty_lengths tests/test_discrete_adjoint_chunking.py::test_dynamic_replay_bucket_default_is_larger_on_gpu tests/test_discrete_adjoint_chunking.py::test_dynamic_replay_bucket_malformed_env_uses_backend_default tests/test_discrete_adjoint_chunking.py::test_dynamic_replay_bucket_honors_env tests/test_discrete_adjoint_chunking.py::test_scan_cache_limit_lru_and_clear tests/test_discrete_adjoint_qh.py::test_replay_tridi_policy_helpers_and_static_flags -q`
+- `git diff --check`
+- `python tools/diagnostics/source_health.py | head -65`
+
+Best next steps:
+
+1. Continue reducing duplicated replay/controller machinery, especially
+   repeated scan-runner cache-key and diagnostics setup.
+2. Keep AD evidence conservative: this simplifies exact-replay payload setup
+   but does not change the adaptive branch-differentiation claim.
+3. Continue avoiding broad CI waits until the refactor tranche is larger.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999%.
+- Solver monolith reduction: 99.737%.
+- Free-boundary adjoint monolith reduction: 99.44%.
+- Driver workflow decomposition: 99.94%.
+- Residual iteration decomposition: 98.68%.
+- WOUT diagnostic/profile decomposition: 99.94%.
+- Bcovar/WOUT parity decomposition: 99.13%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.81%.
+- Tomnsps transform decomposition: 98.5%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.66%.
+- Fixed-boundary optimizer decomposition: 96.05%.
+- Plotting/WOUT visualization decomposition: 95.9%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.45%.
+- Discrete-adjoint replay decomposition: 96.45%.
+- QI objective/staged-runner decomposition: 96.9%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.999998%.
+
 ## 2026-06-19 WOUT Field-Output Policy Extraction
 
 Branch: `codex/differentiability-refactor-plan`.

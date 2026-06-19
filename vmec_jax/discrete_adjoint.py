@@ -1260,6 +1260,28 @@ def _trace_with_replay_defaults(trace: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _replay_stack_values_fn():
+    """Return a tree-map stack function that preserves accelerator-resident arrays."""
+
+    use_device_stack = _backend_is_accelerator(jax.default_backend())
+    jax_array_type = getattr(jax, "Array", ())
+
+    def _as_stack_array(x):
+        if use_device_stack:
+            if jax_array_type and isinstance(x, jax_array_type):
+                return x
+            return jnp.asarray(x)
+        if isinstance(x, np.ndarray):
+            return x
+        return np.asarray(x)
+
+    def _stack_values(*xs):
+        arrays = [_as_stack_array(x) for x in xs]
+        return jnp.stack(arrays, axis=0) if use_device_stack else np.stack(arrays, axis=0)
+
+    return _stack_values
+
+
 def _stack_replay_step_traces(step_traces: tuple[dict[str, Any], ...]):
     step_traces = tuple(_trace_with_replay_defaults(trace) for trace in step_traces)
     optional_keys = _OPTIONAL_REPLAY_STEP_TRACE_KEYS
@@ -1284,25 +1306,7 @@ def _stack_replay_step_traces(step_traces: tuple[dict[str, Any], ...]):
         }
         for trace in step_traces
     )
-    use_device_stack = _backend_is_accelerator(jax.default_backend())
-    jax_array_type = getattr(jax, "Array", ())
-
-    def _as_stack_array(x):
-        if use_device_stack:
-            if jax_array_type and isinstance(x, jax_array_type):
-                return x
-            return jnp.asarray(x)
-        if isinstance(x, np.ndarray):
-            return x
-        return np.asarray(x)
-
-    def _stack_values(*xs):
-        arrays = [_as_stack_array(x) for x in xs]
-        if use_device_stack:
-            return jnp.stack(arrays, axis=0)
-        return np.stack(arrays, axis=0)
-
-    stacked = jax.tree_util.tree_map(_stack_values, *filtered)
+    stacked = jax.tree_util.tree_map(_replay_stack_values_fn(), *filtered)
     static_flags = _static_flags_from_replay_step_traces(step_traces)
     return stacked, static_flags
 
@@ -1331,23 +1335,7 @@ def _build_dynamic_replay_payload(
     store_base_carries: bool = True,
 ):
     step_traces = tuple(_trace_with_replay_defaults(trace) for trace in step_traces)
-    use_device_stack = _backend_is_accelerator(jax.default_backend())
-    jax_array_type = getattr(jax, "Array", ())
-
-    def _as_stack_array(x):
-        if use_device_stack:
-            if jax_array_type and isinstance(x, jax_array_type):
-                return x
-            return jnp.asarray(x)
-        if isinstance(x, np.ndarray):
-            return x
-        return np.asarray(x)
-
-    def _stack_dynamic_values(*xs):
-        arrays = [_as_stack_array(x) for x in xs]
-        if use_device_stack:
-            return jnp.stack(arrays, axis=0)
-        return np.stack(arrays, axis=0)
+    stack_values = _replay_stack_values_fn()
 
     dynamic_static_flags = dict(static_flags)
     dynamic_static_flags["layout"] = step_traces[0]["state_pre"].layout
@@ -1418,7 +1406,7 @@ def _build_dynamic_replay_payload(
         pad_trace["active"] = False
         filtered = filtered + tuple(dict(pad_trace) for _ in range(target_len - len(filtered)))
     stacked = {
-        key: _stack_dynamic_values(*(trace[key] for trace in filtered))
+        key: stack_values(*(trace[key] for trace in filtered))
         for key in filtered[0]
     }
     initial_carry = _dynamic_replay_initial_carry(step_traces[0])
@@ -1428,7 +1416,7 @@ def _build_dynamic_replay_payload(
         if target_len > len(base_carries):
             pad_carry = base_carries[-1]
             base_carries = base_carries + (pad_carry,) * (target_len - len(base_carries))
-        stacked_base_carries = jax.tree_util.tree_map(_stack_dynamic_values, *base_carries)
+        stacked_base_carries = jax.tree_util.tree_map(stack_values, *base_carries)
     return stacked, dynamic_static_flags, initial_carry, stacked_base_carries
 
 
