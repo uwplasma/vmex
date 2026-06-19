@@ -80,44 +80,43 @@ from .solvers.fixed_boundary.profiles import (
 from .state import VMECState, pack_state, unpack_state
 
 
-def _vmec_backward_profile_enabled() -> bool:
-    value = os.environ.get("VMEC_JAX_PROFILE_BACKWARD", "")
+def _env_flag_enabled(name: str) -> bool:
+    value = os.environ.get(name, "")
     return value.strip().lower() not in ("", "0", "false", "no")
+
+
+def _vmec_backward_profile_enabled() -> bool:
+    return _env_flag_enabled("VMEC_JAX_PROFILE_BACKWARD")
+
+
+def _profile_log(*, prefix: str, enabled: bool, stage: str, start: float | None, extra: dict[str, Any]) -> None:
+    if not enabled:
+        return
+    payload = {"stage": stage}
+    if start is not None:
+        payload["elapsed_s"] = time.perf_counter() - start
+    payload.update(extra)
+    print(f"[vmec_jax {prefix}] {payload}", flush=True)
 
 
 def _vmec_backward_profile_log(stage: str, start: float | None = None, **extra) -> None:
-    if not _vmec_backward_profile_enabled():
-        return
-    payload = {"stage": stage}
-    if start is not None:
-        payload["elapsed_s"] = time.perf_counter() - start
-    payload.update(extra)
-    print(f"[vmec_jax backward] {payload}", flush=True)
+    _profile_log(prefix="backward", enabled=_vmec_backward_profile_enabled(), stage=stage, start=start, extra=extra)
 
 
 def _vmec_residual_profile_enabled() -> bool:
-    value = os.environ.get("VMEC_JAX_PROFILE_RESIDUAL", "")
-    return value.strip().lower() not in ("", "0", "false", "no")
+    return _env_flag_enabled("VMEC_JAX_PROFILE_RESIDUAL")
 
 
 def _vmec_residual_profile_log(stage: str, start: float | None = None, **extra) -> None:
-    if not _vmec_residual_profile_enabled():
-        return
-    payload = {"stage": stage}
-    if start is not None:
-        payload["elapsed_s"] = time.perf_counter() - start
-    payload.update(extra)
-    print(f"[vmec_jax residual] {payload}", flush=True)
+    _profile_log(prefix="residual", enabled=_vmec_residual_profile_enabled(), stage=stage, start=start, extra=extra)
 
 
 def _vmec_keep_all_active_enabled() -> bool:
-    value = os.environ.get("VMEC_JAX_IMPLICIT_KEEP_ALL_ACTIVE", "")
-    return value.strip().lower() not in ("", "0", "false", "no")
+    return _env_flag_enabled("VMEC_JAX_IMPLICIT_KEEP_ALL_ACTIVE")
 
 
 def _vmec_disable_reduced_active_enabled() -> bool:
-    value = os.environ.get("VMEC_JAX_IMPLICIT_DISABLE_REDUCED_ACTIVE", "")
-    return value.strip().lower() not in ("", "0", "false", "no")
+    return _env_flag_enabled("VMEC_JAX_IMPLICIT_DISABLE_REDUCED_ACTIVE")
 
 
 def _dense_transpose_lstsq_host(J, b, damping):
@@ -142,15 +141,12 @@ def _dense_transpose_lstsq_host(J, b, damping):
 
 def _pack_named_residual_parts(parts, projector=None):
     """Flatten named residual blocks, optionally keeping structural indices."""
-    packed = []
-    for name, arr in parts:
+    def _pack_one(name, arr):
         flat = jnp.ravel(jnp.asarray(arr))
-        if projector is not None:
-            keep = projector.get(name)
-            if keep is not None:
-                flat = jnp.take(flat, keep)
-        packed.append(flat)
-    return jnp.concatenate(packed, axis=0)
+        keep = None if projector is None else projector.get(name)
+        return flat if keep is None else jnp.take(flat, keep)
+
+    return jnp.concatenate([_pack_one(name, arr) for name, arr in parts], axis=0)
 
 
 def _zero_m1_zforce_flag_from_result(res, dtype) -> np.ndarray:

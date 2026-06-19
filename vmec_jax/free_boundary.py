@@ -304,12 +304,7 @@ def _sample_external_boundary_arrays(
     extcur_eff = tuple(extcur) if extcur is not None else tuple(getattr(static, "free_boundary_extcur", ()) or ())
 
     sample_nzeta = 1 if (not bool(getattr(static.cfg, "lthreed", True))) else int(static.cfg.nzeta)
-    dump_scalpot_enabled = os.getenv("VMEC_JAX_DUMP_SCALPOT", "").strip().lower() not in (
-        "",
-        "0",
-        "false",
-        "no",
-    )
+    dump_scalpot_enabled = _env_truthy("VMEC_JAX_DUMP_SCALPOT")
     setup = _freeb_boundary_sample_setup(static=static, sample_nzeta=int(sample_nzeta))
     trig = setup.trig
     timing["setup_time_s"] = max(0.0, time.perf_counter() - t_phase)
@@ -2338,7 +2333,7 @@ def _freeb_use_greenf_source(ntor: int) -> bool:
         # Default to VMEC-like Green-function non-singular source assembly in
         # all topologies. Environment variable remains a diagnostic override.
         return True
-    return greenf_env.strip().lower() not in ("", "0", "false", "no")
+    return _env_truthy("VMEC_JAX_FREEB_USE_GREENF_SOURCE")
 
 
 def _env_truthy(name: str, default: bool = False) -> bool:
@@ -2707,12 +2702,7 @@ def nestor_external_only_step(
         if runtime_mode == "spectral_poisson_external_only":
             runtime_mode = "spectral_poisson_external_only"
 
-    force_rhs_reuse = os.getenv("VMEC_JAX_FREEB_REUSE_RHS_UPDATE", "1").strip().lower() not in (
-        "",
-        "0",
-        "false",
-        "no",
-    )
+    force_rhs_reuse = _env_truthy("VMEC_JAX_FREEB_REUSE_RHS_UPDATE", default=True)
 
     if int(ivac) != 1 and runtime is not None and not force_rhs_reuse:
         # Legacy fast reuse mode: hold previous potential/bsqvac unchanged.
@@ -2872,12 +2862,7 @@ def nestor_external_only_step(
             # Default to Fortran-equivalent matrix assembly from grpmn (fouri
             # path). Can be disabled via VMEC_JAX_FREEB_EXPERIMENTAL_FOURI_MATRIX=0
             # for diagnostics.
-            experimental_fouri_matrix = os.getenv("VMEC_JAX_FREEB_EXPERIMENTAL_FOURI_MATRIX", "1").strip().lower() not in (
-                "",
-                "0",
-                "false",
-                "no",
-            )
+            experimental_fouri_matrix = _env_truthy("VMEC_JAX_FREEB_EXPERIMENTAL_FOURI_MATRIX", default=True)
             refresh_source_on_reuse = bool(reuse_step and not provider_allows_source_reuse)
             if use_greenf_source and ((not reuse_step) or refresh_source_on_reuse) and cache.mode_basis is not None:
                 nzeta_surf = int(np.asarray(sample.R).shape[1])
@@ -2919,12 +2904,7 @@ def nestor_external_only_step(
                         )
                         bvec_time_s += max(0.0, time.perf_counter() - t_phase)
                     rhs_mode_eff = np.asarray(bvec_mode_nonsing, dtype=float)
-                    add_analytic = os.getenv("VMEC_JAX_FREEB_ADD_ANALYTIC_BVEC", "1").strip().lower() not in (
-                        "",
-                        "0",
-                        "false",
-                        "no",
-                    )
+                    add_analytic = _env_truthy("VMEC_JAX_FREEB_ADD_ANALYTIC_BVEC", default=True)
                     if add_analytic:
                         t_phase = time.perf_counter()
                         bvec_mode_analytic, grpmn_analytic = _vmec_analytic_terms_from_geometry(
