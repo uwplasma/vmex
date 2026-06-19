@@ -668,16 +668,15 @@ def vmecplot2_lcfs_3d_grid(
     return theta, phi, np.asarray(R), np.asarray(Z), np.asarray(B)
 
 
-def axis_rz_from_wout(wout, *, zeta: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Axis curve from wout Fourier coefficients."""
-    zeta = np.asarray(zeta)
+def _axis_rz_from_wout_angle(wout, angle_grid: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    angle_grid = np.asarray(angle_grid)
     if not hasattr(wout, "raxis_cc") or not hasattr(wout, "zaxis_cs"):
         # Fallback: use the m=0,n=0 mode from rmnc for a constant axis estimate.
         r0 = float(np.asarray(wout.rmnc)[0, 0]) if np.asarray(wout.rmnc).size else 0.0
-        return np.full_like(zeta, r0, dtype=float), np.zeros_like(zeta, dtype=float)
+        return np.full_like(angle_grid, r0, dtype=float), np.zeros_like(angle_grid, dtype=float)
 
     n = np.arange(len(wout.raxis_cc), dtype=float)
-    angle = (-n[:, None] * float(wout.nfp)) * zeta[None, :]
+    angle = (-n[:, None] * float(wout.nfp)) * angle_grid[None, :]
     raxis_cc = np.asarray(wout.raxis_cc, dtype=float)[:, None]
     raxis_cs = np.asarray(getattr(wout, "raxis_cs", np.zeros_like(wout.raxis_cc)), dtype=float)[:, None]
     zaxis_cs = np.asarray(wout.zaxis_cs, dtype=float)[:, None]
@@ -686,25 +685,16 @@ def axis_rz_from_wout(wout, *, zeta: np.ndarray) -> tuple[np.ndarray, np.ndarray
     R = np.sum(raxis_cc * np.cos(angle) + raxis_cs * np.sin(angle), axis=0)
     Z = np.sum(zaxis_cs * np.sin(angle) + zaxis_cc * np.cos(angle), axis=0)
     return R, Z
+
+
+def axis_rz_from_wout(wout, *, zeta: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Axis curve from wout Fourier coefficients."""
+    return _axis_rz_from_wout_angle(wout, zeta)
 
 
 def axis_rz_from_wout_physical(wout, *, phi: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Axis curve using physical toroidal angle phi (vmecPlot2 convention)."""
-    if not hasattr(wout, "raxis_cc") or not hasattr(wout, "zaxis_cs"):
-        r0 = float(np.asarray(wout.rmnc)[0, 0]) if np.asarray(wout.rmnc).size else 0.0
-        return np.full_like(phi, r0, dtype=float), np.zeros_like(phi, dtype=float)
-
-    phi = np.asarray(phi)
-    n = np.arange(len(wout.raxis_cc), dtype=float)
-    angle = (-n[:, None] * float(wout.nfp)) * phi[None, :]
-    raxis_cc = np.asarray(wout.raxis_cc, dtype=float)[:, None]
-    raxis_cs = np.asarray(getattr(wout, "raxis_cs", np.zeros_like(wout.raxis_cc)), dtype=float)[:, None]
-    zaxis_cs = np.asarray(wout.zaxis_cs, dtype=float)[:, None]
-    zaxis_cc = np.asarray(getattr(wout, "zaxis_cc", np.zeros_like(wout.zaxis_cs)), dtype=float)[:, None]
-
-    R = np.sum(raxis_cc * np.cos(angle) + raxis_cs * np.sin(angle), axis=0)
-    Z = np.sum(zaxis_cs * np.sin(angle) + zaxis_cc * np.cos(angle), axis=0)
-    return R, Z
+    return _axis_rz_from_wout_angle(wout, phi)
 
 
 def profiles_from_wout(wout) -> dict[str, np.ndarray]:
