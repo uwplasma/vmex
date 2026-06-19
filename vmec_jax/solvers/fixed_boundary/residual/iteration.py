@@ -78,7 +78,7 @@ from vmec_jax.solvers.fixed_boundary.residual.state_setup import (
 )
 from vmec_jax.solvers.fixed_boundary.residual.finalize import (
     attach_residual_iter_timing_diagnostics as _attach_residual_iter_timing_diagnostics,
-    build_residual_iter_resume_state_payload as _build_residual_iter_resume_state_payload,
+    build_residual_iter_resume_state_from_namespace as _build_residual_iter_resume_state_from_namespace,
     finalize_residual_iter_result as _finalize_residual_iter_result,
     precompile_only_residual_iter_result as _precompile_only_residual_iter_result,
     vmec2000_state_only_scan_result as _vmec2000_state_only_scan_result,
@@ -6147,64 +6147,9 @@ def solve_fixed_boundary_residual_iter(
         finalize_start=t_finalize_start,
         solve_wall_start=float(_solve_wall_start),
     )
-    resume_state_base_kwargs = {
-        "time_step": time_step,
-        "inv_tau": inv_tau,
-        "fsq_prev": fsq_prev,
-        "fsq0_prev": fsq0_prev,
-        "flip_sign": flip_sign,
-        "iter1": iter1,
-        "last_iter2": last_iter2,
-        "ijacob": ijacob,
-        "bad_resets": bad_resets,
-        "res0": res0,
-        "res1": res1,
-        "prev_rz_fsq": prev_rz_fsq,
-        "bad_growth_streak": bad_growth_streak,
-        "huge_force_restart_count": huge_force_restart_count,
-        "vmec2000_cache_valid": vmec2000_cache_valid,
-        "freeb_ivac": freeb_ivac,
-        "freeb_ivacskip": freeb_ivacskip,
-        "freeb_nvacskip": freeb_nvacskip,
-        "freeb_nvskip0": freeb_nvskip0,
-        "freeb_last_model": freeb_last_model,
-        "freeb_nestor_runtime": freeb_nestor_runtime,
-    }
-    resume_state_heavy = None
-    if resume_state_mode == "full":
-        resume_state_heavy = {
-            "vRcc": np.asarray(vRcc),
-            "vRss": np.asarray(vRss),
-            "vZsc": np.asarray(vZsc),
-            "vZcs": np.asarray(vZcs),
-            "vLsc": np.asarray(vLsc),
-            "vLcs": np.asarray(vLcs),
-            "vRsc": np.asarray(vRsc),
-            "vRcs": np.asarray(vRcs),
-            "vZcc": np.asarray(vZcc),
-            "vZss": np.asarray(vZss),
-            "vLcc": np.asarray(vLcc),
-            "vLss": np.asarray(vLss),
-            "state_checkpoint": state_checkpoint,
-            "cache_precond_diag": cache_precond_diag,
-            "cache_tcon": cache_tcon,
-            "cache_norms": cache_norms,
-            "cache_rz_scale": cache_rz_scale,
-            "cache_l_scale": cache_l_scale,
-            "cache_rz_norm": cache_rz_norm,
-            "cache_f_norm1": cache_f_norm1,
-            "cache_prec_rz_mats": cache_prec_rz_mats,
-            "cache_prec_rz_jmax": cache_prec_rz_jmax,
-            "cache_prec_lam_prec": cache_prec_lam_prec,
-            "cache_prec_faclam": cache_prec_faclam,
-            "cache_prec_lam_debug": cache_prec_lam_debug,
-            "cache_constraint_rcon0": cache_constraint_rcon0,
-            "cache_constraint_zcon0": cache_constraint_zcon0,
-        }
-    diag["resume_state"] = _build_residual_iter_resume_state_payload(
+    diag["resume_state"] = _build_residual_iter_resume_state_from_namespace(
+        locals(),
         resume_state_mode=str(resume_state_mode),
-        base_kwargs=resume_state_base_kwargs,
-        heavy_payload=resume_state_heavy,
     )
     return _finalize_residual_iter_result(
         result_type=SolveVmecResidualResult,

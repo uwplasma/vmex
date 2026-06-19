@@ -15,10 +15,23 @@ from .runtime import (
 )
 
 _EMPTY_HISTORY_KEYS = ("w_history", "fsqr2_history", "fsqz2_history", "fsql2_history", "grad_rms_history", "step_history")
+_RESUME_BASE_KEYS = (
+    "time_step inv_tau fsq_prev fsq0_prev flip_sign iter1 last_iter2 ijacob "
+    "bad_resets res0 res1 prev_rz_fsq bad_growth_streak huge_force_restart_count "
+    "vmec2000_cache_valid freeb_ivac freeb_ivacskip freeb_nvacskip freeb_nvskip0 "
+    "freeb_last_model freeb_nestor_runtime"
+).split()
+_RESUME_HEAVY_ARRAY_KEYS = "vRcc vRss vZsc vZcs vLsc vLcs vRsc vRcs vZcc vZss vLcc vLss".split()
+_RESUME_HEAVY_OBJECT_KEYS = (
+    "state_checkpoint cache_precond_diag cache_tcon cache_norms cache_rz_scale cache_l_scale "
+    "cache_rz_norm cache_f_norm1 cache_prec_rz_mats cache_prec_rz_jmax cache_prec_lam_prec "
+    "cache_prec_faclam cache_prec_lam_debug cache_constraint_rcon0 cache_constraint_zcon0"
+).split()
 
 __all__ = [
     "attach_residual_iter_timing_diagnostics",
     "build_residual_iter_resume_state_payload",
+    "build_residual_iter_resume_state_from_namespace",
     "finalize_residual_iter_result",
     "precompile_only_residual_iter_result",
     "vmec2000_state_only_scan_result",
@@ -83,6 +96,28 @@ def build_residual_iter_resume_state_payload(
     base = _build_resume_state_base(**dict(base_kwargs))
     heavy = dict(heavy_payload) if mode == "full" and heavy_payload is not None else None
     return _pack_resume_state_record(base=base, heavy=heavy, mode=mode)
+
+
+def build_residual_iter_resume_state_from_namespace(
+    namespace: Mapping[str, Any],
+    *,
+    resume_state_mode: str,
+) -> dict[str, Any] | None:
+    """Build a residual-iteration resume payload from selected local values."""
+
+    mode = str(resume_state_mode)
+    if mode == "none":
+        return None
+    base_kwargs = {key: namespace[key] for key in _RESUME_BASE_KEYS}
+    heavy = None
+    if mode == "full":
+        heavy = {key: np.asarray(namespace[key]) for key in _RESUME_HEAVY_ARRAY_KEYS}
+        heavy.update({key: namespace[key] for key in _RESUME_HEAVY_OBJECT_KEYS})
+    return build_residual_iter_resume_state_payload(
+        resume_state_mode=mode,
+        base_kwargs=base_kwargs,
+        heavy_payload=heavy,
+    )
 
 
 def finalize_residual_iter_result(

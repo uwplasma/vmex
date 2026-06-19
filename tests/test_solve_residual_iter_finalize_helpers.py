@@ -5,6 +5,7 @@ import pytest
 
 from vmec_jax.solvers.fixed_boundary.residual.finalize import (
     attach_residual_iter_timing_diagnostics,
+    build_residual_iter_resume_state_from_namespace,
     build_residual_iter_resume_state_payload,
     finalize_residual_iter_result,
     vmec2000_state_only_scan_result,
@@ -147,6 +148,44 @@ def test_build_residual_iter_resume_state_payload_modes() -> None:
     )
     assert full["freeb_nvacskip"] == 5
     np.testing.assert_allclose(full["cache_norms"], [1.0, 2.0])
+
+
+def test_build_residual_iter_resume_state_from_namespace_selects_payload() -> None:
+    namespace = _resume_base_kwargs()
+    namespace.update(
+        {key: [1.0, 2.0] for key in "vRcc vRss vZsc vZcs vLsc vLcs vRsc vRcs vZcc vZss vLcc vLss".split()}
+    )
+    namespace.update(
+        {
+            "state_checkpoint": "checkpoint",
+            "cache_precond_diag": None,
+            "cache_tcon": None,
+            "cache_norms": np.asarray([3.0, 4.0]),
+            "cache_rz_scale": None,
+            "cache_l_scale": None,
+            "cache_rz_norm": None,
+            "cache_f_norm1": None,
+            "cache_prec_rz_mats": None,
+            "cache_prec_rz_jmax": None,
+            "cache_prec_lam_prec": None,
+            "cache_prec_faclam": None,
+            "cache_prec_lam_debug": None,
+            "cache_constraint_rcon0": None,
+            "cache_constraint_zcon0": None,
+            "unrelated_large_local": object(),
+        }
+    )
+
+    assert build_residual_iter_resume_state_from_namespace(namespace, resume_state_mode="none") is None
+    light = build_residual_iter_resume_state_from_namespace(namespace, resume_state_mode="light")
+    assert light["iter_offset"] == 8
+    assert "vRcc" not in light
+
+    full = build_residual_iter_resume_state_from_namespace(namespace, resume_state_mode="full")
+    np.testing.assert_allclose(full["vRcc"], [1.0, 2.0])
+    np.testing.assert_allclose(full["cache_norms"], [3.0, 4.0])
+    assert full["state_checkpoint"] == "checkpoint"
+    assert "unrelated_large_local" not in full
 
 
 def test_finalize_residual_iter_result_attaches_free_boundary_and_force_payload() -> None:
