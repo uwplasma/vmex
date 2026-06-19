@@ -276,6 +276,110 @@ class ScanDispatchFinalizeInputs:
     badjac_initial_state_probe_iters: int
 
 
+@dataclass(frozen=True)
+class ScanFallbackControlArrays:
+    """Device arrays for scan fallback acceptance/rejection gates."""
+
+    iters: Any
+    badjac_limit: Any
+    accept_frac: Any
+    fsq_factor: Any
+    fsq_abs: Any
+    improve: Any
+
+
+@dataclass(frozen=True)
+class ScanDebugSelection:
+    """Runtime debug-selection flags used by one VMEC2000 scan."""
+
+    force_enabled: bool
+    iter_index: int
+
+
+def _build_vmec2000_scan_runtime(ctx: Vmec2000ScanControllerContext, state_init: VMECState) -> Any:
+    """Resolve runtime/JIT/print settings for the VMEC2000-style scan."""
+
+    return _build_vmec2000_scan_runtime_setup(
+        env=os.environ,
+        state_init=state_init,
+        indata=ctx.indata,
+        cfg=ctx.cfg,
+        mpol=ctx.mpol,
+        nrange=ctx.nrange,
+        resume_state=ctx.resume_state,
+        state_only=bool(ctx.state_only),
+        scan_fallback_enabled=bool(ctx.scan_fallback_enabled),
+        force_chunked_scan=bool(ctx.startup_policy.force_chunked_scan),
+        preconditioner_use_precomputed_tridi=ctx.preconditioner_use_precomputed_tridi,
+        preconditioner_use_lax_tridi=ctx.preconditioner_use_lax_tridi,
+        verbose=bool(ctx.verbose),
+        vmec2000_control=bool(ctx.vmec2000_control),
+        verbose_vmec2000_table=bool(ctx.verbose_vmec2000_table),
+        light_history=bool(ctx.light_history),
+        scan_minimal_default=ctx.scan_minimal_default,
+        dump_any=bool(ctx.startup_policy.dump_any),
+        fsq_total_target=ctx.fsq_total_target,
+        axis_reset_done=bool(ctx.axis_reset_done),
+        lmove_axis=bool(ctx.lmove_axis),
+        step_size=float(ctx.step_size),
+        initial_flip_sign=float(ctx.initial_flip_sign),
+        ftol=float(ctx.ftol),
+        jit_forces=bool(ctx.jit_forces),
+        compute_forces=ctx._compute_forces,
+        compute_forces_impl=ctx._compute_forces_impl,
+        scan_timing_enabled_func=_scan_timing_enabled,
+        new_scan_timing_stats_func=_new_scan_timing_stats,
+        scan_backend_name_func=ctx._scan_backend_name,
+        tree_has_tracer_func=ctx._tree_has_tracer,
+        validate_vmec2000_scan_guards_func=_validate_vmec2000_scan_guards,
+        resolve_vmec2000_scan_setup_func=_resolve_vmec2000_scan_setup,
+        default_vmec2000_controller_constants_func=_default_vmec2000_controller_constants,
+        resolve_scan_runtime_hooks_from_env_func=_resolve_scan_runtime_hooks_from_env,
+        scan_jit_forces_enabled_func=_scan_jit_forces_enabled,
+        scan_trace_context_or_null_func=_scan_trace_context_or_null,
+        initialize_scan_resume_state_func=_initialize_scan_resume_state,
+        scan_m1_preconditioner_rhs_func=_scan_m1_preconditioner_rhs,
+        scale_m1_precond_rhs_from_mats_func=_scale_m1_precond_rhs_from_mats,
+        converged_func=_runtime_converged_residuals_scan_fast,
+        record_scan_device_ready_func=_record_scan_device_ready,
+        has_jax_func=has_jax,
+        jax_module=jax,
+        jnp_module=jnp,
+        time_module=time,
+        backtracking=bool(ctx.backtracking),
+        limit_dt_from_force=bool(ctx.limit_dt_from_force),
+        limit_update_rms=bool(ctx.limit_update_rms),
+        use_direct_fallback=bool(ctx.use_direct_fallback),
+        reference_mode=bool(ctx.reference_mode),
+        strict_update=bool(ctx.strict_update),
+        auto_flip_force=bool(ctx.auto_flip_force),
+    )
+
+
+def _scan_debug_selection_from_env() -> ScanDebugSelection:
+    debug_iter_env = os.getenv("VMEC_JAX_SCAN_DEBUG_ITER", "").strip()
+    try:
+        scan_debug_iter = int(debug_iter_env) if debug_iter_env else -1
+    except Exception:
+        scan_debug_iter = -1
+    return ScanDebugSelection(
+        force_enabled=os.getenv("VMEC_JAX_SCAN_DEBUG_FORCE", "") not in ("", "0"),
+        iter_index=scan_debug_iter,
+    )
+
+
+def _scan_fallback_control_arrays(*, ctx: Vmec2000ScanControllerContext, dtype: Any) -> ScanFallbackControlArrays:
+    startup_policy = ctx.startup_policy
+    return ScanFallbackControlArrays(
+        iters=jnp.asarray(int(ctx.scan_fallback_iters), dtype=jnp.int32),
+        badjac_limit=jnp.asarray(int(ctx.scan_fallback_badjac_limit), dtype=jnp.int32),
+        accept_frac=jnp.asarray(float(ctx.scan_fallback_accept_frac), dtype=dtype),
+        fsq_factor=jnp.asarray(float(ctx.scan_fallback_fsq_factor), dtype=dtype),
+        fsq_abs=jnp.asarray(float(ctx.scan_fallback_fsq_abs), dtype=dtype),
+        improve=jnp.asarray(float(startup_policy.scan_fallback_improve), dtype=dtype),
+    )
+
+
 def _prepare_scan_initial_force_and_axis_reset(
     *,
     ctx: Vmec2000ScanControllerContext,
@@ -589,7 +693,6 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
     scan_fallback_iters = ctx.scan_fallback_iters
     stage_transition_factor = ctx.stage_transition_factor
     stage_transition_scale = ctx.stage_transition_scale
-    startup_policy = ctx.startup_policy
     static = ctx.static
     step_size = ctx.step_size
     trig = ctx.trig
@@ -602,61 +705,7 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
     w_mode_mn = ctx.w_mode_mn
     zero_precond_diag = ctx.zero_precond_diag
     zero_tcon = ctx.zero_tcon
-    scan_runtime = _build_vmec2000_scan_runtime_setup(
-        env=os.environ,
-        state_init=state_init,
-        indata=ctx.indata,
-        cfg=cfg,
-        mpol=ctx.mpol,
-        nrange=ctx.nrange,
-        resume_state=resume_state,
-        state_only=bool(ctx.state_only),
-        scan_fallback_enabled=bool(ctx.scan_fallback_enabled),
-        force_chunked_scan=bool(startup_policy.force_chunked_scan),
-        preconditioner_use_precomputed_tridi=ctx.preconditioner_use_precomputed_tridi,
-        preconditioner_use_lax_tridi=ctx.preconditioner_use_lax_tridi,
-        verbose=bool(verbose),
-        vmec2000_control=bool(vmec2000_control),
-        verbose_vmec2000_table=bool(verbose_vmec2000_table),
-        light_history=bool(ctx.light_history),
-        scan_minimal_default=ctx.scan_minimal_default,
-        dump_any=bool(startup_policy.dump_any),
-        fsq_total_target=fsq_total_target,
-        axis_reset_done=bool(ctx.axis_reset_done),
-        lmove_axis=bool(lmove_axis),
-        step_size=float(step_size),
-        initial_flip_sign=float(initial_flip_sign),
-        ftol=float(ftol),
-        jit_forces=bool(ctx.jit_forces),
-        compute_forces=ctx._compute_forces,
-        compute_forces_impl=ctx._compute_forces_impl,
-        scan_timing_enabled_func=_scan_timing_enabled,
-        new_scan_timing_stats_func=_new_scan_timing_stats,
-        scan_backend_name_func=_scan_backend_name,
-        tree_has_tracer_func=_tree_has_tracer,
-        validate_vmec2000_scan_guards_func=_validate_vmec2000_scan_guards,
-        resolve_vmec2000_scan_setup_func=_resolve_vmec2000_scan_setup,
-        default_vmec2000_controller_constants_func=_default_vmec2000_controller_constants,
-        resolve_scan_runtime_hooks_from_env_func=_resolve_scan_runtime_hooks_from_env,
-        scan_jit_forces_enabled_func=_scan_jit_forces_enabled,
-        scan_trace_context_or_null_func=_scan_trace_context_or_null,
-        initialize_scan_resume_state_func=_initialize_scan_resume_state,
-        scan_m1_preconditioner_rhs_func=_scan_m1_preconditioner_rhs,
-        scale_m1_precond_rhs_from_mats_func=_scale_m1_precond_rhs_from_mats,
-        converged_func=_runtime_converged_residuals_scan_fast,
-        record_scan_device_ready_func=_record_scan_device_ready,
-        has_jax_func=has_jax,
-        jax_module=jax,
-        jnp_module=jnp,
-        time_module=time,
-        backtracking=bool(ctx.backtracking),
-        limit_dt_from_force=bool(ctx.limit_dt_from_force),
-        limit_update_rms=bool(ctx.limit_update_rms),
-        use_direct_fallback=bool(ctx.use_direct_fallback),
-        reference_mode=bool(reference_mode),
-        strict_update=bool(ctx.strict_update),
-        auto_flip_force=bool(ctx.auto_flip_force),
-    )
+    scan_runtime = _build_vmec2000_scan_runtime(ctx, state_init)
 
     scan_timing_enabled = scan_runtime.timing_enabled
     scan_timing_stats = scan_runtime.timing_stats
@@ -773,19 +822,8 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
     jmax0 = initial_cache.jmax
     cache_valid0 = initial_cache.valid
 
-    scan_fallback_iters_j = jnp.asarray(int(scan_fallback_iters), dtype=jnp.int32)
-    scan_fallback_badjac_limit_j = jnp.asarray(int(scan_fallback_badjac_limit), dtype=jnp.int32)
-    scan_fallback_accept_frac_j = jnp.asarray(float(scan_fallback_accept_frac), dtype=dtype)
-    scan_fallback_fsq_factor_j = jnp.asarray(float(scan_fallback_fsq_factor), dtype=dtype)
-    scan_fallback_fsq_abs_j = jnp.asarray(float(scan_fallback_fsq_abs), dtype=dtype)
-    scan_fallback_improve_j = jnp.asarray(float(startup_policy.scan_fallback_improve), dtype=dtype)
-
-    scan_debug_force = os.getenv("VMEC_JAX_SCAN_DEBUG_FORCE", "") not in ("", "0")
-    debug_iter_env = os.getenv("VMEC_JAX_SCAN_DEBUG_ITER", "").strip()
-    try:
-        scan_debug_iter = int(debug_iter_env) if debug_iter_env else -1
-    except Exception:
-        scan_debug_iter = -1
+    scan_fallback_controls = _scan_fallback_control_arrays(ctx=ctx, dtype=dtype)
+    scan_debug = _scan_debug_selection_from_env()
 
     def _scan_step(carry: _ScanCarry, it):
         def _hold_step(carry_hold: _ScanCarry):
@@ -812,8 +850,8 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
                 tree_select=_scan_tree_select,
                 cond=jax.lax.cond,
                 trace_context=lambda: scan_runtime.maybe_trace("scan/compute_forces"),
-                scan_debug_force_enabled=bool(scan_debug_force),
-                scan_debug_iter=int(scan_debug_iter),
+                scan_debug_force_enabled=bool(scan_debug.force_enabled),
+                scan_debug_iter=int(scan_debug.iter_index),
                 debug_force_first_iter=_maybe_debug_scan_force_first_iter,
                 debug_state_iter=_maybe_debug_scan_state_iter,
                 debug_print=scan_runtime.jax_debug_print,
@@ -1110,12 +1148,12 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
                 fsq1=fsq1,
                 bad_jacobian=bad_jacobian,
                 abort_scan_on_badjac=abort_scan_on_badjac,
-                scan_fallback_iters=scan_fallback_iters_j,
-                scan_fallback_badjac_limit=scan_fallback_badjac_limit_j,
-                scan_fallback_accept_frac=scan_fallback_accept_frac_j,
-                scan_fallback_fsq_factor=scan_fallback_fsq_factor_j,
-                scan_fallback_fsq_abs=scan_fallback_fsq_abs_j,
-                scan_fallback_improve=scan_fallback_improve_j,
+                scan_fallback_iters=scan_fallback_controls.iters,
+                scan_fallback_badjac_limit=scan_fallback_controls.badjac_limit,
+                scan_fallback_accept_frac=scan_fallback_controls.accept_frac,
+                scan_fallback_fsq_factor=scan_fallback_controls.fsq_factor,
+                scan_fallback_fsq_abs=scan_fallback_controls.fsq_abs,
+                scan_fallback_improve=scan_fallback_controls.improve,
                 dtype=dtype,
                 vmec2000_control=bool(vmec2000_control),
                 do_restart=do_restart,

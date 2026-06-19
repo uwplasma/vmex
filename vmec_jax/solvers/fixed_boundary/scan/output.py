@@ -928,7 +928,10 @@ def postprocess_vmec2000_scan_result(
                 "cache_prec_rz_mats": carry_final.cache_prec_rz_mats,
                 "cache_prec_lam_prec": np.asarray(carry_final.cache_prec_lam_prec),
             }
-        resume_state_scan_payload = pack_resume_state(resume_state_scan_base, resume_state_scan_heavy)
+        resume_state_scan_payload = pack_resume_state(
+            base=resume_state_scan_base,
+            heavy=resume_state_scan_heavy,
+        )
     free_boundary_diag = {
         "enabled": bool(free_boundary_enabled),
         "nvacskip": int(freeb_nvacskip),
