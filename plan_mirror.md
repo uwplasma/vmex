@@ -25107,3 +25107,119 @@ Results:
 ### User input needed
 
 No user input is needed for the next technical step.
+
+---
+## 209. Stricter Free-Boundary Target-Merit Smoke
+
+### Steps taken
+
+- Tightened the low-resolution circular-coil coupled-loop smoke from the M208
+  diagnostic case by enabling a short fixed-boundary baseline solve
+  (`baseline_maxiter = 5`) for the default `1%`, `3%`, and `10%` beta rows.
+- Probed stricter merit/growth policies before changing the regression:
+  - `target_merit = 0.25` with `fsq_growth_limit = 1.5`;
+  - `target_merit = 0.5` with `fsq_growth_limit = 1.5` and damping `0.5`;
+  - `target_merit = 0.5` with `fsq_growth_limit = 1.5` and a relative
+    boundary-step cap of `0.05`.
+- Found that the boundary-step cap gives stable target-merit convergence for
+  all three beta rows under the stricter `fsq` growth guard.
+- Updated the root free-boundary example regression to assert the stricter
+  target-merit status and the tighter growth limit.
+- Updated mirror example and readiness documentation to report the stricter
+  smoke settings and avoid treating this as production LCFS convergence.
+
+### Results obtained
+
+- The `target_merit = 0.25`, `fsq_growth_limit = 1.5` probe did not converge:
+  - stop reasons: `{"None": 1, "ls_step_not_accepted": 1,
+    "fsq_growth_guard": 2}`;
+  - beta `1%` accepted the first update but did not reach the tighter target;
+  - beta `3%` and `10%` were rejected by the growth guard.
+- The damped `target_merit = 0.5`, `fsq_growth_limit = 1.5` probe converged
+  beta `1%`, but beta `3%` and `10%` still failed the growth guard.
+- The relative-step-limited probe converged all requested beta rows:
+  - `free_boundary_solve_status =
+    ls_boundary_coupled_loop_converged_free_boundary`;
+  - stop reasons: `{"target_merit": 3}`;
+  - beta `1%`: final merit `0.19063313209183086`, final `fsq` growth
+    `0.7773221173331294`;
+  - beta `3%`: final merit `0.17309591864275267`, final `fsq` growth
+    `1.2395923444173464`;
+  - beta `10%`: final merit `0.17309591864275267`, final `fsq` growth
+    `1.3772021485879213`.
+- This makes the checked low-resolution free-boundary smoke meaningfully
+  stronger than M208: it now includes short baseline solves, a tighter growth
+  guard, and an explicit boundary-step safeguard.
+
+### How it was tested
+
+```bash
+python examples/mirror_free_boundary_circular_coils.py --outdir results/mirror/free_boundary_circular_coils_m209_strict_probe --betas 1,3,10 --ntheta 8 --nxi 11 --n-segments 64 --run-fixed-boundary-baseline --baseline-maxiter 5 --run-ls-boundary-coupled-loop --ls-boundary-coupled-loop-steps 4 --ls-boundary-coupled-loop-target-merit 0.25 --ls-boundary-coupled-loop-fsq-growth-limit 1.5 --no-plots
+python examples/mirror_free_boundary_circular_coils.py --outdir results/mirror/free_boundary_circular_coils_m209_damped_probe --betas 1,3,10 --ntheta 8 --nxi 11 --n-segments 64 --run-fixed-boundary-baseline --baseline-maxiter 5 --run-ls-boundary-coupled-loop --ls-boundary-coupled-loop-steps 4 --ls-boundary-coupled-loop-target-merit 0.5 --ls-boundary-coupled-loop-fsq-growth-limit 1.5 --ls-boundary-damping 0.5 --no-plots
+python examples/mirror_free_boundary_circular_coils.py --outdir results/mirror/free_boundary_circular_coils_m209_limited_step_probe --betas 1,3,10 --ntheta 8 --nxi 11 --n-segments 64 --run-fixed-boundary-baseline --baseline-maxiter 5 --run-ls-boundary-coupled-loop --ls-boundary-coupled-loop-steps 4 --ls-boundary-coupled-loop-target-merit 0.5 --ls-boundary-coupled-loop-fsq-growth-limit 1.5 --ls-boundary-max-relative-step 0.05 --no-plots
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_coupled_loop_reports_target_merit_convergence -q
+python -m ruff check tests/mirror/test_mirror_examples.py examples/mirror_free_boundary_circular_coils.py
+python -m sphinx -W -b html docs docs/_build/html
+```
+
+Results:
+
+- The stricter target probe and damped probe gave useful negative evidence and
+  identified boundary-step size as the near-term policy limiter.
+- The limited-step probe reached target merit for all three beta rows with
+  final `fsq` growth below `1.5`.
+- The focused end-to-end pytest passed: `1 passed in 4.98s`.
+- Ruff passed for the touched free-boundary example/test files.
+- Sphinx docs build passed with warnings as errors.
+
+### File structure and best-practice notes
+
+- The stricter regression remains in `tests/mirror/test_mirror_examples.py`,
+  alongside the other root example schema/status checks.
+- The free-boundary example source did not need another schema change; M207
+  already added the converged status contract used here.
+- Documentation changes stay in `examples/mirror/README.md`,
+  `docs/mirror/overview.rst`, and `docs/mirror/readiness.rst`.
+- Generated smoke outputs are under ignored `results/mirror/...` directories;
+  no figures, WOUT files, or diagnostic JSON/CSV outputs are tracked.
+
+### Best next steps
+
+1. Commit and push this M209 tranche, then update the draft PR body and snapshot
+   failed checks.
+2. Build the next free-boundary ladder from the successful step-cap policy:
+   vary `baseline_maxiter`, `ns`, `nxi`, `target_merit`, and growth guard while
+   recording whether the boundary cap remains necessary.
+3. If tighter targets below `0.25` remain blocked, promote the coupled loop from
+   a scalar merit smoke toward a reduced residual-vector solve with explicit
+   boundary regularization.
+4. Continue final PR-readiness cleanup in parallel with the ladder so the
+   remaining open lanes stay finite and reviewable.
+
+### Completion percentages after M209
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `95%`.
+- Fixed-boundary axisymmetric solve: `96%`.
+- Residual Newton / preconditioning: `96%`.
+- Two-coil and manufactured validation: `95%`.
+- Finite-current pitch validation: `94%`.
+- Plotting and `vmec --plot` mirror support: `99%`.
+- I/O schema and docs: `100%`.
+- Differentiable solved-state API: `97%`.
+- Mirror-Boozer-like diagnostics: `94%`.
+- Free-boundary mirror lane: `99.55%` overall for the diagnostic/reduced
+  solver scope; stricter low-resolution target-merit evidence is now present,
+  but production LCFS convergence remains open.
+- Straight-axis hybrid support fixture lane: `100%` for support-fixture scope.
+- Toroidal stellarator-mirror hybrid lane: `99.9%`.
+- ESSOS circular-coil mirror beta scan: `99.3%`.
+- Public API/source simplification: `100%` for the current mirror package
+  structure.
+- PR merge readiness overall: `99.86%`, pending production free-boundary LCFS
+  decision/evidence, broader differentiable solved-state promotion, final
+  checks, and review decision on deferred lanes.
+
+### User input needed
+
+No user input is needed for the next technical step.

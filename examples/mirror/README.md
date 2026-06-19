@@ -248,11 +248,13 @@ fixed-boundary solve on the LS-selected polynomial boundary and record realized
 updates with target-merit, stagnation, and ``fsq`` growth guards; loop rows
 record each LS step, realized trial, acceptance decision, stop reason, and
 optional per-step plots. A low-resolution smoke run with
-``--ls-boundary-coupled-loop-target-merit 0.5`` and
-``--ls-boundary-coupled-loop-fsq-growth-limit 2.0`` reaches the converged
-``free_boundary_solve_status`` for the default 1%, 3%, and 10% beta rows. This
-is diagnostic target-merit evidence, not the final production free-boundary
-LCFS convergence claim. Each pilot row always
+``--baseline-maxiter 5``, ``--ls-boundary-max-relative-step 0.05``,
+``--ls-boundary-coupled-loop-target-merit 0.5``, and
+``--ls-boundary-coupled-loop-fsq-growth-limit 1.5`` reaches the converged
+``free_boundary_solve_status`` for the default 1%, 3%, and 10% beta rows, with
+final LCFS merit around ``0.17``-``0.19``. This is diagnostic target-merit
+evidence, not the final production free-boundary LCFS convergence claim. Each
+pilot row always
 contains ``accepted``, ``rejection_reason``, ``stop_reason``,
 ``lcfs_merit_improvement_fraction``, final residual/``fsq`` diagnostics when a
 trial solve ran, ``fsq_growth_ratio`` relative to the beta row baseline, and
