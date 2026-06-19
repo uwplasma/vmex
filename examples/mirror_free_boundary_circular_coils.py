@@ -51,7 +51,7 @@ from vmec_jax.mirror import (
 
 
 CIRCULAR_COIL_BETA_SCAN_SCHEMA = "mirror_free_boundary_circular_coil_beta_scan"
-CIRCULAR_COIL_BETA_SCAN_SCHEMA_VERSION = "0.6"
+CIRCULAR_COIL_BETA_SCAN_SCHEMA_VERSION = "0.7"
 CIRCULAR_COIL_BETA_SCAN_LS_LINE_SEARCH_FACTORS = (1.0, 0.5, 0.25, 0.125)
 CIRCULAR_COIL_BETA_SCAN_TOP_LEVEL_FIELDS = (
     "metrics_schema",
@@ -231,7 +231,9 @@ CIRCULAR_COIL_BETA_SCAN_WORKFLOW_STATUSES = (
 )
 CIRCULAR_COIL_BETA_SCAN_FREE_BOUNDARY_STATUSES = (
     "not_run",
+    "lcfs_pilot_converged_free_boundary",
     "lcfs_pilot_not_converged_free_boundary",
+    "ls_boundary_coupled_loop_converged_free_boundary",
     "ls_boundary_coupled_loop_not_converged_free_boundary",
 )
 CIRCULAR_COIL_BETA_SCAN_STOP_REASONS = (
@@ -1373,9 +1375,23 @@ def _beta_scan_summary(
     else:
         workflow_status = "setup_only"
     if run_lcfs_pilot:
-        free_boundary_status = "lcfs_pilot_not_converged_free_boundary"
+        pilot_converged = bool(baseline_rows) and all(
+            row.get("lcfs_pilot_stop_reason") == "target_merit" for row in baseline_rows
+        )
+        free_boundary_status = (
+            "lcfs_pilot_converged_free_boundary"
+            if pilot_converged
+            else "lcfs_pilot_not_converged_free_boundary"
+        )
     elif run_ls_boundary_coupled_loop:
-        free_boundary_status = "ls_boundary_coupled_loop_not_converged_free_boundary"
+        loop_converged = bool(baseline_rows) and all(
+            row.get("ls_boundary_coupled_loop_stop_reason") == "target_merit" for row in baseline_rows
+        )
+        free_boundary_status = (
+            "ls_boundary_coupled_loop_converged_free_boundary"
+            if loop_converged
+            else "ls_boundary_coupled_loop_not_converged_free_boundary"
+        )
     else:
         free_boundary_status = "not_run"
     return {

@@ -129,13 +129,12 @@ sharpened preset. Pass ``--resolution-preset smoke``, ``promotion``, or
 ``target`` to use a named resolution ladder. The ``target`` preset expands to
 ``ns = 7,9,15`` and ``mpol:ntor = 5:20,6:24`` and labels rows as target-ladder
 inputs. Office GPU runs of that ladder reached total-``fsq`` convergence at
-``ftol=1e-8`` for all six rows with VMEC2000 outputs present; strict component
-convergence remains a documented caveat. Rows now report the largest
-``fsqr``/``fsqz``/``fsql`` component, that component divided by requested
-``ftol``, and the strict-component bottleneck when one remains. Re-aggregating
-the current 80-iteration target output with those diagnostics shows one strict
-component pass and ``fsqr`` as the remaining bottleneck in five rows, with the
-largest VMEC/JAX component only about ``1.24`` times requested ``ftol``. Use
+``ftol=1e-8`` for all six rows with VMEC2000 outputs present. Rows report the
+largest ``fsqr``/``fsqz``/``fsql`` component, that component divided by
+requested ``ftol``, and the strict-component bottleneck when one remains. A
+targeted 160-iteration office closure run then strict-converged all six target
+rows in 124-134 iterations, with the largest VMEC/JAX component below
+``0.98`` times requested ``ftol``. Use
 ``--case-filter '*ns015*'`` or another comma-separated shell pattern to run a
 subset of the generated case names when splitting the target campaign across
 machines. After split campaigns finish, pass ``--aggregate-json`` one or more
@@ -176,7 +175,10 @@ accepted, rejected, and guard-limited pilot steps. Top-level metrics also
 record ``workflow_status``, ``free_boundary_solve_status``,
 ``beta_scan_requested_percent``, ESSOS-compatible direct-coil metadata, and
 aggregate LCFS pilot counts so benchmark scripts can validate that the 1%, 3%,
-and 10% beta cases were actually exercised. Multi-step pilots can stop on an
+and 10% beta cases were actually exercised. As of schema version ``0.7``,
+``free_boundary_solve_status`` can distinguish not-run, converged, and
+not-converged pilot or coupled-loop workflows; convergence requires every
+requested beta row to stop on ``target_merit``. Multi-step pilots can stop on an
 explicit target merit with ``--lcfs-pilot-target-merit`` or on small accepted
 merit improvement with ``--lcfs-pilot-stagnation-rtol``; each pilot row records
 a ``stop_reason`` and each beta row records ``lcfs_pilot_stop_reason``. Use
@@ -227,7 +229,7 @@ parameterizations are visible before they are used in expensive coupled
 fixed-boundary trials.
 
 The circular-coil beta-scan metrics use the compact schema
-``mirror_free_boundary_circular_coil_beta_scan`` version ``0.6``. The top-level
+``mirror_free_boundary_circular_coil_beta_scan`` version ``0.7``. The top-level
 JSON records the workflow status, direct-coil metadata, requested beta list,
 setup JSON path, aggregate pilot counts, optional LS boundary-step settings,
 figure paths, and ``fixed_boundary_baseline_rows``. It also embeds

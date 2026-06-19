@@ -24858,3 +24858,146 @@ No user input is needed to continue.  A later review decision is still needed
 on whether production free-boundary LCFS convergence and broad differentiable
 full-equilibrium APIs must be included before undrafting, or split into
 follow-up PRs after this mirror-geometry PR.
+
+---
+## 207. Toroidal Strict Closure and Free-Boundary Status Contract
+
+### Steps taken
+
+- Ran the targeted office GPU strict-component closure campaign identified by
+  M206 for the five `fsqr` bottleneck target rows, using the ordinary
+  VMEC/JAX fixed-boundary path with `max_iter = niter = 160`, `ftol = 1e-8`,
+  no plots, no direct-initial residual, and no VMEC2000 rerun.
+- Reran the remaining `ns015_mpol05_ntor20` target row with the same 160-step
+  policy so the final six-row target-ladder strict convergence evidence comes
+  from one consistent policy.
+- Aggregated the six strict-closure rows on office and summarized their
+  strict-component metrics.
+- Promoted the circular-coil beta-scan schema from `0.6` to `0.7` so
+  `free_boundary_solve_status` can represent converged pilot and converged
+  coupled-loop workflows, not only `not_run` and `not_converged`.
+- Wired the new free-boundary status values to existing per-beta
+  `target_merit` stop reasons: top-level convergence requires every requested
+  beta row to stop on `target_merit`.
+- Updated `examples/mirror/README.md`, `docs/mirror/overview.rst`,
+  `docs/mirror/readiness.rst`, and `docs/mirror/index.rst` to remove the
+  toroidal strict-component target caveat and document the free-boundary status
+  contract.
+
+### Results obtained
+
+- Office strict closure wrote compact ignored outputs under:
+  - `results/toroidal_hybrid_target_strict_closure_m207/`;
+  - `results/toroidal_hybrid_target_strict_closure_m207_pass_row/`;
+  - `results/toroidal_hybrid_target_strict_closure_aggregate_m207/`.
+- The six-row strict-closure aggregate reports:
+  - `row_count = 6`;
+  - `vmec_jax_total_fsq_converged_rows = 6`;
+  - `vmec_jax_strict_converged_rows = 6`;
+  - `vmec_jax_strict_component_known_rows = 6`;
+  - `vmec_jax_strict_component_pass_rows = 6`;
+  - `vmec_jax_strict_component_blocker_counts = {}`;
+  - `vmec_jax_final_max_component_over_ftol_min = 0.8472976117349036`;
+  - `vmec_jax_final_max_component_over_ftol_max = 0.9792438354129831`.
+- The strict rows converged in 124-134 iterations:
+  - `ns007_mpol05_ntor20`: 125 iterations, max component/`ftol` =
+    `0.8472976117349036`;
+  - `ns007_mpol06_ntor24`: 127 iterations, `0.8895925557771144`;
+  - `ns009_mpol05_ntor20`: 124 iterations, `0.9645977595921841`;
+  - `ns009_mpol06_ntor24`: 129 iterations, `0.9199396626097643`;
+  - `ns015_mpol05_ntor20`: 127 iterations, `0.9792438354129831`;
+  - `ns015_mpol06_ntor24`: 134 iterations, `0.8975509345607015`.
+- The target-ladder toroidal hybrid lane now has both:
+  - prior VMEC2000 parity evidence for all six named target rows; and
+  - VMEC/JAX strict-component convergence evidence for all six named target
+    rows at `ftol=1e-8`.
+- The free-boundary circular-coil schema can now honestly report a converged
+  pilot/coupled-loop status when a future run reaches target merit for every
+  beta row.  The current production free-boundary LCFS claim remains diagnostic
+  until such a run exists at the required settings.
+
+### How it was tested
+
+```bash
+ssh office 'cd /home/rjorge/local/vmec_mirror && PYTHONPATH=$PWD JAX_ENABLE_X64=1 CUDA_VISIBLE_DEVICES=0 /home/rjorge/venvs/vmec_jax_gpu/bin/python examples/toroidal_stellarator_mirror_hybrid_convergence.py --outdir /home/rjorge/local/vmec_mirror/results/toroidal_hybrid_target_strict_closure_m207 --resolution-preset target --case-filter "ns007_mpol05_ntor20,ns007_mpol06_ntor24,ns009_mpol05_ntor20,ns009_mpol06_ntor24,ns015_mpol06_ntor24" --ntheta-fit 64 --nzeta-fit 64 --run-solve --max-iter 160 --niter 160 --nstep 1 --ftol 1e-8 --no-direct-initial-residual --no-plots'
+ssh office 'cd /home/rjorge/local/vmec_mirror && PYTHONPATH=$PWD JAX_ENABLE_X64=1 CUDA_VISIBLE_DEVICES=0 /home/rjorge/venvs/vmec_jax_gpu/bin/python examples/toroidal_stellarator_mirror_hybrid_convergence.py --outdir /home/rjorge/local/vmec_mirror/results/toroidal_hybrid_target_strict_closure_m207_pass_row --resolution-preset target --case-filter "ns015_mpol05_ntor20" --ntheta-fit 64 --nzeta-fit 64 --run-solve --max-iter 160 --niter 160 --nstep 1 --ftol 1e-8 --no-direct-initial-residual --no-plots'
+ssh office 'cd /home/rjorge/local/vmec_mirror && PYTHONPATH=$PWD JAX_ENABLE_X64=1 /home/rjorge/venvs/vmec_jax_gpu/bin/python examples/toroidal_stellarator_mirror_hybrid_convergence.py --outdir /home/rjorge/local/vmec_mirror/results/toroidal_hybrid_target_strict_closure_aggregate_m207 --aggregate-json /home/rjorge/local/vmec_mirror/results/toroidal_hybrid_target_iter80_aggregate_m210/toroidal_stellarator_mirror_hybrid_convergence_aggregate.json /home/rjorge/local/vmec_mirror/results/toroidal_hybrid_target_strict_closure_m207/toroidal_stellarator_mirror_hybrid_convergence.json /home/rjorge/local/vmec_mirror/results/toroidal_hybrid_target_strict_closure_m207_pass_row/toroidal_stellarator_mirror_hybrid_convergence.json --no-plots'
+python -m ruff check examples/mirror_free_boundary_circular_coils.py tests/mirror/test_mirror_examples.py
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_summary_reports_converged_free_boundary_statuses -q
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_example_runs_without_plots -q
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_summary_reports_converged_free_boundary_statuses tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_example_runs_without_plots tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_ls_boundary_step_reports_reduction tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_ls_boundary_coupled_trial_reports_realized_solve tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_ls_boundary_coupled_loop_reports_guarded_steps -q
+python -m ruff check examples/mirror_free_boundary_circular_coils.py tests/mirror/test_mirror_examples.py examples/toroidal_stellarator_mirror_hybrid_convergence.py tests/test_toroidal_hybrid.py
+python -m sphinx -W -b html docs docs/_build/html
+```
+
+Results:
+
+- Office strict-closure runs completed successfully.
+- Focused free-boundary status unit test passed: `1 passed in 0.30s`.
+- Focused circular-coil example schema test passed: `1 passed in 3.54s`.
+- Corrected focused free-boundary schema/example set passed: `5 passed in
+  11.88s`.
+- Ruff passed for touched example/test files.
+- Sphinx docs build passed with warnings as errors.
+- One stale pytest selection used an old test name and returned no tests before
+  being corrected; no code/test failure was involved.
+
+### File structure and best-practice notes
+
+- The toroidal strict-closure evidence remains in ignored office `results/`
+  directories.  No WOUT, `threed1`, or figure trees were added to git.
+- The free-boundary status change is localized to the root circular-coil
+  example/schema and its focused mirror-example tests.
+- The free-boundary helper APIs remain unchanged; this tranche only makes the
+  report contract capable of representing a successful future target-merit
+  run.
+- Docs now distinguish three states cleanly: toroidal target strict closure is
+  complete for the current ladder, free-boundary status representation is
+  implemented, and production free-boundary LCFS convergence evidence remains
+  open.
+
+### Best next steps
+
+1. Commit and push this M207 tranche.
+2. Update the draft PR body to section 207 and snapshot failed checks.
+3. Run or design the next free-boundary target-merit closure campaign using the
+   new `free_boundary_solve_status` states, starting with the lowest-cost
+   coupled-loop settings that can plausibly hit target merit without violating
+   `fsq` growth guards.
+4. Continue broad differentiable solved-state promotion only after the
+   free-boundary target-merit evidence is clear, so the remaining open lanes
+   stay finite and reviewable.
+
+### Completion percentages after M207
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `95%`.
+- Fixed-boundary axisymmetric solve: `96%`.
+- Residual Newton / preconditioning: `96%`.
+- Two-coil and manufactured validation: `95%`.
+- Finite-current pitch validation: `94%`.
+- Plotting and `vmec --plot` mirror support: `99%`.
+- I/O schema and docs: `100%`.
+- Differentiable solved-state API: `97%`.
+- Mirror-Boozer-like diagnostics: `94%`.
+- Free-boundary mirror lane: `99.4%` overall for the current diagnostic/reduced
+  solver scope, with production LCFS target-merit convergence evidence still
+  open but status representation now ready.
+- Straight-axis hybrid support fixture lane: `100%` for support-fixture scope.
+- Toroidal stellarator-mirror hybrid lane: `99.9%`, with both target total-`fsq`
+  and strict-component convergence evidence complete for the current six-row
+  ladder, plus prior VMEC2000 parity evidence.
+- ESSOS circular-coil mirror beta scan: `99.1%`.
+- Public API/source simplification: `100%` for the current mirror package
+  structure.
+- PR merge readiness overall: `99.82%`, pending production free-boundary LCFS
+  decision/evidence, broader differentiable solved-state promotion, final
+  checks, and review decision on which deferred research lanes stay out of this
+  PR.
+
+### User input needed
+
+No user input is needed for the next technical step.  A later review decision
+is still needed on whether production free-boundary LCFS convergence and broad
+differentiable full-equilibrium APIs must be in this PR or split into follow-up
+PRs after the mirror/toroidal-hybrid foundation is reviewed.

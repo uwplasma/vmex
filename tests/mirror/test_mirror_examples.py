@@ -384,7 +384,7 @@ def test_root_free_boundary_circular_coils_example_runs_without_plots(tmp_path):
     assert metrics["lcfs_pilot_stagnation_rtol"] == 0.0
     assert metrics["lcfs_pilot_fsq_growth_limit"] == 0.0
     assert metrics["lcfs_pilot_stop_reason_counts"] == {"max_steps": 3}
-    assert schema["metrics_schema_version"] == "0.6"
+    assert schema["metrics_schema_version"] == "0.7"
     assert "workflow_status_values" in schema
     assert "free_boundary_status_values" in schema
     assert "ls_boundary_step_fields" in schema
@@ -565,6 +565,79 @@ def test_root_free_boundary_circular_coils_example_runs_without_plots(tmp_path):
     assert metrics["figures"] == {}
 
 
+def test_root_free_boundary_circular_coils_summary_reports_converged_free_boundary_statuses():
+    module = _load_root_example("mirror_free_boundary_circular_coils.py")
+    beta_summary = module["_beta_scan_summary"]
+    common = {
+        "run_fixed_boundary_baseline": True,
+        "lcfs_pilot_steps": 1,
+        "lcfs_pilot_target_merit": 1.0,
+        "lcfs_pilot_stagnation_rtol": 0.0,
+        "lcfs_pilot_fsq_growth_limit": 0.0,
+        "run_ls_boundary_step": False,
+        "run_ls_boundary_coupled_trial": False,
+        "ls_boundary_coupled_loop_steps": 1,
+        "ls_boundary_coupled_loop_target_merit": 1.0,
+        "ls_boundary_coupled_loop_stagnation_rtol": 0.0,
+        "ls_boundary_coupled_loop_fsq_growth_limit": 0.0,
+        "ls_boundary_finite_difference_step": 1.0e-5,
+        "ls_boundary_damping": 1.0,
+        "ls_boundary_max_relative_step": 0.1,
+        "ls_boundary_ridge": 1.0e-8,
+    }
+
+    pilot_summary = beta_summary(
+        [
+            {
+                "lcfs_pilot_rows": [{"accepted": True, "skipped": False, "stop_reason": "target_merit"}],
+                "lcfs_pilot_stop_reason": "target_merit",
+                "ls_boundary_step": None,
+                "ls_boundary_coupled_loop_rows": [],
+            }
+        ],
+        run_lcfs_pilot=True,
+        run_ls_boundary_coupled_loop=False,
+        **common,
+    )
+    assert pilot_summary["free_boundary_solve_status"] == "lcfs_pilot_converged_free_boundary"
+
+    loop_summary = beta_summary(
+        [
+            {
+                "lcfs_pilot_rows": [],
+                "ls_boundary_step": None,
+                "ls_boundary_coupled_loop_rows": [{"accepted": True, "stop_reason": "target_merit"}],
+                "ls_boundary_coupled_loop_stop_reason": "target_merit",
+            }
+        ],
+        run_lcfs_pilot=False,
+        run_ls_boundary_coupled_loop=True,
+        **common,
+    )
+    assert loop_summary["free_boundary_solve_status"] == "ls_boundary_coupled_loop_converged_free_boundary"
+
+    mixed_summary = beta_summary(
+        [
+            {
+                "lcfs_pilot_rows": [{"accepted": True, "skipped": False, "stop_reason": "target_merit"}],
+                "lcfs_pilot_stop_reason": "target_merit",
+                "ls_boundary_step": None,
+                "ls_boundary_coupled_loop_rows": [],
+            },
+            {
+                "lcfs_pilot_rows": [{"accepted": True, "skipped": False, "stop_reason": "max_steps"}],
+                "lcfs_pilot_stop_reason": "max_steps",
+                "ls_boundary_step": None,
+                "ls_boundary_coupled_loop_rows": [],
+            },
+        ],
+        run_lcfs_pilot=True,
+        run_ls_boundary_coupled_loop=False,
+        **common,
+    )
+    assert mixed_summary["free_boundary_solve_status"] == "lcfs_pilot_not_converged_free_boundary"
+
+
 def test_root_free_boundary_circular_coils_example_writes_nonblank_plots(tmp_path):
     image = pytest.importorskip("matplotlib.image")
     completed = subprocess.run(
@@ -709,7 +782,7 @@ def test_root_free_boundary_circular_coils_ls_boundary_step_reports_reduction(tm
     ls_step = row["ls_boundary_step"]
     selected_rows = [trial for trial in ls_step["trial_rows"] if trial["selected"]]
 
-    assert metrics["metrics_schema_version"] == "0.6"
+    assert metrics["metrics_schema_version"] == "0.7"
     assert metrics["ls_boundary_step_requested"] is True
     assert metrics["ls_boundary_coupled_trial_requested"] is False
     assert metrics["ls_boundary_step_rows_total"] == 1
@@ -769,7 +842,7 @@ def test_root_free_boundary_circular_coils_ls_boundary_coupled_trial_reports_rea
     ls_step = row["ls_boundary_step"]
     trial = ls_step["coupled_trial"]
 
-    assert metrics["metrics_schema_version"] == "0.6"
+    assert metrics["metrics_schema_version"] == "0.7"
     assert metrics["ls_boundary_step_requested"] is True
     assert metrics["ls_boundary_coupled_trial_requested"] is True
     assert metrics["ls_boundary_step_rows_total"] == 1
@@ -826,7 +899,7 @@ def test_root_free_boundary_circular_coils_ls_boundary_coupled_loop_reports_guar
     loop_rows = row["ls_boundary_coupled_loop_rows"]
     first, second = loop_rows
 
-    assert metrics["metrics_schema_version"] == "0.6"
+    assert metrics["metrics_schema_version"] == "0.7"
     assert metrics["workflow_status"] == "ls_boundary_coupled_loop"
     assert metrics["free_boundary_solve_status"] == "ls_boundary_coupled_loop_not_converged_free_boundary"
     assert metrics["ls_boundary_coupled_loop_requested"] is True

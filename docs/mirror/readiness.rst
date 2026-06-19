@@ -87,9 +87,10 @@ Current Scope
        residual-vector least-squares solves are available, with explicit
        Jacobian rank, nullity, conditioning, selected JAX mode, predicted
        reduction, actual reduction, and optional adaptive ridge-candidate
-       diagnostics.  Plotted beta-scan and reduced-vector benchmark evidence
-       are present.  This is not a converged production free-boundary
-       equilibrium solver.
+       diagnostics.  Beta-scan status values can now represent target-merit
+       convergence when every requested beta row reaches it.  Plotted beta-scan
+       and reduced-vector benchmark evidence are present, but this is not yet
+       a converged production free-boundary equilibrium solver.
    * - ESSOS beta-scan fixture
      - diagnostic
      - The 1%, 3%, and 10% beta cases share a compact JSON/CSV schema with
@@ -107,11 +108,10 @@ Current Scope
        promotion, and target ladders, split-campaign aggregation, scan
        diagnostics, and CLI finish reporting.  Office GPU/VMEC2000 evidence
        covers all six named target rows with total-``fsq`` convergence at
-       ``ftol=1e-8``.  Rows and aggregate reports identify the largest residual
-       component, its ratio to requested ``ftol``, and the strict-component
-       bottleneck when one remains.  The current 80-iteration target evidence
-       has one strict-component pass, five ``fsqr`` bottlenecks, and a largest
-       VMEC/JAX component about ``1.24`` times requested ``ftol``.
+       ``ftol=1e-8`` and a follow-up strict-component closure run converged all
+       six rows in 124-134 iterations.  Rows and aggregate reports identify
+       the largest residual component, its ratio to requested ``ftol``, and the
+       strict-component bottleneck when one remains.
    * - Anisotropic pressure, kinetic closures, sheath/end physics
      - deferred
      - These closures are outside the fixed-boundary scalar-pressure mirror

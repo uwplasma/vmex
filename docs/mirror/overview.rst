@@ -62,7 +62,9 @@ without coupling it to toroidal VMEC assumptions:
   trial loop for the first true coupled-solve iterations,
   and normal-field-aware candidate selection between local, shape-preserving
   scale, normal-field-slope, mixed scale/normal-field, no-op, and realized
-  coupled trial-scoring updates, plus an optional strict normal-field guard
+  coupled trial-scoring updates, top-level free-boundary status values that can
+  distinguish target-merit convergence from non-converged pilot or coupled-loop
+  runs, plus an optional strict normal-field guard
   that records allowed strategies,
   no-op rejection reasons, workflow status, requested beta-scan points, and
   aggregate pilot counts and stop reasons in JSON output, with optional
@@ -148,22 +150,23 @@ Current solver status:
   low-mode boundary fits can be audited before interpreting residual trends.
   ``--resolution-preset target`` writes the current target
   ladder, ``ns = 7,9,15`` and ``mpol:ntor = 5:20,6:24``.  Office GPU runs of
-  that ladder reached total-``fsq`` convergence at ``ftol=1e-8`` for all six
-  rows with VMEC2000 outputs present.  Rows and aggregate reports now record
+  that ladder first reached total-``fsq`` convergence at ``ftol=1e-8`` for all
+  six rows with VMEC2000 outputs present.  Rows and aggregate reports record
   largest residual-component names, component values divided by requested
-  ``ftol``, strict-component pass counts, and strict bottleneck counts.  The
-  current re-aggregated 80-iteration target evidence has one strict-component
-  pass, five ``fsqr`` bottlenecks, and a largest VMEC/JAX component about
-  ``1.24`` times requested ``ftol``.  ``--case-filter`` accepts comma-separated
-  shell patterns for splitting that target campaign into smaller row subsets.
+  ``ftol``, strict-component pass counts, and strict bottleneck counts.  A
+  targeted 160-iteration office closure run then strict-converged all six
+  target rows in 124-134 iterations, with the largest VMEC/JAX residual
+  component below ``0.98`` times requested ``ftol``.  ``--case-filter`` accepts
+  comma-separated shell patterns for splitting that target campaign into
+  smaller row subsets.
   ``--aggregate-json`` reads one or more existing convergence JSON files from
   split campaigns and writes a de-duplicated aggregate CSV/JSON plus optional
   plots, which keeps remote target-ladder evidence compact and avoids copying
   generated WOUT or ``threed1`` trees into the repository.
 
 Later phases finish production differentiable optimization APIs, production
-free-boundary LCFS solves, strict-component target checks if required for final
-promotion, and broader toroidal stellarator-mirror hybrid convergence studies.
+free-boundary LCFS solves, and broader toroidal stellarator-mirror hybrid
+convergence studies.
 The current ESSOS-compatible circular-coil beta scan remains diagnostic/pilot
 evidence, and the toroidal hybrid target lane is a validated prototype with
 total-``fsq`` convergence evidence at the documented target ladder.
