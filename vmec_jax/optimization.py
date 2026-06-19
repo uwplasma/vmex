@@ -841,11 +841,7 @@ class FixedBoundaryExactOptimizer:
 
     def _profile_add_counter(self, name: str, value: int | float) -> None:
         """Record a diagnostic counter in the profile schema without timing it."""
-        if not hasattr(self, "_profile"):
-            self._profile = {}
-        rec = self._profile.setdefault(name, {"count": 0, "wall_time_s": 0.0})
-        rec["count"] = int(rec["count"]) + 1
-        rec["wall_time_s"] = float(rec["wall_time_s"]) + float(value)
+        self._profile_add(name, float(value))
 
     _profile_solver_free_boundary_timing = _profiling.profile_solver_free_boundary_timing
     _profile_solver_timing = _profiling.profile_solver_timing
@@ -898,16 +894,16 @@ class FixedBoundaryExactOptimizer:
 
     def _callback_trace_dump(self) -> dict:
         events = list(getattr(self, "_callback_trace", []))
-        counts: dict[str, int] = {}
-        wall_time: dict[str, float] = {}
+        summary: dict[str, dict[str, float | int]] = {}
         for event in events:
             key = f"{event['kind']}:{event['source']}"
-            counts[key] = counts.get(key, 0) + 1
-            wall_time[key] = wall_time.get(key, 0.0) + float(event["wall_time_s"])
+            rec = summary.setdefault(key, {"count": 0, "wall_time_s": 0.0})
+            rec["count"] = int(rec["count"]) + 1
+            rec["wall_time_s"] = float(rec["wall_time_s"]) + float(event["wall_time_s"])
         return {
             "enabled": bool(getattr(self, "_callback_trace_enabled", False)),
             "events": events,
-            "summary": {key: {"count": counts[key], "wall_time_s": wall_time[key]} for key in sorted(counts)},
+            "summary": {key: summary[key] for key in sorted(summary)},
         }
 
     _exact_cache_key = staticmethod(_state_cache.exact_cache_key)
