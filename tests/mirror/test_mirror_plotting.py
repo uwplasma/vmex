@@ -54,6 +54,20 @@ def _mout_file(tmp_path: Path) -> Path:
     return write_mirror_output(tmp_path / "mout_plot.nc", result)
 
 
+def _finite_current_mout_file(tmp_path: Path) -> Path:
+    config = MirrorConfig(MirrorResolution(ns=7, ntheta=1, nxi=11, mpol=0), z_min=-1.0, z_max=1.0)
+    boundary = MirrorBoundary.polynomial_radius(r0=0.3, a2=0.05)
+    result = run_mirror_fixed_boundary(
+        config,
+        boundary,
+        psi_prime=PsiPrimeProfile.constant(0.01),
+        i_prime=IPrimeProfile.constant(0.02),
+        pressure=PressureProfile.zero(),
+        options=MirrorSolveOptions(maxiter=1, step_size=1.0e-4, tolerance=1.0e-12, mu0=1.0),
+    )
+    return write_mirror_output(tmp_path / "mout_finite_current_plot.nc", result)
+
+
 def test_mirror_plot_data_helpers_expose_numerical_content(tmp_path):
     output = load_mirror_output(_mout_file(tmp_path))
 
@@ -107,6 +121,28 @@ def test_mirror_plot_data_helpers_expose_numerical_content(tmp_path):
     assert np.allclose(history.fsq, output.history.fsq)
     assert np.allclose(history.normalized_force, output.history.normalized_force)
     assert np.allclose(history.step_size, output.history.step_size)
+
+
+def test_mirror_boozer_like_diagnostics_capture_finite_current_pitch(tmp_path):
+    output = load_mirror_output(_finite_current_mout_file(tmp_path))
+
+    pitch = mirror_field_line_pitch_profile_data(output, num_lines=2)
+    boozer_like = mirror_boozer_like_diagnostics_data(output)
+    summary = mirror_boozer_like_summary_metrics(output)
+
+    assert np.all(boozer_like.iota_like_twist > 0.0)
+    assert np.min(pitch.turns_mean) > 0.0
+    assert np.min(boozer_like.field_line_turns) > 0.0
+    assert np.allclose(boozer_like.field_line_turns, pitch.turns_mean)
+    assert np.min(boozer_like.contravariant_pitch_mean) > 0.0
+    assert np.max(boozer_like.contravariant_pitch_rms) > 0.0
+    assert summary["boozer_like_field_line_turns_min"] == pytest.approx(float(np.min(pitch.turns_mean)))
+    assert summary["boozer_like_contravariant_pitch_mean_min"] == pytest.approx(
+        float(np.min(boozer_like.contravariant_pitch_mean))
+    )
+    assert summary["boozer_like_contravariant_pitch_rms_max"] == pytest.approx(
+        float(np.max(boozer_like.contravariant_pitch_rms))
+    )
 
 
 def test_plot_mirror_output_writes_expected_pngs(tmp_path):

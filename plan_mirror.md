@@ -21547,3 +21547,86 @@ Results:
 ### User input needed
 
 No user input is needed.
+
+---
+## 177. Finite-Current Coverage for Mirror-Boozer-Like Diagnostics
+
+### Steps taken
+
+- Added a focused finite-current plotting-test fixture in
+  `tests/mirror/test_mirror_plotting.py`.
+- Added a direct test that mirror-Boozer-like diagnostics capture nonzero
+  cap-to-cap field-line turns, nonzero contravariant pitch, and nonzero pitch
+  variation when `I'` is finite.
+- Kept this as test coverage only; no production source behavior changed.
+
+### Results obtained
+
+- The Boozer-like diagnostics lane is now covered by both:
+  - root finite-current example smoke coverage with JSON summary metrics;
+  - direct plotting/diagnostic unit-style coverage for nonzero pitch proxies.
+- The new test checks that summary extrema match the underlying diagnostic
+  arrays, reducing the chance that exported scalar metrics drift from plotted
+  data.
+
+### How it was tested
+
+Commands run:
+
+```bash
+python -m ruff format tests/mirror/test_mirror_plotting.py
+python -m ruff check tests/mirror/test_mirror_plotting.py
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_plotting.py -q
+JAX_ENABLE_X64=1 pytest tests/mirror -q
+git diff --check
+```
+
+Results:
+
+- Ruff format left the file unchanged.
+- Ruff check passed.
+- Focused plotting tests passed: `5 passed in 5.16s`.
+- Full mirror suite passed on the updated head: `227 passed, 1 skipped in
+  191.50s`.
+- Whitespace check passed.
+
+### File structure and best-practice notes
+
+- The new helper stays local to `tests/mirror/test_mirror_plotting.py` because
+  it is a tiny fixture used only by plotting/diagnostic tests.
+- The test reuses the public fixed-boundary run and MOUT write/read path, so it
+  verifies the same data shape that examples and `vmec --plot` consume.
+- No generated result files or figures were added to the repository.
+
+### Best next steps
+
+1. Commit and push M177.
+2. Update the draft PR body validation note to include the `227 passed,
+   1 skipped` full mirror-suite result.
+3. Re-check CI after the latest push has had time to finish, inspecting only
+   failed jobs.
+4. Continue the requirement-by-requirement audit and close the next concrete
+   low-completion lane.
+
+### Completion percentages after M177
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `93%`.
+- Fixed-boundary axisymmetric solve: `91%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `90%`.
+- Finite-current pitch validation: `87%`.
+- Plotting and `vmec --plot` mirror support: `97%`.
+- I/O schema and docs: `100%`.
+- Differentiable solved-state API: `95%`.
+- Mirror-Boozer-like diagnostics: `88%`.
+- Free-boundary mirror lane: `99%` overall, with reduced residual-vector
+  nonlinear solve scope complete.
+- Straight-axis hybrid support fixture lane: `100%` for support-fixture scope.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `97%`.
+- PR merge readiness overall: `99%`.
+
+### User input needed
+
+No user input is needed.
