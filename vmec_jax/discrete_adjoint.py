@@ -876,15 +876,19 @@ def build_residual_checkpoint_tape_direct(
         _record_timing("tape_solve_call_s", start)
         return out
 
+    def _extract_result_payload(current_result):
+        pack_start = time.perf_counter()
+        packed_state = jnp.asarray(pack_state(current_result.state), dtype=jnp.float64)
+        _record_timing("tape_final_state_pack_s", pack_start)
+        trace_extract_start = time.perf_counter()
+        traces = tuple(current_result.diagnostics.get("adjoint_step_trace", ()))
+        _record_timing("tape_step_trace_extract_s", trace_extract_start)
+        compact = _compact_tape_diagnostics(current_result.diagnostics)
+        iter_trace = residual_iteration_trace_from_result(current_result) if store_trace else _empty_trace()
+        return packed_state, traces, compact, iter_trace
+
     result = _solve_with_timing(solve_kwargs)
-    pack_start = time.perf_counter()
-    final_packed_state = jnp.asarray(pack_state(result.state), dtype=jnp.float64)
-    _record_timing("tape_final_state_pack_s", pack_start)
-    trace_extract_start = time.perf_counter()
-    step_traces = tuple(result.diagnostics.get("adjoint_step_trace", ()))
-    _record_timing("tape_step_trace_extract_s", trace_extract_start)
-    compact_diagnostics = _compact_tape_diagnostics(result.diagnostics)
-    trace = residual_iteration_trace_from_result(result) if store_trace else _empty_trace()
+    final_packed_state, step_traces, compact_diagnostics, trace = _extract_result_payload(result)
     stacked_step_traces = None
     step_trace_static_flags = None
     dynamic_initial_carry = None
@@ -927,14 +931,7 @@ def build_residual_checkpoint_tape_direct(
                 solve_kwargs_full = dict(solve_kwargs)
                 solve_kwargs_full["adjoint_trace_mode"] = "full"
                 result = _solve_with_timing(solve_kwargs_full)
-                pack_start = time.perf_counter()
-                final_packed_state = jnp.asarray(pack_state(result.state), dtype=jnp.float64)
-                _record_timing("tape_final_state_pack_s", pack_start)
-                trace_extract_start = time.perf_counter()
-                step_traces = tuple(result.diagnostics.get("adjoint_step_trace", ()))
-                _record_timing("tape_step_trace_extract_s", trace_extract_start)
-                compact_diagnostics = _compact_tape_diagnostics(result.diagnostics)
-                trace = residual_iteration_trace_from_result(result) if store_trace else _empty_trace()
+                final_packed_state, step_traces, compact_diagnostics, trace = _extract_result_payload(result)
             trace_stack_start = time.perf_counter()
             stacked_step_traces, step_trace_static_flags = _stack_replay_step_traces(step_traces)
             _record_timing("tape_trace_stack_s", trace_stack_start)
