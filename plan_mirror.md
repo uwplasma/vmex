@@ -22725,3 +22725,110 @@ Results:
 ### User input needed
 
 No user input is needed.
+
+---
+## 189. Solver-Comparison Plot Coverage
+
+### Steps taken
+
+- Audited `examples/mirror_solver_comparison.py` after M188 to identify the
+  next unguarded review-facing plot path in the fixed-boundary and
+  residual-Newton lanes.
+- Ran a plotted solver-comparison probe with the same tiny settings as the
+  existing no-plot test: cylinder, two-coil, and manufactured cases; one
+  gradient-descent step; two L-BFGS and residual-Newton steps; and a small
+  two-coil grid.
+- Confirmed the example writes summary residual-history, final-residual, and
+  physical-boundary plots plus selected residual-Newton mirror plot bundles for
+  the cylinder and two-coil physical cases.
+- Added a plotted smoke test that checks the summary plot set, residual-Newton
+  row metadata, selected MOUT readability, and representative nonblank selected
+  mirror plots.
+
+### Results obtained
+
+- The solver-comparison example now has automated coverage for the plots used
+  to compare gradient descent, scaled L-BFGS-B, residual Newton, and the
+  manufactured residual-Newton gate.
+- The test ties the selected physical plot bundles back to readable mirror
+  outputs with positive Jacobian diagnostics, not only to PNG existence.
+- This strengthens the fixed-boundary, residual-Newton/preconditioning, and
+  two-coil/manufactured validation lanes without changing solver behavior or
+  adding binary artifacts.
+
+### How it was tested
+
+Commands run:
+
+```bash
+JAX_ENABLE_X64=1 python examples/mirror_solver_comparison.py \
+  --outdir /tmp/mirror_solver_comparison_plot_probe \
+  --cases cylinder,two_coil,manufactured \
+  --maxiter-gd 1 \
+  --maxiter-lbfgs 2 \
+  --maxiter-newton 2 \
+  --two-coil-ns 5 \
+  --two-coil-nxi 9 \
+  --residual-linear-maxiter 12
+JAX_ENABLE_X64=1 pytest \
+  tests/mirror/test_mirror_examples.py::test_root_solver_comparison_example_runs_without_plots \
+  tests/mirror/test_mirror_examples.py::test_root_solver_comparison_example_writes_nonblank_plots -q
+python -m ruff format tests/mirror/test_mirror_examples.py
+python -m ruff check tests/mirror/test_mirror_examples.py
+python -m ruff format --check tests/mirror/test_mirror_examples.py
+JAX_ENABLE_X64=1 pytest tests/mirror -q
+```
+
+Results:
+
+- The temporary probe wrote three summary plots, two selected residual-Newton
+  MOUT files, and twenty-two selected mirror PNGs; inspected PNGs were
+  nonblank.
+- Focused solver-comparison tests passed: `2 passed in 23.52s` after
+  formatting.
+- Ruff check and format check passed.
+- Full mirror suite passed: `237 passed, 1 skipped in 249.33s`.
+
+### File structure and best-practice notes
+
+- The new coverage stays in `tests/mirror/test_mirror_examples.py`, next to the
+  existing solver-comparison root-example smoke test.
+- The test reuses the common nonblank-image helper and public MOUT loader.
+- Generated figures remain in pytest temporary directories or ignored result
+  paths; no reference images were committed.
+- Solver-comparison plotting remains owned by the root example, while the
+  standard selected mirror bundles continue to flow through
+  `vmec_jax.mirror.plot_mirror_output`.
+
+### Best next steps
+
+1. Commit and push M189.
+2. Update the draft PR body with section 189 and the `237 passed, 1 skipped`
+   full mirror-suite result.
+3. Inspect only failed CI jobs after the push.
+4. Continue the final audit with the fixed-boundary solve diagnostic example
+   and documentation/readiness wording for the remaining non-100% lanes.
+
+### Completion percentages after M189
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `94%`.
+- Fixed-boundary axisymmetric solve: `95%`.
+- Residual Newton / preconditioning: `96%`.
+- Two-coil and manufactured validation: `95%`.
+- Finite-current pitch validation: `94%`.
+- Plotting and `vmec --plot` mirror support: `99%`.
+- I/O schema and docs: `100%`.
+- Differentiable solved-state API: `96%`.
+- Mirror-Boozer-like diagnostics: `94%`.
+- Free-boundary mirror lane: `99%` overall, with reduced residual-vector
+  nonlinear solve scope complete and benchmark plots covered.
+- Straight-axis hybrid support fixture lane: `100%` for support-fixture scope.
+- Toroidal stellarator-mirror hybrid lane: `96%`.
+- ESSOS circular-coil mirror beta scan: `97%`.
+- Public API/source simplification: `100%` for the mirror package initializer.
+- PR merge readiness overall: `99%`.
+
+### User input needed
+
+No user input is needed.

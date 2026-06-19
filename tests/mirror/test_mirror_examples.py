@@ -1289,6 +1289,72 @@ def test_root_solver_comparison_example_runs_without_plots(tmp_path):
     assert all(row["residual_compare_dense_step"] is False for row in production_rows)
 
 
+def test_root_solver_comparison_example_writes_nonblank_plots(tmp_path):
+    image = pytest.importorskip("matplotlib.image")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "examples/mirror_solver_comparison.py",
+            "--outdir",
+            str(tmp_path / "solver_comparison_plots"),
+            "--cases",
+            "cylinder,two_coil,manufactured",
+            "--maxiter-gd",
+            "1",
+            "--maxiter-lbfgs",
+            "2",
+            "--maxiter-newton",
+            "2",
+            "--two-coil-ns",
+            "5",
+            "--two-coil-nxi",
+            "9",
+            "--residual-linear-maxiter",
+            "12",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    metrics = json.loads(Path(completed.stdout.strip()).read_text())
+    figure_names = {Path(path).name for path in metrics["figures"]}
+    assert figure_names == {
+        "solver_comparison_residuals.png",
+        "solver_comparison_final_residuals.png",
+        "solver_comparison_boundaries.png",
+    }
+    for path in metrics["figures"]:
+        _assert_nonblank_image(path, image)
+
+    residual_newton_rows = {
+        (row["case"], row["solver_scope"]): row for row in metrics["rows"] if row["optimizer"] == "residual_newton"
+    }
+    assert ("cylinder", "production_fixed_boundary") in residual_newton_rows
+    assert ("two_coil", "production_fixed_boundary") in residual_newton_rows
+    assert ("manufactured", "manufactured_source_validation") in residual_newton_rows
+    for key in [("cylinder", "production_fixed_boundary"), ("two_coil", "production_fixed_boundary")]:
+        row = residual_newton_rows[key]
+        assert row["residual_linear_solver"] == "lsmr"
+        assert row["residual_preconditioner"] == "radial_xi_tridi"
+        assert row["residual_linear_maxiter_policy"] == "adaptive"
+        assert row["residual_linear_iterations_total"] is not None
+        assert row["final_residual_norm"] >= 0.0
+
+    artifacts = {artifact["case"]: artifact for artifact in metrics["physical_artifacts"]}
+    assert set(artifacts) == {"cylinder", "two_coil"}
+    for case, artifact in artifacts.items():
+        output = load_mirror_output(artifact["mout"])
+        assert output.diagnostics.min_sqrtg > 0.0
+        figure_dir = Path(artifact["figures"])
+        for suffix in [
+            "mirror_boundary_3d.png",
+            "mirror_residual_history.png",
+            "mirror_boozer_like_diagnostics.png",
+        ]:
+            _assert_nonblank_image(figure_dir / f"{case}_residual_newton_{suffix}", image)
+
+
 def test_root_residual_newton_convergence_grid_runs_without_plots(tmp_path):
     completed = subprocess.run(
         [
