@@ -52,6 +52,13 @@ class NonChunkedScanRunResult(NamedTuple):
     history: Any
 
 
+class Vmec2000ScanDispatchResult(NamedTuple):
+    """Materialized carry/history from the selected VMEC2000 scan runner."""
+
+    carry_final: Any
+    history: Any
+
+
 def _env_value(env: Mapping[str, str | None], name: str, default: str = "") -> str:
     value = env.get(name, default)
     return default if value is None else str(value)
@@ -531,3 +538,26 @@ def run_nonchunked_scan(
         if bool(state_only_scan):
             hist = None
     return NonChunkedScanRunResult(carry_final=carry_final, history=hist)
+
+
+def run_vmec2000_scan_dispatch(
+    carry_init,
+    *,
+    chunked_print: bool,
+    chunked_kwargs: Mapping[str, Any],
+    nonchunked_kwargs: Mapping[str, Any],
+) -> Vmec2000ScanDispatchResult:
+    """Run the VMEC2000 scan using the configured chunking/print policy."""
+
+    if bool(chunked_print):
+        chunked_result = run_chunked_scan(carry_init, **dict(chunked_kwargs))
+        return Vmec2000ScanDispatchResult(
+            carry_final=chunked_result.carry_final,
+            history=chunked_result.history,
+        )
+
+    nonchunked_result = run_nonchunked_scan(carry_init, **dict(nonchunked_kwargs))
+    return Vmec2000ScanDispatchResult(
+        carry_final=nonchunked_result.carry_final,
+        history=nonchunked_result.history,
+    )
