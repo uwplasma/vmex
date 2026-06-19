@@ -1160,6 +1160,22 @@ class FixedBoundaryExactOptimizer:
             packed = pack_state(state)
         return jnp.asarray(packed, dtype=jnp.float64)
 
+    def _store_jacobian_result(self, exact_param_key, residuals, jac=None, *, source=None, t_total: float):
+        """Materialize, profile, and cache an exact Jacobian result."""
+
+        self._last_jacobian_residual = np.asarray(residuals, dtype=float)
+        self._remember_exact_residual(exact_param_key, self._last_jacobian_residual)
+        if jac is None:
+            out = np.zeros((int(self._last_jacobian_residual.size), 0), dtype=float)
+        else:
+            t_host = time.perf_counter()
+            out = np.asarray(jac, dtype=float)
+            self._profile_add("jacobian_host_materialize", time.perf_counter() - t_host)
+            self._last_jacobian_source = source
+        self._remember_exact_jacobian(exact_param_key, out, self._last_jacobian_residual)
+        self._profile_add("jacobian_total", time.perf_counter() - t_total)
+        return out
+
     # ── public residual / Jacobian interface ──────────────────────────────────
 
     def residual_fun(self, params) -> np.ndarray:
@@ -1539,12 +1555,7 @@ class FixedBoundaryExactOptimizer:
                 jnp.zeros((0, int(self._layout.size)), dtype=jnp.float64),
             )[0]
             residuals = jax.block_until_ready(residuals)
-            self._last_jacobian_residual = np.asarray(residuals, dtype=float)
-            self._remember_exact_residual(exact_param_key, self._last_jacobian_residual)
-            out = np.zeros((int(self._last_jacobian_residual.size), 0), dtype=float)
-            self._remember_exact_jacobian(exact_param_key, out, self._last_jacobian_residual)
-            self._profile_add("jacobian_total", time.perf_counter() - t_total)
-            return out
+            return self._store_jacobian_result(exact_param_key, residuals, t_total=t_total)
 
         initial_tangents = self._initial_tangent_columns(
             params,
@@ -1575,15 +1586,9 @@ class FixedBoundaryExactOptimizer:
                 t_replay,
                 (residuals, jac),
             )
-            self._last_jacobian_residual = np.asarray(residuals, dtype=float)
-            self._remember_exact_residual(exact_param_key, self._last_jacobian_residual)
-            t_host = time.perf_counter()
-            out = np.asarray(jac, dtype=float)
-            self._profile_add("jacobian_host_materialize", time.perf_counter() - t_host)
-            self._remember_exact_jacobian(exact_param_key, out, self._last_jacobian_residual)
-            self._last_jacobian_source = "exact_tape_fused_projected_replay"
-            self._profile_add("jacobian_total", time.perf_counter() - t_total)
-            return out
+            return self._store_jacobian_result(
+                exact_param_key, residuals, jac, source="exact_tape_fused_projected_replay", t_total=t_total
+            )
         helper_cache = self._discrete_jacobian_residual_helper(
             int(params.size),
             _residuals_from_packed,
@@ -1614,15 +1619,8 @@ class FixedBoundaryExactOptimizer:
                 t_replay,
                 (residuals, jac),
             )
-            self._last_jacobian_residual = np.asarray(residuals, dtype=float)
-            self._remember_exact_residual(exact_param_key, self._last_jacobian_residual)
-            t_host = time.perf_counter()
-            out = np.asarray(jac, dtype=float)
-            self._profile_add("jacobian_host_materialize", time.perf_counter() - t_host)
-            self._remember_exact_jacobian(exact_param_key, out, self._last_jacobian_residual)
-            self._last_jacobian_source = "exact_tape_chunked_projected_replay_projection"
-            self._profile_add("jacobian_total", time.perf_counter() - t_total)
-            return out
+            source = "exact_tape_chunked_projected_replay_projection"
+            return self._store_jacobian_result(exact_param_key, residuals, jac, source=source, t_total=t_total)
 
         t_replay = time.perf_counter()
         final_tangents = checkpoint_tape_state_jvp_columns(
@@ -1645,15 +1643,9 @@ class FixedBoundaryExactOptimizer:
             (residuals, jac),
         )
         self._profile_add("jacobian_projected_replay_total", time.perf_counter() - t_replay)
-        self._last_jacobian_residual = np.asarray(residuals, dtype=float)
-        self._remember_exact_residual(exact_param_key, self._last_jacobian_residual)
-        t_host = time.perf_counter()
-        out = np.asarray(jac, dtype=float)
-        self._profile_add("jacobian_host_materialize", time.perf_counter() - t_host)
-        self._remember_exact_jacobian(exact_param_key, out, self._last_jacobian_residual)
-        self._last_jacobian_source = "exact_tape_projected_replay"
-        self._profile_add("jacobian_total", time.perf_counter() - t_total)
-        return out
+        return self._store_jacobian_result(
+            exact_param_key, residuals, jac, source="exact_tape_projected_replay", t_total=t_total
+        )
 
     def jacobian_fun(self, params) -> np.ndarray:
         """Exact discrete-adjoint Jacobian at *params*."""
@@ -1716,15 +1708,7 @@ class FixedBoundaryExactOptimizer:
             t_res,
             (residuals, jac),
         )
-        self._last_jacobian_residual = np.asarray(residuals, dtype=float)
-        self._remember_exact_residual(exact_param_key, self._last_jacobian_residual)
-        t_host = time.perf_counter()
-        out = np.asarray(jac, dtype=float)
-        self._profile_add("jacobian_host_materialize", time.perf_counter() - t_host)
-        self._remember_exact_jacobian(exact_param_key, out, self._last_jacobian_residual)
-        self._last_jacobian_source = "exact_tape_replay"
-        self._profile_add("jacobian_total", time.perf_counter() - t_total)
-        return out
+        return self._store_jacobian_result(exact_param_key, residuals, jac, source="exact_tape_replay", t_total=t_total)
 
     def state_tangent_columns_fun(self, params) -> tuple[VMECState, np.ndarray]:
         """Return the accepted-point state and packed state tangent columns.
