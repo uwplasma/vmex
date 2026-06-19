@@ -23,48 +23,40 @@ from .field import signgs_from_sqrtg
 from .geom import eval_geom
 from .init_guess import initial_guess_from_boundary
 from .namelist import InData, write_indata
-from .optimizers.fixed_boundary.linear_guards import finite_linear_operator_output
-from .optimizers.fixed_boundary.linear_guards import linear_operator_matrix_arg
-from .optimizers.fixed_boundary.linear_guards import linear_operator_vector_arg
-from .optimizers.fixed_boundary.history import ResidualHistoryPolicy
-from .optimizers.fixed_boundary.history import build_run_history_dump
-from .optimizers.fixed_boundary.history import history_entry_from_residuals
-from .optimizers.fixed_boundary.history import monotone_final_wall_time
-from .optimizers.fixed_boundary.history import qs_objective_from_residuals
+from .optimizers.fixed_boundary.linear_guards import (
+    finite_linear_operator_output, linear_operator_matrix_arg, linear_operator_vector_arg,
+)
+from .optimizers.fixed_boundary.history import (
+    ResidualHistoryPolicy, build_run_history_dump, history_entry_from_residuals,
+    monotone_final_wall_time, qs_objective_from_residuals,
+)
 from .optimizers.fixed_boundary.gauss_newton import gauss_newton_least_squares
-from .optimizers.fixed_boundary.exact_replay import jvp_only_basepoint_carries_enabled
-from .optimizers.fixed_boundary.exact_replay import jvp_only_exact_tape_enabled
-from .optimizers.fixed_boundary.exact_replay import scan_exact_helpers
-from .optimizers.fixed_boundary.exact_replay import solve_exact_with_tape_for_jvp
-from .optimizers.fixed_boundary.exact_replay import solve_scan_exact_state
+from .optimizers.fixed_boundary.exact_replay import (
+    jvp_only_basepoint_carries_enabled, jvp_only_exact_tape_enabled,
+    scan_exact_helpers, solve_exact_with_tape_for_jvp, solve_scan_exact_state,
+)
 from .optimizers.fixed_boundary.matrix_free import build_residual_linear_operator
-from .optimizers.fixed_boundary.parameterization import BoundaryParamSpec
-from .optimizers.fixed_boundary.parameterization import apply_boundary_params
-from .optimizers.fixed_boundary.parameterization import apply_boundary_params_numpy
-from .optimizers.fixed_boundary.parameterization import boundary_param_names
-from .optimizers.fixed_boundary.parameterization import boundary_param_specs
-from .optimizers.fixed_boundary.parameterization import coeff_label
-from .optimizers.fixed_boundary.parameterization import create_x_scale
-from .optimizers.fixed_boundary.parameterization import extend_boundary_for_max_mode
-from .optimizers.fixed_boundary.parameterization import indexed_boundary_maps_from_boundary
-from .optimizers.fixed_boundary.parameterization import lift_boundary_params
-from .optimizers.fixed_boundary.parameterization import rebuild_indata_with_resolution
-from .optimizers.fixed_boundary.parameterization import truncate_indata_boundary_modes
+from .optimizers.fixed_boundary.parameterization import (
+    BoundaryParamSpec, apply_boundary_params, apply_boundary_params_numpy,
+    boundary_param_names, boundary_param_specs, coeff_label, create_x_scale,
+    extend_boundary_for_max_mode, indexed_boundary_maps_from_boundary,
+    lift_boundary_params, rebuild_indata_with_resolution, truncate_indata_boundary_modes,
+)
 from .optimizers.fixed_boundary import profiling as _profiling
 from .optimizers.fixed_boundary.qs_residuals import make_qh_residuals_fn as _make_qh_residuals_fn_impl
 from .optimizers.fixed_boundary.qs_residuals import make_qs_residuals_fn as _make_qs_residuals_fn_impl
-from .optimizers.fixed_boundary.replay_policy import chunked_projected_replay_projection_enabled
-from .optimizers.fixed_boundary.replay_policy import fused_projected_replay_enabled
-from .optimizers.fixed_boundary.replay_policy import lasym_replay_column_chunk
-from .optimizers.fixed_boundary.replay_policy import optimizer_backend_name
-from .optimizers.fixed_boundary.replay_policy import precompute_linear_operator_initial_tangents_enabled
-from .optimizers.fixed_boundary.replay_policy import projected_replay_residuals_enabled
-from .optimizers.fixed_boundary.replay_policy import scalar_gradient_initial_tangents_enabled
+from .optimizers.fixed_boundary.replay_policy import (
+    chunked_projected_replay_projection_enabled, fused_projected_replay_enabled,
+    lasym_replay_column_chunk, optimizer_backend_name,
+    precompute_linear_operator_initial_tangents_enabled, projected_replay_residuals_enabled,
+    scalar_gradient_initial_tangents_enabled,
+)
 from .optimizers.fixed_boundary.scalar_gradient import exact_objective_and_gradient
 from .optimizers.fixed_boundary.scalar_lbfgs import run_lbfgs_adjoint_exact_optimizer
 from .optimizers.fixed_boundary.scalar_trust import run_scalar_trust_exact_optimizer
-from .optimizers.fixed_boundary.scipy_least_squares import run_scipy_dense_exact_optimizer
-from .optimizers.fixed_boundary.scipy_least_squares import run_scipy_matrix_free_exact_optimizer
+from .optimizers.fixed_boundary.scipy_least_squares import (
+    run_scipy_dense_exact_optimizer, run_scipy_matrix_free_exact_optimizer,
+)
 from .optimizers.fixed_boundary import state_cache as _state_cache
 from .profiles import eval_profiles
 from .state import VMECState
