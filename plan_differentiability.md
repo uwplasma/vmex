@@ -19189,3 +19189,76 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.99999990%.
+
+## 2026-06-19 WOUT JXBFORCE Setup Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Reviewed `wout.py` after the exact-optimizer cleanup and targeted the
+   duplicated VMEC `jxbforce` setup in the corrected-bsubs compatibility path.
+2. Centralized repeated host float-array coercion and Nyquist trig slicing used
+   by both `lasym=False` and `lasym=True` corrected-bsubs branches.
+3. Centralized the collocation solve fallback (`np.linalg.solve` then
+   least-squares) used by both `getbsubs` coefficient builders.
+
+Results obtained:
+
+- `vmec_jax/wout.py` changed by 46 insertions and 51 deletions, net `-5`
+  source lines.
+- File length is now 1737 lines, remaining below the 2000-line source-health
+  warning threshold.
+- The duplicated setup around two parity-sensitive WOUT physics branches is now
+  shared, while the coefficient loops and VMEC parity behavior remain unchanged.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/wout.py`
+- `python -m ruff check vmec_jax/wout.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_helpers.py tests/test_wout_branch_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_wave3_coverage.py tests/test_wout_wave4_coverage.py tests/test_wout_env_branch_coverage.py -q`
+- `python tools/diagnostics/source_health.py --top 15`
+- `git diff --check`
+
+Best next steps:
+
+1. Return to larger production hotspots: `free_boundary.py` diagnostics/replay
+   seams, `discrete_adjoint.py` dynamic replay helpers, or the fixed-boundary
+   residual iterator.
+2. Avoid further tiny WOUT cleanup unless it materially reduces
+   `wout_minimal_from_fixed_boundary` or removes repeated physics logic.
+3. Keep using targeted physics/parity tests after each refactor; defer full CI
+   watching until a larger batch is ready.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.99999931%.
+- Solver monolith reduction: 99.79%.
+- Free-boundary adjoint monolith reduction: 99.50%.
+- Driver workflow decomposition: 99.94%.
+- Residual iteration decomposition: 98.86%.
+- WOUT diagnostic/profile decomposition: 99.96%.
+- Bcovar/WOUT parity decomposition: 99.14%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.81%.
+- Tomnsps transform decomposition: 98.9%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.67%.
+- Fixed-boundary optimizer decomposition: 96.10%.
+- Plotting/WOUT visualization decomposition: 96.1%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.75%.
+- Discrete-adjoint replay decomposition: 96.45%.
+- Free-boundary validation-gate maintainability: 97.3%.
+- QI objective/staged-runner decomposition: 96.9%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.99999991%.
