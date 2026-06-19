@@ -351,6 +351,993 @@ def vmec_source_from_gsource(*, gsource: np.ndarray, basis: dict[str, Any]) -> n
     return np.asarray(src, dtype=float)
 
 
+
+def spectral_second_derivatives_2d(field: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Periodic spectral second derivatives on a uniform `(u,v)` grid."""
+
+    f = np.asarray(field, dtype=float)
+    nu, nv = f.shape
+    ku = np.fft.fftfreq(nu, d=1.0 / float(max(1, nu)))
+    kv = np.fft.fftfreq(nv, d=1.0 / float(max(1, nv)))
+    fh = np.fft.fftn(f)
+    duu = np.fft.ifftn((-(ku[:, None] ** 2)) * fh).real
+    dvv = np.fft.ifftn((-(kv[None, :] ** 2)) * fh).real
+    duv = np.fft.ifftn((-(ku[:, None] * kv[None, :])) * fh).real
+    return np.asarray(duu, dtype=float), np.asarray(duv, dtype=float), np.asarray(dvv, dtype=float)
+
+
+def vmec_precal_tan_tables(*, nu: int, nv: int, nvper: int) -> tuple[np.ndarray, np.ndarray]:
+    """VMEC ``precal.f`` tan tables used by ``greenf.f``."""
+
+    nu = max(1, int(nu))
+    nv = max(1, int(nv))
+    nvper = max(1, int(nvper))
+    kp_count = int(nvper) if int(nv) == 1 else 1
+    nuv_tan = int(2 * nu * nv * kp_count)
+    tanu = np.zeros((nuv_tan,), dtype=float)
+    tanv = np.zeros((nuv_tan,), dtype=float)
+    alu = 2.0 * np.pi / float(nu)
+    alv = 2.0 * np.pi / float(nv)
+    alp_per = 2.0 * np.pi / float(nvper)
+    epstan = np.finfo(float).eps
+    bigno = 1.0e50
+    i = 0
+    for kp in range(1, kp_count + 1):
+        argp = 0.5 * alp_per * float(kp - 1)
+        for ku in range(1, 2 * nu + 1):
+            argu = 0.5 * alu * float(ku - 1)
+            near_qpi = abs(argu - 0.25 * 2.0 * np.pi) < epstan
+            near_3qpi = abs(argu - 0.75 * 2.0 * np.pi) < epstan
+            for kv in range(1, nv + 1):
+                argv = 0.5 * alv * float(kv - 1) + argp
+                if near_qpi or near_3qpi:
+                    tanu[i] = bigno
+                else:
+                    tanu[i] = 2.0 * np.tan(argu)
+                if abs(argv - 0.25 * 2.0 * np.pi) < epstan:
+                    tanv[i] = bigno
+                else:
+                    tanv[i] = 2.0 * np.tan(argv)
+                i += 1
+    return np.asarray(tanu, dtype=float), np.asarray(tanv, dtype=float)
+
+
+def ensure_vmec_nonsingular_kernel_tables(*, basis: dict[str, Any], nv: int, nvper: int) -> dict[str, np.ndarray]:
+    """Cache VMEC nonsingular Green-function helper tables on the mode basis."""
+
+    nv = max(1, int(nv))
+    nvper = max(1, int(nvper))
+    cache = basis.get("_nonsingular_kernel_tables")
+    if (
+        isinstance(cache, dict)
+        and int(cache.get("nv", -1)) == nv
+        and int(cache.get("nvper", -1)) == nvper
+    ):
+        return cache
+
+    nu = int(basis["nu_full"])
+    mf = int(basis["mf"])
+    nf = int(basis["nf"])
+    onp = float(basis["onp"])
+    nuv_full = int(basis["nuv_full"])
+
+    tanu, tanv = vmec_precal_tan_tables(nu=nu, nv=nv, nvper=nvper)
+
+    alv = 2.0 * np.pi / float(max(1, nv))
+    alvp = onp * alv
+    kv = np.arange(nv, dtype=np.int64)
+    cos_v = np.cos(alvp * kv)
+    sin_v = np.sin(alvp * kv)
+    cosuv = np.broadcast_to(cos_v[None, :], (nu, nv)).reshape(-1)
+    sinuv = np.broadcast_to(sin_v[None, :], (nu, nv)).reshape(-1)
+
+    alp_per = 2.0 * np.pi / float(max(1, nvper))
+    cosper = np.cos(alp_per * np.arange(nvper, dtype=float))
+    sinper = np.sin(alp_per * np.arange(nvper, dtype=float))
+
+    cosv_tab = np.zeros((nf + 1, nv), dtype=float)
+    sinv_tab = np.zeros((nf + 1, nv), dtype=float)
+    kv_idx = np.arange(nv, dtype=float)
+    for n in range(0, nf + 1):
+        dn1 = alv * float(n)
+        cosv_tab[n, :] = np.cos(dn1 * kv_idx)
+        sinv_tab[n, :] = np.sin(dn1 * kv_idx)
+
+    alu = 2.0 * np.pi / float(max(1, nu))
+    nu_fourp = int(nu // 2 + 1)
+    cosui = np.zeros((mf + 1, nu_fourp), dtype=float)
+    sinui = np.zeros((mf + 1, nu_fourp), dtype=float)
+    ku_idx = np.arange(nu_fourp, dtype=float)
+    for m in range(0, mf + 1):
+        c = np.cos(alu * float(m) * ku_idx)
+        s = np.sin(alu * float(m) * ku_idx)
+        cosui[m, :] = c * alu * alv * 2.0
+        sinui[m, :] = s * alu * alv * 2.0
+        cosui[m, 0] *= 0.5
+        cosui[m, -1] *= 0.5
+
+    cache = {
+        "nv": np.asarray(nv, dtype=np.int64),
+        "nvper": np.asarray(nvper, dtype=np.int64),
+        "idx_all": np.arange(nuv_full, dtype=np.int64),
+        "tanu": np.asarray(tanu, dtype=float),
+        "tanv": np.asarray(tanv, dtype=float),
+        "cosuv": np.asarray(cosuv, dtype=float),
+        "sinuv": np.asarray(sinuv, dtype=float),
+        "cosper": np.asarray(cosper, dtype=float),
+        "sinper": np.asarray(sinper, dtype=float),
+        "cosv_tab": np.asarray(cosv_tab, dtype=float),
+        "sinv_tab": np.asarray(sinv_tab, dtype=float),
+        "cosui": np.asarray(cosui, dtype=float),
+        "sinui": np.asarray(sinui, dtype=float),
+    }
+    basis["_nonsingular_kernel_tables"] = cache
+    return cache
+
+
+def vmec_nonsingular_gsource_from_bexni(
+    *,
+    sample: ExternalBoundarySample,
+    basis: dict[str, Any],
+    bexni: np.ndarray,
+    signgs: int,
+    nvper: int,
+) -> np.ndarray:
+    """Approximate VMEC greenf+gstore source assembly on one boundary period.
+
+    This ports the key numerics of ``greenf.f``/``scalpot.f`` source accumulation:
+    ``gstore(i) = sum_ip bexni(ip) * delgr(i;ip)``, where ``delgr`` is the
+    non-singular Green-function remainder over field periods.
+    """
+
+    ntheta3, nzeta = sample.R.shape
+    nu = int(basis.get("nu_full", ntheta3))
+    nv = int(nzeta)
+    nuv_full = int(nu * nv)
+    nuv3 = int(ntheta3 * nv)
+    if nuv_full <= 0:
+        return np.zeros((0,), dtype=float)
+
+    onp = float(basis["onp"])
+    onp2 = onp * onp
+    signgs = int(signgs)
+    nvper = max(1, int(nvper))
+
+    R_red = np.asarray(sample.R, dtype=float)
+    Z_red = np.asarray(sample.Z, dtype=float)
+    Ru_red = np.asarray(sample.Ru, dtype=float)
+    Zu_red = np.asarray(sample.Zu, dtype=float)
+    Rv_red = np.asarray(sample.Rv, dtype=float)
+    Zv_red = np.asarray(sample.Zv, dtype=float)
+
+    if (nu == ntheta3) or bool(basis.get("lasym", False)):
+        R2 = np.asarray(R_red, dtype=float)
+        Z2 = np.asarray(Z_red, dtype=float)
+        Ru2 = np.asarray(Ru_red, dtype=float)
+        Zu2 = np.asarray(Zu_red, dtype=float)
+        Rv2 = np.asarray(Rv_red, dtype=float)
+        Zv2 = np.asarray(Zv_red, dtype=float)
+    else:
+        # Rebuild full `nu` surface arrays from stellarator-symmetric half grid.
+        R2 = np.zeros((nu, nv), dtype=float)
+        Z2 = np.zeros((nu, nv), dtype=float)
+        Ru2 = np.zeros((nu, nv), dtype=float)
+        Zu2 = np.zeros((nu, nv), dtype=float)
+        Rv2 = np.zeros((nu, nv), dtype=float)
+        Zv2 = np.zeros((nu, nv), dtype=float)
+        R2[:ntheta3, :] = R_red
+        Z2[:ntheta3, :] = Z_red
+        Ru2[:ntheta3, :] = Ru_red
+        Zu2[:ntheta3, :] = Zu_red
+        Rv2[:ntheta3, :] = Rv_red
+        Zv2[:ntheta3, :] = Zv_red
+        kv_m = (nv - np.arange(nv, dtype=np.int64)) % max(1, nv)
+        for ku in range(1, max(1, ntheta3 - 1)):
+            km = (nu - ku) % max(1, nu)
+            if km < ntheta3:
+                continue
+            # Stellarator symmetry for missing half-grid rows:
+            # (u,v) -> (-u,+v) maps to source rows sampled at (+u,-v).
+            R2[km, :] = R_red[ku, kv_m]
+            Z2[km, :] = -Z_red[ku, kv_m]
+            Ru2[km, :] = -Ru_red[ku, kv_m]
+            Zu2[km, :] = Zu_red[ku, kv_m]
+            Rv2[km, :] = -Rv_red[ku, kv_m]
+            Zv2[km, :] = Zv_red[ku, kv_m]
+
+    # Prefer exact modal second derivatives from surface sampling (VMEC surface.f).
+    # For stellarator-symmetric runs, source derivatives are only needed on the
+    # reduced `ntheta3` rows (primed mesh), so we embed them into full arrays.
+    have_second = (
+        sample.ruu is not None
+        and sample.ruv is not None
+        and sample.rvv is not None
+        and sample.zuu is not None
+        and sample.zuv is not None
+        and sample.zvv is not None
+    )
+    if have_second:
+        ruu_s = np.asarray(sample.ruu, dtype=float)
+        ruv_s = np.asarray(sample.ruv, dtype=float)
+        rvv_s = np.asarray(sample.rvv, dtype=float)
+        zuu_s = np.asarray(sample.zuu, dtype=float)
+        zuv_s = np.asarray(sample.zuv, dtype=float)
+        zvv_s = np.asarray(sample.zvv, dtype=float)
+        if ruu_s.shape == R2.shape:
+            ruu, ruv, rvv = ruu_s, ruv_s, rvv_s
+            zuu, zuv, zvv = zuu_s, zuv_s, zvv_s
+        elif ruu_s.shape == (ntheta3, nv):
+            ruu = np.zeros_like(R2)
+            ruv = np.zeros_like(R2)
+            rvv = np.zeros_like(R2)
+            zuu = np.zeros_like(R2)
+            zuv = np.zeros_like(R2)
+            zvv = np.zeros_like(R2)
+            ruu[:ntheta3, :] = ruu_s
+            ruv[:ntheta3, :] = ruv_s
+            rvv[:ntheta3, :] = rvv_s
+            zuu[:ntheta3, :] = zuu_s
+            zuv[:ntheta3, :] = zuv_s
+            zvv[:ntheta3, :] = zvv_s
+        else:
+            ruu, ruv, rvv = spectral_second_derivatives_2d(R2)
+            zuu, zuv, zvv = spectral_second_derivatives_2d(Z2)
+    else:
+        ruu, ruv, rvv = spectral_second_derivatives_2d(R2)
+        zuu, zuv, zvv = spectral_second_derivatives_2d(Z2)
+    R = R2.reshape(-1)
+    Z = Z2.reshape(-1)
+    Ru = Ru2.reshape(-1)
+    Zu = Zu2.reshape(-1)
+    Rv = Rv2.reshape(-1)
+    Zv = Zv2.reshape(-1)
+    ruu = ruu.reshape(-1)
+    rvv = rvv.reshape(-1)
+    ruv = ruv.reshape(-1)
+    zuu = zuu.reshape(-1)
+    zvv = zvv.reshape(-1)
+    zuv = zuv.reshape(-1)
+
+    snr = float(signgs) * R * Zu
+    snv = float(signgs) * (Ru * Zv - Rv * Zu)
+    snz = -float(signgs) * R * Ru
+    guu_b = Ru * Ru + Zu * Zu
+    guv_b = (Ru * Rv + Zu * Zv) * onp * 2.0
+    gvv_b = (Rv * Rv + Zv * Zv + R * R) * onp2
+    auu = 0.5 * (snr * ruu + snz * zuu)
+    auv = (snr * ruv + snv * Ru + snz * zuv) * onp
+    avv = (snv * Rv + 0.5 * (snr * (rvv - R) + snz * zvv)) * onp2
+    rzb2 = R * R + Z * Z
+
+    tables = ensure_vmec_nonsingular_kernel_tables(basis=basis, nv=nv, nvper=nvper)
+    idx_all = np.asarray(tables["idx_all"], dtype=np.int64)
+    tanu = np.asarray(tables["tanu"], dtype=float)
+    tanv = np.asarray(tables["tanv"], dtype=float)
+    cosuv = np.asarray(tables["cosuv"], dtype=float)
+    sinuv = np.asarray(tables["sinuv"], dtype=float)
+    cosper = np.asarray(tables["cosper"], dtype=float)
+    sinper = np.asarray(tables["sinper"], dtype=float)
+    rcosuv = R * cosuv
+    rsinuv = R * sinuv
+
+    bex = np.asarray(bexni, dtype=float).reshape(-1)
+    if bex.size < nuv3:
+        bex = np.resize(bex, (nuv3,))
+    else:
+        bex = bex[:nuv3]
+
+    gstore = np.zeros((nuv_full,), dtype=float)
+    for ip in range(nuv3):
+        xip = rcosuv[ip]
+        yip = rsinuv[ip]
+        ivoff = nuv_full - ip
+        iskip = ip // nv
+        iuoff = nuv_full - nv * iskip
+
+        gsave = rzb2[ip] + rzb2 - 2.0 * Z[ip] * Z
+        delgr = np.zeros((nuv_full,), dtype=float)
+        for kp in range(nvper):
+            xper = xip * cosper[kp] - yip * sinper[kp]
+            yper = yip * cosper[kp] + xip * sinper[kp]
+            base = gsave - 2.0 * (xper * rcosuv + yper * rsinuv)
+            if kp == 0 or nv == 1:
+                tidx_u = idx_all + iuoff
+                ivoff_k = ivoff + (2 * nu * kp if nv == 1 else 0)
+                tidx_v = idx_all + ivoff_k
+                ga1 = tanu[tidx_u] * (guu_b[ip] * tanu[tidx_u] + guv_b[ip] * tanv[tidx_v]) + gvv_b[ip] * tanv[tidx_v] * tanv[tidx_v]
+                ga2 = tanu[tidx_u] * (auu[ip] * tanu[tidx_u] + auv[ip] * tanv[tidx_v]) + avv[ip] * tanv[tidx_v] * tanv[tidx_v]
+                ga2 = ga2 / ga1
+                ga1s = 1.0 / np.sqrt(ga1)
+                mask = (idx_all != ip) if kp == 0 else np.ones_like(idx_all, dtype=bool)
+                if np.any(mask):
+                    base_m = base[mask]
+                    htemp_m = np.sqrt(1.0 / base_m)
+                    delgr[mask] += htemp_m - ga1s[mask]
+            else:
+                htemp = np.sqrt(1.0 / base)
+                delgr += htemp
+        # VMEC greenf.f: when nv==1, normalize the field-period sum by nvper.
+        if nv == 1 and nvper > 1:
+            delgr /= float(nvper)
+        gstore += bex[ip] * delgr
+
+    return np.asarray(gstore, dtype=float)
+
+
+def vmec_mode_matrix_from_grpmn(
+    *,
+    grpmn: np.ndarray,
+    basis: dict[str, Any],
+) -> np.ndarray:
+    """Build VMEC mode-space matrix from `grpmn` using ``fouri.f`` formulas."""
+
+    g = np.asarray(grpmn, dtype=float)
+    mnpd = int(basis["mnpd"])
+    lasym = bool(basis["lasym"])
+    sinmni = np.asarray(basis["sinmni"], dtype=float)
+    cosmni = np.asarray(basis["cosmni"], dtype=float)
+    # VMEC/NESTOR `pi3` from precal.f: p5*pi2**3 = 4*pi**3.
+    pi3 = float(4.0 * (np.pi**3))
+    mn0 = int(basis.get("mn0", 0))
+
+    if g.ndim != 2 or g.shape[0] < mnpd:
+        raise ValueError("invalid_grpmn_shape")
+    xmpot = np.asarray(basis["xmpot"], dtype=np.int64)
+    n_raw = np.asarray(basis["n_raw"], dtype=np.int64)
+    skip_col = np.logical_and(xmpot == 0, n_raw < 0)
+    gsin = g[:mnpd, :]
+    a11 = gsin @ sinmni
+    a11 = np.asarray(a11, dtype=float)
+    if np.any(skip_col):
+        # fouri.f skips m=0,n<0 in the primed-mesh loop: these are column-only skips.
+        a11[:, skip_col] = 0.0
+    a11[np.diag_indices(mnpd)] += pi3
+
+    if not lasym:
+        return a11
+
+    if g.shape[0] < 2 * mnpd:
+        raise ValueError("invalid_grpmn_shape_lasym")
+    gcos = g[mnpd : 2 * mnpd, :]
+    a12 = gsin @ cosmni
+    a21 = gcos @ sinmni
+    a22 = gcos @ cosmni
+    if np.any(skip_col):
+        a12 = np.asarray(a12, dtype=float)
+        a21 = np.asarray(a21, dtype=float)
+        a22 = np.asarray(a22, dtype=float)
+        a12[:, skip_col] = 0.0
+        a21[:, skip_col] = 0.0
+        a22[:, skip_col] = 0.0
+    a22 = np.asarray(a22, dtype=float)
+    a22[np.diag_indices(mnpd)] += pi3
+    if 0 <= mn0 < mnpd:
+        a22[mn0, mn0] += pi3
+
+    out = np.zeros((2 * mnpd, 2 * mnpd), dtype=float)
+    out[:mnpd, :mnpd] = a11
+    out[:mnpd, mnpd:] = a12
+    out[mnpd:, :mnpd] = a21
+    out[mnpd:, mnpd:] = a22
+    return out
+
+
+def vmec_nonsingular_terms_from_bexni(
+    *,
+    sample: ExternalBoundarySample,
+    basis: dict[str, Any],
+    bexni: np.ndarray,
+    signgs: int,
+    nvper: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute VMEC-like non-singular source and matrix kernel terms.
+
+    Returns:
+      - `gstore` (`gsource_full`) on the full `nu*nv` grid.
+      - `grpmn_nonsing` Fourier-kernel contribution in mode space (`mnpd2,nuv3`).
+    """
+
+    ntheta3, nzeta = sample.R.shape
+    nu = int(basis.get("nu_full", ntheta3))
+    nv = int(nzeta)
+    nuv_full = int(nu * nv)
+    nuv3 = int(ntheta3 * nv)
+    if nuv_full <= 0 or nuv3 <= 0:
+        return np.zeros((0,), dtype=float), np.zeros((0, 0), dtype=float)
+
+    mf = int(basis["mf"])
+    nf = int(basis["nf"])
+    mnpd = int(basis["mnpd"])
+    lasym = bool(basis["lasym"])
+    mnpd2 = int(basis["mnpd2"])
+    onp = float(basis["onp"])
+    signgs = int(signgs)
+    nvper = max(1, int(nvper))
+
+    R_red = np.asarray(sample.R, dtype=float)
+    Z_red = np.asarray(sample.Z, dtype=float)
+    Ru_red = np.asarray(sample.Ru, dtype=float)
+    Zu_red = np.asarray(sample.Zu, dtype=float)
+    Rv_red = np.asarray(sample.Rv, dtype=float)
+    Zv_red = np.asarray(sample.Zv, dtype=float)
+
+    if (nu == ntheta3) or lasym:
+        R2 = np.asarray(R_red, dtype=float)
+        Z2 = np.asarray(Z_red, dtype=float)
+        Ru2 = np.asarray(Ru_red, dtype=float)
+        Zu2 = np.asarray(Zu_red, dtype=float)
+        Rv2 = np.asarray(Rv_red, dtype=float)
+        Zv2 = np.asarray(Zv_red, dtype=float)
+    else:
+        R2 = np.zeros((nu, nv), dtype=float)
+        Z2 = np.zeros((nu, nv), dtype=float)
+        Ru2 = np.zeros((nu, nv), dtype=float)
+        Zu2 = np.zeros((nu, nv), dtype=float)
+        Rv2 = np.zeros((nu, nv), dtype=float)
+        Zv2 = np.zeros((nu, nv), dtype=float)
+        R2[:ntheta3, :] = R_red
+        Z2[:ntheta3, :] = Z_red
+        Ru2[:ntheta3, :] = Ru_red
+        Zu2[:ntheta3, :] = Zu_red
+        Rv2[:ntheta3, :] = Rv_red
+        Zv2[:ntheta3, :] = Zv_red
+        kv_m = (nv - np.arange(nv, dtype=np.int64)) % max(1, nv)
+        for ku in range(1, max(1, ntheta3 - 1)):
+            km = (nu - ku) % max(1, nu)
+            if km < ntheta3:
+                continue
+            R2[km, :] = R_red[ku, kv_m]
+            Z2[km, :] = -Z_red[ku, kv_m]
+            Ru2[km, :] = -Ru_red[ku, kv_m]
+            Zu2[km, :] = Zu_red[ku, kv_m]
+            Rv2[km, :] = -Rv_red[ku, kv_m]
+            Zv2[km, :] = Zv_red[ku, kv_m]
+
+    have_second = (
+        sample.ruu is not None
+        and sample.ruv is not None
+        and sample.rvv is not None
+        and sample.zuu is not None
+        and sample.zuv is not None
+        and sample.zvv is not None
+    )
+    if have_second:
+        ruu_s = np.asarray(sample.ruu, dtype=float)
+        ruv_s = np.asarray(sample.ruv, dtype=float)
+        rvv_s = np.asarray(sample.rvv, dtype=float)
+        zuu_s = np.asarray(sample.zuu, dtype=float)
+        zuv_s = np.asarray(sample.zuv, dtype=float)
+        zvv_s = np.asarray(sample.zvv, dtype=float)
+        if ruu_s.shape == R2.shape:
+            ruu, ruv, rvv = ruu_s, ruv_s, rvv_s
+            zuu, zuv, zvv = zuu_s, zuv_s, zvv_s
+        elif ruu_s.shape == (ntheta3, nv):
+            ruu = np.zeros_like(R2)
+            ruv = np.zeros_like(R2)
+            rvv = np.zeros_like(R2)
+            zuu = np.zeros_like(R2)
+            zuv = np.zeros_like(R2)
+            zvv = np.zeros_like(R2)
+            ruu[:ntheta3, :] = ruu_s
+            ruv[:ntheta3, :] = ruv_s
+            rvv[:ntheta3, :] = rvv_s
+            zuu[:ntheta3, :] = zuu_s
+            zuv[:ntheta3, :] = zuv_s
+            zvv[:ntheta3, :] = zvv_s
+        else:
+            ruu, ruv, rvv = spectral_second_derivatives_2d(R2)
+            zuu, zuv, zvv = spectral_second_derivatives_2d(Z2)
+    else:
+        ruu, ruv, rvv = spectral_second_derivatives_2d(R2)
+        zuu, zuv, zvv = spectral_second_derivatives_2d(Z2)
+    R = R2.reshape(-1)
+    Z = Z2.reshape(-1)
+    Ru = Ru2.reshape(-1)
+    Zu = Zu2.reshape(-1)
+    Rv = Rv2.reshape(-1)
+    Zv = Zv2.reshape(-1)
+    ruu = ruu.reshape(-1)
+    rvv = rvv.reshape(-1)
+    ruv = ruv.reshape(-1)
+    zuu = zuu.reshape(-1)
+    zvv = zvv.reshape(-1)
+    zuv = zuv.reshape(-1)
+
+    snr = float(signgs) * R * Zu
+    snv = float(signgs) * (Ru * Zv - Rv * Zu)
+    snz = -float(signgs) * R * Ru
+    drv = -(R * snr + Z * snz)
+    guu_b = Ru * Ru + Zu * Zu
+    guv_b = (Ru * Rv + Zu * Zv) * onp * 2.0
+    gvv_b = (Rv * Rv + Zv * Zv + R * R) * (onp * onp)
+    auu = 0.5 * (snr * ruu + snz * zuu)
+    auv = (snr * ruv + snv * Ru + snz * zuv) * onp
+    avv = (snv * Rv + 0.5 * (snr * (rvv - R) + snz * zvv)) * (onp * onp)
+    rzb2 = R * R + Z * Z
+
+    tables = ensure_vmec_nonsingular_kernel_tables(basis=basis, nv=nv, nvper=nvper)
+    idx_all = np.asarray(tables["idx_all"], dtype=np.int64)
+    tanu = np.asarray(tables["tanu"], dtype=float)
+    tanv = np.asarray(tables["tanv"], dtype=float)
+    cosuv = np.asarray(tables["cosuv"], dtype=float)
+    sinuv = np.asarray(tables["sinuv"], dtype=float)
+    cosper = np.asarray(tables["cosper"], dtype=float)
+    sinper = np.asarray(tables["sinper"], dtype=float)
+    cosv_tab = np.asarray(tables["cosv_tab"], dtype=float)
+    sinv_tab = np.asarray(tables["sinv_tab"], dtype=float)
+    cosui = np.asarray(tables["cosui"], dtype=float)
+    sinui = np.asarray(tables["sinui"], dtype=float)
+    nu_fourp = int(cosui.shape[1])
+    rcosuv = R * cosuv
+    rsinuv = R * sinuv
+
+    bex = np.asarray(bexni, dtype=float).reshape(-1)
+    if bex.size < nuv3:
+        bex = np.resize(bex, (nuv3,))
+    else:
+        bex = bex[:nuv3]
+
+    imirr_full = np.asarray(basis["imirr_full"], dtype=np.int64)
+    grpmn_nonsing = np.zeros((mnpd2, nuv3), dtype=float)
+    mf1 = mf + 1
+    ndim = 2 if lasym else 1
+    iuv_grid = (np.arange(int(nu_fourp), dtype=np.int64)[:, None] * int(nv)) + np.arange(int(nv), dtype=np.int64)[
+        None, :
+    ]
+    iuv_grid = np.asarray(iuv_grid, dtype=np.int64)
+    iref_grid = np.asarray(imirr_full[iuv_grid], dtype=np.int64)
+    cosv_modes = 0.5 * onp * np.asarray(cosv_tab[: nf + 1, :], dtype=float)
+    sinv_modes = 0.5 * onp * np.asarray(sinv_tab[: nf + 1, :], dtype=float)
+    m_idx = np.arange(mf + 1, dtype=np.int64)
+    n_idx = np.arange(nf + 1, dtype=np.int64)
+    idx_p_grid = m_idx[:, None] + (n_idx[None, :] + nf) * mf1
+    idx_m_grid = m_idx[:, None] + ((-n_idx[None, :]) + nf) * mf1
+    add_negative_n = (n_idx[None, :] != 0) & (m_idx[:, None] != 0)
+    idx_p_flat = idx_p_grid.reshape(-1)
+    idx_m_flat = idx_m_grid.reshape(-1)
+    negative_n_flat = np.asarray(add_negative_n.reshape(-1), dtype=bool)
+    sinm_sym = np.asarray(sinui[: mf + 1, :], dtype=float)
+    cosm_sym = -np.asarray(cosui[: mf + 1, :], dtype=float)
+    sinm_asym = np.asarray(cosui[: mf + 1, :], dtype=float) if lasym else None
+    cosm_asym = np.asarray(sinui[: mf + 1, :], dtype=float) if lasym else None
+
+    try:
+        ip_chunk = int(os.getenv("VMEC_JAX_FREEB_NONSINGULAR_IP_CHUNK", "64"))
+    except Exception:
+        ip_chunk = 64
+    ip_chunk = max(1, min(int(ip_chunk), int(nuv3)))
+
+    gstore = np.zeros((nuv_full,), dtype=float)
+    idx_all_b = idx_all[None, :]
+    rcosuv_b = rcosuv[None, :]
+    rsinuv_b = rsinuv[None, :]
+    z_b = Z[None, :]
+    for ip0 in range(0, nuv3, ip_chunk):
+        ip1 = min(nuv3, ip0 + ip_chunk)
+        ip_idx = np.arange(ip0, ip1, dtype=np.int64)
+        n_chunk = int(ip_idx.size)
+
+        xip = rcosuv[ip_idx]
+        yip = rsinuv[ip_idx]
+        ivoff = nuv_full - ip_idx
+        iskip = ip_idx // nv
+        iuoff = nuv_full - nv * iskip
+        gsave = rzb2[ip_idx, None] + rzb2[None, :] - 2.0 * Z[ip_idx, None] * z_b
+        dsave = drv[ip_idx, None] + z_b * snz[ip_idx, None]
+        delgr = np.zeros((n_chunk, nuv_full), dtype=float)
+        delgrp = np.zeros((n_chunk, nuv_full), dtype=float)
+
+        for kp in range(nvper):
+            xper = xip * cosper[kp] - yip * sinper[kp]
+            yper = yip * cosper[kp] + xip * sinper[kp]
+            sxsave = (snr[ip_idx] * xper - snv[ip_idx] * yper) / R[ip_idx]
+            sysave = (snr[ip_idx] * yper + snv[ip_idx] * xper) / R[ip_idx]
+            base = gsave - 2.0 * (xper[:, None] * rcosuv_b + yper[:, None] * rsinuv_b)
+            deriv_num = rcosuv_b * sxsave[:, None] + rsinuv_b * sysave[:, None] + dsave
+
+            if kp == 0 or nv == 1:
+                tidx_u = idx_all_b + iuoff[:, None]
+                ivoff_k = ivoff + (2 * nu * kp if nv == 1 else 0)
+                tidx_v = idx_all_b + ivoff_k[:, None]
+                tanu_use = tanu[tidx_u]
+                tanv_use = tanv[tidx_v]
+                ga1 = tanu_use * (
+                    guu_b[ip_idx, None] * tanu_use + guv_b[ip_idx, None] * tanv_use
+                ) + gvv_b[ip_idx, None] * tanv_use * tanv_use
+                ga2 = tanu_use * (
+                    auu[ip_idx, None] * tanu_use + auv[ip_idx, None] * tanv_use
+                ) + avv[ip_idx, None] * tanv_use * tanv_use
+                ga2 = ga2 / ga1
+                ga1s = 1.0 / np.sqrt(ga1)
+                if kp == 0:
+                    mask = np.ones((n_chunk, nuv_full), dtype=bool)
+                    mask[np.arange(n_chunk, dtype=np.int64), ip_idx] = False
+                else:
+                    mask = np.ones((n_chunk, nuv_full), dtype=bool)
+                safe_base = np.where(mask, base, 1.0)
+                ftemp = 1.0 / safe_base
+                htemp = np.sqrt(ftemp)
+                deriv = ftemp * htemp * deriv_num
+                delgr += np.where(mask, htemp - ga1s, 0.0)
+                delgrp += np.where(mask, deriv - ga2 * ga1s, 0.0)
+            else:
+                ftemp = 1.0 / base
+                htemp = np.sqrt(ftemp)
+                deriv = ftemp * htemp * deriv_num
+                delgr += htemp
+                delgrp += deriv
+
+        # VMEC greenf.f: when nv==1, normalize both non-singular sums by nvper.
+        if nv == 1 and nvper > 1:
+            scale = 1.0 / float(nvper)
+            delgr *= scale
+            delgrp *= scale
+
+        # Keep the gstore accumulation order explicit for close parity with the
+        # scalar Fortran-style formulation while still vectorizing the expensive
+        # kernel construction above.
+        for loc, ip in enumerate(ip_idx):
+            gstore += bex[int(ip)] * delgr[loc]
+
+        del_iuv = delgrp[:, iuv_grid]
+        del_ref = delgrp[:, iref_grid]
+        ka_grid = del_iuv - del_ref
+        g1_sym = np.einsum("cuv,fv->cuf", ka_grid, cosv_modes, optimize=True)
+        g2_sym = np.einsum("cuv,fv->cuf", ka_grid, sinv_modes, optimize=True)
+
+        for isym in range(ndim):
+            if isym == 0:
+                g1_use = g1_sym
+                g2_use = g2_sym
+                sinm_table = sinm_sym
+                cosm_table = cosm_sym
+                row_off = 0
+            else:
+                ks_grid = del_iuv + del_ref
+                g1_use = np.einsum("cuv,fv->cuf", ks_grid, cosv_modes, optimize=True)
+                g2_use = np.einsum("cuv,fv->cuf", ks_grid, sinv_modes, optimize=True)
+                sinm_table = sinm_asym
+                cosm_table = cosm_asym
+                row_off = mnpd
+
+            gcos = np.einsum("mu,cuf->cmf", sinm_table, g1_use, optimize=True)
+            gsin = np.einsum("mu,cuf->cmf", cosm_table, g2_use, optimize=True)
+            total_plus = (gcos + gsin).reshape(n_chunk, -1)
+            total_minus = (gcos - gsin).reshape(n_chunk, -1)
+            rows_plus = row_off + idx_p_flat
+            rows_minus = row_off + idx_m_flat[negative_n_flat]
+            grpmn_nonsing[np.ix_(rows_plus, ip_idx)] += total_plus.T
+            grpmn_nonsing[np.ix_(rows_minus, ip_idx)] += total_minus[:, negative_n_flat].T
+
+    # Keep raw fourp accumulation scale; any legacy scale experiments are
+    # handled upstream in diagnostics, not in the core assembly path.
+
+    return np.asarray(gstore, dtype=float), np.asarray(grpmn_nonsing, dtype=float)
+
+
+def vmec_bvec_from_gsource(*, gsource: np.ndarray, basis: dict[str, Any]) -> np.ndarray:
+    src = vmec_source_from_gsource(gsource=gsource, basis=basis)
+    sinmni = np.asarray(basis["sinmni"], dtype=float)
+    bsin = sinmni.T @ src
+    xmpot = np.asarray(basis["xmpot"], dtype=np.int64)
+    n_raw = np.asarray(basis["n_raw"], dtype=np.int64)
+    skip_mask = np.logical_and(xmpot == 0, n_raw < 0)
+    if np.any(skip_mask):
+        bsin = np.asarray(bsin, dtype=float)
+        bsin[skip_mask] = 0.0
+    if bool(basis["lasym"]):
+        cosmni = np.asarray(basis["cosmni"], dtype=float)
+        bcos = cosmni.T @ src
+        if np.any(skip_mask):
+            bcos = np.asarray(bcos, dtype=float)
+            bcos[skip_mask] = 0.0
+        return np.concatenate([bsin, bcos], axis=0)
+    return bsin
+
+
+def vmec_analytic_terms_from_geometry(
+    *,
+    sample: ExternalBoundarySample,
+    basis: dict[str, Any],
+    bexni: np.ndarray,
+    signgs: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Analytic VMEC terms from ``analyt.f``: `(bvec_analytic, grpmn_analytic)`."""
+
+    mnpd = int(basis["mnpd"])
+    lasym = bool(basis["lasym"])
+    mf = int(basis["mf"])
+    nf = int(basis["nf"])
+    onp = float(basis["onp"])
+    signgs = int(signgs)
+    cmns = np.asarray(basis["cmns"], dtype=float)
+    theta = np.asarray(basis["theta"], dtype=float).reshape(-1)
+    zeta = np.asarray(basis["zeta"], dtype=float).reshape(-1)
+    npts = int(theta.size)
+    bex = np.asarray(bexni, dtype=float).reshape(-1)
+    if bex.size < npts:
+        bex = np.resize(bex, (npts,))
+    else:
+        bex = bex[:npts]
+
+    R = np.asarray(sample.R, dtype=float).reshape(-1)[:npts]
+    Ru = np.asarray(sample.Ru, dtype=float).reshape(-1)[:npts]
+    Rv = np.asarray(sample.Rv, dtype=float).reshape(-1)[:npts]
+    Zu = np.asarray(sample.Zu, dtype=float).reshape(-1)[:npts]
+    Zv = np.asarray(sample.Zv, dtype=float).reshape(-1)[:npts]
+
+    guu_b = Ru * Ru + Zu * Zu
+    guv_b = (Ru * Rv + Zu * Zv) * (2.0 * onp)
+    gvv_b = (Rv * Rv + Zv * Zv + R * R) * (onp * onp)
+
+    adp = guu_b + guv_b + gvv_b
+    adm = guu_b - guv_b + gvv_b
+    cma = gvv_b - guu_b
+    sqrtc = 2.0 * np.sqrt(gvv_b)
+    sqrta = 2.0 * np.sqrt(guu_b)
+    sqad1 = np.sqrt(adp)
+    sqad2 = np.sqrt(adm)
+
+    tlp = (1.0 / sqad1) * np.log((sqad1 * sqrtc + adp + cma) / (sqad1 * sqrta - adp + cma))
+    tlm = (1.0 / sqad2) * np.log((sqad2 * sqrtc + adm + cma) / (sqad2 * sqrta - adm + cma))
+    tlp_prev = np.zeros_like(tlp)
+    tlm_prev = np.zeros_like(tlm)
+    tlpm = tlp + tlm
+
+    bsin = np.zeros((mf + 1, 2 * nf + 1), dtype=float)
+    bcos = np.zeros((mf + 1, 2 * nf + 1), dtype=float) if lasym else None
+    gsin = np.zeros((mf + 1, 2 * nf + 1, npts), dtype=float)
+    gcos = np.zeros((mf + 1, 2 * nf + 1, npts), dtype=float) if lasym else None
+
+    delt1u = adp * adm - cma * cma
+    azp1u = np.zeros_like(adp)
+    azm1u = np.zeros_like(adm)
+    cma11u = np.zeros_like(cma)
+    r1p = np.zeros_like(adp)
+    r1m = np.zeros_like(adm)
+    r0p = np.zeros_like(adp)
+    r0m = np.zeros_like(adm)
+    ra1p = np.zeros_like(adp)
+    ra1m = np.zeros_like(adm)
+    azp1u[:] = 0.0
+    azm1u[:] = 0.0
+    cma11u[:] = 0.0
+
+    # Second-derivative geometry terms (surface.f).
+    ntheta3, nzeta = sample.R.shape
+    nu_full = int(basis.get("nu_full", ntheta3))
+    if ntheta3 * nzeta == npts and ntheta3 > 0 and nzeta > 0:
+        R_red = np.asarray(sample.R, dtype=float)
+        Z_red = np.asarray(sample.Z, dtype=float)
+        Ru_red = np.asarray(sample.Ru, dtype=float)
+        Zu_red = np.asarray(sample.Zu, dtype=float)
+        Rv_red = np.asarray(sample.Rv, dtype=float)
+        Zv_red = np.asarray(sample.Zv, dtype=float)
+        nv = int(nzeta)
+        have_second = (
+            sample.ruu is not None
+            and sample.ruv is not None
+            and sample.rvv is not None
+            and sample.zuu is not None
+            and sample.zuv is not None
+            and sample.zvv is not None
+        )
+        if have_second and np.asarray(sample.ruu).shape == (ntheta3, nv):
+            # Preferred VMEC-equivalent path: second derivatives synthesized
+            # directly from modal coefficients on the reduced surface grid.
+            R_eval = np.asarray(R_red, dtype=float)
+            Ru_eval = np.asarray(Ru_red, dtype=float)
+            Rv_eval = np.asarray(Rv_red, dtype=float)
+            Zu_eval = np.asarray(Zu_red, dtype=float)
+            Zv_eval = np.asarray(Zv_red, dtype=float)
+            ruu = np.asarray(sample.ruu, dtype=float)
+            ruv = np.asarray(sample.ruv, dtype=float)
+            rvv = np.asarray(sample.rvv, dtype=float)
+            zuu = np.asarray(sample.zuu, dtype=float)
+            zuv = np.asarray(sample.zuv, dtype=float)
+            zvv = np.asarray(sample.zvv, dtype=float)
+        else:
+            if (nu_full == ntheta3) or lasym:
+                R2 = np.asarray(R_red, dtype=float)
+                Z2 = np.asarray(Z_red, dtype=float)
+                Ru2 = np.asarray(Ru_red, dtype=float)
+                Zu2 = np.asarray(Zu_red, dtype=float)
+                Rv2 = np.asarray(Rv_red, dtype=float)
+                Zv2 = np.asarray(Zv_red, dtype=float)
+            else:
+                R2 = np.zeros((nu_full, nv), dtype=float)
+                Z2 = np.zeros((nu_full, nv), dtype=float)
+                Ru2 = np.zeros((nu_full, nv), dtype=float)
+                Zu2 = np.zeros((nu_full, nv), dtype=float)
+                Rv2 = np.zeros((nu_full, nv), dtype=float)
+                Zv2 = np.zeros((nu_full, nv), dtype=float)
+                R2[:ntheta3, :] = R_red
+                Z2[:ntheta3, :] = Z_red
+                Ru2[:ntheta3, :] = Ru_red
+                Zu2[:ntheta3, :] = Zu_red
+                Rv2[:ntheta3, :] = Rv_red
+                Zv2[:ntheta3, :] = Zv_red
+                kv_m = (nv - np.arange(nv, dtype=np.int64)) % max(1, nv)
+                for ku in range(1, max(1, ntheta3 - 1)):
+                    km = (nu_full - ku) % max(1, nu_full)
+                    if km < ntheta3:
+                        continue
+                    R2[km, :] = R_red[ku, kv_m]
+                    Z2[km, :] = -Z_red[ku, kv_m]
+                    Ru2[km, :] = -Ru_red[ku, kv_m]
+                    Zu2[km, :] = Zu_red[ku, kv_m]
+                    Rv2[km, :] = -Rv_red[ku, kv_m]
+                    Zv2[km, :] = Zv_red[ku, kv_m]
+
+            ruu, ruv, rvv = spectral_second_derivatives_2d(R2)
+            zuu, zuv, zvv = spectral_second_derivatives_2d(Z2)
+            if (nu_full != ntheta3) and (not lasym):
+                sl = slice(0, ntheta3)
+                R_eval = R2[sl, :]
+                Ru_eval = Ru2[sl, :]
+                Rv_eval = Rv2[sl, :]
+                Zu_eval = Zu2[sl, :]
+                Zv_eval = Zv2[sl, :]
+                ruu = ruu[sl, :]
+                rvv = rvv[sl, :]
+                ruv = ruv[sl, :]
+                zuu = zuu[sl, :]
+                zvv = zvv[sl, :]
+                zuv = zuv[sl, :]
+            else:
+                R_eval = R2
+                Ru_eval = Ru2
+                Rv_eval = Rv2
+                Zu_eval = Zu2
+                Zv_eval = Zv2
+
+        sgn = float(signgs)
+        snr = sgn * R_eval * Zu_eval
+        snv = sgn * (Ru_eval * Zv_eval - Rv_eval * Zu_eval)
+        snz = -sgn * R_eval * Ru_eval
+        auu = 0.5 * (snr * ruu + snz * zuu)
+        auv = (snr * ruv + snv * Ru_eval + snz * zuv) * onp
+        avv = (snv * Rv_eval + 0.5 * (snr * (rvv - R_eval) + snz * zvv)) * (onp * onp)
+        auu = auu.reshape(-1)
+        auv = auv.reshape(-1)
+        avv = avv.reshape(-1)
+        azp1u = auu + auv + avv
+        azm1u = auu - auv + avv
+        cma11u = avv - auu
+        r1p = (azp1u * (delt1u - cma * cma) / adp - azm1u * adp + 2.0 * cma11u * cma) / delt1u
+        r1m = (azm1u * (delt1u - cma * cma) / adm - azp1u * adm + 2.0 * cma11u * cma) / delt1u
+        r0p = (-azp1u * adm * cma / adp - azm1u * cma + 2.0 * cma11u * adm) / delt1u
+        r0m = (-azm1u * adp * cma / adm - azp1u * cma + 2.0 * cma11u * adp) / delt1u
+        ra1p = azp1u / adp
+        ra1m = azm1u / adm
+
+    sign1 = 1.0
+    fl1 = 0.0
+    for l in range(0, mf + nf + 1):
+        fl = fl1
+        slp = (r1p * fl + ra1p) * tlp + r0p * fl * tlp_prev - (r1p + r0p) / sqrtc + sign1 * (r0p - r1p) / sqrta
+        slm = (r1m * fl + ra1m) * tlm + r0m * fl * tlm_prev - (r1m + r0m) / sqrtc + sign1 * (r0m - r1m) / sqrta
+        slpm = slp + slm
+        for nabs in range(0, nf + 1):
+            zv = float(nabs) * zeta
+            cosv = np.cos(zv)
+            sinv = np.sin(zv)
+            for m in range(0, mf + 1):
+                cm = float(cmns[l, m, nabs])
+                if cm == 0.0:
+                    continue
+                mu = float(m) * theta
+                sinu = np.sin(mu)
+                cosu = np.cos(mu)
+                col_p = nabs + nf
+                col_m = (-nabs) + nf
+                if nabs == 0 or m == 0:
+                    sinp = (sinu * cosv - sinv * cosu) * cm
+                    bsin[m, col_p] += np.sum(tlpm * bex * sinp)
+                    gsin[m, col_p, :] += slpm * sinp
+                    if lasym and bcos is not None:
+                        cosp = (cosu * cosv + sinv * sinu) * cm
+                        bcos[m, col_p] += np.sum(tlpm * bex * cosp)
+                        if gcos is not None:
+                            gcos[m, col_p, :] += slpm * cosp
+                else:
+                    sinp0 = sinu * cosv * cm
+                    temp = -cosu * sinv * cm
+                    sinm = sinp0 - temp
+                    sinp = sinp0 + temp
+                    # VMEC analyt.f calls analysesum2 with swapped argument
+                    # order: (slm, tlm, slp, tlp). Preserve this Fortran quirk
+                    # for exact matrix-side parity.
+                    bsin[m, col_p] += np.sum(tlm * bex * sinp)
+                    bsin[m, col_m] += np.sum(tlp * bex * sinm)
+                    gsin[m, col_p, :] += slm * sinp
+                    gsin[m, col_m, :] += slp * sinm
+                    if lasym and bcos is not None:
+                        cosp0 = cosu * cosv * cm
+                        temp2 = sinu * sinv * cm
+                        cosm = cosp0 - temp2
+                        cosp = cosp0 + temp2
+                        bcos[m, col_p] += np.sum(tlm * bex * cosp)
+                        bcos[m, col_m] += np.sum(tlp * bex * cosm)
+                        if gcos is not None:
+                            gcos[m, col_p, :] += slm * cosp
+                            gcos[m, col_m, :] += slp * cosm
+
+        fl1 = fl1 + 1.0
+        fl2 = 2.0 * fl1 - 1.0
+        sign1 = -sign1
+
+        tlp_next = ((sqrtc + sign1 * sqrta) - fl2 * cma * tlp - fl * adm * tlp_prev) / (adp * fl1)
+        tlm_next = ((sqrtc + sign1 * sqrta) - fl2 * cma * tlm - fl * adp * tlm_prev) / (adm * fl1)
+        tlp_prev = tlp
+        tlm_prev = tlm
+        tlp = tlp_next
+        tlm = tlm_next
+        tlpm = tlp + tlm
+
+    out_s = np.zeros((mnpd,), dtype=float)
+    out_c = np.zeros((mnpd,), dtype=float) if lasym else None
+    gr_s = np.zeros((mnpd, npts), dtype=float)
+    gr_c = np.zeros((mnpd, npts), dtype=float) if lasym else None
+    xmpot = np.asarray(basis["xmpot"], dtype=np.int64)
+    n_raw = np.asarray(basis["n_raw"], dtype=np.int64)
+    for j in range(mnpd):
+        m = int(xmpot[j])
+        n = int(n_raw[j])
+        out_s[j] = bsin[m, n + nf]
+        gr_s[j, :] = gsin[m, n + nf, :]
+        if lasym and out_c is not None:
+            out_c[j] = bcos[m, n + nf]
+            if gr_c is not None and gcos is not None:
+                gr_c[j, :] = gcos[m, n + nf, :]
+    if lasym and out_c is not None and gr_c is not None:
+        return np.concatenate([out_s, out_c], axis=0), np.concatenate([gr_s, gr_c], axis=0)
+    return out_s, gr_s
+
+
+def vmec_analytic_bvec_from_geometry(
+    *,
+    sample: ExternalBoundarySample,
+    basis: dict[str, Any],
+    bexni: np.ndarray,
+    signgs: int,
+) -> np.ndarray:
+    """Analytic-source bvec term from VMEC ``analyt.f`` (bvec branch)."""
+
+    bvec, _ = vmec_analytic_terms_from_geometry(sample=sample, basis=basis, bexni=bexni, signgs=signgs)
+    return bvec
+
+
+def solve_vmec_like_mode_from_gsource(
+    *,
+    cache: NestorVmecLikeCache,
+    gsource: np.ndarray,
+    rhs_mode: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Solve VMEC-like dense integral in mode space and return (phi, potvac)."""
+
+    basis = cache.mode_basis
+    amod = cache.mode_matrix
+    if basis is None or amod is None:
+        raise ValueError("missing_mode_cache")
+
+    rhs_eff = np.asarray(rhs_mode, dtype=float) if rhs_mode is not None else vmec_bvec_from_gsource(gsource=gsource, basis=basis)
+    potvac = dense_lu_solve(cache.mode_matrix_lu, np.asarray(amod, dtype=float), np.asarray(rhs_eff, dtype=float))
+
+    sin_phase = np.asarray(basis["sin_phase"], dtype=float)
+    cos_phase = np.asarray(basis["cos_phase"], dtype=float)
+    mnpd = int(basis["mnpd"])
+    if bool(basis["lasym"]):
+        potsin = np.asarray(potvac[:mnpd], dtype=float)
+        potcos = np.asarray(potvac[mnpd : 2 * mnpd], dtype=float)
+        phi_flat = sin_phase @ potsin + cos_phase @ potcos
+    else:
+        potsin = np.asarray(potvac[:mnpd], dtype=float)
+        phi_flat = sin_phase @ potsin
+    phi = phi_flat.reshape(int(cache.ntheta), int(cache.nzeta))
+    phi = phi - float(np.mean(phi))
+    return np.asarray(phi, dtype=float), np.asarray(potvac, dtype=float), np.asarray(rhs_eff, dtype=float)
+
 def env_truthy(name: str, default: bool = False) -> bool:
     raw = os.getenv(name)
     if raw is None:
@@ -652,6 +1639,7 @@ __all__ = [
     "dense_lu_factor",
     "dense_lu_solve",
     "digest_array_for_cache",
+    "ensure_vmec_nonsingular_kernel_tables",
     "env_truthy",
     "jax_nestor_input_signature",
     "jax_nestor_operator_cache_key",
@@ -659,6 +1647,15 @@ __all__ = [
     "jitted_jax_nestor_operator",
     "mapping_cache_signature",
     "solve_vmec_like_dense",
+    "solve_vmec_like_mode_from_gsource",
     "solve_vmec_like_mode_with_jax_nestor_operator",
+    "spectral_second_derivatives_2d",
+    "vmec_analytic_bvec_from_geometry",
+    "vmec_analytic_terms_from_geometry",
+    "vmec_bvec_from_gsource",
+    "vmec_mode_matrix_from_grpmn",
+    "vmec_nonsingular_gsource_from_bexni",
+    "vmec_nonsingular_terms_from_bexni",
+    "vmec_precal_tan_tables",
     "vmec_source_from_gsource",
 ]

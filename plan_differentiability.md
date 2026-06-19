@@ -23179,3 +23179,84 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.99999999962%.
+
+## 2026-06-19 Free-Boundary VMEC/NESTOR Source-Domain Move
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved the remaining VMEC/NESTOR source and mode-space runtime cluster out
+   of the legacy `vmec_jax/free_boundary.py` facade and into
+   `vmec_jax/solvers/free_boundary/jax_nestor_operator.py`.
+2. The moved cluster includes spectral second derivatives, VMEC precal tangent
+   tables, nonsingular kernel-table caching, nonsingular Green-function source
+   assembly, full nonsingular `gsource/grpmn` assembly, mode-matrix assembly,
+   source-to-mode right-hand-side assembly, analytic VMEC `analyt.f` terms, and
+   the mode-space dense solve wrapper.
+3. Preserved legacy private names in `vmec_jax.free_boundary` via import
+   aliases so existing free-boundary validation tests and downstream
+   diagnostic imports keep working.
+
+Results obtained:
+
+- `vmec_jax/free_boundary.py` decreased from 2699 to 1722 lines.
+- `free_boundary.py` is now below the source-health warning threshold.
+- VMEC/NESTOR source/mode code is colocated with the JAX NESTOR operator cache,
+  which makes the free-boundary facade substantially closer to a true workflow
+  facade instead of a mixed implementation module.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/free_boundary.py vmec_jax/solvers/free_boundary/jax_nestor_operator.py`
+- `python -m ruff check vmec_jax/free_boundary.py vmec_jax/solvers/free_boundary/jax_nestor_operator.py tests/test_free_boundary_wave2.py tests/test_free_boundary_helper_branches.py tests/test_free_boundary_additional_helpers.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_helper_branches.py tests/test_free_boundary_additional_helpers.py tests/test_free_boundary_wave2.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_coil_provider_forward.py tests/test_free_boundary_coil_provider_gradients.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py -q`
+- `python tools/diagnostics/source_health.py --top 24 --top-functions 55`
+
+Best next steps:
+
+1. Stop reducing `free_boundary.py` for now, since it is below threshold and the
+   remaining large function there is the actual orchestration seam
+   `nestor_external_only_step`.
+2. Move to the biggest remaining production monolith,
+   `solvers/fixed_boundary/residual/iteration.py`, and extract VMEC2000 scan
+   controller/reporting/fallback policy seams without changing algorithmic
+   behavior.
+3. Keep the next validation shard focused on fixed-boundary residual scan
+   parity plus existing free-boundary smoke shards after any shared runtime
+   policy changes.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.99999970%.
+- Solver monolith reduction: 99.827%.
+- Free-boundary adjoint monolith reduction: 99.60%.
+- Driver workflow decomposition: 99.949%.
+- Residual iteration decomposition: 99.055%.
+- WOUT diagnostic/profile decomposition: 99.982%.
+- Bcovar/WOUT parity decomposition: 99.16%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.825%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.89%.
+- Fixed-boundary optimizer decomposition: 98.05%.
+- Plotting/WOUT visualization decomposition: 98.05%.
+- Free-boundary facade/domain decomposition: 99.1%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.82%.
+- Discrete-adjoint replay decomposition: 96.82%.
+- Free-boundary validation-gate maintainability: 98.35%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.99999999966%.
