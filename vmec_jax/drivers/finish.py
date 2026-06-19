@@ -367,6 +367,22 @@ def maybe_finish_cli_fixed_boundary_run(
     finish_budget_cap = int(max_fallback_budget) if bool(ctx.max_iter_overridden) else None
     finish_budget_used = 0
     accelerated_finish_uses_scan = False if ctx.use_scan is False else True
+
+    def _bounded_finish_budget(requested: int) -> int:
+        if finish_budget_cap is None:
+            return int(requested)
+        remaining = int(finish_budget_cap) - int(finish_budget_used)
+        return 0 if remaining <= 0 else min(int(requested), int(remaining))
+
+    def _record_finish_attempt(trial: Any, *, budget_i: int, mode_i: str) -> tuple[float, bool]:
+        trial_fsq = float(ctx.result_final_fsq(trial.result))
+        trial_conv = bool(ctx.result_meets_requested_ftol(trial.result, ftol=float(requested_ftol)))
+        attempt_budgets.append(int(budget_i))
+        attempt_fsq.append(float(trial_fsq))
+        attempt_converged.append(bool(trial_conv))
+        attempt_modes.append(str(mode_i))
+        return trial_fsq, trial_conv
+
     if (
         bool(ctx.accelerated_mode)
         and str(initial_policy) == "single_grid"
@@ -376,13 +392,9 @@ def maybe_finish_cli_fixed_boundary_run(
         accel_budget_i = int(base_total_budget)
         accel_budget_used = 0
         while int(accel_budget_i) >= 1 and int(accel_budget_used) < int(max_fallback_budget):
-            if finish_budget_cap is not None:
-                remaining_finish_budget = int(finish_budget_cap) - int(finish_budget_used)
-                if remaining_finish_budget <= 0:
-                    break
-                budget_this = min(int(accel_budget_i), int(remaining_finish_budget))
-            else:
-                budget_this = int(accel_budget_i)
+            budget_this = _bounded_finish_budget(accel_budget_i)
+            if int(budget_this) <= 0:
+                break
             prev_best_fsq = float(best_fsq)
             trial = _run_finish_attempt(
                 budget_i=budget_this,
@@ -390,12 +402,7 @@ def maybe_finish_cli_fixed_boundary_run(
                 use_scan_i=bool(accelerated_finish_uses_scan),
                 performance_mode_i=True,
             )
-            trial_fsq = float(ctx.result_final_fsq(trial.result))
-            trial_conv = bool(ctx.result_meets_requested_ftol(trial.result, ftol=float(requested_ftol)))
-            attempt_budgets.append(int(budget_this))
-            attempt_fsq.append(float(trial_fsq))
-            attempt_converged.append(bool(trial_conv))
-            attempt_modes.append("accelerated")
+            trial_fsq, trial_conv = _record_finish_attempt(trial, budget_i=budget_this, mode_i="accelerated")
             accel_budget_used += int(budget_this)
             finish_budget_used += int(budget_this)
             improved = trial_conv or (float(trial_fsq) < float(prev_best_fsq - improvement_floor))
@@ -415,13 +422,9 @@ def maybe_finish_cli_fixed_boundary_run(
     ):
         budget_i = int(base_total_budget)
         while int(budget_i) >= 1:
-            if finish_budget_cap is not None:
-                remaining_finish_budget = int(finish_budget_cap) - int(finish_budget_used)
-                if remaining_finish_budget <= 0:
-                    break
-                budget_this = min(int(budget_i), int(remaining_finish_budget))
-            else:
-                budget_this = int(budget_i)
+            budget_this = _bounded_finish_budget(budget_i)
+            if int(budget_this) <= 0:
+                break
             prev_best_fsq = float(best_fsq)
             trial = _run_finish_attempt(
                 budget_i=budget_this,
@@ -429,12 +432,7 @@ def maybe_finish_cli_fixed_boundary_run(
                 use_scan_i=False,
                 performance_mode_i=False,
             )
-            trial_fsq = float(ctx.result_final_fsq(trial.result))
-            trial_conv = bool(ctx.result_meets_requested_ftol(trial.result, ftol=float(requested_ftol)))
-            attempt_budgets.append(int(budget_this))
-            attempt_fsq.append(float(trial_fsq))
-            attempt_converged.append(bool(trial_conv))
-            attempt_modes.append("parity")
+            trial_fsq, trial_conv = _record_finish_attempt(trial, budget_i=budget_this, mode_i="parity")
             finish_budget_used += int(budget_this)
             improved = trial_conv or (float(trial_fsq) < float(prev_best_fsq - improvement_floor))
             if improved:
