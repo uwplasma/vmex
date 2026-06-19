@@ -146,7 +146,11 @@ Current solver status:
   no-solve ladder, ``ns = 7,9,15`` and ``mpol:ntor = 5:20,6:24``, while keeping
   the target-resolution production claim false until solved/parity evidence is
   added.  ``--case-filter`` accepts comma-separated shell patterns for splitting
-  that target campaign into smaller row subsets.
+  that target campaign into smaller row subsets.  ``--aggregate-json`` reads
+  one or more existing convergence JSON files from split campaigns and writes a
+  de-duplicated aggregate CSV/JSON plus optional plots, which keeps remote
+  target-ladder evidence compact and avoids copying generated WOUT or ``threed1``
+  trees into the repository.
 
 Later phases finish production differentiable optimization APIs, production
 free-boundary LCFS solves, and target-resolution toroidal stellarator-mirror

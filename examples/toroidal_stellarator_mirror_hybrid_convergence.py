@@ -40,6 +40,16 @@ def _parse_case_filters(text: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in str(text).split(",") if item.strip())
 
 
+def _parse_path_args(values: list[str] | None) -> list[Path]:
+    paths: list[Path] = []
+    for value in values or []:
+        for item in str(value).split(","):
+            item = item.strip()
+            if item:
+                paths.append(Path(item).expanduser())
+    return paths
+
+
 def _case_matches_filters(case: str, filters: tuple[str, ...]) -> bool:
     return not filters or any(fnmatch.fnmatchcase(case, pattern) for pattern in filters)
 
@@ -319,6 +329,7 @@ _CSV_COLUMNS = (
     "vmec2000_wout",
     "vmec2000_threed1",
     "vmec2000_error",
+    "aggregate_source_json",
 )
 
 
@@ -864,6 +875,166 @@ def _write_parity_component_plot(rows: list[dict[str, object]], *, outdir: Path)
     return str(path)
 
 
+def _write_convergence_figures(rows: list[dict[str, object]], *, outdir: Path) -> dict[str, str]:
+    figures: dict[str, str] = {}
+    summary_rows = [
+        row
+        for row in rows
+        if row.get("best_fsq") is not None
+        or row.get("final_fsq") is not None
+        or row.get("max_boundary_fit_error") is not None
+    ]
+    if summary_rows:
+        figures["convergence"] = _write_summary_plot(summary_rows, outdir=outdir)
+    orientation_plot = _write_orientation_plot(rows, outdir=outdir)
+    if orientation_plot is not None:
+        figures["orientation"] = orientation_plot
+    fsq_history_plot = _write_fsq_history_plot(rows, outdir=outdir)
+    if fsq_history_plot is not None:
+        figures["fsq_history"] = fsq_history_plot
+    step_plot = _write_step_diagnostic_plot(rows, outdir=outdir)
+    if step_plot is not None:
+        figures["step_diagnostics"] = step_plot
+    profile_plot = _write_profile_plots(rows, outdir=outdir)
+    if profile_plot is not None:
+        figures["profiles"] = profile_plot
+    parity_plot = _write_parity_component_plot(rows, outdir=outdir)
+    if parity_plot is not None:
+        figures["parity_components"] = parity_plot
+    return figures
+
+
+def _finite_row_values(rows: list[dict[str, object]], key: str) -> list[float]:
+    values: list[float] = []
+    for row in rows:
+        value = row.get(key)
+        if value is None:
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(number):
+            values.append(number)
+    return values
+
+
+def _range_or_none(values: list[float]) -> dict[str, float | None]:
+    if not values:
+        return {"min": None, "max": None}
+    return {"min": float(min(values)), "max": float(max(values))}
+
+
+def _row_sort_key(row: dict[str, object]) -> tuple[str, int, int, int, str]:
+    def _int_value(name: str) -> int:
+        try:
+            return int(row.get(name))
+        except (TypeError, ValueError):
+            return 10**9
+
+    return (
+        str(row.get("shape_case", "")),
+        _int_value("ns"),
+        _int_value("mpol"),
+        _int_value("ntor"),
+        str(row.get("case", "")),
+    )
+
+
+def _aggregate_metrics(rows: list[dict[str, object]]) -> dict[str, object]:
+    direct_ratio = _range_or_none(_finite_row_values(rows, "direct_initial_fsq_ratio_vmec2000"))
+    best_fsq = _range_or_none(_finite_row_values(rows, "best_fsq"))
+    final_fsq = _range_or_none(_finite_row_values(rows, "final_fsq"))
+    vmec2000_final_fsq = _range_or_none(_finite_row_values(rows, "vmec2000_final_fsq"))
+    vmec2000_rows = [row for row in rows if bool(row.get("ran_vmec2000"))]
+    return {
+        "row_count": len(rows),
+        "ran_solve_rows": sum(1 for row in rows if bool(row.get("ran_solve"))),
+        "vmec2000_rows": len(vmec2000_rows),
+        "vmec2000_returncode_zero_rows": sum(
+            1 for row in vmec2000_rows if row.get("vmec2000_returncode") == 0
+        ),
+        "vmec_jax_converged_rows": sum(1 for row in rows if bool(row.get("converged"))),
+        "vmec_jax_strict_converged_rows": sum(1 for row in rows if bool(row.get("converged_strict"))),
+        "direct_initial_fsq_ratio_vmec2000_min": direct_ratio["min"],
+        "direct_initial_fsq_ratio_vmec2000_max": direct_ratio["max"],
+        "best_fsq_min": best_fsq["min"],
+        "best_fsq_max": best_fsq["max"],
+        "final_fsq_min": final_fsq["min"],
+        "final_fsq_max": final_fsq["max"],
+        "vmec2000_final_fsq_min": vmec2000_final_fsq["min"],
+        "vmec2000_final_fsq_max": vmec2000_final_fsq["max"],
+    }
+
+
+def _aggregate_convergence_jsons(
+    paths: list[Path],
+    *,
+    outdir: Path,
+    no_plots: bool,
+) -> Path:
+    if not paths:
+        raise ValueError("at least one --aggregate-json path is required")
+    outdir.mkdir(parents=True, exist_ok=True)
+    rows_by_case: dict[str, dict[str, object]] = {}
+    duplicate_cases: list[str] = []
+    source_summaries: list[dict[str, object]] = []
+    for source_path in paths:
+        path = source_path.expanduser().resolve()
+        with path.open() as file_obj:
+            source = json.load(file_obj)
+        if not isinstance(source, dict):
+            raise ValueError(f"{path} must contain a JSON object")
+        source_rows = source.get("rows")
+        if not isinstance(source_rows, list):
+            raise ValueError(f"{path} must contain a rows list")
+        source_summaries.append(
+            {
+                "path": str(path),
+                "row_count": len(source_rows),
+                "resolution_preset": source.get("resolution_preset"),
+                "target_resolution_ladder": source.get("target_resolution_ladder"),
+                "case_filters": source.get("case_filters", []),
+            }
+        )
+        for index, source_row in enumerate(source_rows):
+            if not isinstance(source_row, dict):
+                raise ValueError(f"{path} row {index} must be a JSON object")
+            case = str(source_row.get("case", "")).strip()
+            if not case:
+                raise ValueError(f"{path} row {index} is missing a case name")
+            if case in rows_by_case:
+                duplicate_cases.append(case)
+            row = dict(source_row)
+            row["aggregate_source_json"] = str(path)
+            rows_by_case[case] = row
+    rows = sorted(rows_by_case.values(), key=_row_sort_key)
+    if not rows:
+        raise ValueError("aggregated convergence JSONs contained no rows")
+    csv_path = _write_rows_csv(rows, outdir=outdir)
+    summary = {
+        "aggregate_schema": "toroidal_stellarator_mirror_hybrid_convergence_aggregate.v1",
+        "source_jsons": [str(path.expanduser().resolve()) for path in paths],
+        "source_summaries": source_summaries,
+        "duplicate_cases_replaced": sorted(set(duplicate_cases)),
+        "resolution_presets": sorted({str(row.get("resolution_preset", "")) for row in rows}),
+        "target_resolution_ladder": all(bool(row.get("target_resolution_ladder")) for row in rows),
+        "target_resolution_promotion_claim": all(
+            bool(row.get("target_resolution_promotion_claim")) for row in rows
+        ),
+        "case_count": len(rows),
+        "rows": rows,
+        "aggregate_metrics": _aggregate_metrics(rows),
+        "csv": csv_path,
+        "figures": {},
+    }
+    if not no_plots:
+        summary["figures"] = _write_convergence_figures(rows, outdir=outdir / "figures")
+    summary_path = outdir / "toroidal_stellarator_mirror_hybrid_convergence_aggregate.json"
+    summary_path.write_text(json.dumps(summary, indent=2) + "\n")
+    return summary_path
+
+
 def _row_case_name(*, ns: int, mpol: int, ntor: int, shape_case: str = "custom") -> str:
     base = f"ns{int(ns):03d}_mpol{int(mpol):02d}_ntor{int(ntor):02d}"
     return base if shape_case == "custom" else f"{shape_case}_{base}"
@@ -939,11 +1110,27 @@ def main() -> None:
     parser.add_argument("--run-vmec2000", action="store_true")
     parser.add_argument("--vmec2000-exec", type=str, default="")
     parser.add_argument("--vmec2000-timeout-s", type=float, default=120.0)
+    parser.add_argument(
+        "--aggregate-json",
+        nargs="+",
+        default=None,
+        metavar="PATH",
+        help="Aggregate one or more existing convergence JSON files instead of running new cases.",
+    )
     parser.add_argument("--no-plots", action="store_true")
     args = parser.parse_args()
 
     outdir = Path(args.outdir).expanduser().resolve()
     outdir.mkdir(parents=True, exist_ok=True)
+    aggregate_paths = _parse_path_args(args.aggregate_json)
+    if args.aggregate_json is not None:
+        summary_path = _aggregate_convergence_jsons(
+            aggregate_paths,
+            outdir=outdir,
+            no_plots=bool(args.no_plots),
+        )
+        print(summary_path)
+        return
     resolution_preset = _resolution_preset(args.resolution_preset)
     if args.resolution_preset == "manual":
         ns_values = _parse_ints(args.ns_array)
@@ -1324,22 +1511,7 @@ def main() -> None:
         "figures": {},
     }
     if not bool(args.no_plots):
-        summary["figures"]["convergence"] = _write_summary_plot(rows, outdir=outdir / "figures")
-        orientation_plot = _write_orientation_plot(rows, outdir=outdir / "figures")
-        if orientation_plot is not None:
-            summary["figures"]["orientation"] = orientation_plot
-        fsq_history_plot = _write_fsq_history_plot(rows, outdir=outdir / "figures")
-        if fsq_history_plot is not None:
-            summary["figures"]["fsq_history"] = fsq_history_plot
-        step_plot = _write_step_diagnostic_plot(rows, outdir=outdir / "figures")
-        if step_plot is not None:
-            summary["figures"]["step_diagnostics"] = step_plot
-        profile_plot = _write_profile_plots(rows, outdir=outdir / "figures")
-        if profile_plot is not None:
-            summary["figures"]["profiles"] = profile_plot
-        parity_plot = _write_parity_component_plot(rows, outdir=outdir / "figures")
-        if parity_plot is not None:
-            summary["figures"]["parity_components"] = parity_plot
+        summary["figures"] = _write_convergence_figures(rows, outdir=outdir / "figures")
 
     summary_path = outdir / "toroidal_stellarator_mirror_hybrid_convergence.json"
     summary_path.write_text(json.dumps(summary, indent=2) + "\n")

@@ -460,6 +460,149 @@ def test_toroidal_hybrid_convergence_example_filters_target_preset_cases(tmp_pat
     assert all("ns015" in row["case"] for row in rows)
 
 
+def test_toroidal_hybrid_convergence_example_aggregates_chunk_jsons(tmp_path: Path):
+    chunk_a = tmp_path / "chunk_a.json"
+    chunk_b = tmp_path / "chunk_b.json"
+    chunk_a.write_text(
+        json.dumps(
+            {
+                "resolution_preset": "target",
+                "target_resolution_ladder": True,
+                "case_filters": ["*ns007*", "*ns009*"],
+                "rows": [
+                    {
+                        "case": "ns009_mpol05_ntor20",
+                        "shape_case": "custom",
+                        "resolution_preset": "target",
+                        "target_resolution_ladder": True,
+                        "target_resolution_promotion_claim": False,
+                        "ns": 9,
+                        "mpol": 5,
+                        "ntor": 20,
+                        "ran_solve": True,
+                        "ran_vmec2000": True,
+                        "vmec2000_returncode": 0,
+                        "direct_initial_fsq_ratio_vmec2000": 1.006,
+                        "best_fsq": 0.04,
+                        "final_fsq": 0.05,
+                        "vmec2000_final_fsq": 0.009,
+                        "max_boundary_fit_error": 1.0e-14,
+                    },
+                    {
+                        "case": "ns007_mpol05_ntor20",
+                        "shape_case": "custom",
+                        "resolution_preset": "target",
+                        "target_resolution_ladder": True,
+                        "target_resolution_promotion_claim": False,
+                        "ns": 7,
+                        "mpol": 5,
+                        "ntor": 20,
+                        "ran_solve": True,
+                        "ran_vmec2000": True,
+                        "vmec2000_returncode": 1,
+                        "direct_initial_fsq_ratio_vmec2000": 9.0,
+                        "best_fsq": 9.0,
+                        "final_fsq": 9.0,
+                        "vmec2000_final_fsq": 9.0,
+                        "max_boundary_fit_error": 1.0e-14,
+                    },
+                ],
+            }
+        )
+        + "\n"
+    )
+    chunk_b.write_text(
+        json.dumps(
+            {
+                "resolution_preset": "target",
+                "target_resolution_ladder": True,
+                "case_filters": ["*ns007*", "*ns015*"],
+                "rows": [
+                    {
+                        "case": "ns007_mpol05_ntor20",
+                        "shape_case": "custom",
+                        "resolution_preset": "target",
+                        "target_resolution_ladder": True,
+                        "target_resolution_promotion_claim": False,
+                        "ns": 7,
+                        "mpol": 5,
+                        "ntor": 20,
+                        "ran_solve": True,
+                        "ran_vmec2000": True,
+                        "vmec2000_returncode": 0,
+                        "direct_initial_fsq_ratio_vmec2000": 1.002,
+                        "best_fsq": 0.03,
+                        "final_fsq": 0.04,
+                        "vmec2000_final_fsq": 0.008,
+                        "max_boundary_fit_error": 1.0e-14,
+                    },
+                    {
+                        "case": "ns015_mpol06_ntor24",
+                        "shape_case": "custom",
+                        "resolution_preset": "target",
+                        "target_resolution_ladder": True,
+                        "target_resolution_promotion_claim": False,
+                        "ns": 15,
+                        "mpol": 6,
+                        "ntor": 24,
+                        "ran_solve": True,
+                        "ran_vmec2000": True,
+                        "vmec2000_returncode": 0,
+                        "direct_initial_fsq_ratio_vmec2000": 1.004,
+                        "best_fsq": 0.06,
+                        "final_fsq": 0.12,
+                        "vmec2000_final_fsq": 0.022,
+                        "max_boundary_fit_error": 1.0e-14,
+                    },
+                ],
+            }
+        )
+        + "\n"
+    )
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "examples/toroidal_stellarator_mirror_hybrid_convergence.py",
+            "--outdir",
+            str(tmp_path / "aggregate"),
+            "--aggregate-json",
+            str(chunk_a),
+            str(chunk_b),
+            "--no-plots",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    summary = json.loads(Path(completed.stdout.strip()).read_text())
+    rows = summary["rows"]
+    assert summary["aggregate_schema"] == "toroidal_stellarator_mirror_hybrid_convergence_aggregate.v1"
+    assert summary["case_count"] == 3
+    assert summary["duplicate_cases_replaced"] == ["ns007_mpol05_ntor20"]
+    assert [row["case"] for row in rows] == [
+        "ns007_mpol05_ntor20",
+        "ns009_mpol05_ntor20",
+        "ns015_mpol06_ntor24",
+    ]
+    assert rows[0]["vmec2000_returncode"] == 0
+    assert Path(rows[0]["aggregate_source_json"]) == chunk_b.resolve()
+    metrics = summary["aggregate_metrics"]
+    assert metrics["row_count"] == 3
+    assert metrics["ran_solve_rows"] == 3
+    assert metrics["vmec2000_returncode_zero_rows"] == 3
+    assert metrics["direct_initial_fsq_ratio_vmec2000_min"] == pytest.approx(1.002)
+    assert metrics["direct_initial_fsq_ratio_vmec2000_max"] == pytest.approx(1.006)
+    assert metrics["best_fsq_min"] == pytest.approx(0.03)
+    assert metrics["final_fsq_max"] == pytest.approx(0.12)
+    assert Path(summary["csv"]).exists()
+    with Path(summary["csv"]).open(newline="") as file_obj:
+        csv_rows = list(csv.DictReader(file_obj))
+    assert [row["case"] for row in csv_rows] == [row["case"] for row in rows]
+    assert Path(csv_rows[0]["aggregate_source_json"]) == chunk_b.resolve()
+
+
 def test_toroidal_hybrid_convergence_example_writes_nonblank_no_solve_plots(tmp_path: Path):
     image = pytest.importorskip("matplotlib.image")
     completed = subprocess.run(
@@ -548,6 +691,7 @@ def test_toroidal_hybrid_convergence_history_summary_uses_iteration_labels():
     assert summary["final_fsq"] == 5.0
     assert module._parse_shape_cases("default, sharp") == ["default", "sharp"]
     assert module._parse_case_filters("a*, b") == ("a*", "b")
+    assert module._parse_path_args(["a,b", "c"]) == [Path("a"), Path("b"), Path("c")]
     assert module._case_matches_filters("sharp_ns015_mpol05_ntor20", ("*ns015*",))
     assert not module._case_matches_filters("sharp_ns009_mpol05_ntor20", ("*ns015*",))
     np.testing.assert_array_equal(

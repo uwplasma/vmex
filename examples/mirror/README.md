@@ -128,7 +128,10 @@ sharpened preset. Pass ``--resolution-preset smoke``, ``promotion``, or
 inputs without claiming production convergence until solved/parity evidence is
 added. Use ``--case-filter '*ns015*'`` or another comma-separated shell pattern
 to run a subset of the generated case names when splitting the target campaign
-across machines.
+across machines. After split campaigns finish, pass ``--aggregate-json`` one or
+more existing convergence JSON files to merge chunked rows, de-duplicate by
+case, write a compact aggregate CSV/JSON report, and optionally regenerate the
+residual/history plots without rerunning VMEC/JAX or VMEC2000.
 
 The root-level ``examples/mirror_free_boundary_circular_coils.py`` script is a
 free-boundary planning fixture. It builds ESSOS-compatible circular-loop direct
