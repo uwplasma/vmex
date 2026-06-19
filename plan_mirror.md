@@ -23979,3 +23979,142 @@ No user input is needed for the next remote target-ladder chunks, but disk
 space on office is tight (`/home` was 99% used during the probe), so large
 plotted or full-history campaigns should be run in filtered chunks and cleaned
 up after extracting compact metrics.
+
+---
+## 200. Office GPU Target-Ladder Six-Row Parity Audit
+
+### Steps taken
+
+- Continued the M199 office target-ladder probe into the full named target
+  ladder, still using filtered chunks to control disk/runtime.
+- Ran three filtered target chunks on office:
+  - `--case-filter "*ns007*"`;
+  - `--case-filter "*ns009*"`;
+  - `--case-filter "*ns015*"`.
+- Each chunk used:
+  - `--resolution-preset target`;
+  - `--run-solve`;
+  - `--run-vmec2000`;
+  - `--max-iter 3`;
+  - `--niter 25`;
+  - `--nstep 1`;
+  - `--ftol 1e-6`;
+  - `--no-plots`.
+- Extracted compact JSON metrics over SSH and left all generated outputs on
+  office under ignored `results/` directories.
+- Checked the remote result-tree sizes and available disk after the runs.
+
+### Results obtained
+
+All six target-ladder rows completed with VMEC2000 return code `0`.
+
+| case | VMEC/JAX final fsq | VMEC/JAX best fsq | VMEC2000 initial fsq | VMEC2000 final fsq | direct-initial / VMEC2000 initial |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `ns007_mpol05_ntor20` | `0.03769366816533995` | `0.03325359464186601` | `0.1078` | `0.00797` | `1.0059287608897773` |
+| `ns007_mpol06_ntor24` | `0.06834814572298939` | `0.03997196508976027` | `0.4521` | `0.01985` | `1.0035103011877164` |
+| `ns009_mpol05_ntor20` | `0.04212371799593974` | `0.0373280603814346` | `0.11149999999999999` | `0.008560000000000002` | `1.006208103367928` |
+| `ns009_mpol06_ntor24` | `0.07288955131418487` | `0.043329639696754574` | `0.46709999999999996` | `0.020710000000000003` | `1.002122976587009` |
+| `ns015_mpol05_ntor20` | `0.056153955478579064` | `0.023020570375674353` | `0.1162` | `0.010620000000000001` | `1.006374048260763` |
+| `ns015_mpol06_ntor24` | `0.12092504641171972` | `0.06708267139943355` | `0.48469999999999996` | `0.02212` | `1.0035506240728607` |
+
+Additional observations:
+
+- VMEC/JAX ran exactly `3` iterations for each row and did not converge under
+  these intentionally short settings.
+- VMEC2000 parsed `25` rows for every row because `NSTEP=1` and `NITER_ARRAY=25`.
+- VMEC2000 final fsq values were lower than the three-iteration VMEC/JAX final
+  fsq values in this short campaign.
+- Direct-initial VMEC/JAX residuals agree with the VMEC2000 initial row to
+  roughly `0.2%` to `0.6%` across the target ladder, which is a strong
+  initialization/parity signal.
+- Result directories on office are compact:
+  - `ns007` chunk: `1.6M`;
+  - `ns009` chunk: `1.9M`;
+  - `ns015` chunk: `3.1M`.
+- Office `/home` remained tight but usable: about `15G` free after the runs.
+
+### Interpretation
+
+- The full target-ladder campaign plumbing is now verified: every target row
+  runs through VMEC/JAX and VMEC2000 from the draft branch on office.
+- The direct-initial parity signal remains consistent across both target mode
+  pairs and all three `ns` levels.
+- This is still not a target-resolution convergence claim.  The VMEC/JAX side
+  was deliberately limited to three iterations, so the next campaign needs
+  larger iteration budgets and should inspect convergence trajectories rather
+  than only final scalars.
+
+### How it was tested
+
+Representative command pattern run on office:
+
+```bash
+ssh office 'cd /home/rjorge/local/vmec_mirror && PYTHONPATH=$PWD /home/rjorge/venvs/vmec_jax_gpu/bin/python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir /home/rjorge/local/vmec_mirror/results/toroidal_hybrid_target_ns007_chunk_vmec2000 \
+  --resolution-preset target \
+  --case-filter "*ns007*" \
+  --ntheta-fit 64 \
+  --nzeta-fit 64 \
+  --run-solve \
+  --max-iter 3 \
+  --niter 25 \
+  --nstep 1 \
+  --ftol 1e-6 \
+  --run-vmec2000 \
+  --vmec2000-exec /home/rjorge/vmec2000/_skbuild/linux-x86_64-3.11/cmake-install/bin/xvmec \
+  --vmec2000-timeout-s 120 \
+  --no-plots'
+```
+
+The same command was repeated with `*ns009*` and `*ns015*` filters and
+matching output directories.  Compact metrics were extracted from the resulting
+JSON files.  No generated result files were copied into the git repository.
+
+### File structure and best-practice notes
+
+- This is a plan-only evidence checkpoint.
+- Remote generated outputs stay under:
+  `/home/rjorge/local/vmec_mirror/results/toroidal_hybrid_target_*_chunk_vmec2000`.
+- No local source, test, docs, or tracked artifact changes were required for
+  this evidence run.
+
+### Best next steps
+
+1. Commit and push M200.
+2. Update the draft PR body with section 200 and the six-row target-ladder
+   audit result.
+3. Inspect only failed CI jobs after the push.
+4. Run a second target campaign with larger VMEC/JAX iteration budgets and
+   `--full-solver-diagnostics` for at least the two `mpol:ntor=5:20` rows, then
+   decide whether solver settings or initialization policy need adjustment
+   before running all six rows to a strict convergence target.
+
+### Completion percentages after M200
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `95%`.
+- Fixed-boundary axisymmetric solve: `96%`.
+- Residual Newton / preconditioning: `96%`.
+- Two-coil and manufactured validation: `95%`.
+- Finite-current pitch validation: `94%`.
+- Plotting and `vmec --plot` mirror support: `99%`.
+- I/O schema and docs: `100%`.
+- Differentiable solved-state API: `97%`.
+- Mirror-Boozer-like diagnostics: `94%`.
+- Free-boundary mirror lane: `99.3%` overall for the current diagnostic/reduced
+  solver scope, with production LCFS convergence still explicitly deferred.
+- Straight-axis hybrid support fixture lane: `100%` for support-fixture scope.
+- Toroidal stellarator-mirror hybrid lane: `98.5%`, with target-ladder
+  VMEC/JAX and VMEC2000 execution verified for all six rows; full
+  target-ladder convergence evidence remains pending.
+- ESSOS circular-coil mirror beta scan: `99%`.
+- Public API/source simplification: `100%` for the current mirror package
+  structure.
+- PR merge readiness overall: `99.5%`, pending GitHub checks and explicit
+  review decision on deferred production lanes.
+
+### User input needed
+
+No user input is needed for the next remote campaign.  Disk space on office is
+still tight, so the next runs should keep `--no-plots` unless plots are needed
+for a specific diagnostic row.
