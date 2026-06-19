@@ -200,6 +200,122 @@ def minimal_wout_symmetric_nyquist_coefficients(
     )
 
 
+def minimal_wout_lasym_nyquist_coefficients(
+    *,
+    bc: Any,
+    bsubu_out: np.ndarray,
+    bsubv_out: np.ndarray,
+    bsupu_out: np.ndarray,
+    bsupv_out: np.ndarray,
+    bsubs_full: np.ndarray,
+    bsubv_asym_source: np.ndarray | None,
+    pres: np.ndarray,
+    ns: int,
+    mpol: int,
+    ntor: int,
+    modes: ModeTable,
+    trig: Any,
+    use_loop: bool,
+) -> SymmetricNyquistCoefficientPayload:
+    """Return VMEC ``wrout`` Nyquist coefficients for ``LASYM = T``."""
+
+    pres_h = np.asarray(pres, dtype=float)[:, None, None]
+    bmag = np.sqrt(2.0 * np.abs(np.asarray(bc.bsq) - pres_h))
+    sqrtg = np.asarray(bc.jac.sqrtg)
+    bsubu_sym, bsubu_asym = vmec_symoutput_split(f=bsubu_out, trig=trig)
+    bsubv_sym, bsubv_asym = vmec_symoutput_split(f=bsubv_out, trig=trig)
+    if bsubv_asym_source is not None:
+        _, bsubv_asym = vmec_symoutput_split(f=bsubv_asym_source, trig=trig)
+    bsupu_sym, bsupu_asym = vmec_symoutput_split(f=bsupu_out, trig=trig)
+    bsupv_sym, bsupv_asym = vmec_symoutput_split(f=bsupv_out, trig=trig)
+    bsubs_sym, bsubs_asym = vmec_symoutput_split(f=bsubs_full, trig=trig, reversed_sym=True)
+    bmag_sym, bmag_asym = vmec_symoutput_split(f=bmag, trig=trig)
+    sqrtg_sym, sqrtg_asym = vmec_symoutput_split(f=sqrtg, trig=trig)
+    if use_loop:
+        sym_coeffs = vmec_wrout_nyquist_lasym_loop(
+            bsq=bmag_sym,
+            gsqrt=sqrtg_sym,
+            bsubu=bsubu_sym,
+            bsubv=bsubv_sym,
+            bsubs=bsubs_sym,
+            bsupu=bsupu_sym,
+            bsupv=bsupv_sym,
+            modes=modes,
+            trig=trig,
+        )
+        asym_coeffs = vmec_wrout_nyquist_lasym_loop(
+            bsq=bmag_asym,
+            gsqrt=sqrtg_asym,
+            bsubu=bsubu_asym,
+            bsubv=bsubv_asym,
+            bsubs=bsubs_asym,
+            bsupu=bsupu_asym,
+            bsupv=bsupv_asym,
+            modes=modes,
+            trig=trig,
+        )
+        gmnc, bmnc, bsubumnc, bsubvmnc, bsubsmns, bsupumnc, bsupvmnc = (
+            sym_coeffs[key]
+            for key in ("gmnc", "bmnc", "bsubumnc", "bsubvmnc", "bsubsmns", "bsupumnc", "bsupvmnc")
+        )
+        gmns, bmns, bsubumns, bsubvmns, bsubsmnc, bsupumns, bsupvmns = (
+            asym_coeffs[key]
+            for key in ("gmns", "bmns", "bsubumns", "bsubvmns", "bsubsmnc", "bsupumns", "bsupvmns")
+        )
+    else:
+        gmnc = vmec_wrout_nyquist_cos_coeffs(f=sqrtg_sym, modes=modes, trig=trig)
+        bmnc = vmec_wrout_nyquist_cos_coeffs(f=bmag_sym, modes=modes, trig=trig)
+        bsubumnc = vmec_wrout_nyquist_cos_coeffs(f=bsubu_sym, modes=modes, trig=trig)
+        bsubvmnc = vmec_wrout_nyquist_cos_coeffs(f=bsubv_sym, modes=modes, trig=trig)
+        bsupumnc = vmec_wrout_nyquist_cos_coeffs(f=bsupu_sym, modes=modes, trig=trig)
+        bsupvmnc = vmec_wrout_nyquist_cos_coeffs(f=bsupv_sym, modes=modes, trig=trig)
+        bsubsmns = vmec_wrout_nyquist_sin_coeffs(f=bsubs_sym, modes=modes, trig=trig)
+        gmns = vmec_wrout_nyquist_sin_coeffs(f=sqrtg_asym, modes=modes, trig=trig)
+        bmns = vmec_wrout_nyquist_sin_coeffs(f=bmag_asym, modes=modes, trig=trig)
+        bsubumns = vmec_wrout_nyquist_sin_coeffs(f=bsubu_asym, modes=modes, trig=trig)
+        bsubvmns = vmec_wrout_nyquist_sin_coeffs(f=bsubv_asym, modes=modes, trig=trig)
+        bsupumns = vmec_wrout_nyquist_sin_coeffs(f=bsupu_asym, modes=modes, trig=trig)
+        bsupvmns = vmec_wrout_nyquist_sin_coeffs(f=bsupv_asym, modes=modes, trig=trig)
+        bsubsmnc = vmec_wrout_nyquist_cos_coeffs(f=bsubs_asym, modes=modes, trig=trig)
+
+    m_mask = np.asarray(modes.m, dtype=int)
+    n_mask = np.asarray(modes.n, dtype=int)
+    mask_bsub = (m_mask >= int(mpol)) | (np.abs(n_mask) > int(ntor))
+    if np.any(mask_bsub):
+        bsubumnc[:, mask_bsub] = 0.0
+        bsubumns[:, mask_bsub] = 0.0
+        bsubvmnc[:, mask_bsub] = 0.0
+        bsubvmns[:, mask_bsub] = 0.0
+    bsubumnc, bsubvmnc, bsubumns, bsubvmns = vmec_wrout_lasym_bsubuv_output_scale(
+        bsubumnc=bsubumnc,
+        bsubvmnc=bsubvmnc,
+        bsubumns=bsubumns,
+        bsubvmns=bsubvmns,
+    )
+    for arr in (gmnc, bmnc, bsubumnc, bsubvmnc, bsupumnc, bsupvmnc, gmns, bmns, bsubumns, bsubvmns, bsupumns, bsupvmns):
+        if arr.shape[0] > 0:
+            arr[0, :] = 0.0
+    if (not use_loop) and (int(ns) > 2):
+        bsubsmns[0, :] = 2.0 * bsubsmns[1, :] - bsubsmns[2, :]
+        bsubsmnc[0, :] = 2.0 * bsubsmnc[1, :] - bsubsmnc[2, :]
+    return SymmetricNyquistCoefficientPayload(
+        gmnc=gmnc,
+        gmns=gmns,
+        bsupumnc=bsupumnc,
+        bsupumns=bsupumns,
+        bsupvmnc=bsupvmnc,
+        bsupvmns=bsupvmns,
+        bsubumnc=bsubumnc,
+        bsubumns=bsubumns,
+        bsubvmnc=bsubvmnc,
+        bsubvmns=bsubvmns,
+        bsubsmns=bsubsmns,
+        bsubsmnc=bsubsmnc,
+        bmnc=bmnc,
+        bmns=bmns,
+    )
+
+
 def vmec_symoutput_split(
     *,
     f: np.ndarray,

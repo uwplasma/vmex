@@ -58,6 +58,7 @@ from .io.wout.netcdf import (
 )
 from .io.wout.nyquist import (
     apply_nyquist_half_weight as _apply_nyquist_half_weight,  # noqa: F401 - compatibility export
+    minimal_wout_lasym_nyquist_coefficients,
     minimal_wout_symmetric_nyquist_coefficients,
     vmec_jxbforce_cos_coeffs as _vmec_jxbforce_cos_coeffs,  # noqa: F401 - compatibility export
     vmec_jxbforce_sin_coeffs as _vmec_jxbforce_sin_coeffs,  # noqa: F401 - compatibility export
@@ -65,10 +66,10 @@ from .io.wout.nyquist import (
     vmec_symforce_apply as _vmec_symforce_apply,
     vmec_symoutput_expand as _vmec_symoutput_expand,
     vmec_symoutput_split as _vmec_symoutput_split,
-    vmec_wrout_lasym_bsubuv_output_scale as _vmec_wrout_lasym_bsubuv_output_scale,
+    vmec_wrout_lasym_bsubuv_output_scale as _vmec_wrout_lasym_bsubuv_output_scale,  # noqa: F401 - compatibility export
     vmec_wrout_nyquist_cos_coeffs as _vmec_wrout_nyquist_cos_coeffs,
-    vmec_wrout_nyquist_lasym_loop as _vmec_wrout_nyquist_lasym_loop,
-    vmec_wrout_nyquist_sin_coeffs as _vmec_wrout_nyquist_sin_coeffs,
+    vmec_wrout_nyquist_lasym_loop as _vmec_wrout_nyquist_lasym_loop,  # noqa: F401 - compatibility export
+    vmec_wrout_nyquist_sin_coeffs as _vmec_wrout_nyquist_sin_coeffs,  # noqa: F401 - compatibility export
     vmec_wrout_nyquist_sin_coeffs_loop as _vmec_wrout_nyquist_sin_coeffs_loop,  # noqa: F401 - compatibility export
     vmec_wrout_nyquist_synthesis as _vmec_wrout_nyquist_synthesis,  # noqa: F401 - compatibility export
 )
@@ -1341,10 +1342,6 @@ def wout_minimal_from_fixed_boundary(
                 )
             bsubu_diag = np.asarray(bsubu_out, dtype=float)
             bsubv_diag = np.asarray(bsubv_out, dtype=float)
-        pres_h = np.asarray(pres, dtype=float)[:, None, None]
-        bmag = np.sqrt(2.0 * np.abs(np.asarray(bc.bsq) - pres_h))
-        sqrtg = np.asarray(bc.jac.sqrtg)
-
         _wout_debug_helpers.dump_bsub_pre_sym_if_requested(
             trig=trig,
             bsubu=bsubu_out,
@@ -1353,90 +1350,26 @@ def wout_minimal_from_fixed_boundary(
             bsupv=bsupv_out,
             bsubs=bsubs_full,
         )
-
-        bsubu_sym, bsubu_asym = _vmec_symoutput_split(f=bsubu_out, trig=trig)
-        bsubv_sym, bsubv_asym = _vmec_symoutput_split(f=bsubv_out, trig=trig)
-        if bsubv_lasym_asym_source is not None:
-            _, bsubv_asym = _vmec_symoutput_split(f=bsubv_lasym_asym_source, trig=trig)
-        bsupu_sym, bsupu_asym = _vmec_symoutput_split(f=bsupu_out, trig=trig)
-        bsupv_sym, bsupv_asym = _vmec_symoutput_split(f=bsupv_out, trig=trig)
-        bsubs_sym, bsubs_asym = _vmec_symoutput_split(f=bsubs_full, trig=trig, reversed_sym=True)
-        bmag_sym, bmag_asym = _vmec_symoutput_split(f=bmag, trig=trig)
-        sqrtg_sym, sqrtg_asym = _vmec_symoutput_split(f=sqrtg, trig=trig)
-        if use_lasym_loop:
-            lasym_coeffs = _vmec_wrout_nyquist_lasym_loop(
-                bsq=bmag_sym,
-                gsqrt=sqrtg_sym,
-                bsubu=bsubu_sym,
-                bsubv=bsubv_sym,
-                bsubs=bsubs_sym,
-                bsupu=bsupu_sym,
-                bsupv=bsupv_sym,
-                modes=nyq_modes,
-                trig=trig,
-            )
-            # Asymmetric channel: pass the asymmetric parts through the same loop
-            # (wrout.f uses tsini for asym fields).
-            lasym_coeffs_a = _vmec_wrout_nyquist_lasym_loop(
-                bsq=bmag_asym,
-                gsqrt=sqrtg_asym,
-                bsubu=bsubu_asym,
-                bsubv=bsubv_asym,
-                bsubs=bsubs_asym,
-                bsupu=bsupu_asym,
-                bsupv=bsupv_asym,
-                modes=nyq_modes,
-                trig=trig,
-            )
-            gmnc, bmnc, bsubumnc, bsubvmnc, bsubsmns, bsupumnc, bsupvmnc = (
-                lasym_coeffs[key]
-                for key in ("gmnc", "bmnc", "bsubumnc", "bsubvmnc", "bsubsmns", "bsupumnc", "bsupvmnc")
-            )
-            gmns, bmns, bsubumns, bsubvmns, bsubsmnc, bsupumns, bsupvmns = (
-                lasym_coeffs_a[key]
-                for key in ("gmns", "bmns", "bsubumns", "bsubvmns", "bsubsmnc", "bsupumns", "bsupvmns")
-            )
-        else:
-            gmnc = _vmec_wrout_nyquist_cos_coeffs(f=sqrtg_sym, modes=nyq_modes, trig=trig)
-            bmnc = _vmec_wrout_nyquist_cos_coeffs(f=bmag_sym, modes=nyq_modes, trig=trig)
-            bsubumnc = _vmec_wrout_nyquist_cos_coeffs(f=bsubu_sym, modes=nyq_modes, trig=trig)
-            bsubvmnc = _vmec_wrout_nyquist_cos_coeffs(f=bsubv_sym, modes=nyq_modes, trig=trig)
-            bsupumnc = _vmec_wrout_nyquist_cos_coeffs(f=bsupu_sym, modes=nyq_modes, trig=trig)
-            bsupvmnc = _vmec_wrout_nyquist_cos_coeffs(f=bsupv_sym, modes=nyq_modes, trig=trig)
-            bsubsmns = _vmec_wrout_nyquist_sin_coeffs(f=bsubs_sym, modes=nyq_modes, trig=trig)
-
-            gmns = _vmec_wrout_nyquist_sin_coeffs(f=sqrtg_asym, modes=nyq_modes, trig=trig)
-            bmns = _vmec_wrout_nyquist_sin_coeffs(f=bmag_asym, modes=nyq_modes, trig=trig)
-            bsubumns = _vmec_wrout_nyquist_sin_coeffs(f=bsubu_asym, modes=nyq_modes, trig=trig)
-            bsubvmns = _vmec_wrout_nyquist_sin_coeffs(f=bsubv_asym, modes=nyq_modes, trig=trig)
-            bsupumns = _vmec_wrout_nyquist_sin_coeffs(f=bsupu_asym, modes=nyq_modes, trig=trig)
-            bsupvmns = _vmec_wrout_nyquist_sin_coeffs(f=bsupv_asym, modes=nyq_modes, trig=trig)
-            bsubsmnc = _vmec_wrout_nyquist_cos_coeffs(f=bsubs_asym, modes=nyq_modes, trig=trig)
-
-        # VMEC output: bsubu/bsubv coefficients are band-limited to the base
-        # spectral resolution (mpol-1, ntor). Higher Nyquist modes are zeroed
-        # (wrout.f keeps them at ~0). Enforce this for LASYM parity.
-        m_mask = np.asarray(nyq_modes.m, dtype=int)
-        n_mask = np.asarray(nyq_modes.n, dtype=int)
-        mask_bsub = (m_mask >= int(mpol)) | (np.abs(n_mask) > int(ntor))
-        if np.any(mask_bsub):
-            bsubumnc[:, mask_bsub] = 0.0
-            bsubumns[:, mask_bsub] = 0.0
-            bsubvmnc[:, mask_bsub] = 0.0
-            bsubvmns[:, mask_bsub] = 0.0
-
-        bsubumnc, bsubvmnc, bsubumns, bsubvmns = _vmec_wrout_lasym_bsubuv_output_scale(
-            bsubumnc=bsubumnc,
-            bsubvmnc=bsubvmnc,
-            bsubumns=bsubumns,
-            bsubvmns=bsubvmns,
+        lasym_nyq = minimal_wout_lasym_nyquist_coefficients(
+            bc=bc,
+            bsubu_out=np.asarray(bsubu_out, dtype=float),
+            bsubv_out=np.asarray(bsubv_out, dtype=float),
+            bsupu_out=np.asarray(bsupu_out, dtype=float),
+            bsupv_out=np.asarray(bsupv_out, dtype=float),
+            bsubs_full=np.asarray(bsubs_full, dtype=float),
+            bsubv_asym_source=bsubv_lasym_asym_source,
+            pres=np.asarray(pres, dtype=float),
+            ns=int(ns),
+            mpol=int(mpol),
+            ntor=int(ntor),
+            modes=nyq_modes,
+            trig=trig,
+            use_loop=bool(use_lasym_loop),
         )
-
-        _zero_first_surface(gmnc, bmnc, bsubumnc, bsubvmnc, bsupumnc, bsupvmnc)
-        _zero_first_surface(gmns, bmns, bsubumns, bsubvmns, bsupumns, bsupvmns)
-        if (not use_lasym_loop) and (ns > 2):
-            bsubsmns[0, :] = 2.0 * bsubsmns[1, :] - bsubsmns[2, :]
-            bsubsmnc[0, :] = 2.0 * bsubsmnc[1, :] - bsubsmnc[2, :]
+        (
+            gmnc, gmns, bsupumnc, bsupumns, bsupvmnc, bsupvmns, bsubumnc,
+            bsubumns, bsubvmnc, bsubvmns, bsubsmns, bsubsmnc, bmnc, bmns,
+        ) = lasym_nyq
     else:
         use_loop = field_options.symmetric_wrout_loop
         sym_nyq = minimal_wout_symmetric_nyquist_coefficients(
