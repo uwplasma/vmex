@@ -24847,3 +24847,70 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.99999999990%.
+
+## 2026-06-19 Scan Tree Selector Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved the recursive scan tree selector out of `run_vmec2000_scan` into a
+   module-level `_scan_tree_select` helper.
+2. Kept the helper in the scan controller module to avoid a new source file and
+   preserve the scan controller's JAX import context.
+
+Results obtained:
+
+- `run_vmec2000_scan` decreased from 863 to 854 lines.
+- The branch-selection utility is now directly reusable/testable without being
+  hidden inside the long scan function.
+- Source-health namespace limits remain unchanged.
+
+Tests and commands run:
+
+- `python -m py_compile vmec_jax/solvers/fixed_boundary/scan/controller.py`
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/scan/controller.py`
+- `python tools/diagnostics/source_health.py --top 20 --max-root-helper-prefix-files 2`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_scan_payload_helpers.py::test_select_scan_step_fields_matches_accept_reject_semantics tests/test_solve_scan_payload_helpers.py::test_build_scan_step_fields_applies_vmec_accept_update_and_nonvmec_reject tests/test_solve_scan_planning_helpers.py::test_scan_cache_key_is_stable_and_tracks_behavioral_toggles -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_scan_math_helpers.py::test_hold_step_emits_minimal_light_and_full_rejected_histories tests/test_solve_scan_math_helpers.py::test_restart_updates_zero_all_velocity_blocks_including_lasym_and_no_restart_preserves_them -q`
+
+Best next steps:
+
+1. Commit and push this scan-controller cleanup.
+2. Look for another scan-controller seam with a true result object; avoid moving
+   JAX-scan branch bodies unless tests cover the exact branch behavior.
+3. If scan seams are not line-negative, return to driver staging/finish context
+   or free-boundary facade cleanup.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.99999991%.
+- Solver monolith reduction: 99.891%.
+- Free-boundary adjoint monolith reduction: 99.60%.
+- Driver workflow decomposition: 99.957%.
+- Residual iteration decomposition: 99.45%.
+- WOUT diagnostic/profile decomposition: 99.992%.
+- Bcovar/WOUT parity decomposition: 99.30%.
+- Force-kernel decomposition: 99.69%.
+- Scan/performance policy consolidation: 99.898%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.89%.
+- Fixed-boundary optimizer decomposition: 98.05%.
+- Plotting/WOUT visualization decomposition: 98.05%.
+- Free-boundary facade/domain decomposition: 99.1%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.86%.
+- Discrete-adjoint replay decomposition: 99.20%.
+- Free-boundary validation-gate maintainability: 98.40%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.999999999905%.

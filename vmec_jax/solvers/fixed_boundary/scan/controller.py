@@ -93,6 +93,16 @@ from vmec_jax.solvers.free_boundary.control import free_boundary_iter_controls a
 from vmec_jax.state import VMECState
 
 
+def _scan_tree_select(cond, t_true, t_false):
+    if t_true is None or t_false is None:
+        return t_true if t_false is None else t_false
+    if isinstance(t_true, tuple) and isinstance(t_false, tuple):
+        return type(t_true)(_scan_tree_select(cond, a, b) for a, b in zip(t_true, t_false, strict=True))
+    if isinstance(t_true, list) and isinstance(t_false, list):
+        return [_scan_tree_select(cond, a, b) for a, b in zip(t_true, t_false, strict=True)]
+    return jnp.where(cond, jnp.asarray(t_true), jnp.asarray(t_false))
+
+
 @dataclass(slots=True)
 class Vmec2000ScanControllerContext:
     """Closed-over solver state needed by the VMEC2000-style scan controller."""
@@ -481,15 +491,6 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
     jmax0 = initial_cache.jmax
     cache_valid0 = initial_cache.valid
 
-    def _tree_select(cond, t_true, t_false):
-        if t_true is None or t_false is None:
-            return t_true if t_false is None else t_false
-        if isinstance(t_true, tuple) and isinstance(t_false, tuple):
-            return type(t_true)(_tree_select(cond, a, b) for a, b in zip(t_true, t_false, strict=True))
-        if isinstance(t_true, list) and isinstance(t_false, list):
-            return [_tree_select(cond, a, b) for a, b in zip(t_true, t_false, strict=True)]
-        return jnp.where(cond, jnp.asarray(t_true), jnp.asarray(t_false))
-
     scan_fallback_iters_j = jnp.asarray(int(scan_fallback_iters), dtype=jnp.int32)
     scan_fallback_badjac_limit_j = jnp.asarray(int(scan_fallback_badjac_limit), dtype=jnp.int32)
     scan_fallback_accept_frac_j = jnp.asarray(float(scan_fallback_accept_frac), dtype=dtype)
@@ -526,7 +527,7 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
                 zero_tcon=zero_tcon,
                 compute_forces_scan=_compute_forces_scan,
                 scan_converged=scan_converged,
-                tree_select=_tree_select,
+                tree_select=_scan_tree_select,
                 cond=jax.lax.cond,
                 trace_context=lambda: _maybe_trace("scan/compute_forces"),
                 scan_debug_force_enabled=bool(scan_debug_force),
