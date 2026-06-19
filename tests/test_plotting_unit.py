@@ -351,7 +351,7 @@ def test_boozmn_plot_helpers_render_synthetic_boozer_output(tmp_path):
         assert path.stat().st_size > 0
     assert plotting._booz_surface_label(booz, 1, outer=False) == "mid radius"
     assert plotting._booz_surface_label(booz, 2, outer=True) == "plasma boundary"
-    source = inspect.getsource(plotting.plot_boozmn_bmag_contours)
+    source = inspect.getsource(plotting._plot_boozer_bmag_axis)
     assert "_BOOZER_PHI_LABEL" in source
     assert "_BOOZER_THETA_LABEL" in source
     assert r"$\phi_{B}$" == plotting._BOOZER_PHI_LABEL.split("angle ", 1)[1].removesuffix(" (rad)")

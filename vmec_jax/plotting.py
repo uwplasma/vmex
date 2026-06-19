@@ -1054,10 +1054,7 @@ def _lcfs_xyz(R: np.ndarray, Z: np.ndarray, phi: np.ndarray):
 
 def _plot_3d_boundary_comparison(wout_init, wout_final, outdir: Path) -> Path:
     """3-D LCFS plots coloured by |B|, initial (left) vs optimised (right)."""
-    prepare_matplotlib_3d()
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    plt = _import_matplotlib()
     from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
     from matplotlib.cm import ScalarMappable
     from matplotlib.colors import Normalize
@@ -1149,10 +1146,7 @@ def _plot_bmag_contours(wout_init, wout_final, outdir: Path) -> Path:
     visually obvious.  The toroidal axis covers exactly **one field period**:
     ζ ∈ [0, 2π/nfp].  Poloidal axis: θ ∈ [0, 2π].
     """
-    prepare_matplotlib_3d()
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    plt = _import_matplotlib()
 
     ns_init = int(np.asarray(wout_init.ns))
     ns_final = int(np.asarray(wout_final.ns))
@@ -1329,11 +1323,7 @@ def plot_boozer_bmag_contours_from_state(
 ):
     """Write a Boozer-coordinate line-contour plot of ``|B|`` for QI review."""
 
-    prepare_matplotlib_3d()
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    plt = _import_matplotlib()
 
     theta, phi, bmag, _booz = boozer_bmag_grid_from_state(
         state,
@@ -1348,20 +1338,17 @@ def plot_boozer_bmag_contours_from_state(
         nphi=nphi,
         phimin=phimin,
     )
-    phi2d, theta2d = np.meshgrid(phi, theta)
-    levels = _line_contour_levels(bmag, count=25)
-
     outdir = _ensure_plot_outdir(outdir, default=".")
     fig, ax = plt.subplots(1, 1, figsize=(8, 4.5))
-    cs = ax.contour(phi2d, theta2d, bmag, levels=levels, cmap="viridis", linewidths=1.0)
-    fig.colorbar(cs, ax=ax, label="|B| (T)")
     surface_label = _selected_boozer_surface_label(surfaces, surface_index)
-    ax.set_title(title if title is not None else f"Boozer |B| contours: {surface_label}")
-    ax.set_xlabel(_BOOZER_PHI_LABEL)
-    ax.set_ylabel(_BOOZER_THETA_LABEL)
-    ax.set_yticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
-    ax.set_yticklabels(["0", "π/2", "π", "3π/2", "2π"])
-    ax.set_ylim(0, 2.0 * np.pi)
+    _plot_boozer_bmag_axis(
+        fig,
+        ax,
+        theta=theta,
+        phi=phi,
+        bmag=bmag,
+        title=title if title is not None else f"Boozer |B| contours: {surface_label}",
+    )
     fig.tight_layout()
     out = outdir / filename
     fig.savefig(out, dpi=180, bbox_inches="tight")
@@ -1430,6 +1417,26 @@ def _booz_surface_label(bx, js: int, *, outer: bool = False) -> str:
     return "mid radius"
 
 
+def _plot_boozer_bmag_axis(fig, ax, *, theta, phi, bmag, title: str, levels: int = 25):
+    phi2d, theta2d = np.meshgrid(phi, theta)
+    cs = ax.contour(
+        phi2d,
+        theta2d,
+        bmag,
+        levels=_line_contour_levels(bmag, count=levels),
+        cmap="viridis",
+        linewidths=1.0,
+    )
+    fig.colorbar(cs, ax=ax, label="|B| (T)")
+    ax.set_title(title)
+    ax.set_xlabel(_BOOZER_PHI_LABEL)
+    ax.set_ylabel(_BOOZER_THETA_LABEL)
+    ax.set_yticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
+    ax.set_yticklabels(["0", "π/2", "π", "3π/2", "2π"])
+    ax.set_ylim(0, 2.0 * np.pi)
+    return cs
+
+
 def plot_boozmn_bmag_contours(
     boozmn,
     *,
@@ -1440,11 +1447,7 @@ def plot_boozmn_bmag_contours(
 ) -> Path:
     """Plot mid-radius and outermost Boozer ``|B|`` line contours from ``boozmn``."""
 
-    prepare_matplotlib_3d()
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    plt = _import_matplotlib()
 
     bx = _load_booz_if_path(boozmn)
     ns_b = int(np.asarray(bx.bmnc_b).shape[1])
@@ -1462,16 +1465,15 @@ def plot_boozmn_bmag_contours(
     fig, axes = plt.subplots(1, len(selected), figsize=(7.5 * len(selected), 4.6), squeeze=False)
     for ax, (is_outer, js) in zip(axes[0], selected):
         theta, phi, bmag = _booz_bmag_grid(bx, js=js, ntheta=ntheta, nphi=nphi)
-        phi2d, theta2d = np.meshgrid(phi, theta)
-        levels = _line_contour_levels(bmag, count=24)
-        cs = ax.contour(phi2d, theta2d, bmag, levels=levels, cmap="viridis", linewidths=1.0)
-        fig.colorbar(cs, ax=ax, label="|B| (T)")
-        ax.set_title(_booz_surface_label(bx, js, outer=is_outer))
-        ax.set_xlabel(_BOOZER_PHI_LABEL)
-        ax.set_ylabel(_BOOZER_THETA_LABEL)
-        ax.set_yticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
-        ax.set_yticklabels(["0", "π/2", "π", "3π/2", "2π"])
-        ax.set_ylim(0, 2.0 * np.pi)
+        _plot_boozer_bmag_axis(
+            fig,
+            ax,
+            theta=theta,
+            phi=phi,
+            bmag=bmag,
+            title=_booz_surface_label(bx, js, outer=is_outer),
+            levels=24,
+        )
     fig.suptitle("Boozer-coordinate |B| contours", fontsize=13)
     fig.tight_layout()
     fig.savefig(out, dpi=180, bbox_inches="tight")
@@ -1500,11 +1502,7 @@ def plot_boozer_lcfs_bmag_comparison(
     in Boozer coordinates.
     """
 
-    prepare_matplotlib_3d()
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    plt = _import_matplotlib()
 
     initial_path = Path(wout_initial)
     final_path = Path(wout_final)
@@ -1539,22 +1537,14 @@ def plot_boozer_lcfs_bmag_comparison(
         if ns_b < 1:
             raise ValueError(f"Boozer output contains no computed surfaces: {boozmn}")
         theta, phi, bmag = _booz_bmag_grid(bx, js=ns_b - 1, ntheta=ntheta, nphi=nphi)
-        phi2d, theta2d = np.meshgrid(phi, theta)
-        cs = ax.contour(
-            phi2d,
-            theta2d,
-            bmag,
-            levels=_line_contour_levels(bmag, count=25),
-            cmap="viridis",
-            linewidths=1.0,
+        _plot_boozer_bmag_axis(
+            fig,
+            ax,
+            theta=theta,
+            phi=phi,
+            bmag=bmag,
+            title=f"{title} in Boozer coordinates",
         )
-        fig.colorbar(cs, ax=ax, label="|B| (T)")
-        ax.set_title(f"{title} in Boozer coordinates")
-        ax.set_xlabel(_BOOZER_PHI_LABEL)
-        ax.set_ylabel(_BOOZER_THETA_LABEL)
-        ax.set_yticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
-        ax.set_yticklabels(["0", "π/2", "π", "3π/2", "2π"])
-        ax.set_ylim(0, 2.0 * np.pi)
 
     fig.suptitle("Initial vs final LCFS |B| line contours in Boozer coordinates", fontsize=13)
     fig.tight_layout()
@@ -1573,11 +1563,7 @@ def plot_boozmn_mode_families(
 ) -> Path:
     """Plot radial Boozer ``|B|`` mode amplitudes grouped by symmetry family."""
 
-    prepare_matplotlib_3d()
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    plt = _import_matplotlib()
 
     bx = _load_booz_if_path(boozmn)
     amp, _bmnc, xm, xn = _boozer_mode_amplitudes(bx)
@@ -1630,11 +1616,7 @@ def plot_boozmn_spectrum(
 ) -> Path:
     """Plot the largest Boozer ``|B|`` Fourier amplitudes on one surface."""
 
-    prepare_matplotlib_3d()
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    plt = _import_matplotlib()
 
     bx = _load_booz_if_path(boozmn)
     amp, _bmnc, xm, xn = _boozer_mode_amplitudes(bx)
@@ -1750,10 +1732,7 @@ def _raw_stage_segments(
 def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
     """Objective value, aspect ratio, and (optionally) iota vs Jacobian evaluation."""
     import json
-    prepare_matplotlib_3d()
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    plt = _import_matplotlib()
 
     with open(history_path) as f:
         data = json.load(f)
@@ -1945,10 +1924,7 @@ def plot_wout(
         ``{"vmec_params", "poloidal_plot", "vmec_surfaces", "3d_plot"}``
         mapping to saved :class:`~pathlib.Path` objects.
     """
-    prepare_matplotlib_3d()
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    plt = _import_matplotlib()
     from matplotlib import cm
     from matplotlib.colors import Normalize
 
@@ -1995,25 +1971,15 @@ def plot_wout(
     ax.set_xlabel(xLabel)
     ax.set_title("pressure")
 
-    ax = axes1[0, 2]
-    ax.plot(s_half, buco[1:], ".-")
-    ax.set_title("buco")
-    ax.set_xlabel(xLabel)
-
-    ax = axes1[1, 0]
-    ax.plot(s_half, bvco[1:], ".-")
-    ax.set_title("bvco")
-    ax.set_xlabel(xLabel)
-
-    ax = axes1[1, 1]
-    ax.plot(s, jcuru, ".-")
-    ax.set_title("jcuru")
-    ax.set_xlabel(xLabel)
-
-    ax = axes1[1, 2]
-    ax.plot(s, jcurv, ".-")
-    ax.set_title("jcurv")
-    ax.set_xlabel(xLabel)
+    for ax, x_vals, y_vals, title in (
+        (axes1[0, 2], s_half, buco[1:], "buco"),
+        (axes1[1, 0], s_half, bvco[1:], "bvco"),
+        (axes1[1, 1], s, jcuru, "jcuru"),
+        (axes1[1, 2], s, jcurv, "jcurv"),
+    ):
+        ax.plot(x_vals, y_vals, ".-")
+        ax.set_title(title)
+        ax.set_xlabel(xLabel)
 
     ax = axes1[2, 0]
     ign = int(s_plot_ignore * len(s))
