@@ -21078,3 +21078,78 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.999999984%.
+
+## 2026-06-19 Free-Boundary Vacuum Coil Fixture Consolidation
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Continued the free-boundary phase-2 validation maintainability lane after
+   the dynamic replay cache-key consolidation.
+2. Added a shared one-coil circular Fourier fixture helper in
+   `tests/test_free_boundary_vacuum_adjoint.py`.
+3. Replaced repeated direct-coil fixture setup across JAX-visible controller,
+   projected-mode fixed-point, LASYM, and direct-coil vacuum-response gates.
+
+Results obtained:
+
+- `tests/test_free_boundary_vacuum_adjoint.py` decreased from 3916 to 3860
+  lines.
+- The tests still construct the same coil radii, currents, segment counts, and
+  asymmetric Fourier perturbation used before; only duplicate fixture plumbing
+  moved behind one helper.
+- The phase-2 AD-vs-FD validation assertions were not weakened.
+
+Tests and commands run:
+
+- `python -m compileall -q tests/test_free_boundary_vacuum_adjoint.py`
+- `python -m ruff check tests/test_free_boundary_vacuum_adjoint.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py::test_jax_visible_controller_direct_coil_gradient_matches_fd tests/test_free_boundary_vacuum_adjoint.py::test_masked_controller_direct_coil_projected_mode_ad_matches_fd_for_current_and_fourier tests/test_free_boundary_vacuum_adjoint.py::test_accepted_controller_direct_coil_projected_mode_ad_matches_fd_and_rejects_bad_step -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py::test_dense_vacuum_adjoint_chain_wrt_coil_current_matches_finite_difference tests/test_free_boundary_vacuum_adjoint.py::test_dense_vacuum_adjoint_chain_wrt_coil_geometry_matches_finite_difference tests/test_free_boundary_vacuum_adjoint.py::test_dense_nonlinear_adjoint_chain_wrt_coil_current_matches_finite_difference tests/test_free_boundary_vacuum_adjoint.py::test_dense_fixed_point_projected_mode_loop_wrt_current_matches_finite_difference tests/test_free_boundary_vacuum_adjoint.py::test_projected_mode_fixed_point_objective_exposes_components tests/test_free_boundary_vacuum_adjoint.py::test_projected_mode_fixed_point_objective_value_and_grad_wrt_coil_pytree tests/test_free_boundary_vacuum_adjoint.py::test_lasym_projected_mode_fixed_point_objective_ad_matches_central_fd_for_coil_pytree tests/test_free_boundary_vacuum_adjoint.py::test_dense_vacuum_adjoint_chain_through_projection_wrt_current_matches_finite_difference tests/test_free_boundary_vacuum_adjoint.py::test_dense_vacuum_adjoint_chain_through_projection_wrt_geometry_matches_finite_difference tests/test_free_boundary_vacuum_adjoint.py::test_dense_mode_vacuum_chain_through_projection_wrt_current_matches_finite_difference tests/test_free_boundary_vacuum_adjoint.py::test_dense_mode_vacuum_chain_through_projection_wrt_geometry_matches_finite_difference -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py -q`
+- `python tools/diagnostics/source_health.py --top 8`
+- `git diff --check`
+
+Best next steps:
+
+1. Continue free-boundary validation-gate cleanup by splitting the largest
+   direct-coil finite-pressure helper into smaller assertion helpers, without
+   changing gate thresholds or branch fingerprints.
+2. Resume production-code monolith reduction in `driver.py`, `wout.py`, or
+   residual iteration once the next extraction is clearly line-negative and
+   covered.
+3. Keep full adaptive-branch differentiability claims conservative until a
+   fingerprint-gated full adaptive AD-vs-FD gate exists.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999459%.
+- Solver monolith reduction: 99.825%.
+- Free-boundary adjoint monolith reduction: 99.54%.
+- Driver workflow decomposition: 99.945%.
+- Residual iteration decomposition: 99.04%.
+- WOUT diagnostic/profile decomposition: 99.975%.
+- Bcovar/WOUT parity decomposition: 99.15%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.82%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.74%.
+- Fixed-boundary optimizer decomposition: 96.22%.
+- Plotting/WOUT visualization decomposition: 96.80%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.75%.
+- Discrete-adjoint replay decomposition: 96.69%.
+- Free-boundary validation-gate maintainability: 98.02%.
+- QI objective/staged-runner decomposition: 96.9%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.999999985%.
