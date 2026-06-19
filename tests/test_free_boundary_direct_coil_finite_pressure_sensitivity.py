@@ -309,37 +309,15 @@ def _synthetic_physical_scalar_inputs(synthetic_report: dict, branch_metadata: d
     return physical_report, scalar_report
 
 
-@pytest.mark.py311_coverage_only
-def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatch: pytest.MonkeyPatch) -> None:
-    from vmec_jax._compat import jax, jnp
+def _assert_direct_coil_trace_control_array_contracts(trace0: dict, trace1: dict, z: np.ndarray) -> None:
     from vmec_jax.free_boundary_adjoint import (
         direct_coil_accepted_trace_array_controls_jax,
-        direct_coil_accepted_trace_branch_metadata,
-        direct_coil_accepted_trace_controller_replay_plan,
-        direct_coil_accepted_trace_controller_slot_summary,
-        direct_coil_accepted_trace_controller_controls_jax,
-        direct_coil_accepted_trace_fingerprint_delta_summary,
         direct_coil_accepted_trace_preconditioner_controls_jax,
         direct_coil_accepted_trace_preconditioner_policy_segments,
-        direct_coil_accepted_trace_replay_graph_metadata,
         direct_coil_accepted_trace_scalar_controls_jax,
-        direct_coil_accepted_trace_status_masks,
         direct_coil_accepted_trace_step_controls_jax,
-        direct_coil_accepted_trace_step_policy_segment_summary,
-        direct_coil_accepted_trace_step_policy_segments,
-        direct_coil_accepted_trace_fingerprint,
-        direct_coil_accepted_trace_fingerprint_delta,
-        direct_coil_same_branch_replay_gate_report,
-        free_boundary_adjoint_trace_replay_diagnostics,
-        _accepted_trace_effective_controller_masks,
-        _accepted_trace_segment_is_unconditionally_accepted,
-        _direct_coil_trace_boundary_shape,
     )
 
-    z = np.arange(6.0).reshape(2, 3)
-    trace0 = _synthetic_direct_coil_trace(z)
-    trace1 = _synthetic_direct_coil_trace(z, dt_eff=0.25, bsqvac_scale=3.0)
-    trace2 = _synthetic_direct_coil_trace(z, dt_eff=0.125, bsqvac_scale=4.0)
     scalar_controls = direct_coil_accepted_trace_scalar_controls_jax([trace0, trace1])
     assert np.allclose(np.asarray(scalar_controls["dt_eff"]), np.asarray([0.5, 0.25]))
     assert np.allclose(np.asarray(scalar_controls["lambda_update_scale"]), np.asarray([[1.0, 0.5], [1.0, 0.5]]))
@@ -412,6 +390,38 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatc
     assert np.asarray(optional_step_controls["force_state_pre"]["r"]).shape == (2, 2)
     np.testing.assert_allclose(np.asarray(optional_step_controls["freeb_pres_scale"][1]), np.asarray([3.0, 4.0]))
     np.testing.assert_allclose(np.asarray(optional_step_controls["constraint_rcon0"][0]), np.asarray([0.0, 1.0]))
+
+
+@pytest.mark.py311_coverage_only
+def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+    from vmec_jax._compat import jax, jnp
+    from vmec_jax.free_boundary_adjoint import (
+        direct_coil_accepted_trace_branch_metadata,
+        direct_coil_accepted_trace_controller_replay_plan,
+        direct_coil_accepted_trace_controller_slot_summary,
+        direct_coil_accepted_trace_controller_controls_jax,
+        direct_coil_accepted_trace_fingerprint_delta_summary,
+        direct_coil_accepted_trace_preconditioner_controls_jax,
+        direct_coil_accepted_trace_preconditioner_policy_segments,
+        direct_coil_accepted_trace_replay_graph_metadata,
+        direct_coil_accepted_trace_status_masks,
+        direct_coil_accepted_trace_step_controls_jax,
+        direct_coil_accepted_trace_step_policy_segment_summary,
+        direct_coil_accepted_trace_step_policy_segments,
+        direct_coil_accepted_trace_fingerprint,
+        direct_coil_accepted_trace_fingerprint_delta,
+        direct_coil_same_branch_replay_gate_report,
+        free_boundary_adjoint_trace_replay_diagnostics,
+        _accepted_trace_effective_controller_masks,
+        _accepted_trace_segment_is_unconditionally_accepted,
+        _direct_coil_trace_boundary_shape,
+    )
+
+    z = np.arange(6.0).reshape(2, 3)
+    trace0 = _synthetic_direct_coil_trace(z)
+    trace1 = _synthetic_direct_coil_trace(z, dt_eff=0.25, bsqvac_scale=3.0)
+    trace2 = _synthetic_direct_coil_trace(z, dt_eff=0.125, bsqvac_scale=4.0)
+    _assert_direct_coil_trace_control_array_contracts(trace0, trace1, z)
     axis_trace0 = _synthetic_direct_coil_trace(z, axis_offset=0.0)
     axis_trace1 = _synthetic_direct_coil_trace(z, dt_eff=0.25, bsqvac_scale=3.0, axis_offset=10.0)
     axis_controls = direct_coil_accepted_trace_step_controls_jax([axis_trace0, axis_trace1])

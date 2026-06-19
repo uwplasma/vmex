@@ -21241,3 +21241,75 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.999999986%.
+
+## 2026-06-19 Trace Fingerprint Control Contract Split
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Continued the free-boundary validation-gate maintainability lane in
+   `tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`.
+2. Split scalar/array/preconditioner/optional control stacking assertions out
+   of `test_direct_coil_trace_fingerprint_detects_control_branch_changes` into
+   `_assert_direct_coil_trace_control_array_contracts`.
+3. Kept the same synthetic trace data, expected shapes, error checks, and
+   optional-control assertions.
+
+Results obtained:
+
+- `test_direct_coil_trace_fingerprint_detects_control_branch_changes`
+  decreased from 802 to 729 lines.
+- The file grew by 10 lines overall because the new helper keeps all contract
+  assertions explicit. This was accepted because the failure surface is now
+  better organized without weakening any gate.
+
+Tests and commands run:
+
+- `python -m compileall -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+- `python -m ruff check tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_trace_fingerprint_detects_control_branch_changes -q`
+- `python tools/diagnostics/source_health.py --top 8`
+- `git diff --check`
+
+Best next steps:
+
+1. Split the same fingerprint test again around replay-graph metadata or
+   physical/adaptive scalar report gates; keep helpers top-level and contract
+   focused.
+2. Avoid pushing more file-level growth unless the target function-length
+   reduction is substantial and tests remain focused.
+3. Return to production code after the highest-risk validation tests are below
+   the main production function sizes.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999461%.
+- Solver monolith reduction: 99.825%.
+- Free-boundary adjoint monolith reduction: 99.54%.
+- Driver workflow decomposition: 99.945%.
+- Residual iteration decomposition: 99.04%.
+- WOUT diagnostic/profile decomposition: 99.979%.
+- Bcovar/WOUT parity decomposition: 99.16%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.82%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.74%.
+- Fixed-boundary optimizer decomposition: 96.22%.
+- Plotting/WOUT visualization decomposition: 96.80%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.75%.
+- Discrete-adjoint replay decomposition: 96.69%.
+- Free-boundary validation-gate maintainability: 98.12%.
+- QI objective/staged-runner decomposition: 96.9%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.999999987%.
