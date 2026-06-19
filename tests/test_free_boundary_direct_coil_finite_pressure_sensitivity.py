@@ -207,6 +207,19 @@ def _run_direct_solve(input_path: Path, params: CoilFieldParams):
     )
 
 
+def _direct_nestor_step(run, params: CoilFieldParams, *, ivac: int = 1, ivacskip: int = 0, iter_idx: int = 1, runtime=None):
+    return nestor_external_only_step(
+        state=run.state,
+        static=run.static,
+        ivac=int(ivac),
+        ivacskip=int(ivacskip),
+        iter_idx=int(iter_idx),
+        runtime=runtime,
+        external_field_provider_kind="direct_coils",
+        external_field_provider_params=params,
+    )
+
+
 @pytest.mark.py311_coverage_only
 def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatch: pytest.MonkeyPatch) -> None:
     from vmec_jax._compat import jax, jnp
@@ -1206,26 +1219,8 @@ def test_active_direct_coil_provider_is_sensitive_in_finite_pressure_context(tmp
     pressure = _pressure_profile(run)
     assert np.max(pressure) > 0.0
 
-    base, _ = nestor_external_only_step(
-        state=run.state,
-        static=run.static,
-        ivac=1,
-        ivacskip=0,
-        iter_idx=1,
-        runtime=None,
-        external_field_provider_kind="direct_coils",
-        external_field_provider_params=base_params,
-    )
-    perturbed, _ = nestor_external_only_step(
-        state=run.state,
-        static=run.static,
-        ivac=1,
-        ivacskip=0,
-        iter_idx=1,
-        runtime=None,
-        external_field_provider_kind="direct_coils",
-        external_field_provider_params=perturbed_params,
-    )
+    base, _ = _direct_nestor_step(run, base_params)
+    perturbed, _ = _direct_nestor_step(run, perturbed_params)
 
     assert base.diagnostics is not None
     assert base.diagnostics["provider_kind"] == "direct_coils"
@@ -1271,26 +1266,8 @@ def test_direct_coil_reuse_refreshes_source_when_provider_changes(tmp_path: Path
     input_path = _write_tiny_direct_freeb_input(tmp_path / "input.direct_provider_reuse_source")
     run = _run_direct_initial_guess(input_path, base_params)
 
-    full, runtime = nestor_external_only_step(
-        state=run.state,
-        static=run.static,
-        ivac=1,
-        ivacskip=0,
-        iter_idx=1,
-        runtime=None,
-        external_field_provider_kind="direct_coils",
-        external_field_provider_params=base_params,
-    )
-    reuse, _ = nestor_external_only_step(
-        state=run.state,
-        static=run.static,
-        ivac=2,
-        ivacskip=1,
-        iter_idx=2,
-        runtime=runtime,
-        external_field_provider_kind="direct_coils",
-        external_field_provider_params=perturbed_params,
-    )
+    full, runtime = _direct_nestor_step(run, base_params)
+    reuse, _ = _direct_nestor_step(run, perturbed_params, ivac=2, ivacskip=1, iter_idx=2, runtime=runtime)
 
     assert full.diagnostics is not None
     assert reuse.diagnostics is not None
@@ -1321,27 +1298,9 @@ def test_direct_coil_dense_nestor_output_is_independent_of_nonsingular_ip_chunk(
         monkeypatch.setenv(key, value)
 
     monkeypatch.setenv("VMEC_JAX_FREEB_NONSINGULAR_IP_CHUNK", "1")
-    scalar, _ = nestor_external_only_step(
-        state=run.state,
-        static=run.static,
-        ivac=1,
-        ivacskip=0,
-        iter_idx=1,
-        runtime=None,
-        external_field_provider_kind="direct_coils",
-        external_field_provider_params=params,
-    )
+    scalar, _ = _direct_nestor_step(run, params)
     monkeypatch.setenv("VMEC_JAX_FREEB_NONSINGULAR_IP_CHUNK", "5")
-    chunked, _ = nestor_external_only_step(
-        state=run.state,
-        static=run.static,
-        ivac=1,
-        ivacskip=0,
-        iter_idx=1,
-        runtime=None,
-        external_field_provider_kind="direct_coils",
-        external_field_provider_params=params,
-    )
+    chunked, _ = _direct_nestor_step(run, params)
 
     for result in (scalar, chunked):
         assert result.model == "vmec2000_like_dense_integral"

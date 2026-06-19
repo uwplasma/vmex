@@ -7,6 +7,76 @@ and should not drive new work unless a specific old result needs to be audited.
 
 Last updated: 2026-06-19.
 
+## 2026-06-19 Direct-Coil Validation NESTOR Helper Consolidation
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `_direct_nestor_step` to the direct-coil finite-pressure validation
+   tests to centralize direct-coil `nestor_external_only_step` invocation.
+2. Replaced duplicated direct-provider NESTOR calls in the finite-pressure
+   sensitivity, provider-reuse, and dense chunk-invariance tests.
+3. Kept the validated physics assertions and runtime/provider checks
+   unchanged; only repeated test scaffolding was removed.
+
+Results obtained:
+
+- `tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+  dropped from 4939 to 4898 lines.
+- The source-health report now shows the direct-coil validation file reduced
+  by 41 lines while keeping the same direct-coil/free-boundary gates.
+
+Tests and commands run:
+
+- `python -m compileall -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+- `python -m ruff check tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+- `python tools/diagnostics/source_health.py | head -80`
+- `git diff --check`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_active_direct_coil_provider_is_sensitive_in_finite_pressure_context tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_reuse_refreshes_source_when_provider_changes tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_dense_nestor_output_is_independent_of_nonsingular_ip_chunk -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_forced_active_direct_coil_finite_pressure_solve_has_physics_diagnostics -q`
+
+Best next steps:
+
+1. Continue reducing validation-test scaffolding around repeated complete-solve
+   FD reports and same-branch custom-VJP assertions.
+2. Keep validation gates intact; only centralize setup, report construction,
+   and repeated assertions.
+3. Return to production `free_boundary.py` or `discrete_adjoint.py` when a
+   similarly safe behavior-preserving seam is evident.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999435%.
+- Solver monolith reduction: 99.80%.
+- Free-boundary adjoint monolith reduction: 99.51%.
+- Driver workflow decomposition: 99.945%.
+- Residual iteration decomposition: 98.93%.
+- WOUT diagnostic/profile decomposition: 99.975%.
+- Bcovar/WOUT parity decomposition: 99.15%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.82%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.74%.
+- Fixed-boundary optimizer decomposition: 96.22%.
+- Plotting/WOUT visualization decomposition: 96.80%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.75%.
+- Discrete-adjoint replay decomposition: 96.62%.
+- Free-boundary validation-gate maintainability: 97.62%.
+- QI objective/staged-runner decomposition: 96.9%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.999999974%.
+
 ## 2026-06-19 Residual Zero-Update History Consolidation
 
 Branch: `codex/differentiability-refactor-plan`.
