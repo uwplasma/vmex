@@ -9,7 +9,7 @@ monkeypatch seams while the long public workflow remains readable.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 import time
 from typing import Any, Callable
 
@@ -135,6 +135,16 @@ class Vmec2000StagedSolveContext:
     deepcopy_func: Callable[[Any], Any]
     getenv: Callable[[str, str], str]
     perf_counter: Callable[[], float] = time.perf_counter
+
+    @classmethod
+    def from_namespace(cls, namespace: dict[str, Any], /, **overrides: Any) -> "Vmec2000StagedSolveContext":
+        """Build the staged-solve context from resolved driver locals."""
+
+        names = [field.name for field in fields(cls)]
+        missing = [name for name in names if name not in overrides and name not in namespace]
+        if missing:
+            raise KeyError(f"Missing VMEC2000 staged-solve context fields: {', '.join(missing)}")
+        return cls(**{name: overrides[name] if name in overrides else namespace[name] for name in names})
 
 
 @dataclass(frozen=True)

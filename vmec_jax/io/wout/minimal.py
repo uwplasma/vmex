@@ -103,6 +103,39 @@ class WoutBssSourcePayload(NamedTuple):
     geom: dict[str, Any]
 
 
+def select_bsubuv_diagnostic_fields(
+    *,
+    bc: Any,
+    bsubu_out: np.ndarray,
+    bsubv_out: np.ndarray,
+    field_options: WoutMinimalFieldOptions,
+    trig: Any,
+    apply_bsubv_equif_correction_func,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Select VMEC-compatible ``bsubu``/``bsubv`` fields for diagnostics."""
+    bsubu_diag = np.asarray(bsubu_out, dtype=float)
+    bsubv_diag = np.asarray(bsubv_out, dtype=float)
+    bsub_src = str(field_options.mercier_bsub_source)
+    if bsub_src in {"bsubu_e", "bsubu_e_scaled", "bsubu"}:
+        u_name = bsub_src
+        v_name = bsub_src.replace("bsubu", "bsubv")
+        if hasattr(bc, u_name) and hasattr(bc, v_name):
+            bsubu_diag = np.asarray(getattr(bc, u_name), dtype=float)
+            bsubv_diag = np.asarray(getattr(bc, v_name), dtype=float)
+    elif field_options.mercier_use_bsube and hasattr(bc, "bsubu_e") and hasattr(bc, "bsubv_e"):
+        bsubu_diag = np.asarray(getattr(bc, "bsubu_e"), dtype=float)
+        bsubv_diag = np.asarray(getattr(bc, "bsubv_e"), dtype=float)
+
+    if (not field_options.disable_bsubv_equif_corr) and getattr(bc, "bsubv_e", None) is not None:
+        # VMEC fileout.f forces IEQUI=1 before funct3d/wrout at output time.
+        bsubv_diag = apply_bsubv_equif_correction_func(
+            bsubv=bsubv_diag,
+            bsubv_e=np.asarray(bc.bsubv_e),
+            trig=trig,
+        )
+    return bsubu_diag, bsubv_diag
+
+
 class WoutScalarDiagnostics(NamedTuple):
     """Scalar and radial diagnostics written by the minimal WOUT builder."""
 

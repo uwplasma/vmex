@@ -49,6 +49,7 @@ from .io.wout.minimal import (
     prepare_wout_bss_source_payload,
     prepare_wout_bcovar_payload,
     prepare_profile_payload,
+    select_bsubuv_diagnostic_fields,
 )
 from .io.wout.netcdf import (
     read_wout_payload,
@@ -425,6 +426,7 @@ def _apply_bsubv_equif_correction(*, bsubv: np.ndarray, bsubv_e: np.ndarray, tri
 
 
 _compute_bsubs_half_mesh = _wout_bsubs_helpers.compute_bsubs_half_mesh
+_bsubs_full_mesh_for_wrout = _wout_bsubs_helpers.bsubs_full_mesh_for_wrout
 _bsubuv_parity_from_state = _wout_bsubs_helpers.bsubuv_parity_from_state
 _bsubuv_parity_from_coeffs = _wout_bsubs_helpers.bsubuv_parity_from_coeffs
 _bsubuv_parity_from_realspace_jxbforce = _wout_bsubs_helpers.bsubuv_parity_from_realspace_jxbforce
@@ -1265,32 +1267,16 @@ def wout_minimal_from_fixed_boundary(
     _wout_debug_helpers.dump_bsub_sources_if_requested(bc=bc)
 
     # VMEC wrout.f uses the *raw* bsubu/bsubv for Fourier output (bsubumnc/etc).
-    # JXBFORCE-style diagnostics (jdotb/Mercier) use the equilibrated + filtered
-    # fields. Keep both paths explicit to match VMEC output.
-    bsubu_diag = bsubu_out
-    bsubv_diag = bsubv_out
-    bsub_src = field_options.mercier_bsub_source
-    if bsub_src in {"bsubu_e", "bsubu_e_scaled", "bsubu"}:
-        u_name = bsub_src
-        v_name = bsub_src.replace("bsubu", "bsubv")
-        if hasattr(bc, u_name) and hasattr(bc, v_name):
-            bsubu_diag = np.asarray(getattr(bc, u_name), dtype=float)
-            bsubv_diag = np.asarray(getattr(bc, v_name), dtype=float)
-    elif field_options.mercier_use_bsube:
-        if hasattr(bc, "bsubu_e") and hasattr(bc, "bsubv_e"):
-            bsubu_diag = np.asarray(getattr(bc, "bsubu_e"), dtype=float)
-            bsubv_diag = np.asarray(getattr(bc, "bsubv_e"), dtype=float)
-    # VMEC fileout.f forces IEQUI=1 before calling funct3d/wrout at output
-    # time, regardless of the runtime IEQUI used in iterations.
-    iequi = 1
-    # VMEC parity: keep the raw bsubv path by default for Mercier/jdotb parity.
-    disable_equif_corr = field_options.disable_bsubv_equif_corr
-    if (iequi == 1) and (not disable_equif_corr) and getattr(bc, "bsubv_e", None) is not None:
-        bsubv_diag = _apply_bsubv_equif_correction(
-            bsubv=bsubv_diag,
-            bsubv_e=np.asarray(bc.bsubv_e),
-            trig=trig,
-        )
+    # JXBFORCE-style diagnostics (jdotb/Mercier) use the selected diagnostic
+    # source, including VMEC's output-time IEQUI=1 correction.
+    bsubu_diag, bsubv_diag = select_bsubuv_diagnostic_fields(
+        bc=bc,
+        bsubu_out=bsubu_out,
+        bsubv_out=bsubv_out,
+        field_options=field_options,
+        trig=trig,
+        apply_bsubv_equif_correction_func=_apply_bsubv_equif_correction,
+    )
     t0 = _timing_start(bool(wout_timing_enabled))
     bsubs_half = _compute_bsubs_half_mesh(
         state=state,
@@ -1311,21 +1297,7 @@ def wout_minimal_from_fixed_boundary(
         apply_scalxc=field_options.apply_bss_scalxc,
     )
     _record_timing(wout_timing, "bsubs_half_s", t0)
-    # In VMEC's fileout path, jxbforce is called before wrout and updates bsubs
-    # to a full-mesh representation via:
-    #   bsubs(js) = 0.5*(bsubs(js) + bsubs(js+1)), js=2..ns-1
-    # then endpoint extrapolation:
-    #   bsubs(1)  = 2*bsubs(2)  - bsubs(3)
-    #   bsubs(ns) = 2*bsubs(ns) - bsubs(ns-1)
-    # wrout then transforms this updated array.
-    bsubs_full = np.asarray(bsubs_half, dtype=float).copy()
-    if ns > 0:
-        # jxbforce initializes bsubs(1,:)=0 before full-mesh averaging.
-        bsubs_full[0] = 0.0
-    if ns > 2:
-        bsubs_full[1:-1] = 0.5 * (bsubs_full[1:-1] + bsubs_full[2:])
-        bsubs_full[0] = 2.0 * bsubs_full[1] - bsubs_full[2]
-        bsubs_full[-1] = 2.0 * bsubs_full[-1] - bsubs_full[-2]
+    bsubs_full = _bsubs_full_mesh_for_wrout(bsubs_half=bsubs_half)
 
     # JXBFORCE applies a low-pass filter on bsubu/bsubv using (mpol-1, ntor).
     skip_bsub_filter = field_options.skip_bsub_filter
