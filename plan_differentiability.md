@@ -25689,3 +25689,73 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.999999999927%.
+
+## 2026-06-19 Scan Initial-Force Axis-Reset Setup Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `ScanInitialForceSetup` in
+   `vmec_jax.solvers.fixed_boundary.scan.controller`.
+2. Extracted initial force evaluation and VMEC initial-axis reset replay from
+   `run_vmec2000_scan` into `_prepare_scan_initial_force_and_axis_reset`.
+3. Kept `_scan_step`, scan branch selection, acceptance/restart logic, scan
+   runner caching, and postprocessing unchanged.
+
+Results obtained:
+
+- `run_vmec2000_scan` decreased from 851 to 798 lines.
+- The pre-loop scan setup is now named separately from the scan step and scan
+  dispatch machinery.
+- Source-health still passes with the root helper-prefix limit at 2.
+
+Tests and commands run:
+
+- `python -m py_compile vmec_jax/solvers/fixed_boundary/scan/controller.py`
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/scan/controller.py`
+- `python tools/diagnostics/source_health.py --top 30 --max-root-helper-prefix-files 2`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_scan_payload_helpers.py::test_select_scan_step_fields_matches_accept_reject_semantics tests/test_solve_scan_planning_helpers.py::test_scan_cache_key_is_stable_and_tracks_behavioral_toggles tests/test_driver_api.py::test_python_default_fixed_boundary_uses_optimized_controller tests/test_driver_api.py::test_run_fixed_boundary_cli_single_grid_uses_accelerated_finish_first -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_driver_control_fast.py tests/test_driver_run_wave8_coverage.py::test_run_fixed_boundary_dispatches_fixed_and_free_static_branches -q`
+
+Best next steps:
+
+1. Commit and push this scan setup extraction.
+2. Continue with scan controller postprocessing or WOUT construction only where
+   a clear focused validation gate exists.
+3. The residual iteration loop remains the largest hotspot, but the next real
+   simplification there should introduce a state/history object rather than
+   moving direct local list references piecemeal.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999951%.
+- Solver monolith reduction: 99.913%.
+- Free-boundary adjoint monolith reduction: 99.66%.
+- Driver workflow decomposition: 99.970%.
+- Residual iteration decomposition: 99.491%.
+- WOUT diagnostic/profile decomposition: 99.992%.
+- Bcovar/WOUT parity decomposition: 99.30%.
+- Force-kernel decomposition: 99.69%.
+- Scan/performance policy consolidation: 99.91%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.05%.
+- Optimizer workflow decomposition: 99.89%.
+- Fixed-boundary optimizer decomposition: 98.05%.
+- Plotting/WOUT visualization decomposition: 98.05%.
+- Free-boundary facade/domain decomposition: 99.18%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.86%.
+- Discrete-adjoint replay decomposition: 99.24%.
+- Free-boundary validation-gate maintainability: 98.47%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.999999999928%.

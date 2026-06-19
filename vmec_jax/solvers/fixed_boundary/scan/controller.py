@@ -214,6 +214,154 @@ class Vmec2000ScanControllerContext:
         return _dataclass_from_namespace(cls, namespace, label="VMEC2000 scan", overrides=overrides)
 
 
+@dataclass(frozen=True)
+class ScanInitialForceSetup:
+    """Initial force payload and axis-reset state used to enter the scan loop."""
+
+    state_init: VMECState
+    scan_resume0: Any
+    axis_reset_enabled: bool
+    axis_reset_repeat: bool
+    kernels: Any
+    frzl: Any
+    gcr2: Any
+    gcz2: Any
+    gcl2: Any
+    rz_scale: Any
+    l_scale: Any
+    norms: Any
+
+
+def _prepare_scan_initial_force_and_axis_reset(
+    *,
+    ctx: Vmec2000ScanControllerContext,
+    state_init: VMECState,
+    scan_runtime,
+    scan_resume0,
+    axis_reset_enabled: bool,
+    axis_reset_repeat: bool,
+    dtype,
+    static,
+    trig,
+    s,
+    zero_precond_diag,
+    zero_tcon,
+    constraint_active_false,
+    vmec2000_control: bool,
+    lmove_axis: bool,
+    verbose: bool,
+    verbose_vmec2000_table: bool,
+    badjac_use_state: bool,
+    ptau_tol: float,
+    compute_forces_scan,
+    scan_print_context,
+) -> ScanInitialForceSetup:
+    """Compute initial scan forces and apply the VMEC initial-axis reset."""
+
+    timing_enabled = bool(scan_runtime.timing_enabled)
+    timing_stats = scan_runtime.timing_stats
+    device_runtime = scan_runtime.device_runtime
+    t_scan_initial_force = time.perf_counter() if timing_enabled else None
+    with scan_runtime.maybe_trace("scan/compute_forces:init"):
+        k0, frzl0, gcr2_0, gcz2_0, gcl2_0, rz_scale0, l_scale0, norms0 = compute_forces_scan(
+            state_init,
+            include_edge=False,
+            zero_m1=jnp.asarray(1.0, dtype=dtype),
+            constraint_precond_diag=zero_precond_diag,
+            constraint_tcon=zero_tcon,
+            constraint_precond_active=constraint_active_false,
+            constraint_tcon_active=constraint_active_false,
+            iter_idx=None,
+        )
+    if timing_enabled and t_scan_initial_force is not None:
+        try:
+            if has_jax():
+                device_runtime.block_value((gcr2_0, gcz2_0, gcl2_0))
+        except Exception:
+            pass
+        timing_stats["scan_initial_compute_forces_s"] += time.perf_counter() - float(t_scan_initial_force)
+
+    axis_reset_eval = _evaluate_initial_axis_reset(
+        axis_reset_enabled=bool(axis_reset_enabled),
+        norms=norms0,
+        gcr2=gcr2_0,
+        gcz2=gcz2_0,
+        gcl2=gcl2_0,
+        k=k0,
+        state=state_init,
+        static=static,
+        trig=trig,
+        s=s,
+        badjac_use_state=bool(badjac_use_state),
+        ptau_tol=ptau_tol,
+        ptau_tol_rel=ctx.ptau_tol_rel,
+        axis_reset_fsq_min=ctx.axis_reset_fsq_min,
+        force_axis_reset=bool(ctx.force_axis_reset),
+        axis_reset_always_3d=bool(ctx.axis_reset_always_3d),
+        vmec2000_control=bool(vmec2000_control),
+        lmove_axis=bool(lmove_axis),
+        debug_enabled=(
+            bool(axis_reset_enabled)
+            and ctx._runtime_env_enabled(os.getenv("VMEC_JAX_AXIS_RESET_DEBUG", ""))
+        ),
+        ptau_minmax_from_k_host=ctx._ptau_minmax_from_k_host,
+        vmec_half_mesh_jacobian_from_state_func=ctx.vmec_half_mesh_jacobian_from_state,
+    )
+    axis_reset_decision = axis_reset_eval.decision
+    bad_jacobian0 = bool(axis_reset_decision.bad_jacobian)
+    force_axis_reset_init = axis_reset_decision.force_reset
+    if axis_reset_decision.reset:
+        if bool(verbose) and bool(vmec2000_control) and bool(verbose_vmec2000_table):
+            if bad_jacobian0 or force_axis_reset_init:
+                print(" INITIAL JACOBIAN CHANGED SIGN!", flush=True)
+            print(" TRYING TO IMPROVE INITIAL MAGNETIC AXIS GUESS", flush=True)
+        state_init = ctx._reset_axis_from_boundary(state_init, k_guess=k0, full_reset=False, refine_axis_guess=False)
+        if bool(verbose) and bool(vmec2000_control) and bool(verbose_vmec2000_table):
+            if ctx.axis_reset_coeffs is not None:
+                raxis_cc, _raxis_cs, _zaxis_cc, zaxis_cs = ctx.axis_reset_coeffs
+                scan_print_context.print_axis_guess(raxis_cc, zaxis_cs)
+        scan_resume0 = scan_resume0._replace(
+            ijacob=jnp.asarray(1, dtype=jnp.int32),
+            state_checkpoint=state_init,
+        )
+        axis_reset_enabled = False
+        axis_reset_repeat = True
+        t_scan_axis_force = time.perf_counter() if timing_enabled else None
+        k0, frzl0, gcr2_0, gcz2_0, gcl2_0, rz_scale0, l_scale0, norms0 = compute_forces_scan(
+            state_init,
+            include_edge=False,
+            zero_m1=jnp.asarray(1.0, dtype=dtype),
+            constraint_precond_diag=zero_precond_diag,
+            constraint_tcon=zero_tcon,
+            constraint_precond_active=constraint_active_false,
+            constraint_tcon_active=constraint_active_false,
+            iter_idx=None,
+        )
+        if timing_enabled and t_scan_axis_force is not None:
+            try:
+                if has_jax():
+                    device_runtime.block_value((gcr2_0, gcz2_0, gcl2_0))
+            except Exception:
+                pass
+            timing_stats["scan_axis_reset_compute_forces_s"] += time.perf_counter() - float(
+                t_scan_axis_force
+            )
+    return ScanInitialForceSetup(
+        state_init=state_init,
+        scan_resume0=scan_resume0,
+        axis_reset_enabled=False,
+        axis_reset_repeat=bool(axis_reset_repeat),
+        kernels=k0,
+        frzl=frzl0,
+        gcr2=gcr2_0,
+        gcz2=gcz2_0,
+        gcl2=gcl2_0,
+        rz_scale=rz_scale0,
+        l_scale=l_scale0,
+        norms=norms0,
+    )
+
+
 def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState) -> SolveVmecResidualResult:
     """Run the VMEC2000-style residual scan controller."""
     _lambda_preconditioner = ctx._lambda_preconditioner
@@ -365,94 +513,41 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
     scale_m1_precond_rhs = scan_runtime.scale_m1_precond_rhs
     jit_forces_scan = scan_runtime.jit_forces_scan
     _compute_forces_scan = scan_runtime.compute_forces_scan
-    t_scan_initial_force = time.perf_counter() if scan_timing_enabled else None
-    with scan_runtime.maybe_trace("scan/compute_forces:init"):
-        k0, frzl0, gcr2_0, gcz2_0, gcl2_0, rz_scale0, l_scale0, norms0 = _compute_forces_scan(
-            state_init,
-            include_edge=False,
-            zero_m1=jnp.asarray(1.0, dtype=dtype),
-            constraint_precond_diag=zero_precond_diag,
-            constraint_tcon=zero_tcon,
-            constraint_precond_active=constraint_active_false,
-            constraint_tcon_active=constraint_active_false,
-            iter_idx=None,
-        )
-    if scan_timing_enabled and t_scan_initial_force is not None:
-        try:
-            if has_jax():
-                scan_device_runtime.block_value((gcr2_0, gcz2_0, gcl2_0))
-        except Exception:
-            pass
-        scan_timing_stats["scan_initial_compute_forces_s"] += time.perf_counter() - float(
-            t_scan_initial_force
-        )
-    axis_reset_eval = _evaluate_initial_axis_reset(
+    initial_force = _prepare_scan_initial_force_and_axis_reset(
+        ctx=ctx,
+        state_init=state_init,
+        scan_runtime=scan_runtime,
+        scan_resume0=scan_resume0,
         axis_reset_enabled=bool(axis_reset_enabled),
-        norms=norms0,
-        gcr2=gcr2_0,
-        gcz2=gcz2_0,
-        gcl2=gcl2_0,
-        k=k0,
-        state=state_init,
+        axis_reset_repeat=bool(axis_reset_repeat),
+        dtype=dtype,
         static=static,
         trig=trig,
         s=s,
-        badjac_use_state=bool(badjac_use_state),
-        ptau_tol=ptau_tol,
-        ptau_tol_rel=ctx.ptau_tol_rel,
-        axis_reset_fsq_min=ctx.axis_reset_fsq_min,
-        force_axis_reset=bool(ctx.force_axis_reset),
-        axis_reset_always_3d=bool(ctx.axis_reset_always_3d),
+        zero_precond_diag=zero_precond_diag,
+        zero_tcon=zero_tcon,
+        constraint_active_false=constraint_active_false,
         vmec2000_control=bool(vmec2000_control),
         lmove_axis=bool(lmove_axis),
-        debug_enabled=(
-            bool(axis_reset_enabled)
-            and _runtime_env_enabled(os.getenv("VMEC_JAX_AXIS_RESET_DEBUG", ""))
-        ),
-        ptau_minmax_from_k_host=ctx._ptau_minmax_from_k_host,
-        vmec_half_mesh_jacobian_from_state_func=vmec_half_mesh_jacobian_from_state,
+        verbose=bool(verbose),
+        verbose_vmec2000_table=bool(verbose_vmec2000_table),
+        badjac_use_state=bool(badjac_use_state),
+        ptau_tol=ptau_tol,
+        compute_forces_scan=_compute_forces_scan,
+        scan_print_context=scan_print_context,
     )
-    axis_reset_decision = axis_reset_eval.decision
-    bad_jacobian0 = bool(axis_reset_decision.bad_jacobian)
-    force_axis_reset_init = axis_reset_decision.force_reset
-    if axis_reset_decision.reset:
-        if bool(verbose) and bool(vmec2000_control) and bool(verbose_vmec2000_table):
-            if bad_jacobian0 or force_axis_reset_init:
-                print(" INITIAL JACOBIAN CHANGED SIGN!", flush=True)
-            print(" TRYING TO IMPROVE INITIAL MAGNETIC AXIS GUESS", flush=True)
-        state_init = ctx._reset_axis_from_boundary(state_init, k_guess=k0, full_reset=False, refine_axis_guess=False)
-        if bool(verbose) and bool(vmec2000_control) and bool(verbose_vmec2000_table):
-            if axis_reset_coeffs is not None:
-                raxis_cc, _raxis_cs, _zaxis_cc, zaxis_cs = axis_reset_coeffs
-                scan_print_context.print_axis_guess(raxis_cc, zaxis_cs)
-        scan_resume0 = scan_resume0._replace(
-            ijacob=jnp.asarray(1, dtype=jnp.int32),
-            state_checkpoint=state_init,
-        )
-        axis_reset_enabled = False
-        axis_reset_repeat = True
-        t_scan_axis_force = time.perf_counter() if scan_timing_enabled else None
-        k0, frzl0, gcr2_0, gcz2_0, gcl2_0, rz_scale0, l_scale0, norms0 = _compute_forces_scan(
-            state_init,
-            include_edge=False,
-            zero_m1=jnp.asarray(1.0, dtype=dtype),
-            constraint_precond_diag=zero_precond_diag,
-            constraint_tcon=zero_tcon,
-            constraint_precond_active=constraint_active_false,
-            constraint_tcon_active=constraint_active_false,
-            iter_idx=None,
-        )
-        if scan_timing_enabled and t_scan_axis_force is not None:
-            try:
-                if has_jax():
-                    scan_device_runtime.block_value((gcr2_0, gcz2_0, gcl2_0))
-            except Exception:
-                pass
-            scan_timing_stats["scan_axis_reset_compute_forces_s"] += time.perf_counter() - float(
-                t_scan_axis_force
-            )
-    # Axis reset handled before scan; avoid per-iteration callbacks.
-    axis_reset_enabled = False
+    state_init = initial_force.state_init
+    scan_resume0 = initial_force.scan_resume0
+    axis_reset_enabled = initial_force.axis_reset_enabled
+    axis_reset_repeat = initial_force.axis_reset_repeat
+    k0 = initial_force.kernels
+    frzl0 = initial_force.frzl
+    gcr2_0 = initial_force.gcr2
+    gcz2_0 = initial_force.gcz2
+    gcl2_0 = initial_force.gcl2
+    rz_scale0 = initial_force.rz_scale
+    l_scale0 = initial_force.l_scale
+    norms0 = initial_force.norms
     scan_run_setup_start = time.perf_counter() if scan_timing_enabled else None
     initial_cache = _build_initial_preconditioner_cache(
         state_init=state_init,
