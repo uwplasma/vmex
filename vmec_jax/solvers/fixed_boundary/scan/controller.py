@@ -356,9 +356,6 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
     print_in_scan = scan_runtime.print_in_scan
     scan_print_mode = scan_runtime.scan_print_mode
 
-    def _maybe_trace(label: str):
-        return scan_runtime.maybe_trace(label)
-
     axis_reset_enabled = scan_runtime.axis_reset_enabled
     axis_reset_repeat = scan_runtime.axis_reset_repeat
     scan_print_context = scan_runtime.print_context
@@ -372,7 +369,7 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
     jit_forces_scan = scan_runtime.jit_forces_scan
     _compute_forces_scan = scan_runtime.compute_forces_scan
     t_scan_initial_force = time.perf_counter() if scan_timing_enabled else None
-    with _maybe_trace("scan/compute_forces:init"):
+    with scan_runtime.maybe_trace("scan/compute_forces:init"):
         k0, frzl0, gcr2_0, gcz2_0, gcl2_0, rz_scale0, l_scale0, norms0 = _compute_forces_scan(
             state_init,
             include_edge=False,
@@ -529,7 +526,7 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
                 scan_converged=scan_converged,
                 tree_select=_scan_tree_select,
                 cond=jax.lax.cond,
-                trace_context=lambda: _maybe_trace("scan/compute_forces"),
+                trace_context=lambda: scan_runtime.maybe_trace("scan/compute_forces"),
                 scan_debug_force_enabled=bool(scan_debug_force),
                 scan_debug_iter=int(scan_debug_iter),
                 debug_force_first_iter=_maybe_debug_scan_force_first_iter,
@@ -732,7 +729,7 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
                 current_payload=current_payload_pre,
                 state_post=state_post,
                 compute_forces_scan_func=_compute_forces_scan,
-                restart_trace_context=lambda: _maybe_trace("scan/compute_forces:restart"),
+                restart_trace_context=lambda: scan_runtime.maybe_trace("scan/compute_forces:restart"),
                 zero_m1=zero_m1,
                 zero_precond_diag=zero_precond_diag,
                 zero_tcon=zero_tcon,
