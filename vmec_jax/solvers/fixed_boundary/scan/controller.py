@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from functools import partial
 import os
 import time
@@ -44,8 +44,8 @@ from vmec_jax.solvers.fixed_boundary.scan.math import (
     _hold_step as _scan_math_hold_step,
     _no_restart_updates as _scan_math_no_restart_updates,
     _restart_updates as _scan_math_restart_updates,
-    _state_jacobian as _scan_math_state_jacobian,
-    scan_bad_jacobian_decision as _scan_bad_jacobian_decision,
+    sample_vmec2000_scan_scalars as _sample_vmec2000_scan_scalars,
+    scan_bad_jacobian_decision_from_step as _scan_bad_jacobian_decision_from_step,
 )
 from vmec_jax.solvers.fixed_boundary.scan.output import (
     finalize_vmec2000_scan_run,
@@ -195,6 +195,16 @@ class Vmec2000ScanControllerContext:
     wout_key: Any
     zero_precond_diag: Any
     zero_tcon: Any
+
+    @classmethod
+    def from_namespace(cls, namespace: dict[str, Any], /, **overrides: Any) -> "Vmec2000ScanControllerContext":
+        """Build the scan context from resolved residual-iteration locals."""
+
+        names = [field.name for field in fields(cls)]
+        missing = [name for name in names if name not in overrides and name not in namespace]
+        if missing:
+            raise KeyError(f"Missing VMEC2000 scan context fields: {', '.join(missing)}")
+        return cls(**{name: overrides[name] if name in overrides else namespace[name] for name in names})
 
 
 def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState) -> SolveVmecResidualResult:
@@ -597,26 +607,20 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
             fsqz = force_eval.fsqz
             fsql = force_eval.fsql
             conv_now = force_eval.conv_now
-            # Scalars for VMEC-style screen output (sampled on NSTEP cadence + convergence).
-            sample_vmec = (iter2 <= 1) | (iter2 >= int(max_iter)) | ((iter2 % nstep_screen) == 0) | conv_now
-            sample_vmec = sample_vmec & jnp.asarray(scan_collect_scalars, dtype=bool)
-
-            def _compute_scalars(_):
-                r00_j = jnp.asarray(k.pr1_even)[0, 0, 0]
-                if bool(cfg.lasym):
-                    z00_j = jnp.asarray(k.pz1_even)[0, 0, 0]
-                else:
-                    z00_j = jnp.asarray(0.0, dtype=r00_j.dtype)
-                # `norms_current` already reflects the current bcovar state.
-                wb_val = jnp.asarray(norms_current.wb)
-                wp_val = jnp.asarray(norms_current.wp)
-                w_mhd = (wb_val + wp_val / (gamma - 1.0)) * jnp.asarray(float(TWOPI * TWOPI), dtype=wb_val.dtype)
-                return r00_j, z00_j, w_mhd
-
-            def _reuse_scalars(_):
-                return carry_adv.r00_prev, carry_adv.z00_prev, carry_adv.w_mhd_prev
-
-            r00_j, z00_j, w_mhd = jax.lax.cond(sample_vmec, _compute_scalars, _reuse_scalars, operand=None)
+            sample_vmec, r00_j, z00_j, w_mhd = _sample_vmec2000_scan_scalars(
+                carry_adv=carry_adv,
+                iter2=iter2,
+                max_iter=int(max_iter),
+                nstep_screen=int(nstep_screen),
+                scan_collect_scalars=bool(scan_collect_scalars),
+                force_sample=conv_now,
+                kernels=k,
+                norms_current=norms_current,
+                gamma=float(gamma),
+                twopi=float(TWOPI),
+                lasym=bool(cfg.lasym),
+                cond=jax.lax.cond,
+            )
 
             current_payload_pre = _build_current_preconditioned_scan_payload(
                 need_bcovar_update=need_bcovar_update,
@@ -671,48 +675,26 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
             use_state_jac = _runtime_env_enabled(os.getenv("VMEC_JAX_SCAN_JAC_FROM_STATE", "0"))
             use_apply_payload_fusion = False
             ptau_min, ptau_max = _ptau_minmax(k) if bool(vmec2000_control) else (None, None)
-
-            def _state_tau():
-                jac_scan = vmec_half_mesh_jacobian_from_state(
-                    state=carry_adv.state,
-                    modes=static.modes,
-                    trig=trig,
-                    s=s,
-                    lconm1=bool(getattr(static.cfg, "lconm1", True)),
-                    lthreed=bool(getattr(static.cfg, "lthreed", True)),
-                    mask_even=getattr(static, "m_is_even", None),
-                    mask_odd=getattr(static, "m_is_odd", None),
-                )
-                return jnp.asarray(jac_scan.tau)
-
-            def _state_jacobian_decision():
-                tau_decision = _scan_math_state_jacobian(
-                    _state_tau(),
-                    vmec2000_control=bool(vmec2000_control),
-                    ptau_tol=ptau_tol,
-                    relative_tol=1.0e-2 if bool(vmec2000_control) else None,
-                )
-                return tau_decision.bad_jacobian, tau_decision.min_tau, tau_decision.max_tau
-
-            def _nonvmec_tau():
-                if use_state_jac:
-                    return _state_tau()
-                return jnp.asarray(k.bc.jac.tau)
-
-            tau_decision = _scan_bad_jacobian_decision(
+            tau_decision = _scan_bad_jacobian_decision_from_step(
+                carry_adv=carry_adv,
+                kernels=k,
+                iter2=iter2,
+                static=static,
+                trig=trig,
+                s=s,
                 vmec2000_control=bool(vmec2000_control),
                 use_apply_payload_fusion=bool(use_apply_payload_fusion),
                 badjac_use_state=bool(badjac_use_state),
                 dump_ptau_state=bool(dump_ptau_state),
                 badjac_state_probe=bool(badjac_state_probe),
                 badjac_initial_state_probe_iters=int(badjac_initial_state_probe_iters),
-                iter2=iter2,
                 ptau_min=ptau_min,
                 ptau_max=ptau_max,
-                state_tau_fn=_state_jacobian_decision,
-                nonvmec_tau_fn=_nonvmec_tau,
                 ptau_tol=ptau_tol,
                 dtype=dtype,
+                use_state_jac=bool(use_state_jac),
+                ignore_badjac=(os.getenv("VMEC_JAX_SCAN_IGNORE_BADJAC", "") not in ("", "0")),
+                vmec_half_mesh_jacobian_from_state_func=vmec_half_mesh_jacobian_from_state,
                 cond=jax.lax.cond,
             )
             bad_jacobian = tau_decision.bad_jacobian
@@ -724,8 +706,6 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
             max_tau_state = tau_decision.max_tau_state
             badjac_ptau = tau_decision.badjac_ptau
             badjac_state = tau_decision.badjac_state
-            if os.getenv("VMEC_JAX_SCAN_IGNORE_BADJAC", "") not in ("", "0"):
-                bad_jacobian = jnp.asarray(False)
             # Axis reset handled before entering the scan loop.
 
             time_restart = evaluate_scan_time_control_restart(

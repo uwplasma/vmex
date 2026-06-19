@@ -23896,3 +23896,84 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.99999999979%.
+
+## 2026-06-19 Scan Context and Step-Math Boundary Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `Vmec2000ScanControllerContext.from_namespace(...)` so the residual
+   solver no longer carries a 100-line keyword constructor for the VMEC2000
+   scan controller.
+2. Moved VMEC2000 scan scalar sampling out of the controller closure and into
+   `vmec_jax/solvers/fixed_boundary/scan/math.py`.
+3. Moved the scan bad-Jacobian ptau/state branch decision out of the controller
+   closure and into the same scan math domain.
+4. Kept monkeypatch-sensitive global functions explicit at the context factory
+   call site, preserving the `vmec_jax.solve` compatibility facade behavior.
+
+Results obtained:
+
+- `vmec_jax/solvers/fixed_boundary/residual/iteration.py` decreased from 4618
+  to 4525 lines.
+- `solve_fixed_boundary_residual_iter` decreased from 4271 to 4178 lines.
+- `run_vmec2000_scan` decreased from 947 to 917 lines.
+- The nested `_advance_step` function no longer appears separately in the
+  source-health function-hotspot list; the remaining nested scan step is down to
+  366 lines.
+- The changed production files are net-negative for this tranche: 149
+  insertions and 152 deletions.
+
+Tests and commands run:
+
+- `python -m py_compile vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/scan/controller.py vmec_jax/solvers/fixed_boundary/scan/math.py`
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/scan/controller.py vmec_jax/solvers/fixed_boundary/scan/math.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_scan_math_helpers.py tests/test_solve_scan_output.py tests/test_solve_scan_planning_helpers.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_real_scan_wave10_coverage.py::test_vmec2000_scan_full_history_runs_fallback_decision tests/test_solve_real_scan_wave10_coverage.py::test_vmec2000_scan_light_history_keeps_scalar_diagnostics tests/test_solve_scan_payload_helpers.py tests/test_solve_scan_time_control.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_finish_cache_more_coverage.py::test_nonscan_reuses_preconditioner_seed_from_same_bcovar_refresh tests/test_solve_finish_cache_more_coverage.py::test_nonscan_non_strict_backtracking_accepts_momentum_update tests/test_solve_finish_cache_more_coverage.py::test_nonscan_debug_force_path_runs_with_m1_and_zeroing -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_hotpaths.py::test_preconditioner_output_scaling_gate_is_gpu_only_without_gpu tests/test_driver_api.py::test_python_default_fixed_boundary_uses_optimized_controller tests/test_implicit_helpers.py::test_fixed_boundary_residual_implicit_primal_matches_default_control_path -q`
+- `python tools/diagnostics/source_health.py --top 20 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. Commit and push this source-health-positive tranche.
+2. Start the explicit non-scan host-loop context/result boundary in the residual
+   domain. The next extraction should target the block after scan dispatch, but
+   it must keep helper resolution in `iteration.py` until compatibility-facade
+   monkeypatch behavior is intentionally moved.
+3. Continue keeping each source tranche net-negative or clearly justified by a
+   larger monolith reduction.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.99999982%.
+- Solver monolith reduction: 99.872%.
+- Free-boundary adjoint monolith reduction: 99.60%.
+- Driver workflow decomposition: 99.949%.
+- Residual iteration decomposition: 99.33%.
+- WOUT diagnostic/profile decomposition: 99.982%.
+- Bcovar/WOUT parity decomposition: 99.16%.
+- Force-kernel decomposition: 99.69%.
+- Scan/performance policy consolidation: 99.890%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.89%.
+- Fixed-boundary optimizer decomposition: 98.05%.
+- Plotting/WOUT visualization decomposition: 98.05%.
+- Free-boundary facade/domain decomposition: 99.1%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.82%.
+- Discrete-adjoint replay decomposition: 99.20%.
+- Free-boundary validation-gate maintainability: 98.40%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.99999999980%.

@@ -401,6 +401,116 @@ def scan_bad_jacobian_decision(
     )
 
 
+def sample_vmec2000_scan_scalars(
+    *,
+    carry_adv: Any,
+    iter2: Any,
+    max_iter: int,
+    nstep_screen: int,
+    scan_collect_scalars: bool,
+    force_sample: Any,
+    kernels: Any,
+    norms_current: Any,
+    gamma: float,
+    twopi: float,
+    lasym: bool,
+    cond: Any,
+) -> tuple[Any, Any, Any, Any]:
+    """Sample scalar quantities used by VMEC2000 scan screen output."""
+
+    sample_vmec = (iter2 <= 1) | (iter2 >= int(max_iter)) | ((iter2 % int(nstep_screen)) == 0) | force_sample
+    sample_vmec = sample_vmec & jnp.asarray(bool(scan_collect_scalars), dtype=bool)
+
+    def _compute_scalars(_):
+        r00_j = jnp.asarray(kernels.pr1_even)[0, 0, 0]
+        if bool(lasym):
+            z00_j = jnp.asarray(kernels.pz1_even)[0, 0, 0]
+        else:
+            z00_j = jnp.asarray(0.0, dtype=r00_j.dtype)
+        wb_val = jnp.asarray(norms_current.wb)
+        wp_val = jnp.asarray(norms_current.wp)
+        w_mhd = (wb_val + wp_val / (float(gamma) - 1.0)) * jnp.asarray(float(twopi * twopi), dtype=wb_val.dtype)
+        return r00_j, z00_j, w_mhd
+
+    def _reuse_scalars(_):
+        return carry_adv.r00_prev, carry_adv.z00_prev, carry_adv.w_mhd_prev
+
+    return (sample_vmec, *cond(sample_vmec, _compute_scalars, _reuse_scalars, operand=None))
+
+
+def scan_bad_jacobian_decision_from_step(
+    *,
+    carry_adv: Any,
+    kernels: Any,
+    iter2: Any,
+    static: Any,
+    trig: Any,
+    s: Any,
+    vmec2000_control: bool,
+    use_apply_payload_fusion: bool,
+    badjac_use_state: bool,
+    dump_ptau_state: bool,
+    badjac_state_probe: bool,
+    badjac_initial_state_probe_iters: int,
+    ptau_min: Any | None,
+    ptau_max: Any | None,
+    ptau_tol: float,
+    dtype: Any,
+    use_state_jac: bool,
+    ignore_badjac: bool,
+    vmec_half_mesh_jacobian_from_state_func: Any,
+    cond: Any,
+) -> ScanBadJacobianDecision:
+    """Resolve the scan bad-Jacobian branch for one controller step."""
+
+    def _state_tau():
+        jac_scan = vmec_half_mesh_jacobian_from_state_func(
+            state=carry_adv.state,
+            modes=static.modes,
+            trig=trig,
+            s=s,
+            lconm1=bool(getattr(static.cfg, "lconm1", True)),
+            lthreed=bool(getattr(static.cfg, "lthreed", True)),
+            mask_even=getattr(static, "m_is_even", None),
+            mask_odd=getattr(static, "m_is_odd", None),
+        )
+        return jnp.asarray(jac_scan.tau)
+
+    def _state_jacobian_decision():
+        tau_decision = _state_jacobian(
+            _state_tau(),
+            vmec2000_control=bool(vmec2000_control),
+            ptau_tol=ptau_tol,
+            relative_tol=1.0e-2 if bool(vmec2000_control) else None,
+        )
+        return tau_decision.bad_jacobian, tau_decision.min_tau, tau_decision.max_tau
+
+    def _nonvmec_tau():
+        if bool(use_state_jac):
+            return _state_tau()
+        return jnp.asarray(kernels.bc.jac.tau)
+
+    decision = scan_bad_jacobian_decision(
+        vmec2000_control=bool(vmec2000_control),
+        use_apply_payload_fusion=bool(use_apply_payload_fusion),
+        badjac_use_state=bool(badjac_use_state),
+        dump_ptau_state=bool(dump_ptau_state),
+        badjac_state_probe=bool(badjac_state_probe),
+        badjac_initial_state_probe_iters=int(badjac_initial_state_probe_iters),
+        iter2=iter2,
+        ptau_min=ptau_min,
+        ptau_max=ptau_max,
+        state_tau_fn=_state_jacobian_decision,
+        nonvmec_tau_fn=_nonvmec_tau,
+        ptau_tol=ptau_tol,
+        dtype=dtype,
+        cond=cond,
+    )
+    if bool(ignore_badjac):
+        decision = decision._replace(bad_jacobian=jnp.asarray(False))
+    return decision
+
+
 def _hold_step(
     carry_hold: Any,
     *,
