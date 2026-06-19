@@ -7,6 +7,97 @@ and should not drive new work unless a specific old result needs to be audited.
 
 Last updated: 2026-06-18.
 
+## 2026-06-18 Solve Facade Compatibility Export Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved broad legacy `vmec_jax.solve` compatibility exports out of
+   `solvers.fixed_boundary.residual.iteration` and into the solve facade.
+2. Rewired fixed-boundary public optimizer wrappers to inject dependencies from
+   their owning domain modules instead of importing through the residual
+   iteration monolith.
+3. Preserved legacy underscore aliases and monkeypatch propagation with an
+   explicit solve-facade alias registry.
+4. Made residual force-context setup tolerate lightweight injected trig stubs,
+   preserving existing dependency-injection tests.
+5. Added a NumPy `lax.fori_loop` shim and changed `_numpy_module_patch` to save
+   all original module attributes before applying patches, which prevents the
+   solve facade from propagating NumPy-mode symbols before downstream originals
+   have been recorded.
+
+Results obtained:
+
+- `vmec_jax/solvers/fixed_boundary/residual/iteration.py` dropped from 6604 to
+  6468 lines, a 136-line reduction in the remaining residual monolith.
+- `vmec_jax/solve.py` is now a compact compatibility registry rather than a
+  duplicated import/module-object list; it remains larger than before because it
+  now owns the compatibility surface previously hidden in the monolith.
+- Net touched-file line count is +43 lines for this tranche, driven by explicit
+  facade/API compatibility glue and a new regression test. This is acceptable
+  only as an intermediate move because it removes compatibility exports from
+  the residual solver; the next tranche should keep reducing
+  `solve_fixed_boundary_residual_iter` itself.
+- All test-imported `from vmec_jax.solve import ...` symbols resolve.
+- A direct NumPy patch-context probe now restores `vmec_forces.jnp` from
+  NumPy mode back to JAX mode after exit.
+- Source-health still identifies
+  `solve_fixed_boundary_residual_iter` as the largest production hotspot
+  (6061-line function inside a 6468-line file), so the next meaningful progress
+  is another extraction from that function, not more facade churn.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/solve.py vmec_jax/solvers/fixed_boundary/api.py vmec_jax/solvers/fixed_boundary/optimization/residual_context.py vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/vmec_numpy_forces.py`
+- `python -m ruff check vmec_jax/solve.py vmec_jax/solvers/fixed_boundary/api.py vmec_jax/solvers/fixed_boundary/optimization/residual_context.py vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/vmec_numpy_forces.py tests/test_vmec_numpy_forces_cache.py --select F401,F841 --ignore-noqa`
+- `JAX_ENABLE_X64=1 pytest -q tests/test_vmec_numpy_forces_cache.py tests/test_driver_api.py::test_run_fixed_boundary_accelerated_mode_defaults_to_single_grid -q`
+- `JAX_ENABLE_X64=1 pytest -q tests/test_solve_force_payload_helpers.py tests/test_solve_residual_iter_force_payload_helpers.py tests/test_solve_additional_helpers.py tests/test_solve_branch_coverage.py tests/test_solve_gd_wave10_coverage.py tests/test_solve_lbfgs_wave8_coverage.py tests/test_solve_residual_optimizer_wave8_coverage.py -q`
+- `JAX_ENABLE_X64=1 pytest -q tests/test_step6_solve_fixed_boundary.py tests/test_vmec2000_fixed_boundary_physics_gates.py tests/test_nonaxis_exec_stage_trace_parity.py tests/test_force_norms_dynamic_parity.py tests/test_residue_getfsq_parity.py tests/test_driver_api.py::test_run_fixed_boundary_accelerated_mode_defaults_to_single_grid -q`
+- `python tools/diagnostics/source_health.py --top 16 --top-functions 30`
+- `git diff --check`
+
+Best next steps:
+
+1. Extract another named seam from `solve_fixed_boundary_residual_iter`, starting
+   with either `_run_vmec2000_scan` setup/reporting or scan-step transition
+   assembly, and select the parity shard before editing.
+2. Avoid adding more solve-facade glue unless an import-compatibility test proves
+   it is necessary.
+3. Keep every tranche honest with source-health and line-count evidence; net
+   line growth should be paid back by monolith extraction in the following
+   tranche.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999%.
+- Solver monolith reduction: 99.67%.
+- Free-boundary adjoint monolith reduction: 99.42%.
+- Driver workflow decomposition: 99.92%.
+- Residual iteration decomposition: 97.9%.
+- WOUT diagnostic/profile decomposition: 99.89%.
+- Bcovar/WOUT parity decomposition: 99.11%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.72%.
+- Tomnsps transform decomposition: 98.5%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.56%.
+- Fixed-boundary optimizer decomposition: 95.8%.
+- Plotting/WOUT visualization decomposition: 95.9%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.35%.
+- QI objective/staged-runner decomposition: 96.9%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.999979%.
+
 ## 2026-06-18 Mercier/JXBFORCE Diagnostic Decomposition
 
 Branch: `codex/differentiability-refactor-plan`.

@@ -10,9 +10,70 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from vmec_jax.solvers.fixed_boundary.residual import iteration as _impl
+from vmec_jax._compat import has_jax, jax, jnp, jit
+from vmec_jax.field import b2_from_bsup, bsup_from_geom, bsup_from_sqrtg_lambda
+from vmec_jax.fourier import eval_fourier_dtheta, eval_fourier_dzeta_phys
+from vmec_jax.geom import eval_geom
+from vmec_jax.grids import angle_steps
+from vmec_jax.solvers.fixed_boundary.diagnostics import first_step as _first_step_diagnostics_helpers
+from vmec_jax.solvers.fixed_boundary.optimization import energy as _fixed_boundary_energy_helpers
+from vmec_jax.solvers.fixed_boundary.optimization import gd as _fixed_boundary_gd_helpers
+from vmec_jax.solvers.fixed_boundary.optimization import lambda_gd as _lambda_optimizer_helpers
+from vmec_jax.solvers.fixed_boundary.optimization import lbfgs as _fixed_boundary_lbfgs_helpers
+from vmec_jax.solvers.fixed_boundary.optimization import residual_context as _residual_force_context_helpers
+from vmec_jax.solvers.fixed_boundary.optimization import residual_gn as _residual_gn_helpers
+from vmec_jax.solvers.fixed_boundary.optimization import residual_lbfgs as _residual_lbfgs_helpers
+from vmec_jax.solvers.fixed_boundary.optimization.constraints import (
+    enforce_fixed_boundary_and_axis as _enforce_fixed_boundary_and_axis,
+    enforce_lambda_gauge as _enforce_lambda_gauge,
+    grad_rms_state as _grad_rms_state,
+    mode00_index as _mode00_index,
+)
+from vmec_jax.solvers.fixed_boundary.optimization.gradient import (
+    mask_grad_for_constraints as _mask_grad_for_constraints,
+    update_state_gd as _update_state_gd,
+)
+from vmec_jax.solvers.fixed_boundary.optimization.quasi_newton import (
+    ensure_descent_direction as _ensure_descent_direction,
+    lbfgs_curvature_tolerance as _resolve_lbfgs_curvature_tol,
+    lbfgs_two_loop_direction as _lbfgs_two_loop_direction,
+)
+from vmec_jax.solvers.fixed_boundary.optimization.residual_objective import (
+    assemble_residual_objective_terms as _assemble_residual_objective_terms,
+    residual_objective_vector as _residual_objective_vector,
+)
+from vmec_jax.solvers.fixed_boundary.optimization.tolerances import (
+    dtype_tiny as _dtype_tiny,
+    resolve_cg_tol as _resolve_cg_tol,
+    resolve_grad_tol as _resolve_grad_tol,
+    resolve_lm_damping as _resolve_lm_damping,
+)
+from vmec_jax.solvers.fixed_boundary.options import (
+    validate_fixed_boundary_gd_options,
+    validate_fixed_boundary_lbfgs_options,
+    validate_lambda_gd_options,
+    validate_pressure_shape,
+    validate_residual_gn_options,
+    validate_residual_lbfgs_options,
+)
+from vmec_jax.solvers.fixed_boundary.preconditioning.operators import (
+    apply_preconditioner as _apply_preconditioner,
+    metric_surface_precond_scales_np as _metric_surface_precond_scales_np,
+    radial_tridi_smooth_dirichlet as _radial_tridi_smooth_dirichlet,
+)
+from vmec_jax.solvers.fixed_boundary.profiles import (
+    _half_mesh_from_full_mesh,
+    _icurv_full_mesh_from_indata,
+    _mass_half_mesh_from_indata,
+    _pressure_half_mesh_from_indata,
+    _vmec_force_flux_profiles,
+)
+from vmec_jax.solvers.fixed_boundary.residual.payload_blocks import (
+    zero_edge_rz_force_blocks as _zero_edge_rz_force_blocks,
+)
 from vmec_jax.solvers.fixed_boundary.results import SolveFixedBoundaryResult, SolveLambdaResult, SolveVmecResidualResult
-from vmec_jax.state import VMECState
+from vmec_jax.solvers.fixed_boundary.results import WoutLikeVmecForces as _WoutLikeVmecForces
+from vmec_jax.state import VMECState, pack_state, unpack_state
 
 
 def solve_lambda_gd(
@@ -37,7 +98,7 @@ def solve_lambda_gd(
 ) -> SolveLambdaResult:
     """Solve VMEC lambda coefficients with fixed R/Z geometry."""
 
-    return _impl._lambda_optimizer_helpers.solve_lambda_gd_impl(
+    return _lambda_optimizer_helpers.solve_lambda_gd_impl(
         state0,
         static,
         phipf=phipf,
@@ -55,19 +116,19 @@ def solve_lambda_gd(
         precond_exponent=precond_exponent,
         precond_radial_alpha=precond_radial_alpha,
         verbose=verbose,
-        has_jax_func=_impl.has_jax,
-        validate_options_func=_impl.validate_lambda_gd_options,
-        mode00_index_func=_impl._mode00_index,
-        eval_geom_func=_impl.eval_geom,
-        eval_fourier_dtheta_func=_impl.eval_fourier_dtheta,
-        eval_fourier_dzeta_phys_func=_impl.eval_fourier_dzeta_phys,
-        bsup_from_sqrtg_lambda_func=_impl.bsup_from_sqrtg_lambda,
-        angle_steps_func=_impl.angle_steps,
-        enforce_lambda_gauge_func=_impl._enforce_lambda_gauge,
-        resolve_grad_tol_func=_impl._resolve_grad_tol,
-        jax_module=_impl.jax,
-        jnp_module=_impl.jnp,
-        jit_func=_impl.jit,
+        has_jax_func=has_jax,
+        validate_options_func=validate_lambda_gd_options,
+        mode00_index_func=_mode00_index,
+        eval_geom_func=eval_geom,
+        eval_fourier_dtheta_func=eval_fourier_dtheta,
+        eval_fourier_dzeta_phys_func=eval_fourier_dzeta_phys,
+        bsup_from_sqrtg_lambda_func=bsup_from_sqrtg_lambda,
+        angle_steps_func=angle_steps,
+        enforce_lambda_gauge_func=_enforce_lambda_gauge,
+        resolve_grad_tol_func=_resolve_grad_tol,
+        jax_module=jax,
+        jnp_module=jnp,
+        jit_func=jit,
     )
 
 
@@ -103,7 +164,7 @@ def solve_fixed_boundary_gd(
 ) -> SolveFixedBoundaryResult:
     """Minimize a VMEC-style energy objective over fixed-boundary coefficients."""
 
-    return _impl._fixed_boundary_gd_helpers.solve_fixed_boundary_gd_impl(
+    return _fixed_boundary_gd_helpers.solve_fixed_boundary_gd_impl(
         state0,
         static,
         phipf=phipf,
@@ -131,24 +192,24 @@ def solve_fixed_boundary_gd(
         differentiable=differentiable,
         stop_grad_in_update=stop_grad_in_update,
         verbose=verbose,
-        has_jax_func=_impl.has_jax,
-        validate_options_func=_impl.validate_fixed_boundary_gd_options,
-        prepare_energy_context_func=_impl._fixed_boundary_energy_helpers.prepare_fixed_boundary_energy_context,
-        enforce_fixed_boundary_and_axis_func=_impl._enforce_fixed_boundary_and_axis,
-        mask_grad_for_constraints_func=_impl._mask_grad_for_constraints,
-        apply_preconditioner_func=_impl._apply_preconditioner,
-        update_state_gd_func=_impl._update_state_gd,
-        grad_rms_state_func=_impl._grad_rms_state,
-        resolve_grad_tol_func=_impl._resolve_grad_tol,
-        mode00_index_func=_impl._mode00_index,
-        eval_geom_func=_impl.eval_geom,
-        bsup_from_geom_func=_impl.bsup_from_geom,
-        b2_from_bsup_func=_impl.b2_from_bsup,
-        angle_steps_func=_impl.angle_steps,
-        validate_pressure_shape_func=_impl.validate_pressure_shape,
-        jax_module=_impl.jax,
-        jnp_module=_impl.jnp,
-        jit_func=_impl.jit,
+        has_jax_func=has_jax,
+        validate_options_func=validate_fixed_boundary_gd_options,
+        prepare_energy_context_func=_fixed_boundary_energy_helpers.prepare_fixed_boundary_energy_context,
+        enforce_fixed_boundary_and_axis_func=_enforce_fixed_boundary_and_axis,
+        mask_grad_for_constraints_func=_mask_grad_for_constraints,
+        apply_preconditioner_func=_apply_preconditioner,
+        update_state_gd_func=_update_state_gd,
+        grad_rms_state_func=_grad_rms_state,
+        resolve_grad_tol_func=_resolve_grad_tol,
+        mode00_index_func=_mode00_index,
+        eval_geom_func=eval_geom,
+        bsup_from_geom_func=bsup_from_geom,
+        b2_from_bsup_func=b2_from_bsup,
+        angle_steps_func=angle_steps,
+        validate_pressure_shape_func=validate_pressure_shape,
+        jax_module=jax,
+        jnp_module=jnp,
+        jit_func=jit,
     )
 
 
@@ -180,7 +241,7 @@ def solve_fixed_boundary_lbfgs(
 ) -> SolveFixedBoundaryResult:
     """Fixed-boundary energy solve using a dependency-free L-BFGS update."""
 
-    return _impl._fixed_boundary_lbfgs_helpers.solve_fixed_boundary_lbfgs_impl(
+    return _fixed_boundary_lbfgs_helpers.solve_fixed_boundary_lbfgs_impl(
         state0,
         static,
         phipf=phipf,
@@ -204,27 +265,27 @@ def solve_fixed_boundary_lbfgs(
         precond_exponent=precond_exponent,
         precond_radial_alpha=precond_radial_alpha,
         verbose=verbose,
-        has_jax_func=_impl.has_jax,
-        validate_options_func=_impl.validate_fixed_boundary_lbfgs_options,
-        prepare_energy_context_func=_impl._fixed_boundary_energy_helpers.prepare_fixed_boundary_energy_context,
-        enforce_fixed_boundary_and_axis_func=_impl._enforce_fixed_boundary_and_axis,
-        mask_grad_for_constraints_func=_impl._mask_grad_for_constraints,
-        apply_preconditioner_func=_impl._apply_preconditioner,
-        grad_rms_state_func=_impl._grad_rms_state,
-        resolve_grad_tol_func=_impl._resolve_grad_tol,
-        lbfgs_two_loop_direction_func=_impl._lbfgs_two_loop_direction,
-        ensure_descent_direction_func=_impl._ensure_descent_direction,
-        resolve_lbfgs_curvature_tol_func=_impl._resolve_lbfgs_curvature_tol,
-        pack_state_func=_impl.pack_state,
-        unpack_state_func=_impl.unpack_state,
-        mode00_index_func=_impl._mode00_index,
-        eval_geom_func=_impl.eval_geom,
-        bsup_from_geom_func=_impl.bsup_from_geom,
-        b2_from_bsup_func=_impl.b2_from_bsup,
-        angle_steps_func=_impl.angle_steps,
-        validate_pressure_shape_func=_impl.validate_pressure_shape,
-        jnp_module=_impl.jnp,
-        jit_func=_impl.jit,
+        has_jax_func=has_jax,
+        validate_options_func=validate_fixed_boundary_lbfgs_options,
+        prepare_energy_context_func=_fixed_boundary_energy_helpers.prepare_fixed_boundary_energy_context,
+        enforce_fixed_boundary_and_axis_func=_enforce_fixed_boundary_and_axis,
+        mask_grad_for_constraints_func=_mask_grad_for_constraints,
+        apply_preconditioner_func=_apply_preconditioner,
+        grad_rms_state_func=_grad_rms_state,
+        resolve_grad_tol_func=_resolve_grad_tol,
+        lbfgs_two_loop_direction_func=_lbfgs_two_loop_direction,
+        ensure_descent_direction_func=_ensure_descent_direction,
+        resolve_lbfgs_curvature_tol_func=_resolve_lbfgs_curvature_tol,
+        pack_state_func=pack_state,
+        unpack_state_func=unpack_state,
+        mode00_index_func=_mode00_index,
+        eval_geom_func=eval_geom,
+        bsup_from_geom_func=bsup_from_geom,
+        b2_from_bsup_func=b2_from_bsup,
+        angle_steps_func=angle_steps,
+        validate_pressure_shape_func=validate_pressure_shape,
+        jnp_module=jnp,
+        jit_func=jit,
     )
 
 
@@ -255,7 +316,7 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
 ) -> SolveVmecResidualResult:
     """Fixed-boundary solve by minimizing the VMEC force-residual objective."""
 
-    return _impl._residual_lbfgs_helpers.solve_fixed_boundary_lbfgs_vmec_residual_impl(
+    return _residual_lbfgs_helpers.solve_fixed_boundary_lbfgs_vmec_residual_impl(
         state0,
         static,
         indata=indata,
@@ -278,30 +339,30 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
         precond_exponent=precond_exponent,
         precond_radial_alpha=precond_radial_alpha,
         verbose=verbose,
-        has_jax_func=_impl.has_jax,
-        validate_options_func=_impl.validate_residual_lbfgs_options,
-        prepare_residual_force_context_func=_impl._residual_force_context_helpers.prepare_residual_force_context,
-        mode00_index_func=_impl._mode00_index,
-        half_mesh_from_full_mesh_func=_impl._half_mesh_from_full_mesh,
-        mass_half_mesh_from_indata_func=_impl._mass_half_mesh_from_indata,
-        pressure_half_mesh_from_indata_func=_impl._pressure_half_mesh_from_indata,
-        icurv_full_mesh_from_indata_func=_impl._icurv_full_mesh_from_indata,
-        vmec_force_flux_profiles_func=_impl._vmec_force_flux_profiles,
-        wout_like_cls=_impl._WoutLikeVmecForces,
-        assemble_residual_objective_terms_func=_impl._assemble_residual_objective_terms,
-        enforce_fixed_boundary_and_axis_func=_impl._enforce_fixed_boundary_and_axis,
-        mask_grad_for_constraints_func=_impl._mask_grad_for_constraints,
-        apply_preconditioner_func=_impl._apply_preconditioner,
-        grad_rms_state_func=_impl._grad_rms_state,
-        resolve_grad_tol_func=_impl._resolve_grad_tol,
-        lbfgs_two_loop_direction_func=_impl._lbfgs_two_loop_direction,
-        ensure_descent_direction_func=_impl._ensure_descent_direction,
-        resolve_lbfgs_curvature_tol_func=_impl._resolve_lbfgs_curvature_tol,
-        pack_state_func=_impl.pack_state,
-        unpack_state_func=_impl.unpack_state,
-        jax_module=_impl.jax,
-        jnp_module=_impl.jnp,
-        jit_func=_impl.jit,
+        has_jax_func=has_jax,
+        validate_options_func=validate_residual_lbfgs_options,
+        prepare_residual_force_context_func=_residual_force_context_helpers.prepare_residual_force_context,
+        mode00_index_func=_mode00_index,
+        half_mesh_from_full_mesh_func=_half_mesh_from_full_mesh,
+        mass_half_mesh_from_indata_func=_mass_half_mesh_from_indata,
+        pressure_half_mesh_from_indata_func=_pressure_half_mesh_from_indata,
+        icurv_full_mesh_from_indata_func=_icurv_full_mesh_from_indata,
+        vmec_force_flux_profiles_func=_vmec_force_flux_profiles,
+        wout_like_cls=_WoutLikeVmecForces,
+        assemble_residual_objective_terms_func=_assemble_residual_objective_terms,
+        enforce_fixed_boundary_and_axis_func=_enforce_fixed_boundary_and_axis,
+        mask_grad_for_constraints_func=_mask_grad_for_constraints,
+        apply_preconditioner_func=_apply_preconditioner,
+        grad_rms_state_func=_grad_rms_state,
+        resolve_grad_tol_func=_resolve_grad_tol,
+        lbfgs_two_loop_direction_func=_lbfgs_two_loop_direction,
+        ensure_descent_direction_func=_ensure_descent_direction,
+        resolve_lbfgs_curvature_tol_func=_resolve_lbfgs_curvature_tol,
+        pack_state_func=pack_state,
+        unpack_state_func=unpack_state,
+        jax_module=jax,
+        jnp_module=jnp,
+        jit_func=jit,
     )
 
 
@@ -334,7 +395,7 @@ def solve_fixed_boundary_gn_vmec_residual(
 ) -> SolveVmecResidualResult:
     """Fixed-boundary solve using Gauss-Newton on VMEC residual blocks."""
 
-    return _impl._residual_gn_helpers.solve_fixed_boundary_gn_vmec_residual_impl(
+    return _residual_gn_helpers.solve_fixed_boundary_gn_vmec_residual_impl(
         state0,
         static,
         indata=indata,
@@ -359,29 +420,29 @@ def solve_fixed_boundary_gn_vmec_residual(
         bt_factor=bt_factor,
         jit_kernels=jit_kernels,
         verbose=verbose,
-        has_jax_func=_impl.has_jax,
-        validate_options_func=_impl.validate_residual_gn_options,
-        prepare_residual_force_context_func=_impl._residual_force_context_helpers.prepare_residual_force_context,
-        mode00_index_func=_impl._mode00_index,
-        half_mesh_from_full_mesh_func=_impl._half_mesh_from_full_mesh,
-        mass_half_mesh_from_indata_func=_impl._mass_half_mesh_from_indata,
-        pressure_half_mesh_from_indata_func=_impl._pressure_half_mesh_from_indata,
-        icurv_full_mesh_from_indata_func=_impl._icurv_full_mesh_from_indata,
-        vmec_force_flux_profiles_func=_impl._vmec_force_flux_profiles,
-        wout_like_cls=_impl._WoutLikeVmecForces,
-        assemble_residual_objective_terms_func=_impl._assemble_residual_objective_terms,
-        residual_objective_vector_func=_impl._residual_objective_vector,
-        enforce_fixed_boundary_and_axis_func=_impl._enforce_fixed_boundary_and_axis,
-        mask_grad_for_constraints_func=_impl._mask_grad_for_constraints,
-        grad_rms_state_func=_impl._grad_rms_state,
-        resolve_cg_tol_func=_impl._resolve_cg_tol,
-        resolve_lm_damping_func=_impl._resolve_lm_damping,
-        dtype_tiny_func=_impl._dtype_tiny,
-        pack_state_func=_impl.pack_state,
-        unpack_state_func=_impl.unpack_state,
-        jax_module=_impl.jax,
-        jnp_module=_impl.jnp,
-        jit_func=_impl.jit,
+        has_jax_func=has_jax,
+        validate_options_func=validate_residual_gn_options,
+        prepare_residual_force_context_func=_residual_force_context_helpers.prepare_residual_force_context,
+        mode00_index_func=_mode00_index,
+        half_mesh_from_full_mesh_func=_half_mesh_from_full_mesh,
+        mass_half_mesh_from_indata_func=_mass_half_mesh_from_indata,
+        pressure_half_mesh_from_indata_func=_pressure_half_mesh_from_indata,
+        icurv_full_mesh_from_indata_func=_icurv_full_mesh_from_indata,
+        vmec_force_flux_profiles_func=_vmec_force_flux_profiles,
+        wout_like_cls=_WoutLikeVmecForces,
+        assemble_residual_objective_terms_func=_assemble_residual_objective_terms,
+        residual_objective_vector_func=_residual_objective_vector,
+        enforce_fixed_boundary_and_axis_func=_enforce_fixed_boundary_and_axis,
+        mask_grad_for_constraints_func=_mask_grad_for_constraints,
+        grad_rms_state_func=_grad_rms_state,
+        resolve_cg_tol_func=_resolve_cg_tol,
+        resolve_lm_damping_func=_resolve_lm_damping,
+        dtype_tiny_func=_dtype_tiny,
+        pack_state_func=pack_state,
+        unpack_state_func=unpack_state,
+        jax_module=jax,
+        jnp_module=jnp,
+        jit_func=jit,
     )
 
 
@@ -403,7 +464,7 @@ def first_step_diagnostics(
 ) -> Dict[str, Any]:
     """Return a one-step force/precondition/update diagnostic bundle."""
 
-    return _impl._first_step_diagnostics_helpers.first_step_diagnostics_impl(
+    return _first_step_diagnostics_helpers.first_step_diagnostics_impl(
         state0,
         static,
         indata=indata,
@@ -417,17 +478,17 @@ def first_step_diagnostics(
         include_edge=include_edge,
         zero_m1=zero_m1,
         use_axisymmetric_preconditioner=use_axisymmetric_preconditioner,
-        has_jax_func=_impl.has_jax,
-        mode00_index_func=_impl._mode00_index,
-        half_mesh_from_full_mesh_func=_impl._half_mesh_from_full_mesh,
-        mass_half_mesh_from_indata_func=_impl._mass_half_mesh_from_indata,
-        pressure_half_mesh_from_indata_func=_impl._pressure_half_mesh_from_indata,
-        icurv_full_mesh_from_indata_func=_impl._icurv_full_mesh_from_indata,
-        vmec_force_flux_profiles_func=_impl._vmec_force_flux_profiles,
-        zero_edge_rz_force_blocks_func=_impl._zero_edge_rz_force_blocks,
-        radial_tridi_smooth_dirichlet_func=_impl._radial_tridi_smooth_dirichlet,
-        metric_surface_precond_scales_np_func=_impl._metric_surface_precond_scales_np,
-        wout_like_vmec_forces_cls=_impl._WoutLikeVmecForces,
+        has_jax_func=has_jax,
+        mode00_index_func=_mode00_index,
+        half_mesh_from_full_mesh_func=_half_mesh_from_full_mesh,
+        mass_half_mesh_from_indata_func=_mass_half_mesh_from_indata,
+        pressure_half_mesh_from_indata_func=_pressure_half_mesh_from_indata,
+        icurv_full_mesh_from_indata_func=_icurv_full_mesh_from_indata,
+        vmec_force_flux_profiles_func=_vmec_force_flux_profiles,
+        zero_edge_rz_force_blocks_func=_zero_edge_rz_force_blocks,
+        radial_tridi_smooth_dirichlet_func=_radial_tridi_smooth_dirichlet,
+        metric_surface_precond_scales_np_func=_metric_surface_precond_scales_np,
+        wout_like_vmec_forces_cls=_WoutLikeVmecForces,
     )
 
 

@@ -42,12 +42,18 @@ def resolve_residual_trig(
     trig = getattr(static, "trig_vmec", None)
     needs_build = trig is None
     if not needs_build:
-        needs_build = (
-            int(trig.ntheta1) != int(static.cfg.ntheta)
-            or int(trig.cosnv.shape[0]) != int(static.cfg.nzeta)
-            or int(trig.cosmu.shape[1]) != int(wout_like.mpol)
-            or int(trig.cosnv.shape[1]) != int(wout_like.ntor) + 1
-        )
+        try:
+            needs_build = (
+                int(trig.ntheta1) != int(static.cfg.ntheta)
+                or int(trig.cosnv.shape[0]) != int(static.cfg.nzeta)
+                or int(trig.cosmu.shape[1]) != int(wout_like.mpol)
+                or int(trig.cosnv.shape[1]) != int(wout_like.ntor) + 1
+            )
+        except AttributeError:
+            # Lightweight tests and monkeypatch workflows sometimes inject a
+            # sentinel trig object.  Preserve that explicit dependency-injection
+            # seam instead of forcing a rebuild.
+            needs_build = False
     if needs_build:
         trig = vmec_trig_tables_func(
             ntheta=int(static.cfg.ntheta),

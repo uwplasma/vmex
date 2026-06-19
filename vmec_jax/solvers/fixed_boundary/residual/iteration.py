@@ -12,11 +12,6 @@ This module intentionally avoids optional dependencies (e.g. jaxopt). The curren
 implementation uses gradient descent with a simple backtracking line search.
 """
 
-# ruff: noqa: F401
-# This module still owns many private compatibility aliases that are re-exported
-# by ``vmec_jax.solve``.  Some are consumed by fixed-boundary API wrappers or by
-# downstream diagnostic monkeypatch workflows rather than by this file directly.
-
 from __future__ import annotations
 
 from contextlib import nullcontext
@@ -36,10 +31,7 @@ from vmec_jax.solvers.fixed_boundary.residual.config import (
     HEAVY_DUMP_ENVS as _HEAVY_DUMP_ENVS,
     LIGHT_DUMP_ENVS as _LIGHT_DUMP_ENVS,
     bad_jacobian_tau_tolerance as _bad_jacobian_tau_tolerance,
-    normalize_debug_print_mode as _normalize_debug_print_mode,  # noqa: F401 - re-exported for internal helpers/tests.
-    parse_bad_jacobian_config as _parse_bad_jacobian_config,  # noqa: F401 - re-exported for internal helpers/tests.
     resolve_axis_reset_config as _resolve_axis_reset_config,
-    resolve_chunked_scan_config as _resolve_chunked_scan_config,  # noqa: F401 - re-exported for internal helpers/tests.
     resolve_debug_print_config as _resolve_debug_print_config,
     resolve_host_profile_setup as _resolve_host_profile_setup,
     resolve_nstep_screen as _resolve_nstep_screen,
@@ -55,7 +47,6 @@ from vmec_jax.solvers.fixed_boundary.residual.policy import (
     residual_iter_history_record as _residual_iter_history_record,
     scan_fallback_decision as _scan_fallback_decision,
     scan_fallback_message as _scan_fallback_message,
-    vmec2000_scan_options_from_env as _vmec2000_scan_options_from_env,
     vmec2000_time_control_decision as _vmec2000_time_control_decision,
 )
 from vmec_jax.solvers.fixed_boundary.residual.runtime import (
@@ -98,13 +89,7 @@ from vmec_jax.solvers.fixed_boundary.residual.force_cache import (
     select_compute_forces_callable as _select_compute_forces_callable,
 )
 from vmec_jax.solvers.fixed_boundary.residual.force_payload import (
-    evaluate_residual_force_from_state as _evaluate_residual_force_from_state,
-    force_z_channel_square_sums as _force_z_channel_square_sums,  # noqa: F401 - compatibility alias for tests/internal users.
-    maybe_debug_force_z_channel_square_sums as _maybe_debug_force_z_channel_square_sums,  # noqa: F401 - compatibility alias for tests/internal users.
-    residual_force_payload_after_m1_scalxc_with_scan_debug as _residual_force_payload_after_m1_scalxc_with_scan_debug,  # noqa: F401 - compatibility alias for tests/internal users.
-    residual_force_gcx2_after_edge_policy as _residual_force_gcx2_after_edge_policy,  # noqa: F401 - compatibility alias for tests/internal users.
-    residual_force_payload_from_kernels as _residual_force_payload_from_kernels,
-    resolve_residual_force_mask_pack as _resolve_residual_force_mask_pack,  # noqa: F401 - compatibility alias for tests/internal users.
+    evaluate_residual_force_from_state as _evaluate_residual_force_from_state,  # noqa: F401 - compatibility alias for tests/internal users.
 )
 from vmec_jax.solvers.fixed_boundary.residual.update import (
     ResidualVelocityBlocks as _ResidualVelocityBlocks,
@@ -116,37 +101,23 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     scale_velocity_blocks as _scale_velocity_blocks,
     zero_velocity_blocks_like as _zero_velocity_blocks_like,
 )
-from vmec_jax.field import TWOPI, b2_from_bsup, bsup_from_geom, bsup_from_sqrtg_lambda
-from vmec_jax.fourier import eval_fourier_dtheta, eval_fourier_dzeta_phys
-from vmec_jax.geom import eval_geom
-from vmec_jax.grids import angle_steps
+from vmec_jax.field import TWOPI
 from vmec_jax.solvers.fixed_boundary.jit_cache import (
     jit_cache_get as _jit_cache_get,
-    jit_cache_limit as _jit_cache_limit,  # noqa: F401 - re-exported for existing internal tests/importers.
     jit_cache_put as _jit_cache_put,
     record_scan_runner_cache_miss_categories as _record_scan_runner_cache_miss_categories,
 )
 from vmec_jax.solvers.fixed_boundary.diagnostics import hlo as _hlo_dump_helpers
-from vmec_jax.solvers.fixed_boundary.diagnostics import first_step as _first_step_diagnostics_helpers
-from vmec_jax.solvers.fixed_boundary.optimization import energy as _fixed_boundary_energy_helpers
-from vmec_jax.solvers.fixed_boundary.optimization import gd as _fixed_boundary_gd_helpers
-from vmec_jax.solvers.fixed_boundary.optimization import lambda_gd as _lambda_optimizer_helpers
-from vmec_jax.solvers.fixed_boundary.optimization import lbfgs as _fixed_boundary_lbfgs_helpers
 from vmec_jax.solvers.fixed_boundary.optimization import residual_context as _residual_force_context_helpers
-from vmec_jax.solvers.fixed_boundary.optimization import residual_gn as _residual_gn_helpers
-from vmec_jax.solvers.fixed_boundary.optimization import residual_lbfgs as _residual_lbfgs_helpers
 from vmec_jax.solvers.fixed_boundary.diagnostics.io import (
     _dump_freeb_axis_trace_record,
     _dump_freeb_control_trace_record,
     _dump_time_control_trace_record,
     _finite_float_or_zero,
-    _format_axis_coeff,  # noqa: F401 - re-exported for existing internal tests/importers.
     _format_checkpoint_log_row as _format_checkpoint_log_row,
     _format_evolve_trace_row as _format_evolve_trace_row,
     _format_freeb_control_trace_row as _format_freeb_control_trace_row,
     _format_time_control_log_row as _format_time_control_log_row,
-    _format_time_control_trace_row,  # noqa: F401 - re-exported for existing internal tests/importers.
-    _format_vmec2000_iter_row,  # noqa: F401 - re-exported for existing internal tests/importers.
     _legacy_dump_record_path as _legacy_dump_record_path,
     _legacy_single_dump_iter_selected as _legacy_single_dump_iter_selected,
     _materialize_adjoint_trace_array,
@@ -161,26 +132,9 @@ from vmec_jax.solvers.fixed_boundary.diagnostics.io import (
     _vmec2000_cadence_selected,
 )
 from vmec_jax.solvers.fixed_boundary.options import (
-    validate_fixed_boundary_gd_options,
-    validate_fixed_boundary_lbfgs_options,
-    validate_lambda_gd_options,
-    validate_pressure_shape,
-    validate_residual_gn_options,
     validate_residual_iteration_options,
-    validate_residual_lbfgs_options,
-)
-from vmec_jax.solvers.fixed_boundary.optimization.quasi_newton import (
-    ensure_descent_direction as _ensure_descent_direction,
-    lbfgs_curvature_tolerance as _resolve_lbfgs_curvature_tol,
-    lbfgs_two_loop_direction as _lbfgs_two_loop_direction,
 )
 from vmec_jax.solvers.fixed_boundary.profiles import (
-    _half_mesh_from_full_mesh,
-    _icurv_full_mesh_from_indata,
-    _mass_half_mesh_from_indata,
-    _pressure_half_mesh_from_indata,
-    _s_half_from_full_mesh_s,  # noqa: F401 - re-exported for existing internal tests/importers.
-    _vmec_force_flux_profiles,
     build_wout_like_profiles_from_indata as _build_wout_like_profiles_from_indata,
 )
 from vmec_jax.solvers.fixed_boundary.residual.geometry import (
@@ -190,23 +144,12 @@ from vmec_jax.solvers.fixed_boundary.residual.geometry import (
 )
 from vmec_jax.solvers.fixed_boundary.residual.mode_transform import (
     build_mode_transform_context as _build_mode_transform_context,
-    build_mode_transform_host_projection as _build_mode_transform_host_projection,
-    mn_cos_to_signed_host_projected as _mn_cos_to_signed_host_projected,
-    mn_sin_to_signed_host_projected as _mn_sin_to_signed_host_projected,
-    mode_diag_weights_mn as _mode_diag_weights_mn_helper,
-    mode_diag_weights_mn_np as _mode_diag_weights_mn_np_helper,
-    vmec_scalxc_from_s_np as _vmec_scalxc_from_s_np_helper,
 )
 from vmec_jax.solvers.fixed_boundary.residual.payload_blocks import (
     ForceBlocks as _ForceBlocks,
-    normalize_force_blocks as _normalize_force_blocks,  # noqa: F401 - re-exported for internal tests/importers.
     preconditioner_output_blocks_jax as _preconditioner_output_blocks_jax,
     preconditioner_output_blocks_np as _preconditioner_output_blocks_np,
     radial_preconditioner_output_blocks_jax as _radial_preconditioner_output_blocks_jax,
-    residual_force_payload_after_m1_scalxc as _residual_force_payload_after_m1_scalxc,  # noqa: F401 - compatibility alias for tests/internal users.
-    residual_force_payload_m1_scalxc_stages as _residual_force_payload_m1_scalxc_stages,  # noqa: F401 - compatibility alias for tests/internal users.
-    zero_edge_rz_force_block as _zero_edge_rz_force_block,  # noqa: F401 - re-exported for internal tests/importers.
-    zero_edge_rz_force_blocks as _zero_edge_rz_force_blocks,
 )
 from vmec_jax.solvers.fixed_boundary.residual.force_norms import (
     lambda_preconditioned_full_norm as _lambda_preconditioned_full_norm,
@@ -221,19 +164,10 @@ from vmec_jax.solvers.fixed_boundary.residual.host_diagnostics import (
 from vmec_jax.solvers.fixed_boundary.residual.scan_adapters import (
     ScanConvergencePredicate,
     ScanDeviceRuntime,
-    ScanTimeControlDumper,
-    ScanVmec2000PrintContext,
     build_vmec2000_scan_runtime_setup as _build_vmec2000_scan_runtime_setup,
     scan_m1_preconditioner_rhs as _scan_m1_preconditioner_rhs,
 )
 from vmec_jax.solvers.fixed_boundary.residual import preconditioner_payload as _precond_payload_facade
-from vmec_jax.solvers.fixed_boundary.residual.preconditioner_payload import (
-    _ACCEPTED_CONTROL_PAYLOAD_JIT_CACHE,
-    _PRECOND_APPLY_PAYLOAD_JIT_CACHE,
-    _PRECOND_OUTPUT_PAYLOAD_JIT_CACHE,
-    _PRECOND_OUTPUT_SCALE_JIT_CACHE,
-    _STRICT_UPDATE_STEP_JIT_CACHE,
-)
 from vmec_jax.solvers.fixed_boundary.residual.ptau import (
     accepted_control_ptau_arrays as _accepted_control_ptau_arrays_helper,
     maybe_dump_jacobian_terms as _maybe_dump_jacobian_terms_helper,
@@ -242,69 +176,33 @@ from vmec_jax.solvers.fixed_boundary.residual.ptau import (
     ptau_minmax_from_k_host as _ptau_minmax_from_k_host_helper,
     ptau_minmax_from_k_jax as _ptau_minmax_from_k_jax_helper,
 )
-from vmec_jax.solvers.fixed_boundary.optimization.tolerances import (
-    dtype_eps as _dtype_eps,  # noqa: F401 - re-exported for existing internal tests/importers.
-    dtype_tiny as _dtype_tiny,
-    resolve_cg_tol as _resolve_cg_tol,
-    resolve_grad_tol as _resolve_grad_tol,
-    resolve_lm_damping as _resolve_lm_damping,
-)
 from vmec_jax.solvers.fixed_boundary.optimization.constraints import (
     apply_vmec_lambda_axis_rules_to_state as _apply_vmec_lambda_axis_rules_to_state,
-    axis_m0_mask as _axis_m0_mask,  # noqa: F401 - re-exported for existing internal tests/importers.
-    enforce_field_rows as _enforce_field_rows,  # noqa: F401 - re-exported for existing internal tests/importers.
-    enforce_field_rows_np as _enforce_field_rows_np,  # noqa: F401 - re-exported for existing internal tests/importers.
     enforce_fixed_boundary_and_axis as _enforce_fixed_boundary_and_axis,
     enforce_fixed_boundary_and_axis_np as _enforce_fixed_boundary_and_axis_np,
-    enforce_lambda_gauge as _enforce_lambda_gauge,
-    grad_rms_state as _grad_rms_state,
-    mode00_index as _mode00_index,
-    replace_mode_slice as _replace_mode_slice,  # noqa: F401 - re-exported for existing internal tests/importers.
-    replace_mode_slice_np as _replace_mode_slice_np,  # noqa: F401 - re-exported for existing internal tests/importers.
-    scale_mode_slice as _scale_mode_slice,  # noqa: F401 - re-exported for existing internal tests/importers.
-    scale_mode_slice_np as _scale_mode_slice_np,  # noqa: F401 - re-exported for existing internal tests/importers.
-    zero_coeff_column as _zero_coeff_column,  # noqa: F401 - re-exported for existing internal tests/importers.
-    zero_coeff_column_np as _zero_coeff_column_np,  # noqa: F401 - re-exported for existing internal tests/importers.
-)
-from vmec_jax.solvers.fixed_boundary.optimization.gradient import (
-    mask_grad_for_constraints as _mask_grad_for_constraints,
-    update_state_gd as _update_state_gd,
+    mode00_index as _mode00_index,  # noqa: F401 - re-exported for existing internal tests/importers.
 )
 from vmec_jax.solvers.fixed_boundary.preconditioning.operators import (
-    apply_preconditioner as _apply_preconditioner,
     can_reassemble_precond_mats as _can_reassemble_precond_mats,
     empty_preconditioner_cache_snapshot as _empty_preconditioner_cache_snapshot,
-    lambda_preconditioner_outputs as _lambda_preconditioner_outputs,
-    metric_surface_precond_from_bcovar_jax as _metric_surface_precond_from_bcovar_jax,
-    metric_surface_precond_scales_jax as _metric_surface_precond_scales_jax,  # noqa: F401 - re-exported for existing internal tests/importers.
-    metric_surface_precond_scales_np as _metric_surface_precond_scales_np,
     pshalf_from_s_jax as _pshalf_from_s_jax,
     pshalf_from_s_np as _pshalf_from_s_np,
     radial_tridi_smooth_dirichlet as _radial_tridi_smooth_dirichlet,
-    resolve_preconditioner_cache_decision as _resolve_preconditioner_cache_decision,
     resolve_preconditioner_tridi_policies as _resolve_preconditioner_tridi_policies,
     scale_m1_precond_rhs_from_mats as _scale_m1_precond_rhs_from_mats,
-    sm_sp_from_s_np as _sm_sp_from_s_np,  # noqa: F401 - re-exported for existing internal tests/importers.
-    update_preconditioner_cache as _update_preconditioner_cache,
-    vmec_scale_m1_factors_from_mats as _vmec_scale_m1_factors_from_mats,  # noqa: F401 - re-exported for existing internal tests/importers.
-    vmec_scale_m1_factors_from_mats_np as _vmec_scale_m1_factors_from_mats_np,  # noqa: F401 - re-exported for existing internal tests/importers.
+    update_preconditioner_cache as _update_preconditioner_cache,  # noqa: F401 - re-exported for existing internal tests/importers.
 )
+from vmec_jax.vmec_lforbal import plascur_edge_from_bcovar
 from vmec_jax.solvers.fixed_boundary.results import (
     ScanCarry as _ScanCarry,
-    SolveFixedBoundaryResult,
-    SolveLambdaResult,
     SolveVmecResidualResult,
-    WoutLikeVmecForces as _WoutLikeVmecForces,
 )
 from vmec_jax.solvers.fixed_boundary.diagnostics.axis_reset import (
-    InitialAxisResetDecision as _InitialAxisResetDecision,  # noqa: F401 - re-exported for existing internal tests/importers.
     bad_jacobian_from_tau_range as _axis_reset_bad_jacobian_from_tau_range,
     bad_jacobian_ptau_from_minmax as _axis_reset_bad_jacobian_ptau_from_minmax,
     initial_axis_reset_decision as _initial_axis_reset_decision,
     initial_force_physical_fsq as _axis_reset_initial_force_physical_fsq,
-    merge_axis_reset_state as _merge_axis_reset_state,
     reset_axis_from_boundary as _reset_axis_from_boundary_impl,
-    write_axis_reset_dump as _write_axis_reset_dump,
 )
 from vmec_jax.solvers.free_boundary.control import (
     free_boundary_iter_controls as _free_boundary_iter_controls,
@@ -315,8 +213,6 @@ from vmec_jax.solvers.free_boundary.control import (
 )
 from vmec_jax.solvers.free_boundary.diagnostics import sample_free_boundary_external_field as _sample_free_boundary_external_field
 from vmec_jax.solvers.fixed_boundary.diagnostics.force import (
-    dump_array as _dump_array,  # noqa: F401 - re-exported for internal tests/importers.
-    gc_from_frzl as _gc_from_frzl,  # noqa: F401 - compatibility alias for internal tests/importers.
     maybe_dump_force_kernels as _maybe_dump_force_kernels,
     maybe_dump_gc as _maybe_dump_gc,
     maybe_dump_gcx2 as _maybe_dump_gcx2,
@@ -343,44 +239,26 @@ from vmec_jax.solvers.fixed_boundary.diagnostics.metric import (
     maybe_dump_xc as _maybe_dump_xc,
 )
 from vmec_jax.solvers.fixed_boundary.scan.resume import (
-    ScanResumeInitialFields as _ScanResumeInitialFields,  # noqa: F401 - re-exported for existing internal tests/importers.
     build_initial_scan_carry as _build_initial_scan_carry,
     build_traced_scan_resume_state as _build_traced_scan_resume_state,
     initialize_scan_resume_state as _initialize_scan_resume_state,
 )
-from vmec_jax.solvers.fixed_boundary.optimization.residual_objective import (
-    assemble_residual_objective_terms as _assemble_residual_objective_terms,
-    residual_objective_vector as _residual_objective_vector,
-)
 from vmec_jax.solvers.fixed_boundary.scan.output import (
     finalize_vmec2000_scan_run,
     finalize_vmec2000_scan_step,
-    postprocess_vmec2000_scan_result,
-    unpack_vmec2000_scan_histories,
-    vmec2000_scan_full_history_row,
     vmec2000_scan_light_history_row,
     vmec2000_scan_minimal_history_row,
-    vmec2000_scan_residual_result,
-    vmec2000_scan_step_result,
-    vmec2000_state_only_scan_diagnostics,
-    vmec2000_traced_scan_diagnostics,
 )
 from vmec_jax.solvers.fixed_boundary.scan.payload import (
     build_current_preconditioned_scan_payload as _build_current_preconditioned_scan_payload,
     build_initial_preconditioner_cache as _build_initial_preconditioner_cache,
-    build_restart_preconditioned_scan_payload as _build_restart_preconditioned_scan_payload,
-    build_scan_step_fields as _build_scan_step_fields,
     evaluate_scan_step_force as _evaluate_scan_step_force,
-    mask_scan_restart_force_payload as _mask_scan_restart_force_payload,  # noqa: F401 - re-exported for internal tests/importers.
     select_payload_and_build_step_fields as _select_payload_and_build_step_fields,
-    select_scan_force_payload as _select_scan_force_payload,
 )
 from vmec_jax.solvers.fixed_boundary.scan.math import (
     _hold_step as _scan_math_hold_step,
     _kernel_arrays_from_k as _scan_math_kernel_arrays_from_k,
     _no_restart_updates as _scan_math_no_restart_updates,
-    _ptau_minmax_from_context_host as _scan_math_ptau_minmax_from_context_host,
-    _ptau_minmax_from_context_jax as _scan_math_ptau_minmax_from_context_jax,
     _ptau_minmax_from_k_host as _scan_math_ptau_minmax_from_k_host,
     _ptau_minmax_from_k_jax as _scan_math_ptau_minmax_from_k_jax,
     _restart_updates as _scan_math_restart_updates,
@@ -401,12 +279,9 @@ from vmec_jax.solvers.fixed_boundary.scan.debug import (
 )
 from vmec_jax.solvers.fixed_boundary.scan.planning import (
     build_scan_timing_report as _build_scan_timing_report,
-    build_vmec2000_scan_cache_key as _build_vmec2000_scan_cache_key,
     default_vmec2000_controller_constants as _default_vmec2000_controller_constants,
     new_scan_timing_stats as _new_scan_timing_stats,
-    resolve_scan_iteration_plan as _resolve_scan_iteration_plan,
     resolve_scan_iteration_runtime_plan as _resolve_scan_iteration_runtime_plan,
-    resolve_scan_preflight_iters as _resolve_scan_preflight_iters,
     resolve_vmec2000_scan_setup as _resolve_vmec2000_scan_setup,
     scan_chunk_settings as _resolve_scan_chunk_settings,
     scan_jit_forces_enabled as _scan_jit_forces_enabled,
@@ -419,14 +294,13 @@ from vmec_jax.solvers.fixed_boundary.scan.runtime import (
     resolve_scan_runtime_hooks_from_env as _resolve_scan_runtime_hooks_from_env,
     run_chunked_scan as _run_chunked_scan,
     run_nonchunked_scan as _run_nonchunked_scan,
-    run_scan_preflight_step as _run_scan_preflight_step,
     scan_trace_context_or_null as _scan_trace_context_or_null,
 )
 from vmec_jax.solvers.fixed_boundary.scan.time_control import (
     evaluate_scan_time_control_restart,
     scan_restart_transition,
 )
-from vmec_jax.state import VMECState, pack_state, unpack_state
+from vmec_jax.state import VMECState
 from vmec_jax.vmec_tomnsp import TomnspsRZL
 
 
@@ -713,9 +587,7 @@ def solve_fixed_boundary_residual_iter(
         _read_axis_coeffs,
         initial_guess_from_boundary,
     )
-    from vmec_jax.vmec_forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
     from vmec_jax.vmec_residue import (
-        vmec_force_norms_from_bcovar_dynamic,
         vmec_gcx2_from_tomnsps,
         vmec_gcx2_from_tomnsps_np,
         vmec_scalxc_from_s,
@@ -2732,21 +2604,13 @@ def solve_fixed_boundary_residual_iter(
     except Exception:
         freeb_plascur = 0.0
 
-    def _vmec_freeb_plascur_from_bcovar(bc_obj, fallback: float) -> float:
-        """VMEC `ctor` proxy used by NESTOR (`vacuum_par(..., ctor, ...)`)."""
-        try:
-            from vmec_jax.vmec_lforbal import plascur_edge_from_bcovar
-            return _runtime_vmec_freeb_plascur_from_bcovar(
-                bc_obj,
-                fallback=fallback,
-                plascur_edge_from_bcovar=plascur_edge_from_bcovar,
-                trig=trig,
-                wout=wout_like,
-                s=s,
-            )
-        except Exception:
-            return float(fallback)
-        return float(fallback)
+    _vmec_freeb_plascur_from_bcovar = partial(
+        _runtime_vmec_freeb_plascur_from_bcovar,
+        plascur_edge_from_bcovar=plascur_edge_from_bcovar,
+        trig=trig,
+        wout=wout_like,
+        s=s,
+    )
 
     res0 = -1.0
     k_preconditioner_update_interval = controller_constants.preconditioner_update_interval

@@ -473,6 +473,13 @@ class _NumpyLaxShim:
         rhs_np = np.asarray(rhs)
         return _wrap(np.tensordot(lhs_np, rhs_np, axes=(list(c_lhs), list(c_rhs))))
 
+    @staticmethod
+    def fori_loop(lower, upper, body_fun, init_val):
+        value = init_val
+        for i in range(int(lower), int(upper)):
+            value = body_fun(i, value)
+        return value
+
     class Precision:
         HIGHEST = None
 
@@ -510,6 +517,7 @@ _JAX_SHIM = _NumpyJaxShim()
 # ---------------------------------------------------------------------------
 
 _PATCHES: list[tuple[Any, list[tuple[str, Any]]]] | None = None
+_MISSING_ATTR = object()
 
 # Separate caches for NumPy-mode versions of module-level JAX array caches.
 # These are populated lazily with _NpArray objects so that mask indexing
@@ -828,11 +836,18 @@ def _numpy_module_patch():
     if _PATCHES is None:
         _PATCHES = _build_patches()
 
-    # Save originals and apply patches.
+    # Save all originals before applying any patch.  Some patched modules
+    # (notably the vmec_jax.solve facade) mirror assignments into other modules,
+    # so a one-pass save/apply loop can accidentally record patched values as
+    # the "original" values for modules visited later in the patch list.
     saved: list[tuple[Any, list[tuple[str, Any]]]] = []
     for mod, attrs in _PATCHES:
-        orig = [(name, getattr(mod, name, None)) for name, _ in attrs]
+        orig = [
+            (name, getattr(mod, name) if hasattr(mod, name) else _MISSING_ATTR)
+            for name, _ in attrs
+        ]
         saved.append((mod, orig))
+    for mod, attrs in _PATCHES:
         for name, new_val in attrs:
             setattr(mod, name, new_val)
 
@@ -847,7 +862,7 @@ def _numpy_module_patch():
     finally:
         for mod, orig in saved:
             for name, old_val in orig:
-                if old_val is None:
+                if old_val is _MISSING_ATTR:
                     try:
                         delattr(mod, name)
                     except AttributeError:
