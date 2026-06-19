@@ -24470,3 +24470,94 @@ with `--aggregate-json`.  Generated outputs remain on office under ignored
 ### User input needed
 
 No user input is needed for the final audit and cleanup pass.
+
+---
+## 203. Target-Ladder Readiness Wording Audit
+
+### Steps taken
+
+- Audited docs and examples for stale target-ladder language after the M202
+  six-row 80-iteration convergence evidence.
+- Updated `docs/mirror/readiness.rst` so the toroidal stellarator-mirror hybrid
+  lane now states the current target-ladder total-`fsq` evidence and the strict
+  component caveat.
+- Updated `docs/mirror/overview.rst` to replace the old target-evidence-pending
+  language with the office GPU total-`fsq` convergence result.
+- Updated `examples/mirror/README.md` to describe the target preset as a named
+  resolution ladder rather than a no-solve-only ladder.
+- Updated the target/promotion preset descriptions in
+  `examples/toroidal_stellarator_mirror_hybrid_convergence.py` to avoid stale
+  no-solve wording.
+
+### Results obtained
+
+- Focused search no longer finds stale phrases such as target convergence
+  pending, no-solve target ladder, or solved/parity evidence still needing to be
+  added in the current docs/example text.
+- Readiness documentation now matches the M202 evidence: target-ladder
+  total-`fsq` convergence is present for all six rows, while strict component
+  convergence and production free-boundary LCFS convergence remain explicit
+  caveats.
+
+### How it was tested
+
+```bash
+rg -n "target-resolution production claim false|until solved/parity evidence|target-ladder convergence evidence remains pending|full target-ladder convergence evidence remains pending|target-resolution production claim false" examples docs vmec_jax tests --glob '!docs/_build/**'
+python -m ruff check examples/toroidal_stellarator_mirror_hybrid_convergence.py tests/test_toroidal_hybrid.py
+JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py::test_toroidal_hybrid_convergence_example_target_preset_without_solve -q
+JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
+python -m sphinx -W -b html docs docs/_build/html
+git diff --check
+```
+
+Results:
+
+- Stale target-ladder wording search returned no remaining matches after the
+  final wording patch.
+- Ruff passed.
+- Focused target-preset test passed: `1 passed in 1.25s`.
+- Full toroidal-hybrid tests passed: `31 passed in 9.19s`.
+- Sphinx docs build passed with warnings as errors.
+- Whitespace check passed.
+
+### File structure and best-practice notes
+
+- Only docs/example wording and preset descriptions changed.
+- No generated outputs were tracked.
+- The code behavior and public APIs remain unchanged.
+
+### Best next steps
+
+1. Commit and push this M203 plan entry.
+2. Update the draft PR body section count to 203.
+3. Snapshot PR checks.
+4. Continue the final audit on remaining deferred lanes, especially production
+   free-boundary LCFS and strict component convergence wording.
+
+### Completion percentages after M203
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `95%`.
+- Fixed-boundary axisymmetric solve: `96%`.
+- Residual Newton / preconditioning: `96%`.
+- Two-coil and manufactured validation: `95%`.
+- Finite-current pitch validation: `94%`.
+- Plotting and `vmec --plot` mirror support: `99%`.
+- I/O schema and docs: `100%`.
+- Differentiable solved-state API: `97%`.
+- Mirror-Boozer-like diagnostics: `94%`.
+- Free-boundary mirror lane: `99.3%` overall for the current diagnostic/reduced
+  solver scope, with production LCFS convergence still explicitly deferred.
+- Straight-axis hybrid support fixture lane: `100%` for support-fixture scope.
+- Toroidal stellarator-mirror hybrid lane: `99.5%`, with current docs/readiness
+  wording aligned to the six-row target total-`fsq` evidence.
+- ESSOS circular-coil mirror beta scan: `99%`.
+- Public API/source simplification: `100%` for the current mirror package
+  structure.
+- PR merge readiness overall: `99.65%`, pending GitHub checks, final audit, and
+  explicit review decision on deferred production free-boundary/strict-component
+  lanes.
+
+### User input needed
+
+No user input is needed for the next audit pass.
