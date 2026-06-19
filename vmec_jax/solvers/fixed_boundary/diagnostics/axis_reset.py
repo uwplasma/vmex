@@ -132,6 +132,7 @@ def evaluate_initial_axis_reset(
     badjac_use_state: bool, ptau_tol: float, ptau_tol_rel: float,
     axis_reset_fsq_min: float, force_axis_reset: bool, axis_reset_always_3d: bool,
     vmec2000_control: bool, lmove_axis: bool, debug_enabled: bool = False,
+    state_check_on_missing_ptau: bool = False,
     ptau_minmax_from_k_host: Callable[[Any], tuple[Any | None, Any | None]],
     vmec_half_mesh_jacobian_from_state_func: Callable[..., Any],
 ) -> InitialAxisResetEvaluation:
@@ -151,7 +152,7 @@ def evaluate_initial_axis_reset(
             ptau_tol=ptau_tol,
             ptau_tol_rel=ptau_tol_rel,
         )
-        if bool(badjac_use_state):
+        if bool(badjac_use_state) or (bool(state_check_on_missing_ptau) and bad_jacobian_ptau is None):
             try:
                 jac = vmec_half_mesh_jacobian_from_state_func(
                     state=state, modes=static.modes, trig=trig, s=s,

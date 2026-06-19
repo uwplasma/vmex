@@ -74,6 +74,7 @@ _LEGACY_ALIASES = {
     "_enforce_field_rows_np": ("vmec_jax.solvers.fixed_boundary.optimization.constraints", "enforce_field_rows_np"),
     "_enforce_lambda_gauge": ("vmec_jax.solvers.fixed_boundary.optimization.constraints", "enforce_lambda_gauge"),
     "_gc_from_frzl": ("vmec_jax.solvers.fixed_boundary.diagnostics.force", "gc_from_frzl"),
+    "_initial_axis_reset_decision": ("vmec_jax.solvers.fixed_boundary.diagnostics.axis_reset", "initial_axis_reset_decision"),
     "_jit_cache_limit": ("vmec_jax.solvers.fixed_boundary.jit_cache", "jit_cache_limit"),
     "_mask_scan_restart_force_payload": ("vmec_jax.solvers.fixed_boundary.scan.payload", "mask_scan_restart_force_payload"),
     "_merge_axis_reset_state": ("vmec_jax.solvers.fixed_boundary.diagnostics.axis_reset", "merge_axis_reset_state"),
