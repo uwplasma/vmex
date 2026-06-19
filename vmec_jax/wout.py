@@ -1023,6 +1023,13 @@ def _zero_first_surface(*arrays: np.ndarray) -> None:
             arr[0, :] = 0.0
 
 
+def _force_sym_for_wout(arr, *, trig, lasym: bool, kind: str) -> np.ndarray:
+    arr_np = np.asarray(arr, dtype=float)
+    if bool(lasym) or int(arr_np.shape[1]) < int(trig.ntheta1):
+        return arr_np
+    return _vmec_symforce_apply(f=arr_np, trig=trig, kind=kind)
+
+
 def wout_minimal_from_fixed_boundary(
     *,
     path: str | Path,
@@ -1181,18 +1188,6 @@ def wout_minimal_from_fixed_boundary(
     )
     bc, k_force, indata_wout = bcovar_payload
 
-    def _force_sym(arr, kind: str):
-        arr_np = np.asarray(arr, dtype=float)
-        # For LASYM there is no symmetry reduction; keep full-grid values.
-        if bool(lasym):
-            return arr_np
-        # Some call sites provide already-reduced theta grids; only apply the
-        # full-grid symforce operation when the grid matches ntheta1.
-        if int(arr_np.shape[1]) < int(trig.ntheta1):
-            return arr_np
-        # Enforce stellarator symmetry on the full grid when lasym=False.
-        return _vmec_symforce_apply(f=arr_np, trig=trig, kind=kind)
-
     bss_payload = prepare_wout_bss_source_payload(
         state=state,
         static=static,
@@ -1203,7 +1198,12 @@ def wout_minimal_from_fixed_boundary(
         trig=trig,
         geom=geom,
         lasym=bool(lasym),
-        force_sym_func=_force_sym,
+        force_sym_func=lambda arr, kind: _force_sym_for_wout(
+            arr,
+            trig=trig,
+            lasym=bool(lasym),
+            kind=kind,
+        ),
         vmec_forces_rz_from_wout_func=vmec_forces_rz_from_wout,
     )
     (
@@ -1417,21 +1417,14 @@ def wout_minimal_from_fixed_boundary(
                 modes=nyq_modes,
                 trig=trig,
             )
-            gmnc = lasym_coeffs["gmnc"]
-            bmnc = lasym_coeffs["bmnc"]
-            bsubumnc = lasym_coeffs["bsubumnc"]
-            bsubvmnc = lasym_coeffs["bsubvmnc"]
-            bsubsmns = lasym_coeffs["bsubsmns"]
-            bsupumnc = lasym_coeffs["bsupumnc"]
-            bsupvmnc = lasym_coeffs["bsupvmnc"]
-
-            gmns = lasym_coeffs_a["gmns"]
-            bmns = lasym_coeffs_a["bmns"]
-            bsubumns = lasym_coeffs_a["bsubumns"]
-            bsubvmns = lasym_coeffs_a["bsubvmns"]
-            bsubsmnc = lasym_coeffs_a["bsubsmnc"]
-            bsupumns = lasym_coeffs_a["bsupumns"]
-            bsupvmns = lasym_coeffs_a["bsupvmns"]
+            gmnc, bmnc, bsubumnc, bsubvmnc, bsubsmns, bsupumnc, bsupvmnc = (
+                lasym_coeffs[key]
+                for key in ("gmnc", "bmnc", "bsubumnc", "bsubvmnc", "bsubsmns", "bsupumnc", "bsupvmnc")
+            )
+            gmns, bmns, bsubumns, bsubvmns, bsubsmnc, bsupumns, bsupvmns = (
+                lasym_coeffs_a[key]
+                for key in ("gmns", "bmns", "bsubumns", "bsubvmns", "bsubsmnc", "bsupumns", "bsupvmns")
+            )
         else:
             gmnc = _vmec_wrout_nyquist_cos_coeffs(f=sqrtg_sym, modes=nyq_modes, trig=trig)
             bmnc = _vmec_wrout_nyquist_cos_coeffs(f=bmag_sym, modes=nyq_modes, trig=trig)

@@ -1886,6 +1886,61 @@ def _assert_same_branch_physical_and_adaptive_scalar_gates(
         json.dumps(report_fn(complete_report, scalars_report, scalar_keys=scalar_keys, json_safe=True), allow_nan=False)
 
 
+def _assert_complete_report_replay_contract(complete_report: dict, replay_gate_report_fn) -> dict[str, dict]:
+    branch = complete_report["branch_compatibility"]
+    base_fingerprint = branch["base_fingerprint"]
+    plus_fingerprint = branch["plus_fingerprint"]
+    minus_fingerprint = branch["minus_fingerprint"]
+    assert branch["same_branch"] is True
+    assert branch["same_accepted_trace_branch"] is True
+    assert branch["same_residual_branch"] is True
+    assert branch["plus"]["compatible"], branch["plus"]["changed_fields"]
+    assert branch["minus"]["compatible"], branch["minus"]["changed_fields"]
+    assert base_fingerprint["n_steps"] == plus_fingerprint["n_steps"] == minus_fingerprint["n_steps"]
+    assert branch["base_residual_fingerprint"] == branch["plus_residual_fingerprint"] == branch["minus_residual_fingerprint"]
+    assert base_fingerprint["n_freeb_steps"] > 0
+    assert plus_fingerprint["n_freeb_steps"] == base_fingerprint["n_freeb_steps"]
+    assert minus_fingerprint["n_freeb_steps"] == base_fingerprint["n_freeb_steps"]
+    np.testing.assert_array_equal(plus_fingerprint["freeb_sizes"], base_fingerprint["freeb_sizes"])
+    np.testing.assert_array_equal(minus_fingerprint["freeb_sizes"], base_fingerprint["freeb_sizes"])
+    expected_fingerprints = {
+        "base": base_fingerprint,
+        "plus": plus_fingerprint,
+        "minus": minus_fingerprint,
+    }
+    trace_replay_diagnostics = complete_report["trace_replay_diagnostics"]
+    assert set(trace_replay_diagnostics) == set(expected_fingerprints)
+    for label, replay_diagnostics in trace_replay_diagnostics.items():
+        fingerprint = expected_fingerprints[label]
+        assert replay_diagnostics["contract"] == "fixed accepted-trace replay diagnostics only"
+        assert replay_diagnostics["differentiates_adaptive_controller"] is False
+        assert replay_diagnostics["n_steps"] == fingerprint["n_steps"]
+        assert replay_diagnostics["branch_fingerprint"]["n_steps"] == fingerprint["n_steps"]
+        assert replay_diagnostics["branch_fingerprint"]["n_freeb_steps"] == fingerprint["n_freeb_steps"]
+        np.testing.assert_array_equal(replay_diagnostics["branch_fingerprint"]["freeb_sizes"], fingerprint["freeb_sizes"])
+        for mask_key in ("active", "accepted", "rejected", "done", "has_active_freeb_replay"):
+            assert np.asarray(replay_diagnostics["masks"][mask_key], dtype=bool).shape == (fingerprint["n_steps"],)
+        assert bool(np.any(np.asarray(replay_diagnostics["masks"]["accepted"], dtype=bool)))
+        assert bool(np.any(np.asarray(replay_diagnostics["masks"]["has_active_freeb_replay"], dtype=bool)))
+        replay_payload = replay_diagnostics["replay_diagnostics"]
+        assert replay_payload["scalar_controls_stackable"] is True
+        assert replay_payload["array_controls_stackable"] is True
+        assert replay_payload["preconditioner_policy_n_segments"] >= 1
+        assert sum(
+            segment["free_boundary_replay_steps"]
+            for segment in replay_payload["preconditioner_policy_segment_summary"]
+        ) == fingerprint["n_freeb_steps"]
+        if not replay_payload["preconditioner_controls_stackable"]:
+            assert "preconditioner_controls" in replay_payload["errors"]
+    replay_gate = replay_gate_report_fn(complete_report)
+    assert replay_gate["passed"], replay_gate
+    assert replay_gate["contract"] == "same-branch accepted-trace replay gate"
+    assert replay_gate["same_branch"] is True
+    assert replay_gate["differentiates_adaptive_controller"] is False
+    json.dumps(replay_gate_report_fn(complete_report, json_safe=True), allow_nan=False)
+    return expected_fingerprints
+
+
 def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
     *,
     input_path: Path,
@@ -2071,61 +2126,11 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
     base_traces = complete_report["base"]["traces"]
     plus_result = complete_report["plus"]["result"]
     minus_result = complete_report["minus"]["result"]
-    plus_branch = complete_report["branch_compatibility"]["plus"]
-    minus_branch = complete_report["branch_compatibility"]["minus"]
-    base_fingerprint = complete_report["branch_compatibility"]["base_fingerprint"]
-    plus_fingerprint = complete_report["branch_compatibility"]["plus_fingerprint"]
-    minus_fingerprint = complete_report["branch_compatibility"]["minus_fingerprint"]
-    base_residual_fingerprint = complete_report["branch_compatibility"]["base_residual_fingerprint"]
-    plus_residual_fingerprint = complete_report["branch_compatibility"]["plus_residual_fingerprint"]
-    minus_residual_fingerprint = complete_report["branch_compatibility"]["minus_residual_fingerprint"]
-    assert complete_report["branch_compatibility"]["same_branch"] is True
-    assert complete_report["branch_compatibility"]["same_accepted_trace_branch"] is True
-    assert complete_report["branch_compatibility"]["same_residual_branch"] is True
-    assert plus_branch["compatible"], plus_branch["changed_fields"]
-    assert minus_branch["compatible"], minus_branch["changed_fields"]
-    assert base_fingerprint["n_steps"] == plus_fingerprint["n_steps"] == minus_fingerprint["n_steps"]
-    assert base_residual_fingerprint == plus_residual_fingerprint == minus_residual_fingerprint
-    assert base_fingerprint["n_freeb_steps"] > 0
-    assert plus_fingerprint["n_freeb_steps"] == base_fingerprint["n_freeb_steps"]
-    assert minus_fingerprint["n_freeb_steps"] == base_fingerprint["n_freeb_steps"]
-    np.testing.assert_array_equal(plus_fingerprint["freeb_sizes"], base_fingerprint["freeb_sizes"])
-    np.testing.assert_array_equal(minus_fingerprint["freeb_sizes"], base_fingerprint["freeb_sizes"])
-    expected_fingerprints = {
-        "base": base_fingerprint,
-        "plus": plus_fingerprint,
-        "minus": minus_fingerprint,
-    }
-    trace_replay_diagnostics = complete_report["trace_replay_diagnostics"]
-    assert set(trace_replay_diagnostics) == set(expected_fingerprints)
-    for label, replay_diagnostics in trace_replay_diagnostics.items():
-        fingerprint = expected_fingerprints[label]
-        assert replay_diagnostics["contract"] == "fixed accepted-trace replay diagnostics only"
-        assert replay_diagnostics["differentiates_adaptive_controller"] is False
-        assert replay_diagnostics["n_steps"] == fingerprint["n_steps"]
-        assert replay_diagnostics["branch_fingerprint"]["n_steps"] == fingerprint["n_steps"]
-        assert replay_diagnostics["branch_fingerprint"]["n_freeb_steps"] == fingerprint["n_freeb_steps"]
-        np.testing.assert_array_equal(replay_diagnostics["branch_fingerprint"]["freeb_sizes"], fingerprint["freeb_sizes"])
-        for mask_key in ("active", "accepted", "rejected", "done", "has_active_freeb_replay"):
-            assert np.asarray(replay_diagnostics["masks"][mask_key], dtype=bool).shape == (fingerprint["n_steps"],)
-        assert bool(np.any(np.asarray(replay_diagnostics["masks"]["accepted"], dtype=bool)))
-        assert bool(np.any(np.asarray(replay_diagnostics["masks"]["has_active_freeb_replay"], dtype=bool)))
-        replay_payload = replay_diagnostics["replay_diagnostics"]
-        assert replay_payload["scalar_controls_stackable"] is True
-        assert replay_payload["array_controls_stackable"] is True
-        assert replay_payload["preconditioner_policy_n_segments"] >= 1
-        assert sum(
-            segment["free_boundary_replay_steps"]
-            for segment in replay_payload["preconditioner_policy_segment_summary"]
-        ) == fingerprint["n_freeb_steps"]
-        if not replay_payload["preconditioner_controls_stackable"]:
-            assert "preconditioner_controls" in replay_payload["errors"]
-    replay_gate = direct_coil_same_branch_replay_gate_report(complete_report)
-    assert replay_gate["passed"], replay_gate
-    assert replay_gate["contract"] == "same-branch accepted-trace replay gate"
-    assert replay_gate["same_branch"] is True
-    assert replay_gate["differentiates_adaptive_controller"] is False
-    json.dumps(direct_coil_same_branch_replay_gate_report(complete_report, json_safe=True), allow_nan=False)
+    expected_fingerprints = _assert_complete_report_replay_contract(
+        complete_report,
+        direct_coil_same_branch_replay_gate_report,
+    )
+    base_fingerprint = expected_fingerprints["base"]
 
     assert complete_report["primary_objective"] == "objective"
     expected_objective_value_keys = {

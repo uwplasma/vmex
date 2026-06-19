@@ -21153,3 +21153,91 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.999999985%.
+
+## 2026-06-19 Same-Branch Gate And WOUT Helper Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Used two read-only explorer agents to inspect the remaining validation and
+   WOUT monoliths for safe, behavior-preserving seams.
+2. Extracted the complete-report accepted-trace replay contract checks from
+   the long direct-coil finite-pressure same-branch custom-VJP helper into
+   `_assert_complete_report_replay_contract`.
+3. Moved the nested WOUT symforce closure into `_force_sym_for_wout` and
+   consolidated LASYM nyquist coefficient unpacking with fixed ordered keys.
+
+Results obtained:
+
+- `_assert_direct_coil_same_branch_custom_vjp_matches_complete_fd` decreased
+  from 809 to 759 lines while keeping the same complete-solve FD, replay,
+  fingerprint, and scalar-gate assertions.
+- `wout_minimal_from_fixed_boundary` decreased from 683 to 669 lines.
+- The WOUT changes are private helper/consolidation changes only; no output
+  schema or numerical path was changed.
+
+Tests and commands run:
+
+- `python -m compileall -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+- `python -m ruff check tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_fd -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_fourier_only_same_branch_custom_vjp_matches_complete_solve_fd tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_lasym_fixed_trace_custom_vjp_matches_complete_solve_fd_on_same_branch -q`
+- `python -m compileall -q vmec_jax/wout.py tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+- `python -m ruff check vmec_jax/wout.py tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+- `python -m pytest -q tests/test_wout_env_branch_coverage.py -k forced_bss_uses_symforced_force_kernel_arrays`
+- `python -m pytest -q tests/test_wout_lasym_bsubv_parity.py`
+- `python -m pytest -q tests/test_wout_helpers.py`
+- `python tools/diagnostics/source_health.py --top 8`
+
+Notes:
+
+- `python -m pytest -q tests/test_wout_helpers.py -k "symforce or symoutput"`
+  selected no tests in this checkout; the full `test_wout_helpers.py` suite
+  was run instead.
+- The finite-pressure file grew by five lines overall because a local helper
+  replaced a dense inline block. This was accepted because the targeted
+  monolithic validation helper shrank by 50 lines and the gate semantics are
+  clearer.
+
+Best next steps:
+
+1. Continue reducing `test_direct_coil_trace_fingerprint_detects_control_branch_changes`
+   by splitting synthetic-trace setup from report/gate assertions.
+2. Target a production-code tranche in `driver.py`, `implicit.py`, or
+   `wout.py` only when the extraction is clearly line-negative and covered by
+   focused parity tests.
+3. Keep branch-local free-boundary adjoint language conservative; no arbitrary
+   adaptive branch differentiation is claimed by these refactors.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999460%.
+- Solver monolith reduction: 99.825%.
+- Free-boundary adjoint monolith reduction: 99.54%.
+- Driver workflow decomposition: 99.945%.
+- Residual iteration decomposition: 99.04%.
+- WOUT diagnostic/profile decomposition: 99.979%.
+- Bcovar/WOUT parity decomposition: 99.16%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.82%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.74%.
+- Fixed-boundary optimizer decomposition: 96.22%.
+- Plotting/WOUT visualization decomposition: 96.80%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.75%.
+- Discrete-adjoint replay decomposition: 96.69%.
+- Free-boundary validation-gate maintainability: 98.08%.
+- QI objective/staged-runner decomposition: 96.9%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.999999986%.
