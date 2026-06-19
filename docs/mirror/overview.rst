@@ -39,7 +39,7 @@ without coupling it to toroidal VMEC assumptions:
 - WHAM-inspired circular-loop fixture metadata, deterministic vacuum-field
   reference checks, optional ``magpylib`` comparison hooks, and low-resolution
   runnable axisymmetric/nonaxisymmetric examples;
-- a first free-boundary mirror bridge with ESSOS-compatible circular-loop coil
+- a free-boundary mirror diagnostic bridge with ESSOS-compatible circular-loop coil
   parameters, direct-coil external-field sampling on the mirror axis/boundary,
   reusable JSON setup export, initial fixed-boundary flux-tube construction
   from sampled on-axis fields, and optional low-resolution fixed-boundary
@@ -81,10 +81,11 @@ without coupling it to toroidal VMEC assumptions:
   uses a central rotating elliptical cross-section, smooth tapering into
   circular mirror end sections, standard geometry/field plots, and explicit
   metrics labels pointing to the toroidal hybrid lane as the final target;
-- a first repo-root toroidal stellarator-mirror hybrid input fixture that writes
+- a repo-root toroidal stellarator-mirror hybrid input fixture that writes
   ordinary VMEC ``RBC``/``ZBS`` boundary coefficients, with mirror-like side
-  arcs, localized rotating-ellipse stellarator corners, and side/corner
-  orientation diagnostics;
+  arcs, localized rotating-ellipse stellarator corners, side/corner
+  orientation diagnostics, convergence-grid reports, and low-resolution
+  VMEC2000 parity diagnostics;
 - focused tests for node ordering, polynomial exactness, interpolation, filtering,
   theta orthogonality, analytic axisymmetric geometry, field identities, and
   analytic energy, gradient checks, Hessian symmetry, MMS stationarity, I/O
@@ -138,6 +139,8 @@ Current solver status:
   fractions so low-mode boundary fits can be audited before interpreting
   residual trends.
 
-Later phases finish differentiable optimization APIs, production
-free-boundary LCFS solves, toroidal stellarator-mirror hybrid convergence and
-VMEC2000 parity studies, and ESSOS circular-coil beta scan examples.
+Later phases finish production differentiable optimization APIs, production
+free-boundary LCFS solves, and target-resolution toroidal stellarator-mirror
+hybrid convergence studies.  The current ESSOS-compatible circular-coil beta
+scan remains diagnostic/pilot evidence, and the current toroidal hybrid parity
+rows remain low-resolution prototype evidence.

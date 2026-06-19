@@ -23126,3 +23126,92 @@ Results:
 ### User input needed
 
 No user input is needed.
+
+---
+## 193. Readiness Documentation Synchronization
+
+### Steps taken
+
+- Audited `docs/mirror/readiness.rst` and `docs/mirror/overview.rst` after the
+  plotted fixed-boundary, differentiability, circular-coil, finite-current, and
+  solver-comparison coverage tranches.
+- Updated the readiness matrix so the current claims mention fixed-boundary
+  diagnostic examples, solver-comparison reports, two-coil plot evidence,
+  dense-vs-matrix-free implicit benchmark plots, circular-coil beta-scan plots,
+  and low-resolution toroidal-hybrid parity scope.
+- Updated the overview to stop describing the ESSOS-compatible beta-scan example
+  and toroidal-hybrid parity rows as future work.  The docs now label them as
+  current diagnostic/prototype evidence and keep only production LCFS solves,
+  production differentiable optimization APIs, and target-resolution toroidal
+  hybrid convergence studies as later work.
+- Ran the docs build with warnings treated as errors and reran the toroidal
+  hybrid test file.
+
+### Results obtained
+
+- The documentation now matches the implemented status more closely: broad
+  production claims remain explicitly out of scope, while current diagnostic and
+  validated-prototype evidence is no longer described as missing.
+- The toroidal hybrid lane remains a validated prototype: low-resolution
+  VMEC2000 parity and no-solve convergence/plot tests are covered, while the
+  final target-resolution convergence ladder remains a promotion gate.
+- The free-boundary circular-coil lane remains diagnostic/pilot evidence, but
+  the implemented 1%, 3%, and 10% beta scan plots and schema are now reflected
+  in the readiness page.
+
+### How it was tested
+
+Commands run:
+
+```bash
+python -m sphinx -W -b html docs docs/_build/html
+JAX_ENABLE_X64=1 pytest tests/test_toroidal_hybrid.py -q
+git diff --check
+```
+
+Results:
+
+- Sphinx docs build passed with warnings as errors.
+- Toroidal hybrid tests passed: `28 passed in 6.41s`.
+- Whitespace check passed.
+
+### File structure and best-practice notes
+
+- The readiness matrix remains the review-facing scope summary in
+  `docs/mirror/readiness.rst`.
+- The broader narrative remains in `docs/mirror/overview.rst`.
+- No generated docs output was committed; the Sphinx build wrote under the
+  ignored `docs/_build/html` tree.
+
+### Best next steps
+
+1. Commit and push M193.
+2. Update the draft PR body with section 193 and the docs/toroidal validation
+   result.
+3. Inspect only failed CI jobs after the push.
+4. Run a final local audit pass over changed files, public docs, PR body, and
+   current CI before deciding whether any remaining lanes need code changes or
+   only explicit deferral in the readiness matrix.
+
+### Completion percentages after M193
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `95%`.
+- Fixed-boundary axisymmetric solve: `96%`.
+- Residual Newton / preconditioning: `96%`.
+- Two-coil and manufactured validation: `95%`.
+- Finite-current pitch validation: `94%`.
+- Plotting and `vmec --plot` mirror support: `99%`.
+- I/O schema and docs: `100%`.
+- Differentiable solved-state API: `97%`.
+- Mirror-Boozer-like diagnostics: `94%`.
+- Free-boundary mirror lane: `99%` overall, with diagnostic scope documented.
+- Straight-axis hybrid support fixture lane: `100%` for support-fixture scope.
+- Toroidal stellarator-mirror hybrid lane: `97%`.
+- ESSOS circular-coil mirror beta scan: `99%`.
+- Public API/source simplification: `100%` for the mirror package initializer.
+- PR merge readiness overall: `99%`.
+
+### User input needed
+
+No user input is needed.

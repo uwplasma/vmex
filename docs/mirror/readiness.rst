@@ -43,7 +43,8 @@ Current Scope
    * - Fixed-boundary axisymmetric mirrors
      - supported
      - Scalar-pressure fixed-boundary solves, residual diagnostics, ``fsq`` and
-       normalized-force reporting, mirror-native output, and standard plots.
+       normalized-force reporting, mirror-native output, fixed-boundary
+       diagnostic examples, solver-comparison reports, and standard plots.
    * - Theta-dependent fixed-boundary surfaces
      - validated prototype
      - Geometry, field, I/O, plotting, and solver stress tests are present.
@@ -57,7 +58,8 @@ Current Scope
    * - Two-coil analytic validation
      - supported
      - The root example compares on-axis and low-radius off-axis fields against
-       circular-loop Biot-Savart formulas and records convergence evidence.
+       circular-loop Biot-Savart formulas, records convergence evidence, and
+       writes checked coil/field/``|B|`` plots.
    * - Finite-current pitch examples
      - supported diagnostic
      - Field-line pitch is visible and quantified as open-field cap-to-cap
@@ -76,19 +78,20 @@ Current Scope
      - validated prototype
      - Reduced axisymmetric residual, Jacobian, linear-solve, forward
        sensitivity, adjoint, and custom-VJP wrappers are tested on tiny grids.
-       They are method gates, not a broad differentiable solved-equilibrium
-       API.
+       Dense-vs-matrix-free benchmark plots are covered.  These are method
+       gates, not a broad differentiable solved-equilibrium API.
    * - Free-boundary circular-coil bridge
      - diagnostic
      - ESSOS-compatible circular coils, external-field sampling, LCFS residual
        vectors, candidate updates, guarded pilot loops, and reduced
-       residual-vector least-squares solves are available.  This is not a
-       converged production free-boundary equilibrium solver.
+       residual-vector least-squares solves are available, with plotted beta
+       scan and reduced-vector benchmark evidence.  This is not a converged
+       production free-boundary equilibrium solver.
    * - ESSOS beta-scan fixture
      - diagnostic
      - The 1%, 3%, and 10% beta cases share a compact JSON/CSV schema with
-       baseline, last-accepted, and final-trial pilot fields for handoff
-       studies.
+       baseline, last-accepted, and final-trial pilot fields plus checked
+       summary and per-beta diagnostic plots for handoff studies.
    * - Straight-axis stellarator-mirror support fixture
      - diagnostic
      - The rotating-ellipse straight-axis example is a support fixture for
@@ -97,8 +100,9 @@ Current Scope
      - validated prototype
      - The repo-root example writes ordinary VMEC boundary coefficients with
        mirror-like side arcs and stellarator-like corners, plus convergence and
-       VMEC2000 parity diagnostics.  Promotion requires a final convergence
-       study over the target resolution ladder.
+       VMEC2000 parity diagnostics at the current low-resolution fixture.
+       Promotion requires a final convergence study over the target resolution
+       ladder.
    * - Anisotropic pressure, kinetic closures, sheath/end physics
      - deferred
      - These closures are outside the fixed-boundary scalar-pressure mirror
