@@ -3016,27 +3016,15 @@ def nestor_external_only_step(
     mode_for_step = runtime_mode if reuse_step else used_mode
     if reuse_step and runtime_cache is None:
         mode_for_step = used_mode
-    potvac = None
-    bvec_mode = None
-    bvec_mode_nonsing = None
-    bvec_mode_analytic = None
-    grpmn_nonsing = None
-    grpmn_analytic = None
-    grpmn_total = None
-    amatrix_mode_pre = None
-    amatrix_mode_from_grpmn = None
-    matrix_override_applied = False
-    jax_nestor_operator_applied = False
+    potvac = bvec_mode = bvec_mode_nonsing = bvec_mode_analytic = None
+    grpmn_nonsing = grpmn_analytic = grpmn_total = None
+    amatrix_mode_pre = amatrix_mode_from_grpmn = None
+    matrix_override_applied = jax_nestor_operator_applied = False
     jax_nestor_operator_reason = "disabled"
+    jax_nestor_operator_jitted = jax_nestor_operator_cache_hit = False
     jax_nestor_operator_time_s = 0.0
-    jax_nestor_operator_jitted = False
-    jax_nestor_operator_cache_hit = False
-    cache_build_time_s = 0.0
-    source_time_s = 0.0
-    bvec_time_s = 0.0
-    matrix_time_s = 0.0
-    linear_solve_time_s = 0.0
-    vacuum_channels_time_s = 0.0
+    cache_build_time_s = source_time_s = bvec_time_s = matrix_time_s = 0.0
+    linear_solve_time_s = vacuum_channels_time_s = 0.0
 
     if _is_dense_mode(mode_for_step):
         alpha = _as_float_env("VMEC_JAX_FREEB_VMEC_LIKE_ALPHA", 1.0)
@@ -3361,10 +3349,12 @@ def nestor_external_only_step(
         diagnostics=diagnostics,
         trace_arrays=trace_arrays,
     )
-    source_sym_cached = runtime_source_sym_cached
-    bvec_nonsing_cached = runtime_bvec_nonsing_cached
-    gsource_cached = runtime_gsource_cached
-    source_cache_iter = runtime_source_cache_iter
+    source_sym_cached, bvec_nonsing_cached, gsource_cached, source_cache_iter = (
+        runtime_source_sym_cached,
+        runtime_bvec_nonsing_cached,
+        runtime_gsource_cached,
+        runtime_source_cache_iter,
+    )
     if isinstance(cache, NestorVmecLikeCache) and (cache.mode_basis is not None):
         basis = cache.mode_basis
         if (not reuse_step) or (not provider_allows_source_reuse) or (gsource_cached is None):
