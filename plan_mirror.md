@@ -21375,3 +21375,95 @@ Results:
 ### User input needed
 
 No user input is needed.
+
+---
+## 175. Draft PR Body Synchronization After Readiness Matrix
+
+### Steps taken
+
+- Updated draft PR #21 after M174.
+- Changed the implementation-log pointer from section 172 to section 174.
+- Added the new readiness matrix to the PR summary, checklist, validation
+  notes, and reviewer notes.
+- Verified PR body markers after editing.
+- Sampled GitHub checks once after the latest pushed head.
+
+### Results obtained
+
+- PR body verification confirmed:
+  - PR number `21`;
+  - draft state `true`;
+  - head SHA `bd9fe5d869c71f33b1f969d1a41da3409ede0a2c`;
+  - body contains `section 174`;
+  - body contains `docs/mirror/readiness.rst`;
+  - body contains the readiness-matrix checklist item;
+  - body contains the Sphinx readiness validation note.
+- CI snapshot found no failing checks.
+- The sampled check list showed:
+  - `Parity Manifest Smoke (dry-run)` passed;
+  - `Physics Full (manual/nightly)` skipped as configured;
+  - standard docs/build/fast/physics-smoke jobs in progress.
+
+### How it was tested
+
+Commands run:
+
+```bash
+gh pr view 21 --repo uwplasma/vmec_jax --json body,number,isDraft,headRefOid,url
+python - <<'PY'
+# update PR body text in /tmp/vmec_mirror_pr_body_m174.md
+PY
+gh pr edit 21 --repo uwplasma/vmec_jax --body-file /tmp/vmec_mirror_pr_body_m174.md
+python - <<'PY'
+# verify required PR body markers
+PY
+python /Users/rogeriojorge/.codex/plugins/cache/openai-curated-remote/github/0.1.5/skills/gh-fix-ci/scripts/inspect_pr_checks.py --repo . --pr 21 --json
+gh pr checks 21 --repo uwplasma/vmec_jax --json name,state,bucket,startedAt,completedAt,link
+git status -sb
+```
+
+Results:
+
+- PR edit succeeded.
+- PR body verification printed `pr_body_ok`.
+- CI failure inspection printed `PR #21: no failing checks detected.`
+- Worktree was clean before this plan-only log.
+
+### File structure and best-practice notes
+
+- No source or docs files changed in this administrative tranche.
+- The PR body now points reviewers to the readiness matrix instead of forcing
+  them to reconstruct current support status from the long plan log.
+- CI was sampled once and not continuously polled.
+
+### Best next steps
+
+1. Commit and push M175.
+2. Run the final full local `tests/mirror` pass.
+3. Re-check PR #21 only after the current CI batch has had time to finish.
+4. If local tests and CI are clean, perform the final requirement-by-
+   requirement completion audit before deciding whether any lane can be
+   declared complete enough to undraft.
+
+### Completion percentages after M175
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `93%`.
+- Fixed-boundary axisymmetric solve: `91%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `90%`.
+- Finite-current pitch validation: `86%`.
+- Plotting and `vmec --plot` mirror support: `97%`.
+- I/O schema and docs: `100%`.
+- Differentiable solved-state API: `95%`.
+- Mirror-Boozer-like diagnostics: `83%`.
+- Free-boundary mirror lane: `99%` overall, with reduced residual-vector
+  nonlinear solve scope complete.
+- Straight-axis hybrid support fixture lane: `100%` for support-fixture scope.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `97%`.
+- PR merge readiness overall: `99%`.
+
+### User input needed
+
+No user input is needed.
