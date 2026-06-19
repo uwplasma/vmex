@@ -508,8 +508,7 @@ def solve_fixed_boundary_residual_iter(
             print("[solve_fixed_boundary_residual_iter] jit_forces disabled (debug dumps enabled)")
     track_history = startup_policy.track_history
 
-    def _pack_resume_state(base: dict[str, Any], heavy: dict[str, Any] | None = None):
-        return _pack_resume_state_record(base=base, heavy=heavy, mode=resume_state_mode)
+    _pack_resume_state = partial(_pack_resume_state_record, mode=resume_state_mode)
 
     from vmec_jax.static import build_static
     from vmec_jax.boundary import boundary_from_indata
