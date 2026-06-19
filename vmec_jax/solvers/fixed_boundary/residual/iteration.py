@@ -2334,6 +2334,12 @@ def solve_fixed_boundary_residual_iter(
     min_tau_history, max_tau_history, bad_jacobian_history = ([] for _ in range(3))
     grad_rms_history, step_history = ([] for _ in range(2))
 
+    def _append_badjac_history(min_tau_value: float, max_tau_value: float, bad_flag: bool) -> None:
+        if track_history:
+            min_tau_history.append(float(min_tau_value))
+            max_tau_history.append(float(max_tau_value))
+            bad_jacobian_history.append(int(bool(bad_flag)))
+
     _history_record_lists, _terminal_history_lists = _residual_iter_history_list_maps(
         locals(),
         free_boundary_enabled=bool(free_boundary_enabled),
@@ -4473,10 +4479,7 @@ def solve_fixed_boundary_residual_iter(
                 )
 
                 if np.isfinite(min_tau) and np.isfinite(max_tau):
-                    if track_history:
-                        min_tau_history.append(min_tau)
-                        max_tau_history.append(max_tau)
-                        bad_jacobian_history.append(int(bool(bad_jacobian)))
+                    _append_badjac_history(min_tau, max_tau, bool(bad_jacobian))
                     if bad_jacobian and _env_dump_badjac not in ("", "0"):
                         dump_dir = _env_dump_dir
                         if dump_dir:
@@ -4487,15 +4490,9 @@ def solve_fixed_boundary_residual_iter(
                             except Exception:
                                 pass
                 else:
-                    if track_history:
-                        min_tau_history.append(float("nan"))
-                        max_tau_history.append(float("nan"))
-                        bad_jacobian_history.append(0)
+                    _append_badjac_history(float("nan"), float("nan"), False)
             else:
-                if track_history:
-                    min_tau_history.append(float("nan"))
-                    max_tau_history.append(float("nan"))
-                    bad_jacobian_history.append(0)
+                _append_badjac_history(float("nan"), float("nan"), False)
 
             # VMEC eqsolve: after the first evolve step, if the Jacobian is bad
             # and ijacob==0, retry with an improved axis guess.
