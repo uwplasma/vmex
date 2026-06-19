@@ -148,17 +148,19 @@ Current solver status:
   side/corner orientation spans, covariance anisotropy ranges, and valid-axis
   fractions so low-mode boundary fits can be audited before interpreting
   residual trends.  ``--resolution-preset target`` writes the current target
-  no-solve ladder, ``ns = 7,9,15`` and ``mpol:ntor = 5:20,6:24``, while keeping
-  the target-resolution production claim false until solved/parity evidence is
-  added.  ``--case-filter`` accepts comma-separated shell patterns for splitting
-  that target campaign into smaller row subsets.  ``--aggregate-json`` reads
-  one or more existing convergence JSON files from split campaigns and writes a
-  de-duplicated aggregate CSV/JSON plus optional plots, which keeps remote
-  target-ladder evidence compact and avoids copying generated WOUT or ``threed1``
-  trees into the repository.
+  ladder, ``ns = 7,9,15`` and ``mpol:ntor = 5:20,6:24``.  Office GPU runs of
+  that ladder reached total-``fsq`` convergence at ``ftol=1e-8`` for all six
+  rows with VMEC2000 outputs present; strict component convergence remains a
+  documented caveat.  ``--case-filter`` accepts comma-separated shell patterns
+  for splitting that target campaign into smaller row subsets.
+  ``--aggregate-json`` reads one or more existing convergence JSON files from
+  split campaigns and writes a de-duplicated aggregate CSV/JSON plus optional
+  plots, which keeps remote target-ladder evidence compact and avoids copying
+  generated WOUT or ``threed1`` trees into the repository.
 
 Later phases finish production differentiable optimization APIs, production
-free-boundary LCFS solves, and target-resolution toroidal stellarator-mirror
-hybrid convergence studies.  The current ESSOS-compatible circular-coil beta
-scan remains diagnostic/pilot evidence, and the current toroidal hybrid parity
-rows remain low-resolution prototype evidence.
+free-boundary LCFS solves, strict-component target checks if required for final
+promotion, and broader toroidal stellarator-mirror hybrid convergence studies.
+The current ESSOS-compatible circular-coil beta scan remains diagnostic/pilot
+evidence, and the toroidal hybrid target lane is a validated prototype with
+total-``fsq`` convergence evidence at the documented target ladder.

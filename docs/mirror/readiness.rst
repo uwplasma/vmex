@@ -103,10 +103,11 @@ Current Scope
      - validated prototype
      - The repo-root example writes ordinary VMEC boundary coefficients with
        mirror-like side arcs and stellarator-like corners, plus convergence and
-       VMEC2000 parity diagnostics at the current low-resolution fixture.
-       The convergence runner has named smoke, promotion, and target no-solve
-       ladders.  Promotion requires solved/parity evidence over the target
-       ladder.
+       VMEC2000 parity diagnostics.  The convergence runner has named smoke,
+       promotion, and target ladders, split-campaign aggregation, scan
+       diagnostics, and CLI finish reporting.  Office GPU/VMEC2000 evidence
+       covers all six named target rows with total-``fsq`` convergence at
+       ``ftol=1e-8``; strict component convergence remains a documented caveat.
    * - Anisotropic pressure, kinetic closures, sheath/end physics
      - deferred
      - These closures are outside the fixed-boundary scalar-pressure mirror

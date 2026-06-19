@@ -93,13 +93,13 @@ _RESOLUTION_PRESETS = {
         "target_resolution_ladder": False,
     },
     "promotion": {
-        "description": "Moderate no-solve promotion ladder before expensive solved rows.",
+        "description": "Moderate promotion ladder before expensive solved rows.",
         "ns_array": (7, 9, 15),
         "mode_pairs": ((5, 20),),
         "target_resolution_ladder": False,
     },
     "target": {
-        "description": "Target no-solve ladder for the final solved/parity convergence campaign.",
+        "description": "Target ladder for solved/parity convergence campaigns.",
         "ns_array": (7, 9, 15),
         "mode_pairs": ((5, 20), (6, 24)),
         "target_resolution_ladder": True,
