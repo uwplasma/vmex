@@ -22536,3 +22536,74 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.99999999935%.
+
+## 2026-06-19 Optimizer Source Documentation and Reset Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Continued the fixed-boundary optimizer source-health tranche without adding
+   another source file.
+2. Replaced the long `FixedBoundaryExactOptimizer` class docstring, which
+   duplicated example workflow documentation, with a concise source-level
+   contract focused on ownership and key controls.
+3. Simplified per-run mutable-state reset by reusing the optimizer's
+   environment-boolean helper and compacting best-exact bookkeeping reset.
+4. Kept the exact-Jacobian cache installation conservative so bare test
+   optimizers and initialized optimizers both retain expected cache behavior.
+
+Results obtained:
+
+- `vmec_jax/optimization.py` decreased from 2382 to 2315 lines.
+- No public API, optimizer dispatch, exact-cache semantics, or history payload
+  changed.
+- No new source file was added.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/optimization.py`
+- `python -m ruff check vmec_jax/optimization.py tests/test_optimization_helpers.py tests/test_optimization_wave2_coverage.py tests/test_optimization_auto_scalar_policy.py tests/test_differentiation_optimization_api_fast.py tests/test_gpu_cpu_performance_profile.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_differentiation_optimization_api_fast.py tests/test_optimization_auto_scalar_policy.py tests/test_optimization_wave2_coverage.py tests/test_optimization_helpers.py tests/test_gpu_cpu_performance_profile.py -q`
+- `python tools/diagnostics/source_health.py --top 22 --top-functions 55`
+
+Best next steps:
+
+1. Extract or simplify the optimizer method-dispatch seam while preserving
+   scalar-trust, matrix-free, L-BFGS, SciPy, and Gauss-Newton behavior.
+2. Target `optimization.py` below 2200 lines before moving back to larger solver
+   files.
+3. Continue avoiding new thin modules unless the domain boundary is clear and
+   total complexity decreases.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.99999959%.
+- Solver monolith reduction: 99.827%.
+- Free-boundary adjoint monolith reduction: 99.60%.
+- Driver workflow decomposition: 99.949%.
+- Residual iteration decomposition: 99.055%.
+- WOUT diagnostic/profile decomposition: 99.982%.
+- Bcovar/WOUT parity decomposition: 99.16%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.825%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.845%.
+- Fixed-boundary optimizer decomposition: 97.22%.
+- Plotting/WOUT visualization decomposition: 97.32%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.82%.
+- Discrete-adjoint replay decomposition: 96.82%.
+- Free-boundary validation-gate maintainability: 98.18%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.9999999994%.

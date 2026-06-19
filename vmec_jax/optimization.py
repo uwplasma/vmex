@@ -293,78 +293,17 @@ def make_qs_residuals_fn(
 
 
 class FixedBoundaryExactOptimizer:
-    """End-to-end optimizer for fixed-boundary VMEC equilibria.
+    """Exact fixed-boundary optimizer built on VMEC solves and AD callbacks.
 
-    Wraps the discrete-adjoint Jacobian machinery into a clean interface
-    analogous to SIMSOPT's ``Vmec + QuasisymmetryRatioResidual +
-    LeastSquaresProblem`` trio — but stays entirely within vmec_jax and
-    requires no finite differences.
+    The optimizer owns the boundary parameterization, accepted/trial VMEC solve
+    budgets, exact-state caches, and outer optimization method dispatch.  The
+    objective is supplied as ``residuals_fn(state)`` so examples can assemble
+    SIMSOPT-like least-squares tuples while staying entirely inside vmec_jax.
 
-    Parameters
-    ----------
-    static:
-        Pre-built :class:`~vmec_jax.static.VMECStatic`.
-    indata:
-        VMEC input namelist (passed to the solver and wout writer).
-    boundary:
-        Reference boundary Fourier coefficients.
-    specs:
-        Parameter descriptors from :func:`boundary_param_specs`.
-    residuals_fn:
-        Callable ``(VMECState) -> jnp.ndarray`` returning the residual vector
-        to minimise.  Build with :func:`make_qh_residuals_fn` or supply your
-        own.
-    boundary_input:
-        Optional boundary coefficients in VMEC input convention. When
-        provided, optimization parameters are applied in that convention and
-        then converted internally with ``apply_m1_constraint=False``.
-    inner_max_iter, inner_ftol:
-        Accepted-point VMEC residual solve budget. ``inner_max_iter <= 0``
-        means "use the VMEC input-deck NITER / NITER_ARRAY budget", and
-        ``inner_ftol <= 0`` means "use the VMEC input-deck FTOL / FTOL_ARRAY".
-    trial_max_iter, trial_ftol:
-        Trial-point VMEC residual solve budget used by the relaxed forward
-        callback inside the optimizer. ``trial_max_iter <= 0`` means "use the
-        same budget selected from the VMEC input deck / accepted-point solve"
-        instead of forcing a separate override", and ``trial_ftol <= 0``
-        means "use that same accepted-point FTOL" instead of forcing a
-        separate relaxed tolerance.
-    solver_device:
-        Device for the exact optimizer's inner solves and Jacobian callbacks.
-        ``None`` / ``"auto"`` / ``"default"`` inherit JAX's active default
-        device. Pass ``"cpu"`` or ``"gpu"`` to explicitly run callbacks under
-        that device context.
-    exact_path:
-        Accepted-point differentiation path. ``None`` / ``"auto"`` keeps the
-        default tape path and honors ``VMEC_JAX_OPT_EXACT_PATH``. Pass
-        ``"tape"`` for the low-cold-cost discrete-adjoint tape path, or
-        ``"scan"`` for the high-compile-cost scan-differentiated path that can
-        be faster for long GPU runs after compilation is amortized.
-    freeze_initial_axis:
-        Reuse the initial magnetic-axis branch from the optimizer base point in
-        residual and exact-replay callbacks.  This is useful for optimization
-        stages whose input deck omits explicit axis coefficients because VMEC's
-        inferred-axis search contains nonsmooth extrema/branch choices.
-
-    Example
-    -------
-    .. code-block:: python
-
-        import numpy as np
-        import vmec_jax as vj
-
-        cfg, indata = vj.load_config("input.nfp4_QH_warm_start")
-        static       = vj.build_static(cfg)
-        boundary     = vj.boundary_from_indata(indata, static.modes)
-
-        specs        = vj.boundary_param_specs(boundary, static.modes, max_mode=2)
-        residuals_fn = vj.make_qh_residuals_fn(static, indata)
-
-        opt    = vj.FixedBoundaryExactOptimizer(static, indata, boundary, specs, residuals_fn)
-        result = opt.run(np.zeros(len(specs)), max_nfev=15)
-
-        opt.save_wout("wout_final.nc", result["x"])
-        opt.save_history("history.json", result)
+    Use ``inner_*`` settings for accepted exact solves, ``trial_*`` settings for
+    relaxed trial residuals, ``solver_device`` to select CPU/GPU callbacks, and
+    ``exact_path`` to choose tape or scan replay.  Full workflow examples live
+    in ``examples/optimization`` and the user documentation.
     """
 
     _DICT_CACHE_ATTRS = (
@@ -2102,23 +2041,17 @@ class FixedBoundaryExactOptimizer:
         self._history = []
         self._profile = {}
         self._trial_residual_cache.clear()
-        if not hasattr(self, "_exact_jacobian_cache"):
-            self._exact_jacobian_cache = {}
-        else:
-            self._exact_jacobian_cache.clear()
-        self._callback_trace_enabled = (
-            os.getenv("VMEC_JAX_OPT_TRACE_CALLBACKS", "").strip().lower() in ("1", "true", "yes", "on")
-            if trace_callbacks is None
-            else bool(trace_callbacks)
+        self._exact_jacobian_cache = getattr(self, "_exact_jacobian_cache", {})
+        self._exact_jacobian_cache.clear()
+        self._callback_trace_enabled = bool(
+            self._env_bool_override("VMEC_JAX_OPT_TRACE_CALLBACKS") if trace_callbacks is None else trace_callbacks
         )
         self._callback_trace = []
         self._callback_point_ids = {}
         self._callback_previous_key = None
         self._wall_t0 = time.perf_counter()
         self._iota_fn = iota_fn
-        self._best_exact_params = None
-        self._best_exact_state = None
-        self._best_exact_residual = None
+        self._best_exact_params = self._best_exact_state = self._best_exact_residual = None
         self._best_exact_cost = math.inf
         self._exact_history_rejected_count = 0
 
