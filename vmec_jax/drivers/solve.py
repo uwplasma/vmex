@@ -126,6 +126,39 @@ def solve_fixed_boundary_from_boundary(
     return res.state
 
 
+def fixed_boundary_initial_guess_run(
+    *,
+    cfg: Any,
+    indata: Any,
+    static: Any,
+    boundary: Any,
+    flux: Any,
+    profiles: dict,
+    signgs: int,
+    restart_state: Any | None,
+    initial_guess_func: Callable[[Any, Any], Any],
+    maybe_dump_xc_init: Callable[..., None],
+    run_container: Callable[..., Any],
+) -> Any:
+    """Return a driver run containing only the initial VMEC state."""
+
+    if restart_state is not None:
+        st0 = restart_state
+    else:
+        st0 = initial_guess_func(static, boundary)
+        maybe_dump_xc_init(state=st0, static=static, label="init")
+    return run_container(
+        cfg=cfg,
+        indata=indata,
+        static=static,
+        state=st0,
+        result=None,
+        flux=flux,
+        profiles=profiles,
+        signgs=signgs,
+    )
+
+
 def run_fixed_boundary_optimizer_solver(
     *,
     solver: str,

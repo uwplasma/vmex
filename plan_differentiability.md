@@ -25399,3 +25399,81 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.999999999923%.
+
+## 2026-06-19 Fixed-Boundary Static/Profile Runtime Cache
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `StaticProfileCache` in `vmec_jax.drivers.runtime` to own lazy
+   `VMECStatic`, boundary, flux, profile, and pressure construction for one
+   public driver call.
+2. Replaced the nested `_build_static_cfg` and `_ensure_static_profiles`
+   closures in `run_fixed_boundary` with the cache object.
+3. Added `fixed_boundary_initial_guess_run` in `vmec_jax.drivers.solve` and
+   routed the `use_initial_guess=True` short-circuit through it.
+4. Kept solver-policy selection, staging, finish retry policy, free-boundary
+   metadata resolution, and adaptive branch behavior in the same owner paths.
+
+Results obtained:
+
+- `run_fixed_boundary` decreased from 632 to 621 lines.
+- Static/profile setup now has a named runtime seam instead of hidden mutable
+  local closures inside the public driver.
+- The initial-guess branch is now tested through a small domain helper rather
+  than inline container construction.
+- Source-health remains stable; root helper-prefix count remains at the
+  configured limit of 2.
+
+Tests and commands run:
+
+- `python -m py_compile vmec_jax/drivers/runtime.py vmec_jax/driver.py`
+- `python -m ruff check vmec_jax/drivers/runtime.py vmec_jax/driver.py`
+- `python tools/diagnostics/source_health.py --top 25 --max-root-helper-prefix-files 2`
+- `python -m py_compile vmec_jax/drivers/runtime.py vmec_jax/drivers/solve.py vmec_jax/driver.py`
+- `python -m ruff check vmec_jax/drivers/runtime.py vmec_jax/drivers/solve.py vmec_jax/driver.py`
+- `python tools/diagnostics/source_health.py --top 25 --max-root-helper-prefix-files 2`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_api.py::test_python_default_fixed_boundary_uses_optimized_controller tests/test_driver_api.py::test_run_fixed_boundary_cli_budgeted_multigrid_path tests/test_driver_api.py::test_run_fixed_boundary_cli_single_grid_uses_accelerated_finish_first tests/test_driver_api.py::test_run_fixed_boundary_initial_guess tests/test_driver_run_wave8_coverage.py::test_run_fixed_boundary_dispatches_fixed_and_free_static_branches -q`
+
+Best next steps:
+
+1. Commit and push this fixed-boundary runtime-cache tranche.
+2. Continue with the next source-health tranche only where it simplifies a
+   named domain seam: scan-stage planning, WOUT profile extraction, or residual
+   trace/finalization.
+3. Keep full adaptive-branch differentiability changes separate unless a new
+   fingerprint-gated AD-vs-FD validation gate is added with the code.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999944%.
+- Solver monolith reduction: 99.905%.
+- Free-boundary adjoint monolith reduction: 99.63%.
+- Driver workflow decomposition: 99.966%.
+- Residual iteration decomposition: 99.491%.
+- WOUT diagnostic/profile decomposition: 99.992%.
+- Bcovar/WOUT parity decomposition: 99.30%.
+- Force-kernel decomposition: 99.69%.
+- Scan/performance policy consolidation: 99.899%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.05%.
+- Optimizer workflow decomposition: 99.89%.
+- Fixed-boundary optimizer decomposition: 98.05%.
+- Plotting/WOUT visualization decomposition: 98.05%.
+- Free-boundary facade/domain decomposition: 99.15%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.86%.
+- Discrete-adjoint replay decomposition: 99.24%.
+- Free-boundary validation-gate maintainability: 98.45%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.999999999924%.
