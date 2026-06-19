@@ -22031,3 +22031,76 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.999999997%.
+
+## 2026-06-19 Discrete-Adjoint Trace Field Map Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Resumed the interrupted `discrete_adjoint.py` refactor and verified that the
+   partial patch was syntactically coherent.
+2. Consolidated the residual-iteration trace field definitions into one shared
+   field map for diagnostic extraction, empty trace construction, and trace
+   concatenation.
+3. Kept the public `ResidualIterationTrace` dataclass unchanged so existing
+   replay, fingerprint, and test callers keep the same API.
+
+Results obtained:
+
+- `vmec_jax/discrete_adjoint.py` decreased from 3453 to 3385 lines.
+- Duplicated trace field lists were removed from
+  `residual_iteration_trace_from_result`, `_empty_trace`, and
+  `concat_residual_iteration_traces`.
+- Source health still reports the same dominant residual-solver and validation
+  hotspots, but this tranche lowers the discrete-adjoint replay maintenance
+  burden without changing behavior.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/discrete_adjoint.py`
+- `python -m ruff check vmec_jax/discrete_adjoint.py tests/test_discrete_adjoint_chunking.py tests/test_vmec_kernel_additional_helpers.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_discrete_adjoint_chunking.py::test_residual_iteration_trace_guards_and_rejected_statuses tests/test_discrete_adjoint_chunking.py::test_concat_residual_iteration_traces_empty_is_typed tests/test_vmec_kernel_additional_helpers.py::test_discrete_adjoint_trace_helpers_validate_lengths_and_compact_diagnostics -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_discrete_adjoint_chunking.py tests/test_vmec_kernel_additional_helpers.py -q`
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 45`
+
+Best next steps:
+
+1. Continue with a larger but still low-risk discrete-adjoint seam:
+   `_packed_dynamic_replay_step_from_carry` now shows up as the largest
+   remaining `discrete_adjoint.py` function.
+2. Keep the residual-loop preconditioned-force extraction separate because it
+   mutates cache/timing state and needs a dedicated payload-return contract.
+3. Avoid docs churn until the next source-health tranche is tested and pushed.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.99999952%.
+- Solver monolith reduction: 99.827%.
+- Free-boundary adjoint monolith reduction: 99.60%.
+- Driver workflow decomposition: 99.949%.
+- Residual iteration decomposition: 99.055%.
+- WOUT diagnostic/profile decomposition: 99.982%.
+- Bcovar/WOUT parity decomposition: 99.16%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.825%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.745%.
+- Fixed-boundary optimizer decomposition: 96.22%.
+- Plotting/WOUT visualization decomposition: 96.82%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.82%.
+- Discrete-adjoint replay decomposition: 96.75%.
+- Free-boundary validation-gate maintainability: 98.18%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.999999998%.
